@@ -86,6 +86,43 @@
             </div>
         </section>
 
+        <!-- Watchlist & Single Ticker Scanner -->
+        <section class="watchlist-section">
+            <div class="watchlist-container">
+                <div class="watchlist-header">
+                    <h2>📋 MY WATCHLIST</h2>
+                    <span class="watchlist-count" id="watchlistCount">0</span>
+                </div>
+                <div class="watchlist-controls">
+                    <div class="watchlist-input-group">
+                        <input type="text" id="addTickerInput" class="watchlist-input" placeholder="Add ticker (e.g. AAPL)">
+                        <button class="watchlist-btn add" id="addTickerBtn">+ Add</button>
+                    </div>
+                </div>
+                <div class="watchlist-tickers" id="watchlistTickers">
+                    <p class="empty-state">Loading watchlist...</p>
+                </div>
+                <div class="watchlist-actions">
+                    <button class="watchlist-btn secondary" id="resetWatchlistBtn">Reset to Defaults</button>
+                </div>
+            </div>
+            
+            <div class="ticker-analyzer">
+                <div class="analyzer-header">
+                    <h2>🔬 SINGLE TICKER ANALYZER</h2>
+                </div>
+                <div class="analyzer-controls">
+                    <div class="analyzer-input-group">
+                        <input type="text" id="analyzeTickerInput" class="analyzer-input" placeholder="Enter ticker to analyze">
+                        <button class="analyzer-btn" id="analyzeTickerBtn">Analyze</button>
+                    </div>
+                </div>
+                <div class="analyzer-results" id="analyzerResults">
+                    <p class="empty-state">Enter a ticker to see Hunter criteria breakdown</p>
+                </div>
+            </div>
+        </section>
+
         <!-- Hunter Scanner Results -->
         <section class="hunter-section">
             <div class="hunter-header">
@@ -95,6 +132,7 @@
                     <span class="scan-status" id="scanStatus">Ready</span>
                 </div>
             </div>
+            <p class="hunter-info">Scans your watchlist first, then S&P 500</p>
             <div class="hunter-results">
                 <div class="hunter-column ursa-column">
                     <div class="hunter-column-header">

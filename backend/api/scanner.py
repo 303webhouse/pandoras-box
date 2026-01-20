@@ -28,11 +28,13 @@ try:
         get_scanner_config, 
         set_scanner_enabled,
         update_scanner_filters,
+        analyze_single_ticker,
         SP500_TOP_100,
         SCANNER_AVAILABLE
     )
 except ImportError:
     SCANNER_AVAILABLE = False
+    analyze_single_ticker = None
     logger.warning("Scanner module not available")
 
 
@@ -190,3 +192,31 @@ async def get_available_tickers():
         "count": len(SP500_TOP_100),
         "description": "S&P 500 Top 100 most liquid stocks"
     }
+
+
+@router.get("/scanner/analyze/{ticker}")
+async def analyze_ticker(ticker: str):
+    """
+    Deep analysis of a single ticker with pass/fail breakdown for each Hunter criteria.
+    
+    Returns:
+    - Data status (OK, NO_DATA, INSUFFICIENT_HISTORY, PARTIAL_DATA, ERROR)
+    - Current metrics (price, SMA 200, VWAP, ADX, RSI, RVOL)
+    - URSA (bearish) criteria breakdown with ✅/❌ for each
+    - TAURUS (bullish) criteria breakdown with ✅/❌ for each
+    - Overall verdict (URSA_SIGNAL, TAURUS_SIGNAL, or NO_SIGNAL)
+    
+    Example: /api/scanner/analyze/AAPL
+    """
+    if not SCANNER_AVAILABLE or analyze_single_ticker is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Scanner not available. Install: pip install yfinance pandas_ta"
+        )
+    
+    try:
+        result = await analyze_single_ticker(ticker)
+        return result
+    except Exception as e:
+        logger.error(f"Error analyzing {ticker}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

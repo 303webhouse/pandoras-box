@@ -6,6 +6,10 @@ Finds:
 - URSA candidates: Trapped longs (price < VWAP, below 200 SMA)
 - TAURUS candidates: Trapped shorts (price > VWAP, above 200 SMA)
 
+Watchlist Priority:
+- Scans user's watchlist FIRST
+- Then scans S&P 500 (excluding watchlist to avoid duplicates)
+
 Requirements: yfinance, pandas, pandas_ta
 """
 
@@ -15,8 +19,25 @@ from typing import Dict, List, Optional, Any
 from datetime import datetime, timedelta
 import uuid
 import asyncio
+import os
+import json
 
 logger = logging.getLogger(__name__)
+
+# Watchlist storage path (shared with watchlist API)
+WATCHLIST_FILE = os.path.join(os.path.dirname(__file__), "..", "..", "data", "watchlist.json")
+
+
+def load_watchlist() -> List[str]:
+    """Load user's watchlist for priority scanning"""
+    try:
+        if os.path.exists(WATCHLIST_FILE):
+            with open(WATCHLIST_FILE, 'r') as f:
+                data = json.load(f)
+                return data.get("tickers", [])
+    except Exception as e:
+        logger.error(f"Error loading watchlist: {e}")
+    return []
 
 # Try to import optional dependencies
 try:
@@ -268,19 +289,208 @@ async def scan_single_ticker(ticker: str) -> List[Dict]:
     return signals
 
 
-async def run_full_scan(tickers: List[str] = None, mode: str = "all") -> Dict:
+async def analyze_single_ticker(ticker: str) -> Dict[str, Any]:
+    """
+    Detailed analysis of a single ticker with pass/fail breakdown for each criteria.
+    
+    Returns comprehensive analysis showing:
+    - What passed ✅
+    - What failed ❌
+    - Current values for all metrics
+    - Overall verdict (URSA, TAURUS, or NO_SIGNAL)
+    """
+    if not SCANNER_AVAILABLE:
+        return {
+            "error": "Scanner dependencies not installed",
+            "install": "pip install yfinance pandas_ta"
+        }
+    
+    ticker = ticker.upper().strip()
+    filters = SCANNER_CONFIG["filters"]
+    
+    result = {
+        "ticker": ticker,
+        "scan_time": datetime.now().isoformat(),
+        "data_status": "pending",
+        "current_price": None,
+        "criteria_breakdown": {
+            "ursa_bearish": {},
+            "taurus_bullish": {}
+        },
+        "overall_verdict": "NO_SIGNAL",
+        "signal_data": None
+    }
+    
+    try:
+        # Fetch data
+        stock = yf.Ticker(ticker)
+        df = stock.history(period="1y")
+        
+        if df is None or df.empty:
+            result["data_status"] = "NO_DATA"
+            result["error"] = f"Could not retrieve data for {ticker}"
+            return result
+        
+        if len(df) < 200:
+            result["data_status"] = "INSUFFICIENT_HISTORY"
+            result["error"] = f"Only {len(df)} days of data. Need 200+ for full analysis."
+            # Still try to calculate what we can
+        
+        # Calculate indicators
+        df = calculate_indicators(df)
+        latest = df.iloc[-1]
+        
+        # Extract current values
+        price = latest.get('Close')
+        sma_200 = latest.get('sma_200')
+        vwap = latest.get('vwap_20')
+        adx = latest.get('adx')
+        rsi = latest.get('rsi')
+        rvol = latest.get('rvol')
+        
+        result["data_status"] = "OK"
+        result["current_price"] = round(price, 2) if price else None
+        
+        # Current metric values
+        result["current_metrics"] = {
+            "price": round(price, 2) if pd.notna(price) else None,
+            "sma_200": round(sma_200, 2) if pd.notna(sma_200) else None,
+            "vwap_20": round(vwap, 2) if pd.notna(vwap) else None,
+            "adx": round(adx, 1) if pd.notna(adx) else None,
+            "rsi": round(rsi, 1) if pd.notna(rsi) else None,
+            "rvol": round(rvol, 2) if pd.notna(rvol) else None,
+            "pct_from_vwap": round(latest.get('pct_from_vwap', 0), 2) if pd.notna(latest.get('pct_from_vwap')) else None
+        }
+        
+        # Check for missing data
+        has_all_data = all([
+            pd.notna(price), pd.notna(sma_200), pd.notna(vwap),
+            pd.notna(adx), pd.notna(rsi), pd.notna(rvol)
+        ])
+        
+        if not has_all_data:
+            result["data_status"] = "PARTIAL_DATA"
+        
+        # ========== URSA (BEARISH) CRITERIA BREAKDOWN ==========
+        ursa_criteria = {
+            "price_below_sma200": {
+                "description": "Price < 200 SMA (Macro Bearish Trend)",
+                "required": f"Price below {round(sma_200, 2) if pd.notna(sma_200) else 'N/A'}",
+                "current": f"Price = {round(price, 2) if pd.notna(price) else 'N/A'}",
+                "passed": bool(pd.notna(price) and pd.notna(sma_200) and price < sma_200)
+            },
+            "price_below_vwap": {
+                "description": "Price < VWAP (Buyers Underwater = Trapped Longs)",
+                "required": f"Price below {round(vwap, 2) if pd.notna(vwap) else 'N/A'}",
+                "current": f"Price = {round(price, 2) if pd.notna(price) else 'N/A'}",
+                "passed": bool(pd.notna(price) and pd.notna(vwap) and price < vwap)
+            },
+            "adx_trending": {
+                "description": f"ADX > {filters['adx_min']} (Trending Market)",
+                "required": f"ADX > {filters['adx_min']}",
+                "current": f"ADX = {round(adx, 1) if pd.notna(adx) else 'N/A'}",
+                "passed": bool(pd.notna(adx) and adx > filters['adx_min'])
+            },
+            "rsi_momentum_room": {
+                "description": f"RSI > {filters['rsi_bear_min']} (Room to Fall)",
+                "required": f"RSI > {filters['rsi_bear_min']}",
+                "current": f"RSI = {round(rsi, 1) if pd.notna(rsi) else 'N/A'}",
+                "passed": bool(pd.notna(rsi) and rsi > filters['rsi_bear_min'])
+            },
+            "rvol_institutional": {
+                "description": f"RVOL > {filters['rvol_min']} (Institutional Activity)",
+                "required": f"RVOL > {filters['rvol_min']}x",
+                "current": f"RVOL = {round(rvol, 2) if pd.notna(rvol) else 'N/A'}x",
+                "passed": bool(pd.notna(rvol) and rvol > filters['rvol_min'])
+            }
+        }
+        
+        result["criteria_breakdown"]["ursa_bearish"] = ursa_criteria
+        ursa_passed = all(c["passed"] for c in ursa_criteria.values())
+        result["criteria_breakdown"]["ursa_bearish"]["ALL_PASSED"] = ursa_passed
+        
+        # ========== TAURUS (BULLISH) CRITERIA BREAKDOWN ==========
+        taurus_criteria = {
+            "price_above_sma200": {
+                "description": "Price > 200 SMA (Macro Bullish Trend)",
+                "required": f"Price above {round(sma_200, 2) if pd.notna(sma_200) else 'N/A'}",
+                "current": f"Price = {round(price, 2) if pd.notna(price) else 'N/A'}",
+                "passed": bool(pd.notna(price) and pd.notna(sma_200) and price > sma_200)
+            },
+            "price_above_vwap": {
+                "description": "Price > VWAP (Sellers Underwater = Trapped Shorts)",
+                "required": f"Price above {round(vwap, 2) if pd.notna(vwap) else 'N/A'}",
+                "current": f"Price = {round(price, 2) if pd.notna(price) else 'N/A'}",
+                "passed": bool(pd.notna(price) and pd.notna(vwap) and price > vwap)
+            },
+            "adx_trending": {
+                "description": f"ADX > {filters['adx_min']} (Trending Market)",
+                "required": f"ADX > {filters['adx_min']}",
+                "current": f"ADX = {round(adx, 1) if pd.notna(adx) else 'N/A'}",
+                "passed": bool(pd.notna(adx) and adx > filters['adx_min'])
+            },
+            "rsi_momentum_room": {
+                "description": f"RSI < {filters['rsi_bull_max']} (Room to Rise)",
+                "required": f"RSI < {filters['rsi_bull_max']}",
+                "current": f"RSI = {round(rsi, 1) if pd.notna(rsi) else 'N/A'}",
+                "passed": bool(pd.notna(rsi) and rsi < filters['rsi_bull_max'])
+            },
+            "rvol_institutional": {
+                "description": f"RVOL > {filters['rvol_min']} (Institutional Activity)",
+                "required": f"RVOL > {filters['rvol_min']}x",
+                "current": f"RVOL = {round(rvol, 2) if pd.notna(rvol) else 'N/A'}x",
+                "passed": bool(pd.notna(rvol) and rvol > filters['rvol_min'])
+            }
+        }
+        
+        result["criteria_breakdown"]["taurus_bullish"] = taurus_criteria
+        taurus_passed = all(c["passed"] for c in taurus_criteria.values())
+        result["criteria_breakdown"]["taurus_bullish"]["ALL_PASSED"] = taurus_passed
+        
+        # ========== OVERALL VERDICT ==========
+        if ursa_passed:
+            result["overall_verdict"] = "URSA_SIGNAL"
+            result["signal_data"] = check_ursa_signal(latest, ticker)
+        elif taurus_passed:
+            result["overall_verdict"] = "TAURUS_SIGNAL"
+            result["signal_data"] = check_taurus_signal(latest, ticker)
+        else:
+            result["overall_verdict"] = "NO_SIGNAL"
+            
+            # Count how close to a signal
+            ursa_count = sum(1 for c in ursa_criteria.values() if isinstance(c, dict) and c.get("passed"))
+            taurus_count = sum(1 for c in taurus_criteria.values() if isinstance(c, dict) and c.get("passed"))
+            
+            result["near_miss"] = {
+                "ursa_criteria_met": f"{ursa_count}/5",
+                "taurus_criteria_met": f"{taurus_count}/5"
+            }
+        
+    except Exception as e:
+        result["data_status"] = "ERROR"
+        result["error"] = str(e)
+        logger.error(f"Error analyzing {ticker}: {e}")
+    
+    return result
+
+
+async def run_full_scan(tickers: List[str] = None, mode: str = "all", include_watchlist: bool = True) -> Dict:
     """
     Run a full scan on multiple tickers
     
+    WATCHLIST PRIORITY: Scans user's watchlist FIRST, then S&P 500
+    
     Args:
-        tickers: List of tickers to scan (default: SP500_TOP_100)
+        tickers: List of tickers to scan (default: watchlist + SP500_TOP_100)
         mode: "all", "ursa", or "taurus"
+        include_watchlist: Whether to prioritize watchlist (default: True)
     
     Returns:
         {
             "scan_time": "ISO timestamp",
             "tickers_scanned": int,
             "signals_found": int,
+            "watchlist_signals": int,
             "ursa_signals": [...],
             "taurus_signals": [...]
         }
@@ -294,27 +504,51 @@ async def run_full_scan(tickers: List[str] = None, mode: str = "all") -> Dict:
     if not SCANNER_CONFIG["enabled"]:
         return {"error": "Scanner is disabled"}
     
-    if tickers is None:
-        tickers = SP500_TOP_100
+    # Build scan list: WATCHLIST FIRST, then S&P 500
+    watchlist = []
+    sp500_list = []
     
-    logger.info(f"🎯 Hunter scan starting: {len(tickers)} tickers, mode={mode}")
+    if tickers is None:
+        if include_watchlist:
+            watchlist = load_watchlist()
+            # S&P 500 minus watchlist tickers (avoid duplicates)
+            sp500_list = [t for t in SP500_TOP_100 if t not in watchlist]
+        else:
+            sp500_list = SP500_TOP_100
+    else:
+        sp500_list = tickers  # Custom list provided
+    
+    # Combine: watchlist first, then S&P 500
+    all_tickers = watchlist + sp500_list
+    
+    logger.info(f"🎯 Hunter scan starting: {len(watchlist)} watchlist + {len(sp500_list)} S&P 500 = {len(all_tickers)} total, mode={mode}")
     start_time = datetime.now()
     
     ursa_signals = []
     taurus_signals = []
+    watchlist_signal_count = 0
     
     # Scan each ticker
-    for ticker in tickers:
+    for i, ticker in enumerate(all_tickers):
+        is_watchlist = ticker in watchlist
+        
         try:
             signals = await scan_single_ticker(ticker)
             
             for signal in signals:
+                # Mark watchlist signals
+                signal["from_watchlist"] = is_watchlist
+                
                 if signal["strategy_profile"]["bias"] == "BEARISH":
                     if mode in ["all", "ursa"]:
                         ursa_signals.append(signal)
+                        if is_watchlist:
+                            watchlist_signal_count += 1
                 else:
                     if mode in ["all", "taurus"]:
                         taurus_signals.append(signal)
+                        if is_watchlist:
+                            watchlist_signal_count += 1
                         
         except Exception as e:
             logger.error(f"Error in scan loop for {ticker}: {e}")
@@ -325,27 +559,30 @@ async def run_full_scan(tickers: List[str] = None, mode: str = "all") -> Dict:
     
     elapsed = (datetime.now() - start_time).total_seconds()
     
-    # Sort by priority and quality metrics
-    ursa_signals.sort(key=lambda x: (
-        x["action_required"]["priority"] == "HIGH",
-        x["quality_metrics"]["rvol_institutional"]
-    ), reverse=True)
+    # Sort by: Watchlist first, then priority, then RVOL
+    def sort_key(x):
+        return (
+            x.get("from_watchlist", False),  # Watchlist first
+            x["action_required"]["priority"] == "HIGH",
+            x["quality_metrics"]["rvol_institutional"]
+        )
     
-    taurus_signals.sort(key=lambda x: (
-        x["action_required"]["priority"] == "HIGH",
-        x["quality_metrics"]["rvol_institutional"]
-    ), reverse=True)
+    ursa_signals.sort(key=sort_key, reverse=True)
+    taurus_signals.sort(key=sort_key, reverse=True)
     
     result = {
         "scan_time": datetime.now().isoformat(),
         "scan_duration_seconds": round(elapsed, 1),
-        "tickers_scanned": len(tickers),
+        "tickers_scanned": len(all_tickers),
+        "watchlist_count": len(watchlist),
+        "sp500_count": len(sp500_list),
         "signals_found": len(ursa_signals) + len(taurus_signals),
+        "watchlist_signals": watchlist_signal_count,
         "ursa_signals": ursa_signals[:20],  # Top 20
         "taurus_signals": taurus_signals[:20]  # Top 20
     }
     
-    logger.info(f"✅ Hunter scan complete: {result['signals_found']} signals in {elapsed:.1f}s")
+    logger.info(f"✅ Hunter scan complete: {result['signals_found']} signals ({watchlist_signal_count} from watchlist) in {elapsed:.1f}s")
     
     return result
 
