@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Pandora's Box - Real-time Trading Signal Dashboard">
+    <title>Pandora's Box</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#0a0e27">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="logo-section">
+                <h1 class="logo">📦 PANDORA'S BOX</h1>
+                <div class="connection-status" id="connectionStatus">
+                    <span class="status-dot"></span>
+                    <span class="status-text">Connecting...</span>
+                </div>
+            </div>
+            <div class="header-controls">
+                <select id="timeframeSelector" class="timeframe-selector">
+                    <option value="DAILY">Daily</option>
+                    <option value="WEEKLY" selected>Weekly</option>
+                    <option value="MONTHLY">Monthly</option>
+                </select>
+                <button class="refresh-btn" id="refreshBtn">↻ Refresh</button>
+            </div>
+        </header>
+
+        <!-- Bias Indicators -->
+        <section class="bias-section">
+            <div class="bias-card" id="dailyBias">
+                <h3>Daily Bias</h3>
+                <div class="bias-display">
+                    <div class="bias-level" id="dailyLevel">NEUTRAL</div>
+                    <div class="bias-details" id="dailyDetails">Loading...</div>
+                </div>
+            </div>
+            <div class="bias-card" id="weeklyBias">
+                <h3>Weekly Bias</h3>
+                <div class="bias-display">
+                    <div class="bias-level" id="weeklyLevel">NEUTRAL</div>
+                    <div class="bias-details" id="weeklyDetails">Loading...</div>
+                </div>
+            </div>
+            <div class="bias-card" id="monthlyBias">
+                <h3>Monthly Bias</h3>
+                <div class="bias-display">
+                    <div class="bias-level" id="monthlyLevel">N/A</div>
+                    <div class="bias-details" id="monthlyDetails">Future indicator slot</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Main Content: Chart + Trade Recommendations -->
+        <section class="main-content">
+            <!-- Chart Area (2/3 width) -->
+            <div class="chart-area">
+                <div class="chart-tabs">
+                    <button class="chart-tab active" data-symbol="SPY">SPY</button>
+                    <button class="chart-tab" data-symbol="VIX">VIX</button>
+                    <button class="chart-tab" data-symbol="BTCUSD">BTC</button>
+                </div>
+                <div class="chart-container" id="chartContainer">
+                    <!-- TradingView Widget -->
+                    <div id="tradingview-widget"></div>
+                </div>
+            </div>
+
+            <!-- Trade Recommendations (1/3 width) -->
+            <div class="trades-panel">
+                <div class="trades-header">
+                    <h2>TRADE IDEAS</h2>
+                    <div class="asset-toggle">
+                        <button class="toggle-btn active" data-asset="equity">Equities</button>
+                        <button class="toggle-btn" data-asset="crypto">Crypto</button>
+                    </div>
+                </div>
+                <div class="signals-container" id="tradeSignals">
+                    <!-- Signals will be populated by JavaScript -->
+                    <p class="empty-state">No signals available</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Open Positions -->
+        <section class="positions-section">
+            <h2>Open Positions</h2>
+            <div class="positions-container" id="openPositions">
+                <p class="empty-state">No open positions</p>
+            </div>
+        </section>
+    </div>
+
+    <!-- TradingView Widget Script -->
+    <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>

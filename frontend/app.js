@@ -1,0 +1,559 @@
+/**
+ * Pandora's Box - Frontend Application
+ * Real-time WebSocket connection for multi-device sync
+ */
+
+// Configuration
+const WS_URL = 'ws://localhost:8000/ws';
+const API_URL = 'http://localhost:8000/api';
+
+// State
+let ws = null;
+let tvWidget = null;
+let currentSymbol = 'SPY';
+let currentTimeframe = 'WEEKLY';
+let activeAssetType = 'equity';
+let signals = {
+    equity: [],
+    crypto: []
+};
+
+// Price levels to display on chart (entry, stop, target)
+let activePriceLevels = null;
+
+// Initialize app
+document.addEventListener('DOMContentLoaded', () => {
+    initTradingViewWidget();
+    initWebSocket();
+    initEventListeners();
+    loadInitialData();
+});
+
+// TradingView Widget
+function initTradingViewWidget() {
+    const container = document.getElementById('tradingview-widget');
+    
+    // Clear any existing content
+    container.innerHTML = '';
+    
+    tvWidget = new TradingView.widget({
+        symbol: currentSymbol,
+        interval: 'D',
+        timezone: 'America/New_York',
+        theme: 'dark',
+        style: '1',
+        locale: 'en',
+        toolbar_bg: '#0a0e27',
+        enable_publishing: false,
+        hide_top_toolbar: false,
+        hide_legend: false,
+        save_image: false,
+        container_id: 'tradingview-widget',
+        width: '100%',
+        height: '100%',
+        studies: [
+            { id: 'MASimple@tv-basicstudies', inputs: { length: 200 } }
+        ],
+        studies_overrides: {
+            // 200 SMA - thick teal line
+            'moving average.ma.color': '#14b8a6',
+            'moving average.ma.linewidth': 3,
+            // Volume bars
+            'volume.volume.color.0': '#FF6B35',
+            'volume.volume.color.1': '#7CFF6B',
+            'volume.volume ma.color': '#14b8a6'
+        },
+        overrides: {
+            // Candlestick colors - lime up, orange down
+            'mainSeriesProperties.candleStyle.upColor': '#7CFF6B',
+            'mainSeriesProperties.candleStyle.downColor': '#FF6B35',
+            'mainSeriesProperties.candleStyle.borderUpColor': '#7CFF6B',
+            'mainSeriesProperties.candleStyle.borderDownColor': '#FF6B35',
+            'mainSeriesProperties.candleStyle.wickUpColor': '#7CFF6B',
+            'mainSeriesProperties.candleStyle.wickDownColor': '#FF6B35',
+            
+            // Background - dark navy
+            'paneProperties.background': '#0a0e27',
+            'paneProperties.backgroundType': 'solid',
+            
+            // Grid lines - subtle
+            'paneProperties.vertGridProperties.color': '#1e293b',
+            'paneProperties.horzGridProperties.color': '#1e293b',
+            'paneProperties.vertGridProperties.style': 0,
+            'paneProperties.horzGridProperties.style': 0,
+            
+            // Scale/axis text
+            'scalesProperties.textColor': '#94a3b8',
+            'scalesProperties.backgroundColor': '#0a0e27',
+            'scalesProperties.lineColor': '#334155',
+            
+            // Crosshair
+            'paneProperties.crossHairProperties.color': '#14b8a6',
+            'paneProperties.crossHairProperties.style': 0,
+            
+            // Legend text
+            'paneProperties.legendProperties.showStudyArguments': true,
+            'paneProperties.legendProperties.showStudyTitles': true,
+            'paneProperties.legendProperties.showStudyValues': true,
+            'paneProperties.legendProperties.showSeriesTitle': true,
+            'paneProperties.legendProperties.showSeriesOHLC': true,
+            
+            // Separator lines between panes
+            'paneProperties.separatorColor': '#334155'
+        },
+        loading_screen: {
+            backgroundColor: '#0a0e27',
+            foregroundColor: '#14b8a6'
+        }
+    });
+}
+
+function changeChartSymbol(symbol) {
+    currentSymbol = symbol;
+    
+    // Update tab active state
+    document.querySelectorAll('.chart-tab').forEach(tab => {
+        tab.classList.toggle('active', tab.dataset.symbol === symbol);
+    });
+    
+    // Clear price levels when changing symbols
+    activePriceLevels = null;
+    
+    // Reinitialize widget with new symbol
+    initTradingViewWidget();
+}
+
+function showTradeOnChart(signal) {
+    // Change to the signal's ticker
+    const symbol = signal.asset_class === 'CRYPTO' 
+        ? signal.ticker + 'USD' 
+        : signal.ticker;
+    
+    currentSymbol = symbol;
+    
+    // Store price levels to display
+    activePriceLevels = {
+        entry: signal.entry_price,
+        stop: signal.stop_loss,
+        target: signal.target_1
+    };
+    
+    // Update tab styling (remove active from all since this is a custom ticker)
+    document.querySelectorAll('.chart-tab').forEach(tab => {
+        tab.classList.remove('active');
+        if (tab.dataset.symbol === symbol) {
+            tab.classList.add('active');
+        }
+    });
+    
+    // Reinitialize with the new symbol
+    initTradingViewWidget();
+    
+    // Note: TradingView widget doesn't easily support drawing horizontal lines
+    // For full price level display, we'd need TradingView Advanced Charts (paid)
+    // For now, the signal details panel shows the levels clearly
+    
+    console.log(`📊 Showing ${signal.ticker} on chart with levels:`, activePriceLevels);
+}
+
+// WebSocket Connection
+function initWebSocket() {
+    console.log('🔌 Connecting to Pandora\'s Box...');
+    
+    ws = new WebSocket(WS_URL);
+    
+    ws.onopen = () => {
+        console.log('✅ Connected to backend');
+        updateConnectionStatus(true);
+        
+        // Send heartbeat every 30 seconds
+        setInterval(() => {
+            if (ws.readyState === WebSocket.OPEN) {
+                ws.send('ping');
+            }
+        }, 30000);
+    };
+    
+    ws.onmessage = (event) => {
+        const message = JSON.parse(event.data);
+        handleWebSocketMessage(message);
+    };
+    
+    ws.onerror = (error) => {
+        console.error('❌ WebSocket error:', error);
+        updateConnectionStatus(false);
+    };
+    
+    ws.onclose = () => {
+        console.log('🔌 Connection closed. Reconnecting...');
+        updateConnectionStatus(false);
+        
+        // Reconnect after 3 seconds
+        setTimeout(initWebSocket, 3000);
+    };
+}
+
+function handleWebSocketMessage(message) {
+    console.log('📨 Received:', message);
+    
+    switch (message.type) {
+        case 'NEW_SIGNAL':
+            addSignal(message.data);
+            break;
+        case 'BIAS_UPDATE':
+            updateBias(message.data);
+            break;
+        case 'POSITION_UPDATE':
+            updatePosition(message.data);
+            break;
+        case 'SIGNAL_DISMISSED':
+            removeSignal(message.signal_id);
+            break;
+    }
+}
+
+function updateConnectionStatus(connected) {
+    const statusDot = document.querySelector('.status-dot');
+    const statusText = document.querySelector('.status-text');
+    
+    if (connected) {
+        statusDot.classList.add('connected');
+        statusText.textContent = 'Live';
+    } else {
+        statusDot.classList.remove('connected');
+        statusText.textContent = 'Reconnecting...';
+    }
+}
+
+// Event Listeners
+function initEventListeners() {
+    // Timeframe selector
+    document.getElementById('timeframeSelector').addEventListener('change', (e) => {
+        currentTimeframe = e.target.value;
+        loadSignals();
+    });
+    
+    // Refresh button
+    document.getElementById('refreshBtn').addEventListener('click', () => {
+        loadSignals();
+        loadBiasData();
+    });
+    
+    // Chart tabs (SPY, VIX, BTC)
+    document.querySelectorAll('.chart-tab').forEach(tab => {
+        tab.addEventListener('click', (e) => {
+            changeChartSymbol(e.target.dataset.symbol);
+        });
+    });
+    
+    // Asset type toggle (Equities / Crypto)
+    document.querySelectorAll('.toggle-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            document.querySelectorAll('.toggle-btn').forEach(b => b.classList.remove('active'));
+            e.target.classList.add('active');
+            activeAssetType = e.target.dataset.asset;
+            renderSignals();
+        });
+    });
+}
+
+// Data Loading
+async function loadInitialData() {
+    await Promise.all([
+        loadSignals(),
+        loadBiasData(),
+        loadOpenPositions()
+    ]);
+}
+
+async function loadSignals() {
+    try {
+        const response = await fetch(`${API_URL}/signals/active`);
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            // Separate equity and crypto signals
+            signals.equity = data.signals.filter(s => s.asset_class === 'EQUITY');
+            signals.crypto = data.signals.filter(s => s.asset_class === 'CRYPTO');
+            
+            renderSignals();
+        }
+    } catch (error) {
+        console.error('Error loading signals:', error);
+    }
+}
+
+async function loadBiasData() {
+    const timeframes = ['DAILY', 'WEEKLY', 'MONTHLY'];
+    
+    for (const timeframe of timeframes) {
+        try {
+            const response = await fetch(`${API_URL}/bias/${timeframe}`);
+            const data = await response.json();
+            
+            // Use the ID-based selectors matching the HTML structure
+            const tfLower = timeframe.toLowerCase();
+            const container = document.getElementById(`${tfLower}Bias`);
+            const levelElement = document.getElementById(`${tfLower}Level`);
+            const detailsElement = document.getElementById(`${tfLower}Details`);
+            
+            if (levelElement) {
+                const level = data.level || 'NEUTRAL';
+                levelElement.textContent = level.replace('_', ' ');
+                
+                // Set background color based on bias
+                if (container) {
+                    container.classList.remove('bullish', 'bearish', 'neutral');
+                    if (level.includes('TORO')) {
+                        container.classList.add('bullish');
+                    } else if (level.includes('URSA')) {
+                        container.classList.add('bearish');
+                    } else {
+                        container.classList.add('neutral');
+                    }
+                }
+            }
+            
+            if (detailsElement) {
+                if (data.details) {
+                    detailsElement.textContent = data.details;
+                } else if (data.data) {
+                    detailsElement.textContent = `TICK: ${data.data.tick || 'N/A'}`;
+                } else {
+                    detailsElement.textContent = 'No data available';
+                }
+            }
+        } catch (error) {
+            console.error(`Error loading ${timeframe} bias:`, error);
+            // Update UI to show error state instead of leaving "Loading..."
+            const tfLower = timeframe.toLowerCase();
+            const detailsElement = document.getElementById(`${tfLower}Details`);
+            if (detailsElement) {
+                detailsElement.textContent = 'Failed to load';
+            }
+        }
+    }
+}
+
+async function loadOpenPositions() {
+    try {
+        const response = await fetch(`${API_URL}/positions/open`);
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            renderPositions(data.positions);
+        }
+    } catch (error) {
+        console.error('Error loading positions:', error);
+    }
+}
+
+// Signal Rendering
+function renderSignals() {
+    const container = document.getElementById('tradeSignals');
+    
+    // Get signals based on active asset type
+    const activeSignals = activeAssetType === 'equity' 
+        ? signals.equity 
+        : signals.crypto.filter(s => ['BTC', 'ETH', 'SOL'].includes(s.ticker));
+    
+    // Limit to top 10
+    const topSignals = activeSignals.slice(0, 10);
+    
+    if (topSignals.length === 0) {
+        const assetLabel = activeAssetType === 'equity' ? 'equity' : 'crypto';
+        container.innerHTML = `<p class="empty-state">No ${assetLabel} signals</p>`;
+        return;
+    }
+    
+    container.innerHTML = topSignals.map(signal => createSignalCard(signal)).join('');
+    
+    // Add event listeners to action buttons and cards
+    attachSignalActions();
+}
+
+function createSignalCard(signal) {
+    const typeLabel = signal.signal_type.replace('_', ' ');
+    
+    return `
+        <div class="signal-card ${signal.signal_type}" data-signal-id="${signal.signal_id}" data-signal='${JSON.stringify(signal)}'>
+            <div class="signal-header">
+                <div>
+                    <div class="signal-type ${signal.signal_type}">${typeLabel}</div>
+                    <div class="signal-strategy">${signal.strategy}</div>
+                </div>
+                <div class="signal-ticker ticker-link" data-action="view-chart">${signal.ticker}</div>
+            </div>
+            
+            <div class="signal-details">
+                <div class="signal-detail">
+                    <div class="signal-detail-label">Entry</div>
+                    <div class="signal-detail-value">${signal.entry_price.toFixed(2)}</div>
+                </div>
+                <div class="signal-detail">
+                    <div class="signal-detail-label">Stop</div>
+                    <div class="signal-detail-value">${signal.stop_loss.toFixed(2)}</div>
+                </div>
+                <div class="signal-detail">
+                    <div class="signal-detail-label">Target</div>
+                    <div class="signal-detail-value">${signal.target_1.toFixed(2)}</div>
+                </div>
+            </div>
+            
+            <div class="signal-details">
+                <div class="signal-detail">
+                    <div class="signal-detail-label">R:R</div>
+                    <div class="signal-detail-value">${signal.risk_reward}:1</div>
+                </div>
+                <div class="signal-detail">
+                    <div class="signal-detail-label">Direction</div>
+                    <div class="signal-detail-value">${signal.direction}</div>
+                </div>
+                <div class="signal-detail">
+                    <div class="signal-detail-label">Score</div>
+                    <div class="signal-detail-value">${signal.score}</div>
+                </div>
+            </div>
+            
+            <div class="signal-actions">
+                <button class="action-btn dismiss-btn" data-action="dismiss">✕ Dismiss</button>
+                <button class="action-btn select-btn" data-action="select">✓ Select</button>
+            </div>
+        </div>
+    `;
+}
+
+function attachSignalActions() {
+    // Clickable ticker to view on chart
+    document.querySelectorAll('.ticker-link').forEach(ticker => {
+        ticker.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const card = e.target.closest('.signal-card');
+            const signal = JSON.parse(card.dataset.signal);
+            showTradeOnChart(signal);
+        });
+    });
+    
+    // Dismiss and Select buttons
+    document.querySelectorAll('.action-btn').forEach(btn => {
+        btn.addEventListener('click', handleSignalAction);
+    });
+}
+
+async function handleSignalAction(event) {
+    event.stopPropagation();
+    const button = event.target;
+    const card = button.closest('.signal-card');
+    const signalId = card.dataset.signalId;
+    const action = button.dataset.action.toUpperCase();
+    
+    if (action === 'VIEW-CHART') return; // Handled separately
+    
+    try {
+        const response = await fetch(`${API_URL}/signal/action`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ signal_id: signalId, action })
+        });
+        
+        const data = await response.json();
+        
+        if (data.status === 'dismissed' || data.status === 'selected') {
+            // Remove card with animation
+            card.style.opacity = '0';
+            card.style.transform = 'translateX(-20px)';
+            setTimeout(() => card.remove(), 300);
+            
+            // Reload positions if selected
+            if (data.status === 'selected') {
+                loadOpenPositions();
+            }
+        }
+    } catch (error) {
+        console.error('Error handling signal action:', error);
+    }
+}
+
+// Signal Management
+function addSignal(signalData) {
+    if (signalData.asset_class === 'EQUITY') {
+        signals.equity.unshift(signalData);
+        signals.equity = signals.equity.slice(0, 10);
+    } else {
+        signals.crypto.unshift(signalData);
+    }
+    
+    renderSignals();
+}
+
+function removeSignal(signalId) {
+    signals.equity = signals.equity.filter(s => s.signal_id !== signalId);
+    signals.crypto = signals.crypto.filter(s => s.signal_id !== signalId);
+    
+    renderSignals();
+}
+
+// Bias Updates
+function updateBias(biasData) {
+    const timeframe = biasData.timeframe.toLowerCase();
+    const container = document.getElementById(`${timeframe}Bias`);
+    const levelElement = document.getElementById(`${timeframe}Level`);
+    const detailsElement = document.getElementById(`${timeframe}Details`);
+    
+    if (levelElement) {
+        levelElement.textContent = biasData.level.replace('_', ' ');
+        levelElement.className = `bias-level ${biasData.level}`;
+    }
+    
+    if (container) {
+        container.classList.remove('bullish', 'bearish', 'neutral');
+        if (biasData.level.includes('TORO')) {
+            container.classList.add('bullish');
+        } else if (biasData.level.includes('URSA')) {
+            container.classList.add('bearish');
+        } else {
+            container.classList.add('neutral');
+        }
+    }
+    
+    if (detailsElement && biasData.details) {
+        detailsElement.innerHTML = biasData.details;
+    }
+}
+
+// Position Management
+function renderPositions(positions) {
+    const container = document.getElementById('openPositions');
+    
+    if (!positions || positions.length === 0) {
+        container.innerHTML = '<p class="empty-state">No open positions</p>';
+        return;
+    }
+    
+    container.innerHTML = positions.map(pos => `
+        <div class="signal-card">
+            <div class="signal-header">
+                <div class="signal-ticker">${pos.ticker}</div>
+                <div class="signal-type">${pos.direction}</div>
+            </div>
+            <div class="signal-details">
+                <div class="signal-detail">
+                    <div class="signal-detail-label">Entry</div>
+                    <div class="signal-detail-value">${pos.entry_price?.toFixed(2) || 'N/A'}</div>
+                </div>
+                <div class="signal-detail">
+                    <div class="signal-detail-label">Stop</div>
+                    <div class="signal-detail-value">${pos.stop_loss.toFixed(2)}</div>
+                </div>
+                <div class="signal-detail">
+                    <div class="signal-detail-label">Target</div>
+                    <div class="signal-detail-value">${pos.target_1.toFixed(2)}</div>
+                </div>
+            </div>
+        </div>
+    `).join('');
+}
+
+function updatePosition(positionData) {
+    loadOpenPositions();
+}
