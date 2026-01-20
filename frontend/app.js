@@ -557,3 +557,232 @@ function renderPositions(positions) {
 function updatePosition(positionData) {
     loadOpenPositions();
 }
+
+// ==========================================
+// HUNTER SCANNER
+// ==========================================
+
+let hunterResults = {
+    ursa: [],
+    taurus: []
+};
+
+// Initialize Hunter Scanner
+function initHunterScanner() {
+    const runScanBtn = document.getElementById('runScanBtn');
+    if (runScanBtn) {
+        runScanBtn.addEventListener('click', runHunterScan);
+    }
+    
+    // Load any cached results
+    loadHunterResults();
+}
+
+// Run a new scan
+async function runHunterScan() {
+    const btn = document.getElementById('runScanBtn');
+    const status = document.getElementById('scanStatus');
+    
+    // Disable button and update status
+    btn.disabled = true;
+    btn.textContent = 'Scanning...';
+    status.textContent = 'Scanning S&P 500...';
+    status.classList.add('scanning');
+    
+    try {
+        // Trigger the scan
+        const response = await fetch(`${API_URL}/scanner/run`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mode: 'all' })
+        });
+        
+        const data = await response.json();
+        
+        if (data.status === 'started') {
+            // Poll for results
+            pollForResults();
+        } else {
+            throw new Error(data.message || 'Scan failed to start');
+        }
+        
+    } catch (error) {
+        console.error('Hunter scan error:', error);
+        status.textContent = 'Scan failed';
+        status.classList.remove('scanning');
+        btn.disabled = false;
+        btn.textContent = 'Run Scan';
+    }
+}
+
+// Poll for scan results
+async function pollForResults() {
+    const btn = document.getElementById('runScanBtn');
+    const status = document.getElementById('scanStatus');
+    
+    let attempts = 0;
+    const maxAttempts = 60; // 5 minutes max
+    
+    const poll = async () => {
+        try {
+            const response = await fetch(`${API_URL}/scanner/status`);
+            const data = await response.json();
+            
+            if (data.status === 'complete') {
+                // Scan complete, load results
+                await loadHunterResults();
+                status.textContent = 'Scan complete';
+                status.classList.remove('scanning');
+                btn.disabled = false;
+                btn.textContent = 'Run Scan';
+                return;
+            }
+            
+            if (data.status === 'scanning' && attempts < maxAttempts) {
+                attempts++;
+                status.textContent = `Scanning... (${attempts * 5}s)`;
+                setTimeout(poll, 5000); // Poll every 5 seconds
+            } else if (data.status && data.status.startsWith('error')) {
+                throw new Error(data.status);
+            }
+            
+        } catch (error) {
+            console.error('Poll error:', error);
+            status.textContent = 'Error';
+            status.classList.remove('scanning');
+            btn.disabled = false;
+            btn.textContent = 'Run Scan';
+        }
+    };
+    
+    poll();
+}
+
+// Load Hunter results from API
+async function loadHunterResults() {
+    try {
+        const response = await fetch(`${API_URL}/scanner/results`);
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            hunterResults.ursa = data.ursa_signals || [];
+            hunterResults.taurus = data.taurus_signals || [];
+            renderHunterResults();
+        }
+        
+    } catch (error) {
+        console.error('Error loading Hunter results:', error);
+    }
+}
+
+// Render Hunter results
+function renderHunterResults() {
+    renderUrsaSignals();
+    renderTaurusSignals();
+}
+
+function renderUrsaSignals() {
+    const container = document.getElementById('ursaSignals');
+    const countEl = document.getElementById('ursaCount');
+    
+    if (!container) return;
+    
+    countEl.textContent = hunterResults.ursa.length;
+    
+    if (hunterResults.ursa.length === 0) {
+        container.innerHTML = '<p class="empty-state">No trapped longs detected</p>';
+        return;
+    }
+    
+    container.innerHTML = hunterResults.ursa.map(signal => createHunterCard(signal, 'ursa')).join('');
+    attachHunterCardEvents();
+}
+
+function renderTaurusSignals() {
+    const container = document.getElementById('taurusSignals');
+    const countEl = document.getElementById('taurusCount');
+    
+    if (!container) return;
+    
+    countEl.textContent = hunterResults.taurus.length;
+    
+    if (hunterResults.taurus.length === 0) {
+        container.innerHTML = '<p class="empty-state">No trapped shorts detected</p>';
+        return;
+    }
+    
+    container.innerHTML = hunterResults.taurus.map(signal => createHunterCard(signal, 'taurus')).join('');
+    attachHunterCardEvents();
+}
+
+function createHunterCard(signal, type) {
+    const priority = signal.action_required?.priority || 'MEDIUM';
+    const metrics = signal.quality_metrics || {};
+    const marketData = signal.market_data || {};
+    const instruction = signal.action_required?.sniper_instruction || '';
+    
+    return `
+        <div class="hunter-card" data-symbol="${signal.symbol}">
+            <div class="hunter-card-header">
+                <span class="hunter-ticker" data-symbol="${signal.symbol}">${signal.symbol}</span>
+                <span class="hunter-priority ${priority.toLowerCase()}">${priority}</span>
+            </div>
+            <div class="hunter-metrics">
+                <div class="hunter-metric">
+                    <div class="hunter-metric-label">ADX</div>
+                    <div class="hunter-metric-value">${metrics.adx_trend_strength?.toFixed(1) || '-'}</div>
+                </div>
+                <div class="hunter-metric">
+                    <div class="hunter-metric-label">RSI</div>
+                    <div class="hunter-metric-value">${metrics.rsi_momentum?.toFixed(1) || '-'}</div>
+                </div>
+                <div class="hunter-metric">
+                    <div class="hunter-metric-label">RVOL</div>
+                    <div class="hunter-metric-value">${metrics.rvol_institutional?.toFixed(1) || '-'}x</div>
+                </div>
+            </div>
+            <div class="hunter-metrics">
+                <div class="hunter-metric">
+                    <div class="hunter-metric-label">Price</div>
+                    <div class="hunter-metric-value">$${marketData.current_price?.toFixed(2) || '-'}</div>
+                </div>
+                <div class="hunter-metric">
+                    <div class="hunter-metric-label">VWAP</div>
+                    <div class="hunter-metric-value">$${marketData.vwap_20?.toFixed(2) || '-'}</div>
+                </div>
+                <div class="hunter-metric">
+                    <div class="hunter-metric-label">From VWAP</div>
+                    <div class="hunter-metric-value">${marketData.pct_distance_from_vwap?.toFixed(1) || '-'}%</div>
+                </div>
+            </div>
+            ${instruction ? `<div class="hunter-instruction">📍 ${instruction}</div>` : ''}
+        </div>
+    `;
+}
+
+function attachHunterCardEvents() {
+    // Click ticker to view on chart
+    document.querySelectorAll('.hunter-ticker').forEach(ticker => {
+        ticker.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const symbol = e.target.dataset.symbol;
+            changeChartSymbol(symbol);
+        });
+    });
+    
+    // Click card to view on chart
+    document.querySelectorAll('.hunter-card').forEach(card => {
+        card.addEventListener('click', (e) => {
+            if (!e.target.classList.contains('hunter-ticker')) {
+                const symbol = card.dataset.symbol;
+                changeChartSymbol(symbol);
+            }
+        });
+    });
+}
+
+// Add Hunter initialization to DOMContentLoaded
+document.addEventListener('DOMContentLoaded', () => {
+    // Initialize Hunter Scanner after a short delay
+    setTimeout(initHunterScanner, 500);
+});

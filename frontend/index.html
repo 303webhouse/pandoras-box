@@ -86,6 +86,37 @@
             </div>
         </section>
 
+        <!-- Hunter Scanner Results -->
+        <section class="hunter-section">
+            <div class="hunter-header">
+                <h2>🎯 HUNTER SCANNER</h2>
+                <div class="hunter-controls">
+                    <button class="hunter-btn" id="runScanBtn">Run Scan</button>
+                    <span class="scan-status" id="scanStatus">Ready</span>
+                </div>
+            </div>
+            <div class="hunter-results">
+                <div class="hunter-column ursa-column">
+                    <div class="hunter-column-header">
+                        <h3>🐻 URSA (Bearish)</h3>
+                        <span class="signal-count" id="ursaCount">0</span>
+                    </div>
+                    <div class="hunter-signals" id="ursaSignals">
+                        <p class="empty-state">No trapped longs detected</p>
+                    </div>
+                </div>
+                <div class="hunter-column taurus-column">
+                    <div class="hunter-column-header">
+                        <h3>🐂 TAURUS (Bullish)</h3>
+                        <span class="signal-count" id="taurusCount">0</span>
+                    </div>
+                    <div class="hunter-signals" id="taurusSignals">
+                        <p class="empty-state">No trapped shorts detected</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
         <!-- Open Positions -->
         <section class="positions-section">
             <h2>Open Positions</h2>
