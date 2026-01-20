@@ -479,6 +479,215 @@ body {
     font-style: italic;
 }
 
+/* Hunter Scanner Section */
+.hunter-section {
+    background: var(--card-bg);
+    border: 2px solid var(--border-color);
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 20px;
+}
+
+.hunter-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.hunter-header h2 {
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: var(--accent-teal);
+}
+
+.hunter-controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.hunter-btn {
+    background: var(--accent-teal);
+    color: var(--dark-bg);
+    border: none;
+    padding: 8px 16px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.hunter-btn:hover {
+    transform: scale(1.05);
+    box-shadow: 0 4px 12px rgba(20, 184, 166, 0.3);
+}
+
+.hunter-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.scan-status {
+    font-size: 12px;
+    color: var(--text-secondary);
+    padding: 4px 10px;
+    background: var(--dark-bg);
+    border-radius: 4px;
+}
+
+.scan-status.scanning {
+    color: var(--accent-teal);
+    animation: pulse 1s infinite;
+}
+
+.hunter-results {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+}
+
+.hunter-column {
+    background: var(--dark-bg);
+    border-radius: 8px;
+    padding: 12px;
+}
+
+.ursa-column {
+    border-left: 3px solid var(--accent-orange);
+}
+
+.taurus-column {
+    border-left: 3px solid var(--accent-lime);
+}
+
+.hunter-column-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.hunter-column-header h3 {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 1px;
+}
+
+.ursa-column h3 {
+    color: var(--accent-orange);
+}
+
+.taurus-column h3 {
+    color: var(--accent-lime);
+}
+
+.signal-count {
+    background: var(--border-color);
+    color: var(--text-primary);
+    font-size: 12px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 10px;
+}
+
+.hunter-signals {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+/* Hunter Signal Card */
+.hunter-card {
+    background: var(--card-bg);
+    border-radius: 6px;
+    padding: 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.hunter-card:hover {
+    transform: translateX(4px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.hunter-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.hunter-ticker {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--accent-teal);
+    cursor: pointer;
+}
+
+.hunter-ticker:hover {
+    color: var(--accent-lime);
+    text-decoration: underline;
+}
+
+.hunter-priority {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 3px;
+    text-transform: uppercase;
+}
+
+.hunter-priority.high {
+    background: var(--accent-orange);
+    color: var(--dark-bg);
+}
+
+.hunter-priority.medium {
+    background: var(--border-color);
+    color: var(--text-primary);
+}
+
+.hunter-metrics {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    font-size: 11px;
+}
+
+.hunter-metric {
+    text-align: center;
+}
+
+.hunter-metric-label {
+    color: var(--text-secondary);
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.hunter-metric-value {
+    font-weight: 700;
+    font-size: 12px;
+    margin-top: 2px;
+}
+
+.hunter-instruction {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border-color);
+    font-size: 10px;
+    color: var(--text-secondary);
+    font-style: italic;
+}
+
 /* Responsive */
 @media (max-width: 1200px) {
     .main-content {
@@ -495,6 +704,10 @@ body {
     }
     
     .bias-section {
+        grid-template-columns: 1fr;
+    }
+    
+    .hunter-results {
         grid-template-columns: 1fr;
     }
 }

@@ -25,3 +25,8 @@ python-dateutil>=2.8.2
 
 # HTTP requests
 httpx>=0.26.0
+
+# Hunter Scanner - Market Data & Analysis
+yfinance>=0.2.36
+pandas>=2.0.0
+pandas_ta>=0.3.14b
