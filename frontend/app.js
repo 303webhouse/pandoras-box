@@ -286,14 +286,14 @@ async function loadSignals() {
 }
 
 async function loadBiasData() {
-    const timeframes = ['DAILY', 'WEEKLY', 'MONTHLY'];
+    // Load Daily and Weekly from generic bias endpoint
+    const timeframes = ['DAILY', 'WEEKLY'];
     
     for (const timeframe of timeframes) {
         try {
             const response = await fetch(`${API_URL}/bias/${timeframe}`);
             const data = await response.json();
             
-            // Use the ID-based selectors matching the HTML structure
             const tfLower = timeframe.toLowerCase();
             const container = document.getElementById(`${tfLower}Bias`);
             const levelElement = document.getElementById(`${tfLower}Level`);
@@ -303,7 +303,6 @@ async function loadBiasData() {
                 const level = data.level || 'NEUTRAL';
                 levelElement.textContent = level.replace('_', ' ');
                 
-                // Set background color based on bias
                 if (container) {
                     container.classList.remove('bullish', 'bearish', 'neutral');
                     if (level.includes('TORO')) {
@@ -327,12 +326,65 @@ async function loadBiasData() {
             }
         } catch (error) {
             console.error(`Error loading ${timeframe} bias:`, error);
-            // Update UI to show error state instead of leaving "Loading..."
             const tfLower = timeframe.toLowerCase();
             const detailsElement = document.getElementById(`${tfLower}Details`);
             if (detailsElement) {
                 detailsElement.textContent = 'Failed to load';
             }
+        }
+    }
+    
+    // Load Monthly (Savita Indicator) separately
+    await loadSavitaIndicator();
+}
+
+async function loadSavitaIndicator() {
+    try {
+        const response = await fetch(`${API_URL}/bias/savita`);
+        const data = await response.json();
+        
+        const container = document.getElementById('monthlyBias');
+        const levelElement = document.getElementById('monthlyLevel');
+        const detailsElement = document.getElementById('monthlyDetails');
+        
+        if (data.status === 'success') {
+            const bias = data.bias || 'NEUTRAL';
+            
+            if (levelElement) {
+                levelElement.textContent = bias.replace('_', ' ');
+            }
+            
+            if (container) {
+                container.classList.remove('bullish', 'bearish', 'neutral');
+                if (bias.includes('TORO')) {
+                    container.classList.add('bullish');
+                } else if (bias.includes('URSA')) {
+                    container.classList.add('bearish');
+                } else {
+                    container.classList.add('neutral');
+                }
+            }
+            
+            if (detailsElement) {
+                // Show reading and interpretation
+                const reading = data.reading || 'N/A';
+                const signal = data.signal || '';
+                const updated = data.last_updated || 'Unknown';
+                detailsElement.innerHTML = `
+                    <span class="savita-reading">${reading}%</span> - ${signal}<br>
+                    <small>Updated: ${updated}</small>
+                `;
+            }
+        } else {
+            if (detailsElement) {
+                detailsElement.textContent = data.message || 'Unavailable';
+            }
+        }
+    } catch (error) {
+        console.error('Error loading Savita indicator:', error);
+        const detailsElement = document.getElementById('monthlyDetails');
+        if (detailsElement) {
+            detailsElement.textContent = 'Failed to load';
         }
     }
 }
