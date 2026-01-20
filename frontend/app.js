@@ -4,8 +4,10 @@
  */
 
 // Configuration
-const WS_URL = 'ws://localhost:8000/ws';
-const API_URL = 'http://localhost:8000/api';
+// Use Railway backend for production, localhost for local development
+const BACKEND_HOST = 'pandoras-box-production.up.railway.app';
+const WS_URL = `wss://${BACKEND_HOST}/ws`;
+const API_URL = `https://${BACKEND_HOST}/api`;
 
 // State
 let ws = null;
