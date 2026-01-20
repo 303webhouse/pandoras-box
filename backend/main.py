@@ -118,12 +118,14 @@ from api.positions import router as positions_router
 from api.scanner import router as scanner_router
 from api.watchlist import router as watchlist_router
 from api.bias import router as bias_router
+from api.strategies import router as strategies_router
 
 app.include_router(webhook_router, prefix="/webhook", tags=["webhooks"])
 app.include_router(positions_router, prefix="/api", tags=["positions"])
 app.include_router(scanner_router, prefix="/api", tags=["scanner"])
 app.include_router(watchlist_router, prefix="/api", tags=["watchlist"])
 app.include_router(bias_router, prefix="/api", tags=["bias"])
+app.include_router(strategies_router, prefix="/api", tags=["strategies"])
 
 if __name__ == "__main__":
     import uvicorn
