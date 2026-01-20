@@ -51,7 +51,7 @@ SCANNER_CONFIG = {
         "adx_min": 20,
         "rsi_bull_max": 60,
         "rsi_bear_min": 40,
-        "rvol_min": 1.5,
+        "rvol_min": 1.25,  # Lowered from 1.5 for more results
     }
 }
 
