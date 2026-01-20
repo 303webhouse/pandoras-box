@@ -1156,3 +1156,162 @@ function renderCriteriaList(criteria) {
     
     return html;
 }
+
+
+// ==========================================
+// STRATEGY CONTROLS
+// ==========================================
+
+let strategiesData = {};
+
+function initStrategies() {
+    const enableAllBtn = document.getElementById('enableAllBtn');
+    const disableAllBtn = document.getElementById('disableAllBtn');
+    
+    if (enableAllBtn) {
+        enableAllBtn.addEventListener('click', enableAllStrategies);
+    }
+    
+    if (disableAllBtn) {
+        disableAllBtn.addEventListener('click', disableAllStrategies);
+    }
+    
+    loadStrategies();
+}
+
+async function loadStrategies() {
+    try {
+        const response = await fetch(`${API_URL}/strategies`);
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            strategiesData = data.strategies;
+            renderStrategies();
+        }
+    } catch (error) {
+        console.error('Error loading strategies:', error);
+        document.getElementById('strategiesGrid').innerHTML = 
+            '<p class="empty-state">Failed to load strategies</p>';
+    }
+}
+
+function renderStrategies() {
+    const container = document.getElementById('strategiesGrid');
+    
+    if (!container) return;
+    
+    const strategyIds = Object.keys(strategiesData);
+    
+    if (strategyIds.length === 0) {
+        container.innerHTML = '<p class="empty-state">No strategies configured</p>';
+        return;
+    }
+    
+    container.innerHTML = strategyIds.map(id => {
+        const strategy = strategiesData[id];
+        const enabled = strategy.enabled;
+        const category = strategy.category || 'other';
+        
+        return `
+            <div class="strategy-card ${enabled ? 'enabled' : 'disabled'}" data-strategy-id="${id}">
+                <div class="strategy-card-header">
+                    <span class="strategy-name">${strategy.name}</span>
+                    <label class="strategy-toggle">
+                        <input type="checkbox" ${enabled ? 'checked' : ''} data-strategy-id="${id}">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+                <div class="strategy-description">${strategy.description}</div>
+                <div class="strategy-meta">
+                    <span class="strategy-badge ${category}">${category}</span>
+                    ${strategy.timeframes ? strategy.timeframes.map(tf => 
+                        `<span class="strategy-badge">${tf}</span>`
+                    ).join('') : ''}
+                </div>
+            </div>
+        `;
+    }).join('');
+    
+    // Attach toggle events
+    container.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {
+        checkbox.addEventListener('change', (e) => {
+            toggleStrategy(e.target.dataset.strategyId, e.target.checked);
+        });
+    });
+}
+
+async function toggleStrategy(strategyId, enabled) {
+    try {
+        const response = await fetch(`${API_URL}/strategies/${strategyId}/toggle`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled })
+        });
+        
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            // Update local state
+            strategiesData[strategyId].enabled = enabled;
+            
+            // Update card styling
+            const card = document.querySelector(`.strategy-card[data-strategy-id="${strategyId}"]`);
+            if (card) {
+                card.classList.toggle('enabled', enabled);
+                card.classList.toggle('disabled', !enabled);
+            }
+            
+            console.log(`Strategy ${strategyId} ${enabled ? 'enabled' : 'disabled'}`);
+        }
+    } catch (error) {
+        console.error('Error toggling strategy:', error);
+        // Revert checkbox
+        const checkbox = document.querySelector(`input[data-strategy-id="${strategyId}"]`);
+        if (checkbox) {
+            checkbox.checked = !enabled;
+        }
+    }
+}
+
+async function enableAllStrategies() {
+    try {
+        const response = await fetch(`${API_URL}/strategies/enable-all`, {
+            method: 'POST'
+        });
+        
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            loadStrategies();
+            console.log('All strategies enabled');
+        }
+    } catch (error) {
+        console.error('Error enabling all strategies:', error);
+    }
+}
+
+async function disableAllStrategies() {
+    if (!confirm('⚠️ KILL SWITCH: This will disable ALL strategies. Continue?')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`${API_URL}/strategies/disable-all`, {
+            method: 'POST'
+        });
+        
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            loadStrategies();
+            console.log('🛑 All strategies DISABLED');
+        }
+    } catch (error) {
+        console.error('Error disabling all strategies:', error);
+    }
+}
+
+// Initialize strategies on page load
+document.addEventListener('DOMContentLoaded', () => {
+    setTimeout(initStrategies, 800);
+});
