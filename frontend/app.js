@@ -787,4 +787,320 @@ function attachHunterCardEvents() {
 document.addEventListener('DOMContentLoaded', () => {
     // Initialize Hunter Scanner after a short delay
     setTimeout(initHunterScanner, 500);
+    
+    // Initialize Watchlist
+    setTimeout(initWatchlist, 600);
+    
+    // Initialize Ticker Analyzer
+    setTimeout(initTickerAnalyzer, 700);
 });
+
+
+// ==========================================
+// WATCHLIST MANAGEMENT
+// ==========================================
+
+let watchlistTickers = [];
+
+function initWatchlist() {
+    const addBtn = document.getElementById('addTickerBtn');
+    const addInput = document.getElementById('addTickerInput');
+    const resetBtn = document.getElementById('resetWatchlistBtn');
+    
+    if (addBtn) {
+        addBtn.addEventListener('click', addTickerToWatchlist);
+    }
+    
+    if (addInput) {
+        addInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                addTickerToWatchlist();
+            }
+        });
+    }
+    
+    if (resetBtn) {
+        resetBtn.addEventListener('click', resetWatchlist);
+    }
+    
+    // Load current watchlist
+    loadWatchlist();
+}
+
+async function loadWatchlist() {
+    try {
+        const response = await fetch(`${API_URL}/watchlist`);
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            watchlistTickers = data.tickers || [];
+            renderWatchlist();
+        }
+    } catch (error) {
+        console.error('Error loading watchlist:', error);
+        document.getElementById('watchlistTickers').innerHTML = 
+            '<p class="empty-state">Failed to load watchlist</p>';
+    }
+}
+
+function renderWatchlist() {
+    const container = document.getElementById('watchlistTickers');
+    const countEl = document.getElementById('watchlistCount');
+    
+    if (!container) return;
+    
+    countEl.textContent = watchlistTickers.length;
+    
+    if (watchlistTickers.length === 0) {
+        container.innerHTML = '<p class="empty-state">No tickers in watchlist</p>';
+        return;
+    }
+    
+    container.innerHTML = watchlistTickers.map(ticker => `
+        <div class="watchlist-ticker" data-ticker="${ticker}">
+            <span class="ticker-name">${ticker}</span>
+            <span class="remove-ticker" data-ticker="${ticker}">✕</span>
+        </div>
+    `).join('');
+    
+    // Attach click events
+    container.querySelectorAll('.ticker-name').forEach(el => {
+        el.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const ticker = e.target.closest('.watchlist-ticker').dataset.ticker;
+            changeChartSymbol(ticker);
+        });
+    });
+    
+    container.querySelectorAll('.remove-ticker').forEach(el => {
+        el.addEventListener('click', (e) => {
+            e.stopPropagation();
+            removeTickerFromWatchlist(e.target.dataset.ticker);
+        });
+    });
+}
+
+async function addTickerToWatchlist() {
+    const input = document.getElementById('addTickerInput');
+    const ticker = input.value.trim().toUpperCase();
+    
+    if (!ticker) return;
+    
+    try {
+        const response = await fetch(`${API_URL}/watchlist/add`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ticker })
+        });
+        
+        const data = await response.json();
+        
+        if (data.status === 'success' || data.status === 'already_exists') {
+            watchlistTickers = data.tickers;
+            renderWatchlist();
+            input.value = '';
+        }
+    } catch (error) {
+        console.error('Error adding ticker:', error);
+    }
+}
+
+async function removeTickerFromWatchlist(ticker) {
+    try {
+        const response = await fetch(`${API_URL}/watchlist/remove`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ticker })
+        });
+        
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            watchlistTickers = data.tickers;
+            renderWatchlist();
+        }
+    } catch (error) {
+        console.error('Error removing ticker:', error);
+    }
+}
+
+async function resetWatchlist() {
+    try {
+        const response = await fetch(`${API_URL}/watchlist/reset`, {
+            method: 'POST'
+        });
+        
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            watchlistTickers = data.tickers;
+            renderWatchlist();
+        }
+    } catch (error) {
+        console.error('Error resetting watchlist:', error);
+    }
+}
+
+
+// ==========================================
+// SINGLE TICKER ANALYZER
+// ==========================================
+
+function initTickerAnalyzer() {
+    const analyzeBtn = document.getElementById('analyzeTickerBtn');
+    const analyzeInput = document.getElementById('analyzeTickerInput');
+    
+    if (analyzeBtn) {
+        analyzeBtn.addEventListener('click', analyzeTicker);
+    }
+    
+    if (analyzeInput) {
+        analyzeInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                analyzeTicker();
+            }
+        });
+    }
+}
+
+async function analyzeTicker() {
+    const input = document.getElementById('analyzeTickerInput');
+    const resultsContainer = document.getElementById('analyzerResults');
+    const ticker = input.value.trim().toUpperCase();
+    
+    if (!ticker) return;
+    
+    resultsContainer.innerHTML = '<p class="empty-state">Analyzing...</p>';
+    
+    try {
+        const response = await fetch(`${API_URL}/scanner/analyze/${ticker}`);
+        const data = await response.json();
+        
+        renderAnalyzerResults(data);
+        
+        // Also switch chart to this ticker
+        changeChartSymbol(ticker);
+        
+    } catch (error) {
+        console.error('Error analyzing ticker:', error);
+        resultsContainer.innerHTML = '<p class="empty-state">Analysis failed</p>';
+    }
+}
+
+function renderAnalyzerResults(data) {
+    const container = document.getElementById('analyzerResults');
+    
+    if (!container) return;
+    
+    if (data.error) {
+        container.innerHTML = `<p class="empty-state">${data.error}</p>`;
+        return;
+    }
+    
+    const verdict = data.overall_verdict || 'NO_SIGNAL';
+    const metrics = data.current_metrics || {};
+    const ursaCriteria = data.criteria_breakdown?.ursa_bearish || {};
+    const taurusCriteria = data.criteria_breakdown?.taurus_bullish || {};
+    
+    // Determine verdict styling
+    let verdictClass = 'no-signal';
+    let verdictText = 'NO SIGNAL';
+    
+    if (verdict === 'URSA_SIGNAL') {
+        verdictClass = 'ursa';
+        verdictText = '🐻 URSA SIGNAL (BEARISH)';
+    } else if (verdict === 'TAURUS_SIGNAL') {
+        verdictClass = 'taurus';
+        verdictText = '🐂 TAURUS SIGNAL (BULLISH)';
+    }
+    
+    let html = `
+        <div class="analyzer-verdict ${verdictClass}">
+            <span class="verdict-ticker">${data.ticker}</span>
+            <span class="verdict-result">${verdictText}</span>
+        </div>
+        
+        <div class="analyzer-metrics">
+            <div class="analyzer-metric">
+                <div class="analyzer-metric-label">Price</div>
+                <div class="analyzer-metric-value">$${metrics.price ?? '-'}</div>
+            </div>
+            <div class="analyzer-metric">
+                <div class="analyzer-metric-label">SMA 200</div>
+                <div class="analyzer-metric-value">$${metrics.sma_200 ?? '-'}</div>
+            </div>
+            <div class="analyzer-metric">
+                <div class="analyzer-metric-label">VWAP</div>
+                <div class="analyzer-metric-value">$${metrics.vwap_20 ?? '-'}</div>
+            </div>
+            <div class="analyzer-metric">
+                <div class="analyzer-metric-label">ADX</div>
+                <div class="analyzer-metric-value">${metrics.adx ?? '-'}</div>
+            </div>
+            <div class="analyzer-metric">
+                <div class="analyzer-metric-label">RSI</div>
+                <div class="analyzer-metric-value">${metrics.rsi ?? '-'}</div>
+            </div>
+            <div class="analyzer-metric">
+                <div class="analyzer-metric-label">RVOL</div>
+                <div class="analyzer-metric-value">${metrics.rvol ?? '-'}x</div>
+            </div>
+        </div>
+    `;
+    
+    // URSA criteria breakdown
+    html += `
+        <div class="criteria-section">
+            <div class="criteria-header ursa">🐻 URSA (Bearish) Criteria</div>
+            ${renderCriteriaList(ursaCriteria)}
+        </div>
+    `;
+    
+    // TAURUS criteria breakdown
+    html += `
+        <div class="criteria-section">
+            <div class="criteria-header taurus">🐂 TAURUS (Bullish) Criteria</div>
+            ${renderCriteriaList(taurusCriteria)}
+        </div>
+    `;
+    
+    // Near miss info if no signal
+    if (verdict === 'NO_SIGNAL' && data.near_miss) {
+        html += `
+            <div class="near-miss">
+                <div class="near-miss-title">Criteria Met</div>
+                <div class="near-miss-counts">
+                    <span class="near-miss-ursa">URSA: ${data.near_miss.ursa_criteria_met}</span>
+                    <span class="near-miss-taurus">TAURUS: ${data.near_miss.taurus_criteria_met}</span>
+                </div>
+            </div>
+        `;
+    }
+    
+    container.innerHTML = html;
+}
+
+function renderCriteriaList(criteria) {
+    let html = '';
+    
+    for (const [key, value] of Object.entries(criteria)) {
+        if (key === 'ALL_PASSED') continue;
+        if (typeof value !== 'object') continue;
+        
+        const passed = value.passed;
+        const statusIcon = passed ? '✅' : '❌';
+        const statusClass = passed ? 'pass' : 'fail';
+        
+        html += `
+            <div class="criteria-item">
+                <span class="criteria-status ${statusClass}">${statusIcon}</span>
+                <div class="criteria-content">
+                    <div class="criteria-name">${value.description}</div>
+                    <div class="criteria-detail">${value.current} (Need: ${value.required})</div>
+                </div>
+            </div>
+        `;
+    }
+    
+    return html;
+}
