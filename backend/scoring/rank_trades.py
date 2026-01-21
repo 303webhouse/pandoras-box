@@ -57,9 +57,9 @@ def classify_signal(
 def calculate_signal_score(
     signal_type: str,
     risk_reward: float,
-    adx: float,
-    line_separation: float,
-    bias_aligned: bool
+    adx: float = None,
+    line_separation: float = None,
+    bias_aligned: bool = False
 ) -> float:
     """
     Calculate overall signal quality score for ranking
@@ -73,20 +73,27 @@ def calculate_signal_score(
         "APIS_CALL": 40,
         "KODIAK_CALL": 40,
         "BULLISH_TRADE": 20,
-        "BEAR_CALL": 20
+        "BEAR_CALL": 20,
+        "EXHAUSTION_BULL": 25,
+        "EXHAUSTION_BEAR": 25
     }
-    base_score = type_scores.get(signal_type, 0)
+    base_score = type_scores.get(signal_type, 15)
     
     # Risk/reward scoring (max 30 points)
     # 2:1 R:R = 20 points, 3:1 = 25 points, 4:1+ = 30 points
-    rr_score = min(risk_reward * 7.5, 30)
+    rr = risk_reward if risk_reward is not None else 0
+    rr_score = min(rr * 7.5, 30)
     
     # Technical strength scoring (max 20 points)
-    # ADX component (10 points)
-    adx_score = min((adx - 25) / 2.5, 10)
-    # Line separation component (10 points)
-    sep_score = min((line_separation - 10) / 2, 10)
-    tech_score = adx_score + sep_score
+    tech_score = 0
+    if adx is not None:
+        # ADX component (10 points)
+        adx_score = min(max((adx - 25) / 2.5, 0), 10)
+        tech_score += adx_score
+    if line_separation is not None:
+        # Line separation component (10 points)
+        sep_score = min(max((line_separation - 10) / 2, 0), 10)
+        tech_score += sep_score
     
     # Bias alignment bonus (10 points)
     alignment_score = 10 if bias_aligned else 0

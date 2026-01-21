@@ -138,18 +138,22 @@ async def get_active_signals():
         signals = await get_active_signals()
         
         # Sort by score (highest first)
+        # Use existing score if available, otherwise calculate
         from scoring.rank_trades import calculate_signal_score
         
         for signal in signals:
-            signal['score'] = calculate_signal_score(
-                signal['signal_type'],
-                signal['risk_reward'],
-                signal['adx'],
-                signal['line_separation'],
-                signal['bias_aligned']
-            )
+            # Only recalculate if score not already set or if signal has required fields
+            if 'score' not in signal or signal.get('score') is None:
+                # Use .get() to handle missing fields gracefully
+                signal['score'] = calculate_signal_score(
+                    signal.get('signal_type', 'NEUTRAL'),
+                    signal.get('risk_reward', 0),
+                    signal.get('adx'),
+                    signal.get('line_separation'),
+                    signal.get('bias_aligned', False)
+                )
         
-        signals.sort(key=lambda x: x['score'], reverse=True)
+        signals.sort(key=lambda x: x.get('score', 0), reverse=True)
         
         return {"status": "success", "signals": signals}
     
