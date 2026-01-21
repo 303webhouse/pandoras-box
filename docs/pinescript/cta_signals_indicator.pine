@@ -1,0 +1,275 @@
+//@version=5
+indicator("CTA Signals (Entry Triggers)", overlay=true, max_labels_count=100)
+
+// ==========================================
+// CTA SIGNALS INDICATOR
+// Purpose: Entry/Exit signal detection:
+// - 120 SMA Golden Touch (rare, high-probability)
+// - Two-Close Confirmations
+// - Volume Breakouts
+// - SMA Reclaims/Losses
+// - Pullback entries in Max Long zone
+// ==========================================
+
+// ==========================================
+// 1. INPUT SETTINGS
+// ==========================================
+
+// --- Signal Toggles ---
+grp_signals = "Signal Types"
+show_golden_touch = input.bool(true, "120 SMA Golden Touch", group=grp_signals)
+show_two_close = input.bool(true, "Two-Close Confirmations", group=grp_signals)
+show_volume_breakout = input.bool(true, "Volume Breakouts", group=grp_signals)
+show_pullback_entry = input.bool(true, "Pullback Entries (Max Long)", group=grp_signals)
+show_reclaim_signals = input.bool(true, "SMA Reclaim/Loss Signals", group=grp_signals)
+
+// --- Golden Touch Settings ---
+grp_golden = "Golden Touch Settings"
+golden_min_bars = input.int(50, "Min Bars Above 120", minval=20, maxval=150, group=grp_golden)
+golden_min_correction = input.float(5.0, "Min Correction %", minval=3.0, maxval=15.0, step=0.5, group=grp_golden)
+
+// --- Volume Settings ---
+grp_vol = "Volume Confirmation"
+vol_threshold = input.float(1.10, "Volume Threshold (1.10 = +10%)", minval=1.0, maxval=2.0, step=0.05, group=grp_vol)
+vol_avg_period = input.int(30, "Average Period", minval=10, maxval=50, group=grp_vol)
+
+// --- Pullback Settings ---
+grp_pullback = "Pullback Entry Settings"
+pullback_touch_20 = input.bool(true, "Trigger on 20 SMA Touch", group=grp_pullback)
+pullback_max_dist = input.float(1.0, "Max Distance from 20 SMA %", minval=0.5, maxval=3.0, step=0.25, group=grp_pullback)
+
+// --- Risk Management Calculation ---
+grp_risk = "Risk Management (for signals)"
+atr_period = input.int(14, "ATR Period", minval=5, maxval=30, group=grp_risk)
+stop_atr_mult = input.float(1.5, "Stop ATR Multiplier", minval=1.0, maxval=3.0, step=0.25, group=grp_risk)
+target_rr = input.float(2.0, "Target R:R Ratio", minval=1.5, maxval=4.0, step=0.25, group=grp_risk)
+
+// --- Display Settings ---
+grp_display = "Display"
+show_entry_levels = input.bool(true, "Show Entry/Stop/Target Lines", group=grp_display)
+show_signal_table = input.bool(true, "Show Active Signal Table", group=grp_display)
+
+// ==========================================
+// 2. CALCULATIONS
+// ==========================================
+
+// --- Core SMAs ---
+sma20 = ta.sma(close, 20)
+sma50 = ta.sma(close, 50)
+sma120 = ta.sma(close, 120)
+
+// --- Zones ---
+zone_max_long = close > sma20 and close > sma50 and close > sma120
+zone_delever = close < sma20 and close >= sma50
+zone_waterfall = close < sma50 and sma20 >= sma120
+zone_capitulation = sma20 < sma120
+
+// --- Volume ---
+vol_avg = ta.sma(volume, vol_avg_period)
+vol_confirmed = volume > vol_avg * vol_threshold
+vol_pct = (volume / vol_avg - 1) * 100
+
+// --- ATR for stops ---
+atr = ta.atr(atr_period)
+
+// --- Golden Touch Detection ---
+bars_above_120 = ta.barssince(close < sma120)
+highest_recent = ta.highest(high, math.max(1, math.min(bars_above_120, 200)))
+correction_pct = (highest_recent - close) / highest_recent * 100
+
+golden_touch_signal = show_golden_touch and
+                      ta.crossunder(close, sma120) and
+                      bars_above_120 > golden_min_bars and
+                      correction_pct >= golden_min_correction and
+                      sma20 > sma120
+
+// Alternative: Price touches 120 SMA without crossing (bounce)
+golden_touch_bounce = show_golden_touch and
+                      low <= sma120 and close > sma120 and
+                      bars_above_120 > golden_min_bars and
+                      correction_pct >= golden_min_correction and
+                      sma20 > sma120
+
+golden_touch = golden_touch_signal or golden_touch_bounce
+
+// --- Two-Close Rule ---
+two_close_long_50 = show_two_close and 
+                    close > sma50 and close[1] > sma50[1] and close[2] <= sma50[2]
+two_close_short_50 = show_two_close and 
+                     close < sma50 and close[1] < sma50[1] and close[2] >= sma50[2]
+two_close_long_20 = show_two_close and 
+                    close > sma20 and close[1] > sma20[1] and close[2] <= sma20[2]
+
+// --- Volume Breakout ---
+vol_breakout_long = show_volume_breakout and vol_confirmed and ta.crossover(close, sma50)
+vol_breakout_short = show_volume_breakout and vol_confirmed and ta.crossunder(close, sma50)
+
+// --- Pullback Entry in Max Long Zone ---
+near_20_sma = math.abs(close - sma20) / sma20 * 100 <= pullback_max_dist
+touched_20 = low <= sma20 and close > sma20
+pullback_entry = show_pullback_entry and 
+                 zone_max_long and 
+                 (pullback_touch_20 ? touched_20 : near_20_sma) and
+                 close > sma20
+
+// --- SMA Reclaims ---
+reclaim_50 = show_reclaim_signals and ta.crossover(close, sma50)
+lost_50 = show_reclaim_signals and ta.crossunder(close, sma50)
+reclaim_120 = show_reclaim_signals and ta.crossover(close, sma120)
+lost_120 = show_reclaim_signals and ta.crossunder(close, sma120)
+
+// --- Calculate Entry/Stop/Target for active signals ---
+var float active_entry = na
+var float active_stop = na
+var float active_target = na
+var string active_signal = ""
+var int active_bar = na
+
+// Priority: Golden Touch > Two-Close+Vol > Pullback > Reclaim
+if golden_touch
+    active_entry := close
+    active_stop := sma120 - atr * stop_atr_mult
+    active_target := close + (close - active_stop) * target_rr
+    active_signal := "GOLDEN TOUCH"
+    active_bar := bar_index
+else if two_close_long_50 and vol_confirmed
+    active_entry := close
+    active_stop := sma50 - atr * stop_atr_mult
+    active_target := close + (close - active_stop) * target_rr
+    active_signal := "2-CLOSE + VOL"
+    active_bar := bar_index
+else if pullback_entry and not pullback_entry[1]
+    active_entry := close
+    active_stop := sma20 - atr * stop_atr_mult
+    active_target := close + (close - active_stop) * target_rr
+    active_signal := "PULLBACK"
+    active_bar := bar_index
+else if vol_breakout_long
+    active_entry := close
+    active_stop := sma50 - atr * stop_atr_mult
+    active_target := close + (close - active_stop) * target_rr
+    active_signal := "VOL BREAKOUT"
+    active_bar := bar_index
+
+// Clear after 10 bars
+if bar_index - active_bar > 10
+    active_entry := na
+    active_stop := na
+    active_target := na
+    active_signal := ""
+
+// ==========================================
+// 3. PLOTTING SIGNALS
+// ==========================================
+
+// --- Golden Touch (highest priority) ---
+plotshape(golden_touch, 
+          style=shape.diamond, location=location.belowbar,
+          color=color.new(#FFD700, 0), size=size.large, text="GOLDEN\n120 TOUCH")
+
+// --- Two-Close Confirmations ---
+plotshape(two_close_long_50 and vol_confirmed, 
+          style=shape.triangleup, location=location.belowbar,
+          color=color.green, size=size.normal, text="2C+VOL\nLONG")
+
+plotshape(two_close_long_50 and not vol_confirmed, 
+          style=shape.triangleup, location=location.belowbar,
+          color=color.new(color.green, 50), size=size.small, text="2C")
+
+plotshape(two_close_short_50, 
+          style=shape.triangledown, location=location.abovebar,
+          color=color.red, size=size.normal, text="2C\nSHORT")
+
+// --- Volume Breakouts ---
+plotshape(vol_breakout_long and not two_close_long_50, 
+          style=shape.circle, location=location.belowbar,
+          color=color.teal, size=size.small, text="VOL+")
+
+plotshape(vol_breakout_short, 
+          style=shape.circle, location=location.abovebar,
+          color=color.maroon, size=size.small, text="VOL-")
+
+// --- Pullback Entries ---
+plotshape(pullback_entry and not pullback_entry[1], 
+          style=shape.arrowup, location=location.belowbar,
+          color=color.lime, size=size.small, text="PB")
+
+// --- Reclaim/Loss ---
+plotshape(reclaim_50 and not vol_breakout_long and not two_close_long_50, 
+          style=shape.labelup, location=location.belowbar,
+          color=color.new(color.green, 30), size=size.tiny, text="R50")
+
+plotshape(lost_50 and not vol_breakout_short and not two_close_short_50, 
+          style=shape.labeldown, location=location.abovebar,
+          color=color.new(color.red, 30), size=size.tiny, text="L50")
+
+plotshape(reclaim_120, 
+          style=shape.labelup, location=location.belowbar,
+          color=color.new(color.blue, 30), size=size.tiny, text="R120")
+
+plotshape(lost_120, 
+          style=shape.labeldown, location=location.abovebar,
+          color=color.new(color.purple, 30), size=size.tiny, text="L120")
+
+// --- Entry/Stop/Target Lines ---
+plot(show_entry_levels and not na(active_entry) ? active_entry : na, 
+     "Entry", color.white, 1, plot.style_linebr)
+plot(show_entry_levels and not na(active_stop) ? active_stop : na, 
+     "Stop", color.red, 1, plot.style_linebr)
+plot(show_entry_levels and not na(active_target) ? active_target : na, 
+     "Target", color.green, 1, plot.style_linebr)
+
+// ==========================================
+// 4. SIGNAL TABLE
+// ==========================================
+
+var table sig_tbl = table.new(position.bottom_right, 2, 7, border_width=1)
+
+if barstate.islast and show_signal_table and active_signal != ""
+    risk = active_entry - active_stop
+    reward = active_target - active_entry
+    rr_ratio = reward / risk
+    
+    table.cell(sig_tbl, 0, 0, "SIGNAL", bgcolor=color.blue, text_color=color.white)
+    table.cell(sig_tbl, 1, 0, active_signal, bgcolor=color.new(color.blue, 50), text_color=color.white)
+    
+    table.cell(sig_tbl, 0, 1, "Entry", bgcolor=color.gray, text_color=color.white)
+    table.cell(sig_tbl, 1, 1, str.tostring(active_entry, format.mintick), bgcolor=color.new(color.gray, 80), text_color=chart.fg_color)
+    
+    table.cell(sig_tbl, 0, 2, "Stop", bgcolor=color.red, text_color=color.white)
+    table.cell(sig_tbl, 1, 2, str.tostring(active_stop, format.mintick), bgcolor=color.new(color.red, 80), text_color=color.white)
+    
+    table.cell(sig_tbl, 0, 3, "Target", bgcolor=color.green, text_color=color.white)
+    table.cell(sig_tbl, 1, 3, str.tostring(active_target, format.mintick), bgcolor=color.new(color.green, 80), text_color=color.white)
+    
+    table.cell(sig_tbl, 0, 4, "Risk", bgcolor=color.gray, text_color=color.white)
+    table.cell(sig_tbl, 1, 4, str.tostring(risk, format.mintick), bgcolor=color.new(color.gray, 80), text_color=chart.fg_color)
+    
+    table.cell(sig_tbl, 0, 5, "R:R", bgcolor=color.gray, text_color=color.white)
+    table.cell(sig_tbl, 1, 5, str.tostring(rr_ratio, "#.1") + ":1", bgcolor=color.new(color.gray, 80), text_color=chart.fg_color)
+    
+    table.cell(sig_tbl, 0, 6, "Bars Ago", bgcolor=color.gray, text_color=color.white)
+    table.cell(sig_tbl, 1, 6, str.tostring(bar_index - active_bar), bgcolor=color.new(color.gray, 80), text_color=chart.fg_color)
+
+else if not show_signal_table or active_signal == ""
+    table.clear(sig_tbl, 0, 0, 1, 6)
+
+// ==========================================
+// 5. ALERTS
+// ==========================================
+
+// High Priority
+alertcondition(golden_touch, "🌟 Golden Touch", "GOLDEN TOUCH at 120 SMA - High probability long!")
+
+// Entry Signals
+alertcondition(two_close_long_50 and vol_confirmed, "✅ 2-Close + Volume Long", "Two-close above 50 SMA with volume confirmation - LONG")
+alertcondition(two_close_short_50, "🔻 2-Close Short", "Two-close below 50 SMA - potential SHORT/EXIT")
+alertcondition(vol_breakout_long, "📈 Volume Breakout Long", "Price broke above 50 SMA with volume")
+alertcondition(vol_breakout_short, "📉 Volume Breakout Short", "Price broke below 50 SMA with volume")
+alertcondition(pullback_entry and not pullback_entry[1], "↩️ Pullback Entry", "Pullback to 20 SMA in Max Long zone")
+
+// Level Signals
+alertcondition(reclaim_50, "Reclaimed 50 SMA", "Price reclaimed 50 SMA")
+alertcondition(lost_50, "Lost 50 SMA", "Price lost 50 SMA")
+alertcondition(reclaim_120, "Reclaimed 120 SMA", "Price reclaimed 120 SMA")
+alertcondition(lost_120, "Lost 120 SMA", "Price lost 120 SMA")

@@ -123,34 +123,93 @@
             </div>
         </section>
 
-        <!-- Hunter Scanner Results -->
-        <section class="hunter-section">
-            <div class="hunter-header">
-                <h2>🎯 HUNTER SCANNER</h2>
-                <div class="hunter-controls">
-                    <button class="hunter-btn" id="runScanBtn">Run Scan</button>
-                    <span class="scan-status" id="scanStatus">Ready</span>
+        <!-- CTA Scanner Results (Equity Swing Trading) -->
+        <section class="cta-section">
+            <div class="cta-header">
+                <h2>🎯 CTA SCANNER (Equity Swing)</h2>
+                <div class="cta-controls">
+                    <button class="cta-btn" id="runCtaScanBtn">Run Scan</button>
+                    <span class="scan-status" id="ctaScanStatus">Ready</span>
                 </div>
             </div>
-            <p class="hunter-info">Scans your watchlist first, then S&P 500</p>
-            <div class="hunter-results">
-                <div class="hunter-column ursa-column">
-                    <div class="hunter-column-header">
-                        <h3>🐻 URSA (Bearish)</h3>
-                        <span class="signal-count" id="ursaCount">0</span>
-                    </div>
-                    <div class="hunter-signals" id="ursaSignals">
-                        <p class="empty-state">No trapped longs detected</p>
+            <p class="cta-info">CTA Replication Strategy • 20/50/120 SMAs • Watchlist + S&P 500</p>
+            
+            <!-- CTA Zone Dashboard -->
+            <div class="cta-zones-dashboard">
+                <h3>📊 CTA Zone Dashboard</h3>
+                <div class="cta-zone-cards" id="ctaZoneCards">
+                    <div class="cta-zone-card" data-ticker="SPY">
+                        <span class="zone-ticker">SPY</span>
+                        <span class="zone-status loading">Loading...</span>
                     </div>
                 </div>
-                <div class="hunter-column taurus-column">
-                    <div class="hunter-column-header">
-                        <h3>🐂 TAURUS (Bullish)</h3>
-                        <span class="signal-count" id="taurusCount">0</span>
+            </div>
+            
+            <!-- CTA Signal Results -->
+            <div class="cta-results">
+                <div class="cta-column golden-column">
+                    <div class="cta-column-header">
+                        <h3>🌟 GOLDEN TOUCH</h3>
+                        <span class="signal-count" id="goldenCount">0</span>
                     </div>
-                    <div class="hunter-signals" id="taurusSignals">
-                        <p class="empty-state">No trapped shorts detected</p>
+                    <div class="cta-signals" id="goldenSignals">
+                        <p class="empty-state">Rare: 120 SMA first touch</p>
                     </div>
+                </div>
+                <div class="cta-column twoclose-column">
+                    <div class="cta-column-header">
+                        <h3>✅ TWO-CLOSE + VOL</h3>
+                        <span class="signal-count" id="twoCloseCount">0</span>
+                    </div>
+                    <div class="cta-signals" id="twoCloseSignals">
+                        <p class="empty-state">No confirmed breakouts</p>
+                    </div>
+                </div>
+                <div class="cta-column pullback-column">
+                    <div class="cta-column-header">
+                        <h3>↩️ PULLBACK ENTRY</h3>
+                        <span class="signal-count" id="pullbackCount">0</span>
+                    </div>
+                    <div class="cta-signals" id="pullbackSignals">
+                        <p class="empty-state">No pullbacks to 20 SMA</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- BTC Bottom Signals Checklist -->
+        <section class="btc-signals-section">
+            <div class="btc-signals-header">
+                <h2>₿ BTC BOTTOM SIGNALS</h2>
+                <div class="btc-signals-controls">
+                    <button class="btc-btn" id="refreshBtcSignalsBtn">↻ Refresh</button>
+                    <button class="btc-btn secondary" id="resetBtcSignalsBtn">Reset All</button>
+                </div>
+            </div>
+            <p class="btc-info">"We identify structural exhaustion of sellers and reset of leverage"</p>
+            
+            <!-- Confluence Summary -->
+            <div class="btc-confluence-summary" id="btcConfluenceSummary">
+                <div class="confluence-meter">
+                    <span class="confluence-count">0/9</span>
+                    <span class="confluence-label">Signals Firing</span>
+                </div>
+                <div class="confluence-verdict">Checking signals...</div>
+            </div>
+            
+            <!-- Signal Checklist -->
+            <div class="btc-signals-grid" id="btcSignalsGrid">
+                <p class="empty-state">Loading signals...</p>
+            </div>
+            
+            <!-- BTC Session Windows -->
+            <div class="btc-sessions">
+                <h3>⏰ BTC Trading Sessions (ET)</h3>
+                <div class="btc-session-current" id="btcSessionCurrent">
+                    <span class="session-status">Checking...</span>
+                </div>
+                <div class="btc-session-list" id="btcSessionList">
+                    <!-- Sessions will be populated by JS -->
                 </div>
             </div>
         </section>
@@ -181,6 +240,6 @@
 
     <!-- TradingView Widget Script -->
     <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-    <script src="app.js"></script>
+    <script src="app.js?v=3"></script>
 </body>
 </html>

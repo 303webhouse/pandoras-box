@@ -1258,3 +1258,612 @@ body {
         font-size: 13px;
     }
 }
+
+/* ==========================================
+   CTA SCANNER SECTION
+   ========================================== */
+
+.cta-section {
+    background: var(--card-bg);
+    border: 2px solid var(--border-color);
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 20px;
+}
+
+.cta-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.cta-header h2 {
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: var(--accent-teal);
+}
+
+.cta-controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.cta-btn {
+    background: var(--accent-teal);
+    color: var(--dark-bg);
+    border: none;
+    padding: 8px 16px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.cta-btn:hover {
+    transform: scale(1.05);
+    box-shadow: 0 4px 12px rgba(20, 184, 166, 0.3);
+}
+
+.cta-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.cta-info {
+    font-size: 12px;
+    color: var(--text-secondary);
+    font-style: italic;
+    margin-bottom: 16px;
+}
+
+/* CTA Zone Dashboard */
+.cta-zones-dashboard {
+    background: var(--dark-bg);
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 16px;
+}
+
+.cta-zones-dashboard h3 {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 10px;
+}
+
+.cta-zone-cards {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.cta-zone-card {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--card-bg);
+    border-radius: 6px;
+    padding: 8px 14px;
+    border-left: 3px solid var(--border-color);
+    transition: all 0.2s;
+}
+
+.cta-zone-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.zone-ticker {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--accent-teal);
+}
+
+.zone-status {
+    font-size: 11px;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.zone-status.loading {
+    background: var(--border-color);
+    color: var(--text-secondary);
+}
+
+.zone-status.MAX_LONG {
+    background: var(--accent-lime);
+    color: var(--dark-bg);
+}
+
+.zone-status.DE_LEVERAGING {
+    background: #FBBF24;
+    color: var(--dark-bg);
+}
+
+.zone-status.WATERFALL {
+    background: #F97316;
+    color: var(--dark-bg);
+}
+
+.zone-status.CAPITULATION {
+    background: var(--accent-orange);
+    color: var(--dark-bg);
+}
+
+.cta-zone-card.MAX_LONG {
+    border-left-color: var(--accent-lime);
+}
+
+.cta-zone-card.DE_LEVERAGING {
+    border-left-color: #FBBF24;
+}
+
+.cta-zone-card.WATERFALL {
+    border-left-color: #F97316;
+}
+
+.cta-zone-card.CAPITULATION {
+    border-left-color: var(--accent-orange);
+}
+
+/* CTA Signal Results */
+.cta-results {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+}
+
+.cta-column {
+    background: var(--dark-bg);
+    border-radius: 8px;
+    padding: 12px;
+}
+
+.golden-column {
+    border-left: 3px solid #FFD700;
+}
+
+.twoclose-column {
+    border-left: 3px solid var(--accent-lime);
+}
+
+.pullback-column {
+    border-left: 3px solid var(--accent-teal);
+}
+
+.cta-column-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.cta-column-header h3 {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+}
+
+.golden-column h3 {
+    color: #FFD700;
+}
+
+.twoclose-column h3 {
+    color: var(--accent-lime);
+}
+
+.pullback-column h3 {
+    color: var(--accent-teal);
+}
+
+.cta-signals {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 250px;
+    overflow-y: auto;
+}
+
+/* CTA Signal Card */
+.cta-card {
+    background: var(--card-bg);
+    border-radius: 6px;
+    padding: 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.cta-card:hover {
+    transform: translateX(4px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.cta-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.cta-ticker {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--accent-teal);
+}
+
+.cta-ticker:hover {
+    color: var(--accent-lime);
+    text-decoration: underline;
+}
+
+.cta-score {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 3px;
+    background: var(--accent-teal);
+    color: var(--dark-bg);
+}
+
+.cta-card-body {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+    font-size: 11px;
+    margin-bottom: 6px;
+}
+
+.cta-metric {
+    text-align: center;
+}
+
+.cta-metric-label {
+    color: var(--text-secondary);
+    font-size: 9px;
+    text-transform: uppercase;
+}
+
+.cta-metric-value {
+    font-weight: 700;
+    margin-top: 2px;
+}
+
+.cta-card-footer {
+    font-size: 10px;
+    color: var(--text-secondary);
+    padding-top: 6px;
+    border-top: 1px solid var(--border-color);
+}
+
+/* ==========================================
+   BTC BOTTOM SIGNALS SECTION
+   ========================================== */
+
+.btc-signals-section {
+    background: var(--card-bg);
+    border: 2px solid #F7931A;
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 20px;
+}
+
+.btc-signals-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.btc-signals-header h2 {
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: #F7931A;
+}
+
+.btc-signals-controls {
+    display: flex;
+    gap: 8px;
+}
+
+.btc-btn {
+    background: #F7931A;
+    color: var(--dark-bg);
+    border: none;
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btc-btn:hover {
+    transform: scale(1.05);
+    box-shadow: 0 4px 12px rgba(247, 147, 26, 0.3);
+}
+
+.btc-btn.secondary {
+    background: var(--border-color);
+    color: var(--text-secondary);
+}
+
+.btc-btn.secondary:hover {
+    background: #475569;
+    color: var(--text-primary);
+}
+
+.btc-info {
+    font-size: 12px;
+    color: var(--text-secondary);
+    font-style: italic;
+    margin-bottom: 16px;
+}
+
+/* Confluence Summary */
+.btc-confluence-summary {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: var(--dark-bg);
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 16px;
+}
+
+.confluence-meter {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.confluence-count {
+    font-size: 28px;
+    font-weight: 900;
+    color: #F7931A;
+}
+
+.confluence-label {
+    font-size: 11px;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.confluence-verdict {
+    font-size: 14px;
+    font-weight: 700;
+    text-align: right;
+    max-width: 60%;
+    line-height: 1.4;
+}
+
+.confluence-verdict.strong {
+    color: var(--accent-lime);
+}
+
+.confluence-verdict.moderate {
+    color: #FBBF24;
+}
+
+.confluence-verdict.weak {
+    color: var(--accent-orange);
+}
+
+.confluence-verdict.none {
+    color: var(--text-secondary);
+}
+
+/* Signal Checklist Grid */
+.btc-signals-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 12px;
+    margin-bottom: 20px;
+}
+
+.btc-signal-card {
+    background: var(--dark-bg);
+    border-radius: 8px;
+    padding: 14px;
+    border-left: 4px solid var(--border-color);
+    transition: all 0.2s;
+    cursor: pointer;
+}
+
+.btc-signal-card:hover {
+    transform: translateX(4px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.btc-signal-card.FIRING {
+    border-left-color: var(--accent-lime);
+    background: rgba(124, 255, 107, 0.05);
+}
+
+.btc-signal-card.NEUTRAL {
+    border-left-color: var(--border-color);
+}
+
+.btc-signal-card.UNKNOWN {
+    border-left-color: var(--text-secondary);
+    opacity: 0.7;
+}
+
+.btc-signal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 8px;
+}
+
+.btc-signal-name {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.btc-signal-status {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 4px;
+    text-transform: uppercase;
+}
+
+.btc-signal-status.FIRING {
+    background: var(--accent-lime);
+    color: var(--dark-bg);
+}
+
+.btc-signal-status.NEUTRAL {
+    background: var(--border-color);
+    color: var(--text-secondary);
+}
+
+.btc-signal-status.UNKNOWN {
+    background: var(--text-secondary);
+    color: var(--dark-bg);
+}
+
+.btc-signal-status.MANUAL {
+    background: #60A5FA;
+    color: var(--dark-bg);
+}
+
+.btc-signal-description {
+    font-size: 11px;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+    line-height: 1.4;
+}
+
+.btc-signal-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 10px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border-color);
+}
+
+.btc-signal-threshold {
+    color: var(--text-secondary);
+}
+
+.btc-signal-value {
+    font-weight: 700;
+    color: var(--accent-teal);
+}
+
+.btc-signal-source {
+    font-size: 9px;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* BTC Session Windows */
+.btc-sessions {
+    background: var(--dark-bg);
+    border-radius: 8px;
+    padding: 14px;
+}
+
+.btc-sessions h3 {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 12px;
+}
+
+.btc-session-current {
+    background: var(--card-bg);
+    border-radius: 6px;
+    padding: 10px 14px;
+    margin-bottom: 12px;
+    border-left: 3px solid var(--border-color);
+}
+
+.btc-session-current.active {
+    border-left-color: #F7931A;
+    background: rgba(247, 147, 26, 0.1);
+}
+
+.btc-session-current .session-status {
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.btc-session-current.active .session-status {
+    color: #F7931A;
+}
+
+.btc-session-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 8px;
+}
+
+.btc-session-item {
+    background: var(--card-bg);
+    border-radius: 6px;
+    padding: 10px;
+    font-size: 11px;
+}
+
+.btc-session-item .session-name {
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 4px;
+}
+
+.btc-session-item .session-time {
+    color: #F7931A;
+    font-weight: 600;
+}
+
+.btc-session-item .session-note {
+    color: var(--text-secondary);
+    font-size: 10px;
+    margin-top: 4px;
+}
+
+/* Responsive for new sections */
+@media (max-width: 1200px) {
+    .cta-results {
+        grid-template-columns: 1fr;
+    }
+    
+    .btc-signals-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 768px) {
+    .btc-confluence-summary {
+        flex-direction: column;
+        gap: 12px;
+        text-align: center;
+    }
+    
+    .confluence-verdict {
+        max-width: 100%;
+        text-align: center;
+    }
+}
