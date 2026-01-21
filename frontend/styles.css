@@ -1844,6 +1844,275 @@ body {
     margin-top: 4px;
 }
 
+/* ==========================================
+   OPTIONS FLOW SECTION (Unusual Whales)
+   ========================================== */
+
+.flow-section {
+    background: var(--card-bg);
+    border: 2px solid #8B5CF6;
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 20px;
+}
+
+.flow-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.flow-header h2 {
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: #8B5CF6;
+}
+
+.flow-controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.flow-btn {
+    background: #8B5CF6;
+    color: white;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.flow-btn:hover {
+    transform: scale(1.05);
+    box-shadow: 0 4px 12px rgba(139, 92, 246, 0.3);
+}
+
+.flow-btn.add {
+    background: var(--accent-teal);
+}
+
+.flow-status {
+    font-size: 11px;
+    color: var(--text-secondary);
+    padding: 4px 8px;
+    background: var(--dark-bg);
+    border-radius: 4px;
+}
+
+.flow-status.connected {
+    color: var(--accent-lime);
+}
+
+.flow-info {
+    font-size: 12px;
+    color: var(--text-secondary);
+    font-style: italic;
+    margin-bottom: 16px;
+}
+
+/* Hot Tickers */
+.flow-hot-tickers {
+    background: var(--dark-bg);
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 12px;
+}
+
+.flow-hot-tickers h3,
+.flow-recent h3,
+.flow-manual-entry h3 {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 10px;
+}
+
+.flow-hot-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.flow-hot-card {
+    background: var(--card-bg);
+    border-radius: 6px;
+    padding: 10px 14px;
+    border-left: 3px solid var(--border-color);
+    cursor: pointer;
+    transition: all 0.2s;
+    min-width: 120px;
+}
+
+.flow-hot-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.flow-hot-card.BULLISH {
+    border-left-color: var(--accent-lime);
+}
+
+.flow-hot-card.BEARISH {
+    border-left-color: var(--accent-orange);
+}
+
+.flow-hot-ticker {
+    font-size: 14px;
+    font-weight: 700;
+    color: #8B5CF6;
+}
+
+.flow-hot-sentiment {
+    font-size: 10px;
+    font-weight: 700;
+    margin-top: 4px;
+}
+
+.flow-hot-sentiment.BULLISH {
+    color: var(--accent-lime);
+}
+
+.flow-hot-sentiment.BEARISH {
+    color: var(--accent-orange);
+}
+
+.flow-hot-premium {
+    font-size: 11px;
+    color: var(--text-secondary);
+    margin-top: 2px;
+}
+
+/* Recent Alerts */
+.flow-recent {
+    background: var(--dark-bg);
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 12px;
+}
+
+.flow-alerts-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.flow-alert-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: var(--card-bg);
+    border-radius: 6px;
+    padding: 10px 12px;
+    font-size: 12px;
+}
+
+.flow-alert-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.flow-alert-ticker {
+    font-weight: 700;
+    color: #8B5CF6;
+    min-width: 50px;
+}
+
+.flow-alert-type {
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    background: var(--border-color);
+    color: var(--text-secondary);
+    text-transform: uppercase;
+}
+
+.flow-alert-type.SWEEP {
+    background: rgba(139, 92, 246, 0.2);
+    color: #8B5CF6;
+}
+
+.flow-alert-type.BLOCK {
+    background: rgba(20, 184, 166, 0.2);
+    color: var(--accent-teal);
+}
+
+.flow-alert-sentiment {
+    font-weight: 700;
+}
+
+.flow-alert-sentiment.BULLISH {
+    color: var(--accent-lime);
+}
+
+.flow-alert-sentiment.BEARISH {
+    color: var(--accent-orange);
+}
+
+.flow-alert-right {
+    text-align: right;
+}
+
+.flow-alert-premium {
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.flow-alert-time {
+    font-size: 10px;
+    color: var(--text-secondary);
+    margin-top: 2px;
+}
+
+/* Manual Entry Form */
+.flow-manual-entry {
+    background: var(--dark-bg);
+    border-radius: 8px;
+    padding: 12px;
+}
+
+.flow-manual-form {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.flow-input {
+    background: var(--card-bg);
+    border: 2px solid var(--border-color);
+    color: var(--text-primary);
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.flow-input:focus {
+    outline: none;
+    border-color: #8B5CF6;
+}
+
+.flow-input.ticker {
+    width: 80px;
+    text-transform: uppercase;
+}
+
+.flow-input select {
+    cursor: pointer;
+}
+
 /* Responsive for new sections */
 @media (max-width: 1200px) {
     .cta-results {
@@ -1852,6 +2121,14 @@ body {
     
     .btc-signals-grid {
         grid-template-columns: 1fr;
+    }
+    
+    .flow-manual-form {
+        flex-direction: column;
+    }
+    
+    .flow-input {
+        width: 100%;
     }
 }
 
