@@ -177,8 +177,17 @@ function initWebSocket() {
     };
     
     ws.onmessage = (event) => {
-        const message = JSON.parse(event.data);
-        handleWebSocketMessage(message);
+        // Handle heartbeat pong response
+        if (event.data === 'pong') {
+            return;
+        }
+        
+        try {
+            const message = JSON.parse(event.data);
+            handleWebSocketMessage(message);
+        } catch (e) {
+            console.warn('⚠️ Non-JSON message received:', event.data);
+        }
     };
     
     ws.onerror = (error) => {
@@ -406,10 +415,23 @@ async function loadOpenPositions() {
 function renderSignals() {
     const container = document.getElementById('tradeSignals');
     
+    // Top 20 crypto by market cap (+ common variations)
+    const SUPPORTED_CRYPTO = [
+        // Base tickers
+        'BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'XRP', 'USDC', 'ADA', 'AVAX', 'DOGE',
+        'DOT', 'TRX', 'LINK', 'MATIC', 'POL', 'SHIB', 'TON', 'LTC', 'BCH', 'XLM', 'UNI',
+        // TradingView USD pairs
+        'BTCUSD', 'ETHUSD', 'SOLUSD', 'XRPUSD', 'ADAUSD', 'AVAXUSD', 'DOGEUSD',
+        'DOTUSD', 'LINKUSD', 'MATICUSD', 'LTCUSD', 'BCHUSD', 'XLMUSD', 'UNIUSD',
+        // TradingView USDT pairs
+        'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT', 'ADAUSDT', 'AVAXUSDT', 'DOGEUSDT',
+        'DOTUSDT', 'LINKUSDT', 'MATICUSDT', 'LTCUSDT', 'BCHUSDT', 'XLMUSDT', 'UNIUSDT'
+    ];
+    
     // Get signals based on active asset type
     const activeSignals = activeAssetType === 'equity' 
         ? signals.equity 
-        : signals.crypto.filter(s => ['BTC', 'ETH', 'SOL'].includes(s.ticker));
+        : signals.crypto.filter(s => SUPPORTED_CRYPTO.includes(s.ticker.toUpperCase()));
     
     // Limit to top 10
     const topSignals = activeSignals.slice(0, 10);

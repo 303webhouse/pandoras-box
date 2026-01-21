@@ -27,6 +27,28 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# Top 20 crypto by market cap (+ common variations for TradingView)
+CRYPTO_TICKERS = {
+    # Base tickers
+    'BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'XRP', 'USDC', 'ADA', 'AVAX', 'DOGE',
+    'DOT', 'TRX', 'LINK', 'MATIC', 'POL', 'SHIB', 'TON', 'LTC', 'BCH', 'XLM', 'UNI',
+    # TradingView USD pairs
+    'BTCUSD', 'ETHUSD', 'SOLUSD', 'XRPUSD', 'ADAUSD', 'AVAXUSD', 'DOGEUSD',
+    'DOTUSD', 'LINKUSD', 'MATICUSD', 'LTCUSD', 'BCHUSD', 'XLMUSD', 'UNIUSD',
+    'BNBUSD', 'TRXUSD', 'SHIBUSD', 'TONUSD',
+    # TradingView USDT pairs  
+    'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT', 'ADAUSDT', 'AVAXUSDT', 'DOGEUSDT',
+    'DOTUSDT', 'LINKUSDT', 'MATICUSDT', 'LTCUSDT', 'BCHUSDT', 'XLMUSDT', 'UNIUSDT',
+    'BNBUSDT', 'TRXUSDT', 'SHIBUSDT', 'TONUSDT',
+    # Binance/Bybit perpetuals
+    'BTCUSDTPERP', 'ETHUSDTPERP', 'BTCPERP', 'ETHPERP'
+}
+
+
+def is_crypto_ticker(ticker: str) -> bool:
+    """Check if a ticker is a cryptocurrency"""
+    return ticker.upper() in CRYPTO_TICKERS
+
 
 class TradingViewAlert(BaseModel):
     """Flexible payload from TradingView webhook - supports multiple strategies"""
@@ -107,7 +129,7 @@ async def process_exhaustion_signal(alert: TradingViewAlert, start_time: datetim
         "risk_reward": risk_reward,
         "timeframe": alert.timeframe,
         "trade_type": "REVERSAL",
-        "asset_class": "CRYPTO" if alert.ticker.upper() in ["BTC", "ETH", "SOL", "BTCUSD", "ETHUSD"] else "EQUITY",
+        "asset_class": "CRYPTO" if is_crypto_ticker(alert.ticker) else "EQUITY",
         "status": "ACTIVE",
         "score": 50  # Base score
     }
@@ -167,7 +189,7 @@ async def process_sniper_signal(alert: TradingViewAlert, start_time: datetime):
         "risk_reward": risk_reward,
         "timeframe": alert.timeframe,
         "trade_type": "CONTINUATION",
-        "asset_class": "CRYPTO" if alert.ticker.upper() in ["BTC", "ETH", "SOL", "BTCUSD", "ETHUSD"] else "EQUITY",
+        "asset_class": "CRYPTO" if is_crypto_ticker(alert.ticker) else "EQUITY",
         "status": "ACTIVE",
         "score": 70
     }
@@ -236,7 +258,7 @@ async def process_triple_line_signal(alert: TradingViewAlert, start_time: dateti
         "bias_aligned": bias_aligned,
         "adx": alert.adx,
         "line_separation": alert.line_separation,
-        "asset_class": "EQUITY" if alert.ticker not in ["BTC", "ETH", "SOL"] else "CRYPTO",
+        "asset_class": "CRYPTO" if is_crypto_ticker(alert.ticker) else "EQUITY",
         "status": "ACTIVE",
         "score": 75 if bias_aligned else 50
     }
@@ -283,7 +305,7 @@ async def process_generic_signal(alert: TradingViewAlert, start_time: datetime):
         "target_2": alert.target_2,
         "risk_reward": risk_reward,
         "timeframe": alert.timeframe,
-        "asset_class": "CRYPTO" if alert.ticker.upper() in ["BTC", "ETH", "SOL", "BTCUSD", "ETHUSD"] else "EQUITY",
+        "asset_class": "CRYPTO" if is_crypto_ticker(alert.ticker) else "EQUITY",
         "status": "ACTIVE",
         "score": 50
     }
