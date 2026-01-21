@@ -1716,3 +1716,189 @@ function renderBtcSessions(data) {
         `;
     }).join('');
 }
+
+
+// ==========================================
+// OPTIONS FLOW (Unusual Whales)
+// ==========================================
+
+let flowHotTickers = [];
+let flowRecentAlerts = [];
+
+function initOptionsFlow() {
+    const refreshBtn = document.getElementById('refreshFlowBtn');
+    const addBtn = document.getElementById('addFlowBtn');
+    
+    if (refreshBtn) {
+        refreshBtn.addEventListener('click', loadFlowData);
+    }
+    
+    if (addBtn) {
+        addBtn.addEventListener('click', addManualFlow);
+    }
+    
+    // Check connection status and load data
+    checkFlowStatus();
+    loadFlowData();
+}
+
+async function checkFlowStatus() {
+    const statusEl = document.getElementById('flowStatus');
+    if (!statusEl) return;
+    
+    try {
+        const response = await fetch(`${API_URL}/flow/status`);
+        const data = await response.json();
+        
+        if (data.configured) {
+            statusEl.textContent = 'Connected';
+            statusEl.classList.add('connected');
+        } else {
+            statusEl.textContent = 'Manual Mode';
+            statusEl.classList.remove('connected');
+        }
+    } catch (error) {
+        statusEl.textContent = 'Offline';
+        statusEl.classList.remove('connected');
+    }
+}
+
+async function loadFlowData() {
+    await Promise.all([
+        loadHotTickers(),
+        loadRecentAlerts()
+    ]);
+}
+
+async function loadHotTickers() {
+    try {
+        const response = await fetch(`${API_URL}/flow/hot`);
+        const data = await response.json();
+        
+        flowHotTickers = data.tickers || [];
+        renderHotTickers();
+    } catch (error) {
+        console.error('Error loading hot tickers:', error);
+    }
+}
+
+function renderHotTickers() {
+    const container = document.getElementById('flowHotList');
+    if (!container) return;
+    
+    if (flowHotTickers.length === 0) {
+        container.innerHTML = '<p class="empty-state">No flow data yet - add manually or connect Unusual Whales</p>';
+        return;
+    }
+    
+    container.innerHTML = flowHotTickers.map(ticker => `
+        <div class="flow-hot-card ${ticker.sentiment}" data-ticker="${ticker.ticker}">
+            <div class="flow-hot-ticker">${ticker.ticker}</div>
+            <div class="flow-hot-sentiment ${ticker.sentiment}">${ticker.sentiment}</div>
+            <div class="flow-hot-premium">$${(ticker.total_premium / 1000).toFixed(0)}K</div>
+        </div>
+    `).join('');
+    
+    // Click to view on chart
+    container.querySelectorAll('.flow-hot-card').forEach(card => {
+        card.addEventListener('click', () => {
+            changeChartSymbol(card.dataset.ticker);
+        });
+    });
+}
+
+async function loadRecentAlerts() {
+    try {
+        const response = await fetch(`${API_URL}/flow/recent?limit=10`);
+        const data = await response.json();
+        
+        flowRecentAlerts = data.alerts || [];
+        renderRecentAlerts();
+    } catch (error) {
+        console.error('Error loading recent alerts:', error);
+    }
+}
+
+function renderRecentAlerts() {
+    const container = document.getElementById('flowAlertsList');
+    if (!container) return;
+    
+    if (flowRecentAlerts.length === 0) {
+        container.innerHTML = '<p class="empty-state">No recent alerts</p>';
+        return;
+    }
+    
+    container.innerHTML = flowRecentAlerts.map(alert => {
+        const time = new Date(alert.received_at || alert.timestamp).toLocaleTimeString();
+        const premium = alert.premium ? `$${(alert.premium / 1000).toFixed(0)}K` : '-';
+        
+        return `
+            <div class="flow-alert-item">
+                <div class="flow-alert-left">
+                    <span class="flow-alert-ticker">${alert.ticker}</span>
+                    <span class="flow-alert-type ${alert.type}">${alert.type}</span>
+                    <span class="flow-alert-sentiment ${alert.sentiment}">${alert.sentiment}</span>
+                </div>
+                <div class="flow-alert-right">
+                    <div class="flow-alert-premium">${premium}</div>
+                    <div class="flow-alert-time">${time}</div>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+async function addManualFlow() {
+    const tickerInput = document.getElementById('flowTickerInput');
+    const sentimentSelect = document.getElementById('flowSentimentSelect');
+    const typeSelect = document.getElementById('flowTypeSelect');
+    
+    const ticker = tickerInput.value.trim().toUpperCase();
+    const sentiment = sentimentSelect.value;
+    const flowType = typeSelect.value;
+    
+    if (!ticker) {
+        alert('Please enter a ticker');
+        return;
+    }
+    
+    try {
+        const response = await fetch(`${API_URL}/flow/manual`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                ticker,
+                sentiment,
+                flow_type: flowType,
+                premium: 100000
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            tickerInput.value = '';
+            loadFlowData();
+            console.log(`🐋 Added manual flow: ${ticker} ${sentiment}`);
+        }
+    } catch (error) {
+        console.error('Error adding manual flow:', error);
+    }
+}
+
+// Check flow confirmation for a signal
+async function checkFlowConfirmation(ticker, direction) {
+    try {
+        const response = await fetch(`${API_URL}/flow/confirm/${ticker}?direction=${direction}`);
+        const data = await response.json();
+        return data;
+    } catch (error) {
+        console.error('Error checking flow confirmation:', error);
+        return null;
+    }
+}
+
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', () => {
+    setTimeout(initOptionsFlow, 1100);
+});

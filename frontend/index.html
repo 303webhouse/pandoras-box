@@ -214,6 +214,53 @@
             </div>
         </section>
 
+        <!-- Options Flow (Unusual Whales) -->
+        <section class="flow-section">
+            <div class="flow-header">
+                <h2>🐋 OPTIONS FLOW</h2>
+                <div class="flow-controls">
+                    <button class="flow-btn" id="refreshFlowBtn">↻ Refresh</button>
+                    <span class="flow-status" id="flowStatus">Not Connected</span>
+                </div>
+            </div>
+            <p class="flow-info">Unusual Whales integration • Manual entry available • Auto-confirms CTA signals</p>
+            
+            <!-- Hot Tickers -->
+            <div class="flow-hot-tickers">
+                <h3>🔥 Hot Flow</h3>
+                <div class="flow-hot-list" id="flowHotList">
+                    <p class="empty-state">No flow data yet</p>
+                </div>
+            </div>
+            
+            <!-- Recent Alerts -->
+            <div class="flow-recent">
+                <h3>📊 Recent Alerts</h3>
+                <div class="flow-alerts-list" id="flowAlertsList">
+                    <p class="empty-state">No recent alerts</p>
+                </div>
+            </div>
+            
+            <!-- Manual Entry -->
+            <div class="flow-manual-entry">
+                <h3>➕ Add Manual Flow</h3>
+                <div class="flow-manual-form">
+                    <input type="text" id="flowTickerInput" placeholder="TICKER" class="flow-input ticker">
+                    <select id="flowSentimentSelect" class="flow-input">
+                        <option value="BULLISH">🟢 Bullish</option>
+                        <option value="BEARISH">🔴 Bearish</option>
+                    </select>
+                    <select id="flowTypeSelect" class="flow-input">
+                        <option value="SWEEP">Sweep</option>
+                        <option value="BLOCK">Block</option>
+                        <option value="UNUSUAL_VOLUME">Unusual Vol</option>
+                        <option value="DARK_POOL">Dark Pool</option>
+                    </select>
+                    <button class="flow-btn add" id="addFlowBtn">Add</button>
+                </div>
+            </div>
+        </section>
+
         <!-- Strategy Controls -->
         <section class="strategies-section">
             <div class="strategies-header">
@@ -240,6 +287,6 @@
 
     <!-- TradingView Widget Script -->
     <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-    <script src="app.js?v=3"></script>
+    <script src="app.js?v=4"></script>
 </body>
 </html>
