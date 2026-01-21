@@ -1336,4 +1336,383 @@ async function disableAllStrategies() {
 // Initialize strategies on page load
 document.addEventListener('DOMContentLoaded', () => {
     setTimeout(initStrategies, 800);
+    setTimeout(initCtaScanner, 900);
+    setTimeout(initBtcSignals, 1000);
 });
+
+
+// ==========================================
+// CTA SCANNER (Equity Swing Trading)
+// ==========================================
+
+let ctaResults = {
+    goldenTouch: [],
+    twoClose: [],
+    pullback: [],
+    zoneUpgrade: []
+};
+
+let ctaZones = {};
+
+function initCtaScanner() {
+    const runCtaScanBtn = document.getElementById('runCtaScanBtn');
+    if (runCtaScanBtn) {
+        runCtaScanBtn.addEventListener('click', runCtaScan);
+    }
+    
+    // Load CTA zone data for watchlist tickers
+    loadCtaZones();
+}
+
+async function loadCtaZones() {
+    const watchlistTickers = ['SPY', 'QQQ', 'AAPL', 'MSFT', 'NVDA'];
+    const zoneCardsContainer = document.getElementById('ctaZoneCards');
+    
+    if (!zoneCardsContainer) return;
+    
+    for (const ticker of watchlistTickers) {
+        try {
+            const response = await fetch(`${API_URL}/cta/analyze/${ticker}`);
+            const data = await response.json();
+            
+            if (data.cta_analysis) {
+                ctaZones[ticker] = data.cta_analysis;
+            }
+        } catch (error) {
+            console.error(`Error loading CTA zone for ${ticker}:`, error);
+        }
+    }
+    
+    renderCtaZones();
+}
+
+function renderCtaZones() {
+    const container = document.getElementById('ctaZoneCards');
+    if (!container) return;
+    
+    const tickers = Object.keys(ctaZones);
+    
+    if (tickers.length === 0) {
+        container.innerHTML = `
+            <div class="cta-zone-card">
+                <span class="zone-ticker">SPY</span>
+                <span class="zone-status loading">Loading...</span>
+            </div>
+        `;
+        return;
+    }
+    
+    container.innerHTML = tickers.map(ticker => {
+        const zone = ctaZones[ticker];
+        const zoneStatus = zone.cta_zone || 'UNKNOWN';
+        
+        return `
+            <div class="cta-zone-card ${zoneStatus}" data-ticker="${ticker}">
+                <span class="zone-ticker">${ticker}</span>
+                <span class="zone-status ${zoneStatus}">${zoneStatus.replace('_', ' ')}</span>
+            </div>
+        `;
+    }).join('');
+    
+    // Attach click events to view on chart
+    container.querySelectorAll('.cta-zone-card').forEach(card => {
+        card.addEventListener('click', () => {
+            const ticker = card.dataset.ticker;
+            changeChartSymbol(ticker);
+        });
+    });
+}
+
+async function runCtaScan() {
+    const btn = document.getElementById('runCtaScanBtn');
+    const status = document.getElementById('ctaScanStatus');
+    
+    btn.disabled = true;
+    btn.textContent = 'Scanning...';
+    status.textContent = 'Scanning watchlist + S&P 500...';
+    status.classList.add('scanning');
+    
+    try {
+        const response = await fetch(`${API_URL}/cta/scan?include_watchlist=true`);
+        const data = await response.json();
+        
+        if (data.error) {
+            throw new Error(data.error);
+        }
+        
+        // Store results by signal type
+        ctaResults.goldenTouch = data.golden_touch_signals || [];
+        ctaResults.twoClose = data.two_close_signals || [];
+        ctaResults.pullback = data.pullback_signals || [];
+        ctaResults.zoneUpgrade = data.zone_upgrade_signals || [];
+        
+        renderCtaResults();
+        
+        status.textContent = `Found ${data.total_signals} signals`;
+        status.classList.remove('scanning');
+        
+    } catch (error) {
+        console.error('CTA scan error:', error);
+        status.textContent = 'Scan failed';
+        status.classList.remove('scanning');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Run Scan';
+    }
+}
+
+function renderCtaResults() {
+    renderCtaColumn('goldenSignals', 'goldenCount', ctaResults.goldenTouch, 'Rare: 120 SMA first touch');
+    renderCtaColumn('twoCloseSignals', 'twoCloseCount', ctaResults.twoClose, 'No confirmed breakouts');
+    renderCtaColumn('pullbackSignals', 'pullbackCount', ctaResults.pullback, 'No pullbacks to 20 SMA');
+}
+
+function renderCtaColumn(containerId, countId, signals, emptyMessage) {
+    const container = document.getElementById(containerId);
+    const countEl = document.getElementById(countId);
+    
+    if (!container) return;
+    
+    countEl.textContent = signals.length;
+    
+    if (signals.length === 0) {
+        container.innerHTML = `<p class="empty-state">${emptyMessage}</p>`;
+        return;
+    }
+    
+    container.innerHTML = signals.slice(0, 5).map(signal => createCtaCard(signal)).join('');
+    
+    // Attach click events
+    container.querySelectorAll('.cta-ticker').forEach(ticker => {
+        ticker.addEventListener('click', (e) => {
+            e.stopPropagation();
+            changeChartSymbol(e.target.dataset.symbol);
+        });
+    });
+}
+
+function createCtaCard(signal) {
+    const setup = signal.setup || {};
+    const context = signal.context || {};
+    
+    return `
+        <div class="cta-card" data-symbol="${signal.symbol}">
+            <div class="cta-card-header">
+                <span class="cta-ticker" data-symbol="${signal.symbol}">${signal.symbol}</span>
+                <span class="cta-score">${signal.priority}</span>
+            </div>
+            <div class="cta-card-body">
+                <div class="cta-metric">
+                    <div class="cta-metric-label">Entry</div>
+                    <div class="cta-metric-value">$${setup.entry?.toFixed(2) || '-'}</div>
+                </div>
+                <div class="cta-metric">
+                    <div class="cta-metric-label">Stop</div>
+                    <div class="cta-metric-value">$${setup.stop?.toFixed(2) || '-'}</div>
+                </div>
+                <div class="cta-metric">
+                    <div class="cta-metric-label">R:R</div>
+                    <div class="cta-metric-value">${setup.rr_ratio || '-'}:1</div>
+                </div>
+            </div>
+            <div class="cta-card-footer">
+                Zone: ${context.cta_zone || 'Unknown'} • Vol: ${context.volume_ratio?.toFixed(1) || '-'}x
+            </div>
+        </div>
+    `;
+}
+
+
+// ==========================================
+// BTC BOTTOM SIGNALS DASHBOARD
+// ==========================================
+
+let btcSignals = {};
+let btcSummary = {};
+
+function initBtcSignals() {
+    const refreshBtn = document.getElementById('refreshBtcSignalsBtn');
+    const resetBtn = document.getElementById('resetBtcSignalsBtn');
+    
+    if (refreshBtn) {
+        refreshBtn.addEventListener('click', loadBtcSignals);
+    }
+    
+    if (resetBtn) {
+        resetBtn.addEventListener('click', resetBtcSignals);
+    }
+    
+    // Initial load
+    loadBtcSignals();
+    loadBtcSessions();
+}
+
+async function loadBtcSignals() {
+    try {
+        const response = await fetch(`${API_URL}/btc/bottom-signals`);
+        const data = await response.json();
+        
+        btcSignals = data.signals || {};
+        btcSummary = data.summary || {};
+        
+        renderBtcSignals();
+        renderBtcSummary();
+        
+    } catch (error) {
+        console.error('Error loading BTC signals:', error);
+        document.getElementById('btcSignalsGrid').innerHTML = 
+            '<p class="empty-state">Failed to load signals</p>';
+    }
+}
+
+function renderBtcSummary() {
+    const container = document.getElementById('btcConfluenceSummary');
+    if (!container) return;
+    
+    const firingCount = btcSummary.firing_count || 0;
+    const totalSignals = btcSummary.total_signals || 9;
+    const verdict = btcSummary.verdict || 'Checking signals...';
+    
+    // Determine verdict class
+    let verdictClass = 'none';
+    if (firingCount >= 6) verdictClass = 'strong';
+    else if (firingCount >= 4) verdictClass = 'moderate';
+    else if (firingCount >= 2) verdictClass = 'weak';
+    
+    container.innerHTML = `
+        <div class="confluence-meter">
+            <span class="confluence-count">${firingCount}/${totalSignals}</span>
+            <span class="confluence-label">Signals Firing</span>
+        </div>
+        <div class="confluence-verdict ${verdictClass}">${verdict}</div>
+    `;
+}
+
+function renderBtcSignals() {
+    const container = document.getElementById('btcSignalsGrid');
+    if (!container) return;
+    
+    const signalIds = Object.keys(btcSignals);
+    
+    if (signalIds.length === 0) {
+        container.innerHTML = '<p class="empty-state">No signals configured</p>';
+        return;
+    }
+    
+    container.innerHTML = signalIds.map(id => {
+        const signal = btcSignals[id];
+        const status = signal.status || 'UNKNOWN';
+        
+        return `
+            <div class="btc-signal-card ${status}" data-signal-id="${id}">
+                <div class="btc-signal-header">
+                    <span class="btc-signal-name">${signal.name}</span>
+                    <span class="btc-signal-status ${status}">${status}</span>
+                </div>
+                <div class="btc-signal-description">${signal.description}</div>
+                <div class="btc-signal-meta">
+                    <span class="btc-signal-threshold">Threshold: ${signal.threshold}</span>
+                    ${signal.value !== null ? `<span class="btc-signal-value">${signal.value}</span>` : ''}
+                </div>
+                <div class="btc-signal-source">Source: ${signal.source}</div>
+            </div>
+        `;
+    }).join('');
+    
+    // Attach click events for manual toggle
+    container.querySelectorAll('.btc-signal-card').forEach(card => {
+        card.addEventListener('click', () => {
+            toggleBtcSignal(card.dataset.signalId);
+        });
+    });
+}
+
+async function toggleBtcSignal(signalId) {
+    const currentStatus = btcSignals[signalId]?.status || 'UNKNOWN';
+    
+    // Cycle through: UNKNOWN -> FIRING -> NEUTRAL -> UNKNOWN
+    let newStatus;
+    if (currentStatus === 'UNKNOWN' || currentStatus === 'NEUTRAL') {
+        newStatus = 'FIRING';
+    } else {
+        newStatus = 'NEUTRAL';
+    }
+    
+    try {
+        const response = await fetch(`${API_URL}/btc/bottom-signals/${signalId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: newStatus })
+        });
+        
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            // Reload all signals to update summary
+            loadBtcSignals();
+        }
+    } catch (error) {
+        console.error('Error toggling BTC signal:', error);
+    }
+}
+
+async function resetBtcSignals() {
+    if (!confirm('Reset all manual BTC signals to UNKNOWN?')) return;
+    
+    try {
+        await fetch(`${API_URL}/btc/bottom-signals/reset`, { method: 'POST' });
+        loadBtcSignals();
+    } catch (error) {
+        console.error('Error resetting BTC signals:', error);
+    }
+}
+
+async function loadBtcSessions() {
+    try {
+        const response = await fetch(`${API_URL}/btc/sessions`);
+        const data = await response.json();
+        
+        renderBtcSessions(data);
+        
+    } catch (error) {
+        console.error('Error loading BTC sessions:', error);
+    }
+}
+
+function renderBtcSessions(data) {
+    const currentContainer = document.getElementById('btcSessionCurrent');
+    const listContainer = document.getElementById('btcSessionList');
+    
+    if (!currentContainer || !listContainer) return;
+    
+    // Current session
+    if (data.current_session && data.current_session.active) {
+        currentContainer.classList.add('active');
+        currentContainer.innerHTML = `
+            <span class="session-status">🟢 NOW: ${data.current_session.name}</span>
+            <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">
+                ${data.current_session.trading_note}
+            </div>
+        `;
+    } else {
+        currentContainer.classList.remove('active');
+        currentContainer.innerHTML = `
+            <span class="session-status">No active key session</span>
+        `;
+    }
+    
+    // Session list
+    const sessions = data.sessions || {};
+    const sessionIds = Object.keys(sessions);
+    
+    listContainer.innerHTML = sessionIds.map(id => {
+        const session = sessions[id];
+        return `
+            <div class="btc-session-item">
+                <div class="session-name">${session.name}</div>
+                <div class="session-time">${session.ny_time} ET</div>
+                <div class="session-note">${session.trading_note}</div>
+            </div>
+        `;
+    }).join('');
+}
