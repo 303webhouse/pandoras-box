@@ -9,7 +9,6 @@ import json
 import os
 from datetime import timedelta
 from dotenv import load_dotenv
-import numpy as np
 
 
 def sanitize_for_json(obj):
@@ -18,12 +17,19 @@ def sanitize_for_json(obj):
         return {k: sanitize_for_json(v) for k, v in obj.items()}
     elif isinstance(obj, list):
         return [sanitize_for_json(item) for item in obj]
-    elif isinstance(obj, (np.bool_, np.integer)):
-        return bool(obj) if isinstance(obj, np.bool_) else int(obj)
-    elif isinstance(obj, np.floating):
-        return float(obj)
-    elif isinstance(obj, np.ndarray):
-        return obj.tolist()
+    else:
+        # Check for numpy types by checking module and class name
+        # This avoids import issues while still handling numpy types
+        type_name = type(obj).__module__ + '.' + type(obj).__name__
+        if 'numpy' in type_name:
+            if 'bool' in type_name.lower():
+                return bool(obj)
+            elif 'int' in type_name.lower():
+                return int(obj)
+            elif 'float' in type_name.lower():
+                return float(obj)
+            elif hasattr(obj, 'tolist'):
+                return obj.tolist()
     return obj
 
 # Load environment variables from .env file
