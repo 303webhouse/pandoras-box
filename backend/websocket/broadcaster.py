@@ -7,8 +7,24 @@ from fastapi import WebSocket
 from typing import List, Dict, Any
 import json
 import logging
+import numpy as np
 
 logger = logging.getLogger(__name__)
+
+
+def sanitize_for_json(obj):
+    """Convert numpy types to native Python types for JSON serialization"""
+    if isinstance(obj, dict):
+        return {k: sanitize_for_json(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [sanitize_for_json(item) for item in obj]
+    elif isinstance(obj, (np.bool_, np.integer)):
+        return bool(obj) if isinstance(obj, np.bool_) else int(obj)
+    elif isinstance(obj, np.floating):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    return obj
 
 class ConnectionManager:
     """Manages WebSocket connections and broadcasts signals to all devices"""
@@ -34,7 +50,9 @@ class ConnectionManager:
         Broadcast message to all connected devices
         Critical for multi-device sync (computer + laptop + phone)
         """
-        message_str = json.dumps(message)
+        # Sanitize message to ensure all numpy types are converted
+        sanitized_message = sanitize_for_json(message)
+        message_str = json.dumps(sanitized_message)
         
         # Send to all connections simultaneously
         disconnected = []
