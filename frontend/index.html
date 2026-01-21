@@ -241,22 +241,111 @@
                 </div>
             </div>
             
-            <!-- Manual Entry -->
+            <!-- Manual Entry Button -->
             <div class="flow-manual-entry">
-                <h3>➕ Add Manual Flow</h3>
-                <div class="flow-manual-form">
-                    <input type="text" id="flowTickerInput" placeholder="TICKER" class="flow-input ticker">
-                    <select id="flowSentimentSelect" class="flow-input">
-                        <option value="BULLISH">🟢 Bullish</option>
-                        <option value="BEARISH">🔴 Bearish</option>
-                    </select>
-                    <select id="flowTypeSelect" class="flow-input">
-                        <option value="SWEEP">Sweep</option>
-                        <option value="BLOCK">Block</option>
-                        <option value="UNUSUAL_VOLUME">Unusual Vol</option>
-                        <option value="DARK_POOL">Dark Pool</option>
-                    </select>
-                    <button class="flow-btn add" id="addFlowBtn">Add</button>
+                <button class="flow-btn add full-width" id="openFlowModalBtn">➕ Add Flow Observation</button>
+            </div>
+        </section>
+
+        <!-- Flow Entry Modal -->
+        <div class="modal-overlay" id="flowModalOverlay">
+            <div class="flow-modal">
+                <div class="flow-modal-header">
+                    <h2>🐋 Add Flow Observation</h2>
+                    <button class="modal-close" id="closeFlowModalBtn">✕</button>
+                </div>
+                
+                <!-- Notability Score -->
+                <div class="flow-score-display" id="flowScoreDisplay">
+                    <div class="flow-score-circle" id="flowScoreCircle">
+                        <span class="flow-score-value" id="flowScoreValue">0</span>
+                    </div>
+                    <div class="flow-score-label" id="flowScoreLabel">Fill in details below</div>
+                </div>
+                
+                <div class="flow-modal-body">
+                    <!-- Ticker -->
+                    <div class="flow-field">
+                        <label>Ticker Symbol *</label>
+                        <input type="text" id="modalFlowTicker" placeholder="e.g. NVDA" class="flow-modal-input">
+                    </div>
+                    
+                    <!-- Direction -->
+                    <div class="flow-field">
+                        <label>Direction *</label>
+                        <div class="flow-btn-group">
+                            <button class="flow-option-btn" data-field="sentiment" data-value="BULLISH">🟢 Calls (Bullish)</button>
+                            <button class="flow-option-btn" data-field="sentiment" data-value="BEARISH">🔴 Puts (Bearish)</button>
+                        </div>
+                    </div>
+                    
+                    <!-- Flow Type -->
+                    <div class="flow-field">
+                        <label>Flow Type * <span class="field-hint">(Sweeps = most aggressive)</span></label>
+                        <div class="flow-btn-group">
+                            <button class="flow-option-btn" data-field="type" data-value="SWEEP">🔥 Sweep</button>
+                            <button class="flow-option-btn" data-field="type" data-value="BLOCK">📦 Block</button>
+                            <button class="flow-option-btn" data-field="type" data-value="UNUSUAL_VOLUME">📊 Unusual Vol</button>
+                            <button class="flow-option-btn" data-field="type" data-value="DARK_POOL">🌑 Dark Pool</button>
+                        </div>
+                    </div>
+                    
+                    <!-- Premium -->
+                    <div class="flow-field">
+                        <label>Premium Size * <span class="field-hint">(Total $ of the trade)</span></label>
+                        <div class="flow-btn-group">
+                            <button class="flow-option-btn" data-field="premium" data-value="25000">$25K-$50K</button>
+                            <button class="flow-option-btn" data-field="premium" data-value="75000">$50K-$100K</button>
+                            <button class="flow-option-btn" data-field="premium" data-value="150000">$100K-$250K</button>
+                            <button class="flow-option-btn" data-field="premium" data-value="500000">$250K+</button>
+                        </div>
+                    </div>
+                    
+                    <!-- Expiry -->
+                    <div class="flow-field">
+                        <label>Expiry Timeframe <span class="field-hint">(How soon do contracts expire?)</span></label>
+                        <div class="flow-btn-group">
+                            <button class="flow-option-btn" data-field="expiry" data-value="0dte">0DTE</button>
+                            <button class="flow-option-btn" data-field="expiry" data-value="week">This Week</button>
+                            <button class="flow-option-btn" data-field="expiry" data-value="2-4weeks">2-4 Weeks</button>
+                            <button class="flow-option-btn" data-field="expiry" data-value="monthly">Monthly+</button>
+                            <button class="flow-option-btn" data-field="expiry" data-value="leaps">LEAPS (6mo+)</button>
+                        </div>
+                    </div>
+                    
+                    <!-- Volume vs OI -->
+                    <div class="flow-field">
+                        <label>Volume vs Open Interest <span class="field-hint">(Is volume unusually high?)</span></label>
+                        <div class="flow-btn-group">
+                            <button class="flow-option-btn" data-field="voloi" data-value="low">Vol < OI</button>
+                            <button class="flow-option-btn" data-field="voloi" data-value="normal">Vol ≈ OI</button>
+                            <button class="flow-option-btn" data-field="voloi" data-value="high">Vol > OI</button>
+                            <button class="flow-option-btn" data-field="voloi" data-value="extreme">Vol >> OI (5x+)</button>
+                        </div>
+                    </div>
+                    
+                    <!-- Repeat Activity -->
+                    <div class="flow-field">
+                        <label>Repeat Activity? <span class="field-hint">(Same strike getting hit multiple times?)</span></label>
+                        <div class="flow-btn-group">
+                            <button class="flow-option-btn" data-field="repeat" data-value="no">Single Trade</button>
+                            <button class="flow-option-btn" data-field="repeat" data-value="yes">Multiple Hits</button>
+                        </div>
+                    </div>
+                    
+                    <!-- Notes -->
+                    <div class="flow-field">
+                        <label>Notes (optional)</label>
+                        <input type="text" id="modalFlowNotes" placeholder="e.g. Before earnings, unusual timing..." class="flow-modal-input">
+                    </div>
+                </div>
+                
+                <div class="flow-modal-footer">
+                    <div class="flow-verdict" id="flowVerdict">
+                        <!-- Verdict will appear here -->
+                    </div>
+                    <button class="flow-btn cancel" id="cancelFlowBtn">Cancel</button>
+                    <button class="flow-btn add" id="submitFlowBtn" disabled>Add Flow</button>
                 </div>
             </div>
         </section>
@@ -287,6 +376,6 @@
 
     <!-- TradingView Widget Script -->
     <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-    <script src="app.js?v=4"></script>
+    <script src="app.js?v=5"></script>
 </body>
 </html>

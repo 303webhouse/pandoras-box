@@ -1848,17 +1848,244 @@ function renderRecentAlerts() {
     }).join('');
 }
 
-async function addManualFlow() {
-    const tickerInput = document.getElementById('flowTickerInput');
-    const sentimentSelect = document.getElementById('flowSentimentSelect');
-    const typeSelect = document.getElementById('flowTypeSelect');
+// Flow Entry Modal State
+let flowModalData = {
+    ticker: '',
+    sentiment: null,
+    type: null,
+    premium: null,
+    expiry: null,
+    voloi: null,
+    repeat: null,
+    notes: ''
+};
+
+function initFlowModal() {
+    const openBtn = document.getElementById('openFlowModalBtn');
+    const closeBtn = document.getElementById('closeFlowModalBtn');
+    const cancelBtn = document.getElementById('cancelFlowBtn');
+    const submitBtn = document.getElementById('submitFlowBtn');
+    const overlay = document.getElementById('flowModalOverlay');
     
-    const ticker = tickerInput.value.trim().toUpperCase();
-    const sentiment = sentimentSelect.value;
-    const flowType = typeSelect.value;
+    if (openBtn) {
+        openBtn.addEventListener('click', openFlowModal);
+    }
     
-    if (!ticker) {
-        alert('Please enter a ticker');
+    if (closeBtn) {
+        closeBtn.addEventListener('click', closeFlowModal);
+    }
+    
+    if (cancelBtn) {
+        cancelBtn.addEventListener('click', closeFlowModal);
+    }
+    
+    if (submitBtn) {
+        submitBtn.addEventListener('click', submitFlowFromModal);
+    }
+    
+    if (overlay) {
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) closeFlowModal();
+        });
+    }
+    
+    // Ticker input
+    const tickerInput = document.getElementById('modalFlowTicker');
+    if (tickerInput) {
+        tickerInput.addEventListener('input', (e) => {
+            flowModalData.ticker = e.target.value.toUpperCase();
+            calculateFlowScore();
+        });
+    }
+    
+    // Notes input
+    const notesInput = document.getElementById('modalFlowNotes');
+    if (notesInput) {
+        notesInput.addEventListener('input', (e) => {
+            flowModalData.notes = e.target.value;
+        });
+    }
+    
+    // Option buttons
+    document.querySelectorAll('.flow-option-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const field = btn.dataset.field;
+            const value = btn.dataset.value;
+            
+            // Remove selected from siblings
+            btn.parentElement.querySelectorAll('.flow-option-btn').forEach(b => {
+                b.classList.remove('selected');
+            });
+            
+            // Select this one
+            btn.classList.add('selected');
+            
+            // Update data
+            flowModalData[field] = value;
+            
+            // Recalculate score
+            calculateFlowScore();
+        });
+    });
+}
+
+function openFlowModal() {
+    // Reset data
+    flowModalData = {
+        ticker: '',
+        sentiment: null,
+        type: null,
+        premium: null,
+        expiry: null,
+        voloi: null,
+        repeat: null,
+        notes: ''
+    };
+    
+    // Reset UI
+    document.getElementById('modalFlowTicker').value = '';
+    document.getElementById('modalFlowNotes').value = '';
+    document.querySelectorAll('.flow-option-btn').forEach(btn => {
+        btn.classList.remove('selected');
+    });
+    
+    // Reset score display
+    updateScoreDisplay(0, 'Fill in details below', '');
+    updateVerdict('');
+    document.getElementById('submitFlowBtn').disabled = true;
+    
+    // Show modal
+    document.getElementById('flowModalOverlay').classList.add('active');
+}
+
+function closeFlowModal() {
+    document.getElementById('flowModalOverlay').classList.remove('active');
+}
+
+function calculateFlowScore() {
+    let score = 0;
+    let factors = [];
+    
+    // Premium scoring (0-30 points)
+    const premiumScores = {
+        '25000': 5,
+        '75000': 15,
+        '150000': 25,
+        '500000': 30
+    };
+    if (flowModalData.premium) {
+        score += premiumScores[flowModalData.premium] || 0;
+        if (flowModalData.premium === '500000') factors.push('💰 Large premium');
+        else if (flowModalData.premium === '150000') factors.push('💵 Good size');
+    }
+    
+    // Type scoring (0-25 points)
+    const typeScores = {
+        'SWEEP': 25,
+        'BLOCK': 20,
+        'UNUSUAL_VOLUME': 15,
+        'DARK_POOL': 10
+    };
+    if (flowModalData.type) {
+        score += typeScores[flowModalData.type] || 0;
+        if (flowModalData.type === 'SWEEP') factors.push('🔥 Aggressive sweep');
+    }
+    
+    // Expiry scoring (0-20 points) - sweet spot is 2-4 weeks
+    const expiryScores = {
+        '0dte': 5,      // Too short, could be gambling
+        'week': 15,     // Good
+        '2-4weeks': 20, // Optimal
+        'monthly': 10,  // OK
+        'leaps': 0      // Too far out
+    };
+    if (flowModalData.expiry) {
+        score += expiryScores[flowModalData.expiry] || 0;
+        if (flowModalData.expiry === '2-4weeks') factors.push('📅 Optimal expiry');
+        if (flowModalData.expiry === 'leaps') factors.push('⚠️ LEAPS (less urgent)');
+    }
+    
+    // Volume vs OI scoring (0-15 points)
+    const voloiScores = {
+        'low': 0,
+        'normal': 5,
+        'high': 12,
+        'extreme': 15
+    };
+    if (flowModalData.voloi) {
+        score += voloiScores[flowModalData.voloi] || 0;
+        if (flowModalData.voloi === 'extreme') factors.push('📊 Extreme volume');
+    }
+    
+    // Repeat activity (0-10 points)
+    if (flowModalData.repeat === 'yes') {
+        score += 10;
+        factors.push('🔁 Repeat hits');
+    }
+    
+    // Determine label and class
+    let label, scoreClass, verdictClass, verdict;
+    
+    if (score >= 80) {
+        label = '🚨 EXCEPTIONAL - Must track!';
+        scoreClass = 'exceptional';
+        verdictClass = 'must-add';
+        verdict = '🐋 This is significant institutional activity. Definitely add this!';
+    } else if (score >= 60) {
+        label = '✅ HIGH - Worth tracking';
+        scoreClass = 'high';
+        verdictClass = 'add';
+        verdict = '👍 Notable flow that could move the stock. Add it!';
+    } else if (score >= 40) {
+        label = '🟡 MEDIUM - Maybe track';
+        scoreClass = 'medium';
+        verdictClass = 'maybe';
+        verdict = '🤔 Decent activity but not exceptional. Add if it matches your thesis.';
+    } else {
+        label = '⚪ LOW - Probably skip';
+        scoreClass = 'low';
+        verdictClass = 'skip';
+        verdict = '👎 Likely noise. Skip unless you have other conviction.';
+    }
+    
+    // Add factors to label
+    if (factors.length > 0) {
+        label += '\n' + factors.join(' • ');
+    }
+    
+    updateScoreDisplay(score, label, scoreClass);
+    updateVerdict(verdict, verdictClass);
+    
+    // Enable submit if we have required fields and decent score
+    const hasRequired = flowModalData.ticker && flowModalData.sentiment && 
+                       flowModalData.type && flowModalData.premium;
+    document.getElementById('submitFlowBtn').disabled = !hasRequired;
+}
+
+function updateScoreDisplay(score, label, scoreClass) {
+    const circle = document.getElementById('flowScoreCircle');
+    const value = document.getElementById('flowScoreValue');
+    const labelEl = document.getElementById('flowScoreLabel');
+    
+    value.textContent = score;
+    labelEl.textContent = label;
+    
+    // Update classes
+    circle.className = 'flow-score-circle ' + scoreClass;
+    labelEl.className = 'flow-score-label ' + scoreClass;
+}
+
+function updateVerdict(text, verdictClass = '') {
+    const verdict = document.getElementById('flowVerdict');
+    verdict.textContent = text;
+    verdict.className = 'flow-verdict ' + verdictClass;
+}
+
+async function submitFlowFromModal() {
+    const ticker = flowModalData.ticker.trim().toUpperCase();
+    
+    if (!ticker || !flowModalData.sentiment || !flowModalData.type || !flowModalData.premium) {
+        alert('Please fill in all required fields');
         return;
     }
     
@@ -1868,23 +2095,30 @@ async function addManualFlow() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 ticker,
-                sentiment,
-                flow_type: flowType,
-                premium: 100000
+                sentiment: flowModalData.sentiment,
+                flow_type: flowModalData.type,
+                premium: parseInt(flowModalData.premium),
+                notes: flowModalData.notes || `Expiry: ${flowModalData.expiry || 'N/A'}, Vol/OI: ${flowModalData.voloi || 'N/A'}, Repeat: ${flowModalData.repeat || 'N/A'}`
             })
         });
         
         const data = await response.json();
         
         if (data.status === 'success') {
-            tickerInput.value = '';
+            closeFlowModal();
             loadFlowData();
-            console.log(`🐋 Added manual flow: ${ticker} ${sentiment}`);
+            console.log(`🐋 Added flow: ${ticker} ${flowModalData.sentiment} (Score: calculated)`);
         }
     } catch (error) {
-        console.error('Error adding manual flow:', error);
+        console.error('Error adding flow:', error);
+        alert('Failed to add flow. Please try again.');
     }
 }
+
+// Initialize modal on page load
+document.addEventListener('DOMContentLoaded', () => {
+    setTimeout(initFlowModal, 1200);
+});
 
 // Check flow confirmation for a signal
 async function checkFlowConfirmation(ticker, direction) {
