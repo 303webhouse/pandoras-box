@@ -9,6 +9,22 @@ import json
 import os
 from datetime import timedelta
 from dotenv import load_dotenv
+import numpy as np
+
+
+def sanitize_for_json(obj):
+    """Convert numpy types to native Python types for JSON serialization"""
+    if isinstance(obj, dict):
+        return {k: sanitize_for_json(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [sanitize_for_json(item) for item in obj]
+    elif isinstance(obj, (np.bool_, np.integer)):
+        return bool(obj) if isinstance(obj, np.bool_) else int(obj)
+    elif isinstance(obj, np.floating):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    return obj
 
 # Load environment variables from .env file
 load_dotenv(os.path.join(os.path.dirname(__file__), '..', '..', 'config', '.env'))
@@ -60,10 +76,12 @@ async def cache_signal(signal_id: str, signal_data: Dict[Any, Any], ttl: int = 3
         ttl: Time to live in seconds (default 1 hour)
     """
     client = await get_redis_client()
+    # Sanitize data to ensure all numpy types are converted to Python natives
+    sanitized_data = sanitize_for_json(signal_data)
     await client.setex(
         f"signal:{signal_id}",
         ttl,
-        json.dumps(signal_data)
+        json.dumps(sanitized_data)
     )
 
 async def get_signal(signal_id: str) -> Optional[Dict[Any, Any]]:
