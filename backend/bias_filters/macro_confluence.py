@@ -141,23 +141,27 @@ async def check_btc_macro_confluence(direction: str) -> Tuple[bool, Dict]:
     
     direction = direction.upper()
     
-    # Define what each macro indicator says
+    # Define what each macro indicator says (ensure all bools are Python bools)
+    btc_above = macro.get("btc_above_50sma")
+    dxy_rising = macro.get("dxy_rising")
+    qqq_above = macro.get("qqq_above_200sma")
+    
     checks = {
         "btc_momentum": {
-            "bullish": macro.get("btc_above_50sma"),
-            "value": f"BTC {'>' if macro.get('btc_above_50sma') else '<'} 50 SMA",
+            "bullish": bool(btc_above) if btc_above is not None else None,
+            "value": f"BTC {'>' if btc_above else '<'} 50 SMA",
             "price": macro.get("btc_price"),
             "sma": macro.get("btc_sma_50")
         },
         "dxy_environment": {
-            "bullish": not macro.get("dxy_rising"),  # DXY falling = risk-on = bullish
-            "value": f"DXY {'rising (risk-off)' if macro.get('dxy_rising') else 'falling (risk-on)'}",
+            "bullish": bool(not dxy_rising) if dxy_rising is not None else None,  # DXY falling = risk-on = bullish
+            "value": f"DXY {'rising (risk-off)' if dxy_rising else 'falling (risk-on)'}",
             "price": macro.get("dxy_price"),
             "sma": macro.get("dxy_sma_20")
         },
         "qqq_trend": {
-            "bullish": macro.get("qqq_above_200sma"),
-            "value": f"QQQ {'>' if macro.get('qqq_above_200sma') else '<'} 200 SMA",
+            "bullish": bool(qqq_above) if qqq_above is not None else None,
+            "value": f"QQQ {'>' if qqq_above else '<'} 200 SMA",
             "price": macro.get("qqq_price"),
             "sma": macro.get("qqq_sma_200")
         }
@@ -166,19 +170,19 @@ async def check_btc_macro_confluence(direction: str) -> Tuple[bool, Dict]:
     # Check confluence based on direction
     if direction in ["LONG", "BUY", "BULLISH"]:
         # For bullish: all should be bullish
-        btc_agrees = checks["btc_momentum"]["bullish"] == True
-        dxy_agrees = checks["dxy_environment"]["bullish"] == True  # DXY falling
-        qqq_agrees = checks["qqq_trend"]["bullish"] == True
+        btc_agrees = bool(checks["btc_momentum"]["bullish"] == True)
+        dxy_agrees = bool(checks["dxy_environment"]["bullish"] == True)  # DXY falling
+        qqq_agrees = bool(checks["qqq_trend"]["bullish"] == True)
         
-        confluence = btc_agrees and dxy_agrees and qqq_agrees
+        confluence = bool(btc_agrees and dxy_agrees and qqq_agrees)
         
     elif direction in ["SHORT", "SELL", "BEARISH"]:
         # For bearish: all should be bearish
-        btc_agrees = checks["btc_momentum"]["bullish"] == False
-        dxy_agrees = checks["dxy_environment"]["bullish"] == False  # DXY rising
-        qqq_agrees = checks["qqq_trend"]["bullish"] == False
+        btc_agrees = bool(checks["btc_momentum"]["bullish"] == False)
+        dxy_agrees = bool(checks["dxy_environment"]["bullish"] == False)  # DXY rising
+        qqq_agrees = bool(checks["qqq_trend"]["bullish"] == False)
         
-        confluence = btc_agrees and dxy_agrees and qqq_agrees
+        confluence = bool(btc_agrees and dxy_agrees and qqq_agrees)
         
     else:
         return False, {"error": f"Unknown direction: {direction}"}
@@ -188,29 +192,29 @@ async def check_btc_macro_confluence(direction: str) -> Tuple[bool, Dict]:
     
     details = {
         "direction": direction,
-        "full_confluence": confluence,
+        "full_confluence": bool(confluence),
         "agreement_count": f"{agreements}/3",
         "checks": {
             "btc_50sma": {
-                "agrees": btc_agrees,
+                "agrees": bool(btc_agrees),
                 "status": checks["btc_momentum"]["value"],
                 "price": checks["btc_momentum"]["price"],
                 "sma": checks["btc_momentum"]["sma"]
             },
             "dxy_trend": {
-                "agrees": dxy_agrees,
+                "agrees": bool(dxy_agrees),
                 "status": checks["dxy_environment"]["value"],
                 "price": checks["dxy_environment"]["price"],
                 "sma": checks["dxy_environment"]["sma"]
             },
             "qqq_200sma": {
-                "agrees": qqq_agrees,
+                "agrees": bool(qqq_agrees),
                 "status": checks["qqq_trend"]["value"],
                 "price": checks["qqq_trend"]["price"],
                 "sma": checks["qqq_trend"]["sma"]
             }
         },
-        "recommendation": get_recommendation(direction, confluence, agreements),
+        "recommendation": get_recommendation(direction, bool(confluence), agreements),
         "updated_at": macro.get("updated_at")
     }
     
