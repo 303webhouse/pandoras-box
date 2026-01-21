@@ -79,20 +79,20 @@ async def get_macro_data() -> Optional[Dict]:
         qqq_hist = qqq.history(period="1y")
         
         # BTC calculations
-        btc_price = btc_hist['Close'].iloc[-1] if not btc_hist.empty else None
-        btc_sma_50 = btc_hist['Close'].rolling(50).mean().iloc[-1] if len(btc_hist) >= 50 else None
-        btc_above_50sma = btc_price > btc_sma_50 if btc_price and btc_sma_50 else None
+        btc_price = float(btc_hist['Close'].iloc[-1]) if not btc_hist.empty else None
+        btc_sma_50 = float(btc_hist['Close'].rolling(50).mean().iloc[-1]) if len(btc_hist) >= 50 else None
+        btc_above_50sma = bool(btc_price > btc_sma_50) if btc_price and btc_sma_50 else None
         
         # DXY calculations (20 SMA for trend)
-        dxy_price = dxy_hist['Close'].iloc[-1] if not dxy_hist.empty else None
-        dxy_sma_20 = dxy_hist['Close'].rolling(20).mean().iloc[-1] if len(dxy_hist) >= 20 else None
+        dxy_price = float(dxy_hist['Close'].iloc[-1]) if not dxy_hist.empty else None
+        dxy_sma_20 = float(dxy_hist['Close'].rolling(20).mean().iloc[-1]) if len(dxy_hist) >= 20 else None
         # DXY rising = price above SMA = risk-off
-        dxy_rising = dxy_price > dxy_sma_20 if dxy_price and dxy_sma_20 else None
+        dxy_rising = bool(dxy_price > dxy_sma_20) if dxy_price and dxy_sma_20 else None
         
         # QQQ calculations
-        qqq_price = qqq_hist['Close'].iloc[-1] if not qqq_hist.empty else None
-        qqq_sma_200 = qqq_hist['Close'].rolling(200).mean().iloc[-1] if len(qqq_hist) >= 200 else None
-        qqq_above_200sma = qqq_price > qqq_sma_200 if qqq_price and qqq_sma_200 else None
+        qqq_price = float(qqq_hist['Close'].iloc[-1]) if not qqq_hist.empty else None
+        qqq_sma_200 = float(qqq_hist['Close'].rolling(200).mean().iloc[-1]) if len(qqq_hist) >= 200 else None
+        qqq_above_200sma = bool(qqq_price > qqq_sma_200) if qqq_price and qqq_sma_200 else None
         
         macro_data = {
             "btc_price": round(btc_price, 2) if btc_price else None,
