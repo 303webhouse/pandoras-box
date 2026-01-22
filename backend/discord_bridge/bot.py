@@ -59,13 +59,37 @@ def parse_flow_from_embed(embed: discord.Embed) -> dict:
     - details: str
     """
     try:
-        # Get title - usually contains ticker and flow type
+        # Get title and description
         title = embed.title or ""
         description = embed.description or ""
         
-        # Extract ticker from title (e.g., "SPY - $100K+ Flow - Wed Jan 21")
-        ticker_match = re.match(r'^([A-Z]+)', title)
-        ticker = ticker_match.group(1) if ticker_match else "UNKNOWN"
+        # Log what we're parsing for debugging
+        logger.info(f"📋 Parsing embed - Title: '{title[:50]}' | Desc: '{description[:80]}...'")
+        
+        # Combine title and description for searching
+        combined = f"{title} {description}"
+        
+        # Extract ticker - check multiple patterns
+        # Pattern 1: Start of title (e.g., "SPY - $100K+ Flow")
+        ticker_match = re.match(r'^([A-Z]{1,5})\b', title)
+        ticker = ticker_match.group(1) if ticker_match else None
+        
+        # Pattern 2: Start of description if not in title
+        if not ticker:
+            ticker_match = re.match(r'^([A-Z]{1,5})\b', description)
+            ticker = ticker_match.group(1) if ticker_match else None
+        
+        # Pattern 3: Look for common flow format "TICKER - $XXX"
+        if not ticker:
+            ticker_match = re.search(r'([A-Z]{1,5})\s*[-–]\s*\$', combined)
+            ticker = ticker_match.group(1) if ticker_match else None
+        
+        # Pattern 4: Any standalone ticker (last resort)
+        if not ticker:
+            ticker_match = re.search(r'\b([A-Z]{2,5})\b', combined)
+            ticker = ticker_match.group(1) if ticker_match else "UNKNOWN"
+        
+        logger.info(f"🎯 Extracted ticker: {ticker}")
         
         # Determine sentiment from embed color or content
         # Green = bullish, Red = bearish
@@ -244,23 +268,32 @@ async def on_message(message: discord.Message):
         return  # User messages handled by commands above
     
     logger.info(f"📨 Processing flow from {message.author.name}")
+    logger.info(f"📎 Message has {len(message.embeds)} embeds, content: '{message.content[:50] if message.content else 'None'}...'")
     
     # Try to parse the flow data
     flow_data = None
     
     # First try embeds
     if message.embeds:
-        for embed in message.embeds:
+        for i, embed in enumerate(message.embeds):
+            logger.info(f"🔍 Checking embed {i+1}/{len(message.embeds)}")
             flow_data = parse_flow_from_embed(embed)
-            if flow_data:
+            if flow_data and flow_data.get("ticker") and flow_data.get("ticker") != "UNKNOWN":
                 break
     
     # If no embed data, try message content
     if not flow_data:
+        logger.info("📝 No embed data, trying message content...")
         flow_data = parse_flow_from_image(message)
     
+    # Log what we got
+    if flow_data:
+        logger.info(f"📊 Parsed flow data: ticker={flow_data.get('ticker')}, sentiment={flow_data.get('sentiment')}")
+    else:
+        logger.warning("⚠️ Could not parse any flow data from message")
+    
     # Send to Pandora if we got valid data
-    if flow_data and flow_data.get("ticker"):
+    if flow_data and flow_data.get("ticker") and flow_data.get("ticker") != "UNKNOWN":
         success = await send_to_pandora(flow_data)
         
         # React to the message to show we processed it
