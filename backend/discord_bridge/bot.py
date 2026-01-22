@@ -228,19 +228,22 @@ async def on_message(message: discord.Message):
     if message.author == bot.user:
         return
     
-    # Only process messages from the flow alerts channel
+    # ALWAYS process commands first (so !test, !status work for users)
+    await bot.process_commands(message)
+    
+    # Only process flow forwarding from the flow alerts channel
     if message.channel.id != FLOW_CHANNEL_ID:
         return
     
-    # Check if message is from UW bot
+    # Check if message is from UW bot (for auto-forwarding flow)
     author_name = message.author.name.lower()
     is_uw_bot = any(name.lower() in author_name for name in UW_BOT_NAMES)
     
-    # Also check if it's from a bot with relevant content
+    # Only auto-forward flow from UW bot or other bots
     if not is_uw_bot and not message.author.bot:
-        return  # Skip non-bot messages unless they're from UW
+        return  # User messages handled by commands above
     
-    logger.info(f"📨 Processing message from {message.author.name}")
+    logger.info(f"📨 Processing flow from {message.author.name}")
     
     # Try to parse the flow data
     flow_data = None
@@ -268,9 +271,6 @@ async def on_message(message: discord.Message):
                 await message.add_reaction("⚠️")
         except discord.Forbidden:
             pass  # No permission to add reactions
-    
-    # Process commands if any
-    await bot.process_commands(message)
 
 
 @bot.command(name="status")
