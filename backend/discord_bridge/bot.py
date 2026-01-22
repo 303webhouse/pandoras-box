@@ -268,7 +268,21 @@ async def on_message(message: discord.Message):
         return  # User messages handled by commands above
     
     logger.info(f"📨 Processing flow from {message.author.name}")
-    logger.info(f"📎 Message has {len(message.embeds)} embeds, content: '{message.content[:50] if message.content else 'None'}...'")
+    logger.info(f"📎 Message has {len(message.embeds)} embeds, content: '{message.content[:100] if message.content else 'None'}'")
+    logger.info(f"📎 Attachments: {len(message.attachments)}, Components: {len(message.components) if hasattr(message, 'components') else 0}")
+    
+    # Deep log the message structure to find where UW hides data
+    if message.embeds:
+        for i, embed in enumerate(message.embeds):
+            logger.info(f"📋 Embed {i}: title='{embed.title}', desc='{embed.description[:100] if embed.description else None}', author='{embed.author.name if embed.author else None}'")
+    
+    # Check if data is in components (buttons often have labels with ticker info)
+    if hasattr(message, 'components') and message.components:
+        for row in message.components:
+            if hasattr(row, 'children'):
+                for child in row.children:
+                    if hasattr(child, 'label'):
+                        logger.info(f"🔘 Button: {child.label}")
     
     # Try to parse the flow data
     flow_data = None
@@ -285,6 +299,34 @@ async def on_message(message: discord.Message):
     if not flow_data:
         logger.info("📝 No embed data, trying message content...")
         flow_data = parse_flow_from_image(message)
+    
+    # Last resort: try to find ticker in any string representation of the message
+    if not flow_data or flow_data.get("ticker") == "UNKNOWN":
+        # Check embeds more thoroughly
+        for embed in message.embeds:
+            all_text = f"{embed.title or ''} {embed.description or ''}"
+            if embed.author:
+                all_text += f" {embed.author.name or ''}"
+            if embed.footer:
+                all_text += f" {embed.footer.text or ''}"
+            for field in embed.fields:
+                all_text += f" {field.name} {field.value}"
+            
+            logger.info(f"📜 All embed text: {all_text[:200]}")
+            
+            # Try to find ticker pattern
+            import re
+            ticker_match = re.search(r'\b([A-Z]{1,5})\s*[-–]\s*\$', all_text)
+            if ticker_match:
+                ticker = ticker_match.group(1)
+                logger.info(f"🎯 Found ticker in embed text: {ticker}")
+                flow_data = {
+                    "ticker": ticker,
+                    "sentiment": "NEUTRAL",
+                    "flow_type": "UNUSUAL_VOLUME", 
+                    "premium": 100000,
+                    "notes": f"Auto-detected from UW: {all_text[:200]}"
+                }
     
     # Log what we got
     if flow_data:
