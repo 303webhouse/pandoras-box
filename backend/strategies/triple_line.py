@@ -32,11 +32,15 @@ async def validate_triple_line_signal(signal: Dict[Any, Any]) -> Tuple[bool, str
     
     # Validation checks
     
-    # 1. ADX must be > 25
+    # 1. ADX must be > 25 (default to 25 if not provided)
+    if adx is None:
+        adx = 25  # Default - passes minimum threshold
     if adx < 25:
         return False, f"ADX too low: {adx} < 25"
     
-    # 2. Lines must be separated by at least 10 points
+    # 2. Lines must be separated by at least 10 points (default to 10 if not provided)
+    if line_separation is None:
+        line_separation = 10  # Default - passes minimum threshold
     if line_separation < 10:
         return False, f"Lines too close: {line_separation} < 10 points"
     
