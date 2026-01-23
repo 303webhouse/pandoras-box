@@ -123,6 +123,7 @@ from api.cta import router as cta_router
 from api.btc_signals import router as btc_signals_router
 from api.flow import router as flow_router
 from api.dollar_smile import router as dollar_smile_router
+from api.hybrid_scanner import router as hybrid_scanner_router
 
 app.include_router(webhook_router, prefix="/webhook", tags=["webhooks"])
 app.include_router(positions_router, prefix="/api", tags=["positions"])
@@ -134,6 +135,7 @@ app.include_router(cta_router, prefix="/api", tags=["cta"])
 app.include_router(btc_signals_router, prefix="/api", tags=["btc-signals"])
 app.include_router(flow_router, prefix="/api", tags=["options-flow"])
 app.include_router(dollar_smile_router, prefix="/api", tags=["dollar-smile"])
+app.include_router(hybrid_scanner_router, prefix="/api", tags=["hybrid-scanner"])
 
 if __name__ == "__main__":
     import uvicorn
