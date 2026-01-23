@@ -266,6 +266,9 @@ function initEventListeners() {
             renderSignals();
         });
     });
+    
+    // Hybrid Scanner
+    initHybridScanner();
 }
 
 // Data Loading
@@ -1577,6 +1580,325 @@ function createCtaCard(signal) {
             </div>
         </div>
     `;
+}
+
+
+// ==========================================
+// HYBRID MARKET SCANNER
+// ==========================================
+
+function initHybridScanner() {
+    const analyzeBtn = document.getElementById('analyzeTickerBtn');
+    const scanBtn = document.getElementById('runHybridScanBtn');
+    const tickerInput = document.getElementById('hybridTickerInput');
+    
+    if (analyzeBtn) {
+        analyzeBtn.addEventListener('click', () => {
+            const ticker = tickerInput.value.trim().toUpperCase();
+            if (ticker) {
+                analyzeHybridTicker(ticker);
+            }
+        });
+    }
+    
+    // Enter key on input
+    if (tickerInput) {
+        tickerInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                const ticker = tickerInput.value.trim().toUpperCase();
+                if (ticker) {
+                    analyzeHybridTicker(ticker);
+                }
+            }
+        });
+    }
+    
+    if (scanBtn) {
+        scanBtn.addEventListener('click', runHybridScan);
+    }
+}
+
+async function analyzeHybridTicker(ticker) {
+    // Show loading state
+    updateHybridGauges({
+        technical: { signal: 'Loading...', loading: true },
+        analyst: { signal: 'Loading...', loading: true },
+        combined: { signal: 'Loading...', loading: true }
+    });
+    
+    try {
+        const response = await fetch(`${API_URL}/hybrid/combined/${ticker}`);
+        const data = await response.json();
+        
+        if (data.status === 'success' && data.data) {
+            renderHybridAnalysis(data.data);
+        } else {
+            updateHybridGauges({
+                technical: { signal: 'Error', error: true },
+                analyst: { signal: 'Error', error: true },
+                combined: { signal: data.message || 'Error', error: true }
+            });
+        }
+    } catch (error) {
+        console.error('Hybrid analysis error:', error);
+        updateHybridGauges({
+            technical: { signal: 'Error', error: true },
+            analyst: { signal: 'Error', error: true },
+            combined: { signal: 'Failed to fetch', error: true }
+        });
+    }
+}
+
+function renderHybridAnalysis(data) {
+    const tech = data.technical || {};
+    const fund = data.fundamental || {};
+    const meta = data.metadata || {};
+    
+    // Technical Gauge
+    const techSignal = document.getElementById('techSignal');
+    const techScore = document.getElementById('techScore');
+    const techDetails = document.getElementById('techDetails');
+    
+    if (techSignal) {
+        const signal = tech.summary_signal || '--';
+        techSignal.textContent = signal;
+        techSignal.className = 'gauge-signal ' + getSignalClass(signal);
+    }
+    
+    if (techScore) {
+        const buyCount = tech.summary_buy_count || 0;
+        const sellCount = tech.summary_sell_count || 0;
+        techScore.innerHTML = `<span class="buy-count">${buyCount} Buy</span> / <span class="sell-count">${sellCount} Sell</span>`;
+    }
+    
+    if (techDetails) {
+        const oscSignal = tech.oscillators_signal || '--';
+        const maSignal = tech.moving_averages_signal || '--';
+        techDetails.innerHTML = `
+            <div>Oscillators: <span>${oscSignal}</span></div>
+            <div>Moving Avgs: <span>${maSignal}</span></div>
+        `;
+    }
+    
+    // Analyst Gauge
+    const analystSignal = document.getElementById('analystSignal');
+    const analystScore = document.getElementById('analystScore');
+    const analystDetails = document.getElementById('analystDetails');
+    
+    if (analystSignal) {
+        const rec = fund.recommendation_key || '--';
+        const displayRec = rec.toUpperCase().replace('_', ' ');
+        analystSignal.textContent = displayRec;
+        analystSignal.className = 'gauge-signal ' + getAnalystClass(rec);
+    }
+    
+    if (analystScore) {
+        const numAnalysts = fund.number_of_analysts || '?';
+        analystScore.innerHTML = `<span class="analyst-count">${numAnalysts} analysts</span>`;
+    }
+    
+    if (analystDetails) {
+        const targetPrice = fund.target_mean_price;
+        const currentPrice = fund.current_price;
+        let upside = '--';
+        let upsideClass = '';
+        
+        if (targetPrice && currentPrice) {
+            const upsideVal = ((targetPrice - currentPrice) / currentPrice * 100).toFixed(1);
+            upside = (upsideVal > 0 ? '+' : '') + upsideVal + '%';
+            upsideClass = upsideVal > 0 ? 'upside-positive' : 'upside-negative';
+        }
+        
+        analystDetails.innerHTML = `
+            <div>Price Target: <span>$${targetPrice?.toFixed(2) || '--'}</span></div>
+            <div>Upside: <span class="${upsideClass}">${upside}</span></div>
+        `;
+    }
+    
+    // Combined Gauge
+    const combinedSignal = document.getElementById('combinedSignal');
+    const combinedScore = document.getElementById('combinedScore');
+    const tickerMeta = document.getElementById('tickerMeta');
+    
+    if (combinedSignal) {
+        // Determine combined sentiment
+        const techSig = (tech.summary_signal || '').toLowerCase();
+        const analystRec = (fund.recommendation_key || '').toLowerCase();
+        
+        let combined = 'NEUTRAL';
+        if ((techSig.includes('buy') || techSig.includes('strong buy')) && 
+            (analystRec.includes('buy') || analystRec === 'strong_buy')) {
+            combined = 'STRONG BUY';
+        } else if (techSig.includes('buy') || analystRec.includes('buy')) {
+            combined = 'BUY';
+        } else if ((techSig.includes('sell') || techSig.includes('strong sell')) && 
+                   (analystRec.includes('sell') || analystRec === 'strong_sell')) {
+            combined = 'STRONG SELL';
+        } else if (techSig.includes('sell') || analystRec.includes('sell')) {
+            combined = 'SELL';
+        }
+        
+        combinedSignal.textContent = combined;
+        combinedSignal.className = 'gauge-signal ' + getSignalClass(combined);
+    }
+    
+    if (combinedScore) {
+        // Simple scoring: 1-5 based on alignment
+        const score = calculateHybridScore(tech, fund);
+        combinedScore.textContent = `Score: ${score}/5`;
+    }
+    
+    if (tickerMeta) {
+        const name = meta.short_name || meta.ticker || '--';
+        const sector = fund.sector || '--';
+        tickerMeta.innerHTML = `
+            <div id="tickerName">${name}</div>
+            <div id="tickerSector">${sector}</div>
+        `;
+    }
+}
+
+function updateHybridGauges(state) {
+    // Technical
+    const techSignal = document.getElementById('techSignal');
+    if (techSignal) {
+        techSignal.textContent = state.technical?.signal || '--';
+        techSignal.className = state.technical?.error ? 'gauge-signal error' : 'gauge-signal';
+    }
+    
+    // Analyst
+    const analystSignal = document.getElementById('analystSignal');
+    if (analystSignal) {
+        analystSignal.textContent = state.analyst?.signal || '--';
+        analystSignal.className = state.analyst?.error ? 'gauge-signal error' : 'gauge-signal';
+    }
+    
+    // Combined
+    const combinedSignal = document.getElementById('combinedSignal');
+    if (combinedSignal) {
+        combinedSignal.textContent = state.combined?.signal || '--';
+        combinedSignal.className = state.combined?.error ? 'gauge-signal error' : 'gauge-signal';
+    }
+}
+
+function getSignalClass(signal) {
+    const s = (signal || '').toLowerCase();
+    if (s.includes('strong buy')) return 'strong-buy';
+    if (s.includes('buy')) return 'buy';
+    if (s.includes('strong sell')) return 'strong-sell';
+    if (s.includes('sell')) return 'sell';
+    return 'neutral';
+}
+
+function getAnalystClass(rec) {
+    const r = (rec || '').toLowerCase();
+    if (r === 'strong_buy' || r === 'strongbuy') return 'strong-buy';
+    if (r.includes('buy')) return 'buy';
+    if (r === 'strong_sell' || r === 'strongsell') return 'strong-sell';
+    if (r.includes('sell') || r.includes('under')) return 'sell';
+    return 'neutral';
+}
+
+function calculateHybridScore(tech, fund) {
+    let score = 3; // Neutral baseline
+    
+    const techSig = (tech.summary_signal || '').toLowerCase();
+    const analystRec = (fund.recommendation_key || '').toLowerCase();
+    
+    // Technical contribution
+    if (techSig.includes('strong buy')) score += 1;
+    else if (techSig.includes('buy')) score += 0.5;
+    else if (techSig.includes('strong sell')) score -= 1;
+    else if (techSig.includes('sell')) score -= 0.5;
+    
+    // Analyst contribution
+    if (analystRec === 'strong_buy' || analystRec === 'strongbuy') score += 1;
+    else if (analystRec.includes('buy')) score += 0.5;
+    else if (analystRec === 'strong_sell' || analystRec === 'strongsell') score -= 1;
+    else if (analystRec.includes('sell') || analystRec.includes('under')) score -= 0.5;
+    
+    return Math.max(1, Math.min(5, Math.round(score)));
+}
+
+async function runHybridScan() {
+    const btn = document.getElementById('runHybridScanBtn');
+    const resultsDiv = document.getElementById('hybridResults');
+    const tableBody = document.getElementById('hybridTableBody');
+    
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Scanning...';
+    }
+    
+    try {
+        // Scan a mix of popular tickers
+        const tickers = 'NVDA,AAPL,MSFT,GOOGL,META,AMZN,TSLA,AMD,NFLX,SPY';
+        const response = await fetch(`${API_URL}/hybrid/scan?tickers=${tickers}&limit=10`);
+        const data = await response.json();
+        
+        if (data.status === 'success' && data.data?.results) {
+            renderHybridTable(data.data.results);
+            if (resultsDiv) resultsDiv.style.display = 'block';
+        } else {
+            if (tableBody) tableBody.innerHTML = '<tr><td colspan="6" style="text-align:center">No results</td></tr>';
+        }
+        
+    } catch (error) {
+        console.error('Hybrid scan error:', error);
+        if (tableBody) tableBody.innerHTML = '<tr><td colspan="6" style="text-align:center">Scan failed</td></tr>';
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = 'Scan Top 10';
+        }
+    }
+}
+
+function renderHybridTable(results) {
+    const tableBody = document.getElementById('hybridTableBody');
+    if (!tableBody) return;
+    
+    if (!results || results.length === 0) {
+        tableBody.innerHTML = '<tr><td colspan="6" style="text-align:center">No results</td></tr>';
+        return;
+    }
+    
+    tableBody.innerHTML = results.map(item => {
+        const tech = item.technical || {};
+        const fund = item.fundamental || {};
+        
+        const techSignal = tech.summary_signal || '--';
+        const techClass = getSignalClass(techSignal);
+        
+        const analystRec = (fund.recommendation_key || '--').toUpperCase().replace('_', ' ');
+        const analystClass = getAnalystClass(fund.recommendation_key);
+        
+        // Calculate upside
+        let upside = '--';
+        let upsideClass = '';
+        if (fund.target_mean_price && fund.current_price) {
+            const upsideVal = ((fund.target_mean_price - fund.current_price) / fund.current_price * 100).toFixed(1);
+            upside = (upsideVal > 0 ? '+' : '') + upsideVal + '%';
+            upsideClass = upsideVal > 0 ? 'upside-positive' : 'upside-negative';
+        }
+        
+        // Calculate strength (buy - sell)
+        const strength = (tech.summary_buy_count || 0) - (tech.summary_sell_count || 0);
+        const strengthStr = strength > 0 ? '+' + strength : String(strength);
+        
+        const sector = fund.sector || '--';
+        
+        return `
+            <tr>
+                <td><strong style="cursor:pointer" onclick="changeChartSymbol('${item.ticker}')">${item.ticker}</strong></td>
+                <td class="signal-${techClass.replace(' ', '-')}">${techSignal}</td>
+                <td>${strengthStr}</td>
+                <td class="signal-${analystClass.replace(' ', '-')}">${analystRec}</td>
+                <td class="${upsideClass}">${upside}</td>
+                <td>${sector}</td>
+            </tr>
+        `;
+    }).join('');
 }
 
 
