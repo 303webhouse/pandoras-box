@@ -179,15 +179,15 @@ def get_bias_status(timeframe: BiasTimeframe = None) -> Dict[str, Any]:
     
     if timeframe:
         tf_key = timeframe.value.lower()
-        tf_data = history.get(tf_key, {})
-        current = tf_data.get("current", {})
-        previous = tf_data.get("previous", {})
+        tf_data = history.get(tf_key, {}) or {}
+        current = tf_data.get("current") or {}
+        previous = tf_data.get("previous") or {}
         
         return {
             "timeframe": timeframe.value,
-            "level": current.get("level", "NEUTRAL"),
-            "timestamp": current.get("timestamp"),
-            "details": current.get("details", {}),
+            "level": current.get("level", "NEUTRAL") if current else "NEUTRAL",
+            "timestamp": current.get("timestamp") if current else None,
+            "details": current.get("details", {}) if current else {},
             "trend": tf_data.get("trend", "NEW"),
             "previous": {
                 "level": previous.get("level") if previous else None,
@@ -199,13 +199,13 @@ def get_bias_status(timeframe: BiasTimeframe = None) -> Dict[str, Any]:
     result = {}
     for tf in BiasTimeframe:
         tf_key = tf.value.lower()
-        tf_data = history.get(tf_key, {})
-        current = tf_data.get("current", {})
-        previous = tf_data.get("previous", {})
+        tf_data = history.get(tf_key, {}) or {}
+        current = tf_data.get("current") or {}
+        previous = tf_data.get("previous") or {}
         
         result[tf_key] = {
-            "level": current.get("level", "NEUTRAL"),
-            "timestamp": current.get("timestamp"),
+            "level": current.get("level", "NEUTRAL") if current else "NEUTRAL",
+            "timestamp": current.get("timestamp") if current else None,
             "trend": tf_data.get("trend", "NEW"),
             "previous_level": previous.get("level") if previous else None
         }
@@ -219,15 +219,17 @@ def get_bias_history(timeframe: BiasTimeframe, limit: int = 10) -> List[Dict[str
     history = _load_bias_history()
     tf_key = timeframe.value.lower()
     
-    tf_data = history.get(tf_key, {})
+    tf_data = history.get(tf_key, {}) or {}
     entries = []
     
     # Add current
-    if tf_data.get("current"):
-        entries.append(tf_data["current"])
+    current = tf_data.get("current")
+    if current:
+        entries.append(current)
     
     # Add history
-    entries.extend(tf_data.get("history", []))
+    hist_list = tf_data.get("history") or []
+    entries.extend(hist_list)
     
     return entries[:limit]
 
