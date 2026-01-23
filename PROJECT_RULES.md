@@ -12,6 +12,20 @@ No manual data entry, no mental math, no context-switching. If a human has to re
 
 ---
 
+## Primary Goal
+
+**Real-time, actionable trade recommendations with minimal subjective interpretation.**
+
+The app must deliver:
+1. **Automated filtering** — Signals pass through customizable filters before surfacing
+2. **Clear trade recommendations** — Every signal includes Entry, Exit (target), and Stop/Loss prices
+3. **Multi-timeframe/multi-asset coverage** — Strategies for swing trades, intraday, equities, crypto, etc.
+4. **Future optionality** — Ability to add new strategies/filters from the UI without code changes
+5. **Full flexibility** — Every filter and strategy can be toggled on/off independently
+6. **Knowledgebase** — Every strategy and filter has an explanation linked to its trade suggestions, scanners, and UI components
+
+---
+
 ## Development Principles
 
 1. **Single source of truth** — Data lives in one place (database), displayed in many.
@@ -57,6 +71,7 @@ No manual data entry, no mental math, no context-switching. If a human has to re
 - **Strategy evaluation:** Viability check → optimal timeframe → concise summary → add to approved list
 - **New indicators:** Classify as execution vs. bias BEFORE building
 - **This file:** Read before making suggestions or building features
+- **UI for new features:** Before building a new module, scanner, or feature, ask Nick how it should appear on the UI — provide suggestions but get explicit approval on layout/placement
 
 ---
 

@@ -3,6 +3,65 @@
 
 ---
 
+> **IMPORTANT:** Before building anything, read `PROJECT_RULES.md` in the repo root. It contains the prime directive, development principles, bias hierarchy, and workflow rules that govern all decisions.
+
+---
+
+# CURRENT STATUS (Jan 21, 2026)
+
+## What's Built:
+
+### Backend (main.py has all routers):
+- `/api/hybrid/*` - Hybrid scanner (Technical + Analyst gauges) 
+- `/api/btc/*` - BTC bottom signals + sessions
+- `/api/flow/*` - Options flow (Unusual Whales integration)
+- `/api/dollar-smile/*` - Dollar Smile macro indicator
+- `/api/bias-auto/*` - Bias scheduler with trend tracking
+- `/api/cta/*` - CTA swing trading scanner
+- `/api/scanner/*` - Hunter scanner (Ursa/Taurus)
+- `/api/watchlist/*` - Watchlist management
+- `/api/strategies/*` - Strategy enable/disable
+- `/api/positions/*` - Position tracking
+- `/webhook/*` - TradingView webhooks
+
+### Frontend (app.js):
+- TradingView chart widget
+- Hybrid Scanner with Technical + Analyst gauges
+- BTC Bottom Signals Dashboard (manual tracking)
+- BTC Sessions display (key time windows)
+- Options Flow section with manual entry modal
+- Dollar Smile macro bias
+- Bias cards with trend indicators
+- CTA Scanner section with zone cards
+- Hunter Scanner (Ursa/Taurus signals)
+- Watchlist management
+- Strategy controls
+- Signal cards with dismiss/select actions
+
+## NEXT PRIORITIES:
+
+### 1. Connect Data Feeds (MAIN PRIORITY)
+Most signals/filters are UI mockups - need real data:
+- [ ] TradingView webhooks for live signals
+- [ ] Unusual Whales API for options flow (or manual entry)
+- [ ] Coinalyze/Laevitas for BTC derivatives data
+- [ ] Yahoo Finance for stock data (yfinance in scanner)
+- [ ] VIX data feed for divergence warnings
+
+### 2. UI Reorganization
+- [ ] Better layout/grouping of components
+- [ ] Clearer visual hierarchy
+- [ ] Mobile responsiveness improvements
+
+### 3. Signal Filtering Process
+- [ ] Implement proper signal scoring/ranking
+- [ ] Add filter controls that actually filter
+- [ ] Confluence detection (multiple signals aligning)
+
+---
+
+# STRATEGY SPECIFICATIONS
+
 # PART 1: EQUITY SWING TRADING (PRIMARY)
 
 ## Strategy: CTA Replication
