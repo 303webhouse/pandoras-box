@@ -41,6 +41,11 @@ except ImportError:
 
 # State persistence file
 STATE_FILE = os.path.join(os.path.dirname(__file__), "..", "..", "data", "scanner_state.json")
+TECHNICAL_CACHE_FILE = os.path.join(os.path.dirname(__file__), "..", "..", "data", "technical_cache.json")
+
+# Market open time: 9:30 AM ET, refresh at 9:45 AM ET
+REFRESH_HOUR = 9
+REFRESH_MINUTE = 45
 
 
 class TechnicalSignal(str, Enum):
@@ -86,6 +91,9 @@ DEFAULT_UNIVERSE = [
 class HybridScanner:
     """
     Hybrid Market Scanner combining Technical + Fundamental analysis
+    
+    Technical data is cached daily (refreshed at 9:45 AM ET) to avoid rate limits.
+    Fundamental data is cached for 4 hours.
     """
     
     def __init__(self, universe: List[str] = None):
@@ -93,6 +101,7 @@ class HybridScanner:
         self.state = self._load_state()
         self.fundamental_cache = {}
         self.cache_ttl = timedelta(hours=4)  # Cache fundamentals for 4 hours
+        self.technical_cache = self._load_technical_cache()
         
     def _load_state(self) -> Dict[str, Any]:
         """Load persisted signal state"""
@@ -113,6 +122,142 @@ class HybridScanner:
         except Exception as e:
             logger.error(f"Error saving scanner state: {e}")
     
+    def _load_technical_cache(self) -> Dict[str, Any]:
+        """Load cached technical data"""
+        try:
+            if os.path.exists(TECHNICAL_CACHE_FILE):
+                with open(TECHNICAL_CACHE_FILE, 'r') as f:
+                    cache = json.load(f)
+                    # Check if cache is from today (after 9:45 AM ET)
+                    last_refresh = cache.get("last_refresh")
+                    if last_refresh:
+                        refresh_time = datetime.fromisoformat(last_refresh)
+                        # If refreshed today after 9:45 AM, cache is valid
+                        now = datetime.now()
+                        if refresh_time.date() == now.date():
+                            logger.info(f"📊 Loaded technical cache from {last_refresh}")
+                            return cache
+                    logger.info("📊 Technical cache expired, will refresh on next request")
+        except Exception as e:
+            logger.error(f"Error loading technical cache: {e}")
+        return {"tickers": {}, "last_refresh": None, "aggregate": {}}
+    
+    def _save_technical_cache(self):
+        """Save technical cache to disk"""
+        try:
+            os.makedirs(os.path.dirname(TECHNICAL_CACHE_FILE), exist_ok=True)
+            with open(TECHNICAL_CACHE_FILE, 'w') as f:
+                json.dump(self.technical_cache, f, indent=2, default=str)
+            logger.info(f"💾 Saved technical cache for {len(self.technical_cache.get('tickers', {}))} tickers")
+        except Exception as e:
+            logger.error(f"Error saving technical cache: {e}")
+    
+    def is_cache_valid(self) -> bool:
+        """Check if technical cache is still valid (from today after 9:45 AM ET)"""
+        last_refresh = self.technical_cache.get("last_refresh")
+        if not last_refresh:
+            return False
+        
+        try:
+            refresh_time = datetime.fromisoformat(last_refresh)
+            now = datetime.now()
+            
+            # Cache is valid if:
+            # 1. Refreshed today AND
+            # 2. Current time is before tomorrow's refresh window
+            if refresh_time.date() == now.date():
+                return True
+            
+            # Allow cache from yesterday if it's before 9:45 AM today
+            if now.hour < REFRESH_HOUR or (now.hour == REFRESH_HOUR and now.minute < REFRESH_MINUTE):
+                yesterday = now.date() - timedelta(days=1)
+                if refresh_time.date() == yesterday:
+                    return True
+        except Exception as e:
+            logger.error(f"Error checking cache validity: {e}")
+        
+        return False
+    
+    def get_cached_technical(self, ticker: str) -> Optional[Dict[str, Any]]:
+        """Get cached technical data for a ticker if available and valid"""
+        if not self.is_cache_valid():
+            return None
+        return self.technical_cache.get("tickers", {}).get(ticker.upper())
+    
+    def set_cached_technical(self, ticker: str, data: Dict[str, Any]):
+        """Cache technical data for a ticker"""
+        if "tickers" not in self.technical_cache:
+            self.technical_cache["tickers"] = {}
+        self.technical_cache["tickers"][ticker.upper()] = data
+    
+    def get_aggregate_sentiment(self) -> Dict[str, Any]:
+        """Get aggregate technical sentiment across all cached tickers"""
+        cached = self.technical_cache.get("aggregate")
+        if cached and self.is_cache_valid():
+            return cached
+        return self._calculate_aggregate_sentiment()
+    
+    def _calculate_aggregate_sentiment(self) -> Dict[str, Any]:
+        """Calculate aggregate sentiment from cached technical data"""
+        tickers = self.technical_cache.get("tickers", {})
+        
+        if not tickers:
+            return {
+                "total_tickers": 0,
+                "bullish_count": 0,
+                "bearish_count": 0,
+                "neutral_count": 0,
+                "bullish_pct": 0,
+                "bearish_pct": 0,
+                "sentiment": "NO_DATA",
+                "last_refresh": None
+            }
+        
+        bullish = 0
+        bearish = 0
+        neutral = 0
+        
+        for ticker, data in tickers.items():
+            signal = data.get("signal", "NEUTRAL")
+            if signal in ["BUY", "STRONG_BUY"]:
+                bullish += 1
+            elif signal in ["SELL", "STRONG_SELL"]:
+                bearish += 1
+            else:
+                neutral += 1
+        
+        total = len(tickers)
+        bullish_pct = round((bullish / total) * 100, 1) if total > 0 else 0
+        bearish_pct = round((bearish / total) * 100, 1) if total > 0 else 0
+        
+        # Determine overall sentiment
+        if bullish_pct >= 60:
+            sentiment = "STRONG_BULLISH"
+        elif bullish_pct >= 50:
+            sentiment = "BULLISH"
+        elif bearish_pct >= 60:
+            sentiment = "STRONG_BEARISH"
+        elif bearish_pct >= 50:
+            sentiment = "BEARISH"
+        else:
+            sentiment = "NEUTRAL"
+        
+        aggregate = {
+            "total_tickers": total,
+            "bullish_count": bullish,
+            "bearish_count": bearish,
+            "neutral_count": neutral,
+            "bullish_pct": bullish_pct,
+            "bearish_pct": bearish_pct,
+            "sentiment": sentiment,
+            "last_refresh": self.technical_cache.get("last_refresh")
+        }
+        
+        # Cache the aggregate
+        self.technical_cache["aggregate"] = aggregate
+        
+        return aggregate
+    
     # =========================================================================
     # ENGINE A: TECHNICAL ENGINE (tradingview-ta)
     # =========================================================================
@@ -120,7 +265,8 @@ class HybridScanner:
     def get_technical_analysis(
         self, 
         ticker: str, 
-        interval: str = "1d"
+        interval: str = "1d",
+        use_cache: bool = True
     ) -> Dict[str, Any]:
         """
         Get TradingView technical analysis for a ticker
@@ -128,10 +274,19 @@ class HybridScanner:
         Args:
             ticker: Stock symbol
             interval: Timeframe (1m, 5m, 15m, 1h, 4h, 1d, 1W, 1M)
+            use_cache: If True, use cached data if available (default: True)
         
         Returns:
             Dict with signal, score, and oscillator values
         """
+        # Check cache first (only for daily interval)
+        if use_cache and interval == "1d":
+            cached = self.get_cached_technical(ticker)
+            if cached:
+                logger.debug(f"Using cached technical data for {ticker}")
+                cached["from_cache"] = True
+                return cached
+        
         if not TRADINGVIEW_TA_AVAILABLE:
             return {
                 "ticker": ticker,
@@ -181,7 +336,7 @@ class HybridScanner:
             # Get specific indicator values
             indicators = analysis.indicators
             
-            return {
+            result = {
                 "ticker": ticker,
                 "interval": interval,
                 "signal": signal,
@@ -217,8 +372,15 @@ class HybridScanner:
                     "change": indicators.get("change"),
                     "change_pct": indicators.get("change") / indicators.get("open") * 100 if indicators.get("open") else None,
                 },
-                "timestamp": datetime.now().isoformat()
+                "timestamp": datetime.now().isoformat(),
+                "from_cache": False
             }
+            
+            # Cache the result for daily interval
+            if interval == "1d":
+                self.set_cached_technical(ticker, result)
+            
+            return result
             
         except Exception as e:
             # Try NYSE exchange
@@ -585,6 +747,95 @@ class HybridScanner:
                 })
         
         return candidates
+    
+    # =========================================================================
+    # DAILY REFRESH FUNCTION
+    # =========================================================================
+    
+    async def refresh_technical_cache(
+        self,
+        tickers: List[str] = None,
+        delay_between_calls: float = 1.0
+    ) -> Dict[str, Any]:
+        """
+        Refresh technical cache for all tickers.
+        
+        Should be called once daily at 9:45 AM ET (15 min after market open)
+        to get fresh technical readings with the opening price action settled.
+        
+        Args:
+            tickers: List of tickers to refresh (defaults to watchlist + top stocks)
+            delay_between_calls: Seconds between API calls to avoid rate limiting
+        
+        Returns:
+            Dict with refresh summary and aggregate sentiment
+        """
+        # Default to a curated list for daily refresh
+        default_tickers = [
+            # Major indices/ETFs for market pulse
+            "SPY", "QQQ", "IWM", "DIA",
+            # Mega caps (market movers)
+            "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA",
+            # Sector leaders
+            "XLF", "XLE", "XLK", "XLV", "XLI", "XLP", "XLU", "XLB", "XLRE",
+            # Additional key stocks
+            "AMD", "JPM", "V", "MA", "UNH", "JNJ", "WMT", "HD", "BAC", "GS",
+            "NFLX", "ADBE", "CRM", "ORCL", "INTC", "MU", "QCOM", "AVGO",
+        ]
+        
+        refresh_list = tickers or default_tickers
+        success_count = 0
+        error_count = 0
+        errors = []
+        
+        logger.info(f"📊 Starting daily technical refresh for {len(refresh_list)} tickers...")
+        start_time = datetime.now()
+        
+        for i, ticker in enumerate(refresh_list):
+            try:
+                # Force fresh fetch by bypassing cache
+                result = self.get_technical_analysis(ticker, interval="1d", use_cache=False)
+                
+                if result.get("signal") != TechnicalSignal.ERROR.value:
+                    success_count += 1
+                    logger.debug(f"✅ {ticker}: {result.get('signal')}")
+                else:
+                    error_count += 1
+                    errors.append({"ticker": ticker, "error": result.get("error", "Unknown")})
+                    logger.warning(f"⚠️ {ticker}: {result.get('error')}")
+                
+            except Exception as e:
+                error_count += 1
+                errors.append({"ticker": ticker, "error": str(e)})
+                logger.error(f"❌ {ticker}: {e}")
+            
+            # Delay to avoid rate limiting (TradingView can be strict)
+            if i < len(refresh_list) - 1:
+                await asyncio.sleep(delay_between_calls)
+        
+        # Update cache metadata
+        self.technical_cache["last_refresh"] = datetime.now().isoformat()
+        self._save_technical_cache()
+        
+        # Calculate aggregate sentiment
+        aggregate = self._calculate_aggregate_sentiment()
+        
+        elapsed = (datetime.now() - start_time).total_seconds()
+        
+        summary = {
+            "status": "completed",
+            "refresh_time": self.technical_cache["last_refresh"],
+            "duration_seconds": round(elapsed, 1),
+            "tickers_requested": len(refresh_list),
+            "success_count": success_count,
+            "error_count": error_count,
+            "errors": errors[:10],  # Only return first 10 errors
+            "aggregate_sentiment": aggregate
+        }
+        
+        logger.info(f"📊 Daily refresh complete: {success_count}/{len(refresh_list)} tickers, {round(elapsed, 1)}s")
+        
+        return summary
 
 
 # Singleton instance
@@ -619,3 +870,21 @@ def get_fundamental(ticker: str) -> Dict[str, Any]:
     """Get fundamental analysis for single ticker"""
     scanner = get_scanner()
     return scanner.get_fundamental_analysis(ticker)
+
+
+async def refresh_technicals(tickers: List[str] = None) -> Dict[str, Any]:
+    """Refresh technical cache for daily update"""
+    scanner = get_scanner()
+    return await scanner.refresh_technical_cache(tickers)
+
+
+def get_aggregate_sentiment() -> Dict[str, Any]:
+    """Get aggregate technical sentiment for macro bias"""
+    scanner = get_scanner()
+    return scanner.get_aggregate_sentiment()
+
+
+def is_cache_fresh() -> bool:
+    """Check if technical cache is fresh"""
+    scanner = get_scanner()
+    return scanner.is_cache_valid()

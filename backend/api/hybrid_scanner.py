@@ -26,6 +26,9 @@ try:
         scan_market,
         get_technical,
         get_fundamental,
+        refresh_technicals,
+        get_aggregate_sentiment,
+        is_cache_fresh,
         TRADINGVIEW_TA_AVAILABLE,
         YFINANCE_AVAILABLE
     )
@@ -223,6 +226,8 @@ async def get_combined_analysis(
                 "score": technical.get("signal_score", {}),
                 "oscillators_summary": technical.get("oscillators", {}).get("summary"),
                 "ma_summary": technical.get("moving_averages", {}).get("summary"),
+                "from_cache": technical.get("from_cache", False),
+                "timestamp": technical.get("timestamp"),
             },
             "analyst_gauge": {
                 "consensus": analyst_consensus,
@@ -322,6 +327,105 @@ async def get_strategy_candidates(
         
     except Exception as e:
         logger.error(f"Error getting candidates: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =========================================================================
+# DAILY CACHE & AGGREGATE ENDPOINTS (for Macro Bias)
+# =========================================================================
+
+@router.get("/cache-status")
+async def get_cache_status():
+    """
+    Check technical cache freshness
+    
+    Cache is refreshed daily at 9:45 AM ET (15 min after market open).
+    Returns whether cache is valid and when it was last updated.
+    """
+    if not SCANNER_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Hybrid Scanner not available")
+    
+    try:
+        scanner = get_scanner()
+        cache = scanner.technical_cache
+        
+        return {
+            "status": "success",
+            "cache_valid": scanner.is_cache_valid(),
+            "last_refresh": cache.get("last_refresh"),
+            "tickers_cached": len(cache.get("tickers", {})),
+            "refresh_schedule": "Daily at 9:45 AM ET",
+            "message": "Cache is fresh" if scanner.is_cache_valid() else "Cache needs refresh"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting cache status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/refresh")
+async def trigger_technical_refresh(
+    tickers: Optional[str] = Query(None, description="Comma-separated tickers to refresh (optional)")
+):
+    """
+    Trigger daily technical data refresh
+    
+    Should be called once daily at 9:45 AM ET (15 min after market open).
+    This pulls fresh technical signals from TradingView and caches them.
+    
+    Rate limits are respected by adding delays between calls.
+    Takes approximately 30-60 seconds for the default watchlist.
+    """
+    if not SCANNER_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Hybrid Scanner not available")
+    
+    try:
+        ticker_list = None
+        if tickers:
+            ticker_list = [t.strip().upper() for t in tickers.split(",")]
+        
+        result = await refresh_technicals(ticker_list)
+        
+        return {
+            "status": "success",
+            "message": f"Refreshed {result.get('success_count')} tickers",
+            **result
+        }
+        
+    except Exception as e:
+        logger.error(f"Error refreshing technical cache: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/aggregate")
+async def get_aggregate_technical_sentiment():
+    """
+    Get aggregate technical sentiment across all cached tickers
+    
+    This is used for the Daily Macro Bias indicator:
+    - STRONG_BULLISH: 60%+ tickers showing Buy
+    - BULLISH: 50-60% tickers showing Buy
+    - NEUTRAL: Mixed signals
+    - BEARISH: 50-60% tickers showing Sell  
+    - STRONG_BEARISH: 60%+ tickers showing Sell
+    
+    Use this to gauge overall market technical health.
+    """
+    if not SCANNER_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Hybrid Scanner not available")
+    
+    try:
+        aggregate = get_aggregate_sentiment()
+        
+        return {
+            "status": "success",
+            "aggregate": aggregate,
+            "cache_valid": is_cache_fresh(),
+            "use_for": "Daily Macro Bias - Market Technical Health"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting aggregate sentiment: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
