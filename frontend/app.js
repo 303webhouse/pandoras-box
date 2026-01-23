@@ -1630,13 +1630,14 @@ async function analyzeHybridTicker(ticker) {
         const response = await fetch(`${API_URL}/hybrid/combined/${ticker}`);
         const data = await response.json();
         
-        if (data.status === 'success' && data.data) {
-            renderHybridAnalysis(data.data);
+        if (data.status === 'success') {
+            // API returns data at root level, not nested under 'data'
+            renderHybridAnalysis(data);
         } else {
             updateHybridGauges({
                 technical: { signal: 'Error', error: true },
                 analyst: { signal: 'Error', error: true },
-                combined: { signal: data.message || 'Error', error: true }
+                combined: { signal: data.message || data.detail || 'Error', error: true }
             });
         }
     } catch (error) {
@@ -1650,63 +1651,66 @@ async function analyzeHybridTicker(ticker) {
 }
 
 function renderHybridAnalysis(data) {
-    const tech = data.technical || {};
-    const fund = data.fundamental || {};
+    // Use the actual API response structure
+    const tech = data.technical_gauge || {};
+    const analyst = data.analyst_gauge || {};
+    const combined = data.combined || {};
     const meta = data.metadata || {};
+    const price = data.price || {};
     
     // Technical Gauge
     const techSignal = document.getElementById('techSignal');
-    const techScore = document.getElementById('techScore');
+    const techScoreEl = document.getElementById('techScore');
     const techDetails = document.getElementById('techDetails');
     
     if (techSignal) {
-        const signal = tech.summary_signal || '--';
-        techSignal.textContent = signal;
+        const signal = tech.signal || '--';
+        techSignal.textContent = signal.replace('_', ' ');
         techSignal.className = 'gauge-signal ' + getSignalClass(signal);
     }
     
-    if (techScore) {
-        const buyCount = tech.summary_buy_count || 0;
-        const sellCount = tech.summary_sell_count || 0;
-        techScore.innerHTML = `<span class="buy-count">${buyCount} Buy</span> / <span class="sell-count">${sellCount} Sell</span>`;
+    if (techScoreEl) {
+        const score = tech.score || {};
+        const buyCount = score.buy || 0;
+        const sellCount = score.sell || 0;
+        techScoreEl.innerHTML = `<span class="buy-count">${buyCount} Buy</span> / <span class="sell-count">${sellCount} Sell</span>`;
     }
     
     if (techDetails) {
-        const oscSignal = tech.oscillators_signal || '--';
-        const maSignal = tech.moving_averages_signal || '--';
+        const oscSignal = tech.oscillators_summary || '--';
+        const maSignal = tech.ma_summary || '--';
         techDetails.innerHTML = `
-            <div>Oscillators: <span>${oscSignal}</span></div>
-            <div>Moving Avgs: <span>${maSignal}</span></div>
+            <div>Oscillators: <span>${oscSignal?.replace('_', ' ') || '--'}</span></div>
+            <div>Moving Avgs: <span>${maSignal?.replace('_', ' ') || '--'}</span></div>
         `;
     }
     
     // Analyst Gauge
     const analystSignal = document.getElementById('analystSignal');
-    const analystScore = document.getElementById('analystScore');
+    const analystScoreEl = document.getElementById('analystScore');
     const analystDetails = document.getElementById('analystDetails');
     
     if (analystSignal) {
-        const rec = fund.recommendation_key || '--';
+        const rec = analyst.consensus || '--';
         const displayRec = rec.toUpperCase().replace('_', ' ');
         analystSignal.textContent = displayRec;
         analystSignal.className = 'gauge-signal ' + getAnalystClass(rec);
     }
     
-    if (analystScore) {
-        const numAnalysts = fund.number_of_analysts || '?';
-        analystScore.innerHTML = `<span class="analyst-count">${numAnalysts} analysts</span>`;
+    if (analystScoreEl) {
+        const numAnalysts = analyst.num_analysts || '?';
+        analystScoreEl.innerHTML = `<span class="analyst-count">${numAnalysts} analysts</span>`;
     }
     
     if (analystDetails) {
-        const targetPrice = fund.target_mean_price;
-        const currentPrice = fund.current_price;
+        const targetPrice = analyst.price_target;
+        const upsidePct = analyst.upside_pct;
         let upside = '--';
         let upsideClass = '';
         
-        if (targetPrice && currentPrice) {
-            const upsideVal = ((targetPrice - currentPrice) / currentPrice * 100).toFixed(1);
-            upside = (upsideVal > 0 ? '+' : '') + upsideVal + '%';
-            upsideClass = upsideVal > 0 ? 'upside-positive' : 'upside-negative';
+        if (upsidePct !== undefined && upsidePct !== null) {
+            upside = (upsidePct > 0 ? '+' : '') + upsidePct.toFixed(1) + '%';
+            upsideClass = upsidePct > 0 ? 'upside-positive' : 'upside-negative';
         }
         
         analystDetails.innerHTML = `
@@ -1717,40 +1721,23 @@ function renderHybridAnalysis(data) {
     
     // Combined Gauge
     const combinedSignal = document.getElementById('combinedSignal');
-    const combinedScore = document.getElementById('combinedScore');
+    const combinedScoreEl = document.getElementById('combinedScore');
     const tickerMeta = document.getElementById('tickerMeta');
     
     if (combinedSignal) {
-        // Determine combined sentiment
-        const techSig = (tech.summary_signal || '').toLowerCase();
-        const analystRec = (fund.recommendation_key || '').toLowerCase();
-        
-        let combined = 'NEUTRAL';
-        if ((techSig.includes('buy') || techSig.includes('strong buy')) && 
-            (analystRec.includes('buy') || analystRec === 'strong_buy')) {
-            combined = 'STRONG BUY';
-        } else if (techSig.includes('buy') || analystRec.includes('buy')) {
-            combined = 'BUY';
-        } else if ((techSig.includes('sell') || techSig.includes('strong sell')) && 
-                   (analystRec.includes('sell') || analystRec === 'strong_sell')) {
-            combined = 'STRONG SELL';
-        } else if (techSig.includes('sell') || analystRec.includes('sell')) {
-            combined = 'SELL';
-        }
-        
-        combinedSignal.textContent = combined;
-        combinedSignal.className = 'gauge-signal ' + getSignalClass(combined);
+        const rec = combined.recommendation || 'NEUTRAL';
+        combinedSignal.textContent = rec.replace('_', ' ');
+        combinedSignal.className = 'gauge-signal ' + getSignalClass(rec);
     }
     
-    if (combinedScore) {
-        // Simple scoring: 1-5 based on alignment
-        const score = calculateHybridScore(tech, fund);
-        combinedScore.textContent = `Score: ${score}/5`;
+    if (combinedScoreEl) {
+        const score = combined.score || '--';
+        combinedScoreEl.textContent = `Score: ${score}/5`;
     }
     
     if (tickerMeta) {
-        const name = meta.short_name || meta.ticker || '--';
-        const sector = fund.sector || '--';
+        const name = meta.name || data.ticker || '--';
+        const sector = meta.sector || '--';
         tickerMeta.innerHTML = `
             <div id="tickerName">${name}</div>
             <div id="tickerSector">${sector}</div>
@@ -1836,8 +1823,10 @@ async function runHybridScan() {
         const response = await fetch(`${API_URL}/hybrid/scan?tickers=${tickers}&limit=10`);
         const data = await response.json();
         
-        if (data.status === 'success' && data.data?.results) {
-            renderHybridTable(data.data.results);
+        // API returns results directly or under data.results
+        const results = data.results || data.data?.results;
+        if (data.status === 'success' && results) {
+            renderHybridTable(results);
             if (resultsDiv) resultsDiv.style.display = 'block';
         } else {
             if (tableBody) tableBody.innerHTML = '<tr><td colspan="6" style="text-align:center">No results</td></tr>';
@@ -1864,29 +1853,31 @@ function renderHybridTable(results) {
     }
     
     tableBody.innerHTML = results.map(item => {
-        const tech = item.technical || {};
-        const fund = item.fundamental || {};
+        // Use the actual API response structure
+        const tech = item.technical_gauge || item.technical || {};
+        const analyst = item.analyst_gauge || item.fundamental || {};
+        const meta = item.metadata || {};
         
-        const techSignal = tech.summary_signal || '--';
-        const techClass = getSignalClass(techSignal);
+        const techSignal = (tech.signal || '--').replace('_', ' ');
+        const techClass = getSignalClass(tech.signal);
         
-        const analystRec = (fund.recommendation_key || '--').toUpperCase().replace('_', ' ');
-        const analystClass = getAnalystClass(fund.recommendation_key);
+        const analystRec = (analyst.consensus || '--').toUpperCase().replace('_', ' ');
+        const analystClass = getAnalystClass(analyst.consensus);
         
-        // Calculate upside
+        // Calculate upside from API response
         let upside = '--';
         let upsideClass = '';
-        if (fund.target_mean_price && fund.current_price) {
-            const upsideVal = ((fund.target_mean_price - fund.current_price) / fund.current_price * 100).toFixed(1);
-            upside = (upsideVal > 0 ? '+' : '') + upsideVal + '%';
-            upsideClass = upsideVal > 0 ? 'upside-positive' : 'upside-negative';
+        if (analyst.upside_pct !== undefined && analyst.upside_pct !== null) {
+            upside = (analyst.upside_pct > 0 ? '+' : '') + analyst.upside_pct.toFixed(1) + '%';
+            upsideClass = analyst.upside_pct > 0 ? 'upside-positive' : 'upside-negative';
         }
         
-        // Calculate strength (buy - sell)
-        const strength = (tech.summary_buy_count || 0) - (tech.summary_sell_count || 0);
+        // Calculate strength (buy - sell) from score
+        const score = tech.score || {};
+        const strength = (score.buy || 0) - (score.sell || 0);
         const strengthStr = strength > 0 ? '+' + strength : String(strength);
         
-        const sector = fund.sector || '--';
+        const sector = meta.sector || '--';
         
         return `
             <tr>
