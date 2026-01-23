@@ -1,0 +1,521 @@
+"""
+Automated Bias Scheduler
+
+Handles automatic refresh of all bias indicators:
+- Daily Bias: Refreshes at 9:45 AM ET every trading day
+- Weekly Bias: Refreshes at 9:45 AM ET every Monday
+- Monthly Bias: Refreshes at 9:45 AM ET on first trading day of month
+
+Stores historical values to show trends (vs previous period).
+"""
+
+import os
+import json
+import logging
+import asyncio
+from datetime import datetime, timedelta
+from typing import Dict, Any, Optional, List
+from enum import Enum
+
+logger = logging.getLogger(__name__)
+
+# State file for bias history
+BIAS_HISTORY_FILE = os.path.join(os.path.dirname(__file__), "..", "..", "data", "bias_history.json")
+
+
+class BiasTimeframe(str, Enum):
+    DAILY = "DAILY"
+    WEEKLY = "WEEKLY"
+    MONTHLY = "MONTHLY"
+
+
+class TrendDirection(str, Enum):
+    IMPROVING = "IMPROVING"      # More bullish than previous
+    DECLINING = "DECLINING"      # More bearish than previous
+    STABLE = "STABLE"           # Same as previous
+    NEW = "NEW"                 # No previous data
+
+
+# Bias level numeric values for comparison
+BIAS_LEVELS = {
+    "TORO_MAJOR": 5,
+    "TORO MAJOR": 5,
+    "TORO_MINOR": 4,
+    "TORO MINOR": 4,
+    "NEUTRAL": 3,
+    "URSA_MINOR": 2,
+    "URSA MINOR": 2,
+    "URSA_MAJOR": 1,
+    "URSA MAJOR": 1,
+}
+
+
+def _load_bias_history() -> Dict[str, Any]:
+    """Load bias history from disk"""
+    try:
+        if os.path.exists(BIAS_HISTORY_FILE):
+            with open(BIAS_HISTORY_FILE, 'r') as f:
+                return json.load(f)
+    except Exception as e:
+        logger.error(f"Error loading bias history: {e}")
+    
+    return {
+        "daily": {"current": None, "previous": None, "history": []},
+        "weekly": {"current": None, "previous": None, "history": []},
+        "monthly": {"current": None, "previous": None, "history": []},
+        "last_updated": None
+    }
+
+
+def _save_bias_history(data: Dict[str, Any]):
+    """Save bias history to disk"""
+    try:
+        os.makedirs(os.path.dirname(BIAS_HISTORY_FILE), exist_ok=True)
+        with open(BIAS_HISTORY_FILE, 'w') as f:
+            json.dump(data, f, indent=2, default=str)
+    except Exception as e:
+        logger.error(f"Error saving bias history: {e}")
+
+
+def calculate_trend(current_level: str, previous_level: str) -> TrendDirection:
+    """Calculate trend direction between two bias levels"""
+    if not previous_level:
+        return TrendDirection.NEW
+    
+    current_val = BIAS_LEVELS.get(current_level.upper().replace("_", " "), 3)
+    previous_val = BIAS_LEVELS.get(previous_level.upper().replace("_", " "), 3)
+    
+    if current_val > previous_val:
+        return TrendDirection.IMPROVING
+    elif current_val < previous_val:
+        return TrendDirection.DECLINING
+    else:
+        return TrendDirection.STABLE
+
+
+def update_bias(
+    timeframe: BiasTimeframe,
+    new_level: str,
+    details: Dict[str, Any] = None
+) -> Dict[str, Any]:
+    """
+    Update bias for a timeframe, storing previous value for trend tracking
+    
+    Args:
+        timeframe: DAILY, WEEKLY, or MONTHLY
+        new_level: The new bias level (e.g., "TORO_MAJOR", "NEUTRAL", etc.)
+        details: Additional details to store (data sources, components, etc.)
+    
+    Returns:
+        Dict with current, previous, trend, and timestamp
+    """
+    history = _load_bias_history()
+    tf_key = timeframe.value.lower()
+    
+    # Get current data (will become previous)
+    current_data = history.get(tf_key, {}).get("current")
+    
+    # Create new current entry
+    now = datetime.now()
+    new_entry = {
+        "level": new_level,
+        "timestamp": now.isoformat(),
+        "details": details or {}
+    }
+    
+    # Calculate trend
+    previous_level = current_data.get("level") if current_data else None
+    trend = calculate_trend(new_level, previous_level)
+    
+    # Update history
+    if tf_key not in history:
+        history[tf_key] = {"current": None, "previous": None, "history": []}
+    
+    # Shift current to previous
+    if current_data:
+        history[tf_key]["previous"] = current_data
+        # Add to history (keep last 30 entries)
+        history[tf_key]["history"] = [current_data] + history[tf_key].get("history", [])[:29]
+    
+    # Set new current
+    history[tf_key]["current"] = new_entry
+    history[tf_key]["trend"] = trend.value
+    history["last_updated"] = now.isoformat()
+    
+    _save_bias_history(history)
+    
+    return {
+        "timeframe": timeframe.value,
+        "current": new_entry,
+        "previous": current_data,
+        "trend": trend.value,
+        "trend_description": _get_trend_description(trend, previous_level, new_level)
+    }
+
+
+def _get_trend_description(trend: TrendDirection, previous: str, current: str) -> str:
+    """Get human-readable trend description"""
+    if trend == TrendDirection.NEW:
+        return "First reading"
+    elif trend == TrendDirection.IMPROVING:
+        return f"↑ More bullish (was {previous})"
+    elif trend == TrendDirection.DECLINING:
+        return f"↓ More bearish (was {previous})"
+    else:
+        return f"→ Unchanged from {previous}"
+
+
+def get_bias_status(timeframe: BiasTimeframe = None) -> Dict[str, Any]:
+    """
+    Get current bias status with trend information
+    
+    Args:
+        timeframe: Specific timeframe, or None for all
+    
+    Returns:
+        Dict with bias data including trends
+    """
+    history = _load_bias_history()
+    
+    if timeframe:
+        tf_key = timeframe.value.lower()
+        tf_data = history.get(tf_key, {})
+        current = tf_data.get("current", {})
+        previous = tf_data.get("previous", {})
+        
+        return {
+            "timeframe": timeframe.value,
+            "level": current.get("level", "NEUTRAL"),
+            "timestamp": current.get("timestamp"),
+            "details": current.get("details", {}),
+            "trend": tf_data.get("trend", "NEW"),
+            "previous": {
+                "level": previous.get("level") if previous else None,
+                "timestamp": previous.get("timestamp") if previous else None
+            }
+        }
+    
+    # Return all timeframes
+    result = {}
+    for tf in BiasTimeframe:
+        tf_key = tf.value.lower()
+        tf_data = history.get(tf_key, {})
+        current = tf_data.get("current", {})
+        previous = tf_data.get("previous", {})
+        
+        result[tf_key] = {
+            "level": current.get("level", "NEUTRAL"),
+            "timestamp": current.get("timestamp"),
+            "trend": tf_data.get("trend", "NEW"),
+            "previous_level": previous.get("level") if previous else None
+        }
+    
+    result["last_updated"] = history.get("last_updated")
+    return result
+
+
+def get_bias_history(timeframe: BiasTimeframe, limit: int = 10) -> List[Dict[str, Any]]:
+    """Get historical bias values for a timeframe"""
+    history = _load_bias_history()
+    tf_key = timeframe.value.lower()
+    
+    tf_data = history.get(tf_key, {})
+    entries = []
+    
+    # Add current
+    if tf_data.get("current"):
+        entries.append(tf_data["current"])
+    
+    # Add history
+    entries.extend(tf_data.get("history", []))
+    
+    return entries[:limit]
+
+
+# =========================================================================
+# REFRESH FUNCTIONS - Called by scheduler
+# =========================================================================
+
+async def refresh_daily_bias() -> Dict[str, Any]:
+    """
+    Refresh daily bias based on:
+    - Technical aggregate sentiment (Hybrid Scanner)
+    - Market indicators
+    
+    Scheduled: 9:45 AM ET every trading day
+    """
+    logger.info("📊 Refreshing Daily Bias...")
+    
+    try:
+        # Import here to avoid circular imports
+        from scanners.hybrid_scanner import get_aggregate_sentiment, refresh_technicals, is_cache_fresh
+        
+        # Refresh technical cache if needed
+        if not is_cache_fresh():
+            logger.info("Refreshing technical cache for daily bias...")
+            await refresh_technicals()
+        
+        # Get aggregate sentiment
+        aggregate = get_aggregate_sentiment()
+        
+        # Map aggregate sentiment to bias level
+        sentiment = aggregate.get("sentiment", "NEUTRAL")
+        
+        bias_map = {
+            "STRONG_BULLISH": "TORO_MAJOR",
+            "BULLISH": "TORO_MINOR",
+            "NEUTRAL": "NEUTRAL",
+            "BEARISH": "URSA_MINOR",
+            "STRONG_BEARISH": "URSA_MAJOR"
+        }
+        
+        new_level = bias_map.get(sentiment, "NEUTRAL")
+        
+        # Update bias with trend tracking
+        result = update_bias(
+            BiasTimeframe.DAILY,
+            new_level,
+            details={
+                "source": "hybrid_scanner_aggregate",
+                "bullish_pct": aggregate.get("bullish_pct"),
+                "bearish_pct": aggregate.get("bearish_pct"),
+                "tickers_analyzed": aggregate.get("total_tickers"),
+                "technical_refresh_time": aggregate.get("last_refresh")
+            }
+        )
+        
+        logger.info(f"✅ Daily Bias updated: {new_level} (trend: {result.get('trend')})")
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error refreshing daily bias: {e}")
+        return {"error": str(e)}
+
+
+async def refresh_weekly_bias() -> Dict[str, Any]:
+    """
+    Refresh weekly bias based on:
+    - Weekly technical signals
+    - Weekly trend analysis
+    
+    Scheduled: 9:45 AM ET every Monday
+    """
+    logger.info("📊 Refreshing Weekly Bias...")
+    
+    try:
+        from scanners.hybrid_scanner import get_scanner
+        
+        # Get weekly technical analysis for key indices
+        scanner = get_scanner()
+        indices = ["SPY", "QQQ", "IWM", "DIA"]
+        
+        bullish_count = 0
+        bearish_count = 0
+        
+        for ticker in indices:
+            try:
+                # Use weekly interval
+                tech = scanner.get_technical_analysis(ticker, interval="1W")
+                signal = tech.get("signal", "NEUTRAL")
+                
+                if signal in ["BUY", "STRONG_BUY"]:
+                    bullish_count += 1
+                elif signal in ["SELL", "STRONG_SELL"]:
+                    bearish_count += 1
+            except:
+                pass
+        
+        # Determine weekly bias
+        total = bullish_count + bearish_count
+        if total == 0:
+            new_level = "NEUTRAL"
+        elif bullish_count >= 3:
+            new_level = "TORO_MAJOR"
+        elif bullish_count >= 2:
+            new_level = "TORO_MINOR"
+        elif bearish_count >= 3:
+            new_level = "URSA_MAJOR"
+        elif bearish_count >= 2:
+            new_level = "URSA_MINOR"
+        else:
+            new_level = "NEUTRAL"
+        
+        result = update_bias(
+            BiasTimeframe.WEEKLY,
+            new_level,
+            details={
+                "source": "weekly_index_technicals",
+                "bullish_indices": bullish_count,
+                "bearish_indices": bearish_count,
+                "indices_checked": indices
+            }
+        )
+        
+        logger.info(f"✅ Weekly Bias updated: {new_level} (trend: {result.get('trend')})")
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error refreshing weekly bias: {e}")
+        return {"error": str(e)}
+
+
+async def refresh_monthly_bias() -> Dict[str, Any]:
+    """
+    Refresh monthly bias based on:
+    - Monthly technical signals
+    - Macro indicators
+    
+    Scheduled: 9:45 AM ET on first trading day of month
+    """
+    logger.info("📊 Refreshing Monthly Bias...")
+    
+    try:
+        from scanners.hybrid_scanner import get_scanner
+        
+        # Get monthly technical analysis for key indices
+        scanner = get_scanner()
+        indices = ["SPY", "QQQ", "IWM"]
+        
+        bullish_count = 0
+        bearish_count = 0
+        
+        for ticker in indices:
+            try:
+                # Use monthly interval
+                tech = scanner.get_technical_analysis(ticker, interval="1M")
+                signal = tech.get("signal", "NEUTRAL")
+                
+                if signal in ["BUY", "STRONG_BUY"]:
+                    bullish_count += 1
+                elif signal in ["SELL", "STRONG_SELL"]:
+                    bearish_count += 1
+            except:
+                pass
+        
+        # Determine monthly bias
+        if bullish_count >= 2:
+            new_level = "TORO_MAJOR" if bullish_count == 3 else "TORO_MINOR"
+        elif bearish_count >= 2:
+            new_level = "URSA_MAJOR" if bearish_count == 3 else "URSA_MINOR"
+        else:
+            new_level = "NEUTRAL"
+        
+        result = update_bias(
+            BiasTimeframe.MONTHLY,
+            new_level,
+            details={
+                "source": "monthly_index_technicals",
+                "bullish_indices": bullish_count,
+                "bearish_indices": bearish_count,
+                "indices_checked": indices
+            }
+        )
+        
+        logger.info(f"✅ Monthly Bias updated: {new_level} (trend: {result.get('trend')})")
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error refreshing monthly bias: {e}")
+        return {"error": str(e)}
+
+
+# =========================================================================
+# SCHEDULER SETUP
+# =========================================================================
+
+_scheduler_started = False
+
+def is_trading_day() -> bool:
+    """Check if today is a trading day (Mon-Fri, not a holiday)"""
+    today = datetime.now()
+    # Simple check: Monday=0 through Friday=4
+    return today.weekday() < 5
+
+
+def is_first_trading_day_of_month() -> bool:
+    """Check if today is the first trading day of the month"""
+    today = datetime.now()
+    
+    # Find first weekday of month
+    first_day = today.replace(day=1)
+    while first_day.weekday() >= 5:  # Saturday or Sunday
+        first_day += timedelta(days=1)
+    
+    return today.date() == first_day.date()
+
+
+async def run_scheduled_refreshes():
+    """
+    Run appropriate refreshes based on current time/day
+    Called by the scheduler at 9:45 AM ET
+    """
+    now = datetime.now()
+    logger.info(f"⏰ Running scheduled bias refresh at {now}")
+    
+    if not is_trading_day():
+        logger.info("Not a trading day, skipping refresh")
+        return
+    
+    # Always refresh daily
+    await refresh_daily_bias()
+    
+    # Monday = refresh weekly
+    if now.weekday() == 0:
+        await refresh_weekly_bias()
+    
+    # First trading day of month = refresh monthly
+    if is_first_trading_day_of_month():
+        await refresh_monthly_bias()
+
+
+async def start_scheduler():
+    """Start the background scheduler"""
+    global _scheduler_started
+    
+    if _scheduler_started:
+        logger.info("Scheduler already running")
+        return
+    
+    _scheduler_started = True
+    logger.info("🚀 Starting bias scheduler...")
+    
+    # Use APScheduler if available, otherwise use simple asyncio loop
+    try:
+        from apscheduler.schedulers.asyncio import AsyncIOScheduler
+        from apscheduler.triggers.cron import CronTrigger
+        
+        scheduler = AsyncIOScheduler()
+        
+        # Daily refresh at 9:45 AM ET (Mon-Fri)
+        scheduler.add_job(
+            run_scheduled_refreshes,
+            CronTrigger(hour=9, minute=45, day_of_week='mon-fri'),
+            id='bias_refresh',
+            name='Daily Bias Refresh',
+            replace_existing=True
+        )
+        
+        scheduler.start()
+        logger.info("✅ APScheduler started - bias refresh scheduled for 9:45 AM ET")
+        
+    except ImportError:
+        logger.warning("APScheduler not installed, using fallback scheduler")
+        # Fallback: Simple asyncio-based scheduler
+        asyncio.create_task(_fallback_scheduler())
+
+
+async def _fallback_scheduler():
+    """Fallback scheduler using asyncio (runs in background)"""
+    logger.info("Starting fallback scheduler loop")
+    
+    while True:
+        now = datetime.now()
+        
+        # Check if it's 9:45 AM (within 1 minute window)
+        if now.hour == 9 and 45 <= now.minute < 46:
+            await run_scheduled_refreshes()
+            # Wait 2 minutes to avoid duplicate runs
+            await asyncio.sleep(120)
+        else:
+            # Check every minute
+            await asyncio.sleep(60)

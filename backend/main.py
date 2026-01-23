@@ -36,6 +36,15 @@ async def lifespan(app: FastAPI):
     postgres_client = await get_postgres_client()
     
     logger.info("✅ Database connections established")
+    
+    # Start the bias scheduler
+    try:
+        from scheduler.bias_scheduler import start_scheduler
+        await start_scheduler()
+        logger.info("✅ Bias scheduler started")
+    except Exception as e:
+        logger.warning(f"⚠️ Could not start scheduler: {e}")
+    
     logger.info("✅ Pandora's Box is live")
     
     yield
@@ -127,6 +136,7 @@ from api.btc_signals import router as btc_signals_router
 from api.flow import router as flow_router
 from api.dollar_smile import router as dollar_smile_router
 from api.hybrid_scanner import router as hybrid_scanner_router
+from api.bias_scheduler import router as bias_scheduler_router
 
 app.include_router(webhook_router, prefix="/webhook", tags=["webhooks"])
 app.include_router(positions_router, prefix="/api", tags=["positions"])
@@ -138,6 +148,7 @@ app.include_router(cta_router, prefix="/api", tags=["cta"])
 app.include_router(btc_signals_router, prefix="/api", tags=["btc-signals"])
 app.include_router(flow_router, prefix="/api", tags=["options-flow"])
 app.include_router(dollar_smile_router, prefix="/api", tags=["dollar-smile"])
+app.include_router(bias_scheduler_router, prefix="/api", tags=["bias-scheduler"])
 app.include_router(hybrid_scanner_router, prefix="/api", tags=["hybrid-scanner"])
 
 # Serve frontend static files

@@ -176,6 +176,28 @@ body {
     line-height: 1.6;
 }
 
+/* Trend Indicators */
+.trend-indicator {
+    font-weight: bold;
+    margin-right: 4px;
+}
+
+.trend-indicator.trend-improving {
+    color: var(--accent-lime);
+}
+
+.trend-indicator.trend-declining {
+    color: var(--accent-orange);
+}
+
+.trend-indicator.trend-stable {
+    color: var(--text-secondary);
+}
+
+.trend-indicator.trend-new {
+    color: var(--accent-cyan);
+}
+
 .dollar-smile-data {
     margin-top: 8px;
     padding-top: 8px;
