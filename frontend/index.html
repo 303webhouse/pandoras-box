@@ -65,11 +65,11 @@
             </div>
         </section>
 
-        <!-- Main Content: Chart + Trade Recommendations -->
+        <!-- Main Content: Chart + Trade Ideas + Open Positions -->
         <section class="main-content">
-            <!-- Chart Area (2/3 width) -->
+            <!-- Chart Area (1/2 width) -->
             <div class="chart-area">
-                <div class="chart-tabs">
+                <div class="chart-tabs" id="chartTabs">
                     <button class="chart-tab active" data-symbol="SPY">SPY</button>
                     <button class="chart-tab" data-symbol="VIX">VIX</button>
                     <button class="chart-tab" data-symbol="BTCUSD">BTC</button>
@@ -80,7 +80,7 @@
                 </div>
             </div>
 
-            <!-- Trade Recommendations (1/3 width) -->
+            <!-- Trade Ideas (1/4 width) -->
             <div class="trades-panel">
                 <div class="trades-header">
                     <h2>TRADE IDEAS</h2>
@@ -92,6 +92,17 @@
                 <div class="signals-container" id="tradeSignals">
                     <!-- Signals will be populated by JavaScript -->
                     <p class="empty-state">No signals available</p>
+                </div>
+            </div>
+
+            <!-- Open Positions (1/4 width) -->
+            <div class="positions-panel">
+                <div class="positions-header">
+                    <h2>OPEN POSITIONS</h2>
+                    <span class="positions-count" id="positionsCount">0</span>
+                </div>
+                <div class="positions-container" id="openPositions">
+                    <p class="empty-state">No open positions</p>
                 </div>
             </div>
         </section>
@@ -450,13 +461,91 @@
             </div>
         </section>
 
-        <!-- Open Positions -->
-        <section class="positions-section">
-            <h2>Open Positions</h2>
-            <div class="positions-container" id="openPositions">
-                <p class="empty-state">No open positions</p>
+        <!-- Position Entry Modal -->
+        <div class="modal-overlay" id="positionEntryModal">
+            <div class="position-modal">
+                <div class="position-modal-header">
+                    <h2>📈 Open Position</h2>
+                    <button class="modal-close" id="closePositionModalBtn">✕</button>
+                </div>
+                <div class="position-modal-body">
+                    <div class="position-ticker-display" id="positionTickerDisplay">AAPL</div>
+                    <div class="position-direction-display" id="positionDirectionDisplay">LONG</div>
+                    
+                    <div class="position-field">
+                        <label>Entry Price *</label>
+                        <input type="number" id="positionEntryPrice" step="0.01" placeholder="e.g. 228.50" class="position-input">
+                    </div>
+                    
+                    <div class="position-field">
+                        <label id="positionQtyLabel">Quantity (Shares) *</label>
+                        <input type="number" id="positionQuantity" step="1" placeholder="e.g. 100" class="position-input">
+                    </div>
+                    
+                    <div class="position-summary" id="positionSummary">
+                        <div class="summary-row">
+                            <span>Stop Loss:</span>
+                            <span id="summaryStop">--</span>
+                        </div>
+                        <div class="summary-row">
+                            <span>Target:</span>
+                            <span id="summaryTarget">--</span>
+                        </div>
+                        <div class="summary-row">
+                            <span>Position Size:</span>
+                            <span id="summarySize">$--</span>
+                        </div>
+                        <div class="summary-row">
+                            <span>Risk Amount:</span>
+                            <span id="summaryRisk">$--</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="position-modal-footer">
+                    <button class="position-btn cancel" id="cancelPositionBtn">Cancel</button>
+                    <button class="position-btn confirm" id="confirmPositionBtn">Open Position</button>
+                </div>
             </div>
-        </section>
+        </div>
+
+        <!-- Position Close Modal -->
+        <div class="modal-overlay" id="positionCloseModal">
+            <div class="position-modal">
+                <div class="position-modal-header">
+                    <h2>📉 Close Position</h2>
+                    <button class="modal-close" id="closeCloseModalBtn">✕</button>
+                </div>
+                <div class="position-modal-body">
+                    <div class="position-ticker-display" id="closeTickerDisplay">AAPL</div>
+                    
+                    <div class="position-field">
+                        <label>Exit Price *</label>
+                        <input type="number" id="positionExitPrice" step="0.01" placeholder="e.g. 235.00" class="position-input">
+                    </div>
+                    
+                    <div class="position-field">
+                        <label id="closeQtyLabel">Quantity to Close *</label>
+                        <input type="number" id="closeQuantity" step="1" placeholder="e.g. 50" class="position-input">
+                        <small class="qty-hint" id="closeQtyHint">You have 100 shares</small>
+                    </div>
+                    
+                    <div class="position-summary" id="closeSummary">
+                        <div class="summary-row">
+                            <span>Entry Price:</span>
+                            <span id="closeEntryPrice">--</span>
+                        </div>
+                        <div class="summary-row pnl-row">
+                            <span>Realized P&L:</span>
+                            <span id="closeRealizedPnL">$--</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="position-modal-footer">
+                    <button class="position-btn cancel" id="cancelCloseBtn">Cancel</button>
+                    <button class="position-btn confirm" id="confirmCloseBtn">Close Position</button>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- TradingView Widget Script -->

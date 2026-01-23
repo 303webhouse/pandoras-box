@@ -51,6 +51,27 @@ async def get_scanner_status():
     }
 
 
+@router.get("/price/{ticker}")
+async def get_current_price(ticker: str):
+    """
+    Get current price for a ticker (for P&L calculation)
+    Fast lookup using yfinance
+    """
+    try:
+        import yfinance as yf
+        stock = yf.Ticker(ticker.upper())
+        hist = stock.history(period="1d")
+        
+        if hist.empty:
+            return {"ticker": ticker, "price": None, "error": "No data"}
+        
+        price = float(hist['Close'].iloc[-1])
+        return {"ticker": ticker.upper(), "price": round(price, 2)}
+    except Exception as e:
+        logger.error(f"Error getting price for {ticker}: {e}")
+        return {"ticker": ticker, "price": None, "error": str(e)}
+
+
 @router.get("/scan")
 async def run_market_scan(
     tickers: Optional[str] = Query(None, description="Comma-separated list of tickers (optional, uses default universe)"),

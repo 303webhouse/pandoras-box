@@ -676,6 +676,14 @@ async function handleSignalAction(event) {
     
     if (action === 'VIEW-CHART') return; // Handled separately
     
+    if (action === 'SELECT') {
+        // Open position entry modal instead of directly selecting
+        const signal = JSON.parse(card.dataset.signal);
+        openPositionEntryModal(signal, card);
+        return;
+    }
+    
+    // Handle dismiss
     try {
         const response = await fetch(`${API_URL}/signal/action`, {
             method: 'POST',
@@ -685,16 +693,11 @@ async function handleSignalAction(event) {
         
         const data = await response.json();
         
-        if (data.status === 'dismissed' || data.status === 'selected') {
+        if (data.status === 'dismissed') {
             // Remove card with animation
             card.style.opacity = '0';
             card.style.transform = 'translateX(-20px)';
             setTimeout(() => card.remove(), 300);
-            
-            // Reload positions if selected
-            if (data.status === 'selected') {
-                loadOpenPositions();
-            }
         }
     } catch (error) {
         console.error('Error handling signal action:', error);
@@ -2596,4 +2599,447 @@ async function checkFlowConfirmation(ticker, direction) {
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', () => {
     setTimeout(initOptionsFlow, 1100);
+});
+
+
+// ==========================================
+// POSITION MANAGEMENT
+// ==========================================
+
+let openPositions = [];
+let pendingPositionSignal = null;
+let pendingPositionCard = null;
+let closingPosition = null;
+let currentPrices = {};  // Cache of current prices for P&L calculation
+let priceUpdateInterval = null;
+
+function initPositionModals() {
+    // Entry modal
+    const closeEntryBtn = document.getElementById('closePositionModalBtn');
+    const cancelEntryBtn = document.getElementById('cancelPositionBtn');
+    const confirmEntryBtn = document.getElementById('confirmPositionBtn');
+    const entryModal = document.getElementById('positionEntryModal');
+    
+    if (closeEntryBtn) closeEntryBtn.addEventListener('click', closePositionEntryModal);
+    if (cancelEntryBtn) cancelEntryBtn.addEventListener('click', closePositionEntryModal);
+    if (confirmEntryBtn) confirmEntryBtn.addEventListener('click', confirmPositionEntry);
+    if (entryModal) {
+        entryModal.addEventListener('click', (e) => {
+            if (e.target === entryModal) closePositionEntryModal();
+        });
+    }
+    
+    // Entry price/qty inputs for live summary update
+    const entryPriceInput = document.getElementById('positionEntryPrice');
+    const qtyInput = document.getElementById('positionQuantity');
+    if (entryPriceInput) entryPriceInput.addEventListener('input', updatePositionSummary);
+    if (qtyInput) qtyInput.addEventListener('input', updatePositionSummary);
+    
+    // Close modal
+    const closeCloseBtn = document.getElementById('closeCloseModalBtn');
+    const cancelCloseBtn = document.getElementById('cancelCloseBtn');
+    const confirmCloseBtn = document.getElementById('confirmCloseBtn');
+    const closeModal = document.getElementById('positionCloseModal');
+    
+    if (closeCloseBtn) closeCloseBtn.addEventListener('click', closePositionCloseModal);
+    if (cancelCloseBtn) cancelCloseBtn.addEventListener('click', closePositionCloseModal);
+    if (confirmCloseBtn) confirmCloseBtn.addEventListener('click', confirmPositionClose);
+    if (closeModal) {
+        closeModal.addEventListener('click', (e) => {
+            if (e.target === closeModal) closePositionCloseModal();
+        });
+    }
+    
+    // Exit price/qty inputs for live P&L update
+    const exitPriceInput = document.getElementById('positionExitPrice');
+    const closeQtyInput = document.getElementById('closeQuantity');
+    if (exitPriceInput) exitPriceInput.addEventListener('input', updateCloseSummary);
+    if (closeQtyInput) closeQtyInput.addEventListener('input', updateCloseSummary);
+    
+    // Load existing positions
+    loadOpenPositionsEnhanced();
+    
+    // Start price updates for P&L
+    startPriceUpdates();
+}
+
+function openPositionEntryModal(signal, card) {
+    pendingPositionSignal = signal;
+    pendingPositionCard = card;
+    
+    // Populate modal
+    document.getElementById('positionTickerDisplay').textContent = signal.ticker;
+    const dirDisplay = document.getElementById('positionDirectionDisplay');
+    dirDisplay.textContent = signal.direction;
+    dirDisplay.className = 'position-direction-display ' + signal.direction;
+    
+    // Set label based on asset class
+    const qtyLabel = document.getElementById('positionQtyLabel');
+    if (signal.asset_class === 'CRYPTO') {
+        qtyLabel.textContent = 'Quantity (Tokens) *';
+    } else {
+        qtyLabel.textContent = 'Quantity (Shares) *';
+    }
+    
+    // Pre-fill entry price from signal
+    document.getElementById('positionEntryPrice').value = signal.entry_price?.toFixed(2) || '';
+    document.getElementById('positionQuantity').value = '';
+    
+    // Update summary
+    document.getElementById('summaryStop').textContent = '$' + (signal.stop_loss?.toFixed(2) || '--');
+    document.getElementById('summaryTarget').textContent = '$' + (signal.target_1?.toFixed(2) || '--');
+    document.getElementById('summarySize').textContent = '$--';
+    document.getElementById('summaryRisk').textContent = '$--';
+    
+    // Show modal
+    document.getElementById('positionEntryModal').classList.add('active');
+}
+
+function closePositionEntryModal() {
+    document.getElementById('positionEntryModal').classList.remove('active');
+    pendingPositionSignal = null;
+    pendingPositionCard = null;
+}
+
+function updatePositionSummary() {
+    if (!pendingPositionSignal) return;
+    
+    const entryPrice = parseFloat(document.getElementById('positionEntryPrice').value) || 0;
+    const qty = parseFloat(document.getElementById('positionQuantity').value) || 0;
+    const stopLoss = pendingPositionSignal.stop_loss || 0;
+    
+    const positionSize = entryPrice * qty;
+    const riskPerShare = Math.abs(entryPrice - stopLoss);
+    const totalRisk = riskPerShare * qty;
+    
+    document.getElementById('summarySize').textContent = '$' + positionSize.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+    document.getElementById('summaryRisk').textContent = '$' + totalRisk.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+}
+
+async function confirmPositionEntry() {
+    if (!pendingPositionSignal) return;
+    
+    const entryPrice = parseFloat(document.getElementById('positionEntryPrice').value);
+    const qty = parseFloat(document.getElementById('positionQuantity').value);
+    
+    if (!entryPrice || !qty) {
+        alert('Please enter both entry price and quantity');
+        return;
+    }
+    
+    try {
+        // Create position via API
+        const response = await fetch(`${API_URL}/positions/open`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                signal_id: pendingPositionSignal.signal_id,
+                ticker: pendingPositionSignal.ticker,
+                direction: pendingPositionSignal.direction,
+                entry_price: entryPrice,
+                quantity: qty,
+                stop_loss: pendingPositionSignal.stop_loss,
+                target_1: pendingPositionSignal.target_1,
+                strategy: pendingPositionSignal.strategy,
+                asset_class: pendingPositionSignal.asset_class,
+                signal_type: pendingPositionSignal.signal_type,
+                bias_level: pendingPositionSignal.bias_level
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.status === 'success' || data.position_id) {
+            // Remove signal card
+            if (pendingPositionCard) {
+                pendingPositionCard.style.opacity = '0';
+                pendingPositionCard.style.transform = 'translateX(-20px)';
+                setTimeout(() => pendingPositionCard.remove(), 300);
+            }
+            
+            // Close modal
+            closePositionEntryModal();
+            
+            // Reload positions
+            await loadOpenPositionsEnhanced();
+            
+            // Add ticker to chart tabs
+            addPositionChartTab(pendingPositionSignal.ticker);
+            
+            console.log(`📈 Position opened: ${pendingPositionSignal.ticker} ${pendingPositionSignal.direction}`);
+        } else {
+            alert('Failed to open position: ' + (data.message || 'Unknown error'));
+        }
+    } catch (error) {
+        console.error('Error opening position:', error);
+        alert('Failed to open position');
+    }
+}
+
+async function loadOpenPositionsEnhanced() {
+    try {
+        const response = await fetch(`${API_URL}/positions/open`);
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            openPositions = data.positions || [];
+            renderPositionsEnhanced();
+            updatePositionsCount();
+            updatePositionChartTabs();
+        }
+    } catch (error) {
+        console.error('Error loading positions:', error);
+    }
+}
+
+function updatePositionsCount() {
+    const countEl = document.getElementById('positionsCount');
+    if (countEl) {
+        countEl.textContent = openPositions.length;
+    }
+}
+
+function renderPositionsEnhanced() {
+    const container = document.getElementById('openPositions');
+    if (!container) return;
+    
+    if (!openPositions || openPositions.length === 0) {
+        container.innerHTML = '<p class="empty-state">No open positions</p>';
+        return;
+    }
+    
+    container.innerHTML = openPositions.map(pos => {
+        const currentPrice = currentPrices[pos.ticker] || pos.entry_price;
+        const pnl = calculatePnL(pos, currentPrice);
+        const pnlClass = pnl >= 0 ? 'positive' : 'negative';
+        const pnlStr = (pnl >= 0 ? '+' : '') + '$' + pnl.toFixed(2);
+        const pnlPct = ((currentPrice - pos.entry_price) / pos.entry_price * 100);
+        const pnlPctStr = (pnlPct >= 0 ? '+' : '') + pnlPct.toFixed(2) + '%';
+        
+        return `
+            <div class="position-card" data-position-id="${pos.id || pos.signal_id}">
+                <div class="position-card-header">
+                    <span class="position-ticker" data-ticker="${pos.ticker}">${pos.ticker}</span>
+                    <span class="position-direction ${pos.direction}">${pos.direction}</span>
+                </div>
+                <div class="position-details">
+                    <div class="position-detail">
+                        <div class="position-detail-label">Entry</div>
+                        <div class="position-detail-value">$${pos.entry_price?.toFixed(2) || '--'}</div>
+                    </div>
+                    <div class="position-detail">
+                        <div class="position-detail-label">Qty</div>
+                        <div class="position-detail-value">${pos.quantity || '--'}</div>
+                    </div>
+                    <div class="position-detail">
+                        <div class="position-detail-label">Stop</div>
+                        <div class="position-detail-value">$${pos.stop_loss?.toFixed(2) || '--'}</div>
+                    </div>
+                    <div class="position-detail">
+                        <div class="position-detail-label">Target</div>
+                        <div class="position-detail-value">$${pos.target_1?.toFixed(2) || '--'}</div>
+                    </div>
+                </div>
+                <div class="position-pnl">
+                    <span class="pnl-label">Unrealized P&L</span>
+                    <span class="pnl-value ${pnlClass}">${pnlStr} (${pnlPctStr})</span>
+                </div>
+                <div class="position-actions">
+                    <button class="position-btn-small close-btn" data-position-id="${pos.id || pos.signal_id}">Close Position</button>
+                </div>
+            </div>
+        `;
+    }).join('');
+    
+    // Attach events
+    container.querySelectorAll('.position-ticker').forEach(el => {
+        el.addEventListener('click', (e) => {
+            e.stopPropagation();
+            changeChartSymbol(e.target.dataset.ticker);
+        });
+    });
+    
+    container.querySelectorAll('.close-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const positionId = btn.dataset.positionId;
+            const position = openPositions.find(p => (p.id || p.signal_id) == positionId);
+            if (position) openPositionCloseModal(position);
+        });
+    });
+}
+
+function calculatePnL(position, currentPrice) {
+    if (!position.entry_price || !position.quantity || !currentPrice) return 0;
+    
+    if (position.direction === 'LONG') {
+        return (currentPrice - position.entry_price) * position.quantity;
+    } else {
+        return (position.entry_price - currentPrice) * position.quantity;
+    }
+}
+
+function openPositionCloseModal(position) {
+    closingPosition = position;
+    
+    document.getElementById('closeTickerDisplay').textContent = position.ticker;
+    document.getElementById('positionExitPrice').value = '';
+    document.getElementById('closeQuantity').value = position.quantity;
+    document.getElementById('closeQtyHint').textContent = `You have ${position.quantity} ${position.asset_class === 'CRYPTO' ? 'tokens' : 'shares'}`;
+    document.getElementById('closeEntryPrice').textContent = '$' + (position.entry_price?.toFixed(2) || '--');
+    document.getElementById('closeRealizedPnL').textContent = '$--';
+    document.getElementById('closeRealizedPnL').className = '';
+    
+    document.getElementById('positionCloseModal').classList.add('active');
+}
+
+function closePositionCloseModal() {
+    document.getElementById('positionCloseModal').classList.remove('active');
+    closingPosition = null;
+}
+
+function updateCloseSummary() {
+    if (!closingPosition) return;
+    
+    const exitPrice = parseFloat(document.getElementById('positionExitPrice').value) || 0;
+    const closeQty = parseFloat(document.getElementById('closeQuantity').value) || 0;
+    
+    if (exitPrice && closeQty) {
+        let pnl;
+        if (closingPosition.direction === 'LONG') {
+            pnl = (exitPrice - closingPosition.entry_price) * closeQty;
+        } else {
+            pnl = (closingPosition.entry_price - exitPrice) * closeQty;
+        }
+        
+        const pnlStr = (pnl >= 0 ? '+' : '') + '$' + pnl.toFixed(2);
+        const pnlEl = document.getElementById('closeRealizedPnL');
+        pnlEl.textContent = pnlStr;
+        pnlEl.className = pnl >= 0 ? 'positive' : 'negative';
+    }
+}
+
+async function confirmPositionClose() {
+    if (!closingPosition) return;
+    
+    const exitPrice = parseFloat(document.getElementById('positionExitPrice').value);
+    const closeQty = parseFloat(document.getElementById('closeQuantity').value);
+    
+    if (!exitPrice || !closeQty) {
+        alert('Please enter exit price and quantity');
+        return;
+    }
+    
+    if (closeQty > closingPosition.quantity) {
+        alert('Cannot close more than you own');
+        return;
+    }
+    
+    try {
+        const response = await fetch(`${API_URL}/positions/close`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                position_id: closingPosition.id || closingPosition.signal_id,
+                exit_price: exitPrice,
+                quantity_closed: closeQty
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.status === 'success' || data.status === 'closed' || data.status === 'partial_close') {
+            closePositionCloseModal();
+            await loadOpenPositionsEnhanced();
+            
+            // Remove chart tab if fully closed
+            if (closeQty >= closingPosition.quantity) {
+                removePositionChartTab(closingPosition.ticker);
+            }
+            
+            console.log(`📉 Position closed: ${closingPosition.ticker} - P&L: $${data.realized_pnl?.toFixed(2) || '--'}`);
+        } else {
+            alert('Failed to close position: ' + (data.message || 'Unknown error'));
+        }
+    } catch (error) {
+        console.error('Error closing position:', error);
+        alert('Failed to close position');
+    }
+}
+
+// Chart tabs for open positions
+function addPositionChartTab(ticker) {
+    const tabsContainer = document.getElementById('chartTabs');
+    if (!tabsContainer) return;
+    
+    // Check if tab already exists
+    const existing = tabsContainer.querySelector(`[data-symbol="${ticker}"]`);
+    if (existing) return;
+    
+    const tab = document.createElement('button');
+    tab.className = 'chart-tab position-tab';
+    tab.dataset.symbol = ticker;
+    tab.textContent = ticker;
+    tab.addEventListener('click', () => changeChartSymbol(ticker));
+    
+    tabsContainer.appendChild(tab);
+}
+
+function removePositionChartTab(ticker) {
+    const tabsContainer = document.getElementById('chartTabs');
+    if (!tabsContainer) return;
+    
+    // Don't remove default tabs
+    if (['SPY', 'VIX', 'BTCUSD'].includes(ticker)) return;
+    
+    // Check if any other position still has this ticker
+    const stillHasPosition = openPositions.some(p => p.ticker === ticker);
+    if (stillHasPosition) return;
+    
+    const tab = tabsContainer.querySelector(`[data-symbol="${ticker}"]`);
+    if (tab && tab.classList.contains('position-tab')) {
+        tab.remove();
+    }
+}
+
+function updatePositionChartTabs() {
+    // Add tabs for all open positions
+    openPositions.forEach(pos => {
+        addPositionChartTab(pos.ticker);
+    });
+}
+
+// Price updates for real-time P&L
+function startPriceUpdates() {
+    // Update every 30 seconds
+    priceUpdateInterval = setInterval(updateCurrentPrices, 30000);
+    // Initial update
+    updateCurrentPrices();
+}
+
+async function updateCurrentPrices() {
+    if (openPositions.length === 0) return;
+    
+    const tickers = [...new Set(openPositions.map(p => p.ticker))];
+    
+    for (const ticker of tickers) {
+        try {
+            // Try to get price from hybrid scanner (it's fast)
+            const response = await fetch(`${API_URL}/hybrid/price/${ticker}`);
+            const data = await response.json();
+            if (data.price) {
+                currentPrices[ticker] = data.price;
+            }
+        } catch (error) {
+            // Silently fail - we'll use entry price as fallback
+        }
+    }
+    
+    // Re-render with updated prices
+    renderPositionsEnhanced();
+}
+
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', () => {
+    setTimeout(initPositionModals, 1300);
 });

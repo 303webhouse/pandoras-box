@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime
+import logging
 
 from database.redis_client import get_signal, delete_signal
 from database.postgres_client import (
@@ -16,7 +17,14 @@ from database.postgres_client import (
 )
 from websocket.broadcaster import manager
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
+
+# In-memory position store (for quick demo - should use Redis/Postgres in production)
+_open_positions = []
+_closed_trades = []
+_position_counter = 1
 
 class SignalAction(BaseModel):
     """User action on a signal"""
@@ -28,6 +36,26 @@ class PositionUpdate(BaseModel):
     position_id: int
     exit_price: Optional[float] = None
     status: Optional[str] = None  # "OPEN", "CLOSED", "STOPPED_OUT", "TARGET_HIT"
+
+class OpenPositionRequest(BaseModel):
+    """Request to open a new position"""
+    signal_id: str
+    ticker: str
+    direction: str
+    entry_price: float
+    quantity: float
+    stop_loss: Optional[float] = None
+    target_1: Optional[float] = None
+    strategy: Optional[str] = None
+    asset_class: Optional[str] = "EQUITY"
+    signal_type: Optional[str] = None
+    bias_level: Optional[str] = None
+
+class ClosePositionRequest(BaseModel):
+    """Request to close a position"""
+    position_id: str
+    exit_price: float
+    quantity_closed: float
 
 @router.post("/signal/action")
 async def handle_signal_action(action: SignalAction):
@@ -92,6 +120,132 @@ async def handle_signal_action(action: SignalAction):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.post("/positions/open")
+async def open_position(request: OpenPositionRequest):
+    """
+    Open a new position with entry price and quantity
+    """
+    global _position_counter
+    
+    try:
+        position = {
+            "id": _position_counter,
+            "signal_id": request.signal_id,
+            "ticker": request.ticker,
+            "direction": request.direction,
+            "entry_price": request.entry_price,
+            "quantity": request.quantity,
+            "stop_loss": request.stop_loss,
+            "target_1": request.target_1,
+            "strategy": request.strategy,
+            "asset_class": request.asset_class,
+            "signal_type": request.signal_type,
+            "bias_level": request.bias_level,
+            "entry_time": datetime.now().isoformat(),
+            "status": "OPEN"
+        }
+        
+        _open_positions.append(position)
+        _position_counter += 1
+        
+        # Remove from active signals
+        await delete_signal(request.signal_id)
+        
+        # Broadcast to all devices
+        await manager.broadcast_position_update({
+            "action": "POSITION_OPENED",
+            "position": position
+        })
+        
+        logger.info(f"📈 Position opened: {request.ticker} {request.direction} @ ${request.entry_price} x {request.quantity}")
+        
+        return {"status": "success", "position_id": position["id"], "position": position}
+    
+    except Exception as e:
+        logger.error(f"Error opening position: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/positions/close")
+async def close_position(request: ClosePositionRequest):
+    """
+    Close a position (supports partial close)
+    Logs to trade history for backtesting
+    """
+    try:
+        # Find the position
+        position = None
+        position_idx = None
+        for idx, p in enumerate(_open_positions):
+            if str(p["id"]) == str(request.position_id) or p["signal_id"] == request.position_id:
+                position = p
+                position_idx = idx
+                break
+        
+        if not position:
+            raise HTTPException(status_code=404, detail="Position not found")
+        
+        # Calculate P&L
+        if position["direction"] == "LONG":
+            pnl_per_unit = request.exit_price - position["entry_price"]
+        else:
+            pnl_per_unit = position["entry_price"] - request.exit_price
+        
+        realized_pnl = pnl_per_unit * request.quantity_closed
+        
+        # Create trade history record
+        trade_record = {
+            "id": position["id"],
+            "signal_id": position["signal_id"],
+            "ticker": position["ticker"],
+            "direction": position["direction"],
+            "entry_price": position["entry_price"],
+            "exit_price": request.exit_price,
+            "quantity_closed": request.quantity_closed,
+            "realized_pnl": round(realized_pnl, 2),
+            "strategy": position.get("strategy"),
+            "signal_type": position.get("signal_type"),
+            "bias_level": position.get("bias_level"),
+            "entry_time": position.get("entry_time"),
+            "exit_time": datetime.now().isoformat(),
+            "asset_class": position.get("asset_class")
+        }
+        
+        _closed_trades.append(trade_record)
+        
+        # Check if partial or full close
+        remaining_qty = position["quantity"] - request.quantity_closed
+        
+        if remaining_qty <= 0:
+            # Full close - remove position
+            _open_positions.pop(position_idx)
+            status = "closed"
+            logger.info(f"📉 Position closed: {position['ticker']} - P&L: ${realized_pnl:.2f}")
+        else:
+            # Partial close - update quantity
+            _open_positions[position_idx]["quantity"] = remaining_qty
+            status = "partial_close"
+            logger.info(f"📉 Partial close: {position['ticker']} - Closed {request.quantity_closed}, Remaining {remaining_qty}")
+        
+        # Broadcast update
+        await manager.broadcast_position_update({
+            "action": "POSITION_CLOSED" if status == "closed" else "POSITION_PARTIAL_CLOSE",
+            "position_id": position["id"],
+            "trade_record": trade_record
+        })
+        
+        return {
+            "status": status,
+            "realized_pnl": round(realized_pnl, 2),
+            "remaining_quantity": remaining_qty if remaining_qty > 0 else 0,
+            "trade_record": trade_record
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error closing position: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.get("/positions/open")
 async def get_open_positions_api():
     """
@@ -100,9 +254,24 @@ async def get_open_positions_api():
     """
     
     try:
-        positions = await get_open_positions()
-        return {"status": "success", "positions": positions}
+        # Return in-memory positions (faster than DB query for real-time)
+        return {"status": "success", "positions": _open_positions}
     
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/positions/history")
+async def get_trade_history():
+    """
+    Get closed trade history for backtesting
+    """
+    try:
+        return {
+            "status": "success",
+            "trades": _closed_trades,
+            "total_trades": len(_closed_trades),
+            "total_pnl": sum(t.get("realized_pnl", 0) for t in _closed_trades)
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
