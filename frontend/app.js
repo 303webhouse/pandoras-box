@@ -1588,7 +1588,7 @@ function createCtaCard(signal) {
 // ==========================================
 
 function initHybridScanner() {
-    const analyzeBtn = document.getElementById('analyzeTickerBtn');
+    const analyzeBtn = document.getElementById('hybridAnalyzeBtn');
     const scanBtn = document.getElementById('runHybridScanBtn');
     const tickerInput = document.getElementById('hybridTickerInput');
     
