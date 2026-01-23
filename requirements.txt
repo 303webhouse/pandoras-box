@@ -37,3 +37,6 @@ tradingview-ta>=3.3.0
 # Discord Bridge - Unusual Whales Integration
 discord.py>=2.3.2
 aiohttp>=3.9.0
+
+# Scheduler for automated bias refresh
+apscheduler>=3.10.0

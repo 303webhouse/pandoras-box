@@ -298,7 +298,112 @@ async function loadSignals() {
 }
 
 async function loadBiasData() {
-    // Load Daily and Weekly from generic bias endpoint
+    // Load all biases from the auto-scheduler endpoint (includes trends!)
+    try {
+        const response = await fetch(`${API_URL}/bias-auto/status`);
+        const result = await response.json();
+        
+        if (result.status === 'success' && result.data) {
+            const data = result.data;
+            
+            // Update Daily Bias
+            updateBiasWithTrend('daily', data.daily);
+            
+            // Update Weekly Bias
+            updateBiasWithTrend('weekly', data.weekly);
+            
+            // Update Monthly Bias
+            updateBiasWithTrend('monthly', data.monthly);
+        } else {
+            // Fallback to old endpoint if scheduler not ready
+            await loadBiasDataFallback();
+        }
+    } catch (error) {
+        console.error('Error loading bias data from scheduler:', error);
+        // Fallback to old endpoint
+        await loadBiasDataFallback();
+    }
+    
+    // Load Dollar Smile macro bias
+    await loadDollarSmile();
+}
+
+function updateBiasWithTrend(timeframe, biasData) {
+    const container = document.getElementById(`${timeframe}Bias`);
+    const levelElement = document.getElementById(`${timeframe}Level`);
+    const detailsElement = document.getElementById(`${timeframe}Details`);
+    
+    if (!biasData) {
+        if (detailsElement) detailsElement.textContent = 'Awaiting first refresh';
+        return;
+    }
+    
+    const level = biasData.level || 'NEUTRAL';
+    const trend = biasData.trend || 'NEW';
+    const previousLevel = biasData.previous_level;
+    const timestamp = biasData.timestamp;
+    
+    // Update level display
+    if (levelElement) {
+        levelElement.textContent = level.replace('_', ' ');
+    }
+    
+    // Update container styling
+    if (container) {
+        container.classList.remove('bullish', 'bearish', 'neutral');
+        if (level.includes('TORO')) {
+            container.classList.add('bullish');
+        } else if (level.includes('URSA')) {
+            container.classList.add('bearish');
+        } else {
+            container.classList.add('neutral');
+        }
+    }
+    
+    // Update details with trend
+    if (detailsElement) {
+        let trendIcon = '';
+        let trendText = '';
+        
+        switch (trend) {
+            case 'IMPROVING':
+                trendIcon = '↑';
+                trendText = `vs ${(previousLevel || 'N/A').replace('_', ' ')}`;
+                break;
+            case 'DECLINING':
+                trendIcon = '↓';
+                trendText = `vs ${(previousLevel || 'N/A').replace('_', ' ')}`;
+                break;
+            case 'STABLE':
+                trendIcon = '→';
+                trendText = 'unchanged';
+                break;
+            default:
+                trendIcon = '•';
+                trendText = 'first reading';
+        }
+        
+        // Format timestamp
+        let timeStr = '';
+        if (timestamp) {
+            const date = new Date(timestamp);
+            timeStr = date.toLocaleString('en-US', { 
+                month: 'short', 
+                day: 'numeric',
+                hour: 'numeric',
+                minute: '2-digit'
+            });
+        }
+        
+        detailsElement.innerHTML = `
+            <span class="trend-indicator trend-${trend.toLowerCase()}">${trendIcon}</span> ${trendText}
+            ${timeStr ? `<br><small>Updated: ${timeStr}</small>` : ''}
+        `;
+    }
+}
+
+async function loadBiasDataFallback() {
+    // Fallback to old endpoints if scheduler not available
     const timeframes = ['DAILY', 'WEEKLY'];
     
     for (const timeframe of timeframes) {
@@ -328,29 +433,15 @@ async function loadBiasData() {
             }
             
             if (detailsElement) {
-                if (data.details) {
-                    detailsElement.textContent = data.details;
-                } else if (data.data) {
-                    detailsElement.textContent = `TICK: ${data.data.tick || 'N/A'}`;
-                } else {
-                    detailsElement.textContent = 'No data available';
-                }
+                detailsElement.textContent = 'TICK: N/A';
             }
         } catch (error) {
             console.error(`Error loading ${timeframe} bias:`, error);
-            const tfLower = timeframe.toLowerCase();
-            const detailsElement = document.getElementById(`${tfLower}Details`);
-            if (detailsElement) {
-                detailsElement.textContent = 'Failed to load';
-            }
         }
     }
     
-    // Load Monthly (Savita Indicator) separately
+    // Load Monthly separately
     await loadSavitaIndicator();
-    
-    // Load Dollar Smile macro bias
-    await loadDollarSmile();
 }
 
 async function loadSavitaIndicator() {
