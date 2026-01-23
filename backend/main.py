@@ -16,14 +16,13 @@ import os
 # Import our modules (will create these next)
 from database.redis_client import get_redis_client
 from database.postgres_client import get_postgres_client
-from websocket.broadcaster import ConnectionManager
+from websocket.broadcaster import manager
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# WebSocket connection manager
-manager = ConnectionManager()
+# WebSocket connection manager (imported from broadcaster.py for shared instance)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
