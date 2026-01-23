@@ -345,6 +345,9 @@ async function loadBiasData() {
     
     // Load Monthly (Savita Indicator) separately
     await loadSavitaIndicator();
+    
+    // Load Dollar Smile macro bias
+    await loadDollarSmile();
 }
 
 async function loadSavitaIndicator() {
@@ -392,6 +395,60 @@ async function loadSavitaIndicator() {
     } catch (error) {
         console.error('Error loading Savita indicator:', error);
         const detailsElement = document.getElementById('monthlyDetails');
+        if (detailsElement) {
+            detailsElement.textContent = 'Failed to load';
+        }
+    }
+}
+
+async function loadDollarSmile() {
+    try {
+        const response = await fetch(`${API_URL}/dollar-smile/status`);
+        const result = await response.json();
+        
+        const container = document.getElementById('dollarSmileBias');
+        const levelElement = document.getElementById('dollarSmileLevel');
+        const detailsElement = document.getElementById('dollarSmileDetails');
+        const dataElement = document.getElementById('dollarSmileData');
+        
+        if (result.status === 'success' && result.data) {
+            const data = result.data;
+            const bias = data.bias || 'NEUTRAL';
+            
+            if (levelElement) {
+                levelElement.textContent = bias.replace('_', ' ');
+            }
+            
+            if (container) {
+                container.classList.remove('bullish', 'bearish', 'neutral');
+                if (bias.includes('TORO')) {
+                    container.classList.add('bullish');
+                } else if (bias.includes('URSA')) {
+                    container.classList.add('bearish');
+                } else {
+                    container.classList.add('neutral');
+                }
+            }
+            
+            if (detailsElement) {
+                detailsElement.textContent = data.description || 'Awaiting data';
+            }
+            
+            if (dataElement) {
+                const dxy = data.dxy_current ? data.dxy_current.toFixed(2) : '--';
+                const dxyChange = data.dxy_5d_change_pct ? `${data.dxy_5d_change_pct > 0 ? '+' : ''}${data.dxy_5d_change_pct.toFixed(1)}%` : '';
+                const vix = data.vix_current ? data.vix_current.toFixed(1) : '--';
+                const position = data.smile_position ? ` | ${data.smile_position.replace('_', ' ')}` : '';
+                dataElement.innerHTML = `<small>DXY: ${dxy} ${dxyChange} | VIX: ${vix}${position}</small>`;
+            }
+        } else {
+            if (detailsElement) {
+                detailsElement.textContent = 'Awaiting webhook data...';
+            }
+        }
+    } catch (error) {
+        console.error('Error loading Dollar Smile:', error);
+        const detailsElement = document.getElementById('dollarSmileDetails');
         if (detailsElement) {
             detailsElement.textContent = 'Failed to load';
         }
