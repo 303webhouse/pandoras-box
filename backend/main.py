@@ -5,10 +5,13 @@ High-performance trading signal processor with sub-100ms latency
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from contextlib import asynccontextmanager
 import asyncio
 from typing import Set
 import logging
+import os
 
 # Import our modules (will create these next)
 from database.redis_client import get_redis_client
@@ -136,6 +139,29 @@ app.include_router(btc_signals_router, prefix="/api", tags=["btc-signals"])
 app.include_router(flow_router, prefix="/api", tags=["options-flow"])
 app.include_router(dollar_smile_router, prefix="/api", tags=["dollar-smile"])
 app.include_router(hybrid_scanner_router, prefix="/api", tags=["hybrid-scanner"])
+
+# Serve frontend static files
+# Check both possible paths (running from backend/ or from root)
+frontend_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend")
+if not os.path.exists(frontend_path):
+    frontend_path = os.path.join(os.path.dirname(__file__), "..", "frontend")
+    
+if os.path.exists(frontend_path):
+    # Mount static files but keep API routes as priority
+    app.mount("/static", StaticFiles(directory=frontend_path), name="static")
+    
+    @app.get("/app", response_class=FileResponse)
+    async def serve_frontend():
+        """Serve the frontend dashboard"""
+        return FileResponse(os.path.join(frontend_path, "index.html"))
+    
+    @app.get("/app.js", response_class=FileResponse)
+    async def serve_app_js():
+        return FileResponse(os.path.join(frontend_path, "app.js"))
+    
+    @app.get("/styles.css", response_class=FileResponse)
+    async def serve_styles():
+        return FileResponse(os.path.join(frontend_path, "styles.css"))
 
 if __name__ == "__main__":
     import uvicorn
