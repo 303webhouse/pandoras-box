@@ -31,6 +31,9 @@ yfinance>=0.2.36
 pandas>=2.0.0
 pandas_ta>=0.3.14b
 
+# Hybrid Scanner - TradingView Technical Analysis
+tradingview-ta>=3.3.0
+
 # Discord Bridge - Unusual Whales Integration
 discord.py>=2.3.2
 aiohttp>=3.9.0
