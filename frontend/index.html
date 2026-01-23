@@ -187,6 +187,81 @@
             </div>
         </section>
 
+        <!-- Hybrid Market Scanner (Technical + Fundamental) -->
+        <section class="hybrid-scanner-section">
+            <div class="hybrid-header">
+                <h2>📡 HYBRID SCANNER</h2>
+                <div class="hybrid-controls">
+                    <input type="text" id="hybridTickerInput" class="hybrid-input" placeholder="Enter ticker (e.g., NVDA)">
+                    <button class="hybrid-btn" id="analyzeTickerBtn">Analyze</button>
+                    <button class="hybrid-btn secondary" id="runHybridScanBtn">Scan Top 10</button>
+                </div>
+            </div>
+            <p class="hybrid-info">Technical (TradingView) + Fundamental (Wall Street Analysts) • Two-Gauge System</p>
+            
+            <!-- Single Ticker Analysis -->
+            <div class="hybrid-analysis" id="hybridAnalysis">
+                <div class="hybrid-gauges">
+                    <!-- Technical Gauge -->
+                    <div class="gauge-card technical-gauge" id="technicalGauge">
+                        <h3>📊 Technical Gauge</h3>
+                        <div class="gauge-signal" id="techSignal">--</div>
+                        <div class="gauge-score" id="techScore">
+                            <span class="buy-count">-- Buy</span> / 
+                            <span class="sell-count">-- Sell</span>
+                        </div>
+                        <div class="gauge-details" id="techDetails">
+                            <div>Oscillators: <span id="techOsc">--</span></div>
+                            <div>Moving Avgs: <span id="techMA">--</span></div>
+                        </div>
+                    </div>
+                    
+                    <!-- Analyst Gauge -->
+                    <div class="gauge-card analyst-gauge" id="analystGauge">
+                        <h3>🏦 Analyst Gauge</h3>
+                        <div class="gauge-signal" id="analystSignal">--</div>
+                        <div class="gauge-score" id="analystScore">
+                            <span class="analyst-count">-- analysts</span>
+                        </div>
+                        <div class="gauge-details" id="analystDetails">
+                            <div>Price Target: <span id="priceTarget">$--</span></div>
+                            <div>Upside: <span id="analystUpside">--%</span></div>
+                        </div>
+                    </div>
+                    
+                    <!-- Combined Recommendation -->
+                    <div class="gauge-card combined-gauge" id="combinedGauge">
+                        <h3>⚡ Combined</h3>
+                        <div class="gauge-signal" id="combinedSignal">--</div>
+                        <div class="gauge-score" id="combinedScore">Score: --/5</div>
+                        <div class="gauge-details" id="tickerMeta">
+                            <div id="tickerName">Enter ticker above</div>
+                            <div id="tickerSector">--</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Scan Results Table -->
+            <div class="hybrid-results" id="hybridResults" style="display: none;">
+                <h3>📋 Scan Results</h3>
+                <table class="hybrid-table">
+                    <thead>
+                        <tr>
+                            <th>Ticker</th>
+                            <th>Technical</th>
+                            <th>Strength</th>
+                            <th>Analyst</th>
+                            <th>Upside</th>
+                            <th>Sector</th>
+                        </tr>
+                    </thead>
+                    <tbody id="hybridTableBody">
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
         <!-- BTC Bottom Signals Checklist -->
         <section class="btc-signals-section">
             <div class="btc-signals-header">
@@ -386,6 +461,6 @@
 
     <!-- TradingView Widget Script -->
     <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-    <script src="app.js?v=5"></script>
+    <script src="app.js?v=6"></script>
 </body>
 </html>

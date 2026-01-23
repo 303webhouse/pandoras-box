@@ -1562,6 +1562,205 @@ body {
    BTC BOTTOM SIGNALS SECTION
    ========================================== */
 
+/* Hybrid Scanner Section */
+.hybrid-scanner-section {
+    background: var(--card-bg);
+    border: 2px solid var(--accent-cyan);
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 20px;
+}
+
+.hybrid-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border-color);
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.hybrid-header h2 {
+    font-size: 18px;
+    color: var(--accent-cyan);
+    margin: 0;
+}
+
+.hybrid-controls {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.hybrid-input {
+    padding: 8px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--bg-dark);
+    color: var(--text-primary);
+    font-size: 14px;
+    width: 150px;
+}
+
+.hybrid-btn {
+    padding: 8px 16px;
+    border: none;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    background: var(--accent-cyan);
+    color: var(--bg-dark);
+}
+
+.hybrid-btn:hover {
+    opacity: 0.8;
+}
+
+.hybrid-btn.secondary {
+    background: transparent;
+    border: 1px solid var(--accent-cyan);
+    color: var(--accent-cyan);
+}
+
+.hybrid-info {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-bottom: 16px;
+}
+
+.hybrid-gauges {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+@media (max-width: 768px) {
+    .hybrid-gauges {
+        grid-template-columns: 1fr;
+    }
+}
+
+.gauge-card {
+    background: var(--bg-dark);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 16px;
+    text-align: center;
+}
+
+.gauge-card h3 {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin: 0 0 12px 0;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.gauge-signal {
+    font-size: 24px;
+    font-weight: 700;
+    margin-bottom: 8px;
+    color: var(--text-primary);
+}
+
+.gauge-signal.strong-buy, .gauge-signal.buy {
+    color: var(--accent-lime);
+}
+
+.gauge-signal.strong-sell, .gauge-signal.sell {
+    color: var(--accent-orange);
+}
+
+.gauge-signal.neutral {
+    color: var(--text-secondary);
+}
+
+.gauge-score {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-bottom: 10px;
+}
+
+.gauge-details {
+    font-size: 11px;
+    color: var(--text-muted);
+    line-height: 1.6;
+}
+
+.technical-gauge {
+    border-color: #3B82F6;
+}
+
+.analyst-gauge {
+    border-color: #10B981;
+}
+
+.combined-gauge {
+    border-color: var(--accent-cyan);
+}
+
+.hybrid-results {
+    margin-top: 16px;
+}
+
+.hybrid-results h3 {
+    font-size: 14px;
+    color: var(--text-primary);
+    margin-bottom: 12px;
+}
+
+.hybrid-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+}
+
+.hybrid-table th,
+.hybrid-table td {
+    padding: 10px 8px;
+    text-align: left;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.hybrid-table th {
+    background: var(--bg-dark);
+    color: var(--text-secondary);
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 10px;
+    letter-spacing: 1px;
+}
+
+.hybrid-table tr:hover {
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.hybrid-table .signal-buy {
+    color: var(--accent-lime);
+}
+
+.hybrid-table .signal-sell {
+    color: var(--accent-orange);
+}
+
+.hybrid-table .signal-neutral {
+    color: var(--text-secondary);
+}
+
+.hybrid-table .upside-positive {
+    color: var(--accent-lime);
+}
+
+.hybrid-table .upside-negative {
+    color: var(--accent-orange);
+}
+
 .btc-signals-section {
     background: var(--card-bg);
     border: 2px solid #F7931A;
