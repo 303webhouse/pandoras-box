@@ -141,15 +141,22 @@ app.include_router(dollar_smile_router, prefix="/api", tags=["dollar-smile"])
 app.include_router(hybrid_scanner_router, prefix="/api", tags=["hybrid-scanner"])
 
 # Serve frontend static files
-# Check both possible paths (running from backend/ or from root)
-frontend_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend")
-if not os.path.exists(frontend_path):
-    frontend_path = os.path.join(os.path.dirname(__file__), "..", "frontend")
-    
-if os.path.exists(frontend_path):
-    # Mount static files but keep API routes as priority
-    app.mount("/static", StaticFiles(directory=frontend_path), name="static")
-    
+# Multiple path resolution strategies for different deployment environments
+possible_paths = [
+    os.path.join(os.path.dirname(__file__), "..", "frontend"),  # Running from backend/
+    os.path.join(os.getcwd(), "..", "frontend"),  # CWD is backend/
+    os.path.join(os.getcwd(), "frontend"),  # CWD is root
+    "/app/frontend",  # Railway absolute path
+]
+
+frontend_path = None
+for path in possible_paths:
+    if os.path.exists(path) and os.path.isdir(path):
+        frontend_path = os.path.abspath(path)
+        logger.info(f"✅ Frontend found at: {frontend_path}")
+        break
+
+if frontend_path:
     @app.get("/app", response_class=FileResponse)
     async def serve_frontend():
         """Serve the frontend dashboard"""
@@ -162,6 +169,14 @@ if os.path.exists(frontend_path):
     @app.get("/styles.css", response_class=FileResponse)
     async def serve_styles():
         return FileResponse(os.path.join(frontend_path, "styles.css"))
+    
+    @app.get("/manifest.json", response_class=FileResponse)
+    async def serve_manifest():
+        return FileResponse(os.path.join(frontend_path, "manifest.json"))
+else:
+    logger.warning("⚠️ Frontend directory not found. Tried paths:")
+    for path in possible_paths:
+        logger.warning(f"  - {path}")
 
 if __name__ == "__main__":
     import uvicorn
