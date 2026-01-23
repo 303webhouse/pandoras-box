@@ -33,6 +33,9 @@ yfinance>=0.2.36
 pandas>=2.0.0
 pandas_ta>=0.3.14b
 
+# Hybrid Scanner - TradingView Technical Analysis
+tradingview-ta>=3.3.0
+
 # Additional required packages
 annotated-types==0.6.0
 anyio==4.2.0
