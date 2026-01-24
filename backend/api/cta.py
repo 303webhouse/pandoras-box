@@ -128,3 +128,26 @@ async def cta_set_enabled(enabled: bool):
     
     set_cta_enabled(enabled)
     return {"enabled": enabled}
+
+
+@router.post("/scan/push")
+async def cta_scan_and_push():
+    """
+    Run CTA scan and push signals to Trade Ideas
+    This triggers the scheduled scan manually
+    """
+    if not CTA_SCANNER_AVAILABLE:
+        raise HTTPException(status_code=503, detail="CTA Scanner not available")
+    
+    try:
+        from scheduler.bias_scheduler import run_cta_scan_scheduled
+        
+        await run_cta_scan_scheduled()
+        
+        return {
+            "status": "success",
+            "message": "CTA scan complete - signals pushed to Trade Ideas"
+        }
+    except Exception as e:
+        logger.error(f"Error in manual CTA scan push: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
