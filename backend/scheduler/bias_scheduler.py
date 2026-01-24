@@ -510,14 +510,101 @@ async def _fallback_scheduler():
     """Fallback scheduler using asyncio (runs in background)"""
     logger.info("Starting fallback scheduler loop")
     
+    last_cta_scan_hour = -1
+    
     while True:
         now = datetime.now()
         
-        # Check if it's 9:45 AM (within 1 minute window)
+        # Check if it's 9:45 AM (within 1 minute window) - bias refresh
         if now.hour == 9 and 45 <= now.minute < 46:
             await run_scheduled_refreshes()
             # Wait 2 minutes to avoid duplicate runs
             await asyncio.sleep(120)
+        
+        # CTA scan: Run every hour during market hours (9:30 AM - 4:00 PM ET)
+        elif is_trading_day() and 9 <= now.hour <= 16 and now.hour != last_cta_scan_hour:
+            last_cta_scan_hour = now.hour
+            await run_cta_scan_scheduled()
+            await asyncio.sleep(60)
         else:
             # Check every minute
             await asyncio.sleep(60)
+
+
+# =========================================================================
+# CTA SCANNER SCHEDULED TASK
+# =========================================================================
+
+async def run_cta_scan_scheduled():
+    """
+    Run CTA scanner automatically and push signals to Trade Ideas
+    Scheduled: Every hour during market hours (9:30 AM - 4:00 PM ET)
+    """
+    logger.info("🎯 Running scheduled CTA scan...")
+    
+    try:
+        from scanners.cta_scanner import run_cta_scan, CTA_SCANNER_AVAILABLE
+        from websocket.broadcaster import manager
+        from database.redis_client import cache_signal
+        
+        if not CTA_SCANNER_AVAILABLE:
+            logger.warning("CTA Scanner not available - skipping scheduled scan")
+            return
+        
+        # Run the scan
+        result = await run_cta_scan(include_watchlist=True)
+        
+        if result.get("error"):
+            logger.error(f"CTA scan error: {result['error']}")
+            return
+        
+        # Get all signals
+        all_signals = result.get("top_signals", [])
+        
+        if not all_signals:
+            logger.info("CTA scan complete - no new signals found")
+            return
+        
+        logger.info(f"CTA scan found {len(all_signals)} signals")
+        
+        # Push each signal to Trade Ideas via WebSocket
+        for signal in all_signals[:10]:  # Limit to top 10
+            # Convert CTA signal format to standard signal format
+            trade_signal = {
+                "signal_id": signal.get("signal_id"),
+                "timestamp": signal.get("timestamp"),
+                "ticker": signal.get("symbol"),
+                "strategy": "CTA Scanner",
+                "direction": signal.get("direction", "LONG"),
+                "signal_type": signal.get("signal_type"),
+                "entry_price": signal.get("setup", {}).get("entry"),
+                "stop_loss": signal.get("setup", {}).get("stop"),
+                "target_1": signal.get("setup", {}).get("target"),
+                "risk_reward": signal.get("setup", {}).get("rr_ratio"),
+                "timeframe": "DAILY",
+                "asset_class": "EQUITY",
+                "status": "ACTIVE",
+                "score": signal.get("priority", 50),
+                "confidence": signal.get("confidence", "MEDIUM"),
+                "notes": signal.get("description")
+            }
+            
+            # Cache in Redis
+            await cache_signal(trade_signal["signal_id"], trade_signal, ttl=3600)
+            
+            # Broadcast to all connected devices
+            await manager.broadcast_signal(trade_signal)
+            
+            logger.info(f"📡 CTA signal pushed: {trade_signal['ticker']} {trade_signal['signal_type']}")
+        
+        logger.info(f"✅ CTA scheduled scan complete - {len(all_signals)} signals pushed to Trade Ideas")
+        
+    except Exception as e:
+        logger.error(f"Error in scheduled CTA scan: {e}")
+
+
+async def trigger_cta_scan_now():
+    """
+    Manually trigger a CTA scan (called from API)
+    """
+    await run_cta_scan_scheduled()
