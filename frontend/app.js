@@ -579,11 +579,21 @@ function initWeeklyBiasSettings() {
     const resetBtn = document.getElementById('resetFactorsBtn');
     const applyBtn = document.getElementById('applyFactorsBtn');
     
-    if (!settingsBtn || !modal) return;
+    if (!settingsBtn || !modal) {
+        console.warn('Weekly bias settings elements not found');
+        return;
+    }
     
     // Open modal
-    settingsBtn.addEventListener('click', () => {
-        loadFactorStatesIntoModal();
+    settingsBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        console.log('Gear clicked - opening modal');
+        try {
+            loadFactorStatesIntoModal();
+        } catch (err) {
+            console.error('Error loading factor states:', err);
+        }
         modal.classList.add('active');
     });
     
@@ -630,28 +640,35 @@ function initWeeklyBiasSettings() {
 
 // Load factor states into modal
 function loadFactorStatesIntoModal() {
-    loadFactorStatesFromStorage();
-    
-    // Update checkboxes
-    document.querySelectorAll('#weeklyBiasSettingsModal .factor-toggle').forEach(toggle => {
-        const factorName = toggle.dataset.factor;
-        const checkbox = toggle.querySelector('input[type="checkbox"]');
-        checkbox.checked = weeklyBiasFactorStates[factorName] !== false;
-    });
-    
-    // Update vote displays if we have factor data
-    if (weeklyBiasFullData && weeklyBiasFullData.details && weeklyBiasFullData.details.factors) {
-        const factors = weeklyBiasFullData.details.factors;
+    try {
+        loadFactorStatesFromStorage();
+        
+        // Update checkboxes
         document.querySelectorAll('#weeklyBiasSettingsModal .factor-toggle').forEach(toggle => {
             const factorName = toggle.dataset.factor;
-            const voteElement = toggle.querySelector('.factor-vote');
-            if (voteElement && factors[factorName]) {
-                const vote = factors[factorName].vote || 0;
-                const sign = vote >= 0 ? '+' : '';
-                voteElement.textContent = `(vote: ${sign}${vote})`;
-                voteElement.dataset.vote = vote;
+            const checkbox = toggle.querySelector('input[type="checkbox"]');
+            if (checkbox) {
+                checkbox.checked = weeklyBiasFactorStates[factorName] !== false;
             }
         });
+        
+        // Update vote displays if we have factor data
+        if (weeklyBiasFullData && weeklyBiasFullData.details && weeklyBiasFullData.details.factors) {
+            const factors = weeklyBiasFullData.details.factors;
+            document.querySelectorAll('#weeklyBiasSettingsModal .factor-toggle').forEach(toggle => {
+                const factorName = toggle.dataset.factor;
+                const voteElement = toggle.querySelector('.factor-vote');
+                if (voteElement && factors[factorName]) {
+                    const vote = factors[factorName].vote || 0;
+                    const sign = vote >= 0 ? '+' : '';
+                    voteElement.textContent = `(vote: ${sign}${vote})`;
+                    voteElement.dataset.vote = vote;
+                }
+            });
+        }
+        console.log('Factor states loaded into modal');
+    } catch (err) {
+        console.error('Error in loadFactorStatesIntoModal:', err);
     }
 }
 
