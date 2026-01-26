@@ -178,9 +178,9 @@ def get_effective_bias(timeframe: BiasTimeframe) -> Dict[str, Any]:
     weekly_data = history.get("weekly", {}).get("current", {})
     daily_data = history.get("daily", {}).get("current", {})
     
-    cyclical_level = cyclical_data.get("level", "NEUTRAL") if cyclical_data else "NEUTRAL"
-    weekly_level = weekly_data.get("level", "NEUTRAL") if weekly_data else "NEUTRAL"
-    daily_level = daily_data.get("level", "NEUTRAL") if daily_data else "NEUTRAL"
+    cyclical_level = cyclical_data.get("level", "LEAN_TORO") if cyclical_data else "LEAN_TORO"
+    weekly_level = weekly_data.get("level", "LEAN_TORO") if weekly_data else "LEAN_TORO"
+    daily_level = daily_data.get("level", "LEAN_TORO") if daily_data else "LEAN_TORO"
     
     result = {
         "raw": {},
@@ -1280,11 +1280,10 @@ async def refresh_cyclical_bias() -> Dict[str, Any]:
             from bias_filters.savita_indicator import get_savita_reading
             savita_result = get_savita_reading()
             
-            # Map bias string to level
-            bias_to_level = {"TORO_MAJOR": 5, "TORO_MINOR": 4, "NEUTRAL": 3, "URSA_MINOR": 2, "URSA_MAJOR": 1}
-            savita_bias = savita_result.get("bias", "NEUTRAL")
-            savita_level = bias_to_level.get(savita_bias, 3)
-            savita_vote = savita_level - 3
+            # Map bias string to level (use global BIAS_LEVELS)
+            savita_bias = savita_result.get("bias", "LEAN_TORO")
+            savita_level = BIAS_LEVELS.get(savita_bias, 4)  # Default LEAN_TORO = 4
+            savita_vote = savita_level - 4  # Center around LEAN levels (3.5 rounded)
             
             factor_votes.append(("savita_indicator", savita_vote, {
                 "bias": savita_bias,
