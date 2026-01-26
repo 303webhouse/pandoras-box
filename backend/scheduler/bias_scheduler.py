@@ -295,7 +295,8 @@ def get_bias_status(timeframe: BiasTimeframe = None) -> Dict[str, Any]:
             "level": current.get("level", "NEUTRAL") if current else "NEUTRAL",
             "timestamp": current.get("timestamp") if current else None,
             "trend": tf_data.get("trend", "NEW"),
-            "previous_level": previous.get("level") if previous else None
+            "previous_level": previous.get("level") if previous else None,
+            "details": current.get("details", {}) if current else {}  # Include factor details
         }
     
     result["last_updated"] = history.get("last_updated")
