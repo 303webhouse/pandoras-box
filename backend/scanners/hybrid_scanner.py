@@ -383,35 +383,80 @@ class HybridScanner:
             return result
             
         except Exception as e:
-            # Try NYSE exchange
-            try:
-                handler = TA_Handler(
-                    symbol=ticker,
-                    screener="america",
-                    exchange="NYSE",
-                    interval=tv_interval
-                )
-                analysis = handler.get_analysis()
-                summary = analysis.summary
-                
-                return {
-                    "ticker": ticker,
-                    "interval": interval,
-                    "signal": summary.get("RECOMMENDATION", "NEUTRAL"),
-                    "signal_score": {
-                        "buy": summary.get("BUY", 0),
-                        "sell": summary.get("SELL", 0),
-                        "neutral": summary.get("NEUTRAL", 0),
-                    },
-                    "timestamp": datetime.now().isoformat()
-                }
-            except Exception as e2:
-                logger.error(f"Technical analysis error for {ticker}: {e2}")
-                return {
-                    "ticker": ticker,
-                    "signal": TechnicalSignal.ERROR.value,
-                    "error": str(e2)
-                }
+            # Try other exchanges: NYSE, then AMEX (for ETFs like SPY, IWM, etc.)
+            for exchange in ["NYSE", "AMEX"]:
+                try:
+                    handler = TA_Handler(
+                        symbol=ticker,
+                        screener="america",
+                        exchange=exchange,
+                        interval=tv_interval
+                    )
+                    analysis = handler.get_analysis()
+                    summary = analysis.summary
+                    indicators = analysis.indicators
+                    oscillators = analysis.oscillators
+                    moving_avgs = analysis.moving_averages
+                    
+                    # Return full data, not simplified
+                    result = {
+                        "ticker": ticker,
+                        "interval": interval,
+                        "signal": summary.get("RECOMMENDATION", "NEUTRAL"),
+                        "signal_score": {
+                            "buy": summary.get("BUY", 0),
+                            "sell": summary.get("SELL", 0),
+                            "neutral": summary.get("NEUTRAL", 0),
+                            "total": summary.get("BUY", 0) + summary.get("SELL", 0) + summary.get("NEUTRAL", 0)
+                        },
+                        "oscillators": {
+                            "summary": oscillators.get("RECOMMENDATION", "NEUTRAL"),
+                            "rsi": indicators.get("RSI"),
+                            "macd": indicators.get("MACD.macd"),
+                            "stoch_k": indicators.get("Stoch.K"),
+                            "cci": indicators.get("CCI20"),
+                            "adx": indicators.get("ADX"),
+                            "mom": indicators.get("Mom"),
+                        },
+                        "moving_averages": {
+                            "summary": moving_avgs.get("RECOMMENDATION", "NEUTRAL"),
+                            "ema20": indicators.get("EMA20"),
+                            "sma20": indicators.get("SMA20"),
+                            "ema50": indicators.get("EMA50"),
+                            "sma50": indicators.get("SMA50"),
+                            "ema200": indicators.get("EMA200"),
+                            "sma200": indicators.get("SMA200"),
+                        },
+                        "price": {
+                            "close": indicators.get("close"),
+                            "open": indicators.get("open"),
+                            "high": indicators.get("high"),
+                            "low": indicators.get("low"),
+                            "change": indicators.get("change"),
+                            "change_pct": indicators.get("change") / indicators.get("open") * 100 if indicators.get("open") else None,
+                        },
+                        "timestamp": datetime.now().isoformat(),
+                        "exchange": exchange,
+                        "from_cache": False
+                    }
+                    
+                    # Cache for daily interval
+                    if interval == "1d":
+                        self.set_cached_technical(ticker, result)
+                    
+                    logger.debug(f"Found {ticker} on {exchange}")
+                    return result
+                    
+                except Exception:
+                    continue  # Try next exchange
+            
+            # All exchanges failed
+            logger.error(f"Technical analysis error for {ticker}: Not found on any exchange")
+            return {
+                "ticker": ticker,
+                "signal": TechnicalSignal.ERROR.value,
+                "error": f"Not found on NASDAQ, NYSE, or AMEX"
+            }
     
     # =========================================================================
     # ENGINE B: FUNDAMENTAL ENGINE (yfinance)
