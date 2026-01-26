@@ -353,8 +353,9 @@ async def refresh_daily_bias() -> Dict[str, Any]:
         # FACTOR 1: SPY RSI (Momentum)
         # =====================================================================
         try:
-            spy_data = scanner.get_technical_analysis("SPY", interval="1D")
-            rsi = spy_data.get("oscillators", {}).get("RSI", 50)
+            spy_data = scanner.get_technical_analysis("SPY", interval="1d")
+            # Note: oscillators.rsi is lowercase in the scanner response
+            rsi = spy_data.get("oscillators", {}).get("rsi", 50) or 50
             
             # RSI scoring: <30 = oversold (bullish), >70 = overbought (bearish)
             if rsi <= 30:
@@ -374,7 +375,7 @@ async def refresh_daily_bias() -> Dict[str, Any]:
                 rsi_signal = "NEUTRAL"
             
             factor_votes.append(("spy_rsi", rsi_vote, {
-                "rsi": round(rsi, 1),
+                "rsi": round(rsi, 1) if rsi else 50,
                 "signal": rsi_signal
             }))
             logger.info(f"  📊 SPY RSI: {rsi:.1f} - {rsi_signal} (vote: {rsi_vote:+d})")
@@ -387,31 +388,36 @@ async def refresh_daily_bias() -> Dict[str, Any]:
         # FACTOR 2: VIX Level (Fear Gauge)
         # =====================================================================
         try:
-            vix_data = scanner.get_technical_analysis("CBOE:VIX", interval="1D")
-            vix_price = vix_data.get("price", 20)
+            # Use VXX (VIX ETN) instead of CBOE:VIX which doesn't work with tradingview-ta
+            vix_data = scanner.get_technical_analysis("UVXY", interval="1d")
+            # Get the price from the nested structure
+            vix_close = vix_data.get("price", {}).get("close", 0) or 0
             
-            # VIX scoring: <15 = complacent (bullish), >25 = fearful (bearish)
-            if vix_price < 13:
-                vix_vote = 2
+            # UVXY is leveraged VIX, so scale thresholds accordingly
+            # UVXY typically trades 10-50 range, use signal instead of absolute price
+            vix_signal_raw = vix_data.get("signal", "NEUTRAL")
+            
+            # Use VIX proxy based on UVXY signal
+            if vix_signal_raw in ["SELL", "STRONG_SELL"]:
+                # UVXY falling = VIX falling = bullish
+                vix_vote = 2 if vix_signal_raw == "STRONG_SELL" else 1
                 vix_signal = "LOW_FEAR"
-            elif vix_price < 18:
-                vix_vote = 1
-                vix_signal = "MODERATE_LOW"
-            elif vix_price > 30:
-                vix_vote = -2
+            elif vix_signal_raw in ["BUY", "STRONG_BUY"]:
+                # UVXY rising = VIX rising = bearish
+                vix_vote = -2 if vix_signal_raw == "STRONG_BUY" else -1
                 vix_signal = "HIGH_FEAR"
-            elif vix_price > 22:
-                vix_vote = -1
-                vix_signal = "ELEVATED"
             else:
                 vix_vote = 0
                 vix_signal = "NEUTRAL"
             
+            vix_price = vix_close  # For display purposes
+            
             factor_votes.append(("vix_level", vix_vote, {
-                "vix": round(vix_price, 2),
+                "uvxy_price": round(vix_price, 2) if vix_price else 0,
+                "uvxy_signal": vix_signal_raw,
                 "signal": vix_signal
             }))
-            logger.info(f"  😰 VIX Level: {vix_price:.2f} - {vix_signal} (vote: {vix_vote:+d})")
+            logger.info(f"  😰 VIX Level: UVXY {vix_signal_raw} - {vix_signal} (vote: {vix_vote:+d})")
             
         except Exception as e:
             logger.warning(f"Error in VIX factor: {e}")
@@ -421,11 +427,12 @@ async def refresh_daily_bias() -> Dict[str, Any]:
         # FACTOR 3: Tech Leadership (QQQ vs SPY)
         # =====================================================================
         try:
-            spy_data = scanner.get_technical_analysis("SPY", interval="1D")
-            qqq_data = scanner.get_technical_analysis("QQQ", interval="1D")
+            spy_data = scanner.get_technical_analysis("SPY", interval="1d")
+            qqq_data = scanner.get_technical_analysis("QQQ", interval="1d")
             
-            spy_change = spy_data.get("change_percent", 0)
-            qqq_change = qqq_data.get("change_percent", 0)
+            # Get change_pct from nested price structure
+            spy_change = spy_data.get("price", {}).get("change_pct", 0) or 0
+            qqq_change = qqq_data.get("price", {}).get("change_pct", 0) or 0
             diff = qqq_change - spy_change
             
             # QQQ outperforming = tech leading = bullish for growth
@@ -461,11 +468,11 @@ async def refresh_daily_bias() -> Dict[str, Any]:
         # FACTOR 4: Small Cap Risk (IWM vs SPY)
         # =====================================================================
         try:
-            spy_data = scanner.get_technical_analysis("SPY", interval="1D")
-            iwm_data = scanner.get_technical_analysis("IWM", interval="1D")
+            spy_data = scanner.get_technical_analysis("SPY", interval="1d")
+            iwm_data = scanner.get_technical_analysis("IWM", interval="1d")
             
-            spy_change = spy_data.get("change_percent", 0)
-            iwm_change = iwm_data.get("change_percent", 0)
+            spy_change = spy_data.get("price", {}).get("change_pct", 0) or 0
+            iwm_change = iwm_data.get("price", {}).get("change_pct", 0) or 0
             diff = iwm_change - spy_change
             
             # IWM outperforming = risk-on = bullish
@@ -501,12 +508,12 @@ async def refresh_daily_bias() -> Dict[str, Any]:
         # FACTOR 5: SPY Trend (Price vs 9 EMA)
         # =====================================================================
         try:
-            spy_data = scanner.get_technical_analysis("SPY", interval="1D")
-            price = spy_data.get("price", 0)
+            spy_data = scanner.get_technical_analysis("SPY", interval="1d")
+            price = spy_data.get("price", {}).get("close", 0) or 0
             ma_data = spy_data.get("moving_averages", {})
             
-            # Try to get EMA9, fall back to signal
-            ema9_signal = ma_data.get("EMA9", {}).get("signal", "NEUTRAL")
+            # Get EMA20 value and compare to price
+            ema20 = ma_data.get("ema20", 0) or 0
             spy_signal = spy_data.get("signal", "NEUTRAL")
             
             # Use the overall signal as trend indicator
@@ -514,9 +521,9 @@ async def refresh_daily_bias() -> Dict[str, Any]:
             trend_vote = signal_to_vote.get(spy_signal, 0)
             
             factor_votes.append(("spy_trend", trend_vote, {
-                "price": round(price, 2),
+                "price": round(price, 2) if price else 0,
                 "signal": spy_signal,
-                "ema9_signal": ema9_signal
+                "ema20": round(ema20, 2) if ema20 else 0
             }))
             logger.info(f"  📈 SPY Trend: {spy_signal} (vote: {trend_vote:+d})")
             
@@ -528,11 +535,11 @@ async def refresh_daily_bias() -> Dict[str, Any]:
         # FACTOR 6: Market Breadth (RSP vs SPY)
         # =====================================================================
         try:
-            spy_data = scanner.get_technical_analysis("SPY", interval="1D")
-            rsp_data = scanner.get_technical_analysis("RSP", interval="1D")
+            spy_data = scanner.get_technical_analysis("SPY", interval="1d")
+            rsp_data = scanner.get_technical_analysis("RSP", interval="1d")
             
-            spy_change = spy_data.get("change_percent", 0)
-            rsp_change = rsp_data.get("change_percent", 0)
+            spy_change = spy_data.get("price", {}).get("change_pct", 0) or 0
+            rsp_change = rsp_data.get("price", {}).get("change_pct", 0) or 0
             diff = rsp_change - spy_change
             
             # RSP outperforming = broad participation = bullish breadth
@@ -653,6 +660,7 @@ async def refresh_weekly_bias() -> Dict[str, Any]:
         for ticker in indices:
             try:
                 tech = scanner.get_technical_analysis(ticker, interval="1W")
+                logger.debug(f"    {ticker} data: signal={tech.get('signal')}, error={tech.get('error')}")
                 signal = tech.get("signal", "NEUTRAL")
                 index_signals[ticker] = signal
                 
@@ -693,29 +701,31 @@ async def refresh_weekly_bias() -> Dict[str, Any]:
         logger.warning(f"Error in index trends factor: {e}")
         factor_votes.append(("index_trends", 0, {"error": str(e)}))
     
-    # ========== FACTOR 2: Dollar Trend (DXY) ==========
+    # ========== FACTOR 2: Dollar Trend (using UUP - Dollar Bullish ETF) ==========
     try:
-        dxy_data = scanner.get_technical_analysis("TVC:DXY", interval="1W")
-        dxy_signal = dxy_data.get("signal", "NEUTRAL")
-        dxy_change = dxy_data.get("change_percent", 0)
+        # Use UUP (Invesco DB US Dollar Index Bullish Fund) instead of DXY
+        uup_data = scanner.get_technical_analysis("UUP", interval="1W")
+        uup_signal = uup_data.get("signal", "NEUTRAL")
+        uup_change = uup_data.get("price", {}).get("change_pct", 0) or 0
         
         # Weak dollar = bullish for stocks (inverse relationship)
-        if dxy_signal in ["SELL", "STRONG_SELL"]:
-            dollar_vote = 2 if dxy_signal == "STRONG_SELL" else 1
+        # UUP rising = dollar strengthening = bearish for stocks
+        if uup_signal in ["SELL", "STRONG_SELL"]:
+            dollar_vote = 2 if uup_signal == "STRONG_SELL" else 1
             dollar_status = "WEAK_DOLLAR"
-        elif dxy_signal in ["BUY", "STRONG_BUY"]:
-            dollar_vote = -2 if dxy_signal == "STRONG_BUY" else -1
+        elif uup_signal in ["BUY", "STRONG_BUY"]:
+            dollar_vote = -2 if uup_signal == "STRONG_BUY" else -1
             dollar_status = "STRONG_DOLLAR"
         else:
             dollar_vote = 0
             dollar_status = "NEUTRAL"
         
         factor_votes.append(("dollar_trend", dollar_vote, {
-            "dxy_signal": dxy_signal,
-            "dxy_change": round(dxy_change, 2),
+            "uup_signal": uup_signal,
+            "uup_change": round(uup_change, 2) if uup_change else 0,
             "status": dollar_status
         }))
-        logger.info(f"  💵 Dollar Trend: DXY {dxy_signal} ({dxy_change:+.2f}%) - {dollar_status} (vote: {dollar_vote:+d})")
+        logger.info(f"  💵 Dollar Trend: UUP {uup_signal} ({uup_change:+.2f}%) - {dollar_status} (vote: {dollar_vote:+d})")
         
     except Exception as e:
         logger.warning(f"Error in dollar trend factor: {e}")
@@ -726,8 +736,8 @@ async def refresh_weekly_bias() -> Dict[str, Any]:
         xlk_data = scanner.get_technical_analysis("XLK", interval="1W")
         xlu_data = scanner.get_technical_analysis("XLU", interval="1W")
         
-        xlk_change = xlk_data.get("change_percent", 0)
-        xlu_change = xlu_data.get("change_percent", 0)
+        xlk_change = xlk_data.get("price", {}).get("change_pct", 0) or 0
+        xlu_change = xlu_data.get("price", {}).get("change_pct", 0) or 0
         diff = xlk_change - xlu_change
         
         # Tech outperforming utilities = risk-on = bullish
@@ -764,8 +774,8 @@ async def refresh_weekly_bias() -> Dict[str, Any]:
         hyg_data = scanner.get_technical_analysis("HYG", interval="1W")
         tlt_data = scanner.get_technical_analysis("TLT", interval="1W")
         
-        hyg_change = hyg_data.get("change_percent", 0)
-        tlt_change = tlt_data.get("change_percent", 0)
+        hyg_change = hyg_data.get("price", {}).get("change_pct", 0) or 0
+        tlt_change = tlt_data.get("price", {}).get("change_pct", 0) or 0
         diff = hyg_change - tlt_change
         
         # HYG outperforming TLT = risk appetite = bullish
@@ -802,8 +812,8 @@ async def refresh_weekly_bias() -> Dict[str, Any]:
         spy_data = scanner.get_technical_analysis("SPY", interval="1W")
         rsp_data = scanner.get_technical_analysis("RSP", interval="1W")
         
-        spy_change = spy_data.get("change_percent", 0)
-        rsp_change = rsp_data.get("change_percent", 0)
+        spy_change = spy_data.get("price", {}).get("change_pct", 0) or 0
+        rsp_change = rsp_data.get("price", {}).get("change_pct", 0) or 0
         diff = rsp_change - spy_change
         
         # RSP outperforming = broad participation = bullish breadth
