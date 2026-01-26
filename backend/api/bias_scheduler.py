@@ -65,6 +65,68 @@ async def get_all_bias_status():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/shift-status")
+async def get_shift_status():
+    """
+    Get current weekly bias shift status vs Monday baseline
+    
+    Returns:
+    - baseline: Monday's baseline reading (timestamp, total_vote, level)
+    - current: Current day's reading (from latest weekly bias)
+    - delta: Difference between current and baseline votes
+    - shift_status: STABLE, IMPROVING, STRONGLY_IMPROVING, DETERIORATING, or STRONGLY_DETERIORATING
+    """
+    if not SCHEDULER_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Bias scheduler not available")
+    
+    try:
+        baseline = get_weekly_baseline()
+        weekly_status = get_bias_status(BiasTimeframe.WEEKLY)
+        
+        # Get current reading from weekly status
+        current_details = weekly_status.get("details", {})
+        current_vote = current_details.get("total_vote", 0)
+        current_level = weekly_status.get("level", "NEUTRAL")
+        
+        # Calculate shift if baseline exists
+        if baseline.get("timestamp"):
+            from scheduler.bias_scheduler import calculate_shift_status
+            baseline_vote = baseline.get("total_vote", 0)
+            shift_info = calculate_shift_status(baseline_vote, current_vote)
+            
+            return {
+                "status": "success",
+                "baseline": {
+                    "timestamp": baseline.get("timestamp"),
+                    "total_vote": baseline.get("total_vote"),
+                    "level": baseline.get("level")
+                },
+                "current": {
+                    "timestamp": weekly_status.get("timestamp"),
+                    "total_vote": current_vote,
+                    "level": current_level
+                },
+                "delta": shift_info["delta"],
+                "shift_status": shift_info["status"],
+                "description": shift_info["description"]
+            }
+        else:
+            return {
+                "status": "success",
+                "baseline": None,
+                "current": {
+                    "timestamp": weekly_status.get("timestamp"),
+                    "total_vote": current_vote,
+                    "level": current_level
+                },
+                "message": "No baseline set yet. Baseline will be set on next Monday."
+            }
+        
+    except Exception as e:
+        logger.error(f"Error getting shift status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/{timeframe}")
 async def get_timeframe_bias(timeframe: str):
     """
@@ -187,68 +249,6 @@ async def manual_refresh(
         raise
     except Exception as e:
         logger.error(f"Error refreshing bias: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/shift-status")
-async def get_shift_status():
-    """
-    Get current weekly bias shift status vs Monday baseline
-    
-    Returns:
-    - baseline: Monday's baseline reading (timestamp, total_vote, level)
-    - current: Current day's reading (from latest weekly bias)
-    - delta: Difference between current and baseline votes
-    - shift_status: STABLE, IMPROVING, STRONGLY_IMPROVING, DETERIORATING, or STRONGLY_DETERIORATING
-    """
-    if not SCHEDULER_AVAILABLE:
-        raise HTTPException(status_code=503, detail="Bias scheduler not available")
-    
-    try:
-        baseline = get_weekly_baseline()
-        weekly_status = get_bias_status(BiasTimeframe.WEEKLY)
-        
-        # Get current reading from weekly status
-        current_details = weekly_status.get("details", {})
-        current_vote = current_details.get("total_vote", 0)
-        current_level = weekly_status.get("level", "NEUTRAL")
-        
-        # Calculate shift if baseline exists
-        if baseline.get("timestamp"):
-            from scheduler.bias_scheduler import calculate_shift_status
-            baseline_vote = baseline.get("total_vote", 0)
-            shift_info = calculate_shift_status(baseline_vote, current_vote)
-            
-            return {
-                "status": "success",
-                "baseline": {
-                    "timestamp": baseline.get("timestamp"),
-                    "total_vote": baseline.get("total_vote"),
-                    "level": baseline.get("level")
-                },
-                "current": {
-                    "timestamp": weekly_status.get("timestamp"),
-                    "total_vote": current_vote,
-                    "level": current_level
-                },
-                "delta": shift_info["delta"],
-                "shift_status": shift_info["status"],
-                "description": shift_info["description"]
-            }
-        else:
-            return {
-                "status": "success",
-                "baseline": None,
-                "current": {
-                    "timestamp": weekly_status.get("timestamp"),
-                    "total_vote": current_vote,
-                    "level": current_level
-                },
-                "message": "No baseline set yet. Baseline will be set on next Monday."
-            }
-        
-    except Exception as e:
-        logger.error(f"Error getting shift status: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
