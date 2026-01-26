@@ -446,10 +446,7 @@ function updateBiasWithTrend(timeframe, biasData) {
 
 // Update weekly bias with factor filtering
 function updateWeeklyBiasWithFactors(biasData) {
-    console.log('updateWeeklyBiasWithFactors called with:', biasData);
-    
     if (!biasData || !biasData.details || !biasData.details.factors) {
-        console.warn('No factor data available, using fallback');
         // Fallback to regular update if no factor data
         updateBiasWithTrend('weekly', biasData);
         return;
@@ -457,7 +454,6 @@ function updateWeeklyBiasWithFactors(biasData) {
     
     // Load factor states from localStorage
     loadFactorStatesFromStorage();
-    console.log('Loaded factor states:', weeklyBiasFactorStates);
     
     // Preserve shift indicator before updating
     const weeklyLevelElement = document.getElementById('weeklyLevel');
@@ -468,19 +464,12 @@ function updateWeeklyBiasWithFactors(biasData) {
     let filteredVote = 0;
     let enabledCount = 0;
     
-    console.log('Available factors:', factors);
-    
     Object.keys(factors).forEach(factorName => {
-        const isEnabled = weeklyBiasFactorStates[factorName];
-        const vote = factors[factorName].vote || 0;
-        console.log(`Factor ${factorName}: enabled=${isEnabled}, vote=${vote}`);
-        if (isEnabled) {
-            filteredVote += vote;
+        if (weeklyBiasFactorStates[factorName]) {
+            filteredVote += factors[factorName].vote || 0;
             enabledCount++;
         }
     });
-    
-    console.log(`Filtered vote: ${filteredVote}, Enabled count: ${enabledCount}`);
     
     // Scale thresholds based on number of enabled factors
     // Original: ±6 (major), ±3 (minor) for 6 factors
@@ -488,8 +477,6 @@ function updateWeeklyBiasWithFactors(biasData) {
     const scaleFactor = enabledCount / totalFactors;
     const majorThreshold = Math.round(6 * scaleFactor);
     const minorThreshold = Math.round(3 * scaleFactor);
-    
-    console.log(`Thresholds - major: ±${majorThreshold}, minor: ±${minorThreshold}`);
     
     // Determine bias level
     let newLevel = 'NEUTRAL';
@@ -503,8 +490,6 @@ function updateWeeklyBiasWithFactors(biasData) {
         newLevel = 'URSA_MINOR';
     }
     
-    console.log(`NEW BIAS LEVEL: ${newLevel}`);
-    
     // Create modified bias data for display
     const modifiedBiasData = {
         ...biasData,
@@ -513,11 +498,8 @@ function updateWeeklyBiasWithFactors(biasData) {
         enabled_factors: enabledCount
     };
     
-    console.log('Modified bias data:', modifiedBiasData);
-    
     // Update display
     updateBiasWithTrend('weekly', modifiedBiasData);
-    console.log('Display update called');
     
     // Re-add shift indicator if it existed
     if (shiftIndicator && weeklyLevelElement) {
@@ -641,27 +623,18 @@ function initWeeklyBiasSettings() {
     // Apply factors
     if (applyBtn) {
         applyBtn.addEventListener('click', () => {
-            console.log('Apply button clicked');
-            
             // Save checkbox states
             document.querySelectorAll('#weeklyBiasSettingsModal .factor-toggle').forEach(toggle => {
                 const factorName = toggle.dataset.factor;
                 const checkbox = toggle.querySelector('input[type="checkbox"]');
                 weeklyBiasFactorStates[factorName] = checkbox.checked;
-                console.log(`Factor ${factorName}: ${checkbox.checked}`);
             });
             
             saveFactorStatesToStorage();
-            console.log('Factor states saved:', weeklyBiasFactorStates);
             
             // Recalculate and update display
-            console.log('weeklyBiasFullData exists:', !!weeklyBiasFullData);
-            console.log('weeklyBiasFullData:', weeklyBiasFullData);
-            
             if (weeklyBiasFullData) {
                 updateWeeklyBiasWithFactors(weeklyBiasFullData);
-            } else {
-                console.warn('No weeklyBiasFullData available - bias cannot be recalculated');
             }
             
             closeModal();
