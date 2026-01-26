@@ -156,6 +156,68 @@ body {
     font-size: 14px;
 }
 
+/* Bias Alignment Glow - When Cyclical & Weekly are aligned */
+.bias-aligned-bullish .main-content,
+.bias-aligned-bullish .watchlist-section,
+.bias-aligned-bullish .cta-section,
+.bias-aligned-bullish .hybrid-scanner-section,
+.bias-aligned-bullish .btc-signals-section,
+.bias-aligned-bullish .flow-section,
+.bias-aligned-bullish .strategies-section {
+    outline: 2px solid var(--accent-lime);
+    outline-offset: -2px;
+    border-radius: 10px;
+}
+
+.bias-aligned-bearish .main-content,
+.bias-aligned-bearish .watchlist-section,
+.bias-aligned-bearish .cta-section,
+.bias-aligned-bearish .hybrid-scanner-section,
+.bias-aligned-bearish .btc-signals-section,
+.bias-aligned-bearish .flow-section,
+.bias-aligned-bearish .strategies-section {
+    outline: 2px solid var(--accent-orange);
+    outline-offset: -2px;
+    border-radius: 10px;
+}
+
+/* Override controls alignment styling */
+.bias-aligned-bullish .bias-override-control .override-toggle[data-active="true"],
+.bias-aligned-bullish .override-active-banner {
+    background: var(--accent-lime);
+    color: var(--dark-bg);
+}
+
+.bias-aligned-bearish .bias-override-control .override-toggle[data-active="true"],
+.bias-aligned-bearish .override-active-banner {
+    background: var(--accent-orange);
+    color: var(--dark-bg);
+}
+
+/* Bias alignment indicator in header */
+.bias-alignment-indicator {
+    display: none;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 700;
+    margin-left: 12px;
+}
+
+.bias-aligned-bullish .bias-alignment-indicator {
+    display: flex;
+    background: rgba(124, 255, 107, 0.2);
+    color: var(--accent-lime);
+}
+
+.bias-aligned-bearish .bias-alignment-indicator {
+    display: flex;
+    background: rgba(255, 107, 53, 0.2);
+    color: var(--accent-orange);
+}
+
 /* Bias Flow Divider */
 .bias-flow-divider {
     width: 1px;
@@ -409,12 +471,16 @@ body {
     font-size: 0.9em;
 }
 
-.bias-level.TORO_MAJOR, .bias-level.TORO_MINOR {
+/* Bullish bias levels - lime green */
+.bias-level.TORO_MAJOR, .bias-level.TORO_MINOR,
+.bias-level.MAJOR_TORO, .bias-level.MINOR_TORO, .bias-level.LEAN_TORO {
     background: var(--accent-lime);
     color: var(--dark-bg);
 }
 
-.bias-level.URSA_MAJOR, .bias-level.URSA_MINOR {
+/* Bearish bias levels - orange */
+.bias-level.URSA_MAJOR, .bias-level.URSA_MINOR,
+.bias-level.MAJOR_URSA, .bias-level.MINOR_URSA, .bias-level.LEAN_URSA {
     background: var(--accent-orange);
     color: var(--dark-bg);
 }

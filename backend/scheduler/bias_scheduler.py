@@ -47,13 +47,26 @@ class TrendDirection(str, Enum):
     NEW = "NEW"                 # No previous data
 
 
-# Bias level numeric values for comparison
+# Bias level numeric values for comparison (6-level system, no neutral)
 BIAS_LEVELS = {
-    "TORO_MAJOR": 5,
-    "TORO MAJOR": 5,
-    "TORO_MINOR": 4,
-    "TORO MINOR": 4,
-    "NEUTRAL": 3,
+    "MAJOR_TORO": 6,
+    "MAJOR TORO": 6,
+    "MINOR_TORO": 5,
+    "MINOR TORO": 5,
+    "LEAN_TORO": 4,
+    "LEAN TORO": 4,
+    "LEAN_URSA": 3,
+    "LEAN URSA": 3,
+    "MINOR_URSA": 2,
+    "MINOR URSA": 2,
+    "MAJOR_URSA": 1,
+    "MAJOR URSA": 1,
+    # Legacy mappings for backward compatibility
+    "TORO_MAJOR": 6,
+    "TORO MAJOR": 6,
+    "TORO_MINOR": 5,
+    "TORO MINOR": 5,
+    "NEUTRAL": 4,  # Map old neutral to LEAN_TORO (bullish default)
     "URSA_MINOR": 2,
     "URSA MINOR": 2,
     "URSA_MAJOR": 1,
@@ -62,11 +75,12 @@ BIAS_LEVELS = {
 
 # Numeric value back to bias level name
 LEVEL_TO_BIAS = {
-    5: "TORO_MAJOR",
-    4: "TORO_MINOR",
-    3: "NEUTRAL",
-    2: "URSA_MINOR",
-    1: "URSA_MAJOR",
+    6: "MAJOR_TORO",
+    5: "MINOR_TORO",
+    4: "LEAN_TORO",
+    3: "LEAN_URSA",
+    2: "MINOR_URSA",
+    1: "MAJOR_URSA",
 }
 
 
@@ -78,12 +92,13 @@ def apply_hierarchical_modifier(
     """
     Apply hierarchical modification from a higher timeframe bias to a lower timeframe.
     
-    Rules:
-    - TORO_MAJOR modifier: Boosts base by +1 level (max TORO_MAJOR)
-    - TORO_MINOR modifier: Boosts base by +0.5 (rounds up if neutral or better)
-    - URSA_MAJOR modifier: Reduces base by -1 level (min URSA_MAJOR)
-    - URSA_MINOR modifier: Reduces base by -0.5 (rounds down if neutral or worse)
-    - NEUTRAL modifier: No change
+    6-Level System Rules:
+    - MAJOR_TORO modifier (6): Boosts base by +1 level (max MAJOR_TORO)
+    - MINOR_TORO modifier (5): Boosts base by +0.5
+    - LEAN_TORO modifier (4): No change (already bullish lean)
+    - LEAN_URSA modifier (3): No change (already bearish lean)
+    - MINOR_URSA modifier (2): Reduces base by -0.5
+    - MAJOR_URSA modifier (1): Reduces base by -1 level (min MAJOR_URSA)
     
     Args:
         base_level: The base bias level (e.g., from Daily calculation)
@@ -93,38 +108,36 @@ def apply_hierarchical_modifier(
     Returns:
         Tuple of (modified_level, modification_details)
     """
-    base_value = BIAS_LEVELS.get(base_level.upper().replace("_", " "), 3)
-    modifier_value = BIAS_LEVELS.get(modifier_level.upper().replace("_", " "), 3)
+    base_value = BIAS_LEVELS.get(base_level.upper().replace("_", " "), 4)  # Default to LEAN_TORO
+    modifier_value = BIAS_LEVELS.get(modifier_level.upper().replace("_", " "), 4)
     
     original_value = base_value
     adjustment = 0
     adjustment_reason = "no_modifier"
     
     # Strong bullish modifier boosts by 1
-    if modifier_value == 5:  # TORO_MAJOR
+    if modifier_value == 6:  # MAJOR_TORO
         adjustment = 1
         adjustment_reason = "strong_bullish_boost"
-    # Minor bullish modifier boosts by 0.5 (only effective if base is neutral or bullish)
-    elif modifier_value == 4:  # TORO_MINOR
-        if base_value >= 3:  # Neutral or better
-            adjustment = 0.5
-            adjustment_reason = "minor_bullish_boost"
+    # Minor bullish modifier boosts by 0.5
+    elif modifier_value == 5:  # MINOR_TORO
+        adjustment = 0.5
+        adjustment_reason = "minor_bullish_boost"
+    # Lean levels don't modify (they're already directional but not strong)
+    elif modifier_value in [4, 3]:  # LEAN_TORO or LEAN_URSA
+        adjustment = 0
+        adjustment_reason = "lean_no_change"
     # Strong bearish modifier reduces by 1
-    elif modifier_value == 1:  # URSA_MAJOR
+    elif modifier_value == 1:  # MAJOR_URSA
         adjustment = -1
         adjustment_reason = "strong_bearish_drag"
-    # Minor bearish modifier reduces by 0.5 (only effective if base is neutral or bearish)
-    elif modifier_value == 2:  # URSA_MINOR
-        if base_value <= 3:  # Neutral or worse
-            adjustment = -0.5
-            adjustment_reason = "minor_bearish_drag"
     
-    # Apply adjustment and clamp to valid range [1, 5]
+    # Apply adjustment and clamp to valid range [1, 6]
     modified_value = base_value + adjustment
-    modified_value = max(1, min(5, round(modified_value)))
+    modified_value = max(1, min(6, round(modified_value)))
     
     # Convert back to level name
-    modified_level = LEVEL_TO_BIAS.get(modified_value, "NEUTRAL")
+    modified_level = LEVEL_TO_BIAS.get(modified_value, "LEAN_TORO")
     
     details = {
         "original_level": base_level,
@@ -742,17 +755,28 @@ async def refresh_daily_bias() -> Dict[str, Any]:
         total_vote = sum(vote for _, vote, _ in factor_votes)
         max_possible = 12  # 6 factors × 2 max each
         
-        # Thresholds for 6 factors
-        if total_vote >= 6:
-            new_level = "TORO_MAJOR"
+        # Thresholds for 6 factors (6-level system, no neutral)
+        # Use weekly bias as tiebreaker when vote = 0
+        if total_vote >= 7:
+            new_level = "MAJOR_TORO"
         elif total_vote >= 3:
-            new_level = "TORO_MINOR"
-        elif total_vote <= -6:
-            new_level = "URSA_MAJOR"
-        elif total_vote <= -3:
-            new_level = "URSA_MINOR"
+            new_level = "MINOR_TORO"
+        elif total_vote > 0:
+            new_level = "LEAN_TORO"
+        elif total_vote == 0:
+            # Tiebreaker: use weekly bias direction
+            weekly_data = get_bias_status(BiasTimeframe.WEEKLY)
+            weekly_level = weekly_data.get("level", "LEAN_TORO") if weekly_data else "LEAN_TORO"
+            if "URSA" in weekly_level.upper():
+                new_level = "LEAN_URSA"
+            else:
+                new_level = "LEAN_TORO"  # Default bullish
+        elif total_vote > -3:
+            new_level = "LEAN_URSA"
+        elif total_vote > -7:
+            new_level = "MINOR_URSA"
         else:
-            new_level = "NEUTRAL"
+            new_level = "MAJOR_URSA"
         
         # Build details
         details = {
@@ -1033,17 +1057,28 @@ async def refresh_weekly_bias() -> Dict[str, Any]:
     
     # Map total vote to bias level
     # Range: -12 to +12 for 6 factors
-    # Thresholds adjusted for 6 factors
-    if total_vote >= 6:
-        new_level = "TORO_MAJOR"
+    # Thresholds for 6 factors (6-level system, no neutral)
+    # Use cyclical bias as tiebreaker when vote = 0
+    if total_vote >= 7:
+        new_level = "MAJOR_TORO"
     elif total_vote >= 3:
-        new_level = "TORO_MINOR"
-    elif total_vote <= -6:
-        new_level = "URSA_MAJOR"
-    elif total_vote <= -3:
-        new_level = "URSA_MINOR"
+        new_level = "MINOR_TORO"
+    elif total_vote > 0:
+        new_level = "LEAN_TORO"
+    elif total_vote == 0:
+        # Tiebreaker: use cyclical bias direction
+        cyclical_data = get_bias_status(BiasTimeframe.CYCLICAL)
+        cyclical_level = cyclical_data.get("level", "LEAN_TORO") if cyclical_data else "LEAN_TORO"
+        if "URSA" in cyclical_level.upper():
+            new_level = "LEAN_URSA"
+        else:
+            new_level = "LEAN_TORO"  # Default bullish
+    elif total_vote > -3:
+        new_level = "LEAN_URSA"
+    elif total_vote > -7:
+        new_level = "MINOR_URSA"
     else:
-        new_level = "NEUTRAL"
+        new_level = "MAJOR_URSA"
     
     # Build details
     details = {
@@ -1314,17 +1349,20 @@ async def refresh_cyclical_bias() -> Dict[str, Any]:
         total_vote = sum(vote for _, vote, _ in factor_votes)
         max_possible = 12  # 6 factors × 2 max each
         
-        # Thresholds for 6 factors (same as weekly)
-        if total_vote >= 6:
-            new_level = "TORO_MAJOR"
+        # Thresholds for 6 factors (6-level system, no neutral)
+        # Cyclical has no higher timeframe, default to bullish for ties (long-term market uptrend)
+        if total_vote >= 7:
+            new_level = "MAJOR_TORO"
         elif total_vote >= 3:
-            new_level = "TORO_MINOR"
-        elif total_vote <= -6:
-            new_level = "URSA_MAJOR"
-        elif total_vote <= -3:
-            new_level = "URSA_MINOR"
+            new_level = "MINOR_TORO"
+        elif total_vote >= 0:
+            new_level = "LEAN_TORO"  # Default bullish for 0
+        elif total_vote > -3:
+            new_level = "LEAN_URSA"
+        elif total_vote > -7:
+            new_level = "MINOR_URSA"
         else:
-            new_level = "NEUTRAL"
+            new_level = "MAJOR_URSA"
         
         # Build details
         details = {
