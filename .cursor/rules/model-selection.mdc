@@ -1,0 +1,39 @@
+---
+description: Model selection preferences - use faster models by default, Opus only when needed
+alwaysApply: true
+---
+
+# Model Selection
+
+## Default Behavior
+
+Use **faster models** for most tasks. Only use **Opus** when the request genuinely benefits from its additional capabilities.
+
+## When to Use Opus
+
+- Complex architectural decisions or major refactors
+- Debugging subtle or multi-layered issues
+- Tasks requiring deep reasoning across many files
+- Novel problems without clear patterns
+
+## When Faster Models Suffice
+
+- Simple file edits and bug fixes
+- Adding features with clear patterns
+- Standard CRUD operations
+- Running commands and deployments
+- Repetitive or well-defined tasks
+
+## Required: Announce Model at Start
+
+At the beginning of every build/task response, state which model tier is being used:
+
+```
+**Model: Faster** - [brief reason]
+```
+or
+```
+**Model: Opus** - [brief reason why Opus is needed]
+```
+
+This helps the user understand resource allocation and allows them to redirect if needed.

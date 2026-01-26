@@ -1097,14 +1097,23 @@ function applyPersonalBiasToCards() {
     
     if (personalBias === 'NEUTRAL') return;
     
-    // Add badge to each bias card
+    // Add badge to each bias card - insert after bias-level, before bias-details
     const biasCards = document.querySelectorAll('.bias-card');
     biasCards.forEach(card => {
-        const badge = document.createElement('span');
-        badge.className = `personal-bias-badge ${personalBias.toLowerCase()}`;
-        badge.textContent = personalBias === 'TORO' ? '+1 Personal' : '-1 Personal';
-        badge.title = `Your personal ${personalBias} bias adds ${personalBias === 'TORO' ? '+1' : '-1'} to the score`;
-        card.appendChild(badge);
+        const biasLevel = card.querySelector('.bias-level');
+        const biasDetails = card.querySelector('.bias-details');
+        
+        if (biasLevel && biasDetails) {
+            const badge = document.createElement('div');
+            badge.className = `personal-bias-badge ${personalBias.toLowerCase()}`;
+            badge.textContent = personalBias === 'TORO' ? '+1 Personal Bias' : '-1 Personal Bias';
+            badge.title = `Your personal ${personalBias} bias adds ${personalBias === 'TORO' ? '+1' : '-1'} to the score`;
+            
+            // Insert after bias-level (and bias-effective if present)
+            const biasEffective = card.querySelector('.bias-effective');
+            const insertAfter = biasEffective || biasLevel;
+            insertAfter.parentNode.insertBefore(badge, insertAfter.nextSibling);
+        }
     });
 }
 
