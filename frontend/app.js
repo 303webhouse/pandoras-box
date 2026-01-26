@@ -26,8 +26,8 @@ let activePriceLevels = null;
 // Weekly Bias Factor State
 let weeklyBiasFullData = null; // Stores complete weekly bias data with factors
 let weeklyBiasFactorStates = {
-    index_technicals: true,
-    dollar_smile: true,
+    index_trends: true,
+    dollar_trend: true,
     sector_rotation: true,
     credit_spreads: true,
     market_breadth: true,
@@ -37,12 +37,12 @@ let weeklyBiasFactorStates = {
 // Daily Bias Factor State
 let dailyBiasFullData = null;
 let dailyBiasFactorStates = {
-    tick_breadth: true,
-    put_call_ratio: true,
-    vix_intraday: true,
-    vold: true,
-    trin_arms: true,
-    spy_vs_rsp: true
+    spy_rsi: true,
+    vix_level: true,
+    tech_leadership: true,
+    small_cap_risk: true,
+    spy_trend: true,
+    market_breadth: true
 };
 
 // Cyclical Bias Factor State
@@ -554,8 +554,8 @@ function checkAndResetFactorsForNewDay(biasData) {
     if (!lastResetDate || lastResetDate !== currentDate) {
         // New day detected - reset all factors to enabled
         weeklyBiasFactorStates = {
-            index_technicals: true,
-            dollar_smile: true,
+            index_trends: true,
+            dollar_trend: true,
             sector_rotation: true,
             credit_spreads: true,
             market_breadth: true,
