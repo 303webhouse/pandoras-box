@@ -25,6 +25,7 @@ try:
         refresh_weekly_bias,
         refresh_monthly_bias,
         run_scheduled_refreshes,
+        get_weekly_baseline,
         BiasTimeframe
     )
     SCHEDULER_AVAILABLE = True
@@ -189,6 +190,68 @@ async def manual_refresh(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/shift-status")
+async def get_shift_status():
+    """
+    Get current weekly bias shift status vs Monday baseline
+    
+    Returns:
+    - baseline: Monday's baseline reading (timestamp, total_vote, level)
+    - current: Current day's reading (from latest weekly bias)
+    - delta: Difference between current and baseline votes
+    - shift_status: STABLE, IMPROVING, STRONGLY_IMPROVING, DETERIORATING, or STRONGLY_DETERIORATING
+    """
+    if not SCHEDULER_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Bias scheduler not available")
+    
+    try:
+        baseline = get_weekly_baseline()
+        weekly_status = get_bias_status(BiasTimeframe.WEEKLY)
+        
+        # Get current reading from weekly status
+        current_details = weekly_status.get("details", {})
+        current_vote = current_details.get("total_vote", 0)
+        current_level = weekly_status.get("level", "NEUTRAL")
+        
+        # Calculate shift if baseline exists
+        if baseline.get("timestamp"):
+            from scheduler.bias_scheduler import calculate_shift_status
+            baseline_vote = baseline.get("total_vote", 0)
+            shift_info = calculate_shift_status(baseline_vote, current_vote)
+            
+            return {
+                "status": "success",
+                "baseline": {
+                    "timestamp": baseline.get("timestamp"),
+                    "total_vote": baseline.get("total_vote"),
+                    "level": baseline.get("level")
+                },
+                "current": {
+                    "timestamp": weekly_status.get("timestamp"),
+                    "total_vote": current_vote,
+                    "level": current_level
+                },
+                "delta": shift_info["delta"],
+                "shift_status": shift_info["status"],
+                "description": shift_info["description"]
+            }
+        else:
+            return {
+                "status": "success",
+                "baseline": None,
+                "current": {
+                    "timestamp": weekly_status.get("timestamp"),
+                    "total_vote": current_vote,
+                    "level": current_level
+                },
+                "message": "No baseline set yet. Baseline will be set on next Monday."
+            }
+        
+    except Exception as e:
+        logger.error(f"Error getting shift status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/schedule")
 async def get_schedule_info():
     """Get information about the automatic refresh schedule"""
@@ -202,8 +265,8 @@ async def get_schedule_info():
             },
             "weekly": {
                 "time": "9:45 AM ET",
-                "days": "Monday only",
-                "source": "Weekly technical analysis of major indices (SPY, QQQ, IWM, DIA)"
+                "days": "Every trading day (Monday sets baseline, daily compares to baseline)",
+                "source": "6-factor weekly analysis: Index Technicals, Dollar Smile, Sector Rotation, Credit Spreads, Market Breadth, VIX Term Structure"
             },
             "monthly": {
                 "time": "9:45 AM ET",
@@ -219,5 +282,16 @@ async def get_schedule_info():
                 "STABLE": "Same as previous period",
                 "NEW": "First reading (no previous data)"
             }
+        },
+        "weekly_shift_detection": {
+            "description": "Weekly bias runs daily and compares to Monday's baseline",
+            "shift_statuses": {
+                "STABLE": "Delta -2 to +2 (sentiment stable)",
+                "IMPROVING": "Delta +3 to +5 (sentiment improving)",
+                "STRONGLY_IMPROVING": "Delta +6 or more (sentiment strongly improving)",
+                "DETERIORATING": "Delta -3 to -5 (sentiment deteriorating)",
+                "STRONGLY_DETERIORATING": "Delta -6 or less (sentiment strongly deteriorating)"
+            },
+            "alerts": "WebSocket alerts are broadcast for STRONGLY_IMPROVING and STRONGLY_DETERIORATING shifts"
         }
     }

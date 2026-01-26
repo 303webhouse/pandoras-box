@@ -21,6 +21,15 @@ logger = logging.getLogger(__name__)
 
 # State file for bias history
 BIAS_HISTORY_FILE = os.path.join(os.path.dirname(__file__), "..", "..", "data", "bias_history.json")
+BASELINE_FILE = os.path.join(os.path.dirname(__file__), "..", "..", "data", "weekly_baseline.json")
+
+# Weekly baseline storage (Monday's reading)
+_weekly_baseline = {
+    "timestamp": None,
+    "total_vote": None,
+    "factors": {},
+    "level": None
+}
 
 
 class BiasTimeframe(str, Enum):
@@ -75,6 +84,44 @@ def _save_bias_history(data: Dict[str, Any]):
             json.dump(data, f, indent=2, default=str)
     except Exception as e:
         logger.error(f"Error saving bias history: {e}")
+
+
+def _load_weekly_baseline() -> Dict[str, Any]:
+    """Load weekly baseline from disk"""
+    global _weekly_baseline
+    try:
+        if os.path.exists(BASELINE_FILE):
+            with open(BASELINE_FILE, 'r') as f:
+                baseline = json.load(f)
+                # Check if baseline is from this week (Monday or later)
+                if baseline.get("timestamp"):
+                    baseline_date = datetime.fromisoformat(baseline["timestamp"])
+                    now = datetime.now()
+                    # If baseline is older than current Monday, reset it
+                    days_since_baseline = (now - baseline_date).days
+                    if days_since_baseline < 7 and baseline_date.weekday() == 0:
+                        _weekly_baseline = baseline
+                        return baseline
+    except Exception as e:
+        logger.error(f"Error loading weekly baseline: {e}")
+    
+    return {
+        "timestamp": None,
+        "total_vote": None,
+        "factors": {},
+        "level": None
+    }
+
+
+def _save_weekly_baseline():
+    """Save weekly baseline to disk"""
+    global _weekly_baseline
+    try:
+        os.makedirs(os.path.dirname(BASELINE_FILE), exist_ok=True)
+        with open(BASELINE_FILE, 'w') as f:
+            json.dump(_weekly_baseline, f, indent=2, default=str)
+    except Exception as e:
+        logger.error(f"Error saving weekly baseline: {e}")
 
 
 def calculate_trend(current_level: str, previous_level: str) -> TrendDirection:
@@ -163,6 +210,47 @@ def _get_trend_description(trend: TrendDirection, previous: str, current: str) -
         return f"↓ More bearish (was {previous})"
     else:
         return f"→ Unchanged from {previous}"
+
+
+def calculate_shift_status(baseline_vote: int, current_vote: int) -> Dict[str, Any]:
+    """
+    Calculate shift status comparing current vote to baseline vote
+    
+    Args:
+        baseline_vote: Monday's baseline vote (-12 to +12)
+        current_vote: Current day's vote (-12 to +12)
+    
+    Returns:
+        Dict with delta, status, and description
+    """
+    delta = current_vote - baseline_vote
+    
+    if delta >= 6:
+        status = "STRONGLY_IMPROVING"
+        description = "Sentiment strongly improving since Monday"
+    elif delta >= 3:
+        status = "IMPROVING"
+        description = "Sentiment improving since Monday"
+    elif delta <= -6:
+        status = "STRONGLY_DETERIORATING"
+        description = "Sentiment strongly deteriorating since Monday"
+    elif delta <= -3:
+        status = "DETERIORATING"
+        description = "Sentiment deteriorating since Monday"
+    else:
+        status = "STABLE"
+        description = "Sentiment stable since Monday"
+    
+    return {
+        "delta": delta,
+        "status": status,
+        "description": description
+    }
+
+
+def get_weekly_baseline() -> Dict[str, Any]:
+    """Get the current weekly baseline (Monday's reading)"""
+    return _weekly_baseline.copy()
 
 
 def get_bias_status(timeframe: BiasTimeframe = None) -> Dict[str, Any]:
@@ -307,9 +395,26 @@ async def refresh_weekly_bias() -> Dict[str, Any]:
     Each factor votes: -2 to +2
     Final bias is aggregate of all votes.
     
-    Scheduled: 9:45 AM ET every Monday
+    Runs daily at 9:45 AM ET. Monday's reading becomes the weekly baseline.
+    Subsequent days are compared to Monday's baseline to detect shifts.
     """
+    global _weekly_baseline
+    
     logger.info("📊 Refreshing Weekly Bias (6-Factor Model)...")
+    
+    # Check if it's Monday or if no baseline exists
+    now = datetime.now()
+    is_monday = now.weekday() == 0
+    baseline_exists = _weekly_baseline.get("timestamp") is not None
+    
+    # Load baseline if not already loaded (in case of restart)
+    if not baseline_exists:
+        _weekly_baseline = _load_weekly_baseline()
+        baseline_exists = _weekly_baseline.get("timestamp") is not None
+    
+    # Update baseline if it's Monday or no baseline exists
+    if is_monday or not baseline_exists:
+        logger.info("  📌 Setting new weekly baseline (Monday or first run)")
     
     factor_votes = []  # List of (factor_name, vote, details)
     
@@ -466,7 +571,59 @@ async def refresh_weekly_bias() -> Dict[str, Any]:
         "factors": {name: {"vote": vote, "details": det} for name, vote, det in factor_votes}
     }
     
+    # Update baseline if it's Monday or no baseline exists
+    if is_monday or not baseline_exists:
+        _weekly_baseline = {
+            "timestamp": now.isoformat(),
+            "total_vote": total_vote,
+            "factors": {name: {"vote": vote, "details": det} for name, vote, det in factor_votes},
+            "level": new_level
+        }
+        _save_weekly_baseline()
+        baseline_exists = True  # Update flag after setting baseline
+        logger.info(f"  ✅ Weekly baseline set: {new_level} (vote: {total_vote})")
+    
+    # Calculate shift status compared to baseline (only on non-Monday days with existing baseline)
+    shift_info = None
+    if baseline_exists and not is_monday:
+        baseline_vote = _weekly_baseline.get("total_vote", 0)
+        shift_info = calculate_shift_status(baseline_vote, total_vote)
+        logger.info(f"  📊 Shift vs baseline: {shift_info['status']} (delta: {shift_info['delta']})")
+    
+    # Update bias with trend tracking
     result = update_bias(BiasTimeframe.WEEKLY, new_level, details=details)
+    
+    # Add baseline and shift info to result
+    result["baseline"] = {
+        "timestamp": _weekly_baseline.get("timestamp"),
+        "total_vote": _weekly_baseline.get("total_vote"),
+        "level": _weekly_baseline.get("level")
+    } if _weekly_baseline.get("timestamp") else None
+    
+    if shift_info:
+        result["shift"] = shift_info
+        
+        # Broadcast WebSocket alert for significant shifts
+        if shift_info["status"] in ["STRONGLY_IMPROVING", "STRONGLY_DETERIORATING"]:
+            try:
+                from websocket.broadcaster import manager
+                
+                baseline_level = _weekly_baseline.get("level", "UNKNOWN")
+                alert = {
+                    "type": "BIAS_SHIFT_ALERT",
+                    "timestamp": now.isoformat(),
+                    "message": f"Weekly bias shift detected: {baseline_level} → {new_level}",
+                    "baseline_vote": _weekly_baseline.get("total_vote"),
+                    "current_vote": total_vote,
+                    "delta": shift_info["delta"],
+                    "shift_status": shift_info["status"],
+                    "baseline_level": baseline_level,
+                    "current_level": new_level
+                }
+                await manager.broadcast({"type": "bias_alert", "data": alert})
+                logger.info(f"  🚨 Alert broadcast: {shift_info['status']}")
+            except Exception as e:
+                logger.warning(f"Error broadcasting shift alert: {e}")
     
     logger.info(f"✅ Weekly Bias updated: {new_level} (total vote: {total_vote}/{max_possible})")
     return result
@@ -572,9 +729,8 @@ async def run_scheduled_refreshes():
     # Always refresh daily
     await refresh_daily_bias()
     
-    # Monday = refresh weekly
-    if now.weekday() == 0:
-        await refresh_weekly_bias()
+    # Always refresh weekly (runs daily, Monday sets baseline)
+    await refresh_weekly_bias()
     
     # First trading day of month = refresh monthly
     if is_first_trading_day_of_month():
@@ -583,7 +739,7 @@ async def run_scheduled_refreshes():
 
 async def start_scheduler():
     """Start the background scheduler"""
-    global _scheduler_started
+    global _scheduler_started, _weekly_baseline
     
     if _scheduler_started:
         logger.info("Scheduler already running")
@@ -591,6 +747,13 @@ async def start_scheduler():
     
     _scheduler_started = True
     logger.info("🚀 Starting bias scheduler...")
+    
+    # Load weekly baseline from disk
+    _weekly_baseline = _load_weekly_baseline()
+    if _weekly_baseline.get("timestamp"):
+        logger.info(f"  📌 Loaded weekly baseline: {_weekly_baseline.get('level')} (from {_weekly_baseline.get('timestamp')})")
+    else:
+        logger.info("  📌 No weekly baseline found - will be set on next Monday")
     
     # Use APScheduler if available, otherwise use simple asyncio loop
     try:
