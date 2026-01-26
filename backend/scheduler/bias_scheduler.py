@@ -567,13 +567,56 @@ async def run_cta_scan_scheduled():
         
         logger.info(f"CTA scan found {len(all_signals)} signals")
         
+        # Load watchlist for bonus scoring
+        from scanners.cta_scanner import load_watchlist
+        watchlist = load_watchlist()
+        
+        # Get current bias status for alignment check
+        bias_status = get_bias_status()
+        
         # Push each signal to Trade Ideas via WebSocket
         for signal in all_signals[:10]:  # Limit to top 10
+            ticker = signal.get("symbol")
+            base_score = signal.get("priority", 50)
+            
+            # Calculate bonus points
+            score_bonuses = []
+            
+            # 1. Watchlist bonus (+10)
+            if ticker in watchlist:
+                base_score += 10
+                score_bonuses.append("Watchlist")
+            
+            # 2. Bias alignment bonus (+10)
+            bias_aligned = await check_bias_alignment_for_cta(signal.get("direction"))
+            if bias_aligned:
+                base_score += 10
+                score_bonuses.append("Bias Aligned")
+            
+            # 3. Options flow confirmation (+10)
+            flow_confirmed = await check_flow_confirmation_for_cta(ticker, signal.get("direction"))
+            if flow_confirmed:
+                base_score += 10
+                score_bonuses.append("Flow Confirmed")
+            
+            # Update confidence based on final score
+            if base_score >= 70:
+                confidence = "HIGH"
+            elif base_score >= 55:
+                confidence = "MEDIUM"
+            else:
+                confidence = "LOW"
+            
+            # Build notes with bonuses
+            notes = signal.get("description", "")
+            if score_bonuses:
+                notes += f" [+{len(score_bonuses)*10}: {', '.join(score_bonuses)}]"
+            
             # Convert CTA signal format to standard signal format
             trade_signal = {
                 "signal_id": signal.get("signal_id"),
                 "timestamp": signal.get("timestamp"),
-                "ticker": signal.get("symbol"),
+                "ticker": ticker,
                 "strategy": "CTA Scanner",
                 "direction": signal.get("direction", "LONG"),
                 "signal_type": signal.get("signal_type"),
@@ -584,9 +627,9 @@ async def run_cta_scan_scheduled():
                 "timeframe": "DAILY",
                 "asset_class": "EQUITY",
                 "status": "ACTIVE",
-                "score": signal.get("priority", 50),
-                "confidence": signal.get("confidence", "MEDIUM"),
-                "notes": signal.get("description")
+                "score": base_score,
+                "confidence": confidence,
+                "notes": notes
             }
             
             # Cache in Redis
@@ -595,7 +638,7 @@ async def run_cta_scan_scheduled():
             # Broadcast to all connected devices
             await manager.broadcast_signal(trade_signal)
             
-            logger.info(f"📡 CTA signal pushed: {trade_signal['ticker']} {trade_signal['signal_type']}")
+            logger.info(f"📡 CTA signal pushed: {ticker} {signal.get('signal_type')} (score: {base_score})")
         
         logger.info(f"✅ CTA scheduled scan complete - {len(all_signals)} signals pushed to Trade Ideas")
         
@@ -608,3 +651,65 @@ async def trigger_cta_scan_now():
     Manually trigger a CTA scan (called from API)
     """
     await run_cta_scan_scheduled()
+
+
+async def check_bias_alignment_for_cta(direction: str) -> bool:
+    """
+    Check if current bias indicators align with signal direction
+    Returns True if daily/weekly biases support the trade direction
+    """
+    try:
+        bias_status = get_bias_status()
+        
+        # Map bias levels to numeric values
+        daily_level = bias_status.get("daily", {}).get("level", "NEUTRAL")
+        weekly_level = bias_status.get("weekly", {}).get("level", "NEUTRAL")
+        
+        daily_val = BIAS_LEVELS.get(daily_level.upper().replace("_", " "), 3)
+        weekly_val = BIAS_LEVELS.get(weekly_level.upper().replace("_", " "), 3)
+        
+        if direction == "LONG":
+            # LONG signals need bullish bias (>= 4)
+            return daily_val >= 4 or weekly_val >= 4
+        else:
+            # SHORT signals need bearish bias (<= 2)
+            return daily_val <= 2 or weekly_val <= 2
+            
+    except Exception as e:
+        logger.warning(f"Error checking bias alignment: {e}")
+        return False
+
+
+async def check_flow_confirmation_for_cta(ticker: str, direction: str) -> bool:
+    """
+    Check if there's recent options flow supporting this trade
+    Returns True if flow exists in the same direction within last 24 hours
+    """
+    try:
+        # Try to get flow data from Redis
+        from database.redis_client import get_redis_client
+        import json
+        
+        client = await get_redis_client()
+        
+        # Check for recent flow alerts for this ticker
+        flow_key = f"flow:ticker:{ticker}"
+        flow_data = await client.get(flow_key)
+        
+        if not flow_data:
+            return False
+        
+        flow = json.loads(flow_data)
+        flow_sentiment = flow.get("sentiment", "").upper()
+        
+        # Check if flow aligns with signal direction
+        if direction == "LONG" and flow_sentiment == "BULLISH":
+            return True
+        elif direction == "SHORT" and flow_sentiment == "BEARISH":
+            return True
+        
+        return False
+        
+    except Exception as e:
+        logger.warning(f"Error checking flow confirmation: {e}")
+        return False
