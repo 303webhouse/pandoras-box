@@ -23,6 +23,7 @@ try:
     from scheduler.bias_scheduler import (
         get_bias_status,
         get_bias_history,
+        get_effective_bias,
         refresh_daily_bias,
         refresh_weekly_bias,
         refresh_cyclical_bias,
@@ -44,9 +45,10 @@ async def get_all_bias_status():
     Hierarchical system: Cyclical → Weekly → Daily
     
     Returns:
-    - daily: Current daily bias with trend vs yesterday
-    - weekly: Current weekly bias with trend vs last week
+    - daily: Current daily bias with trend vs yesterday (includes effective bias)
+    - weekly: Current weekly bias with trend vs last week (includes effective bias)
     - cyclical: Long-term macro bias (200 SMA, yield curve, Sahm Rule, etc.)
+    - effective: Hierarchically modified bias levels
     """
     if not SCHEDULER_AVAILABLE:
         raise HTTPException(status_code=503, detail="Bias scheduler not available")
@@ -54,9 +56,26 @@ async def get_all_bias_status():
     try:
         status = get_bias_status()
         
+        # Get effective bias (with hierarchical modifiers) for Daily
+        effective_daily = get_effective_bias(BiasTimeframe.DAILY)
+        
         return {
             "status": "success",
             "data": status,
+            "effective": {
+                "daily": effective_daily.get("effective", {}).get("daily"),
+                "weekly": effective_daily.get("effective", {}).get("weekly"),
+                "cyclical": effective_daily.get("raw", {}).get("cyclical"),
+                "modifiers": {
+                    "daily": effective_daily.get("modifiers", {}).get("daily"),
+                    "weekly": effective_daily.get("modifiers", {}).get("weekly")
+                }
+            },
+            "hierarchy_explanation": {
+                "system": "Cyclical -> Weekly -> Daily",
+                "description": "Higher timeframe biases modify lower timeframe biases. "
+                               "TORO_MAJOR boosts +1, URSA_MAJOR drags -1, minor levels have smaller effects."
+            },
             "schedule": {
                 "daily": "9:45 AM ET every trading day (intraday factors)",
                 "weekly": "9:45 AM ET every Monday (6-factor model)",
@@ -253,6 +272,52 @@ async def manual_refresh(
         raise
     except Exception as e:
         logger.error(f"Error refreshing bias: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/effective/{timeframe}")
+async def get_effective_bias_endpoint(timeframe: str):
+    """
+    Get the EFFECTIVE bias for a timeframe after applying hierarchical modifiers.
+    
+    Hierarchical System:
+    - Cyclical (macro) → modifies → Weekly → modifies → Daily
+    
+    For example:
+    - If Daily raw = TORO_MINOR but Weekly (effective) = URSA_MAJOR
+    - The effective Daily might be reduced to NEUTRAL due to bearish weekly drag
+    
+    Args:
+        timeframe: DAILY, WEEKLY, or CYCLICAL
+    
+    Returns:
+    - raw: The unmodified bias levels
+    - effective: The bias after applying hierarchical modifiers
+    - modifiers: Details about what modifications were applied
+    """
+    if not SCHEDULER_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Bias scheduler not available")
+    
+    try:
+        tf = BiasTimeframe(timeframe.upper())
+    except ValueError:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Invalid timeframe. Use: DAILY, WEEKLY, or CYCLICAL"
+        )
+    
+    try:
+        effective = get_effective_bias(tf)
+        
+        return {
+            "status": "success",
+            "timeframe": timeframe.upper(),
+            "hierarchical_system": "Cyclical -> Weekly -> Daily",
+            "data": effective
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting effective {timeframe} bias: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
