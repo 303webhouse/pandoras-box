@@ -331,17 +331,17 @@ def get_bias_history(timeframe: BiasTimeframe, limit: int = 10) -> List[Dict[str
 
 async def refresh_daily_bias() -> Dict[str, Any]:
     """
-    Refresh daily bias based on 6-FACTOR intraday analysis:
-    1. TICK/ADD Breadth (NYSE cumulative tick and advance/decline)
-    2. Put/Call Ratio (CBOE equity options sentiment)
-    3. VIX Intraday (Current vs previous close, term structure)
-    4. VOLD (Up volume vs down volume)
-    5. TRIN/Arms Index (Combines A/D with volume ratio)
-    6. SPY vs RSP (Broad market participation - equal weight vs cap weight)
+    Refresh daily bias based on 6-FACTOR calculable analysis:
+    1. SPY RSI - Momentum oscillator (overbought/oversold)
+    2. VIX Level - Fear gauge
+    3. Tech Leadership - QQQ vs SPY relative strength
+    4. Small Cap Risk - IWM vs SPY (risk-on/off)
+    5. SPY Trend - Price vs 9 EMA
+    6. Breadth - RSP vs SPY (equal weight vs cap weight)
     
-    Scheduled: 9:45 AM ET every trading day, can update multiple times
+    All factors calculated from price data - no external feeds needed.
     """
-    logger.info("📊 Refreshing Daily Bias (6-Factor Intraday Model)...")
+    logger.info("📊 Refreshing Daily Bias (6-Factor Calculable Model)...")
     
     factor_votes = []  # List of (name, vote, details)
     
@@ -350,179 +350,215 @@ async def refresh_daily_bias() -> Dict[str, Any]:
         scanner = get_scanner()
         
         # =====================================================================
-        # FACTOR 1: TICK/ADD Breadth (using SPY intraday momentum as proxy)
+        # FACTOR 1: SPY RSI (Momentum)
         # =====================================================================
         try:
-            # Use SPY intraday data as proxy for TICK breadth
-            spy_1h = scanner.get_technical_analysis("SPY", interval="1h")
-            spy_signal = spy_1h.get("signal", "NEUTRAL")
+            spy_data = scanner.get_technical_analysis("SPY", interval="1D")
+            rsi = spy_data.get("oscillators", {}).get("RSI", 50)
             
-            signal_to_vote = {"STRONG_BUY": 2, "BUY": 1, "NEUTRAL": 0, "SELL": -1, "STRONG_SELL": -2}
-            tick_vote = signal_to_vote.get(spy_signal, 0)
+            # RSI scoring: <30 = oversold (bullish), >70 = overbought (bearish)
+            if rsi <= 30:
+                rsi_vote = 2
+                rsi_signal = "OVERSOLD"
+            elif rsi <= 40:
+                rsi_vote = 1
+                rsi_signal = "LEAN_OVERSOLD"
+            elif rsi >= 70:
+                rsi_vote = -2
+                rsi_signal = "OVERBOUGHT"
+            elif rsi >= 60:
+                rsi_vote = -1
+                rsi_signal = "LEAN_OVERBOUGHT"
+            else:
+                rsi_vote = 0
+                rsi_signal = "NEUTRAL"
             
-            factor_votes.append(("tick_breadth", tick_vote, {
-                "bias": spy_signal,
-                "spy_1h_signal": spy_signal,
-                "note": "Using SPY 1h momentum as TICK proxy"
+            factor_votes.append(("spy_rsi", rsi_vote, {
+                "rsi": round(rsi, 1),
+                "signal": rsi_signal
             }))
-            logger.info(f"  📊 TICK/ADD Breadth: {spy_signal} (vote: {tick_vote:+d})")
+            logger.info(f"  📊 SPY RSI: {rsi:.1f} - {rsi_signal} (vote: {rsi_vote:+d})")
             
         except Exception as e:
-            logger.warning(f"Error in TICK/ADD factor: {e}")
-            factor_votes.append(("tick_breadth", 0, {"error": str(e)}))
+            logger.warning(f"Error in SPY RSI factor: {e}")
+            factor_votes.append(("spy_rsi", 0, {"error": str(e)}))
         
         # =====================================================================
-        # FACTOR 2: Put/Call Ratio
+        # FACTOR 2: VIX Level (Fear Gauge)
         # =====================================================================
         try:
-            # Put/Call ratio: Low (<0.7) = bullish, High (>1.0) = bearish (contrarian)
-            # Using VIX as a proxy for fear/greed sentiment
             vix_data = scanner.get_technical_analysis("CBOE:VIX", interval="1D")
             vix_price = vix_data.get("price", 20)
             
-            # Estimate P/C ratio from VIX (simplified)
-            # VIX < 15 = low fear = bullish sentiment = +2
-            # VIX 15-20 = moderate = +1
-            # VIX 20-25 = elevated = -1
-            # VIX > 25 = high fear = bearish sentiment = -2
-            if vix_price < 15:
-                pc_vote = 2
-                pc_sentiment = "BULLISH"
-            elif vix_price < 20:
-                pc_vote = 1
-                pc_sentiment = "LEAN_BULLISH"
-            elif vix_price < 25:
-                pc_vote = -1
-                pc_sentiment = "LEAN_BEARISH"
+            # VIX scoring: <15 = complacent (bullish), >25 = fearful (bearish)
+            if vix_price < 13:
+                vix_vote = 2
+                vix_signal = "LOW_FEAR"
+            elif vix_price < 18:
+                vix_vote = 1
+                vix_signal = "MODERATE_LOW"
+            elif vix_price > 30:
+                vix_vote = -2
+                vix_signal = "HIGH_FEAR"
+            elif vix_price > 22:
+                vix_vote = -1
+                vix_signal = "ELEVATED"
             else:
-                pc_vote = -2
-                pc_sentiment = "BEARISH"
+                vix_vote = 0
+                vix_signal = "NEUTRAL"
             
-            factor_votes.append(("put_call_ratio", pc_vote, {
-                "vix_proxy": vix_price,
-                "sentiment": pc_sentiment,
-                "note": "Using VIX as sentiment proxy"
+            factor_votes.append(("vix_level", vix_vote, {
+                "vix": round(vix_price, 2),
+                "signal": vix_signal
             }))
-            logger.info(f"  📉 Put/Call Ratio: {pc_sentiment} (VIX: {vix_price}, vote: {pc_vote:+d})")
+            logger.info(f"  😰 VIX Level: {vix_price:.2f} - {vix_signal} (vote: {vix_vote:+d})")
             
         except Exception as e:
-            logger.warning(f"Error in Put/Call factor: {e}")
-            factor_votes.append(("put_call_ratio", 0, {"error": str(e)}))
+            logger.warning(f"Error in VIX factor: {e}")
+            factor_votes.append(("vix_level", 0, {"error": str(e)}))
         
         # =====================================================================
-        # FACTOR 3: VIX Intraday (Term structure bias)
+        # FACTOR 3: Tech Leadership (QQQ vs SPY)
         # =====================================================================
         try:
-            from bias_filters.vix_term_structure import get_bias_for_scoring as get_vix_bias
-            vix_result = get_vix_bias()
-            
-            vix_level = vix_result.get("bias_level", 3)
-            vix_vote = vix_level - 3
-            
-            factor_votes.append(("vix_intraday", vix_vote, {
-                "bias": vix_result.get("bias", "NEUTRAL"),
-                "bias_level": vix_level,
-                "last_updated": vix_result.get("last_updated")
-            }))
-            logger.info(f"  📈 VIX Intraday: {vix_result.get('bias')} (vote: {vix_vote:+d})")
-            
-        except Exception as e:
-            logger.warning(f"Error in VIX intraday factor: {e}")
-            factor_votes.append(("vix_intraday", 0, {"error": str(e)}))
-        
-        # =====================================================================
-        # FACTOR 4: VOLD (Up Volume vs Down Volume)
-        # =====================================================================
-        try:
-            # Compare SPY volume trend as proxy for market volume
             spy_data = scanner.get_technical_analysis("SPY", interval="1D")
+            qqq_data = scanner.get_technical_analysis("QQQ", interval="1D")
+            
+            spy_change = spy_data.get("change_percent", 0)
+            qqq_change = qqq_data.get("change_percent", 0)
+            diff = qqq_change - spy_change
+            
+            # QQQ outperforming = tech leading = bullish for growth
+            if diff > 0.5:
+                tech_vote = 2
+                tech_signal = "TECH_LEADING"
+            elif diff > 0.1:
+                tech_vote = 1
+                tech_signal = "TECH_SLIGHT_LEAD"
+            elif diff < -0.5:
+                tech_vote = -2
+                tech_signal = "TECH_LAGGING"
+            elif diff < -0.1:
+                tech_vote = -1
+                tech_signal = "TECH_SLIGHT_LAG"
+            else:
+                tech_vote = 0
+                tech_signal = "BALANCED"
+            
+            factor_votes.append(("tech_leadership", tech_vote, {
+                "qqq_change": round(qqq_change, 2),
+                "spy_change": round(spy_change, 2),
+                "diff": round(diff, 2),
+                "signal": tech_signal
+            }))
+            logger.info(f"  💻 Tech Leadership: QQQ {qqq_change:+.2f}% vs SPY {spy_change:+.2f}% - {tech_signal} (vote: {tech_vote:+d})")
+            
+        except Exception as e:
+            logger.warning(f"Error in Tech Leadership factor: {e}")
+            factor_votes.append(("tech_leadership", 0, {"error": str(e)}))
+        
+        # =====================================================================
+        # FACTOR 4: Small Cap Risk (IWM vs SPY)
+        # =====================================================================
+        try:
+            spy_data = scanner.get_technical_analysis("SPY", interval="1D")
+            iwm_data = scanner.get_technical_analysis("IWM", interval="1D")
+            
+            spy_change = spy_data.get("change_percent", 0)
+            iwm_change = iwm_data.get("change_percent", 0)
+            diff = iwm_change - spy_change
+            
+            # IWM outperforming = risk-on = bullish
+            if diff > 0.5:
+                risk_vote = 2
+                risk_signal = "RISK_ON"
+            elif diff > 0.1:
+                risk_vote = 1
+                risk_signal = "SLIGHT_RISK_ON"
+            elif diff < -0.5:
+                risk_vote = -2
+                risk_signal = "RISK_OFF"
+            elif diff < -0.1:
+                risk_vote = -1
+                risk_signal = "SLIGHT_RISK_OFF"
+            else:
+                risk_vote = 0
+                risk_signal = "NEUTRAL"
+            
+            factor_votes.append(("small_cap_risk", risk_vote, {
+                "iwm_change": round(iwm_change, 2),
+                "spy_change": round(spy_change, 2),
+                "diff": round(diff, 2),
+                "signal": risk_signal
+            }))
+            logger.info(f"  🏃 Small Cap Risk: IWM {iwm_change:+.2f}% vs SPY {spy_change:+.2f}% - {risk_signal} (vote: {risk_vote:+d})")
+            
+        except Exception as e:
+            logger.warning(f"Error in Small Cap Risk factor: {e}")
+            factor_votes.append(("small_cap_risk", 0, {"error": str(e)}))
+        
+        # =====================================================================
+        # FACTOR 5: SPY Trend (Price vs 9 EMA)
+        # =====================================================================
+        try:
+            spy_data = scanner.get_technical_analysis("SPY", interval="1D")
+            price = spy_data.get("price", 0)
+            ma_data = spy_data.get("moving_averages", {})
+            
+            # Try to get EMA9, fall back to signal
+            ema9_signal = ma_data.get("EMA9", {}).get("signal", "NEUTRAL")
             spy_signal = spy_data.get("signal", "NEUTRAL")
             
-            # Map technical signal to volume sentiment
-            if spy_signal in ["STRONG_BUY"]:
-                vold_vote = 2
-                vold_sentiment = "STRONG_BULLISH"
-            elif spy_signal == "BUY":
-                vold_vote = 1
-                vold_sentiment = "BULLISH"
-            elif spy_signal == "SELL":
-                vold_vote = -1
-                vold_sentiment = "BEARISH"
-            elif spy_signal == "STRONG_SELL":
-                vold_vote = -2
-                vold_sentiment = "STRONG_BEARISH"
-            else:
-                vold_vote = 0
-                vold_sentiment = "NEUTRAL"
+            # Use the overall signal as trend indicator
+            signal_to_vote = {"STRONG_BUY": 2, "BUY": 1, "NEUTRAL": 0, "SELL": -1, "STRONG_SELL": -2}
+            trend_vote = signal_to_vote.get(spy_signal, 0)
             
-            factor_votes.append(("vold", vold_vote, {
-                "spy_signal": spy_signal,
-                "sentiment": vold_sentiment,
-                "note": "Using SPY technical signal as volume proxy"
+            factor_votes.append(("spy_trend", trend_vote, {
+                "price": round(price, 2),
+                "signal": spy_signal,
+                "ema9_signal": ema9_signal
             }))
-            logger.info(f"  📊 VOLD: {vold_sentiment} (vote: {vold_vote:+d})")
+            logger.info(f"  📈 SPY Trend: {spy_signal} (vote: {trend_vote:+d})")
             
         except Exception as e:
-            logger.warning(f"Error in VOLD factor: {e}")
-            factor_votes.append(("vold", 0, {"error": str(e)}))
+            logger.warning(f"Error in SPY Trend factor: {e}")
+            factor_votes.append(("spy_trend", 0, {"error": str(e)}))
         
         # =====================================================================
-        # FACTOR 5: TRIN/Arms Index
+        # FACTOR 6: Market Breadth (RSP vs SPY)
         # =====================================================================
         try:
-            # TRIN < 1 = bullish (advances dominating), > 1 = bearish
-            # Using market breadth as proxy
-            from bias_filters.market_breadth import get_bias_for_scoring as get_breadth_bias
-            breadth_result = get_breadth_bias()
+            spy_data = scanner.get_technical_analysis("SPY", interval="1D")
+            rsp_data = scanner.get_technical_analysis("RSP", interval="1D")
             
-            trin_level = breadth_result.get("bias_level", 3)
-            trin_vote = trin_level - 3
+            spy_change = spy_data.get("change_percent", 0)
+            rsp_change = rsp_data.get("change_percent", 0)
+            diff = rsp_change - spy_change
             
-            factor_votes.append(("trin_arms", trin_vote, {
-                "bias": breadth_result.get("bias", "NEUTRAL"),
-                "bias_level": trin_level,
-                "note": "Using market breadth as TRIN proxy"
-            }))
-            logger.info(f"  ⚖️ TRIN/Arms: {breadth_result.get('bias')} (vote: {trin_vote:+d})")
-            
-        except Exception as e:
-            logger.warning(f"Error in TRIN factor: {e}")
-            factor_votes.append(("trin_arms", 0, {"error": str(e)}))
-        
-        # =====================================================================
-        # FACTOR 6: SPY vs RSP (Market Breadth - Equal Weight vs Cap Weight)
-        # =====================================================================
-        try:
-            # Compare SPY (cap weighted) vs RSP (equal weight)
-            # If RSP outperforming SPY = broad rally = bullish
-            # If SPY outperforming RSP = narrow rally (mega caps) = less bullish
-            spy_tech = scanner.get_technical_analysis("SPY", interval="1D")
-            rsp_tech = scanner.get_technical_analysis("RSP", interval="1D")
-            
-            spy_signal = spy_tech.get("signal", "NEUTRAL")
-            rsp_signal = rsp_tech.get("signal", "NEUTRAL")
-            
-            signal_values = {"STRONG_BUY": 2, "BUY": 1, "NEUTRAL": 0, "SELL": -1, "STRONG_SELL": -2}
-            spy_val = signal_values.get(spy_signal, 0)
-            rsp_val = signal_values.get(rsp_signal, 0)
-            
-            # RSP stronger than SPY = broad participation = more bullish
-            if rsp_val > spy_val:
-                breadth_vote = min(2, rsp_val + 1)  # Boost for broad participation
-                breadth_type = "BROAD_RALLY"
-            elif spy_val > rsp_val:
-                breadth_vote = spy_val  # Narrow rally, less conviction
-                breadth_type = "NARROW_RALLY"
+            # RSP outperforming = broad participation = bullish breadth
+            if diff > 0.3:
+                breadth_vote = 2
+                breadth_signal = "BROAD_STRENGTH"
+            elif diff > 0.1:
+                breadth_vote = 1
+                breadth_signal = "HEALTHY_BREADTH"
+            elif diff < -0.3:
+                breadth_vote = -2
+                breadth_signal = "NARROW_RALLY"
+            elif diff < -0.1:
+                breadth_vote = -1
+                breadth_signal = "WEAK_BREADTH"
             else:
-                breadth_vote = spy_val
-                breadth_type = "BALANCED"
+                breadth_vote = 0
+                breadth_signal = "NEUTRAL"
             
-            factor_votes.append(("spy_vs_rsp", breadth_vote, {
-                "spy_signal": spy_signal,
-                "rsp_signal": rsp_signal,
-                "breadth_type": breadth_type
+            factor_votes.append(("market_breadth", breadth_vote, {
+                "rsp_change": round(rsp_change, 2),
+                "spy_change": round(spy_change, 2),
+                "diff": round(diff, 2),
+                "signal": breadth_signal
             }))
-            logger.info(f"  📈 SPY vs RSP: {breadth_type} (vote: {breadth_vote:+d})")
+            logger.info(f"  📊 Breadth: RSP {rsp_change:+.2f}% vs SPY {spy_change:+.2f}% - {breadth_signal} (vote: {breadth_vote:+d})")
             
         except Exception as e:
             logger.warning(f"Error in SPY vs RSP factor: {e}")
@@ -567,23 +603,22 @@ async def refresh_daily_bias() -> Dict[str, Any]:
 
 async def refresh_weekly_bias() -> Dict[str, Any]:
     """
-    Refresh weekly bias based on 6-FACTOR analysis:
-    1. Index Technicals (SPY, QQQ, IWM, DIA weekly signals)
-    2. Dollar Smile (DXY + VIX macro regime)
-    3. Sector Rotation (Offensive vs Defensive sectors)
+    Refresh weekly bias based on 6-FACTOR calculable analysis:
+    1. Index Trends (SPY, QQQ, IWM, SMH weekly signals) - includes semiconductors
+    2. Dollar Trend (DXY direction - weak dollar = bullish for stocks)
+    3. Sector Rotation (XLK vs XLU - offensive vs defensive)
     4. Credit Spreads (HYG vs TLT - risk appetite)
-    5. Market Breadth (RSP vs SPY - participation)
+    5. Market Breadth (RSP vs SPY weekly - participation)
     6. VIX Term Structure (VIX vs VIX3M - sentiment)
     
-    Each factor votes: -2 to +2
-    Final bias is aggregate of all votes.
+    All factors calculated from ETF prices - no external feeds needed.
     
     Runs daily at 9:45 AM ET. Monday's reading becomes the weekly baseline.
     Subsequent days are compared to Monday's baseline to detect shifts.
     """
     global _weekly_baseline
     
-    logger.info("📊 Refreshing Weekly Bias (6-Factor Model)...")
+    logger.info("📊 Refreshing Weekly Bias (6-Factor Calculable Model)...")
     
     # Check if it's Monday or if no baseline exists
     now = datetime.now()
@@ -601,13 +636,17 @@ async def refresh_weekly_bias() -> Dict[str, Any]:
     
     factor_votes = []  # List of (factor_name, vote, details)
     
-    # ========== FACTOR 1: Index Technicals ==========
     try:
         from scanners.hybrid_scanner import get_scanner
-        
         scanner = get_scanner()
-        indices = ["SPY", "QQQ", "IWM", "DIA"]
-        
+    except Exception as e:
+        logger.error(f"Failed to get scanner: {e}")
+        return {"error": str(e)}
+    
+    # ========== FACTOR 1: Index Trends (SPY/QQQ/IWM/SMH) ==========
+    try:
+        indices = ["SPY", "QQQ", "IWM", "SMH"]
+        index_signals = {}
         bullish_count = 0
         bearish_count = 0
         
@@ -615,97 +654,182 @@ async def refresh_weekly_bias() -> Dict[str, Any]:
             try:
                 tech = scanner.get_technical_analysis(ticker, interval="1W")
                 signal = tech.get("signal", "NEUTRAL")
+                index_signals[ticker] = signal
                 
                 if signal in ["BUY", "STRONG_BUY"]:
                     bullish_count += 1
                 elif signal in ["SELL", "STRONG_SELL"]:
                     bearish_count += 1
-            except:
-                pass
+            except Exception as e:
+                index_signals[ticker] = "ERROR"
+                logger.warning(f"Error getting {ticker} signal: {e}")
         
-        # Vote based on index technicals
-        if bullish_count >= 3:
-            factor_votes.append(("index_technicals", 2, {"bullish": bullish_count, "bearish": bearish_count}))
-        elif bullish_count >= 2:
-            factor_votes.append(("index_technicals", 1, {"bullish": bullish_count, "bearish": bearish_count}))
+        # Vote: 4/4 bullish = +2, 3/4 = +1, 3/4 bearish = -1, 4/4 bearish = -2
+        if bullish_count >= 4:
+            idx_vote = 2
+            idx_signal = "ALL_BULLISH"
+        elif bullish_count >= 3:
+            idx_vote = 1
+            idx_signal = "MOSTLY_BULLISH"
+        elif bearish_count >= 4:
+            idx_vote = -2
+            idx_signal = "ALL_BEARISH"
         elif bearish_count >= 3:
-            factor_votes.append(("index_technicals", -2, {"bullish": bullish_count, "bearish": bearish_count}))
-        elif bearish_count >= 2:
-            factor_votes.append(("index_technicals", -1, {"bullish": bullish_count, "bearish": bearish_count}))
+            idx_vote = -1
+            idx_signal = "MOSTLY_BEARISH"
         else:
-            factor_votes.append(("index_technicals", 0, {"bullish": bullish_count, "bearish": bearish_count}))
-            
-        logger.info(f"  📈 Index Technicals: bullish={bullish_count}, bearish={bearish_count}")
+            idx_vote = 0
+            idx_signal = "MIXED"
+        
+        factor_votes.append(("index_trends", idx_vote, {
+            "signals": index_signals,
+            "bullish": bullish_count,
+            "bearish": bearish_count,
+            "signal": idx_signal
+        }))
+        logger.info(f"  📈 Index Trends (SPY/QQQ/IWM/SMH): {bullish_count} bullish, {bearish_count} bearish - {idx_signal} (vote: {idx_vote:+d})")
         
     except Exception as e:
-        logger.warning(f"Error in index technicals factor: {e}")
-        factor_votes.append(("index_technicals", 0, {"error": str(e)}))
+        logger.warning(f"Error in index trends factor: {e}")
+        factor_votes.append(("index_trends", 0, {"error": str(e)}))
     
-    # ========== FACTOR 2: Dollar Smile ==========
+    # ========== FACTOR 2: Dollar Trend (DXY) ==========
     try:
-        from bias_filters.dollar_smile import auto_fetch_and_update as fetch_dollar_smile, get_bias_for_scoring
+        dxy_data = scanner.get_technical_analysis("TVC:DXY", interval="1W")
+        dxy_signal = dxy_data.get("signal", "NEUTRAL")
+        dxy_change = dxy_data.get("change_percent", 0)
         
-        await fetch_dollar_smile()
-        dollar_smile = get_bias_for_scoring()
-        ds_level = dollar_smile.get("bias_level", 3)
+        # Weak dollar = bullish for stocks (inverse relationship)
+        if dxy_signal in ["SELL", "STRONG_SELL"]:
+            dollar_vote = 2 if dxy_signal == "STRONG_SELL" else 1
+            dollar_status = "WEAK_DOLLAR"
+        elif dxy_signal in ["BUY", "STRONG_BUY"]:
+            dollar_vote = -2 if dxy_signal == "STRONG_BUY" else -1
+            dollar_status = "STRONG_DOLLAR"
+        else:
+            dollar_vote = 0
+            dollar_status = "NEUTRAL"
         
-        # Convert 1-5 scale to vote: 5->+2, 4->+1, 3->0, 2->-1, 1->-2
-        ds_vote = ds_level - 3
-        factor_votes.append(("dollar_smile", ds_vote, {"bias_level": ds_level, "bias": dollar_smile.get("bias")}))
-        
-        logger.info(f"  💵 Dollar Smile: {dollar_smile.get('bias')} (level {ds_level})")
+        factor_votes.append(("dollar_trend", dollar_vote, {
+            "dxy_signal": dxy_signal,
+            "dxy_change": round(dxy_change, 2),
+            "status": dollar_status
+        }))
+        logger.info(f"  💵 Dollar Trend: DXY {dxy_signal} ({dxy_change:+.2f}%) - {dollar_status} (vote: {dollar_vote:+d})")
         
     except Exception as e:
-        logger.warning(f"Error in dollar smile factor: {e}")
-        factor_votes.append(("dollar_smile", 0, {"error": str(e)}))
+        logger.warning(f"Error in dollar trend factor: {e}")
+        factor_votes.append(("dollar_trend", 0, {"error": str(e)}))
     
-    # ========== FACTOR 3: Sector Rotation ==========
+    # ========== FACTOR 3: Sector Rotation (XLK vs XLU) ==========
     try:
-        from bias_filters.sector_rotation import auto_fetch_and_update as fetch_sector_rotation, get_bias_for_scoring as get_sector_bias
+        xlk_data = scanner.get_technical_analysis("XLK", interval="1W")
+        xlu_data = scanner.get_technical_analysis("XLU", interval="1W")
         
-        await fetch_sector_rotation()
-        sector_rotation = get_sector_bias()
-        sr_level = sector_rotation.get("bias_level", 3)
+        xlk_change = xlk_data.get("change_percent", 0)
+        xlu_change = xlu_data.get("change_percent", 0)
+        diff = xlk_change - xlu_change
         
-        # Convert 1-5 scale to vote
-        sr_vote = sr_level - 3
-        factor_votes.append(("sector_rotation", sr_vote, {"bias_level": sr_level, "bias": sector_rotation.get("bias")}))
+        # Tech outperforming utilities = risk-on = bullish
+        if diff > 1.5:
+            sector_vote = 2
+            sector_signal = "STRONG_RISK_ON"
+        elif diff > 0.5:
+            sector_vote = 1
+            sector_signal = "RISK_ON"
+        elif diff < -1.5:
+            sector_vote = -2
+            sector_signal = "STRONG_RISK_OFF"
+        elif diff < -0.5:
+            sector_vote = -1
+            sector_signal = "RISK_OFF"
+        else:
+            sector_vote = 0
+            sector_signal = "NEUTRAL"
         
-        logger.info(f"  📊 Sector Rotation: {sector_rotation.get('bias')} (level {sr_level})")
+        factor_votes.append(("sector_rotation", sector_vote, {
+            "xlk_change": round(xlk_change, 2),
+            "xlu_change": round(xlu_change, 2),
+            "diff": round(diff, 2),
+            "signal": sector_signal
+        }))
+        logger.info(f"  📊 Sector Rotation: XLK {xlk_change:+.2f}% vs XLU {xlu_change:+.2f}% - {sector_signal} (vote: {sector_vote:+d})")
         
     except Exception as e:
         logger.warning(f"Error in sector rotation factor: {e}")
         factor_votes.append(("sector_rotation", 0, {"error": str(e)}))
     
-    # ========== FACTOR 4: Credit Spreads ==========
+    # ========== FACTOR 4: Credit Spreads (HYG vs TLT) ==========
     try:
-        from bias_filters.credit_spreads import auto_fetch_and_update as fetch_credit_spreads, get_bias_for_scoring as get_credit_bias
+        hyg_data = scanner.get_technical_analysis("HYG", interval="1W")
+        tlt_data = scanner.get_technical_analysis("TLT", interval="1W")
         
-        await fetch_credit_spreads()
-        credit_spreads = get_credit_bias()
-        cs_level = credit_spreads.get("bias_level", 3)
+        hyg_change = hyg_data.get("change_percent", 0)
+        tlt_change = tlt_data.get("change_percent", 0)
+        diff = hyg_change - tlt_change
         
-        cs_vote = cs_level - 3
-        factor_votes.append(("credit_spreads", cs_vote, {"bias_level": cs_level, "bias": credit_spreads.get("bias")}))
+        # HYG outperforming TLT = risk appetite = bullish
+        if diff > 1.0:
+            credit_vote = 2
+            credit_signal = "STRONG_RISK_APPETITE"
+        elif diff > 0.3:
+            credit_vote = 1
+            credit_signal = "RISK_APPETITE"
+        elif diff < -1.0:
+            credit_vote = -2
+            credit_signal = "FLIGHT_TO_SAFETY"
+        elif diff < -0.3:
+            credit_vote = -1
+            credit_signal = "CAUTION"
+        else:
+            credit_vote = 0
+            credit_signal = "NEUTRAL"
         
-        logger.info(f"  💳 Credit Spreads: {credit_spreads.get('bias')} (level {cs_level})")
+        factor_votes.append(("credit_spreads", credit_vote, {
+            "hyg_change": round(hyg_change, 2),
+            "tlt_change": round(tlt_change, 2),
+            "diff": round(diff, 2),
+            "signal": credit_signal
+        }))
+        logger.info(f"  💳 Credit Spreads: HYG {hyg_change:+.2f}% vs TLT {tlt_change:+.2f}% - {credit_signal} (vote: {credit_vote:+d})")
         
     except Exception as e:
         logger.warning(f"Error in credit spreads factor: {e}")
         factor_votes.append(("credit_spreads", 0, {"error": str(e)}))
     
-    # ========== FACTOR 5: Market Breadth ==========
+    # ========== FACTOR 5: Market Breadth (RSP vs SPY weekly) ==========
     try:
-        from bias_filters.market_breadth import auto_fetch_and_update as fetch_market_breadth, get_bias_for_scoring as get_breadth_bias
+        spy_data = scanner.get_technical_analysis("SPY", interval="1W")
+        rsp_data = scanner.get_technical_analysis("RSP", interval="1W")
         
-        await fetch_market_breadth()
-        market_breadth = get_breadth_bias()
-        mb_level = market_breadth.get("bias_level", 3)
+        spy_change = spy_data.get("change_percent", 0)
+        rsp_change = rsp_data.get("change_percent", 0)
+        diff = rsp_change - spy_change
         
-        mb_vote = mb_level - 3
-        factor_votes.append(("market_breadth", mb_vote, {"bias_level": mb_level, "bias": market_breadth.get("bias")}))
+        # RSP outperforming = broad participation = bullish breadth
+        if diff > 0.5:
+            breadth_vote = 2
+            breadth_signal = "BROAD_STRENGTH"
+        elif diff > 0.15:
+            breadth_vote = 1
+            breadth_signal = "HEALTHY_BREADTH"
+        elif diff < -0.5:
+            breadth_vote = -2
+            breadth_signal = "NARROW_LEADERSHIP"
+        elif diff < -0.15:
+            breadth_vote = -1
+            breadth_signal = "WEAK_BREADTH"
+        else:
+            breadth_vote = 0
+            breadth_signal = "NEUTRAL"
         
-        logger.info(f"  📊 Market Breadth: {market_breadth.get('bias')} (level {mb_level})")
+        factor_votes.append(("market_breadth", breadth_vote, {
+            "rsp_change": round(rsp_change, 2),
+            "spy_change": round(spy_change, 2),
+            "diff": round(diff, 2),
+            "signal": breadth_signal
+        }))
+        logger.info(f"  📊 Market Breadth: RSP {rsp_change:+.2f}% vs SPY {spy_change:+.2f}% - {breadth_signal} (vote: {breadth_vote:+d})")
         
     except Exception as e:
         logger.warning(f"Error in market breadth factor: {e}")
