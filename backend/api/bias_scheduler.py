@@ -3,9 +3,11 @@ Bias Scheduler API Endpoints
 
 Provides access to automated bias data with trend tracking:
 - GET /bias-auto/status - Get all bias levels with trends
-- GET /bias-auto/{timeframe} - Get specific timeframe
+- GET /bias-auto/{timeframe} - Get specific timeframe (DAILY, WEEKLY, CYCLICAL)
 - GET /bias-auto/{timeframe}/history - Get historical values
 - POST /bias-auto/refresh - Manually trigger refresh
+
+Hierarchical system: Cyclical → Weekly → Daily (higher timeframes modify lower)
 """
 
 from fastapi import APIRouter, HTTPException, Query
@@ -23,7 +25,7 @@ try:
         get_bias_history,
         refresh_daily_bias,
         refresh_weekly_bias,
-        refresh_monthly_bias,
+        refresh_cyclical_bias,
         run_scheduled_refreshes,
         get_weekly_baseline,
         BiasTimeframe
@@ -39,10 +41,12 @@ async def get_all_bias_status():
     """
     Get current bias status for all timeframes with trend information
     
+    Hierarchical system: Cyclical → Weekly → Daily
+    
     Returns:
     - daily: Current daily bias with trend vs yesterday
     - weekly: Current weekly bias with trend vs last week
-    - monthly: Current monthly bias with trend vs last month
+    - cyclical: Long-term macro bias (200 SMA, yield curve, Sahm Rule, etc.)
     """
     if not SCHEDULER_AVAILABLE:
         raise HTTPException(status_code=503, detail="Bias scheduler not available")
@@ -54,9 +58,9 @@ async def get_all_bias_status():
             "status": "success",
             "data": status,
             "schedule": {
-                "daily": "9:45 AM ET every trading day",
-                "weekly": "9:45 AM ET every Monday",
-                "monthly": "9:45 AM ET first trading day of month"
+                "daily": "9:45 AM ET every trading day (intraday factors)",
+                "weekly": "9:45 AM ET every Monday (6-factor model)",
+                "cyclical": "9:45 AM ET every Monday (long-term macro)"
             }
         }
         
@@ -133,13 +137,13 @@ async def get_timeframe_bias(timeframe: str):
     Get bias status for a specific timeframe
     
     Args:
-        timeframe: DAILY, WEEKLY, or MONTHLY
+        timeframe: DAILY, WEEKLY, or CYCLICAL
     
     Returns detailed bias info including:
     - Current level and timestamp
     - Previous level for trend comparison
     - Trend direction (IMPROVING, DECLINING, STABLE)
-    - Details about data sources
+    - Details about data sources and individual factors
     """
     if not SCHEDULER_AVAILABLE:
         raise HTTPException(status_code=503, detail="Bias scheduler not available")
@@ -149,7 +153,7 @@ async def get_timeframe_bias(timeframe: str):
     except ValueError:
         raise HTTPException(
             status_code=400, 
-            detail=f"Invalid timeframe. Use: DAILY, WEEKLY, or MONTHLY"
+            detail=f"Invalid timeframe. Use: DAILY, WEEKLY, or CYCLICAL"
         )
     
     try:
@@ -183,7 +187,7 @@ async def get_timeframe_history(
     except ValueError:
         raise HTTPException(
             status_code=400, 
-            detail=f"Invalid timeframe. Use: DAILY, WEEKLY, or MONTHLY"
+            detail=f"Invalid timeframe. Use: DAILY, WEEKLY, or CYCLICAL"
         )
     
     try:
@@ -209,9 +213,9 @@ async def manual_refresh(
     Manually trigger bias refresh
     
     Normally this runs automatically:
-    - Daily: 9:45 AM ET every trading day
-    - Weekly: 9:45 AM ET every Monday
-    - Monthly: 9:45 AM ET first trading day of month
+    - Daily: 9:45 AM ET every trading day (intraday factors)
+    - Weekly: 9:45 AM ET every Monday (6-factor model)
+    - Cyclical: 9:45 AM ET every Monday (long-term macro)
     
     Use this endpoint to force a refresh outside the schedule.
     """
@@ -225,10 +229,10 @@ async def manual_refresh(
                 result = await refresh_daily_bias()
             elif tf == "WEEKLY":
                 result = await refresh_weekly_bias()
-            elif tf == "MONTHLY":
-                result = await refresh_monthly_bias()
+            elif tf == "CYCLICAL":
+                result = await refresh_cyclical_bias()
             else:
-                raise HTTPException(status_code=400, detail="Invalid timeframe")
+                raise HTTPException(status_code=400, detail="Invalid timeframe. Use: DAILY, WEEKLY, or CYCLICAL")
             
             return {
                 "status": "success",
@@ -257,21 +261,26 @@ async def get_schedule_info():
     """Get information about the automatic refresh schedule"""
     return {
         "status": "success",
+        "hierarchical_system": {
+            "description": "Cyclical → Weekly → Daily (higher timeframes modify lower)",
+            "flow": "Long-term macro sets backdrop, Weekly conditions modify it, Daily fine-tunes"
+        },
         "schedule": {
             "daily": {
                 "time": "9:45 AM ET",
                 "days": "Monday through Friday (trading days)",
-                "source": "Hybrid Scanner aggregate technical sentiment"
+                "source": "6-factor intraday analysis: TICK/ADD, Put/Call, VIX, VOLD, TRIN, SPY vs RSP",
+                "updates": "Multiple times per day"
             },
             "weekly": {
                 "time": "9:45 AM ET",
                 "days": "Every trading day (Monday sets baseline, daily compares to baseline)",
                 "source": "6-factor weekly analysis: Index Technicals, Dollar Smile, Sector Rotation, Credit Spreads, Market Breadth, VIX Term Structure"
             },
-            "monthly": {
+            "cyclical": {
                 "time": "9:45 AM ET",
-                "days": "First trading day of month",
-                "source": "Monthly technical analysis of major indices"
+                "days": "Every Monday (long-term macro doesn't change daily)",
+                "source": "6-factor macro analysis: 200 SMA Positions, Yield Curve, Credit Spreads, Savita, Long-term Breadth, Sahm Rule"
             }
         },
         "trend_tracking": {
