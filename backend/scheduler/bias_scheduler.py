@@ -296,18 +296,24 @@ async def refresh_daily_bias() -> Dict[str, Any]:
 
 async def refresh_weekly_bias() -> Dict[str, Any]:
     """
-    Refresh weekly bias based on:
-    - Weekly technical signals
-    - Weekly trend analysis
+    Refresh weekly bias based on MULTI-FACTOR analysis:
+    1. Index Technicals (SPY, QQQ, IWM, DIA weekly signals)
+    2. Dollar Smile (DXY + VIX macro regime)
+    3. Sector Rotation (Offensive vs Defensive sectors)
+    
+    Each factor votes: bullish (+1), neutral (0), bearish (-1)
+    Final bias is aggregate of all votes.
     
     Scheduled: 9:45 AM ET every Monday
     """
-    logger.info("📊 Refreshing Weekly Bias...")
+    logger.info("📊 Refreshing Weekly Bias (Multi-Factor)...")
     
+    factor_votes = []  # List of (factor_name, vote, details)
+    
+    # ========== FACTOR 1: Index Technicals ==========
     try:
         from scanners.hybrid_scanner import get_scanner
         
-        # Get weekly technical analysis for key indices
         scanner = get_scanner()
         indices = ["SPY", "QQQ", "IWM", "DIA"]
         
@@ -316,7 +322,6 @@ async def refresh_weekly_bias() -> Dict[str, Any]:
         
         for ticker in indices:
             try:
-                # Use weekly interval
                 tech = scanner.get_technical_analysis(ticker, interval="1W")
                 signal = tech.get("signal", "NEUTRAL")
                 
@@ -327,38 +332,89 @@ async def refresh_weekly_bias() -> Dict[str, Any]:
             except:
                 pass
         
-        # Determine weekly bias
-        total = bullish_count + bearish_count
-        if total == 0:
-            new_level = "NEUTRAL"
-        elif bullish_count >= 3:
-            new_level = "TORO_MAJOR"
+        # Vote based on index technicals
+        if bullish_count >= 3:
+            factor_votes.append(("index_technicals", 2, {"bullish": bullish_count, "bearish": bearish_count}))
         elif bullish_count >= 2:
-            new_level = "TORO_MINOR"
+            factor_votes.append(("index_technicals", 1, {"bullish": bullish_count, "bearish": bearish_count}))
         elif bearish_count >= 3:
-            new_level = "URSA_MAJOR"
+            factor_votes.append(("index_technicals", -2, {"bullish": bullish_count, "bearish": bearish_count}))
         elif bearish_count >= 2:
-            new_level = "URSA_MINOR"
+            factor_votes.append(("index_technicals", -1, {"bullish": bullish_count, "bearish": bearish_count}))
         else:
-            new_level = "NEUTRAL"
-        
-        result = update_bias(
-            BiasTimeframe.WEEKLY,
-            new_level,
-            details={
-                "source": "weekly_index_technicals",
-                "bullish_indices": bullish_count,
-                "bearish_indices": bearish_count,
-                "indices_checked": indices
-            }
-        )
-        
-        logger.info(f"✅ Weekly Bias updated: {new_level} (trend: {result.get('trend')})")
-        return result
+            factor_votes.append(("index_technicals", 0, {"bullish": bullish_count, "bearish": bearish_count}))
+            
+        logger.info(f"  📈 Index Technicals: bullish={bullish_count}, bearish={bearish_count}")
         
     except Exception as e:
-        logger.error(f"Error refreshing weekly bias: {e}")
-        return {"error": str(e)}
+        logger.warning(f"Error in index technicals factor: {e}")
+        factor_votes.append(("index_technicals", 0, {"error": str(e)}))
+    
+    # ========== FACTOR 2: Dollar Smile ==========
+    try:
+        from bias_filters.dollar_smile import auto_fetch_and_update as fetch_dollar_smile, get_bias_for_scoring
+        
+        await fetch_dollar_smile()
+        dollar_smile = get_bias_for_scoring()
+        ds_level = dollar_smile.get("bias_level", 3)
+        
+        # Convert 1-5 scale to vote: 5->+2, 4->+1, 3->0, 2->-1, 1->-2
+        ds_vote = ds_level - 3
+        factor_votes.append(("dollar_smile", ds_vote, {"bias_level": ds_level, "bias": dollar_smile.get("bias")}))
+        
+        logger.info(f"  💵 Dollar Smile: {dollar_smile.get('bias')} (level {ds_level})")
+        
+    except Exception as e:
+        logger.warning(f"Error in dollar smile factor: {e}")
+        factor_votes.append(("dollar_smile", 0, {"error": str(e)}))
+    
+    # ========== FACTOR 3: Sector Rotation ==========
+    try:
+        from bias_filters.sector_rotation import auto_fetch_and_update as fetch_sector_rotation, get_bias_for_scoring as get_sector_bias
+        
+        await fetch_sector_rotation()
+        sector_rotation = get_sector_bias()
+        sr_level = sector_rotation.get("bias_level", 3)
+        
+        # Convert 1-5 scale to vote
+        sr_vote = sr_level - 3
+        factor_votes.append(("sector_rotation", sr_vote, {"bias_level": sr_level, "bias": sector_rotation.get("bias")}))
+        
+        logger.info(f"  📊 Sector Rotation: {sector_rotation.get('bias')} (level {sr_level})")
+        
+    except Exception as e:
+        logger.warning(f"Error in sector rotation factor: {e}")
+        factor_votes.append(("sector_rotation", 0, {"error": str(e)}))
+    
+    # ========== AGGREGATE VOTES ==========
+    total_vote = sum(v[1] for v in factor_votes)
+    max_possible = len(factor_votes) * 2  # Each factor can vote -2 to +2
+    
+    # Map total vote to bias level
+    # Range: -6 to +6 for 3 factors
+    if total_vote >= 4:
+        new_level = "TORO_MAJOR"
+    elif total_vote >= 2:
+        new_level = "TORO_MINOR"
+    elif total_vote <= -4:
+        new_level = "URSA_MAJOR"
+    elif total_vote <= -2:
+        new_level = "URSA_MINOR"
+    else:
+        new_level = "NEUTRAL"
+    
+    # Build details
+    details = {
+        "source": "multi_factor_weekly",
+        "total_vote": total_vote,
+        "max_possible": max_possible,
+        "factors": {name: {"vote": vote, "details": det} for name, vote, det in factor_votes}
+    }
+    
+    result = update_bias(BiasTimeframe.WEEKLY, new_level, details=details)
+    
+    logger.info(f"✅ Weekly Bias updated: {new_level} (total vote: {total_vote}/{max_possible})")
+    return result
 
 
 async def refresh_monthly_bias() -> Dict[str, Any]:
