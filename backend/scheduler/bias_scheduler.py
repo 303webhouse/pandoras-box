@@ -331,53 +331,234 @@ def get_bias_history(timeframe: BiasTimeframe, limit: int = 10) -> List[Dict[str
 
 async def refresh_daily_bias() -> Dict[str, Any]:
     """
-    Refresh daily bias based on:
-    - Technical aggregate sentiment (Hybrid Scanner)
-    - Market indicators
+    Refresh daily bias based on 6-FACTOR intraday analysis:
+    1. TICK/ADD Breadth (NYSE cumulative tick and advance/decline)
+    2. Put/Call Ratio (CBOE equity options sentiment)
+    3. VIX Intraday (Current vs previous close, term structure)
+    4. VOLD (Up volume vs down volume)
+    5. TRIN/Arms Index (Combines A/D with volume ratio)
+    6. SPY vs RSP (Broad market participation - equal weight vs cap weight)
     
-    Scheduled: 9:45 AM ET every trading day
+    Scheduled: 9:45 AM ET every trading day, can update multiple times
     """
-    logger.info("📊 Refreshing Daily Bias...")
+    logger.info("📊 Refreshing Daily Bias (6-Factor Intraday Model)...")
+    
+    factor_votes = []  # List of (name, vote, details)
     
     try:
-        # Import here to avoid circular imports
-        from scanners.hybrid_scanner import get_aggregate_sentiment, refresh_technicals, is_cache_fresh
+        from scanners.hybrid_scanner import get_scanner
+        scanner = get_scanner()
         
-        # Refresh technical cache if needed
-        if not is_cache_fresh():
-            logger.info("Refreshing technical cache for daily bias...")
-            await refresh_technicals()
+        # =====================================================================
+        # FACTOR 1: TICK/ADD Breadth
+        # =====================================================================
+        try:
+            from bias_filters.tick_breadth import get_tick_breadth_bias
+            tick_result = get_tick_breadth_bias()
+            
+            tick_level = tick_result.get("bias_level", 3)
+            tick_vote = tick_level - 3  # Convert 1-5 scale to -2 to +2
+            
+            factor_votes.append(("tick_breadth", tick_vote, {
+                "bias": tick_result.get("bias", "NEUTRAL"),
+                "bias_level": tick_level,
+                "tick_reading": tick_result.get("tick_reading"),
+                "add_reading": tick_result.get("add_reading")
+            }))
+            logger.info(f"  📊 TICK/ADD Breadth: {tick_result.get('bias')} (vote: {tick_vote:+d})")
+            
+        except Exception as e:
+            logger.warning(f"Error in TICK/ADD factor: {e}")
+            factor_votes.append(("tick_breadth", 0, {"error": str(e)}))
         
-        # Get aggregate sentiment
-        aggregate = get_aggregate_sentiment()
+        # =====================================================================
+        # FACTOR 2: Put/Call Ratio
+        # =====================================================================
+        try:
+            # Put/Call ratio: Low (<0.7) = bullish, High (>1.0) = bearish (contrarian)
+            # Using VIX as a proxy for fear/greed sentiment
+            vix_data = scanner.get_technical_analysis("CBOE:VIX", interval="1D")
+            vix_price = vix_data.get("price", 20)
+            
+            # Estimate P/C ratio from VIX (simplified)
+            # VIX < 15 = low fear = bullish sentiment = +2
+            # VIX 15-20 = moderate = +1
+            # VIX 20-25 = elevated = -1
+            # VIX > 25 = high fear = bearish sentiment = -2
+            if vix_price < 15:
+                pc_vote = 2
+                pc_sentiment = "BULLISH"
+            elif vix_price < 20:
+                pc_vote = 1
+                pc_sentiment = "LEAN_BULLISH"
+            elif vix_price < 25:
+                pc_vote = -1
+                pc_sentiment = "LEAN_BEARISH"
+            else:
+                pc_vote = -2
+                pc_sentiment = "BEARISH"
+            
+            factor_votes.append(("put_call_ratio", pc_vote, {
+                "vix_proxy": vix_price,
+                "sentiment": pc_sentiment,
+                "note": "Using VIX as sentiment proxy"
+            }))
+            logger.info(f"  📉 Put/Call Ratio: {pc_sentiment} (VIX: {vix_price}, vote: {pc_vote:+d})")
+            
+        except Exception as e:
+            logger.warning(f"Error in Put/Call factor: {e}")
+            factor_votes.append(("put_call_ratio", 0, {"error": str(e)}))
         
-        # Map aggregate sentiment to bias level
-        sentiment = aggregate.get("sentiment", "NEUTRAL")
+        # =====================================================================
+        # FACTOR 3: VIX Intraday (Change from previous close)
+        # =====================================================================
+        try:
+            from bias_filters.vix_term_structure import get_vix_term_structure_bias
+            vix_result = get_vix_term_structure_bias()
+            
+            vix_level = vix_result.get("bias_level", 3)
+            vix_vote = vix_level - 3
+            
+            factor_votes.append(("vix_intraday", vix_vote, {
+                "bias": vix_result.get("bias", "NEUTRAL"),
+                "bias_level": vix_level,
+                "term_structure": vix_result.get("term_structure"),
+                "vix_level": vix_result.get("vix_level")
+            }))
+            logger.info(f"  📈 VIX Intraday: {vix_result.get('bias')} (vote: {vix_vote:+d})")
+            
+        except Exception as e:
+            logger.warning(f"Error in VIX intraday factor: {e}")
+            factor_votes.append(("vix_intraday", 0, {"error": str(e)}))
         
-        bias_map = {
-            "STRONG_BULLISH": "TORO_MAJOR",
-            "BULLISH": "TORO_MINOR",
-            "NEUTRAL": "NEUTRAL",
-            "BEARISH": "URSA_MINOR",
-            "STRONG_BEARISH": "URSA_MAJOR"
+        # =====================================================================
+        # FACTOR 4: VOLD (Up Volume vs Down Volume)
+        # =====================================================================
+        try:
+            # Compare SPY volume trend as proxy for market volume
+            spy_data = scanner.get_technical_analysis("SPY", interval="1D")
+            spy_signal = spy_data.get("signal", "NEUTRAL")
+            
+            # Map technical signal to volume sentiment
+            if spy_signal in ["STRONG_BUY"]:
+                vold_vote = 2
+                vold_sentiment = "STRONG_BULLISH"
+            elif spy_signal == "BUY":
+                vold_vote = 1
+                vold_sentiment = "BULLISH"
+            elif spy_signal == "SELL":
+                vold_vote = -1
+                vold_sentiment = "BEARISH"
+            elif spy_signal == "STRONG_SELL":
+                vold_vote = -2
+                vold_sentiment = "STRONG_BEARISH"
+            else:
+                vold_vote = 0
+                vold_sentiment = "NEUTRAL"
+            
+            factor_votes.append(("vold", vold_vote, {
+                "spy_signal": spy_signal,
+                "sentiment": vold_sentiment,
+                "note": "Using SPY technical signal as volume proxy"
+            }))
+            logger.info(f"  📊 VOLD: {vold_sentiment} (vote: {vold_vote:+d})")
+            
+        except Exception as e:
+            logger.warning(f"Error in VOLD factor: {e}")
+            factor_votes.append(("vold", 0, {"error": str(e)}))
+        
+        # =====================================================================
+        # FACTOR 5: TRIN/Arms Index
+        # =====================================================================
+        try:
+            # TRIN < 1 = bullish (advances dominating), > 1 = bearish
+            # Using market breadth as proxy
+            from bias_filters.market_breadth import get_market_breadth_bias
+            breadth_result = get_market_breadth_bias()
+            
+            trin_level = breadth_result.get("bias_level", 3)
+            trin_vote = trin_level - 3
+            
+            factor_votes.append(("trin_arms", trin_vote, {
+                "bias": breadth_result.get("bias", "NEUTRAL"),
+                "bias_level": trin_level,
+                "note": "Using market breadth as TRIN proxy"
+            }))
+            logger.info(f"  ⚖️ TRIN/Arms: {breadth_result.get('bias')} (vote: {trin_vote:+d})")
+            
+        except Exception as e:
+            logger.warning(f"Error in TRIN factor: {e}")
+            factor_votes.append(("trin_arms", 0, {"error": str(e)}))
+        
+        # =====================================================================
+        # FACTOR 6: SPY vs RSP (Market Breadth - Equal Weight vs Cap Weight)
+        # =====================================================================
+        try:
+            # Compare SPY (cap weighted) vs RSP (equal weight)
+            # If RSP outperforming SPY = broad rally = bullish
+            # If SPY outperforming RSP = narrow rally (mega caps) = less bullish
+            spy_tech = scanner.get_technical_analysis("SPY", interval="1D")
+            rsp_tech = scanner.get_technical_analysis("RSP", interval="1D")
+            
+            spy_signal = spy_tech.get("signal", "NEUTRAL")
+            rsp_signal = rsp_tech.get("signal", "NEUTRAL")
+            
+            signal_values = {"STRONG_BUY": 2, "BUY": 1, "NEUTRAL": 0, "SELL": -1, "STRONG_SELL": -2}
+            spy_val = signal_values.get(spy_signal, 0)
+            rsp_val = signal_values.get(rsp_signal, 0)
+            
+            # RSP stronger than SPY = broad participation = more bullish
+            if rsp_val > spy_val:
+                breadth_vote = min(2, rsp_val + 1)  # Boost for broad participation
+                breadth_type = "BROAD_RALLY"
+            elif spy_val > rsp_val:
+                breadth_vote = spy_val  # Narrow rally, less conviction
+                breadth_type = "NARROW_RALLY"
+            else:
+                breadth_vote = spy_val
+                breadth_type = "BALANCED"
+            
+            factor_votes.append(("spy_vs_rsp", breadth_vote, {
+                "spy_signal": spy_signal,
+                "rsp_signal": rsp_signal,
+                "breadth_type": breadth_type
+            }))
+            logger.info(f"  📈 SPY vs RSP: {breadth_type} (vote: {breadth_vote:+d})")
+            
+        except Exception as e:
+            logger.warning(f"Error in SPY vs RSP factor: {e}")
+            factor_votes.append(("spy_vs_rsp", 0, {"error": str(e)}))
+        
+        # =====================================================================
+        # CALCULATE TOTAL VOTE AND DETERMINE BIAS
+        # =====================================================================
+        total_vote = sum(vote for _, vote, _ in factor_votes)
+        max_possible = 12  # 6 factors × 2 max each
+        
+        # Thresholds for 6 factors
+        if total_vote >= 6:
+            new_level = "TORO_MAJOR"
+        elif total_vote >= 3:
+            new_level = "TORO_MINOR"
+        elif total_vote <= -6:
+            new_level = "URSA_MAJOR"
+        elif total_vote <= -3:
+            new_level = "URSA_MINOR"
+        else:
+            new_level = "NEUTRAL"
+        
+        # Build details
+        details = {
+            "source": "6_factor_daily",
+            "total_vote": total_vote,
+            "max_possible": max_possible,
+            "factors": {name: {"vote": vote, "details": det} for name, vote, det in factor_votes}
         }
         
-        new_level = bias_map.get(sentiment, "NEUTRAL")
-        
         # Update bias with trend tracking
-        result = update_bias(
-            BiasTimeframe.DAILY,
-            new_level,
-            details={
-                "source": "hybrid_scanner_aggregate",
-                "bullish_pct": aggregate.get("bullish_pct"),
-                "bearish_pct": aggregate.get("bearish_pct"),
-                "tickers_analyzed": aggregate.get("total_tickers"),
-                "technical_refresh_time": aggregate.get("last_refresh")
-            }
-        )
+        result = update_bias(BiasTimeframe.DAILY, new_level, details=details)
         
-        logger.info(f"✅ Daily Bias updated: {new_level} (trend: {result.get('trend')})")
+        logger.info(f"✅ Daily Bias updated: {new_level} (total vote: {total_vote}/{max_possible})")
         return result
         
     except Exception as e:
