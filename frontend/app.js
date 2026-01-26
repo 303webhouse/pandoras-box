@@ -458,16 +458,17 @@ function updateBiasWithTrend(timeframe, biasData) {
                 trendText = 'first reading';
         }
         
-        // Format timestamp
+        // Format timestamp in Mountain Time
         let timeStr = '';
         if (timestamp) {
             const date = new Date(timestamp);
             timeStr = date.toLocaleString('en-US', { 
+                timeZone: 'America/Denver',
                 month: 'short', 
                 day: 'numeric',
                 hour: 'numeric',
                 minute: '2-digit'
-            });
+            }) + ' MT';
         }
         
         detailsElement.innerHTML = `
@@ -1083,7 +1084,13 @@ async function loadCyclicalBiasFallback() {
             if (detailsElement) {
                 const details = data.details || {};
                 const totalVote = details.total_vote !== undefined ? details.total_vote : '?';
-                const timestamp = data.timestamp ? new Date(data.timestamp).toLocaleString() : 'Unknown';
+                const timestamp = data.timestamp ? new Date(data.timestamp).toLocaleString('en-US', {
+                    timeZone: 'America/Denver',
+                    month: 'short',
+                    day: 'numeric',
+                    hour: 'numeric',
+                    minute: '2-digit'
+                }) + ' MT' : 'Unknown';
                 detailsElement.innerHTML = `
                     Vote: ${totalVote}/12 • Long-term macro<br>
                     <small>Updated: ${timestamp}</small>
