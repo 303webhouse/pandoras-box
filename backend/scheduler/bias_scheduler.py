@@ -350,22 +350,22 @@ async def refresh_daily_bias() -> Dict[str, Any]:
         scanner = get_scanner()
         
         # =====================================================================
-        # FACTOR 1: TICK/ADD Breadth
+        # FACTOR 1: TICK/ADD Breadth (using SPY intraday momentum as proxy)
         # =====================================================================
         try:
-            from bias_filters.tick_breadth import get_tick_breadth_bias
-            tick_result = get_tick_breadth_bias()
+            # Use SPY intraday data as proxy for TICK breadth
+            spy_1h = scanner.get_technical_analysis("SPY", interval="1h")
+            spy_signal = spy_1h.get("signal", "NEUTRAL")
             
-            tick_level = tick_result.get("bias_level", 3)
-            tick_vote = tick_level - 3  # Convert 1-5 scale to -2 to +2
+            signal_to_vote = {"STRONG_BUY": 2, "BUY": 1, "NEUTRAL": 0, "SELL": -1, "STRONG_SELL": -2}
+            tick_vote = signal_to_vote.get(spy_signal, 0)
             
             factor_votes.append(("tick_breadth", tick_vote, {
-                "bias": tick_result.get("bias", "NEUTRAL"),
-                "bias_level": tick_level,
-                "tick_reading": tick_result.get("tick_reading"),
-                "add_reading": tick_result.get("add_reading")
+                "bias": spy_signal,
+                "spy_1h_signal": spy_signal,
+                "note": "Using SPY 1h momentum as TICK proxy"
             }))
-            logger.info(f"  📊 TICK/ADD Breadth: {tick_result.get('bias')} (vote: {tick_vote:+d})")
+            logger.info(f"  📊 TICK/ADD Breadth: {spy_signal} (vote: {tick_vote:+d})")
             
         except Exception as e:
             logger.warning(f"Error in TICK/ADD factor: {e}")
@@ -410,11 +410,11 @@ async def refresh_daily_bias() -> Dict[str, Any]:
             factor_votes.append(("put_call_ratio", 0, {"error": str(e)}))
         
         # =====================================================================
-        # FACTOR 3: VIX Intraday (Change from previous close)
+        # FACTOR 3: VIX Intraday (Term structure bias)
         # =====================================================================
         try:
-            from bias_filters.vix_term_structure import get_vix_term_structure_bias
-            vix_result = get_vix_term_structure_bias()
+            from bias_filters.vix_term_structure import get_bias_for_scoring as get_vix_bias
+            vix_result = get_vix_bias()
             
             vix_level = vix_result.get("bias_level", 3)
             vix_vote = vix_level - 3
@@ -422,8 +422,7 @@ async def refresh_daily_bias() -> Dict[str, Any]:
             factor_votes.append(("vix_intraday", vix_vote, {
                 "bias": vix_result.get("bias", "NEUTRAL"),
                 "bias_level": vix_level,
-                "term_structure": vix_result.get("term_structure"),
-                "vix_level": vix_result.get("vix_level")
+                "last_updated": vix_result.get("last_updated")
             }))
             logger.info(f"  📈 VIX Intraday: {vix_result.get('bias')} (vote: {vix_vote:+d})")
             
@@ -473,8 +472,8 @@ async def refresh_daily_bias() -> Dict[str, Any]:
         try:
             # TRIN < 1 = bullish (advances dominating), > 1 = bearish
             # Using market breadth as proxy
-            from bias_filters.market_breadth import get_market_breadth_bias
-            breadth_result = get_market_breadth_bias()
+            from bias_filters.market_breadth import get_bias_for_scoring as get_breadth_bias
+            breadth_result = get_breadth_bias()
             
             trin_level = breadth_result.get("bias_level", 3)
             trin_vote = trin_level - 3
@@ -922,8 +921,8 @@ async def refresh_cyclical_bias() -> Dict[str, Any]:
         # FACTOR 3: Credit Spreads (HYG vs LQD)
         # =====================================================================
         try:
-            from bias_filters.credit_spreads import get_credit_spread_bias
-            credit_result = get_credit_spread_bias()
+            from bias_filters.credit_spreads import get_bias_for_scoring as get_credit_bias
+            credit_result = get_credit_bias()
             
             credit_level = credit_result.get("bias_level", 3)
             # Map 1-5 scale to vote: 5→+2, 4→+1, 3→0, 2→-1, 1→-2
@@ -932,7 +931,7 @@ async def refresh_cyclical_bias() -> Dict[str, Any]:
             factor_votes.append(("credit_spreads", credit_vote, {
                 "bias": credit_result.get("bias", "NEUTRAL"),
                 "bias_level": credit_level,
-                "spread_trend": credit_result.get("trend", "unknown")
+                "last_updated": credit_result.get("last_updated")
             }))
             logger.info(f"  💳 Credit Spreads: {credit_result.get('bias')} (vote: {credit_vote:+d})")
             
@@ -944,18 +943,22 @@ async def refresh_cyclical_bias() -> Dict[str, Any]:
         # FACTOR 4: Savita Indicator (BofA sentiment)
         # =====================================================================
         try:
-            from bias_filters.savita_indicator import get_savita_bias
-            savita_result = get_savita_bias()
+            from bias_filters.savita_indicator import get_savita_reading
+            savita_result = get_savita_reading()
             
-            savita_level = savita_result.get("bias_level", 3)
+            # Map bias string to level
+            bias_to_level = {"TORO_MAJOR": 5, "TORO_MINOR": 4, "NEUTRAL": 3, "URSA_MINOR": 2, "URSA_MAJOR": 1}
+            savita_bias = savita_result.get("bias", "NEUTRAL")
+            savita_level = bias_to_level.get(savita_bias, 3)
             savita_vote = savita_level - 3
             
             factor_votes.append(("savita_indicator", savita_vote, {
-                "bias": savita_result.get("bias", "NEUTRAL"),
+                "bias": savita_bias,
                 "bias_level": savita_level,
-                "reading": savita_result.get("reading")
+                "reading": savita_result.get("reading"),
+                "signal": savita_result.get("signal")
             }))
-            logger.info(f"  🎯 Savita Indicator: {savita_result.get('bias')} (vote: {savita_vote:+d})")
+            logger.info(f"  🎯 Savita Indicator: {savita_bias} (vote: {savita_vote:+d})")
             
         except Exception as e:
             logger.warning(f"Error in Savita factor: {e}")
@@ -965,8 +968,8 @@ async def refresh_cyclical_bias() -> Dict[str, Any]:
         # FACTOR 5: Long-term Breadth (% stocks above 200 SMA)
         # =====================================================================
         try:
-            from bias_filters.market_breadth import get_market_breadth_bias
-            breadth_result = get_market_breadth_bias()
+            from bias_filters.market_breadth import get_bias_for_scoring as get_longterm_breadth
+            breadth_result = get_longterm_breadth()
             
             breadth_level = breadth_result.get("bias_level", 3)
             breadth_vote = breadth_level - 3
@@ -974,7 +977,7 @@ async def refresh_cyclical_bias() -> Dict[str, Any]:
             factor_votes.append(("longterm_breadth", breadth_vote, {
                 "bias": breadth_result.get("bias", "NEUTRAL"),
                 "bias_level": breadth_level,
-                "pct_above_200sma": breadth_result.get("pct_above_200sma")
+                "last_updated": breadth_result.get("last_updated")
             }))
             logger.info(f"  📊 Long-term Breadth: {breadth_result.get('bias')} (vote: {breadth_vote:+d})")
             
