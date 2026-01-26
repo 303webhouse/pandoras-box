@@ -41,6 +41,7 @@
             </div>
             <div class="bias-card" id="weeklyBias">
                 <h3>Weekly Bias</h3>
+                <button class="bias-settings-btn" id="weeklyBiasSettingsBtn" title="Factor Settings">⚙️</button>
                 <div class="bias-display">
                     <div class="bias-level" id="weeklyLevel">NEUTRAL</div>
                     <div class="bias-details" id="weeklyDetails">Loading...</div>
@@ -51,16 +52,6 @@
                 <div class="bias-display">
                     <div class="bias-level" id="monthlyLevel">NEUTRAL</div>
                     <div class="bias-details" id="monthlyDetails">Loading...</div>
-                </div>
-            </div>
-            <div class="bias-card" id="dollarSmileBias">
-                <h3>💵 Dollar Smile (Macro)</h3>
-                <div class="bias-display">
-                    <div class="bias-level" id="dollarSmileLevel">NEUTRAL</div>
-                    <div class="bias-details" id="dollarSmileDetails">Awaiting webhook data...</div>
-                </div>
-                <div class="dollar-smile-data" id="dollarSmileData">
-                    <small>DXY: -- | VIX: --</small>
                 </div>
             </div>
         </section>
@@ -543,6 +534,64 @@
                 <div class="position-modal-footer">
                     <button class="position-btn cancel" id="cancelCloseBtn">Cancel</button>
                     <button class="position-btn confirm" id="confirmCloseBtn">Close Position</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Weekly Bias Factor Settings Modal -->
+        <div class="modal-overlay" id="weeklyBiasSettingsModal">
+            <div class="factors-modal">
+                <div class="factors-modal-header">
+                    <h2>Weekly Bias Factors</h2>
+                    <button class="modal-close" id="closeWeeklyBiasSettingsBtn">✕</button>
+                </div>
+                <div class="factors-modal-body">
+                    <div class="factor-toggle" data-factor="index_technicals">
+                        <label>
+                            <input type="checkbox" checked>
+                            <span class="factor-name">Index Technicals</span>
+                        </label>
+                        <span class="factor-vote" data-vote="0">(vote: 0)</span>
+                    </div>
+                    <div class="factor-toggle" data-factor="dollar_smile">
+                        <label>
+                            <input type="checkbox" checked>
+                            <span class="factor-name">Dollar Smile</span>
+                        </label>
+                        <span class="factor-vote" data-vote="0">(vote: 0)</span>
+                    </div>
+                    <div class="factor-toggle" data-factor="sector_rotation">
+                        <label>
+                            <input type="checkbox" checked>
+                            <span class="factor-name">Sector Rotation</span>
+                        </label>
+                        <span class="factor-vote" data-vote="0">(vote: 0)</span>
+                    </div>
+                    <div class="factor-toggle" data-factor="credit_spreads">
+                        <label>
+                            <input type="checkbox" checked>
+                            <span class="factor-name">Credit Spreads</span>
+                        </label>
+                        <span class="factor-vote" data-vote="0">(vote: 0)</span>
+                    </div>
+                    <div class="factor-toggle" data-factor="market_breadth">
+                        <label>
+                            <input type="checkbox" checked>
+                            <span class="factor-name">Market Breadth</span>
+                        </label>
+                        <span class="factor-vote" data-vote="0">(vote: 0)</span>
+                    </div>
+                    <div class="factor-toggle" data-factor="vix_term_structure">
+                        <label>
+                            <input type="checkbox" checked>
+                            <span class="factor-name">VIX Term Structure</span>
+                        </label>
+                        <span class="factor-vote" data-vote="0">(vote: 0)</span>
+                    </div>
+                </div>
+                <div class="factors-modal-footer">
+                    <button class="factors-btn reset" id="resetFactorsBtn">Reset All</button>
+                    <button class="factors-btn apply" id="applyFactorsBtn">Apply</button>
                 </div>
             </div>
         </div>

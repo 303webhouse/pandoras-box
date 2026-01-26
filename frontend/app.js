@@ -23,6 +23,17 @@ let signals = {
 // Price levels to display on chart (entry, stop, target)
 let activePriceLevels = null;
 
+// Weekly Bias Factor State
+let weeklyBiasFullData = null; // Stores complete weekly bias data with factors
+let weeklyBiasFactorStates = {
+    index_technicals: true,
+    dollar_smile: true,
+    sector_rotation: true,
+    credit_spreads: true,
+    market_breadth: true,
+    vix_term_structure: true
+};
+
 // Initialize app
 document.addEventListener('DOMContentLoaded', () => {
     initTradingViewWidget();
@@ -212,7 +223,14 @@ function handleWebSocketMessage(message) {
             addSignal(message.data);
             break;
         case 'BIAS_UPDATE':
-            updateBias(message.data);
+            // Handle weekly bias updates with factor filtering
+            if (message.data.timeframe === 'weekly' || message.data.timeframe === 'WEEKLY') {
+                checkAndResetFactorsForNewDay(message.data);
+                weeklyBiasFullData = message.data;
+                updateWeeklyBiasWithFactors(message.data);
+            } else {
+                updateBias(message.data);
+            }
             // Also refresh shift status when bias updates
             fetchBiasShiftStatus();
             break;
@@ -271,6 +289,9 @@ function initEventListeners() {
     
     // Hybrid Scanner
     initHybridScanner();
+    
+    // Weekly Bias Factor Settings Modal
+    initWeeklyBiasSettings();
 }
 
 // Data Loading
@@ -316,8 +337,17 @@ async function loadBiasData() {
             // Update Daily Bias
             updateBiasWithTrend('daily', data.daily);
             
-            // Update Weekly Bias
-            updateBiasWithTrend('weekly', data.weekly);
+            // Update Weekly Bias - store full data and check for new day reset
+            if (data.weekly) {
+                // Check if this is a new day and reset factors if needed
+                checkAndResetFactorsForNewDay(data.weekly);
+                
+                // Store full weekly bias data with factors
+                weeklyBiasFullData = data.weekly;
+                
+                // Apply factor filters and recalculate
+                updateWeeklyBiasWithFactors(data.weekly);
+            }
             
             // Update Monthly Bias
             updateBiasWithTrend('monthly', data.monthly);
@@ -330,9 +360,6 @@ async function loadBiasData() {
         // Fallback to old endpoint
         await loadBiasDataFallback();
     }
-    
-    // Load Dollar Smile macro bias
-    await loadDollarSmile();
     
     // Load shift status for weekly bias
     await fetchBiasShiftStatus();
@@ -414,6 +441,217 @@ function updateBiasWithTrend(timeframe, biasData) {
             <span class="trend-indicator trend-${trend.toLowerCase()}">${trendIcon}</span> ${trendText}
             ${timeStr ? `<br><small>Updated: ${timeStr}</small>` : ''}
         `;
+    }
+}
+
+// Update weekly bias with factor filtering
+function updateWeeklyBiasWithFactors(biasData) {
+    if (!biasData || !biasData.details || !biasData.details.factors) {
+        // Fallback to regular update if no factor data
+        updateBiasWithTrend('weekly', biasData);
+        return;
+    }
+    
+    // Load factor states from localStorage
+    loadFactorStatesFromStorage();
+    
+    // Preserve shift indicator before updating
+    const weeklyLevelElement = document.getElementById('weeklyLevel');
+    const shiftIndicator = weeklyLevelElement ? weeklyLevelElement.querySelector('.bias-shift-indicator') : null;
+    
+    // Calculate filtered vote total
+    const factors = biasData.details.factors;
+    let filteredVote = 0;
+    let enabledCount = 0;
+    
+    Object.keys(factors).forEach(factorName => {
+        if (weeklyBiasFactorStates[factorName]) {
+            filteredVote += factors[factorName].vote || 0;
+            enabledCount++;
+        }
+    });
+    
+    // Scale thresholds based on number of enabled factors
+    // Original: ±6 (major), ±3 (minor) for 6 factors
+    const totalFactors = 6;
+    const scaleFactor = enabledCount / totalFactors;
+    const majorThreshold = Math.round(6 * scaleFactor);
+    const minorThreshold = Math.round(3 * scaleFactor);
+    
+    // Determine bias level
+    let newLevel = 'NEUTRAL';
+    if (filteredVote >= majorThreshold) {
+        newLevel = 'TORO_MAJOR';
+    } else if (filteredVote >= minorThreshold) {
+        newLevel = 'TORO_MINOR';
+    } else if (filteredVote <= -majorThreshold) {
+        newLevel = 'URSA_MAJOR';
+    } else if (filteredVote <= -minorThreshold) {
+        newLevel = 'URSA_MINOR';
+    }
+    
+    // Create modified bias data for display
+    const modifiedBiasData = {
+        ...biasData,
+        level: newLevel,
+        filtered_vote: filteredVote,
+        enabled_factors: enabledCount
+    };
+    
+    // Update display
+    updateBiasWithTrend('weekly', modifiedBiasData);
+    
+    // Re-add shift indicator if it existed
+    if (shiftIndicator && weeklyLevelElement) {
+        weeklyLevelElement.appendChild(shiftIndicator);
+    }
+    
+    // Show/hide warning badge
+    updateWarningBadge(enabledCount);
+}
+
+// Check if new day and reset factors
+function checkAndResetFactorsForNewDay(biasData) {
+    if (!biasData || !biasData.timestamp) return;
+    
+    const lastResetDate = localStorage.getItem('weeklyBiasLastReset');
+    const currentDate = new Date(biasData.timestamp).toDateString();
+    
+    if (!lastResetDate || lastResetDate !== currentDate) {
+        // New day detected - reset all factors to enabled
+        weeklyBiasFactorStates = {
+            index_technicals: true,
+            dollar_smile: true,
+            sector_rotation: true,
+            credit_spreads: true,
+            market_breadth: true,
+            vix_term_structure: true
+        };
+        localStorage.setItem('weeklyBiasFactors', JSON.stringify(weeklyBiasFactorStates));
+        localStorage.setItem('weeklyBiasLastReset', currentDate);
+        console.log('🔄 New day detected - reset all weekly bias factors to enabled');
+    }
+}
+
+// Load factor states from localStorage
+function loadFactorStatesFromStorage() {
+    const stored = localStorage.getItem('weeklyBiasFactors');
+    if (stored) {
+        try {
+            weeklyBiasFactorStates = JSON.parse(stored);
+        } catch (e) {
+            console.error('Error loading factor states:', e);
+        }
+    }
+}
+
+// Save factor states to localStorage
+function saveFactorStatesToStorage() {
+    localStorage.setItem('weeklyBiasFactors', JSON.stringify(weeklyBiasFactorStates));
+}
+
+// Update warning badge
+function updateWarningBadge(enabledCount) {
+    const weeklyLevelElement = document.getElementById('weeklyLevel');
+    if (!weeklyLevelElement) return;
+    
+    // Remove existing warning badge
+    const existingBadge = weeklyLevelElement.querySelector('.bias-warning-badge');
+    if (existingBadge) {
+        existingBadge.remove();
+    }
+    
+    // Add warning if not all factors enabled
+    if (enabledCount < 6) {
+        const badge = document.createElement('span');
+        badge.className = 'bias-warning-badge';
+        badge.textContent = '⚠️';
+        badge.title = `${enabledCount} of 6 factors active`;
+        weeklyLevelElement.appendChild(badge);
+    }
+}
+
+// Initialize Weekly Bias Settings Modal
+function initWeeklyBiasSettings() {
+    const settingsBtn = document.getElementById('weeklyBiasSettingsBtn');
+    const modal = document.getElementById('weeklyBiasSettingsModal');
+    const closeBtn = document.getElementById('closeWeeklyBiasSettingsBtn');
+    const resetBtn = document.getElementById('resetFactorsBtn');
+    const applyBtn = document.getElementById('applyFactorsBtn');
+    
+    if (!settingsBtn || !modal) return;
+    
+    // Open modal
+    settingsBtn.addEventListener('click', () => {
+        loadFactorStatesIntoModal();
+        modal.classList.add('active');
+    });
+    
+    // Close modal
+    const closeModal = () => {
+        modal.classList.remove('active');
+    };
+    
+    if (closeBtn) closeBtn.addEventListener('click', closeModal);
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) closeModal();
+    });
+    
+    // Reset all factors
+    if (resetBtn) {
+        resetBtn.addEventListener('click', () => {
+            document.querySelectorAll('#weeklyBiasSettingsModal input[type="checkbox"]').forEach(cb => {
+                cb.checked = true;
+            });
+        });
+    }
+    
+    // Apply factors
+    if (applyBtn) {
+        applyBtn.addEventListener('click', () => {
+            // Save checkbox states
+            document.querySelectorAll('#weeklyBiasSettingsModal .factor-toggle').forEach(toggle => {
+                const factorName = toggle.dataset.factor;
+                const checkbox = toggle.querySelector('input[type="checkbox"]');
+                weeklyBiasFactorStates[factorName] = checkbox.checked;
+            });
+            
+            saveFactorStatesToStorage();
+            
+            // Recalculate and update display
+            if (weeklyBiasFullData) {
+                updateWeeklyBiasWithFactors(weeklyBiasFullData);
+            }
+            
+            closeModal();
+        });
+    }
+}
+
+// Load factor states into modal
+function loadFactorStatesIntoModal() {
+    loadFactorStatesFromStorage();
+    
+    // Update checkboxes
+    document.querySelectorAll('#weeklyBiasSettingsModal .factor-toggle').forEach(toggle => {
+        const factorName = toggle.dataset.factor;
+        const checkbox = toggle.querySelector('input[type="checkbox"]');
+        checkbox.checked = weeklyBiasFactorStates[factorName] !== false;
+    });
+    
+    // Update vote displays if we have factor data
+    if (weeklyBiasFullData && weeklyBiasFullData.details && weeklyBiasFullData.details.factors) {
+        const factors = weeklyBiasFullData.details.factors;
+        document.querySelectorAll('#weeklyBiasSettingsModal .factor-toggle').forEach(toggle => {
+            const factorName = toggle.dataset.factor;
+            const voteElement = toggle.querySelector('.factor-vote');
+            if (voteElement && factors[factorName]) {
+                const vote = factors[factorName].vote || 0;
+                const sign = vote >= 0 ? '+' : '';
+                voteElement.textContent = `(vote: ${sign}${vote})`;
+                voteElement.dataset.vote = vote;
+            }
+        });
     }
 }
 
@@ -591,59 +829,6 @@ async function loadSavitaIndicator() {
     }
 }
 
-async function loadDollarSmile() {
-    try {
-        const response = await fetch(`${API_URL}/dollar-smile/status`);
-        const result = await response.json();
-        
-        const container = document.getElementById('dollarSmileBias');
-        const levelElement = document.getElementById('dollarSmileLevel');
-        const detailsElement = document.getElementById('dollarSmileDetails');
-        const dataElement = document.getElementById('dollarSmileData');
-        
-        if (result.status === 'success' && result.data) {
-            const data = result.data;
-            const bias = data.bias || 'NEUTRAL';
-            
-            if (levelElement) {
-                levelElement.textContent = bias.replace('_', ' ');
-            }
-            
-            if (container) {
-                container.classList.remove('bullish', 'bearish', 'neutral');
-                if (bias.includes('TORO')) {
-                    container.classList.add('bullish');
-                } else if (bias.includes('URSA')) {
-                    container.classList.add('bearish');
-                } else {
-                    container.classList.add('neutral');
-                }
-            }
-            
-            if (detailsElement) {
-                detailsElement.textContent = data.description || 'Awaiting data';
-            }
-            
-            if (dataElement) {
-                const dxy = data.dxy_current ? data.dxy_current.toFixed(2) : '--';
-                const dxyChange = data.dxy_5d_change_pct ? `${data.dxy_5d_change_pct > 0 ? '+' : ''}${data.dxy_5d_change_pct.toFixed(1)}%` : '';
-                const vix = data.vix_current ? data.vix_current.toFixed(1) : '--';
-                const position = data.smile_position ? ` | ${data.smile_position.replace('_', ' ')}` : '';
-                dataElement.innerHTML = `<small>DXY: ${dxy} ${dxyChange} | VIX: ${vix}${position}</small>`;
-            }
-        } else {
-            if (detailsElement) {
-                detailsElement.textContent = 'Awaiting webhook data...';
-            }
-        }
-    } catch (error) {
-        console.error('Error loading Dollar Smile:', error);
-        const detailsElement = document.getElementById('dollarSmileDetails');
-        if (detailsElement) {
-            detailsElement.textContent = 'Failed to load';
-        }
-    }
-}
 
 async function loadOpenPositions() {
     try {
