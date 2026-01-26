@@ -1112,6 +1112,16 @@ async def start_scheduler():
     else:
         logger.info("  📌 No weekly baseline found - will be set on next Monday")
     
+    # Run initial refresh on startup (Railway has ephemeral filesystem)
+    logger.info("  🔄 Running initial bias refresh on startup...")
+    try:
+        await refresh_daily_bias()
+        await refresh_weekly_bias()
+        await refresh_cyclical_bias()
+        logger.info("  ✅ Initial bias refresh complete")
+    except Exception as e:
+        logger.error(f"  ❌ Error during initial refresh: {e}")
+    
     # Use APScheduler if available, otherwise use simple asyncio loop
     try:
         from apscheduler.schedulers.asyncio import AsyncIOScheduler
