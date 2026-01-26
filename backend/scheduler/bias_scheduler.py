@@ -60,6 +60,157 @@ BIAS_LEVELS = {
     "URSA MAJOR": 1,
 }
 
+# Numeric value back to bias level name
+LEVEL_TO_BIAS = {
+    5: "TORO_MAJOR",
+    4: "TORO_MINOR",
+    3: "NEUTRAL",
+    2: "URSA_MINOR",
+    1: "URSA_MAJOR",
+}
+
+
+def apply_hierarchical_modifier(
+    base_level: str,
+    modifier_level: str,
+    modifier_name: str = "higher_timeframe"
+) -> tuple[str, Dict[str, Any]]:
+    """
+    Apply hierarchical modification from a higher timeframe bias to a lower timeframe.
+    
+    Rules:
+    - TORO_MAJOR modifier: Boosts base by +1 level (max TORO_MAJOR)
+    - TORO_MINOR modifier: Boosts base by +0.5 (rounds up if neutral or better)
+    - URSA_MAJOR modifier: Reduces base by -1 level (min URSA_MAJOR)
+    - URSA_MINOR modifier: Reduces base by -0.5 (rounds down if neutral or worse)
+    - NEUTRAL modifier: No change
+    
+    Args:
+        base_level: The base bias level (e.g., from Daily calculation)
+        modifier_level: The higher timeframe bias level (e.g., Weekly)
+        modifier_name: Name for logging (e.g., "weekly" or "cyclical")
+    
+    Returns:
+        Tuple of (modified_level, modification_details)
+    """
+    base_value = BIAS_LEVELS.get(base_level.upper().replace("_", " "), 3)
+    modifier_value = BIAS_LEVELS.get(modifier_level.upper().replace("_", " "), 3)
+    
+    original_value = base_value
+    adjustment = 0
+    adjustment_reason = "no_modifier"
+    
+    # Strong bullish modifier boosts by 1
+    if modifier_value == 5:  # TORO_MAJOR
+        adjustment = 1
+        adjustment_reason = "strong_bullish_boost"
+    # Minor bullish modifier boosts by 0.5 (only effective if base is neutral or bullish)
+    elif modifier_value == 4:  # TORO_MINOR
+        if base_value >= 3:  # Neutral or better
+            adjustment = 0.5
+            adjustment_reason = "minor_bullish_boost"
+    # Strong bearish modifier reduces by 1
+    elif modifier_value == 1:  # URSA_MAJOR
+        adjustment = -1
+        adjustment_reason = "strong_bearish_drag"
+    # Minor bearish modifier reduces by 0.5 (only effective if base is neutral or bearish)
+    elif modifier_value == 2:  # URSA_MINOR
+        if base_value <= 3:  # Neutral or worse
+            adjustment = -0.5
+            adjustment_reason = "minor_bearish_drag"
+    
+    # Apply adjustment and clamp to valid range [1, 5]
+    modified_value = base_value + adjustment
+    modified_value = max(1, min(5, round(modified_value)))
+    
+    # Convert back to level name
+    modified_level = LEVEL_TO_BIAS.get(modified_value, "NEUTRAL")
+    
+    details = {
+        "original_level": base_level,
+        "original_value": original_value,
+        "modifier_level": modifier_level,
+        "modifier_value": modifier_value,
+        "modifier_name": modifier_name,
+        "adjustment": adjustment,
+        "adjustment_reason": adjustment_reason,
+        "modified_value": modified_value,
+        "modified_level": modified_level,
+        "was_modified": modified_level != base_level
+    }
+    
+    if modified_level != base_level:
+        logger.info(
+            f"  Hierarchical modifier ({modifier_name}): {base_level} -> {modified_level} "
+            f"({adjustment_reason}, adj={adjustment:+.1f})"
+        )
+    
+    return modified_level, details
+
+
+def get_effective_bias(timeframe: BiasTimeframe) -> Dict[str, Any]:
+    """
+    Get the effective bias for a timeframe, including hierarchical modifiers.
+    
+    Returns the raw bias AND the modified bias after applying higher timeframe influence.
+    
+    Daily Bias: Modified by Weekly + Cyclical
+    Weekly Bias: Modified by Cyclical
+    Cyclical Bias: No modifier (highest level)
+    """
+    history = _load_bias_history()
+    
+    # Get raw bias levels for each timeframe
+    cyclical_data = history.get("cyclical", {}).get("current", {})
+    weekly_data = history.get("weekly", {}).get("current", {})
+    daily_data = history.get("daily", {}).get("current", {})
+    
+    cyclical_level = cyclical_data.get("level", "NEUTRAL") if cyclical_data else "NEUTRAL"
+    weekly_level = weekly_data.get("level", "NEUTRAL") if weekly_data else "NEUTRAL"
+    daily_level = daily_data.get("level", "NEUTRAL") if daily_data else "NEUTRAL"
+    
+    result = {
+        "raw": {},
+        "effective": {},
+        "modifiers": {}
+    }
+    
+    if timeframe == BiasTimeframe.CYCLICAL:
+        # Cyclical has no modifier - it's the highest level
+        result["raw"]["cyclical"] = cyclical_level
+        result["effective"]["cyclical"] = cyclical_level
+        result["modifiers"]["cyclical"] = None
+        
+    elif timeframe == BiasTimeframe.WEEKLY:
+        # Weekly is modified by Cyclical
+        modified_weekly, weekly_mod_details = apply_hierarchical_modifier(
+            weekly_level, cyclical_level, "cyclical"
+        )
+        result["raw"]["weekly"] = weekly_level
+        result["effective"]["weekly"] = modified_weekly
+        result["modifiers"]["weekly"] = weekly_mod_details
+        
+    elif timeframe == BiasTimeframe.DAILY:
+        # Weekly is first modified by Cyclical
+        effective_weekly, weekly_mod_details = apply_hierarchical_modifier(
+            weekly_level, cyclical_level, "cyclical"
+        )
+        
+        # Then Daily is modified by the effective Weekly
+        modified_daily, daily_mod_details = apply_hierarchical_modifier(
+            daily_level, effective_weekly, "weekly"
+        )
+        
+        result["raw"]["daily"] = daily_level
+        result["raw"]["weekly"] = weekly_level
+        result["raw"]["cyclical"] = cyclical_level
+        result["effective"]["daily"] = modified_daily
+        result["effective"]["weekly"] = effective_weekly
+        result["modifiers"]["daily"] = daily_mod_details
+        result["modifiers"]["weekly"] = weekly_mod_details
+    
+    return result
+
 
 def _load_bias_history() -> Dict[str, Any]:
     """Load bias history from disk"""
@@ -388,36 +539,50 @@ async def refresh_daily_bias() -> Dict[str, Any]:
         # FACTOR 2: VIX Level (Fear Gauge)
         # =====================================================================
         try:
-            # Use VXX (VIX ETN) instead of CBOE:VIX which doesn't work with tradingview-ta
-            vix_data = scanner.get_technical_analysis("UVXY", interval="1d")
-            # Get the price from the nested structure
-            vix_close = vix_data.get("price", {}).get("close", 0) or 0
+            # Try multiple VIX proxies in order of preference
+            # VIXY (1x VIX ETF) works on CBOE exchange
+            vix_proxies = ["VIXY", "UVXY", "VXX"]
+            vix_data = None
+            vix_ticker_used = None
             
-            # UVXY is leveraged VIX, so scale thresholds accordingly
-            # UVXY typically trades 10-50 range, use signal instead of absolute price
-            vix_signal_raw = vix_data.get("signal", "NEUTRAL")
+            for vix_proxy in vix_proxies:
+                try:
+                    vix_data = scanner.get_technical_analysis(vix_proxy, interval="1d")
+                    if vix_data.get("signal") != "ERROR":
+                        vix_ticker_used = vix_proxy
+                        break
+                except Exception:
+                    continue
             
-            # Use VIX proxy based on UVXY signal
-            if vix_signal_raw in ["SELL", "STRONG_SELL"]:
-                # UVXY falling = VIX falling = bullish
-                vix_vote = 2 if vix_signal_raw == "STRONG_SELL" else 1
-                vix_signal = "LOW_FEAR"
-            elif vix_signal_raw in ["BUY", "STRONG_BUY"]:
-                # UVXY rising = VIX rising = bearish
-                vix_vote = -2 if vix_signal_raw == "STRONG_BUY" else -1
-                vix_signal = "HIGH_FEAR"
+            if vix_data and vix_data.get("signal") != "ERROR":
+                # Get the price from the nested structure
+                vix_close = vix_data.get("price", {}).get("close", 0) or 0
+                vix_signal_raw = vix_data.get("signal", "NEUTRAL")
+                
+                # Use VIX proxy signal: falling VIX = bullish, rising VIX = bearish
+                if vix_signal_raw in ["SELL", "STRONG_SELL"]:
+                    # VIX proxy falling = VIX falling = bullish
+                    vix_vote = 2 if vix_signal_raw == "STRONG_SELL" else 1
+                    vix_signal = "LOW_FEAR"
+                elif vix_signal_raw in ["BUY", "STRONG_BUY"]:
+                    # VIX proxy rising = VIX rising = bearish
+                    vix_vote = -2 if vix_signal_raw == "STRONG_BUY" else -1
+                    vix_signal = "HIGH_FEAR"
+                else:
+                    vix_vote = 0
+                    vix_signal = "NEUTRAL"
+                
+                factor_votes.append(("vix_level", vix_vote, {
+                    "vix_proxy": vix_ticker_used,
+                    "price": round(vix_close, 2) if vix_close else 0,
+                    "proxy_signal": vix_signal_raw,
+                    "signal": vix_signal
+                }))
+                logger.info(f"  VIX Level: {vix_ticker_used} {vix_signal_raw} - {vix_signal} (vote: {vix_vote:+d})")
             else:
-                vix_vote = 0
-                vix_signal = "NEUTRAL"
-            
-            vix_price = vix_close  # For display purposes
-            
-            factor_votes.append(("vix_level", vix_vote, {
-                "uvxy_price": round(vix_price, 2) if vix_price else 0,
-                "uvxy_signal": vix_signal_raw,
-                "signal": vix_signal
-            }))
-            logger.info(f"  😰 VIX Level: UVXY {vix_signal_raw} - {vix_signal} (vote: {vix_vote:+d})")
+                # All VIX proxies failed - use neutral vote
+                logger.warning("All VIX proxies failed, using neutral vote")
+                factor_votes.append(("vix_level", 0, {"error": "No VIX proxy available"}))
             
         except Exception as e:
             logger.warning(f"Error in VIX factor: {e}")

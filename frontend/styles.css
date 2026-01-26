@@ -116,10 +116,59 @@ body {
 
 /* Bias Section */
 .bias-section {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    display: flex;
+    flex-direction: column;
     gap: 16px;
     margin-bottom: 20px;
+}
+
+/* Hierarchical Flow Indicator */
+.bias-hierarchy-flow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 8px 16px;
+    background: rgba(30, 41, 59, 0.5);
+    border-radius: 8px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-bottom: 4px;
+}
+
+.hierarchy-label {
+    font-weight: 600;
+    color: var(--accent-teal);
+    margin-right: 8px;
+}
+
+.hierarchy-arrow {
+    background: var(--card-bg);
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-weight: 600;
+    font-size: 11px;
+    color: var(--text-primary);
+}
+
+.hierarchy-connector {
+    color: var(--accent-teal);
+    font-size: 14px;
+}
+
+/* Bias Cards Container */
+.bias-section > .bias-card:first-of-type {
+    margin-top: 0;
+}
+
+.bias-section:has(.bias-hierarchy-flow) {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    grid-template-rows: auto auto;
+}
+
+.bias-hierarchy-flow {
+    grid-column: 1 / -1;
 }
 
 .bias-card {
@@ -207,6 +256,61 @@ body {
     font-size: 12px;
     color: var(--text-secondary);
     line-height: 1.6;
+}
+
+/* Effective Bias Display (hierarchical modifier result) */
+.bias-effective {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 6px 10px;
+    background: rgba(20, 184, 166, 0.1);
+    border: 1px dashed var(--accent-teal);
+    border-radius: 4px;
+    font-size: 12px;
+}
+
+.effective-label {
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+.effective-level {
+    font-weight: 700;
+    color: var(--accent-teal);
+}
+
+.effective-level.boost {
+    color: var(--accent-lime);
+}
+
+.effective-level.drag {
+    color: var(--accent-orange);
+}
+
+/* Modifier indicator on bias card */
+.bias-card.has-modifier {
+    position: relative;
+}
+
+.bias-card.has-modifier::after {
+    content: '';
+    position: absolute;
+    top: -2px;
+    right: -2px;
+    width: 8px;
+    height: 8px;
+    background: var(--accent-teal);
+    border-radius: 50%;
+}
+
+.bias-card.modifier-boost::after {
+    background: var(--accent-lime);
+}
+
+.bias-card.modifier-drag::after {
+    background: var(--accent-orange);
 }
 
 /* Bias Shift Indicator */

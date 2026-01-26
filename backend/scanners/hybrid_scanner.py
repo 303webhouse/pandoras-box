@@ -383,8 +383,8 @@ class HybridScanner:
             return result
             
         except Exception as e:
-            # Try other exchanges: NYSE, then AMEX (for ETFs like SPY, IWM, etc.)
-            for exchange in ["NYSE", "AMEX"]:
+            # Try other exchanges: NYSE, AMEX (for ETFs), CBOE (for VIX-related products)
+            for exchange in ["NYSE", "AMEX", "CBOE"]:
                 try:
                     handler = TA_Handler(
                         symbol=ticker,
@@ -455,7 +455,7 @@ class HybridScanner:
             return {
                 "ticker": ticker,
                 "signal": TechnicalSignal.ERROR.value,
-                "error": f"Not found on NASDAQ, NYSE, or AMEX"
+                "error": f"Not found on NASDAQ, NYSE, AMEX, or CBOE"
             }
     
     # =========================================================================

@@ -357,6 +357,7 @@ async function loadBiasData() {
         
         if (result.status === 'success' && result.data) {
             const data = result.data;
+            const effective = result.effective;  // Hierarchical modifiers
             
             // Update Daily Bias - store full data and apply factor filters
             if (data.daily) {
@@ -366,6 +367,13 @@ async function loadBiasData() {
                 } else {
                     updateBiasWithTrend('daily', data.daily);
                 }
+                
+                // Show effective bias if different from raw (hierarchical modifier applied)
+                if (effective && effective.daily && effective.daily !== data.daily.level) {
+                    updateEffectiveBias('daily', data.daily.level, effective.daily, effective.modifiers?.daily);
+                } else {
+                    hideEffectiveBias('daily');
+                }
             }
             
             // Update Weekly Bias - store full data and check for new day reset
@@ -373,9 +381,17 @@ async function loadBiasData() {
                 checkAndResetFactorsForNewDay(data.weekly);
                 weeklyBiasFullData = data.weekly;
                 updateWeeklyBiasWithFactors(data.weekly);
+                
+                // Show effective bias if different from raw (modified by Cyclical)
+                if (effective && effective.weekly && effective.weekly !== data.weekly.level) {
+                    updateEffectiveBias('weekly', data.weekly.level, effective.weekly, effective.modifiers?.weekly);
+                } else {
+                    hideEffectiveBias('weekly');
+                }
             }
             
             // Update Cyclical Bias - store full data and apply factor filters
+            // Note: Cyclical has no modifier (it's the highest level)
             if (data.cyclical) {
                 cyclicalBiasFullData = data.cyclical;
                 if (data.cyclical.details && data.cyclical.details.factors) {
@@ -396,6 +412,80 @@ async function loadBiasData() {
     
     // Load shift status for weekly bias
     await fetchBiasShiftStatus();
+}
+
+// Display effective bias when hierarchical modifier is applied
+function updateEffectiveBias(timeframe, rawLevel, effectiveLevel, modifierDetails) {
+    const container = document.getElementById(`${timeframe}Bias`);
+    const effectiveEl = document.getElementById(`${timeframe}Effective`);
+    
+    if (!effectiveEl) return;
+    
+    const levelEl = effectiveEl.querySelector('.effective-level');
+    if (levelEl) {
+        levelEl.textContent = effectiveLevel.replace('_', ' ');
+        
+        // Determine if it's a boost or drag
+        const rawValue = getBiasValue(rawLevel);
+        const effectiveValue = getBiasValue(effectiveLevel);
+        
+        levelEl.classList.remove('boost', 'drag');
+        if (effectiveValue > rawValue) {
+            levelEl.classList.add('boost');
+        } else if (effectiveValue < rawValue) {
+            levelEl.classList.add('drag');
+        }
+    }
+    
+    // Show the effective display
+    effectiveEl.style.display = 'flex';
+    
+    // Add modifier indicator to card
+    if (container) {
+        container.classList.add('has-modifier');
+        container.classList.remove('modifier-boost', 'modifier-drag');
+        
+        const rawValue = getBiasValue(rawLevel);
+        const effectiveValue = getBiasValue(effectiveLevel);
+        if (effectiveValue > rawValue) {
+            container.classList.add('modifier-boost');
+        } else if (effectiveValue < rawValue) {
+            container.classList.add('modifier-drag');
+        }
+    }
+    
+    // Add tooltip with modifier details if available
+    if (modifierDetails && effectiveEl) {
+        const reason = modifierDetails.adjustment_reason || 'hierarchical modifier';
+        const modifierName = modifierDetails.modifier_name || 'higher timeframe';
+        effectiveEl.title = `Modified by ${modifierName}: ${reason.replace(/_/g, ' ')}`;
+    }
+}
+
+// Hide effective bias display
+function hideEffectiveBias(timeframe) {
+    const effectiveEl = document.getElementById(`${timeframe}Effective`);
+    const container = document.getElementById(`${timeframe}Bias`);
+    
+    if (effectiveEl) {
+        effectiveEl.style.display = 'none';
+    }
+    
+    if (container) {
+        container.classList.remove('has-modifier', 'modifier-boost', 'modifier-drag');
+    }
+}
+
+// Convert bias level to numeric value for comparison
+function getBiasValue(level) {
+    const values = {
+        'TORO_MAJOR': 5, 'TORO MAJOR': 5,
+        'TORO_MINOR': 4, 'TORO MINOR': 4,
+        'NEUTRAL': 3,
+        'URSA_MINOR': 2, 'URSA MINOR': 2,
+        'URSA_MAJOR': 1, 'URSA MAJOR': 1
+    };
+    return values[level?.toUpperCase()?.replace('_', ' ')] || 3;
 }
 
 function updateBiasWithTrend(timeframe, biasData) {
