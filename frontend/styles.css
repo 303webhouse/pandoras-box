@@ -302,24 +302,24 @@ body {
 
 /* Personal Bias Badge on Bias Cards */
 .personal-bias-badge {
-    position: absolute;
-    top: 8px;
-    left: 8px;
-    font-size: 9px;
+    display: block;
+    text-align: center;
+    font-size: 10px;
     font-weight: 700;
-    padding: 2px 6px;
-    border-radius: 3px;
-    background: rgba(20, 184, 166, 0.2);
+    padding: 4px 8px;
+    margin-top: 6px;
+    border-radius: 4px;
+    background: rgba(20, 184, 166, 0.15);
     color: var(--accent-teal);
 }
 
 .personal-bias-badge.toro {
-    background: rgba(124, 255, 107, 0.2);
+    background: rgba(124, 255, 107, 0.15);
     color: var(--accent-lime);
 }
 
 .personal-bias-badge.ursa {
-    background: rgba(255, 107, 53, 0.2);
+    background: rgba(255, 107, 53, 0.15);
     color: var(--accent-orange);
 }
 
