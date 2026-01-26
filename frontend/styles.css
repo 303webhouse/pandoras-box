@@ -3188,3 +3188,10 @@ body {
 .factors-btn.apply:hover {
     background: #0ea391;
 }
+
+/* Ensure weekly bias settings modal visibility */
+#weeklyBiasSettingsModal.active {
+    display: flex !important;
+    opacity: 1;
+    visibility: visible;
+}
