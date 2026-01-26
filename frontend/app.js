@@ -595,6 +595,10 @@ function initWeeklyBiasSettings() {
             console.error('Error loading factor states:', err);
         }
         modal.classList.add('active');
+        console.log('Modal classes after adding active:', modal.className);
+        console.log('Modal display style:', window.getComputedStyle(modal).display);
+        console.log('Modal visibility:', window.getComputedStyle(modal).visibility);
+        console.log('Modal z-index:', window.getComputedStyle(modal).zIndex);
     });
     
     // Close modal
