@@ -330,3 +330,50 @@ def manually_set_bias(
     logger.info(f"💵 Dollar Smile manually set: {bias.upper()} (level {level})")
     
     return {"status": "success", "data": _dollar_smile_state}
+
+
+async def auto_fetch_and_update() -> Dict[str, Any]:
+    """
+    Auto-fetch DXY and VIX data using yfinance and update Dollar Smile bias.
+    Called by the scheduler - no webhooks needed.
+    """
+    global _dollar_smile_state
+    
+    try:
+        import yfinance as yf
+        
+        # Fetch DXY (US Dollar Index)
+        # Note: yfinance uses "DX-Y.NYB" for DXY futures
+        dxy_ticker = yf.Ticker("DX-Y.NYB")
+        dxy_hist = dxy_ticker.history(period="10d")
+        
+        if len(dxy_hist) < 6:
+            logger.warning("Not enough DXY data for Dollar Smile calculation")
+            return {"status": "error", "message": "Insufficient DXY data"}
+        
+        dxy_current = float(dxy_hist['Close'].iloc[-1])
+        dxy_5d_ago = float(dxy_hist['Close'].iloc[-6])  # 5 trading days ago
+        
+        # Fetch VIX
+        vix_ticker = yf.Ticker("^VIX")
+        vix_hist = vix_ticker.history(period="5d")
+        
+        if len(vix_hist) < 1:
+            logger.warning("No VIX data available for Dollar Smile calculation")
+            return {"status": "error", "message": "No VIX data"}
+        
+        vix_current = float(vix_hist['Close'].iloc[-1])
+        
+        # Calculate Dollar Smile bias
+        result = calculate_dollar_smile_bias(dxy_current, dxy_5d_ago, vix_current)
+        _dollar_smile_state.update(result)
+        _dollar_smile_state["last_updated"] = datetime.now().isoformat()
+        _dollar_smile_state["data_source"] = "yfinance_auto"
+        
+        logger.info(f"💵 Dollar Smile auto-updated: {result['bias']} (DXY: {dxy_current:.2f}, VIX: {vix_current:.1f})")
+        
+        return {"status": "success", "data": _dollar_smile_state}
+        
+    except Exception as e:
+        logger.error(f"Error auto-fetching Dollar Smile data: {e}")
+        return {"status": "error", "message": str(e)}
