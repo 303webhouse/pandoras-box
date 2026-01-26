@@ -59,7 +59,7 @@ let cyclicalBiasFactorStates = {
 // Personal Bias & Override State
 let personalBias = 'NEUTRAL';  // NEUTRAL, TORO, URSA
 let biasOverrideActive = false;
-let biasOverrideDirection = 'TORO_MAJOR';  // TORO_MAJOR or URSA_MAJOR
+let biasOverrideDirection = 'MAJOR_TORO';  // MAJOR_TORO or MAJOR_URSA
 
 // Initialize app
 document.addEventListener('DOMContentLoaded', () => {
@@ -285,12 +285,6 @@ function updateConnectionStatus(connected) {
 
 // Event Listeners
 function initEventListeners() {
-    // Timeframe selector
-    document.getElementById('timeframeSelector').addEventListener('change', (e) => {
-        currentTimeframe = e.target.value;
-        loadSignals();
-    });
-    
     // Refresh button
     document.getElementById('refreshBtn').addEventListener('click', () => {
         loadSignals();
@@ -420,6 +414,9 @@ async function loadBiasData() {
     
     // Load shift status for weekly bias
     await fetchBiasShiftStatus();
+    
+    // Check and apply alignment styling
+    checkAndApplyBiasAlignment();
 }
 
 // Display effective bias when hierarchical modifier is applied
@@ -487,13 +484,67 @@ function hideEffectiveBias(timeframe) {
 // Convert bias level to numeric value for comparison
 function getBiasValue(level) {
     const values = {
-        'TORO_MAJOR': 5, 'TORO MAJOR': 5,
-        'TORO_MINOR': 4, 'TORO MINOR': 4,
-        'NEUTRAL': 3,
+        // New 6-level system
+        'MAJOR_TORO': 6, 'MAJOR TORO': 6,
+        'MINOR_TORO': 5, 'MINOR TORO': 5,
+        'LEAN_TORO': 4, 'LEAN TORO': 4,
+        'LEAN_URSA': 3, 'LEAN URSA': 3,
+        'MINOR_URSA': 2, 'MINOR URSA': 2,
+        'MAJOR_URSA': 1, 'MAJOR URSA': 1,
+        // Legacy mappings
+        'TORO_MAJOR': 6, 'TORO MAJOR': 6,
+        'TORO_MINOR': 5, 'TORO MINOR': 5,
+        'NEUTRAL': 4,  // Map to LEAN_TORO
         'URSA_MINOR': 2, 'URSA MINOR': 2,
         'URSA_MAJOR': 1, 'URSA MAJOR': 1
     };
-    return values[level?.toUpperCase()?.replace('_', ' ')] || 3;
+    return values[level?.toUpperCase()?.replace('_', ' ')] || 4;  // Default LEAN_TORO
+}
+
+// Check if bias level is bullish (TORO-based)
+function isBullishBias(level) {
+    return level && (level.toUpperCase().includes('TORO') || getBiasValue(level) >= 4);
+}
+
+// Check if bias level is bearish (URSA-based)
+function isBearishBias(level) {
+    return level && (level.toUpperCase().includes('URSA') || getBiasValue(level) <= 3);
+}
+
+// Check and apply alignment styling when Cyclical and Weekly are aligned
+function checkAndApplyBiasAlignment() {
+    const container = document.querySelector('.container');
+    const alignmentIndicator = document.getElementById('biasAlignmentIndicator');
+    const alignmentText = document.getElementById('alignmentText');
+    
+    if (!container) return;
+    
+    // Remove existing alignment classes
+    container.classList.remove('bias-aligned-bullish', 'bias-aligned-bearish');
+    
+    // Get current bias levels
+    const cyclicalLevel = cyclicalBiasFullData?.level || '';
+    const weeklyLevel = weeklyBiasFullData?.level || '';
+    
+    const cyclicalBullish = isBullishBias(cyclicalLevel);
+    const cyclicalBearish = isBearishBias(cyclicalLevel);
+    const weeklyBullish = isBullishBias(weeklyLevel);
+    const weeklyBearish = isBearishBias(weeklyLevel);
+    
+    // Check alignment
+    if (cyclicalBullish && weeklyBullish) {
+        container.classList.add('bias-aligned-bullish');
+        if (alignmentText) alignmentText.textContent = 'BULLISH ALIGNED';
+        console.log('Bias alignment: BULLISH (Cyclical + Weekly both bullish)');
+    } else if (cyclicalBearish && weeklyBearish) {
+        container.classList.add('bias-aligned-bearish');
+        if (alignmentText) alignmentText.textContent = 'BEARISH ALIGNED';
+        console.log('Bias alignment: BEARISH (Cyclical + Weekly both bearish)');
+    } else {
+        // Not aligned - no outline
+        if (alignmentText) alignmentText.textContent = 'MIXED';
+        console.log('Bias alignment: MIXED (Cyclical and Weekly not aligned)');
+    }
 }
 
 function updateBiasWithTrend(timeframe, biasData) {
@@ -1052,7 +1103,7 @@ function loadPersonalBiasState() {
             const state = JSON.parse(saved);
             personalBias = state.personalBias || 'NEUTRAL';
             biasOverrideActive = state.biasOverrideActive || false;
-            biasOverrideDirection = state.biasOverrideDirection || 'TORO_MAJOR';
+            biasOverrideDirection = state.biasOverrideDirection || 'MAJOR_TORO';
         }
         
         // Apply to UI elements
@@ -1140,10 +1191,10 @@ function getEffectiveTradingBias() {
         };
     }
     
-    // Get current daily bias (or use NEUTRAL if not loaded)
-    const dailyLevel = dailyBiasFullData?.level || 'NEUTRAL';
-    const weeklyLevel = weeklyBiasFullData?.level || 'NEUTRAL';
-    const cyclicalLevel = cyclicalBiasFullData?.level || 'NEUTRAL';
+    // Get current daily bias (or use LEAN_TORO if not loaded - bullish default)
+    const dailyLevel = dailyBiasFullData?.level || 'LEAN_TORO';
+    const weeklyLevel = weeklyBiasFullData?.level || 'LEAN_TORO';
+    const cyclicalLevel = cyclicalBiasFullData?.level || 'LEAN_TORO';
     
     // Calculate composite score
     let compositeScore = getBiasValue(dailyLevel);
@@ -1155,12 +1206,12 @@ function getEffectiveTradingBias() {
         compositeScore -= 1;
     }
     
-    // Clamp to valid range
-    compositeScore = Math.max(1, Math.min(5, compositeScore));
+    // Clamp to valid range [1, 6]
+    compositeScore = Math.max(1, Math.min(6, compositeScore));
     
-    // Convert back to level name
-    const levelMap = {5: 'TORO_MAJOR', 4: 'TORO_MINOR', 3: 'NEUTRAL', 2: 'URSA_MINOR', 1: 'URSA_MAJOR'};
-    const effectiveLevel = levelMap[compositeScore] || 'NEUTRAL';
+    // Convert back to level name (6-level system)
+    const levelMap = {6: 'MAJOR_TORO', 5: 'MINOR_TORO', 4: 'LEAN_TORO', 3: 'LEAN_URSA', 2: 'MINOR_URSA', 1: 'MAJOR_URSA'};
+    const effectiveLevel = levelMap[compositeScore] || 'LEAN_TORO';
     
     return {
         level: effectiveLevel,
@@ -1182,10 +1233,10 @@ function isSignalAlignedWithBias(signalDirection) {
     const biasValue = getBiasValue(bias.level);
     
     if (signalDirection === 'LONG') {
-        // LONG signals align with bullish bias (>= 3)
-        return biasValue >= 3;
+        // LONG signals align with bullish bias (TORO levels: >= 4)
+        return biasValue >= 4;
     } else if (signalDirection === 'SHORT') {
-        // SHORT signals align with bearish bias (<= 3)
+        // SHORT signals align with bearish bias (URSA levels: <= 3)
         return biasValue <= 3;
     }
     

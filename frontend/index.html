@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Pandora's Box - Real-time Trading Signal Dashboard">
     <title>Pandora's Box</title>
-    <link rel="stylesheet" href="styles.css?v=17">
+    <link rel="stylesheet" href="styles.css?v=18">
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#0a0e27">
 </head>
@@ -21,11 +21,6 @@
                 </div>
             </div>
             <div class="header-controls">
-                <select id="timeframeSelector" class="timeframe-selector">
-                    <option value="DAILY">Daily</option>
-                    <option value="WEEKLY" selected>Weekly</option>
-                    <option value="MONTHLY">Monthly</option>
-                </select>
                 <button class="refresh-btn" id="refreshBtn">↻ Refresh</button>
             </div>
         </header>
@@ -40,6 +35,14 @@
                 <span class="hierarchy-arrow">Weekly</span>
                 <span class="hierarchy-connector">→</span>
                 <span class="hierarchy-arrow">Daily</span>
+                
+                <div class="bias-flow-divider"></div>
+                
+                <!-- Alignment Indicator -->
+                <div class="bias-alignment-indicator" id="biasAlignmentIndicator">
+                    <span class="alignment-icon">⚡</span>
+                    <span class="alignment-text" id="alignmentText">ALIGNED</span>
+                </div>
                 
                 <div class="bias-flow-divider"></div>
                 
@@ -58,8 +61,8 @@
                     <label class="override-label">Override:</label>
                     <button class="override-toggle" id="biasOverrideToggle" data-active="false">OFF</button>
                     <select id="overrideDirectionSelector" class="override-direction-select" disabled>
-                        <option value="TORO_MAJOR">TORO MAJOR</option>
-                        <option value="URSA_MAJOR">URSA MAJOR</option>
+                        <option value="MAJOR_TORO">MAJOR TORO</option>
+                        <option value="MAJOR_URSA">MAJOR URSA</option>
                     </select>
                 </div>
             </div>
@@ -762,6 +765,6 @@
 
     <!-- TradingView Widget Script -->
     <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-    <script src="app.js?v=20"></script>
+    <script src="app.js?v=21"></script>
 </body>
 </html>
