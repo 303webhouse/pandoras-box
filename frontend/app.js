@@ -34,6 +34,28 @@ let weeklyBiasFactorStates = {
     vix_term_structure: true
 };
 
+// Daily Bias Factor State
+let dailyBiasFullData = null;
+let dailyBiasFactorStates = {
+    tick_breadth: true,
+    put_call_ratio: true,
+    vix_intraday: true,
+    vold: true,
+    trin_arms: true,
+    spy_vs_rsp: true
+};
+
+// Cyclical Bias Factor State
+let cyclicalBiasFullData = null;
+let cyclicalBiasFactorStates = {
+    sma_200_positions: true,
+    yield_curve: true,
+    credit_spreads: true,
+    savita_indicator: true,
+    longterm_breadth: true,
+    sahm_rule: true
+};
+
 // Initialize app
 document.addEventListener('DOMContentLoaded', () => {
     initTradingViewWidget();
@@ -290,8 +312,10 @@ function initEventListeners() {
     // Hybrid Scanner
     initHybridScanner();
     
-    // Weekly Bias Factor Settings Modal
+    // Bias Factor Settings Modals
     initWeeklyBiasSettings();
+    initDailyBiasSettings();
+    initCyclicalBiasSettings();
 }
 
 // Data Loading
@@ -334,23 +358,32 @@ async function loadBiasData() {
         if (result.status === 'success' && result.data) {
             const data = result.data;
             
-            // Update Daily Bias
-            updateBiasWithTrend('daily', data.daily);
+            // Update Daily Bias - store full data and apply factor filters
+            if (data.daily) {
+                dailyBiasFullData = data.daily;
+                if (data.daily.details && data.daily.details.factors) {
+                    updateDailyBiasWithFactors(data.daily);
+                } else {
+                    updateBiasWithTrend('daily', data.daily);
+                }
+            }
             
             // Update Weekly Bias - store full data and check for new day reset
             if (data.weekly) {
-                // Check if this is a new day and reset factors if needed
                 checkAndResetFactorsForNewDay(data.weekly);
-                
-                // Store full weekly bias data with factors
                 weeklyBiasFullData = data.weekly;
-                
-                // Apply factor filters and recalculate
                 updateWeeklyBiasWithFactors(data.weekly);
             }
             
-            // Update Monthly Bias
-            updateBiasWithTrend('monthly', data.monthly);
+            // Update Cyclical Bias - store full data and apply factor filters
+            if (data.cyclical) {
+                cyclicalBiasFullData = data.cyclical;
+                if (data.cyclical.details && data.cyclical.details.factors) {
+                    updateCyclicalBiasWithFactors(data.cyclical);
+                } else {
+                    updateBiasWithTrend('cyclical', data.cyclical);
+                }
+            }
         } else {
             // Fallback to old endpoint if scheduler not ready
             await loadBiasDataFallback();
@@ -550,13 +583,13 @@ function saveFactorStatesToStorage() {
     localStorage.setItem('weeklyBiasFactors', JSON.stringify(weeklyBiasFactorStates));
 }
 
-// Update warning badge
-function updateWarningBadge(enabledCount) {
-    const weeklyLevelElement = document.getElementById('weeklyLevel');
-    if (!weeklyLevelElement) return;
+// Update warning badge for any timeframe
+function updateWarningBadge(enabledCount, timeframe = 'weekly') {
+    const levelElement = document.getElementById(`${timeframe}Level`);
+    if (!levelElement) return;
     
     // Remove existing warning badge
-    const existingBadge = weeklyLevelElement.querySelector('.bias-warning-badge');
+    const existingBadge = levelElement.querySelector('.bias-warning-badge');
     if (existingBadge) {
         existingBadge.remove();
     }
@@ -567,8 +600,98 @@ function updateWarningBadge(enabledCount) {
         badge.className = 'bias-warning-badge';
         badge.textContent = '⚠️';
         badge.title = `${enabledCount} of 6 factors active`;
-        weeklyLevelElement.appendChild(badge);
+        levelElement.appendChild(badge);
     }
+}
+
+// Update Daily Bias with factor filtering
+function updateDailyBiasWithFactors(biasData) {
+    if (!biasData || !biasData.details || !biasData.details.factors) {
+        updateBiasWithTrend('daily', biasData);
+        return;
+    }
+    
+    const factors = biasData.details.factors;
+    let filteredVote = 0;
+    let enabledCount = 0;
+    
+    Object.keys(factors).forEach(factorName => {
+        if (dailyBiasFactorStates[factorName]) {
+            filteredVote += factors[factorName].vote || 0;
+            enabledCount++;
+        }
+    });
+    
+    const totalFactors = 6;
+    const scaleFactor = enabledCount / totalFactors;
+    const majorThreshold = Math.round(6 * scaleFactor);
+    const minorThreshold = Math.round(3 * scaleFactor);
+    
+    let newLevel = 'NEUTRAL';
+    if (filteredVote >= majorThreshold) {
+        newLevel = 'TORO_MAJOR';
+    } else if (filteredVote >= minorThreshold) {
+        newLevel = 'TORO_MINOR';
+    } else if (filteredVote <= -majorThreshold) {
+        newLevel = 'URSA_MAJOR';
+    } else if (filteredVote <= -minorThreshold) {
+        newLevel = 'URSA_MINOR';
+    }
+    
+    const modifiedBiasData = {
+        ...biasData,
+        level: newLevel,
+        filtered_vote: filteredVote,
+        enabled_factors: enabledCount
+    };
+    
+    updateBiasWithTrend('daily', modifiedBiasData);
+    updateWarningBadge(enabledCount, 'daily');
+}
+
+// Update Cyclical Bias with factor filtering
+function updateCyclicalBiasWithFactors(biasData) {
+    if (!biasData || !biasData.details || !biasData.details.factors) {
+        updateBiasWithTrend('cyclical', biasData);
+        return;
+    }
+    
+    const factors = biasData.details.factors;
+    let filteredVote = 0;
+    let enabledCount = 0;
+    
+    Object.keys(factors).forEach(factorName => {
+        if (cyclicalBiasFactorStates[factorName]) {
+            filteredVote += factors[factorName].vote || 0;
+            enabledCount++;
+        }
+    });
+    
+    const totalFactors = 6;
+    const scaleFactor = enabledCount / totalFactors;
+    const majorThreshold = Math.round(6 * scaleFactor);
+    const minorThreshold = Math.round(3 * scaleFactor);
+    
+    let newLevel = 'NEUTRAL';
+    if (filteredVote >= majorThreshold) {
+        newLevel = 'TORO_MAJOR';
+    } else if (filteredVote >= minorThreshold) {
+        newLevel = 'TORO_MINOR';
+    } else if (filteredVote <= -majorThreshold) {
+        newLevel = 'URSA_MAJOR';
+    } else if (filteredVote <= -minorThreshold) {
+        newLevel = 'URSA_MINOR';
+    }
+    
+    const modifiedBiasData = {
+        ...biasData,
+        level: newLevel,
+        filtered_vote: filteredVote,
+        enabled_factors: enabledCount
+    };
+    
+    updateBiasWithTrend('cyclical', modifiedBiasData);
+    updateWarningBadge(enabledCount, 'cyclical');
 }
 
 // Initialize Weekly Bias Settings Modal
@@ -588,17 +711,12 @@ function initWeeklyBiasSettings() {
     settingsBtn.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
-        console.log('Gear clicked - opening modal');
         try {
-            loadFactorStatesIntoModal();
+            loadFactorStatesIntoModal('weekly', weeklyBiasFactorStates, weeklyBiasFullData);
         } catch (err) {
             console.error('Error loading factor states:', err);
         }
         modal.classList.add('active');
-        console.log('Modal classes after adding active:', modal.className);
-        console.log('Modal display style:', window.getComputedStyle(modal).display);
-        console.log('Modal visibility:', window.getComputedStyle(modal).visibility);
-        console.log('Modal z-index:', window.getComputedStyle(modal).zIndex);
     });
     
     // Close modal
@@ -642,24 +760,150 @@ function initWeeklyBiasSettings() {
     }
 }
 
-// Load factor states into modal
-function loadFactorStatesIntoModal() {
+// Initialize Daily Bias Settings Modal
+function initDailyBiasSettings() {
+    const settingsBtn = document.getElementById('dailyBiasSettingsBtn');
+    const modal = document.getElementById('dailyBiasSettingsModal');
+    const closeBtn = document.getElementById('closeDailyBiasSettingsBtn');
+    const resetBtn = document.getElementById('resetDailyFactorsBtn');
+    const applyBtn = document.getElementById('applyDailyFactorsBtn');
+    
+    if (!settingsBtn || !modal) {
+        console.warn('Daily bias settings elements not found');
+        return;
+    }
+    
+    // Open modal
+    settingsBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        loadFactorStatesIntoModal('daily', dailyBiasFactorStates, dailyBiasFullData);
+        modal.classList.add('active');
+    });
+    
+    // Close modal
+    const closeModal = () => modal.classList.remove('active');
+    
+    if (closeBtn) closeBtn.addEventListener('click', closeModal);
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) closeModal();
+    });
+    
+    // Reset all factors
+    if (resetBtn) {
+        resetBtn.addEventListener('click', () => {
+            document.querySelectorAll('#dailyBiasSettingsModal input[type="checkbox"]').forEach(cb => {
+                cb.checked = true;
+            });
+        });
+    }
+    
+    // Apply factors
+    if (applyBtn) {
+        applyBtn.addEventListener('click', () => {
+            document.querySelectorAll('#dailyBiasSettingsModal .factor-toggle').forEach(toggle => {
+                const factorName = toggle.dataset.factor;
+                const checkbox = toggle.querySelector('input[type="checkbox"]');
+                dailyBiasFactorStates[factorName] = checkbox.checked;
+            });
+            
+            saveDailyFactorStatesToStorage();
+            
+            if (dailyBiasFullData) {
+                updateDailyBiasWithFactors(dailyBiasFullData);
+            }
+            
+            closeModal();
+        });
+    }
+}
+
+// Initialize Cyclical Bias Settings Modal
+function initCyclicalBiasSettings() {
+    const settingsBtn = document.getElementById('cyclicalBiasSettingsBtn');
+    const modal = document.getElementById('cyclicalBiasSettingsModal');
+    const closeBtn = document.getElementById('closeCyclicalBiasSettingsBtn');
+    const resetBtn = document.getElementById('resetCyclicalFactorsBtn');
+    const applyBtn = document.getElementById('applyCyclicalFactorsBtn');
+    
+    if (!settingsBtn || !modal) {
+        console.warn('Cyclical bias settings elements not found');
+        return;
+    }
+    
+    // Open modal
+    settingsBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        loadFactorStatesIntoModal('cyclical', cyclicalBiasFactorStates, cyclicalBiasFullData);
+        modal.classList.add('active');
+    });
+    
+    // Close modal
+    const closeModal = () => modal.classList.remove('active');
+    
+    if (closeBtn) closeBtn.addEventListener('click', closeModal);
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) closeModal();
+    });
+    
+    // Reset all factors
+    if (resetBtn) {
+        resetBtn.addEventListener('click', () => {
+            document.querySelectorAll('#cyclicalBiasSettingsModal input[type="checkbox"]').forEach(cb => {
+                cb.checked = true;
+            });
+        });
+    }
+    
+    // Apply factors
+    if (applyBtn) {
+        applyBtn.addEventListener('click', () => {
+            document.querySelectorAll('#cyclicalBiasSettingsModal .factor-toggle').forEach(toggle => {
+                const factorName = toggle.dataset.factor;
+                const checkbox = toggle.querySelector('input[type="checkbox"]');
+                cyclicalBiasFactorStates[factorName] = checkbox.checked;
+            });
+            
+            saveCyclicalFactorStatesToStorage();
+            
+            if (cyclicalBiasFullData) {
+                updateCyclicalBiasWithFactors(cyclicalBiasFullData);
+            }
+            
+            closeModal();
+        });
+    }
+}
+
+// Generic function to load factor states into any modal
+function loadFactorStatesIntoModal(timeframe, factorStates, fullData) {
     try {
-        loadFactorStatesFromStorage();
+        const modalId = `${timeframe}BiasSettingsModal`;
+        
+        // Load from storage first
+        const stored = localStorage.getItem(`${timeframe}BiasFactors`);
+        if (stored) {
+            try {
+                Object.assign(factorStates, JSON.parse(stored));
+            } catch (e) {
+                console.error(`Error loading ${timeframe} factor states:`, e);
+            }
+        }
         
         // Update checkboxes
-        document.querySelectorAll('#weeklyBiasSettingsModal .factor-toggle').forEach(toggle => {
+        document.querySelectorAll(`#${modalId} .factor-toggle`).forEach(toggle => {
             const factorName = toggle.dataset.factor;
             const checkbox = toggle.querySelector('input[type="checkbox"]');
             if (checkbox) {
-                checkbox.checked = weeklyBiasFactorStates[factorName] !== false;
+                checkbox.checked = factorStates[factorName] !== false;
             }
         });
         
         // Update vote displays if we have factor data
-        if (weeklyBiasFullData && weeklyBiasFullData.details && weeklyBiasFullData.details.factors) {
-            const factors = weeklyBiasFullData.details.factors;
-            document.querySelectorAll('#weeklyBiasSettingsModal .factor-toggle').forEach(toggle => {
+        if (fullData && fullData.details && fullData.details.factors) {
+            const factors = fullData.details.factors;
+            document.querySelectorAll(`#${modalId} .factor-toggle`).forEach(toggle => {
                 const factorName = toggle.dataset.factor;
                 const voteElement = toggle.querySelector('.factor-vote');
                 if (voteElement && factors[factorName]) {
@@ -670,10 +914,18 @@ function loadFactorStatesIntoModal() {
                 }
             });
         }
-        console.log('Factor states loaded into modal');
     } catch (err) {
-        console.error('Error in loadFactorStatesIntoModal:', err);
+        console.error(`Error in loadFactorStatesIntoModal for ${timeframe}:`, err);
     }
+}
+
+// Storage functions for each timeframe
+function saveDailyFactorStatesToStorage() {
+    localStorage.setItem('dailyBiasFactors', JSON.stringify(dailyBiasFactorStates));
+}
+
+function saveCyclicalFactorStatesToStorage() {
+    localStorage.setItem('cyclicalBiasFactors', JSON.stringify(cyclicalBiasFactorStates));
 }
 
 // Fetch and display bias shift status (weekly bias shift from Monday baseline)
@@ -795,21 +1047,23 @@ async function loadBiasDataFallback() {
         }
     }
     
-    // Load Monthly separately
-    await loadSavitaIndicator();
+    // Load Cyclical separately (fallback)
+    await loadCyclicalBiasFallback();
 }
 
-async function loadSavitaIndicator() {
+async function loadCyclicalBiasFallback() {
     try {
-        const response = await fetch(`${API_URL}/bias/savita`);
-        const data = await response.json();
+        // Try to load from bias-auto endpoint first
+        const response = await fetch(`${API_URL}/bias-auto/CYCLICAL`);
+        const result = await response.json();
         
-        const container = document.getElementById('monthlyBias');
-        const levelElement = document.getElementById('monthlyLevel');
-        const detailsElement = document.getElementById('monthlyDetails');
+        const container = document.getElementById('cyclicalBias');
+        const levelElement = document.getElementById('cyclicalLevel');
+        const detailsElement = document.getElementById('cyclicalDetails');
         
-        if (data.status === 'success') {
-            const bias = data.bias || 'NEUTRAL';
+        if (result.status === 'success' && result.data) {
+            const data = result.data;
+            const bias = data.level || 'NEUTRAL';
             
             if (levelElement) {
                 levelElement.textContent = bias.replace('_', ' ');
@@ -827,23 +1081,22 @@ async function loadSavitaIndicator() {
             }
             
             if (detailsElement) {
-                // Show reading and interpretation
-                const reading = data.reading || 'N/A';
-                const signal = data.signal || '';
-                const updated = data.last_updated || 'Unknown';
+                const details = data.details || {};
+                const totalVote = details.total_vote !== undefined ? details.total_vote : '?';
+                const timestamp = data.timestamp ? new Date(data.timestamp).toLocaleString() : 'Unknown';
                 detailsElement.innerHTML = `
-                    <span class="savita-reading">${reading}%</span> - ${signal}<br>
-                    <small>Updated: ${updated}</small>
+                    Vote: ${totalVote}/12 • Long-term macro<br>
+                    <small>Updated: ${timestamp}</small>
                 `;
             }
         } else {
             if (detailsElement) {
-                detailsElement.textContent = data.message || 'Unavailable';
+                detailsElement.textContent = 'Awaiting first refresh';
             }
         }
     } catch (error) {
-        console.error('Error loading Savita indicator:', error);
-        const detailsElement = document.getElementById('monthlyDetails');
+        console.error('Error loading Cyclical bias:', error);
+        const detailsElement = document.getElementById('cyclicalDetails');
         if (detailsElement) {
             detailsElement.textContent = 'Failed to load';
         }

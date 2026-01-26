@@ -3189,8 +3189,10 @@ body {
     background: #0ea391;
 }
 
-/* Ensure weekly bias settings modal visibility */
-#weeklyBiasSettingsModal.active {
+/* Ensure bias settings modals visibility */
+#weeklyBiasSettingsModal.active,
+#dailyBiasSettingsModal.active,
+#cyclicalBiasSettingsModal.active {
     display: flex !important;
     opacity: 1;
     visibility: visible;

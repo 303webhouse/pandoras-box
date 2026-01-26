@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Pandora's Box - Real-time Trading Signal Dashboard">
     <title>Pandora's Box</title>
-    <link rel="stylesheet" href="styles.css?v=11">
+    <link rel="stylesheet" href="styles.css?v=14">
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#0a0e27">
 </head>
@@ -34,6 +34,7 @@
         <section class="bias-section">
             <div class="bias-card" id="dailyBias">
                 <h3>Daily Bias</h3>
+                <button class="bias-settings-btn" id="dailyBiasSettingsBtn" title="Factor Settings">⚙️</button>
                 <div class="bias-display">
                     <div class="bias-level" id="dailyLevel">NEUTRAL</div>
                     <div class="bias-details" id="dailyDetails">Loading...</div>
@@ -47,11 +48,12 @@
                     <div class="bias-details" id="weeklyDetails">Loading...</div>
                 </div>
             </div>
-            <div class="bias-card" id="monthlyBias">
-                <h3>Monthly Bias (Savita)</h3>
+            <div class="bias-card" id="cyclicalBias">
+                <h3>Cyclical Bias</h3>
+                <button class="bias-settings-btn" id="cyclicalBiasSettingsBtn" title="Factor Settings">⚙️</button>
                 <div class="bias-display">
-                    <div class="bias-level" id="monthlyLevel">NEUTRAL</div>
-                    <div class="bias-details" id="monthlyDetails">Loading...</div>
+                    <div class="bias-level" id="cyclicalLevel">NEUTRAL</div>
+                    <div class="bias-details" id="cyclicalDetails">Loading...</div>
                 </div>
             </div>
         </section>
@@ -595,10 +597,126 @@
                 </div>
             </div>
         </div>
+
+        <!-- Daily Bias Factor Settings Modal -->
+        <div class="modal-overlay" id="dailyBiasSettingsModal">
+            <div class="factors-modal">
+                <div class="factors-modal-header">
+                    <h2>Daily Bias Factors</h2>
+                    <button class="modal-close" id="closeDailyBiasSettingsBtn">✕</button>
+                </div>
+                <div class="factors-modal-body">
+                    <div class="factor-toggle" data-factor="tick_breadth">
+                        <label>
+                            <input type="checkbox" checked>
+                            <span class="factor-name">TICK/ADD Breadth</span>
+                        </label>
+                        <span class="factor-vote" data-vote="0">(vote: 0)</span>
+                    </div>
+                    <div class="factor-toggle" data-factor="put_call_ratio">
+                        <label>
+                            <input type="checkbox" checked>
+                            <span class="factor-name">Put/Call Ratio</span>
+                        </label>
+                        <span class="factor-vote" data-vote="0">(vote: 0)</span>
+                    </div>
+                    <div class="factor-toggle" data-factor="vix_intraday">
+                        <label>
+                            <input type="checkbox" checked>
+                            <span class="factor-name">VIX Intraday</span>
+                        </label>
+                        <span class="factor-vote" data-vote="0">(vote: 0)</span>
+                    </div>
+                    <div class="factor-toggle" data-factor="vold">
+                        <label>
+                            <input type="checkbox" checked>
+                            <span class="factor-name">VOLD (Volume)</span>
+                        </label>
+                        <span class="factor-vote" data-vote="0">(vote: 0)</span>
+                    </div>
+                    <div class="factor-toggle" data-factor="trin_arms">
+                        <label>
+                            <input type="checkbox" checked>
+                            <span class="factor-name">TRIN/Arms Index</span>
+                        </label>
+                        <span class="factor-vote" data-vote="0">(vote: 0)</span>
+                    </div>
+                    <div class="factor-toggle" data-factor="spy_vs_rsp">
+                        <label>
+                            <input type="checkbox" checked>
+                            <span class="factor-name">SPY vs RSP (Breadth)</span>
+                        </label>
+                        <span class="factor-vote" data-vote="0">(vote: 0)</span>
+                    </div>
+                </div>
+                <div class="factors-modal-footer">
+                    <button class="factors-btn reset" id="resetDailyFactorsBtn">Reset All</button>
+                    <button class="factors-btn apply" id="applyDailyFactorsBtn">Apply</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Cyclical Bias Factor Settings Modal -->
+        <div class="modal-overlay" id="cyclicalBiasSettingsModal">
+            <div class="factors-modal">
+                <div class="factors-modal-header">
+                    <h2>Cyclical Bias Factors</h2>
+                    <button class="modal-close" id="closeCyclicalBiasSettingsBtn">✕</button>
+                </div>
+                <div class="factors-modal-body">
+                    <div class="factor-toggle" data-factor="sma_200_positions">
+                        <label>
+                            <input type="checkbox" checked>
+                            <span class="factor-name">200 SMA Positions</span>
+                        </label>
+                        <span class="factor-vote" data-vote="0">(vote: 0)</span>
+                    </div>
+                    <div class="factor-toggle" data-factor="yield_curve">
+                        <label>
+                            <input type="checkbox" checked>
+                            <span class="factor-name">Yield Curve</span>
+                        </label>
+                        <span class="factor-vote" data-vote="0">(vote: 0)</span>
+                    </div>
+                    <div class="factor-toggle" data-factor="credit_spreads">
+                        <label>
+                            <input type="checkbox" checked>
+                            <span class="factor-name">Credit Spreads</span>
+                        </label>
+                        <span class="factor-vote" data-vote="0">(vote: 0)</span>
+                    </div>
+                    <div class="factor-toggle" data-factor="savita_indicator">
+                        <label>
+                            <input type="checkbox" checked>
+                            <span class="factor-name">Savita Indicator</span>
+                        </label>
+                        <span class="factor-vote" data-vote="0">(vote: 0)</span>
+                    </div>
+                    <div class="factor-toggle" data-factor="longterm_breadth">
+                        <label>
+                            <input type="checkbox" checked>
+                            <span class="factor-name">Long-term Breadth</span>
+                        </label>
+                        <span class="factor-vote" data-vote="0">(vote: 0)</span>
+                    </div>
+                    <div class="factor-toggle" data-factor="sahm_rule">
+                        <label>
+                            <input type="checkbox" checked>
+                            <span class="factor-name">Sahm Rule</span>
+                        </label>
+                        <span class="factor-vote" data-vote="0">(vote: 0)</span>
+                    </div>
+                </div>
+                <div class="factors-modal-footer">
+                    <button class="factors-btn reset" id="resetCyclicalFactorsBtn">Reset All</button>
+                    <button class="factors-btn apply" id="applyCyclicalFactorsBtn">Apply</button>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- TradingView Widget Script -->
     <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-    <script src="app.js?v=13"></script>
+    <script src="app.js?v=14"></script>
 </body>
 </html>

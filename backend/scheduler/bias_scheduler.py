@@ -2,9 +2,11 @@
 Automated Bias Scheduler
 
 Handles automatic refresh of all bias indicators:
-- Daily Bias: Refreshes at 9:45 AM ET every trading day
-- Weekly Bias: Refreshes at 9:45 AM ET every Monday
-- Monthly Bias: Refreshes at 9:45 AM ET on first trading day of month
+- Daily Bias: Refreshes at 9:45 AM ET every trading day (intraday factors)
+- Weekly Bias: Refreshes at 9:45 AM ET every Monday (6-factor model)
+- Cyclical Bias: Long-term macro indicators (200 SMA, yield curve, Sahm Rule, etc.)
+
+Hierarchical system: Cyclical → Weekly → Daily (higher timeframes modify lower)
 
 Stores historical values to show trends (vs previous period).
 """
@@ -35,7 +37,7 @@ _weekly_baseline = {
 class BiasTimeframe(str, Enum):
     DAILY = "DAILY"
     WEEKLY = "WEEKLY"
-    MONTHLY = "MONTHLY"
+    CYCLICAL = "CYCLICAL"
 
 
 class TrendDirection(str, Enum):
@@ -71,7 +73,7 @@ def _load_bias_history() -> Dict[str, Any]:
     return {
         "daily": {"current": None, "previous": None, "history": []},
         "weekly": {"current": None, "previous": None, "history": []},
-        "monthly": {"current": None, "previous": None, "history": []},
+        "cyclical": {"current": None, "previous": None, "history": []},
         "last_updated": None
     }
 
@@ -149,7 +151,7 @@ def update_bias(
     Update bias for a timeframe, storing previous value for trend tracking
     
     Args:
-        timeframe: DAILY, WEEKLY, or MONTHLY
+        timeframe: DAILY, WEEKLY, or CYCLICAL
         new_level: The new bias level (e.g., "TORO_MAJOR", "NEUTRAL", etc.)
         details: Additional details to store (data sources, components, etc.)
     
@@ -630,63 +632,233 @@ async def refresh_weekly_bias() -> Dict[str, Any]:
     return result
 
 
-async def refresh_monthly_bias() -> Dict[str, Any]:
+async def refresh_cyclical_bias() -> Dict[str, Any]:
     """
-    Refresh monthly bias based on:
-    - Monthly technical signals
-    - Macro indicators
+    Refresh cyclical bias based on 6-FACTOR long-term macro analysis:
+    1. 200 SMA Positions (SPY, QQQ, IWM above/below 200-day SMA)
+    2. Yield Curve (2Y-10Y spread - inverted = bearish)
+    3. Credit Spreads (HYG/LQD ratio - widening = bearish)
+    4. Savita Indicator (BofA sentiment)
+    5. Long-term Breadth (% stocks above 200 SMA)
+    6. Sahm Rule (recession indicator based on unemployment)
     
-    Scheduled: 9:45 AM ET on first trading day of month
+    Updates: Weekly or on significant macro changes
     """
-    logger.info("📊 Refreshing Monthly Bias...")
+    logger.info("📊 Refreshing Cyclical Bias (6-Factor Macro Model)...")
+    
+    factor_votes = []  # List of (name, vote, details)
     
     try:
         from scanners.hybrid_scanner import get_scanner
-        
-        # Get monthly technical analysis for key indices
         scanner = get_scanner()
-        indices = ["SPY", "QQQ", "IWM"]
         
-        bullish_count = 0
-        bearish_count = 0
-        
-        for ticker in indices:
-            try:
-                # Use monthly interval
-                tech = scanner.get_technical_analysis(ticker, interval="1M")
-                signal = tech.get("signal", "NEUTRAL")
+        # =====================================================================
+        # FACTOR 1: 200 SMA Positions (SPY, QQQ, IWM)
+        # =====================================================================
+        try:
+            indices = ["SPY", "QQQ", "IWM"]
+            above_200sma = 0
+            below_200sma = 0
+            sma_details = {}
+            
+            for ticker in indices:
+                try:
+                    tech = scanner.get_technical_analysis(ticker, interval="1D")
+                    # Check if price is above 200 SMA (from moving averages data)
+                    ma_data = tech.get("moving_averages", {})
+                    sma200_signal = ma_data.get("SMA200", {}).get("signal", "NEUTRAL")
+                    
+                    if sma200_signal == "BUY":
+                        above_200sma += 1
+                        sma_details[ticker] = "above"
+                    elif sma200_signal == "SELL":
+                        below_200sma += 1
+                        sma_details[ticker] = "below"
+                    else:
+                        sma_details[ticker] = "neutral"
+                except Exception as e:
+                    logger.warning(f"Error getting 200 SMA for {ticker}: {e}")
+                    sma_details[ticker] = "error"
+            
+            # Vote: +2 if all above, +1 if majority above, -1 if majority below, -2 if all below
+            if above_200sma == 3:
+                sma_vote = 2
+            elif above_200sma >= 2:
+                sma_vote = 1
+            elif below_200sma == 3:
+                sma_vote = -2
+            elif below_200sma >= 2:
+                sma_vote = -1
+            else:
+                sma_vote = 0
                 
-                if signal in ["BUY", "STRONG_BUY"]:
-                    bullish_count += 1
-                elif signal in ["SELL", "STRONG_SELL"]:
-                    bearish_count += 1
-            except:
-                pass
+            factor_votes.append(("sma_200_positions", sma_vote, {
+                "above_count": above_200sma,
+                "below_count": below_200sma,
+                "details": sma_details
+            }))
+            logger.info(f"  📈 200 SMA Positions: {above_200sma}/3 above (vote: {sma_vote:+d})")
+            
+        except Exception as e:
+            logger.warning(f"Error in 200 SMA factor: {e}")
+            factor_votes.append(("sma_200_positions", 0, {"error": str(e)}))
         
-        # Determine monthly bias
-        if bullish_count >= 2:
-            new_level = "TORO_MAJOR" if bullish_count == 3 else "TORO_MINOR"
-        elif bearish_count >= 2:
-            new_level = "URSA_MAJOR" if bearish_count == 3 else "URSA_MINOR"
+        # =====================================================================
+        # FACTOR 2: Yield Curve (2Y-10Y spread)
+        # =====================================================================
+        try:
+            # Use TradingView data for treasury yields
+            us10y = scanner.get_technical_analysis("TVC:US10Y", interval="1D")
+            us02y = scanner.get_technical_analysis("TVC:US02Y", interval="1D")
+            
+            yield_10y = us10y.get("price", 0)
+            yield_2y = us02y.get("price", 0)
+            spread = yield_10y - yield_2y
+            
+            # Vote: +2 if spread > 0.5 (healthy), +1 if 0-0.5, -1 if inverted, -2 if deeply inverted
+            if spread > 0.5:
+                yc_vote = 2
+            elif spread > 0:
+                yc_vote = 1
+            elif spread > -0.5:
+                yc_vote = -1
+            else:
+                yc_vote = -2
+                
+            factor_votes.append(("yield_curve", yc_vote, {
+                "spread": round(spread, 3),
+                "us10y": yield_10y,
+                "us02y": yield_2y,
+                "status": "normal" if spread > 0 else "inverted"
+            }))
+            logger.info(f"  📉 Yield Curve: {spread:.2f}% spread (vote: {yc_vote:+d})")
+            
+        except Exception as e:
+            logger.warning(f"Error in yield curve factor: {e}")
+            factor_votes.append(("yield_curve", 0, {"error": str(e)}))
+        
+        # =====================================================================
+        # FACTOR 3: Credit Spreads (HYG vs LQD)
+        # =====================================================================
+        try:
+            from bias_filters.credit_spreads import get_credit_spread_bias
+            credit_result = get_credit_spread_bias()
+            
+            credit_level = credit_result.get("bias_level", 3)
+            # Map 1-5 scale to vote: 5→+2, 4→+1, 3→0, 2→-1, 1→-2
+            credit_vote = credit_level - 3
+            
+            factor_votes.append(("credit_spreads", credit_vote, {
+                "bias": credit_result.get("bias", "NEUTRAL"),
+                "bias_level": credit_level,
+                "spread_trend": credit_result.get("trend", "unknown")
+            }))
+            logger.info(f"  💳 Credit Spreads: {credit_result.get('bias')} (vote: {credit_vote:+d})")
+            
+        except Exception as e:
+            logger.warning(f"Error in credit spreads factor: {e}")
+            factor_votes.append(("credit_spreads", 0, {"error": str(e)}))
+        
+        # =====================================================================
+        # FACTOR 4: Savita Indicator (BofA sentiment)
+        # =====================================================================
+        try:
+            from bias_filters.savita_indicator import get_savita_bias
+            savita_result = get_savita_bias()
+            
+            savita_level = savita_result.get("bias_level", 3)
+            savita_vote = savita_level - 3
+            
+            factor_votes.append(("savita_indicator", savita_vote, {
+                "bias": savita_result.get("bias", "NEUTRAL"),
+                "bias_level": savita_level,
+                "reading": savita_result.get("reading")
+            }))
+            logger.info(f"  🎯 Savita Indicator: {savita_result.get('bias')} (vote: {savita_vote:+d})")
+            
+        except Exception as e:
+            logger.warning(f"Error in Savita factor: {e}")
+            factor_votes.append(("savita_indicator", 0, {"error": str(e)}))
+        
+        # =====================================================================
+        # FACTOR 5: Long-term Breadth (% stocks above 200 SMA)
+        # =====================================================================
+        try:
+            from bias_filters.market_breadth import get_market_breadth_bias
+            breadth_result = get_market_breadth_bias()
+            
+            breadth_level = breadth_result.get("bias_level", 3)
+            breadth_vote = breadth_level - 3
+            
+            factor_votes.append(("longterm_breadth", breadth_vote, {
+                "bias": breadth_result.get("bias", "NEUTRAL"),
+                "bias_level": breadth_level,
+                "pct_above_200sma": breadth_result.get("pct_above_200sma")
+            }))
+            logger.info(f"  📊 Long-term Breadth: {breadth_result.get('bias')} (vote: {breadth_vote:+d})")
+            
+        except Exception as e:
+            logger.warning(f"Error in breadth factor: {e}")
+            factor_votes.append(("longterm_breadth", 0, {"error": str(e)}))
+        
+        # =====================================================================
+        # FACTOR 6: Sahm Rule (Recession indicator)
+        # =====================================================================
+        try:
+            # Sahm Rule: 3-month avg unemployment rises 0.5+ from 12-month low = recession
+            # We'll use a simplified version - check if unemployment trend is rising
+            # For now, use a neutral placeholder until we integrate FRED data
+            sahm_vote = 0  # Neutral by default
+            sahm_triggered = False
+            
+            # TODO: Integrate FRED API for actual Sahm Rule calculation
+            # For now, this is a placeholder that defaults to neutral
+            
+            factor_votes.append(("sahm_rule", sahm_vote, {
+                "triggered": sahm_triggered,
+                "status": "not_triggered" if not sahm_triggered else "recession_warning",
+                "note": "Requires FRED API integration for live data"
+            }))
+            logger.info(f"  🚨 Sahm Rule: {'TRIGGERED' if sahm_triggered else 'Not triggered'} (vote: {sahm_vote:+d})")
+            
+        except Exception as e:
+            logger.warning(f"Error in Sahm Rule factor: {e}")
+            factor_votes.append(("sahm_rule", 0, {"error": str(e)}))
+        
+        # =====================================================================
+        # CALCULATE TOTAL VOTE AND DETERMINE BIAS
+        # =====================================================================
+        total_vote = sum(vote for _, vote, _ in factor_votes)
+        max_possible = 12  # 6 factors × 2 max each
+        
+        # Thresholds for 6 factors (same as weekly)
+        if total_vote >= 6:
+            new_level = "TORO_MAJOR"
+        elif total_vote >= 3:
+            new_level = "TORO_MINOR"
+        elif total_vote <= -6:
+            new_level = "URSA_MAJOR"
+        elif total_vote <= -3:
+            new_level = "URSA_MINOR"
         else:
             new_level = "NEUTRAL"
         
-        result = update_bias(
-            BiasTimeframe.MONTHLY,
-            new_level,
-            details={
-                "source": "monthly_index_technicals",
-                "bullish_indices": bullish_count,
-                "bearish_indices": bearish_count,
-                "indices_checked": indices
-            }
-        )
+        # Build details
+        details = {
+            "source": "6_factor_cyclical",
+            "total_vote": total_vote,
+            "max_possible": max_possible,
+            "factors": {name: {"vote": vote, "details": det} for name, vote, det in factor_votes}
+        }
         
-        logger.info(f"✅ Monthly Bias updated: {new_level} (trend: {result.get('trend')})")
+        # Update bias with trend tracking
+        result = update_bias(BiasTimeframe.CYCLICAL, new_level, details=details)
+        
+        logger.info(f"✅ Cyclical Bias updated: {new_level} (total vote: {total_vote}/{max_possible})")
         return result
         
     except Exception as e:
-        logger.error(f"Error refreshing monthly bias: {e}")
+        logger.error(f"Error refreshing cyclical bias: {e}")
         return {"error": str(e)}
 
 
@@ -733,9 +905,9 @@ async def run_scheduled_refreshes():
     # Always refresh weekly (runs daily, Monday sets baseline)
     await refresh_weekly_bias()
     
-    # First trading day of month = refresh monthly
-    if is_first_trading_day_of_month():
-        await refresh_monthly_bias()
+    # Refresh cyclical on Mondays (long-term macro doesn't change daily)
+    if now.weekday() == 0:  # Monday
+        await refresh_cyclical_bias()
 
 
 async def start_scheduler():
