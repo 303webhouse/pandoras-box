@@ -135,6 +135,7 @@ from api.btc_signals import router as btc_signals_router
 from api.flow import router as flow_router
 from api.dollar_smile import router as dollar_smile_router
 from api.sector_rotation import router as sector_rotation_router
+from api.market_indicators import router as market_indicators_router
 from api.hybrid_scanner import router as hybrid_scanner_router
 from api.bias_scheduler import router as bias_scheduler_router
 
@@ -149,6 +150,7 @@ app.include_router(btc_signals_router, prefix="/api", tags=["btc-signals"])
 app.include_router(flow_router, prefix="/api", tags=["options-flow"])
 app.include_router(dollar_smile_router, prefix="/api", tags=["dollar-smile"])
 app.include_router(sector_rotation_router, prefix="/api", tags=["sector-rotation"])
+app.include_router(market_indicators_router, prefix="/api", tags=["market-indicators"])
 app.include_router(bias_scheduler_router, prefix="/api", tags=["bias-scheduler"])
 app.include_router(hybrid_scanner_router, prefix="/api", tags=["hybrid-scanner"])
 

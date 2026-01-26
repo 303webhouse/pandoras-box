@@ -296,17 +296,20 @@ async def refresh_daily_bias() -> Dict[str, Any]:
 
 async def refresh_weekly_bias() -> Dict[str, Any]:
     """
-    Refresh weekly bias based on MULTI-FACTOR analysis:
+    Refresh weekly bias based on 6-FACTOR analysis:
     1. Index Technicals (SPY, QQQ, IWM, DIA weekly signals)
     2. Dollar Smile (DXY + VIX macro regime)
     3. Sector Rotation (Offensive vs Defensive sectors)
+    4. Credit Spreads (HYG vs TLT - risk appetite)
+    5. Market Breadth (RSP vs SPY - participation)
+    6. VIX Term Structure (VIX vs VIX3M - sentiment)
     
-    Each factor votes: bullish (+1), neutral (0), bearish (-1)
+    Each factor votes: -2 to +2
     Final bias is aggregate of all votes.
     
     Scheduled: 9:45 AM ET every Monday
     """
-    logger.info("📊 Refreshing Weekly Bias (Multi-Factor)...")
+    logger.info("📊 Refreshing Weekly Bias (6-Factor Model)...")
     
     factor_votes = []  # List of (factor_name, vote, details)
     
@@ -386,26 +389,78 @@ async def refresh_weekly_bias() -> Dict[str, Any]:
         logger.warning(f"Error in sector rotation factor: {e}")
         factor_votes.append(("sector_rotation", 0, {"error": str(e)}))
     
+    # ========== FACTOR 4: Credit Spreads ==========
+    try:
+        from bias_filters.credit_spreads import auto_fetch_and_update as fetch_credit_spreads, get_bias_for_scoring as get_credit_bias
+        
+        await fetch_credit_spreads()
+        credit_spreads = get_credit_bias()
+        cs_level = credit_spreads.get("bias_level", 3)
+        
+        cs_vote = cs_level - 3
+        factor_votes.append(("credit_spreads", cs_vote, {"bias_level": cs_level, "bias": credit_spreads.get("bias")}))
+        
+        logger.info(f"  💳 Credit Spreads: {credit_spreads.get('bias')} (level {cs_level})")
+        
+    except Exception as e:
+        logger.warning(f"Error in credit spreads factor: {e}")
+        factor_votes.append(("credit_spreads", 0, {"error": str(e)}))
+    
+    # ========== FACTOR 5: Market Breadth ==========
+    try:
+        from bias_filters.market_breadth import auto_fetch_and_update as fetch_market_breadth, get_bias_for_scoring as get_breadth_bias
+        
+        await fetch_market_breadth()
+        market_breadth = get_breadth_bias()
+        mb_level = market_breadth.get("bias_level", 3)
+        
+        mb_vote = mb_level - 3
+        factor_votes.append(("market_breadth", mb_vote, {"bias_level": mb_level, "bias": market_breadth.get("bias")}))
+        
+        logger.info(f"  📊 Market Breadth: {market_breadth.get('bias')} (level {mb_level})")
+        
+    except Exception as e:
+        logger.warning(f"Error in market breadth factor: {e}")
+        factor_votes.append(("market_breadth", 0, {"error": str(e)}))
+    
+    # ========== FACTOR 6: VIX Term Structure ==========
+    try:
+        from bias_filters.vix_term_structure import auto_fetch_and_update as fetch_vix_term, get_bias_for_scoring as get_vix_term_bias
+        
+        await fetch_vix_term()
+        vix_term = get_vix_term_bias()
+        vt_level = vix_term.get("bias_level", 3)
+        
+        vt_vote = vt_level - 3
+        factor_votes.append(("vix_term_structure", vt_vote, {"bias_level": vt_level, "bias": vix_term.get("bias")}))
+        
+        logger.info(f"  📉 VIX Term Structure: {vix_term.get('bias')} (level {vt_level})")
+        
+    except Exception as e:
+        logger.warning(f"Error in VIX term structure factor: {e}")
+        factor_votes.append(("vix_term_structure", 0, {"error": str(e)}))
+    
     # ========== AGGREGATE VOTES ==========
     total_vote = sum(v[1] for v in factor_votes)
     max_possible = len(factor_votes) * 2  # Each factor can vote -2 to +2
     
     # Map total vote to bias level
-    # Range: -6 to +6 for 3 factors
-    if total_vote >= 4:
+    # Range: -12 to +12 for 6 factors
+    # Thresholds adjusted for 6 factors
+    if total_vote >= 6:
         new_level = "TORO_MAJOR"
-    elif total_vote >= 2:
+    elif total_vote >= 3:
         new_level = "TORO_MINOR"
-    elif total_vote <= -4:
+    elif total_vote <= -6:
         new_level = "URSA_MAJOR"
-    elif total_vote <= -2:
+    elif total_vote <= -3:
         new_level = "URSA_MINOR"
     else:
         new_level = "NEUTRAL"
     
     # Build details
     details = {
-        "source": "multi_factor_weekly",
+        "source": "6_factor_weekly",
         "total_vote": total_vote,
         "max_possible": max_possible,
         "factors": {name: {"vote": vote, "details": det} for name, vote, det in factor_votes}
