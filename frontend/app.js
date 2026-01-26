@@ -557,7 +557,7 @@ function updateBiasWithTrend(timeframe, biasData) {
         return;
     }
     
-    const level = biasData.level || 'NEUTRAL';
+    const level = biasData.level || 'LEAN_TORO';
     const trend = biasData.trend || 'NEW';
     const previousLevel = biasData.previous_level;
     const timestamp = biasData.timestamp;
@@ -1391,7 +1391,7 @@ async function loadBiasDataFallback() {
             const detailsElement = document.getElementById(`${tfLower}Details`);
             
             if (levelElement) {
-                const level = data.level || 'NEUTRAL';
+                const level = data.level || 'LEAN_TORO';
                 levelElement.textContent = level.replace('_', ' ');
                 
                 if (container) {
@@ -1401,7 +1401,7 @@ async function loadBiasDataFallback() {
                     } else if (level.includes('URSA')) {
                         container.classList.add('bearish');
                     } else {
-                        container.classList.add('neutral');
+                        container.classList.add('bullish');  // Default to bullish in 6-level system
                     }
                 }
             }
@@ -1430,7 +1430,7 @@ async function loadCyclicalBiasFallback() {
         
         if (result.status === 'success' && result.data) {
             const data = result.data;
-            const bias = data.level || 'NEUTRAL';
+            const bias = data.level || 'LEAN_TORO';
             
             if (levelElement) {
                 levelElement.textContent = bias.replace('_', ' ');
