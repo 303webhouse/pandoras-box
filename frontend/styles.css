@@ -156,6 +156,173 @@ body {
     font-size: 14px;
 }
 
+/* Bias Flow Divider */
+.bias-flow-divider {
+    width: 1px;
+    height: 20px;
+    background: var(--border-color);
+    margin: 0 12px;
+}
+
+/* Personal Bias Control */
+.personal-bias-control {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.personal-bias-label {
+    font-size: 11px;
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+.personal-bias-select {
+    background: var(--card-bg);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.personal-bias-select:focus {
+    outline: none;
+    border-color: var(--accent-teal);
+}
+
+.personal-bias-select option[value="TORO"] {
+    color: var(--accent-lime);
+}
+
+.personal-bias-select option[value="URSA"] {
+    color: var(--accent-orange);
+}
+
+/* Override Control */
+.bias-override-control {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: 8px;
+}
+
+.override-label {
+    font-size: 11px;
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+.override-toggle {
+    background: var(--card-bg);
+    color: var(--text-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 4px 10px;
+    font-size: 10px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.override-toggle[data-active="true"] {
+    background: var(--accent-teal);
+    color: var(--dark-bg);
+    border-color: var(--accent-teal);
+}
+
+.override-toggle:hover {
+    border-color: var(--accent-teal);
+}
+
+.override-direction-select {
+    background: var(--card-bg);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.override-direction-select:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.override-direction-select:focus {
+    outline: none;
+    border-color: var(--accent-teal);
+}
+
+.override-direction-select option[value="TORO_MAJOR"] {
+    color: var(--accent-lime);
+}
+
+.override-direction-select option[value="URSA_MAJOR"] {
+    color: var(--accent-orange);
+}
+
+/* Override Active State - Visual Indicator */
+.bias-section.override-active .bias-card {
+    opacity: 0.6;
+    pointer-events: none;
+}
+
+.bias-section.override-active .bias-hierarchy-flow {
+    border: 2px solid var(--accent-teal);
+    background: rgba(20, 184, 166, 0.1);
+}
+
+/* Override Banner */
+.override-active-banner {
+    display: none;
+    background: linear-gradient(90deg, var(--accent-teal), #0d9488);
+    color: var(--dark-bg);
+    padding: 8px 16px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 700;
+    text-align: center;
+    margin-top: 8px;
+    animation: pulse-glow 2s infinite;
+}
+
+.bias-section.override-active .override-active-banner {
+    display: block;
+}
+
+@keyframes pulse-glow {
+    0%, 100% { box-shadow: 0 0 5px var(--accent-teal); }
+    50% { box-shadow: 0 0 15px var(--accent-teal); }
+}
+
+/* Personal Bias Badge on Bias Cards */
+.personal-bias-badge {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    font-size: 9px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 3px;
+    background: rgba(20, 184, 166, 0.2);
+    color: var(--accent-teal);
+}
+
+.personal-bias-badge.toro {
+    background: rgba(124, 255, 107, 0.2);
+    color: var(--accent-lime);
+}
+
+.personal-bias-badge.ursa {
+    background: rgba(255, 107, 53, 0.2);
+    color: var(--accent-orange);
+}
+
 /* Bias Cards Container */
 .bias-section > .bias-card:first-of-type {
     margin-top: 0;
@@ -964,6 +1131,42 @@ body {
     font-weight: 700;
     font-size: 13px;
     margin-top: 2px;
+}
+
+/* Signal Bias Alignment Indicator */
+.signal-bias-indicator {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 8px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 600;
+}
+
+.signal-bias-indicator.bias-aligned {
+    background: rgba(124, 255, 107, 0.1);
+    color: var(--accent-lime);
+}
+
+.signal-bias-indicator.bias-misaligned {
+    background: rgba(255, 107, 53, 0.1);
+    color: var(--accent-orange);
+}
+
+.signal-bias-indicator .bias-icon {
+    font-size: 12px;
+}
+
+/* Signal Card Bias State */
+.signal-card.bias-misaligned {
+    opacity: 0.7;
+    border-left-style: dashed;
+}
+
+.signal-card.bias-misaligned:hover {
+    opacity: 1;
 }
 
 .signal-actions {
