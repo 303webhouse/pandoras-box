@@ -56,6 +56,11 @@ let cyclicalBiasFactorStates = {
     sahm_rule: true
 };
 
+// Personal Bias & Override State
+let personalBias = 'NEUTRAL';  // NEUTRAL, TORO, URSA
+let biasOverrideActive = false;
+let biasOverrideDirection = 'TORO_MAJOR';  // TORO_MAJOR or URSA_MAJOR
+
 // Initialize app
 document.addEventListener('DOMContentLoaded', () => {
     initTradingViewWidget();
@@ -316,6 +321,9 @@ function initEventListeners() {
     initWeeklyBiasSettings();
     initDailyBiasSettings();
     initCyclicalBiasSettings();
+    
+    // Personal Bias & Override Controls
+    initPersonalBiasControls();
 }
 
 // Data Loading
@@ -967,6 +975,214 @@ function initCyclicalBiasSettings() {
     }
 }
 
+// =========================================================================
+// PERSONAL BIAS & OVERRIDE CONTROLS
+// =========================================================================
+
+function initPersonalBiasControls() {
+    const personalBiasSelector = document.getElementById('personalBiasSelector');
+    const overrideToggle = document.getElementById('biasOverrideToggle');
+    const overrideDirectionSelector = document.getElementById('overrideDirectionSelector');
+    const biasSection = document.querySelector('.bias-section');
+    
+    if (!personalBiasSelector || !overrideToggle) {
+        console.warn('Personal bias control elements not found');
+        return;
+    }
+    
+    // Load saved states from localStorage
+    loadPersonalBiasState();
+    
+    // Personal Bias Selector
+    personalBiasSelector.addEventListener('change', (e) => {
+        personalBias = e.target.value;
+        savePersonalBiasState();
+        applyPersonalBiasToCards();
+        console.log(`Personal bias set to: ${personalBias}`);
+    });
+    
+    // Override Toggle
+    overrideToggle.addEventListener('click', () => {
+        biasOverrideActive = !biasOverrideActive;
+        overrideToggle.dataset.active = biasOverrideActive.toString();
+        overrideToggle.textContent = biasOverrideActive ? 'ON' : 'OFF';
+        overrideDirectionSelector.disabled = !biasOverrideActive;
+        
+        // Update UI state
+        if (biasSection) {
+            biasSection.classList.toggle('override-active', biasOverrideActive);
+        }
+        
+        // Update override banner
+        updateOverrideBanner();
+        
+        savePersonalBiasState();
+        
+        // Re-render signals with new bias state
+        if (typeof renderSignals === 'function') {
+            renderSignals();
+        }
+        
+        console.log(`Bias override: ${biasOverrideActive ? 'ACTIVE' : 'INACTIVE'} - ${biasOverrideDirection}`);
+    });
+    
+    // Override Direction Selector
+    overrideDirectionSelector.addEventListener('change', (e) => {
+        biasOverrideDirection = e.target.value;
+        updateOverrideBanner();
+        savePersonalBiasState();
+        
+        // Re-render signals with new bias
+        if (typeof renderSignals === 'function') {
+            renderSignals();
+        }
+        
+        console.log(`Override direction set to: ${biasOverrideDirection}`);
+    });
+    
+    // Apply initial state
+    applyPersonalBiasToCards();
+    updateOverrideBanner();
+}
+
+function loadPersonalBiasState() {
+    try {
+        const saved = localStorage.getItem('personalBiasState');
+        if (saved) {
+            const state = JSON.parse(saved);
+            personalBias = state.personalBias || 'NEUTRAL';
+            biasOverrideActive = state.biasOverrideActive || false;
+            biasOverrideDirection = state.biasOverrideDirection || 'TORO_MAJOR';
+        }
+        
+        // Apply to UI elements
+        const personalBiasSelector = document.getElementById('personalBiasSelector');
+        const overrideToggle = document.getElementById('biasOverrideToggle');
+        const overrideDirectionSelector = document.getElementById('overrideDirectionSelector');
+        const biasSection = document.querySelector('.bias-section');
+        
+        if (personalBiasSelector) personalBiasSelector.value = personalBias;
+        if (overrideToggle) {
+            overrideToggle.dataset.active = biasOverrideActive.toString();
+            overrideToggle.textContent = biasOverrideActive ? 'ON' : 'OFF';
+        }
+        if (overrideDirectionSelector) {
+            overrideDirectionSelector.value = biasOverrideDirection;
+            overrideDirectionSelector.disabled = !biasOverrideActive;
+        }
+        if (biasSection) {
+            biasSection.classList.toggle('override-active', biasOverrideActive);
+        }
+        
+    } catch (e) {
+        console.error('Error loading personal bias state:', e);
+    }
+}
+
+function savePersonalBiasState() {
+    try {
+        localStorage.setItem('personalBiasState', JSON.stringify({
+            personalBias,
+            biasOverrideActive,
+            biasOverrideDirection
+        }));
+    } catch (e) {
+        console.error('Error saving personal bias state:', e);
+    }
+}
+
+function applyPersonalBiasToCards() {
+    // Remove existing badges
+    document.querySelectorAll('.personal-bias-badge').forEach(b => b.remove());
+    
+    if (personalBias === 'NEUTRAL') return;
+    
+    // Add badge to each bias card
+    const biasCards = document.querySelectorAll('.bias-card');
+    biasCards.forEach(card => {
+        const badge = document.createElement('span');
+        badge.className = `personal-bias-badge ${personalBias.toLowerCase()}`;
+        badge.textContent = personalBias === 'TORO' ? '+1 Personal' : '-1 Personal';
+        badge.title = `Your personal ${personalBias} bias adds ${personalBias === 'TORO' ? '+1' : '-1'} to the score`;
+        card.appendChild(badge);
+    });
+}
+
+function updateOverrideBanner() {
+    const banner = document.getElementById('overrideActiveBanner');
+    const biasDisplay = document.getElementById('overrideBiasDisplay');
+    
+    if (banner && biasDisplay) {
+        biasDisplay.textContent = biasOverrideDirection.replace('_', ' ');
+    }
+}
+
+/**
+ * Get the effective bias for trade filtering
+ * When override is active, returns the override direction
+ * Otherwise, returns the calculated bias with personal bias modifier
+ */
+function getEffectiveTradingBias() {
+    if (biasOverrideActive) {
+        return {
+            level: biasOverrideDirection,
+            isOverride: true,
+            personalBias: personalBias
+        };
+    }
+    
+    // Get current daily bias (or use NEUTRAL if not loaded)
+    const dailyLevel = dailyBiasFullData?.level || 'NEUTRAL';
+    const weeklyLevel = weeklyBiasFullData?.level || 'NEUTRAL';
+    const cyclicalLevel = cyclicalBiasFullData?.level || 'NEUTRAL';
+    
+    // Calculate composite score
+    let compositeScore = getBiasValue(dailyLevel);
+    
+    // Add personal bias modifier
+    if (personalBias === 'TORO') {
+        compositeScore += 1;
+    } else if (personalBias === 'URSA') {
+        compositeScore -= 1;
+    }
+    
+    // Clamp to valid range
+    compositeScore = Math.max(1, Math.min(5, compositeScore));
+    
+    // Convert back to level name
+    const levelMap = {5: 'TORO_MAJOR', 4: 'TORO_MINOR', 3: 'NEUTRAL', 2: 'URSA_MINOR', 1: 'URSA_MAJOR'};
+    const effectiveLevel = levelMap[compositeScore] || 'NEUTRAL';
+    
+    return {
+        level: effectiveLevel,
+        rawDaily: dailyLevel,
+        rawWeekly: weeklyLevel,
+        rawCyclical: cyclicalLevel,
+        isOverride: false,
+        personalBias: personalBias,
+        personalModifier: personalBias === 'NEUTRAL' ? 0 : (personalBias === 'TORO' ? 1 : -1)
+    };
+}
+
+/**
+ * Check if a trade signal aligns with current bias
+ * Used by Trade Ideas filtering
+ */
+function isSignalAlignedWithBias(signalDirection) {
+    const bias = getEffectiveTradingBias();
+    const biasValue = getBiasValue(bias.level);
+    
+    if (signalDirection === 'LONG') {
+        // LONG signals align with bullish bias (>= 3)
+        return biasValue >= 3;
+    } else if (signalDirection === 'SHORT') {
+        // SHORT signals align with bearish bias (<= 3)
+        return biasValue <= 3;
+    }
+    
+    return true; // Unknown direction, allow
+}
+
 // Generic function to load factor states into any modal
 function loadFactorStatesIntoModal(timeframe, factorStates, fullData) {
     try {
@@ -1254,8 +1470,17 @@ function renderSignals() {
 function createSignalCard(signal) {
     const typeLabel = signal.signal_type.replace('_', ' ');
     
+    // Check bias alignment
+    const bias = getEffectiveTradingBias();
+    const isAligned = isSignalAlignedWithBias(signal.direction);
+    const biasAlignmentClass = isAligned ? 'bias-aligned' : 'bias-misaligned';
+    const biasAlignmentIcon = isAligned ? '✓' : '⚠';
+    const biasAlignmentText = bias.isOverride 
+        ? `Override: ${bias.level.replace('_', ' ')}` 
+        : `Bias: ${bias.level.replace('_', ' ')}`;
+    
     return `
-        <div class="signal-card ${signal.signal_type}" data-signal-id="${signal.signal_id}" data-signal='${JSON.stringify(signal)}'>
+        <div class="signal-card ${signal.signal_type} ${biasAlignmentClass}" data-signal-id="${signal.signal_id}" data-signal='${JSON.stringify(signal)}'>
             <div class="signal-header">
                 <div>
                     <div class="signal-type ${signal.signal_type}">${typeLabel}</div>
@@ -1292,6 +1517,11 @@ function createSignalCard(signal) {
                     <div class="signal-detail-label">Score</div>
                     <div class="signal-detail-value">${signal.score}</div>
                 </div>
+            </div>
+            
+            <div class="signal-bias-indicator ${biasAlignmentClass}" title="${biasAlignmentText}">
+                <span class="bias-icon">${biasAlignmentIcon}</span>
+                <span class="bias-text">${isAligned ? 'Aligned' : 'Counter-bias'}</span>
             </div>
             
             <div class="signal-actions">
