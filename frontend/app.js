@@ -654,23 +654,28 @@ function updateWeeklyBiasWithFactors(biasData) {
         }
     });
     
-    // Scale thresholds based on number of enabled factors
-    // Original: ±6 (major), ±3 (minor) for 6 factors
+    // 6-level system thresholds (scaled by enabled factors)
     const totalFactors = 6;
     const scaleFactor = enabledCount / totalFactors;
-    const majorThreshold = Math.round(6 * scaleFactor);
+    const majorThreshold = Math.round(7 * scaleFactor);
     const minorThreshold = Math.round(3 * scaleFactor);
     
-    // Determine bias level
-    let newLevel = 'NEUTRAL';
+    // 6-level system: MAJOR_TORO, MINOR_TORO, LEAN_TORO, LEAN_URSA, MINOR_URSA, MAJOR_URSA
+    let newLevel;
     if (filteredVote >= majorThreshold) {
-        newLevel = 'TORO_MAJOR';
+        newLevel = 'MAJOR_TORO';
     } else if (filteredVote >= minorThreshold) {
-        newLevel = 'TORO_MINOR';
-    } else if (filteredVote <= -majorThreshold) {
-        newLevel = 'URSA_MAJOR';
-    } else if (filteredVote <= -minorThreshold) {
-        newLevel = 'URSA_MINOR';
+        newLevel = 'MINOR_TORO';
+    } else if (filteredVote > 0) {
+        newLevel = 'LEAN_TORO';
+    } else if (filteredVote === 0) {
+        newLevel = 'LEAN_TORO';  // Default bullish for ties
+    } else if (filteredVote > -minorThreshold) {
+        newLevel = 'LEAN_URSA';
+    } else if (filteredVote > -majorThreshold) {
+        newLevel = 'MINOR_URSA';
+    } else {
+        newLevel = 'MAJOR_URSA';
     }
     
     // Create modified bias data for display
@@ -772,20 +777,28 @@ function updateDailyBiasWithFactors(biasData) {
         }
     });
     
+    // 6-level system thresholds (scaled by enabled factors)
     const totalFactors = 6;
     const scaleFactor = enabledCount / totalFactors;
-    const majorThreshold = Math.round(6 * scaleFactor);
+    const majorThreshold = Math.round(7 * scaleFactor);
     const minorThreshold = Math.round(3 * scaleFactor);
     
-    let newLevel = 'NEUTRAL';
+    // 6-level system: MAJOR_TORO, MINOR_TORO, LEAN_TORO, LEAN_URSA, MINOR_URSA, MAJOR_URSA
+    let newLevel;
     if (filteredVote >= majorThreshold) {
-        newLevel = 'TORO_MAJOR';
+        newLevel = 'MAJOR_TORO';
     } else if (filteredVote >= minorThreshold) {
-        newLevel = 'TORO_MINOR';
-    } else if (filteredVote <= -majorThreshold) {
-        newLevel = 'URSA_MAJOR';
-    } else if (filteredVote <= -minorThreshold) {
-        newLevel = 'URSA_MINOR';
+        newLevel = 'MINOR_TORO';
+    } else if (filteredVote > 0) {
+        newLevel = 'LEAN_TORO';
+    } else if (filteredVote === 0) {
+        newLevel = 'LEAN_TORO';  // Default bullish for ties
+    } else if (filteredVote > -minorThreshold) {
+        newLevel = 'LEAN_URSA';
+    } else if (filteredVote > -majorThreshold) {
+        newLevel = 'MINOR_URSA';
+    } else {
+        newLevel = 'MAJOR_URSA';
     }
     
     const modifiedBiasData = {
@@ -817,20 +830,28 @@ function updateCyclicalBiasWithFactors(biasData) {
         }
     });
     
+    // 6-level system thresholds (scaled by enabled factors)
     const totalFactors = 6;
     const scaleFactor = enabledCount / totalFactors;
-    const majorThreshold = Math.round(6 * scaleFactor);
+    const majorThreshold = Math.round(7 * scaleFactor);
     const minorThreshold = Math.round(3 * scaleFactor);
     
-    let newLevel = 'NEUTRAL';
+    // 6-level system: MAJOR_TORO, MINOR_TORO, LEAN_TORO, LEAN_URSA, MINOR_URSA, MAJOR_URSA
+    let newLevel;
     if (filteredVote >= majorThreshold) {
-        newLevel = 'TORO_MAJOR';
+        newLevel = 'MAJOR_TORO';
     } else if (filteredVote >= minorThreshold) {
-        newLevel = 'TORO_MINOR';
-    } else if (filteredVote <= -majorThreshold) {
-        newLevel = 'URSA_MAJOR';
-    } else if (filteredVote <= -minorThreshold) {
-        newLevel = 'URSA_MINOR';
+        newLevel = 'MINOR_TORO';
+    } else if (filteredVote > 0) {
+        newLevel = 'LEAN_TORO';
+    } else if (filteredVote === 0) {
+        newLevel = 'LEAN_TORO';  // Default bullish for ties
+    } else if (filteredVote > -minorThreshold) {
+        newLevel = 'LEAN_URSA';
+    } else if (filteredVote > -majorThreshold) {
+        newLevel = 'MINOR_URSA';
+    } else {
+        newLevel = 'MAJOR_URSA';
     }
     
     const modifiedBiasData = {
