@@ -213,6 +213,8 @@ function handleWebSocketMessage(message) {
             break;
         case 'BIAS_UPDATE':
             updateBias(message.data);
+            // Also refresh shift status when bias updates
+            fetchBiasShiftStatus();
             break;
         case 'POSITION_UPDATE':
             updatePosition(message.data);
@@ -278,6 +280,11 @@ async function loadInitialData() {
         loadBiasData(),
         loadOpenPositions()
     ]);
+    
+    // Set up auto-refresh for bias shift status every 5 minutes
+    setInterval(() => {
+        fetchBiasShiftStatus();
+    }, 5 * 60 * 1000); // 5 minutes
 }
 
 async function loadSignals() {
@@ -326,6 +333,9 @@ async function loadBiasData() {
     
     // Load Dollar Smile macro bias
     await loadDollarSmile();
+    
+    // Load shift status for weekly bias
+    await fetchBiasShiftStatus();
 }
 
 function updateBiasWithTrend(timeframe, biasData) {
@@ -343,9 +353,14 @@ function updateBiasWithTrend(timeframe, biasData) {
     const previousLevel = biasData.previous_level;
     const timestamp = biasData.timestamp;
     
-    // Update level display
+    // Update level display (preserve shift indicator if it exists, only for weekly)
     if (levelElement) {
+        const shiftIndicator = (timeframe === 'weekly') ? levelElement.querySelector('.bias-shift-indicator') : null;
         levelElement.textContent = level.replace('_', ' ');
+        // Re-add shift indicator if it existed (for weekly bias)
+        if (shiftIndicator && timeframe === 'weekly') {
+            levelElement.appendChild(shiftIndicator);
+        }
     }
     
     // Update container styling
@@ -400,6 +415,87 @@ function updateBiasWithTrend(timeframe, biasData) {
             ${timeStr ? `<br><small>Updated: ${timeStr}</small>` : ''}
         `;
     }
+}
+
+// Fetch and display bias shift status (weekly bias shift from Monday baseline)
+async function fetchBiasShiftStatus() {
+    try {
+        const response = await fetch(`${API_URL}/bias-auto/shift-status`);
+        const data = await response.json();
+        if (data.status === 'success') {
+            updateBiasShiftDisplay(data.data);
+        }
+    } catch (error) {
+        console.error('Error fetching bias shift:', error);
+    }
+}
+
+// Update weekly bias display with shift indicator
+function updateBiasShiftDisplay(shiftData) {
+    const weeklyLevelElement = document.getElementById('weeklyLevel');
+    const weeklyDetailsElement = document.getElementById('weeklyDetails');
+    
+    if (!shiftData || !weeklyLevelElement) {
+        return;
+    }
+    
+    // Remove any existing shift indicator
+    const existingIndicator = weeklyLevelElement.querySelector('.bias-shift-indicator');
+    if (existingIndicator) {
+        existingIndicator.remove();
+    }
+    
+    // Check if we have baseline data
+    if (!shiftData.has_baseline) {
+        // No baseline yet - don't show indicator
+        return;
+    }
+    
+    const shiftDirection = shiftData.shift_direction || 'STABLE';
+    const delta = shiftData.delta || 0;
+    
+    // Determine icon and class based on shift direction
+    let shiftIcon = '';
+    let shiftClass = '';
+    let shiftText = '';
+    
+    switch (shiftDirection) {
+        case 'IMPROVING':
+        case 'STRONGLY_IMPROVING':
+            shiftIcon = '▲';
+            shiftClass = 'bias-shift-improving';
+            shiftText = shiftDirection === 'STRONGLY_IMPROVING' ? 'strongly improving' : 'improving';
+            break;
+        case 'DETERIORATING':
+        case 'STRONGLY_DETERIORATING':
+            shiftIcon = '▼';
+            shiftClass = 'bias-shift-deteriorating';
+            shiftText = shiftDirection === 'STRONGLY_DETERIORATING' ? 'strongly deteriorating' : 'deteriorating';
+            break;
+        case 'STABLE':
+        default:
+            shiftIcon = '—';
+            shiftClass = 'bias-shift-stable';
+            shiftText = 'stable';
+            break;
+    }
+    
+    // Create shift indicator element
+    const shiftIndicator = document.createElement('span');
+    shiftIndicator.className = `bias-shift-indicator ${shiftClass}`;
+    
+    // Add strong class for STRONGLY_* states
+    if (shiftDirection === 'STRONGLY_IMPROVING' || shiftDirection === 'STRONGLY_DETERIORATING') {
+        shiftIndicator.classList.add('bias-shift-strong');
+    }
+    
+    // Format delta (always show sign)
+    const deltaSign = delta >= 0 ? '+' : '';
+    shiftIndicator.innerHTML = `${shiftIcon} ${deltaSign}${delta}`;
+    shiftIndicator.title = `Shift: ${shiftText} (${deltaSign}${delta} from Monday baseline)`;
+    
+    // Append to level element (inline with bias level)
+    weeklyLevelElement.appendChild(shiftIndicator);
 }
 
 async function loadBiasDataFallback() {
