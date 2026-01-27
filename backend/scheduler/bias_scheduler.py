@@ -1167,9 +1167,12 @@ async def refresh_cyclical_bias() -> Dict[str, Any]:
         scanner = get_scanner()
         
         # =====================================================================
-        # FACTOR 1: 200 SMA Positions (SPY, QQQ, IWM)
+        # FACTOR 1: 200 SMA Positions (SPY, QQQ, IWM) using yfinance
         # =====================================================================
         try:
+            import yfinance as yf
+            import pandas as pd
+            
             indices = ["SPY", "QQQ", "IWM"]
             above_200sma = 0
             below_200sma = 0
@@ -1177,13 +1180,14 @@ async def refresh_cyclical_bias() -> Dict[str, Any]:
             
             for ticker in indices:
                 try:
-                    tech = scanner.get_technical_analysis(ticker, interval="1D")
-                    # Get close price and SMA200 value directly
-                    close_price = tech.get("price", {}).get("close", 0)
-                    ma_data = tech.get("moving_averages", {})
-                    sma200_value = ma_data.get("sma200", 0)
+                    # Use yfinance for reliable 200 SMA calculation
+                    stock = yf.Ticker(ticker)
+                    hist = stock.history(period="1y")  # Need ~200 days of data
                     
-                    if close_price and sma200_value and close_price > 0 and sma200_value > 0:
+                    if len(hist) >= 200:
+                        close_price = float(hist['Close'].iloc[-1])
+                        sma200_value = float(hist['Close'].tail(200).mean())
+                        
                         if close_price > sma200_value:
                             above_200sma += 1
                             sma_details[ticker] = f"above (${close_price:.2f} > ${sma200_value:.2f})"
@@ -1191,7 +1195,7 @@ async def refresh_cyclical_bias() -> Dict[str, Any]:
                             below_200sma += 1
                             sma_details[ticker] = f"below (${close_price:.2f} < ${sma200_value:.2f})"
                     else:
-                        sma_details[ticker] = f"no data (close={close_price}, sma200={sma200_value})"
+                        sma_details[ticker] = f"insufficient data ({len(hist)} days)"
                 except Exception as e:
                     logger.warning(f"Error getting 200 SMA for {ticker}: {e}")
                     sma_details[ticker] = f"error: {str(e)}"
