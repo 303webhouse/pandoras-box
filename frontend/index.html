@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Pandora's Box - Real-time Trading Signal Dashboard">
     <title>Pandora's Box</title>
-    <link rel="stylesheet" href="styles.css?v=24">
+    <link rel="stylesheet" href="styles.css?v=25">
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#0a0e27">
 </head>
@@ -192,8 +192,46 @@
                         <button class="analyzer-btn" id="analyzeTickerBtn">Analyze</button>
                     </div>
                 </div>
+                
+                <!-- Integrated Gauges (Technical + Analyst + Combined) -->
+                <div class="analyzer-gauges" id="analyzerGauges" style="display: none;">
+                    <div class="gauge-card technical-gauge" id="technicalGauge">
+                        <h3>📊 Technical</h3>
+                        <div class="gauge-signal" id="techSignal">--</div>
+                        <div class="gauge-score" id="techScore">
+                            <span class="buy-count">-- Buy</span> / 
+                            <span class="sell-count">-- Sell</span>
+                        </div>
+                        <div class="gauge-details" id="techDetails">
+                            <div>Oscillators: <span id="techOsc">--</span></div>
+                            <div>Moving Avgs: <span id="techMA">--</span></div>
+                        </div>
+                    </div>
+                    <div class="gauge-card analyst-gauge" id="analystGauge">
+                        <h3>🏦 Analyst</h3>
+                        <div class="gauge-signal" id="analystSignal">--</div>
+                        <div class="gauge-score" id="analystScore">
+                            <span class="analyst-count">-- analysts</span>
+                        </div>
+                        <div class="gauge-details" id="analystDetails">
+                            <div>Target: <span id="priceTarget">$--</span></div>
+                            <div>Upside: <span id="analystUpside">--%</span></div>
+                        </div>
+                    </div>
+                    <div class="gauge-card combined-gauge" id="combinedGauge">
+                        <h3>⚡ Combined</h3>
+                        <div class="gauge-signal" id="combinedSignal">--</div>
+                        <div class="gauge-score" id="combinedScore">Score: --/5</div>
+                        <div class="gauge-details" id="tickerMeta">
+                            <div id="tickerName">--</div>
+                            <div id="tickerSector">--</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Hunter Criteria Results -->
                 <div class="analyzer-results" id="analyzerResults">
-                    <p class="empty-state">Enter a ticker to see Hunter criteria breakdown</p>
+                    <p class="empty-state">Enter a ticker to analyze</p>
                 </div>
             </div>
         </section>
@@ -252,60 +290,15 @@
             </div>
         </section>
 
-        <!-- Hybrid Market Scanner (Technical + Fundamental) -->
+        <!-- Hybrid Market Scanner (Batch Scan Results) -->
         <section class="hybrid-scanner-section">
             <div class="hybrid-header">
-                <h2>📡 HYBRID SCANNER</h2>
+                <h2>📡 HYBRID BATCH SCANNER</h2>
                 <div class="hybrid-controls">
-                    <input type="text" id="hybridTickerInput" class="hybrid-input" placeholder="Enter ticker (e.g., NVDA)">
-                    <button class="hybrid-btn" id="hybridAnalyzeBtn">Analyze</button>
-                    <button class="hybrid-btn secondary" id="runHybridScanBtn">Scan Top 10</button>
+                    <button class="hybrid-btn" id="runHybridScanBtn">Scan Watchlist</button>
                 </div>
             </div>
-            <p class="hybrid-info">Technical (TradingView) + Fundamental (Wall Street Analysts) • Two-Gauge System</p>
-            
-            <!-- Single Ticker Analysis -->
-            <div class="hybrid-analysis" id="hybridAnalysis">
-                <div class="hybrid-gauges">
-                    <!-- Technical Gauge -->
-                    <div class="gauge-card technical-gauge" id="technicalGauge">
-                        <h3>📊 Technical Gauge</h3>
-                        <div class="gauge-signal" id="techSignal">--</div>
-                        <div class="gauge-score" id="techScore">
-                            <span class="buy-count">-- Buy</span> / 
-                            <span class="sell-count">-- Sell</span>
-                        </div>
-                        <div class="gauge-details" id="techDetails">
-                            <div>Oscillators: <span id="techOsc">--</span></div>
-                            <div>Moving Avgs: <span id="techMA">--</span></div>
-                        </div>
-                    </div>
-                    
-                    <!-- Analyst Gauge -->
-                    <div class="gauge-card analyst-gauge" id="analystGauge">
-                        <h3>🏦 Analyst Gauge</h3>
-                        <div class="gauge-signal" id="analystSignal">--</div>
-                        <div class="gauge-score" id="analystScore">
-                            <span class="analyst-count">-- analysts</span>
-                        </div>
-                        <div class="gauge-details" id="analystDetails">
-                            <div>Price Target: <span id="priceTarget">$--</span></div>
-                            <div>Upside: <span id="analystUpside">--%</span></div>
-                        </div>
-                    </div>
-                    
-                    <!-- Combined Recommendation -->
-                    <div class="gauge-card combined-gauge" id="combinedGauge">
-                        <h3>⚡ Combined</h3>
-                        <div class="gauge-signal" id="combinedSignal">--</div>
-                        <div class="gauge-score" id="combinedScore">Score: --/5</div>
-                        <div class="gauge-details" id="tickerMeta">
-                            <div id="tickerName">Enter ticker above</div>
-                            <div id="tickerSector">--</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
+            <p class="hybrid-info">Scans your watchlist with Technical + Analyst analysis</p>
             
             <!-- Scan Results Table -->
             <div class="hybrid-results" id="hybridResults" style="display: none;">
@@ -840,6 +833,6 @@
 
     <!-- TradingView Widget Script -->
     <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-    <script src="app.js?v=29"></script>
+    <script src="app.js?v=30"></script>
 </body>
 </html>
