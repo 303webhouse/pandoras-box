@@ -4660,6 +4660,67 @@ body.override-active-bearish .override-toggle[data-active="true"] {
     border-bottom-color: var(--accent-lime);
 }
 
+/* KB Info Icon (ⓘ) next to factors */
+.kb-info-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-left: 6px;
+    width: 16px;
+    height: 16px;
+    font-size: 12px;
+    color: var(--accent-teal);
+    opacity: 0.6;
+    cursor: pointer;
+    transition: all 0.2s;
+    vertical-align: middle;
+}
+
+.kb-info-icon:hover {
+    opacity: 1;
+    color: var(--accent-lime);
+    transform: scale(1.2);
+}
+
+/* KB Link (clickable text) */
+.kb-link {
+    cursor: pointer;
+    transition: all 0.2s;
+    position: relative;
+}
+
+.kb-link:hover {
+    color: var(--accent-teal);
+}
+
+.kb-link::after {
+    content: 'ⓘ';
+    font-size: 10px;
+    margin-left: 4px;
+    opacity: 0;
+    transition: opacity 0.2s;
+    color: var(--accent-teal);
+}
+
+.kb-link:hover::after {
+    opacity: 0.7;
+}
+
+/* Don't show info icon on small text */
+h2 .kb-link::after,
+h3 .kb-link::after {
+    font-size: 12px;
+}
+
+/* Bias card KB links */
+.bias-card h3 .kb-link {
+    color: inherit;
+}
+
+.bias-card h3 .kb-link:hover {
+    color: var(--accent-teal);
+}
+
 /* ============================================
    KNOWLEDGEBASE FULL PAGE STYLES
    ============================================ */
