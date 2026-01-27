@@ -128,6 +128,48 @@ async def init_database():
             )
         """)
         
+        # Add new columns to signals table for Trade Ideas enhancement
+        # These are added separately to support existing databases
+        await conn.execute("""
+            ALTER TABLE signals 
+            ADD COLUMN IF NOT EXISTS score DECIMAL(5, 2),
+            ADD COLUMN IF NOT EXISTS bias_alignment VARCHAR(20),
+            ADD COLUMN IF NOT EXISTS triggering_factors JSONB,
+            ADD COLUMN IF NOT EXISTS actual_entry_price DECIMAL(10, 2),
+            ADD COLUMN IF NOT EXISTS actual_exit_price DECIMAL(10, 2),
+            ADD COLUMN IF NOT EXISTS actual_stop_hit BOOLEAN,
+            ADD COLUMN IF NOT EXISTS trade_outcome VARCHAR(20),
+            ADD COLUMN IF NOT EXISTS loss_reason VARCHAR(50),
+            ADD COLUMN IF NOT EXISTS notes TEXT
+        """)
+        
+        # Add new columns to positions table for enhanced tracking
+        await conn.execute("""
+            ALTER TABLE positions
+            ADD COLUMN IF NOT EXISTS strategy VARCHAR(100),
+            ADD COLUMN IF NOT EXISTS asset_class VARCHAR(20),
+            ADD COLUMN IF NOT EXISTS signal_type VARCHAR(50),
+            ADD COLUMN IF NOT EXISTS bias_level VARCHAR(50),
+            ADD COLUMN IF NOT EXISTS target_2 DECIMAL(10, 2),
+            ADD COLUMN IF NOT EXISTS actual_entry_price DECIMAL(10, 2),
+            ADD COLUMN IF NOT EXISTS actual_exit_price DECIMAL(10, 2),
+            ADD COLUMN IF NOT EXISTS trade_outcome VARCHAR(20),
+            ADD COLUMN IF NOT EXISTS loss_reason VARCHAR(50),
+            ADD COLUMN IF NOT EXISTS notes TEXT,
+            ADD COLUMN IF NOT EXISTS quantity_closed INTEGER DEFAULT 0
+        """)
+        
+        # Create indexes for efficient queries
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_signals_score ON signals(score DESC NULLS LAST);
+            CREATE INDEX IF NOT EXISTS idx_signals_user_action ON signals(user_action);
+            CREATE INDEX IF NOT EXISTS idx_signals_created_at ON signals(created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_signals_ticker ON signals(ticker);
+            CREATE INDEX IF NOT EXISTS idx_signals_strategy ON signals(strategy);
+            CREATE INDEX IF NOT EXISTS idx_positions_status ON positions(status);
+            CREATE INDEX IF NOT EXISTS idx_positions_ticker ON positions(ticker);
+        """)
+        
         print("✅ Database schema initialized")
 
 async def log_signal(signal_data: Dict[Any, Any]):
@@ -234,3 +276,365 @@ async def log_tick_data(date: str, tick_high: int, tick_low: int, range_type: st
             ON CONFLICT (date) DO UPDATE 
             SET tick_high = $2, tick_low = $3, range_type = $4
         """, date, tick_high, tick_low, range_type)
+
+
+# =========================================================================
+# TRADE IDEAS QUERY FUNCTIONS
+# =========================================================================
+
+async def get_active_trade_ideas(limit: int = 10) -> List[Dict[Any, Any]]:
+    """
+    Get active trade ideas (not dismissed/selected) ordered by score.
+    Returns the top N signals for the Trade Ideas feed.
+    """
+    pool = await get_postgres_client()
+    
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT 
+                signal_id, timestamp, strategy, ticker, asset_class,
+                direction, signal_type, entry_price, stop_loss, target_1,
+                target_2, risk_reward, timeframe, bias_level, adx,
+                line_separation, score, bias_alignment, triggering_factors,
+                created_at
+            FROM signals 
+            WHERE user_action IS NULL 
+            ORDER BY score DESC NULLS LAST, created_at DESC
+            LIMIT $1
+        """, limit)
+        
+        return [dict(row) for row in rows]
+
+
+async def get_signal_queue(limit: int = 50) -> List[Dict[Any, Any]]:
+    """
+    Get the full queue of active signals (for refilling top 10).
+    Returns more signals than displayed to have a buffer for refills.
+    """
+    pool = await get_postgres_client()
+    
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT 
+                signal_id, timestamp, strategy, ticker, asset_class,
+                direction, signal_type, entry_price, stop_loss, target_1,
+                target_2, risk_reward, timeframe, bias_level, adx,
+                line_separation, score, bias_alignment, triggering_factors,
+                created_at
+            FROM signals 
+            WHERE user_action IS NULL 
+            ORDER BY score DESC NULLS LAST, created_at DESC
+            LIMIT $1
+        """, limit)
+        
+        return [dict(row) for row in rows]
+
+
+async def get_archived_signals(
+    filters: Optional[Dict[str, Any]] = None,
+    limit: int = 100,
+    offset: int = 0
+) -> Dict[str, Any]:
+    """
+    Get archived signals for backtesting analysis.
+    
+    Filters can include:
+    - ticker: Filter by specific ticker
+    - strategy: Filter by strategy name
+    - user_action: Filter by DISMISSED, SELECTED, or all
+    - trade_outcome: Filter by WIN, LOSS, BREAKEVEN
+    - start_date: Filter by date range (start)
+    - end_date: Filter by date range (end)
+    - bias_alignment: Filter by ALIGNED or COUNTER_BIAS
+    """
+    pool = await get_postgres_client()
+    filters = filters or {}
+    
+    # Build dynamic WHERE clause
+    conditions = ["user_action IS NOT NULL"]  # Only archived signals
+    params = []
+    param_idx = 1
+    
+    if filters.get('ticker'):
+        conditions.append(f"ticker = ${param_idx}")
+        params.append(filters['ticker'].upper())
+        param_idx += 1
+    
+    if filters.get('strategy'):
+        conditions.append(f"strategy = ${param_idx}")
+        params.append(filters['strategy'])
+        param_idx += 1
+    
+    if filters.get('user_action'):
+        conditions.append(f"user_action = ${param_idx}")
+        params.append(filters['user_action'])
+        param_idx += 1
+    
+    if filters.get('trade_outcome'):
+        conditions.append(f"trade_outcome = ${param_idx}")
+        params.append(filters['trade_outcome'])
+        param_idx += 1
+    
+    if filters.get('bias_alignment'):
+        conditions.append(f"bias_alignment = ${param_idx}")
+        params.append(filters['bias_alignment'])
+        param_idx += 1
+    
+    if filters.get('start_date'):
+        conditions.append(f"created_at >= ${param_idx}")
+        params.append(filters['start_date'])
+        param_idx += 1
+    
+    if filters.get('end_date'):
+        conditions.append(f"created_at <= ${param_idx}")
+        params.append(filters['end_date'])
+        param_idx += 1
+    
+    where_clause = " AND ".join(conditions)
+    
+    async with pool.acquire() as conn:
+        # Get total count for pagination
+        count_query = f"SELECT COUNT(*) FROM signals WHERE {where_clause}"
+        total_count = await conn.fetchval(count_query, *params)
+        
+        # Get paginated results
+        params.extend([limit, offset])
+        query = f"""
+            SELECT 
+                signal_id, timestamp, strategy, ticker, asset_class,
+                direction, signal_type, entry_price, stop_loss, target_1,
+                target_2, risk_reward, timeframe, bias_level, adx,
+                line_separation, score, bias_alignment, triggering_factors,
+                user_action, dismissed_at, selected_at,
+                actual_entry_price, actual_exit_price, actual_stop_hit,
+                trade_outcome, loss_reason, notes, created_at
+            FROM signals 
+            WHERE {where_clause}
+            ORDER BY created_at DESC
+            LIMIT ${param_idx} OFFSET ${param_idx + 1}
+        """
+        
+        rows = await conn.fetch(query, *params)
+        
+        return {
+            "signals": [dict(row) for row in rows],
+            "total": total_count,
+            "limit": limit,
+            "offset": offset
+        }
+
+
+async def get_signal_by_id(signal_id: str) -> Optional[Dict[Any, Any]]:
+    """Get a single signal by its ID"""
+    pool = await get_postgres_client()
+    
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("""
+            SELECT * FROM signals WHERE signal_id = $1
+        """, signal_id)
+        
+        return dict(row) if row else None
+
+
+async def update_signal_with_score(signal_id: str, score: float, bias_alignment: str, triggering_factors: Dict):
+    """Update a signal with its calculated score and bias alignment"""
+    pool = await get_postgres_client()
+    
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            UPDATE signals 
+            SET score = $2, bias_alignment = $3, triggering_factors = $4
+            WHERE signal_id = $1
+        """, signal_id, score, bias_alignment, json.dumps(triggering_factors))
+
+
+async def update_signal_outcome(
+    signal_id: str,
+    actual_entry_price: Optional[float] = None,
+    actual_exit_price: Optional[float] = None,
+    actual_stop_hit: Optional[bool] = None,
+    trade_outcome: Optional[str] = None,
+    loss_reason: Optional[str] = None,
+    notes: Optional[str] = None
+):
+    """
+    Update signal with actual trade outcome for backtesting.
+    Called when position is closed.
+    """
+    pool = await get_postgres_client()
+    
+    # Build dynamic UPDATE
+    updates = []
+    params = [signal_id]
+    param_idx = 2
+    
+    if actual_entry_price is not None:
+        updates.append(f"actual_entry_price = ${param_idx}")
+        params.append(actual_entry_price)
+        param_idx += 1
+    
+    if actual_exit_price is not None:
+        updates.append(f"actual_exit_price = ${param_idx}")
+        params.append(actual_exit_price)
+        param_idx += 1
+    
+    if actual_stop_hit is not None:
+        updates.append(f"actual_stop_hit = ${param_idx}")
+        params.append(actual_stop_hit)
+        param_idx += 1
+    
+    if trade_outcome is not None:
+        updates.append(f"trade_outcome = ${param_idx}")
+        params.append(trade_outcome)
+        param_idx += 1
+    
+    if loss_reason is not None:
+        updates.append(f"loss_reason = ${param_idx}")
+        params.append(loss_reason)
+        param_idx += 1
+    
+    if notes is not None:
+        updates.append(f"notes = ${param_idx}")
+        params.append(notes)
+        param_idx += 1
+    
+    if not updates:
+        return
+    
+    async with pool.acquire() as conn:
+        query = f"UPDATE signals SET {', '.join(updates)} WHERE signal_id = $1"
+        await conn.execute(query, *params)
+
+
+async def get_backtest_statistics(filters: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """
+    Get aggregate statistics for backtesting analysis.
+    """
+    pool = await get_postgres_client()
+    filters = filters or {}
+    
+    # Build WHERE clause
+    conditions = ["user_action = 'SELECTED'"]  # Only trades that were taken
+    params = []
+    param_idx = 1
+    
+    if filters.get('ticker'):
+        conditions.append(f"ticker = ${param_idx}")
+        params.append(filters['ticker'].upper())
+        param_idx += 1
+    
+    if filters.get('strategy'):
+        conditions.append(f"strategy = ${param_idx}")
+        params.append(filters['strategy'])
+        param_idx += 1
+    
+    if filters.get('start_date'):
+        conditions.append(f"created_at >= ${param_idx}")
+        params.append(filters['start_date'])
+        param_idx += 1
+    
+    if filters.get('end_date'):
+        conditions.append(f"created_at <= ${param_idx}")
+        params.append(filters['end_date'])
+        param_idx += 1
+    
+    where_clause = " AND ".join(conditions)
+    
+    async with pool.acquire() as conn:
+        stats = await conn.fetchrow(f"""
+            SELECT 
+                COUNT(*) as total_trades,
+                COUNT(CASE WHEN trade_outcome = 'WIN' THEN 1 END) as wins,
+                COUNT(CASE WHEN trade_outcome = 'LOSS' THEN 1 END) as losses,
+                COUNT(CASE WHEN trade_outcome = 'BREAKEVEN' THEN 1 END) as breakeven,
+                COUNT(CASE WHEN bias_alignment = 'ALIGNED' THEN 1 END) as aligned_trades,
+                COUNT(CASE WHEN bias_alignment = 'COUNTER_BIAS' THEN 1 END) as counter_bias_trades,
+                COUNT(CASE WHEN loss_reason = 'SETUP_FAILED' THEN 1 END) as setup_failures,
+                COUNT(CASE WHEN loss_reason = 'EXECUTION_ERROR' THEN 1 END) as execution_errors,
+                AVG(score) as avg_score
+            FROM signals
+            WHERE {where_clause}
+        """, *params)
+        
+        result = dict(stats) if stats else {}
+        
+        # Calculate win rate
+        total = result.get('total_trades', 0)
+        wins = result.get('wins', 0)
+        result['win_rate'] = round((wins / total * 100), 1) if total > 0 else 0
+        
+        # Calculate aligned win rate
+        aligned_stats = await conn.fetchrow(f"""
+            SELECT 
+                COUNT(*) as total,
+                COUNT(CASE WHEN trade_outcome = 'WIN' THEN 1 END) as wins
+            FROM signals
+            WHERE {where_clause} AND bias_alignment = 'ALIGNED'
+        """, *params)
+        
+        if aligned_stats:
+            aligned_total = aligned_stats['total'] or 0
+            aligned_wins = aligned_stats['wins'] or 0
+            result['aligned_win_rate'] = round((aligned_wins / aligned_total * 100), 1) if aligned_total > 0 else 0
+        
+        return result
+
+
+async def close_position_in_db(
+    position_id: int,
+    exit_price: float,
+    exit_time: datetime,
+    realized_pnl: float,
+    trade_outcome: str,
+    loss_reason: Optional[str] = None,
+    notes: Optional[str] = None
+) -> Optional[Dict[Any, Any]]:
+    """
+    Close a position in the database and log the outcome.
+    Returns the closed position data.
+    """
+    pool = await get_postgres_client()
+    
+    async with pool.acquire() as conn:
+        # Update position
+        row = await conn.fetchrow("""
+            UPDATE positions 
+            SET 
+                exit_price = $2,
+                exit_time = $3,
+                realized_pnl = $4,
+                status = 'CLOSED',
+                actual_exit_price = $2,
+                trade_outcome = $5,
+                loss_reason = $6,
+                notes = $7
+            WHERE id = $1
+            RETURNING *
+        """, position_id, exit_price, exit_time, realized_pnl, trade_outcome, loss_reason, notes)
+        
+        if row:
+            # Also update the linked signal
+            signal_id = row['signal_id']
+            await conn.execute("""
+                UPDATE signals
+                SET 
+                    actual_exit_price = $2,
+                    trade_outcome = $3,
+                    loss_reason = $4,
+                    notes = $5
+                WHERE signal_id = $1
+            """, signal_id, exit_price, trade_outcome, loss_reason, notes)
+        
+        return dict(row) if row else None
+
+
+async def get_position_by_id(position_id: int) -> Optional[Dict[Any, Any]]:
+    """Get a single position by ID"""
+    pool = await get_postgres_client()
+    
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("""
+            SELECT * FROM positions WHERE id = $1
+        """, position_id)
+        
+        return dict(row) if row else None

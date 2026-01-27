@@ -1,19 +1,27 @@
 """
 Positions API
-Manages selected trades and open positions
+Manages selected trades and open positions with comprehensive logging for backtesting.
 """
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from datetime import datetime
 import logging
+import json
 
-from database.redis_client import get_signal, delete_signal
+from database.redis_client import get_signal, delete_signal, cache_signal
 from database.postgres_client import (
     update_signal_action,
     create_position,
-    get_open_positions
+    get_open_positions,
+    get_active_trade_ideas,
+    get_archived_signals,
+    get_signal_by_id,
+    update_signal_outcome,
+    close_position_in_db,
+    get_position_by_id,
+    get_backtest_statistics
 )
 from websocket.broadcaster import manager
 
@@ -21,24 +29,55 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# In-memory position store (for quick demo - should use Redis/Postgres in production)
+# In-memory position store (synced with database on startup)
 _open_positions = []
 _closed_trades = []
 _position_counter = 1
+
+
+# =========================================================================
+# REQUEST MODELS
+# =========================================================================
 
 class SignalAction(BaseModel):
     """User action on a signal"""
     signal_id: str
     action: str  # "DISMISS" or "SELECT"
 
+class AcceptSignalRequest(BaseModel):
+    """Request to accept a signal and open a position"""
+    signal_id: str
+    actual_entry_price: float
+    quantity: float
+    stop_loss: Optional[float] = None
+    target_1: Optional[float] = None
+    target_2: Optional[float] = None
+    notes: Optional[str] = None
+
+class DismissSignalRequest(BaseModel):
+    """Request to dismiss a signal with reason"""
+    signal_id: str
+    reason: Optional[str] = None  # "NOT_ALIGNED", "MISSED_ENTRY", "TECHNICAL_CONCERN", "OTHER"
+    notes: Optional[str] = None
+
+class ClosePositionRequest(BaseModel):
+    """Request to close a position with outcome logging"""
+    position_id: int
+    exit_price: float
+    quantity_closed: Optional[float] = None  # If None, close entire position
+    trade_outcome: str  # "WIN", "LOSS", "BREAKEVEN"
+    loss_reason: Optional[str] = None  # "SETUP_FAILED", "EXECUTION_ERROR", "MARKET_CONDITIONS"
+    actual_stop_hit: Optional[bool] = False
+    notes: Optional[str] = None
+
 class PositionUpdate(BaseModel):
     """Update an existing position"""
     position_id: int
     exit_price: Optional[float] = None
-    status: Optional[str] = None  # "OPEN", "CLOSED", "STOPPED_OUT", "TARGET_HIT"
+    status: Optional[str] = None
 
 class OpenPositionRequest(BaseModel):
-    """Request to open a new position"""
+    """Request to open a new position (legacy)"""
     signal_id: str
     ticker: str
     direction: str
@@ -51,83 +90,245 @@ class OpenPositionRequest(BaseModel):
     signal_type: Optional[str] = None
     bias_level: Optional[str] = None
 
-class ClosePositionRequest(BaseModel):
-    """Request to close a position"""
-    position_id: str
-    exit_price: float
-    quantity_closed: float
+class ArchiveFilters(BaseModel):
+    """Filters for archived signals query"""
+    ticker: Optional[str] = None
+    strategy: Optional[str] = None
+    user_action: Optional[str] = None  # "DISMISSED", "SELECTED"
+    trade_outcome: Optional[str] = None  # "WIN", "LOSS", "BREAKEVEN"
+    bias_alignment: Optional[str] = None  # "ALIGNED", "COUNTER_BIAS"
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    limit: int = 100
+    offset: int = 0
 
-@router.post("/signal/action")
-async def handle_signal_action(action: SignalAction):
-    """
-    Handle user action on a signal (dismiss or select)
-    """
-    
-    try:
-        signal_id = action.signal_id
-        user_action = action.action.upper()
-        
-        if user_action not in ["DISMISS", "SELECT"]:
-            raise HTTPException(status_code=400, detail="Invalid action")
-        
-        # Get signal data from Redis
-        signal_data = await get_signal(signal_id)
-        
-        if not signal_data:
-            raise HTTPException(status_code=404, detail="Signal not found")
-        
-        # Update database
-        await update_signal_action(signal_id, user_action)
-        
-        if user_action == "DISMISS":
-            # Remove from Redis cache
-            await delete_signal(signal_id)
-            
-            # Broadcast dismissal to all devices
-            await manager.broadcast({
-                "type": "SIGNAL_DISMISSED",
-                "signal_id": signal_id
-            })
-            
-            return {"status": "dismissed", "signal_id": signal_id}
-        
-        elif user_action == "SELECT":
-            # Create position in database
-            position_data = {
-                "ticker": signal_data['ticker'],
-                "direction": signal_data['direction'],
-                "entry_price": signal_data['entry_price'],
-                "entry_time": datetime.now(),
-                "stop_loss": signal_data['stop_loss'],
-                "target_1": signal_data['target_1'],
-                "broker": "MANUAL"
-            }
-            
-            await create_position(signal_id, position_data)
-            
-            # Remove from active signals cache
-            await delete_signal(signal_id)
-            
-            # Broadcast selection to all devices
-            await manager.broadcast_position_update({
-                "action": "POSITION_OPENED",
-                "signal_id": signal_id,
-                "position": position_data
-            })
-            
-            return {"status": "selected", "signal_id": signal_id, "position": position_data}
-    
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+# =========================================================================
+# SIGNAL ACCEPT/DISMISS ENDPOINTS WITH FULL LOGGING
+# =========================================================================
 
-@router.post("/positions/open")
-async def open_position(request: OpenPositionRequest):
+@router.post("/signals/{signal_id}/accept")
+async def accept_signal(signal_id: str, request: AcceptSignalRequest):
     """
-    Open a new position with entry price and quantity
+    Accept a trade signal and open a position.
+    
+    Logs comprehensive data for backtesting:
+    - Original signal conditions
+    - Actual entry price (vs recommended)
+    - Triggering factors and bias alignment
+    - Timestamp of decision
     """
     global _position_counter
     
     try:
+        # Get signal data from Redis or PostgreSQL
+        signal_data = await get_signal(signal_id)
+        if not signal_data:
+            # Try database
+            signal_data = await get_signal_by_id(signal_id)
+        
+        if not signal_data:
+            raise HTTPException(status_code=404, detail="Signal not found")
+        
+        # Update signal as SELECTED in database
+        await update_signal_action(signal_id, "SELECTED")
+        
+        # Log the actual entry price to signal
+        await update_signal_outcome(
+            signal_id,
+            actual_entry_price=request.actual_entry_price,
+            notes=request.notes
+        )
+        
+        # Create position in database with full details
+        position_data = {
+            "ticker": signal_data.get('ticker'),
+            "direction": signal_data.get('direction'),
+            "entry_price": signal_data.get('entry_price'),  # Recommended entry
+            "actual_entry_price": request.actual_entry_price,  # Actual entry
+            "entry_time": datetime.now(),
+            "stop_loss": request.stop_loss or signal_data.get('stop_loss'),
+            "target_1": request.target_1 or signal_data.get('target_1'),
+            "target_2": request.target_2 or signal_data.get('target_2'),
+            "strategy": signal_data.get('strategy'),
+            "asset_class": signal_data.get('asset_class', 'EQUITY'),
+            "signal_type": signal_data.get('signal_type'),
+            "bias_level": signal_data.get('bias_alignment'),
+            "broker": "MANUAL"
+        }
+        
+        await create_position(signal_id, position_data)
+        
+        # Also add to in-memory store for quick access
+        position = {
+            "id": _position_counter,
+            "signal_id": signal_id,
+            "ticker": position_data["ticker"],
+            "direction": position_data["direction"],
+            "entry_price": request.actual_entry_price,
+            "recommended_entry": signal_data.get('entry_price'),
+            "quantity": request.quantity,
+            "stop_loss": position_data["stop_loss"],
+            "target_1": position_data["target_1"],
+            "target_2": position_data.get("target_2"),
+            "strategy": position_data["strategy"],
+            "signal_type": position_data["signal_type"],
+            "bias_alignment": signal_data.get('bias_alignment'),
+            "score": signal_data.get('score'),
+            "triggering_factors": signal_data.get('triggering_factors'),
+            "asset_class": position_data["asset_class"],
+            "entry_time": datetime.now().isoformat(),
+            "status": "OPEN"
+        }
+        
+        _open_positions.append(position)
+        _position_counter += 1
+        
+        # Remove from active signals cache
+        await delete_signal(signal_id)
+        
+        # Broadcast to all devices
+        await manager.broadcast_position_update({
+            "action": "POSITION_OPENED",
+            "signal_id": signal_id,
+            "position": position
+        })
+        
+        # Broadcast signal removal from Trade Ideas
+        await manager.broadcast({
+            "type": "SIGNAL_ACCEPTED",
+            "signal_id": signal_id,
+            "position_id": position["id"]
+        })
+        
+        logger.info(f"✅ Signal accepted: {position['ticker']} {position['direction']} @ ${request.actual_entry_price}")
+        
+        return {
+            "status": "accepted",
+            "signal_id": signal_id,
+            "position_id": position["id"],
+            "position": position
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error accepting signal: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/signals/{signal_id}/dismiss")
+async def dismiss_signal(signal_id: str, request: DismissSignalRequest):
+    """
+    Dismiss a trade signal with reason logging.
+    
+    Logs:
+    - Reason for dismissal
+    - Timestamp
+    - Notes for future analysis
+    """
+    try:
+        # Get signal data
+        signal_data = await get_signal(signal_id)
+        if not signal_data:
+            signal_data = await get_signal_by_id(signal_id)
+        
+        if not signal_data:
+            raise HTTPException(status_code=404, detail="Signal not found")
+        
+        # Update signal as DISMISSED in database
+        await update_signal_action(signal_id, "DISMISSED")
+        
+        # Log dismissal notes
+        notes = f"Dismissed: {request.reason or 'No reason provided'}"
+        if request.notes:
+            notes += f" - {request.notes}"
+        
+        await update_signal_outcome(signal_id, notes=notes)
+        
+        # Remove from Redis cache
+        await delete_signal(signal_id)
+        
+        # Broadcast dismissal to all devices
+        await manager.broadcast({
+            "type": "SIGNAL_DISMISSED",
+            "signal_id": signal_id,
+            "reason": request.reason
+        })
+        
+        logger.info(f"❌ Signal dismissed: {signal_data.get('ticker', signal_id)} - {request.reason}")
+        
+        return {
+            "status": "dismissed",
+            "signal_id": signal_id,
+            "reason": request.reason
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error dismissing signal: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/signal/action")
+async def handle_signal_action(action: SignalAction):
+    """
+    Legacy endpoint for backwards compatibility.
+    Use /signals/{signal_id}/accept or /signals/{signal_id}/dismiss instead.
+    """
+    if action.action.upper() == "DISMISS":
+        return await dismiss_signal(action.signal_id, DismissSignalRequest(signal_id=action.signal_id))
+    elif action.action.upper() == "SELECT":
+        # For legacy, get signal and use its entry price
+        signal_data = await get_signal(action.signal_id)
+        if not signal_data:
+            signal_data = await get_signal_by_id(action.signal_id)
+        
+        if not signal_data:
+            raise HTTPException(status_code=404, detail="Signal not found")
+        
+        return await accept_signal(
+            action.signal_id,
+            AcceptSignalRequest(
+                signal_id=action.signal_id,
+                actual_entry_price=signal_data.get('entry_price', 0),
+                quantity=1
+            )
+        )
+    else:
+        raise HTTPException(status_code=400, detail="Invalid action. Use DISMISS or SELECT.")
+
+@router.post("/positions/open")
+async def open_position(request: OpenPositionRequest):
+    """
+    Open a new position with entry price and quantity.
+    Persists to both in-memory cache and PostgreSQL.
+    """
+    global _position_counter
+    
+    try:
+        # Create position in database first
+        position_data = {
+            "ticker": request.ticker,
+            "direction": request.direction,
+            "entry_price": request.entry_price,
+            "entry_time": datetime.now(),
+            "stop_loss": request.stop_loss,
+            "target_1": request.target_1,
+            "strategy": request.strategy,
+            "asset_class": request.asset_class,
+            "signal_type": request.signal_type,
+            "bias_level": request.bias_level,
+            "broker": "MANUAL"
+        }
+        
+        # Save to PostgreSQL
+        try:
+            await create_position(request.signal_id, position_data)
+        except Exception as db_err:
+            logger.warning(f"Failed to persist position to DB: {db_err}")
+        
+        # Also keep in memory for fast access
         position = {
             "id": _position_counter,
             "signal_id": request.signal_id,
@@ -165,18 +366,66 @@ async def open_position(request: OpenPositionRequest):
         logger.error(f"Error opening position: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
+async def sync_positions_from_database():
+    """
+    Sync open positions from database to in-memory cache.
+    Called on startup to restore positions after restart.
+    """
+    global _open_positions, _position_counter
+    
+    try:
+        db_positions = await get_open_positions()
+        
+        if db_positions:
+            _open_positions = []
+            max_id = 0
+            
+            for pos in db_positions:
+                position = {
+                    "id": pos.get("id", 0),
+                    "signal_id": pos.get("signal_id"),
+                    "ticker": pos.get("ticker"),
+                    "direction": pos.get("direction"),
+                    "entry_price": float(pos.get("entry_price", 0)) if pos.get("entry_price") else 0,
+                    "quantity": pos.get("quantity", 1),
+                    "stop_loss": float(pos.get("stop_loss", 0)) if pos.get("stop_loss") else None,
+                    "target_1": float(pos.get("target_1", 0)) if pos.get("target_1") else None,
+                    "strategy": pos.get("strategy"),
+                    "asset_class": pos.get("asset_class", "EQUITY"),
+                    "signal_type": pos.get("signal_type"),
+                    "bias_level": pos.get("bias_level"),
+                    "entry_time": pos.get("entry_time").isoformat() if pos.get("entry_time") else None,
+                    "status": pos.get("status", "OPEN")
+                }
+                _open_positions.append(position)
+                max_id = max(max_id, position["id"])
+            
+            _position_counter = max_id + 1
+            logger.info(f"✅ Synced {len(_open_positions)} open positions from database")
+        else:
+            logger.info("No open positions in database to sync")
+    
+    except Exception as e:
+        logger.warning(f"Failed to sync positions from database: {e}")
+
 @router.post("/positions/close")
 async def close_position(request: ClosePositionRequest):
     """
-    Close a position (supports partial close)
-    Logs to trade history for backtesting
+    Close a position with comprehensive outcome logging.
+    
+    Logs for backtesting:
+    - Trade outcome (WIN/LOSS/BREAKEVEN)
+    - Loss reason if applicable (SETUP_FAILED/EXECUTION_ERROR)
+    - Whether stop loss was hit
+    - Notes for analysis
     """
     try:
-        # Find the position
+        # Find the position in memory
         position = None
         position_idx = None
         for idx, p in enumerate(_open_positions):
-            if str(p["id"]) == str(request.position_id) or p["signal_id"] == request.position_id:
+            if p["id"] == request.position_id:
                 position = p
                 position_idx = idx
                 break
@@ -184,59 +433,107 @@ async def close_position(request: ClosePositionRequest):
         if not position:
             raise HTTPException(status_code=404, detail="Position not found")
         
+        # Determine quantity to close
+        quantity_closed = request.quantity_closed or position.get("quantity", 1)
+        
         # Calculate P&L
         if position["direction"] == "LONG":
             pnl_per_unit = request.exit_price - position["entry_price"]
         else:
             pnl_per_unit = position["entry_price"] - request.exit_price
         
-        realized_pnl = pnl_per_unit * request.quantity_closed
+        realized_pnl = pnl_per_unit * quantity_closed
         
-        # Create trade history record
+        # Determine trade outcome if not provided
+        trade_outcome = request.trade_outcome
+        if not trade_outcome:
+            if realized_pnl > 0:
+                trade_outcome = "WIN"
+            elif realized_pnl < 0:
+                trade_outcome = "LOSS"
+            else:
+                trade_outcome = "BREAKEVEN"
+        
+        # Create comprehensive trade history record
         trade_record = {
             "id": position["id"],
-            "signal_id": position["signal_id"],
+            "signal_id": position.get("signal_id"),
             "ticker": position["ticker"],
             "direction": position["direction"],
             "entry_price": position["entry_price"],
+            "recommended_entry": position.get("recommended_entry"),
             "exit_price": request.exit_price,
-            "quantity_closed": request.quantity_closed,
+            "quantity_closed": quantity_closed,
             "realized_pnl": round(realized_pnl, 2),
             "strategy": position.get("strategy"),
             "signal_type": position.get("signal_type"),
-            "bias_level": position.get("bias_level"),
+            "bias_alignment": position.get("bias_alignment"),
+            "score": position.get("score"),
+            "triggering_factors": position.get("triggering_factors"),
             "entry_time": position.get("entry_time"),
             "exit_time": datetime.now().isoformat(),
-            "asset_class": position.get("asset_class")
+            "asset_class": position.get("asset_class"),
+            # Outcome logging for backtesting
+            "trade_outcome": trade_outcome,
+            "loss_reason": request.loss_reason if trade_outcome == "LOSS" else None,
+            "actual_stop_hit": request.actual_stop_hit,
+            "notes": request.notes
         }
         
         _closed_trades.append(trade_record)
         
+        # Update PostgreSQL with outcome
+        signal_id = position.get("signal_id")
+        if signal_id:
+            try:
+                await update_signal_outcome(
+                    signal_id,
+                    actual_exit_price=request.exit_price,
+                    actual_stop_hit=request.actual_stop_hit,
+                    trade_outcome=trade_outcome,
+                    loss_reason=request.loss_reason,
+                    notes=request.notes
+                )
+            except Exception as db_err:
+                logger.warning(f"Failed to update signal outcome: {db_err}")
+        
         # Check if partial or full close
-        remaining_qty = position["quantity"] - request.quantity_closed
+        remaining_qty = position.get("quantity", 1) - quantity_closed
         
         if remaining_qty <= 0:
             # Full close - remove position
             _open_positions.pop(position_idx)
             status = "closed"
-            logger.info(f"📉 Position closed: {position['ticker']} - P&L: ${realized_pnl:.2f}")
+            
+            # Also close in database if position exists there
+            # (future: implement close_position_in_db)
+            
+            outcome_emoji = "🎯" if trade_outcome == "WIN" else "❌" if trade_outcome == "LOSS" else "➖"
+            logger.info(f"{outcome_emoji} Position closed: {position['ticker']} - {trade_outcome} - P&L: ${realized_pnl:.2f}")
+            
+            if trade_outcome == "LOSS" and request.loss_reason:
+                logger.info(f"   Loss reason: {request.loss_reason}")
         else:
             # Partial close - update quantity
             _open_positions[position_idx]["quantity"] = remaining_qty
             status = "partial_close"
-            logger.info(f"📉 Partial close: {position['ticker']} - Closed {request.quantity_closed}, Remaining {remaining_qty}")
+            logger.info(f"📉 Partial close: {position['ticker']} - Closed {quantity_closed}, Remaining {remaining_qty}")
         
         # Broadcast update
         await manager.broadcast_position_update({
             "action": "POSITION_CLOSED" if status == "closed" else "POSITION_PARTIAL_CLOSE",
             "position_id": position["id"],
-            "trade_record": trade_record
+            "trade_record": trade_record,
+            "trade_outcome": trade_outcome,
+            "loss_reason": request.loss_reason
         })
         
         return {
             "status": status,
+            "trade_outcome": trade_outcome,
+            "loss_reason": request.loss_reason if trade_outcome == "LOSS" else None,
             "realized_pnl": round(realized_pnl, 2),
-            "remaining_quantity": remaining_qty if remaining_qty > 0 else 0,
+            "remaining_quantity": max(0, remaining_qty),
             "trade_record": trade_record
         }
     
@@ -295,36 +592,149 @@ async def update_position(update: PositionUpdate):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/signals/active")
-async def get_active_signals():
+async def get_active_signals_api():
     """
-    Get all active signals (not dismissed or selected)
-    Used by frontend to populate trade recommendation columns
-    """
+    Get all active trade ideas (not dismissed or selected).
+    Returns top 10 ranked by score with bias alignment.
     
-    from database.redis_client import get_active_signals
+    Falls back to Redis cache, then PostgreSQL for persistence.
+    """
+    from database.redis_client import get_active_signals as get_redis_signals
     
     try:
-        signals = await get_active_signals()
+        # First try Redis for fast access
+        signals = await get_redis_signals()
+        
+        # If Redis is empty, try PostgreSQL
+        if not signals:
+            try:
+                signals = await get_active_trade_ideas(limit=50)
+                # Re-cache active signals in Redis
+                for signal in signals[:20]:
+                    if signal.get('signal_id'):
+                        await cache_signal(signal['signal_id'], signal, ttl=7200)
+            except Exception as db_err:
+                logger.warning(f"Could not fetch from PostgreSQL: {db_err}")
+                signals = []
         
         # Sort by score (highest first)
-        # Use existing score if available, otherwise calculate
-        from scoring.rank_trades import calculate_signal_score
+        signals.sort(key=lambda x: x.get('score', 0) or 0, reverse=True)
         
-        for signal in signals:
-            # Only recalculate if score not already set or if signal has required fields
-            if 'score' not in signal or signal.get('score') is None:
-                # Use .get() to handle missing fields gracefully
-                signal['score'] = calculate_signal_score(
-                    signal.get('signal_type', 'NEUTRAL'),
-                    signal.get('risk_reward', 0),
-                    signal.get('adx'),
-                    signal.get('line_separation'),
-                    signal.get('bias_aligned', False)
-                )
+        # Return top 10 for display (but keep more in queue)
+        top_signals = signals[:10]
+        queue_size = len(signals)
         
-        signals.sort(key=lambda x: x.get('score', 0), reverse=True)
-        
-        return {"status": "success", "signals": signals}
+        return {
+            "status": "success",
+            "signals": top_signals,
+            "queue_size": queue_size,
+            "has_more": queue_size > 10
+        }
     
     except Exception as e:
+        logger.error(f"Error fetching active signals: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/signals/queue")
+async def get_signal_queue():
+    """
+    Get the full queue of active signals (for auto-refill).
+    Returns up to 50 signals ranked by score.
+    """
+    from database.redis_client import get_active_signals as get_redis_signals
+    
+    try:
+        signals = await get_redis_signals()
+        
+        if not signals:
+            signals = await get_active_trade_ideas(limit=50)
+        
+        signals.sort(key=lambda x: x.get('score', 0) or 0, reverse=True)
+        
+        return {
+            "status": "success",
+            "signals": signals,
+            "total": len(signals)
+        }
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/signals/archive")
+async def get_archived_signals_api(filters: ArchiveFilters):
+    """
+    Get archived signals for backtesting analysis.
+    
+    Supports filtering by:
+    - ticker, strategy, user_action, trade_outcome
+    - bias_alignment, date range
+    - Pagination via limit/offset
+    """
+    try:
+        filter_dict = {
+            "ticker": filters.ticker,
+            "strategy": filters.strategy,
+            "user_action": filters.user_action,
+            "trade_outcome": filters.trade_outcome,
+            "bias_alignment": filters.bias_alignment,
+            "start_date": filters.start_date,
+            "end_date": filters.end_date
+        }
+        
+        # Remove None values
+        filter_dict = {k: v for k, v in filter_dict.items() if v is not None}
+        
+        result = await get_archived_signals(
+            filters=filter_dict,
+            limit=filters.limit,
+            offset=filters.offset
+        )
+        
+        return {
+            "status": "success",
+            **result
+        }
+    
+    except Exception as e:
+        logger.error(f"Error fetching archived signals: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/signals/statistics")
+async def get_trading_statistics(
+    ticker: Optional[str] = None,
+    strategy: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None
+):
+    """
+    Get aggregate trading statistics for backtesting analysis.
+    
+    Returns:
+    - Total trades, wins, losses, breakeven
+    - Win rate (overall and for bias-aligned trades)
+    - Setup failures vs execution errors
+    """
+    try:
+        filters = {}
+        if ticker:
+            filters["ticker"] = ticker
+        if strategy:
+            filters["strategy"] = strategy
+        if start_date:
+            filters["start_date"] = start_date
+        if end_date:
+            filters["end_date"] = end_date
+        
+        stats = await get_backtest_statistics(filters)
+        
+        return {
+            "status": "success",
+            "statistics": stats
+        }
+    
+    except Exception as e:
+        logger.error(f"Error fetching statistics: {e}")
         raise HTTPException(status_code=500, detail=str(e))

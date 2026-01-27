@@ -163,11 +163,57 @@ function changeChartSymbol(symbol) {
         tab.classList.toggle('active', tab.dataset.symbol === symbol);
     });
     
-    // Clear price levels when changing symbols
-    activePriceLevels = null;
+    // Update price levels panel for this symbol
+    updatePriceLevelsPanel(symbol);
     
     // Reinitialize widget with new symbol
     initTradingViewWidget();
+}
+
+function updatePriceLevelsPanel(symbol) {
+    const panel = document.getElementById('priceLevelsPanel');
+    if (!panel) return;
+    
+    // Check if we have price levels for this symbol
+    const levels = window.activePriceLevels?.[symbol];
+    
+    if (levels) {
+        // Show panel with levels
+        panel.style.display = 'block';
+        document.getElementById('priceLevelsTicker').textContent = symbol;
+        document.getElementById('priceLevelEntry').textContent = levels.entry ? `$${parseFloat(levels.entry).toFixed(2)}` : '--';
+        document.getElementById('priceLevelStop').textContent = levels.stop ? `$${parseFloat(levels.stop).toFixed(2)}` : '--';
+        document.getElementById('priceLevelTarget1').textContent = levels.target1 ? `$${parseFloat(levels.target1).toFixed(2)}` : '--';
+        
+        const target2Row = document.getElementById('priceLevelTarget2Row');
+        if (levels.target2) {
+            document.getElementById('priceLevelTarget2').textContent = `$${parseFloat(levels.target2).toFixed(2)}`;
+            target2Row.style.display = 'flex';
+        } else {
+            target2Row.style.display = 'none';
+        }
+    } else {
+        // Check if there's an open position for this symbol
+        const position = openPositions.find(p => p.ticker === symbol);
+        if (position) {
+            panel.style.display = 'block';
+            document.getElementById('priceLevelsTicker').textContent = symbol;
+            document.getElementById('priceLevelEntry').textContent = position.entry_price ? `$${parseFloat(position.entry_price).toFixed(2)}` : '--';
+            document.getElementById('priceLevelStop').textContent = position.stop_loss ? `$${parseFloat(position.stop_loss).toFixed(2)}` : '--';
+            document.getElementById('priceLevelTarget1').textContent = position.target_1 ? `$${parseFloat(position.target_1).toFixed(2)}` : '--';
+            
+            const target2Row = document.getElementById('priceLevelTarget2Row');
+            if (position.target_2) {
+                document.getElementById('priceLevelTarget2').textContent = `$${parseFloat(position.target_2).toFixed(2)}`;
+                target2Row.style.display = 'flex';
+            } else {
+                target2Row.style.display = 'none';
+            }
+        } else {
+            // No levels for this symbol - hide panel
+            panel.style.display = 'none';
+        }
+    }
 }
 
 function showTradeOnChart(signal) {
@@ -254,7 +300,22 @@ function handleWebSocketMessage(message) {
     
     switch (message.type) {
         case 'NEW_SIGNAL':
-            addSignal(message.data);
+            // Add signal and check if it should jump to top 10
+            handleNewSignal(message.data);
+            break;
+        case 'SIGNAL_PRIORITY_UPDATE':
+            // New high-priority signal that should be shown immediately
+            handlePrioritySignal(message.data);
+            break;
+        case 'SIGNAL_ACCEPTED':
+            // Signal was accepted by user, remove from feed and refill
+            removeSignal(message.signal_id);
+            refillTradeIdeas();
+            break;
+        case 'SIGNAL_DISMISSED':
+            // Signal was dismissed, remove from feed
+            removeSignal(message.signal_id);
+            refillTradeIdeas();
             break;
         case 'BIAS_UPDATE':
             // Handle weekly bias updates with factor filtering
@@ -271,10 +332,83 @@ function handleWebSocketMessage(message) {
         case 'POSITION_UPDATE':
             updatePosition(message.data);
             break;
-        case 'SIGNAL_DISMISSED':
-            removeSignal(message.signal_id);
-            break;
     }
+}
+
+function handleNewSignal(signalData) {
+    // Add to appropriate signal list
+    if (signalData.asset_class === 'EQUITY' || !signalData.asset_class) {
+        // Check if this signal should jump into top 10
+        const currentLowestScore = getLowestDisplayedScore();
+        const newScore = signalData.score || 0;
+        
+        if (newScore > currentLowestScore || signals.equity.length < 10) {
+            // Insert at correct position based on score
+            insertSignalByScore(signalData, 'equity');
+            renderSignals();
+            
+            // Highlight new signal with animation
+            highlightNewSignal(signalData.signal_id);
+        } else {
+            // Add to queue but don't display
+            signals.equity.push(signalData);
+        }
+    } else {
+        signals.crypto.push(signalData);
+        renderSignals();
+    }
+}
+
+function handlePrioritySignal(signalData) {
+    // High-priority signal - insert at top with animation
+    console.log('🔥 Priority signal received:', signalData.ticker, signalData.score);
+    
+    if (signalData.asset_class === 'EQUITY' || !signalData.asset_class) {
+        // Remove if already exists
+        signals.equity = signals.equity.filter(s => s.signal_id !== signalData.signal_id);
+        // Insert at top
+        signals.equity.unshift(signalData);
+        signals.equity.sort((a, b) => (b.score || 0) - (a.score || 0));
+    }
+    
+    renderSignals();
+    highlightNewSignal(signalData.signal_id);
+}
+
+function getLowestDisplayedScore() {
+    const displayed = signals.equity.slice(0, 10);
+    if (displayed.length < 10) return 0;
+    return displayed.reduce((min, s) => Math.min(min, s.score || 0), 100);
+}
+
+function insertSignalByScore(signalData, type) {
+    const list = type === 'equity' ? signals.equity : signals.crypto;
+    
+    // Remove if already exists
+    const filtered = list.filter(s => s.signal_id !== signalData.signal_id);
+    
+    // Find insert position
+    let insertIdx = filtered.findIndex(s => (s.score || 0) < (signalData.score || 0));
+    if (insertIdx === -1) insertIdx = filtered.length;
+    
+    // Insert
+    filtered.splice(insertIdx, 0, signalData);
+    
+    if (type === 'equity') {
+        signals.equity = filtered;
+    } else {
+        signals.crypto = filtered;
+    }
+}
+
+function highlightNewSignal(signalId) {
+    setTimeout(() => {
+        const card = document.querySelector(`[data-signal-id="${signalId}"]`);
+        if (card) {
+            card.classList.add('new-signal-highlight');
+            setTimeout(() => card.classList.remove('new-signal-highlight'), 3000);
+        }
+    }, 100);
 }
 
 function updateConnectionStatus(connected) {
@@ -1916,68 +2050,93 @@ function renderSignals() {
 }
 
 function createSignalCard(signal) {
-    const typeLabel = signal.signal_type.replace('_', ' ');
+    const typeLabel = (signal.signal_type || 'SIGNAL').replace('_', ' ');
     
-    // Check bias alignment
-    const bias = getEffectiveTradingBias();
-    const isAligned = isSignalAlignedWithBias(signal.direction);
-    const biasAlignmentClass = isAligned ? 'bias-aligned' : 'bias-misaligned';
-    const biasAlignmentIcon = isAligned ? '✓' : '⚠';
-    const biasAlignmentText = bias.isOverride 
-        ? `Override: ${bias.level.replace('_', ' ')}` 
-        : `Bias: ${bias.level.replace('_', ' ')}`;
+    // Calculate score tier and pulse class
+    const score = signal.score || 0;
+    const scoreTier = getScoreTier(score);
+    const isStrongSignal = score >= 75;
+    const pulseClass = isStrongSignal ? 'signal-pulse' : '';
+    
+    // Check bias alignment from signal data or calculate
+    const biasAlignment = signal.bias_alignment || 'NEUTRAL';
+    const isAligned = biasAlignment.includes('ALIGNED') && !biasAlignment.includes('COUNTER');
+    const biasAlignmentClass = isAligned ? 'bias-aligned' : (biasAlignment === 'NEUTRAL' ? '' : 'bias-misaligned');
+    const biasAlignmentIcon = isAligned ? '✓' : (biasAlignment.includes('COUNTER') ? '⚠' : '○');
+    const biasAlignmentText = biasAlignment.replace('_', ' ');
+    
+    // Safe number formatting
+    const formatPrice = (val) => val ? parseFloat(val).toFixed(2) : '-';
+    const formatRR = (val) => val ? `${parseFloat(val).toFixed(1)}:1` : '-';
     
     return `
-        <div class="signal-card ${signal.signal_type} ${biasAlignmentClass}" data-signal-id="${signal.signal_id}" data-signal='${JSON.stringify(signal)}'>
+        <div class="signal-card ${signal.signal_type || ''} ${biasAlignmentClass} ${pulseClass}" 
+             data-signal-id="${signal.signal_id}" 
+             data-signal='${JSON.stringify(signal).replace(/'/g, "&#39;")}'>
+            
             <div class="signal-header">
                 <div>
-                    <div class="signal-type ${signal.signal_type}">${typeLabel}</div>
-                    <div class="signal-strategy">${signal.strategy}</div>
+                    <div class="signal-type ${signal.signal_type || ''}">${typeLabel}</div>
+                    <div class="signal-strategy">${signal.strategy || 'Unknown'}</div>
                 </div>
                 <div class="signal-ticker ticker-link" data-action="view-chart">${signal.ticker}</div>
+            </div>
+            
+            <div class="signal-score-bar">
+                <div class="score-label">Score</div>
+                <div class="score-value ${scoreTier.toLowerCase()}">${score}</div>
+                <div class="score-tier ${scoreTier.toLowerCase()}">${scoreTier}</div>
             </div>
             
             <div class="signal-details">
                 <div class="signal-detail">
                     <div class="signal-detail-label">Entry</div>
-                    <div class="signal-detail-value">${signal.entry_price.toFixed(2)}</div>
+                    <div class="signal-detail-value">${formatPrice(signal.entry_price)}</div>
                 </div>
                 <div class="signal-detail">
                     <div class="signal-detail-label">Stop</div>
-                    <div class="signal-detail-value">${signal.stop_loss.toFixed(2)}</div>
+                    <div class="signal-detail-value">${formatPrice(signal.stop_loss)}</div>
                 </div>
                 <div class="signal-detail">
                     <div class="signal-detail-label">Target</div>
-                    <div class="signal-detail-value">${signal.target_1.toFixed(2)}</div>
+                    <div class="signal-detail-value">${formatPrice(signal.target_1)}</div>
                 </div>
             </div>
             
             <div class="signal-details">
                 <div class="signal-detail">
                     <div class="signal-detail-label">R:R</div>
-                    <div class="signal-detail-value">${signal.risk_reward}:1</div>
+                    <div class="signal-detail-value">${formatRR(signal.risk_reward)}</div>
                 </div>
                 <div class="signal-detail">
                     <div class="signal-detail-label">Direction</div>
-                    <div class="signal-detail-value">${signal.direction}</div>
+                    <div class="signal-detail-value direction-${(signal.direction || '').toLowerCase()}">${signal.direction || '-'}</div>
                 </div>
                 <div class="signal-detail">
-                    <div class="signal-detail-label">Score</div>
-                    <div class="signal-detail-value">${signal.score}</div>
+                    <div class="signal-detail-label">Confidence</div>
+                    <div class="signal-detail-value">${signal.confidence || '-'}</div>
                 </div>
             </div>
             
             <div class="signal-bias-indicator ${biasAlignmentClass}" title="${biasAlignmentText}">
                 <span class="bias-icon">${biasAlignmentIcon}</span>
-                <span class="bias-text">${isAligned ? 'Aligned' : 'Counter-bias'}</span>
+                <span class="bias-text">${biasAlignmentText}</span>
             </div>
             
             <div class="signal-actions">
                 <button class="action-btn dismiss-btn" data-action="dismiss">✕ Dismiss</button>
-                <button class="action-btn select-btn" data-action="select">✓ Select</button>
+                <button class="action-btn select-btn" data-action="select">✓ Accept</button>
             </div>
         </div>
     `;
+}
+
+function getScoreTier(score) {
+    if (score >= 85) return 'EXCEPTIONAL';
+    if (score >= 75) return 'STRONG';
+    if (score >= 60) return 'MODERATE';
+    if (score >= 45) return 'WEAK';
+    return 'LOW';
 }
 
 function attachSignalActions() {
@@ -2008,17 +2167,29 @@ async function handleSignalAction(event) {
     
     if (action === 'SELECT') {
         // Open position entry modal instead of directly selecting
-        const signal = JSON.parse(card.dataset.signal);
+        const signal = JSON.parse(card.dataset.signal.replace(/&#39;/g, "'"));
         openPositionEntryModal(signal, card);
         return;
     }
     
-    // Handle dismiss
+    if (action === 'DISMISS') {
+        // Open dismiss modal with reason selection
+        const signal = JSON.parse(card.dataset.signal.replace(/&#39;/g, "'"));
+        openDismissModal(signal, card);
+        return;
+    }
+}
+
+async function dismissSignalWithReason(signalId, reason, notes, card) {
     try {
-        const response = await fetch(`${API_URL}/signal/action`, {
+        const response = await fetch(`${API_URL}/signals/${signalId}/dismiss`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ signal_id: signalId, action })
+            body: JSON.stringify({ 
+                signal_id: signalId, 
+                reason: reason,
+                notes: notes
+            })
         });
         
         const data = await response.json();
@@ -2027,10 +2198,97 @@ async function handleSignalAction(event) {
             // Remove card with animation
             card.style.opacity = '0';
             card.style.transform = 'translateX(-20px)';
-            setTimeout(() => card.remove(), 300);
+            setTimeout(() => {
+                card.remove();
+                // Auto-refill Trade Ideas list
+                refillTradeIdeas();
+            }, 300);
         }
     } catch (error) {
-        console.error('Error handling signal action:', error);
+        console.error('Error dismissing signal:', error);
+    }
+}
+
+function openDismissModal(signal, card) {
+    const modal = document.createElement('div');
+    modal.className = 'signal-modal-overlay';
+    modal.innerHTML = `
+        <div class="signal-modal dismiss-modal">
+            <div class="modal-header">
+                <h3>Dismiss ${signal.ticker} Signal</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p>Why are you dismissing this signal?</p>
+                <div class="dismiss-reasons">
+                    <label class="dismiss-reason">
+                        <input type="radio" name="dismissReason" value="NOT_ALIGNED">
+                        <span>Not aligned with my thesis</span>
+                    </label>
+                    <label class="dismiss-reason">
+                        <input type="radio" name="dismissReason" value="MISSED_ENTRY">
+                        <span>Missed optimal entry</span>
+                    </label>
+                    <label class="dismiss-reason">
+                        <input type="radio" name="dismissReason" value="TECHNICAL_CONCERN">
+                        <span>Technical concerns</span>
+                    </label>
+                    <label class="dismiss-reason">
+                        <input type="radio" name="dismissReason" value="OTHER" checked>
+                        <span>Other / No reason</span>
+                    </label>
+                </div>
+                <div class="modal-field">
+                    <label>Notes (optional)</label>
+                    <textarea id="dismissNotes" placeholder="Additional notes..."></textarea>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button class="modal-btn cancel">Cancel</button>
+                <button class="modal-btn dismiss">Dismiss Signal</button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    // Handle close
+    modal.querySelector('.modal-close').addEventListener('click', () => modal.remove());
+    modal.querySelector('.modal-btn.cancel').addEventListener('click', () => modal.remove());
+    
+    // Handle dismiss
+    modal.querySelector('.modal-btn.dismiss').addEventListener('click', async () => {
+        const reason = modal.querySelector('input[name="dismissReason"]:checked')?.value || 'OTHER';
+        const notes = modal.querySelector('#dismissNotes').value;
+        
+        modal.remove();
+        await dismissSignalWithReason(signal.signal_id, reason, notes, card);
+    });
+    
+    // Close on backdrop click
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) modal.remove();
+    });
+}
+
+async function refillTradeIdeas() {
+    // Fetch updated signal queue and re-render
+    try {
+        const response = await fetch(`${API_URL}/signals/active`);
+        const data = await response.json();
+        
+        if (data.status === 'success' && data.signals) {
+            // Update in-memory signals
+            signals.equity = data.signals.filter(s => s.asset_class === 'EQUITY' || !s.asset_class);
+            signals.crypto = data.signals.filter(s => s.asset_class === 'CRYPTO');
+            
+            // Re-render
+            renderSignals();
+            
+            console.log(`Trade Ideas refilled: ${data.signals.length} signals`);
+        }
+    } catch (error) {
+        console.error('Error refilling trade ideas:', error);
     }
 }
 
@@ -4255,33 +4513,33 @@ async function confirmPositionEntry() {
     }
     
     try {
-        // Create position via API
-        const response = await fetch(`${API_URL}/positions/open`, {
+        // Accept signal via new API endpoint (includes full logging)
+        const response = await fetch(`${API_URL}/signals/${pendingPositionSignal.signal_id}/accept`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 signal_id: pendingPositionSignal.signal_id,
-                ticker: pendingPositionSignal.ticker,
-                direction: pendingPositionSignal.direction,
-                entry_price: entryPrice,
+                actual_entry_price: entryPrice,
                 quantity: qty,
                 stop_loss: pendingPositionSignal.stop_loss,
                 target_1: pendingPositionSignal.target_1,
-                strategy: pendingPositionSignal.strategy,
-                asset_class: pendingPositionSignal.asset_class,
-                signal_type: pendingPositionSignal.signal_type,
-                bias_level: pendingPositionSignal.bias_level
+                target_2: pendingPositionSignal.target_2,
+                notes: `Accepted via Trade Ideas UI`
             })
         });
         
         const data = await response.json();
         
-        if (data.status === 'success' || data.position_id) {
-            // Remove signal card
+        if (data.status === 'accepted' || data.position_id) {
+            // Remove signal card with animation
             if (pendingPositionCard) {
                 pendingPositionCard.style.opacity = '0';
                 pendingPositionCard.style.transform = 'translateX(-20px)';
-                setTimeout(() => pendingPositionCard.remove(), 300);
+                setTimeout(() => {
+                    pendingPositionCard.remove();
+                    // Auto-refill Trade Ideas list
+                    refillTradeIdeas();
+                }, 300);
             }
             
             // Close modal
@@ -4293,13 +4551,34 @@ async function confirmPositionEntry() {
             // Add ticker to chart tabs
             addPositionChartTab(pendingPositionSignal.ticker);
             
-            console.log(`📈 Position opened: ${pendingPositionSignal.ticker} ${pendingPositionSignal.direction}`);
+            // Store price levels for chart display
+            storePriceLevels(pendingPositionSignal.ticker, {
+                entry: entryPrice,
+                stop: pendingPositionSignal.stop_loss,
+                target1: pendingPositionSignal.target_1,
+                target2: pendingPositionSignal.target_2
+            });
+            
+            console.log(`📈 Position accepted: ${pendingPositionSignal.ticker} ${pendingPositionSignal.direction} @ $${entryPrice}`);
         } else {
-            alert('Failed to open position: ' + (data.message || 'Unknown error'));
+            alert('Failed to accept signal: ' + (data.detail || data.message || 'Unknown error'));
         }
     } catch (error) {
-        console.error('Error opening position:', error);
-        alert('Failed to open position');
+        console.error('Error accepting signal:', error);
+        alert('Failed to accept signal');
+    }
+}
+
+// Store price levels for chart sidebar display
+function storePriceLevels(ticker, levels) {
+    if (!window.activePriceLevels) {
+        window.activePriceLevels = {};
+    }
+    window.activePriceLevels[ticker] = levels;
+    
+    // Update panel if currently viewing this ticker
+    if (currentSymbol === ticker) {
+        updatePriceLevelsPanel(ticker);
     }
 }
 
@@ -4462,14 +4741,119 @@ async function confirmPositionClose() {
         return;
     }
     
+    // Calculate P&L to determine if this is a loss
+    const entryPrice = closingPosition.entry_price || 0;
+    let pnl;
+    if (closingPosition.direction === 'LONG') {
+        pnl = (exitPrice - entryPrice) * closeQty;
+    } else {
+        pnl = (entryPrice - exitPrice) * closeQty;
+    }
+    
+    // Determine trade outcome
+    let tradeOutcome;
+    if (pnl > 0) {
+        tradeOutcome = 'WIN';
+    } else if (pnl < 0) {
+        tradeOutcome = 'LOSS';
+    } else {
+        tradeOutcome = 'BREAKEVEN';
+    }
+    
+    // If it's a loss, show loss classification modal
+    if (tradeOutcome === 'LOSS') {
+        showLossClassificationModal(closingPosition, exitPrice, closeQty, pnl);
+        return;
+    }
+    
+    // Otherwise, proceed with close
+    await executePositionClose(closingPosition.id, exitPrice, closeQty, tradeOutcome, null, null);
+}
+
+function showLossClassificationModal(position, exitPrice, closeQty, pnl) {
+    const modal = document.createElement('div');
+    modal.className = 'signal-modal-overlay';
+    modal.innerHTML = `
+        <div class="signal-modal loss-modal">
+            <div class="modal-header">
+                <h3>Loss Classification - ${position.ticker}</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="loss-summary">
+                    <p class="loss-amount">Loss: <span class="negative">$${Math.abs(pnl).toFixed(2)}</span></p>
+                </div>
+                <p>What caused this loss? (for backtesting analysis)</p>
+                <div class="loss-reasons">
+                    <label class="loss-reason setup-failed">
+                        <input type="radio" name="lossReason" value="SETUP_FAILED">
+                        <span>Setup Failed</span>
+                        <small>The trade thesis was wrong - the setup didn't work as expected</small>
+                    </label>
+                    <label class="loss-reason execution-error">
+                        <input type="radio" name="lossReason" value="EXECUTION_ERROR">
+                        <span>Execution Error</span>
+                        <small>I made a mistake - bad entry, moved stop, over-leveraged, etc.</small>
+                    </label>
+                    <label class="loss-reason market-conditions">
+                        <input type="radio" name="lossReason" value="MARKET_CONDITIONS" checked>
+                        <span>Market Conditions</span>
+                        <small>Unexpected news, volatility, or market-wide move against position</small>
+                    </label>
+                </div>
+                <div class="modal-field">
+                    <label>Notes (optional)</label>
+                    <textarea id="lossNotes" placeholder="What did you learn from this trade?"></textarea>
+                </div>
+                <div class="modal-field">
+                    <label>
+                        <input type="checkbox" id="stopHitCheck">
+                        Stop loss was hit (triggered automatically)
+                    </label>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button class="modal-btn cancel">Cancel</button>
+                <button class="modal-btn close-position">Confirm Close</button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    // Handle close
+    modal.querySelector('.modal-close').addEventListener('click', () => modal.remove());
+    modal.querySelector('.modal-btn.cancel').addEventListener('click', () => modal.remove());
+    
+    // Handle confirm
+    modal.querySelector('.modal-btn.close-position').addEventListener('click', async () => {
+        const lossReason = modal.querySelector('input[name="lossReason"]:checked')?.value || 'MARKET_CONDITIONS';
+        const notes = modal.querySelector('#lossNotes').value;
+        const stopHit = modal.querySelector('#stopHitCheck').checked;
+        
+        modal.remove();
+        await executePositionClose(position.id, exitPrice, closeQty, 'LOSS', lossReason, notes, stopHit);
+    });
+    
+    // Close on backdrop click
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) modal.remove();
+    });
+}
+
+async function executePositionClose(positionId, exitPrice, closeQty, tradeOutcome, lossReason, notes, stopHit = false) {
     try {
         const response = await fetch(`${API_URL}/positions/close`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                position_id: closingPosition.id || closingPosition.signal_id,
+                position_id: positionId,
                 exit_price: exitPrice,
-                quantity_closed: closeQty
+                quantity_closed: closeQty,
+                trade_outcome: tradeOutcome,
+                loss_reason: lossReason,
+                actual_stop_hit: stopHit,
+                notes: notes
             })
         });
         
@@ -4482,11 +4866,16 @@ async function confirmPositionClose() {
             // Remove chart tab if fully closed
             if (closeQty >= closingPosition.quantity) {
                 removePositionChartTab(closingPosition.ticker);
+                // Remove price levels
+                if (window.activePriceLevels) {
+                    delete window.activePriceLevels[closingPosition.ticker];
+                }
             }
             
-            console.log(`📉 Position closed: ${closingPosition.ticker} - P&L: $${data.realized_pnl?.toFixed(2) || '--'}`);
+            const emoji = tradeOutcome === 'WIN' ? '🎯' : tradeOutcome === 'LOSS' ? '❌' : '➖';
+            console.log(`${emoji} Position closed: ${closingPosition.ticker} - ${tradeOutcome} - P&L: $${data.realized_pnl?.toFixed(2) || '--'}`);
         } else {
-            alert('Failed to close position: ' + (data.message || 'Unknown error'));
+            alert('Failed to close position: ' + (data.detail || data.message || 'Unknown error'));
         }
     } catch (error) {
         console.error('Error closing position:', error);
