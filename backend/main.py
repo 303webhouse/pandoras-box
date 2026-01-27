@@ -34,6 +34,13 @@ async def lifespan(app: FastAPI):
     redis_client = await get_redis_client()
     postgres_client = await get_postgres_client()
     
+    # Initialize/update database schema (adds new columns if they don't exist)
+    try:
+        from database.postgres_client import init_database
+        await init_database()
+    except Exception as e:
+        logger.warning(f"⚠️ Could not initialize database schema: {e}")
+    
     logger.info("✅ Database connections established")
     
     # Start the bias scheduler
