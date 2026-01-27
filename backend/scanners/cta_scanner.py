@@ -15,6 +15,7 @@ Requirements: yfinance, pandas, pandas_ta
 """
 
 import pandas as pd
+import numpy as np
 import logging
 from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime, timedelta
@@ -24,6 +25,25 @@ import os
 import json
 
 logger = logging.getLogger(__name__)
+
+
+def convert_numpy_types(obj):
+    """Convert numpy types to Python native types for JSON serialization"""
+    if isinstance(obj, dict):
+        return {k: convert_numpy_types(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_numpy_types(item) for item in obj]
+    elif isinstance(obj, (np.bool_, np.bool8)):
+        return bool(obj)
+    elif isinstance(obj, (np.integer, np.int64, np.int32)):
+        return int(obj)
+    elif isinstance(obj, (np.floating, np.float64, np.float32)):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif pd.isna(obj):
+        return None
+    return obj
 
 # Watchlist storage path
 WATCHLIST_FILE = os.path.join(os.path.dirname(__file__), "..", "..", "data", "watchlist.json")
@@ -494,7 +514,8 @@ async def scan_ticker_cta(ticker: str) -> List[Dict]:
     except Exception as e:
         logger.error(f"Error in CTA scan for {ticker}: {e}")
     
-    return signals
+    # Convert numpy types for JSON serialization
+    return [convert_numpy_types(s) for s in signals]
 
 
 async def analyze_ticker_cta(ticker: str) -> Dict[str, Any]:
@@ -590,7 +611,8 @@ async def analyze_ticker_cta(ticker: str) -> Dict[str, Any]:
         result["error"] = str(e)
         logger.error(f"Error analyzing {ticker}: {e}")
     
-    return result
+    # Convert numpy types to Python native types for JSON serialization
+    return convert_numpy_types(result)
 
 
 async def run_cta_scan(tickers: List[str] = None, include_watchlist: bool = True) -> Dict:
