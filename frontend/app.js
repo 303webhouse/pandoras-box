@@ -61,6 +61,13 @@ let personalBias = 'NEUTRAL';  // NEUTRAL, TORO, URSA
 let biasOverrideActive = false;
 let biasOverrideDirection = 'MAJOR_TORO';  // MAJOR_TORO or MAJOR_URSA
 
+// Per-timeframe personal bias toggles (default: apply to all)
+let personalBiasAppliesTo = {
+    daily: true,
+    weekly: true,
+    cyclical: true
+};
+
 // Initialize app
 document.addEventListener('DOMContentLoaded', () => {
     initTradingViewWidget();
@@ -557,15 +564,36 @@ function updateBiasWithTrend(timeframe, biasData) {
         return;
     }
     
-    const level = biasData.level || 'LEAN_TORO';
+    const rawLevel = biasData.level || 'LEAN_TORO';
     const trend = biasData.trend || 'NEW';
     const previousLevel = biasData.previous_level;
     const timestamp = biasData.timestamp;
+    
+    // Apply personal bias adjustment if enabled for this timeframe
+    let level = rawLevel;
+    let personalBiasApplied = false;
+    if (personalBias !== 'NEUTRAL' && personalBiasAppliesTo[timeframe]) {
+        const rawValue = getBiasValue(rawLevel);
+        let adjustedValue = rawValue;
+        
+        if (personalBias === 'TORO') {
+            adjustedValue = Math.min(6, rawValue + 1);
+        } else if (personalBias === 'URSA') {
+            adjustedValue = Math.max(1, rawValue - 1);
+        }
+        
+        if (adjustedValue !== rawValue) {
+            const levelMap = {6: 'MAJOR_TORO', 5: 'MINOR_TORO', 4: 'LEAN_TORO', 3: 'LEAN_URSA', 2: 'MINOR_URSA', 1: 'MAJOR_URSA'};
+            level = levelMap[adjustedValue] || rawLevel;
+            personalBiasApplied = true;
+        }
+    }
     
     // Update level display (preserve shift indicator if it exists, only for weekly)
     if (levelElement) {
         const shiftIndicator = (timeframe === 'weekly') ? levelElement.querySelector('.bias-shift-indicator') : null;
         levelElement.textContent = level.replace('_', ' ');
+        levelElement.className = `bias-level ${level}`;
         // Re-add shift indicator if it existed (for weekly bias)
         if (shiftIndicator && timeframe === 'weekly') {
             levelElement.appendChild(shiftIndicator);
@@ -580,7 +608,7 @@ function updateBiasWithTrend(timeframe, biasData) {
         } else if (level.includes('URSA')) {
             container.classList.add('bearish');
         } else {
-            container.classList.add('neutral');
+            container.classList.add('bullish');  // Default bullish in 6-level system
         }
     }
     
@@ -913,11 +941,18 @@ function initWeeklyBiasSettings() {
     if (applyBtn) {
         applyBtn.addEventListener('click', () => {
             // Save checkbox states
-            document.querySelectorAll('#weeklyBiasSettingsModal .factor-toggle').forEach(toggle => {
+            document.querySelectorAll('#weeklyBiasSettingsModal .factor-toggle:not(.personal-bias-toggle)').forEach(toggle => {
                 const factorName = toggle.dataset.factor;
                 const checkbox = toggle.querySelector('input[type="checkbox"]');
-                weeklyBiasFactorStates[factorName] = checkbox.checked;
+                if (factorName) weeklyBiasFactorStates[factorName] = checkbox.checked;
             });
+            
+            // Save personal bias toggle for this timeframe
+            const personalBiasToggle = document.getElementById('weeklyPersonalBiasToggle');
+            if (personalBiasToggle) {
+                personalBiasAppliesTo.weekly = personalBiasToggle.checked;
+                savePersonalBiasState();
+            }
             
             saveFactorStatesToStorage();
             
@@ -972,11 +1007,18 @@ function initDailyBiasSettings() {
     // Apply factors
     if (applyBtn) {
         applyBtn.addEventListener('click', () => {
-            document.querySelectorAll('#dailyBiasSettingsModal .factor-toggle').forEach(toggle => {
+            document.querySelectorAll('#dailyBiasSettingsModal .factor-toggle:not(.personal-bias-toggle)').forEach(toggle => {
                 const factorName = toggle.dataset.factor;
                 const checkbox = toggle.querySelector('input[type="checkbox"]');
-                dailyBiasFactorStates[factorName] = checkbox.checked;
+                if (factorName) dailyBiasFactorStates[factorName] = checkbox.checked;
             });
+            
+            // Save personal bias toggle for this timeframe
+            const personalBiasToggle = document.getElementById('dailyPersonalBiasToggle');
+            if (personalBiasToggle) {
+                personalBiasAppliesTo.daily = personalBiasToggle.checked;
+                savePersonalBiasState();
+            }
             
             saveDailyFactorStatesToStorage();
             
@@ -1030,11 +1072,18 @@ function initCyclicalBiasSettings() {
     // Apply factors
     if (applyBtn) {
         applyBtn.addEventListener('click', () => {
-            document.querySelectorAll('#cyclicalBiasSettingsModal .factor-toggle').forEach(toggle => {
+            document.querySelectorAll('#cyclicalBiasSettingsModal .factor-toggle:not(.personal-bias-toggle)').forEach(toggle => {
                 const factorName = toggle.dataset.factor;
                 const checkbox = toggle.querySelector('input[type="checkbox"]');
-                cyclicalBiasFactorStates[factorName] = checkbox.checked;
+                if (factorName) cyclicalBiasFactorStates[factorName] = checkbox.checked;
             });
+            
+            // Save personal bias toggle for this timeframe
+            const personalBiasToggle = document.getElementById('cyclicalPersonalBiasToggle');
+            if (personalBiasToggle) {
+                personalBiasAppliesTo.cyclical = personalBiasToggle.checked;
+                savePersonalBiasState();
+            }
             
             saveCyclicalFactorStatesToStorage();
             
@@ -1125,7 +1174,25 @@ function loadPersonalBiasState() {
             personalBias = state.personalBias || 'NEUTRAL';
             biasOverrideActive = state.biasOverrideActive || false;
             biasOverrideDirection = state.biasOverrideDirection || 'MAJOR_TORO';
+            
+            // Load per-timeframe personal bias toggles
+            if (state.personalBiasAppliesTo) {
+                personalBiasAppliesTo = {
+                    daily: state.personalBiasAppliesTo.daily !== false,
+                    weekly: state.personalBiasAppliesTo.weekly !== false,
+                    cyclical: state.personalBiasAppliesTo.cyclical !== false
+                };
+            }
         }
+        
+        // Apply to per-timeframe toggle checkboxes
+        const dailyToggle = document.getElementById('dailyPersonalBiasToggle');
+        const weeklyToggle = document.getElementById('weeklyPersonalBiasToggle');
+        const cyclicalToggle = document.getElementById('cyclicalPersonalBiasToggle');
+        
+        if (dailyToggle) dailyToggle.checked = personalBiasAppliesTo.daily;
+        if (weeklyToggle) weeklyToggle.checked = personalBiasAppliesTo.weekly;
+        if (cyclicalToggle) cyclicalToggle.checked = personalBiasAppliesTo.cyclical;
         
         // Apply to UI elements
         const personalBiasSelector = document.getElementById('personalBiasSelector');
@@ -1156,7 +1223,8 @@ function savePersonalBiasState() {
         localStorage.setItem('personalBiasState', JSON.stringify({
             personalBias,
             biasOverrideActive,
-            biasOverrideDirection
+            biasOverrideDirection,
+            personalBiasAppliesTo
         }));
     } catch (e) {
         console.error('Error saving personal bias state:', e);
@@ -1291,7 +1359,7 @@ function loadFactorStatesIntoModal(timeframe, factorStates, fullData) {
         // Update vote displays if we have factor data
         if (fullData && fullData.details && fullData.details.factors) {
             const factors = fullData.details.factors;
-            document.querySelectorAll(`#${modalId} .factor-toggle`).forEach(toggle => {
+            document.querySelectorAll(`#${modalId} .factor-toggle:not(.personal-bias-toggle)`).forEach(toggle => {
                 const factorName = toggle.dataset.factor;
                 const voteElement = toggle.querySelector('.factor-vote');
                 if (voteElement && factors[factorName]) {
@@ -1301,6 +1369,12 @@ function loadFactorStatesIntoModal(timeframe, factorStates, fullData) {
                     voteElement.dataset.vote = vote;
                 }
             });
+        }
+        
+        // Set personal bias toggle state for this timeframe
+        const personalBiasToggle = document.getElementById(`${timeframe}PersonalBiasToggle`);
+        if (personalBiasToggle) {
+            personalBiasToggle.checked = personalBiasAppliesTo[timeframe] !== false;
         }
     } catch (err) {
         console.error(`Error in loadFactorStatesIntoModal for ${timeframe}:`, err);

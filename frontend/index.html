@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Pandora's Box - Real-time Trading Signal Dashboard">
     <title>Pandora's Box</title>
-    <link rel="stylesheet" href="styles.css?v=18">
+    <link rel="stylesheet" href="styles.css?v=19">
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#0a0e27">
 </head>
@@ -638,6 +638,14 @@
                         </label>
                         <span class="factor-vote" data-vote="0">(vote: 0)</span>
                     </div>
+                    <div class="factor-divider"></div>
+                    <div class="factor-toggle personal-bias-toggle" data-timeframe="weekly">
+                        <label>
+                            <input type="checkbox" id="weeklyPersonalBiasToggle" checked>
+                            <span class="factor-name">Apply My Personal Bias</span>
+                        </label>
+                        <span class="factor-note">(adjusts score by +/-1)</span>
+                    </div>
                 </div>
                 <div class="factors-modal-footer">
                     <button class="factors-btn reset" id="resetFactorsBtn">Reset All</button>
@@ -695,6 +703,14 @@
                             <span class="factor-name">Market Breadth (RSP vs SPY)</span>
                         </label>
                         <span class="factor-vote" data-vote="0">(vote: 0)</span>
+                    </div>
+                    <div class="factor-divider"></div>
+                    <div class="factor-toggle personal-bias-toggle" data-timeframe="daily">
+                        <label>
+                            <input type="checkbox" id="dailyPersonalBiasToggle" checked>
+                            <span class="factor-name">Apply My Personal Bias</span>
+                        </label>
+                        <span class="factor-note">(adjusts score by +/-1)</span>
                     </div>
                 </div>
                 <div class="factors-modal-footer">
@@ -754,6 +770,14 @@
                         </label>
                         <span class="factor-vote" data-vote="0">(vote: 0)</span>
                     </div>
+                    <div class="factor-divider"></div>
+                    <div class="factor-toggle personal-bias-toggle" data-timeframe="cyclical">
+                        <label>
+                            <input type="checkbox" id="cyclicalPersonalBiasToggle" checked>
+                            <span class="factor-name">Apply My Personal Bias</span>
+                        </label>
+                        <span class="factor-note">(adjusts score by +/-1)</span>
+                    </div>
                 </div>
                 <div class="factors-modal-footer">
                     <button class="factors-btn reset" id="resetCyclicalFactorsBtn">Reset All</button>
@@ -765,6 +789,6 @@
 
     <!-- TradingView Widget Script -->
     <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-    <script src="app.js?v=23"></script>
+    <script src="app.js?v=24"></script>
 </body>
 </html>
