@@ -19,9 +19,11 @@ from strategies.exhaustion import validate_exhaustion_signal, classify_exhaustio
 from bias_filters.tick_breadth import check_bias_alignment
 from bias_filters.macro_confluence import upgrade_signal_if_confluence
 from scoring.rank_trades import classify_signal
+from scoring.trade_ideas_scorer import calculate_signal_score, get_score_tier
 from database.redis_client import cache_signal
-from database.postgres_client import log_signal
+from database.postgres_client import log_signal, update_signal_with_score
 from websocket.broadcaster import manager
+from scheduler.bias_scheduler import get_bias_status
 
 logger = logging.getLogger(__name__)
 
@@ -131,7 +133,8 @@ async def process_exhaustion_signal(alert: TradingViewAlert, start_time: datetim
         "trade_type": "REVERSAL",
         "asset_class": "CRYPTO" if is_crypto_ticker(alert.ticker) else "EQUITY",
         "status": "ACTIVE",
-        "score": 50  # Base score
+        "rsi": alert.rsi,
+        "adx": alert.adx
     }
     
     # 🔥 CHECK MACRO CONFLUENCE FOR BTC
@@ -140,13 +143,15 @@ async def process_exhaustion_signal(alert: TradingViewAlert, start_time: datetim
         signal_data = await upgrade_signal_if_confluence(signal_data)
         
         if signal_data.get("signal_type") in ["APIS_CALL", "KODIAK_CALL"]:
-            signal_data["score"] = 95  # High conviction
             logger.info(f"⭐ BTC signal upgraded to {signal_data['signal_type']}!")
+    
+    # Apply proper scoring
+    signal_data = await apply_signal_scoring(signal_data)
     
     # Cache, log, and broadcast
     await cache_signal(signal_id, signal_data, ttl=3600)
     await log_signal(signal_data)
-    await manager.broadcast_signal(signal_data)
+    await manager.broadcast_signal_smart(signal_data, priority_threshold=75.0)
     
     elapsed = (datetime.now() - start_time).total_seconds() * 1000
     logger.info(f"✅ Exhaustion signal processed: {alert.ticker} {signal_data['signal_type']} in {elapsed:.1f}ms")
@@ -191,13 +196,17 @@ async def process_sniper_signal(alert: TradingViewAlert, start_time: datetime):
         "trade_type": "CONTINUATION",
         "asset_class": "CRYPTO" if is_crypto_ticker(alert.ticker) else "EQUITY",
         "status": "ACTIVE",
-        "score": 70
+        "rsi": alert.rsi,
+        "adx": alert.adx
     }
+    
+    # Apply proper scoring
+    signal_data = await apply_signal_scoring(signal_data)
     
     # Cache, log, and broadcast
     await cache_signal(signal_id, signal_data, ttl=3600)
     await log_signal(signal_data)
-    await manager.broadcast_signal(signal_data)
+    await manager.broadcast_signal_smart(signal_data, priority_threshold=75.0)
     
     elapsed = (datetime.now() - start_time).total_seconds() * 1000
     logger.info(f"✅ Sniper signal processed: {alert.ticker} {signal_type} in {elapsed:.1f}ms")
@@ -245,7 +254,7 @@ async def process_triple_line_signal(alert: TradingViewAlert, start_time: dateti
         "signal_id": signal_id,
         "timestamp": alert.timestamp or datetime.now().isoformat(),
         "ticker": alert.ticker,
-        "strategy": alert.strategy,
+        "strategy": "Triple Line Trend Retracement",
         "direction": alert.direction,
         "signal_type": signal_type,
         "entry_price": alert.entry_price,
@@ -255,18 +264,20 @@ async def process_triple_line_signal(alert: TradingViewAlert, start_time: dateti
         "risk_reward": risk_reward,
         "timeframe": alert.timeframe,
         "bias_level": bias_level,
-        "bias_aligned": bias_aligned,
         "adx": alert.adx,
+        "rsi": alert.rsi,
         "line_separation": alert.line_separation,
         "asset_class": "CRYPTO" if is_crypto_ticker(alert.ticker) else "EQUITY",
-        "status": "ACTIVE",
-        "score": 75 if bias_aligned else 50
+        "status": "ACTIVE"
     }
+    
+    # Apply proper scoring
+    signal_data = await apply_signal_scoring(signal_data)
     
     # Cache, log, and broadcast
     await cache_signal(signal_id, signal_data, ttl=3600)
     await log_signal(signal_data)
-    await manager.broadcast_signal(signal_data)
+    await manager.broadcast_signal_smart(signal_data, priority_threshold=75.0)
     
     elapsed = (datetime.now() - start_time).total_seconds() * 1000
     logger.info(f"✅ Signal processed: {alert.ticker} {signal_type} in {elapsed:.1f}ms")
@@ -307,12 +318,16 @@ async def process_generic_signal(alert: TradingViewAlert, start_time: datetime):
         "timeframe": alert.timeframe,
         "asset_class": "CRYPTO" if is_crypto_ticker(alert.ticker) else "EQUITY",
         "status": "ACTIVE",
-        "score": 50
+        "rsi": alert.rsi,
+        "adx": alert.adx
     }
+    
+    # Apply proper scoring
+    signal_data = await apply_signal_scoring(signal_data)
     
     await cache_signal(signal_id, signal_data, ttl=3600)
     await log_signal(signal_data)
-    await manager.broadcast_signal(signal_data)
+    await manager.broadcast_signal_smart(signal_data, priority_threshold=75.0)
     
     elapsed = (datetime.now() - start_time).total_seconds() * 1000
     logger.info(f"✅ Generic signal processed: {alert.ticker} {signal_type} in {elapsed:.1f}ms")
@@ -338,6 +353,61 @@ def calculate_risk_reward(alert: TradingViewAlert) -> float:
         reward = alert.entry_price - alert.target_1
     
     return round(reward / risk, 2) if risk > 0 else 0
+
+
+async def apply_signal_scoring(signal_data: dict) -> dict:
+    """
+    Apply the Trade Ideas Scorer to a signal.
+    Gets current bias and calculates proper score, alignment, and triggering factors.
+    """
+    try:
+        # Get current bias for scoring
+        bias_status = get_bias_status()
+        current_bias = {
+            "daily": bias_status.get("daily", {}),
+            "weekly": bias_status.get("weekly", {}),
+            "cyclical": bias_status.get("cyclical", {})
+        }
+        
+        # Calculate score using the scorer
+        score, bias_alignment, triggering_factors = calculate_signal_score(signal_data, current_bias)
+        
+        # Update signal data
+        signal_data["score"] = score
+        signal_data["bias_alignment"] = bias_alignment
+        signal_data["triggering_factors"] = triggering_factors
+        signal_data["scoreTier"] = get_score_tier(score)
+        
+        # Set confidence based on score
+        if score >= 75:
+            signal_data["confidence"] = "HIGH"
+        elif score >= 55:
+            signal_data["confidence"] = "MEDIUM"
+        else:
+            signal_data["confidence"] = "LOW"
+        
+        logger.info(f"📊 Signal scored: {signal_data.get('ticker')} = {score} ({bias_alignment})")
+        
+        # Update score in database
+        try:
+            await update_signal_with_score(
+                signal_data.get("signal_id"),
+                score,
+                bias_alignment,
+                triggering_factors
+            )
+        except Exception as db_err:
+            logger.warning(f"Failed to update score in DB: {db_err}")
+        
+        return signal_data
+        
+    except Exception as e:
+        logger.warning(f"Error applying signal scoring: {e}")
+        # Return signal with defaults if scoring fails
+        signal_data["score"] = 50
+        signal_data["bias_alignment"] = "NEUTRAL"
+        signal_data["confidence"] = "MEDIUM"
+        return signal_data
 
 
 @router.post("/test")
