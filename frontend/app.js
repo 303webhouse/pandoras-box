@@ -2770,7 +2770,8 @@ function renderAnalyzerResults(data) {
     `;
     
     // Near miss info if no signal
-    if (verdict === 'NO_SIGNAL' && data.near_miss) {
+    const hunterVerdict = data.overall_verdict || 'NO_SIGNAL';
+    if (hunterVerdict === 'NO_SIGNAL' && data.near_miss) {
         html += `
             <div class="near-miss">
                 <div class="near-miss-title">Criteria Met</div>
