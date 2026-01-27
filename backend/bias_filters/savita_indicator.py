@@ -48,6 +48,20 @@ SAVITA_CONFIG = {
 }
 
 
+def is_savita_stale() -> bool:
+    """Check if Savita data is stale (>30 days old)"""
+    last_updated = SAVITA_CONFIG.get("last_updated")
+    if not last_updated:
+        return True
+    
+    try:
+        update_date = datetime.strptime(last_updated, "%Y-%m-%d")
+        days_since = (datetime.now() - update_date).days
+        return days_since > 30
+    except:
+        return True
+
+
 def get_savita_reading() -> Dict[str, Any]:
     """
     Get the current Savita Indicator reading and interpretation
@@ -59,11 +73,26 @@ def get_savita_reading() -> Dict[str, Any]:
             "signal": str (SELL, NEUTRAL, BUY),
             "interpretation": str,
             "last_updated": str,
-            "enabled": bool
+            "enabled": bool,
+            "stale": bool
         }
     """
     reading = SAVITA_CONFIG["current_reading"]
     thresholds = SAVITA_CONFIG["thresholds"]
+    stale = is_savita_stale()
+    
+    # If stale, return neutral (disabled from scoring)
+    if stale:
+        return {
+            "reading": reading,
+            "bias": "NEUTRAL",
+            "signal": "DISABLED",
+            "interpretation": f"Data stale (>30 days old) - not affecting score. Last reading: {reading}%",
+            "last_updated": SAVITA_CONFIG["last_updated"],
+            "enabled": False,
+            "stale": True,
+            "thresholds": thresholds
+        }
     
     # Determine bias level
     if reading >= thresholds["ursa_major"]:
@@ -94,6 +123,7 @@ def get_savita_reading() -> Dict[str, Any]:
         "interpretation": interpretation,
         "last_updated": SAVITA_CONFIG["last_updated"],
         "enabled": SAVITA_CONFIG["enabled"],
+        "stale": False,
         "thresholds": thresholds
     }
 
