@@ -842,7 +842,7 @@ function updateBiasWithTrend(timeframe, biasData) {
                 day: 'numeric',
                 hour: 'numeric',
                 minute: '2-digit'
-            }) + ' MT';
+            }) + ' ET';
         }
         
         detailsElement.innerHTML = `
@@ -1800,7 +1800,7 @@ async function loadCyclicalBiasFallback() {
                     day: 'numeric',
                     hour: 'numeric',
                     minute: '2-digit'
-                }) + ' MT' : 'Unknown';
+                }) + ' ET' : 'Unknown';
                 detailsElement.innerHTML = `
                     Vote: ${totalVote}/12 • Long-term macro<br>
                     <small>Updated: ${timestamp}</small>

@@ -83,11 +83,16 @@ async def root():
 @app.get("/health")
 async def health_check():
     """Detailed health check"""
+    from scheduler.bias_scheduler import get_eastern_now
+    
     redis_client = await get_redis_client()
     postgres_client = await get_postgres_client()
     
+    now_et = get_eastern_now()
+    
     return {
         "status": "healthy",
+        "server_time_et": now_et.strftime("%Y-%m-%d %H:%M:%S %Z"),
         "redis": "connected" if redis_client else "disconnected",
         "postgres": "connected" if postgres_client else "disconnected",
         "websocket_connections": len(manager.active_connections)
