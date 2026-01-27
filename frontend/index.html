@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Pandora's Box - Real-time Trading Signal Dashboard">
     <title>Pandora's Box</title>
-    <link rel="stylesheet" href="styles.css?v=22">
+    <link rel="stylesheet" href="styles.css?v=23">
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#0a0e27">
 </head>
@@ -70,6 +70,14 @@
             <!-- Override Active Banner -->
             <div class="override-active-banner" id="overrideActiveBanner">
                 ⚡ OVERRIDE ACTIVE: <span id="overrideBiasDisplay">TORO MAJOR</span> - All calculated biases ignored
+            </div>
+            
+            <!-- Crisis Mode Alert Banner -->
+            <div class="crisis-alert-banner" id="crisisAlertBanner" style="display: none;">
+                <span class="crisis-icon">🚨</span>
+                <span class="crisis-text">CRISIS TIER ACTIVE: </span>
+                <span class="crisis-factors" id="crisisFactors">Sahm Rule triggered</span>
+                <span class="crisis-note"> - Elevated weighting applied</span>
             </div>
             
             <div class="bias-card" id="dailyBias">
@@ -789,6 +797,6 @@
 
     <!-- TradingView Widget Script -->
     <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-    <script src="app.js?v=26"></script>
+    <script src="app.js?v=27"></script>
 </body>
 </html>

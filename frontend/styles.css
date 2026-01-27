@@ -425,6 +425,63 @@ body.override-active-bearish .override-toggle[data-active="true"] {
     50% { box-shadow: 0 0 15px var(--accent-teal); }
 }
 
+/* Crisis Alert Banner */
+.crisis-alert-banner {
+    display: none;
+    background: linear-gradient(90deg, #dc2626, #991b1b);
+    color: #ffffff;
+    padding: 10px 16px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 700;
+    text-align: center;
+    margin-top: 8px;
+    animation: crisis-pulse 1.5s infinite;
+    border: 2px solid #ef4444;
+}
+
+.crisis-alert-banner.active {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+.crisis-icon {
+    font-size: 16px;
+    animation: crisis-shake 0.5s infinite;
+}
+
+.crisis-text {
+    font-weight: 800;
+    text-transform: uppercase;
+}
+
+.crisis-factors {
+    color: #fef08a;
+    font-weight: 700;
+}
+
+.crisis-note {
+    opacity: 0.9;
+    font-weight: 500;
+}
+
+@keyframes crisis-pulse {
+    0%, 100% { 
+        box-shadow: 0 0 5px #dc2626, 0 0 10px rgba(220, 38, 38, 0.5); 
+    }
+    50% { 
+        box-shadow: 0 0 15px #dc2626, 0 0 25px rgba(220, 38, 38, 0.7); 
+    }
+}
+
+@keyframes crisis-shake {
+    0%, 100% { transform: translateX(0); }
+    25% { transform: translateX(-2px); }
+    75% { transform: translateX(2px); }
+}
+
 /* Personal Bias Badge on Bias Cards */
 .personal-bias-badge {
     display: block;
