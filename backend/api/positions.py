@@ -663,14 +663,17 @@ async def get_active_signals_api():
                     # Set confidence and potentially upgrade signal type
                     direction = sig.get('direction', '').upper()
                     
-                    if score >= 75:
+                    if score >= 85:
                         sig['confidence'] = "HIGH"
                         sig['priority'] = "HIGH"
-                        # Upgrade to APIS/KODIAK for strongest signals
+                        # Upgrade to APIS/KODIAK for strongest signals (rare, 85+ only)
                         if direction in ["LONG", "BUY"]:
                             sig['signal_type'] = "APIS_CALL"
                         elif direction in ["SHORT", "SELL"]:
                             sig['signal_type'] = "KODIAK_CALL"
+                    elif score >= 75:
+                        sig['confidence'] = "HIGH"
+                        sig['priority'] = "HIGH"
                     elif score >= 55:
                         sig['confidence'] = "MEDIUM"
                     else:
@@ -823,6 +826,56 @@ async def debug_signals():
         debug_info["postgresql"]["error"] = str(e)
     
     return debug_info
+
+
+@router.delete("/signals/clear-all")
+async def clear_all_signals():
+    """
+    Clear all active signals from Redis and PostgreSQL.
+    Use this to remove test/corrupted signals and start fresh.
+    
+    WARNING: This permanently deletes all active signals!
+    """
+    from database.redis_client import get_active_signals as get_redis_signals, delete_signal
+    from database.postgres_client import get_postgres_client
+    
+    cleared = {
+        "redis": 0,
+        "postgresql": 0
+    }
+    
+    try:
+        # Clear Redis signals
+        redis_signals = await get_redis_signals()
+        for sig in redis_signals:
+            sig_id = sig.get('signal_id')
+            if sig_id:
+                await delete_signal(sig_id)
+                cleared["redis"] += 1
+        
+        logger.info(f"Cleared {cleared['redis']} signals from Redis")
+    except Exception as e:
+        logger.error(f"Error clearing Redis: {e}")
+    
+    try:
+        # Clear PostgreSQL active signals (set user_action to 'CLEARED')
+        pool = await get_postgres_client()
+        async with pool.acquire() as conn:
+            result = await conn.execute(
+                "UPDATE signals SET user_action = 'CLEARED' WHERE user_action IS NULL"
+            )
+            # Parse the result to get count
+            cleared["postgresql"] = int(result.split()[-1]) if result else 0
+        
+        logger.info(f"Cleared {cleared['postgresql']} signals from PostgreSQL")
+    except Exception as e:
+        logger.error(f"Error clearing PostgreSQL: {e}")
+    
+    return {
+        "status": "success",
+        "message": "All active signals cleared",
+        "cleared": cleared
+    }
 
 
 @router.get("/signals/statistics")
