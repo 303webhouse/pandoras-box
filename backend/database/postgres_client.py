@@ -290,18 +290,29 @@ async def get_active_trade_ideas(limit: int = 10) -> List[Dict[Any, Any]]:
     pool = await get_postgres_client()
     
     async with pool.acquire() as conn:
-        rows = await conn.fetch("""
-            SELECT 
-                signal_id, timestamp, strategy, ticker, asset_class,
-                direction, signal_type, entry_price, stop_loss, target_1,
-                target_2, risk_reward, timeframe, bias_level, adx,
-                line_separation, score, bias_alignment, triggering_factors,
-                created_at
-            FROM signals 
-            WHERE user_action IS NULL 
-            ORDER BY score DESC NULLS LAST, created_at DESC
-            LIMIT $1
-        """, limit)
+        # Use SELECT * to be resilient to schema changes
+        # Order by created_at if score column doesn't exist
+        try:
+            rows = await conn.fetch("""
+                SELECT *
+                FROM signals 
+                WHERE user_action IS NULL 
+                ORDER BY COALESCE(score, 0) DESC, created_at DESC
+                LIMIT $1
+            """, limit)
+        except Exception as e:
+            # Fallback query without score ordering if that column doesn't exist
+            logger.warning(f"Score-based query failed, using fallback: {e}")
+            rows = await conn.fetch("""
+                SELECT signal_id, timestamp, strategy, ticker, asset_class,
+                    direction, signal_type, entry_price, stop_loss, target_1,
+                    risk_reward, timeframe, bias_level, adx, line_separation,
+                    created_at
+                FROM signals 
+                WHERE user_action IS NULL 
+                ORDER BY created_at DESC
+                LIMIT $1
+            """, limit)
         
         return [dict(row) for row in rows]
 
@@ -314,18 +325,27 @@ async def get_signal_queue(limit: int = 50) -> List[Dict[Any, Any]]:
     pool = await get_postgres_client()
     
     async with pool.acquire() as conn:
-        rows = await conn.fetch("""
-            SELECT 
-                signal_id, timestamp, strategy, ticker, asset_class,
-                direction, signal_type, entry_price, stop_loss, target_1,
-                target_2, risk_reward, timeframe, bias_level, adx,
-                line_separation, score, bias_alignment, triggering_factors,
-                created_at
-            FROM signals 
-            WHERE user_action IS NULL 
-            ORDER BY score DESC NULLS LAST, created_at DESC
-            LIMIT $1
-        """, limit)
+        # Use SELECT * to be resilient to schema changes
+        try:
+            rows = await conn.fetch("""
+                SELECT *
+                FROM signals 
+                WHERE user_action IS NULL 
+                ORDER BY COALESCE(score, 0) DESC, created_at DESC
+                LIMIT $1
+            """, limit)
+        except Exception as e:
+            logger.warning(f"Signal queue query failed, using fallback: {e}")
+            rows = await conn.fetch("""
+                SELECT signal_id, timestamp, strategy, ticker, asset_class,
+                    direction, signal_type, entry_price, stop_loss, target_1,
+                    risk_reward, timeframe, bias_level, adx, line_separation,
+                    created_at
+                FROM signals 
+                WHERE user_action IS NULL 
+                ORDER BY created_at DESC
+                LIMIT $1
+            """, limit)
         
         return [dict(row) for row in rows]
 
