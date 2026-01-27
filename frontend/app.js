@@ -2481,31 +2481,38 @@ async function analyzeTicker() {
     const input = document.getElementById('analyzeTickerInput');
     const resultsContainer = document.getElementById('analyzerResults');
     const gaugesContainer = document.getElementById('analyzerGauges');
+    const aggregateContainer = document.getElementById('analyzerAggregate');
     const ticker = input.value.trim().toUpperCase();
     
     if (!ticker) return;
     
     resultsContainer.innerHTML = '<p class="empty-state">Analyzing...</p>';
     if (gaugesContainer) gaugesContainer.style.display = 'none';
+    if (aggregateContainer) aggregateContainer.style.display = 'none';
     
     try {
-        // Fetch both Hunter analysis and Hybrid gauges in parallel
-        const [hunterResponse, hybridResponse] = await Promise.all([
+        // Fetch Hunter analysis, Hybrid gauges, and current bias in parallel
+        const [hunterResponse, hybridResponse, biasResponse] = await Promise.all([
             fetch(`${API_URL}/scanner/analyze/${ticker}`),
-            fetch(`${API_URL}/hybrid/combined/${ticker}`)
+            fetch(`${API_URL}/hybrid/combined/${ticker}`),
+            fetch(`${API_URL}/bias-auto/status`)
         ]);
         
         const hunterData = await hunterResponse.json();
         const hybridData = await hybridResponse.json();
+        const biasData = await biasResponse.json();
         
-        // Render Hunter criteria results
+        // Render ticker info/metrics
         renderAnalyzerResults(hunterData);
         
-        // Render Hybrid gauges (Technical + Analyst + Combined)
+        // Render Hybrid gauges (Technical + Analyst)
         if (hybridData.status === 'success') {
             renderHybridAnalysis(hybridData);
             if (gaugesContainer) gaugesContainer.style.display = 'flex';
         }
+        
+        // Calculate and render aggregate verdict with bias alignment
+        renderAggregateVerdict(ticker, hunterData, hybridData, biasData);
         
         // Also switch chart to this ticker
         changeChartSymbol(ticker);
@@ -2514,6 +2521,135 @@ async function analyzeTicker() {
         console.error('Error analyzing ticker:', error);
         resultsContainer.innerHTML = '<p class="empty-state">Analysis failed</p>';
     }
+}
+
+function renderAggregateVerdict(ticker, hunterData, hybridData, biasData) {
+    const container = document.getElementById('analyzerAggregate');
+    if (!container) return;
+    
+    // Calculate aggregate score from all sources
+    let totalScore = 0;
+    let maxScore = 0;
+    
+    // 1. Technical Gauge Score (weight: 3)
+    const techSignal = hybridData?.technical_gauge?.signal || '';
+    const techScore = hybridData?.technical_gauge?.score || {};
+    if (techSignal) {
+        maxScore += 3;
+        if (techSignal.includes('STRONG_BUY')) totalScore += 3;
+        else if (techSignal.includes('BUY')) totalScore += 2;
+        else if (techSignal.includes('STRONG_SELL')) totalScore -= 3;
+        else if (techSignal.includes('SELL')) totalScore -= 2;
+        // Neutral = 0
+    }
+    
+    // 2. Analyst Gauge Score (weight: 2)
+    const analystConsensus = hybridData?.analyst_gauge?.consensus || '';
+    const analystUpside = hybridData?.analyst_gauge?.upside_pct || 0;
+    if (analystConsensus) {
+        maxScore += 2;
+        if (analystConsensus.toLowerCase().includes('strong_buy') || analystConsensus.toLowerCase() === 'buy') {
+            totalScore += 2;
+        } else if (analystConsensus.toLowerCase().includes('hold')) {
+            totalScore += 0;
+        } else if (analystConsensus.toLowerCase().includes('sell')) {
+            totalScore -= 2;
+        }
+    }
+    // Analyst upside bonus (weight: 1)
+    if (analystUpside !== null && analystUpside !== undefined) {
+        maxScore += 1;
+        if (analystUpside > 15) totalScore += 1;
+        else if (analystUpside < -10) totalScore -= 1;
+    }
+    
+    // 3. Hunter/CTA Analysis Score (weight: 2)
+    const hunterVerdict = hunterData?.overall_verdict || '';
+    const ctaZone = hunterData?.cta_analysis?.cta_zone || '';
+    if (hunterVerdict) {
+        maxScore += 2;
+        if (hunterVerdict === 'TAURUS_SIGNAL') totalScore += 2;
+        else if (hunterVerdict === 'URSA_SIGNAL') totalScore -= 2;
+    }
+    // CTA Zone bonus
+    if (ctaZone) {
+        maxScore += 1;
+        if (ctaZone === 'MAX_LONG') totalScore += 1;
+        else if (ctaZone === 'CAPITULATION' || ctaZone === 'WATERFALL') totalScore -= 1;
+    }
+    
+    // 4. Price vs Key Levels (weight: 1)
+    const metrics = hunterData?.current_metrics || {};
+    if (metrics.price && metrics.sma_200) {
+        maxScore += 1;
+        if (metrics.price > metrics.sma_200) totalScore += 1;
+        else totalScore -= 1;
+    }
+    
+    // Force non-neutral: if score is exactly 0, use technical tiebreaker
+    if (totalScore === 0 && techScore.buy !== undefined) {
+        totalScore = (techScore.buy > techScore.sell) ? 0.5 : -0.5;
+    }
+    
+    // Determine verdict level (6-level system like bias)
+    const scorePercent = maxScore > 0 ? (totalScore / maxScore) * 100 : 0;
+    let verdict, verdictClass;
+    
+    if (scorePercent >= 50) {
+        verdict = 'MAJOR TORO';
+        verdictClass = 'major-toro';
+    } else if (scorePercent >= 25) {
+        verdict = 'MINOR TORO';
+        verdictClass = 'minor-toro';
+    } else if (scorePercent > 0) {
+        verdict = 'LEAN TORO';
+        verdictClass = 'lean-toro';
+    } else if (scorePercent <= -50) {
+        verdict = 'MAJOR URSA';
+        verdictClass = 'major-ursa';
+    } else if (scorePercent <= -25) {
+        verdict = 'MINOR URSA';
+        verdictClass = 'minor-ursa';
+    } else {
+        verdict = 'LEAN URSA';
+        verdictClass = 'lean-ursa';
+    }
+    
+    // Get current daily bias for alignment check
+    const dailyBias = biasData?.biases?.daily?.level || 'UNKNOWN';
+    const isToro = verdict.includes('TORO');
+    const biasIsToro = dailyBias.includes('TORO');
+    
+    let alignmentStatus, alignmentClass;
+    if (dailyBias === 'UNKNOWN') {
+        alignmentStatus = 'Bias unavailable';
+        alignmentClass = 'unknown';
+    } else if (isToro === biasIsToro) {
+        alignmentStatus = `✅ ALIGNED (${dailyBias.replace('_', ' ')})`;
+        alignmentClass = 'aligned';
+    } else {
+        alignmentStatus = `⚠️ DIVERGENT (${dailyBias.replace('_', ' ')})`;
+        alignmentClass = 'divergent';
+    }
+    
+    // Update UI
+    document.getElementById('aggregateTicker').textContent = ticker;
+    
+    const signalEl = document.getElementById('aggregateSignal');
+    signalEl.textContent = verdict;
+    signalEl.className = `aggregate-signal ${verdictClass}`;
+    
+    document.getElementById('aggregateScore').textContent = `Score: ${totalScore > 0 ? '+' : ''}${totalScore.toFixed(1)} / ${maxScore}`;
+    
+    const alignmentEl = document.getElementById('biasAlignmentStatus');
+    alignmentEl.textContent = alignmentStatus;
+    alignmentEl.className = `alignment-status ${alignmentClass}`;
+    
+    // Update container class for styling
+    const verdictContainer = document.getElementById('aggregateVerdict');
+    verdictContainer.className = `aggregate-verdict ${verdictClass}`;
+    
+    container.style.display = 'flex';
 }
 
 function renderAnalyzerResults(data) {

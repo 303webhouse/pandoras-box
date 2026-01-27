@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Pandora's Box - Real-time Trading Signal Dashboard">
     <title>Pandora's Box</title>
-    <link rel="stylesheet" href="styles.css?v=25">
+    <link rel="stylesheet" href="styles.css?v=26">
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#0a0e27">
 </head>
@@ -193,7 +193,27 @@
                     </div>
                 </div>
                 
-                <!-- Integrated Gauges (Technical + Analyst + Combined) -->
+                <!-- Aggregate Verdict with Bias Alignment -->
+                <div class="analyzer-aggregate" id="analyzerAggregate" style="display: none;">
+                    <div class="aggregate-verdict" id="aggregateVerdict">
+                        <span class="aggregate-ticker" id="aggregateTicker">--</span>
+                        <span class="aggregate-signal" id="aggregateSignal">--</span>
+                    </div>
+                    <div class="aggregate-details">
+                        <div class="aggregate-score" id="aggregateScore">Score: --</div>
+                        <div class="aggregate-alignment" id="aggregateAlignment">
+                            <span class="alignment-label">vs Daily Bias:</span>
+                            <span class="alignment-status" id="biasAlignmentStatus">--</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Ticker Info & Metrics -->
+                <div class="analyzer-results" id="analyzerResults">
+                    <p class="empty-state">Enter a ticker to analyze</p>
+                </div>
+                
+                <!-- Gauges (Technical + Analyst) - Below Info Boxes -->
                 <div class="analyzer-gauges" id="analyzerGauges" style="display: none;">
                     <div class="gauge-card technical-gauge" id="technicalGauge">
                         <h3>📊 Technical</h3>
@@ -218,20 +238,6 @@
                             <div>Upside: <span id="analystUpside">--%</span></div>
                         </div>
                     </div>
-                    <div class="gauge-card combined-gauge" id="combinedGauge">
-                        <h3>⚡ Combined</h3>
-                        <div class="gauge-signal" id="combinedSignal">--</div>
-                        <div class="gauge-score" id="combinedScore">Score: --/5</div>
-                        <div class="gauge-details" id="tickerMeta">
-                            <div id="tickerName">--</div>
-                            <div id="tickerSector">--</div>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Hunter Criteria Results -->
-                <div class="analyzer-results" id="analyzerResults">
-                    <p class="empty-state">Enter a ticker to analyze</p>
                 </div>
             </div>
         </section>
@@ -833,6 +839,6 @@
 
     <!-- TradingView Widget Script -->
     <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-    <script src="app.js?v=30"></script>
+    <script src="app.js?v=31"></script>
 </body>
 </html>
