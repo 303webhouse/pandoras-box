@@ -1925,6 +1925,49 @@ body.override-active-bearish .override-toggle[data-active="true"] {
     border-top: 1px solid var(--border-color);
 }
 
+/* Analyzer Gauges (Integrated) */
+.analyzer-gauges {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+}
+
+.analyzer-gauges .gauge-card {
+    flex: 1;
+    min-width: 140px;
+    padding: 12px;
+    background: var(--dark-bg);
+    border-radius: 8px;
+    text-align: center;
+}
+
+.analyzer-gauges .gauge-card h3 {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin: 0 0 8px 0;
+}
+
+.analyzer-gauges .gauge-signal {
+    font-size: 14px;
+    font-weight: 700;
+    padding: 4px 8px;
+    border-radius: 4px;
+    margin-bottom: 6px;
+}
+
+.analyzer-gauges .gauge-score {
+    font-size: 11px;
+    color: var(--text-secondary);
+}
+
+.analyzer-gauges .gauge-details {
+    font-size: 10px;
+    color: var(--text-secondary);
+    margin-top: 6px;
+    opacity: 0.8;
+}
+
 /* Analyzer Results */
 .analyzer-results {
     background: var(--dark-bg);

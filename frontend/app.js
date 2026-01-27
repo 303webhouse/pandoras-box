@@ -2480,17 +2480,32 @@ function initTickerAnalyzer() {
 async function analyzeTicker() {
     const input = document.getElementById('analyzeTickerInput');
     const resultsContainer = document.getElementById('analyzerResults');
+    const gaugesContainer = document.getElementById('analyzerGauges');
     const ticker = input.value.trim().toUpperCase();
     
     if (!ticker) return;
     
     resultsContainer.innerHTML = '<p class="empty-state">Analyzing...</p>';
+    if (gaugesContainer) gaugesContainer.style.display = 'none';
     
     try {
-        const response = await fetch(`${API_URL}/scanner/analyze/${ticker}`);
-        const data = await response.json();
+        // Fetch both Hunter analysis and Hybrid gauges in parallel
+        const [hunterResponse, hybridResponse] = await Promise.all([
+            fetch(`${API_URL}/scanner/analyze/${ticker}`),
+            fetch(`${API_URL}/hybrid/combined/${ticker}`)
+        ]);
         
-        renderAnalyzerResults(data);
+        const hunterData = await hunterResponse.json();
+        const hybridData = await hybridResponse.json();
+        
+        // Render Hunter criteria results
+        renderAnalyzerResults(hunterData);
+        
+        // Render Hybrid gauges (Technical + Analyst + Combined)
+        if (hybridData.status === 'success') {
+            renderHybridAnalysis(hybridData);
+            if (gaugesContainer) gaugesContainer.style.display = 'flex';
+        }
         
         // Also switch chart to this ticker
         changeChartSymbol(ticker);
@@ -2964,34 +2979,11 @@ function createCtaCard(signal) {
 
 
 // ==========================================
-// HYBRID MARKET SCANNER
+// HYBRID MARKET SCANNER (Batch Scan Only)
 // ==========================================
 
 function initHybridScanner() {
-    const analyzeBtn = document.getElementById('hybridAnalyzeBtn');
     const scanBtn = document.getElementById('runHybridScanBtn');
-    const tickerInput = document.getElementById('hybridTickerInput');
-    
-    if (analyzeBtn) {
-        analyzeBtn.addEventListener('click', () => {
-            const ticker = tickerInput.value.trim().toUpperCase();
-            if (ticker) {
-                analyzeHybridTicker(ticker);
-            }
-        });
-    }
-    
-    // Enter key on input
-    if (tickerInput) {
-        tickerInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') {
-                const ticker = tickerInput.value.trim().toUpperCase();
-                if (ticker) {
-                    analyzeHybridTicker(ticker);
-                }
-            }
-        });
-    }
     
     if (scanBtn) {
         scanBtn.addEventListener('click', runHybridScan);
