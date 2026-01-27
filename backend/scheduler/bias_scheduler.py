@@ -1148,31 +1148,33 @@ async def refresh_weekly_bias() -> Dict[str, Any]:
 
 async def refresh_cyclical_bias() -> Dict[str, Any]:
     """
-    Refresh cyclical bias based on 6-FACTOR long-term macro analysis:
-    1. 200 SMA Positions (SPY, QQQ, IWM above/below 200-day SMA)
-    2. Yield Curve (2Y-10Y spread - inverted = bearish)
-    3. Credit Spreads (HYG/LQD ratio - widening = bearish)
-    4. Savita Indicator (BofA sentiment)
-    5. Long-term Breadth (% stocks above 200 SMA)
-    6. Sahm Rule (recession indicator based on unemployment)
+    Refresh cyclical bias based on 8-FACTOR long-term macro analysis with TIERED VOTING:
     
+    Standard Factors (±2 max):
+    1. 200 SMA Positions (SPY, QQQ, IWM above/below 200-day SMA)
+    2. Savita Indicator (BofA sentiment)
+    3. Long-term Breadth (RSP vs SPY equal-weight performance)
+    4. Cyclical vs Defensive (XLY vs XLP sector rotation)
+    5. Copper/Gold Ratio (economic activity vs safety)
+    
+    Crisis-Tiered Factors (can exceed ±2 in extreme conditions):
+    6. Yield Curve: ±2 normal, ±3 if deeply inverted (< -0.5%)
+    7. Credit Spreads: ±2 normal, ±3 if extreme stress
+    8. Sahm Rule (VIX proxy): ±2 normal, ±4 if recession triggered
+    
+    Max possible: ±16 normal, ±20 crisis conditions
     Updates: Weekly or on significant macro changes
     """
-    logger.info("📊 Refreshing Cyclical Bias (6-Factor Macro Model)...")
+    logger.info("📊 Refreshing Cyclical Bias (8-Factor Tiered Macro Model)...")
     
-    factor_votes = []  # List of (name, vote, details)
+    factor_votes = []  # List of (name, vote, max_vote, details)
+    import yfinance as yf
     
     try:
-        from scanners.hybrid_scanner import get_scanner
-        scanner = get_scanner()
-        
         # =====================================================================
-        # FACTOR 1: 200 SMA Positions (SPY, QQQ, IWM) using yfinance
+        # FACTOR 1: 200 SMA Positions (SPY, QQQ, IWM) - Standard ±2
         # =====================================================================
         try:
-            import yfinance as yf
-            import pandas as pd
-            
             indices = ["SPY", "QQQ", "IWM"]
             above_200sma = 0
             below_200sma = 0
@@ -1180,9 +1182,8 @@ async def refresh_cyclical_bias() -> Dict[str, Any]:
             
             for ticker in indices:
                 try:
-                    # Use yfinance for reliable 200 SMA calculation
                     stock = yf.Ticker(ticker)
-                    hist = stock.history(period="1y")  # Need ~200 days of data
+                    hist = stock.history(period="1y")
                     
                     if len(hist) >= 200:
                         close_price = float(hist['Close'].iloc[-1])
@@ -1200,7 +1201,7 @@ async def refresh_cyclical_bias() -> Dict[str, Any]:
                     logger.warning(f"Error getting 200 SMA for {ticker}: {e}")
                     sma_details[ticker] = f"error: {str(e)}"
             
-            # Vote: +2 if all above, +1 if majority above, -1 if majority below, -2 if all below
+            # Standard voting: ±2 max
             if above_200sma == 3:
                 sma_vote = 2
             elif above_200sma >= 2:
@@ -1212,176 +1213,189 @@ async def refresh_cyclical_bias() -> Dict[str, Any]:
             else:
                 sma_vote = 0
                 
-            factor_votes.append(("sma_200_positions", sma_vote, {
+            factor_votes.append(("sma_200_positions", sma_vote, 2, {
                 "above_count": above_200sma,
                 "below_count": below_200sma,
-                "details": sma_details
+                "details": sma_details,
+                "tier": "standard"
             }))
-            logger.info(f"  📈 200 SMA Positions: {above_200sma}/3 above (vote: {sma_vote:+d})")
+            logger.info(f"  📈 200 SMA Positions: {above_200sma}/3 above (vote: {sma_vote:+d}/±2)")
             
         except Exception as e:
             logger.warning(f"Error in 200 SMA factor: {e}")
-            factor_votes.append(("sma_200_positions", 0, {"error": str(e)}))
+            factor_votes.append(("sma_200_positions", 0, 2, {"error": str(e)}))
         
         # =====================================================================
-        # FACTOR 2: Yield Curve (2Y-10Y spread) using yfinance
+        # FACTOR 2: Yield Curve - TIERED: ±2 normal, ±3 if deeply inverted
         # =====================================================================
         try:
-            import yfinance as yf
-            
-            # Fetch treasury yields using yfinance
-            # ^TNX = 10-Year Treasury, ^IRX = 13-Week T-Bill (no direct 2Y, use proxy)
-            tnx = yf.Ticker("^TNX")  # 10-year
-            tyx = yf.Ticker("^TYX")  # 30-year (we'll estimate 2Y from spread)
-            
+            tnx = yf.Ticker("^TNX")
             tnx_hist = tnx.history(period="5d")
             
             if len(tnx_hist) > 0:
                 yield_10y = float(tnx_hist['Close'].iloc[-1])
                 
-                # For 2Y yield, we'll use a simple estimate or fetch from alternative source
-                # Typically 2Y is about 0.3-0.5% below 10Y in normal times
-                # Let's try to get the actual 2Y yield using TLT/SHY ratio as proxy
                 try:
-                    # Try to get 2Y directly via alternative ticker
-                    two_year = yf.Ticker("^IRX")  # 13-week as proxy
+                    two_year = yf.Ticker("^IRX")
                     two_hist = two_year.history(period="5d")
                     if len(two_hist) > 0:
-                        # IRX is 13-week rate, 2Y is typically higher
-                        # Use a rough estimate: 2Y ≈ 13-week + 0.5 to 1.0
                         yield_short = float(two_hist['Close'].iloc[-1])
-                        yield_2y = yield_short + 0.5  # Rough estimate
+                        yield_2y = yield_short + 0.5
                     else:
-                        yield_2y = yield_10y - 0.3  # Default estimate
+                        yield_2y = yield_10y - 0.3
                 except:
-                    yield_2y = yield_10y - 0.3  # Default estimate
+                    yield_2y = yield_10y - 0.3
                 
                 spread = yield_10y - yield_2y
                 
-                # Vote: +2 if spread > 0.5 (healthy), +1 if 0-0.5, -1 if inverted, -2 if deeply inverted
+                # TIERED VOTING: Deeply inverted gets extra weight
                 if spread > 0.5:
                     yc_vote = 2
+                    max_vote = 2
+                    tier = "standard"
                 elif spread > 0:
                     yc_vote = 1
+                    max_vote = 2
+                    tier = "standard"
                 elif spread > -0.5:
                     yc_vote = -1
-                else:
+                    max_vote = 2
+                    tier = "standard"
+                elif spread > -1.0:
                     yc_vote = -2
+                    max_vote = 2
+                    tier = "standard"
+                else:
+                    # DEEPLY INVERTED: Tiered up to ±3
+                    yc_vote = -3
+                    max_vote = 3
+                    tier = "crisis"
                     
-                factor_votes.append(("yield_curve", yc_vote, {
+                factor_votes.append(("yield_curve", yc_vote, max_vote, {
                     "spread": round(spread, 3),
                     "us10y": round(yield_10y, 2),
                     "us02y": round(yield_2y, 2),
-                    "status": "normal" if spread > 0 else "inverted",
+                    "status": "normal" if spread > 0 else ("inverted" if spread > -0.5 else "deeply_inverted"),
+                    "tier": tier,
                     "data_source": "yfinance"
                 }))
-                logger.info(f"  📉 Yield Curve: {spread:.2f}% spread (10Y: {yield_10y:.2f}%, vote: {yc_vote:+d})")
+                logger.info(f"  📉 Yield Curve: {spread:.2f}% spread (vote: {yc_vote:+d}/±{max_vote}, {tier})")
             else:
                 raise Exception("No treasury yield data available")
             
         except Exception as e:
             logger.warning(f"Error in yield curve factor: {e}")
-            factor_votes.append(("yield_curve", -1, {
-                "error": str(e),
-                "note": "Defaulting to mild inverted assumption"
-            }))
+            factor_votes.append(("yield_curve", -1, 2, {"error": str(e)}))
         
         # =====================================================================
-        # FACTOR 3: Credit Spreads (HYG vs TLT) - Auto-fetch fresh data
+        # FACTOR 3: Credit Spreads - TIERED: ±2 normal, ±3 if extreme
         # =====================================================================
         try:
             from bias_filters.credit_spreads import auto_fetch_and_update as fetch_credit_spreads
             from bias_filters.credit_spreads import get_bias_for_scoring as get_credit_bias
             
-            # Fetch fresh data using yfinance
             await fetch_credit_spreads()
-            
-            # Now get the updated bias
             credit_result = get_credit_bias()
             
             credit_level = credit_result.get("bias_level", 3)
-            # Map 1-5 scale to vote: 5→+2, 4→+1, 3→0, 2→-1, 1→-2
-            credit_vote = credit_level - 3
+            credit_bias = credit_result.get("bias", "NEUTRAL")
             
-            factor_votes.append(("credit_spreads", credit_vote, {
-                "bias": credit_result.get("bias", "NEUTRAL"),
+            # TIERED VOTING: Extreme credit stress gets extra weight
+            if credit_level == 5:  # TORO_MAJOR
+                credit_vote = 2
+                max_vote = 2
+                tier = "standard"
+            elif credit_level == 4:  # TORO_MINOR
+                credit_vote = 1
+                max_vote = 2
+                tier = "standard"
+            elif credit_level == 3:  # NEUTRAL
+                credit_vote = 0
+                max_vote = 2
+                tier = "standard"
+            elif credit_level == 2:  # URSA_MINOR
+                credit_vote = -1
+                max_vote = 2
+                tier = "standard"
+            else:  # credit_level == 1, URSA_MAJOR (extreme credit stress)
+                credit_vote = -3
+                max_vote = 3
+                tier = "crisis"
+            
+            factor_votes.append(("credit_spreads", credit_vote, max_vote, {
+                "bias": credit_bias,
                 "bias_level": credit_level,
+                "tier": tier,
                 "last_updated": credit_result.get("last_updated"),
                 "data_source": "yfinance"
             }))
-            logger.info(f"  💳 Credit Spreads: {credit_result.get('bias')} (vote: {credit_vote:+d})")
+            logger.info(f"  💳 Credit Spreads: {credit_bias} (vote: {credit_vote:+d}/±{max_vote}, {tier})")
             
         except Exception as e:
             logger.warning(f"Error in credit spreads factor: {e}")
-            factor_votes.append(("credit_spreads", 0, {"error": str(e)}))
+            factor_votes.append(("credit_spreads", 0, 2, {"error": str(e)}))
         
         # =====================================================================
-        # FACTOR 4: Savita Indicator (BofA sentiment)
+        # FACTOR 4: Savita Indicator - Standard ±2
         # =====================================================================
         try:
             from bias_filters.savita_indicator import get_savita_reading
             savita_result = get_savita_reading()
             
-            # Map bias string to level (use global BIAS_LEVELS)
             savita_bias = savita_result.get("bias", "LEAN_TORO")
-            savita_level = BIAS_LEVELS.get(savita_bias, 4)  # Default LEAN_TORO = 4
-            savita_vote = savita_level - 4  # Center around LEAN levels (3.5 rounded)
+            savita_level = BIAS_LEVELS.get(savita_bias, 4)
+            savita_vote = savita_level - 4
             
-            factor_votes.append(("savita_indicator", savita_vote, {
+            factor_votes.append(("savita_indicator", savita_vote, 2, {
                 "bias": savita_bias,
                 "bias_level": savita_level,
                 "reading": savita_result.get("reading"),
-                "signal": savita_result.get("signal")
+                "signal": savita_result.get("signal"),
+                "tier": "standard"
             }))
-            logger.info(f"  🎯 Savita Indicator: {savita_bias} (vote: {savita_vote:+d})")
+            logger.info(f"  🎯 Savita Indicator: {savita_bias} (vote: {savita_vote:+d}/±2)")
             
         except Exception as e:
             logger.warning(f"Error in Savita factor: {e}")
-            factor_votes.append(("savita_indicator", 0, {"error": str(e)}))
+            factor_votes.append(("savita_indicator", 0, 2, {"error": str(e)}))
         
         # =====================================================================
-        # FACTOR 5: Long-term Breadth (RSP vs SPY) - Auto-fetch fresh data
+        # FACTOR 5: Long-term Breadth (RSP vs SPY) - Standard ±2
         # =====================================================================
         try:
             from bias_filters.market_breadth import auto_fetch_and_update as fetch_market_breadth
             from bias_filters.market_breadth import get_bias_for_scoring as get_longterm_breadth
             
-            # Fetch fresh data using yfinance
             await fetch_market_breadth()
-            
-            # Now get the updated bias
             breadth_result = get_longterm_breadth()
             
             breadth_level = breadth_result.get("bias_level", 3)
             breadth_vote = breadth_level - 3
             
-            factor_votes.append(("longterm_breadth", breadth_vote, {
+            factor_votes.append(("longterm_breadth", breadth_vote, 2, {
                 "bias": breadth_result.get("bias", "NEUTRAL"),
                 "bias_level": breadth_level,
+                "tier": "standard",
                 "last_updated": breadth_result.get("last_updated"),
                 "data_source": "yfinance"
             }))
-            logger.info(f"  📊 Long-term Breadth: {breadth_result.get('bias')} (vote: {breadth_vote:+d})")
+            logger.info(f"  📊 Long-term Breadth: {breadth_result.get('bias')} (vote: {breadth_vote:+d}/±2)")
             
         except Exception as e:
             logger.warning(f"Error in breadth factor: {e}")
-            factor_votes.append(("longterm_breadth", 0, {"error": str(e)}))
+            factor_votes.append(("longterm_breadth", 0, 2, {"error": str(e)}))
         
         # =====================================================================
-        # FACTOR 6: Sahm Rule (Recession indicator) - Using market-based proxy
+        # FACTOR 6: Sahm Rule (VIX proxy) - TIERED: ±2 normal, ±4 if triggered
         # =====================================================================
         try:
-            import yfinance as yf
-            
-            # The actual Sahm Rule uses unemployment data from FRED
-            # As a proxy, we'll use the VIX level and trend as a recession fear indicator
-            # High VIX + rising = recession fears, Low VIX + stable = healthy
-            
             vix = yf.Ticker("^VIX")
             vix_hist = vix.history(period="3mo")
             
             sahm_triggered = False
             sahm_vote = 0
+            max_vote = 2
+            tier = "standard"
             sahm_details = {}
             
             if len(vix_hist) >= 20:
@@ -1389,8 +1403,6 @@ async def refresh_cyclical_bias() -> Dict[str, Any]:
                 vix_20d_avg = float(vix_hist['Close'].tail(20).mean())
                 vix_3mo_low = float(vix_hist['Close'].min())
                 vix_3mo_high = float(vix_hist['Close'].max())
-                
-                # Calculate "Sahm-like" indicator: current vs recent low
                 vix_rise_from_low = current_vix - vix_3mo_low
                 
                 sahm_details = {
@@ -1401,68 +1413,205 @@ async def refresh_cyclical_bias() -> Dict[str, Any]:
                     "rise_from_low": round(vix_rise_from_low, 2)
                 }
                 
-                # Recession signal if VIX > 25 AND rose significantly from recent low
-                if current_vix > 30 and vix_rise_from_low > 10:
+                # TIERED VOTING: Recession trigger gets maximum weight
+                if current_vix > 35 and vix_rise_from_low > 15:
+                    # EXTREME CRISIS: Full recession signal
                     sahm_triggered = True
-                    sahm_vote = -2
+                    sahm_vote = -4
+                    max_vote = 4
+                    tier = "crisis_extreme"
+                    sahm_details["status"] = "recession_triggered"
+                elif current_vix > 30 and vix_rise_from_low > 10:
+                    # CRISIS: Recession warning
+                    sahm_triggered = True
+                    sahm_vote = -3
+                    max_vote = 4
+                    tier = "crisis"
                     sahm_details["status"] = "recession_warning"
                 elif current_vix > 25 and vix_rise_from_low > 5:
-                    sahm_vote = -1
+                    sahm_vote = -2
                     sahm_details["status"] = "elevated_fear"
+                elif current_vix > 20:
+                    sahm_vote = -1
+                    sahm_details["status"] = "caution"
                 elif current_vix < 15:
-                    sahm_vote = 1
+                    sahm_vote = 2
                     sahm_details["status"] = "low_fear"
+                elif current_vix < 18:
+                    sahm_vote = 1
+                    sahm_details["status"] = "complacent"
                 else:
                     sahm_vote = 0
                     sahm_details["status"] = "normal"
                     
                 sahm_details["data_source"] = "vix_proxy"
+                sahm_details["tier"] = tier
             else:
-                sahm_details = {"error": "Insufficient VIX data", "status": "unknown"}
+                sahm_details = {"error": "Insufficient VIX data", "status": "unknown", "tier": "standard"}
             
-            factor_votes.append(("sahm_rule", sahm_vote, {
+            factor_votes.append(("sahm_rule", sahm_vote, max_vote, {
                 "triggered": sahm_triggered,
                 **sahm_details
             }))
-            logger.info(f"  🚨 Sahm Rule (VIX proxy): {sahm_details.get('status', 'unknown')} (vote: {sahm_vote:+d})")
+            logger.info(f"  🚨 Sahm Rule: {sahm_details.get('status', 'unknown')} (vote: {sahm_vote:+d}/±{max_vote}, {tier})")
             
         except Exception as e:
             logger.warning(f"Error in Sahm Rule factor: {e}")
-            factor_votes.append(("sahm_rule", 0, {"error": str(e)}))
+            factor_votes.append(("sahm_rule", 0, 2, {"error": str(e)}))
         
         # =====================================================================
-        # CALCULATE TOTAL VOTE AND DETERMINE BIAS
+        # FACTOR 7: Cyclical vs Defensive Rotation (XLY vs XLP) - Standard ±2
         # =====================================================================
-        total_vote = sum(vote for _, vote, _ in factor_votes)
-        max_possible = 12  # 6 factors × 2 max each
+        try:
+            # XLY = Consumer Discretionary (cyclical), XLP = Consumer Staples (defensive)
+            xly = yf.Ticker("XLY")
+            xlp = yf.Ticker("XLP")
+            
+            xly_hist = xly.history(period="1mo")
+            xlp_hist = xlp.history(period="1mo")
+            
+            if len(xly_hist) >= 20 and len(xlp_hist) >= 20:
+                # Calculate 20-day performance
+                xly_current = float(xly_hist['Close'].iloc[-1])
+                xly_20d_ago = float(xly_hist['Close'].iloc[-20])
+                xly_return = ((xly_current - xly_20d_ago) / xly_20d_ago) * 100
+                
+                xlp_current = float(xlp_hist['Close'].iloc[-1])
+                xlp_20d_ago = float(xlp_hist['Close'].iloc[-20])
+                xlp_return = ((xlp_current - xlp_20d_ago) / xlp_20d_ago) * 100
+                
+                # Spread: positive = cyclicals leading (risk-on)
+                rotation_spread = xly_return - xlp_return
+                
+                if rotation_spread > 3.0:
+                    rotation_vote = 2
+                    status = "strong_risk_on"
+                elif rotation_spread > 1.0:
+                    rotation_vote = 1
+                    status = "mild_risk_on"
+                elif rotation_spread < -3.0:
+                    rotation_vote = -2
+                    status = "strong_defensive"
+                elif rotation_spread < -1.0:
+                    rotation_vote = -1
+                    status = "mild_defensive"
+                else:
+                    rotation_vote = 0
+                    status = "neutral"
+                
+                factor_votes.append(("cyclical_vs_defensive", rotation_vote, 2, {
+                    "xly_return_20d": round(xly_return, 2),
+                    "xlp_return_20d": round(xlp_return, 2),
+                    "spread": round(rotation_spread, 2),
+                    "status": status,
+                    "tier": "standard",
+                    "data_source": "yfinance"
+                }))
+                logger.info(f"  🔄 Cyclical vs Defensive: {status} (spread: {rotation_spread:+.1f}%, vote: {rotation_vote:+d}/±2)")
+            else:
+                raise Exception("Insufficient XLY/XLP data")
+                
+        except Exception as e:
+            logger.warning(f"Error in Cyclical vs Defensive factor: {e}")
+            factor_votes.append(("cyclical_vs_defensive", 0, 2, {"error": str(e)}))
         
-        # Thresholds for 6 factors (6-level system, no neutral)
-        # Cyclical has no higher timeframe, default to bullish for ties (long-term market uptrend)
-        if total_vote >= 7:
+        # =====================================================================
+        # FACTOR 8: Copper/Gold Ratio - Standard ±2
+        # =====================================================================
+        try:
+            # COPX = Copper miners ETF, GLD = Gold ETF
+            # Alternative: Use futures proxies
+            copper = yf.Ticker("COPX")  # Copper miners
+            gold = yf.Ticker("GLD")     # Gold ETF
+            
+            copper_hist = copper.history(period="1mo")
+            gold_hist = gold.history(period="1mo")
+            
+            if len(copper_hist) >= 20 and len(gold_hist) >= 20:
+                # Calculate 20-day performance
+                copper_current = float(copper_hist['Close'].iloc[-1])
+                copper_20d_ago = float(copper_hist['Close'].iloc[-20])
+                copper_return = ((copper_current - copper_20d_ago) / copper_20d_ago) * 100
+                
+                gold_current = float(gold_hist['Close'].iloc[-1])
+                gold_20d_ago = float(gold_hist['Close'].iloc[-20])
+                gold_return = ((gold_current - gold_20d_ago) / gold_20d_ago) * 100
+                
+                # Spread: positive = copper leading (economic optimism)
+                cg_spread = copper_return - gold_return
+                
+                if cg_spread > 5.0:
+                    cg_vote = 2
+                    status = "economic_optimism"
+                elif cg_spread > 2.0:
+                    cg_vote = 1
+                    status = "mild_optimism"
+                elif cg_spread < -5.0:
+                    cg_vote = -2
+                    status = "flight_to_safety"
+                elif cg_spread < -2.0:
+                    cg_vote = -1
+                    status = "mild_caution"
+                else:
+                    cg_vote = 0
+                    status = "neutral"
+                
+                factor_votes.append(("copper_gold_ratio", cg_vote, 2, {
+                    "copper_return_20d": round(copper_return, 2),
+                    "gold_return_20d": round(gold_return, 2),
+                    "spread": round(cg_spread, 2),
+                    "status": status,
+                    "tier": "standard",
+                    "data_source": "yfinance"
+                }))
+                logger.info(f"  🥇 Copper/Gold: {status} (spread: {cg_spread:+.1f}%, vote: {cg_vote:+d}/±2)")
+            else:
+                raise Exception("Insufficient COPX/GLD data")
+                
+        except Exception as e:
+            logger.warning(f"Error in Copper/Gold factor: {e}")
+            factor_votes.append(("copper_gold_ratio", 0, 2, {"error": str(e)}))
+        
+        # =====================================================================
+        # CALCULATE TOTAL VOTE AND DETERMINE BIAS (8-Factor Tiered System)
+        # =====================================================================
+        total_vote = sum(vote for _, vote, _, _ in factor_votes)
+        max_possible_normal = 16  # 8 factors × 2 max each (normal conditions)
+        max_possible_crisis = sum(max_v for _, _, max_v, _ in factor_votes)  # Actual max based on current tier
+        
+        # Check if any crisis-tier factors are active
+        crisis_active = any(det.get("tier", "standard").startswith("crisis") for _, _, _, det in factor_votes)
+        
+        # Thresholds for 8 factors with tiered voting
+        # Adjusted for higher max possible vote range
+        if total_vote >= 10:
             new_level = "MAJOR_TORO"
-        elif total_vote >= 3:
+        elif total_vote >= 5:
             new_level = "MINOR_TORO"
         elif total_vote >= 0:
-            new_level = "LEAN_TORO"  # Default bullish for 0
-        elif total_vote > -3:
+            new_level = "LEAN_TORO"
+        elif total_vote > -5:
             new_level = "LEAN_URSA"
-        elif total_vote > -7:
+        elif total_vote > -10:
             new_level = "MINOR_URSA"
         else:
             new_level = "MAJOR_URSA"
         
         # Build details
         details = {
-            "source": "6_factor_cyclical",
+            "source": "8_factor_tiered_cyclical",
             "total_vote": total_vote,
-            "max_possible": max_possible,
-            "factors": {name: {"vote": vote, "details": det} for name, vote, det in factor_votes}
+            "max_possible_normal": max_possible_normal,
+            "max_possible_current": max_possible_crisis,
+            "crisis_mode_active": crisis_active,
+            "factors": {name: {"vote": vote, "max_vote": max_v, "details": det} for name, vote, max_v, det in factor_votes}
         }
         
         # Update bias with trend tracking
         result = update_bias(BiasTimeframe.CYCLICAL, new_level, details=details)
         
-        logger.info(f"✅ Cyclical Bias updated: {new_level} (total vote: {total_vote}/{max_possible})")
+        mode_str = "CRISIS MODE" if crisis_active else "normal"
+        logger.info(f"✅ Cyclical Bias updated: {new_level} (vote: {total_vote}/±{max_possible_crisis}, {mode_str})")
         return result
         
     except Exception as e:
