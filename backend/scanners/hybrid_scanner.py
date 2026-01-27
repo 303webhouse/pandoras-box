@@ -450,12 +450,140 @@ class HybridScanner:
                 except Exception:
                     continue  # Try next exchange
             
-            # All exchanges failed
-            logger.error(f"Technical analysis error for {ticker}: Not found on any exchange")
+            # All exchanges failed - try yfinance fallback
+            logger.warning(f"TradingView failed for {ticker}, trying yfinance fallback")
+            return self._get_technical_fallback_yfinance(ticker)
+    
+    def _get_technical_fallback_yfinance(self, ticker: str) -> Dict[str, Any]:
+        """
+        Fallback technical analysis using yfinance when TradingView fails.
+        Calculates basic indicators: RSI, SMA crossovers, price vs MAs.
+        """
+        if not YFINANCE_AVAILABLE:
             return {
                 "ticker": ticker,
                 "signal": TechnicalSignal.ERROR.value,
-                "error": f"Not found on NASDAQ, NYSE, AMEX, or CBOE"
+                "error": "Neither TradingView nor yfinance available"
+            }
+        
+        try:
+            stock = yf.Ticker(ticker)
+            df = stock.history(period="6mo")
+            
+            if df.empty or len(df) < 50:
+                return {
+                    "ticker": ticker,
+                    "signal": TechnicalSignal.ERROR.value,
+                    "error": "Insufficient data"
+                }
+            
+            # Calculate indicators
+            close = df['Close']
+            
+            # RSI (14-period)
+            delta = close.diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+            rs = gain / loss
+            rsi = 100 - (100 / (1 + rs))
+            current_rsi = float(rsi.iloc[-1])
+            
+            # Moving averages
+            sma20 = float(close.rolling(20).mean().iloc[-1])
+            sma50 = float(close.rolling(50).mean().iloc[-1])
+            sma200 = float(close.rolling(200).mean().iloc[-1]) if len(df) >= 200 else None
+            current_price = float(close.iloc[-1])
+            
+            # Score calculation
+            buy_signals = 0
+            sell_signals = 0
+            neutral_signals = 0
+            
+            # RSI scoring
+            if current_rsi < 30:
+                buy_signals += 2  # Oversold
+            elif current_rsi < 40:
+                buy_signals += 1
+            elif current_rsi > 70:
+                sell_signals += 2  # Overbought
+            elif current_rsi > 60:
+                sell_signals += 1
+            else:
+                neutral_signals += 1
+            
+            # Price vs MAs
+            if current_price > sma20:
+                buy_signals += 1
+            else:
+                sell_signals += 1
+                
+            if current_price > sma50:
+                buy_signals += 1
+            else:
+                sell_signals += 1
+            
+            if sma200 and current_price > sma200:
+                buy_signals += 1
+            elif sma200:
+                sell_signals += 1
+            
+            # MA crossovers
+            if sma20 > sma50:
+                buy_signals += 1
+            else:
+                sell_signals += 1
+            
+            # Determine signal
+            total_buy = buy_signals
+            total_sell = sell_signals
+            
+            if total_buy >= total_sell + 3:
+                signal = "STRONG_BUY"
+            elif total_buy > total_sell:
+                signal = "BUY"
+            elif total_sell >= total_buy + 3:
+                signal = "STRONG_SELL"
+            elif total_sell > total_buy:
+                signal = "SELL"
+            else:
+                signal = "NEUTRAL"
+            
+            result = {
+                "ticker": ticker,
+                "interval": "1d",
+                "signal": signal,
+                "signal_score": {
+                    "buy": total_buy,
+                    "sell": total_sell,
+                    "neutral": neutral_signals
+                },
+                "oscillators": {
+                    "summary": "BUY" if current_rsi < 45 else ("SELL" if current_rsi > 55 else "NEUTRAL"),
+                    "RSI": round(current_rsi, 2)
+                },
+                "moving_averages": {
+                    "summary": "BUY" if current_price > sma50 else "SELL",
+                    "SMA20": round(sma20, 2),
+                    "SMA50": round(sma50, 2),
+                    "SMA200": round(sma200, 2) if sma200 else None
+                },
+                "price": round(current_price, 2),
+                "source": "yfinance_fallback",
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            # Cache it
+            self.technical_cache[ticker.upper()] = result
+            
+            logger.info(f"✅ {ticker} technical (yfinance fallback): {signal}")
+            return result
+            
+        except Exception as e:
+            logger.error(f"yfinance fallback failed for {ticker}: {e}")
+            return {
+                "ticker": ticker,
+                "signal": TechnicalSignal.ERROR.value,
+                "error": f"All technical sources failed: {str(e)}"
             }
     
     # =========================================================================
