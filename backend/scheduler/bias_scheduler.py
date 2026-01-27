@@ -1337,28 +1337,65 @@ async def refresh_cyclical_bias() -> Dict[str, Any]:
             factor_votes.append(("credit_spreads", 0, 2, {"error": str(e)}))
         
         # =====================================================================
-        # FACTOR 4: Savita Indicator - Standard ±2
+        # FACTOR 4: Excess CAPE Yield (ECY) - Standard ±2
+        # Rate-adjusted valuation: compares equity yield to real bond yield
         # =====================================================================
         try:
-            from bias_filters.savita_indicator import get_savita_reading
-            savita_result = get_savita_reading()
+            from bias_filters.excess_cape_yield import get_ecy_reading
+            ecy_result = await get_ecy_reading()
             
-            savita_bias = savita_result.get("bias", "LEAN_TORO")
-            savita_level = BIAS_LEVELS.get(savita_bias, 4)
-            savita_vote = savita_level - 4
-            
-            factor_votes.append(("savita_indicator", savita_vote, 2, {
-                "bias": savita_bias,
-                "bias_level": savita_level,
-                "reading": savita_result.get("reading"),
-                "signal": savita_result.get("signal"),
-                "tier": "standard"
-            }))
-            logger.info(f"  🎯 Savita Indicator: {savita_bias} (vote: {savita_vote:+d}/±2)")
+            if ecy_result.get("status") == "success":
+                ecy_vote = ecy_result.get("vote", 0)
+                ecy_bias = ecy_result.get("bias", "NEUTRAL")
+                
+                factor_votes.append(("excess_cape_yield", ecy_vote, 2, {
+                    "bias": ecy_bias,
+                    "cape": ecy_result.get("cape"),
+                    "earnings_yield": ecy_result.get("earnings_yield"),
+                    "real_yield": ecy_result.get("real_yield"),
+                    "ecy": ecy_result.get("ecy"),
+                    "signal": ecy_result.get("signal"),
+                    "interpretation": ecy_result.get("interpretation"),
+                    "tier": "standard"
+                }))
+                logger.info(f"  📊 Excess CAPE Yield: {ecy_result.get('ecy')}% -> {ecy_bias} (vote: {ecy_vote:+d}/±2)")
+            else:
+                logger.warning(f"ECY data unavailable: {ecy_result.get('message')}")
+                factor_votes.append(("excess_cape_yield", 0, 2, {"error": ecy_result.get("message")}))
             
         except Exception as e:
-            logger.warning(f"Error in Savita factor: {e}")
-            factor_votes.append(("savita_indicator", 0, 2, {"error": str(e)}))
+            logger.warning(f"Error in ECY factor: {e}")
+            factor_votes.append(("excess_cape_yield", 0, 2, {"error": str(e)}))
+        
+        # =====================================================================
+        # FACTOR 4b: Savita Indicator (OPTIONAL) - Standard ±2
+        # Only active if manually updated with recent BofA data
+        # =====================================================================
+        try:
+            from bias_filters.savita_indicator import get_savita_reading, is_savita_stale
+            
+            # Only include Savita if it has fresh data (not stale)
+            if not is_savita_stale():
+                savita_result = get_savita_reading()
+                savita_bias = savita_result.get("bias", "NEUTRAL")
+                savita_level = BIAS_LEVELS.get(savita_bias, 4)
+                savita_vote = savita_level - 4
+                
+                factor_votes.append(("savita_indicator", savita_vote, 2, {
+                    "bias": savita_bias,
+                    "bias_level": savita_level,
+                    "reading": savita_result.get("reading"),
+                    "signal": savita_result.get("signal"),
+                    "tier": "standard",
+                    "optional": True,
+                    "note": "Manual input - BofA data"
+                }))
+                logger.info(f"  🎯 Savita Indicator (optional): {savita_bias} (vote: {savita_vote:+d}/±2)")
+            else:
+                logger.info(f"  ⏸️ Savita Indicator: Skipped (stale data >30 days)")
+            
+        except Exception as e:
+            logger.warning(f"Error checking Savita: {e}")
         
         # =====================================================================
         # FACTOR 5: Long-term Breadth (RSP vs SPY) - Standard ±2
