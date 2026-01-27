@@ -1889,9 +1889,11 @@ async def _fallback_scheduler():
     logger.info("Starting fallback scheduler loop (using Eastern Time)")
     
     last_cta_scan_hour = -1
+    last_hunter_scan_half = -1  # Track half-hour intervals (0 or 30)
     
     while True:
         now = get_eastern_now()
+        current_half = 0 if now.minute < 30 else 30
         
         # Check if it's 9:45 AM ET (within 1 minute window) - bias refresh
         if now.hour == 9 and 45 <= now.minute < 46:
@@ -1905,6 +1907,13 @@ async def _fallback_scheduler():
             last_cta_scan_hour = now.hour
             logger.info(f"⏰ Market hours CTA scan (ET: {now.strftime('%H:%M')})")
             await run_cta_scan_scheduled()
+            await asyncio.sleep(60)
+        
+        # Hunter scan: Run every 30 minutes during market hours (9:30 AM - 4:00 PM ET)
+        elif is_trading_day() and 9 <= now.hour <= 16 and current_half != last_hunter_scan_half:
+            last_hunter_scan_half = current_half
+            logger.info(f"⏰ Market hours Hunter scan (ET: {now.strftime('%H:%M')})")
+            await run_hunter_scan_scheduled()
             await asyncio.sleep(60)
         else:
             # Check every minute
@@ -1926,6 +1935,8 @@ async def run_cta_scan_scheduled():
         from scanners.cta_scanner import run_cta_scan, CTA_SCANNER_AVAILABLE
         from websocket.broadcaster import manager
         from database.redis_client import cache_signal
+        from database.postgres_client import log_signal, update_signal_with_score
+        from scoring.trade_ideas_scorer import calculate_signal_score
         
         if not CTA_SCANNER_AVAILABLE:
             logger.warning("CTA Scanner not available - skipping scheduled scan")
@@ -1946,6 +1957,13 @@ async def run_cta_scan_scheduled():
             return
         
         logger.info(f"CTA scan found {len(all_signals)} signals")
+        
+        # Get current bias status for scoring
+        current_bias = {
+            "daily": get_bias_status().get("daily", {}),
+            "weekly": get_bias_status().get("weekly", {}),
+            "cyclical": get_bias_status().get("cyclical", {})
+        }
         
         # Load watchlist for bonus scoring
         from scanners.cta_scanner import load_watchlist
@@ -2007,18 +2025,48 @@ async def run_cta_scan_scheduled():
                 "timeframe": "DAILY",
                 "asset_class": "EQUITY",
                 "status": "ACTIVE",
-                "score": base_score,
-                "confidence": confidence,
+                "cta_zone": signal.get("cta_zone"),
                 "notes": notes
             }
             
-            # Cache in Redis
-            await cache_signal(trade_signal["signal_id"], trade_signal, ttl=3600)
+            # Calculate score using the new scoring algorithm
+            score, bias_alignment, triggering_factors = calculate_signal_score(trade_signal, current_bias)
             
-            # Broadcast to all connected devices
-            await manager.broadcast_signal(trade_signal)
+            # Add legacy bonus adjustments to triggering factors
+            if score_bonuses:
+                triggering_factors["legacy_bonuses"] = score_bonuses
             
-            logger.info(f"📡 CTA signal pushed: {ticker} {signal.get('signal_type')} (score: {base_score})")
+            trade_signal["score"] = score
+            trade_signal["bias_alignment"] = bias_alignment
+            trade_signal["triggering_factors"] = triggering_factors
+            
+            # Determine confidence based on score
+            if score >= 75:
+                trade_signal["confidence"] = "HIGH"
+            elif score >= 55:
+                trade_signal["confidence"] = "MEDIUM"
+            else:
+                trade_signal["confidence"] = "LOW"
+            
+            # Log to PostgreSQL (permanent record)
+            try:
+                await log_signal(trade_signal)
+                await update_signal_with_score(
+                    trade_signal["signal_id"],
+                    score,
+                    bias_alignment,
+                    triggering_factors
+                )
+            except Exception as db_err:
+                logger.warning(f"Failed to log CTA signal to DB: {db_err}")
+            
+            # Cache in Redis (for quick access)
+            await cache_signal(trade_signal["signal_id"], trade_signal, ttl=7200)  # 2 hour TTL
+            
+            # Broadcast to all connected devices (use smart broadcast for priority handling)
+            await manager.broadcast_signal_smart(trade_signal, priority_threshold=75.0)
+            
+            logger.info(f"📡 CTA signal pushed: {ticker} {signal.get('signal_type')} (score: {score}, {bias_alignment})")
         
         logger.info(f"✅ CTA scheduled scan complete - {len(all_signals)} signals pushed to Trade Ideas")
         
@@ -2093,3 +2141,141 @@ async def check_flow_confirmation_for_cta(ticker: str, direction: str) -> bool:
     except Exception as e:
         logger.warning(f"Error checking flow confirmation: {e}")
         return False
+
+
+# =========================================================================
+# HUNTER SCANNER SCHEDULED TASK
+# =========================================================================
+
+async def run_hunter_scan_scheduled():
+    """
+    Run Hunter scanner automatically and push signals to Trade Ideas
+    Scheduled: Every 30 minutes during market hours (9:30 AM - 4:00 PM ET)
+    """
+    logger.info("🎯 Running scheduled Hunter scan...")
+    
+    try:
+        from scanners.hunter import run_full_scan, SCANNER_AVAILABLE
+        from websocket.broadcaster import manager
+        from database.redis_client import cache_signal
+        from database.postgres_client import log_signal, update_signal_with_score
+        from scoring.trade_ideas_scorer import calculate_signal_score
+        
+        if not SCANNER_AVAILABLE:
+            logger.warning("Hunter Scanner not available - skipping scheduled scan")
+            return
+        
+        # Run the scan
+        result = await run_full_scan(mode="all")
+        
+        if not result:
+            logger.info("Hunter scan complete - no results")
+            return
+        
+        # Combine URSA and TAURUS signals
+        all_signals = []
+        all_signals.extend(result.get("ursa_signals", []))
+        all_signals.extend(result.get("taurus_signals", []))
+        
+        if not all_signals:
+            logger.info("Hunter scan complete - no new signals found")
+            return
+        
+        logger.info(f"Hunter scan found {len(all_signals)} signals")
+        
+        # Load watchlist for bonus scoring
+        from database.redis_client import get_watchlist
+        watchlist = await get_watchlist("default")
+        watchlist = watchlist or []
+        
+        # Get current bias status for scoring
+        bias_status = get_bias_status()
+        current_bias = {
+            "daily": bias_status.get("daily", {}),
+            "weekly": bias_status.get("weekly", {}),
+            "cyclical": bias_status.get("cyclical", {})
+        }
+        
+        # Process and push each signal to Trade Ideas
+        signals_pushed = 0
+        for signal in all_signals[:15]:  # Limit to top 15
+            ticker = signal.get("ticker")
+            
+            # Determine direction from signal type
+            signal_type = signal.get("signal_type", "")
+            direction = "SHORT" if "URSA" in signal_type.upper() else "LONG"
+            
+            # Convert Hunter signal format to standard signal format
+            trade_signal = {
+                "signal_id": signal.get("scan_id") or f"HUNTER_{ticker}_{get_eastern_now().strftime('%Y%m%d_%H%M%S')}",
+                "timestamp": signal.get("timestamp") or get_eastern_now().isoformat(),
+                "ticker": ticker,
+                "strategy": "Hunter Scanner",
+                "direction": direction,
+                "signal_type": signal_type,
+                "entry_price": signal.get("entry_price"),
+                "stop_loss": signal.get("stop_loss"),
+                "target_1": signal.get("target"),
+                "risk_reward": signal.get("risk_reward"),
+                "timeframe": "DAILY",
+                "asset_class": "EQUITY",
+                "status": "ACTIVE",
+                "adx": signal.get("adx"),
+                "rsi": signal.get("rsi"),
+                "rvol": signal.get("rvol")
+            }
+            
+            # Calculate score using the new scoring algorithm
+            score, bias_alignment, triggering_factors = calculate_signal_score(trade_signal, current_bias)
+            
+            # Add watchlist bonus
+            if ticker in watchlist:
+                score = min(100, score + 5)
+                triggering_factors["watchlist_bonus"] = 5
+            
+            trade_signal["score"] = score
+            trade_signal["bias_alignment"] = bias_alignment
+            trade_signal["triggering_factors"] = triggering_factors
+            
+            # Determine confidence based on score
+            if score >= 75:
+                trade_signal["confidence"] = "HIGH"
+            elif score >= 55:
+                trade_signal["confidence"] = "MEDIUM"
+            else:
+                trade_signal["confidence"] = "LOW"
+            
+            # Log to PostgreSQL (permanent record)
+            try:
+                await log_signal(trade_signal)
+                await update_signal_with_score(
+                    trade_signal["signal_id"],
+                    score,
+                    bias_alignment,
+                    triggering_factors
+                )
+            except Exception as db_err:
+                logger.warning(f"Failed to log Hunter signal to DB: {db_err}")
+            
+            # Cache in Redis (for quick access)
+            await cache_signal(trade_signal["signal_id"], trade_signal, ttl=7200)  # 2 hour TTL
+            
+            # Broadcast to all connected devices (use smart broadcast for priority handling)
+            await manager.broadcast_signal_smart(trade_signal, priority_threshold=75.0)
+            
+            logger.info(f"📡 Hunter signal pushed: {ticker} {signal_type} (score: {score}, {bias_alignment})")
+            signals_pushed += 1
+        
+        logger.info(f"✅ Hunter scheduled scan complete - {signals_pushed} signals pushed to Trade Ideas")
+        
+    except Exception as e:
+        logger.error(f"Error in scheduled Hunter scan: {e}")
+        import traceback
+        traceback.print_exc()
+
+
+async def trigger_hunter_scan_now():
+    """
+    Manually trigger a Hunter scan (called from API)
+    """
+    await run_hunter_scan_scheduled()

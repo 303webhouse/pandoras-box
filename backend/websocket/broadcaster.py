@@ -100,6 +100,30 @@ class ConnectionManager:
             "data": position_data
         }
         await self.broadcast(message)
+    
+    async def broadcast_priority_signal(self, signal_data: Dict[Any, Any]):
+        """
+        Broadcast a high-priority signal that should jump to the top.
+        Used when a new signal scores higher than existing displayed signals.
+        """
+        message = {
+            "type": "SIGNAL_PRIORITY_UPDATE",
+            "data": signal_data
+        }
+        await self.broadcast(message)
+        logger.info(f"🔥 Priority signal broadcast: {signal_data.get('ticker', 'UNKNOWN')} (score: {signal_data.get('score', 0)})")
+    
+    async def broadcast_signal_smart(self, signal_data: Dict[Any, Any], priority_threshold: float = 75.0):
+        """
+        Smart broadcast - sends priority update if signal scores above threshold.
+        Otherwise sends as regular signal.
+        """
+        score = signal_data.get('score', 0)
+        
+        if score >= priority_threshold:
+            await self.broadcast_priority_signal(signal_data)
+        else:
+            await self.broadcast_signal(signal_data)
 
 # Global instance
 manager = ConnectionManager()
