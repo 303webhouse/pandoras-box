@@ -449,3 +449,69 @@ async def trigger_savita_auto_search():
     except Exception as e:
         logger.error(f"Error in Savita auto-search: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==============================================================================
+# EXCESS CAPE YIELD (ECY) ENDPOINTS
+# ==============================================================================
+
+@router.get("/ecy")
+async def get_ecy_status():
+    """
+    Get current Excess CAPE Yield (ECY) status
+    
+    ECY = Earnings Yield - Real 10Y Treasury Yield
+    
+    This is a rate-adjusted valuation indicator:
+    - High ECY (>4%): Stocks very attractive vs bonds (bullish)
+    - Low ECY (<0%): Bonds more attractive (bearish)
+    """
+    try:
+        from bias_filters.excess_cape_yield import get_ecy_reading, get_ecy_config
+        
+        result = await get_ecy_reading()
+        
+        return {
+            "status": "success",
+            "data": result,
+            "config": get_ecy_config()
+        }
+    except Exception as e:
+        logger.error(f"Error getting ECY status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/ecy/update-cape")
+async def update_cape_ratio(
+    cape: float = Query(..., ge=5, le=60, description="New CAPE ratio (5-60)"),
+    date: Optional[str] = Query(None, description="Date of reading (YYYY-MM-DD)")
+):
+    """
+    Update the CAPE (Shiller P/E) ratio
+    
+    CAPE changes slowly, so monthly updates are sufficient.
+    Current values typically range from 25-40.
+    
+    Sources:
+    - multpl.com/shiller-pe
+    - gurufocus.com/shiller-pe
+    
+    Args:
+        cape: The new CAPE ratio value
+        date: Optional date string (defaults to today)
+    """
+    try:
+        from bias_filters.excess_cape_yield import update_cape
+        
+        result = update_cape(cape, date)
+        
+        return {
+            "status": "success",
+            "message": f"CAPE updated to {cape}",
+            "data": result
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error updating CAPE: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

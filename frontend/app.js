@@ -607,19 +607,28 @@ function checkAndDisplayCrisisAlert(cyclicalData) {
     }
 }
 
-// Savita Indicator Update Functions
+// Savita Indicator Update Functions (Optional - bonus factor when BofA data available)
 function checkSavitaStatus(cyclicalData) {
     const reminder = document.getElementById('savitaReminder');
     if (!reminder) return;
     
     const factors = cyclicalData?.details?.factors || {};
     const savitaData = factors.savita_indicator?.details || {};
+    
+    // Check if Savita is actively contributing to the score
+    const savitaActive = savitaData && !savitaData.optional;
+    
+    // Savita is now optional - only show reminder if user has previously entered data
+    // and it's getting stale, to let them know they can update it again
     const lastUpdated = savitaData.last_updated || savitaData.reading?.last_updated;
     
     if (!lastUpdated) {
-        // No data at all - show reminder
+        // No Savita data - that's fine, it's optional now
+        // Show subtle link to add if they find data
         reminder.style.display = 'flex';
-        reminder.classList.add('stale');
+        reminder.classList.remove('stale');
+        reminder.querySelector('.reminder-link').textContent = 'Add Savita (optional)';
+        reminder.style.opacity = '0.6';
         return;
     }
     
@@ -629,17 +638,26 @@ function checkSavitaStatus(cyclicalData) {
     const daysSinceUpdate = Math.floor((now - updateDate) / (1000 * 60 * 60 * 24));
     
     if (daysSinceUpdate > 30) {
+        // Stale - Savita disabled, but they can update
         reminder.style.display = 'flex';
         reminder.classList.add('stale');
-        reminder.querySelector('.reminder-link').textContent = `Update Savita (${daysSinceUpdate}d old)`;
+        reminder.style.opacity = '1';
+        reminder.querySelector('.reminder-link').textContent = `Savita inactive (${daysSinceUpdate}d)`;
     } else if (daysSinceUpdate > 20) {
-        // Getting stale, show gentle reminder
+        // Getting stale soon
         reminder.style.display = 'flex';
         reminder.classList.remove('stale');
+        reminder.style.opacity = '0.8';
         reminder.querySelector('.reminder-link').textContent = `Savita: ${daysSinceUpdate}d old`;
     } else {
-        // Fresh enough - hide reminder
-        reminder.style.display = 'none';
+        // Fresh and active - show green status
+        reminder.style.display = 'flex';
+        reminder.classList.remove('stale');
+        reminder.style.opacity = '0.7';
+        reminder.style.borderColor = '#22c55e';
+        reminder.style.background = 'rgba(34, 197, 94, 0.1)';
+        reminder.querySelector('.reminder-link').textContent = 'Savita active';
+        reminder.querySelector('.reminder-link').style.color = '#22c55e';
     }
 }
 
