@@ -1585,10 +1585,17 @@ async def refresh_cyclical_bias() -> Dict[str, Any]:
                         "last_date": str(sahm_data.index[-1].date())
                     }
                     
-                    # Sahm Rule thresholds:
-                    # >= 0.50 = Recession signal (historically 100% accurate)
-                    # 0.30-0.50 = Warning zone
-                    # < 0.30 = Normal/expansion
+                    # Sahm Rule scoring: Crisis indicator + Trend matters
+                    # Only gives bullish signal when LOW and FALLING (relief)
+                    # Otherwise it's a bearish/neutral indicator
+                    #
+                    # >= 0.50 = Recession triggered (-4, crisis)
+                    # 0.40-0.50 = High warning (-2)
+                    # 0.30-0.40 + rising = Deteriorating (-1)
+                    # 0.30-0.40 + falling = Improving but elevated (0)
+                    # < 0.30 + rising = Moving wrong direction (-1)
+                    # < 0.30 + falling = Relief signal (+1) - ONLY bullish case
+                    
                     if current_sahm >= 0.50:
                         # RECESSION TRIGGERED - Maximum crisis weight
                         sahm_triggered = True
@@ -1598,30 +1605,32 @@ async def refresh_cyclical_bias() -> Dict[str, Any]:
                         sahm_details["status"] = "recession_triggered"
                     elif current_sahm >= 0.40:
                         # HIGH WARNING - Crisis weight
-                        sahm_vote = -3
+                        sahm_vote = -2
                         max_vote = 4
                         tier = "crisis"
                         sahm_details["status"] = "high_warning"
                     elif current_sahm >= 0.30:
-                        # WARNING ZONE
-                        sahm_vote = -2
-                        sahm_details["status"] = "warning"
-                    elif current_sahm >= 0.20:
-                        # ELEVATED
-                        sahm_vote = -1
-                        sahm_details["status"] = "elevated"
-                    elif current_sahm <= 0.05:
-                        # STRONG EXPANSION
-                        sahm_vote = 2
-                        sahm_details["status"] = "strong_expansion"
-                    elif current_sahm <= 0.10:
-                        # EXPANSION
-                        sahm_vote = 1
-                        sahm_details["status"] = "expansion"
-                    else:
-                        # NORMAL
-                        sahm_vote = 0
-                        sahm_details["status"] = "normal"
+                        # WARNING ZONE - trend matters
+                        if sahm_trend == "rising":
+                            sahm_vote = -1
+                            sahm_details["status"] = "warning_deteriorating"
+                        else:
+                            sahm_vote = 0
+                            sahm_details["status"] = "warning_improving"
+                    elif current_sahm < 0.30:
+                        # BELOW WARNING - trend determines signal
+                        if sahm_trend == "falling":
+                            # Relief signal - only bullish case
+                            sahm_vote = 1
+                            sahm_details["status"] = "relief_signal"
+                        elif sahm_trend == "rising":
+                            # Moving wrong direction
+                            sahm_vote = -1
+                            sahm_details["status"] = "rising_concern"
+                        else:
+                            # Stable/normal - no signal
+                            sahm_vote = 0
+                            sahm_details["status"] = "stable"
                     
                     sahm_details["tier"] = tier
                     sahm_details["data_source"] = "FRED"
