@@ -1149,7 +1149,9 @@ function initWeeklyBiasSettings() {
             if (personalBiasToggle) {
                 personalBiasAppliesTo.weekly = personalBiasToggle.checked;
                 savePersonalBiasState();
-                applyPersonalBiasToCards();  // Update badges immediately
+                reRenderBiasCardsWithPersonalBias();  // Re-render with new settings
+                applyPersonalBiasToCards();  // Update badges
+                checkBiasAlignment();
             }
             
             saveFactorStatesToStorage();
@@ -1216,7 +1218,9 @@ function initDailyBiasSettings() {
             if (personalBiasToggle) {
                 personalBiasAppliesTo.daily = personalBiasToggle.checked;
                 savePersonalBiasState();
-                applyPersonalBiasToCards();  // Update badges immediately
+                reRenderBiasCardsWithPersonalBias();  // Re-render with new settings
+                applyPersonalBiasToCards();  // Update badges
+                checkBiasAlignment();
             }
             
             saveDailyFactorStatesToStorage();
@@ -1282,7 +1286,9 @@ function initCyclicalBiasSettings() {
             if (personalBiasToggle) {
                 personalBiasAppliesTo.cyclical = personalBiasToggle.checked;
                 savePersonalBiasState();
-                applyPersonalBiasToCards();  // Update badges immediately
+                reRenderBiasCardsWithPersonalBias();  // Re-render with new settings
+                applyPersonalBiasToCards();  // Update badges
+                checkBiasAlignment();
             }
             
             saveCyclicalFactorStatesToStorage();
@@ -1318,7 +1324,14 @@ function initPersonalBiasControls() {
     personalBiasSelector.addEventListener('change', (e) => {
         personalBias = e.target.value;
         savePersonalBiasState();
+        
+        // Re-render bias cards with new personal bias applied
+        reRenderBiasCardsWithPersonalBias();
+        
+        // Update badges and alignment styling
         applyPersonalBiasToCards();
+        checkBiasAlignment();
+        
         console.log(`Personal bias set to: ${personalBias}`);
     });
     
@@ -1467,6 +1480,37 @@ function savePersonalBiasState() {
     } catch (e) {
         console.error('Error saving personal bias state:', e);
     }
+}
+
+function reRenderBiasCardsWithPersonalBias() {
+    // Re-render all bias cards from cached data with new personal bias applied
+    // This avoids an API call - just re-renders with existing data
+    
+    if (dailyBiasFullData) {
+        if (dailyBiasFullData.details && dailyBiasFullData.details.factors) {
+            updateDailyBiasWithFactors(dailyBiasFullData);
+        } else {
+            updateBiasWithTrend('daily', dailyBiasFullData);
+        }
+    }
+    
+    if (weeklyBiasFullData) {
+        if (weeklyBiasFullData.details && weeklyBiasFullData.details.factors) {
+            updateWeeklyBiasWithFactors(weeklyBiasFullData);
+        } else {
+            updateBiasWithTrend('weekly', weeklyBiasFullData);
+        }
+    }
+    
+    if (cyclicalBiasFullData) {
+        if (cyclicalBiasFullData.details && cyclicalBiasFullData.details.factors) {
+            updateCyclicalBiasWithFactors(cyclicalBiasFullData);
+        } else {
+            updateBiasWithTrend('cyclical', cyclicalBiasFullData);
+        }
+    }
+    
+    console.log('Bias cards re-rendered with personal bias adjustment');
 }
 
 function applyPersonalBiasToCards() {
