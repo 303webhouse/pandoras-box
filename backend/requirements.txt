@@ -40,7 +40,7 @@ tradingview-ta>=3.3.0
 fredapi>=0.5.1
 
 # Google Gemini API - AI-powered data extraction
-google-generativeai>=0.3.0
+google-generativeai>=0.8.0
 
 # Additional required packages
 annotated-types==0.6.0
