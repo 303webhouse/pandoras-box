@@ -598,8 +598,12 @@ async def get_active_signals_api():
     Returns top 10 ranked by score with bias alignment.
     
     Falls back to Redis cache, then PostgreSQL for persistence.
+    Re-scores signals that don't have proper scores.
     """
     from database.redis_client import get_active_signals as get_redis_signals
+    from scoring.trade_ideas_scorer import calculate_signal_score, get_score_tier
+    from scheduler.bias_scheduler import get_bias_status
+    from database.postgres_client import update_signal_with_score
     
     try:
         # First try Redis for fast access
@@ -635,6 +639,45 @@ async def get_active_signals_api():
                 await cache_signal(sig_id, sig, ttl=7200)
         
         logger.info(f"📡 Total merged signals: {len(signals)}")
+        
+        # Get current bias for re-scoring
+        bias_status = get_bias_status()
+        current_bias = {
+            "daily": bias_status.get("daily", {}),
+            "weekly": bias_status.get("weekly", {}),
+            "cyclical": bias_status.get("cyclical", {})
+        }
+        
+        # Re-score signals that don't have proper scores
+        for sig in signals:
+            current_score = sig.get('score')
+            # Re-score if score is 0, None, or missing proper bias_alignment
+            if not current_score or current_score == 0 or not sig.get('bias_alignment'):
+                try:
+                    score, bias_alignment, factors = calculate_signal_score(sig, current_bias)
+                    sig['score'] = score
+                    sig['bias_alignment'] = bias_alignment
+                    sig['triggering_factors'] = factors
+                    sig['scoreTier'] = get_score_tier(score)
+                    
+                    # Set confidence
+                    if score >= 75:
+                        sig['confidence'] = "HIGH"
+                    elif score >= 55:
+                        sig['confidence'] = "MEDIUM"
+                    else:
+                        sig['confidence'] = "LOW"
+                    
+                    # Update in DB asynchronously
+                    try:
+                        await update_signal_with_score(sig.get('signal_id'), score, bias_alignment, factors)
+                    except:
+                        pass  # Non-critical
+                        
+                except Exception as score_err:
+                    logger.warning(f"Failed to rescore signal: {score_err}")
+                    sig['score'] = 50  # Default
+                    sig['bias_alignment'] = 'NEUTRAL'
         
         # Sort by score (highest first)
         signals.sort(key=lambda x: x.get('score', 0) or 0, reverse=True)

@@ -31,12 +31,28 @@ STRATEGY_BASE_SCORES = {
     "URSA_SIGNAL": 75,
     "TAURUS_SIGNAL": 75,
     
-    # TradingView webhook signals
+    # TradingView webhook signals - Triple Line variants
     "TRIPLE_LINE": 70,
+    "TRIPLE LINE TREND RETRACEMENT": 70,
+    "TRIPLE_LINE_TREND_RETRACEMENT": 70,
+    
+    # BTC macro confluence (highest conviction)
+    "APIS_CALL": 90,
+    "KODIAK_CALL": 90,
+    
+    # Exhaustion signals
+    "EXHAUSTION": 65,
     "EXHAUSTION_TOP": 65,
     "EXHAUSTION_BOTTOM": 65,
+    
+    # Sniper signals
+    "SNIPER": 60,
     "SNIPER_URSA": 60,
     "SNIPER_TAURUS": 60,
+    
+    # Generic types
+    "BULLISH_TRADE": 55,
+    "BEAR_CALL": 55,
     
     # Default for unknown strategies
     "DEFAULT": 50
