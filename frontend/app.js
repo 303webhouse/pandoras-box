@@ -366,9 +366,8 @@ function handlePrioritySignal(signalData) {
     if (signalData.asset_class === 'EQUITY' || !signalData.asset_class) {
         // Remove if already exists
         signals.equity = signals.equity.filter(s => s.signal_id !== signalData.signal_id);
-        // Insert at top
+        // Insert at top (newest signals always first)
         signals.equity.unshift(signalData);
-        signals.equity.sort((a, b) => (b.score || 0) - (a.score || 0));
     }
     
     renderSignals();
