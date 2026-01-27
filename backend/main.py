@@ -198,9 +198,18 @@ if frontend_path:
         """Serve the frontend dashboard"""
         return FileResponse(os.path.join(frontend_path, "index.html"))
     
+    @app.get("/knowledgebase", response_class=FileResponse)
+    async def serve_knowledgebase():
+        """Serve the knowledgebase page"""
+        return FileResponse(os.path.join(frontend_path, "knowledgebase.html"))
+    
     @app.get("/app.js", response_class=FileResponse)
     async def serve_app_js():
         return FileResponse(os.path.join(frontend_path, "app.js"))
+    
+    @app.get("/knowledgebase.js", response_class=FileResponse)
+    async def serve_knowledgebase_js():
+        return FileResponse(os.path.join(frontend_path, "knowledgebase.js"))
     
     @app.get("/styles.css", response_class=FileResponse)
     async def serve_styles():

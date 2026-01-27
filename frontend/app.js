@@ -4986,4 +4986,191 @@ async function updateCurrentPrices() {
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', () => {
     setTimeout(initPositionModals, 1300);
+    setTimeout(initKnowledgebase, 1500);
 });
+
+// ============================================
+// KNOWLEDGEBASE POPUP FUNCTIONALITY
+// ============================================
+
+let kbTermMap = {};
+let kbPopupModal = null;
+
+async function initKnowledgebase() {
+    // Load term map for making UI terms clickable
+    try {
+        const response = await fetch(`${API_URL}/knowledgebase/term-map`);
+        const data = await response.json();
+        kbTermMap = data.termMap || {};
+        console.log(`📚 Loaded ${Object.keys(kbTermMap).length} knowledgebase terms`);
+    } catch (error) {
+        console.error('Error loading knowledgebase term map:', error);
+    }
+    
+    // Initialize popup modal
+    kbPopupModal = document.getElementById('kbPopupModal');
+    
+    // Close button
+    const closeBtn = document.getElementById('closeKbPopupBtn');
+    if (closeBtn) {
+        closeBtn.addEventListener('click', closeKbPopup);
+    }
+    
+    // Close on backdrop click
+    if (kbPopupModal) {
+        kbPopupModal.addEventListener('click', (e) => {
+            if (e.target === kbPopupModal) closeKbPopup();
+        });
+    }
+    
+    // Close on Escape key
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && kbPopupModal?.classList.contains('active')) {
+            closeKbPopup();
+        }
+    });
+}
+
+async function openKbPopup(termId) {
+    if (!kbPopupModal) return;
+    
+    try {
+        // Load popup data
+        const response = await fetch(`${API_URL}/knowledgebase/popup/${termId}`);
+        if (!response.ok) throw new Error('Term not found');
+        
+        const data = await response.json();
+        
+        // Populate popup
+        document.getElementById('kbPopupCategory').textContent = data.category || 'General';
+        document.getElementById('kbPopupTitle').textContent = data.term;
+        
+        // Format short description with paragraphs
+        const formattedDesc = formatPopupDescription(data.shortDescription || '');
+        document.getElementById('kbPopupBody').innerHTML = formattedDesc;
+        
+        // Related terms
+        const relatedContainer = document.getElementById('kbPopupRelated');
+        if (data.relatedTerms && data.relatedTerms.length > 0) {
+            let relatedHtml = '<span style="color: var(--text-secondary); font-size: 12px;">Related: </span>';
+            data.relatedTerms.slice(0, 4).forEach(relatedId => {
+                // Find term name from map
+                const termName = Object.keys(kbTermMap).find(k => kbTermMap[k] === relatedId) || relatedId;
+                relatedHtml += `<span class="related-tag" data-term-id="${relatedId}">${termName}</span>`;
+            });
+            relatedContainer.innerHTML = relatedHtml;
+            
+            // Add click handlers for related terms
+            relatedContainer.querySelectorAll('.related-tag').forEach(tag => {
+                tag.addEventListener('click', () => {
+                    openKbPopup(tag.dataset.termId);
+                });
+            });
+        } else {
+            relatedContainer.innerHTML = '';
+        }
+        
+        // More info link
+        const moreInfoLink = document.getElementById('kbMoreInfoLink');
+        moreInfoLink.href = `/knowledgebase?entry=${termId}`;
+        
+        // Show modal
+        kbPopupModal.classList.add('active');
+        
+    } catch (error) {
+        console.error('Error loading knowledgebase popup:', error);
+    }
+}
+
+function closeKbPopup() {
+    if (kbPopupModal) {
+        kbPopupModal.classList.remove('active');
+    }
+}
+
+function formatPopupDescription(text) {
+    if (!text) return '';
+    
+    // Split by double newlines for paragraphs
+    let html = text;
+    
+    // Bold text
+    html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    
+    // Convert newlines to paragraphs
+    const paragraphs = html.split('\n\n');
+    html = paragraphs.map(p => {
+        p = p.trim();
+        if (!p) return '';
+        // Handle single-line list items
+        if (p.startsWith('- ')) {
+            return '<p>' + p.replace(/^- /, '• ') + '</p>';
+        }
+        return '<p>' + p.replace(/\n/g, '<br>') + '</p>';
+    }).join('');
+    
+    return html;
+}
+
+// Make a specific term clickable
+function makeTermClickable(element, termId) {
+    element.classList.add('kb-term');
+    element.setAttribute('data-kb-term', termId);
+    element.style.cursor = 'pointer';
+    element.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openKbPopup(termId);
+    });
+}
+
+// Utility function to find and make terms clickable in an element
+function linkKnowledgebaseTerms(containerSelector) {
+    const container = document.querySelector(containerSelector);
+    if (!container) return;
+    
+    // For each term in our map, find it in the container and make it clickable
+    Object.entries(kbTermMap).forEach(([term, id]) => {
+        // Skip if term is too short (to avoid matching partial words)
+        if (term.length < 4) return;
+        
+        // Find text nodes containing this term
+        const walker = document.createTreeWalker(
+            container,
+            NodeFilter.SHOW_TEXT,
+            null,
+            false
+        );
+        
+        let node;
+        while (node = walker.nextNode()) {
+            if (node.nodeValue.includes(term) && !node.parentElement.classList.contains('kb-term')) {
+                // Wrap the term in a clickable span
+                const regex = new RegExp(`(${escapeRegExp(term)})`, 'gi');
+                if (regex.test(node.nodeValue)) {
+                    const span = document.createElement('span');
+                    span.innerHTML = node.nodeValue.replace(regex, `<span class="kb-term" data-kb-term="${id}">$1</span>`);
+                    node.parentNode.replaceChild(span, node);
+                }
+            }
+        }
+    });
+    
+    // Add click handlers
+    container.querySelectorAll('.kb-term[data-kb-term]').forEach(el => {
+        el.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            openKbPopup(el.dataset.kbTerm);
+        });
+    });
+}
+
+function escapeRegExp(string) {
+    return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// Export for use in other parts of the app
+window.openKbPopup = openKbPopup;
+window.makeTermClickable = makeTermClickable;
+window.linkKnowledgebaseTerms = linkKnowledgebaseTerms;
