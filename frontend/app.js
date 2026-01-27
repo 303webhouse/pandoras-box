@@ -952,6 +952,7 @@ function initWeeklyBiasSettings() {
             if (personalBiasToggle) {
                 personalBiasAppliesTo.weekly = personalBiasToggle.checked;
                 savePersonalBiasState();
+                applyPersonalBiasToCards();  // Update badges immediately
             }
             
             saveFactorStatesToStorage();
@@ -1018,6 +1019,7 @@ function initDailyBiasSettings() {
             if (personalBiasToggle) {
                 personalBiasAppliesTo.daily = personalBiasToggle.checked;
                 savePersonalBiasState();
+                applyPersonalBiasToCards();  // Update badges immediately
             }
             
             saveDailyFactorStatesToStorage();
@@ -1083,6 +1085,7 @@ function initCyclicalBiasSettings() {
             if (personalBiasToggle) {
                 personalBiasAppliesTo.cyclical = personalBiasToggle.checked;
                 savePersonalBiasState();
+                applyPersonalBiasToCards();  // Update badges immediately
             }
             
             saveCyclicalFactorStatesToStorage();
@@ -1176,7 +1179,7 @@ function initPersonalBiasControls() {
     updateOverrideBanner();
 }
 
-// Apply override styling to container
+// Apply override styling to container and all sections
 function applyOverrideStyling() {
     const container = document.querySelector('.container');
     if (!container) return;
@@ -1184,9 +1187,17 @@ function applyOverrideStyling() {
     // Remove existing override classes
     container.classList.remove('override-active-bullish', 'override-active-bearish');
     
+    // Also remove from body for wider support
+    document.body.classList.remove('override-active-bullish', 'override-active-bearish');
+    
     if (biasOverrideActive) {
         const isBullish = biasOverrideDirection.includes('TORO');
-        container.classList.add(isBullish ? 'override-active-bullish' : 'override-active-bearish');
+        const overrideClass = isBullish ? 'override-active-bullish' : 'override-active-bearish';
+        container.classList.add(overrideClass);
+        document.body.classList.add(overrideClass);
+        console.log(`Override styling applied: ${overrideClass}`);
+    } else {
+        console.log('Override styling removed');
     }
 }
 
@@ -1267,9 +1278,20 @@ function applyPersonalBiasToCards() {
     
     if (personalBias === 'NEUTRAL') return;
     
-    // Add badge to each bias card - insert after bias-level, before bias-details
-    const biasCards = document.querySelectorAll('.bias-card');
-    biasCards.forEach(card => {
+    // Add badge to each bias card where personal bias is enabled for that timeframe
+    const timeframeMap = {
+        'dailyBias': 'daily',
+        'weeklyBias': 'weekly',
+        'cyclicalBias': 'cyclical'
+    };
+    
+    Object.entries(timeframeMap).forEach(([cardId, timeframe]) => {
+        // Only add badge if personal bias is enabled for this timeframe
+        if (!personalBiasAppliesTo[timeframe]) return;
+        
+        const card = document.getElementById(cardId);
+        if (!card) return;
+        
         const biasLevel = card.querySelector('.bias-level');
         const biasDetails = card.querySelector('.bias-details');
         
