@@ -660,9 +660,17 @@ async def get_active_signals_api():
                     sig['triggering_factors'] = factors
                     sig['scoreTier'] = get_score_tier(score)
                     
-                    # Set confidence
+                    # Set confidence and potentially upgrade signal type
+                    direction = sig.get('direction', '').upper()
+                    
                     if score >= 75:
                         sig['confidence'] = "HIGH"
+                        sig['priority'] = "HIGH"
+                        # Upgrade to APIS/KODIAK for strongest signals
+                        if direction in ["LONG", "BUY"]:
+                            sig['signal_type'] = "APIS_CALL"
+                        elif direction in ["SHORT", "SELL"]:
+                            sig['signal_type'] = "KODIAK_CALL"
                     elif score >= 55:
                         sig['confidence'] = "MEDIUM"
                     else:

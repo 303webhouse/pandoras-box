@@ -137,15 +137,7 @@ async def process_exhaustion_signal(alert: TradingViewAlert, start_time: datetim
         "adx": alert.adx
     }
     
-    # 🔥 CHECK MACRO CONFLUENCE FOR BTC
-    if "btc" in alert.ticker.lower():
-        logger.info(f"🔍 BTC Exhaustion detected - checking macro confluence...")
-        signal_data = await upgrade_signal_if_confluence(signal_data)
-        
-        if signal_data.get("signal_type") in ["APIS_CALL", "KODIAK_CALL"]:
-            logger.info(f"⭐ BTC signal upgraded to {signal_data['signal_type']}!")
-    
-    # Apply proper scoring
+    # Apply proper scoring (this will also upgrade to APIS/KODIAK if high score)
     signal_data = await apply_signal_scoring(signal_data)
     
     # Cache, log, and broadcast
@@ -359,6 +351,10 @@ async def apply_signal_scoring(signal_data: dict) -> dict:
     """
     Apply the Trade Ideas Scorer to a signal.
     Gets current bias and calculates proper score, alignment, and triggering factors.
+    
+    High-scoring signals get upgraded to special signal types:
+    - APIS_CALL: Strong LONG signal (score >= 75)
+    - KODIAK_CALL: Strong SHORT signal (score >= 75)
     """
     try:
         # Get current bias for scoring
@@ -378,13 +374,25 @@ async def apply_signal_scoring(signal_data: dict) -> dict:
         signal_data["triggering_factors"] = triggering_factors
         signal_data["scoreTier"] = get_score_tier(score)
         
-        # Set confidence based on score
+        # Set confidence and potentially upgrade signal type based on score
+        direction = signal_data.get("direction", "").upper()
+        
         if score >= 75:
             signal_data["confidence"] = "HIGH"
+            signal_data["priority"] = "HIGH"
+            # Upgrade to APIS/KODIAK for strongest signals
+            if direction in ["LONG", "BUY"]:
+                signal_data["signal_type"] = "APIS_CALL"
+                logger.info(f"⭐ {signal_data.get('ticker')} upgraded to APIS CALL (score: {score})")
+            elif direction in ["SHORT", "SELL"]:
+                signal_data["signal_type"] = "KODIAK_CALL"
+                logger.info(f"⭐ {signal_data.get('ticker')} upgraded to KODIAK CALL (score: {score})")
         elif score >= 55:
             signal_data["confidence"] = "MEDIUM"
+            signal_data["priority"] = "MEDIUM"
         else:
             signal_data["confidence"] = "LOW"
+            signal_data["priority"] = "LOW"
         
         logger.info(f"📊 Signal scored: {signal_data.get('ticker')} = {score} ({bias_alignment})")
         

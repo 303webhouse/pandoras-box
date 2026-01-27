@@ -237,7 +237,12 @@ def get_recommendation(direction: str, confluence: bool, agreements: int) -> str
 
 async def upgrade_signal_if_confluence(signal: Dict) -> Dict:
     """
-    Check a BTC signal and upgrade to APIS/KODIAK if macro confluence exists
+    Check ANY signal and upgrade to APIS/KODIAK if macro confluence exists.
+    
+    APIS_CALL = Strong bullish with full macro confluence (all 3 factors bullish)
+    KODIAK_CALL = Strong bearish with full macro confluence (all 3 factors bearish)
+    
+    Applies to ALL tickers (equities and crypto).
     
     Args:
         signal: The incoming signal dict
@@ -247,16 +252,8 @@ async def upgrade_signal_if_confluence(signal: Dict) -> Dict:
     """
     ticker = signal.get("ticker", "").upper()
     direction = signal.get("direction", "").upper()
-    strategy = signal.get("strategy", "").lower()
     
-    # Only check BTC Exhaustion signals
-    if "btc" not in ticker.lower():
-        return signal
-    
-    if "exhaustion" not in strategy.lower():
-        return signal
-    
-    logger.info(f"🔍 Checking macro confluence for BTC {direction} signal...")
+    logger.info(f"🔍 Checking macro confluence for {ticker} {direction} signal...")
     
     has_confluence, details = await check_btc_macro_confluence(direction)
     
@@ -264,18 +261,18 @@ async def upgrade_signal_if_confluence(signal: Dict) -> Dict:
     signal["macro_confluence"] = details
     
     if has_confluence:
-        # Upgrade signal type
+        # Upgrade signal type - APIS for bulls, KODIAK for bears
         if direction in ["LONG", "BUY", "BULLISH"]:
             signal["signal_type"] = "APIS_CALL"
             signal["priority"] = "HIGH"
-            logger.info(f"⬆️ BTC signal upgraded to APIS CALL - full macro confluence!")
+            logger.info(f"⬆️ {ticker} signal upgraded to APIS CALL - full macro confluence!")
         else:
             signal["signal_type"] = "KODIAK_CALL"
             signal["priority"] = "HIGH"
-            logger.info(f"⬆️ BTC signal upgraded to KODIAK CALL - full macro confluence!")
+            logger.info(f"⬆️ {ticker} signal upgraded to KODIAK CALL - full macro confluence!")
     else:
         # Keep original signal type but add confluence info
         signal["priority"] = "MEDIUM" if details.get("agreement_count", "0/3").startswith("2") else "LOW"
-        logger.info(f"BTC signal not upgraded - confluence: {details.get('agreement_count')}")
+        logger.info(f"{ticker} signal not upgraded - confluence: {details.get('agreement_count')}")
     
     return signal
