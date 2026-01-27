@@ -195,39 +195,55 @@ body {
 }
 
 /* Override Active - Bullish (green outlines on all sections) */
-.override-active-bullish .main-content,
-.override-active-bullish .watchlist-section,
-.override-active-bullish .cta-section,
-.override-active-bullish .hybrid-scanner-section,
-.override-active-bullish .btc-signals-section,
-.override-active-bullish .flow-section,
-.override-active-bullish .strategies-section,
-.override-active-bullish .bias-card {
-    outline: 2px solid var(--accent-lime);
-    outline-offset: -2px;
+body.override-active-bullish .main-content,
+body.override-active-bullish .watchlist-section,
+body.override-active-bullish .cta-section,
+body.override-active-bullish .hybrid-scanner-section,
+body.override-active-bullish .btc-signals-section,
+body.override-active-bullish .flow-section,
+body.override-active-bullish .strategies-section,
+body.override-active-bullish .bias-card,
+body.override-active-bullish section {
+    outline: 3px solid var(--accent-lime) !important;
+    outline-offset: -3px;
 }
 
-.override-active-bullish .override-active-banner {
-    background: var(--accent-lime);
-    color: var(--dark-bg);
+body.override-active-bullish .override-active-banner,
+body.override-active-bullish .bias-hierarchy-flow {
+    background: rgba(124, 255, 107, 0.15);
+    border-color: var(--accent-lime);
+}
+
+body.override-active-bullish .override-toggle[data-active="true"] {
+    background: var(--accent-lime) !important;
+    border-color: var(--accent-lime) !important;
+    color: var(--dark-bg) !important;
 }
 
 /* Override Active - Bearish (orange outlines on all sections) */
-.override-active-bearish .main-content,
-.override-active-bearish .watchlist-section,
-.override-active-bearish .cta-section,
-.override-active-bearish .hybrid-scanner-section,
-.override-active-bearish .btc-signals-section,
-.override-active-bearish .flow-section,
-.override-active-bearish .strategies-section,
-.override-active-bearish .bias-card {
-    outline: 2px solid var(--accent-orange);
-    outline-offset: -2px;
+body.override-active-bearish .main-content,
+body.override-active-bearish .watchlist-section,
+body.override-active-bearish .cta-section,
+body.override-active-bearish .hybrid-scanner-section,
+body.override-active-bearish .btc-signals-section,
+body.override-active-bearish .flow-section,
+body.override-active-bearish .strategies-section,
+body.override-active-bearish .bias-card,
+body.override-active-bearish section {
+    outline: 3px solid var(--accent-orange) !important;
+    outline-offset: -3px;
 }
 
-.override-active-bearish .override-active-banner {
-    background: var(--accent-orange);
-    color: var(--dark-bg);
+body.override-active-bearish .override-active-banner,
+body.override-active-bearish .bias-hierarchy-flow {
+    background: rgba(255, 107, 53, 0.15);
+    border-color: var(--accent-orange);
+}
+
+body.override-active-bearish .override-toggle[data-active="true"] {
+    background: var(--accent-orange) !important;
+    border-color: var(--accent-orange) !important;
+    color: var(--dark-bg) !important;
 }
 
 /* Bias alignment indicator in header */
