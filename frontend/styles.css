@@ -1663,6 +1663,113 @@ body.override-active-bearish .override-toggle[data-active="true"] {
     animation: none;
 }
 
+/* ============================================
+   APIS_CALL & KODIAK_CALL - HIGHEST CONVICTION SIGNALS
+   These are the strongest signals and should JUMP off the screen
+   ============================================ */
+
+/* APIS CALL - Strong Bullish Signal (Bull God) */
+.signal-card.APIS_CALL {
+    background: linear-gradient(135deg, rgba(16, 185, 129, 0.15) 0%, rgba(5, 150, 105, 0.25) 100%);
+    border: 2px solid #10b981;
+    border-left-width: 8px;
+    box-shadow: 0 0 20px rgba(16, 185, 129, 0.4), 0 0 40px rgba(16, 185, 129, 0.2);
+    animation: apisGlow 1.5s ease-in-out infinite alternate;
+    position: relative;
+    overflow: hidden;
+}
+
+.signal-card.APIS_CALL::before {
+    content: '🐂';
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    font-size: 24px;
+    opacity: 0.8;
+    animation: bounce 1s ease-in-out infinite;
+}
+
+.signal-card.APIS_CALL .signal-type {
+    background: linear-gradient(90deg, #10b981, #34d399);
+    color: #000;
+    font-weight: 800;
+    text-shadow: none;
+    padding: 6px 14px;
+    font-size: 14px;
+    letter-spacing: 1px;
+}
+
+@keyframes apisGlow {
+    0% {
+        box-shadow: 0 0 20px rgba(16, 185, 129, 0.4), 0 0 40px rgba(16, 185, 129, 0.2);
+    }
+    100% {
+        box-shadow: 0 0 30px rgba(16, 185, 129, 0.6), 0 0 60px rgba(16, 185, 129, 0.3), 0 0 80px rgba(16, 185, 129, 0.1);
+    }
+}
+
+/* KODIAK CALL - Strong Bearish Signal (Bear God) */
+.signal-card.KODIAK_CALL {
+    background: linear-gradient(135deg, rgba(239, 68, 68, 0.15) 0%, rgba(185, 28, 28, 0.25) 100%);
+    border: 2px solid #ef4444;
+    border-left-width: 8px;
+    box-shadow: 0 0 20px rgba(239, 68, 68, 0.4), 0 0 40px rgba(239, 68, 68, 0.2);
+    animation: kodiakGlow 1.5s ease-in-out infinite alternate;
+    position: relative;
+    overflow: hidden;
+}
+
+.signal-card.KODIAK_CALL::before {
+    content: '🐻';
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    font-size: 24px;
+    opacity: 0.8;
+    animation: bounce 1s ease-in-out infinite;
+}
+
+.signal-card.KODIAK_CALL .signal-type {
+    background: linear-gradient(90deg, #ef4444, #f87171);
+    color: #000;
+    font-weight: 800;
+    text-shadow: none;
+    padding: 6px 14px;
+    font-size: 14px;
+    letter-spacing: 1px;
+}
+
+@keyframes kodiakGlow {
+    0% {
+        box-shadow: 0 0 20px rgba(239, 68, 68, 0.4), 0 0 40px rgba(239, 68, 68, 0.2);
+    }
+    100% {
+        box-shadow: 0 0 30px rgba(239, 68, 68, 0.6), 0 0 60px rgba(239, 68, 68, 0.3), 0 0 80px rgba(239, 68, 68, 0.1);
+    }
+}
+
+@keyframes bounce {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-4px); }
+}
+
+/* Score display for APIS/KODIAK */
+.signal-card.APIS_CALL .score-value,
+.signal-card.KODIAK_CALL .score-value {
+    font-size: 18px;
+    font-weight: 800;
+}
+
+.signal-card.APIS_CALL .score-tier {
+    background: #10b981;
+    color: #000;
+}
+
+.signal-card.KODIAK_CALL .score-tier {
+    background: #ef4444;
+    color: #fff;
+}
+
 /* New Signal Highlight Animation */
 @keyframes newSignalFlash {
     0% { background: rgba(20, 184, 166, 0.3); }
