@@ -1467,8 +1467,8 @@ async def refresh_cyclical_bias() -> Dict[str, Any]:
             xly = yf.Ticker("XLY")
             xlp = yf.Ticker("XLP")
             
-            xly_hist = xly.history(period="1mo")
-            xlp_hist = xlp.history(period="1mo")
+            xly_hist = xly.history(period="2mo")  # Get 2 months to ensure 20 trading days
+            xlp_hist = xlp.history(period="2mo")
             
             if len(xly_hist) >= 20 and len(xlp_hist) >= 20:
                 # Calculate 20-day performance
@@ -1524,8 +1524,8 @@ async def refresh_cyclical_bias() -> Dict[str, Any]:
             copper = yf.Ticker("COPX")  # Copper miners
             gold = yf.Ticker("GLD")     # Gold ETF
             
-            copper_hist = copper.history(period="1mo")
-            gold_hist = gold.history(period="1mo")
+            copper_hist = copper.history(period="2mo")  # Get 2 months to ensure 20 trading days
+            gold_hist = gold.history(period="2mo")
             
             if len(copper_hist) >= 20 and len(gold_hist) >= 20:
                 # Calculate 20-day performance
