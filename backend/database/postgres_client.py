@@ -7,8 +7,27 @@ import asyncpg
 import os
 from typing import Optional, Dict, Any, List
 from datetime import datetime
+from decimal import Decimal
 import json
+import logging
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
+
+
+def serialize_db_row(row_dict: Dict) -> Dict:
+    """Convert database row to JSON-serializable dict"""
+    result = {}
+    for key, value in row_dict.items():
+        if isinstance(value, datetime):
+            result[key] = value.isoformat()
+        elif isinstance(value, Decimal):
+            result[key] = float(value)
+        elif value is None:
+            result[key] = None
+        else:
+            result[key] = value
+    return result
 
 # Load environment variables from .env file
 load_dotenv(os.path.join(os.path.dirname(__file__), '..', '..', 'config', '.env'))
@@ -263,7 +282,7 @@ async def get_open_positions() -> List[Dict[Any, Any]]:
             ORDER BY created_at DESC
         """)
         
-        return [dict(row) for row in rows]
+        return [serialize_db_row(dict(row)) for row in rows]
 
 async def log_tick_data(date: str, tick_high: int, tick_low: int, range_type: str):
     """Log daily TICK data for bias calculation"""
@@ -314,7 +333,8 @@ async def get_active_trade_ideas(limit: int = 10) -> List[Dict[Any, Any]]:
                 LIMIT $1
             """, limit)
         
-        return [dict(row) for row in rows]
+        # Convert to dicts and handle datetime/Decimal serialization
+        return [serialize_db_row(dict(row)) for row in rows]
 
 
 async def get_signal_queue(limit: int = 50) -> List[Dict[Any, Any]]:
@@ -347,7 +367,8 @@ async def get_signal_queue(limit: int = 50) -> List[Dict[Any, Any]]:
                 LIMIT $1
             """, limit)
         
-        return [dict(row) for row in rows]
+        # Convert to dicts and handle datetime/Decimal serialization
+        return [serialize_db_row(dict(row)) for row in rows]
 
 
 async def get_archived_signals(
@@ -437,7 +458,7 @@ async def get_archived_signals(
         rows = await conn.fetch(query, *params)
         
         return {
-            "signals": [dict(row) for row in rows],
+            "signals": [serialize_db_row(dict(row)) for row in rows],
             "total": total_count,
             "limit": limit,
             "offset": offset
@@ -453,7 +474,7 @@ async def get_signal_by_id(signal_id: str) -> Optional[Dict[Any, Any]]:
             SELECT * FROM signals WHERE signal_id = $1
         """, signal_id)
         
-        return dict(row) if row else None
+        return serialize_db_row(dict(row)) if row else None
 
 
 async def update_signal_with_score(signal_id: str, score: float, bias_alignment: str, triggering_factors: Dict):
@@ -645,7 +666,7 @@ async def close_position_in_db(
                 WHERE signal_id = $1
             """, signal_id, exit_price, trade_outcome, loss_reason, notes)
         
-        return dict(row) if row else None
+        return serialize_db_row(dict(row)) if row else None
 
 
 async def get_position_by_id(position_id: int) -> Optional[Dict[Any, Any]]:
@@ -657,4 +678,4 @@ async def get_position_by_id(position_id: int) -> Optional[Dict[Any, Any]]:
             SELECT * FROM positions WHERE id = $1
         """, position_id)
         
-        return dict(row) if row else None
+        return serialize_db_row(dict(row)) if row else None
