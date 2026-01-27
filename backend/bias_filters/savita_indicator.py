@@ -229,7 +229,19 @@ async def auto_search_savita_update() -> Dict[str, Any]:
         import google.generativeai as genai
         
         genai.configure(api_key=gemini_api_key)
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        # Try multiple model names for compatibility
+        model_names = ['gemini-1.5-flash-latest', 'gemini-1.0-pro', 'gemini-pro-latest']
+        model = None
+        for model_name in model_names:
+            try:
+                model = genai.GenerativeModel(model_name)
+                # Test if model works
+                break
+            except Exception:
+                continue
+        
+        if model is None:
+            raise Exception("No compatible Gemini model found")
         
         prompt = """Search for the latest Bank of America Sell Side Indicator (also known as the BofA Sell Side Indicator or Savita Subramanian's indicator).
 
