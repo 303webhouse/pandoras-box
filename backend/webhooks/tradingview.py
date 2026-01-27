@@ -377,16 +377,19 @@ async def apply_signal_scoring(signal_data: dict) -> dict:
         # Set confidence and potentially upgrade signal type based on score
         direction = signal_data.get("direction", "").upper()
         
-        if score >= 75:
+        if score >= 85:
             signal_data["confidence"] = "HIGH"
             signal_data["priority"] = "HIGH"
-            # Upgrade to APIS/KODIAK for strongest signals
+            # Upgrade to APIS/KODIAK for strongest signals (rare, 85+ only)
             if direction in ["LONG", "BUY"]:
                 signal_data["signal_type"] = "APIS_CALL"
-                logger.info(f"⭐ {signal_data.get('ticker')} upgraded to APIS CALL (score: {score})")
+                logger.info(f"APIS CALL: {signal_data.get('ticker')} (score: {score})")
             elif direction in ["SHORT", "SELL"]:
                 signal_data["signal_type"] = "KODIAK_CALL"
-                logger.info(f"⭐ {signal_data.get('ticker')} upgraded to KODIAK CALL (score: {score})")
+                logger.info(f"KODIAK CALL: {signal_data.get('ticker')} (score: {score})")
+        elif score >= 75:
+            signal_data["confidence"] = "HIGH"
+            signal_data["priority"] = "HIGH"
         elif score >= 55:
             signal_data["confidence"] = "MEDIUM"
             signal_data["priority"] = "MEDIUM"

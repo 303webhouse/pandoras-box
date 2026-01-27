@@ -1679,15 +1679,7 @@ body.override-active-bearish .override-toggle[data-active="true"] {
     overflow: hidden;
 }
 
-.signal-card.APIS_CALL::before {
-    content: '🐂';
-    position: absolute;
-    top: 8px;
-    right: 8px;
-    font-size: 24px;
-    opacity: 0.8;
-    animation: bounce 1s ease-in-out infinite;
-}
+/* No emoji - clean design */
 
 .signal-card.APIS_CALL .signal-type {
     background: linear-gradient(90deg, #10b981, #34d399);
@@ -1719,15 +1711,7 @@ body.override-active-bearish .override-toggle[data-active="true"] {
     overflow: hidden;
 }
 
-.signal-card.KODIAK_CALL::before {
-    content: '🐻';
-    position: absolute;
-    top: 8px;
-    right: 8px;
-    font-size: 24px;
-    opacity: 0.8;
-    animation: bounce 1s ease-in-out infinite;
-}
+/* No emoji - clean design */
 
 .signal-card.KODIAK_CALL .signal-type {
     background: linear-gradient(90deg, #ef4444, #f87171);
@@ -1748,10 +1732,7 @@ body.override-active-bearish .override-toggle[data-active="true"] {
     }
 }
 
-@keyframes bounce {
-    0%, 100% { transform: translateY(0); }
-    50% { transform: translateY(-4px); }
-}
+/* Bounce animation removed - no emojis */
 
 /* Score display for APIS/KODIAK */
 .signal-card.APIS_CALL .score-value,
