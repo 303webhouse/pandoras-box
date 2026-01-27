@@ -2707,41 +2707,36 @@ function renderAnalyzerResults(data) {
         return;
     }
     
-    const verdict = data.overall_verdict || 'NO_SIGNAL';
     const metrics = data.current_metrics || {};
     const ursaCriteria = data.criteria_breakdown?.ursa_bearish || {};
     const taurusCriteria = data.criteria_breakdown?.taurus_bullish || {};
+    const ctaAnalysis = data.cta_analysis || {};
     
-    // Determine verdict styling
-    let verdictClass = 'no-signal';
-    let verdictText = 'NO SIGNAL';
-    
-    if (verdict === 'URSA_SIGNAL') {
-        verdictClass = 'ursa';
-        verdictText = '🐻 URSA SIGNAL (BEARISH)';
-    } else if (verdict === 'TAURUS_SIGNAL') {
-        verdictClass = 'taurus';
-        verdictText = '🐂 TAURUS SIGNAL (BULLISH)';
-    }
+    // CTA Zone info for display
+    const ctaZone = ctaAnalysis.cta_zone || 'N/A';
+    const ctaBias = ctaAnalysis.bias || '';
     
     let html = `
-        <div class="analyzer-verdict ${verdictClass}">
-            <span class="verdict-ticker">${data.ticker}</span>
-            <span class="verdict-result">${verdictText}</span>
-        </div>
-        
         <div class="analyzer-metrics">
             <div class="analyzer-metric">
                 <div class="analyzer-metric-label">Price</div>
                 <div class="analyzer-metric-value">$${metrics.price ?? '-'}</div>
             </div>
             <div class="analyzer-metric">
-                <div class="analyzer-metric-label">SMA 200</div>
-                <div class="analyzer-metric-value">$${metrics.sma_200 ?? '-'}</div>
+                <div class="analyzer-metric-label">SMA 20</div>
+                <div class="analyzer-metric-value">$${ctaAnalysis.sma20 ?? metrics.sma_20 ?? '-'}</div>
             </div>
             <div class="analyzer-metric">
-                <div class="analyzer-metric-label">VWAP</div>
-                <div class="analyzer-metric-value">$${metrics.vwap_20 ?? '-'}</div>
+                <div class="analyzer-metric-label">SMA 50</div>
+                <div class="analyzer-metric-value">$${ctaAnalysis.sma50 ?? metrics.sma_50 ?? '-'}</div>
+            </div>
+            <div class="analyzer-metric">
+                <div class="analyzer-metric-label">CTA Zone</div>
+                <div class="analyzer-metric-value zone-${ctaZone.toLowerCase().replace(' ', '-')}">${ctaZone}</div>
+            </div>
+            <div class="analyzer-metric">
+                <div class="analyzer-metric-label">RSI</div>
+                <div class="analyzer-metric-value">${metrics.rsi ?? '-'}</div>
             </div>
             <div class="analyzer-metric">
                 <div class="analyzer-metric-label">ADX</div>
