@@ -230,6 +230,14 @@ async def auto_search_savita_update() -> Dict[str, Any]:
         
         genai.configure(api_key=gemini_api_key)
         
+        # List available models for debugging
+        try:
+            available_models = [m.name for m in genai.list_models() if 'generateContent' in [method.name for method in m.supported_generation_methods]]
+            logger.info(f"Available Gemini models: {available_models}")
+        except Exception as e:
+            logger.warning(f"Could not list models: {e}")
+            available_models = []
+        
         prompt = """Search for the latest Bank of America Sell Side Indicator (also known as the BofA Sell Side Indicator or Savita Subramanian's indicator).
 
 This indicator measures Wall Street strategists' average recommended equity allocation as a percentage.
