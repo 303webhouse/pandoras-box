@@ -832,12 +832,12 @@ function updateBiasWithTrend(timeframe, biasData) {
                 trendText = 'first reading';
         }
         
-        // Format timestamp in Mountain Time
+        // Format timestamp in Eastern Time (market hours)
         let timeStr = '';
         if (timestamp) {
             const date = new Date(timestamp);
             timeStr = date.toLocaleString('en-US', { 
-                timeZone: 'America/Denver',
+                timeZone: 'America/New_York',
                 month: 'short', 
                 day: 'numeric',
                 hour: 'numeric',
@@ -1795,7 +1795,7 @@ async function loadCyclicalBiasFallback() {
                 const details = data.details || {};
                 const totalVote = details.total_vote !== undefined ? details.total_vote : '?';
                 const timestamp = data.timestamp ? new Date(data.timestamp).toLocaleString('en-US', {
-                    timeZone: 'America/Denver',
+                    timeZone: 'America/New_York',
                     month: 'short',
                     day: 'numeric',
                     hour: 'numeric',
