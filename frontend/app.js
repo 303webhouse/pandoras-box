@@ -2491,18 +2491,25 @@ async function analyzeTicker() {
     if (aggregateContainer) aggregateContainer.style.display = 'none';
     
     try {
-        // Fetch Hunter analysis, Hybrid gauges, and current bias in parallel
-        const [hunterResponse, hybridResponse, biasResponse] = await Promise.all([
+        // Fetch Hunter analysis, CTA analysis, Hybrid gauges, and current bias in parallel
+        const [hunterResponse, ctaResponse, hybridResponse, biasResponse] = await Promise.all([
             fetch(`${API_URL}/scanner/analyze/${ticker}`),
+            fetch(`${API_URL}/cta/analyze/${ticker}`),
             fetch(`${API_URL}/hybrid/combined/${ticker}`),
             fetch(`${API_URL}/bias-auto/status`)
         ]);
         
         const hunterData = await hunterResponse.json();
+        const ctaData = await ctaResponse.json();
         const hybridData = await hybridResponse.json();
         const biasData = await biasResponse.json();
         
-        // Render ticker info/metrics
+        // Merge CTA analysis into Hunter data for unified display
+        if (ctaData && ctaData.cta_analysis) {
+            hunterData.cta_analysis = ctaData.cta_analysis;
+        }
+        
+        // Render ticker info/metrics (now includes CTA data)
         renderAnalyzerResults(hunterData);
         
         // Render Hybrid gauges (Technical + Analyst)
