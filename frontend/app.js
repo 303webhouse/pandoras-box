@@ -408,6 +408,9 @@ async function loadBiasData() {
                 } else {
                     updateBiasWithTrend('cyclical', data.cyclical);
                 }
+                
+                // Check for crisis mode and display alert
+                checkAndDisplayCrisisAlert(data.cyclical);
             }
         } else {
             // Fallback to old endpoint if scheduler not ready
@@ -551,6 +554,50 @@ function checkAndApplyBiasAlignment() {
         // Not aligned - no outline
         if (alignmentText) alignmentText.textContent = 'MIXED';
         console.log('Bias alignment: MIXED (Cyclical and Weekly not aligned)');
+    }
+}
+
+// Check and display crisis alert when tiered factors are in crisis mode
+function checkAndDisplayCrisisAlert(cyclicalData) {
+    const crisisBanner = document.getElementById('crisisAlertBanner');
+    const crisisFactorsEl = document.getElementById('crisisFactors');
+    
+    if (!crisisBanner) return;
+    
+    // Check if crisis mode is active from the cyclical data
+    const details = cyclicalData?.details || {};
+    const crisisActive = details.crisis_mode_active || false;
+    const factors = details.factors || {};
+    
+    if (crisisActive) {
+        // Find which factors are in crisis tier
+        const crisisFactorNames = [];
+        
+        Object.keys(factors).forEach(factorName => {
+            const factorData = factors[factorName];
+            const tier = factorData?.details?.tier || 'standard';
+            
+            if (tier.startsWith('crisis')) {
+                // Convert factor name to readable format
+                const readableName = factorName
+                    .replace(/_/g, ' ')
+                    .replace(/\b\w/g, l => l.toUpperCase());
+                
+                const status = factorData?.details?.status || tier;
+                crisisFactorNames.push(`${readableName} (${status})`);
+            }
+        });
+        
+        if (crisisFactorNames.length > 0) {
+            crisisFactorsEl.textContent = crisisFactorNames.join(', ');
+            crisisBanner.classList.add('active');
+            crisisBanner.style.display = 'flex';
+            console.warn('CRISIS MODE ACTIVE:', crisisFactorNames);
+        }
+    } else {
+        // No crisis - hide the banner
+        crisisBanner.classList.remove('active');
+        crisisBanner.style.display = 'none';
     }
 }
 
