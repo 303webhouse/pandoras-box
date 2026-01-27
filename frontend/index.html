@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Pandora's Box - Real-time Trading Signal Dashboard">
     <title>Pandora's Box</title>
-    <link rel="stylesheet" href="styles.css?v=23">
+    <link rel="stylesheet" href="styles.css?v=24">
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#0a0e27">
 </head>
@@ -21,6 +21,11 @@
                 </div>
             </div>
             <div class="header-controls">
+                <!-- Savita Update Reminder (shows when stale) -->
+                <div class="savita-reminder" id="savitaReminder" style="display: none;">
+                    <span class="reminder-icon">📊</span>
+                    <a href="#" id="savitaUpdateLink" class="reminder-link">Update Savita</a>
+                </div>
                 <button class="refresh-btn" id="refreshBtn">↻ Refresh</button>
             </div>
         </header>
@@ -795,8 +800,39 @@
         </div>
     </div>
 
+    <!-- Savita Update Modal -->
+    <div class="modal-overlay" id="savitaUpdateModal">
+        <div class="savita-modal">
+            <div class="savita-modal-header">
+                <h2>Update Savita Indicator</h2>
+                <button class="modal-close" id="closeSavitaModal">✕</button>
+            </div>
+            <div class="savita-modal-body">
+                <p class="savita-description">
+                    Enter the latest BofA Sell Side Indicator reading from financial news.
+                    <br><small>Search: "BofA Sell Side Indicator" or "Savita Subramanian indicator"</small>
+                </p>
+                <div class="savita-input-group">
+                    <label for="savitaReading">Reading (%)</label>
+                    <input type="number" id="savitaReading" min="40" max="70" step="0.1" placeholder="e.g., 55.9">
+                </div>
+                <div class="savita-input-group">
+                    <label for="savitaDate">Report Date (optional)</label>
+                    <input type="date" id="savitaDate">
+                </div>
+                <div class="savita-current" id="savitaCurrentInfo">
+                    Current: <span id="savitaCurrentReading">--</span>% (updated <span id="savitaLastUpdated">--</span>)
+                </div>
+            </div>
+            <div class="savita-modal-footer">
+                <button class="savita-btn cancel" id="cancelSavitaUpdate">Cancel</button>
+                <button class="savita-btn submit" id="submitSavitaUpdate">Update</button>
+            </div>
+        </div>
+    </div>
+
     <!-- TradingView Widget Script -->
     <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-    <script src="app.js?v=27"></script>
+    <script src="app.js?v=28"></script>
 </body>
 </html>

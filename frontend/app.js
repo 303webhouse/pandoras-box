@@ -323,6 +323,9 @@ function initEventListeners() {
     initDailyBiasSettings();
     initCyclicalBiasSettings();
     
+    // Savita Update Modal
+    initSavitaUpdateModal();
+    
     // Personal Bias & Override Controls
     initPersonalBiasControls();
 }
@@ -411,6 +414,9 @@ async function loadBiasData() {
                 
                 // Check for crisis mode and display alert
                 checkAndDisplayCrisisAlert(data.cyclical);
+                
+                // Check Savita status for update reminder
+                checkSavitaStatus(data.cyclical);
             }
         } else {
             // Fallback to old endpoint if scheduler not ready
@@ -599,6 +605,132 @@ function checkAndDisplayCrisisAlert(cyclicalData) {
         crisisBanner.classList.remove('active');
         crisisBanner.style.display = 'none';
     }
+}
+
+// Savita Indicator Update Functions
+function checkSavitaStatus(cyclicalData) {
+    const reminder = document.getElementById('savitaReminder');
+    if (!reminder) return;
+    
+    const factors = cyclicalData?.details?.factors || {};
+    const savitaData = factors.savita_indicator?.details || {};
+    const lastUpdated = savitaData.last_updated || savitaData.reading?.last_updated;
+    
+    if (!lastUpdated) {
+        // No data at all - show reminder
+        reminder.style.display = 'flex';
+        reminder.classList.add('stale');
+        return;
+    }
+    
+    // Check if data is stale (>30 days old)
+    const updateDate = new Date(lastUpdated);
+    const now = new Date();
+    const daysSinceUpdate = Math.floor((now - updateDate) / (1000 * 60 * 60 * 24));
+    
+    if (daysSinceUpdate > 30) {
+        reminder.style.display = 'flex';
+        reminder.classList.add('stale');
+        reminder.querySelector('.reminder-link').textContent = `Update Savita (${daysSinceUpdate}d old)`;
+    } else if (daysSinceUpdate > 20) {
+        // Getting stale, show gentle reminder
+        reminder.style.display = 'flex';
+        reminder.classList.remove('stale');
+        reminder.querySelector('.reminder-link').textContent = `Savita: ${daysSinceUpdate}d old`;
+    } else {
+        // Fresh enough - hide reminder
+        reminder.style.display = 'none';
+    }
+}
+
+function initSavitaUpdateModal() {
+    const updateLink = document.getElementById('savitaUpdateLink');
+    const modal = document.getElementById('savitaUpdateModal');
+    const closeBtn = document.getElementById('closeSavitaModal');
+    const cancelBtn = document.getElementById('cancelSavitaUpdate');
+    const submitBtn = document.getElementById('submitSavitaUpdate');
+    
+    if (!updateLink || !modal) return;
+    
+    // Open modal
+    updateLink.addEventListener('click', async (e) => {
+        e.preventDefault();
+        
+        // Fetch current Savita status
+        try {
+            const response = await fetch(`${API_URL}/bias-auto/savita`);
+            const result = await response.json();
+            
+            if (result.status === 'success') {
+                const data = result.data;
+                document.getElementById('savitaCurrentReading').textContent = data.reading || '--';
+                document.getElementById('savitaLastUpdated').textContent = data.last_updated || '--';
+                
+                // Check if stale
+                const currentInfo = document.getElementById('savitaCurrentInfo');
+                if (data.last_updated) {
+                    const daysSince = Math.floor((new Date() - new Date(data.last_updated)) / (1000 * 60 * 60 * 24));
+                    if (daysSince > 30) {
+                        currentInfo.classList.add('stale');
+                        currentInfo.innerHTML = `<strong>⚠️ DISABLED (${daysSince}d old)</strong> - Savita not affecting score until updated`;
+                    } else {
+                        currentInfo.classList.remove('stale');
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('Error fetching Savita status:', error);
+        }
+        
+        modal.classList.add('active');
+    });
+    
+    // Close modal
+    const closeModal = () => {
+        modal.classList.remove('active');
+        document.getElementById('savitaReading').value = '';
+        document.getElementById('savitaDate').value = '';
+    };
+    
+    closeBtn?.addEventListener('click', closeModal);
+    cancelBtn?.addEventListener('click', closeModal);
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) closeModal();
+    });
+    
+    // Submit update
+    submitBtn?.addEventListener('click', async () => {
+        const reading = parseFloat(document.getElementById('savitaReading').value);
+        const date = document.getElementById('savitaDate').value;
+        
+        if (isNaN(reading) || reading < 40 || reading > 70) {
+            alert('Please enter a valid reading between 40 and 70');
+            return;
+        }
+        
+        try {
+            let url = `${API_URL}/bias-auto/savita/update?reading=${reading}`;
+            if (date) url += `&date=${date}`;
+            
+            const response = await fetch(url, { method: 'POST' });
+            const result = await response.json();
+            
+            if (result.status === 'success') {
+                alert(`Savita updated to ${reading}%`);
+                closeModal();
+                
+                // Refresh bias data and hide reminder
+                await loadBiasData();
+                const reminder = document.getElementById('savitaReminder');
+                if (reminder) reminder.style.display = 'none';
+            } else {
+                alert('Error updating Savita: ' + (result.detail || 'Unknown error'));
+            }
+        } catch (error) {
+            console.error('Error updating Savita:', error);
+            alert('Error updating Savita');
+        }
+    });
 }
 
 function updateBiasWithTrend(timeframe, biasData) {

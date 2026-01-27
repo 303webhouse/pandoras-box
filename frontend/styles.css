@@ -482,6 +482,160 @@ body.override-active-bearish .override-toggle[data-active="true"] {
     75% { transform: translateX(2px); }
 }
 
+/* Savita Update Reminder */
+.savita-reminder {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    background: rgba(251, 191, 36, 0.15);
+    border: 1px solid #fbbf24;
+    border-radius: 4px;
+    font-size: 11px;
+    margin-right: 10px;
+}
+
+.savita-reminder .reminder-icon {
+    font-size: 12px;
+}
+
+.savita-reminder .reminder-link {
+    color: #fbbf24;
+    text-decoration: none;
+    font-weight: 600;
+}
+
+.savita-reminder .reminder-link:hover {
+    text-decoration: underline;
+    color: #fcd34d;
+}
+
+.savita-reminder.stale {
+    background: rgba(239, 68, 68, 0.15);
+    border-color: #ef4444;
+}
+
+.savita-reminder.stale .reminder-link {
+    color: #ef4444;
+}
+
+/* Savita Update Modal */
+.savita-modal {
+    background: var(--card-bg);
+    border-radius: 12px;
+    width: 400px;
+    max-width: 90vw;
+    border: 1px solid var(--border-color);
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+}
+
+.savita-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.savita-modal-header h2 {
+    font-size: 16px;
+    color: var(--accent-teal);
+    margin: 0;
+}
+
+.savita-modal-body {
+    padding: 20px;
+}
+
+.savita-description {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-bottom: 16px;
+    line-height: 1.5;
+}
+
+.savita-description small {
+    color: var(--text-secondary);
+    opacity: 0.7;
+}
+
+.savita-input-group {
+    margin-bottom: 14px;
+}
+
+.savita-input-group label {
+    display: block;
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-bottom: 6px;
+}
+
+.savita-input-group input {
+    width: 100%;
+    padding: 10px 12px;
+    background: var(--dark-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    color: var(--text-primary);
+    font-size: 14px;
+}
+
+.savita-input-group input:focus {
+    outline: none;
+    border-color: var(--accent-teal);
+}
+
+.savita-current {
+    font-size: 12px;
+    color: var(--text-secondary);
+    padding: 10px;
+    background: rgba(20, 184, 166, 0.1);
+    border-radius: 6px;
+    margin-top: 10px;
+}
+
+.savita-current.stale {
+    background: rgba(239, 68, 68, 0.1);
+    color: #ef4444;
+}
+
+.savita-modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    padding: 16px 20px;
+    border-top: 1px solid var(--border-color);
+}
+
+.savita-btn {
+    padding: 8px 16px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    border: none;
+    transition: all 0.2s;
+}
+
+.savita-btn.cancel {
+    background: transparent;
+    color: var(--text-secondary);
+    border: 1px solid var(--border-color);
+}
+
+.savita-btn.cancel:hover {
+    background: var(--border-color);
+}
+
+.savita-btn.submit {
+    background: var(--accent-teal);
+    color: var(--dark-bg);
+}
+
+.savita-btn.submit:hover {
+    background: #0d9488;
+}
+
 /* Personal Bias Badge on Bias Cards */
 .personal-bias-badge {
     display: block;
