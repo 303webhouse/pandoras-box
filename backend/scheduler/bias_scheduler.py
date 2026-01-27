@@ -41,6 +41,63 @@ _weekly_baseline = {
     "level": None
 }
 
+# Scheduler status tracking
+_scheduler_status = {
+    "cta_scanner": {
+        "last_run": None,
+        "signals_found": 0,
+        "status": "idle",
+        "next_run": None
+    },
+    "hunter_scanner": {
+        "last_run": None,
+        "signals_found": 0,
+        "status": "idle",
+        "next_run": None
+    },
+    "bias_refresh": {
+        "last_run": None,
+        "status": "idle"
+    },
+    "scheduler_started": None
+}
+
+def get_scheduler_status() -> Dict[str, Any]:
+    """Get current scheduler status for all scheduled tasks"""
+    now = get_eastern_now()
+    is_market_hours = is_trading_day() and 9 <= now.hour <= 16
+    
+    # Calculate next run times
+    if is_market_hours:
+        next_cta = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+        next_hunter_min = 0 if now.minute >= 30 else 30
+        next_hunter = now.replace(minute=next_hunter_min, second=0, microsecond=0)
+        if next_hunter <= now:
+            next_hunter += timedelta(minutes=30)
+    else:
+        # Next market open
+        next_open = now.replace(hour=9, minute=30, second=0, microsecond=0)
+        if now.hour >= 16 or (now.hour == 9 and now.minute >= 30):
+            next_open += timedelta(days=1)
+        next_cta = next_open
+        next_hunter = next_open
+    
+    return {
+        "current_time_et": now.strftime("%Y-%m-%d %H:%M:%S"),
+        "is_trading_day": is_trading_day(),
+        "is_market_hours": is_market_hours,
+        "scheduler_started": _scheduler_status.get("scheduler_started"),
+        "cta_scanner": {
+            **_scheduler_status["cta_scanner"],
+            "next_run_et": next_cta.strftime("%H:%M") if is_market_hours else f"Market open ({next_cta.strftime('%Y-%m-%d %H:%M')})"
+        },
+        "hunter_scanner": {
+            **_scheduler_status["hunter_scanner"],
+            "next_run_et": next_hunter.strftime("%H:%M") if is_market_hours else f"Market open ({next_hunter.strftime('%Y-%m-%d %H:%M')})"
+        },
+        "bias_refresh": _scheduler_status["bias_refresh"]
+    }
+
 
 class BiasTimeframe(str, Enum):
     DAILY = "DAILY"
@@ -1823,13 +1880,14 @@ async def run_scheduled_refreshes():
 
 async def start_scheduler():
     """Start the background scheduler"""
-    global _scheduler_started, _weekly_baseline
+    global _scheduler_started, _weekly_baseline, _scheduler_status
     
     if _scheduler_started:
         logger.info("Scheduler already running")
         return
     
     _scheduler_started = True
+    _scheduler_status["scheduler_started"] = get_eastern_now().isoformat()
     logger.info("🚀 Starting bias scheduler...")
     
     # Load weekly baseline from disk
@@ -2068,9 +2126,15 @@ async def run_cta_scan_scheduled():
             
             logger.info(f"📡 CTA signal pushed: {ticker} {signal.get('signal_type')} (score: {score}, {bias_alignment})")
         
+        # Update scheduler status
+        _scheduler_status["cta_scanner"]["last_run"] = get_eastern_now().isoformat()
+        _scheduler_status["cta_scanner"]["signals_found"] = len(all_signals)
+        _scheduler_status["cta_scanner"]["status"] = "completed"
+        
         logger.info(f"✅ CTA scheduled scan complete - {len(all_signals)} signals pushed to Trade Ideas")
         
     except Exception as e:
+        _scheduler_status["cta_scanner"]["status"] = f"error: {str(e)}"
         logger.error(f"Error in scheduled CTA scan: {e}")
 
 
@@ -2266,9 +2330,15 @@ async def run_hunter_scan_scheduled():
             logger.info(f"📡 Hunter signal pushed: {ticker} {signal_type} (score: {score}, {bias_alignment})")
             signals_pushed += 1
         
+        # Update scheduler status
+        _scheduler_status["hunter_scanner"]["last_run"] = get_eastern_now().isoformat()
+        _scheduler_status["hunter_scanner"]["signals_found"] = signals_pushed
+        _scheduler_status["hunter_scanner"]["status"] = "completed"
+        
         logger.info(f"✅ Hunter scheduled scan complete - {signals_pushed} signals pushed to Trade Ideas")
         
     except Exception as e:
+        _scheduler_status["hunter_scanner"]["status"] = f"error: {str(e)}"
         logger.error(f"Error in scheduled Hunter scan: {e}")
         import traceback
         traceback.print_exc()

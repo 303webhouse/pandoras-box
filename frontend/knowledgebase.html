@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Pandora's Box - Trading Knowledgebase">
+    <title>Knowledgebase - Pandora's Box</title>
+    <link rel="stylesheet" href="styles.css?v=29">
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#0a0e27">
+</head>
+<body>
+    <div class="container kb-page">
+        <!-- Header -->
+        <header class="header">
+            <div class="logo-section">
+                <a href="/app" class="logo-link">
+                    <h1 class="logo">📦 PANDORA'S BOX</h1>
+                </a>
+            </div>
+            <div class="header-controls">
+                <a href="/app" class="back-btn">← Back to Dashboard</a>
+            </div>
+        </header>
+
+        <!-- Knowledgebase Content -->
+        <div class="kb-container">
+            <!-- Sidebar with Categories -->
+            <aside class="kb-sidebar">
+                <div class="kb-search-container">
+                    <input type="text" id="kbSearchInput" class="kb-search-input" placeholder="Search knowledgebase...">
+                    <button class="kb-search-btn" id="kbSearchBtn">🔍</button>
+                </div>
+                
+                <nav class="kb-categories">
+                    <h3>Categories</h3>
+                    <ul class="kb-category-list" id="kbCategoryList">
+                        <li class="kb-category-item active" data-category="all">
+                            <span class="category-name">All Entries</span>
+                            <span class="category-count" id="allCount">0</span>
+                        </li>
+                        <!-- Categories will be populated by JavaScript -->
+                    </ul>
+                </nav>
+            </aside>
+
+            <!-- Main Content Area -->
+            <main class="kb-main">
+                <!-- Search Results Section (hidden by default) -->
+                <section class="kb-search-results" id="kbSearchResults" style="display: none;">
+                    <h2>Search Results</h2>
+                    <p class="search-query-display">Results for: "<span id="searchQueryDisplay"></span>"</p>
+                    <div class="kb-results-list" id="kbResultsList">
+                        <!-- Search results populated by JavaScript -->
+                    </div>
+                    <button class="kb-clear-search" id="kbClearSearch">Clear Search</button>
+                </section>
+
+                <!-- Browse Section -->
+                <section class="kb-browse" id="kbBrowse">
+                    <div class="kb-browse-header">
+                        <h2 id="kbCurrentCategory">All Entries</h2>
+                        <span class="kb-entry-count" id="kbEntryCount">Loading...</span>
+                    </div>
+                    
+                    <div class="kb-entries-grid" id="kbEntriesGrid">
+                        <!-- Entries populated by JavaScript -->
+                        <p class="empty-state">Loading knowledgebase...</p>
+                    </div>
+                </section>
+
+                <!-- Single Entry View (hidden by default) -->
+                <section class="kb-entry-view" id="kbEntryView" style="display: none;">
+                    <button class="kb-back-btn" id="kbBackBtn">← Back to List</button>
+                    
+                    <article class="kb-full-entry">
+                        <header class="kb-entry-header">
+                            <span class="kb-entry-category" id="entryCategory">Category</span>
+                            <h1 class="kb-entry-title" id="entryTitle">Entry Title</h1>
+                        </header>
+                        
+                        <div class="kb-entry-content" id="entryContent">
+                            <!-- Full entry content rendered here -->
+                        </div>
+                        
+                        <footer class="kb-entry-footer">
+                            <div class="kb-related-terms" id="kbRelatedTerms">
+                                <h3>Related Terms</h3>
+                                <div class="related-terms-list" id="relatedTermsList">
+                                    <!-- Related terms populated by JavaScript -->
+                                </div>
+                            </div>
+                        </footer>
+                    </article>
+                </section>
+            </main>
+        </div>
+    </div>
+
+    <script src="knowledgebase.js?v=1"></script>
+</body>
+</html>

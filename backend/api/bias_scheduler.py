@@ -29,6 +29,7 @@ try:
         refresh_cyclical_bias,
         run_scheduled_refreshes,
         get_weekly_baseline,
+        get_scheduler_status,
         BiasTimeframe
     )
     SCHEDULER_AVAILABLE = True
@@ -85,6 +86,30 @@ async def get_all_bias_status():
         
     except Exception as e:
         logger.error(f"Error getting bias status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/scheduler-status")
+async def get_scanner_scheduler_status():
+    """
+    Get status of all scheduled scanners.
+    
+    Shows:
+    - When each scanner last ran
+    - How many signals it found
+    - When it will run next
+    - Current market hours status
+    """
+    if not SCHEDULER_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Scheduler not available")
+    
+    try:
+        return {
+            "status": "success",
+            **get_scheduler_status()
+        }
+    except Exception as e:
+        logger.error(f"Error getting scheduler status: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

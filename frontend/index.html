@@ -26,6 +26,7 @@
                     <span class="reminder-icon">📊</span>
                     <a href="#" id="savitaUpdateLink" class="reminder-link">Update Savita</a>
                 </div>
+                <a href="/knowledgebase" class="kb-btn" title="Knowledgebase">📚 KB</a>
                 <button class="refresh-btn" id="refreshBtn">↻ Refresh</button>
             </div>
         </header>
@@ -863,8 +864,30 @@
         </div>
     </div>
 
+    <!-- Knowledgebase Popup Modal -->
+    <div class="modal-overlay" id="kbPopupModal">
+        <div class="kb-popup-modal">
+            <div class="kb-popup-header">
+                <span class="kb-popup-category" id="kbPopupCategory">Category</span>
+                <h2 class="kb-popup-title" id="kbPopupTitle">Term</h2>
+                <button class="modal-close" id="closeKbPopupBtn">✕</button>
+            </div>
+            <div class="kb-popup-body" id="kbPopupBody">
+                <!-- Short description loaded here -->
+            </div>
+            <div class="kb-popup-footer">
+                <div class="kb-popup-related" id="kbPopupRelated">
+                    <!-- Related terms shown here -->
+                </div>
+                <a href="#" class="kb-more-info-link" id="kbMoreInfoLink" target="_blank">
+                    MORE INFORMATION →
+                </a>
+            </div>
+        </div>
+    </div>
+
     <!-- TradingView Widget Script -->
     <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-    <script src="app.js?v=41"></script>
+    <script src="app.js?v=42"></script>
 </body>
 </html>
