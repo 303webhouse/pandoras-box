@@ -2615,20 +2615,65 @@ function renderAggregateVerdict(ticker, hunterData, hybridData, biasData) {
         verdictClass = 'lean-ursa';
     }
     
-    // Get current daily bias for alignment check
-    const dailyBias = biasData?.biases?.daily?.level || 'UNKNOWN';
+    // Get bias levels for swing trade alignment (Weekly weighted more than Daily for swing trades)
+    const dailyBias = biasData?.data?.daily?.level || '';
+    const weeklyBias = biasData?.data?.weekly?.level || '';
+    const cyclicalBias = biasData?.data?.cyclical?.level || '';
+    
+    // Convert 1-6 scale to -2.5 to +2.5 scale for weighted average
+    // 6 (MAJOR_TORO) = +2.5, 5 = +1.5, 4 = +0.5, 3 = -0.5, 2 = -1.5, 1 (MAJOR_URSA) = -2.5
+    const toSwingScore = (level) => {
+        const val = getBiasValue(level);
+        return (val - 3.5); // Converts 1-6 to -2.5 to +2.5
+    };
+    
+    // Calculate weighted swing bias: Weekly 50%, Daily 30%, Cyclical 20%
+    let swingBiasScore = 0;
+    let biasAvailable = false;
+    let totalWeight = 0;
+    
+    if (weeklyBias) {
+        biasAvailable = true;
+        swingBiasScore += toSwingScore(weeklyBias) * 0.5;
+        totalWeight += 0.5;
+    }
+    if (dailyBias) {
+        biasAvailable = true;
+        swingBiasScore += toSwingScore(dailyBias) * 0.3;
+        totalWeight += 0.3;
+    }
+    if (cyclicalBias) {
+        biasAvailable = true;
+        swingBiasScore += toSwingScore(cyclicalBias) * 0.2;
+        totalWeight += 0.2;
+    }
+    
+    // Normalize if not all biases available
+    if (totalWeight > 0 && totalWeight < 1) {
+        swingBiasScore = swingBiasScore / totalWeight;
+    }
+    
+    // Determine swing bias level from weighted score (-2.5 to +2.5 scale)
+    let swingBiasLevel;
+    if (swingBiasScore >= 2) swingBiasLevel = 'MAJOR_TORO';
+    else if (swingBiasScore >= 1) swingBiasLevel = 'MINOR_TORO';
+    else if (swingBiasScore > 0) swingBiasLevel = 'LEAN_TORO';
+    else if (swingBiasScore <= -2) swingBiasLevel = 'MAJOR_URSA';
+    else if (swingBiasScore <= -1) swingBiasLevel = 'MINOR_URSA';
+    else swingBiasLevel = 'LEAN_URSA';
+    
     const isToro = verdict.includes('TORO');
-    const biasIsToro = dailyBias.includes('TORO');
+    const biasIsToro = swingBiasLevel.includes('TORO');
     
     let alignmentStatus, alignmentClass;
-    if (dailyBias === 'UNKNOWN') {
-        alignmentStatus = 'Bias unavailable';
+    if (!biasAvailable) {
+        alignmentStatus = 'Bias loading...';
         alignmentClass = 'unknown';
     } else if (isToro === biasIsToro) {
-        alignmentStatus = `✅ ALIGNED (${dailyBias.replace('_', ' ')})`;
+        alignmentStatus = `✅ ALIGNED (${swingBiasLevel.replace('_', ' ')})`;
         alignmentClass = 'aligned';
     } else {
-        alignmentStatus = `⚠️ DIVERGENT (${dailyBias.replace('_', ' ')})`;
+        alignmentStatus = `⚠️ DIVERGENT (${swingBiasLevel.replace('_', ' ')})`;
         alignmentClass = 'divergent';
     }
     
