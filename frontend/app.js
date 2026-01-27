@@ -483,12 +483,40 @@ async function loadSignals() {
         const response = await fetch(`${API_URL}/signals/active`);
         const data = await response.json();
         
-        if (data.status === 'success') {
-            // Separate equity and crypto signals
-            signals.equity = data.signals.filter(s => s.asset_class === 'EQUITY');
-            signals.crypto = data.signals.filter(s => s.asset_class === 'CRYPTO');
+        console.log('📡 Loaded signals:', data);
+        
+        if (data.status === 'success' && data.signals) {
+            // Separate equity and crypto signals (be more flexible with asset_class matching)
+            const cryptoTickers = ['BTC', 'ETH', 'SOL', 'XRP', 'ADA', 'AVAX', 'DOGE', 'DOT', 'LINK', 'MATIC', 'LTC', 'UNI'];
+            
+            signals.equity = data.signals.filter(s => {
+                // If explicitly marked as EQUITY
+                if (s.asset_class === 'EQUITY') return true;
+                // If no asset_class but ticker doesn't look like crypto
+                if (!s.asset_class) {
+                    const tickerBase = (s.ticker || '').toUpperCase().replace(/USD.*/, '');
+                    return !cryptoTickers.includes(tickerBase);
+                }
+                return false;
+            });
+            
+            signals.crypto = data.signals.filter(s => {
+                // If explicitly marked as CRYPTO
+                if (s.asset_class === 'CRYPTO') return true;
+                // If no asset_class but ticker looks like crypto
+                if (!s.asset_class) {
+                    const tickerBase = (s.ticker || '').toUpperCase().replace(/USD.*/, '');
+                    return cryptoTickers.includes(tickerBase);
+                }
+                return false;
+            });
+            
+            console.log(`📊 Signals loaded: ${signals.equity.length} equity, ${signals.crypto.length} crypto`);
+            console.log('🪙 Crypto signals:', signals.crypto);
             
             renderSignals();
+        } else {
+            console.warn('No signals in response or error:', data);
         }
     } catch (error) {
         console.error('Error loading signals:', error);

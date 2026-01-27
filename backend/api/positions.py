@@ -603,19 +603,38 @@ async def get_active_signals_api():
     
     try:
         # First try Redis for fast access
-        signals = await get_redis_signals()
+        redis_signals = await get_redis_signals()
+        logger.info(f"📡 Redis returned {len(redis_signals)} signals")
         
-        # If Redis is empty, try PostgreSQL
-        if not signals:
-            try:
-                signals = await get_active_trade_ideas(limit=50)
-                # Re-cache active signals in Redis
-                for signal in signals[:20]:
-                    if signal.get('signal_id'):
-                        await cache_signal(signal['signal_id'], signal, ttl=7200)
-            except Exception as db_err:
-                logger.warning(f"Could not fetch from PostgreSQL: {db_err}")
-                signals = []
+        # Always try PostgreSQL too - signals might have expired from Redis
+        pg_signals = []
+        try:
+            pg_signals = await get_active_trade_ideas(limit=50)
+            logger.info(f"📡 PostgreSQL returned {len(pg_signals)} signals")
+        except Exception as db_err:
+            logger.warning(f"Could not fetch from PostgreSQL: {db_err}")
+        
+        # Merge signals (prefer Redis for speed, but include PostgreSQL for persistence)
+        signal_ids = set()
+        signals = []
+        
+        # First add all Redis signals
+        for sig in redis_signals:
+            sig_id = sig.get('signal_id')
+            if sig_id and sig_id not in signal_ids:
+                signal_ids.add(sig_id)
+                signals.append(sig)
+        
+        # Then add PostgreSQL signals that aren't already in Redis
+        for sig in pg_signals:
+            sig_id = sig.get('signal_id')
+            if sig_id and sig_id not in signal_ids:
+                signal_ids.add(sig_id)
+                signals.append(sig)
+                # Re-cache in Redis for faster access next time
+                await cache_signal(sig_id, sig, ttl=7200)
+        
+        logger.info(f"📡 Total merged signals: {len(signals)}")
         
         # Sort by score (highest first)
         signals.sort(key=lambda x: x.get('score', 0) or 0, reverse=True)
@@ -700,6 +719,59 @@ async def get_archived_signals_api(filters: ArchiveFilters):
     except Exception as e:
         logger.error(f"Error fetching archived signals: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/signals/debug")
+async def debug_signals():
+    """
+    Debug endpoint to check signal storage status.
+    Returns counts from Redis and PostgreSQL.
+    """
+    from database.redis_client import get_active_signals as get_redis_signals
+    from database.postgres_client import get_postgres_client
+    
+    debug_info = {
+        "redis": {"count": 0, "sample": None},
+        "postgresql": {"active_count": 0, "total_count": 0, "sample": None}
+    }
+    
+    try:
+        # Check Redis
+        redis_signals = await get_redis_signals()
+        debug_info["redis"]["count"] = len(redis_signals)
+        if redis_signals:
+            debug_info["redis"]["sample"] = {
+                "signal_id": redis_signals[0].get("signal_id"),
+                "ticker": redis_signals[0].get("ticker"),
+                "asset_class": redis_signals[0].get("asset_class")
+            }
+    except Exception as e:
+        debug_info["redis"]["error"] = str(e)
+    
+    try:
+        # Check PostgreSQL
+        pool = await get_postgres_client()
+        async with pool.acquire() as conn:
+            # Count active (user_action IS NULL)
+            active_count = await conn.fetchval(
+                "SELECT COUNT(*) FROM signals WHERE user_action IS NULL"
+            )
+            debug_info["postgresql"]["active_count"] = active_count
+            
+            # Count total
+            total_count = await conn.fetchval("SELECT COUNT(*) FROM signals")
+            debug_info["postgresql"]["total_count"] = total_count
+            
+            # Get sample active signal
+            sample = await conn.fetchrow(
+                "SELECT signal_id, ticker, asset_class, created_at FROM signals WHERE user_action IS NULL ORDER BY created_at DESC LIMIT 1"
+            )
+            if sample:
+                debug_info["postgresql"]["sample"] = dict(sample)
+    except Exception as e:
+        debug_info["postgresql"]["error"] = str(e)
+    
+    return debug_info
 
 
 @router.get("/signals/statistics")
