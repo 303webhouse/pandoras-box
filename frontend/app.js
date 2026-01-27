@@ -5029,6 +5029,34 @@ async function initKnowledgebase() {
             closeKbPopup();
         }
     });
+    
+    // Initialize all KB links and info icons in the page
+    initKbClickHandlers();
+}
+
+// Initialize click handlers for all KB links and info icons
+function initKbClickHandlers() {
+    // Handle .kb-link elements (clickable text headers/labels)
+    document.querySelectorAll('.kb-link[data-kb-term]').forEach(el => {
+        el.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const termId = el.dataset.kbTerm;
+            if (termId) openKbPopup(termId);
+        });
+    });
+    
+    // Handle .kb-info-icon elements (ⓘ icons)
+    document.querySelectorAll('.kb-info-icon[data-kb-term]').forEach(el => {
+        el.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const termId = el.dataset.kbTerm;
+            if (termId) openKbPopup(termId);
+        });
+    });
+    
+    console.log('📚 KB click handlers initialized');
 }
 
 async function openKbPopup(termId) {
