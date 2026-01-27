@@ -199,3 +199,119 @@ def get_savita_config() -> Dict[str, Any]:
         **SAVITA_CONFIG.copy(),
         "current_interpretation": get_savita_reading()
     }
+
+
+async def auto_search_savita_update() -> Dict[str, Any]:
+    """
+    Use Gemini AI to search for the latest BofA Sell Side Indicator reading.
+    Should be called daily from 12th-23rd of each month during release window.
+    
+    Returns:
+        {
+            "status": "success" | "no_update" | "error",
+            "new_reading": float | None,
+            "previous_reading": float,
+            "source": str,
+            "message": str
+        }
+    """
+    import os
+    
+    gemini_api_key = os.environ.get("GEMINI_API_KEY")
+    if not gemini_api_key:
+        return {
+            "status": "error",
+            "message": "GEMINI_API_KEY not configured",
+            "previous_reading": SAVITA_CONFIG["current_reading"]
+        }
+    
+    try:
+        import google.generativeai as genai
+        
+        genai.configure(api_key=gemini_api_key)
+        model = genai.GenerativeModel('gemini-pro')
+        
+        prompt = """Search for the latest Bank of America Sell Side Indicator (also known as the BofA Sell Side Indicator or Savita Subramanian's indicator).
+
+This indicator measures Wall Street strategists' average recommended equity allocation as a percentage.
+
+Please find the most recent reading and respond in this exact format:
+READING: [number]%
+DATE: [month year]
+SOURCE: [where you found it]
+
+If you cannot find a recent reading (within the last 2 months), respond with:
+NOT_FOUND
+
+Only provide the number if you are confident it is the actual BofA Sell Side Indicator reading."""
+
+        response = model.generate_content(prompt)
+        response_text = response.text.strip()
+        
+        logger.info(f"Gemini Savita search response: {response_text}")
+        
+        if "NOT_FOUND" in response_text:
+            return {
+                "status": "no_update",
+                "message": "No recent Savita reading found",
+                "previous_reading": SAVITA_CONFIG["current_reading"]
+            }
+        
+        # Parse the response
+        import re
+        reading_match = re.search(r'READING:\s*([\d.]+)%?', response_text)
+        date_match = re.search(r'DATE:\s*(.+)', response_text)
+        source_match = re.search(r'SOURCE:\s*(.+)', response_text)
+        
+        if reading_match:
+            new_reading = float(reading_match.group(1))
+            
+            # Validate the reading is in reasonable range (40-70%)
+            if 40 <= new_reading <= 70:
+                previous = SAVITA_CONFIG["current_reading"]
+                
+                # Only update if it's different from current
+                if abs(new_reading - previous) > 0.1:
+                    date_str = date_match.group(1).strip() if date_match else datetime.now().strftime("%Y-%m-%d")
+                    source = source_match.group(1).strip() if source_match else "Gemini search"
+                    
+                    # Update the indicator
+                    update_savita_reading(new_reading, date_str)
+                    
+                    logger.info(f"✅ Savita updated via Gemini: {previous}% -> {new_reading}%")
+                    
+                    return {
+                        "status": "success",
+                        "new_reading": new_reading,
+                        "previous_reading": previous,
+                        "date": date_str,
+                        "source": source,
+                        "message": f"Updated from {previous}% to {new_reading}%"
+                    }
+                else:
+                    return {
+                        "status": "no_update",
+                        "message": f"Reading unchanged at {new_reading}%",
+                        "previous_reading": previous
+                    }
+            else:
+                return {
+                    "status": "error",
+                    "message": f"Invalid reading {new_reading}% (outside 40-70% range)",
+                    "previous_reading": SAVITA_CONFIG["current_reading"]
+                }
+        else:
+            return {
+                "status": "error",
+                "message": "Could not parse reading from Gemini response",
+                "response": response_text,
+                "previous_reading": SAVITA_CONFIG["current_reading"]
+            }
+            
+    except Exception as e:
+        logger.error(f"Error in Gemini Savita search: {e}")
+        return {
+            "status": "error",
+            "message": str(e),
+            "previous_reading": SAVITA_CONFIG["current_reading"]
+        }

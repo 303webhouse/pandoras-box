@@ -345,7 +345,7 @@ async def get_schedule_info():
             "cyclical": {
                 "time": "9:45 AM ET",
                 "days": "Every Monday (long-term macro doesn't change daily)",
-                "source": "6-factor macro analysis: 200 SMA Positions, Yield Curve, Credit Spreads, Savita, Long-term Breadth, Sahm Rule"
+                "source": "9-factor macro analysis: 200 SMA, Yield Curve, Credit Spreads, Savita, Breadth, VIX Regime, Cyclical/Defensive, Copper/Gold, Sahm Rule"
             }
         },
         "trend_tracking": {
@@ -369,3 +369,83 @@ async def get_schedule_info():
             "alerts": "WebSocket alerts are broadcast for STRONGLY_IMPROVING and STRONGLY_DETERIORATING shifts"
         }
     }
+
+
+# =========================================================================
+# SAVITA INDICATOR ENDPOINTS
+# =========================================================================
+
+@router.get("/savita")
+async def get_savita_status():
+    """
+    Get current Savita Indicator (BofA Sell Side Indicator) status
+    
+    This is a contrarian sentiment indicator:
+    - High reading (>57.7%) = Wall Street too bullish = Bearish signal
+    - Low reading (<51.3%) = Wall Street too bearish = Bullish signal
+    """
+    try:
+        from bias_filters.savita_indicator import get_savita_reading, get_savita_config
+        
+        return {
+            "status": "success",
+            "data": get_savita_reading(),
+            "config": get_savita_config()
+        }
+    except Exception as e:
+        logger.error(f"Error getting Savita status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/savita/update")
+async def update_savita(
+    reading: float = Query(..., ge=40, le=70, description="New Savita reading (40-70%)"),
+    date: Optional[str] = Query(None, description="Date of reading (YYYY-MM-DD)")
+):
+    """
+    Manually update the Savita Indicator reading
+    
+    Use this when you see a new BofA Sell Side Indicator release in the news.
+    
+    Args:
+        reading: The new equity allocation % (e.g., 55.9)
+        date: Optional date string (defaults to today)
+    """
+    try:
+        from bias_filters.savita_indicator import update_savita_reading
+        
+        result = update_savita_reading(reading, date)
+        
+        return {
+            "status": "success",
+            "message": f"Savita updated to {reading}%",
+            "data": result
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error updating Savita: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/savita/auto-search")
+async def trigger_savita_auto_search():
+    """
+    Trigger Gemini AI search for latest Savita reading
+    
+    This uses Google Gemini to search the web for the latest
+    BofA Sell Side Indicator reading. Normally runs automatically
+    from 12th-23rd of each month.
+    """
+    try:
+        from bias_filters.savita_indicator import auto_search_savita_update
+        
+        result = await auto_search_savita_update()
+        
+        return {
+            "status": "success",
+            "search_result": result
+        }
+    except Exception as e:
+        logger.error(f"Error in Savita auto-search: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

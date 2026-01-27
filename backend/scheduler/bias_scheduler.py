@@ -1727,6 +1727,30 @@ def is_first_trading_day_of_month() -> bool:
     return today.date() == first_day.date()
 
 
+async def run_savita_auto_search():
+    """
+    Run Gemini-powered search for latest Savita indicator reading.
+    Called by scheduler from 12th-23rd of each month at 8:00 AM ET.
+    """
+    from datetime import datetime
+    now = datetime.now()
+    logger.info(f"🔍 Running Savita auto-search at {now}")
+    
+    try:
+        from bias_filters.savita_indicator import auto_search_savita_update
+        result = await auto_search_savita_update()
+        
+        if result.get("status") == "success":
+            logger.info(f"✅ Savita updated: {result.get('previous_reading')}% -> {result.get('new_reading')}%")
+        elif result.get("status") == "no_update":
+            logger.info(f"📊 Savita unchanged: {result.get('message')}")
+        else:
+            logger.warning(f"⚠️ Savita search issue: {result.get('message')}")
+            
+    except Exception as e:
+        logger.error(f"❌ Savita auto-search error: {e}")
+
+
 async def run_scheduled_refreshes():
     """
     Run appropriate refreshes based on current time/day
@@ -1794,8 +1818,18 @@ async def start_scheduler():
             replace_existing=True
         )
         
+        # Savita auto-search at 8:00 AM ET, days 12-23 of each month
+        scheduler.add_job(
+            run_savita_auto_search,
+            CronTrigger(hour=8, minute=0, day='12-23'),
+            id='savita_search',
+            name='Savita Auto-Search (BofA Indicator)',
+            replace_existing=True
+        )
+        
         scheduler.start()
         logger.info("✅ APScheduler started - bias refresh scheduled for 9:45 AM ET")
+        logger.info("✅ Savita auto-search scheduled for 8:00 AM ET (days 12-23)")
         
     except ImportError:
         logger.warning("APScheduler not installed, using fallback scheduler")
