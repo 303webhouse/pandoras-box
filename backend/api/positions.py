@@ -690,8 +690,20 @@ async def get_active_signals_api():
                     sig['score'] = 50  # Default
                     sig['bias_alignment'] = 'NEUTRAL'
         
-        # Sort by score (highest first)
-        signals.sort(key=lambda x: x.get('score', 0) or 0, reverse=True)
+        # Sort by recency first (newest signals on top), then by score as tiebreaker
+        # This ensures fresh signals are always visible even if older ones scored higher
+        def get_sort_key(sig):
+            # Parse timestamp - newer = higher priority
+            ts = sig.get('timestamp') or sig.get('created_at') or '1970-01-01'
+            if isinstance(ts, str):
+                ts_str = ts
+            else:
+                ts_str = str(ts)
+            # Score as secondary sort (higher = better)
+            score = sig.get('score', 0) or 0
+            return (ts_str, score)
+        
+        signals.sort(key=get_sort_key, reverse=True)
         
         # Return top 10 for display (but keep more in queue)
         top_signals = signals[:10]
