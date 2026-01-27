@@ -2578,12 +2578,31 @@ function renderAggregateVerdict(ticker, hunterData, hybridData, biasData) {
         else if (ctaZone === 'CAPITULATION' || ctaZone === 'WATERFALL') totalScore -= 1;
     }
     
-    // 4. Price vs Key Levels (weight: 1)
+    // 4. Price vs Weighted SMAs (swing-trade weighted: SMA50 > SMA200 > SMA20)
     const metrics = hunterData?.current_metrics || {};
-    if (metrics.price && metrics.sma_200) {
-        maxScore += 1;
-        if (metrics.price > metrics.sma_200) totalScore += 1;
-        else totalScore -= 1;
+    const ctaAnalysis = hunterData?.cta_analysis || {};
+    const price = metrics.price;
+    const sma20 = ctaAnalysis.sma20 || metrics.sma20;
+    const sma50 = ctaAnalysis.sma50 || metrics.sma50;
+    const sma200 = ctaAnalysis.sma200 || metrics.sma_200;
+    
+    // Weighted SMA scoring for swing trades:
+    // SMA 50 (medium-term): weight 1.0 - most important for swing trades
+    // SMA 200 (long-term): weight 0.5 - macro trend confirmation  
+    // SMA 20 (short-term): weight 0.5 - entry timing
+    if (price) {
+        if (sma50) {
+            maxScore += 1;
+            totalScore += price > sma50 ? 1 : -1;
+        }
+        if (sma200) {
+            maxScore += 0.5;
+            totalScore += price > sma200 ? 0.5 : -0.5;
+        }
+        if (sma20) {
+            maxScore += 0.5;
+            totalScore += price > sma20 ? 0.5 : -0.5;
+        }
     }
     
     // Force non-neutral: if score is exactly 0, use technical tiebreaker
@@ -2716,19 +2735,25 @@ function renderAnalyzerResults(data) {
     const ctaZone = ctaAnalysis.cta_zone || 'N/A';
     const ctaBias = ctaAnalysis.bias || '';
     
+    // Get SMA values from CTA analysis (primary) or metrics (fallback)
+    const sma20 = ctaAnalysis.sma20 ?? metrics.sma20 ?? null;
+    const sma50 = ctaAnalysis.sma50 ?? metrics.sma50 ?? null;
+    const sma120 = ctaAnalysis.sma120 ?? null;
+    const sma200 = ctaAnalysis.sma200 ?? metrics.sma_200 ?? null;
+    
     let html = `
         <div class="analyzer-metrics">
             <div class="analyzer-metric">
                 <div class="analyzer-metric-label">Price</div>
-                <div class="analyzer-metric-value">$${metrics.price ?? '-'}</div>
+                <div class="analyzer-metric-value">$${metrics.price?.toFixed(2) ?? '-'}</div>
             </div>
             <div class="analyzer-metric">
                 <div class="analyzer-metric-label">SMA 20</div>
-                <div class="analyzer-metric-value">$${ctaAnalysis.sma20 ?? metrics.sma_20 ?? '-'}</div>
+                <div class="analyzer-metric-value">${sma20 ? '$' + sma20.toFixed(2) : '-'}</div>
             </div>
             <div class="analyzer-metric">
                 <div class="analyzer-metric-label">SMA 50</div>
-                <div class="analyzer-metric-value">$${ctaAnalysis.sma50 ?? metrics.sma_50 ?? '-'}</div>
+                <div class="analyzer-metric-value">${sma50 ? '$' + sma50.toFixed(2) : '-'}</div>
             </div>
             <div class="analyzer-metric">
                 <div class="analyzer-metric-label">CTA Zone</div>
@@ -2736,19 +2761,15 @@ function renderAnalyzerResults(data) {
             </div>
             <div class="analyzer-metric">
                 <div class="analyzer-metric-label">RSI</div>
-                <div class="analyzer-metric-value">${metrics.rsi ?? '-'}</div>
+                <div class="analyzer-metric-value">${metrics.rsi?.toFixed(1) ?? '-'}</div>
             </div>
             <div class="analyzer-metric">
                 <div class="analyzer-metric-label">ADX</div>
-                <div class="analyzer-metric-value">${metrics.adx ?? '-'}</div>
-            </div>
-            <div class="analyzer-metric">
-                <div class="analyzer-metric-label">RSI</div>
-                <div class="analyzer-metric-value">${metrics.rsi ?? '-'}</div>
+                <div class="analyzer-metric-value">${metrics.adx?.toFixed(1) ?? '-'}</div>
             </div>
             <div class="analyzer-metric">
                 <div class="analyzer-metric-label">RVOL</div>
-                <div class="analyzer-metric-value">${metrics.rvol ?? '-'}x</div>
+                <div class="analyzer-metric-value">${metrics.rvol?.toFixed(2) ?? '-'}x</div>
             </div>
         </div>
     `;
