@@ -534,18 +534,20 @@ body.override-active-bearish .override-toggle[data-active="true"] {
     font-size: 0.9em;
 }
 
-/* Bullish bias levels - lime green */
+/* Bullish bias levels - lime green outline */
 .bias-level.TORO_MAJOR, .bias-level.TORO_MINOR,
 .bias-level.MAJOR_TORO, .bias-level.MINOR_TORO, .bias-level.LEAN_TORO {
-    background: var(--accent-lime);
-    color: var(--dark-bg);
+    background: transparent;
+    border: 2px solid var(--accent-lime);
+    color: var(--accent-lime);
 }
 
-/* Bearish bias levels - orange */
+/* Bearish bias levels - orange outline */
 .bias-level.URSA_MAJOR, .bias-level.URSA_MINOR,
 .bias-level.MAJOR_URSA, .bias-level.MINOR_URSA, .bias-level.LEAN_URSA {
-    background: var(--accent-orange);
-    color: var(--dark-bg);
+    background: transparent;
+    border: 2px solid var(--accent-orange);
+    color: var(--accent-orange);
 }
 
 .bias-details {
