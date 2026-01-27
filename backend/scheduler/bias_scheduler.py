@@ -15,11 +15,19 @@ import os
 import json
 import logging
 import asyncio
+import pytz
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List
 from enum import Enum
 
 logger = logging.getLogger(__name__)
+
+# Eastern Time for market hours
+ET = pytz.timezone('America/New_York')
+
+def get_eastern_now() -> datetime:
+    """Get current time in Eastern Time (market hours)"""
+    return datetime.now(ET)
 
 # State file for bias history
 BIAS_HISTORY_FILE = os.path.join(os.path.dirname(__file__), "..", "..", "data", "bias_history.json")
@@ -259,10 +267,13 @@ def _load_weekly_baseline() -> Dict[str, Any]:
         if os.path.exists(BASELINE_FILE):
             with open(BASELINE_FILE, 'r') as f:
                 baseline = json.load(f)
-                # Check if baseline is from this week (Monday or later)
+                # Check if baseline is from this week (Monday or later) in Eastern Time
                 if baseline.get("timestamp"):
                     baseline_date = datetime.fromisoformat(baseline["timestamp"])
-                    now = datetime.now()
+                    now = get_eastern_now()
+                    # Make baseline_date timezone-aware if it isn't
+                    if baseline_date.tzinfo is None:
+                        baseline_date = ET.localize(baseline_date)
                     # If baseline is older than current Monday, reset it
                     days_since_baseline = (now - baseline_date).days
                     if days_since_baseline < 7 and baseline_date.weekday() == 0:
@@ -328,8 +339,8 @@ def update_bias(
     # Get current data (will become previous)
     current_data = history.get(tf_key, {}).get("current")
     
-    # Create new current entry
-    now = datetime.now()
+    # Create new current entry (Eastern Time)
+    now = get_eastern_now()
     new_entry = {
         "level": new_level,
         "timestamp": now.isoformat(),
@@ -816,8 +827,8 @@ async def refresh_weekly_bias() -> Dict[str, Any]:
     
     logger.info("📊 Refreshing Weekly Bias (6-Factor Calculable Model)...")
     
-    # Check if it's Monday or if no baseline exists
-    now = datetime.now()
+    # Check if it's Monday or if no baseline exists (Eastern Time)
+    now = get_eastern_now()
     is_monday = now.weekday() == 0
     baseline_exists = _weekly_baseline.get("timestamp") is not None
     
@@ -1746,18 +1757,18 @@ async def refresh_cyclical_bias() -> Dict[str, Any]:
 _scheduler_started = False
 
 def is_trading_day() -> bool:
-    """Check if today is a trading day (Mon-Fri, not a holiday)"""
-    today = datetime.now()
+    """Check if today is a trading day (Mon-Fri, not a holiday) in Eastern Time"""
+    today = get_eastern_now()
     # Simple check: Monday=0 through Friday=4
     return today.weekday() < 5
 
 
 def is_first_trading_day_of_month() -> bool:
-    """Check if today is the first trading day of the month"""
-    today = datetime.now()
+    """Check if today is the first trading day of the month (Eastern Time)"""
+    today = get_eastern_now()
     
     # Find first weekday of month
-    first_day = today.replace(day=1)
+    first_day = today.replace(day=1, tzinfo=ET)
     while first_day.weekday() >= 5:  # Saturday or Sunday
         first_day += timedelta(days=1)
     
@@ -1769,9 +1780,8 @@ async def run_savita_auto_search():
     Run Gemini-powered search for latest Savita indicator reading.
     Called by scheduler from 12th-23rd of each month at 8:00 AM ET.
     """
-    from datetime import datetime
-    now = datetime.now()
-    logger.info(f"🔍 Running Savita auto-search at {now}")
+    now = get_eastern_now()
+    logger.info(f"🔍 Running Savita auto-search at {now.strftime('%Y-%m-%d %H:%M:%S %Z')}")
     
     try:
         from bias_filters.savita_indicator import auto_search_savita_update
@@ -1793,8 +1803,8 @@ async def run_scheduled_refreshes():
     Run appropriate refreshes based on current time/day
     Called by the scheduler at 9:45 AM ET
     """
-    now = datetime.now()
-    logger.info(f"⏰ Running scheduled bias refresh at {now}")
+    now = get_eastern_now()
+    logger.info(f"⏰ Running scheduled bias refresh at {now.strftime('%Y-%m-%d %H:%M:%S %Z')}")
     
     if not is_trading_day():
         logger.info("Not a trading day, skipping refresh")
@@ -1876,15 +1886,16 @@ async def start_scheduler():
 
 async def _fallback_scheduler():
     """Fallback scheduler using asyncio (runs in background)"""
-    logger.info("Starting fallback scheduler loop")
+    logger.info("Starting fallback scheduler loop (using Eastern Time)")
     
     last_cta_scan_hour = -1
     
     while True:
-        now = datetime.now()
+        now = get_eastern_now()
         
-        # Check if it's 9:45 AM (within 1 minute window) - bias refresh
+        # Check if it's 9:45 AM ET (within 1 minute window) - bias refresh
         if now.hour == 9 and 45 <= now.minute < 46:
+            logger.info(f"⏰ 9:45 AM ET trigger - running bias refresh (ET: {now.strftime('%H:%M')})")
             await run_scheduled_refreshes()
             # Wait 2 minutes to avoid duplicate runs
             await asyncio.sleep(120)
@@ -1892,6 +1903,7 @@ async def _fallback_scheduler():
         # CTA scan: Run every hour during market hours (9:30 AM - 4:00 PM ET)
         elif is_trading_day() and 9 <= now.hour <= 16 and now.hour != last_cta_scan_hour:
             last_cta_scan_hour = now.hour
+            logger.info(f"⏰ Market hours CTA scan (ET: {now.strftime('%H:%M')})")
             await run_cta_scan_scheduled()
             await asyncio.sleep(60)
         else:
