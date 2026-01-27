@@ -1148,24 +1148,25 @@ async def refresh_weekly_bias() -> Dict[str, Any]:
 
 async def refresh_cyclical_bias() -> Dict[str, Any]:
     """
-    Refresh cyclical bias based on 8-FACTOR long-term macro analysis with TIERED VOTING:
+    Refresh cyclical bias based on 9-FACTOR long-term macro analysis with TIERED VOTING:
     
     Standard Factors (±2 max):
     1. 200 SMA Positions (SPY, QQQ, IWM above/below 200-day SMA)
     2. Savita Indicator (BofA sentiment)
     3. Long-term Breadth (RSP vs SPY equal-weight performance)
-    4. Cyclical vs Defensive (XLY vs XLP sector rotation)
-    5. Copper/Gold Ratio (economic activity vs safety)
+    4. VIX Regime (fear/complacency gauge)
+    5. Cyclical vs Defensive (XLY vs XLP sector rotation)
+    6. Copper/Gold Ratio (economic activity vs safety)
     
     Crisis-Tiered Factors (can exceed ±2 in extreme conditions):
-    6. Yield Curve: ±2 normal, ±3 if deeply inverted (< -0.5%)
-    7. Credit Spreads: ±2 normal, ±3 if extreme stress
-    8. Sahm Rule (VIX proxy): ±2 normal, ±4 if recession triggered
+    7. Yield Curve: ±2 normal, ±3 if deeply inverted (< -0.5%)
+    8. Credit Spreads: ±2 normal, ±3 if extreme stress
+    9. Sahm Rule (FRED): ±2 normal, ±4 if recession triggered (real unemployment data)
     
-    Max possible: ±16 normal, ±20 crisis conditions
+    Max possible: ±18 normal, ±22 crisis conditions
     Updates: Weekly or on significant macro changes
     """
-    logger.info("📊 Refreshing Cyclical Bias (8-Factor Tiered Macro Model)...")
+    logger.info("📊 Refreshing Cyclical Bias (9-Factor Tiered Macro Model)...")
     
     factor_votes = []  # List of (name, vote, max_vote, details)
     import yfinance as yf
@@ -1386,78 +1387,57 @@ async def refresh_cyclical_bias() -> Dict[str, Any]:
             factor_votes.append(("longterm_breadth", 0, 2, {"error": str(e)}))
         
         # =====================================================================
-        # FACTOR 6: Sahm Rule (VIX proxy) - TIERED: ±2 normal, ±4 if triggered
+        # FACTOR 6: VIX Regime (Fear/Complacency Gauge) - Standard ±2
         # =====================================================================
         try:
             vix = yf.Ticker("^VIX")
             vix_hist = vix.history(period="3mo")
             
-            sahm_triggered = False
-            sahm_vote = 0
-            max_vote = 2
-            tier = "standard"
-            sahm_details = {}
+            vix_vote = 0
+            vix_details = {}
             
             if len(vix_hist) >= 20:
                 current_vix = float(vix_hist['Close'].iloc[-1])
                 vix_20d_avg = float(vix_hist['Close'].tail(20).mean())
                 vix_3mo_low = float(vix_hist['Close'].min())
                 vix_3mo_high = float(vix_hist['Close'].max())
-                vix_rise_from_low = current_vix - vix_3mo_low
                 
-                sahm_details = {
+                vix_details = {
                     "current_vix": round(current_vix, 2),
                     "vix_20d_avg": round(vix_20d_avg, 2),
                     "vix_3mo_low": round(vix_3mo_low, 2),
                     "vix_3mo_high": round(vix_3mo_high, 2),
-                    "rise_from_low": round(vix_rise_from_low, 2)
+                    "vix_percentile": round((current_vix - vix_3mo_low) / (vix_3mo_high - vix_3mo_low) * 100, 1) if vix_3mo_high != vix_3mo_low else 50
                 }
                 
-                # TIERED VOTING: Recession trigger gets maximum weight
-                if current_vix > 35 and vix_rise_from_low > 15:
-                    # EXTREME CRISIS: Full recession signal
-                    sahm_triggered = True
-                    sahm_vote = -4
-                    max_vote = 4
-                    tier = "crisis_extreme"
-                    sahm_details["status"] = "recession_triggered"
-                elif current_vix > 30 and vix_rise_from_low > 10:
-                    # CRISIS: Recession warning
-                    sahm_triggered = True
-                    sahm_vote = -3
-                    max_vote = 4
-                    tier = "crisis"
-                    sahm_details["status"] = "recession_warning"
-                elif current_vix > 25 and vix_rise_from_low > 5:
-                    sahm_vote = -2
-                    sahm_details["status"] = "elevated_fear"
-                elif current_vix > 20:
-                    sahm_vote = -1
-                    sahm_details["status"] = "caution"
-                elif current_vix < 15:
-                    sahm_vote = 2
-                    sahm_details["status"] = "low_fear"
-                elif current_vix < 18:
-                    sahm_vote = 1
-                    sahm_details["status"] = "complacent"
+                # VIX levels: <15 = complacent (bullish), 15-20 = normal, 20-25 = elevated, >25 = fear
+                if current_vix < 14:
+                    vix_vote = 2
+                    vix_details["regime"] = "extreme_complacency"
+                elif current_vix < 17:
+                    vix_vote = 1
+                    vix_details["regime"] = "complacent"
+                elif current_vix < 22:
+                    vix_vote = 0
+                    vix_details["regime"] = "normal"
+                elif current_vix < 28:
+                    vix_vote = -1
+                    vix_details["regime"] = "elevated_fear"
                 else:
-                    sahm_vote = 0
-                    sahm_details["status"] = "normal"
+                    vix_vote = -2
+                    vix_details["regime"] = "high_fear"
                     
-                sahm_details["data_source"] = "vix_proxy"
-                sahm_details["tier"] = tier
+                vix_details["tier"] = "standard"
+                vix_details["data_source"] = "yfinance"
             else:
-                sahm_details = {"error": "Insufficient VIX data", "status": "unknown", "tier": "standard"}
+                vix_details = {"error": "Insufficient VIX data", "regime": "unknown", "tier": "standard"}
             
-            factor_votes.append(("sahm_rule", sahm_vote, max_vote, {
-                "triggered": sahm_triggered,
-                **sahm_details
-            }))
-            logger.info(f"  🚨 Sahm Rule: {sahm_details.get('status', 'unknown')} (vote: {sahm_vote:+d}/±{max_vote}, {tier})")
+            factor_votes.append(("vix_regime", vix_vote, 2, vix_details))
+            logger.info(f"  😰 VIX Regime: {vix_details.get('regime', 'unknown')} (VIX: {vix_details.get('current_vix', 'N/A')}, vote: {vix_vote:+d}/±2)")
             
         except Exception as e:
-            logger.warning(f"Error in Sahm Rule factor: {e}")
-            factor_votes.append(("sahm_rule", 0, 2, {"error": str(e)}))
+            logger.warning(f"Error in VIX Regime factor: {e}")
+            factor_votes.append(("vix_regime", 0, 2, {"error": str(e)}))
         
         # =====================================================================
         # FACTOR 7: Cyclical vs Defensive Rotation (XLY vs XLP) - Standard ±2
@@ -1573,18 +1553,112 @@ async def refresh_cyclical_bias() -> Dict[str, Any]:
             factor_votes.append(("copper_gold_ratio", 0, 2, {"error": str(e)}))
         
         # =====================================================================
-        # CALCULATE TOTAL VOTE AND DETERMINE BIAS (8-Factor Tiered System)
+        # FACTOR 9: Sahm Rule (Real FRED Data) - TIERED: ±2 normal, ±4 if triggered
+        # =====================================================================
+        try:
+            import os
+            fred_api_key = os.environ.get("FRED_API_KEY")
+            
+            if fred_api_key:
+                from fredapi import Fred
+                fred = Fred(api_key=fred_api_key)
+                
+                # Get the real Sahm Rule indicator from FRED
+                # SAHMREALTIME: Real-time Sahm Rule Recession Indicator
+                sahm_data = fred.get_series('SAHMREALTIME', observation_start='2024-01-01')
+                
+                sahm_triggered = False
+                sahm_vote = 0
+                max_vote = 2
+                tier = "standard"
+                
+                if len(sahm_data) > 0:
+                    current_sahm = float(sahm_data.iloc[-1])
+                    previous_sahm = float(sahm_data.iloc[-2]) if len(sahm_data) > 1 else current_sahm
+                    sahm_trend = "rising" if current_sahm > previous_sahm else ("falling" if current_sahm < previous_sahm else "stable")
+                    
+                    sahm_details = {
+                        "current_reading": round(current_sahm, 3),
+                        "previous_reading": round(previous_sahm, 3),
+                        "trend": sahm_trend,
+                        "threshold": 0.50,
+                        "last_date": str(sahm_data.index[-1].date())
+                    }
+                    
+                    # Sahm Rule thresholds:
+                    # >= 0.50 = Recession signal (historically 100% accurate)
+                    # 0.30-0.50 = Warning zone
+                    # < 0.30 = Normal/expansion
+                    if current_sahm >= 0.50:
+                        # RECESSION TRIGGERED - Maximum crisis weight
+                        sahm_triggered = True
+                        sahm_vote = -4
+                        max_vote = 4
+                        tier = "crisis_extreme"
+                        sahm_details["status"] = "recession_triggered"
+                    elif current_sahm >= 0.40:
+                        # HIGH WARNING - Crisis weight
+                        sahm_vote = -3
+                        max_vote = 4
+                        tier = "crisis"
+                        sahm_details["status"] = "high_warning"
+                    elif current_sahm >= 0.30:
+                        # WARNING ZONE
+                        sahm_vote = -2
+                        sahm_details["status"] = "warning"
+                    elif current_sahm >= 0.20:
+                        # ELEVATED
+                        sahm_vote = -1
+                        sahm_details["status"] = "elevated"
+                    elif current_sahm <= 0.05:
+                        # STRONG EXPANSION
+                        sahm_vote = 2
+                        sahm_details["status"] = "strong_expansion"
+                    elif current_sahm <= 0.10:
+                        # EXPANSION
+                        sahm_vote = 1
+                        sahm_details["status"] = "expansion"
+                    else:
+                        # NORMAL
+                        sahm_vote = 0
+                        sahm_details["status"] = "normal"
+                    
+                    sahm_details["tier"] = tier
+                    sahm_details["data_source"] = "FRED"
+                    
+                    factor_votes.append(("sahm_rule", sahm_vote, max_vote, {
+                        "triggered": sahm_triggered,
+                        **sahm_details
+                    }))
+                    logger.info(f"  🚨 Sahm Rule (FRED): {sahm_details['status']} (reading: {current_sahm:.3f}, vote: {sahm_vote:+d}/±{max_vote}, {tier})")
+                else:
+                    raise Exception("No Sahm Rule data returned from FRED")
+            else:
+                # No FRED API key - use placeholder
+                factor_votes.append(("sahm_rule", 0, 2, {
+                    "status": "no_api_key",
+                    "tier": "standard",
+                    "note": "Set FRED_API_KEY environment variable for real data"
+                }))
+                logger.warning("  🚨 Sahm Rule: No FRED API key configured")
+                
+        except Exception as e:
+            logger.warning(f"Error in Sahm Rule factor: {e}")
+            factor_votes.append(("sahm_rule", 0, 2, {"error": str(e), "tier": "standard"}))
+        
+        # =====================================================================
+        # CALCULATE TOTAL VOTE AND DETERMINE BIAS (9-Factor Tiered System)
         # =====================================================================
         total_vote = sum(vote for _, vote, _, _ in factor_votes)
-        max_possible_normal = 16  # 8 factors × 2 max each (normal conditions)
+        max_possible_normal = 18  # 9 factors × 2 max each (normal conditions)
         max_possible_crisis = sum(max_v for _, _, max_v, _ in factor_votes)  # Actual max based on current tier
         
         # Check if any crisis-tier factors are active
         crisis_active = any(det.get("tier", "standard").startswith("crisis") for _, _, _, det in factor_votes)
         
-        # Thresholds for 8 factors with tiered voting
-        # Adjusted for higher max possible vote range
-        if total_vote >= 10:
+        # Thresholds for 9 factors with tiered voting
+        # Adjusted for higher max possible vote range (±18 normal, ±22 crisis)
+        if total_vote >= 11:
             new_level = "MAJOR_TORO"
         elif total_vote >= 5:
             new_level = "MINOR_TORO"
@@ -1592,14 +1666,14 @@ async def refresh_cyclical_bias() -> Dict[str, Any]:
             new_level = "LEAN_TORO"
         elif total_vote > -5:
             new_level = "LEAN_URSA"
-        elif total_vote > -10:
+        elif total_vote > -11:
             new_level = "MINOR_URSA"
         else:
             new_level = "MAJOR_URSA"
         
         # Build details
         details = {
-            "source": "8_factor_tiered_cyclical",
+            "source": "9_factor_tiered_cyclical",
             "total_vote": total_vote,
             "max_possible_normal": max_possible_normal,
             "max_possible_current": max_possible_crisis,

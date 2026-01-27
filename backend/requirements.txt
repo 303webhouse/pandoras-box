@@ -36,6 +36,9 @@ pandas_ta>=0.3.14b
 # Hybrid Scanner - TradingView Technical Analysis
 tradingview-ta>=3.3.0
 
+# FRED API - Federal Reserve Economic Data
+fredapi>=0.5.1
+
 # Additional required packages
 annotated-types==0.6.0
 anyio==4.2.0
