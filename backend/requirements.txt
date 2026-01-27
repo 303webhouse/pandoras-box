@@ -39,6 +39,9 @@ tradingview-ta>=3.3.0
 # FRED API - Federal Reserve Economic Data
 fredapi>=0.5.1
 
+# Google Gemini API - AI-powered data extraction
+google-generativeai>=0.3.0
+
 # Additional required packages
 annotated-types==0.6.0
 anyio==4.2.0
