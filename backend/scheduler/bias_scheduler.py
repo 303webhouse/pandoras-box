@@ -47,13 +47,13 @@ _scheduler_status = {
         "last_run": None,
         "signals_found": 0,
         "status": "idle",
-        "next_run": None
+        "interval": "15-30 min (market hours)"
     },
-    "hunter_scanner": {
+    "crypto_scanner": {
         "last_run": None,
         "signals_found": 0,
         "status": "idle",
-        "next_run": None
+        "interval": "30 min (24/7)"
     },
     "bias_refresh": {
         "last_run": None,
@@ -67,20 +67,45 @@ def get_scheduler_status() -> Dict[str, Any]:
     now = get_eastern_now()
     is_market_hours = is_trading_day() and 9 <= now.hour <= 16
     
-    # Calculate next run times
+    # Calculate CTA interval based on time of day
     if is_market_hours:
-        next_cta = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
-        next_hunter_min = 0 if now.minute >= 30 else 30
-        next_hunter = now.replace(minute=next_hunter_min, second=0, microsecond=0)
-        if next_hunter <= now:
-            next_hunter += timedelta(minutes=30)
+        if now.hour == 9 or (now.hour == 10 and now.minute < 30) or now.hour >= 15:
+            cta_interval = "15 min (volatility period)"
+        else:
+            cta_interval = "30 min (mid-day)"
     else:
-        # Next market open
+        cta_interval = "Paused (after hours)"
+    
+    # Calculate next CTA run
+    if is_market_hours:
+        # Next 15 or 30 min mark
+        if now.hour == 9 or (now.hour == 10 and now.minute < 30) or now.hour >= 15:
+            # Every 15 min
+            next_min = ((now.minute // 15) + 1) * 15
+            if next_min >= 60:
+                next_cta = now.replace(minute=0, second=0) + timedelta(hours=1)
+            else:
+                next_cta = now.replace(minute=next_min, second=0)
+        else:
+            # Every 30 min
+            next_min = 30 if now.minute < 30 else 60
+            if next_min >= 60:
+                next_cta = now.replace(minute=0, second=0) + timedelta(hours=1)
+            else:
+                next_cta = now.replace(minute=next_min, second=0)
+        next_cta_str = next_cta.strftime("%H:%M ET")
+    else:
         next_open = now.replace(hour=9, minute=30, second=0, microsecond=0)
-        if now.hour >= 16 or (now.hour == 9 and now.minute >= 30):
+        if now.hour >= 16:
             next_open += timedelta(days=1)
-        next_cta = next_open
-        next_hunter = next_open
+        next_cta_str = f"Market open ({next_open.strftime('%Y-%m-%d %H:%M')} ET)"
+    
+    # Calculate next crypto run (always 30 min from last or next 30-min mark)
+    next_crypto_min = 30 if now.minute < 30 else 60
+    if next_crypto_min >= 60:
+        next_crypto = now.replace(minute=0, second=0) + timedelta(hours=1)
+    else:
+        next_crypto = now.replace(minute=next_crypto_min, second=0)
     
     return {
         "current_time_et": now.strftime("%Y-%m-%d %H:%M:%S"),
@@ -89,13 +114,19 @@ def get_scheduler_status() -> Dict[str, Any]:
         "scheduler_started": _scheduler_status.get("scheduler_started"),
         "cta_scanner": {
             **_scheduler_status["cta_scanner"],
-            "next_run_et": next_cta.strftime("%H:%M") if is_market_hours else f"Market open ({next_cta.strftime('%Y-%m-%d %H:%M')})"
+            "current_interval": cta_interval,
+            "next_run_et": next_cta_str,
+            "schedule": "First/last hour: 15min, Mid-day: 30min (market hours only)"
         },
-        "hunter_scanner": {
-            **_scheduler_status["hunter_scanner"],
-            "next_run_et": next_hunter.strftime("%H:%M") if is_market_hours else f"Market open ({next_hunter.strftime('%Y-%m-%d %H:%M')})"
+        "crypto_scanner": {
+            **_scheduler_status["crypto_scanner"],
+            "next_run_et": next_crypto.strftime("%H:%M ET"),
+            "schedule": "Every 30 minutes, 24/7"
         },
-        "bias_refresh": _scheduler_status["bias_refresh"]
+        "bias_refresh": {
+            **_scheduler_status["bias_refresh"],
+            "schedule": "9:45 AM ET on trading days"
+        }
     }
 
 
@@ -1943,39 +1974,91 @@ async def start_scheduler():
 
 
 async def _fallback_scheduler():
-    """Fallback scheduler using asyncio (runs in background)"""
+    """
+    Fallback scheduler using asyncio (runs in background)
+    
+    Schedule:
+    - Bias Refresh: 9:45 AM ET on trading days
+    - CTA Scanner (Equities): 
+        - First hour (9:30-10:30): Every 15 min
+        - Mid-day (10:30-15:00): Every 30 min  
+        - Last hour (15:00-16:00): Every 15 min
+    - Crypto Scanner: Every 30 min, 24/7
+    """
     logger.info("Starting fallback scheduler loop (using Eastern Time)")
     
-    last_cta_scan_hour = -1
-    last_hunter_scan_half = -1  # Track half-hour intervals (0 or 30)
+    last_cta_scan_time = None
+    last_crypto_scan_time = None
+    last_bias_refresh_date = None
     
     while True:
         now = get_eastern_now()
-        current_half = 0 if now.minute < 30 else 30
+        current_hour = now.hour
+        current_minute = now.minute
         
-        # Check if it's 9:45 AM ET (within 1 minute window) - bias refresh
-        if now.hour == 9 and 45 <= now.minute < 46:
-            logger.info(f"⏰ 9:45 AM ET trigger - running bias refresh (ET: {now.strftime('%H:%M')})")
-            await run_scheduled_refreshes()
-            # Wait 2 minutes to avoid duplicate runs
-            await asyncio.sleep(120)
+        # =========================================
+        # BIAS REFRESH: 9:45 AM ET on trading days
+        # =========================================
+        if is_trading_day() and current_hour == 9 and 45 <= current_minute < 46:
+            today_str = now.strftime("%Y-%m-%d")
+            if last_bias_refresh_date != today_str:
+                last_bias_refresh_date = today_str
+                logger.info(f"⏰ 9:45 AM ET trigger - running bias refresh")
+                await run_scheduled_refreshes()
+                await asyncio.sleep(120)
+                continue
         
-        # CTA scan: Run every hour during market hours (9:30 AM - 4:00 PM ET)
-        elif is_trading_day() and 9 <= now.hour <= 16 and now.hour != last_cta_scan_hour:
-            last_cta_scan_hour = now.hour
-            logger.info(f"⏰ Market hours CTA scan (ET: {now.strftime('%H:%M')})")
-            await run_cta_scan_scheduled()
-            await asyncio.sleep(60)
+        # =========================================
+        # CTA SCANNER (EQUITIES): Smart frequency during market hours
+        # =========================================
+        if is_trading_day() and 9 <= current_hour <= 16:
+            # Determine scan interval based on time of day
+            if current_hour == 9 or (current_hour == 10 and current_minute < 30):
+                # First hour: Every 15 minutes (high volatility at open)
+                cta_interval_minutes = 15
+            elif current_hour >= 15:
+                # Last hour: Every 15 minutes (high volatility at close)
+                cta_interval_minutes = 15
+            else:
+                # Mid-day: Every 30 minutes
+                cta_interval_minutes = 30
+            
+            # Check if enough time has passed since last scan
+            should_scan_cta = False
+            if last_cta_scan_time is None:
+                should_scan_cta = True
+            else:
+                minutes_since_last = (now - last_cta_scan_time).total_seconds() / 60
+                should_scan_cta = minutes_since_last >= cta_interval_minutes
+            
+            if should_scan_cta:
+                last_cta_scan_time = now
+                _scheduler_status["cta_scanner"]["status"] = "running"
+                logger.info(f"⏰ CTA scan (interval: {cta_interval_minutes}min) - ET: {now.strftime('%H:%M')}")
+                await run_cta_scan_scheduled()
+                await asyncio.sleep(30)
+                continue
         
-        # Hunter scan: Run every 30 minutes during market hours (9:30 AM - 4:00 PM ET)
-        elif is_trading_day() and 9 <= now.hour <= 16 and current_half != last_hunter_scan_half:
-            last_hunter_scan_half = current_half
-            logger.info(f"⏰ Market hours Hunter scan (ET: {now.strftime('%H:%M')})")
-            await run_hunter_scan_scheduled()
-            await asyncio.sleep(60)
+        # =========================================
+        # CRYPTO SCANNER: 24/7, every 30 minutes
+        # =========================================
+        should_scan_crypto = False
+        if last_crypto_scan_time is None:
+            should_scan_crypto = True
         else:
-            # Check every minute
-            await asyncio.sleep(60)
+            minutes_since_crypto = (now - last_crypto_scan_time).total_seconds() / 60
+            should_scan_crypto = minutes_since_crypto >= 30
+        
+        if should_scan_crypto:
+            last_crypto_scan_time = now
+            _scheduler_status["crypto_scanner"]["status"] = "running"
+            logger.info(f"⏰ Crypto scan (24/7) - ET: {now.strftime('%H:%M')}")
+            await run_crypto_scan_scheduled()
+            await asyncio.sleep(30)
+            continue
+        
+        # Check every minute
+        await asyncio.sleep(60)
 
 
 # =========================================================================
@@ -2349,3 +2432,136 @@ async def trigger_hunter_scan_now():
     Manually trigger a Hunter scan (called from API)
     """
     await run_hunter_scan_scheduled()
+
+
+# =========================================================================
+# CRYPTO SCANNER SCHEDULED TASK (24/7)
+# =========================================================================
+
+# Top crypto tickers to scan
+CRYPTO_TICKERS = [
+    'BTCUSD', 'ETHUSD', 'SOLUSD', 'XRPUSD', 'ADAUSD', 
+    'AVAXUSD', 'DOGEUSD', 'DOTUSD', 'LINKUSD', 'MATICUSD',
+    'LTCUSD', 'UNIUSD', 'ATOMUSD', 'NEARUSD', 'APTUSD'
+]
+
+async def run_crypto_scan_scheduled():
+    """
+    Run crypto scanner 24/7 and push signals to Trade Ideas.
+    Scheduled: Every 30 minutes around the clock.
+    
+    Uses Hunter Scanner logic but focused on crypto tickers.
+    """
+    logger.info("🪙 Running scheduled Crypto scan...")
+    
+    try:
+        from scanners.hunter import analyze_single_ticker, SCANNER_AVAILABLE
+        from websocket.broadcaster import manager
+        from database.redis_client import cache_signal
+        from database.postgres_client import log_signal, update_signal_with_score
+        from scoring.trade_ideas_scorer import calculate_signal_score
+        
+        if not SCANNER_AVAILABLE:
+            logger.warning("Hunter Scanner not available for crypto scan")
+            _scheduler_status["crypto_scanner"]["status"] = "unavailable"
+            return
+        
+        # Get current bias for scoring
+        bias_status = get_bias_status()
+        current_bias = {
+            "daily": bias_status.get("daily", {}),
+            "weekly": bias_status.get("weekly", {}),
+            "cyclical": bias_status.get("cyclical", {})
+        }
+        
+        signals_found = 0
+        
+        for ticker in CRYPTO_TICKERS:
+            try:
+                # Analyze ticker
+                result = await analyze_single_ticker(ticker)
+                
+                if not result or result.get('data_status') != 'OK':
+                    continue
+                
+                # Check if there's a signal
+                verdict = result.get('overall_verdict', 'NO_SIGNAL')
+                if verdict == 'NO_SIGNAL':
+                    continue
+                
+                # Build signal
+                direction = 'SHORT' if 'URSA' in verdict else 'LONG'
+                signal_type = verdict
+                
+                signal_id = f"{ticker}_{direction}_{get_eastern_now().strftime('%Y%m%d_%H%M%S')}"
+                
+                trade_signal = {
+                    "signal_id": signal_id,
+                    "timestamp": get_eastern_now().isoformat(),
+                    "ticker": ticker,
+                    "strategy": "Crypto Scanner",
+                    "direction": direction,
+                    "signal_type": signal_type,
+                    "entry_price": result.get('metrics', {}).get('price'),
+                    "stop_loss": None,  # Would need to calculate
+                    "target_1": None,
+                    "risk_reward": None,
+                    "timeframe": "DAILY",
+                    "asset_class": "CRYPTO",
+                    "status": "ACTIVE",
+                    "adx": result.get('metrics', {}).get('adx'),
+                    "rsi": result.get('metrics', {}).get('rsi')
+                }
+                
+                # Calculate score
+                score, bias_alignment, triggering_factors = calculate_signal_score(trade_signal, current_bias)
+                
+                trade_signal["score"] = score
+                trade_signal["bias_alignment"] = bias_alignment
+                trade_signal["triggering_factors"] = triggering_factors
+                
+                # Set confidence
+                if score >= 75:
+                    trade_signal["confidence"] = "HIGH"
+                elif score >= 55:
+                    trade_signal["confidence"] = "MEDIUM"
+                else:
+                    trade_signal["confidence"] = "LOW"
+                
+                # Log to PostgreSQL
+                try:
+                    await log_signal(trade_signal)
+                    await update_signal_with_score(signal_id, score, bias_alignment, triggering_factors)
+                except Exception as db_err:
+                    logger.warning(f"Failed to log crypto signal to DB: {db_err}")
+                
+                # Cache in Redis (longer TTL for crypto since it's 24/7)
+                await cache_signal(signal_id, trade_signal, ttl=14400)  # 4 hour TTL
+                
+                # Broadcast
+                await manager.broadcast_signal_smart(trade_signal, priority_threshold=75.0)
+                
+                logger.info(f"🪙 Crypto signal: {ticker} {signal_type} (score: {score})")
+                signals_found += 1
+                
+            except Exception as ticker_err:
+                logger.warning(f"Error scanning {ticker}: {ticker_err}")
+                continue
+        
+        # Update scheduler status
+        _scheduler_status["crypto_scanner"]["last_run"] = get_eastern_now().isoformat()
+        _scheduler_status["crypto_scanner"]["signals_found"] = signals_found
+        _scheduler_status["crypto_scanner"]["status"] = "completed"
+        
+        logger.info(f"✅ Crypto scan complete - {signals_found} signals found")
+        
+    except Exception as e:
+        _scheduler_status["crypto_scanner"]["status"] = f"error: {str(e)}"
+        logger.error(f"Error in crypto scan: {e}")
+        import traceback
+        traceback.print_exc()
+
+
+async def trigger_crypto_scan_now():
+    """Manually trigger a crypto scan"""
+    await run_crypto_scan_scheduled()

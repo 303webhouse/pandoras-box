@@ -1,0 +1,102 @@
+# Knowledgebase Entry Requirements
+
+## Rule
+
+Every new indicator, signal, strategy, filter, scanner, or trading concept added to this project **MUST** have a corresponding knowledgebase entry.
+
+## When This Rule Applies
+
+This rule applies when adding ANY of the following to the codebase:
+
+- **Indicators**: Bias indicators, technical indicators, market indicators
+- **Signals**: Trade signals, alert signals, confirmation signals
+- **Strategies**: Trading strategies, entry/exit strategies
+- **Filters**: Bias filters, signal filters, market filters
+- **Scanners**: Stock scanners, market scanners, hybrid scanners
+- **Zones**: CTA zones, market zones, trend zones
+- **Concepts**: Trading concepts, execution concepts, market terms
+
+## Required Steps
+
+### 1. Add Entry to Knowledgebase JSON
+
+Add a new entry to `data/knowledgebase.json` with this structure:
+
+```json
+{
+  "id": "term-slug-lowercase",
+  "term": "Display Term Name",
+  "category": "One of: Bias Indicators, Signals, Strategies, Scanners, Technical Indicators, CTA Zones, Bias Levels, Trading Concepts, Options Flow, Time Frames",
+  "shortDescription": "Max 500 words. Brief explanation for popup display. Include key points, how it works, and trading implications.",
+  "fullDescription": "Complete detailed explanation with markdown formatting. Include sections for: What it is, How it works, Trading implications, Related concepts.",
+  "relatedTerms": ["related-term-id-1", "related-term-id-2"]
+}
+```
+
+### 2. Short Description Requirements (for popup)
+
+- Maximum 500 words
+- Must explain what the term means
+- Must explain how it's used in trading
+- Should include key signals or interpretations
+- Should be understandable to non-experts
+
+### 3. Full Description Requirements (for full page)
+
+- No word limit
+- Use markdown formatting (headers, tables, lists, code blocks)
+- Include sections:
+  - Definition/Overview
+  - How It Works (calculation if applicable)
+  - Interpretation/Signal Logic
+  - Trading Implications
+  - Best Practices
+  - Related Concepts
+
+### 4. Category Selection
+
+Choose the most appropriate category:
+
+| Category | Use For |
+|----------|---------|
+| Bias Indicators | Factors that contribute to bias calculation |
+| Signals | Generated trading signals or alerts |
+| Strategies | Complete trading strategies |
+| Scanners | Tools that scan/filter stocks |
+| Technical Indicators | Standard technical analysis indicators |
+| CTA Zones | CTA strategy zone classifications |
+| Bias Levels | Bias level definitions (TORO, URSA, etc.) |
+| Trading Concepts | General trading terminology |
+| Options Flow | Options and flow-related terms |
+| Time Frames | Time-related concepts |
+
+### 5. Related Terms
+
+Always link to related knowledgebase entries by their ID. This improves navigation and helps users understand connections between concepts.
+
+## Example Entry
+
+```json
+{
+  "id": "new-indicator-name",
+  "term": "New Indicator Name",
+  "category": "Bias Indicators",
+  "shortDescription": "Brief 500-word max description explaining the indicator, how it works, and what signals it generates.\n\nInclude key interpretation points:\n- Bullish signal: Condition X\n- Bearish signal: Condition Y\n- Neutral: Condition Z\n\nExplain why this indicator matters for trading decisions.",
+  "fullDescription": "## Overview\n\nFull detailed explanation...\n\n## How It Works\n\nTechnical details...\n\n## Signal Interpretation\n\n| Signal | Condition | Action |\n|--------|-----------|--------|\n| Bullish | X > Y | Consider longs |\n\n## Related Concepts\n\n- Related concept 1\n- Related concept 2",
+  "relatedTerms": ["related-term-1", "related-term-2"]
+}
+```
+
+## Verification
+
+After adding a new entry:
+
+1. Verify the JSON is valid (no syntax errors)
+2. Check that the ID is unique
+3. Ensure the category matches an existing category
+4. Test that related term IDs exist in the knowledgebase
+5. Reload the knowledgebase cache via API: `POST /api/knowledgebase/reload`
+
+## Reminder
+
+This knowledgebase serves as the single source of truth for all trading terminology in the application. Keeping it updated ensures users can always understand any term they encounter in the UI.
