@@ -194,6 +194,42 @@ body {
     color: var(--dark-bg);
 }
 
+/* Override Active - Bullish (green outlines on all sections) */
+.override-active-bullish .main-content,
+.override-active-bullish .watchlist-section,
+.override-active-bullish .cta-section,
+.override-active-bullish .hybrid-scanner-section,
+.override-active-bullish .btc-signals-section,
+.override-active-bullish .flow-section,
+.override-active-bullish .strategies-section,
+.override-active-bullish .bias-card {
+    outline: 2px solid var(--accent-lime);
+    outline-offset: -2px;
+}
+
+.override-active-bullish .override-active-banner {
+    background: var(--accent-lime);
+    color: var(--dark-bg);
+}
+
+/* Override Active - Bearish (orange outlines on all sections) */
+.override-active-bearish .main-content,
+.override-active-bearish .watchlist-section,
+.override-active-bearish .cta-section,
+.override-active-bearish .hybrid-scanner-section,
+.override-active-bearish .btc-signals-section,
+.override-active-bearish .flow-section,
+.override-active-bearish .strategies-section,
+.override-active-bearish .bias-card {
+    outline: 2px solid var(--accent-orange);
+    outline-offset: -2px;
+}
+
+.override-active-bearish .override-active-banner {
+    background: var(--accent-orange);
+    color: var(--dark-bg);
+}
+
 /* Bias alignment indicator in header */
 .bias-alignment-indicator {
     display: none;
@@ -293,6 +329,17 @@ body {
     background: var(--accent-teal);
     color: var(--dark-bg);
     border-color: var(--accent-teal);
+}
+
+/* Override toggle colors based on direction */
+.override-toggle[data-active="true"][data-direction="bullish"] {
+    background: var(--accent-lime);
+    border-color: var(--accent-lime);
+}
+
+.override-toggle[data-active="true"][data-direction="bearish"] {
+    background: var(--accent-orange);
+    border-color: var(--accent-orange);
 }
 
 .override-toggle:hover {
@@ -3470,6 +3517,8 @@ body {
 
 .factors-modal-body {
     padding: 20px 24px;
+    max-height: 60vh;
+    overflow-y: auto;
 }
 
 .factor-toggle {

@@ -1129,10 +1129,12 @@ function initPersonalBiasControls() {
         overrideToggle.textContent = biasOverrideActive ? 'ON' : 'OFF';
         overrideDirectionSelector.disabled = !biasOverrideActive;
         
-        // Update UI state
-        if (biasSection) {
-            biasSection.classList.toggle('override-active', biasOverrideActive);
-        }
+        // Update override direction data attribute
+        const isBullish = biasOverrideDirection.includes('TORO');
+        overrideToggle.dataset.direction = isBullish ? 'bullish' : 'bearish';
+        
+        // Update UI state - apply override styling to container
+        applyOverrideStyling();
         
         // Update override banner
         updateOverrideBanner();
@@ -1150,6 +1152,13 @@ function initPersonalBiasControls() {
     // Override Direction Selector
     overrideDirectionSelector.addEventListener('change', (e) => {
         biasOverrideDirection = e.target.value;
+        
+        // Update override toggle direction attribute
+        const isBullish = biasOverrideDirection.includes('TORO');
+        overrideToggle.dataset.direction = isBullish ? 'bullish' : 'bearish';
+        
+        // Update styling
+        applyOverrideStyling();
         updateOverrideBanner();
         savePersonalBiasState();
         
@@ -1163,7 +1172,22 @@ function initPersonalBiasControls() {
     
     // Apply initial state
     applyPersonalBiasToCards();
+    applyOverrideStyling();
     updateOverrideBanner();
+}
+
+// Apply override styling to container
+function applyOverrideStyling() {
+    const container = document.querySelector('.container');
+    if (!container) return;
+    
+    // Remove existing override classes
+    container.classList.remove('override-active-bullish', 'override-active-bearish');
+    
+    if (biasOverrideActive) {
+        const isBullish = biasOverrideDirection.includes('TORO');
+        container.classList.add(isBullish ? 'override-active-bullish' : 'override-active-bearish');
+    }
 }
 
 function loadPersonalBiasState() {
@@ -1204,6 +1228,9 @@ function loadPersonalBiasState() {
         if (overrideToggle) {
             overrideToggle.dataset.active = biasOverrideActive.toString();
             overrideToggle.textContent = biasOverrideActive ? 'ON' : 'OFF';
+            // Set direction attribute for styling
+            const isBullish = biasOverrideDirection.includes('TORO');
+            overrideToggle.dataset.direction = isBullish ? 'bullish' : 'bearish';
         }
         if (overrideDirectionSelector) {
             overrideDirectionSelector.value = biasOverrideDirection;
@@ -1212,6 +1239,9 @@ function loadPersonalBiasState() {
         if (biasSection) {
             biasSection.classList.toggle('override-active', biasOverrideActive);
         }
+        
+        // Apply override styling to container
+        applyOverrideStyling();
         
     } catch (e) {
         console.error('Error loading personal bias state:', e);
