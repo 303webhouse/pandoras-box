@@ -1967,15 +1967,96 @@ async def start_scheduler():
         logger.info("✅ APScheduler started - bias refresh scheduled for 9:45 AM ET")
         logger.info("✅ Savita auto-search scheduled for 8:00 AM ET (days 12-23)")
         
+        # ALSO start the scanner loop (APScheduler doesn't handle the variable-interval scanners)
+        asyncio.create_task(_scanner_loop())
+        logger.info("✅ Scanner loop started (CTA + Crypto)")
+        
     except ImportError:
         logger.warning("APScheduler not installed, using fallback scheduler")
-        # Fallback: Simple asyncio-based scheduler
+        # Fallback: Simple asyncio-based scheduler (handles both bias refresh AND scanners)
         asyncio.create_task(_fallback_scheduler())
+
+
+async def _scanner_loop():
+    """
+    Dedicated scanner loop for CTA and Crypto scanners.
+    Runs alongside APScheduler (which handles bias refresh).
+    
+    Schedule:
+    - CTA Scanner (Equities): 
+        - First hour (9:30-10:30): Every 15 min
+        - Mid-day (10:30-15:00): Every 30 min  
+        - Last hour (15:00-16:00): Every 15 min
+    - Crypto Scanner: Every 30 min, 24/7
+    """
+    logger.info("Starting scanner loop (CTA + Crypto)")
+    
+    last_cta_scan_time = None
+    last_crypto_scan_time = None
+    
+    while True:
+        try:
+            now = get_eastern_now()
+            current_hour = now.hour
+            current_minute = now.minute
+            
+            # =========================================
+            # CTA SCANNER (EQUITIES): Smart frequency during market hours
+            # =========================================
+            if is_trading_day() and 9 <= current_hour <= 16:
+                # Determine scan interval based on time of day
+                if current_hour == 9 or (current_hour == 10 and current_minute < 30):
+                    cta_interval_minutes = 15
+                elif current_hour >= 15:
+                    cta_interval_minutes = 15
+                else:
+                    cta_interval_minutes = 30
+                
+                should_scan_cta = False
+                if last_cta_scan_time is None:
+                    should_scan_cta = True
+                else:
+                    minutes_since_last = (now - last_cta_scan_time).total_seconds() / 60
+                    should_scan_cta = minutes_since_last >= cta_interval_minutes
+                
+                if should_scan_cta:
+                    last_cta_scan_time = now
+                    _scheduler_status["cta_scanner"]["status"] = "running"
+                    logger.info(f"⏰ CTA scan (interval: {cta_interval_minutes}min) - ET: {now.strftime('%H:%M')}")
+                    await run_cta_scan_scheduled()
+                    await asyncio.sleep(30)
+                    continue
+            
+            # =========================================
+            # CRYPTO SCANNER: 24/7, every 30 minutes
+            # =========================================
+            should_scan_crypto = False
+            if last_crypto_scan_time is None:
+                should_scan_crypto = True
+            else:
+                minutes_since_crypto = (now - last_crypto_scan_time).total_seconds() / 60
+                should_scan_crypto = minutes_since_crypto >= 30
+            
+            if should_scan_crypto:
+                last_crypto_scan_time = now
+                _scheduler_status["crypto_scanner"]["status"] = "running"
+                logger.info(f"⏰ Crypto scan (24/7) - ET: {now.strftime('%H:%M')}")
+                await run_crypto_scan_scheduled()
+                await asyncio.sleep(30)
+                continue
+            
+            # Check every minute
+            await asyncio.sleep(60)
+            
+        except Exception as e:
+            logger.error(f"Error in scanner loop: {e}")
+            await asyncio.sleep(60)
 
 
 async def _fallback_scheduler():
     """
     Fallback scheduler using asyncio (runs in background)
+    Used when APScheduler is not installed.
     
     Schedule:
     - Bias Refresh: 9:45 AM ET on trading days

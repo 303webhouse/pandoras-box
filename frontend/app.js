@@ -770,26 +770,19 @@ function checkAndDisplayCrisisAlert(cyclicalData) {
 
 // Savita Indicator Update Functions (Optional - bonus factor when BofA data available)
 function checkSavitaStatus(cyclicalData) {
-    const reminder = document.getElementById('savitaReminder');
-    if (!reminder) return;
+    const btn = document.getElementById('savitaUpdateBtn');
+    if (!btn) return;
     
     const factors = cyclicalData?.details?.factors || {};
     const savitaData = factors.savita_indicator?.details || {};
     
-    // Check if Savita is actively contributing to the score
-    const savitaActive = savitaData && !savitaData.optional;
-    
-    // Savita is now optional - only show reminder if user has previously entered data
-    // and it's getting stale, to let them know they can update it again
+    // Check Savita freshness
     const lastUpdated = savitaData.last_updated || savitaData.reading?.last_updated;
     
     if (!lastUpdated) {
-        // No Savita data - that's fine, it's optional now
-        // Show subtle link to add if they find data
-        reminder.style.display = 'flex';
-        reminder.classList.remove('stale');
-        reminder.querySelector('.reminder-link').textContent = 'Add Savita (optional)';
-        reminder.style.opacity = '0.6';
+        // No Savita data - just show normal button
+        btn.classList.remove('stale');
+        btn.title = 'Add Savita Indicator (optional)';
         return;
     }
     
@@ -799,42 +792,38 @@ function checkSavitaStatus(cyclicalData) {
     const daysSinceUpdate = Math.floor((now - updateDate) / (1000 * 60 * 60 * 24));
     
     if (daysSinceUpdate > 30) {
-        // Stale - Savita disabled, but they can update
-        reminder.style.display = 'flex';
-        reminder.classList.add('stale');
-        reminder.style.opacity = '1';
-        reminder.querySelector('.reminder-link').textContent = `Savita inactive (${daysSinceUpdate}d)`;
+        // Stale - add pulse animation
+        btn.classList.add('stale');
+        btn.title = `Savita inactive (${daysSinceUpdate}d old) - click to update`;
     } else if (daysSinceUpdate > 20) {
         // Getting stale soon
-        reminder.style.display = 'flex';
-        reminder.classList.remove('stale');
-        reminder.style.opacity = '0.8';
-        reminder.querySelector('.reminder-link').textContent = `Savita: ${daysSinceUpdate}d old`;
+        btn.classList.add('stale');
+        btn.title = `Savita getting stale (${daysSinceUpdate}d) - consider updating`;
     } else {
-        // Fresh and active - show green status
-        reminder.style.display = 'flex';
-        reminder.classList.remove('stale');
-        reminder.style.opacity = '0.7';
-        reminder.style.borderColor = '#22c55e';
-        reminder.style.background = 'rgba(34, 197, 94, 0.1)';
-        reminder.querySelector('.reminder-link').textContent = 'Savita active';
-        reminder.querySelector('.reminder-link').style.color = '#22c55e';
+        // Fresh and active
+        btn.classList.remove('stale');
+        btn.title = `Savita active (updated ${daysSinceUpdate}d ago)`;
     }
 }
 
 function initSavitaUpdateModal() {
-    const updateLink = document.getElementById('savitaUpdateLink');
+    const updateBtn = document.getElementById('savitaUpdateBtn');
     const modal = document.getElementById('savitaUpdateModal');
     const closeBtn = document.getElementById('closeSavitaModal');
     const cancelBtn = document.getElementById('cancelSavitaUpdate');
     const submitBtn = document.getElementById('submitSavitaUpdate');
     
-    if (!updateLink || !modal) return;
+    if (!modal) return;
     
-    // Open modal
-    updateLink.addEventListener('click', async (e) => {
-        e.preventDefault();
-        
+    // Open modal from new button
+    if (updateBtn) {
+        updateBtn.addEventListener('click', async (e) => {
+            e.preventDefault();
+            openSavitaModal();
+        });
+    }
+    
+    async function openSavitaModal() {
         // Fetch current Savita status
         try {
             const response = await fetch(`${API_URL}/bias-auto/savita`);
@@ -862,7 +851,7 @@ function initSavitaUpdateModal() {
         }
         
         modal.classList.add('active');
-    });
+    }
     
     // Close modal
     const closeModal = () => {
@@ -898,10 +887,9 @@ function initSavitaUpdateModal() {
                 alert(`Savita updated to ${reading}%`);
                 closeModal();
                 
-                // Refresh bias data and hide reminder
+                // Refresh bias data and update button style
                 await loadBiasData();
-                const reminder = document.getElementById('savitaReminder');
-                if (reminder) reminder.style.display = 'none';
+                updateSavitaButtonStatus();
             } else {
                 alert('Error updating Savita: ' + (result.detail || 'Unknown error'));
             }
@@ -910,6 +898,16 @@ function initSavitaUpdateModal() {
             alert('Error updating Savita');
         }
     });
+}
+
+// Update Savita button style based on data freshness
+function updateSavitaButtonStatus() {
+    const btn = document.getElementById('savitaUpdateBtn');
+    if (!btn) return;
+    
+    // Check if Savita data is stale (could be enhanced with actual data check)
+    // For now, remove stale class after update
+    btn.classList.remove('stale');
 }
 
 function updateBiasWithTrend(timeframe, biasData) {
@@ -2096,6 +2094,10 @@ function createSignalCard(signal) {
     const formatPrice = (val) => val ? parseFloat(val).toFixed(2) : '-';
     const formatRR = (val) => val ? `${parseFloat(val).toFixed(1)}:1` : '-';
     
+    // Wrap strategy and signal type with KB links
+    const strategyWithKb = wrapWithKbLink(signal.strategy || 'Unknown');
+    const typeWithKb = wrapWithKbLink(typeLabel);
+    
     return `
         <div class="signal-card ${signal.signal_type || ''} ${biasAlignmentClass} ${pulseClass}" 
              data-signal-id="${signal.signal_id}" 
@@ -2103,8 +2105,8 @@ function createSignalCard(signal) {
             
             <div class="signal-header">
                 <div>
-                    <div class="signal-type ${signal.signal_type || ''}">${typeLabel}</div>
-                    <div class="signal-strategy">${signal.strategy || 'Unknown'}</div>
+                    <div class="signal-type ${signal.signal_type || ''}">${typeWithKb}</div>
+                    <div class="signal-strategy">${strategyWithKb}</div>
                 </div>
                 <div class="signal-ticker ticker-link" data-action="view-chart">${signal.ticker}</div>
             </div>
@@ -4985,8 +4987,145 @@ async function updateCurrentPrices() {
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', () => {
     setTimeout(initPositionModals, 1300);
+    setTimeout(initManualPositionModal, 1400);
     setTimeout(initKnowledgebase, 1500);
 });
+
+
+// ============================================
+// MANUAL POSITION ENTRY
+// ============================================
+
+function initManualPositionModal() {
+    const addBtn = document.getElementById('addPositionBtn');
+    const modal = document.getElementById('manualPositionModal');
+    const closeBtn = document.getElementById('closeManualPositionBtn');
+    const cancelBtn = document.getElementById('cancelManualPositionBtn');
+    const confirmBtn = document.getElementById('confirmManualPositionBtn');
+    
+    if (addBtn) {
+        addBtn.addEventListener('click', openManualPositionModal);
+    }
+    
+    if (closeBtn) closeBtn.addEventListener('click', closeManualPositionModal);
+    if (cancelBtn) cancelBtn.addEventListener('click', closeManualPositionModal);
+    if (confirmBtn) confirmBtn.addEventListener('click', submitManualPosition);
+    
+    if (modal) {
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) closeManualPositionModal();
+        });
+    }
+    
+    // Auto-uppercase ticker input
+    const tickerInput = document.getElementById('manualTicker');
+    if (tickerInput) {
+        tickerInput.addEventListener('input', (e) => {
+            e.target.value = e.target.value.toUpperCase();
+        });
+    }
+    
+    console.log('📝 Manual position modal initialized');
+}
+
+function openManualPositionModal() {
+    const modal = document.getElementById('manualPositionModal');
+    if (modal) {
+        // Clear form
+        document.getElementById('manualTicker').value = '';
+        document.getElementById('manualDirection').value = 'LONG';
+        document.getElementById('manualEntryPrice').value = '';
+        document.getElementById('manualQuantity').value = '';
+        document.getElementById('manualStopLoss').value = '';
+        document.getElementById('manualTarget').value = '';
+        document.getElementById('manualNotes').value = '';
+        
+        modal.classList.add('active');
+        document.getElementById('manualTicker').focus();
+    }
+}
+
+function closeManualPositionModal() {
+    const modal = document.getElementById('manualPositionModal');
+    if (modal) {
+        modal.classList.remove('active');
+    }
+}
+
+async function submitManualPosition() {
+    const ticker = document.getElementById('manualTicker').value.trim().toUpperCase();
+    const direction = document.getElementById('manualDirection').value;
+    const entryPrice = parseFloat(document.getElementById('manualEntryPrice').value);
+    const quantity = parseFloat(document.getElementById('manualQuantity').value);
+    const stopLoss = parseFloat(document.getElementById('manualStopLoss').value) || null;
+    const target = parseFloat(document.getElementById('manualTarget').value) || null;
+    const notes = document.getElementById('manualNotes').value.trim();
+    
+    // Validation
+    if (!ticker) {
+        alert('Please enter a ticker symbol');
+        return;
+    }
+    if (isNaN(entryPrice) || entryPrice <= 0) {
+        alert('Please enter a valid entry price');
+        return;
+    }
+    if (isNaN(quantity) || quantity <= 0) {
+        alert('Please enter a valid quantity');
+        return;
+    }
+    
+    // Determine asset class
+    const cryptoTickers = ['BTC', 'ETH', 'SOL', 'XRP', 'ADA', 'AVAX', 'DOGE', 'DOT', 'LINK', 'MATIC', 'LTC', 'UNI'];
+    const isCrypto = cryptoTickers.some(c => ticker.includes(c));
+    
+    const positionData = {
+        ticker: ticker,
+        direction: direction,
+        entry_price: entryPrice,
+        quantity: quantity,
+        stop_loss: stopLoss,
+        target_1: target,
+        strategy: notes || 'Manual Entry',
+        asset_class: isCrypto ? 'CRYPTO' : 'EQUITY',
+        signal_type: 'MANUAL',
+        notes: notes
+    };
+    
+    try {
+        const response = await fetch(`${API_URL}/positions/manual`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(positionData)
+        });
+        
+        const result = await response.json();
+        
+        if (response.ok) {
+            console.log('✅ Manual position created:', result);
+            closeManualPositionModal();
+            
+            // Add to local positions and refresh UI
+            if (result.position) {
+                openPositions.push(result.position);
+                renderPositions();
+                
+                // Store price levels for chart
+                if (result.position.stop_loss || result.position.target_1) {
+                    storePriceLevels(result.position);
+                }
+            }
+            
+            // Refresh positions from server
+            await loadOpenPositions();
+        } else {
+            alert(`Error: ${result.detail || 'Failed to create position'}`);
+        }
+    } catch (error) {
+        console.error('Error creating manual position:', error);
+        alert('Failed to create position. Please try again.');
+    }
+}
 
 // ============================================
 // KNOWLEDGEBASE POPUP FUNCTIONALITY
@@ -5055,7 +5194,94 @@ function initKbClickHandlers() {
         });
     });
     
+    // Handle .kb-factor-link elements (clickable factor names in settings modals)
+    document.querySelectorAll('.kb-factor-link[data-kb-term]').forEach(el => {
+        el.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const termId = el.dataset.kbTerm;
+            if (termId) openKbPopup(termId);
+        });
+    });
+    
     console.log('📚 KB click handlers initialized');
+}
+
+// Map strategy/signal names to KB term IDs
+const KB_TERM_MAP = {
+    // Strategies
+    'TRIPLE_LINE': 'triple-line-trend',
+    'TRIPLE LINE': 'triple-line-trend',
+    'CTA': 'cta-scanner',
+    'CTA_GOLDEN': 'cta-scanner',
+    'CTA_TWOCLOSE': 'cta-scanner',
+    'CTA_PULLBACK': 'cta-scanner',
+    'GOLDEN_TOUCH': 'cta-scanner',
+    'GOLDEN TOUCH': 'cta-scanner',
+    'TWO_CLOSE': 'cta-scanner',
+    'TWO-CLOSE': 'cta-scanner',
+    'PULLBACK': 'cta-scanner',
+    'HUNTER': 'hunter-scanner',
+    'URSA': 'hunter-scanner',
+    'TAURUS': 'hunter-scanner',
+    'EXHAUSTION': 'trade-ideas',
+    'EXHAUSTION_BULL': 'trade-ideas',
+    'EXHAUSTION_BEAR': 'trade-ideas',
+    
+    // Signal types
+    'LONG': 'risk-on',
+    'SHORT': 'risk-off',
+    'BULLISH': 'toro-major',
+    'BEARISH': 'ursa-major',
+    
+    // CTA Zones
+    'MAX_LONG': 'max-long',
+    'MAX LONG': 'max-long',
+    'DE_LEVERAGING': 'de-leveraging',
+    'DE-LEVERAGING': 'de-leveraging',
+    'DELEVERAGING': 'de-leveraging',
+    'WATERFALL': 'waterfall',
+    'CAPITULATION': 'capitulation',
+    
+    // Bias levels
+    'TORO_MAJOR': 'toro-major',
+    'TORO_MINOR': 'toro-minor',
+    'URSA_MAJOR': 'ursa-major',
+    'URSA_MINOR': 'ursa-minor',
+    'NEUTRAL': 'neutral',
+    
+    // BTC signals
+    '25-DELTA SKEW': 'btc-bottom-signals',
+    'QUARTERLY BASIS': 'btc-bottom-signals',
+    'PERP FUNDING': 'btc-bottom-signals',
+    'STABLECOIN APRS': 'btc-bottom-signals',
+    'TERM STRUCTURE': 'btc-bottom-signals',
+    'OPEN INTEREST': 'btc-bottom-signals',
+    'LIQUIDATION': 'btc-bottom-signals',
+    'ORDERBOOK SKEW': 'btc-bottom-signals',
+    'VIX SPIKE': 'vix-term-structure',
+    
+    // Options flow
+    'SWEEP': 'trade-ideas',
+    'BLOCK': 'trade-ideas',
+    'DARK_POOL': 'trade-ideas',
+    'UNUSUAL_VOLUME': 'trade-ideas'
+};
+
+// Helper to get KB term ID from a name
+function getKbTermId(name) {
+    if (!name) return null;
+    const normalized = name.toUpperCase().trim();
+    return KB_TERM_MAP[normalized] || null;
+}
+
+// Helper to wrap text with KB link if a mapping exists
+function wrapWithKbLink(text, customTermId = null) {
+    const termId = customTermId || getKbTermId(text);
+    if (termId) {
+        return `<span class="kb-term-dynamic" data-kb-term="${termId}">${text}</span>`;
+    }
+    return text;
 }
 
 async function openKbPopup(termId) {

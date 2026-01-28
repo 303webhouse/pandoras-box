@@ -21,11 +21,6 @@
                 </div>
             </div>
             <div class="header-controls">
-                <!-- Savita Update Reminder (shows when stale) -->
-                <div class="savita-reminder" id="savitaReminder" style="display: none;">
-                    <span class="reminder-icon">📊</span>
-                    <a href="#" id="savitaUpdateLink" class="reminder-link">Update Savita</a>
-                </div>
                 <a href="/knowledgebase" class="kb-btn" title="Knowledgebase">📚 KB</a>
                 <button class="refresh-btn" id="refreshBtn">↻ Refresh</button>
             </div>
@@ -71,6 +66,11 @@
                         <option value="MAJOR_URSA">MAJOR URSA</option>
                     </select>
                 </div>
+                
+                <!-- Savita Update Button -->
+                <button class="savita-update-btn" id="savitaUpdateBtn" title="Update Savita Indicator">
+                    📊 Savita
+                </button>
             </div>
             
             <!-- Override Active Banner -->
@@ -180,7 +180,10 @@
             <div class="positions-panel">
                 <div class="positions-header">
                     <h2>OPEN POSITIONS</h2>
-                    <span class="positions-count" id="positionsCount">0</span>
+                    <div class="positions-header-actions">
+                        <button class="add-position-btn" id="addPositionBtn" title="Add Manual Trade">+</button>
+                        <span class="positions-count" id="positionsCount">0</span>
+                    </div>
                 </div>
                 <div class="positions-container" id="openPositions">
                     <p class="empty-state">No open positions</p>
@@ -638,48 +641,42 @@
                     <div class="factor-toggle" data-factor="index_trends">
                         <label>
                             <input type="checkbox" checked>
-                            <span class="factor-name">Index Trends (SPY/QQQ/IWM/SMH)</span>
-                            <span class="kb-info-icon" data-kb-term="weekly-bias" title="Learn more">ⓘ</span>
+                            <span class="factor-name kb-factor-link" data-kb-term="weekly-bias">Index Trends (SPY/QQQ/IWM/SMH)</span>
                         </label>
                         <span class="factor-vote" data-vote="0">(vote: 0)</span>
                     </div>
                     <div class="factor-toggle" data-factor="dollar_trend">
                         <label>
                             <input type="checkbox" checked>
-                            <span class="factor-name">Dollar Trend (DXY)</span>
-                            <span class="kb-info-icon" data-kb-term="dollar-smile" title="Learn more">ⓘ</span>
+                            <span class="factor-name kb-factor-link" data-kb-term="dollar-smile">Dollar Trend (DXY)</span>
                         </label>
                         <span class="factor-vote" data-vote="0">(vote: 0)</span>
                     </div>
                     <div class="factor-toggle" data-factor="sector_rotation">
                         <label>
                             <input type="checkbox" checked>
-                            <span class="factor-name">Sector Rotation (XLK vs XLU)</span>
-                            <span class="kb-info-icon" data-kb-term="sector-rotation" title="Learn more">ⓘ</span>
+                            <span class="factor-name kb-factor-link" data-kb-term="sector-rotation">Sector Rotation (XLK vs XLU)</span>
                         </label>
                         <span class="factor-vote" data-vote="0">(vote: 0)</span>
                     </div>
                     <div class="factor-toggle" data-factor="credit_spreads">
                         <label>
                             <input type="checkbox" checked>
-                            <span class="factor-name">Credit Spreads (HYG vs TLT)</span>
-                            <span class="kb-info-icon" data-kb-term="credit-spreads" title="Learn more">ⓘ</span>
+                            <span class="factor-name kb-factor-link" data-kb-term="credit-spreads">Credit Spreads (HYG vs TLT)</span>
                         </label>
                         <span class="factor-vote" data-vote="0">(vote: 0)</span>
                     </div>
                     <div class="factor-toggle" data-factor="market_breadth">
                         <label>
                             <input type="checkbox" checked>
-                            <span class="factor-name">Market Breadth (RSP vs SPY)</span>
-                            <span class="kb-info-icon" data-kb-term="market-breadth" title="Learn more">ⓘ</span>
+                            <span class="factor-name kb-factor-link" data-kb-term="market-breadth">Market Breadth (RSP vs SPY)</span>
                         </label>
                         <span class="factor-vote" data-vote="0">(vote: 0)</span>
                     </div>
                     <div class="factor-toggle" data-factor="vix_term_structure">
                         <label>
                             <input type="checkbox" checked>
-                            <span class="factor-name">VIX Term Structure</span>
-                            <span class="kb-info-icon" data-kb-term="vix-term-structure" title="Learn more">ⓘ</span>
+                            <span class="factor-name kb-factor-link" data-kb-term="vix-term-structure">VIX Term Structure</span>
                         </label>
                         <span class="factor-vote" data-vote="0">(vote: 0)</span>
                     </div>
@@ -710,48 +707,42 @@
                     <div class="factor-toggle" data-factor="spy_rsi">
                         <label>
                             <input type="checkbox" checked>
-                            <span class="factor-name">SPY RSI (Momentum)</span>
-                            <span class="kb-info-icon" data-kb-term="rsi" title="Learn more">ⓘ</span>
+                            <span class="factor-name kb-factor-link" data-kb-term="rsi">SPY RSI (Momentum)</span>
                         </label>
                         <span class="factor-vote" data-vote="0">(vote: 0)</span>
                     </div>
                     <div class="factor-toggle" data-factor="vix_level">
                         <label>
                             <input type="checkbox" checked>
-                            <span class="factor-name">VIX Level (Fear)</span>
-                            <span class="kb-info-icon" data-kb-term="vix-term-structure" title="Learn more">ⓘ</span>
+                            <span class="factor-name kb-factor-link" data-kb-term="vix-term-structure">VIX Level (Fear)</span>
                         </label>
                         <span class="factor-vote" data-vote="0">(vote: 0)</span>
                     </div>
                     <div class="factor-toggle" data-factor="tech_leadership">
                         <label>
                             <input type="checkbox" checked>
-                            <span class="factor-name">Tech Leadership (QQQ vs SPY)</span>
-                            <span class="kb-info-icon" data-kb-term="daily-bias" title="Learn more">ⓘ</span>
+                            <span class="factor-name kb-factor-link" data-kb-term="daily-bias">Tech Leadership (QQQ vs SPY)</span>
                         </label>
                         <span class="factor-vote" data-vote="0">(vote: 0)</span>
                     </div>
                     <div class="factor-toggle" data-factor="small_cap_risk">
                         <label>
                             <input type="checkbox" checked>
-                            <span class="factor-name">Small Cap Risk (IWM vs SPY)</span>
-                            <span class="kb-info-icon" data-kb-term="daily-bias" title="Learn more">ⓘ</span>
+                            <span class="factor-name kb-factor-link" data-kb-term="daily-bias">Small Cap Risk (IWM vs SPY)</span>
                         </label>
                         <span class="factor-vote" data-vote="0">(vote: 0)</span>
                     </div>
                     <div class="factor-toggle" data-factor="spy_trend">
                         <label>
                             <input type="checkbox" checked>
-                            <span class="factor-name">SPY Trend</span>
-                            <span class="kb-info-icon" data-kb-term="daily-bias" title="Learn more">ⓘ</span>
+                            <span class="factor-name kb-factor-link" data-kb-term="daily-bias">SPY Trend</span>
                         </label>
                         <span class="factor-vote" data-vote="0">(vote: 0)</span>
                     </div>
                     <div class="factor-toggle" data-factor="market_breadth">
                         <label>
                             <input type="checkbox" checked>
-                            <span class="factor-name">Market Breadth (RSP vs SPY)</span>
-                            <span class="kb-info-icon" data-kb-term="market-breadth" title="Learn more">ⓘ</span>
+                            <span class="factor-name kb-factor-link" data-kb-term="market-breadth">Market Breadth (RSP vs SPY)</span>
                         </label>
                         <span class="factor-vote" data-vote="0">(vote: 0)</span>
                     </div>
@@ -782,56 +773,49 @@
                     <div class="factor-toggle" data-factor="sma_200_positions">
                         <label>
                             <input type="checkbox" checked>
-                            <span class="factor-name">200 SMA Positions</span>
-                            <span class="kb-info-icon" data-kb-term="cyclical-bias" title="Learn more">ⓘ</span>
+                            <span class="factor-name kb-factor-link" data-kb-term="cyclical-bias">200 SMA Positions</span>
                         </label>
                         <span class="factor-vote" data-vote="0">(vote: 0)</span>
                     </div>
                     <div class="factor-toggle" data-factor="yield_curve">
                         <label>
                             <input type="checkbox" checked>
-                            <span class="factor-name">Yield Curve</span>
-                            <span class="kb-info-icon" data-kb-term="cyclical-bias" title="Learn more">ⓘ</span>
+                            <span class="factor-name kb-factor-link" data-kb-term="cyclical-bias">Yield Curve</span>
                         </label>
                         <span class="factor-vote" data-vote="0">(vote: 0)</span>
                     </div>
                     <div class="factor-toggle" data-factor="credit_spreads">
                         <label>
                             <input type="checkbox" checked>
-                            <span class="factor-name">Credit Spreads</span>
-                            <span class="kb-info-icon" data-kb-term="credit-spreads" title="Learn more">ⓘ</span>
+                            <span class="factor-name kb-factor-link" data-kb-term="credit-spreads">Credit Spreads</span>
                         </label>
                         <span class="factor-vote" data-vote="0">(vote: 0)</span>
                     </div>
                     <div class="factor-toggle" data-factor="excess_cape_yield">
                         <label>
                             <input type="checkbox" checked>
-                            <span class="factor-name">Excess CAPE Yield</span>
-                            <span class="kb-info-icon" data-kb-term="excess-cape-yield" title="Learn more">ⓘ</span>
+                            <span class="factor-name kb-factor-link" data-kb-term="excess-cape-yield">Excess CAPE Yield</span>
                         </label>
                         <span class="factor-vote" data-vote="0">(vote: 0)</span>
                     </div>
                     <div class="factor-toggle" data-factor="savita_indicator" style="opacity: 0.6;">
                         <label>
                             <input type="checkbox" checked>
-                            <span class="factor-name">Savita (Optional)</span>
-                            <span class="kb-info-icon" data-kb-term="savita-indicator" title="Learn more">ⓘ</span>
+                            <span class="factor-name kb-factor-link" data-kb-term="savita-indicator">Savita (Optional)</span>
                         </label>
                         <span class="factor-vote" data-vote="0">(vote: 0)</span>
                     </div>
                     <div class="factor-toggle" data-factor="longterm_breadth">
                         <label>
                             <input type="checkbox" checked>
-                            <span class="factor-name">Long-term Breadth</span>
-                            <span class="kb-info-icon" data-kb-term="market-breadth" title="Learn more">ⓘ</span>
+                            <span class="factor-name kb-factor-link" data-kb-term="market-breadth">Long-term Breadth</span>
                         </label>
                         <span class="factor-vote" data-vote="0">(vote: 0)</span>
                     </div>
                     <div class="factor-toggle" data-factor="sahm_rule">
                         <label>
                             <input type="checkbox" checked>
-                            <span class="factor-name">Sahm Rule</span>
-                            <span class="kb-info-icon" data-kb-term="cyclical-bias" title="Learn more">ⓘ</span>
+                            <span class="factor-name kb-factor-link" data-kb-term="cyclical-bias">Sahm Rule</span>
                         </label>
                         <span class="factor-vote" data-vote="0">(vote: 0)</span>
                     </div>
@@ -879,6 +863,61 @@
             <div class="savita-modal-footer">
                 <button class="savita-btn cancel" id="cancelSavitaUpdate">Cancel</button>
                 <button class="savita-btn submit" id="submitSavitaUpdate">Update</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Manual Position Entry Modal -->
+    <div class="modal-overlay" id="manualPositionModal">
+        <div class="modal-content manual-position-modal">
+            <div class="modal-header">
+                <h3>Add Manual Position</h3>
+                <button class="modal-close" id="closeManualPositionBtn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Ticker</label>
+                        <input type="text" id="manualTicker" placeholder="AAPL" maxlength="10">
+                    </div>
+                    <div class="form-group">
+                        <label>Direction</label>
+                        <select id="manualDirection">
+                            <option value="LONG">LONG</option>
+                            <option value="SHORT">SHORT</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Entry Price</label>
+                        <input type="number" id="manualEntryPrice" step="0.01" placeholder="0.00">
+                    </div>
+                    <div class="form-group">
+                        <label>Quantity</label>
+                        <input type="number" id="manualQuantity" step="1" placeholder="100">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Stop Loss</label>
+                        <input type="number" id="manualStopLoss" step="0.01" placeholder="0.00">
+                    </div>
+                    <div class="form-group">
+                        <label>Target</label>
+                        <input type="number" id="manualTarget" step="0.01" placeholder="0.00">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group full-width">
+                        <label>Strategy / Notes</label>
+                        <input type="text" id="manualNotes" placeholder="Manual entry, swing trade, etc.">
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-cancel" id="cancelManualPositionBtn">Cancel</button>
+                <button class="btn-confirm" id="confirmManualPositionBtn">Add Position</button>
             </div>
         </div>
     </div>

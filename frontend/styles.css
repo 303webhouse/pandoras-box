@@ -391,6 +391,37 @@ body.override-active-bearish .override-toggle[data-active="true"] {
     color: var(--accent-orange);
 }
 
+/* Savita Update Button (in bias section) */
+.savita-update-btn {
+    background: var(--accent-teal);
+    color: var(--dark-bg);
+    border: none;
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+    margin-left: 12px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.savita-update-btn:hover {
+    background: var(--accent-lime);
+    transform: scale(1.05);
+}
+
+.savita-update-btn.stale {
+    animation: savitaPulse 2s ease-in-out infinite;
+}
+
+@keyframes savitaPulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(20, 184, 166, 0.4); }
+    50% { box-shadow: 0 0 0 8px rgba(20, 184, 166, 0); }
+}
+
 /* Override Active State - Visual Indicator */
 .bias-section.override-active .bias-card {
     opacity: 0.6;
@@ -1140,6 +1171,33 @@ body.override-active-bearish .override-toggle[data-active="true"] {
     margin: 0;
 }
 
+.positions-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.add-position-btn {
+    background: var(--accent-teal);
+    color: var(--dark-bg);
+    border: none;
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    font-size: 20px;
+    font-weight: 700;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+}
+
+.add-position-btn:hover {
+    background: var(--accent-lime);
+    transform: scale(1.1);
+}
+
 .positions-count {
     background: var(--accent-lime);
     color: var(--dark-bg);
@@ -1147,6 +1205,58 @@ body.override-active-bearish .override-toggle[data-active="true"] {
     border-radius: 12px;
     font-size: 12px;
     font-weight: 700;
+}
+
+/* Manual Position Modal */
+.manual-position-modal {
+    width: 450px;
+    max-width: 95%;
+}
+
+.manual-position-modal .form-row {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 16px;
+}
+
+.manual-position-modal .form-group {
+    flex: 1;
+}
+
+.manual-position-modal .form-group.full-width {
+    flex: 100%;
+}
+
+.manual-position-modal label {
+    display: block;
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-bottom: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.manual-position-modal input,
+.manual-position-modal select {
+    width: 100%;
+    padding: 10px 12px;
+    background: var(--dark-bg);
+    border: 2px solid var(--border-color);
+    border-radius: 8px;
+    color: var(--text-primary);
+    font-size: 14px;
+    transition: border-color 0.2s;
+}
+
+.manual-position-modal input:focus,
+.manual-position-modal select:focus {
+    outline: none;
+    border-color: var(--accent-teal);
+}
+
+.manual-position-modal input::placeholder {
+    color: var(--text-secondary);
+    opacity: 0.6;
 }
 
 .positions-container {
@@ -4768,6 +4878,37 @@ body.override-active-bearish .override-toggle[data-active="true"] {
     opacity: 1;
     color: var(--accent-lime);
     transform: scale(1.2);
+}
+
+/* KB Factor Link (clickable factor names in settings) */
+.kb-factor-link {
+    cursor: pointer;
+    transition: color 0.2s;
+    position: relative;
+}
+
+.kb-factor-link:hover {
+    color: var(--accent-teal) !important;
+}
+
+.kb-factor-link::after {
+    content: 'ⓘ';
+    font-size: 10px;
+    margin-left: 6px;
+    opacity: 0.5;
+    color: var(--accent-teal);
+    transition: opacity 0.2s;
+}
+
+.kb-factor-link:hover::after {
+    opacity: 1;
+}
+
+/* Prevent checkbox toggle when clicking factor name */
+.factor-toggle label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
 }
 
 /* KB Link (clickable text) */
