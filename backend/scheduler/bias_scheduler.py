@@ -2656,9 +2656,9 @@ async def trigger_hunter_scan_now():
 
 # Top crypto tickers to scan
 CRYPTO_TICKERS = [
-    'BTCUSD', 'ETHUSD', 'SOLUSD', 'XRPUSD', 'ADAUSD', 
-    'AVAXUSD', 'DOGEUSD', 'DOTUSD', 'LINKUSD', 'MATICUSD',
-    'LTCUSD', 'UNIUSD', 'ATOMUSD', 'NEARUSD', 'APTUSD'
+    'BTC-USD', 'ETH-USD', 'SOL-USD', 'XRP-USD', 'ADA-USD', 
+    'AVAX-USD', 'DOGE-USD', 'DOT-USD', 'LINK-USD', 'MATIC-USD',
+    'LTC-USD', 'UNI-USD', 'ATOM-USD', 'NEAR-USD', 'APT-USD'
 ]
 
 async def run_crypto_scan_scheduled():
