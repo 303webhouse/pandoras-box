@@ -83,6 +83,51 @@ RECENCY_CONFIG = {
     "max_bonus": 15             # Maximum recency bonus points
 }
 
+# Sector priority bonuses
+SECTOR_PRIORITY_BONUS = {
+    "leading_aligned": 8,       # Signal in leading sector, aligned with bullish bias
+    "lagging_counter": 8,       # Signal in lagging sector, aligned with bearish bias (short)
+    "neutral_sector": 0,        # Neutral sector, no bonus
+    "misaligned_sector": -5     # Signal against sector trend (e.g., long in lagging during bull)
+}
+
+# Ticker to sector mapping (common tickers)
+TICKER_SECTORS = {
+    # Technology
+    "AAPL": "Technology", "MSFT": "Technology", "NVDA": "Technology", 
+    "GOOGL": "Technology", "GOOG": "Technology", "META": "Technology",
+    "AMD": "Technology", "INTC": "Technology", "CRM": "Technology",
+    "ORCL": "Technology", "ADBE": "Technology", "NOW": "Technology",
+    # Consumer Discretionary
+    "AMZN": "Consumer Discretionary", "TSLA": "Consumer Discretionary",
+    "HD": "Consumer Discretionary", "NKE": "Consumer Discretionary",
+    "SBUX": "Consumer Discretionary", "MCD": "Consumer Discretionary",
+    "NFLX": "Consumer Discretionary",
+    # Healthcare
+    "UNH": "Healthcare", "JNJ": "Healthcare", "PFE": "Healthcare",
+    "ABBV": "Healthcare", "MRK": "Healthcare", "LLY": "Healthcare",
+    # Financials
+    "JPM": "Financials", "BAC": "Financials", "GS": "Financials",
+    "MS": "Financials", "WFC": "Financials", "C": "Financials",
+    # Energy
+    "XOM": "Energy", "CVX": "Energy", "COP": "Energy", "SLB": "Energy",
+    # Industrials
+    "CAT": "Industrials", "BA": "Industrials", "UPS": "Industrials",
+    "HON": "Industrials", "GE": "Industrials", "RTX": "Industrials",
+    # Consumer Staples
+    "PG": "Consumer Staples", "KO": "Consumer Staples", "PEP": "Consumer Staples",
+    "WMT": "Consumer Staples", "COST": "Consumer Staples",
+    # Utilities
+    "NEE": "Utilities", "DUK": "Utilities", "SO": "Utilities",
+    # Materials
+    "LIN": "Materials", "APD": "Materials", "SHW": "Materials",
+    # Real Estate
+    "PLD": "Real Estate", "AMT": "Real Estate", "SPG": "Real Estate",
+    # Communication Services
+    "DIS": "Communication Services", "CMCSA": "Communication Services",
+    "VZ": "Communication Services", "T": "Communication Services"
+}
+
 
 # =========================================================================
 # SCORING FUNCTIONS
@@ -90,7 +135,8 @@ RECENCY_CONFIG = {
 
 def calculate_signal_score(
     signal: Dict[str, Any],
-    current_bias: Dict[str, Any]
+    current_bias: Dict[str, Any],
+    sector_strength: Dict[str, Any] = None
 ) -> Tuple[float, str, Dict[str, Any]]:
     """
     Calculate composite score for a trade signal.
@@ -98,6 +144,7 @@ def calculate_signal_score(
     Args:
         signal: Signal data dict with strategy, direction, ticker, etc.
         current_bias: Current bias state with daily, weekly, cyclical levels
+        sector_strength: Optional sector strength data for priority scoring
     
     Returns:
         Tuple of (score, bias_alignment, triggering_factors)
@@ -187,8 +234,39 @@ def calculate_signal_score(
             rr_bonus = 5
         triggering_factors["risk_reward"] = {"value": rr, "bonus": rr_bonus}
     
+    # 6. Sector priority bonus
+    sector_bonus = 0
+    ticker = signal.get('ticker', '').upper()
+    sector = TICKER_SECTORS.get(ticker)
+    
+    if sector and sector_strength:
+        sector_data = sector_strength.get(sector, {})
+        sector_trend = sector_data.get("trend", "neutral")
+        
+        # Determine if sector alignment helps or hurts
+        is_bullish_signal = direction in ["LONG", "BUY"]
+        is_bearish_signal = direction in ["SHORT", "SELL"]
+        
+        if sector_trend == "leading":
+            if is_bullish_signal:
+                sector_bonus = SECTOR_PRIORITY_BONUS["leading_aligned"]
+            else:
+                sector_bonus = SECTOR_PRIORITY_BONUS["misaligned_sector"]
+        elif sector_trend == "lagging":
+            if is_bearish_signal:
+                sector_bonus = SECTOR_PRIORITY_BONUS["lagging_counter"]
+            else:
+                sector_bonus = SECTOR_PRIORITY_BONUS["misaligned_sector"]
+        
+        triggering_factors["sector_priority"] = {
+            "sector": sector,
+            "trend": sector_trend,
+            "bonus": sector_bonus,
+            "rank": sector_data.get("rank")
+        }
+    
     # Calculate final score
-    raw_score = base_score + tech_bonus + recency_bonus + rr_bonus
+    raw_score = base_score + tech_bonus + recency_bonus + rr_bonus + sector_bonus
     final_score = raw_score * alignment_multiplier
     
     # Cap at 100
@@ -199,6 +277,7 @@ def calculate_signal_score(
         "technical_bonus": tech_bonus,
         "recency_bonus": recency_bonus,
         "rr_bonus": rr_bonus,
+        "sector_bonus": sector_bonus,
         "raw_score": raw_score,
         "alignment_multiplier": alignment_multiplier,
         "final_score": round(final_score, 2)
@@ -338,14 +417,15 @@ def calculate_recency_bonus(timestamp) -> int:
         return 0
 
 
-def score_signal_batch(signals: list, current_bias: Dict[str, Any]) -> list:
+def score_signal_batch(signals: list, current_bias: Dict[str, Any], sector_strength: Dict[str, Any] = None) -> list:
     """
     Score a batch of signals and return sorted by score descending.
+    Optionally includes sector priority based on sector_strength data.
     """
     scored_signals = []
     
     for signal in signals:
-        score, alignment, factors = calculate_signal_score(signal, current_bias)
+        score, alignment, factors = calculate_signal_score(signal, current_bias, sector_strength)
         
         signal_copy = signal.copy()
         signal_copy['score'] = score
