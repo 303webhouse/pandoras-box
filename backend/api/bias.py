@@ -148,6 +148,68 @@ async def get_savita_configuration():
 
 
 # ====================
+# TICK RANGE BREADTH
+# ====================
+
+@router.get("/bias/tick")
+async def get_tick_bias():
+    """
+    Get current TICK Range Breadth indicator status
+    
+    TICK data comes from TradingView webhook to /webhook/tick
+    
+    Returns:
+        - tick_high: Daily TICK high
+        - tick_low: Daily TICK low  
+        - daily_bias: TORO/URSA based on today's range
+        - weekly_bias: TORO/URSA based on last 5 days
+        - history: Recent TICK values
+    """
+    try:
+        from bias_filters.tick_breadth import get_tick_status
+        return await get_tick_status()
+    except Exception as e:
+        logger.error(f"Error getting TICK status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/bias/tick/alignment/{direction}")
+async def check_tick_alignment(direction: str, timeframe: str = "DAILY"):
+    """
+    Check if a trade direction aligns with TICK bias
+    
+    Args:
+        direction: LONG or SHORT
+        timeframe: DAILY or WEEKLY
+    
+    Returns:
+        - bias: Current TICK bias
+        - aligned: Whether direction aligns
+    """
+    try:
+        from bias_filters.tick_breadth import check_bias_alignment
+        
+        direction = direction.upper()
+        if direction not in ["LONG", "SHORT"]:
+            raise HTTPException(status_code=400, detail="Direction must be LONG or SHORT")
+        
+        bias, aligned = await check_bias_alignment(direction, timeframe)
+        
+        return {
+            "direction": direction,
+            "timeframe": timeframe,
+            "tick_bias": bias,
+            "aligned": aligned,
+            "recommendation": "PROCEED" if aligned else "CAUTION"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error checking TICK alignment: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ====================
 # ALL BIAS SUMMARY
 # ====================
 
