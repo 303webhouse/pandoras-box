@@ -3952,7 +3952,98 @@ body.override-active-bearish .override-toggle[data-active="true"] {
     color: var(--accent-teal);
 }
 
+.btc-signal-value-display {
+    margin: 8px 0;
+    padding: 8px;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 6px;
+}
+
+.signal-value-main {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--accent-teal);
+}
+
+.btc-signal-card.FIRING .signal-value-main {
+    color: var(--accent-lime);
+}
+
+.btc-signal-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border-color);
+    font-size: 10px;
+}
+
 .btc-signal-source {
+    text-transform: uppercase;
+    font-weight: 600;
+}
+
+.btc-signal-source.auto {
+    color: var(--accent-teal);
+}
+
+.btc-signal-source.manual {
+    color: #60A5FA;
+}
+
+.btc-signal-timestamp {
+    color: var(--text-secondary);
+}
+
+.manual-override-badge {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    font-size: 8px;
+    font-weight: 700;
+    padding: 2px 6px;
+    background: #60A5FA;
+    color: var(--dark-bg);
+    border-radius: 4px;
+    text-transform: uppercase;
+}
+
+.btc-signal-card {
+    position: relative;
+}
+
+/* API Status Indicators */
+.btc-api-status {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 12px;
+    padding: 8px;
+    background: var(--dark-bg);
+    border-radius: 8px;
+}
+
+.api-status-item {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 4px 8px;
+    border-radius: 4px;
+    text-transform: uppercase;
+}
+
+.api-status-item.connected {
+    background: rgba(124, 255, 107, 0.15);
+    color: var(--accent-lime);
+}
+
+.api-status-item.disconnected {
+    background: rgba(255, 107, 107, 0.15);
+    color: var(--accent-orange);
+}
+
+/* Old source styling (kept for compatibility) */
+.btc-signal-source-old {
     font-size: 9px;
     color: var(--text-secondary);
     text-transform: uppercase;

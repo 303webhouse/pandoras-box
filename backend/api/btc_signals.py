@@ -1,6 +1,13 @@
 """
 BTC Bottom Signals API Endpoints
 Dashboard for tracking derivative bottom signals
+
+ALL 9 SIGNALS AUTOMATED via:
+- Coinalyze (funding, OI, liquidations, term structure)
+- Deribit (25-delta skew)
+- DeFiLlama (stablecoin APRs)
+- Binance (orderbook, quarterly basis)
+- yfinance (VIX)
 """
 
 from fastapi import APIRouter, HTTPException
@@ -17,7 +24,9 @@ from bias_filters.btc_bottom_signals import (
     get_all_signals,
     get_signal,
     update_signal_manual,
+    clear_manual_override,
     reset_all_signals,
+    update_all_signals,
     get_signal_ids,
     get_btc_sessions,
     get_current_session
@@ -36,13 +45,42 @@ async def get_bottom_signals_dashboard():
     """
     Get the full BTC bottom signals dashboard
     
-    Returns all 8+ signals with their current status,
-    firing count, and overall verdict.
+    Returns all 9 signals with their current status,
+    raw data from APIs, firing count, and overall verdict.
+    
+    Signals are auto-fetched from:
+    - Coinalyze (funding, OI, liquidations, term structure)
+    - Deribit (25-delta skew)
+    - DeFiLlama (stablecoin APRs)
+    - Binance (orderbook, quarterly basis)
+    - yfinance (VIX)
     """
     try:
         return await get_all_signals()
     except Exception as e:
         logger.error(f"Error getting bottom signals: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/bottom-signals/refresh")
+async def refresh_all_signals():
+    """
+    Force refresh ALL signals from their respective APIs
+    
+    This bypasses the cache and fetches fresh data from:
+    - Coinalyze, Deribit, DeFiLlama, Binance, yfinance
+    
+    Rate limits apply - don't call more than once per minute.
+    """
+    try:
+        result = await update_all_signals()
+        return {
+            "status": "success",
+            "message": f"Refreshed all signals: {result['confluence']['firing']}/{result['confluence']['total']} firing",
+            **result
+        }
+    except Exception as e:
+        logger.error(f"Error refreshing signals: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -82,12 +120,32 @@ async def update_signal(signal_id: str, update: ManualSignalUpdate):
 
 @router.post("/bottom-signals/reset")
 async def reset_signals():
-    """Reset all manual signals to UNKNOWN status"""
+    """Reset all signals to UNKNOWN status and clear manual overrides"""
     try:
         await reset_all_signals()
-        return {"status": "success", "message": "All manual signals reset"}
+        return {"status": "success", "message": "All signals reset to UNKNOWN"}
     except Exception as e:
         logger.error(f"Error resetting signals: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/bottom-signals/{signal_id}/clear-override")
+async def clear_signal_override(signal_id: str):
+    """
+    Clear manual override for a signal and return to auto-fetching
+    
+    Use this when you want the signal to be automatically updated
+    by the API instead of using a manual value.
+    """
+    try:
+        result = await clear_manual_override(signal_id)
+        return {
+            "status": "success",
+            "message": f"Manual override cleared for {signal_id}",
+            "signals": result
+        }
+    except Exception as e:
+        logger.error(f"Error clearing override for {signal_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
