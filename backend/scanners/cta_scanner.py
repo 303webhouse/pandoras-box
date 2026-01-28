@@ -526,7 +526,199 @@ def check_zone_upgrade(df: pd.DataFrame, ticker: str) -> Optional[Dict]:
     return None
 
 
-async def scan_ticker_cta(ticker: str) -> List[Dict]:
+# ============================================================================
+# SHORT SIGNAL DETECTION (for lagging sectors / bearish setups)
+# ============================================================================
+
+def check_bearish_breakdown(df: pd.DataFrame, ticker: str) -> Optional[Dict]:
+    """
+    Check for bearish breakdown below 50 SMA with volume
+    
+    Criteria:
+    - Two consecutive closes below 50 SMA (after being above)
+    - Volume > 1.2x average (selling pressure)
+    - 20 SMA trending down (downtrend confirmed)
+    """
+    if len(df) < 3:
+        return None
+    
+    latest = df.iloc[-1]
+    prev1 = df.iloc[-2]
+    prev2 = df.iloc[-3]
+    
+    # Two consecutive closes below 50, after being above
+    two_close_below_50 = (
+        latest['Close'] < latest['sma50'] and 
+        prev1['Close'] < prev1['sma50'] and 
+        prev2['Close'] >= prev2['sma50']
+    )
+    
+    if not two_close_below_50:
+        return None
+    
+    # Volume confirmation
+    vol_threshold = CTA_CONFIG["volume"]["breakout_threshold"]
+    high_volume = latest['vol_ratio'] >= vol_threshold
+    
+    # 20 SMA trending down
+    sma20_down = latest['sma20'] < prev1['sma20']
+    
+    if high_volume and sma20_down:
+        price = latest['Close']
+        sma50 = latest['sma50']
+        atr = latest['atr']
+        
+        entry = price
+        stop = sma50 + (atr * CTA_CONFIG["risk"]["stop_atr_multiplier"])
+        risk = stop - entry
+        target = entry - (risk * CTA_CONFIG["risk"]["default_rr_ratio"])
+        
+        return {
+            "signal_id": str(uuid.uuid4()),
+            "timestamp": datetime.now().isoformat(),
+            "symbol": ticker,
+            "signal_type": "BEARISH_BREAKDOWN",
+            "direction": "SHORT",
+            "priority": 75,
+            "description": f"Bearish breakdown below 50 SMA with {latest['vol_ratio']:.0f}% volume.",
+            "setup": {
+                "entry": round(entry, 2),
+                "stop": round(stop, 2),
+                "target": round(target, 2),
+                "risk": round(risk, 2),
+                "reward": round(entry - target, 2),
+                "rr_ratio": round((entry - target) / risk, 1),
+            },
+            "context": {
+                "cta_zone": latest['cta_zone'],
+                "sma20": round(latest['sma20'], 2),
+                "sma50": round(sma50, 2),
+                "sma120": round(latest['sma120'], 2),
+                "volume_ratio": round(latest['vol_ratio'], 2),
+            },
+            "confidence": "HIGH",
+            "notes": "Bearish breakdown confirmed. Best for lagging sectors."
+        }
+    
+    return None
+
+
+def check_death_cross(df: pd.DataFrame, ticker: str) -> Optional[Dict]:
+    """
+    Check for Death Cross (50 SMA crosses below 200 SMA)
+    
+    Strong bearish signal - trend is broken
+    """
+    if len(df) < 2:
+        return None
+    
+    latest = df.iloc[-1]
+    prev = df.iloc[-2]
+    
+    if pd.isna(latest['sma50']) or pd.isna(latest['sma200']):
+        return None
+    
+    # Death cross just happened
+    death_cross = (latest['sma50'] < latest['sma200'] and 
+                  prev['sma50'] >= prev['sma200'])
+    
+    if death_cross:
+        price = latest['Close']
+        atr = latest['atr']
+        sma50 = latest['sma50']
+        
+        entry = price
+        stop = sma50 + (atr * 2)  # Wider stop for trend change
+        risk = stop - entry
+        target = entry - (risk * 2.5)  # Higher R:R for major trend shift
+        
+        return {
+            "signal_id": str(uuid.uuid4()),
+            "timestamp": datetime.now().isoformat(),
+            "symbol": ticker,
+            "signal_type": "DEATH_CROSS",
+            "direction": "SHORT",
+            "priority": 90,
+            "description": f"Death Cross: 50 SMA crossed below 200 SMA. Major trend reversal.",
+            "setup": {
+                "entry": round(entry, 2),
+                "stop": round(stop, 2),
+                "target": round(target, 2),
+                "risk": round(risk, 2),
+                "reward": round(entry - target, 2),
+                "rr_ratio": round((entry - target) / risk, 1),
+            },
+            "context": {
+                "cta_zone": latest['cta_zone'],
+                "sma50": round(sma50, 2),
+                "sma200": round(latest['sma200'], 2),
+            },
+            "confidence": "HIGH",
+            "notes": "Major bearish trend change. Long-term downtrend likely."
+        }
+    
+    return None
+
+
+def check_resistance_rejection(df: pd.DataFrame, ticker: str) -> Optional[Dict]:
+    """
+    Check for rejection at 50 or 120 SMA resistance
+    
+    Criteria:
+    - Price rallied to 50 or 120 SMA
+    - Failed to break above (rejection candle)
+    - Now heading lower
+    """
+    if len(df) < 3:
+        return None
+    
+    latest = df.iloc[-1]
+    prev = df.iloc[-2]
+    
+    # Check if price tested 50 SMA and got rejected
+    tested_50 = prev['High'] >= prev['sma50'] * 0.99  # Got within 1%
+    rejected = latest['Close'] < prev['Close']  # Now heading down
+    below_50 = latest['Close'] < latest['sma50']
+    
+    if tested_50 and rejected and below_50:
+        price = latest['Close']
+        sma50 = latest['sma50']
+        atr = latest['atr']
+        
+        entry = price
+        stop = sma50 + (atr * 1.5)
+        risk = stop - entry
+        target = entry - (risk * 2.0)
+        
+        return {
+            "signal_id": str(uuid.uuid4()),
+            "timestamp": datetime.now().isoformat(),
+            "symbol": ticker,
+            "signal_type": "RESISTANCE_REJECTION",
+            "direction": "SHORT",
+            "priority": 65,
+            "description": f"Rejected at 50 SMA resistance. Heading lower.",
+            "setup": {
+                "entry": round(entry, 2),
+                "stop": round(stop, 2),
+                "target": round(target, 2),
+                "risk": round(risk, 2),
+                "reward": round(entry - target, 2),
+                "rr_ratio": round((entry - target) / risk, 1),
+            },
+            "context": {
+                "cta_zone": latest['cta_zone'],
+                "sma50": round(sma50, 2),
+                "resistance_level": round(prev['High'], 2),
+            },
+            "confidence": "MEDIUM",
+            "notes": "Failed breakout. Good for continuation shorts in weak sectors."
+        }
+    
+    return None
+
+
+async def scan_ticker_cta(ticker: str, allow_shorts: bool = False) -> List[Dict]:
     """Scan a single ticker for all CTA signals"""
     if not CTA_SCANNER_AVAILABLE:
         return []
@@ -545,7 +737,7 @@ async def scan_ticker_cta(ticker: str) -> List[Dict]:
         # Calculate indicators
         df = calculate_cta_indicators(df)
         
-        # Check for each signal type (priority order)
+        # LONG signals (always check)
         golden = check_golden_touch(df, ticker)
         if golden:
             signals.append(golden)
@@ -561,6 +753,20 @@ async def scan_ticker_cta(ticker: str) -> List[Dict]:
         zone_up = check_zone_upgrade(df, ticker)
         if zone_up:
             signals.append(zone_up)
+        
+        # SHORT signals (only if enabled)
+        if allow_shorts:
+            death_cross = check_death_cross(df, ticker)
+            if death_cross:
+                signals.append(death_cross)
+            
+            bearish_breakdown = check_bearish_breakdown(df, ticker)
+            if bearish_breakdown:
+                signals.append(bearish_breakdown)
+            
+            resistance_rejection = check_resistance_rejection(df, ticker)
+            if resistance_rejection:
+                signals.append(resistance_rejection)
         
     except Exception as e:
         logger.error(f"Error in CTA scan for {ticker}: {e}")
