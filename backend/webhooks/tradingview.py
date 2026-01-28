@@ -421,6 +421,54 @@ async def apply_signal_scoring(signal_data: dict) -> dict:
         return signal_data
 
 
+class TickDataPayload(BaseModel):
+    """Payload for TICK range data from TradingView"""
+    tick_high: int  # Daily TICK high (e.g., +1200)
+    tick_low: int   # Daily TICK low (e.g., -800)
+    date: Optional[str] = None  # Optional date (YYYY-MM-DD), defaults to today
+
+
+@router.post("/tick")
+async def receive_tick_data(payload: TickDataPayload):
+    """
+    Receive NYSE TICK data from TradingView webhook
+    
+    TradingView Alert Setup:
+    - Symbol: $TICK (NYSE TICK index)
+    - Condition: Once per day at market close (4:00 PM ET)
+    - Webhook URL: https://your-app.railway.app/webhook/tick
+    - Message (JSON):
+      {
+        "tick_high": {{high}},
+        "tick_low": {{low}}
+      }
+    
+    Alternative manual Pine Script:
+      //@version=5
+      indicator("TICK Reporter")
+      if barstate.islast and session.ismarket
+          alert('{"tick_high":' + str.tostring(ta.highest(high, 1)) + ',"tick_low":' + str.tostring(ta.lowest(low, 1)) + '}', alert.freq_once_per_bar_close)
+    """
+    from bias_filters.tick_breadth import store_tick_data
+    
+    logger.info(f"TICK webhook received: high={payload.tick_high}, low={payload.tick_low}")
+    
+    result = await store_tick_data(
+        tick_high=payload.tick_high,
+        tick_low=payload.tick_low,
+        date=payload.date
+    )
+    
+    return result
+
+
+@router.get("/tick/status")
+async def get_tick_status_endpoint():
+    """Get current TICK data and bias status"""
+    from bias_filters.tick_breadth import get_tick_status
+    return await get_tick_status()
+
+
 @router.post("/test")
 async def test_webhook(request: Request):
     """Test endpoint to verify webhook is working"""

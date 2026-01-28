@@ -1,43 +1,196 @@
 """
 TICK Range Breadth Model Bias Filter
-Checks if signal aligns with current market bias
+Based on Linda Raschke's method using NYSE TICK ($TICK) data
+
+Data comes from TradingView webhook alerts.
 Target: <5ms execution time
 """
 
-from typing import Tuple
-from database.redis_client import get_bias
+import json
+import logging
+from typing import Tuple, Dict, Any, Optional, List
+from datetime import datetime, timezone, timedelta
 
-async def check_bias_alignment(direction: str, timeframe: str) -> Tuple[str, bool]:
+logger = logging.getLogger(__name__)
+
+# Redis keys for TICK data
+REDIS_KEY_TICK_CURRENT = "tick:current"
+REDIS_KEY_TICK_HISTORY = "tick:history"
+REDIS_TTL_SECONDS = 86400 * 7  # 7 days
+
+
+async def store_tick_data(tick_high: int, tick_low: int, date: Optional[str] = None) -> Dict[str, Any]:
     """
-    Check if signal direction aligns with current bias
+    Store TICK high/low data from TradingView webhook
+    
+    Args:
+        tick_high: Daily TICK high value (typically +500 to +1500)
+        tick_low: Daily TICK low value (typically -500 to -1500)
+        date: Optional date string (defaults to today)
+    
+    Returns:
+        Dict with stored data and calculated bias
+    """
+    try:
+        from database.redis_client import get_redis_client
+        
+        redis = await get_redis_client()
+        if not redis:
+            return {"error": "Redis not available"}
+        
+        # Use provided date or today
+        if date:
+            data_date = date
+        else:
+            data_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        
+        # Calculate daily bias
+        daily_bias = await calculate_daily_bias(tick_high, tick_low)
+        
+        # Store current TICK data
+        current_data = {
+            "tick_high": tick_high,
+            "tick_low": tick_low,
+            "date": data_date,
+            "daily_bias": daily_bias,
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }
+        
+        await redis.setex(
+            REDIS_KEY_TICK_CURRENT,
+            REDIS_TTL_SECONDS,
+            json.dumps(current_data)
+        )
+        
+        # Add to history (keep last 10 days)
+        history_raw = await redis.get(REDIS_KEY_TICK_HISTORY)
+        history = json.loads(history_raw) if history_raw else []
+        
+        # Remove existing entry for same date
+        history = [h for h in history if h.get("date") != data_date]
+        
+        # Add new entry
+        history.append({
+            "tick_high": tick_high,
+            "tick_low": tick_low,
+            "date": data_date
+        })
+        
+        # Keep only last 10 days
+        history = sorted(history, key=lambda x: x["date"])[-10:]
+        
+        await redis.setex(
+            REDIS_KEY_TICK_HISTORY,
+            REDIS_TTL_SECONDS,
+            json.dumps(history)
+        )
+        
+        # Calculate weekly bias if we have enough history
+        weekly_bias = await calculate_weekly_bias(history)
+        
+        logger.info(f"TICK data stored: high={tick_high}, low={tick_low}, daily={daily_bias}, weekly={weekly_bias}")
+        
+        return {
+            "status": "success",
+            "tick_high": tick_high,
+            "tick_low": tick_low,
+            "date": data_date,
+            "daily_bias": daily_bias,
+            "weekly_bias": weekly_bias,
+            "history_days": len(history)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error storing TICK data: {e}")
+        return {"error": str(e)}
+
+
+async def get_tick_status() -> Dict[str, Any]:
+    """
+    Get current TICK status and bias
+    
+    Returns:
+        Dict with current TICK data, daily/weekly bias
+    """
+    try:
+        from database.redis_client import get_redis_client
+        
+        redis = await get_redis_client()
+        if not redis:
+            return {"error": "Redis not available", "daily_bias": "NEUTRAL", "weekly_bias": "NEUTRAL"}
+        
+        # Get current data
+        current_raw = await redis.get(REDIS_KEY_TICK_CURRENT)
+        current = json.loads(current_raw) if current_raw else None
+        
+        # Get history
+        history_raw = await redis.get(REDIS_KEY_TICK_HISTORY)
+        history = json.loads(history_raw) if history_raw else []
+        
+        if not current:
+            return {
+                "status": "no_data",
+                "message": "No TICK data available. Send from TradingView webhook.",
+                "daily_bias": "NEUTRAL",
+                "weekly_bias": "NEUTRAL",
+                "history_days": len(history)
+            }
+        
+        # Recalculate biases
+        daily_bias = await calculate_daily_bias(current["tick_high"], current["tick_low"])
+        weekly_bias = await calculate_weekly_bias(history)
+        
+        return {
+            "status": "ok",
+            "tick_high": current["tick_high"],
+            "tick_low": current["tick_low"],
+            "date": current["date"],
+            "daily_bias": daily_bias,
+            "weekly_bias": weekly_bias,
+            "updated_at": current.get("updated_at"),
+            "history_days": len(history),
+            "history": history[-5:]  # Last 5 days
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting TICK status: {e}")
+        return {"error": str(e), "daily_bias": "NEUTRAL", "weekly_bias": "NEUTRAL"}
+
+
+async def check_bias_alignment(direction: str, timeframe: str = "DAILY") -> Tuple[str, bool]:
+    """
+    Check if signal direction aligns with current TICK-based bias
     
     Args:
         direction: "LONG" or "SHORT"
-        timeframe: "DAILY", "WEEKLY", or "MONTHLY"
+        timeframe: "DAILY" or "WEEKLY"
     
     Returns:
         (bias_level, is_aligned): Current bias and whether signal aligns
     """
     
-    # Get current bias from Redis cache
-    bias_data = await get_bias(timeframe)
+    # Get current TICK status
+    tick_status = await get_tick_status()
     
-    if not bias_data:
-        # No bias data available, default to neutral
+    if tick_status.get("status") != "ok":
         return "NEUTRAL", False
     
-    bias_level = bias_data.get('level', 'NEUTRAL')
+    # Get bias for requested timeframe
+    if timeframe.upper() == "WEEKLY":
+        bias_level = tick_status.get("weekly_bias", "NEUTRAL")
+    else:
+        bias_level = tick_status.get("daily_bias", "NEUTRAL")
     
     # Determine alignment
     is_aligned = False
     
     if direction == "LONG":
-        # Long signals align with bullish bias
+        # Long signals align with bullish bias (wide TICK range)
         if bias_level in ["TORO_MINOR", "TORO_MAJOR"]:
             is_aligned = True
     
     elif direction == "SHORT":
-        # Short signals align with bearish bias
+        # Short signals align with bearish bias (narrow TICK range)
         if bias_level in ["URSA_MINOR", "URSA_MAJOR"]:
             is_aligned = True
     
