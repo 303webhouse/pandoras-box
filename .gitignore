@@ -1,0 +1,6 @@
+﻿# Crypto Scalper (separate project)
+crypto-scalper/
+
+# Python cache
+__pycache__/
+*.pyc
