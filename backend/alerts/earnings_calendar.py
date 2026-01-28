@@ -8,10 +8,9 @@ Filters out (or targets) tickers with upcoming earnings:
 3. Warn about earnings week for open positions
 
 Uses yfinance earnings calendar data
+Note: yfinance/pandas imported lazily inside functions to avoid startup timeout
 """
 
-import yfinance as yf
-import pandas as pd
 import logging
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
@@ -42,6 +41,8 @@ def get_earnings_date(ticker: str) -> Optional[datetime]:
     Returns None if no earnings data available
     """
     try:
+        import yfinance as yf
+        import pandas as pd
         stock = yf.Ticker(ticker)
         
         # Try to get earnings calendar

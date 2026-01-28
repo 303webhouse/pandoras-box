@@ -13,10 +13,10 @@ Use Cases:
 - FOMC days: Warn of whipsaw risk, suggest wait-and-see
 - VIX spike: Potential reversal setup (mean reversion)
 - Gap up/down: Fade or follow based on breadth confirmation
+
+Note: yfinance/pandas imported lazily inside functions to avoid startup timeout
 """
 
-import yfinance as yf
-import pandas as pd
 import logging
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
@@ -105,6 +105,7 @@ def check_vix_spike() -> Optional[Dict[str, Any]]:
     - VIX -20% intraday: Complacency returning (risk-on)
     """
     try:
+        import yfinance as yf
         vix = yf.Ticker("^VIX")
         df = vix.history(period="5d", interval="1d")
         
@@ -170,6 +171,7 @@ def check_gap_moves() -> List[Dict[str, Any]]:
     Gaps >3% often reverse (fade) or continue with conviction
     Decision depends on volume and breadth
     """
+    import yfinance as yf
     alerts = []
     
     tickers = ["SPY", "QQQ", "IWM"]
@@ -216,6 +218,7 @@ def check_breadth_extremes() -> Optional[Dict[str, Any]]:
     These often mark short-term exhaustion and reversal points
     """
     try:
+        import yfinance as yf
         # Use NYSE Advance-Decline data from market breadth
         # This is a simplified check - would need real A/D data for production
         
@@ -242,6 +245,7 @@ def check_volume_surge(ticker: str = "SPY") -> Optional[Dict[str, Any]]:
     High volume confirms conviction in a move
     """
     try:
+        import yfinance as yf
         stock = yf.Ticker(ticker)
         df = stock.history(period="1mo")
         
