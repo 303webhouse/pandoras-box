@@ -407,11 +407,33 @@ async def create_manual_position(request: ManualPositionRequest):
             "broker": "MANUAL"
         }
         
-        # Save to PostgreSQL
+        # First, create a dummy signal record to satisfy foreign key
+        try:
+            from database.postgres_client import log_signal
+            await log_signal({
+                "signal_id": signal_id,
+                "ticker": request.ticker,
+                "strategy": request.strategy or "Manual Entry",
+                "direction": request.direction,
+                "signal_type": "MANUAL",
+                "entry_price": request.entry_price,
+                "stop_loss": request.stop_loss,
+                "target_1": request.target_1,
+                "timestamp": datetime.now().isoformat(),
+                "asset_class": request.asset_class,
+                "score": 0,
+                "bias_alignment": "N/A"
+            })
+        except Exception as signal_err:
+            logger.warning(f"Failed to create dummy signal: {signal_err}")
+        
+        # Save position to PostgreSQL
         try:
             await create_position(signal_id, position_data)
+            logger.info(f"✅ Manual position saved to PostgreSQL: {request.ticker}")
         except Exception as db_err:
-            logger.warning(f"Failed to persist manual position to DB: {db_err}")
+            logger.error(f"❌ Failed to persist manual position to DB: {db_err}")
+            # Continue anyway - position will still work in memory
         
         # Create position object for memory/UI
         position = {
