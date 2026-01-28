@@ -1907,6 +1907,141 @@ async def run_scheduled_refreshes():
     # Refresh cyclical on Mondays (long-term macro doesn't change daily)
     if now.weekday() == 0:  # Monday
         await refresh_cyclical_bias()
+    
+    # Run sector strength scan every morning
+    await scan_sector_strength()
+    
+    # Update scheduler status
+    _scheduler_status["bias_refresh"]["last_run"] = now.isoformat()
+    _scheduler_status["bias_refresh"]["status"] = "completed"
+
+
+async def scan_sector_strength():
+    """
+    Scan sector ETFs to determine which sectors are leading/lagging.
+    Updates the watchlist with sector strength rankings.
+    
+    Criteria:
+    - Price vs 20 SMA (momentum)
+    - Price vs 50 SMA (trend)
+    - Relative strength vs SPY
+    """
+    logger.info("📊 Scanning sector strength...")
+    
+    try:
+        import yfinance as yf
+        import httpx
+        
+        # Sector ETFs to analyze
+        SECTOR_ETFS = {
+            "Technology": "XLK",
+            "Consumer Discretionary": "XLY",
+            "Healthcare": "XLV",
+            "Financials": "XLF",
+            "Industrials": "XLI",
+            "Consumer Staples": "XLP",
+            "Energy": "XLE",
+            "Utilities": "XLU",
+            "Materials": "XLB",
+            "Real Estate": "XLRE",
+            "Communication Services": "XLC"
+        }
+        
+        # Get SPY as benchmark
+        spy = yf.Ticker("SPY")
+        spy_hist = spy.history(period="3mo")
+        if spy_hist.empty:
+            logger.warning("Could not fetch SPY data for sector comparison")
+            return
+        
+        spy_price = float(spy_hist['Close'].iloc[-1])
+        spy_sma20 = float(spy_hist['Close'].rolling(20).mean().iloc[-1])
+        spy_pct_change_month = (spy_price / spy_hist['Close'].iloc[-21] - 1) * 100 if len(spy_hist) >= 21 else 0
+        
+        sector_scores = {}
+        
+        for sector_name, etf in SECTOR_ETFS.items():
+            try:
+                ticker = yf.Ticker(etf)
+                hist = ticker.history(period="3mo")
+                
+                if hist.empty or len(hist) < 50:
+                    continue
+                
+                price = float(hist['Close'].iloc[-1])
+                sma20 = float(hist['Close'].rolling(20).mean().iloc[-1])
+                sma50 = float(hist['Close'].rolling(50).mean().iloc[-1])
+                
+                # Calculate metrics
+                above_20sma = price > sma20
+                above_50sma = price > sma50
+                pct_change_month = (price / hist['Close'].iloc[-21] - 1) * 100 if len(hist) >= 21 else 0
+                
+                # Relative strength vs SPY
+                relative_strength = pct_change_month - spy_pct_change_month
+                
+                # Score: higher = stronger sector
+                score = 0
+                if above_20sma:
+                    score += 1
+                if above_50sma:
+                    score += 1
+                if relative_strength > 1:
+                    score += 2  # Outperforming SPY significantly
+                elif relative_strength > 0:
+                    score += 1  # Slightly outperforming
+                elif relative_strength < -1:
+                    score -= 1  # Underperforming
+                
+                sector_scores[sector_name] = {
+                    "etf": etf,
+                    "price": round(price, 2),
+                    "above_20sma": above_20sma,
+                    "above_50sma": above_50sma,
+                    "pct_change_month": round(pct_change_month, 2),
+                    "relative_strength": round(relative_strength, 2),
+                    "strength": score,
+                    "trend": "leading" if score >= 3 else ("lagging" if score <= 0 else "neutral")
+                }
+                
+            except Exception as e:
+                logger.warning(f"Error scanning {sector_name} ({etf}): {e}")
+                continue
+        
+        # Rank sectors by strength
+        sorted_sectors = sorted(sector_scores.items(), key=lambda x: x[1]["strength"], reverse=True)
+        for rank, (sector_name, data) in enumerate(sorted_sectors, 1):
+            sector_scores[sector_name]["rank"] = rank
+        
+        logger.info(f"✅ Sector strength scan complete: {len(sector_scores)} sectors analyzed")
+        
+        # Log top and bottom sectors
+        if sorted_sectors:
+            top = sorted_sectors[0]
+            bottom = sorted_sectors[-1]
+            logger.info(f"   Leading: {top[0]} ({top[1]['etf']}) - score {top[1]['strength']}")
+            logger.info(f"   Lagging: {bottom[0]} ({bottom[1]['etf']}) - score {bottom[1]['strength']}")
+        
+        # Update watchlist with sector strength
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    "http://localhost:8000/api/watchlist/sector-strength",
+                    json={"sector_strength": sector_scores},
+                    timeout=10.0
+                )
+                if response.status_code == 200:
+                    logger.info("   Sector strength saved to watchlist")
+        except Exception as e:
+            logger.warning(f"Could not update watchlist with sector strength: {e}")
+        
+        return sector_scores
+        
+    except Exception as e:
+        logger.error(f"Error in sector strength scan: {e}")
+        import traceback
+        traceback.print_exc()
+        return {}
 
 
 async def start_scheduler():
