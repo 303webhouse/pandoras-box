@@ -1886,6 +1886,33 @@ async def run_savita_auto_search():
         logger.error(f"❌ Savita auto-search error: {e}")
 
 
+async def refresh_btc_bottom_signals():
+    """
+    Auto-refresh BTC Bottom Signals from all API sources
+    Runs every 5 minutes, 24/7
+    """
+    try:
+        from bias_filters.btc_bottom_signals import update_all_signals
+        
+        logger.info("🔄 Refreshing BTC Bottom Signals from APIs...")
+        result = await update_all_signals()
+        
+        confluence = result.get('confluence', {})
+        firing = confluence.get('firing', 0)
+        total = confluence.get('total', 9)
+        
+        logger.info(f"✅ BTC Signals refreshed: {firing}/{total} firing")
+        
+        # Log any API issues
+        api_status = result.get('api_status', {})
+        unavailable = [api for api, status in api_status.items() if not status]
+        if unavailable:
+            logger.warning(f"⚠️ Unavailable BTC data sources: {', '.join(unavailable)}")
+            
+    except Exception as e:
+        logger.error(f"❌ BTC Bottom Signals refresh error: {e}")
+
+
 async def run_scheduled_refreshes():
     """
     Run appropriate refreshes based on current time/day
@@ -2098,9 +2125,20 @@ async def start_scheduler():
             replace_existing=True
         )
         
+        # BTC Bottom Signals refresh every 5 minutes (24/7)
+        scheduler.add_job(
+            refresh_btc_bottom_signals,
+            'interval',
+            minutes=5,
+            id='btc_signals_refresh',
+            name='BTC Bottom Signals Auto-Refresh',
+            replace_existing=True
+        )
+        
         scheduler.start()
         logger.info("✅ APScheduler started - bias refresh scheduled for 9:45 AM ET")
         logger.info("✅ Savita auto-search scheduled for 8:00 AM ET (days 12-23)")
+        logger.info("✅ BTC Bottom Signals refresh scheduled every 5 minutes")
         
         # ALSO start the scanner loop (APScheduler doesn't handle the variable-interval scanners)
         asyncio.create_task(_scanner_loop())

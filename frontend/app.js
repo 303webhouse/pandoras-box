@@ -3862,18 +3862,21 @@ function renderHybridTable(results) {
 
 
 // ==========================================
-// BTC BOTTOM SIGNALS DASHBOARD
+// BTC BOTTOM SIGNALS DASHBOARD (ALL 9 AUTOMATED)
 // ==========================================
 
 let btcSignals = {};
-let btcSummary = {};
+let btcConfluence = {};
+let btcRawData = {};
+let btcApiStatus = {};
 
 function initBtcSignals() {
     const refreshBtn = document.getElementById('refreshBtcSignalsBtn');
     const resetBtn = document.getElementById('resetBtcSignalsBtn');
     
     if (refreshBtn) {
-        refreshBtn.addEventListener('click', loadBtcSignals);
+        // Force refresh fetches fresh data from APIs
+        refreshBtn.addEventListener('click', refreshBtcSignals);
     }
     
     if (resetBtn) {
@@ -3883,6 +3886,9 @@ function initBtcSignals() {
     // Initial load
     loadBtcSignals();
     loadBtcSessions();
+    
+    // Auto-refresh every 5 minutes
+    setInterval(loadBtcSignals, 5 * 60 * 1000);
 }
 
 async function loadBtcSignals() {
@@ -3891,10 +3897,13 @@ async function loadBtcSignals() {
         const data = await response.json();
         
         btcSignals = data.signals || {};
-        btcSummary = data.summary || {};
+        btcConfluence = data.confluence || {};
+        btcRawData = data.raw_data || {};
+        btcApiStatus = data.api_status || {};
         
         renderBtcSignals();
         renderBtcSummary();
+        renderBtcApiStatus();
         
     } catch (error) {
         console.error('Error loading BTC signals:', error);
@@ -3903,27 +3912,76 @@ async function loadBtcSignals() {
     }
 }
 
+async function refreshBtcSignals() {
+    const refreshBtn = document.getElementById('refreshBtcSignalsBtn');
+    if (refreshBtn) {
+        refreshBtn.disabled = true;
+        refreshBtn.textContent = 'Refreshing...';
+    }
+    
+    try {
+        const response = await fetch(`${API_URL}/btc/bottom-signals/refresh`, {
+            method: 'POST'
+        });
+        const data = await response.json();
+        
+        btcSignals = data.signals || {};
+        btcConfluence = data.confluence || {};
+        btcRawData = data.raw_data || {};
+        btcApiStatus = data.api_status || {};
+        
+        renderBtcSignals();
+        renderBtcSummary();
+        renderBtcApiStatus();
+        
+    } catch (error) {
+        console.error('Error refreshing BTC signals:', error);
+    } finally {
+        if (refreshBtn) {
+            refreshBtn.disabled = false;
+            refreshBtn.textContent = 'Refresh All';
+        }
+    }
+}
+
 function renderBtcSummary() {
     const container = document.getElementById('btcConfluenceSummary');
     if (!container) return;
     
-    const firingCount = btcSummary.firing_count || 0;
-    const totalSignals = btcSummary.total_signals || 9;
-    const verdict = btcSummary.verdict || 'Checking signals...';
-    
-    // Determine verdict class
-    let verdictClass = 'none';
-    if (firingCount >= 6) verdictClass = 'strong';
-    else if (firingCount >= 4) verdictClass = 'moderate';
-    else if (firingCount >= 2) verdictClass = 'weak';
+    const firingCount = btcConfluence.firing || 0;
+    const totalSignals = btcConfluence.total || 9;
+    const verdict = btcConfluence.verdict || 'Checking signals...';
+    const verdictLevel = btcConfluence.verdict_level || 'none';
     
     container.innerHTML = `
         <div class="confluence-meter">
             <span class="confluence-count">${firingCount}/${totalSignals}</span>
             <span class="confluence-label">Signals Firing</span>
         </div>
-        <div class="confluence-verdict ${verdictClass}">${verdict}</div>
+        <div class="confluence-verdict ${verdictLevel}">${verdict}</div>
     `;
+}
+
+function renderBtcApiStatus() {
+    const container = document.getElementById('btcApiStatus');
+    if (!container) return;
+    
+    const apis = [
+        { key: 'coinalyze', name: 'Coinalyze', signals: 'Funding, OI, Liqs, Term' },
+        { key: 'deribit', name: 'Deribit', signals: '25d Skew' },
+        { key: 'defillama', name: 'DeFiLlama', signals: 'Stablecoin APR' },
+        { key: 'binance', name: 'Binance', signals: 'Orderbook, Basis' },
+        { key: 'yfinance', name: 'yfinance', signals: 'VIX' }
+    ];
+    
+    container.innerHTML = apis.map(api => {
+        const status = btcApiStatus[api.key] ? 'connected' : 'disconnected';
+        return `
+            <span class="api-status-item ${status}" title="${api.signals}">
+                ${api.name}: ${status === 'connected' ? 'OK' : 'OFF'}
+            </span>
+        `;
+    }).join('');
 }
 
 function renderBtcSignals() {
@@ -3940,21 +3998,49 @@ function renderBtcSignals() {
     container.innerHTML = signalIds.map(id => {
         const signal = btcSignals[id];
         const status = signal.status || 'UNKNOWN';
-        // KB link for signal name - all BTC signals link to btc-bottom-signals entry
+        const isAuto = signal.auto !== false;
+        const hasManualOverride = signal.manual_override === true;
+        
+        // Format timestamp
+        let timestamp = '';
+        if (signal.updated_at) {
+            const date = new Date(signal.updated_at);
+            timestamp = date.toLocaleTimeString('en-US', { 
+                hour: '2-digit', 
+                minute: '2-digit',
+                timeZone: 'America/New_York'
+            }) + ' ET';
+        }
+        
+        // KB link for signal name
         const nameWithKb = `<span class="kb-term-dynamic" data-kb-term="btc-bottom-signals">${signal.name}</span>`;
         
+        // Source indicator
+        const sourceIcon = isAuto ? '⚡' : '✋';
+        const sourceLabel = isAuto ? 'AUTO' : 'MANUAL';
+        
+        // Value display - use raw value if available and detailed
+        const rawData = btcRawData[id] || {};
+        let displayValue = signal.value;
+        if (displayValue === null || displayValue === undefined) {
+            displayValue = '--';
+        }
+        
         return `
-            <div class="btc-signal-card ${status}" data-signal-id="${id}">
+            <div class="btc-signal-card ${status} ${isAuto ? 'auto' : 'manual'}" data-signal-id="${id}">
                 <div class="btc-signal-header">
                     <span class="btc-signal-name">${nameWithKb}</span>
                     <span class="btc-signal-status ${status}">${status}</span>
                 </div>
-                <div class="btc-signal-description">${signal.description}</div>
-                <div class="btc-signal-meta">
-                    <span class="btc-signal-threshold">Threshold: ${signal.threshold}</span>
-                    ${signal.value !== null ? `<span class="btc-signal-value">${signal.value}</span>` : ''}
+                <div class="btc-signal-value-display">
+                    <span class="signal-value-main">${displayValue}</span>
                 </div>
-                <div class="btc-signal-source">Source: ${signal.source}</div>
+                <div class="btc-signal-description">${signal.description}</div>
+                <div class="btc-signal-footer">
+                    <span class="btc-signal-source ${isAuto ? 'auto' : 'manual'}">${sourceIcon} ${sourceLabel}</span>
+                    <span class="btc-signal-timestamp">${timestamp}</span>
+                </div>
+                ${hasManualOverride ? '<div class="manual-override-badge">Override Active</div>' : ''}
             </div>
         `;
     }).join('');
@@ -3962,7 +4048,7 @@ function renderBtcSignals() {
     // Attach KB handlers
     attachDynamicKbHandlers(container);
     
-    // Attach click events for manual toggle (but not on KB links)
+    // Attach click events for manual override toggle
     container.querySelectorAll('.btc-signal-card').forEach(card => {
         card.addEventListener('click', (e) => {
             // Don't toggle if clicking a KB link
@@ -3973,9 +4059,29 @@ function renderBtcSignals() {
 }
 
 async function toggleBtcSignal(signalId) {
-    const currentStatus = btcSignals[signalId]?.status || 'UNKNOWN';
+    const signal = btcSignals[signalId];
+    if (!signal) return;
     
-    // Cycle through: UNKNOWN -> FIRING -> NEUTRAL -> UNKNOWN
+    const isAuto = signal.auto !== false;
+    const hasManualOverride = signal.manual_override === true;
+    
+    // If currently has manual override, clear it
+    if (hasManualOverride) {
+        if (confirm('Clear manual override and return to auto-fetch?')) {
+            try {
+                await fetch(`${API_URL}/btc/bottom-signals/${signalId}/clear-override`, {
+                    method: 'POST'
+                });
+                loadBtcSignals();
+            } catch (error) {
+                console.error('Error clearing override:', error);
+            }
+        }
+        return;
+    }
+    
+    // Otherwise, set a manual override
+    const currentStatus = signal.status || 'UNKNOWN';
     let newStatus;
     if (currentStatus === 'UNKNOWN' || currentStatus === 'NEUTRAL') {
         newStatus = 'FIRING';
@@ -3993,7 +4099,6 @@ async function toggleBtcSignal(signalId) {
         const data = await response.json();
         
         if (data.status === 'success') {
-            // Reload all signals to update summary
             loadBtcSignals();
         }
     } catch (error) {
@@ -4002,11 +4107,12 @@ async function toggleBtcSignal(signalId) {
 }
 
 async function resetBtcSignals() {
-    if (!confirm('Reset all manual BTC signals to UNKNOWN?')) return;
+    if (!confirm('Reset all signals to UNKNOWN and clear all manual overrides?')) return;
     
     try {
         await fetch(`${API_URL}/btc/bottom-signals/reset`, { method: 'POST' });
-        loadBtcSignals();
+        // After reset, refresh to get fresh data from APIs
+        await refreshBtcSignals();
     } catch (error) {
         console.error('Error resetting BTC signals:', error);
     }
