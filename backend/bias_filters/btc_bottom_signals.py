@@ -35,7 +35,7 @@ except ImportError:
 
 # Import Redis client for persistence
 try:
-    from backend.database.redis_client import get_redis_client
+    from database.redis_client import get_redis_client
     REDIS_AVAILABLE = True
 except ImportError:
     REDIS_AVAILABLE = False
@@ -43,7 +43,7 @@ except ImportError:
 
 # Import API clients
 try:
-    from backend.bias_filters.coinalyze_client import (
+    from bias_filters.coinalyze_client import (
         get_funding_rate, get_open_interest, get_liquidations, get_term_structure
     )
     COINALYZE_AVAILABLE = True
@@ -52,21 +52,21 @@ except ImportError:
     logger.warning("Coinalyze client not available")
 
 try:
-    from backend.bias_filters.deribit_client import get_25_delta_skew
+    from bias_filters.deribit_client import get_25_delta_skew
     DERIBIT_AVAILABLE = True
 except ImportError:
     DERIBIT_AVAILABLE = False
     logger.warning("Deribit client not available")
 
 try:
-    from backend.bias_filters.defillama_client import get_stablecoin_aprs
+    from bias_filters.defillama_client import get_stablecoin_aprs
     DEFILLAMA_AVAILABLE = True
 except ImportError:
     DEFILLAMA_AVAILABLE = False
     logger.warning("DeFiLlama client not available")
 
 try:
-    from backend.bias_filters.binance_client import get_spot_orderbook_skew, get_quarterly_basis
+    from bias_filters.binance_client import get_spot_orderbook_skew, get_quarterly_basis
     BINANCE_AVAILABLE = True
 except ImportError:
     BINANCE_AVAILABLE = False
