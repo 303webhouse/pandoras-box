@@ -159,7 +159,7 @@ from api.market_indicators import router as market_indicators_router
 from api.hybrid_scanner import router as hybrid_scanner_router
 from api.bias_scheduler import router as bias_scheduler_router
 from api.knowledgebase import router as knowledgebase_router
-# from api.alerts import router as alerts_router  # Temporarily disabled - debugging import issue
+from api.alerts import router as alerts_router
 
 app.include_router(webhook_router, prefix="/webhook", tags=["webhooks"])
 app.include_router(positions_router, prefix="/api", tags=["positions"])
@@ -176,7 +176,7 @@ app.include_router(market_indicators_router, prefix="/api", tags=["market-indica
 app.include_router(bias_scheduler_router, prefix="/api", tags=["bias-scheduler"])
 app.include_router(hybrid_scanner_router, prefix="/api", tags=["hybrid-scanner"])
 app.include_router(knowledgebase_router, prefix="/api", tags=["knowledgebase"])
-# app.include_router(alerts_router, prefix="/api", tags=["alerts"])  # Temporarily disabled
+app.include_router(alerts_router, prefix="/api", tags=["alerts"])
 
 # Serve frontend static files
 # Multiple path resolution strategies for different deployment environments
