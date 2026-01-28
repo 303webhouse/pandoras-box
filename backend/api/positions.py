@@ -90,6 +90,19 @@ class OpenPositionRequest(BaseModel):
     signal_type: Optional[str] = None
     bias_level: Optional[str] = None
 
+class ManualPositionRequest(BaseModel):
+    """Request to create a manual position (no signal required)"""
+    ticker: str
+    direction: str
+    entry_price: float
+    quantity: float
+    stop_loss: Optional[float] = None
+    target_1: Optional[float] = None
+    strategy: Optional[str] = "Manual Entry"
+    asset_class: Optional[str] = "EQUITY"
+    signal_type: Optional[str] = "MANUAL"
+    notes: Optional[str] = None
+
 class ArchiveFilters(BaseModel):
     """Filters for archived signals query"""
     ticker: Optional[str] = None
@@ -364,6 +377,75 @@ async def open_position(request: OpenPositionRequest):
     
     except Exception as e:
         logger.error(f"Error opening position: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/positions/manual")
+async def create_manual_position(request: ManualPositionRequest):
+    """
+    Create a manual position without requiring a signal.
+    For trades made outside of the hub's signal system.
+    """
+    global _position_counter
+    
+    try:
+        # Generate a manual signal ID
+        signal_id = f"MANUAL_{request.ticker}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        
+        # Create position data
+        position_data = {
+            "ticker": request.ticker,
+            "direction": request.direction,
+            "entry_price": request.entry_price,
+            "entry_time": datetime.now(),
+            "stop_loss": request.stop_loss,
+            "target_1": request.target_1,
+            "strategy": request.strategy or "Manual Entry",
+            "asset_class": request.asset_class,
+            "signal_type": "MANUAL",
+            "notes": request.notes,
+            "broker": "MANUAL"
+        }
+        
+        # Save to PostgreSQL
+        try:
+            await create_position(signal_id, position_data)
+        except Exception as db_err:
+            logger.warning(f"Failed to persist manual position to DB: {db_err}")
+        
+        # Create position object for memory/UI
+        position = {
+            "id": _position_counter,
+            "signal_id": signal_id,
+            "ticker": request.ticker,
+            "direction": request.direction,
+            "entry_price": request.entry_price,
+            "quantity": request.quantity,
+            "stop_loss": request.stop_loss,
+            "target_1": request.target_1,
+            "strategy": request.strategy or "Manual Entry",
+            "asset_class": request.asset_class,
+            "signal_type": "MANUAL",
+            "notes": request.notes,
+            "entry_time": datetime.now().isoformat(),
+            "status": "OPEN"
+        }
+        
+        _open_positions.append(position)
+        _position_counter += 1
+        
+        # Broadcast to all devices
+        await manager.broadcast_position_update({
+            "action": "POSITION_OPENED",
+            "position": position
+        })
+        
+        logger.info(f"📝 Manual position created: {request.ticker} {request.direction} @ ${request.entry_price} x {request.quantity}")
+        
+        return {"status": "success", "position_id": position["id"], "position": position}
+    
+    except Exception as e:
+        logger.error(f"Error creating manual position: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

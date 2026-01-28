@@ -1,7 +1,34 @@
 {
-    "tickers": [
-        "AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", 
-        "META", "TSLA", "AMD", "NFLX", "SPY"
-    ],
-    "updated_at": "2026-01-21T00:00:00Z"
+    "sectors": {
+        "Technology": {
+            "tickers": ["AAPL", "MSFT", "NVDA", "GOOGL", "AMD", "META"],
+            "etf": "XLK"
+        },
+        "Consumer Discretionary": {
+            "tickers": ["AMZN", "TSLA", "NFLX"],
+            "etf": "XLY"
+        },
+        "Financials": {
+            "tickers": ["JPM", "BAC", "GS"],
+            "etf": "XLF"
+        },
+        "Healthcare": {
+            "tickers": ["UNH", "JNJ", "PFE"],
+            "etf": "XLV"
+        },
+        "Energy": {
+            "tickers": ["XOM", "CVX"],
+            "etf": "XLE"
+        },
+        "Industrials": {
+            "tickers": ["CAT", "BA", "UPS"],
+            "etf": "XLI"
+        },
+        "Index ETFs": {
+            "tickers": ["SPY", "QQQ", "IWM"],
+            "etf": null
+        }
+    },
+    "sector_strength": {},
+    "updated_at": "2026-01-28T00:00:00Z"
 }
