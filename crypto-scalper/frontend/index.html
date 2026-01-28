@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Crypto Scalper - BTC Trading Signals</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#0a0e27">
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-left">
+                <h1>⚡ Crypto Scalper</h1>
+                <span class="connection-status" id="connectionStatus">
+                    <span class="status-dot"></span>
+                    <span class="status-text">Connecting...</span>
+                </span>
+            </div>
+            <div class="header-center">
+                <div class="price-display" id="priceDisplay">
+                    <span class="price-label">BTC/USDT</span>
+                    <span class="price-value" id="currentPrice">--,---.--</span>
+                    <span class="price-change" id="priceChange">0.00%</span>
+                </div>
+            </div>
+            <div class="header-right">
+                <div class="risk-badge" id="riskBadge">
+                    <span class="risk-label">Risk Status</span>
+                    <span class="risk-value" id="riskValue">--</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Left Panel - Signals -->
+            <section class="signals-panel">
+                <div class="panel-header">
+                    <h2>🎯 Active Signals</h2>
+                    <span class="signal-count" id="signalCount">0</span>
+                </div>
+                <div class="signals-list" id="signalsList">
+                    <div class="no-signals">
+                        <span class="icon">📡</span>
+                        <p>Waiting for signals...</p>
+                        <p class="sub">Monitoring 4 strategies 24/7</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Center Panel - Market Data & Chart -->
+            <section class="market-panel">
+                <!-- Market Stats Row -->
+                <div class="market-stats">
+                    <div class="stat-card">
+                        <span class="stat-label">24h High</span>
+                        <span class="stat-value" id="high24h">--,---.--</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">24h Low</span>
+                        <span class="stat-value" id="low24h">--,---.--</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">VWAP</span>
+                        <span class="stat-value" id="vwapPrice">--,---.--</span>
+                    </div>
+                    <div class="stat-card funding">
+                        <span class="stat-label">Funding Rate</span>
+                        <span class="stat-value" id="fundingRate">--.----%</span>
+                    </div>
+                </div>
+
+                <!-- Orderbook Imbalance -->
+                <div class="orderbook-bar">
+                    <div class="ob-label">Orderbook</div>
+                    <div class="ob-meter">
+                        <div class="ob-bid" id="obBid" style="width: 50%"></div>
+                        <div class="ob-ask" id="obAsk" style="width: 50%"></div>
+                    </div>
+                    <div class="ob-values">
+                        <span class="ob-bid-val" id="bidDepth">0 BTC</span>
+                        <span class="ob-imbalance" id="obImbalance">0%</span>
+                        <span class="ob-ask-val" id="askDepth">0 BTC</span>
+                    </div>
+                </div>
+
+                <!-- Session Info -->
+                <div class="session-info" id="sessionInfo">
+                    <div class="session-label">Current Session</div>
+                    <div class="session-name" id="sessionName">--</div>
+                    <div class="session-next" id="nextSession">Next: --</div>
+                </div>
+
+                <!-- Liquidation Stats -->
+                <div class="liquidation-stats">
+                    <div class="liq-header">
+                        <span>📊 Liquidations (1h)</span>
+                    </div>
+                    <div class="liq-bar">
+                        <div class="liq-long" id="liqLong" style="width: 50%">
+                            <span id="liqLongVal">$0</span>
+                        </div>
+                        <div class="liq-short" id="liqShort" style="width: 50%">
+                            <span id="liqShortVal">$0</span>
+                        </div>
+                    </div>
+                    <div class="liq-labels">
+                        <span>Long Liqs</span>
+                        <span>Short Liqs</span>
+                    </div>
+                </div>
+
+                <!-- TradingView Chart Placeholder -->
+                <div class="chart-container" id="chartContainer">
+                    <div class="chart-placeholder">
+                        <p>📈 Chart loads here</p>
+                        <p class="sub">Connect TradingView widget for live chart</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Right Panel - Risk & Account -->
+            <section class="risk-panel">
+                <div class="panel-header">
+                    <h2>💰 Account Status</h2>
+                </div>
+                
+                <!-- Account Info -->
+                <div class="account-card">
+                    <div class="account-row">
+                        <span class="label">Account Type</span>
+                        <span class="value" id="accountType">1-Step</span>
+                    </div>
+                    <div class="account-row">
+                        <span class="label">Starting Balance</span>
+                        <span class="value" id="startingBalance">$25,000.00</span>
+                    </div>
+                    <div class="account-row highlight">
+                        <span class="label">Current Balance</span>
+                        <span class="value" id="currentBalance">$25,000.00</span>
+                    </div>
+                    <div class="account-row">
+                        <span class="label">High Water Mark</span>
+                        <span class="value" id="hwm">$25,000.00</span>
+                    </div>
+                </div>
+
+                <!-- Drawdown Meters -->
+                <div class="drawdown-section">
+                    <h3>Risk Limits</h3>
+                    
+                    <div class="meter-group">
+                        <div class="meter-label">
+                            <span>Max Drawdown</span>
+                            <span id="ddCurrent">0.00%</span> / <span id="ddLimit">6%</span>
+                        </div>
+                        <div class="meter-bar">
+                            <div class="meter-fill dd" id="ddMeter" style="width: 0%"></div>
+                            <div class="meter-warning" style="left: 83.33%"></div>
+                        </div>
+                    </div>
+
+                    <div class="meter-group">
+                        <div class="meter-label">
+                            <span>Daily P&L</span>
+                            <span id="dailyPnl">0.00%</span> / <span id="dailyLimit">-4%</span>
+                        </div>
+                        <div class="meter-bar">
+                            <div class="meter-fill daily" id="dailyMeter" style="width: 0%"></div>
+                            <div class="meter-warning" style="left: 75%"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Risk Phase -->
+                <div class="phase-section">
+                    <h3>Risk Phase</h3>
+                    <div class="phase-buttons">
+                        <button class="phase-btn active" data-phase="conservative">Conservative</button>
+                        <button class="phase-btn" data-phase="growth">Growth</button>
+                        <button class="phase-btn" data-phase="aggressive">Aggressive</button>
+                    </div>
+                    <div class="phase-info" id="phaseInfo">
+                        <p>Max 1% risk per trade | 2:1 min R:R | 1-2x leverage</p>
+                    </div>
+                </div>
+
+                <!-- Strategy Toggles -->
+                <div class="strategies-section">
+                    <h3>Strategies</h3>
+                    <div class="strategy-toggles">
+                        <label class="strategy-toggle">
+                            <input type="checkbox" checked data-strategy="funding_rate">
+                            <span class="toggle-slider"></span>
+                            <span class="toggle-label">Funding Rate</span>
+                        </label>
+                        <label class="strategy-toggle">
+                            <input type="checkbox" checked data-strategy="vwap">
+                            <span class="toggle-slider"></span>
+                            <span class="toggle-label">VWAP</span>
+                        </label>
+                        <label class="strategy-toggle">
+                            <input type="checkbox" checked data-strategy="session_breakout">
+                            <span class="toggle-slider"></span>
+                            <span class="toggle-label">Session Breakout</span>
+                        </label>
+                        <label class="strategy-toggle">
+                            <input type="checkbox" checked data-strategy="liquidation_reversal">
+                            <span class="toggle-slider"></span>
+                            <span class="toggle-label">Liquidation Reversal</span>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Open Positions -->
+                <div class="positions-section">
+                    <h3>Open Positions</h3>
+                    <div class="positions-list" id="positionsList">
+                        <div class="no-positions">No open positions</div>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <div class="footer-left">
+                <span>Breakout Prop Trading Mode</span>
+            </div>
+            <div class="footer-center">
+                <span id="serverTime">--:--:-- UTC</span>
+            </div>
+            <div class="footer-right">
+                <span id="messageCount">0 msgs</span>
+            </div>
+        </footer>
+    </div>
+
+    <!-- Signal Detail Modal -->
+    <div class="modal" id="signalModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="modalTitle">Signal Details</h3>
+                <button class="modal-close" onclick="closeModal()">&times;</button>
+            </div>
+            <div class="modal-body" id="modalBody">
+                <!-- Filled by JS -->
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal()">Close</button>
+                <button class="btn btn-primary" onclick="dismissSignal()">Dismiss Signal</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

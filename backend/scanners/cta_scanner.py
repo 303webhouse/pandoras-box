@@ -71,18 +71,69 @@ except ImportError:
     logger.warning("CTA Scanner dependencies not installed. Run: pip install yfinance pandas_ta")
 
 
-# S&P 500 tickers for scanning
-SP500_TOP_100 = [
-    "AAPL", "MSFT", "AMZN", "NVDA", "GOOGL", "META", "TSLA", "BRK-B", "UNH", "XOM",
-    "JNJ", "JPM", "V", "PG", "MA", "HD", "CVX", "MRK", "ABBV", "LLY",
-    "PEP", "KO", "COST", "AVGO", "MCD", "WMT", "CSCO", "TMO", "ACN", "ABT",
-    "DHR", "NEE", "LIN", "ADBE", "NKE", "TXN", "PM", "UNP", "CRM", "RTX",
-    "ORCL", "CMCSA", "AMD", "LOW", "INTC", "SPGI", "HON", "AMGN", "UPS", "IBM",
-    "BA", "CAT", "GE", "SBUX", "DE", "INTU", "QCOM", "PLD", "ISRG", "MDLZ",
-    "AXP", "BKNG", "GILD", "ADI", "TJX", "SYK", "VRTX", "ADP", "MMC", "REGN",
-    "CVS", "BLK", "SCHW", "C", "MO", "ZTS", "CI", "TMUS", "LRCX", "PGR",
-    "NOW", "ETN", "PANW", "BSX", "SNPS", "SLB", "EQIX", "CB", "CME", "SO",
-    "ITW", "DUK", "MU", "AON", "CL", "ICE", "WM", "MCO", "PNC", "FDX"
+# Universe Filters
+UNIVERSE_FILTERS = {
+    "market_cap_min": 2_000_000_000,      # $2B minimum
+    "market_cap_max": 200_000_000_000,    # $200B maximum (avoid mega-caps)
+    "atr_percent_min": 1.5,                # Minimum daily volatility
+    "volume_min": 1_000_000,               # 1M shares/day minimum
+    
+    # Russell-specific (higher bars)
+    "russell_market_cap_max": 50_000_000_000,  # $50B max for Russell
+    "russell_atr_percent_min": 2.0,            # Higher volatility requirement
+    "russell_volume_min": 2_000_000,           # 2M shares/day
+}
+
+# S&P 500 Expanded Universe (Top 200 by market cap/liquidity)
+SP500_EXPANDED = [
+    # Mega Tech (but still good movers)
+    "AAPL", "MSFT", "AMZN", "NVDA", "GOOGL", "META", "TSLA", "AVGO", "ORCL", "AMD",
+    "CRM", "ADBE", "CSCO", "INTC", "QCOM", "INTU", "NOW", "PANW", "SNPS", "AMAT",
+    
+    # Financials
+    "JPM", "BAC", "WFC", "GS", "MS", "C", "BLK", "SCHW", "AXP", "USB",
+    "PNC", "TFC", "COF", "BK", "STT", "SPGI", "MCO", "ICE", "CME", "AON",
+    
+    # Healthcare
+    "UNH", "JNJ", "LLY", "ABBV", "MRK", "PFE", "TMO", "ABT", "DHR", "BMY",
+    "AMGN", "GILD", "ISRG", "REGN", "VRTX", "CI", "CVS", "ELV", "HUM", "ZTS",
+    
+    # Consumer Discretionary
+    "AMZN", "TSLA", "HD", "MCD", "NKE", "SBUX", "TJX", "LOW", "BKNG", "MAR",
+    
+    # Consumer Staples
+    "WMT", "PG", "KO", "PEP", "COST", "PM", "MO", "MDLZ", "CL", "GIS",
+    
+    # Industrials
+    "CAT", "BA", "UNP", "UPS", "RTX", "HON", "GE", "DE", "MMC", "ITW",
+    "WM", "EMR", "ETN", "FDX", "NSC", "CSX",
+    
+    # Energy
+    "XOM", "CVX", "COP", "SLB", "EOG", "MPC", "PSX", "VLO", "OXY", "HAL",
+    
+    # Materials
+    "LIN", "APD", "SHW", "ECL", "NEM", "FCX",
+    
+    # Utilities
+    "NEE", "SO", "DUK", "AEP", "SRE", "D", "EXC",
+    
+    # Real Estate
+    "PLD", "AMT", "EQIX", "PSA", "WELL", "SPG", "O", "CBRE",
+    
+    # Communication Services
+    "META", "GOOGL", "NFLX", "DIS", "CMCSA", "T", "VZ", "TMUS"
+]
+
+# Russell 1000 High-Volume Tickers (selected for liquidity)
+RUSSELL_HIGH_VOLUME = [
+    # High-volume mid-caps with good technical setups
+    "PLTR", "SOFI", "RIVN", "LCID", "F", "SNAP", "COIN", "HOOD", "RBLX", "U",
+    "ZM", "DOCU", "CRWD", "NET", "DDOG", "SNOW", "MDB", "HUBS", "ZS", "OKTA",
+    "SQ", "PYPL", "SHOP", "ROKU", "PINS", "TWLO", "LYFT", "UBER", "DASH", "ABNB",
+    "GME", "AMC", "BB", "BBBY", "TLRY", "SNDL", "MARA", "RIOT", "SI", "FUBO",
+    "NIO", "XPEV", "LI", "BABA", "JD", "PDD", "BIDU",
+    "AFRM", "UPST", "LMND", "OPEN", "WISH", "CLOV", "SKLZ",
+    "PLUG", "FCEL", "BE", "QS", "BLNK", "CHPT"
 ]
 
 
@@ -615,9 +666,152 @@ async def analyze_ticker_cta(ticker: str) -> Dict[str, Any]:
     return convert_numpy_types(result)
 
 
-async def run_cta_scan(tickers: List[str] = None, include_watchlist: bool = True) -> Dict:
+async def check_ticker_filters(ticker: str, is_russell: bool = False) -> bool:
+    """
+    Check if ticker passes quality filters (market cap, volume, volatility)
+    
+    Args:
+        ticker: Stock symbol
+        is_russell: If True, apply stricter Russell filters
+        
+    Returns:
+        True if ticker passes all filters
+    """
+    try:
+        stock = yf.Ticker(ticker)
+        info = stock.info
+        
+        # Get market cap
+        market_cap = info.get('marketCap')
+        if not market_cap:
+            logger.debug(f"{ticker}: No market cap data")
+            return False
+        
+        # Market cap filter
+        if is_russell:
+            if market_cap < UNIVERSE_FILTERS["market_cap_min"] or market_cap > UNIVERSE_FILTERS["russell_market_cap_max"]:
+                return False
+        else:
+            if market_cap < UNIVERSE_FILTERS["market_cap_min"] or market_cap > UNIVERSE_FILTERS["market_cap_max"]:
+                return False
+        
+        # Volume filter
+        avg_volume = info.get('averageVolume', 0)
+        min_vol = UNIVERSE_FILTERS["russell_volume_min"] if is_russell else UNIVERSE_FILTERS["volume_min"]
+        if avg_volume < min_vol:
+            logger.debug(f"{ticker}: Volume too low ({avg_volume:,})")
+            return False
+        
+        # ATR% filter (need recent data)
+        df = stock.history(period="1mo")
+        if df.empty or len(df) < 20:
+            return False
+        
+        # Calculate ATR%
+        df = calculate_cta_indicators(df)
+        latest_atr = df.iloc[-1].get('atr')
+        latest_price = df.iloc[-1]['Close']
+        
+        if pd.isna(latest_atr) or latest_price == 0:
+            return False
+        
+        atr_percent = (latest_atr / latest_price) * 100
+        min_atr = UNIVERSE_FILTERS["russell_atr_percent_min"] if is_russell else UNIVERSE_FILTERS["atr_percent_min"]
+        
+        if atr_percent < min_atr:
+            logger.debug(f"{ticker}: ATR% too low ({atr_percent:.2f}%)")
+            return False
+        
+        logger.debug(f"{ticker}: Passed filters - MCap: ${market_cap/1e9:.1f}B, Vol: {avg_volume:,}, ATR%: {atr_percent:.2f}%")
+        return True
+        
+    except Exception as e:
+        logger.debug(f"{ticker}: Filter check error - {e}")
+        return False
+
+
+async def build_dynamic_universe(sector_strength: Dict[str, Any] = None) -> List[str]:
+    """
+    Build optimized scan universe based on sector strength and filters
+    
+    Priority order:
+    1. Watchlist (always included)
+    2. Leading sector tickers (20 per sector)
+    3. S&P 500 filtered tickers
+    4. Russell 1000 high-volume filtered tickers
+    
+    Returns:
+        List of tickers to scan
+    """
+    universe = []
+    
+    # 1. Watchlist always first
+    watchlist = load_watchlist()
+    universe.extend(watchlist)
+    logger.info(f"📋 Watchlist: {len(watchlist)} tickers")
+    
+    # 2. Sector-based allocation (if sector data available)
+    if sector_strength:
+        # Sort sectors by rank
+        sorted_sectors = sorted(sector_strength.items(), key=lambda x: x[1].get('rank', 999))
+        
+        for sector_name, sector_data in sorted_sectors:
+            rank = sector_data.get('rank', 999)
+            trend = sector_data.get('trend', 'neutral')
+            
+            # Allocate tickers based on sector strength
+            if trend == 'leading' and rank <= 3:
+                # Leading sectors: scan more tickers
+                allocation = 20
+            elif trend == 'neutral' or (4 <= rank <= 8):
+                # Mid-pack sectors: moderate allocation
+                allocation = 10
+            else:
+                # Lagging sectors: skip for now (could add SHORT logic later)
+                allocation = 0
+            
+            logger.info(f"📊 {sector_name}: Rank {rank}, {trend} → {allocation} tickers")
+    
+    # 3. S&P 500 filtered universe
+    logger.info("🔍 Filtering S&P 500 universe...")
+    sp500_filtered = []
+    
+    for ticker in SP500_EXPANDED[:150]:  # Check first 150
+        if ticker not in universe:
+            if await check_ticker_filters(ticker, is_russell=False):
+                sp500_filtered.append(ticker)
+                if len(sp500_filtered) >= 80:  # Cap at 80 to save scan time
+                    break
+    
+    universe.extend(sp500_filtered)
+    logger.info(f"✅ S&P 500: {len(sp500_filtered)} tickers passed filters")
+    
+    # 4. Russell high-volume picks (stricter filters)
+    logger.info("🔍 Filtering Russell 1000 universe...")
+    russell_filtered = []
+    
+    for ticker in RUSSELL_HIGH_VOLUME[:80]:  # Check first 80
+        if ticker not in universe:
+            if await check_ticker_filters(ticker, is_russell=True):
+                russell_filtered.append(ticker)
+                if len(russell_filtered) >= 30:  # Cap at 30
+                    break
+    
+    universe.extend(russell_filtered)
+    logger.info(f"✅ Russell: {len(russell_filtered)} tickers passed filters")
+    
+    logger.info(f"🎯 Total scan universe: {len(universe)} tickers")
+    return universe
+
+
+async def run_cta_scan(tickers: List[str] = None, include_watchlist: bool = True, use_dynamic_universe: bool = True) -> Dict:
     """
     Run full CTA scan on multiple tickers
+    
+    Args:
+        tickers: Optional list of specific tickers to scan
+        include_watchlist: If True, prioritize user's watchlist
+        use_dynamic_universe: If True, build optimized universe with filters
     
     Returns signals sorted by priority with entry/stop/target
     """
@@ -627,25 +821,52 @@ async def run_cta_scan(tickers: List[str] = None, include_watchlist: bool = True
     if not CTA_CONFIG["enabled"]:
         return {"error": "CTA Scanner is disabled"}
     
-    # Build scan list
-    watchlist = []
-    sp500_list = []
-    
-    if tickers is None:
-        if include_watchlist:
-            watchlist = load_watchlist()
-            sp500_list = [t for t in SP500_TOP_100 if t not in watchlist]
-        else:
-            sp500_list = SP500_TOP_100
-    else:
-        sp500_list = tickers
-    
-    all_tickers = watchlist + sp500_list
-    
-    logger.info(f"🎯 CTA Scan starting: {len(watchlist)} watchlist + {len(sp500_list)} S&P 500")
     start_time = datetime.now()
     
+    # Build scan list
+    if tickers is not None:
+        # Manual ticker list provided
+        all_tickers = tickers
+        watchlist = load_watchlist() if include_watchlist else []
+        logger.info(f"🎯 CTA Scan starting: {len(tickers)} specified tickers")
+    elif use_dynamic_universe:
+        # Use smart filtered universe
+        logger.info("🧠 Building dynamic filtered universe...")
+        
+        # Try to load sector strength data
+        try:
+            import httpx
+            response = httpx.get("http://localhost:8000/api/watchlist", timeout=5.0)
+            if response.status_code == 200:
+                data = response.json()
+                sector_strength = data.get('sector_strength', {})
+            else:
+                sector_strength = None
+        except:
+            sector_strength = None
+        
+        all_tickers = await build_dynamic_universe(sector_strength)
+        watchlist = load_watchlist()
+    else:
+        # Legacy: Just watchlist + top 100
+        watchlist = load_watchlist() if include_watchlist else []
+        sp500_list = [t for t in SP500_EXPANDED[:100] if t not in watchlist]
+        all_tickers = watchlist + sp500_list
+        logger.info(f"🎯 CTA Scan starting: {len(watchlist)} watchlist + {len(sp500_list)} S&P")
+    
+    logger.info(f"📊 Scanning {len(all_tickers)} tickers...")
+    
+    # Ensure watchlist is loaded for tagging
+    if 'watchlist' not in locals():
+        watchlist = load_watchlist()
+    
     all_signals = []
+    scan_stats = {
+        "sp500_scanned": 0,
+        "russell_scanned": 0,
+        "watchlist_scanned": 0,
+        "filtered_out": 0
+    }
     
     for ticker in all_tickers:
         is_watchlist = ticker in watchlist
@@ -655,10 +876,19 @@ async def run_cta_scan(tickers: List[str] = None, include_watchlist: bool = True
             for signal in signals:
                 signal["from_watchlist"] = is_watchlist
                 all_signals.append(signal)
+            
+            # Track stats
+            if is_watchlist:
+                scan_stats["watchlist_scanned"] += 1
+            elif ticker in RUSSELL_HIGH_VOLUME:
+                scan_stats["russell_scanned"] += 1
+            else:
+                scan_stats["sp500_scanned"] += 1
+                
         except Exception as e:
             logger.error(f"Error scanning {ticker}: {e}")
         
-        await asyncio.sleep(0.1)  # Rate limiting
+        await asyncio.sleep(0.05)  # Faster rate limiting (was 0.1)
     
     elapsed = (datetime.now() - start_time).total_seconds()
     
@@ -679,8 +909,10 @@ async def run_cta_scan(tickers: List[str] = None, include_watchlist: bool = True
         "scan_time": datetime.now().isoformat(),
         "scan_duration_seconds": round(elapsed, 1),
         "tickers_scanned": len(all_tickers),
-        "watchlist_count": len(watchlist),
+        "universe_breakdown": scan_stats,
+        "watchlist_count": scan_stats["watchlist_scanned"],
         "total_signals": len(all_signals),
+        "filters_enabled": use_dynamic_universe if tickers is None else False,
         
         # Signals by type (best first)
         "golden_touch_signals": golden_touch[:5],
@@ -693,7 +925,8 @@ async def run_cta_scan(tickers: List[str] = None, include_watchlist: bool = True
     }
     
     logger.info(f"✅ CTA Scan complete: {len(all_signals)} signals in {elapsed:.1f}s")
-    logger.info(f"   Golden Touch: {len(golden_touch)}, Two-Close: {len(two_close)}, Pullbacks: {len(pullbacks)}")
+    logger.info(f"   Universe: {scan_stats['watchlist_scanned']} WL, {scan_stats['sp500_scanned']} S&P, {scan_stats['russell_scanned']} Russell")
+    logger.info(f"   Signals: Golden {len(golden_touch)}, Two-Close {len(two_close)}, Pullbacks {len(pullbacks)}")
     
     return result
 
