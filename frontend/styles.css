@@ -2539,12 +2539,75 @@ body.override-active-bearish .override-toggle[data-active="true"] {
 
 .watchlist-tickers {
     display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
+    flex-direction: column;
+    gap: 12px;
     margin-bottom: 12px;
-    max-height: 150px;
+    max-height: 300px;
     overflow-y: auto;
     padding: 4px;
+}
+
+/* Sector Grouping */
+.watchlist-sector {
+    background: var(--dark-bg);
+    border-radius: 8px;
+    padding: 8px;
+    border: 1px solid var(--border-color);
+}
+
+.watchlist-sector.sector-leading {
+    border-color: var(--accent-lime);
+    background: rgba(163, 230, 53, 0.05);
+}
+
+.watchlist-sector.sector-lagging {
+    border-color: var(--accent-orange);
+    background: rgba(251, 146, 60, 0.05);
+}
+
+.sector-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.sector-name {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.sector-etf {
+    font-size: 10px;
+    color: var(--accent-teal);
+    background: rgba(20, 184, 166, 0.1);
+    padding: 2px 6px;
+    border-radius: 4px;
+}
+
+.sector-trend {
+    margin-left: auto;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.sector-trend.leading {
+    color: var(--accent-lime);
+}
+
+.sector-trend.lagging {
+    color: var(--accent-orange);
+}
+
+.sector-tickers {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
 }
 
 .watchlist-ticker {
@@ -4948,6 +5011,47 @@ h3 .kb-link::after {
 
 .bias-card h3 .kb-link:hover {
     color: var(--accent-teal);
+}
+
+/* Dynamic KB terms (in rendered content) */
+.kb-term-dynamic {
+    cursor: pointer;
+    color: inherit;
+    position: relative;
+    transition: color 0.2s;
+}
+
+.kb-term-dynamic:hover {
+    color: var(--accent-teal);
+}
+
+.kb-term-dynamic::after {
+    content: 'ⓘ';
+    font-size: 9px;
+    margin-left: 3px;
+    opacity: 0;
+    transition: opacity 0.2s;
+    color: var(--accent-teal);
+    vertical-align: super;
+}
+
+.kb-term-dynamic:hover::after {
+    opacity: 0.8;
+}
+
+/* Slightly more prominent in cards */
+.signal-strategy .kb-term-dynamic,
+.signal-type .kb-term-dynamic,
+.cta-card-footer .kb-term-dynamic,
+.btc-signal-name .kb-term-dynamic {
+    border-bottom: 1px dotted rgba(20, 184, 166, 0.3);
+}
+
+.signal-strategy .kb-term-dynamic:hover,
+.signal-type .kb-term-dynamic:hover,
+.cta-card-footer .kb-term-dynamic:hover,
+.btc-signal-name .kb-term-dynamic:hover {
+    border-bottom-color: var(--accent-teal);
 }
 
 /* ============================================
