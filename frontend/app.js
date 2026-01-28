@@ -2072,6 +2072,9 @@ function renderSignals() {
     
     // Add event listeners to action buttons and cards
     attachSignalActions();
+    
+    // Attach KB link handlers to dynamically created content
+    attachDynamicKbHandlers(container);
 }
 
 function createSignalCard(signal) {
@@ -2672,6 +2675,9 @@ function initWatchlist() {
     loadWatchlist();
 }
 
+let watchlistSectors = {};
+let sectorStrength = {};
+
 async function loadWatchlist() {
     try {
         const response = await fetch(`${API_URL}/watchlist`);
@@ -2679,6 +2685,8 @@ async function loadWatchlist() {
         
         if (data.status === 'success') {
             watchlistTickers = data.tickers || [];
+            watchlistSectors = data.sectors || {};
+            sectorStrength = data.sector_strength || {};
             renderWatchlist();
         }
     } catch (error) {
@@ -2696,17 +2704,52 @@ function renderWatchlist() {
     
     countEl.textContent = watchlistTickers.length;
     
-    if (watchlistTickers.length === 0) {
+    if (Object.keys(watchlistSectors).length === 0) {
         container.innerHTML = '<p class="empty-state">No tickers in watchlist</p>';
         return;
     }
     
-    container.innerHTML = watchlistTickers.map(ticker => `
-        <div class="watchlist-ticker" data-ticker="${ticker}">
-            <span class="ticker-name">${ticker}</span>
-            <span class="remove-ticker" data-ticker="${ticker}">✕</span>
-        </div>
-    `).join('');
+    // Sort sectors by strength rank if available
+    const sortedSectors = Object.entries(watchlistSectors)
+        .map(([name, data]) => ({
+            name,
+            ...data,
+            strength: sectorStrength[name]?.strength || 0,
+            trend: sectorStrength[name]?.trend || 'neutral',
+            rank: sectorStrength[name]?.rank || 999
+        }))
+        .sort((a, b) => a.rank - b.rank);
+    
+    // Build sector-organized HTML
+    let html = '';
+    for (const sector of sortedSectors) {
+        if (!sector.tickers || sector.tickers.length === 0) continue;
+        
+        const strengthClass = sector.trend === 'leading' ? 'sector-leading' : 
+                             sector.trend === 'lagging' ? 'sector-lagging' : '';
+        const strengthIcon = sector.trend === 'leading' ? '↑' : 
+                            sector.trend === 'lagging' ? '↓' : '';
+        
+        html += `
+            <div class="watchlist-sector ${strengthClass}">
+                <div class="sector-header">
+                    <span class="sector-name">${sector.name}</span>
+                    ${sector.etf ? `<span class="sector-etf">${sector.etf}</span>` : ''}
+                    ${strengthIcon ? `<span class="sector-trend ${sector.trend}">${strengthIcon}</span>` : ''}
+                </div>
+                <div class="sector-tickers">
+                    ${sector.tickers.map(ticker => `
+                        <div class="watchlist-ticker" data-ticker="${ticker}">
+                            <span class="ticker-name">${ticker}</span>
+                            <span class="remove-ticker" data-ticker="${ticker}">✕</span>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+    }
+    
+    container.innerHTML = html;
     
     // Attach click events
     container.querySelectorAll('.ticker-name').forEach(el => {
@@ -3079,6 +3122,9 @@ function renderAnalyzerResults(data) {
     const sma120 = ctaAnalysis.sma120 ?? null;
     const sma200 = ctaAnalysis.sma200 ?? metrics.sma_200 ?? null;
     
+    // Wrap CTA zone with KB link
+    const ctaZoneWithKb = wrapWithKbLink(ctaZone) || ctaZone;
+    
     let html = `
         <div class="analyzer-metrics">
             <div class="analyzer-metric">
@@ -3094,11 +3140,11 @@ function renderAnalyzerResults(data) {
                 <div class="analyzer-metric-value">${sma50 ? '$' + sma50.toFixed(2) : '-'}</div>
             </div>
             <div class="analyzer-metric">
-                <div class="analyzer-metric-label">CTA Zone</div>
-                <div class="analyzer-metric-value zone-${ctaZone.toLowerCase().replace(' ', '-')}">${ctaZone}</div>
+                <div class="analyzer-metric-label"><span class="kb-term-dynamic" data-kb-term="cta-scanner">CTA Zone</span></div>
+                <div class="analyzer-metric-value zone-${ctaZone.toLowerCase().replace(' ', '-')}">${ctaZoneWithKb}</div>
             </div>
             <div class="analyzer-metric">
-                <div class="analyzer-metric-label">RSI</div>
+                <div class="analyzer-metric-label"><span class="kb-term-dynamic" data-kb-term="rsi">RSI</span></div>
                 <div class="analyzer-metric-value">${metrics.rsi?.toFixed(1) ?? '-'}</div>
             </div>
             <div class="analyzer-metric">
@@ -3143,6 +3189,9 @@ function renderAnalyzerResults(data) {
     }
     
     container.innerHTML = html;
+    
+    // Attach KB handlers to dynamically created links
+    attachDynamicKbHandlers(container);
 }
 
 function renderCriteriaList(criteria) {
@@ -3396,18 +3445,25 @@ function renderCtaZones() {
     container.innerHTML = tickers.map(ticker => {
         const zone = ctaZones[ticker];
         const zoneStatus = zone.cta_zone || 'UNKNOWN';
+        const zoneDisplay = zoneStatus.replace('_', ' ');
+        const zoneWithKb = wrapWithKbLink(zoneStatus);
         
         return `
             <div class="cta-zone-card ${zoneStatus}" data-ticker="${ticker}">
                 <span class="zone-ticker">${ticker}</span>
-                <span class="zone-status ${zoneStatus}">${zoneStatus.replace('_', ' ')}</span>
+                <span class="zone-status ${zoneStatus}">${zoneWithKb}</span>
             </div>
         `;
     }).join('');
     
-    // Attach click events to view on chart
+    // Attach KB handlers
+    attachDynamicKbHandlers(container);
+    
+    // Attach click events to view on chart (but not on KB links)
     container.querySelectorAll('.cta-zone-card').forEach(card => {
-        card.addEventListener('click', () => {
+        card.addEventListener('click', (e) => {
+            // Don't change chart if clicking a KB link
+            if (e.target.classList.contains('kb-term-dynamic')) return;
             const ticker = card.dataset.ticker;
             changeChartSymbol(ticker);
         });
@@ -3473,6 +3529,9 @@ function renderCtaColumn(containerId, countId, signals, emptyMessage) {
     
     container.innerHTML = signals.slice(0, 5).map(signal => createCtaCard(signal)).join('');
     
+    // Attach KB handlers
+    attachDynamicKbHandlers(container);
+    
     // Attach click events
     container.querySelectorAll('.cta-ticker').forEach(ticker => {
         ticker.addEventListener('click', (e) => {
@@ -3485,6 +3544,7 @@ function renderCtaColumn(containerId, countId, signals, emptyMessage) {
 function createCtaCard(signal) {
     const setup = signal.setup || {};
     const context = signal.context || {};
+    const zoneWithKb = wrapWithKbLink(context.cta_zone || 'Unknown');
     
     return `
         <div class="cta-card" data-symbol="${signal.symbol}">
@@ -3507,7 +3567,7 @@ function createCtaCard(signal) {
                 </div>
             </div>
             <div class="cta-card-footer">
-                Zone: ${context.cta_zone || 'Unknown'} • Vol: ${context.volume_ratio?.toFixed(1) || '-'}x
+                Zone: ${zoneWithKb} • Vol: ${context.volume_ratio?.toFixed(1) || '-'}x
             </div>
         </div>
     `;
@@ -3880,11 +3940,13 @@ function renderBtcSignals() {
     container.innerHTML = signalIds.map(id => {
         const signal = btcSignals[id];
         const status = signal.status || 'UNKNOWN';
+        // KB link for signal name - all BTC signals link to btc-bottom-signals entry
+        const nameWithKb = `<span class="kb-term-dynamic" data-kb-term="btc-bottom-signals">${signal.name}</span>`;
         
         return `
             <div class="btc-signal-card ${status}" data-signal-id="${id}">
                 <div class="btc-signal-header">
-                    <span class="btc-signal-name">${signal.name}</span>
+                    <span class="btc-signal-name">${nameWithKb}</span>
                     <span class="btc-signal-status ${status}">${status}</span>
                 </div>
                 <div class="btc-signal-description">${signal.description}</div>
@@ -3897,9 +3959,14 @@ function renderBtcSignals() {
         `;
     }).join('');
     
-    // Attach click events for manual toggle
+    // Attach KB handlers
+    attachDynamicKbHandlers(container);
+    
+    // Attach click events for manual toggle (but not on KB links)
     container.querySelectorAll('.btc-signal-card').forEach(card => {
-        card.addEventListener('click', () => {
+        card.addEventListener('click', (e) => {
+            // Don't toggle if clicking a KB link
+            if (e.target.classList.contains('kb-term-dynamic')) return;
             toggleBtcSignal(card.dataset.signalId);
         });
     });
@@ -5282,6 +5349,23 @@ function wrapWithKbLink(text, customTermId = null) {
         return `<span class="kb-term-dynamic" data-kb-term="${termId}">${text}</span>`;
     }
     return text;
+}
+
+// Attach click handlers to dynamically created KB links
+function attachDynamicKbHandlers(container) {
+    if (!container) return;
+    container.querySelectorAll('.kb-term-dynamic[data-kb-term]').forEach(el => {
+        // Remove existing listener to avoid duplicates
+        el.removeEventListener('click', handleDynamicKbClick);
+        el.addEventListener('click', handleDynamicKbClick);
+    });
+}
+
+function handleDynamicKbClick(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    const termId = e.currentTarget.dataset.kbTerm;
+    if (termId) openKbPopup(termId);
 }
 
 async function openKbPopup(termId) {
