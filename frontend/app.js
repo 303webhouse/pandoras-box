@@ -514,7 +514,8 @@ async function loadSignals() {
             console.log(`📊 Signals loaded: ${signals.equity.length} equity, ${signals.crypto.length} crypto`);
             console.log('🪙 Crypto signals:', signals.crypto);
             
-            renderSignals();
+            // Force render signals with a small delay to ensure DOM is ready
+            setTimeout(() => renderSignals(), 100);
         } else {
             console.warn('No signals in response or error:', data);
         }
