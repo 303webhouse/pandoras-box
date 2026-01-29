@@ -723,6 +723,42 @@ async def force_sync_positions():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/positions/diagnose")
+async def diagnose_positions():
+    """
+    Diagnostic endpoint to troubleshoot position loading
+    """
+    try:
+        from database.postgres_client import get_postgres_client
+        pool = await get_postgres_client()
+        
+        # Query 1: All positions
+        async with pool.acquire() as conn:
+            all_rows = await conn.fetch("SELECT id, ticker, status FROM positions ORDER BY created_at DESC")
+            
+        # Query 2: Open positions only  
+        async with pool.acquire() as conn:
+            open_rows = await conn.fetch("SELECT id, ticker, status FROM positions WHERE status = 'OPEN'")
+        
+        # Test get_open_positions function
+        from_function = await get_open_positions()
+        
+        return {
+            "status": "success",
+            "all_positions_count": len(all_rows),
+            "all_positions": [dict(r) for r in all_rows],
+            "open_query_count": len(open_rows),
+            "open_query_results": [dict(r) for r in open_rows],
+            "function_result_count": len(from_function),
+            "function_results": from_function,
+            "memory_count": len(_open_positions),
+            "memory_positions": _open_positions
+        }
+    except Exception as e:
+        logger.error(f"Error in diagnose endpoint: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/position/update")
 async def update_position(update: PositionUpdate):
     """
