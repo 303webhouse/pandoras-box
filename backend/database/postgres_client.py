@@ -282,6 +282,11 @@ async def get_open_positions() -> List[Dict[Any, Any]]:
             ORDER BY created_at DESC
         """)
         
+        logger.info(f"📊 get_open_positions query returned {len(rows)} rows")
+        if rows:
+            for row in rows:
+                logger.info(f"  - Position: {dict(row).get('ticker')} status={dict(row).get('status')}")
+        
         return [serialize_db_row(dict(row)) for row in rows]
 
 async def log_tick_data(date: str, tick_high: int, tick_low: int, range_type: str):

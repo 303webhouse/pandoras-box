@@ -479,13 +479,16 @@ async def sync_positions_from_database():
     global _open_positions, _position_counter
     
     try:
+        logger.info("🔄 Starting position sync from database...")
         db_positions = await get_open_positions()
+        logger.info(f"📊 Database returned {len(db_positions) if db_positions else 0} positions")
         
         if db_positions:
             _open_positions = []
             max_id = 0
             
             for pos in db_positions:
+                logger.info(f"Processing position: {pos.get('ticker')} - {pos.get('direction')}")
                 position = {
                     "id": pos.get("id", 0),
                     "signal_id": pos.get("signal_id"),
@@ -508,10 +511,10 @@ async def sync_positions_from_database():
             _position_counter = max_id + 1
             logger.info(f"✅ Synced {len(_open_positions)} open positions from database")
         else:
-            logger.info("No open positions in database to sync")
+            logger.warning("⚠️ No open positions returned from database query")
     
     except Exception as e:
-        logger.warning(f"Failed to sync positions from database: {e}")
+        logger.error(f"❌ Failed to sync positions from database: {e}", exc_info=True)
 
 @router.post("/positions/close")
 async def close_position(request: ClosePositionRequest):
