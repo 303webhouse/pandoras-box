@@ -489,6 +489,17 @@ async def sync_positions_from_database():
             
             for pos in db_positions:
                 logger.info(f"Processing position: {pos.get('ticker')} - {pos.get('direction')}")
+                
+                # Handle entry_time - could be datetime object or string
+                entry_time_value = pos.get("entry_time")
+                if entry_time_value:
+                    if isinstance(entry_time_value, str):
+                        entry_time_str = entry_time_value
+                    else:
+                        entry_time_str = entry_time_value.isoformat()
+                else:
+                    entry_time_str = None
+                
                 position = {
                     "id": pos.get("id", 0),
                     "signal_id": pos.get("signal_id"),
@@ -502,7 +513,7 @@ async def sync_positions_from_database():
                     "asset_class": pos.get("asset_class", "EQUITY"),
                     "signal_type": pos.get("signal_type"),
                     "bias_level": pos.get("bias_level"),
-                    "entry_time": pos.get("entry_time").isoformat() if pos.get("entry_time") else None,
+                    "entry_time": entry_time_str,
                     "status": pos.get("status", "OPEN")
                 }
                 _open_positions.append(position)
