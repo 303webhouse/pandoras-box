@@ -888,6 +888,17 @@ async def get_active_signals_api():
                     sig['score'] = 50  # Default
                     sig['bias_alignment'] = 'NEUTRAL'
         
+        # Filter out tickers that have open positions
+        open_tickers = set()
+        try:
+            open_pos = await get_open_positions()
+            open_tickers = {pos.get('ticker', '').upper() for pos in open_pos if pos.get('ticker')}
+            if open_tickers:
+                signals = [s for s in signals if s.get('ticker', '').upper() not in open_tickers]
+                logger.info(f"📊 Filtered out {len(open_tickers)} tickers with open positions: {open_tickers}")
+        except Exception as e:
+            logger.warning(f"Could not filter open positions: {e}")
+        
         # Sort by recency first (newest signals on top), then by score as tiebreaker
         # This ensures fresh signals are always visible even if older ones scored higher
         def get_sort_key(sig):
