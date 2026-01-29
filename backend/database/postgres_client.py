@@ -305,6 +305,7 @@ async def get_active_trade_ideas(limit: int = 10) -> List[Dict[Any, Any]]:
     """
     Get active trade ideas (not dismissed/selected) ordered by score.
     Returns the top N signals for the Trade Ideas feed.
+    Excludes tickers that were dismissed in the last 24 hours to prevent duplicates.
     """
     pool = await get_postgres_client()
     
@@ -316,6 +317,11 @@ async def get_active_trade_ideas(limit: int = 10) -> List[Dict[Any, Any]]:
                 SELECT *
                 FROM signals 
                 WHERE user_action IS NULL 
+                AND ticker NOT IN (
+                    SELECT DISTINCT ticker FROM signals 
+                    WHERE user_action = 'DISMISSED' 
+                    AND dismissed_at > NOW() - INTERVAL '24 hours'
+                )
                 ORDER BY COALESCE(score, 0) DESC, created_at DESC
                 LIMIT $1
             """, limit)
@@ -329,6 +335,11 @@ async def get_active_trade_ideas(limit: int = 10) -> List[Dict[Any, Any]]:
                     created_at
                 FROM signals 
                 WHERE user_action IS NULL 
+                AND ticker NOT IN (
+                    SELECT DISTINCT ticker FROM signals 
+                    WHERE user_action = 'DISMISSED' 
+                    AND dismissed_at > NOW() - INTERVAL '24 hours'
+                )
                 ORDER BY created_at DESC
                 LIMIT $1
             """, limit)
