@@ -42,7 +42,8 @@ let dailyBiasFactorStates = {
     tech_leadership: true,
     small_cap_risk: true,
     spy_trend: true,
-    market_breadth: true
+    market_breadth: true,
+    tick_breadth: true
 };
 
 // Cyclical Bias Factor State
@@ -1162,10 +1163,10 @@ function updateDailyBiasWithFactors(biasData) {
     });
     
     // 6-level system thresholds (scaled by enabled factors)
-    const totalFactors = 6;
+    const totalFactors = 7;  // Updated to 7 to include TICK Breadth
     const scaleFactor = enabledCount / totalFactors;
-    const majorThreshold = Math.round(7 * scaleFactor);
-    const minorThreshold = Math.round(3 * scaleFactor);
+    const majorThreshold = Math.round(8 * scaleFactor);  // Adjusted for 7 factors
+    const minorThreshold = Math.round(4 * scaleFactor);  // Adjusted for 7 factors
     
     // 6-level system: MAJOR_TORO, MINOR_TORO, LEAN_TORO, LEAN_URSA, MINOR_URSA, MAJOR_URSA
     let newLevel;

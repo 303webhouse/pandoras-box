@@ -676,6 +676,33 @@ async def get_trade_history():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+@router.get("/positions/debug-db")
+async def debug_positions_db():
+    """
+    Debug endpoint: Check what positions exist in PostgreSQL vs memory
+    """
+    try:
+        from database.postgres_client import get_postgres_client
+        pool = await get_postgres_client()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch("SELECT * FROM positions ORDER BY created_at DESC LIMIT 10")
+            from database.postgres_client import serialize_db_row
+            db_positions = [serialize_db_row(dict(row)) for row in rows]
+        
+        return {
+            "status": "success",
+            "db_positions": db_positions,
+            "db_count": len(db_positions),
+            "memory_positions": _open_positions,
+            "memory_count": len(_open_positions),
+            "synced": len(db_positions) == len(_open_positions)
+        }
+    except Exception as e:
+        logger.error(f"Error in debug endpoint: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/position/update")
 async def update_position(update: PositionUpdate):
     """

@@ -20,42 +20,43 @@ logger = logging.getLogger(__name__)
 # =========================================================================
 
 # Base scores by signal type/strategy (0-100 scale)
+# Reduced by 20 points to prevent score inflation
 STRATEGY_BASE_SCORES = {
     # CTA Scanner signals (highest quality)
-    "GOLDEN_TOUCH": 85,
-    "TWO_CLOSE_VOLUME": 80,
-    "ZONE_UPGRADE": 75,
-    "PULLBACK_ENTRY": 70,
+    "GOLDEN_TOUCH": 65,
+    "TWO_CLOSE_VOLUME": 60,
+    "ZONE_UPGRADE": 55,
+    "PULLBACK_ENTRY": 50,
     
     # Hunter Scanner signals
-    "URSA_SIGNAL": 75,
-    "TAURUS_SIGNAL": 75,
+    "URSA_SIGNAL": 55,
+    "TAURUS_SIGNAL": 55,
     
     # TradingView webhook signals - Triple Line variants
-    "TRIPLE_LINE": 70,
-    "TRIPLE LINE TREND RETRACEMENT": 70,
-    "TRIPLE_LINE_TREND_RETRACEMENT": 70,
+    "TRIPLE_LINE": 50,
+    "TRIPLE LINE TREND RETRACEMENT": 50,
+    "TRIPLE_LINE_TREND_RETRACEMENT": 50,
     
     # BTC macro confluence (highest conviction)
-    "APIS_CALL": 90,
-    "KODIAK_CALL": 90,
+    "APIS_CALL": 70,
+    "KODIAK_CALL": 70,
     
     # Exhaustion signals
-    "EXHAUSTION": 65,
-    "EXHAUSTION_TOP": 65,
-    "EXHAUSTION_BOTTOM": 65,
+    "EXHAUSTION": 45,
+    "EXHAUSTION_TOP": 45,
+    "EXHAUSTION_BOTTOM": 45,
     
     # Sniper signals
-    "SNIPER": 60,
-    "SNIPER_URSA": 60,
-    "SNIPER_TAURUS": 60,
+    "SNIPER": 40,
+    "SNIPER_URSA": 40,
+    "SNIPER_TAURUS": 40,
     
     # Generic types
-    "BULLISH_TRADE": 55,
-    "BEAR_CALL": 55,
+    "BULLISH_TRADE": 35,
+    "BEAR_CALL": 35,
     
     # Default for unknown strategies
-    "DEFAULT": 50
+    "DEFAULT": 30
 }
 
 # Bias alignment multipliers
@@ -68,19 +69,20 @@ BIAS_ALIGNMENT = {
 }
 
 # Technical confluence bonuses
+# Cut in half to prevent bonus stacking
 TECHNICAL_BONUSES = {
-    "ideal_rsi": 10,            # RSI in ideal range (30-40 for longs, 60-70 for shorts)
-    "strong_adx": 8,            # ADX > 25 (strong trend)
-    "favorable_zone": 12,       # CTA zone supports direction
-    "high_rvol": 5,             # Relative volume > 1.5
-    "sma_alignment": 8          # Price/SMA alignment supports direction
+    "ideal_rsi": 5,             # RSI in ideal range (30-40 for longs, 60-70 for shorts)
+    "strong_adx": 4,            # ADX > 25 (strong trend)
+    "favorable_zone": 6,        # CTA zone supports direction
+    "high_rvol": 3,             # Relative volume > 1.5
+    "sma_alignment": 4          # Price/SMA alignment supports direction
 }
 
 # Recency decay (hours)
 RECENCY_CONFIG = {
     "full_bonus_hours": 1,      # Full recency bonus within 1 hour
     "half_life_hours": 4,       # Score decays by 50% after 4 hours
-    "max_bonus": 15             # Maximum recency bonus points
+    "max_bonus": 8              # Maximum recency bonus points (reduced from 15)
 }
 
 # Sector priority bonuses
@@ -455,13 +457,13 @@ def is_signal_strong(score: float) -> bool:
 
 def get_score_tier(score: float) -> str:
     """Get the tier classification for UI display"""
-    if score >= 85:
+    if score >= 75:
         return "EXCEPTIONAL"
-    elif score >= 75:
-        return "STRONG"
     elif score >= 60:
-        return "MODERATE"
+        return "STRONG"
     elif score >= 45:
+        return "MODERATE"
+    elif score >= 30:
         return "WEAK"
     else:
         return "LOW"

@@ -594,13 +594,14 @@ def get_bias_history(timeframe: BiasTimeframe, limit: int = 10) -> List[Dict[str
 
 async def refresh_daily_bias() -> Dict[str, Any]:
     """
-    Refresh daily bias based on 6-FACTOR calculable analysis:
+    Refresh daily bias based on 7-FACTOR calculable analysis:
     1. SPY RSI - Momentum oscillator (overbought/oversold)
     2. VIX Level - Fear gauge
     3. Tech Leadership - QQQ vs SPY relative strength
     4. Small Cap Risk - IWM vs SPY (risk-on/off)
     5. SPY Trend - Price vs 9 EMA
     6. Breadth - RSP vs SPY (equal weight vs cap weight)
+    7. TICK Range Breadth - Linda Raschke method (wide/narrow participation)
     
     All factors calculated from price data - no external feeds needed.
     """
@@ -849,16 +850,53 @@ async def refresh_daily_bias() -> Dict[str, Any]:
             factor_votes.append(("spy_vs_rsp", 0, {"error": str(e)}))
         
         # =====================================================================
+        # FACTOR 7: TICK Range Breadth (Linda Raschke method)
+        # =====================================================================
+        try:
+            from bias_filters.tick_breadth import get_tick_status
+            tick_status = await get_tick_status()
+            
+            tick_bias = tick_status.get("daily_bias", "NEUTRAL")
+            tick_high = tick_status.get("tick_high", 0)
+            tick_low = tick_status.get("tick_low", 0)
+            
+            # TICK logic:
+            # Wide range (high > +1000 OR low < -1000) = TORO (bullish participation)
+            # Narrow range (high < +500 AND low > -500) = URSA (weak participation)
+            if tick_bias == "TORO_MINOR":
+                tick_vote = 2
+                tick_signal = "WIDE_RANGE"
+            elif tick_bias == "URSA_MINOR":
+                tick_vote = -2
+                tick_signal = "NARROW_RANGE"
+            else:
+                tick_vote = 0
+                tick_signal = "NEUTRAL"
+            
+            factor_votes.append(("tick_breadth", tick_vote, {
+                "tick_high": tick_high,
+                "tick_low": tick_low,
+                "bias": tick_bias,
+                "signal": tick_signal
+            }))
+            logger.info(f"  📊 TICK Breadth: High {tick_high:+d} / Low {tick_low:+d} - {tick_signal} (vote: {tick_vote:+d})")
+            
+        except Exception as e:
+            logger.warning(f"Error in TICK Breadth factor: {e}")
+            factor_votes.append(("tick_breadth", 0, {"error": str(e)}))
+        
+        # =====================================================================
         # CALCULATE TOTAL VOTE AND DETERMINE BIAS
         # =====================================================================
         total_vote = sum(vote for _, vote, _ in factor_votes)
-        max_possible = 12  # 6 factors × 2 max each
+        max_possible = 14  # 7 factors × 2 max each
         
-        # Thresholds for 6 factors (6-level system, no neutral)
+        # Thresholds for 7 factors (6-level system, no neutral)
+        # Adjusted for 14 max possible (was 12)
         # Use weekly bias as tiebreaker when vote = 0
-        if total_vote >= 7:
+        if total_vote >= 8:  # Was 7
             new_level = "MAJOR_TORO"
-        elif total_vote >= 3:
+        elif total_vote >= 4:  # Was 3
             new_level = "MINOR_TORO"
         elif total_vote > 0:
             new_level = "LEAN_TORO"
@@ -870,16 +908,16 @@ async def refresh_daily_bias() -> Dict[str, Any]:
                 new_level = "LEAN_URSA"
             else:
                 new_level = "LEAN_TORO"  # Default bullish
-        elif total_vote > -3:
+        elif total_vote > -4:  # Was -3
             new_level = "LEAN_URSA"
-        elif total_vote > -7:
+        elif total_vote > -8:  # Was -7
             new_level = "MINOR_URSA"
         else:
             new_level = "MAJOR_URSA"
         
         # Build details
         details = {
-            "source": "6_factor_daily",
+            "source": "7_factor_daily",
             "total_vote": total_vote,
             "max_possible": max_possible,
             "factors": {name: {"vote": vote, "details": det} for name, vote, det in factor_votes}
