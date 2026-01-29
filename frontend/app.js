@@ -2103,6 +2103,18 @@ function createSignalCard(signal) {
     const strategyWithKb = wrapWithKbLink(signal.strategy || 'Unknown');
     const typeWithKb = wrapWithKbLink(typeLabel);
     
+    // Format timestamp as "Jan 28, 1:45 PM"
+    let timestampStr = '';
+    if (signal.timestamp || signal.created_at) {
+        try {
+            const signalDate = new Date(signal.timestamp || signal.created_at);
+            const options = { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true };
+            timestampStr = signalDate.toLocaleString('en-US', options);
+        } catch (e) {
+            timestampStr = '';
+        }
+    }
+    
     return `
         <div class="signal-card ${signal.signal_type || ''} ${biasAlignmentClass} ${pulseClass}" 
              data-signal-id="${signal.signal_id}" 
@@ -2115,6 +2127,8 @@ function createSignalCard(signal) {
                 </div>
                 <div class="signal-ticker ticker-link" data-action="view-chart">${signal.ticker}</div>
             </div>
+            
+            ${timestampStr ? `<div class="signal-timestamp">${timestampStr}</div>` : ''}
             
             <div class="signal-score-bar">
                 <div class="score-label">Score</div>
@@ -4826,12 +4840,29 @@ function renderPositionsEnhanced() {
         const pnlPct = ((currentPrice - pos.entry_price) / pos.entry_price * 100);
         const pnlPctStr = (pnlPct >= 0 ? '+' : '') + pnlPct.toFixed(2) + '%';
         
+        // Format entry time as "Jan 28, 1:45 PM"
+        let entryTimeStr = '';
+        if (pos.entry_time) {
+            try {
+                const entryDate = new Date(pos.entry_time);
+                const options = { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true };
+                entryTimeStr = entryDate.toLocaleString('en-US', options);
+            } catch (e) {
+                entryTimeStr = '';
+            }
+        }
+        
+        // Strategy/Signal info
+        const strategyInfo = pos.strategy || pos.signal_type || 'MANUAL';
+        
         return `
             <div class="position-card" data-position-id="${pos.id || pos.signal_id}">
                 <div class="position-card-header">
                     <span class="position-ticker" data-ticker="${pos.ticker}">${pos.ticker}</span>
                     <span class="position-direction ${pos.direction}">${pos.direction}</span>
                 </div>
+                ${entryTimeStr ? `<div class="position-timestamp">${entryTimeStr}</div>` : ''}
+                ${strategyInfo !== 'MANUAL' ? `<div class="position-strategy">${strategyInfo}</div>` : ''}
                 <div class="position-details">
                     <div class="position-detail">
                         <div class="position-detail-label">Entry</div>
@@ -4839,7 +4870,7 @@ function renderPositionsEnhanced() {
                     </div>
                     <div class="position-detail">
                         <div class="position-detail-label">Qty</div>
-                        <div class="position-detail-value">${pos.quantity || '--'}</div>
+                        <div class="position-detail-value">${pos.quantity || '1'}</div>
                     </div>
                     <div class="position-detail">
                         <div class="position-detail-label">Stop</div>
