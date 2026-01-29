@@ -1951,6 +1951,40 @@ async def refresh_btc_bottom_signals():
         logger.error(f"❌ BTC Bottom Signals refresh error: {e}")
 
 
+async def auto_dismiss_old_signals():
+    """
+    Auto-dismiss signals older than 24 hours to keep Trade Ideas fresh.
+    Runs every hour.
+    """
+    try:
+        from database.postgres_client import get_postgres_client
+        
+        pool = await get_postgres_client()
+        async with pool.acquire() as conn:
+            # Dismiss signals older than 24 hours that haven't been acted upon
+            result = await conn.execute("""
+                UPDATE signals 
+                SET user_action = 'DISMISSED', 
+                    dismissed_at = NOW(),
+                    notes = COALESCE(notes || ' | ', '') || 'Auto-dismissed after 24h'
+                WHERE user_action IS NULL 
+                AND created_at < NOW() - INTERVAL '24 hours'
+            """)
+            
+            # Extract count from result status (e.g., "UPDATE 5")
+            count = 0
+            if hasattr(result, 'split'):
+                parts = result.split()
+                if len(parts) > 1 and parts[1].isdigit():
+                    count = int(parts[1])
+            
+            if count > 0:
+                logger.info(f"🗑️ Auto-dismissed {count} signals older than 24 hours")
+            
+    except Exception as e:
+        logger.error(f"❌ Auto-dismiss error: {e}")
+
+
 async def run_scheduled_refreshes():
     """
     Run appropriate refreshes based on current time/day
@@ -2173,10 +2207,21 @@ async def start_scheduler():
             replace_existing=True
         )
         
+        # Auto-dismiss old signals every hour
+        scheduler.add_job(
+            auto_dismiss_old_signals,
+            'interval',
+            hours=1,
+            id='auto_dismiss_signals',
+            name='Auto-Dismiss Old Signals',
+            replace_existing=True
+        )
+        
         scheduler.start()
         logger.info("✅ APScheduler started - bias refresh scheduled for 9:45 AM ET")
         logger.info("✅ Savita auto-search scheduled for 8:00 AM ET (days 12-23)")
         logger.info("✅ BTC Bottom Signals refresh scheduled every 5 minutes")
+        logger.info("✅ Auto-dismiss old signals scheduled every hour")
         
         # ALSO start the scanner loop (APScheduler doesn't handle the variable-interval scanners)
         asyncio.create_task(_scanner_loop())
