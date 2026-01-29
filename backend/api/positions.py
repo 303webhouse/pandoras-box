@@ -158,6 +158,7 @@ async def accept_signal(signal_id: str, request: AcceptSignalRequest):
             "direction": signal_data.get('direction'),
             "entry_price": signal_data.get('entry_price'),  # Recommended entry
             "actual_entry_price": request.actual_entry_price,  # Actual entry
+            "quantity": request.quantity,  # ADD QUANTITY HERE
             "entry_time": datetime.now(),
             "stop_loss": request.stop_loss or signal_data.get('stop_loss'),
             "target_1": request.target_1 or signal_data.get('target_1'),
@@ -397,6 +398,7 @@ async def create_manual_position(request: ManualPositionRequest):
             "ticker": request.ticker,
             "direction": request.direction,
             "entry_price": request.entry_price,
+            "quantity": request.quantity,  # ADD QUANTITY HERE
             "entry_time": datetime.now(),
             "stop_loss": request.stop_loss,
             "target_1": request.target_1,
@@ -908,20 +910,31 @@ async def get_active_signals_api():
             
             if ticker not in ticker_groups:
                 ticker_groups[ticker] = sig.copy()
-                ticker_groups[ticker]['strategies'] = [sig.get('strategy', 'Unknown')]
-                ticker_groups[ticker]['signal_types'] = [sig.get('signal_type', 'SIGNAL')]
+                # Initialize strategies as a list
+                current_strategy = sig.get('strategy', 'Unknown')
+                ticker_groups[ticker]['strategies'] = [current_strategy] if current_strategy else []
+                current_sig_type = sig.get('signal_type', 'SIGNAL')
+                ticker_groups[ticker]['signal_types'] = [current_sig_type] if current_sig_type else []
             else:
                 # Merge into existing signal for this ticker
                 existing = ticker_groups[ticker]
                 
+                # Ensure strategies is a list (defensive)
+                if not isinstance(existing.get('strategies'), list):
+                    existing['strategies'] = [existing.get('strategy', 'Unknown')]
+                
                 # Add strategy if not already listed
                 strategy = sig.get('strategy', 'Unknown')
-                if strategy not in existing['strategies']:
+                if strategy and strategy not in existing['strategies']:
                     existing['strategies'].append(strategy)
+                
+                # Ensure signal_types is a list (defensive)
+                if not isinstance(existing.get('signal_types'), list):
+                    existing['signal_types'] = [existing.get('signal_type', 'SIGNAL')]
                 
                 # Add signal type if not already listed
                 sig_type = sig.get('signal_type', 'SIGNAL')
-                if sig_type not in existing['signal_types']:
+                if sig_type and sig_type not in existing['signal_types']:
                     existing['signal_types'].append(sig_type)
                 
                 # Keep the highest score
