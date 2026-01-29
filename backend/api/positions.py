@@ -703,6 +703,23 @@ async def debug_positions_db():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/positions/force-sync")
+async def force_sync_positions():
+    """
+    Manually trigger position sync from database to memory
+    """
+    try:
+        await sync_positions_from_database()
+        return {
+            "status": "success",
+            "message": f"Synced {len(_open_positions)} positions from database",
+            "positions": _open_positions
+        }
+    except Exception as e:
+        logger.error(f"Error forcing position sync: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/position/update")
 async def update_position(update: PositionUpdate):
     """
