@@ -257,16 +257,21 @@ async def create_position(signal_id: str, position_data: Dict[Any, Any]):
         await conn.execute("""
             INSERT INTO positions (
                 signal_id, ticker, direction, entry_price, entry_time,
-                stop_loss, target_1, status, broker
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                stop_loss, target_1, quantity, strategy, asset_class, 
+                signal_type, status, broker
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
         """,
             signal_id,
             position_data['ticker'],
             position_data['direction'],
             position_data.get('entry_price'),
             position_data.get('entry_time'),
-            position_data['stop_loss'],
-            position_data['target_1'],
+            position_data.get('stop_loss'),
+            position_data.get('target_1'),
+            position_data.get('quantity'),           # ADD QUANTITY
+            position_data.get('strategy'),           # ADD STRATEGY
+            position_data.get('asset_class'),        # ADD ASSET CLASS
+            position_data.get('signal_type'),        # ADD SIGNAL TYPE
             'OPEN',
             position_data.get('broker', 'MANUAL')
         )

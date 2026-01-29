@@ -915,6 +915,12 @@ async def get_active_signals_api():
                 ticker_groups[ticker]['strategies'] = [current_strategy] if current_strategy else []
                 current_sig_type = sig.get('signal_type', 'SIGNAL')
                 ticker_groups[ticker]['signal_types'] = [current_sig_type] if current_sig_type else []
+                # Ensure triggering_factors is a list
+                tf = ticker_groups[ticker].get('triggering_factors')
+                if tf and isinstance(tf, str):
+                    ticker_groups[ticker]['triggering_factors'] = [tf]
+                elif not isinstance(tf, list):
+                    ticker_groups[ticker]['triggering_factors'] = []
             else:
                 # Merge into existing signal for this ticker
                 existing = ticker_groups[ticker]
@@ -945,10 +951,23 @@ async def get_active_signals_api():
                     existing['priority'] = sig.get('priority', 'MEDIUM')
                 
                 # Merge triggering factors (combine unique factors)
-                if sig.get('triggering_factors'):
+                new_factors = sig.get('triggering_factors')
+                if new_factors:
+                    # Ensure new_factors is a list
+                    if isinstance(new_factors, str):
+                        new_factors = [new_factors]
+                    elif not isinstance(new_factors, list):
+                        new_factors = []
+                    
+                    # Ensure existing_factors is a list
                     existing_factors = existing.get('triggering_factors', [])
-                    for factor in sig['triggering_factors']:
-                        if factor not in existing_factors:
+                    if isinstance(existing_factors, str):
+                        existing_factors = [existing_factors]
+                    elif not isinstance(existing_factors, list):
+                        existing_factors = []
+                    
+                    for factor in new_factors:
+                        if factor and factor not in existing_factors:
                             existing_factors.append(factor)
                     existing['triggering_factors'] = existing_factors
                 
