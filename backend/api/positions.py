@@ -473,6 +473,84 @@ async def create_manual_position(request: ManualPositionRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class UpdatePositionRequest(BaseModel):
+    """Request to update a position"""
+    quantity: Optional[int] = None
+    stop_loss: Optional[float] = None
+    target_1: Optional[float] = None
+    notes: Optional[str] = None
+
+
+@router.patch("/positions/{position_id}")
+async def update_position(position_id: int, request: UpdatePositionRequest):
+    """
+    Update an existing position (quantity, stops, targets, notes).
+    """
+    try:
+        # Find in memory
+        position = None
+        for p in _open_positions:
+            if p["id"] == position_id:
+                position = p
+                break
+        
+        if not position:
+            raise HTTPException(status_code=404, detail="Position not found")
+        
+        # Update memory
+        if request.quantity is not None:
+            position["quantity"] = request.quantity
+        if request.stop_loss is not None:
+            position["stop_loss"] = request.stop_loss
+        if request.target_1 is not None:
+            position["target_1"] = request.target_1
+        if request.notes is not None:
+            position["notes"] = request.notes
+        
+        # Update database
+        try:
+            pool = await get_postgres_client()
+            async with pool.acquire() as conn:
+                updates = []
+                params = []
+                param_idx = 1
+                
+                if request.quantity is not None:
+                    updates.append(f"quantity = ${param_idx}")
+                    params.append(request.quantity)
+                    param_idx += 1
+                if request.stop_loss is not None:
+                    updates.append(f"stop_loss = ${param_idx}")
+                    params.append(request.stop_loss)
+                    param_idx += 1
+                if request.target_1 is not None:
+                    updates.append(f"target_1 = ${param_idx}")
+                    params.append(request.target_1)
+                    param_idx += 1
+                if request.notes is not None:
+                    updates.append(f"notes = ${param_idx}")
+                    params.append(request.notes)
+                    param_idx += 1
+                
+                if updates:
+                    params.append(position_id)
+                    query = f"UPDATE positions SET {', '.join(updates)} WHERE id = ${param_idx}"
+                    await conn.execute(query, *params)
+                    
+        except Exception as db_err:
+            logger.warning(f"Failed to update position in DB: {db_err}")
+        
+        logger.info(f"📝 Position {position_id} updated: qty={request.quantity}, stop={request.stop_loss}, target={request.target_1}")
+        
+        return {"status": "success", "position": position}
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating position: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 async def sync_positions_from_database():
     """
     Sync open positions from database to in-memory cache.

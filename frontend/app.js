@@ -2111,11 +2111,16 @@ function createSignalCard(signal) {
     
     const typeWithKb = wrapWithKbLink(typeLabel);
     
-    // Format timestamp as "Jan 28, 1:45 PM"
+    // Format timestamp as "Jan 28, 1:45 PM" (convert from UTC)
     let timestampStr = '';
     if (signal.timestamp || signal.created_at) {
         try {
-            const signalDate = new Date(signal.timestamp || signal.created_at);
+            // Server stores UTC without 'Z', so add it for proper parsing
+            let timeStr = signal.timestamp || signal.created_at;
+            if (!timeStr.endsWith('Z') && !timeStr.includes('+') && !timeStr.includes('-', 10)) {
+                timeStr += 'Z';  // Treat as UTC
+            }
+            const signalDate = new Date(timeStr);
             const options = { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true };
             timestampStr = signalDate.toLocaleString('en-US', options);
         } catch (e) {
@@ -4848,11 +4853,16 @@ function renderPositionsEnhanced() {
         const pnlPct = ((currentPrice - pos.entry_price) / pos.entry_price * 100);
         const pnlPctStr = (pnlPct >= 0 ? '+' : '') + pnlPct.toFixed(2) + '%';
         
-        // Format entry time as "Jan 28, 1:45 PM"
+        // Format entry time as "Jan 28, 1:45 PM" (convert from UTC)
         let entryTimeStr = '';
         if (pos.entry_time) {
             try {
-                const entryDate = new Date(pos.entry_time);
+                // Server stores UTC without 'Z', so add it for proper parsing
+                let timeStr = pos.entry_time;
+                if (!timeStr.endsWith('Z') && !timeStr.includes('+') && !timeStr.includes('-', 10)) {
+                    timeStr += 'Z';  // Treat as UTC
+                }
+                const entryDate = new Date(timeStr);
                 const options = { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true };
                 entryTimeStr = entryDate.toLocaleString('en-US', options);
             } catch (e) {
@@ -4878,7 +4888,7 @@ function renderPositionsEnhanced() {
                     </div>
                     <div class="position-detail">
                         <div class="position-detail-label">Qty</div>
-                        <div class="position-detail-value">${pos.quantity || '1'}</div>
+                        <div class="position-detail-value">${pos.quantity || '--'}</div>
                     </div>
                     <div class="position-detail">
                         <div class="position-detail-label">Stop</div>
