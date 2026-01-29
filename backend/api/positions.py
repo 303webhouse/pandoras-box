@@ -899,6 +899,57 @@ async def get_active_signals_api():
         except Exception as e:
             logger.warning(f"Could not filter open positions: {e}")
         
+        # Deduplicate: Group by ticker and merge multiple strategies into one signal
+        ticker_groups = {}
+        for sig in signals:
+            ticker = sig.get('ticker', '').upper()
+            if not ticker:
+                continue
+            
+            if ticker not in ticker_groups:
+                ticker_groups[ticker] = sig.copy()
+                ticker_groups[ticker]['strategies'] = [sig.get('strategy', 'Unknown')]
+                ticker_groups[ticker]['signal_types'] = [sig.get('signal_type', 'SIGNAL')]
+            else:
+                # Merge into existing signal for this ticker
+                existing = ticker_groups[ticker]
+                
+                # Add strategy if not already listed
+                strategy = sig.get('strategy', 'Unknown')
+                if strategy not in existing['strategies']:
+                    existing['strategies'].append(strategy)
+                
+                # Add signal type if not already listed
+                sig_type = sig.get('signal_type', 'SIGNAL')
+                if sig_type not in existing['signal_types']:
+                    existing['signal_types'].append(sig_type)
+                
+                # Keep the highest score
+                if sig.get('score', 0) > existing.get('score', 0):
+                    existing['score'] = sig['score']
+                    existing['scoreTier'] = sig.get('scoreTier', 'MODERATE')
+                    existing['confidence'] = sig.get('confidence', 'MEDIUM')
+                    existing['priority'] = sig.get('priority', 'MEDIUM')
+                
+                # Merge triggering factors (combine unique factors)
+                if sig.get('triggering_factors'):
+                    existing_factors = existing.get('triggering_factors', [])
+                    for factor in sig['triggering_factors']:
+                        if factor not in existing_factors:
+                            existing_factors.append(factor)
+                    existing['triggering_factors'] = existing_factors
+                
+                # Keep most recent timestamp
+                ts_new = sig.get('timestamp') or sig.get('created_at') or ''
+                ts_existing = existing.get('timestamp') or existing.get('created_at') or ''
+                if ts_new > ts_existing:
+                    existing['timestamp'] = ts_new
+                    existing['created_at'] = ts_new
+        
+        # Convert back to list
+        signals = list(ticker_groups.values())
+        logger.info(f"📊 Deduplicated to {len(signals)} unique tickers")
+        
         # Sort by recency first (newest signals on top), then by score as tiebreaker
         # This ensures fresh signals are always visible even if older ones scored higher
         def get_sort_key(sig):
