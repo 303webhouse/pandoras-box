@@ -5640,3 +5640,20 @@ h3 .kb-link::after {
         font-size: 24px;
     }
 }
+
+/* Timestamps for signals and positions */
+.signal-timestamp, .position-timestamp {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    margin: 4px 0 8px 0;
+    font-style: italic;
+}
+
+.position-strategy {
+    font-size: 0.75rem;
+    color: var(--accent-teal);
+    margin-bottom: 8px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
