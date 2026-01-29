@@ -2099,8 +2099,16 @@ function createSignalCard(signal) {
     const formatPrice = (val) => val ? parseFloat(val).toFixed(2) : '-';
     const formatRR = (val) => val ? `${parseFloat(val).toFixed(1)}:1` : '-';
     
-    // Wrap strategy and signal type with KB links
-    const strategyWithKb = wrapWithKbLink(signal.strategy || 'Unknown');
+    // Handle multiple strategies (deduplicated signals)
+    let strategiesHtml = '';
+    if (signal.strategies && signal.strategies.length > 1) {
+        // Multiple strategies - show all
+        strategiesHtml = signal.strategies.map(s => wrapWithKbLink(s)).join(' + ');
+    } else {
+        // Single strategy
+        strategiesHtml = wrapWithKbLink(signal.strategy || 'Unknown');
+    }
+    
     const typeWithKb = wrapWithKbLink(typeLabel);
     
     // Format timestamp as "Jan 28, 1:45 PM"
@@ -2123,7 +2131,7 @@ function createSignalCard(signal) {
             <div class="signal-header">
                 <div>
                     <div class="signal-type ${signal.signal_type || ''}">${typeWithKb}</div>
-                    <div class="signal-strategy">${strategyWithKb}</div>
+                    <div class="signal-strategy">${strategiesHtml}</div>
                 </div>
                 <div class="signal-ticker ticker-link" data-action="view-chart">${signal.ticker}</div>
             </div>
