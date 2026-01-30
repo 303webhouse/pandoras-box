@@ -1,6 +1,39 @@
-﻿# Crypto Scalper (separate project)
+# Crypto Scalper (separate project)
 crypto-scalper/
 
 # Python cache
 __pycache__/
 *.pyc
+*.pyo
+
+# Environment variables (NEVER commit secrets)
+.env
+*.env
+config/.env
+
+# Logs
+*.log
+bot_startup.log
+
+# Backups
+*.backup.*
+*.bak
+
+# Archives
+*.zip
+
+# Debug/diagnostic output
+diagnose_output.json
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+
+# Local scripts (machine-specific)
+start_discord_bot.bat
+start_discord_bot.ps1
+start_discord_bot_silent.vbs
