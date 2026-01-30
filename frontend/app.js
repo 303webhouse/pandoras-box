@@ -2725,76 +2725,130 @@ async function loadWatchlist() {
     }
 }
 
-function renderWatchlist() {
+async function renderWatchlist() {
     const container = document.getElementById('watchlistTickers');
     const countEl = document.getElementById('watchlistCount');
-    
+
     if (!container) return;
-    
+
     countEl.textContent = watchlistTickers.length;
-    
-    if (Object.keys(watchlistSectors).length === 0) {
+
+    if (watchlistTickers.length === 0) {
         container.innerHTML = '<p class="empty-state">No tickers in watchlist</p>';
         return;
     }
-    
-    // Sort sectors by strength rank if available
-    const sortedSectors = Object.entries(watchlistSectors)
-        .map(([name, data]) => ({
-            name,
-            ...data,
-            strength: sectorStrength[name]?.strength || 0,
-            trend: sectorStrength[name]?.trend || 'neutral',
-            rank: sectorStrength[name]?.rank || 999
-        }))
-        .sort((a, b) => a.rank - b.rank);
-    
-    // Build sector-organized HTML
-    let html = '';
-    for (const sector of sortedSectors) {
-        if (!sector.tickers || sector.tickers.length === 0) continue;
-        
-        const strengthClass = sector.trend === 'leading' ? 'sector-leading' : 
-                             sector.trend === 'lagging' ? 'sector-lagging' : '';
-        const strengthIcon = sector.trend === 'leading' ? '↑' : 
-                            sector.trend === 'lagging' ? '↓' : '';
-        
-        html += `
-            <div class="watchlist-sector ${strengthClass}">
-                <div class="sector-header">
-                    <span class="sector-name">${sector.name}</span>
-                    ${sector.etf ? `<span class="sector-etf">${sector.etf}</span>` : ''}
-                    ${strengthIcon ? `<span class="sector-trend ${sector.trend}">${strengthIcon}</span>` : ''}
-                </div>
-                <div class="sector-tickers">
-                    ${sector.tickers.map(ticker => `
-                        <div class="watchlist-ticker" data-ticker="${ticker}">
-                            <span class="ticker-name">${ticker}</span>
-                            <span class="remove-ticker" data-ticker="${ticker}">✕</span>
+
+    // Show loading state
+    container.innerHTML = '<p class="empty-state">Loading prices...</p>';
+
+    try {
+        // Fetch prices and signals in parallel
+        const pricePromises = watchlistTickers.map(ticker =>
+            fetch(`${API_URL}/hybrid/price/${ticker}`)
+                .then(r => r.json())
+                .then(data => ({ ticker, price: data.price, change_pct: data.change_pct }))
+                .catch(() => ({ ticker, price: null, change_pct: null }))
+        );
+
+        const signalsResponse = await fetch(`${API_URL}/signals/active`);
+        const signalsData = await signalsResponse.json();
+        const activeSignals = signalsData.signals || [];
+
+        const priceData = await Promise.all(pricePromises);
+
+        // Build card-based HTML
+        let html = '<div class="watchlist-cards">';
+
+        for (const data of priceData) {
+            const ticker = data.ticker;
+            const price = data.price;
+            const changePct = data.change_pct;
+
+            // Find active signals for this ticker
+            const tickerSignals = activeSignals.filter(s => s.ticker === ticker);
+
+            let signalBadges = '';
+            tickerSignals.forEach(signal => {
+                const badgeClass = signal.direction === 'LONG' ? 'signal-badge-long' : 'signal-badge-short';
+                signalBadges += `<span class="signal-badge ${badgeClass}">${signal.direction}</span>`;
+            });
+
+            const changeClass = changePct >= 0 ? 'price-up' : 'price-down';
+            const changeSign = changePct >= 0 ? '+' : '';
+
+            html += `
+                <div class="watchlist-ticker-card" data-ticker="${ticker}">
+                    <div class="ticker-main">
+                        <div class="ticker-symbol">${ticker}</div>
+                        <div class="ticker-signals">${signalBadges || '<span class="no-signal">—</span>'}</div>
+                    </div>
+                    <div class="ticker-price">
+                        <div class="current-price">${price ? `$${price.toFixed(2)}` : '—'}</div>
+                        <div class="price-change ${changeClass}">
+                            ${changePct !== null ? `${changeSign}${changePct.toFixed(2)}%` : '—'}
                         </div>
-                    `).join('')}
+                    </div>
+                    <div class="ticker-actions">
+                        <button class="ticker-action-btn analyze" data-ticker="${ticker}" title="Analyze">🔬</button>
+                        <button class="ticker-action-btn chart" data-ticker="${ticker}" title="Chart">📊</button>
+                        <button class="ticker-action-btn remove" data-ticker="${ticker}" title="Remove">✕</button>
+                    </div>
                 </div>
-            </div>
-        `;
+            `;
+        }
+
+        html += '</div>';
+        container.innerHTML = html;
+
+        // Attach event listeners
+        container.querySelectorAll('.ticker-action-btn.analyze').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const ticker = e.target.dataset.ticker;
+                analyzeTicker(ticker);
+            });
+        });
+
+        container.querySelectorAll('.ticker-action-btn.chart').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const ticker = e.target.dataset.ticker;
+                showChart(ticker);
+            });
+        });
+
+        container.querySelectorAll('.ticker-action-btn.remove').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const ticker = e.target.dataset.ticker;
+                removeFromWatchlist(ticker);
+            });
+        });
+
+    } catch (error) {
+        console.error('Error rendering watchlist:', error);
+        container.innerHTML = '<p class="empty-state">Error loading watchlist</p>';
     }
-    
-    container.innerHTML = html;
-    
-    // Attach click events
-    container.querySelectorAll('.ticker-name').forEach(el => {
-        el.addEventListener('click', (e) => {
-            e.stopPropagation();
-            const ticker = e.target.closest('.watchlist-ticker').dataset.ticker;
-            changeChartSymbol(ticker);
-        });
-    });
-    
-    container.querySelectorAll('.remove-ticker').forEach(el => {
-        el.addEventListener('click', (e) => {
-            e.stopPropagation();
-            removeTickerFromWatchlist(e.target.dataset.ticker);
-        });
-    });
+}
+
+// Helper functions for watchlist actions
+function analyzeTicker(ticker) {
+    // Populate the analyzer input and trigger analysis
+    const input = document.getElementById('analyzeTickerInput');
+    const btn = document.getElementById('analyzeTickerBtn');
+
+    if (input && btn) {
+        input.value = ticker;
+        btn.click();
+    }
+}
+
+function showChart(ticker) {
+    changeChartSymbol(ticker);
+}
+
+function removeFromWatchlist(ticker) {
+    removeTickerFromWatchlist(ticker);
 }
 
 async function addTickerToWatchlist() {
@@ -2923,7 +2977,10 @@ async function analyzeTicker() {
         
         // Calculate and render aggregate verdict with bias alignment
         renderAggregateVerdict(ticker, hunterData, hybridData, biasData);
-        
+
+        // Populate enhanced context cards
+        await analyzeTickerEnhanced(ticker);
+
         // Also switch chart to this ticker
         changeChartSymbol(ticker);
         
@@ -3889,6 +3946,140 @@ function renderHybridTable(results) {
     }).join('');
 }
 
+// Enhanced Analyzer with Context Cards
+async function analyzeTickerEnhanced(ticker) {
+    const contextContainer = document.getElementById('analyzerContext');
+    if (!contextContainer) return;
+
+    try {
+        // Show context section
+        contextContainer.style.display = 'grid';
+
+        // Fetch all data in parallel
+        const [ctaResponse, sectorResponse, biasResponse, flowResponse, signalsResponse, priceResponse] = await Promise.all([
+            fetch(`${API_URL}/cta/analyze/${ticker}`),
+            fetch(`${API_URL}/hybrid/combined/${ticker}`),
+            fetch(`${API_URL}/bias-auto/status`),
+            fetch(`${API_URL}/flow/ticker/${ticker}`),
+            fetch(`${API_URL}/signals/ticker/${ticker}`),
+            fetch(`${API_URL}/hybrid/price/${ticker}`)
+        ]);
+
+        const ctaData = await ctaResponse.json();
+        const sectorData = await sectorResponse.json();
+        const biasData = await biasResponse.json();
+        const flowData = await flowResponse.json();
+        const signalsData = await signalsResponse.json();
+        const priceData = await priceResponse.json();
+
+        // Populate CTA Zone Card
+        const ctaAnalysis = ctaData.cta_analysis || {};
+        const zoneStatus = document.getElementById('contextZoneStatus');
+        const zoneSMAs = document.getElementById('contextZoneSMAs');
+
+        if (zoneStatus) {
+            const zoneLabel = ctaAnalysis.cta_zone || 'UNKNOWN';
+            let zoneClass = 'zone-neutral';
+            if (zoneLabel === 'MAX_LONG') zoneClass = 'zone-max-long';
+            else if (zoneLabel === 'RISK_ON') zoneClass = 'zone-risk-on';
+            else if (zoneLabel === 'NEUTRAL') zoneClass = 'zone-neutral';
+            else if (zoneLabel === 'RISK_OFF') zoneClass = 'zone-risk-off';
+            else if (zoneLabel === 'CAPITULATION') zoneClass = 'zone-capitulation';
+
+            zoneStatus.innerHTML = `<span class="zone-label ${zoneClass}">${zoneLabel}</span>`;
+        }
+
+        if (zoneSMAs) {
+            document.getElementById('sma20').textContent = ctaAnalysis.sma20 ? `$${ctaAnalysis.sma20.toFixed(2)}` : '--';
+            document.getElementById('sma50').textContent = ctaAnalysis.sma50 ? `$${ctaAnalysis.sma50.toFixed(2)}` : '--';
+            document.getElementById('sma120').textContent = ctaAnalysis.sma120 ? `$${ctaAnalysis.sma120.toFixed(2)}` : '--';
+        }
+
+        // Populate Sector Info Card
+        const meta = sectorData.metadata || {};
+        document.getElementById('sectorName').textContent = meta.sector || '--';
+        document.getElementById('sectorETF').textContent = meta.sector_etf || '--';
+
+        // Populate Bias Alignment Card
+        const dailyBias = biasData?.data?.daily?.level || '';
+        const dailyIsToro = dailyBias.includes('TORO');
+
+        const longAlignment = document.getElementById('longAlignment');
+        const shortAlignment = document.getElementById('shortAlignment');
+
+        if (longAlignment) {
+            longAlignment.textContent = dailyIsToro ? '✅ Aligned' : '⚠️ Divergent';
+            longAlignment.className = 'alignment-status ' + (dailyIsToro ? 'aligned' : 'divergent');
+        }
+
+        if (shortAlignment) {
+            shortAlignment.textContent = !dailyIsToro ? '✅ Aligned' : '⚠️ Divergent';
+            shortAlignment.className = 'alignment-status ' + (!dailyIsToro ? 'aligned' : 'divergent');
+        }
+
+        // Populate Risk Levels Card
+        const price = priceData.price || 0;
+        const atr = ctaAnalysis.atr || 0;
+
+        document.getElementById('atrValue').textContent = atr ? `$${atr.toFixed(2)}` : '--';
+        document.getElementById('stopDistance').textContent = atr ? `$${(atr * 2).toFixed(2)}` : '--';
+        document.getElementById('targetDistance').textContent = atr ? `$${(atr * 3).toFixed(2)}` : '--';
+
+        // Populate Recent Flow Card
+        const flowSummary = document.getElementById('contextFlowSummary');
+        if (flowData.flow && flowData.flow.length > 0) {
+            const recentFlow = flowData.flow.slice(0, 3);
+            flowSummary.innerHTML = recentFlow.map(f => `
+                <div class="flow-item">
+                    <span class="flow-direction ${f.sentiment === 'BULLISH' ? 'bullish' : 'bearish'}">
+                        ${f.sentiment === 'BULLISH' ? '🟢' : '🔴'} ${f.type}
+                    </span>
+                    <span class="flow-score">${f.notability_score}/100</span>
+                </div>
+            `).join('');
+        } else {
+            flowSummary.innerHTML = '<p class="flow-empty">No recent flow data</p>';
+        }
+
+        // Populate Recent Signals Card
+        const signalsSummary = document.getElementById('contextSignalsSummary');
+        if (signalsData.signals && signalsData.signals.length > 0) {
+            const recentSignals = signalsData.signals.slice(0, 3);
+            signalsSummary.innerHTML = recentSignals.map(s => `
+                <div class="signal-item">
+                    <span class="signal-strategy">${s.strategy_name}</span>
+                    <span class="signal-direction ${s.direction === 'LONG' ? 'long' : 'short'}">
+                        ${s.direction}
+                    </span>
+                </div>
+            `).join('');
+        } else {
+            signalsSummary.innerHTML = '<p class="signals-empty">No recent signals</p>';
+        }
+
+        // Wire up action buttons
+        const createIdeaBtn = document.getElementById('createTradeIdeaBtn');
+        const addWatchlistBtn = document.getElementById('addToWatchlistBtn');
+
+        if (createIdeaBtn) {
+            createIdeaBtn.onclick = () => {
+                console.log('Create trade idea for', ticker);
+                // This would open a modal or navigate to trade idea creation
+            };
+        }
+
+        if (addWatchlistBtn) {
+            addWatchlistBtn.onclick = () => {
+                addTickerToWatchlist();
+            };
+        }
+
+    } catch (error) {
+        console.error('Error in enhanced analyzer:', error);
+        contextContainer.style.display = 'none';
+    }
+}
+
 
 // ==========================================
 // BTC BOTTOM SIGNALS DASHBOARD (ALL 9 AUTOMATED)
@@ -4147,13 +4338,15 @@ async function resetBtcSignals() {
     }
 }
 
+// MOVED TO CRYPTO-SCALPER: BTC session functions relocated to dedicated crypto-scalper application
+/*
 async function loadBtcSessions() {
     try {
         const response = await fetch(`${API_URL}/btc/sessions`);
         const data = await response.json();
-        
+
         renderBtcSessions(data);
-        
+
     } catch (error) {
         console.error('Error loading BTC sessions:', error);
     }
@@ -4162,9 +4355,9 @@ async function loadBtcSessions() {
 function renderBtcSessions(data) {
     const currentContainer = document.getElementById('btcSessionCurrent');
     const listContainer = document.getElementById('btcSessionList');
-    
+
     if (!currentContainer || !listContainer) return;
-    
+
     // Current session
     if (data.current_session && data.current_session.active) {
         currentContainer.classList.add('active');
@@ -4180,11 +4373,11 @@ function renderBtcSessions(data) {
             <span class="session-status">No active key session</span>
         `;
     }
-    
+
     // Session list
     const sessions = data.sessions || {};
     const sessionIds = Object.keys(sessions);
-    
+
     listContainer.innerHTML = sessionIds.map(id => {
         const session = sessions[id];
         return `
@@ -4196,6 +4389,7 @@ function renderBtcSessions(data) {
         `;
     }).join('');
 }
+*/
 
 
 // ==========================================
@@ -4615,6 +4809,191 @@ async function checkFlowConfirmation(ticker, direction) {
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', () => {
     setTimeout(initOptionsFlow, 1100);
+});
+
+
+// ==========================================
+// STRATEGY FILTER SYSTEM
+// ==========================================
+
+const strategyFilters = {
+    strategies: new Set([
+        'golden_touch', 'pullback_entry', 'taurus_signal', 'triple_line',
+        'two_close_vol', 'zone_upgrade', 'exhaustion', 'ursa_signal',
+        'apis_call', 'kodiak_call'
+    ]),
+    directions: new Set(['LONG', 'SHORT']),
+    minScore: 0
+};
+
+function initStrategyFilters() {
+    const selectAllBtn = document.getElementById('selectAllStrategies');
+    const clearAllBtn = document.getElementById('clearAllStrategies');
+    const scoreSlider = document.getElementById('scoreThreshold');
+    const scoreValue = document.getElementById('scoreValue');
+    const filterLong = document.getElementById('filterLong');
+    const filterShort = document.getElementById('filterShort');
+    const strategyCheckboxes = document.querySelectorAll('.strategy-checkbox');
+
+    // Select All button
+    if (selectAllBtn) {
+        selectAllBtn.addEventListener('click', () => {
+            strategyCheckboxes.forEach(checkbox => {
+                checkbox.checked = true;
+                strategyFilters.strategies.add(checkbox.dataset.strategy);
+            });
+            updateFilterSummary();
+            applyFiltersAndRefresh();
+        });
+    }
+
+    // Clear All button
+    if (clearAllBtn) {
+        clearAllBtn.addEventListener('click', () => {
+            strategyCheckboxes.forEach(checkbox => {
+                checkbox.checked = false;
+            });
+            strategyFilters.strategies.clear();
+            updateFilterSummary();
+            applyFiltersAndRefresh();
+        });
+    }
+
+    // Strategy checkboxes
+    strategyCheckboxes.forEach(checkbox => {
+        checkbox.addEventListener('change', (e) => {
+            const strategy = e.target.dataset.strategy;
+            if (e.target.checked) {
+                strategyFilters.strategies.add(strategy);
+            } else {
+                strategyFilters.strategies.delete(strategy);
+            }
+            updateFilterSummary();
+            applyFiltersAndRefresh();
+        });
+    });
+
+    // Score slider
+    if (scoreSlider && scoreValue) {
+        scoreSlider.addEventListener('input', (e) => {
+            const value = parseInt(e.target.value);
+            scoreValue.textContent = value;
+            strategyFilters.minScore = value;
+            document.getElementById('activeMinScore').textContent = value;
+            applyFiltersAndRefresh();
+        });
+    }
+
+    // Direction filters
+    if (filterLong) {
+        filterLong.addEventListener('change', (e) => {
+            if (e.target.checked) {
+                strategyFilters.directions.add('LONG');
+            } else {
+                strategyFilters.directions.delete('LONG');
+            }
+            updateFilterSummary();
+            applyFiltersAndRefresh();
+        });
+    }
+
+    if (filterShort) {
+        filterShort.addEventListener('change', (e) => {
+            if (e.target.checked) {
+                strategyFilters.directions.add('SHORT');
+            } else {
+                strategyFilters.directions.delete('SHORT');
+            }
+            updateFilterSummary();
+            applyFiltersAndRefresh();
+        });
+    }
+
+    // Initial summary
+    updateFilterSummary();
+}
+
+function updateFilterSummary() {
+    const strategyCountEl = document.getElementById('activeStrategyCount');
+    const directionsEl = document.getElementById('activeDirections');
+    const minScoreEl = document.getElementById('activeMinScore');
+
+    if (strategyCountEl) {
+        strategyCountEl.textContent = strategyFilters.strategies.size;
+    }
+
+    if (directionsEl) {
+        const dirs = Array.from(strategyFilters.directions);
+        if (dirs.length === 2) {
+            directionsEl.textContent = 'LONG + SHORT';
+        } else if (dirs.length === 1) {
+            directionsEl.textContent = dirs[0];
+        } else {
+            directionsEl.textContent = 'NONE';
+        }
+    }
+
+    if (minScoreEl) {
+        minScoreEl.textContent = strategyFilters.minScore;
+    }
+}
+
+function applyFiltersAndRefresh() {
+    // Filter and re-render trade ideas
+    filterTradeIdeas();
+}
+
+function filterTradeIdeas() {
+    // Get all signals
+    const currentSignals = activeAssetType === 'equity' ? signals.equity : signals.crypto;
+
+    // Apply filters
+    const filtered = currentSignals.filter(signal => {
+        // Check strategy
+        const signalStrategy = signal.strategy_name ? signal.strategy_name.toLowerCase().replace(/\s+/g, '_').replace(/\+/g, '') : '';
+        const matchesStrategy = strategyFilters.strategies.size === 0 || strategyFilters.strategies.has(signalStrategy);
+
+        // Check direction
+        const matchesDirection = strategyFilters.directions.has(signal.direction);
+
+        // Check score
+        const matchesScore = (signal.score || 0) >= strategyFilters.minScore;
+
+        return matchesStrategy && matchesDirection && matchesScore;
+    });
+
+    // Update display
+    renderFilteredSignals(filtered);
+    updateEmptyState(filtered.length);
+}
+
+function renderFilteredSignals(filtered) {
+    // Use the existing renderSignals logic but with filtered data
+    const container = document.getElementById('tradeSignals');
+    if (!container) return;
+
+    if (filtered.length === 0) {
+        container.innerHTML = '<p class="empty-state">No signals match current filters</p>';
+        return;
+    }
+
+    // Render top 10 signals
+    const top10 = filtered.slice(0, 10);
+    container.innerHTML = top10.map(signal => createSignalCard(signal)).join('');
+}
+
+function updateEmptyState(count) {
+    const container = document.getElementById('tradeSignals');
+    if (!container) return;
+
+    if (count === 0) {
+        container.innerHTML = '<p class="empty-state">No signals match current filters</p>';
+    }
+}
+
+// Initialize strategy filters on page load
+document.addEventListener('DOMContentLoaded', () => {
+    setTimeout(initStrategyFilters, 500);
 });
 
 

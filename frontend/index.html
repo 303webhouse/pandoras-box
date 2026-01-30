@@ -249,7 +249,7 @@
                         <h3>📊 Technical</h3>
                         <div class="gauge-signal" id="techSignal">--</div>
                         <div class="gauge-score" id="techScore">
-                            <span class="buy-count">-- Buy</span> / 
+                            <span class="buy-count">-- Buy</span> /
                             <span class="sell-count">-- Sell</span>
                         </div>
                         <div class="gauge-details" id="techDetails">
@@ -269,59 +269,230 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- Enhanced Context Cards -->
+                <div class="analyzer-context" id="analyzerContext" style="display: none;">
+                    <!-- CTA Zone Card -->
+                    <div class="context-card cta-zone-card">
+                        <h3>📊 CTA Zone</h3>
+                        <div class="zone-status" id="contextZoneStatus">
+                            <span class="zone-label">--</span>
+                        </div>
+                        <div class="zone-smas" id="contextZoneSMAs">
+                            <div class="sma-row">
+                                <span class="sma-label">20 SMA:</span>
+                                <span class="sma-value" id="sma20">--</span>
+                            </div>
+                            <div class="sma-row">
+                                <span class="sma-label">50 SMA:</span>
+                                <span class="sma-value" id="sma50">--</span>
+                            </div>
+                            <div class="sma-row">
+                                <span class="sma-label">120 SMA:</span>
+                                <span class="sma-value" id="sma120">--</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Sector Info Card -->
+                    <div class="context-card sector-card">
+                        <h3>🏢 Sector Info</h3>
+                        <div class="sector-info" id="contextSectorInfo">
+                            <div class="info-row">
+                                <span class="info-label">Sector:</span>
+                                <span class="info-value" id="sectorName">--</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">ETF:</span>
+                                <span class="info-value" id="sectorETF">--</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Bias Alignment Card -->
+                    <div class="context-card alignment-card">
+                        <h3>⚖️ Bias Alignment</h3>
+                        <div class="alignment-info" id="contextAlignmentInfo">
+                            <div class="alignment-row">
+                                <span class="alignment-label">LONG trades:</span>
+                                <span class="alignment-status" id="longAlignment">--</span>
+                            </div>
+                            <div class="alignment-row">
+                                <span class="alignment-label">SHORT trades:</span>
+                                <span class="alignment-status" id="shortAlignment">--</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Risk Levels Card -->
+                    <div class="context-card risk-card">
+                        <h3>⚠️ Risk Levels</h3>
+                        <div class="risk-info" id="contextRiskInfo">
+                            <div class="risk-row">
+                                <span class="risk-label">ATR:</span>
+                                <span class="risk-value" id="atrValue">--</span>
+                            </div>
+                            <div class="risk-row">
+                                <span class="risk-label">Stop (2x ATR):</span>
+                                <span class="risk-value" id="stopDistance">--</span>
+                            </div>
+                            <div class="risk-row">
+                                <span class="risk-label">Target (3x ATR):</span>
+                                <span class="risk-value" id="targetDistance">--</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Recent Flow Card -->
+                    <div class="context-card flow-card">
+                        <h3>🐋 Recent Flow (24h)</h3>
+                        <div class="flow-summary" id="contextFlowSummary">
+                            <p class="flow-empty">No recent flow data</p>
+                        </div>
+                    </div>
+
+                    <!-- Recent Signals Card -->
+                    <div class="context-card signals-card">
+                        <h3>📡 Recent Signals (24h)</h3>
+                        <div class="signals-summary" id="contextSignalsSummary">
+                            <p class="signals-empty">No recent signals</p>
+                        </div>
+                    </div>
+
+                    <!-- Action Buttons -->
+                    <div class="analyzer-actions">
+                        <button class="analyzer-action-btn create-idea" id="createTradeIdeaBtn">
+                            📝 Create Trade Idea
+                        </button>
+                        <button class="analyzer-action-btn add-watchlist" id="addToWatchlistBtn">
+                            ⭐ Add to Watchlist
+                        </button>
+                    </div>
+                </div>
             </div>
         </section>
 
-        <!-- CTA Scanner Results (Equity Swing Trading) -->
-        <section class="cta-section">
-            <div class="cta-header">
-                <h2>🎯 <span class="kb-link" data-kb-term="cta-scanner">CTA SCANNER</span> (Equity Swing)</h2>
-                <div class="cta-controls">
-                    <button class="cta-btn" id="runCtaScanBtn">Run Scan</button>
-                    <span class="scan-status" id="ctaScanStatus">Ready</span>
+        <!-- Strategy Filter Panel -->
+        <section class="strategy-filter-section">
+            <div class="strategy-filter-header">
+                <h2>⚙️ STRATEGY FILTERS</h2>
+                <div class="strategy-filter-controls">
+                    <button class="filter-btn select-all" id="selectAllStrategies">Select All</button>
+                    <button class="filter-btn clear-all" id="clearAllStrategies">Clear All</button>
                 </div>
             </div>
-            <p class="cta-info">CTA Replication Strategy • 20/50/120 SMAs • Watchlist + S&P 500</p>
-            
-            <!-- CTA Zone Dashboard -->
-            <div class="cta-zones-dashboard">
-                <h3>📊 <span class="kb-link" data-kb-term="cta-scanner">CTA Zone Dashboard</span></h3>
-                <div class="cta-zone-cards" id="ctaZoneCards">
-                    <div class="cta-zone-card" data-ticker="SPY">
-                        <span class="zone-ticker">SPY</span>
-                        <span class="zone-status loading">Loading...</span>
+
+            <!-- Strategy Groups -->
+            <div class="strategy-groups">
+                <!-- Trend Following -->
+                <div class="strategy-group">
+                    <h3 class="strategy-group-title">📈 Trend Following</h3>
+                    <div class="strategy-toggles">
+                        <label class="strategy-toggle">
+                            <input type="checkbox" class="strategy-checkbox" data-strategy="golden_touch" checked>
+                            <span class="strategy-name">Golden Touch</span>
+                        </label>
+                        <label class="strategy-toggle">
+                            <input type="checkbox" class="strategy-checkbox" data-strategy="pullback_entry" checked>
+                            <span class="strategy-name">Pullback Entry</span>
+                        </label>
+                        <label class="strategy-toggle">
+                            <input type="checkbox" class="strategy-checkbox" data-strategy="taurus_signal" checked>
+                            <span class="strategy-name">Taurus Signal</span>
+                        </label>
+                        <label class="strategy-toggle">
+                            <input type="checkbox" class="strategy-checkbox" data-strategy="triple_line" checked>
+                            <span class="strategy-name">Triple Line</span>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Breakout -->
+                <div class="strategy-group">
+                    <h3 class="strategy-group-title">🚀 Breakout</h3>
+                    <div class="strategy-toggles">
+                        <label class="strategy-toggle">
+                            <input type="checkbox" class="strategy-checkbox" data-strategy="two_close_vol" checked>
+                            <span class="strategy-name">Two-Close + Vol</span>
+                        </label>
+                        <label class="strategy-toggle">
+                            <input type="checkbox" class="strategy-checkbox" data-strategy="zone_upgrade" checked>
+                            <span class="strategy-name">Zone Upgrade</span>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Reversal -->
+                <div class="strategy-group">
+                    <h3 class="strategy-group-title">🔄 Reversal</h3>
+                    <div class="strategy-toggles">
+                        <label class="strategy-toggle">
+                            <input type="checkbox" class="strategy-checkbox" data-strategy="exhaustion" checked>
+                            <span class="strategy-name">Exhaustion</span>
+                        </label>
+                        <label class="strategy-toggle">
+                            <input type="checkbox" class="strategy-checkbox" data-strategy="ursa_signal" checked>
+                            <span class="strategy-name">Ursa Signal</span>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Macro Confluence -->
+                <div class="strategy-group">
+                    <h3 class="strategy-group-title">🌍 Macro Confluence</h3>
+                    <div class="strategy-toggles">
+                        <label class="strategy-toggle">
+                            <input type="checkbox" class="strategy-checkbox" data-strategy="apis_call" checked>
+                            <span class="strategy-name">APIS Call</span>
+                        </label>
+                        <label class="strategy-toggle">
+                            <input type="checkbox" class="strategy-checkbox" data-strategy="kodiak_call" checked>
+                            <span class="strategy-name">Kodiak Call</span>
+                        </label>
                     </div>
                 </div>
             </div>
-            
-            <!-- CTA Signal Results -->
-            <div class="cta-results">
-                <div class="cta-column golden-column">
-                    <div class="cta-column-header">
-                        <h3>🌟 <span class="kb-link" data-kb-term="cta-scanner">GOLDEN TOUCH</span></h3>
-                        <span class="signal-count" id="goldenCount">0</span>
-                    </div>
-                    <div class="cta-signals" id="goldenSignals">
-                        <p class="empty-state">Rare: 120 SMA first touch</p>
+
+            <!-- Direction Filter -->
+            <div class="direction-filter">
+                <h3 class="filter-section-title">📊 Direction</h3>
+                <div class="direction-toggles">
+                    <label class="direction-toggle">
+                        <input type="checkbox" id="filterLong" checked>
+                        <span class="direction-label long">LONG</span>
+                    </label>
+                    <label class="direction-toggle">
+                        <input type="checkbox" id="filterShort" checked>
+                        <span class="direction-label short">SHORT</span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- Score Threshold Slider -->
+            <div class="score-filter">
+                <h3 class="filter-section-title">🎯 Minimum Score</h3>
+                <div class="score-slider-container">
+                    <input type="range" id="scoreThreshold" class="score-slider" min="0" max="100" value="0" step="5">
+                    <div class="score-display">
+                        <span id="scoreValue">0</span>
+                        <span class="score-unit">/ 100</span>
                     </div>
                 </div>
-                <div class="cta-column twoclose-column">
-                    <div class="cta-column-header">
-                        <h3>✅ <span class="kb-link" data-kb-term="cta-scanner">TWO-CLOSE + VOL</span></h3>
-                        <span class="signal-count" id="twoCloseCount">0</span>
-                    </div>
-                    <div class="cta-signals" id="twoCloseSignals">
-                        <p class="empty-state">No confirmed breakouts</p>
-                    </div>
+            </div>
+
+            <!-- Active Filters Summary -->
+            <div class="filter-summary">
+                <div class="summary-item">
+                    <span class="summary-label">Active Strategies:</span>
+                    <span class="summary-value" id="activeStrategyCount">10</span>
                 </div>
-                <div class="cta-column pullback-column">
-                    <div class="cta-column-header">
-                        <h3>↩️ <span class="kb-link" data-kb-term="cta-scanner">PULLBACK ENTRY</span></h3>
-                        <span class="signal-count" id="pullbackCount">0</span>
-                    </div>
-                    <div class="cta-signals" id="pullbackSignals">
-                        <p class="empty-state">No pullbacks to 20 SMA</p>
-                    </div>
+                <div class="summary-item">
+                    <span class="summary-label">Direction:</span>
+                    <span class="summary-value" id="activeDirections">LONG + SHORT</span>
+                </div>
+                <div class="summary-item">
+                    <span class="summary-label">Min Score:</span>
+                    <span class="summary-value" id="activeMinScore">0</span>
                 </div>
             </div>
         </section>
@@ -387,6 +558,8 @@
             </div>
             
             <!-- BTC Session Windows -->
+            <!-- MOVED TO CRYPTO-SCALPER: This section has been relocated to the dedicated crypto-scalper application -->
+            <!--
             <div class="btc-sessions">
                 <h3>⏰ BTC Trading Sessions (ET)</h3>
                 <div class="btc-session-current" id="btcSessionCurrent">
@@ -396,6 +569,7 @@
                     <!-- Sessions will be populated by JS -->
                 </div>
             </div>
+            -->
         </section>
 
         <!-- Options Flow (Unusual Whales) -->
