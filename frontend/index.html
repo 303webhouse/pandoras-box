@@ -167,12 +167,43 @@
                     <h2><span class="kb-link" data-kb-term="trade-ideas">TRADE IDEAS</span></h2>
                     <div class="asset-toggle">
                         <button class="toggle-btn active" data-asset="equity">Equities</button>
-                        <button class="toggle-btn" data-asset="crypto">Crypto</button>
+                        <button class="toggle-btn" data-asset="options">Options</button>
                     </div>
                 </div>
+                <!-- Equity Signals Container -->
                 <div class="signals-container" id="tradeSignals">
                     <!-- Signals will be populated by JavaScript -->
                     <p class="empty-state">No signals available</p>
+                </div>
+                <!-- Options Tab Content -->
+                <div class="options-tab-content" id="optionsTabContent" style="display: none;">
+                    <div class="options-header">
+                        <h3>Open Options Positions</h3>
+                        <button class="options-btn primary" id="openOptionsModalBtn">+ Add Position</button>
+                    </div>
+                    <!-- Options Summary -->
+                    <div class="options-summary" id="optionsSummary">
+                        <div class="summary-stat">
+                            <span class="stat-label">Open Positions</span>
+                            <span class="stat-value" id="optionsCount">0</span>
+                        </div>
+                        <div class="summary-stat">
+                            <span class="stat-label">Total P&L</span>
+                            <span class="stat-value" id="optionsTotalPnl">$0.00</span>
+                        </div>
+                        <div class="summary-stat">
+                            <span class="stat-label">Net Delta</span>
+                            <span class="stat-value" id="optionsNetDelta">0</span>
+                        </div>
+                        <div class="summary-stat">
+                            <span class="stat-label">Daily Theta</span>
+                            <span class="stat-value" id="optionsDailyTheta">$0.00</span>
+                        </div>
+                    </div>
+                    <!-- Options Positions List -->
+                    <div class="options-positions-list" id="optionsPositionsList">
+                        <p class="empty-state">No open options positions</p>
+                    </div>
                 </div>
             </div>
 
@@ -1104,6 +1135,117 @@
             <div class="modal-footer">
                 <button class="btn-cancel" id="cancelManualPositionBtn">Cancel</button>
                 <button class="btn-confirm" id="confirmManualPositionBtn">Add Position</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Options Entry Modal -->
+    <div class="modal-overlay" id="optionsModalOverlay" style="display: none;">
+        <div class="options-modal">
+            <div class="modal-header">
+                <h2>Add Options Position</h2>
+                <button class="modal-close" id="closeOptionsModalBtn">✕</button>
+            </div>
+            <div class="modal-body">
+                <!-- Step 1: Basic Info -->
+                <div class="form-section">
+                    <h4>Position Details</h4>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Underlying</label>
+                            <input type="text" id="optUnderlying" placeholder="SPY" class="form-input" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Strategy</label>
+                            <select id="optStrategy" class="form-select">
+                                <option value="LONG_CALL">Long Call</option>
+                                <option value="LONG_PUT">Long Put</option>
+                                <option value="BULL_CALL_SPREAD">Bull Call Spread</option>
+                                <option value="BEAR_PUT_SPREAD">Bear Put Spread</option>
+                                <option value="BULL_PUT_SPREAD">Bull Put Spread (Credit)</option>
+                                <option value="BEAR_CALL_SPREAD">Bear Call Spread (Credit)</option>
+                                <option value="IRON_CONDOR">Iron Condor</option>
+                                <option value="STRADDLE">Straddle</option>
+                                <option value="STRANGLE">Strangle</option>
+                                <option value="CUSTOM">Custom</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Direction</label>
+                            <select id="optDirection" class="form-select">
+                                <option value="BULLISH">Bullish</option>
+                                <option value="BEARISH">Bearish</option>
+                                <option value="NEUTRAL">Neutral</option>
+                                <option value="VOLATILITY">Volatility</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                <!-- Step 2: Legs -->
+                <div class="form-section">
+                    <h4>Option Legs</h4>
+                    <div class="legs-container" id="optLegsContainer">
+                        <!-- Leg 1 (default) -->
+                        <div class="leg-row" data-leg="1">
+                            <div class="leg-header">
+                                <span class="leg-number">Leg 1</span>
+                            </div>
+                            <div class="leg-fields">
+                                <select class="leg-action form-select-sm">
+                                    <option value="BUY">BUY</option>
+                                    <option value="SELL">SELL</option>
+                                </select>
+                                <select class="leg-type form-select-sm">
+                                    <option value="CALL">CALL</option>
+                                    <option value="PUT">PUT</option>
+                                </select>
+                                <input type="number" class="leg-strike form-input-sm" placeholder="Strike" step="0.5">
+                                <input type="date" class="leg-expiry form-input-sm">
+                                <input type="number" class="leg-qty form-input-sm" placeholder="Qty" value="1" min="1">
+                                <input type="number" class="leg-premium form-input-sm" placeholder="Premium" step="0.01">
+                            </div>
+                        </div>
+                    </div>
+                    <button class="add-leg-btn" id="addLegBtn">+ Add Leg</button>
+                </div>
+                <!-- Step 3: Position Metrics -->
+                <div class="form-section">
+                    <h4>Position Metrics</h4>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Net Premium</label>
+                            <input type="number" id="optNetPremium" placeholder="-250 or 150" class="form-input" step="0.01">
+                            <span class="form-hint">Negative = debit, Positive = credit</span>
+                        </div>
+                        <div class="form-group">
+                            <label>Max Profit</label>
+                            <input type="number" id="optMaxProfit" placeholder="Optional" class="form-input" step="0.01">
+                        </div>
+                        <div class="form-group">
+                            <label>Max Loss</label>
+                            <input type="number" id="optMaxLoss" placeholder="Optional" class="form-input" step="0.01">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Breakeven</label>
+                            <input type="text" id="optBreakeven" placeholder="585.50 or 580,590" class="form-input">
+                        </div>
+                        <div class="form-group">
+                            <label>Entry Date</label>
+                            <input type="date" id="optEntryDate" class="form-input">
+                        </div>
+                    </div>
+                </div>
+                <!-- Step 4: Notes -->
+                <div class="form-section">
+                    <h4>Trade Thesis</h4>
+                    <textarea id="optThesis" class="form-textarea" placeholder="Why are you entering this trade?"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="modal-btn secondary" id="cancelOptionsBtn">Cancel</button>
+                <button class="modal-btn primary" id="saveOptionsBtn">Save Position</button>
             </div>
         </div>
     </div>
