@@ -270,10 +270,96 @@ def calculate_signal_score(
     # Calculate final score
     raw_score = base_score + tech_bonus + recency_bonus + rr_bonus + sector_bonus
     final_score = raw_score * alignment_multiplier
-    
+
+    # =========================================================================
+    # CIRCUIT BREAKER SCORING MODIFIERS
+    # =========================================================================
+    circuit_breaker_modifier = 1.0
+    cb_applied = False
+
+    try:
+        from webhooks.circuit_breaker import get_circuit_breaker_state
+        cb_state = get_circuit_breaker_state()
+
+        if cb_state.get("active"):
+            cb_trigger = cb_state.get("trigger", "")
+            scoring_mod = cb_state.get("scoring_modifier", 1.0)
+            is_long = direction in ["LONG", "BUY"]
+            is_short = direction in ["SHORT", "SELL"]
+
+            # Determine signal type for exhaustion/reversal bonus
+            is_exhaustion = signal_type in ["EXHAUSTION", "EXHAUSTION_TOP", "EXHAUSTION_BOTTOM"]
+            is_reversal = signal.get("trade_type", "").upper() == "REVERSAL"
+
+            # BEARISH circuit breaker (SPY down, VIX spike)
+            if cb_trigger in ["spy_down_1pct", "spy_down_2pct", "vix_spike", "vix_extreme"]:
+                if is_long:
+                    # Penalize LONG signals
+                    circuit_breaker_modifier = scoring_mod
+                    cb_applied = True
+                    triggering_factors["circuit_breaker_penalty"] = {
+                        "trigger": cb_trigger,
+                        "direction": "LONG",
+                        "modifier": scoring_mod,
+                        "reason": "Bearish circuit breaker penalizes longs"
+                    }
+                elif is_short:
+                    # Boost SHORT signals
+                    circuit_breaker_modifier = 1.3
+                    cb_applied = True
+                    triggering_factors["circuit_breaker_bonus"] = {
+                        "trigger": cb_trigger,
+                        "direction": "SHORT",
+                        "modifier": 1.3,
+                        "reason": "Bearish circuit breaker boosts shorts"
+                    }
+
+                    # Extra boost for exhaustion/reversal shorts
+                    if is_exhaustion or is_reversal:
+                        circuit_breaker_modifier *= 1.2
+                        triggering_factors["circuit_breaker_bonus"]["exhaustion_boost"] = 1.2
+                        triggering_factors["circuit_breaker_bonus"]["total_modifier"] = circuit_breaker_modifier
+
+            # BULLISH circuit breaker (SPY recovery)
+            elif cb_trigger in ["spy_up_2pct", "spy_recovery"]:
+                if is_short:
+                    # Penalize SHORT signals
+                    circuit_breaker_modifier = scoring_mod
+                    cb_applied = True
+                    triggering_factors["circuit_breaker_penalty"] = {
+                        "trigger": cb_trigger,
+                        "direction": "SHORT",
+                        "modifier": scoring_mod,
+                        "reason": "Bullish circuit breaker penalizes shorts"
+                    }
+                elif is_long:
+                    # Boost LONG signals
+                    circuit_breaker_modifier = 1.3
+                    cb_applied = True
+                    triggering_factors["circuit_breaker_bonus"] = {
+                        "trigger": cb_trigger,
+                        "direction": "LONG",
+                        "modifier": 1.3,
+                        "reason": "Bullish circuit breaker boosts longs"
+                    }
+
+                    # Extra boost for exhaustion/reversal longs
+                    if is_exhaustion or is_reversal:
+                        circuit_breaker_modifier *= 1.2
+                        triggering_factors["circuit_breaker_bonus"]["exhaustion_boost"] = 1.2
+                        triggering_factors["circuit_breaker_bonus"]["total_modifier"] = circuit_breaker_modifier
+
+            # Apply modifier
+            if cb_applied:
+                final_score *= circuit_breaker_modifier
+                logger.info(f"⚠️ Circuit breaker modifier applied to {signal.get('ticker')}: {circuit_breaker_modifier:.2f}x")
+
+    except Exception as e:
+        logger.warning(f"Error applying circuit breaker modifiers: {e}")
+
     # Cap at 100
     final_score = min(100, max(0, final_score))
-    
+
     triggering_factors["calculation"] = {
         "base_score": base_score,
         "technical_bonus": tech_bonus,
@@ -282,6 +368,7 @@ def calculate_signal_score(
         "sector_bonus": sector_bonus,
         "raw_score": raw_score,
         "alignment_multiplier": alignment_multiplier,
+        "circuit_breaker_modifier": circuit_breaker_modifier if cb_applied else None,
         "final_score": round(final_score, 2)
     }
     

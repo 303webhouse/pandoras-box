@@ -145,6 +145,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
 # Import and include routers (webhook endpoints, API routes)
 from webhooks.tradingview import router as webhook_router
+from webhooks.circuit_breaker import router as circuit_breaker_router
 from api.positions import router as positions_router
 from api.scanner import router as scanner_router
 from api.watchlist import router as watchlist_router
@@ -163,6 +164,7 @@ from api.alerts import router as alerts_router
 from api.uw_integration import router as uw_router
 
 app.include_router(webhook_router, prefix="/webhook", tags=["webhooks"])
+app.include_router(circuit_breaker_router, prefix="/webhook", tags=["circuit-breaker"])
 app.include_router(positions_router, prefix="/api", tags=["positions"])
 app.include_router(scanner_router, prefix="/api", tags=["scanner"])
 app.include_router(watchlist_router, prefix="/api", tags=["watchlist"])
