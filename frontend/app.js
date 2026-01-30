@@ -6047,3 +6047,442 @@ function escapeRegExp(string) {
 window.openKbPopup = openKbPopup;
 window.makeTermClickable = makeTermClickable;
 window.linkKnowledgebaseTerms = linkKnowledgebaseTerms;
+
+// =========================================================================
+// OPTIONS POSITION MANAGEMENT
+// =========================================================================
+
+let currentLegCount = 1;
+
+function initOptionsTab() {
+    // Tab switching for Equities/Options
+    document.querySelectorAll('.asset-toggle .toggle-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const asset = e.target.dataset.asset;
+            switchAssetTab(asset);
+        });
+    });
+
+    // Modal controls
+    document.getElementById('openOptionsModalBtn')?.addEventListener('click', openOptionsModal);
+    document.getElementById('closeOptionsModalBtn')?.addEventListener('click', closeOptionsModal);
+    document.getElementById('cancelOptionsBtn')?.addEventListener('click', closeOptionsModal);
+    document.getElementById('saveOptionsBtn')?.addEventListener('click', saveOptionsPosition);
+    document.getElementById('addLegBtn')?.addEventListener('click', addLeg);
+
+    // Strategy change updates direction and leg count
+    document.getElementById('optStrategy')?.addEventListener('change', onStrategyChange);
+
+    // Set default entry date to today
+    const entryDateInput = document.getElementById('optEntryDate');
+    if (entryDateInput) {
+        entryDateInput.value = new Date().toISOString().split('T')[0];
+    }
+
+    // Close modal on overlay click
+    const overlay = document.getElementById('optionsModalOverlay');
+    if (overlay) {
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) closeOptionsModal();
+        });
+    }
+
+    console.log('Options tab initialized');
+}
+
+function switchAssetTab(asset) {
+    // Update toggle buttons
+    document.querySelectorAll('.asset-toggle .toggle-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.asset === asset);
+    });
+
+    // Show/hide content
+    const equityContent = document.getElementById('tradeSignals');
+    const optionsContent = document.getElementById('optionsTabContent');
+
+    if (asset === 'options') {
+        if (equityContent) equityContent.style.display = 'none';
+        if (optionsContent) optionsContent.style.display = '';
+        loadOptionsPositions();
+    } else {
+        if (equityContent) equityContent.style.display = '';
+        if (optionsContent) optionsContent.style.display = 'none';
+    }
+}
+
+function openOptionsModal() {
+    document.getElementById('optionsModalOverlay').style.display = 'flex';
+    currentLegCount = 1;
+    // Set default entry date
+    const entryDateInput = document.getElementById('optEntryDate');
+    if (entryDateInput) {
+        entryDateInput.value = new Date().toISOString().split('T')[0];
+    }
+}
+
+function closeOptionsModal() {
+    document.getElementById('optionsModalOverlay').style.display = 'none';
+    resetOptionsForm();
+}
+
+function resetOptionsForm() {
+    const fields = ['optUnderlying', 'optNetPremium', 'optMaxProfit', 'optMaxLoss', 'optBreakeven', 'optThesis'];
+    fields.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+    });
+
+    const optStrategy = document.getElementById('optStrategy');
+    if (optStrategy) optStrategy.value = 'LONG_CALL';
+
+    const optDirection = document.getElementById('optDirection');
+    if (optDirection) optDirection.value = 'BULLISH';
+
+    // Reset to single leg
+    const container = document.getElementById('optLegsContainer');
+    if (container) {
+        container.innerHTML = createLegHTML(1);
+    }
+    currentLegCount = 1;
+}
+
+function onStrategyChange(e) {
+    const strategy = e.target.value;
+    const directionSelect = document.getElementById('optDirection');
+
+    // Auto-set direction based on strategy
+    const directionMap = {
+        'LONG_CALL': 'BULLISH',
+        'LONG_PUT': 'BEARISH',
+        'BULL_CALL_SPREAD': 'BULLISH',
+        'BEAR_PUT_SPREAD': 'BEARISH',
+        'BULL_PUT_SPREAD': 'BULLISH',
+        'BEAR_CALL_SPREAD': 'BEARISH',
+        'IRON_CONDOR': 'NEUTRAL',
+        'STRADDLE': 'VOLATILITY',
+        'STRANGLE': 'VOLATILITY'
+    };
+
+    if (directionMap[strategy] && directionSelect) {
+        directionSelect.value = directionMap[strategy];
+    }
+
+    // Auto-set leg count based on strategy
+    const legCountMap = {
+        'LONG_CALL': 1,
+        'LONG_PUT': 1,
+        'BULL_CALL_SPREAD': 2,
+        'BEAR_PUT_SPREAD': 2,
+        'BULL_PUT_SPREAD': 2,
+        'BEAR_CALL_SPREAD': 2,
+        'IRON_CONDOR': 4,
+        'STRADDLE': 2,
+        'STRANGLE': 2,
+        'CUSTOM': 1
+    };
+
+    const targetLegs = legCountMap[strategy] || 1;
+    setLegCount(targetLegs);
+}
+
+function setLegCount(count) {
+    const container = document.getElementById('optLegsContainer');
+    if (!container) return;
+
+    container.innerHTML = '';
+    for (let i = 1; i <= count; i++) {
+        container.innerHTML += createLegHTML(i);
+    }
+    currentLegCount = count;
+}
+
+function createLegHTML(legNum) {
+    return `
+        <div class="leg-row" data-leg="${legNum}">
+            <div class="leg-header">
+                <span class="leg-number">Leg ${legNum}</span>
+                ${legNum > 1 ? `<button type="button" class="remove-leg-btn" onclick="removeLeg(${legNum})">✕</button>` : ''}
+            </div>
+            <div class="leg-fields">
+                <select class="leg-action form-select-sm">
+                    <option value="BUY">BUY</option>
+                    <option value="SELL">SELL</option>
+                </select>
+                <select class="leg-type form-select-sm">
+                    <option value="CALL">CALL</option>
+                    <option value="PUT">PUT</option>
+                </select>
+                <input type="number" class="leg-strike form-input-sm" placeholder="Strike" step="0.5">
+                <input type="date" class="leg-expiry form-input-sm">
+                <input type="number" class="leg-qty form-input-sm" placeholder="Qty" value="1" min="1">
+                <input type="number" class="leg-premium form-input-sm" placeholder="Premium" step="0.01">
+            </div>
+        </div>
+    `;
+}
+
+function addLeg() {
+    currentLegCount++;
+    const container = document.getElementById('optLegsContainer');
+    if (container) {
+        container.innerHTML += createLegHTML(currentLegCount);
+    }
+}
+
+function removeLeg(legNum) {
+    const legRow = document.querySelector(`.leg-row[data-leg="${legNum}"]`);
+    if (legRow) {
+        legRow.remove();
+        currentLegCount--;
+        // Renumber remaining legs
+        document.querySelectorAll('.leg-row').forEach((row, idx) => {
+            row.dataset.leg = idx + 1;
+            row.querySelector('.leg-number').textContent = `Leg ${idx + 1}`;
+        });
+    }
+}
+
+async function saveOptionsPosition() {
+    const underlying = document.getElementById('optUnderlying')?.value.trim().toUpperCase();
+    const strategy = document.getElementById('optStrategy')?.value;
+    const direction = document.getElementById('optDirection')?.value;
+    const netPremium = parseFloat(document.getElementById('optNetPremium')?.value) || 0;
+    const maxProfit = parseFloat(document.getElementById('optMaxProfit')?.value) || null;
+    const maxLoss = parseFloat(document.getElementById('optMaxLoss')?.value) || null;
+    const breakevenStr = document.getElementById('optBreakeven')?.value;
+    const entryDate = document.getElementById('optEntryDate')?.value;
+    const thesis = document.getElementById('optThesis')?.value;
+
+    if (!underlying) {
+        alert('Please enter an underlying ticker');
+        return;
+    }
+
+    // Collect legs
+    const legs = [];
+    document.querySelectorAll('.leg-row').forEach(row => {
+        const action = row.querySelector('.leg-action')?.value;
+        const optionType = row.querySelector('.leg-type')?.value;
+        const strike = parseFloat(row.querySelector('.leg-strike')?.value);
+        const expiry = row.querySelector('.leg-expiry')?.value;
+        const qty = parseInt(row.querySelector('.leg-qty')?.value) || 1;
+        const premium = parseFloat(row.querySelector('.leg-premium')?.value) || 0;
+
+        if (strike && expiry) {
+            legs.push({
+                action: action,
+                option_type: optionType,
+                strike: strike,
+                expiration: expiry,
+                quantity: qty,
+                premium: premium
+            });
+        }
+    });
+
+    if (legs.length === 0) {
+        alert('Please add at least one leg with strike and expiration');
+        return;
+    }
+
+    // Parse breakeven
+    let breakeven = [];
+    if (breakevenStr) {
+        breakeven = breakevenStr.split(',').map(b => parseFloat(b.trim())).filter(b => !isNaN(b));
+    }
+
+    const payload = {
+        underlying: underlying,
+        strategy_type: strategy,
+        direction: direction,
+        legs: legs,
+        entry_date: entryDate,
+        net_premium: netPremium,
+        max_profit: maxProfit,
+        max_loss: maxLoss,
+        breakeven: breakeven,
+        thesis: thesis
+    };
+
+    try {
+        const response = await fetch(`${API_URL}/options/positions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        const data = await response.json();
+
+        if (data.status === 'success') {
+            closeOptionsModal();
+            loadOptionsPositions();
+            console.log(`Options position added: ${underlying} ${strategy}`);
+        } else {
+            alert('Error saving position: ' + (data.detail || 'Unknown error'));
+        }
+    } catch (e) {
+        console.error('Error saving options position:', e);
+        alert('Error saving position');
+    }
+}
+
+async function loadOptionsPositions() {
+    try {
+        const response = await fetch(`${API_URL}/options/positions?status=OPEN`);
+        const data = await response.json();
+
+        const positions = data.positions || [];
+        renderOptionsPositions(positions);
+        updateOptionsSummary(positions);
+
+    } catch (e) {
+        console.error('Error loading options positions:', e);
+    }
+}
+
+function renderOptionsPositions(positions) {
+    const container = document.getElementById('optionsPositionsList');
+    if (!container) return;
+
+    if (!positions || positions.length === 0) {
+        container.innerHTML = '<p class="empty-state">No open options positions</p>';
+        return;
+    }
+
+    container.innerHTML = positions.map(pos => {
+        const metrics = pos.metrics || {};
+        const dte = metrics.days_to_expiry;
+        const dteClass = dte > 14 ? 'safe' : (dte > 7 ? 'warning' : 'danger');
+        const pnl = metrics.unrealized_pnl;
+        const pnlClass = pnl > 0 ? 'positive' : (pnl < 0 ? 'negative' : '');
+
+        // Build legs summary
+        const legsSummary = pos.legs.map(leg =>
+            `${leg.action} ${leg.quantity}x ${leg.strike} ${leg.option_type} ${leg.expiration}`
+        ).join(' | ');
+
+        const pnlDisplay = pnl !== null ? ((pnl >= 0 ? '+' : '') + pnl.toFixed(2)) : '--';
+        const thetaDisplay = metrics.net_theta ? metrics.net_theta.toFixed(2) : '--';
+
+        return `
+            <div class="options-position-card" data-position-id="${pos.position_id}">
+                <div class="position-header">
+                    <div class="position-ticker">
+                        <span class="ticker-symbol">${pos.underlying}</span>
+                        <span class="strategy-badge ${pos.direction.toLowerCase()}">${pos.strategy_display || pos.strategy_type}</span>
+                    </div>
+                    <div class="position-dte ${dteClass}">
+                        <span class="dte-value">${dte !== null ? dte : '--'}</span>
+                        <span class="dte-label">DTE</span>
+                    </div>
+                </div>
+                <div class="position-legs">
+                    <span class="legs-summary">${legsSummary}</span>
+                </div>
+                <div class="position-metrics">
+                    <div class="metric">
+                        <span class="metric-label">Entry</span>
+                        <span class="metric-value">${pos.net_premium >= 0 ? '+' : ''}${pos.net_premium?.toFixed(2) || '0.00'}</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">P&L</span>
+                        <span class="metric-value ${pnlClass}">${pnlDisplay}</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Delta</span>
+                        <span class="metric-value">${metrics.net_delta || '--'}</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Theta</span>
+                        <span class="metric-value">${thetaDisplay}/day</span>
+                    </div>
+                </div>
+                ${pos.thesis ? `<div class="position-thesis">"${pos.thesis}"</div>` : ''}
+                <div class="position-actions">
+                    <button class="position-btn" onclick="viewPositionDetails('${pos.position_id}')">Details</button>
+                    <button class="position-btn" onclick="closeOptionsPosition('${pos.position_id}')">Close</button>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+function updateOptionsSummary(positions) {
+    const countEl = document.getElementById('optionsCount');
+    const pnlEl = document.getElementById('optionsTotalPnl');
+    const deltaEl = document.getElementById('optionsNetDelta');
+    const thetaEl = document.getElementById('optionsDailyTheta');
+
+    if (countEl) countEl.textContent = positions.length;
+
+    let totalPnl = 0;
+    let totalDelta = 0;
+    let totalTheta = 0;
+
+    positions.forEach(pos => {
+        const metrics = pos.metrics || {};
+        if (metrics.unrealized_pnl !== null && metrics.unrealized_pnl !== undefined) {
+            totalPnl += metrics.unrealized_pnl;
+        }
+        if (metrics.net_delta) totalDelta += metrics.net_delta;
+        if (metrics.net_theta) totalTheta += metrics.net_theta;
+    });
+
+    if (pnlEl) {
+        pnlEl.textContent = '$' + (totalPnl >= 0 ? '+' : '') + totalPnl.toFixed(2);
+        pnlEl.className = 'stat-value ' + (totalPnl >= 0 ? 'positive' : 'negative');
+    }
+
+    if (deltaEl) deltaEl.textContent = totalDelta.toFixed(0);
+    if (thetaEl) thetaEl.textContent = '$' + totalTheta.toFixed(2);
+}
+
+async function viewPositionDetails(positionId) {
+    try {
+        const response = await fetch(`${API_URL}/options/positions/${positionId}`);
+        const data = await response.json();
+        console.log('Position details:', data);
+        // Could open a detail modal here
+    } catch (e) {
+        console.error('Error fetching position details:', e);
+    }
+}
+
+async function closeOptionsPosition(positionId) {
+    const exitPremium = prompt('Enter exit premium (positive for credit, negative for debit):');
+    if (exitPremium === null) return;
+
+    const outcome = prompt('Outcome? (WIN, LOSS, BREAKEVEN, EXPIRED_WORTHLESS, ASSIGNED)');
+    if (!outcome) return;
+
+    try {
+        const response = await fetch(`${API_URL}/options/positions/${positionId}/close`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                position_id: positionId,
+                exit_premium: parseFloat(exitPremium),
+                outcome: outcome.toUpperCase()
+            })
+        });
+
+        const data = await response.json();
+
+        if (data.status === 'success') {
+            loadOptionsPositions();
+            console.log(`Position closed - P&L: $${data.realized_pnl?.toFixed(2)}`);
+        }
+    } catch (e) {
+        console.error('Error closing position:', e);
+    }
+}
+
+// Make functions globally available
+window.removeLeg = removeLeg;
+window.viewPositionDetails = viewPositionDetails;
+window.closeOptionsPosition = closeOptionsPosition;
+
+// Initialize options tab on page load
+document.addEventListener('DOMContentLoaded', () => {
+    setTimeout(initOptionsTab, 1600);
+});

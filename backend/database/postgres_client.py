@@ -697,10 +697,194 @@ async def close_position_in_db(
 async def get_position_by_id(position_id: int) -> Optional[Dict[Any, Any]]:
     """Get a single position by ID"""
     pool = await get_postgres_client()
-    
+
     async with pool.acquire() as conn:
         row = await conn.fetchrow("""
             SELECT * FROM positions WHERE id = $1
         """, position_id)
-        
+
         return serialize_db_row(dict(row)) if row else None
+
+
+# =========================================================================
+# OPTIONS POSITION LOGGING
+# =========================================================================
+
+async def log_options_position(position: Dict[Any, Any]):
+    """Log a new options position to the database"""
+    pool = await get_postgres_client()
+
+    async with pool.acquire() as conn:
+        # Check if options_positions table exists, create if not
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS options_positions (
+                id SERIAL PRIMARY KEY,
+                position_id VARCHAR(100) UNIQUE NOT NULL,
+                underlying VARCHAR(20) NOT NULL,
+                strategy_type VARCHAR(50) NOT NULL,
+                direction VARCHAR(20),
+                legs JSONB,
+                entry_date DATE,
+                net_premium DECIMAL(12,2),
+                max_profit DECIMAL(12,2),
+                max_loss DECIMAL(12,2),
+                breakeven JSONB,
+                notes TEXT,
+                thesis TEXT,
+                status VARCHAR(20) DEFAULT 'OPEN',
+                exit_premium DECIMAL(12,2),
+                exit_date DATE,
+                exit_notes TEXT,
+                outcome VARCHAR(30),
+                realized_pnl DECIMAL(12,2),
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP,
+                closed_at TIMESTAMP
+            )
+        """)
+
+        await conn.execute("""
+            INSERT INTO options_positions (
+                position_id, underlying, strategy_type, direction, legs,
+                entry_date, net_premium, max_profit, max_loss, breakeven,
+                notes, thesis, status, created_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+        """,
+            position['position_id'],
+            position['underlying'],
+            position['strategy_type'],
+            position.get('direction'),
+            json.dumps(position.get('legs', [])),
+            position.get('entry_date'),
+            position.get('net_premium'),
+            position.get('max_profit'),
+            position.get('max_loss'),
+            json.dumps(position.get('breakeven', [])),
+            position.get('notes'),
+            position.get('thesis'),
+            position.get('status', 'OPEN'),
+            datetime.now()
+        )
+
+        logger.info(f"Logged options position {position['position_id']} to database")
+
+
+async def update_options_position_outcome(position_id: str, position: Dict[Any, Any]):
+    """Update options position with close details"""
+    pool = await get_postgres_client()
+
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            UPDATE options_positions SET
+                status = $2,
+                exit_premium = $3,
+                exit_date = $4,
+                exit_notes = $5,
+                outcome = $6,
+                realized_pnl = $7,
+                updated_at = NOW(),
+                closed_at = NOW()
+            WHERE position_id = $1
+        """,
+            position_id,
+            position.get('status'),
+            position.get('exit_premium'),
+            position.get('exit_date'),
+            position.get('exit_notes'),
+            position.get('outcome'),
+            position.get('realized_pnl')
+        )
+
+
+async def get_open_options_positions() -> List[Dict[Any, Any]]:
+    """Get all open options positions from database"""
+    pool = await get_postgres_client()
+
+    async with pool.acquire() as conn:
+        # Check if table exists first
+        table_exists = await conn.fetchval("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables
+                WHERE table_name = 'options_positions'
+            )
+        """)
+
+        if not table_exists:
+            return []
+
+        rows = await conn.fetch("""
+            SELECT * FROM options_positions
+            WHERE status = 'OPEN'
+            ORDER BY entry_date DESC
+        """)
+
+        positions = []
+        for row in rows:
+            pos = dict(row)
+            # Parse JSON fields
+            if pos.get('legs'):
+                pos['legs'] = json.loads(pos['legs']) if isinstance(pos['legs'], str) else pos['legs']
+            if pos.get('breakeven'):
+                pos['breakeven'] = json.loads(pos['breakeven']) if isinstance(pos['breakeven'], str) else pos['breakeven']
+            positions.append(serialize_db_row(pos))
+
+        return positions
+
+
+async def get_options_archive(
+    underlying: Optional[str] = None,
+    strategy_type: Optional[str] = None,
+    outcome: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    limit: int = 100
+) -> List[Dict[Any, Any]]:
+    """Get archived (closed) options positions for backtesting analysis"""
+    pool = await get_postgres_client()
+
+    # Check if table exists first
+    async with pool.acquire() as conn:
+        table_exists = await conn.fetchval("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables
+                WHERE table_name = 'options_positions'
+            )
+        """)
+
+        if not table_exists:
+            return []
+
+    query = "SELECT * FROM options_positions WHERE status != 'OPEN'"
+    params = []
+    param_count = 0
+
+    if underlying:
+        param_count += 1
+        query += f" AND underlying = ${param_count}"
+        params.append(underlying.upper())
+
+    if strategy_type:
+        param_count += 1
+        query += f" AND strategy_type = ${param_count}"
+        params.append(strategy_type)
+
+    if outcome:
+        param_count += 1
+        query += f" AND outcome = ${param_count}"
+        params.append(outcome)
+
+    if start_date:
+        param_count += 1
+        query += f" AND entry_date >= ${param_count}"
+        params.append(start_date)
+
+    if end_date:
+        param_count += 1
+        query += f" AND entry_date <= ${param_count}"
+        params.append(end_date)
+
+    query += f" ORDER BY closed_at DESC LIMIT {limit}"
+
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(query, *params)
+        return [serialize_db_row(dict(row)) for row in rows]
