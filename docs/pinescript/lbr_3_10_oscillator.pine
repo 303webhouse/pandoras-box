@@ -1,0 +1,133 @@
+// LBR 3/10 Oscillator + PF3 Momentum Thrust
+// Based on Linda Raschke's methodology
+// Adapted for crypto by Trading Hub
+//
+// @version=5
+indicator("LBR 3/10 Oscillator + PF3", shorttitle="LBR 3/10", overlay=false)
+
+// ============ INPUTS ============
+fast_ma_period = input.int(3, "Fast MA Period", minval=1)
+slow_ma_period = input.int(10, "Slow MA Period", minval=1)
+signal_period = input.int(16, "Signal Line Period", minval=1)
+pf3_lookback = input.int(20, "PF3 Lookback Period", minval=5)
+
+show_pf3_dots = input.bool(true, "Show PF3 White Dots")
+show_bias_background = input.bool(true, "Show Bias Background")
+
+// Colors
+bullish_color = input.color(color.new(color.lime, 30), "Bullish Color")
+bearish_color = input.color(color.new(color.red, 30), "Bearish Color")
+neutral_color = input.color(color.new(color.gray, 50), "Neutral Color")
+signal_line_color = input.color(color.orange, "Signal Line Color")
+
+// ============ CALCULATIONS ============
+
+// Fast Line = SMA(Close, 3) - SMA(Close, 10)
+sma_fast = ta.sma(close, fast_ma_period)
+sma_slow = ta.sma(close, slow_ma_period)
+fast_line = sma_fast - sma_slow
+
+// Slow Line (Signal) = SMA(FastLine, 16)
+slow_line = ta.sma(fast_line, signal_period)
+
+// Histogram = Fast - Slow
+histogram = fast_line - slow_line
+
+// ============ PF3 "WHITE DOT" LOGIC ============
+// Trigger when Fast Line makes new N-period high or low
+
+// Bullish PF3: Fast line makes new high
+pf3_bullish = fast_line > ta.highest(fast_line[1], pf3_lookback)
+
+// Bearish PF3: Fast line makes new low
+pf3_bearish = fast_line < ta.lowest(fast_line[1], pf3_lookback)
+
+// ============ BIAS TRACKING ============
+// Track the bias state
+var bias = 0  // 1 = bullish, -1 = bearish, 0 = neutral
+var bias_start_bar = 0
+var bias_signal_low = 0.0
+var bias_signal_high = 0.0
+
+// Bias duration in bars (adjust for your timeframe)
+// For 4H chart: 18 hours = ~4.5 bars
+// For Daily: 3 days = 3 bars
+bias_duration = input.int(6, "Bias Duration (bars)", minval=1)
+
+// Set new bias on PF3 signal
+if pf3_bullish
+    bias := 1
+    bias_start_bar := bar_index
+    bias_signal_low := low
+    bias_signal_high := high
+
+if pf3_bearish
+    bias := -1
+    bias_start_bar := bar_index
+    bias_signal_low := low
+    bias_signal_high := high
+
+// Check for bias invalidation
+if bias == 1
+    // Bullish invalidated if price closes below signal candle low
+    if close < bias_signal_low
+        bias := 0
+    // Or if time expired
+    if bar_index - bias_start_bar > bias_duration
+        bias := 0
+
+if bias == -1
+    // Bearish invalidated if price closes above signal candle high
+    if close > bias_signal_high
+        bias := 0
+    // Or if time expired
+    if bar_index - bias_start_bar > bias_duration
+        bias := 0
+
+// ============ PLOTTING ============
+
+// Histogram with color based on momentum direction
+hist_color = histogram >= 0 ? (histogram > histogram[1] ? bullish_color : color.new(bullish_color, 60)) : (histogram < histogram[1] ? bearish_color : color.new(bearish_color, 60))
+plot(histogram, style=plot.style_columns, color=hist_color, title="Histogram")
+
+// Fast Line (optional - can be noisy)
+// plot(fast_line, color=color.blue, linewidth=1, title="Fast Line")
+
+// Slow Line (Signal)
+plot(slow_line, color=signal_line_color, linewidth=2, title="Signal Line")
+
+// Zero Line
+hline(0, "Zero", color=color.gray, linestyle=hline.style_dashed)
+
+// PF3 White Dots
+plotshape(show_pf3_dots and pf3_bullish, title="PF3 Bullish", location=location.top, style=shape.circle, size=size.small, color=color.white, text="▲")
+plotshape(show_pf3_dots and pf3_bearish, title="PF3 Bearish", location=location.bottom, style=shape.circle, size=size.small, color=color.white, text="▼")
+
+// Background color for active bias
+bgcolor(show_bias_background and bias == 1 ? color.new(color.green, 90) : show_bias_background and bias == -1 ? color.new(color.red, 90) : na, title="Bias Background")
+
+// ============ ALERTS ============
+alertcondition(pf3_bullish, title="PF3 Bullish (White Dot)", message="LBR 3/10: PF3 BULLISH momentum thrust on {{ticker}}")
+alertcondition(pf3_bearish, title="PF3 Bearish (White Dot)", message="LBR 3/10: PF3 BEARISH momentum thrust on {{ticker}}")
+alertcondition(pf3_bullish or pf3_bearish, title="PF3 Any", message="LBR 3/10: PF3 {{plot_0}} on {{ticker}} at {{close}}")
+
+// ============ INFO TABLE ============
+var table info_table = table.new(position.top_right, 2, 5, bgcolor=color.new(color.black, 80), border_width=1)
+
+if barstate.islast
+    table.cell(info_table, 0, 0, "LBR 3/10", text_color=color.white, text_size=size.small)
+    table.cell(info_table, 1, 0, "", text_color=color.white)
+    
+    table.cell(info_table, 0, 1, "Fast Line", text_color=color.gray, text_size=size.tiny)
+    table.cell(info_table, 1, 1, str.tostring(fast_line, "#.####"), text_color=fast_line >= 0 ? bullish_color : bearish_color, text_size=size.tiny)
+    
+    table.cell(info_table, 0, 2, "Slow Line", text_color=color.gray, text_size=size.tiny)
+    table.cell(info_table, 1, 2, str.tostring(slow_line, "#.####"), text_color=signal_line_color, text_size=size.tiny)
+    
+    table.cell(info_table, 0, 3, "Histogram", text_color=color.gray, text_size=size.tiny)
+    table.cell(info_table, 1, 3, str.tostring(histogram, "#.####"), text_color=histogram >= 0 ? bullish_color : bearish_color, text_size=size.tiny)
+    
+    bias_text = bias == 1 ? "BULLISH" : bias == -1 ? "BEARISH" : "NEUTRAL"
+    bias_color_display = bias == 1 ? bullish_color : bias == -1 ? bearish_color : neutral_color
+    table.cell(info_table, 0, 4, "Bias", text_color=color.gray, text_size=size.tiny)
+    table.cell(info_table, 1, 4, bias_text, text_color=bias_color_display, text_size=size.tiny)
