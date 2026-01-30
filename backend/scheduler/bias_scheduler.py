@@ -914,13 +914,55 @@ async def refresh_daily_bias() -> Dict[str, Any]:
             new_level = "MINOR_URSA"
         else:
             new_level = "MAJOR_URSA"
-        
+
+        # =====================================================================
+        # CIRCUIT BREAKER OVERRIDE
+        # =====================================================================
+        original_level = new_level
+        circuit_breaker_applied = False
+
+        try:
+            from webhooks.circuit_breaker import get_circuit_breaker_state
+            cb_state = get_circuit_breaker_state()
+
+            if cb_state.get("active"):
+                bias_cap = cb_state.get("bias_cap")
+                bias_floor = cb_state.get("bias_floor")
+
+                # Apply bias cap (maximum bullish level)
+                if bias_cap:
+                    cap_value = BIAS_LEVELS.get(bias_cap, 6)
+                    current_value = BIAS_LEVELS.get(new_level, 4)
+
+                    if current_value > cap_value:
+                        new_level = bias_cap
+                        circuit_breaker_applied = True
+                        logger.warning(f"⚠️ Circuit breaker CAP applied: {original_level} -> {new_level}")
+
+                # Apply bias floor (minimum bearish level)
+                if bias_floor:
+                    floor_value = BIAS_LEVELS.get(bias_floor, 1)
+                    current_value = BIAS_LEVELS.get(new_level, 4)
+
+                    if current_value > floor_value:
+                        new_level = bias_floor
+                        circuit_breaker_applied = True
+                        logger.warning(f"⚠️ Circuit breaker FLOOR applied: {original_level} -> {new_level}")
+
+        except Exception as e:
+            logger.warning(f"Error applying circuit breaker: {e}")
+
         # Build details
         details = {
             "source": "7_factor_daily",
             "total_vote": total_vote,
             "max_possible": max_possible,
-            "factors": {name: {"vote": vote, "details": det} for name, vote, det in factor_votes}
+            "factors": {name: {"vote": vote, "details": det} for name, vote, det in factor_votes},
+            "circuit_breaker": {
+                "applied": circuit_breaker_applied,
+                "original_level": original_level if circuit_breaker_applied else None,
+                "trigger": cb_state.get("trigger") if circuit_breaker_applied else None
+            } if circuit_breaker_applied else None
         }
         
         # Update bias with trend tracking
@@ -1985,6 +2027,19 @@ async def auto_dismiss_old_signals():
         logger.error(f"❌ Auto-dismiss error: {e}")
 
 
+async def reset_circuit_breaker_scheduled():
+    """
+    Reset circuit breaker at market open (9:30 AM ET)
+    Clears any overnight risk events
+    """
+    try:
+        from webhooks.circuit_breaker import reset_circuit_breaker
+        result = reset_circuit_breaker()
+        logger.info(f"🔓 Circuit breaker reset at market open: {result}")
+    except Exception as e:
+        logger.error(f"Error resetting circuit breaker: {e}")
+
+
 async def run_scheduled_refreshes():
     """
     Run appropriate refreshes based on current time/day
@@ -2178,16 +2233,49 @@ async def start_scheduler():
         from apscheduler.triggers.cron import CronTrigger
         
         scheduler = AsyncIOScheduler()
-        
-        # Daily refresh at 9:45 AM ET (Mon-Fri)
+
+        # Circuit breaker reset at market open (9:30 AM ET)
+        scheduler.add_job(
+            reset_circuit_breaker_scheduled,
+            CronTrigger(hour=9, minute=30, day_of_week='mon-fri'),
+            id='circuit_breaker_reset',
+            name='Circuit Breaker Daily Reset',
+            replace_existing=True
+        )
+
+        # Daily refresh at multiple times throughout the day (9:45 AM, 11:00 AM, 1:00 PM, 3:00 PM ET)
         scheduler.add_job(
             run_scheduled_refreshes,
             CronTrigger(hour=9, minute=45, day_of_week='mon-fri'),
-            id='bias_refresh',
-            name='Daily Bias Refresh',
+            id='bias_refresh_0945',
+            name='Daily Bias Refresh (9:45 AM)',
             replace_existing=True
         )
-        
+
+        scheduler.add_job(
+            run_scheduled_refreshes,
+            CronTrigger(hour=11, minute=0, day_of_week='mon-fri'),
+            id='bias_refresh_1100',
+            name='Daily Bias Refresh (11:00 AM)',
+            replace_existing=True
+        )
+
+        scheduler.add_job(
+            run_scheduled_refreshes,
+            CronTrigger(hour=13, minute=0, day_of_week='mon-fri'),
+            id='bias_refresh_1300',
+            name='Daily Bias Refresh (1:00 PM)',
+            replace_existing=True
+        )
+
+        scheduler.add_job(
+            run_scheduled_refreshes,
+            CronTrigger(hour=15, minute=0, day_of_week='mon-fri'),
+            id='bias_refresh_1500',
+            name='Daily Bias Refresh (3:00 PM)',
+            replace_existing=True
+        )
+
         # Savita auto-search at 8:00 AM ET, days 12-23 of each month
         scheduler.add_job(
             run_savita_auto_search,
