@@ -4823,14 +4823,13 @@ const strategyFilters = {
         'apis_call', 'kodiak_call'
     ]),
     directions: new Set(['LONG', 'SHORT']),
-    minScore: 0
+    minScore: 1
 };
 
 function initStrategyFilters() {
     const selectAllBtn = document.getElementById('selectAllStrategies');
     const clearAllBtn = document.getElementById('clearAllStrategies');
-    const scoreSlider = document.getElementById('scoreThreshold');
-    const scoreValue = document.getElementById('scoreValue');
+    const scoreInput = document.getElementById('scoreThreshold');
     const filterLong = document.getElementById('filterLong');
     const filterShort = document.getElementById('filterShort');
     const strategyCheckboxes = document.querySelectorAll('.strategy-checkbox');
@@ -4873,11 +4872,12 @@ function initStrategyFilters() {
         });
     });
 
-    // Score slider
-    if (scoreSlider && scoreValue) {
-        scoreSlider.addEventListener('input', (e) => {
-            const value = parseInt(e.target.value);
-            scoreValue.textContent = value;
+    // Score input
+    if (scoreInput) {
+        scoreInput.addEventListener('input', (e) => {
+            let value = parseInt(e.target.value) || 1;
+            // Clamp value between 1 and 100
+            value = Math.max(1, Math.min(100, value));
             strategyFilters.minScore = value;
             document.getElementById('activeMinScore').textContent = value;
             applyFiltersAndRefresh();

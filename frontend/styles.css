@@ -5635,14 +5635,79 @@ h3 .kb-link::after {
     font-size: 14px;
     font-weight: 700;
     letter-spacing: 1px;
-    margin: 0 0 15px 0;
+    margin: 0;
 }
 
 .strategy-filter-header {
     display: flex;
-    justify-content: space-between;
     align-items: center;
+    gap: 12px;
     margin-bottom: 15px;
+    flex-wrap: wrap;
+}
+
+.header-divider {
+    color: var(--text-secondary);
+    opacity: 0.5;
+    font-size: 16px;
+}
+
+.header-controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.min-score-label {
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.score-input {
+    width: 60px;
+    padding: 4px 8px;
+    background: var(--dark-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    color: var(--text-primary);
+    font-size: 13px;
+    text-align: center;
+}
+
+.score-input:focus {
+    outline: none;
+    border-color: var(--accent-teal);
+}
+
+.strategy-filter-controls {
+    margin-left: auto;
+}
+
+/* Scrollable strategy groups container */
+.strategy-groups-container {
+    max-height: 180px;
+    overflow-y: auto;
+    margin-bottom: 15px;
+    padding-right: 5px;
+}
+
+.strategy-groups-container::-webkit-scrollbar {
+    width: 6px;
+}
+
+.strategy-groups-container::-webkit-scrollbar-track {
+    background: var(--dark-bg);
+    border-radius: 3px;
+}
+
+.strategy-groups-container::-webkit-scrollbar-thumb {
+    background: var(--border-color);
+    border-radius: 3px;
+}
+
+.strategy-groups-container::-webkit-scrollbar-thumb:hover {
+    background: var(--accent-teal);
 }
 
 .strategy-filter-controls {
@@ -5738,46 +5803,33 @@ h3 .kb-link::after {
     white-space: nowrap;
 }
 
-/* Direction Filter */
-.direction-filter {
-    margin-bottom: 15px;
-}
-
-.filter-section-title {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--text-primary);
-    margin: 0 0 10px 0;
-}
-
-.direction-checkboxes {
-    display: flex;
-    gap: 20px;
-}
-
+/* Direction Toggle (in header) */
 .direction-toggle {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
     cursor: pointer;
 }
 
-.direction-checkbox {
-    width: 16px;
-    height: 16px;
+.direction-toggle input[type="checkbox"] {
+    width: 14px;
+    height: 14px;
     cursor: pointer;
     accent-color: var(--accent-teal);
+    margin: 0;
 }
 
 .direction-label {
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 600;
-    color: var(--text-primary);
 }
 
-/* Score Filter */
-.score-filter {
-    margin-bottom: 15px;
+.direction-label.long {
+    color: var(--accent-green);
+}
+
+.direction-label.short {
+    color: var(--accent-red);
 }
 
 .score-slider-row {
