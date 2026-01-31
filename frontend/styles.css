@@ -5628,6 +5628,8 @@ h3 .kb-link::after {
     border-radius: 12px;
     padding: 20px;
     margin: 20px 0;
+    width: 50%;
+    min-width: 400px;
 }
 
 .strategy-filter-section h2 {
@@ -5678,6 +5680,12 @@ h3 .kb-link::after {
 .score-input:focus {
     outline: none;
     border-color: var(--accent-teal);
+}
+
+.filter-status {
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-style: italic;
 }
 
 .strategy-filter-controls {

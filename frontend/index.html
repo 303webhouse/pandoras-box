@@ -420,6 +420,8 @@
                     <span class="header-divider">|</span>
                     <label class="min-score-label">Min Score:</label>
                     <input type="number" id="scoreThreshold" class="score-input" min="1" max="100" value="1">
+                    <span class="header-divider">|</span>
+                    <span class="filter-status"><span id="activeStrategyCount">10</span> strategies, <span id="activeDirections">LONG + SHORT</span>, min <span id="activeMinScore">1</span></span>
                 </div>
                 <div class="strategy-filter-controls">
                     <button class="filter-btn select-all" id="selectAllStrategies">Select All</button>
@@ -500,21 +502,6 @@
                 </div>
             </div>
 
-            <!-- Active Filters Summary -->
-            <div class="filter-summary">
-                <div class="summary-item">
-                    <span class="summary-label">Active Strategies:</span>
-                    <span class="summary-value" id="activeStrategyCount">10</span>
-                </div>
-                <div class="summary-item">
-                    <span class="summary-label">Direction:</span>
-                    <span class="summary-value" id="activeDirections">LONG + SHORT</span>
-                </div>
-                <div class="summary-item">
-                    <span class="summary-label">Min Score:</span>
-                    <span class="summary-value" id="activeMinScore">1</span>
-                </div>
-            </div>
         </section>
 
         <!-- Hybrid Market Scanner (Batch Scan Results) -->
