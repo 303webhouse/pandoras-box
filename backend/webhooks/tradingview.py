@@ -83,7 +83,10 @@ async def receive_tradingview_alert(alert: TradingViewAlert):
     
     try:
         # Route to appropriate strategy handler
-        if "exhaustion" in strategy_lower:
+        # Scout signals first (early warning, not full trade signals)
+        if "scout" in strategy_lower:
+            return await process_scout_signal(alert, start_time)
+        elif "exhaustion" in strategy_lower:
             return await process_exhaustion_signal(alert, start_time)
         elif "sniper" in strategy_lower:
             return await process_sniper_signal(alert, start_time)
@@ -96,6 +99,67 @@ async def receive_tradingview_alert(alert: TradingViewAlert):
     except Exception as e:
         logger.error(f"Error processing webhook: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+async def process_scout_signal(alert: TradingViewAlert, start_time: datetime):
+    """
+    Process Scout signals - early warning indicators from 15m charts
+
+    These are NOT full trade signals - they're alerts that a reversal MAY be starting.
+    They get a special signal_type and lower priority so they show differently in the UI.
+    """
+
+    # Build signal data with Scout-specific fields
+    signal_id = f"SCOUT_{alert.ticker}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+    signal_data = {
+        "signal_id": signal_id,
+        "timestamp": alert.timestamp or datetime.now().isoformat(),
+        "ticker": alert.ticker,
+        "strategy": "Scout",
+        "direction": alert.direction,
+        "signal_type": "SCOUT_ALERT",  # Special type for UI differentiation
+        "entry_price": alert.entry_price,
+        "stop_loss": None,  # Scout doesn't provide SL/TP
+        "target_1": None,
+        "target_2": None,
+        "risk_reward": None,
+        "timeframe": alert.timeframe or "15",
+        "trade_type": "EARLY_WARNING",
+        "asset_class": "CRYPTO" if is_crypto_ticker(alert.ticker) else "EQUITY",
+        "status": "ACTIVE",
+        "rsi": alert.rsi,
+        "rvol": alert.rvol,
+        # Scout-specific: lower priority, shorter TTL
+        "priority": "LOW",
+        "confidence": "SCOUT",  # Special confidence level
+        "score": 40,  # Base score - scouts don't get full scoring
+        "bias_alignment": "NEUTRAL",
+        "note": "Early warning - confirm with 1H Sniper before entry"
+    }
+
+    # Cache with shorter TTL (30 mins instead of 1 hour)
+    await cache_signal(signal_id, signal_data, ttl=1800)
+
+    # Log to database
+    await log_signal(signal_data)
+
+    # Broadcast to UI - use dedicated scout broadcast (no priority threshold)
+    await manager.broadcast({
+        "type": "SCOUT_ALERT",
+        "data": signal_data
+    })
+
+    elapsed = (datetime.now() - start_time).total_seconds() * 1000
+    logger.info(f"⚠️ Scout alert: {alert.ticker} {alert.direction} (RSI: {alert.rsi}, RVOL: {alert.rvol}) in {elapsed:.1f}ms")
+
+    return {
+        "status": "success",
+        "signal_id": signal_id,
+        "signal_type": "SCOUT_ALERT",
+        "message": "Early warning - not a trade signal",
+        "processing_time_ms": round(elapsed, 1)
+    }
 
 
 async def process_exhaustion_signal(alert: TradingViewAlert, start_time: datetime):
