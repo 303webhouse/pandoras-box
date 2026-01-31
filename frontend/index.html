@@ -407,87 +407,8 @@
         <section class="strategy-filter-section">
             <div class="strategy-filter-header">
                 <h2><span class="icon-teal">&#9881;</span> STRATEGY FILTERS</h2>
-                <div class="strategy-filter-controls">
-                    <button class="filter-btn select-all" id="selectAllStrategies">Select All</button>
-                    <button class="filter-btn clear-all" id="clearAllStrategies">Clear All</button>
-                </div>
-            </div>
-
-            <!-- Strategy Groups -->
-            <div class="strategy-groups">
-                <!-- Trend Following -->
-                <div class="strategy-group">
-                    <h3 class="strategy-group-title"><span class="icon-teal">&#8593;</span> Trend Following</h3>
-                    <div class="strategy-toggles">
-                        <label class="strategy-toggle">
-                            <input type="checkbox" class="strategy-checkbox" data-strategy="golden_touch" checked>
-                            <span class="strategy-name">Golden Touch</span>
-                        </label>
-                        <label class="strategy-toggle">
-                            <input type="checkbox" class="strategy-checkbox" data-strategy="pullback_entry" checked>
-                            <span class="strategy-name">Pullback Entry</span>
-                        </label>
-                        <label class="strategy-toggle">
-                            <input type="checkbox" class="strategy-checkbox" data-strategy="taurus_signal" checked>
-                            <span class="strategy-name">Taurus Signal</span>
-                        </label>
-                        <label class="strategy-toggle">
-                            <input type="checkbox" class="strategy-checkbox" data-strategy="triple_line" checked>
-                            <span class="strategy-name">Triple Line</span>
-                        </label>
-                    </div>
-                </div>
-
-                <!-- Breakout -->
-                <div class="strategy-group">
-                    <h3 class="strategy-group-title"><span class="icon-teal">&#9650;</span> Breakout</h3>
-                    <div class="strategy-toggles">
-                        <label class="strategy-toggle">
-                            <input type="checkbox" class="strategy-checkbox" data-strategy="two_close_vol" checked>
-                            <span class="strategy-name">Two-Close + Vol</span>
-                        </label>
-                        <label class="strategy-toggle">
-                            <input type="checkbox" class="strategy-checkbox" data-strategy="zone_upgrade" checked>
-                            <span class="strategy-name">Zone Upgrade</span>
-                        </label>
-                    </div>
-                </div>
-
-                <!-- Reversal -->
-                <div class="strategy-group">
-                    <h3 class="strategy-group-title"><span class="icon-teal">&#8635;</span> Reversal</h3>
-                    <div class="strategy-toggles">
-                        <label class="strategy-toggle">
-                            <input type="checkbox" class="strategy-checkbox" data-strategy="exhaustion" checked>
-                            <span class="strategy-name">Exhaustion</span>
-                        </label>
-                        <label class="strategy-toggle">
-                            <input type="checkbox" class="strategy-checkbox" data-strategy="ursa_signal" checked>
-                            <span class="strategy-name">Ursa Signal</span>
-                        </label>
-                    </div>
-                </div>
-
-                <!-- Macro Confluence -->
-                <div class="strategy-group">
-                    <h3 class="strategy-group-title"><span class="icon-teal">&#9673;</span> Macro Confluence</h3>
-                    <div class="strategy-toggles">
-                        <label class="strategy-toggle">
-                            <input type="checkbox" class="strategy-checkbox" data-strategy="apis_call" checked>
-                            <span class="strategy-name">APIS Call</span>
-                        </label>
-                        <label class="strategy-toggle">
-                            <input type="checkbox" class="strategy-checkbox" data-strategy="kodiak_call" checked>
-                            <span class="strategy-name">Kodiak Call</span>
-                        </label>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Direction Filter -->
-            <div class="direction-filter">
-                <h3 class="filter-section-title"><span class="icon-teal">&#8644;</span> Direction</h3>
-                <div class="direction-toggles">
+                <span class="header-divider">|</span>
+                <div class="header-controls">
                     <label class="direction-toggle">
                         <input type="checkbox" id="filterLong" checked>
                         <span class="direction-label long">LONG</span>
@@ -496,17 +417,85 @@
                         <input type="checkbox" id="filterShort" checked>
                         <span class="direction-label short">SHORT</span>
                     </label>
+                    <span class="header-divider">|</span>
+                    <label class="min-score-label">Min Score:</label>
+                    <input type="number" id="scoreThreshold" class="score-input" min="1" max="100" value="1">
+                </div>
+                <div class="strategy-filter-controls">
+                    <button class="filter-btn select-all" id="selectAllStrategies">Select All</button>
+                    <button class="filter-btn clear-all" id="clearAllStrategies">Clear All</button>
                 </div>
             </div>
 
-            <!-- Score Threshold Slider -->
-            <div class="score-filter">
-                <h3 class="filter-section-title"><span class="icon-teal">&#9678;</span> Minimum Score</h3>
-                <div class="score-slider-container">
-                    <input type="range" id="scoreThreshold" class="score-slider" min="0" max="100" value="0" step="5">
-                    <div class="score-display">
-                        <span id="scoreValue">0</span>
-                        <span class="score-unit">/ 100</span>
+            <!-- Strategy Groups (scrollable) -->
+            <div class="strategy-groups-container">
+                <div class="strategy-groups">
+                    <!-- Trend Following -->
+                    <div class="strategy-group">
+                        <h3 class="strategy-group-title"><span class="icon-teal">&#8593;</span> Trend Following</h3>
+                        <div class="strategy-toggles">
+                            <label class="strategy-toggle">
+                                <input type="checkbox" class="strategy-checkbox" data-strategy="golden_touch" checked>
+                                <span class="strategy-name">Golden Touch</span>
+                            </label>
+                            <label class="strategy-toggle">
+                                <input type="checkbox" class="strategy-checkbox" data-strategy="pullback_entry" checked>
+                                <span class="strategy-name">Pullback Entry</span>
+                            </label>
+                            <label class="strategy-toggle">
+                                <input type="checkbox" class="strategy-checkbox" data-strategy="taurus_signal" checked>
+                                <span class="strategy-name">Taurus Signal</span>
+                            </label>
+                            <label class="strategy-toggle">
+                                <input type="checkbox" class="strategy-checkbox" data-strategy="triple_line" checked>
+                                <span class="strategy-name">Triple Line</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Breakout -->
+                    <div class="strategy-group">
+                        <h3 class="strategy-group-title"><span class="icon-teal">&#9650;</span> Breakout</h3>
+                        <div class="strategy-toggles">
+                            <label class="strategy-toggle">
+                                <input type="checkbox" class="strategy-checkbox" data-strategy="two_close_vol" checked>
+                                <span class="strategy-name">Two-Close + Vol</span>
+                            </label>
+                            <label class="strategy-toggle">
+                                <input type="checkbox" class="strategy-checkbox" data-strategy="zone_upgrade" checked>
+                                <span class="strategy-name">Zone Upgrade</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Reversal -->
+                    <div class="strategy-group">
+                        <h3 class="strategy-group-title"><span class="icon-teal">&#8635;</span> Reversal</h3>
+                        <div class="strategy-toggles">
+                            <label class="strategy-toggle">
+                                <input type="checkbox" class="strategy-checkbox" data-strategy="exhaustion" checked>
+                                <span class="strategy-name">Exhaustion</span>
+                            </label>
+                            <label class="strategy-toggle">
+                                <input type="checkbox" class="strategy-checkbox" data-strategy="ursa_signal" checked>
+                                <span class="strategy-name">Ursa Signal</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Macro Confluence -->
+                    <div class="strategy-group">
+                        <h3 class="strategy-group-title"><span class="icon-teal">&#9673;</span> Macro Confluence</h3>
+                        <div class="strategy-toggles">
+                            <label class="strategy-toggle">
+                                <input type="checkbox" class="strategy-checkbox" data-strategy="apis_call" checked>
+                                <span class="strategy-name">APIS Call</span>
+                            </label>
+                            <label class="strategy-toggle">
+                                <input type="checkbox" class="strategy-checkbox" data-strategy="kodiak_call" checked>
+                                <span class="strategy-name">Kodiak Call</span>
+                            </label>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -523,7 +512,7 @@
                 </div>
                 <div class="summary-item">
                     <span class="summary-label">Min Score:</span>
-                    <span class="summary-value" id="activeMinScore">0</span>
+                    <span class="summary-value" id="activeMinScore">1</span>
                 </div>
             </div>
         </section>
