@@ -2299,57 +2299,6 @@ body.override-active-bearish .override-toggle[data-active="true"] {
     margin-bottom: 8px;
 }
 
-.strategy-name {
-    font-size: 13px;
-    font-weight: 700;
-    color: var(--text-primary);
-}
-
-.strategy-toggle {
-    position: relative;
-    width: 40px;
-    height: 20px;
-    cursor: pointer;
-}
-
-.strategy-toggle input {
-    opacity: 0;
-    width: 0;
-    height: 0;
-}
-
-.toggle-slider {
-    position: absolute;
-    cursor: pointer;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background-color: var(--border-color);
-    transition: 0.3s;
-    border-radius: 20px;
-}
-
-.toggle-slider:before {
-    position: absolute;
-    content: "";
-    height: 16px;
-    width: 16px;
-    left: 2px;
-    bottom: 2px;
-    background-color: var(--text-primary);
-    transition: 0.3s;
-    border-radius: 50%;
-}
-
-.strategy-toggle input:checked + .toggle-slider {
-    background-color: var(--accent-teal);
-}
-
-.strategy-toggle input:checked + .toggle-slider:before {
-    transform: translateX(20px);
-}
-
 .strategy-description {
     font-size: 11px;
     color: var(--text-secondary);
@@ -5656,6 +5605,17 @@ h3 .kb-link::after {
     font-weight: 500;
     text-transform: uppercase;
     letter-spacing: 0.5px;
+}
+
+/* =========================================================================
+   TEAL LINE ART ICONS
+   ========================================================================= */
+
+.icon-teal {
+    color: var(--accent-teal);
+    font-style: normal;
+    margin-right: 6px;
+    font-weight: normal;
 }
 
 /* =========================================================================
