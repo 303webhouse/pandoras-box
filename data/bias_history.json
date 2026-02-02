@@ -1,0 +1,157 @@
+{
+  "daily": {
+    "current": {
+      "level": "LEAN_URSA",
+      "timestamp": "2026-02-02T01:13:00.440528-05:00",
+      "details": {
+        "source": "7_factor_daily",
+        "total_vote": -1,
+        "max_possible": 14,
+        "factors": {
+          "spy_rsi": {
+            "vote": 0,
+            "details": {
+              "rsi": 53.9,
+              "signal": "NEUTRAL"
+            }
+          },
+          "vix_level": {
+            "vote": 0,
+            "details": {
+              "vix_proxy": "VIXY",
+              "price": 26.71,
+              "proxy_signal": "NEUTRAL",
+              "signal": "NEUTRAL"
+            }
+          },
+          "tech_leadership": {
+            "vote": -1,
+            "details": {
+              "qqq_change": -0.19,
+              "spy_change": -0.04,
+              "diff": -0.15,
+              "signal": "TECH_SLIGHT_LAG"
+            }
+          },
+          "small_cap_risk": {
+            "vote": -1,
+            "details": {
+              "iwm_change": -0.54,
+              "spy_change": -0.04,
+              "diff": -0.5,
+              "signal": "SLIGHT_RISK_OFF"
+            }
+          },
+          "spy_trend": {
+            "vote": 1,
+            "details": {
+              "price": 691.97,
+              "signal": "BUY",
+              "ema20": 690.1
+            }
+          },
+          "market_breadth": {
+            "vote": 0,
+            "details": {
+              "rsp_change": -0.11,
+              "spy_change": -0.04,
+              "diff": -0.07,
+              "signal": "NEUTRAL"
+            }
+          },
+          "tick_breadth": {
+            "vote": 0,
+            "details": {
+              "tick_high": 0,
+              "tick_low": 0,
+              "bias": "NEUTRAL",
+              "signal": "NEUTRAL"
+            }
+          }
+        },
+        "circuit_breaker": null
+      }
+    },
+    "previous": null,
+    "history": [],
+    "trend": "NEW"
+  },
+  "weekly": {
+    "current": {
+      "level": "MINOR_TORO",
+      "timestamp": "2026-02-02T01:13:09.580532-05:00",
+      "details": {
+        "source": "6_factor_weekly",
+        "total_vote": 3,
+        "max_possible": 12,
+        "factors": {
+          "index_trends": {
+            "vote": 2,
+            "details": {
+              "signals": {
+                "SPY": "BUY",
+                "QQQ": "BUY",
+                "IWM": "BUY",
+                "SMH": "BUY"
+              },
+              "bullish": 4,
+              "bearish": 0,
+              "signal": "ALL_BULLISH"
+            }
+          },
+          "dollar_trend": {
+            "vote": 2,
+            "details": {
+              "uup_signal": "STRONG_SELL",
+              "uup_change": -0.83,
+              "status": "WEAK_DOLLAR"
+            }
+          },
+          "sector_rotation": {
+            "vote": -2,
+            "details": {
+              "xlk_change": -0.57,
+              "xlu_change": 3.8,
+              "diff": -4.37,
+              "signal": "STRONG_RISK_OFF"
+            }
+          },
+          "credit_spreads": {
+            "vote": 1,
+            "details": {
+              "hyg_change": -0.03,
+              "tlt_change": -1.03,
+              "diff": 1.0,
+              "signal": "RISK_APPETITE"
+            }
+          },
+          "market_breadth": {
+            "vote": 0,
+            "details": {
+              "rsp_change": 0,
+              "spy_change": 0.06,
+              "diff": -0.06,
+              "signal": "NEUTRAL"
+            }
+          },
+          "vix_term_structure": {
+            "vote": 0,
+            "details": {
+              "bias_level": 3,
+              "bias": "NEUTRAL"
+            }
+          }
+        }
+      }
+    },
+    "previous": null,
+    "history": [],
+    "trend": "NEW"
+  },
+  "cyclical": {
+    "current": null,
+    "previous": null,
+    "history": []
+  },
+  "last_updated": "2026-02-02T01:13:09.580532-05:00"
+}
