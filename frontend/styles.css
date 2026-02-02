@@ -1861,6 +1861,233 @@ body.override-active-bearish .override-toggle[data-active="true"] {
     color: #fff;
 }
 
+/* ============================================
+   SCOUT ALERTS - Early Warning Signals
+   Yellow/Amber color scheme - warning, not action
+   ============================================ */
+
+.scout-alerts-section {
+    margin-bottom: 12px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.scout-alerts-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.scout-header-left {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.scout-header-icon {
+    font-size: 14px;
+}
+
+.scout-header-title {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    color: #fbbf24;
+}
+
+.scout-alert-count {
+    background: #fbbf24;
+    color: #000;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 10px;
+    min-width: 18px;
+    text-align: center;
+}
+
+.scout-alerts-container {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 180px;
+    overflow-y: auto;
+}
+
+.scout-empty-state {
+    color: var(--text-secondary);
+    font-size: 11px;
+    text-align: center;
+    padding: 8px;
+    margin: 0;
+}
+
+/* Scout Alert Card - Smaller than regular signals */
+.scout-alert-card {
+    background: rgba(251, 191, 36, 0.08);
+    border: 1px solid rgba(251, 191, 36, 0.3);
+    border-left: 3px solid #fbbf24;
+    border-radius: 6px;
+    padding: 8px 10px;
+    cursor: pointer;
+    transition: all 0.2s;
+    animation: scoutPulse 3s ease-in-out infinite;
+}
+
+.scout-alert-card:hover {
+    background: rgba(251, 191, 36, 0.12);
+    transform: translateX(2px);
+    box-shadow: 0 2px 8px rgba(251, 191, 36, 0.2);
+}
+
+.scout-alert-card.scout-short {
+    border-left-color: #f97316;
+    background: rgba(249, 115, 22, 0.08);
+    border-color: rgba(249, 115, 22, 0.3);
+}
+
+.scout-alert-card.scout-short:hover {
+    background: rgba(249, 115, 22, 0.12);
+    box-shadow: 0 2px 8px rgba(249, 115, 22, 0.2);
+}
+
+@keyframes scoutPulse {
+    0%, 100% {
+        box-shadow: 0 0 0 0 rgba(251, 191, 36, 0);
+    }
+    50% {
+        box-shadow: 0 0 8px 2px rgba(251, 191, 36, 0.3);
+    }
+}
+
+.scout-alert-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+}
+
+.scout-badge {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.scout-icon {
+    font-size: 12px;
+}
+
+.scout-label {
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 1px;
+    color: #fbbf24;
+    background: rgba(251, 191, 36, 0.2);
+    padding: 2px 6px;
+    border-radius: 3px;
+}
+
+.scout-dismiss-btn {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 16px;
+    cursor: pointer;
+    padding: 0 4px;
+    line-height: 1;
+    transition: color 0.2s;
+}
+
+.scout-dismiss-btn:hover {
+    color: #fbbf24;
+}
+
+.scout-alert-content {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.scout-ticker-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.scout-ticker {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.scout-direction {
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 3px;
+}
+
+.scout-direction.scout-long {
+    background: rgba(124, 255, 107, 0.2);
+    color: var(--accent-lime);
+}
+
+.scout-direction.scout-short {
+    background: rgba(249, 115, 22, 0.2);
+    color: #f97316;
+}
+
+.scout-metrics {
+    display: flex;
+    gap: 12px;
+}
+
+.scout-metric {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+.scout-metric-label {
+    font-size: 8px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    letter-spacing: 0.5px;
+}
+
+.scout-metric-value {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.scout-note {
+    font-size: 9px;
+    color: #fbbf24;
+    font-style: italic;
+    padding-top: 4px;
+    border-top: 1px dashed rgba(251, 191, 36, 0.2);
+}
+
+/* Scrollbar for scout alerts container */
+.scout-alerts-container::-webkit-scrollbar {
+    width: 4px;
+}
+
+.scout-alerts-container::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.scout-alerts-container::-webkit-scrollbar-thumb {
+    background: rgba(251, 191, 36, 0.3);
+    border-radius: 2px;
+}
+
+.scout-alerts-container::-webkit-scrollbar-thumb:hover {
+    background: rgba(251, 191, 36, 0.5);
+}
+
 /* New Signal Highlight Animation */
 @keyframes newSignalFlash {
     0% { background: rgba(20, 184, 166, 0.3); }
