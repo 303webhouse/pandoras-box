@@ -21,10 +21,27 @@
                 </div>
             </div>
             <div class="header-controls">
+                <div class="mode-switcher" role="tablist" aria-label="App Mode">
+                    <button class="mode-btn active" id="modeHubBtn" data-mode="hub" role="tab" aria-selected="true">Trading Hub</button>
+                    <button class="mode-btn" id="modeCryptoBtn" data-mode="crypto" role="tab" aria-selected="false">Crypto Scalper</button>
+                </div>
                 <a href="/knowledgebase" class="kb-btn" title="Knowledgebase">📚 KB</a>
                 <button class="refresh-btn" id="refreshBtn">↻ Refresh</button>
             </div>
         </header>
+
+        <section class="crypto-topbar" id="cryptoTopbar">
+            <div class="crypto-topbar-left">
+                <div class="crypto-session-status" id="cryptoSessionStatus">
+                    <span class="session-pill">Fetching BTC session</span>
+                </div>
+            </div>
+            <div class="crypto-topbar-right">
+                <button class="crypto-toggle-btn" id="cryptoBtcToggleBtn" aria-expanded="true"> Bottom Signals</button>
+            </div>
+        </section>
+
+        <main id="hubShell" class="hub-shell">
 
         <!-- Bias Indicators -->
         <section class="bias-section">
@@ -553,8 +570,8 @@
             <div class="btc-signals-header">
                 <h2>₿ <span class="kb-link" data-kb-term="btc-bottom-signals">BTC BOTTOM SIGNALS</span></h2>
                 <div class="btc-signals-controls">
-                    <button class="btc-btn" id="refreshBtcSignalsBtn">↻ Refresh</button>
-                    <button class="btc-btn secondary" id="resetBtcSignalsBtn">Reset All</button>
+                    <button class="btc-btn btc-refresh-btn" id="refreshBtcSignalsBtn">↻ Refresh</button>
+                    <button class="btc-btn secondary btc-reset-btn" id="resetBtcSignalsBtn">Reset All</button>
                 </div>
             </div>
             <p class="btc-info">"We identify structural exhaustion of sellers and reset of leverage"</p>
@@ -1239,6 +1256,122 @@
             </div>
         </div>
     </div>
+
+        </main>
+
+        <main id="cryptoShell" class="crypto-shell" hidden>
+            <section class="crypto-grid">
+                <div class="crypto-column crypto-column-left">
+                    <div class="crypto-panel">
+                        <div class="crypto-panel-header">
+                            <h2>🪙 Crypto Signal Stream</h2>
+                            <div class="crypto-panel-controls">
+                                <label for="cryptoSignalSort" class="crypto-label">Sort</label>
+                                <select id="cryptoSignalSort" class="crypto-select">
+                                    <option value="score">Score</option>
+                                    <option value="recency">Recency</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="crypto-signal-list" id="cryptoSignalsList">
+                            <p class="empty-state">Loading crypto signals</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="crypto-column crypto-column-center">
+                    <div class="crypto-panel">
+                        <div class="crypto-panel-header">
+                            <h2>🕒 BTC Session Windows</h2>
+                            <span class="crypto-subtext">Times shown in America/Denver</span>
+                        </div>
+                        <div class="btc-session-current" id="cryptoBtcSessionCurrent">
+                            <span class="session-status">Checking</span>
+                        </div>
+                        <div class="btc-session-list" id="cryptoBtcSessionList"></div>
+                    </div>
+
+                    <div class="crypto-panel">
+                        <div class="crypto-panel-header">
+                            <h2>📍 Key Levels</h2>
+                            <span class="crypto-subtext" id="cryptoKeyLevelsUpdated">Updating</span>
+                        </div>
+                        <div class="crypto-level-grid" id="cryptoKeyLevelsGrid">
+                            <div class="crypto-level-item">
+                                <span class="crypto-level-label">Today Open</span>
+                                <span class="crypto-level-value" data-level="todayOpen">--</span>
+                            </div>
+                            <div class="crypto-level-item">
+                                <span class="crypto-level-label">Yesterday Close</span>
+                                <span class="crypto-level-value" data-level="yesterdayClose">--</span>
+                            </div>
+                            <div class="crypto-level-item">
+                                <span class="crypto-level-label">Overnight High</span>
+                                <span class="crypto-level-value" data-level="overnightHigh">--</span>
+                            </div>
+                            <div class="crypto-level-item">
+                                <span class="crypto-level-label">Overnight Low</span>
+                                <span class="crypto-level-value" data-level="overnightLow">--</span>
+                            </div>
+                            <div class="crypto-level-item">
+                                <span class="crypto-level-label">Weekly Open</span>
+                                <span class="crypto-level-value" data-level="weeklyOpen">--</span>
+                            </div>
+                            <div class="crypto-level-item">
+                                <span class="crypto-level-label">Monthly Open</span>
+                                <span class="crypto-level-value" data-level="monthlyOpen">--</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="crypto-column crypto-column-right">
+                    <div class="crypto-panel crypto-panel-collapsible" id="cryptoBtcPanel">
+                        <div class="btc-signals-header">
+                            <h2>🧠 BTC Bottom Signals</h2>
+                            <div class="btc-signals-controls">
+                                <button class="btc-btn btc-refresh-btn">↻ Refresh</button>
+                                <button class="btc-btn secondary btc-reset-btn">Reset All</button>
+                            </div>
+                        </div>
+                        <div class="btc-confluence-summary" id="cryptoBtcConfluenceSummary">
+                            <div class="confluence-meter">
+                                <span class="confluence-count">0/9</span>
+                                <span class="confluence-label">Signals Firing</span>
+                            </div>
+                            <div class="confluence-verdict">Checking signals</div>
+                        </div>
+                        <div class="btc-api-status" id="cryptoBtcApiStatus">
+                            <span class="api-status-item">Loading APIs</span>
+                        </div>
+                        <div class="btc-signals-grid" id="cryptoBtcSignalsGrid">
+                            <p class="empty-state">Loading signals</p>
+                        </div>
+                    </div>
+
+                    <div class="crypto-panel">
+                        <div class="crypto-panel-header">
+                            <h2>🧭 Macro Confluence</h2>
+                        </div>
+                        <div class="crypto-bias-grid" id="cryptoBiasGrid">
+                            <div class="crypto-bias-card">
+                                <span class="crypto-bias-label">Daily Bias</span>
+                                <span class="crypto-bias-value" data-bias="daily">--</span>
+                            </div>
+                            <div class="crypto-bias-card">
+                                <span class="crypto-bias-label">Weekly Bias</span>
+                                <span class="crypto-bias-value" data-bias="weekly">--</span>
+                            </div>
+                            <div class="crypto-bias-card">
+                                <span class="crypto-bias-label">Cyclical Bias</span>
+                                <span class="crypto-bias-value" data-bias="cyclical">--</span>
+                            </div>
+                        </div>
+                        <div class="crypto-bias-note" id="cryptoBiasNote">Loading bias alignment</div>
+                    </div>
+                </div>
+            </section>
+        </main>
 
     <!-- Knowledgebase Popup Modal -->
     <div class="modal-overlay" id="kbPopupModal">
