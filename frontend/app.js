@@ -110,9 +110,22 @@ function initRouting() {
 
 function getModeFromPath() {
     const path = window.location.pathname.replace(/\/$/, '');
-    if (path === '/crypto') return APP_MODES.CRYPTO;
-    if (path === '/hub') return APP_MODES.HUB;
+    if (path.endsWith('/crypto')) return APP_MODES.CRYPTO;
+    if (path.endsWith('/hub')) return APP_MODES.HUB;
     return null;
+}
+
+function getModeBasePath() {
+    const path = window.location.pathname.replace(/\/$/, '');
+    if (path.endsWith('/crypto')) return path.slice(0, -7) || '';
+    if (path.endsWith('/hub')) return path.slice(0, -4) || '';
+    return path || '';
+}
+
+function buildModePath(mode) {
+    const basePath = getModeBasePath();
+    const safeBase = basePath === '/' ? '' : basePath;
+    return `${safeBase}/${mode}`.replace(/\/+/g, '/');
 }
 
 function setMode(mode, options = {}) {
@@ -137,7 +150,7 @@ function setMode(mode, options = {}) {
     localStorage.setItem('pandoraAppMode', nextMode);
 
     if (!options.skipHistory) {
-        const targetPath = nextMode === APP_MODES.CRYPTO ? '/crypto' : '/hub';
+        const targetPath = buildModePath(nextMode);
         const currentPath = window.location.pathname;
         if (currentPath !== targetPath) {
             if (options.replace || currentPath === '/' || currentPath === '') {
@@ -759,7 +772,6 @@ function initEventListeners() {
             e.target.classList.add('active');
             activeAssetType = e.target.dataset.asset;
             refreshSignalViews();
-            renderCryptoSignals();
         });
     });
     
@@ -4859,7 +4871,7 @@ function renderBtcSignals() {
         const nameWithKb = `<span class="kb-term-dynamic" data-kb-term="btc-bottom-signals">${signal.name}</span>`;
         
         // Source indicator
-        const sourceIcon = isAuto ? '' : '';
+        const sourceIcon = isAuto ? '🤖' : '✋';
         const sourceLabel = isAuto ? 'AUTO' : 'MANUAL';
         
         // Value display - use raw value if available and detailed
@@ -4977,43 +4989,53 @@ async function loadBtcSessions() {
 }
 
 function renderBtcSessions(data) {
-    const currentContainer = document.getElementById('cryptoBtcSessionCurrent');
-    const listContainer = document.getElementById('cryptoBtcSessionList');
+    const targets = [
+        {
+            current: document.getElementById('btcSessionCurrent'),
+            list: document.getElementById('btcSessionList')
+        },
+        {
+            current: document.getElementById('cryptoBtcSessionCurrent'),
+            list: document.getElementById('cryptoBtcSessionList')
+        }
+    ];
 
-    if (!currentContainer || !listContainer) return;
-
-    // Current session
-    if (data.current_session && data.current_session.active) {
-        currentContainer.classList.add('active');
-        currentContainer.innerHTML = `
-            <span class="session-status">🟢 NOW: ${data.current_session.name}</span>
-            <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">
-                ${data.current_session.trading_note}
-            </div>
-        `;
-    } else {
-        currentContainer.classList.remove('active');
-        currentContainer.innerHTML = `
-            <span class="session-status">No active key session</span>
-        `;
-    }
-
-    // Session list
     const sessions = data.sessions || {};
     const sessionIds = Object.keys(sessions);
 
-    listContainer.innerHTML = sessionIds.map(id => {
-        const session = sessions[id];
-        const localTime = formatUtcRangeToDenver(session.utc_time);
-        const isActive = data.current_session?.name === session.name;
-        return `
-            <div class="btc-session-item ${isActive ? 'active' : ''}">
-                <div class="session-name">${session.name}</div>
-                <div class="session-time">${localTime}</div>
-                <div class="session-note">${session.trading_note}</div>
-            </div>
-        `;
-    }).join('');
+    targets.forEach(({ current, list }) => {
+        if (!current || !list) return;
+
+        // Current session
+        if (data.current_session && data.current_session.active) {
+            current.classList.add('active');
+            current.innerHTML = `
+                <span class="session-status">🟢 NOW: ${data.current_session.name}</span>
+                <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">
+                    ${data.current_session.trading_note}
+                </div>
+            `;
+        } else {
+            current.classList.remove('active');
+            current.innerHTML = `
+                <span class="session-status">No active key session</span>
+            `;
+        }
+
+        // Session list
+        list.innerHTML = sessionIds.map(id => {
+            const session = sessions[id];
+            const localTime = formatUtcRangeToDenver(session.utc_time);
+            const isActive = data.current_session?.name === session.name;
+            return `
+                <div class="btc-session-item ${isActive ? 'active' : ''}">
+                    <div class="session-name">${session.name}</div>
+                    <div class="session-time">${localTime}</div>
+                    <div class="session-note">${session.trading_note}</div>
+                </div>
+            `;
+        }).join('');
+    });
 
     updateCryptoSessionStatus(data.current_session, data.sessions);
 }
@@ -5040,9 +5062,10 @@ function formatUtcRangeToDenver(utcRange) {
     if (!utcRange) return '--';
     let range = utcRange.trim();
     let dayPrefix = null;
-    if (range.startsWith('Fri ')) {
-        dayPrefix = 'Fri';
-        range = range.replace('Fri ', '');
+    const dayMatch = range.match(/^(Sun|Mon|Tue|Wed|Thu|Fri|Sat)\s+/);
+    if (dayMatch) {
+        dayPrefix = dayMatch[1];
+        range = range.slice(dayMatch[0].length);
     }
 
     const [startStr, endStr] = range.split('-');
