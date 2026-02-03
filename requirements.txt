@@ -47,3 +47,6 @@ fredapi>=0.5.1
 
 # Google Gemini API - AI-powered data extraction
 google-generativeai>=0.8.0
+
+# Anthropic Claude Vision API
+anthropic>=0.18.0

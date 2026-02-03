@@ -51,6 +51,44 @@ class EconomicCalendarData(BaseModel):
     timestamp: Optional[str] = None
 
 
+class HighestVolumeContract(BaseModel):
+    """Single contract in highest volume table."""
+    ticker: str
+    strike: Optional[float] = None
+    option_type: Optional[str] = None
+    volume: Optional[int] = None
+    open_interest: Optional[int] = None
+    premium_pct: Optional[float] = None
+    dte: Optional[str] = None
+    contract: Optional[str] = None
+
+    model_config = {"extra": "allow"}
+
+
+class HighestVolumeData(BaseModel):
+    """Highest Volume Contracts data from UW."""
+    data_type: Optional[str] = "highest_volume_contracts"
+    contracts: List[HighestVolumeContract] = []
+    total_calls: Optional[int] = None
+    total_puts: Optional[int] = None
+    sentiment: Optional[str] = None
+    timestamp: Optional[str] = None
+    source: Optional[str] = None
+
+    model_config = {"extra": "allow"}
+
+
+class FlowAlertsData(BaseModel):
+    """Flow alert batch from UW vision."""
+    data_type: Optional[str] = "flow_alerts"
+    alerts: List[Dict[str, Any]] = []
+    dominant_sentiment: Optional[str] = None
+    timestamp: Optional[str] = None
+    source: Optional[str] = None
+
+    model_config = {"extra": "allow"}
+
+
 # ================================
 # IN-MEMORY STORAGE
 # ================================
@@ -61,6 +99,9 @@ _uw_data = {
     "market_tide": None,
     "sectorflow": None,
     "economic_calendar": None,
+    "highest_volume": None,
+    "flow_alerts": None,
+    "generic": None,
     "last_updated": None
 }
 
@@ -218,6 +259,88 @@ async def receive_economic_calendar(data: EconomicCalendarData):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/highest_volume")
+async def receive_highest_volume(data: HighestVolumeData):
+    """
+    Receive highest volume contracts data from Pandora Bridge.
+    """
+    try:
+        contracts = [c.model_dump() for c in data.contracts]
+        _uw_data["highest_volume"] = {
+            "contracts": contracts,
+            "total_calls": data.total_calls,
+            "total_puts": data.total_puts,
+            "sentiment": data.sentiment,
+            "timestamp": data.timestamp or datetime.now().isoformat(),
+            "received_at": datetime.now().isoformat()
+        }
+        _uw_data["last_updated"] = datetime.now().isoformat()
+
+        # Store in UW module for downstream use
+        from bias_filters.unusual_whales import process_highest_volume
+        await process_highest_volume(contracts, data.total_calls, data.total_puts)
+
+        logger.info(f"📊 Highest Volume updated: {len(contracts)} contracts")
+
+        return {
+            "status": "success",
+            "message": f"Highest Volume received: {len(contracts)} contracts",
+            "contracts_parsed": len(contracts),
+            "data": _uw_data["highest_volume"]
+        }
+    except Exception as e:
+        logger.error(f"Error processing highest volume: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/flow_alerts")
+async def receive_flow_alerts(data: FlowAlertsData):
+    """
+    Receive flow alerts extracted via vision.
+    """
+    try:
+        _uw_data["flow_alerts"] = {
+            "alerts": data.alerts,
+            "dominant_sentiment": data.dominant_sentiment,
+            "timestamp": data.timestamp or datetime.now().isoformat(),
+            "received_at": datetime.now().isoformat()
+        }
+        _uw_data["last_updated"] = datetime.now().isoformat()
+
+        logger.info(f"🐋 Flow alerts updated: {len(data.alerts)} alerts")
+
+        return {
+            "status": "success",
+            "message": f"Flow alerts received: {len(data.alerts)} alerts",
+            "data": _uw_data["flow_alerts"]
+        }
+    except Exception as e:
+        logger.error(f"Error processing flow alerts: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/generic")
+async def receive_generic(payload: Dict[str, Any]):
+    """
+    Receive generic UW vision payloads not mapped to a dedicated endpoint.
+    """
+    try:
+        _uw_data["generic"] = {
+            "payload": payload,
+            "timestamp": datetime.now().isoformat()
+        }
+        _uw_data["last_updated"] = datetime.now().isoformat()
+
+        return {
+            "status": "success",
+            "message": "Generic payload received",
+            "data": _uw_data["generic"]
+        }
+    except Exception as e:
+        logger.error(f"Error processing generic payload: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/latest")
 async def get_latest_uw_data():
     """
@@ -230,7 +353,10 @@ async def get_latest_uw_data():
         "last_updated": _uw_data["last_updated"],
         "market_tide": _uw_data["market_tide"],
         "sectorflow": _uw_data["sectorflow"],
-        "economic_calendar": _uw_data["economic_calendar"]
+        "economic_calendar": _uw_data["economic_calendar"],
+        "highest_volume": _uw_data["highest_volume"],
+        "flow_alerts": _uw_data["flow_alerts"],
+        "generic": _uw_data["generic"]
     }
 
 
@@ -260,6 +386,8 @@ async def get_uw_status():
     market_tide_ts = _uw_data["market_tide"].get("received_at") if _uw_data["market_tide"] else None
     sectorflow_ts = _uw_data["sectorflow"].get("received_at") if _uw_data["sectorflow"] else None
     calendar_ts = _uw_data["economic_calendar"].get("received_at") if _uw_data["economic_calendar"] else None
+    highest_volume_ts = _uw_data["highest_volume"].get("received_at") if _uw_data["highest_volume"] else None
+    flow_alerts_ts = _uw_data["flow_alerts"].get("received_at") if _uw_data["flow_alerts"] else None
     
     return {
         "status": "success",
@@ -283,6 +411,16 @@ async def get_uw_status():
                 "last_received": calendar_ts,
                 "is_stale": is_stale(calendar_ts, max_age_hours=24),  # Calendar refreshes daily
                 "high_impact_today": has_high_impact_event()
+            },
+            "highest_volume": {
+                "has_data": _uw_data["highest_volume"] is not None,
+                "last_received": highest_volume_ts,
+                "is_stale": is_stale(highest_volume_ts, max_age_hours=24)
+            },
+            "flow_alerts": {
+                "has_data": _uw_data["flow_alerts"] is not None,
+                "last_received": flow_alerts_ts,
+                "is_stale": is_stale(flow_alerts_ts, max_age_hours=6)
             }
         }
     }
