@@ -2501,7 +2501,7 @@ async def run_cta_scan_scheduled():
         from scanners.cta_scanner import run_cta_scan, CTA_SCANNER_AVAILABLE
         from websocket.broadcaster import manager
         from database.redis_client import cache_signal
-        from database.postgres_client import log_signal, update_signal_with_score
+        from database.postgres_client import log_signal, update_signal_with_score, has_recent_active_signal
         from scoring.trade_ideas_scorer import calculate_signal_score
         
         if not CTA_SCANNER_AVAILABLE:
@@ -2541,6 +2541,17 @@ async def run_cta_scan_scheduled():
         # Push each signal to Trade Ideas via WebSocket
         for signal in all_signals[:10]:  # Limit to top 10
             ticker = signal.get("symbol")
+            if not ticker:
+                continue
+
+            cooldown_hours = int(os.getenv("CTA_SIGNAL_COOLDOWN_HOURS", "24"))
+            try:
+                if await has_recent_active_signal(ticker, cooldown_hours, strategy="CTA Scanner"):
+                    logger.info(f"⏳ Skipping CTA signal for {ticker} (cooldown {cooldown_hours}h)")
+                    continue
+            except Exception as dedupe_err:
+                logger.warning(f"CTA cooldown check failed for {ticker}: {dedupe_err}")
+
             base_score = signal.get("priority", 50)
             
             # Calculate bonus points

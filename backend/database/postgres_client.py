@@ -192,7 +192,7 @@ async def init_database():
             CREATE INDEX IF NOT EXISTS idx_positions_ticker ON positions(ticker);
         """)
         
-        print("✅ Database schema initialized")
+        print("Database schema initialized")
 
 async def log_signal(signal_data: Dict[Any, Any]):
     """
@@ -221,8 +221,8 @@ async def log_signal(signal_data: Dict[Any, Any]):
                 signal_id, timestamp, strategy, ticker, asset_class,
                 direction, signal_type, entry_price, stop_loss, target_1,
                 target_2, risk_reward, timeframe, bias_level, adx, line_separation,
-                bias_at_signal
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+                score, bias_alignment, triggering_factors, bias_at_signal
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
             ON CONFLICT (signal_id) DO NOTHING
         """,
             signal_data['signal_id'],
@@ -241,6 +241,9 @@ async def log_signal(signal_data: Dict[Any, Any]):
             signal_data.get('bias_level'),
             signal_data.get('adx'),
             signal_data.get('line_separation'),
+            signal_data.get('score'),
+            signal_data.get('bias_alignment'),
+            json.dumps(signal_data.get('triggering_factors')) if signal_data.get('triggering_factors') is not None else None,
             json.dumps(bias_at_signal) if bias_at_signal is not None else None
         )
 
@@ -381,6 +384,35 @@ async def get_active_trade_ideas(limit: int = 10) -> List[Dict[Any, Any]]:
         
         # Convert to dicts and handle datetime/Decimal serialization
         return [serialize_db_row(dict(row)) for row in rows]
+
+
+async def has_recent_active_signal(
+    ticker: str,
+    max_age_hours: int = 24,
+    strategy: Optional[str] = None
+) -> bool:
+    """
+    Check if a ticker already has a recent active signal.
+    Useful for de-duplicating CTA signals within a cooldown window.
+    """
+    pool = await get_postgres_client()
+    ticker = ticker.upper()
+
+    conditions = ["ticker = $1", "user_action IS NULL", "timestamp > NOW() - ($2 * INTERVAL '1 hour')"]
+    params = [ticker, max_age_hours]
+
+    if strategy:
+        conditions.append("strategy = $3")
+        params.append(strategy)
+
+    where_clause = " AND ".join(conditions)
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            f"SELECT 1 FROM signals WHERE {where_clause} LIMIT 1",
+            *params
+        )
+        return row is not None
 
 
 async def get_active_trade_ideas_paginated(

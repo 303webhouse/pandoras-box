@@ -27,6 +27,7 @@ let tradeIdeasPagination = {
 
 // Price levels to display on chart (entry, stop, target)
 let activePriceLevels = null;
+let tvLevelShapes = [];
 
 // Weekly Bias Factor State
 let weeklyBiasFullData = null; // Stores complete weekly bias data with factors
@@ -164,6 +165,13 @@ function initTradingViewWidget() {
             foregroundColor: '#14b8a6'
         }
     });
+
+    // Best-effort: draw levels if the widget supports it
+    if (tvWidget && typeof tvWidget.onChartReady === 'function') {
+        tvWidget.onChartReady(() => {
+            drawLevelsOnChart();
+        });
+    }
 }
 
 function changeChartSymbol(symbol) {
@@ -181,17 +189,26 @@ function changeChartSymbol(symbol) {
     initTradingViewWidget();
 }
 
+function getTickerFromSymbol(symbol) {
+    if (!symbol) return symbol;
+    const upper = symbol.toUpperCase();
+    if (upper.endsWith('USDT')) return upper.slice(0, -4);
+    if (upper.endsWith('USD')) return upper.slice(0, -3);
+    return upper;
+}
+
 function updatePriceLevelsPanel(symbol) {
     const panel = document.getElementById('priceLevelsPanel');
     if (!panel) return;
     
     // Check if we have price levels for this symbol
-    const levels = window.activePriceLevels?.[symbol];
+    const tickerKey = getTickerFromSymbol(symbol);
+    const levels = window.activePriceLevels?.[tickerKey];
     
     if (levels) {
         // Show panel with levels
         panel.style.display = 'block';
-        document.getElementById('priceLevelsTicker').textContent = symbol;
+        document.getElementById('priceLevelsTicker').textContent = tickerKey;
         document.getElementById('priceLevelEntry').textContent = levels.entry ? `$${parseFloat(levels.entry).toFixed(2)}` : '--';
         document.getElementById('priceLevelStop').textContent = levels.stop ? `$${parseFloat(levels.stop).toFixed(2)}` : '--';
         document.getElementById('priceLevelTarget1').textContent = levels.target1 ? `$${parseFloat(levels.target1).toFixed(2)}` : '--';
@@ -205,10 +222,10 @@ function updatePriceLevelsPanel(symbol) {
         }
     } else {
         // Check if there's an open position for this symbol
-        const position = openPositions.find(p => p.ticker === symbol);
+        const position = openPositions.find(p => (p.ticker || '').toUpperCase() === tickerKey);
         if (position) {
             panel.style.display = 'block';
-            document.getElementById('priceLevelsTicker').textContent = symbol;
+            document.getElementById('priceLevelsTicker').textContent = tickerKey;
             document.getElementById('priceLevelEntry').textContent = position.entry_price ? `$${parseFloat(position.entry_price).toFixed(2)}` : '--';
             document.getElementById('priceLevelStop').textContent = position.stop_loss ? `$${parseFloat(position.stop_loss).toFixed(2)}` : '--';
             document.getElementById('priceLevelTarget1').textContent = position.target_1 ? `$${parseFloat(position.target_1).toFixed(2)}` : '--';
@@ -225,6 +242,9 @@ function updatePriceLevelsPanel(symbol) {
             panel.style.display = 'none';
         }
     }
+
+    // Best-effort: update chart lines if supported
+    drawLevelsOnChart();
 }
 
 function showTradeOnChart(signal) {
@@ -236,11 +256,12 @@ function showTradeOnChart(signal) {
     currentSymbol = symbol;
     
     // Store price levels to display
-    activePriceLevels = {
+    storePriceLevels(signal.ticker, {
         entry: signal.entry_price,
         stop: signal.stop_loss,
-        target: signal.target_1
-    };
+        target1: signal.target_1,
+        target2: signal.target_2
+    });
     
     // Update tab styling (remove active from all since this is a custom ticker)
     document.querySelectorAll('.chart-tab').forEach(tab => {
@@ -257,7 +278,84 @@ function showTradeOnChart(signal) {
     // For full price level display, we'd need TradingView Advanced Charts (paid)
     // For now, the signal details panel shows the levels clearly
     
-    console.log(`📊 Showing ${signal.ticker} on chart with levels:`, activePriceLevels);
+    console.log(`📊 Showing ${signal.ticker} on chart with levels:`, window.activePriceLevels?.[signal.ticker]);
+}
+
+function clearChartLevels() {
+    if (!tvWidget || typeof tvWidget.activeChart !== 'function') {
+        tvLevelShapes = [];
+        return;
+    }
+
+    try {
+        const chart = tvWidget.activeChart();
+        if (!chart || typeof chart.removeEntity !== 'function') {
+            tvLevelShapes = [];
+            return;
+        }
+
+        for (const id of tvLevelShapes) {
+            try {
+                chart.removeEntity(id);
+            } catch {
+                // ignore best-effort cleanup
+            }
+        }
+    } catch {
+        // ignore best-effort cleanup
+    }
+
+    tvLevelShapes = [];
+}
+
+function drawLevelsOnChart() {
+    if (!tvWidget || typeof tvWidget.activeChart !== 'function') {
+        return;
+    }
+
+    const tickerKey = getTickerFromSymbol(currentSymbol);
+    const levels = window.activePriceLevels?.[tickerKey];
+    if (!levels) {
+        clearChartLevels();
+        return;
+    }
+
+    try {
+        const chart = tvWidget.activeChart();
+        if (!chart || typeof chart.createShape !== 'function') {
+            return;
+        }
+
+        clearChartLevels();
+
+        const shapes = [
+            { price: levels.entry, color: '#22c55e', text: 'Entry' },
+            { price: levels.stop, color: '#ef4444', text: 'Stop' },
+            { price: levels.target1, color: '#3b82f6', text: 'Target' },
+            { price: levels.target2, color: '#6366f1', text: 'Target 2' }
+        ];
+
+        for (const shape of shapes) {
+            if (!shape.price) continue;
+            const id = chart.createShape(
+                { price: shape.price },
+                {
+                    shape: 'horizontal_line',
+                    text: shape.text,
+                    lock: true,
+                    disableSelection: true,
+                    disableSave: true,
+                    overrides: {
+                        linecolor: shape.color,
+                        linewidth: 2
+                    }
+                }
+            );
+            if (id) tvLevelShapes.push(id);
+        }
+    } catch {
+        // Widget may not support drawings; ignore
+    }
 }
 
 // WebSocket Connection
