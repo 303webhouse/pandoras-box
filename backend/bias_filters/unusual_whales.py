@@ -41,6 +41,13 @@ class FlowType(str, Enum):
 # In production, this would be in Redis with TTL
 _flow_cache: Dict[str, Dict[str, Any]] = {}
 _recent_alerts: List[Dict[str, Any]] = []
+_highest_volume_cache: Dict[str, Any] = {
+    "contracts": [],
+    "total_calls": 0,
+    "total_puts": 0,
+    "sentiment": FlowSentiment.UNKNOWN,
+    "last_updated": None
+}
 
 # Configuration
 UW_CONFIG = {
@@ -318,6 +325,48 @@ def clear_old_data():
         a for a in _recent_alerts
         if datetime.fromisoformat(a["received_at"]) > cutoff
     ]
+
+
+async def process_highest_volume(
+    contracts: List[Dict[str, Any]],
+    total_calls: Optional[int] = None,
+    total_puts: Optional[int] = None
+) -> Dict[str, Any]:
+    """
+    Store highest volume contracts and derive a simple sentiment.
+    """
+    calls = total_calls
+    puts = total_puts
+
+    if calls is None or puts is None:
+        calls = 0
+        puts = 0
+        for contract in contracts:
+            option_type = str(contract.get("option_type", "")).upper()
+            if option_type in ["CALL", "C"]:
+                calls += 1
+            elif option_type in ["PUT", "P"]:
+                puts += 1
+
+    if calls > puts * 1.5:
+        sentiment = FlowSentiment.BULLISH
+    elif puts > calls * 1.5:
+        sentiment = FlowSentiment.BEARISH
+    else:
+        sentiment = FlowSentiment.NEUTRAL
+
+    _highest_volume_cache["contracts"] = contracts
+    _highest_volume_cache["total_calls"] = calls
+    _highest_volume_cache["total_puts"] = puts
+    _highest_volume_cache["sentiment"] = sentiment
+    _highest_volume_cache["last_updated"] = datetime.now().isoformat()
+
+    logger.info(
+        f"📊 Highest Volume stored: {len(contracts)} contracts, "
+        f"calls={calls}, puts={puts}, sentiment={sentiment}"
+    )
+
+    return _highest_volume_cache.copy()
 
 
 # Manual flow entry (for when API isn't connected)

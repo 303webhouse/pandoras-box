@@ -23,6 +23,7 @@ import aiohttp
 from datetime import datetime, time
 from typing import Optional, Dict, Any, List
 import pytz
+from utils.vision_parser import parse_uw_image
 
 # Discord.py imports
 try:
@@ -39,6 +40,9 @@ except ImportError:
 DISCORD_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 UW_CHANNEL_ID = int(os.getenv("DISCORD_UW_CHANNEL_ID", "1463692055694807201"))
 PANDORA_API_URL = os.getenv("PANDORA_API_URL", "https://pandoras-box-production.up.railway.app/api")
+NOTIFICATION_CHANNEL_ID = int(os.getenv("DISCORD_NOTIFICATION_CHANNEL_ID", str(UW_CHANNEL_ID)))
+TRADE_ALERT_CHANNEL_ID = int(os.getenv("DISCORD_TRADE_ALERT_CHANNEL_ID", str(NOTIFICATION_CHANNEL_ID)))
+MIN_SCORE_FOR_ALERT = int(os.getenv("DISCORD_MIN_SCORE_FOR_ALERT", "80"))
 
 # UW Bot identification
 UW_BOT_NAMES = ["unusual_whales_crier", "unusual whales", "uw"]
@@ -84,6 +88,8 @@ latest_data = {
     "oi_increase": None,
     "economic_calendar": None,
 }
+
+_seen_signal_ids: set[str] = set()
 
 # ================================
 # HELPER FUNCTIONS
@@ -473,6 +479,42 @@ async def send_flow_alert_to_pandora(data: Dict[str, Any]) -> bool:
     return await send_to_pandora("/flow/manual", payload)
 
 
+def format_uw_summary(data: Dict[str, Any]) -> Optional[str]:
+    """Format a short summary of parsed UW data."""
+    data_type = data.get("data_type", "other")
+
+    if data_type == "highest_volume_contracts":
+        contracts = data.get("contracts", [])
+        calls = data.get("total_calls", 0)
+        puts = data.get("total_puts", 0)
+        sentiment = data.get("sentiment", "NEUTRAL")
+        return f"Parsed {len(contracts)} contracts | Calls: {calls} | Puts: {puts} | Sentiment: {sentiment}"
+
+    if data_type == "market_tide":
+        bull = data.get("bullish_pct", "?")
+        bear = data.get("bearish_pct", "?")
+        sentiment = data.get("sentiment", "NEUTRAL")
+        return f"Market Tide | Bull: {bull}% | Bear: {bear}% | Sentiment: {sentiment}"
+
+    if data_type == "sector_flow":
+        bullish = ", ".join(data.get("bullish_sectors", [])[:3]) or "None"
+        bearish = ", ".join(data.get("bearish_sectors", [])[:3]) or "None"
+        overall = data.get("overall_sentiment", "NEUTRAL")
+        return f"Sector Flow | Bullish: {bullish} | Bearish: {bearish} | Overall: {overall}"
+
+    if data_type == "economic_calendar":
+        high_impact = data.get("high_impact_count", 0)
+        caution = "CAUTION" if data.get("trading_caution") else "Clear"
+        return f"Economic Calendar | High-impact events: {high_impact} | {caution}"
+
+    if data_type == "flow_alerts":
+        alerts = data.get("alerts", [])
+        sentiment = data.get("dominant_sentiment", "MIXED")
+        return f"Flow Alerts | {len(alerts)} alerts | Sentiment: {sentiment}"
+
+    return None
+
+
 # ================================
 # QUERY FUNCTIONS
 # ================================
@@ -528,6 +570,131 @@ async def scheduled_queries():
         await send_uw_command(channel, "/economic_calendar")
 
 
+@tasks.loop(minutes=1)
+async def reminder_scheduler():
+    """Send reminders for manual UW commands."""
+    now = get_et_now()
+    current_time = now.strftime("%H:%M")
+    day_of_week = now.weekday()  # 0=Monday
+
+    channel = bot.get_channel(NOTIFICATION_CHANNEL_ID)
+    if not channel:
+        return
+
+    # Market Tide reminders (weekdays)
+    if day_of_week < 5 and current_time in ["09:35", "12:00", "15:30"]:
+        await channel.send(
+            "Reminder: Time to check market tide.\n"
+            "Run `/market_tide` in the UW channel and I'll parse the response."
+        )
+
+    # Sector Flow reminder (Monday)
+    if day_of_week == 0 and current_time == "10:00":
+        await channel.send(
+            "Reminder: Weekly sector flow check.\n"
+            "Run `/sectorflow` in the UW channel."
+        )
+
+    # Economic Calendar (weekdays)
+    if day_of_week < 5 and current_time == "08:30":
+        await channel.send(
+            "Reminder: Check economic calendar.\n"
+            "Run `/economic_calendar` in the UW channel."
+        )
+
+
+@reminder_scheduler.before_loop
+async def before_reminder_scheduler():
+    await bot.wait_until_ready()
+
+
+@tasks.loop(minutes=2)
+async def trade_idea_poller():
+    """Poll for new high-score trade ideas and post to Discord."""
+    global _seen_signal_ids
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"{PANDORA_API_URL}/signals/active") as resp:
+                if resp.status != 200:
+                    return
+                data = await resp.json()
+
+        signals = data.get("signals", [])
+        channel = bot.get_channel(TRADE_ALERT_CHANNEL_ID)
+        if not channel:
+            return
+
+        for signal in signals:
+            signal_id = signal.get("signal_id")
+            score = signal.get("score", 0)
+
+            if not signal_id:
+                continue
+            if signal_id in _seen_signal_ids:
+                continue
+            if score < MIN_SCORE_FOR_ALERT:
+                _seen_signal_ids.add(signal_id)
+                continue
+
+            _seen_signal_ids.add(signal_id)
+            embed = format_trade_idea_embed(signal)
+            await channel.send(embed=embed)
+            logger.info(f"Posted trade alert: {signal.get('ticker')} score={score}")
+
+        # Cleanup old IDs (keep last 500)
+        if len(_seen_signal_ids) > 500:
+            _seen_signal_ids = set(list(_seen_signal_ids)[-500:])
+
+    except Exception as e:
+        logger.error(f"Error polling trade ideas: {e}")
+
+
+@trade_idea_poller.before_loop
+async def before_trade_poller():
+    await bot.wait_until_ready()
+
+
+def format_trade_idea_embed(signal: Dict[str, Any]) -> discord.Embed:
+    """Format a trade signal as a Discord embed."""
+    ticker = signal.get("ticker", "???")
+    direction = signal.get("direction", "???")
+    score = signal.get("score", 0)
+    strategy = signal.get("strategy", "Unknown")
+    entry = signal.get("entry_price", 0)
+    stop = signal.get("stop_loss", 0)
+    target = signal.get("target_1", 0)
+
+    color = 0x00FF00 if direction == "LONG" else 0xFF0000
+    embed = discord.Embed(
+        title=f"Trade Idea: {ticker} {direction}",
+        color=color
+    )
+
+    embed.add_field(name="Score", value=f"{score:.0f}/100", inline=True)
+    embed.add_field(name="Strategy", value=strategy, inline=True)
+    embed.add_field(name="Direction", value=direction, inline=True)
+
+    embed.add_field(name="Entry", value=f"${entry:.2f}", inline=True)
+    embed.add_field(name="Stop", value=f"${stop:.2f}", inline=True)
+    embed.add_field(name="Target", value=f"${target:.2f}", inline=True)
+
+    if entry and stop and target:
+        risk = abs(entry - stop)
+        reward = abs(target - entry)
+        rr = reward / risk if risk > 0 else 0
+        embed.add_field(name="R:R", value=f"{rr:.1f}:1", inline=True)
+
+    alignment = signal.get("bias_alignment", "Unknown")
+    embed.add_field(name="Bias", value=alignment, inline=True)
+
+    signal_id = signal.get("signal_id", "N/A")
+    embed.set_footer(text=f"Signal ID: {str(signal_id)[:8]}")
+    embed.timestamp = datetime.now()
+
+    return embed
+
+
 @scheduled_queries.before_loop
 async def before_scheduled_queries():
     """Wait until bot is ready before starting scheduled tasks"""
@@ -562,6 +729,17 @@ async def on_ready():
     # Start scheduled tasks
     if not scheduled_queries.is_running():
         scheduled_queries.start()
+    if not reminder_scheduler.is_running():
+        reminder_scheduler.start()
+    if not trade_idea_poller.is_running():
+        trade_idea_poller.start()
+
+    logger.info(
+        "Task status: scheduled_queries=%s, reminder_scheduler=%s, trade_idea_poller=%s",
+        "running" if scheduled_queries.is_running() else "stopped",
+        "running" if reminder_scheduler.is_running() else "stopped",
+        "running" if trade_idea_poller.is_running() else "stopped"
+    )
 
 
 @bot.event
@@ -587,6 +765,52 @@ async def on_message(message: discord.Message):
         return
     
     logger.info(f"📨 Processing message from {message.author.name}")
+    
+    # Check for UW image posts and parse with vision
+    image_url = None
+
+    for attachment in message.attachments:
+        if attachment.content_type and "image" in attachment.content_type:
+            image_url = attachment.url
+            break
+
+    if not image_url:
+        for embed in message.embeds:
+            if embed.image and embed.image.url:
+                image_url = embed.image.url
+                break
+
+    if image_url:
+        logger.info("UW image detected, parsing with AI vision...")
+        parsed_data = await parse_uw_image(image_url)
+
+        if parsed_data:
+            data_type = parsed_data.get("data_type", "other")
+
+            endpoint_map = {
+                "highest_volume_contracts": "/bias/uw/highest_volume",
+                "market_tide": "/bias/uw/market_tide",
+                "sector_flow": "/bias/uw/sectorflow",
+                "economic_calendar": "/bias/uw/economic_calendar",
+                "flow_alerts": "/bias/uw/flow_alerts",
+                "oi_change": "/bias/uw/flow_alerts",
+                "other": "/bias/uw/generic"
+            }
+
+            endpoint = endpoint_map.get(data_type, "/bias/uw/generic")
+            await send_to_pandora(endpoint, parsed_data)
+
+            sentiment = (
+                parsed_data.get("sentiment")
+                or parsed_data.get("overall_sentiment")
+                or parsed_data.get("dominant_sentiment")
+                or "UNKNOWN"
+            )
+            logger.info(f"Parsed UW {data_type}: sentiment={sentiment}")
+
+            summary = format_uw_summary(parsed_data)
+            if summary:
+                await message.channel.send(summary)
     
     # Process embeds
     for embed in message.embeds:
@@ -662,6 +886,10 @@ async def help_command(ctx):
 **Testing:**
 • `!test TICKER` - Send test flow to Pandora
 
+**Manual Logging:**
+• `!logflow AAPL bull sweep 500k` - Log a flow alert manually
+• `!logtide bullish 65` - Log market tide manually
+
 **Scheduled Queries (automatic):**
 • Market Tide: 9:35 AM, 12:00 PM, 3:30 PM ET
 • Sector Flow: Monday 10:00 AM ET
@@ -682,6 +910,17 @@ async def status_command(ctx):
                    f"• Time (ET): {now.strftime('%H:%M:%S')}\n"
                    f"• Market Hours: {'✅' if is_market_hours() else '❌'}\n"
                    f"• Scheduler: {'Running' if scheduled_queries.is_running() else 'Stopped'}")
+
+
+@bot.command(name="tasks")
+async def tasks_command(ctx):
+    """Show background task status"""
+    await ctx.send(
+        "🧰 **Background Tasks**\n"
+        f"• scheduled_queries: {'Running' if scheduled_queries.is_running() else 'Stopped'}\n"
+        f"• reminder_scheduler: {'Running' if reminder_scheduler.is_running() else 'Stopped'}\n"
+        f"• trade_idea_poller: {'Running' if trade_idea_poller.is_running() else 'Stopped'}"
+    )
 
 
 @bot.command(name="latest")
@@ -761,6 +1000,97 @@ async def maxpain_command(ctx, ticker: str = None):
     pending_queries["max_pain"] = ticker.upper()
     await send_uw_command(ctx.channel, f"/max_pain {ticker.upper()}")
     await ctx.send(f"📍 Querying max pain for **{ticker.upper()}**...")
+
+
+@bot.command(name="logflow")
+async def log_flow_command(
+    ctx,
+    ticker: str,
+    sentiment: str,
+    flow_type: str = "sweep",
+    premium: str = "100k"
+):
+    """
+    Quick manual flow entry
+    Usage: !logflow AAPL bull sweep 500k
+    """
+    premium_clean = premium.lower().replace(",", "")
+    if "m" in premium_clean:
+        premium_value = int(float(premium_clean.replace("m", "")) * 1_000_000)
+    elif "k" in premium_clean:
+        premium_value = int(float(premium_clean.replace("k", "")) * 1_000)
+    else:
+        premium_value = int(float(premium_clean))
+
+    sentiment_map = {
+        "bull": "BULLISH", "bullish": "BULLISH", "b": "BULLISH",
+        "bear": "BEARISH", "bearish": "BEARISH", "s": "BEARISH",
+        "neutral": "NEUTRAL", "n": "NEUTRAL"
+    }
+    sentiment_normalized = sentiment_map.get(sentiment.lower(), "NEUTRAL")
+
+    type_map = {
+        "sweep": "SWEEP", "block": "BLOCK", "split": "SPLIT",
+        "unusual": "UNUSUAL_VOLUME", "dark": "DARK_POOL", "dp": "DARK_POOL"
+    }
+    flow_type_normalized = type_map.get(flow_type.lower(), "UNUSUAL_VOLUME")
+
+    flow_data = {
+        "ticker": ticker.upper(),
+        "sentiment": sentiment_normalized,
+        "flow_type": flow_type_normalized,
+        "premium": premium_value,
+        "source": "manual_discord"
+    }
+
+    success = await send_flow_alert_to_pandora(flow_data)
+
+    if success:
+        await ctx.send(
+            f"✅ Logged: **{ticker.upper()}** {sentiment_normalized} "
+            f"{flow_type_normalized} ${premium_value:,}"
+        )
+    else:
+        await ctx.send("❌ Failed to log flow to Pandora")
+
+
+@bot.command(name="logtide")
+async def log_tide_command(ctx, sentiment: str, bullish_pct: int = None):
+    """
+    Quick market tide entry
+    Usage: !logtide bullish 65
+    """
+    sentiment_map = {
+        "bull": "BULLISH", "bullish": "BULLISH",
+        "bear": "BEARISH", "bearish": "BEARISH",
+        "neutral": "NEUTRAL"
+    }
+    sentiment_normalized = sentiment_map.get(sentiment.lower(), "NEUTRAL")
+
+    tide_data = {
+        "type": "market_tide",
+        "sentiment": sentiment_normalized,
+        "bullish_pct": bullish_pct,
+        "bearish_pct": 100 - bullish_pct if bullish_pct is not None else None,
+        "timestamp": datetime.now().isoformat(),
+        "source": "manual_discord"
+    }
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"{PANDORA_API_URL}/bias/uw/market_tide",
+                json=tide_data
+            ) as resp:
+                success = resp.status == 200
+    except Exception:
+        success = False
+
+    if success:
+        pct_text = f" ({bullish_pct}% bullish)" if bullish_pct is not None else ""
+        await ctx.send(f"✅ Logged market tide: **{sentiment_normalized}**{pct_text}")
+    else:
+        await ctx.send("❌ Failed to log market tide")
 
 
 @bot.command(name="test")
