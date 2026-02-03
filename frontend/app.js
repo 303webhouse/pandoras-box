@@ -19,6 +19,11 @@ let signals = {
     equity: [],
     crypto: []
 };
+const TRADE_IDEAS_PAGE_SIZE = 10;
+let tradeIdeasPagination = {
+    equity: { offset: 0, limit: TRADE_IDEAS_PAGE_SIZE, hasMore: true, loading: false },
+    crypto: { offset: 0, limit: TRADE_IDEAS_PAGE_SIZE, hasMore: true, loading: false }
+};
 
 // Price levels to display on chart (entry, stop, target)
 let activePriceLevels = null;
@@ -655,6 +660,8 @@ async function loadSignals() {
             console.log(`📊 Signals loaded: ${signals.equity.length} equity, ${signals.crypto.length} crypto`);
             console.log('🪙 Crypto signals:', signals.crypto);
             
+            resetTradeIdeasPagination();
+            
             // Force render signals with a small delay to ensure DOM is ready
             setTimeout(() => renderSignals(), 100);
         } else {
@@ -663,6 +670,18 @@ async function loadSignals() {
     } catch (error) {
         console.error('Error loading signals:', error);
     }
+}
+
+function resetTradeIdeasPagination() {
+    tradeIdeasPagination = {
+        equity: { offset: signals.equity.length, limit: TRADE_IDEAS_PAGE_SIZE, hasMore: true, loading: false },
+        crypto: { offset: signals.crypto.length, limit: TRADE_IDEAS_PAGE_SIZE, hasMore: true, loading: false }
+    };
+}
+
+function syncTradeIdeasOffset(assetType) {
+    if (!tradeIdeasPagination[assetType]) return;
+    tradeIdeasPagination[assetType].offset = signals[assetType].length;
 }
 
 async function loadBiasData() {
@@ -2202,19 +2221,26 @@ function renderSignals() {
         ? signals.equity 
         : signals.crypto.filter(s => SUPPORTED_CRYPTO.includes(s.ticker.toUpperCase()));
     
-    // Limit to top 10
-    const topSignals = activeSignals.slice(0, 10);
-    
-    if (topSignals.length === 0) {
+    if (activeSignals.length === 0) {
         const assetLabel = activeAssetType === 'equity' ? 'equity' : 'crypto';
         container.innerHTML = `<p class="empty-state">No ${assetLabel} signals</p>`;
         return;
     }
     
-    container.innerHTML = topSignals.map(signal => createSignalCard(signal)).join('');
+    const pagination = tradeIdeasPagination[activeAssetType];
+    const loadMoreText = pagination?.loading ? 'Loading...' : 'Reload previous';
+    const loadMoreDisabled = pagination?.loading ? 'disabled' : '';
+    const loadMoreButton = pagination?.hasMore
+        ? `<div class="trade-ideas-footer">
+                <button class="reload-previous-btn" ${loadMoreDisabled}>${loadMoreText}</button>
+           </div>`
+        : '';
+    
+    container.innerHTML = activeSignals.map(signal => createSignalCard(signal)).join('') + loadMoreButton;
     
     // Add event listeners to action buttons and cards
     attachSignalActions();
+    attachReloadPreviousHandler();
     
     // Attach KB link handlers to dynamically created content
     attachDynamicKbHandlers(container);
@@ -2358,6 +2384,43 @@ function attachSignalActions() {
     });
 }
 
+function attachReloadPreviousHandler() {
+    const btn = document.querySelector('.reload-previous-btn');
+    if (!btn) return;
+    btn.addEventListener('click', loadMoreTradeIdeas);
+}
+
+async function loadMoreTradeIdeas() {
+    const pagination = tradeIdeasPagination[activeAssetType];
+    if (!pagination || pagination.loading || !pagination.hasMore) return;
+
+    pagination.loading = true;
+    renderSignals();
+
+    try {
+        const assetClass = activeAssetType === 'equity' ? 'EQUITY' : 'CRYPTO';
+        const response = await fetch(
+            `${API_URL}/signals/active/paged?limit=${pagination.limit}&offset=${pagination.offset}&asset_class=${assetClass}`
+        );
+        const data = await response.json();
+
+        if (data.status === 'success' && Array.isArray(data.signals)) {
+            const existingIds = new Set(signals[activeAssetType].map(s => s.signal_id));
+            const newSignals = data.signals.filter(s => !existingIds.has(s.signal_id));
+            signals[activeAssetType] = signals[activeAssetType].concat(newSignals);
+            pagination.offset = signals[activeAssetType].length;
+            pagination.hasMore = data.has_more ?? (newSignals.length >= pagination.limit);
+        } else {
+            pagination.hasMore = false;
+        }
+    } catch (error) {
+        console.error('Error loading previous trade ideas:', error);
+    } finally {
+        pagination.loading = false;
+        renderSignals();
+    }
+}
+
 async function handleSignalAction(event) {
     event.stopPropagation();
     const button = event.target;
@@ -2483,6 +2546,7 @@ async function refillTradeIdeas() {
             // Update in-memory signals
             signals.equity = data.signals.filter(s => s.asset_class === 'EQUITY' || !s.asset_class);
             signals.crypto = data.signals.filter(s => s.asset_class === 'CRYPTO');
+            resetTradeIdeasPagination();
             
             // Re-render
             renderSignals();
@@ -2498,18 +2562,18 @@ async function refillTradeIdeas() {
 function addSignal(signalData) {
     if (signalData.asset_class === 'EQUITY') {
         signals.equity.unshift(signalData);
-        signals.equity = signals.equity.slice(0, 10);
     } else {
         signals.crypto.unshift(signalData);
     }
-    
+    syncTradeIdeasOffset(signalData.asset_class === 'EQUITY' ? 'equity' : 'crypto');
     renderSignals();
 }
 
 function removeSignal(signalId) {
     signals.equity = signals.equity.filter(s => s.signal_id !== signalId);
     signals.crypto = signals.crypto.filter(s => s.signal_id !== signalId);
-    
+    syncTradeIdeasOffset('equity');
+    syncTradeIdeasOffset('crypto');
     renderSignals();
 }
 
@@ -5395,6 +5459,7 @@ function renderPositionsEnhanced() {
         
         return `
             <div class="position-card" data-position-id="${pos.id || pos.signal_id}">
+                <button class="position-remove-btn" data-position-id="${pos.id || pos.signal_id}" title="Remove position">×</button>
                 <div class="position-card-header">
                     <span class="position-ticker" data-ticker="${pos.ticker}">${pos.ticker}</span>
                     <span class="position-direction ${pos.direction}">${pos.direction}</span>
@@ -5446,6 +5511,15 @@ function renderPositionsEnhanced() {
             if (position) openPositionCloseModal(position);
         });
     });
+
+    container.querySelectorAll('.position-remove-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const positionId = btn.dataset.positionId;
+            const position = openPositions.find(p => (p.id || p.signal_id) == positionId);
+            if (position) openPositionRemoveModal(position);
+        });
+    });
 }
 
 function calculatePnL(position, currentPrice) {
@@ -5475,6 +5549,65 @@ function openPositionCloseModal(position) {
 function closePositionCloseModal() {
     document.getElementById('positionCloseModal').classList.remove('active');
     closingPosition = null;
+}
+
+function openPositionRemoveModal(position) {
+    const modal = document.createElement('div');
+    modal.className = 'signal-modal-overlay';
+    modal.innerHTML = `
+        <div class="signal-modal remove-modal">
+            <div class="modal-header">
+                <h3>Remove ${position.ticker} Position</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p class="warning-text">THIS TRADE WILL NOT BE ARCHIVED FOR BACKTESTING</p>
+                <p>Use this only for glitched positions or trades you do not want logged.</p>
+            </div>
+            <div class="modal-actions">
+                <button class="modal-btn cancel">Cancel</button>
+                <button class="modal-btn remove-position">Remove Position</button>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    modal.querySelector('.modal-close').addEventListener('click', () => modal.remove());
+    modal.querySelector('.modal-btn.cancel').addEventListener('click', () => modal.remove());
+    modal.querySelector('.modal-btn.remove-position').addEventListener('click', async () => {
+        modal.remove();
+        await removePositionWithoutArchive(position);
+    });
+
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) modal.remove();
+    });
+}
+
+async function removePositionWithoutArchive(position) {
+    try {
+        if (!position.id) {
+            alert('Cannot remove position: missing id');
+            return;
+        }
+        const response = await fetch(`${API_URL}/positions/${position.id}`, {
+            method: 'DELETE'
+        });
+        const data = await response.json();
+
+        if (data.status === 'removed') {
+            openPositions = openPositions.filter(p => (p.id || p.signal_id) !== position.id);
+            renderPositionsEnhanced();
+            updatePositionsCount();
+            updatePositionChartTabs();
+        } else {
+            alert('Failed to remove position: ' + (data.detail || data.message || 'Unknown error'));
+        }
+    } catch (error) {
+        console.error('Error removing position:', error);
+        alert('Failed to remove position');
+    }
 }
 
 function updateCloseSummary() {

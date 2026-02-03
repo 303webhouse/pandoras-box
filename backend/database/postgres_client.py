@@ -159,7 +159,8 @@ async def init_database():
             ADD COLUMN IF NOT EXISTS actual_stop_hit BOOLEAN,
             ADD COLUMN IF NOT EXISTS trade_outcome VARCHAR(20),
             ADD COLUMN IF NOT EXISTS loss_reason VARCHAR(50),
-            ADD COLUMN IF NOT EXISTS notes TEXT
+            ADD COLUMN IF NOT EXISTS notes TEXT,
+            ADD COLUMN IF NOT EXISTS bias_at_signal JSONB
         """)
         
         # Add new columns to positions table for enhanced tracking
@@ -175,7 +176,9 @@ async def init_database():
             ADD COLUMN IF NOT EXISTS trade_outcome VARCHAR(20),
             ADD COLUMN IF NOT EXISTS loss_reason VARCHAR(50),
             ADD COLUMN IF NOT EXISTS notes TEXT,
-            ADD COLUMN IF NOT EXISTS quantity_closed INTEGER DEFAULT 0
+            ADD COLUMN IF NOT EXISTS quantity_closed INTEGER DEFAULT 0,
+            ADD COLUMN IF NOT EXISTS bias_at_open JSONB,
+            ADD COLUMN IF NOT EXISTS bias_at_close JSONB
         """)
         
         # Create indexes for efficient queries
@@ -203,13 +206,23 @@ async def log_signal(signal_data: Dict[Any, Any]):
     if isinstance(timestamp, str):
         timestamp = datetime.fromisoformat(timestamp)
     
+    bias_at_signal = signal_data.get("bias_at_signal")
+    if not bias_at_signal:
+        try:
+            from utils.bias_snapshot import get_bias_snapshot
+            bias_at_signal = await get_bias_snapshot()
+        except Exception as err:
+            logger.warning(f"Failed to capture bias snapshot for signal: {err}")
+            bias_at_signal = None
+
     async with pool.acquire() as conn:
         await conn.execute("""
             INSERT INTO signals (
                 signal_id, timestamp, strategy, ticker, asset_class,
                 direction, signal_type, entry_price, stop_loss, target_1,
-                risk_reward, timeframe, bias_level, adx, line_separation
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+                target_2, risk_reward, timeframe, bias_level, adx, line_separation,
+                bias_at_signal
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
             ON CONFLICT (signal_id) DO NOTHING
         """,
             signal_data['signal_id'],
@@ -222,11 +235,13 @@ async def log_signal(signal_data: Dict[Any, Any]):
             signal_data['entry_price'],
             signal_data['stop_loss'],
             signal_data['target_1'],
+            signal_data.get('target_2'),
             signal_data.get('risk_reward'),
             signal_data.get('timeframe'),
             signal_data.get('bias_level'),
             signal_data.get('adx'),
-            signal_data.get('line_separation')
+            signal_data.get('line_separation'),
+            json.dumps(bias_at_signal) if bias_at_signal is not None else None
         )
 
 async def update_signal_action(signal_id: str, action: str):
@@ -249,17 +264,19 @@ async def update_signal_action(signal_id: str, action: str):
                 WHERE signal_id = $1
             """, signal_id)
 
-async def create_position(signal_id: str, position_data: Dict[Any, Any]):
-    """Create a new position when user selects a trade"""
+async def create_position(signal_id: str, position_data: Dict[Any, Any]) -> Optional[int]:
+    """Create a new position when user selects a trade. Returns position id if available."""
     pool = await get_postgres_client()
     
     async with pool.acquire() as conn:
-        await conn.execute("""
+        row = await conn.fetchrow("""
             INSERT INTO positions (
                 signal_id, ticker, direction, entry_price, entry_time,
                 stop_loss, target_1, quantity, strategy, asset_class, 
-                signal_type, status, broker
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                signal_type, status, broker, target_2, bias_at_open,
+                actual_entry_price
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+            RETURNING id
         """,
             signal_id,
             position_data['ticker'],
@@ -273,8 +290,12 @@ async def create_position(signal_id: str, position_data: Dict[Any, Any]):
             position_data.get('asset_class'),        # ADD ASSET CLASS
             position_data.get('signal_type'),        # ADD SIGNAL TYPE
             'OPEN',
-            position_data.get('broker', 'MANUAL')
+            position_data.get('broker', 'MANUAL'),
+            position_data.get('target_2'),
+            json.dumps(position_data.get('bias_at_open')) if position_data.get('bias_at_open') is not None else None,
+            position_data.get('actual_entry_price') or position_data.get('entry_price')
         )
+        return row["id"] if row and "id" in row else None
 
 async def get_open_positions() -> List[Dict[Any, Any]]:
     """Retrieve all open positions"""
@@ -360,6 +381,65 @@ async def get_active_trade_ideas(limit: int = 10) -> List[Dict[Any, Any]]:
         
         # Convert to dicts and handle datetime/Decimal serialization
         return [serialize_db_row(dict(row)) for row in rows]
+
+
+async def get_active_trade_ideas_paginated(
+    limit: int = 10,
+    offset: int = 0,
+    asset_class: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Get active trade ideas with pagination for the Trade Ideas feed.
+    """
+    pool = await get_postgres_client()
+    filters = ["user_action IS NULL"]
+    params = []
+    param_idx = 1
+
+    if asset_class:
+        filters.append(f"asset_class = ${param_idx}")
+        params.append(asset_class.upper())
+        param_idx += 1
+
+    # Exclude tickers recently dismissed and those with open positions
+    filters.append("""
+        ticker NOT IN (
+            SELECT DISTINCT ticker FROM signals
+            WHERE user_action = 'DISMISSED'
+            AND dismissed_at > NOW() - INTERVAL '24 hours'
+        )
+    """)
+    filters.append("""
+        ticker NOT IN (
+            SELECT DISTINCT ticker FROM positions
+            WHERE status = 'OPEN'
+        )
+    """)
+
+    where_clause = " AND ".join(filters)
+
+    async with pool.acquire() as conn:
+        total = await conn.fetchval(
+            f"SELECT COUNT(*) FROM signals WHERE {where_clause}",
+            *params
+        )
+
+        params.extend([limit, offset])
+        query = f"""
+            SELECT *
+            FROM signals
+            WHERE {where_clause}
+            ORDER BY created_at DESC
+            LIMIT ${param_idx} OFFSET ${param_idx + 1}
+        """
+        rows = await conn.fetch(query, *params)
+
+    return {
+        "signals": [serialize_db_row(dict(row)) for row in rows],
+        "total": total or 0,
+        "limit": limit,
+        "offset": offset
+    }
 
 
 async def get_signal_queue(limit: int = 50) -> List[Dict[Any, Any]]:
@@ -471,6 +551,7 @@ async def get_archived_signals(
                 direction, signal_type, entry_price, stop_loss, target_1,
                 target_2, risk_reward, timeframe, bias_level, adx,
                 line_separation, score, bias_alignment, triggering_factors,
+                bias_at_signal,
                 user_action, dismissed_at, selected_at,
                 actual_entry_price, actual_exit_price, actual_stop_hit,
                 trade_outcome, loss_reason, notes, created_at
@@ -652,6 +733,8 @@ async def close_position_in_db(
     exit_time: datetime,
     realized_pnl: float,
     trade_outcome: str,
+    quantity_closed: Optional[float] = None,
+    bias_at_close: Optional[Dict[str, Any]] = None,
     loss_reason: Optional[str] = None,
     notes: Optional[str] = None
 ) -> Optional[Dict[Any, Any]]:
@@ -673,10 +756,22 @@ async def close_position_in_db(
                 actual_exit_price = $2,
                 trade_outcome = $5,
                 loss_reason = $6,
-                notes = $7
+                notes = $7,
+                quantity_closed = COALESCE($8, quantity_closed),
+                bias_at_close = $9
             WHERE id = $1
             RETURNING *
-        """, position_id, exit_price, exit_time, realized_pnl, trade_outcome, loss_reason, notes)
+        """,
+            position_id,
+            exit_price,
+            exit_time,
+            realized_pnl,
+            trade_outcome,
+            loss_reason,
+            notes,
+            quantity_closed,
+            json.dumps(bias_at_close) if bias_at_close is not None else None
+        )
         
         if row:
             # Also update the linked signal
@@ -692,6 +787,41 @@ async def close_position_in_db(
             """, signal_id, exit_price, trade_outcome, loss_reason, notes)
         
         return serialize_db_row(dict(row)) if row else None
+
+
+async def update_position_quantity(position_id: int, remaining_qty: float, quantity_closed: float) -> None:
+    """Update open position quantity after a partial close."""
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            UPDATE positions
+            SET quantity = $2,
+                quantity_closed = COALESCE(quantity_closed, 0) + $3
+            WHERE id = $1
+        """, position_id, remaining_qty, quantity_closed)
+
+
+async def delete_open_position(position_id: int, signal_id: Optional[str] = None) -> int:
+    """Delete an open position without archiving (manual cleanup)."""
+    pool = await get_postgres_client()
+    deleted = 0
+
+    async with pool.acquire() as conn:
+        result = await conn.execute(
+            "DELETE FROM positions WHERE id = $1",
+            position_id
+        )
+        if result:
+            deleted = int(result.split()[-1]) if result.split()[-1].isdigit() else 0
+
+        if deleted == 0 and signal_id:
+            result = await conn.execute(
+                "DELETE FROM positions WHERE signal_id = $1 AND status = 'OPEN'",
+                signal_id
+            )
+            deleted = int(result.split()[-1]) if result.split()[-1].isdigit() else 0
+
+    return deleted
 
 
 async def get_position_by_id(position_id: int) -> Optional[Dict[Any, Any]]:
