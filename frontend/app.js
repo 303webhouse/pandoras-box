@@ -5041,6 +5041,7 @@ function renderBtcSessions(data) {
 
     updateCryptoSessionStatus(data.current_session, data.sessions);
 }
+*/
 
 function updateCryptoSessionStatus(currentSession, sessions) {
     const statusEl = document.getElementById('cryptoSessionStatus');
