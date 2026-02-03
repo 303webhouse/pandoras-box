@@ -19,7 +19,6 @@ const APP_MODES = {
     HUB: 'hub',
     CRYPTO: 'crypto'
 };
-let activeMode = APP_MODES.HUB;
 let signals = {
     equity: [],
     crypto: []
@@ -130,7 +129,6 @@ function buildModePath(mode) {
 
 function setMode(mode, options = {}) {
     const nextMode = mode === APP_MODES.CRYPTO ? APP_MODES.CRYPTO : APP_MODES.HUB;
-    activeMode = nextMode;
     document.body.dataset.mode = nextMode;
 
     const hubShell = document.getElementById('hubShell');
@@ -1072,25 +1070,13 @@ function checkAndApplyBiasAlignment() {
     const cyclicalLevel = cyclicalBiasFullData?.level || '';
     const weeklyLevel = weeklyBiasFullData?.level || '';
     
-    const cyclicalBullish = isBullishBias(cyclicalLevel);
-    const cyclicalBearish = isBearishBias(cyclicalLevel);
-    const weeklyBullish = isBullishBias(weeklyLevel);
-    const weeklyBearish = isBearishBias(weeklyLevel);
-    
-    // Check alignment
-    if (cyclicalBullish && weeklyBullish) {
-        container.classList.add('bias-aligned-bullish');
-        if (alignmentText) alignmentText.textContent = 'BULLISH ALIGNED';
-        console.log('Bias alignment: BULLISH (Cyclical + Weekly both bullish)');
-    } else if (cyclicalBearish && weeklyBearish) {
-        container.classList.add('bias-aligned-bearish');
-        if (alignmentText) alignmentText.textContent = 'BEARISH ALIGNED';
-        console.log('Bias alignment: BEARISH (Cyclical + Weekly both bearish)');
-    } else {
-        // Not aligned - no outline
-        if (alignmentText) alignmentText.textContent = 'MIXED';
-        console.log('Bias alignment: MIXED (Cyclical and Weekly not aligned)');
+    const alignment = getBiasAlignmentStatus(cyclicalLevel, weeklyLevel);
+
+    if (alignment.alignmentClass) {
+        container.classList.add(alignment.alignmentClass);
     }
+
+    if (alignmentText) alignmentText.textContent = alignment.alignmentText;
 }
 
 // Check and display crisis alert when tiered factors are in crisis mode
@@ -2647,6 +2633,33 @@ function createSignalCard(signal) {
     `;
 }
 
+function getBiasAlignmentStatus(cyclicalLevel, weeklyLevel) {
+    const cyclicalBullish = isBullishBias(cyclicalLevel);
+    const cyclicalBearish = isBearishBias(cyclicalLevel);
+    const weeklyBullish = isBullishBias(weeklyLevel);
+    const weeklyBearish = isBearishBias(weeklyLevel);
+
+    if (cyclicalBullish && weeklyBullish) {
+        return {
+            note: 'Macro alignment: Bullish (Cyclical + Weekly aligned)',
+            alignmentText: 'BULLISH ALIGNED',
+            alignmentClass: 'bias-aligned-bullish'
+        };
+    }
+    if (cyclicalBearish && weeklyBearish) {
+        return {
+            note: 'Macro alignment: Bearish (Cyclical + Weekly aligned)',
+            alignmentText: 'BEARISH ALIGNED',
+            alignmentClass: 'bias-aligned-bearish'
+        };
+    }
+    return {
+        note: 'Macro alignment: Mixed signals across timeframes',
+        alignmentText: 'MIXED',
+        alignmentClass: ''
+    };
+}
+
 function renderCryptoBiasSummary() {
     const grid = document.getElementById('cryptoBiasGrid');
     if (!grid) return;
@@ -2667,18 +2680,7 @@ function renderCryptoBiasSummary() {
     const note = document.getElementById('cryptoBiasNote');
     if (!note) return;
 
-    const cyclicalBullish = isBullishBias(biasValues.cyclical);
-    const cyclicalBearish = isBearishBias(biasValues.cyclical);
-    const weeklyBullish = isBullishBias(biasValues.weekly);
-    const weeklyBearish = isBearishBias(biasValues.weekly);
-
-    if (cyclicalBullish && weeklyBullish) {
-        note.textContent = 'Macro alignment: Bullish (Cyclical + Weekly aligned)';
-    } else if (cyclicalBearish && weeklyBearish) {
-        note.textContent = 'Macro alignment: Bearish (Cyclical + Weekly aligned)';
-    } else {
-        note.textContent = 'Macro alignment: Mixed signals across timeframes';
-    }
+    note.textContent = getBiasAlignmentStatus(biasValues.cyclical, biasValues.weekly).note;
 }
 
 async function loadCryptoKeyLevels() {
@@ -5072,8 +5074,11 @@ function formatUtcRangeToDenver(utcRange) {
     if (!startStr || !endStr) return utcRange;
 
     const parseTime = (timeStr) => {
-        const [hours, minutes] = timeStr.split(':').map(Number);
-        return { hours, minutes };
+        const match = timeStr.trim().match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
+        if (!match) {
+            return null;
+        }
+        return { hours: Number(match[1]), minutes: Number(match[2]) };
     };
 
     const getBaseDate = () => {
@@ -5090,6 +5095,7 @@ function formatUtcRangeToDenver(utcRange) {
     const baseDate = getBaseDate();
     const startTime = parseTime(startStr);
     const endTime = parseTime(endStr);
+    if (!startTime || !endTime) return utcRange;
 
     const startDate = new Date(Date.UTC(
         baseDate.getUTCFullYear(),
@@ -5105,6 +5111,9 @@ function formatUtcRangeToDenver(utcRange) {
         endTime.hours,
         endTime.minutes
     ));
+    if (endDate <= startDate) {
+        endDate.setUTCDate(endDate.getUTCDate() + 1);
+    }
 
     const formatter = new Intl.DateTimeFormat('en-US', {
         timeZone: 'America/Denver',
