@@ -16,14 +16,18 @@ from database.postgres_client import (
     create_position,
     get_open_positions,
     get_active_trade_ideas,
+    get_active_trade_ideas_paginated,
     get_archived_signals,
     get_signal_by_id,
     update_signal_outcome,
     close_position_in_db,
     get_position_by_id,
-    get_backtest_statistics
+    get_backtest_statistics,
+    update_position_quantity,
+    delete_open_position
 )
 from websocket.broadcaster import manager
+from utils.bias_snapshot import get_bias_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -152,6 +156,9 @@ async def accept_signal(signal_id: str, request: AcceptSignalRequest):
             notes=request.notes
         )
         
+        # Capture bias snapshot for archival at open
+        bias_at_open = await get_bias_snapshot()
+
         # Create position in database with full details
         position_data = {
             "ticker": signal_data.get('ticker'),
@@ -167,14 +174,15 @@ async def accept_signal(signal_id: str, request: AcceptSignalRequest):
             "asset_class": signal_data.get('asset_class', 'EQUITY'),
             "signal_type": signal_data.get('signal_type'),
             "bias_level": signal_data.get('bias_alignment'),
+            "bias_at_open": bias_at_open,
             "broker": "MANUAL"
         }
         
-        await create_position(signal_id, position_data)
+        db_position_id = await create_position(signal_id, position_data)
         
         # Also add to in-memory store for quick access
         position = {
-            "id": _position_counter,
+            "id": db_position_id or _position_counter,
             "signal_id": signal_id,
             "ticker": position_data["ticker"],
             "direction": position_data["direction"],
@@ -195,7 +203,8 @@ async def accept_signal(signal_id: str, request: AcceptSignalRequest):
         }
         
         _open_positions.append(position)
-        _position_counter += 1
+        if not db_position_id:
+            _position_counter += 1
         
         # Remove from active signals cache
         await delete_signal(signal_id)
@@ -322,29 +331,35 @@ async def open_position(request: OpenPositionRequest):
     
     try:
         # Create position in database first
+        bias_at_open = await get_bias_snapshot()
+
         position_data = {
             "ticker": request.ticker,
             "direction": request.direction,
             "entry_price": request.entry_price,
             "entry_time": datetime.now(),
+            "quantity": request.quantity,
             "stop_loss": request.stop_loss,
             "target_1": request.target_1,
+            "target_2": None,
             "strategy": request.strategy,
             "asset_class": request.asset_class,
             "signal_type": request.signal_type,
             "bias_level": request.bias_level,
+            "bias_at_open": bias_at_open,
             "broker": "MANUAL"
         }
         
         # Save to PostgreSQL
         try:
-            await create_position(request.signal_id, position_data)
+            db_position_id = await create_position(request.signal_id, position_data)
         except Exception as db_err:
             logger.warning(f"Failed to persist position to DB: {db_err}")
+            db_position_id = None
         
         # Also keep in memory for fast access
         position = {
-            "id": _position_counter,
+            "id": db_position_id or _position_counter,
             "signal_id": request.signal_id,
             "ticker": request.ticker,
             "direction": request.direction,
@@ -361,7 +376,8 @@ async def open_position(request: OpenPositionRequest):
         }
         
         _open_positions.append(position)
-        _position_counter += 1
+        if not db_position_id:
+            _position_counter += 1
         
         # Remove from active signals
         await delete_signal(request.signal_id)
@@ -393,6 +409,8 @@ async def create_manual_position(request: ManualPositionRequest):
         # Generate a manual signal ID
         signal_id = f"MANUAL_{request.ticker}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         
+        bias_at_open = await get_bias_snapshot()
+
         # Create position data
         position_data = {
             "ticker": request.ticker,
@@ -402,10 +420,12 @@ async def create_manual_position(request: ManualPositionRequest):
             "entry_time": datetime.now(),
             "stop_loss": request.stop_loss,
             "target_1": request.target_1,
+            "target_2": None,
             "strategy": request.strategy or "Manual Entry",
             "asset_class": request.asset_class,
             "signal_type": "MANUAL",
             "notes": request.notes,
+            "bias_at_open": bias_at_open,
             "broker": "MANUAL"
         }
         
@@ -431,15 +451,16 @@ async def create_manual_position(request: ManualPositionRequest):
         
         # Save position to PostgreSQL
         try:
-            await create_position(signal_id, position_data)
+            db_position_id = await create_position(signal_id, position_data)
             logger.info(f"✅ Manual position saved to PostgreSQL: {request.ticker}")
         except Exception as db_err:
             logger.error(f"❌ Failed to persist manual position to DB: {db_err}")
             # Continue anyway - position will still work in memory
+            db_position_id = None
         
         # Create position object for memory/UI
         position = {
-            "id": _position_counter,
+            "id": db_position_id or _position_counter,
             "signal_id": signal_id,
             "ticker": request.ticker,
             "direction": request.direction,
@@ -456,7 +477,8 @@ async def create_manual_position(request: ManualPositionRequest):
         }
         
         _open_positions.append(position)
-        _position_counter += 1
+        if not db_position_id:
+            _position_counter += 1
         
         # Broadcast to all devices
         await manager.broadcast_position_update({
@@ -652,6 +674,9 @@ async def close_position(request: ClosePositionRequest):
             else:
                 trade_outcome = "BREAKEVEN"
         
+        # Capture bias snapshot at close for archival
+        bias_at_close = await get_bias_snapshot()
+
         # Create comprehensive trade history record
         trade_record = {
             "id": position["id"],
@@ -671,6 +696,7 @@ async def close_position(request: ClosePositionRequest):
             "entry_time": position.get("entry_time"),
             "exit_time": datetime.now().isoformat(),
             "asset_class": position.get("asset_class"),
+            "bias_at_close": bias_at_close,
             # Outcome logging for backtesting
             "trade_outcome": trade_outcome,
             "loss_reason": request.loss_reason if trade_outcome == "LOSS" else None,
@@ -704,7 +730,20 @@ async def close_position(request: ClosePositionRequest):
             status = "closed"
             
             # Also close in database if position exists there
-            # (future: implement close_position_in_db)
+            try:
+                await close_position_in_db(
+                    position_id=position["id"],
+                    exit_price=request.exit_price,
+                    exit_time=datetime.now(),
+                    realized_pnl=round(realized_pnl, 2),
+                    trade_outcome=trade_outcome,
+                    quantity_closed=quantity_closed,
+                    bias_at_close=bias_at_close,
+                    loss_reason=request.loss_reason if trade_outcome == "LOSS" else None,
+                    notes=request.notes
+                )
+            except Exception as db_err:
+                logger.warning(f"Failed to close position in DB: {db_err}")
             
             outcome_emoji = "🎯" if trade_outcome == "WIN" else "❌" if trade_outcome == "LOSS" else "➖"
             logger.info(f"{outcome_emoji} Position closed: {position['ticker']} - {trade_outcome} - P&L: ${realized_pnl:.2f}")
@@ -715,6 +754,10 @@ async def close_position(request: ClosePositionRequest):
             # Partial close - update quantity
             _open_positions[position_idx]["quantity"] = remaining_qty
             status = "partial_close"
+            try:
+                await update_position_quantity(position["id"], remaining_qty, quantity_closed)
+            except Exception as db_err:
+                logger.warning(f"Failed to update position quantity in DB: {db_err}")
             logger.info(f"📉 Partial close: {position['ticker']} - Closed {quantity_closed}, Remaining {remaining_qty}")
         
         # Broadcast update
@@ -753,6 +796,48 @@ async def get_open_positions_api():
         return {"status": "success", "positions": _open_positions}
     
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/positions/{position_id}")
+async def remove_position(position_id: int):
+    """
+    Remove a position from active list without archiving.
+    Intended for glitched or unwanted trades.
+    """
+    try:
+        position = None
+        position_idx = None
+        for idx, p in enumerate(_open_positions):
+            if p["id"] == position_id:
+                position = p
+                position_idx = idx
+                break
+
+        if not position:
+            raise HTTPException(status_code=404, detail="Position not found")
+
+        _open_positions.pop(position_idx)
+
+        try:
+            await delete_open_position(position_id, position.get("signal_id"))
+        except Exception as db_err:
+            logger.warning(f"Failed to delete position from DB: {db_err}")
+
+        await manager.broadcast_position_update({
+            "action": "POSITION_REMOVED",
+            "position_id": position_id,
+            "position": position
+        })
+
+        return {
+            "status": "removed",
+            "position_id": position_id
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error removing position: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/positions/history")
@@ -1088,6 +1173,39 @@ async def get_active_signals_api():
     
     except Exception as e:
         logger.error(f"Error fetching active signals: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/signals/active/paged")
+async def get_active_signals_paged(
+    limit: int = 10,
+    offset: int = 0,
+    asset_class: Optional[str] = None
+):
+    """
+    Paginated active trade ideas for "Reload previous".
+    """
+    try:
+        result = await get_active_trade_ideas_paginated(
+            limit=limit,
+            offset=offset,
+            asset_class=asset_class
+        )
+
+        signals = result.get("signals", [])
+        total = result.get("total", 0)
+        has_more = (offset + len(signals)) < total
+
+        return {
+            "status": "success",
+            "signals": signals,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "has_more": has_more
+        }
+    except Exception as e:
+        logger.error(f"Error fetching paged signals: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

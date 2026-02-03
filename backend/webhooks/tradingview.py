@@ -24,6 +24,7 @@ from database.redis_client import cache_signal
 from database.postgres_client import log_signal, update_signal_with_score
 from websocket.broadcaster import manager
 from scheduler.bias_scheduler import get_bias_status
+from utils.bias_snapshot import get_bias_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -138,6 +139,8 @@ async def process_scout_signal(alert: TradingViewAlert, start_time: datetime):
         "note": "Early warning - confirm with 1H Sniper before entry"
     }
 
+    signal_data = await attach_bias_snapshot(signal_data)
+
     # Cache with shorter TTL (30 mins instead of 1 hour)
     await cache_signal(signal_id, signal_data, ttl=1800)
 
@@ -203,6 +206,7 @@ async def process_exhaustion_signal(alert: TradingViewAlert, start_time: datetim
     
     # Apply proper scoring (this will also upgrade to APIS/KODIAK if high score)
     signal_data = await apply_signal_scoring(signal_data)
+    signal_data = await attach_bias_snapshot(signal_data)
     
     # Cache, log, and broadcast
     await cache_signal(signal_id, signal_data, ttl=3600)
@@ -258,6 +262,7 @@ async def process_sniper_signal(alert: TradingViewAlert, start_time: datetime):
     
     # Apply proper scoring
     signal_data = await apply_signal_scoring(signal_data)
+    signal_data = await attach_bias_snapshot(signal_data)
     
     # Cache, log, and broadcast
     await cache_signal(signal_id, signal_data, ttl=3600)
@@ -329,6 +334,7 @@ async def process_triple_line_signal(alert: TradingViewAlert, start_time: dateti
     
     # Apply proper scoring
     signal_data = await apply_signal_scoring(signal_data)
+    signal_data = await attach_bias_snapshot(signal_data)
     
     # Cache, log, and broadcast
     await cache_signal(signal_id, signal_data, ttl=3600)
@@ -380,6 +386,7 @@ async def process_generic_signal(alert: TradingViewAlert, start_time: datetime):
     
     # Apply proper scoring
     signal_data = await apply_signal_scoring(signal_data)
+    signal_data = await attach_bias_snapshot(signal_data)
     
     await cache_signal(signal_id, signal_data, ttl=3600)
     await log_signal(signal_data)
@@ -409,6 +416,13 @@ def calculate_risk_reward(alert: TradingViewAlert) -> float:
         reward = alert.entry_price - alert.target_1
     
     return round(reward / risk, 2) if risk > 0 else 0
+
+
+async def attach_bias_snapshot(signal_data: dict) -> dict:
+    """Attach bias indicator snapshot at signal time for archiving."""
+    if not signal_data.get("bias_at_signal"):
+        signal_data["bias_at_signal"] = await get_bias_snapshot()
+    return signal_data
 
 
 async def apply_signal_scoring(signal_data: dict) -> dict:

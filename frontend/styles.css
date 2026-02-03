@@ -1275,12 +1275,37 @@ body.override-active-bearish .override-toggle[data-active="true"] {
     border-radius: 8px;
     padding: 12px;
     cursor: pointer;
+    position: relative;
     transition: all 0.2s;
 }
 
 .position-card:hover {
     border-color: var(--accent-teal);
-    transform: translateY(-2px);
+    outline: 2px solid rgba(255, 255, 255, 0.2);
+}
+
+.position-remove-btn {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    border: 1px solid var(--border-color);
+    background: var(--dark-bg);
+    color: var(--text-secondary);
+    font-size: 16px;
+    line-height: 18px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+}
+
+.position-remove-btn:hover {
+    border-color: #ef4444;
+    color: #ef4444;
 }
 
 .position-card-header {
@@ -1593,8 +1618,8 @@ body.override-active-bearish .override-toggle[data-active="true"] {
 }
 
 .signal-card:hover {
-    transform: translateX(4px);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    outline: 2px solid rgba(255, 255, 255, 0.2);
 }
 
 .signal-card.KODIAK_CALL, .signal-card.BEAR_CALL {
@@ -1698,6 +1723,34 @@ body.override-active-bearish .override-toggle[data-active="true"] {
 .signal-bias-indicator.bias-misaligned {
     background: rgba(255, 107, 53, 0.1);
     color: var(--accent-orange);
+}
+
+.trade-ideas-footer {
+    display: flex;
+    justify-content: center;
+    padding: 12px 0 4px;
+}
+
+.reload-previous-btn {
+    padding: 8px 14px;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+    background: var(--dark-bg);
+    color: var(--text-primary);
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    transition: all 0.2s;
+}
+
+.reload-previous-btn:hover {
+    border-color: var(--accent-teal);
+    color: var(--accent-teal);
+}
+
+.reload-previous-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
 }
 
 .signal-bias-indicator .bias-icon {
@@ -2410,6 +2463,21 @@ body.override-active-bearish .override-toggle[data-active="true"] {
 
 .modal-btn.close-position:hover {
     background: #dc2626;
+}
+
+.modal-btn.remove-position {
+    background: #ef4444;
+    color: white;
+}
+
+.modal-btn.remove-position:hover {
+    background: #dc2626;
+}
+
+.warning-text {
+    color: #ef4444;
+    font-weight: 700;
+    text-transform: uppercase;
 }
 
 /* Entry Details in Modal */
