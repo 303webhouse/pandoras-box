@@ -15,6 +15,11 @@ let tvWidget = null;
 let currentSymbol = 'SPY';
 let currentTimeframe = 'WEEKLY';
 let activeAssetType = 'equity';
+const APP_MODES = {
+    HUB: 'hub',
+    CRYPTO: 'crypto'
+};
+let activeMode = APP_MODES.HUB;
 let signals = {
     equity: [],
     crypto: []
@@ -82,11 +87,70 @@ const SCOUT_ALERT_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
 
 // Initialize app
 document.addEventListener('DOMContentLoaded', () => {
+    initRouting();
     initTradingViewWidget();
     initWebSocket();
     initEventListeners();
     loadInitialData();
+    initCryptoScalper();
 });
+
+function initRouting() {
+    const modeFromPath = getModeFromPath();
+    const storedMode = localStorage.getItem('pandoraAppMode');
+    const initialMode = modeFromPath || storedMode || APP_MODES.HUB;
+
+    setMode(initialMode, { replace: true });
+
+    window.addEventListener('popstate', () => {
+        const nextMode = getModeFromPath() || localStorage.getItem('pandoraAppMode') || APP_MODES.HUB;
+        setMode(nextMode, { skipHistory: true });
+    });
+}
+
+function getModeFromPath() {
+    const path = window.location.pathname.replace(/\/$/, '');
+    if (path === '/crypto') return APP_MODES.CRYPTO;
+    if (path === '/hub') return APP_MODES.HUB;
+    return null;
+}
+
+function setMode(mode, options = {}) {
+    const nextMode = mode === APP_MODES.CRYPTO ? APP_MODES.CRYPTO : APP_MODES.HUB;
+    activeMode = nextMode;
+    document.body.dataset.mode = nextMode;
+
+    const hubShell = document.getElementById('hubShell');
+    const cryptoShell = document.getElementById('cryptoShell');
+    if (hubShell) hubShell.hidden = nextMode !== APP_MODES.HUB;
+    if (cryptoShell) cryptoShell.hidden = nextMode !== APP_MODES.CRYPTO;
+
+    const hubBtn = document.getElementById('modeHubBtn');
+    const cryptoBtn = document.getElementById('modeCryptoBtn');
+    if (hubBtn && cryptoBtn) {
+        hubBtn.classList.toggle('active', nextMode === APP_MODES.HUB);
+        cryptoBtn.classList.toggle('active', nextMode === APP_MODES.CRYPTO);
+        hubBtn.setAttribute('aria-selected', nextMode === APP_MODES.HUB);
+        cryptoBtn.setAttribute('aria-selected', nextMode === APP_MODES.CRYPTO);
+    }
+
+    localStorage.setItem('pandoraAppMode', nextMode);
+
+    if (!options.skipHistory) {
+        const targetPath = nextMode === APP_MODES.CRYPTO ? '/crypto' : '/hub';
+        const currentPath = window.location.pathname;
+        if (currentPath !== targetPath) {
+            if (options.replace || currentPath === '/' || currentPath === '') {
+                window.history.replaceState({}, '', targetPath);
+            } else {
+                window.history.pushState({}, '', targetPath);
+            }
+        }
+    }
+
+    renderCryptoSignals();
+    renderCryptoBiasSummary();
+}
 
 // TradingView Widget
 function initTradingViewWidget() {
@@ -457,7 +521,7 @@ function handleNewSignal(signalData) {
         if (newScore > currentLowestScore || signals.equity.length < 10) {
             // Insert at correct position based on score
             insertSignalByScore(signalData, 'equity');
-            renderSignals();
+            refreshSignalViews();
 
             // Highlight new signal with animation
             highlightNewSignal(signalData.signal_id);
@@ -467,7 +531,7 @@ function handleNewSignal(signalData) {
         }
     } else {
         signals.crypto.push(signalData);
-        renderSignals();
+        refreshSignalViews();
     }
 
     // Auto-dismiss Scout alert if a real signal fires for the same ticker
@@ -487,7 +551,7 @@ function handlePrioritySignal(signalData) {
         signals.equity.unshift(signalData);
     }
     
-    renderSignals();
+    refreshSignalViews();
     highlightNewSignal(signalData.signal_id);
 }
 
@@ -672,6 +736,14 @@ function initEventListeners() {
         loadSignals();
         loadBiasData();
     });
+
+    // Mode switcher
+    document.querySelectorAll('.mode-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const mode = e.currentTarget.dataset.mode;
+            setMode(mode);
+        });
+    });
     
     // Chart tabs (SPY, VIX, BTC)
     document.querySelectorAll('.chart-tab').forEach(tab => {
@@ -686,7 +758,8 @@ function initEventListeners() {
             document.querySelectorAll('.toggle-btn').forEach(b => b.classList.remove('active'));
             e.target.classList.add('active');
             activeAssetType = e.target.dataset.asset;
-            renderSignals();
+            refreshSignalViews();
+            renderCryptoSignals();
         });
     });
     
@@ -720,6 +793,26 @@ async function loadInitialData() {
     setInterval(() => {
         fetchBiasShiftStatus();
     }, 5 * 60 * 1000); // 5 minutes
+}
+
+function initCryptoScalper() {
+    const sortSelect = document.getElementById('cryptoSignalSort');
+    if (sortSelect) {
+        sortSelect.addEventListener('change', renderCryptoSignals);
+    }
+
+    const btcToggleBtn = document.getElementById('cryptoBtcToggleBtn');
+    if (btcToggleBtn) {
+        btcToggleBtn.addEventListener('click', () => {
+            const panel = document.getElementById('cryptoBtcPanel');
+            if (!panel) return;
+            const isCollapsed = panel.classList.toggle('collapsed');
+            btcToggleBtn.setAttribute('aria-expanded', String(!isCollapsed));
+        });
+    }
+
+    loadCryptoKeyLevels();
+    setInterval(loadCryptoKeyLevels, 10 * 60 * 1000);
 }
 
 async function loadSignals() {
@@ -761,7 +854,9 @@ async function loadSignals() {
             resetTradeIdeasPagination();
             
             // Force render signals with a small delay to ensure DOM is ready
-            setTimeout(() => renderSignals(), 100);
+            setTimeout(() => {
+                refreshSignalViews();
+            }, 100);
         } else {
             console.warn('No signals in response or error:', data);
         }
@@ -854,6 +949,8 @@ async function loadBiasData() {
     
     // Check and apply alignment styling
     checkAndApplyBiasAlignment();
+
+    renderCryptoBiasSummary();
 }
 
 // Display effective bias when hierarchical modifier is applied
@@ -1775,7 +1872,7 @@ function initPersonalBiasControls() {
         
         // Re-render signals with new bias state
         if (typeof renderSignals === 'function') {
-            renderSignals();
+            refreshSignalViews();
         }
         
         console.log(`Bias override: ${biasOverrideActive ? 'ACTIVE' : 'INACTIVE'} - ${biasOverrideDirection}`);
@@ -1796,7 +1893,7 @@ function initPersonalBiasControls() {
         
         // Re-render signals with new bias
         if (typeof renderSignals === 'function') {
-            renderSignals();
+            refreshSignalViews();
         }
         
         console.log(`Override direction set to: ${biasOverrideDirection}`);
@@ -2344,6 +2441,87 @@ function renderSignals() {
     attachDynamicKbHandlers(container);
 }
 
+function renderCryptoSignals() {
+    const container = document.getElementById('cryptoSignalsList');
+    if (!container) return;
+
+    const sortBy = document.getElementById('cryptoSignalSort')?.value || 'score';
+    const cryptoSignals = [...signals.crypto];
+
+    if (cryptoSignals.length === 0) {
+        container.innerHTML = '<p class="empty-state">No crypto signals yet</p>';
+        return;
+    }
+
+    cryptoSignals.sort((a, b) => {
+        if (sortBy === 'recency') {
+            const timeA = new Date(a.timestamp || a.created_at || 0).getTime();
+            const timeB = new Date(b.timestamp || b.created_at || 0).getTime();
+            return timeB - timeA;
+        }
+        const scoreA = Number(a.score || 0);
+        const scoreB = Number(b.score || 0);
+        return scoreB - scoreA;
+    });
+
+    container.innerHTML = cryptoSignals.map(signal => createCryptoSignalCard(signal)).join('');
+}
+
+function refreshSignalViews() {
+    if (typeof renderSignals === 'function') {
+        renderSignals();
+    }
+    renderCryptoSignals();
+}
+
+function createCryptoSignalCard(signal) {
+    const typeLabel = (signal.signal_type || 'SIGNAL').replace('_', ' ');
+    const score = signal.score !== undefined && signal.score !== null ? Number(signal.score).toFixed(1) : '--';
+    const direction = signal.direction || 'N/A';
+    const timeframe = signal.timeframe || 'INTRADAY';
+    const strategy = signal.strategy || 'Crypto Scanner';
+
+    let timestampStr = 'Unknown time';
+    if (signal.timestamp || signal.created_at) {
+        try {
+            let timeStr = signal.timestamp || signal.created_at;
+            if (!timeStr.endsWith('Z') && !timeStr.includes('+') && !timeStr.includes('-', 10)) {
+                timeStr += 'Z';
+            }
+            timestampStr = new Date(timeStr).toLocaleString('en-US', {
+                hour: 'numeric',
+                minute: '2-digit',
+                month: 'short',
+                day: 'numeric'
+            });
+        } catch (error) {
+            timestampStr = 'Unknown time';
+        }
+    }
+
+    const badges = [];
+    if (signal.signal_type === 'APIS_CALL') {
+        badges.push('<span class="crypto-badge apis">APIS</span>');
+    }
+    if (signal.signal_type === 'KODIAK_CALL') {
+        badges.push('<span class="crypto-badge kodiak">KODIAK</span>');
+    }
+
+    return `
+        <div class="crypto-signal-card">
+            <div class="crypto-signal-header">
+                <span class="crypto-signal-title">${signal.ticker || '--'}  ${typeLabel}</span>
+                <div class="crypto-signal-meta">
+                    ${badges.join('')}
+                    <span class="crypto-badge">${score}</span>
+                </div>
+            </div>
+            <div class="crypto-signal-details">${strategy}  ${direction}  ${timeframe}</div>
+            <div class="crypto-signal-details">Last update: ${timestampStr}</div>
+        </div>
+    `;
+}
+
 function createSignalCard(signal) {
     const typeLabel = (signal.signal_type || 'SIGNAL').replace('_', ' ');
     
@@ -2457,6 +2635,129 @@ function createSignalCard(signal) {
     `;
 }
 
+function renderCryptoBiasSummary() {
+    const grid = document.getElementById('cryptoBiasGrid');
+    if (!grid) return;
+
+    const biasValues = {
+        daily: dailyBiasFullData?.level || 'NEUTRAL',
+        weekly: weeklyBiasFullData?.level || 'NEUTRAL',
+        cyclical: cyclicalBiasFullData?.level || 'NEUTRAL'
+    };
+
+    grid.querySelectorAll('[data-bias]').forEach(el => {
+        const key = el.dataset.bias;
+        if (biasValues[key]) {
+            el.textContent = biasValues[key].replace('_', ' ');
+        }
+    });
+
+    const note = document.getElementById('cryptoBiasNote');
+    if (!note) return;
+
+    const cyclicalBullish = isBullishBias(biasValues.cyclical);
+    const cyclicalBearish = isBearishBias(biasValues.cyclical);
+    const weeklyBullish = isBullishBias(biasValues.weekly);
+    const weeklyBearish = isBearishBias(biasValues.weekly);
+
+    if (cyclicalBullish && weeklyBullish) {
+        note.textContent = 'Macro alignment: Bullish (Cyclical + Weekly aligned)';
+    } else if (cyclicalBearish && weeklyBearish) {
+        note.textContent = 'Macro alignment: Bearish (Cyclical + Weekly aligned)';
+    } else {
+        note.textContent = 'Macro alignment: Mixed signals across timeframes';
+    }
+}
+
+async function loadCryptoKeyLevels() {
+    const updatedEl = document.getElementById('cryptoKeyLevelsUpdated');
+    const grid = document.getElementById('cryptoKeyLevelsGrid');
+    if (!grid) return;
+
+    try {
+        const symbol = 'BTCUSDT';
+        const daily = await fetchBinanceKlines(symbol, '1d', { limit: 3 });
+        const weekly = await fetchBinanceKlines(symbol, '1w', { limit: 2 });
+        const monthly = await fetchBinanceKlines(symbol, '1M', { limit: 2 });
+
+        const today = daily?.[daily.length - 1];
+        const yesterday = daily?.[daily.length - 2];
+
+        const todayOpen = today ? parseFloat(today[1]) : null;
+        const yesterdayClose = yesterday ? parseFloat(yesterday[4]) : null;
+
+        const overnight = await fetchOvernightRange(symbol);
+        const weeklyOpen = weekly?.[weekly.length - 1] ? parseFloat(weekly[weekly.length - 1][1]) : null;
+        const monthlyOpen = monthly?.[monthly.length - 1] ? parseFloat(monthly[monthly.length - 1][1]) : null;
+
+        updateCryptoLevelValue('todayOpen', todayOpen);
+        updateCryptoLevelValue('yesterdayClose', yesterdayClose);
+        updateCryptoLevelValue('overnightHigh', overnight?.high);
+        updateCryptoLevelValue('overnightLow', overnight?.low);
+        updateCryptoLevelValue('weeklyOpen', weeklyOpen);
+        updateCryptoLevelValue('monthlyOpen', monthlyOpen);
+
+        if (updatedEl) {
+            updatedEl.textContent = `Updated ${new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
+        }
+    } catch (error) {
+        console.error('Error loading crypto key levels:', error);
+        if (updatedEl) {
+            updatedEl.textContent = 'Update failed';
+        }
+    }
+}
+
+function updateCryptoLevelValue(levelKey, value) {
+    const el = document.querySelector(`[data-level="${levelKey}"]`);
+    if (!el) return;
+    if (value === null || value === undefined || Number.isNaN(value)) {
+        el.textContent = '--';
+        return;
+    }
+    el.textContent = `$${Number(value).toLocaleString('en-US', { maximumFractionDigits: 2 })}`;
+}
+
+async function fetchBinanceKlines(symbol, interval, params = {}) {
+    const url = new URL('https://api.binance.com/api/v3/klines');
+    url.searchParams.set('symbol', symbol);
+    url.searchParams.set('interval', interval);
+    Object.entries(params).forEach(([key, value]) => {
+        if (value !== undefined && value !== null) {
+            url.searchParams.set(key, value);
+        }
+    });
+
+    const response = await fetch(url.toString());
+    if (!response.ok) {
+        throw new Error(`Binance API error: ${response.status}`);
+    }
+    return response.json();
+}
+
+async function fetchOvernightRange(symbol) {
+    const now = new Date();
+    const start = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0);
+    const end = start + 8 * 60 * 60 * 1000;
+
+    const klines = await fetchBinanceKlines(symbol, '1h', {
+        startTime: start,
+        endTime: end
+    });
+
+    if (!Array.isArray(klines) || klines.length === 0) {
+        return null;
+    }
+
+    const highs = klines.map(k => parseFloat(k[2]));
+    const lows = klines.map(k => parseFloat(k[3]));
+
+    return {
+        high: Math.max(...highs),
+        low: Math.min(...lows)
+    };
+}
+
 function getScoreTier(score) {
     if (score >= 85) return 'EXCEPTIONAL';
     if (score >= 75) return 'STRONG';
@@ -2493,7 +2794,7 @@ async function loadMoreTradeIdeas() {
     if (!pagination || pagination.loading || !pagination.hasMore) return;
 
     pagination.loading = true;
-    renderSignals();
+    refreshSignalViews();
 
     try {
         const assetClass = activeAssetType === 'equity' ? 'EQUITY' : 'CRYPTO';
@@ -2515,7 +2816,7 @@ async function loadMoreTradeIdeas() {
         console.error('Error loading previous trade ideas:', error);
     } finally {
         pagination.loading = false;
-        renderSignals();
+        refreshSignalViews();
     }
 }
 
@@ -2647,7 +2948,7 @@ async function refillTradeIdeas() {
             resetTradeIdeasPagination();
             
             // Re-render
-            renderSignals();
+            refreshSignalViews();
             
             console.log(`Trade Ideas refilled: ${data.signals.length} signals`);
         }
@@ -2664,7 +2965,7 @@ function addSignal(signalData) {
         signals.crypto.unshift(signalData);
     }
     syncTradeIdeasOffset(signalData.asset_class === 'EQUITY' ? 'equity' : 'crypto');
-    renderSignals();
+    refreshSignalViews();
 }
 
 function removeSignal(signalId) {
@@ -2672,7 +2973,7 @@ function removeSignal(signalId) {
     signals.crypto = signals.crypto.filter(s => s.signal_id !== signalId);
     syncTradeIdeasOffset('equity');
     syncTradeIdeasOffset('crypto');
-    renderSignals();
+    refreshSignalViews();
 }
 
 // Bias Updates
@@ -4393,18 +4694,35 @@ let btcConfluence = {};
 let btcRawData = {};
 let btcApiStatus = {};
 
+function getBtcUiTargets() {
+    return [
+        {
+            summary: document.getElementById('btcConfluenceSummary'),
+            apiStatus: document.getElementById('btcApiStatus'),
+            grid: document.getElementById('btcSignalsGrid')
+        },
+        {
+            summary: document.getElementById('cryptoBtcConfluenceSummary'),
+            apiStatus: document.getElementById('cryptoBtcApiStatus'),
+            grid: document.getElementById('cryptoBtcSignalsGrid')
+        }
+    ];
+}
+
 function initBtcSignals() {
-    const refreshBtn = document.getElementById('refreshBtcSignalsBtn');
-    const resetBtn = document.getElementById('resetBtcSignalsBtn');
-    
-    if (refreshBtn) {
-        // Force refresh fetches fresh data from APIs
-        refreshBtn.addEventListener('click', refreshBtcSignals);
-    }
-    
-    if (resetBtn) {
-        resetBtn.addEventListener('click', resetBtcSignals);
-    }
+    const refreshButtons = document.querySelectorAll('.btc-refresh-btn');
+    const resetButtons = document.querySelectorAll('.btc-reset-btn');
+
+    refreshButtons.forEach(btn => {
+        if (!btn.dataset.label) {
+            btn.dataset.label = btn.textContent.trim();
+        }
+        btn.addEventListener('click', refreshBtcSignals);
+    });
+
+    resetButtons.forEach(btn => {
+        btn.addEventListener('click', resetBtcSignals);
+    });
     
     // Initial load
     loadBtcSignals();
@@ -4430,17 +4748,20 @@ async function loadBtcSignals() {
         
     } catch (error) {
         console.error('Error loading BTC signals:', error);
-        document.getElementById('btcSignalsGrid').innerHTML = 
-            '<p class="empty-state">Failed to load signals</p>';
+        getBtcUiTargets().forEach(target => {
+            if (target.grid) {
+                target.grid.innerHTML = '<p class="empty-state">Failed to load signals</p>';
+            }
+        });
     }
 }
 
 async function refreshBtcSignals() {
-    const refreshBtn = document.getElementById('refreshBtcSignalsBtn');
-    if (refreshBtn) {
-        refreshBtn.disabled = true;
-        refreshBtn.textContent = 'Refreshing...';
-    }
+    const refreshButtons = document.querySelectorAll('.btc-refresh-btn');
+    refreshButtons.forEach(btn => {
+        btn.disabled = true;
+        btn.textContent = 'Refreshing...';
+    });
     
     try {
         const response = await fetch(`${API_URL}/btc/bottom-signals/refresh`, {
@@ -4460,35 +4781,32 @@ async function refreshBtcSignals() {
     } catch (error) {
         console.error('Error refreshing BTC signals:', error);
     } finally {
-        if (refreshBtn) {
-            refreshBtn.disabled = false;
-            refreshBtn.textContent = 'Refresh All';
-        }
+        refreshButtons.forEach(btn => {
+            btn.disabled = false;
+            btn.textContent = btn.dataset.label || ' Refresh';
+        });
     }
 }
 
 function renderBtcSummary() {
-    const container = document.getElementById('btcConfluenceSummary');
-    if (!container) return;
-    
     const firingCount = btcConfluence.firing || 0;
     const totalSignals = btcConfluence.total || 9;
     const verdict = btcConfluence.verdict || 'Checking signals...';
     const verdictLevel = btcConfluence.verdict_level || 'none';
-    
-    container.innerHTML = `
-        <div class="confluence-meter">
-            <span class="confluence-count">${firingCount}/${totalSignals}</span>
-            <span class="confluence-label">Signals Firing</span>
-        </div>
-        <div class="confluence-verdict ${verdictLevel}">${verdict}</div>
-    `;
+
+    getBtcUiTargets().forEach(target => {
+        if (!target.summary) return;
+        target.summary.innerHTML = `
+            <div class="confluence-meter">
+                <span class="confluence-count">${firingCount}/${totalSignals}</span>
+                <span class="confluence-label">Signals Firing</span>
+            </div>
+            <div class="confluence-verdict ${verdictLevel}">${verdict}</div>
+        `;
+    });
 }
 
 function renderBtcApiStatus() {
-    const container = document.getElementById('btcApiStatus');
-    if (!container) return;
-    
     const apis = [
         { key: 'coinalyze', name: 'Coinalyze', signals: 'Funding, OI, Liqs, Term' },
         { key: 'deribit', name: 'Deribit', signals: '25d Skew' },
@@ -4496,29 +4814,31 @@ function renderBtcApiStatus() {
         { key: 'binance', name: 'Binance', signals: 'Orderbook, Basis' },
         { key: 'yfinance', name: 'yfinance', signals: 'VIX' }
     ];
-    
-    container.innerHTML = apis.map(api => {
-        const status = btcApiStatus[api.key] ? 'connected' : 'disconnected';
-        return `
-            <span class="api-status-item ${status}" title="${api.signals}">
-                ${api.name}: ${status === 'connected' ? 'OK' : 'OFF'}
-            </span>
-        `;
-    }).join('');
+
+    getBtcUiTargets().forEach(target => {
+        if (!target.apiStatus) return;
+        target.apiStatus.innerHTML = apis.map(api => {
+            const status = btcApiStatus[api.key] ? 'connected' : 'disconnected';
+            return `
+                <span class="api-status-item ${status}" title="${api.signals}">
+                    ${api.name}: ${status === 'connected' ? 'OK' : 'OFF'}
+                </span>
+            `;
+        }).join('');
+    });
 }
 
 function renderBtcSignals() {
-    const container = document.getElementById('btcSignalsGrid');
-    if (!container) return;
-    
     const signalIds = Object.keys(btcSignals);
-    
-    if (signalIds.length === 0) {
-        container.innerHTML = '<p class="empty-state">No signals configured</p>';
-        return;
-    }
-    
-    container.innerHTML = signalIds.map(id => {
+
+    getBtcUiTargets().forEach(target => {
+        if (!target.grid) return;
+        if (signalIds.length === 0) {
+            target.grid.innerHTML = '<p class="empty-state">No signals configured</p>';
+            return;
+        }
+
+        target.grid.innerHTML = signalIds.map(id => {
         const signal = btcSignals[id];
         const status = signal.status || 'UNKNOWN';
         const isAuto = signal.auto !== false;
@@ -4539,7 +4859,7 @@ function renderBtcSignals() {
         const nameWithKb = `<span class="kb-term-dynamic" data-kb-term="btc-bottom-signals">${signal.name}</span>`;
         
         // Source indicator
-        const sourceIcon = isAuto ? '⚡' : '✋';
+        const sourceIcon = isAuto ? '' : '';
         const sourceLabel = isAuto ? 'AUTO' : 'MANUAL';
         
         // Value display - use raw value if available and detailed
@@ -4568,15 +4888,16 @@ function renderBtcSignals() {
         `;
     }).join('');
     
-    // Attach KB handlers
-    attachDynamicKbHandlers(container);
-    
-    // Attach click events for manual override toggle
-    container.querySelectorAll('.btc-signal-card').forEach(card => {
-        card.addEventListener('click', (e) => {
-            // Don't toggle if clicking a KB link
-            if (e.target.classList.contains('kb-term-dynamic')) return;
-            toggleBtcSignal(card.dataset.signalId);
+        // Attach KB handlers
+        attachDynamicKbHandlers(target.grid);
+        
+        // Attach click events for manual override toggle
+        target.grid.querySelectorAll('.btc-signal-card').forEach(card => {
+            card.addEventListener('click', (e) => {
+                // Don't toggle if clicking a KB link
+                if (e.target.classList.contains('kb-term-dynamic')) return;
+                toggleBtcSignal(card.dataset.signalId);
+            });
         });
     });
 }
@@ -4656,8 +4977,8 @@ async function loadBtcSessions() {
 }
 
 function renderBtcSessions(data) {
-    const currentContainer = document.getElementById('btcSessionCurrent');
-    const listContainer = document.getElementById('btcSessionList');
+    const currentContainer = document.getElementById('cryptoBtcSessionCurrent');
+    const listContainer = document.getElementById('cryptoBtcSessionList');
 
     if (!currentContainer || !listContainer) return;
 
@@ -4683,16 +5004,93 @@ function renderBtcSessions(data) {
 
     listContainer.innerHTML = sessionIds.map(id => {
         const session = sessions[id];
+        const localTime = formatUtcRangeToDenver(session.utc_time);
+        const isActive = data.current_session?.name === session.name;
         return `
-            <div class="btc-session-item">
+            <div class="btc-session-item ${isActive ? 'active' : ''}">
                 <div class="session-name">${session.name}</div>
-                <div class="session-time">${session.ny_time} ET</div>
+                <div class="session-time">${localTime}</div>
                 <div class="session-note">${session.trading_note}</div>
             </div>
         `;
     }).join('');
+
+    updateCryptoSessionStatus(data.current_session, data.sessions);
 }
-*/
+
+function updateCryptoSessionStatus(currentSession, sessions) {
+    const statusEl = document.getElementById('cryptoSessionStatus');
+    if (!statusEl) return;
+
+    if (currentSession && currentSession.active) {
+        const utcTime = currentSession.utc_time || '';
+        const localTime = utcTime ? formatUtcRangeToDenver(utcTime) : '';
+        statusEl.innerHTML = `
+            <span class="session-pill">🟢 NOW: ${currentSession.name}${localTime ? `  ${localTime}` : ''}</span>
+        `;
+    } else {
+        const nextSession = sessions ? Object.values(sessions)[0] : null;
+        statusEl.innerHTML = `
+            <span class="session-pill">No active BTC session${nextSession ? `  Next: ${nextSession.name}` : ''}</span>
+        `;
+    }
+}
+
+function formatUtcRangeToDenver(utcRange) {
+    if (!utcRange) return '--';
+    let range = utcRange.trim();
+    let dayPrefix = null;
+    if (range.startsWith('Fri ')) {
+        dayPrefix = 'Fri';
+        range = range.replace('Fri ', '');
+    }
+
+    const [startStr, endStr] = range.split('-');
+    if (!startStr || !endStr) return utcRange;
+
+    const parseTime = (timeStr) => {
+        const [hours, minutes] = timeStr.split(':').map(Number);
+        return { hours, minutes };
+    };
+
+    const getBaseDate = () => {
+        const now = new Date();
+        const base = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+        if (!dayPrefix) return base;
+        const dayMap = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+        const targetDay = dayMap[dayPrefix];
+        const offset = (targetDay - base.getUTCDay() + 7) % 7;
+        base.setUTCDate(base.getUTCDate() + offset);
+        return base;
+    };
+
+    const baseDate = getBaseDate();
+    const startTime = parseTime(startStr);
+    const endTime = parseTime(endStr);
+
+    const startDate = new Date(Date.UTC(
+        baseDate.getUTCFullYear(),
+        baseDate.getUTCMonth(),
+        baseDate.getUTCDate(),
+        startTime.hours,
+        startTime.minutes
+    ));
+    const endDate = new Date(Date.UTC(
+        baseDate.getUTCFullYear(),
+        baseDate.getUTCMonth(),
+        baseDate.getUTCDate(),
+        endTime.hours,
+        endTime.minutes
+    ));
+
+    const formatter = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'America/Denver',
+        hour: 'numeric',
+        minute: '2-digit'
+    });
+
+    return `${formatter.format(startDate)}-${formatter.format(endDate)} MT`;
+}
 
 
 // ==========================================
