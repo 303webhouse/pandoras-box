@@ -1087,6 +1087,52 @@ async def get_active_signals_api():
             else:
                 # Merge into existing signal for this ticker
                 existing = ticker_groups[ticker]
+
+                ts_new = sig.get('timestamp') or sig.get('created_at') or ''
+                ts_existing = existing.get('timestamp') or existing.get('created_at') or ''
+
+                # If the new signal is more recent, prefer it as the base record
+                if ts_new > ts_existing:
+                    previous = existing
+                    existing = sig.copy()
+                    ticker_groups[ticker] = existing
+
+                    # Carry over strategies and signal types from the previous record
+                    previous_strategies = previous.get('strategies') if isinstance(previous.get('strategies'), list) else [previous.get('strategy', 'Unknown')]
+                    previous_types = previous.get('signal_types') if isinstance(previous.get('signal_types'), list) else [previous.get('signal_type', 'SIGNAL')]
+                    
+                    current_strategy = existing.get('strategy', 'Unknown')
+                    existing['strategies'] = [current_strategy] if current_strategy else []
+                    for strategy in previous_strategies:
+                        if strategy and strategy not in existing['strategies']:
+                            existing['strategies'].append(strategy)
+                    
+                    current_sig_type = existing.get('signal_type', 'SIGNAL')
+                    existing['signal_types'] = [current_sig_type] if current_sig_type else []
+                    for sig_type in previous_types:
+                        if sig_type and sig_type not in existing['signal_types']:
+                            existing['signal_types'].append(sig_type)
+                    
+                    # Merge triggering factors
+                    previous_factors = previous.get('triggering_factors', [])
+                    if isinstance(previous_factors, str):
+                        previous_factors = [previous_factors]
+                    elif not isinstance(previous_factors, list):
+                        previous_factors = []
+                    
+                    current_factors = existing.get('triggering_factors', [])
+                    if isinstance(current_factors, str):
+                        current_factors = [current_factors]
+                    elif not isinstance(current_factors, list):
+                        current_factors = []
+                    
+                    for factor in previous_factors:
+                        if factor and factor not in current_factors:
+                            current_factors.append(factor)
+                    existing['triggering_factors'] = current_factors
+                
+                # Refresh reference after potential replacement
+                existing = ticker_groups[ticker]
                 
                 # Ensure strategies is a list (defensive)
                 if not isinstance(existing.get('strategies'), list):
@@ -1106,12 +1152,12 @@ async def get_active_signals_api():
                 if sig_type and sig_type not in existing['signal_types']:
                     existing['signal_types'].append(sig_type)
                 
-                # Keep the highest score
-                if sig.get('score', 0) > existing.get('score', 0):
-                    existing['score'] = sig['score']
-                    existing['scoreTier'] = sig.get('scoreTier', 'MODERATE')
-                    existing['confidence'] = sig.get('confidence', 'MEDIUM')
-                    existing['priority'] = sig.get('priority', 'MEDIUM')
+                # If base record is missing score, backfill from this signal
+                if not existing.get('score') and sig.get('score') is not None:
+                    existing['score'] = sig.get('score')
+                    existing['scoreTier'] = sig.get('scoreTier', existing.get('scoreTier', 'MODERATE'))
+                    existing['confidence'] = sig.get('confidence', existing.get('confidence', 'MEDIUM'))
+                    existing['priority'] = sig.get('priority', existing.get('priority', 'MEDIUM'))
                 
                 # Merge triggering factors (combine unique factors)
                 new_factors = sig.get('triggering_factors')
