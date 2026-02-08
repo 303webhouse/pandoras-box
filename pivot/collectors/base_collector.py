@@ -140,6 +140,20 @@ async def get_price_history(ticker: str, days: int = 30):
             return str(value).lower().replace(" ", "_")
 
         cols = data.columns
+        if all(isinstance(c, tuple) and len(c) >= 2 for c in cols):
+            data.columns = [_lower(c[0]) for c in cols]
+            return data
+
+        if all(isinstance(c, str) and c.startswith("(") and "," in c and c.endswith(")") for c in cols):
+            parsed = []
+            for col in cols:
+                text = col.strip("()")
+                left = text.split(",", 1)[0]
+                field = left.strip().strip("'\"")
+                parsed.append(_lower(field))
+            data.columns = parsed
+            return data
+
         if hasattr(cols, "levels") and len(getattr(cols, "levels", [])) >= 2:
             level0 = [str(c).lower() for c in cols.get_level_values(0)]
             level1 = [str(c).lower() for c in cols.get_level_values(1)]
