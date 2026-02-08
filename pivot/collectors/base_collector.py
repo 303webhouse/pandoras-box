@@ -130,11 +130,47 @@ async def post_pivot_alert(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 async def get_price_history(ticker: str, days: int = 30):
+    def _normalize_columns(data):
+        if data is None or data.empty:
+            return data
+        if not hasattr(data, "columns"):
+            return data
+
+        def _lower(value: Any) -> str:
+            return str(value).lower().replace(" ", "_")
+
+        cols = data.columns
+        if hasattr(cols, "levels") and len(getattr(cols, "levels", [])) >= 2:
+            level0 = [str(c).lower() for c in cols.get_level_values(0)]
+            level1 = [str(c).lower() for c in cols.get_level_values(1)]
+            fields = {"open", "high", "low", "close", "adj close", "adj_close", "volume"}
+            level0_fields = any(v in fields for v in level0)
+            level1_fields = any(v in fields for v in level1)
+
+            if level0_fields and not level1_fields:
+                if len(set(level1)) == 1:
+                    data.columns = [_lower(c[0]) for c in cols]
+                else:
+                    first = cols.get_level_values(1)[0]
+                    data = data.xs(first, axis=1, level=1, drop_level=True)
+                    data.columns = [_lower(c) for c in data.columns]
+            elif level1_fields and not level0_fields:
+                if len(set(level0)) == 1:
+                    data.columns = [_lower(c[1]) for c in cols]
+                else:
+                    first = cols.get_level_values(0)[0]
+                    data = data.xs(first, axis=1, level=0, drop_level=True)
+                    data.columns = [_lower(c) for c in data.columns]
+            else:
+                data.columns = [_lower(c) for c in cols]
+            return data
+
+        data.columns = [_lower(c) for c in cols]
+        return data
+
     def _download():
         data = yf.download(ticker, period=f"{days}d", progress=False)
-        if data is not None and not data.empty:
-            data.columns = [str(c).lower().replace(" ", "_") for c in data.columns]
-        return data
+        return _normalize_columns(data)
 
     return await asyncio.to_thread(_download)
 
