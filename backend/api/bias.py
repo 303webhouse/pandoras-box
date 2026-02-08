@@ -48,7 +48,7 @@ except ImportError as e:
     COMPOSITE_AVAILABLE = False
     logger.warning(f"Composite bias engine not available: {e}")
 
-from utils.pivot_auth import verify_pivot_key
+from backend.utils.pivot_auth import verify_pivot_key
 
 
 class SavitaUpdate(BaseModel):
