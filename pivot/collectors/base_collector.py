@@ -22,6 +22,7 @@ from .config import (
 )
 
 logger = logging.getLogger(__name__)
+YF_LOCK = asyncio.Lock()
 
 
 def score_to_bias(score: float) -> str:
@@ -240,7 +241,8 @@ async def get_price_history(ticker: str, days: int = 30):
         data = _normalize_columns(data)
         return _ensure_close(data)
 
-    return await asyncio.to_thread(_download)
+    async with YF_LOCK:
+        return await asyncio.to_thread(_download)
 
 
 async def get_latest_price(ticker: str) -> Optional[float]:
