@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 from datetime import datetime
 from typing import Any, Dict, Optional
 
@@ -53,11 +54,33 @@ def _api_url(path: str) -> str:
         path = f"/{path}"
     return f"{PANDORA_API_URL}{path}"
 
+def _sanitize_payload(value: Any) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            return None
+        return value
+    if hasattr(value, "item"):
+        try:
+            item = value.item()
+            if isinstance(item, float) and not math.isfinite(item):
+                return None
+            return item
+        except Exception:
+            pass
+    if isinstance(value, dict):
+        return {k: _sanitize_payload(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_sanitize_payload(v) for v in value]
+    return value
+
 
 async def post_json(path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     last_error: Optional[Exception] = None
     for attempt in range(1, RETRY_ATTEMPTS + 1):
         try:
+            payload = _sanitize_payload(payload)
             async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
                 response = await client.post(_api_url(path), json=payload, headers=_headers())
                 if response.status_code >= 400:
