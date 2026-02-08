@@ -168,9 +168,40 @@ async def get_price_history(ticker: str, days: int = 30):
         data.columns = [_lower(c) for c in cols]
         return data
 
+    def _ensure_close(data):
+        if data is None or data.empty:
+            return data
+        if "close" in data.columns:
+            return data
+
+        candidate = None
+        if "adj_close" in data.columns:
+            candidate = "adj_close"
+        else:
+            for col in data.columns:
+                key = str(col).lower().replace(" ", "_")
+                if key == "adj_close":
+                    candidate = col
+                    break
+
+        if candidate is None:
+            for col in data.columns:
+                key = str(col).lower().replace(" ", "_")
+                if "close" in key:
+                    candidate = col
+                    break
+
+        if candidate is None:
+            return None
+
+        data = data.copy()
+        data["close"] = data[candidate]
+        return data
+
     def _download():
         data = yf.download(ticker, period=f"{days}d", progress=False)
-        return _normalize_columns(data)
+        data = _normalize_columns(data)
+        return _ensure_close(data)
 
     return await asyncio.to_thread(_download)
 
