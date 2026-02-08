@@ -124,6 +124,10 @@ async def health_check():
 @app.get("/api/bias/{timeframe}")
 async def get_bias_data(timeframe: str):
     """Get current bias for a specific timeframe"""
+    if timeframe.lower() == "summary":
+        from api.bias import get_all_bias_indicators
+        return await get_all_bias_indicators()
+
     from database.redis_client import get_bias
     
     bias = await get_bias(timeframe.upper())
