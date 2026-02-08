@@ -110,25 +110,26 @@ def _is_market_hours(now: datetime) -> bool:
 
 
 async def run_all_factors() -> int:
-    tasks = [
-        factor_credit_spreads.collect_and_post(),
-        factor_market_breadth.collect_and_post(),
-        factor_vix_term.collect_and_post(),
-        factor_tick_breadth.collect_and_post(),
-        factor_sector_rotation.collect_and_post(),
-        factor_dollar_smile.collect_and_post(),
-        factor_excess_cape.collect_and_post(),
-        factor_savita.collect_and_post(),
+    jobs = [
+        ("credit_spreads", factor_credit_spreads.collect_and_post),
+        ("market_breadth", factor_market_breadth.collect_and_post),
+        ("vix_term", factor_vix_term.collect_and_post),
+        ("tick_breadth", factor_tick_breadth.collect_and_post),
+        ("sector_rotation", factor_sector_rotation.collect_and_post),
+        ("dollar_smile", factor_dollar_smile.collect_and_post),
+        ("excess_cape", factor_excess_cape.collect_and_post),
+        ("savita", factor_savita.collect_and_post),
     ]
 
-    results = await asyncio.gather(*tasks, return_exceptions=True)
     count = 0
-    for result in results:
-        if isinstance(result, Exception):
-            logger.warning(f"Factor job failed: {result}")
-            continue
-        if result is not None:
-            count += 1
+    for name, job in jobs:
+        try:
+            result = await job()
+            if result is not None:
+                count += 1
+        except Exception as exc:
+            logger.warning(f"Factor job failed ({name}): {exc}")
+        await asyncio.sleep(2)
     return count
 
 
