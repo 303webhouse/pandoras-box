@@ -280,12 +280,12 @@ def start_scheduler() -> None:
     scheduler.start()
     logger.info("Pivot scheduler started")
 
-    try:
-        asyncio.get_event_loop().run_forever()
-    except (KeyboardInterrupt, SystemExit):
-        pass
+
+async def _run_forever() -> None:
+    start_scheduler()
+    await asyncio.Event().wait()
 
 
 if __name__ == "__main__":
     _configure_logging()
-    start_scheduler()
+    asyncio.run(_run_forever())
