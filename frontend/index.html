@@ -45,64 +45,59 @@
 
         <!-- Bias Indicators -->
         <section class="bias-section">
-            <!-- Hierarchical flow indicator with personal bias controls -->
-            <div class="bias-hierarchy-flow">
-                <span class="hierarchy-label">Bias Flow:</span>
-                <span class="hierarchy-arrow">Cyclical</span>
-                <span class="hierarchy-connector">→</span>
-                <span class="hierarchy-arrow">Weekly</span>
-                <span class="hierarchy-connector">→</span>
-                <span class="hierarchy-arrow">Daily</span>
-                
-                <div class="bias-flow-divider"></div>
-                
-                <!-- Alignment Indicator -->
-                <div class="bias-alignment-indicator" id="biasAlignmentIndicator">
-                    <span class="alignment-icon">⚡</span>
-                    <span class="alignment-text" id="alignmentText">ALIGNED</span>
+
+            <div class="bias-composite-panel" id="biasCompositePanel">
+                <div class="bias-composite-header">
+                    <div class="bias-composite-title">
+                        <h2>MARKET BIAS</h2>
+                        <div class="pivot-health" id="pivotHealth">
+                            <span class="pivot-dot">o</span>
+                            <span class="pivot-text">Pivot unknown</span>
+                        </div>
+                    </div>
+                    <div class="bias-composite-actions">
+                        <button class="savita-update-btn" id="savitaUpdateBtn" title="Update Savita Indicator">
+                            Savita
+                        </button>
+                        <div class="bias-override-controls">
+                            <select id="compositeOverrideSelect" class="bias-override-select">
+                                <option value="">Override Bias...</option>
+                                <option value="TORO_MAJOR">TORO MAJOR</option>
+                                <option value="TORO_MINOR">TORO MINOR</option>
+                                <option value="NEUTRAL">NEUTRAL</option>
+                                <option value="URSA_MINOR">URSA MINOR</option>
+                                <option value="URSA_MAJOR">URSA MAJOR</option>
+                            </select>
+                            <button class="composite-override-btn" id="compositeOverrideApply">Apply</button>
+                            <button class="composite-override-btn secondary" id="compositeOverrideClear">Clear</button>
+                        </div>
+                    </div>
                 </div>
-                
-                <div class="bias-flow-divider"></div>
-                
-                <!-- Personal Bias Selector -->
-                <div class="personal-bias-control">
-                    <label class="personal-bias-label">My Bias:</label>
-                    <select id="personalBiasSelector" class="personal-bias-select">
-                        <option value="NEUTRAL">Neutral</option>
-                        <option value="TORO">Toro (+1)</option>
-                        <option value="URSA">Ursa (-1)</option>
-                    </select>
+
+                <div class="bias-banner" id="compositeBiasBanner">
+                    <div class="bias-banner-main">
+                        <div class="bias-level" id="compositeBiasLevel">NEUTRAL</div>
+                        <div class="bias-score" id="compositeBiasScore">(0.00)</div>
+                    </div>
+                    <div class="confidence-badge" id="compositeConfidence">LOW</div>
                 </div>
-                
-                <!-- Override Control -->
-                <div class="bias-override-control">
-                    <label class="override-label">Override:</label>
-                    <button class="override-toggle" id="biasOverrideToggle" data-active="false">OFF</button>
-                    <select id="overrideDirectionSelector" class="override-direction-select" disabled>
-                        <option value="MAJOR_TORO">MAJOR TORO</option>
-                        <option value="MAJOR_URSA">MAJOR URSA</option>
-                    </select>
+
+                <div class="override-indicator" id="compositeOverrideIndicator" style="display: none;"></div>
+
+                <div class="factor-breakdown">
+                    <div class="factor-breakdown-header" id="factorBreakdownToggle">
+                        <span class="factor-breakdown-caret">></span>
+                        <span class="factor-breakdown-title">Factor Breakdown</span>
+                        <span class="factor-breakdown-count" id="factorActiveCount">0/8 active</span>
+                    </div>
+                    <div class="factor-list" id="compositeFactorList" style="display: none;"></div>
                 </div>
-                
-                <!-- Savita Update Button -->
-                <button class="savita-update-btn" id="savitaUpdateBtn" title="Update Savita Indicator">
-                    📊 Savita
-                </button>
+
+                <div class="bias-composite-footer">
+                    <span class="last-update" id="compositeLastUpdate">Last update: --</span>
+                </div>
             </div>
-            
-            <!-- Override Active Banner -->
-            <div class="override-active-banner" id="overrideActiveBanner">
-                ⚡ OVERRIDE ACTIVE: <span id="overrideBiasDisplay">TORO MAJOR</span> - All calculated biases ignored
-            </div>
-            
-            <!-- Crisis Mode Alert Banner -->
-            <div class="crisis-alert-banner" id="crisisAlertBanner" style="display: none;">
-                <span class="crisis-icon">🚨</span>
-                <span class="crisis-text">CRISIS TIER ACTIVE: </span>
-                <span class="crisis-factors" id="crisisFactors">Sahm Rule triggered</span>
-                <span class="crisis-note"> - Elevated weighting applied</span>
-            </div>
-            
+
             <div class="bias-card" id="dailyBias">
                 <h3><span class="kb-link" data-kb-term="daily-bias">Daily Bias</span></h3>
                 <button class="bias-settings-btn" id="dailyBiasSettingsBtn" title="Factor Settings">⚙️</button>
@@ -257,20 +252,26 @@
         <section class="watchlist-section">
             <div class="watchlist-container">
                 <div class="watchlist-header">
-                    <h2>📋 MY WATCHLIST</h2>
-                    <span class="watchlist-count" id="watchlistCount">0</span>
-                </div>
-                <div class="watchlist-controls">
-                    <div class="watchlist-input-group">
-                        <input type="text" id="addTickerInput" class="watchlist-input" placeholder="Add ticker (e.g. AAPL)">
-                        <button class="watchlist-btn add" id="addTickerBtn">+ Add</button>
+                    <h2>WATCHLIST</h2>
+                    <div class="watchlist-controls">
+                        <div class="watchlist-benchmark" id="watchlist-benchmark"></div>
+                        <select id="watchlist-sort" class="watchlist-sort-select">
+                            <option value="strength_rank">By Sector Strength</option>
+                            <option value="change_1d">By Daily Change</option>
+                            <option value="change_1w">By Weekly Change</option>
+                            <option value="signals">By Active Signals</option>
+                        </select>
+                        <button id="watchlist-view-toggle" class="view-toggle-btn" title="Toggle flat/sector view">
+                            ☰
+                        </button>
                     </div>
                 </div>
-                <div class="watchlist-tickers" id="watchlistTickers">
-                    <p class="empty-state">Loading watchlist...</p>
+                <div id="watchlist-grid" class="watchlist-grid">
+                    <div class="watchlist-loading">Loading watchlist data...</div>
                 </div>
-                <div class="watchlist-actions">
-                    <button class="watchlist-btn secondary" id="resetWatchlistBtn">Reset to Defaults</button>
+                <div class="watchlist-footer">
+                    <span id="watchlist-enriched-at"></span>
+                    <button id="watchlist-refresh" class="btn-subtle">↻ Refresh</button>
                 </div>
             </div>
             

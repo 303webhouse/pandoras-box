@@ -59,6 +59,11 @@ _scheduler_status = {
         "last_run": None,
         "status": "idle"
     },
+    "composite_bias": {
+        "last_run": None,
+        "status": "idle",
+        "interval": "15 min"
+    },
     "scheduler_started": None
 }
 
@@ -126,6 +131,10 @@ def get_scheduler_status() -> Dict[str, Any]:
         "bias_refresh": {
             **_scheduler_status["bias_refresh"],
             "schedule": "9:45 AM ET on trading days"
+        },
+        "composite_bias": {
+            **_scheduler_status["composite_bias"],
+            "schedule": "Every 15 minutes"
         }
     }
 
@@ -2070,6 +2079,29 @@ async def run_scheduled_refreshes():
     _scheduler_status["bias_refresh"]["status"] = "completed"
 
 
+async def refresh_composite_bias():
+    """
+    Refresh composite bias (15-minute safety net).
+    """
+    try:
+        from bias_engine.composite import compute_composite
+    except ImportError as e:
+        logger.warning(f"Composite bias engine not available: {e}")
+        return None
+
+    now = get_eastern_now()
+    try:
+        result = await compute_composite()
+        _scheduler_status["composite_bias"]["last_run"] = now.isoformat()
+        _scheduler_status["composite_bias"]["status"] = "completed"
+        logger.info(f"🧭 Composite bias refreshed: {result.bias_level} ({result.composite_score:.2f})")
+        return result
+    except Exception as e:
+        _scheduler_status["composite_bias"]["status"] = f"error: {str(e)}"
+        logger.warning(f"Error refreshing composite bias: {e}")
+        return None
+
+
 async def scan_sector_strength():
     """
     Scan sector ETFs to determine which sectors are leading/lagging.
@@ -2304,12 +2336,23 @@ async def start_scheduler():
             name='Auto-Dismiss Old Signals',
             replace_existing=True
         )
+
+        # Composite bias refresh every 15 minutes
+        scheduler.add_job(
+            refresh_composite_bias,
+            'interval',
+            minutes=15,
+            id='composite_bias_refresh',
+            name='Composite Bias Refresh',
+            replace_existing=True
+        )
         
         scheduler.start()
         logger.info("✅ APScheduler started - bias refresh scheduled for 9:45 AM ET")
         logger.info("✅ Savita auto-search scheduled for 8:00 AM ET (days 12-23)")
         logger.info("✅ BTC Bottom Signals refresh scheduled every 5 minutes")
         logger.info("✅ Auto-dismiss old signals scheduled every hour")
+        logger.info("✅ Composite bias refresh scheduled every 15 minutes")
         
         # ALSO start the scanner loop (APScheduler doesn't handle the variable-interval scanners)
         asyncio.create_task(_scanner_loop())
@@ -2415,6 +2458,7 @@ async def _fallback_scheduler():
     last_cta_scan_time = None
     last_crypto_scan_time = None
     last_bias_refresh_date = None
+    last_composite_refresh_time = None
     
     while True:
         now = get_eastern_now()
@@ -2432,6 +2476,22 @@ async def _fallback_scheduler():
                 await run_scheduled_refreshes()
                 await asyncio.sleep(120)
                 continue
+
+        # =========================================
+        # COMPOSITE BIAS: Every 15 minutes
+        # =========================================
+        should_refresh_composite = False
+        if last_composite_refresh_time is None:
+            should_refresh_composite = True
+        else:
+            minutes_since_composite = (now - last_composite_refresh_time).total_seconds() / 60
+            should_refresh_composite = minutes_since_composite >= 15
+
+        if should_refresh_composite:
+            last_composite_refresh_time = now
+            await refresh_composite_bias()
+            await asyncio.sleep(10)
+            continue
         
         # =========================================
         # CTA SCANNER (EQUITIES): Smart frequency during market hours

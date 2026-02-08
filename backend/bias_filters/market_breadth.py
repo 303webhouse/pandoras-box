@@ -18,9 +18,12 @@ Update Frequency: Weekly (every Monday)
 """
 
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from datetime import datetime
 from enum import Enum
+
+from bias_engine.composite import FactorReading
+from bias_engine.factor_utils import score_to_signal, get_price_history
 
 logger = logging.getLogger(__name__)
 
@@ -171,3 +174,70 @@ def get_bias_for_scoring() -> Dict[str, Any]:
         "allows_shorts": level <= 3,
         "last_updated": _market_breadth_state.get("last_updated")
     }
+
+
+async def compute_breadth_score() -> Optional[FactorReading]:
+    """
+    RSP/SPY ratio vs 20-day SMA.
+    Bearish when RSP underperforms SPY (narrow market).
+    """
+    rsp = await get_price_history("RSP", days=30)
+    spy = await get_price_history("SPY", days=30)
+
+    if rsp is None or spy is None or rsp.empty or spy.empty:
+        return None
+    if "close" not in rsp.columns or "close" not in spy.columns:
+        return None
+
+    ratio = (rsp["close"] / spy["close"]).dropna()
+    if len(ratio) < 20:
+        return None
+
+    current = float(ratio.iloc[-1])
+    sma_20 = float(ratio.rolling(20).mean().iloc[-1])
+    if sma_20 == 0:
+        return None
+
+    pct_dev = (current - sma_20) / sma_20 * 100
+    if len(ratio) >= 5 and ratio.iloc[-5] != 0:
+        roc_5d = (current - float(ratio.iloc[-5])) / float(ratio.iloc[-5]) * 100
+    else:
+        roc_5d = 0.0
+
+    if pct_dev >= 1.5:
+        base = 0.8
+    elif pct_dev >= 0.5:
+        base = 0.4
+    elif pct_dev >= -0.5:
+        base = 0.0
+    elif pct_dev >= -1.5:
+        base = -0.4
+    else:
+        base = -0.8
+
+    roc_modifier = max(-0.2, min(0.2, roc_5d * 0.15))
+    score = max(-1.0, min(1.0, base + roc_modifier))
+
+    return FactorReading(
+        factor_id="market_breadth",
+        score=score,
+        signal=score_to_signal(score),
+        detail=(
+            f"RSP/SPY ratio {current:.4f} vs SMA20 {sma_20:.4f} "
+            f"({pct_dev:+.1f}%), 5d ROC: {roc_5d:+.2f}%"
+        ),
+        timestamp=datetime.utcnow(),
+        source="yfinance",
+        raw_data={
+            "rsp": float(rsp["close"].iloc[-1]),
+            "spy": float(spy["close"].iloc[-1]),
+            "ratio": current,
+            "sma20": sma_20,
+            "pct_dev": float(pct_dev),
+            "roc_5d": float(roc_5d),
+        },
+    )
+
+
+async def compute_score() -> Optional[FactorReading]:
+    return await compute_breadth_score()

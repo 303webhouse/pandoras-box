@@ -11,6 +11,9 @@ import logging
 from typing import Tuple, Dict, Any, Optional, List
 from datetime import datetime, timezone, timedelta
 
+from bias_engine.composite import FactorReading
+from bias_engine.factor_utils import score_to_signal
+
 logger = logging.getLogger(__name__)
 
 # Redis keys for TICK data
@@ -272,3 +275,69 @@ async def calculate_weekly_bias(tick_history: list) -> str:
     # Mixed signals
     else:
         return "NEUTRAL"
+
+
+async def compute_tick_score(tick_data: Dict[str, Any]) -> Optional[FactorReading]:
+    """
+    Score based on TICK readings received from TradingView.
+    tick_data should contain:
+      - tick_high: highest TICK reading in session
+      - tick_low: lowest TICK reading in session
+      - tick_close: latest TICK value
+      - tick_avg: session average TICK
+    """
+    if not tick_data:
+        return None
+
+    tick_high = float(tick_data.get("tick_high", 0) or 0)
+    tick_low = float(tick_data.get("tick_low", 0) or 0)
+    tick_close = float(tick_data.get("tick_close", 0) or 0)
+    tick_avg = float(tick_data.get("tick_avg", tick_close) or 0)
+
+    if tick_avg > 400:
+        base = 0.8
+    elif tick_avg > 200:
+        base = 0.4
+    elif tick_avg > -200:
+        base = 0.0
+    elif tick_avg > -400:
+        base = -0.4
+    else:
+        base = -0.8
+
+    extreme_mod = 0.0
+    if tick_low < -1000:
+        extreme_mod = -0.2
+    elif tick_high > 1000:
+        extreme_mod = 0.2
+
+    score = max(-1.0, min(1.0, base + extreme_mod))
+
+    return FactorReading(
+        factor_id="tick_breadth",
+        score=score,
+        signal=score_to_signal(score),
+        detail=f"TICK avg: {tick_avg:+.0f}, range: [{tick_low:.0f}, {tick_high:.0f}], close: {tick_close:+.0f}",
+        timestamp=datetime.utcnow(),
+        source="tradingview",
+        raw_data=tick_data,
+    )
+
+
+async def compute_score(tick_data: Optional[Dict[str, Any]] = None) -> Optional[FactorReading]:
+    """
+    Compute score from provided tick_data or latest stored values.
+    """
+    if tick_data is None:
+        try:
+            from database.redis_client import get_redis_client
+            redis = await get_redis_client()
+            if not redis:
+                return None
+            current_raw = await redis.get(REDIS_KEY_TICK_CURRENT)
+            tick_data = json.loads(current_raw) if current_raw else None
+        except Exception as e:
+            logger.warning(f"Error loading tick data for scoring: {e}")
+            return None
+
+    return await compute_tick_score(tick_data or {})

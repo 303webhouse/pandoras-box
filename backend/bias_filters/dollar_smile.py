@@ -20,6 +20,9 @@ from typing import Dict, Any, Optional
 from datetime import datetime
 from enum import Enum
 
+from bias_engine.composite import FactorReading
+from bias_engine.factor_utils import score_to_signal, get_price_history, get_latest_price
+
 logger = logging.getLogger(__name__)
 
 
@@ -377,3 +380,54 @@ async def auto_fetch_and_update() -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"Error auto-fetching Dollar Smile data: {e}")
         return {"status": "error", "message": str(e)}
+
+
+async def compute_dollar_smile_score() -> Optional[FactorReading]:
+    """
+    DXY vs 20-day SMA and VIX level.
+    Rising DXY + rising VIX = risk-off (bearish for equities).
+    Falling DXY = risk-on (bullish).
+    """
+    dxy = await get_price_history("DX-Y.NYB", days=60)
+    vix = await get_latest_price("^VIX")
+
+    if dxy is None or dxy.empty or "close" not in dxy.columns or vix is None:
+        return None
+
+    current_dxy = float(dxy["close"].iloc[-1])
+    sma_20 = float(dxy["close"].rolling(20).mean().iloc[-1])
+    if sma_20 == 0:
+        return None
+
+    dxy_above_sma = current_dxy > sma_20
+    vix_elevated = vix > 20
+
+    if dxy_above_sma and vix_elevated:
+        score = -0.6
+    elif dxy_above_sma and not vix_elevated:
+        score = 0.0
+    elif not dxy_above_sma and vix_elevated:
+        score = -0.3
+    else:
+        score = 0.5
+
+    return FactorReading(
+        factor_id="dollar_smile",
+        score=score,
+        signal=score_to_signal(score),
+        detail=(
+            f"DXY {current_dxy:.2f} {'above' if dxy_above_sma else 'below'} "
+            f"SMA20 {sma_20:.2f}, VIX {'elevated' if vix_elevated else 'calm'} at {vix:.1f}"
+        ),
+        timestamp=datetime.utcnow(),
+        source="yfinance",
+        raw_data={
+            "dxy": float(current_dxy),
+            "sma20": float(sma_20),
+            "vix": float(vix),
+        },
+    )
+
+
+async def compute_score() -> Optional[FactorReading]:
+    return await compute_dollar_smile_score()

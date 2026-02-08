@@ -27,6 +27,9 @@ import logging
 from typing import Dict, Optional, Any
 from datetime import datetime
 
+from bias_engine.composite import FactorReading
+from bias_engine.factor_utils import score_to_signal
+
 logger = logging.getLogger(__name__)
 
 # Savita Indicator Configuration
@@ -229,6 +232,59 @@ def get_savita_config() -> Dict[str, Any]:
         **SAVITA_CONFIG.copy(),
         "current_interpretation": get_savita_reading()
     }
+
+
+async def compute_savita_score() -> Optional[FactorReading]:
+    """
+    BofA Sell Side Indicator. Manual entry via API.
+    This is a CONTRARIAN indicator.
+    """
+    savita = get_savita_reading()
+    if not savita or not savita.get("enabled") or savita.get("stale"):
+        return None
+
+    reading = savita.get("reading")
+    if reading is None:
+        return None
+
+    if reading >= 65:
+        score = -0.8
+    elif reading >= 60:
+        score = -0.4
+    elif reading >= 55:
+        score = -0.1
+    elif reading >= 50:
+        score = 0.1
+    elif reading >= 45:
+        score = 0.4
+    else:
+        score = 0.8
+
+    last_updated = savita.get("last_updated")
+    try:
+        timestamp = datetime.fromisoformat(last_updated)
+    except Exception:
+        timestamp = datetime.utcnow()
+
+    consensus = "neutral"
+    if reading > 55:
+        consensus = "bullish consensus"
+    elif reading < 45:
+        consensus = "bearish consensus"
+
+    return FactorReading(
+        factor_id="savita",
+        score=score,
+        signal=score_to_signal(score),
+        detail=f"BofA Sell Side Indicator: {reading:.1f} ({consensus})",
+        timestamp=timestamp,
+        source="manual",
+        raw_data={"value": float(reading), "date": last_updated},
+    )
+
+
+async def compute_score() -> Optional[FactorReading]:
+    return await compute_savita_score()
 
 
 async def auto_search_savita_update() -> Dict[str, Any]:

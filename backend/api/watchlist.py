@@ -10,7 +10,7 @@ Features:
 - Persist watchlist to file (simple JSON storage)
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import json
@@ -85,77 +85,233 @@ def ensure_data_dir():
         os.makedirs(data_dir)
 
 
-def load_watchlist_data() -> Dict[str, Any]:
-    """Load full watchlist data including sectors"""
+def _copy_default_watchlist() -> Dict[str, Any]:
+    return json.loads(json.dumps(DEFAULT_WATCHLIST))
+
+
+def _load_from_json() -> Dict[str, Any]:
+    """Load watchlist from JSON file (fallback)."""
     try:
         ensure_data_dir()
         if os.path.exists(WATCHLIST_FILE):
             with open(WATCHLIST_FILE, 'r') as f:
                 data = json.load(f)
-                # Handle old format (flat list)
                 if "tickers" in data and "sectors" not in data:
-                    # Migrate to new format
                     return migrate_watchlist(data.get("tickers", []))
                 return data
-        else:
-            save_watchlist_data(DEFAULT_WATCHLIST)
-            return DEFAULT_WATCHLIST
     except Exception as e:
-        logger.error(f"Error loading watchlist: {e}")
-        return DEFAULT_WATCHLIST
+        logger.error(f"Error loading watchlist JSON: {e}")
+    return _copy_default_watchlist()
 
 
-def migrate_watchlist(tickers: List[str]) -> Dict[str, Any]:
-    """Migrate old flat watchlist to sector-organized format"""
-    # Put all existing tickers in Uncategorized
-    new_data = DEFAULT_WATCHLIST.copy()
-    new_data["sectors"]["Uncategorized"] = {
-        "tickers": tickers,
-        "etf": None
-    }
-    save_watchlist_data(new_data)
-    logger.info(f"Migrated {len(tickers)} tickers to sector format")
-    return new_data
-
-
-def load_watchlist() -> List[str]:
-    """Load flat list of all tickers (for backwards compatibility)"""
-    data = load_watchlist_data()
-    all_tickers = []
-    for sector_data in data.get("sectors", {}).values():
-        all_tickers.extend(sector_data.get("tickers", []))
-    return list(set(all_tickers))  # Remove duplicates
-
-
-def save_watchlist_data(data: Dict[str, Any]) -> bool:
-    """Save full watchlist data to file"""
+def _save_to_json(data: Dict[str, Any]) -> bool:
+    """Save watchlist data to JSON file (backup)."""
     try:
         ensure_data_dir()
-        data["updated_at"] = datetime.now().isoformat()
         with open(WATCHLIST_FILE, 'w') as f:
             json.dump(data, f, indent=2)
         return True
     except Exception as e:
-        logger.error(f"Error saving watchlist: {e}")
+        logger.error(f"Error saving watchlist JSON: {e}")
         return False
 
 
-def save_watchlist(tickers: List[str]) -> bool:
-    """Save flat list of tickers (backwards compatibility)"""
-    data = load_watchlist_data()
-    # Put all tickers in Uncategorized
+def migrate_watchlist(tickers: List[str]) -> Dict[str, Any]:
+    """Migrate old flat watchlist to sector-organized format"""
+    new_data = _copy_default_watchlist()
+    new_data["sectors"]["Uncategorized"] = {
+        "tickers": tickers,
+        "etf": None
+    }
+    _save_to_json(new_data)
+    logger.info(f"Migrated {len(tickers)} tickers to sector format")
+    return new_data
+
+
+async def init_watchlist_table() -> None:
+    """Create watchlist_config table and seed from JSON/defaults if empty."""
+    try:
+        from database.postgres_client import get_postgres_client
+
+        pool = await get_postgres_client()
+        async with pool.acquire() as conn:
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS watchlist_config (
+                    id SERIAL PRIMARY KEY,
+                    sector_name VARCHAR(100) NOT NULL,
+                    tickers JSONB NOT NULL DEFAULT '[]',
+                    etf VARCHAR(10),
+                    sort_order INTEGER DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    updated_at TIMESTAMP DEFAULT NOW()
+                )
+            """)
+            await conn.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_watchlist_sector_name
+                ON watchlist_config(sector_name)
+            """)
+
+            count = await conn.fetchval("SELECT COUNT(*) FROM watchlist_config")
+            if count == 0:
+                seed_data = _load_from_json()
+                sectors = seed_data.get("sectors", {})
+                for idx, (sector_name, sector_data) in enumerate(sectors.items()):
+                    await conn.execute("""
+                        INSERT INTO watchlist_config (sector_name, tickers, etf, sort_order)
+                        VALUES ($1, $2, $3, $4)
+                        ON CONFLICT (sector_name) DO NOTHING
+                    """,
+                        sector_name,
+                        json.dumps(sector_data.get("tickers", [])),
+                        sector_data.get("etf"),
+                        idx,
+                    )
+                logger.info(f"Seeded {len(sectors)} sectors into watchlist_config")
+    except Exception as e:
+        logger.warning(f"Could not init watchlist table (using JSON fallback): {e}")
+
+
+async def _load_from_postgres() -> Optional[Dict[str, Any]]:
+    """Load watchlist config from PostgreSQL."""
+    try:
+        from database.postgres_client import get_postgres_client
+
+        pool = await get_postgres_client()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT sector_name, tickers, etf FROM watchlist_config ORDER BY sort_order"
+            )
+            if not rows:
+                return None
+
+            sectors = {}
+            for row in rows:
+                tickers = row["tickers"]
+                if isinstance(tickers, str):
+                    tickers = json.loads(tickers)
+                sectors[row["sector_name"]] = {
+                    "tickers": tickers,
+                    "etf": row["etf"],
+                }
+
+            sector_strength = {}
+            try:
+                sector_strength = _load_from_json().get("sector_strength", {})
+            except Exception:
+                sector_strength = {}
+
+            return {
+                "sectors": sectors,
+                "sector_strength": sector_strength,
+                "updated_at": datetime.utcnow().isoformat(),
+            }
+    except Exception as e:
+        logger.warning(f"PostgreSQL unavailable, using JSON fallback: {e}")
+        return None
+
+
+async def load_watchlist_data_async() -> Dict[str, Any]:
+    """Load watchlist config from PostgreSQL (primary) or JSON file (fallback)."""
+    data = await _load_from_postgres()
+    if data:
+        return data
+    return _load_from_json()
+
+
+def load_watchlist_data() -> Dict[str, Any]:
+    """Sync fallback for watchlist config (JSON only)."""
+    return _load_from_json()
+
+
+async def save_watchlist_data_async(data: Dict[str, Any]) -> bool:
+    """Save watchlist config to PostgreSQL (primary) and JSON file (backup)."""
+    data["updated_at"] = datetime.utcnow().isoformat()
+    saved_pg = False
+
+    try:
+        from database.postgres_client import get_postgres_client
+
+        pool = await get_postgres_client()
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                sectors = data.get("sectors", {})
+                for idx, (sector_name, sector_data) in enumerate(sectors.items()):
+                    await conn.execute("""
+                        INSERT INTO watchlist_config (sector_name, tickers, etf, sort_order, updated_at)
+                        VALUES ($1, $2, $3, $4, NOW())
+                        ON CONFLICT (sector_name) DO UPDATE SET
+                            tickers = $2, etf = $3, sort_order = $4, updated_at = NOW()
+                    """,
+                        sector_name,
+                        json.dumps(sector_data.get("tickers", [])),
+                        sector_data.get("etf"),
+                        idx,
+                    )
+
+                current_sectors = list(sectors.keys())
+                if current_sectors:
+                    await conn.execute(
+                        "DELETE FROM watchlist_config WHERE sector_name != ALL($1::text[])",
+                        current_sectors,
+                    )
+                else:
+                    await conn.execute("DELETE FROM watchlist_config")
+        saved_pg = True
+    except Exception as e:
+        logger.warning(f"PostgreSQL save failed, using JSON only: {e}")
+
+    saved_json = _save_to_json(data)
+    await _invalidate_watchlist_cache()
+
+    return saved_pg or saved_json
+
+
+def save_watchlist_data(data: Dict[str, Any]) -> bool:
+    """Sync JSON backup for watchlist config."""
+    data["updated_at"] = datetime.utcnow().isoformat()
+    return _save_to_json(data)
+
+
+def _flatten_tickers(sectors: Dict[str, Any]) -> List[str]:
+    all_tickers: List[str] = []
+    for sector_data in sectors.values():
+        all_tickers.extend(sector_data.get("tickers", []))
+    return list(set(all_tickers))
+
+
+async def load_watchlist() -> List[str]:
+    """Load flat list of all tickers (async)."""
+    data = await load_watchlist_data_async()
+    return _flatten_tickers(data.get("sectors", {}))
+
+
+async def save_watchlist(tickers: List[str]) -> bool:
+    """Save flat list of tickers (backwards compatibility)."""
+    data = await load_watchlist_data_async()
     data["sectors"]["Uncategorized"] = {
         "tickers": tickers,
         "etf": None
     }
-    return save_watchlist_data(data)
+    return await save_watchlist_data_async(data)
+
+
+async def _invalidate_watchlist_cache() -> None:
+    try:
+        from database.redis_client import get_redis_client
+        from watchlist.enrichment import ENRICHMENT_CACHE_KEY
+
+        client = await get_redis_client()
+        if client:
+            await client.delete(ENRICHMENT_CACHE_KEY)
+    except Exception:
+        pass
 
 
 @router.get("/watchlist")
 async def get_watchlist():
     """Get the current watchlist organized by sector"""
-    data = load_watchlist_data()
-    all_tickers = load_watchlist()
+    data = await load_watchlist_data_async()
+    all_tickers = _flatten_tickers(data.get("sectors", {}))
     
     return {
         "status": "success",
@@ -170,7 +326,7 @@ async def get_watchlist():
 @router.get("/watchlist/sectors")
 async def get_watchlist_sectors():
     """Get watchlist organized by sector with strength data"""
-    data = load_watchlist_data()
+    data = await load_watchlist_data_async()
     
     # Sort sectors by strength if available
     sectors = data.get("sectors", {})
@@ -213,7 +369,7 @@ async def update_watchlist(update: WatchlistUpdate):
             seen.add(t)
             unique_tickers.append(t)
     
-    if save_watchlist(unique_tickers):
+    if await save_watchlist(unique_tickers):
         logger.info(f"Watchlist updated: {len(unique_tickers)} tickers")
         return {
             "status": "success",
@@ -233,8 +389,8 @@ async def add_to_watchlist(action: TickerAction):
     if not ticker:
         raise HTTPException(status_code=400, detail="Ticker cannot be empty")
     
-    data = load_watchlist_data()
-    all_tickers = load_watchlist()
+    data = await load_watchlist_data_async()
+    all_tickers = _flatten_tickers(data.get("sectors", {}))
     
     if ticker in all_tickers:
         return {
@@ -249,8 +405,8 @@ async def add_to_watchlist(action: TickerAction):
     
     data["sectors"][sector]["tickers"].insert(0, ticker)
     
-    if save_watchlist_data(data):
-        all_tickers = load_watchlist()
+    if await save_watchlist_data_async(data):
+        all_tickers = _flatten_tickers(data.get("sectors", {}))
         logger.info(f"Added {ticker} to watchlist ({sector})")
         return {
             "status": "success",
@@ -267,7 +423,7 @@ async def remove_from_watchlist(action: TickerAction):
     """Remove a single ticker from the watchlist"""
     ticker = action.ticker.upper().strip()
     
-    data = load_watchlist_data()
+    data = await load_watchlist_data_async()
     found = False
     
     # Search all sectors for the ticker
@@ -278,15 +434,15 @@ async def remove_from_watchlist(action: TickerAction):
             break
     
     if not found:
-        all_tickers = load_watchlist()
+        all_tickers = _flatten_tickers(data.get("sectors", {}))
         return {
             "status": "not_found",
             "message": f"{ticker} is not in your watchlist",
             "tickers": all_tickers
         }
     
-    if save_watchlist_data(data):
-        all_tickers = load_watchlist()
+    if await save_watchlist_data_async(data):
+        all_tickers = _flatten_tickers(data.get("sectors", {}))
         logger.info(f"Removed {ticker} from watchlist")
         return {
             "status": "success",
@@ -301,7 +457,7 @@ async def remove_from_watchlist(action: TickerAction):
 @router.delete("/watchlist/clear")
 async def clear_watchlist():
     """Clear the entire watchlist"""
-    if save_watchlist([]):
+    if await save_watchlist([]):
         logger.info("Watchlist cleared")
         return {
             "status": "success",
@@ -316,8 +472,8 @@ async def clear_watchlist():
 @router.post("/watchlist/reset")
 async def reset_watchlist():
     """Reset watchlist to defaults"""
-    if save_watchlist_data(DEFAULT_WATCHLIST):
-        all_tickers = load_watchlist()
+    if await save_watchlist_data_async(_copy_default_watchlist()):
+        all_tickers = _flatten_tickers(DEFAULT_WATCHLIST.get("sectors", {}))
         logger.info("Watchlist reset to defaults")
         return {
             "status": "success",
@@ -333,10 +489,24 @@ async def reset_watchlist():
 @router.post("/watchlist/sector-strength")
 async def update_sector_strength(update: SectorStrengthUpdate):
     """Update sector strength rankings (called by bias scheduler)"""
-    data = load_watchlist_data()
+    data = await load_watchlist_data_async()
     data["sector_strength"] = update.sector_strength
     
-    if save_watchlist_data(data):
+    if await save_watchlist_data_async(data):
+        try:
+            from database.redis_client import get_redis_client
+            from watchlist.enrichment import SECTOR_STRENGTH_CACHE_KEY, SECTOR_STRENGTH_CACHE_TTL
+
+            client = await get_redis_client()
+            if client:
+                await client.setex(
+                    SECTOR_STRENGTH_CACHE_KEY,
+                    SECTOR_STRENGTH_CACHE_TTL,
+                    json.dumps(update.sector_strength),
+                )
+        except Exception as e:
+            logger.warning(f"Failed to cache sector strength: {e}")
+
         logger.info(f"Sector strength updated: {len(update.sector_strength)} sectors")
         return {
             "status": "success",
@@ -344,3 +514,114 @@ async def update_sector_strength(update: SectorStrengthUpdate):
         }
     else:
         raise HTTPException(status_code=500, detail="Failed to save sector strength")
+
+
+# ====================
+# WATCHLIST V2 (ENRICHED)
+# ====================
+
+@router.get("/watchlist/enriched")
+async def get_enriched_watchlist(
+    sort_by: str = Query("strength_rank", description="Sort field"),
+    sort_dir: str = Query("asc", description="Sort direction"),
+):
+    """
+    Get enriched watchlist with prices, sector strength, CTA zones, and bias alignment.
+    """
+    try:
+        from watchlist.enrichment import enrich_watchlist
+    except ImportError:
+        raise HTTPException(status_code=503, detail="Enrichment engine not available")
+
+    redis_client = None
+    try:
+        from database.redis_client import get_redis_client
+        redis_client = await get_redis_client()
+    except Exception:
+        redis_client = None
+
+    watchlist_data = await load_watchlist_data_async()
+    result = await enrich_watchlist(watchlist_data, redis_client)
+
+    reverse = (sort_dir.lower() == "desc")
+    sort_by = (sort_by or "strength_rank").lower()
+
+    if sort_by == "change_1d":
+        for sector in result.get("sectors", []):
+            sector["tickers"].sort(
+                key=lambda t: t.get("change_1d") or 0,
+                reverse=reverse,
+            )
+    elif sort_by == "change_1w":
+        for sector in result.get("sectors", []):
+            sector["tickers"].sort(
+                key=lambda t: t.get("change_1w") or 0,
+                reverse=reverse,
+            )
+    elif sort_by == "signals":
+        for sector in result.get("sectors", []):
+            sector["tickers"].sort(
+                key=lambda t: t.get("active_signals", 0),
+                reverse=True,
+            )
+    elif sort_by == "name":
+        for sector in result.get("sectors", []):
+            sector["tickers"].sort(key=lambda t: t.get("symbol", ""))
+
+    return result
+
+
+@router.get("/watchlist/flat")
+async def get_flat_enriched(
+    sort_by: str = Query("change_1d", description="Sort field"),
+    sort_dir: str = Query("desc", description="Sort direction"),
+    limit: int = Query(50, description="Max tickers to return"),
+):
+    """Get all watchlist tickers in a flat list with sector context."""
+    try:
+        from watchlist.enrichment import enrich_watchlist
+    except ImportError:
+        raise HTTPException(status_code=503, detail="Enrichment engine not available")
+
+    redis_client = None
+    try:
+        from database.redis_client import get_redis_client
+        redis_client = await get_redis_client()
+    except Exception:
+        redis_client = None
+
+    watchlist_data = await load_watchlist_data_async()
+    result = await enrich_watchlist(watchlist_data, redis_client)
+
+    flat = []
+    for sector in result.get("sectors", []):
+        for ticker in sector.get("tickers", []):
+            enriched = dict(ticker)
+            enriched["sector"] = sector.get("name")
+            enriched["sector_etf"] = sector.get("etf")
+            enriched["sector_vs_spy_1w"] = sector.get("vs_spy_1w")
+            enriched["sector_strength_rank"] = sector.get("strength_rank")
+            enriched["sector_bias_alignment"] = sector.get("bias_alignment")
+            flat.append(enriched)
+
+    sort_key = (sort_by or "change_1d").lower()
+    if sort_key == "signals":
+        sort_key = "active_signals"
+
+    valid_sorts = {"change_1d", "change_1w", "active_signals", "price", "symbol"}
+    if sort_key not in valid_sorts:
+        sort_key = "change_1d"
+
+    reverse = (sort_dir.lower() == "desc")
+    if sort_key == "symbol":
+        flat.sort(key=lambda t: t.get("symbol", ""), reverse=reverse)
+    else:
+        flat.sort(key=lambda t: t.get(sort_key) or 0, reverse=reverse)
+
+    return {
+        "status": "success",
+        "tickers": flat[:limit],
+        "benchmark": result.get("benchmark"),
+        "total": len(flat),
+        "enriched_at": result.get("enriched_at"),
+    }
