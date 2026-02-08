@@ -19,9 +19,12 @@ Update Frequency: Weekly (every Monday)
 """
 
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from datetime import datetime
 from enum import Enum
+
+from bias_engine.composite import FactorReading
+from bias_engine.factor_utils import score_to_signal, get_price_history
 
 logger = logging.getLogger(__name__)
 
@@ -192,3 +195,77 @@ def get_bias_for_scoring() -> Dict[str, Any]:
         "allows_shorts": level <= 3,
         "last_updated": _sector_rotation_state.get("last_updated")
     }
+
+
+async def compute_sector_rotation_score() -> Optional[FactorReading]:
+    """
+    Offensive (XLK+XLY) vs Defensive (XLP+XLU) relative strength.
+    5-day and 20-day rate of change comparison.
+    """
+    xlk = await get_price_history("XLK", days=30)
+    xly = await get_price_history("XLY", days=30)
+    xlp = await get_price_history("XLP", days=30)
+    xlu = await get_price_history("XLU", days=30)
+
+    data_frames = [xlk, xly, xlp, xlu]
+    if any(df is None or df.empty for df in data_frames):
+        return None
+    if any("close" not in df.columns for df in data_frames):
+        return None
+
+    offensive = (xlk["close"] + xly["close"]).dropna()
+    defensive = (xlp["close"] + xlu["close"]).dropna()
+    ratio = (offensive / defensive).dropna()
+    if len(ratio) < 20:
+        return None
+
+    current = float(ratio.iloc[-1])
+    sma_20 = float(ratio.rolling(20).mean().iloc[-1])
+    if sma_20 == 0:
+        return None
+
+    pct_dev = (current - sma_20) / sma_20 * 100
+    if len(ratio) >= 5 and ratio.iloc[-5] != 0:
+        roc_5d = (current - float(ratio.iloc[-5])) / float(ratio.iloc[-5]) * 100
+    else:
+        roc_5d = 0.0
+
+    if pct_dev >= 2.0:
+        base = 0.7
+    elif pct_dev >= 1.0:
+        base = 0.3
+    elif pct_dev >= -1.0:
+        base = 0.0
+    elif pct_dev >= -2.0:
+        base = -0.4
+    else:
+        base = -0.8
+
+    roc_modifier = max(-0.3, min(0.3, roc_5d * 0.2))
+    score = max(-1.0, min(1.0, base + roc_modifier))
+
+    return FactorReading(
+        factor_id="sector_rotation",
+        score=score,
+        signal=score_to_signal(score),
+        detail=(
+            f"Offensive/Defensive ratio vs SMA20: {pct_dev:+.1f}%, "
+            f"5d ROC: {roc_5d:+.2f}%"
+        ),
+        timestamp=datetime.utcnow(),
+        source="yfinance",
+        raw_data={
+            "xlk": float(xlk["close"].iloc[-1]),
+            "xly": float(xly["close"].iloc[-1]),
+            "xlp": float(xlp["close"].iloc[-1]),
+            "xlu": float(xlu["close"].iloc[-1]),
+            "ratio": current,
+            "sma20": sma_20,
+            "pct_dev": float(pct_dev),
+            "roc_5d": float(roc_5d),
+        },
+    )
+
+
+async def compute_score() -> Optional[FactorReading]:
+    return await compute_sector_rotation_score()

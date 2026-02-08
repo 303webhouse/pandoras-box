@@ -8,8 +8,10 @@ Provides endpoints for all macro bias filters including:
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 import logging
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +30,22 @@ try:
 except ImportError:
     SAVITA_AVAILABLE = False
     logger.warning("Savita indicator module not available")
+
+# Import composite bias engine
+try:
+    from bias_engine.composite import (
+        FACTOR_CONFIG,
+        compute_composite,
+        record_factor_reading,
+        get_cached_composite,
+        set_override,
+        clear_override
+    )
+    from database.redis_client import get_redis_client, sanitize_for_json
+    COMPOSITE_AVAILABLE = True
+except ImportError as e:
+    COMPOSITE_AVAILABLE = False
+    logger.warning(f"Composite bias engine not available: {e}")
 
 
 class SavitaUpdate(BaseModel):
@@ -258,3 +276,198 @@ async def get_all_bias_indicators():
         summary["overall_macro_bias"] = "UNKNOWN"
     
     return summary
+
+# ====================
+# COMPOSITE BIAS ENGINE
+# ====================
+
+VALID_BIAS_LEVELS = {
+    "URSA_MAJOR",
+    "URSA_MINOR",
+    "NEUTRAL",
+    "TORO_MINOR",
+    "TORO_MAJOR"
+}
+
+REDIS_PIVOT_HEALTH_KEY = "bias:pivot:health"
+REDIS_PIVOT_HEALTH_TTL = 86400
+
+
+class FactorUpdateRequest(BaseModel):
+    """Request model for updating a factor reading"""
+    factor_id: str
+    score: float
+    signal: Optional[str] = "NEUTRAL"
+    detail: Optional[str] = ""
+    source: Optional[str] = "unknown"
+    raw_data: Optional[Dict[str, Any]] = None
+    timestamp: Optional[datetime] = None
+
+
+class BiasOverrideRequest(BaseModel):
+    """Request model for manual bias override"""
+    level: str
+    reason: Optional[str] = None
+    expires_hours: Optional[int] = None
+
+
+class PivotHealthRequest(BaseModel):
+    """Request model for pivot health heartbeat"""
+    agent: Optional[str] = "pivot"
+    timestamp: Optional[datetime] = None
+
+
+@router.get("/bias/composite")
+async def get_composite_bias():
+    """Get the latest composite bias reading with factor breakdown"""
+    if not COMPOSITE_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Composite bias engine not available")
+
+    result = await get_cached_composite()
+    if not result:
+        result = await compute_composite()
+
+    return result.model_dump(mode="json")
+
+
+@router.post("/bias/factor-update")
+async def update_factor_reading(update: FactorUpdateRequest):
+    """Store a new factor reading and recompute composite bias"""
+    if not COMPOSITE_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Composite bias engine not available")
+
+    factor_id = update.factor_id.strip().lower()
+    if factor_id not in FACTOR_CONFIG:
+        raise HTTPException(status_code=400, detail=f"Unknown factor_id: {factor_id}")
+
+    if update.score < -1.0 or update.score > 1.0:
+        raise HTTPException(status_code=400, detail="Score must be between -1.0 and 1.0")
+
+    payload = update.model_dump(exclude_none=True)
+    payload["factor_id"] = factor_id
+
+    await record_factor_reading(payload)
+    result = await compute_composite()
+
+    return result.model_dump(mode="json")
+
+
+@router.post("/bias/override")
+async def set_bias_override(request: BiasOverrideRequest):
+    """Manually override composite bias"""
+    if not COMPOSITE_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Composite bias engine not available")
+
+    level = request.level.strip().upper()
+    if level not in VALID_BIAS_LEVELS:
+        raise HTTPException(status_code=400, detail="Invalid bias level")
+
+    await set_override(level=level, reason=request.reason, expires_hours=request.expires_hours)
+    result = await compute_composite()
+
+    return result.model_dump(mode="json")
+
+
+@router.delete("/bias/override")
+async def clear_bias_override():
+    """Clear any active manual bias override"""
+    if not COMPOSITE_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Composite bias engine not available")
+
+    await clear_override(reason="manual_clear")
+    result = await compute_composite()
+
+    return result.model_dump(mode="json")
+
+
+@router.get("/bias/history")
+async def get_bias_history(hours: int = 24):
+    """Get historical composite bias readings"""
+    if not COMPOSITE_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Composite bias engine not available")
+
+    if hours <= 0:
+        raise HTTPException(status_code=400, detail="Hours must be a positive integer")
+
+    from database.postgres_client import get_postgres_client, serialize_db_row
+
+    cutoff = datetime.utcnow() - timedelta(hours=hours)
+    pool = await get_postgres_client()
+
+    try:
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT
+                    composite_score,
+                    bias_level,
+                    bias_numeric,
+                    active_factors,
+                    stale_factors,
+                    velocity_multiplier,
+                    override,
+                    confidence,
+                    factor_scores,
+                    created_at
+                FROM bias_composite_history
+                WHERE created_at >= $1
+                ORDER BY created_at DESC
+                """,
+                cutoff
+            )
+    except Exception as e:
+        logger.warning(f"Error fetching composite bias history: {e}")
+        rows = []
+
+    history = [serialize_db_row(dict(row)) for row in rows]
+
+    return {
+        "hours": hours,
+        "count": len(history),
+        "history": history
+    }
+
+
+@router.post("/bias/health")
+async def update_pivot_health(payload: PivotHealthRequest):
+    """Store heartbeat from Pivot data collector"""
+    if not COMPOSITE_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Composite bias engine not available")
+
+    timestamp = payload.timestamp or datetime.utcnow()
+    data = {
+        "agent": payload.agent or "pivot",
+        "last_heartbeat": timestamp.isoformat(),
+    }
+
+    try:
+        client = await get_redis_client()
+        if client:
+            await client.setex(
+                REDIS_PIVOT_HEALTH_KEY,
+                REDIS_PIVOT_HEALTH_TTL,
+                json.dumps(sanitize_for_json(data)),
+            )
+    except Exception as e:
+        logger.warning(f"Failed to store pivot health: {e}")
+
+    return data
+
+
+@router.get("/bias/health")
+async def get_pivot_health():
+    """Read last Pivot heartbeat for UI health indicator"""
+    if not COMPOSITE_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Composite bias engine not available")
+
+    try:
+        client = await get_redis_client()
+        if not client:
+            return {"status": "unavailable", "last_heartbeat": None}
+        raw = await client.get(REDIS_PIVOT_HEALTH_KEY)
+        if not raw:
+            return {"status": "unknown", "last_heartbeat": None}
+        return json.loads(raw)
+    except Exception as e:
+        logger.warning(f"Failed to read pivot health: {e}")
+        return {"status": "unknown", "last_heartbeat": None}

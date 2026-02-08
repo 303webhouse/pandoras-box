@@ -9,6 +9,20 @@ const BACKEND_HOST = 'pandoras-box-production.up.railway.app';
 const WS_URL = `wss://${BACKEND_HOST}/ws`;
 const API_URL = `https://${BACKEND_HOST}/api`;
 
+const BIAS_COLORS = {
+    TORO_MAJOR: { bg: '#0a2e1a', accent: '#00e676', text: '#00e676' },
+    TORO_MINOR: { bg: '#1a2e1a', accent: '#66bb6a', text: '#66bb6a' },
+    NEUTRAL:    { bg: '#1a2228', accent: '#78909c', text: '#78909c' },
+    URSA_MINOR: { bg: '#2e1a0a', accent: '#ff9800', text: '#ff9800' },
+    URSA_MAJOR: { bg: '#2e0a0a', accent: '#f44336', text: '#f44336' },
+};
+
+const CONFIDENCE_COLORS = {
+    HIGH: '#00e676',
+    MEDIUM: '#ff9800',
+    LOW: '#f44336',
+};
+
 // State
 let ws = null;
 let tvWidget = null;
@@ -502,16 +516,21 @@ function handleWebSocketMessage(message) {
             refillTradeIdeas();
             break;
         case 'BIAS_UPDATE':
-            // Handle weekly bias updates with factor filtering
-            if (message.data.timeframe === 'weekly' || message.data.timeframe === 'WEEKLY') {
-                checkAndResetFactorsForNewDay(message.data);
-                weeklyBiasFullData = message.data;
-                updateWeeklyBiasWithFactors(message.data);
+            if (message.data && typeof message.data.bias_level !== 'undefined' && typeof message.data.composite_score !== 'undefined') {
+                renderCompositeBias(message.data);
+                flashCompositeBanner();
             } else {
-                updateBias(message.data);
+                // Handle weekly bias updates with factor filtering
+                if (message.data.timeframe === 'weekly' || message.data.timeframe === 'WEEKLY') {
+                    checkAndResetFactorsForNewDay(message.data);
+                    weeklyBiasFullData = message.data;
+                    updateWeeklyBiasWithFactors(message.data);
+                } else {
+                    updateBias(message.data);
+                }
+                // Also refresh shift status when bias updates
+                fetchBiasShiftStatus();
             }
-            // Also refresh shift status when bias updates
-            fetchBiasShiftStatus();
             break;
         case 'POSITION_UPDATE':
             updatePosition(message.data);
@@ -746,6 +765,8 @@ function initEventListeners() {
     document.getElementById('refreshBtn').addEventListener('click', () => {
         loadSignals();
         loadBiasData();
+        fetchCompositeBias();
+        checkPivotHealth();
     });
 
     // Mode switcher
@@ -783,9 +804,9 @@ function initEventListeners() {
     
     // Savita Update Modal
     initSavitaUpdateModal();
-    
-    // Personal Bias & Override Controls
-    initPersonalBiasControls();
+
+    // Composite Bias Controls
+    initCompositeBiasControls();
 }
 
 // Data Loading
@@ -793,6 +814,7 @@ async function loadInitialData() {
     await Promise.all([
         loadSignals(),
         loadBiasData(),
+        fetchCompositeBias(),
         loadOpenPositions()
     ]);
 
@@ -803,6 +825,10 @@ async function loadInitialData() {
     setInterval(() => {
         fetchBiasShiftStatus();
     }, 5 * 60 * 1000); // 5 minutes
+
+    // Pivot health checks
+    checkPivotHealth();
+    setInterval(checkPivotHealth, 5 * 60 * 1000);
 }
 
 function initCryptoScalper() {
@@ -962,6 +988,252 @@ async function loadBiasData() {
 
     renderCryptoBiasSummary();
 }
+
+
+async function fetchCompositeBias() {
+    try {
+        const resp = await fetch(`${API_URL}/bias/composite`);
+        const data = await resp.json();
+        renderCompositeBias(data);
+    } catch (err) {
+        console.error('Failed to fetch composite bias:', err);
+        showCompositeError();
+    }
+}
+
+function showCompositeError() {
+    const levelEl = document.getElementById('compositeBiasLevel');
+    const scoreEl = document.getElementById('compositeBiasScore');
+    const confEl = document.getElementById('compositeConfidence');
+    const lastUpdateEl = document.getElementById('compositeLastUpdate');
+
+    if (levelEl) levelEl.textContent = 'UNKNOWN';
+    if (scoreEl) scoreEl.textContent = '(--)';
+    if (confEl) confEl.textContent = 'LOW';
+    if (lastUpdateEl) lastUpdateEl.textContent = 'Last update: --';
+}
+
+function renderCompositeBias(data) {
+    if (!data) return;
+
+    const banner = document.getElementById('compositeBiasBanner');
+    const levelEl = document.getElementById('compositeBiasLevel');
+    const scoreEl = document.getElementById('compositeBiasScore');
+    const confEl = document.getElementById('compositeConfidence');
+    const overrideEl = document.getElementById('compositeOverrideIndicator');
+    const factorList = document.getElementById('compositeFactorList');
+    const activeCountEl = document.getElementById('factorActiveCount');
+    const lastUpdateEl = document.getElementById('compositeLastUpdate');
+
+    const biasLevel = data.bias_level || 'NEUTRAL';
+    const scoreValue = typeof data.composite_score === 'number'
+        ? data.composite_score
+        : parseFloat(data.composite_score || 0);
+    const colors = BIAS_COLORS[biasLevel] || BIAS_COLORS.NEUTRAL;
+
+    if (banner) {
+        banner.style.background = colors.bg;
+        banner.style.borderColor = colors.accent;
+    }
+    if (levelEl) {
+        levelEl.textContent = biasLevel.replace(/_/g, ' ');
+        levelEl.style.color = colors.accent;
+    }
+    if (scoreEl) {
+        const scoreText = Number.isFinite(scoreValue) ? scoreValue.toFixed(2) : '--';
+        scoreEl.textContent = `(${scoreText})`;
+    }
+    if (confEl) {
+        const confidence = (data.confidence || 'LOW').toUpperCase();
+        confEl.textContent = confidence;
+        confEl.style.color = CONFIDENCE_COLORS[confidence] || CONFIDENCE_COLORS.LOW;
+    }
+
+    if (overrideEl) {
+        if (data.override) {
+            overrideEl.style.display = 'block';
+            overrideEl.textContent = `Override active: ${data.override.replace(/_/g, ' ')}`;
+        } else {
+            overrideEl.style.display = 'none';
+        }
+    }
+
+    if (factorList) {
+        const factorOrder = [
+            'credit_spreads', 'market_breadth', 'vix_term', 'tick_breadth',
+            'sector_rotation', 'dollar_smile', 'excess_cape', 'savita'
+        ];
+        const activeSet = new Set(data.active_factors || []);
+        const staleSet = new Set(data.stale_factors || []);
+
+        factorList.innerHTML = '';
+
+        factorOrder.forEach((factorId) => {
+            const factor = data.factors ? data.factors[factorId] : null;
+            const isActive = activeSet.has(factorId);
+            const isStale = staleSet.has(factorId) || !isActive;
+            const score = factor && typeof factor.score === 'number' ? factor.score : null;
+            const barPct = score !== null ? Math.min(100, Math.abs(score) * 100) : 0;
+
+            const barColor = score === null ? '#455a64'
+                : score <= -0.6 ? '#f44336'
+                : score <= -0.2 ? '#ff9800'
+                : score >= 0.6 ? '#00e676'
+                : score >= 0.2 ? '#66bb6a' : '#78909c';
+
+            const row = document.createElement('div');
+            row.className = `factor-row${isStale ? ' stale' : ''}`;
+            row.innerHTML = `
+                <span class="factor-status">${isActive ? 'o' : '-'}</span>
+                <span class="factor-name">${formatFactorName(factorId)}</span>
+                <div class="factor-bar">
+                    <div class="factor-bar-fill" style="width:${barPct}%;background:${barColor}"></div>
+                </div>
+                <span class="factor-score">${score !== null && isActive ? score.toFixed(2) : 'STALE'}</span>
+                <span class="factor-signal" style="color:${barColor}">${score !== null && isActive ? (factor.signal || '').replace(/_/g, ' ') : '?'}</span>
+            `;
+
+            if (factor && factor.detail) {
+                row.title = factor.detail;
+                row.style.cursor = 'pointer';
+                row.addEventListener('click', () => {
+                    const existing = row.querySelector('.factor-detail');
+                    if (existing) {
+                        existing.remove();
+                    } else {
+                        const detail = document.createElement('div');
+                        detail.className = 'factor-detail';
+                        detail.textContent = factor.detail;
+                        row.appendChild(detail);
+                    }
+                });
+            }
+
+            factorList.appendChild(row);
+        });
+
+        if (activeCountEl) {
+            const activeCount = (data.active_factors || []).length;
+            activeCountEl.textContent = `${activeCount}/8 active`;
+        }
+    }
+
+    if (lastUpdateEl && data.timestamp) {
+        const timeAgo = getTimeAgo(new Date(data.timestamp));
+        lastUpdateEl.textContent = `Last update: ${timeAgo}`;
+    }
+}
+
+function initCompositeBiasControls() {
+    const toggle = document.getElementById('factorBreakdownToggle');
+    const list = document.getElementById('compositeFactorList');
+    const caret = toggle ? toggle.querySelector('.factor-breakdown-caret') : null;
+
+    if (toggle && list) {
+        toggle.addEventListener('click', () => {
+            const isOpen = list.style.display !== 'none';
+            list.style.display = isOpen ? 'none' : 'flex';
+            if (caret) caret.textContent = isOpen ? '>' : 'v';
+        });
+    }
+
+    const applyBtn = document.getElementById('compositeOverrideApply');
+    const clearBtn = document.getElementById('compositeOverrideClear');
+    const selectEl = document.getElementById('compositeOverrideSelect');
+
+    if (applyBtn && selectEl) {
+        applyBtn.addEventListener('click', async () => {
+            const level = selectEl.value;
+            if (!level) return;
+            const reason = prompt('Reason for override?');
+            if (!reason) return;
+
+            await fetch(`${API_URL}/bias/override`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    level,
+                    reason,
+                    expires_hours: 24,
+                })
+            });
+
+            fetchCompositeBias();
+        });
+    }
+
+    if (clearBtn) {
+        clearBtn.addEventListener('click', async () => {
+            await fetch(`${API_URL}/bias/override`, { method: 'DELETE' });
+            fetchCompositeBias();
+        });
+    }
+}
+
+function checkPivotHealth() {
+    const indicator = document.getElementById('pivotHealth');
+    if (!indicator) return;
+    const dot = indicator.querySelector('.pivot-dot');
+    const textEl = indicator.querySelector('.pivot-text');
+
+    fetch(`${API_URL}/bias/health`)
+        .then(resp => resp.ok ? resp.json() : null)
+        .then(data => {
+            if (!data || !data.last_heartbeat) {
+                indicator.classList.remove('online', 'offline');
+                if (dot) dot.textContent = 'o';
+                if (textEl) textEl.textContent = 'Pivot unknown';
+                return;
+            }
+
+            const lastHeartbeat = new Date(data.last_heartbeat);
+            const minutesAgo = (Date.now() - lastHeartbeat.getTime()) / 60000;
+
+            if (minutesAgo < 30) {
+                indicator.classList.add('online');
+                indicator.classList.remove('offline');
+                if (dot) dot.textContent = 'o';
+                if (textEl) textEl.textContent = 'Pivot live';
+            } else {
+                indicator.classList.add('offline');
+                indicator.classList.remove('online');
+                if (dot) dot.textContent = 'o';
+                if (textEl) textEl.textContent = `Pivot offline (${Math.round(minutesAgo)}m)`;
+            }
+        })
+        .catch(() => {
+            indicator.classList.remove('online', 'offline');
+            if (dot) dot.textContent = 'o';
+            if (textEl) textEl.textContent = 'Pivot unknown';
+        });
+}
+
+function formatFactorName(factorId) {
+    return factorId
+        .split('_')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' ');
+}
+
+function getTimeAgo(date) {
+    if (!date || Number.isNaN(date.getTime())) return '--';
+    const diffMs = Date.now() - date.getTime();
+    const diffMin = Math.floor(diffMs / 60000);
+    if (diffMin < 1) return 'just now';
+    if (diffMin < 60) return `${diffMin}m ago`;
+    const diffHr = Math.floor(diffMin / 60);
+    if (diffHr < 24) return `${diffHr}h ago`;
+    const diffDay = Math.floor(diffHr / 24);
+    return `${diffDay}d ago`;
+}
+
+function flashCompositeBanner() {
+    const banner = document.getElementById('compositeBiasBanner');
+    if (!banner) return;
+    banner.classList.add('flash');
+    setTimeout(() => banner.classList.remove('flash'), 1500);
+}
+
 
 // Display effective bias when hierarchical modifier is applied
 function updateEffectiveBias(timeframe, rawLevel, effectiveLevel, modifierDetails) {
@@ -3295,6 +3567,20 @@ document.addEventListener('DOMContentLoaded', () => {
 // WATCHLIST MANAGEMENT
 // ==========================================
 
+let watchlistViewMode = 'sectors';
+let watchlistRefreshInterval = null;
+let watchlistLastData = null;
+
+const ZONE_COLORS = {
+    MAX_LONG: { bg: '#0a2e1a', text: '#00e676' },
+    LEVERAGED_LONG: { bg: '#0a2e2a', text: '#4caf50' },
+    DE_LEVERAGING: { bg: '#2e2e0a', text: '#ffeb3b' },
+    WATERFALL: { bg: '#2e1a0a', text: '#ff9800' },
+    CAPITULATION: { bg: '#2e0a0a', text: '#f44336' },
+    RECOVERY: { bg: '#0a1a2e', text: '#42a5f5' },
+    NEUTRAL: { bg: '#1a2228', text: '#78909c' }
+};
+
 let watchlistTickers = [];
 
 function initWatchlist() {
@@ -3318,14 +3604,19 @@ function initWatchlist() {
         resetBtn.addEventListener('click', resetWatchlist);
     }
     
-    // Load current watchlist
-    loadWatchlist();
+    // Load enriched watchlist UI
+    initWatchlistV2();
 }
 
 let watchlistSectors = {};
 let sectorStrength = {};
 
 async function loadWatchlist() {
+    const grid = document.getElementById('watchlist-grid');
+    if (grid) {
+        await fetchEnrichedWatchlist();
+        return;
+    }
     try {
         const response = await fetch(`${API_URL}/watchlist`);
         const data = await response.json();
@@ -3338,12 +3629,350 @@ async function loadWatchlist() {
         }
     } catch (error) {
         console.error('Error loading watchlist:', error);
-        document.getElementById('watchlistTickers').innerHTML = 
-            '<p class="empty-state">Failed to load watchlist</p>';
+        const container = document.getElementById('watchlistTickers');
+        if (container) {
+            container.innerHTML = '<p class="empty-state">Failed to load watchlist</p>';
+        }
+    }
+}
+
+async function fetchEnrichedWatchlist() {
+    const grid = document.getElementById('watchlist-grid');
+    if (!grid) return;
+
+    const sortSelect = document.getElementById('watchlist-sort');
+    const sortBy = sortSelect ? sortSelect.value : 'strength_rank';
+
+    try {
+        let url;
+        if (watchlistViewMode === 'flat') {
+            url = `${API_URL}/watchlist/flat?sort_by=${sortBy}&sort_dir=desc`;
+        } else {
+            url = `${API_URL}/watchlist/enriched?sort_by=${sortBy}`;
+        }
+
+        if (!watchlistLastData) {
+            grid.innerHTML = '<div class="watchlist-loading">Loading watchlist data...</div>';
+        }
+
+        const response = await fetch(url);
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+        if (data.status === 'success') {
+            watchlistLastData = data;
+            if (watchlistViewMode === 'flat') {
+                renderFlatWatchlist(data);
+            } else {
+                renderSectorWatchlist(data);
+            }
+            renderBenchmark(data.benchmark);
+            updateEnrichedTimestamp(data.enriched_at);
+        } else {
+            throw new Error(data.message || 'Unknown error');
+        }
+    } catch (error) {
+        console.error('Watchlist fetch failed:', error);
+        grid.innerHTML = `
+            <div class="watchlist-error">
+                Failed to load watchlist data<br>
+                <span style="font-size:11px;color:#78909c">${error.message}</span>
+            </div>
+        `;
+    }
+}
+
+function renderSectorWatchlist(data) {
+    const grid = document.getElementById('watchlist-grid');
+    if (!grid) return;
+    grid.innerHTML = '';
+
+    const sectors = data.sectors || [];
+    if (sectors.length === 0) {
+        grid.innerHTML = '<div class="watchlist-loading">No sectors configured</div>';
+        return;
+    }
+
+    sectors.forEach(sector => {
+        const card = document.createElement('div');
+        card.className = 'sector-card';
+
+        const vsSpy1w = sector.vs_spy_1w;
+        const vsSpyPositive = (vsSpy1w || 0) >= 0;
+        const vsSpyColor = vsSpyPositive ? '#00e676' : '#f44336';
+        const headerBg = vsSpyPositive ? '#0a2e1a' : '#2e0a0a';
+        const biasColor = sector.bias_alignment === 'TORO' ? '#00e676'
+            : sector.bias_alignment === 'URSA' ? '#f44336'
+                : '#78909c';
+
+        let etfHtml = '';
+        if (sector.etf && sector.etf_change_1w !== null && sector.etf_change_1w !== undefined) {
+            etfHtml = `
+                <span class="sector-etf" style="color:${vsSpyColor}">
+                    ${escapeHtml(sector.etf)} ${formatChange(sector.etf_change_1w)}/1w
+                </span>
+            `;
+        }
+
+        let vsSpyHtml = '';
+        if (vsSpy1w !== null && vsSpy1w !== undefined) {
+            vsSpyHtml = `
+                <span class="sector-vs-spy" style="color:${vsSpyColor};background:${vsSpyColor}18">
+                    vs SPY: ${formatChange(vsSpy1w)}
+                </span>
+            `;
+        }
+
+        const headerHTML = `
+            <div class="sector-header" style="background:${headerBg}">
+                <div class="sector-title-row">
+                    <span class="sector-name">${escapeHtml(sector.name)}</span>
+                    ${etfHtml}
+                    ${vsSpyHtml}
+                </div>
+                <div class="sector-meta">
+                    <span class="sector-bias" style="color:${biasColor}">
+                        ${sector.bias_alignment || '-'}
+                    </span>
+                    <span class="sector-rank">
+                        ${sector.strength_rank < 999 ? '#' + sector.strength_rank : '-'}
+                    </span>
+                </div>
+            </div>
+        `;
+
+        let tableHTML = `
+            <div class="ticker-header-row">
+                <span class="col-ticker">Ticker</span>
+                <span class="col-price">Price</span>
+                <span class="col-1d">1D</span>
+                <span class="col-1w">1W</span>
+                <span class="col-zone">Zone</span>
+                <span class="col-signals">Sigs</span>
+            </div>
+        `;
+
+        const tickers = sector.tickers || [];
+        tickers.forEach(t => {
+            const zoneStyle = ZONE_COLORS[t.cta_zone] || ZONE_COLORS.NEUTRAL;
+            const zoneLabel = t.cta_zone ? t.cta_zone.replace(/_/g, ' ').substring(0, 9) : '-';
+            const signalDisplay = t.active_signals > 0
+                ? `<span class="signal-active">&#9889;${t.active_signals}</span>`
+                : '<span class="signal-none">-</span>';
+
+            tableHTML += `
+                <div class="ticker-row" data-symbol="${escapeHtml(t.symbol)}"
+                     onclick="openTickerChart('${escapeHtml(t.symbol)}')">
+                    <span class="col-ticker ticker-symbol">${escapeHtml(t.symbol)}</span>
+                    <span class="col-price">
+                        ${t.price !== null && t.price !== undefined ? '$' + t.price.toFixed(2) : '-'}
+                    </span>
+                    <span class="col-1d" style="color:${changeColor(t.change_1d)}">
+                        ${formatChange(t.change_1d)}
+                    </span>
+                    <span class="col-1w" style="color:${changeColor(t.change_1w)}">
+                        ${formatChange(t.change_1w)}
+                    </span>
+                    <span class="col-zone">
+                        <span class="zone-badge" style="background:${zoneStyle.bg};color:${zoneStyle.text}">
+                            ${zoneLabel}
+                        </span>
+                    </span>
+                    <span class="col-signals">${signalDisplay}</span>
+                </div>
+            `;
+        });
+
+        card.innerHTML = headerHTML + tableHTML;
+        grid.appendChild(card);
+    });
+}
+
+function renderFlatWatchlist(data) {
+    const grid = document.getElementById('watchlist-grid');
+    if (!grid) return;
+    grid.innerHTML = '';
+
+    const tickers = data.tickers || [];
+    if (tickers.length === 0) {
+        grid.innerHTML = '<div class="watchlist-loading">No tickers found</div>';
+        return;
+    }
+
+    const table = document.createElement('div');
+    table.className = 'flat-watchlist';
+
+    table.innerHTML = `
+        <div class="ticker-header-row flat-header">
+            <span class="col-ticker">Ticker</span>
+            <span class="col-sector">Sector</span>
+            <span class="col-price">Price</span>
+            <span class="col-1d">1D</span>
+            <span class="col-1w">1W</span>
+            <span class="col-zone">Zone</span>
+            <span class="col-signals">Sigs</span>
+        </div>
+    `;
+
+    tickers.forEach(t => {
+        const zoneStyle = ZONE_COLORS[t.cta_zone] || ZONE_COLORS.NEUTRAL;
+        const zoneLabel = t.cta_zone ? t.cta_zone.replace(/_/g, ' ').substring(0, 9) : '-';
+        const signalDisplay = t.active_signals > 0
+            ? `<span class="signal-active">&#9889;${t.active_signals}</span>`
+            : '<span class="signal-none">-</span>';
+
+        const row = document.createElement('div');
+        row.className = 'ticker-row';
+        row.setAttribute('data-symbol', t.symbol);
+        row.onclick = function() { openTickerChart(t.symbol); };
+        row.innerHTML = `
+            <span class="col-ticker ticker-symbol">${escapeHtml(t.symbol)}</span>
+            <span class="col-sector">${escapeHtml(t.sector || '-')}</span>
+            <span class="col-price">
+                ${t.price !== null && t.price !== undefined ? '$' + t.price.toFixed(2) : '-'}
+            </span>
+            <span class="col-1d" style="color:${changeColor(t.change_1d)}">
+                ${formatChange(t.change_1d)}
+            </span>
+            <span class="col-1w" style="color:${changeColor(t.change_1w)}">
+                ${formatChange(t.change_1w)}
+            </span>
+            <span class="col-zone">
+                <span class="zone-badge" style="background:${zoneStyle.bg};color:${zoneStyle.text}">
+                    ${zoneLabel}
+                </span>
+            </span>
+            <span class="col-signals">${signalDisplay}</span>
+        `;
+        table.appendChild(row);
+    });
+
+    grid.appendChild(table);
+}
+
+function formatChange(val) {
+    if (val === null || val === undefined) return '-';
+    const sign = val > 0 ? '+' : '';
+    return `${sign}${val.toFixed(1)}%`;
+}
+
+function changeColor(val) {
+    if (val === null || val === undefined) return '#78909c';
+    return val >= 0 ? '#00e676' : '#f44336';
+}
+
+function renderBenchmark(benchmark) {
+    const el = document.getElementById('watchlist-benchmark');
+    if (!el || !benchmark) return;
+
+    const priceStr = benchmark.price !== null && benchmark.price !== undefined
+        ? '$' + benchmark.price.toFixed(2) : '-';
+
+    el.innerHTML = `
+        <span class="benchmark-label">${escapeHtml(benchmark.symbol || 'SPY')}</span>
+        <span class="benchmark-price">${priceStr}</span>
+        <span style="color:${changeColor(benchmark.change_1d)};font-weight:600">
+            ${formatChange(benchmark.change_1d)}
+        </span>
+    `;
+}
+
+function updateEnrichedTimestamp(isoString) {
+    const el = document.getElementById('watchlist-enriched-at');
+    if (!el) return;
+    if (!isoString) {
+        el.textContent = '';
+        return;
+    }
+    try {
+        const date = new Date(isoString);
+        el.textContent = `Updated: ${date.toLocaleTimeString()}`;
+    } catch {
+        el.textContent = '';
+    }
+}
+
+function openTickerChart(symbol) {
+    if (typeof changeChartSymbol === 'function') {
+        changeChartSymbol(symbol);
+        return;
+    }
+    if (typeof tvWidget !== 'undefined' && tvWidget.setSymbol) {
+        tvWidget.setSymbol(symbol, '1D');
+        return;
+    }
+    window.open(`https://www.tradingview.com/chart/?symbol=${encodeURIComponent(symbol)}`, '_blank');
+}
+
+function escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
+function initWatchlistV2() {
+    const grid = document.getElementById('watchlist-grid');
+    if (!grid) return;
+    if (grid.dataset.init === 'true') {
+        fetchEnrichedWatchlist();
+        return;
+    }
+    grid.dataset.init = 'true';
+
+    const sortSelect = document.getElementById('watchlist-sort');
+    if (sortSelect) {
+        sortSelect.addEventListener('change', () => {
+            fetchEnrichedWatchlist();
+        });
+    }
+
+    const toggleBtn = document.getElementById('watchlist-view-toggle');
+    if (toggleBtn) {
+        toggleBtn.addEventListener('click', () => {
+            watchlistViewMode = watchlistViewMode === 'sectors' ? 'flat' : 'sectors';
+            toggleBtn.textContent = watchlistViewMode === 'sectors' ? '\u2630' : '\u229E';
+            toggleBtn.title = watchlistViewMode === 'sectors'
+                ? 'Switch to flat view' : 'Switch to sector view';
+            fetchEnrichedWatchlist();
+        });
+    }
+
+    const refreshBtn = document.getElementById('watchlist-refresh');
+    if (refreshBtn) {
+        refreshBtn.addEventListener('click', () => {
+            watchlistLastData = null;
+            fetchEnrichedWatchlist();
+        });
+    }
+
+    fetchEnrichedWatchlist();
+    startWatchlistRefresh();
+}
+
+function startWatchlistRefresh() {
+    stopWatchlistRefresh();
+    watchlistRefreshInterval = setInterval(fetchEnrichedWatchlist, 60000);
+}
+
+function stopWatchlistRefresh() {
+    if (watchlistRefreshInterval) {
+        clearInterval(watchlistRefreshInterval);
+        watchlistRefreshInterval = null;
     }
 }
 
 async function renderWatchlist() {
+    const enrichedGrid = document.getElementById('watchlist-grid');
+    if (enrichedGrid) {
+        fetchEnrichedWatchlist();
+        return;
+    }
+
     const container = document.getElementById('watchlistTickers');
     const countEl = document.getElementById('watchlistCount');
 
@@ -3469,9 +4098,10 @@ function removeFromWatchlist(ticker) {
     removeTickerFromWatchlist(ticker);
 }
 
-async function addTickerToWatchlist() {
+async function addTickerToWatchlist(tickerOverride) {
     const input = document.getElementById('addTickerInput');
-    const ticker = input.value.trim().toUpperCase();
+    const rawTicker = tickerOverride || (input ? input.value : '');
+    const ticker = rawTicker.trim().toUpperCase();
     
     if (!ticker) return;
     
@@ -3487,7 +4117,7 @@ async function addTickerToWatchlist() {
         if (data.status === 'success' || data.status === 'already_exists') {
             watchlistTickers = data.tickers;
             renderWatchlist();
-            input.value = '';
+            if (input) input.value = '';
         }
     } catch (error) {
         console.error('Error adding ticker:', error);
@@ -4688,7 +5318,7 @@ async function analyzeTickerEnhanced(ticker) {
 
         if (addWatchlistBtn) {
             addWatchlistBtn.onclick = () => {
-                addTickerToWatchlist();
+                addTickerToWatchlist(ticker);
             };
         }
 

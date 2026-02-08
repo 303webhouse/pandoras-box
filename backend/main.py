@@ -40,6 +40,14 @@ async def lifespan(app: FastAPI):
         await init_database()
     except Exception as e:
         logger.warning(f"⚠️ Could not initialize database schema: {e}")
+
+    # Initialize watchlist config table
+    try:
+        from api.watchlist import init_watchlist_table
+        await init_watchlist_table()
+        logger.info("✅ Watchlist table ready")
+    except Exception as e:
+        logger.warning(f"⚠️ Could not initialize watchlist table: {e}")
     
     logger.info("✅ Database connections established")
     

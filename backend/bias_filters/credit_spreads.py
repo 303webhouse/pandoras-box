@@ -18,9 +18,12 @@ Update Frequency: Weekly (every Monday)
 """
 
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from datetime import datetime
 from enum import Enum
+
+from bias_engine.composite import FactorReading
+from bias_engine.factor_utils import score_to_signal, get_price_history
 
 logger = logging.getLogger(__name__)
 
@@ -171,3 +174,71 @@ def get_bias_for_scoring() -> Dict[str, Any]:
         "allows_shorts": level <= 3,
         "last_updated": _credit_spread_state.get("last_updated")
     }
+
+
+async def compute_credit_spread_score() -> Optional[FactorReading]:
+    """
+    Compute HYG/TLT ratio vs its 20-day SMA.
+    Bearish when ratio is falling (HYG underperforming TLT).
+    """
+    hyg = await get_price_history("HYG", days=30)
+    tlt = await get_price_history("TLT", days=30)
+
+    if hyg is None or tlt is None or hyg.empty or tlt.empty:
+        return None
+    if "close" not in hyg.columns or "close" not in tlt.columns:
+        return None
+
+    ratio = (hyg["close"] / tlt["close"]).dropna()
+    if len(ratio) < 20:
+        return None
+
+    current_ratio = float(ratio.iloc[-1])
+    sma_20 = float(ratio.rolling(20).mean().iloc[-1])
+    if sma_20 == 0:
+        return None
+
+    pct_dev = (current_ratio - sma_20) / sma_20 * 100
+
+    if len(ratio) >= 5 and ratio.iloc[-5] != 0:
+        roc_5d = (current_ratio - float(ratio.iloc[-5])) / float(ratio.iloc[-5]) * 100
+    else:
+        roc_5d = 0.0
+
+    if pct_dev >= 2.0:
+        base = 0.8
+    elif pct_dev >= 1.0:
+        base = 0.4
+    elif pct_dev >= -1.0:
+        base = 0.0
+    elif pct_dev >= -2.0:
+        base = -0.4
+    else:
+        base = -0.8
+
+    roc_modifier = max(-0.2, min(0.2, roc_5d * 0.1))
+    score = max(-1.0, min(1.0, base + roc_modifier))
+
+    return FactorReading(
+        factor_id="credit_spreads",
+        score=score,
+        signal=score_to_signal(score),
+        detail=(
+            f"HYG/TLT ratio {current_ratio:.3f} vs SMA20 {sma_20:.3f} "
+            f"({pct_dev:+.1f}%), 5d ROC: {roc_5d:+.2f}%"
+        ),
+        timestamp=datetime.utcnow(),
+        source="yfinance",
+        raw_data={
+            "hyg": float(hyg["close"].iloc[-1]),
+            "tlt": float(tlt["close"].iloc[-1]),
+            "ratio": current_ratio,
+            "sma20": sma_20,
+            "pct_dev": float(pct_dev),
+            "roc_5d": float(roc_5d),
+        },
+    )
+
+
+async def compute_score() -> Optional[FactorReading]:
+    return await compute_credit_spread_score()

@@ -20,9 +20,12 @@ Note: If VIX3M is unavailable, we fall back to comparing VIX level alone.
 """
 
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from datetime import datetime
 from enum import Enum
+
+from bias_engine.composite import FactorReading
+from bias_engine.factor_utils import score_to_signal, get_latest_price, neutral_reading
 
 logger = logging.getLogger(__name__)
 
@@ -220,3 +223,68 @@ def get_bias_for_scoring() -> Dict[str, Any]:
         "allows_shorts": level <= 3,
         "last_updated": _vix_term_state.get("last_updated")
     }
+
+
+async def compute_vix_term_score() -> Optional[FactorReading]:
+    """
+    VIX / VIX3M ratio.
+    Backwardation (ratio > 1.0) = bearish.
+    Contango (ratio < 0.85) = bullish.
+    Also factors in absolute VIX level.
+    """
+    vix = await get_latest_price("^VIX")
+    vix3m = await get_latest_price("^VIX3M")
+
+    if vix is None:
+        return None
+    if not vix3m:
+        return neutral_reading("vix_term", "VIX3M data unavailable", source="yfinance")
+
+    ratio = vix / vix3m
+
+    if ratio >= 1.10:
+        term_score = -1.0
+    elif ratio >= 1.0:
+        term_score = -0.6
+    elif ratio >= 0.95:
+        term_score = -0.2
+    elif ratio >= 0.85:
+        term_score = 0.2
+    else:
+        term_score = 0.6
+
+    if vix >= 30:
+        level_mod = -0.3
+    elif vix >= 25:
+        level_mod = -0.2
+    elif vix >= 20:
+        level_mod = -0.1
+    elif vix <= 12:
+        level_mod = 0.1
+    else:
+        level_mod = 0.0
+
+    score = max(-1.0, min(1.0, term_score + level_mod))
+
+    return FactorReading(
+        factor_id="vix_term",
+        score=score,
+        signal=score_to_signal(score),
+        detail=(
+            f"VIX {vix:.1f} / VIX3M {vix3m:.1f} = {ratio:.3f} "
+            f"({'backwardation' if ratio > 1 else 'contango'})"
+        ),
+        timestamp=datetime.utcnow(),
+        source="yfinance",
+        raw_data={
+            "vix": float(vix),
+            "vix3m": float(vix3m),
+            "ratio": float(ratio),
+            "term_score": float(term_score),
+            "level_mod": float(level_mod),
+        },
+    )
+
+
+async def compute_score() -> Optional[FactorReading]:
+    return await compute_vix_term_score()

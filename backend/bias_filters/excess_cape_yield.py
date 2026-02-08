@@ -27,6 +27,9 @@ import os
 from typing import Dict, Any, Optional
 from datetime import datetime
 
+from bias_engine.composite import FactorReading
+from bias_engine.factor_utils import score_to_signal, get_latest_price
+
 logger = logging.getLogger(__name__)
 
 # ECY Configuration
@@ -229,3 +232,54 @@ def set_ecy_enabled(enabled: bool) -> None:
     """Enable or disable the ECY indicator"""
     ECY_CONFIG["enabled"] = enabled
     logger.info(f"ECY Indicator {'enabled' if enabled else 'disabled'}")
+
+
+async def compute_excess_cape_score() -> Optional[FactorReading]:
+    """
+    Excess CAPE Yield = (1/CAPE) - 10Y nominal yield.
+    Lower = more expensive = more risky.
+    """
+    cape = ECY_CONFIG.get("cape")
+    if not cape or cape <= 0:
+        return None
+
+    ten_year_raw = await get_latest_price("^TNX")
+    if ten_year_raw is None:
+        return None
+
+    ten_year = ten_year_raw / 100
+    cape_ey = 1.0 / cape
+    ecy = (cape_ey - ten_year) * 100
+
+    if ecy >= 3.0:
+        score = 0.6
+    elif ecy >= 2.0:
+        score = 0.3
+    elif ecy >= 1.0:
+        score = 0.0
+    elif ecy >= 0.0:
+        score = -0.4
+    else:
+        score = -0.8
+
+    return FactorReading(
+        factor_id="excess_cape",
+        score=score,
+        signal=score_to_signal(score),
+        detail=(
+            f"CAPE: {cape:.1f}, Earnings Yield: {cape_ey*100:.1f}%, "
+            f"10Y: {ten_year*100:.1f}%, ECY: {ecy:.1f}%"
+        ),
+        timestamp=datetime.utcnow(),
+        source="mixed",
+        raw_data={
+            "cape": float(cape),
+            "earnings_yield": float(cape_ey),
+            "ten_year": float(ten_year),
+            "ecy": float(ecy),
+        },
+    )
+
+
+async def compute_score() -> Optional[FactorReading]:
+    return await compute_excess_cape_score()
