@@ -9,7 +9,10 @@ import json
 
 from pydantic import BaseModel
 
-from backend.utils.pivot_auth import verify_pivot_key
+try:
+    from utils.pivot_auth import verify_pivot_key
+except ModuleNotFoundError:
+    from backend.utils.pivot_auth import verify_pivot_key
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
