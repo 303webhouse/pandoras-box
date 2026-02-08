@@ -22,7 +22,10 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-from backend.utils.pivot_auth import verify_pivot_key
+try:
+    from utils.pivot_auth import verify_pivot_key
+except ModuleNotFoundError:
+    from backend.utils.pivot_auth import verify_pivot_key
 
 # Watchlist storage path
 WATCHLIST_FILE = os.path.join(os.path.dirname(__file__), "..", "..", "data", "watchlist.json")
