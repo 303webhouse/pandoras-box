@@ -2,12 +2,28 @@
 Alerts API - Black Swan and Earnings Alerts
 """
 
-from fastapi import APIRouter, Query
-from typing import List, Dict, Any
+from fastapi import APIRouter, Query, Depends
+from typing import List, Dict, Any, Optional
 import logging
+import json
+
+from pydantic import BaseModel
+
+from utils.pivot_auth import verify_pivot_key
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+PIVOT_ALERTS_KEY = "pivot:alerts"
+PIVOT_ALERTS_MAX = 100
+
+
+class PivotAlertRequest(BaseModel):
+    """Pivot alert payload"""
+    type: str = "anomaly"
+    message: str
+    timestamp: Optional[str] = None
+    data: Optional[Dict[str, Any]] = None
 
 
 @router.get("/alerts/black-swan")
@@ -41,6 +57,26 @@ async def get_black_swan_alerts():
             "detail": str(e),
             "alerts": []
         }
+
+
+@router.post("/alerts/pivot")
+async def receive_pivot_alert(payload: PivotAlertRequest, _: str = Depends(verify_pivot_key)):
+    """Store Pivot anomaly alerts for dashboard display."""
+    try:
+        from database.redis_client import get_redis_client, sanitize_for_json
+
+        client = await get_redis_client()
+        if not client:
+            return {"status": "error", "detail": "Redis unavailable"}
+
+        record = sanitize_for_json(payload.model_dump())
+        await client.lpush(PIVOT_ALERTS_KEY, json.dumps(record))
+        await client.ltrim(PIVOT_ALERTS_KEY, 0, PIVOT_ALERTS_MAX - 1)
+
+        return {"status": "received"}
+    except Exception as e:
+        logger.error(f"Error storing Pivot alert: {e}")
+        return {"status": "error", "detail": str(e)}
 
 
 @router.get("/alerts/earnings/{ticker}")

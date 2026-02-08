@@ -2210,10 +2210,14 @@ async def scan_sector_strength():
         
         # Update watchlist with sector strength
         try:
+            pivot_key = os.getenv("PIVOT_API_KEY")
+            headers = {"Authorization": f"Bearer {pivot_key}"} if pivot_key else None
+
             async with httpx.AsyncClient() as client:
                 response = await client.post(
                     "http://localhost:8000/api/watchlist/sector-strength",
                     json={"sector_strength": sector_scores},
+                    headers=headers,
                     timeout=10.0
                 )
                 if response.status_code == 200:
