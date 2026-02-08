@@ -10,7 +10,7 @@ Features:
 - Persist watchlist to file (simple JSON storage)
 """
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import json
@@ -21,6 +21,8 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+from utils.pivot_auth import verify_pivot_key
 
 # Watchlist storage path
 WATCHLIST_FILE = os.path.join(os.path.dirname(__file__), "..", "..", "data", "watchlist.json")
@@ -487,7 +489,7 @@ async def reset_watchlist():
 
 
 @router.post("/watchlist/sector-strength")
-async def update_sector_strength(update: SectorStrengthUpdate):
+async def update_sector_strength(update: SectorStrengthUpdate, _: str = Depends(verify_pivot_key)):
     """Update sector strength rankings (called by bias scheduler)"""
     data = await load_watchlist_data_async()
     data["sector_strength"] = update.sector_strength

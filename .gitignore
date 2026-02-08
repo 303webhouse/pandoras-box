@@ -15,6 +15,10 @@ config/.env
 *.log
 bot_startup.log
 
+# Pivot runtime state
+pivot/state/
+pivot/cache/
+
 # Backups
 *.backup.*
 *.bak
