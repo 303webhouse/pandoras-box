@@ -116,10 +116,16 @@ body {
 
 /* Bias Section */
 .bias-section {
-    display: flex;
-    flex-direction: column;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 16px;
     margin-bottom: 20px;
+    align-items: start;
+}
+
+.bias-composite-panel,
+.bias-card {
+    min-width: 0;
 }
 
 /* Composite Bias Panel */
