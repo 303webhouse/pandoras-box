@@ -248,188 +248,108 @@
             </div>
         </section>
 
-        <!-- Watchlist & Single Ticker Scanner -->
+        <!-- Watchlist v3 -->
         <section class="watchlist-section">
-            <div class="watchlist-container">
-                <div class="watchlist-header">
-                    <h2>WATCHLIST</h2>
-                    <div class="watchlist-controls">
-                        <div class="watchlist-benchmark" id="watchlist-benchmark"></div>
-                        <select id="watchlist-sort" class="watchlist-sort-select">
-                            <option value="strength_rank">By Sector Strength</option>
-                            <option value="change_1d">By Daily Change</option>
-                            <option value="change_1w">By Weekly Change</option>
-                            <option value="signals">By Active Signals</option>
-                        </select>
-                        <button id="watchlist-view-toggle" class="view-toggle-btn" title="Toggle flat/sector view">
-                            ☰
-                        </button>
-                    </div>
-                </div>
-                <div id="watchlist-grid" class="watchlist-grid">
-                    <div class="watchlist-loading">Loading watchlist data...</div>
-                </div>
-                <div class="watchlist-footer">
-                    <span id="watchlist-enriched-at"></span>
-                    <button id="watchlist-refresh" class="btn-subtle">↻ Refresh</button>
-                </div>
-            </div>
-            
-            <div class="ticker-analyzer">
-                <div class="analyzer-header">
-                    <h2>🔬 SINGLE TICKER ANALYZER</h2>
-                </div>
-                <div class="analyzer-controls">
-                    <div class="analyzer-input-group">
-                        <input type="text" id="analyzeTickerInput" class="analyzer-input" placeholder="Enter ticker to analyze">
-                        <button class="analyzer-btn" id="analyzeTickerBtn">Analyze</button>
-                    </div>
-                </div>
-                
-                <!-- Aggregate Verdict with Bias Alignment -->
-                <div class="analyzer-aggregate" id="analyzerAggregate" style="display: none;">
-                    <div class="aggregate-verdict" id="aggregateVerdict">
-                        <span class="aggregate-ticker" id="aggregateTicker">--</span>
-                        <span class="aggregate-signal" id="aggregateSignal">--</span>
-                    </div>
-                    <div class="aggregate-details">
-                        <div class="aggregate-score" id="aggregateScore">Score: --</div>
-                        <div class="aggregate-alignment" id="aggregateAlignment">
-                            <span class="alignment-label">vs Daily Bias:</span>
-                            <span class="alignment-status" id="biasAlignmentStatus">--</span>
+            <div class="watchlist-v3">
+                <div class="watchlist-left">
+                    <div class="watchlist-container">
+                        <div class="watchlist-header">
+                            <h2>SECTOR OVERVIEW</h2>
+                            <div class="watchlist-controls">
+                                <div class="watchlist-benchmark" id="watchlist-benchmark"></div>
+                                <select id="watchlist-sector-sort" class="watchlist-sort-select">
+                                    <option value="strength_rank">By Sector Strength</option>
+                                    <option value="change_1d">By Daily Change</option>
+                                    <option value="change_1w">By Weekly Change</option>
+                                    <option value="signals">By Active Signals</option>
+                                </select>
+                            </div>
                         </div>
-                    </div>
-                </div>
-                
-                <!-- Ticker Info & Metrics -->
-                <div class="analyzer-results" id="analyzerResults">
-                    <p class="empty-state">Enter a ticker to analyze</p>
-                </div>
-                
-                <!-- Gauges (Technical + Analyst) - Below Info Boxes -->
-                <div class="analyzer-gauges" id="analyzerGauges" style="display: none;">
-                    <div class="gauge-card technical-gauge" id="technicalGauge">
-                        <h3>📊 Technical</h3>
-                        <div class="gauge-signal" id="techSignal">--</div>
-                        <div class="gauge-score" id="techScore">
-                            <span class="buy-count">-- Buy</span> /
-                            <span class="sell-count">-- Sell</span>
+                        <div id="watchlist-grid" class="watchlist-grid">
+                            <div class="watchlist-loading">Loading watchlist data...</div>
                         </div>
-                        <div class="gauge-details" id="techDetails">
-                            <div>Oscillators: <span id="techOsc">--</span></div>
-                            <div>Moving Avgs: <span id="techMA">--</span></div>
-                        </div>
-                    </div>
-                    <div class="gauge-card analyst-gauge" id="analystGauge">
-                        <h3>🏦 Analyst</h3>
-                        <div class="gauge-signal" id="analystSignal">--</div>
-                        <div class="gauge-score" id="analystScore">
-                            <span class="analyst-count">-- analysts</span>
-                        </div>
-                        <div class="gauge-details" id="analystDetails">
-                            <div>Target: <span id="priceTarget">$--</span></div>
-                            <div>Upside: <span id="analystUpside">--%</span></div>
+                        <div class="watchlist-footer">
+                            <span id="watchlist-enriched-at"></span>
+                            <button id="watchlist-refresh" class="btn-subtle">↻ Refresh</button>
                         </div>
                     </div>
                 </div>
 
-                <!-- Enhanced Context Cards -->
-                <div class="analyzer-context" id="analyzerContext" style="display: none;">
-                    <!-- CTA Zone Card -->
-                    <div class="context-card cta-zone-card">
-                        <h3>📊 CTA Zone</h3>
-                        <div class="zone-status" id="contextZoneStatus">
-                            <span class="zone-label">--</span>
+                <div class="watchlist-right">
+                    <div class="tickers-panel">
+                        <div class="tickers-header">
+                            <h2>WATCHLIST TICKERS</h2>
+                            <div class="tickers-controls">
+                                <div class="tickers-control">
+                                    <label for="ticker-sort">Sort:</label>
+                                    <select id="ticker-sort">
+                                        <option value="sector">Sector</option>
+                                        <option value="change_1d">Daily Change %</option>
+                                        <option value="change_1w">Weekly Change %</option>
+                                        <option value="relative_volume">Relative Volume</option>
+                                        <option value="cta_zone">CTA Zone</option>
+                                    </select>
+                                </div>
+                                <div class="tickers-control">
+                                    <label for="ticker-filter">Filter:</label>
+                                    <select id="ticker-filter">
+                                        <option value="all">All</option>
+                                        <option value="mine">My Watchlist</option>
+                                        <option value="positions">Active Positions Only</option>
+                                        <option value="scanner">Scanner Universe</option>
+                                        <option value="muted">Muted Only</option>
+                                    </select>
+                                </div>
+                                <div class="tickers-meta">
+                                    <span id="ticker-count">Showing: 0 tickers</span>
+                                    <span id="ticker-positions">⚡ 0 active positions</span>
+                                </div>
+                            </div>
                         </div>
-                        <div class="zone-smas" id="contextZoneSMAs">
-                            <div class="sma-row">
-                                <span class="sma-label">20 SMA:</span>
-                                <span class="sma-value" id="sma20">--</span>
-                            </div>
-                            <div class="sma-row">
-                                <span class="sma-label">50 SMA:</span>
-                                <span class="sma-value" id="sma50">--</span>
-                            </div>
-                            <div class="sma-row">
-                                <span class="sma-label">120 SMA:</span>
-                                <span class="sma-value" id="sma120">--</span>
-                            </div>
+
+                        <div id="ticker-list" class="ticker-list">
+                            <div class="watchlist-loading">Loading tickers...</div>
+                        </div>
+
+                        <div class="tickers-footer">
+                            <button id="tickers-refresh" class="btn-subtle">↻ Refresh</button>
+                            <span id="tickers-updated-at"></span>
+                        </div>
+
+                        <div id="bulk-actions" class="bulk-actions" style="display: none;">
+                            <span id="bulk-count">0 selected</span>
+                            <button id="bulk-mute">Mute All</button>
+                            <button id="bulk-unmute">Unmute All</button>
+                            <button id="bulk-remove">Remove All</button>
+                            <button id="bulk-cancel">Cancel</button>
                         </div>
                     </div>
 
-                    <!-- Sector Info Card -->
-                    <div class="context-card sector-card">
-                        <h3>🏢 Sector Info</h3>
-                        <div class="sector-info" id="contextSectorInfo">
-                            <div class="info-row">
-                                <span class="info-label">Sector:</span>
-                                <span class="info-value" id="sectorName">--</span>
-                            </div>
-                            <div class="info-row">
-                                <span class="info-label">ETF:</span>
-                                <span class="info-value" id="sectorETF">--</span>
+                    <div class="analyzer-panel">
+                        <div class="analyzer-header">
+                            <h2>🔬 SINGLE TICKER ANALYZER</h2>
+                            <div class="analyzer-header-actions">
+                                <button class="analyzer-action-btn add-watchlist" id="addToWatchlistBtn" disabled>
+                                    + Add to Watchlist
+                                </button>
                             </div>
                         </div>
-                    </div>
-
-                    <!-- Bias Alignment Card -->
-                    <div class="context-card alignment-card">
-                        <h3>⚖️ Bias Alignment</h3>
-                        <div class="alignment-info" id="contextAlignmentInfo">
-                            <div class="alignment-row">
-                                <span class="alignment-label">LONG trades:</span>
-                                <span class="alignment-status" id="longAlignment">--</span>
-                            </div>
-                            <div class="alignment-row">
-                                <span class="alignment-label">SHORT trades:</span>
-                                <span class="alignment-status" id="shortAlignment">--</span>
+                        <div class="analyzer-controls">
+                            <div class="analyzer-input-group">
+                                <input type="text" id="analyzeTickerInput" class="analyzer-input" placeholder="Enter ticker to analyze">
+                                <select id="analyzeInterval" class="analyzer-interval">
+                                    <option value="1d">1D</option>
+                                    <option value="4h">4H</option>
+                                    <option value="1h">1H</option>
+                                    <option value="15m">15M</option>
+                                </select>
+                                <button class="analyzer-btn" id="analyzeTickerBtn">Analyze</button>
                             </div>
                         </div>
-                    </div>
 
-                    <!-- Risk Levels Card -->
-                    <div class="context-card risk-card">
-                        <h3>⚠️ Risk Levels</h3>
-                        <div class="risk-info" id="contextRiskInfo">
-                            <div class="risk-row">
-                                <span class="risk-label">ATR:</span>
-                                <span class="risk-value" id="atrValue">--</span>
-                            </div>
-                            <div class="risk-row">
-                                <span class="risk-label">Stop (2x ATR):</span>
-                                <span class="risk-value" id="stopDistance">--</span>
-                            </div>
-                            <div class="risk-row">
-                                <span class="risk-label">Target (3x ATR):</span>
-                                <span class="risk-value" id="targetDistance">--</span>
-                            </div>
+                        <div class="analyzer-results-v3" id="analyzerResultsV3">
+                            <p class="empty-state">Enter a ticker to analyze</p>
                         </div>
-                    </div>
-
-                    <!-- Recent Flow Card -->
-                    <div class="context-card flow-card">
-                        <h3>🐋 Recent Flow (24h)</h3>
-                        <div class="flow-summary" id="contextFlowSummary">
-                            <p class="flow-empty">No recent flow data</p>
-                        </div>
-                    </div>
-
-                    <!-- Recent Signals Card -->
-                    <div class="context-card signals-card">
-                        <h3>📡 Recent Signals (24h)</h3>
-                        <div class="signals-summary" id="contextSignalsSummary">
-                            <p class="signals-empty">No recent signals</p>
-                        </div>
-                    </div>
-
-                    <!-- Action Buttons -->
-                    <div class="analyzer-actions">
-                        <button class="analyzer-action-btn create-idea" id="createTradeIdeaBtn">
-                            📝 Create Trade Idea
-                        </button>
-                        <button class="analyzer-action-btn add-watchlist" id="addToWatchlistBtn">
-                            ⭐ Add to Watchlist
-                        </button>
                     </div>
                 </div>
             </div>

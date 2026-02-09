@@ -186,6 +186,43 @@ async def init_database():
             CREATE INDEX IF NOT EXISTS idx_bias_history_created
                 ON bias_composite_history(created_at);
         """)
+
+        # Watchlist tickers (primary source of ticker membership)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS watchlist_tickers (
+                id SERIAL PRIMARY KEY,
+                symbol VARCHAR(10) NOT NULL,
+                sector VARCHAR(100) NOT NULL DEFAULT 'Uncategorized',
+                source VARCHAR(20) NOT NULL DEFAULT 'manual',
+                muted BOOLEAN NOT NULL DEFAULT false,
+                priority VARCHAR(20) NOT NULL DEFAULT 'normal',
+                added_at TIMESTAMP DEFAULT NOW(),
+                muted_at TIMESTAMP,
+                position_id INTEGER,
+                notes VARCHAR(200),
+                UNIQUE(symbol)
+            )
+        """)
+
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_watchlist_tickers_sector
+                ON watchlist_tickers(sector);
+        """)
+
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_watchlist_tickers_source
+                ON watchlist_tickers(source);
+        """)
+
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_watchlist_tickers_muted
+                ON watchlist_tickers(muted);
+        """)
+
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_watchlist_tickers_priority
+                ON watchlist_tickers(priority);
+        """)
         
         # Add new columns to signals table for Trade Ideas enhancement
         # These are added separately to support existing databases

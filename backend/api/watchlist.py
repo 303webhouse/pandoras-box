@@ -16,7 +16,7 @@ from typing import List, Optional, Dict, Any
 import json
 import os
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +81,25 @@ class TickerAction(BaseModel):
 class SectorStrengthUpdate(BaseModel):
     """Request model for updating sector strength"""
     sector_strength: Dict[str, Any]
+
+
+class WatchlistTickerAdd(BaseModel):
+    """Add a ticker via the single ticker analyzer"""
+    symbol: str
+    sector: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class WatchlistTickerMute(BaseModel):
+    """Mute/unmute a single ticker"""
+    muted: bool
+
+
+class BulkMuteRequest(BaseModel):
+    """Bulk mute/unmute tickers by symbol list or sector"""
+    symbols: Optional[List[str]] = None
+    sector: Optional[str] = None
+    muted: bool
 
 
 def ensure_data_dir():
@@ -172,8 +191,79 @@ async def init_watchlist_table() -> None:
                         idx,
                     )
                 logger.info(f"Seeded {len(sectors)} sectors into watchlist_config")
+        await migrate_watchlist_tickers()
     except Exception as e:
         logger.warning(f"Could not init watchlist table (using JSON fallback): {e}")
+
+
+async def migrate_watchlist_tickers() -> None:
+    """Seed watchlist_tickers from watchlist_config and scanner universe if empty."""
+    try:
+        from database.postgres_client import get_postgres_client
+        from config.sectors import detect_sector
+        from scanners.universe import SP500_EXPANDED, RUSSELL_HIGH_VOLUME
+
+        pool = await get_postgres_client()
+        async with pool.acquire() as conn:
+            count = await conn.fetchval("SELECT COUNT(*) FROM watchlist_tickers")
+            if count and count > 0:
+                return
+
+            manual_symbols: set[str] = set()
+            manual_attempts = 0
+
+            rows = await conn.fetch(
+                "SELECT sector_name, tickers FROM watchlist_config ORDER BY sort_order"
+            )
+            for row in rows:
+                tickers = row["tickers"]
+                if isinstance(tickers, str):
+                    tickers = json.loads(tickers)
+                for symbol in tickers or []:
+                    symbol = str(symbol).upper().strip()
+                    if not symbol:
+                        continue
+                    manual_symbols.add(symbol)
+                    manual_attempts += 1
+                    await conn.execute(
+                        """
+                        INSERT INTO watchlist_tickers (symbol, sector, source, priority)
+                        VALUES ($1, $2, 'manual', 'normal')
+                        ON CONFLICT (symbol) DO NOTHING
+                        """,
+                        symbol,
+                        row["sector_name"],
+                    )
+
+            scanner_symbols: List[str] = []
+            seen = set()
+            for symbol in SP500_EXPANDED + RUSSELL_HIGH_VOLUME:
+                symbol = str(symbol).upper().strip()
+                if not symbol or symbol in seen or symbol in manual_symbols:
+                    continue
+                seen.add(symbol)
+                scanner_symbols.append(symbol)
+
+            scanner_attempts = 0
+            for symbol in scanner_symbols:
+                scanner_attempts += 1
+                await conn.execute(
+                    """
+                    INSERT INTO watchlist_tickers (symbol, sector, source, priority)
+                    VALUES ($1, $2, 'scanner', 'low')
+                    ON CONFLICT (symbol) DO NOTHING
+                    """,
+                    symbol,
+                    detect_sector(symbol),
+                )
+
+            logger.info(
+                "Seeded watchlist_tickers: %s manual, %s scanner",
+                manual_attempts,
+                scanner_attempts,
+            )
+    except Exception as e:
+        logger.warning(f"Could not migrate watchlist_tickers: {e}")
 
 
 async def _load_from_postgres() -> Optional[Dict[str, Any]]:
@@ -183,21 +273,38 @@ async def _load_from_postgres() -> Optional[Dict[str, Any]]:
 
         pool = await get_postgres_client()
         async with pool.acquire() as conn:
-            rows = await conn.fetch(
-                "SELECT sector_name, tickers, etf FROM watchlist_config ORDER BY sort_order"
+            sector_rows = await conn.fetch(
+                "SELECT sector_name, etf, sort_order FROM watchlist_config ORDER BY sort_order"
             )
-            if not rows:
+            ticker_rows = await conn.fetch(
+                """
+                SELECT symbol, sector, source, muted, priority, added_at
+                FROM watchlist_tickers
+                WHERE source IN ('manual', 'position') AND muted = false
+                ORDER BY priority DESC, added_at
+                """
+            )
+
+            if not sector_rows and not ticker_rows:
                 return None
 
-            sectors = {}
-            for row in rows:
-                tickers = row["tickers"]
-                if isinstance(tickers, str):
-                    tickers = json.loads(tickers)
-                sectors[row["sector_name"]] = {
-                    "tickers": tickers,
+            sectors: Dict[str, Dict[str, Any]] = {}
+            ordered_sector_names: List[str] = []
+            for row in sector_rows:
+                sector_name = row["sector_name"]
+                ordered_sector_names.append(sector_name)
+                sectors[sector_name] = {
+                    "tickers": [],
                     "etf": row["etf"],
                 }
+
+            for row in ticker_rows:
+                symbol = row["symbol"]
+                sector_name = row["sector"] or "Uncategorized"
+                if sector_name not in sectors:
+                    sectors[sector_name] = {"tickers": [], "etf": None}
+                    ordered_sector_names.append(sector_name)
+                sectors[sector_name]["tickers"].append(symbol)
 
             sector_strength = {}
             try:
@@ -206,13 +313,67 @@ async def _load_from_postgres() -> Optional[Dict[str, Any]]:
                 sector_strength = {}
 
             return {
-                "sectors": sectors,
+                "sectors": {name: sectors[name] for name in ordered_sector_names},
                 "sector_strength": sector_strength,
-                "updated_at": datetime.utcnow().isoformat(),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
             }
     except Exception as e:
         logger.warning(f"PostgreSQL unavailable, using JSON fallback: {e}")
         return None
+
+
+async def _sync_watchlist_tickers_from_sectors(sectors: Dict[str, Any]) -> None:
+    """Sync manual watchlist tickers from sector payloads."""
+    try:
+        from database.postgres_client import get_postgres_client
+
+        pool = await get_postgres_client()
+        async with pool.acquire() as conn:
+            manual_symbols: Dict[str, str] = {}
+            for sector_name, sector_data in sectors.items():
+                for symbol in sector_data.get("tickers", []) or []:
+                    symbol = str(symbol).upper().strip()
+                    if not symbol:
+                        continue
+                    manual_symbols[symbol] = sector_name
+
+            symbols = list(manual_symbols.keys())
+
+            if not symbols:
+                await conn.execute(
+                    "DELETE FROM watchlist_tickers WHERE source = 'manual' AND priority != 'high'"
+                )
+                return
+
+            for symbol, sector in manual_symbols.items():
+                await conn.execute(
+                    """
+                    INSERT INTO watchlist_tickers (symbol, sector, source, priority, muted)
+                    VALUES ($1, $2, 'manual', 'normal', false)
+                    ON CONFLICT (symbol) DO UPDATE SET
+                        sector = EXCLUDED.sector,
+                        source = 'manual',
+                        muted = false,
+                        priority = CASE
+                            WHEN watchlist_tickers.priority = 'high' THEN 'high'
+                            ELSE 'normal'
+                        END
+                    """,
+                    symbol,
+                    sector,
+                )
+
+            await conn.execute(
+                """
+                DELETE FROM watchlist_tickers
+                WHERE source = 'manual'
+                  AND priority != 'high'
+                  AND symbol <> ALL($1::text[])
+                """,
+                symbols,
+            )
+    except Exception as e:
+        logger.warning(f"Failed to sync watchlist_tickers: {e}")
 
 
 async def load_watchlist_data_async() -> Dict[str, Any]:
@@ -230,7 +391,7 @@ def load_watchlist_data() -> Dict[str, Any]:
 
 async def save_watchlist_data_async(data: Dict[str, Any]) -> bool:
     """Save watchlist config to PostgreSQL (primary) and JSON file (backup)."""
-    data["updated_at"] = datetime.utcnow().isoformat()
+    data["updated_at"] = datetime.now(timezone.utc).isoformat()
     saved_pg = False
 
     try:
@@ -262,6 +423,7 @@ async def save_watchlist_data_async(data: Dict[str, Any]) -> bool:
                 else:
                     await conn.execute("DELETE FROM watchlist_config")
         saved_pg = True
+        await _sync_watchlist_tickers_from_sectors(sectors)
     except Exception as e:
         logger.warning(f"PostgreSQL save failed, using JSON only: {e}")
 
@@ -273,7 +435,7 @@ async def save_watchlist_data_async(data: Dict[str, Any]) -> bool:
 
 def save_watchlist_data(data: Dict[str, Any]) -> bool:
     """Sync JSON backup for watchlist config."""
-    data["updated_at"] = datetime.utcnow().isoformat()
+    data["updated_at"] = datetime.now(timezone.utc).isoformat()
     return _save_to_json(data)
 
 
@@ -520,6 +682,333 @@ async def update_sector_strength(update: SectorStrengthUpdate, _: str = Depends(
     else:
         raise HTTPException(status_code=500, detail="Failed to save sector strength")
 
+
+# ====================
+# WATCHLIST V3 (TICKERS)
+# ====================
+
+@router.get("/watchlist/tickers")
+async def get_watchlist_tickers(
+    source: str = Query("all", description="manual|position|scanner|all"),
+    muted: Optional[bool] = Query(None, description="Filter by muted state"),
+    sector: Optional[str] = Query(None, description="Filter by sector name"),
+    sort_by: str = Query("sector", description="Sort field"),
+    sort_dir: str = Query("asc", description="Sort direction"),
+    include_enrichment: bool = Query(True, description="Include price/zone enrichment"),
+):
+    """
+    Return watchlist tickers from watchlist_tickers with optional enrichment.
+    """
+    try:
+        from database.postgres_client import get_postgres_client
+        from watchlist.enrichment import fetch_price_data_async, get_cta_zones, get_active_signals
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Missing dependencies: {e}")
+
+    redis_client = None
+    try:
+        from database.redis_client import get_redis_client
+        redis_client = await get_redis_client()
+    except Exception:
+        redis_client = None
+
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        # Counts (unfiltered)
+        count_rows = await conn.fetch(
+            "SELECT source, muted, COUNT(*) AS count FROM watchlist_tickers GROUP BY source, muted"
+        )
+
+        counts = {"total": 0, "manual": 0, "position": 0, "scanner": 0, "muted": 0}
+        for row in count_rows:
+            row_count = int(row["count"])
+            counts["total"] += row_count
+            src = row["source"]
+            if src in counts:
+                counts[src] += row_count
+            if row["muted"]:
+                counts["muted"] += row_count
+
+        clauses: List[str] = []
+        params: List[Any] = []
+        param_idx = 1
+
+        if source and source != "all":
+            clauses.append(f"source = ${param_idx}")
+            params.append(source)
+            param_idx += 1
+
+        if muted is not None:
+            clauses.append(f"muted = ${param_idx}")
+            params.append(muted)
+            param_idx += 1
+
+        if sector:
+            clauses.append(f"sector = ${param_idx}")
+            params.append(sector)
+            param_idx += 1
+
+        query = """
+            SELECT symbol, sector, source, muted, priority, position_id, notes, added_at, muted_at
+            FROM watchlist_tickers
+        """
+        if clauses:
+            query += " WHERE " + " AND ".join(clauses)
+        query += " ORDER BY added_at"
+
+        rows = await conn.fetch(query, *params)
+
+    tickers = []
+    symbols = []
+    for row in rows:
+        symbol = row["symbol"]
+        symbols.append(symbol)
+        tickers.append({
+            "symbol": symbol,
+            "sector": row["sector"],
+            "source": row["source"],
+            "muted": row["muted"],
+            "priority": row["priority"],
+            "position_id": row["position_id"],
+            "notes": row["notes"],
+            "added_at": row["added_at"].isoformat() if row["added_at"] else None,
+            "muted_at": row["muted_at"].isoformat() if row["muted_at"] else None,
+            "price": None,
+            "change_1d": None,
+            "change_1w": None,
+            "volume": None,
+            "volume_avg": None,
+            "relative_volume": None,
+            "cta_zone": None,
+            "active_signals": 0,
+        })
+
+    price_data: Dict[str, dict] = {}
+    if include_enrichment:
+        enrich_symbols = [t["symbol"] for t in tickers if t["source"] in ("manual", "position")]
+        price_data = await fetch_price_data_async(enrich_symbols)
+
+    cta_zones = await get_cta_zones(symbols, redis_client)
+    signal_counts = await get_active_signals(symbols, redis_client)
+
+    for ticker in tickers:
+        symbol = ticker["symbol"]
+        pd_data = price_data.get(symbol, {})
+        ticker["price"] = pd_data.get("price")
+        ticker["change_1d"] = pd_data.get("change_1d")
+        ticker["change_1w"] = pd_data.get("change_1w")
+        ticker["volume"] = pd_data.get("volume")
+        ticker["volume_avg"] = pd_data.get("volume_avg")
+        if pd_data.get("volume") and pd_data.get("volume_avg"):
+            ticker["relative_volume"] = round(pd_data["volume"] / pd_data["volume_avg"], 2)
+        ticker["cta_zone"] = cta_zones.get(symbol)
+        ticker["active_signals"] = signal_counts.get(symbol, 0)
+
+    sort_by = (sort_by or "sector").lower()
+    reverse = (sort_dir or "asc").lower() == "desc"
+
+    def sort_key(item: Dict[str, Any]):
+        if sort_by == "change_1d":
+            return item.get("change_1d") or 0
+        if sort_by == "change_1w":
+            return item.get("change_1w") or 0
+        if sort_by == "relative_volume":
+            return item.get("relative_volume") or 0
+        if sort_by == "cta_zone":
+            return item.get("cta_zone") or ""
+        return (item.get("sector") or "", item.get("symbol") or "")
+
+    tickers.sort(key=sort_key, reverse=reverse)
+
+    return {
+        "status": "success",
+        "tickers": tickers,
+        "counts": counts,
+    }
+
+
+@router.patch("/watchlist/tickers/{symbol}/mute")
+async def mute_watchlist_ticker(symbol: str, request: WatchlistTickerMute):
+    symbol = symbol.upper().strip()
+    if not symbol:
+        raise HTTPException(status_code=400, detail="Symbol cannot be empty")
+
+    from database.postgres_client import get_postgres_client
+
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT symbol, muted FROM watchlist_tickers WHERE symbol = $1",
+            symbol,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Ticker not found")
+
+        if request.muted:
+            await conn.execute(
+                "UPDATE watchlist_tickers SET muted = true, muted_at = NOW() WHERE symbol = $1",
+                symbol,
+            )
+        else:
+            await conn.execute(
+                "UPDATE watchlist_tickers SET muted = false, muted_at = NULL WHERE symbol = $1",
+                symbol,
+            )
+
+    await _invalidate_watchlist_cache()
+    return {"status": "success", "symbol": symbol, "muted": request.muted}
+
+
+@router.patch("/watchlist/tickers/bulk-mute")
+async def bulk_mute_watchlist_tickers(request: BulkMuteRequest):
+    if request.symbols and request.sector:
+        raise HTTPException(status_code=400, detail="Provide symbols OR sector, not both")
+    if not request.symbols and not request.sector:
+        raise HTTPException(status_code=400, detail="Provide symbols or sector")
+
+    from database.postgres_client import get_postgres_client
+
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        if request.symbols:
+            symbols = [s.upper().strip() for s in request.symbols if s and s.strip()]
+            if not symbols:
+                raise HTTPException(status_code=400, detail="Symbols cannot be empty")
+            if request.muted:
+                await conn.execute(
+                    "UPDATE watchlist_tickers SET muted = true, muted_at = NOW() WHERE symbol = ANY($1::text[])",
+                    symbols,
+                )
+            else:
+                await conn.execute(
+                    "UPDATE watchlist_tickers SET muted = false, muted_at = NULL WHERE symbol = ANY($1::text[])",
+                    symbols,
+                )
+        else:
+            sector = request.sector
+            if request.muted:
+                await conn.execute(
+                    "UPDATE watchlist_tickers SET muted = true, muted_at = NOW() WHERE sector = $1",
+                    sector,
+                )
+            else:
+                await conn.execute(
+                    "UPDATE watchlist_tickers SET muted = false, muted_at = NULL WHERE sector = $1",
+                    sector,
+                )
+
+    await _invalidate_watchlist_cache()
+    return {"status": "success", "muted": request.muted}
+
+
+@router.delete("/watchlist/tickers/{symbol}")
+async def delete_watchlist_ticker(symbol: str):
+    symbol = symbol.upper().strip()
+    if not symbol:
+        raise HTTPException(status_code=400, detail="Symbol cannot be empty")
+
+    from database.postgres_client import get_postgres_client
+
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT symbol, source FROM watchlist_tickers WHERE symbol = $1",
+            symbol,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Ticker not found")
+
+        source = row["source"]
+        if source == "scanner":
+            raise HTTPException(status_code=400, detail="Scanner tickers cannot be deleted. Mute instead.")
+
+        if source == "position":
+            open_count = await conn.fetchval(
+                "SELECT COUNT(*) FROM positions WHERE ticker = $1 AND status = 'OPEN'",
+                symbol,
+            )
+            if open_count and open_count > 0:
+                raise HTTPException(status_code=400, detail="Ticker has open positions. Close position first.")
+
+        await conn.execute("DELETE FROM watchlist_tickers WHERE symbol = $1", symbol)
+
+    await _invalidate_watchlist_cache()
+    return {"status": "success", "symbol": symbol}
+
+
+@router.post("/watchlist/tickers/add")
+async def add_watchlist_ticker(request: WatchlistTickerAdd):
+    symbol = request.symbol.upper().strip()
+    if not symbol:
+        raise HTTPException(status_code=400, detail="Symbol cannot be empty")
+
+    from database.postgres_client import get_postgres_client
+    from config.sectors import detect_sector
+
+    sector = (request.sector or detect_sector(symbol)).strip()
+
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        # Ensure sector exists in watchlist_config
+        existing_sector = await conn.fetchval(
+            "SELECT 1 FROM watchlist_config WHERE sector_name = $1",
+            sector,
+        )
+        if not existing_sector:
+            max_sort = await conn.fetchval(
+                "SELECT COALESCE(MAX(sort_order), 0) FROM watchlist_config"
+            )
+            await conn.execute(
+                """
+                INSERT INTO watchlist_config (sector_name, tickers, etf, sort_order)
+                VALUES ($1, $2, $3, $4)
+                ON CONFLICT (sector_name) DO NOTHING
+                """,
+                sector,
+                json.dumps([]),
+                None,
+                int(max_sort or 0) + 1,
+            )
+
+        existing = await conn.fetchrow(
+            "SELECT source, priority FROM watchlist_tickers WHERE symbol = $1",
+            symbol,
+        )
+
+        if existing:
+            if existing["source"] == "manual":
+                return {"status": "already_exists", "symbol": symbol}
+
+            await conn.execute(
+                """
+                UPDATE watchlist_tickers
+                SET source = 'manual',
+                    sector = $2,
+                    muted = false,
+                    notes = COALESCE($3, notes),
+                    priority = CASE
+                        WHEN priority = 'high' THEN 'high'
+                        ELSE 'normal'
+                    END
+                WHERE symbol = $1
+                """,
+                symbol,
+                sector,
+                request.notes,
+            )
+        else:
+            await conn.execute(
+                """
+                INSERT INTO watchlist_tickers (symbol, sector, source, priority, notes)
+                VALUES ($1, $2, 'manual', 'normal', $3)
+                """,
+                symbol,
+                sector,
+                request.notes,
+            )
+
+    await _invalidate_watchlist_cache()
+    return {"status": "success", "symbol": symbol, "sector": sector}
 
 # ====================
 # WATCHLIST V2 (ENRICHED)
