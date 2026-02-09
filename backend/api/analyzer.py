@@ -131,7 +131,7 @@ def _build_combined_recommendation(analysis: Dict[str, Any]) -> Dict[str, Any]:
             "signal_type": best.get("signal_type"),
             "entry": best.get("setup", {}).get("entry"),
             "stop": best.get("setup", {}).get("stop"),
-            "target": best.get("setup", {}).get("target"),
+            "target": best.get("setup", {}).get("t2"),
             "confidence": best.get("confidence"),
             "note": best.get("description"),
         }
@@ -170,3 +170,12 @@ def _build_combined_recommendation(analysis: Dict[str, Any]) -> Dict[str, Any]:
         "cta_zone": cta_zone,
         "note": cta_rec.get("note", "No actionable setup. Continue monitoring."),
     }
+
+
+@router.get("/signals/hit-rates")
+async def get_signal_hit_rates():
+    """Return historical hit rates by signal type and zone."""
+    from jobs.score_signals import get_hit_rates
+
+    rates = await get_hit_rates()
+    return {"status": "success", "hit_rates": rates}

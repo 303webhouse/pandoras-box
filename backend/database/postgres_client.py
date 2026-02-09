@@ -223,6 +223,46 @@ async def init_database():
             CREATE INDEX IF NOT EXISTS idx_watchlist_tickers_priority
                 ON watchlist_tickers(priority);
         """)
+
+        # Signal outcomes table (historical hit rate tracking)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS signal_outcomes (
+                id SERIAL PRIMARY KEY,
+                signal_id VARCHAR(100) NOT NULL,
+                symbol VARCHAR(10) NOT NULL,
+                signal_type VARCHAR(50) NOT NULL,
+                direction VARCHAR(10) NOT NULL,
+                cta_zone VARCHAR(30),
+                entry DECIMAL(12, 2),
+                stop DECIMAL(12, 2),
+                t1 DECIMAL(12, 2),
+                t2 DECIMAL(12, 2),
+                invalidation_level DECIMAL(12, 2),
+                created_at TIMESTAMP NOT NULL,
+                outcome VARCHAR(20),
+                outcome_at TIMESTAMP,
+                outcome_price DECIMAL(12, 2),
+                max_favorable DECIMAL(12, 2),
+                max_adverse DECIMAL(12, 2),
+                days_to_outcome INTEGER,
+                UNIQUE(signal_id)
+            )
+        """)
+
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_signal_outcomes_symbol
+                ON signal_outcomes(symbol);
+        """)
+
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_signal_outcomes_type
+                ON signal_outcomes(signal_type);
+        """)
+
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_signal_outcomes_outcome
+                ON signal_outcomes(outcome);
+        """)
         
         # Add new columns to signals table for Trade Ideas enhancement
         # These are added separately to support existing databases

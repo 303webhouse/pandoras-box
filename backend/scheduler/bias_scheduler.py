@@ -2022,6 +2022,16 @@ def is_first_trading_day_of_month() -> bool:
     return today.date() == first_day.date()
 
 
+async def run_signal_scoring_job() -> None:
+    """Score pending signals and clean up stale discovery tickers."""
+    try:
+        from jobs.score_signals import score_pending_signals, cleanup_stale_discovery_tickers
+        await score_pending_signals()
+        await cleanup_stale_discovery_tickers()
+    except Exception as e:
+        logger.warning(f"Signal scoring job failed: {e}")
+
+
 async def run_savita_auto_search():
     """
     Run Gemini-powered search for latest Savita indicator reading.
@@ -2412,6 +2422,15 @@ async def start_scheduler():
             name='Composite Bias Refresh',
             replace_existing=True
         )
+
+        # Nightly signal outcome scoring + discovery cleanup (9:00 PM ET)
+        scheduler.add_job(
+            run_signal_scoring_job,
+            CronTrigger(day_of_week='mon-fri', hour=21, minute=0, timezone=ET),
+            id='signal_scoring',
+            name='Signal Outcome Scoring',
+            replace_existing=True
+        )
         
         scheduler.start()
         logger.info("✅ APScheduler started - bias refresh scheduled for 9:45 AM ET")
@@ -2419,6 +2438,7 @@ async def start_scheduler():
         logger.info("✅ BTC Bottom Signals refresh scheduled every 5 minutes")
         logger.info("✅ Auto-dismiss old signals scheduled every hour")
         logger.info("✅ Composite bias refresh scheduled every 15 minutes")
+        logger.info("✅ Signal outcome scoring scheduled for 9:00 PM ET")
         
         # ALSO start the scanner loop (APScheduler doesn't handle the variable-interval scanners)
         asyncio.create_task(_scanner_loop())
@@ -2724,6 +2744,7 @@ async def run_cta_scan_scheduled():
                 notes += f" [+{len(score_bonuses)*10}: {', '.join(score_bonuses)}]"
             
             # Convert CTA signal format to standard signal format
+            setup = signal.get("setup", {}) or {}
             trade_signal = {
                 "signal_id": signal.get("signal_id"),
                 "timestamp": signal.get("timestamp"),
@@ -2731,10 +2752,11 @@ async def run_cta_scan_scheduled():
                 "strategy": "CTA Scanner",
                 "direction": signal.get("direction", "LONG"),
                 "signal_type": signal.get("signal_type"),
-                "entry_price": signal.get("setup", {}).get("entry"),
-                "stop_loss": signal.get("setup", {}).get("stop"),
-                "target_1": signal.get("setup", {}).get("target"),
-                "risk_reward": signal.get("setup", {}).get("rr_ratio"),
+                "entry_price": setup.get("entry"),
+                "stop_loss": setup.get("stop"),
+                "target_1": setup.get("t1") or setup.get("target"),
+                "target_2": setup.get("t2") or setup.get("target"),
+                "risk_reward": setup.get("rr_ratio"),
                 "timeframe": "DAILY",
                 "asset_class": "EQUITY",
                 "status": "ACTIVE",
@@ -2784,6 +2806,33 @@ async def run_cta_scan_scheduled():
                     await client.expire(f"signal:active:{ticker}", 7200)
             except Exception:
                 pass
+
+            # Record signal outcome tracking
+            try:
+                from database.postgres_client import get_postgres_client
+                pool = await get_postgres_client()
+                async with pool.acquire() as conn:
+                    await conn.execute(
+                        """
+                        INSERT INTO signal_outcomes
+                            (signal_id, symbol, signal_type, direction, cta_zone,
+                             entry, stop, t1, t2, invalidation_level, created_at, outcome)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), 'PENDING')
+                        ON CONFLICT (signal_id) DO NOTHING
+                        """,
+                        signal.get("signal_id"),
+                        signal.get("symbol"),
+                        signal.get("signal_type"),
+                        signal.get("direction"),
+                        signal.get("cta_zone"),
+                        setup.get("entry"),
+                        setup.get("stop"),
+                        setup.get("t1"),
+                        setup.get("t2"),
+                        setup.get("invalidation_level"),
+                    )
+            except Exception as e:
+                logger.warning(f"Failed to record signal outcome: {e}")
             
             # Broadcast to all connected devices (use smart broadcast for priority handling)
             await manager.broadcast_signal_smart(trade_signal, priority_threshold=75.0)
@@ -2848,8 +2897,8 @@ async def check_flow_confirmation_for_cta(ticker: str, direction: str) -> bool:
         
         client = await get_redis_client()
         
-        # Check for recent flow alerts for this ticker
-        flow_key = f"flow:ticker:{ticker}"
+        # Check for recent UW flow alerts for this ticker
+        flow_key = f"uw:flow:{ticker}"
         flow_data = await client.get(flow_key)
         
         if not flow_data:
@@ -2931,6 +2980,7 @@ async def run_crypto_scan_scheduled():
                 signal_type = best_signal.get("signal_type", "CTA_SIGNAL")
                 signal_id = f"{ticker}_{direction}_{get_eastern_now().strftime('%Y%m%d_%H%M%S')}"
 
+                setup = best_signal.get("setup", {}) or {}
                 trade_signal = {
                     "signal_id": signal_id,
                     "timestamp": get_eastern_now().isoformat(),
@@ -2938,10 +2988,11 @@ async def run_crypto_scan_scheduled():
                     "strategy": "Crypto Scanner",
                     "direction": direction,
                     "signal_type": signal_type,
-                    "entry_price": best_signal.get("setup", {}).get("entry") or cta_analysis.get("current_price"),
-                    "stop_loss": best_signal.get("setup", {}).get("stop"),
-                    "target_1": best_signal.get("setup", {}).get("target"),
-                    "risk_reward": best_signal.get("setup", {}).get("rr_ratio"),
+                    "entry_price": setup.get("entry") or cta_analysis.get("current_price"),
+                    "stop_loss": setup.get("stop"),
+                    "target_1": setup.get("t1") or setup.get("target"),
+                    "target_2": setup.get("t2") or setup.get("target"),
+                    "risk_reward": setup.get("rr_ratio"),
                     "timeframe": "DAILY",
                     "asset_class": "CRYPTO",
                     "status": "ACTIVE",
