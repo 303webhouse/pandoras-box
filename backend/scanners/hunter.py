@@ -1,16 +1,7 @@
 """
-The Hunter - S&P 500 Stock Scanner
-Scans for "Trapped Traders" with institutional volume backing
-
-Finds:
-- URSA candidates: Trapped longs (price < VWAP, below 200 SMA)
-- TAURUS candidates: Trapped shorts (price > VWAP, above 200 SMA)
-
-Watchlist Priority:
-- Scans user's watchlist FIRST
-- Then scans S&P 500 (excluding watchlist to avoid duplicates)
-
-Requirements: yfinance, pandas, pandas_ta
+DEPRECATED: Trapped trader detection has been absorbed into cta_scanner.py.
+This file is kept for reference only. Do not import from it.
+See: check_trapped_longs() and check_trapped_shorts() in cta_scanner.py
 """
 
 import pandas as pd
@@ -20,24 +11,23 @@ from datetime import datetime, timedelta
 import uuid
 import asyncio
 import os
-import json
 
 logger = logging.getLogger(__name__)
 
-# Watchlist storage path (shared with watchlist API)
-WATCHLIST_FILE = os.path.join(os.path.dirname(__file__), "..", "..", "data", "watchlist.json")
-
-
-def load_watchlist() -> List[str]:
-    """Load user's watchlist for priority scanning"""
+async def _get_watchlist_symbols() -> List[str]:
     try:
-        if os.path.exists(WATCHLIST_FILE):
-            with open(WATCHLIST_FILE, 'r') as f:
-                data = json.load(f)
-                return data.get("tickers", [])
+        from database.postgres_client import get_postgres_client
+        pool = await get_postgres_client()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT symbol FROM watchlist_tickers "
+                "WHERE source IN ('manual', 'position') AND muted = false "
+                "ORDER BY added_at"
+            )
+        return [row["symbol"] for row in rows]
     except Exception as e:
-        logger.error(f"Error loading watchlist: {e}")
-    return []
+        logger.warning(f"Failed to load watchlist symbols: {e}")
+        return []
 
 # Try to import optional dependencies
 try:
@@ -510,7 +500,7 @@ async def run_full_scan(tickers: List[str] = None, mode: str = "all", include_wa
     
     if tickers is None:
         if include_watchlist:
-            watchlist = load_watchlist()
+            watchlist = await _get_watchlist_symbols()
             # S&P 500 minus watchlist tickers (avoid duplicates)
             sp500_list = [t for t in SP500_TOP_100 if t not in watchlist]
         else:

@@ -2658,8 +2658,18 @@ async def run_cta_scan_scheduled():
         }
         
         # Load watchlist for bonus scoring
-        from scanners.cta_scanner import load_watchlist
-        watchlist = load_watchlist()
+        watchlist = []
+        try:
+            from database.postgres_client import get_postgres_client
+            pool = await get_postgres_client()
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(
+                    "SELECT symbol FROM watchlist_tickers "
+                    "WHERE source IN ('manual', 'position') AND muted = false"
+                )
+            watchlist = [row["symbol"] for row in rows]
+        except Exception as e:
+            logger.warning(f"Failed to load watchlist symbols: {e}")
         
         # Get current bias status for alignment check
         bias_status = get_bias_status()
@@ -2765,6 +2775,15 @@ async def run_cta_scan_scheduled():
             
             # Cache in Redis (for quick access)
             await cache_signal(trade_signal["signal_id"], trade_signal, ttl=7200)  # 2 hour TTL
+
+            try:
+                from database.redis_client import get_redis_client
+                client = await get_redis_client()
+                if client:
+                    await client.incr(f"signal:active:{ticker}")
+                    await client.expire(f"signal:active:{ticker}", 7200)
+            except Exception:
+                pass
             
             # Broadcast to all connected devices (use smart broadcast for priority handling)
             await manager.broadcast_signal_smart(trade_signal, priority_threshold=75.0)
@@ -2853,150 +2872,6 @@ async def check_flow_confirmation_for_cta(ticker: str, direction: str) -> bool:
 
 
 # =========================================================================
-# HUNTER SCANNER SCHEDULED TASK
-# =========================================================================
-
-async def run_hunter_scan_scheduled():
-    """
-    Run Hunter scanner automatically and push signals to Trade Ideas
-    Scheduled: Every 30 minutes during market hours (9:30 AM - 4:00 PM ET)
-    """
-    logger.info("🎯 Running scheduled Hunter scan...")
-    
-    try:
-        from scanners.hunter import run_full_scan, SCANNER_AVAILABLE
-        from websocket.broadcaster import manager
-        from database.redis_client import cache_signal
-        from database.postgres_client import log_signal, update_signal_with_score
-        from scoring.trade_ideas_scorer import calculate_signal_score
-        
-        if not SCANNER_AVAILABLE:
-            logger.warning("Hunter Scanner not available - skipping scheduled scan")
-            return
-        
-        # Run the scan
-        result = await run_full_scan(mode="all")
-        
-        if not result:
-            logger.info("Hunter scan complete - no results")
-            return
-        
-        # Combine URSA and TAURUS signals
-        all_signals = []
-        all_signals.extend(result.get("ursa_signals", []))
-        all_signals.extend(result.get("taurus_signals", []))
-        
-        if not all_signals:
-            logger.info("Hunter scan complete - no new signals found")
-            return
-        
-        logger.info(f"Hunter scan found {len(all_signals)} signals")
-        
-        # Load watchlist for bonus scoring
-        from database.redis_client import get_watchlist
-        watchlist = await get_watchlist("default")
-        watchlist = watchlist or []
-        
-        # Get current bias status for scoring
-        bias_status = get_bias_status()
-        current_bias = {
-            "daily": bias_status.get("daily", {}),
-            "weekly": bias_status.get("weekly", {}),
-            "cyclical": bias_status.get("cyclical", {})
-        }
-        
-        # Process and push each signal to Trade Ideas
-        signals_pushed = 0
-        for signal in all_signals[:15]:  # Limit to top 15
-            ticker = signal.get("ticker")
-            
-            # Determine direction from signal type
-            signal_type = signal.get("signal_type", "")
-            direction = "SHORT" if "URSA" in signal_type.upper() else "LONG"
-            
-            # Convert Hunter signal format to standard signal format
-            trade_signal = {
-                "signal_id": signal.get("scan_id") or f"HUNTER_{ticker}_{get_eastern_now().strftime('%Y%m%d_%H%M%S')}",
-                "timestamp": signal.get("timestamp") or get_eastern_now().isoformat(),
-                "ticker": ticker,
-                "strategy": "Hunter Scanner",
-                "direction": direction,
-                "signal_type": signal_type,
-                "entry_price": signal.get("entry_price"),
-                "stop_loss": signal.get("stop_loss"),
-                "target_1": signal.get("target"),
-                "risk_reward": signal.get("risk_reward"),
-                "timeframe": "DAILY",
-                "asset_class": "EQUITY",
-                "status": "ACTIVE",
-                "adx": signal.get("adx"),
-                "rsi": signal.get("rsi"),
-                "rvol": signal.get("rvol")
-            }
-            
-            # Calculate score using the new scoring algorithm
-            score, bias_alignment, triggering_factors = calculate_signal_score(trade_signal, current_bias)
-            
-            # Add watchlist bonus
-            if ticker in watchlist:
-                score = min(100, score + 5)
-                triggering_factors["watchlist_bonus"] = 5
-            
-            trade_signal["score"] = score
-            trade_signal["bias_alignment"] = bias_alignment
-            trade_signal["triggering_factors"] = triggering_factors
-            
-            # Determine confidence based on score
-            if score >= 75:
-                trade_signal["confidence"] = "HIGH"
-            elif score >= 55:
-                trade_signal["confidence"] = "MEDIUM"
-            else:
-                trade_signal["confidence"] = "LOW"
-            
-            # Log to PostgreSQL (permanent record)
-            try:
-                await log_signal(trade_signal)
-                await update_signal_with_score(
-                    trade_signal["signal_id"],
-                    score,
-                    bias_alignment,
-                    triggering_factors
-                )
-            except Exception as db_err:
-                logger.warning(f"Failed to log Hunter signal to DB: {db_err}")
-            
-            # Cache in Redis (for quick access)
-            await cache_signal(trade_signal["signal_id"], trade_signal, ttl=7200)  # 2 hour TTL
-            
-            # Broadcast to all connected devices (use smart broadcast for priority handling)
-            await manager.broadcast_signal_smart(trade_signal, priority_threshold=75.0)
-            
-            logger.info(f"📡 Hunter signal pushed: {ticker} {signal_type} (score: {score}, {bias_alignment})")
-            signals_pushed += 1
-        
-        # Update scheduler status
-        _scheduler_status["hunter_scanner"]["last_run"] = get_eastern_now().isoformat()
-        _scheduler_status["hunter_scanner"]["signals_found"] = signals_pushed
-        _scheduler_status["hunter_scanner"]["status"] = "completed"
-        
-        logger.info(f"✅ Hunter scheduled scan complete - {signals_pushed} signals pushed to Trade Ideas")
-        
-    except Exception as e:
-        _scheduler_status["hunter_scanner"]["status"] = f"error: {str(e)}"
-        logger.error(f"Error in scheduled Hunter scan: {e}")
-        import traceback
-        traceback.print_exc()
-
-
-async def trigger_hunter_scan_now():
-    """
-    Manually trigger a Hunter scan (called from API)
-    """
-    await run_hunter_scan_scheduled()
-
-
-# =========================================================================
 # CRYPTO SCANNER SCHEDULED TASK (24/7)
 # =========================================================================
 
@@ -3017,14 +2892,14 @@ async def run_crypto_scan_scheduled():
     logger.info("🪙 Running scheduled Crypto scan...")
     
     try:
-        from scanners.hunter import analyze_single_ticker, SCANNER_AVAILABLE
+        from scanners.cta_scanner import analyze_ticker_cta as analyze_single_ticker, CTA_SCANNER_AVAILABLE as SCANNER_AVAILABLE
         from websocket.broadcaster import manager
         from database.redis_client import cache_signal
         from database.postgres_client import log_signal, update_signal_with_score
         from scoring.trade_ideas_scorer import calculate_signal_score
         
         if not SCANNER_AVAILABLE:
-            logger.warning("Hunter Scanner not available for crypto scan")
+            logger.warning("CTA Scanner not available for crypto scan")
             _scheduler_status["crypto_scanner"]["status"] = "unavailable"
             return
         
@@ -3042,21 +2917,20 @@ async def run_crypto_scan_scheduled():
             try:
                 # Analyze ticker
                 result = await analyze_single_ticker(ticker)
-                
-                if not result or result.get('data_status') != 'OK':
+                if not result or result.get("error"):
                     continue
-                
-                # Check if there's a signal
-                verdict = result.get('overall_verdict', 'NO_SIGNAL')
-                if verdict == 'NO_SIGNAL':
+
+                signals = result.get("signals", [])
+                if not signals:
                     continue
-                
-                # Build signal
-                direction = 'SHORT' if 'URSA' in verdict else 'LONG'
-                signal_type = verdict
-                
+
+                best_signal = max(signals, key=lambda s: s.get("priority", 0))
+                cta_analysis = result.get("cta_analysis", {})
+
+                direction = best_signal.get("direction", "LONG")
+                signal_type = best_signal.get("signal_type", "CTA_SIGNAL")
                 signal_id = f"{ticker}_{direction}_{get_eastern_now().strftime('%Y%m%d_%H%M%S')}"
-                
+
                 trade_signal = {
                     "signal_id": signal_id,
                     "timestamp": get_eastern_now().isoformat(),
@@ -3064,15 +2938,15 @@ async def run_crypto_scan_scheduled():
                     "strategy": "Crypto Scanner",
                     "direction": direction,
                     "signal_type": signal_type,
-                    "entry_price": result.get('metrics', {}).get('price'),
-                    "stop_loss": None,  # Would need to calculate
-                    "target_1": None,
-                    "risk_reward": None,
+                    "entry_price": best_signal.get("setup", {}).get("entry") or cta_analysis.get("current_price"),
+                    "stop_loss": best_signal.get("setup", {}).get("stop"),
+                    "target_1": best_signal.get("setup", {}).get("target"),
+                    "risk_reward": best_signal.get("setup", {}).get("rr_ratio"),
                     "timeframe": "DAILY",
                     "asset_class": "CRYPTO",
                     "status": "ACTIVE",
-                    "adx": result.get('metrics', {}).get('adx'),
-                    "rsi": result.get('metrics', {}).get('rsi')
+                    "cta_zone": cta_analysis.get("cta_zone"),
+                    "confidence": best_signal.get("confidence", "MEDIUM"),
                 }
                 
                 # Calculate score

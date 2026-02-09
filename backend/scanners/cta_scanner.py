@@ -22,9 +22,10 @@ from datetime import datetime, timedelta
 import uuid
 import asyncio
 import os
-import json
 
 logger = logging.getLogger(__name__)
+
+from scanners.universe import SP500_EXPANDED, RUSSELL_HIGH_VOLUME, build_scan_universe
 
 
 def convert_numpy_types(obj):
@@ -45,20 +46,7 @@ def convert_numpy_types(obj):
         return None
     return obj
 
-# Watchlist storage path
-WATCHLIST_FILE = os.path.join(os.path.dirname(__file__), "..", "..", "data", "watchlist.json")
-
-
-def load_watchlist() -> List[str]:
-    """Load user's watchlist for priority scanning"""
-    try:
-        if os.path.exists(WATCHLIST_FILE):
-            with open(WATCHLIST_FILE, 'r') as f:
-                data = json.load(f)
-                return data.get("tickers", [])
-    except Exception as e:
-        logger.error(f"Error loading watchlist: {e}")
-    return []
+# NOTE: Watchlist membership now comes from watchlist_tickers (PostgreSQL).
 
 
 # Try to import optional dependencies
@@ -69,6 +57,14 @@ try:
 except ImportError:
     CTA_SCANNER_AVAILABLE = False
     logger.warning("CTA Scanner dependencies not installed. Run: pip install yfinance pandas_ta")
+
+
+async def _fetch_history_async(ticker: str, period: str = "1y") -> pd.DataFrame:
+    def _sync_fetch() -> pd.DataFrame:
+        stock = yf.Ticker(ticker)
+        return stock.history(period=period)
+
+    return await asyncio.to_thread(_sync_fetch)
 
 
 # Universe Filters
@@ -84,58 +80,8 @@ UNIVERSE_FILTERS = {
     "russell_volume_min": 2_000_000,           # 2M shares/day
 }
 
-# S&P 500 Expanded Universe (Top 200 by market cap/liquidity)
-SP500_EXPANDED = [
-    # Mega Tech (but still good movers)
-    "AAPL", "MSFT", "AMZN", "NVDA", "GOOGL", "META", "TSLA", "AVGO", "ORCL", "AMD",
-    "CRM", "ADBE", "CSCO", "INTC", "QCOM", "INTU", "NOW", "PANW", "SNPS", "AMAT",
-    
-    # Financials
-    "JPM", "BAC", "WFC", "GS", "MS", "C", "BLK", "SCHW", "AXP", "USB",
-    "PNC", "TFC", "COF", "BK", "STT", "SPGI", "MCO", "ICE", "CME", "AON",
-    
-    # Healthcare
-    "UNH", "JNJ", "LLY", "ABBV", "MRK", "PFE", "TMO", "ABT", "DHR", "BMY",
-    "AMGN", "GILD", "ISRG", "REGN", "VRTX", "CI", "CVS", "ELV", "HUM", "ZTS",
-    
-    # Consumer Discretionary
-    "AMZN", "TSLA", "HD", "MCD", "NKE", "SBUX", "TJX", "LOW", "BKNG", "MAR",
-    
-    # Consumer Staples
-    "WMT", "PG", "KO", "PEP", "COST", "PM", "MO", "MDLZ", "CL", "GIS",
-    
-    # Industrials
-    "CAT", "BA", "UNP", "UPS", "RTX", "HON", "GE", "DE", "MMC", "ITW",
-    "WM", "EMR", "ETN", "FDX", "NSC", "CSX",
-    
-    # Energy
-    "XOM", "CVX", "COP", "SLB", "EOG", "MPC", "PSX", "VLO", "OXY", "HAL",
-    
-    # Materials
-    "LIN", "APD", "SHW", "ECL", "NEM", "FCX",
-    
-    # Utilities
-    "NEE", "SO", "DUK", "AEP", "SRE", "D", "EXC",
-    
-    # Real Estate
-    "PLD", "AMT", "EQIX", "PSA", "WELL", "SPG", "O", "CBRE",
-    
-    # Communication Services
-    "META", "GOOGL", "NFLX", "DIS", "CMCSA", "T", "VZ", "TMUS"
-]
-
-# Russell 1000 High-Volume Tickers (selected for liquidity)
-RUSSELL_HIGH_VOLUME = [
-    # High-volume mid-caps with good technical setups
-    "PLTR", "SOFI", "RIVN", "LCID", "F", "SNAP", "COIN", "HOOD", "RBLX", "U",
-    "ZM", "DOCU", "CRWD", "NET", "DDOG", "SNOW", "MDB", "HUBS", "ZS", "OKTA",
-    "SQ", "PYPL", "SHOP", "ROKU", "PINS", "TWLO", "LYFT", "UBER", "DASH", "ABNB",
-    "GME", "AMC", "BB", "BBBY", "TLRY", "SNDL", "MARA", "RIOT", "SI", "FUBO",
-    "NIO", "XPEV", "LI", "BABA", "JD", "PDD", "BIDU",
-    "AFRM", "UPST", "LMND", "OPEN", "WISH", "CLOV", "SKLZ",
-    "PLUG", "FCEL", "BE", "QS", "BLNK", "CHPT"
-]
-
+FILTER_CACHE_KEY = "scanner:filter_cache"
+FILTER_CACHE_TTL = 86400  # 24 hours
 
 # CTA Scanner Configuration
 CTA_CONFIG = {
@@ -222,6 +168,21 @@ def calculate_cta_indicators(df: pd.DataFrame) -> pd.DataFrame:
         vol_period = CTA_CONFIG["volume"]["avg_period"]
         df['vol_avg'] = df['Volume'].rolling(vol_period).mean()
         df['vol_ratio'] = df['Volume'] / df['vol_avg']
+
+        # ===== Indicators for trapped trader detection =====
+        typical_price = (df['High'] + df['Low'] + df['Close']) / 3
+        df['vwap_20'] = (typical_price * df['Volume']).rolling(20).sum() / df['Volume'].rolling(20).sum()
+
+        adx_data = ta.adx(df['High'], df['Low'], df['Close'], length=14)
+        if adx_data is not None and 'ADX_14' in adx_data.columns:
+            df['adx'] = adx_data['ADX_14']
+        else:
+            df['adx'] = None
+
+        df['rsi'] = ta.rsi(df['Close'], length=14)
+
+        df['vol_avg_20'] = df['Volume'].rolling(20).mean()
+        df['rvol'] = df['Volume'] / df['vol_avg_20']
         
         # Rolling high (for correction calculation)
         df['rolling_high_60'] = df['High'].rolling(60).max()
@@ -526,6 +487,134 @@ def check_zone_upgrade(df: pd.DataFrame, ticker: str) -> Optional[Dict]:
     return None
 
 
+def check_trapped_longs(df: pd.DataFrame, ticker: str) -> Optional[Dict]:
+    """
+    URSA HUNTER: Detect trapped longs (bearish setup).
+    All conditions must be true:
+    - Price < 200 SMA (macro bearish)
+    - Price < 20-day VWAP (buyers underwater)
+    - ADX > 20 (trending, not choppy)
+    - RSI > 40 (room to fall, not already oversold)
+    - RVOL > 1.25x (institutional activity)
+    """
+    latest = df.iloc[-1]
+    price = latest['Close']
+    sma200 = latest.get('sma200')
+    vwap = latest.get('vwap_20')
+    adx = latest.get('adx')
+    rsi = latest.get('rsi')
+    rvol = latest.get('rvol')
+    atr = latest.get('atr', 0) or 0
+
+    if any(pd.isna(x) for x in [price, sma200, vwap, adx, rsi, rvol]):
+        return None
+
+    if not all([
+        price < sma200,
+        price < vwap,
+        adx > 20,
+        rsi > 40,
+        rvol > 1.25,
+    ]):
+        return None
+
+    entry = round(price, 2)
+    stop = round(price + (atr * 1.5), 2)
+    target = round(price - (atr * 3.0), 2)
+    priority = 80
+    if rvol > 2.0 and adx > 30:
+        priority = 100
+
+    return {
+        "signal_id": f"{ticker}_TRAPPED_LONGS_{datetime.now().strftime('%Y%m%d')}",
+        "timestamp": datetime.now().isoformat(),
+        "symbol": ticker,
+        "signal_type": "TRAPPED_LONGS",
+        "direction": "SHORT",
+        "confidence": "HIGH" if (rvol > 2.0 and adx > 30) else "MEDIUM",
+        "priority": priority,
+        "description": f"Trapped longs: Price below 200 SMA and VWAP, ADX {adx:.0f}, RVOL {rvol:.1f}x",
+        "setup": {
+            "entry": entry,
+            "stop": stop,
+            "target": target,
+            "rr_ratio": round((entry - target) / (stop - entry), 1) if (stop - entry) > 0 else 0,
+        },
+        "trapped_trader_data": {
+            "sma200": round(sma200, 2),
+            "vwap_20": round(vwap, 2),
+            "pct_from_vwap": round(((price - vwap) / vwap) * 100, 2),
+            "adx": round(adx, 1),
+            "rsi": round(rsi, 1),
+            "rvol": round(rvol, 2),
+        },
+    }
+
+
+def check_trapped_shorts(df: pd.DataFrame, ticker: str) -> Optional[Dict]:
+    """
+    TAURUS HUNTER: Detect trapped shorts (bullish setup).
+    All conditions must be true:
+    - Price > 200 SMA (macro bullish)
+    - Price > 20-day VWAP (shorts underwater)
+    - ADX > 20 (trending)
+    - RSI < 60 (room to rise, not already overbought)
+    - RVOL > 1.25x (institutional activity)
+    """
+    latest = df.iloc[-1]
+    price = latest['Close']
+    sma200 = latest.get('sma200')
+    vwap = latest.get('vwap_20')
+    adx = latest.get('adx')
+    rsi = latest.get('rsi')
+    rvol = latest.get('rvol')
+    atr = latest.get('atr', 0) or 0
+
+    if any(pd.isna(x) for x in [price, sma200, vwap, adx, rsi, rvol]):
+        return None
+
+    if not all([
+        price > sma200,
+        price > vwap,
+        adx > 20,
+        rsi < 60,
+        rvol > 1.25,
+    ]):
+        return None
+
+    entry = round(price, 2)
+    stop = round(price - (atr * 1.5), 2)
+    target = round(price + (atr * 3.0), 2)
+    priority = 80
+    if rvol > 2.0 and adx > 30:
+        priority = 100
+
+    return {
+        "signal_id": f"{ticker}_TRAPPED_SHORTS_{datetime.now().strftime('%Y%m%d')}",
+        "timestamp": datetime.now().isoformat(),
+        "symbol": ticker,
+        "signal_type": "TRAPPED_SHORTS",
+        "direction": "LONG",
+        "confidence": "HIGH" if (rvol > 2.0 and adx > 30) else "MEDIUM",
+        "priority": priority,
+        "description": f"Trapped shorts: Price above 200 SMA and VWAP, ADX {adx:.0f}, RVOL {rvol:.1f}x",
+        "setup": {
+            "entry": entry,
+            "stop": stop,
+            "target": target,
+            "rr_ratio": round((target - entry) / (entry - stop), 1) if (entry - stop) > 0 else 0,
+        },
+        "trapped_trader_data": {
+            "sma200": round(sma200, 2),
+            "vwap_20": round(vwap, 2),
+            "pct_from_vwap": round(((price - vwap) / vwap) * 100, 2),
+            "adx": round(adx, 1),
+            "rsi": round(rsi, 1),
+            "rvol": round(rvol, 2),
+        },
+    }
+
+
 # ============================================================================
 # SHORT SIGNAL DETECTION (for lagging sectors / bearish setups)
 # ============================================================================
@@ -727,8 +816,7 @@ async def scan_ticker_cta(ticker: str, allow_shorts: bool = False) -> List[Dict]
     
     try:
         # Fetch data
-        stock = yf.Ticker(ticker)
-        df = stock.history(period="1y")
+        df = await _fetch_history_async(ticker, period="1y")
         
         if df.empty or len(df) < 150:
             logger.debug(f"{ticker}: Insufficient data for CTA scan")
@@ -736,6 +824,17 @@ async def scan_ticker_cta(ticker: str, allow_shorts: bool = False) -> List[Dict]
         
         # Calculate indicators
         df = calculate_cta_indicators(df)
+
+        # Write CTA zone to Redis for watchlist enrichment
+        try:
+            from database.redis_client import get_redis_client
+
+            latest_zone = df.iloc[-1].get('cta_zone')
+            client = await get_redis_client()
+            if client and latest_zone and latest_zone != "UNKNOWN":
+                await client.setex(f"cta:zone:{ticker}", 3600, latest_zone)
+        except Exception:
+            pass
         
         # LONG signals (always check)
         golden = check_golden_touch(df, ticker)
@@ -767,6 +866,14 @@ async def scan_ticker_cta(ticker: str, allow_shorts: bool = False) -> List[Dict]
             resistance_rejection = check_resistance_rejection(df, ticker)
             if resistance_rejection:
                 signals.append(resistance_rejection)
+
+        trapped_longs = check_trapped_longs(df, ticker)
+        if trapped_longs:
+            signals.append(trapped_longs)
+
+        trapped_shorts = check_trapped_shorts(df, ticker)
+        if trapped_shorts:
+            signals.append(trapped_shorts)
         
     except Exception as e:
         logger.error(f"Error in CTA scan for {ticker}: {e}")
@@ -794,18 +901,44 @@ async def analyze_ticker_cta(ticker: str) -> Dict[str, Any]:
     }
     
     try:
-        stock = yf.Ticker(ticker)
-        df = stock.history(period="1y")
-        
+        df = await _fetch_history_async(ticker, period="1y")
+
         if df.empty or len(df) < 150:
             result["error"] = "Insufficient data"
             return result
-        
+
         df = calculate_cta_indicators(df)
+        result = await analyze_ticker_cta_from_df(ticker, df)
+
+    except Exception as e:
+        result["error"] = str(e)
+        logger.error(f"Error analyzing {ticker}: {e}")
+
+    return convert_numpy_types(result)
+
+
+async def analyze_ticker_cta_from_df(ticker: str, df: pd.DataFrame) -> Dict[str, Any]:
+    """
+    Same as analyze_ticker_cta() but accepts pre-fetched DataFrame.
+    Used by the unified analyzer to avoid duplicate yfinance calls.
+    """
+    ticker = ticker.upper().strip()
+    result = {
+        "ticker": ticker,
+        "scan_time": datetime.now().isoformat(),
+        "cta_analysis": {},
+        "signals": [],
+        "recommendation": None,
+    }
+
+    try:
+        if df.empty or len(df) < 150:
+            result["error"] = "Insufficient data"
+            return result
+
         latest = df.iloc[-1]
-        
         zone, bias = get_cta_zone(latest['Close'], latest['sma20'], latest['sma50'], latest['sma120'])
-        
+
         result["cta_analysis"] = {
             "current_price": round(latest['Close'], 2),
             "cta_zone": zone,
@@ -814,65 +947,183 @@ async def analyze_ticker_cta(ticker: str) -> Dict[str, Any]:
             "sma50": round(latest['sma50'], 2) if pd.notna(latest['sma50']) else None,
             "sma120": round(latest['sma120'], 2) if pd.notna(latest['sma120']) else None,
             "sma200": round(latest['sma200'], 2) if pd.notna(latest['sma200']) else None,
-            "distance_to_20_pct": round(latest['dist_to_20_pct'], 2) if pd.notna(latest['dist_to_20_pct']) else None,
-            "distance_to_50_pct": round(latest['dist_to_50_pct'], 2) if pd.notna(latest['dist_to_50_pct']) else None,
-            "distance_to_120_pct": round(latest['dist_to_120_pct'], 2) if pd.notna(latest['dist_to_120_pct']) else None,
-            "days_above_120": int(latest['days_above_120']) if pd.notna(latest['days_above_120']) else 0,
-            "correction_from_high_pct": round(latest['correction_pct'], 2) if pd.notna(latest['correction_pct']) else None,
-            "volume_ratio": round(latest['vol_ratio'], 2) if pd.notna(latest['vol_ratio']) else None,
-            "atr": round(latest['atr'], 2) if pd.notna(latest['atr']) else None,
+            "distance_to_20_pct": round(latest['dist_to_20_pct'], 2) if pd.notna(latest.get('dist_to_20_pct')) else None,
+            "distance_to_50_pct": round(latest['dist_to_50_pct'], 2) if pd.notna(latest.get('dist_to_50_pct')) else None,
+            "distance_to_120_pct": round(latest['dist_to_120_pct'], 2) if pd.notna(latest.get('dist_to_120_pct')) else None,
+            "days_above_120": int(latest['days_above_120']) if pd.notna(latest.get('days_above_120')) else 0,
+            "correction_from_high_pct": round(latest['correction_pct'], 2) if pd.notna(latest.get('correction_pct')) else None,
+            "volume_ratio": round(latest['vol_ratio'], 2) if pd.notna(latest.get('vol_ratio')) else None,
+            "atr": round(latest['atr'], 2) if pd.notna(latest.get('atr')) else None,
         }
-        
-        # Get signals
-        result["signals"] = await scan_ticker_cta(ticker)
-        
-        # Generate recommendation
+
+        signals = []
+        golden = check_golden_touch(df, ticker)
+        if golden:
+            signals.append(golden)
+        two_close = check_two_close_volume(df, ticker)
+        if two_close:
+            signals.append(two_close)
+        pullback = check_pullback_entry(df, ticker)
+        if pullback:
+            signals.append(pullback)
+        zone_up = check_zone_upgrade(df, ticker)
+        if zone_up:
+            signals.append(zone_up)
+        trapped_l = check_trapped_longs(df, ticker)
+        if trapped_l:
+            signals.append(trapped_l)
+        trapped_s = check_trapped_shorts(df, ticker)
+        if trapped_s:
+            signals.append(trapped_s)
+
+        result["signals"] = [convert_numpy_types(s) for s in signals]
+
         if result["signals"]:
-            best_signal = max(result["signals"], key=lambda x: x["priority"])
+            best_signal = max(result["signals"], key=lambda x: x.get("priority", 0))
             result["recommendation"] = {
-                "action": "CONSIDER_LONG",
-                "signal_type": best_signal["signal_type"],
-                "entry": best_signal["setup"]["entry"],
-                "stop": best_signal["setup"]["stop"],
-                "target": best_signal["setup"]["target"],
-                "confidence": best_signal["confidence"],
+                "action": best_signal.get("direction", "CONSIDER_LONG"),
+                "signal_type": best_signal.get("signal_type"),
+                "entry": best_signal.get("setup", {}).get("entry"),
+                "stop": best_signal.get("setup", {}).get("stop"),
+                "target": best_signal.get("setup", {}).get("target"),
+                "confidence": best_signal.get("confidence"),
             }
         else:
             if zone == "MAX_LONG":
-                result["recommendation"] = {
-                    "action": "HOLD_OR_WAIT_PULLBACK",
-                    "note": "In Max Long zone but no specific entry signal. Wait for pullback to 20 SMA."
-                }
+                result["recommendation"] = {"action": "HOLD_OR_WAIT_PULLBACK", "note": "In Max Long zone. Wait for pullback to 20 SMA."}
             elif zone == "DE_LEVERAGING":
-                result["recommendation"] = {
-                    "action": "WATCH",
-                    "note": "De-leveraging zone. Watch for reclaim of 20 SMA with volume."
-                }
+                result["recommendation"] = {"action": "WATCH", "note": "De-leveraging zone. Watch for reclaim of 20 SMA with volume."}
             elif zone == "WATERFALL":
-                result["recommendation"] = {
-                    "action": "AVOID_LONGS",
-                    "note": "Waterfall zone. No long entries until 50 SMA reclaimed."
-                }
+                result["recommendation"] = {"action": "AVOID_LONGS", "note": "Waterfall zone. No longs until 50 SMA reclaimed."}
             elif zone == "CAPITULATION":
-                result["recommendation"] = {
-                    "action": "NO_TRADE",
-                    "note": "Capitulation zone. 20 SMA below 120. Wait for structural recovery."
-                }
+                result["recommendation"] = {"action": "NO_TRADE", "note": "Capitulation zone. Wait for structural recovery."}
             else:
-                result["recommendation"] = {
-                    "action": "MONITOR",
-                    "note": "No clear setup. Continue monitoring."
-                }
-        
+                result["recommendation"] = {"action": "MONITOR", "note": "No clear setup. Continue monitoring."}
+
     except Exception as e:
         result["error"] = str(e)
         logger.error(f"Error analyzing {ticker}: {e}")
-    
-    # Convert numpy types to Python native types for JSON serialization
+
     return convert_numpy_types(result)
 
 
-async def check_ticker_filters(ticker: str, is_russell: bool = False) -> bool:
+def get_trapped_trader_breakdown_from_df(ticker: str, df: pd.DataFrame) -> Dict[str, Any]:
+    """
+    Detailed pass/fail breakdown for trapped trader detection.
+    Accepts pre-fetched, pre-calculated DataFrame.
+    """
+    if df.empty or len(df) < 200:
+        return {"verdict": "INSUFFICIENT_DATA", "error": f"Only {len(df)} days available, need 200+"}
+
+    latest = df.iloc[-1]
+    price = latest['Close']
+    sma200 = latest.get('sma200')
+    vwap = latest.get('vwap_20')
+    adx = latest.get('adx')
+    rsi = latest.get('rsi')
+    rvol = latest.get('rvol')
+
+    ursa_criteria = {
+        "price_below_sma200": {
+            "label": "Price < 200 SMA (Macro Bearish)",
+            "required": f"Below {round(sma200, 2)}" if pd.notna(sma200) else "N/A",
+            "current": f"{round(price, 2)}" if pd.notna(price) else "N/A",
+            "passed": bool(pd.notna(price) and pd.notna(sma200) and price < sma200),
+        },
+        "price_below_vwap": {
+            "label": "Price < 20d VWAP (Buyers Underwater)",
+            "required": f"Below {round(vwap, 2)}" if pd.notna(vwap) else "N/A",
+            "current": f"{round(price, 2)}" if pd.notna(price) else "N/A",
+            "passed": bool(pd.notna(price) and pd.notna(vwap) and price < vwap),
+        },
+        "adx_trending": {
+            "label": "ADX > 20 (Trending Market)",
+            "required": "> 20",
+            "current": f"{round(adx, 1)}" if pd.notna(adx) else "N/A",
+            "passed": bool(pd.notna(adx) and adx > 20),
+        },
+        "rsi_room_to_fall": {
+            "label": "RSI > 40 (Room to Fall)",
+            "required": "> 40",
+            "current": f"{round(rsi, 1)}" if pd.notna(rsi) else "N/A",
+            "passed": bool(pd.notna(rsi) and rsi > 40),
+        },
+        "institutional_volume": {
+            "label": "RVOL > 1.25x (Institutional Activity)",
+            "required": "> 1.25x",
+            "current": f"{round(rvol, 2)}x" if pd.notna(rvol) else "N/A",
+            "passed": bool(pd.notna(rvol) and rvol > 1.25),
+        },
+    }
+
+    taurus_criteria = {
+        "price_above_sma200": {
+            "label": "Price > 200 SMA (Macro Bullish)",
+            "required": f"Above {round(sma200, 2)}" if pd.notna(sma200) else "N/A",
+            "current": f"{round(price, 2)}" if pd.notna(price) else "N/A",
+            "passed": bool(pd.notna(price) and pd.notna(sma200) and price > sma200),
+        },
+        "price_above_vwap": {
+            "label": "Price > 20d VWAP (Shorts Underwater)",
+            "required": f"Above {round(vwap, 2)}" if pd.notna(vwap) else "N/A",
+            "current": f"{round(price, 2)}" if pd.notna(price) else "N/A",
+            "passed": bool(pd.notna(price) and pd.notna(vwap) and price > vwap),
+        },
+        "adx_trending": {
+            "label": "ADX > 20 (Trending Market)",
+            "required": "> 20",
+            "current": f"{round(adx, 1)}" if pd.notna(adx) else "N/A",
+            "passed": bool(pd.notna(adx) and adx > 20),
+        },
+        "rsi_room_to_rise": {
+            "label": "RSI < 60 (Room to Rise)",
+            "required": "< 60",
+            "current": f"{round(rsi, 1)}" if pd.notna(rsi) else "N/A",
+            "passed": bool(pd.notna(rsi) and rsi < 60),
+        },
+        "institutional_volume": {
+            "label": "RVOL > 1.25x (Institutional Activity)",
+            "required": "> 1.25x",
+            "current": f"{round(rvol, 2)}x" if pd.notna(rvol) else "N/A",
+            "passed": bool(pd.notna(rvol) and rvol > 1.25),
+        },
+    }
+
+    ursa_all_passed = all(c["passed"] for c in ursa_criteria.values())
+    taurus_all_passed = all(c["passed"] for c in taurus_criteria.values())
+
+    if ursa_all_passed:
+        verdict = "TRAPPED_LONGS"
+    elif taurus_all_passed:
+        verdict = "TRAPPED_SHORTS"
+    else:
+        verdict = "NO_SIGNAL"
+
+    return {
+        "verdict": verdict,
+        "metrics": {
+            "price": round(price, 2) if pd.notna(price) else None,
+            "sma200": round(sma200, 2) if pd.notna(sma200) else None,
+            "vwap_20": round(vwap, 2) if pd.notna(vwap) else None,
+            "adx": round(adx, 1) if pd.notna(adx) else None,
+            "rsi": round(rsi, 1) if pd.notna(rsi) else None,
+            "rvol": round(rvol, 2) if pd.notna(rvol) else None,
+        },
+        "ursa_bearish": {"all_passed": ursa_all_passed, "criteria": ursa_criteria},
+        "taurus_bullish": {"all_passed": taurus_all_passed, "criteria": taurus_criteria},
+    }
+
+
+async def get_trapped_trader_breakdown(ticker: str) -> Dict[str, Any]:
+    """Wrapper that fetches data then delegates to _from_df variant."""
+    df = await _fetch_history_async(ticker, period="1y")
+    if df.empty:
+        return {"verdict": "NO_DATA", "error": f"No data for {ticker}"}
+    df = calculate_cta_indicators(df)
+    return get_trapped_trader_breakdown_from_df(ticker, df)
+
+
+def _check_ticker_filters_sync(ticker: str, is_russell: bool = False) -> bool:
     """
     Check if ticker passes quality filters (market cap, volume, volatility)
     
@@ -936,78 +1187,100 @@ async def check_ticker_filters(ticker: str, is_russell: bool = False) -> bool:
         return False
 
 
+async def check_ticker_filters_cached(ticker: str, is_russell: bool = False) -> bool:
+    """Cache filter results in Redis for 24 hours to avoid repeated HTTP calls."""
+    try:
+        from database.redis_client import get_redis_client
+        client = await get_redis_client()
+    except Exception:
+        client = None
+
+    if client:
+        cached = await client.hget(FILTER_CACHE_KEY, ticker)
+        if cached is not None:
+            if isinstance(cached, (bytes, bytearray)):
+                return cached == b"1"
+            return str(cached) == "1"
+
+    result = await asyncio.to_thread(_check_ticker_filters_sync, ticker, is_russell)
+
+    if client:
+        await client.hset(FILTER_CACHE_KEY, ticker, "1" if result else "0")
+        await client.expire(FILTER_CACHE_KEY, FILTER_CACHE_TTL)
+
+    return result
+
+
+async def _get_ticker_sources(symbols: List[str]) -> Dict[str, str]:
+    if not symbols:
+        return {}
+    try:
+        from database.postgres_client import get_postgres_client
+        pool = await get_postgres_client()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT symbol, source FROM watchlist_tickers WHERE symbol = ANY($1::text[])",
+                symbols,
+            )
+        return {row["symbol"]: row["source"] for row in rows}
+    except Exception as e:
+        logger.warning(f"Failed to load ticker sources: {e}")
+        return {}
+
+
+async def _get_watchlist_symbols() -> List[str]:
+    try:
+        from database.postgres_client import get_postgres_client
+        pool = await get_postgres_client()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT symbol FROM watchlist_tickers "
+                "WHERE source IN ('manual', 'position') AND muted = false "
+                "ORDER BY added_at"
+            )
+        return [row["symbol"] for row in rows]
+    except Exception as e:
+        logger.warning(f"Failed to load watchlist symbols: {e}")
+        return []
+
+
 async def build_dynamic_universe(sector_strength: Dict[str, Any] = None) -> List[str]:
     """
     Build optimized scan universe based on sector strength and filters
-    
+
     Priority order:
     1. Watchlist (always included)
     2. Leading sector tickers (20 per sector)
     3. S&P 500 filtered tickers
     4. Russell 1000 high-volume filtered tickers
-    
+
     Returns:
         List of tickers to scan
     """
-    universe = []
-    
-    # 1. Watchlist always first
-    watchlist = load_watchlist()
-    universe.extend(watchlist)
-    logger.info(f"📋 Watchlist: {len(watchlist)} tickers")
-    
-    # 2. Sector-based allocation (if sector data available)
-    if sector_strength:
-        # Sort sectors by rank
-        sorted_sectors = sorted(sector_strength.items(), key=lambda x: x[1].get('rank', 999))
-        
-        for sector_name, sector_data in sorted_sectors:
-            rank = sector_data.get('rank', 999)
-            trend = sector_data.get('trend', 'neutral')
-            
-            # Allocate tickers based on sector strength
-            if trend == 'leading' and rank <= 3:
-                # Leading sectors: scan more tickers
-                allocation = 20
-            elif trend == 'neutral' or (4 <= rank <= 8):
-                # Mid-pack sectors: moderate allocation
-                allocation = 10
-            else:
-                # Lagging sectors: skip for now (could add SHORT logic later)
-                allocation = 0
-            
-            logger.info(f"📊 {sector_name}: Rank {rank}, {trend} → {allocation} tickers")
-    
-    # 3. S&P 500 filtered universe
-    logger.info("🔍 Filtering S&P 500 universe...")
-    sp500_filtered = []
-    
-    for ticker in SP500_EXPANDED[:150]:  # Check first 150
-        if ticker not in universe:
-            if await check_ticker_filters(ticker, is_russell=False):
-                sp500_filtered.append(ticker)
-                if len(sp500_filtered) >= 80:  # Cap at 80 to save scan time
-                    break
-    
-    universe.extend(sp500_filtered)
-    logger.info(f"✅ S&P 500: {len(sp500_filtered)} tickers passed filters")
-    
-    # 4. Russell high-volume picks (stricter filters)
-    logger.info("🔍 Filtering Russell 1000 universe...")
-    russell_filtered = []
-    
-    for ticker in RUSSELL_HIGH_VOLUME[:80]:  # Check first 80
-        if ticker not in universe:
-            if await check_ticker_filters(ticker, is_russell=True):
-                russell_filtered.append(ticker)
-                if len(russell_filtered) >= 30:  # Cap at 30
-                    break
-    
-    universe.extend(russell_filtered)
-    logger.info(f"✅ Russell: {len(russell_filtered)} tickers passed filters")
-    
-    logger.info(f"🎯 Total scan universe: {len(universe)} tickers")
-    return universe
+    universe = await build_scan_universe(max_tickers=200, include_scanner_universe=True, respect_muted=True)
+    sources = await _get_ticker_sources(universe)
+
+    filtered = []
+    filtered_out = 0
+
+    for ticker in universe:
+        source = sources.get(ticker, "scanner")
+        if source in ("manual", "position"):
+            filtered.append(ticker)
+            continue
+
+        is_russell = ticker in RUSSELL_HIGH_VOLUME
+        if await check_ticker_filters_cached(ticker, is_russell=is_russell):
+            filtered.append(ticker)
+        else:
+            filtered_out += 1
+
+    logger.info(
+        "Dynamic universe built: %s kept, %s filtered out",
+        len(filtered),
+        filtered_out,
+    )
+    return filtered
 
 
 async def run_cta_scan(tickers: List[str] = None, include_watchlist: bool = True, use_dynamic_universe: bool = True) -> Dict:
@@ -1032,39 +1305,35 @@ async def run_cta_scan(tickers: List[str] = None, include_watchlist: bool = True
     # Build scan list
     if tickers is not None:
         # Manual ticker list provided
-        all_tickers = tickers
-        watchlist = load_watchlist() if include_watchlist else []
-        logger.info(f"🎯 CTA Scan starting: {len(tickers)} specified tickers")
+        all_tickers = [t.upper().strip() for t in tickers if t and str(t).strip()]
+        watchlist = await _get_watchlist_symbols() if include_watchlist else []
+        logger.info(f"CTA Scan starting: {len(all_tickers)} specified tickers")
     elif use_dynamic_universe:
         # Use smart filtered universe
-        logger.info("🧠 Building dynamic filtered universe...")
-        
-        # Try to load sector strength data
+        logger.info("Building dynamic filtered universe...")
+
+        sector_strength = None
         try:
-            import httpx
-            response = httpx.get("http://localhost:8000/api/watchlist", timeout=5.0)
-            if response.status_code == 200:
-                data = response.json()
-                sector_strength = data.get('sector_strength', {})
-            else:
-                sector_strength = None
-        except:
+            from api.watchlist import load_watchlist_data_async
+            data = await load_watchlist_data_async()
+            sector_strength = data.get("sector_strength", {})
+        except Exception:
             sector_strength = None
-        
+
         all_tickers = await build_dynamic_universe(sector_strength)
-        watchlist = load_watchlist()
+        watchlist = await _get_watchlist_symbols()
     else:
         # Legacy: Just watchlist + top 100
-        watchlist = load_watchlist() if include_watchlist else []
+        watchlist = await _get_watchlist_symbols() if include_watchlist else []
         sp500_list = [t for t in SP500_EXPANDED[:100] if t not in watchlist]
         all_tickers = watchlist + sp500_list
-        logger.info(f"🎯 CTA Scan starting: {len(watchlist)} watchlist + {len(sp500_list)} S&P")
+        logger.info(f"CTA Scan starting: {len(watchlist)} watchlist + {len(sp500_list)} S&P")
     
     logger.info(f"📊 Scanning {len(all_tickers)} tickers...")
     
     # Ensure watchlist is loaded for tagging
     if 'watchlist' not in locals():
-        watchlist = load_watchlist()
+        watchlist = await _get_watchlist_symbols()
     
     all_signals = []
     scan_stats = {

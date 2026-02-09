@@ -200,7 +200,7 @@ async def receive_circuit_breaker_alert(alert: CircuitBreakerTrigger):
         # Broadcast circuit breaker state via WebSocket
         try:
             from websocket.broadcaster import manager
-            await manager.broadcast_json({
+            await manager.broadcast({
                 "type": "circuit_breaker",
                 "state": state,
                 "timestamp": datetime.now(timezone.utc).isoformat()
@@ -246,7 +246,7 @@ async def reset_circuit_breaker_endpoint():
     # Broadcast reset via WebSocket
     try:
         from websocket.broadcaster import manager
-        await manager.broadcast_json({
+        await manager.broadcast({
             "type": "circuit_breaker",
             "state": result["state"],
             "timestamp": datetime.now(timezone.utc).isoformat()
@@ -278,7 +278,7 @@ async def test_circuit_breaker(trigger: str):
         # Broadcast test state
         try:
             from websocket.broadcaster import manager
-            await manager.broadcast_json({
+            await manager.broadcast({
                 "type": "circuit_breaker",
                 "state": state,
                 "test_mode": True,

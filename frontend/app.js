@@ -3564,12 +3564,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
 // ==========================================
-// WATCHLIST MANAGEMENT
+// WATCHLIST MANAGEMENT (v3)
 // ==========================================
 
-let watchlistViewMode = 'sectors';
 let watchlistRefreshInterval = null;
 let watchlistLastData = null;
+let watchlistTickerCache = [];
+let watchlistCounts = {};
+let selectedTickers = new Set();
+let lastAnalyzedTicker = null;
 
 const ZONE_COLORS = {
     MAX_LONG: { bg: '#0a2e1a', text: '#00e676' },
@@ -3581,76 +3584,57 @@ const ZONE_COLORS = {
     NEUTRAL: { bg: '#1a2228', text: '#78909c' }
 };
 
-let watchlistTickers = [];
-
 function initWatchlist() {
-    const addBtn = document.getElementById('addTickerBtn');
-    const addInput = document.getElementById('addTickerInput');
-    const resetBtn = document.getElementById('resetWatchlistBtn');
-    
-    if (addBtn) {
-        addBtn.addEventListener('click', addTickerToWatchlist);
-    }
-    
-    if (addInput) {
-        addInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') {
-                addTickerToWatchlist();
-            }
-        });
-    }
-    
-    if (resetBtn) {
-        resetBtn.addEventListener('click', resetWatchlist);
-    }
-    
-    // Load enriched watchlist UI
-    initWatchlistV2();
+    initWatchlistV3();
 }
 
-let watchlistSectors = {};
-let sectorStrength = {};
+function initWatchlistV3() {
+    const sectorSort = document.getElementById('watchlist-sector-sort');
+    if (sectorSort) {
+        sectorSort.addEventListener('change', () => {
+            watchlistLastData = null;
+            fetchEnrichedWatchlist();
+        });
+    }
 
-async function loadWatchlist() {
-    const grid = document.getElementById('watchlist-grid');
-    if (grid) {
-        await fetchEnrichedWatchlist();
-        return;
+    const refreshBtn = document.getElementById('watchlist-refresh');
+    if (refreshBtn) {
+        refreshBtn.addEventListener('click', () => {
+            watchlistLastData = null;
+            fetchEnrichedWatchlist();
+        });
     }
-    try {
-        const response = await fetch(`${API_URL}/watchlist`);
-        const data = await response.json();
-        
-        if (data.status === 'success') {
-            watchlistTickers = data.tickers || [];
-            watchlistSectors = data.sectors || {};
-            sectorStrength = data.sector_strength || {};
-            renderWatchlist();
-        }
-    } catch (error) {
-        console.error('Error loading watchlist:', error);
-        const container = document.getElementById('watchlistTickers');
-        if (container) {
-            container.innerHTML = '<p class="empty-state">Failed to load watchlist</p>';
-        }
+
+    const tickerSort = document.getElementById('ticker-sort');
+    if (tickerSort) {
+        tickerSort.addEventListener('change', () => fetchTickerList());
     }
+
+    const tickerFilter = document.getElementById('ticker-filter');
+    if (tickerFilter) {
+        tickerFilter.addEventListener('change', () => renderTickerList());
+    }
+
+    const tickersRefresh = document.getElementById('tickers-refresh');
+    if (tickersRefresh) {
+        tickersRefresh.addEventListener('click', () => fetchTickerList(true));
+    }
+
+    setupBulkActions();
+    fetchEnrichedWatchlist();
+    fetchTickerList(true);
+    startWatchlistRefresh();
 }
 
 async function fetchEnrichedWatchlist() {
     const grid = document.getElementById('watchlist-grid');
     if (!grid) return;
 
-    const sortSelect = document.getElementById('watchlist-sort');
+    const sortSelect = document.getElementById('watchlist-sector-sort');
     const sortBy = sortSelect ? sortSelect.value : 'strength_rank';
 
     try {
-        let url;
-        if (watchlistViewMode === 'flat') {
-            url = `${API_URL}/watchlist/flat?sort_by=${sortBy}&sort_dir=desc`;
-        } else {
-            url = `${API_URL}/watchlist/enriched?sort_by=${sortBy}`;
-        }
-
+        const url = `${API_URL}/watchlist/enriched?sort_by=${encodeURIComponent(sortBy)}`;
         if (!watchlistLastData) {
             grid.innerHTML = '<div class="watchlist-loading">Loading watchlist data...</div>';
         }
@@ -3663,11 +3647,7 @@ async function fetchEnrichedWatchlist() {
         const data = await response.json();
         if (data.status === 'success') {
             watchlistLastData = data;
-            if (watchlistViewMode === 'flat') {
-                renderFlatWatchlist(data);
-            } else {
-                renderSectorWatchlist(data);
-            }
+            renderSectorWatchlist(data);
             renderBenchmark(data.benchmark);
             updateEnrichedTimestamp(data.enriched_at);
         } else {
@@ -3684,279 +3664,12 @@ async function fetchEnrichedWatchlist() {
     }
 }
 
-function renderSectorWatchlist(data) {
-    const grid = document.getElementById('watchlist-grid');
-    if (!grid) return;
-    grid.innerHTML = '';
-
-    const sectors = data.sectors || [];
-    if (sectors.length === 0) {
-        grid.innerHTML = '<div class="watchlist-loading">No sectors configured</div>';
-        return;
-    }
-
-    sectors.forEach(sector => {
-        const card = document.createElement('div');
-        card.className = 'sector-card';
-
-        const vsSpy1w = sector.vs_spy_1w;
-        const vsSpyPositive = (vsSpy1w || 0) >= 0;
-        const vsSpyColor = vsSpyPositive ? '#00e676' : '#f44336';
-        const headerBg = vsSpyPositive ? '#0a2e1a' : '#2e0a0a';
-        const biasColor = sector.bias_alignment === 'TORO' ? '#00e676'
-            : sector.bias_alignment === 'URSA' ? '#f44336'
-                : '#78909c';
-
-        let etfHtml = '';
-        if (sector.etf && sector.etf_change_1w !== null && sector.etf_change_1w !== undefined) {
-            etfHtml = `
-                <span class="sector-etf" style="color:${vsSpyColor}">
-                    ${escapeHtml(sector.etf)} ${formatChange(sector.etf_change_1w)}/1w
-                </span>
-            `;
-        }
-
-        let vsSpyHtml = '';
-        if (vsSpy1w !== null && vsSpy1w !== undefined) {
-            vsSpyHtml = `
-                <span class="sector-vs-spy" style="color:${vsSpyColor};background:${vsSpyColor}18">
-                    vs SPY: ${formatChange(vsSpy1w)}
-                </span>
-            `;
-        }
-
-        const headerHTML = `
-            <div class="sector-header" style="background:${headerBg}">
-                <div class="sector-title-row">
-                    <span class="sector-name">${escapeHtml(sector.name)}</span>
-                    ${etfHtml}
-                    ${vsSpyHtml}
-                </div>
-                <div class="sector-meta">
-                    <span class="sector-bias" style="color:${biasColor}">
-                        ${sector.bias_alignment || '-'}
-                    </span>
-                    <span class="sector-rank">
-                        ${sector.strength_rank < 999 ? '#' + sector.strength_rank : '-'}
-                    </span>
-                </div>
-            </div>
-        `;
-
-        let tableHTML = `
-            <div class="ticker-header-row">
-                <span class="col-ticker">Ticker</span>
-                <span class="col-price">Price</span>
-                <span class="col-1d">1D</span>
-                <span class="col-1w">1W</span>
-                <span class="col-zone">Zone</span>
-                <span class="col-signals">Sigs</span>
-            </div>
-        `;
-
-        const tickers = sector.tickers || [];
-        tickers.forEach(t => {
-            const zoneStyle = ZONE_COLORS[t.cta_zone] || ZONE_COLORS.NEUTRAL;
-            const zoneLabel = t.cta_zone ? t.cta_zone.replace(/_/g, ' ').substring(0, 9) : '-';
-            const signalDisplay = t.active_signals > 0
-                ? `<span class="signal-active">&#9889;${t.active_signals}</span>`
-                : '<span class="signal-none">-</span>';
-
-            tableHTML += `
-                <div class="ticker-row" data-symbol="${escapeHtml(t.symbol)}"
-                     onclick="openTickerChart('${escapeHtml(t.symbol)}')">
-                    <span class="col-ticker ticker-symbol">${escapeHtml(t.symbol)}</span>
-                    <span class="col-price">
-                        ${t.price !== null && t.price !== undefined ? '$' + t.price.toFixed(2) : '-'}
-                    </span>
-                    <span class="col-1d" style="color:${changeColor(t.change_1d)}">
-                        ${formatChange(t.change_1d)}
-                    </span>
-                    <span class="col-1w" style="color:${changeColor(t.change_1w)}">
-                        ${formatChange(t.change_1w)}
-                    </span>
-                    <span class="col-zone">
-                        <span class="zone-badge" style="background:${zoneStyle.bg};color:${zoneStyle.text}">
-                            ${zoneLabel}
-                        </span>
-                    </span>
-                    <span class="col-signals">${signalDisplay}</span>
-                </div>
-            `;
-        });
-
-        card.innerHTML = headerHTML + tableHTML;
-        grid.appendChild(card);
-    });
-}
-
-function renderFlatWatchlist(data) {
-    const grid = document.getElementById('watchlist-grid');
-    if (!grid) return;
-    grid.innerHTML = '';
-
-    const tickers = data.tickers || [];
-    if (tickers.length === 0) {
-        grid.innerHTML = '<div class="watchlist-loading">No tickers found</div>';
-        return;
-    }
-
-    const table = document.createElement('div');
-    table.className = 'flat-watchlist';
-
-    table.innerHTML = `
-        <div class="ticker-header-row flat-header">
-            <span class="col-ticker">Ticker</span>
-            <span class="col-sector">Sector</span>
-            <span class="col-price">Price</span>
-            <span class="col-1d">1D</span>
-            <span class="col-1w">1W</span>
-            <span class="col-zone">Zone</span>
-            <span class="col-signals">Sigs</span>
-        </div>
-    `;
-
-    tickers.forEach(t => {
-        const zoneStyle = ZONE_COLORS[t.cta_zone] || ZONE_COLORS.NEUTRAL;
-        const zoneLabel = t.cta_zone ? t.cta_zone.replace(/_/g, ' ').substring(0, 9) : '-';
-        const signalDisplay = t.active_signals > 0
-            ? `<span class="signal-active">&#9889;${t.active_signals}</span>`
-            : '<span class="signal-none">-</span>';
-
-        const row = document.createElement('div');
-        row.className = 'ticker-row';
-        row.setAttribute('data-symbol', t.symbol);
-        row.onclick = function() { openTickerChart(t.symbol); };
-        row.innerHTML = `
-            <span class="col-ticker ticker-symbol">${escapeHtml(t.symbol)}</span>
-            <span class="col-sector">${escapeHtml(t.sector || '-')}</span>
-            <span class="col-price">
-                ${t.price !== null && t.price !== undefined ? '$' + t.price.toFixed(2) : '-'}
-            </span>
-            <span class="col-1d" style="color:${changeColor(t.change_1d)}">
-                ${formatChange(t.change_1d)}
-            </span>
-            <span class="col-1w" style="color:${changeColor(t.change_1w)}">
-                ${formatChange(t.change_1w)}
-            </span>
-            <span class="col-zone">
-                <span class="zone-badge" style="background:${zoneStyle.bg};color:${zoneStyle.text}">
-                    ${zoneLabel}
-                </span>
-            </span>
-            <span class="col-signals">${signalDisplay}</span>
-        `;
-        table.appendChild(row);
-    });
-
-    grid.appendChild(table);
-}
-
-function formatChange(val) {
-    if (val === null || val === undefined) return '-';
-    const sign = val > 0 ? '+' : '';
-    return `${sign}${val.toFixed(1)}%`;
-}
-
-function changeColor(val) {
-    if (val === null || val === undefined) return '#78909c';
-    return val >= 0 ? '#00e676' : '#f44336';
-}
-
-function renderBenchmark(benchmark) {
-    const el = document.getElementById('watchlist-benchmark');
-    if (!el || !benchmark) return;
-
-    const priceStr = benchmark.price !== null && benchmark.price !== undefined
-        ? '$' + benchmark.price.toFixed(2) : '-';
-
-    el.innerHTML = `
-        <span class="benchmark-label">${escapeHtml(benchmark.symbol || 'SPY')}</span>
-        <span class="benchmark-price">${priceStr}</span>
-        <span style="color:${changeColor(benchmark.change_1d)};font-weight:600">
-            ${formatChange(benchmark.change_1d)}
-        </span>
-    `;
-}
-
-function updateEnrichedTimestamp(isoString) {
-    const el = document.getElementById('watchlist-enriched-at');
-    if (!el) return;
-    if (!isoString) {
-        el.textContent = '';
-        return;
-    }
-    try {
-        const date = new Date(isoString);
-        el.textContent = `Updated: ${date.toLocaleTimeString()}`;
-    } catch {
-        el.textContent = '';
-    }
-}
-
-function openTickerChart(symbol) {
-    if (typeof changeChartSymbol === 'function') {
-        changeChartSymbol(symbol);
-        return;
-    }
-    if (typeof tvWidget !== 'undefined' && tvWidget.setSymbol) {
-        tvWidget.setSymbol(symbol, '1D');
-        return;
-    }
-    window.open(`https://www.tradingview.com/chart/?symbol=${encodeURIComponent(symbol)}`, '_blank');
-}
-
-function escapeHtml(str) {
-    if (!str) return '';
-    return String(str)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;');
-}
-
-function initWatchlistV2() {
-    const grid = document.getElementById('watchlist-grid');
-    if (!grid) return;
-    if (grid.dataset.init === 'true') {
-        fetchEnrichedWatchlist();
-        return;
-    }
-    grid.dataset.init = 'true';
-
-    const sortSelect = document.getElementById('watchlist-sort');
-    if (sortSelect) {
-        sortSelect.addEventListener('change', () => {
-            fetchEnrichedWatchlist();
-        });
-    }
-
-    const toggleBtn = document.getElementById('watchlist-view-toggle');
-    if (toggleBtn) {
-        toggleBtn.addEventListener('click', () => {
-            watchlistViewMode = watchlistViewMode === 'sectors' ? 'flat' : 'sectors';
-            toggleBtn.textContent = watchlistViewMode === 'sectors' ? '\u2630' : '\u229E';
-            toggleBtn.title = watchlistViewMode === 'sectors'
-                ? 'Switch to flat view' : 'Switch to sector view';
-            fetchEnrichedWatchlist();
-        });
-    }
-
-    const refreshBtn = document.getElementById('watchlist-refresh');
-    if (refreshBtn) {
-        refreshBtn.addEventListener('click', () => {
-            watchlistLastData = null;
-            fetchEnrichedWatchlist();
-        });
-    }
-
-    fetchEnrichedWatchlist();
-    startWatchlistRefresh();
-}
-
 function startWatchlistRefresh() {
     stopWatchlistRefresh();
-    watchlistRefreshInterval = setInterval(fetchEnrichedWatchlist, 60000);
+    watchlistRefreshInterval = setInterval(() => {
+        fetchEnrichedWatchlist();
+        fetchTickerList();
+    }, 60000);
 }
 
 function stopWatchlistRefresh() {
@@ -3966,591 +3679,478 @@ function stopWatchlistRefresh() {
     }
 }
 
-async function renderWatchlist() {
-    const enrichedGrid = document.getElementById('watchlist-grid');
-    if (enrichedGrid) {
-        fetchEnrichedWatchlist();
-        return;
+async function fetchTickerList(force = false) {
+    const list = document.getElementById('ticker-list');
+    if (!list) return;
+
+    const sortSelect = document.getElementById('ticker-sort');
+    const sortBy = sortSelect ? sortSelect.value : 'sector';
+    const sortDir = sortBy === 'sector' ? 'asc' : 'desc';
+
+    if (force) {
+        list.innerHTML = '<div class="watchlist-loading">Loading tickers...</div>';
     }
-
-    const container = document.getElementById('watchlistTickers');
-    const countEl = document.getElementById('watchlistCount');
-
-    if (!container) return;
-
-    countEl.textContent = watchlistTickers.length;
-
-    if (watchlistTickers.length === 0) {
-        container.innerHTML = '<p class="empty-state">No tickers in watchlist</p>';
-        return;
-    }
-
-    // Show loading state
-    container.innerHTML = '<p class="empty-state">Loading prices...</p>';
 
     try {
-        // Fetch prices and signals in parallel
-        const pricePromises = watchlistTickers.map(ticker =>
-            fetch(`${API_URL}/hybrid/price/${ticker}`)
-                .then(r => r.json())
-                .then(data => ({ ticker, price: data.price, change_pct: data.change_pct }))
-                .catch(() => ({ ticker, price: null, change_pct: null }))
-        );
-
-        const signalsResponse = await fetch(`${API_URL}/signals/active`);
-        const signalsData = await signalsResponse.json();
-        const activeSignals = signalsData.signals || [];
-
-        const priceData = await Promise.all(pricePromises);
-
-        // Build card-based HTML
-        let html = '<div class="watchlist-cards">';
-
-        for (const data of priceData) {
-            const ticker = data.ticker;
-            const price = data.price;
-            const changePct = data.change_pct;
-
-            // Find active signals for this ticker
-            const tickerSignals = activeSignals.filter(s => s.ticker === ticker);
-
-            let signalBadges = '';
-            tickerSignals.forEach(signal => {
-                const badgeClass = signal.direction === 'LONG' ? 'signal-badge-long' : 'signal-badge-short';
-                signalBadges += `<span class="signal-badge ${badgeClass}">${signal.direction}</span>`;
-            });
-
-            const changeClass = changePct >= 0 ? 'price-up' : 'price-down';
-            const changeSign = changePct >= 0 ? '+' : '';
-
-            html += `
-                <div class="watchlist-ticker-card" data-ticker="${ticker}">
-                    <div class="ticker-main">
-                        <div class="ticker-symbol">${ticker}</div>
-                        <div class="ticker-signals">${signalBadges || '<span class="no-signal">—</span>'}</div>
-                    </div>
-                    <div class="ticker-price">
-                        <div class="current-price">${price ? `$${price.toFixed(2)}` : '—'}</div>
-                        <div class="price-change ${changeClass}">
-                            ${changePct !== null ? `${changeSign}${changePct.toFixed(2)}%` : '—'}
-                        </div>
-                    </div>
-                    <div class="ticker-actions">
-                        <button class="ticker-action-btn analyze" data-ticker="${ticker}" title="Analyze">🔬</button>
-                        <button class="ticker-action-btn chart" data-ticker="${ticker}" title="Chart">📊</button>
-                        <button class="ticker-action-btn remove" data-ticker="${ticker}" title="Remove">✕</button>
-                    </div>
-                </div>
-            `;
+        const url = `${API_URL}/watchlist/tickers?sort_by=${encodeURIComponent(sortBy)}&sort_dir=${sortDir}&include_enrichment=true`;
+        const response = await fetch(url);
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
         }
 
-        html += '</div>';
-        container.innerHTML = html;
-
-        // Attach event listeners
-        container.querySelectorAll('.ticker-action-btn.analyze').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const ticker = e.target.dataset.ticker;
-                analyzeTicker(ticker);
-            });
-        });
-
-        container.querySelectorAll('.ticker-action-btn.chart').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const ticker = e.target.dataset.ticker;
-                showChart(ticker);
-            });
-        });
-
-        container.querySelectorAll('.ticker-action-btn.remove').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const ticker = e.target.dataset.ticker;
-                removeFromWatchlist(ticker);
-            });
-        });
-
+        const data = await response.json();
+        if (data.status === 'success') {
+            watchlistTickerCache = data.tickers || [];
+            watchlistCounts = data.counts || {};
+            renderTickerList();
+            updateTickersTimestamp();
+            updateTickerMeta();
+        } else {
+            throw new Error(data.message || 'Unknown error');
+        }
     } catch (error) {
-        console.error('Error rendering watchlist:', error);
-        container.innerHTML = '<p class="empty-state">Error loading watchlist</p>';
+        console.error('Ticker list fetch failed:', error);
+        list.innerHTML = `<div class="watchlist-error">Failed to load tickers</div>`;
+    }
+}
+
+function getFilteredTickers() {
+    const filterSelect = document.getElementById('ticker-filter');
+    const filterVal = filterSelect ? filterSelect.value : 'all';
+    const all = watchlistTickerCache || [];
+
+    if (filterVal === 'mine') {
+        return all.filter(t => t.source === 'manual' || t.source === 'position');
+    }
+    if (filterVal === 'positions') {
+        return all.filter(t => t.priority === 'high');
+    }
+    if (filterVal === 'scanner') {
+        return all.filter(t => t.source === 'scanner');
+    }
+    if (filterVal === 'muted') {
+        return all.filter(t => t.muted);
+    }
+    return all;
+}
+
+function updateTickerMeta() {
+    const countEl = document.getElementById('ticker-count');
+    const positionsEl = document.getElementById('ticker-positions');
+    const filtered = getFilteredTickers();
+    if (countEl) {
+        countEl.textContent = `Showing: ${filtered.length} tickers`;
+    }
+    const positionsCount = watchlistCounts.position || filtered.filter(t => t.priority === 'high').length;
+    if (positionsEl) {
+        positionsEl.textContent = `Positions: ${positionsCount} active`;
+    }
+}
+
+function updateTickersTimestamp() {
+    const el = document.getElementById('tickers-updated-at');
+    if (!el) return;
+    const now = new Date();
+    el.textContent = `Updated: ${now.toLocaleTimeString()}`;
+}
+
+function renderTickerList() {
+    const list = document.getElementById('ticker-list');
+    if (!list) return;
+    list.innerHTML = '';
+
+    const tickers = getFilteredTickers();
+    updateTickerMeta();
+
+    if (tickers.length === 0) {
+        list.innerHTML = '<div class="watchlist-loading">No tickers found</div>';
+        return;
+    }
+
+    const header = document.createElement('div');
+    header.className = 'ticker-header-v3';
+    header.innerHTML = `
+        <span></span>
+        <span>Symbol</span>
+        <span>Sector</span>
+        <span>Price</span>
+        <span>1D</span>
+        <span>RVOL</span>
+        <span>CTA</span>
+        <span>Sigs</span>
+        <span></span>
+    `;
+    list.appendChild(header);
+
+    tickers.forEach(t => {
+        const row = document.createElement('div');
+        row.className = `ticker-row-v3${t.muted ? ' muted' : ''}`;
+        row.dataset.symbol = t.symbol;
+
+        const dotClass = t.priority === 'high'
+            ? 'dot-high'
+            : (t.source === 'manual' || t.source === 'position') ? 'dot-manual' : 'dot-scanner';
+
+        const zoneStyle = ZONE_COLORS[t.cta_zone] || ZONE_COLORS.NEUTRAL;
+        const zoneLabel = t.cta_zone ? t.cta_zone.replace(/_/g, ' ').substring(0, 9) : '-';
+        const signalDisplay = t.active_signals > 0 ? String(t.active_signals) : '-';
+        const relVol = t.relative_volume !== null && t.relative_volume !== undefined
+            ? `${t.relative_volume.toFixed(2)}x` : '-';
+        const price = t.price !== null && t.price !== undefined ? `$${t.price.toFixed(2)}` : '-';
+
+        row.innerHTML = `
+            <div class="ticker-checkbox">
+                <input type="checkbox" data-symbol="${escapeHtml(t.symbol)}" ${selectedTickers.has(t.symbol) ? 'checked' : ''}/>
+            </div>
+            <div class="ticker-symbol-v3">
+                <span class="ticker-dot ${dotClass}"></span>${escapeHtml(t.symbol)}
+            </div>
+            <div class="ticker-sector-v3">${escapeHtml(t.sector || '-')}</div>
+            <div class="ticker-price-v3">${price}</div>
+            <div class="ticker-change-v3" style="color:${changeColor(t.change_1d)}">${formatChange(t.change_1d)}</div>
+            <div class="ticker-rvol-v3">${relVol}</div>
+            <div class="ticker-zone-v3">
+                <span class="zone-badge" style="background:${zoneStyle.bg};color:${zoneStyle.text}">
+                    ${zoneLabel}
+                </span>
+            </div>
+            <div class="ticker-signals-v3">${signalDisplay}</div>
+            <div class="ticker-actions-v3">...
+                <div class="ticker-menu">
+                    <button data-action="analyze">Open in Analyzer</button>
+                    <button data-action="chart">View CTA Zones</button>
+                    <button data-action="mute">${t.muted ? 'Unmute' : 'Mute'}</button>
+                    <button data-action="remove">Remove</button>
+                </div>
+            </div>
+        `;
+
+        row.addEventListener('click', (e) => {
+            if (e.target.closest('.ticker-actions-v3') || e.target.type === 'checkbox' || e.target.tagName === 'BUTTON') {
+                return;
+            }
+            openTickerChart(t.symbol);
+        });
+
+        const checkbox = row.querySelector('input[type="checkbox"]');
+        if (checkbox) {
+            checkbox.addEventListener('change', (e) => {
+                if (e.target.checked) {
+                    selectedTickers.add(t.symbol);
+                } else {
+                    selectedTickers.delete(t.symbol);
+                }
+                updateBulkActions();
+            });
+        }
+
+        const menuButton = row.querySelector('.ticker-actions-v3');
+        if (menuButton) {
+            menuButton.addEventListener('click', (e) => {
+                e.stopPropagation();
+                row.classList.toggle('menu-open');
+            });
+        }
+
+        const menu = row.querySelector('.ticker-menu');
+        if (menu) {
+            menu.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const action = e.target.getAttribute('data-action');
+                if (!action) return;
+                row.classList.remove('menu-open');
+                if (action === 'analyze') analyzeTicker(t.symbol);
+                if (action === 'chart') openTickerChart(t.symbol);
+                if (action === 'mute') toggleMuteTicker(t.symbol, !t.muted);
+                if (action === 'remove') deleteTicker(t.symbol);
+            });
+        }
+
+        list.appendChild(row);
+    });
+}
+
+function setupBulkActions() {
+    const muteBtn = document.getElementById('bulk-mute');
+    const unmuteBtn = document.getElementById('bulk-unmute');
+    const removeBtn = document.getElementById('bulk-remove');
+    const cancelBtn = document.getElementById('bulk-cancel');
+
+    if (muteBtn) muteBtn.addEventListener('click', () => bulkMuteTickers(true));
+    if (unmuteBtn) unmuteBtn.addEventListener('click', () => bulkMuteTickers(false));
+    if (removeBtn) removeBtn.addEventListener('click', bulkRemoveTickers);
+    if (cancelBtn) cancelBtn.addEventListener('click', () => {
+        selectedTickers.clear();
+        renderTickerList();
+        updateBulkActions();
+    });
+}
+
+function updateBulkActions() {
+    const bulkBar = document.getElementById('bulk-actions');
+    const countEl = document.getElementById('bulk-count');
+    if (!bulkBar || !countEl) return;
+    const count = selectedTickers.size;
+    countEl.textContent = `${count} selected`;
+    bulkBar.style.display = count > 0 ? 'flex' : 'none';
+}
+
+async function toggleMuteTicker(symbol, muted) {
+    try {
+        const response = await fetch(`${API_URL}/watchlist/tickers/${encodeURIComponent(symbol)}/mute`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ muted })
+        });
+        const data = await response.json();
+        if (data.status === 'success') {
+            fetchTickerList(true);
+        } else {
+            alert(data.message || 'Failed to update mute status');
+        }
+    } catch (error) {
+        console.error('Mute toggle failed:', error);
+    }
+}
+
+async function bulkMuteTickers(muted) {
+    if (selectedTickers.size === 0) return;
+    try {
+        const response = await fetch(`${API_URL}/watchlist/tickers/bulk-mute`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ symbols: Array.from(selectedTickers), muted })
+        });
+        const data = await response.json();
+        if (data.status === 'success') {
+            selectedTickers.clear();
+            fetchTickerList(true);
+            updateBulkActions();
+        } else {
+            alert(data.message || 'Bulk update failed');
+        }
+    } catch (error) {
+        console.error('Bulk mute failed:', error);
+    }
+}
+
+async function bulkRemoveTickers() {
+    if (selectedTickers.size === 0) return;
+    if (!confirm('Remove selected tickers?')) return;
+    const symbols = Array.from(selectedTickers);
+    await Promise.all(symbols.map(symbol => deleteTicker(symbol, false)));
+    selectedTickers.clear();
+    fetchTickerList(true);
+    updateBulkActions();
+}
+
+async function deleteTicker(symbol, confirmDelete = true) {
+    if (confirmDelete && !confirm(`Remove ${symbol} from watchlist?`)) return;
+    try {
+        const response = await fetch(`${API_URL}/watchlist/tickers/${encodeURIComponent(symbol)}`, {
+            method: 'DELETE'
+        });
+        const data = await response.json();
+        if (data.status === 'success') {
+            fetchTickerList(true);
+        } else {
+            alert(data.message || 'Remove failed');
+        }
+    } catch (error) {
+        console.error('Delete ticker failed:', error);
     }
 }
 
 // Helper functions for watchlist actions
 function analyzeTicker(ticker) {
-    // Populate the analyzer input and trigger analysis
     const input = document.getElementById('analyzeTickerInput');
     const btn = document.getElementById('analyzeTickerBtn');
+    if (input && ticker) input.value = ticker;
+    if (btn) btn.click();
+}
 
-    if (input && btn) {
-        input.value = ticker;
-        btn.click();
+function openTickerChart(ticker) {
+    if (typeof changeChartSymbol === 'function') {
+        changeChartSymbol(ticker);
+        return;
     }
-}
-
-function showChart(ticker) {
-    changeChartSymbol(ticker);
-}
-
-function removeFromWatchlist(ticker) {
-    removeTickerFromWatchlist(ticker);
-}
-
-async function addTickerToWatchlist(tickerOverride) {
-    const input = document.getElementById('addTickerInput');
-    const rawTicker = tickerOverride || (input ? input.value : '');
-    const ticker = rawTicker.trim().toUpperCase();
-    
-    if (!ticker) return;
-    
-    try {
-        const response = await fetch(`${API_URL}/watchlist/add`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ticker })
-        });
-        
-        const data = await response.json();
-        
-        if (data.status === 'success' || data.status === 'already_exists') {
-            watchlistTickers = data.tickers;
-            renderWatchlist();
-            if (input) input.value = '';
-        }
-    } catch (error) {
-        console.error('Error adding ticker:', error);
+    if (typeof tvWidget !== 'undefined' && tvWidget.setSymbol) {
+        tvWidget.setSymbol(ticker, '1D');
+        return;
     }
+    window.open(`https://www.tradingview.com/chart/?symbol=${encodeURIComponent(ticker)}`, '_blank');
 }
-
-async function removeTickerFromWatchlist(ticker) {
-    try {
-        const response = await fetch(`${API_URL}/watchlist/remove`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ticker })
-        });
-        
-        const data = await response.json();
-        
-        if (data.status === 'success') {
-            watchlistTickers = data.tickers;
-            renderWatchlist();
-        }
-    } catch (error) {
-        console.error('Error removing ticker:', error);
-    }
-}
-
-async function resetWatchlist() {
-    try {
-        const response = await fetch(`${API_URL}/watchlist/reset`, {
-            method: 'POST'
-        });
-        
-        const data = await response.json();
-        
-        if (data.status === 'success') {
-            watchlistTickers = data.tickers;
-            renderWatchlist();
-        }
-    } catch (error) {
-        console.error('Error resetting watchlist:', error);
-    }
-}
-
 
 // ==========================================
-// SINGLE TICKER ANALYZER
+// SINGLE TICKER ANALYZER (Unified)
 // ==========================================
 
 function initTickerAnalyzer() {
     const analyzeBtn = document.getElementById('analyzeTickerBtn');
     const analyzeInput = document.getElementById('analyzeTickerInput');
-    
+    const addBtn = document.getElementById('addToWatchlistBtn');
+
     if (analyzeBtn) {
-        analyzeBtn.addEventListener('click', analyzeTicker);
+        analyzeBtn.addEventListener('click', runUnifiedAnalyzer);
     }
-    
+
     if (analyzeInput) {
         analyzeInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') {
-                analyzeTicker();
+                runUnifiedAnalyzer();
             }
         });
     }
+
+    if (addBtn) {
+        addBtn.addEventListener('click', addAnalyzedTickerToWatchlist);
+    }
 }
 
-async function analyzeTicker() {
+async function runUnifiedAnalyzer() {
     const input = document.getElementById('analyzeTickerInput');
-    const resultsContainer = document.getElementById('analyzerResults');
-    const gaugesContainer = document.getElementById('analyzerGauges');
-    const aggregateContainer = document.getElementById('analyzerAggregate');
-    const ticker = input.value.trim().toUpperCase();
-    
-    if (!ticker) return;
-    
+    const intervalSelect = document.getElementById('analyzeInterval');
+    const resultsContainer = document.getElementById('analyzerResultsV3');
+    const addBtn = document.getElementById('addToWatchlistBtn');
+    const ticker = input ? input.value.trim().toUpperCase() : '';
+    const interval = intervalSelect ? intervalSelect.value : '1d';
+
+    if (!ticker || !resultsContainer) return;
+    lastAnalyzedTicker = ticker;
+    if (addBtn) addBtn.disabled = true;
+
     resultsContainer.innerHTML = '<p class="empty-state">Analyzing...</p>';
-    if (gaugesContainer) gaugesContainer.style.display = 'none';
-    if (aggregateContainer) aggregateContainer.style.display = 'none';
-    
+
     try {
-        // Fetch Hunter analysis, CTA analysis, Hybrid gauges, and current bias in parallel
-        const [hunterResponse, ctaResponse, hybridResponse, biasResponse] = await Promise.all([
-            fetch(`${API_URL}/scanner/analyze/${ticker}`),
-            fetch(`${API_URL}/cta/analyze/${ticker}`),
-            fetch(`${API_URL}/hybrid/combined/${ticker}`),
-            fetch(`${API_URL}/bias-auto/status`)
-        ]);
-        
-        const hunterData = await hunterResponse.json();
-        const ctaData = await ctaResponse.json();
-        const hybridData = await hybridResponse.json();
-        const biasData = await biasResponse.json();
-        
-        // Merge CTA analysis into Hunter data for unified display
-        if (ctaData && ctaData.cta_analysis) {
-            hunterData.cta_analysis = ctaData.cta_analysis;
+        const response = await fetch(`${API_URL}/analyze/${encodeURIComponent(ticker)}?interval=${encodeURIComponent(interval)}`);
+        const data = await response.json();
+        if (data.status === 'success') {
+            renderAnalyzerResultsV3(data.analysis || {});
+            if (addBtn) addBtn.disabled = false;
+            openTickerChart(ticker);
+        } else {
+            resultsContainer.innerHTML = `<p class="empty-state">${data.message || 'Analysis failed'}</p>`;
         }
-        
-        // Render ticker info/metrics (now includes CTA data)
-        renderAnalyzerResults(hunterData);
-        
-        // Render Hybrid gauges (Technical + Analyst)
-        if (hybridData.status === 'success') {
-            renderHybridAnalysis(hybridData);
-            if (gaugesContainer) gaugesContainer.style.display = 'flex';
-        }
-        
-        // Calculate and render aggregate verdict with bias alignment
-        renderAggregateVerdict(ticker, hunterData, hybridData, biasData);
-
-        // Populate enhanced context cards
-        await analyzeTickerEnhanced(ticker);
-
-        // Also switch chart to this ticker
-        changeChartSymbol(ticker);
-        
     } catch (error) {
-        console.error('Error analyzing ticker:', error);
+        console.error('Analyzer error:', error);
         resultsContainer.innerHTML = '<p class="empty-state">Analysis failed</p>';
     }
 }
 
-function renderAggregateVerdict(ticker, hunterData, hybridData, biasData) {
-    const container = document.getElementById('analyzerAggregate');
+function renderAnalyzerResultsV3(analysis) {
+    const container = document.getElementById('analyzerResultsV3');
     if (!container) return;
-    
-    // Calculate aggregate score from all sources
-    let totalScore = 0;
-    let maxScore = 0;
-    
-    // 1. Technical Gauge Score (weight: 3)
-    const techSignal = hybridData?.technical_gauge?.signal || '';
-    const techScore = hybridData?.technical_gauge?.score || {};
-    if (techSignal) {
-        maxScore += 3;
-        if (techSignal.includes('STRONG_BUY')) totalScore += 3;
-        else if (techSignal.includes('BUY')) totalScore += 2;
-        else if (techSignal.includes('STRONG_SELL')) totalScore -= 3;
-        else if (techSignal.includes('SELL')) totalScore -= 2;
-        // Neutral = 0
-    }
-    
-    // 2. Analyst Gauge Score (weight: 2)
-    const analystConsensus = hybridData?.analyst_gauge?.consensus || '';
-    const analystUpside = hybridData?.analyst_gauge?.upside_pct || 0;
-    if (analystConsensus) {
-        maxScore += 2;
-        if (analystConsensus.toLowerCase().includes('strong_buy') || analystConsensus.toLowerCase() === 'buy') {
-            totalScore += 2;
-        } else if (analystConsensus.toLowerCase().includes('hold')) {
-            totalScore += 0;
-        } else if (analystConsensus.toLowerCase().includes('sell')) {
-            totalScore -= 2;
-        }
-    }
-    // Analyst upside bonus (weight: 1)
-    if (analystUpside !== null && analystUpside !== undefined) {
-        maxScore += 1;
-        if (analystUpside > 15) totalScore += 1;
-        else if (analystUpside < -10) totalScore -= 1;
-    }
-    
-    // 3. Hunter/CTA Analysis Score (weight: 2)
-    const hunterVerdict = hunterData?.overall_verdict || '';
-    const ctaZone = hunterData?.cta_analysis?.cta_zone || '';
-    if (hunterVerdict) {
-        maxScore += 2;
-        if (hunterVerdict === 'TAURUS_SIGNAL') totalScore += 2;
-        else if (hunterVerdict === 'URSA_SIGNAL') totalScore -= 2;
-    }
-    // CTA Zone bonus
-    if (ctaZone) {
-        maxScore += 1;
-        if (ctaZone === 'MAX_LONG') totalScore += 1;
-        else if (ctaZone === 'CAPITULATION' || ctaZone === 'WATERFALL') totalScore -= 1;
-    }
-    
-    // 4. Price vs Weighted SMAs (swing-trade weighted: SMA50 > SMA200 > SMA20)
-    const metrics = hunterData?.current_metrics || {};
-    const ctaAnalysis = hunterData?.cta_analysis || {};
-    const price = metrics.price;
-    const sma20 = ctaAnalysis.sma20 || metrics.sma20;
-    const sma50 = ctaAnalysis.sma50 || metrics.sma50;
-    const sma200 = ctaAnalysis.sma200 || metrics.sma_200;
-    
-    // Weighted SMA scoring for swing trades:
-    // SMA 50 (medium-term): weight 1.0 - most important for swing trades
-    // SMA 200 (long-term): weight 0.5 - macro trend confirmation  
-    // SMA 20 (short-term): weight 0.5 - entry timing
-    if (price) {
-        if (sma50) {
-            maxScore += 1;
-            totalScore += price > sma50 ? 1 : -1;
-        }
-        if (sma200) {
-            maxScore += 0.5;
-            totalScore += price > sma200 ? 0.5 : -0.5;
-        }
-        if (sma20) {
-            maxScore += 0.5;
-            totalScore += price > sma20 ? 0.5 : -0.5;
-        }
-    }
-    
-    // Force non-neutral: if score is exactly 0, use technical tiebreaker
-    if (totalScore === 0 && techScore.buy !== undefined) {
-        totalScore = (techScore.buy > techScore.sell) ? 0.5 : -0.5;
-    }
-    
-    // Determine verdict level (6-level system like bias)
-    const scorePercent = maxScore > 0 ? (totalScore / maxScore) * 100 : 0;
-    let verdict, verdictClass;
-    
-    if (scorePercent >= 50) {
-        verdict = 'MAJOR TORO';
-        verdictClass = 'major-toro';
-    } else if (scorePercent >= 25) {
-        verdict = 'MINOR TORO';
-        verdictClass = 'minor-toro';
-    } else if (scorePercent > 0) {
-        verdict = 'LEAN TORO';
-        verdictClass = 'lean-toro';
-    } else if (scorePercent <= -50) {
-        verdict = 'MAJOR URSA';
-        verdictClass = 'major-ursa';
-    } else if (scorePercent <= -25) {
-        verdict = 'MINOR URSA';
-        verdictClass = 'minor-ursa';
-    } else {
-        verdict = 'LEAN URSA';
-        verdictClass = 'lean-ursa';
-    }
-    
-    // Get bias levels for swing trade alignment (Weekly weighted more than Daily for swing trades)
-    const dailyBias = biasData?.data?.daily?.level || '';
-    const weeklyBias = biasData?.data?.weekly?.level || '';
-    const cyclicalBias = biasData?.data?.cyclical?.level || '';
-    
-    // Convert 1-6 scale to -2.5 to +2.5 scale for weighted average
-    // 6 (MAJOR_TORO) = +2.5, 5 = +1.5, 4 = +0.5, 3 = -0.5, 2 = -1.5, 1 (MAJOR_URSA) = -2.5
-    const toSwingScore = (level) => {
-        const val = getBiasValue(level);
-        return (val - 3.5); // Converts 1-6 to -2.5 to +2.5
-    };
-    
-    // Calculate weighted swing bias: Weekly 50%, Daily 30%, Cyclical 20%
-    let swingBiasScore = 0;
-    let biasAvailable = false;
-    let totalWeight = 0;
-    
-    if (weeklyBias) {
-        biasAvailable = true;
-        swingBiasScore += toSwingScore(weeklyBias) * 0.5;
-        totalWeight += 0.5;
-    }
-    if (dailyBias) {
-        biasAvailable = true;
-        swingBiasScore += toSwingScore(dailyBias) * 0.3;
-        totalWeight += 0.3;
-    }
-    if (cyclicalBias) {
-        biasAvailable = true;
-        swingBiasScore += toSwingScore(cyclicalBias) * 0.2;
-        totalWeight += 0.2;
-    }
-    
-    // Normalize if not all biases available
-    if (totalWeight > 0 && totalWeight < 1) {
-        swingBiasScore = swingBiasScore / totalWeight;
-    }
-    
-    // Determine swing bias level from weighted score (-2.5 to +2.5 scale)
-    let swingBiasLevel;
-    if (swingBiasScore >= 2) swingBiasLevel = 'MAJOR_TORO';
-    else if (swingBiasScore >= 1) swingBiasLevel = 'MINOR_TORO';
-    else if (swingBiasScore > 0) swingBiasLevel = 'LEAN_TORO';
-    else if (swingBiasScore <= -2) swingBiasLevel = 'MAJOR_URSA';
-    else if (swingBiasScore <= -1) swingBiasLevel = 'MINOR_URSA';
-    else swingBiasLevel = 'LEAN_URSA';
-    
-    const isToro = verdict.includes('TORO');
-    const biasIsToro = swingBiasLevel.includes('TORO');
-    
-    let alignmentStatus, alignmentClass;
-    if (!biasAvailable) {
-        alignmentStatus = 'Bias loading...';
-        alignmentClass = 'unknown';
-    } else if (isToro === biasIsToro) {
-        alignmentStatus = `✅ ALIGNED (${swingBiasLevel.replace('_', ' ')})`;
-        alignmentClass = 'aligned';
-    } else {
-        alignmentStatus = `⚠️ DIVERGENT (${swingBiasLevel.replace('_', ' ')})`;
-        alignmentClass = 'divergent';
-    }
-    
-    // Update UI
-    document.getElementById('aggregateTicker').textContent = ticker;
-    
-    const signalEl = document.getElementById('aggregateSignal');
-    signalEl.textContent = verdict;
-    signalEl.className = `aggregate-signal ${verdictClass}`;
-    
-    document.getElementById('aggregateScore').textContent = `Score: ${totalScore > 0 ? '+' : ''}${totalScore.toFixed(1)} / ${maxScore}`;
-    
-    const alignmentEl = document.getElementById('biasAlignmentStatus');
-    alignmentEl.textContent = alignmentStatus;
-    alignmentEl.className = `alignment-status ${alignmentClass}`;
-    
-    // Update container class for styling
-    const verdictContainer = document.getElementById('aggregateVerdict');
-    verdictContainer.className = `aggregate-verdict ${verdictClass}`;
-    
-    container.style.display = 'flex';
+
+    const cta = analysis.cta || {};
+    const trapped = analysis.trapped_traders || {};
+    const tech = analysis.technicals || {};
+    const fund = analysis.fundamentals || {};
+    const combined = analysis.combined || {};
+
+    const ctaAnalysis = cta.cta_analysis || {};
+    const signals = cta.signals || [];
+
+    const zone = ctaAnalysis.cta_zone || 'UNKNOWN';
+    const zonePill = zone === 'UNKNOWN' ? 'neutral' : zone.includes('LONG') ? 'good' : zone.includes('CAPIT') || zone.includes('WATER') ? 'bad' : 'neutral';
+
+    const signalsHtml = signals.length
+        ? signals.map(s => `
+            <div class="analysis-card">
+                <div><strong>${escapeHtml(s.signal_type || 'SIGNAL')}</strong> (${escapeHtml(s.direction || '')})</div>
+                <div>Entry: ${s.setup?.entry ?? '-'}</div>
+                <div>Stop: ${s.setup?.stop ?? '-'}</div>
+                <div>Target: ${s.setup?.target ?? '-'}</div>
+            </div>
+        `).join('')
+        : '<div class="analysis-card">No active signals</div>';
+
+    const trappedCriteria = trapped.ursa_bearish?.criteria || {};
+    const taurusCriteria = trapped.taurus_bullish?.criteria || {};
+
+    const buildCriteriaList = (criteria) => Object.values(criteria).map(c => `
+        <div class="analysis-card">
+            <div>${c.passed ? 'PASS' : 'FAIL'} ${escapeHtml(c.label || '')}</div>
+            <div>Current: ${escapeHtml(c.current || 'N/A')} | Need: ${escapeHtml(c.required || 'N/A')}</div>
+        </div>
+    `).join('');
+
+    container.innerHTML = `
+        <div class="analysis-section">
+            <h3>CTA Zone</h3>
+            <div class="analysis-grid">
+                <div>Zone: <span class="analysis-pill ${zonePill}">${escapeHtml(zone)}</span></div>
+                <div>Price: ${ctaAnalysis.current_price ?? '-'}</div>
+                <div>SMA20: ${ctaAnalysis.sma20 ?? '-'}</div>
+                <div>SMA50: ${ctaAnalysis.sma50 ?? '-'}</div>
+                <div>SMA120: ${ctaAnalysis.sma120 ?? '-'}</div>
+                <div>ATR: ${ctaAnalysis.atr ?? '-'}</div>
+            </div>
+        </div>
+
+        <div class="analysis-section">
+            <h3>Active Signals</h3>
+            <div class="analysis-grid">
+                ${signalsHtml}
+            </div>
+        </div>
+
+        <div class="analysis-section">
+            <h3>Trapped Trader Check</h3>
+            <div class="analysis-grid">
+                <div class="analysis-card">
+                    <strong>Verdict:</strong> ${escapeHtml(trapped.verdict || 'NO_SIGNAL')}
+                </div>
+                ${buildCriteriaList(trappedCriteria)}
+                ${buildCriteriaList(taurusCriteria)}
+            </div>
+        </div>
+
+        <div class="analysis-section">
+            <h3>TradingView Technical</h3>
+            <div class="analysis-grid">
+                <div>Signal: <span class="analysis-pill neutral">${escapeHtml(tech.signal || 'N/A')}</span></div>
+                <div>Score: ${tech.score ?? '-'}</div>
+                <div>Price: ${tech.price ?? '-'}</div>
+            </div>
+        </div>
+
+        <div class="analysis-section">
+            <h3>Analyst Consensus</h3>
+            <div class="analysis-grid">
+                <div>Rating: ${escapeHtml(fund.analyst?.rating || 'N/A')}</div>
+                <div>Target: ${fund.price_target?.target ?? '-'}</div>
+                <div>Upside: ${fund.price_target?.upside_pct ?? '-'}%</div>
+            </div>
+        </div>
+
+        <div class="analysis-section">
+            <h3>Combined Recommendation</h3>
+            <div class="analysis-grid">
+                <div>Action: <span class="analysis-pill neutral">${escapeHtml(combined.action || 'MONITOR')}</span></div>
+                <div>Source: ${escapeHtml(combined.source || 'Combined Analysis')}</div>
+                <div>Note: ${escapeHtml(combined.note || '')}</div>
+            </div>
+        </div>
+    `;
 }
 
-function renderAnalyzerResults(data) {
-    const container = document.getElementById('analyzerResults');
-    
-    if (!container) return;
-    
-    if (data.error) {
-        container.innerHTML = `<p class="empty-state">${data.error}</p>`;
-        return;
+async function addAnalyzedTickerToWatchlist() {
+    if (!lastAnalyzedTicker) return;
+    try {
+        const response = await fetch(`${API_URL}/watchlist/tickers/add`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ symbol: lastAnalyzedTicker, notes: 'Added from Analyzer' })
+        });
+        const data = await response.json();
+        if (data.status === 'success' || data.status === 'already_exists') {
+            fetchTickerList(true);
+        } else {
+            alert(data.message || 'Failed to add ticker');
+        }
+    } catch (error) {
+        console.error('Add to watchlist failed:', error);
     }
-    
-    const metrics = data.current_metrics || {};
-    const ursaCriteria = data.criteria_breakdown?.ursa_bearish || {};
-    const taurusCriteria = data.criteria_breakdown?.taurus_bullish || {};
-    const ctaAnalysis = data.cta_analysis || {};
-    
-    // CTA Zone info for display
-    const ctaZone = ctaAnalysis.cta_zone || 'N/A';
-    const ctaBias = ctaAnalysis.bias || '';
-    
-    // Get SMA values from CTA analysis (primary) or metrics (fallback)
-    const sma20 = ctaAnalysis.sma20 ?? metrics.sma20 ?? null;
-    const sma50 = ctaAnalysis.sma50 ?? metrics.sma50 ?? null;
-    const sma120 = ctaAnalysis.sma120 ?? null;
-    const sma200 = ctaAnalysis.sma200 ?? metrics.sma_200 ?? null;
-    
-    // Wrap CTA zone with KB link
-    const ctaZoneWithKb = wrapWithKbLink(ctaZone) || ctaZone;
-    
-    let html = `
-        <div class="analyzer-metrics">
-            <div class="analyzer-metric">
-                <div class="analyzer-metric-label">Price</div>
-                <div class="analyzer-metric-value">$${metrics.price?.toFixed(2) ?? '-'}</div>
-            </div>
-            <div class="analyzer-metric">
-                <div class="analyzer-metric-label">SMA 20</div>
-                <div class="analyzer-metric-value">${sma20 ? '$' + sma20.toFixed(2) : '-'}</div>
-            </div>
-            <div class="analyzer-metric">
-                <div class="analyzer-metric-label">SMA 50</div>
-                <div class="analyzer-metric-value">${sma50 ? '$' + sma50.toFixed(2) : '-'}</div>
-            </div>
-            <div class="analyzer-metric">
-                <div class="analyzer-metric-label"><span class="kb-term-dynamic" data-kb-term="cta-scanner">CTA Zone</span></div>
-                <div class="analyzer-metric-value zone-${ctaZone.toLowerCase().replace(' ', '-')}">${ctaZoneWithKb}</div>
-            </div>
-            <div class="analyzer-metric">
-                <div class="analyzer-metric-label"><span class="kb-term-dynamic" data-kb-term="rsi">RSI</span></div>
-                <div class="analyzer-metric-value">${metrics.rsi?.toFixed(1) ?? '-'}</div>
-            </div>
-            <div class="analyzer-metric">
-                <div class="analyzer-metric-label">ADX</div>
-                <div class="analyzer-metric-value">${metrics.adx?.toFixed(1) ?? '-'}</div>
-            </div>
-            <div class="analyzer-metric">
-                <div class="analyzer-metric-label">RVOL</div>
-                <div class="analyzer-metric-value">${metrics.rvol?.toFixed(2) ?? '-'}x</div>
-            </div>
-        </div>
-    `;
-    
-    // URSA criteria breakdown
-    html += `
-        <div class="criteria-section">
-            <div class="criteria-header ursa">🐻 URSA (Bearish) Criteria</div>
-            ${renderCriteriaList(ursaCriteria)}
-        </div>
-    `;
-    
-    // TAURUS criteria breakdown
-    html += `
-        <div class="criteria-section">
-            <div class="criteria-header taurus">🐂 TAURUS (Bullish) Criteria</div>
-            ${renderCriteriaList(taurusCriteria)}
-        </div>
-    `;
-    
-    // Near miss info if no signal
-    const hunterVerdict = data.overall_verdict || 'NO_SIGNAL';
-    if (hunterVerdict === 'NO_SIGNAL' && data.near_miss) {
-        html += `
-            <div class="near-miss">
-                <div class="near-miss-title">Criteria Met</div>
-                <div class="near-miss-counts">
-                    <span class="near-miss-ursa">URSA: ${data.near_miss.ursa_criteria_met}</span>
-                    <span class="near-miss-taurus">TAURUS: ${data.near_miss.taurus_criteria_met}</span>
-                </div>
-            </div>
-        `;
-    }
-    
-    container.innerHTML = html;
-    
-    // Attach KB handlers to dynamically created links
-    attachDynamicKbHandlers(container);
-}
-
-function renderCriteriaList(criteria) {
-    let html = '';
-    
-    for (const [key, value] of Object.entries(criteria)) {
-        if (key === 'ALL_PASSED') continue;
-        if (typeof value !== 'object') continue;
-        
-        const passed = value.passed;
-        const statusIcon = passed ? '✅' : '❌';
-        const statusClass = passed ? 'pass' : 'fail';
-        
-        html += `
-            <div class="criteria-item">
-                <span class="criteria-status ${statusClass}">${statusIcon}</span>
-                <div class="criteria-content">
-                    <div class="criteria-name">${value.description}</div>
-                    <div class="criteria-detail">${value.current} (Need: ${value.required})</div>
-                </div>
-            </div>
-        `;
-    }
-    
-    return html;
 }
 
 

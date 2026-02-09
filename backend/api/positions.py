@@ -119,6 +119,108 @@ class ArchiveFilters(BaseModel):
     limit: int = 100
     offset: int = 0
 
+
+async def _upsert_watchlist_for_position(ticker: str, position_id: int) -> None:
+    ticker = (ticker or "").upper().strip()
+    if not ticker:
+        return
+
+    try:
+        from database.postgres_client import get_postgres_client
+        from config.sectors import detect_sector
+
+        pool = await get_postgres_client()
+        async with pool.acquire() as conn:
+            existing = await conn.fetchrow(
+                "SELECT id, source, priority FROM watchlist_tickers WHERE symbol = $1",
+                ticker,
+            )
+            if existing:
+                await conn.execute(
+                    """
+                    UPDATE watchlist_tickers
+                    SET priority = 'high',
+                        position_id = $1,
+                        muted = false
+                    WHERE symbol = $2
+                    """,
+                    position_id,
+                    ticker,
+                )
+            else:
+                sector = detect_sector(ticker)
+                await conn.execute(
+                    """
+                    INSERT INTO watchlist_tickers
+                    (symbol, sector, source, priority, position_id)
+                    VALUES ($1, $2, 'position', 'high', $3)
+                    """,
+                    ticker,
+                    sector,
+                    position_id,
+                )
+        logger.info(f"📋 Auto-added {ticker} to watchlist (active position)")
+    except Exception as e:
+        logger.warning(f"Failed to auto-add position ticker to watchlist: {e}")
+
+
+async def _update_watchlist_on_position_close(ticker: str, position_id: int) -> None:
+    ticker = (ticker or "").upper().strip()
+    if not ticker:
+        return
+
+    try:
+        from database.postgres_client import get_postgres_client
+
+        pool = await get_postgres_client()
+        async with pool.acquire() as conn:
+            other_count = await conn.fetchval(
+                """
+                SELECT COUNT(*)
+                FROM positions
+                WHERE ticker = $1
+                  AND status = 'OPEN'
+                  AND id != $2
+                """,
+                ticker,
+                position_id,
+            )
+
+            if other_count and other_count > 0:
+                logger.info(
+                    f"📋 {ticker} still has {other_count} open position(s) — keeping high priority"
+                )
+                return
+
+            ticker_row = await conn.fetchrow(
+                "SELECT id, source FROM watchlist_tickers WHERE symbol = $1",
+                ticker,
+            )
+            if not ticker_row:
+                return
+
+            if ticker_row["source"] == "position":
+                await conn.execute(
+                    "DELETE FROM watchlist_tickers WHERE symbol = $1",
+                    ticker,
+                )
+                logger.info(
+                    f"📋 Removed {ticker} from watchlist (position closed, was auto-added)"
+                )
+            else:
+                await conn.execute(
+                    """
+                    UPDATE watchlist_tickers
+                       SET priority = CASE WHEN source = 'scanner' THEN 'low' ELSE 'normal' END,
+                           position_id = NULL
+                     WHERE symbol = $1
+                    """,
+                    ticker,
+                )
+                logger.info(f"📋 {ticker} priority reset (position closed)")
+    except Exception as e:
+        logger.warning(f"Failed to update watchlist on position close: {e}")
+
 # =========================================================================
 # SIGNAL ACCEPT/DISMISS ENDPOINTS WITH FULL LOGGING
 # =========================================================================
@@ -208,6 +310,8 @@ async def accept_signal(signal_id: str, request: AcceptSignalRequest):
         
         # Remove from active signals cache
         await delete_signal(signal_id)
+
+        await _upsert_watchlist_for_position(position["ticker"], position["id"])
         
         # Broadcast to all devices
         await manager.broadcast_position_update({
@@ -270,6 +374,20 @@ async def dismiss_signal(signal_id: str, request: DismissSignalRequest):
         
         # Remove from Redis cache
         await delete_signal(signal_id)
+
+        # Decrement active signal count for this ticker
+        try:
+            from database.redis_client import get_redis_client
+
+            client = await get_redis_client()
+            ticker = (signal_data.get("ticker") or "").upper().strip()
+            if client and ticker:
+                key = f"signal:active:{ticker}"
+                new_val = await client.decr(key)
+                if new_val is not None and new_val < 0:
+                    await client.set(key, 0)
+        except Exception:
+            pass
         
         # Broadcast dismissal to all devices
         await manager.broadcast({
@@ -381,6 +499,8 @@ async def open_position(request: OpenPositionRequest):
         
         # Remove from active signals
         await delete_signal(request.signal_id)
+
+        await _upsert_watchlist_for_position(position["ticker"], position["id"])
         
         # Broadcast to all devices
         await manager.broadcast_position_update({
@@ -744,6 +864,8 @@ async def close_position(request: ClosePositionRequest):
                 )
             except Exception as db_err:
                 logger.warning(f"Failed to close position in DB: {db_err}")
+
+            await _update_watchlist_on_position_close(position["ticker"], position["id"])
             
             outcome_emoji = "🎯" if trade_outcome == "WIN" else "❌" if trade_outcome == "LOSS" else "➖"
             logger.info(f"{outcome_emoji} Position closed: {position['ticker']} - {trade_outcome} - P&L: ${realized_pnl:.2f}")

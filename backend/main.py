@@ -187,6 +187,7 @@ from api.knowledgebase import router as knowledgebase_router
 from api.alerts import router as alerts_router
 from api.uw_integration import router as uw_router
 from api.options_positions import router as options_router
+from api.analyzer import router as analyzer_router
 
 app.include_router(webhook_router, prefix="/webhook", tags=["webhooks"])
 app.include_router(circuit_breaker_router, prefix="/webhook", tags=["circuit-breaker"])
@@ -207,6 +208,7 @@ app.include_router(knowledgebase_router, prefix="/api", tags=["knowledgebase"])
 app.include_router(alerts_router, prefix="/api", tags=["alerts"])
 app.include_router(uw_router, prefix="/api", tags=["unusual-whales"])
 app.include_router(options_router, prefix="/api", tags=["options"])
+app.include_router(analyzer_router, prefix="/api", tags=["analyzer"])
 
 # Serve frontend static files
 # Multiple path resolution strategies for different deployment environments
