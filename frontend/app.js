@@ -3710,7 +3710,13 @@ async function fetchTickerList(force = false) {
         }
     } catch (error) {
         console.error('Ticker list fetch failed:', error);
-        list.innerHTML = `<div class="watchlist-error">Failed to load tickers</div>`;
+        const message = error && error.message ? error.message : 'Unknown error';
+        list.innerHTML = `
+            <div class="watchlist-error">
+                Failed to load tickers<br>
+                <span style="font-size:11px;color:#78909c">${message}</span>
+            </div>
+        `;
     }
 }
 
