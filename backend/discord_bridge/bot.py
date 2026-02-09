@@ -20,10 +20,13 @@ import re
 import asyncio
 import logging
 import aiohttp
-from datetime import datetime, time
+from datetime import datetime, time, timezone
 from typing import Optional, Dict, Any, List
 import pytz
 from utils.vision_parser import parse_uw_image
+from discord_bridge.uw.parser import parse_flow_embed, parse_ticker_embed
+from discord_bridge.uw.filter import FlowFilter
+from discord_bridge.uw.aggregator import FlowAggregator
 
 # Discord.py imports
 try:
@@ -38,7 +41,11 @@ except ImportError:
 # ================================
 
 DISCORD_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
+PIVOT_API_KEY = os.getenv("PIVOT_API_KEY", "")
 UW_CHANNEL_ID = int(os.getenv("DISCORD_UW_CHANNEL_ID", "1463692055694807201"))
+UW_FLOW_CHANNEL_ID = int(os.getenv("UW_FLOW_CHANNEL_ID", "0"))
+UW_TICKER_CHANNEL_ID = int(os.getenv("UW_TICKER_CHANNEL_ID", "0"))
+UW_BOT_USER_ID = int(os.getenv("UW_BOT_USER_ID", "1100705854271008798"))
 PANDORA_API_URL = os.getenv("PANDORA_API_URL", "https://pandoras-box-production.up.railway.app/api")
 NOTIFICATION_CHANNEL_ID = int(os.getenv("DISCORD_NOTIFICATION_CHANNEL_ID", str(UW_CHANNEL_ID)))
 TRADE_ALERT_CHANNEL_ID = int(os.getenv("DISCORD_TRADE_ALERT_CHANNEL_ID", str(NOTIFICATION_CHANNEL_ID)))
@@ -90,6 +97,8 @@ latest_data = {
 }
 
 _seen_signal_ids: set[str] = set()
+uw_flow_filter = FlowFilter()
+uw_flow_aggregator = FlowAggregator()
 
 # ================================
 # HELPER FUNCTIONS
@@ -425,7 +434,15 @@ async def send_to_pandora(endpoint: str, data: Dict[str, Any]) -> bool:
     try:
         async with aiohttp.ClientSession() as session:
             url = f"{PANDORA_API_URL}{endpoint}"
-            async with session.post(url, json=data, timeout=aiohttp.ClientTimeout(total=10)) as response:
+            headers = {}
+            if PIVOT_API_KEY:
+                headers["Authorization"] = f"Bearer {PIVOT_API_KEY}"
+            async with session.post(
+                url,
+                json=data,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as response:
                 if response.status == 200:
                     logger.info(f"✅ Sent to Pandora {endpoint}")
                     return True
@@ -477,6 +494,31 @@ async def send_flow_alert_to_pandora(data: Dict[str, Any]) -> bool:
         "notes": data.get("notes", "")
     }
     return await send_to_pandora("/flow/manual", payload)
+
+
+async def push_uw_aggregates() -> None:
+    """Push UW flow summaries and discovery list to Pandora."""
+    flow_summaries = uw_flow_aggregator.get_flow_summaries()
+    if flow_summaries:
+        await send_to_pandora(
+            "/uw/flow",
+            {
+                "summaries": flow_summaries,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+        logger.info("Pushed UW flow summaries: %s tickers", len(flow_summaries))
+
+    discovery = uw_flow_aggregator.get_discovery_list()
+    if discovery:
+        await send_to_pandora(
+            "/uw/discovery",
+            {
+                "tickers": discovery,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+        logger.info("Pushed UW discovery list: %s tickers", len(discovery))
 
 
 def format_uw_summary(data: Dict[str, Any]) -> Optional[str]:
@@ -655,6 +697,19 @@ async def before_trade_poller():
     await bot.wait_until_ready()
 
 
+@tasks.loop(minutes=5)
+async def uw_aggregate_poller():
+    """Push UW aggregates (flow + discovery) to Pandora."""
+    if not UW_FLOW_CHANNEL_ID and not UW_TICKER_CHANNEL_ID:
+        return
+    await push_uw_aggregates()
+
+
+@uw_aggregate_poller.before_loop
+async def before_uw_aggregate_poller():
+    await bot.wait_until_ready()
+
+
 def format_trade_idea_embed(signal: Dict[str, Any]) -> discord.Embed:
     """Format a trade signal as a Discord embed."""
     ticker = signal.get("ticker", "???")
@@ -733,13 +788,48 @@ async def on_ready():
         reminder_scheduler.start()
     if not trade_idea_poller.is_running():
         trade_idea_poller.start()
+    if not uw_aggregate_poller.is_running():
+        uw_aggregate_poller.start()
 
     logger.info(
-        "Task status: scheduled_queries=%s, reminder_scheduler=%s, trade_idea_poller=%s",
+        "Task status: scheduled_queries=%s, reminder_scheduler=%s, trade_idea_poller=%s, uw_aggregate_poller=%s",
         "running" if scheduled_queries.is_running() else "stopped",
         "running" if reminder_scheduler.is_running() else "stopped",
-        "running" if trade_idea_poller.is_running() else "stopped"
+        "running" if trade_idea_poller.is_running() else "stopped",
+        "running" if uw_aggregate_poller.is_running() else "stopped",
     )
+
+
+async def handle_uw_flow_message(message: discord.Message) -> None:
+    for embed in message.embeds:
+        parsed = parse_flow_embed(embed)
+        if parsed is None:
+            continue
+        if not uw_flow_filter.passes(parsed):
+            logger.debug(
+                "Filtered UW flow: %s DTE=%s reason=%s",
+                parsed.get("ticker"),
+                parsed.get("dte"),
+                uw_flow_filter.last_reject_reason,
+            )
+            continue
+        uw_flow_aggregator.add_flow(parsed)
+        logger.info(
+            "UW Flow: %s %s %s premium=%s",
+            parsed.get("ticker"),
+            parsed.get("side"),
+            parsed.get("option_type"),
+            parsed.get("premium"),
+        )
+
+
+async def handle_uw_ticker_message(message: discord.Message) -> None:
+    for embed in message.embeds:
+        parsed = parse_ticker_embed(embed)
+        if parsed is None:
+            continue
+        uw_flow_aggregator.update_ticker_summary(parsed)
+        logger.info("UW Ticker Update: %s", parsed.get("ticker"))
 
 
 @bot.event
@@ -752,7 +842,17 @@ async def on_message(message: discord.Message):
     
     # Process commands first
     await bot.process_commands(message)
-    
+
+    uw_channels = {UW_FLOW_CHANNEL_ID, UW_TICKER_CHANNEL_ID}
+    if message.channel.id in uw_channels and any(uw_channels):
+        if message.author.id != UW_BOT_USER_ID:
+            return
+        if message.channel.id == UW_FLOW_CHANNEL_ID:
+            await handle_uw_flow_message(message)
+        elif message.channel.id == UW_TICKER_CHANNEL_ID:
+            await handle_uw_ticker_message(message)
+        return
+
     # Only process UW responses in the designated channel
     if message.channel.id != UW_CHANNEL_ID:
         return
