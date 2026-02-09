@@ -3,7 +3,7 @@ Pandora's Box - Main FastAPI Application
 High-performance trading signal processor with sub-100ms latency
 """
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -124,9 +124,21 @@ async def health_check():
 @app.get("/api/bias/{timeframe}")
 async def get_bias_data(timeframe: str):
     """Get current bias for a specific timeframe"""
-    if timeframe.lower() == "summary":
+    timeframe_lower = timeframe.lower()
+    if timeframe_lower == "summary":
         from api.bias import get_all_bias_indicators
         return await get_all_bias_indicators()
+    if timeframe_lower == "tick":
+        from api.bias import get_tick_bias
+        return await get_tick_bias()
+    if timeframe_lower == "composite":
+        from api.bias import get_composite_bias
+        return await get_composite_bias()
+    if timeframe_lower == "health":
+        from api.bias import get_pivot_health
+        return await get_pivot_health()
+    if timeframe_lower not in {"daily", "weekly", "monthly", "cyclical"}:
+        raise HTTPException(status_code=404, detail="Unknown bias timeframe")
 
     from database.redis_client import get_bias
     
