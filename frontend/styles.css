@@ -2926,9 +2926,7 @@ body.override-active-bearish .override-toggle[data-active="true"] {
 
 /* Watchlist & Analyzer Section */
 .watchlist-section {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 20px;
+    display: block;
     margin-bottom: 20px;
 }
 
@@ -7865,6 +7863,7 @@ body[data-mode="crypto"] .crypto-shell {
     grid-template-columns: 1fr 1fr 2fr;
     gap: 16px;
     align-items: start;
+    width: 100%;
 }
 
 .watchlist-left,
