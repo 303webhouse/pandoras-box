@@ -22,7 +22,13 @@ REDIS_KEY_TICK_HISTORY = "tick:history"
 REDIS_TTL_SECONDS = 86400 * 7  # 7 days
 
 
-async def store_tick_data(tick_high: int, tick_low: int, date: Optional[str] = None) -> Dict[str, Any]:
+async def store_tick_data(
+    tick_high: float,
+    tick_low: float,
+    date: Optional[str] = None,
+    tick_close: Optional[float] = None,
+    tick_avg: Optional[float] = None,
+) -> Dict[str, Any]:
     """
     Store TICK high/low data from TradingView webhook
     
@@ -54,6 +60,8 @@ async def store_tick_data(tick_high: int, tick_low: int, date: Optional[str] = N
         current_data = {
             "tick_high": tick_high,
             "tick_low": tick_low,
+            "tick_close": tick_close,
+            "tick_avg": tick_avg,
             "date": data_date,
             "daily_bias": daily_bias,
             "updated_at": datetime.now(timezone.utc).isoformat()
@@ -97,6 +105,8 @@ async def store_tick_data(tick_high: int, tick_low: int, date: Optional[str] = N
             "status": "success",
             "tick_high": tick_high,
             "tick_low": tick_low,
+            "tick_close": tick_close,
+            "tick_avg": tick_avg,
             "date": data_date,
             "daily_bias": daily_bias,
             "weekly_bias": weekly_bias,
@@ -147,6 +157,8 @@ async def get_tick_status() -> Dict[str, Any]:
             "status": "ok",
             "tick_high": current["tick_high"],
             "tick_low": current["tick_low"],
+            "tick_close": current.get("tick_close"),
+            "tick_avg": current.get("tick_avg"),
             "date": current["date"],
             "daily_bias": daily_bias,
             "weekly_bias": weekly_bias,

@@ -501,8 +501,10 @@ async def apply_signal_scoring(signal_data: dict) -> dict:
 
 class TickDataPayload(BaseModel):
     """Payload for TICK range data from TradingView"""
-    tick_high: int  # Daily TICK high (e.g., +1200)
-    tick_low: int   # Daily TICK low (e.g., -800)
+    tick_high: float  # Daily/session TICK high (e.g., +1200)
+    tick_low: float   # Daily/session TICK low (e.g., -800)
+    tick_close: Optional[float] = None  # Latest TICK close
+    tick_avg: Optional[float] = None    # Session average TICK
     date: Optional[str] = None  # Optional date (YYYY-MM-DD), defaults to today
 
 
@@ -534,7 +536,9 @@ async def receive_tick_data(payload: TickDataPayload):
     result = await store_tick_data(
         tick_high=payload.tick_high,
         tick_low=payload.tick_low,
-        date=payload.date
+        date=payload.date,
+        tick_close=payload.tick_close,
+        tick_avg=payload.tick_avg,
     )
     
     return result
