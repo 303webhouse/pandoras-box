@@ -7858,19 +7858,19 @@ body[data-mode="crypto"] .crypto-shell {
 }
 
 /* ==============================
-   Watchlist v3 (Two-Column)
+   Watchlist v3 (Three-Column)
    ============================== */
 .watchlist-v3 {
     display: grid;
-    grid-template-columns: 1.05fr 1.6fr;
+    grid-template-columns: 1fr 1fr 2fr;
     gap: 16px;
     align-items: start;
 }
 
+.watchlist-left,
+.watchlist-middle,
 .watchlist-right {
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
+    min-width: 0;
 }
 
 .tickers-panel,
