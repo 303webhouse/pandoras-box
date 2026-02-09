@@ -23,6 +23,32 @@ const CONFIDENCE_COLORS = {
     LOW: '#f44336',
 };
 
+// Shared helpers
+function escapeHtml(value) {
+    if (value === null || value === undefined) return '';
+    return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/\"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function formatChange(value) {
+    if (value === null || value === undefined || Number.isNaN(value)) return '-';
+    const num = Number(value);
+    const sign = num > 0 ? '+' : '';
+    return `${sign}${num.toFixed(2)}%`;
+}
+
+function changeColor(value) {
+    if (value === null || value === undefined || Number.isNaN(value)) return '#78909c';
+    const num = Number(value);
+    if (num > 0) return '#4caf50';
+    if (num < 0) return '#f44336';
+    return '#78909c';
+}
+
 // State
 let ws = null;
 let tvWidget = null;
@@ -3664,6 +3690,113 @@ async function fetchEnrichedWatchlist() {
     }
 }
 
+function renderBenchmark(benchmark) {
+    const el = document.getElementById('watchlist-benchmark');
+    if (!el) return;
+    if (!benchmark) {
+        el.innerHTML = '';
+        return;
+    }
+    const price = benchmark.price !== null && benchmark.price !== undefined
+        ? `$${Number(benchmark.price).toFixed(2)}`
+        : '-';
+    const chg = formatChange(benchmark.change_1d);
+    const color = changeColor(benchmark.change_1d);
+    el.innerHTML = `
+        <span class="benchmark-label">${escapeHtml(benchmark.symbol || 'SPY')}</span>
+        <span class="benchmark-price">${price}</span>
+        <span style="color:${color}">${chg}</span>
+    `;
+}
+
+function updateEnrichedTimestamp(ts) {
+    const el = document.getElementById('watchlist-enriched-at');
+    if (!el) return;
+    const dt = ts ? new Date(ts) : new Date();
+    el.textContent = `Updated: ${dt.toLocaleTimeString()}`;
+}
+
+function renderSectorWatchlist(data) {
+    const grid = document.getElementById('watchlist-grid');
+    if (!grid) return;
+
+    const sectors = Array.isArray(data.sectors) ? data.sectors : [];
+    if (!sectors.length) {
+        grid.innerHTML = '<div class="watchlist-loading">No sectors available</div>';
+        return;
+    }
+
+    grid.innerHTML = '';
+
+    sectors.forEach(sector => {
+        const card = document.createElement('div');
+        card.className = 'sector-card';
+
+        const vsSpy = sector.vs_spy_1w ?? sector.vs_spy_1d;
+        const vsSpyLabel = formatChange(vsSpy);
+        const vsSpyColor = changeColor(vsSpy);
+        const etf = sector.etf || '-';
+        const rank = sector.strength_rank !== undefined && sector.strength_rank !== null
+            ? `#${sector.strength_rank}`
+            : '#-';
+        const bias = sector.bias_alignment || 'NEUTRAL';
+
+        card.innerHTML = `
+            <div class="sector-header">
+                <div class="sector-title-row">
+                    <span class="sector-name">${escapeHtml(sector.name || 'Uncategorized')}</span>
+                    <span class="sector-etf">${escapeHtml(etf)}</span>
+                    <span class="sector-vs-spy" style="color:${vsSpyColor}">${vsSpyLabel}</span>
+                </div>
+                <div class="sector-meta">
+                    <span class="sector-bias">${escapeHtml(bias)}</span>
+                    <span class="sector-rank">${escapeHtml(rank)}</span>
+                </div>
+            </div>
+            <div class="ticker-header-row">
+                <div>Symbol</div>
+                <div class="col-price">Price</div>
+                <div class="col-1d">1D</div>
+                <div class="col-1w">1W</div>
+                <div class="col-zone">CTA</div>
+                <div class="col-signals">Sigs</div>
+            </div>
+        `;
+
+        const tickers = sector.tickers || [];
+        tickers.forEach(ticker => {
+            const row = document.createElement('div');
+            row.className = 'ticker-row';
+            row.dataset.symbol = ticker.symbol;
+
+            const price = ticker.price !== null && ticker.price !== undefined
+                ? `$${Number(ticker.price).toFixed(2)}`
+                : '-';
+            const zone = ticker.cta_zone || 'NEUTRAL';
+            const zoneStyle = ZONE_COLORS[zone] || ZONE_COLORS.NEUTRAL;
+            const signals = ticker.active_signals || 0;
+
+            row.innerHTML = `
+                <div class="ticker-symbol">${escapeHtml(ticker.symbol)}</div>
+                <div class="col-price">${price}</div>
+                <div class="col-1d" style="color:${changeColor(ticker.change_1d)}">${formatChange(ticker.change_1d)}</div>
+                <div class="col-1w" style="color:${changeColor(ticker.change_1w)}">${formatChange(ticker.change_1w)}</div>
+                <div class="col-zone">
+                    <span class="zone-badge" style="background:${zoneStyle.bg};color:${zoneStyle.text}">
+                        ${escapeHtml(zone.replace(/_/g, ' '))}
+                    </span>
+                </div>
+                <div class="col-signals ${signals > 0 ? 'signal-active' : 'signal-none'}">${signals || '-'}</div>
+            `;
+
+            row.addEventListener('click', () => openTickerChart(ticker.symbol));
+            card.appendChild(row);
+        });
+
+        grid.appendChild(card);
+    });
+}
+
 function startWatchlistRefresh() {
     stopWatchlistRefresh();
     watchlistRefreshInterval = setInterval(() => {
@@ -4980,6 +5113,13 @@ function initBtcSignals() {
     
     // Auto-refresh every 5 minutes
     setInterval(loadBtcSignals, 5 * 60 * 1000);
+}
+
+function loadBtcSessions() {
+    // Placeholder: avoid runtime errors if BTC sessions are not configured
+    if (typeof renderBtcSessions === 'function') {
+        renderBtcSessions();
+    }
 }
 
 async function loadBtcSignals() {
