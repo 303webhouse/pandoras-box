@@ -99,10 +99,8 @@ async def get_signal(signal_id: str) -> Optional[Dict[Any, Any]]:
 async def get_active_signals() -> list:
     """Get all active signals (last 100)"""
     client = await get_redis_client()
-    keys = await client.keys("signal:*")
-    
     signals = []
-    for key in keys:
+    async for key in client.scan_iter("signal:*", count=100):
         data = await client.get(key)
         if data:
             signals.append(json.loads(data))

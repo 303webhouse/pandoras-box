@@ -119,7 +119,7 @@ def score_to_bias(score: float) -> tuple[str, int]:
         return "TORO_MAJOR", 5
     if score >= 0.20:
         return "TORO_MINOR", 4
-    if score >= -0.19:
+    if score >= -0.20:
         return "NEUTRAL", 3
     if score >= -0.59:
         return "URSA_MINOR", 2
@@ -272,27 +272,6 @@ async def log_composite(result: CompositeResult) -> None:
     try:
         pool = await get_postgres_client()
         async with pool.acquire() as conn:
-            await conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS bias_composite_history (
-                    id SERIAL PRIMARY KEY,
-                    composite_score FLOAT NOT NULL,
-                    bias_level VARCHAR(20) NOT NULL,
-                    bias_numeric INTEGER NOT NULL,
-                    active_factors TEXT[] NOT NULL,
-                    stale_factors TEXT[] NOT NULL,
-                    velocity_multiplier FLOAT NOT NULL DEFAULT 1.0,
-                    override VARCHAR(20),
-                    confidence VARCHAR(10) NOT NULL,
-                    factor_scores JSONB NOT NULL,
-                    created_at TIMESTAMP DEFAULT NOW()
-                );
-
-                CREATE INDEX IF NOT EXISTS idx_bias_history_created
-                    ON bias_composite_history(created_at);
-                """
-            )
-
             factor_scores = {
                 factor_id: (reading.score if reading else None)
                 for factor_id, reading in result.factors.items()

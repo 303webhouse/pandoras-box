@@ -14,6 +14,9 @@ from collectors.base_collector import get_json
 
 logger = logging.getLogger(__name__)
 
+_EARNINGS_CACHE_DATE = None
+_EARNINGS_CACHE: Dict[str, Any] = {}
+
 
 def _get_next_earnings_date(symbol: str):
     try:
@@ -40,12 +43,22 @@ async def check_earnings(days_ahead: int = 2) -> List[Dict[str, Any]]:
     tickers = watchlist.get("tickers", []) if isinstance(watchlist, dict) else []
     upcoming: List[Dict[str, Any]] = []
 
+    global _EARNINGS_CACHE_DATE, _EARNINGS_CACHE
     today = datetime.utcnow().date()
     cutoff = today + timedelta(days=days_ahead)
 
+    if _EARNINGS_CACHE_DATE != today:
+        _EARNINGS_CACHE_DATE = today
+        _EARNINGS_CACHE = {}
+
     for symbol in tickers:
         try:
-            date_val = _get_next_earnings_date(symbol)
+            symbol_key = str(symbol).upper()
+            if symbol_key in _EARNINGS_CACHE:
+                date_val = _EARNINGS_CACHE[symbol_key]
+            else:
+                date_val = _get_next_earnings_date(symbol_key)
+                _EARNINGS_CACHE[symbol_key] = date_val
             if not date_val:
                 continue
             if isinstance(date_val, datetime):

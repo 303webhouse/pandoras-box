@@ -25,18 +25,6 @@ logger = logging.getLogger(__name__)
 YF_LOCK = asyncio.Lock()
 
 
-def score_to_bias(score: float) -> str:
-    if score >= 0.60:
-        return "TORO_MAJOR"
-    if score >= 0.20:
-        return "TORO_MINOR"
-    if score >= -0.19:
-        return "NEUTRAL"
-    if score >= -0.59:
-        return "URSA_MINOR"
-    return "URSA_MAJOR"
-
-
 def _clamp(value: float, low: float = -1.0, high: float = 1.0) -> float:
     return max(low, min(high, value))
 
@@ -125,7 +113,6 @@ async def post_factor(
 ) -> Dict[str, Any]:
     payload = {
         "score": float(score),
-        "bias": bias or score_to_bias(score),
         "detail": detail,
         "data": data or {},
         "scoring_details": scoring_details or {},
@@ -133,6 +120,8 @@ async def post_factor(
         "stale_after_hours": stale_after_hours,
         "source": source,
     }
+    if bias is not None:
+        payload["bias"] = bias
     return await post_json(f"/bias/factors/{factor_name}", payload)
 
 

@@ -164,6 +164,28 @@ async def init_database():
             CREATE INDEX IF NOT EXISTS idx_factor_history_name_time
                 ON factor_history (factor_name, collected_at DESC);
         """)
+
+        # Composite bias history
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS bias_composite_history (
+                id SERIAL PRIMARY KEY,
+                composite_score FLOAT NOT NULL,
+                bias_level VARCHAR(20) NOT NULL,
+                bias_numeric INTEGER NOT NULL,
+                active_factors TEXT[] NOT NULL,
+                stale_factors TEXT[] NOT NULL,
+                velocity_multiplier FLOAT NOT NULL DEFAULT 1.0,
+                override VARCHAR(20),
+                confidence VARCHAR(10) NOT NULL,
+                factor_scores JSONB NOT NULL,
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_bias_history_created
+                ON bias_composite_history(created_at);
+        """)
         
         # Add new columns to signals table for Trade Ideas enhancement
         # These are added separately to support existing databases
