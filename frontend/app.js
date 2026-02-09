@@ -5093,6 +5093,10 @@ function getBtcUiTargets() {
 }
 
 function initBtcSignals() {
+    const hasBtcPanels = document.getElementById('btcSignalsGrid') || document.getElementById('cryptoBtcSignalsGrid');
+    if (!hasBtcPanels) {
+        return;
+    }
     const refreshButtons = document.querySelectorAll('.btc-refresh-btn');
     const resetButtons = document.querySelectorAll('.btc-reset-btn');
 

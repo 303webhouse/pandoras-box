@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Pandora's Box - Real-time Trading Signal Dashboard">
     <title>Pandora's Box</title>
-    <link rel="stylesheet" href="styles.css?v=28">
+    <link rel="stylesheet" href="styles.css?v=29">
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#0a0e27">
 </head>
@@ -35,9 +35,6 @@
                 <div class="crypto-session-status" id="cryptoSessionStatus">
                     <span class="session-pill">Fetching BTC session</span>
                 </div>
-            </div>
-            <div class="crypto-topbar-right">
-                <button class="crypto-toggle-btn" id="cryptoBtcToggleBtn" aria-expanded="true"> Bottom Signals</button>
             </div>
         </section>
 
@@ -486,51 +483,6 @@
                     </tbody>
                 </table>
             </div>
-        </section>
-
-        <!-- BTC Bottom Signals Checklist -->
-        <section class="btc-signals-section">
-            <div class="btc-signals-header">
-                <h2>₿ <span class="kb-link" data-kb-term="btc-bottom-signals">BTC BOTTOM SIGNALS</span></h2>
-                <div class="btc-signals-controls">
-                    <button class="btc-btn btc-refresh-btn" id="refreshBtcSignalsBtn">↻ Refresh</button>
-                    <button class="btc-btn secondary btc-reset-btn" id="resetBtcSignalsBtn">Reset All</button>
-                </div>
-            </div>
-            <p class="btc-info">"We identify structural exhaustion of sellers and reset of leverage"</p>
-            
-            <!-- Confluence Summary -->
-            <div class="btc-confluence-summary" id="btcConfluenceSummary">
-                <div class="confluence-meter">
-                    <span class="confluence-count">0/9</span>
-                    <span class="confluence-label kb-link" data-kb-term="macro-confluence">Signals Firing</span>
-                </div>
-                <div class="confluence-verdict">Checking signals...</div>
-            </div>
-            
-            <!-- API Status -->
-            <div class="btc-api-status" id="btcApiStatus">
-                <span class="api-status-item">Loading APIs...</span>
-            </div>
-            
-            <!-- Signal Checklist (ALL 9 AUTOMATED) -->
-            <div class="btc-signals-grid" id="btcSignalsGrid">
-                <p class="empty-state">Loading signals...</p>
-            </div>
-            
-            <!-- BTC Session Windows -->
-            <!-- MOVED TO CRYPTO-SCALPER: This section has been relocated to the dedicated crypto-scalper application -->
-            <!--
-            <div class="btc-sessions">
-                <h3>⏰ BTC Trading Sessions (ET)</h3>
-                <div class="btc-session-current" id="btcSessionCurrent">
-                    <span class="session-status">Checking...</span>
-                </div>
-                <div class="btc-session-list" id="btcSessionList">
-                    <!-- Sessions will be populated by JS -->
-                </div>
-            </div>
-            -->
         </section>
 
         <!-- Options Flow (Unusual Whales) -->
@@ -1249,29 +1201,6 @@
                 </div>
 
                 <div class="crypto-column crypto-column-right">
-                    <div class="crypto-panel crypto-panel-collapsible" id="cryptoBtcPanel">
-                        <div class="btc-signals-header">
-                            <h2>🧠 BTC Bottom Signals</h2>
-                            <div class="btc-signals-controls">
-                                <button class="btc-btn btc-refresh-btn">↻ Refresh</button>
-                                <button class="btc-btn secondary btc-reset-btn">Reset All</button>
-                            </div>
-                        </div>
-                        <div class="btc-confluence-summary" id="cryptoBtcConfluenceSummary">
-                            <div class="confluence-meter">
-                                <span class="confluence-count">0/9</span>
-                                <span class="confluence-label">Signals Firing</span>
-                            </div>
-                            <div class="confluence-verdict">Checking signals</div>
-                        </div>
-                        <div class="btc-api-status" id="cryptoBtcApiStatus">
-                            <span class="api-status-item">Loading APIs</span>
-                        </div>
-                        <div class="btc-signals-grid" id="cryptoBtcSignalsGrid">
-                            <p class="empty-state">Loading signals</p>
-                        </div>
-                    </div>
-
                     <div class="crypto-panel">
                         <div class="crypto-panel-header">
                             <h2>🧭 Macro Confluence</h2>
@@ -1320,6 +1249,6 @@
 
     <!-- TradingView Widget Script -->
     <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-    <script src="app.js?v=43"></script>
+    <script src="app.js?v=44"></script>
 </body>
 </html>
