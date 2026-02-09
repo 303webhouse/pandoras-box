@@ -16,7 +16,7 @@ import json
 import logging
 import asyncio
 import pytz
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from typing import Dict, Any, Optional, List
 from enum import Enum
 
@@ -1935,9 +1935,79 @@ _scheduler_started = False
 
 def is_trading_day() -> bool:
     """Check if today is a trading day (Mon-Fri, not a holiday) in Eastern Time"""
-    today = get_eastern_now()
-    # Simple check: Monday=0 through Friday=4
-    return today.weekday() < 5
+    today = get_eastern_now().date()
+    if today.weekday() >= 5:
+        return False
+
+    holiday_dates = (
+        _nyse_holidays(today.year - 1)
+        | _nyse_holidays(today.year)
+        | _nyse_holidays(today.year + 1)
+    )
+    return today not in holiday_dates
+
+
+def _observed_date(day: date) -> date:
+    if day.weekday() == 5:
+        return day - timedelta(days=1)
+    if day.weekday() == 6:
+        return day + timedelta(days=1)
+    return day
+
+
+def _nth_weekday(year: int, month: int, weekday: int, n: int) -> date:
+    current = date(year, month, 1)
+    while current.weekday() != weekday:
+        current += timedelta(days=1)
+    return current + timedelta(weeks=n - 1)
+
+
+def _last_weekday(year: int, month: int, weekday: int) -> date:
+    if month == 12:
+        current = date(year + 1, 1, 1) - timedelta(days=1)
+    else:
+        current = date(year, month + 1, 1) - timedelta(days=1)
+    while current.weekday() != weekday:
+        current -= timedelta(days=1)
+    return current
+
+
+def _easter_date(year: int) -> date:
+    a = year % 19
+    b = year // 100
+    c = year % 100
+    d = b // 4
+    e = b % 4
+    f = (b + 8) // 25
+    g = (b - f + 1) // 3
+    h = (19 * a + b - d - g + 15) % 30
+    i = c // 4
+    k = c % 4
+    l = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 22 * l) // 451
+    month = (h + l - 7 * m + 114) // 31
+    day = ((h + l - 7 * m + 114) % 31) + 1
+    return date(year, month, day)
+
+
+def _nyse_holidays(year: int) -> set[date]:
+    holidays: set[date] = set()
+
+    holidays.add(_observed_date(date(year, 1, 1)))      # New Year's Day
+    holidays.add(_nth_weekday(year, 1, 0, 3))           # MLK Day (3rd Monday Jan)
+    holidays.add(_nth_weekday(year, 2, 0, 3))           # Presidents Day (3rd Monday Feb)
+
+    good_friday = _easter_date(year) - timedelta(days=2)
+    holidays.add(good_friday)
+
+    holidays.add(_last_weekday(year, 5, 0))             # Memorial Day (last Monday May)
+    holidays.add(_observed_date(date(year, 6, 19)))     # Juneteenth
+    holidays.add(_observed_date(date(year, 7, 4)))      # Independence Day
+    holidays.add(_nth_weekday(year, 9, 0, 1))           # Labor Day (1st Monday Sep)
+    holidays.add(_nth_weekday(year, 11, 3, 4))          # Thanksgiving (4th Thursday Nov)
+    holidays.add(_observed_date(date(year, 12, 25)))    # Christmas
+
+    return holidays
 
 
 def is_first_trading_day_of_month() -> bool:
@@ -2116,7 +2186,6 @@ async def scan_sector_strength():
     
     try:
         import yfinance as yf
-        import httpx
         
         # Sector ETFs to analyze
         SECTOR_ETFS = {
@@ -2133,9 +2202,12 @@ async def scan_sector_strength():
             "Communication Services": "XLC"
         }
         
+        def _fetch_history(symbol: str):
+            ticker = yf.Ticker(symbol)
+            return ticker.history(period="3mo")
+
         # Get SPY as benchmark
-        spy = yf.Ticker("SPY")
-        spy_hist = spy.history(period="3mo")
+        spy_hist = await asyncio.to_thread(_fetch_history, "SPY")
         if spy_hist.empty:
             logger.warning("Could not fetch SPY data for sector comparison")
             return
@@ -2148,8 +2220,7 @@ async def scan_sector_strength():
         
         for sector_name, etf in SECTOR_ETFS.items():
             try:
-                ticker = yf.Ticker(etf)
-                hist = ticker.history(period="3mo")
+                hist = await asyncio.to_thread(_fetch_history, etf)
                 
                 if hist.empty or len(hist) < 50:
                     continue
@@ -2208,20 +2279,11 @@ async def scan_sector_strength():
             logger.info(f"   Leading: {top[0]} ({top[1]['etf']}) - score {top[1]['strength']}")
             logger.info(f"   Lagging: {bottom[0]} ({bottom[1]['etf']}) - score {bottom[1]['strength']}")
         
-        # Update watchlist with sector strength
+        # Update watchlist with sector strength (direct call avoids localhost dependency)
         try:
-            pivot_key = os.getenv("PIVOT_API_KEY")
-            headers = {"Authorization": f"Bearer {pivot_key}"} if pivot_key else None
-
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    "http://localhost:8000/api/watchlist/sector-strength",
-                    json={"sector_strength": sector_scores},
-                    headers=headers,
-                    timeout=10.0
-                )
-                if response.status_code == 200:
-                    logger.info("   Sector strength saved to watchlist")
+            from api.watchlist import SectorStrengthUpdate, update_sector_strength
+            await update_sector_strength(SectorStrengthUpdate(sector_strength=sector_scores), _="internal")
+            logger.info("   Sector strength saved to watchlist")
         except Exception as e:
             logger.warning(f"Could not update watchlist with sector strength: {e}")
         

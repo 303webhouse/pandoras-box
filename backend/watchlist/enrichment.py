@@ -4,6 +4,7 @@ Pulls live market data for all watchlist tickers and sector ETFs,
 attaches CTA zones and bias alignment, caches in Redis.
 """
 
+import asyncio
 import json
 import logging
 from datetime import datetime
@@ -97,6 +98,13 @@ def fetch_price_data(symbols: List[str]) -> Dict[str, dict]:
             result[symbol] = dict(empty)
 
     return result
+
+
+async def fetch_price_data_async(symbols: List[str]) -> Dict[str, dict]:
+    """
+    Async wrapper for bulk yfinance fetches to avoid blocking the event loop.
+    """
+    return await asyncio.to_thread(fetch_price_data, symbols)
 
 
 async def get_cta_zones(symbols: List[str], redis_client) -> Dict[str, Optional[str]]:
@@ -265,7 +273,7 @@ async def enrich_watchlist(watchlist_data: dict, redis_client) -> dict:
     all_etfs = list(set(all_etfs))
     all_symbols = list(set(all_tickers + all_etfs + [BENCHMARK_TICKER]))
 
-    price_data = fetch_price_data(all_symbols)
+    price_data = await fetch_price_data_async(all_symbols)
     cta_zones = await get_cta_zones(all_tickers, redis_client)
     signal_counts = await get_active_signals(all_tickers, redis_client)
     sector_strength = compute_sector_strength(sectors, price_data)
