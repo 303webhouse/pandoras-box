@@ -638,41 +638,145 @@
 
         <!-- Position Entry Modal -->
         <div class="modal-overlay" id="positionEntryModal">
-            <div class="position-modal">
+            <div class="position-modal" id="positionModalContainer">
                 <div class="position-modal-header">
-                    <h2>📈 Open Position</h2>
+                    <h2 id="positionModalTitle">📈 Open Position</h2>
                     <button class="modal-close" id="closePositionModalBtn">✕</button>
                 </div>
                 <div class="position-modal-body">
                     <div class="position-ticker-display" id="positionTickerDisplay">AAPL</div>
                     <div class="position-direction-display" id="positionDirectionDisplay">LONG</div>
                     
-                    <div class="position-field">
-                        <label>Entry Price *</label>
-                        <input type="number" id="positionEntryPrice" step="0.01" placeholder="e.g. 228.50" class="position-input">
+                    <!-- Trade Type Toggle -->
+                    <div class="trade-type-toggle">
+                        <button class="trade-type-btn active" data-type="equity" id="tradeTypeEquity">Equity</button>
+                        <button class="trade-type-btn" data-type="options" id="tradeTypeOptions">Options</button>
                     </div>
                     
-                    <div class="position-field">
-                        <label id="positionQtyLabel">Quantity (Shares) *</label>
-                        <input type="number" id="positionQuantity" step="1" placeholder="e.g. 100" class="position-input">
+                    <!-- Equity Fields -->
+                    <div id="equityFields">
+                        <div class="position-field">
+                            <label>Entry Price *</label>
+                            <input type="number" id="positionEntryPrice" step="0.01" placeholder="e.g. 228.50" class="position-input">
+                        </div>
+                        
+                        <div class="position-field">
+                            <label id="positionQtyLabel">Quantity (Shares) *</label>
+                            <input type="number" id="positionQuantity" step="1" placeholder="e.g. 100" class="position-input">
+                        </div>
+                        
+                        <div class="position-summary" id="positionSummary">
+                            <div class="summary-row">
+                                <span>Stop Loss:</span>
+                                <span id="summaryStop">--</span>
+                            </div>
+                            <div class="summary-row">
+                                <span>Target:</span>
+                                <span id="summaryTarget">--</span>
+                            </div>
+                            <div class="summary-row">
+                                <span>Position Size:</span>
+                                <span id="summarySize">$--</span>
+                            </div>
+                            <div class="summary-row">
+                                <span>Risk Amount:</span>
+                                <span id="summaryRisk">$--</span>
+                            </div>
+                        </div>
                     </div>
                     
-                    <div class="position-summary" id="positionSummary">
-                        <div class="summary-row">
-                            <span>Stop Loss:</span>
-                            <span id="summaryStop">--</span>
+                    <!-- Options Fields -->
+                    <div id="optionsFields" style="display: none;">
+                        <div class="position-field">
+                            <label>Strategy *</label>
+                            <select id="optPositionStrategy" class="position-input">
+                                <option value="LONG_CALL">Long Call</option>
+                                <option value="LONG_PUT">Long Put</option>
+                                <option value="BULL_CALL_SPREAD">Bull Call Spread</option>
+                                <option value="BEAR_PUT_SPREAD">Bear Put Spread</option>
+                                <option value="BULL_PUT_SPREAD">Bull Put Spread (Credit)</option>
+                                <option value="BEAR_CALL_SPREAD">Bear Call Spread (Credit)</option>
+                                <option value="IRON_CONDOR">Iron Condor</option>
+                                <option value="STRADDLE">Straddle</option>
+                                <option value="STRANGLE">Strangle</option>
+                                <option value="CUSTOM">Custom</option>
+                            </select>
                         </div>
-                        <div class="summary-row">
-                            <span>Target:</span>
-                            <span id="summaryTarget">--</span>
+                        
+                        <!-- Option Legs -->
+                        <div class="opt-legs-section">
+                            <label class="opt-legs-label">Legs</label>
+                            <div id="optPositionLegs">
+                                <div class="opt-leg-row" data-leg="1">
+                                    <div class="opt-leg-fields">
+                                        <select class="opt-leg-action position-input-sm">
+                                            <option value="BUY">BUY</option>
+                                            <option value="SELL">SELL</option>
+                                        </select>
+                                        <select class="opt-leg-type position-input-sm">
+                                            <option value="CALL">CALL</option>
+                                            <option value="PUT">PUT</option>
+                                        </select>
+                                        <input type="number" class="opt-leg-strike position-input-sm" placeholder="Strike" step="0.5">
+                                        <input type="date" class="opt-leg-expiry position-input-sm">
+                                        <input type="number" class="opt-leg-qty position-input-sm" placeholder="Qty" value="1" min="1" step="1">
+                                        <input type="number" class="opt-leg-premium position-input-sm" placeholder="Premium" step="0.01">
+                                    </div>
+                                </div>
+                            </div>
+                            <button class="opt-add-leg-btn" id="optPositionAddLeg">+ Add Leg</button>
                         </div>
-                        <div class="summary-row">
-                            <span>Position Size:</span>
-                            <span id="summarySize">$--</span>
+                        
+                        <div class="position-field-row">
+                            <div class="position-field half">
+                                <label>Net Premium *</label>
+                                <input type="number" id="optPositionPremium" step="0.01" placeholder="-250 or 150" class="position-input">
+                                <span class="field-hint">Negative = debit, Positive = credit</span>
+                            </div>
+                            <div class="position-field half">
+                                <label>Contracts *</label>
+                                <input type="number" id="optPositionContracts" step="1" min="1" value="1" class="position-input">
+                            </div>
                         </div>
-                        <div class="summary-row">
-                            <span>Risk Amount:</span>
-                            <span id="summaryRisk">$--</span>
+                        
+                        <div class="position-field-row">
+                            <div class="position-field half">
+                                <label>Max Profit</label>
+                                <input type="number" id="optPositionMaxProfit" step="0.01" placeholder="Optional" class="position-input">
+                            </div>
+                            <div class="position-field half">
+                                <label>Max Loss</label>
+                                <input type="number" id="optPositionMaxLoss" step="0.01" placeholder="Optional" class="position-input">
+                            </div>
+                        </div>
+                        
+                        <div class="position-field">
+                            <label>Breakeven</label>
+                            <input type="text" id="optPositionBreakeven" placeholder="e.g. 585.50 or 580,590" class="position-input">
+                        </div>
+                        
+                        <div class="position-field">
+                            <label>Thesis</label>
+                            <textarea id="optPositionThesis" class="position-input" rows="2" placeholder="Why this options trade?"></textarea>
+                        </div>
+                        
+                        <div class="position-summary" id="optionsSummary">
+                            <div class="summary-row">
+                                <span>Strategy:</span>
+                                <span id="optSummaryStrategy">--</span>
+                            </div>
+                            <div class="summary-row">
+                                <span>Direction:</span>
+                                <span id="optSummaryDirection">--</span>
+                            </div>
+                            <div class="summary-row">
+                                <span>Net Premium:</span>
+                                <span id="optSummaryPremium">$--</span>
+                            </div>
+                            <div class="summary-row">
+                                <span>Max Risk:</span>
+                                <span id="optSummaryRisk">$--</span>
+                            </div>
                         </div>
                     </div>
                 </div>

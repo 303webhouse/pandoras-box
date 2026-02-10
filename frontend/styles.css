@@ -1840,6 +1840,127 @@ body.override-active-bearish .override-toggle[data-active="true"] {
     background: #0ea391;
 }
 
+/* Trade Type Toggle (Equity / Options) */
+.trade-type-toggle {
+    display: flex;
+    gap: 4px;
+    background: var(--dark-bg);
+    border-radius: 8px;
+    padding: 4px;
+    margin-bottom: 20px;
+}
+
+.trade-type-btn {
+    flex: 1;
+    padding: 10px 16px;
+    border: none;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    background: transparent;
+    color: var(--text-secondary);
+}
+
+.trade-type-btn.active {
+    background: var(--accent-teal);
+    color: var(--dark-bg);
+}
+
+.trade-type-btn:not(.active):hover {
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.05);
+}
+
+/* Options mode - wider modal */
+.position-modal.options-mode {
+    max-width: 560px;
+}
+
+/* Options leg rows */
+.opt-legs-section {
+    margin-bottom: 16px;
+}
+
+.opt-legs-label {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+}
+
+.opt-leg-row {
+    margin-bottom: 8px;
+}
+
+.opt-leg-fields {
+    display: grid;
+    grid-template-columns: 70px 70px 1fr 1fr 60px 1fr;
+    gap: 6px;
+}
+
+.position-input-sm {
+    padding: 8px 8px;
+    background: var(--dark-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    color: var(--text-primary);
+    font-size: 12px;
+    font-weight: 600;
+    min-width: 0;
+}
+
+.position-input-sm:focus {
+    outline: none;
+    border-color: var(--accent-teal);
+}
+
+.opt-add-leg-btn {
+    background: transparent;
+    border: 1px dashed var(--border-color);
+    border-radius: 6px;
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 600;
+    padding: 6px 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+    margin-top: 4px;
+}
+
+.opt-add-leg-btn:hover {
+    border-color: var(--accent-teal);
+    color: var(--accent-teal);
+}
+
+/* Field row for side-by-side fields */
+.position-field-row {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 0;
+}
+
+.position-field.half {
+    flex: 1;
+}
+
+.field-hint {
+    display: block;
+    margin-top: 4px;
+    font-size: 11px;
+    color: var(--text-secondary);
+    opacity: 0.7;
+}
+
+/* Textarea in position modal */
+#optPositionThesis {
+    resize: vertical;
+    min-height: 50px;
+    font-family: inherit;
+}
+
 /* Custom scrollbar */
 .signals-container::-webkit-scrollbar {
     width: 6px;
