@@ -48,9 +48,43 @@ RUSSELL_HIGH_VOLUME = [
     "PLUG", "FCEL", "BE", "QS", "BLNK", "CHPT",
 ]
 
+# Always-scan instruments: highly liquid ETFs, indices, commodities, currencies,
+# and international markets. These bypass quality filters and are always included
+# in the scan universe regardless of watchlist membership.
+ALWAYS_SCAN = [
+    # Sector ETFs (11)
+    "XLK", "XLY", "XLF", "XLV", "XLE", "XLI", "XLP", "XLC", "XLU", "XLRE", "XLB",
+    # Broad Market (5)
+    "SPY", "QQQ", "IWM", "DIA", "RSP",
+    # Volatility (1)
+    "UVXY",
+    # Fixed Income (3)
+    "TLT", "HYG", "LQD",
+    # Commodities (4)
+    "GLD", "SLV", "USO", "COPX",
+    # Broad International (3)
+    "EEM", "EFA", "FXI",
+    # Country ETFs (5)
+    "EWJ",   # Japan
+    "EWY",   # South Korea
+    "EWG",   # Germany
+    "INDA",  # India
+    "EWU",   # UK
+    # Currencies (4)
+    "UUP",   # US Dollar Index
+    "FXE",   # Euro
+    "FXY",   # Japanese Yen
+    "FXB",   # British Pound
+    # Uranium (1)
+    "URA",
+    # Sector-specific (2)
+    "SMH",   # Semiconductors
+    "XBI",   # Biotech
+]
+
 
 async def build_scan_universe(
-    max_tickers: int = 200,
+    max_tickers: int = 300,
     include_scanner_universe: bool = True,
     respect_muted: bool = True,
 ) -> List[str]:
@@ -58,8 +92,9 @@ async def build_scan_universe(
     Build deduplicated scan universe in priority order:
     1. Active position tickers (priority='high')
     2. Manual watchlist tickers (source='manual', not muted)
-    3. Scanner universe tickers (source='scanner', not muted)
-    4. Fallback to hardcoded lists if DB unavailable
+    3. Always-scan instruments (sector ETFs, indices, commodities, currencies, international)
+    4. Scanner universe tickers (source='scanner', not muted)
+    5. Fallback to hardcoded lists if DB unavailable
     """
     universe: List[str] = []
     seen = set()
@@ -76,6 +111,7 @@ async def build_scan_universe(
 
         pool = await get_postgres_client()
         async with pool.acquire() as conn:
+            # 1. High-priority tickers (open positions)
             rows = await conn.fetch(
                 "SELECT symbol FROM watchlist_tickers "
                 "WHERE priority = 'high' AND muted = false "
@@ -83,6 +119,7 @@ async def build_scan_universe(
             )
             add_unique([r["symbol"] for r in rows])
 
+            # 2. Manual watchlist tickers
             rows = await conn.fetch(
                 "SELECT symbol FROM watchlist_tickers "
                 "WHERE source = 'manual' AND muted = false AND priority != 'high' "
@@ -90,6 +127,10 @@ async def build_scan_universe(
             )
             add_unique([r["symbol"] for r in rows])
 
+            # 3. Always-scan instruments (no filtering, always included)
+            add_unique(ALWAYS_SCAN)
+
+            # 4. Scanner universe tickers
             if include_scanner_universe:
                 muted_filter = "AND muted = false" if respect_muted else ""
                 rows = await conn.fetch(
@@ -99,7 +140,9 @@ async def build_scan_universe(
 
     except Exception as e:
         logger.warning(f"DB unavailable for universe build, using hardcoded fallback: {e}")
+        add_unique(ALWAYS_SCAN)
         add_unique(SP500_EXPANDED)
         add_unique(RUSSELL_HIGH_VOLUME)
 
+    logger.info(f"Scan universe built: {len(universe)} tickers")
     return universe[:max_tickers]
