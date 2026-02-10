@@ -96,6 +96,12 @@ let dailyBiasFactorStates = {
     tick_breadth: true
 };
 
+// Composite Bias API response cache (used by crypto bias bar without needing DOM from hub)
+let _compositeBiasData = null;
+
+// Keep a reference to open positions for crypto rendering
+let _open_positions_cache = [];
+
 // Cyclical Bias Factor State
 let cyclicalBiasFullData = null;
 let cyclicalBiasFactorStates = {
@@ -201,6 +207,11 @@ function setMode(mode, options = {}) {
 
     renderCryptoSignals();
     renderCryptoBiasSummary();
+
+    // Initialize crypto chart when switching to crypto mode
+    if (nextMode === APP_MODES.CRYPTO && !cryptoTvWidget) {
+        setTimeout(initCryptoChart, 200);
+    }
 }
 
 // TradingView Widget
@@ -857,24 +868,187 @@ async function loadInitialData() {
     setInterval(checkPivotHealth, 5 * 60 * 1000);
 }
 
+let cryptoTvWidget = null;
+let cryptoCurrentSymbol = 'BTCUSD';
+
 function initCryptoScalper() {
     const sortSelect = document.getElementById('cryptoSignalSort');
     if (sortSelect) {
         sortSelect.addEventListener('change', renderCryptoSignals);
     }
 
-    const btcToggleBtn = document.getElementById('cryptoBtcToggleBtn');
-    if (btcToggleBtn) {
-        btcToggleBtn.addEventListener('click', () => {
-            const panel = document.getElementById('cryptoBtcPanel');
-            if (!panel) return;
-            const isCollapsed = panel.classList.toggle('collapsed');
-            btcToggleBtn.setAttribute('aria-expanded', String(!isCollapsed));
+    // Chart tab switching
+    const chartTabs = document.getElementById('cryptoChartTabs');
+    if (chartTabs) {
+        chartTabs.querySelectorAll('.chart-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                chartTabs.querySelectorAll('.chart-tab').forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                const sym = tab.dataset.symbol;
+                if (sym && sym !== cryptoCurrentSymbol) {
+                    cryptoCurrentSymbol = sym;
+                    initCryptoChart();
+                }
+            });
         });
+    }
+
+    // Strategy filter checkboxes
+    document.querySelectorAll('.crypto-strategy-cb').forEach(cb => {
+        cb.addEventListener('change', renderCryptoSignals);
+    });
+    const dirLong = document.getElementById('cryptoFilterLong');
+    const dirShort = document.getElementById('cryptoFilterShort');
+    if (dirLong) dirLong.addEventListener('change', renderCryptoSignals);
+    if (dirShort) dirShort.addEventListener('change', renderCryptoSignals);
+    const scoreThreshold = document.getElementById('cryptoScoreThreshold');
+    if (scoreThreshold) scoreThreshold.addEventListener('input', renderCryptoSignals);
+
+    // Signal action delegation
+    const signalList = document.getElementById('cryptoSignalsList');
+    if (signalList) {
+        signalList.addEventListener('click', handleCryptoSignalAction);
     }
 
     loadCryptoKeyLevels();
     setInterval(loadCryptoKeyLevels, 10 * 60 * 1000);
+}
+
+function initCryptoChart() {
+    const container = document.getElementById('crypto-tradingview-widget');
+    if (!container) return;
+    if (typeof TradingView === 'undefined') return;
+
+    // TradingView requires a visible container with non-zero dimensions.
+    // If the container is not yet laid out (e.g. parent is hidden or has zero size),
+    // defer the init by one animation frame so the browser can reflow first.
+    const parentContainer = document.getElementById('cryptoChartContainer');
+    if (parentContainer && parentContainer.offsetWidth === 0) {
+        requestAnimationFrame(() => setTimeout(initCryptoChart, 50));
+        return;
+    }
+
+    container.innerHTML = '';
+    cryptoTvWidget = new TradingView.widget({
+        symbol: cryptoCurrentSymbol,
+        interval: '15',
+        timezone: 'America/New_York',
+        theme: 'dark',
+        style: '1',
+        locale: 'en',
+        toolbar_bg: '#0a0e27',
+        enable_publishing: false,
+        hide_top_toolbar: false,
+        hide_legend: false,
+        save_image: false,
+        container_id: 'crypto-tradingview-widget',
+        width: '100%',
+        height: '100%',
+        studies: [
+            { id: 'MASimple@tv-basicstudies', inputs: { length: 50 } },
+            { id: 'MASimple@tv-basicstudies', inputs: { length: 200 } }
+        ],
+        overrides: {
+            'mainSeriesProperties.candleStyle.upColor': '#7CFF6B',
+            'mainSeriesProperties.candleStyle.downColor': '#FF6B35',
+            'mainSeriesProperties.candleStyle.borderUpColor': '#7CFF6B',
+            'mainSeriesProperties.candleStyle.borderDownColor': '#FF6B35',
+            'mainSeriesProperties.candleStyle.wickUpColor': '#7CFF6B',
+            'mainSeriesProperties.candleStyle.wickDownColor': '#FF6B35',
+            'paneProperties.background': '#0a0e27',
+            'paneProperties.backgroundType': 'solid',
+            'paneProperties.vertGridProperties.color': '#1e293b',
+            'paneProperties.horzGridProperties.color': '#1e293b',
+            'scalesProperties.textColor': '#94a3b8',
+            'scalesProperties.backgroundColor': '#0a0e27',
+            'paneProperties.crossHairProperties.color': '#F7931A'
+        }
+    });
+}
+
+function handleCryptoSignalAction(e) {
+    const btn = e.target.closest('[data-action]');
+    if (!btn) return;
+    const card = btn.closest('.crypto-signal-card');
+    if (!card) return;
+    const signalId = card.dataset.signalId;
+    if (!signalId) return;
+
+    const action = btn.dataset.action;
+    if (action === 'select') {
+        // Find signal data
+        const signal = signals.crypto.find(s => s.signal_id === signalId);
+        if (signal) {
+            openCryptoAcceptModal(signal);
+        }
+    } else if (action === 'dismiss') {
+        dismissCryptoSignal(signalId);
+    } else if (action === 'view-chart') {
+        // Normalize the ticker: strip any trailing USDT or USD suffix before building symbol
+        const rawTicker = btn.textContent.trim().toUpperCase().replace(/USDT?$/, '');
+        if (rawTicker) {
+            cryptoCurrentSymbol = rawTicker + 'USD';
+            initCryptoChart();
+            // Highlight matching tab (if no tab matches, all tabs become inactive — graceful)
+            const tabs = document.getElementById('cryptoChartTabs');
+            if (tabs) {
+                tabs.querySelectorAll('.chart-tab').forEach(t => {
+                    t.classList.toggle('active', t.dataset.symbol === cryptoCurrentSymbol);
+                });
+            }
+        }
+    }
+}
+
+function openCryptoAcceptModal(signal) {
+    // Reuse the existing position entry modal from hub mode.
+    // IMPORTANT: must set pendingPositionSignal so confirmPositionEntry() has the data.
+    const modal = document.getElementById('positionEntryModal');
+    if (!modal) return;
+
+    // Wire up pendingPositionSignal so the shared confirmPositionEntry handler works
+    pendingPositionSignal = signal;
+    pendingPositionCard = null; // No card element ref in crypto mode; skip animation
+
+    const tickerDisplay = document.getElementById('positionTickerDisplay');
+    const dirDisplay = document.getElementById('positionDirectionDisplay');
+    const entryInput = document.getElementById('positionEntryPrice');
+    const qtyInput = document.getElementById('positionQuantity');
+    const qtyLabel = document.getElementById('positionQtyLabel');
+    const summaryStop = document.getElementById('summaryStop');
+    const summaryTarget = document.getElementById('summaryTarget');
+    const summarySize = document.getElementById('summarySize');
+    const summaryRisk = document.getElementById('summaryRisk');
+
+    if (tickerDisplay) tickerDisplay.textContent = signal.ticker || '--';
+    if (dirDisplay) {
+        dirDisplay.textContent = signal.direction || 'LONG';
+        dirDisplay.className = 'position-direction-display ' + (signal.direction || 'LONG');
+    }
+    if (entryInput) entryInput.value = signal.entry_price ? parseFloat(signal.entry_price).toFixed(2) : '';
+    if (qtyInput) { qtyInput.value = ''; qtyInput.placeholder = 'Contracts'; }
+    if (qtyLabel) qtyLabel.textContent = 'Quantity (Contracts) *';
+    if (summaryStop) summaryStop.textContent = signal.stop_loss ? `$${parseFloat(signal.stop_loss).toLocaleString()}` : '--';
+    if (summaryTarget) summaryTarget.textContent = signal.target_1 ? `$${parseFloat(signal.target_1).toLocaleString()}` : '--';
+    if (summarySize) summarySize.textContent = '$--';
+    if (summaryRisk) summaryRisk.textContent = '$--';
+
+    // Use classList.add('active') to match the hub modal open/close pattern
+    modal.classList.add('active');
+}
+
+async function dismissCryptoSignal(signalId) {
+    try {
+        await fetch(`${API_URL}/signals/${signalId}/dismiss`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ signal_id: signalId })
+        });
+        signals.crypto = signals.crypto.filter(s => s.signal_id !== signalId);
+        renderCryptoSignals();
+    } catch (err) {
+        console.error('Error dismissing crypto signal:', err);
+    }
 }
 
 async function loadSignals() {
@@ -1041,6 +1215,9 @@ function showCompositeError() {
 
 function renderCompositeBias(data) {
     if (!data) return;
+
+    // Cache for use by crypto bias bar (avoids reading from hub DOM elements)
+    _compositeBiasData = data;
 
     const banner = document.getElementById('compositeBiasBanner');
     const levelEl = document.getElementById('compositeBiasLevel');
@@ -2681,9 +2858,11 @@ async function loadOpenPositions() {
     try {
         const response = await fetch(`${API_URL}/positions/open`);
         const data = await response.json();
-        
+
         if (data.status === 'success') {
+            _open_positions_cache = data.positions || [];
             renderPositions(data.positions);
+            renderCryptoPositions();
         }
     } catch (error) {
         console.error('Error loading positions:', error);
@@ -2737,15 +2916,49 @@ function renderSignals() {
     attachDynamicKbHandlers(container);
 }
 
+function getCryptoFilterState() {
+    const enabledStrategies = new Set();
+    document.querySelectorAll('.crypto-strategy-cb:checked').forEach(cb => {
+        enabledStrategies.add(cb.dataset.strategy);
+    });
+    const allowLong = document.getElementById('cryptoFilterLong')?.checked !== false;
+    const allowShort = document.getElementById('cryptoFilterShort')?.checked !== false;
+    const minScore = parseInt(document.getElementById('cryptoScoreThreshold')?.value || '1', 10);
+    return { enabledStrategies, allowLong, allowShort, minScore };
+}
+
 function renderCryptoSignals() {
     const container = document.getElementById('cryptoSignalsList');
     if (!container) return;
 
     const sortBy = document.getElementById('cryptoSignalSort')?.value || 'score';
-    const cryptoSignals = [...signals.crypto];
+    const filters = getCryptoFilterState();
+    let cryptoSignals = [...signals.crypto];
+
+    // Apply strategy filters
+    cryptoSignals = cryptoSignals.filter(s => {
+        const strategy = (s.strategy || '').toLowerCase().replace(/[\s-]/g, '_');
+        if (filters.enabledStrategies.size > 0) {
+            let matched = false;
+            for (const enabled of filters.enabledStrategies) {
+                // Exact match OR strategy is a versioned variant (e.g. "golden_touch_v2")
+                // Use prefix check so partial checkbox keys like "touch" don't match "golden_touch"
+                if (strategy === enabled || strategy.startsWith(enabled + '_')) {
+                    matched = true;
+                    break;
+                }
+            }
+            if (!matched) return false;
+        }
+        const dir = (s.direction || '').toUpperCase();
+        if (dir === 'LONG' && !filters.allowLong) return false;
+        if (dir === 'SHORT' && !filters.allowShort) return false;
+        if ((s.score || 0) < filters.minScore) return false;
+        return true;
+    });
 
     if (cryptoSignals.length === 0) {
-        container.innerHTML = '<p class="empty-state">No crypto signals yet</p>';
+        container.innerHTML = '<p class="empty-state">No crypto signals match filters</p>';
         return;
     }
 
@@ -2755,12 +2968,13 @@ function renderCryptoSignals() {
             const timeB = new Date(b.timestamp || b.created_at || 0).getTime();
             return timeB - timeA;
         }
-        const scoreA = Number(a.score || 0);
-        const scoreB = Number(b.score || 0);
-        return scoreB - scoreA;
+        return (Number(b.score) || 0) - (Number(a.score) || 0);
     });
 
     container.innerHTML = cryptoSignals.map(signal => createCryptoSignalCard(signal)).join('');
+
+    // Also update crypto positions
+    renderCryptoPositions();
 }
 
 function refreshSignalViews() {
@@ -2771,13 +2985,13 @@ function refreshSignalViews() {
 }
 
 function createCryptoSignalCard(signal) {
-    const typeLabel = (signal.signal_type || 'SIGNAL').replace('_', ' ');
     const score = signal.score !== undefined && signal.score !== null ? Number(signal.score).toFixed(1) : '--';
+    const scoreTier = typeof getScoreTier === 'function' ? getScoreTier(Number(score) || 0) : 'MODERATE';
     const direction = signal.direction || 'N/A';
-    const timeframe = signal.timeframe || 'INTRADAY';
     const strategy = signal.strategy || 'Crypto Scanner';
+    const formatPrice = (val) => val ? `$${parseFloat(val).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}` : '--';
 
-    let timestampStr = 'Unknown time';
+    let timestampStr = '';
     if (signal.timestamp || signal.created_at) {
         try {
             let timeStr = signal.timestamp || signal.created_at;
@@ -2785,35 +2999,48 @@ function createCryptoSignalCard(signal) {
                 timeStr += 'Z';
             }
             timestampStr = new Date(timeStr).toLocaleString('en-US', {
-                hour: 'numeric',
-                minute: '2-digit',
-                month: 'short',
-                day: 'numeric'
+                hour: 'numeric', minute: '2-digit', month: 'short', day: 'numeric'
             });
-        } catch (error) {
-            timestampStr = 'Unknown time';
-        }
+        } catch (e) { /* ignore */ }
     }
 
     const badges = [];
-    if (signal.signal_type === 'APIS_CALL') {
-        badges.push('<span class="crypto-badge apis">APIS</span>');
-    }
-    if (signal.signal_type === 'KODIAK_CALL') {
-        badges.push('<span class="crypto-badge kodiak">KODIAK</span>');
-    }
+    if (signal.signal_type === 'APIS_CALL') badges.push('<span class="crypto-badge apis">APIS</span>');
+    if (signal.signal_type === 'KODIAK_CALL') badges.push('<span class="crypto-badge kodiak">KODIAK</span>');
+
+    const biasAlignment = signal.bias_alignment || 'NEUTRAL';
+    const isAligned = biasAlignment.includes('ALIGNED') && !biasAlignment.includes('COUNTER');
+    const biasClass = isAligned ? 'aligned' : (biasAlignment.includes('COUNTER') ? 'counter' : '');
+    const biasIcon = isAligned ? '&#10003;' : (biasAlignment.includes('COUNTER') ? '&#9888;' : '&#9675;');
+    const biasText = biasAlignment.replace(/_/g, ' ');
+
+    const signalTypeClass = signal.signal_type || '';
 
     return `
-        <div class="crypto-signal-card">
+        <div class="crypto-signal-card ${signalTypeClass}" data-signal-id="${signal.signal_id || ''}" data-signal='${JSON.stringify(signal).replace(/'/g, "&#39;")}'>
             <div class="crypto-signal-header">
-                <span class="crypto-signal-title">${signal.ticker || '--'}  ${typeLabel}</span>
+                <span class="crypto-signal-ticker" data-action="view-chart">${escapeHtml(signal.ticker || '--')}</span>
                 <div class="crypto-signal-meta">
                     ${badges.join('')}
-                    <span class="crypto-badge">${score}</span>
+                    <span class="crypto-badge">${escapeHtml(direction)}</span>
                 </div>
             </div>
-            <div class="crypto-signal-details">${strategy}  ${direction}  ${timeframe}</div>
-            <div class="crypto-signal-details">Last update: ${timestampStr}</div>
+            <div class="crypto-signal-score">
+                <span class="crypto-score-value">${score}</span>
+                <span class="crypto-score-tier ${scoreTier.toLowerCase()}">${scoreTier}</span>
+                <span style="margin-left:auto;font-size:11px;color:var(--text-secondary)">${escapeHtml(strategy)}</span>
+            </div>
+            <div class="crypto-signal-details">
+                <span><span class="crypto-signal-detail-label">Entry</span> <span class="crypto-signal-detail-value">${formatPrice(signal.entry_price)}</span></span>
+                <span><span class="crypto-signal-detail-label">Stop</span> <span class="crypto-signal-detail-value">${formatPrice(signal.stop_loss)}</span></span>
+                <span><span class="crypto-signal-detail-label">Target</span> <span class="crypto-signal-detail-value">${formatPrice(signal.target_1)}</span></span>
+                <span><span class="crypto-signal-detail-label">R:R</span> <span class="crypto-signal-detail-value">${signal.risk_reward ? parseFloat(signal.risk_reward).toFixed(1) + ':1' : '--'}</span></span>
+            </div>
+            <div class="crypto-signal-bias ${biasClass}">${biasIcon} ${biasText}${timestampStr ? `  &middot;  ${timestampStr}` : ''}</div>
+            <div class="crypto-signal-actions">
+                <button class="action-btn dismiss-btn" data-action="dismiss">&#10005; Dismiss</button>
+                <button class="action-btn select-btn" data-action="select">&#10003; Accept</button>
+            </div>
         </div>
     `;
 }
@@ -2968,23 +3195,96 @@ function renderCryptoBiasSummary() {
         cyclical: cyclicalBiasFullData?.level || 'NEUTRAL'
     };
 
+    // Populate individual bias cards
     grid.querySelectorAll('[data-bias]').forEach(el => {
         const key = el.dataset.bias;
         if (biasValues[key]) {
             el.textContent = biasValues[key].replace('_', ' ');
+            // Color the value
+            const level = biasValues[key];
+            if (level.includes('TORO')) el.style.color = BIAS_COLORS[level]?.text || '#00e676';
+            else if (level.includes('URSA')) el.style.color = BIAS_COLORS[level]?.text || '#f44336';
+            else el.style.color = BIAS_COLORS.NEUTRAL?.text || '#78909c';
         }
     });
 
-    const note = document.getElementById('cryptoBiasNote');
-    if (!note) return;
+    // Populate composite bias bar — read directly from cached API response,
+    // not from hub DOM elements (which may not be rendered if user landed on /crypto).
+    const levelEl = document.getElementById('cryptoCompositeBiasLevel');
+    const scoreEl = document.getElementById('cryptoCompositeBiasScore');
+    const confEl = document.getElementById('cryptoCompositeBiasConfidence');
+    const biasBar = document.getElementById('cryptoBiasBar');
 
-    note.textContent = getBiasAlignmentStatus(biasValues.cyclical, biasValues.weekly).note;
+    const compositeLevel = (_compositeBiasData?.bias_level || 'NEUTRAL').replace(/_/g, ' ');
+    const compositeScoreVal = typeof _compositeBiasData?.composite_score === 'number'
+        ? _compositeBiasData.composite_score
+        : parseFloat(_compositeBiasData?.composite_score || 0);
+    const compositeConf = (_compositeBiasData?.confidence || 'LOW').toUpperCase();
+
+    if (levelEl) {
+        levelEl.textContent = compositeLevel;
+        const biasColorKey = compositeLevel.replace(/\s/g, '_');
+        const biasColor = BIAS_COLORS[biasColorKey] || BIAS_COLORS.NEUTRAL;
+        levelEl.style.color = biasColor.text;
+        if (biasBar) biasBar.style.borderColor = biasColor.accent;
+    }
+    if (scoreEl) {
+        const scoreText = Number.isFinite(compositeScoreVal) ? compositeScoreVal.toFixed(2) : '--';
+        scoreEl.textContent = `(${scoreText})`;
+    }
+    if (confEl) {
+        confEl.textContent = compositeConf;
+        confEl.className = 'crypto-bias-bar-confidence ' + compositeConf;
+    }
+
+    // Alignment note
+    const note = document.getElementById('cryptoBiasNote');
+    if (note) {
+        note.textContent = getBiasAlignmentStatus(biasValues.cyclical, biasValues.weekly).note;
+    }
+}
+
+function renderCryptoPositions() {
+    const container = document.getElementById('cryptoPositionsList');
+    const countEl = document.getElementById('cryptoPositionsCount');
+    if (!container) return;
+
+    // Filter open positions for crypto
+    const cryptoTickers = ['BTC', 'ETH', 'SOL', 'XRP', 'ADA', 'AVAX', 'DOGE', 'DOT', 'LINK', 'MATIC', 'LTC', 'UNI'];
+    const cryptoPositions = _open_positions_cache.filter(p => {
+        if (p.asset_class === 'CRYPTO') return true;
+        const tickerBase = (p.ticker || '').toUpperCase().replace(/USD.*/, '');
+        return cryptoTickers.includes(tickerBase);
+    });
+
+    if (countEl) countEl.textContent = cryptoPositions.length;
+
+    if (cryptoPositions.length === 0) {
+        container.innerHTML = '<p class="empty-state">No open crypto positions</p>';
+        return;
+    }
+
+    container.innerHTML = cryptoPositions.map(p => `
+        <div class="crypto-position-card">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+                <span class="crypto-position-ticker">${escapeHtml(p.ticker || '--')}</span>
+                <span class="crypto-position-direction ${p.direction || ''}" style="font-size:11px;font-weight:700">${escapeHtml(p.direction || '--')}</span>
+            </div>
+            <div class="crypto-position-meta">
+                Entry: $${p.entry_price ? parseFloat(p.entry_price).toLocaleString() : '--'}
+                &middot; Qty: ${p.quantity || '--'}
+                ${p.stop_loss ? `&middot; Stop: $${parseFloat(p.stop_loss).toLocaleString()}` : ''}
+                ${p.strategy ? `&middot; ${escapeHtml(p.strategy)}` : ''}
+            </div>
+        </div>
+    `).join('');
 }
 
 async function loadCryptoKeyLevels() {
     const updatedEl = document.getElementById('cryptoKeyLevelsUpdated');
-    const grid = document.getElementById('cryptoKeyLevelsGrid');
-    if (!grid) return;
+    // Note: was previously guarded by a 'cryptoKeyLevelsGrid' ID that no longer exists.
+    // updateCryptoLevelValue() uses querySelectorAll('[data-level=...]') which targets
+    // the strip elements directly, so no container reference needed here.
 
     try {
         const symbol = 'BTCUSDT';
@@ -3021,13 +3321,18 @@ async function loadCryptoKeyLevels() {
 }
 
 function updateCryptoLevelValue(levelKey, value) {
-    const el = document.querySelector(`[data-level="${levelKey}"]`);
-    if (!el) return;
-    if (value === null || value === undefined || Number.isNaN(value)) {
-        el.textContent = '--';
-        return;
-    }
-    el.textContent = `$${Number(value).toLocaleString('en-US', { maximumFractionDigits: 2 })}`;
+    const formatted = (value !== null && value !== undefined && !Number.isNaN(value))
+        ? `$${Number(value).toLocaleString('en-US', { maximumFractionDigits: 0 })}`
+        : '--';
+    // Update all matching elements (strip <b> tags + any other data-level targets)
+    document.querySelectorAll(`[data-level="${levelKey}"]`).forEach(el => {
+        const b = el.querySelector('b');
+        if (b) {
+            b.textContent = formatted;
+        } else {
+            el.textContent = formatted;
+        }
+    });
 }
 
 async function fetchBinanceKlines(symbol, interval, params = {}) {
@@ -5114,15 +5419,69 @@ function initBtcSignals() {
     // Initial load
     loadBtcSignals();
     loadBtcSessions();
-    
-    // Auto-refresh every 5 minutes
+
+    // Auto-refresh: signals every 5 min, sessions every 10 min
     setInterval(loadBtcSignals, 5 * 60 * 1000);
+    setInterval(loadBtcSessions, 10 * 60 * 1000);
 }
 
-function loadBtcSessions() {
-    // Placeholder: avoid runtime errors if BTC sessions are not configured
-    if (typeof renderBtcSessions === 'function') {
-        renderBtcSessions();
+async function loadBtcSessions() {
+    await renderBtcSessions();
+}
+
+async function renderBtcSessions() {
+    const listEl = document.getElementById('cryptoBtcSessionList');
+    const currentEl = document.getElementById('cryptoBtcSessionCurrent');
+    if (!listEl && !currentEl) return;
+
+    try {
+        const response = await fetch(`${API_URL}/btc/sessions`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+
+        const sessions = data.sessions || {};
+        const currentSession = data.current_session || null;
+
+        // Update the topbar session pill
+        updateCryptoSessionStatus(currentSession, sessions);
+
+        // Update the current-session indicator inside the crypto panel.
+        // The active styling is on .btc-session-current.active — toggle that class on the element.
+        if (currentEl) {
+            if (currentSession && currentSession.active) {
+                currentEl.classList.add('active');
+                currentEl.innerHTML = `<span class="session-status">NOW: ${escapeHtml(currentSession.name)}</span>`;
+            } else {
+                currentEl.classList.remove('active');
+                const sessionValues = Object.values(sessions);
+                const nextName = sessionValues.length > 0 ? sessionValues[0].name : null;
+                currentEl.innerHTML = `<span class="session-status">No active session${nextName ? ` &middot; Next: ${escapeHtml(nextName)}` : ''}</span>`;
+            }
+        }
+
+        // Render session list rows
+        if (listEl) {
+            const sessionIds = Object.keys(sessions);
+            if (sessionIds.length === 0) {
+                listEl.innerHTML = '<p class="empty-state">No sessions configured</p>';
+                return;
+            }
+            listEl.innerHTML = sessionIds.map(id => {
+                const s = sessions[id];
+                const isActive = currentSession && currentSession.name === s.name;
+                const localTime = s.utc_time ? formatUtcRangeToDenver(s.utc_time) : '';
+                return `
+                    <div class="btc-session-item${isActive ? ' active' : ''}">
+                        <div class="session-name${isActive ? ' active' : ''}">${escapeHtml(s.name)}</div>
+                        <div class="session-time">${escapeHtml(s.ny_time)} ET${localTime ? ` &middot; ${escapeHtml(localTime)}` : ''}</div>
+                        <div class="session-note">${escapeHtml(s.trading_note || '')}</div>
+                    </div>
+                `;
+            }).join('');
+        }
+    } catch (err) {
+        console.error('Error loading BTC sessions:', err);
+        if (listEl) listEl.innerHTML = '<p class="empty-state">Could not load sessions</p>';
     }
 }
 
