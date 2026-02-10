@@ -809,6 +809,7 @@ function initEventListeners() {
         loadSignals();
         loadBiasData();
         fetchCompositeBias();
+        fetchTimeframeBias();
         checkPivotHealth();
     });
 
@@ -858,16 +859,23 @@ async function loadInitialData() {
         loadSignals(),
         loadBiasData(),
         fetchCompositeBias(),
+        fetchTimeframeBias(),
         loadOpenPositions()
     ]);
 
     // Initialize Scout Alerts section
     renderScoutAlerts();
+    
+    // Initialize timeframe card toggles
+    initTimeframeToggles();
 
     // Set up auto-refresh for bias shift status every 5 minutes
     setInterval(() => {
         fetchBiasShiftStatus();
     }, 5 * 60 * 1000); // 5 minutes
+    
+    // Refresh timeframe data every 2 minutes
+    setInterval(fetchTimeframeBias, 2 * 60 * 1000);
 
     // Pivot health checks
     checkPivotHealth();
@@ -1065,10 +1073,22 @@ async function loadSignals() {
         console.log('📡 Loaded signals:', data);
         
         if (data.status === 'success' && data.signals) {
+            // Merge counter-trend signals that aren't already in the main list
+            const allSignals = [...data.signals];
+            if (data.counter_trend_signals && data.counter_trend_signals.length > 0) {
+                const mainIds = new Set(allSignals.map(s => s.signal_id));
+                for (const ct of data.counter_trend_signals) {
+                    ct.is_counter_trend = true;
+                    if (!mainIds.has(ct.signal_id)) {
+                        allSignals.push(ct);
+                    }
+                }
+            }
+            
             // Separate equity and crypto signals (be more flexible with asset_class matching)
             const cryptoTickers = ['BTC', 'ETH', 'SOL', 'XRP', 'ADA', 'AVAX', 'DOGE', 'DOT', 'LINK', 'MATIC', 'LTC', 'UNI'];
             
-            signals.equity = data.signals.filter(s => {
+            signals.equity = allSignals.filter(s => {
                 // If explicitly marked as EQUITY
                 if (s.asset_class === 'EQUITY') return true;
                 // If no asset_class but ticker doesn't look like crypto
@@ -1079,7 +1099,7 @@ async function loadSignals() {
                 return false;
             });
             
-            signals.crypto = data.signals.filter(s => {
+            signals.crypto = allSignals.filter(s => {
                 // If explicitly marked as CRYPTO
                 if (s.asset_class === 'CRYPTO') return true;
                 // If no asset_class but ticker looks like crypto
@@ -1378,6 +1398,165 @@ function initCompositeBiasControls() {
         });
     }
 }
+
+// =========================================================================
+// TIMEFRAME FACTOR CARDS (Intraday / Swing / Macro)
+// =========================================================================
+
+async function fetchTimeframeBias() {
+    try {
+        const resp = await fetch(`${API_URL}/bias/composite/timeframes`);
+        const data = await resp.json();
+        if (data && data.timeframes) {
+            renderTimeframeCards(data);
+            renderSectorRotationStrip(data.sector_rotation);
+            
+            // Apply pulse to composite banner at extremes
+            const banner = document.getElementById('compositeBiasBanner');
+            if (banner) {
+                banner.classList.remove('pulse-toro', 'pulse-ursa');
+                if (data.composite_bias === 'TORO_MAJOR') banner.classList.add('pulse-toro');
+                else if (data.composite_bias === 'URSA_MAJOR') banner.classList.add('pulse-ursa');
+            }
+        }
+    } catch (err) {
+        console.error('Failed to fetch timeframe bias:', err);
+    }
+}
+
+function renderTimeframeCards(data) {
+    const tfNames = ['intraday', 'swing', 'macro'];
+    const displayNames = { intraday: 'Intraday', swing: 'Swing', macro: 'Macro' };
+    const cardIds = { intraday: 'tfIntraday', swing: 'tfSwing', macro: 'tfMacro' };
+
+    for (const tf of tfNames) {
+        const tfData = data.timeframes[tf];
+        if (!tfData) continue;
+
+        const card = document.getElementById(cardIds[tf]);
+        if (!card) continue;
+
+        const level = tfData.bias_level || 'NEUTRAL';
+        const score = typeof tfData.sub_score === 'number' ? tfData.sub_score.toFixed(2) : '--';
+        const momentum = tfData.momentum || 'stable';
+
+        // Update level
+        const levelEl = card.querySelector('.tf-level');
+        if (levelEl) {
+            levelEl.textContent = level.replace('_', ' ');
+        }
+
+        // Update score
+        const scoreEl = card.querySelector('.tf-score');
+        if (scoreEl) scoreEl.textContent = `(${score})`;
+
+        // Update momentum
+        const momEl = card.querySelector('.tf-momentum');
+        if (momEl) {
+            const arrows = { strengthening: '↑', weakening: '↓', stable: '→' };
+            const labels = { strengthening: 'Strengthening', weakening: 'Weakening', stable: 'Stable' };
+            momEl.className = `tf-momentum ${momentum}`;
+            momEl.innerHTML = `<span class="tf-momentum-arrow">${arrows[momentum] || '→'}</span> ${labels[momentum] || 'Stable'}`;
+        }
+
+        // Update divergence
+        const divEl = card.querySelector('.tf-divergence');
+        if (divEl) {
+            if (tfData.divergent) {
+                const compDir = data.composite_score > 0 ? 'bullish' : 'bearish';
+                divEl.textContent = `Diverging from composite (${compDir})`;
+                divEl.style.display = 'block';
+            } else {
+                divEl.style.display = 'none';
+            }
+        }
+
+        // Apply bias color class
+        card.className = `tf-card ${level}`;
+
+        // Pulse at extremes
+        card.classList.remove('pulse-toro', 'pulse-ursa');
+        if (level === 'TORO_MAJOR') card.classList.add('pulse-toro');
+        else if (level === 'URSA_MAJOR') card.classList.add('pulse-ursa');
+
+        // Render factor bars
+        const factorsEl = card.querySelector('.tf-factors');
+        if (factorsEl && tfData.factors) {
+            factorsEl.innerHTML = tfData.factors.map(f => {
+                const fScore = f.score !== null ? f.score : 0;
+                const pct = Math.abs(fScore) * 50; // 0-50% of bar width
+                const dir = fScore >= 0 ? 'bullish' : 'bearish';
+                const staleClass = f.stale ? 'stale' : '';
+                const name = f.factor_id.replace(/_/g, ' ');
+                return `
+                    <div class="tf-factor-row ${staleClass}">
+                        <span class="tf-factor-name">${name}</span>
+                        <div class="tf-factor-bar">
+                            <div class="tf-factor-bar-fill ${dir}" style="width:${pct}%"></div>
+                        </div>
+                        <span class="tf-factor-score">${f.score !== null ? (fScore >= 0 ? '+' : '') + fScore.toFixed(2) : '--'}</span>
+                    </div>`;
+            }).join('');
+        }
+    }
+}
+
+// =========================================================================
+// SECTOR ROTATION STRIP
+// =========================================================================
+
+function renderSectorRotationStrip(sectorData) {
+    const container = document.getElementById('sectorChips');
+    if (!container) return;
+
+    if (!sectorData || !sectorData.sectors || sectorData.sectors.length === 0) {
+        container.innerHTML = '<span style="font-size:10px;color:var(--text-secondary)">Sector rotation data loading...</span>';
+        return;
+    }
+
+    // Sort: SURGING first, then STEADY, then DUMPING (by rotation momentum)
+    const sectors = [...sectorData.sectors].sort((a, b) => (b.rotation_momentum || 0) - (a.rotation_momentum || 0));
+
+    container.innerHTML = sectors.map(s => {
+        const status = s.status || 'STEADY';
+        const arrow = status === 'SURGING' ? '▲' : (status === 'DUMPING' ? '▼' : '–');
+        const mom = s.rotation_momentum !== undefined ? (s.rotation_momentum >= 0 ? '+' : '') + s.rotation_momentum.toFixed(1) + '%' : '';
+        const rs5 = s.rs_5d !== undefined ? (s.rs_5d >= 0 ? '+' : '') + s.rs_5d.toFixed(1) + '%' : '--';
+        const rs20 = s.rs_20d !== undefined ? (s.rs_20d >= 0 ? '+' : '') + s.rs_20d.toFixed(1) + '%' : '--';
+        const rankChange = s.rank_change_5d !== undefined ? (s.rank_change_5d > 0 ? '+' + s.rank_change_5d : s.rank_change_5d) : '--';
+        const accel = s.acceleration || 'unknown';
+
+        return `
+            <div class="sector-chip ${status}" title="${s.sector}">
+                <span class="sector-chip-arrow">${arrow}</span>
+                ${s.etf}
+                <div class="sector-tooltip">
+                    <div class="sector-tooltip-row"><span class="sector-tooltip-label">${s.sector}</span></div>
+                    <div class="sector-tooltip-row"><span class="sector-tooltip-label">5d RS</span><span>${rs5}</span></div>
+                    <div class="sector-tooltip-row"><span class="sector-tooltip-label">20d RS</span><span>${rs20}</span></div>
+                    <div class="sector-tooltip-row"><span class="sector-tooltip-label">Momentum</span><span>${mom}</span></div>
+                    <div class="sector-tooltip-row"><span class="sector-tooltip-label">Rank Δ</span><span>${rankChange}</span></div>
+                    <div class="sector-tooltip-row"><span class="sector-tooltip-label">Accel</span><span>${accel}</span></div>
+                </div>
+            </div>`;
+    }).join('');
+}
+
+// Initialize timeframe card expand/collapse toggles
+function initTimeframeToggles() {
+    document.querySelectorAll('.tf-expand-toggle').forEach(toggle => {
+        toggle.addEventListener('click', () => {
+            const targetId = toggle.dataset.target;
+            const target = document.getElementById(targetId);
+            if (target) {
+                const isOpen = target.style.display !== 'none';
+                target.style.display = isOpen ? 'none' : 'flex';
+                toggle.textContent = isOpen ? 'Factors >' : 'Factors v';
+            }
+        });
+    });
+}
+
 
 function checkPivotHealth() {
     const indicator = document.getElementById('pivotHealth');
@@ -3100,14 +3279,19 @@ function createSignalCard(signal) {
         }
     }
     
+    const isCounterTrend = signal.is_counter_trend || signal.contrarian_qualified;
+    const counterTrendClass = isCounterTrend ? 'counter-trend' : '';
+    const counterTrendTag = isCounterTrend ? '<span class="counter-trend-tag">COUNTER-TREND</span>' : '';
+    const contrarianTag = signal.contrarian_qualified ? '<span class="counter-trend-tag" style="color:#14b8a6;background:rgba(20,184,166,0.12)">CONTRARIAN</span>' : '';
+    
     return `
-        <div class="signal-card ${signal.signal_type || ''} ${biasAlignmentClass} ${pulseClass}" 
+        <div class="signal-card ${signal.signal_type || ''} ${biasAlignmentClass} ${pulseClass} ${counterTrendClass}" 
              data-signal-id="${signal.signal_id}" 
              data-signal='${JSON.stringify(signal).replace(/'/g, "&#39;")}'>
             
             <div class="signal-header">
                 <div>
-                    <div class="signal-type ${signal.signal_type || ''}">${typeWithKb}</div>
+                    <div class="signal-type ${signal.signal_type || ''}">${typeWithKb}${counterTrendTag}${contrarianTag}</div>
                     <div class="signal-strategy">${strategiesHtml}</div>
                 </div>
                 <div class="signal-ticker ticker-link" data-action="view-chart">${signal.ticker}</div>

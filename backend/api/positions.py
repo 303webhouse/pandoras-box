@@ -1481,13 +1481,43 @@ async def get_active_signals_api():
         
         signals.sort(key=get_sort_key, reverse=True)
         
+        # Separate counter-trend signals
+        # Get composite bias direction to determine what counts as counter-trend
+        counter_trend_signals = []
+        try:
+            from bias_engine.composite import get_cached_composite
+            cached = await get_cached_composite()
+            if cached and abs(cached.composite_score) >= 0.1:
+                market_is_bullish = cached.composite_score > 0
+                for sig in signals:
+                    sig_dir = (sig.get('direction') or '').upper()
+                    is_long = sig_dir in ('LONG', 'BUY')
+                    is_counter = (market_is_bullish and not is_long) or (not market_is_bullish and is_long)
+                    if is_counter:
+                        sig['is_counter_trend'] = True
+                        counter_trend_signals.append(sig)
+        except Exception:
+            pass
+        
+        # Top 2 counter-trend signals by score
+        counter_trend_signals.sort(key=lambda s: s.get('score', 0) or 0, reverse=True)
+        top_counter = counter_trend_signals[:2]
+        top_counter_ids = {s.get('signal_id') for s in top_counter}
+        
         # Return top 10 for display (but keep more in queue)
+        # Ensure counter-trend signals aren't duplicated if they're already in top 10
         top_signals = signals[:10]
+        top_signal_ids = {s.get('signal_id') for s in top_signals}
+        
+        # Add counter-trend signals that aren't already in top 10
+        extra_counter = [s for s in top_counter if s.get('signal_id') not in top_signal_ids]
+        
         queue_size = len(signals)
         
         return {
             "status": "success",
             "signals": top_signals,
+            "counter_trend_signals": extra_counter,
             "queue_size": queue_size,
             "has_more": queue_size > 10
         }

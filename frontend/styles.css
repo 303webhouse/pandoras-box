@@ -734,6 +734,304 @@ body.override-active-bearish .override-toggle[data-active="true"] {
     50% { box-shadow: 0 0 15px var(--accent-teal); }
 }
 
+/* =========================================================================
+   TIMEFRAME FACTOR GROUP CARDS (Intraday / Swing / Macro)
+   ========================================================================= */
+
+.tf-card {
+    background: var(--card-bg);
+    border: 2px solid var(--border-color);
+    border-radius: 10px;
+    padding: 12px 14px;
+    position: relative;
+    min-width: 0;
+}
+
+.tf-card h3 {
+    font-family: 'Orbit', sans-serif;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+}
+
+.tf-display {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.tf-level {
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 1px;
+}
+
+.tf-score {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.tf-momentum {
+    font-size: 11px;
+    color: var(--text-secondary);
+    margin-left: auto;
+}
+
+.tf-momentum-arrow {
+    font-weight: 700;
+    margin-right: 2px;
+}
+
+.tf-momentum.strengthening { color: #66bb6a; }
+.tf-momentum.strengthening .tf-momentum-arrow { color: #00e676; }
+.tf-momentum.weakening { color: #ff9800; }
+.tf-momentum.weakening .tf-momentum-arrow { color: #f44336; }
+
+/* Divergence alert */
+.tf-divergence {
+    font-size: 10px;
+    padding: 3px 8px;
+    margin-top: 6px;
+    border-radius: 4px;
+    background: rgba(255, 152, 0, 0.12);
+    color: #ff9800;
+    border: 1px solid rgba(255, 152, 0, 0.25);
+}
+
+/* Expandable factor list */
+.tf-expand-toggle {
+    font-size: 10px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    margin-top: 6px;
+    letter-spacing: 0.5px;
+}
+
+.tf-expand-toggle:hover { color: var(--accent-teal); }
+
+.tf-factors {
+    margin-top: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.tf-factor-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 10px;
+    color: var(--text-secondary);
+}
+
+.tf-factor-name {
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.tf-factor-bar {
+    width: 50px;
+    height: 4px;
+    background: var(--border-color);
+    border-radius: 2px;
+    overflow: hidden;
+    position: relative;
+}
+
+.tf-factor-bar-fill {
+    position: absolute;
+    top: 0;
+    height: 100%;
+    border-radius: 2px;
+    transition: width 0.3s;
+}
+
+.tf-factor-bar-fill.bullish {
+    left: 50%;
+    background: #66bb6a;
+}
+
+.tf-factor-bar-fill.bearish {
+    right: 50%;
+    background: #ff9800;
+}
+
+.tf-factor-score {
+    width: 36px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.tf-factor-row.stale {
+    opacity: 0.4;
+}
+
+/* Bias level colors on tf-cards */
+.tf-card.TORO_MAJOR { border-color: #00e676; }
+.tf-card.TORO_MAJOR .tf-level { color: #00e676; }
+.tf-card.TORO_MINOR { border-color: #66bb6a; }
+.tf-card.TORO_MINOR .tf-level { color: #66bb6a; }
+.tf-card.NEUTRAL .tf-level { color: #78909c; }
+.tf-card.URSA_MINOR { border-color: #ff9800; }
+.tf-card.URSA_MINOR .tf-level { color: #ff9800; }
+.tf-card.URSA_MAJOR { border-color: #f44336; }
+.tf-card.URSA_MAJOR .tf-level { color: #f44336; }
+
+/* Extreme pulse animation */
+@keyframes bias-pulse-green {
+    0%, 100% { border-color: #00e676; box-shadow: 0 0 4px rgba(0, 230, 118, 0.3); }
+    50% { border-color: #00e676; box-shadow: 0 0 12px rgba(0, 230, 118, 0.6); }
+}
+
+@keyframes bias-pulse-red {
+    0%, 100% { border-color: #f44336; box-shadow: 0 0 4px rgba(244, 67, 54, 0.3); }
+    50% { border-color: #f44336; box-shadow: 0 0 12px rgba(244, 67, 54, 0.6); }
+}
+
+.tf-card.pulse-toro { animation: bias-pulse-green 2s ease-in-out infinite; }
+.tf-card.pulse-ursa { animation: bias-pulse-red 2s ease-in-out infinite; }
+.bias-banner.pulse-toro { animation: bias-pulse-green 2s ease-in-out infinite; }
+.bias-banner.pulse-ursa { animation: bias-pulse-red 2s ease-in-out infinite; }
+
+/* =========================================================================
+   SECTOR ROTATION STRIP
+   ========================================================================= */
+
+.sector-rotation-strip {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 12px;
+    padding: 4px 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+
+.sector-rotation-strip::-webkit-scrollbar { display: none; }
+
+.sector-chips {
+    display: flex;
+    gap: 5px;
+    align-items: center;
+    width: 100%;
+}
+
+.sector-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: all 0.2s;
+    position: relative;
+}
+
+.sector-chip:hover {
+    transform: translateY(-1px);
+}
+
+.sector-chip.SURGING {
+    background: rgba(0, 230, 118, 0.12);
+    color: #00e676;
+    border-color: rgba(0, 230, 118, 0.3);
+}
+
+.sector-chip.DUMPING {
+    background: rgba(244, 67, 54, 0.12);
+    color: #f44336;
+    border-color: rgba(244, 67, 54, 0.3);
+}
+
+.sector-chip.STEADY {
+    background: rgba(120, 144, 156, 0.08);
+    color: #78909c;
+    border-color: transparent;
+}
+
+.sector-chip-arrow {
+    font-size: 9px;
+}
+
+/* Sector chip tooltip */
+.sector-chip .sector-tooltip {
+    display: none;
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--dark-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 10px;
+    white-space: nowrap;
+    z-index: 100;
+    color: var(--text-primary);
+    margin-bottom: 4px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+}
+
+.sector-chip:hover .sector-tooltip { display: block; }
+
+.sector-tooltip-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.sector-tooltip-label { color: var(--text-secondary); }
+
+/* =========================================================================
+   COUNTER-TREND SIGNAL STYLING
+   ========================================================================= */
+
+.signal-card.counter-trend {
+    border-left: 3px solid #ff9800;
+    position: relative;
+}
+
+.counter-trend-tag {
+    display: inline-block;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.8px;
+    color: #ff9800;
+    background: rgba(255, 152, 0, 0.12);
+    padding: 1px 6px;
+    border-radius: 3px;
+    margin-left: 6px;
+}
+
+.counter-trend-separator {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 9px;
+    letter-spacing: 1px;
+    color: var(--text-secondary);
+    margin: 8px 0 4px;
+    opacity: 0.6;
+}
+
+.counter-trend-separator::before,
+.counter-trend-separator::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border-color);
+}
+
 /* Crisis Alert Banner */
 .crisis-alert-banner {
     display: none;
