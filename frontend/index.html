@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Pandora's Box - Real-time Trading Signal Dashboard">
     <title>Pandora's Box</title>
-    <link rel="stylesheet" href="styles.css?v=29">
+    <link rel="stylesheet" href="styles.css?v=30">
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#0a0e27">
 </head>
@@ -1135,94 +1135,174 @@
         </main>
 
         <main id="cryptoShell" class="crypto-shell" hidden>
-            <section class="crypto-grid">
-                <div class="crypto-column crypto-column-left">
-                    <div class="crypto-panel">
-                        <div class="crypto-panel-header">
-                            <h2>🪙 Crypto Signal Stream</h2>
-                            <div class="crypto-panel-controls">
-                                <label for="cryptoSignalSort" class="crypto-label">Sort</label>
-                                <select id="cryptoSignalSort" class="crypto-select">
-                                    <option value="score">Score</option>
-                                    <option value="recency">Recency</option>
-                                </select>
-                            </div>
-                        </div>
-                        <div class="crypto-signal-list" id="cryptoSignalsList">
-                            <p class="empty-state">Loading crypto signals</p>
-                        </div>
+
+            <!-- Row 1: Bias Bar -->
+            <section class="crypto-bias-bar" id="cryptoBiasBar">
+                <div class="crypto-bias-bar-main">
+                    <div class="crypto-bias-bar-level" id="cryptoCompositeBiasLevel">NEUTRAL</div>
+                    <div class="crypto-bias-bar-score" id="cryptoCompositeBiasScore">(0.00)</div>
+                    <div class="crypto-bias-bar-confidence" id="cryptoCompositeBiasConfidence">LOW</div>
+                </div>
+                <div class="crypto-bias-bar-cards" id="cryptoBiasGrid">
+                    <div class="crypto-bias-card" data-bias-key="daily">
+                        <span class="crypto-bias-label">Daily</span>
+                        <span class="crypto-bias-value" data-bias="daily">--</span>
+                    </div>
+                    <div class="crypto-bias-card" data-bias-key="weekly">
+                        <span class="crypto-bias-label">Weekly</span>
+                        <span class="crypto-bias-value" data-bias="weekly">--</span>
+                    </div>
+                    <div class="crypto-bias-card" data-bias-key="cyclical">
+                        <span class="crypto-bias-label">Cyclical</span>
+                        <span class="crypto-bias-value" data-bias="cyclical">--</span>
+                    </div>
+                </div>
+                <div class="crypto-bias-bar-alignment" id="cryptoBiasNote">Loading bias alignment</div>
+            </section>
+
+            <!-- Row 2: Chart + Trade Ideas + Positions -->
+            <section class="crypto-main-content">
+                <!-- TradingView Chart -->
+                <div class="crypto-chart-area">
+                    <div class="crypto-chart-tabs" id="cryptoChartTabs">
+                        <button class="chart-tab active" data-symbol="BTCUSD">BTC</button>
+                        <button class="chart-tab" data-symbol="ETHUSD">ETH</button>
+                        <button class="chart-tab" data-symbol="SOLUSD">SOL</button>
+                    </div>
+                    <div class="crypto-chart-container" id="cryptoChartContainer">
+                        <div id="crypto-tradingview-widget"></div>
+                    </div>
+                    <!-- Key Levels Overlay -->
+                    <div class="crypto-key-levels-strip" id="cryptoKeyLevelsStrip">
+                        <span class="crypto-kl" data-level="todayOpen" title="Today Open">TO: <b>--</b></span>
+                        <span class="crypto-kl" data-level="overnightHigh" title="Overnight High">OH: <b>--</b></span>
+                        <span class="crypto-kl" data-level="overnightLow" title="Overnight Low">OL: <b>--</b></span>
+                        <span class="crypto-kl" data-level="weeklyOpen" title="Weekly Open">WO: <b>--</b></span>
+                        <span class="crypto-kl" data-level="monthlyOpen" title="Monthly Open">MO: <b>--</b></span>
+                        <span class="crypto-kl-updated" id="cryptoKeyLevelsUpdated">--</span>
                     </div>
                 </div>
 
-                <div class="crypto-column crypto-column-center">
-                    <div class="crypto-panel">
-                        <div class="crypto-panel-header">
-                            <h2>🕒 BTC Session Windows</h2>
-                            <span class="crypto-subtext">Times shown in America/Denver</span>
+                <!-- Trade Ideas -->
+                <div class="crypto-trades-panel">
+                    <div class="crypto-panel-header">
+                        <h2>TRADE IDEAS</h2>
+                        <div class="crypto-panel-controls">
+                            <label for="cryptoSignalSort" class="crypto-label">Sort</label>
+                            <select id="cryptoSignalSort" class="crypto-select">
+                                <option value="score">Score</option>
+                                <option value="recency">Recency</option>
+                            </select>
                         </div>
-                        <div class="btc-session-current" id="cryptoBtcSessionCurrent">
-                            <span class="session-status">Checking</span>
-                        </div>
-                        <div class="btc-session-list" id="cryptoBtcSessionList"></div>
                     </div>
-
-                    <div class="crypto-panel">
-                        <div class="crypto-panel-header">
-                            <h2>📍 Key Levels</h2>
-                            <span class="crypto-subtext" id="cryptoKeyLevelsUpdated">Updating</span>
-                        </div>
-                        <div class="crypto-level-grid" id="cryptoKeyLevelsGrid">
-                            <div class="crypto-level-item">
-                                <span class="crypto-level-label">Today Open</span>
-                                <span class="crypto-level-value" data-level="todayOpen">--</span>
-                            </div>
-                            <div class="crypto-level-item">
-                                <span class="crypto-level-label">Yesterday Close</span>
-                                <span class="crypto-level-value" data-level="yesterdayClose">--</span>
-                            </div>
-                            <div class="crypto-level-item">
-                                <span class="crypto-level-label">Overnight High</span>
-                                <span class="crypto-level-value" data-level="overnightHigh">--</span>
-                            </div>
-                            <div class="crypto-level-item">
-                                <span class="crypto-level-label">Overnight Low</span>
-                                <span class="crypto-level-value" data-level="overnightLow">--</span>
-                            </div>
-                            <div class="crypto-level-item">
-                                <span class="crypto-level-label">Weekly Open</span>
-                                <span class="crypto-level-value" data-level="weeklyOpen">--</span>
-                            </div>
-                            <div class="crypto-level-item">
-                                <span class="crypto-level-label">Monthly Open</span>
-                                <span class="crypto-level-value" data-level="monthlyOpen">--</span>
-                            </div>
-                        </div>
+                    <div class="crypto-signal-list" id="cryptoSignalsList">
+                        <p class="empty-state">No crypto signals yet</p>
                     </div>
                 </div>
 
-                <div class="crypto-column crypto-column-right">
-                    <div class="crypto-panel">
-                        <div class="crypto-panel-header">
-                            <h2>🧭 Macro Confluence</h2>
-                        </div>
-                        <div class="crypto-bias-grid" id="cryptoBiasGrid">
-                            <div class="crypto-bias-card">
-                                <span class="crypto-bias-label">Daily Bias</span>
-                                <span class="crypto-bias-value" data-bias="daily">--</span>
-                            </div>
-                            <div class="crypto-bias-card">
-                                <span class="crypto-bias-label">Weekly Bias</span>
-                                <span class="crypto-bias-value" data-bias="weekly">--</span>
-                            </div>
-                            <div class="crypto-bias-card">
-                                <span class="crypto-bias-label">Cyclical Bias</span>
-                                <span class="crypto-bias-value" data-bias="cyclical">--</span>
-                            </div>
-                        </div>
-                        <div class="crypto-bias-note" id="cryptoBiasNote">Loading bias alignment</div>
+                <!-- Open Positions -->
+                <div class="crypto-positions-panel">
+                    <div class="crypto-panel-header">
+                        <h2>OPEN POSITIONS</h2>
+                        <span class="positions-count" id="cryptoPositionsCount">0</span>
+                    </div>
+                    <div class="crypto-positions-list" id="cryptoPositionsList">
+                        <p class="empty-state">No open crypto positions</p>
                     </div>
                 </div>
             </section>
+
+            <!-- Row 3: Strategy Filters -->
+            <section class="crypto-strategy-section">
+                <div class="crypto-strategy-header">
+                    <h2>STRATEGY FILTERS</h2>
+                    <div class="crypto-strategy-controls">
+                        <label class="direction-toggle">
+                            <input type="checkbox" id="cryptoFilterLong" checked>
+                            <span class="direction-label long">LONG</span>
+                        </label>
+                        <label class="direction-toggle">
+                            <input type="checkbox" id="cryptoFilterShort" checked>
+                            <span class="direction-label short">SHORT</span>
+                        </label>
+                        <span class="header-divider">|</span>
+                        <label class="min-score-label">Min Score:</label>
+                        <input type="number" id="cryptoScoreThreshold" class="score-input" min="1" max="100" value="1">
+                    </div>
+                </div>
+                <div class="crypto-strategy-toggles" id="cryptoStrategyToggles">
+                    <label class="strategy-toggle">
+                        <input type="checkbox" class="crypto-strategy-cb" data-strategy="exhaustion" checked>
+                        <span class="strategy-name">Exhaustion</span>
+                    </label>
+                    <label class="strategy-toggle">
+                        <input type="checkbox" class="crypto-strategy-cb" data-strategy="triple_line" checked>
+                        <span class="strategy-name">Triple Line</span>
+                    </label>
+                    <label class="strategy-toggle">
+                        <input type="checkbox" class="crypto-strategy-cb" data-strategy="golden_touch" checked>
+                        <span class="strategy-name">Golden Touch</span>
+                    </label>
+                    <label class="strategy-toggle">
+                        <input type="checkbox" class="crypto-strategy-cb" data-strategy="pullback_entry" checked>
+                        <span class="strategy-name">Pullback Entry</span>
+                    </label>
+                    <label class="strategy-toggle">
+                        <input type="checkbox" class="crypto-strategy-cb" data-strategy="taurus_signal" checked>
+                        <span class="strategy-name">Taurus Signal</span>
+                    </label>
+                    <label class="strategy-toggle">
+                        <input type="checkbox" class="crypto-strategy-cb" data-strategy="ursa_signal" checked>
+                        <span class="strategy-name">Ursa Signal</span>
+                    </label>
+                    <label class="strategy-toggle">
+                        <input type="checkbox" class="crypto-strategy-cb" data-strategy="two_close_vol" checked>
+                        <span class="strategy-name">Two-Close + Vol</span>
+                    </label>
+                    <label class="strategy-toggle">
+                        <input type="checkbox" class="crypto-strategy-cb" data-strategy="zone_upgrade" checked>
+                        <span class="strategy-name">Zone Upgrade</span>
+                    </label>
+                </div>
+            </section>
+
+            <!-- Row 4: BTC Bottom Signals + Session Windows -->
+            <section class="crypto-bottom-row">
+                <!-- BTC Bottom Signals Dashboard -->
+                <div class="crypto-btc-signals-panel">
+                    <div class="btc-signals-header">
+                        <h2>BTC BOTTOM SIGNALS</h2>
+                        <div class="btc-signals-controls">
+                            <button class="btc-btn btc-refresh-btn" data-label="Refresh">Refresh</button>
+                            <button class="btc-btn secondary btc-reset-btn">Reset</button>
+                        </div>
+                    </div>
+                    <div class="btc-confluence-summary" id="cryptoBtcConfluenceSummary">
+                        <div class="confluence-meter">
+                            <span class="confluence-count">--</span>
+                            <span class="confluence-label">Signals Firing</span>
+                        </div>
+                        <div class="confluence-verdict">Loading...</div>
+                    </div>
+                    <div class="btc-api-status" id="cryptoBtcApiStatus"></div>
+                    <div class="btc-signals-grid" id="cryptoBtcSignalsGrid">
+                        <p class="empty-state">Loading BTC signals...</p>
+                    </div>
+                </div>
+
+                <!-- Session Windows + Key Levels -->
+                <div class="crypto-sessions-panel">
+                    <div class="crypto-panel-header">
+                        <h2>BTC SESSION WINDOWS</h2>
+                        <span class="crypto-subtext">Times in America/Denver</span>
+                    </div>
+                    <div class="btc-session-current" id="cryptoBtcSessionCurrent">
+                        <span class="session-status">Checking</span>
+                    </div>
+                    <div class="btc-session-list" id="cryptoBtcSessionList"></div>
+                </div>
+            </section>
+
         </main>
 
     <!-- Knowledgebase Popup Modal -->
@@ -1249,6 +1329,6 @@
 
     <!-- TradingView Widget Script -->
     <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-    <script src="app.js?v=44"></script>
+    <script src="app.js?v=45"></script>
 </body>
 </html>
