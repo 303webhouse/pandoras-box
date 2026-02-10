@@ -6515,7 +6515,7 @@ body[data-mode="crypto"] .crypto-shell {
 
 .crypto-chart-container {
     flex: 1;
-    min-height: 0;
+    min-height: 420px;
 }
 
 .crypto-chart-container > div {

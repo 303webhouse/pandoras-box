@@ -96,6 +96,12 @@ let dailyBiasFactorStates = {
     tick_breadth: true
 };
 
+// Composite Bias API response cache (used by crypto bias bar without needing DOM from hub)
+let _compositeBiasData = null;
+
+// Keep a reference to open positions for crypto rendering
+let _open_positions_cache = [];
+
 // Cyclical Bias Factor State
 let cyclicalBiasFullData = null;
 let cyclicalBiasFactorStates = {
@@ -913,6 +919,15 @@ function initCryptoChart() {
     if (!container) return;
     if (typeof TradingView === 'undefined') return;
 
+    // TradingView requires a visible container with non-zero dimensions.
+    // If the container is not yet laid out (e.g. parent is hidden or has zero size),
+    // defer the init by one animation frame so the browser can reflow first.
+    const parentContainer = document.getElementById('cryptoChartContainer');
+    if (parentContainer && parentContainer.offsetWidth === 0) {
+        requestAnimationFrame(() => setTimeout(initCryptoChart, 50));
+        return;
+    }
+
     container.innerHTML = '';
     cryptoTvWidget = new TradingView.widget({
         symbol: cryptoCurrentSymbol,
@@ -969,10 +984,12 @@ function handleCryptoSignalAction(e) {
     } else if (action === 'dismiss') {
         dismissCryptoSignal(signalId);
     } else if (action === 'view-chart') {
-        const ticker = btn.textContent.trim();
-        if (ticker) {
-            cryptoCurrentSymbol = ticker + 'USD';
+        // Normalize the ticker: strip any trailing USDT or USD suffix before building symbol
+        const rawTicker = btn.textContent.trim().toUpperCase().replace(/USDT?$/, '');
+        if (rawTicker) {
+            cryptoCurrentSymbol = rawTicker + 'USD';
             initCryptoChart();
+            // Highlight matching tab (if no tab matches, all tabs become inactive — graceful)
             const tabs = document.getElementById('cryptoChartTabs');
             if (tabs) {
                 tabs.querySelectorAll('.chart-tab').forEach(t => {
@@ -984,9 +1001,14 @@ function handleCryptoSignalAction(e) {
 }
 
 function openCryptoAcceptModal(signal) {
-    // Reuse the existing position entry modal from hub mode
+    // Reuse the existing position entry modal from hub mode.
+    // IMPORTANT: must set pendingPositionSignal so confirmPositionEntry() has the data.
     const modal = document.getElementById('positionEntryModal');
     if (!modal) return;
+
+    // Wire up pendingPositionSignal so the shared confirmPositionEntry handler works
+    pendingPositionSignal = signal;
+    pendingPositionCard = null; // No card element ref in crypto mode; skip animation
 
     const tickerDisplay = document.getElementById('positionTickerDisplay');
     const dirDisplay = document.getElementById('positionDirectionDisplay');
@@ -995,17 +1017,24 @@ function openCryptoAcceptModal(signal) {
     const qtyLabel = document.getElementById('positionQtyLabel');
     const summaryStop = document.getElementById('summaryStop');
     const summaryTarget = document.getElementById('summaryTarget');
+    const summarySize = document.getElementById('summarySize');
+    const summaryRisk = document.getElementById('summaryRisk');
 
     if (tickerDisplay) tickerDisplay.textContent = signal.ticker || '--';
-    if (dirDisplay) dirDisplay.textContent = signal.direction || 'LONG';
-    if (entryInput) entryInput.value = signal.entry_price || '';
+    if (dirDisplay) {
+        dirDisplay.textContent = signal.direction || 'LONG';
+        dirDisplay.className = 'position-direction-display ' + (signal.direction || 'LONG');
+    }
+    if (entryInput) entryInput.value = signal.entry_price ? parseFloat(signal.entry_price).toFixed(2) : '';
     if (qtyInput) { qtyInput.value = ''; qtyInput.placeholder = 'Contracts'; }
     if (qtyLabel) qtyLabel.textContent = 'Quantity (Contracts) *';
     if (summaryStop) summaryStop.textContent = signal.stop_loss ? `$${parseFloat(signal.stop_loss).toLocaleString()}` : '--';
     if (summaryTarget) summaryTarget.textContent = signal.target_1 ? `$${parseFloat(signal.target_1).toLocaleString()}` : '--';
+    if (summarySize) summarySize.textContent = '$--';
+    if (summaryRisk) summaryRisk.textContent = '$--';
 
-    modal.dataset.signalId = signal.signal_id;
-    modal.style.display = 'flex';
+    // Use classList.add('active') to match the hub modal open/close pattern
+    modal.classList.add('active');
 }
 
 async function dismissCryptoSignal(signalId) {
@@ -1186,6 +1215,9 @@ function showCompositeError() {
 
 function renderCompositeBias(data) {
     if (!data) return;
+
+    // Cache for use by crypto bias bar (avoids reading from hub DOM elements)
+    _compositeBiasData = data;
 
     const banner = document.getElementById('compositeBiasBanner');
     const levelEl = document.getElementById('compositeBiasLevel');
@@ -2909,7 +2941,12 @@ function renderCryptoSignals() {
         if (filters.enabledStrategies.size > 0) {
             let matched = false;
             for (const enabled of filters.enabledStrategies) {
-                if (strategy.includes(enabled)) { matched = true; break; }
+                // Exact match OR strategy is a versioned variant (e.g. "golden_touch_v2")
+                // Use prefix check so partial checkbox keys like "touch" don't match "golden_touch"
+                if (strategy === enabled || strategy.startsWith(enabled + '_')) {
+                    matched = true;
+                    break;
+                }
             }
             if (!matched) return false;
         }
@@ -3171,32 +3208,33 @@ function renderCryptoBiasSummary() {
         }
     });
 
-    // Populate composite bias bar
+    // Populate composite bias bar — read directly from cached API response,
+    // not from hub DOM elements (which may not be rendered if user landed on /crypto).
     const levelEl = document.getElementById('cryptoCompositeBiasLevel');
     const scoreEl = document.getElementById('cryptoCompositeBiasScore');
     const confEl = document.getElementById('cryptoCompositeBiasConfidence');
     const biasBar = document.getElementById('cryptoBiasBar');
 
-    // Read from existing composite data (set by the hub's bias loader)
-    const compositePanel = document.getElementById('compositeBiasLevel');
-    const compositeScore = document.getElementById('compositeBiasScore');
-    const compositeConf = document.getElementById('compositeConfidence');
+    const compositeLevel = (_compositeBiasData?.bias_level || 'NEUTRAL').replace(/_/g, ' ');
+    const compositeScoreVal = typeof _compositeBiasData?.composite_score === 'number'
+        ? _compositeBiasData.composite_score
+        : parseFloat(_compositeBiasData?.composite_score || 0);
+    const compositeConf = (_compositeBiasData?.confidence || 'LOW').toUpperCase();
 
-    if (levelEl && compositePanel) {
-        const level = compositePanel.textContent || 'NEUTRAL';
-        levelEl.textContent = level;
-        // Apply color to the whole bar
-        const biasColor = BIAS_COLORS[level.replace(/\s/g, '_')] || BIAS_COLORS.NEUTRAL;
-        if (biasBar) biasBar.style.borderColor = biasColor.accent;
+    if (levelEl) {
+        levelEl.textContent = compositeLevel;
+        const biasColorKey = compositeLevel.replace(/\s/g, '_');
+        const biasColor = BIAS_COLORS[biasColorKey] || BIAS_COLORS.NEUTRAL;
         levelEl.style.color = biasColor.text;
+        if (biasBar) biasBar.style.borderColor = biasColor.accent;
     }
-    if (scoreEl && compositeScore) {
-        scoreEl.textContent = compositeScore.textContent || '(0.00)';
+    if (scoreEl) {
+        const scoreText = Number.isFinite(compositeScoreVal) ? compositeScoreVal.toFixed(2) : '--';
+        scoreEl.textContent = `(${scoreText})`;
     }
-    if (confEl && compositeConf) {
-        const conf = compositeConf.textContent || 'LOW';
-        confEl.textContent = conf;
-        confEl.className = 'crypto-bias-bar-confidence ' + conf;
+    if (confEl) {
+        confEl.textContent = compositeConf;
+        confEl.className = 'crypto-bias-bar-confidence ' + compositeConf;
     }
 
     // Alignment note
@@ -3242,13 +3280,11 @@ function renderCryptoPositions() {
     `).join('');
 }
 
-// Keep a reference to open positions for crypto rendering
-let _open_positions_cache = [];
-
 async function loadCryptoKeyLevels() {
     const updatedEl = document.getElementById('cryptoKeyLevelsUpdated');
-    const grid = document.getElementById('cryptoKeyLevelsGrid');
-    if (!grid) return;
+    // Note: was previously guarded by a 'cryptoKeyLevelsGrid' ID that no longer exists.
+    // updateCryptoLevelValue() uses querySelectorAll('[data-level=...]') which targets
+    // the strip elements directly, so no container reference needed here.
 
     try {
         const symbol = 'BTCUSDT';
@@ -5383,15 +5419,69 @@ function initBtcSignals() {
     // Initial load
     loadBtcSignals();
     loadBtcSessions();
-    
-    // Auto-refresh every 5 minutes
+
+    // Auto-refresh: signals every 5 min, sessions every 10 min
     setInterval(loadBtcSignals, 5 * 60 * 1000);
+    setInterval(loadBtcSessions, 10 * 60 * 1000);
 }
 
-function loadBtcSessions() {
-    // Placeholder: avoid runtime errors if BTC sessions are not configured
-    if (typeof renderBtcSessions === 'function') {
-        renderBtcSessions();
+async function loadBtcSessions() {
+    await renderBtcSessions();
+}
+
+async function renderBtcSessions() {
+    const listEl = document.getElementById('cryptoBtcSessionList');
+    const currentEl = document.getElementById('cryptoBtcSessionCurrent');
+    if (!listEl && !currentEl) return;
+
+    try {
+        const response = await fetch(`${API_URL}/btc/sessions`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+
+        const sessions = data.sessions || {};
+        const currentSession = data.current_session || null;
+
+        // Update the topbar session pill
+        updateCryptoSessionStatus(currentSession, sessions);
+
+        // Update the current-session indicator inside the crypto panel.
+        // The active styling is on .btc-session-current.active — toggle that class on the element.
+        if (currentEl) {
+            if (currentSession && currentSession.active) {
+                currentEl.classList.add('active');
+                currentEl.innerHTML = `<span class="session-status">NOW: ${escapeHtml(currentSession.name)}</span>`;
+            } else {
+                currentEl.classList.remove('active');
+                const sessionValues = Object.values(sessions);
+                const nextName = sessionValues.length > 0 ? sessionValues[0].name : null;
+                currentEl.innerHTML = `<span class="session-status">No active session${nextName ? ` &middot; Next: ${escapeHtml(nextName)}` : ''}</span>`;
+            }
+        }
+
+        // Render session list rows
+        if (listEl) {
+            const sessionIds = Object.keys(sessions);
+            if (sessionIds.length === 0) {
+                listEl.innerHTML = '<p class="empty-state">No sessions configured</p>';
+                return;
+            }
+            listEl.innerHTML = sessionIds.map(id => {
+                const s = sessions[id];
+                const isActive = currentSession && currentSession.name === s.name;
+                const localTime = s.utc_time ? formatUtcRangeToDenver(s.utc_time) : '';
+                return `
+                    <div class="btc-session-item${isActive ? ' active' : ''}">
+                        <div class="session-name${isActive ? ' active' : ''}">${escapeHtml(s.name)}</div>
+                        <div class="session-time">${escapeHtml(s.ny_time)} ET${localTime ? ` &middot; ${escapeHtml(localTime)}` : ''}</div>
+                        <div class="session-note">${escapeHtml(s.trading_note || '')}</div>
+                    </div>
+                `;
+            }).join('');
+        }
+    } catch (err) {
+        console.error('Error loading BTC sessions:', err);
+        if (listEl) listEl.innerHTML = '<p class="empty-state">Could not load sessions</p>';
     }
 }
 
