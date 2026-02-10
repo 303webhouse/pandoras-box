@@ -233,6 +233,11 @@ if frontend_path:
     async def serve_frontend():
         """Serve the frontend dashboard"""
         return FileResponse(os.path.join(frontend_path, "index.html"))
+
+    @app.get("/app/{mode}", response_class=FileResponse)
+    async def serve_frontend_mode(mode: str):
+        """Serve frontend for SPA client-side routes (/app/crypto, /app/hub)"""
+        return FileResponse(os.path.join(frontend_path, "index.html"))
     
     @app.get("/knowledgebase", response_class=FileResponse)
     async def serve_knowledgebase():
