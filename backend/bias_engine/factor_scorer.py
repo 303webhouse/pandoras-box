@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 async def score_all_factors() -> Dict[str, FactorReading]:
-    """Run all factor scoring functions (tick_breadth excluded)."""
+    """Run all factor scoring functions including tick_breadth (reads from Redis)."""
     results: Dict[str, FactorReading] = {}
 
     scorers = {
@@ -24,6 +24,7 @@ async def score_all_factors() -> Dict[str, FactorReading]:
         "dollar_smile": "bias_filters.dollar_smile",
         "excess_cape": "bias_filters.excess_cape_yield",
         "savita": "bias_filters.savita_indicator",
+        "tick_breadth": "bias_filters.tick_breadth",
     }
 
     for factor_id, module_path in scorers.items():

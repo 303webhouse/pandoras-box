@@ -511,27 +511,23 @@ class TickDataPayload(BaseModel):
 @router.post("/tick")
 async def receive_tick_data(payload: TickDataPayload):
     """
-    Receive NYSE TICK data from TradingView webhook
+    Receive NYSE TICK data from TradingView webhook (fires every 15 min during market hours).
     
     TradingView Alert Setup:
     - Symbol: $TICK (NYSE TICK index)
-    - Condition: Once per day at market close (4:00 PM ET)
+    - Condition: Every 15 minutes during market hours
     - Webhook URL: https://your-app.railway.app/webhook/tick
     - Message (JSON):
       {
         "tick_high": {{high}},
-        "tick_low": {{low}}
+        "tick_low": {{low}},
+        "tick_close": {{close}},
+        "tick_avg": {{hl2}}
       }
-    
-    Alternative manual Pine Script:
-      //@version=5
-      indicator("TICK Reporter")
-      if barstate.islast and session.ismarket
-          alert('{"tick_high":' + str.tostring(ta.highest(high, 1)) + ',"tick_low":' + str.tostring(ta.lowest(low, 1)) + '}', alert.freq_once_per_bar_close)
     """
-    from bias_filters.tick_breadth import store_tick_data
+    from bias_filters.tick_breadth import store_tick_data, compute_score as compute_tick_score
     
-    logger.info(f"TICK webhook received: high={payload.tick_high}, low={payload.tick_low}")
+    logger.info(f"📊 TICK webhook received: high={payload.tick_high}, low={payload.tick_low}, close={payload.tick_close}, avg={payload.tick_avg}")
     
     result = await store_tick_data(
         tick_high=payload.tick_high,
@@ -540,6 +536,31 @@ async def receive_tick_data(payload: TickDataPayload):
         tick_close=payload.tick_close,
         tick_avg=payload.tick_avg,
     )
+    
+    # Auto-score tick_breadth and feed into composite bias engine
+    try:
+        tick_data = {
+            "tick_high": payload.tick_high,
+            "tick_low": payload.tick_low,
+            "tick_close": payload.tick_close,
+            "tick_avg": payload.tick_avg,
+        }
+        reading = await compute_tick_score(tick_data)
+        if reading:
+            from bias_engine.composite import store_factor_reading, compute_composite
+            await store_factor_reading(reading)
+            composite = await compute_composite()
+            logger.info(
+                f"📊 TICK factor scored: {reading.score:+.2f} ({reading.signal}) → "
+                f"composite {composite.bias_level} ({composite.composite_score:+.2f})"
+            )
+            result["factor_score"] = reading.score
+            result["factor_signal"] = reading.signal
+            result["composite_bias"] = composite.bias_level
+        else:
+            logger.warning("📊 TICK factor scoring returned None")
+    except Exception as e:
+        logger.error(f"📊 TICK factor scoring failed (data still stored): {e}")
     
     return result
 
