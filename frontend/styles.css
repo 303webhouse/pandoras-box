@@ -1,4 +1,4 @@
-/* Pandora's Box - Dark Teal Aesthetic */
+/* Pandora - Dark Teal Aesthetic */
 
 :root {
     --dark-bg: #0a0e27;
@@ -27,6 +27,20 @@ body {
     min-height: 100vh;
 }
 
+/* Orbit font for all major section headings */
+.bias-composite-title h2,
+.trades-header h2,
+.positions-header h2,
+.strategies-header h2,
+.watchlist-header h2,
+.analyzer-header h2,
+.positions-section h2,
+.hunter-header h2,
+.savita-modal-header h2,
+.modal-header h3 {
+    font-family: 'Orbit', sans-serif;
+}
+
 .container {
     max-width: 1800px;
     margin: 0 auto;
@@ -50,10 +64,22 @@ body {
 }
 
 .logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.logo-icon {
+    height: 36px;
+    width: auto;
+}
+
+.logo-text {
+    font-family: 'Orbit', sans-serif;
     font-size: 22px;
-    font-weight: 700;
+    font-weight: 400;
     color: var(--accent-teal);
-    letter-spacing: 1px;
+    letter-spacing: 3px;
 }
 
 .connection-status {

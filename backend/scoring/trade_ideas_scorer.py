@@ -59,13 +59,13 @@ STRATEGY_BASE_SCORES = {
     "DEFAULT": 30
 }
 
-# Bias alignment multipliers
+# Bias alignment multipliers (softened to allow counter-trend signals through)
 BIAS_ALIGNMENT = {
-    "STRONG_ALIGNED": 1.5,      # Signal direction matches major bias (e.g., LONG + MAJOR_TORO)
-    "ALIGNED": 1.25,            # Signal direction matches minor/lean bias
-    "NEUTRAL": 1.0,             # Can't determine alignment
-    "COUNTER_BIAS": 0.6,        # Signal goes against current bias
-    "STRONG_COUNTER": 0.4       # Signal goes against major bias
+    "STRONG_ALIGNED": 1.25,     # Signal direction matches strong composite bias
+    "ALIGNED": 1.10,            # Signal direction matches moderate composite bias
+    "NEUTRAL": 1.0,             # Composite near zero / can't determine
+    "COUNTER_BIAS": 0.85,       # Signal goes against moderate composite bias
+    "STRONG_COUNTER": 0.70      # Signal goes against strong composite bias
 }
 
 # Technical confluence bonuses
@@ -174,11 +174,8 @@ def calculate_signal_score(
         "value": bias_alignment,
         "multiplier": alignment_multiplier,
         "direction": direction,
-        "bias_levels": {
-            "daily": current_bias.get("daily", {}).get("level"),
-            "weekly": current_bias.get("weekly", {}).get("level"),
-            "cyclical": current_bias.get("cyclical", {}).get("level")
-        }
+        "composite_score": current_bias.get("composite_score"),
+        "source": "composite" if "composite_score" in current_bias else "legacy_voting"
     }
     
     # 3. Technical confluence bonuses
@@ -379,63 +376,100 @@ def calculate_signal_score(
 
 def calculate_bias_alignment(direction: str, bias_data: Dict[str, Any]) -> Tuple[str, float]:
     """
-    Determine how well a signal aligns with current bias.
+    Determine how well a signal aligns with the composite bias engine.
     
-    Uses a weighted average:
-    - Weekly: 50% weight (most important for swing trades)
-    - Daily: 30% weight
-    - Cyclical: 20% weight
+    Uses the composite_score directly (range: -1.0 to +1.0) as the single
+    source of truth, replacing the old daily/weekly/cyclical weighted average.
+    
+    Falls back to old voting system data if composite is unavailable.
     """
     if not direction:
         return "NEUTRAL", BIAS_ALIGNMENT["NEUTRAL"]
     
-    is_long = direction == "LONG"
+    composite_score = _get_composite_score(bias_data)
+    is_long = direction.upper() in ("LONG", "BUY")
     
-    # Get bias levels
+    # For LONG signals, positive composite = aligned; for SHORT, negative = aligned
+    # Flip sign for shorts so the same thresholds work for both directions
+    directional_score = composite_score if is_long else -composite_score
+    
+    if directional_score >= 0.4:
+        return "STRONG_ALIGNED", BIAS_ALIGNMENT["STRONG_ALIGNED"]
+    elif directional_score >= 0.1:
+        return "ALIGNED", BIAS_ALIGNMENT["ALIGNED"]
+    elif directional_score >= -0.1:
+        return "NEUTRAL", BIAS_ALIGNMENT["NEUTRAL"]
+    elif directional_score >= -0.4:
+        return "COUNTER_BIAS", BIAS_ALIGNMENT["COUNTER_BIAS"]
+    else:
+        return "STRONG_COUNTER", BIAS_ALIGNMENT["STRONG_COUNTER"]
+
+
+def _get_composite_score(bias_data: Dict[str, Any]) -> float:
+    """
+    Extract composite score, trying multiple sources:
+    1. composite_score field passed directly in bias_data
+    2. Live fetch from cached composite in Redis
+    3. Fallback: derive from old voting system data
+    """
+    # Source 1: Direct composite score in bias_data
+    if "composite_score" in bias_data:
+        try:
+            return float(bias_data["composite_score"])
+        except (TypeError, ValueError):
+            pass
+    
+    # Source 2: Fetch from composite engine cache
+    try:
+        import asyncio
+        from bias_engine.composite import get_cached_composite
+        
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            # We're in an async context — can't await here synchronously.
+            # Try a thread-safe approach via the cached Redis value.
+            import json
+            from database.redis_client import _redis_client
+            if _redis_client:
+                import redis.asyncio
+                # Fall through to source 3 if we can't get it synchronously
+                pass
+        else:
+            result = loop.run_until_complete(get_cached_composite())
+            if result:
+                return float(result.composite_score)
+    except Exception:
+        pass
+    
+    # Source 3: Fallback — derive from old voting system levels
+    return _derive_score_from_old_bias(bias_data)
+
+
+def _derive_score_from_old_bias(bias_data: Dict[str, Any]) -> float:
+    """
+    Fallback: convert old daily/weekly/cyclical levels to an approximate
+    composite score in [-1, 1] range. Used only when composite engine
+    data is unavailable.
+    """
+    level_map = {
+        "MAJOR_TORO": 0.8, "TORO_MAJOR": 0.8,
+        "MINOR_TORO": 0.4, "TORO_MINOR": 0.4,
+        "LEAN_TORO": 0.15,
+        "NEUTRAL": 0.0,
+        "LEAN_URSA": -0.15,
+        "MINOR_URSA": -0.4, "URSA_MINOR": -0.4,
+        "MAJOR_URSA": -0.8, "URSA_MAJOR": -0.8,
+    }
+    
     daily_level = bias_data.get("daily", {}).get("level", "")
     weekly_level = bias_data.get("weekly", {}).get("level", "")
     cyclical_level = bias_data.get("cyclical", {}).get("level", "")
     
-    def level_to_score(level: str) -> int:
-        """Convert bias level to numeric score (-3 to +3)"""
-        level_map = {
-            "MAJOR_TORO": 3, "MINOR_TORO": 2, "LEAN_TORO": 1,
-            "LEAN_URSA": -1, "MINOR_URSA": -2, "MAJOR_URSA": -3
-        }
-        return level_map.get(level, 0)
+    d = level_map.get(daily_level, 0.0)
+    w = level_map.get(weekly_level, 0.0)
+    c = level_map.get(cyclical_level, 0.0)
     
-    # Calculate weighted bias score
-    daily_score = level_to_score(daily_level) * 0.3
-    weekly_score = level_to_score(weekly_level) * 0.5
-    cyclical_score = level_to_score(cyclical_level) * 0.2
-    
-    weighted_bias = daily_score + weekly_score + cyclical_score
-    
-    # Determine alignment
-    if is_long:
-        # LONG signals want positive bias
-        if weighted_bias >= 2:
-            return "STRONG_ALIGNED", BIAS_ALIGNMENT["STRONG_ALIGNED"]
-        elif weighted_bias >= 0.5:
-            return "ALIGNED", BIAS_ALIGNMENT["ALIGNED"]
-        elif weighted_bias >= -0.5:
-            return "NEUTRAL", BIAS_ALIGNMENT["NEUTRAL"]
-        elif weighted_bias >= -2:
-            return "COUNTER_BIAS", BIAS_ALIGNMENT["COUNTER_BIAS"]
-        else:
-            return "STRONG_COUNTER", BIAS_ALIGNMENT["STRONG_COUNTER"]
-    else:
-        # SHORT signals want negative bias
-        if weighted_bias <= -2:
-            return "STRONG_ALIGNED", BIAS_ALIGNMENT["STRONG_ALIGNED"]
-        elif weighted_bias <= -0.5:
-            return "ALIGNED", BIAS_ALIGNMENT["ALIGNED"]
-        elif weighted_bias <= 0.5:
-            return "NEUTRAL", BIAS_ALIGNMENT["NEUTRAL"]
-        elif weighted_bias <= 2:
-            return "COUNTER_BIAS", BIAS_ALIGNMENT["COUNTER_BIAS"]
-        else:
-            return "STRONG_COUNTER", BIAS_ALIGNMENT["STRONG_COUNTER"]
+    return max(-1.0, min(1.0, d * 0.3 + w * 0.5 + c * 0.2))
 
 
 def calculate_rsi_bonus(rsi: float, direction: str) -> int:
