@@ -6415,6 +6415,7 @@ let pendingPositionCard = null;
 let closingPosition = null;
 let currentPrices = {};  // Cache of current prices for P&L calculation
 let priceUpdateInterval = null;
+let currentTradeType = 'equity';  // 'equity' or 'options'
 
 function initPositionModals() {
     // Entry modal
@@ -6437,6 +6438,26 @@ function initPositionModals() {
     const qtyInput = document.getElementById('positionQuantity');
     if (entryPriceInput) entryPriceInput.addEventListener('input', updatePositionSummary);
     if (qtyInput) qtyInput.addEventListener('input', updatePositionSummary);
+    
+    // Trade type toggle (Equity / Options)
+    const tradeTypeEquity = document.getElementById('tradeTypeEquity');
+    const tradeTypeOptions = document.getElementById('tradeTypeOptions');
+    if (tradeTypeEquity) tradeTypeEquity.addEventListener('click', () => setTradeType('equity'));
+    if (tradeTypeOptions) tradeTypeOptions.addEventListener('click', () => setTradeType('options'));
+    
+    // Options fields - live summary update
+    const optPremium = document.getElementById('optPositionPremium');
+    const optContracts = document.getElementById('optPositionContracts');
+    const optMaxLoss = document.getElementById('optPositionMaxLoss');
+    const optStrategy = document.getElementById('optPositionStrategy');
+    if (optPremium) optPremium.addEventListener('input', updateOptionsSummary);
+    if (optContracts) optContracts.addEventListener('input', updateOptionsSummary);
+    if (optMaxLoss) optMaxLoss.addEventListener('input', updateOptionsSummary);
+    if (optStrategy) optStrategy.addEventListener('change', updateOptionsSummary);
+    
+    // Add leg button
+    const addLegBtn = document.getElementById('optPositionAddLeg');
+    if (addLegBtn) addLegBtn.addEventListener('click', addOptionsLeg);
     
     // Close modal
     const closeCloseBtn = document.getElementById('closeCloseModalBtn');
@@ -6494,6 +6515,41 @@ function openPositionEntryModal(signal, card) {
     document.getElementById('summarySize').textContent = '$--';
     document.getElementById('summaryRisk').textContent = '$--';
     
+    // Reset to equity mode
+    setTradeType('equity');
+    
+    // Pre-fill options direction based on signal direction
+    const optDirection = signal.direction === 'LONG' ? 'BULLISH' : 'BEARISH';
+    
+    // Pre-fill options strategy suggestion based on direction
+    const optStrategySelect = document.getElementById('optPositionStrategy');
+    if (optStrategySelect) {
+        optStrategySelect.value = signal.direction === 'LONG' ? 'LONG_CALL' : 'LONG_PUT';
+    }
+    
+    // Reset options fields
+    resetOptionsFields();
+    
+    // Pre-fill first leg type based on direction
+    const firstLegType = document.querySelector('#optPositionLegs .opt-leg-type');
+    if (firstLegType) {
+        firstLegType.value = signal.direction === 'LONG' ? 'CALL' : 'PUT';
+    }
+    
+    // Set default expiry to ~30 days out
+    const firstLegExpiry = document.querySelector('#optPositionLegs .opt-leg-expiry');
+    if (firstLegExpiry) {
+        const defaultExpiry = new Date();
+        defaultExpiry.setDate(defaultExpiry.getDate() + 30);
+        firstLegExpiry.value = defaultExpiry.toISOString().split('T')[0];
+    }
+    
+    // Pre-fill strike near entry price (round to nearest 0.5)
+    const firstLegStrike = document.querySelector('#optPositionLegs .opt-leg-strike');
+    if (firstLegStrike && signal.entry_price) {
+        firstLegStrike.value = (Math.round(signal.entry_price * 2) / 2).toFixed(1);
+    }
+    
     // Show modal
     document.getElementById('positionEntryModal').classList.add('active');
 }
@@ -6502,6 +6558,7 @@ function closePositionEntryModal() {
     document.getElementById('positionEntryModal').classList.remove('active');
     pendingPositionSignal = null;
     pendingPositionCard = null;
+    currentTradeType = 'equity';
 }
 
 function updatePositionSummary() {
@@ -6521,6 +6578,11 @@ function updatePositionSummary() {
 
 async function confirmPositionEntry() {
     if (!pendingPositionSignal) return;
+    
+    if (currentTradeType === 'options') {
+        await confirmOptionsPositionEntry();
+        return;
+    }
     
     const entryPrice = parseFloat(document.getElementById('positionEntryPrice').value);
     const qty = parseFloat(document.getElementById('positionQuantity').value);
@@ -6584,6 +6646,256 @@ async function confirmPositionEntry() {
     } catch (error) {
         console.error('Error accepting signal:', error);
         alert('Failed to accept signal');
+    }
+}
+
+// ==========================================
+// TRADE TYPE TOGGLE (Equity / Options)
+// ==========================================
+
+function setTradeType(type) {
+    currentTradeType = type;
+    const equityBtn = document.getElementById('tradeTypeEquity');
+    const optionsBtn = document.getElementById('tradeTypeOptions');
+    const equityFields = document.getElementById('equityFields');
+    const optionsFields = document.getElementById('optionsFields');
+    const modalContainer = document.getElementById('positionModalContainer');
+    const modalTitle = document.getElementById('positionModalTitle');
+    const confirmBtn = document.getElementById('confirmPositionBtn');
+    
+    if (type === 'equity') {
+        equityBtn.classList.add('active');
+        optionsBtn.classList.remove('active');
+        equityFields.style.display = 'block';
+        optionsFields.style.display = 'none';
+        modalContainer.classList.remove('options-mode');
+        modalTitle.textContent = '📈 Open Position';
+        confirmBtn.textContent = 'Open Position';
+    } else {
+        equityBtn.classList.remove('active');
+        optionsBtn.classList.add('active');
+        equityFields.style.display = 'none';
+        optionsFields.style.display = 'block';
+        modalContainer.classList.add('options-mode');
+        modalTitle.textContent = '📊 Open Options Position';
+        confirmBtn.textContent = 'Open Options Position';
+        updateOptionsSummary();
+    }
+}
+
+function resetOptionsFields() {
+    // Reset strategy
+    const strategySelect = document.getElementById('optPositionStrategy');
+    if (strategySelect) strategySelect.selectedIndex = 0;
+    
+    // Clear numeric inputs
+    const fieldsToReset = ['optPositionPremium', 'optPositionMaxProfit', 'optPositionMaxLoss', 'optPositionBreakeven', 'optPositionThesis'];
+    fieldsToReset.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+    });
+    
+    // Reset contracts to 1
+    const contracts = document.getElementById('optPositionContracts');
+    if (contracts) contracts.value = '1';
+    
+    // Reset legs to single default leg
+    const legsContainer = document.getElementById('optPositionLegs');
+    if (legsContainer) {
+        legsContainer.innerHTML = `
+            <div class="opt-leg-row" data-leg="1">
+                <div class="opt-leg-fields">
+                    <select class="opt-leg-action position-input-sm">
+                        <option value="BUY">BUY</option>
+                        <option value="SELL">SELL</option>
+                    </select>
+                    <select class="opt-leg-type position-input-sm">
+                        <option value="CALL">CALL</option>
+                        <option value="PUT">PUT</option>
+                    </select>
+                    <input type="number" class="opt-leg-strike position-input-sm" placeholder="Strike" step="0.5">
+                    <input type="date" class="opt-leg-expiry position-input-sm">
+                    <input type="number" class="opt-leg-qty position-input-sm" placeholder="Qty" value="1" min="1" step="1">
+                    <input type="number" class="opt-leg-premium position-input-sm" placeholder="Premium" step="0.01">
+                </div>
+            </div>
+        `;
+    }
+}
+
+function addOptionsLeg() {
+    const legsContainer = document.getElementById('optPositionLegs');
+    if (!legsContainer) return;
+    
+    const legCount = legsContainer.querySelectorAll('.opt-leg-row').length + 1;
+    
+    const legHTML = `
+        <div class="opt-leg-row" data-leg="${legCount}">
+            <div class="opt-leg-fields">
+                <select class="opt-leg-action position-input-sm">
+                    <option value="BUY">BUY</option>
+                    <option value="SELL">SELL</option>
+                </select>
+                <select class="opt-leg-type position-input-sm">
+                    <option value="CALL">CALL</option>
+                    <option value="PUT">PUT</option>
+                </select>
+                <input type="number" class="opt-leg-strike position-input-sm" placeholder="Strike" step="0.5">
+                <input type="date" class="opt-leg-expiry position-input-sm">
+                <input type="number" class="opt-leg-qty position-input-sm" placeholder="Qty" value="1" min="1" step="1">
+                <input type="number" class="opt-leg-premium position-input-sm" placeholder="Premium" step="0.01">
+            </div>
+        </div>
+    `;
+    
+    legsContainer.insertAdjacentHTML('beforeend', legHTML);
+}
+
+function collectOptionsLegs() {
+    const legRows = document.querySelectorAll('#optPositionLegs .opt-leg-row');
+    const legs = [];
+    
+    legRows.forEach(row => {
+        const action = row.querySelector('.opt-leg-action')?.value;
+        const optionType = row.querySelector('.opt-leg-type')?.value;
+        const strike = parseFloat(row.querySelector('.opt-leg-strike')?.value);
+        const expiry = row.querySelector('.opt-leg-expiry')?.value;
+        const qty = parseInt(row.querySelector('.opt-leg-qty')?.value) || 1;
+        const premium = parseFloat(row.querySelector('.opt-leg-premium')?.value);
+        
+        if (strike && expiry) {
+            legs.push({
+                action: action,
+                option_type: optionType,
+                strike: strike,
+                expiration: expiry,
+                quantity: qty,
+                premium: premium || 0
+            });
+        }
+    });
+    
+    return legs;
+}
+
+function updateOptionsSummary() {
+    if (!pendingPositionSignal) return;
+    
+    const strategy = document.getElementById('optPositionStrategy')?.value || '--';
+    const premium = parseFloat(document.getElementById('optPositionPremium')?.value) || 0;
+    const contracts = parseInt(document.getElementById('optPositionContracts')?.value) || 1;
+    const maxLoss = parseFloat(document.getElementById('optPositionMaxLoss')?.value);
+    
+    // Strategy display name
+    const strategyNames = {
+        'LONG_CALL': 'Long Call', 'LONG_PUT': 'Long Put',
+        'BULL_CALL_SPREAD': 'Bull Call Spread', 'BEAR_PUT_SPREAD': 'Bear Put Spread',
+        'BULL_PUT_SPREAD': 'Bull Put Spread', 'BEAR_CALL_SPREAD': 'Bear Call Spread',
+        'IRON_CONDOR': 'Iron Condor', 'STRADDLE': 'Straddle',
+        'STRANGLE': 'Strangle', 'CUSTOM': 'Custom'
+    };
+    
+    // Direction from signal
+    const direction = pendingPositionSignal.direction === 'LONG' ? 'BULLISH' : 'BEARISH';
+    
+    document.getElementById('optSummaryStrategy').textContent = strategyNames[strategy] || strategy;
+    document.getElementById('optSummaryDirection').textContent = direction;
+    
+    // Net premium (total = per-contract premium * contracts * 100 for standard options)
+    const totalPremium = premium * contracts;
+    const premiumStr = totalPremium !== 0 ? '$' + Math.abs(totalPremium).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '$--';
+    document.getElementById('optSummaryPremium').textContent = (premium < 0 ? '-' : '+') + premiumStr;
+    
+    // Max risk
+    if (maxLoss) {
+        document.getElementById('optSummaryRisk').textContent = '$' + Math.abs(maxLoss).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+    } else if (premium < 0) {
+        // For debit positions, max risk is the premium paid
+        document.getElementById('optSummaryRisk').textContent = '$' + Math.abs(totalPremium).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+    } else {
+        document.getElementById('optSummaryRisk').textContent = '$--';
+    }
+}
+
+async function confirmOptionsPositionEntry() {
+    if (!pendingPositionSignal) return;
+    
+    const strategy = document.getElementById('optPositionStrategy')?.value;
+    const premium = parseFloat(document.getElementById('optPositionPremium')?.value);
+    const contracts = parseInt(document.getElementById('optPositionContracts')?.value) || 1;
+    const legs = collectOptionsLegs();
+    
+    // Validate required fields
+    if (!strategy) {
+        alert('Please select an options strategy');
+        return;
+    }
+    if (isNaN(premium)) {
+        alert('Please enter the net premium');
+        return;
+    }
+    if (legs.length === 0) {
+        alert('Please fill in at least one option leg (strike and expiry required)');
+        return;
+    }
+    
+    const direction = pendingPositionSignal.direction === 'LONG' ? 'BULLISH' : 'BEARISH';
+    const maxProfit = parseFloat(document.getElementById('optPositionMaxProfit')?.value) || null;
+    const maxLoss = parseFloat(document.getElementById('optPositionMaxLoss')?.value) || null;
+    const breakevenStr = document.getElementById('optPositionBreakeven')?.value || '';
+    const breakeven = breakevenStr ? breakevenStr.split(',').map(s => parseFloat(s.trim())).filter(n => !isNaN(n)) : null;
+    const thesis = document.getElementById('optPositionThesis')?.value || '';
+    
+    try {
+        // Step 1: Create options position
+        const optResponse = await fetch(`${API_URL}/signals/${pendingPositionSignal.signal_id}/accept-options`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                signal_id: pendingPositionSignal.signal_id,
+                underlying: pendingPositionSignal.ticker,
+                strategy_type: strategy,
+                direction: direction,
+                legs: legs,
+                net_premium: premium,
+                contracts: contracts,
+                max_profit: maxProfit,
+                max_loss: maxLoss,
+                breakeven: breakeven,
+                thesis: thesis,
+                notes: `Accepted via Trade Ideas UI (Options: ${strategy})`
+            })
+        });
+        
+        const data = await optResponse.json();
+        
+        if (data.status === 'success' || data.status === 'accepted' || data.position_id) {
+            // Remove signal card with animation
+            if (pendingPositionCard) {
+                pendingPositionCard.style.opacity = '0';
+                pendingPositionCard.style.transform = 'translateX(-20px)';
+                setTimeout(() => {
+                    pendingPositionCard.remove();
+                    refillTradeIdeas();
+                }, 300);
+            }
+            
+            // Close modal
+            closePositionEntryModal();
+            
+            // Reload positions (both equity and options)
+            await loadOpenPositionsEnhanced();
+            
+            // Add ticker to chart tabs
+            addPositionChartTab(pendingPositionSignal.ticker);
+            
+            console.log(`📊 Options position accepted: ${pendingPositionSignal.ticker} ${strategy} - Premium: $${premium}`);
+        } else {
+            alert('Failed to accept signal as options: ' + (data.detail || data.message || 'Unknown error'));
+        }
+    } catch (error) {
+        console.error('Error accepting signal as options:', error);
+        alert('Failed to accept signal as options position');
     }
 }
 

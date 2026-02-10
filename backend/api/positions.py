@@ -58,6 +58,30 @@ class AcceptSignalRequest(BaseModel):
     target_2: Optional[float] = None
     notes: Optional[str] = None
 
+class OptionLegRequest(BaseModel):
+    """Single leg of an options position"""
+    action: str  # "BUY" or "SELL"
+    option_type: str  # "CALL" or "PUT"
+    strike: float
+    expiration: str  # YYYY-MM-DD
+    quantity: int = 1
+    premium: float = 0.0
+
+class AcceptSignalAsOptionsRequest(BaseModel):
+    """Request to accept a signal and open an options position"""
+    signal_id: str
+    underlying: str
+    strategy_type: str  # e.g. "LONG_CALL", "BULL_CALL_SPREAD"
+    direction: str  # "BULLISH", "BEARISH", "NEUTRAL", "VOLATILITY"
+    legs: List[OptionLegRequest]
+    net_premium: float  # Positive = credit, Negative = debit
+    contracts: int = 1
+    max_profit: Optional[float] = None
+    max_loss: Optional[float] = None
+    breakeven: Optional[List[float]] = None
+    thesis: Optional[str] = None
+    notes: Optional[str] = None
+
 class DismissSignalRequest(BaseModel):
     """Request to dismiss a signal with reason"""
     signal_id: str
@@ -340,6 +364,101 @@ async def accept_signal(signal_id: str, request: AcceptSignalRequest):
         raise
     except Exception as e:
         logger.error(f"Error accepting signal: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/signals/{signal_id}/accept-options")
+async def accept_signal_as_options(signal_id: str, request: AcceptSignalAsOptionsRequest):
+    """
+    Accept a trade signal and open an OPTIONS position instead of equity.
+    
+    This endpoint:
+    1. Marks the signal as SELECTED (same as equity accept)
+    2. Creates an options position via the options_positions module
+    3. Logs the acceptance with full signal context for backtesting
+    """
+    try:
+        # Get signal data from Redis or PostgreSQL
+        signal_data = await get_signal(signal_id)
+        if not signal_data:
+            signal_data = await get_signal_by_id(signal_id)
+        
+        if not signal_data:
+            raise HTTPException(status_code=404, detail="Signal not found")
+        
+        # Update signal as SELECTED in database
+        await update_signal_action(signal_id, "SELECTED")
+        
+        # Log the acceptance to signal record
+        await update_signal_outcome(
+            signal_id,
+            notes=request.notes or f"Accepted as OPTIONS: {request.strategy_type}"
+        )
+        
+        # Create options position via options_positions module
+        from api.options_positions import (
+            CreateOptionsPositionRequest,
+            OptionLeg,
+            create_options_position
+        )
+        
+        # Convert legs to the options module format
+        option_legs = [
+            OptionLeg(
+                action=leg.action,
+                option_type=leg.option_type,
+                strike=leg.strike,
+                expiration=leg.expiration,
+                quantity=leg.quantity,
+                premium=leg.premium
+            )
+            for leg in request.legs
+        ]
+        
+        options_request = CreateOptionsPositionRequest(
+            underlying=request.underlying.upper(),
+            strategy_type=request.strategy_type,
+            direction=request.direction,
+            legs=option_legs,
+            net_premium=request.net_premium,
+            max_profit=request.max_profit,
+            max_loss=request.max_loss,
+            breakeven=request.breakeven,
+            notes=request.notes,
+            thesis=request.thesis
+        )
+        
+        options_result = await create_options_position(options_request)
+        
+        # Remove from active signals cache
+        await delete_signal(signal_id)
+        
+        # Broadcast signal removal from Trade Ideas
+        await manager.broadcast({
+            "type": "SIGNAL_ACCEPTED",
+            "signal_id": signal_id,
+            "position_id": options_result.get("position_id"),
+            "trade_type": "OPTIONS"
+        })
+        
+        logger.info(
+            f"✅ Signal accepted as OPTIONS: {request.underlying} "
+            f"{request.strategy_type} {request.direction} - "
+            f"Premium: ${request.net_premium} (from signal {signal_id})"
+        )
+        
+        return {
+            "status": "accepted",
+            "trade_type": "OPTIONS",
+            "signal_id": signal_id,
+            "position_id": options_result.get("position_id"),
+            "position": options_result.get("position")
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error accepting signal as options: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
