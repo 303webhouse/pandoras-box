@@ -1048,6 +1048,46 @@ async def log_options_position(position: Dict[Any, Any]):
         logger.info(f"Logged options position {position['position_id']} to database")
 
 
+async def link_options_position_to_signal(
+    position_id: str,
+    signal_id: str,
+    bias_at_open: Optional[Dict] = None,
+    signal_data: Optional[Dict] = None
+):
+    """
+    Link an options position back to its originating signal for backtesting.
+    Adds signal_id, bias_at_open, and signal context to the options_positions record.
+    """
+    pool = await get_postgres_client()
+
+    async with pool.acquire() as conn:
+        # Add columns if they don't exist yet
+        await conn.execute("""
+            ALTER TABLE options_positions
+            ADD COLUMN IF NOT EXISTS signal_id VARCHAR(255),
+            ADD COLUMN IF NOT EXISTS bias_at_open JSONB,
+            ADD COLUMN IF NOT EXISTS signal_score DECIMAL(6,2),
+            ADD COLUMN IF NOT EXISTS signal_entry_price DECIMAL(10,2)
+        """)
+
+        await conn.execute("""
+            UPDATE options_positions SET
+                signal_id = $2,
+                bias_at_open = $3,
+                signal_score = $4,
+                signal_entry_price = $5
+            WHERE position_id = $1
+        """,
+            position_id,
+            signal_id,
+            json.dumps(bias_at_open) if bias_at_open else None,
+            signal_data.get('score') if signal_data else None,
+            signal_data.get('entry_price') if signal_data else None
+        )
+
+        logger.info(f"Linked options position {position_id} to signal {signal_id}")
+
+
 async def update_options_position_outcome(position_id: str, position: Dict[Any, Any]):
     """Update options position with close details"""
     pool = await get_postgres_client()
