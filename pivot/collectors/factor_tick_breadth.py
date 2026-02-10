@@ -37,15 +37,24 @@ async def collect_and_post():
     try:
         tick = await get_json("/bias/tick")
     except Exception as exc:
-        logger.warning(f"Failed to fetch TICK data: {exc}")
+        logger.error(f"Failed to fetch TICK data from /bias/tick: {exc}", exc_info=True)
         return None
 
-    if not tick or tick.get("status") not in ("ok", "success"):
-        logger.warning("TICK data unavailable or not ready")
+    if not tick:
+        logger.warning("TICK data: /bias/tick returned empty response — no TV webhook data in Redis?")
+        return None
+
+    status = tick.get("status")
+    if status not in ("ok", "success"):
+        logger.warning(f"TICK data not ready: status={status}, response={tick}")
         return None
 
     tick_high = float(tick.get("tick_high", 0) or 0)
     tick_low = float(tick.get("tick_low", 0) or 0)
+
+    if tick_high == 0 and tick_low == 0:
+        logger.warning("TICK data has zero high/low — likely no TV alert received yet today")
+        return None
 
     # If average not provided, approximate from range.
     tick_avg = float(tick.get("tick_avg") or (tick_high + tick_low) / 2)
@@ -65,6 +74,8 @@ async def collect_and_post():
         "tick_close": tick_close,
         "source": "pandora_api",
     }
+
+    logger.info(f"TICK breadth posting: score={score:+.2f}, {detail}")
 
     return await post_factor(
         "tick_breadth",

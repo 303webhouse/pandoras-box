@@ -16,8 +16,14 @@ async def compute_score():
     vix = await get_latest_price("^VIX")
     vix3m = await get_latest_price("^VIX3M")
 
-    if vix is None or vix3m is None or vix3m == 0:
+    if vix is None:
+        logger.error("VIX data unavailable from yfinance — cannot compute vix_term")
         return None
+
+    # VIX3M unavailable: post a degraded VIX-only reading instead of nothing
+    if vix3m is None or vix3m == 0:
+        logger.warning(f"VIX3M unavailable — using VIX-only fallback (VIX={vix:.1f})")
+        return _vix_only_fallback(vix)
 
     ratio = vix / vix3m
 
@@ -60,13 +66,56 @@ async def compute_score():
     return score, detail, data
 
 
+def _vix_only_fallback(vix: float):
+    """
+    Degraded scoring using absolute VIX level only.
+    Less precise than the full VIX/VIX3M ratio, but better than posting nothing.
+    """
+    if vix >= 35:
+        score = -0.8
+    elif vix >= 30:
+        score = -0.5
+    elif vix >= 25:
+        score = -0.3
+    elif vix >= 20:
+        score = -0.1
+    elif vix >= 15:
+        score = 0.1
+    elif vix >= 12:
+        score = 0.3
+    else:
+        score = 0.5
+
+    detail = f"VIX {vix:.1f} (VIX3M unavailable — VIX-only fallback)"
+    data = {
+        "vix": float(vix),
+        "vix3m": None,
+        "ratio": None,
+        "degraded": True,
+        "source_note": "VIX-only fallback, VIX3M unavailable from yfinance",
+    }
+
+    return _clamp(score), detail, data
+
+
 async def collect_and_post():
-    result = await compute_score()
+    try:
+        result = await compute_score()
+    except Exception as exc:
+        logger.error(f"VIX term compute_score() raised: {exc}", exc_info=True)
+        return None
+
     if not result:
-        logger.warning("VIX term data unavailable")
+        logger.error("VIX term: compute_score() returned None — no data posted, factor will go stale")
         return None
 
     score, detail, data = result
+    degraded = data.get("degraded", False)
+    if degraded:
+        logger.warning(f"VIX term posting DEGRADED reading: score={score:+.2f}, {detail}")
+    else:
+        logger.info(f"VIX term posting: score={score:+.2f}, {detail}")
+
     return await post_factor(
         "vix_term",
         score=score,
