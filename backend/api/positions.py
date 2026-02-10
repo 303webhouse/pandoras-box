@@ -389,11 +389,14 @@ async def accept_signal_as_options(signal_id: str, request: AcceptSignalAsOption
         # Update signal as SELECTED in database
         await update_signal_action(signal_id, "SELECTED")
         
-        # Log the acceptance to signal record
+        # Log the acceptance to signal record (include premium as entry context)
         await update_signal_outcome(
             signal_id,
-            notes=request.notes or f"Accepted as OPTIONS: {request.strategy_type}"
+            notes=request.notes or f"Accepted as OPTIONS: {request.strategy_type} | Premium: {request.net_premium}"
         )
+        
+        # Capture bias snapshot at time of entry (same as equity path)
+        bias_at_open = await get_bias_snapshot()
         
         # Create options position via options_positions module
         from api.options_positions import (
@@ -415,6 +418,17 @@ async def accept_signal_as_options(signal_id: str, request: AcceptSignalAsOption
             for leg in request.legs
         ]
         
+        # Build notes with signal context for backtesting traceability
+        backtest_notes = (
+            f"Signal: {signal_id} | "
+            f"Score: {signal_data.get('score')} | "
+            f"Bias: {signal_data.get('bias_alignment')} | "
+            f"Strategy: {signal_data.get('strategy')} | "
+            f"Signal Entry: ${signal_data.get('entry_price')}"
+        )
+        if request.notes:
+            backtest_notes = f"{request.notes} | {backtest_notes}"
+        
         options_request = CreateOptionsPositionRequest(
             underlying=request.underlying.upper(),
             strategy_type=request.strategy_type,
@@ -424,11 +438,31 @@ async def accept_signal_as_options(signal_id: str, request: AcceptSignalAsOption
             max_profit=request.max_profit,
             max_loss=request.max_loss,
             breakeven=request.breakeven,
-            notes=request.notes,
+            notes=backtest_notes,
             thesis=request.thesis
         )
         
         options_result = await create_options_position(options_request)
+        
+        # Attach signal_id and bias snapshot to the options position for backtesting
+        options_position_id = options_result.get("position_id")
+        if options_position_id:
+            from api.options_positions import _options_positions
+            if options_position_id in _options_positions:
+                _options_positions[options_position_id]["signal_id"] = signal_id
+                _options_positions[options_position_id]["bias_at_open"] = bias_at_open
+                _options_positions[options_position_id]["signal_score"] = signal_data.get("score")
+                _options_positions[options_position_id]["signal_strategy"] = signal_data.get("strategy")
+                _options_positions[options_position_id]["signal_entry_price"] = signal_data.get("entry_price")
+            
+            # Persist signal_id and bias to database
+            try:
+                from database.postgres_client import link_options_position_to_signal
+                await link_options_position_to_signal(
+                    options_position_id, signal_id, bias_at_open, signal_data
+                )
+            except Exception as e:
+                logger.warning(f"Could not persist signal link to DB: {e}")
         
         # Remove from active signals cache
         await delete_signal(signal_id)
