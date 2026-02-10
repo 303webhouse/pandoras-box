@@ -4911,7 +4911,49 @@ body.override-active-bearish .override-toggle[data-active="true"] {
     border-left: 3px solid var(--border-color);
     cursor: pointer;
     transition: all 0.2s;
-    min-width: 120px;
+    min-width: 130px;
+}
+
+.flow-hot-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.flow-hot-score {
+    font-size: 10px;
+    font-weight: 700;
+    background: rgba(139, 92, 246, 0.2);
+    color: #8B5CF6;
+    padding: 2px 6px;
+    border-radius: 4px;
+}
+
+.flow-hot-details {
+    display: flex;
+    gap: 6px;
+    margin-top: 4px;
+}
+
+.flow-hot-count,
+.flow-hot-dte {
+    font-size: 10px;
+    color: var(--text-secondary);
+}
+
+.flow-hot-breakdown {
+    display: flex;
+    gap: 8px;
+    margin-top: 4px;
+    font-size: 10px;
+}
+
+.flow-calls {
+    color: var(--accent-lime);
+}
+
+.flow-puts {
+    color: var(--accent-orange);
 }
 
 .flow-hot-card:hover {
@@ -4965,7 +5007,7 @@ body.override-active-bearish .override-toggle[data-active="true"] {
     display: flex;
     flex-direction: column;
     gap: 8px;
-    max-height: 200px;
+    max-height: 280px;
     overflow-y: auto;
 }
 
@@ -4977,6 +5019,51 @@ body.override-active-bearish .override-toggle[data-active="true"] {
     border-radius: 6px;
     padding: 10px 12px;
     font-size: 12px;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.flow-alert-item:hover {
+    background: rgba(139, 92, 246, 0.1);
+}
+
+.flow-alert-score {
+    font-size: 9px;
+    font-weight: 700;
+    background: rgba(139, 92, 246, 0.2);
+    color: #8B5CF6;
+    padding: 1px 5px;
+    border-radius: 3px;
+}
+
+.flow-alert-center {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    flex-shrink: 1;
+    min-width: 0;
+}
+
+.flow-alert-detail {
+    font-size: 10px;
+    color: var(--text-secondary);
+    background: var(--dark-bg);
+    padding: 2px 6px;
+    border-radius: 3px;
+    white-space: nowrap;
+}
+
+.flow-alert-meta {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+}
+
+.flow-alert-source {
+    font-size: 9px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    opacity: 0.7;
 }
 
 .flow-alert-left {
