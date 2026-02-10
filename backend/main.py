@@ -259,6 +259,12 @@ if frontend_path:
     @app.get("/manifest.json", response_class=FileResponse)
     async def serve_manifest():
         return FileResponse(os.path.join(frontend_path, "manifest.json"))
+    
+    # Mount frontend assets directory (images, etc.)
+    assets_path = os.path.join(frontend_path, "assets")
+    if os.path.exists(assets_path):
+        app.mount("/assets", StaticFiles(directory=assets_path), name="frontend-assets")
+        logger.info(f"✅ Frontend assets mounted from: {assets_path}")
 else:
     logger.warning("⚠️ Frontend directory not found. Tried paths:")
     for path in possible_paths:
