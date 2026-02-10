@@ -20,65 +20,134 @@ from websocket.broadcaster import manager
 logger = logging.getLogger(__name__)
 
 FACTOR_CONFIG = {
-    # --- Swing factors (total: 0.56) ---
-    "credit_spreads": {
-        "weight": 0.16,
-        "staleness_hours": 48,
-        "description": "HYG vs TLT ratio - measures credit market risk appetite",
-        "timeframe": "swing",
-    },
-    "market_breadth": {
-        "weight": 0.16,
-        "staleness_hours": 48,
-        "description": "RSP vs SPY ratio - equal-weight vs cap-weight divergence",
-        "timeframe": "swing",
-    },
-    "sector_rotation": {
-        "weight": 0.12,
-        "staleness_hours": 48,
-        "description": "XLK/XLY vs XLP/XLU - offensive vs defensive flows",
-        "timeframe": "swing",
-    },
-    "dollar_smile": {
-        "weight": 0.06,
-        "staleness_hours": 48,
-        "description": "DXY trend - risk-on weakness vs risk-off strength",
-        "timeframe": "swing",
-    },
-    "put_call_ratio": {
-        "weight": 0.06,
-        "staleness_hours": 72,
-        "description": "CBOE equity put/call ratio - contrarian sentiment gauge",
-        "timeframe": "swing",
-    },
-    # --- Intraday factors (total: 0.32) ---
+    # =====================================================================
+    # INTRADAY FACTORS (6 factors, total weight: 0.30)
+    # Fast-moving indicators that change throughout the trading day.
+    # =====================================================================
     "vix_term": {
-        "weight": 0.14,
+        "weight": 0.07,
         "staleness_hours": 4,
         "description": "VIX vs VIX3M - near-term fear vs longer-term expectations",
         "timeframe": "intraday",
     },
     "tick_breadth": {
-        "weight": 0.12,
+        "weight": 0.06,
         "staleness_hours": 4,
         "description": "Intraday TICK readings - buying/selling pressure",
         "timeframe": "intraday",
     },
+    "vix_regime": {
+        "weight": 0.05,
+        "staleness_hours": 4,
+        "description": "Absolute VIX level - overall market fear/complacency",
+        "timeframe": "intraday",
+    },
+    "spy_trend_intraday": {
+        "weight": 0.05,
+        "staleness_hours": 4,
+        "description": "SPY price vs 9 EMA - short-term momentum",
+        "timeframe": "intraday",
+    },
+    "breadth_momentum": {
+        "weight": 0.04,
+        "staleness_hours": 24,
+        "description": "RSP/SPY ratio rate of change - breadth improving or deteriorating",
+        "timeframe": "intraday",
+    },
     "options_sentiment": {
-        "weight": 0.06,
+        "weight": 0.03,
         "staleness_hours": 8,
         "description": "UW Market Tide - institutional options flow sentiment",
         "timeframe": "intraday",
     },
-    # --- Macro factors (total: 0.12) ---
+    # =====================================================================
+    # SWING FACTORS (7 factors, total weight: 0.45)
+    # Multi-day trend indicators for swing trade alignment.
+    # =====================================================================
+    "credit_spreads": {
+        "weight": 0.09,
+        "staleness_hours": 48,
+        "description": "HYG vs TLT ratio - measures credit market risk appetite",
+        "timeframe": "swing",
+    },
+    "market_breadth": {
+        "weight": 0.09,
+        "staleness_hours": 48,
+        "description": "RSP vs SPY ratio - equal-weight vs cap-weight divergence",
+        "timeframe": "swing",
+    },
+    "sector_rotation": {
+        "weight": 0.07,
+        "staleness_hours": 48,
+        "description": "XLK/XLY vs XLP/XLU - offensive vs defensive flows",
+        "timeframe": "swing",
+    },
+    "spy_200sma_distance": {
+        "weight": 0.07,
+        "staleness_hours": 24,
+        "description": "SPY percent distance from 200-day SMA - trend strength",
+        "timeframe": "swing",
+    },
+    "high_yield_oas": {
+        "weight": 0.05,
+        "staleness_hours": 48,
+        "description": "ICE BofA HY OAS - precise credit stress gauge",
+        "timeframe": "swing",
+    },
+    "dollar_smile": {
+        "weight": 0.04,
+        "staleness_hours": 48,
+        "description": "DXY trend - risk-on weakness vs risk-off strength",
+        "timeframe": "swing",
+    },
+    "put_call_ratio": {
+        "weight": 0.04,
+        "staleness_hours": 72,
+        "description": "CBOE equity put/call ratio - contrarian sentiment gauge",
+        "timeframe": "swing",
+    },
+    # =====================================================================
+    # MACRO FACTORS (7 factors, total weight: 0.25)
+    # Long-term economic and structural indicators.
+    # =====================================================================
+    "yield_curve": {
+        "weight": 0.05,
+        "staleness_hours": 72,
+        "description": "10Y-2Y Treasury spread - recession predictor",
+        "timeframe": "macro",
+    },
+    "initial_claims": {
+        "weight": 0.05,
+        "staleness_hours": 168,
+        "description": "Weekly initial jobless claims - labor market health",
+        "timeframe": "macro",
+    },
+    "sahm_rule": {
+        "weight": 0.04,
+        "staleness_hours": 168,
+        "description": "Sahm Rule - real-time recession probability",
+        "timeframe": "macro",
+    },
+    "copper_gold_ratio": {
+        "weight": 0.03,
+        "staleness_hours": 48,
+        "description": "COPX/GLD - economic activity vs safety demand",
+        "timeframe": "macro",
+    },
     "excess_cape": {
-        "weight": 0.06,
+        "weight": 0.03,
         "staleness_hours": 168,
         "description": "Excess CAPE yield - valuation risk level",
         "timeframe": "macro",
     },
+    "ism_manufacturing": {
+        "weight": 0.03,
+        "staleness_hours": 720,
+        "description": "ISM Manufacturing PMI - leading economic indicator",
+        "timeframe": "macro",
+    },
     "savita": {
-        "weight": 0.06,
+        "weight": 0.02,
         "staleness_hours": 1080,
         "description": "BofA Sell Side Indicator - monthly contrarian sentiment",
         "timeframe": "macro",
