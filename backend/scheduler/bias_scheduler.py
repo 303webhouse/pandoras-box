@@ -2154,6 +2154,13 @@ async def run_scheduled_refreshes():
     # Run sector strength scan every morning
     await scan_sector_strength()
     
+    # Compute sector rotation momentum
+    try:
+        from bias_filters.sector_momentum import refresh_sector_rotation
+        await refresh_sector_rotation()
+    except Exception as e:
+        logger.warning(f"Sector rotation momentum refresh failed: {e}")
+    
     # Update scheduler status
     _scheduler_status["bias_refresh"]["last_run"] = now.isoformat()
     _scheduler_status["bias_refresh"]["status"] = "completed"
@@ -2162,7 +2169,15 @@ async def run_scheduled_refreshes():
 async def refresh_composite_bias():
     """
     Refresh composite bias (15-minute safety net).
+    Also refreshes sector rotation momentum during market hours.
     """
+    # Refresh sector rotation momentum alongside composite
+    try:
+        from bias_filters.sector_momentum import refresh_sector_rotation
+        await refresh_sector_rotation()
+    except Exception as e:
+        logger.debug(f"Sector rotation refresh during composite cycle: {e}")
+
     try:
         from bias_engine.composite import compute_composite
     except ImportError as e:

@@ -459,6 +459,48 @@ async def apply_signal_scoring(signal_data: dict) -> dict:
         # Calculate score using the scorer
         score, bias_alignment, triggering_factors = calculate_signal_score(signal_data, current_bias)
         
+        # Contrarian qualification: if signal is counter-bias, check if it qualifies
+        # for penalty removal (multiplier restored to 1.0x)
+        if bias_alignment in ("COUNTER_BIAS", "STRONG_COUNTER") and composite_score is not None:
+            try:
+                from scoring.contrarian_qualifier import qualify_contrarian
+                direction = signal_data.get("direction", "").upper()
+                cq = await qualify_contrarian(signal_data, composite_score, direction)
+                if cq["qualified"]:
+                    # Recalculate: restore multiplier to 1.0x
+                    original_multiplier = triggering_factors.get("bias_alignment", {}).get("multiplier", 1.0)
+                    if original_multiplier < 1.0:
+                        # Re-score with neutral multiplier
+                        raw_score = triggering_factors.get("calculation", {}).get("raw_score", score)
+                        score = min(100, max(0, raw_score * 1.0))
+                        score = round(score, 2)
+
+                    signal_data["contrarian_qualified"] = True
+                    signal_data["contrarian_reasons"] = cq["reasons"]
+                    triggering_factors["contrarian"] = {
+                        "qualified": True,
+                        "reasons": cq["reasons"],
+                        "original_multiplier": original_multiplier,
+                        "restored_multiplier": 1.0,
+                    }
+                    bias_alignment = "CONTRARIAN_QUALIFIED"
+                    logger.info(f"🔄 Contrarian restored: {signal_data.get('ticker')} {direction} (reasons: {cq['reasons']})")
+            except Exception as cq_err:
+                logger.warning(f"Contrarian qualification check failed: {cq_err}")
+        
+        # Sector rotation bonus
+        try:
+            from scoring.sector_rotation_bonus import get_sector_bonus
+            sector_rot_bonus = await get_sector_bonus(signal_data)
+            if sector_rot_bonus != 0:
+                score = min(100, max(0, score + sector_rot_bonus))
+                score = round(score, 2)
+                triggering_factors["sector_rotation_bonus"] = sector_rot_bonus
+        except ImportError:
+            pass  # Module not yet built (Phase 4)
+        except Exception as sr_err:
+            logger.debug(f"Sector rotation bonus check failed: {sr_err}")
+        
         # Update signal data
         signal_data["score"] = score
         signal_data["bias_alignment"] = bias_alignment

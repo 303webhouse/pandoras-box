@@ -86,3 +86,74 @@ async def get_scoring_data():
     except Exception as e:
         logger.error(f"Error getting scoring data: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# =========================================================================
+# SECTOR MOMENTUM / ROTATION DETECTOR (11-sector sharp rotation tracking)
+# =========================================================================
+
+@router.get("/momentum")
+async def get_sector_momentum():
+    """
+    Get current sector rotation momentum for all 11 sectors.
+    
+    Returns each sector's relative strength vs SPY, rotation momentum,
+    status (SURGING/DUMPING/STEADY), acceleration, and rank changes.
+    """
+    try:
+        from bias_filters.sector_momentum import get_cached_rotation
+        data = await get_cached_rotation()
+        if not data:
+            return {
+                "status": "no_data",
+                "message": "Sector rotation data not yet computed. Trigger /sector-rotation/momentum/refresh."
+            }
+        
+        # Sort by rotation momentum for display
+        sorted_sectors = sorted(
+            data.values(),
+            key=lambda x: x.get("rotation_momentum", 0),
+            reverse=True,
+        )
+        
+        surging = [s for s in sorted_sectors if s["status"] == "SURGING"]
+        dumping = [s for s in sorted_sectors if s["status"] == "DUMPING"]
+        
+        return {
+            "status": "success",
+            "sectors": sorted_sectors,
+            "summary": {
+                "surging": [s["sector"] for s in surging],
+                "dumping": [s["sector"] for s in dumping],
+                "surging_count": len(surging),
+                "dumping_count": len(dumping),
+            },
+            "updated_at": sorted_sectors[0].get("updated_at") if sorted_sectors else None,
+        }
+    except Exception as e:
+        logger.error(f"Error getting sector momentum: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/momentum/refresh")
+async def refresh_sector_momentum():
+    """Manually trigger sector rotation momentum computation."""
+    try:
+        from bias_filters.sector_momentum import refresh_sector_rotation
+        data = await refresh_sector_rotation()
+        
+        if not data:
+            return {"status": "error", "message": "Failed to compute sector rotation data"}
+        
+        surging = [s for s in data.values() if s["status"] == "SURGING"]
+        dumping = [s for s in data.values() if s["status"] == "DUMPING"]
+        
+        return {
+            "status": "success",
+            "sectors_computed": len(data),
+            "surging": [s["sector"] for s in surging],
+            "dumping": [s["sector"] for s in dumping],
+        }
+    except Exception as e:
+        logger.error(f"Error refreshing sector momentum: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
