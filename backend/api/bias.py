@@ -366,6 +366,125 @@ async def get_composite_bias():
     return result.model_dump(mode="json")
 
 
+@router.get("/bias/composite/timeframes")
+async def get_composite_timeframes():
+    """
+    Get composite bias data grouped by timeframe (Intraday/Swing/Macro)
+    with independent sub-scores and momentum (strengthening/weakening).
+    Used by the frontend timeframe cards.
+    """
+    if not COMPOSITE_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Composite bias engine not available")
+
+    from datetime import timedelta
+
+    result = await get_cached_composite()
+    if not result:
+        result = await compute_composite()
+
+    # Group factors by timeframe
+    timeframes = {"intraday": [], "swing": [], "macro": []}
+    for factor_id, config in FACTOR_CONFIG.items():
+        tf = config.get("timeframe", "swing")
+        reading = result.factors.get(factor_id)
+        entry = {
+            "factor_id": factor_id,
+            "weight": config["weight"],
+            "description": config.get("description", ""),
+            "stale": factor_id in result.stale_factors,
+        }
+        if reading:
+            entry["score"] = reading.score
+            entry["signal"] = reading.signal
+            entry["detail"] = reading.detail
+            entry["timestamp"] = reading.timestamp.isoformat() if reading.timestamp else None
+            entry["source"] = reading.source
+        else:
+            entry["score"] = None
+            entry["signal"] = "STALE"
+        timeframes[tf].append(entry)
+
+    # Calculate independent sub-scores per timeframe
+    from bias_engine.composite import score_to_bias, get_reading_before
+    now = datetime.utcnow()
+    lookback = now - timedelta(hours=4)
+
+    timeframe_results = {}
+    for tf_name, factors in timeframes.items():
+        active_factors = [f for f in factors if f["score"] is not None and not f["stale"]]
+        if active_factors:
+            total_weight = sum(f["weight"] for f in active_factors)
+            sub_score = sum(f["score"] * f["weight"] for f in active_factors) / total_weight if total_weight > 0 else 0.0
+            sub_score = max(-1.0, min(1.0, sub_score))
+        else:
+            sub_score = 0.0
+
+        bias_level, bias_numeric = score_to_bias(sub_score)
+
+        # Momentum: compare current sub-score to ~4 hours ago
+        momentum = "stable"
+        try:
+            old_scores = []
+            for f in factors:
+                old_reading = await get_reading_before(f["factor_id"], lookback)
+                if old_reading:
+                    old_scores.append((old_reading.score, f["weight"]))
+
+            if old_scores:
+                old_total_weight = sum(w for _, w in old_scores)
+                if old_total_weight > 0:
+                    old_sub_score = sum(s * w for s, w in old_scores) / old_total_weight
+                    delta = sub_score - old_sub_score
+                    if delta > 0.05:
+                        momentum = "strengthening"
+                    elif delta < -0.05:
+                        momentum = "weakening"
+        except Exception:
+            pass
+
+        # Divergence from composite
+        composite_direction = "bullish" if result.composite_score > 0.1 else ("bearish" if result.composite_score < -0.1 else "neutral")
+        tf_direction = "bullish" if sub_score > 0.1 else ("bearish" if sub_score < -0.1 else "neutral")
+        divergent = composite_direction != "neutral" and tf_direction != "neutral" and composite_direction != tf_direction
+
+        timeframe_results[tf_name] = {
+            "sub_score": round(sub_score, 3),
+            "bias_level": bias_level,
+            "bias_numeric": bias_numeric,
+            "momentum": momentum,
+            "divergent": divergent,
+            "active_count": len(active_factors),
+            "total_count": len(factors),
+            "factors": factors,
+        }
+
+    # Sector rotation summary
+    sector_rotation = None
+    try:
+        from bias_filters.sector_momentum import get_cached_rotation
+        rotation = await get_cached_rotation()
+        if rotation:
+            sorted_sectors = sorted(rotation.values(), key=lambda x: x.get("rotation_momentum", 0), reverse=True)
+            sector_rotation = {
+                "sectors": sorted_sectors,
+                "surging": [s["sector"] for s in sorted_sectors if s["status"] == "SURGING"],
+                "dumping": [s["sector"] for s in sorted_sectors if s["status"] == "DUMPING"],
+            }
+    except Exception:
+        pass
+
+    return {
+        "composite_score": result.composite_score,
+        "composite_bias": result.bias_level,
+        "composite_numeric": result.bias_numeric,
+        "confidence": result.confidence,
+        "override": result.override,
+        "timestamp": result.timestamp.isoformat(),
+        "timeframes": timeframe_results,
+        "sector_rotation": sector_rotation,
+    }
+
+
 @router.post("/bias/factors/{factor_name}")
 async def update_factor_from_pivot(
     factor_name: str,

@@ -91,7 +91,7 @@
                     <div class="factor-breakdown-header" id="factorBreakdownToggle">
                         <span class="factor-breakdown-caret">></span>
                         <span class="factor-breakdown-title">Factor Breakdown</span>
-                        <span class="factor-breakdown-count" id="factorActiveCount">0/8 active</span>
+                        <span class="factor-breakdown-count" id="factorActiveCount">0/10 active</span>
                     </div>
                     <div class="factor-list" id="compositeFactorList" style="display: none;"></div>
                 </div>
@@ -101,37 +101,46 @@
                 </div>
             </div>
 
-            <div class="bias-card" id="dailyBias">
-                <h3><span class="kb-link" data-kb-term="daily-bias">Daily Bias</span></h3>
-                <button class="bias-settings-btn" id="dailyBiasSettingsBtn" title="Factor Settings">⚙️</button>
-                <div class="bias-display">
-                    <div class="bias-level" id="dailyLevel">NEUTRAL</div>
-                    <div class="bias-effective" id="dailyEffective" style="display: none;">
-                        <span class="effective-label"><span class="kb-link" data-kb-term="effective-bias">Effective</span>:</span>
-                        <span class="effective-level"></span>
-                    </div>
-                    <div class="bias-details" id="dailyDetails">Loading...</div>
+            <!-- Timeframe Factor Group Cards (replace old Daily/Weekly/Cyclical) -->
+            <div class="tf-card" id="tfIntraday" data-timeframe="intraday">
+                <h3>INTRADAY</h3>
+                <div class="tf-display">
+                    <div class="tf-level" id="tfIntradayLevel">NEUTRAL</div>
+                    <div class="tf-score" id="tfIntradayScore">(0.00)</div>
+                    <div class="tf-momentum" id="tfIntradayMomentum"><span class="tf-momentum-arrow">→</span> Stable</div>
                 </div>
+                <div class="tf-divergence" id="tfIntradayDivergence" style="display:none;"></div>
+                <div class="tf-factors" id="tfIntradayFactors" style="display:none;"></div>
+                <div class="tf-expand-toggle" data-target="tfIntradayFactors">Factors ></div>
             </div>
-            <div class="bias-card" id="weeklyBias">
-                <h3><span class="kb-link" data-kb-term="weekly-bias">Weekly Bias</span></h3>
-                <button class="bias-settings-btn" id="weeklyBiasSettingsBtn" title="Factor Settings">⚙️</button>
-                <div class="bias-display">
-                    <div class="bias-level" id="weeklyLevel">NEUTRAL</div>
-                    <div class="bias-effective" id="weeklyEffective" style="display: none;">
-                        <span class="effective-label"><span class="kb-link" data-kb-term="effective-bias">Effective</span>:</span>
-                        <span class="effective-level"></span>
-                    </div>
-                    <div class="bias-details" id="weeklyDetails">Loading...</div>
+            <div class="tf-card" id="tfSwing" data-timeframe="swing">
+                <h3>SWING</h3>
+                <div class="tf-display">
+                    <div class="tf-level" id="tfSwingLevel">NEUTRAL</div>
+                    <div class="tf-score" id="tfSwingScore">(0.00)</div>
+                    <div class="tf-momentum" id="tfSwingMomentum"><span class="tf-momentum-arrow">→</span> Stable</div>
                 </div>
+                <div class="tf-divergence" id="tfSwingDivergence" style="display:none;"></div>
+                <div class="tf-factors" id="tfSwingFactors" style="display:none;"></div>
+                <div class="tf-expand-toggle" data-target="tfSwingFactors">Factors ></div>
             </div>
-            <div class="bias-card" id="cyclicalBias">
-                <h3><span class="kb-link" data-kb-term="cyclical-bias">Cyclical Bias</span></h3>
-                <button class="bias-settings-btn" id="cyclicalBiasSettingsBtn" title="Factor Settings">⚙️</button>
-                <div class="bias-display">
-                    <div class="bias-level" id="cyclicalLevel">NEUTRAL</div>
-                    <div class="bias-details" id="cyclicalDetails">Loading...</div>
+            <div class="tf-card" id="tfMacro" data-timeframe="macro">
+                <h3>MACRO</h3>
+                <div class="tf-display">
+                    <div class="tf-level" id="tfMacroLevel">NEUTRAL</div>
+                    <div class="tf-score" id="tfMacroScore">(0.00)</div>
+                    <div class="tf-momentum" id="tfMacroMomentum"><span class="tf-momentum-arrow">→</span> Stable</div>
                 </div>
+                <div class="tf-divergence" id="tfMacroDivergence" style="display:none;"></div>
+                <div class="tf-factors" id="tfMacroFactors" style="display:none;"></div>
+                <div class="tf-expand-toggle" data-target="tfMacroFactors">Factors ></div>
+            </div>
+        </section>
+
+        <!-- Sector Rotation Strip -->
+        <section class="sector-rotation-strip" id="sectorRotationStrip">
+            <div class="sector-chips" id="sectorChips">
+                <!-- Populated by JS -->
             </div>
         </section>
 
