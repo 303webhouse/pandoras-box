@@ -575,6 +575,12 @@ function handleWebSocketMessage(message) {
         case 'SCOUT_ALERT':
             displayScoutAlert(message.data);
             break;
+        case 'FLOW_UPDATE':
+            // New flow data from Discord bot via UW - refresh the Options Flow section
+            console.log(`🐋 Flow update: ${message.count} tickers (${(message.tickers_updated || []).join(', ')})`);
+            loadFlowData();
+            checkFlowStatus();
+            break;
     }
 }
 
@@ -5809,14 +5815,9 @@ let flowRecentAlerts = [];
 
 function initOptionsFlow() {
     const refreshBtn = document.getElementById('refreshFlowBtn');
-    const addBtn = document.getElementById('addFlowBtn');
     
     if (refreshBtn) {
         refreshBtn.addEventListener('click', loadFlowData);
-    }
-    
-    if (addBtn) {
-        addBtn.addEventListener('click', addManualFlow);
     }
     
     // Check connection status and load data
@@ -5832,7 +5833,10 @@ async function checkFlowStatus() {
         const response = await fetch(`${API_URL}/flow/status`);
         const data = await response.json();
         
-        if (data.configured) {
+        if (data.configured && data.source === 'discord_bot') {
+            statusEl.textContent = `Live (${data.active_tickers} tickers)`;
+            statusEl.classList.add('connected');
+        } else if (data.configured) {
             statusEl.textContent = 'Connected';
             statusEl.classList.add('connected');
         } else {
@@ -5873,13 +5877,38 @@ function renderHotTickers() {
         return;
     }
     
-    container.innerHTML = flowHotTickers.map(ticker => `
-        <div class="flow-hot-card ${ticker.sentiment}" data-ticker="${ticker.ticker}">
-            <div class="flow-hot-ticker">${ticker.ticker}</div>
-            <div class="flow-hot-sentiment ${ticker.sentiment}">${ticker.sentiment}</div>
-            <div class="flow-hot-premium">$${(ticker.total_premium / 1000).toFixed(0)}K</div>
-        </div>
-    `).join('');
+    container.innerHTML = flowHotTickers.map(ticker => {
+        const premium = ticker.total_premium || 0;
+        const premiumStr = premium >= 1000000 
+            ? `$${(premium / 1000000).toFixed(1)}M` 
+            : `$${(premium / 1000).toFixed(0)}K`;
+        const score = ticker.unusualness_score ? Math.round(ticker.unusualness_score) : null;
+        const alertCount = ticker.alert_count || ticker.unusual_count || 0;
+        const callPrem = ticker.call_premium || 0;
+        const putPrem = ticker.put_premium || 0;
+        const dte = ticker.avg_dte ? `${Math.round(ticker.avg_dte)}d` : '';
+        
+        return `
+            <div class="flow-hot-card ${ticker.sentiment}" data-ticker="${ticker.ticker}">
+                <div class="flow-hot-top">
+                    <div class="flow-hot-ticker">${ticker.ticker}</div>
+                    ${score ? `<div class="flow-hot-score">${score}</div>` : ''}
+                </div>
+                <div class="flow-hot-sentiment ${ticker.sentiment}">${ticker.sentiment}</div>
+                <div class="flow-hot-premium">${premiumStr}</div>
+                <div class="flow-hot-details">
+                    ${alertCount ? `<span class="flow-hot-count">${alertCount} alert${alertCount > 1 ? 's' : ''}</span>` : ''}
+                    ${dte ? `<span class="flow-hot-dte">${dte}</span>` : ''}
+                </div>
+                ${(callPrem || putPrem) ? `
+                    <div class="flow-hot-breakdown">
+                        <span class="flow-calls">C: $${(callPrem / 1000).toFixed(0)}K</span>
+                        <span class="flow-puts">P: $${(putPrem / 1000).toFixed(0)}K</span>
+                    </div>
+                ` : ''}
+            </div>
+        `;
+    }).join('');
     
     // Click to view on chart
     container.querySelectorAll('.flow-hot-card').forEach(card => {
@@ -5912,22 +5941,54 @@ function renderRecentAlerts() {
     
     container.innerHTML = flowRecentAlerts.map(alert => {
         const time = new Date(alert.received_at || alert.timestamp).toLocaleTimeString();
-        const premium = alert.premium ? `$${(alert.premium / 1000).toFixed(0)}K` : '-';
+        const premium = alert.premium ? (alert.premium >= 1000000 
+            ? `$${(alert.premium / 1000000).toFixed(1)}M` 
+            : `$${(alert.premium / 1000).toFixed(0)}K`) : '-';
+        const score = alert.unusualness_score ? Math.round(alert.unusualness_score) : null;
+        const strike = alert.strike ? `$${alert.strike}` : '';
+        const expiry = alert.expiry || '';
+        const optType = alert.option_type || '';
+        const dte = alert.avg_dte ? `${Math.round(alert.avg_dte)}DTE` : '';
+        const count = alert.unusual_count || 0;
+        const source = alert.source === 'discord_bot' ? 'UW' : (alert.source === 'manual' ? 'Manual' : '');
+        
+        // Build detail chips
+        let details = [];
+        if (strike && optType) details.push(`${optType} ${strike}`);
+        else if (strike) details.push(strike);
+        if (expiry) details.push(expiry);
+        if (dte) details.push(dte);
+        if (count > 1) details.push(`${count}x`);
         
         return `
-            <div class="flow-alert-item">
+            <div class="flow-alert-item" data-ticker="${alert.ticker}">
                 <div class="flow-alert-left">
                     <span class="flow-alert-ticker">${alert.ticker}</span>
-                    <span class="flow-alert-type ${alert.type}">${alert.type}</span>
+                    <span class="flow-alert-type ${alert.type || ''}">${alert.type || 'FLOW'}</span>
                     <span class="flow-alert-sentiment ${alert.sentiment}">${alert.sentiment}</span>
+                    ${score ? `<span class="flow-alert-score">${score}</span>` : ''}
+                </div>
+                <div class="flow-alert-center">
+                    ${details.length > 0 ? details.map(d => `<span class="flow-alert-detail">${d}</span>`).join('') : ''}
                 </div>
                 <div class="flow-alert-right">
                     <div class="flow-alert-premium">${premium}</div>
-                    <div class="flow-alert-time">${time}</div>
+                    <div class="flow-alert-meta">
+                        <span class="flow-alert-time">${time}</span>
+                        ${source ? `<span class="flow-alert-source">${source}</span>` : ''}
+                    </div>
                 </div>
             </div>
         `;
     }).join('');
+    
+    // Click alert to view ticker on chart
+    container.querySelectorAll('.flow-alert-item').forEach(item => {
+        item.addEventListener('click', () => {
+            const ticker = item.dataset.ticker;
+            if (ticker) changeChartSymbol(ticker);
+        });
+    });
 }
 
 // Flow Entry Modal State
