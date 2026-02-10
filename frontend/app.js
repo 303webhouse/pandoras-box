@@ -584,6 +584,34 @@ function handleWebSocketMessage(message) {
     }
 }
 
+// Audio alert for new signals (uses Web Audio API — no file needed)
+function playSignalAlert(priority = false) {
+    try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.type = 'sine';
+        gain.gain.value = 0.12;
+
+        if (priority) {
+            // Priority signal: two-tone rising chime
+            osc.frequency.value = 660;
+            osc.start(ctx.currentTime);
+            osc.frequency.setValueAtTime(880, ctx.currentTime + 0.15);
+            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+            osc.stop(ctx.currentTime + 0.4);
+        } else {
+            // Regular signal entering top 10: single soft tone
+            osc.frequency.value = 880;
+            osc.start(ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
+            osc.stop(ctx.currentTime + 0.25);
+        }
+    } catch (e) { /* Audio not available */ }
+}
+
 function handleNewSignal(signalData) {
     // Add to appropriate signal list
     if (signalData.asset_class === 'EQUITY' || !signalData.asset_class) {
@@ -596,8 +624,9 @@ function handleNewSignal(signalData) {
             insertSignalByScore(signalData, 'equity');
             refreshSignalViews();
 
-            // Highlight new signal with animation
+            // Highlight new signal with animation + sound
             highlightNewSignal(signalData.signal_id);
+            playSignalAlert(false);
         } else {
             // Add to queue but don't display
             signals.equity.push(signalData);
@@ -626,6 +655,7 @@ function handlePrioritySignal(signalData) {
     
     refreshSignalViews();
     highlightNewSignal(signalData.signal_id);
+    playSignalAlert(true);
 }
 
 function getLowestDisplayedScore() {
@@ -1540,6 +1570,15 @@ function renderSectorRotationStrip(sectorData) {
                 </div>
             </div>`;
     }).join('');
+
+    // Make sector chips clickable to change chart
+    container.querySelectorAll('.sector-chip').forEach(chip => {
+        chip.addEventListener('click', (e) => {
+            if (e.target.closest('.sector-tooltip')) return;
+            const match = chip.textContent.trim().match(/[A-Z]{2,5}/);
+            if (match && match[0]) changeChartSymbol(match[0]);
+        });
+    });
 }
 
 // Initialize timeframe card expand/collapse toggles
