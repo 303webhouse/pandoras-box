@@ -4626,17 +4626,51 @@ body.override-active-bearish .override-toggle[data-active="true"] {
     gap: 8px;
 }
 
+.btc-session-current {
+    padding: 8px 12px;
+    margin-bottom: 10px;
+    border-radius: 8px;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.btc-session-current.active {
+    background: rgba(247, 147, 26, 0.1);
+    border: 1px solid rgba(247, 147, 26, 0.3);
+    color: #F7931A;
+    font-weight: 700;
+}
+
+.btc-session-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 360px;
+    overflow-y: auto;
+}
+
 .btc-session-item {
     background: var(--card-bg);
     border-radius: 6px;
     padding: 10px;
     font-size: 11px;
+    border-left: 3px solid var(--border-color);
+    transition: border-color 0.2s;
+}
+
+.btc-session-item.active {
+    border-left-color: #F7931A;
+    background: rgba(247, 147, 26, 0.05);
 }
 
 .btc-session-item .session-name {
     font-weight: 700;
     color: var(--text-primary);
     margin-bottom: 4px;
+}
+
+.btc-session-item .session-name.active {
+    color: #F7931A;
 }
 
 .btc-session-item .session-time {
