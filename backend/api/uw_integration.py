@@ -176,6 +176,27 @@ async def receive_market_tide(data: MarketTideData):
         
         logger.info(f"📊 Market Tide updated: {data.sentiment}")
         
+        # Auto-score options_sentiment factor and feed into composite bias engine
+        factor_score = None
+        factor_signal = None
+        composite_bias = None
+        try:
+            from bias_filters.options_sentiment import compute_score as compute_options_score
+            reading = await compute_options_score(_uw_data["market_tide"])
+            if reading:
+                from bias_engine.composite import store_factor_reading, compute_composite
+                await store_factor_reading(reading)
+                composite = await compute_composite()
+                factor_score = reading.score
+                factor_signal = reading.signal
+                composite_bias = composite.bias_level
+                logger.info(
+                    f"📊 Options sentiment scored: {reading.score:+.2f} ({reading.signal}) → "
+                    f"composite {composite.bias_level} ({composite.composite_score:+.2f})"
+                )
+        except Exception as score_err:
+            logger.error(f"Options sentiment scoring failed (data still stored): {score_err}")
+        
         # Calculate bias contribution
         bias_contribution = "NEUTRAL"
         if data.sentiment in ["BULLISH", "STRONGLY_BULLISH"]:
@@ -183,12 +204,18 @@ async def receive_market_tide(data: MarketTideData):
         elif data.sentiment in ["BEARISH", "STRONGLY_BEARISH"]:
             bias_contribution = "URSA"
         
-        return {
+        result = {
             "status": "success",
             "message": f"Market Tide received: {data.sentiment}",
             "bias_contribution": bias_contribution,
             "data": _uw_data["market_tide"]
         }
+        if factor_score is not None:
+            result["factor_score"] = factor_score
+            result["factor_signal"] = factor_signal
+            result["composite_bias"] = composite_bias
+        
+        return result
         
     except Exception as e:
         logger.error(f"Error processing market tide: {e}")

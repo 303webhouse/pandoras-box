@@ -435,13 +435,26 @@ async def apply_signal_scoring(signal_data: dict) -> dict:
     - KODIAK_CALL: Strong SHORT signal (score >= 75)
     """
     try:
-        # Get current bias for scoring
-        bias_status = get_bias_status()
-        current_bias = {
-            "daily": bias_status.get("daily", {}),
-            "weekly": bias_status.get("weekly", {}),
-            "cyclical": bias_status.get("cyclical", {})
-        }
+        # Primary: use composite engine score for bias alignment
+        composite_score = None
+        try:
+            from bias_engine.composite import get_cached_composite
+            cached = await get_cached_composite()
+            if cached:
+                composite_score = cached.composite_score
+        except Exception as comp_err:
+            logger.warning(f"Composite bias unavailable, falling back to old system: {comp_err}")
+        
+        # Build bias data — prefer composite, fall back to old voting system
+        if composite_score is not None:
+            current_bias = {"composite_score": composite_score}
+        else:
+            bias_status = get_bias_status()
+            current_bias = {
+                "daily": bias_status.get("daily", {}),
+                "weekly": bias_status.get("weekly", {}),
+                "cyclical": bias_status.get("cyclical", {})
+            }
         
         # Calculate score using the scorer
         score, bias_alignment, triggering_factors = calculate_signal_score(signal_data, current_bias)
@@ -570,6 +583,69 @@ async def get_tick_status_endpoint():
     """Get current TICK data and bias status"""
     from bias_filters.tick_breadth import get_tick_status
     return await get_tick_status()
+
+
+class PCRPayload(BaseModel):
+    """Payload for Put/Call Ratio data from TradingView"""
+    pcr: float  # CBOE equity put/call ratio (e.g., 0.85)
+    date: Optional[str] = None  # Optional date (YYYY-MM-DD), defaults to today
+
+
+@router.post("/pcr")
+async def receive_pcr_data(payload: PCRPayload):
+    """
+    Receive CBOE Put/Call Ratio data from TradingView webhook.
+    
+    TradingView Alert Setup:
+    - Symbol: $CPCE (CBOE equity put/call ratio)
+    - Timeframe: Daily
+    - Condition: Once per bar close
+    - Webhook URL: https://your-app.railway.app/webhook/pcr
+    - Message (JSON): {"pcr": {{close}}}
+    """
+    from bias_filters.put_call_ratio import store_pcr_data, compute_score as compute_pcr_score
+    
+    logger.info(f"📊 PCR webhook received: {payload.pcr:.3f}")
+    
+    result = await store_pcr_data(pcr_value=payload.pcr, date=payload.date)
+    
+    # Auto-score put_call_ratio and feed into composite bias engine
+    try:
+        pcr_data = {"pcr": payload.pcr}
+        reading = await compute_pcr_score(pcr_data)
+        if reading:
+            from bias_engine.composite import store_factor_reading, compute_composite
+            await store_factor_reading(reading)
+            composite = await compute_composite()
+            logger.info(
+                f"📊 PCR factor scored: {reading.score:+.2f} ({reading.signal}) → "
+                f"composite {composite.bias_level} ({composite.composite_score:+.2f})"
+            )
+            result["factor_score"] = reading.score
+            result["factor_signal"] = reading.signal
+            result["composite_bias"] = composite.bias_level
+        else:
+            logger.warning("📊 PCR factor scoring returned None")
+    except Exception as e:
+        logger.error(f"📊 PCR factor scoring failed (data still stored): {e}")
+    
+    return result
+
+
+@router.get("/pcr/status")
+async def get_pcr_status():
+    """Get current Put/Call Ratio data and status"""
+    from bias_filters.put_call_ratio import compute_score
+    reading = await compute_score()
+    if reading:
+        return {
+            "status": "ok",
+            "pcr": reading.raw_data.get("pcr"),
+            "score": reading.score,
+            "signal": reading.signal,
+            "detail": reading.detail,
+        }
+    return {"status": "no_data", "message": "No PCR data available"}
 
 
 @router.post("/test")

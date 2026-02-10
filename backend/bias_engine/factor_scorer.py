@@ -25,6 +25,8 @@ async def score_all_factors() -> Dict[str, FactorReading]:
         "excess_cape": "bias_filters.excess_cape_yield",
         "savita": "bias_filters.savita_indicator",
         "tick_breadth": "bias_filters.tick_breadth",
+        "options_sentiment": "bias_filters.options_sentiment",
+        "put_call_ratio": "bias_filters.put_call_ratio",
     }
 
     for factor_id, module_path in scorers.items():

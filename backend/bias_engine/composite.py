@@ -1,4 +1,4 @@
-﻿"""
+"""
 Composite Bias Engine
 
 Creates a unified bias score from multiple factors with graceful degradation.
@@ -20,45 +20,68 @@ from websocket.broadcaster import manager
 logger = logging.getLogger(__name__)
 
 FACTOR_CONFIG = {
+    # --- Swing factors (total: 0.56) ---
     "credit_spreads": {
-        "weight": 0.18,
+        "weight": 0.16,
         "staleness_hours": 48,
         "description": "HYG vs TLT ratio - measures credit market risk appetite",
+        "timeframe": "swing",
     },
     "market_breadth": {
-        "weight": 0.18,
+        "weight": 0.16,
         "staleness_hours": 48,
         "description": "RSP vs SPY ratio - equal-weight vs cap-weight divergence",
-    },
-    "vix_term": {
-        "weight": 0.16,
-        "staleness_hours": 4,
-        "description": "VIX vs VIX3M - near-term fear vs longer-term expectations",
-    },
-    "tick_breadth": {
-        "weight": 0.14,
-        "staleness_hours": 4,
-        "description": "Intraday TICK readings - buying/selling pressure",
+        "timeframe": "swing",
     },
     "sector_rotation": {
-        "weight": 0.14,
+        "weight": 0.12,
         "staleness_hours": 48,
         "description": "XLK/XLY vs XLP/XLU - offensive vs defensive flows",
+        "timeframe": "swing",
     },
     "dollar_smile": {
-        "weight": 0.08,
+        "weight": 0.06,
         "staleness_hours": 48,
         "description": "DXY trend - risk-on weakness vs risk-off strength",
+        "timeframe": "swing",
     },
+    "put_call_ratio": {
+        "weight": 0.06,
+        "staleness_hours": 72,
+        "description": "CBOE equity put/call ratio - contrarian sentiment gauge",
+        "timeframe": "swing",
+    },
+    # --- Intraday factors (total: 0.32) ---
+    "vix_term": {
+        "weight": 0.14,
+        "staleness_hours": 4,
+        "description": "VIX vs VIX3M - near-term fear vs longer-term expectations",
+        "timeframe": "intraday",
+    },
+    "tick_breadth": {
+        "weight": 0.12,
+        "staleness_hours": 4,
+        "description": "Intraday TICK readings - buying/selling pressure",
+        "timeframe": "intraday",
+    },
+    "options_sentiment": {
+        "weight": 0.06,
+        "staleness_hours": 8,
+        "description": "UW Market Tide - institutional options flow sentiment",
+        "timeframe": "intraday",
+    },
+    # --- Macro factors (total: 0.12) ---
     "excess_cape": {
-        "weight": 0.08,
+        "weight": 0.06,
         "staleness_hours": 168,
         "description": "Excess CAPE yield - valuation risk level",
+        "timeframe": "macro",
     },
     "savita": {
-        "weight": 0.04,
+        "weight": 0.06,
         "staleness_hours": 1080,
         "description": "BofA Sell Side Indicator - monthly contrarian sentiment",
+        "timeframe": "macro",
     },
 }
 
