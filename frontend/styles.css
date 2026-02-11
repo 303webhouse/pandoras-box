@@ -5019,6 +5019,21 @@ body.override-active-bearish .override-toggle[data-active="true"] {
     color: var(--accent-orange);
 }
 
+.api-status-item.key-missing {
+    background: rgba(255, 193, 7, 0.18);
+    color: #ffc107;
+}
+
+.btc-signal-error {
+    margin-top: 6px;
+    font-size: 10px;
+    color: #ffb74d;
+    background: rgba(255, 183, 77, 0.12);
+    padding: 6px 8px;
+    border-radius: 6px;
+    border: 1px solid rgba(255, 183, 77, 0.25);
+}
+
 /* Old source styling (kept for compatibility) */
 .btc-signal-source-old {
     font-size: 9px;
@@ -7036,9 +7051,60 @@ body[data-mode="crypto"] .crypto-shell {
 
 .crypto-main-content {
     display: grid;
-    grid-template-columns: 1fr 320px 280px;
+    grid-template-columns: 2fr 1fr 1fr;
     gap: 16px;
     margin-bottom: 16px;
+}
+
+.crypto-micro-bar {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.crypto-micro-card {
+    background: var(--card-bg);
+    border: 1px solid rgba(20, 184, 166, 0.18);
+    border-radius: 12px;
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-height: 70px;
+}
+
+.crypto-micro-card .micro-label {
+    font-size: 11px;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.crypto-micro-card .micro-value {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.crypto-micro-card .micro-sub {
+    font-size: 11px;
+    color: var(--text-secondary);
+}
+
+.micro-value.bullish,
+.micro-sub.bullish {
+    color: #00e676;
+}
+
+.micro-value.bearish,
+.micro-sub.bearish {
+    color: #f44336;
+}
+
+.micro-value.neutral,
+.micro-sub.neutral {
+    color: #78909c;
 }
 
 .crypto-chart-area {
@@ -7099,6 +7165,108 @@ body[data-mode="crypto"] .crypto-shell {
     font-size: 11px;
     color: var(--text-secondary);
     overflow-x: auto;
+}
+
+.crypto-orderflow-panel {
+    border-top: 1px solid var(--border-color);
+    padding: 12px;
+    background: rgba(6, 24, 35, 0.55);
+}
+
+.crypto-orderflow-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+}
+
+.crypto-orderflow-header h3 {
+    margin: 0;
+    font-size: 12px;
+    letter-spacing: 1.2px;
+    color: var(--text-primary);
+}
+
+.orderflow-updated {
+    font-size: 11px;
+    color: var(--text-secondary);
+}
+
+.crypto-orderflow-body {
+    display: grid;
+    gap: 10px;
+}
+
+.orderflow-metrics {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(120px, 1fr));
+    gap: 10px;
+}
+
+.orderflow-metric {
+    background: rgba(10, 20, 30, 0.7);
+    border: 1px solid rgba(20, 184, 166, 0.15);
+    border-radius: 10px;
+    padding: 8px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.orderflow-metric .metric-label {
+    font-size: 10px;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.orderflow-metric .metric-value {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.orderflow-chart {
+    min-height: 50px;
+}
+
+.orderflow-chart svg {
+    width: 100%;
+    height: 50px;
+}
+
+.orderflow-tape {
+    background: rgba(8, 14, 22, 0.6);
+    border: 1px solid rgba(20, 184, 166, 0.15);
+    border-radius: 10px;
+    padding: 8px 10px;
+    max-height: 150px;
+    overflow: auto;
+    font-size: 12px;
+}
+
+.orderflow-tape-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 4px 0;
+    border-bottom: 1px dashed rgba(255, 255, 255, 0.05);
+}
+
+.orderflow-tape-row:last-child {
+    border-bottom: none;
+}
+
+.orderflow-tape-row.buy {
+    color: #00e676;
+}
+
+.orderflow-tape-row.sell {
+    color: #f44336;
+}
+
+.auto-bias-toggle .direction-label.neutral {
+    color: var(--text-secondary);
 }
 
 .crypto-kl {
@@ -7201,6 +7369,21 @@ body[data-mode="crypto"] .crypto-shell {
 .crypto-badge.kodiak {
     background: rgba(244, 63, 94, 0.25);
     color: #fca5a5;
+}
+
+.crypto-badge.scout {
+    background: rgba(59, 130, 246, 0.25);
+    color: #93c5fd;
+}
+
+.crypto-badge.sniper {
+    background: rgba(16, 185, 129, 0.25);
+    color: #6ee7b7;
+}
+
+.crypto-badge.exhaustion {
+    background: rgba(245, 158, 11, 0.25);
+    color: #fcd34d;
 }
 
 .crypto-signal-score {

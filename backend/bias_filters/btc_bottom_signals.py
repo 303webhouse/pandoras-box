@@ -20,6 +20,7 @@ ALL 9 SIGNALS NOW AUTOMATED:
 import logging
 import asyncio
 import json
+import os
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timezone, timedelta
 from enum import Enum
@@ -552,6 +553,14 @@ async def get_all_signals() -> Dict[str, Any]:
             "binance": BINANCE_AVAILABLE,
             "yfinance": YFINANCE_AVAILABLE,
             "redis": REDIS_AVAILABLE
+        },
+        "api_keys": {
+            "coinalyze": bool(os.getenv("COINALYZE_API_KEY"))
+        },
+        "api_errors": {
+            signal_id: raw.get("error")
+            for signal_id, raw in _raw_data.items()
+            if isinstance(raw, dict) and raw.get("error")
         }
     }
 
