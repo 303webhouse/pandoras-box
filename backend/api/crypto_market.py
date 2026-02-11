@@ -24,6 +24,7 @@ DEFAULT_HEADERS = {
 
 _cache: Dict[str, Any] = {"timestamp": 0.0, "data": None}
 CACHE_TTL_SECONDS = 5
+_last_good: Dict[str, Any] = {}
 
 
 async def _fetch_json(client: httpx.AsyncClient, url: str, params: Optional[dict] = None) -> Dict[str, Any]:
@@ -82,6 +83,11 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
             perp_price = None
     else:
         errors.append(f"okx_perp_price: {data_map['okx_perp_price'].get('error')}")
+    if perp_price is None and _last_good.get("perp_price") is not None:
+        perp_price = _last_good["perp_price"]
+        errors.append("okx_perp_price: using cached fallback")
+    elif perp_price is not None:
+        _last_good["perp_price"] = perp_price
 
     # Binance spot price
     binance_spot = None
@@ -90,6 +96,11 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
         binance_spot = _safe_float(data_map["binance_spot_price"]["data"].get("price"))
     else:
         errors.append(f"binance_spot_price: {data_map['binance_spot_price'].get('error')}")
+    if binance_spot is None and _last_good.get("binance_spot") is not None:
+        binance_spot = _last_good["binance_spot"]
+        errors.append("binance_spot_price: using cached fallback")
+    elif binance_spot is not None:
+        _last_good["binance_spot"] = binance_spot
 
     # Funding rates
     funding_okx = None
@@ -106,6 +117,13 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
                 funding_okx_time = None
     else:
         errors.append(f"okx_funding: {data_map['okx_funding'].get('error')}")
+    if funding_okx is None and _last_good.get("funding_okx") is not None:
+        funding_okx = _last_good["funding_okx"]
+        funding_okx_time = _last_good.get("funding_okx_time")
+        errors.append("okx_funding: using cached fallback")
+    elif funding_okx is not None:
+        _last_good["funding_okx"] = funding_okx
+        _last_good["funding_okx_time"] = funding_okx_time
 
     funding_bybit = None
     funding_bybit_time = None
@@ -121,6 +139,12 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
                 funding_bybit_time = None
     else:
         errors.append(f"bybit_funding: {data_map['bybit_funding'].get('error')}")
+    if funding_bybit is None and _last_good.get("funding_bybit") is not None:
+        funding_bybit = _last_good["funding_bybit"]
+        funding_bybit_time = _last_good.get("funding_bybit_time")
+    elif funding_bybit is not None:
+        _last_good["funding_bybit"] = funding_bybit
+        _last_good["funding_bybit_time"] = funding_bybit_time
 
     # Coinbase spot
     coinbase_spot = None
@@ -131,6 +155,11 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
             coinbase_spot = None
     else:
         errors.append(f"coinbase_spot: {data_map['coinbase_spot'].get('error')}")
+    if coinbase_spot is None and _last_good.get("coinbase_spot") is not None:
+        coinbase_spot = _last_good["coinbase_spot"]
+        errors.append("coinbase_spot: using cached fallback")
+    elif coinbase_spot is not None:
+        _last_good["coinbase_spot"] = coinbase_spot
 
     # Trades -> CVD + order flow
     cvd_btc = 0.0
@@ -180,6 +209,26 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
             })
     else:
         errors.append(f"okx_trades: {data_map['okx_trades'].get('error')}")
+    if not cvd_series and _last_good.get("cvd"):
+        cached_cvd = _last_good["cvd"]
+        cvd_btc = cached_cvd.get("net_btc", 0.0)
+        cvd_usd = cached_cvd.get("net_usd", 0.0)
+        cvd_direction = cached_cvd.get("direction", "NEUTRAL")
+        taker_buy_qty = cached_cvd.get("taker_buy_qty", 0.0)
+        taker_sell_qty = cached_cvd.get("taker_sell_qty", 0.0)
+        cvd_series = cached_cvd.get("cvd_series", [])
+        trade_tape = _last_good.get("order_flow", [])
+        errors.append("okx_trades: using cached fallback")
+    elif cvd_series:
+        _last_good["cvd"] = {
+            "net_btc": round(cvd_btc, 4),
+            "net_usd": round(cvd_usd, 2),
+            "direction": "BULLISH" if cvd_usd > 0 else "BEARISH" if cvd_usd < 0 else "NEUTRAL",
+            "taker_buy_qty": round(taker_buy_qty, 4),
+            "taker_sell_qty": round(taker_sell_qty, 4),
+            "cvd_series": cvd_series[-120:],
+        }
+        _last_good["order_flow"] = trade_tape
 
     basis = None
     basis_pct = None

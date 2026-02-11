@@ -1628,40 +1628,38 @@ function initTimeframeToggles() {
 
 
 function checkPivotHealth() {
-    const indicator = document.getElementById('pivotHealth');
-    if (!indicator) return;
-    const dot = indicator.querySelector('.pivot-dot');
-    const textEl = indicator.querySelector('.pivot-text');
+    const indicators = Array.from(document.querySelectorAll('[data-pivot-health="true"]'));
+    if (!indicators.length) return;
+
+    const updateIndicators = (status, text) => {
+        indicators.forEach(indicator => {
+            const dot = indicator.querySelector('.pivot-dot');
+            const textEl = indicator.querySelector('.pivot-text');
+            indicator.classList.remove('online', 'offline');
+            if (status) indicator.classList.add(status);
+            if (dot) dot.textContent = 'o';
+            if (textEl) textEl.textContent = text;
+        });
+    };
 
     fetch(`${API_URL}/bias/health`)
         .then(resp => resp.ok ? resp.json() : null)
         .then(data => {
             if (!data || !data.last_heartbeat) {
-                indicator.classList.remove('online', 'offline');
-                if (dot) dot.textContent = 'o';
-                if (textEl) textEl.textContent = 'Pivot unknown';
+                updateIndicators(null, 'Pivot unknown');
                 return;
             }
 
             const lastHeartbeat = new Date(data.last_heartbeat);
             const minutesAgo = (Date.now() - lastHeartbeat.getTime()) / 60000;
-
             if (minutesAgo < 30) {
-                indicator.classList.add('online');
-                indicator.classList.remove('offline');
-                if (dot) dot.textContent = 'o';
-                if (textEl) textEl.textContent = 'Pivot live';
+                updateIndicators('online', 'Pivot live');
             } else {
-                indicator.classList.add('offline');
-                indicator.classList.remove('online');
-                if (dot) dot.textContent = 'o';
-                if (textEl) textEl.textContent = `Pivot offline (${Math.round(minutesAgo)}m)`;
+                updateIndicators('offline', `Pivot offline (${Math.round(minutesAgo)}m)`);
             }
         })
         .catch(() => {
-            indicator.classList.remove('online', 'offline');
-            if (dot) dot.textContent = 'o';
-            if (textEl) textEl.textContent = 'Pivot unknown';
+            updateIndicators(null, 'Pivot unknown');
         });
 }
 
@@ -3633,11 +3631,11 @@ function renderCryptoMarketData() {
     const funding = cryptoMarketData.funding || {};
     const cvd = cryptoMarketData.cvd || {};
 
-    const spot = prices.coinbase_spot;
+    const spot = prices.coinbase_spot ?? prices.binance_spot ?? null;
     const perps = prices.perps || {};
     const perp = perps.okx ?? perps.binance_perp ?? null;
-    const basis = prices.basis;
-    const basisPct = prices.basis_pct;
+    const basis = prices.basis ?? (spot !== null && perp !== null ? spot - perp : null);
+    const basisPct = prices.basis_pct ?? (basis !== null && perp ? (basis / perp) * 100 : null);
     const binanceSpot = prices.binance_spot;
     const binanceSpotUpdated = prices.binance_spot_ts;
     const perpSpread = perps.spread;
@@ -3657,6 +3655,7 @@ function renderCryptoMarketData() {
     const cvdValueEl = document.getElementById('cryptoCvdValue');
     const cvdFlowEl = document.getElementById('cryptoCvdFlow');
     const coinbaseUpdatedEl = document.getElementById('cryptoCoinbaseUpdated');
+    const snapshotTimestamp = cryptoMarketData.timestamp;
 
     if (spotEl) spotEl.textContent = formatUsdValue(spot);
     if (binanceSpotEl) binanceSpotEl.textContent = formatUsdValue(binanceSpot);
@@ -3701,7 +3700,10 @@ function renderCryptoMarketData() {
         fundingBinanceEl.className = `micro-value ${funding.okx?.rate > 0 ? 'bearish' : funding.okx?.rate < 0 ? 'bullish' : 'neutral'}`;
     }
     if (fundingBybitEl) {
-        fundingBybitEl.textContent = formatFundingRate(funding.bybit?.rate, 'Bybit');
+        const bybitText = funding.bybit?.rate === null || funding.bybit?.rate === undefined
+            ? 'Bybit: unavailable'
+            : formatFundingRate(funding.bybit?.rate, 'Bybit');
+        fundingBybitEl.textContent = bybitText;
         fundingBybitEl.className = `micro-sub ${funding.bybit?.rate > 0 ? 'bearish' : funding.bybit?.rate < 0 ? 'bullish' : 'neutral'}`;
     }
 
@@ -3717,7 +3719,8 @@ function renderCryptoMarketData() {
     }
 
     if (coinbaseUpdatedEl) {
-        coinbaseUpdatedEl.textContent = new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+        const ts = snapshotTimestamp ? new Date(snapshotTimestamp) : new Date();
+        coinbaseUpdatedEl.textContent = ts.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
     }
 
     renderOrderflow(cvd, cryptoMarketData.order_flow || []);
@@ -3732,8 +3735,8 @@ function renderOrderflow(cvd, tape) {
     const updatedEl = document.getElementById('cryptoOrderflowUpdated');
     const sparklineEl = document.getElementById('cryptoCvdSparkline');
 
-    if (takerBuyEl) takerBuyEl.textContent = cvd?.taker_buy_qty ? `${cvd.taker_buy_qty.toFixed(2)} BTC` : '--';
-    if (takerSellEl) takerSellEl.textContent = cvd?.taker_sell_qty ? `${cvd.taker_sell_qty.toFixed(2)} BTC` : '--';
+    if (takerBuyEl) takerBuyEl.textContent = (cvd?.taker_buy_qty !== null && cvd?.taker_buy_qty !== undefined) ? `${Number(cvd.taker_buy_qty).toFixed(2)} BTC` : '--';
+    if (takerSellEl) takerSellEl.textContent = (cvd?.taker_sell_qty !== null && cvd?.taker_sell_qty !== undefined) ? `${Number(cvd.taker_sell_qty).toFixed(2)} BTC` : '--';
     if (cvdTrendEl) {
         const dir = cvd?.direction || 'NEUTRAL';
         cvdTrendEl.textContent = dir;
