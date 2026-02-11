@@ -3599,17 +3599,26 @@ async function loadCryptoMarketData() {
     const spotEl = document.getElementById('cryptoCoinbaseSpot');
     if (!spotEl) return;
 
+    let data = null;
     try {
         const response = await fetch(`${API_URL}/crypto/market`);
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}`);
         }
-        const data = await response.json();
-        cryptoMarketData = data;
-        renderCryptoMarketData();
+        data = await response.json();
     } catch (error) {
         console.error('Error loading crypto market data:', error);
         renderCryptoMarketError();
+        return;
+    }
+
+    cryptoMarketData = data;
+
+    try {
+        renderCryptoMarketData();
+    } catch (error) {
+        // Keep last good values on screen if a render-only issue occurs.
+        console.error('Error rendering crypto market data:', error);
     }
 }
 
@@ -3725,6 +3734,30 @@ function renderCryptoMarketData() {
 
     renderOrderflow(cvd, cryptoMarketData.order_flow || []);
     updateCryptoSpotTicker();
+}
+
+function updateCryptoSpotTicker() {
+    const tickerEl = document.getElementById('cryptoSpotTicker');
+    if (!tickerEl) return;
+
+    const prices = cryptoMarketData?.prices || {};
+    const spot = prices.coinbase_spot ?? prices.binance_spot ?? null;
+    const sma9 = prices.sma9 ?? null;
+
+    if (spot === null || spot === undefined || Number.isNaN(Number(spot))) {
+        tickerEl.textContent = '--';
+        tickerEl.classList.remove('bullish', 'bearish');
+        return;
+    }
+
+    tickerEl.textContent = `BTC ${formatUsdValue(spot)}`;
+    tickerEl.classList.remove('bullish', 'bearish');
+
+    if (sma9 !== null && sma9 !== undefined && !Number.isNaN(Number(sma9))) {
+        tickerEl.classList.add(Number(spot) >= Number(sma9) ? 'bullish' : 'bearish');
+    } else if (prices.basis_pct !== null && prices.basis_pct !== undefined && !Number.isNaN(Number(prices.basis_pct))) {
+        tickerEl.classList.add(Number(prices.basis_pct) >= 0 ? 'bullish' : 'bearish');
+    }
 }
 
 function renderOrderflow(cvd, tape) {
