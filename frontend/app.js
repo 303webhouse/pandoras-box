@@ -918,12 +918,29 @@ let cryptoTvWidget = null;
 let cryptoCurrentSymbol = 'BTCUSD';
 
 function initCryptoScalper() {
+    // Top coin chips
+    const topCoins = document.getElementById('cryptoTopCoins');
+    if (topCoins) {
+        topCoins.querySelectorAll('.coin-chip').forEach(chip => {
+            chip.addEventListener('click', () => {
+                topCoins.querySelectorAll('.coin-chip').forEach(c => c.classList.remove('active'));
+                chip.addEventListener('click', () => {});
+                chip.classList.add('active');
+                const sym = chip.dataset.symbol;
+                if (sym && sym !== cryptoCurrentSymbol) {
+                    cryptoCurrentSymbol = sym;
+                    initCryptoChart();
+                }
+            });
+        });
+    }
+
     const sortSelect = document.getElementById('cryptoSignalSort');
     if (sortSelect) {
         sortSelect.addEventListener('change', renderCryptoSignals);
     }
 
-    // Chart tab switching
+    // Chart tab switching (legacy tabs) + chips already handle above
     const chartTabs = document.getElementById('cryptoChartTabs');
     if (chartTabs) {
         chartTabs.querySelectorAll('.chart-tab').forEach(tab => {
@@ -3642,12 +3659,21 @@ function renderCryptoMarketData() {
     const perp = prices.binance_perp;
     const basis = prices.basis;
     const basisPct = prices.basis_pct;
+    const binanceSpot = prices.binance_spot;
+    const binanceSpotUpdated = prices.binance_spot_ts;
+    const perps = prices.perps || {};
+    const perpSpread = perps.spread;
+    const perpNote = perps.note;
 
     const spotEl = document.getElementById('cryptoCoinbaseSpot');
     const perpEl = document.getElementById('cryptoBinancePerp');
     const basisEl = document.getElementById('cryptoBasis');
     const spotLeadEl = document.getElementById('cryptoSpotLead');
     const spotLeadNoteEl = document.getElementById('cryptoSpotLeadNote');
+    const binanceSpotEl = document.getElementById('cryptoBinanceSpot');
+    const binanceSpotUpdatedEl = document.getElementById('cryptoBinanceSpotUpdated');
+    const perpSpreadEl = document.getElementById('cryptoPerpSpread');
+    const perpSpreadNoteEl = document.getElementById('cryptoPerpSpreadNote');
     const fundingBinanceEl = document.getElementById('cryptoFundingBinance');
     const fundingBybitEl = document.getElementById('cryptoFundingBybit');
     const cvdValueEl = document.getElementById('cryptoCvdValue');
@@ -3655,6 +3681,8 @@ function renderCryptoMarketData() {
     const coinbaseUpdatedEl = document.getElementById('cryptoCoinbaseUpdated');
 
     if (spotEl) spotEl.textContent = formatUsdValue(spot);
+    if (binanceSpotEl) binanceSpotEl.textContent = formatUsdValue(binanceSpot);
+    if (binanceSpotUpdatedEl) binanceSpotUpdatedEl.textContent = binanceSpotUpdated ? new Date(binanceSpotUpdated).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : '--';
     if (perpEl) perpEl.textContent = formatUsdValue(perp);
 
     if (basisEl) {
@@ -3663,6 +3691,15 @@ function renderCryptoMarketData() {
             : 'Basis: --';
         basisEl.textContent = basisText;
         basisEl.className = `micro-sub ${basisPct > 0 ? 'bullish' : basisPct < 0 ? 'bearish' : 'neutral'}`;
+    }
+
+    if (perpSpreadEl) {
+        perpSpreadEl.textContent = perpSpread !== null && perpSpread !== undefined ? formatUsdValue(perpSpread) : '--';
+        perpSpreadEl.className = `micro-value ${perpSpread > 0 ? 'bearish' : perpSpread < 0 ? 'bullish' : 'neutral'}`;
+    }
+    if (perpSpreadNoteEl) {
+        perpSpreadNoteEl.textContent = perpNote || 'Spread spot vs perp';
+        perpSpreadNoteEl.className = `micro-sub ${perpSpread > 0 ? 'bearish' : perpSpread < 0 ? 'bullish' : 'neutral'}`;
     }
 
     if (spotLeadEl) {
