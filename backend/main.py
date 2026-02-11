@@ -140,6 +140,20 @@ async def get_bias_data(timeframe: str):
     if timeframe_lower not in {"daily", "weekly", "monthly", "cyclical"}:
         raise HTTPException(status_code=404, detail="Unknown bias timeframe")
 
+    if timeframe_lower in {"daily", "weekly", "cyclical"}:
+        try:
+            from api.bias_scheduler import get_timeframe_bias
+            scheduler_result = await get_timeframe_bias(timeframe_lower)
+            if (
+                isinstance(scheduler_result, dict)
+                and scheduler_result.get("status") == "success"
+                and scheduler_result.get("data")
+            ):
+                return scheduler_result["data"]
+        except Exception:
+            # Fall back to legacy Redis cache below.
+            pass
+
     from database.redis_client import get_bias
     
     bias = await get_bias(timeframe.upper())
