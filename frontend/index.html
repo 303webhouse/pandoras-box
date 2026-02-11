@@ -1276,32 +1276,59 @@
                 </div>
             </section>
 
-            <!-- Row 1.5: Microstructure (Spot, Perp, Funding, CVD) -->
-            <section class="crypto-micro-bar" id="cryptoMicroBar">
-                <div class="crypto-micro-card">
-                    <span class="micro-label">Coinbase Spot</span>
-                    <span class="micro-value" id="cryptoCoinbaseSpot">--</span>
-                    <span class="micro-sub" id="cryptoCoinbaseUpdated">--</span>
+            <!-- Row 1.5: Microstructure + BTC Bottom Signals (two-column) -->
+            <section class="crypto-insights-row">
+                <div class="crypto-insights-left">
+                    <div class="crypto-micro-bar" id="cryptoMicroBar">
+                        <div class="crypto-micro-card">
+                            <span class="micro-label">Coinbase Spot</span>
+                            <span class="micro-value" id="cryptoCoinbaseSpot">--</span>
+                            <span class="micro-sub" id="cryptoCoinbaseUpdated">--</span>
+                        </div>
+                        <div class="crypto-micro-card">
+                            <span class="micro-label">Binance Perp</span>
+                            <span class="micro-value" id="cryptoBinancePerp">--</span>
+                            <span class="micro-sub" id="cryptoBasis">Basis: --</span>
+                        </div>
+                        <div class="crypto-micro-card">
+                            <span class="micro-label">Funding (Binance / Bybit)</span>
+                            <span class="micro-value" id="cryptoFundingBinance">--</span>
+                            <span class="micro-sub" id="cryptoFundingBybit">--</span>
+                        </div>
+                        <div class="crypto-micro-card">
+                            <span class="micro-label">CVD (Binance Perp)</span>
+                            <span class="micro-value" id="cryptoCvdValue">--</span>
+                            <span class="micro-sub" id="cryptoCvdFlow">--</span>
+                        </div>
+                        <div class="crypto-micro-card">
+                            <span class="micro-label">Spot vs Perp</span>
+                            <span class="micro-value" id="cryptoSpotLead">--</span>
+                            <span class="micro-sub" id="cryptoSpotLeadNote">--</span>
+                        </div>
+                    </div>
                 </div>
-                <div class="crypto-micro-card">
-                    <span class="micro-label">Binance Perp</span>
-                    <span class="micro-value" id="cryptoBinancePerp">--</span>
-                    <span class="micro-sub" id="cryptoBasis">Basis: --</span>
-                </div>
-                <div class="crypto-micro-card">
-                    <span class="micro-label">Funding (Binance / Bybit)</span>
-                    <span class="micro-value" id="cryptoFundingBinance">--</span>
-                    <span class="micro-sub" id="cryptoFundingBybit">--</span>
-                </div>
-                <div class="crypto-micro-card">
-                    <span class="micro-label">CVD (Binance Perp)</span>
-                    <span class="micro-value" id="cryptoCvdValue">--</span>
-                    <span class="micro-sub" id="cryptoCvdFlow">--</span>
-                </div>
-                <div class="crypto-micro-card">
-                    <span class="micro-label">Spot vs Perp</span>
-                    <span class="micro-value" id="cryptoSpotLead">--</span>
-                    <span class="micro-sub" id="cryptoSpotLeadNote">--</span>
+
+                <div class="crypto-insights-right">
+                    <div class="crypto-btc-signals-panel">
+                        <div class="btc-signals-header">
+                            <h2>BTC BOTTOM SIGNALS</h2>
+                            <div class="btc-signals-controls">
+                                <button class="btc-btn btc-refresh-btn" data-label="Refresh">Refresh</button>
+                                <button class="btc-btn secondary btc-reset-btn">Reset</button>
+                            </div>
+                        </div>
+                        <div class="btc-confluence-summary" id="cryptoBtcConfluenceSummary">
+                            <div class="confluence-meter">
+                                <span class="confluence-count">--</span>
+                                <span class="confluence-label">Signals Firing</span>
+                            </div>
+                            <div class="confluence-verdict">Loading...</div>
+                        </div>
+                        <div class="btc-api-status" id="cryptoBtcApiStatus"></div>
+                        <div class="btc-signals-grid" id="cryptoBtcSignalsGrid">
+                            <p class="empty-state">Loading BTC signals...</p>
+                        </div>
+                    </div>
                 </div>
             </section>
 
