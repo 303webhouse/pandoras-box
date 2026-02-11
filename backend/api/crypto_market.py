@@ -11,10 +11,16 @@ import httpx
 
 router = APIRouter(prefix="/crypto", tags=["crypto-market"])
 
-BINANCE_SPOT_BASE = "https://api.binance.com"
-BINANCE_FUTURES_BASE = "https://fapi.binance.com"
-BYBIT_BASE = "https://api.bybit.com"
+BINANCE_SPOT_BASE = "https://data-api.binance.vision"  # geo-friendly mirror
+OKX_BASE = "https://www.okx.com"
+BYBIT_BASE = "https://api.bybit.com"  # kept for potential future use
 COINBASE_BASE = "https://api.coinbase.com"
+
+DEFAULT_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (compatible; PandoraBot/1.0; +https://pandoras-box)",
+    "Accept": "application/json,text/*;q=0.9",
+    "Accept-Language": "en-US,en;q=0.8",
+}
 
 _cache: Dict[str, Any] = {"timestamp": 0.0, "data": None}
 CACHE_TTL_SECONDS = 5
@@ -22,7 +28,7 @@ CACHE_TTL_SECONDS = 5
 
 async def _fetch_json(client: httpx.AsyncClient, url: str, params: Optional[dict] = None) -> Dict[str, Any]:
     try:
-        resp = await client.get(url, params=params)
+        resp = await client.get(url, params=params, headers=DEFAULT_HEADERS, follow_redirects=True)
         resp.raise_for_status()
         return {"ok": True, "data": resp.json()}
     except Exception as exc:
@@ -44,13 +50,21 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
     if _cache["data"] and (now - _cache["timestamp"]) < CACHE_TTL_SECONDS:
         return _cache["data"]
 
-    async with httpx.AsyncClient(timeout=8.0) as client:
+    async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
         tasks = {
-            "binance_perp_price": _fetch_json(client, f"{BINANCE_FUTURES_BASE}/fapi/v1/ticker/price", {"symbol": symbol}),
-            "binance_funding": _fetch_json(client, f"{BINANCE_FUTURES_BASE}/fapi/v1/fundingRate", {"symbol": symbol, "limit": 1}),
-            "bybit_funding": _fetch_json(client, f"{BYBIT_BASE}/v5/market/funding/history", {"category": "linear", "symbol": symbol, "limit": 1}),
+            # Spot prices
+            "binance_spot_price": _fetch_json(client, f"{BINANCE_SPOT_BASE}/api/v3/ticker/price", {"symbol": symbol}),
             "coinbase_spot": _fetch_json(client, f"{COINBASE_BASE}/v2/prices/BTC-USD/spot"),
-            "agg_trades": _fetch_json(client, f"{BINANCE_FUTURES_BASE}/fapi/v1/aggTrades", {"symbol": symbol, "limit": limit}),
+
+            # Perp prices & funding via OKX (not geo-blocked)
+            "okx_perp_price": _fetch_json(client, f"{OKX_BASE}/api/v5/market/ticker", {"instId": "BTC-USDT-SWAP"}),
+            "okx_funding": _fetch_json(client, f"{OKX_BASE}/api/v5/public/funding-rate", {"instId": "BTC-USDT-SWAP"}),
+
+            # Bybit funding retained; tolerate failures
+            "bybit_funding": _fetch_json(client, f"{BYBIT_BASE}/v5/market/funding/history", {"category": "linear", "symbol": symbol, "limit": 1}),
+
+            # Order flow / trades from OKX swap
+            "okx_trades": _fetch_json(client, f"{OKX_BASE}/api/v5/market/trades", {"instId": "BTC-USDT-SWAP", "limit": limit}),
         }
 
         results = await asyncio.gather(*tasks.values())
@@ -58,25 +72,40 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
 
     errors: List[str] = []
 
-    # Binance perp price
+    # OKX perp price
     perp_price = None
-    if data_map["binance_perp_price"]["ok"]:
-        perp_price = _safe_float(data_map["binance_perp_price"]["data"].get("price"))
+    if data_map["okx_perp_price"]["ok"]:
+        try:
+            row = data_map["okx_perp_price"]["data"].get("data", [])[0]
+            perp_price = _safe_float(row.get("last"))
+        except Exception:
+            perp_price = None
     else:
-        errors.append(f"binance_perp_price: {data_map['binance_perp_price'].get('error')}")
+        errors.append(f"okx_perp_price: {data_map['okx_perp_price'].get('error')}")
+
+    # Binance spot price
+    binance_spot = None
+    binance_spot_ts = datetime.now(timezone.utc).isoformat()
+    if data_map["binance_spot_price"]["ok"]:
+        binance_spot = _safe_float(data_map["binance_spot_price"]["data"].get("price"))
+    else:
+        errors.append(f"binance_spot_price: {data_map['binance_spot_price'].get('error')}")
 
     # Funding rates
-    funding_binance = None
-    funding_binance_time = None
-    if data_map["binance_funding"]["ok"] and data_map["binance_funding"]["data"]:
-        item = data_map["binance_funding"]["data"][0]
-        funding_binance = _safe_float(item.get("fundingRate"))
-        try:
-            funding_binance_time = datetime.fromtimestamp(int(item.get("fundingTime", 0)) / 1000, timezone.utc).isoformat()
-        except Exception:
-            funding_binance_time = None
+    funding_okx = None
+    funding_okx_time = None
+    if data_map["okx_funding"]["ok"]:
+        fund_data = data_map["okx_funding"].get("data")
+        rows = fund_data.get("data", []) if isinstance(fund_data, dict) else []
+        if rows:
+            row = rows[0]
+            funding_okx = _safe_float(row.get("fundingRate"))
+            try:
+                funding_okx_time = datetime.fromtimestamp(int(row.get("fundingTime", 0)) / 1000, timezone.utc).isoformat()
+            except Exception:
+                funding_okx_time = None
     else:
-        errors.append(f"binance_funding: {data_map['binance_funding'].get('error')}")
+        errors.append(f"okx_funding: {data_map['okx_funding'].get('error')}")
 
     funding_bybit = None
     funding_bybit_time = None
@@ -103,7 +132,7 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
     else:
         errors.append(f"coinbase_spot: {data_map['coinbase_spot'].get('error')}")
 
-    # Agg trades -> CVD + order flow
+    # Trades -> CVD + order flow
     cvd_btc = 0.0
     cvd_usd = 0.0
     taker_buy_qty = 0.0
@@ -111,15 +140,16 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
     trade_tape: List[Dict[str, Any]] = []
     cvd_series: List[float] = []
 
-    if data_map["agg_trades"]["ok"]:
-        trades = data_map["agg_trades"]["data"]
+    if data_map["okx_trades"]["ok"]:
+        trades_data = data_map["okx_trades"].get("data")
+        trades = trades_data.get("data", []) if isinstance(trades_data, dict) else []
         cumulative = 0.0
         for trade in trades:
-            price = _safe_float(trade.get("p"))
-            qty = _safe_float(trade.get("q"))
+            price = _safe_float(trade.get("px"))
+            qty = _safe_float(trade.get("sz"))
             if price is None or qty is None:
                 continue
-            is_sell = bool(trade.get("m"))  # buyer is maker => sell aggressor
+            is_sell = str(trade.get("side", "")).lower() == "sell"
             sign = -1 if is_sell else 1
             notional = price * qty
             cvd_btc += sign * qty
@@ -131,14 +161,13 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
             else:
                 taker_buy_qty += qty
 
-        # Build trade tape from last 15 trades
         for trade in trades[-15:]:
-            price = _safe_float(trade.get("p"))
-            qty = _safe_float(trade.get("q"))
+            price = _safe_float(trade.get("px"))
+            qty = _safe_float(trade.get("sz"))
             if price is None or qty is None:
                 continue
-            is_sell = bool(trade.get("m"))
-            ts = trade.get("T")
+            is_sell = str(trade.get("side", "")).lower() == "sell"
+            ts = trade.get("ts")
             try:
                 time_iso = datetime.fromtimestamp(int(ts) / 1000, timezone.utc).isoformat() if ts else None
             except Exception:
@@ -150,7 +179,7 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
                 "timestamp": time_iso
             })
     else:
-        errors.append(f"agg_trades: {data_map['agg_trades'].get('error')}")
+        errors.append(f"okx_trades: {data_map['okx_trades'].get('error')}")
 
     basis = None
     basis_pct = None
@@ -158,6 +187,14 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
         basis = coinbase_spot - perp_price
         if perp_price:
             basis_pct = basis / perp_price * 100
+
+    perp_spread = None
+    if perp_price is not None and binance_spot is not None:
+        perp_spread = perp_price - binance_spot
+
+    spot_spread = None
+    if coinbase_spot is not None and binance_spot is not None:
+        spot_spread = coinbase_spot - binance_spot
 
     cvd_direction = "NEUTRAL"
     if cvd_usd > 0:
@@ -170,12 +207,20 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "prices": {
             "coinbase_spot": coinbase_spot,
-            "binance_perp": perp_price,
+            "binance_spot": binance_spot,
+            "binance_spot_ts": binance_spot_ts,
+            "perps": {
+                "okx": perp_price,
+                "bybit": None,  # unavailable due to geo restrictions
+                "spread": perp_spread,
+                "note": "OKX swap used as perp proxy; spread = OKX perp - Binance spot"
+            },
             "basis": basis,
-            "basis_pct": basis_pct
+            "basis_pct": basis_pct,
+            "spot_spread": spot_spread
         },
         "funding": {
-            "binance": {"rate": funding_binance, "timestamp": funding_binance_time},
+            "okx": {"rate": funding_okx, "timestamp": funding_okx_time},
             "bybit": {"rate": funding_bybit, "timestamp": funding_bybit_time}
         },
         "cvd": {
