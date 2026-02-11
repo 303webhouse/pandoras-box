@@ -3627,7 +3627,6 @@ function renderCryptoMarketError() {
     });
 }
 
-$inject
 function renderCryptoMarketData() {
     if (!cryptoMarketData) return;
     const prices = cryptoMarketData.prices || {};
@@ -3635,7 +3634,8 @@ function renderCryptoMarketData() {
     const cvd = cryptoMarketData.cvd || {};
 
     const spot = prices.coinbase_spot;
-    const perps = prices.perps || {};\n    const perp = perps.okx ?? perps.binance_perp ?? null;
+    const perps = prices.perps || {};
+    const perp = perps.okx ?? perps.binance_perp ?? null;
     const basis = prices.basis;
     const basisPct = prices.basis_pct;
     const binanceSpot = prices.binance_spot;
@@ -3720,7 +3720,8 @@ function renderCryptoMarketData() {
         coinbaseUpdatedEl.textContent = new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
     }
 
-    renderOrderflow(cvd, cryptoMarketData.order_flow || []);\n    updateCryptoSpotTicker();
+    renderOrderflow(cvd, cryptoMarketData.order_flow || []);
+    updateCryptoSpotTicker();
 }
 
 function renderOrderflow(cvd, tape) {
@@ -8925,6 +8926,8 @@ window.closeOptionsPosition = closeOptionsPosition;
 document.addEventListener('DOMContentLoaded', () => {
     setTimeout(initOptionsTab, 1600);
 });
+
+
 
 
 
