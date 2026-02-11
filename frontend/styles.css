@@ -8,9 +8,9 @@
     --text-secondary: #94a3b8;
     --accent-teal: #14b8a6;
     --accent-lime: #7CFF6B;
-    --accent-orange: #FF6B35;
+    --accent-orange: #e5370e;
     --accent-green-dark: #4CAF50;
-    --accent-orange-dark: #FF8C42;
+    --accent-orange-dark: #e5370e;
     --accent-red: #e5370e;
     --bearish-color: #e5370e;
 }
@@ -9389,7 +9389,7 @@ body[data-mode="crypto"] .crypto-shell {
 .bias-divider {color:#3d4b74;font-weight:700;}
 .crypto-spot-ticker {font-family:"Orbit",sans-serif;font-size:24px;font-weight:700;letter-spacing:0.6px;min-width:140px;text-align:center;}
 .crypto-spot-ticker.bullish {color:#3bd671;}
-.crypto-spot-ticker.bearish {color:#ff8c42;}
+.crypto-spot-ticker.bearish {color:#e5370e;}
 .crypto-bias-meta {display:flex;align-items:center;gap:10px;}
 
 /* Insights row full width */

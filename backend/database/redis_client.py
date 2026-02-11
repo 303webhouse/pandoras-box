@@ -101,9 +101,22 @@ async def get_active_signals() -> list:
     client = await get_redis_client()
     signals = []
     async for key in client.scan_iter("signal:*", count=100):
+        # Skip per-ticker active counters (signal:active:{TICKER}).
+        if key.startswith("signal:active:"):
+            continue
+
         data = await client.get(key)
-        if data:
-            signals.append(json.loads(data))
+        if not data:
+            continue
+
+        try:
+            decoded = json.loads(data)
+        except json.JSONDecodeError:
+            continue
+
+        # Only signal payload objects belong in this feed.
+        if isinstance(decoded, dict):
+            signals.append(decoded)
     
     return signals
 
