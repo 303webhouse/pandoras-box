@@ -1,4 +1,4 @@
-"""
+﻿"""
 Automated Bias Scheduler
 
 Handles automatic refresh of all bias indicators:
@@ -6,7 +6,7 @@ Handles automatic refresh of all bias indicators:
 - Weekly Bias: Refreshes at 9:45 AM ET every Monday (6-factor model)
 - Cyclical Bias: Long-term macro indicators (200 SMA, yield curve, Sahm Rule, etc.)
 
-Hierarchical system: Cyclical → Weekly → Daily (higher timeframes modify lower)
+Hierarchical system: Cyclical â†’ Weekly â†’ Daily (higher timeframes modify lower)
 
 Stores historical values to show trends (vs previous period).
 """
@@ -479,11 +479,11 @@ def _get_trend_description(trend: TrendDirection, previous: str, current: str) -
     if trend == TrendDirection.NEW:
         return "First reading"
     elif trend == TrendDirection.IMPROVING:
-        return f"↑ More bullish (was {previous})"
+        return f"â†‘ More bullish (was {previous})"
     elif trend == TrendDirection.DECLINING:
-        return f"↓ More bearish (was {previous})"
+        return f"â†“ More bearish (was {previous})"
     else:
-        return f"→ Unchanged from {previous}"
+        return f"â†’ Unchanged from {previous}"
 
 
 def calculate_shift_status(baseline_vote: int, current_vote: int) -> Dict[str, Any]:
@@ -614,7 +614,7 @@ async def refresh_daily_bias() -> Dict[str, Any]:
     
     All factors calculated from price data - no external feeds needed.
     """
-    logger.info("📊 Refreshing Daily Bias (6-Factor Calculable Model)...")
+    logger.info("ðŸ“Š Refreshing Daily Bias (6-Factor Calculable Model)...")
     
     factor_votes = []  # List of (name, vote, details)
     
@@ -651,7 +651,7 @@ async def refresh_daily_bias() -> Dict[str, Any]:
                 "rsi": round(rsi, 1) if rsi else 50,
                 "signal": rsi_signal
             }))
-            logger.info(f"  📊 SPY RSI: {rsi:.1f} - {rsi_signal} (vote: {rsi_vote:+d})")
+            logger.info(f"  ðŸ“Š SPY RSI: {rsi:.1f} - {rsi_signal} (vote: {rsi_vote:+d})")
             
         except Exception as e:
             logger.warning(f"Error in SPY RSI factor: {e}")
@@ -745,7 +745,7 @@ async def refresh_daily_bias() -> Dict[str, Any]:
                 "diff": round(diff, 2),
                 "signal": tech_signal
             }))
-            logger.info(f"  💻 Tech Leadership: QQQ {qqq_change:+.2f}% vs SPY {spy_change:+.2f}% - {tech_signal} (vote: {tech_vote:+d})")
+            logger.info(f"  ðŸ’» Tech Leadership: QQQ {qqq_change:+.2f}% vs SPY {spy_change:+.2f}% - {tech_signal} (vote: {tech_vote:+d})")
             
         except Exception as e:
             logger.warning(f"Error in Tech Leadership factor: {e}")
@@ -785,7 +785,7 @@ async def refresh_daily_bias() -> Dict[str, Any]:
                 "diff": round(diff, 2),
                 "signal": risk_signal
             }))
-            logger.info(f"  🏃 Small Cap Risk: IWM {iwm_change:+.2f}% vs SPY {spy_change:+.2f}% - {risk_signal} (vote: {risk_vote:+d})")
+            logger.info(f"  ðŸƒ Small Cap Risk: IWM {iwm_change:+.2f}% vs SPY {spy_change:+.2f}% - {risk_signal} (vote: {risk_vote:+d})")
             
         except Exception as e:
             logger.warning(f"Error in Small Cap Risk factor: {e}")
@@ -812,7 +812,7 @@ async def refresh_daily_bias() -> Dict[str, Any]:
                 "signal": spy_signal,
                 "ema20": round(ema20, 2) if ema20 else 0
             }))
-            logger.info(f"  📈 SPY Trend: {spy_signal} (vote: {trend_vote:+d})")
+            logger.info(f"  ðŸ“ˆ SPY Trend: {spy_signal} (vote: {trend_vote:+d})")
             
         except Exception as e:
             logger.warning(f"Error in SPY Trend factor: {e}")
@@ -852,7 +852,7 @@ async def refresh_daily_bias() -> Dict[str, Any]:
                 "diff": round(diff, 2),
                 "signal": breadth_signal
             }))
-            logger.info(f"  📊 Breadth: RSP {rsp_change:+.2f}% vs SPY {spy_change:+.2f}% - {breadth_signal} (vote: {breadth_vote:+d})")
+            logger.info(f"  ðŸ“Š Breadth: RSP {rsp_change:+.2f}% vs SPY {spy_change:+.2f}% - {breadth_signal} (vote: {breadth_vote:+d})")
             
         except Exception as e:
             logger.warning(f"Error in SPY vs RSP factor: {e}")
@@ -888,7 +888,11 @@ async def refresh_daily_bias() -> Dict[str, Any]:
                 "bias": tick_bias,
                 "signal": tick_signal
             }))
-            logger.info(f"  📊 TICK Breadth: High {tick_high:+d} / Low {tick_low:+d} - {tick_signal} (vote: {tick_vote:+d})")
+            tick_high_disp = int(round(float(tick_high or 0)))
+            tick_low_disp = int(round(float(tick_low or 0)))
+            logger.info(
+                f"  TICK Breadth: High {tick_high_disp:+d} / Low {tick_low_disp:+d} - {tick_signal} (vote: {tick_vote:+d})"
+            )
             
         except Exception as e:
             logger.warning(f"Error in TICK Breadth factor: {e}")
@@ -898,7 +902,7 @@ async def refresh_daily_bias() -> Dict[str, Any]:
         # CALCULATE TOTAL VOTE AND DETERMINE BIAS
         # =====================================================================
         total_vote = sum(vote for _, vote, _ in factor_votes)
-        max_possible = 14  # 7 factors × 2 max each
+        max_possible = 14  # 7 factors Ã— 2 max each
         
         # Thresholds for 7 factors (6-level system, no neutral)
         # Adjusted for 14 max possible (was 12)
@@ -946,7 +950,7 @@ async def refresh_daily_bias() -> Dict[str, Any]:
                     if current_value > cap_value:
                         new_level = bias_cap
                         circuit_breaker_applied = True
-                        logger.warning(f"⚠️ Circuit breaker CAP applied: {original_level} -> {new_level}")
+                        logger.warning(f"âš ï¸ Circuit breaker CAP applied: {original_level} -> {new_level}")
 
                 # Apply bias floor (minimum bearish level)
                 if bias_floor:
@@ -956,7 +960,7 @@ async def refresh_daily_bias() -> Dict[str, Any]:
                     if current_value > floor_value:
                         new_level = bias_floor
                         circuit_breaker_applied = True
-                        logger.warning(f"⚠️ Circuit breaker FLOOR applied: {original_level} -> {new_level}")
+                        logger.warning(f"âš ï¸ Circuit breaker FLOOR applied: {original_level} -> {new_level}")
 
         except Exception as e:
             logger.warning(f"Error applying circuit breaker: {e}")
@@ -977,7 +981,7 @@ async def refresh_daily_bias() -> Dict[str, Any]:
         # Update bias with trend tracking
         result = update_bias(BiasTimeframe.DAILY, new_level, details=details)
         
-        logger.info(f"✅ Daily Bias updated: {new_level} (total vote: {total_vote}/{max_possible})")
+        logger.info(f"âœ… Daily Bias updated: {new_level} (total vote: {total_vote}/{max_possible})")
         return result
         
     except Exception as e:
@@ -1002,7 +1006,7 @@ async def refresh_weekly_bias() -> Dict[str, Any]:
     """
     global _weekly_baseline
     
-    logger.info("📊 Refreshing Weekly Bias (6-Factor Calculable Model)...")
+    logger.info("ðŸ“Š Refreshing Weekly Bias (6-Factor Calculable Model)...")
     
     # Check if it's Monday or if no baseline exists (Eastern Time)
     now = get_eastern_now()
@@ -1016,7 +1020,7 @@ async def refresh_weekly_bias() -> Dict[str, Any]:
     
     # Update baseline if it's Monday or no baseline exists
     if is_monday or not baseline_exists:
-        logger.info("  📌 Setting new weekly baseline (Monday or first run)")
+        logger.info("  ðŸ“Œ Setting new weekly baseline (Monday or first run)")
     
     factor_votes = []  # List of (factor_name, vote, details)
     
@@ -1072,7 +1076,7 @@ async def refresh_weekly_bias() -> Dict[str, Any]:
             "bearish": bearish_count,
             "signal": idx_signal
         }))
-        logger.info(f"  📈 Index Trends (SPY/QQQ/IWM/SMH): {bullish_count} bullish, {bearish_count} bearish - {idx_signal} (vote: {idx_vote:+d})")
+        logger.info(f"  ðŸ“ˆ Index Trends (SPY/QQQ/IWM/SMH): {bullish_count} bullish, {bearish_count} bearish - {idx_signal} (vote: {idx_vote:+d})")
         
     except Exception as e:
         logger.warning(f"Error in index trends factor: {e}")
@@ -1102,7 +1106,7 @@ async def refresh_weekly_bias() -> Dict[str, Any]:
             "uup_change": round(uup_change, 2) if uup_change else 0,
             "status": dollar_status
         }))
-        logger.info(f"  💵 Dollar Trend: UUP {uup_signal} ({uup_change:+.2f}%) - {dollar_status} (vote: {dollar_vote:+d})")
+        logger.info(f"  ðŸ’µ Dollar Trend: UUP {uup_signal} ({uup_change:+.2f}%) - {dollar_status} (vote: {dollar_vote:+d})")
         
     except Exception as e:
         logger.warning(f"Error in dollar trend factor: {e}")
@@ -1140,7 +1144,7 @@ async def refresh_weekly_bias() -> Dict[str, Any]:
             "diff": round(diff, 2),
             "signal": sector_signal
         }))
-        logger.info(f"  📊 Sector Rotation: XLK {xlk_change:+.2f}% vs XLU {xlu_change:+.2f}% - {sector_signal} (vote: {sector_vote:+d})")
+        logger.info(f"  ðŸ“Š Sector Rotation: XLK {xlk_change:+.2f}% vs XLU {xlu_change:+.2f}% - {sector_signal} (vote: {sector_vote:+d})")
         
     except Exception as e:
         logger.warning(f"Error in sector rotation factor: {e}")
@@ -1178,7 +1182,7 @@ async def refresh_weekly_bias() -> Dict[str, Any]:
             "diff": round(diff, 2),
             "signal": credit_signal
         }))
-        logger.info(f"  💳 Credit Spreads: HYG {hyg_change:+.2f}% vs TLT {tlt_change:+.2f}% - {credit_signal} (vote: {credit_vote:+d})")
+        logger.info(f"  ðŸ’³ Credit Spreads: HYG {hyg_change:+.2f}% vs TLT {tlt_change:+.2f}% - {credit_signal} (vote: {credit_vote:+d})")
         
     except Exception as e:
         logger.warning(f"Error in credit spreads factor: {e}")
@@ -1216,7 +1220,7 @@ async def refresh_weekly_bias() -> Dict[str, Any]:
             "diff": round(diff, 2),
             "signal": breadth_signal
         }))
-        logger.info(f"  📊 Market Breadth: RSP {rsp_change:+.2f}% vs SPY {spy_change:+.2f}% - {breadth_signal} (vote: {breadth_vote:+d})")
+        logger.info(f"  ðŸ“Š Market Breadth: RSP {rsp_change:+.2f}% vs SPY {spy_change:+.2f}% - {breadth_signal} (vote: {breadth_vote:+d})")
         
     except Exception as e:
         logger.warning(f"Error in market breadth factor: {e}")
@@ -1233,7 +1237,7 @@ async def refresh_weekly_bias() -> Dict[str, Any]:
         vt_vote = vt_level - 3
         factor_votes.append(("vix_term_structure", vt_vote, {"bias_level": vt_level, "bias": vix_term.get("bias")}))
         
-        logger.info(f"  📉 VIX Term Structure: {vix_term.get('bias')} (level {vt_level})")
+        logger.info(f"  ðŸ“‰ VIX Term Structure: {vix_term.get('bias')} (level {vt_level})")
         
     except Exception as e:
         logger.warning(f"Error in VIX term structure factor: {e}")
@@ -1286,14 +1290,14 @@ async def refresh_weekly_bias() -> Dict[str, Any]:
         }
         _save_weekly_baseline()
         baseline_exists = True  # Update flag after setting baseline
-        logger.info(f"  ✅ Weekly baseline set: {new_level} (vote: {total_vote})")
+        logger.info(f"  âœ… Weekly baseline set: {new_level} (vote: {total_vote})")
     
     # Calculate shift status compared to baseline (only on non-Monday days with existing baseline)
     shift_info = None
     if baseline_exists and not is_monday:
         baseline_vote = _weekly_baseline.get("total_vote", 0)
         shift_info = calculate_shift_status(baseline_vote, total_vote)
-        logger.info(f"  📊 Shift vs baseline: {shift_info['status']} (delta: {shift_info['delta']})")
+        logger.info(f"  ðŸ“Š Shift vs baseline: {shift_info['status']} (delta: {shift_info['delta']})")
     
     # Update bias with trend tracking
     result = update_bias(BiasTimeframe.WEEKLY, new_level, details=details)
@@ -1317,7 +1321,7 @@ async def refresh_weekly_bias() -> Dict[str, Any]:
                 alert = {
                     "type": "BIAS_SHIFT_ALERT",
                     "timestamp": now.isoformat(),
-                    "message": f"Weekly bias shift detected: {baseline_level} → {new_level}",
+                    "message": f"Weekly bias shift detected: {baseline_level} â†’ {new_level}",
                     "baseline_vote": _weekly_baseline.get("total_vote"),
                     "current_vote": total_vote,
                     "delta": shift_info["delta"],
@@ -1326,11 +1330,11 @@ async def refresh_weekly_bias() -> Dict[str, Any]:
                     "current_level": new_level
                 }
                 await manager.broadcast({"type": "bias_alert", "data": alert})
-                logger.info(f"  🚨 Alert broadcast: {shift_info['status']}")
+                logger.info(f"  ðŸš¨ Alert broadcast: {shift_info['status']}")
             except Exception as e:
                 logger.warning(f"Error broadcasting shift alert: {e}")
     
-    logger.info(f"✅ Weekly Bias updated: {new_level} (total vote: {total_vote}/{max_possible})")
+    logger.info(f"âœ… Weekly Bias updated: {new_level} (total vote: {total_vote}/{max_possible})")
     return result
 
 
@@ -1338,7 +1342,7 @@ async def refresh_cyclical_bias() -> Dict[str, Any]:
     """
     Refresh cyclical bias based on 9-FACTOR long-term macro analysis with TIERED VOTING:
     
-    Standard Factors (±2 max):
+    Standard Factors (Â±2 max):
     1. 200 SMA Positions (SPY, QQQ, IWM above/below 200-day SMA)
     2. Savita Indicator (BofA sentiment)
     3. Long-term Breadth (RSP vs SPY equal-weight performance)
@@ -1346,22 +1350,22 @@ async def refresh_cyclical_bias() -> Dict[str, Any]:
     5. Cyclical vs Defensive (XLY vs XLP sector rotation)
     6. Copper/Gold Ratio (economic activity vs safety)
     
-    Crisis-Tiered Factors (can exceed ±2 in extreme conditions):
-    7. Yield Curve: ±2 normal, ±3 if deeply inverted (< -0.5%)
-    8. Credit Spreads: ±2 normal, ±3 if extreme stress
-    9. Sahm Rule (FRED): ±2 normal, ±4 if recession triggered (real unemployment data)
+    Crisis-Tiered Factors (can exceed Â±2 in extreme conditions):
+    7. Yield Curve: Â±2 normal, Â±3 if deeply inverted (< -0.5%)
+    8. Credit Spreads: Â±2 normal, Â±3 if extreme stress
+    9. Sahm Rule (FRED): Â±2 normal, Â±4 if recession triggered (real unemployment data)
     
-    Max possible: ±18 normal, ±22 crisis conditions
+    Max possible: Â±18 normal, Â±22 crisis conditions
     Updates: Weekly or on significant macro changes
     """
-    logger.info("📊 Refreshing Cyclical Bias (9-Factor Tiered Macro Model)...")
+    logger.info("ðŸ“Š Refreshing Cyclical Bias (9-Factor Tiered Macro Model)...")
     
     factor_votes = []  # List of (name, vote, max_vote, details)
     import yfinance as yf
     
     try:
         # =====================================================================
-        # FACTOR 1: 200 SMA Positions (SPY, QQQ, IWM) - Standard ±2
+        # FACTOR 1: 200 SMA Positions (SPY, QQQ, IWM) - Standard Â±2
         # =====================================================================
         try:
             indices = ["SPY", "QQQ", "IWM"]
@@ -1390,7 +1394,7 @@ async def refresh_cyclical_bias() -> Dict[str, Any]:
                     logger.warning(f"Error getting 200 SMA for {ticker}: {e}")
                     sma_details[ticker] = f"error: {str(e)}"
             
-            # Standard voting: ±2 max
+            # Standard voting: Â±2 max
             if above_200sma == 3:
                 sma_vote = 2
             elif above_200sma >= 2:
@@ -1408,14 +1412,14 @@ async def refresh_cyclical_bias() -> Dict[str, Any]:
                 "details": sma_details,
                 "tier": "standard"
             }))
-            logger.info(f"  📈 200 SMA Positions: {above_200sma}/3 above (vote: {sma_vote:+d}/±2)")
+            logger.info(f"  ðŸ“ˆ 200 SMA Positions: {above_200sma}/3 above (vote: {sma_vote:+d}/Â±2)")
             
         except Exception as e:
             logger.warning(f"Error in 200 SMA factor: {e}")
             factor_votes.append(("sma_200_positions", 0, 2, {"error": str(e)}))
         
         # =====================================================================
-        # FACTOR 2: Yield Curve - TIERED: ±2 normal, ±3 if deeply inverted
+        # FACTOR 2: Yield Curve - TIERED: Â±2 normal, Â±3 if deeply inverted
         # =====================================================================
         try:
             tnx = yf.Ticker("^TNX")
@@ -1455,7 +1459,7 @@ async def refresh_cyclical_bias() -> Dict[str, Any]:
                     max_vote = 2
                     tier = "standard"
                 else:
-                    # DEEPLY INVERTED: Tiered up to ±3
+                    # DEEPLY INVERTED: Tiered up to Â±3
                     yc_vote = -3
                     max_vote = 3
                     tier = "crisis"
@@ -1468,7 +1472,7 @@ async def refresh_cyclical_bias() -> Dict[str, Any]:
                     "tier": tier,
                     "data_source": "yfinance"
                 }))
-                logger.info(f"  📉 Yield Curve: {spread:.2f}% spread (vote: {yc_vote:+d}/±{max_vote}, {tier})")
+                logger.info(f"  ðŸ“‰ Yield Curve: {spread:.2f}% spread (vote: {yc_vote:+d}/Â±{max_vote}, {tier})")
             else:
                 raise Exception("No treasury yield data available")
             
@@ -1477,7 +1481,7 @@ async def refresh_cyclical_bias() -> Dict[str, Any]:
             factor_votes.append(("yield_curve", -1, 2, {"error": str(e)}))
         
         # =====================================================================
-        # FACTOR 3: Credit Spreads - TIERED: ±2 normal, ±3 if extreme
+        # FACTOR 3: Credit Spreads - TIERED: Â±2 normal, Â±3 if extreme
         # =====================================================================
         try:
             from bias_filters.credit_spreads import auto_fetch_and_update as fetch_credit_spreads
@@ -1518,14 +1522,14 @@ async def refresh_cyclical_bias() -> Dict[str, Any]:
                 "last_updated": credit_result.get("last_updated"),
                 "data_source": "yfinance"
             }))
-            logger.info(f"  💳 Credit Spreads: {credit_bias} (vote: {credit_vote:+d}/±{max_vote}, {tier})")
+            logger.info(f"  ðŸ’³ Credit Spreads: {credit_bias} (vote: {credit_vote:+d}/Â±{max_vote}, {tier})")
             
         except Exception as e:
             logger.warning(f"Error in credit spreads factor: {e}")
             factor_votes.append(("credit_spreads", 0, 2, {"error": str(e)}))
         
         # =====================================================================
-        # FACTOR 4: Excess CAPE Yield (ECY) - Standard ±2
+        # FACTOR 4: Excess CAPE Yield (ECY) - Standard Â±2
         # Rate-adjusted valuation: compares equity yield to real bond yield
         # =====================================================================
         try:
@@ -1546,7 +1550,7 @@ async def refresh_cyclical_bias() -> Dict[str, Any]:
                     "interpretation": ecy_result.get("interpretation"),
                     "tier": "standard"
                 }))
-                logger.info(f"  📊 Excess CAPE Yield: {ecy_result.get('ecy')}% -> {ecy_bias} (vote: {ecy_vote:+d}/±2)")
+                logger.info(f"  ðŸ“Š Excess CAPE Yield: {ecy_result.get('ecy')}% -> {ecy_bias} (vote: {ecy_vote:+d}/Â±2)")
             else:
                 logger.warning(f"ECY data unavailable: {ecy_result.get('message')}")
                 factor_votes.append(("excess_cape_yield", 0, 2, {"error": ecy_result.get("message")}))
@@ -1556,7 +1560,7 @@ async def refresh_cyclical_bias() -> Dict[str, Any]:
             factor_votes.append(("excess_cape_yield", 0, 2, {"error": str(e)}))
         
         # =====================================================================
-        # FACTOR 4b: Savita Indicator (OPTIONAL) - Standard ±2
+        # FACTOR 4b: Savita Indicator (OPTIONAL) - Standard Â±2
         # Only active if manually updated with recent BofA data
         # =====================================================================
         try:
@@ -1578,15 +1582,15 @@ async def refresh_cyclical_bias() -> Dict[str, Any]:
                     "optional": True,
                     "note": "Manual input - BofA data"
                 }))
-                logger.info(f"  🎯 Savita Indicator (optional): {savita_bias} (vote: {savita_vote:+d}/±2)")
+                logger.info(f"  ðŸŽ¯ Savita Indicator (optional): {savita_bias} (vote: {savita_vote:+d}/Â±2)")
             else:
-                logger.info(f"  ⏸️ Savita Indicator: Skipped (stale data >30 days)")
+                logger.info(f"  â¸ï¸ Savita Indicator: Skipped (stale data >30 days)")
             
         except Exception as e:
             logger.warning(f"Error checking Savita: {e}")
         
         # =====================================================================
-        # FACTOR 5: Long-term Breadth (RSP vs SPY) - Standard ±2
+        # FACTOR 5: Long-term Breadth (RSP vs SPY) - Standard Â±2
         # =====================================================================
         try:
             from bias_filters.market_breadth import auto_fetch_and_update as fetch_market_breadth
@@ -1605,14 +1609,14 @@ async def refresh_cyclical_bias() -> Dict[str, Any]:
                 "last_updated": breadth_result.get("last_updated"),
                 "data_source": "yfinance"
             }))
-            logger.info(f"  📊 Long-term Breadth: {breadth_result.get('bias')} (vote: {breadth_vote:+d}/±2)")
+            logger.info(f"  ðŸ“Š Long-term Breadth: {breadth_result.get('bias')} (vote: {breadth_vote:+d}/Â±2)")
             
         except Exception as e:
             logger.warning(f"Error in breadth factor: {e}")
             factor_votes.append(("longterm_breadth", 0, 2, {"error": str(e)}))
         
         # =====================================================================
-        # FACTOR 6: VIX Regime (Fear/Complacency Gauge) - Standard ±2
+        # FACTOR 6: VIX Regime (Fear/Complacency Gauge) - Standard Â±2
         # =====================================================================
         try:
             vix = yf.Ticker("^VIX")
@@ -1658,14 +1662,14 @@ async def refresh_cyclical_bias() -> Dict[str, Any]:
                 vix_details = {"error": "Insufficient VIX data", "regime": "unknown", "tier": "standard"}
             
             factor_votes.append(("vix_regime", vix_vote, 2, vix_details))
-            logger.info(f"  😰 VIX Regime: {vix_details.get('regime', 'unknown')} (VIX: {vix_details.get('current_vix', 'N/A')}, vote: {vix_vote:+d}/±2)")
+            logger.info(f"  ðŸ˜° VIX Regime: {vix_details.get('regime', 'unknown')} (VIX: {vix_details.get('current_vix', 'N/A')}, vote: {vix_vote:+d}/Â±2)")
             
         except Exception as e:
             logger.warning(f"Error in VIX Regime factor: {e}")
             factor_votes.append(("vix_regime", 0, 2, {"error": str(e)}))
         
         # =====================================================================
-        # FACTOR 7: Cyclical vs Defensive Rotation (XLY vs XLP) - Standard ±2
+        # FACTOR 7: Cyclical vs Defensive Rotation (XLY vs XLP) - Standard Â±2
         # =====================================================================
         try:
             # XLY = Consumer Discretionary (cyclical), XLP = Consumer Staples (defensive)
@@ -1712,7 +1716,7 @@ async def refresh_cyclical_bias() -> Dict[str, Any]:
                     "tier": "standard",
                     "data_source": "yfinance"
                 }))
-                logger.info(f"  🔄 Cyclical vs Defensive: {status} (spread: {rotation_spread:+.1f}%, vote: {rotation_vote:+d}/±2)")
+                logger.info(f"  ðŸ”„ Cyclical vs Defensive: {status} (spread: {rotation_spread:+.1f}%, vote: {rotation_vote:+d}/Â±2)")
             else:
                 raise Exception("Insufficient XLY/XLP data")
                 
@@ -1721,7 +1725,7 @@ async def refresh_cyclical_bias() -> Dict[str, Any]:
             factor_votes.append(("cyclical_vs_defensive", 0, 2, {"error": str(e)}))
         
         # =====================================================================
-        # FACTOR 8: Copper/Gold Ratio - Standard ±2
+        # FACTOR 8: Copper/Gold Ratio - Standard Â±2
         # =====================================================================
         try:
             # COPX = Copper miners ETF, GLD = Gold ETF
@@ -1769,7 +1773,7 @@ async def refresh_cyclical_bias() -> Dict[str, Any]:
                     "tier": "standard",
                     "data_source": "yfinance"
                 }))
-                logger.info(f"  🥇 Copper/Gold: {status} (spread: {cg_spread:+.1f}%, vote: {cg_vote:+d}/±2)")
+                logger.info(f"  ðŸ¥‡ Copper/Gold: {status} (spread: {cg_spread:+.1f}%, vote: {cg_vote:+d}/Â±2)")
             else:
                 raise Exception("Insufficient COPX/GLD data")
                 
@@ -1778,7 +1782,7 @@ async def refresh_cyclical_bias() -> Dict[str, Any]:
             factor_votes.append(("copper_gold_ratio", 0, 2, {"error": str(e)}))
         
         # =====================================================================
-        # FACTOR 9: Sahm Rule (Real FRED Data) - TIERED: ±2 normal, ±4 if triggered
+        # FACTOR 9: Sahm Rule (Real FRED Data) - TIERED: Â±2 normal, Â±4 if triggered
         # =====================================================================
         try:
             import os
@@ -1864,7 +1868,7 @@ async def refresh_cyclical_bias() -> Dict[str, Any]:
                         "triggered": sahm_triggered,
                         **sahm_details
                     }))
-                    logger.info(f"  🚨 Sahm Rule (FRED): {sahm_details['status']} (reading: {current_sahm:.3f}, vote: {sahm_vote:+d}/±{max_vote}, {tier})")
+                    logger.info(f"  ðŸš¨ Sahm Rule (FRED): {sahm_details['status']} (reading: {current_sahm:.3f}, vote: {sahm_vote:+d}/Â±{max_vote}, {tier})")
                 else:
                     raise Exception("No Sahm Rule data returned from FRED")
             else:
@@ -1874,7 +1878,7 @@ async def refresh_cyclical_bias() -> Dict[str, Any]:
                     "tier": "standard",
                     "note": "Set FRED_API_KEY environment variable for real data"
                 }))
-                logger.warning("  🚨 Sahm Rule: No FRED API key configured")
+                logger.warning("  ðŸš¨ Sahm Rule: No FRED API key configured")
                 
         except Exception as e:
             logger.warning(f"Error in Sahm Rule factor: {e}")
@@ -1884,14 +1888,14 @@ async def refresh_cyclical_bias() -> Dict[str, Any]:
         # CALCULATE TOTAL VOTE AND DETERMINE BIAS (9-Factor Tiered System)
         # =====================================================================
         total_vote = sum(vote for _, vote, _, _ in factor_votes)
-        max_possible_normal = 18  # 9 factors × 2 max each (normal conditions)
+        max_possible_normal = 18  # 9 factors Ã— 2 max each (normal conditions)
         max_possible_crisis = sum(max_v for _, _, max_v, _ in factor_votes)  # Actual max based on current tier
         
         # Check if any crisis-tier factors are active
         crisis_active = any(det.get("tier", "standard").startswith("crisis") for _, _, _, det in factor_votes)
         
         # Thresholds for 9 factors with tiered voting
-        # Adjusted for higher max possible vote range (±18 normal, ±22 crisis)
+        # Adjusted for higher max possible vote range (Â±18 normal, Â±22 crisis)
         if total_vote >= 11:
             new_level = "MAJOR_TORO"
         elif total_vote >= 5:
@@ -1919,7 +1923,7 @@ async def refresh_cyclical_bias() -> Dict[str, Any]:
         result = update_bias(BiasTimeframe.CYCLICAL, new_level, details=details)
         
         mode_str = "CRISIS MODE" if crisis_active else "normal"
-        logger.info(f"✅ Cyclical Bias updated: {new_level} (vote: {total_vote}/±{max_possible_crisis}, {mode_str})")
+        logger.info(f"âœ… Cyclical Bias updated: {new_level} (vote: {total_vote}/Â±{max_possible_crisis}, {mode_str})")
         return result
         
     except Exception as e:
@@ -2038,21 +2042,21 @@ async def run_savita_auto_search():
     Called by scheduler from 12th-23rd of each month at 8:00 AM ET.
     """
     now = get_eastern_now()
-    logger.info(f"🔍 Running Savita auto-search at {now.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+    logger.info(f"ðŸ” Running Savita auto-search at {now.strftime('%Y-%m-%d %H:%M:%S %Z')}")
     
     try:
         from bias_filters.savita_indicator import auto_search_savita_update
         result = await auto_search_savita_update()
         
         if result.get("status") == "success":
-            logger.info(f"✅ Savita updated: {result.get('previous_reading')}% -> {result.get('new_reading')}%")
+            logger.info(f"âœ… Savita updated: {result.get('previous_reading')}% -> {result.get('new_reading')}%")
         elif result.get("status") == "no_update":
-            logger.info(f"📊 Savita unchanged: {result.get('message')}")
+            logger.info(f"ðŸ“Š Savita unchanged: {result.get('message')}")
         else:
-            logger.warning(f"⚠️ Savita search issue: {result.get('message')}")
+            logger.warning(f"âš ï¸ Savita search issue: {result.get('message')}")
             
     except Exception as e:
-        logger.error(f"❌ Savita auto-search error: {e}")
+        logger.error(f"âŒ Savita auto-search error: {e}")
 
 
 async def refresh_btc_bottom_signals():
@@ -2063,23 +2067,23 @@ async def refresh_btc_bottom_signals():
     try:
         from bias_filters.btc_bottom_signals import update_all_signals
         
-        logger.info("🔄 Refreshing BTC Bottom Signals from APIs...")
+        logger.info("ðŸ”„ Refreshing BTC Bottom Signals from APIs...")
         result = await update_all_signals()
         
         confluence = result.get('confluence', {})
         firing = confluence.get('firing', 0)
         total = confluence.get('total', 9)
         
-        logger.info(f"✅ BTC Signals refreshed: {firing}/{total} firing")
+        logger.info(f"âœ… BTC Signals refreshed: {firing}/{total} firing")
         
         # Log any API issues
         api_status = result.get('api_status', {})
         unavailable = [api for api, status in api_status.items() if not status]
         if unavailable:
-            logger.warning(f"⚠️ Unavailable BTC data sources: {', '.join(unavailable)}")
+            logger.warning(f"âš ï¸ Unavailable BTC data sources: {', '.join(unavailable)}")
             
     except Exception as e:
-        logger.error(f"❌ BTC Bottom Signals refresh error: {e}")
+        logger.error(f"âŒ BTC Bottom Signals refresh error: {e}")
 
 
 async def auto_dismiss_old_signals():
@@ -2110,10 +2114,10 @@ async def auto_dismiss_old_signals():
                     count = int(parts[1])
             
             if count > 0:
-                logger.info(f"🗑️ Auto-dismissed {count} signals older than 24 hours")
+                logger.info(f"ðŸ—‘ï¸ Auto-dismissed {count} signals older than 24 hours")
             
     except Exception as e:
-        logger.error(f"❌ Auto-dismiss error: {e}")
+        logger.error(f"âŒ Auto-dismiss error: {e}")
 
 
 async def reset_circuit_breaker_scheduled():
@@ -2124,7 +2128,7 @@ async def reset_circuit_breaker_scheduled():
     try:
         from webhooks.circuit_breaker import reset_circuit_breaker
         result = reset_circuit_breaker()
-        logger.info(f"🔓 Circuit breaker reset at market open: {result}")
+        logger.info(f"ðŸ”“ Circuit breaker reset at market open: {result}")
     except Exception as e:
         logger.error(f"Error resetting circuit breaker: {e}")
 
@@ -2135,7 +2139,7 @@ async def run_scheduled_refreshes():
     Called by the scheduler at 9:45 AM ET
     """
     now = get_eastern_now()
-    logger.info(f"⏰ Running scheduled bias refresh at {now.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+    logger.info(f"â° Running scheduled bias refresh at {now.strftime('%Y-%m-%d %H:%M:%S %Z')}")
     
     if not is_trading_day():
         logger.info("Not a trading day, skipping refresh")
@@ -2189,7 +2193,7 @@ async def refresh_composite_bias():
         result = await compute_composite()
         _scheduler_status["composite_bias"]["last_run"] = now.isoformat()
         _scheduler_status["composite_bias"]["status"] = "completed"
-        logger.info(f"🧭 Composite bias refreshed: {result.bias_level} ({result.composite_score:.2f})")
+        logger.info(f"ðŸ§­ Composite bias refreshed: {result.bias_level} ({result.composite_score:.2f})")
         return result
     except Exception as e:
         _scheduler_status["composite_bias"]["status"] = f"error: {str(e)}"
@@ -2207,7 +2211,7 @@ async def scan_sector_strength():
     - Price vs 50 SMA (trend)
     - Relative strength vs SPY
     """
-    logger.info("📊 Scanning sector strength...")
+    logger.info("ðŸ“Š Scanning sector strength...")
     
     try:
         import yfinance as yf
@@ -2295,7 +2299,7 @@ async def scan_sector_strength():
         for rank, (sector_name, data) in enumerate(sorted_sectors, 1):
             sector_scores[sector_name]["rank"] = rank
         
-        logger.info(f"✅ Sector strength scan complete: {len(sector_scores)} sectors analyzed")
+        logger.info(f"âœ… Sector strength scan complete: {len(sector_scores)} sectors analyzed")
         
         # Log top and bottom sectors
         if sorted_sectors:
@@ -2331,24 +2335,24 @@ async def start_scheduler():
     
     _scheduler_started = True
     _scheduler_status["scheduler_started"] = get_eastern_now().isoformat()
-    logger.info("🚀 Starting bias scheduler...")
+    logger.info("ðŸš€ Starting bias scheduler...")
     
     # Load weekly baseline from disk
     _weekly_baseline = _load_weekly_baseline()
     if _weekly_baseline.get("timestamp"):
-        logger.info(f"  📌 Loaded weekly baseline: {_weekly_baseline.get('level')} (from {_weekly_baseline.get('timestamp')})")
+        logger.info(f"  ðŸ“Œ Loaded weekly baseline: {_weekly_baseline.get('level')} (from {_weekly_baseline.get('timestamp')})")
     else:
-        logger.info("  📌 No weekly baseline found - will be set on next Monday")
+        logger.info("  ðŸ“Œ No weekly baseline found - will be set on next Monday")
     
     # Run initial refresh on startup (Railway has ephemeral filesystem)
-    logger.info("  🔄 Running initial bias refresh on startup...")
+    logger.info("  ðŸ”„ Running initial bias refresh on startup...")
     try:
         await refresh_daily_bias()
         await refresh_weekly_bias()
         await refresh_cyclical_bias()
-        logger.info("  ✅ Initial bias refresh complete")
+        logger.info("  âœ… Initial bias refresh complete")
     except Exception as e:
-        logger.error(f"  ❌ Error during initial refresh: {e}")
+        logger.error(f"  âŒ Error during initial refresh: {e}")
     
     # Use APScheduler if available, otherwise use simple asyncio loop
     try:
@@ -2448,16 +2452,16 @@ async def start_scheduler():
         )
         
         scheduler.start()
-        logger.info("✅ APScheduler started - bias refresh scheduled for 9:45 AM ET")
-        logger.info("✅ Savita auto-search scheduled for 8:00 AM ET (days 12-23)")
-        logger.info("✅ BTC Bottom Signals refresh scheduled every 5 minutes")
-        logger.info("✅ Auto-dismiss old signals scheduled every hour")
-        logger.info("✅ Composite bias refresh scheduled every 15 minutes")
-        logger.info("✅ Signal outcome scoring scheduled for 9:00 PM ET")
+        logger.info("âœ… APScheduler started - bias refresh scheduled for 9:45 AM ET")
+        logger.info("âœ… Savita auto-search scheduled for 8:00 AM ET (days 12-23)")
+        logger.info("âœ… BTC Bottom Signals refresh scheduled every 5 minutes")
+        logger.info("âœ… Auto-dismiss old signals scheduled every hour")
+        logger.info("âœ… Composite bias refresh scheduled every 15 minutes")
+        logger.info("âœ… Signal outcome scoring scheduled for 9:00 PM ET")
         
         # ALSO start the scanner loop (APScheduler doesn't handle the variable-interval scanners)
         asyncio.create_task(_scanner_loop())
-        logger.info("✅ Scanner loop started (CTA + Crypto)")
+        logger.info("âœ… Scanner loop started (CTA + Crypto)")
         
     except ImportError:
         logger.warning("APScheduler not installed, using fallback scheduler")
@@ -2510,7 +2514,7 @@ async def _scanner_loop():
                 if should_scan_cta:
                     last_cta_scan_time = now
                     _scheduler_status["cta_scanner"]["status"] = "running"
-                    logger.info(f"⏰ CTA scan (interval: {cta_interval_minutes}min) - ET: {now.strftime('%H:%M')}")
+                    logger.info(f"â° CTA scan (interval: {cta_interval_minutes}min) - ET: {now.strftime('%H:%M')}")
                     await run_cta_scan_scheduled()
                     await asyncio.sleep(30)
                     continue
@@ -2528,7 +2532,7 @@ async def _scanner_loop():
             if should_scan_crypto:
                 last_crypto_scan_time = now
                 _scheduler_status["crypto_scanner"]["status"] = "running"
-                logger.info(f"⏰ Crypto scan (24/7) - ET: {now.strftime('%H:%M')}")
+                logger.info(f"â° Crypto scan (24/7) - ET: {now.strftime('%H:%M')}")
                 await run_crypto_scan_scheduled()
                 await asyncio.sleep(30)
                 continue
@@ -2573,7 +2577,7 @@ async def _fallback_scheduler():
             today_str = now.strftime("%Y-%m-%d")
             if last_bias_refresh_date != today_str:
                 last_bias_refresh_date = today_str
-                logger.info(f"⏰ 9:45 AM ET trigger - running bias refresh")
+                logger.info(f"â° 9:45 AM ET trigger - running bias refresh")
                 await run_scheduled_refreshes()
                 await asyncio.sleep(120)
                 continue
@@ -2620,7 +2624,7 @@ async def _fallback_scheduler():
             if should_scan_cta:
                 last_cta_scan_time = now
                 _scheduler_status["cta_scanner"]["status"] = "running"
-                logger.info(f"⏰ CTA scan (interval: {cta_interval_minutes}min) - ET: {now.strftime('%H:%M')}")
+                logger.info(f"â° CTA scan (interval: {cta_interval_minutes}min) - ET: {now.strftime('%H:%M')}")
                 await run_cta_scan_scheduled()
                 await asyncio.sleep(30)
                 continue
@@ -2638,7 +2642,7 @@ async def _fallback_scheduler():
         if should_scan_crypto:
             last_crypto_scan_time = now
             _scheduler_status["crypto_scanner"]["status"] = "running"
-            logger.info(f"⏰ Crypto scan (24/7) - ET: {now.strftime('%H:%M')}")
+            logger.info(f"â° Crypto scan (24/7) - ET: {now.strftime('%H:%M')}")
             await run_crypto_scan_scheduled()
             await asyncio.sleep(30)
             continue
@@ -2656,7 +2660,7 @@ async def run_cta_scan_scheduled():
     Run CTA scanner automatically and push signals to Trade Ideas
     Scheduled: Every hour during market hours (9:30 AM - 4:00 PM ET)
     """
-    logger.info("🎯 Running scheduled CTA scan...")
+    logger.info("ðŸŽ¯ Running scheduled CTA scan...")
     
     try:
         from scanners.cta_scanner import run_cta_scan, CTA_SCANNER_AVAILABLE
@@ -2718,7 +2722,7 @@ async def run_cta_scan_scheduled():
             cooldown_hours = int(os.getenv("CTA_SIGNAL_COOLDOWN_HOURS", "24"))
             try:
                 if await has_recent_active_signal(ticker, cooldown_hours, strategy="CTA Scanner"):
-                    logger.info(f"⏳ Skipping CTA signal for {ticker} (cooldown {cooldown_hours}h)")
+                    logger.info(f"â³ Skipping CTA signal for {ticker} (cooldown {cooldown_hours}h)")
                     continue
             except Exception as dedupe_err:
                 logger.warning(f"CTA cooldown check failed for {ticker}: {dedupe_err}")
@@ -2852,14 +2856,14 @@ async def run_cta_scan_scheduled():
             # Broadcast to all connected devices (use smart broadcast for priority handling)
             await manager.broadcast_signal_smart(trade_signal, priority_threshold=75.0)
             
-            logger.info(f"📡 CTA signal pushed: {ticker} {signal.get('signal_type')} (score: {score}, {bias_alignment})")
+            logger.info(f"ðŸ“¡ CTA signal pushed: {ticker} {signal.get('signal_type')} (score: {score}, {bias_alignment})")
         
         # Update scheduler status
         _scheduler_status["cta_scanner"]["last_run"] = get_eastern_now().isoformat()
         _scheduler_status["cta_scanner"]["signals_found"] = len(all_signals)
         _scheduler_status["cta_scanner"]["status"] = "completed"
         
-        logger.info(f"✅ CTA scheduled scan complete - {len(all_signals)} signals pushed to Trade Ideas")
+        logger.info(f"âœ… CTA scheduled scan complete - {len(all_signals)} signals pushed to Trade Ideas")
         
     except Exception as e:
         _scheduler_status["cta_scanner"]["status"] = f"error: {str(e)}"
@@ -2953,7 +2957,7 @@ async def run_crypto_scan_scheduled():
     
     Uses Hunter Scanner logic but focused on crypto tickers.
     """
-    logger.info("🪙 Running scheduled Crypto scan...")
+    logger.info("ðŸª™ Running scheduled Crypto scan...")
     
     try:
         from scanners.cta_scanner import analyze_ticker_cta as analyze_single_ticker, CTA_SCANNER_AVAILABLE as SCANNER_AVAILABLE
@@ -3043,7 +3047,7 @@ async def run_crypto_scan_scheduled():
                 # Broadcast
                 await manager.broadcast_signal_smart(trade_signal, priority_threshold=75.0)
                 
-                logger.info(f"🪙 Crypto signal: {ticker} {signal_type} (score: {score})")
+                logger.info(f"ðŸª™ Crypto signal: {ticker} {signal_type} (score: {score})")
                 signals_found += 1
                 
             except Exception as ticker_err:
@@ -3055,7 +3059,7 @@ async def run_crypto_scan_scheduled():
         _scheduler_status["crypto_scanner"]["signals_found"] = signals_found
         _scheduler_status["crypto_scanner"]["status"] = "completed"
         
-        logger.info(f"✅ Crypto scan complete - {signals_found} signals found")
+        logger.info(f"âœ… Crypto scan complete - {signals_found} signals found")
         
     except Exception as e:
         _scheduler_status["crypto_scanner"]["status"] = f"error: {str(e)}"
