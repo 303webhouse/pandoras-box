@@ -299,6 +299,8 @@ async def _fetch_funding_signal() -> Dict[str, Any]:
             "value": data.get("funding_rate"),
             "predicted_rate": data.get("predicted_rate"),
             "sentiment": data.get("sentiment"),
+            "source": data.get("source"),
+            "error": data.get("error"),
             "updated_at": data.get("timestamp")
         }
     except Exception as e:
@@ -324,6 +326,8 @@ async def _fetch_oi_signal() -> Dict[str, Any]:
             "oi_change": oi_change,
             "price_change": price_change,
             "divergence": data.get("divergence"),
+            "source": data.get("source"),
+            "error": data.get("error"),
             "updated_at": data.get("timestamp")
         }
     except Exception as e:
@@ -349,6 +353,8 @@ async def _fetch_liquidations_signal() -> Dict[str, Any]:
             "long_pct": long_pct,
             "total_usd": total_liq,
             "composition": data.get("composition"),
+            "source": data.get("source"),
+            "error": data.get("error"),
             "updated_at": data.get("timestamp")
         }
     except Exception as e:
@@ -369,6 +375,8 @@ async def _fetch_term_structure_signal() -> Dict[str, Any]:
             "structure": data.get("structure"),
             "trend": data.get("funding_trend"),
             "current_funding": data.get("current_funding"),
+            "source": data.get("source"),
+            "error": data.get("error"),
             "updated_at": data.get("timestamp")
         }
     except Exception as e:
@@ -435,6 +443,8 @@ async def _fetch_orderbook_signal() -> Dict[str, Any]:
             "bid_depth": data.get("bid_depth"),
             "ask_depth": data.get("ask_depth"),
             "sentiment": data.get("sentiment"),
+            "source": data.get("source"),
+            "error": data.get("error"),
             "updated_at": data.get("timestamp")
         }
     except Exception as e:
@@ -460,6 +470,8 @@ async def _fetch_basis_signal() -> Dict[str, Any]:
             "spot_price": _to_float(data.get("spot_price")),
             "futures_price": _to_float(data.get("futures_price")),
             "sentiment": data.get("sentiment"),
+            "source": data.get("source"),
+            "error": data.get("error"),
             "updated_at": data.get("timestamp")
         }
     except Exception as e:
@@ -541,6 +553,11 @@ async def update_all_signals() -> Dict[str, Any]:
 async def get_all_signals() -> Dict[str, Any]:
     """Get current state of all bottom signals"""
     await _ensure_initialized()
+    coinalyze_key_present = bool(
+        os.getenv("COINALYZE_API_KEY")
+        or os.getenv("COINALYZE_KEY")
+        or os.getenv("COINALYZE_TOKEN")
+    )
     
     # Count firing signals
     firing_count = sum(1 for s in _bottom_signals.values() 
@@ -573,7 +590,7 @@ async def get_all_signals() -> Dict[str, Any]:
         },
         "last_update": datetime.now(timezone.utc).isoformat(),
         "api_status": {
-            "coinalyze": COINALYZE_AVAILABLE,
+            "coinalyze": COINALYZE_AVAILABLE and coinalyze_key_present,
             "deribit": DERIBIT_AVAILABLE,
             "defillama": DEFILLAMA_AVAILABLE,
             "binance": BINANCE_AVAILABLE,
@@ -581,7 +598,7 @@ async def get_all_signals() -> Dict[str, Any]:
             "redis": REDIS_AVAILABLE
         },
         "api_keys": {
-            "coinalyze": bool(os.getenv("COINALYZE_API_KEY"))
+            "coinalyze": coinalyze_key_present
         },
         "api_errors": {
             signal_id: raw.get("error")
