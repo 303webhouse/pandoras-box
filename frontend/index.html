@@ -36,14 +36,6 @@
             </div>
         </header>
 
-        <section class="crypto-topbar" id="cryptoTopbar">
-            <div class="crypto-topbar-left">
-                <div class="crypto-session-status" id="cryptoSessionStatus">
-                    <span class="session-pill">Fetching BTC session</span>
-                </div>
-            </div>
-        </section>
-
         <main id="hubShell" class="hub-shell">
 
         <!-- Bias Indicators -->
@@ -1276,7 +1268,12 @@
                         <span class="crypto-bias-value" data-bias="cyclical">--</span>
                     </div>
                 </div>
-                <div class="crypto-bias-bar-alignment" id="cryptoBiasNote">Loading bias alignment</div>
+                <div class="crypto-bias-bar-meta">
+                    <div class="crypto-bias-bar-alignment" id="cryptoBiasNote">Loading bias alignment</div>
+                    <div class="crypto-session-status compact" id="cryptoSessionStatus">
+                        <span class="session-pill">Fetching BTC session</span>
+                    </div>
+                </div>
             </section>
 
             <!-- Row 1.5: Microstructure (Spot, Perp, Funding, CVD) -->
@@ -1450,43 +1447,6 @@
                         <input type="checkbox" class="crypto-strategy-cb" data-strategy="zone_upgrade" checked>
                         <span class="strategy-name">Zone Upgrade</span>
                     </label>
-                </div>
-            </section>
-
-            <!-- Row 4: BTC Bottom Signals + Session Windows -->
-            <section class="crypto-bottom-row">
-                <!-- BTC Bottom Signals Dashboard -->
-                <div class="crypto-btc-signals-panel">
-                    <div class="btc-signals-header">
-                        <h2>BTC BOTTOM SIGNALS</h2>
-                        <div class="btc-signals-controls">
-                            <button class="btc-btn btc-refresh-btn" data-label="Refresh">Refresh</button>
-                            <button class="btc-btn secondary btc-reset-btn">Reset</button>
-                        </div>
-                    </div>
-                    <div class="btc-confluence-summary" id="cryptoBtcConfluenceSummary">
-                        <div class="confluence-meter">
-                            <span class="confluence-count">--</span>
-                            <span class="confluence-label">Signals Firing</span>
-                        </div>
-                        <div class="confluence-verdict">Loading...</div>
-                    </div>
-                    <div class="btc-api-status" id="cryptoBtcApiStatus"></div>
-                    <div class="btc-signals-grid" id="cryptoBtcSignalsGrid">
-                        <p class="empty-state">Loading BTC signals...</p>
-                    </div>
-                </div>
-
-                <!-- Session Windows + Key Levels -->
-                <div class="crypto-sessions-panel">
-                    <div class="crypto-panel-header">
-                        <h2>BTC SESSION WINDOWS</h2>
-                        <span class="crypto-subtext">Times in America/Denver</span>
-                    </div>
-                    <div class="btc-session-current" id="cryptoBtcSessionCurrent">
-                        <span class="session-status">Checking</span>
-                    </div>
-                    <div class="btc-session-list" id="cryptoBtcSessionList"></div>
                 </div>
             </section>
 

@@ -7045,6 +7045,22 @@ body[data-mode="crypto"] .crypto-shell {
     text-align: right;
 }
 
+.crypto-bias-bar-meta {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+.crypto-session-status.compact .session-pill {
+    padding: 5px 10px;
+    font-size: 11px;
+    background: rgba(20, 184, 166, 0.18);
+    border: 1px solid rgba(20, 184, 166, 0.3);
+    color: var(--text-primary);
+}
+
 /* =============================================
    CRYPTO SCALPER — MAIN CONTENT (Row 2)
    ============================================= */
@@ -8940,7 +8956,7 @@ body[data-mode="crypto"] .crypto-shell {
    ============================== */
 .watchlist-v3 {
     display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 16px;
     align-items: start;
     width: 100%;

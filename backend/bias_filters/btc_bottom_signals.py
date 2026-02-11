@@ -695,10 +695,14 @@ def get_btc_sessions() -> Dict[str, Any]:
 
 def get_current_session() -> Optional[Dict[str, Any]]:
     """Determine if we're currently in a key BTC trading session"""
-    import pytz
-    
     try:
-        ny_tz = pytz.timezone('America/New_York')
+        try:
+            from zoneinfo import ZoneInfo
+            ny_tz = ZoneInfo("America/New_York")
+        except Exception:
+            import pytz
+            ny_tz = pytz.timezone("America/New_York")
+
         now_ny = datetime.now(ny_tz)
         hour = now_ny.hour
         minute = now_ny.minute

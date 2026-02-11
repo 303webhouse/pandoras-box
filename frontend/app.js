@@ -5871,7 +5871,12 @@ function getBtcUiTargets() {
 
 function initBtcSignals() {
     const hasBtcPanels = document.getElementById('btcSignalsGrid') || document.getElementById('cryptoBtcSignalsGrid');
+    const sessionPill = document.getElementById('cryptoSessionStatus');
     if (!hasBtcPanels) {
+        if (sessionPill) {
+            loadBtcSessions();
+            setInterval(loadBtcSessions, 10 * 60 * 1000);
+        }
         return;
     }
     const refreshButtons = document.querySelectorAll('.btc-refresh-btn');
@@ -5904,7 +5909,8 @@ async function loadBtcSessions() {
 async function renderBtcSessions() {
     const listEl = document.getElementById('cryptoBtcSessionList');
     const currentEl = document.getElementById('cryptoBtcSessionCurrent');
-    if (!listEl && !currentEl) return;
+    const sessionPill = document.getElementById('cryptoSessionStatus');
+    if (!listEl && !currentEl && !sessionPill) return;
 
     try {
         const response = await fetch(`${API_URL}/btc/sessions`);
@@ -5913,20 +5919,21 @@ async function renderBtcSessions() {
 
         const sessions = data.sessions || {};
         const currentSession = data.current_session || null;
+        const resolvedSession = resolveActiveSession(currentSession, sessions);
 
-        // Update the topbar session pill
-        updateCryptoSessionStatus(currentSession, sessions);
+        // Update the session pill in the bias bar
+        updateCryptoSessionStatus(resolvedSession, sessions);
 
         // Update the current-session indicator inside the crypto panel.
         // The active styling is on .btc-session-current.active — toggle that class on the element.
         if (currentEl) {
-            if (currentSession && currentSession.active) {
+            if (resolvedSession && resolvedSession.active) {
                 currentEl.classList.add('active');
-                currentEl.innerHTML = `<span class="session-status">NOW: ${escapeHtml(currentSession.name)}</span>`;
+                currentEl.innerHTML = `<span class="session-status">NOW: ${escapeHtml(resolvedSession.name)}</span>`;
             } else {
                 currentEl.classList.remove('active');
-                const sessionValues = Object.values(sessions);
-                const nextName = sessionValues.length > 0 ? sessionValues[0].name : null;
+                const nextSession = getNextSessionBySchedule(sessions);
+                const nextName = nextSession ? nextSession.name : null;
                 currentEl.innerHTML = `<span class="session-status">No active session${nextName ? ` &middot; Next: ${escapeHtml(nextName)}` : ''}</span>`;
             }
         }
@@ -5940,7 +5947,7 @@ async function renderBtcSessions() {
             }
             listEl.innerHTML = sessionIds.map(id => {
                 const s = sessions[id];
-                const isActive = currentSession && currentSession.name === s.name;
+                const isActive = resolvedSession && resolvedSession.name === s.name;
                 const localTime = s.utc_time ? formatUtcRangeToDenver(s.utc_time) : '';
                 return `
                     <div class="btc-session-item${isActive ? ' active' : ''}">
@@ -5954,6 +5961,9 @@ async function renderBtcSessions() {
     } catch (err) {
         console.error('Error loading BTC sessions:', err);
         if (listEl) listEl.innerHTML = '<p class="empty-state">Could not load sessions</p>';
+        if (sessionPill) {
+            sessionPill.innerHTML = '<span class="session-pill neutral">Session data unavailable</span>';
+        }
     }
 }
 
@@ -6194,6 +6204,98 @@ async function resetBtcSignals() {
 }
 
 // MOVED TO CRYPTO-SCALPER: BTC session functions relocated to dedicated crypto-scalper application
+function getEasternTimeParts() {
+    try {
+        const formatter = new Intl.DateTimeFormat('en-US', {
+            timeZone: 'America/New_York',
+            hour12: false,
+            hour: '2-digit',
+            minute: '2-digit',
+            weekday: 'short'
+        });
+        const parts = formatter.formatToParts(new Date());
+        const partMap = {};
+        parts.forEach(part => {
+            partMap[part.type] = part.value;
+        });
+        return {
+            hour: Number(partMap.hour),
+            minute: Number(partMap.minute),
+            weekday: partMap.weekday
+        };
+    } catch (e) {
+        console.warn('Unable to resolve Eastern time:', e);
+        return null;
+    }
+}
+
+function resolveActiveSession(currentSession, sessions) {
+    if (currentSession && currentSession.active) return currentSession;
+    return findActiveSessionClient(sessions) || currentSession;
+}
+
+function findActiveSessionClient(sessions) {
+    if (!sessions) return null;
+    const time = getEasternTimeParts();
+    if (!time) return null;
+    const { hour, minute, weekday } = time;
+
+    if (hour >= 20 && hour < 21) {
+        return { ...(sessions.asia_handoff || { name: 'Asia Handoff + Funding Reset' }), active: true };
+    }
+    if (hour >= 4 && hour < 6) {
+        return { ...(sessions.london_open || { name: 'London Cash FX Open' }), active: true };
+    }
+    if (hour >= 11 && hour < 13) {
+        return { ...(sessions.peak_volume || { name: 'Peak Global Volume' }), active: true };
+    }
+    if (hour >= 15 && hour < 16) {
+        return { ...(sessions.etf_fixing || { name: 'ETF Fixing Window' }), active: true };
+    }
+    if (weekday === 'Fri' && hour === 15 && minute >= 55) {
+        return { ...(sessions.friday_close || { name: 'Friday CME Close' }), active: true };
+    }
+    return null;
+}
+
+function parseNyStartTime(nyTime) {
+    if (!nyTime) return null;
+    let cleaned = nyTime.toLowerCase().trim();
+    cleaned = cleaned.replace(/^\w{3}\s+/, ''); // remove "Fri " prefix
+    const start = cleaned.split('-')[0]?.trim();
+    if (!start) return null;
+    const match = start.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)/i);
+    if (!match) return null;
+    let hour = parseInt(match[1], 10);
+    const minute = match[2] ? parseInt(match[2], 10) : 0;
+    const meridian = match[3].toLowerCase();
+    if (meridian === 'pm' && hour !== 12) hour += 12;
+    if (meridian === 'am' && hour === 12) hour = 0;
+    return hour * 60 + minute;
+}
+
+function getNextSessionBySchedule(sessions) {
+    if (!sessions) return null;
+    const time = getEasternTimeParts();
+    if (!time) return null;
+    const nowMinutes = (time.hour * 60) + time.minute;
+    const isFriday = time.weekday === 'Fri';
+
+    const sessionList = Object.values(sessions)
+        .map(session => {
+            const startMinutes = parseNyStartTime(session.ny_time);
+            if (startMinutes === null) return null;
+            const isFridayOnly = (session.ny_time || '').toLowerCase().startsWith('fri');
+            if (isFridayOnly && !isFriday) return null;
+            return { ...session, startMinutes };
+        })
+        .filter(Boolean)
+        .sort((a, b) => a.startMinutes - b.startMinutes);
+
+    if (sessionList.length === 0) return null;
+    const upcoming = sessionList.find(session => session.startMinutes > nowMinutes);
+    return upcoming || sessionList[0];
+}
 
 function updateCryptoSessionStatus(currentSession, sessions) {
     const statusEl = document.getElementById('cryptoSessionStatus');
@@ -6206,7 +6308,7 @@ function updateCryptoSessionStatus(currentSession, sessions) {
             <span class="session-pill">🟢 NOW: ${currentSession.name}${localTime ? `  ${localTime}` : ''}</span>
         `;
     } else {
-        const nextSession = sessions ? Object.values(sessions)[0] : null;
+        const nextSession = getNextSessionBySchedule(sessions);
         statusEl.innerHTML = `
             <span class="session-pill">No active BTC session${nextSession ? `  Next: ${nextSession.name}` : ''}</span>
         `;
