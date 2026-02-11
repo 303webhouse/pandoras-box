@@ -1248,30 +1248,27 @@
         <main id="cryptoShell" class="crypto-shell" hidden>
 
             <!-- Row 1: Bias Bar -->
+                        <!-- Row 1: Bias Bar -->
             <section class="crypto-bias-bar" id="cryptoBiasBar">
-                <div class="crypto-bias-bar-main">
-                    <div class="crypto-bias-bar-level" id="cryptoCompositeBiasLevel">NEUTRAL</div>
-                    <div class="crypto-bias-bar-score" id="cryptoCompositeBiasScore">(0.00)</div>
-                    <div class="crypto-bias-bar-confidence" id="cryptoCompositeBiasConfidence">LOW</div>
-                </div>
-                <div class="crypto-bias-bar-cards" id="cryptoBiasGrid">
-                    <div class="crypto-bias-card" data-bias-key="daily">
-                        <span class="crypto-bias-label">Daily</span>
-                        <span class="crypto-bias-value" data-bias="daily">--</span>
+                <div class="crypto-bias-row" id="cryptoBiasRow">
+                    <div class="crypto-bias-inline" id="cryptoBiasInline">
+                        <span class="bias-pill" data-bias="daily">Daily: <span id="cryptoBiasDaily">--</span></span>
+                        <span class="bias-divider">|</span>
+                        <span class="bias-pill" data-bias="weekly">Weekly: <span id="cryptoBiasWeekly">--</span></span>
+                        <span class="bias-divider">|</span>
+                        <span class="bias-pill" data-bias="cyclical">Cyclical: <span id="cryptoBiasCyclical">--</span></span>
+                        <span class="bias-divider">|</span>
+                        <span class="bias-pill">Composite: <span id="cryptoCompositeInline">NEUTRAL</span></span>
                     </div>
-                    <div class="crypto-bias-card" data-bias-key="weekly">
-                        <span class="crypto-bias-label">Weekly</span>
-                        <span class="crypto-bias-value" data-bias="weekly">--</span>
-                    </div>
-                    <div class="crypto-bias-card" data-bias-key="cyclical">
-                        <span class="crypto-bias-label">Cyclical</span>
-                        <span class="crypto-bias-value" data-bias="cyclical">--</span>
-                    </div>
-                </div>
-                <div class="crypto-bias-bar-meta">
-                    <div class="crypto-bias-bar-alignment" id="cryptoBiasNote">Loading bias alignment</div>
-                    <div class="crypto-session-status compact" id="cryptoSessionStatus">
-                        <span class="session-pill">Fetching BTC session</span>
+                    <div class="crypto-spot-ticker" id="cryptoSpotTicker">--</div>
+                    <div class="crypto-bias-meta">
+                        <div class="crypto-session-status compact" id="cryptoSessionStatus">
+                            <span class="session-pill">Fetching BTC session</span>
+                        </div>
+                        <div class="pivot-health" id="pivotHealth">
+                            <span class="pivot-dot">o</span>
+                            <span class="pivot-text">Pivot unknown</span>
+                        </div>
                     </div>
                 </div>
             </section>
@@ -1400,73 +1397,99 @@
                 </div>
             </section>
 
-            <!-- Row 3: Strategy Filters -->
-            <section class="crypto-strategy-section">
-                <div class="crypto-strategy-header">
-                    <h2>STRATEGY FILTERS</h2>
-                <div class="crypto-strategy-controls">
-                    <label class="direction-toggle">
-                        <input type="checkbox" id="cryptoFilterLong" checked>
-                        <span class="direction-label long">LONG</span>
-                    </label>
-                    <label class="direction-toggle">
-                        <input type="checkbox" id="cryptoFilterShort" checked>
-                        <span class="direction-label short">SHORT</span>
-                    </label>
-                    <label class="direction-toggle auto-bias-toggle">
-                        <input type="checkbox" id="cryptoAutoBiasToggle" checked>
-                        <span class="direction-label neutral">AUTO BIAS</span>
-                    </label>
-                    <span class="header-divider">|</span>
-                    <label class="min-score-label">Min Score:</label>
-                    <input type="number" id="cryptoScoreThreshold" class="score-input" min="1" max="100" value="1">
+                        <!-- Row 3: Strategy Filters + BTC Bottom Signals (50/50) -->
+            <section class="crypto-strategy-bottom">
+                <div class="crypto-strategy-half">
+                    <div class="crypto-strategy-section">
+                        <div class="crypto-strategy-header">
+                            <h2>STRATEGY FILTERS</h2>
+                            <div class="crypto-strategy-controls">
+                                <label class="direction-toggle">
+                                    <input type="checkbox" id="cryptoFilterLong" checked>
+                                    <span class="direction-label long">LONG</span>
+                                </label>
+                                <label class="direction-toggle">
+                                    <input type="checkbox" id="cryptoFilterShort" checked>
+                                    <span class="direction-label short">SHORT</span>
+                                </label>
+                                <label class="direction-toggle auto-bias-toggle">
+                                    <input type="checkbox" id="cryptoAutoBiasToggle" checked>
+                                    <span class="direction-label neutral">AUTO BIAS</span>
+                                </label>
+                                <span class="header-divider">|</span>
+                                <label class="min-score-label">Min Score:</label>
+                                <input type="number" id="cryptoScoreThreshold" class="score-input" min="1" max="100" value="1">
+                            </div>
+                        </div>
+                        <div class="crypto-strategy-toggles" id="cryptoStrategyToggles">
+                            <label class="strategy-toggle">
+                                <input type="checkbox" class="crypto-strategy-cb" data-strategy="scout" checked data-direction="LONG">
+                                <span class="strategy-name">Scout (15m Early)</span>
+                            </label>
+                            <label class="strategy-toggle">
+                                <input type="checkbox" class="crypto-strategy-cb" data-strategy="sniper" checked data-direction="LONG">
+                                <span class="strategy-name">Sniper (1H Confirm)</span>
+                            </label>
+                            <label class="strategy-toggle">
+                                <input type="checkbox" class="crypto-strategy-cb" data-strategy="exhaustion" checked>
+                                <span class="strategy-name">Exhaustion</span>
+                            </label>
+                            <label class="strategy-toggle">
+                                <input type="checkbox" class="crypto-strategy-cb" data-strategy="triple_line" checked>
+                                <span class="strategy-name">Triple Line</span>
+                            </label>
+                            <label class="strategy-toggle">
+                                <input type="checkbox" class="crypto-strategy-cb" data-strategy="golden_touch" checked>
+                                <span class="strategy-name">Golden Touch</span>
+                            </label>
+                            <label class="strategy-toggle">
+                                <input type="checkbox" class="crypto-strategy-cb" data-strategy="pullback_entry" checked>
+                                <span class="strategy-name">Pullback Entry</span>
+                            </label>
+                            <label class="strategy-toggle">
+                                <input type="checkbox" class="crypto-strategy-cb" data-strategy="taurus_signal" checked>
+                                <span class="strategy-name">Taurus Signal</span>
+                            </label>
+                            <label class="strategy-toggle">
+                                <input type="checkbox" class="crypto-strategy-cb" data-strategy="ursa_signal" checked>
+                                <span class="strategy-name">Ursa Signal</span>
+                            </label>
+                            <label class="strategy-toggle">
+                                <input type="checkbox" class="crypto-strategy-cb" data-strategy="two_close_vol" checked>
+                                <span class="strategy-name">Two-Close + Vol</span>
+                            </label>
+                            <label class="strategy-toggle">
+                                <input type="checkbox" class="crypto-strategy-cb" data-strategy="zone_upgrade" checked>
+                                <span class="strategy-name">Zone Upgrade</span>
+                            </label>
+                        </div>
+                    </div>
                 </div>
-            </div>
-            <div class="crypto-strategy-toggles" id="cryptoStrategyToggles">
-                <label class="strategy-toggle">
-                    <input type="checkbox" class="crypto-strategy-cb" data-strategy="scout" checked data-direction="LONG">
-                    <span class="strategy-name">Scout (15m Early)</span>
-                </label>
-                <label class="strategy-toggle">
-                    <input type="checkbox" class="crypto-strategy-cb" data-strategy="sniper" checked data-direction="LONG">
-                    <span class="strategy-name">Sniper (1H Confirm)</span>
-                </label>
-                <label class="strategy-toggle">
-                    <input type="checkbox" class="crypto-strategy-cb" data-strategy="exhaustion" checked>
-                    <span class="strategy-name">Exhaustion</span>
-                </label>
-                    <label class="strategy-toggle">
-                        <input type="checkbox" class="crypto-strategy-cb" data-strategy="triple_line" checked>
-                        <span class="strategy-name">Triple Line</span>
-                    </label>
-                    <label class="strategy-toggle">
-                        <input type="checkbox" class="crypto-strategy-cb" data-strategy="golden_touch" checked>
-                        <span class="strategy-name">Golden Touch</span>
-                    </label>
-                    <label class="strategy-toggle">
-                        <input type="checkbox" class="crypto-strategy-cb" data-strategy="pullback_entry" checked>
-                        <span class="strategy-name">Pullback Entry</span>
-                    </label>
-                    <label class="strategy-toggle">
-                        <input type="checkbox" class="crypto-strategy-cb" data-strategy="taurus_signal" checked>
-                        <span class="strategy-name">Taurus Signal</span>
-                    </label>
-                    <label class="strategy-toggle">
-                        <input type="checkbox" class="crypto-strategy-cb" data-strategy="ursa_signal" checked>
-                        <span class="strategy-name">Ursa Signal</span>
-                    </label>
-                    <label class="strategy-toggle">
-                        <input type="checkbox" class="crypto-strategy-cb" data-strategy="two_close_vol" checked>
-                        <span class="strategy-name">Two-Close + Vol</span>
-                    </label>
-                    <label class="strategy-toggle">
-                        <input type="checkbox" class="crypto-strategy-cb" data-strategy="zone_upgrade" checked>
-                        <span class="strategy-name">Zone Upgrade</span>
-                    </label>
+                <div class="crypto-bottom-half">
+                    <div class="crypto-btc-signals-panel compact">
+                        <div class="btc-signals-header">
+                            <h2>BTC BOTTOM SIGNALS</h2>
+                            <div class="btc-signals-controls">
+                                <button class="btc-btn btc-refresh-btn" data-label="Refresh">Refresh</button>
+                                <button class="btc-btn secondary btc-reset-btn">Reset</button>
+                            </div>
+                        </div>
+                        <div class="btc-confluence-summary" id="cryptoBtcConfluenceSummary">
+                            <div class="confluence-meter">
+                                <span class="confluence-count">--</span>
+                                <span class="confluence-label">Signals Firing</span>
+                            </div>
+                            <div class="confluence-verdict">Loading...</div>
+                        </div>
+                        <div class="btc-api-status" id="cryptoBtcApiStatus"></div>
+                        <div class="btc-signals-grid compact" id="cryptoBtcSignalsGrid">
+                            <p class="empty-state">Loading BTC signals...</p>
+                        </div>
+                    </div>
                 </div>
             </section>
 
-            <!-- Row 4: BTC Bottom Signals (compact half-width under ideas/positions) -->
+            <!-- Row 4 placeholder end --> (compact half-width under ideas/positions) -->
             <section class="crypto-bottom-row compact">
                 <div class="crypto-bottom-spacer"></div>
                 <div class="crypto-btc-signals-panel compact">
@@ -1520,3 +1543,6 @@
     <script src="app.js?v=46"></script>
 </body>
 </html>
+
+
+

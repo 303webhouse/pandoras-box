@@ -3454,64 +3454,42 @@ function getBiasAlignmentStatus(cyclicalLevel, weeklyLevel) {
 }
 
 function renderCryptoBiasSummary() {
-    const grid = document.getElementById('cryptoBiasGrid');
-    if (!grid) return;
-
     const biasValues = {
         daily: dailyBiasFullData?.level || 'NEUTRAL',
         weekly: weeklyBiasFullData?.level || 'NEUTRAL',
         cyclical: cyclicalBiasFullData?.level || 'NEUTRAL'
     };
 
-    // Populate individual bias cards
-    grid.querySelectorAll('[data-bias]').forEach(el => {
-        const key = el.dataset.bias;
-        if (biasValues[key]) {
-            el.textContent = biasValues[key].replace('_', ' ');
-            // Color the value
-            const level = biasValues[key];
-            if (level.includes('TORO')) el.style.color = BIAS_COLORS[level]?.text || '#00e676';
-            else if (level.includes('URSA')) el.style.color = BIAS_COLORS[level]?.text || '#f44336';
-            else el.style.color = BIAS_COLORS.NEUTRAL?.text || '#78909c';
-        }
-    });
+    const inlineDaily = document.getElementById('cryptoBiasDaily');
+    const inlineWeekly = document.getElementById('cryptoBiasWeekly');
+    const inlineCyc = document.getElementById('cryptoBiasCyclical');
+    const inlineComposite = document.getElementById('cryptoCompositeInline');
 
-    // Populate composite bias bar — read directly from cached API response,
-    // not from hub DOM elements (which may not be rendered if user landed on /crypto).
+    if (inlineDaily) inlineDaily.textContent = (biasValues.daily || '--').replace('_', ' ');
+    if (inlineWeekly) inlineWeekly.textContent = (biasValues.weekly || '--').replace('_', ' ');
+    if (inlineCyc) inlineCyc.textContent = (biasValues.cyclical || '--').replace('_', ' ');
+    if (inlineComposite) inlineComposite.textContent = (_compositeBiasData?.bias_level || 'NEUTRAL').replace('_', ' ');
+
     const levelEl = document.getElementById('cryptoCompositeBiasLevel');
     const scoreEl = document.getElementById('cryptoCompositeBiasScore');
     const confEl = document.getElementById('cryptoCompositeBiasConfidence');
-    const biasBar = document.getElementById('cryptoBiasBar');
 
     const compositeLevel = (_compositeBiasData?.bias_level || 'NEUTRAL').replace(/_/g, ' ');
     const compositeScoreVal = typeof _compositeBiasData?.composite_score === 'number'
         ? _compositeBiasData.composite_score
         : parseFloat(_compositeBiasData?.composite_score || 0);
     const compositeConf = (_compositeBiasData?.confidence || 'LOW').toUpperCase();
+    const colors = BIAS_COLORS[_compositeBiasData?.bias_level] || BIAS_COLORS.NEUTRAL;
 
     if (levelEl) {
         levelEl.textContent = compositeLevel;
-        const biasColorKey = compositeLevel.replace(/\s/g, '_');
-        const biasColor = BIAS_COLORS[biasColorKey] || BIAS_COLORS.NEUTRAL;
-        levelEl.style.color = biasColor.text;
-        if (biasBar) biasBar.style.borderColor = biasColor.accent;
+        levelEl.style.color = colors?.text || '#9fb7ff';
     }
-    if (scoreEl) {
-        const scoreText = Number.isFinite(compositeScoreVal) ? compositeScoreVal.toFixed(2) : '--';
-        scoreEl.textContent = `(${scoreText})`;
-    }
+    if (scoreEl) scoreEl.textContent = Number.isFinite(compositeScoreVal) ? `(${compositeScoreVal.toFixed(2)})` : '(--)';
     if (confEl) {
         confEl.textContent = compositeConf;
-        confEl.className = 'crypto-bias-bar-confidence ' + compositeConf;
+        confEl.style.color = CONFIDENCE_COLORS[compositeConf] || CONFIDENCE_COLORS.LOW;
     }
-
-    // Alignment note
-    const note = document.getElementById('cryptoBiasNote');
-    if (note) {
-        note.textContent = getBiasAlignmentStatus(biasValues.cyclical, biasValues.weekly).note;
-    }
-
-    applyCryptoBiasPreset();
 }
 
 function getCryptoSignalPriority(signal) {
@@ -3649,6 +3627,7 @@ function renderCryptoMarketError() {
     });
 }
 
+$inject
 function renderCryptoMarketData() {
     if (!cryptoMarketData) return;
     const prices = cryptoMarketData.prices || {};
@@ -3656,12 +3635,11 @@ function renderCryptoMarketData() {
     const cvd = cryptoMarketData.cvd || {};
 
     const spot = prices.coinbase_spot;
-    const perp = prices.binance_perp;
+    const perps = prices.perps || {};\n    const perp = perps.okx ?? perps.binance_perp ?? null;
     const basis = prices.basis;
     const basisPct = prices.basis_pct;
     const binanceSpot = prices.binance_spot;
     const binanceSpotUpdated = prices.binance_spot_ts;
-    const perps = prices.perps || {};
     const perpSpread = perps.spread;
     const perpNote = perps.note;
 
@@ -3719,8 +3697,8 @@ function renderCryptoMarketData() {
     }
 
     if (fundingBinanceEl) {
-        fundingBinanceEl.textContent = formatFundingRate(funding.binance?.rate, 'Binance');
-        fundingBinanceEl.className = `micro-value ${funding.binance?.rate > 0 ? 'bearish' : funding.binance?.rate < 0 ? 'bullish' : 'neutral'}`;
+        fundingBinanceEl.textContent = formatFundingRate(funding.okx?.rate, 'Binance');
+        fundingBinanceEl.className = `micro-value ${funding.okx?.rate > 0 ? 'bearish' : funding.okx?.rate < 0 ? 'bullish' : 'neutral'}`;
     }
     if (fundingBybitEl) {
         fundingBybitEl.textContent = formatFundingRate(funding.bybit?.rate, 'Bybit');
@@ -3742,7 +3720,7 @@ function renderCryptoMarketData() {
         coinbaseUpdatedEl.textContent = new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
     }
 
-    renderOrderflow(cvd, cryptoMarketData.order_flow || []);
+    renderOrderflow(cvd, cryptoMarketData.order_flow || []);\n    updateCryptoSpotTicker();
 }
 
 function renderOrderflow(cvd, tape) {
@@ -8947,3 +8925,6 @@ window.closeOptionsPosition = closeOptionsPosition;
 document.addEventListener('DOMContentLoaded', () => {
     setTimeout(initOptionsTab, 1600);
 });
+
+
+
