@@ -39,6 +39,14 @@ _closed_trades = []
 _position_counter = 1
 
 
+def _normalize_signal_payloads(signals: Optional[List[Any]]) -> List[Dict[str, Any]]:
+    """Keep only dict payloads (skip numeric counters and other primitive values)."""
+    if not signals:
+        return []
+
+    return [sig for sig in signals if isinstance(sig, dict)]
+
+
 # =========================================================================
 # REQUEST MODELS
 # =========================================================================
@@ -1245,13 +1253,13 @@ async def get_active_signals_api():
     
     try:
         # First try Redis for fast access
-        redis_signals = await get_redis_signals()
+        redis_signals = _normalize_signal_payloads(await get_redis_signals())
         logger.info(f"📡 Redis returned {len(redis_signals)} signals")
         
         # Always try PostgreSQL too - signals might have expired from Redis
         pg_signals = []
         try:
-            pg_signals = await get_active_trade_ideas(limit=50)
+            pg_signals = _normalize_signal_payloads(await get_active_trade_ideas(limit=50))
             logger.info(f"📡 PostgreSQL returned {len(pg_signals)} signals")
         except Exception as db_err:
             logger.warning(f"Could not fetch from PostgreSQL: {db_err}")
@@ -1569,10 +1577,10 @@ async def get_signal_queue():
     from database.redis_client import get_active_signals as get_redis_signals
     
     try:
-        signals = await get_redis_signals()
+        signals = _normalize_signal_payloads(await get_redis_signals())
         
         if not signals:
-            signals = await get_active_trade_ideas(limit=50)
+            signals = _normalize_signal_payloads(await get_active_trade_ideas(limit=50))
         
         signals.sort(key=lambda x: x.get('score', 0) or 0, reverse=True)
         
@@ -1642,7 +1650,7 @@ async def debug_signals():
     
     try:
         # Check Redis
-        redis_signals = await get_redis_signals()
+        redis_signals = _normalize_signal_payloads(await get_redis_signals())
         debug_info["redis"]["count"] = len(redis_signals)
         if redis_signals:
             debug_info["redis"]["sample"] = {
@@ -1697,7 +1705,7 @@ async def clear_all_signals():
     
     try:
         # Clear Redis signals
-        redis_signals = await get_redis_signals()
+        redis_signals = _normalize_signal_payloads(await get_redis_signals())
         for sig in redis_signals:
             sig_id = sig.get('signal_id')
             if sig_id:
