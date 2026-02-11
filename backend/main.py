@@ -189,6 +189,7 @@ from api.uw_integration import router as uw_integration_router
 from api.uw import router as uw_router
 from api.options_positions import router as options_router
 from api.analyzer import router as analyzer_router
+from api.crypto_market import router as crypto_market_router
 
 app.include_router(webhook_router, prefix="/webhook", tags=["webhooks"])
 app.include_router(circuit_breaker_router, prefix="/webhook", tags=["circuit-breaker"])
@@ -211,6 +212,7 @@ app.include_router(uw_integration_router, prefix="/api", tags=["unusual-whales"]
 app.include_router(uw_router, prefix="/api", tags=["unusual-whales"])
 app.include_router(options_router, prefix="/api", tags=["options"])
 app.include_router(analyzer_router, prefix="/api", tags=["analyzer"])
+app.include_router(crypto_market_router, prefix="/api", tags=["crypto-market"])
 
 # Serve frontend static files
 # Multiple path resolution strategies for different deployment environments
