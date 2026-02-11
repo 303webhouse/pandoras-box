@@ -4,10 +4,10 @@
  */
 
 // Configuration
-// Use Railway backend for production, localhost for local development
-const BACKEND_HOST = 'pandoras-box-production.up.railway.app';
-const WS_URL = `wss://${BACKEND_HOST}/ws`;
-const API_URL = `https://${BACKEND_HOST}/api`;
+// Resolve backend from current host so /app and /app/crypto always hit the same deployment.
+const IS_HTTPS = window.location.protocol === 'https:';
+const WS_URL = `${IS_HTTPS ? 'wss' : 'ws'}://${window.location.host}/ws`;
+const API_URL = `${window.location.origin}/api`;
 
 const BIAS_COLORS = {
     TORO_MAJOR: { bg: '#0a2e1a', accent: '#00e676', text: '#00e676' },
@@ -1469,8 +1469,19 @@ async function fetchTimeframeBias() {
         const resp = await fetch(`${API_URL}/bias/composite/timeframes`);
         const data = await resp.json();
         if (data && data.timeframes) {
+            // Backfill composite cache so bias strips still render when /bias/composite lags.
+            _compositeBiasData = {
+                ...(typeof _compositeBiasData === 'object' && _compositeBiasData ? _compositeBiasData : {}),
+                bias_level: data.composite_bias || _compositeBiasData?.bias_level || 'NEUTRAL',
+                composite_score: typeof data.composite_score === 'number'
+                    ? data.composite_score
+                    : (_compositeBiasData?.composite_score ?? 0),
+                confidence: data.confidence || _compositeBiasData?.confidence || 'LOW'
+            };
+
             renderTimeframeCards(data);
             renderSectorRotationStrip(data.sector_rotation);
+            renderCryptoBiasSummary();
             
             // Apply pulse to composite banner at extremes
             const banner = document.getElementById('compositeBiasBanner');
@@ -3653,7 +3664,7 @@ async function loadCryptoMarketData() {
 
 function renderCryptoMarketError() {
     const ids = [
-        'cryptoCoinbaseSpot', 'cryptoBinancePerp', 'cryptoBasis', 'cryptoFundingBinance',
+        'cryptoCoinbaseSpot', 'cryptoBinanceSpot', 'cryptoPerpSpread', 'cryptoFundingBinance',
         'cryptoFundingBybit', 'cryptoCvdValue', 'cryptoCvdFlow', 'cryptoSpotLead',
         'cryptoSpotLeadNote', 'cryptoTakerBuy', 'cryptoTakerSell', 'cryptoCvdTrend'
     ];
@@ -3670,6 +3681,7 @@ function renderCryptoMarketData() {
     const prices = cryptoMarketData.prices || {};
     const funding = cryptoMarketData.funding || {};
     const cvd = cryptoMarketData.cvd || {};
+    const errors = Array.isArray(cryptoMarketData.errors) ? cryptoMarketData.errors : [];
 
     const rememberNumber = (key, value) => {
         const num = Number(value);
@@ -3689,9 +3701,13 @@ function renderCryptoMarketData() {
     };
 
     const perps = prices.perps || {};
-    const spot = rememberNumber('coinbase_spot', prices.coinbase_spot ?? prices.binance_spot);
-    const perp = rememberNumber('perp_price', perps.okx ?? perps.binance_perp);
-    const binanceSpot = rememberNumber('binance_spot', prices.binance_spot);
+    const spotRaw = prices.coinbase_spot ?? prices.coinbase ?? prices.spot_coinbase ?? null;
+    const binanceSpotRaw = prices.binance_spot ?? prices.binance ?? prices.spot_binance ?? prices.spot ?? null;
+    const perpRaw = perps.okx ?? perps.binance_perp ?? perps.perp ?? prices.perp_price ?? prices.perp ?? null;
+
+    const spot = rememberNumber('coinbase_spot', spotRaw ?? binanceSpotRaw);
+    const perp = rememberNumber('perp_price', perpRaw);
+    const binanceSpot = rememberNumber('binance_spot', binanceSpotRaw);
     const basis = rememberNumber('basis', prices.basis ?? (spot !== null && perp !== null ? spot - perp : null));
     const basisPct = rememberNumber('basis_pct', prices.basis_pct ?? (basis !== null && perp ? (basis / perp) * 100 : null));
     const binanceSpotUpdated = rememberString('binance_spot_ts', prices.binance_spot_ts);
@@ -3753,26 +3769,27 @@ function renderCryptoMarketData() {
     }
 
     if (fundingBinanceEl) {
-        const okxFunding = rememberNumber('funding_okx', funding.okx?.rate);
-        fundingBinanceEl.textContent = formatFundingRate(okxFunding, 'Binance');
+        const okxFunding = rememberNumber('funding_okx', funding.okx?.rate ?? funding.binance?.rate ?? funding.okx_rate);
+        fundingBinanceEl.textContent = formatFundingRate(okxFunding, 'OKX');
         fundingBinanceEl.className = `micro-value ${okxFunding > 0 ? 'bearish' : okxFunding < 0 ? 'bullish' : 'neutral'}`;
     }
     if (fundingBybitEl) {
-        const bybitFunding = rememberNumber('funding_bybit', funding.bybit?.rate);
+        const bybitFunding = rememberNumber('funding_bybit', funding.bybit?.rate ?? funding.bybit_rate);
+        const bybitBlocked = errors.some((err) => String(err).toLowerCase().includes('bybit_funding'));
         const bybitText = bybitFunding === null || bybitFunding === undefined
-            ? 'Bybit: unavailable'
+            ? (bybitBlocked ? 'Bybit: blocked (403)' : 'Bybit: unavailable')
             : formatFundingRate(bybitFunding, 'Bybit');
         fundingBybitEl.textContent = bybitText;
-        fundingBybitEl.className = `micro-sub ${bybitFunding > 0 ? 'bearish' : bybitFunding < 0 ? 'bullish' : 'neutral'}`;
+        fundingBybitEl.className = `micro-sub ${bybitFunding > 0 ? 'bearish' : bybitFunding < 0 ? 'bullish' : bybitBlocked ? 'bearish' : 'neutral'}`;
     }
 
     if (cvdValueEl) {
-        const netUsd = rememberNumber('cvd_net_usd', cvd.net_usd);
+        const netUsd = rememberNumber('cvd_net_usd', cvd.net_usd ?? cvd.net ?? cvd.value_usd);
         cvdValueEl.textContent = netUsd !== null ? formatSignedUsd(netUsd) : '--';
         cvdValueEl.className = `micro-value ${netUsd > 0 ? 'bullish' : netUsd < 0 ? 'bearish' : 'neutral'}`;
     }
     if (cvdFlowEl) {
-        const flow = rememberString('cvd_direction', cvd.direction) || 'NEUTRAL';
+        const flow = rememberString('cvd_direction', cvd.direction ?? cvd.trend) || 'NEUTRAL';
         cvdFlowEl.textContent = flow.replace('_', ' ');
         cvdFlowEl.className = `micro-sub ${flow.includes('BULL') ? 'bullish' : flow.includes('BEAR') ? 'bearish' : 'neutral'}`;
     }
