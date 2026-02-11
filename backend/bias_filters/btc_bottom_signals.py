@@ -162,6 +162,16 @@ _raw_data: Dict[str, Any] = {}
 _initialized = False
 
 
+def _to_float(value: Any) -> Optional[float]:
+    """Convert unknown numeric payloads to float safely."""
+    try:
+        if value is None:
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 async def _load_from_redis() -> None:
     """Load signal states from Redis on startup"""
     global _bottom_signals, _raw_data, _initialized
@@ -303,11 +313,16 @@ async def _fetch_oi_signal() -> Dict[str, Any]:
     
     try:
         data = await get_open_interest()
+        oi_change = _to_float(data.get("oi_change_4h"))
+        price_change = _to_float(data.get("price_change_4h"))
+        oi_text = f"{oi_change:+.2f}%" if oi_change is not None else "--"
+        price_text = f"{price_change:+.2f}%" if price_change is not None else "--"
+
         return {
             "status": data.get("signal", SignalStatus.UNKNOWN.value),
-            "value": f"OI: {data.get('oi_change_4h', 0):+.2f}% | Price: {data.get('price_change_4h', 0):+.2f}%",
-            "oi_change": data.get("oi_change_4h"),
-            "price_change": data.get("price_change_4h"),
+            "value": f"OI: {oi_text} | Price: {price_text}",
+            "oi_change": oi_change,
+            "price_change": price_change,
             "divergence": data.get("divergence"),
             "updated_at": data.get("timestamp")
         }
@@ -323,11 +338,16 @@ async def _fetch_liquidations_signal() -> Dict[str, Any]:
     
     try:
         data = await get_liquidations()
+        long_pct = _to_float(data.get("long_pct"))
+        total_liq = _to_float(data.get("total_liquidations"))
+        long_text = f"{long_pct:.0f}%" if long_pct is not None else "--"
+        total_text = f"${total_liq/1e6:.1f}M" if total_liq is not None else "--"
+
         return {
             "status": data.get("signal", SignalStatus.UNKNOWN.value),
-            "value": f"{data.get('long_pct', 50):.0f}% Long | ${data.get('total_liquidations', 0)/1e6:.1f}M",
-            "long_pct": data.get("long_pct"),
-            "total_usd": data.get("total_liquidations"),
+            "value": f"{long_text} Long | {total_text}",
+            "long_pct": long_pct,
+            "total_usd": total_liq,
             "composition": data.get("composition"),
             "updated_at": data.get("timestamp")
         }
@@ -405,10 +425,13 @@ async def _fetch_orderbook_signal() -> Dict[str, Any]:
     
     try:
         data = await get_spot_orderbook_skew()
+        imbalance = _to_float(data.get("imbalance_pct"))
+        imbalance_text = f"{imbalance:+.1f}%" if imbalance is not None else "--"
+
         return {
             "status": data.get("signal", SignalStatus.UNKNOWN.value),
-            "value": f"{data.get('imbalance_pct', 0):+.1f}% imbalance",
-            "imbalance": data.get("imbalance_pct"),
+            "value": f"{imbalance_text} imbalance",
+            "imbalance": imbalance,
             "bid_depth": data.get("bid_depth"),
             "ask_depth": data.get("ask_depth"),
             "sentiment": data.get("sentiment"),
@@ -426,13 +449,16 @@ async def _fetch_basis_signal() -> Dict[str, Any]:
     
     try:
         data = await get_quarterly_basis()
+        basis_ann = _to_float(data.get("basis_annualized"))
+        basis_text = f"{basis_ann:.2f}% ann." if basis_ann is not None else "unknown"
+
         return {
             "status": data.get("signal", SignalStatus.UNKNOWN.value),
-            "value": f"{data.get('basis_annualized', 0):.2f}% ann.",
-            "basis_annualized": data.get("basis_annualized"),
-            "basis_pct": data.get("basis_pct"),
-            "spot_price": data.get("spot_price"),
-            "futures_price": data.get("futures_price"),
+            "value": basis_text,
+            "basis_annualized": basis_ann,
+            "basis_pct": _to_float(data.get("basis_pct")),
+            "spot_price": _to_float(data.get("spot_price")),
+            "futures_price": _to_float(data.get("futures_price")),
             "sentiment": data.get("sentiment"),
             "updated_at": data.get("timestamp")
         }

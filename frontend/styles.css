@@ -1,4 +1,4 @@
-/* Pandora - Dark Teal Aesthetic */
+﻿/* Pandora - Dark Teal Aesthetic */
 
 :root {
     --dark-bg: #0a0e27;
@@ -11,6 +11,8 @@
     --accent-orange: #FF6B35;
     --accent-green-dark: #4CAF50;
     --accent-orange-dark: #FF8C42;
+    --accent-red: #e5370e;
+    --bearish-color: #e5370e;
 }
 
 * {
@@ -204,7 +206,7 @@ body {
 }
 
 .pivot-health.offline {
-    color: #f44336;
+    color: #e5370e;
 }
 
 .pivot-dot {
@@ -397,7 +399,7 @@ body {
 }
 
 @keyframes bias-flash {
-    0% { box-shadow: 0 0 20px rgba(244, 67, 54, 0.4); }
+    0% { box-shadow: 0 0 20px rgba(229, 55, 14, 0.4); }
     100% { box-shadow: none; }
 }
 
@@ -793,7 +795,7 @@ body.override-active-bearish .override-toggle[data-active="true"] {
 .tf-momentum.strengthening { color: #66bb6a; }
 .tf-momentum.strengthening .tf-momentum-arrow { color: #00e676; }
 .tf-momentum.weakening { color: #ff9800; }
-.tf-momentum.weakening .tf-momentum-arrow { color: #f44336; }
+.tf-momentum.weakening .tf-momentum-arrow { color: #e5370e; }
 
 /* Divergence alert */
 .tf-divergence {
@@ -884,8 +886,8 @@ body.override-active-bearish .override-toggle[data-active="true"] {
 .tf-card.NEUTRAL .tf-level { color: #78909c; }
 .tf-card.URSA_MINOR { border-color: #ff9800; }
 .tf-card.URSA_MINOR .tf-level { color: #ff9800; }
-.tf-card.URSA_MAJOR { border-color: #f44336; }
-.tf-card.URSA_MAJOR .tf-level { color: #f44336; }
+.tf-card.URSA_MAJOR { border-color: #e5370e; }
+.tf-card.URSA_MAJOR .tf-level { color: #e5370e; }
 
 /* Extreme pulse animation */
 @keyframes bias-pulse-green {
@@ -894,8 +896,8 @@ body.override-active-bearish .override-toggle[data-active="true"] {
 }
 
 @keyframes bias-pulse-red {
-    0%, 100% { border-color: #f44336; box-shadow: 0 0 4px rgba(244, 67, 54, 0.3); }
-    50% { border-color: #f44336; box-shadow: 0 0 12px rgba(244, 67, 54, 0.6); }
+    0%, 100% { border-color: #e5370e; box-shadow: 0 0 4px rgba(229, 55, 14, 0.3); }
+    50% { border-color: #e5370e; box-shadow: 0 0 12px rgba(229, 55, 14, 0.6); }
 }
 
 .tf-card.pulse-toro { animation: bias-pulse-green 2s ease-in-out infinite; }
@@ -953,9 +955,9 @@ body.override-active-bearish .override-toggle[data-active="true"] {
 }
 
 .sector-chip.DUMPING {
-    background: rgba(244, 67, 54, 0.12);
-    color: #f44336;
-    border-color: rgba(244, 67, 54, 0.3);
+    background: rgba(229, 55, 14, 0.12);
+    color: #e5370e;
+    border-color: rgba(229, 55, 14, 0.3);
 }
 
 .sector-chip.STEADY {
@@ -1040,7 +1042,7 @@ body.override-active-bearish .override-toggle[data-active="true"] {
 /* Crisis Alert Banner */
 .crisis-alert-banner {
     display: none;
-    background: linear-gradient(90deg, #dc2626, #991b1b);
+    background: linear-gradient(90deg, #e5370e, #e5370e);
     color: #ffffff;
     padding: 10px 16px;
     border-radius: 6px;
@@ -1049,7 +1051,7 @@ body.override-active-bearish .override-toggle[data-active="true"] {
     text-align: center;
     margin-top: 8px;
     animation: crisis-pulse 1.5s infinite;
-    border: 2px solid #ef4444;
+    border: 2px solid #e5370e;
 }
 
 .crisis-alert-banner.active {
@@ -1081,10 +1083,10 @@ body.override-active-bearish .override-toggle[data-active="true"] {
 
 @keyframes crisis-pulse {
     0%, 100% { 
-        box-shadow: 0 0 5px #dc2626, 0 0 10px rgba(220, 38, 38, 0.5); 
+        box-shadow: 0 0 5px #e5370e, 0 0 10px rgba(229, 55, 14, 0.5); 
     }
     50% { 
-        box-shadow: 0 0 15px #dc2626, 0 0 25px rgba(220, 38, 38, 0.7); 
+        box-shadow: 0 0 15px #e5370e, 0 0 25px rgba(229, 55, 14, 0.7); 
     }
 }
 
@@ -1123,12 +1125,12 @@ body.override-active-bearish .override-toggle[data-active="true"] {
 }
 
 .savita-reminder.stale {
-    background: rgba(239, 68, 68, 0.15);
-    border-color: #ef4444;
+    background: rgba(229, 55, 14, 0.15);
+    border-color: #e5370e;
 }
 
 .savita-reminder.stale .reminder-link {
-    color: #ef4444;
+    color: #e5370e;
 }
 
 /* Savita Update Modal */
@@ -1207,8 +1209,8 @@ body.override-active-bearish .override-toggle[data-active="true"] {
 }
 
 .savita-current.stale {
-    background: rgba(239, 68, 68, 0.1);
-    color: #ef4444;
+    background: rgba(229, 55, 14, 0.1);
+    color: #e5370e;
 }
 
 .savita-modal-footer {
@@ -1452,8 +1454,8 @@ body.override-active-bearish .override-toggle[data-active="true"] {
 }
 
 .bias-shift-deteriorating {
-    color: #ef4444;
-    background: rgba(239, 68, 68, 0.1);
+    color: #e5370e;
+    background: rgba(229, 55, 14, 0.1);
 }
 
 .bias-shift-stable {
@@ -1645,10 +1647,10 @@ body.override-active-bearish .override-toggle[data-active="true"] {
 }
 
 .price-level.stop {
-    background: rgba(239, 68, 68, 0.15);
+    background: rgba(229, 55, 14, 0.15);
 }
 .price-level.stop .level-value {
-    color: #ef4444;
+    color: #e5370e;
 }
 
 .price-level.target, .price-level.target2 {
@@ -1885,8 +1887,8 @@ body.override-active-bearish .override-toggle[data-active="true"] {
 }
 
 .position-remove-btn:hover {
-    border-color: #ef4444;
-    color: #ef4444;
+    border-color: #e5370e;
+    color: #e5370e;
 }
 
 .position-card-header {
@@ -2567,10 +2569,10 @@ body.override-active-bearish .override-toggle[data-active="true"] {
 
 /* KODIAK CALL - Strong Bearish Signal (Bear God) */
 .signal-card.KODIAK_CALL {
-    background: linear-gradient(135deg, rgba(239, 68, 68, 0.15) 0%, rgba(185, 28, 28, 0.25) 100%);
-    border: 2px solid #ef4444;
+    background: linear-gradient(135deg, rgba(229, 55, 14, 0.15) 0%, rgba(229, 55, 14, 0.25) 100%);
+    border: 2px solid #e5370e;
     border-left-width: 8px;
-    box-shadow: 0 0 20px rgba(239, 68, 68, 0.4), 0 0 40px rgba(239, 68, 68, 0.2);
+    box-shadow: 0 0 20px rgba(229, 55, 14, 0.4), 0 0 40px rgba(229, 55, 14, 0.2);
     animation: kodiakGlow 1.5s ease-in-out infinite alternate;
     position: relative;
     overflow: hidden;
@@ -2579,7 +2581,7 @@ body.override-active-bearish .override-toggle[data-active="true"] {
 /* No emoji - clean design */
 
 .signal-card.KODIAK_CALL .signal-type {
-    background: linear-gradient(90deg, #ef4444, #f87171);
+    background: linear-gradient(90deg, #e5370e, #e5370e);
     color: #000;
     font-weight: 800;
     text-shadow: none;
@@ -2590,10 +2592,10 @@ body.override-active-bearish .override-toggle[data-active="true"] {
 
 @keyframes kodiakGlow {
     0% {
-        box-shadow: 0 0 20px rgba(239, 68, 68, 0.4), 0 0 40px rgba(239, 68, 68, 0.2);
+        box-shadow: 0 0 20px rgba(229, 55, 14, 0.4), 0 0 40px rgba(229, 55, 14, 0.2);
     }
     100% {
-        box-shadow: 0 0 30px rgba(239, 68, 68, 0.6), 0 0 60px rgba(239, 68, 68, 0.3), 0 0 80px rgba(239, 68, 68, 0.1);
+        box-shadow: 0 0 30px rgba(229, 55, 14, 0.6), 0 0 60px rgba(229, 55, 14, 0.3), 0 0 80px rgba(229, 55, 14, 0.1);
     }
 }
 
@@ -2612,7 +2614,7 @@ body.override-active-bearish .override-toggle[data-active="true"] {
 }
 
 .signal-card.KODIAK_CALL .score-tier {
-    background: #ef4444;
+    background: #e5370e;
     color: #fff;
 }
 
@@ -3104,7 +3106,7 @@ body.override-active-bearish .override-toggle[data-active="true"] {
 }
 
 .loss-reason.setup-failed {
-    border-left: 4px solid #ef4444;
+    border-left: 4px solid #e5370e;
 }
 
 .loss-reason.execution-error {
@@ -3159,25 +3161,25 @@ body.override-active-bearish .override-toggle[data-active="true"] {
 }
 
 .modal-btn.close-position {
-    background: #ef4444;
+    background: #e5370e;
     color: white;
 }
 
 .modal-btn.close-position:hover {
-    background: #dc2626;
+    background: #e5370e;
 }
 
 .modal-btn.remove-position {
-    background: #ef4444;
+    background: #e5370e;
     color: white;
 }
 
 .modal-btn.remove-position:hover {
-    background: #dc2626;
+    background: #e5370e;
 }
 
 .warning-text {
-    color: #ef4444;
+    color: #e5370e;
     font-weight: 700;
     text-transform: uppercase;
 }
@@ -5602,8 +5604,8 @@ body.override-active-bearish .override-toggle[data-active="true"] {
 }
 
 .flow-score-circle.low {
-    background: rgba(239, 68, 68, 0.2);
-    border-color: #EF4444;
+    background: rgba(229, 55, 14, 0.2);
+    border-color: #e5370e;
 }
 
 .flow-score-circle.medium {
@@ -5634,7 +5636,7 @@ body.override-active-bearish .override-toggle[data-active="true"] {
     line-height: 1.4;
 }
 
-.flow-score-label.low { color: #EF4444; }
+.flow-score-label.low { color: #e5370e; }
 .flow-score-label.medium { color: #FBBF24; }
 .flow-score-label.high { color: var(--accent-lime); }
 .flow-score-label.exceptional { color: #8B5CF6; }
@@ -5748,7 +5750,7 @@ body.override-active-bearish .override-toggle[data-active="true"] {
 }
 
 .flow-verdict.skip {
-    color: #EF4444;
+    color: #e5370e;
 }
 
 .flow-verdict.maybe {
@@ -6130,7 +6132,7 @@ body.override-active-bearish .override-toggle[data-active="true"] {
     border-bottom-color: var(--accent-lime);
 }
 
-/* KB Info Icon (ⓘ) next to factors */
+/* KB Info Icon (â“˜) next to factors */
 .kb-info-icon {
     display: inline-flex;
     align-items: center;
@@ -6164,7 +6166,7 @@ body.override-active-bearish .override-toggle[data-active="true"] {
 }
 
 .kb-factor-link::after {
-    content: 'ⓘ';
+    content: 'â“˜';
     font-size: 10px;
     margin-left: 6px;
     opacity: 0.5;
@@ -6195,7 +6197,7 @@ body.override-active-bearish .override-toggle[data-active="true"] {
 }
 
 .kb-link::after {
-    content: 'ⓘ';
+    content: 'â“˜';
     font-size: 10px;
     margin-left: 4px;
     opacity: 0;
@@ -6235,7 +6237,7 @@ h3 .kb-link::after {
 }
 
 .kb-term-dynamic::after {
-    content: 'ⓘ';
+    content: 'â“˜';
     font-size: 9px;
     margin-left: 3px;
     opacity: 0;
@@ -6913,7 +6915,7 @@ body[data-mode="crypto"] .crypto-shell {
 }
 
 /* =============================================
-   CRYPTO SCALPER — SHARED
+   CRYPTO SCALPER â€” SHARED
    ============================================= */
 
 .crypto-panel-header {
@@ -6958,7 +6960,7 @@ body[data-mode="crypto"] .crypto-shell {
 }
 
 /* =============================================
-   CRYPTO SCALPER — BIAS BAR (Row 1)
+   CRYPTO SCALPER â€” BIAS BAR (Row 1)
    ============================================= */
 
 .crypto-bias-bar {
@@ -7067,7 +7069,7 @@ body[data-mode="crypto"] .crypto-shell {
 }
 
 /* =============================================
-   CRYPTO SCALPER — MAIN CONTENT (Row 2)
+   CRYPTO SCALPER â€” MAIN CONTENT (Row 2)
    ============================================= */
 
 .crypto-main-content {
@@ -7185,7 +7187,7 @@ body[data-mode="crypto"] .crypto-shell {
 
 .micro-value.bearish,
 .micro-sub.bearish {
-    color: #f44336;
+    color: #e5370e;
 }
 
 .micro-value.neutral,
@@ -7348,7 +7350,7 @@ body[data-mode="crypto"] .crypto-shell {
 }
 
 .orderflow-tape-row.sell {
-    color: #f44336;
+    color: #e5370e;
 }
 
 .auto-bias-toggle .direction-label.neutral {
@@ -7410,7 +7412,7 @@ body[data-mode="crypto"] .crypto-shell {
 }
 
 .crypto-signal-card.KODIAK_CALL {
-    border-left: 3px solid #f44336;
+    border-left: 3px solid #e5370e;
 }
 
 .crypto-signal-header {
@@ -7454,7 +7456,7 @@ body[data-mode="crypto"] .crypto-shell {
 
 .crypto-badge.kodiak {
     background: rgba(244, 63, 94, 0.25);
-    color: #fca5a5;
+    color: #e5370e;
 }
 
 .crypto-badge.scout {
@@ -7557,8 +7559,8 @@ body[data-mode="crypto"] .crypto-shell {
 
 .crypto-signal-actions .dismiss-btn:hover {
     background: rgba(244, 63, 94, 0.15);
-    border-color: #f44336;
-    color: #f44336;
+    border-color: #e5370e;
+    color: #e5370e;
 }
 
 /* Positions Panel */
@@ -7600,10 +7602,10 @@ body[data-mode="crypto"] .crypto-shell {
 }
 
 .crypto-position-direction.LONG { color: var(--accent-lime); }
-.crypto-position-direction.SHORT { color: #f44336; }
+.crypto-position-direction.SHORT { color: #e5370e; }
 
 /* =============================================
-   CRYPTO SCALPER — STRATEGY FILTERS (Row 3)
+   CRYPTO SCALPER â€” STRATEGY FILTERS (Row 3)
    ============================================= */
 
 .crypto-strategy-section {
@@ -7642,7 +7644,7 @@ body[data-mode="crypto"] .crypto-shell {
 }
 
 /* =============================================
-   CRYPTO SCALPER — BOTTOM ROW (Row 4)
+   CRYPTO SCALPER â€” BOTTOM ROW (Row 4)
    ============================================= */
 
 .crypto-bottom-row {
@@ -8127,8 +8129,8 @@ body[data-mode="crypto"] .crypto-shell {
 }
 
 .zone-label.zone-capitulation, .zone-label.zone-bearish {
-    background: rgba(239, 68, 68, 0.2);
-    color: #ef4444;
+    background: rgba(229, 55, 14, 0.2);
+    color: #e5370e;
 }
 
 .zone-label.zone-waterfall, .zone-label.zone-extreme {
@@ -8353,7 +8355,7 @@ body[data-mode="crypto"] .crypto-shell {
 
 .position-dte.safe { background: rgba(124, 255, 107, 0.2); }
 .position-dte.warning { background: rgba(234, 179, 8, 0.2); }
-.position-dte.danger { background: rgba(239, 68, 68, 0.2); }
+.position-dte.danger { background: rgba(229, 55, 14, 0.2); }
 
 .dte-value {
     font-size: 1.1rem;
@@ -8949,7 +8951,7 @@ body[data-mode="crypto"] .crypto-shell {
 .watchlist-error {
     text-align: center;
     padding: 40px 20px;
-    color: #f44336;
+    color: #e5370e;
     font-size: 13px;
 }
 
@@ -9356,8 +9358,8 @@ body[data-mode="crypto"] .crypto-shell {
 }
 
 .analysis-pill.bad {
-    background: rgba(244, 67, 54, 0.2);
-    color: #ff8a80;
+    background: rgba(229, 55, 14, 0.2);
+    color: #e5370e;
 }
 
 .analysis-pill.neutral {
@@ -9410,4 +9412,5 @@ body[data-mode="crypto"] .crypto-shell {
 
 /* Padding match equities */
 .crypto-shell {padding:18px 22px;}
+
 

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Pandora's Box - Frontend Application
  * Real-time WebSocket connection for multi-device sync
  */
@@ -14,13 +14,13 @@ const BIAS_COLORS = {
     TORO_MINOR: { bg: '#1a2e1a', accent: '#66bb6a', text: '#66bb6a' },
     NEUTRAL:    { bg: '#1a2228', accent: '#78909c', text: '#78909c' },
     URSA_MINOR: { bg: '#2e1a0a', accent: '#ff9800', text: '#ff9800' },
-    URSA_MAJOR: { bg: '#2e0a0a', accent: '#f44336', text: '#f44336' },
+    URSA_MAJOR: { bg: '#2e0a0a', accent: '#e5370e', text: '#e5370e' },
 };
 
 const CONFIDENCE_COLORS = {
     HIGH: '#00e676',
     MEDIUM: '#ff9800',
-    LOW: '#f44336',
+    LOW: '#e5370e',
 };
 
 // Shared helpers
@@ -45,7 +45,7 @@ function changeColor(value) {
     if (value === null || value === undefined || Number.isNaN(value)) return '#78909c';
     const num = Number(value);
     if (num > 0) return '#4caf50';
-    if (num < 0) return '#f44336';
+    if (num < 0) return '#e5370e';
     return '#78909c';
 }
 
@@ -103,6 +103,7 @@ let _compositeBiasData = null;
 let _open_positions_cache = [];
 let cryptoMarketData = null;
 let cryptoMarketTimer = null;
+let cryptoMarketLastGood = {};
 
 // Cyclical Bias Factor State
 let cyclicalBiasFullData = null;
@@ -406,7 +407,7 @@ function showTradeOnChart(signal) {
     // For full price level display, we'd need TradingView Advanced Charts (paid)
     // For now, the signal details panel shows the levels clearly
     
-    console.log(`📊 Showing ${signal.ticker} on chart with levels:`, window.activePriceLevels?.[signal.ticker]);
+    console.log(`ðŸ“Š Showing ${signal.ticker} on chart with levels:`, window.activePriceLevels?.[signal.ticker]);
 }
 
 function clearChartLevels() {
@@ -458,7 +459,7 @@ function drawLevelsOnChart() {
 
         const shapes = [
             { price: levels.entry, color: '#22c55e', text: 'Entry' },
-            { price: levels.stop, color: '#ef4444', text: 'Stop' },
+            { price: levels.stop, color: '#e5370e', text: 'Stop' },
             { price: levels.target1, color: '#3b82f6', text: 'Target' },
             { price: levels.target2, color: '#6366f1', text: 'Target 2' }
         ];
@@ -488,12 +489,12 @@ function drawLevelsOnChart() {
 
 // WebSocket Connection
 function initWebSocket() {
-    console.log('🔌 Connecting to Pandora\'s Box...');
+    console.log('ðŸ”Œ Connecting to Pandora\'s Box...');
     
     ws = new WebSocket(WS_URL);
     
     ws.onopen = () => {
-        console.log('✅ Connected to backend');
+        console.log('âœ… Connected to backend');
         updateConnectionStatus(true);
         
         // Send heartbeat every 30 seconds
@@ -514,17 +515,17 @@ function initWebSocket() {
             const message = JSON.parse(event.data);
             handleWebSocketMessage(message);
         } catch (e) {
-            console.warn('⚠️ Non-JSON message received:', event.data);
+            console.warn('âš ï¸ Non-JSON message received:', event.data);
         }
     };
     
     ws.onerror = (error) => {
-        console.error('❌ WebSocket error:', error);
+        console.error('âŒ WebSocket error:', error);
         updateConnectionStatus(false);
     };
     
     ws.onclose = () => {
-        console.log('🔌 Connection closed. Reconnecting...');
+        console.log('ðŸ”Œ Connection closed. Reconnecting...');
         updateConnectionStatus(false);
         
         // Reconnect after 3 seconds
@@ -533,7 +534,7 @@ function initWebSocket() {
 }
 
 function handleWebSocketMessage(message) {
-    console.log('📨 Received:', message);
+    console.log('ðŸ“¨ Received:', message);
     
     switch (message.type) {
         case 'NEW_SIGNAL':
@@ -579,14 +580,14 @@ function handleWebSocketMessage(message) {
             break;
         case 'FLOW_UPDATE':
             // New flow data from Discord bot via UW - refresh the Options Flow section
-            console.log(`🐋 Flow update: ${message.count} tickers (${(message.tickers_updated || []).join(', ')})`);
+            console.log(`ðŸ‹ Flow update: ${message.count} tickers (${(message.tickers_updated || []).join(', ')})`);
             loadFlowData();
             checkFlowStatus();
             break;
     }
 }
 
-// Audio alert for new signals (uses Web Audio API — no file needed)
+// Audio alert for new signals (uses Web Audio API â€” no file needed)
 function playSignalAlert(priority = false) {
     try {
         const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -646,7 +647,7 @@ function handleNewSignal(signalData) {
 
 function handlePrioritySignal(signalData) {
     // High-priority signal - insert at top with animation
-    console.log('🔥 Priority signal received:', signalData.ticker, signalData.score);
+    console.log('ðŸ”¥ Priority signal received:', signalData.ticker, signalData.score);
     
     if (signalData.asset_class === 'EQUITY' || !signalData.asset_class) {
         // Remove if already exists
@@ -702,7 +703,7 @@ function highlightNewSignal(signalId) {
 // ============================================
 
 function displayScoutAlert(data) {
-    console.log('🔭 Scout Alert received:', data.ticker, data.direction);
+    console.log('ðŸ”­ Scout Alert received:', data.ticker, data.direction);
 
     // Check if we already have a scout alert for this ticker
     const existingIndex = scoutAlerts.findIndex(a => a.ticker === data.ticker);
@@ -736,7 +737,7 @@ function dismissScoutAlertByTicker(ticker) {
     // Called when a real Sniper signal fires for the same ticker
     const alert = scoutAlerts.find(a => a.ticker === ticker);
     if (alert) {
-        console.log('🎯 Scout alert confirmed by Sniper signal:', ticker);
+        console.log('ðŸŽ¯ Scout alert confirmed by Sniper signal:', ticker);
         scoutAlerts = scoutAlerts.filter(a => a.ticker !== ticker);
         renderScoutAlerts();
     }
@@ -744,16 +745,16 @@ function dismissScoutAlertByTicker(ticker) {
 
 function createScoutAlertCard(alert) {
     const directionClass = alert.direction === 'LONG' ? 'scout-long' : 'scout-short';
-    const directionIcon = alert.direction === 'LONG' ? '↑' : '↓';
+    const directionIcon = alert.direction === 'LONG' ? 'â†‘' : 'â†“';
 
     return `
         <div class="scout-alert-card ${directionClass}" data-scout-id="${alert.signal_id}" data-ticker="${alert.ticker}">
             <div class="scout-alert-header">
                 <div class="scout-badge">
-                    <span class="scout-icon">⚠️</span>
+                    <span class="scout-icon">âš ï¸</span>
                     <span class="scout-label">SCOUT</span>
                 </div>
-                <button class="scout-dismiss-btn" data-action="dismiss-scout" title="Dismiss">×</button>
+                <button class="scout-dismiss-btn" data-action="dismiss-scout" title="Dismiss">Ã—</button>
             </div>
             <div class="scout-alert-content">
                 <div class="scout-ticker-row">
@@ -1063,7 +1064,7 @@ function handleCryptoSignalAction(e) {
         if (rawTicker) {
             cryptoCurrentSymbol = rawTicker + 'USD';
             initCryptoChart();
-            // Highlight matching tab (if no tab matches, all tabs become inactive — graceful)
+            // Highlight matching tab (if no tab matches, all tabs become inactive â€” graceful)
             const tabs = document.getElementById('cryptoChartTabs');
             if (tabs) {
                 tabs.querySelectorAll('.chart-tab').forEach(t => {
@@ -1130,7 +1131,7 @@ async function loadSignals() {
         const response = await fetch(`${API_URL}/signals/active`);
         const data = await response.json();
         
-        console.log('📡 Loaded signals:', data);
+        console.log('ðŸ“¡ Loaded signals:', data);
         
         if (data.status === 'success' && data.signals) {
             // Merge counter-trend signals that aren't already in the main list
@@ -1170,8 +1171,8 @@ async function loadSignals() {
                 return false;
             });
             
-            console.log(`📊 Signals loaded: ${signals.equity.length} equity, ${signals.crypto.length} crypto`);
-            console.log('🪙 Crypto signals:', signals.crypto);
+            console.log(`ðŸ“Š Signals loaded: ${signals.equity.length} equity, ${signals.crypto.length} crypto`);
+            console.log('ðŸª™ Crypto signals:', signals.crypto);
             
             resetTradeIdeasPagination();
             
@@ -1365,7 +1366,7 @@ function renderCompositeBias(data) {
             const barPct = score !== null ? Math.min(100, Math.abs(score) * 100) : 0;
 
             const barColor = score === null ? '#455a64'
-                : score <= -0.6 ? '#f44336'
+                : score <= -0.6 ? '#e5370e'
                 : score <= -0.2 ? '#ff9800'
                 : score >= 0.6 ? '#00e676'
                 : score >= 0.2 ? '#66bb6a' : '#78909c';
@@ -1513,10 +1514,10 @@ function renderTimeframeCards(data) {
         // Update momentum
         const momEl = card.querySelector('.tf-momentum');
         if (momEl) {
-            const arrows = { strengthening: '↑', weakening: '↓', stable: '→' };
+            const arrows = { strengthening: 'â†‘', weakening: 'â†“', stable: 'â†’' };
             const labels = { strengthening: 'Strengthening', weakening: 'Weakening', stable: 'Stable' };
             momEl.className = `tf-momentum ${momentum}`;
-            momEl.innerHTML = `<span class="tf-momentum-arrow">${arrows[momentum] || '→'}</span> ${labels[momentum] || 'Stable'}`;
+            momEl.innerHTML = `<span class="tf-momentum-arrow">${arrows[momentum] || 'â†’'}</span> ${labels[momentum] || 'Stable'}`;
         }
 
         // Update divergence
@@ -1579,7 +1580,7 @@ function renderSectorRotationStrip(sectorData) {
 
     container.innerHTML = sectors.map(s => {
         const status = s.status || 'STEADY';
-        const arrow = status === 'SURGING' ? '▲' : (status === 'DUMPING' ? '▼' : '–');
+        const arrow = status === 'SURGING' ? 'â–²' : (status === 'DUMPING' ? 'â–¼' : 'â€“');
         const mom = s.rotation_momentum !== undefined ? (s.rotation_momentum >= 0 ? '+' : '') + s.rotation_momentum.toFixed(1) + '%' : '';
         const rs5 = s.rs_5d !== undefined ? (s.rs_5d >= 0 ? '+' : '') + s.rs_5d.toFixed(1) + '%' : '--';
         const rs20 = s.rs_20d !== undefined ? (s.rs_20d >= 0 ? '+' : '') + s.rs_20d.toFixed(1) + '%' : '--';
@@ -1595,7 +1596,7 @@ function renderSectorRotationStrip(sectorData) {
                     <div class="sector-tooltip-row"><span class="sector-tooltip-label">5d RS</span><span>${rs5}</span></div>
                     <div class="sector-tooltip-row"><span class="sector-tooltip-label">20d RS</span><span>${rs20}</span></div>
                     <div class="sector-tooltip-row"><span class="sector-tooltip-label">Momentum</span><span>${mom}</span></div>
-                    <div class="sector-tooltip-row"><span class="sector-tooltip-label">Rank Δ</span><span>${rankChange}</span></div>
+                    <div class="sector-tooltip-row"><span class="sector-tooltip-label">Rank Î”</span><span>${rankChange}</span></div>
                     <div class="sector-tooltip-row"><span class="sector-tooltip-label">Accel</span><span>${accel}</span></div>
                 </div>
             </div>`;
@@ -1922,7 +1923,7 @@ function initSavitaUpdateModal() {
                     const daysSince = Math.floor((new Date() - new Date(data.last_updated)) / (1000 * 60 * 60 * 24));
                     if (daysSince > 30) {
                         currentInfo.classList.add('stale');
-                        currentInfo.innerHTML = `<strong>⚠️ DISABLED (${daysSince}d old)</strong> - Savita not affecting score until updated`;
+                        currentInfo.innerHTML = `<strong>âš ï¸ DISABLED (${daysSince}d old)</strong> - Savita not affecting score until updated`;
                     } else {
                         currentInfo.classList.remove('stale');
                     }
@@ -2057,19 +2058,19 @@ function updateBiasWithTrend(timeframe, biasData) {
         
         switch (trend) {
             case 'IMPROVING':
-                trendIcon = '↑';
+                trendIcon = '&uarr;';
                 trendText = `vs ${(previousLevel || 'N/A').replace('_', ' ')}`;
                 break;
             case 'DECLINING':
-                trendIcon = '↓';
+                trendIcon = '&darr;';
                 trendText = `vs ${(previousLevel || 'N/A').replace('_', ' ')}`;
                 break;
             case 'STABLE':
-                trendIcon = '→';
+                trendIcon = '&rarr;';
                 trendText = 'unchanged';
                 break;
             default:
-                trendIcon = '•';
+                trendIcon = '&bull;';
                 trendText = 'first reading';
         }
         
@@ -2086,8 +2087,29 @@ function updateBiasWithTrend(timeframe, biasData) {
             }) + ' ET';
         }
         
+        const details = biasData?.details || {};
+        const totalVote = Number.isFinite(Number(details.total_vote)) ? Number(details.total_vote) : null;
+        const maxVote =
+            Number.isFinite(Number(details.max_possible))
+                ? Number(details.max_possible)
+                : Number.isFinite(Number(details.max_possible_current))
+                    ? Number(details.max_possible_current)
+                    : Number.isFinite(Number(details.max_possible_normal))
+                        ? Number(details.max_possible_normal)
+                        : null;
+        const factorCount = details.factors && typeof details.factors === 'object'
+            ? Object.keys(details.factors).length
+            : null;
+        const source = details.source || null;
+
+        const metaParts = [];
+        if (totalVote !== null && maxVote !== null) metaParts.push(`vote ${totalVote}/${maxVote}`);
+        if (factorCount !== null) metaParts.push(`${factorCount} factors`);
+        if (source) metaParts.push(source.replaceAll('_', ' '));
+
         detailsElement.innerHTML = `
             <span class="trend-indicator trend-${trend.toLowerCase()}">${trendIcon}</span> ${trendText}
+            ${metaParts.length ? `<br><small>${metaParts.join(' | ')}</small>` : ''}
             ${timeStr ? `<br><small>Updated: ${timeStr}</small>` : ''}
         `;
     }
@@ -2183,7 +2205,7 @@ function checkAndResetFactorsForNewDay(biasData) {
         };
         localStorage.setItem('weeklyBiasFactors', JSON.stringify(weeklyBiasFactorStates));
         localStorage.setItem('weeklyBiasLastReset', currentDate);
-        console.log('🔄 New day detected - reset all weekly bias factors to enabled');
+        console.log('ðŸ”„ New day detected - reset all weekly bias factors to enabled');
     }
 }
 
@@ -2219,7 +2241,7 @@ function updateWarningBadge(enabledCount, timeframe = 'weekly') {
     if (enabledCount < 6) {
         const badge = document.createElement('span');
         badge.className = 'bias-warning-badge';
-        badge.textContent = '⚠️';
+        badge.textContent = 'âš ï¸';
         badge.title = `${enabledCount} of 6 factors active`;
         levelElement.appendChild(badge);
     }
@@ -2969,19 +2991,19 @@ function updateBiasShiftDisplay(shiftData) {
     switch (shiftDirection) {
         case 'IMPROVING':
         case 'STRONGLY_IMPROVING':
-            shiftIcon = '▲';
+            shiftIcon = 'â–²';
             shiftClass = 'bias-shift-improving';
             shiftText = shiftDirection === 'STRONGLY_IMPROVING' ? 'strongly improving' : 'improving';
             break;
         case 'DETERIORATING':
         case 'STRONGLY_DETERIORATING':
-            shiftIcon = '▼';
+            shiftIcon = 'â–¼';
             shiftClass = 'bias-shift-deteriorating';
             shiftText = shiftDirection === 'STRONGLY_DETERIORATING' ? 'strongly deteriorating' : 'deteriorating';
             break;
         case 'STABLE':
         default:
-            shiftIcon = '—';
+            shiftIcon = 'â€”';
             shiftClass = 'bias-shift-stable';
             shiftText = 'stable';
             break;
@@ -3087,7 +3109,7 @@ async function loadCyclicalBiasFallback() {
                     minute: '2-digit'
                 }) + ' ET' : 'Unknown';
                 detailsElement.innerHTML = `
-                    Vote: ${totalVote}/12 • Long-term macro<br>
+                    Vote: ${totalVote}/12 â€¢ Long-term macro<br>
                     <small>Updated: ${timestamp}</small>
                 `;
             }
@@ -3319,7 +3341,7 @@ function createSignalCard(signal) {
     const biasAlignment = signal.bias_alignment || 'NEUTRAL';
     const isAligned = biasAlignment.includes('ALIGNED') && !biasAlignment.includes('COUNTER');
     const biasAlignmentClass = isAligned ? 'bias-aligned' : (biasAlignment === 'NEUTRAL' ? '' : 'bias-misaligned');
-    const biasAlignmentIcon = isAligned ? '✓' : (biasAlignment.includes('COUNTER') ? '⚠' : '○');
+    const biasAlignmentIcon = isAligned ? 'âœ“' : (biasAlignment.includes('COUNTER') ? 'âš ' : 'â—‹');
     const biasAlignmentText = biasAlignment.replace('_', ' ');
     
     // Safe number formatting
@@ -3417,8 +3439,8 @@ function createSignalCard(signal) {
             </div>
             
             <div class="signal-actions">
-                <button class="action-btn dismiss-btn" data-action="dismiss">✕ Dismiss</button>
-                <button class="action-btn select-btn" data-action="select">✓ Accept</button>
+                <button class="action-btn dismiss-btn" data-action="dismiss">âœ• Dismiss</button>
+                <button class="action-btn select-btn" data-action="select">âœ“ Accept</button>
             </div>
         </div>
     `;
@@ -3608,7 +3630,14 @@ async function loadCryptoMarketData() {
         data = await response.json();
     } catch (error) {
         console.error('Error loading crypto market data:', error);
-        renderCryptoMarketError();
+        // Keep the last good snapshot visible on transient API failures.
+        if (cryptoMarketData) {
+            renderCryptoMarketData();
+            const updated = document.getElementById('cryptoCoinbaseUpdated');
+            if (updated) updated.textContent = 'stale';
+        } else {
+            renderCryptoMarketError();
+        }
         return;
     }
 
@@ -3632,6 +3661,8 @@ function renderCryptoMarketError() {
         const el = document.getElementById(id);
         if (el) el.textContent = '--';
     });
+    const updated = document.getElementById('cryptoCoinbaseUpdated');
+    if (updated) updated.textContent = '--';
 }
 
 function renderCryptoMarketData() {
@@ -3640,14 +3671,31 @@ function renderCryptoMarketData() {
     const funding = cryptoMarketData.funding || {};
     const cvd = cryptoMarketData.cvd || {};
 
-    const spot = prices.coinbase_spot ?? prices.binance_spot ?? null;
+    const rememberNumber = (key, value) => {
+        const num = Number(value);
+        if (value !== null && value !== undefined && !Number.isNaN(num)) {
+            cryptoMarketLastGood[key] = num;
+            return num;
+        }
+        return cryptoMarketLastGood[key] ?? null;
+    };
+
+    const rememberString = (key, value) => {
+        if (value !== null && value !== undefined && `${value}`.trim() !== '') {
+            cryptoMarketLastGood[key] = value;
+            return value;
+        }
+        return cryptoMarketLastGood[key] ?? null;
+    };
+
     const perps = prices.perps || {};
-    const perp = perps.okx ?? perps.binance_perp ?? null;
-    const basis = prices.basis ?? (spot !== null && perp !== null ? spot - perp : null);
-    const basisPct = prices.basis_pct ?? (basis !== null && perp ? (basis / perp) * 100 : null);
-    const binanceSpot = prices.binance_spot;
-    const binanceSpotUpdated = prices.binance_spot_ts;
-    const perpSpread = perps.spread;
+    const spot = rememberNumber('coinbase_spot', prices.coinbase_spot ?? prices.binance_spot);
+    const perp = rememberNumber('perp_price', perps.okx ?? perps.binance_perp);
+    const binanceSpot = rememberNumber('binance_spot', prices.binance_spot);
+    const basis = rememberNumber('basis', prices.basis ?? (spot !== null && perp !== null ? spot - perp : null));
+    const basisPct = rememberNumber('basis_pct', prices.basis_pct ?? (basis !== null && perp ? (basis / perp) * 100 : null));
+    const binanceSpotUpdated = rememberString('binance_spot_ts', prices.binance_spot_ts);
+    const perpSpread = rememberNumber('perp_spread', perps.spread);
     const perpNote = perps.note;
 
     const spotEl = document.getElementById('cryptoCoinbaseSpot');
@@ -3705,24 +3753,26 @@ function renderCryptoMarketData() {
     }
 
     if (fundingBinanceEl) {
-        fundingBinanceEl.textContent = formatFundingRate(funding.okx?.rate, 'Binance');
-        fundingBinanceEl.className = `micro-value ${funding.okx?.rate > 0 ? 'bearish' : funding.okx?.rate < 0 ? 'bullish' : 'neutral'}`;
+        const okxFunding = rememberNumber('funding_okx', funding.okx?.rate);
+        fundingBinanceEl.textContent = formatFundingRate(okxFunding, 'Binance');
+        fundingBinanceEl.className = `micro-value ${okxFunding > 0 ? 'bearish' : okxFunding < 0 ? 'bullish' : 'neutral'}`;
     }
     if (fundingBybitEl) {
-        const bybitText = funding.bybit?.rate === null || funding.bybit?.rate === undefined
+        const bybitFunding = rememberNumber('funding_bybit', funding.bybit?.rate);
+        const bybitText = bybitFunding === null || bybitFunding === undefined
             ? 'Bybit: unavailable'
-            : formatFundingRate(funding.bybit?.rate, 'Bybit');
+            : formatFundingRate(bybitFunding, 'Bybit');
         fundingBybitEl.textContent = bybitText;
-        fundingBybitEl.className = `micro-sub ${funding.bybit?.rate > 0 ? 'bearish' : funding.bybit?.rate < 0 ? 'bullish' : 'neutral'}`;
+        fundingBybitEl.className = `micro-sub ${bybitFunding > 0 ? 'bearish' : bybitFunding < 0 ? 'bullish' : 'neutral'}`;
     }
 
     if (cvdValueEl) {
-        const netUsd = cvd.net_usd ?? null;
+        const netUsd = rememberNumber('cvd_net_usd', cvd.net_usd);
         cvdValueEl.textContent = netUsd !== null ? formatSignedUsd(netUsd) : '--';
         cvdValueEl.className = `micro-value ${netUsd > 0 ? 'bullish' : netUsd < 0 ? 'bearish' : 'neutral'}`;
     }
     if (cvdFlowEl) {
-        const flow = cvd.direction || 'NEUTRAL';
+        const flow = rememberString('cvd_direction', cvd.direction) || 'NEUTRAL';
         cvdFlowEl.textContent = flow.replace('_', ' ');
         cvdFlowEl.className = `micro-sub ${flow.includes('BULL') ? 'bullish' : flow.includes('BEAR') ? 'bearish' : 'neutral'}`;
     }
@@ -4377,7 +4427,7 @@ function createHunterCard(signal, type) {
                     <div class="hunter-metric-value">${marketData.pct_distance_from_vwap?.toFixed(1) || '-'}%</div>
                 </div>
             </div>
-            ${instruction ? `<div class="hunter-instruction">📍 ${instruction}</div>` : ''}
+            ${instruction ? `<div class="hunter-instruction">ðŸ“ ${instruction}</div>` : ''}
         </div>
     `;
 }
@@ -4432,7 +4482,7 @@ const ZONE_COLORS = {
     LEVERAGED_LONG: { bg: '#0a2e2a', text: '#4caf50' },
     DE_LEVERAGING: { bg: '#2e2e0a', text: '#ffeb3b' },
     WATERFALL: { bg: '#2e1a0a', text: '#ff9800' },
-    CAPITULATION: { bg: '#2e0a0a', text: '#f44336' },
+    CAPITULATION: { bg: '#2e0a0a', text: '#e5370e' },
     RECOVERY: { bg: '#0a1a2e', text: '#42a5f5' },
     NEUTRAL: { bg: '#1a2228', text: '#78909c' }
 };
@@ -5253,7 +5303,7 @@ async function enableAllStrategies() {
 }
 
 async function disableAllStrategies() {
-    if (!confirm('⚠️ KILL SWITCH: This will disable ALL strategies. Continue?')) {
+    if (!confirm('âš ï¸ KILL SWITCH: This will disable ALL strategies. Continue?')) {
         return;
     }
     
@@ -5266,7 +5316,7 @@ async function disableAllStrategies() {
         
         if (data.status === 'success') {
             loadStrategies();
-            console.log('🛑 All strategies DISABLED');
+            console.log('ðŸ›‘ All strategies DISABLED');
         }
     } catch (error) {
         console.error('Error disabling all strategies:', error);
@@ -5467,7 +5517,7 @@ function createCtaCard(signal) {
                 </div>
             </div>
             <div class="cta-card-footer">
-                Zone: ${zoneWithKb} • Vol: ${context.volume_ratio?.toFixed(1) || '-'}x
+                Zone: ${zoneWithKb} â€¢ Vol: ${context.volume_ratio?.toFixed(1) || '-'}x
             </div>
         </div>
     `;
@@ -5822,12 +5872,12 @@ async function analyzeTickerEnhanced(ticker) {
         const shortAlignment = document.getElementById('shortAlignment');
 
         if (longAlignment) {
-            longAlignment.textContent = dailyIsToro ? '✅ Aligned' : '⚠️ Divergent';
+            longAlignment.textContent = dailyIsToro ? 'âœ… Aligned' : 'âš ï¸ Divergent';
             longAlignment.className = 'alignment-status ' + (dailyIsToro ? 'aligned' : 'divergent');
         }
 
         if (shortAlignment) {
-            shortAlignment.textContent = !dailyIsToro ? '✅ Aligned' : '⚠️ Divergent';
+            shortAlignment.textContent = !dailyIsToro ? 'âœ… Aligned' : 'âš ï¸ Divergent';
             shortAlignment.className = 'alignment-status ' + (!dailyIsToro ? 'aligned' : 'divergent');
         }
 
@@ -5846,7 +5896,7 @@ async function analyzeTickerEnhanced(ticker) {
             flowSummary.innerHTML = recentFlow.map(f => `
                 <div class="flow-item">
                     <span class="flow-direction ${f.sentiment === 'BULLISH' ? 'bullish' : 'bearish'}">
-                        ${f.sentiment === 'BULLISH' ? '🟢' : '🔴'} ${f.type}
+                        ${f.sentiment === 'BULLISH' ? 'ðŸŸ¢' : 'ðŸ”´'} ${f.type}
                     </span>
                     <span class="flow-score">${f.notability_score}/100</span>
                 </div>
@@ -5977,7 +6027,7 @@ async function renderBtcSessions() {
         updateCryptoSessionStatus(resolvedSession, sessions);
 
         // Update the current-session indicator inside the crypto panel.
-        // The active styling is on .btc-session-current.active — toggle that class on the element.
+        // The active styling is on .btc-session-current.active â€” toggle that class on the element.
         if (currentEl) {
             if (resolvedSession && resolvedSession.active) {
                 currentEl.classList.add('active');
@@ -6150,7 +6200,7 @@ function renderBtcSignals() {
         const nameWithKb = `<span class="kb-term-dynamic" data-kb-term="btc-bottom-signals">${signal.name}</span>`;
         
         // Source indicator
-        const sourceIcon = isAuto ? '🤖' : '✋';
+        const sourceIcon = isAuto ? 'ðŸ¤–' : 'âœ‹';
         const sourceLabel = isAuto ? 'AUTO' : 'MANUAL';
         
         // Value display - use raw value if available and detailed
@@ -6357,7 +6407,7 @@ function updateCryptoSessionStatus(currentSession, sessions) {
         const utcTime = currentSession.utc_time || '';
         const localTime = utcTime ? formatUtcRangeToDenver(utcTime) : '';
         statusEl.innerHTML = `
-            <span class="session-pill">🟢 NOW: ${currentSession.name}${localTime ? `  ${localTime}` : ''}</span>
+            <span class="session-pill">ðŸŸ¢ NOW: ${currentSession.name}${localTime ? `  ${localTime}` : ''}</span>
         `;
     } else {
         const nextSession = getNextSessionBySchedule(sessions);
@@ -6744,8 +6794,8 @@ function calculateFlowScore() {
     };
     if (flowModalData.premium) {
         score += premiumScores[flowModalData.premium] || 0;
-        if (flowModalData.premium === '500000') factors.push('💰 Large premium');
-        else if (flowModalData.premium === '150000') factors.push('💵 Good size');
+        if (flowModalData.premium === '500000') factors.push('ðŸ’° Large premium');
+        else if (flowModalData.premium === '150000') factors.push('ðŸ’µ Good size');
     }
     
     // Type scoring (0-25 points)
@@ -6757,7 +6807,7 @@ function calculateFlowScore() {
     };
     if (flowModalData.type) {
         score += typeScores[flowModalData.type] || 0;
-        if (flowModalData.type === 'SWEEP') factors.push('🔥 Aggressive sweep');
+        if (flowModalData.type === 'SWEEP') factors.push('ðŸ”¥ Aggressive sweep');
     }
     
     // Expiry scoring (0-20 points) - sweet spot is 2-4 weeks
@@ -6770,8 +6820,8 @@ function calculateFlowScore() {
     };
     if (flowModalData.expiry) {
         score += expiryScores[flowModalData.expiry] || 0;
-        if (flowModalData.expiry === '2-4weeks') factors.push('📅 Optimal expiry');
-        if (flowModalData.expiry === 'leaps') factors.push('⚠️ LEAPS (less urgent)');
+        if (flowModalData.expiry === '2-4weeks') factors.push('ðŸ“… Optimal expiry');
+        if (flowModalData.expiry === 'leaps') factors.push('âš ï¸ LEAPS (less urgent)');
     }
     
     // Volume vs OI scoring (0-15 points)
@@ -6783,43 +6833,43 @@ function calculateFlowScore() {
     };
     if (flowModalData.voloi) {
         score += voloiScores[flowModalData.voloi] || 0;
-        if (flowModalData.voloi === 'extreme') factors.push('📊 Extreme volume');
+        if (flowModalData.voloi === 'extreme') factors.push('ðŸ“Š Extreme volume');
     }
     
     // Repeat activity (0-10 points)
     if (flowModalData.repeat === 'yes') {
         score += 10;
-        factors.push('🔁 Repeat hits');
+        factors.push('ðŸ” Repeat hits');
     }
     
     // Determine label and class
     let label, scoreClass, verdictClass, verdict;
     
     if (score >= 80) {
-        label = '🚨 EXCEPTIONAL - Must track!';
+        label = 'ðŸš¨ EXCEPTIONAL - Must track!';
         scoreClass = 'exceptional';
         verdictClass = 'must-add';
-        verdict = '🐋 This is significant institutional activity. Definitely add this!';
+        verdict = 'ðŸ‹ This is significant institutional activity. Definitely add this!';
     } else if (score >= 60) {
-        label = '✅ HIGH - Worth tracking';
+        label = 'âœ… HIGH - Worth tracking';
         scoreClass = 'high';
         verdictClass = 'add';
-        verdict = '👍 Notable flow that could move the stock. Add it!';
+        verdict = 'ðŸ‘ Notable flow that could move the stock. Add it!';
     } else if (score >= 40) {
-        label = '🟡 MEDIUM - Maybe track';
+        label = 'ðŸŸ¡ MEDIUM - Maybe track';
         scoreClass = 'medium';
         verdictClass = 'maybe';
-        verdict = '🤔 Decent activity but not exceptional. Add if it matches your thesis.';
+        verdict = 'ðŸ¤” Decent activity but not exceptional. Add if it matches your thesis.';
     } else {
-        label = '⚪ LOW - Probably skip';
+        label = 'âšª LOW - Probably skip';
         scoreClass = 'low';
         verdictClass = 'skip';
-        verdict = '👎 Likely noise. Skip unless you have other conviction.';
+        verdict = 'ðŸ‘Ž Likely noise. Skip unless you have other conviction.';
     }
     
     // Add factors to label
     if (factors.length > 0) {
-        label += '\n' + factors.join(' • ');
+        label += '\n' + factors.join(' â€¢ ');
     }
     
     updateScoreDisplay(score, label, scoreClass);
@@ -6876,7 +6926,7 @@ async function submitFlowFromModal() {
         if (data.status === 'success') {
             closeFlowModal();
             loadFlowData();
-            console.log(`🐋 Added flow: ${ticker} ${flowModalData.sentiment} (Score: calculated)`);
+            console.log(`ðŸ‹ Added flow: ${ticker} ${flowModalData.sentiment} (Score: calculated)`);
         }
     } catch (error) {
         console.error('Error adding flow:', error);
@@ -7326,7 +7376,7 @@ async function confirmPositionEntry() {
                 target2: pendingPositionSignal.target_2
             });
             
-            console.log(`📈 Position accepted: ${pendingPositionSignal.ticker} ${pendingPositionSignal.direction} @ $${entryPrice}`);
+            console.log(`ðŸ“ˆ Position accepted: ${pendingPositionSignal.ticker} ${pendingPositionSignal.direction} @ $${entryPrice}`);
         } else {
             alert('Failed to accept signal: ' + (data.detail || data.message || 'Unknown error'));
         }
@@ -7356,7 +7406,7 @@ function setTradeType(type) {
         equityFields.style.display = 'block';
         optionsFields.style.display = 'none';
         modalContainer.classList.remove('options-mode');
-        modalTitle.textContent = '📈 Open Position';
+        modalTitle.textContent = 'ðŸ“ˆ Open Position';
         confirmBtn.textContent = 'Open Position';
     } else {
         equityBtn.classList.remove('active');
@@ -7364,7 +7414,7 @@ function setTradeType(type) {
         equityFields.style.display = 'none';
         optionsFields.style.display = 'block';
         modalContainer.classList.add('options-mode');
-        modalTitle.textContent = '📊 Open Options Position';
+        modalTitle.textContent = 'ðŸ“Š Open Options Position';
         confirmBtn.textContent = 'Open Options Position';
         updateOptionsSummary();
     }
@@ -7576,7 +7626,7 @@ async function confirmOptionsPositionEntry() {
             // Add ticker to chart tabs
             addPositionChartTab(pendingPositionSignal.ticker);
             
-            console.log(`📊 Options position accepted: ${pendingPositionSignal.ticker} ${strategy} - Premium: $${premium}`);
+            console.log(`ðŸ“Š Options position accepted: ${pendingPositionSignal.ticker} ${strategy} - Premium: $${premium}`);
         } else {
             alert('Failed to accept signal as options: ' + (data.detail || data.message || 'Unknown error'));
         }
@@ -7661,7 +7711,7 @@ function renderPositionsEnhanced() {
         
         return `
             <div class="position-card" data-position-id="${pos.id || pos.signal_id}">
-                <button class="position-remove-btn" data-position-id="${pos.id || pos.signal_id}" title="Remove position">×</button>
+                <button class="position-remove-btn" data-position-id="${pos.id || pos.signal_id}" title="Remove position">Ã—</button>
                 <div class="position-card-header">
                     <span class="position-ticker" data-ticker="${pos.ticker}">${pos.ticker}</span>
                     <span class="position-direction ${pos.direction}">${pos.direction}</span>
@@ -7980,7 +8030,7 @@ async function executePositionClose(positionId, exitPrice, closeQty, tradeOutcom
                 }
             }
             
-            const emoji = tradeOutcome === 'WIN' ? '🎯' : tradeOutcome === 'LOSS' ? '❌' : '➖';
+            const emoji = tradeOutcome === 'WIN' ? 'ðŸŽ¯' : tradeOutcome === 'LOSS' ? 'âŒ' : 'âž–';
             console.log(`${emoji} Position closed: ${closingPosition.ticker} - ${tradeOutcome} - P&L: $${data.realized_pnl?.toFixed(2) || '--'}`);
         } else {
             alert('Failed to close position: ' + (data.detail || data.message || 'Unknown error'));
@@ -8104,7 +8154,7 @@ function initManualPositionModal() {
         });
     }
     
-    console.log('📝 Manual position modal initialized');
+    console.log('ðŸ“ Manual position modal initialized');
 }
 
 function openManualPositionModal() {
@@ -8181,7 +8231,7 @@ async function submitManualPosition() {
         const result = await response.json();
         
         if (response.ok) {
-            console.log('✅ Manual position created:', result);
+            console.log('âœ… Manual position created:', result);
             closeManualPositionModal();
             
             // Add to local positions and refresh UI
@@ -8219,7 +8269,7 @@ async function initKnowledgebase() {
         const response = await fetch(`${API_URL}/knowledgebase/term-map`);
         const data = await response.json();
         kbTermMap = data.termMap || {};
-        console.log(`📚 Loaded ${Object.keys(kbTermMap).length} knowledgebase terms`);
+        console.log(`ðŸ“š Loaded ${Object.keys(kbTermMap).length} knowledgebase terms`);
     } catch (error) {
         console.error('Error loading knowledgebase term map:', error);
     }
@@ -8263,7 +8313,7 @@ function initKbClickHandlers() {
         });
     });
     
-    // Handle .kb-info-icon elements (ⓘ icons)
+    // Handle .kb-info-icon elements (â“˜ icons)
     document.querySelectorAll('.kb-info-icon[data-kb-term]').forEach(el => {
         el.addEventListener('click', (e) => {
             e.preventDefault();
@@ -8283,7 +8333,7 @@ function initKbClickHandlers() {
         });
     });
     
-    console.log('📚 KB click handlers initialized');
+    console.log('ðŸ“š KB click handlers initialized');
 }
 
 // Map strategy/signal names to KB term IDs
@@ -8453,7 +8503,7 @@ function formatPopupDescription(text) {
         if (!p) return '';
         // Handle single-line list items
         if (p.startsWith('- ')) {
-            return '<p>' + p.replace(/^- /, '• ') + '</p>';
+            return '<p>' + p.replace(/^- /, 'â€¢ ') + '</p>';
         }
         return '<p>' + p.replace(/\n/g, '<br>') + '</p>';
     }).join('');
@@ -8677,7 +8727,7 @@ function createLegHTML(legNum) {
         <div class="leg-row" data-leg="${legNum}">
             <div class="leg-header">
                 <span class="leg-number">Leg ${legNum}</span>
-                ${legNum > 1 ? `<button type="button" class="remove-leg-btn" onclick="removeLeg(${legNum})">✕</button>` : ''}
+                ${legNum > 1 ? `<button type="button" class="remove-leg-btn" onclick="removeLeg(${legNum})">âœ•</button>` : ''}
             </div>
             <div class="leg-fields">
                 <select class="leg-action form-select-sm">
