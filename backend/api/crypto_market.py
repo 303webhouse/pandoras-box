@@ -56,6 +56,7 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
             # Spot prices
             "binance_spot_price": _fetch_json(client, f"{BINANCE_SPOT_BASE}/api/v3/ticker/price", {"symbol": symbol}),
             "coinbase_spot": _fetch_json(client, f"{COINBASE_BASE}/v2/prices/BTC-USD/spot"),
+            "okx_spot_price": _fetch_json(client, f"{OKX_BASE}/api/v5/market/ticker", {"instId": "BTC-USDT"}),
 
             # Perp prices & funding via OKX (not geo-blocked)
             "okx_perp_price": _fetch_json(client, f"{OKX_BASE}/api/v5/market/ticker", {"instId": "BTC-USDT-SWAP"}),
@@ -96,6 +97,14 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
         binance_spot = _safe_float(data_map["binance_spot_price"]["data"].get("price"))
     else:
         errors.append(f"binance_spot_price: {data_map['binance_spot_price'].get('error')}")
+    if binance_spot is None and data_map["okx_spot_price"]["ok"]:
+        try:
+            row = data_map["okx_spot_price"]["data"].get("data", [])[0]
+            binance_spot = _safe_float(row.get("last"))
+            if binance_spot is not None:
+                errors.append("binance_spot_price: using OKX spot fallback")
+        except Exception:
+            pass
     if binance_spot is None and _last_good.get("binance_spot") is not None:
         binance_spot = _last_good["binance_spot"]
         errors.append("binance_spot_price: using cached fallback")

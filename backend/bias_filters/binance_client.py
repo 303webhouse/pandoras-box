@@ -1,21 +1,19 @@
 """
-Binance API Client
-Fetches BTC spot orderbook depth and quarterly futures basis
-
-API Documentation: https://developers.binance.com/docs/
-No authentication required for public market data
+Market Microstructure Client (Binance + OKX fallback)
+Fetches BTC spot orderbook depth and perp-vs-spot basis with geo-safe fallbacks.
 """
 
 import logging
 from datetime import datetime, timezone, timedelta
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional
 import httpx
 
 logger = logging.getLogger(__name__)
 
 # API Configuration
-BINANCE_SPOT_URL = "https://api.binance.com/api/v3"
+BINANCE_SPOT_URL = "https://data-api.binance.vision/api/v3"  # geo-friendly mirror
 BINANCE_FUTURES_URL = "https://fapi.binance.com/fapi/v1"
+OKX_MARKET_URL = "https://www.okx.com/api/v5/market"
 
 # Cache for API responses
 _cache: Dict[str, Dict[str, Any]] = {}
@@ -41,20 +39,42 @@ def _set_cache(key: str, data: Any, ttl: int):
 
 
 async def _make_request(url: str, params: Dict[str, Any] = None) -> Optional[Dict]:
-    """Make request to Binance API"""
+    """Make request to a public market API endpoint"""
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.get(url, params=params)
             
             if response.status_code != 200:
-                logger.error(f"Binance API error: {response.status_code} - {response.text}")
+                logger.warning(f"Market API error ({url}): {response.status_code} - {response.text}")
                 return None
             
             return response.json()
     
     except Exception as e:
-        logger.error(f"Binance request failed: {e}")
+        logger.warning(f"Market API request failed ({url}): {e}")
         return None
+
+
+def _normalize_okx_book(okx_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Convert OKX orderbook payload into Binance-like shape."""
+    if not okx_data or okx_data.get("code") != "0":
+        return None
+
+    rows = okx_data.get("data") or []
+    if not rows:
+        return None
+
+    row = rows[0]
+    bids = row.get("bids") or []
+    asks = row.get("asks") or []
+    if not bids or not asks:
+        return None
+
+    # Keep [price, qty] shape used by the existing depth math.
+    return {
+        "bids": [[b[0], b[1]] for b in bids if len(b) >= 2],
+        "asks": [[a[0], a[1]] for a in asks if len(a) >= 2],
+    }
 
 
 async def get_spot_orderbook_skew() -> Dict[str, Any]:
@@ -80,11 +100,20 @@ async def get_spot_orderbook_skew() -> Dict[str, Any]:
     if cached:
         return cached
     
-    # Get orderbook with 1000 levels
+    # Try Binance spot depth first (geo-friendly mirror), then OKX spot books.
     data = await _make_request(f"{BINANCE_SPOT_URL}/depth", {
         "symbol": "BTCUSDT",
         "limit": 1000
     })
+
+    source = "binance_vision"
+    if not data or "bids" not in data or "asks" not in data:
+        okx_data = await _make_request(f"{OKX_MARKET_URL}/books", {
+            "instId": "BTC-USDT",
+            "sz": 400
+        })
+        data = _normalize_okx_book(okx_data or {})
+        source = "okx_spot"
     
     if not data or "bids" not in data or "asks" not in data:
         return {
@@ -93,7 +122,8 @@ async def get_spot_orderbook_skew() -> Dict[str, Any]:
             "imbalance": None,
             "sentiment": "unknown",
             "signal": "UNKNOWN",
-            "error": "Failed to fetch orderbook"
+            "source": "unavailable",
+            "error": "Failed to fetch orderbook from Binance Vision or OKX"
         }
     
     bids = data["bids"]  # [[price, qty], ...]
@@ -149,6 +179,7 @@ async def get_spot_orderbook_skew() -> Dict[str, Any]:
         "spread_bps": round((best_ask - best_bid) / mid_price * 10000, 2),
         "sentiment": sentiment,
         "signal": signal,
+        "source": source,
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
     
@@ -183,10 +214,19 @@ async def get_quarterly_basis() -> Dict[str, Any]:
     if cached:
         return cached
     
-    # Get spot price
+    # Get spot price (Binance Vision first, OKX spot fallback).
     spot_data = await _make_request(f"{BINANCE_SPOT_URL}/ticker/price", {
         "symbol": "BTCUSDT"
     })
+
+    spot_source = "binance_vision"
+    if not spot_data or "price" not in spot_data:
+        okx_spot = await _make_request(f"{OKX_MARKET_URL}/ticker", {
+            "instId": "BTC-USDT"
+        })
+        if okx_spot and okx_spot.get("code") == "0" and okx_spot.get("data"):
+            spot_data = {"price": okx_spot["data"][0].get("last")}
+            spot_source = "okx_spot"
     
     if not spot_data or "price" not in spot_data:
         return {
@@ -194,15 +234,25 @@ async def get_quarterly_basis() -> Dict[str, Any]:
             "basis_annualized": None,
             "sentiment": "unknown",
             "signal": "UNKNOWN",
-            "error": "Failed to fetch spot price"
+            "source": "unavailable",
+            "error": "Failed to fetch spot price from Binance Vision or OKX"
         }
     
     spot_price = float(spot_data["price"])
     
-    # Get perpetual futures price (as proxy if quarterly not available)
+    # Get perpetual futures price (Binance Futures first, OKX swap fallback).
     perp_data = await _make_request(f"{BINANCE_FUTURES_URL}/ticker/price", {
         "symbol": "BTCUSDT"
     })
+
+    perp_source = "binance_futures"
+    if not perp_data or "price" not in perp_data:
+        okx_perp = await _make_request(f"{OKX_MARKET_URL}/ticker", {
+            "instId": "BTC-USDT-SWAP"
+        })
+        if okx_perp and okx_perp.get("code") == "0" and okx_perp.get("data"):
+            perp_data = {"price": okx_perp["data"][0].get("last")}
+            perp_source = "okx_swap"
     
     if not perp_data or "price" not in perp_data:
         return {
@@ -210,7 +260,8 @@ async def get_quarterly_basis() -> Dict[str, Any]:
             "basis_annualized": None,
             "sentiment": "unknown",
             "signal": "UNKNOWN",
-            "error": "Failed to fetch futures price"
+            "source": f"{spot_source}->unavailable",
+            "error": "Failed to fetch perp/futures price from Binance Futures or OKX"
         }
     
     futures_price = float(perp_data["price"])
@@ -248,6 +299,7 @@ async def get_quarterly_basis() -> Dict[str, Any]:
         "basis_annualized": round(basis_annualized, 2),
         "sentiment": sentiment,
         "signal": signal,
+        "source": f"{spot_source}+{perp_source}",
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
     

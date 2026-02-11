@@ -1,9 +1,6 @@
 """
-Coinalyze API Client
-Fetches real-time BTC derivatives data: funding rates, open interest, liquidations
-
-API Documentation: https://api.coinalyze.net/v1/doc/
-Rate Limit: 40 calls/minute
+Derivatives Data Client (Coinalyze + OKX fallback)
+Fetches BTC funding, OI, liquidation, and term-structure signals.
 """
 
 import os
@@ -17,16 +14,26 @@ logger = logging.getLogger(__name__)
 
 # API Configuration
 COINALYZE_BASE_URL = "https://api.coinalyze.net/v1"
-COINALYZE_API_KEY = os.getenv("COINALYZE_API_KEY", "")
+OKX_PUBLIC_URL = "https://www.okx.com/api/v5"
 
 # BTC perpetual symbols across major exchanges (aggregated)
 BTC_PERP_SYMBOLS = [
     "BTCUSDT_PERP.A",  # Aggregated across all exchanges
 ]
+OKX_SWAP_SYMBOL = "BTC-USDT-SWAP"
 
 # Cache for API responses (avoid hitting rate limits)
 _cache: Dict[str, Dict[str, Any]] = {}
 CACHE_TTL_SECONDS = 300  # 5 minutes
+
+
+def _get_api_key() -> str:
+    """Read Coinalyze key with common env aliases and sanitize quoting."""
+    for env_name in ("COINALYZE_API_KEY", "COINALYZE_KEY", "COINALYZE_TOKEN"):
+        value = os.getenv(env_name, "")
+        if value:
+            return value.strip().strip("'").strip('"')
+    return ""
 
 
 def _get_cached(key: str) -> Optional[Dict[str, Any]]:
@@ -46,20 +53,34 @@ def _set_cache(key: str, data: Any, ttl: int = CACHE_TTL_SECONDS):
     }
 
 
+def _to_float(value: Any) -> Optional[float]:
+    try:
+        if value is None:
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 async def _make_request(endpoint: str, params: Dict[str, Any] = None) -> Optional[Dict]:
     """Make authenticated request to Coinalyze API"""
-    if not COINALYZE_API_KEY:
+    api_key = _get_api_key()
+    if not api_key:
         logger.warning("COINALYZE_API_KEY not set - cannot fetch data")
         return None
     
     url = f"{COINALYZE_BASE_URL}{endpoint}"
     headers = {
-        "api_key": COINALYZE_API_KEY
+        "api_key": api_key,
+        "X-API-KEY": api_key,
     }
+    query = dict(params or {})
+    # Keep key in query as compatibility fallback when proxies strip custom headers.
+    query.setdefault("api_key", api_key)
     
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(url, headers=headers, params=params)
+            response = await client.get(url, headers=headers, params=query)
             
             if response.status_code == 429:
                 logger.warning("Coinalyze rate limit hit - waiting 60s")
@@ -74,6 +95,25 @@ async def _make_request(endpoint: str, params: Dict[str, Any] = None) -> Optiona
     
     except Exception as e:
         logger.error(f"Coinalyze request failed: {e}")
+        return None
+
+
+async def _make_okx_request(endpoint: str, params: Dict[str, Any] = None) -> Optional[Dict[str, Any]]:
+    """Query OKX public endpoints used as fallback for restricted providers."""
+    url = f"{OKX_PUBLIC_URL}{endpoint}"
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.get(url, params=params or {})
+            if response.status_code != 200:
+                logger.warning(f"OKX API error: {response.status_code} - {response.text}")
+                return None
+            payload = response.json()
+            if isinstance(payload, dict) and payload.get("code") not in (None, "0", 0):
+                logger.warning(f"OKX API returned non-zero code: {payload}")
+                return None
+            return payload
+    except Exception as exc:
+        logger.warning(f"OKX request failed: {exc}")
         return None
 
 
@@ -101,12 +141,39 @@ async def get_funding_rate() -> Dict[str, Any]:
     })
     
     if not data or not isinstance(data, list) or len(data) == 0:
+        # Fallback: OKX current funding snapshot.
+        okx_data = await _make_okx_request("/public/funding-rate", {"instId": OKX_SWAP_SYMBOL})
+        rows = okx_data.get("data", []) if isinstance(okx_data, dict) else []
+        if rows:
+            row = rows[0]
+            funding_rate = (_to_float(row.get("fundingRate")) or 0.0) * 100
+            predicted_rate = _to_float(row.get("nextFundingRate"))
+            predicted_rate = predicted_rate * 100 if predicted_rate is not None else None
+            if funding_rate > 0.05:
+                sentiment = "overleveraged_longs"
+                signal = "FIRING"
+            elif funding_rate < -0.03:
+                sentiment = "overleveraged_shorts"
+                signal = "FIRING"
+            else:
+                sentiment = "neutral"
+                signal = "NEUTRAL"
+            result = {
+                "funding_rate": round(funding_rate, 4),
+                "predicted_rate": round(predicted_rate, 4) if predicted_rate is not None else None,
+                "sentiment": sentiment,
+                "signal": signal,
+                "source": "okx_fallback",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+            _set_cache(cache_key, result)
+            return result
         return {
             "funding_rate": None,
             "predicted_rate": None,
             "sentiment": "unknown",
             "signal": "UNKNOWN",
-            "error": "Failed to fetch funding rate"
+            "error": "Failed to fetch funding rate from Coinalyze and OKX"
         }
     
     # Parse response - Coinalyze returns array of symbols
@@ -132,6 +199,7 @@ async def get_funding_rate() -> Dict[str, Any]:
         "predicted_rate": round(predicted_rate, 4) if predicted_rate else None,
         "sentiment": sentiment,
         "signal": signal,
+        "source": "coinalyze",
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
     
@@ -174,13 +242,72 @@ async def get_open_interest() -> Dict[str, Any]:
     })
     
     if not data or not isinstance(data, list) or len(data) == 0:
+        # Fallback: OKX open-interest snapshot + 1H candles for price context.
+        oi_data = await _make_okx_request("/public/open-interest", {"instId": OKX_SWAP_SYMBOL})
+        oi_rows = oi_data.get("data", []) if isinstance(oi_data, dict) else []
+        if oi_rows:
+            current_oi = _to_float(oi_rows[0].get("oi"))
+            now_ts = datetime.now(timezone.utc)
+            prev_snapshot = _get_cached("okx_oi_snapshot")
+            _set_cache("okx_oi_snapshot", {"oi": current_oi, "ts": now_ts.isoformat()}, ttl=8 * 3600)
+
+            oi_change_4h = None
+            if prev_snapshot and isinstance(prev_snapshot, dict):
+                prev_oi = _to_float(prev_snapshot.get("oi"))
+                prev_ts_raw = prev_snapshot.get("ts")
+                prev_ts = None
+                if isinstance(prev_ts_raw, str):
+                    try:
+                        prev_ts = datetime.fromisoformat(prev_ts_raw)
+                    except Exception:
+                        prev_ts = None
+                if prev_oi and current_oi and prev_oi > 0 and prev_ts:
+                    age_hours = max((now_ts - prev_ts).total_seconds() / 3600.0, 0.25)
+                    raw_change = (current_oi - prev_oi) / prev_oi * 100
+                    oi_change_4h = raw_change * (4.0 / age_hours)
+
+            candles = await _make_okx_request("/market/candles", {
+                "instId": OKX_SWAP_SYMBOL,
+                "bar": "1H",
+                "limit": 6
+            })
+            candle_rows = candles.get("data", []) if isinstance(candles, dict) else []
+            price_change_4h = None
+            if len(candle_rows) >= 5:
+                # OKX candles are newest-first: [ts,o,h,l,c,...]
+                newest = _to_float(candle_rows[0][4]) if len(candle_rows[0]) > 4 else None
+                older = _to_float(candle_rows[4][4]) if len(candle_rows[4]) > 4 else None
+                if newest and older and older > 0:
+                    price_change_4h = (newest - older) / older * 100
+
+            divergence = "none"
+            signal = "NEUTRAL"
+            if oi_change_4h is not None and price_change_4h is not None and abs(oi_change_4h) > 2 and abs(price_change_4h) > 0.5:
+                if oi_change_4h > 0 and price_change_4h < 0:
+                    divergence = "accumulation"
+                    signal = "FIRING"
+                elif oi_change_4h < 0 and price_change_4h > 0:
+                    divergence = "distribution"
+                    signal = "FIRING"
+
+            result = {
+                "current_oi": current_oi,
+                "oi_change_4h": round(oi_change_4h, 2) if oi_change_4h is not None else None,
+                "price_change_4h": round(price_change_4h, 2) if price_change_4h is not None else None,
+                "divergence": divergence if (oi_change_4h is not None and price_change_4h is not None) else "unknown",
+                "signal": signal if (oi_change_4h is not None and price_change_4h is not None) else "NEUTRAL",
+                "source": "okx_fallback",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+            _set_cache(cache_key, result)
+            return result
         return {
             "current_oi": None,
             "oi_change_4h": None,
             "price_change_4h": None,
             "divergence": "unknown",
             "signal": "UNKNOWN",
-            "error": "Failed to fetch OI data"
+            "error": "Failed to fetch OI data from Coinalyze and OKX"
         }
     
     # Parse OI history
@@ -227,6 +354,7 @@ async def get_open_interest() -> Dict[str, Any]:
         "price_change_4h": round(price_change_4h, 2),
         "divergence": divergence,
         "signal": signal,
+        "source": "coinalyze",
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
     
@@ -268,6 +396,49 @@ async def get_liquidations() -> Dict[str, Any]:
     })
     
     if not data or not isinstance(data, list) or len(data) == 0:
+        # Fallback: OKX liquidation feed (filled liquidation orders).
+        okx_data = await _make_okx_request("/public/liquidation-orders", {
+            "instType": "SWAP",
+            "state": "filled",
+            "uly": "BTC-USDT",
+            "limit": 100
+        })
+        rows = okx_data.get("data", []) if isinstance(okx_data, dict) else []
+        if rows:
+            long_contracts = 0.0
+            short_contracts = 0.0
+            for row in rows:
+                size = _to_float(row.get("sz")) or 0.0
+                pos_side = str(row.get("posSide", "")).lower()
+                if pos_side == "long":
+                    long_contracts += size
+                elif pos_side == "short":
+                    short_contracts += size
+
+            total_contracts = long_contracts + short_contracts
+            long_pct = (long_contracts / total_contracts * 100) if total_contracts > 0 else 50.0
+            composition = "balanced"
+            signal = "NEUTRAL"
+            if total_contracts > 100:
+                if long_pct > 75:
+                    composition = "long_heavy"
+                    signal = "FIRING"
+                elif long_pct < 25:
+                    composition = "short_heavy"
+                    signal = "FIRING"
+
+            result = {
+                "long_liquidations": round(long_contracts, 2),
+                "short_liquidations": round(short_contracts, 2),
+                "total_liquidations": round(total_contracts, 2),
+                "long_pct": round(long_pct, 1),
+                "composition": composition,
+                "signal": signal,
+                "source": "okx_fallback",
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+            _set_cache(cache_key, result)
+            return result
         return {
             "long_liquidations": None,
             "short_liquidations": None,
@@ -275,7 +446,7 @@ async def get_liquidations() -> Dict[str, Any]:
             "long_pct": None,
             "composition": "unknown",
             "signal": "UNKNOWN",
-            "error": "Failed to fetch liquidation data"
+            "error": "Failed to fetch liquidation data from Coinalyze and OKX"
         }
     
     # Parse liquidation data
@@ -320,6 +491,7 @@ async def get_liquidations() -> Dict[str, Any]:
         "long_pct": round(long_pct, 1),
         "composition": composition,
         "signal": signal,
+        "source": "coinalyze",
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
     
@@ -359,11 +531,57 @@ async def get_term_structure() -> Dict[str, Any]:
     })
     
     if not data or not isinstance(data, list) or len(data) == 0:
+        # Fallback: OKX funding-rate history.
+        okx_data = await _make_okx_request("/public/funding-rate-history", {
+            "instId": OKX_SWAP_SYMBOL,
+            "limit": 12
+        })
+        rows = okx_data.get("data", []) if isinstance(okx_data, dict) else []
+        if len(rows) >= 2:
+            # OKX returns newest-first.
+            rates = [(_to_float(r.get("fundingRate")) or 0.0) * 100 for r in reversed(rows)]
+            current_funding = rates[-1]
+            avg_funding = sum(rates) / len(rates)
+            if avg_funding > 0.02:
+                structure = "contango"
+            elif avg_funding < -0.01:
+                structure = "backwardation"
+            else:
+                structure = "flat"
+
+            recent_avg = sum(rates[-2:]) / 2
+            older_len = max(len(rates) - 2, 1)
+            older_avg = sum(rates[:-2]) / older_len if len(rates) > 2 else rates[0]
+            if recent_avg > older_avg + 0.01:
+                funding_trend = "rising"
+            elif recent_avg < older_avg - 0.01:
+                funding_trend = "falling"
+            else:
+                funding_trend = "stable"
+
+            signal = "NEUTRAL"
+            if structure == "contango" and funding_trend == "rising":
+                signal = "FIRING"
+            elif structure == "backwardation" and funding_trend == "falling":
+                signal = "FIRING"
+
+            result = {
+                "structure": structure,
+                "funding_trend": funding_trend,
+                "current_funding": round(current_funding, 4),
+                "avg_funding_24h": round(avg_funding, 4),
+                "signal": signal,
+                "source": "okx_fallback",
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+            _set_cache(cache_key, result)
+            return result
+
         return {
             "structure": "unknown",
             "funding_trend": "unknown",
             "signal": "UNKNOWN",
-            "error": "Failed to fetch funding history"
+            "error": "Failed to fetch funding history from Coinalyze and OKX"
         }
     
     # Parse funding history
@@ -418,6 +636,7 @@ async def get_term_structure() -> Dict[str, Any]:
         "current_funding": round(current_funding, 4),
         "avg_funding_24h": round(avg_funding, 4),
         "signal": signal,
+        "source": "coinalyze",
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
     
