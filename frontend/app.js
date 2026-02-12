@@ -888,9 +888,10 @@ function initEventListeners() {
 
 // Data Loading
 async function loadInitialData() {
+    // Load bias auto first so composite/timeframe fallback has fresh source data.
+    await loadBiasData();
     await Promise.all([
         loadSignals(),
-        loadBiasData(),
         fetchCompositeBias(),
         fetchTimeframeBias(),
         loadOpenPositions()
@@ -1269,18 +1270,183 @@ async function loadBiasData() {
     
     // Load shift status for weekly bias
     await fetchBiasShiftStatus();
-    
+
     // Check and apply alignment styling
     checkAndApplyBiasAlignment();
 
     renderCryptoBiasSummary();
 }
 
+function normalizeCompositeBiasLevel(level) {
+    if (!level) return 'NEUTRAL';
+    const raw = String(level).toUpperCase().replace(/\s+/g, '_');
+    const map = {
+        MAJOR_TORO: 'TORO_MAJOR',
+        MINOR_TORO: 'TORO_MINOR',
+        LEAN_TORO: 'TORO_MINOR',
+        LEAN_URSA: 'URSA_MINOR',
+        MINOR_URSA: 'URSA_MINOR',
+        MAJOR_URSA: 'URSA_MAJOR',
+        TORO_MAJOR: 'TORO_MAJOR',
+        TORO_MINOR: 'TORO_MINOR',
+        URSA_MINOR: 'URSA_MINOR',
+        URSA_MAJOR: 'URSA_MAJOR',
+        NEUTRAL: 'NEUTRAL'
+    };
+    return map[raw] || 'NEUTRAL';
+}
+
+function biasTrendToMomentum(trend) {
+    const value = String(trend || '').toUpperCase();
+    if (value === 'IMPROVING') return 'strengthening';
+    if (value === 'DECLINING') return 'weakening';
+    return 'stable';
+}
+
+function compositeLevelToScore(level) {
+    const normalized = normalizeCompositeBiasLevel(level);
+    const scoreMap = {
+        TORO_MAJOR: 0.9,
+        TORO_MINOR: 0.45,
+        NEUTRAL: 0,
+        URSA_MINOR: -0.45,
+        URSA_MAJOR: -0.9
+    };
+    return scoreMap[normalized] ?? 0;
+}
+
+function scoreToCompositeLevel(score) {
+    if (score >= 0.6) return 'TORO_MAJOR';
+    if (score >= 0.2) return 'TORO_MINOR';
+    if (score <= -0.6) return 'URSA_MAJOR';
+    if (score <= -0.2) return 'URSA_MINOR';
+    return 'NEUTRAL';
+}
+
+function factorMapToRows(factorMap) {
+    if (!factorMap || typeof factorMap !== 'object') return [];
+    return Object.entries(factorMap).map(([factorId, factorData]) => {
+        const voteRaw = Number(factorData?.vote ?? 0);
+        const vote = Number.isFinite(voteRaw) ? voteRaw : 0;
+        const score = Math.max(-1, Math.min(1, vote / 2));
+        const signal = factorData?.details?.signal || factorData?.signal || 'NEUTRAL';
+        const detail = factorData?.details ? JSON.stringify(factorData.details) : '';
+        return {
+            factor_id: factorId,
+            weight: 1,
+            description: '',
+            stale: false,
+            score,
+            signal,
+            detail
+        };
+    });
+}
+
+function buildTimeframesFromBiasAuto() {
+    const mappings = [
+        ['intraday', dailyBiasFullData],
+        ['swing', weeklyBiasFullData],
+        ['macro', cyclicalBiasFullData]
+    ];
+    const available = mappings.filter(([, data]) => data && data.level);
+    if (!available.length) return null;
+
+    const timeframes = {};
+    const subScores = [];
+
+    for (const [name, source] of available) {
+        const biasLevel = normalizeCompositeBiasLevel(source.level);
+        const subScore = compositeLevelToScore(biasLevel);
+        const factors = factorMapToRows(source?.details?.factors);
+        subScores.push(subScore);
+        timeframes[name] = {
+            sub_score: Number(subScore.toFixed(3)),
+            bias_level: biasLevel,
+            bias_numeric: getBiasValue(biasLevel),
+            momentum: biasTrendToMomentum(source?.trend),
+            divergent: false,
+            active_count: factors.length,
+            total_count: factors.length,
+            factors
+        };
+    }
+
+    for (const [name] of mappings) {
+        if (!timeframes[name]) {
+            timeframes[name] = {
+                sub_score: 0,
+                bias_level: 'NEUTRAL',
+                bias_numeric: getBiasValue('NEUTRAL'),
+                momentum: 'stable',
+                divergent: false,
+                active_count: 0,
+                total_count: 0,
+                factors: []
+            };
+        }
+    }
+
+    const compositeScore = subScores.length ? subScores.reduce((a, b) => a + b, 0) / subScores.length : 0;
+    return {
+        composite_score: Number(compositeScore.toFixed(3)),
+        composite_bias: scoreToCompositeLevel(compositeScore),
+        composite_numeric: getBiasValue(scoreToCompositeLevel(compositeScore)),
+        confidence: available.length === 3 ? 'HIGH' : 'MEDIUM',
+        override: null,
+        timestamp: new Date().toISOString(),
+        timeframes,
+        sector_rotation: null,
+        _fallback_from_bias_auto: true
+    };
+}
+
+function shouldUseCompositeFallback(data) {
+    if (!data || typeof data !== 'object') return true;
+    const activeCount = Array.isArray(data.active_factors) ? data.active_factors.length : 0;
+    const hasAnyScore = !!(data.factors && Object.values(data.factors).some((f) => f && typeof f.score === 'number'));
+    return activeCount === 0 || !hasAnyScore;
+}
+
+function shouldUseTimeframeFallback(data) {
+    if (!data || !data.timeframes) return true;
+    return Object.values(data.timeframes).every((tf) => (tf?.active_count || 0) === 0);
+}
+
+function buildCompositeFallbackFromBiasAuto() {
+    const tfFallback = buildTimeframesFromBiasAuto();
+    if (!tfFallback) return null;
+
+    const fallbackFactors = [
+        { factor_id: 'daily_bias', score: compositeLevelToScore(normalizeCompositeBiasLevel(dailyBiasFullData?.level)), signal: dailyBiasFullData?.level || 'NEUTRAL', detail: 'Derived from bias-auto daily model' },
+        { factor_id: 'weekly_bias', score: compositeLevelToScore(normalizeCompositeBiasLevel(weeklyBiasFullData?.level)), signal: weeklyBiasFullData?.level || 'NEUTRAL', detail: 'Derived from bias-auto weekly model' },
+        { factor_id: 'cyclical_bias', score: compositeLevelToScore(normalizeCompositeBiasLevel(cyclicalBiasFullData?.level)), signal: cyclicalBiasFullData?.level || 'NEUTRAL', detail: 'Derived from bias-auto cyclical model' }
+    ];
+
+    return {
+        composite_score: tfFallback.composite_score,
+        bias_level: tfFallback.composite_bias,
+        bias_numeric: tfFallback.composite_numeric,
+        confidence: tfFallback.confidence,
+        override: null,
+        timestamp: tfFallback.timestamp,
+        factors: {},
+        active_factors: fallbackFactors.map((f) => f.factor_id),
+        stale_factors: [],
+        fallback_factors: fallbackFactors,
+        _fallback_from_bias_auto: true
+    };
+}
+
 
 async function fetchCompositeBias() {
     try {
         const resp = await fetch(`${API_URL}/bias/composite`);
-        const data = await resp.json();
+        let data = await resp.json();
+        if (shouldUseCompositeFallback(data)) {
+            const fallback = buildCompositeFallbackFromBiasAuto();
+            if (fallback) data = fallback;
+        }
         renderCompositeBias(data);
     } catch (err) {
         console.error('Failed to fetch composite bias:', err);
@@ -1349,6 +1515,28 @@ function renderCompositeBias(data) {
     }
 
     if (factorList) {
+        if (Array.isArray(data.fallback_factors) && data.fallback_factors.length) {
+            factorList.innerHTML = data.fallback_factors.map((factor) => {
+                const score = Number(factor.score || 0);
+                const barPct = Math.min(100, Math.abs(score) * 100);
+                const barColor = score <= -0.6 ? '#e5370e'
+                    : score < 0 ? '#ff9800'
+                    : score >= 0.6 ? '#00e676'
+                    : '#66bb6a';
+                return `
+                    <div class="factor-row">
+                        <span class="factor-status">o</span>
+                        <span class="factor-name">${formatFactorName(factor.factor_id)}</span>
+                        <div class="factor-bar">
+                            <div class="factor-bar-fill" style="width:${barPct}%;background:${barColor}"></div>
+                        </div>
+                        <span class="factor-score">${score.toFixed(2)}</span>
+                        <span class="factor-signal" style="color:${barColor}">${(factor.signal || '').replace(/_/g, ' ')}</span>
+                    </div>
+                `;
+            }).join('');
+            if (activeCountEl) activeCountEl.textContent = `${data.fallback_factors.length} bias-auto factors`;
+        } else {
         const factorOrder = [
             'credit_spreads', 'market_breadth', 'vix_term', 'tick_breadth',
             'sector_rotation', 'dollar_smile', 'excess_cape', 'savita'
@@ -1402,15 +1590,18 @@ function renderCompositeBias(data) {
             factorList.appendChild(row);
         });
 
-        if (activeCountEl) {
-            const activeCount = (data.active_factors || []).length;
-            activeCountEl.textContent = `${activeCount}/8 active`;
+            if (activeCountEl) {
+                const activeCount = (data.active_factors || []).length;
+                activeCountEl.textContent = `${activeCount}/8 active`;
+            }
         }
     }
 
     if (lastUpdateEl && data.timestamp) {
         const timeAgo = getTimeAgo(new Date(data.timestamp));
-        lastUpdateEl.textContent = `Last update: ${timeAgo}`;
+        lastUpdateEl.textContent = data._fallback_from_bias_auto
+            ? `Last update: ${timeAgo} (bias-auto fallback)`
+            : `Last update: ${timeAgo}`;
     }
 }
 
@@ -1467,7 +1658,11 @@ function initCompositeBiasControls() {
 async function fetchTimeframeBias() {
     try {
         const resp = await fetch(`${API_URL}/bias/composite/timeframes`);
-        const data = await resp.json();
+        let data = await resp.json();
+        if (shouldUseTimeframeFallback(data)) {
+            const fallback = buildTimeframesFromBiasAuto();
+            if (fallback) data = fallback;
+        }
         if (data && data.timeframes) {
             // Backfill composite cache so bias strips still render when /bias/composite lags.
             _compositeBiasData = {
