@@ -7,7 +7,7 @@ attaches CTA zones and bias alignment, caches in Redis.
 import asyncio
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
 import yfinance as yf
@@ -21,6 +21,38 @@ SECTOR_STRENGTH_CACHE_KEY = "watchlist:sector_strength"
 SECTOR_STRENGTH_CACHE_TTL = 900  # 15 minutes
 
 BENCHMARK_TICKER = "SPY"
+
+# Short-lived in-process cache to reduce Redis load during frequent polling.
+INMEM_ENRICHMENT_CACHE_TTL = 30  # seconds
+_INMEM_ENRICHMENT_CACHE: Dict[str, Optional[dict]] = {"payload": None, "expires_at": None}
+
+
+def _get_inmem_enrichment() -> Optional[dict]:
+    payload = _INMEM_ENRICHMENT_CACHE.get("payload")
+    expires_at = _INMEM_ENRICHMENT_CACHE.get("expires_at")
+    if payload and expires_at and datetime.now() < expires_at:
+        return payload
+    return None
+
+
+def _set_inmem_enrichment(payload: dict) -> None:
+    _INMEM_ENRICHMENT_CACHE["payload"] = payload
+    _INMEM_ENRICHMENT_CACHE["expires_at"] = datetime.now() + timedelta(seconds=INMEM_ENRICHMENT_CACHE_TTL)
+
+
+async def _bulk_get(redis_client, keys: List[str]) -> List[Optional[str]]:
+    if not redis_client or not keys:
+        return [None] * len(keys)
+    try:
+        values = await redis_client.mget(keys)
+        if values is None:
+            return [None] * len(keys)
+        # Ensure length parity with keys.
+        if len(values) < len(keys):
+            values = list(values) + [None] * (len(keys) - len(values))
+        return values[: len(keys)]
+    except Exception:
+        return [None] * len(keys)
 
 
 def fetch_price_data(symbols: List[str]) -> Dict[str, dict]:
@@ -115,13 +147,12 @@ async def get_cta_zones(symbols: List[str], redis_client) -> Dict[str, Optional[
     if redis_client is None:
         return {symbol: None for symbol in symbols}
 
+    keys = [f"cta:zone:{symbol}" for symbol in symbols]
+    values = await _bulk_get(redis_client, keys)
+
     zones: Dict[str, Optional[str]] = {}
-    for symbol in symbols:
-        try:
-            zone = await redis_client.get(f"cta:zone:{symbol}")
-            zones[symbol] = zone if zone else None
-        except Exception:
-            zones[symbol] = None
+    for symbol, zone in zip(symbols, values):
+        zones[symbol] = zone if zone else None
     return zones
 
 
@@ -130,10 +161,12 @@ async def get_active_signals(symbols: List[str], redis_client) -> Dict[str, int]
     if redis_client is None:
         return {symbol: 0 for symbol in symbols}
 
+    keys = [f"signal:active:{symbol}" for symbol in symbols]
+    values = await _bulk_get(redis_client, keys)
+
     counts: Dict[str, int] = {}
-    for symbol in symbols:
+    for symbol, count in zip(symbols, values):
         try:
-            count = await redis_client.get(f"signal:active:{symbol}")
             counts[symbol] = int(count) if count else 0
         except Exception:
             counts[symbol] = 0
@@ -250,11 +283,17 @@ async def enrich_watchlist(watchlist_data: dict, redis_client) -> dict:
     """
     Main entry point. Takes raw watchlist config, returns fully enriched response.
     """
+    cached_local = _get_inmem_enrichment()
+    if cached_local:
+        return cached_local
+
     if redis_client:
         try:
             cached = await redis_client.get(ENRICHMENT_CACHE_KEY)
             if cached:
-                return json.loads(cached)
+                payload = json.loads(cached)
+                _set_inmem_enrichment(payload)
+                return payload
         except Exception:
             pass
 
@@ -331,18 +370,22 @@ async def enrich_watchlist(watchlist_data: dict, redis_client) -> dict:
         "cache_ttl_seconds": ENRICHMENT_CACHE_TTL,
     }
 
+    _set_inmem_enrichment(result)
+
     if redis_client:
         try:
-            await redis_client.setex(
+            pipe = redis_client.pipeline()
+            pipe.setex(
                 ENRICHMENT_CACHE_KEY,
                 ENRICHMENT_CACHE_TTL,
                 json.dumps(result),
             )
-            await redis_client.setex(
+            pipe.setex(
                 SECTOR_STRENGTH_CACHE_KEY,
                 SECTOR_STRENGTH_CACHE_TTL,
                 json.dumps(sector_strength),
             )
+            await pipe.execute()
         except Exception as exc:
             logger.warning(f"Failed to cache enriched watchlist: {exc}")
 

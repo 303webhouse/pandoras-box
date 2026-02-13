@@ -104,6 +104,10 @@ let _open_positions_cache = [];
 let cryptoMarketData = null;
 let cryptoMarketTimer = null;
 let cryptoMarketLastGood = {};
+let cryptoWma9 = null;
+let cryptoWmaUpdated = null;
+let cryptoWmaTimer = null;
+let cryptoWmaLoading = false;
 
 // Cyclical Bias Factor State
 let cyclicalBiasFullData = null;
@@ -844,6 +848,7 @@ function initEventListeners() {
         fetchCompositeBias();
         fetchTimeframeBias();
         checkPivotHealth();
+        checkRedisHealth();
     });
 
     // Mode switcher
@@ -914,6 +919,10 @@ async function loadInitialData() {
     // Pivot health checks
     checkPivotHealth();
     setInterval(checkPivotHealth, 5 * 60 * 1000);
+
+    // Redis health checks
+    checkRedisHealth();
+    setInterval(checkRedisHealth, 2 * 60 * 1000);
 }
 
 let cryptoTvWidget = null;
@@ -988,6 +997,10 @@ function initCryptoScalper() {
     loadCryptoMarketData();
     if (cryptoMarketTimer) clearInterval(cryptoMarketTimer);
     cryptoMarketTimer = setInterval(loadCryptoMarketData, 15 * 1000);
+
+    refreshCryptoWma9();
+    if (cryptoWmaTimer) clearInterval(cryptoWmaTimer);
+    cryptoWmaTimer = setInterval(refreshCryptoWma9, 15 * 60 * 1000);
 }
 
 function initCryptoChart() {
@@ -1867,6 +1880,63 @@ function checkPivotHealth() {
         })
         .catch(() => {
             updateIndicators(null, 'Pivot unknown');
+        });
+}
+
+function checkRedisHealth() {
+    const indicators = Array.from(document.querySelectorAll('[data-redis-health="true"]'));
+    if (!indicators.length) return;
+
+    const updateIndicators = (status, text, title) => {
+        indicators.forEach(indicator => {
+            const dot = indicator.querySelector('.redis-dot');
+            const textEl = indicator.querySelector('.redis-text');
+            indicator.classList.remove('ok', 'throttled', 'error');
+            if (status) indicator.classList.add(status);
+            if (dot) dot.textContent = 'o';
+            if (textEl) textEl.textContent = text;
+            if (title) {
+                indicator.title = title;
+            } else {
+                indicator.removeAttribute('title');
+            }
+        });
+    };
+
+    fetch(`${API_URL}/redis/health`)
+        .then(resp => resp.ok ? resp.json() : null)
+        .then(data => {
+            if (!data) {
+                updateIndicators(null, 'Redis unknown');
+                return;
+            }
+
+            const status = data.status || 'unknown';
+            const lastError = data.last_error || null;
+            const lastErrorAt = data.last_error_at ? new Date(data.last_error_at) : null;
+            const minutesAgo = lastErrorAt ? Math.round((Date.now() - lastErrorAt.getTime()) / 60000) : null;
+
+            if (status === 'throttled') {
+                const suffix = Number.isFinite(minutesAgo) ? ` (${minutesAgo}m)` : '';
+                updateIndicators('throttled', `Redis throttled${suffix}`, lastError || 'Redis throttled');
+                return;
+            }
+
+            if (status === 'error') {
+                const suffix = Number.isFinite(minutesAgo) ? ` (${minutesAgo}m)` : '';
+                updateIndicators('error', `Redis error${suffix}`, lastError || 'Redis error');
+                return;
+            }
+
+            if (status === 'ok') {
+                updateIndicators('ok', 'Redis ok');
+                return;
+            }
+
+            updateIndicators(null, 'Redis unknown');
+        })
+        .catch(() => {
+            updateIndicators(null, 'Redis unknown');
         });
 }
 
@@ -3682,25 +3752,30 @@ function getBiasAlignmentStatus(cyclicalLevel, weeklyLevel) {
 function renderCryptoBiasSummary() {
     const biasValues = {
         daily: dailyBiasFullData?.level || 'NEUTRAL',
-        weekly: weeklyBiasFullData?.level || 'NEUTRAL',
-        cyclical: cyclicalBiasFullData?.level || 'NEUTRAL'
+        composite: _compositeBiasData?.bias_level || 'NEUTRAL'
     };
 
     const inlineDaily = document.getElementById('cryptoBiasDaily');
-    const inlineWeekly = document.getElementById('cryptoBiasWeekly');
-    const inlineCyc = document.getElementById('cryptoBiasCyclical');
     const inlineComposite = document.getElementById('cryptoCompositeInline');
 
-    if (inlineDaily) inlineDaily.textContent = (biasValues.daily || '--').replace('_', ' ');
-    if (inlineWeekly) inlineWeekly.textContent = (biasValues.weekly || '--').replace('_', ' ');
-    if (inlineCyc) inlineCyc.textContent = (biasValues.cyclical || '--').replace('_', ' ');
-    if (inlineComposite) inlineComposite.textContent = (_compositeBiasData?.bias_level || 'NEUTRAL').replace('_', ' ');
+    if (inlineDaily) inlineDaily.textContent = (biasValues.daily || '--').replace(/_/g, ' ');
+    if (inlineComposite) inlineComposite.textContent = (biasValues.composite || 'NEUTRAL').replace(/_/g, ' ');
+
+    const applyBiasPill = (pill, level) => {
+        if (!pill) return;
+        const biasKey = (level || 'NEUTRAL').toUpperCase();
+        pill.classList.remove('TORO_MAJOR', 'TORO_MINOR', 'URSA_MINOR', 'URSA_MAJOR', 'NEUTRAL');
+        pill.classList.add(biasKey);
+    };
+
+    applyBiasPill(document.querySelector('.bias-pill[data-bias="daily"]'), biasValues.daily);
+    applyBiasPill(document.querySelector('.bias-pill[data-bias="composite"]'), biasValues.composite);
 
     const levelEl = document.getElementById('cryptoCompositeBiasLevel');
     const scoreEl = document.getElementById('cryptoCompositeBiasScore');
     const confEl = document.getElementById('cryptoCompositeBiasConfidence');
 
-    const compositeLevel = (_compositeBiasData?.bias_level || 'NEUTRAL').replace(/_/g, ' ');
+    const compositeLevel = (biasValues.composite || 'NEUTRAL').replace(/_/g, ' ');
     const compositeScoreVal = typeof _compositeBiasData?.composite_score === 'number'
         ? _compositeBiasData.composite_score
         : parseFloat(_compositeBiasData?.composite_score || 0);
@@ -3824,7 +3899,7 @@ async function loadCryptoKeyLevels() {
 }
 
 async function loadCryptoMarketData() {
-    const spotEl = document.getElementById('cryptoCoinbaseSpot');
+    const spotEl = document.getElementById('cryptoCoinbaseSpotInline');
     if (!spotEl) return;
 
     let data = null;
@@ -3839,8 +3914,6 @@ async function loadCryptoMarketData() {
         // Keep the last good snapshot visible on transient API failures.
         if (cryptoMarketData) {
             renderCryptoMarketData();
-            const updated = document.getElementById('cryptoCoinbaseUpdated');
-            if (updated) updated.textContent = 'stale';
         } else {
             renderCryptoMarketError();
         }
@@ -3859,16 +3932,16 @@ async function loadCryptoMarketData() {
 
 function renderCryptoMarketError() {
     const ids = [
-        'cryptoCoinbaseSpot', 'cryptoBinanceSpot', 'cryptoPerpSpread', 'cryptoFundingBinance',
-        'cryptoFundingBybit', 'cryptoCvdValue', 'cryptoCvdFlow', 'cryptoSpotLead',
-        'cryptoSpotLeadNote', 'cryptoTakerBuy', 'cryptoTakerSell', 'cryptoCvdTrend'
+        'cryptoCoinbaseSpotInline', 'cryptoBinanceSpotInline', 'cryptoBinancePerpInline',
+        'cryptoPerpSourceInline', 'cryptoFundingInline', 'cryptoCvdInline', 'cryptoTakerBuy', 'cryptoTakerSell', 'cryptoCvdTrend'
     ];
     ids.forEach(id => {
         const el = document.getElementById(id);
-        if (el) el.textContent = '--';
+        if (el) {
+            el.textContent = '--';
+            el.classList.remove('bullish', 'bearish');
+        }
     });
-    const updated = document.getElementById('cryptoCoinbaseUpdated');
-    if (updated) updated.textContent = '--';
 }
 
 function renderCryptoMarketData() {
@@ -3876,7 +3949,6 @@ function renderCryptoMarketData() {
     const prices = cryptoMarketData.prices || {};
     const funding = cryptoMarketData.funding || {};
     const cvd = cryptoMarketData.cvd || {};
-    const errors = Array.isArray(cryptoMarketData.errors) ? cryptoMarketData.errors : [];
 
     const rememberNumber = (key, value) => {
         const num = Number(value);
@@ -3898,128 +3970,64 @@ function renderCryptoMarketData() {
     const perps = prices.perps || {};
     const spotRaw = prices.coinbase_spot ?? prices.coinbase ?? prices.spot_coinbase ?? null;
     const binanceSpotRaw = prices.binance_spot ?? prices.binance ?? prices.spot_binance ?? prices.spot ?? null;
-    const perpRaw = perps.okx ?? perps.binance_perp ?? perps.perp ?? prices.perp_price ?? prices.perp ?? null;
+    const perpRaw = perps.bybit ?? perps.okx ?? perps.binance_perp ?? perps.perp ?? prices.perp_price ?? prices.perp ?? null;
 
-    const spot = rememberNumber('coinbase_spot', spotRaw ?? binanceSpotRaw);
-    const perp = rememberNumber('perp_price', perpRaw);
-    const binanceSpot = rememberNumber('binance_spot', binanceSpotRaw);
-    const basis = rememberNumber('basis', prices.basis ?? (spot !== null && perp !== null ? spot - perp : null));
-    const basisPct = rememberNumber('basis_pct', prices.basis_pct ?? (basis !== null && perp ? (basis / perp) * 100 : null));
-    const binanceSpotUpdated = rememberString('binance_spot_ts', prices.binance_spot_ts);
-    const perpSpread = rememberNumber('perp_spread', perps.spread);
-    const perpNote = perps.note;
+    rememberNumber('coinbase_spot', spotRaw ?? binanceSpotRaw);
+    rememberNumber('binance_spot', binanceSpotRaw);
+    rememberNumber('perp_price', perpRaw);
+    rememberString('binance_spot_ts', prices.binance_spot_ts);
+    rememberString('perp_source', perps.source);
 
-    const spotEl = document.getElementById('cryptoCoinbaseSpot');
-    const perpEl = document.getElementById('cryptoBinancePerp');
-    const basisEl = document.getElementById('cryptoBasis');
-    const spotLeadEl = document.getElementById('cryptoSpotLead');
-    const spotLeadNoteEl = document.getElementById('cryptoSpotLeadNote');
-    const binanceSpotEl = document.getElementById('cryptoBinanceSpot');
-    const binanceSpotUpdatedEl = document.getElementById('cryptoBinanceSpotUpdated');
-    const perpSpreadEl = document.getElementById('cryptoPerpSpread');
-    const perpSpreadNoteEl = document.getElementById('cryptoPerpSpreadNote');
-    const fundingBinanceEl = document.getElementById('cryptoFundingBinance');
-    const fundingBybitEl = document.getElementById('cryptoFundingBybit');
-    const cvdValueEl = document.getElementById('cryptoCvdValue');
-    const cvdFlowEl = document.getElementById('cryptoCvdFlow');
-    const coinbaseUpdatedEl = document.getElementById('cryptoCoinbaseUpdated');
-    const snapshotTimestamp = cryptoMarketData.timestamp;
+    const fundingInlineEl = document.getElementById('cryptoFundingInline');
+    const cvdInlineEl = document.getElementById('cryptoCvdInline');
 
-    if (spotEl) spotEl.textContent = formatUsdValue(spot);
-    if (binanceSpotEl) binanceSpotEl.textContent = formatUsdValue(binanceSpot);
-    if (binanceSpotUpdatedEl) binanceSpotUpdatedEl.textContent = binanceSpotUpdated ? new Date(binanceSpotUpdated).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : '--';
-    if (perpEl) perpEl.textContent = formatUsdValue(perp);
-
-    if (basisEl) {
-        const basisText = basis !== null && basis !== undefined
-            ? `Basis: ${formatUsdValue(basis)} (${formatSignedPercent(basisPct)})`
-            : 'Basis: --';
-        basisEl.textContent = basisText;
-        basisEl.className = `micro-sub ${basisPct > 0 ? 'bullish' : basisPct < 0 ? 'bearish' : 'neutral'}`;
-    }
-
-    if (perpSpreadEl) {
-        perpSpreadEl.textContent = perpSpread !== null && perpSpread !== undefined ? formatUsdValue(perpSpread) : '--';
-        perpSpreadEl.className = `micro-value ${perpSpread > 0 ? 'bearish' : perpSpread < 0 ? 'bullish' : 'neutral'}`;
-    }
-    if (perpSpreadNoteEl) {
-        perpSpreadNoteEl.textContent = perpNote || 'Spread spot vs perp';
-        perpSpreadNoteEl.className = `micro-sub ${perpSpread > 0 ? 'bearish' : perpSpread < 0 ? 'bullish' : 'neutral'}`;
-    }
-
-    if (spotLeadEl) {
-        const leadText = basisPct === null || basisPct === undefined
-            ? '--'
-            : basisPct > 0 ? 'Spot Leading' : basisPct < 0 ? 'Perp Leading' : 'In Sync';
-        spotLeadEl.textContent = leadText;
-        spotLeadEl.className = `micro-value ${basisPct > 0 ? 'bullish' : basisPct < 0 ? 'bearish' : 'neutral'}`;
-    }
-
-    if (spotLeadNoteEl) {
-        const note = basis !== null && basis !== undefined
-            ? `Spread: ${formatUsdValue(basis)}`
-            : '--';
-        spotLeadNoteEl.textContent = note;
-        spotLeadNoteEl.className = `micro-sub ${basisPct > 0 ? 'bullish' : basisPct < 0 ? 'bearish' : 'neutral'}`;
-    }
-
-    if (fundingBinanceEl) {
+    if (fundingInlineEl) {
         const okxFunding = rememberNumber('funding_okx', funding.okx?.rate ?? funding.binance?.rate ?? funding.okx_rate);
-        fundingBinanceEl.textContent = formatFundingRate(okxFunding, 'OKX');
-        fundingBinanceEl.className = `micro-value ${okxFunding > 0 ? 'bearish' : okxFunding < 0 ? 'bullish' : 'neutral'}`;
-    }
-    if (fundingBybitEl) {
-        const bybitFunding = rememberNumber('funding_bybit', funding.bybit?.rate ?? funding.bybit_rate);
-        const bybitBlocked = errors.some((err) => String(err).toLowerCase().includes('bybit_funding'));
-        const bybitText = bybitFunding === null || bybitFunding === undefined
-            ? (bybitBlocked ? 'Bybit: blocked (403)' : 'Bybit: unavailable')
-            : formatFundingRate(bybitFunding, 'Bybit');
-        fundingBybitEl.textContent = bybitText;
-        fundingBybitEl.className = `micro-sub ${bybitFunding > 0 ? 'bearish' : bybitFunding < 0 ? 'bullish' : bybitBlocked ? 'bearish' : 'neutral'}`;
+        fundingInlineEl.textContent = formatFundingRate(okxFunding, 'Funding');
+        fundingInlineEl.className = `crypto-price-extra ${okxFunding > 0 ? 'bearish' : okxFunding < 0 ? 'bullish' : ''}`.trim();
     }
 
-    if (cvdValueEl) {
+    if (cvdInlineEl) {
         const netUsd = rememberNumber('cvd_net_usd', cvd.net_usd ?? cvd.net ?? cvd.value_usd);
-        cvdValueEl.textContent = netUsd !== null ? formatSignedUsd(netUsd) : '--';
-        cvdValueEl.className = `micro-value ${netUsd > 0 ? 'bullish' : netUsd < 0 ? 'bearish' : 'neutral'}`;
-    }
-    if (cvdFlowEl) {
-        const flow = rememberString('cvd_direction', cvd.direction ?? cvd.trend) || 'NEUTRAL';
-        cvdFlowEl.textContent = flow.replace('_', ' ');
-        cvdFlowEl.className = `micro-sub ${flow.includes('BULL') ? 'bullish' : flow.includes('BEAR') ? 'bearish' : 'neutral'}`;
-    }
-
-    if (coinbaseUpdatedEl) {
-        const ts = snapshotTimestamp ? new Date(snapshotTimestamp) : new Date();
-        coinbaseUpdatedEl.textContent = ts.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+        cvdInlineEl.textContent = netUsd !== null ? `CVD ${formatSignedUsd(netUsd)}` : 'CVD --';
+        cvdInlineEl.className = `crypto-price-extra ${netUsd > 0 ? 'bullish' : netUsd < 0 ? 'bearish' : ''}`.trim();
     }
 
     renderOrderflow(cvd, cryptoMarketData.order_flow || []);
-    updateCryptoSpotTicker();
+    updateCryptoPriceStrip();
 }
 
-function updateCryptoSpotTicker() {
-    const tickerEl = document.getElementById('cryptoSpotTicker');
-    if (!tickerEl) return;
+function updateCryptoPriceStrip() {
+    const coinbaseEl = document.getElementById('cryptoCoinbaseSpotInline');
+    const binanceSpotEl = document.getElementById('cryptoBinanceSpotInline');
+    const binancePerpEl = document.getElementById('cryptoBinancePerpInline');
+    const perpSourceEl = document.getElementById('cryptoPerpSourceInline');
+
+    if (!coinbaseEl && !binanceSpotEl && !binancePerpEl) return;
 
     const prices = cryptoMarketData?.prices || {};
-    const spot = prices.coinbase_spot ?? prices.binance_spot ?? null;
-    const sma9 = prices.sma9 ?? null;
+    const perps = prices.perps || {};
+    const coinbaseSpot = cryptoMarketLastGood.coinbase_spot ?? prices.coinbase_spot ?? null;
+    const binanceSpot = cryptoMarketLastGood.binance_spot ?? prices.binance_spot ?? null;
+    const perpPrice = cryptoMarketLastGood.perp_price ?? perps.bybit ?? perps.okx ?? prices.perp_price ?? null;
+    const perpSource = (cryptoMarketLastGood.perp_source ?? perps.source ?? '').toString().toUpperCase();
 
-    if (spot === null || spot === undefined || Number.isNaN(Number(spot))) {
-        tickerEl.textContent = '--';
-        tickerEl.classList.remove('bullish', 'bearish');
-        return;
-    }
+    if (coinbaseEl) coinbaseEl.textContent = coinbaseSpot !== null ? formatUsdValue(coinbaseSpot) : '--';
+    if (binanceSpotEl) binanceSpotEl.textContent = binanceSpot !== null ? formatUsdValue(binanceSpot) : '--';
+    if (binancePerpEl) binancePerpEl.textContent = perpPrice !== null ? formatUsdValue(perpPrice) : '--';
+    if (perpSourceEl) perpSourceEl.textContent = perpSource ? perpSource : '--';
 
-    tickerEl.textContent = `BTC ${formatUsdValue(spot)}`;
-    tickerEl.classList.remove('bullish', 'bearish');
+    const compareSpot = coinbaseSpot ?? binanceSpot ?? perpPrice;
+    const wma = cryptoWma9;
+    const trendClass = (wma !== null && compareSpot !== null && !Number.isNaN(Number(wma)) && !Number.isNaN(Number(compareSpot)))
+        ? (Number(compareSpot) >= Number(wma) ? 'bullish' : 'bearish')
+        : null;
 
-    if (sma9 !== null && sma9 !== undefined && !Number.isNaN(Number(sma9))) {
-        tickerEl.classList.add(Number(spot) >= Number(sma9) ? 'bullish' : 'bearish');
-    } else if (prices.basis_pct !== null && prices.basis_pct !== undefined && !Number.isNaN(Number(prices.basis_pct))) {
-        tickerEl.classList.add(Number(prices.basis_pct) >= 0 ? 'bullish' : 'bearish');
-    }
+    [coinbaseEl, binanceSpotEl, binancePerpEl].forEach(el => {
+        if (!el) return;
+        el.classList.remove('bullish', 'bearish');
+        if (trendClass) el.classList.add(trendClass);
+    });
 }
 
 function renderOrderflow(cvd, tape) {
@@ -4134,6 +4142,54 @@ async function fetchBinanceKlines(symbol, interval, params = {}) {
         throw new Error(result.error || 'Binance proxy error');
     }
     return result.data;
+}
+
+function calculateWeightedMovingAverage(values) {
+    if (!Array.isArray(values) || values.length === 0) return null;
+    let weightedSum = 0;
+    let weightTotal = 0;
+    values.forEach((value, idx) => {
+        const weight = idx + 1;
+        weightedSum += Number(value) * weight;
+        weightTotal += weight;
+    });
+    if (weightTotal === 0) return null;
+    return weightedSum / weightTotal;
+}
+
+function extractSessionOpenPrices(klines) {
+    if (!Array.isArray(klines)) return [];
+    return klines
+        .filter(row => {
+            const openTime = row?.[0];
+            if (!openTime) return false;
+            const date = new Date(openTime);
+            return date.getUTCHours() === 1; // 8:00pm EST = 01:00 UTC
+        })
+        .map(row => Number(row?.[1]))
+        .filter(value => !Number.isNaN(value));
+}
+
+async function refreshCryptoWma9() {
+    if (cryptoWmaLoading) return;
+    cryptoWmaLoading = true;
+    try {
+        const klines = await fetchBinanceKlines('BTCUSDT', '1h', { limit: 240 });
+        const sessionOpens = extractSessionOpenPrices(klines);
+        if (sessionOpens.length >= 9) {
+            const lastNine = sessionOpens.slice(-9);
+            const wma = calculateWeightedMovingAverage(lastNine);
+            if (wma !== null && !Number.isNaN(wma)) {
+                cryptoWma9 = wma;
+                cryptoWmaUpdated = Date.now();
+            }
+        }
+    } catch (error) {
+        console.error('Error refreshing BTC 9-day WMA:', error);
+    } finally {
+        cryptoWmaLoading = false;
+        updateCryptoPriceStrip();
+    }
 }
 
 async function fetchOvernightRange(symbol) {

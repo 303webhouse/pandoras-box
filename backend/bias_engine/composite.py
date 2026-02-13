@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional, List
 
@@ -170,6 +171,10 @@ REDIS_KEY_FACTOR_LATEST = "bias:factor:{factor_id}:latest"
 REDIS_KEY_FACTOR_HISTORY = "bias:factor:{factor_id}:history"
 REDIS_KEY_COMPOSITE_LATEST = "bias:composite:latest"
 REDIS_KEY_OVERRIDE = "bias:override"
+
+# Short-lived in-process cache to reduce Redis reads during frequent polling.
+COMPOSITE_MEM_CACHE_TTL = int(os.getenv("COMPOSITE_MEM_CACHE_TTL", "15"))
+_COMPOSITE_MEM_CACHE: Dict[str, Any] = {"payload": None, "expires_at": None}
 
 
 class FactorReading(BaseModel):
@@ -335,6 +340,12 @@ async def count_bearish_shifts(hours: int = 24) -> int:
 
 
 async def get_cached_composite() -> Optional[CompositeResult]:
+    now = datetime.utcnow()
+    cached = _COMPOSITE_MEM_CACHE.get("payload")
+    expires = _COMPOSITE_MEM_CACHE.get("expires_at")
+    if cached and expires and now < expires:
+        return cached
+
     try:
         client = await get_redis_client()
         if not client:
@@ -343,13 +354,18 @@ async def get_cached_composite() -> Optional[CompositeResult]:
         if not raw:
             return None
         data = json.loads(raw)
-        return CompositeResult.model_validate(data)
+        result = CompositeResult.model_validate(data)
+        _COMPOSITE_MEM_CACHE["payload"] = result
+        _COMPOSITE_MEM_CACHE["expires_at"] = now + timedelta(seconds=COMPOSITE_MEM_CACHE_TTL)
+        return result
     except Exception as exc:
         logger.warning(f"Failed to load cached composite bias: {exc}")
         return None
 
 
 async def cache_composite(result: CompositeResult) -> None:
+    _COMPOSITE_MEM_CACHE["payload"] = result
+    _COMPOSITE_MEM_CACHE["expires_at"] = datetime.utcnow() + timedelta(seconds=COMPOSITE_MEM_CACHE_TTL)
     try:
         client = await get_redis_client()
         if not client:

@@ -12,10 +12,19 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 import logging
 import json
+import os
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# Lightweight in-process cache to reduce Redis lookups for timeframe payloads.
+TIMEFRAMES_CACHE_TTL_SECONDS = int(os.getenv("BIAS_TIMEFRAMES_CACHE_TTL", "30"))
+_TIMEFRAMES_CACHE: Dict[str, Any] = {
+    "payload": None,
+    "expires_at": None,
+    "composite_ts": None,
+}
 
 # Import bias filters
 try:
@@ -376,11 +385,21 @@ async def get_composite_timeframes():
     if not COMPOSITE_AVAILABLE:
         raise HTTPException(status_code=503, detail="Composite bias engine not available")
 
-    from datetime import timedelta
-
     result = await get_cached_composite()
     if not result:
         result = await compute_composite()
+
+    # Short-circuit if we already computed this composite timestamp recently.
+    try:
+        now = datetime.utcnow()
+        composite_ts = result.timestamp.isoformat() if result.timestamp else None
+        cached_payload = _TIMEFRAMES_CACHE.get("payload")
+        cached_expires = _TIMEFRAMES_CACHE.get("expires_at")
+        cached_ts = _TIMEFRAMES_CACHE.get("composite_ts")
+        if cached_payload and cached_expires and composite_ts == cached_ts and now < cached_expires:
+            return cached_payload
+    except Exception:
+        pass
 
     # Group factors by timeframe
     timeframes = {"intraday": [], "swing": [], "macro": []}
@@ -473,7 +492,7 @@ async def get_composite_timeframes():
     except Exception:
         pass
 
-    return {
+    payload = {
         "composite_score": result.composite_score,
         "composite_bias": result.bias_level,
         "composite_numeric": result.bias_numeric,
@@ -483,6 +502,15 @@ async def get_composite_timeframes():
         "timeframes": timeframe_results,
         "sector_rotation": sector_rotation,
     }
+
+    try:
+        _TIMEFRAMES_CACHE["payload"] = payload
+        _TIMEFRAMES_CACHE["composite_ts"] = result.timestamp.isoformat() if result.timestamp else None
+        _TIMEFRAMES_CACHE["expires_at"] = datetime.utcnow() + timedelta(seconds=TIMEFRAMES_CACHE_TTL_SECONDS)
+    except Exception:
+        pass
+
+    return payload
 
 
 @router.post("/bias/factors/{factor_name}")

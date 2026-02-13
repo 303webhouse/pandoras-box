@@ -62,8 +62,9 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
             "okx_perp_price": _fetch_json(client, f"{OKX_BASE}/api/v5/market/ticker", {"instId": "BTC-USDT-SWAP"}),
             "okx_funding": _fetch_json(client, f"{OKX_BASE}/api/v5/public/funding-rate", {"instId": "BTC-USDT-SWAP"}),
 
-            # Bybit funding retained; tolerate failures
+            # Bybit funding + perp price retained; tolerate failures
             "bybit_funding": _fetch_json(client, f"{BYBIT_BASE}/v5/market/funding/history", {"category": "linear", "symbol": symbol, "limit": 1}),
+            "bybit_perp_price": _fetch_json(client, f"{BYBIT_BASE}/v5/market/tickers", {"category": "linear", "symbol": symbol}),
 
             # Order flow / trades from OKX swap
             "okx_trades": _fetch_json(client, f"{OKX_BASE}/api/v5/market/trades", {"instId": "BTC-USDT-SWAP", "limit": limit}),
@@ -74,21 +75,40 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
 
     errors: List[str] = []
 
-    # OKX perp price
+    # Perp price preference: Bybit first, OKX fallback
     perp_price = None
-    if data_map["okx_perp_price"]["ok"]:
+    perp_source = None
+
+    if data_map["bybit_perp_price"]["ok"]:
         try:
-            row = data_map["okx_perp_price"]["data"].get("data", [])[0]
-            perp_price = _safe_float(row.get("last"))
+            rows = data_map["bybit_perp_price"]["data"].get("result", {}).get("list", [])
+            if rows:
+                perp_price = _safe_float(rows[0].get("lastPrice"))
+                if perp_price is not None:
+                    perp_source = "bybit"
         except Exception:
             perp_price = None
     else:
+        errors.append(f"bybit_perp_price: {data_map['bybit_perp_price'].get('error')}")
+
+    if perp_price is None and data_map["okx_perp_price"]["ok"]:
+        try:
+            row = data_map["okx_perp_price"]["data"].get("data", [])[0]
+            perp_price = _safe_float(row.get("last"))
+            if perp_price is not None:
+                perp_source = "okx"
+        except Exception:
+            perp_price = None
+    elif perp_price is None and not data_map["okx_perp_price"]["ok"]:
         errors.append(f"okx_perp_price: {data_map['okx_perp_price'].get('error')}")
+
     if perp_price is None and _last_good.get("perp_price") is not None:
         perp_price = _last_good["perp_price"]
-        errors.append("okx_perp_price: using cached fallback")
+        perp_source = _last_good.get("perp_source")
+        errors.append("perp_price: using cached fallback")
     elif perp_price is not None:
         _last_good["perp_price"] = perp_price
+        _last_good["perp_source"] = perp_source
 
     # Binance spot price
     binance_spot = None
@@ -268,10 +288,11 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
             "binance_spot": binance_spot,
             "binance_spot_ts": binance_spot_ts,
             "perps": {
-                "okx": perp_price,
-                "bybit": None,  # unavailable due to geo restrictions
+                "okx": perp_price if perp_source == "okx" else None,
+                "bybit": perp_price if perp_source == "bybit" else None,
                 "spread": perp_spread,
-                "note": "OKX swap used as perp proxy; spread = OKX perp - Binance spot"
+                "source": perp_source,
+                "note": "Bybit perp primary with OKX fallback; spread = perp - Binance spot"
             },
             "basis": basis,
             "basis_pct": basis_pct,
