@@ -241,8 +241,7 @@ function initTradingViewWidget() {
         hide_legend: false,
         save_image: false,
         container_id: 'tradingview-widget',
-        width: '100%',
-        height: '100%',
+        autosize: true,
         studies: [
             { id: 'MASimple@tv-basicstudies', inputs: { length: 200 } }
         ],
@@ -6467,8 +6466,7 @@ function renderBtcSignals() {
         // KB link for signal name
         const nameWithKb = `<span class="kb-term-dynamic" data-kb-term="btc-bottom-signals">${signal.name}</span>`;
         
-        // Source indicator
-        const sourceIcon = isAuto ? 'ðŸ¤–' : 'âœ‹';
+        // Source indicator (ASCII only to avoid encoding artifacts)
         const sourceLabel = isAuto ? 'AUTO' : 'MANUAL';
         
         // Value display - use raw value if available and detailed
@@ -6491,7 +6489,7 @@ function renderBtcSignals() {
                 <div class="btc-signal-description">${signal.description}</div>
                 ${apiError ? `<div class=\"btc-signal-error\">${escapeHtml(apiError)}</div>` : ''}
                 <div class="btc-signal-footer">
-                    <span class="btc-signal-source ${isAuto ? 'auto' : 'manual'}">${sourceIcon} ${sourceLabel}</span>
+                    <span class="btc-signal-source ${isAuto ? 'auto' : 'manual'}">${sourceLabel}</span>
                     <span class="btc-signal-timestamp">${timestamp}</span>
                 </div>
                 ${hasManualOverride ? '<div class="manual-override-badge">Override Active</div>' : ''}
