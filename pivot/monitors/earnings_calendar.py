@@ -4,6 +4,7 @@ Earnings proximity monitor.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from datetime import datetime, timedelta
 from typing import List, Dict, Any
@@ -18,10 +19,23 @@ _EARNINGS_CACHE_DATE = None
 _EARNINGS_CACHE: Dict[str, Any] = {}
 
 
+@contextlib.contextmanager
+def _silence_yf_errors():
+    """Suppress yfinance's internal ERROR logs for tickers without earnings data (ETFs, indices)."""
+    yf_log = logging.getLogger("yfinance")
+    prev = yf_log.level
+    yf_log.setLevel(logging.CRITICAL)
+    try:
+        yield
+    finally:
+        yf_log.setLevel(prev)
+
+
 def _get_next_earnings_date(symbol: str):
     try:
-        ticker = yf.Ticker(symbol)
-        cal = ticker.calendar
+        with _silence_yf_errors():
+            ticker = yf.Ticker(symbol)
+            cal = ticker.calendar
         if cal is not None and not cal.empty:
             if "Earnings Date" in cal.index:
                 date_val = cal.loc["Earnings Date"][0]
