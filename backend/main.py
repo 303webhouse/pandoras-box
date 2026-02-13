@@ -6,7 +6,7 @@ High-performance trading signal processor with sub-100ms latency
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from contextlib import asynccontextmanager
 import asyncio
 from typing import Set
@@ -277,6 +277,13 @@ if frontend_path:
     @app.get("/manifest.json", response_class=FileResponse)
     async def serve_manifest():
         return FileResponse(os.path.join(frontend_path, "manifest.json"))
+
+    @app.get("/favicon.ico", response_class=FileResponse)
+    async def serve_favicon():
+        favicon_path = os.path.join(frontend_path, "favicon.ico")
+        if os.path.exists(favicon_path):
+            return FileResponse(favicon_path)
+        return Response(status_code=204)
     
     # Mount frontend assets directory (images, etc.)
     assets_path = os.path.join(frontend_path, "assets")
