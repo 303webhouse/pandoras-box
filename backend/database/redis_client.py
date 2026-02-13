@@ -7,7 +7,7 @@ import redis.asyncio as redis
 from typing import Optional, Dict, Any
 import json
 import os
-from datetime import timedelta
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
 
@@ -41,8 +41,83 @@ REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
 REDIS_DB = int(os.getenv("REDIS_DB", 0))
 REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", None)
 
+# Redis health telemetry (process-local)
+REDIS_HEALTH_WINDOW_SECONDS = int(os.getenv("REDIS_HEALTH_WINDOW_SECONDS", "600"))
+_redis_health: Dict[str, Any] = {
+    "last_error": None,
+    "last_error_at": None,
+    "last_error_type": None,
+    "last_throttle_at": None,
+    "last_success_at": None,
+}
+
 # Global connection pool
 _redis_client: Optional[redis.Redis] = None
+
+
+def _is_throttle_error(message: str) -> bool:
+    if not message:
+        return False
+    text = message.lower()
+    return "max requests limit exceeded" in text or "max request limit" in text
+
+
+def _record_redis_success() -> None:
+    _redis_health["last_success_at"] = datetime.utcnow()
+
+
+def _record_redis_error(exc: Exception) -> None:
+    now = datetime.utcnow()
+    message = str(exc)
+    _redis_health["last_error"] = message
+    _redis_health["last_error_at"] = now
+    _redis_health["last_error_type"] = type(exc).__name__
+    if _is_throttle_error(message):
+        _redis_health["last_throttle_at"] = now
+
+
+def get_redis_status() -> Dict[str, Any]:
+    """Return last-known Redis health status without issuing new Redis commands."""
+    now = datetime.utcnow()
+    window = timedelta(seconds=REDIS_HEALTH_WINDOW_SECONDS)
+
+    last_throttle_at = _redis_health.get("last_throttle_at")
+    last_error_at = _redis_health.get("last_error_at")
+    last_success_at = _redis_health.get("last_success_at")
+
+    status = "unknown"
+    if last_throttle_at and (now - last_throttle_at) <= window:
+        status = "throttled"
+    elif last_error_at and (now - last_error_at) <= window:
+        status = "error"
+    elif last_success_at and (now - last_success_at) <= window:
+        status = "ok"
+
+    def _to_iso(value: Optional[datetime]) -> Optional[str]:
+        return value.isoformat() if isinstance(value, datetime) else None
+
+    return {
+        "status": status,
+        "throttled": status == "throttled",
+        "last_error": _redis_health.get("last_error"),
+        "last_error_type": _redis_health.get("last_error_type"),
+        "last_error_at": _to_iso(last_error_at),
+        "last_throttle_at": _to_iso(last_throttle_at),
+        "last_success_at": _to_iso(last_success_at),
+        "window_seconds": REDIS_HEALTH_WINDOW_SECONDS,
+    }
+
+
+class TelemetryRedis(redis.Redis):
+    async def execute_command(self, *args, **options):
+        try:
+            result = await super().execute_command(*args, **options)
+            _record_redis_success()
+            return result
+        except Exception as exc:
+            _record_redis_error(exc)
+            raise
+
 
 async def get_redis_client() -> redis.Redis:
     """Get or create Redis client with connection pooling"""
@@ -56,7 +131,7 @@ async def get_redis_client() -> redis.Redis:
         else:
             redis_url = f"redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}"
         
-        _redis_client = await redis.from_url(
+        _redis_client = await TelemetryRedis.from_url(
             redis_url,
             encoding="utf-8",
             decode_responses=True,
