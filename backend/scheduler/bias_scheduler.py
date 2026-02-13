@@ -2714,12 +2714,13 @@ async def run_cta_scan_scheduled():
         bias_status = get_bias_status()
         
         # Push each signal to Trade Ideas via WebSocket
+        pushed_count = 0
+        cooldown_hours = int(os.getenv("CTA_SIGNAL_COOLDOWN_HOURS", "24"))
         for signal in all_signals[:10]:  # Limit to top 10
             ticker = signal.get("symbol")
             if not ticker:
                 continue
 
-            cooldown_hours = int(os.getenv("CTA_SIGNAL_COOLDOWN_HOURS", "24"))
             try:
                 if await has_recent_active_signal(ticker, cooldown_hours, strategy="CTA Scanner"):
                     logger.info(f"â³ Skipping CTA signal for {ticker} (cooldown {cooldown_hours}h)")
@@ -2855,6 +2856,7 @@ async def run_cta_scan_scheduled():
             
             # Broadcast to all connected devices (use smart broadcast for priority handling)
             await manager.broadcast_signal_smart(trade_signal, priority_threshold=75.0)
+            pushed_count += 1
             
             logger.info(f"ðŸ“¡ CTA signal pushed: {ticker} {signal.get('signal_type')} (score: {score}, {bias_alignment})")
         
@@ -2863,7 +2865,7 @@ async def run_cta_scan_scheduled():
         _scheduler_status["cta_scanner"]["signals_found"] = len(all_signals)
         _scheduler_status["cta_scanner"]["status"] = "completed"
         
-        logger.info(f"âœ… CTA scheduled scan complete - {len(all_signals)} signals pushed to Trade Ideas")
+        logger.info(f"âœ… CTA scheduled scan complete - {pushed_count}/{len(all_signals)} signals pushed to Trade Ideas")
         
     except Exception as e:
         _scheduler_status["cta_scanner"]["status"] = f"error: {str(e)}"
