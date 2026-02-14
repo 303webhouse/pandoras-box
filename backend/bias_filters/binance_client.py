@@ -1,9 +1,16 @@
 """
 Market Microstructure Client (Binance + OKX fallback)
 Fetches BTC spot orderbook depth and perp-vs-spot basis with geo-safe fallbacks.
+
+BINANCE_PROXY_URL env var: Set to VPS proxy base URL to route fapi.binance.com
+requests through a non-geo-restricted server.  The proxy must accept:
+  GET {BINANCE_PROXY_URL}/fapi/v1/<path>?<original-query-params>
+and forward them verbatim to https://fapi.binance.com.
+Example: BINANCE_PROXY_URL=http://5.78.134.70:8090
 """
 
 import logging
+import os
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional
 import httpx
@@ -12,8 +19,13 @@ logger = logging.getLogger(__name__)
 
 # API Configuration
 BINANCE_SPOT_URL = "https://data-api.binance.vision/api/v3"  # geo-friendly mirror
-BINANCE_FUTURES_URL = "https://fapi.binance.com/fapi/v1"
+_BINANCE_PROXY_URL = os.environ.get("BINANCE_PROXY_URL", "").rstrip("/")
+# If a proxy is configured, route fapi calls through it; otherwise try direct (will 451 on Railway)
+BINANCE_FUTURES_URL = f"{_BINANCE_PROXY_URL}/fapi/v1" if _BINANCE_PROXY_URL else "https://fapi.binance.com/fapi/v1"
 OKX_MARKET_URL = "https://www.okx.com/api/v5/market"
+
+if _BINANCE_PROXY_URL:
+    logger.info("Binance Futures routed via proxy: %s", _BINANCE_PROXY_URL)
 
 # Cache for API responses
 _cache: Dict[str, Dict[str, Any]] = {}
@@ -45,11 +57,13 @@ async def _make_request(url: str, params: Dict[str, Any] = None) -> Optional[Dic
             response = await client.get(url, params=params)
 
             if response.status_code not in (200,):
-                # 451 = geo-restricted (Binance Futures on Railway), treat as silent fallback
                 if response.status_code == 451:
-                    logger.debug(f"Market API geo-restricted ({url}): 451 - using fallback")
+                    if _BINANCE_PROXY_URL:
+                        logger.warning(f"Binance proxy returned 451 geo-block ({url}) - proxy may not be working")
+                    else:
+                        logger.debug(f"Binance Futures geo-restricted ({url}): 451 - using OKX fallback")
                 else:
-                    logger.warning(f"Market API error ({url}): {response.status_code} - {response.text}")
+                    logger.warning(f"Market API error ({url}): {response.status_code} - {response.text[:200]}")
                 return None
 
             return response.json()
