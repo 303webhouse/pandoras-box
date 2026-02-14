@@ -2182,6 +2182,14 @@ async def refresh_composite_bias():
     except Exception as e:
         logger.debug(f"Sector rotation refresh during composite cycle: {e}")
 
+    # Score all 20 factors (including FRED-sourced macro factors) and write to Redis
+    # so that compute_composite() has fresh readings to aggregate.
+    try:
+        from bias_engine.factor_scorer import score_all_factors
+        await score_all_factors()
+    except Exception as e:
+        logger.warning(f"Factor scoring failed during composite refresh: {e}")
+
     try:
         from bias_engine.composite import compute_composite
     except ImportError as e:
@@ -2350,6 +2358,13 @@ async def start_scheduler():
         await refresh_daily_bias()
         await refresh_weekly_bias()
         await refresh_cyclical_bias()
+        # Score all composite factors (including FRED) so the composite engine
+        # has data immediately on boot rather than waiting for the first 15-min cycle.
+        try:
+            from bias_engine.factor_scorer import score_all_factors
+            await score_all_factors()
+        except Exception as fs_err:
+            logger.warning(f"  Initial factor scoring failed: {fs_err}")
         logger.info("  âœ… Initial bias refresh complete")
     except Exception as e:
         logger.error(f"  âŒ Error during initial refresh: {e}")
