@@ -80,6 +80,7 @@ def fetch_price_data(symbols: List[str]) -> Dict[str, dict]:
             group_by="ticker",
             auto_adjust=True,
             threads=True,
+            progress=False,
         )
 
         for symbol in symbols:

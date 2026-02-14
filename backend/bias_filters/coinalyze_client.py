@@ -235,10 +235,12 @@ async def get_open_interest() -> Dict[str, Any]:
     now = datetime.now(timezone.utc)
     from_ts = int((now - timedelta(hours=6)).timestamp() * 1000)
     
+    to_ts = int(now.timestamp() * 1000)
     data = await _make_request("/open-interest-history", {
         "symbols": ",".join(BTC_PERP_SYMBOLS),
-        "interval": "1h",
-        "from": from_ts
+        "interval": "1hour",
+        "from": from_ts,
+        "to": to_ts,
     })
     
     if not data or not isinstance(data, list) or len(data) == 0:
@@ -389,10 +391,12 @@ async def get_liquidations() -> Dict[str, Any]:
     now = datetime.now(timezone.utc)
     from_ts = int((now - timedelta(hours=2)).timestamp() * 1000)
     
+    to_ts = int(now.timestamp() * 1000)
     data = await _make_request("/liquidation-history", {
         "symbols": ",".join(BTC_PERP_SYMBOLS),
-        "interval": "1h",
-        "from": from_ts
+        "interval": "1hour",
+        "from": from_ts,
+        "to": to_ts,
     })
     
     if not data or not isinstance(data, list) or len(data) == 0:
@@ -524,10 +528,12 @@ async def get_term_structure() -> Dict[str, Any]:
     now = datetime.now(timezone.utc)
     from_ts = int((now - timedelta(hours=24)).timestamp() * 1000)
     
+    to_ts = int(now.timestamp() * 1000)
     data = await _make_request("/funding-rate-history", {
         "symbols": ",".join(BTC_PERP_SYMBOLS),
-        "interval": "8h",  # Standard funding interval
-        "from": from_ts
+        "interval": "6hour",
+        "from": from_ts,
+        "to": to_ts,
     })
     
     if not data or not isinstance(data, list) or len(data) == 0:

@@ -43,13 +43,17 @@ async def _make_request(url: str, params: Dict[str, Any] = None) -> Optional[Dic
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.get(url, params=params)
-            
-            if response.status_code != 200:
-                logger.warning(f"Market API error ({url}): {response.status_code} - {response.text}")
+
+            if response.status_code not in (200,):
+                # 451 = geo-restricted (Binance Futures on Railway), treat as silent fallback
+                if response.status_code == 451:
+                    logger.debug(f"Market API geo-restricted ({url}): 451 - using fallback")
+                else:
+                    logger.warning(f"Market API error ({url}): {response.status_code} - {response.text}")
                 return None
-            
+
             return response.json()
-    
+
     except Exception as e:
         logger.warning(f"Market API request failed ({url}): {e}")
         return None
