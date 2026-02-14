@@ -284,6 +284,14 @@ if frontend_path:
         if os.path.exists(favicon_path):
             return FileResponse(favicon_path)
         return Response(status_code=204)
+
+    @app.get("/icon-192.png", response_class=FileResponse)
+    async def serve_icon_192():
+        return FileResponse(os.path.join(frontend_path, "icon-192.png"), media_type="image/png")
+
+    @app.get("/icon-512.png", response_class=FileResponse)
+    async def serve_icon_512():
+        return FileResponse(os.path.join(frontend_path, "icon-512.png"), media_type="image/png")
     
     # Mount frontend assets directory (images, etc.)
     assets_path = os.path.join(frontend_path, "assets")
