@@ -30,6 +30,9 @@ _last_good: Dict[str, Any] = {}
 async def _fetch_json(client: httpx.AsyncClient, url: str, params: Optional[dict] = None) -> Dict[str, Any]:
     try:
         resp = await client.get(url, params=params, headers=DEFAULT_HEADERS, follow_redirects=True)
+        # 403 = Bybit geo-block, 451 = Binance geo-block — both expected on Railway, fail silently
+        if resp.status_code in (403, 451):
+            return {"ok": False, "error": f"geo_restricted_{resp.status_code}"}
         resp.raise_for_status()
         return {"ok": True, "data": resp.json()}
     except Exception as exc:
