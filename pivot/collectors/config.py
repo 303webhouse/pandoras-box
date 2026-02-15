@@ -41,3 +41,7 @@ TIMEZONE = os.getenv("TIMEZONE", "America/New_York")
 HTTP_TIMEOUT = float(os.getenv("PIVOT_HTTP_TIMEOUT", "20"))
 RETRY_ATTEMPTS = int(os.getenv("PIVOT_RETRY_ATTEMPTS", "3"))
 RETRY_BACKOFF_SECONDS = float(os.getenv("PIVOT_RETRY_BACKOFF", "2"))
+
+# ── Interactive Chat ─────────────────────────────────────────────────────────
+PIVOT_CHAT_CHANNEL_ID = os.getenv("PIVOT_CHAT_CHANNEL_ID", "")
+PIVOT_OWNER_ID = os.getenv("PIVOT_OWNER_ID", "")
