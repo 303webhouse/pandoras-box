@@ -38,6 +38,7 @@ rsync -a --delete \
     --exclude='.env' \
     --exclude='.env.example' \
     --exclude='venv' \
+    --exclude='discord_bridge' \
     --exclude='logs' \
     --exclude='state' \
     --exclude='cache' \
