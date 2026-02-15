@@ -18,6 +18,7 @@ BINANCE_PERP_API_ROOT = (
     _binance_perp_base if _binance_perp_base.endswith("/fapi/v1")
     else f"{_binance_perp_base}/fapi/v1"
 )
+BINANCE_PERP_HTTP_PROXY = os.getenv("CRYPTO_BINANCE_PERP_HTTP_PROXY", "").strip() or None
 OKX_BASE = "https://www.okx.com"
 BYBIT_BASE = "https://api.bybit.com"  # kept for potential future use
 COINBASE_BASE = "https://api.coinbase.com"
@@ -144,7 +145,12 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
     if _cache["data"] and (now - _cache["timestamp"]) < CACHE_TTL_SECONDS:
         return _cache["data"]
 
-    async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
+    market_client_kwargs: Dict[str, Any] = {"timeout": 8.0, "follow_redirects": True}
+    binance_client_kwargs: Dict[str, Any] = {"timeout": 8.0, "follow_redirects": True}
+    if BINANCE_PERP_HTTP_PROXY:
+        binance_client_kwargs["proxy"] = BINANCE_PERP_HTTP_PROXY
+
+    async with httpx.AsyncClient(**market_client_kwargs) as client, httpx.AsyncClient(**binance_client_kwargs) as binance_client:
         use_bybit = BYBIT_ENABLED and not _bybit_runtime_disabled
         tasks = {
             # Spot prices
@@ -153,9 +159,9 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
             "okx_spot_price": _fetch_json(client, f"{OKX_BASE}/api/v5/market/ticker", {"instId": "BTC-USDT"}),
 
             # Binance perp (PRIMARY): price, funding, and tape
-            "binance_perp_price": _fetch_json(client, f"{BINANCE_PERP_API_ROOT}/ticker/price", {"symbol": symbol}),
-            "binance_funding": _fetch_json(client, f"{BINANCE_PERP_API_ROOT}/premiumIndex", {"symbol": symbol}),
-            "binance_trades": _fetch_json(client, f"{BINANCE_PERP_API_ROOT}/trades", {"symbol": symbol, "limit": limit}),
+            "binance_perp_price": _fetch_json(binance_client, f"{BINANCE_PERP_API_ROOT}/ticker/price", {"symbol": symbol}),
+            "binance_funding": _fetch_json(binance_client, f"{BINANCE_PERP_API_ROOT}/premiumIndex", {"symbol": symbol}),
+            "binance_trades": _fetch_json(binance_client, f"{BINANCE_PERP_API_ROOT}/trades", {"symbol": symbol, "limit": limit}),
 
             # Perp prices & funding via OKX (not geo-blocked)
             "okx_perp_price": _fetch_json(client, f"{OKX_BASE}/api/v5/market/ticker", {"instId": "BTC-USDT-SWAP"}),
@@ -182,12 +188,19 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
     # Perp price preference: Binance futures first, then Bybit, then OKX.
     perp_price = None
     perp_source = None
+    perp_source_detail = None
 
     if data_map["binance_perp_price"]["ok"]:
         try:
             perp_price = _safe_float(data_map["binance_perp_price"]["data"].get("price"))
             if perp_price is not None:
                 perp_source = "binance"
+                if BINANCE_PERP_HTTP_PROXY:
+                    perp_source_detail = "binance_via_proxy"
+                elif _binance_perp_base != "https://fapi.binance.com":
+                    perp_source_detail = "binance_via_custom_base"
+                else:
+                    perp_source_detail = "binance_direct"
         except Exception:
             perp_price = None
     else:
@@ -202,6 +215,7 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
                 perp_price = _safe_float(rows[0].get("lastPrice"))
                 if perp_price is not None:
                     perp_source = "bybit"
+                    perp_source_detail = "bybit_direct"
         except Exception:
             perp_price = None
     else:
@@ -217,6 +231,7 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
             perp_price = _safe_float(row.get("last"))
             if perp_price is not None:
                 perp_source = "okx"
+                perp_source_detail = "okx_direct"
         except Exception:
             perp_price = None
     elif perp_price is None and not data_map["okx_perp_price"]["ok"]:
@@ -225,10 +240,12 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
     if perp_price is None and _last_good.get("perp_price") is not None:
         perp_price = _last_good["perp_price"]
         perp_source = _last_good.get("perp_source")
+        perp_source_detail = _last_good.get("perp_source_detail")
         errors.append("perp_price: using cached fallback")
     elif perp_price is not None:
         _last_good["perp_price"] = perp_price
         _last_good["perp_source"] = perp_source
+        _last_good["perp_source_detail"] = perp_source_detail
 
     # Binance spot price
     binance_spot = None
@@ -493,6 +510,11 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
                 "bybit": perp_price if perp_source == "bybit" else None,
                 "spread": perp_spread,
                 "source": perp_source,
+                "source_detail": perp_source_detail,
+                "routing": {
+                    "binance_perp_api_root": BINANCE_PERP_API_ROOT,
+                    "binance_perp_proxy_enabled": bool(BINANCE_PERP_HTTP_PROXY),
+                },
                 "note": "Binance perps prioritized, then Bybit, then OKX. Spread = perp - Binance spot."
             },
             "basis": basis,
