@@ -38,6 +38,9 @@ rsync -a --delete \
     --exclude='.env' \
     --exclude='.env.example' \
     --exclude='venv' \
+    --exclude='logs' \
+    --exclude='state' \
+    --exclude='cache' \
     "$PIVOT_DIR/" "$INSTALL_DIR/"
 
 echo "[+] Syncing discord_bridge..."
