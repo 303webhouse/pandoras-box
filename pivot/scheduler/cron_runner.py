@@ -29,6 +29,7 @@ from collectors import (
     health_check,
 )
 from collectors.base_collector import post_pivot_alert
+from monitors.defcon import check_defcon
 from monitors.bias_shift import check_bias_shift
 from monitors.cta_zones import check_cta_zones
 from monitors.factor_velocity import check_factor_velocity
@@ -46,6 +47,7 @@ TZ = ZoneInfo(TIMEZONE)
 
 COOLDOWN_PATH = Path(__file__).resolve().parents[1] / "state" / "cooldowns.json"
 COOLDOWNS = {
+    "defcon": 300,      # 5 min cooldown — more urgent than other monitors
     "bias_shift": 1800,
     "cta_zone": 900,
     "factor_velocity": 3600,
@@ -178,6 +180,21 @@ async def heartbeat_job():
         return
 
     logger.info("Heartbeat cycle")
+
+    # DEFCON check — highest priority, evaluate first
+    defcon_change = await check_defcon()
+    if defcon_change and _should_send("defcon", COOLDOWNS["defcon"]):
+        level = defcon_change["current_level"]
+        guidance = defcon_change["guidance"]
+        priority = "CRITICAL" if level in ("orange", "red") else "HIGH"
+        await send_discord("critical", f"DEFCON {level.upper()}", guidance, priority=priority)
+        await post_pivot_alert({
+            "type": "defcon",
+            "level": level,
+            "previous": defcon_change["previous_level"],
+            "signals": defcon_change["signals"],
+            "timestamp": defcon_change.get("timestamp"),
+        })
 
     bias_shift = await check_bias_shift()
     if bias_shift and _should_send("bias_shift", COOLDOWNS["bias_shift"]):
