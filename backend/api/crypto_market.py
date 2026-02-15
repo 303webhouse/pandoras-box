@@ -25,10 +25,12 @@ COINBASE_BASE = "https://api.coinbase.com"
 BYBIT_ENABLED = os.getenv("CRYPTO_MARKET_ENABLE_BYBIT", "true").strip().lower() in {"1", "true", "yes", "on"}
 
 # CVD smoothing/hysteresis to reduce top-bar whipsaw.
-CVD_EMA_ALPHA = float(os.getenv("CRYPTO_CVD_EMA_ALPHA", "0.35"))
-CVD_HI_THRESHOLD = float(os.getenv("CRYPTO_CVD_HI_THRESHOLD", "0.08"))
-CVD_LO_THRESHOLD = float(os.getenv("CRYPTO_CVD_LO_THRESHOLD", "0.03"))
+CVD_EMA_ALPHA = float(os.getenv("CRYPTO_CVD_EMA_ALPHA", "0.25"))
+CVD_HI_THRESHOLD = float(os.getenv("CRYPTO_CVD_HI_THRESHOLD", "0.10"))
+CVD_LO_THRESHOLD = float(os.getenv("CRYPTO_CVD_LO_THRESHOLD", "0.05"))
 CVD_MIN_NOTIONAL_USD = float(os.getenv("CRYPTO_CVD_MIN_NOTIONAL_USD", "250000"))
+CVD_CONFIRM_TICKS = int(os.getenv("CRYPTO_CVD_CONFIRM_TICKS", "2"))
+CVD_FORCE_THRESHOLD = float(os.getenv("CRYPTO_CVD_FORCE_THRESHOLD", "0.15"))
 
 DEFAULT_HEADERS = {
     "User-Agent": "Mozilla/5.0 (compatible; PandoraBot/1.0; +https://pandoras-box)",
@@ -37,12 +39,14 @@ DEFAULT_HEADERS = {
 }
 
 _cache: Dict[str, Any] = {"timestamp": 0.0, "data": None}
-CACHE_TTL_SECONDS = 5
+CACHE_TTL_SECONDS = 4
 _last_good: Dict[str, Any] = {}
 _bybit_runtime_disabled = False
 _cvd_trend_state: Dict[str, Any] = {
     "ema_ratio": None,
     "direction": "NEUTRAL",
+    "pending_direction": None,
+    "pending_count": 0,
     "updated_at": None,
 }
 
@@ -89,34 +93,63 @@ def _classify_cvd_direction(net_usd: float, gross_usd: float) -> Dict[str, Any]:
     ema_ratio = raw_ratio if prev_ema is None else ((1 - CVD_EMA_ALPHA) * prev_ema + CVD_EMA_ALPHA * raw_ratio)
 
     prev_direction = _cvd_trend_state.get("direction", "NEUTRAL")
-    direction = prev_direction
+    direction_candidate = prev_direction
 
     # If flow is very small, keep the prior state unless we have a clear move.
     if gross_usd < CVD_MIN_NOTIONAL_USD and abs(ema_ratio) < CVD_HI_THRESHOLD:
         if prev_direction not in {"BULLISH", "BEARISH"}:
-            direction = "NEUTRAL"
+            direction_candidate = "NEUTRAL"
     else:
         if prev_direction == "BULLISH":
             if ema_ratio <= -CVD_HI_THRESHOLD:
-                direction = "BEARISH"
+                direction_candidate = "BEARISH"
             elif ema_ratio < CVD_LO_THRESHOLD:
-                direction = "NEUTRAL"
+                direction_candidate = "NEUTRAL"
             else:
-                direction = "BULLISH"
+                direction_candidate = "BULLISH"
         elif prev_direction == "BEARISH":
             if ema_ratio >= CVD_HI_THRESHOLD:
-                direction = "BULLISH"
+                direction_candidate = "BULLISH"
             elif ema_ratio > -CVD_LO_THRESHOLD:
-                direction = "NEUTRAL"
+                direction_candidate = "NEUTRAL"
             else:
-                direction = "BEARISH"
+                direction_candidate = "BEARISH"
         else:
             if ema_ratio >= CVD_HI_THRESHOLD:
-                direction = "BULLISH"
+                direction_candidate = "BULLISH"
             elif ema_ratio <= -CVD_HI_THRESHOLD:
-                direction = "BEARISH"
+                direction_candidate = "BEARISH"
             else:
-                direction = "NEUTRAL"
+                direction_candidate = "NEUTRAL"
+
+    # Confirm direction changes to avoid whipsaw (5s poll can be noisy on low timeframes).
+    confirm_ticks = max(1, int(CVD_CONFIRM_TICKS))
+    force_threshold = abs(float(CVD_FORCE_THRESHOLD))
+    pending_direction = _cvd_trend_state.get("pending_direction")
+    pending_count = int(_cvd_trend_state.get("pending_count") or 0)
+
+    if direction_candidate != prev_direction:
+        if force_threshold and abs(ema_ratio) >= force_threshold:
+            direction = direction_candidate
+            pending_direction = None
+            pending_count = 0
+        else:
+            if pending_direction == direction_candidate:
+                pending_count += 1
+            else:
+                pending_direction = direction_candidate
+                pending_count = 1
+
+            if pending_count >= confirm_ticks:
+                direction = direction_candidate
+                pending_direction = None
+                pending_count = 0
+            else:
+                direction = prev_direction
+    else:
+        direction = prev_direction
+        pending_direction = None
+        pending_count = 0
 
     abs_ratio = abs(ema_ratio)
     if abs_ratio >= 0.12:
@@ -128,6 +161,8 @@ def _classify_cvd_direction(net_usd: float, gross_usd: float) -> Dict[str, Any]:
 
     _cvd_trend_state["ema_ratio"] = ema_ratio
     _cvd_trend_state["direction"] = direction
+    _cvd_trend_state["pending_direction"] = pending_direction
+    _cvd_trend_state["pending_count"] = pending_count
     _cvd_trend_state["updated_at"] = datetime.now(timezone.utc).isoformat()
 
     return {

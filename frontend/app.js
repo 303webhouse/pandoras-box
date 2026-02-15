@@ -134,6 +134,7 @@ let cryptoWma9 = null;
 let cryptoWmaUpdated = null;
 let cryptoWmaTimer = null;
 let cryptoWmaLoading = false;
+const CRYPTO_MARKET_POLL_MS = 5 * 1000;
 
 // Cyclical Bias Factor State
 let cyclicalBiasFullData = null;
@@ -242,6 +243,14 @@ function setMode(mode, options = {}) {
 
     renderCryptoSignals();
     renderCryptoBiasSummary();
+
+    // Only poll the crypto market endpoint while the crypto view is active.
+    // This keeps the 5s update cadence without burning API calls in Hub mode.
+    if (nextMode === APP_MODES.CRYPTO) {
+        startCryptoMarketPolling();
+    } else {
+        stopCryptoMarketPolling();
+    }
 
     // Initialize crypto chart when switching to crypto mode
     if (nextMode === APP_MODES.CRYPTO && !cryptoTvWidget) {
@@ -1033,13 +1042,26 @@ function initCryptoScalper() {
     loadCryptoKeyLevels();
     setInterval(loadCryptoKeyLevels, 10 * 60 * 1000);
 
-    loadCryptoMarketData();
-    if (cryptoMarketTimer) clearInterval(cryptoMarketTimer);
-    cryptoMarketTimer = setInterval(loadCryptoMarketData, 15 * 1000);
-
     refreshCryptoWma9();
     if (cryptoWmaTimer) clearInterval(cryptoWmaTimer);
     cryptoWmaTimer = setInterval(refreshCryptoWma9, 15 * 60 * 1000);
+
+    // Start 5s market polling only if the crypto view is currently visible.
+    if (document.body.dataset.mode === APP_MODES.CRYPTO) {
+        startCryptoMarketPolling();
+    }
+}
+
+function startCryptoMarketPolling() {
+    loadCryptoMarketData();
+    if (cryptoMarketTimer) clearInterval(cryptoMarketTimer);
+    cryptoMarketTimer = setInterval(loadCryptoMarketData, CRYPTO_MARKET_POLL_MS);
+}
+
+function stopCryptoMarketPolling() {
+    if (!cryptoMarketTimer) return;
+    clearInterval(cryptoMarketTimer);
+    cryptoMarketTimer = null;
 }
 
 function initCryptoChart() {
@@ -4077,8 +4099,12 @@ function renderCryptoMarketData() {
             'funding_primary',
             funding.primary?.rate ?? funding.binance?.rate ?? funding.okx?.rate ?? funding.bybit?.rate ?? funding.okx_rate
         );
-        fundingInlineEl.textContent = formatFundingRate(primaryFunding, 'Funding');
-        fundingInlineEl.className = `crypto-price-extra ${primaryFunding > 0 ? 'bearish' : primaryFunding < 0 ? 'bullish' : ''}`.trim();
+        const fundingSource = rememberString('funding_source', funding.primary?.source);
+        const fundingSourceLabel = fundingSource ? `${String(fundingSource).toUpperCase()}` : '';
+        const fundingLabel = fundingSourceLabel ? `Funding (${fundingSourceLabel})` : 'Funding';
+        fundingInlineEl.textContent = formatFundingRate(primaryFunding, fundingLabel);
+        // Color by numeric sign for immediate readability.
+        fundingInlineEl.className = `crypto-price-extra ${primaryFunding > 0 ? 'bullish' : primaryFunding < 0 ? 'bearish' : ''}`.trim();
     }
 
     if (cvdInlineEl) {
@@ -4086,11 +4112,10 @@ function renderCryptoMarketData() {
         const cvdDir = rememberString('cvd_direction', cvd.direction ?? cvd.smoothed_direction ?? 'NEUTRAL');
         const cvdConfidence = rememberString('cvd_confidence', cvd.direction_confidence ?? '');
         if (netUsd !== null) {
-            const confidenceBadge = (cvdDir && cvdDir !== 'NEUTRAL' && cvdConfidence)
-                ? ` ${cvdConfidence.charAt(0)}`
-                : '';
+            const confidenceBadge = (cvdDir && cvdDir !== 'NEUTRAL' && cvdConfidence) ? ` ${cvdConfidence.charAt(0)}` : '';
             const directionLabel = cvdDir && cvdDir !== 'NEUTRAL' ? `${cvdDir}${confidenceBadge}` : 'NEUTRAL';
-            cvdInlineEl.textContent = `CVD ${directionLabel} ${formatSignedUsd(netUsd)}`;
+            const compactValue = formatCompactSignedUsd(netUsd);
+            cvdInlineEl.innerHTML = `<span class="crypto-cvd-direction">CVD ${directionLabel}</span> <span class="crypto-cvd-net">(${compactValue})</span>`;
         } else {
             cvdInlineEl.textContent = 'CVD --';
         }
@@ -4115,11 +4140,16 @@ function updateCryptoPriceStrip() {
     const binanceSpot = cryptoMarketLastGood.binance_spot ?? prices.binance_spot ?? null;
     const perpPrice = cryptoMarketLastGood.perp_price ?? perps.binance ?? perps.bybit ?? perps.okx ?? prices.perp_price ?? null;
     const perpSource = (cryptoMarketLastGood.perp_source ?? perps.source ?? '').toString().toUpperCase();
+    const perpSourceMap = {
+        BINANCE: 'BINANCE PERPS',
+        BYBIT: 'BYBIT PERPS',
+        OKX: 'OKX PERPS',
+    };
 
     if (coinbaseEl) coinbaseEl.textContent = coinbaseSpot !== null ? formatUsdValue(coinbaseSpot) : '--';
     if (binanceSpotEl) binanceSpotEl.textContent = binanceSpot !== null ? formatUsdValue(binanceSpot) : '--';
     if (binancePerpEl) binancePerpEl.textContent = perpPrice !== null ? formatUsdValue(perpPrice) : '--';
-    if (perpSourceEl) perpSourceEl.textContent = perpSource ? perpSource : '--';
+    if (perpSourceEl) perpSourceEl.textContent = perpSourceMap[perpSource] || (perpSource ? `${perpSource} PERPS` : '--');
 
     const compareSpot = coinbaseSpot ?? binanceSpot ?? perpPrice;
     const wma = cryptoWma9;
@@ -4201,6 +4231,24 @@ function formatSignedUsd(value) {
     return `${sign}$${Math.abs(num).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+function formatCompactSignedUsd(value) {
+    if (value === null || value === undefined || Number.isNaN(value)) return '--';
+    const num = Number(value);
+    const abs = Math.abs(num);
+    const sign = num >= 0 ? '+' : '-';
+    let compact = '';
+    if (abs >= 1_000_000_000) {
+        compact = `${(abs / 1_000_000_000).toFixed(2)}B`;
+    } else if (abs >= 1_000_000) {
+        compact = `${(abs / 1_000_000).toFixed(2)}M`;
+    } else if (abs >= 1_000) {
+        compact = `${(abs / 1_000).toFixed(1)}K`;
+    } else {
+        compact = abs.toFixed(0);
+    }
+    return `${sign}$${compact}`;
+}
+
 function formatSignedPercent(value) {
     if (value === null || value === undefined || Number.isNaN(value)) return '--';
     const num = Number(value);
@@ -4210,9 +4258,11 @@ function formatSignedPercent(value) {
 
 function formatFundingRate(rate, label) {
     if (rate === null || rate === undefined || Number.isNaN(rate)) return `${label}: --`;
-    const pct = Number(rate) * 100;
+    const num = Number(rate);
+    const pct = num * 100;
     const sign = pct >= 0 ? '+' : '';
-    return `${label}: ${sign}${pct.toFixed(4)}%`;
+    const side = num > 0 ? 'Longs pay' : num < 0 ? 'Shorts pay' : 'Flat';
+    return `${label}: ${sign}${pct.toFixed(4)}% (${side})`;
 }
 
 function updateCryptoLevelValue(levelKey, value) {
