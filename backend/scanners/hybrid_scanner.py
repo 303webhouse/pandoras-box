@@ -452,12 +452,12 @@ class HybridScanner:
             
             # All exchanges failed - try yfinance fallback
             logger.warning(f"TradingView failed for {ticker}, trying yfinance fallback")
-            return self._get_technical_fallback_yfinance(ticker)
+            return self._get_technical_fallback_yfinance(ticker, interval)
     
-    def _get_technical_fallback_yfinance(self, ticker: str) -> Dict[str, Any]:
+    def _get_technical_fallback_yfinance(self, ticker: str, interval: str = "1d") -> Dict[str, Any]:
         """
         Fallback technical analysis using yfinance when TradingView fails.
-        Calculates basic indicators: RSI, SMA crossovers, price vs MAs.
+        Calculates basic indicators and returns the same shape as TradingView data.
         """
         if not YFINANCE_AVAILABLE:
             return {
@@ -465,21 +465,31 @@ class HybridScanner:
                 "signal": TechnicalSignal.ERROR.value,
                 "error": "Neither TradingView nor yfinance available"
             }
-        
+
         try:
             stock = yf.Ticker(ticker)
-            df = stock.history(period="6mo")
-            
+            history_period = "24mo" if interval in {"1W", "1M"} else "6mo"
+            df = stock.history(period=history_period, interval="1d")
+
+            if not df.empty and interval in {"1W", "1M"}:
+                rule = "W-FRI" if interval == "1W" else "ME"
+                df = df.resample(rule).agg({
+                    "Open": "first",
+                    "High": "max",
+                    "Low": "min",
+                    "Close": "last",
+                    "Volume": "sum",
+                }).dropna()
+
             if df.empty or len(df) < 50:
                 return {
                     "ticker": ticker,
                     "signal": TechnicalSignal.ERROR.value,
                     "error": "Insufficient data"
                 }
-            
-            # Calculate indicators
-            close = df['Close']
-            
+
+            close = df["Close"]
+
             # RSI (14-period)
             delta = close.diff()
             gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
@@ -487,56 +497,61 @@ class HybridScanner:
             rs = gain / loss
             rsi = 100 - (100 / (1 + rs))
             current_rsi = float(rsi.iloc[-1])
-            
+
             # Moving averages
             sma20 = float(close.rolling(20).mean().iloc[-1])
             sma50 = float(close.rolling(50).mean().iloc[-1])
             sma200 = float(close.rolling(200).mean().iloc[-1]) if len(df) >= 200 else None
             current_price = float(close.iloc[-1])
-            
+            current_open = float(df["Open"].iloc[-1]) if "Open" in df.columns else None
+            current_high = float(df["High"].iloc[-1]) if "High" in df.columns else None
+            current_low = float(df["Low"].iloc[-1]) if "Low" in df.columns else None
+            prev_close = float(close.iloc[-2]) if len(close) >= 2 else None
+            change = (current_price - prev_close) if prev_close is not None else None
+            change_pct = ((change / prev_close) * 100) if (change is not None and prev_close) else None
+
             # Score calculation
             buy_signals = 0
             sell_signals = 0
             neutral_signals = 0
-            
+
             # RSI scoring
             if current_rsi < 30:
-                buy_signals += 2  # Oversold
+                buy_signals += 2
             elif current_rsi < 40:
                 buy_signals += 1
             elif current_rsi > 70:
-                sell_signals += 2  # Overbought
+                sell_signals += 2
             elif current_rsi > 60:
                 sell_signals += 1
             else:
                 neutral_signals += 1
-            
+
             # Price vs MAs
             if current_price > sma20:
                 buy_signals += 1
             else:
                 sell_signals += 1
-                
+
             if current_price > sma50:
                 buy_signals += 1
             else:
                 sell_signals += 1
-            
+
             if sma200 and current_price > sma200:
                 buy_signals += 1
             elif sma200:
                 sell_signals += 1
-            
+
             # MA crossovers
             if sma20 > sma50:
                 buy_signals += 1
             else:
                 sell_signals += 1
-            
-            # Determine signal
+
             total_buy = buy_signals
             total_sell = sell_signals
-            
+
             if total_buy >= total_sell + 3:
                 signal = "STRONG_BUY"
             elif total_buy > total_sell:
@@ -547,37 +562,54 @@ class HybridScanner:
                 signal = "SELL"
             else:
                 signal = "NEUTRAL"
-            
+
             result = {
                 "ticker": ticker,
-                "interval": "1d",
+                "interval": interval,
                 "signal": signal,
                 "signal_score": {
                     "buy": total_buy,
                     "sell": total_sell,
-                    "neutral": neutral_signals
+                    "neutral": neutral_signals,
+                    "total": total_buy + total_sell + neutral_signals,
                 },
                 "oscillators": {
                     "summary": "BUY" if current_rsi < 45 else ("SELL" if current_rsi > 55 else "NEUTRAL"),
-                    "RSI": round(current_rsi, 2)
+                    "rsi": round(current_rsi, 2),
+                    "macd": None,
+                    "stoch_k": None,
+                    "cci": None,
+                    "adx": None,
+                    "mom": None,
                 },
                 "moving_averages": {
                     "summary": "BUY" if current_price > sma50 else "SELL",
-                    "SMA20": round(sma20, 2),
-                    "SMA50": round(sma50, 2),
-                    "SMA200": round(sma200, 2) if sma200 else None
+                    "ema20": None,
+                    "sma20": round(sma20, 2),
+                    "ema50": None,
+                    "sma50": round(sma50, 2),
+                    "ema200": None,
+                    "sma200": round(sma200, 2) if sma200 else None,
                 },
-                "price": round(current_price, 2),
+                "price": {
+                    "close": round(current_price, 2),
+                    "open": round(current_open, 2) if current_open is not None else None,
+                    "high": round(current_high, 2) if current_high is not None else None,
+                    "low": round(current_low, 2) if current_low is not None else None,
+                    "change": round(change, 2) if change is not None else None,
+                    "change_pct": round(change_pct, 2) if change_pct is not None else None,
+                },
                 "source": "yfinance_fallback",
-                "timestamp": datetime.now().isoformat()
+                "timestamp": datetime.now().isoformat(),
             }
-            
-            # Cache it
-            self.technical_cache[ticker.upper()] = result
-            
-            logger.info(f"✅ {ticker} technical (yfinance fallback): {signal}")
+
+            # Cache only daily interval results (cache key currently has no interval dimension).
+            if interval == "1d":
+                self.technical_cache[ticker.upper()] = result
+
+            logger.info(f"Fallback technical data for {ticker}: {signal}")
             return result
-            
+
         except Exception as e:
             logger.error(f"yfinance fallback failed for {ticker}: {e}")
             return {
@@ -585,7 +617,7 @@ class HybridScanner:
                 "signal": TechnicalSignal.ERROR.value,
                 "error": f"All technical sources failed: {str(e)}"
             }
-    
+
     # =========================================================================
     # ENGINE B: FUNDAMENTAL ENGINE (yfinance)
     # =========================================================================
