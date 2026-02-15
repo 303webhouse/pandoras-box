@@ -93,42 +93,42 @@ SIGNAL_DEFINITIONS = {
     "skew_25delta": {
         "name": "25-Delta Skew",
         "description": "Options skew extremely negative (Puts expensive)",
-        "threshold": "< -5% or > +5%",
+        "threshold": "> +5% (fear / put demand)",
         "source": "deribit",
         "notes": "When skew hits extreme lows, market is fully hedged; dealers buy back hedges creating vanna/charm tailwind"
     },
     "quarterly_basis": {
         "name": "Quarterly Basis",
         "description": "Futures premium compressed to near 0% (or negative)",
-        "threshold": "< 5% or > 15% annualized",
+        "threshold": "< -5% annualized (backwardation)",
         "source": "binance",
         "notes": "Compression confirms speculative longs are washed out, leverage reset"
     },
     "perp_funding": {
         "name": "Perp Funding",
         "description": "Funding rates flip negative (Shorts paying Longs)",
-        "threshold": "< -0.03% or > 0.05%",
+        "threshold": "< -0.03%",
         "source": "coinalyze",
         "notes": "Creates fuel for short squeeze; no incentive for shorts to hold through grind higher"
     },
     "stablecoin_aprs": {
         "name": "Stablecoin APRs",
         "description": "DeFi lending rates collapsed to base rate",
-        "threshold": "< 2% or > 8%",
+        "threshold": "< 2%",
         "source": "defillama",
         "notes": "Low APRs = apathy, speculative froth gone, no one rushing to leverage up"
     },
     "term_structure": {
         "name": "Term Structure",
         "description": "Near-dated futures > Far-dated (Inversion)",
-        "threshold": "Contango + rising funding = FIRING",
+        "threshold": "Backwardation + falling funding",
         "source": "coinalyze",
         "notes": "Market willing to pay premium to hedge RIGHT NOW; urgency = forced selling/capitulation"
     },
     "open_interest": {
         "name": "Open Interest Divergence",
         "description": "OI rising while price falling (Trap set)",
-        "threshold": "OI/Price divergence > 2%",
+        "threshold": "OI up + Price down (abs move filters)",
         "source": "coinalyze",
         "notes": "Aggressive shorts opening late OR longs averaging down; price tick up = late shorts underwater"
     },
@@ -142,7 +142,7 @@ SIGNAL_DEFINITIONS = {
     "spot_orderbook": {
         "name": "Spot Orderbook Skew",
         "description": "Bid-side liquidity heavily outweighs Ask-side",
-        "threshold": "> 15% imbalance",
+        "threshold": "> 15% bid imbalance",
         "source": "binance",
         "notes": "Derivatives noisy; Spot is truth. Thick Bid = smart money deploying passive capital"
     },
@@ -294,11 +294,24 @@ async def _fetch_funding_signal() -> Dict[str, Any]:
     
     try:
         data = await get_funding_rate()
+        raw_status = data.get("signal", SignalStatus.UNKNOWN.value)
+        sentiment = data.get("sentiment")
+        funding_rate = _to_float(data.get("funding_rate"))
+
+        # Bottom checklist is directional: short-crowded conditions support a bottom.
+        status = raw_status
+        if raw_status == SignalStatus.FIRING.value:
+            if sentiment == "overleveraged_shorts":
+                status = SignalStatus.FIRING.value
+            elif sentiment == "overleveraged_longs":
+                status = SignalStatus.NEUTRAL.value
+
         return {
-            "status": data.get("signal", SignalStatus.UNKNOWN.value),
-            "value": data.get("funding_rate"),
+            "status": status,
+            "value": f"{funding_rate:+.4f}%" if funding_rate is not None else "--",
+            "funding_rate": funding_rate,
             "predicted_rate": data.get("predicted_rate"),
-            "sentiment": data.get("sentiment"),
+            "sentiment": sentiment,
             "source": data.get("source"),
             "error": data.get("error"),
             "updated_at": data.get("timestamp")
@@ -315,17 +328,26 @@ async def _fetch_oi_signal() -> Dict[str, Any]:
     
     try:
         data = await get_open_interest()
+        raw_status = data.get("signal", SignalStatus.UNKNOWN.value)
         oi_change = _to_float(data.get("oi_change_4h"))
         price_change = _to_float(data.get("price_change_4h"))
+        divergence = data.get("divergence")
         oi_text = f"{oi_change:+.2f}%" if oi_change is not None else "--"
         price_text = f"{price_change:+.2f}%" if price_change is not None else "--"
 
+        if oi_change is None or price_change is None:
+            status = SignalStatus.UNKNOWN.value
+        elif raw_status == SignalStatus.FIRING.value:
+            status = SignalStatus.FIRING.value if divergence == "accumulation" else SignalStatus.NEUTRAL.value
+        else:
+            status = raw_status
+
         return {
-            "status": data.get("signal", SignalStatus.UNKNOWN.value),
+            "status": status,
             "value": f"OI: {oi_text} | Price: {price_text}",
             "oi_change": oi_change,
             "price_change": price_change,
-            "divergence": data.get("divergence"),
+            "divergence": divergence,
             "source": data.get("source"),
             "error": data.get("error"),
             "updated_at": data.get("timestamp")
@@ -342,17 +364,26 @@ async def _fetch_liquidations_signal() -> Dict[str, Any]:
     
     try:
         data = await get_liquidations()
+        raw_status = data.get("signal", SignalStatus.UNKNOWN.value)
         long_pct = _to_float(data.get("long_pct"))
         total_liq = _to_float(data.get("total_liquidations"))
+        composition = data.get("composition")
         long_text = f"{long_pct:.0f}%" if long_pct is not None else "--"
         total_text = f"${total_liq/1e6:.1f}M" if total_liq is not None else "--"
 
+        if long_pct is None or total_liq is None:
+            status = SignalStatus.UNKNOWN.value
+        elif raw_status == SignalStatus.FIRING.value:
+            status = SignalStatus.FIRING.value if composition == "long_heavy" else SignalStatus.NEUTRAL.value
+        else:
+            status = raw_status
+
         return {
-            "status": data.get("signal", SignalStatus.UNKNOWN.value),
+            "status": status,
             "value": f"{long_text} Long | {total_text}",
             "long_pct": long_pct,
             "total_usd": total_liq,
-            "composition": data.get("composition"),
+            "composition": composition,
             "source": data.get("source"),
             "error": data.get("error"),
             "updated_at": data.get("timestamp")
@@ -369,11 +400,24 @@ async def _fetch_term_structure_signal() -> Dict[str, Any]:
     
     try:
         data = await get_term_structure()
+        raw_status = data.get("signal", SignalStatus.UNKNOWN.value)
+        structure = data.get("structure")
+        trend = data.get("funding_trend")
+
+        status = raw_status
+        if raw_status == SignalStatus.FIRING.value:
+            # Bottom-supportive regime is panic/backwardation, not euphoric contango.
+            status = (
+                SignalStatus.FIRING.value
+                if structure == "backwardation" and trend == "falling"
+                else SignalStatus.NEUTRAL.value
+            )
+
         return {
-            "status": data.get("signal", SignalStatus.UNKNOWN.value),
-            "value": f"{data.get('structure', 'unknown')} ({data.get('funding_trend', 'stable')})",
-            "structure": data.get("structure"),
-            "trend": data.get("funding_trend"),
+            "status": status,
+            "value": f"{structure or 'unknown'} ({trend or 'stable'})",
+            "structure": structure,
+            "trend": trend,
             "current_funding": data.get("current_funding"),
             "source": data.get("source"),
             "error": data.get("error"),
@@ -391,13 +435,28 @@ async def _fetch_skew_signal() -> Dict[str, Any]:
     
     try:
         data = await get_25_delta_skew()
+        raw_status = data.get("signal", SignalStatus.UNKNOWN.value)
+        skew = _to_float(data.get("skew_25d"))
+        sentiment = data.get("sentiment")
+
+        if skew is None:
+            status = SignalStatus.UNKNOWN.value
+            value = "--"
+        else:
+            value = f"{skew:+.2f}%"
+            if raw_status == SignalStatus.FIRING.value:
+                status = SignalStatus.FIRING.value if sentiment == "bearish" else SignalStatus.NEUTRAL.value
+            else:
+                status = raw_status
+
         return {
-            "status": data.get("signal", SignalStatus.UNKNOWN.value),
-            "value": f"{data.get('skew_25d', 0):+.2f}%",
-            "skew": data.get("skew_25d"),
+            "status": status,
+            "value": value,
+            "skew": skew,
             "put_iv": data.get("put_iv_25d"),
             "call_iv": data.get("call_iv_25d"),
-            "sentiment": data.get("sentiment"),
+            "sentiment": sentiment,
+            "error": data.get("error"),
             "updated_at": data.get("timestamp")
         }
     except Exception as e:
@@ -412,13 +471,28 @@ async def _fetch_stablecoin_signal() -> Dict[str, Any]:
     
     try:
         data = await get_stablecoin_aprs()
+        raw_status = data.get("signal", SignalStatus.UNKNOWN.value)
+        average_apy = _to_float(data.get("average_apy"))
+        sentiment = data.get("sentiment")
+
+        if average_apy is None:
+            status = SignalStatus.UNKNOWN.value
+            value = "--"
+        else:
+            value = f"{average_apy:.2f}% avg"
+            if raw_status == SignalStatus.FIRING.value:
+                status = SignalStatus.FIRING.value if sentiment == "risk_off" else SignalStatus.NEUTRAL.value
+            else:
+                status = raw_status
+
         return {
-            "status": data.get("signal", SignalStatus.UNKNOWN.value),
-            "value": f"{data.get('average_apy', 0):.2f}% avg",
-            "average_apy": data.get("average_apy"),
+            "status": status,
+            "value": value,
+            "average_apy": average_apy,
             "median_apy": data.get("median_apy"),
             "pools_analyzed": data.get("pools_analyzed"),
-            "sentiment": data.get("sentiment"),
+            "sentiment": sentiment,
+            "error": data.get("error"),
             "updated_at": data.get("timestamp")
         }
     except Exception as e:
@@ -433,16 +507,25 @@ async def _fetch_orderbook_signal() -> Dict[str, Any]:
     
     try:
         data = await get_spot_orderbook_skew()
+        raw_status = data.get("signal", SignalStatus.UNKNOWN.value)
         imbalance = _to_float(data.get("imbalance_pct"))
+        sentiment = data.get("sentiment")
         imbalance_text = f"{imbalance:+.1f}%" if imbalance is not None else "--"
 
+        if imbalance is None:
+            status = SignalStatus.UNKNOWN.value
+        elif raw_status == SignalStatus.FIRING.value:
+            status = SignalStatus.FIRING.value if sentiment == "bid_heavy" else SignalStatus.NEUTRAL.value
+        else:
+            status = raw_status
+
         return {
-            "status": data.get("signal", SignalStatus.UNKNOWN.value),
+            "status": status,
             "value": f"{imbalance_text} imbalance",
             "imbalance": imbalance,
             "bid_depth": data.get("bid_depth"),
             "ask_depth": data.get("ask_depth"),
-            "sentiment": data.get("sentiment"),
+            "sentiment": sentiment,
             "source": data.get("source"),
             "error": data.get("error"),
             "updated_at": data.get("timestamp")
@@ -459,17 +542,26 @@ async def _fetch_basis_signal() -> Dict[str, Any]:
     
     try:
         data = await get_quarterly_basis()
+        raw_status = data.get("signal", SignalStatus.UNKNOWN.value)
         basis_ann = _to_float(data.get("basis_annualized"))
+        sentiment = data.get("sentiment")
         basis_text = f"{basis_ann:.2f}% ann." if basis_ann is not None else "unknown"
 
+        if basis_ann is None:
+            status = SignalStatus.UNKNOWN.value
+        elif raw_status == SignalStatus.FIRING.value:
+            status = SignalStatus.FIRING.value if sentiment == "backwardation" else SignalStatus.NEUTRAL.value
+        else:
+            status = raw_status
+
         return {
-            "status": data.get("signal", SignalStatus.UNKNOWN.value),
+            "status": status,
             "value": basis_text,
             "basis_annualized": basis_ann,
             "basis_pct": _to_float(data.get("basis_pct")),
             "spot_price": _to_float(data.get("spot_price")),
             "futures_price": _to_float(data.get("futures_price")),
-            "sentiment": data.get("sentiment"),
+            "sentiment": sentiment,
             "source": data.get("source"),
             "error": data.get("error"),
             "updated_at": data.get("timestamp")

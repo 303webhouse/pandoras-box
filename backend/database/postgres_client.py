@@ -114,7 +114,7 @@ async def init_database():
                 exit_time TIMESTAMP,
                 stop_loss DECIMAL(10, 2),
                 target_1 DECIMAL(10, 2),
-                quantity INTEGER,
+                quantity DECIMAL(18, 8),
                 realized_pnl DECIMAL(10, 2),
                 status VARCHAR(20),
                 broker VARCHAR(50),
@@ -293,9 +293,19 @@ async def init_database():
             ADD COLUMN IF NOT EXISTS trade_outcome VARCHAR(20),
             ADD COLUMN IF NOT EXISTS loss_reason VARCHAR(50),
             ADD COLUMN IF NOT EXISTS notes TEXT,
-            ADD COLUMN IF NOT EXISTS quantity_closed INTEGER DEFAULT 0,
+            ADD COLUMN IF NOT EXISTS quantity_closed DECIMAL(18, 8) DEFAULT 0,
             ADD COLUMN IF NOT EXISTS bias_at_open JSONB,
             ADD COLUMN IF NOT EXISTS bias_at_close JSONB
+        """)
+
+        # Ensure crypto position sizing supports fractional quantities.
+        await conn.execute("""
+            ALTER TABLE positions
+            ALTER COLUMN quantity TYPE DECIMAL(18, 8) USING quantity::DECIMAL(18, 8)
+        """)
+        await conn.execute("""
+            ALTER TABLE positions
+            ALTER COLUMN quantity_closed TYPE DECIMAL(18, 8) USING quantity_closed::DECIMAL(18, 8)
         """)
         
         # Create indexes for efficient queries
@@ -338,8 +348,8 @@ async def log_signal(signal_data: Dict[Any, Any]):
                 signal_id, timestamp, strategy, ticker, asset_class,
                 direction, signal_type, entry_price, stop_loss, target_1,
                 target_2, risk_reward, timeframe, bias_level, adx, line_separation,
-                score, bias_alignment, triggering_factors, bias_at_signal
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+                score, bias_alignment, triggering_factors, bias_at_signal, notes
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
             ON CONFLICT (signal_id) DO NOTHING
         """,
             signal_data['signal_id'],
@@ -361,7 +371,8 @@ async def log_signal(signal_data: Dict[Any, Any]):
             signal_data.get('score'),
             signal_data.get('bias_alignment'),
             json.dumps(signal_data.get('triggering_factors')) if signal_data.get('triggering_factors') is not None else None,
-            json.dumps(bias_at_signal) if bias_at_signal is not None else None
+            json.dumps(bias_at_signal) if bias_at_signal is not None else None,
+            signal_data.get("notes")
         )
 
 async def update_signal_action(signal_id: str, action: str):

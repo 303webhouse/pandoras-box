@@ -4858,6 +4858,10 @@ body.override-active-bearish .override-toggle[data-active="true"] {
     color: var(--accent-orange);
 }
 
+.confluence-verdict.early {
+    color: var(--accent-orange);
+}
+
 .confluence-verdict.none {
     color: var(--text-secondary);
 }

@@ -138,6 +138,7 @@ class ManualPositionRequest(BaseModel):
     asset_class: Optional[str] = "EQUITY"
     signal_type: Optional[str] = "MANUAL"
     notes: Optional[str] = None
+    account: Optional[str] = "MANUAL"
 
 class ArchiveFilters(BaseModel):
     """Filters for archived signals query"""
@@ -687,27 +688,49 @@ async def create_manual_position(request: ManualPositionRequest):
     global _position_counter
     
     try:
+        account = (request.account or "MANUAL").strip().upper()
+        if account not in {"BREAKOUT", "ROBINHOOD", "BROKERAGELINK", "MANUAL"}:
+            account = "MANUAL"
+        asset_class = (request.asset_class or "EQUITY").strip().upper()
+        if asset_class not in {"EQUITY", "CRYPTO"}:
+            asset_class = "EQUITY"
+        ticker = (request.ticker or "").strip().upper()
+        direction = (request.direction or "").strip().upper()
+
+        if not ticker:
+            raise HTTPException(status_code=400, detail="Ticker is required")
+        if direction not in {"LONG", "SHORT"}:
+            raise HTTPException(status_code=400, detail="Direction must be LONG or SHORT")
+        if request.entry_price <= 0 or request.quantity <= 0:
+            raise HTTPException(status_code=400, detail="Entry price and quantity must be positive")
+
+        strategy_name = request.strategy or ("Breakout Manual" if account == "BREAKOUT" else "Manual Entry")
+        notes_with_account = request.notes or ""
+        account_tag = f"account={account}"
+        if account_tag.lower() not in notes_with_account.lower():
+            notes_with_account = f"{notes_with_account} | {account_tag}".strip(" |")
+
         # Generate a manual signal ID
-        signal_id = f"MANUAL_{request.ticker}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        signal_id = f"MANUAL_{ticker}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         
         bias_at_open = await get_bias_snapshot()
 
         # Create position data
         position_data = {
-            "ticker": request.ticker,
-            "direction": request.direction,
+            "ticker": ticker,
+            "direction": direction,
             "entry_price": request.entry_price,
             "quantity": request.quantity,  # ADD QUANTITY HERE
             "entry_time": datetime.now(),
             "stop_loss": request.stop_loss,
             "target_1": request.target_1,
             "target_2": None,
-            "strategy": request.strategy or "Manual Entry",
-            "asset_class": request.asset_class,
+            "strategy": strategy_name,
+            "asset_class": asset_class,
             "signal_type": "MANUAL",
-            "notes": request.notes,
+            "notes": notes_with_account,
             "bias_at_open": bias_at_open,
-            "broker": "MANUAL"
+            "broker": account
         }
         
         # First, create a dummy signal record to satisfy foreign key
@@ -715,25 +738,29 @@ async def create_manual_position(request: ManualPositionRequest):
             from database.postgres_client import log_signal
             await log_signal({
                 "signal_id": signal_id,
-                "ticker": request.ticker,
-                "strategy": request.strategy or "Manual Entry",
-                "direction": request.direction,
+                "ticker": ticker,
+                "strategy": strategy_name,
+                "direction": direction,
                 "signal_type": "MANUAL",
                 "entry_price": request.entry_price,
                 "stop_loss": request.stop_loss,
                 "target_1": request.target_1,
                 "timestamp": datetime.now().isoformat(),
-                "asset_class": request.asset_class,
+                "asset_class": asset_class,
                 "score": 0,
-                "bias_alignment": "N/A"
+                "bias_alignment": "N/A",
+                "notes": notes_with_account
             })
+
+            # Keep manual placeholders out of active Trade Ideas.
+            await update_signal_action(signal_id, "SELECTED")
         except Exception as signal_err:
             logger.warning(f"Failed to create dummy signal: {signal_err}")
         
         # Save position to PostgreSQL
         try:
             db_position_id = await create_position(signal_id, position_data)
-            logger.info(f"✅ Manual position saved to PostgreSQL: {request.ticker}")
+            logger.info(f"✅ Manual position saved to PostgreSQL: {ticker}")
         except Exception as db_err:
             logger.error(f"❌ Failed to persist manual position to DB: {db_err}")
             # Continue anyway - position will still work in memory
@@ -743,16 +770,18 @@ async def create_manual_position(request: ManualPositionRequest):
         position = {
             "id": db_position_id or _position_counter,
             "signal_id": signal_id,
-            "ticker": request.ticker,
-            "direction": request.direction,
+            "ticker": ticker,
+            "direction": direction,
             "entry_price": request.entry_price,
             "quantity": request.quantity,
             "stop_loss": request.stop_loss,
             "target_1": request.target_1,
-            "strategy": request.strategy or "Manual Entry",
-            "asset_class": request.asset_class,
+            "strategy": strategy_name,
+            "asset_class": asset_class,
             "signal_type": "MANUAL",
-            "notes": request.notes,
+            "notes": notes_with_account,
+            "broker": account,
+            "account": account,
             "entry_time": datetime.now().isoformat(),
             "status": "OPEN"
         }
@@ -767,7 +796,7 @@ async def create_manual_position(request: ManualPositionRequest):
             "position": position
         })
         
-        logger.info(f"📝 Manual position created: {request.ticker} {request.direction} @ ${request.entry_price} x {request.quantity}")
+        logger.info(f"📝 Manual position created: {ticker} {direction} @ ${request.entry_price} x {request.quantity}")
         
         return {"status": "success", "position_id": position["id"], "position": position}
     
@@ -778,7 +807,7 @@ async def create_manual_position(request: ManualPositionRequest):
 
 class UpdatePositionRequest(BaseModel):
     """Request to update a position"""
-    quantity: Optional[int] = None
+    quantity: Optional[float] = None
     stop_loss: Optional[float] = None
     target_1: Optional[float] = None
     notes: Optional[str] = None
@@ -896,6 +925,8 @@ async def sync_positions_from_database():
                     "asset_class": pos.get("asset_class", "EQUITY"),
                     "signal_type": pos.get("signal_type"),
                     "bias_level": pos.get("bias_level"),
+                    "broker": pos.get("broker"),
+                    "account": pos.get("broker"),
                     "entry_time": entry_time_str,
                     "status": pos.get("status", "OPEN")
                 }
@@ -971,6 +1002,8 @@ async def close_position(request: ClosePositionRequest):
             "realized_pnl": round(realized_pnl, 2),
             "strategy": position.get("strategy"),
             "signal_type": position.get("signal_type"),
+            "broker": position.get("broker"),
+            "account": position.get("account") or position.get("broker"),
             "bias_alignment": position.get("bias_alignment"),
             "score": position.get("score"),
             "triggering_factors": position.get("triggering_factors"),

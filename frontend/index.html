@@ -251,7 +251,7 @@
                 <div class="positions-header">
                     <h2>OPEN POSITIONS</h2>
                     <div class="positions-header-actions">
-                        <button class="add-position-btn" id="addPositionBtn" title="Add Manual Trade">+</button>
+                        <button class="add-position-btn" id="addPositionBtn" data-action="add-manual-position" data-context="equity" title="Add Manual Trade">+</button>
                         <span class="positions-count" id="positionsCount">0</span>
                     </div>
                 </div>
@@ -1109,6 +1109,24 @@
                 </div>
                 <div class="form-row">
                     <div class="form-group">
+                        <label>Account</label>
+                        <select id="manualAccount">
+                            <option value="MANUAL">Manual / Other</option>
+                            <option value="BREAKOUT">Breakout Prop</option>
+                            <option value="ROBINHOOD">Robinhood</option>
+                            <option value="BROKERAGELINK">401(k) BrokerageLink</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Asset Class</label>
+                        <select id="manualAssetClass">
+                            <option value="EQUITY">EQUITY</option>
+                            <option value="CRYPTO">CRYPTO</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
                         <label>Entry Price</label>
                         <input type="number" id="manualEntryPrice" step="0.01" placeholder="0.00">
                     </div>
@@ -1274,7 +1292,7 @@
                             </div>
                             <span class="crypto-price-main" id="cryptoCoinbaseSpotInline" title="Coinbase spot">--</span>
                             <div class="crypto-price-stack">
-                                <span class="crypto-price-small" id="cryptoBinancePerpInline" title="Perp (Bybit primary, OKX fallback)">--</span>
+                                <span class="crypto-price-small" id="cryptoBinancePerpInline" title="Perp (Binance primary, Bybit/OKX fallback)">--</span>
                                 <span class="crypto-price-sub" id="cryptoPerpSourceInline">--</span>
                             </div>
                         </div>
@@ -1369,7 +1387,10 @@
                 <div class="crypto-positions-panel">
                     <div class="crypto-panel-header">
                         <h2>OPEN POSITIONS</h2>
-                        <span class="positions-count" id="cryptoPositionsCount">0</span>
+                        <div class="positions-header-actions">
+                            <button class="add-position-btn" id="addCryptoPositionBtn" data-action="add-manual-position" data-context="crypto" title="Add Breakout Trade">+</button>
+                            <span class="positions-count" id="cryptoPositionsCount">0</span>
+                        </div>
                     </div>
                     <div class="crypto-positions-list" id="cryptoPositionsList">
                         <p class="empty-state">No open crypto positions</p>
@@ -1493,7 +1514,7 @@
 
     <!-- TradingView Widget Script -->
     <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-    <script src="/app.js?v=49"></script>
+    <script src="/app.js?v=50"></script>
 </body>
 </html>
 
