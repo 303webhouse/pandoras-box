@@ -7126,6 +7126,11 @@ body[data-mode="crypto"] .crypto-shell {
 
 .crypto-price-extra.bullish { color: #3bd671; }
 .crypto-price-extra.bearish { color: #e5370e; }
+.crypto-cvd-net {
+    font-size: 10px;
+    opacity: 0.75;
+    margin-left: 2px;
+}
 
 .price-divider {
     color: #3d4b74;
@@ -9529,6 +9534,7 @@ body[data-mode="crypto"] .crypto-shell {
 .crypto-price-extra {font-family:"Orbit",sans-serif;font-size:11px;letter-spacing:0.4px;text-transform:uppercase;color:#94a3b8;white-space:nowrap;}
 .crypto-price-extra.bullish {color:#3bd671;}
 .crypto-price-extra.bearish {color:#e5370e;}
+.crypto-cvd-net {font-size:10px;opacity:0.75;margin-left:2px;}
 .price-divider {color:#3d4b74;font-weight:700;}
 .crypto-bias-meta {display:flex;align-items:center;gap:10px;justify-self:end;}
 
