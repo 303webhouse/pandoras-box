@@ -775,16 +775,16 @@ function dismissScoutAlertByTicker(ticker) {
 
 function createScoutAlertCard(alert) {
     const directionClass = alert.direction === 'LONG' ? 'scout-long' : 'scout-short';
-    const directionIcon = alert.direction === 'LONG' ? 'â†‘' : 'â†“';
+    const directionIcon = alert.direction === 'LONG' ? '^' : 'v';
 
     return `
         <div class="scout-alert-card ${directionClass}" data-scout-id="${alert.signal_id}" data-ticker="${alert.ticker}">
             <div class="scout-alert-header">
                 <div class="scout-badge">
-                    <span class="scout-icon">âš ï¸</span>
+                    <span class="scout-icon">!</span>
                     <span class="scout-label">SCOUT</span>
                 </div>
-                <button class="scout-dismiss-btn" data-action="dismiss-scout" title="Dismiss">Ã—</button>
+                <button class="scout-dismiss-btn" data-action="dismiss-scout" title="Dismiss">x</button>
             </div>
             <div class="scout-alert-content">
                 <div class="scout-ticker-row">
@@ -1775,10 +1775,10 @@ function renderTimeframeCards(data) {
         // Update momentum
         const momEl = card.querySelector('.tf-momentum');
         if (momEl) {
-            const arrows = { strengthening: 'â†‘', weakening: 'â†“', stable: 'â†’' };
+            const arrows = { strengthening: '^', weakening: 'v', stable: '->' };
             const labels = { strengthening: 'Strengthening', weakening: 'Weakening', stable: 'Stable' };
             momEl.className = `tf-momentum ${momentum}`;
-            momEl.innerHTML = `<span class="tf-momentum-arrow">${arrows[momentum] || 'â†’'}</span> ${labels[momentum] || 'Stable'}`;
+            momEl.innerHTML = `<span class="tf-momentum-arrow">${arrows[momentum] || '->'}</span> ${labels[momentum] || 'Stable'}`;
         }
 
         // Update divergence
@@ -1816,7 +1816,11 @@ function renderTimeframeCards(data) {
                         <div class="tf-factor-bar">
                             <div class="tf-factor-bar-fill ${dir}" style="width:${pct}%"></div>
                         </div>
-                        <span class="tf-factor-score">${f.score !== null ? (fScore >= 0 ? '+' : '') + fScore.toFixed(2) : '--'}</span>
+                        <span class="tf-factor-score">${
+                            f.score !== null
+                                ? (fScore >= 0 ? '+' : '') + fScore.toFixed(2)
+                                : (f.stale ? 'STALE' : '--')
+                        }</span>
                     </div>`;
             }).join('');
         }
@@ -1841,7 +1845,7 @@ function renderSectorRotationStrip(sectorData) {
 
     container.innerHTML = sectors.map(s => {
         const status = s.status || 'STEADY';
-        const arrow = status === 'SURGING' ? 'â–²' : (status === 'DUMPING' ? 'â–¼' : 'â€“');
+        const arrow = status === 'SURGING' ? '^' : (status === 'DUMPING' ? 'v' : '-');
         const mom = s.rotation_momentum !== undefined ? (s.rotation_momentum >= 0 ? '+' : '') + s.rotation_momentum.toFixed(1) + '%' : '';
         const rs5 = s.rs_5d !== undefined ? (s.rs_5d >= 0 ? '+' : '') + s.rs_5d.toFixed(1) + '%' : '--';
         const rs20 = s.rs_20d !== undefined ? (s.rs_20d >= 0 ? '+' : '') + s.rs_20d.toFixed(1) + '%' : '--';
@@ -1857,7 +1861,7 @@ function renderSectorRotationStrip(sectorData) {
                     <div class="sector-tooltip-row"><span class="sector-tooltip-label">5d RS</span><span>${rs5}</span></div>
                     <div class="sector-tooltip-row"><span class="sector-tooltip-label">20d RS</span><span>${rs20}</span></div>
                     <div class="sector-tooltip-row"><span class="sector-tooltip-label">Momentum</span><span>${mom}</span></div>
-                    <div class="sector-tooltip-row"><span class="sector-tooltip-label">Rank Î”</span><span>${rankChange}</span></div>
+                    <div class="sector-tooltip-row"><span class="sector-tooltip-label">Rank Delta</span><span>${rankChange}</span></div>
                     <div class="sector-tooltip-row"><span class="sector-tooltip-label">Accel</span><span>${accel}</span></div>
                 </div>
             </div>`;
@@ -2241,7 +2245,7 @@ function initSavitaUpdateModal() {
                     const daysSince = Math.floor((new Date() - new Date(data.last_updated)) / (1000 * 60 * 60 * 24));
                     if (daysSince > 30) {
                         currentInfo.classList.add('stale');
-                        currentInfo.innerHTML = `<strong>âš ï¸ DISABLED (${daysSince}d old)</strong> - Savita not affecting score until updated`;
+                        currentInfo.innerHTML = `<strong>DISABLED (${daysSince}d old)</strong> - Savita not affecting score until updated`;
                     } else {
                         currentInfo.classList.remove('stale');
                     }
@@ -2563,7 +2567,7 @@ function updateWarningBadge(enabledCount, timeframe = 'weekly', totalFactorsOver
     if (enabledCount < totalFactors) {
         const badge = document.createElement('span');
         badge.className = 'bias-warning-badge';
-        badge.textContent = 'âš ï¸';
+        badge.textContent = '!';
         badge.title = `${enabledCount} of ${totalFactors} factors active`;
         levelElement.appendChild(badge);
     }
@@ -3341,19 +3345,19 @@ function updateBiasShiftDisplay(shiftData) {
     switch (shiftDirection) {
         case 'IMPROVING':
         case 'STRONGLY_IMPROVING':
-            shiftIcon = 'â–²';
+            shiftIcon = '^';
             shiftClass = 'bias-shift-improving';
             shiftText = shiftDirection === 'STRONGLY_IMPROVING' ? 'strongly improving' : 'improving';
             break;
         case 'DETERIORATING':
         case 'STRONGLY_DETERIORATING':
-            shiftIcon = 'â–¼';
+            shiftIcon = 'v';
             shiftClass = 'bias-shift-deteriorating';
             shiftText = shiftDirection === 'STRONGLY_DETERIORATING' ? 'strongly deteriorating' : 'deteriorating';
             break;
         case 'STABLE':
         default:
-            shiftIcon = 'â€”';
+            shiftIcon = '-';
             shiftClass = 'bias-shift-stable';
             shiftText = 'stable';
             break;
@@ -3459,7 +3463,7 @@ async function loadCyclicalBiasFallback() {
                     minute: '2-digit'
                 }) + ' ET' : 'Unknown';
                 detailsElement.innerHTML = `
-                    Vote: ${totalVote}/12 â€¢ Long-term macro<br>
+                    Vote: ${totalVote}/12 | Long-term macro<br>
                     <small>Updated: ${timestamp}</small>
                 `;
             }
@@ -3691,7 +3695,7 @@ function createSignalCard(signal) {
     const biasAlignment = signal.bias_alignment || 'NEUTRAL';
     const isAligned = biasAlignment.includes('ALIGNED') && !biasAlignment.includes('COUNTER');
     const biasAlignmentClass = isAligned ? 'bias-aligned' : (biasAlignment === 'NEUTRAL' ? '' : 'bias-misaligned');
-    const biasAlignmentIcon = isAligned ? 'âœ“' : (biasAlignment.includes('COUNTER') ? 'âš ' : 'â—‹');
+    const biasAlignmentIcon = isAligned ? 'OK' : (biasAlignment.includes('COUNTER') ? '!' : 'o');
     const biasAlignmentText = biasAlignment.replace('_', ' ');
     
     // Safe number formatting
@@ -3789,8 +3793,8 @@ function createSignalCard(signal) {
             </div>
             
             <div class="signal-actions">
-                <button class="action-btn dismiss-btn" data-action="dismiss">âœ• Dismiss</button>
-                <button class="action-btn select-btn" data-action="select">âœ“ Accept</button>
+                <button class="action-btn dismiss-btn" data-action="dismiss">X Dismiss</button>
+                <button class="action-btn select-btn" data-action="select">OK Accept</button>
             </div>
         </div>
     `;
@@ -4769,7 +4773,7 @@ function createHunterCard(signal, type) {
                     <div class="hunter-metric-value">${marketData.pct_distance_from_vwap?.toFixed(1) || '-'}%</div>
                 </div>
             </div>
-            ${instruction ? `<div class="hunter-instruction">ðŸ“ ${instruction}</div>` : ''}
+            ${instruction ? `<div class="hunter-instruction">${instruction}</div>` : ''}
         </div>
     `;
 }
@@ -5645,7 +5649,7 @@ async function enableAllStrategies() {
 }
 
 async function disableAllStrategies() {
-    if (!confirm('âš ï¸ KILL SWITCH: This will disable ALL strategies. Continue?')) {
+    if (!confirm('KILL SWITCH: This will disable ALL strategies. Continue?')) {
         return;
     }
     
@@ -5859,7 +5863,7 @@ function createCtaCard(signal) {
                 </div>
             </div>
             <div class="cta-card-footer">
-                Zone: ${zoneWithKb} â€¢ Vol: ${context.volume_ratio?.toFixed(1) || '-'}x
+                Zone: ${zoneWithKb} | Vol: ${context.volume_ratio?.toFixed(1) || '-'}x
             </div>
         </div>
     `;
@@ -6214,12 +6218,12 @@ async function analyzeTickerEnhanced(ticker) {
         const shortAlignment = document.getElementById('shortAlignment');
 
         if (longAlignment) {
-            longAlignment.textContent = dailyIsToro ? 'âœ… Aligned' : 'âš ï¸ Divergent';
+            longAlignment.textContent = dailyIsToro ? 'Aligned' : 'Divergent';
             longAlignment.className = 'alignment-status ' + (dailyIsToro ? 'aligned' : 'divergent');
         }
 
         if (shortAlignment) {
-            shortAlignment.textContent = !dailyIsToro ? 'âœ… Aligned' : 'âš ï¸ Divergent';
+            shortAlignment.textContent = !dailyIsToro ? 'Aligned' : 'Divergent';
             shortAlignment.className = 'alignment-status ' + (!dailyIsToro ? 'aligned' : 'divergent');
         }
 
@@ -6238,7 +6242,7 @@ async function analyzeTickerEnhanced(ticker) {
             flowSummary.innerHTML = recentFlow.map(f => `
                 <div class="flow-item">
                     <span class="flow-direction ${f.sentiment === 'BULLISH' ? 'bullish' : 'bearish'}">
-                        ${f.sentiment === 'BULLISH' ? 'ðŸŸ¢' : 'ðŸ”´'} ${f.type}
+                        ${f.sentiment === 'BULLISH' ? 'BULL' : 'BEAR'} ${f.type}
                     </span>
                     <span class="flow-score">${f.notability_score}/100</span>
                 </div>
@@ -6748,7 +6752,7 @@ function updateCryptoSessionStatus(currentSession, sessions) {
         const utcTime = currentSession.utc_time || '';
         const localTime = utcTime ? formatUtcRangeToDenver(utcTime) : '';
         statusEl.innerHTML = `
-            <span class="session-pill">ðŸŸ¢ NOW: ${currentSession.name}${localTime ? `  ${localTime}` : ''}</span>
+            <span class="session-pill">NOW: ${currentSession.name}${localTime ? `  ${localTime}` : ''}</span>
         `;
     } else {
         const nextSession = getNextSessionBySchedule(sessions);
@@ -7135,8 +7139,8 @@ function calculateFlowScore() {
     };
     if (flowModalData.premium) {
         score += premiumScores[flowModalData.premium] || 0;
-        if (flowModalData.premium === '500000') factors.push('ðŸ’° Large premium');
-        else if (flowModalData.premium === '150000') factors.push('ðŸ’µ Good size');
+        if (flowModalData.premium === '500000') factors.push('Large premium');
+        else if (flowModalData.premium === '150000') factors.push('Good size');
     }
     
     // Type scoring (0-25 points)
@@ -7148,7 +7152,7 @@ function calculateFlowScore() {
     };
     if (flowModalData.type) {
         score += typeScores[flowModalData.type] || 0;
-        if (flowModalData.type === 'SWEEP') factors.push('ðŸ”¥ Aggressive sweep');
+        if (flowModalData.type === 'SWEEP') factors.push('Aggressive sweep');
     }
     
     // Expiry scoring (0-20 points) - sweet spot is 2-4 weeks
@@ -7161,8 +7165,8 @@ function calculateFlowScore() {
     };
     if (flowModalData.expiry) {
         score += expiryScores[flowModalData.expiry] || 0;
-        if (flowModalData.expiry === '2-4weeks') factors.push('ðŸ“… Optimal expiry');
-        if (flowModalData.expiry === 'leaps') factors.push('âš ï¸ LEAPS (less urgent)');
+        if (flowModalData.expiry === '2-4weeks') factors.push('Optimal expiry');
+        if (flowModalData.expiry === 'leaps') factors.push('LEAPS (less urgent)');
     }
     
     // Volume vs OI scoring (0-15 points)
@@ -7174,43 +7178,43 @@ function calculateFlowScore() {
     };
     if (flowModalData.voloi) {
         score += voloiScores[flowModalData.voloi] || 0;
-        if (flowModalData.voloi === 'extreme') factors.push('ðŸ“Š Extreme volume');
+        if (flowModalData.voloi === 'extreme') factors.push('Extreme volume');
     }
     
     // Repeat activity (0-10 points)
     if (flowModalData.repeat === 'yes') {
         score += 10;
-        factors.push('ðŸ” Repeat hits');
+        factors.push('Repeat hits');
     }
     
     // Determine label and class
     let label, scoreClass, verdictClass, verdict;
     
     if (score >= 80) {
-        label = 'ðŸš¨ EXCEPTIONAL - Must track!';
+        label = 'EXCEPTIONAL - Must track!';
         scoreClass = 'exceptional';
         verdictClass = 'must-add';
-        verdict = 'ðŸ‹ This is significant institutional activity. Definitely add this!';
+        verdict = 'This is significant institutional activity. Definitely add this!';
     } else if (score >= 60) {
-        label = 'âœ… HIGH - Worth tracking';
+        label = 'HIGH - Worth tracking';
         scoreClass = 'high';
         verdictClass = 'add';
-        verdict = 'ðŸ‘ Notable flow that could move the stock. Add it!';
+        verdict = 'Notable flow that could move the stock. Add it!';
     } else if (score >= 40) {
-        label = 'ðŸŸ¡ MEDIUM - Maybe track';
+        label = 'MEDIUM - Maybe track';
         scoreClass = 'medium';
         verdictClass = 'maybe';
-        verdict = 'ðŸ¤” Decent activity but not exceptional. Add if it matches your thesis.';
+        verdict = 'Decent activity but not exceptional. Add if it matches your thesis.';
     } else {
-        label = 'âšª LOW - Probably skip';
+        label = 'LOW - Probably skip';
         scoreClass = 'low';
         verdictClass = 'skip';
-        verdict = 'ðŸ‘Ž Likely noise. Skip unless you have other conviction.';
+        verdict = 'Likely noise. Skip unless you have other conviction.';
     }
     
     // Add factors to label
     if (factors.length > 0) {
-        label += '\n' + factors.join(' â€¢ ');
+        label += '\n' + factors.join(' | ');
     }
     
     updateScoreDisplay(score, label, scoreClass);
@@ -7747,7 +7751,7 @@ function setTradeType(type) {
         equityFields.style.display = 'block';
         optionsFields.style.display = 'none';
         modalContainer.classList.remove('options-mode');
-        modalTitle.textContent = 'ðŸ“ˆ Open Position';
+        modalTitle.textContent = 'Open Position';
         confirmBtn.textContent = 'Open Position';
     } else {
         equityBtn.classList.remove('active');
@@ -7755,7 +7759,7 @@ function setTradeType(type) {
         equityFields.style.display = 'none';
         optionsFields.style.display = 'block';
         modalContainer.classList.add('options-mode');
-        modalTitle.textContent = 'ðŸ“Š Open Options Position';
+        modalTitle.textContent = 'Open Options Position';
         confirmBtn.textContent = 'Open Options Position';
         updateOptionsSummary();
     }
@@ -8052,7 +8056,7 @@ function renderPositionsEnhanced() {
         
         return `
             <div class="position-card" data-position-id="${pos.id || pos.signal_id}">
-                <button class="position-remove-btn" data-position-id="${pos.id || pos.signal_id}" title="Remove position">Ã—</button>
+                <button class="position-remove-btn" data-position-id="${pos.id || pos.signal_id}" title="Remove position">x</button>
                 <div class="position-card-header">
                     <span class="position-ticker" data-ticker="${pos.ticker}">${pos.ticker}</span>
                     <span class="position-direction ${pos.direction}">${pos.direction}</span>
@@ -8371,7 +8375,7 @@ async function executePositionClose(positionId, exitPrice, closeQty, tradeOutcom
                 }
             }
             
-            const emoji = tradeOutcome === 'WIN' ? 'ðŸŽ¯' : tradeOutcome === 'LOSS' ? 'âŒ' : 'âž–';
+            const emoji = tradeOutcome === 'WIN' ? 'WIN' : tradeOutcome === 'LOSS' ? 'LOSS' : '-';
             console.log(`${emoji} Position closed: ${closingPosition.ticker} - ${tradeOutcome} - P&L: $${data.realized_pnl?.toFixed(2) || '--'}`);
         } else {
             alert('Failed to close position: ' + (data.detail || data.message || 'Unknown error'));
@@ -8844,7 +8848,7 @@ function formatPopupDescription(text) {
         if (!p) return '';
         // Handle single-line list items
         if (p.startsWith('- ')) {
-            return '<p>' + p.replace(/^- /, 'â€¢ ') + '</p>';
+            return '<p>' + p.replace(/^- /, '- ') + '</p>';
         }
         return '<p>' + p.replace(/\n/g, '<br>') + '</p>';
     }).join('');
@@ -9068,7 +9072,7 @@ function createLegHTML(legNum) {
         <div class="leg-row" data-leg="${legNum}">
             <div class="leg-header">
                 <span class="leg-number">Leg ${legNum}</span>
-                ${legNum > 1 ? `<button type="button" class="remove-leg-btn" onclick="removeLeg(${legNum})">âœ•</button>` : ''}
+                ${legNum > 1 ? `<button type="button" class="remove-leg-btn" onclick="removeLeg(${legNum})">X</button>` : ''}
             </div>
             <div class="leg-fields">
                 <select class="leg-action form-select-sm">
