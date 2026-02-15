@@ -41,3 +41,8 @@ TIMEZONE = os.getenv("TIMEZONE", "America/New_York")
 HTTP_TIMEOUT = float(os.getenv("PIVOT_HTTP_TIMEOUT", "20"))
 RETRY_ATTEMPTS = int(os.getenv("PIVOT_RETRY_ATTEMPTS", "3"))
 RETRY_BACKOFF_SECONDS = float(os.getenv("PIVOT_RETRY_BACKOFF", "2"))
+
+# ── Journal ──────────────────────────────────────────────────────────────────
+JOURNAL_DB_PATH = os.getenv("JOURNAL_DB_PATH", "/opt/pivot/data/journal.db")
+ACCOUNT_BALANCE_401K = float(os.getenv("ACCOUNT_BALANCE_401K", "8100"))
+ACCOUNT_BALANCE_RH = float(os.getenv("ACCOUNT_BALANCE_RH", "4698"))
