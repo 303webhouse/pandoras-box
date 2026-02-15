@@ -18,6 +18,7 @@ BINANCE_FUTURES_URL = (
     _binance_perp_base if _binance_perp_base.endswith("/fapi/v1")
     else f"{_binance_perp_base}/fapi/v1"
 )
+BINANCE_PERP_HTTP_PROXY = os.getenv("CRYPTO_BINANCE_PERP_HTTP_PROXY", "").strip() or None
 OKX_MARKET_URL = "https://www.okx.com/api/v5/market"
 
 # Cache for API responses
@@ -46,7 +47,11 @@ def _set_cache(key: str, data: Any, ttl: int):
 async def _make_request(url: str, params: Dict[str, Any] = None) -> Optional[Dict]:
     """Make request to a public market API endpoint"""
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        client_kwargs: Dict[str, Any] = {"timeout": 10.0}
+        if BINANCE_PERP_HTTP_PROXY and url.startswith(BINANCE_FUTURES_URL):
+            client_kwargs["proxy"] = BINANCE_PERP_HTTP_PROXY
+
+        async with httpx.AsyncClient(**client_kwargs) as client:
             response = await client.get(url, params=params)
 
             if response.status_code not in (200,):
