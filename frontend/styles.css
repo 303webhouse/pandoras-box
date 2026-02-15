@@ -4847,7 +4847,7 @@ body.override-active-bearish .override-toggle[data-active="true"] {
 }
 
 .confluence-verdict.strong {
-    color: var(--accent-lime);
+    color: #F7931A;
 }
 
 .confluence-verdict.moderate {
@@ -4889,8 +4889,8 @@ body.override-active-bearish .override-toggle[data-active="true"] {
 }
 
 .btc-signal-card.FIRING {
-    border-left-color: var(--accent-lime);
-    background: rgba(124, 255, 107, 0.05);
+    border-left-color: #F7931A;
+    background: rgba(247, 147, 26, 0.10);
 }
 
 .btc-signal-card.NEUTRAL {
@@ -4924,7 +4924,7 @@ body.override-active-bearish .override-toggle[data-active="true"] {
 }
 
 .btc-signal-status.FIRING {
-    background: var(--accent-lime);
+    background: #F7931A;
     color: var(--dark-bg);
 }
 
@@ -4982,7 +4982,27 @@ body.override-active-bearish .override-toggle[data-active="true"] {
 }
 
 .btc-signal-card.FIRING .signal-value-main {
-    color: var(--accent-lime);
+    color: #F7931A;
+}
+
+@keyframes btcOrangePulse {
+    0% {
+        border-color: #F7931A;
+        box-shadow: 0 0 0 rgba(247, 147, 26, 0.00);
+    }
+    50% {
+        border-color: #FFB347;
+        box-shadow: 0 0 16px rgba(247, 147, 26, 0.35);
+    }
+    100% {
+        border-color: #F7931A;
+        box-shadow: 0 0 0 rgba(247, 147, 26, 0.00);
+    }
+}
+
+.btc-signals-section.confluence-bullish,
+.crypto-btc-signals-panel.confluence-bullish {
+    animation: btcOrangePulse 2.2s ease-in-out infinite;
 }
 
 .btc-signal-footer {
