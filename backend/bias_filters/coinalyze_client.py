@@ -21,6 +21,8 @@ BTC_PERP_SYMBOLS = [
     "BTCUSDT_PERP.A",  # Aggregated across all exchanges
 ]
 OKX_SWAP_SYMBOL = "BTC-USDT-SWAP"
+# OKX BTC-USDT-SWAP contract size is 0.01 BTC per contract.
+OKX_BTC_SWAP_CTVAL_BTC = 0.01
 
 # Cache for API responses (avoid hitting rate limits)
 _cache: Dict[str, Dict[str, Any]] = {}
@@ -409,21 +411,38 @@ async def get_liquidations() -> Dict[str, Any]:
         })
         rows = okx_data.get("data", []) if isinstance(okx_data, dict) else []
         if rows:
-            long_contracts = 0.0
-            short_contracts = 0.0
-            for row in rows:
-                size = _to_float(row.get("sz")) or 0.0
-                pos_side = str(row.get("posSide", "")).lower()
-                if pos_side == "long":
-                    long_contracts += size
-                elif pos_side == "short":
-                    short_contracts += size
+            long_usd = 0.0
+            short_usd = 0.0
+            parsed_rows = 0
 
-            total_contracts = long_contracts + short_contracts
-            long_pct = (long_contracts / total_contracts * 100) if total_contracts > 0 else 50.0
+            # OKX returns liquidation entries nested under each row["details"].
+            for row in rows:
+                details = row.get("details") or []
+                if not isinstance(details, list):
+                    continue
+                for entry in details:
+                    size_contracts = _to_float(entry.get("sz")) or 0.0
+                    price = _to_float(entry.get("bkPx")) or 0.0
+                    if size_contracts <= 0 or price <= 0:
+                        continue
+
+                    size_btc = size_contracts * OKX_BTC_SWAP_CTVAL_BTC
+                    notional_usd = size_btc * price
+                    pos_side = str(entry.get("posSide", "")).lower()
+                    if pos_side == "long":
+                        long_usd += notional_usd
+                        parsed_rows += 1
+                    elif pos_side == "short":
+                        short_usd += notional_usd
+                        parsed_rows += 1
+
+            total_usd = long_usd + short_usd
+            long_pct = (long_usd / total_usd * 100) if total_usd > 0 else 50.0
             composition = "balanced"
             signal = "NEUTRAL"
-            if total_contracts > 100:
+
+            # Keep thresholds aligned with the primary Coinalyze path.
+            if total_usd > 5_000_000:
                 if long_pct > 75:
                     composition = "long_heavy"
                     signal = "FIRING"
@@ -432,12 +451,13 @@ async def get_liquidations() -> Dict[str, Any]:
                     signal = "FIRING"
 
             result = {
-                "long_liquidations": round(long_contracts, 2),
-                "short_liquidations": round(short_contracts, 2),
-                "total_liquidations": round(total_contracts, 2),
+                "long_liquidations": round(long_usd, 2),
+                "short_liquidations": round(short_usd, 2),
+                "total_liquidations": round(total_usd, 2),
                 "long_pct": round(long_pct, 1),
                 "composition": composition,
                 "signal": signal,
+                "parsed_rows": parsed_rows,
                 "source": "okx_fallback",
                 "timestamp": datetime.now(timezone.utc).isoformat()
             }

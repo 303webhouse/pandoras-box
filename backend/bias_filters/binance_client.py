@@ -4,6 +4,7 @@ Fetches BTC spot orderbook depth and perp-vs-spot basis with geo-safe fallbacks.
 """
 
 import logging
+import os
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional
 import httpx
@@ -12,7 +13,11 @@ logger = logging.getLogger(__name__)
 
 # API Configuration
 BINANCE_SPOT_URL = "https://data-api.binance.vision/api/v3"  # geo-friendly mirror
-BINANCE_FUTURES_URL = "https://fapi.binance.com/fapi/v1"
+_binance_perp_base = os.getenv("CRYPTO_BINANCE_PERP_BASE", "https://fapi.binance.com").rstrip("/")
+BINANCE_FUTURES_URL = (
+    _binance_perp_base if _binance_perp_base.endswith("/fapi/v1")
+    else f"{_binance_perp_base}/fapi/v1"
+)
 OKX_MARKET_URL = "https://www.okx.com/api/v5/market"
 
 # Cache for API responses

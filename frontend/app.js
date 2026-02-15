@@ -163,6 +163,7 @@ let personalBiasAppliesTo = {
 let scoutAlerts = [];
 const SCOUT_ALERT_MAX_VISIBLE = 3;
 const SCOUT_ALERT_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+let manualPositionContext = 'equity';
 
 // Initialize app
 document.addEventListener('DOMContentLoaded', () => {
@@ -607,6 +608,8 @@ function handleWebSocketMessage(message) {
             break;
         case 'SCOUT_ALERT':
             displayScoutAlert(message.data);
+            // Also feed Scout into Trade Ideas stream in real time.
+            handleNewSignal(message.data);
             break;
         case 'FLOW_UPDATE':
             // New flow data from Discord bot via UW - refresh the Options Flow section
@@ -646,8 +649,14 @@ function playSignalAlert(priority = false) {
 }
 
 function handleNewSignal(signalData) {
+    if (!signalData || !signalData.signal_id) return;
+
+    const isScout = (signalData.signal_type || '').toUpperCase() === 'SCOUT_ALERT'
+        || (signalData.strategy || '').toLowerCase().includes('scout');
+
     // Add to appropriate signal list
     if (signalData.asset_class === 'EQUITY' || !signalData.asset_class) {
+        signals.equity = signals.equity.filter(s => s.signal_id !== signalData.signal_id);
         // Check if this signal should jump into top 10
         const currentLowestScore = getLowestDisplayedScore();
         const newScore = signalData.score || 0;
@@ -665,12 +674,13 @@ function handleNewSignal(signalData) {
             signals.equity.push(signalData);
         }
     } else {
+        signals.crypto = signals.crypto.filter(s => s.signal_id !== signalData.signal_id);
         signals.crypto.push(signalData);
         refreshSignalViews();
     }
 
     // Auto-dismiss Scout alert if a real signal fires for the same ticker
-    if (signalData.ticker) {
+    if (!isScout && signalData.ticker) {
         dismissScoutAlertByTicker(signalData.ticker);
     }
 }
@@ -684,6 +694,9 @@ function handlePrioritySignal(signalData) {
         signals.equity = signals.equity.filter(s => s.signal_id !== signalData.signal_id);
         // Insert at top (newest signals always first)
         signals.equity.unshift(signalData);
+    } else {
+        signals.crypto = signals.crypto.filter(s => s.signal_id !== signalData.signal_id);
+        signals.crypto.unshift(signalData);
     }
     
     refreshSignalViews();
@@ -4048,7 +4061,7 @@ function renderCryptoMarketData() {
     const perps = prices.perps || {};
     const spotRaw = prices.coinbase_spot ?? prices.coinbase ?? prices.spot_coinbase ?? null;
     const binanceSpotRaw = prices.binance_spot ?? prices.binance ?? prices.spot_binance ?? prices.spot ?? null;
-    const perpRaw = perps.bybit ?? perps.okx ?? perps.binance_perp ?? perps.perp ?? prices.perp_price ?? prices.perp ?? null;
+    const perpRaw = perps.binance ?? perps.bybit ?? perps.okx ?? perps.binance_perp ?? perps.perp ?? prices.perp_price ?? prices.perp ?? null;
 
     rememberNumber('coinbase_spot', spotRaw ?? binanceSpotRaw);
     rememberNumber('binance_spot', binanceSpotRaw);
@@ -4060,15 +4073,28 @@ function renderCryptoMarketData() {
     const cvdInlineEl = document.getElementById('cryptoCvdInline');
 
     if (fundingInlineEl) {
-        const okxFunding = rememberNumber('funding_okx', funding.okx?.rate ?? funding.binance?.rate ?? funding.okx_rate);
-        fundingInlineEl.textContent = formatFundingRate(okxFunding, 'Funding');
-        fundingInlineEl.className = `crypto-price-extra ${okxFunding > 0 ? 'bearish' : okxFunding < 0 ? 'bullish' : ''}`.trim();
+        const primaryFunding = rememberNumber(
+            'funding_primary',
+            funding.primary?.rate ?? funding.binance?.rate ?? funding.okx?.rate ?? funding.bybit?.rate ?? funding.okx_rate
+        );
+        fundingInlineEl.textContent = formatFundingRate(primaryFunding, 'Funding');
+        fundingInlineEl.className = `crypto-price-extra ${primaryFunding > 0 ? 'bearish' : primaryFunding < 0 ? 'bullish' : ''}`.trim();
     }
 
     if (cvdInlineEl) {
         const netUsd = rememberNumber('cvd_net_usd', cvd.net_usd ?? cvd.net ?? cvd.value_usd);
-        cvdInlineEl.textContent = netUsd !== null ? `CVD ${formatSignedUsd(netUsd)}` : 'CVD --';
-        cvdInlineEl.className = `crypto-price-extra ${netUsd > 0 ? 'bullish' : netUsd < 0 ? 'bearish' : ''}`.trim();
+        const cvdDir = rememberString('cvd_direction', cvd.direction ?? cvd.smoothed_direction ?? 'NEUTRAL');
+        const cvdConfidence = rememberString('cvd_confidence', cvd.direction_confidence ?? '');
+        if (netUsd !== null) {
+            const confidenceBadge = (cvdDir && cvdDir !== 'NEUTRAL' && cvdConfidence)
+                ? ` ${cvdConfidence.charAt(0)}`
+                : '';
+            const directionLabel = cvdDir && cvdDir !== 'NEUTRAL' ? `${cvdDir}${confidenceBadge}` : 'NEUTRAL';
+            cvdInlineEl.textContent = `CVD ${directionLabel} ${formatSignedUsd(netUsd)}`;
+        } else {
+            cvdInlineEl.textContent = 'CVD --';
+        }
+        cvdInlineEl.className = `crypto-price-extra ${cvdDir?.includes('BULL') ? 'bullish' : cvdDir?.includes('BEAR') ? 'bearish' : ''}`.trim();
     }
 
     renderOrderflow(cvd, cryptoMarketData.order_flow || []);
@@ -4087,7 +4113,7 @@ function updateCryptoPriceStrip() {
     const perps = prices.perps || {};
     const coinbaseSpot = cryptoMarketLastGood.coinbase_spot ?? prices.coinbase_spot ?? null;
     const binanceSpot = cryptoMarketLastGood.binance_spot ?? prices.binance_spot ?? null;
-    const perpPrice = cryptoMarketLastGood.perp_price ?? perps.bybit ?? perps.okx ?? prices.perp_price ?? null;
+    const perpPrice = cryptoMarketLastGood.perp_price ?? perps.binance ?? perps.bybit ?? perps.okx ?? prices.perp_price ?? null;
     const perpSource = (cryptoMarketLastGood.perp_source ?? perps.source ?? '').toString().toUpperCase();
 
     if (coinbaseEl) coinbaseEl.textContent = coinbaseSpot !== null ? formatUsdValue(coinbaseSpot) : '--';
@@ -4120,11 +4146,14 @@ function renderOrderflow(cvd, tape) {
     if (takerSellEl) takerSellEl.textContent = (cvd?.taker_sell_qty !== null && cvd?.taker_sell_qty !== undefined) ? `${Number(cvd.taker_sell_qty).toFixed(2)} BTC` : '--';
     if (cvdTrendEl) {
         const dir = cvd?.direction || 'NEUTRAL';
-        cvdTrendEl.textContent = dir;
+        const confidence = (cvd?.direction_confidence || '').toUpperCase();
+        cvdTrendEl.textContent = (confidence && dir !== 'NEUTRAL') ? `${dir} (${confidence})` : dir;
         cvdTrendEl.className = `metric-value ${dir.includes('BULL') ? 'bullish' : dir.includes('BEAR') ? 'bearish' : 'neutral'}`;
     }
     if (updatedEl) {
-        updatedEl.textContent = new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+        const stamp = new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+        const source = (cvd?.source || '').toString().toUpperCase();
+        updatedEl.textContent = source ? `${source} ${stamp}` : stamp;
     }
 
     if (sparklineEl) {
@@ -4561,11 +4590,11 @@ function renderPositions(positions) {
                 </div>
                 <div class="signal-detail">
                     <div class="signal-detail-label">Stop</div>
-                    <div class="signal-detail-value">${pos.stop_loss.toFixed(2)}</div>
+                    <div class="signal-detail-value">${pos.stop_loss != null ? Number(pos.stop_loss).toFixed(2) : 'N/A'}</div>
                 </div>
                 <div class="signal-detail">
                     <div class="signal-detail-label">Target</div>
-                    <div class="signal-detail-value">${pos.target_1.toFixed(2)}</div>
+                    <div class="signal-detail-value">${pos.target_1 != null ? Number(pos.target_1).toFixed(2) : 'N/A'}</div>
                 </div>
             </div>
         </div>
@@ -6418,6 +6447,9 @@ async function renderBtcSessions() {
 async function loadBtcSignals() {
     try {
         const response = await fetch(`${API_URL}/btc/bottom-signals`);
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
         const data = await response.json();
         
         btcSignals = data.signals || {};
@@ -6452,12 +6484,17 @@ async function refreshBtcSignals() {
         const response = await fetch(`${API_URL}/btc/bottom-signals/refresh`, {
             method: 'POST'
         });
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
         const data = await response.json();
         
         btcSignals = data.signals || {};
         btcConfluence = data.confluence || {};
         btcRawData = data.raw_data || {};
         btcApiStatus = data.api_status || {};
+        btcApiKeys = data.api_keys || {};
+        btcApiErrors = data.api_errors || {};
         
         renderBtcSignals();
         renderBtcSummary();
@@ -6505,7 +6542,7 @@ function renderBtcApiStatus() {
         target.apiStatus.innerHTML = apis.map(api => {
             const available = !!btcApiStatus[api.key];
             const keyMissing = api.key === 'coinalyze' && btcApiKeys.coinalyze === false;
-            const status = !available ? 'disconnected' : (keyMissing ? 'key-missing' : 'connected');
+            const status = keyMissing ? 'key-missing' : (available ? 'connected' : 'disconnected');
             return `
                 <span class="api-status-item ${status}" title="${api.signals}">
                     ${api.name}: ${status === 'connected' ? 'OK' : status === 'key-missing' ? 'KEY' : 'OFF'}
@@ -8471,15 +8508,16 @@ document.addEventListener('DOMContentLoaded', () => {
 // ============================================
 
 function initManualPositionModal() {
-    const addBtn = document.getElementById('addPositionBtn');
     const modal = document.getElementById('manualPositionModal');
     const closeBtn = document.getElementById('closeManualPositionBtn');
     const cancelBtn = document.getElementById('cancelManualPositionBtn');
     const confirmBtn = document.getElementById('confirmManualPositionBtn');
     
-    if (addBtn) {
-        addBtn.addEventListener('click', openManualPositionModal);
-    }
+    document.querySelectorAll('[data-action="add-manual-position"]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            openManualPositionModal(btn.dataset.context || 'equity');
+        });
+    });
     
     if (closeBtn) closeBtn.addEventListener('click', closeManualPositionModal);
     if (cancelBtn) cancelBtn.addEventListener('click', closeManualPositionModal);
@@ -8502,20 +8540,45 @@ function initManualPositionModal() {
     console.log('ðŸ“ Manual position modal initialized');
 }
 
-function openManualPositionModal() {
+function openManualPositionModal(context = 'equity') {
     const modal = document.getElementById('manualPositionModal');
+    const tickerEl = document.getElementById('manualTicker');
+    const quantityEl = document.getElementById('manualQuantity');
+    const accountEl = document.getElementById('manualAccount');
+    const assetClassEl = document.getElementById('manualAssetClass');
+
+    manualPositionContext = (context || 'equity').toLowerCase();
+
     if (modal) {
         // Clear form
-        document.getElementById('manualTicker').value = '';
+        tickerEl.value = '';
         document.getElementById('manualDirection').value = 'LONG';
         document.getElementById('manualEntryPrice').value = '';
-        document.getElementById('manualQuantity').value = '';
+        quantityEl.value = '';
         document.getElementById('manualStopLoss').value = '';
         document.getElementById('manualTarget').value = '';
         document.getElementById('manualNotes').value = '';
+
+        if (manualPositionContext === 'crypto') {
+            if (accountEl) accountEl.value = 'BREAKOUT';
+            if (assetClassEl) assetClassEl.value = 'CRYPTO';
+            if (tickerEl) tickerEl.placeholder = 'BTCUSDT';
+            if (quantityEl) {
+                quantityEl.step = '0.001';
+                quantityEl.placeholder = '0.010';
+            }
+        } else {
+            if (accountEl) accountEl.value = 'MANUAL';
+            if (assetClassEl) assetClassEl.value = 'EQUITY';
+            if (tickerEl) tickerEl.placeholder = 'AAPL';
+            if (quantityEl) {
+                quantityEl.step = '1';
+                quantityEl.placeholder = '100';
+            }
+        }
         
         modal.classList.add('active');
-        document.getElementById('manualTicker').focus();
+        tickerEl.focus();
     }
 }
 
@@ -8534,6 +8597,8 @@ async function submitManualPosition() {
     const stopLoss = parseFloat(document.getElementById('manualStopLoss').value) || null;
     const target = parseFloat(document.getElementById('manualTarget').value) || null;
     const notes = document.getElementById('manualNotes').value.trim();
+    const account = document.getElementById('manualAccount')?.value || (manualPositionContext === 'crypto' ? 'BREAKOUT' : 'MANUAL');
+    const selectedAssetClass = document.getElementById('manualAssetClass')?.value || 'EQUITY';
     
     // Validation
     if (!ticker) {
@@ -8551,7 +8616,10 @@ async function submitManualPosition() {
     
     // Determine asset class
     const cryptoTickers = ['BTC', 'ETH', 'SOL', 'XRP', 'ADA', 'AVAX', 'DOGE', 'DOT', 'LINK', 'MATIC', 'LTC', 'UNI'];
-    const isCrypto = cryptoTickers.some(c => ticker.includes(c));
+    const isCrypto = selectedAssetClass === 'CRYPTO'
+        || manualPositionContext === 'crypto'
+        || cryptoTickers.some(c => ticker.includes(c));
+    const strategy = account === 'BREAKOUT' ? 'Breakout Manual' : 'Manual Entry';
     
     const positionData = {
         ticker: ticker,
@@ -8560,10 +8628,11 @@ async function submitManualPosition() {
         quantity: quantity,
         stop_loss: stopLoss,
         target_1: target,
-        strategy: notes || 'Manual Entry',
+        strategy: strategy,
         asset_class: isCrypto ? 'CRYPTO' : 'EQUITY',
         signal_type: 'MANUAL',
-        notes: notes
+        notes: notes,
+        account: account
     };
     
     try {
@@ -8582,16 +8651,23 @@ async function submitManualPosition() {
             // Add to local positions and refresh UI
             if (result.position) {
                 openPositions.push(result.position);
-                renderPositions();
+                _open_positions_cache.push(result.position);
+                renderPositions(openPositions);
+                renderCryptoPositions();
                 
                 // Store price levels for chart
                 if (result.position.stop_loss || result.position.target_1) {
-                    storePriceLevels(result.position);
+                    storePriceLevels(result.position.ticker, {
+                        entry_price: result.position.entry_price,
+                        stop_loss: result.position.stop_loss,
+                        target_1: result.position.target_1
+                    });
                 }
             }
             
             // Refresh positions from server
             await loadOpenPositions();
+            await loadOpenPositionsEnhanced();
         } else {
             alert(`Error: ${result.detail || 'Failed to create position'}`);
         }
