@@ -6515,6 +6515,7 @@ function renderBtcSummary() {
     const totalSignals = btcConfluence.total || 9;
     const verdict = btcConfluence.verdict || 'Checking signals...';
     const verdictLevel = btcConfluence.verdict_level || 'none';
+    const bullishConfluence = firingCount >= 5 || verdictLevel === 'strong' || verdictLevel === 'moderate';
 
     getBtcUiTargets().forEach(target => {
         if (!target.summary) return;
@@ -6525,6 +6526,11 @@ function renderBtcSummary() {
             </div>
             <div class="confluence-verdict ${verdictLevel}">${verdict}</div>
         `;
+
+        const panel = target.summary.closest('.btc-signals-section, .crypto-btc-signals-panel');
+        if (panel) {
+            panel.classList.toggle('confluence-bullish', bullishConfluence);
+        }
     });
 }
 
