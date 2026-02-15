@@ -23,6 +23,32 @@ const CONFIDENCE_COLORS = {
     LOW: '#e5370e',
 };
 
+const COMPOSITE_FACTOR_DISPLAY_ORDER = [
+    // Intraday
+    'vix_term',
+    'tick_breadth',
+    'vix_regime',
+    'spy_trend_intraday',
+    'breadth_momentum',
+    'options_sentiment',
+    // Swing
+    'credit_spreads',
+    'market_breadth',
+    'sector_rotation',
+    'spy_200sma_distance',
+    'high_yield_oas',
+    'dollar_smile',
+    'put_call_ratio',
+    // Macro
+    'yield_curve',
+    'initial_claims',
+    'sahm_rule',
+    'copper_gold_ratio',
+    'excess_cape',
+    'ism_manufacturing',
+    'savita'
+];
+
 // Shared helpers
 function escapeHtml(value) {
     if (value === null || value === undefined) return '';
@@ -115,6 +141,7 @@ let cyclicalBiasFactorStates = {
     sma_200_positions: true,
     yield_curve: true,
     credit_spreads: true,
+    excess_cape_yield: true,
     savita_indicator: true,
     longterm_breadth: true,
     sahm_rule: true
@@ -1214,6 +1241,9 @@ function syncTradeIdeasOffset(assetType) {
 }
 
 async function loadBiasData() {
+    loadDailyFactorStatesFromStorage();
+    loadCyclicalFactorStatesFromStorage();
+
     // Load all biases from the auto-scheduler endpoint (includes trends!)
     try {
         const response = await fetch(`${API_URL}/bias-auto/status`);
@@ -1415,14 +1445,16 @@ function buildTimeframesFromBiasAuto() {
 
 function shouldUseCompositeFallback(data) {
     if (!data || typeof data !== 'object') return true;
-    const activeCount = Array.isArray(data.active_factors) ? data.active_factors.length : 0;
-    const hasAnyScore = !!(data.factors && Object.values(data.factors).some((f) => f && typeof f.score === 'number'));
-    return activeCount === 0 || !hasAnyScore;
+    const hasFactorsMap = data.factors && typeof data.factors === 'object';
+    const hasFactorEntries = hasFactorsMap && Object.keys(data.factors).length > 0;
+    const hasFactorSets = Array.isArray(data.active_factors) || Array.isArray(data.stale_factors);
+    return !hasFactorEntries && !hasFactorSets;
 }
 
 function shouldUseTimeframeFallback(data) {
-    if (!data || !data.timeframes) return true;
-    return Object.values(data.timeframes).every((tf) => (tf?.active_count || 0) === 0);
+    if (!data || !data.timeframes || typeof data.timeframes !== 'object') return true;
+    const requiredBuckets = ['intraday', 'swing', 'macro'];
+    return !requiredBuckets.every((bucket) => Object.prototype.hasOwnProperty.call(data.timeframes, bucket));
 }
 
 function buildCompositeFallbackFromBiasAuto() {
@@ -1549,62 +1581,73 @@ function renderCompositeBias(data) {
             }).join('');
             if (activeCountEl) activeCountEl.textContent = `${data.fallback_factors.length} bias-auto factors`;
         } else {
-        const factorOrder = [
-            'credit_spreads', 'market_breadth', 'vix_term', 'tick_breadth',
-            'sector_rotation', 'dollar_smile', 'excess_cape', 'savita'
-        ];
-        const activeSet = new Set(data.active_factors || []);
-        const staleSet = new Set(data.stale_factors || []);
+            const activeSet = new Set(data.active_factors || []);
+            const staleSet = new Set(data.stale_factors || []);
+            const factorsMap = data.factors && typeof data.factors === 'object' ? data.factors : {};
+            const discoveredFactorIds = new Set([
+                ...Object.keys(factorsMap),
+                ...Array.from(activeSet),
+                ...Array.from(staleSet)
+            ]);
 
-        factorList.innerHTML = '';
+            const factorOrderMap = new Map(COMPOSITE_FACTOR_DISPLAY_ORDER.map((id, idx) => [id, idx]));
+            const sortedFactorIds = Array.from(discoveredFactorIds).sort((a, b) => {
+                const ai = factorOrderMap.has(a) ? factorOrderMap.get(a) : Number.MAX_SAFE_INTEGER;
+                const bi = factorOrderMap.has(b) ? factorOrderMap.get(b) : Number.MAX_SAFE_INTEGER;
+                if (ai !== bi) return ai - bi;
+                return a.localeCompare(b);
+            });
 
-        factorOrder.forEach((factorId) => {
-            const factor = data.factors ? data.factors[factorId] : null;
-            const isActive = activeSet.has(factorId);
-            const isStale = staleSet.has(factorId) || !isActive;
-            const score = factor && typeof factor.score === 'number' ? factor.score : null;
-            const barPct = score !== null ? Math.min(100, Math.abs(score) * 100) : 0;
+            factorList.innerHTML = '';
 
-            const barColor = score === null ? '#455a64'
-                : score <= -0.6 ? '#e5370e'
-                : score <= -0.2 ? '#ff9800'
-                : score >= 0.6 ? '#00e676'
-                : score >= 0.2 ? '#66bb6a' : '#78909c';
+            sortedFactorIds.forEach((factorId) => {
+                const factor = factorsMap[factorId] || null;
+                const isActive = activeSet.has(factorId);
+                const isStale = staleSet.has(factorId) || !isActive;
+                const score = factor && typeof factor.score === 'number' ? factor.score : null;
+                const barPct = score !== null ? Math.min(100, Math.abs(score) * 100) : 0;
 
-            const row = document.createElement('div');
-            row.className = `factor-row${isStale ? ' stale' : ''}`;
-            row.innerHTML = `
-                <span class="factor-status">${isActive ? 'o' : '-'}</span>
-                <span class="factor-name">${formatFactorName(factorId)}</span>
-                <div class="factor-bar">
-                    <div class="factor-bar-fill" style="width:${barPct}%;background:${barColor}"></div>
-                </div>
-                <span class="factor-score">${score !== null && isActive ? score.toFixed(2) : 'STALE'}</span>
-                <span class="factor-signal" style="color:${barColor}">${score !== null && isActive ? (factor.signal || '').replace(/_/g, ' ') : '?'}</span>
-            `;
+                const barColor = score === null ? '#455a64'
+                    : score <= -0.6 ? '#e5370e'
+                    : score <= -0.2 ? '#ff9800'
+                    : score >= 0.6 ? '#00e676'
+                    : score >= 0.2 ? '#66bb6a' : '#78909c';
 
-            if (factor && factor.detail) {
-                row.title = factor.detail;
-                row.style.cursor = 'pointer';
-                row.addEventListener('click', () => {
-                    const existing = row.querySelector('.factor-detail');
-                    if (existing) {
-                        existing.remove();
-                    } else {
-                        const detail = document.createElement('div');
-                        detail.className = 'factor-detail';
-                        detail.textContent = factor.detail;
-                        row.appendChild(detail);
-                    }
-                });
-            }
+                const row = document.createElement('div');
+                row.className = `factor-row${isStale ? ' stale' : ''}`;
+                row.innerHTML = `
+                    <span class="factor-status">${isActive ? 'o' : '-'}</span>
+                    <span class="factor-name">${formatFactorName(factorId)}</span>
+                    <div class="factor-bar">
+                        <div class="factor-bar-fill" style="width:${barPct}%;background:${barColor}"></div>
+                    </div>
+                    <span class="factor-score">${score !== null && isActive ? score.toFixed(2) : 'STALE'}</span>
+                    <span class="factor-signal" style="color:${barColor}">${score !== null && isActive ? (factor.signal || '').replace(/_/g, ' ') : '?'}</span>
+                `;
 
-            factorList.appendChild(row);
-        });
+                if (factor && factor.detail) {
+                    row.title = factor.detail;
+                    row.style.cursor = 'pointer';
+                    row.addEventListener('click', () => {
+                        const existing = row.querySelector('.factor-detail');
+                        if (existing) {
+                            existing.remove();
+                        } else {
+                            const detail = document.createElement('div');
+                            detail.className = 'factor-detail';
+                            detail.textContent = factor.detail;
+                            row.appendChild(detail);
+                        }
+                    });
+                }
+
+                factorList.appendChild(row);
+            });
 
             if (activeCountEl) {
                 const activeCount = (data.active_factors || []).length;
-                activeCountEl.textContent = `${activeCount}/8 active`;
+                const totalCount = sortedFactorIds.length;
+                activeCountEl.textContent = `${activeCount}/${totalCount} active`;
             }
         }
     }
@@ -2418,7 +2461,7 @@ function updateWeeklyBiasWithFactors(biasData) {
     });
     
     // 6-level system thresholds (scaled by enabled factors)
-    const totalFactors = 6;
+    const totalFactors = Math.max(1, Object.keys(factors).length);
     const scaleFactor = enabledCount / totalFactors;
     const majorThreshold = Math.round(7 * scaleFactor);
     const minorThreshold = Math.round(3 * scaleFactor);
@@ -2458,7 +2501,7 @@ function updateWeeklyBiasWithFactors(biasData) {
     }
     
     // Show/hide warning badge
-    updateWarningBadge(enabledCount);
+    updateWarningBadge(enabledCount, 'weekly', totalFactors);
 }
 
 // Check if new day and reset factors
@@ -2489,7 +2532,7 @@ function loadFactorStatesFromStorage() {
     const stored = localStorage.getItem('weeklyBiasFactors');
     if (stored) {
         try {
-            weeklyBiasFactorStates = JSON.parse(stored);
+            weeklyBiasFactorStates = { ...weeklyBiasFactorStates, ...JSON.parse(stored) };
         } catch (e) {
             console.error('Error loading factor states:', e);
         }
@@ -2502,7 +2545,7 @@ function saveFactorStatesToStorage() {
 }
 
 // Update warning badge for any timeframe
-function updateWarningBadge(enabledCount, timeframe = 'weekly') {
+function updateWarningBadge(enabledCount, timeframe = 'weekly', totalFactorsOverride = null) {
     const levelElement = document.getElementById(`${timeframe}Level`);
     if (!levelElement) return;
     
@@ -2512,14 +2555,24 @@ function updateWarningBadge(enabledCount, timeframe = 'weekly') {
         existingBadge.remove();
     }
     
+    const totalFactors = Number.isFinite(totalFactorsOverride) && totalFactorsOverride > 0
+        ? totalFactorsOverride
+        : Math.max(1, getConfiguredFactorCount(timeframe));
+
     // Add warning if not all factors enabled
-    if (enabledCount < 6) {
+    if (enabledCount < totalFactors) {
         const badge = document.createElement('span');
         badge.className = 'bias-warning-badge';
         badge.textContent = 'âš ï¸';
-        badge.title = `${enabledCount} of 6 factors active`;
+        badge.title = `${enabledCount} of ${totalFactors} factors active`;
         levelElement.appendChild(badge);
     }
+}
+
+function getConfiguredFactorCount(timeframe) {
+    if (timeframe === 'daily') return Object.keys(dailyBiasFactorStates).length;
+    if (timeframe === 'cyclical') return Object.keys(cyclicalBiasFactorStates).length;
+    return Object.keys(weeklyBiasFactorStates).length;
 }
 
 // Update Daily Bias with factor filtering
@@ -2541,10 +2594,10 @@ function updateDailyBiasWithFactors(biasData) {
     });
     
     // 6-level system thresholds (scaled by enabled factors)
-    const totalFactors = 7;  // Updated to 7 to include TICK Breadth
+    const totalFactors = Math.max(1, Object.keys(factors).length);
     const scaleFactor = enabledCount / totalFactors;
-    const majorThreshold = Math.round(8 * scaleFactor);  // Adjusted for 7 factors
-    const minorThreshold = Math.round(4 * scaleFactor);  // Adjusted for 7 factors
+    const majorThreshold = Math.round(8 * scaleFactor);
+    const minorThreshold = Math.round(4 * scaleFactor);
     
     // 6-level system: MAJOR_TORO, MINOR_TORO, LEAN_TORO, LEAN_URSA, MINOR_URSA, MAJOR_URSA
     let newLevel;
@@ -2572,7 +2625,7 @@ function updateDailyBiasWithFactors(biasData) {
     };
     
     updateBiasWithTrend('daily', modifiedBiasData);
-    updateWarningBadge(enabledCount, 'daily');
+    updateWarningBadge(enabledCount, 'daily', totalFactors);
 }
 
 // Update Cyclical Bias with factor filtering
@@ -2594,7 +2647,7 @@ function updateCyclicalBiasWithFactors(biasData) {
     });
     
     // 6-level system thresholds (scaled by enabled factors)
-    const totalFactors = 6;
+    const totalFactors = Math.max(1, Object.keys(factors).length);
     const scaleFactor = enabledCount / totalFactors;
     const majorThreshold = Math.round(7 * scaleFactor);
     const minorThreshold = Math.round(3 * scaleFactor);
@@ -2625,7 +2678,7 @@ function updateCyclicalBiasWithFactors(biasData) {
     };
     
     updateBiasWithTrend('cyclical', modifiedBiasData);
-    updateWarningBadge(enabledCount, 'cyclical');
+    updateWarningBadge(enabledCount, 'cyclical', totalFactors);
 }
 
 // Initialize Weekly Bias Settings Modal
@@ -3217,8 +3270,30 @@ function saveDailyFactorStatesToStorage() {
     localStorage.setItem('dailyBiasFactors', JSON.stringify(dailyBiasFactorStates));
 }
 
+function loadDailyFactorStatesFromStorage() {
+    const stored = localStorage.getItem('dailyBiasFactors');
+    if (stored) {
+        try {
+            dailyBiasFactorStates = { ...dailyBiasFactorStates, ...JSON.parse(stored) };
+        } catch (e) {
+            console.error('Error loading daily factor states:', e);
+        }
+    }
+}
+
 function saveCyclicalFactorStatesToStorage() {
     localStorage.setItem('cyclicalBiasFactors', JSON.stringify(cyclicalBiasFactorStates));
+}
+
+function loadCyclicalFactorStatesFromStorage() {
+    const stored = localStorage.getItem('cyclicalBiasFactors');
+    if (stored) {
+        try {
+            cyclicalBiasFactorStates = { ...cyclicalBiasFactorStates, ...JSON.parse(stored) };
+        } catch (e) {
+            console.error('Error loading cyclical factor states:', e);
+        }
+    }
 }
 
 // Fetch and display bias shift status (weekly bias shift from Monday baseline)

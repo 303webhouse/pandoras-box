@@ -6,6 +6,7 @@ from fastapi import APIRouter, Query
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 import asyncio
+import os
 import time
 import httpx
 
@@ -15,6 +16,7 @@ BINANCE_SPOT_BASE = "https://data-api.binance.vision"  # geo-friendly mirror
 OKX_BASE = "https://www.okx.com"
 BYBIT_BASE = "https://api.bybit.com"  # kept for potential future use
 COINBASE_BASE = "https://api.coinbase.com"
+BYBIT_ENABLED = os.getenv("CRYPTO_MARKET_ENABLE_BYBIT", "true").strip().lower() in {"1", "true", "yes", "on"}
 
 DEFAULT_HEADERS = {
     "User-Agent": "Mozilla/5.0 (compatible; PandoraBot/1.0; +https://pandoras-box)",
@@ -25,6 +27,7 @@ DEFAULT_HEADERS = {
 _cache: Dict[str, Any] = {"timestamp": 0.0, "data": None}
 CACHE_TTL_SECONDS = 5
 _last_good: Dict[str, Any] = {}
+_bybit_runtime_disabled = False
 
 
 async def _fetch_json(client: httpx.AsyncClient, url: str, params: Optional[dict] = None) -> Dict[str, Any]:
@@ -39,6 +42,10 @@ async def _fetch_json(client: httpx.AsyncClient, url: str, params: Optional[dict
         return {"ok": False, "error": str(exc)}
 
 
+def _is_geo_restriction(error: Optional[str]) -> bool:
+    return bool(error and str(error).startswith("geo_restricted_"))
+
+
 def _safe_float(value: Any) -> Optional[float]:
     try:
         if value is None:
@@ -50,11 +57,13 @@ def _safe_float(value: Any) -> Optional[float]:
 
 @router.get("/market")
 async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query(200, ge=50, le=1000)):
+    global _bybit_runtime_disabled
     now = time.time()
     if _cache["data"] and (now - _cache["timestamp"]) < CACHE_TTL_SECONDS:
         return _cache["data"]
 
     async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
+        use_bybit = BYBIT_ENABLED and not _bybit_runtime_disabled
         tasks = {
             # Spot prices
             "binance_spot_price": _fetch_json(client, f"{BINANCE_SPOT_BASE}/api/v3/ticker/price", {"symbol": symbol}),
@@ -65,16 +74,21 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
             "okx_perp_price": _fetch_json(client, f"{OKX_BASE}/api/v5/market/ticker", {"instId": "BTC-USDT-SWAP"}),
             "okx_funding": _fetch_json(client, f"{OKX_BASE}/api/v5/public/funding-rate", {"instId": "BTC-USDT-SWAP"}),
 
-            # Bybit funding + perp price retained; tolerate failures
-            "bybit_funding": _fetch_json(client, f"{BYBIT_BASE}/v5/market/funding/history", {"category": "linear", "symbol": symbol, "limit": 1}),
-            "bybit_perp_price": _fetch_json(client, f"{BYBIT_BASE}/v5/market/tickers", {"category": "linear", "symbol": symbol}),
-
             # Order flow / trades from OKX swap
             "okx_trades": _fetch_json(client, f"{OKX_BASE}/api/v5/market/trades", {"instId": "BTC-USDT-SWAP", "limit": limit}),
         }
+        if use_bybit:
+            tasks.update({
+                # Bybit funding + perp price retained; tolerate failures
+                "bybit_funding": _fetch_json(client, f"{BYBIT_BASE}/v5/market/funding/history", {"category": "linear", "symbol": symbol, "limit": 1}),
+                "bybit_perp_price": _fetch_json(client, f"{BYBIT_BASE}/v5/market/tickers", {"category": "linear", "symbol": symbol}),
+            })
 
         results = await asyncio.gather(*tasks.values())
         data_map = dict(zip(tasks.keys(), results))
+        if not use_bybit:
+            data_map["bybit_funding"] = {"ok": False, "error": "disabled"}
+            data_map["bybit_perp_price"] = {"ok": False, "error": "disabled"}
 
     errors: List[str] = []
 
@@ -92,7 +106,11 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
         except Exception:
             perp_price = None
     else:
-        errors.append(f"bybit_perp_price: {data_map['bybit_perp_price'].get('error')}")
+        bybit_price_error = data_map["bybit_perp_price"].get("error")
+        if _is_geo_restriction(bybit_price_error):
+            _bybit_runtime_disabled = True
+        elif BYBIT_ENABLED and bybit_price_error != "disabled":
+            errors.append(f"bybit_perp_price: {bybit_price_error}")
 
     if perp_price is None and data_map["okx_perp_price"]["ok"]:
         try:
@@ -170,7 +188,11 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
             except Exception:
                 funding_bybit_time = None
     else:
-        errors.append(f"bybit_funding: {data_map['bybit_funding'].get('error')}")
+        bybit_funding_error = data_map["bybit_funding"].get("error")
+        if _is_geo_restriction(bybit_funding_error):
+            _bybit_runtime_disabled = True
+        elif BYBIT_ENABLED and bybit_funding_error != "disabled":
+            errors.append(f"bybit_funding: {bybit_funding_error}")
     if funding_bybit is None and _last_good.get("funding_bybit") is not None:
         funding_bybit = _last_good["funding_bybit"]
         funding_bybit_time = _last_good.get("funding_bybit_time")
@@ -295,7 +317,7 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
                 "bybit": perp_price if perp_source == "bybit" else None,
                 "spread": perp_spread,
                 "source": perp_source,
-                "note": "Bybit perp primary with OKX fallback; spread = perp - Binance spot"
+                "note": "Bybit + OKX perp sources with automatic geo fallback; spread = perp - Binance spot"
             },
             "basis": basis,
             "basis_pct": basis_pct,
