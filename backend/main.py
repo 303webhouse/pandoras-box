@@ -12,6 +12,7 @@ import asyncio
 from typing import Set
 import logging
 import os
+import sys
 
 # Import our modules (will create these next)
 from database.redis_client import get_redis_client
@@ -19,8 +20,9 @@ from database.postgres_client import get_postgres_client
 from websocket.broadcaster import manager
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 logger = logging.getLogger(__name__)
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 # WebSocket connection manager (imported from broadcaster.py for shared instance)
 
@@ -105,21 +107,43 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    """Detailed health check"""
+    """Resilient health check (never throws on transient dependency failures)."""
     from scheduler.bias_scheduler import get_eastern_now
+    from database.redis_client import get_redis_status
     
-    redis_client = await get_redis_client()
-    postgres_client = await get_postgres_client()
+    redis_state = "unknown"
+    postgres_state = "unknown"
+
+    try:
+        redis_status = get_redis_status()
+        redis_state = redis_status.get("status", "unknown")
+    except Exception:
+        redis_state = "error"
+
+    try:
+        postgres_client = await get_postgres_client()
+        postgres_state = "connected" if postgres_client else "disconnected"
+    except Exception:
+        postgres_state = "error"
     
     now_et = get_eastern_now()
+    overall = "healthy"
+    if postgres_state in {"error", "disconnected"}:
+        overall = "degraded"
     
     return {
-        "status": "healthy",
+        "status": overall,
         "server_time_et": now_et.strftime("%Y-%m-%d %H:%M:%S %Z"),
-        "redis": "connected" if redis_client else "disconnected",
-        "postgres": "connected" if postgres_client else "disconnected",
+        "redis": redis_state,
+        "postgres": postgres_state,
         "websocket_connections": len(manager.active_connections)
     }
+
+
+@app.get("/live")
+async def live_check():
+    """Pure liveness probe for platform health checks."""
+    return {"status": "alive"}
 
 @app.get("/api/bias/{timeframe}")
 async def get_bias_data(timeframe: str):
