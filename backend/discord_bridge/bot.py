@@ -23,7 +23,6 @@ import aiohttp
 from datetime import datetime, time, timezone
 from typing import Optional, Dict, Any, List
 import pytz
-from utils.vision_parser import parse_uw_image
 from discord_bridge.uw.parser import parse_flow_embed, parse_ticker_embed
 from discord_bridge.uw.filter import FlowFilter
 from discord_bridge.uw.aggregator import FlowAggregator
@@ -881,8 +880,16 @@ async def on_message(message: discord.Message):
                 break
 
     if image_url:
-        logger.info("UW image detected, parsing with AI vision...")
-        parsed_data = await parse_uw_image(image_url)
+        logger.info("UW image detected; attempting AI vision parse...")
+        parsed_data = None
+        try:
+            # Optional dependency. On the Pivot VPS we may not have Claude Vision
+            # libs installed; skip cleanly rather than crashing the whole bot.
+            from utils.vision_parser import parse_uw_image  # type: ignore
+
+            parsed_data = await parse_uw_image(image_url)
+        except Exception as exc:
+            logger.warning(f"Vision parser unavailable; skipping image parse: {exc}")
 
         if parsed_data:
             data_type = parsed_data.get("data_type", "other")
