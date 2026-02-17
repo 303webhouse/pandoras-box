@@ -18,14 +18,25 @@ Scheduled Queries:
 import os
 import re
 import asyncio
+import base64
 import logging
+import mimetypes
+import sqlite3
 import aiohttp
+import time as time_module
+from collections import defaultdict
 from datetime import datetime, time, timezone
 from typing import Optional, Dict, Any, List
 import pytz
 from discord_bridge.uw.parser import parse_flow_embed, parse_ticker_embed
 from discord_bridge.uw.filter import FlowFilter
 from discord_bridge.uw.aggregator import FlowAggregator
+from discord_bridge.whale_parser import (
+    parse_whale_hunter_signal,
+    parse_uw_premium_embed,
+    format_whale_hunter_for_llm,
+    format_uw_embed_for_llm,
+)
 
 # Discord.py imports
 try:
@@ -45,6 +56,8 @@ UW_CHANNEL_ID = int(os.getenv("DISCORD_UW_CHANNEL_ID", "1463692055694807201"))
 UW_FLOW_CHANNEL_ID = int(os.getenv("UW_FLOW_CHANNEL_ID", "0"))
 UW_TICKER_CHANNEL_ID = int(os.getenv("UW_TICKER_CHANNEL_ID", "0"))
 UW_BOT_USER_ID = int(os.getenv("UW_BOT_USER_ID", "1100705854271008798"))
+WHALE_ALERTS_CHANNEL_ID = int(os.getenv("WHALE_ALERTS_CHANNEL_ID", "0"))
+PIVOT_CHAT_CHANNEL_ID = int(os.getenv("PIVOT_CHAT_CHANNEL_ID", "0"))
 PANDORA_API_URL = os.getenv("PANDORA_API_URL", "https://pandoras-box-production.up.railway.app/api")
 NOTIFICATION_CHANNEL_ID = int(os.getenv("DISCORD_NOTIFICATION_CHANNEL_ID", str(UW_CHANNEL_ID)))
 TRADE_ALERT_CHANNEL_ID = int(os.getenv("DISCORD_TRADE_ALERT_CHANNEL_ID", str(NOTIFICATION_CHANNEL_ID)))
@@ -98,6 +111,45 @@ latest_data = {
 _seen_signal_ids: set[str] = set()
 uw_flow_filter = FlowFilter()
 uw_flow_aggregator = FlowAggregator()
+recent_uw_flow: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+last_zone_shift_state: Optional[Dict[str, Any]] = None
+
+UW_CONTEXT_WINDOW_SECONDS = 4 * 60 * 60
+ZONE_CONTEXT_WINDOW_SECONDS = 6 * 60 * 60
+
+COMPANY_TICKERS = {
+    "carvana": "CVNA",
+    "tesla": "TSLA",
+    "apple": "AAPL",
+    "nvidia": "NVDA",
+    "google": "GOOGL",
+    "amazon": "AMZN",
+    "microsoft": "MSFT",
+    "meta": "META",
+    "netflix": "NFLX",
+    "spy": "SPY",
+    "qqq": "QQQ",
+}
+
+DIRECTIONAL_HINTS = {
+    "short",
+    "long",
+    "bearish",
+    "bullish",
+    "put",
+    "puts",
+    "call",
+    "calls",
+    "spread",
+    "entry",
+    "setup",
+    "trade",
+}
+
+JOURNAL_DB_PATH = os.getenv("PIVOT_JOURNAL_DB_PATH", "/opt/pivot/data/journal.db")
+PIVOT_VISION_MAX_TOKENS = int(os.getenv("PIVOT_VISION_MAX_TOKENS", "1800"))
+PIVOT_MAX_IMAGE_BYTES = int(os.getenv("PIVOT_MAX_IMAGE_BYTES", str(5 * 1024 * 1024)))
+PIVOT_JOURNAL_LOOKBACK_LIMIT = int(os.getenv("PIVOT_JOURNAL_LOOKBACK_LIMIT", "3"))
 
 # ================================
 # HELPER FUNCTIONS
@@ -119,6 +171,119 @@ def is_market_hours() -> bool:
 def is_trading_day() -> bool:
     """Check if today is a trading day (weekday)"""
     return get_et_now().weekday() < 5
+
+
+def _parse_iso_datetime(value: Any) -> Optional[datetime]:
+    if not value or not isinstance(value, str):
+        return None
+    try:
+        normalized = value.replace("Z", "+00:00")
+        dt = datetime.fromisoformat(normalized)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
+def _is_directional_question(text: str) -> bool:
+    text_lower = (text or "").lower()
+    if not text_lower.strip():
+        return False
+    if "?" in text_lower:
+        return True
+    return any(term in text_lower for term in DIRECTIONAL_HINTS)
+
+
+def _record_recent_uw_flow(
+    ticker: Optional[str],
+    *,
+    sentiment: Optional[str] = None,
+    flow_type: Optional[str] = None,
+    premium: Optional[float] = None,
+    strike: Optional[float] = None,
+    option_type: Optional[str] = None,
+    source: str = "local",
+) -> None:
+    symbol = (ticker or "").upper().strip()
+    if not symbol:
+        return
+
+    now = time_module.time()
+    records = recent_uw_flow[symbol]
+    records[:] = [r for r in records if now - float(r.get("ts", 0)) <= UW_CONTEXT_WINDOW_SECONDS]
+    records.append(
+        {
+            "ticker": symbol,
+            "sentiment": (sentiment or "").upper() or None,
+            "flow_type": (flow_type or "").upper() or None,
+            "premium": premium,
+            "strike": strike,
+            "option_type": (option_type or "").upper() or None,
+            "source": source,
+            "ts": now,
+        }
+    )
+    if len(records) > 80:
+        del records[:-80]
+
+
+def _get_local_recent_uw_flow(ticker: str, max_age_seconds: int = UW_CONTEXT_WINDOW_SECONDS) -> List[Dict[str, Any]]:
+    symbol = (ticker or "").upper().strip()
+    if not symbol:
+        return []
+    now = time_module.time()
+    records = recent_uw_flow.get(symbol, [])
+    valid = [r for r in records if now - float(r.get("ts", 0)) <= max_age_seconds]
+    recent_uw_flow[symbol] = valid[-80:]
+    return list(reversed(valid))
+
+
+def _is_zone_shift_signal(signal: Dict[str, Any]) -> bool:
+    signal_type = (signal.get("signal_type") or "").upper()
+    strategy = (signal.get("strategy") or "").upper()
+    return "ZONE" in signal_type or "ZONE" in strategy
+
+
+def _capture_zone_shift_state(signal: Dict[str, Any]) -> None:
+    global last_zone_shift_state
+
+    signal_time = _parse_iso_datetime(signal.get("timestamp")) or datetime.now(timezone.utc)
+    notes = str(signal.get("notes") or "")
+    from_zone = None
+    to_zone = signal.get("cta_zone")
+
+    transition = re.search(r"from\s+([A-Z_]+)\s+to\s+([A-Z_]+)", notes, re.IGNORECASE)
+    if transition:
+        from_zone = transition.group(1).upper()
+        to_zone = transition.group(2).upper()
+
+    last_zone_shift_state = {
+        "timestamp": signal_time,
+        "signal_type": (signal.get("signal_type") or "").upper(),
+        "direction": (signal.get("direction") or "").upper(),
+        "from_zone": from_zone,
+        "to_zone": (to_zone or "").upper() or None,
+    }
+
+
+def _build_zone_context_text(signal: Dict[str, Any]) -> str:
+    now_utc = datetime.now(timezone.utc)
+    cta_zone = (signal.get("cta_zone") or "").upper() or "UNKNOWN"
+
+    if last_zone_shift_state:
+        shift_ts = last_zone_shift_state.get("timestamp")
+        if isinstance(shift_ts, datetime):
+            age_seconds = (now_utc - shift_ts).total_seconds()
+            if age_seconds <= ZONE_CONTEXT_WINDOW_SECONDS:
+                age_hours = max(age_seconds / 3600, 0.1)
+                to_zone = last_zone_shift_state.get("to_zone") or cta_zone
+                return (
+                    f"Confirmation: Zone shifted to {to_zone} {age_hours:.1f}h ago "
+                    f"({last_zone_shift_state.get('direction', 'UNKNOWN')})."
+                )
+
+    return f"Zone context: Current CTA zone is {cta_zone} (no zone shift in last 6h)."
 
 # ================================
 # UW RESPONSE PARSERS
@@ -674,12 +839,26 @@ async def trade_idea_poller():
                 continue
             if signal_id in _seen_signal_ids:
                 continue
+            if _is_zone_shift_signal(signal):
+                _capture_zone_shift_state(signal)
+                _seen_signal_ids.add(signal_id)
+                logger.info(
+                    "Suppressed standalone zone-shift alert: %s %s",
+                    signal.get("ticker"),
+                    signal.get("signal_type"),
+                )
+                continue
             if score < MIN_SCORE_FOR_ALERT:
                 _seen_signal_ids.add(signal_id)
                 continue
 
             _seen_signal_ids.add(signal_id)
             embed = format_trade_idea_embed(signal)
+            embed.add_field(
+                name="Bias Context",
+                value=_build_zone_context_text(signal),
+                inline=False,
+            )
             await channel.send(embed=embed)
             logger.info(f"Posted trade alert: {signal.get('ticker')} score={score}")
 
@@ -757,6 +936,950 @@ async def before_scheduled_queries():
 
 
 # ================================
+# WHALE ALERTS HANDLER
+# ================================
+
+_COMMON_WORDS = {
+    "A",
+    "AN",
+    "AND",
+    "ARE",
+    "AS",
+    "AT",
+    "BE",
+    "BEAR",
+    "BEARISH",
+    "BULL",
+    "BULLISH",
+    "BUT",
+    "BY",
+    "DO",
+    "DOES",
+    "FOR",
+    "FROM",
+    "HERE",
+    "HOW",
+    "IF",
+    "IN",
+    "IS",
+    "IT",
+    "LOOK",
+    "LOOKS",
+    "NOW",
+    "OF",
+    "ON",
+    "OR",
+    "SHOULD",
+    "SO",
+    "THAT",
+    "THE",
+    "THIS",
+    "TO",
+    "US",
+    "VIX",
+    "WHAT",
+    "WHERE",
+    "WHY",
+    "WITH",
+}
+
+
+def _auth_headers() -> Dict[str, str]:
+    headers: Dict[str, str] = {}
+    if PIVOT_API_KEY:
+        headers["Authorization"] = f"Bearer {PIVOT_API_KEY}"
+    return headers
+
+
+def _extract_ticker_hint(text: str) -> Optional[str]:
+    text_lower = (text or "").lower()
+    for company_name, ticker in COMPANY_TICKERS.items():
+        if re.search(rf"\b{re.escape(company_name)}\b", text_lower):
+            return ticker
+
+    for token in re.findall(r"\b[A-Za-z]{1,5}\b", (text or "").upper()):
+        if token in _COMMON_WORDS:
+            continue
+        return token
+    return None
+
+
+async def _fetch_json(session: aiohttp.ClientSession, endpoint: str) -> Optional[Dict[str, Any]]:
+    try:
+        async with session.get(
+            f"{PANDORA_API_URL}{endpoint}",
+            headers=_auth_headers(),
+            timeout=aiohttp.ClientTimeout(total=5),
+        ) as resp:
+            if resp.status == 200:
+                return await resp.json()
+            logger.debug("Context fetch failed for %s with status %s", endpoint, resp.status)
+    except Exception as exc:
+        logger.debug("Context fetch failed for %s: %s", endpoint, exc)
+    return None
+
+
+def _format_bias_context(bias_state: Optional[Dict[str, Any]]) -> str:
+    if not bias_state:
+        return "Composite Bias (DAILY): unavailable"
+    level = bias_state.get("level", "UNKNOWN")
+    trend = bias_state.get("trend", "UNKNOWN")
+    details = bias_state.get("details") or {}
+    total_vote = details.get("total_vote")
+    max_possible = details.get("max_possible")
+    if total_vote is None or max_possible is None:
+        score = "unknown"
+    else:
+        score = f"{total_vote}/{max_possible}"
+    return f"Composite Bias (DAILY): {level} | Score: {score} | Trend: {trend}"
+
+
+def _format_vix_context(vix_term: Optional[Dict[str, Any]]) -> str:
+    if not vix_term:
+        return "VIX Term Structure: unavailable"
+    vix_data = vix_term.get("data") or {}
+    vix_current = vix_data.get("vix_current")
+    vix_3m = vix_data.get("vix3m_current")
+    term = vix_data.get("term_structure", "UNKNOWN")
+    if vix_current is None:
+        return f"VIX Term Structure: {term}"
+    if vix_3m is None:
+        return f"VIX: {vix_current} | Term Structure: {term}"
+    return f"VIX: {vix_current} | VIX3M: {vix_3m} | Term Structure: {term}"
+
+
+def _format_quote_context(symbol: str, quote_data: Optional[Dict[str, Any]]) -> str:
+    if not quote_data:
+        return f"{symbol}: unavailable"
+    price = quote_data.get("price")
+    if price is None:
+        return f"{symbol}: unavailable"
+    try:
+        return f"{symbol}: ${float(price):.2f}"
+    except (TypeError, ValueError):
+        return f"{symbol}: {price}"
+
+
+async def _get_options_context_for_ticker(
+    ticker: str,
+    *,
+    target_price: Optional[float] = None,
+) -> str:
+    symbol = (ticker or "").upper().strip()
+    if not symbol:
+        return "Options chain: unavailable (missing ticker)"
+    try:
+        from tools.options_chain import get_options_context  # type: ignore
+        return await get_options_context(symbol, target_price=target_price, dte_range=(7, 45))
+    except Exception as exc:
+        return f"Options chain unavailable for {symbol}: {exc}"
+
+
+def _extract_alert_epoch(alert: Dict[str, Any]) -> Optional[float]:
+    dt = _parse_iso_datetime(alert.get("received_at") or alert.get("timestamp"))
+    if dt:
+        return dt.timestamp()
+
+    ts = alert.get("ts")
+    if isinstance(ts, (int, float)):
+        return float(ts)
+    return None
+
+
+def _normalize_alert_type(alert: Dict[str, Any]) -> str:
+    flow_type = (
+        alert.get("flow_type")
+        or alert.get("type")
+        or alert.get("order_type")
+        or "UNKNOWN"
+    )
+    return str(flow_type).upper()
+
+
+def _normalize_alert_sentiment(alert: Dict[str, Any]) -> str:
+    raw = str(alert.get("sentiment") or "").upper()
+    if raw in {"BULLISH", "BEARISH"}:
+        return raw
+
+    net_premium = alert.get("net_premium")
+    if isinstance(net_premium, (int, float)):
+        if net_premium > 0:
+            return "BULLISH"
+        if net_premium < 0:
+            return "BEARISH"
+    return "UNKNOWN"
+
+
+async def _fetch_backend_recent_uw_alerts(ticker: str, lookback_hours: int = 4) -> List[Dict[str, Any]]:
+    symbol = (ticker or "").upper().strip()
+    if not symbol:
+        return []
+
+    cutoff = time_module.time() - (lookback_hours * 3600)
+    alerts: List[Dict[str, Any]] = []
+    async with aiohttp.ClientSession() as session:
+        recent_payload = await _fetch_json(session, "/flow/recent?limit=80")
+        if isinstance(recent_payload, dict):
+            for alert in recent_payload.get("alerts", []) or []:
+                if not isinstance(alert, dict):
+                    continue
+                if str(alert.get("ticker", "")).upper().strip() != symbol:
+                    continue
+                epoch = _extract_alert_epoch(alert)
+                if epoch is None or epoch < cutoff:
+                    continue
+                alerts.append(alert)
+
+        # Fallback if recent endpoint has no entry for this ticker.
+        if not alerts:
+            ticker_payload = await _fetch_json(session, f"/flow/ticker/{symbol}")
+            flow_obj = ticker_payload.get("flow") if isinstance(ticker_payload, dict) else None
+            if isinstance(flow_obj, dict):
+                flow_obj = dict(flow_obj)
+                flow_obj.setdefault("ticker", symbol)
+                flow_obj.setdefault("source", ticker_payload.get("source", "backend"))
+                flow_obj.setdefault("timestamp", datetime.now(timezone.utc).isoformat())
+                alerts.append(flow_obj)
+
+    return alerts
+
+
+def _merge_uw_alerts(
+    ticker: str,
+    backend_alerts: List[Dict[str, Any]],
+    local_alerts: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    symbol = (ticker or "").upper().strip()
+    merged: List[Dict[str, Any]] = []
+    seen: set[tuple[Any, ...]] = set()
+
+    for source_alert in [*backend_alerts, *local_alerts]:
+        alert = dict(source_alert)
+        alert["ticker"] = symbol
+
+        epoch = _extract_alert_epoch(alert)
+        alert["_epoch"] = epoch or time_module.time()
+        alert["sentiment"] = _normalize_alert_sentiment(alert)
+        alert["flow_type"] = _normalize_alert_type(alert)
+
+        key = (
+            round(alert["_epoch"], 0),
+            alert.get("ticker"),
+            alert.get("flow_type"),
+            alert.get("sentiment"),
+            alert.get("premium") or alert.get("total_premium") or alert.get("largest_premium"),
+            alert.get("strike"),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(alert)
+
+    merged.sort(
+        key=lambda x: (
+            x.get("_epoch", 0),
+            x.get("premium") or x.get("total_premium") or x.get("largest_premium") or 0,
+        ),
+        reverse=True,
+    )
+    return merged[:6]
+
+
+def _format_uw_alert_line(alert: Dict[str, Any]) -> str:
+    flow_type = alert.get("flow_type", "UNKNOWN")
+    sentiment = alert.get("sentiment", "UNKNOWN")
+    premium = (
+        alert.get("premium")
+        or alert.get("total_premium")
+        or alert.get("largest_premium")
+        or 0
+    )
+    try:
+        premium_text = f"${float(premium):,.0f}"
+    except Exception:
+        premium_text = str(premium)
+
+    strike = alert.get("strike")
+    strike_text = ""
+    if isinstance(strike, (int, float)):
+        strike_text = f" strike ${float(strike):.1f}"
+
+    option_type = str(alert.get("option_type") or "").upper()
+    option_text = f" {option_type}" if option_type in {"CALL", "PUT"} else ""
+
+    return f"- {flow_type} {sentiment}{option_text}{strike_text}, premium {premium_text}"
+
+
+def _build_uw_context_block(ticker: str, alerts: List[Dict[str, Any]], lookback_hours: int = 4) -> str:
+    symbol = (ticker or "").upper().strip()
+    if not alerts:
+        return f"UW Flow Context ({symbol}, last {lookback_hours}h): none detected"
+
+    lines = [f"UW Flow Context ({symbol}, last {lookback_hours}h):"]
+    dark_pool_count = 0
+    for alert in alerts[:4]:
+        if str(alert.get("flow_type", "")).upper() == "DARK_POOL":
+            dark_pool_count += 1
+        lines.append(_format_uw_alert_line(alert))
+    if dark_pool_count:
+        lines.append(f"Dark pool prints in window: {dark_pool_count}")
+    return "\n".join(lines)
+
+
+def _build_convergence_block(
+    ticker: str,
+    whale_lean: Optional[str],
+    poc_level: Optional[float],
+    alerts: List[Dict[str, Any]],
+) -> Optional[str]:
+    if not alerts or not whale_lean:
+        return None
+
+    lean = str(whale_lean).upper()
+    if lean not in {"BULLISH", "BEARISH"}:
+        return None
+
+    directional = [a for a in alerts if a.get("sentiment") in {"BULLISH", "BEARISH"}]
+    if not directional:
+        return None
+
+    match = next((a for a in directional if a.get("sentiment") == lean), None)
+    lead = match or directional[0]
+    conviction = "HIGH" if match else "MODERATE"
+
+    price_text = f"${float(poc_level):.2f}" if isinstance(poc_level, (int, float)) else "N/A"
+    uw_line = _format_uw_alert_line(lead).lstrip("- ").replace("premium ", "")
+    return (
+        f"⚡ CONVERGENCE: Whale Hunter tape signal + UW options flow both active on {(ticker or '').upper()}\n"
+        f"Whale: {lean} distribution/accumulation at {price_text}\n"
+        f"UW Flow: {uw_line}\n"
+        f"Conviction upgrade: {conviction}"
+    )
+
+
+async def build_recent_uw_context(ticker: str, lookback_hours: int = 4) -> tuple[str, List[Dict[str, Any]]]:
+    symbol = (ticker or "").upper().strip()
+    if not symbol:
+        return "UW Flow Context: unavailable", []
+
+    backend_alerts = await _fetch_backend_recent_uw_alerts(symbol, lookback_hours=lookback_hours)
+    local_alerts = _get_local_recent_uw_flow(symbol, max_age_seconds=lookback_hours * 3600)
+    merged = _merge_uw_alerts(symbol, backend_alerts, local_alerts)
+    return _build_uw_context_block(symbol, merged, lookback_hours=lookback_hours), merged
+
+
+async def build_market_context(user_text: str = "", ticker_hint: Optional[str] = None) -> str:
+    target_ticker = (ticker_hint or _extract_ticker_hint(user_text) or "SPY").upper()
+    symbols: List[str] = ["SPY"]
+    if target_ticker != "SPY":
+        symbols.append(target_ticker)
+
+    async with aiohttp.ClientSession() as session:
+        tasks = [
+            _fetch_json(session, "/bias/DAILY"),
+            _fetch_json(session, "/market-indicators/vix-term"),
+        ]
+        tasks.extend(_fetch_json(session, f"/hybrid/price/{symbol}") for symbol in symbols)
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    def as_dict(value: Any) -> Optional[Dict[str, Any]]:
+        return value if isinstance(value, dict) else None
+
+    bias_state = as_dict(results[0])
+    vix_term = as_dict(results[1])
+    quote_results = [as_dict(value) for value in results[2:]]
+
+    lines = [
+        _format_bias_context(bias_state),
+        _format_vix_context(vix_term),
+    ]
+    for symbol, quote_data in zip(symbols, quote_results):
+        lines.append(_format_quote_context(symbol, quote_data))
+
+    return "\n".join(lines)
+
+
+def _is_image_attachment(attachment: discord.Attachment) -> bool:
+    content_type = (attachment.content_type or "").lower()
+    if content_type.startswith("image/"):
+        return True
+
+    name = (attachment.filename or "").lower()
+    return name.endswith((".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"))
+
+
+def _guess_image_mime_type(attachment: discord.Attachment) -> str:
+    content_type = (attachment.content_type or "").split(";")[0].strip().lower()
+    if content_type.startswith("image/"):
+        return content_type
+
+    guessed, _ = mimetypes.guess_type(attachment.filename or "")
+    if guessed and guessed.startswith("image/"):
+        return guessed
+    return "image/png"
+
+
+def _first_image_attachment(message: discord.Message) -> Optional[discord.Attachment]:
+    for attachment in message.attachments:
+        if _is_image_attachment(attachment):
+            return attachment
+    return None
+
+
+async def _attachment_to_data_url(attachment: discord.Attachment) -> Optional[str]:
+    if attachment.size and attachment.size > PIVOT_MAX_IMAGE_BYTES:
+        logger.warning(
+            "Skipping image %s: size %s exceeds max %s bytes",
+            attachment.filename,
+            attachment.size,
+            PIVOT_MAX_IMAGE_BYTES,
+        )
+        return None
+
+    try:
+        raw = await attachment.read()
+    except Exception as exc:
+        logger.warning("Failed reading image attachment %s: %s", attachment.filename, exc)
+        return None
+
+    if not raw:
+        return None
+
+    if len(raw) > PIVOT_MAX_IMAGE_BYTES:
+        logger.warning(
+            "Skipping image %s: downloaded size %s exceeds max %s bytes",
+            attachment.filename,
+            len(raw),
+            PIVOT_MAX_IMAGE_BYTES,
+        )
+        return None
+
+    mime_type = _guess_image_mime_type(attachment)
+    encoded = base64.b64encode(raw).decode("ascii")
+    return f"data:{mime_type};base64,{encoded}"
+
+
+def _safe_float(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip().replace("$", "").replace(",", "")
+    if not cleaned:
+        return None
+    try:
+        return float(cleaned)
+    except Exception:
+        return None
+
+
+def _safe_int(value: Any) -> Optional[int]:
+    parsed = _safe_float(value)
+    if parsed is None:
+        return None
+    try:
+        return int(round(parsed))
+    except Exception:
+        return None
+
+
+def _safe_sql_identifier(name: str) -> bool:
+    return bool(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name or ""))
+
+
+def _parse_expiry_datetime(value: Any) -> Optional[datetime]:
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+
+    text = str(value).strip()
+    if not text:
+        return None
+
+    parsed = _parse_iso_datetime(text)
+    if parsed:
+        return parsed
+
+    for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%m/%d/%Y", "%Y-%m-%d %H:%M:%S"):
+        try:
+            dt = datetime.strptime(text[:19], fmt)
+            return dt.replace(tzinfo=timezone.utc)
+        except Exception:
+            continue
+    return None
+
+
+def _get_journal_table(conn: sqlite3.Connection) -> Optional[str]:
+    try:
+        rows = conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    except Exception:
+        return None
+
+    table_names = [str(row[0]) for row in rows if row and row[0]]
+    if not table_names:
+        return None
+
+    for candidate in ("trades", "positions", "journal_trades"):
+        if candidate in table_names:
+            return candidate
+
+    for name in table_names:
+        lowered = name.lower()
+        if "trade" in lowered or "position" in lowered:
+            return name
+    return None
+
+
+def _get_table_columns(conn: sqlite3.Connection, table_name: str) -> List[str]:
+    if not _safe_sql_identifier(table_name):
+        return []
+    try:
+        rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+        return [str(row[1]) for row in rows if len(row) > 1 and row[1]]
+    except Exception:
+        return []
+
+
+def _fetch_open_journal_positions(ticker: str) -> List[Dict[str, Any]]:
+    symbol = (ticker or "").upper().strip()
+    if not symbol:
+        return []
+    if not os.path.exists(JOURNAL_DB_PATH):
+        return []
+
+    conn: Optional[sqlite3.Connection] = None
+    try:
+        conn = sqlite3.connect(JOURNAL_DB_PATH)
+        conn.row_factory = sqlite3.Row
+
+        table_name = _get_journal_table(conn)
+        if not table_name:
+            return []
+        columns = _get_table_columns(conn, table_name)
+        if "ticker" not in columns:
+            return []
+
+        preferred_cols = [
+            "id",
+            "ticker",
+            "status",
+            "direction",
+            "side",
+            "strategy",
+            "structure",
+            "option_type",
+            "strike",
+            "short_strike",
+            "long_strike",
+            "breakeven",
+            "break_even",
+            "expiry",
+            "expiration",
+            "entry_price",
+            "entry_date",
+            "opened_at",
+            "created_at",
+            "dte",
+        ]
+        selected = [name for name in preferred_cols if name in columns and _safe_sql_identifier(name)]
+        if not selected:
+            selected = [name for name in columns if _safe_sql_identifier(name)]
+
+        if not selected:
+            return []
+
+        where_clauses = ["UPPER(ticker)=?"]
+        params: List[Any] = [symbol]
+        if "status" in columns:
+            where_clauses.append("LOWER(status)='open'")
+        elif "is_open" in columns:
+            where_clauses.append("is_open=1")
+
+        order_candidates = ["opened_at", "entry_date", "created_at", "id"]
+        order_column = next((name for name in order_candidates if name in columns), None)
+
+        sql = (
+            f"SELECT {', '.join(selected)} FROM {table_name} "
+            f"WHERE {' AND '.join(where_clauses)}"
+        )
+        if order_column:
+            sql += f" ORDER BY {order_column} DESC"
+        sql += f" LIMIT {max(1, PIVOT_JOURNAL_LOOKBACK_LIMIT)}"
+
+        rows = conn.execute(sql, params).fetchall()
+        return [dict(row) for row in rows]
+    except Exception as exc:
+        logger.warning("Journal lookup failed for %s: %s", symbol, exc)
+        return []
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+def _infer_option_type(position: Dict[str, Any]) -> str:
+    option_type = str(position.get("option_type") or "").upper()
+    if option_type in {"CALL", "PUT"}:
+        return option_type
+
+    joined = " ".join(
+        str(position.get(key) or "")
+        for key in ("direction", "side", "strategy", "structure")
+    ).upper()
+    if "PUT" in joined:
+        return "PUT"
+    if "CALL" in joined:
+        return "CALL"
+    return ""
+
+
+def _infer_position_bias(position: Dict[str, Any]) -> str:
+    joined = " ".join(
+        str(position.get(key) or "")
+        for key in ("direction", "side", "strategy", "structure", "option_type")
+    ).upper()
+    if any(token in joined for token in ("BEAR", "SHORT", "PUT")):
+        return "BEARISH"
+    if any(token in joined for token in ("BULL", "LONG", "CALL")):
+        return "BULLISH"
+    return "UNKNOWN"
+
+
+def _format_position_structure(position: Dict[str, Any]) -> str:
+    short_strike = _safe_float(position.get("short_strike"))
+    long_strike = _safe_float(position.get("long_strike"))
+    strike = _safe_float(position.get("strike"))
+    option_type = _infer_option_type(position)
+    strategy = str(position.get("strategy") or position.get("structure") or "").strip()
+
+    if short_strike is not None and long_strike is not None:
+        spread_name = "vertical spread"
+        if option_type == "PUT":
+            spread_name = "put spread"
+        elif option_type == "CALL":
+            spread_name = "call spread"
+        return f"{spread_name} {short_strike:.1f}/{long_strike:.1f}"
+
+    if strike is not None and option_type:
+        bias = _infer_position_bias(position)
+        side = "long" if bias == "BULLISH" else "short" if bias == "BEARISH" else "position"
+        return f"{side} {option_type.lower()} {strike:.1f}"
+
+    if strategy:
+        return strategy
+
+    return "open position (structure unavailable)"
+
+
+def _compute_position_dte(position: Dict[str, Any]) -> Optional[int]:
+    direct_dte = _safe_int(position.get("dte"))
+    if direct_dte is not None:
+        return direct_dte
+
+    for key in ("expiry", "expiration"):
+        expiry_dt = _parse_expiry_datetime(position.get(key))
+        if not expiry_dt:
+            continue
+        return (expiry_dt.date() - get_et_now().date()).days
+    return None
+
+
+def _build_position_levels(position: Dict[str, Any]) -> Dict[str, float]:
+    levels: Dict[str, float] = {}
+
+    short_strike = _safe_float(position.get("short_strike"))
+    long_strike = _safe_float(position.get("long_strike"))
+    strike = _safe_float(position.get("strike"))
+    breakeven = _safe_float(position.get("breakeven"))
+    if breakeven is None:
+        breakeven = _safe_float(position.get("break_even"))
+
+    if short_strike is not None:
+        levels["short strike"] = short_strike
+    if long_strike is not None:
+        levels["long strike"] = long_strike
+    if strike is not None and "short strike" not in levels:
+        levels["strike"] = strike
+    if breakeven is not None:
+        levels["breakeven"] = breakeven
+
+    return levels
+
+
+def _build_whale_position_guidance(
+    position: Dict[str, Any],
+    poc_level: Optional[float],
+    whale_lean: Optional[str],
+) -> Optional[str]:
+    guidance_parts: List[str] = []
+    levels = _build_position_levels(position)
+
+    if isinstance(poc_level, (int, float)) and levels:
+        nearest_label, nearest_price = min(
+            levels.items(),
+            key=lambda kv: abs(float(poc_level) - kv[1]),
+        )
+        distance = float(poc_level) - nearest_price
+        abs_distance = abs(distance)
+        relation = "above" if distance >= 0 else "below"
+
+        if nearest_label == "short strike":
+            guidance_parts.append(
+                f"POC is ${abs_distance:.2f} {relation} your short strike (${nearest_price:.2f})"
+            )
+            if abs_distance <= 2:
+                guidance_parts.append("tighten stop and defend short strike")
+        elif nearest_label == "long strike":
+            guidance_parts.append(
+                f"POC is ${abs_distance:.2f} {relation} your long strike (${nearest_price:.2f})"
+            )
+        elif nearest_label == "breakeven":
+            guidance_parts.append(
+                f"POC is ${abs_distance:.2f} {relation} breakeven (${nearest_price:.2f})"
+            )
+        else:
+            guidance_parts.append(
+                f"POC is ${abs_distance:.2f} {relation} your strike (${nearest_price:.2f})"
+            )
+
+    whale_bias = str(whale_lean or "").upper()
+    position_bias = _infer_position_bias(position)
+    if whale_bias in {"BULLISH", "BEARISH"} and position_bias in {"BULLISH", "BEARISH"}:
+        if whale_bias == position_bias:
+            guidance_parts.append("whale confirms your direction - hold while level is intact")
+        else:
+            guidance_parts.append("whale is counter to your position - consider a defensive adjustment")
+
+    if not guidance_parts:
+        return None
+    return "; ".join(guidance_parts)
+
+
+def _build_journal_context_for_whale_sync(
+    ticker: str,
+    poc_level: Optional[float],
+    whale_lean: Optional[str],
+) -> Optional[str]:
+    symbol = (ticker or "").upper().strip()
+    if not symbol:
+        return None
+
+    positions = _fetch_open_journal_positions(symbol)
+    if not positions:
+        return None
+
+    lines: List[str] = [f"Journal Open Positions ({symbol}):"]
+    for position in positions[: max(1, PIVOT_JOURNAL_LOOKBACK_LIMIT)]:
+        structure = _format_position_structure(position)
+        dte = _compute_position_dte(position)
+        dte_text = f" | {dte} DTE" if dte is not None else ""
+        lines.append(f"- Holding: {structure}{dte_text}")
+
+        guidance = _build_whale_position_guidance(position, poc_level, whale_lean)
+        if guidance:
+            lines.append(f"  Guidance: {guidance}")
+
+    return "\n".join(lines)
+
+
+async def _build_journal_context_for_whale(
+    ticker: str,
+    poc_level: Optional[float],
+    whale_lean: Optional[str],
+) -> Optional[str]:
+    return await asyncio.to_thread(
+        _build_journal_context_for_whale_sync,
+        ticker,
+        poc_level,
+        whale_lean,
+    )
+
+
+async def call_pivot_llm(prompt: str, max_tokens: int = 900) -> str:
+    """Call the Pivot LLM (OpenRouter). Returns empty string on failure."""
+    try:
+        from llm.pivot_agent import call_llm  # type: ignore
+        return await call_llm(prompt, max_tokens=max_tokens)
+    except Exception as exc:
+        logger.warning("Pivot LLM call failed: %s", exc)
+        return ""
+
+
+async def call_pivot_llm_messages(messages: List[Dict[str, Any]], max_tokens: int = 1200) -> str:
+    """Call the Pivot LLM with full message objects (supports vision blocks)."""
+    try:
+        from llm.pivot_agent import call_llm_messages  # type: ignore
+        return await call_llm_messages(messages, max_tokens=max_tokens)
+    except Exception as exc:
+        logger.warning("Pivot multimodal LLM call failed: %s", exc)
+        return ""
+
+
+def _chunk_message(text: str, limit: int = 1900) -> List[str]:
+    """Split long text into Discord-safe chunks."""
+    if len(text) <= limit:
+        return [text]
+
+    chunks: List[str] = []
+    remaining = text
+    while len(remaining) > limit:
+        split_at = remaining.rfind("\n", 0, limit)
+        if split_at < int(limit * 0.6):
+            split_at = remaining.rfind(" ", 0, limit)
+        if split_at < int(limit * 0.6):
+            split_at = limit
+        chunks.append(remaining[:split_at].rstrip())
+        remaining = remaining[split_at:].lstrip()
+    if remaining:
+        chunks.append(remaining)
+    return chunks
+
+
+async def send_discord_chunks(channel: discord.abc.Messageable, text: str, limit: int = 1900) -> None:
+    """Send text in one or more Discord messages within character limits."""
+    for chunk in _chunk_message(text, limit=limit):
+        await channel.send(chunk)
+
+
+async def handle_whale_alerts_message(message: discord.Message) -> None:
+    """
+    Handle a message in #whale-alerts.
+
+    Two signal types are processed:
+      A. Whale Hunter plain-text signals (from our TradingView webhook)
+      B. Unusual Whales Premium bot embeds
+
+    For each, we:
+      1. Parse the signal fields
+      2. Fetch current bias from Pandora
+      3. Ask the Pivot LLM for a Playbook evaluation
+      4. Reply in the channel
+    """
+    # Skip the bot's own messages
+    if message.author == bot.user:
+        return
+
+    parsed = None
+    flow_text = None
+
+    # ── A. Whale Hunter plain-text signal ──────────────────────────────────
+    if message.content:
+        parsed = parse_whale_hunter_signal(message)
+        if parsed:
+            flow_text = format_whale_hunter_for_llm(parsed)
+
+    # ── B. Unusual Whales Premium bot embed ────────────────────────────────
+    if not parsed and message.embeds:
+        for embed in message.embeds:
+            parsed = parse_uw_premium_embed(embed)
+            if parsed:
+                flow_text = format_uw_embed_for_llm(parsed)
+                _record_recent_uw_flow(
+                    parsed.get("ticker"),
+                    sentiment=parsed.get("sentiment"),
+                    flow_type=parsed.get("order_type"),
+                    premium=parsed.get("premium"),
+                    strike=parsed.get("strike"),
+                    option_type=parsed.get("option_type"),
+                    source="whale_alerts_embed",
+                )
+                break
+        else:
+            # Embeds present but none parsed — log field names for refinement
+            for embed in message.embeds:
+                if embed.fields:
+                    field_names = [f.name for f in embed.fields]
+                    logger.info(
+                        "whale-alerts embed not parsed — field names: %s", field_names
+                    )
+
+    if not parsed or not flow_text:
+        return  # Nothing actionable
+
+    ticker = parsed.get("ticker", "?")
+    source = parsed.get("source", "unknown")
+
+    # ── Fetch market context (bias + VIX + SPY + ticker) ──────────────────
+    ticker_hint = ticker if isinstance(ticker, str) and ticker.isalpha() else None
+    market_context = await build_market_context(flow_text, ticker_hint=ticker_hint)
+    uw_context_text, uw_alerts = await build_recent_uw_context(str(ticker_hint or ticker))
+    market_context = f"{market_context}\n\n{uw_context_text}"
+
+    convergence_block = None
+    if source == "whale_hunter":
+        poc_level = parsed.get("poc_level")
+        target_price = float(poc_level) if isinstance(poc_level, (int, float)) else None
+        options_context = await _get_options_context_for_ticker(str(ticker_hint or ticker), target_price=target_price)
+        market_context = f"{market_context}\n\n{options_context}"
+        journal_context = await _build_journal_context_for_whale(
+            str(ticker_hint or ticker),
+            target_price,
+            parsed.get("lean"),
+        )
+        if journal_context:
+            market_context = f"{market_context}\n\n{journal_context}"
+        convergence_block = _build_convergence_block(
+            str(ticker_hint or ticker),
+            parsed.get("lean"),
+            poc_level if isinstance(poc_level, (int, float)) else None,
+            uw_alerts,
+        )
+
+    # ── LLM evaluation ────────────────────────────────────────────────────
+    try:
+        from llm.prompts import (  # type: ignore
+            build_flow_analysis_prompt,
+            build_whale_hunter_prompt,
+        )
+
+        if source == "whale_hunter":
+            prompt = build_whale_hunter_prompt(flow_text, market_context)
+            llm_response = await call_pivot_llm(prompt, max_tokens=2500)
+        else:
+            prompt = build_flow_analysis_prompt(flow_text, market_context)
+            llm_response = await call_pivot_llm(prompt, max_tokens=1200)
+    except Exception as exc:
+        logger.warning("Could not build flow prompt: %s", exc)
+        llm_response = ""
+
+    # ── Reply in channel ──────────────────────────────────────────────────
+    if source == "whale_hunter":
+        lean = parsed.get("lean", "?")
+        poc = parsed.get("poc_level")
+        header = (
+            f"**Whale Hunter — {ticker}** | Lean: `{lean}`"
+            + (f" | POC: `${poc:.2f}`" if poc else "")
+        )
+    else:
+        opt_type = parsed.get("option_type", "")
+        order_type = parsed.get("order_type", "")
+        header = f"**UW Flow — {ticker}** {opt_type} {order_type}".strip()
+
+    if llm_response:
+        if convergence_block:
+            reply = f"{header}\n\n{convergence_block}\n\n{llm_response}"
+        else:
+            reply = f"{header}\n\n{llm_response}"
+    else:
+        reply = (
+            f"{header}\n\n"
+            f"*(LLM unavailable — raw data logged. "
+            f"Source: {source}, ticker: {ticker})*"
+        )
+
+    try:
+        await send_discord_chunks(message.channel, reply)
+    except discord.Forbidden:
+        logger.warning("No permission to send in whale-alerts channel")
+    except Exception as exc:
+        logger.error("Failed to send whale-alerts reply: %s", exc)
+
+
+# ================================
 # EVENT HANDLERS
 # ================================
 
@@ -764,7 +1887,9 @@ async def before_scheduled_queries():
 async def on_ready():
     """Called when bot is connected and ready"""
     logger.info(f"🐋 Pandora Bridge v2.0 connected as {bot.user}")
-    logger.info(f"📡 Watching channel ID: {UW_CHANNEL_ID}")
+    logger.info(f"📡 Watching UW channel ID: {UW_CHANNEL_ID}")
+    if WHALE_ALERTS_CHANNEL_ID:
+        logger.info(f"🐳 Watching #whale-alerts channel ID: {WHALE_ALERTS_CHANNEL_ID}")
     
     # Find and verify the channel
     channel = bot.get_channel(UW_CHANNEL_ID)
@@ -813,6 +1938,15 @@ async def handle_uw_flow_message(message: discord.Message) -> None:
             )
             continue
         uw_flow_aggregator.add_flow(parsed)
+        _record_recent_uw_flow(
+            parsed.get("ticker"),
+            sentiment=parsed.get("sentiment") or parsed.get("side"),
+            flow_type=parsed.get("flow_type") or parsed.get("type"),
+            premium=parsed.get("premium"),
+            strike=parsed.get("strike"),
+            option_type=parsed.get("option_type"),
+            source="uw_flow_channel",
+        )
         logger.info(
             "UW Flow: %s %s %s premium=%s",
             parsed.get("ticker"),
@@ -838,9 +1972,14 @@ async def on_message(message: discord.Message):
     # Ignore our own messages
     if message.author == bot.user:
         return
-    
+
     # Process commands first
     await bot.process_commands(message)
+
+    # ── #whale-alerts: Whale Hunter signals + UW Premium embeds ───────────
+    if WHALE_ALERTS_CHANNEL_ID and message.channel.id == WHALE_ALERTS_CHANNEL_ID:
+        await handle_whale_alerts_message(message)
+        return
 
     uw_channels = {UW_FLOW_CHANNEL_ID, UW_TICKER_CHANNEL_ID}
     if message.channel.id in uw_channels and any(uw_channels):
@@ -850,6 +1989,88 @@ async def on_message(message: discord.Message):
             await handle_uw_flow_message(message)
         elif message.channel.id == UW_TICKER_CHANNEL_ID:
             await handle_uw_ticker_message(message)
+        return
+
+    # ── #pivot-chat: Conversational LLM chat ──────────────────────────────
+    if PIVOT_CHAT_CHANNEL_ID and message.channel.id == PIVOT_CHAT_CHANNEL_ID:
+        async with message.channel.typing():
+            user_text = message.content or ""
+            reply = ""
+
+            image_attachment = _first_image_attachment(message)
+            if image_attachment:
+                data_url = await _attachment_to_data_url(image_attachment)
+                if data_url:
+                    vision_text = "Extract trading data from this screenshot and evaluate it."
+                    if user_text.strip():
+                        vision_text = f"{vision_text}\n\nUser request:\n{user_text.strip()}"
+
+                    vision_messages = [
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "image_url", "image_url": {"url": data_url}},
+                                {"type": "text", "text": vision_text},
+                            ],
+                        }
+                    ]
+                    image_analysis = await call_pivot_llm_messages(
+                        vision_messages,
+                        max_tokens=PIVOT_VISION_MAX_TOKENS,
+                    )
+
+                    if image_analysis:
+                        detected_ticker = _extract_ticker_hint(f"{user_text}\n{image_analysis}")
+                        if detected_ticker:
+                            market_context = await build_market_context(
+                                user_text or image_analysis,
+                                ticker_hint=detected_ticker,
+                            )
+                            uw_context_text, _ = await build_recent_uw_context(detected_ticker)
+                            options_context = await _get_options_context_for_ticker(detected_ticker)
+                            follow_up_prompt = (
+                                "You already extracted data from a trading screenshot. "
+                                "Now combine that with live market context and provide "
+                                "a concise, actionable evaluation.\n\n"
+                                f"LIVE MARKET CONTEXT:\n{market_context}\n\n"
+                                f"{uw_context_text}\n\n"
+                                f"{options_context}\n\n"
+                                f"IMAGE EXTRACT:\n{image_analysis}\n\n"
+                                f"USER MESSAGE:\n{user_text or 'Evaluate this screenshot.'}"
+                            )
+                            contextual_eval = await call_pivot_llm(
+                                follow_up_prompt,
+                                max_tokens=2500,
+                            )
+                            if contextual_eval:
+                                reply = (
+                                    f"**Image Extract**\n{image_analysis}\n\n"
+                                    f"**Contextual Evaluation**\n{contextual_eval}"
+                                )
+                        if not reply:
+                            reply = image_analysis
+
+            if not reply:
+                ticker_hint = _extract_ticker_hint(user_text)
+                market_context = await build_market_context(user_text, ticker_hint=ticker_hint)
+
+                if ticker_hint and _is_directional_question(user_text):
+                    uw_context_text, _ = await build_recent_uw_context(ticker_hint)
+                    options_context = await _get_options_context_for_ticker(ticker_hint)
+                    market_context = (
+                        f"{market_context}\n\n"
+                        f"{uw_context_text}\n\n"
+                        f"{options_context}"
+                    )
+
+                prompt = (
+                    "Use this current market context when answering.\n\n"
+                    f"{market_context}\n\n"
+                    f"USER MESSAGE:\n{user_text or 'Give a quick market read.'}"
+                )
+                reply = await call_pivot_llm(prompt, max_tokens=1600)
+        if reply:
+            await send_discord_chunks(message.channel, reply)
         return
 
     # Only process UW responses in the designated channel
