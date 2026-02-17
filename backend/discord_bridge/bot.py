@@ -1359,6 +1359,17 @@ async def _attachment_to_data_url(attachment: discord.Attachment) -> Optional[st
     return f"data:{mime_type};base64,{encoded}"
 
 
+def _data_url_to_image_parts(data_url: str) -> Optional[tuple[str, str]]:
+    value = (data_url or "").strip()
+    if not value.startswith("data:") or ";base64," not in value:
+        return None
+    header, b64_data = value.split(",", 1)
+    media_type = header.replace("data:", "").replace(";base64", "").strip()
+    if not media_type or not b64_data:
+        return None
+    return media_type, b64_data
+
+
 def _safe_float(value: Any) -> Optional[float]:
     if value is None:
         return None
@@ -2005,11 +2016,21 @@ async def on_message(message: discord.Message):
                     if user_text.strip():
                         vision_text = f"{vision_text}\n\nUser request:\n{user_text.strip()}"
 
+                    image_parts = _data_url_to_image_parts(data_url)
                     vision_messages = [
                         {
                             "role": "user",
                             "content": [
-                                {"type": "image_url", "image_url": {"url": data_url}},
+                                (
+                                    {
+                                        "type": "image",
+                                        "source_type": "base64",
+                                        "media_type": image_parts[0],
+                                        "data": image_parts[1],
+                                    }
+                                    if image_parts
+                                    else {"type": "image_url", "image_url": {"url": data_url}}
+                                ),
                                 {"type": "text", "text": vision_text},
                             ],
                         }
@@ -2019,7 +2040,7 @@ async def on_message(message: discord.Message):
                         max_tokens=PIVOT_VISION_MAX_TOKENS,
                     )
 
-                    if image_analysis:
+                    if image_analysis and not image_analysis.startswith("[LLM error"):
                         detected_ticker = _extract_ticker_hint(f"{user_text}\n{image_analysis}")
                         if detected_ticker:
                             market_context = await build_market_context(
