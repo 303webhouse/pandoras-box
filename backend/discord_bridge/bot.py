@@ -52,6 +52,7 @@ UW_FLOW_CHANNEL_ID = int(os.getenv("UW_FLOW_CHANNEL_ID", "0"))
 UW_TICKER_CHANNEL_ID = int(os.getenv("UW_TICKER_CHANNEL_ID", "0"))
 UW_BOT_USER_ID = int(os.getenv("UW_BOT_USER_ID", "1100705854271008798"))
 WHALE_ALERTS_CHANNEL_ID = int(os.getenv("WHALE_ALERTS_CHANNEL_ID", "0"))
+PIVOT_CHAT_CHANNEL_ID = int(os.getenv("PIVOT_CHAT_CHANNEL_ID", "0"))
 PANDORA_API_URL = os.getenv("PANDORA_API_URL", "https://pandoras-box-production.up.railway.app/api")
 NOTIFICATION_CHANNEL_ID = int(os.getenv("DISCORD_NOTIFICATION_CHANNEL_ID", str(UW_CHANNEL_ID)))
 TRADE_ALERT_CHANNEL_ID = int(os.getenv("DISCORD_TRADE_ALERT_CHANNEL_ID", str(NOTIFICATION_CHANNEL_ID)))
@@ -989,6 +990,14 @@ async def on_message(message: discord.Message):
             await handle_uw_flow_message(message)
         elif message.channel.id == UW_TICKER_CHANNEL_ID:
             await handle_uw_ticker_message(message)
+        return
+
+    # ── #pivot-chat: Conversational LLM chat ──────────────────────────────
+    if PIVOT_CHAT_CHANNEL_ID and message.channel.id == PIVOT_CHAT_CHANNEL_ID:
+        async with message.channel.typing():
+            reply = await call_pivot_llm(message.content)
+        if reply:
+            await message.channel.send(reply[:1900])
         return
 
     # Only process UW responses in the designated channel
