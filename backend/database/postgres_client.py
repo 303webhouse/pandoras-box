@@ -6,7 +6,7 @@ Stores all signals for backtesting and historical analysis
 import asyncpg
 import os
 from typing import Optional, Dict, Any, List
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 import json
 import logging
@@ -332,6 +332,9 @@ async def log_signal(signal_data: Dict[Any, Any]):
     timestamp = signal_data['timestamp']
     if isinstance(timestamp, str):
         timestamp = datetime.fromisoformat(timestamp)
+    # Ensure timezone-aware (asyncpg requires this for TIMESTAMP comparisons)
+    if isinstance(timestamp, datetime) and timestamp.tzinfo is None:
+        timestamp = timestamp.replace(tzinfo=timezone.utc)
     
     bias_at_signal = signal_data.get("bias_at_signal")
     if not bias_at_signal:
