@@ -26,6 +26,12 @@ import pytz
 from discord_bridge.uw.parser import parse_flow_embed, parse_ticker_embed
 from discord_bridge.uw.filter import FlowFilter
 from discord_bridge.uw.aggregator import FlowAggregator
+from discord_bridge.whale_parser import (
+    parse_whale_hunter_signal,
+    parse_uw_premium_embed,
+    format_whale_hunter_for_llm,
+    format_uw_embed_for_llm,
+)
 
 # Discord.py imports
 try:
@@ -45,6 +51,7 @@ UW_CHANNEL_ID = int(os.getenv("DISCORD_UW_CHANNEL_ID", "1463692055694807201"))
 UW_FLOW_CHANNEL_ID = int(os.getenv("UW_FLOW_CHANNEL_ID", "0"))
 UW_TICKER_CHANNEL_ID = int(os.getenv("UW_TICKER_CHANNEL_ID", "0"))
 UW_BOT_USER_ID = int(os.getenv("UW_BOT_USER_ID", "1100705854271008798"))
+WHALE_ALERTS_CHANNEL_ID = int(os.getenv("WHALE_ALERTS_CHANNEL_ID", "0"))
 PANDORA_API_URL = os.getenv("PANDORA_API_URL", "https://pandoras-box-production.up.railway.app/api")
 NOTIFICATION_CHANNEL_ID = int(os.getenv("DISCORD_NOTIFICATION_CHANNEL_ID", str(UW_CHANNEL_ID)))
 TRADE_ALERT_CHANNEL_ID = int(os.getenv("DISCORD_TRADE_ALERT_CHANNEL_ID", str(NOTIFICATION_CHANNEL_ID)))
@@ -757,6 +764,131 @@ async def before_scheduled_queries():
 
 
 # ================================
+# WHALE ALERTS HANDLER
+# ================================
+
+async def fetch_bias_state() -> str:
+    """Fetch current composite bias from Pandora API for LLM context."""
+    try:
+        async with aiohttp.ClientSession() as session:
+            headers = {}
+            if PIVOT_API_KEY:
+                headers["Authorization"] = f"Bearer {PIVOT_API_KEY}"
+            async with session.get(
+                f"{PANDORA_API_URL}/bias/DAILY",
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=5),
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    return str(data)
+    except Exception as exc:
+        logger.debug("Could not fetch bias state: %s", exc)
+    return "Bias data unavailable"
+
+
+async def call_pivot_llm(prompt: str) -> str:
+    """Call the Pivot LLM (OpenRouter). Returns empty string on failure."""
+    try:
+        from llm.pivot_agent import call_llm  # type: ignore
+        return await call_llm(prompt, max_tokens=600)
+    except Exception as exc:
+        logger.warning("Pivot LLM call failed: %s", exc)
+        return ""
+
+
+async def handle_whale_alerts_message(message: discord.Message) -> None:
+    """
+    Handle a message in #whale-alerts.
+
+    Two signal types are processed:
+      A. Whale Hunter plain-text signals (from our TradingView webhook)
+      B. Unusual Whales Premium bot embeds
+
+    For each, we:
+      1. Parse the signal fields
+      2. Fetch current bias from Pandora
+      3. Ask the Pivot LLM for a Playbook evaluation
+      4. Reply in the channel
+    """
+    # Skip the bot's own messages
+    if message.author == bot.user:
+        return
+
+    parsed = None
+    flow_text = None
+
+    # ── A. Whale Hunter plain-text signal ──────────────────────────────────
+    if message.content:
+        parsed = parse_whale_hunter_signal(message)
+        if parsed:
+            flow_text = format_whale_hunter_for_llm(parsed)
+
+    # ── B. Unusual Whales Premium bot embed ────────────────────────────────
+    if not parsed and message.embeds:
+        for embed in message.embeds:
+            parsed = parse_uw_premium_embed(embed)
+            if parsed:
+                flow_text = format_uw_embed_for_llm(parsed)
+                break
+        else:
+            # Embeds present but none parsed — log field names for refinement
+            for embed in message.embeds:
+                if embed.fields:
+                    field_names = [f.name for f in embed.fields]
+                    logger.info(
+                        "whale-alerts embed not parsed — field names: %s", field_names
+                    )
+
+    if not parsed or not flow_text:
+        return  # Nothing actionable
+
+    ticker = parsed.get("ticker", "?")
+    source = parsed.get("source", "unknown")
+
+    # ── Fetch bias context ─────────────────────────────────────────────────
+    bias_state = await fetch_bias_state()
+
+    # ── LLM evaluation ────────────────────────────────────────────────────
+    try:
+        from llm.prompts import build_flow_analysis_prompt  # type: ignore
+        prompt = build_flow_analysis_prompt(flow_text, bias_state)
+        llm_response = await call_pivot_llm(prompt)
+    except Exception as exc:
+        logger.warning("Could not build flow prompt: %s", exc)
+        llm_response = ""
+
+    # ── Reply in channel ──────────────────────────────────────────────────
+    if source == "whale_hunter":
+        lean = parsed.get("lean", "?")
+        poc = parsed.get("poc_level")
+        header = (
+            f"**Whale Hunter — {ticker}** | Lean: `{lean}`"
+            + (f" | POC: `${poc:.2f}`" if poc else "")
+        )
+    else:
+        opt_type = parsed.get("option_type", "")
+        order_type = parsed.get("order_type", "")
+        header = f"**UW Flow — {ticker}** {opt_type} {order_type}".strip()
+
+    if llm_response:
+        reply = f"{header}\n\n{llm_response}"
+    else:
+        reply = (
+            f"{header}\n\n"
+            f"*(LLM unavailable — raw data logged. "
+            f"Source: {source}, ticker: {ticker})*"
+        )
+
+    try:
+        await message.channel.send(reply[:1900])  # Discord message limit guard
+    except discord.Forbidden:
+        logger.warning("No permission to send in whale-alerts channel")
+    except Exception as exc:
+        logger.error("Failed to send whale-alerts reply: %s", exc)
+
+
+# ================================
 # EVENT HANDLERS
 # ================================
 
@@ -764,7 +896,9 @@ async def before_scheduled_queries():
 async def on_ready():
     """Called when bot is connected and ready"""
     logger.info(f"🐋 Pandora Bridge v2.0 connected as {bot.user}")
-    logger.info(f"📡 Watching channel ID: {UW_CHANNEL_ID}")
+    logger.info(f"📡 Watching UW channel ID: {UW_CHANNEL_ID}")
+    if WHALE_ALERTS_CHANNEL_ID:
+        logger.info(f"🐳 Watching #whale-alerts channel ID: {WHALE_ALERTS_CHANNEL_ID}")
     
     # Find and verify the channel
     channel = bot.get_channel(UW_CHANNEL_ID)
@@ -838,9 +972,14 @@ async def on_message(message: discord.Message):
     # Ignore our own messages
     if message.author == bot.user:
         return
-    
+
     # Process commands first
     await bot.process_commands(message)
+
+    # ── #whale-alerts: Whale Hunter signals + UW Premium embeds ───────────
+    if WHALE_ALERTS_CHANNEL_ID and message.channel.id == WHALE_ALERTS_CHANNEL_ID:
+        await handle_whale_alerts_message(message)
+        return
 
     uw_channels = {UW_FLOW_CHANNEL_ID, UW_TICKER_CHANNEL_ID}
     if message.channel.id in uw_channels and any(uw_channels):
