@@ -47,7 +47,20 @@ async def call_llm(user_prompt: str, max_tokens: int = 1000) -> str:
                 return "[Billing limit reached]"
 
             data = response.json()
+
+            if response.status_code != 200:
+                err = data.get("error", {})
+                logger.error(
+                    f"OpenRouter error {response.status_code}: "
+                    f"{err.get('message', data)}"
+                )
+                return f"[LLM error: HTTP {response.status_code} — {err.get('message', 'unknown error')}]"
+
+            if "choices" not in data:
+                logger.error(f"OpenRouter unexpected response: {data}")
+                return "[LLM error: unexpected response format from OpenRouter]"
+
             return data["choices"][0]["message"]["content"]
     except Exception as exc:
-        logger.error(f"LLM call failed: {exc}")
+        logger.exception(f"LLM call failed: {exc}")
         return f"[LLM error: {exc}]"
