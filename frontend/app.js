@@ -941,7 +941,7 @@ function initEventListeners() {
 
 // Data Loading
 async function loadInitialData() {
-    // Load bias auto first so composite/timeframe fallback has fresh source data.
+    // Load timeframe bias cards first; composite views are sourced from backend endpoints.
     await loadBiasData();
     await Promise.all([
         loadSignals(),
@@ -1420,111 +1420,15 @@ function factorMapToRows(factorMap) {
     });
 }
 
-function buildTimeframesFromBiasAuto() {
-    const mappings = [
-        ['intraday', dailyBiasFullData],
-        ['swing', weeklyBiasFullData],
-        ['macro', cyclicalBiasFullData]
-    ];
-    const available = mappings.filter(([, data]) => data && data.level);
-    if (!available.length) return null;
-
-    const timeframes = {};
-    const subScores = [];
-
-    for (const [name, source] of available) {
-        const biasLevel = normalizeCompositeBiasLevel(source.level);
-        const subScore = compositeLevelToScore(biasLevel);
-        const factors = factorMapToRows(source?.details?.factors);
-        subScores.push(subScore);
-        timeframes[name] = {
-            sub_score: Number(subScore.toFixed(3)),
-            bias_level: biasLevel,
-            bias_numeric: getBiasValue(biasLevel),
-            momentum: biasTrendToMomentum(source?.trend),
-            divergent: false,
-            active_count: factors.length,
-            total_count: factors.length,
-            factors
-        };
-    }
-
-    for (const [name] of mappings) {
-        if (!timeframes[name]) {
-            timeframes[name] = {
-                sub_score: 0,
-                bias_level: 'NEUTRAL',
-                bias_numeric: getBiasValue('NEUTRAL'),
-                momentum: 'stable',
-                divergent: false,
-                active_count: 0,
-                total_count: 0,
-                factors: []
-            };
-        }
-    }
-
-    const compositeScore = subScores.length ? subScores.reduce((a, b) => a + b, 0) / subScores.length : 0;
-    return {
-        composite_score: Number(compositeScore.toFixed(3)),
-        composite_bias: scoreToCompositeLevel(compositeScore),
-        composite_numeric: getBiasValue(scoreToCompositeLevel(compositeScore)),
-        confidence: available.length === 3 ? 'HIGH' : 'MEDIUM',
-        override: null,
-        timestamp: new Date().toISOString(),
-        timeframes,
-        sector_rotation: null,
-        _fallback_from_bias_auto: true
-    };
-}
-
-function shouldUseCompositeFallback(data) {
-    if (!data || typeof data !== 'object') return true;
-    const hasFactorsMap = data.factors && typeof data.factors === 'object';
-    const hasFactorEntries = hasFactorsMap && Object.keys(data.factors).length > 0;
-    const hasFactorSets = Array.isArray(data.active_factors) || Array.isArray(data.stale_factors);
-    return !hasFactorEntries && !hasFactorSets;
-}
-
-function shouldUseTimeframeFallback(data) {
-    if (!data || !data.timeframes || typeof data.timeframes !== 'object') return true;
-    const requiredBuckets = ['intraday', 'swing', 'macro'];
-    return !requiredBuckets.every((bucket) => Object.prototype.hasOwnProperty.call(data.timeframes, bucket));
-}
-
-function buildCompositeFallbackFromBiasAuto() {
-    const tfFallback = buildTimeframesFromBiasAuto();
-    if (!tfFallback) return null;
-
-    const fallbackFactors = [
-        { factor_id: 'daily_bias', score: compositeLevelToScore(normalizeCompositeBiasLevel(dailyBiasFullData?.level)), signal: dailyBiasFullData?.level || 'NEUTRAL', detail: 'Derived from bias-auto daily model' },
-        { factor_id: 'weekly_bias', score: compositeLevelToScore(normalizeCompositeBiasLevel(weeklyBiasFullData?.level)), signal: weeklyBiasFullData?.level || 'NEUTRAL', detail: 'Derived from bias-auto weekly model' },
-        { factor_id: 'cyclical_bias', score: compositeLevelToScore(normalizeCompositeBiasLevel(cyclicalBiasFullData?.level)), signal: cyclicalBiasFullData?.level || 'NEUTRAL', detail: 'Derived from bias-auto cyclical model' }
-    ];
-
-    return {
-        composite_score: tfFallback.composite_score,
-        bias_level: tfFallback.composite_bias,
-        bias_numeric: tfFallback.composite_numeric,
-        confidence: tfFallback.confidence,
-        override: null,
-        timestamp: tfFallback.timestamp,
-        factors: {},
-        active_factors: fallbackFactors.map((f) => f.factor_id),
-        stale_factors: [],
-        fallback_factors: fallbackFactors,
-        _fallback_from_bias_auto: true
-    };
-}
-
-
 async function fetchCompositeBias() {
     try {
         const resp = await fetch(`${API_URL}/bias/composite`);
-        let data = await resp.json();
-        if (shouldUseCompositeFallback(data)) {
-            const fallback = buildCompositeFallbackFromBiasAuto();
-            if (fallback) data = fallback;
+        if (!resp.ok) {
+            throw new Error(`/bias/composite returned HTTP ${resp.status}`);
+        }
+        const data = await resp.json();
+        if (!data || typeof data !== 'object') {
+            throw new Error('/bias/composite returned invalid payload');
         }
         renderCompositeBias(data);
     } catch (err) {
@@ -1748,21 +1652,24 @@ function initCompositeBiasControls() {
 async function fetchTimeframeBias() {
     try {
         const resp = await fetch(`${API_URL}/bias/composite/timeframes`);
-        let data = await resp.json();
-        if (shouldUseTimeframeFallback(data)) {
-            const fallback = buildTimeframesFromBiasAuto();
-            if (fallback) data = fallback;
+        if (!resp.ok) {
+            throw new Error(`/bias/composite/timeframes returned HTTP ${resp.status}`);
         }
+        const data = await resp.json();
+        if (!data || !data.timeframes || typeof data.timeframes !== 'object') {
+            throw new Error('/bias/composite/timeframes returned invalid payload');
+        }
+
         if (data && data.timeframes) {
-            // Backfill composite cache so bias strips still render when /bias/composite lags.
-            _compositeBiasData = {
-                ...(typeof _compositeBiasData === 'object' && _compositeBiasData ? _compositeBiasData : {}),
-                bias_level: data.composite_bias || _compositeBiasData?.bias_level || 'NEUTRAL',
-                composite_score: typeof data.composite_score === 'number'
-                    ? data.composite_score
-                    : (_compositeBiasData?.composite_score ?? 0),
-                confidence: data.confidence || _compositeBiasData?.confidence || 'LOW'
-            };
+            // Backfill cache only from backend-computed timeframe payload.
+            if (data.composite_bias && typeof data.composite_score === 'number') {
+                _compositeBiasData = {
+                    ...(typeof _compositeBiasData === 'object' && _compositeBiasData ? _compositeBiasData : {}),
+                    bias_level: data.composite_bias,
+                    composite_score: data.composite_score,
+                    confidence: data.confidence || _compositeBiasData?.confidence || 'LOW'
+                };
+            }
 
             renderTimeframeCards(data);
             renderSectorRotationStrip(data.sector_rotation);
