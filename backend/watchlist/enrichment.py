@@ -85,7 +85,15 @@ def fetch_price_data(symbols: List[str]) -> Dict[str, dict]:
 
         for symbol in symbols:
             try:
-                ticker_data = data if len(symbols) == 1 else data[symbol]
+                if len(symbols) == 1:
+                    ticker_data = data
+                else:
+                    try:
+                        # yfinance < 0.2.50: first MultiIndex level is ticker
+                        ticker_data = data[symbol]
+                    except KeyError:
+                        # yfinance >= 0.2.50: first MultiIndex level is price field
+                        ticker_data = data.xs(symbol, axis=1, level=1)
 
                 if ticker_data.empty or len(ticker_data) < 2:
                     result[symbol] = dict(empty)
