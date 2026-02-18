@@ -134,12 +134,32 @@ async def get_signal_stats_rows(
             s.signal_type,
             s.ticker,
             s.direction,
+            s.asset_class,
+            s.timeframe,
             s.bias_level,
+            s.bias_alignment,
             s.day_of_week,
             s.hour_of_day,
+            s.is_opex_week,
+            s.days_to_earnings,
+            s.market_event,
             s.score,
+            s.entry_price,
+            s.stop_loss,
+            s.target_1,
+            s.target_2,
+            s.risk_reward,
+            s.user_action,
+            s.dismissed_at,
+            s.selected_at,
+            s.notes,
             s.triggering_factors,
             s.bias_at_signal,
+            EXISTS(
+                SELECT 1
+                FROM trades t
+                WHERE t.signal_id = s.signal_id
+            ) AS traded,
             so.outcome,
             so.outcome_at,
             so.max_favorable,
@@ -403,7 +423,9 @@ async def get_signals_for_backtest(
             s.direction,
             s.strategy,
             s.signal_type,
-            s.entry_price
+            s.entry_price,
+            s.score,
+            s.bias_alignment
         FROM signals s
         WHERE {" AND ".join(conditions)}
         ORDER BY s.timestamp ASC

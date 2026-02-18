@@ -9,7 +9,7 @@ import io
 import json
 import hashlib
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from fastapi import APIRouter, HTTPException, Path, Query
 from fastapi.responses import StreamingResponse
@@ -57,6 +57,7 @@ analytics_router = APIRouter()
 
 _BACKTEST_CACHE: Dict[str, Dict[str, Any]] = {}
 _BACKTEST_CACHE_TTL_SECONDS = 600
+_CONVICTION_ORDER = {"WATCH": 1, "MODERATE": 2, "HIGH": 3}
 
 
 class BacktestParams(BaseModel):
@@ -64,6 +65,9 @@ class BacktestParams(BaseModel):
     stop_distance_pct: float = 0.5
     target_distance_pct: float = 1.0
     risk_per_trade: float = 235.0
+    min_conviction: Optional[str] = None
+    require_convergence: bool = False
+    bias_must_align: bool = False
 
 
 class BacktestRequest(BaseModel):
@@ -223,6 +227,97 @@ def _resolved_outcome_records(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]
     return output
 
 
+def _parse_dt(value: Any) -> Optional[datetime]:
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        text = value.strip().replace("Z", "+00:00")
+        try:
+            return datetime.fromisoformat(text)
+        except ValueError:
+            return None
+    return None
+
+
+def _row_day_of_week(row: Dict[str, Any]) -> Optional[int]:
+    value = row.get("day_of_week")
+    if value is not None:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+    ts = _parse_dt(row.get("timestamp"))
+    if ts is None:
+        return None
+    return ts.weekday()
+
+
+def _row_hour_of_day(row: Dict[str, Any]) -> Optional[int]:
+    value = row.get("hour_of_day")
+    if value is not None:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+    ts = _parse_dt(row.get("timestamp"))
+    if ts is None:
+        return None
+    return ts.hour
+
+
+def _filter_signal_rows(
+    rows: List[Dict[str, Any]],
+    source: Optional[str] = None,
+    conviction: Optional[str] = None,
+    day_of_week: Optional[int] = None,
+    hour_of_day: Optional[int] = None,
+) -> List[Dict[str, Any]]:
+    if not rows:
+        return []
+    target_source = _slug(source) if source else ""
+    target_conviction = (conviction or "").strip().upper()
+    filtered: List[Dict[str, Any]] = []
+    for row in rows:
+        if target_source and _slug(row.get("strategy") or row.get("signal_type")) != target_source:
+            continue
+        row_conviction = derive_conviction(score=row.get("score"))
+        if target_conviction and row_conviction != target_conviction:
+            continue
+        if day_of_week is not None and _row_day_of_week(row) != day_of_week:
+            continue
+        if hour_of_day is not None and _row_hour_of_day(row) != hour_of_day:
+            continue
+        filtered.append(row)
+    return filtered
+
+
+def _build_signal_convergence_links(rows: List[Dict[str, Any]]) -> Dict[str, List[str]]:
+    buckets: Dict[Tuple[str, str, datetime], List[str]] = {}
+    for row in rows:
+        signal_id = str(row.get("signal_id") or "").strip()
+        if not signal_id:
+            continue
+        ts = _parse_dt(row.get("timestamp"))
+        if not ts:
+            continue
+        bucket_time = ts.replace(minute=(ts.minute // 30) * 30, second=0, microsecond=0)
+        key = (
+            str(row.get("ticker") or "").upper(),
+            direction_label(row.get("direction")),
+            bucket_time,
+        )
+        buckets.setdefault(key, []).append(signal_id)
+
+    links: Dict[str, List[str]] = {}
+    for ids in buckets.values():
+        unique_ids = list(dict.fromkeys(ids))
+        if len(unique_ids) < 2:
+            continue
+        for sid in unique_ids:
+            links[sid] = [other for other in unique_ids if other != sid]
+    return links
+
+
 def _accuracy_breakdown(rows: List[Dict[str, Any]], key_fn) -> Dict[str, float]:
     buckets: Dict[str, Dict[str, int]] = {}
     for row in rows:
@@ -368,13 +463,27 @@ async def signal_stats(
     direction: Optional[str] = None,
     days: int = Query(30, ge=1, le=3650),
     bias_regime: Optional[str] = None,
+    conviction: Optional[str] = None,
+    day_of_week: Optional[int] = Query(None, ge=0, le=6),
+    hour_of_day: Optional[int] = Query(None, ge=0, le=23),
+    start: Optional[str] = None,
+    end: Optional[str] = None,
 ):
     rows = await get_signal_stats_rows(
-        source=source,
+        source=None,
         ticker=ticker,
         direction=direction,
         days=days,
         bias_regime=bias_regime,
+        start=start,
+        end=end,
+    )
+    rows = _filter_signal_rows(
+        rows,
+        source=source,
+        conviction=conviction,
+        day_of_week=day_of_week,
+        hour_of_day=hour_of_day,
     )
     resolved_rows = _resolved_outcome_records(rows)
     total_signals = len(rows)
@@ -391,25 +500,14 @@ async def signal_stats(
     positive_rows = [r for r in resolved_rows if r["is_accurate"] is True]
     time_to_mfe_hours: List[float] = []
     for row in positive_rows:
-        start = row.get("timestamp")
-        end = row.get("outcome_at")
-        if isinstance(start, str):
-            try:
-                start = datetime.fromisoformat(start)
-            except ValueError:
-                start = None
-        if isinstance(end, str):
-            try:
-                end = datetime.fromisoformat(end)
-            except ValueError:
-                end = None
-        if isinstance(start, datetime) and isinstance(end, datetime):
-            delta_h = (end - start).total_seconds() / 3600.0
+        start_ts = _parse_dt(row.get("timestamp"))
+        end_ts = _parse_dt(row.get("outcome_at"))
+        if isinstance(start_ts, datetime) and isinstance(end_ts, datetime):
+            delta_h = (end_ts - start_ts).total_seconds() / 3600.0
             if delta_h >= 0:
                 time_to_mfe_hours.append(delta_h)
 
-    convergence_candidates = await get_convergence_candidate_rows(days=days, ticker=ticker)
-    convergence_events = _compute_convergence_events(convergence_candidates, min_sources=2)
+    convergence_events = _compute_convergence_events(rows, min_sources=2)
     source_slug = _slug(source) if source else None
     convergence_signal_ids: set[str] = set()
     filtered_events = []
@@ -434,6 +532,11 @@ async def signal_stats(
             "ticker": ticker,
             "direction": direction,
             "bias_regime": bias_regime,
+            "conviction": conviction,
+            "day_of_week": day_of_week,
+            "hour_of_day": hour_of_day,
+            "start": start,
+            "end": end,
         },
         "total_signals": total_signals,
         "with_outcomes": with_outcomes,
@@ -441,22 +544,8 @@ async def signal_stats(
             "overall": round(overall_accuracy, 3),
             "by_direction": _accuracy_breakdown(resolved_rows, lambda r: direction_label(r.get("direction"))),
             "by_regime": _accuracy_breakdown(resolved_rows, _resolve_regime),
-            "by_day_of_week": _accuracy_breakdown(
-                resolved_rows,
-                lambda r: r.get("day_of_week")
-                if r.get("day_of_week") is not None
-                else datetime.fromisoformat(str(r.get("timestamp"))).weekday()
-                if r.get("timestamp")
-                else "unknown",
-            ),
-            "by_hour": _accuracy_breakdown(
-                resolved_rows,
-                lambda r: r.get("hour_of_day")
-                if r.get("hour_of_day") is not None
-                else datetime.fromisoformat(str(r.get("timestamp"))).hour
-                if r.get("timestamp")
-                else "unknown",
-            ),
+            "by_day_of_week": _accuracy_breakdown(resolved_rows, lambda r: _row_day_of_week(r) if _row_day_of_week(r) is not None else "unknown"),
+            "by_hour": _accuracy_breakdown(resolved_rows, lambda r: _row_hour_of_day(r) if _row_hour_of_day(r) is not None else "unknown"),
             "by_conviction": _accuracy_breakdown(
                 resolved_rows,
                 lambda r: derive_conviction(score=r.get("score")),
@@ -604,6 +693,213 @@ async def trade_stats(
     }
 
 
+@analytics_router.get("/signals")
+async def list_signals(
+    source: Optional[str] = None,
+    ticker: Optional[str] = None,
+    direction: Optional[str] = None,
+    bias_regime: Optional[str] = None,
+    conviction: Optional[str] = None,
+    day_of_week: Optional[int] = Query(None, ge=0, le=6),
+    hour_of_day: Optional[int] = Query(None, ge=0, le=23),
+    days: int = Query(30, ge=1, le=3650),
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    sort_by: str = Query("timestamp"),
+    sort_dir: str = Query("desc"),
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+):
+    rows = await get_signal_stats_rows(
+        source=None,
+        ticker=ticker,
+        direction=direction,
+        days=days,
+        bias_regime=bias_regime,
+        start=start,
+        end=end,
+    )
+    rows = _filter_signal_rows(
+        rows,
+        source=source,
+        conviction=conviction,
+        day_of_week=day_of_week,
+        hour_of_day=hour_of_day,
+    )
+    convergence_links = _build_signal_convergence_links(rows)
+
+    normalized_rows: List[Dict[str, Any]] = []
+    for row in rows:
+        outcome_class = classify_outcome(row.get("outcome"))
+        accuracy_flag = True if outcome_class == "positive" else False if outcome_class == "negative" else None
+        signal_id = str(row.get("signal_id") or "")
+        row_copy = dict(row)
+        row_copy["source"] = _slug(row.get("strategy") or row.get("signal_type"))
+        row_copy["conviction"] = derive_conviction(score=row.get("score"))
+        row_copy["mfe_pct"] = round(_mfe_pct(row), 3)
+        row_copy["mae_pct"] = round(_mae_pct(row), 3)
+        row_copy["signal_accuracy"] = accuracy_flag
+        row_copy["traded"] = bool(row.get("traded"))
+        row_copy["convergence_ids"] = convergence_links.get(signal_id, [])
+        normalized_rows.append(row_copy)
+
+    sort_key = sort_by.strip().lower()
+    reverse = sort_dir.strip().lower() != "asc"
+
+    def _sort_value(item: Dict[str, Any]) -> Any:
+        if sort_key == "timestamp":
+            return _parse_dt(item.get("timestamp")) or datetime.min
+        if sort_key == "ticker":
+            return str(item.get("ticker") or "")
+        if sort_key == "direction":
+            return str(item.get("direction") or "")
+        if sort_key == "source":
+            return str(item.get("source") or "")
+        if sort_key == "conviction":
+            return _CONVICTION_ORDER.get(str(item.get("conviction") or "").upper(), 0)
+        if sort_key == "mfe_pct":
+            return _as_float(item.get("mfe_pct"))
+        if sort_key == "mae_pct":
+            return _as_float(item.get("mae_pct"))
+        if sort_key == "accurate":
+            value = item.get("signal_accuracy")
+            return 1 if value is True else 0 if value is False else -1
+        if sort_key == "traded":
+            return 1 if item.get("traded") else 0
+        return _parse_dt(item.get("timestamp")) or datetime.min
+
+    normalized_rows.sort(key=_sort_value, reverse=reverse)
+    total = len(normalized_rows)
+    page = normalized_rows[offset: offset + limit]
+
+    return {
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "rows": page,
+    }
+
+
+@analytics_router.get("/trades")
+async def list_trades(
+    account: Optional[str] = None,
+    ticker: Optional[str] = None,
+    direction: Optional[str] = None,
+    structure: Optional[str] = None,
+    signal_source: Optional[str] = None,
+    status: Optional[str] = None,
+    search: Optional[str] = None,
+    days: int = Query(90, ge=1, le=3650),
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    limit: int = Query(200, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+):
+    rows = await get_trade_rows(
+        account=account,
+        ticker=ticker,
+        direction=direction,
+        structure=structure,
+        days=days,
+        signal_source=signal_source,
+        start=start,
+        end=end,
+    )
+
+    filtered = rows
+    if status:
+        status_upper = status.upper()
+        filtered = [
+            row for row in filtered
+            if str(row.get("status") or "").upper() == status_upper
+        ]
+
+    if search:
+        needle = search.strip().lower()
+        if needle:
+            filtered = [
+                row for row in filtered
+                if needle in str(row.get("ticker") or "").lower()
+                or needle in str(row.get("notes") or "").lower()
+                or needle in str(row.get("structure") or "").lower()
+                or needle in str(row.get("signal_source") or "").lower()
+            ]
+
+    filtered.sort(
+        key=lambda row: (
+            row.get("opened_at") or row.get("closed_at") or datetime.utcnow(),
+            row.get("id") or 0,
+        ),
+        reverse=True,
+    )
+    total = len(filtered)
+    page = filtered[offset: offset + limit]
+
+    return {
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "rows": page,
+    }
+
+
+@analytics_router.get("/trade/{trade_id}/legs")
+async def trade_legs(trade_id: int = Path(..., ge=1)):
+    rows = await fetch_rows(
+        """
+        SELECT *
+        FROM trade_legs
+        WHERE trade_id = $1
+        ORDER BY timestamp ASC, id ASC
+        """,
+        [trade_id],
+    )
+    return {"trade_id": trade_id, "rows": rows}
+
+
+@analytics_router.get("/health-alerts")
+async def health_alerts(
+    resolved: bool = False,
+    limit: int = Query(100, ge=1, le=500),
+):
+    exists_rows = await fetch_rows("SELECT to_regclass('public.health_alerts') AS table_name")
+    exists = bool(exists_rows and exists_rows[0].get("table_name"))
+    if not exists:
+        return {"rows": [], "total": 0}
+
+    query = """
+        SELECT *
+        FROM health_alerts
+        WHERE ($1::boolean IS TRUE AND resolved_at IS NOT NULL)
+           OR ($1::boolean IS FALSE AND resolved_at IS NULL)
+        ORDER BY created_at DESC
+        LIMIT $2
+    """
+    rows = await fetch_rows(query, [resolved, limit])
+    return {"rows": rows, "total": len(rows)}
+
+
+@analytics_router.put("/health-alert/{alert_id}/dismiss")
+async def dismiss_health_alert(alert_id: int = Path(..., ge=1)):
+    exists_rows = await fetch_rows("SELECT to_regclass('public.health_alerts') AS table_name")
+    exists = bool(exists_rows and exists_rows[0].get("table_name"))
+    if not exists:
+        raise HTTPException(status_code=404, detail="health_alerts table not found")
+
+    updated = await fetch_rows(
+        """
+        UPDATE health_alerts
+        SET resolved_at = NOW()
+        WHERE id = $1
+        RETURNING *
+        """,
+        [alert_id],
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail="Alert not found")
+    return {"status": "ok", "alert": updated[0]}
+
+
 @analytics_router.get("/factor-performance")
 async def factor_performance(
     factor: Optional[str] = None,
@@ -643,6 +939,7 @@ async def factor_performance(
         weights = [_as_float(d.get("weight")) for d in data_samples if d.get("weight") is not None]
         stale_flags = [1 for d in data_samples if bool(d.get("stale"))]
         stale_pct = safe_div(sum(stale_flags), len(data_samples))
+        last_stale_date = None
 
         ursa_hits = 0
         ursa_total = 0
@@ -661,6 +958,9 @@ async def factor_performance(
             score = _as_float(row.get("score"))
             timeline.append({"date": day, "score": round(score, 4)})
             day_scores.setdefault(day, []).append(score)
+            row_data = _parse_json_field(row.get("data"))
+            if bool(row_data.get("stale")):
+                last_stale_date = day
 
             if day in next_return:
                 ret = next_return[day]
@@ -678,6 +978,9 @@ async def factor_performance(
         daily_factor_series[name] = {day: mean(vals) for day, vals in day_scores.items()}
 
         correlation = pearson_correlation(aligned_scores, spy_returns)
+        accuracy_when_ursa = safe_div(ursa_hits, ursa_total)
+        accuracy_when_toro = safe_div(toro_hits, toro_total)
+        best_regime = "URSA" if accuracy_when_ursa >= accuracy_when_toro else "TORO"
         factor_output.append(
             {
                 "name": name,
@@ -686,8 +989,10 @@ async def factor_performance(
                 "avg_score": round(mean(scores), 4),
                 "score_std_dev": round(std_dev(scores), 4),
                 "stale_pct": round(stale_pct, 4),
-                "accuracy_when_ursa": round(safe_div(ursa_hits, ursa_total), 3),
-                "accuracy_when_toro": round(safe_div(toro_hits, toro_total), 3),
+                "accuracy_when_ursa": round(accuracy_when_ursa, 3),
+                "accuracy_when_toro": round(accuracy_when_toro, 3),
+                "best_regime": best_regime,
+                "last_stale_date": last_stale_date,
                 "correlation_with_spy_next_day": round(correlation, 4),
                 "most_correlated_with": None,
                 "least_correlated_with": None,
@@ -1026,18 +1331,54 @@ async def portfolio_risk(account: Optional[str] = None):
 
     open_positions = await fetch_rows(
         """
-        SELECT account, ticker
+        SELECT
+            account,
+            ticker,
+            direction,
+            structure,
+            risk_amount,
+            entry_price,
+            stop_loss,
+            target_1
         FROM trades
         WHERE LOWER(COALESCE(status, 'open')) = 'open'
         """
     )
     tickers_by_account: Dict[str, List[str]] = {}
+    positions_by_account_direction: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
+    direction_risk_totals: Dict[str, float] = {"LONG": 0.0, "SHORT": 0.0}
+    ticker_exposure_map: Dict[str, Dict[str, Any]] = {}
     for row in open_positions:
         acct = str(row.get("account") or "UNKNOWN").lower()
         tickers_by_account.setdefault(acct, [])
         ticker_value = str(row.get("ticker") or "").upper()
         if ticker_value and ticker_value not in tickers_by_account[acct]:
             tickers_by_account[acct].append(ticker_value)
+        dir_bucket = "LONG" if direction_label(row.get("direction")) == "BULLISH" else "SHORT"
+        risk_amount = abs(_as_float(row.get("risk_amount"), 0.0))
+        direction_risk_totals[dir_bucket] = direction_risk_totals.get(dir_bucket, 0.0) + risk_amount
+        positions_by_account_direction.setdefault((acct, dir_bucket), []).append(
+            {
+                "ticker": ticker_value,
+                "direction": dir_bucket,
+                "structure": row.get("structure"),
+                "risk_amount": round(risk_amount, 3),
+                "entry_price": _as_float(row.get("entry_price")),
+                "stop_loss": _as_float(row.get("stop_loss")),
+                "target_1": _as_float(row.get("target_1")),
+            }
+        )
+
+        if ticker_value:
+            entry = ticker_exposure_map.setdefault(
+                ticker_value,
+                {"ticker": ticker_value, "total_risk": 0.0, "long_risk": 0.0, "short_risk": 0.0},
+            )
+            entry["total_risk"] += risk_amount
+            if dir_bucket == "LONG":
+                entry["long_risk"] += risk_amount
+            else:
+                entry["short_risk"] += risk_amount
 
     accounts_payload: Dict[str, Any] = {}
     total_risk = 0.0
@@ -1094,11 +1435,158 @@ async def portfolio_risk(account: Optional[str] = None):
             "warning": warning,
         }
 
+    ticker_exposure: List[Dict[str, Any]] = []
+    for ticker, data in ticker_exposure_map.items():
+        dominant_direction = "LONG" if data.get("long_risk", 0.0) >= data.get("short_risk", 0.0) else "SHORT"
+        ticker_exposure.append(
+            {
+                "ticker": ticker,
+                "risk": round(_as_float(data.get("total_risk")), 3),
+                "direction": dominant_direction,
+            }
+        )
+    ticker_exposure.sort(key=lambda row: _as_float(row.get("risk")), reverse=True)
+
+    correlated_groups: List[Dict[str, Any]] = []
+    for (acct, direction_bucket), positions in positions_by_account_direction.items():
+        if len(positions) < 2:
+            continue
+        combined_risk = round(sum(abs(_as_float(p.get("risk_amount"))) for p in positions), 3)
+        estimated_impact = round(combined_risk * 0.45, 3)
+        recommendation = (
+            "Consider reducing one position or adding a hedge so correlated risk remains below 10%."
+            if combined_risk > 0
+            else "Monitor concentration risk."
+        )
+        correlated_groups.append(
+            {
+                "account": acct,
+                "direction": direction_bucket,
+                "tickers": [p.get("ticker") for p in positions if p.get("ticker")],
+                "positions": positions,
+                "combined_risk": combined_risk,
+                "estimated_1pct_move_impact": estimated_impact,
+                "recommendation": recommendation,
+            }
+        )
+
     return {
         "timestamp": latest_ts.isoformat() if latest_ts else datetime.utcnow().isoformat() + "Z",
         "accounts": accounts_payload,
+        "direction_risk": {k: round(v, 3) for k, v in direction_risk_totals.items()},
+        "ticker_exposure": ticker_exposure,
+        "correlated_groups": correlated_groups,
         "cross_account_total_risk": round(total_risk, 3),
         "cross_account_net_delta": round(total_delta, 4),
+    }
+
+
+@analytics_router.get("/price-data")
+async def price_data(
+    ticker: str = Query(..., min_length=1),
+    timeframe: str = Query("D"),
+    days: int = Query(60, ge=1, le=3650),
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    limit: int = Query(5000, ge=1, le=100000),
+):
+    start_dt, end_dt = window_bounds(days=days, start=start, end=end)
+    rows = await fetch_rows(
+        """
+        SELECT timestamp, open, high, low, close, volume
+        FROM price_history
+        WHERE UPPER(ticker) = UPPER($1)
+          AND timeframe = $2
+          AND timestamp >= $3
+          AND timestamp <= $4
+        ORDER BY timestamp ASC
+        LIMIT $5
+        """,
+        [ticker.upper(), timeframe, start_dt, end_dt, limit],
+    )
+    payload_rows = []
+    for row in rows:
+        ts = row.get("timestamp")
+        iso_ts = ts.isoformat() if isinstance(ts, datetime) else str(ts)
+        day = ts.date().isoformat() if isinstance(ts, datetime) else iso_ts[:10]
+        payload_rows.append(
+            {
+                "date": day,
+                "timestamp": iso_ts,
+                "open": _as_float(row.get("open")),
+                "high": _as_float(row.get("high")),
+                "low": _as_float(row.get("low")),
+                "close": _as_float(row.get("close")),
+                "volume": _as_float(row.get("volume")),
+            }
+        )
+    return {
+        "ticker": ticker.upper(),
+        "timeframe": timeframe,
+        "rows": payload_rows,
+        "count": len(payload_rows),
+    }
+
+
+@analytics_router.get("/risk-history")
+async def risk_history(
+    account: Optional[str] = None,
+    days: int = Query(30, ge=1, le=3650),
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    limit: int = Query(2000, ge=1, le=20000),
+):
+    start_dt, end_dt = window_bounds(days=days, start=start, end=end)
+    if account:
+        rows = await fetch_rows(
+            """
+            SELECT timestamp, risk_pct_of_account, total_risk, net_delta
+            FROM portfolio_snapshots
+            WHERE UPPER(account) = UPPER($1)
+              AND timestamp >= $2
+              AND timestamp <= $3
+            ORDER BY timestamp ASC
+            LIMIT $4
+            """,
+            [account, start_dt, end_dt, limit],
+        )
+    else:
+        rows = await fetch_rows(
+            """
+            SELECT
+                timestamp,
+                AVG(risk_pct_of_account) AS risk_pct_of_account,
+                SUM(total_risk) AS total_risk,
+                SUM(net_delta) AS net_delta
+            FROM portfolio_snapshots
+            WHERE timestamp >= $1
+              AND timestamp <= $2
+            GROUP BY timestamp
+            ORDER BY timestamp ASC
+            LIMIT $3
+            """,
+            [start_dt, end_dt, limit],
+        )
+
+    payload_rows = []
+    for row in rows:
+        ts = row.get("timestamp")
+        iso_ts = ts.isoformat() if isinstance(ts, datetime) else str(ts)
+        payload_rows.append(
+            {
+                "date": iso_ts[:10],
+                "timestamp": iso_ts,
+                "risk_pct": round(_as_float(row.get("risk_pct_of_account")) * 100.0, 3),
+                "total_risk": round(_as_float(row.get("total_risk")), 3),
+                "net_delta": round(_as_float(row.get("net_delta")), 4),
+            }
+        )
+
+    return {
+        "account": account.lower() if account else "all",
+        "window_days": days,
+        "rows": payload_rows,
+        "count": len(payload_rows),
     }
 
 
@@ -1116,6 +1604,31 @@ async def run_backtest(request: BacktestRequest):
         start_date=request.start_date,
         end_date=request.end_date,
     )
+
+    min_conviction = (request.params.min_conviction or "").strip().upper()
+    if min_conviction in _CONVICTION_ORDER:
+        threshold = _CONVICTION_ORDER[min_conviction]
+        signals = [
+            row
+            for row in signals
+            if _CONVICTION_ORDER.get(derive_conviction(score=row.get("score")), 0) >= threshold
+        ]
+
+    if request.params.bias_must_align:
+        def _aligned(value: Any) -> bool:
+            text = str(value or "").strip().lower()
+            if not text:
+                return False
+            if any(flag in text for flag in ("misalign", "counter", "against", "false", "no")):
+                return False
+            return any(flag in text for flag in ("align", "true", "yes", "match", "confirm", "with_bias"))
+
+        signals = [row for row in signals if _aligned(row.get("bias_alignment"))]
+
+    if request.params.require_convergence:
+        links = _build_signal_convergence_links(signals)
+        signals = [row for row in signals if links.get(str(row.get("signal_id") or ""))]
+
     if not signals:
         payload = {
             "parameters": request.model_dump(mode="json"),
