@@ -108,7 +108,7 @@ FACTOR_CONFIG = {
         "timeframe": "swing",
     },
     # =====================================================================
-    # MACRO FACTORS (7 factors, total weight: 0.25)
+    # MACRO FACTORS (8 factors, total weight: 0.30 before normalization)
     # Long-term economic and structural indicators.
     # =====================================================================
     "yield_curve": {
@@ -133,6 +133,12 @@ FACTOR_CONFIG = {
         "weight": 0.03,
         "staleness_hours": 48,
         "description": "COPX/GLD - economic activity vs safety demand",
+        "timeframe": "macro",
+    },
+    "dxy_trend": {
+        "weight": 0.05,
+        "staleness_hours": 48,
+        "description": "DXY 5d trend + SMA20 context - strong USD is typically risk-off for equities",
         "timeframe": "macro",
     },
     "excess_cape": {

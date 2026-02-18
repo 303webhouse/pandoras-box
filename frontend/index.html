@@ -1581,7 +1581,10 @@
                 <div class="analytics-card">
                     <div class="analytics-card-header">
                         <h3>Trade Journal</h3>
-                        <button class="analytics-btn" id="journalToggleFormBtn">+ Log Trade</button>
+                        <div class="analytics-controls">
+                            <button class="analytics-btn analytics-btn-ghost" id="journalImportTradesBtn">📥 Import Trades</button>
+                            <button class="analytics-btn" id="journalToggleFormBtn">+ Log Trade</button>
+                        </div>
                     </div>
                     <div class="analytics-filters-grid">
                         <select id="journalFilterAccount">
@@ -1601,6 +1604,12 @@
                             <option value="put_spread">put_spread</option>
                             <option value="call_spread">call_spread</option>
                             <option value="shares">shares</option>
+                        </select>
+                        <select id="journalFilterOrigin">
+                            <option value="">Origin: All</option>
+                            <option value="signal_driven">Signal</option>
+                            <option value="manual">Manual</option>
+                            <option value="imported">Imported</option>
                         </select>
                         <select id="journalFilterSource">
                             <option value="">Signal Source: All</option>
@@ -1627,13 +1636,14 @@
                                     <th>R:R</th>
                                     <th>Account</th>
                                     <th>Bias</th>
+                                    <th>Origin</th>
                                     <th>Signal</th>
                                     <th>Exit Reason</th>
                                 </tr>
                             </thead>
                             <tbody id="journalTableBody">
                                 <tr>
-                                    <td colspan="12" class="analytics-empty">Loading trades...</td>
+                                    <td colspan="13" class="analytics-empty">Loading trades...</td>
                                 </tr>
                             </tbody>
                         </table>
@@ -1679,6 +1689,23 @@
                         <div class="analytics-form-actions">
                             <button class="analytics-btn analytics-btn-ghost" id="journalCancelFormBtn">Cancel</button>
                             <button class="analytics-btn" id="journalSaveTradeBtn">Save Trade</button>
+                        </div>
+                    </div>
+                    <div class="analytics-card" id="journalImportCard" hidden>
+                        <div class="analytics-card-header">
+                            <h3>Import Trades</h3>
+                        </div>
+                        <div class="analytics-form-grid">
+                            <input id="journalImportCsv" type="file" accept=".csv,text/csv">
+                            <textarea id="journalImportText" placeholder="Or paste trade history text here..."></textarea>
+                        </div>
+                        <div class="analytics-form-actions">
+                            <button class="analytics-btn analytics-btn-ghost" id="journalImportCancelBtn">Cancel</button>
+                            <button class="analytics-btn analytics-btn-ghost" id="journalImportParseBtn">Parse</button>
+                            <button class="analytics-btn" id="journalImportConfirmBtn">Import</button>
+                        </div>
+                        <div id="journalImportPreview" class="journal-details">
+                            <div class="analytics-empty">Upload a CSV or paste trades, then click Parse.</div>
                         </div>
                     </div>
                 </div>

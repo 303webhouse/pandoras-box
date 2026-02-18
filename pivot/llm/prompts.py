@@ -167,6 +167,13 @@ Red flags:
   c) nearest options strike to POC
   d) defined-risk structure suggestion
   e) conviction: HIGH / MODERATE / WATCH
+- RVOL modifier:
+  - RVOL > 2.0 (RVOL_CONFIRMED): heavy relative volume confirms institutional activity; conviction can be upgraded.
+  - RVOL 0.8-2.0 (RVOL_NORMAL): conviction unchanged.
+  - RVOL < 0.8 (RVOL_THIN): thin tape; downgrade conviction and require extra convergence.
+- TICK cross-reference:
+  - If `tick_confirmation.status == TICK_CONFIRMS`, treat setup as higher confidence.
+  - If `tick_confirmation.status == TICK_CONTRADICTS`, treat as counter-flow and require stronger confirmation.
 - Never dismiss Whale Hunter for missing strike/OI/premium data.
 
 2) UNUSUAL WHALES FLOW
@@ -250,6 +257,17 @@ When Nick logs a trade, capture: account, ticker, strategy, direction, entry pri
 size, max loss, bias at entry, thesis, catalyst, invalidation, target, stop, confidence (1-5).
 On exit: exit price, P&L ($ and %), followed plan (Y/N), lesson learned.
 
+## TRADE IMPORT PARSING
+When the user asks to import trade history (CSV mention, pasted fills, or quick trade notes),
+parse into structured JSON fields:
+- ticker, direction (BULLISH/BEARISH), structure
+- entry_date, exit_date (or null), entry_price, exit_price
+- strike, short_strike, long_strike, expiry, quantity
+- pnl_dollars, pnl_percent, exit_reason, account
+
+Always present a concise preview table for confirmation before submitting imports.
+If uncertainty exists, keep the field null instead of guessing.
+
 ## OUTPUT GUIDELINES
 - Briefs: under 300 words. Alerts: under 100 words.
 - Always cite actual numbers from the data provided.
@@ -286,6 +304,15 @@ def build_eod_prompt(data: str) -> str:
     return (
         "Generate the EOD summary. Follow the format from your system prompt.\n\n"
         "Lead with the day's verdict: did the bias call play out?\n"
+        "- Factor Health line near the top: `Factor Health: {fresh}/{total} fresh ({stale_count} stale: {stale_names})`\n"
+        "- If stale_count > 5, include warning: `⚠️ Low data confidence — {stale_count} factors stale. Composite bias may be unreliable.`\n"
+        "- Signal Convergence section (last 24h):\n"
+        "  - `🎯 CONVERGENCE: {ticker} {direction} — confirmed by {source1}, {source2}`\n"
+        "  - 2 sources = MODERATE convergence, 3+ sources = HIGH convergence\n"
+        "  - If none: `No signal convergence detected today.`\n"
+        "- UW Flow Intelligence section using today's UW screenshots:\n"
+        "  - Summarize Market Tide/Dark Pool/GEX if available\n"
+        "  - If unavailable: `📊 UW visual data not available today — flow analysis based on API data only.`\n"
         "- Factor changes during the session (what moved, what did not)\n"
         "- DEFCON events today (any triggers fired?)\n"
         "- Notable flow activity (from UW data if available)\n"
@@ -388,7 +415,8 @@ def build_whale_hunter_prompt(signal_text: str, market_context: str) -> str:
         "b) Does Whale lean align with current composite bias?\n"
         "c) What is the nearest options strike to POC?\n"
         "d) Suggest a defined-risk structure based on bias + IV context.\n"
-        "e) Conviction: HIGH / MODERATE / WATCH with a short reason.\n\n"
+        "e) Conviction: HIGH / MODERATE / WATCH with a short reason.\n"
+        "f) Explicitly include RVOL and TICK confirmation impacts if present in context.\n\n"
         "Do NOT treat Whale Hunter as options flow. It is equity tape context.\n\n"
         f"SIGNAL:\n{signal_text}\n\n"
         f"MARKET CONTEXT:\n{market_context}"

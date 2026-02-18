@@ -11,7 +11,7 @@ import hashlib
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from fastapi import APIRouter, HTTPException, Path, Query
+from fastapi import APIRouter, HTTPException, Path, Query, UploadFile, File
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -37,6 +37,7 @@ from analytics.computations import (
 from analytics.queries import (
     close_trade,
     fetch_rows,
+    find_matching_signals,
     get_convergence_candidate_rows,
     get_factor_rows,
     get_latest_benchmarks,
@@ -47,10 +48,14 @@ from analytics.queries import (
     get_signals_for_backtest,
     get_spy_daily_closes,
     get_trade_rows,
+    get_uw_snapshot_rows,
+    insert_uw_snapshot,
     insert_trade,
     insert_trade_leg,
+    trade_exists_duplicate,
     window_bounds,
 )
+from analytics.robinhood_parser import parse_robinhood_csv_bytes
 from database.postgres_client import log_signal
 
 analytics_router = APIRouter()
@@ -97,6 +102,11 @@ class LogTradeRequest(BaseModel):
     full_context: Dict[str, Any] = Field(default_factory=dict)
     bias_at_entry: Optional[str] = None
     risk_amount: Optional[float] = None
+    origin: Optional[str] = "manual"
+    strike: Optional[float] = None
+    expiry: Optional[str] = None
+    short_strike: Optional[float] = None
+    long_strike: Optional[float] = None
     status: str = "open"
 
 
@@ -148,6 +158,20 @@ class LogSignalRequest(BaseModel):
     notes: Optional[str] = None
     market_state: Optional[Dict[str, Any]] = None
     factor_snapshot: Optional[Dict[str, Any]] = None
+
+
+class UwSnapshotRequest(BaseModel):
+    timestamp: Optional[datetime] = None
+    dashboard_type: str
+    time_slot: Optional[str] = None
+    extracted_data: Dict[str, Any] = Field(default_factory=dict)
+    raw_summary: Optional[str] = None
+    signal_alignment: Optional[str] = None
+
+
+class ImportTradesRequest(BaseModel):
+    trades: List[Dict[str, Any]] = Field(default_factory=list)
+    account: Optional[str] = "robinhood"
 
 
 def _as_float(value: Any, default: float = 0.0) -> float:
@@ -576,6 +600,7 @@ async def trade_stats(
     ticker: Optional[str] = None,
     direction: Optional[str] = None,
     structure: Optional[str] = None,
+    origin: Optional[str] = None,
     days: int = Query(90, ge=1, le=3650),
     signal_source: Optional[str] = None,
 ):
@@ -584,6 +609,7 @@ async def trade_stats(
         ticker=ticker,
         direction=direction,
         structure=structure,
+        origin=origin,
         days=days,
         signal_source=signal_source,
     )
@@ -622,24 +648,26 @@ async def trade_stats(
     by_account: Dict[str, Dict[str, Any]] = {}
     by_structure: Dict[str, Dict[str, Any]] = {}
     by_bias: Dict[str, Dict[str, Any]] = {}
+    by_origin: Dict[str, Dict[str, Any]] = {}
     exit_reason_counts: Dict[str, int] = {}
 
     for row in closed_rows:
         acct = (row.get("account") or "UNKNOWN").lower()
         struct = (row.get("structure") or "unknown").lower()
         bias = (row.get("bias_at_entry") or row.get("linked_signal_bias") or "UNKNOWN").upper()
+        origin = (row.get("origin") or "manual").lower()
         pnl = _as_float(row.get("pnl_dollars"))
         win_flag = 1 if pnl > 0 else 0
         reason = (row.get("exit_reason") or "unknown").lower()
         exit_reason_counts[reason] = exit_reason_counts.get(reason, 0) + 1
 
-        for bucket_map, key in ((by_account, acct), (by_structure, struct), (by_bias, bias)):
+        for bucket_map, key in ((by_account, acct), (by_structure, struct), (by_bias, bias), (by_origin, origin)):
             bucket = bucket_map.setdefault(key, {"trades": 0, "wins": 0, "pnl": 0.0})
             bucket["trades"] += 1
             bucket["wins"] += win_flag
             bucket["pnl"] += pnl
 
-    for bucket_map in (by_account, by_structure, by_bias):
+    for bucket_map in (by_account, by_structure, by_bias, by_origin):
         for key, bucket in list(bucket_map.items()):
             bucket_map[key] = {
                 "trades": bucket["trades"],
@@ -683,6 +711,7 @@ async def trade_stats(
         "by_account": by_account,
         "by_structure": by_structure,
         "by_bias_at_entry": by_bias,
+        "by_origin": by_origin,
         "by_exit_reason": exit_reason_counts,
         "equity_curve": equity_curve,
         "benchmarks": {
@@ -786,6 +815,7 @@ async def list_trades(
     ticker: Optional[str] = None,
     direction: Optional[str] = None,
     structure: Optional[str] = None,
+    origin: Optional[str] = None,
     signal_source: Optional[str] = None,
     status: Optional[str] = None,
     search: Optional[str] = None,
@@ -800,6 +830,7 @@ async def list_trades(
         ticker=ticker,
         direction=direction,
         structure=structure,
+        origin=origin,
         days=days,
         signal_source=signal_source,
         start=start,
@@ -823,6 +854,7 @@ async def list_trades(
                 or needle in str(row.get("notes") or "").lower()
                 or needle in str(row.get("structure") or "").lower()
                 or needle in str(row.get("signal_source") or "").lower()
+                or needle in str(row.get("origin") or "").lower()
             ]
 
     filtered.sort(
@@ -1814,9 +1846,26 @@ async def run_backtest(request: BacktestRequest):
 async def log_trade(request: LogTradeRequest):
     payload = request.model_dump()
     payload["ticker"] = request.ticker.upper()
+    payload["origin"] = (request.origin or "manual").lower()
+    matches: List[str] = []
     if request.pivot_recommendation and len(request.pivot_recommendation) > 2000:
         payload["pivot_recommendation"] = request.pivot_recommendation[:2000]
+
+    # Imported trades can be auto-upgraded to signal-driven if a nearby matching signal exists.
+    if payload["origin"] == "imported":
+        opened_at = request.opened_at or datetime.utcnow()
+        matches = await find_matching_signals(
+            ticker=payload["ticker"],
+            direction=request.direction or "",
+            entry_timestamp=opened_at,
+            window_hours=4,
+        )
+        if matches:
+            payload["signal_id"] = matches[0]
+            payload["origin"] = "signal_driven"
+
     created = await insert_trade(payload)
+    created["signal_matches"] = matches if payload.get("origin") == "signal_driven" else []
     return {"status": "ok", "trade": created}
 
 
@@ -1846,6 +1895,165 @@ async def log_signal_endpoint(request: LogSignalRequest):
         data["timestamp"] = request.timestamp.isoformat()
     await log_signal(data, market_state=market_state, factor_snapshot=factor_snapshot)
     return {"status": "ok", "signal_id": request.signal_id}
+
+
+@analytics_router.post("/log-uw-snapshot")
+async def log_uw_snapshot(request: UwSnapshotRequest):
+    payload = request.model_dump()
+    payload["dashboard_type"] = str(payload.get("dashboard_type") or "").strip().lower()
+    if payload["dashboard_type"] not in {"market_tide", "dark_pool", "gex"}:
+        raise HTTPException(status_code=400, detail="dashboard_type must be one of: market_tide, dark_pool, gex")
+    created = await insert_uw_snapshot(payload)
+    return {"status": "ok", "snapshot": created}
+
+
+@analytics_router.get("/uw-snapshots")
+async def get_uw_snapshots(
+    days: int = Query(1, ge=1, le=30),
+    dashboard_type: Optional[str] = None,
+    time_slot: Optional[str] = None,
+):
+    rows = await get_uw_snapshot_rows(days=days, dashboard_type=dashboard_type, time_slot=time_slot)
+    return {
+        "window_days": days,
+        "count": len(rows),
+        "rows": rows,
+    }
+
+
+@analytics_router.post("/parse-robinhood-csv")
+async def parse_robinhood_csv(file: UploadFile = File(...)):
+    if not file.filename or not file.filename.lower().endswith(".csv"):
+        raise HTTPException(status_code=400, detail="Upload a .csv file")
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="CSV is empty")
+    try:
+        return parse_robinhood_csv_bytes(raw)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Failed parsing CSV: {exc}") from exc
+
+
+@analytics_router.post("/import-trades")
+async def import_trades(request: ImportTradesRequest):
+    imported = 0
+    signal_matched = 0
+    duplicates_skipped = 0
+    errors: List[str] = []
+    open_positions = 0
+    total_pnl = 0.0
+
+    for idx, trade in enumerate(request.trades):
+        try:
+            ticker = str(trade.get("ticker") or "").strip().upper()
+            if not ticker:
+                errors.append(f"row {idx + 1}: missing ticker")
+                continue
+
+            direction = str(trade.get("direction") or "").strip().upper() or None
+            entry_date_raw = trade.get("entry_date") or trade.get("opened_at")
+            entry_dt = _parse_dt(entry_date_raw)
+            if entry_dt is None and isinstance(entry_date_raw, str) and len(entry_date_raw.strip()) == 10:
+                entry_dt = _parse_dt(f"{entry_date_raw.strip()}T00:00:00")
+            if entry_dt is None:
+                entry_dt = datetime.utcnow()
+
+            strike = trade.get("strike")
+            short_strike = trade.get("short_strike")
+
+            if await trade_exists_duplicate(
+                ticker=ticker,
+                direction=direction,
+                entry_date=entry_dt,
+                strike=_as_float(strike) if strike is not None else None,
+                short_strike=_as_float(short_strike) if short_strike is not None else None,
+            ):
+                duplicates_skipped += 1
+                continue
+
+            payload: Dict[str, Any] = {
+                "ticker": ticker,
+                "direction": direction,
+                "account": (trade.get("account") or request.account or "robinhood"),
+                "structure": trade.get("structure"),
+                "entry_price": trade.get("entry_price"),
+                "stop_loss": trade.get("stop_loss"),
+                "target_1": trade.get("target_1"),
+                "quantity": trade.get("quantity"),
+                "opened_at": entry_dt,
+                "notes": trade.get("notes"),
+                "status": (trade.get("status") or "open"),
+                "origin": "imported",
+                "strike": strike,
+                "expiry": trade.get("expiry"),
+                "short_strike": short_strike,
+                "long_strike": trade.get("long_strike"),
+                "exit_price": trade.get("exit_price"),
+                "pnl_dollars": trade.get("pnl_dollars"),
+                "pnl_percent": trade.get("pnl_percent"),
+                "exit_reason": trade.get("exit_reason"),
+            }
+            exit_date_raw = trade.get("exit_date") or trade.get("closed_at")
+            exit_dt = _parse_dt(exit_date_raw)
+            if exit_dt is None and isinstance(exit_date_raw, str) and len(exit_date_raw.strip()) == 10:
+                exit_dt = _parse_dt(f"{exit_date_raw.strip()}T00:00:00")
+            if exit_dt is not None:
+                payload["closed_at"] = exit_dt
+
+            matches = await find_matching_signals(
+                ticker=ticker,
+                direction=direction or "",
+                entry_timestamp=entry_dt,
+                window_hours=4,
+            )
+            if matches:
+                payload["signal_id"] = matches[0]
+                payload["origin"] = "signal_driven"
+                signal_matched += 1
+
+            created = await insert_trade(payload)
+            trade_id = created.get("id")
+            imported += 1
+
+            if str(payload.get("status", "")).lower() == "open":
+                open_positions += 1
+            if created.get("pnl_dollars") is not None:
+                total_pnl += _as_float(created.get("pnl_dollars"))
+            elif trade.get("pnl_dollars") is not None:
+                total_pnl += _as_float(trade.get("pnl_dollars"))
+
+            legs = trade.get("legs") or []
+            if trade_id and isinstance(legs, list):
+                for leg in legs:
+                    if not isinstance(leg, dict):
+                        continue
+                    leg_ts = _parse_dt(leg.get("timestamp")) or entry_dt
+                    await insert_trade_leg(
+                        {
+                            "trade_id": trade_id,
+                            "timestamp": leg_ts,
+                            "action": leg.get("action") or "fill",
+                            "direction": leg.get("direction") or direction or "UNKNOWN",
+                            "quantity": _as_float(leg.get("quantity"), 0.0),
+                            "price": _as_float(leg.get("price"), 0.0),
+                            "strike": leg.get("strike"),
+                            "expiry": leg.get("expiry"),
+                            "leg_type": leg.get("leg_type") or leg.get("option_type") or payload.get("structure"),
+                            "commission": _as_float(leg.get("commission"), 0.0),
+                            "notes": leg.get("trans_code"),
+                        }
+                    )
+        except Exception as exc:
+            errors.append(f"row {idx + 1}: {exc}")
+
+    return {
+        "imported": imported,
+        "signal_matched": signal_matched,
+        "duplicates_skipped": duplicates_skipped,
+        "open_positions": open_positions,
+        "errors": errors,
+        "total_pnl": round(total_pnl, 2),
+    }
 
 
 @analytics_router.get("/export/signals")

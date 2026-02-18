@@ -1,4 +1,4 @@
-"""
+﻿"""
 Pandora Bridge - Discord Bot (v2.0)
 Bridges Unusual Whales data from Discord to Pandora's Box
 
@@ -17,6 +17,7 @@ Scheduled Queries:
 
 import os
 import re
+import json
 import asyncio
 import base64
 import logging
@@ -25,7 +26,7 @@ import sqlite3
 import aiohttp
 import time as time_module
 from collections import defaultdict
-from datetime import datetime, time, timezone
+from datetime import datetime, time, timezone, timedelta, date as date_cls
 from typing import Optional, Dict, Any, List
 import pytz
 from discord_bridge.uw.parser import parse_flow_embed, parse_ticker_embed
@@ -114,6 +115,9 @@ uw_flow_filter = FlowFilter()
 uw_flow_aggregator = FlowAggregator()
 recent_uw_flow: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
 last_zone_shift_state: Optional[Dict[str, Any]] = None
+uw_request_sent_state: Dict[str, str] = {}
+uw_snapshot_received_state: Dict[str, Dict[str, Any]] = defaultdict(dict)
+pending_trade_imports: Dict[int, Dict[str, Any]] = {}
 
 UW_CONTEXT_WINDOW_SECONDS = 4 * 60 * 60
 ZONE_CONTEXT_WINDOW_SECONDS = 6 * 60 * 60
@@ -179,6 +183,117 @@ def is_market_hours() -> bool:
 def is_trading_day() -> bool:
     """Check if today is a trading day (weekday)"""
     return get_et_now().weekday() < 5
+
+
+def _nth_weekday_of_month(year: int, month: int, weekday: int, n: int) -> date_cls:
+    d = date_cls(year, month, 1)
+    while d.weekday() != weekday:
+        d += timedelta(days=1)
+    d += timedelta(days=7 * (n - 1))
+    return d
+
+
+def _last_weekday_of_month(year: int, month: int, weekday: int) -> date_cls:
+    if month == 12:
+        d = date_cls(year + 1, 1, 1) - timedelta(days=1)
+    else:
+        d = date_cls(year, month + 1, 1) - timedelta(days=1)
+    while d.weekday() != weekday:
+        d -= timedelta(days=1)
+    return d
+
+
+def _observed_holiday(day: date_cls) -> date_cls:
+    if day.weekday() == 5:
+        return day - timedelta(days=1)
+    if day.weekday() == 6:
+        return day + timedelta(days=1)
+    return day
+
+
+def _us_market_holidays(year: int) -> set[date_cls]:
+    # Major market holidays (approximation, sufficient for reminder suppression).
+    holidays = {
+        _observed_holiday(date_cls(year, 1, 1)),                         # New Year's Day
+        _nth_weekday_of_month(year, 1, 0, 3),                            # MLK Day
+        _nth_weekday_of_month(year, 2, 0, 3),                            # Presidents Day
+        _last_weekday_of_month(year, 5, 0),                              # Memorial Day
+        _observed_holiday(date_cls(year, 7, 4)),                         # Independence Day
+        _nth_weekday_of_month(year, 9, 0, 1),                            # Labor Day
+        _nth_weekday_of_month(year, 11, 3, 4),                           # Thanksgiving
+        _observed_holiday(date_cls(year, 12, 25)),                       # Christmas
+    }
+    return holidays
+
+
+def is_us_market_open_day(ts: Optional[datetime] = None) -> bool:
+    now = (ts or get_et_now()).astimezone(ET)
+    if now.weekday() >= 5:
+        return False
+    holidays = _us_market_holidays(now.year)
+    return now.date() not in holidays
+
+
+def _uw_time_slot(now: Optional[datetime] = None) -> str:
+    ts = (now or get_et_now()).astimezone(ET)
+    if ts.hour < 12:
+        return "morning"
+    if ts.hour < 16:
+        return "afternoon"
+    return "close"
+
+
+def _mark_uw_snapshot_received(dashboard_type: str, observed_at: Optional[datetime] = None) -> None:
+    ts = (observed_at or get_et_now()).astimezone(ET)
+    slot = _uw_time_slot(ts)
+    day_key = ts.date().isoformat()
+    uw_snapshot_received_state[day_key][slot] = dashboard_type
+
+
+async def send_uw_screenshot_request(time_slot: str) -> None:
+    channel_id = PIVOT_CHAT_CHANNEL_ID or NOTIFICATION_CHANNEL_ID
+    channel = bot.get_channel(channel_id)
+    if not channel:
+        return
+
+    now = get_et_now()
+    if not is_us_market_open_day(now):
+        return
+
+    day_key = now.date().isoformat()
+    slot_key = f"{day_key}:{time_slot}"
+    if uw_request_sent_state.get(time_slot) == day_key or uw_request_sent_state.get(slot_key) == day_key:
+        return
+
+    messages = {
+        "morning": (
+            "ðŸ“Š **Morning data request** â€” when you can, please drop screenshots of:\n"
+            "â€¢ **UW Market Tide**\n"
+            "â€¢ **UW Dark Pool**\n"
+            "No rush â€” anytime before noon works."
+        ),
+        "afternoon": (
+            "ðŸ“Š **Power hour setup** â€” if you can grab:\n"
+            "â€¢ **UW Market Tide**\n"
+            "â€¢ **UW Dark Pool**\n"
+            "This helps prep for late-session signal quality."
+        ),
+        "close": (
+            "ðŸ“Š **EOD brief data request** â€” please drop when possible:\n"
+            "â€¢ **UW Market Tide**\n"
+            "â€¢ **UW Dark Pool**\n"
+            "â€¢ **UW Options GEX**\n"
+            "If nothing arrives by 4:30 PM ET, the brief will run with API-only flow context."
+        ),
+    }
+
+    text = messages.get(time_slot)
+    if not text:
+        return
+
+    await channel.send(text)
+    uw_request_sent_state[time_slot] = day_key
+    uw_request_sent_state[slot_key] = day_key
 
 
 def _parse_iso_datetime(value: Any) -> Optional[datetime]:
@@ -370,7 +485,7 @@ def parse_market_tide(embed: discord.Embed) -> Optional[Dict[str, Any]]:
                 if put_match:
                     result["put_premium"] = int(put_match.group(1).replace(',', ''))
         
-        logger.info(f"📊 Parsed market_tide: {result['sentiment']}")
+        logger.info(f"ðŸ“Š Parsed market_tide: {result['sentiment']}")
         return result
         
     except Exception as e:
@@ -413,16 +528,16 @@ def parse_sectorflow(embed: discord.Embed) -> Optional[Dict[str, Any]]:
             match = re.search(pattern, all_text, re.IGNORECASE)
             if match:
                 context = match.group(1).lower()
-                if any(word in context for word in ["bullish", "call", "green", "↑", "+"]):
+                if any(word in context for word in ["bullish", "call", "green", "â†‘", "+"]):
                     result["sectors"][sector] = "BULLISH"
                     result["bullish_sectors"].append(sector)
-                elif any(word in context for word in ["bearish", "put", "red", "↓", "-"]):
+                elif any(word in context for word in ["bearish", "put", "red", "â†“", "-"]):
                     result["sectors"][sector] = "BEARISH"
                     result["bearish_sectors"].append(sector)
                 else:
                     result["sectors"][sector] = "NEUTRAL"
         
-        logger.info(f"📊 Parsed sectorflow: {len(result['bullish_sectors'])} bullish, {len(result['bearish_sectors'])} bearish")
+        logger.info(f"ðŸ“Š Parsed sectorflow: {len(result['bullish_sectors'])} bullish, {len(result['bearish_sectors'])} bearish")
         return result
         
     except Exception as e:
@@ -483,7 +598,7 @@ def parse_oi_change(embed: discord.Embed, increase: bool = True) -> Optional[Dic
                     # OI decrease in calls = less bullish, puts = less bearish
                     pass
         
-        logger.info(f"📊 Parsed oi_{keyword}: {len(result['contracts'])} contracts")
+        logger.info(f"ðŸ“Š Parsed oi_{keyword}: {len(result['contracts'])} contracts")
         return result
         
     except Exception as e:
@@ -524,7 +639,7 @@ def parse_economic_calendar(embed: discord.Embed) -> Optional[Dict[str, Any]]:
             if event["high_impact"]:
                 result["high_impact_today"] = True
         
-        logger.info(f"📊 Parsed economic_calendar: {len(result['events'])} events, high_impact={result['high_impact_today']}")
+        logger.info(f"ðŸ“Š Parsed economic_calendar: {len(result['events'])} events, high_impact={result['high_impact_today']}")
         return result
         
     except Exception as e:
@@ -555,7 +670,7 @@ def parse_flow_alert(embed: discord.Embed) -> Optional[Dict[str, Any]]:
         # Extract ticker
         ticker_match = re.match(r'^([A-Z]{1,5})\b', title)
         if not ticker_match:
-            ticker_match = re.search(r'\b([A-Z]{1,5})\s*[-–]\s*\$', combined)
+            ticker_match = re.search(r'\b([A-Z]{1,5})\s*[-â€“]\s*\$', combined)
         if not ticker_match:
             ticker_match = re.search(r'\b([A-Z]{2,5})\b', combined)
         
@@ -598,7 +713,7 @@ def parse_flow_alert(embed: discord.Embed) -> Optional[Dict[str, Any]]:
         result["notes"] = f"Auto-parsed from UW: {title[:100]}"
         
         if result["ticker"]:
-            logger.info(f"📊 Parsed flow_alert: {result['ticker']} {result['sentiment']}")
+            logger.info(f"ðŸ“Š Parsed flow_alert: {result['ticker']} {result['sentiment']}")
             return result
         
         return None
@@ -627,17 +742,17 @@ async def send_to_pandora(endpoint: str, data: Dict[str, Any]) -> bool:
                 timeout=aiohttp.ClientTimeout(total=10),
             ) as response:
                 if response.status == 200:
-                    logger.info(f"✅ Sent to Pandora {endpoint}")
+                    logger.info(f"âœ… Sent to Pandora {endpoint}")
                     return True
                 else:
                     error_text = await response.text()
-                    logger.error(f"❌ Pandora API error: {response.status} - {error_text}")
+                    logger.error(f"âŒ Pandora API error: {response.status} - {error_text}")
                     return False
     except asyncio.TimeoutError:
-        logger.error(f"❌ Timeout sending to {endpoint}")
+        logger.error(f"âŒ Timeout sending to {endpoint}")
         return False
     except Exception as e:
-        logger.error(f"❌ Error sending to Pandora: {e}")
+        logger.error(f"âŒ Error sending to Pandora: {e}")
         return False
 
 
@@ -753,9 +868,9 @@ async def send_uw_command(channel: discord.TextChannel, command: str):
     # For now, we'll send it as a message - some bots respond to this
     try:
         await channel.send(command)
-        logger.info(f"📤 Sent query: {command}")
+        logger.info(f"ðŸ“¤ Sent query: {command}")
     except Exception as e:
-        logger.error(f"❌ Failed to send query: {e}")
+        logger.error(f"âŒ Failed to send query: {e}")
 
 
 # ================================
@@ -830,6 +945,32 @@ async def reminder_scheduler():
 
 @reminder_scheduler.before_loop
 async def before_reminder_scheduler():
+    await bot.wait_until_ready()
+
+
+@tasks.loop(minutes=1)
+async def uw_screenshot_request_scheduler():
+    """
+    Ask for UW screenshots at fixed checkpoints:
+    - 10:00 ET
+    - 15:00 ET
+    - 16:05 ET
+    """
+    now = get_et_now()
+    if not is_us_market_open_day(now):
+        return
+
+    hhmm = now.strftime("%H:%M")
+    if hhmm == "10:00":
+        await send_uw_screenshot_request("morning")
+    elif hhmm == "15:00":
+        await send_uw_screenshot_request("afternoon")
+    elif hhmm == "16:05":
+        await send_uw_screenshot_request("close")
+
+
+@uw_screenshot_request_scheduler.before_loop
+async def before_uw_screenshot_request_scheduler():
     await bot.wait_until_ready()
 
 
@@ -951,7 +1092,7 @@ def format_trade_idea_embed(signal: Dict[str, Any]) -> discord.Embed:
 async def before_scheduled_queries():
     """Wait until bot is ready before starting scheduled tasks"""
     await bot.wait_until_ready()
-    logger.info("⏰ Scheduled queries task started")
+    logger.info("â° Scheduled queries task started")
 
 
 # ================================
@@ -1065,6 +1206,57 @@ def _format_vix_context(vix_term: Optional[Dict[str, Any]]) -> str:
     if vix_3m is None:
         return f"VIX: {vix_current} | Term Structure: {term}"
     return f"VIX: {vix_current} | VIX3M: {vix_3m} | Term Structure: {term}"
+
+
+def _format_factor_health_context(composite_payload: Optional[Dict[str, Any]]) -> str:
+    if not composite_payload:
+        return "Factor Health: unavailable"
+
+    active = composite_payload.get("active_factors") or []
+    stale = composite_payload.get("stale_factors") or []
+    if not isinstance(active, list):
+        active = []
+    if not isinstance(stale, list):
+        stale = []
+
+    total = len(active) + len(stale)
+    if total == 0:
+        return "Factor Health: unavailable"
+
+    stale_count = len(stale)
+    if stale_count:
+        stale_names = ", ".join(str(x) for x in stale[:6])
+        if len(stale) > 6:
+            stale_names = f"{stale_names}, +{len(stale) - 6} more"
+    else:
+        stale_names = "none"
+
+    summary = f"Factor Health: {len(active)}/{total} fresh ({stale_count} stale: {stale_names})"
+    if stale_count > 5:
+        summary += f"\nâš ï¸ Low data confidence - {stale_count} factors stale. Composite bias may be unreliable."
+    return summary
+
+
+def _format_convergence_context(payload: Optional[Dict[str, Any]]) -> str:
+    if not payload:
+        return "Signal Convergence (24h): unavailable"
+
+    events = payload.get("convergence_events") or []
+    if not isinstance(events, list):
+        events = []
+    if not events:
+        return "Signal Convergence (24h): No signal convergence detected today."
+
+    lines = ["Signal Convergence (24h):"]
+    for event in events[:3]:
+        ticker = str(event.get("ticker") or "?").upper()
+        direction = str(event.get("direction") or "UNKNOWN").upper()
+        sources = event.get("sources") or []
+        source_names = ", ".join(str(s) for s in sources) if isinstance(sources, list) else str(sources)
+        source_count = int(event.get("source_count") or (len(sources) if isinstance(sources, list) else 0))
+        strength = "HIGH convergence" if source_count >= 3 else "MODERATE convergence"
+        lines.append(f"- ðŸŽ¯ CONVERGENCE: {ticker} {direction} â€” confirmed by {source_names} ({strength})")
+    return "\n".join(lines)
 
 
 def _format_quote_context(symbol: str, quote_data: Optional[Dict[str, Any]]) -> str:
@@ -1316,11 +1508,119 @@ def _build_convergence_block(
     price_text = f"${float(poc_level):.2f}" if isinstance(poc_level, (int, float)) else "N/A"
     uw_line = _format_uw_alert_line(lead).lstrip("- ").replace("premium ", "")
     return (
-        f"⚡ CONVERGENCE: Whale Hunter tape signal + UW options flow both active on {(ticker or '').upper()}\n"
+        f"âš¡ CONVERGENCE: Whale Hunter tape signal + UW options flow both active on {(ticker or '').upper()}\n"
         f"Whale: {lean} distribution/accumulation at {price_text}\n"
         f"UW Flow: {uw_line}\n"
         f"Conviction upgrade: {conviction}"
     )
+
+
+async def _calculate_rvol_for_whale(
+    ticker: str,
+    event_ts: datetime,
+    lookback_days: int = 20,
+) -> Optional[float]:
+    symbol = (ticker or "").upper().strip()
+    if not symbol:
+        return None
+
+    endpoint = f"/analytics/price-data?ticker={symbol}&timeframe=5m&days={max(10, lookback_days + 5)}&limit=20000"
+    async with aiohttp.ClientSession() as session:
+        payload = await _fetch_json(session, endpoint)
+    rows = payload.get("rows") if isinstance(payload, dict) else None
+    if not isinstance(rows, list) or not rows:
+        return None
+
+    target_et = event_ts.astimezone(ET)
+    target_slot = target_et.strftime("%H:%M")
+    current_volume: Optional[float] = None
+    comparison: List[float] = []
+
+    for row in rows:
+        ts = _parse_iso_datetime(row.get("timestamp"))
+        if not ts:
+            continue
+        ts_et = ts.astimezone(ET)
+        if ts_et.strftime("%H:%M") != target_slot:
+            continue
+        vol = _safe_float(row.get("volume"))
+        if vol is None:
+            continue
+        if ts_et.date() == target_et.date():
+            current_volume = vol
+        elif ts_et.date() < target_et.date():
+            comparison.append(vol)
+
+    if current_volume is None or not comparison:
+        return None
+
+    comparison = comparison[-lookback_days:]
+    baseline = sum(comparison) / len(comparison) if comparison else 0.0
+    if baseline <= 0:
+        return None
+    return float(current_volume / baseline)
+
+
+def _apply_rvol_conviction_modifier(base_conviction: str, rvol: Optional[float]) -> tuple[str, str]:
+    conviction = str(base_conviction or "MODERATE").upper()
+    if conviction not in {"WATCH", "MODERATE", "HIGH"}:
+        conviction = "MODERATE"
+    if rvol is None:
+        return conviction, "RVOL_UNAVAILABLE"
+    if rvol > 2.0:
+        if conviction == "WATCH":
+            conviction = "MODERATE"
+        elif conviction == "MODERATE":
+            conviction = "HIGH"
+        return conviction, "RVOL_CONFIRMED"
+    if rvol < 0.8:
+        if conviction == "HIGH":
+            conviction = "MODERATE"
+        elif conviction == "MODERATE":
+            conviction = "WATCH"
+        return conviction, "RVOL_THIN"
+    return conviction, "RVOL_NORMAL"
+
+
+async def _build_tick_whale_confirmation(
+    whale_direction: Optional[str],
+    reference_ts: Optional[datetime] = None,
+) -> Optional[Dict[str, Any]]:
+    lean = str(whale_direction or "").upper()
+    if lean not in {"BULLISH", "BEARISH"}:
+        return None
+
+    async with aiohttp.ClientSession() as session:
+        tick_payload = await _fetch_json(session, "/bias/tick")
+    if not isinstance(tick_payload, dict) or tick_payload.get("status") not in {"ok", "success"}:
+        return None
+
+    updated_at = _parse_iso_datetime(tick_payload.get("updated_at"))
+    now_utc = (reference_ts or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    if updated_at and abs((now_utc - updated_at).total_seconds()) > 30 * 60:
+        return None
+
+    candidates = [
+        _safe_float(tick_payload.get("tick_close")),
+        _safe_float(tick_payload.get("tick_low")),
+        _safe_float(tick_payload.get("tick_high")),
+    ]
+    values = [float(v) for v in candidates if isinstance(v, float)]
+    if not values:
+        return None
+
+    tick_value = max(values, key=lambda x: abs(x))
+    if abs(tick_value) < 800:
+        return None
+
+    tick_direction = "BEARISH" if tick_value < 0 else "BULLISH"
+    status = "TICK_CONFIRMS" if tick_direction == lean else "TICK_CONTRADICTS"
+    return {
+        "tick_value": round(tick_value, 2),
+        "tick_time": updated_at.isoformat() if updated_at else None,
+        "tick_direction": tick_direction,
+        "status": status,
+    }
 
 
 async def build_recent_uw_context(ticker: str, lookback_hours: int = 4) -> tuple[str, List[Dict[str, Any]]]:
@@ -1344,7 +1644,9 @@ async def build_market_context(user_text: str = "", ticker_hint: Optional[str] =
         tasks = [
             _fetch_json(session, "/bias/DAILY"),
             _fetch_json(session, "/market-indicators/vix-term"),
+            _fetch_json(session, "/bias/composite"),
             _fetch_json(session, "/analytics/strategy-health?days=30"),
+            _fetch_json(session, "/analytics/convergence-stats?days=1&min_sources=2"),
         ]
         tasks.extend(_fetch_json(session, f"/hybrid/price/{symbol}") for symbol in symbols)
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -1354,12 +1656,16 @@ async def build_market_context(user_text: str = "", ticker_hint: Optional[str] =
 
     bias_state = as_dict(results[0])
     vix_term = as_dict(results[1])
-    strategy_health_payload = as_dict(results[2])
-    quote_results = [as_dict(value) for value in results[3:]]
+    composite_payload = as_dict(results[2])
+    strategy_health_payload = as_dict(results[3])
+    convergence_payload = as_dict(results[4])
+    quote_results = [as_dict(value) for value in results[5:]]
 
     lines = [
         _format_bias_context(bias_state),
         _format_vix_context(vix_term),
+        _format_factor_health_context(composite_payload),
+        _format_convergence_context(convergence_payload),
         _format_strategy_health_context(strategy_health_payload),
     ]
     for symbol, quote_data in zip(symbols, quote_results):
@@ -1598,6 +1904,98 @@ def _data_url_to_image_parts(data_url: str) -> Optional[tuple[str, str]]:
     if not media_type or not b64_data:
         return None
     return media_type, b64_data
+
+
+def _detect_uw_dashboard_type(text: str, fallback: str = "") -> Optional[str]:
+    corpus = f"{text}\n{fallback}".lower()
+    if not corpus.strip():
+        return None
+    if "market tide" in corpus or "net premium" in corpus:
+        return "market_tide"
+    if "dark pool" in corpus or "darkpool" in corpus:
+        return "dark_pool"
+    if "gex" in corpus or "gamma exposure" in corpus or "put wall" in corpus or "call wall" in corpus:
+        return "gex"
+    return None
+
+
+def _extract_uw_snapshot_structured_data(summary_text: str) -> Dict[str, Any]:
+    text = summary_text or ""
+    upper = text.upper()
+    data: Dict[str, Any] = {}
+
+    if "BULLISH" in upper:
+        data["direction"] = "BULLISH"
+    elif "BEARISH" in upper:
+        data["direction"] = "BEARISH"
+    elif "NEUTRAL" in upper:
+        data["direction"] = "NEUTRAL"
+
+    money_match = re.search(r"\$?\s*([0-9]+(?:\.[0-9]+)?)\s*([MB])", upper)
+    if money_match:
+        val = float(money_match.group(1))
+        scale = money_match.group(2)
+        if scale == "B":
+            val *= 1000.0
+        data["magnitude_millions"] = round(val, 2)
+
+    tickers = re.findall(r"\b[A-Z]{1,5}\b", upper)
+    top_tickers = []
+    for symbol in tickers:
+        if symbol in _COMMON_WORDS:
+            continue
+        if symbol in {"UW", "GEX", "POC", "IV", "ETF", "CVD", "VIX"}:
+            continue
+        if symbol not in top_tickers:
+            top_tickers.append(symbol)
+        if len(top_tickers) >= 3:
+            break
+    if top_tickers:
+        data["top_tickers"] = top_tickers
+
+    if "ACCELERAT" in upper:
+        data["trend"] = "accelerating"
+    elif "DECELERAT" in upper:
+        data["trend"] = "decelerating"
+
+    if "CONFIRM" in upper or "ALIGNS" in upper or "ALIGNED" in upper:
+        data["signal_alignment"] = "confirms_bias"
+    elif "CONTRADICT" in upper or "CONFLICT" in upper:
+        data["signal_alignment"] = "contradicts_bias"
+    else:
+        data["signal_alignment"] = "neutral"
+
+    return data
+
+
+async def _post_uw_snapshot_to_backend(
+    *,
+    dashboard_type: str,
+    summary_text: str,
+    time_slot: Optional[str] = None,
+) -> None:
+    payload = {
+        "dashboard_type": dashboard_type,
+        "time_slot": time_slot or _uw_time_slot(),
+        "extracted_data": _extract_uw_snapshot_structured_data(summary_text),
+        "raw_summary": summary_text[:3000],
+        "signal_alignment": _extract_uw_snapshot_structured_data(summary_text).get("signal_alignment", "neutral"),
+    }
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"{PANDORA_API_URL}/analytics/log-uw-snapshot",
+                json=payload,
+                headers=_auth_headers(),
+                timeout=aiohttp.ClientTimeout(total=8),
+            ) as resp:
+                if resp.status >= 400:
+                    logger.debug("UW snapshot log failed with status %s", resp.status)
+                    return
+        _mark_uw_snapshot_received(dashboard_type)
+    except Exception as exc:
+        logger.debug("Could not persist UW snapshot context: %s", exc)
 
 
 def _safe_float(value: Any) -> Optional[float]:
@@ -2020,6 +2418,131 @@ async def send_discord_chunks(channel: discord.abc.Messageable, text: str, limit
         await channel.send(chunk)
 
 
+def _is_csv_attachment(attachment: discord.Attachment) -> bool:
+    name = (attachment.filename or "").lower()
+    ctype = (attachment.content_type or "").lower()
+    return name.endswith(".csv") or "csv" in ctype
+
+
+def _looks_like_trade_import_text(text: str) -> bool:
+    lower = (text or "").lower()
+    if not lower.strip():
+        return False
+    triggers = ["import trades", "log these trades", "here are my trades", "bought", "sold", "put spread", "call spread"]
+    return any(token in lower for token in triggers)
+
+
+async def _parse_robinhood_csv_attachment(attachment: discord.Attachment) -> Optional[Dict[str, Any]]:
+    try:
+        raw = await attachment.read()
+    except Exception as exc:
+        logger.warning("Failed to read CSV attachment %s: %s", attachment.filename, exc)
+        return None
+
+    form = aiohttp.FormData()
+    form.add_field(
+        "file",
+        raw,
+        filename=attachment.filename or "trades.csv",
+        content_type=attachment.content_type or "text/csv",
+    )
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"{PANDORA_API_URL}/analytics/parse-robinhood-csv",
+                data=form,
+                headers=_auth_headers(),
+                timeout=aiohttp.ClientTimeout(total=30),
+            ) as resp:
+                if resp.status != 200:
+                    logger.warning("CSV parse API failed: status=%s", resp.status)
+                    return None
+                return await resp.json()
+    except Exception as exc:
+        logger.warning("CSV parse request failed: %s", exc)
+        return None
+
+
+async def _parse_trade_text_with_llm(text: str) -> Optional[Dict[str, Any]]:
+    prompt = (
+        "Extract trades from this text and return strict JSON with key `trades` (list).\n"
+        "Each trade object fields: ticker, direction, structure, entry_date, exit_date, "
+        "entry_price, exit_price, strike, short_strike, long_strike, expiry, quantity, "
+        "pnl_dollars, pnl_percent, exit_reason, status, account.\n"
+        "If unknown, use null. Output JSON only.\n\n"
+        f"TEXT:\n{text}"
+    )
+    raw = await call_pivot_llm(prompt, max_tokens=1200)
+    if not raw:
+        return None
+    raw = raw.strip()
+    if raw.startswith("```"):
+        raw = raw.strip("`")
+        if raw.lower().startswith("json"):
+            raw = raw[4:].strip()
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, dict):
+            return parsed
+    except Exception:
+        return None
+    return None
+
+
+def _format_trade_import_preview(payload: Dict[str, Any]) -> str:
+    trades = payload.get("trades") or []
+    open_positions = payload.get("open_positions") or []
+    rows = list(trades) + list(open_positions)
+    if not rows:
+        return "No trades parsed."
+
+    lines = ["📋 **PARSED TRADES**", ""]
+    lines.append("# | Ticker | Structure | Entry | Exit | P&L")
+    lines.append("--|--------|-----------|-------|------|------")
+    total_pnl = 0.0
+    for idx, trade in enumerate(rows[:25], start=1):
+        ticker = str(trade.get("ticker") or "--").upper()
+        structure = str(trade.get("structure") or "--")
+        entry_date = str(trade.get("entry_date") or "--")
+        exit_date = str(trade.get("exit_date") or "--")
+        pnl = trade.get("pnl_dollars")
+        if isinstance(pnl, (int, float)):
+            total_pnl += float(pnl)
+            pnl_text = f"${float(pnl):,.2f}"
+        else:
+            pnl_text = "--"
+        lines.append(f"{idx} | {ticker} | {structure} | {entry_date} | {exit_date} | {pnl_text}")
+
+    lines.append("")
+    lines.append(
+        f"Closed: {len(trades)} | Open: {len(open_positions)} | Total P&L (closed): ${total_pnl:,.2f}\n"
+        "Reply **`import all`** to confirm, or reply **`cancel import`**."
+    )
+    return "\n".join(lines)
+
+
+async def _execute_trade_import(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    import_payload = {
+        "trades": [*(payload.get("trades") or []), *(payload.get("open_positions") or [])],
+        "account": "robinhood",
+    }
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"{PANDORA_API_URL}/analytics/import-trades",
+                json=import_payload,
+                headers=_auth_headers(),
+                timeout=aiohttp.ClientTimeout(total=60),
+            ) as resp:
+                if resp.status != 200:
+                    logger.warning("Trade import failed: status=%s", resp.status)
+                    return None
+                return await resp.json()
+    except Exception as exc:
+        logger.warning("Trade import request failed: %s", exc)
+        return None
+
+
 async def handle_whale_alerts_message(message: discord.Message) -> None:
     """
     Handle a message in #whale-alerts.
@@ -2041,13 +2564,13 @@ async def handle_whale_alerts_message(message: discord.Message) -> None:
     parsed = None
     flow_text = None
 
-    # ── A. Whale Hunter plain-text signal ──────────────────────────────────
+    # â”€â”€ A. Whale Hunter plain-text signal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     if message.content:
         parsed = parse_whale_hunter_signal(message)
         if parsed:
             flow_text = format_whale_hunter_for_llm(parsed)
 
-    # ── B. Unusual Whales Premium bot embed ────────────────────────────────
+    # â”€â”€ B. Unusual Whales Premium bot embed â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     if not parsed and message.embeds:
         for embed in message.embeds:
             parsed = parse_uw_premium_embed(embed)
@@ -2064,12 +2587,12 @@ async def handle_whale_alerts_message(message: discord.Message) -> None:
                 )
                 break
         else:
-            # Embeds present but none parsed — log field names for refinement
+            # Embeds present but none parsed â€” log field names for refinement
             for embed in message.embeds:
                 if embed.fields:
                     field_names = [f.name for f in embed.fields]
                     logger.info(
-                        "whale-alerts embed not parsed — field names: %s", field_names
+                        "whale-alerts embed not parsed â€” field names: %s", field_names
                     )
 
     if not parsed or not flow_text:
@@ -2078,18 +2601,62 @@ async def handle_whale_alerts_message(message: discord.Message) -> None:
     ticker = parsed.get("ticker", "?")
     source = parsed.get("source", "unknown")
 
-    # ── Fetch market context (bias + VIX + SPY + ticker) ──────────────────
+    # â”€â”€ Fetch market context (bias + VIX + SPY + ticker) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     ticker_hint = ticker if isinstance(ticker, str) and ticker.isalpha() else None
     market_context = await build_market_context(flow_text, ticker_hint=ticker_hint)
     uw_context_text, uw_alerts = await build_recent_uw_context(str(ticker_hint or ticker))
     market_context = f"{market_context}\n\n{uw_context_text}"
 
     convergence_block = None
+    whale_conviction = "MODERATE"
+    rvol_value: Optional[float] = None
+    rvol_modifier = "RVOL_UNAVAILABLE"
+    tick_confirmation: Optional[Dict[str, Any]] = None
+
     if source == "whale_hunter":
         poc_level = parsed.get("poc_level")
         target_price = float(poc_level) if isinstance(poc_level, (int, float)) else None
+        event_ts = message.created_at if isinstance(message.created_at, datetime) else datetime.now(timezone.utc)
+        if event_ts.tzinfo is None:
+            event_ts = event_ts.replace(tzinfo=timezone.utc)
+
+        rvol_value = await _calculate_rvol_for_whale(str(ticker_hint or ticker), event_ts)
+        whale_conviction, rvol_modifier = _apply_rvol_conviction_modifier("MODERATE", rvol_value)
+
+        tick_confirmation = await _build_tick_whale_confirmation(parsed.get("lean"), event_ts)
+        if tick_confirmation:
+            if tick_confirmation.get("status") == "TICK_CONFIRMS":
+                if whale_conviction == "WATCH":
+                    whale_conviction = "MODERATE"
+                elif whale_conviction == "MODERATE":
+                    whale_conviction = "HIGH"
+            elif tick_confirmation.get("status") == "TICK_CONTRADICTS":
+                if whale_conviction == "HIGH":
+                    whale_conviction = "MODERATE"
+                elif whale_conviction == "MODERATE":
+                    whale_conviction = "WATCH"
+
+        parsed["rvol"] = rvol_value
+        parsed["rvol_modifier"] = rvol_modifier
+        if tick_confirmation:
+            parsed["tick_confirmation"] = tick_confirmation
+
         options_context = await _get_options_context_for_ticker(str(ticker_hint or ticker), target_price=target_price)
-        market_context = f"{market_context}\n\n{options_context}"
+        enrichment_lines = [options_context]
+        if isinstance(rvol_value, (int, float)):
+            enrichment_lines.append(
+                f"Whale RVOL: {float(rvol_value):.2f}x ({rvol_modifier}) | Conviction: {whale_conviction}"
+            )
+        else:
+            enrichment_lines.append("Whale RVOL: unavailable (conviction unchanged)")
+        if tick_confirmation:
+            enrichment_lines.append(
+                f"TICK Confirmation: {tick_confirmation.get('status')} | "
+                f"value {tick_confirmation.get('tick_value')} | "
+                f"time {tick_confirmation.get('tick_time') or 'unknown'}"
+            )
+        market_context = f"{market_context}\n\n" + "\n".join(enrichment_lines)
+
         journal_context = await _build_journal_context_for_whale(
             str(ticker_hint or ticker),
             target_price,
@@ -2104,7 +2671,7 @@ async def handle_whale_alerts_message(message: discord.Message) -> None:
             uw_alerts,
         )
 
-    # ── LLM evaluation ────────────────────────────────────────────────────
+    # â”€â”€ LLM evaluation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     try:
         from llm.prompts import (  # type: ignore
             build_flow_analysis_prompt,
@@ -2121,18 +2688,19 @@ async def handle_whale_alerts_message(message: discord.Message) -> None:
         logger.warning("Could not build flow prompt: %s", exc)
         llm_response = ""
 
-    # ── Reply in channel ──────────────────────────────────────────────────
+    # â”€â”€ Reply in channel â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     if source == "whale_hunter":
         lean = parsed.get("lean", "?")
         poc = parsed.get("poc_level")
         header = (
-            f"**Whale Hunter — {ticker}** | Lean: `{lean}`"
+            f"**Whale Hunter â€” {ticker}** | Lean: `{lean}`"
             + (f" | POC: `${poc:.2f}`" if poc else "")
+            + (f" | Conviction: `{whale_conviction}`" if whale_conviction else "")
         )
     else:
         opt_type = parsed.get("option_type", "")
         order_type = parsed.get("order_type", "")
-        header = f"**UW Flow — {ticker}** {opt_type} {order_type}".strip()
+        header = f"**UW Flow â€” {ticker}** {opt_type} {order_type}".strip()
 
     if llm_response:
         if convergence_block:
@@ -2142,7 +2710,7 @@ async def handle_whale_alerts_message(message: discord.Message) -> None:
     else:
         reply = (
             f"{header}\n\n"
-            f"*(LLM unavailable — raw data logged. "
+            f"*(LLM unavailable â€” raw data logged. "
             f"Source: {source}, ticker: {ticker})*"
         )
 
@@ -2212,7 +2780,7 @@ async def handle_crypto_alerts_message(message: discord.Message) -> None:
             f"Context:\n{crypto_context}"
         )
 
-    header = f"**Crypto Alert — {ticker_hint or 'UNKNOWN'}** | `{strategy}` | `{direction}`"
+    header = f"**Crypto Alert â€” {ticker_hint or 'UNKNOWN'}** | `{strategy}` | `{direction}`"
     await send_discord_chunks(message.channel, f"{header}\n\n{llm_response}")
 
 
@@ -2223,12 +2791,12 @@ async def handle_crypto_alerts_message(message: discord.Message) -> None:
 @bot.event
 async def on_ready():
     """Called when bot is connected and ready"""
-    logger.info(f"🐋 Pandora Bridge v2.0 connected as {bot.user}")
-    logger.info(f"📡 Watching UW channel ID: {UW_CHANNEL_ID}")
+    logger.info(f"ðŸ‹ Pandora Bridge v2.0 connected as {bot.user}")
+    logger.info(f"ðŸ“¡ Watching UW channel ID: {UW_CHANNEL_ID}")
     if WHALE_ALERTS_CHANNEL_ID:
-        logger.info(f"🐳 Watching #whale-alerts channel ID: {WHALE_ALERTS_CHANNEL_ID}")
+        logger.info(f"ðŸ³ Watching #whale-alerts channel ID: {WHALE_ALERTS_CHANNEL_ID}")
     if CRYPTO_ALERTS_CHANNEL_ID:
-        logger.info(f"🪙 Watching #crypto-alerts channel ID: {CRYPTO_ALERTS_CHANNEL_ID}")
+        logger.info(f"ðŸª™ Watching #crypto-alerts channel ID: {CRYPTO_ALERTS_CHANNEL_ID}")
 
     added_cols = await asyncio.to_thread(_ensure_journal_schema_columns_sync)
     if added_cols:
@@ -2237,31 +2805,34 @@ async def on_ready():
     # Find and verify the channel
     channel = bot.get_channel(UW_CHANNEL_ID)
     if channel:
-        logger.info(f"✅ Found channel: #{channel.name}")
+        logger.info(f"âœ… Found channel: #{channel.name}")
         try:
-            await channel.send("🔗 **Pandora Bridge v2.0 Online**\n"
-                             "• Watching for UW alerts\n"
-                             "• Scheduled queries active\n"
-                             "• Type `!help_pandora` for commands")
+            await channel.send("ðŸ”— **Pandora Bridge v2.0 Online**\n"
+                             "â€¢ Watching for UW alerts\n"
+                             "â€¢ Scheduled queries active\n"
+                             "â€¢ Type `!help_pandora` for commands")
         except discord.Forbidden:
             logger.warning("Cannot send messages to channel (no permission)")
     else:
-        logger.error(f"❌ Could not find channel {UW_CHANNEL_ID}")
+        logger.error(f"âŒ Could not find channel {UW_CHANNEL_ID}")
     
     # Start scheduled tasks
     if not scheduled_queries.is_running():
         scheduled_queries.start()
     if not reminder_scheduler.is_running():
         reminder_scheduler.start()
+    if not uw_screenshot_request_scheduler.is_running():
+        uw_screenshot_request_scheduler.start()
     if not trade_idea_poller.is_running():
         trade_idea_poller.start()
     if not uw_aggregate_poller.is_running():
         uw_aggregate_poller.start()
 
     logger.info(
-        "Task status: scheduled_queries=%s, reminder_scheduler=%s, trade_idea_poller=%s, uw_aggregate_poller=%s",
+        "Task status: scheduled_queries=%s, reminder_scheduler=%s, uw_screenshot_request_scheduler=%s, trade_idea_poller=%s, uw_aggregate_poller=%s",
         "running" if scheduled_queries.is_running() else "stopped",
         "running" if reminder_scheduler.is_running() else "stopped",
+        "running" if uw_screenshot_request_scheduler.is_running() else "stopped",
         "running" if trade_idea_poller.is_running() else "stopped",
         "running" if uw_aggregate_poller.is_running() else "stopped",
     )
@@ -2319,7 +2890,7 @@ async def on_message(message: discord.Message):
     # Process commands first
     await bot.process_commands(message)
 
-    # ── #whale-alerts: Whale Hunter signals + UW Premium embeds ───────────
+    # â”€â”€ #whale-alerts: Whale Hunter signals + UW Premium embeds â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     if WHALE_ALERTS_CHANNEL_ID and message.channel.id == WHALE_ALERTS_CHANNEL_ID:
         await handle_whale_alerts_message(message)
         return
@@ -2338,17 +2909,76 @@ async def on_message(message: discord.Message):
             await handle_uw_ticker_message(message)
         return
 
-    # ── #pivot-chat: Conversational LLM chat ──────────────────────────────
+    # â”€â”€ #pivot-chat: Conversational LLM chat â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     if PIVOT_CHAT_CHANNEL_ID and message.channel.id == PIVOT_CHAT_CHANNEL_ID:
         async with message.channel.typing():
             user_text = message.content or ""
             reply = ""
 
+            # Trade import confirmation flow.
+            user_key = int(message.author.id)
+            lower_text = user_text.strip().lower()
+            if lower_text in {"import all", "confirm import"}:
+                pending = pending_trade_imports.get(user_key)
+                if pending:
+                    result = await _execute_trade_import(pending)
+                    if result:
+                        pending_trade_imports.pop(user_key, None)
+                        reply = (
+                            "✅ Trade import complete.\n"
+                            f"Imported: {result.get('imported', 0)} | "
+                            f"Signal matched: {result.get('signal_matched', 0)} | "
+                            f"Duplicates skipped: {result.get('duplicates_skipped', 0)} | "
+                            f"Open positions: {result.get('open_positions', 0)} | "
+                            f"Total P&L: ${float(result.get('total_pnl') or 0):,.2f}"
+                        )
+                    else:
+                        reply = "Import failed. Try again in a minute."
+                else:
+                    reply = "No pending parsed trades found. Upload a CSV or paste trades first."
+            elif lower_text in {"cancel import", "cancel"}:
+                if pending_trade_imports.pop(user_key, None):
+                    reply = "Cancelled pending trade import."
+
+            # CSV import path.
+            if not reply:
+                csv_attachment = next((a for a in message.attachments if _is_csv_attachment(a)), None)
+                if csv_attachment:
+                    parsed_csv = await _parse_robinhood_csv_attachment(csv_attachment)
+                    if parsed_csv:
+                        pending_trade_imports[user_key] = parsed_csv
+                        reply = _format_trade_import_preview(parsed_csv)
+                    else:
+                        reply = "Could not parse the CSV attachment. Make sure it's a Robinhood export."
+
+            # Pasted/freeform import path.
+            if not reply and _looks_like_trade_import_text(user_text):
+                parsed_text = await _parse_trade_text_with_llm(user_text)
+                if parsed_text and isinstance(parsed_text.get("trades"), list) and parsed_text.get("trades"):
+                    preview = {
+                        "format_detected": "freeform_text",
+                        "raw_transactions": len(parsed_text.get("trades") or []),
+                        "filtered_transactions": len(parsed_text.get("trades") or []),
+                        "grouped_trades": len(parsed_text.get("trades") or []),
+                        "trades": parsed_text.get("trades") or [],
+                        "open_positions": [],
+                        "warnings": [],
+                    }
+                    pending_trade_imports[user_key] = preview
+                    reply = _format_trade_import_preview(preview)
+
             image_attachment = _first_image_attachment(message)
-            if image_attachment:
+            if not reply and image_attachment:
                 data_url = await _attachment_to_data_url(image_attachment)
                 if data_url:
-                    vision_text = "Extract trading data from this screenshot and evaluate it."
+                    vision_text = (
+                        "Extract trading data from this screenshot and evaluate it.\n\n"
+                        "If this is an Unusual Whales dashboard, extract structured data:\n"
+                        "- Market Tide: direction, net premium magnitude, top 3 tickers, accel/decel\n"
+                        "- Dark Pool: largest prints (ticker/level/size), net sentiment, whale alignment clues\n"
+                        "- GEX: positive/negative gamma, key levels, put wall, call wall\n"
+                        "Then note whether the screenshot confirms or contradicts current bias."
+                    )
                     if user_text.strip():
                         vision_text = f"{vision_text}\n\nUser request:\n{user_text.strip()}"
 
@@ -2367,6 +2997,16 @@ async def on_message(message: discord.Message):
                     )
 
                     if image_analysis and not image_analysis.startswith("[LLM error"):
+                        uw_dashboard_type = _detect_uw_dashboard_type(
+                            image_analysis,
+                            f"{user_text}\n{image_attachment.filename}",
+                        )
+                        if uw_dashboard_type:
+                            await _post_uw_snapshot_to_backend(
+                                dashboard_type=uw_dashboard_type,
+                                summary_text=image_analysis,
+                                time_slot=_uw_time_slot(get_et_now()),
+                            )
                         detected_ticker = _extract_ticker_hint(f"{user_text}\n{image_analysis}")
                         if detected_ticker:
                             market_context = await build_market_context(
@@ -2433,7 +3073,7 @@ async def on_message(message: discord.Message):
     if not is_uw_bot:
         return
     
-    logger.info(f"📨 Processing message from {message.author.name}")
+    logger.info(f"ðŸ“¨ Processing message from {message.author.name}")
     
     # Check for UW image posts and parse with vision
     image_url = None
@@ -2463,6 +3103,20 @@ async def on_message(message: discord.Message):
 
         if parsed_data:
             data_type = parsed_data.get("data_type", "other")
+            dashboard_map = {
+                "market_tide": "market_tide",
+                "flow_alerts": "dark_pool",
+                "highest_volume_contracts": "dark_pool",
+                "oi_change": "dark_pool",
+                "gex": "gex",
+            }
+            dashboard_type = dashboard_map.get(str(data_type))
+            if dashboard_type:
+                await _post_uw_snapshot_to_backend(
+                    dashboard_type=dashboard_type,
+                    summary_text=json.dumps(parsed_data),
+                    time_slot=_uw_time_slot(get_et_now()),
+                )
 
             endpoint_map = {
                 "highest_volume_contracts": "/bias/uw/highest_volume",
@@ -2500,7 +3154,7 @@ async def on_message(message: discord.Message):
                 pending_queries["market_tide"] = False
                 latest_data["market_tide"] = parsed_data
                 await send_market_tide_to_pandora(parsed_data)
-                await message.add_reaction("📊")
+                await message.add_reaction("ðŸ“Š")
                 continue
         
         if pending_queries["sectorflow"]:
@@ -2509,7 +3163,7 @@ async def on_message(message: discord.Message):
                 pending_queries["sectorflow"] = False
                 latest_data["sectorflow"] = parsed_data
                 await send_sectorflow_to_pandora(parsed_data)
-                await message.add_reaction("📈")
+                await message.add_reaction("ðŸ“ˆ")
                 continue
         
         if pending_queries["oi_increase"]:
@@ -2517,7 +3171,7 @@ async def on_message(message: discord.Message):
             if parsed_data:
                 pending_queries["oi_increase"] = False
                 latest_data["oi_increase"] = parsed_data
-                await message.add_reaction("📈")
+                await message.add_reaction("ðŸ“ˆ")
                 continue
         
         if pending_queries["economic_calendar"]:
@@ -2525,7 +3179,7 @@ async def on_message(message: discord.Message):
             if parsed_data:
                 pending_queries["economic_calendar"] = False
                 latest_data["economic_calendar"] = parsed_data
-                await message.add_reaction("📅")
+                await message.add_reaction("ðŸ“…")
                 continue
         
         # If no pending query matched, try general flow alert parsing
@@ -2533,7 +3187,7 @@ async def on_message(message: discord.Message):
         if parsed_data and parsed_data.get("ticker"):
             await send_flow_alert_to_pandora(parsed_data)
             try:
-                await message.add_reaction("✅")
+                await message.add_reaction("âœ…")
             except discord.Forbidden:
                 pass
 
@@ -2546,32 +3200,32 @@ async def on_message(message: discord.Message):
 async def help_command(ctx):
     """Show Pandora Bridge help"""
     help_text = """
-🐋 **Pandora Bridge v2.0 Commands**
+ðŸ‹ **Pandora Bridge v2.0 Commands**
 
 **Manual Queries:**
-• `!tide` - Query market tide now
-• `!sector` - Query sector flow now
-• `!oi` - Query OI changes now
-• `!calendar` - Query economic calendar now
-• `!flow TICKER` - Query flow for a specific ticker
-• `!maxpain TICKER` - Query max pain for a ticker
+â€¢ `!tide` - Query market tide now
+â€¢ `!sector` - Query sector flow now
+â€¢ `!oi` - Query OI changes now
+â€¢ `!calendar` - Query economic calendar now
+â€¢ `!flow TICKER` - Query flow for a specific ticker
+â€¢ `!maxpain TICKER` - Query max pain for a ticker
 
 **Status:**
-• `!status` - Check bot status
-• `!latest` - Show latest parsed data
+â€¢ `!status` - Check bot status
+â€¢ `!latest` - Show latest parsed data
 
 **Testing:**
-• `!test TICKER` - Send test flow to Pandora
+â€¢ `!test TICKER` - Send test flow to Pandora
 
 **Manual Logging:**
-• `!logflow AAPL bull sweep 500k` - Log a flow alert manually
-• `!logtide bullish 65` - Log market tide manually
+â€¢ `!logflow AAPL bull sweep 500k` - Log a flow alert manually
+â€¢ `!logtide bullish 65` - Log market tide manually
 
 **Scheduled Queries (automatic):**
-• Market Tide: 9:35 AM, 12:00 PM, 3:30 PM ET
-• Sector Flow: Monday 10:00 AM ET
-• OI Increase: Monday 10:05 AM ET
-• Economic Calendar: Daily 8:30 AM ET
+â€¢ Market Tide: 9:35 AM, 12:00 PM, 3:30 PM ET
+â€¢ Sector Flow: Monday 10:00 AM ET
+â€¢ OI Increase: Monday 10:05 AM ET
+â€¢ Economic Calendar: Daily 8:30 AM ET
 """
     await ctx.send(help_text)
 
@@ -2580,30 +3234,30 @@ async def help_command(ctx):
 async def status_command(ctx):
     """Check bridge status"""
     now = get_et_now()
-    await ctx.send(f"🔗 **Pandora Bridge v2.0 Status**\n"
-                   f"• Connected: ✅\n"
-                   f"• Channel: <#{UW_CHANNEL_ID}>\n"
-                   f"• API: {PANDORA_API_URL}\n"
-                   f"• Time (ET): {now.strftime('%H:%M:%S')}\n"
-                   f"• Market Hours: {'✅' if is_market_hours() else '❌'}\n"
-                   f"• Scheduler: {'Running' if scheduled_queries.is_running() else 'Stopped'}")
+    await ctx.send(f"ðŸ”— **Pandora Bridge v2.0 Status**\n"
+                   f"â€¢ Connected: âœ…\n"
+                   f"â€¢ Channel: <#{UW_CHANNEL_ID}>\n"
+                   f"â€¢ API: {PANDORA_API_URL}\n"
+                   f"â€¢ Time (ET): {now.strftime('%H:%M:%S')}\n"
+                   f"â€¢ Market Hours: {'âœ…' if is_market_hours() else 'âŒ'}\n"
+                   f"â€¢ Scheduler: {'Running' if scheduled_queries.is_running() else 'Stopped'}")
 
 
 @bot.command(name="tasks")
 async def tasks_command(ctx):
     """Show background task status"""
     await ctx.send(
-        "🧰 **Background Tasks**\n"
-        f"• scheduled_queries: {'Running' if scheduled_queries.is_running() else 'Stopped'}\n"
-        f"• reminder_scheduler: {'Running' if reminder_scheduler.is_running() else 'Stopped'}\n"
-        f"• trade_idea_poller: {'Running' if trade_idea_poller.is_running() else 'Stopped'}"
+        "ðŸ§° **Background Tasks**\n"
+        f"â€¢ scheduled_queries: {'Running' if scheduled_queries.is_running() else 'Stopped'}\n"
+        f"â€¢ reminder_scheduler: {'Running' if reminder_scheduler.is_running() else 'Stopped'}\n"
+        f"â€¢ trade_idea_poller: {'Running' if trade_idea_poller.is_running() else 'Stopped'}"
     )
 
 
 @bot.command(name="latest")
 async def latest_command(ctx):
     """Show latest parsed data"""
-    response = "📊 **Latest Parsed Data**\n\n"
+    response = "ðŸ“Š **Latest Parsed Data**\n\n"
     
     for key, data in latest_data.items():
         if data:
@@ -2628,7 +3282,7 @@ async def tide_command(ctx):
     """Manually query market tide"""
     pending_queries["market_tide"] = True
     await send_uw_command(ctx.channel, "/market_tide")
-    await ctx.send("📊 Querying market tide...")
+    await ctx.send("ðŸ“Š Querying market tide...")
 
 
 @bot.command(name="sector")
@@ -2636,7 +3290,7 @@ async def sector_command(ctx):
     """Manually query sector flow"""
     pending_queries["sectorflow"] = True
     await send_uw_command(ctx.channel, "/sectorflow")
-    await ctx.send("📈 Querying sector flow...")
+    await ctx.send("ðŸ“ˆ Querying sector flow...")
 
 
 @bot.command(name="oi")
@@ -2644,7 +3298,7 @@ async def oi_command(ctx):
     """Manually query OI changes"""
     pending_queries["oi_increase"] = True
     await send_uw_command(ctx.channel, "/oi_increase")
-    await ctx.send("📊 Querying OI increase...")
+    await ctx.send("ðŸ“Š Querying OI increase...")
 
 
 @bot.command(name="calendar")
@@ -2652,31 +3306,31 @@ async def calendar_command(ctx):
     """Manually query economic calendar"""
     pending_queries["economic_calendar"] = True
     await send_uw_command(ctx.channel, "/economic_calendar")
-    await ctx.send("📅 Querying economic calendar...")
+    await ctx.send("ðŸ“… Querying economic calendar...")
 
 
 @bot.command(name="flow")
 async def flow_command(ctx, ticker: str = None):
     """Query flow for a specific ticker"""
     if not ticker:
-        await ctx.send("❌ Usage: `!flow TICKER` (e.g., `!flow AAPL`)")
+        await ctx.send("âŒ Usage: `!flow TICKER` (e.g., `!flow AAPL`)")
         return
     
     pending_queries["flow_ticker"] = ticker.upper()
     await send_uw_command(ctx.channel, f"/flow_ticker {ticker.upper()}")
-    await ctx.send(f"🔍 Querying flow for **{ticker.upper()}**...")
+    await ctx.send(f"ðŸ” Querying flow for **{ticker.upper()}**...")
 
 
 @bot.command(name="maxpain")
 async def maxpain_command(ctx, ticker: str = None):
     """Query max pain for a ticker"""
     if not ticker:
-        await ctx.send("❌ Usage: `!maxpain TICKER` (e.g., `!maxpain SPY`)")
+        await ctx.send("âŒ Usage: `!maxpain TICKER` (e.g., `!maxpain SPY`)")
         return
     
     pending_queries["max_pain"] = ticker.upper()
     await send_uw_command(ctx.channel, f"/max_pain {ticker.upper()}")
-    await ctx.send(f"📍 Querying max pain for **{ticker.upper()}**...")
+    await ctx.send(f"ðŸ“ Querying max pain for **{ticker.upper()}**...")
 
 
 @bot.command(name="logflow")
@@ -2724,11 +3378,11 @@ async def log_flow_command(
 
     if success:
         await ctx.send(
-            f"✅ Logged: **{ticker.upper()}** {sentiment_normalized} "
+            f"âœ… Logged: **{ticker.upper()}** {sentiment_normalized} "
             f"{flow_type_normalized} ${premium_value:,}"
         )
     else:
-        await ctx.send("❌ Failed to log flow to Pandora")
+        await ctx.send("âŒ Failed to log flow to Pandora")
 
 
 @bot.command(name="logtide")
@@ -2765,9 +3419,9 @@ async def log_tide_command(ctx, sentiment: str, bullish_pct: int = None):
 
     if success:
         pct_text = f" ({bullish_pct}% bullish)" if bullish_pct is not None else ""
-        await ctx.send(f"✅ Logged market tide: **{sentiment_normalized}**{pct_text}")
+        await ctx.send(f"âœ… Logged market tide: **{sentiment_normalized}**{pct_text}")
     else:
-        await ctx.send("❌ Failed to log market tide")
+        await ctx.send("âŒ Failed to log market tide")
 
 
 @bot.command(name="test")
@@ -2784,9 +3438,9 @@ async def test_command(ctx, ticker: str = "TEST"):
     success = await send_flow_alert_to_pandora(test_flow)
     
     if success:
-        await ctx.send(f"✅ Test flow sent for **{ticker.upper()}**")
+        await ctx.send(f"âœ… Test flow sent for **{ticker.upper()}**")
     else:
-        await ctx.send(f"❌ Failed to send test flow - is Pandora's Box running?")
+        await ctx.send(f"âŒ Failed to send test flow - is Pandora's Box running?")
 
 
 # ================================
@@ -2796,13 +3450,14 @@ async def test_command(ctx, ticker: str = "TEST"):
 def run_bot():
     """Run the Discord bot"""
     if not DISCORD_TOKEN:
-        logger.error("❌ DISCORD_BOT_TOKEN environment variable not set!")
+        logger.error("âŒ DISCORD_BOT_TOKEN environment variable not set!")
         logger.error("Set it with: export DISCORD_BOT_TOKEN='your-token-here'")
         return
     
-    logger.info("🚀 Starting Pandora Bridge v2.0...")
+    logger.info("ðŸš€ Starting Pandora Bridge v2.0...")
     bot.run(DISCORD_TOKEN)
 
 
 if __name__ == "__main__":
     run_bot()
+

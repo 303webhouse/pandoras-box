@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 ET = pytz.timezone("America/New_York")
 BINANCE_BASE = "https://data-api.binance.vision/api/v3/klines"
 
-DEFAULT_TICKERS = {"SPY", "QQQ", "IWM", "GDX", "SLV", "BTC"}
+DEFAULT_TICKERS = {"SPY", "QQQ", "IWM", "GDX", "SLV", "BTC", "DXY"}
 CRYPTO_TICKERS = {
     "BTC",
     "ETH",
@@ -64,6 +64,8 @@ def _to_float(value: Any) -> Optional[float]:
 
 def _normalize_symbol_for_yf(ticker: str) -> str:
     symbol = (ticker or "").upper().strip()
+    if symbol == "DXY":
+        return "DX-Y.NYB"
     if symbol in {"BTC", "ETH", "SOL", "XRP"}:
         return f"{symbol}-USD"
     return symbol
@@ -94,6 +96,62 @@ def _parse_yf_rows(df: Any, ticker: str, timeframe: str) -> List[Tuple[str, str,
         return rows
 
     frame = _normalize_ohlcv_df(df)
+    if timeframe.upper() == "D":
+        # Guardrail: if provider returns intraday stamps for a daily pull, collapse to one OHLCV bar per calendar day.
+        daily_agg: Dict[str, Dict[str, Any]] = {}
+        for idx, rec in frame.iterrows():
+            if not isinstance(idx, datetime):
+                continue
+            ts = idx if idx.tzinfo is not None else idx.replace(tzinfo=timezone.utc)
+            day_key = ts.date().isoformat()
+            open_px = _to_float(rec.get("open"))
+            high_px = _to_float(rec.get("high"))
+            low_px = _to_float(rec.get("low"))
+            close_px = _to_float(rec.get("close"))
+            volume_px = _to_float(rec.get("volume")) or 0.0
+
+            bucket = daily_agg.get(day_key)
+            if not bucket:
+                daily_agg[day_key] = {
+                    "timestamp": datetime.fromisoformat(f"{day_key}T00:00:00+00:00"),
+                    "open": open_px,
+                    "high": high_px,
+                    "low": low_px,
+                    "close": close_px,
+                    "volume": volume_px,
+                    "_first_ts": ts,
+                    "_last_ts": ts,
+                }
+                continue
+
+            if ts < bucket["_first_ts"] and open_px is not None:
+                bucket["open"] = open_px
+                bucket["_first_ts"] = ts
+            if ts > bucket["_last_ts"] and close_px is not None:
+                bucket["close"] = close_px
+                bucket["_last_ts"] = ts
+            if high_px is not None:
+                bucket["high"] = high_px if bucket["high"] is None else max(bucket["high"], high_px)
+            if low_px is not None:
+                bucket["low"] = low_px if bucket["low"] is None else min(bucket["low"], low_px)
+            bucket["volume"] = (bucket.get("volume") or 0.0) + volume_px
+
+        for key in sorted(daily_agg.keys()):
+            item = daily_agg[key]
+            rows.append(
+                (
+                    ticker,
+                    timeframe,
+                    item["timestamp"],
+                    item.get("open"),
+                    item.get("high"),
+                    item.get("low"),
+                    item.get("close"),
+                    item.get("volume"),
+                )
+            )
+        return rows
+
     for idx, rec in frame.iterrows():
         if not isinstance(idx, datetime):
             continue
@@ -118,9 +176,34 @@ def _fetch_yf_history_sync(ticker: str, period: str, interval: str) -> Any:
 
     symbol = _normalize_symbol_for_yf(ticker)
     try:
-        return yf.download(symbol, period=period, interval=interval, progress=False, auto_adjust=False, multi_level_index=False)
+        return yf.download(symbol, period=period, interval=interval, progress=False, auto_adjust=True, multi_level_index=False)
     except TypeError:
-        return yf.download(symbol, period=period, interval=interval, progress=False, auto_adjust=False)
+        return yf.download(symbol, period=period, interval=interval, progress=False, auto_adjust=True)
+
+
+async def _purge_malformed_daily_rows() -> int:
+    """
+    Remove malformed rows where timeframe='D' but timestamp is not midnight UTC.
+    These rows pollute daily series and can corrupt indicator calculations.
+    """
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        deleted = await conn.fetchval(
+            """
+            WITH purged AS (
+                DELETE FROM price_history
+                WHERE timeframe = 'D'
+                  AND (
+                    EXTRACT(HOUR FROM timestamp) <> 0
+                    OR EXTRACT(MINUTE FROM timestamp) <> 0
+                    OR EXTRACT(SECOND FROM timestamp) <> 0
+                  )
+                RETURNING 1
+            )
+            SELECT COUNT(*) FROM purged
+            """
+        )
+    return int(deleted or 0)
 
 
 async def _fetch_equity_rows(ticker: str, backfill: bool, include_intraday: bool) -> List[Tuple[str, str, datetime, Optional[float], Optional[float], Optional[float], Optional[float], Optional[float]]]:
@@ -291,6 +374,14 @@ async def collect_price_history_cycle(backfill: bool = False) -> Dict[str, Any]:
     if not tickers:
         return {"status": "no_tickers", "rows_upserted": 0, "tickers": 0}
 
+    deleted_bad_rows = 0
+    try:
+        deleted_bad_rows = await _purge_malformed_daily_rows()
+        if deleted_bad_rows:
+            logger.warning("Purged %s malformed daily price rows before collection.", deleted_bad_rows)
+    except Exception as exc:
+        logger.warning("Could not purge malformed daily rows: %s", exc)
+
     equity_intraday = backfill or _market_hours_equities()
     upserted = 0
     errors: List[str] = []
@@ -314,6 +405,7 @@ async def collect_price_history_cycle(backfill: bool = False) -> Dict[str, Any]:
         "status": "ok" if not errors else "partial",
         "rows_upserted": upserted,
         "tickers": len(tickers),
+        "purged_daily_rows": deleted_bad_rows,
         "errors": errors[:10],
     }
 
