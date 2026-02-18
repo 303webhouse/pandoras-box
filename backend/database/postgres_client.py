@@ -354,6 +354,24 @@ async def init_database():
                 ON health_alerts(resolved_at)
                 WHERE resolved_at IS NULL;
         """)
+
+        # Unusual Whales screenshot intelligence snapshots (vision-extracted context).
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS uw_snapshots (
+                id SERIAL PRIMARY KEY,
+                timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                dashboard_type TEXT NOT NULL,
+                time_slot TEXT,
+                extracted_data JSONB NOT NULL DEFAULT '{}'::jsonb,
+                raw_summary TEXT,
+                signal_alignment TEXT
+            )
+        """)
+
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_uw_snap_ts
+                ON uw_snapshots(timestamp, dashboard_type);
+        """)
         
         # TICK history table
         await conn.execute("""
@@ -529,6 +547,11 @@ async def init_database():
             ALTER TABLE IF EXISTS trades
             ADD COLUMN IF NOT EXISTS structure TEXT,
             ADD COLUMN IF NOT EXISTS signal_source TEXT,
+            ADD COLUMN IF NOT EXISTS origin TEXT DEFAULT 'manual',
+            ADD COLUMN IF NOT EXISTS strike DECIMAL(10, 2),
+            ADD COLUMN IF NOT EXISTS expiry DATE,
+            ADD COLUMN IF NOT EXISTS short_strike DECIMAL(10, 2),
+            ADD COLUMN IF NOT EXISTS long_strike DECIMAL(10, 2),
             ADD COLUMN IF NOT EXISTS exit_price DECIMAL(10, 2),
             ADD COLUMN IF NOT EXISTS pnl_dollars DECIMAL(12, 2),
             ADD COLUMN IF NOT EXISTS pnl_percent DECIMAL(8, 3),
@@ -538,6 +561,12 @@ async def init_database():
             ADD COLUMN IF NOT EXISTS risk_amount DECIMAL(12, 2),
             ADD COLUMN IF NOT EXISTS risk_pct DECIMAL(8, 3),
             ADD COLUMN IF NOT EXISTS account_balance_at_open DECIMAL(12, 2)
+        """)
+
+        await conn.execute("""
+            UPDATE trades
+            SET origin = 'manual'
+            WHERE origin IS NULL
         """)
         
         # Add new columns to positions table for enhanced tracking

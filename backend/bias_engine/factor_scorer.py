@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 async def score_all_factors() -> Dict[str, FactorReading]:
-    """Run all 20 factor scoring functions."""
+    """Run all configured factor scoring functions."""
     results: Dict[str, FactorReading] = {}
 
     scorers = {
@@ -40,6 +40,7 @@ async def score_all_factors() -> Dict[str, FactorReading]:
         "excess_cape": "bias_filters.excess_cape_yield",
         "ism_manufacturing": "bias_filters.ism_manufacturing",
         "savita": "bias_filters.savita_indicator",
+        "dxy_trend": "bias_filters.dxy_trend",
     }
 
     for factor_id, module_path in scorers.items():

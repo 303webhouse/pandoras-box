@@ -20,6 +20,7 @@ from bias_engine.composite import FactorReading
 logger = logging.getLogger(__name__)
 
 PRICE_CACHE_TTL = 900  # 15 minutes
+PRICE_CACHE_VERSION = "v2"
 
 _TUPLE_COLUMN_RE = re.compile(r"^\('([^']+)'\s*,\s*_?'[^']*'\)$")
 
@@ -104,7 +105,9 @@ async def get_price_history(ticker: str, days: int = 30) -> pd.DataFrame:
     Uses a key per ticker+days to avoid mismatched windows.
     """
     symbol = str(ticker).strip().upper()
-    cache_key = f"prices:{symbol}:{days}"
+    if symbol == "DXY":
+        symbol = "DX-Y.NYB"
+    cache_key = f"prices:{PRICE_CACHE_VERSION}:{symbol}:{days}:adj"
     try:
         client = await get_redis_client()
         if client:
@@ -123,10 +126,10 @@ async def get_price_history(ticker: str, days: int = 30) -> pd.DataFrame:
             pass
 
     try:
-        data = yf.download(symbol, period=f"{days}d", progress=False, auto_adjust=False, multi_level_index=False)
+        data = yf.download(symbol, period=f"{days}d", progress=False, auto_adjust=True, multi_level_index=False)
     except TypeError:
         # Backward compatibility for older yfinance versions without multi_level_index.
-        data = yf.download(symbol, period=f"{days}d", progress=False, auto_adjust=False)
+        data = yf.download(symbol, period=f"{days}d", progress=False, auto_adjust=True)
     data = _normalize_history(data)
 
     try:

@@ -255,7 +255,29 @@ async def morning_brief():
 async def eod_brief():
     try:
         composite = await get_json("/bias/composite")
-        prompt = _repeat_high_stakes_prompt(build_eod_prompt(json.dumps(composite, indent=2)))
+        convergence = await get_json("/analytics/convergence-stats?days=1&min_sources=2")
+        uw_snapshots = await get_json("/analytics/uw-snapshots?days=1")
+
+        active_factors = (composite or {}).get("active_factors") or []
+        stale_factors = (composite or {}).get("stale_factors") or []
+        factor_health = {
+            "fresh": len(active_factors) if isinstance(active_factors, list) else 0,
+            "stale_count": len(stale_factors) if isinstance(stale_factors, list) else 0,
+            "total": (
+                (len(active_factors) if isinstance(active_factors, list) else 0)
+                + (len(stale_factors) if isinstance(stale_factors, list) else 0)
+            ),
+            "stale_names": stale_factors if isinstance(stale_factors, list) else [],
+        }
+
+        payload = {
+            "composite": composite,
+            "factor_health": factor_health,
+            "convergence": convergence,
+            "uw_visual_data": uw_snapshots,
+        }
+
+        prompt = _repeat_high_stakes_prompt(build_eod_prompt(json.dumps(payload, indent=2)))
         text = await call_llm(prompt, max_tokens=3000)
         await send_discord("briefs", "EOD Summary", text, priority="MEDIUM")
     except Exception as exc:

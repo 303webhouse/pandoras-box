@@ -181,6 +181,7 @@ async def get_trade_rows(
     ticker: Optional[str] = None,
     direction: Optional[str] = None,
     structure: Optional[str] = None,
+    origin: Optional[str] = None,
     days: int = 90,
     signal_source: Optional[str] = None,
     start: Optional[str] = None,
@@ -202,6 +203,9 @@ async def get_trade_rows(
     if structure:
         params.append(structure.lower())
         conditions.append(f"LOWER(COALESCE(t.structure, '')) = ${len(params)}")
+    if origin:
+        params.append(origin.lower())
+        conditions.append(f"LOWER(COALESCE(t.origin, 'manual')) = ${len(params)}")
     if signal_source:
         params.append(f"%{signal_source}%")
         conditions.append(
@@ -445,6 +449,7 @@ async def get_schema_table_summary() -> Dict[str, Dict[str, Any]]:
         "portfolio_snapshots",
         "strategy_health",
         "health_alerts",
+        "uw_snapshots",
     ]
     summary: Dict[str, Dict[str, Any]] = {}
     pool = await get_postgres_client()
@@ -486,6 +491,11 @@ async def get_schema_table_summary() -> Dict[str, Dict[str, Any]]:
                     stats["unresolved"] = unresolved
                 except Exception:
                     stats["unresolved"] = 0
+            elif table == "uw_snapshots":
+                oldest = await conn.fetchval("SELECT MIN(timestamp) FROM uw_snapshots")
+                newest = await conn.fetchval("SELECT MAX(timestamp) FROM uw_snapshots")
+                stats["oldest"] = oldest.isoformat() if oldest else None
+                stats["newest"] = newest.isoformat() if newest else None
 
             summary[table] = stats
 
@@ -498,12 +508,16 @@ async def insert_trade(trade: Dict[str, Any]) -> Dict[str, Any]:
             signal_id, ticker, direction, status, account, structure,
             signal_source, entry_price, stop_loss, target_1, quantity,
             opened_at, notes, pivot_recommendation, pivot_conviction,
-            full_context, bias_at_entry, risk_amount
+            full_context, bias_at_entry, risk_amount,
+            origin, strike, expiry, short_strike, long_strike,
+            closed_at, exit_price, pnl_dollars, pnl_percent, rr_achieved, exit_reason
         ) VALUES (
             $1, $2, $3, $4, $5, $6,
             $7, $8, $9, $10, $11,
             $12, $13, $14, $15,
-            $16::jsonb, $17, $18
+            $16::jsonb, $17, $18,
+            $19, $20, $21, $22, $23,
+            $24, $25, $26, $27, $28, $29
         )
         RETURNING *
     """
@@ -526,11 +540,101 @@ async def insert_trade(trade: Dict[str, Any]) -> Dict[str, Any]:
         json.dumps(trade.get("full_context") or {}),
         trade.get("bias_at_entry"),
         trade.get("risk_amount"),
+        trade.get("origin") or "manual",
+        trade.get("strike"),
+        trade.get("expiry"),
+        trade.get("short_strike"),
+        trade.get("long_strike"),
+        trade.get("closed_at"),
+        trade.get("exit_price"),
+        trade.get("pnl_dollars"),
+        trade.get("pnl_percent"),
+        trade.get("rr_achieved"),
+        trade.get("exit_reason"),
     ]
     pool = await get_postgres_client()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(query, *params)
     return dict(row) if row else {}
+
+
+async def find_matching_signals(
+    ticker: str,
+    direction: str,
+    entry_timestamp: datetime,
+    window_hours: int = 4,
+) -> List[str]:
+    """
+    Find likely matching signals around a trade entry window.
+    """
+    if not ticker or not direction or not entry_timestamp:
+        return []
+
+    dir_upper = str(direction).upper()
+    if dir_upper in {"LONG", "BUY"}:
+        candidates = ["LONG", "BUY", "BULLISH"]
+    elif dir_upper in {"SHORT", "SELL"}:
+        candidates = ["SHORT", "SELL", "BEARISH"]
+    else:
+        candidates = [dir_upper]
+
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT signal_id
+            FROM signals
+            WHERE LOWER(ticker) = LOWER($1)
+              AND UPPER(direction) = ANY($2::text[])
+              AND timestamp BETWEEN $3 - ($4 || ' hours')::interval
+                              AND $3 + ($4 || ' hours')::interval
+            ORDER BY ABS(EXTRACT(EPOCH FROM (timestamp - $3)))
+            LIMIT 5
+            """,
+            ticker,
+            candidates,
+            entry_timestamp,
+            max(1, int(window_hours)),
+        )
+    return [str(row["signal_id"]) for row in rows if row.get("signal_id")]
+
+
+async def trade_exists_duplicate(
+    ticker: str,
+    direction: Optional[str],
+    entry_date: Optional[datetime],
+    strike: Optional[float],
+    short_strike: Optional[float],
+) -> bool:
+    if not ticker or not entry_date:
+        return False
+
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT id
+            FROM trades
+            WHERE UPPER(ticker) = UPPER($1)
+              AND ($2::text IS NULL OR UPPER(COALESCE(direction,'')) = UPPER($2))
+              AND DATE(COALESCE(opened_at, NOW())) BETWEEN DATE($3 - INTERVAL '1 day') AND DATE($3 + INTERVAL '1 day')
+              AND (
+                    ($4::numeric IS NULL AND strike IS NULL)
+                    OR ABS(COALESCE(strike, 0) - COALESCE($4, 0)) < 0.01
+                  )
+              AND (
+                    ($5::numeric IS NULL AND short_strike IS NULL)
+                    OR ABS(COALESCE(short_strike, 0) - COALESCE($5, 0)) < 0.01
+                  )
+            LIMIT 1
+            """,
+            ticker,
+            direction,
+            entry_date,
+            strike,
+            short_strike,
+        )
+    return row is not None
 
 
 async def close_trade(trade_id: int, update: Dict[str, Any]) -> Dict[str, Any]:
@@ -593,3 +697,49 @@ async def insert_trade_leg(payload: Dict[str, Any]) -> Dict[str, Any]:
     async with pool.acquire() as conn:
         row = await conn.fetchrow(query, *params)
     return dict(row) if row else {}
+
+
+async def insert_uw_snapshot(payload: Dict[str, Any]) -> Dict[str, Any]:
+    query = """
+        INSERT INTO uw_snapshots (
+            timestamp, dashboard_type, time_slot, extracted_data, raw_summary, signal_alignment
+        ) VALUES (
+            COALESCE($1, NOW()), $2, $3, $4::jsonb, $5, $6
+        )
+        RETURNING *
+    """
+    params = [
+        payload.get("timestamp"),
+        payload.get("dashboard_type"),
+        payload.get("time_slot"),
+        json.dumps(payload.get("extracted_data") or {}),
+        payload.get("raw_summary"),
+        payload.get("signal_alignment"),
+    ]
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(query, *params)
+    return dict(row) if row else {}
+
+
+async def get_uw_snapshot_rows(
+    days: int = 1,
+    dashboard_type: Optional[str] = None,
+    time_slot: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    start_dt, end_dt = window_bounds(days=max(1, days))
+    conditions = ["timestamp >= $1", "timestamp <= $2"]
+    params: List[Any] = [start_dt, end_dt]
+    if dashboard_type:
+        params.append(dashboard_type)
+        conditions.append(f"LOWER(dashboard_type) = LOWER(${len(params)})")
+    if time_slot:
+        params.append(time_slot)
+        conditions.append(f"LOWER(COALESCE(time_slot,'')) = LOWER(${len(params)})")
+    query = f"""
+        SELECT *
+        FROM uw_snapshots
+        WHERE {" AND ".join(conditions)}
+        ORDER BY timestamp DESC
+    """
+    return await fetch_rows(query, params)

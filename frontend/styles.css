@@ -9926,10 +9926,46 @@ body[data-mode="analytics"] .analytics-shell {
     background: rgba(20, 184, 166, 0.09);
 }
 
+.origin-tag {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 62px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    border: 1px solid transparent;
+}
+
+.origin-tag-signal {
+    color: #00e676;
+    background: rgba(0, 230, 118, 0.14);
+    border-color: rgba(0, 230, 118, 0.28);
+}
+
+.origin-tag-manual {
+    color: #66d1ff;
+    background: rgba(37, 99, 235, 0.14);
+    border-color: rgba(37, 99, 235, 0.28);
+}
+
+.origin-tag-imported {
+    color: #cfd8e3;
+    background: rgba(148, 163, 184, 0.15);
+    border-color: rgba(148, 163, 184, 0.26);
+}
+
 .analytics-summary-row {
     margin-top: 8px;
     font-size: 12px;
     color: #9fb7ff;
+}
+
+.journal-import-preview {
+    max-height: 280px;
 }
 
 .journal-details {

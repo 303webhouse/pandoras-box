@@ -33,12 +33,14 @@
                 account: '',
                 direction: '',
                 structure: '',
+                origin: '',
                 signal_source: '',
                 days: 90,
                 search: ''
             },
             rows: [],
-            selectedTradeId: null
+            selectedTradeId: null,
+            pendingImportPreview: null
         },
         signalExplorer: {
             sortBy: 'timestamp',
@@ -132,6 +134,24 @@
         return dt.toLocaleString();
     }
 
+    function normalizeTradeOrigin(value) {
+        const origin = String(value || 'manual').trim().toLowerCase();
+        if (origin === 'signal_driven' || origin === 'signal') return 'signal_driven';
+        if (origin === 'imported' || origin === 'import') return 'imported';
+        return 'manual';
+    }
+
+    function renderOriginTag(value) {
+        const origin = normalizeTradeOrigin(value);
+        if (origin === 'signal_driven') {
+            return '<span class="origin-tag origin-tag-signal">Signal</span>';
+        }
+        if (origin === 'imported') {
+            return '<span class="origin-tag origin-tag-imported">Imported</span>';
+        }
+        return '<span class="origin-tag origin-tag-manual">Manual</span>';
+    }
+
     function normalizeRegime(value) {
         const raw = String(value || '').toUpperCase().trim();
         if (!raw) return 'UNKNOWN';
@@ -218,6 +238,26 @@
         }
     }
 
+    async function fetchForm(path, formData, options = {}) {
+        const url = `${API_BASE}${path}`;
+        const response = await fetch(url, {
+            method: options.method || 'POST',
+            body: formData,
+            headers: options.headers || {}
+        });
+        if (!response.ok) {
+            let detail = `${response.status} ${response.statusText}`;
+            try {
+                const payload = await response.json();
+                if (payload && payload.detail) detail = payload.detail;
+            } catch (_) {
+                // ignore
+            }
+            throw new Error(detail);
+        }
+        return response.json();
+    }
+
     function startDashboardTimer() {
         stopDashboardTimer();
         state.dashboardTimer = window.setInterval(() => {
@@ -276,6 +316,7 @@
             'journalFilterAccount',
             'journalFilterDirection',
             'journalFilterStructure',
+            'journalFilterOrigin',
             'journalFilterSource',
             'journalFilterDays',
             'journalSearchTicker'
@@ -296,12 +337,19 @@
         const toggleFormBtn = byId('journalToggleFormBtn');
         const cancelFormBtn = byId('journalCancelFormBtn');
         const saveTradeBtn = byId('journalSaveTradeBtn');
+        const importBtn = byId('journalImportTradesBtn');
+        const importCancelBtn = byId('journalImportCancelBtn');
+        const importParseBtn = byId('journalImportParseBtn');
+        const importConfirmBtn = byId('journalImportConfirmBtn');
+        if (importConfirmBtn) importConfirmBtn.disabled = true;
 
         if (toggleFormBtn) {
             toggleFormBtn.addEventListener('click', () => {
                 const card = byId('journalLogTradeCard');
                 if (!card) return;
                 card.hidden = !card.hidden;
+                const importCard = byId('journalImportCard');
+                if (importCard && !card.hidden) importCard.hidden = true;
             });
         }
 
@@ -315,6 +363,40 @@
         if (saveTradeBtn) {
             saveTradeBtn.addEventListener('click', async () => {
                 await submitTradeForm();
+            });
+        }
+
+        if (importBtn) {
+            importBtn.addEventListener('click', () => {
+                const card = byId('journalImportCard');
+                if (!card) return;
+                card.hidden = !card.hidden;
+                if (!card.hidden && importConfirmBtn) importConfirmBtn.disabled = true;
+                const logCard = byId('journalLogTradeCard');
+                if (logCard && !card.hidden) logCard.hidden = true;
+            });
+        }
+
+        if (importCancelBtn) {
+            importCancelBtn.addEventListener('click', () => {
+                const card = byId('journalImportCard');
+                if (card) card.hidden = true;
+                state.journal.pendingImportPreview = null;
+                const preview = byId('journalImportPreview');
+                if (preview) preview.innerHTML = '<div class="analytics-empty">Upload a CSV or paste trades, then click Parse.</div>';
+                if (importConfirmBtn) importConfirmBtn.disabled = true;
+            });
+        }
+
+        if (importParseBtn) {
+            importParseBtn.addEventListener('click', async () => {
+                await parseImportTradesInput();
+            });
+        }
+
+        if (importConfirmBtn) {
+            importConfirmBtn.addEventListener('click', async () => {
+                await confirmImportTrades();
             });
         }
     }
@@ -395,6 +477,7 @@
             account: byId('journalFilterAccount')?.value || '',
             direction: byId('journalFilterDirection')?.value || '',
             structure: byId('journalFilterStructure')?.value || '',
+            origin: byId('journalFilterOrigin')?.value || '',
             signal_source: byId('journalFilterSource')?.value || '',
             days: asNumber(byId('journalFilterDays')?.value, 90),
             search: byId('journalSearchTicker')?.value?.trim() || ''
@@ -521,6 +604,10 @@
 
         const pnl = stats?.pnl || {};
         const risk = stats?.risk_metrics || {};
+        const byOrigin = stats?.by_origin || {};
+        const signalOrigin = byOrigin.signal_driven || {};
+        const importedOrigin = byOrigin.imported || {};
+        const originBreakdown = `${asNumber(signalOrigin.trades)} signal (${formatPercent(signalOrigin.win_rate)}) vs ${asNumber(importedOrigin.trades)} imported (${formatPercent(importedOrigin.win_rate)})`;
 
         const metrics = [
             { label: 'Total P&L', value: formatDollar(pnl.total_dollars), className: metricClass(pnl.total_dollars) },
@@ -531,6 +618,7 @@
             { label: 'Max Drawdown', value: formatRawPercent(risk.max_drawdown_pct), className: metricClass(risk.max_drawdown_pct) },
             { label: 'Expectancy', value: formatDollar(pnl.expectancy_per_trade), className: metricClass(pnl.expectancy_per_trade) },
             { label: 'Open Trades', value: String(asNumber(stats?.open, 0)), className: '' },
+            { label: 'Origin Mix', value: originBreakdown, className: '' },
             { label: 'Best Trade', value: formatDollar(pnl.largest_win), className: metricClass(pnl.largest_win) },
             { label: 'Worst Trade', value: formatDollar(pnl.largest_loss), className: metricClass(pnl.largest_loss) }
         ];
@@ -885,7 +973,7 @@
 
         const trades = safeArray(rows);
         if (!trades.length) {
-            tbody.innerHTML = '<tr><td colspan="12" class="analytics-empty">Collecting data - metrics will appear after signals accumulate.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="13" class="analytics-empty">Collecting data - metrics will appear after signals accumulate.</td></tr>';
             return;
         }
 
@@ -899,6 +987,7 @@
                 const exit = trade.exit_price !== null && trade.exit_price !== undefined ? Number(trade.exit_price).toFixed(2) : '--';
                 const signal = trade.signal_source || trade.linked_signal_strategy || '--';
                 const bias = trade.bias_at_entry || trade.linked_signal_bias || '--';
+                const origin = trade.origin || 'manual';
 
                 return `
                     <tr class="${rowClass}" data-trade-id="${id}">
@@ -912,6 +1001,7 @@
                         <td>${escapeHtml(formatRatio(trade.rr_achieved))}</td>
                         <td>${escapeHtml(String(trade.account || '--').toUpperCase())}</td>
                         <td>${escapeHtml(String(bias))}</td>
+                        <td>${renderOriginTag(origin)}</td>
                         <td>${escapeHtml(slugToLabel(signal))}</td>
                         <td>${escapeHtml(String(trade.exit_reason || '--'))}</td>
                     </tr>
@@ -1049,7 +1139,7 @@
 
         const body = byId('journalTableBody');
         if (body) {
-            body.innerHTML = '<tr><td colspan="12" class="analytics-empty">Loading trades...</td></tr>';
+            body.innerHTML = '<tr><td colspan="13" class="analytics-empty">Loading trades...</td></tr>';
         }
 
         try {
@@ -1058,6 +1148,7 @@
                     account: filters.account,
                     direction: filters.direction,
                     structure: filters.structure,
+                    origin: filters.origin,
                     signal_source: filters.signal_source,
                     days: filters.days,
                     search: filters.search,
@@ -1069,6 +1160,7 @@
                     ticker: filters.search,
                     direction: filters.direction,
                     structure: filters.structure,
+                    origin: filters.origin,
                     signal_source: filters.signal_source,
                     days: filters.days
                 })
@@ -1097,7 +1189,7 @@
         } catch (error) {
             console.error('Trade journal load failed:', error);
             if (body) {
-                body.innerHTML = `<tr><td colspan="12" class="analytics-empty">Trade journal error: ${escapeHtml(error.message || 'unknown')}</td></tr>`;
+                body.innerHTML = `<tr><td colspan="13" class="analytics-empty">Trade journal error: ${escapeHtml(error.message || 'unknown')}</td></tr>`;
             }
         }
     }
@@ -1176,6 +1268,175 @@
         } catch (error) {
             console.error('Trade save failed:', error);
             window.alert(`Failed to save trade: ${error.message || 'unknown error'}`);
+        }
+    }
+
+    function renderImportPreview(preview, importResult = null) {
+        const container = byId('journalImportPreview');
+        const confirmBtn = byId('journalImportConfirmBtn');
+        if (!container) return;
+
+        if (importResult) {
+            if (confirmBtn) confirmBtn.disabled = true;
+            const errors = safeArray(importResult.errors);
+            container.innerHTML = `
+                <div class="analytics-summary-row">
+                    Imported: ${asNumber(importResult.imported)} | Signal matched: ${asNumber(importResult.signal_matched)} | Duplicates skipped: ${asNumber(importResult.duplicates_skipped)} | Open positions: ${asNumber(importResult.open_positions)} | Total P&L: ${formatDollar(importResult.total_pnl)}
+                </div>
+                ${errors.length ? `<div class="analytics-empty">Errors: ${escapeHtml(errors.join(' | '))}</div>` : '<div class="analytics-empty">Import complete.</div>'}
+            `;
+            return;
+        }
+
+        const closedTrades = safeArray(preview?.trades);
+        const openTrades = safeArray(preview?.open_positions);
+        const combined = [...closedTrades, ...openTrades];
+        const warnings = safeArray(preview?.warnings);
+        if (!combined.length) {
+            if (confirmBtn) confirmBtn.disabled = true;
+            container.innerHTML = '<div class="analytics-empty">No trades parsed. Upload a Robinhood CSV or paste CSV text and click Parse.</div>';
+            return;
+        }
+
+        if (confirmBtn) confirmBtn.disabled = false;
+        const previewRows = combined.slice(0, 40).map((trade, idx) => {
+            const ticker = String(trade.ticker || '--').toUpperCase();
+            const structure = String(trade.structure || '--');
+            const entry = formatDate(trade.entry_date || trade.opened_at);
+            const exit = trade.exit_date || trade.closed_at ? formatDate(trade.exit_date || trade.closed_at) : '--';
+            const pnl = trade.pnl_dollars !== null && trade.pnl_dollars !== undefined
+                ? formatDollar(trade.pnl_dollars)
+                : '--';
+            const status = String(trade.status || (trade.exit_date ? 'closed' : 'open')).toLowerCase();
+            return `
+                <tr>
+                    <td>${idx + 1}</td>
+                    <td>${escapeHtml(ticker)}</td>
+                    <td>${escapeHtml(structure)}</td>
+                    <td>${escapeHtml(entry)}</td>
+                    <td>${escapeHtml(exit)}</td>
+                    <td>${escapeHtml(pnl)}</td>
+                    <td>${escapeHtml(status)}</td>
+                </tr>
+            `;
+        }).join('');
+
+        const warningHtml = warnings.length
+            ? `<div class="analytics-empty">${warnings.map((w) => escapeHtml(String(w))).join('<br>')}</div>`
+            : '';
+
+        container.innerHTML = `
+            <div class="analytics-summary-row">
+                Format: ${escapeHtml(preview?.format_detected || 'unknown')} | Raw rows: ${asNumber(preview?.raw_transactions)} | Parsed legs: ${asNumber(preview?.filtered_transactions)} | Grouped trades: ${asNumber(preview?.grouped_trades)}
+            </div>
+            <div class="analytics-summary-row">
+                Closed trades: ${closedTrades.length} | Open positions: ${openTrades.length}
+            </div>
+            <div class="analytics-table-wrap journal-import-preview">
+                <table class="analytics-table">
+                    <thead>
+                        <tr>
+                            <th>#</th><th>Ticker</th><th>Structure</th><th>Entry</th><th>Exit</th><th>P&L $</th><th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>${previewRows}</tbody>
+                </table>
+            </div>
+            ${warningHtml}
+        `;
+    }
+
+    async function parseImportTradesInput() {
+        const fileInput = byId('journalImportCsv');
+        const textInput = byId('journalImportText');
+        const confirmBtn = byId('journalImportConfirmBtn');
+        const csvFile = fileInput?.files?.[0] || null;
+        const pastedText = textInput?.value?.trim() || '';
+
+        if (confirmBtn) confirmBtn.disabled = true;
+        if (!csvFile && !pastedText) {
+            renderImportPreview(null);
+            return;
+        }
+
+        try {
+            let preview = null;
+            if (csvFile) {
+                const formData = new FormData();
+                formData.append('file', csvFile);
+                preview = await fetchForm('/parse-robinhood-csv', formData);
+            } else {
+                let payload = null;
+                try {
+                    const parsed = JSON.parse(pastedText);
+                    if (Array.isArray(parsed)) {
+                        payload = {
+                            format_detected: 'json_array',
+                            raw_transactions: parsed.length,
+                            filtered_transactions: parsed.length,
+                            grouped_trades: parsed.length,
+                            trades: parsed,
+                            open_positions: [],
+                            warnings: ['Parsed as JSON array.']
+                        };
+                    }
+                } catch (_) {
+                    // fall through to CSV-style parse path
+                }
+
+                if (payload) {
+                    preview = payload;
+                } else {
+                    const formData = new FormData();
+                    const blob = new Blob([pastedText], { type: 'text/csv' });
+                    formData.append('file', blob, 'pasted_trades.csv');
+                    preview = await fetchForm('/parse-robinhood-csv', formData);
+                }
+            }
+
+            state.journal.pendingImportPreview = preview;
+            renderImportPreview(preview);
+        } catch (error) {
+            console.error('Trade import parse failed:', error);
+            state.journal.pendingImportPreview = null;
+            if (confirmBtn) confirmBtn.disabled = true;
+            const container = byId('journalImportPreview');
+            if (container) {
+                container.innerHTML = `<div class="analytics-empty">Parse failed: ${escapeHtml(error.message || 'unknown')}</div>`;
+            }
+        }
+    }
+
+    async function confirmImportTrades() {
+        const preview = state.journal.pendingImportPreview;
+        if (!preview) {
+            window.alert('Parse trades first.');
+            return;
+        }
+        const trades = [...safeArray(preview.trades), ...safeArray(preview.open_positions)];
+        if (!trades.length) {
+            window.alert('No parsed trades to import.');
+            return;
+        }
+
+        try {
+            const result = await fetchJson('/import-trades', {}, {
+                method: 'POST',
+                body: {
+                    account: 'robinhood',
+                    trades
+                }
+            });
+            renderImportPreview(preview, result);
+            state.journal.pendingImportPreview = null;
+            const fileInput = byId('journalImportCsv');
+            const textInput = byId('journalImportText');
+            if (fileInput) fileInput.value = '';
+            if (textInput) textInput.value = '';
+            await loadTradeJournal();
+        } catch (error) {
+            console.error('Trade import failed:', error);
+            window.alert(`Import failed: ${error.message || 'unknown error'}`);
         }
     }
 
