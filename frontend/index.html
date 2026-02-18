@@ -36,6 +36,7 @@
                 <div class="mode-switcher" role="tablist" aria-label="App Mode">
                     <button class="mode-btn active" id="modeHubBtn" data-mode="hub" role="tab" aria-selected="true">Equities Swinger</button>
                     <button class="mode-btn" id="modeCryptoBtn" data-mode="crypto" role="tab" aria-selected="false">Crypto Scalper</button>
+                    <button class="mode-btn" id="modeAnalyticsBtn" data-mode="analytics" role="tab" aria-selected="false">Analytics</button>
                 </div>
                 <a href="/knowledgebase" class="kb-btn" title="Knowledgebase">📚 KB</a>
                 <button class="refresh-btn" id="refreshBtn">↻ Refresh</button>
@@ -1493,6 +1494,565 @@
 
         </main>
 
+        <main id="analyticsShell" class="analytics-shell" hidden>
+            <section class="analytics-subtabs" role="tablist" aria-label="Analytics Views">
+                <button class="analytics-subtab active" data-analytics-tab="dashboard" role="tab" aria-selected="true">Dashboard</button>
+                <button class="analytics-subtab" data-analytics-tab="trade-journal" role="tab" aria-selected="false">Trade Journal</button>
+                <button class="analytics-subtab" data-analytics-tab="signal-explorer" role="tab" aria-selected="false">Signal Explorer</button>
+                <button class="analytics-subtab" data-analytics-tab="factor-lab" role="tab" aria-selected="false">Factor Lab</button>
+                <button class="analytics-subtab" data-analytics-tab="backtest" role="tab" aria-selected="false">Backtest</button>
+                <button class="analytics-subtab" data-analytics-tab="risk" role="tab" aria-selected="false">Risk</button>
+            </section>
+
+            <section class="analytics-tab-pane active" id="analyticsPaneDashboard">
+                <div class="analytics-section-header">
+                    <h2>Strategy Health</h2>
+                    <span class="analytics-muted" id="analyticsHealthAsOf">Collecting data...</span>
+                </div>
+                <div class="analytics-health-grid" id="analyticsHealthCards">
+                    <div class="analytics-empty">Collecting data - metrics will appear after signals accumulate.</div>
+                </div>
+
+                <div class="analytics-row analytics-row-2">
+                    <div class="analytics-card analytics-card-wide">
+                        <div class="analytics-card-header">
+                            <h3>Equity Curve</h3>
+                            <div class="analytics-controls">
+                                <select id="analyticsEquityAccount">
+                                    <option value="">All Accounts</option>
+                                    <option value="robinhood">Robinhood</option>
+                                    <option value="401k">401k</option>
+                                    <option value="breakout">Breakout</option>
+                                    <option value="coinbase">Coinbase</option>
+                                </select>
+                                <select id="analyticsEquityRange">
+                                    <option value="7">1W</option>
+                                    <option value="30" selected>1M</option>
+                                    <option value="90">3M</option>
+                                    <option value="180">6M</option>
+                                    <option value="3650">ALL</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="analytics-chart-wrap">
+                            <canvas id="analyticsEquityChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="analytics-card analytics-card-narrow">
+                        <div class="analytics-card-header">
+                            <h3>Key Metrics</h3>
+                        </div>
+                        <div class="analytics-metrics-list" id="analyticsKeyMetrics">
+                            <div class="analytics-empty">Loading metrics...</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="analytics-row analytics-row-3">
+                    <div class="analytics-card">
+                        <div class="analytics-card-header">
+                            <h3>Signal Accuracy Over Time</h3>
+                        </div>
+                        <div class="analytics-chart-wrap">
+                            <canvas id="analyticsAccuracyChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="analytics-card">
+                        <div class="analytics-card-header">
+                            <h3>Win Rate by Regime</h3>
+                        </div>
+                        <div class="analytics-chart-wrap">
+                            <canvas id="analyticsRegimeChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="analytics-card analytics-alerts-card">
+                    <div class="analytics-card-header">
+                        <h3>Active Alerts</h3>
+                    </div>
+                    <div class="analytics-alerts-list" id="analyticsAlertsList">
+                        <div class="analytics-empty">No active alerts.</div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="analytics-tab-pane" id="analyticsPaneTradeJournal" hidden>
+                <div class="analytics-card">
+                    <div class="analytics-card-header">
+                        <h3>Trade Journal</h3>
+                        <button class="analytics-btn" id="journalToggleFormBtn">+ Log Trade</button>
+                    </div>
+                    <div class="analytics-filters-grid">
+                        <select id="journalFilterAccount">
+                            <option value="">Account: All</option>
+                            <option value="robinhood">Robinhood</option>
+                            <option value="401k">401k</option>
+                            <option value="breakout">Breakout</option>
+                            <option value="coinbase">Coinbase</option>
+                        </select>
+                        <select id="journalFilterDirection">
+                            <option value="">Direction: All</option>
+                            <option value="LONG">LONG</option>
+                            <option value="SHORT">SHORT</option>
+                        </select>
+                        <select id="journalFilterStructure">
+                            <option value="">Structure: All</option>
+                            <option value="put_spread">put_spread</option>
+                            <option value="call_spread">call_spread</option>
+                            <option value="shares">shares</option>
+                        </select>
+                        <select id="journalFilterSource">
+                            <option value="">Signal Source: All</option>
+                        </select>
+                        <select id="journalFilterDays">
+                            <option value="30">30d</option>
+                            <option value="90" selected>90d</option>
+                            <option value="180">180d</option>
+                            <option value="365">1y</option>
+                        </select>
+                        <input id="journalSearchTicker" type="text" placeholder="Search ticker or notes...">
+                    </div>
+                    <div class="analytics-table-wrap">
+                        <table class="analytics-table" id="journalTradesTable">
+                            <thead>
+                                <tr>
+                                    <th>Date</th>
+                                    <th>Ticker</th>
+                                    <th>Dir</th>
+                                    <th>Struct</th>
+                                    <th>Entry/Exit</th>
+                                    <th>P&L $</th>
+                                    <th>P&L %</th>
+                                    <th>R:R</th>
+                                    <th>Account</th>
+                                    <th>Bias</th>
+                                    <th>Signal</th>
+                                    <th>Exit Reason</th>
+                                </tr>
+                            </thead>
+                            <tbody id="journalTableBody">
+                                <tr>
+                                    <td colspan="12" class="analytics-empty">Loading trades...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="analytics-summary-row" id="journalSummary">Collecting data...</div>
+                </div>
+
+                <div class="analytics-row analytics-row-journal">
+                    <div class="analytics-card">
+                        <div class="analytics-card-header">
+                            <h3>Trade Details</h3>
+                        </div>
+                        <div id="journalTradeDetails" class="journal-details">
+                            <div class="analytics-empty">Click a trade row to view legs, recommendation, and context.</div>
+                        </div>
+                    </div>
+                    <div class="analytics-card" id="journalLogTradeCard" hidden>
+                        <div class="analytics-card-header">
+                            <h3>Log Trade</h3>
+                        </div>
+                        <div class="analytics-form-grid">
+                            <input id="journalFormTicker" type="text" placeholder="Ticker">
+                            <select id="journalFormDirection">
+                                <option value="">Direction</option>
+                                <option value="LONG">LONG</option>
+                                <option value="SHORT">SHORT</option>
+                            </select>
+                            <input id="journalFormStructure" type="text" placeholder="Structure (put_spread)">
+                            <input id="journalFormEntry" type="number" step="0.01" placeholder="Entry Price">
+                            <input id="journalFormStop" type="number" step="0.01" placeholder="Stop Loss">
+                            <input id="journalFormTarget1" type="number" step="0.01" placeholder="Target 1">
+                            <input id="journalFormTarget2" type="number" step="0.01" placeholder="Target 2">
+                            <input id="journalFormQuantity" type="number" step="0.01" placeholder="Quantity">
+                            <select id="journalFormAccount">
+                                <option value="">Account</option>
+                                <option value="robinhood">Robinhood</option>
+                                <option value="401k">401k</option>
+                                <option value="breakout">Breakout</option>
+                                <option value="coinbase">Coinbase</option>
+                            </select>
+                            <textarea id="journalFormNotes" placeholder="Notes"></textarea>
+                        </div>
+                        <div class="analytics-form-actions">
+                            <button class="analytics-btn analytics-btn-ghost" id="journalCancelFormBtn">Cancel</button>
+                            <button class="analytics-btn" id="journalSaveTradeBtn">Save Trade</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="analytics-tab-pane" id="analyticsPaneSignalExplorer" hidden>
+                <div class="analytics-card">
+                    <div class="analytics-card-header">
+                        <h3>Signal Explorer</h3>
+                    </div>
+                    <div class="analytics-filters-grid analytics-filters-grid-8">
+                        <select id="signalFilterSource">
+                            <option value="">Source: All</option>
+                        </select>
+                        <input id="signalFilterTicker" type="text" placeholder="Ticker: All">
+                        <select id="signalFilterDirection">
+                            <option value="">Direction: All</option>
+                            <option value="BULLISH">BULLISH</option>
+                            <option value="BEARISH">BEARISH</option>
+                        </select>
+                        <select id="signalFilterConviction">
+                            <option value="">Conviction: All</option>
+                            <option value="HIGH">HIGH</option>
+                            <option value="MODERATE">MODERATE</option>
+                            <option value="WATCH">WATCH</option>
+                        </select>
+                        <select id="signalFilterRegime">
+                            <option value="">Regime: All</option>
+                            <option value="MAJOR_URSA">MAJOR_URSA</option>
+                            <option value="MINOR_URSA">MINOR_URSA</option>
+                            <option value="NEUTRAL">NEUTRAL</option>
+                            <option value="MINOR_TORO">MINOR_TORO</option>
+                            <option value="MAJOR_TORO">MAJOR_TORO</option>
+                        </select>
+                        <select id="signalFilterDay">
+                            <option value="">Day: All</option>
+                            <option value="0">Monday</option>
+                            <option value="1">Tuesday</option>
+                            <option value="2">Wednesday</option>
+                            <option value="3">Thursday</option>
+                            <option value="4">Friday</option>
+                        </select>
+                        <select id="signalFilterHour">
+                            <option value="">Hour: All</option>
+                            <option value="9">09:00</option>
+                            <option value="10">10:00</option>
+                            <option value="11">11:00</option>
+                            <option value="12">12:00</option>
+                            <option value="13">13:00</option>
+                            <option value="14">14:00</option>
+                            <option value="15">15:00</option>
+                            <option value="16">16:00</option>
+                        </select>
+                        <select id="signalFilterDays">
+                            <option value="7">7d</option>
+                            <option value="30" selected>30d</option>
+                            <option value="60">60d</option>
+                            <option value="90">90d</option>
+                            <option value="180">180d</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="analytics-row analytics-row-signal">
+                    <div class="analytics-card">
+                        <div class="analytics-card-header">
+                            <h3>Signals</h3>
+                            <span class="analytics-muted" id="signalTableMeta">Loading...</span>
+                        </div>
+                        <div class="analytics-table-wrap signal-table-wrap">
+                            <table class="analytics-table" id="signalExplorerTable">
+                                <thead>
+                                    <tr>
+                                        <th data-sort="timestamp">Time</th>
+                                        <th data-sort="ticker">Ticker</th>
+                                        <th data-sort="direction">Dir</th>
+                                        <th data-sort="source">Source</th>
+                                        <th data-sort="conviction">Conv</th>
+                                        <th data-sort="mfe_pct">MFE %</th>
+                                        <th data-sort="mae_pct">MAE %</th>
+                                        <th data-sort="accurate">Accurate</th>
+                                        <th data-sort="traded">Traded</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="signalExplorerTableBody">
+                                    <tr>
+                                        <td colspan="9" class="analytics-empty">Loading signals...</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="journal-details signal-detail-panel" id="signalDetailPanel">
+                            <div class="analytics-empty">Click a signal row to inspect payload, market state, factors, and convergence IDs.</div>
+                        </div>
+                    </div>
+                    <div class="analytics-card">
+                        <div class="analytics-card-header">
+                            <h3>Filtered Results</h3>
+                        </div>
+                        <div class="analytics-metrics-list" id="signalStatsPanel">
+                            <div class="analytics-empty">Loading stats...</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="analytics-row analytics-row-3">
+                    <div class="analytics-card">
+                        <div class="analytics-card-header">
+                            <h3>MFE / MAE Histogram</h3>
+                        </div>
+                        <div class="analytics-chart-wrap analytics-chart-wrap-sm">
+                            <canvas id="signalMfeMaeChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="analytics-card">
+                        <div class="analytics-card-header">
+                            <h3>Accuracy by Hour</h3>
+                        </div>
+                        <div class="analytics-chart-wrap analytics-chart-wrap-sm">
+                            <canvas id="signalAccuracyHourChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="analytics-tab-pane" id="analyticsPaneFactorLab" hidden>
+                <div class="analytics-card">
+                    <div class="analytics-card-header">
+                        <h3>Factor Lab</h3>
+                    </div>
+                    <div class="analytics-filters-grid analytics-filters-grid-3">
+                        <select id="factorLabFactorSelect">
+                            <option value="">Select Factor</option>
+                        </select>
+                        <select id="factorLabCompareSelect">
+                            <option value="">Compare With (Optional)</option>
+                        </select>
+                        <select id="factorLabDays">
+                            <option value="30">30d</option>
+                            <option value="60" selected>60d</option>
+                            <option value="90">90d</option>
+                            <option value="180">180d</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="analytics-card">
+                    <div class="analytics-card-header">
+                        <h3>Factor Timeline vs SPY</h3>
+                    </div>
+                    <div class="analytics-chart-wrap">
+                        <canvas id="factorLabTimelineChart"></canvas>
+                    </div>
+                </div>
+
+                <div class="analytics-row analytics-row-4">
+                    <div class="analytics-card factor-stat-card" id="factorLabAccuracyCard">
+                        <div class="analytics-card-header"><h3>Accuracy</h3></div>
+                        <div class="analytics-empty">Loading...</div>
+                    </div>
+                    <div class="analytics-card factor-stat-card" id="factorLabStaleCard">
+                        <div class="analytics-card-header"><h3>Stale Rate</h3></div>
+                        <div class="analytics-empty">Loading...</div>
+                    </div>
+                    <div class="analytics-card factor-stat-card" id="factorLabBestRegimeCard">
+                        <div class="analytics-card-header"><h3>Best Regime</h3></div>
+                        <div class="analytics-empty">Loading...</div>
+                    </div>
+                    <div class="analytics-card factor-stat-card" id="factorLabCorrelationCard">
+                        <div class="analytics-card-header"><h3>Correlation</h3></div>
+                        <div class="analytics-empty">Loading...</div>
+                    </div>
+                </div>
+
+                <div class="analytics-card">
+                    <div class="analytics-card-header">
+                        <h3>Correlation Matrix</h3>
+                    </div>
+                    <div class="analytics-table-wrap correlation-matrix-wrap" id="factorLabCorrelationMatrix">
+                        <div class="analytics-empty">Collecting data - matrix will appear after factor history accumulates.</div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="analytics-tab-pane" id="analyticsPaneBacktest" hidden>
+                <div class="analytics-row analytics-row-backtest">
+                    <div class="analytics-card">
+                        <div class="analytics-card-header">
+                            <h3>Backtest Configuration</h3>
+                        </div>
+                        <div class="analytics-form-grid">
+                            <select id="backtestStrategy">
+                                <option value="whale_hunter">whale_hunter</option>
+                                <option value="uw_flow">uw_flow</option>
+                                <option value="sniper">sniper</option>
+                                <option value="trade_ideas">trade_ideas</option>
+                                <option value="exhaustion">exhaustion</option>
+                            </select>
+                            <input id="backtestTicker" type="text" placeholder="Ticker (SPY)">
+                            <select id="backtestDirection">
+                                <option value="">ALL</option>
+                                <option value="BULLISH">BULLISH</option>
+                                <option value="BEARISH">BEARISH</option>
+                            </select>
+                            <input id="backtestStartDate" type="date">
+                            <input id="backtestEndDate" type="date">
+                            <input id="backtestStopPct" type="number" step="0.1" value="0.5" placeholder="Stop Distance %">
+                            <input id="backtestTargetPct" type="number" step="0.1" value="1.0" placeholder="Target Distance %">
+                            <input id="backtestRiskPerTrade" type="number" step="1" value="235" placeholder="Risk Per Trade $">
+                            <select id="backtestMinConviction">
+                                <option value="">Min Conviction: Any</option>
+                                <option value="WATCH">WATCH+</option>
+                                <option value="MODERATE">MODERATE+</option>
+                                <option value="HIGH">HIGH only</option>
+                            </select>
+                            <label class="analytics-check">
+                                <input id="backtestRequireConvergence" type="checkbox">
+                                Require Convergence
+                            </label>
+                            <label class="analytics-check">
+                                <input id="backtestBiasAlign" type="checkbox">
+                                Bias Must Align
+                            </label>
+                        </div>
+                        <div class="analytics-form-actions">
+                            <button class="analytics-btn" id="backtestRunBtn">Run Backtest</button>
+                        </div>
+                    </div>
+                    <div class="analytics-card">
+                        <div class="analytics-card-header">
+                            <h3>Backtest Results</h3>
+                            <button class="analytics-btn analytics-btn-ghost" id="backtestCompareBtn" hidden>Compare</button>
+                        </div>
+                        <div id="backtestResultsPanel">
+                            <div class="analytics-empty">Run a backtest to view results.</div>
+                        </div>
+                        <div class="analytics-chart-wrap" id="backtestEquityWrap" hidden>
+                            <canvas id="backtestEquityChart"></canvas>
+                        </div>
+                        <div class="analytics-table-wrap" id="backtestTradesWrap" hidden>
+                            <table class="analytics-table" id="backtestTradesTable">
+                                <thead>
+                                    <tr>
+                                        <th>Date</th>
+                                        <th>Entry</th>
+                                        <th>Exit</th>
+                                        <th>P&L</th>
+                                        <th>Reason</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="backtestTradesBody">
+                                    <tr><td colspan="5" class="analytics-empty">No trades.</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div id="backtestComparePanel" hidden>
+                            <div class="analytics-section-header">
+                                <h2>Comparison Run</h2>
+                            </div>
+                            <div class="analytics-form-grid">
+                                <select id="backtestCompareStrategy">
+                                    <option value="whale_hunter">whale_hunter</option>
+                                    <option value="uw_flow">uw_flow</option>
+                                    <option value="sniper">sniper</option>
+                                    <option value="trade_ideas">trade_ideas</option>
+                                    <option value="exhaustion">exhaustion</option>
+                                </select>
+                                <input id="backtestCompareTicker" type="text" placeholder="Ticker (SPY)">
+                                <select id="backtestCompareDirection">
+                                    <option value="">ALL</option>
+                                    <option value="BULLISH">BULLISH</option>
+                                    <option value="BEARISH">BEARISH</option>
+                                </select>
+                                <input id="backtestCompareStartDate" type="date">
+                                <input id="backtestCompareEndDate" type="date">
+                                <input id="backtestCompareStopPct" type="number" step="0.1" value="0.5">
+                                <input id="backtestCompareTargetPct" type="number" step="0.1" value="1.0">
+                                <input id="backtestCompareRiskPerTrade" type="number" step="1" value="235">
+                                <select id="backtestCompareMinConviction">
+                                    <option value="">Min Conviction: Any</option>
+                                    <option value="WATCH">WATCH+</option>
+                                    <option value="MODERATE">MODERATE+</option>
+                                    <option value="HIGH">HIGH only</option>
+                                </select>
+                                <label class="analytics-check">
+                                    <input id="backtestCompareRequireConvergence" type="checkbox">
+                                    Require Convergence
+                                </label>
+                                <label class="analytics-check">
+                                    <input id="backtestCompareBiasAlign" type="checkbox">
+                                    Bias Must Align
+                                </label>
+                            </div>
+                            <div class="analytics-form-actions">
+                                <button class="analytics-btn" id="backtestRunCompareBtn">Run Comparison</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="analytics-tab-pane" id="analyticsPaneRisk" hidden>
+                <div class="analytics-row analytics-row-4" id="riskAccountCards">
+                    <div class="analytics-empty">Loading risk cards...</div>
+                </div>
+
+                <div class="analytics-row analytics-row-3">
+                    <div class="analytics-card">
+                        <div class="analytics-card-header">
+                            <h3>Direction Exposure</h3>
+                        </div>
+                        <div class="analytics-chart-wrap analytics-chart-wrap-sm">
+                            <canvas id="riskDirectionChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="analytics-card">
+                        <div class="analytics-card-header">
+                            <h3>Ticker Exposure</h3>
+                        </div>
+                        <div class="analytics-chart-wrap analytics-chart-wrap-sm">
+                            <canvas id="riskTickerExposureChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="analytics-row analytics-row-risk-bottom">
+                    <div class="analytics-card">
+                        <div class="analytics-card-header">
+                            <h3>Correlation Risk</h3>
+                        </div>
+                        <div class="analytics-table-wrap">
+                            <table class="analytics-table">
+                                <thead>
+                                    <tr>
+                                        <th>Account</th>
+                                        <th>Direction</th>
+                                        <th>Tickers</th>
+                                        <th>Combined Risk</th>
+                                        <th>1% Move Impact</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="riskCorrelationTableBody">
+                                    <tr><td colspan="5" class="analytics-empty">No correlated clusters detected.</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="analytics-summary-row" id="riskCorrelationRecommendation">Collecting data...</div>
+                    </div>
+                    <div class="analytics-card">
+                        <div class="analytics-card-header">
+                            <h3>Risk Over Time</h3>
+                            <div class="analytics-controls">
+                                <select id="riskHistoryAccount">
+                                    <option value="robinhood">robinhood</option>
+                                    <option value="401k">401k</option>
+                                    <option value="breakout">breakout</option>
+                                    <option value="coinbase">coinbase</option>
+                                </select>
+                                <select id="riskHistoryDays">
+                                    <option value="14">14d</option>
+                                    <option value="30" selected>30d</option>
+                                    <option value="60">60d</option>
+                                    <option value="90">90d</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="analytics-chart-wrap analytics-chart-wrap-sm">
+                            <canvas id="riskHistoryChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+
     <!-- Knowledgebase Popup Modal -->
     <div class="modal-overlay" id="kbPopupModal">
         <div class="kb-popup-modal">
@@ -1517,7 +2077,9 @@
 
     <!-- TradingView Widget Script -->
     <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
     <script src="/app.js?v=53"></script>
+    <script src="/analytics.js?v=2"></script>
 </body>
 </html>
 

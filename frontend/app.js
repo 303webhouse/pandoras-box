@@ -96,7 +96,8 @@ let currentTimeframe = 'WEEKLY';
 let activeAssetType = 'equity';
 const APP_MODES = {
     HUB: 'hub',
-    CRYPTO: 'crypto'
+    CRYPTO: 'crypto',
+    ANALYTICS: 'analytics'
 };
 let signals = {
     equity: [],
@@ -205,6 +206,7 @@ function initRouting() {
 
 function getModeFromPath() {
     const path = window.location.pathname.replace(/\/$/, '');
+    if (path.endsWith('/analytics')) return APP_MODES.ANALYTICS;
     if (path.endsWith('/crypto')) return APP_MODES.CRYPTO;
     if (path.endsWith('/hub')) return APP_MODES.HUB;
     return null;
@@ -212,6 +214,7 @@ function getModeFromPath() {
 
 function getModeBasePath() {
     const path = window.location.pathname.replace(/\/$/, '');
+    if (path.endsWith('/analytics')) return path.slice(0, -10) || '';
     if (path.endsWith('/crypto')) return path.slice(0, -7) || '';
     if (path.endsWith('/hub')) return path.slice(0, -4) || '';
     return path || '';
@@ -224,21 +227,28 @@ function buildModePath(mode) {
 }
 
 function setMode(mode, options = {}) {
-    const nextMode = mode === APP_MODES.CRYPTO ? APP_MODES.CRYPTO : APP_MODES.HUB;
+    let nextMode = APP_MODES.HUB;
+    if (mode === APP_MODES.CRYPTO) nextMode = APP_MODES.CRYPTO;
+    if (mode === APP_MODES.ANALYTICS) nextMode = APP_MODES.ANALYTICS;
     document.body.dataset.mode = nextMode;
 
     const hubShell = document.getElementById('hubShell');
     const cryptoShell = document.getElementById('cryptoShell');
+    const analyticsShell = document.getElementById('analyticsShell');
     if (hubShell) hubShell.hidden = nextMode !== APP_MODES.HUB;
     if (cryptoShell) cryptoShell.hidden = nextMode !== APP_MODES.CRYPTO;
+    if (analyticsShell) analyticsShell.hidden = nextMode !== APP_MODES.ANALYTICS;
 
     const hubBtn = document.getElementById('modeHubBtn');
     const cryptoBtn = document.getElementById('modeCryptoBtn');
-    if (hubBtn && cryptoBtn) {
+    const analyticsBtn = document.getElementById('modeAnalyticsBtn');
+    if (hubBtn && cryptoBtn && analyticsBtn) {
         hubBtn.classList.toggle('active', nextMode === APP_MODES.HUB);
         cryptoBtn.classList.toggle('active', nextMode === APP_MODES.CRYPTO);
+        analyticsBtn.classList.toggle('active', nextMode === APP_MODES.ANALYTICS);
         hubBtn.setAttribute('aria-selected', nextMode === APP_MODES.HUB);
         cryptoBtn.setAttribute('aria-selected', nextMode === APP_MODES.CRYPTO);
+        analyticsBtn.setAttribute('aria-selected', nextMode === APP_MODES.ANALYTICS);
     }
 
     localStorage.setItem('pandoraAppMode', nextMode);
@@ -269,6 +279,12 @@ function setMode(mode, options = {}) {
     // Initialize crypto chart when switching to crypto mode
     if (nextMode === APP_MODES.CRYPTO && !cryptoTvWidget) {
         setTimeout(initCryptoChart, 200);
+    }
+
+    try {
+        document.dispatchEvent(new CustomEvent('pandora:modechange', { detail: { mode: nextMode } }));
+    } catch (error) {
+        console.warn('Mode change event dispatch failed:', error);
     }
 }
 
@@ -911,6 +927,9 @@ function initEventListeners() {
         fetchTimeframeBias();
         checkPivotHealth();
         checkRedisHealth();
+        if (window.analyticsUI && typeof window.analyticsUI.refreshAll === 'function') {
+            window.analyticsUI.refreshAll();
+        }
     });
 
     // Mode switcher
