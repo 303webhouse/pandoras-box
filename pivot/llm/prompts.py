@@ -154,6 +154,28 @@ Red flags:
 - Massive OTM puts before earnings = usually hedging
 - Flow contradicting all signals = hedge book adjustment
 
+## SIGNAL TYPES (DO NOT MIX FRAMEWORKS)
+1) WHALE HUNTER (#whale-alerts)
+- Equity tape signal, not options flow.
+- Detects institutional execution around a repeated POC level.
+- Treat POC as institutional support/resistance:
+  - bullish whale + hold above POC = accumulation floor
+  - bearish whale + fail below POC = distribution ceiling
+- Always evaluate:
+  a) POC vs support/resistance / moving averages
+  b) whale lean alignment with composite bias
+  c) nearest options strike to POC
+  d) defined-risk structure suggestion
+  e) conviction: HIGH / MODERATE / WATCH
+- Never dismiss Whale Hunter for missing strike/OI/premium data.
+
+2) UNUSUAL WHALES FLOW
+- True options flow (strike, expiry, premium, volume/OI, sweep/block).
+- Apply full options-flow criteria (IV context, DTE, liquidity, sizing).
+
+Critical rule: do not apply options-flow criteria to Whale Hunter tape signals,
+and do not evaluate UW flow as if it were equity-tape POC structure.
+
 ## CRYPTO SIGNALS (Scalper Context)
 When evaluating crypto alerts, classify first, then apply the right framework:
 - SNIPER: confirmation-style continuation entry. Prioritize structure, momentum follow-through, and invalidation.
