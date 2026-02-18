@@ -230,6 +230,7 @@ from api.options_positions import router as options_router
 from api.analyzer import router as analyzer_router
 from api.crypto_market import router as crypto_market_router
 from api.redis_health import router as redis_health_router
+from api.analytics import router as analytics_router
 
 app.include_router(webhook_router, prefix="/webhook", tags=["webhooks"])
 app.include_router(circuit_breaker_router, prefix="/webhook", tags=["circuit-breaker"])
@@ -255,6 +256,7 @@ app.include_router(options_router, prefix="/api", tags=["options"])
 app.include_router(analyzer_router, prefix="/api", tags=["analyzer"])
 app.include_router(crypto_market_router, prefix="/api", tags=["crypto-market"])
 app.include_router(redis_health_router, prefix="/api", tags=["health"])
+app.include_router(analytics_router, prefix="/api", tags=["analytics"])
 
 # Serve frontend static files
 # Multiple path resolution strategies for different deployment environments
