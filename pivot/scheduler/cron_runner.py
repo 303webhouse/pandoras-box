@@ -55,6 +55,13 @@ COOLDOWNS = {
 }
 
 
+def _repeat_high_stakes_prompt(prompt: str) -> str:
+    normalized = (prompt or "").strip()
+    if not normalized:
+        return prompt
+    return f"{normalized}\n\n---\nREVIEW AND CONFIRM:\n{normalized}"
+
+
 def _configure_logging() -> None:
     from logging.handlers import TimedRotatingFileHandler
 
@@ -248,8 +255,8 @@ async def morning_brief():
 async def eod_brief():
     try:
         composite = await get_json("/bias/composite")
-        prompt = build_eod_prompt(json.dumps(composite, indent=2))
-        text = await call_llm(prompt, max_tokens=700)
+        prompt = _repeat_high_stakes_prompt(build_eod_prompt(json.dumps(composite, indent=2)))
+        text = await call_llm(prompt, max_tokens=3000)
         await send_discord("briefs", "EOD Summary", text, priority="MEDIUM")
     except Exception as exc:
         logger.warning(f"EOD summary failed: {exc}")

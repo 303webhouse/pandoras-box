@@ -73,20 +73,36 @@ async def compute_score(pcr_data: Optional[Dict[str, Any]] = None) -> Optional[F
         try:
             from database.redis_client import get_redis_client
             redis = await get_redis_client()
-            if not redis:
-                return None
-            raw = await redis.get(REDIS_KEY_PCR_CURRENT)
-            pcr_data = json.loads(raw) if raw else None
+            if redis:
+                raw = await redis.get(REDIS_KEY_PCR_CURRENT)
+                pcr_data = json.loads(raw) if raw else None
         except Exception as e:
             logger.warning(f"Error loading PCR data for scoring: {e}")
-            return None
 
     if not pcr_data:
-        return None
+        logger.warning("Put/Call ratio: no PCR payload available, using neutral fallback")
+        return FactorReading(
+            factor_id="put_call_ratio",
+            score=0.0,
+            signal="NEUTRAL",
+            detail="No fresh CBOE PCR webhook data; neutral fallback",
+            timestamp=datetime.utcnow(),
+            source="fallback",
+            raw_data={"fallback": True},
+        )
 
     pcr_value = float(pcr_data.get("pcr", 0) or 0)
     if pcr_value <= 0:
-        return None
+        logger.warning("Put/Call ratio: invalid PCR value, using neutral fallback")
+        return FactorReading(
+            factor_id="put_call_ratio",
+            score=0.0,
+            signal="NEUTRAL",
+            detail="Invalid CBOE PCR value; neutral fallback",
+            timestamp=datetime.utcnow(),
+            source="fallback",
+            raw_data={"fallback": True, "pcr_data": pcr_data},
+        )
 
     score = _score_pcr(pcr_value)
 
