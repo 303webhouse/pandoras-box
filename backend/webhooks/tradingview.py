@@ -407,15 +407,28 @@ def calculate_risk_reward(alert: TradingViewAlert) -> float:
     """Calculate risk/reward ratio from alert data"""
     if not alert.stop_loss or not alert.target_1:
         return 0
-    
-    if alert.direction.upper() in ["LONG", "BUY"]:
+
+    direction = (alert.direction or "").upper()
+    if direction in {"LONG", "BUY"}:
         risk = alert.entry_price - alert.stop_loss
         reward = alert.target_1 - alert.entry_price
     else:
         risk = alert.stop_loss - alert.entry_price
         reward = alert.entry_price - alert.target_1
-    
-    return round(reward / risk, 2) if risk > 0 else 0
+
+    if risk <= 0 or reward <= 0:
+        logger.warning(
+            "Invalid R:R inputs for %s %s (entry=%s stop=%s target=%s direction=%s)",
+            alert.strategy,
+            alert.ticker,
+            alert.entry_price,
+            alert.stop_loss,
+            alert.target_1,
+            alert.direction,
+        )
+        return 0
+
+    return round(reward / risk, 2)
 
 
 async def attach_bias_snapshot(signal_data: dict) -> dict:

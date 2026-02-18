@@ -58,6 +58,7 @@ UW_TICKER_CHANNEL_ID = int(os.getenv("UW_TICKER_CHANNEL_ID", "0"))
 UW_BOT_USER_ID = int(os.getenv("UW_BOT_USER_ID", "1100705854271008798"))
 WHALE_ALERTS_CHANNEL_ID = int(os.getenv("WHALE_ALERTS_CHANNEL_ID", "0"))
 PIVOT_CHAT_CHANNEL_ID = int(os.getenv("PIVOT_CHAT_CHANNEL_ID", "0"))
+CRYPTO_ALERTS_CHANNEL_ID = int(os.getenv("CRYPTO_ALERTS_CHANNEL_ID", "0"))
 PANDORA_API_URL = os.getenv("PANDORA_API_URL", "https://pandoras-box-production.up.railway.app/api")
 NOTIFICATION_CHANNEL_ID = int(os.getenv("DISCORD_NOTIFICATION_CHANNEL_ID", str(UW_CHANNEL_ID)))
 TRADE_ALERT_CHANNEL_ID = int(os.getenv("DISCORD_TRADE_ALERT_CHANNEL_ID", str(NOTIFICATION_CHANNEL_ID)))
@@ -150,6 +151,13 @@ JOURNAL_DB_PATH = os.getenv("PIVOT_JOURNAL_DB_PATH", "/opt/pivot/data/journal.db
 PIVOT_VISION_MAX_TOKENS = int(os.getenv("PIVOT_VISION_MAX_TOKENS", "1800"))
 PIVOT_MAX_IMAGE_BYTES = int(os.getenv("PIVOT_MAX_IMAGE_BYTES", str(5 * 1024 * 1024)))
 PIVOT_JOURNAL_LOOKBACK_LIMIT = int(os.getenv("PIVOT_JOURNAL_LOOKBACK_LIMIT", "3"))
+JOURNAL_REQUIRED_COLUMNS = {
+    "strike": "REAL",
+    "expiry": "TEXT",
+    "structure": "TEXT",
+    "short_strike": "REAL",
+    "long_strike": "REAL",
+}
 
 # ================================
 # HELPER FUNCTIONS
@@ -193,6 +201,17 @@ def _is_directional_question(text: str) -> bool:
     if "?" in text_lower:
         return True
     return any(term in text_lower for term in DIRECTIONAL_HINTS)
+
+
+def _repeat_high_stakes_prompt(full_context: str) -> str:
+    """
+    Repeat high-stakes prompts so the model re-reads full context before answer.
+    Applied only to recommendation-style calls (not casual chat).
+    """
+    normalized = (full_context or "").strip()
+    if not normalized:
+        return full_context
+    return f"{normalized}\n\n---\nREVIEW AND CONFIRM:\n{normalized}"
 
 
 def _record_recent_uw_flow(
@@ -1299,6 +1318,167 @@ async def build_market_context(user_text: str = "", ticker_hint: Optional[str] =
     return "\n".join(lines)
 
 
+def _message_embed_text(message: discord.Message) -> str:
+    parts: List[str] = []
+    for embed in message.embeds:
+        if embed.title:
+            parts.append(str(embed.title))
+        if embed.description:
+            parts.append(str(embed.description))
+        for field in embed.fields or []:
+            name = str(field.name or "").strip()
+            value = str(field.value or "").strip()
+            if name and value:
+                parts.append(f"{name}: {value}")
+            elif value:
+                parts.append(value)
+    return "\n".join(parts).strip()
+
+
+def _message_signal_text(message: discord.Message) -> str:
+    parts: List[str] = []
+    if message.content and message.content.strip():
+        parts.append(message.content.strip())
+    embed_text = _message_embed_text(message)
+    if embed_text:
+        parts.append(embed_text)
+    return "\n\n".join(parts).strip()
+
+
+def _extract_crypto_ticker_hint(text: str) -> Optional[str]:
+    upper_text = (text or "").upper()
+    if not upper_text:
+        return None
+
+    ignore_tokens = _COMMON_WORDS | {
+        "SCOUT",
+        "SNIPER",
+        "EXHAUSTION",
+        "ALERT",
+        "SIGNAL",
+        "CRYPTO",
+        "LONG",
+        "SHORT",
+        "BUY",
+        "SELL",
+    }
+
+    candidates = re.findall(r"\b[A-Z]{2,10}(?:[-/]?(?:USDT|USD|PERP))?\b", upper_text)
+    for raw in candidates:
+        symbol = raw.replace("-", "").replace("/", "")
+        if symbol in ignore_tokens:
+            continue
+        if symbol.endswith("USDT") or symbol.endswith("USD") or symbol.endswith("PERP"):
+            return symbol
+        if 2 <= len(symbol) <= 6:
+            return symbol
+    return None
+
+
+def _format_crypto_price_context(payload: Optional[Dict[str, Any]]) -> str:
+    if not payload:
+        return "Crypto Price Context: unavailable"
+
+    prices = payload.get("prices") or {}
+    perps = prices.get("perps") or {}
+    spot = prices.get("binance_spot") or prices.get("coinbase_spot")
+    perp = (
+        perps.get("source_price")
+        or perps.get("binance")
+        or perps.get("bybit")
+        or perps.get("okx")
+    )
+    basis_pct = prices.get("basis_pct")
+
+    segments: List[str] = []
+    if isinstance(spot, (int, float)):
+        segments.append(f"BTC Spot: ${float(spot):,.2f}")
+    if isinstance(perp, (int, float)):
+        segments.append(f"Perp: ${float(perp):,.2f}")
+    if isinstance(basis_pct, (int, float)):
+        segments.append(f"Basis: {float(basis_pct) * 100:+.2f}%")
+
+    return " | ".join(segments) if segments else "Crypto Price Context: unavailable"
+
+
+def _format_crypto_funding_context(payload: Optional[Dict[str, Any]]) -> str:
+    if not payload:
+        return "Funding: unavailable"
+    funding = payload.get("funding") or {}
+    primary = funding.get("primary") or {}
+    rate = primary.get("rate")
+    source = str(primary.get("source") or "unknown").upper()
+    if isinstance(rate, (int, float)):
+        return f"Funding ({source}): {float(rate) * 100:+.4f}%"
+    return "Funding: unavailable"
+
+
+def _format_crypto_cvd_context(payload: Optional[Dict[str, Any]]) -> str:
+    if not payload:
+        return "CVD: unavailable"
+    cvd = payload.get("cvd") or {}
+    direction = str(cvd.get("direction") or "UNKNOWN")
+    confidence = str(cvd.get("direction_confidence") or "LOW")
+    net_usd = cvd.get("net_usd")
+    if isinstance(net_usd, (int, float)):
+        return f"CVD: {direction} ({confidence}), net ${float(net_usd):,.0f}"
+    return f"CVD: {direction} ({confidence})"
+
+
+def _format_etf_window_context(
+    current_session_payload: Optional[Dict[str, Any]],
+    sessions_payload: Optional[Dict[str, Any]],
+) -> str:
+    if isinstance(current_session_payload, dict) and current_session_payload.get("in_session"):
+        session_name = (
+            current_session_payload.get("name")
+            or (current_session_payload.get("current_session") or {}).get("name")
+            or "ACTIVE SESSION"
+        )
+        return f"ETF Flow Window: active ({session_name})"
+
+    sessions = (sessions_payload or {}).get("sessions") or {}
+    etf_fix = sessions.get("etf_fixing") or {}
+    etf_name = str(etf_fix.get("name") or "ETF Fixing Window")
+    etf_time = str(etf_fix.get("ny_time") or "3pm-4pm ET")
+    return f"ETF Flow Window: inactive (typically {etf_name}, {etf_time})"
+
+
+async def build_crypto_market_context(ticker_hint: Optional[str] = None) -> str:
+    symbol = (ticker_hint or "BTC").upper().strip()
+    base_symbol = re.sub(r"(USDT|USD|PERP)$", "", symbol) or "BTC"
+
+    async with aiohttp.ClientSession() as session:
+        market_payload, current_session_payload, sessions_payload, hybrid_payload = await asyncio.gather(
+            _fetch_json(session, "/crypto/market"),
+            _fetch_json(session, "/btc/sessions/current"),
+            _fetch_json(session, "/btc/sessions"),
+            _fetch_json(session, f"/hybrid/price/{base_symbol}"),
+            return_exceptions=True,
+        )
+
+    def as_dict(value: Any) -> Optional[Dict[str, Any]]:
+        return value if isinstance(value, dict) else None
+
+    market_payload = as_dict(market_payload)
+    current_session_payload = as_dict(current_session_payload)
+    sessions_payload = as_dict(sessions_payload)
+    hybrid_payload = as_dict(hybrid_payload)
+
+    lines = [
+        _format_crypto_price_context(market_payload),
+        _format_crypto_funding_context(market_payload),
+        _format_crypto_cvd_context(market_payload),
+        _format_etf_window_context(current_session_payload, sessions_payload),
+    ]
+
+    hybrid_price = hybrid_payload.get("price") if isinstance(hybrid_payload, dict) else None
+    if isinstance(hybrid_price, (int, float)):
+        lines.append(f"{base_symbol} API Quote: ${float(hybrid_price):,.2f}")
+
+    return "\n".join(lines)
+
+
 def _is_image_attachment(attachment: discord.Attachment) -> bool:
     content_type = (attachment.content_type or "").lower()
     if content_type.startswith("image/"):
@@ -1454,6 +1634,40 @@ def _get_table_columns(conn: sqlite3.Connection, table_name: str) -> List[str]:
         return [str(row[1]) for row in rows if len(row) > 1 and row[1]]
     except Exception:
         return []
+
+
+def _ensure_journal_schema_columns_sync() -> List[str]:
+    """
+    Add optional strike/expiry/structure columns when missing.
+    Keeps existing journal DBs backward compatible.
+    """
+    if not os.path.exists(JOURNAL_DB_PATH):
+        return []
+
+    conn: Optional[sqlite3.Connection] = None
+    added: List[str] = []
+    try:
+        conn = sqlite3.connect(JOURNAL_DB_PATH)
+        table_name = _get_journal_table(conn)
+        if not table_name or not _safe_sql_identifier(table_name):
+            return []
+
+        existing = set(_get_table_columns(conn, table_name))
+        for col_name, sql_type in JOURNAL_REQUIRED_COLUMNS.items():
+            if col_name in existing or not _safe_sql_identifier(col_name):
+                continue
+            conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {col_name} {sql_type}")
+            added.append(col_name)
+
+        if added:
+            conn.commit()
+        return added
+    except Exception as exc:
+        logger.warning("Journal schema migration skipped: %s", exc)
+        return []
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 def _fetch_open_journal_positions(ticker: str) -> List[Dict[str, Any]]:
@@ -1848,7 +2062,7 @@ async def handle_whale_alerts_message(message: discord.Message) -> None:
         )
 
         if source == "whale_hunter":
-            prompt = build_whale_hunter_prompt(flow_text, market_context)
+            prompt = _repeat_high_stakes_prompt(build_whale_hunter_prompt(flow_text, market_context))
             llm_response = await call_pivot_llm(prompt, max_tokens=2500)
         else:
             prompt = build_flow_analysis_prompt(flow_text, market_context)
@@ -1890,6 +2104,68 @@ async def handle_whale_alerts_message(message: discord.Message) -> None:
         logger.error("Failed to send whale-alerts reply: %s", exc)
 
 
+def _extract_crypto_direction(signal_text: str) -> str:
+    upper = (signal_text or "").upper()
+    if any(token in upper for token in ("SHORT", "BEAR", "SELL")):
+        return "SHORT"
+    if any(token in upper for token in ("LONG", "BULL", "BUY")):
+        return "LONG"
+    return "UNKNOWN"
+
+
+def _extract_crypto_strategy(signal_text: str) -> str:
+    upper = (signal_text or "").upper()
+    if "SNIPER" in upper:
+        return "SNIPER"
+    if "SCOUT" in upper:
+        return "SCOUT"
+    if "EXHAUSTION" in upper:
+        return "EXHAUSTION"
+    if "TRIPLE" in upper:
+        return "TRIPLE_LINE"
+    return "CRYPTO_SIGNAL"
+
+
+async def handle_crypto_alerts_message(message: discord.Message) -> None:
+    """
+    Evaluate incoming crypto alert messages with crypto-native context.
+    """
+    if message.author == bot.user:
+        return
+
+    signal_text = _message_signal_text(message)
+    if not signal_text:
+        return
+
+    ticker_hint = _extract_crypto_ticker_hint(signal_text) or _extract_ticker_hint(signal_text)
+    direction = _extract_crypto_direction(signal_text)
+    strategy = _extract_crypto_strategy(signal_text)
+
+    crypto_context = await build_crypto_market_context(ticker_hint=ticker_hint)
+    bias_context = await build_market_context(signal_text, ticker_hint="SPY")
+
+    prompt = (
+        "A crypto signal was detected. Evaluate it using the CRYPTO SIGNAL framework in your instructions.\n\n"
+        f"Signal Type: {strategy}\n"
+        f"Direction: {direction}\n"
+        f"Ticker: {ticker_hint or 'UNKNOWN'}\n\n"
+        f"SIGNAL:\n{signal_text}\n\n"
+        f"CRYPTO MARKET CONTEXT:\n{crypto_context}\n\n"
+        f"BROAD MARKET CONTEXT:\n{bias_context}\n\n"
+        "Provide a concise tradeability read, invalidation level, and risk framing."
+    )
+
+    llm_response = await call_pivot_llm(_repeat_high_stakes_prompt(prompt), max_tokens=2500)
+    if not llm_response:
+        llm_response = (
+            "LLM unavailable for crypto evaluation.\n\n"
+            f"Context:\n{crypto_context}"
+        )
+
+    header = f"**Crypto Alert — {ticker_hint or 'UNKNOWN'}** | `{strategy}` | `{direction}`"
+    await send_discord_chunks(message.channel, f"{header}\n\n{llm_response}")
+
+
 # ================================
 # EVENT HANDLERS
 # ================================
@@ -1901,6 +2177,12 @@ async def on_ready():
     logger.info(f"📡 Watching UW channel ID: {UW_CHANNEL_ID}")
     if WHALE_ALERTS_CHANNEL_ID:
         logger.info(f"🐳 Watching #whale-alerts channel ID: {WHALE_ALERTS_CHANNEL_ID}")
+    if CRYPTO_ALERTS_CHANNEL_ID:
+        logger.info(f"🪙 Watching #crypto-alerts channel ID: {CRYPTO_ALERTS_CHANNEL_ID}")
+
+    added_cols = await asyncio.to_thread(_ensure_journal_schema_columns_sync)
+    if added_cols:
+        logger.info("Journal schema updated with columns: %s", ", ".join(added_cols))
     
     # Find and verify the channel
     channel = bot.get_channel(UW_CHANNEL_ID)
@@ -1992,6 +2274,10 @@ async def on_message(message: discord.Message):
         await handle_whale_alerts_message(message)
         return
 
+    if CRYPTO_ALERTS_CHANNEL_ID and message.channel.id == CRYPTO_ALERTS_CHANNEL_ID:
+        await handle_crypto_alerts_message(message)
+        return
+
     uw_channels = {UW_FLOW_CHANNEL_ID, UW_TICKER_CHANNEL_ID}
     if message.channel.id in uw_channels and any(uw_channels):
         if message.author.id != UW_BOT_USER_ID:
@@ -2060,7 +2346,7 @@ async def on_message(message: discord.Message):
                                 f"USER MESSAGE:\n{user_text or 'Evaluate this screenshot.'}"
                             )
                             contextual_eval = await call_pivot_llm(
-                                follow_up_prompt,
+                                _repeat_high_stakes_prompt(follow_up_prompt),
                                 max_tokens=2500,
                             )
                             if contextual_eval:
@@ -2089,6 +2375,8 @@ async def on_message(message: discord.Message):
                     f"{market_context}\n\n"
                     f"USER MESSAGE:\n{user_text or 'Give a quick market read.'}"
                 )
+                if ticker_hint and _is_directional_question(user_text):
+                    prompt = _repeat_high_stakes_prompt(prompt)
                 reply = await call_pivot_llm(prompt, max_tokens=1600)
         if reply:
             await send_discord_chunks(message.channel, reply)
