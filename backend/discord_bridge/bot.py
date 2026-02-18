@@ -2302,21 +2302,11 @@ async def on_message(message: discord.Message):
                     if user_text.strip():
                         vision_text = f"{vision_text}\n\nUser request:\n{user_text.strip()}"
 
-                    image_parts = _data_url_to_image_parts(data_url)
                     vision_messages = [
                         {
                             "role": "user",
                             "content": [
-                                (
-                                    {
-                                        "type": "image",
-                                        "source_type": "base64",
-                                        "media_type": image_parts[0],
-                                        "data": image_parts[1],
-                                    }
-                                    if image_parts
-                                    else {"type": "image_url", "image_url": {"url": data_url}}
-                                ),
+                                {"type": "image_url", "image_url": {"url": data_url}},
                                 {"type": "text", "text": vision_text},
                             ],
                         }
