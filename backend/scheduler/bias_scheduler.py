@@ -64,6 +64,21 @@ _scheduler_status = {
         "status": "idle",
         "interval": "15 min"
     },
+    "price_collection": {
+        "last_run": None,
+        "status": "idle",
+        "interval": "5 min"
+    },
+    "benchmark_tracker": {
+        "last_run": None,
+        "status": "idle",
+        "interval": "Daily 4:10 PM ET"
+    },
+    "portfolio_monitor": {
+        "last_run": None,
+        "status": "idle",
+        "interval": "Daily 4:15 PM ET"
+    },
     "scheduler_started": None
 }
 
@@ -135,6 +150,18 @@ def get_scheduler_status() -> Dict[str, Any]:
         "composite_bias": {
             **_scheduler_status["composite_bias"],
             "schedule": "Every 15 minutes"
+        },
+        "price_collection": {
+            **_scheduler_status["price_collection"],
+            "schedule": "Every 5 minutes (equities intraday in market hours, crypto 24/7)"
+        },
+        "benchmark_tracker": {
+            **_scheduler_status["benchmark_tracker"],
+            "schedule": "Daily at 4:10 PM ET"
+        },
+        "portfolio_monitor": {
+            **_scheduler_status["portfolio_monitor"],
+            "schedule": "Daily at 4:15 PM ET"
         }
     }
 
@@ -2120,6 +2147,68 @@ async def auto_dismiss_old_signals():
         logger.error(f"âŒ Auto-dismiss error: {e}")
 
 
+async def run_price_collection_job(backfill: bool = False):
+    """
+    Collect and persist OHLCV price history.
+    - backfill=True: one-time startup backfill window.
+    - backfill=False: incremental append cadence.
+    """
+    now = get_eastern_now()
+    _scheduler_status["price_collection"]["status"] = "running"
+    try:
+        from analytics.price_collector import collect_price_history_cycle, run_price_backfill_once
+
+        if backfill:
+            result = await run_price_backfill_once()
+        else:
+            result = await collect_price_history_cycle(backfill=False)
+
+        _scheduler_status["price_collection"]["last_run"] = now.isoformat()
+        _scheduler_status["price_collection"]["status"] = result.get("status", "completed")
+        logger.info(
+            "Price collection (%s): status=%s tickers=%s rows=%s",
+            "backfill" if backfill else "incremental",
+            result.get("status"),
+            result.get("tickers"),
+            result.get("rows_upserted"),
+        )
+    except Exception as e:
+        _scheduler_status["price_collection"]["status"] = f"error: {e}"
+        logger.error(f"Price collection error: {e}")
+
+
+async def run_benchmark_tracker_job():
+    """Update benchmark baselines at market close."""
+    now = get_eastern_now()
+    _scheduler_status["benchmark_tracker"]["status"] = "running"
+    try:
+        from analytics.benchmark_tracker import update_benchmarks
+
+        result = await update_benchmarks()
+        _scheduler_status["benchmark_tracker"]["last_run"] = now.isoformat()
+        _scheduler_status["benchmark_tracker"]["status"] = result.get("status", "completed")
+        logger.info("Benchmark tracker updated: %s", result.get("status"))
+    except Exception as e:
+        _scheduler_status["benchmark_tracker"]["status"] = f"error: {e}"
+        logger.error(f"Benchmark tracker error: {e}")
+
+
+async def run_portfolio_monitor_job():
+    """Persist portfolio risk snapshot and alert on correlated exposure."""
+    now = get_eastern_now()
+    _scheduler_status["portfolio_monitor"]["status"] = "running"
+    try:
+        from analytics.portfolio_monitor import snapshot_portfolio_and_alert
+
+        result = await snapshot_portfolio_and_alert()
+        _scheduler_status["portfolio_monitor"]["last_run"] = now.isoformat()
+        _scheduler_status["portfolio_monitor"]["status"] = result.get("status", "completed")
+        logger.info("Portfolio monitor updated: %s", result.get("status"))
+    except Exception as e:
+        _scheduler_status["portfolio_monitor"]["status"] = f"error: {e}"
+        logger.error(f"Portfolio monitor error: {e}")
+
+
 async def reset_circuit_breaker_scheduled():
     """
     Reset circuit breaker at market open (9:30 AM ET)
@@ -2368,6 +2457,13 @@ async def start_scheduler():
         logger.info("  âœ… Initial bias refresh complete")
     except Exception as e:
         logger.error(f"  âŒ Error during initial refresh: {e}")
+
+    # Kick off startup price-history backfill asynchronously.
+    try:
+        asyncio.create_task(run_price_collection_job(backfill=True))
+        logger.info("  ðŸ“¦ Analytics price backfill task started")
+    except Exception as e:
+        logger.warning(f"  âš ï¸ Could not start analytics backfill task: {e}")
     
     # Use APScheduler if available, otherwise use simple asyncio loop
     try:
@@ -2457,6 +2553,36 @@ async def start_scheduler():
             replace_existing=True
         )
 
+        # Price history collection every 5 minutes.
+        scheduler.add_job(
+            run_price_collection_job,
+            'interval',
+            minutes=5,
+            kwargs={"backfill": False},
+            id='price_history_collection',
+            name='Price History Collection',
+            replace_existing=True,
+            coalesce=True,
+            max_instances=1
+        )
+
+        # Daily analytics updates at/after market close.
+        scheduler.add_job(
+            run_benchmark_tracker_job,
+            CronTrigger(day_of_week='mon-fri', hour=16, minute=10, timezone=ET),
+            id='benchmark_tracker',
+            name='Benchmark Tracker',
+            replace_existing=True
+        )
+
+        scheduler.add_job(
+            run_portfolio_monitor_job,
+            CronTrigger(day_of_week='mon-fri', hour=16, minute=15, timezone=ET),
+            id='portfolio_monitor',
+            name='Portfolio Risk Snapshot',
+            replace_existing=True
+        )
+
         # Nightly signal outcome scoring + discovery cleanup (9:00 PM ET)
         scheduler.add_job(
             run_signal_scoring_job,
@@ -2472,6 +2598,9 @@ async def start_scheduler():
         logger.info("âœ… BTC Bottom Signals refresh scheduled every 5 minutes")
         logger.info("âœ… Auto-dismiss old signals scheduled every hour")
         logger.info("âœ… Composite bias refresh scheduled every 15 minutes")
+        logger.info("âœ… Price history collection scheduled every 5 minutes")
+        logger.info("âœ… Benchmark tracker scheduled daily at 4:10 PM ET")
+        logger.info("âœ… Portfolio monitor scheduled daily at 4:15 PM ET")
         logger.info("âœ… Signal outcome scoring scheduled for 9:00 PM ET")
         
         # ALSO start the scanner loop (APScheduler doesn't handle the variable-interval scanners)
@@ -2579,6 +2708,9 @@ async def _fallback_scheduler():
     last_crypto_scan_time = None
     last_bias_refresh_date = None
     last_composite_refresh_time = None
+    last_price_collection_time = None
+    last_benchmark_date = None
+    last_portfolio_date = None
     
     while True:
         now = get_eastern_now()
@@ -2612,6 +2744,44 @@ async def _fallback_scheduler():
             await refresh_composite_bias()
             await asyncio.sleep(10)
             continue
+
+        # =========================================
+        # PRICE COLLECTION: Every 5 minutes
+        # =========================================
+        should_collect_prices = False
+        if last_price_collection_time is None:
+            should_collect_prices = True
+        else:
+            minutes_since_prices = (now - last_price_collection_time).total_seconds() / 60
+            should_collect_prices = minutes_since_prices >= 5
+
+        if should_collect_prices:
+            last_price_collection_time = now
+            await run_price_collection_job(backfill=False)
+            await asyncio.sleep(10)
+            continue
+
+        # =========================================
+        # BENCHMARK TRACKER: Daily at 4:10 PM ET
+        # =========================================
+        if is_trading_day() and current_hour == 16 and 10 <= current_minute < 11:
+            today_str = now.strftime("%Y-%m-%d")
+            if last_benchmark_date != today_str:
+                last_benchmark_date = today_str
+                await run_benchmark_tracker_job()
+                await asyncio.sleep(10)
+                continue
+
+        # =========================================
+        # PORTFOLIO MONITOR: Daily at 4:15 PM ET
+        # =========================================
+        if is_trading_day() and current_hour == 16 and 15 <= current_minute < 16:
+            today_str = now.strftime("%Y-%m-%d")
+            if last_portfolio_date != today_str:
+                last_portfolio_date = today_str
+                await run_portfolio_monitor_job()
+                await asyncio.sleep(10)
+                continue
         
         # =========================================
         # CTA SCANNER (EQUITIES): Smart frequency during market hours

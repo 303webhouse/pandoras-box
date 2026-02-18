@@ -52,6 +52,30 @@ def _normalize_timestamp_for_db(raw_timestamp: Any) -> datetime:
 
     return timestamp
 
+
+async def _build_calendar_metadata(timestamp: datetime, ticker: Optional[str]) -> Dict[str, Any]:
+    """
+    Compute calendar context fields for signal archival.
+
+    Falls back safely so signal persistence never fails on enrichment errors.
+    """
+    defaults = {
+        "day_of_week": timestamp.weekday(),
+        "hour_of_day": timestamp.hour,
+        "is_opex_week": False,
+        "days_to_earnings": None,
+        "market_event": None,
+    }
+    try:
+        from analytics.calendar_context import get_signal_calendar_fields
+
+        fields = await get_signal_calendar_fields(timestamp, ticker or "")
+        if isinstance(fields, dict):
+            defaults.update(fields)
+    except Exception as exc:
+        logger.debug("Calendar enrichment skipped for %s: %s", ticker, exc)
+    return defaults
+
 # Load environment variables from .env file
 load_dotenv(os.path.join(os.path.dirname(__file__), '..', '..', 'config', '.env'))
 
@@ -120,6 +144,11 @@ async def init_database():
                 user_action VARCHAR(20),
                 dismissed_at TIMESTAMP,
                 selected_at TIMESTAMP,
+                day_of_week INTEGER,
+                hour_of_day INTEGER,
+                is_opex_week BOOLEAN DEFAULT FALSE,
+                days_to_earnings INTEGER,
+                market_event TEXT,
                 created_at TIMESTAMP DEFAULT NOW()
             )
         """)
@@ -144,6 +173,117 @@ async def init_database():
                 created_at TIMESTAMP DEFAULT NOW(),
                 FOREIGN KEY (signal_id) REFERENCES signals(signal_id)
             )
+        """)
+
+        # Trades table - user execution archive for analytics workflows.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS trades (
+                id SERIAL PRIMARY KEY,
+                signal_id VARCHAR(255),
+                ticker VARCHAR(20) NOT NULL,
+                direction VARCHAR(10),
+                status VARCHAR(20) DEFAULT 'open',
+                account VARCHAR(50),
+                entry_price DECIMAL(10, 2),
+                stop_loss DECIMAL(10, 2),
+                target_1 DECIMAL(10, 2),
+                quantity DECIMAL(18, 8),
+                opened_at TIMESTAMPTZ DEFAULT NOW(),
+                closed_at TIMESTAMPTZ,
+                notes TEXT
+            )
+        """)
+
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_trades_ticker_status
+                ON trades(ticker, status);
+        """)
+
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_trades_account
+                ON trades(account);
+        """)
+
+        # Price history for backtesting and benchmark derivation.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS price_history (
+                id SERIAL PRIMARY KEY,
+                ticker TEXT NOT NULL,
+                timeframe TEXT NOT NULL,
+                timestamp TIMESTAMPTZ NOT NULL,
+                open REAL,
+                high REAL,
+                low REAL,
+                close REAL,
+                volume REAL,
+                UNIQUE(ticker, timeframe, timestamp)
+            )
+        """)
+
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_price_ticker_tf
+                ON price_history(ticker, timeframe, timestamp);
+        """)
+
+        # Multi-leg execution journal linked to trades.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS trade_legs (
+                id SERIAL PRIMARY KEY,
+                trade_id INTEGER REFERENCES trades(id) NOT NULL,
+                timestamp TIMESTAMPTZ NOT NULL,
+                action TEXT NOT NULL,
+                direction TEXT NOT NULL,
+                quantity REAL NOT NULL,
+                price REAL NOT NULL,
+                strike REAL,
+                expiry DATE,
+                leg_type TEXT,
+                commission REAL DEFAULT 0,
+                notes TEXT
+            )
+        """)
+
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_legs_trade
+                ON trade_legs(trade_id);
+        """)
+
+        # Benchmark time-series for performance comparison.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS benchmarks (
+                id SERIAL PRIMARY KEY,
+                timestamp TIMESTAMPTZ NOT NULL,
+                benchmark TEXT NOT NULL,
+                cumulative_return REAL
+            )
+        """)
+
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_benchmarks_ts
+                ON benchmarks(benchmark, timestamp);
+        """)
+
+        # Portfolio-level risk snapshots.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS portfolio_snapshots (
+                id SERIAL PRIMARY KEY,
+                timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                account TEXT NOT NULL,
+                total_positions INTEGER,
+                net_delta REAL,
+                total_risk REAL,
+                risk_pct_of_account REAL,
+                largest_position_pct REAL,
+                sector_exposure JSONB DEFAULT '{}'::jsonb,
+                direction_exposure JSONB DEFAULT '{}'::jsonb,
+                correlated_positions INTEGER,
+                max_correlated_loss REAL
+            )
+        """)
+
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_portfolio_ts
+                ON portfolio_snapshots(account, timestamp);
         """)
         
         # TICK history table
@@ -300,7 +440,20 @@ async def init_database():
             ADD COLUMN IF NOT EXISTS trade_outcome VARCHAR(20),
             ADD COLUMN IF NOT EXISTS loss_reason VARCHAR(50),
             ADD COLUMN IF NOT EXISTS notes TEXT,
-            ADD COLUMN IF NOT EXISTS bias_at_signal JSONB
+            ADD COLUMN IF NOT EXISTS bias_at_signal JSONB,
+            ADD COLUMN IF NOT EXISTS day_of_week INTEGER,
+            ADD COLUMN IF NOT EXISTS hour_of_day INTEGER,
+            ADD COLUMN IF NOT EXISTS is_opex_week BOOLEAN DEFAULT FALSE,
+            ADD COLUMN IF NOT EXISTS days_to_earnings INTEGER,
+            ADD COLUMN IF NOT EXISTS market_event TEXT
+        """)
+
+        # Add recommendation capture fields to the trade journal table.
+        await conn.execute("""
+            ALTER TABLE IF EXISTS trades
+            ADD COLUMN IF NOT EXISTS pivot_recommendation TEXT,
+            ADD COLUMN IF NOT EXISTS pivot_conviction TEXT,
+            ADD COLUMN IF NOT EXISTS full_context JSONB DEFAULT '{}'::jsonb
         """)
         
         # Add new columns to positions table for enhanced tracking
@@ -338,13 +491,18 @@ async def init_database():
             CREATE INDEX IF NOT EXISTS idx_signals_created_at ON signals(created_at DESC);
             CREATE INDEX IF NOT EXISTS idx_signals_ticker ON signals(ticker);
             CREATE INDEX IF NOT EXISTS idx_signals_strategy ON signals(strategy);
+            CREATE INDEX IF NOT EXISTS idx_signals_calendar ON signals(day_of_week, hour_of_day);
             CREATE INDEX IF NOT EXISTS idx_positions_status ON positions(status);
             CREATE INDEX IF NOT EXISTS idx_positions_ticker ON positions(ticker);
         """)
         
         print("Database schema initialized")
 
-async def log_signal(signal_data: Dict[Any, Any]):
+async def log_signal(
+    signal_data: Dict[Any, Any],
+    market_state: Optional[Dict[Any, Any]] = None,
+    factor_snapshot: Optional[Dict[Any, Any]] = None,
+):
     """
     Log a new signal to the database
     This runs async to avoid blocking the main pipeline
@@ -352,6 +510,11 @@ async def log_signal(signal_data: Dict[Any, Any]):
     pool = await get_postgres_client()
     
     timestamp = _normalize_timestamp_for_db(signal_data.get("timestamp"))
+    calendar_fields = await _build_calendar_metadata(timestamp, signal_data.get("ticker"))
+    # Allow explicit overrides from callers while keeping auto-compute as default.
+    for key in ("day_of_week", "hour_of_day", "is_opex_week", "days_to_earnings", "market_event"):
+        if key in signal_data and signal_data.get(key) is not None:
+            calendar_fields[key] = signal_data.get(key)
     
     bias_at_signal = signal_data.get("bias_at_signal")
     if not bias_at_signal:
@@ -362,14 +525,26 @@ async def log_signal(signal_data: Dict[Any, Any]):
             logger.warning(f"Failed to capture bias snapshot for signal: {err}")
             bias_at_signal = None
 
+    triggering_factors = signal_data.get("triggering_factors")
+    if triggering_factors is None and (market_state is not None or factor_snapshot is not None):
+        triggering_factors = {
+            "market_state": market_state,
+            "factor_snapshot": factor_snapshot,
+        }
+
     async with pool.acquire() as conn:
         await conn.execute("""
             INSERT INTO signals (
                 signal_id, timestamp, strategy, ticker, asset_class,
                 direction, signal_type, entry_price, stop_loss, target_1,
                 target_2, risk_reward, timeframe, bias_level, adx, line_separation,
-                score, bias_alignment, triggering_factors, bias_at_signal, notes
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+                score, bias_alignment, triggering_factors, bias_at_signal, notes,
+                day_of_week, hour_of_day, is_opex_week, days_to_earnings, market_event
+            ) VALUES (
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+                $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
+                $21, $22, $23, $24, $25, $26
+            )
             ON CONFLICT (signal_id) DO NOTHING
         """,
             signal_data['signal_id'],
@@ -390,9 +565,14 @@ async def log_signal(signal_data: Dict[Any, Any]):
             signal_data.get('line_separation'),
             signal_data.get('score'),
             signal_data.get('bias_alignment'),
-            json.dumps(signal_data.get('triggering_factors')) if signal_data.get('triggering_factors') is not None else None,
+            json.dumps(triggering_factors) if triggering_factors is not None else None,
             json.dumps(bias_at_signal) if bias_at_signal is not None else None,
-            signal_data.get("notes")
+            signal_data.get("notes"),
+            calendar_fields.get("day_of_week"),
+            calendar_fields.get("hour_of_day"),
+            calendar_fields.get("is_opex_week"),
+            calendar_fields.get("days_to_earnings"),
+            calendar_fields.get("market_event"),
         )
 
 async def update_signal_action(signal_id: str, action: str):
