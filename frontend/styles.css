@@ -29,6 +29,10 @@ body {
     min-height: 100vh;
 }
 
+[hidden] {
+    display: none !important;
+}
+
 /* Orbit font for all major section headings */
 .bias-composite-title h2,
 .trades-header h2,
@@ -6967,7 +6971,17 @@ body[data-mode="crypto"] .crypto-topbar {
     display: block;
 }
 
-.crypto-shell {
+.crypto-shell,
+.analytics-shell {
+    display: none;
+}
+
+body[data-mode="hub"] .hub-shell {
+    display: block;
+}
+
+body[data-mode="hub"] .crypto-shell,
+body[data-mode="hub"] .analytics-shell {
     display: none;
 }
 
@@ -6975,7 +6989,20 @@ body[data-mode="crypto"] .hub-shell {
     display: none;
 }
 
+body[data-mode="crypto"] .analytics-shell {
+    display: none;
+}
+
 body[data-mode="crypto"] .crypto-shell {
+    display: block;
+}
+
+body[data-mode="analytics"] .hub-shell,
+body[data-mode="analytics"] .crypto-shell {
+    display: none;
+}
+
+body[data-mode="analytics"] .analytics-shell {
     display: block;
 }
 
