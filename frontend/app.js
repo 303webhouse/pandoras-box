@@ -183,12 +183,41 @@ let manualPositionContext = 'equity';
 
 // Initialize app
 document.addEventListener('DOMContentLoaded', () => {
-    initRouting();
-    initTradingViewWidget();
-    initWebSocket();
-    initEventListeners();
-    loadInitialData();
-    initCryptoScalper();
+    // Bind critical UI interactions first so mode switches still work
+    // even if downstream initializers fail.
+    try {
+        initRouting();
+    } catch (error) {
+        console.error('initRouting failed:', error);
+    }
+
+    try {
+        initEventListeners();
+    } catch (error) {
+        console.error('initEventListeners failed:', error);
+    }
+
+    try {
+        initTradingViewWidget();
+    } catch (error) {
+        console.error('initTradingViewWidget failed:', error);
+    }
+
+    try {
+        initWebSocket();
+    } catch (error) {
+        console.error('initWebSocket failed:', error);
+    }
+
+    Promise.resolve(loadInitialData()).catch((error) => {
+        console.error('loadInitialData failed:', error);
+    });
+
+    try {
+        initCryptoScalper();
+    } catch (error) {
+        console.error('initCryptoScalper failed:', error);
+    }
 });
 
 function initRouting() {
