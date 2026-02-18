@@ -296,6 +296,64 @@ async def init_database():
             CREATE INDEX IF NOT EXISTS idx_portfolio_ts
                 ON portfolio_snapshots(account, timestamp);
         """)
+
+        # Strategy health snapshots (rolling quality scores per signal source).
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS strategy_health (
+                id SERIAL PRIMARY KEY,
+                source TEXT NOT NULL,
+                window_days INTEGER NOT NULL DEFAULT 30,
+                signals_count INTEGER NOT NULL DEFAULT 0,
+                outcomes_count INTEGER NOT NULL DEFAULT 0,
+                accuracy REAL,
+                false_signal_rate REAL,
+                expectancy REAL,
+                avg_mfe_pct REAL,
+                avg_mae_pct REAL,
+                mfe_mae_ratio REAL,
+                regime_breakdown JSONB DEFAULT '{}'::jsonb,
+                convergence_signals INTEGER DEFAULT 0,
+                convergence_accuracy REAL,
+                grade VARCHAR(2) NOT NULL,
+                computed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_strategy_health_source_time
+                ON strategy_health(source, computed_at DESC);
+        """)
+
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_strategy_health_computed_at
+                ON strategy_health(computed_at DESC);
+        """)
+
+        # Strategy health alerts for degraded grades and grade transitions.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS health_alerts (
+                id SERIAL PRIMARY KEY,
+                source TEXT NOT NULL,
+                previous_grade VARCHAR(2),
+                new_grade VARCHAR(2) NOT NULL,
+                threshold_trigger TEXT NOT NULL,
+                message TEXT,
+                metadata JSONB DEFAULT '{}'::jsonb,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                resolved_at TIMESTAMPTZ
+            )
+        """)
+
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_health_alerts_source_created
+                ON health_alerts(source, created_at DESC);
+        """)
+
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_health_alerts_unresolved
+                ON health_alerts(resolved_at)
+                WHERE resolved_at IS NULL;
+        """)
         
         # TICK history table
         await conn.execute("""

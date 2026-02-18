@@ -79,6 +79,11 @@ _scheduler_status = {
         "status": "idle",
         "interval": "Daily 4:15 PM ET"
     },
+    "health_monitor": {
+        "last_run": None,
+        "status": "idle",
+        "interval": "Daily 4:30 PM ET"
+    },
     "scheduler_started": None
 }
 
@@ -162,6 +167,10 @@ def get_scheduler_status() -> Dict[str, Any]:
         "portfolio_monitor": {
             **_scheduler_status["portfolio_monitor"],
             "schedule": "Daily at 4:15 PM ET"
+        },
+        "health_monitor": {
+            **_scheduler_status["health_monitor"],
+            "schedule": "Daily at 4:30 PM ET"
         }
     }
 
@@ -2209,6 +2218,27 @@ async def run_portfolio_monitor_job():
         logger.error(f"Portfolio monitor error: {e}")
 
 
+async def run_health_monitor_job():
+    """Compute rolling strategy health grades and alert on degraded sources."""
+    now = get_eastern_now()
+    _scheduler_status["health_monitor"]["status"] = "running"
+    try:
+        from analytics.health_monitor import run_strategy_health_monitor
+
+        result = await run_strategy_health_monitor(window_days=30)
+        _scheduler_status["health_monitor"]["last_run"] = now.isoformat()
+        _scheduler_status["health_monitor"]["status"] = result.get("status", "completed")
+        logger.info(
+            "Strategy health monitor updated: status=%s sources=%s alerts=%s",
+            result.get("status"),
+            result.get("sources"),
+            result.get("alerts"),
+        )
+    except Exception as e:
+        _scheduler_status["health_monitor"]["status"] = f"error: {e}"
+        logger.error(f"Strategy health monitor error: {e}")
+
+
 async def reset_circuit_breaker_scheduled():
     """
     Reset circuit breaker at market open (9:30 AM ET)
@@ -2583,6 +2613,14 @@ async def start_scheduler():
             replace_existing=True
         )
 
+        scheduler.add_job(
+            run_health_monitor_job,
+            CronTrigger(day_of_week='mon-fri', hour=16, minute=30, timezone=ET),
+            id='health_monitor',
+            name='Strategy Health Monitor',
+            replace_existing=True
+        )
+
         # Nightly signal outcome scoring + discovery cleanup (9:00 PM ET)
         scheduler.add_job(
             run_signal_scoring_job,
@@ -2601,6 +2639,7 @@ async def start_scheduler():
         logger.info("âœ… Price history collection scheduled every 5 minutes")
         logger.info("âœ… Benchmark tracker scheduled daily at 4:10 PM ET")
         logger.info("âœ… Portfolio monitor scheduled daily at 4:15 PM ET")
+        logger.info("âœ… Strategy health monitor scheduled daily at 4:30 PM ET")
         logger.info("âœ… Signal outcome scoring scheduled for 9:00 PM ET")
         
         # ALSO start the scanner loop (APScheduler doesn't handle the variable-interval scanners)
@@ -2711,6 +2750,7 @@ async def _fallback_scheduler():
     last_price_collection_time = None
     last_benchmark_date = None
     last_portfolio_date = None
+    last_health_monitor_date = None
     
     while True:
         now = get_eastern_now()
@@ -2780,6 +2820,17 @@ async def _fallback_scheduler():
             if last_portfolio_date != today_str:
                 last_portfolio_date = today_str
                 await run_portfolio_monitor_job()
+                await asyncio.sleep(10)
+                continue
+
+        # =========================================
+        # HEALTH MONITOR: Daily at 4:30 PM ET
+        # =========================================
+        if is_trading_day() and current_hour == 16 and 30 <= current_minute < 31:
+            today_str = now.strftime("%Y-%m-%d")
+            if last_health_monitor_date != today_str:
+                last_health_monitor_date = today_str
+                await run_health_monitor_job()
                 await asyncio.sleep(10)
                 continue
         

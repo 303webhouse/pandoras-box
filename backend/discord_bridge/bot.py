@@ -1079,6 +1079,53 @@ def _format_quote_context(symbol: str, quote_data: Optional[Dict[str, Any]]) -> 
         return f"{symbol}: {price}"
 
 
+def _format_strategy_health_context(payload: Optional[Dict[str, Any]]) -> str:
+    if not payload:
+        return "Strategy Health: unavailable"
+
+    grades = payload.get("grades") or []
+    if not isinstance(grades, list) or not grades:
+        return "Strategy Health (30d): no persisted grades yet"
+
+    degraded: List[Dict[str, Any]] = []
+    for row in grades:
+        grade = str((row or {}).get("grade") or "").upper()
+        if grade in {"C", "D", "F"}:
+            degraded.append(row)
+
+    unresolved = payload.get("unresolved_alerts")
+    unresolved_text = ""
+    if isinstance(unresolved, (int, float)):
+        unresolved_text = f" | unresolved alerts: {int(unresolved)}"
+
+    if not degraded:
+        return f"Strategy Health (30d): no degraded sources (all >= B){unresolved_text}"
+
+    lines = [f"Strategy Health Warning (30d){unresolved_text}:"]
+    for row in degraded[:5]:
+        source = str((row or {}).get("source") or "unknown")
+        grade = str((row or {}).get("grade") or "?").upper()
+        accuracy = row.get("accuracy")
+        signals_count = row.get("signals_count")
+
+        accuracy_text = "n/a"
+        if isinstance(accuracy, (int, float)):
+            accuracy_text = f"{float(accuracy) * 100:.1f}%"
+        signals_text = str(signals_count) if isinstance(signals_count, (int, float)) else "n/a"
+
+        lines.append(f"- {source}: grade {grade}, accuracy {accuracy_text}, signals {signals_text}")
+
+    lines.append("Rule: C requires convergence. D means no solo recommendations.")
+    return "\n".join(lines)
+
+
+async def get_strategy_health_context(days: int = 30) -> str:
+    endpoint = f"/analytics/strategy-health?days={max(1, int(days))}"
+    async with aiohttp.ClientSession() as session:
+        payload = await _fetch_json(session, endpoint)
+    return _format_strategy_health_context(payload)
+
+
 async def _get_options_context_for_ticker(
     ticker: str,
     *,
@@ -1297,6 +1344,7 @@ async def build_market_context(user_text: str = "", ticker_hint: Optional[str] =
         tasks = [
             _fetch_json(session, "/bias/DAILY"),
             _fetch_json(session, "/market-indicators/vix-term"),
+            _fetch_json(session, "/analytics/strategy-health?days=30"),
         ]
         tasks.extend(_fetch_json(session, f"/hybrid/price/{symbol}") for symbol in symbols)
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -1306,11 +1354,13 @@ async def build_market_context(user_text: str = "", ticker_hint: Optional[str] =
 
     bias_state = as_dict(results[0])
     vix_term = as_dict(results[1])
-    quote_results = [as_dict(value) for value in results[2:]]
+    strategy_health_payload = as_dict(results[2])
+    quote_results = [as_dict(value) for value in results[3:]]
 
     lines = [
         _format_bias_context(bias_state),
         _format_vix_context(vix_term),
+        _format_strategy_health_context(strategy_health_payload),
     ]
     for symbol, quote_data in zip(symbols, quote_results):
         lines.append(_format_quote_context(symbol, quote_data))
