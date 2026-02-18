@@ -35,8 +35,12 @@ logger = logging.getLogger(__name__)
 # Savita Indicator Configuration
 SAVITA_CONFIG = {
     # Current reading - UPDATE THIS MONTHLY when new data is released
-    "current_reading": 55.9,  # As of last update
-    "last_updated": "2026-01-15",  # Date of last BofA report
+    "current_reading": 56.0,  # January update
+    "last_updated": "2026-01-31",  # Date of last BofA report
+    "stale_after_days": 45,
+    "readings_history": {
+        "2026-01": 56.0,
+    },
     
     # Thresholds (from BofA research)
     "thresholds": {
@@ -52,7 +56,7 @@ SAVITA_CONFIG = {
 
 
 def is_savita_stale() -> bool:
-    """Check if Savita data is stale (>30 days old)"""
+    """Check if Savita data is stale (> configured freshness window)."""
     last_updated = SAVITA_CONFIG.get("last_updated")
     if not last_updated:
         return True
@@ -60,7 +64,8 @@ def is_savita_stale() -> bool:
     try:
         update_date = datetime.strptime(last_updated, "%Y-%m-%d")
         days_since = (datetime.now() - update_date).days
-        return days_since > 30
+        stale_after_days = int(SAVITA_CONFIG.get("stale_after_days", 45))
+        return days_since > stale_after_days
     except:
         return True
 
@@ -86,11 +91,12 @@ def get_savita_reading() -> Dict[str, Any]:
     
     # If stale, return neutral (disabled from scoring)
     if stale:
+        stale_after_days = int(SAVITA_CONFIG.get("stale_after_days", 45))
         return {
             "reading": reading,
             "bias": "NEUTRAL",
             "signal": "DISABLED",
-            "interpretation": f"Data stale (>30 days old) - not affecting score. Last reading: {reading}%",
+            "interpretation": f"Data stale (>{stale_after_days} days old) - not affecting score. Last reading: {reading}%",
             "last_updated": SAVITA_CONFIG["last_updated"],
             "enabled": False,
             "stale": True,
@@ -147,6 +153,10 @@ def update_savita_reading(new_reading: float, update_date: Optional[str] = None)
     
     SAVITA_CONFIG["current_reading"] = new_reading
     SAVITA_CONFIG["last_updated"] = update_date or datetime.now().strftime("%Y-%m-%d")
+    if SAVITA_CONFIG.get("last_updated"):
+        month_key = str(SAVITA_CONFIG["last_updated"])[:7]
+        if month_key:
+            SAVITA_CONFIG.setdefault("readings_history", {})[month_key] = float(new_reading)
     
     logger.info(f"📊 Savita Indicator updated: {new_reading}% as of {SAVITA_CONFIG['last_updated']}")
     

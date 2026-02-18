@@ -75,6 +75,19 @@ function changeColor(value) {
     return '#78909c';
 }
 
+function normalizeRiskReward(value) {
+    if (value === null || value === undefined || value === '') return null;
+    const num = Number.parseFloat(value);
+    if (!Number.isFinite(num)) return null;
+    const normalized = Math.abs(num);
+    return normalized > 0 ? normalized : null;
+}
+
+function formatRiskReward(value) {
+    const normalized = normalizeRiskReward(value);
+    return normalized ? `${normalized.toFixed(1)}:1` : '-';
+}
+
 // State
 let ws = null;
 let tvWidget = null;
@@ -124,6 +137,7 @@ let dailyBiasFactorStates = {
 
 // Composite Bias API response cache (used by crypto bias bar without needing DOM from hub)
 let _compositeBiasData = null;
+let _dailyBiasPrimaryData = null;
 
 // Keep a reference to open positions for crypto rendering
 let _open_positions_cache = [];
@@ -597,7 +611,7 @@ function handleWebSocketMessage(message) {
             break;
         case 'BIAS_UPDATE':
             if (message.data && typeof message.data.bias_level !== 'undefined' && typeof message.data.composite_score !== 'undefined') {
-                renderCompositeBias(message.data);
+                fetchCompositeBias();
                 flashCompositeBanner();
             } else {
                 // Handle weekly bias updates with factor filtering
@@ -1373,6 +1387,24 @@ function normalizeCompositeBiasLevel(level) {
     return map[raw] || 'NEUTRAL';
 }
 
+function normalizeDailyBiasLevel(level) {
+    if (!level) return 'NEUTRAL';
+    return String(level).toUpperCase().replace(/\s+/g, '_');
+}
+
+function timeframeVoteToBiasLabel(vote) {
+    if (vote >= 6) return 'MAJOR_TORO';
+    if (vote >= 3) return 'MINOR_TORO';
+    if (vote <= -6) return 'MAJOR_URSA';
+    if (vote <= -3) return 'MINOR_URSA';
+    return 'NEUTRAL';
+}
+
+function scoreToTimeframeVote(score) {
+    if (!Number.isFinite(score)) return 0;
+    return Math.round(score * 10);
+}
+
 function biasTrendToMomentum(trend) {
     const value = String(trend || '').toUpperCase();
     if (value === 'IMPROVING') return 'strengthening';
@@ -1420,17 +1452,38 @@ function factorMapToRows(factorMap) {
     });
 }
 
-async function fetchCompositeBias() {
+async function fetchDailyBiasPrimary() {
     try {
-        const resp = await fetch(`${API_URL}/bias/composite`);
+        const resp = await fetch(`${API_URL}/bias/DAILY`);
         if (!resp.ok) {
-            throw new Error(`/bias/composite returned HTTP ${resp.status}`);
+            throw new Error(`/bias/DAILY returned HTTP ${resp.status}`);
         }
         const data = await resp.json();
         if (!data || typeof data !== 'object') {
+            throw new Error('/bias/DAILY returned invalid payload');
+        }
+        _dailyBiasPrimaryData = data;
+        return data;
+    } catch (err) {
+        console.error('Failed to fetch daily bias primary:', err);
+        return null;
+    }
+}
+
+async function fetchCompositeBias() {
+    try {
+        const [compositeResp, dailyData] = await Promise.all([
+            fetch(`${API_URL}/bias/composite`),
+            fetchDailyBiasPrimary(),
+        ]);
+        if (!compositeResp.ok) {
+            throw new Error(`/bias/composite returned HTTP ${compositeResp.status}`);
+        }
+        const data = await compositeResp.json();
+        if (!data || typeof data !== 'object') {
             throw new Error('/bias/composite returned invalid payload');
         }
-        renderCompositeBias(data);
+        renderCompositeBias(data, dailyData);
     } catch (err) {
         console.error('Failed to fetch composite bias:', err);
         showCompositeError();
@@ -1441,51 +1494,78 @@ function showCompositeError() {
     const levelEl = document.getElementById('compositeBiasLevel');
     const scoreEl = document.getElementById('compositeBiasScore');
     const confEl = document.getElementById('compositeConfidence');
+    const secondaryEl = document.getElementById('compositeBiasSecondary');
     const lastUpdateEl = document.getElementById('compositeLastUpdate');
 
     if (levelEl) levelEl.textContent = 'UNKNOWN';
     if (scoreEl) scoreEl.textContent = '(--)';
     if (confEl) confEl.textContent = 'LOW';
+    if (secondaryEl) secondaryEl.textContent = 'Composite: --';
     if (lastUpdateEl) lastUpdateEl.textContent = 'Last update: --';
 }
 
-function renderCompositeBias(data) {
+function renderCompositeBias(data, dailyData = null) {
     if (!data) return;
 
     // Cache for use by crypto bias bar (avoids reading from hub DOM elements)
     _compositeBiasData = data;
+    if (dailyData && typeof dailyData === 'object') {
+        _dailyBiasPrimaryData = dailyData;
+    }
 
     const banner = document.getElementById('compositeBiasBanner');
     const levelEl = document.getElementById('compositeBiasLevel');
     const scoreEl = document.getElementById('compositeBiasScore');
     const confEl = document.getElementById('compositeConfidence');
+    const secondaryEl = document.getElementById('compositeBiasSecondary');
     const overrideEl = document.getElementById('compositeOverrideIndicator');
     const factorList = document.getElementById('compositeFactorList');
     const activeCountEl = document.getElementById('factorActiveCount');
     const lastUpdateEl = document.getElementById('compositeLastUpdate');
 
-    const biasLevel = data.bias_level || 'NEUTRAL';
+    const dailySource = _dailyBiasPrimaryData || dailyBiasFullData || {};
+    const dailyLevel = normalizeDailyBiasLevel(dailySource.level || data.bias_level || 'NEUTRAL');
+    const dailyVoteRaw = Number(dailySource?.details?.total_vote);
+    const dailyVote = Number.isFinite(dailyVoteRaw) ? Math.trunc(dailyVoteRaw) : null;
+    const dailyColorKey = normalizeCompositeBiasLevel(dailyLevel);
+    const colors = BIAS_COLORS[dailyColorKey] || BIAS_COLORS.NEUTRAL;
+
     const scoreValue = typeof data.composite_score === 'number'
         ? data.composite_score
         : parseFloat(data.composite_score || 0);
-    const colors = BIAS_COLORS[biasLevel] || BIAS_COLORS.NEUTRAL;
+    const confidence = (data.confidence || 'LOW').toUpperCase();
+    const activeCount = Array.isArray(data.active_factors) ? data.active_factors.length : null;
+    const staleCount = Array.isArray(data.stale_factors) ? data.stale_factors.length : null;
+    const totalCount = Number.isFinite(activeCount) && Number.isFinite(staleCount)
+        ? activeCount + staleCount
+        : (data.factors && typeof data.factors === 'object' ? Object.keys(data.factors).length : null);
 
     if (banner) {
         banner.style.background = colors.bg;
         banner.style.borderColor = colors.accent;
     }
     if (levelEl) {
-        levelEl.textContent = biasLevel.replace(/_/g, ' ');
+        levelEl.textContent = dailyLevel.replace(/_/g, ' ');
         levelEl.style.color = colors.accent;
     }
     if (scoreEl) {
-        const scoreText = Number.isFinite(scoreValue) ? scoreValue.toFixed(2) : '--';
+        const scoreText = dailyVote === null ? '--' : `${dailyVote >= 0 ? '+' : ''}${dailyVote}`;
         scoreEl.textContent = `(${scoreText})`;
     }
     if (confEl) {
-        const confidence = (data.confidence || 'LOW').toUpperCase();
-        confEl.textContent = confidence;
+        const suffix = Number.isFinite(activeCount) && Number.isFinite(totalCount)
+            ? ` (${activeCount}/${totalCount} active)`
+            : '';
+        confEl.textContent = `${confidence}${suffix}`;
         confEl.style.color = CONFIDENCE_COLORS[confidence] || CONFIDENCE_COLORS.LOW;
+    }
+    if (secondaryEl) {
+        const compositeLevel = String(data.bias_level || 'NEUTRAL').replace(/_/g, ' ');
+        const compositeScoreText = Number.isFinite(scoreValue) ? scoreValue.toFixed(2) : '--';
+        const staleLabel = Number.isFinite(staleCount)
+            ? ` - ${staleCount} stale factor${staleCount === 1 ? '' : 's'}`
+            : '';
+        secondaryEl.textContent = `Composite: ${compositeLevel} (${compositeScoreText})${staleLabel}`;
     }
 
     if (overrideEl) {
@@ -1498,104 +1578,79 @@ function renderCompositeBias(data) {
     }
 
     if (factorList) {
-        if (Array.isArray(data.fallback_factors) && data.fallback_factors.length) {
-            factorList.innerHTML = data.fallback_factors.map((factor) => {
-                const score = Number(factor.score || 0);
-                const barPct = Math.min(100, Math.abs(score) * 100);
-                const barColor = score <= -0.6 ? '#e5370e'
-                    : score < 0 ? '#ff9800'
-                    : score >= 0.6 ? '#00e676'
-                    : '#66bb6a';
-                return `
-                    <div class="factor-row">
-                        <span class="factor-status">o</span>
-                        <span class="factor-name">${formatFactorName(factor.factor_id)}</span>
-                        <div class="factor-bar">
-                            <div class="factor-bar-fill" style="width:${barPct}%;background:${barColor}"></div>
-                        </div>
-                        <span class="factor-score">${score.toFixed(2)}</span>
-                        <span class="factor-signal" style="color:${barColor}">${(factor.signal || '').replace(/_/g, ' ')}</span>
-                    </div>
-                `;
-            }).join('');
-            if (activeCountEl) activeCountEl.textContent = `${data.fallback_factors.length} bias-auto factors`;
-        } else {
-            const activeSet = new Set(data.active_factors || []);
-            const staleSet = new Set(data.stale_factors || []);
-            const factorsMap = data.factors && typeof data.factors === 'object' ? data.factors : {};
-            const discoveredFactorIds = new Set([
-                ...Object.keys(factorsMap),
-                ...Array.from(activeSet),
-                ...Array.from(staleSet)
-            ]);
+        const activeSet = new Set(data.active_factors || []);
+        const staleSet = new Set(data.stale_factors || []);
+        const factorsMap = data.factors && typeof data.factors === 'object' ? data.factors : {};
+        const discoveredFactorIds = new Set([
+            ...Object.keys(factorsMap),
+            ...Array.from(activeSet),
+            ...Array.from(staleSet)
+        ]);
 
-            const factorOrderMap = new Map(COMPOSITE_FACTOR_DISPLAY_ORDER.map((id, idx) => [id, idx]));
-            const sortedFactorIds = Array.from(discoveredFactorIds).sort((a, b) => {
-                const ai = factorOrderMap.has(a) ? factorOrderMap.get(a) : Number.MAX_SAFE_INTEGER;
-                const bi = factorOrderMap.has(b) ? factorOrderMap.get(b) : Number.MAX_SAFE_INTEGER;
-                if (ai !== bi) return ai - bi;
-                return a.localeCompare(b);
-            });
+        const factorOrderMap = new Map(COMPOSITE_FACTOR_DISPLAY_ORDER.map((id, idx) => [id, idx]));
+        const sortedFactorIds = Array.from(discoveredFactorIds).sort((a, b) => {
+            const ai = factorOrderMap.has(a) ? factorOrderMap.get(a) : Number.MAX_SAFE_INTEGER;
+            const bi = factorOrderMap.has(b) ? factorOrderMap.get(b) : Number.MAX_SAFE_INTEGER;
+            if (ai !== bi) return ai - bi;
+            return a.localeCompare(b);
+        });
 
-            factorList.innerHTML = '';
+        factorList.innerHTML = '';
 
-            sortedFactorIds.forEach((factorId) => {
-                const factor = factorsMap[factorId] || null;
-                const isActive = activeSet.has(factorId);
-                const isStale = staleSet.has(factorId) || !isActive;
-                const score = factor && typeof factor.score === 'number' ? factor.score : null;
-                const barPct = score !== null ? Math.min(100, Math.abs(score) * 100) : 0;
+        sortedFactorIds.forEach((factorId) => {
+            const factor = factorsMap[factorId] || null;
+            const isActive = activeSet.has(factorId);
+            const isStale = staleSet.has(factorId) || !isActive;
+            const score = factor && typeof factor.score === 'number' ? factor.score : null;
+            const barPct = score !== null ? Math.min(100, Math.abs(score) * 100) : 0;
 
-                const barColor = score === null ? '#455a64'
-                    : score <= -0.6 ? '#e5370e'
-                    : score <= -0.2 ? '#ff9800'
-                    : score >= 0.6 ? '#00e676'
-                    : score >= 0.2 ? '#66bb6a' : '#78909c';
+            const barColor = score === null ? '#455a64'
+                : score <= -0.6 ? '#e5370e'
+                : score <= -0.2 ? '#ff9800'
+                : score >= 0.6 ? '#00e676'
+                : score >= 0.2 ? '#66bb6a' : '#78909c';
 
-                const row = document.createElement('div');
-                row.className = `factor-row${isStale ? ' stale' : ''}`;
-                row.innerHTML = `
-                    <span class="factor-status">${isActive ? 'o' : '-'}</span>
-                    <span class="factor-name">${formatFactorName(factorId)}</span>
-                    <div class="factor-bar">
-                        <div class="factor-bar-fill" style="width:${barPct}%;background:${barColor}"></div>
-                    </div>
-                    <span class="factor-score">${score !== null && isActive ? score.toFixed(2) : 'STALE'}</span>
-                    <span class="factor-signal" style="color:${barColor}">${score !== null && isActive ? (factor.signal || '').replace(/_/g, ' ') : '?'}</span>
-                `;
+            const row = document.createElement('div');
+            row.className = `factor-row${isStale ? ' stale' : ''}`;
+            row.innerHTML = `
+                <span class="factor-status">${isActive ? 'o' : '-'}</span>
+                <span class="factor-name">${formatFactorName(factorId)}</span>
+                <div class="factor-bar">
+                    <div class="factor-bar-fill" style="width:${barPct}%;background:${barColor}"></div>
+                </div>
+                <span class="factor-score">${score !== null && isActive ? score.toFixed(2) : 'STALE'}</span>
+                <span class="factor-signal" style="color:${barColor}">${score !== null && isActive ? (factor.signal || '').replace(/_/g, ' ') : '?'}</span>
+            `;
 
-                if (factor && factor.detail) {
-                    row.title = factor.detail;
-                    row.style.cursor = 'pointer';
-                    row.addEventListener('click', () => {
-                        const existing = row.querySelector('.factor-detail');
-                        if (existing) {
-                            existing.remove();
-                        } else {
-                            const detail = document.createElement('div');
-                            detail.className = 'factor-detail';
-                            detail.textContent = factor.detail;
-                            row.appendChild(detail);
-                        }
-                    });
-                }
-
-                factorList.appendChild(row);
-            });
-
-            if (activeCountEl) {
-                const activeCount = (data.active_factors || []).length;
-                const totalCount = sortedFactorIds.length;
-                activeCountEl.textContent = `${activeCount}/${totalCount} active`;
+            if (factor && factor.detail) {
+                row.title = factor.detail;
+                row.style.cursor = 'pointer';
+                row.addEventListener('click', () => {
+                    const existing = row.querySelector('.factor-detail');
+                    if (existing) {
+                        existing.remove();
+                    } else {
+                        const detail = document.createElement('div');
+                        detail.className = 'factor-detail';
+                        detail.textContent = factor.detail;
+                        row.appendChild(detail);
+                    }
+                });
             }
+
+            factorList.appendChild(row);
+        });
+
+        if (activeCountEl) {
+            const total = sortedFactorIds.length;
+            const active = (data.active_factors || []).length;
+            activeCountEl.textContent = `${active}/${total} active`;
         }
     }
 
     if (lastUpdateEl && data.timestamp) {
         const timeAgo = getTimeAgo(new Date(data.timestamp));
-        lastUpdateEl.textContent = data._fallback_from_bias_auto
-            ? `Last update: ${timeAgo} (bias-auto fallback)`
-            : `Last update: ${timeAgo}`;
+        lastUpdateEl.textContent = `Last update: ${timeAgo}`;
     }
 }
 
@@ -1690,7 +1745,6 @@ async function fetchTimeframeBias() {
 
 function renderTimeframeCards(data) {
     const tfNames = ['intraday', 'swing', 'macro'];
-    const displayNames = { intraday: 'Intraday', swing: 'Swing', macro: 'Macro' };
     const cardIds = { intraday: 'tfIntraday', swing: 'tfSwing', macro: 'tfMacro' };
 
     for (const tf of tfNames) {
@@ -1700,8 +1754,11 @@ function renderTimeframeCards(data) {
         const card = document.getElementById(cardIds[tf]);
         if (!card) continue;
 
-        const level = tfData.bias_level || 'NEUTRAL';
-        const score = typeof tfData.sub_score === 'number' ? tfData.sub_score.toFixed(2) : '--';
+        const voteValue = Number.isFinite(Number(tfData.vote_sum))
+            ? Math.trunc(Number(tfData.vote_sum))
+            : scoreToTimeframeVote(typeof tfData.sub_score === 'number' ? tfData.sub_score : 0);
+        const level = timeframeVoteToBiasLabel(voteValue);
+        const visualLevel = normalizeCompositeBiasLevel(level);
         const momentum = tfData.momentum || 'stable';
 
         // Update level
@@ -1712,7 +1769,10 @@ function renderTimeframeCards(data) {
 
         // Update score
         const scoreEl = card.querySelector('.tf-score');
-        if (scoreEl) scoreEl.textContent = `(${score})`;
+        if (scoreEl) {
+            const voteText = `${voteValue >= 0 ? '+' : ''}${voteValue}`;
+            scoreEl.textContent = `(${voteText})`;
+        }
 
         // Update momentum
         const momEl = card.querySelector('.tf-momentum');
@@ -1736,12 +1796,12 @@ function renderTimeframeCards(data) {
         }
 
         // Apply bias color class
-        card.className = `tf-card ${level}`;
+        card.className = `tf-card ${visualLevel}`;
 
         // Pulse at extremes
         card.classList.remove('pulse-toro', 'pulse-ursa');
-        if (level === 'TORO_MAJOR') card.classList.add('pulse-toro');
-        else if (level === 'URSA_MAJOR') card.classList.add('pulse-ursa');
+        if (visualLevel === 'TORO_MAJOR') card.classList.add('pulse-toro');
+        else if (visualLevel === 'URSA_MAJOR') card.classList.add('pulse-ursa');
 
         // Render factor bars
         const factorsEl = card.querySelector('.tf-factors');
@@ -3613,7 +3673,7 @@ function createCryptoSignalCard(signal) {
                 <span><span class="crypto-signal-detail-label">Entry</span> <span class="crypto-signal-detail-value">${formatPrice(signal.entry_price)}</span></span>
                 <span><span class="crypto-signal-detail-label">Stop</span> <span class="crypto-signal-detail-value">${formatPrice(signal.stop_loss)}</span></span>
                 <span><span class="crypto-signal-detail-label">Target</span> <span class="crypto-signal-detail-value">${formatPrice(signal.target_1)}</span></span>
-                <span><span class="crypto-signal-detail-label">R:R</span> <span class="crypto-signal-detail-value">${signal.risk_reward ? parseFloat(signal.risk_reward).toFixed(1) + ':1' : '--'}</span></span>
+                <span><span class="crypto-signal-detail-label">R:R</span> <span class="crypto-signal-detail-value">${formatRiskReward(signal.risk_reward)}</span></span>
             </div>
             <div class="crypto-signal-bias ${biasClass}">${biasIcon} ${biasText}${timestampStr ? `  &middot;  ${timestampStr}` : ''}</div>
             <div class="crypto-signal-actions">
@@ -3642,7 +3702,7 @@ function createSignalCard(signal) {
     
     // Safe number formatting
     const formatPrice = (val) => val ? parseFloat(val).toFixed(2) : '-';
-    const formatRR = (val) => val ? `${parseFloat(val).toFixed(1)}:1` : '-';
+    const formatRR = (val) => formatRiskReward(val);
     
     // Handle multiple strategies (deduplicated signals)
     let strategiesHtml = '';
@@ -3771,7 +3831,7 @@ function getBiasAlignmentStatus(cyclicalLevel, weeklyLevel) {
 
 function renderCryptoBiasSummary() {
     const biasValues = {
-        daily: dailyBiasFullData?.level || 'NEUTRAL',
+        daily: _dailyBiasPrimaryData?.level || dailyBiasFullData?.level || 'NEUTRAL',
         composite: _compositeBiasData?.bias_level || 'NEUTRAL'
     };
 
@@ -5845,7 +5905,7 @@ function createCtaCard(signal) {
                 </div>
                 <div class="cta-metric">
                     <div class="cta-metric-label">R:R</div>
-                    <div class="cta-metric-value">${setup.rr_ratio || '-'}:1</div>
+                    <div class="cta-metric-value">${formatRiskReward(setup.rr_ratio)}</div>
                 </div>
             </div>
             <div class="cta-card-footer">

@@ -12,11 +12,13 @@ This is a CONTRARIAN indicator:
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime
 from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
+REDIS_KEY_MARKET_TIDE = "uw:market_tide:latest"
 
 # Import FactorReading and helpers from composite engine
 try:
@@ -34,11 +36,19 @@ async def compute_score(tide_data: Optional[Dict[str, Any]] = None) -> Optional[
     If tide_data is not provided, tries to read from the in-memory store.
     """
     if tide_data is None:
-        tide_data = _get_latest_tide()
+        tide_data = await _get_latest_tide()
 
     if not tide_data:
-        logger.debug("Options sentiment: no Market Tide data available")
-        return None
+        logger.warning("Options sentiment: no Market Tide data available, using neutral fallback")
+        return FactorReading(
+            factor_id="options_sentiment",
+            score=0.0,
+            signal="NEUTRAL",
+            detail="No UW Market Tide data received; neutral fallback",
+            timestamp=datetime.utcnow(),
+            source="fallback",
+            raw_data={"fallback": True},
+        )
 
     sentiment = (tide_data.get("sentiment") or "").upper()
     bullish_pct = tide_data.get("bullish_pct")
@@ -126,18 +136,37 @@ def _compute_tide_score(
     return max(-1.0, min(1.0, score))
 
 
-def _get_latest_tide() -> Optional[Dict[str, Any]]:
-    """Read latest Market Tide from the in-memory UW data store."""
+async def _get_latest_tide() -> Optional[Dict[str, Any]]:
+    """Read latest Market Tide from in-memory store, then Redis fallback."""
     try:
         from api.uw_integration import get_uw_data
         data = get_uw_data()
-        return data.get("market_tide")
+        market_tide = data.get("market_tide")
+        if market_tide:
+            return market_tide
     except Exception:
         pass
 
     try:
         from backend.api.uw_integration import get_uw_data
         data = get_uw_data()
-        return data.get("market_tide")
+        market_tide = data.get("market_tide")
+        if market_tide:
+            return market_tide
     except Exception:
-        return None
+        pass
+
+    # Process-resilient fallback for restarts.
+    try:
+        from database.redis_client import get_redis_client
+        redis = await get_redis_client()
+        if redis:
+            raw = await redis.get(REDIS_KEY_MARKET_TIDE)
+            if raw:
+                data = json.loads(raw)
+                if isinstance(data, dict):
+                    return data
+    except Exception:
+        pass
+
+    return None

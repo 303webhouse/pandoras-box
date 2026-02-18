@@ -1543,24 +1543,30 @@ async def get_active_signals_api():
         # Top 2 counter-trend signals by score
         counter_trend_signals.sort(key=lambda s: s.get('score', 0) or 0, reverse=True)
         top_counter = counter_trend_signals[:2]
-        top_counter_ids = {s.get('signal_id') for s in top_counter}
-        
-        # Return top 10 for display (but keep more in queue)
-        # Ensure counter-trend signals aren't duplicated if they're already in top 10
-        top_signals = signals[:10]
+
+        # Keep crypto/equity visibility balanced so one asset class does not
+        # starve the other in the combined feed.
+        equity_signals = [s for s in signals if str(s.get("asset_class", "")).upper() != "CRYPTO"]
+        crypto_signals = [s for s in signals if str(s.get("asset_class", "")).upper() == "CRYPTO"]
+        top_signals = [*equity_signals[:10], *crypto_signals[:10]]
+        if not top_signals:
+            top_signals = signals[:10]
+        top_signals.sort(key=get_sort_key, reverse=True)
+        top_signals = top_signals[:20]
+
         top_signal_ids = {s.get('signal_id') for s in top_signals}
-        
-        # Add counter-trend signals that aren't already in top 10
+
+        # Add counter-trend signals that aren't already in top slice
         extra_counter = [s for s in top_counter if s.get('signal_id') not in top_signal_ids]
-        
+
         queue_size = len(signals)
-        
+
         return {
             "status": "success",
             "signals": top_signals,
             "counter_trend_signals": extra_counter,
             "queue_size": queue_size,
-            "has_more": queue_size > 10
+            "has_more": queue_size > len(top_signals)
         }
     
     except Exception as e:

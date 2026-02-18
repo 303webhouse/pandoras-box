@@ -154,6 +154,21 @@ Red flags:
 - Massive OTM puts before earnings = usually hedging
 - Flow contradicting all signals = hedge book adjustment
 
+## CRYPTO SIGNALS (Scalper Context)
+When evaluating crypto alerts, classify first, then apply the right framework:
+- SNIPER: confirmation-style continuation entry. Prioritize structure, momentum follow-through, and invalidation.
+- SCOUT: early warning only. Treat as watchlist context unless confirmed by higher-timeframe structure.
+- EXHAUSTION: reversal setup. Require trigger confirmation and tighter risk controls.
+- TRIPLE LINE / TREND signals: continuation framework; avoid counter-trend entries without explicit edge.
+
+For crypto setups, prioritize:
+- Funding rate regime
+- CVD direction and confidence
+- Spot/perp basis and any dislocation
+- Session/ETF flow windows and liquidity conditions
+
+Do not evaluate crypto setups with equity-only heuristics. VIX/sector rotation are secondary unless cross-asset contagion is explicit.
+
 ## NICK'S MACRO WORLDVIEW (Challenge these)
 Extremely bearish on: Trump admin, US macro stability, USD reserve status, geopolitical risk.
 Bullish on AI as a trade thesis (disruption/destruction of industries).

@@ -13,11 +13,14 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional, Dict, Any, List
 from datetime import datetime
+import json
 import logging
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/bias/uw", tags=["Unusual Whales"])
+REDIS_KEY_MARKET_TIDE = "uw:market_tide:latest"
+REDIS_TTL_MARKET_TIDE_SECONDS = 86400 * 7
 
 # ================================
 # DATA MODELS
@@ -175,6 +178,19 @@ async def receive_market_tide(data: MarketTideData):
         _uw_data["last_updated"] = datetime.now().isoformat()
         
         logger.info(f"📊 Market Tide updated: {data.sentiment}")
+
+        # Persist latest Market Tide across process restarts.
+        try:
+            from database.redis_client import get_redis_client
+            redis = await get_redis_client()
+            if redis:
+                await redis.setex(
+                    REDIS_KEY_MARKET_TIDE,
+                    REDIS_TTL_MARKET_TIDE_SECONDS,
+                    json.dumps(_uw_data["market_tide"]),
+                )
+        except Exception as redis_err:
+            logger.warning(f"Could not persist Market Tide to Redis: {redis_err}")
         
         # Auto-score options_sentiment factor and feed into composite bias engine
         factor_score = None

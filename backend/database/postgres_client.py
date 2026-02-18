@@ -29,6 +29,29 @@ def serialize_db_row(row_dict: Dict) -> Dict:
             result[key] = value
     return result
 
+
+def _normalize_timestamp_for_db(raw_timestamp: Any) -> datetime:
+    """
+    Normalize signal timestamps for PostgreSQL TIMESTAMP columns.
+
+    Database schema uses TIMESTAMP (without timezone), so we always write a
+    UTC-naive datetime to avoid offset-aware/naive adapter errors in asyncpg.
+    """
+    timestamp = raw_timestamp
+    if isinstance(timestamp, str):
+        normalized = timestamp.strip()
+        if normalized.endswith("Z"):
+            normalized = normalized[:-1] + "+00:00"
+        timestamp = datetime.fromisoformat(normalized)
+
+    if not isinstance(timestamp, datetime):
+        timestamp = datetime.utcnow()
+
+    if timestamp.tzinfo is not None:
+        timestamp = timestamp.astimezone(timezone.utc).replace(tzinfo=None)
+
+    return timestamp
+
 # Load environment variables from .env file
 load_dotenv(os.path.join(os.path.dirname(__file__), '..', '..', 'config', '.env'))
 
@@ -328,13 +351,7 @@ async def log_signal(signal_data: Dict[Any, Any]):
     """
     pool = await get_postgres_client()
     
-    # Convert timestamp string to datetime if needed
-    timestamp = signal_data['timestamp']
-    if isinstance(timestamp, str):
-        timestamp = datetime.fromisoformat(timestamp)
-    # Ensure timezone-aware (asyncpg requires this for TIMESTAMP comparisons)
-    if isinstance(timestamp, datetime) and timestamp.tzinfo is None:
-        timestamp = timestamp.replace(tzinfo=timezone.utc)
+    timestamp = _normalize_timestamp_for_db(signal_data.get("timestamp"))
     
     bias_at_signal = signal_data.get("bias_at_signal")
     if not bias_at_signal:
