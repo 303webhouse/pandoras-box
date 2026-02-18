@@ -184,12 +184,23 @@ async def init_database():
                 direction VARCHAR(10),
                 status VARCHAR(20) DEFAULT 'open',
                 account VARCHAR(50),
+                structure TEXT,
+                signal_source TEXT,
                 entry_price DECIMAL(10, 2),
                 stop_loss DECIMAL(10, 2),
                 target_1 DECIMAL(10, 2),
                 quantity DECIMAL(18, 8),
                 opened_at TIMESTAMPTZ DEFAULT NOW(),
                 closed_at TIMESTAMPTZ,
+                exit_price DECIMAL(10, 2),
+                pnl_dollars DECIMAL(12, 2),
+                pnl_percent DECIMAL(8, 3),
+                rr_achieved DECIMAL(8, 3),
+                exit_reason TEXT,
+                bias_at_entry VARCHAR(50),
+                risk_amount DECIMAL(12, 2),
+                risk_pct DECIMAL(8, 3),
+                account_balance_at_open DECIMAL(12, 2),
                 notes TEXT
             )
         """)
@@ -455,6 +466,21 @@ async def init_database():
             ADD COLUMN IF NOT EXISTS pivot_conviction TEXT,
             ADD COLUMN IF NOT EXISTS full_context JSONB DEFAULT '{}'::jsonb
         """)
+
+        await conn.execute("""
+            ALTER TABLE IF EXISTS trades
+            ADD COLUMN IF NOT EXISTS structure TEXT,
+            ADD COLUMN IF NOT EXISTS signal_source TEXT,
+            ADD COLUMN IF NOT EXISTS exit_price DECIMAL(10, 2),
+            ADD COLUMN IF NOT EXISTS pnl_dollars DECIMAL(12, 2),
+            ADD COLUMN IF NOT EXISTS pnl_percent DECIMAL(8, 3),
+            ADD COLUMN IF NOT EXISTS rr_achieved DECIMAL(8, 3),
+            ADD COLUMN IF NOT EXISTS exit_reason TEXT,
+            ADD COLUMN IF NOT EXISTS bias_at_entry VARCHAR(50),
+            ADD COLUMN IF NOT EXISTS risk_amount DECIMAL(12, 2),
+            ADD COLUMN IF NOT EXISTS risk_pct DECIMAL(8, 3),
+            ADD COLUMN IF NOT EXISTS account_balance_at_open DECIMAL(12, 2)
+        """)
         
         # Add new columns to positions table for enhanced tracking
         await conn.execute("""
@@ -494,6 +520,9 @@ async def init_database():
             CREATE INDEX IF NOT EXISTS idx_signals_calendar ON signals(day_of_week, hour_of_day);
             CREATE INDEX IF NOT EXISTS idx_positions_status ON positions(status);
             CREATE INDEX IF NOT EXISTS idx_positions_ticker ON positions(ticker);
+            CREATE INDEX IF NOT EXISTS idx_trades_status ON trades(status);
+            CREATE INDEX IF NOT EXISTS idx_trades_structure ON trades(structure);
+            CREATE INDEX IF NOT EXISTS idx_trades_signal_source ON trades(signal_source);
         """)
         
         print("Database schema initialized")
