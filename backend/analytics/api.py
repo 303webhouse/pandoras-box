@@ -872,7 +872,42 @@ async def strategy_comparison(
 async def strategy_health(days: int = Query(30, ge=1, le=3650)):
     exists_rows = await fetch_rows("SELECT to_regclass('public.strategy_health') AS table_name")
     exists = bool(exists_rows and exists_rows[0].get("table_name"))
-    if exists:
+    if not exists:
+        return {
+            "window_days": days,
+            "source": "strategy_health_table_missing",
+            "grades": [],
+            "unresolved_alerts": 0,
+        }
+
+    start_dt, _ = window_bounds(days=days)
+    rows = await fetch_rows(
+        """
+        SELECT DISTINCT ON (source)
+            source,
+            grade,
+            accuracy,
+            expectancy,
+            signals_count,
+            outcomes_count,
+            false_signal_rate,
+            avg_mfe_pct,
+            avg_mae_pct,
+            mfe_mae_ratio,
+            regime_breakdown,
+            convergence_signals,
+            convergence_accuracy,
+            computed_at
+        FROM strategy_health
+        WHERE computed_at >= $1
+        ORDER BY source, computed_at DESC
+        """,
+        [start_dt],
+    )
+
+    # If no rows in window, return most recent snapshot per source so callers
+    # still see the latest persisted grades.
+    if not rows:
         rows = await fetch_rows(
             """
             SELECT DISTINCT ON (source)
@@ -881,14 +916,24 @@ async def strategy_health(days: int = Query(30, ge=1, le=3650)):
                 accuracy,
                 expectancy,
                 signals_count,
+                outcomes_count,
                 false_signal_rate,
+                avg_mfe_pct,
+                avg_mae_pct,
+                mfe_mae_ratio,
                 regime_breakdown,
+                convergence_signals,
                 convergence_accuracy,
                 computed_at
             FROM strategy_health
             ORDER BY source, computed_at DESC
             """
         )
+
+    alerts_exists_rows = await fetch_rows("SELECT to_regclass('public.health_alerts') AS table_name")
+    alerts_exists = bool(alerts_exists_rows and alerts_exists_rows[0].get("table_name"))
+    unresolved_count = 0
+    if alerts_exists:
         unresolved = await fetch_rows(
             """
             SELECT COUNT(*) AS unresolved
@@ -897,32 +942,12 @@ async def strategy_health(days: int = Query(30, ge=1, le=3650)):
             """
         )
         unresolved_count = int(unresolved[0]["unresolved"]) if unresolved else 0
-        return {
-            "window_days": days,
-            "source": "strategy_health_table",
-            "grades": rows,
-            "unresolved_alerts": unresolved_count,
-        }
 
-    derived = await strategy_comparison(days=days)
-    grades = []
-    for strategy in derived.get("strategies", []):
-        grades.append(
-            {
-                "source": strategy.get("source"),
-                "grade": strategy.get("grade"),
-                "accuracy": strategy.get("accuracy"),
-                "expectancy": strategy.get("expectancy_if_traded"),
-                "signals_count": strategy.get("signals"),
-                "computed_at": datetime.utcnow().isoformat(),
-                "derived": True,
-            }
-        )
     return {
         "window_days": days,
-        "source": "derived",
-        "grades": grades,
-        "unresolved_alerts": 0,
+        "source": "strategy_health_table",
+        "grades": rows,
+        "unresolved_alerts": unresolved_count,
     }
 
 

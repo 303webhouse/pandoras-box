@@ -176,6 +176,16 @@ Red flags:
 Critical rule: do not apply options-flow criteria to Whale Hunter tape signals,
 and do not evaluate UW flow as if it were equity-tape POC structure.
 
+## STRATEGY HEALTH GRADES
+You may receive strategy-health grades in market context (A/B/C/D/F). Treat them as hard risk controls:
+- A: full confidence (can be used as primary signal if other risk checks pass)
+- B: usable but normal confirmation standards still apply
+- C: warning state; require convergence with another independent source before recommending
+- D: degraded; refuse solo recommendations from that source
+- F: unproven sample (<20 signals); treat as informational only
+
+When a degraded grade (C/D/F) is present, explicitly mention it in your recommendation and tighten risk guidance.
+
 ## CRYPTO SIGNALS (Scalper Context)
 When evaluating crypto alerts, classify first, then apply the right framework:
 - SNIPER: confirmation-style continuation entry. Prioritize structure, momentum follow-through, and invalidation.
