@@ -1490,6 +1490,8 @@ async def price_data(
     end: Optional[str] = None,
     limit: int = Query(5000, ge=1, le=100000),
 ):
+    timeframe_norm = (timeframe or "D").strip().upper()
+    is_daily = timeframe_norm in {"D", "1D", "DAILY"}
     start_dt, end_dt = window_bounds(days=days, start=start, end=end)
     rows = await fetch_rows(
         """
@@ -1502,27 +1504,73 @@ async def price_data(
         ORDER BY timestamp ASC
         LIMIT $5
         """,
-        [ticker.upper(), timeframe, start_dt, end_dt, limit],
+        [ticker.upper(), timeframe_norm, start_dt, end_dt, limit],
     )
     payload_rows = []
-    for row in rows:
-        ts = row.get("timestamp")
-        iso_ts = ts.isoformat() if isinstance(ts, datetime) else str(ts)
-        day = ts.date().isoformat() if isinstance(ts, datetime) else iso_ts[:10]
-        payload_rows.append(
-            {
-                "date": day,
-                "timestamp": iso_ts,
-                "open": _as_float(row.get("open")),
-                "high": _as_float(row.get("high")),
-                "low": _as_float(row.get("low")),
-                "close": _as_float(row.get("close")),
-                "volume": _as_float(row.get("volume")),
-            }
-        )
+    if is_daily:
+        daily = {}
+        for row in rows:
+            ts = row.get("timestamp")
+            if not isinstance(ts, datetime):
+                continue
+            day = ts.date().isoformat()
+            open_px = _as_float(row.get("open"))
+            high_px = _as_float(row.get("high"))
+            low_px = _as_float(row.get("low"))
+            close_px = _as_float(row.get("close"))
+            volume = _as_float(row.get("volume")) or 0.0
+
+            existing = daily.get(day)
+            if not existing:
+                daily[day] = {
+                    "date": day,
+                    "timestamp": ts.isoformat(),
+                    "open": open_px,
+                    "high": high_px,
+                    "low": low_px,
+                    "close": close_px,
+                    "volume": volume,
+                    "_first_ts": ts,
+                    "_last_ts": ts,
+                }
+                continue
+
+            if ts < existing["_first_ts"] and open_px is not None:
+                existing["open"] = open_px
+                existing["_first_ts"] = ts
+            if ts > existing["_last_ts"] and close_px is not None:
+                existing["close"] = close_px
+                existing["timestamp"] = ts.isoformat()
+                existing["_last_ts"] = ts
+            if high_px is not None:
+                existing["high"] = high_px if existing["high"] is None else max(existing["high"], high_px)
+            if low_px is not None:
+                existing["low"] = low_px if existing["low"] is None else min(existing["low"], low_px)
+            existing["volume"] = (existing.get("volume") or 0.0) + volume
+
+        payload_rows = [daily[d] for d in sorted(daily.keys())]
+        for row in payload_rows:
+            row.pop("_first_ts", None)
+            row.pop("_last_ts", None)
+    else:
+        for row in rows:
+            ts = row.get("timestamp")
+            iso_ts = ts.isoformat() if isinstance(ts, datetime) else str(ts)
+            day = ts.date().isoformat() if isinstance(ts, datetime) else iso_ts[:10]
+            payload_rows.append(
+                {
+                    "date": day,
+                    "timestamp": iso_ts,
+                    "open": _as_float(row.get("open")),
+                    "high": _as_float(row.get("high")),
+                    "low": _as_float(row.get("low")),
+                    "close": _as_float(row.get("close")),
+                    "volume": _as_float(row.get("volume")),
+                }
+            )
     return {
         "ticker": ticker.upper(),
-        "timeframe": timeframe,
+        "timeframe": timeframe_norm,
         "rows": payload_rows,
         "count": len(payload_rows),
     }
