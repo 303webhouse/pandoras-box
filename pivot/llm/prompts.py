@@ -340,6 +340,29 @@ def build_flow_analysis_prompt(flow_data: str, bias_state: str) -> str:
     )
 
 
+def build_whale_hunter_prompt(signal_text: str, market_context: str) -> str:
+    """
+    Analyze Whale Hunter equity-tape signals with proper classification.
+
+    Whale Hunter signals are not options flow; this prompt keeps the model on
+    the tape/POC framework while still using options chain context for trade
+    structure suggestions.
+    """
+    return (
+        "A Whale Hunter signal was detected. Evaluate it using the WHALE HUNTER "
+        "framework in your system instructions.\n\n"
+        "Required structure:\n"
+        "a) Is POC near known support/resistance or key moving averages?\n"
+        "b) Does Whale lean align with current composite bias?\n"
+        "c) What is the nearest options strike to POC?\n"
+        "d) Suggest a defined-risk structure based on bias + IV context.\n"
+        "e) Conviction: HIGH / MODERATE / WATCH with a short reason.\n\n"
+        "Do NOT treat Whale Hunter as options flow. It is equity tape context.\n\n"
+        f"SIGNAL:\n{signal_text}\n\n"
+        f"MARKET CONTEXT:\n{market_context}"
+    )
+
+
 def build_breakout_checkin_prompt(account_data: str) -> str:
     """
     Breakout prop account status check.
