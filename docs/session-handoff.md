@@ -46,3 +46,7 @@
 - Journal check showed clean startup with Discord gateway connection and scheduler jobs loaded; no import/runtime crashes from this deployment.
 - Noted deploy warning during rsync: `cannot delete non-empty directory: tools` (deployment still completed successfully).
 - Scope note: this VPS runs pivot bot/collector from `/opt/pivot`; backend API persistence changes (`backend/webhooks`, `backend/database`, `backend/scheduler`) are expected to deploy via the backend hosting path (Railway), not this host.
+- Railway health checks after push:
+  - `GET /health` returned `status=healthy`, `redis=ok`, `postgres=connected` at `2026-02-19 14:02:36 EST`.
+  - `GET /api/signals/debug` returned matching active counts (`redis.count=26`, `postgresql.active_count=26`).
+  - `GET /api/analytics/schema-status` returned non-zero persistence tables (`signals.rows=26`, `signal_outcomes.rows=23`, `factor_history.rows=48`, `price_history.rows=98396`).
