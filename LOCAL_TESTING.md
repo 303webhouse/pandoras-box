@@ -1,320 +1,126 @@
-# 🧪 Local Testing Guide
+# Pivot — Local Development Guide
 
-Follow these steps to get Pandora's Box running locally with test data.
+**Last Updated:** February 19, 2026
 
----
-
-## Step 1: Install Python Dependencies
-
-Open Command Prompt in `C:\trading-hub\backend\` (or wherever you extracted the files):
-
-```bash
-pip install -r requirements.txt --break-system-packages
-```
-
-**What this installs:**
-- FastAPI (web server)
-- Uvicorn (ASGI server)
-- Redis client
-- PostgreSQL client
-- WebSocket support
-- Everything else needed
-
-**Expected time:** 2-3 minutes
+How to run parts of Pivot locally for development and testing. The live system runs on Railway (backend) + VPS (bot), but you can run the backend locally for faster iteration.
 
 ---
 
-## Step 2: Set Up Databases (Simplified for Testing)
+## Prerequisites
 
-For local testing, you have two options:
-
-### Option A: Use Free Cloud Databases (Easiest)
-
-**Redis via Upstash (30 seconds setup):**
-1. Go to https://console.upstash.com/redis
-2. Click "Create Database"
-3. Name it "pandoras-box-test"
-4. Copy the connection details
-
-**PostgreSQL via Supabase (1 minute setup):**
-1. Go to https://supabase.com/dashboard
-2. Click "New Project"
-3. Name it "pandoras-box-test"
-4. Wait for it to initialize
-5. Go to Settings → Database → Connection String
-6. Copy the URI
-
-### Option B: Install Locally (More Setup)
-
-**Redis:**
-```bash
-# Windows: Use WSL or download from https://github.com/microsoftarchive/redis/releases
-# OR use Docker:
-docker run -d -p 6379:6379 redis:alpine
-```
-
-**PostgreSQL:**
-```bash
-# Download from https://www.postgresql.org/download/windows/
-# OR use Docker:
-docker run -d -p 5432:5432 -e POSTGRES_PASSWORD=postgres postgres:15
-```
+- Python 3.12+
+- Git access to `303webhouse/pandoras-box`
+- `.env` file with required credentials (see `pivot/.env.example`)
 
 ---
 
-## Step 3: Configure Environment
+## Running Backend Locally
 
-1. Go to `C:\trading-hub\config\`
-2. Copy `.env.example` to `.env`
-3. Edit `.env`:
+The backend API can run locally and connect to the Railway PostgreSQL and Upstash Redis.
 
-**If using cloud databases (Option A):**
+```bash
+git clone https://github.com/303webhouse/pandoras-box.git
+cd pandoras-box/backend
+pip install -r ../requirements.txt --break-system-packages
+```
+
+Create a `.env` in the `config/` directory with the Railway database credentials (find these in Railway dashboard → fabulous-essence → pandoras-box service → Variables):
+
 ```env
-# Redis (from Upstash)
-REDIS_HOST=grizzly-bear-12345.upstash.io
-REDIS_PORT=6379
-
-# PostgreSQL (from Supabase)
-DB_HOST=db.abcdefghijk.supabase.co
-DB_PORT=5432
-DB_NAME=postgres
+DB_HOST=<railway-postgres-host>
+DB_PORT=<railway-postgres-port>
+DB_NAME=railway
 DB_USER=postgres
-DB_PASSWORD=your-supabase-password
+DB_PASSWORD=<railway-postgres-password>
+REDIS_URL=rediss://<upstash-redis-url>
 ```
 
-**If using local databases (Option B):**
-```env
-REDIS_HOST=localhost
-REDIS_PORT=6379
+**Important:** Use the `or` pattern if modifying any env var loading:
+```python
+# CORRECT
+DB_HOST = os.getenv("DB_HOST") or "localhost"
 
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=pandoras_box
-DB_USER=postgres
-DB_PASSWORD=postgres
+# WRONG
+DB_HOST = os.getenv("DB_HOST", "localhost")
 ```
 
-Save and close.
-
----
-
-## Step 4: Initialize Database
-
-Open Command Prompt in `C:\trading-hub\backend\`:
-
-```bash
-python -c "from database.postgres_client import init_database; import asyncio; asyncio.run(init_database())"
-```
-
-**What this does:**
-- Creates `signals` table
-- Creates `positions` table
-- Creates `tick_history` table
-- Creates `bias_history` table
-
-**Expected output:**
-```
-✅ Database schema initialized
-```
-
-If you get an error, double-check your `.env` credentials.
-
----
-
-## Step 5: Start Backend
-
-In Command Prompt (`C:\trading-hub\backend\`):
-
+Start the backend:
 ```bash
 python main.py
+# API runs on http://localhost:8000
 ```
 
-**Expected output:**
+Test it:
+```bash
+curl http://localhost:8000/health
 ```
-🚀 Pandora's Box backend starting...
-✅ Database connections established
-✅ Pandora's Box is live
-INFO:     Uvicorn running on http://0.0.0.0:8000
-```
-
-**Leave this terminal window open.** Backend is now running.
 
 ---
 
-## Step 6: Start Frontend
-
-Open a **NEW** Command Prompt window in `C:\trading-hub\frontend\`:
+## Running Frontend Locally
 
 ```bash
+cd frontend
 python -m http.server 3000
+# Open http://localhost:3000
 ```
 
-**Expected output:**
-```
-Serving HTTP on 0.0.0.0 port 3000 (http://0.0.0.0:3000/) ...
-```
-
-**Leave this terminal window open too.**
+The frontend connects to the backend via WebSocket. Update the API URL in `frontend/app.js` if pointing at localhost instead of Railway.
 
 ---
 
-## Step 7: Open Dashboard
+## Testing Webhooks Locally
 
-Open your web browser and go to:
+To receive TradingView webhooks locally, you'd need to expose port 8000 via a tunnel (ngrok, cloudflared, etc.). For most development, it's easier to:
 
-```
-http://localhost:3000
-```
-
-**What you should see:**
-- Dark teal dashboard loads
-- "Live" connection status (green dot)
-- Bias indicators show "Loading..."
-- Signal columns are empty
-
-**This is normal!** No data yet.
-
----
-
-## Step 8: Populate Test Data
-
-Open a **THIRD** Command Prompt window in `C:\trading-hub\backend\`:
+1. Make changes locally
+2. Push to `main` (triggers Railway deploy)
+3. Test against the live Railway URL
 
 ```bash
-python test_signals.py
-```
-
-**You'll see a menu:**
-```
-Choose an option:
-1. Send all test signals (populate dashboard)
-2. Send one random signal (test refresh)
-3. Set test bias data
-4. Do everything (signals + bias)
-
-Enter choice (1-4):
-```
-
-**Type `4` and press Enter** (this does everything).
-
-**Expected output:**
-```
-✅ Daily bias set: TORO_MINOR (Wide TICK range)
-✅ Weekly bias set: TORO_MAJOR (Strong breadth)
-
-📊 Pandora's Box - Test Signal Generator
-============================================================
-Sending 11 test signals to backend...
-
-✅ AAPL LONG - APIS_CALL (27.3ms)
-✅ MSFT LONG - APIS_CALL (15.8ms)
-✅ TSLA SHORT - KODIAK_CALL (18.2ms)
-✅ NVDA SHORT - KODIAK_CALL (16.5ms)
-✅ GOOGL LONG - BULLISH_TRADE (14.9ms)
-...
-============================================================
-✅ Test signals sent! Check your dashboard.
-============================================================
+# Test webhook format
+curl -X POST http://localhost:8000/webhook/tradingview \
+  -H "Content-Type: application/json" \
+  -d '{"ticker":"SPY","strategy":"test","direction":"LONG","timeframe":"15m"}'
 ```
 
 ---
 
-## Step 9: Watch the Magic Happen
+## Running the Discord Bot Locally
 
-**Go back to your browser (http://localhost:3000)**
+⚠️ **Only do this if the VPS bot is stopped first.** Two bot instances cause duplicate Discord gateway connections.
 
-You should now see:
-
-✅ **Bias Indicators Updated:**
-- Daily Bias: TORO MINOR (green)
-- Weekly Bias: TORO MAJOR (green)
-
-✅ **Equity Column Populated:**
-- ~8 signals showing
-- Mix of APIS CALL, KODIAK CALL, BULLISH TRADE, BEAR CALL
-- Each with Entry/Stop/Target prices
-
-✅ **Crypto Column Populated:**
-- BTC, ETH, SOL signals
-
-**Try Interacting:**
-- Click **✕ Dismiss** on a signal → it disappears
-- Click **✓ Select** on a signal → moves to "Open Positions" section
-- Click **↻ Refresh** → re-queries backend
-
----
-
-## Step 10: Test Multi-Device Sync
-
-**Open the dashboard on another device:**
-
-1. **On your laptop:** Open http://localhost:3000
-2. **On your phone:** 
-   - Connect phone to same WiFi
-   - Find your computer's local IP (run `ipconfig` in Command Prompt, look for IPv4)
-   - Open http://YOUR-IP:3000 on phone
-
-**Now dismiss or select a signal on one device** → Watch it update on all devices instantly via WebSocket!
-
----
-
-## Troubleshooting
-
-### "Module 'redis' has no attribute 'asyncio'"
-Your Redis package is outdated. Run:
 ```bash
-pip install redis[hiredis]==5.0.1 --break-system-packages --force-reinstall
+ssh root@188.245.250.2 "systemctl stop pivot-bot"  # Stop VPS bot first
+
+cd pandoras-box
+python run_discord_bot.py
 ```
 
-### "Connection refused" to Redis/PostgreSQL
-- Check `.env` credentials
-- Verify databases are running (cloud or local)
-- Test connection manually
-
-### Backend crashes on startup
-- Check all dependencies installed: `pip list | findstr fastapi`
-- Look at error message - usually missing package or wrong `.env` value
-
-### No signals appear after running test script
-- Check backend terminal for errors
-- Verify backend is running on port 8000
-- Try running test script again
-
-### WebSocket shows "Reconnecting..."
-- Backend crashed or not started
-- Check terminal running `main.py` for errors
-- Restart backend
+When done, restart the VPS bot:
+```bash
+ssh root@188.245.250.2 "systemctl start pivot-bot"
+```
 
 ---
 
-## What To Do Next
+## What NOT to Do Locally
 
-**If everything works:**
-1. ✅ Test selecting/dismissing signals
-2. ✅ Test refresh button
-3. ✅ Test timeframe selector (Daily/Weekly/Monthly)
-4. ✅ Test on multiple devices
-5. ✅ Check Open Positions section
-
-**When ready for production:**
-1. Deploy backend to Railway
-2. Deploy frontend to Vercel
-3. Configure TradingView webhooks with production URL
-4. Start receiving real trading signals!
+- **Don't run the Discord bot while VPS bot is running** — duplicate gateway connections
+- **Don't use `os.getenv("VAR", default)`** — use `os.getenv("VAR") or default` instead
+- **Don't edit files directly on VPS** — always commit to git and `git pull` on VPS
+- **Don't create a separate Postgres database** — use the Railway instance for consistency
 
 ---
 
-## Running It Again Later
+## Development Workflow
 
-**Every time you want to use Pandora's Box:**
+The recommended workflow is:
 
-1. Open two Command Prompts
-2. Terminal 1: `cd C:\trading-hub\backend` → `python main.py`
-3. Terminal 2: `cd C:\trading-hub\frontend` → `python -m http.server 3000`
-4. Open browser to http://localhost:3000
-
-**OR just double-click `start.bat`** (does all of this automatically)
-
----
-
-**You're ready to test! Start with Step 1.**
+1. **Discuss architecture** in Claude.ai (this is the planning layer)
+2. **Write a markdown brief** describing exactly what to build
+3. **Hand brief to Claude Code (Codex)** for implementation
+4. **Test locally** if needed (backend only)
+5. **Push to main** → Railway auto-deploys backend
+6. **SSH to VPS** → `git pull && systemctl restart pivot-bot` for bot changes
+7. **Verify** via health endpoint and Discord interaction
