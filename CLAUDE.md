@@ -1,176 +1,182 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code (claude.ai/code) and Claude.ai when working with this repository.
+
+> **Read `PROJECT_RULES.md` first** — it contains the prime directive, bias hierarchy, and workflow rules.
+> **Read `DEVELOPMENT_STATUS.md`** — it has the Phase 2 roadmap, what's built, what's next, and known issues.
 
 ## Project Overview
 
-Pandora's Box (codename **Pivot**): A real-time trading signal dashboard and AI-powered Discord trading assistant. The system processes TradingView alerts through automated strategies and bias filters, broadcasts trade recommendations via WebSocket, and provides interactive market analysis through a Discord bot.
+**Pivot** is an AI-powered trading assistant built around a Discord bot that provides real-time market analysis, signal evaluation, and trade recommendations for options swing trading. The system combines automated data collection (20+ macro/technical/flow factors), TradingView webhook integration, Unusual Whales flow data, dark pool detection, and LLM-powered analysis to deliver actionable trading intelligence.
 
-## Deployment Architecture
+The project was originally called "Pandora's Box" — the name persists in some URLs, database names, and older code. **Pivot** is the current name for the overall system and the Discord bot personality.
 
-### Production Infrastructure
-| Component | Platform | Details |
-|-----------|----------|---------|
-| **Backend API** | Railway (fabulous-essence) | FastAPI + WebSocket, auto-deploys from GitHub `main` |
-| **PostgreSQL** | Railway (fabulous-essence) | Same project as backend, linked via `${{Postgres.*}}` references |
-| **Discord Bot** | VPS (PIVOT-EU, 188.245.250.2) | Hetzner, runs as `pivot-bot.service` systemd unit |
-| **GitHub Repo** | 303webhouse/pandoras-box | Single `main` branch, pushes trigger Railway deploy |
+## Architecture
 
-### Railway Service (pandoras-box)
-- **URL**: `pandoras-box-production.up.railway.app`
-- **Health**: `GET /health` → returns postgres/redis/websocket status
-- **Procfile**: `web: sh -c "cd backend && python -m uvicorn main:app --host 0.0.0.0 --port $PORT"`
-- **Runtime**: Python 3.12.8
-- **Region**: us-west2
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                     THREE DEPLOYMENT TARGETS                        │
+├──────────────────────┬──────────────────────┬───────────────────────┤
+│   Railway (Backend)  │   VPS (Discord Bot)  │  Frontend (Static)    │
+│   FastAPI + Postgres │   bot.py + scheduler │  Dashboard + Charts   │
+│   Auto-deploys from  │   /opt/pivot on VPS  │  analytics.js         │
+│   main branch push   │   systemd services   │  Served from VPS      │
+└──────────┬───────────┴──────────┬───────────┴───────────┬───────────┘
+           │                      │                       │
+           ▼                      ▼                       ▼
+   pandoras-box-               188.245.250.2           Browser UI
+   production.up.             (Hetzner, EU)            (port 3000)
+   railway.app
+```
 
-### VPS Discord Bot (PIVOT-EU)
-- **Host**: root@188.245.250.2
-- **Code location**: `/opt/pandoras-box/`
-- **Service**: `systemctl status pivot-bot` / `journalctl -u pivot-bot -f`
-- **Deploy**: `cd /opt/pandoras-box && git pull && systemctl restart pivot-bot`
-- **Intents**: Full (members + message_content + presences enabled in Discord Developer Portal)
+### Backend (Railway — `backend/`)
+- **FastAPI** app in `main.py` — all API routers, webhooks, WebSocket
+- **PostgreSQL** (Railway, same project `fabulous-essence`) — signals, trades, factor_history, analytics tables. Linked via `${{Postgres.*}}` references.
+- **Redis** (Upstash) — real-time cache for bias state, signals. Requires SSL (`rediss://`).
+- Auto-deploys on push to `main` branch
+- Key endpoints: `/webhook/tradingview`, `/api/bias/*`, `/api/analytics/*`, `/health`
+- Health check: `curl https://pandoras-box-production.up.railway.app/health`
 
-### Environment Variables
+### Discord Bot (VPS — `pivot/` + `backend/discord_bridge/`)
+- **VPS**: Hetzner PIVOT-EU at `188.245.250.2`, code at `/opt/pivot/`
+- **Two systemd services**: `pivot-bot.service` (Discord bot) + `pivot-collector.service` (data collectors)
+- **`backend/discord_bridge/bot.py`** — The actual running bot (3,466 lines), lives on VPS at `/opt/pivot/discord_bridge/bot.py`
+- **LLM agent** — Gemini Pro via OpenRouter for market analysis, screenshot parsing, trade evaluation
+- **Playbook** — `pivot/llm/playbook_v2.1.md` contains trading rules, risk parameters, account details
+- **Intents**: Full (members, message_content, presences, guilds)
+- Deploy: `ssh root@188.245.250.2` → `cd /opt/pivot && git pull && systemctl restart pivot-bot`
 
-Railway variables (pandoras-box service → Variables tab):
-- `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` → linked via `${{Postgres.*}}` references
+### Frontend (`frontend/`)
+- `index.html` + `app.js` — Main dashboard (bias cards, signals, charts)
+- `analytics.js` — Analytics UI (6 tabs: Dashboard, Trade Journal, Signal Explorer, Factor Lab, Backtest, Risk)
+- PWA-installable, dark teal theme with dynamic accent colors based on bias level
+
+## Key Subsystems
+
+### Bias Engine (`backend/bias_engine/`)
+20+ factors across macro, technical, flow, and breadth categories. Each factor scores -2 to +2. Composite weighted average maps to 5-level system:
+- **URSA MAJOR** (strongly bearish) → **URSA MINOR** → **NEUTRAL** → **TORO MINOR** → **TORO MAJOR** (strongly bullish)
+
+Factor sources: yfinance (SPY technicals, VIX, sector data), FRED (credit spreads, yield curve, claims), TradingView webhooks (TICK breadth, circuit breaker), UW (options flow, dark pool).
+
+### Signal Pipeline
+```
+TradingView Alert / UW Flow / Whale Hunter → POST /webhook/* →
+Strategy Validation → Bias Filter → Signal Scorer → PostgreSQL + Redis →
+WebSocket Broadcast + Discord Alert
+```
+
+### Whale Hunter (Dark Pool Detection)
+PineScript indicator on TradingView detects institutional absorption patterns via volume footprint analysis (consecutive bars with matched POC levels). Sends webhooks to Pivot for LLM evaluation.
+
+### Circuit Breaker (`backend/webhooks/circuit_breaker.py`)
+TradingView alerts trigger automatic bias overrides during extreme market events. Adjusts scoring modifiers and bias caps/floors. Triggers: `spy_down_1pct`, `spy_down_2pct`, `vix_spike`, `vix_extreme`.
+
+### UW Flow Parser (`backend/discord_bridge/uw/`)
+Monitors Unusual Whales Premium Bot Discord channels, parses flow alerts into structured signals. Filters: min DTE 7, max DTE 180, min premium $50K, min score 80.
+
+### Analytics System (`backend/analytics/`)
+See `DEVELOPMENT_STATUS.md` for full details. Three phases deployed:
+- Phase 1: Data collection schema (signals, trades, factors, prices)
+- Phase 2: API endpoints (stats, health, performance, backtesting)
+- Phase 3: 6-tab UI (Dashboard, Trade Journal, Signal Explorer, Factor Lab, Backtest, Risk)
+
+### Collectors (`pivot/collectors/`)
+Scheduled data fetchers for each factor: VIX term structure, credit spreads, sector rotation, TICK breadth, market breadth, dollar smile, CAPE yield, Savita indicator. Run on cron via `scheduler/cron_runner.py`.
+
+### Monitors (`pivot/monitors/`)
+Alert monitors: bias shift, CTA zones, factor velocity, volume anomaly, earnings calendar, economic calendar, DEFCON behavioral layer.
+
+## Commands
+
+```bash
+# Backend (Railway — automatic on push)
+git push origin main
+
+# Verify backend
+curl https://pandoras-box-production.up.railway.app/health
+
+# Deploy Discord bot (VPS — manual)
+ssh root@188.245.250.2
+cd /opt/pivot && git pull origin main
+systemctl restart pivot-bot
+journalctl -u pivot-bot -f  # verify startup
+
+# Both services together
+systemctl status pivot-bot pivot-collector
+
+# Local development
+cd backend && python main.py          # API on port 8000
+cd frontend && python -m http.server 3000  # UI on port 3000
+```
+
+## Environment Variables
+
+### Railway (pandoras-box service)
+- `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` → linked via `${{Postgres.*}}`
 - `DISCORD_BOT_TOKEN`, `DISCORD_TOKEN`, `DISCORD_FLOW_CHANNEL_ID`, `DISCORD_WEBHOOK_SIGNALS`
 - `COINALYZE_API_KEY`, `CRYPTO_BINANCE_PERP_HTTP_PROXY`
 - `FRED_API_KEY`, `GEMINI_API_KEY`, `PIVOT_API_KEY`
 
-**Important pattern for env vars** — always use `or` instead of default parameter to handle empty strings:
+### VPS (`/opt/pivot/.env`)
+See `pivot/.env.example` for full list. Key vars: `DISCORD_BOT_TOKEN`, `PANDORA_API_URL`, `PIVOT_API_KEY`, `LLM_API_KEY`, `FRED_API_KEY`, UW channel IDs, Discord webhook URLs.
+
+**Critical pattern for env vars** — always use `or` to handle Railway empty strings:
 ```python
-# CORRECT — handles empty string from Railway references
+# CORRECT
 DB_HOST = os.getenv("DB_HOST") or "localhost"
 DB_PORT = int(os.getenv("DB_PORT") or 5432)
 
-# WRONG — os.getenv returns '' (not None) when var exists but is empty
-DB_HOST = os.getenv("DB_HOST", "localhost")  # returns '' not 'localhost'
+# WRONG — os.getenv returns '' not None when var exists but is empty
+DB_HOST = os.getenv("DB_HOST", "localhost")  # returns ''
 DB_PORT = int(os.getenv("DB_PORT", 5432))    # int('') crashes
 ```
 
-## Commands
+## Adding Components
 
-### Deploy Backend (Railway — automatic)
-```bash
-# Push to main triggers auto-deploy
-git add . && git commit -m "feat: description" && git push origin main
-```
+### New Factor
+1. Create collector in `pivot/collectors/factor_[name].py`
+2. Create bias filter in `backend/bias_filters/[name].py`
+3. Register in `backend/bias_engine/composite.py` with weight and timeframe
+4. Add to scheduler in `pivot/scheduler/cron_runner.py`
+5. Add knowledgebase entry in `data/knowledgebase.json`
 
-### Deploy Discord Bot (VPS — manual)
-```bash
-ssh root@188.245.250.2
-cd /opt/pandoras-box && git pull origin main
-systemctl restart pivot-bot
-journalctl -u pivot-bot -f  # verify startup
-```
+### New Signal Source
+1. Create webhook handler in `backend/webhooks/[name].py`
+2. Register route in `backend/main.py`
+3. Add signal type to scoring pipeline
+4. Add evaluation template in `pivot/llm/prompts.py`
+5. Update Discord alert formatting in bot
 
-### Local Development
-```bash
-# Start backend
-cd backend && python main.py
+### New Analytics Feature
+1. Add database tables/queries in `backend/analytics/db.py`
+2. Add computation logic in `backend/analytics/computations.py`
+3. Add API endpoint in `backend/api/analytics.py`
+4. Add UI tab/component in `frontend/analytics.js`
 
-# Start frontend (separate terminal)
-cd frontend && python -m http.server 3000
+## Key Files for Context
 
-# Run Discord bot locally
-python run_discord_bot.py
+| File | Purpose |
+|------|---------|
+| `pivot/llm/prompts.py` | System prompts — Pivot's personality, analysis instructions, all behavioral rules |
+| `pivot/llm/playbook_v2.1.md` | Trading rules, risk parameters, account balances, strategy specs |
+| `backend/bias_engine/composite.py` | Factor weighting, composite bias calculation |
+| `backend/discord_bridge/bot.py` | Discord bot main file (3,466 lines — VPS copy is the live one) |
+| `backend/webhooks/tradingview.py` | TradingView webhook receiver |
+| `backend/webhooks/circuit_breaker.py` | Circuit breaker logic |
+| `backend/discord_bridge/uw/parser.py` | UW flow message parser |
+| `backend/discord_bridge/uw/aggregator.py` | UW flow aggregation and scoring |
+| `backend/discord_bridge/whale_parser.py` | Whale Hunter signal parser |
+| `pivot/scheduler/cron_runner.py` | Heartbeat scheduler for all monitors |
+| `pivot/deploy.sh` | VPS deployment script (rsync + systemd setup) |
+| `frontend/analytics.js` | Analytics UI (6 tabs) |
+| `DEVELOPMENT_STATUS.md` | Phase roadmap, what's built, what's planned |
 
-# Windows quick start (backend + frontend + browser)
-start.bat
-```
+## Nick's Working Style
 
-### Database
-```python
-# Initialize schema
-from backend.database.postgres_client import init_database
-import asyncio
-asyncio.run(init_database())
-```
-
-## Architecture
-
-### Signal Flow
-```
-TradingView Alert → POST /webhook/tradingview → Strategy Validator →
-Bias Filter → Signal Scorer → Redis Cache + PostgreSQL (async) →
-WebSocket Broadcast → All Devices + Discord
-```
-
-### Two Applications
-- **Main Trading Hub** (`backend/`, `frontend/`): Equity signals, bias filters, TradingView webhooks, REST API
-- **Pivot Discord Bot** (`pivot/`, `run_discord_bot.py`): AI-powered trading assistant with market analysis
-
-### Backend Structure (`backend/`)
-| Directory | Purpose |
-|-----------|---------|
-| `webhooks/` | TradingView receivers, circuit breaker |
-| `strategies/` | Signal validators (triple_line, exhaustion, ursa_taurus) |
-| `bias_filters/` | Macro alignment (tick_breadth, macro_confluence, btc_bottom_signals, dollar_smile) |
-| `scoring/` | Signal classification (APIS/KODIAK/BULLISH/BEAR) |
-| `database/` | Redis (real-time cache) + PostgreSQL (permanent logs) |
-| `websocket/` | Multi-device broadcaster |
-| `api/` | REST routers (positions, scanner, bias, btc_signals, options, flow) |
-| `scanners/` | Market scanners (hunter, hybrid, cta) |
-| `alerts/` | Black swan detection, earnings calendar |
-| `discord_bridge/` | Unusual Whales data bridge |
-
-### Pivot Discord Bot (`pivot/`)
-| Directory | Purpose |
-|-----------|---------|
-| `bot.py` | Bot entry point, Discord gateway connection |
-| `llm/` | LLM integration (Gemini) for market analysis chat |
-| `collectors/` | Market data collectors |
-| `monitors/` | Market condition monitors |
-| `notifications/` | Discord notification handlers |
-| `scheduler/` | Scheduled tasks (market hours, data refresh) |
-
-### Dual Database Pattern
-- **Redis**: Real-time state (<2ms), signals expire in 3600s, bias in 86400s
-- **PostgreSQL**: Permanent logging for backtesting; tables: signals, positions, options_positions, alerts, btc_sessions
-
-### WebSocket Messages
-```python
-{"type": "NEW_SIGNAL", ...}
-{"type": "BIAS_UPDATE", ...}
-{"type": "POSITION_UPDATE", ...}
-{"type": "SIGNAL_PRIORITY_UPDATE", ...}
-```
-
-## Adding New Components
-
-### New Strategy
-1. Create `backend/strategies/[name].py`
-2. Import and register in `backend/webhooks/tradingview.py`
-3. Document in `docs/approved-strategies/`
-4. Add knowledgebase entry
-
-### New Bias Filter
-1. Create `backend/bias_filters/[name].py`
-2. Add to signal processor pipeline
-3. Document in `docs/approved-bias-indicators/`
-4. Add knowledgebase entry
-
-### New Knowledgebase Entry
-Every indicator, signal, strategy, filter, or scanner **must** have a corresponding entry in `data/knowledgebase.json`:
-```json
-{
-  "id": "term-slug-lowercase",
-  "term": "Display Term Name",
-  "category": "Bias Indicators|Signals|Strategies|Scanners|...",
-  "shortDescription": "Max 500 words for popup",
-  "fullDescription": "Full markdown documentation",
-  "relatedTerms": ["related-term-id"]
-}
-```
-Reload cache: `POST /api/knowledgebase/reload`
-
-## Key API Endpoints
-
-- `GET /health` — Service health check (postgres, redis, websocket status)
-- `POST /webhook/tradingview` — Receive TradingView alerts
-- `GET /api/bias/{timeframe}` — Get bias level (DAILY/WEEKLY/MONTHLY)
-- `GET /api/positions` — Open positions
-- `GET /api/scanner` — Market scanner
-- `GET /api/btc-signals` — BTC macro signals
-- `WS /ws` — WebSocket connection for real-time updates
+- Has ADHD — prefers step-by-step guidance broken into manageable chunks
+- Non-engineer background — explain technical decisions simply
+- Uses **Claude.ai** for architecture planning, strategic discussions, and writing Codex briefs
+- Uses **Claude Code (Codex)** for implementation — receives briefs as markdown files
+- Workflow: discuss in Claude.ai → write brief → hand to Codex → deploy → verify
+- Strongly opinionated trader — bearish on macro/Trump admin, bullish on AI disruption. Pivot should challenge these biases.
