@@ -1,82 +1,62 @@
-# Pandora's Box - To-Do List
+# Pivot — Current Priorities
 
-## Aesthetic & Quality of Life Improvements
-**No backend structure changes required**
+**Last Updated:** February 19, 2026
 
-### Custom Signal Icons
-- [ ] **APIS CALL** icon
-  - Design: Bright lime green (#7CFF6B)
-  - Theme: Bullish/upward momentum
-  - Style: Dark teal aesthetic, modern, scalable SVG
-  
-- [ ] **BULLISH TRADE** icon
-  - Design: Darker green (#4CAF50)
-  - Theme: Moderate bullish
-  - Style: Matches app palette
-  
-- [ ] **KODIAK CALL** icon
-  - Design: Bright orange (#FF6B35)
-  - Theme: Bearish/downward momentum
-  - Style: Bold, powerful bear symbolism
-  
-- [ ] **BEAR CALL** icon
-  - Design: Darker orange (#FF8C42)
-  - Theme: Moderate bearish
-  - Style: Subtle bear theme
-
-**Implementation**: Drop SVG files into `frontend/assets/icons/` and reference in CSS
+Prioritized list of what needs building, fixing, or improving. For full phase details, see `DEVELOPMENT_STATUS.md`.
 
 ---
 
-### Pandora's Box Logo
-- [ ] Custom logo design
-  - Color palette: Dark teal + lime/orange accents
-  - Style: Modern, tech-forward
-  - Formats needed: SVG (scalable), PNG (192x192, 512x512 for PWA)
-  - Placement: Header, PWA icon, favicon
+## 🔴 Critical Fixes
 
-**Implementation**: Replace placeholder in `frontend/index.html` header
+- [ ] **SPY price feed** — yfinance returns split-unadjusted data (~$228 vs ~$686). Corrupts 9 EMA and 200 SMA distance factors. Codex brief deployed.
+- [ ] **Signal persistence** — Signals may write to Redis but silently fail PostgreSQL insert. Investigate if analytics tables show zero signal rows.
 
 ---
 
-### UI Polish
-- [ ] Add loading skeletons for signal cards
-- [ ] Smooth scroll animations
-- [ ] Toast notifications for signal actions
-- [ ] Confetti animation on trade selection (optional fun)
-- [ ] Dark mode toggle (currently fixed dark theme)
-- [ ] Customizable accent colors in settings
+## 🟠 High Priority (Next Up)
+
+- [ ] **Phase 2F: UW Dashboard API scraping** — Replace manual screenshot analysis with structured API calls to Unusual Whales dashboard. Investigate UW API access. Brief not yet written.
+- [ ] **Phase 2G: Auto-Scout** — Screen incoming UW flow + Alpha Feed ideas automatically, identify setups matching Playbook criteria, post formatted picks to Discord. Depends on Phase 2F.
+- [ ] **Factor freshness in EOD brief** — Show which factors are fresh vs stale in daily summaries. Codex brief deployed.
+- [ ] **Convergence summary in EOD brief** — Highlight when multiple independent sources agree. Codex brief deployed.
 
 ---
 
-### Mobile Optimization
-- [ ] Haptic feedback on button presses (iOS/Android)
-- [ ] Swipe-to-dismiss gesture for signals
-- [ ] Pull-to-refresh on signal lists
-- [ ] Bottom navigation bar for easier thumb reach
-- [ ] Landscape mode optimization for tablets
+## 🟡 Medium Priority
+
+- [ ] **Robinhood trade import** — CSV parser + signal matching to backfill historical trades into analytics. Codex brief deployed.
+- [ ] **UW screenshot scheduler** — Auto-request screenshots at 10AM, 3PM, 4:05PM ET. Codex brief deployed.
+- [ ] **DXY macro factor** — Dollar index as secondary confirmation signal (low weight). Codex brief deployed.
+- [ ] **RVOL conviction modifier** — Add relative volume to Whale Hunter signal scoring. Codex brief deployed.
+- [ ] **Stale factor reliability** — options_sentiment, put_call_ratio, savita_indicator have ongoing reliability issues.
 
 ---
 
-### User Experience
-- [ ] Onboarding tutorial for first-time users
-- [ ] Keyboard shortcuts (desktop)
-- [ ] Signal preview tooltip on hover
-- [ ] Watchlist quick-edit modal
-- [ ] Export positions to CSV
-- [ ] Share signals via link/QR code
+## 🟢 Lower Priority
+
+- [ ] **TICK-Whale cross-reference** — Cross-reference TICK breadth with Whale Hunter timing. Codex brief deployed.
+- [ ] **Crypto sandbox** — Autonomous trading on Coinbase (~$150 account). Architecture not started.
+- [ ] **Broker API integration** — Automated trade execution via Robinhood API. Far future.
+- [ ] **Complex multi-leg tracking** — Iron condors, butterflies. `trade_legs` table exists but not wired.
+- [ ] **Learning Protocol** — Self-correcting system where Pivot tracks recommendation accuracy and adjusts weighting. Designed but not implemented.
 
 ---
 
-### Performance Monitoring
-- [ ] Display latency metrics in footer
-- [ ] Signal processing time badge
+## 🎨 UI/UX (When Time Permits)
+
+- [ ] Custom signal icons (APIS CALL, BULLISH TRADE, KODIAK CALL, BEAR CALL)
+- [ ] Pivot logo design (dark teal + accent colors)
+- [ ] Loading skeletons for signal cards
+- [ ] Mobile optimization (bottom nav, pull-to-refresh)
 - [ ] WebSocket connection quality indicator
-- [ ] Backend health dashboard
 
 ---
 
-## Notes
-- All items above can be implemented without touching backend Python code
-- Focus is on visual polish and UX refinement
-- Priority: Icons > Logo > UI Polish > Mobile > UX > Monitoring
+## ✅ Recently Completed
+
+- [x] Railway Postgres fix — moved to same project (fabulous-essence), linked via `${{Postgres.*}}`
+- [x] Documentation overhaul — CLAUDE.md, CODEX.md, PROJECT_SUMMARY.md, PROJECT_RULES.md rewritten
+- [x] DEVELOPMENT_STATUS.md — Full phase roadmap with system component inventory
+- [x] Phase 2A-2E — Playbook, trade journal, DEFCON, market data, interactive chat all live
+- [x] Analytics Phases 1-3 — Schema, API endpoints, 6-tab UI all deployed
+- [x] Empty env var pattern — Documented and applied across codebase

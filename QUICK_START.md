@@ -1,202 +1,147 @@
-# 🚀 Quick Start Guide - Pandora's Box
+# Pivot — Operations Quick Reference
 
-## You've Downloaded the Project. Now What?
+**Last Updated:** February 19, 2026
 
-### Step 1: Extract the Files
-1. Locate `trading-hub` folder in your downloads
-2. Copy it to `C:\trading-hub` (or wherever you want)
-3. Open that folder in File Explorer
+This is a quick reference for operating and deploying Pivot. For full architecture details, read `CLAUDE.md`. For what's built vs planned, read `DEVELOPMENT_STATUS.md`.
 
 ---
 
-### Step 2: Install Python (If You Haven't)
-1. Go to https://www.python.org/downloads/
-2. Download Python 3.10 or newer
-3. **IMPORTANT**: Check "Add Python to PATH" during installation
-4. Verify: Open Command Prompt and type `python --version`
-
----
-
-### Step 3: Install Backend Dependencies
-```bash
-cd C:\trading-hub\backend
-pip install -r requirements.txt --break-system-packages
-```
-
-This installs FastAPI, Redis, PostgreSQL drivers, etc.
-
----
-
-### Step 4: Set Up Databases
-
-**Option A: Use Free Cloud Databases (Recommended)**
-
-**Redis (via Upstash)**:
-1. Go to https://upstash.com
-2. Create free account
-3. Create Redis database
-4. Copy connection details
-
-**PostgreSQL (via Supabase)**:
-1. Go to https://supabase.com
-2. Create free account
-3. Create new project
-4. Copy database URL from project settings
-
-**Option B: Install Locally**
-- Redis: https://redis.io/download
-- PostgreSQL: https://www.postgresql.org/download/
-
----
-
-### Step 5: Configure Environment
-1. Go to `C:\trading-hub\config\`
-2. Copy `.env.example` → `.env`
-3. Edit `.env` with your database credentials:
-
-```env
-REDIS_HOST=your-redis-host.upstash.io
-REDIS_PORT=6379
-DB_HOST=your-project.supabase.co
-DB_NAME=postgres
-DB_USER=postgres
-DB_PASSWORD=your-password
-```
-
----
-
-### Step 6: Initialize Database
-Open Command Prompt in `C:\trading-hub\backend\` and run:
+## System Status Checks
 
 ```bash
-python -c "from database.postgres_client import init_database; import asyncio; asyncio.run(init_database())"
-```
+# Backend API health (Railway)
+curl https://pandoras-box-production.up.railway.app/health
+# Expected: {"status":"healthy","postgres":"connected","redis":"ok","websocket_connections":N}
 
-This creates the tables for signals, positions, TICK history, etc.
+# Discord bot status (VPS)
+ssh root@188.245.250.2 "systemctl status pivot-bot pivot-collector"
+
+# Bot logs (live tail)
+ssh root@188.245.250.2 "journalctl -u pivot-bot -f"
+
+# Collector logs
+ssh root@188.245.250.2 "journalctl -u pivot-collector -f"
+```
 
 ---
 
-### Step 7: Start the System
+## Deploy Backend (Railway)
 
-**Easy Way** (Windows):
-1. Double-click `start.bat`
-2. Two command windows open (backend + frontend)
-3. Browser opens to http://localhost:3000
+Push to `main` → Railway auto-deploys. That's it.
 
-**Manual Way**:
 ```bash
-# Terminal 1 - Backend
-cd C:\trading-hub\backend
-python main.py
+git add -A && git commit -m "description" && git push origin main
+```
 
-# Terminal 2 - Frontend
-cd C:\trading-hub\frontend
-python -m http.server 3000
+Verify after deploy:
+```bash
+curl https://pandoras-box-production.up.railway.app/health
 ```
 
 ---
 
-### Step 8: Test It Works
-1. Dashboard should load at http://localhost:3000
-2. Check connection status in header (should say "Live")
-3. Bias indicators will show "Loading..." until you add TICK data
+## Deploy Discord Bot (VPS)
 
----
+Manual process — SSH in, pull, restart:
 
-### Step 9: Configure TradingView Webhooks
-
-**In TradingView**:
-1. Create alert for your strategy
-2. Set alert to "Webhook URL"
-3. **Local testing**: Use ngrok or similar to expose localhost:8000
-   - Install ngrok: https://ngrok.com/download
-   - Run: `ngrok http 8000`
-   - Use ngrok URL: `https://your-id.ngrok.io/webhook/tradingview`
-4. **Production**: Use your deployed backend URL
-
-**Alert Message** (JSON):
-```json
-{
-  "ticker": "{{ticker}}",
-  "strategy": "Triple Line Trend Retracement",
-  "direction": "LONG",
-  "entry_price": {{close}},
-  "stop_loss": {{low}},
-  "target_1": {{high}},
-  "adx": 32.5,
-  "line_separation": 15.2,
-  "timeframe": "DAILY"
-}
+```bash
+ssh root@188.245.250.2
+cd /opt/pivot
+git pull origin main
+systemctl restart pivot-bot
+journalctl -u pivot-bot -f   # ALWAYS verify startup
 ```
 
-Replace `adx` and `line_separation` with actual values from your indicators.
+If collector changes were made too:
+```bash
+systemctl restart pivot-collector
+journalctl -u pivot-collector -f
+```
 
 ---
 
-### Step 10: Deploy to Cloud (Optional)
+## Common Operations
 
-**Backend** (Railway):
-1. Push code to GitHub
-2. Go to https://railway.app
-3. Connect repo
-4. Select `backend/` as root directory
-5. Add environment variables
-6. Deploy
+### Restart bot after crash
+```bash
+ssh root@188.245.250.2 "systemctl restart pivot-bot"
+```
 
-**Frontend** (Vercel):
-1. Go to https://vercel.com
-2. Import repo
-3. Set build directory to `frontend/`
-4. Deploy
+### Check if Railway is eating credits
+Railway dashboard → fabulous-essence project → Usage tab. Free tier gives $5/month.
 
-**Update TradingView webhooks** to use your production backend URL.
+### Force Railway redeploy (without code change)
+Railway dashboard → pandoras-box service → Deployments → Redeploy latest.
+
+### Check what's running on VPS
+```bash
+ssh root@188.245.250.2 "systemctl list-units | grep pivot"
+```
+
+### View recent bot errors
+```bash
+ssh root@188.245.250.2 "journalctl -u pivot-bot --since '1 hour ago' | grep -i error"
+```
+
+### Test a webhook locally
+```bash
+curl -X POST https://pandoras-box-production.up.railway.app/webhook/tradingview \
+  -H "Content-Type: application/json" \
+  -d '{"ticker":"SPY","strategy":"test","direction":"LONG","timeframe":"15m"}'
+```
+
+---
+
+## Environment Variable Safety
+
+Railway uses `${{Postgres.*}}` template references that resolve to empty strings during build. Always use the `or` pattern:
+
+```python
+# CORRECT
+DB_HOST = os.getenv("DB_HOST") or "localhost"
+DB_PORT = int(os.getenv("DB_PORT") or 5432)
+
+# WRONG — returns '' not None, causes int('') crash
+DB_HOST = os.getenv("DB_HOST", "localhost")
+DB_PORT = int(os.getenv("DB_PORT", 5432))
+```
+
+---
+
+## Infrastructure Map
+
+| What | Where | Access |
+|------|-------|--------|
+| Backend API | Railway (fabulous-essence) | `pandoras-box-production.up.railway.app` |
+| PostgreSQL | Railway (same project) | Linked via `${{Postgres.*}}` |
+| Redis | Upstash | `rediss://` URL in Railway env vars |
+| Discord Bot | Hetzner VPS (PIVOT-EU) | `ssh root@188.245.250.2` |
+| Data Collector | Same VPS | `pivot-collector.service` |
+| Source Code | GitHub | `303webhouse/pandoras-box` |
+| Frontend | Served from VPS | Port 3000 |
+
+---
+
+## Credential Locations
+
+Credentials are NOT stored in the repo. They live in:
+
+- **Railway env vars** — DB_*, DISCORD_*, API keys (Railway dashboard → pandoras-box service → Variables)
+- **VPS .env file** — `/opt/pivot/.env` (Discord token, API keys, webhook URLs)
+- **Nick's Claude.ai memory** — Contains all tokens/keys for reference in conversations
+- **GitHub PAT** — Used for git operations on VPS, stored in git credential helper
 
 ---
 
 ## Troubleshooting
 
-### "Command 'python' not found"
-- Python not installed or not in PATH
-- Reinstall Python with "Add to PATH" checked
-
-### "Connection refused" in dashboard
-- Backend not running
-- Check if port 8000 is already in use
-- Try running backend manually to see error messages
-
-### "Database connection failed"
-- Check credentials in `.env`
-- Verify Redis/PostgreSQL are accessible
-- Test connection manually
-
-### No signals appearing
-- TradingView webhook not configured
-- Check backend logs for incoming webhooks
-- Verify webhook URL is correct
-
-### WebSocket won't connect
-- Firewall blocking port 8000
-- CORS issue (check browser console)
-- Backend crashed (check terminal)
-
----
-
-## Next Actions
-
-1. ✅ **Get it running locally** (Steps 1-7)
-2. ✅ **Test with manual webhook** (use Postman or curl)
-3. ✅ **Connect TradingView** (Step 9)
-4. ✅ **Install PWA on phone** (open dashboard in mobile browser → Add to Home Screen)
-5. ✅ **Deploy to production** (Step 10)
-
----
-
-## Support
-
-- **Documentation**: Read `README.md` and `PROJECT_SUMMARY.md`
-- **Code comments**: Every file has inline explanations
-- **Architecture docs**: Check `docs/architecture/`
-
----
-
-**You're ready to go. Start with Step 1!**
+| Problem | Fix |
+|---------|-----|
+| Bot offline | `ssh root@188.245.250.2 "systemctl restart pivot-bot"` |
+| Railway deploy stuck | Railway dashboard → Redeploy or check build logs |
+| Health returns `postgres: disconnected` | Check Railway Postgres service is running in fabulous-essence |
+| Health returns `redis: error` | Verify Upstash Redis URL in Railway env vars starts with `rediss://` |
+| Bot responds but no market data | Check `pivot-collector.service` is running |
+| Duplicate bot responses | Ensure only ONE bot instance (VPS only, not Railway) |
+| `int('')` crash on Railway | Missing `or` pattern in env var — see safety section above |
+| Stale bias data | Check collector logs: `journalctl -u pivot-collector --since '1 hour ago'` |
