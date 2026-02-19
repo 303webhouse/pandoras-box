@@ -59,36 +59,60 @@ def detect_csv_format(header_row: Sequence[str]) -> str:
 
 def parse_option_instrument(instrument_str: str) -> Optional[Dict[str, Any]]:
     """
-    Parse: "SPY 03/07/2026 680.00 Put"
+    Parse option descriptions in two formats:
+      Format A: "SPY 03/07/2026 680.00 Put"     (strike before type)
+      Format B: "NFLX 5/15/2026 Call $82.00"     (type before strike - Robinhood)
     """
     text = (instrument_str or "").strip()
     parts = text.split()
     if len(parts) < 4:
         return None
-    if parts[-1].lower() not in {"put", "call"}:
-        return None
+
+    # Both formats: parts[0] = ticker, parts[1] = date
     try:
         ticker = parts[0].upper()
         expiry = datetime.strptime(parts[1], "%m/%d/%Y").strftime("%Y-%m-%d")
-        strike = float(parts[2])
-        option_type = parts[-1].lower()
-        return {
-            "ticker": ticker,
-            "expiry": expiry,
-            "strike": strike,
-            "option_type": option_type,
-        }
     except Exception:
         return None
 
+    if parts[2].lower() in {"put", "call"}:
+        # Format B: TICKER DATE TYPE STRIKE (Robinhood)
+        option_type = parts[2].lower()
+        try:
+            strike = float(parts[3].replace("$", ""))
+        except Exception:
+            return None
+    elif parts[-1].lower() in {"put", "call"}:
+        # Format A: TICKER DATE STRIKE TYPE (original)
+        option_type = parts[-1].lower()
+        try:
+            strike = float(parts[2].replace("$", ""))
+        except Exception:
+            return None
+    else:
+        return None
+
+    return {
+        "ticker": ticker,
+        "expiry": expiry,
+        "strike": strike,
+        "option_type": option_type,
+    }
+
 
 def _as_float(value: Any, default: float = 0.0) -> float:
+    """Parse a numeric value, handling $, commas, and accounting-style (negative) parens."""
     try:
         if value is None:
             return default
-        text = str(value).replace(",", "").strip()
+        text = str(value).strip()
         if not text:
             return default
+        # Strip dollar signs and commas
+        text = text.replace("$", "").replace(",", "")
+        # Handle accounting-style negatives: ($160.04) -> -160.04
+        if text.startswith("(") and text.endswith(")"):
+            text = "-" + text[1:-1]
         return float(text)
     except Exception:
         return default
@@ -212,7 +236,7 @@ def _statement_rows_to_legs(rows: List[Dict[str, Any]]) -> Tuple[List[ParsedLeg]
 
     for row in rows:
         trans_code = str(row.get("Trans Code") or "").strip().upper()
-        description = str(row.get("Description") or "").strip().upper()
+        description = str(row.get("Description") or "").strip()
         instrument = str(row.get("Instrument") or "").strip()
         timestamp = _parse_statement_timestamp(row)
         if not timestamp:
@@ -220,7 +244,7 @@ def _statement_rows_to_legs(rows: List[Dict[str, Any]]) -> Tuple[List[ParsedLeg]
             filtered_out += 1
             continue
 
-        if trans_code in IGNORE_TRANS_CODES or any(token in description for token in ("DIVIDEND", "INTEREST", "TRANSFER")):
+        if trans_code in IGNORE_TRANS_CODES or any(token in description.upper() for token in ("DIVIDEND", "INTEREST", "TRANSFER")):
             skipped_by_reason["non_trade"] += 1
             filtered_out += 1
             continue
@@ -232,7 +256,11 @@ def _statement_rows_to_legs(rows: List[Dict[str, Any]]) -> Tuple[List[ParsedLeg]
             filtered_out += 1
             continue
 
+        # Try Instrument field first, then fall back to Description for option details.
+        # Robinhood puts just the ticker in Instrument but full option info in Description.
         opt = parse_option_instrument(instrument)
+        if not opt:
+            opt = parse_option_instrument(description)
         if opt:
             if trans_code in {"BTO"}:
                 action = "buy_to_open"
