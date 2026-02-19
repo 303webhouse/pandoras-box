@@ -1923,8 +1923,9 @@ async def get_uw_snapshots(
 
 @analytics_router.post("/parse-robinhood-csv")
 async def parse_robinhood_csv(file: UploadFile = File(...)):
-    if not file.filename or not file.filename.lower().endswith(".csv"):
-        raise HTTPException(status_code=400, detail="Upload a .csv file")
+    name = (file.filename or "").lower()
+    if not name or not (name.endswith(".csv") or name.endswith(".txt")):
+        raise HTTPException(status_code=400, detail="Upload a .csv or .txt file")
     raw = await file.read()
     if not raw:
         raise HTTPException(status_code=400, detail="CSV is empty")
