@@ -5,6 +5,7 @@ OpenRouter client for Pivot.
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List
 
 import httpx
@@ -50,11 +51,19 @@ def _extract_text_from_response(data: Dict[str, Any]) -> str:
 
 
 def _build_openrouter_payload(messages: List[Dict[str, Any]], max_tokens: int) -> Dict[str, Any]:
+    # Inject current ET date/time so the LLM always knows when "now" is.
+    et = timezone(timedelta(hours=-5))
+    now_et = datetime.now(et)
+    date_line = (
+        f"TODAY: {now_et.strftime('%A, %B %d, %Y')} | "
+        f"Time: {now_et.strftime('%I:%M %p')} ET"
+    )
+    system_content = f"{date_line}\n\n{PIVOT_SYSTEM_PROMPT}"
     return {
         "model": LLM_MODEL,
         "max_tokens": max_tokens,
         "messages": [
-            {"role": "system", "content": PIVOT_SYSTEM_PROMPT},
+            {"role": "system", "content": system_content},
             *messages,
         ],
     }
