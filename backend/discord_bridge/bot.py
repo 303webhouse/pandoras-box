@@ -25,7 +25,7 @@ import mimetypes
 import sqlite3
 import aiohttp
 import time as time_module
-from collections import defaultdict
+from collections import defaultdict, deque
 from datetime import datetime, time, timezone, timedelta, date as date_cls
 from typing import Optional, Dict, Any, List
 import pytz
@@ -121,6 +121,52 @@ last_zone_shift_state: Optional[Dict[str, Any]] = None
 uw_request_sent_state: Dict[str, str] = {}
 uw_snapshot_received_state: Dict[str, Dict[str, Any]] = defaultdict(dict)
 pending_trade_imports: Dict[int, Dict[str, Any]] = {}
+
+
+class ConversationBuffer:
+    """Per-channel rolling conversation history for Pivot chat context."""
+
+    MAX_PAIRS = 10
+    TOKEN_BUDGET = 6000
+
+    def __init__(self):
+        self._history = deque(maxlen=self.MAX_PAIRS * 2)
+
+    def add_user(self, content: str) -> None:
+        text = (content or "").strip()
+        if text:
+            self._history.append({"role": "user", "content": text})
+
+    def add_assistant(self, content: str) -> None:
+        text = (content or "").strip()
+        if text:
+            self._history.append({"role": "assistant", "content": text})
+
+    def get_messages(self) -> List[Dict[str, str]]:
+        messages: List[Dict[str, str]] = [dict(entry) for entry in self._history]
+        while messages and self._estimate_tokens(messages) > self.TOKEN_BUDGET:
+            if len(messages) >= 2:
+                messages.pop(0)
+                messages.pop(0)
+            else:
+                messages.pop(0)
+        return messages
+
+    def _estimate_tokens(self, messages: List[Dict[str, str]]) -> int:
+        total_chars = sum(len(str(m.get("content", ""))) for m in messages)
+        return total_chars // 4
+
+    def clear(self) -> None:
+        self._history.clear()
+
+
+_conversation_buffers: Dict[int, ConversationBuffer] = {}
+
+
+def _get_buffer(channel_id: int) -> ConversationBuffer:
+    if channel_id not in _conversation_buffers:
+        _conversation_buffers[channel_id] = ConversationBuffer()
+    return _conversation_buffers[channel_id]
 
 UW_CONTEXT_WINDOW_SECONDS = 4 * 60 * 60
 ZONE_CONTEXT_WINDOW_SECONDS = 6 * 60 * 60
@@ -2918,6 +2964,7 @@ async def on_message(message: discord.Message):
         async with message.channel.typing():
             user_text = message.content or ""
             reply = ""
+            buffer = _get_buffer(message.channel.id)
 
             # Trade import confirmation flow.
             user_key = int(message.author.id)
@@ -2943,8 +2990,12 @@ async def on_message(message: discord.Message):
             elif lower_text in {"cancel import", "cancel"}:
                 if pending_trade_imports.pop(user_key, None):
                     reply = "Cancelled pending trade import."
+            if reply:
+                buffer.add_user(user_text or "[trade import command]")
+                buffer.add_assistant(reply)
 
             # CSV import path.
+            csv_attachment = None
             if not reply:
                 csv_attachment = next((a for a in message.attachments if _is_csv_attachment(a)), None)
                 if csv_attachment:
@@ -2954,6 +3005,12 @@ async def on_message(message: discord.Message):
                         reply = _format_trade_import_preview(parsed_csv)
                     else:
                         reply = "Could not parse the CSV attachment. Make sure it's a Robinhood export."
+                if reply:
+                    csv_user_summary = user_text or "[CSV attachment]"
+                    if csv_attachment:
+                        csv_user_summary = f"{csv_user_summary}\n[CSV: {csv_attachment.filename}]"
+                    buffer.add_user(csv_user_summary)
+                    buffer.add_assistant(reply)
 
             # Pasted/freeform import path.
             if not reply and _looks_like_trade_import_text(user_text):
@@ -2970,6 +3027,9 @@ async def on_message(message: discord.Message):
                     }
                     pending_trade_imports[user_key] = preview
                     reply = _format_trade_import_preview(preview)
+                if reply:
+                    buffer.add_user(user_text or "[trade import text]")
+                    buffer.add_assistant(reply)
 
             image_attachment = _first_image_attachment(message)
             if not reply and image_attachment:
@@ -3041,6 +3101,12 @@ async def on_message(message: discord.Message):
                         if not reply:
                             reply = image_analysis
 
+                if reply:
+                    image_user_summary = user_text.strip() or "[screenshot uploaded]"
+                    image_user_summary = f"{image_user_summary}\n[Image: {image_attachment.filename}]"
+                    buffer.add_user(image_user_summary)
+                    buffer.add_assistant(reply)
+
             if not reply:
                 ticker_hint = _extract_ticker_hint(user_text)
                 market_context = await build_market_context(user_text, ticker_hint=ticker_hint)
@@ -3054,14 +3120,30 @@ async def on_message(message: discord.Message):
                         f"{options_context}"
                     )
 
-                prompt = (
+                now_et = get_et_now()
+                date_header = (
+                    f"TODAY: {now_et.strftime('%A, %B %d, %Y')} | "
+                    f"Time: {now_et.strftime('%I:%M %p')} ET"
+                )
+                market_context = f"{date_header}\n\n{market_context}"
+
+                current_user_content = (
                     "Use this current market context when answering.\n\n"
                     f"{market_context}\n\n"
                     f"USER MESSAGE:\n{user_text or 'Give a quick market read.'}"
                 )
-                if ticker_hint and _is_directional_question(user_text):
-                    prompt = _repeat_high_stakes_prompt(prompt)
-                reply = await call_pivot_llm(prompt, max_tokens=1600)
+                buffer.add_user(current_user_content)
+                messages = buffer.get_messages()
+
+                if ticker_hint and _is_directional_question(user_text) and messages:
+                    messages[-1] = {
+                        "role": "user",
+                        "content": _repeat_high_stakes_prompt(messages[-1]["content"]),
+                    }
+
+                reply = await call_pivot_llm_messages(messages, max_tokens=1600)
+                if reply and not reply.startswith("[LLM error"):
+                    buffer.add_assistant(reply)
         if reply:
             await send_discord_chunks(message.channel, reply)
         return
