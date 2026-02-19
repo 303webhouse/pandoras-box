@@ -1,5 +1,8 @@
 """
 Historical price collector for analytics/backtesting tables.
+
+WAL-SAFE VERSION: Batched inserts to prevent PostgreSQL WAL bloat
+that can fill Railway's 500MB volume and crash-loop the database.
 """
 
 from __future__ import annotations
@@ -34,6 +37,16 @@ CRYPTO_TICKERS = {
     "BCH",
     "XLM",
 }
+
+# ---------------------------------------------------------------------------
+# WAL-safety constants
+# ---------------------------------------------------------------------------
+UPSERT_BATCH_SIZE = 150          # rows per INSERT batch (keeps WAL per-txn small)
+BATCH_PAUSE_SECONDS = 0.1        # brief pause between batches for checkpoint breathing room
+VOLUME_WARN_MB = 350             # log warning when DB exceeds this size
+VOLUME_ABORT_MB = 430            # skip inserts entirely above this to protect the volume
+RETENTION_DAILY_DAYS = 90        # keep 90 days of daily bars
+RETENTION_INTRADAY_DAYS = 7      # keep 7 days of 5m bars
 
 _backfill_lock = asyncio.Lock()
 _backfill_done = False
@@ -325,29 +338,133 @@ async def _fetch_crypto_rows(ticker: str, backfill: bool) -> List[Tuple[str, str
     return rows
 
 
+# ---------------------------------------------------------------------------
+# WAL-safe batched upsert (replaces old unbatched _upsert_price_rows)
+# ---------------------------------------------------------------------------
+
+async def _get_db_size_mb() -> float:
+    """Return current database size in MB. Used to guard against filling the volume."""
+    try:
+        pool = await get_postgres_client()
+        async with pool.acquire() as conn:
+            size_bytes = await conn.fetchval("SELECT pg_database_size(current_database())")
+            return (size_bytes or 0) / (1024 * 1024)
+    except Exception as exc:
+        logger.warning("Could not check database size: %s", exc)
+        return 0.0
+
+
 async def _upsert_price_rows(
     rows: Iterable[Tuple[str, str, datetime, Optional[float], Optional[float], Optional[float], Optional[float], Optional[float]]]
 ) -> int:
+    """
+    Batched upsert: inserts rows in chunks of UPSERT_BATCH_SIZE with brief
+    pauses between batches. Each batch is its own transaction so Postgres can
+    checkpoint and recycle WAL files between batches.
+
+    This prevents the WAL from ballooning to hundreds of MB during large
+    inserts (backfills or many tickers), which previously filled the 500 MB
+    Railway volume and crash-looped the database.
+    """
     payload = list(rows)
     if not payload:
         return 0
-    pool = await get_postgres_client()
-    async with pool.acquire() as conn:
-        await conn.executemany(
-            """
-            INSERT INTO price_history (ticker, timeframe, timestamp, open, high, low, close, volume)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-            ON CONFLICT (ticker, timeframe, timestamp)
-            DO UPDATE SET
-                open = EXCLUDED.open,
-                high = EXCLUDED.high,
-                low = EXCLUDED.low,
-                close = EXCLUDED.close,
-                volume = EXCLUDED.volume
-            """,
-            payload,
+
+    # --- Volume safety check ---
+    db_mb = await _get_db_size_mb()
+    if db_mb > VOLUME_ABORT_MB:
+        logger.error(
+            "DB size %.0f MB exceeds abort threshold %d MB — skipping insert of %d rows to protect volume!",
+            db_mb, VOLUME_ABORT_MB, len(payload),
         )
-    return len(payload)
+        return 0
+    if db_mb > VOLUME_WARN_MB:
+        logger.warning("DB size %.0f MB approaching limit (warn=%d MB).", db_mb, VOLUME_WARN_MB)
+
+    pool = await get_postgres_client()
+    upsert_sql = """
+        INSERT INTO price_history (ticker, timeframe, timestamp, open, high, low, close, volume)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        ON CONFLICT (ticker, timeframe, timestamp)
+        DO UPDATE SET
+            open = EXCLUDED.open,
+            high = EXCLUDED.high,
+            low = EXCLUDED.low,
+            close = EXCLUDED.close,
+            volume = EXCLUDED.volume
+    """
+
+    total_inserted = 0
+    for i in range(0, len(payload), UPSERT_BATCH_SIZE):
+        batch = payload[i : i + UPSERT_BATCH_SIZE]
+        async with pool.acquire() as conn:
+            await conn.executemany(upsert_sql, batch)
+        total_inserted += len(batch)
+
+        # Brief pause to let Postgres checkpoint / recycle WAL between batches
+        if i + UPSERT_BATCH_SIZE < len(payload):
+            await asyncio.sleep(BATCH_PAUSE_SECONDS)
+
+    return total_inserted
+
+
+# ---------------------------------------------------------------------------
+# Data retention — trim old rows to keep volume lean
+# ---------------------------------------------------------------------------
+
+async def _trim_old_price_history() -> Dict[str, int]:
+    """
+    Delete price_history rows older than retention thresholds.
+    - Daily bars: keep RETENTION_DAILY_DAYS (90 days)
+    - Intraday bars: keep RETENTION_INTRADAY_DAYS (7 days)
+
+    Returns dict with counts of deleted rows per category.
+    """
+    pool = await get_postgres_client()
+    deleted = {"daily": 0, "intraday": 0}
+
+    try:
+        async with pool.acquire() as conn:
+            # Trim old daily bars
+            result = await conn.fetchval(
+                """
+                WITH trimmed AS (
+                    DELETE FROM price_history
+                    WHERE timeframe = 'D'
+                      AND timestamp < NOW() - $1::interval
+                    RETURNING 1
+                )
+                SELECT COUNT(*) FROM trimmed
+                """,
+                timedelta(days=RETENTION_DAILY_DAYS),
+            )
+            deleted["daily"] = int(result or 0)
+
+            # Trim old intraday bars
+            result = await conn.fetchval(
+                """
+                WITH trimmed AS (
+                    DELETE FROM price_history
+                    WHERE timeframe != 'D'
+                      AND timestamp < NOW() - $1::interval
+                    RETURNING 1
+                )
+                SELECT COUNT(*) FROM trimmed
+                """,
+                timedelta(days=RETENTION_INTRADAY_DAYS),
+            )
+            deleted["intraday"] = int(result or 0)
+
+    except Exception as exc:
+        logger.warning("Error trimming old price_history rows: %s", exc)
+
+    total = deleted["daily"] + deleted["intraday"]
+    if total > 0:
+        logger.info(
+            "Trimmed %d old price_history rows (daily=%d, intraday=%d).",
+            total, deleted["daily"], deleted["intraday"],
+        )
+    return deleted
 
 
 async def _load_target_tickers() -> List[str]:
@@ -401,11 +518,26 @@ async def collect_price_history_cycle(backfill: bool = False) -> Dict[str, Any]:
             errors.append(f"{ticker}: {exc}")
             logger.warning("Price collector failed for %s: %s", ticker, exc)
 
+    # --- Trim old data after each collection cycle to keep volume lean ---
+    trimmed = {"daily": 0, "intraday": 0}
+    try:
+        trimmed = await _trim_old_price_history()
+    except Exception as exc:
+        logger.warning("Post-collection trim failed: %s", exc)
+
+    # --- Log volume health ---
+    try:
+        db_mb = await _get_db_size_mb()
+        logger.info("Price collection done: %d rows upserted, DB size %.1f MB.", upserted, db_mb)
+    except Exception:
+        pass
+
     return {
         "status": "ok" if not errors else "partial",
         "rows_upserted": upserted,
         "tickers": len(tickers),
         "purged_daily_rows": deleted_bad_rows,
+        "trimmed_rows": trimmed,
         "errors": errors[:10],
     }
 
