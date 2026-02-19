@@ -1,5 +1,6 @@
 # Pandora's Box - Backend Dependencies
 # Windows-compatible versions with pre-built wheels
+# Cache bust: 2026-02-19
 
 # FastAPI and ASGI server
 fastapi==0.109.0
