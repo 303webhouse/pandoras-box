@@ -41,7 +41,7 @@ The project was originally called "Pandora's Box" — the name persists in some 
 - **VPS**: Hetzner PIVOT-EU at `188.245.250.2`, code at `/opt/pivot/`
 - **Two systemd services**: `pivot-bot.service` (Discord bot) + `pivot-collector.service` (data collectors)
 - **`backend/discord_bridge/bot.py`** — The actual running bot (3,466 lines), lives on VPS at `/opt/pivot/discord_bridge/bot.py`
-- **LLM agent** — Gemini Pro via OpenRouter for market analysis, screenshot parsing, trade evaluation
+- **LLM agent** — Claude Sonnet 4.6 (`anthropic/claude-sonnet-4.6`) via OpenRouter for market analysis, screenshot parsing, trade evaluation
 - **Playbook** — `pivot/llm/playbook_v2.1.md` contains trading rules, risk parameters, account details
 - **Intents**: Full (members, message_content, presences, guilds)
 - Deploy: `ssh root@188.245.250.2` → `cd /opt/pivot && git pull && systemctl restart pivot-bot`
@@ -116,10 +116,10 @@ cd frontend && python -m http.server 3000  # UI on port 3000
 - `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` → linked via `${{Postgres.*}}`
 - `DISCORD_BOT_TOKEN`, `DISCORD_TOKEN`, `DISCORD_FLOW_CHANNEL_ID`, `DISCORD_WEBHOOK_SIGNALS`
 - `COINALYZE_API_KEY`, `CRYPTO_BINANCE_PERP_HTTP_PROXY`
-- `FRED_API_KEY`, `GEMINI_API_KEY`, `PIVOT_API_KEY`
+- `FRED_API_KEY`, `PIVOT_API_KEY`
 
 ### VPS (`/opt/pivot/.env`)
-See `pivot/.env.example` for full list. Key vars: `DISCORD_BOT_TOKEN`, `PANDORA_API_URL`, `PIVOT_API_KEY`, `LLM_API_KEY`, `FRED_API_KEY`, UW channel IDs, Discord webhook URLs.
+See `pivot/.env.example` for full list. Key vars: `DISCORD_BOT_TOKEN`, `PANDORA_API_URL`, `PIVOT_API_KEY`, `LLM_API_KEY` (OpenRouter key), `LLM_MODEL` (`anthropic/claude-sonnet-4.6`), `FRED_API_KEY`, UW channel IDs, Discord webhook URLs.
 
 **Critical pattern for env vars** — always use `or` to handle Railway empty strings:
 ```python
