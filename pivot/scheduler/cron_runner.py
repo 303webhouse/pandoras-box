@@ -180,11 +180,21 @@ async def run_cape_only():
 
 
 async def heartbeat_job():
+    # Always send heartbeat to Railway, even outside market hours
+    try:
+        await post_pivot_alert({
+            "type": "heartbeat",
+            "message": "Pivot alive",
+            "timestamp": datetime.utcnow().isoformat(),
+        })
+    except Exception as e:
+        logger.warning(f"Heartbeat ping failed: {e}")
+
     now = datetime.now(TZ)
     if not _is_market_hours(now):
         return
 
-    logger.info("Heartbeat cycle")
+    logger.info("Heartbeat cycle — checking monitors")
 
     bias_shift = await check_bias_shift()
     if bias_shift and _should_send("bias_shift", COOLDOWNS["bias_shift"]):
@@ -245,7 +255,16 @@ async def heartbeat_job():
 async def morning_brief():
     try:
         composite = await get_json("/bias/composite")
-        prompt = build_morning_brief_prompt(json.dumps(composite, indent=2))
+
+        # Search for pre-market/early session context
+        from llm.web_search import web_search
+        search_results = await web_search("stock market today morning movers", count=5)
+        search_block = ""
+        if search_results and not search_results.startswith("["):
+            search_block = f"\n\nWEB SEARCH - What's happening right now:\n{search_results}"
+
+        data_block = json.dumps(composite, indent=2)
+        prompt = build_morning_brief_prompt(data_block + search_block)
         text = await call_llm(prompt, max_tokens=700)
         await send_discord("briefs", "Morning Brief", text, priority="MEDIUM")
     except Exception as exc:
@@ -304,7 +323,7 @@ def start_scheduler() -> None:
 
     scheduler.add_job(heartbeat_job, CronTrigger(day_of_week="mon-fri", minute="*/15", timezone=TZ))
 
-    scheduler.add_job(morning_brief, CronTrigger(day_of_week="mon-fri", hour=6, minute=45, timezone=TZ))
+    scheduler.add_job(morning_brief, CronTrigger(day_of_week="mon-fri", hour=10, minute=0, timezone=TZ))
     scheduler.add_job(eod_brief, CronTrigger(day_of_week="mon-fri", hour=16, minute=30, timezone=TZ))
 
     scheduler.start()
