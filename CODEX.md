@@ -2,13 +2,13 @@
 
 This file provides guidance to OpenAI Codex and other AI coding assistants working with this repository.
 
-For the full project context, see [CLAUDE.md](./CLAUDE.md) — it is the canonical reference and this file mirrors its key information.
+For the full project context, see [CLAUDE.md](./CLAUDE.md) — it is the canonical reference. For development status and roadmap, see [DEVELOPMENT_STATUS.md](./DEVELOPMENT_STATUS.md).
 
 ## Quick Reference
 
-**Project**: Pandora's Box (codename Pivot) — real-time trading signal dashboard + AI Discord trading assistant.
+**Project**: Pivot — AI-powered Discord trading assistant for options swing trading.
 
-**Repo**: `303webhouse/pandoras-box` (single `main` branch)
+**Repo**: `303webhouse/pandoras-box` (single `main` branch). "Pandora's Box" is the legacy name.
 
 ## Deployment
 
@@ -17,28 +17,31 @@ For the full project context, see [CLAUDE.md](./CLAUDE.md) — it is the canonic
 | Backend API | Railway (fabulous-essence) | pandoras-box-production.up.railway.app |
 | PostgreSQL | Railway (fabulous-essence) | Same project, linked via `${{Postgres.*}}` |
 | Discord Bot | VPS (Hetzner) | 188.245.250.2, systemd `pivot-bot.service` |
+| Data Collector | VPS (same box) | systemd `pivot-collector.service` |
 
 **Deploy backend**: Push to `main` → Railway auto-deploys.
-**Deploy bot**: SSH to VPS → `cd /opt/pandoras-box && git pull && systemctl restart pivot-bot`
+**Deploy bot**: `ssh root@188.245.250.2` → `cd /opt/pivot && git pull && systemctl restart pivot-bot`
+**Health check**: `curl https://pandoras-box-production.up.railway.app/health`
 
 ## Tech Stack
 
 - **Backend**: Python 3.12, FastAPI, uvicorn
-- **Database**: PostgreSQL (Railway) + Redis
-- **Frontend**: Vanilla JS PWA
-- **Discord Bot**: discord.py with Gemini LLM integration
-- **Infra**: Railway (API + DB), Hetzner VPS (bot), GitHub
+- **Database**: PostgreSQL (Railway) + Redis (Upstash, SSL required)
+- **Frontend**: Vanilla JS PWA (dashboard + 6-tab analytics)
+- **Discord Bot**: discord.py + Gemini Pro via OpenRouter
+- **Indicators**: PineScript on TradingView (Whale Hunter, CTA, Circuit Breaker)
 
 ## Key Directories
 
 ```
-backend/          → FastAPI backend (webhooks, strategies, bias filters, scoring, API, database)
-pivot/            → Discord bot (bot.py, llm/, collectors/, monitors/, scheduler/)
-frontend/         → PWA dashboard (HTML/CSS/JS)
+backend/          → FastAPI backend (webhooks, strategies, bias filters, scoring, analytics, API)
+backend/discord_bridge/ → Discord bot source (bot.py is 3,466 lines — the live bot)
+backend/discord_bridge/uw/ → UW flow parser, aggregator, filter
+pivot/            → Bot core (bot.py entry, llm/, collectors/, monitors/, scheduler/)
+pivot/llm/        → prompts.py (Pivot's brain), playbook_v2.1.md, pivot_agent.py
+frontend/         → PWA dashboard (index.html, app.js, analytics.js, styles.css)
 config/           → Environment config templates
-docs/             → Strategy and architecture documentation
-data/             → Knowledgebase JSON, runtime data
-migrations/       → Database migration scripts
+docs/             → PineScript source, architecture docs
 ```
 
 ## Environment Variable Pattern
@@ -53,21 +56,25 @@ DB_PORT = int(os.getenv("DB_PORT") or 5432)
 DB_HOST = os.getenv("DB_HOST", "localhost")
 ```
 
-## Commands
+## Key Files
 
-```bash
-# Local dev
-cd backend && python main.py          # API on port 8000
-cd frontend && python -m http.server 3000  # UI on port 3000
-python run_discord_bot.py             # Discord bot
-
-# Health check
-curl https://pandoras-box-production.up.railway.app/health
-```
+| File | What It Does |
+|------|--------------|
+| `pivot/llm/prompts.py` | Pivot's personality, analysis rules, evaluation templates |
+| `pivot/llm/playbook_v2.1.md` | Trading rules, risk params, account balances |
+| `backend/discord_bridge/bot.py` | The running Discord bot (VPS copy is live) |
+| `backend/bias_engine/composite.py` | Factor weighting and composite calculation |
+| `backend/webhooks/tradingview.py` | TradingView webhook receiver |
+| `backend/webhooks/circuit_breaker.py` | Circuit breaker bias override |
+| `pivot/scheduler/cron_runner.py` | Heartbeat scheduler for monitors |
+| `pivot/deploy.sh` | VPS deployment script |
 
 ## Rules
 
 - Read `PROJECT_RULES.md` before making architectural suggestions
-- Every new strategy/filter needs a knowledgebase entry in `data/knowledgebase.json`
-- Classify indicators as **execution** (entry/exit triggers) vs **bias** (directional filters) before building
-- UI changes need explicit approval — suggest layout but don't assume placement
+- Read `DEVELOPMENT_STATUS.md` to understand what's built vs planned
+- Every new factor needs a collector, bias filter, composite registration, and scheduler entry
+- Classify indicators as MACRO/TECHNICAL/FLOW/BREADTH before building
+- `prompts.py` is Pivot's brain — edit carefully, test after deploy
+- Always deploy both: push to git (Railway) + sync VPS (bot restart)
+- Update `DEVELOPMENT_STATUS.md` after completing significant work

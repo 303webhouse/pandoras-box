@@ -1,6 +1,6 @@
-# Pandora's Box — Project Rules
+# Pivot — Project Rules
 
-**Last Updated:** 2026-02-19
+**Last Updated:** February 19, 2026
 
 ---
 
@@ -14,26 +14,25 @@ No manual data entry, no mental math, no context-switching. If a human has to re
 
 ## Primary Goal
 
-**Real-time, actionable trade recommendations with minimal subjective interpretation.**
+**Real-time, actionable trade intelligence delivered via Discord with objective market analysis.**
 
-The app must deliver:
-1. **Automated filtering** — Signals pass through customizable filters before surfacing
-2. **Clear trade recommendations** — Every signal includes Entry, Exit (target), and Stop/Loss prices
-3. **Multi-timeframe/multi-asset coverage** — Strategies for swing trades, intraday, equities, crypto, etc.
-4. **Future optionality** — Ability to add new strategies/filters from the UI without code changes
-5. **Full flexibility** — Every filter and strategy can be toggled on/off independently
-6. **Knowledgebase** — Every strategy and filter has an explanation linked to its trade suggestions, scanners, and UI components
-7. **Bias challenge** — Pivot must actively challenge Nick's directional biases with objective data
+The system must deliver:
+1. **Automated data collection** — 20+ macro/technical/flow factors fetched on schedule
+2. **Clear trade evaluations** — Every signal evaluated with entry, exit, stop, and conviction level
+3. **Bias challenge** — Pivot actively challenges Nick's directional biases with data
+4. **Multi-source convergence** — Flag when independent signals agree (whale + UW flow + sector rotation)
+5. **Performance tracking** — Analytics system measures what's working and what isn't
 
 ---
 
 ## Development Principles
 
-1. **Single source of truth** — Data lives in one place (database), displayed in many.
-2. **Fail visible** — If something breaks, the dashboard should show it clearly (not silent failures).
-3. **Bias toward action** — Default to shipping incremental improvements over perfect plans.
-4. **Modular architecture** — New strategies/indicators plug in without rewriting core logic.
-5. **Empty-safe env vars** — Always use `os.getenv("VAR") or default` pattern, never `os.getenv("VAR", default)` to handle Railway's empty string references.
+1. **Single source of truth** — Data lives in PostgreSQL, displayed in many places (Discord, UI, briefs)
+2. **Fail visible** — If data is stale or missing, say so explicitly. Never silently use bad data.
+3. **Bias toward action** — Ship incremental improvements over perfect plans
+4. **Modular architecture** — New factors, signals, and strategies plug in without rewriting core
+5. **Brief-driven development** — Architecture decisions happen in Claude.ai conversations. Implementation specs are written as markdown briefs and handed to Codex for building.
+6. **Empty-safe env vars** — Always use `os.getenv("VAR") or default` pattern, never `os.getenv("VAR", default)` to handle Railway's empty string references.
 
 ---
 
@@ -48,52 +47,113 @@ The app must deliver:
 | 2 | URSA MINOR | Lean bearish — reduced size shorts |
 | 1 | URSA MAJOR | Strongly bearish — full size shorts |
 
-### Indicator Categories (Keep Separate)
-- **Execution Strategies** — Entry/exit triggers (e.g., Triple Line Trend Retracement)
-- **Bias Indicators** — Directional filters, no entry signals (e.g., TICK Range Breadth, Dollar Smile)
-- **Black Swan Monitors** — Event-driven alerts (e.g., Truth Social scanner)
+### Factor Categories (Keep Separate)
+- **MACRO** — Economic/credit indicators (yield curve, HY OAS, CAPE, claims, ISM, DXY)
+- **TECHNICAL** — Price-based indicators (SPY SMA/EMA distance, VIX regime, sector rotation)
+- **FLOW** — Order flow and sentiment (options sentiment, put/call ratio, UW flow, dark pool)
+- **BREADTH** — Market internals (TICK breadth, market breadth, advance/decline)
+
+### Signal Sources
+- **TradingView webhooks** — Strategy alerts, Whale Hunter, Circuit Breaker, Scout
+- **Unusual Whales** — Options flow alerts (via Discord Premium Bot monitoring)
+- **UW Screenshots** — Manual screenshots analyzed by Pivot via Gemini Vision
+- **Trade Ideas** — Manual trade concepts evaluated by Pivot
+
+### Risk Rules (from Playbook v2.1)
+- Max 5% account risk per trade
+- Max 2 correlated positions simultaneously
+- Circuit Breaker overrides bias during extreme market events
+- DEFCON system monitors behavioral patterns and market confluence
 
 ---
 
 ## Technical Stack
 
 | Component | Tool | Details |
-|-----------|------|--------|
+|-----------|------|---------|
 | Backend | FastAPI (Python 3.12) | REST + WebSocket, deployed on Railway |
-| Database | PostgreSQL | Railway-hosted, same project as backend |
-| Cache | Redis | Real-time state, requires SSL (`rediss://`) |
-| Frontend | Vanilla JS PWA | No framework, dark teal UI |
-| Discord Bot | discord.py + Gemini | Runs on Hetzner VPS as systemd service |
+| Database | PostgreSQL | Railway-hosted (fabulous-essence project) |
+| Cache | Redis (Upstash) | Real-time state, requires SSL (`rediss://`) |
+| Frontend | Vanilla JS PWA | No framework, dark teal UI, 6-tab analytics |
+| Discord Bot | discord.py + Gemini Pro | VPS: 188.245.250.2 (`/opt/pivot`) |
+| LLM | Gemini Pro via OpenRouter | Analysis, evaluation, briefs |
 | Charts | TradingView embed | Webhook alerts for automation |
 | Version Control | GitHub | `303webhouse/pandoras-box`, push to `main` auto-deploys Railway |
-| VPS | Hetzner (PIVOT-EU) | 188.245.250.2, Ubuntu, hosts Discord bot |
+| VPS | Hetzner (PIVOT-EU) | 188.245.250.2, Debian, hosts bot + collector |
 
 ---
 
 ## Deployment Rules
 
-- **Railway backend**: Auto-deploys on push to `main`. Never configure database variables with `${{Postgres.*}}` references across different Railway projects — they must be in the same project.
+- **Railway backend**: Auto-deploys on push to `main`. Postgres must be in the SAME Railway project — never use `${{Postgres.*}}` references across different projects.
 - **VPS Discord bot**: Manual deploy via SSH → `git pull` → `systemctl restart pivot-bot`. Always check `journalctl -u pivot-bot -f` after restart.
-- **Environment variables**: Railway variables tab for backend, `.env` file on VPS for bot.
-- **One bot instance only**: The Discord bot runs on VPS only. Do not run a second instance on Railway (causes duplicate gateway connections).
+- **One bot instance only**: The Discord bot runs on VPS only. Never run a second instance on Railway (causes duplicate gateway connections).
+- **VPS has TWO services**: `pivot-bot.service` (Discord bot) and `pivot-collector.service` (data collector). Both managed via systemd.
+- **bot.py source of truth**: Edit `backend/discord_bridge/bot.py` in the repo. The VPS copy at `/opt/pivot/discord_bridge/bot.py` is synced from git.
 
 ---
 
 ## Workflow Rules
 
-- **Strategy evaluation:** Viability check → optimal timeframe → concise summary → add to approved list
-- **New indicators:** Classify as execution vs. bias BEFORE building
-- **This file:** Read before making suggestions or building features
-- **UI for new features:** Before building a new module, scanner, or feature, ask Nick how it should appear on the UI — provide suggestions but get explicit approval on layout/placement
-- **Step-by-step guidance:** Nick has ADHD — break complex tasks into small, manageable chunks
+- **Architecture decisions**: Discuss in Claude.ai with Nick → document rationale
+- **Implementation**: Write detailed markdown brief → hand to Codex → deploy → verify
+- **New indicators**: Classify as MACRO/TECHNICAL/FLOW/BREADTH before building
+- **New signals**: Must include evaluation template in `pivot/llm/prompts.py`
+- **UI changes**: Ask Nick how it should look — suggest options but get approval
+- **Prompt changes**: `prompts.py` is Pivot's brain — edit carefully, test in Discord after deploy
+- **Step-by-step guidance**: Nick has ADHD — break complex tasks into small, manageable chunks
 - **Use Claude Code for implementation, Claude.ai for architecture/planning**
+
+---
+
+## Agent Maintenance Protocol
+
+**All Claude.ai (Opus) and Claude Code (Codex/Sonnet) agents must follow these rules to maintain project continuity.**
+
+### 1. Update Documentation After Significant Changes
+
+| Change Type | Update These Files |
+|-------------|-------------------|
+| New module, subsystem, or major feature | `DEVELOPMENT_STATUS.md`, `CLAUDE.md` |
+| New API endpoint | `CLAUDE.md` (key files section) |
+| New database table | `DEVELOPMENT_STATUS.md` |
+| New factor or signal source | `CLAUDE.md` (subsystems), `PROJECT_RULES.md` (if new category) |
+| Strategy or risk rule change | `PROJECT_RULES.md`, update Playbook reference |
+| Bug fix for a known issue | `DEVELOPMENT_STATUS.md` (remove from known issues) |
+| Architecture decision with rationale | `DEVELOPMENT_STATUS.md` |
+
+### 2. Track What's Real vs Planned
+
+**Never describe planned/unbuilt features as if they exist.** If unsure whether something has been implemented, check:
+- `DEVELOPMENT_STATUS.md` for build status
+- The actual codebase (grep for the function/endpoint/table)
+- Railway health endpoint or VPS service status
+
+### 3. Maintain the Known State
+
+These values change and should be verified, not assumed:
+- Account balances (Robinhood, 401k, Breakout prop, Coinbase)
+- Number of active factors and which ones are stale
+- Current bias composite level
+- What's deployed on Railway vs what's deployed on VPS (they can drift)
+
+### 4. Flag Contradictions
+
+If documentation contradicts the actual code, **fix the documentation** and note it. The code is the source of truth.
+
+### 5. Preserve Decision Context
+
+When making architecture decisions, document **why** not just **what**. Future agents need to understand the reasoning.
+- ❌ "Added DXY factor with weight 0.05"
+- ✅ "Added DXY factor with weight 0.05 — kept low because dollar strength is a secondary confirmation signal, not a primary equity rotation driver."
 
 ---
 
 ## Pending Automation Targets
 
-- [ ] Dollar Smile macro bias (DXY + VIX via TradingView webhooks)
-- [ ] TICK Range Breadth daily auto-pull
-- [ ] UW Dashboard API scraping (Phase 2D)
+- [ ] UW Dashboard API scraping (Phase 2F)
 - [ ] Auto-scout: screen UW flow + Alpha Feed ideas → Discord picks (Phase 2G)
-- [ ] Dark Pool Whale Hunter PineScript integration into Pivot ecosystem
+- [ ] Crypto autonomous trading sandbox (Coinbase)
+- [ ] Robinhood trade import (CSV parser, signal matching)
+- [ ] DXY macro factor (in Codex brief)
+- [ ] Dark Pool Whale Hunter RVOL conviction modifier
