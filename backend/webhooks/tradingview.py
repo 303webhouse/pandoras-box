@@ -141,11 +141,10 @@ async def process_scout_signal(alert: TradingViewAlert, start_time: datetime):
 
     signal_data = await attach_bias_snapshot(signal_data)
 
+    # Persist first to avoid Redis/DB divergence.
+    await log_signal(signal_data)
     # Cache with shorter TTL (30 mins instead of 1 hour)
     await cache_signal(signal_id, signal_data, ttl=1800)
-
-    # Log to database
-    await log_signal(signal_data)
 
     # Broadcast to UI - use dedicated scout broadcast (no priority threshold)
     await manager.broadcast({
@@ -208,9 +207,9 @@ async def process_exhaustion_signal(alert: TradingViewAlert, start_time: datetim
     signal_data = await apply_signal_scoring(signal_data)
     signal_data = await attach_bias_snapshot(signal_data)
     
-    # Cache, log, and broadcast
-    await cache_signal(signal_id, signal_data, ttl=3600)
+    # Persist first to avoid Redis/DB divergence.
     await log_signal(signal_data)
+    await cache_signal(signal_id, signal_data, ttl=3600)
     await manager.broadcast_signal_smart(signal_data, priority_threshold=75.0)
     
     elapsed = (datetime.now() - start_time).total_seconds() * 1000
@@ -264,9 +263,9 @@ async def process_sniper_signal(alert: TradingViewAlert, start_time: datetime):
     signal_data = await apply_signal_scoring(signal_data)
     signal_data = await attach_bias_snapshot(signal_data)
     
-    # Cache, log, and broadcast
-    await cache_signal(signal_id, signal_data, ttl=3600)
+    # Persist first to avoid Redis/DB divergence.
     await log_signal(signal_data)
+    await cache_signal(signal_id, signal_data, ttl=3600)
     await manager.broadcast_signal_smart(signal_data, priority_threshold=75.0)
     
     elapsed = (datetime.now() - start_time).total_seconds() * 1000
@@ -336,9 +335,9 @@ async def process_triple_line_signal(alert: TradingViewAlert, start_time: dateti
     signal_data = await apply_signal_scoring(signal_data)
     signal_data = await attach_bias_snapshot(signal_data)
     
-    # Cache, log, and broadcast
-    await cache_signal(signal_id, signal_data, ttl=3600)
+    # Persist first to avoid Redis/DB divergence.
     await log_signal(signal_data)
+    await cache_signal(signal_id, signal_data, ttl=3600)
     await manager.broadcast_signal_smart(signal_data, priority_threshold=75.0)
     
     elapsed = (datetime.now() - start_time).total_seconds() * 1000
@@ -388,8 +387,9 @@ async def process_generic_signal(alert: TradingViewAlert, start_time: datetime):
     signal_data = await apply_signal_scoring(signal_data)
     signal_data = await attach_bias_snapshot(signal_data)
     
-    await cache_signal(signal_id, signal_data, ttl=3600)
+    # Persist first to avoid Redis/DB divergence.
     await log_signal(signal_data)
+    await cache_signal(signal_id, signal_data, ttl=3600)
     await manager.broadcast_signal_smart(signal_data, priority_threshold=75.0)
     
     elapsed = (datetime.now() - start_time).total_seconds() * 1000

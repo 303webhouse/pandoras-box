@@ -15,6 +15,34 @@ from dotenv import load_dotenv
 logger = logging.getLogger(__name__)
 
 
+def _sanitize_for_json(obj: Any) -> Any:
+    """Convert nested payloads into JSON-serializable values."""
+    if isinstance(obj, dict):
+        return {k: _sanitize_for_json(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_sanitize_for_json(item) for item in obj]
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    if isinstance(obj, Decimal):
+        return float(obj)
+
+    # Handle numpy-like scalars without importing numpy directly.
+    type_name = f"{type(obj).__module__}.{type(obj).__name__}".lower()
+    if "numpy" in type_name:
+        if "bool" in type_name:
+            return bool(obj)
+        if "int" in type_name:
+            return int(obj)
+        if "float" in type_name:
+            return float(obj)
+        if hasattr(obj, "tolist"):
+            try:
+                return obj.tolist()
+            except Exception:
+                return str(obj)
+    return obj
+
+
 def serialize_db_row(row_dict: Dict) -> Dict:
     """Convert database row to JSON-serializable dict"""
     result = {}
@@ -618,7 +646,7 @@ async def log_signal(
     signal_data: Dict[Any, Any],
     market_state: Optional[Dict[Any, Any]] = None,
     factor_snapshot: Optional[Dict[Any, Any]] = None,
-):
+) -> bool:
     """
     Log a new signal to the database
     This runs async to avoid blocking the main pipeline
@@ -649,7 +677,7 @@ async def log_signal(
         }
 
     async with pool.acquire() as conn:
-        await conn.execute("""
+        result = await conn.execute("""
             INSERT INTO signals (
                 signal_id, timestamp, strategy, ticker, asset_class,
                 direction, signal_type, entry_price, stop_loss, target_1,
@@ -681,8 +709,8 @@ async def log_signal(
             signal_data.get('line_separation'),
             signal_data.get('score'),
             signal_data.get('bias_alignment'),
-            json.dumps(triggering_factors) if triggering_factors is not None else None,
-            json.dumps(bias_at_signal) if bias_at_signal is not None else None,
+            json.dumps(_sanitize_for_json(triggering_factors)) if triggering_factors is not None else None,
+            json.dumps(_sanitize_for_json(bias_at_signal)) if bias_at_signal is not None else None,
             signal_data.get("notes"),
             calendar_fields.get("day_of_week"),
             calendar_fields.get("hour_of_day"),
@@ -690,6 +718,10 @@ async def log_signal(
             calendar_fields.get("days_to_earnings"),
             calendar_fields.get("market_event"),
         )
+        inserted = str(result).strip().endswith("1")
+        if not inserted:
+            logger.warning("Signal insert skipped (duplicate signal_id=%s)", signal_data.get("signal_id"))
+        return inserted
 
 async def update_signal_action(signal_id: str, action: str):
     """
@@ -1068,7 +1100,7 @@ async def update_signal_with_score(signal_id: str, score: float, bias_alignment:
             UPDATE signals 
             SET score = $2, bias_alignment = $3, triggering_factors = $4
             WHERE signal_id = $1
-        """, signal_id, score, bias_alignment, json.dumps(triggering_factors))
+        """, signal_id, score, bias_alignment, json.dumps(_sanitize_for_json(triggering_factors)))
 
 
 async def update_signal_outcome(

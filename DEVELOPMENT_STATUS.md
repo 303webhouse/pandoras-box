@@ -72,6 +72,7 @@ This is the single source of truth for what has been built, what's in progress, 
 - Trade idea evaluation with entry/stop/target/conviction
 - Signal type differentiation (Whale Hunter vs UW flow vs manual)
 - Market context injection (current bias, recent signals, factor states)
+- Channel-scoped conversation memory in `#pivot-chat` (rolling history with token budget trimming)
 - EOD daily brief generation
 
 ---
@@ -139,7 +140,7 @@ These upgrades have been specified as markdown briefs and handed to Codex for im
 
 | # | Brief | Priority | Status |
 |---|-------|----------|--------|
-| 1 | SPY price feed fix (yfinance split-unadjusted data) | URGENT | Deployed to Codex |
+| 1 | SPY price feed fix (yfinance split-unadjusted data) | URGENT | Implemented in code (deploy verification pending) |
 | 2 | Factor freshness indicator in EOD brief | HIGH | Deployed to Codex |
 | 3 | Convergence summary in EOD brief | HIGH | Deployed to Codex |
 | 4 | UW screenshot request scheduler (10AM, 3PM, 4:05PM ET) | MEDIUM | Deployed to Codex |
@@ -188,11 +189,11 @@ Alert monitors: bias shift detection, CTA zone proximity, factor velocity (rapid
 
 ## Known Issues (as of Feb 19, 2026)
 
-- ⚠️ **SPY price feed**: yfinance may return ~$228 instead of ~$686 (split-unadjusted). Corrupts 9 EMA and 200 SMA distance factors. Fix in Codex brief.
+- ⚠️ **SPY price feed verification pending**: Guardrails were added in `backend/bias_engine/factor_utils.py` (live quote validation + fallback), but production deployment/runtime verification is still required.
 - ⚠️ **Stale factors**: options_sentiment, put_call_ratio, and savita_indicator have reliability issues. EOD brief doesn't indicate which are fresh vs stale yet.
 - ⚠️ **Analytics tables mostly empty**: System deployed but needs signal accumulation time and trade imports to populate meaningful data.
 - ⚠️ **Trade journal has no historical data**: Robinhood import system designed but not built yet.
-- ⚠️ **Signal persistence gap**: Signals may write to Redis but fail silently on PostgreSQL insert. Needs investigation if analytics show zero rows.
+- ⚠️ **Signal persistence verification pending**: DB-first persistence guardrails were added (webhooks + schedulers) to prevent Redis-only signals, but production runtime verification is still required.
 
 ---
 

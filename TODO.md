@@ -8,8 +8,6 @@ Prioritized list of what needs building, fixing, or improving. For full phase de
 
 ## 🔴 Critical Fixes
 
-- [ ] **SPY price feed** — yfinance returns split-unadjusted data (~$228 vs ~$686). Corrupts 9 EMA and 200 SMA distance factors. Codex brief deployed.
-- [ ] **Signal persistence** — Signals may write to Redis but silently fail PostgreSQL insert. Investigate if analytics tables show zero signal rows.
 
 ---
 
@@ -54,6 +52,8 @@ Prioritized list of what needs building, fixing, or improving. For full phase de
 
 ## ✅ Recently Completed
 
+- [x] **Signal persistence hardening** - Enforced DB-first signal persistence (webhooks and schedulers), skipped Redis/broadcast on DB write failure for scheduled signals, and fixed CTA `signal_outcomes.symbol` fallback to ticker
+- [x] **SPY price feed fix** - Added SPY quote validation and fallback handling in `backend/bias_engine/factor_utils.py` to prevent split-scale mismatches from corrupting 9 EMA / 200 SMA factors (deploy verification pending)
 - [x] Railway Postgres fix — moved to same project (fabulous-essence), linked via `${{Postgres.*}}`
 - [x] Documentation overhaul — CLAUDE.md, CODEX.md, PROJECT_SUMMARY.md, PROJECT_RULES.md rewritten
 - [x] DEVELOPMENT_STATUS.md — Full phase roadmap with system component inventory

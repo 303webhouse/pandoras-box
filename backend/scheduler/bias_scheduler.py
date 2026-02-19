@@ -3039,7 +3039,8 @@ async def run_cta_scan_scheduled():
             else:
                 trade_signal["confidence"] = "LOW"
             
-            # Log to PostgreSQL (permanent record)
+            # Persist first; skip Redis/broadcast if DB write fails.
+            db_persisted = False
             try:
                 await log_signal(trade_signal)
                 await update_signal_with_score(
@@ -3048,9 +3049,12 @@ async def run_cta_scan_scheduled():
                     bias_alignment,
                     triggering_factors
                 )
+                db_persisted = True
             except Exception as db_err:
-                logger.warning(f"Failed to log CTA signal to DB: {db_err}")
-            
+                logger.error("Skipping CTA signal %s due to DB persistence failure: %s", trade_signal.get("signal_id"), db_err)
+            if not db_persisted:
+                continue
+
             # Cache in Redis (for quick access)
             await cache_signal(trade_signal["signal_id"], trade_signal, ttl=7200)  # 2 hour TTL
 
@@ -3077,7 +3081,7 @@ async def run_cta_scan_scheduled():
                         ON CONFLICT (signal_id) DO NOTHING
                         """,
                         signal.get("signal_id"),
-                        signal.get("symbol"),
+                        signal.get("symbol") or ticker,
                         signal.get("signal_type"),
                         signal.get("direction"),
                         signal.get("cta_zone"),
@@ -3272,13 +3276,17 @@ async def run_crypto_scan_scheduled():
                 else:
                     trade_signal["confidence"] = "LOW"
                 
-                # Log to PostgreSQL
+                # Persist first; skip Redis/broadcast if DB write fails.
+                db_persisted = False
                 try:
                     await log_signal(trade_signal)
                     await update_signal_with_score(signal_id, score, bias_alignment, triggering_factors)
+                    db_persisted = True
                 except Exception as db_err:
-                    logger.warning(f"Failed to log crypto signal to DB: {db_err}")
-                
+                    logger.error("Skipping crypto signal %s due to DB persistence failure: %s", signal_id, db_err)
+                if not db_persisted:
+                    continue
+
                 # Cache in Redis (longer TTL for crypto since it's 24/7)
                 await cache_signal(signal_id, trade_signal, ttl=14400)  # 4 hour TTL
                 
