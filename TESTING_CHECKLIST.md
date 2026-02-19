@@ -1,133 +1,89 @@
-# ✅ Local Testing Checklist
+# Pivot — Post-Deploy Verification Checklist
 
-Print this out or keep it open while testing.
+**Last Updated:** February 19, 2026
 
----
-
-## Prerequisites (One-Time Setup)
-
-- [ ] Python 3.10+ installed (`python --version`)
-- [ ] Redis database ready (Upstash or local)
-- [ ] PostgreSQL database ready (Supabase or local)
-- [ ] `.env` file configured with database credentials
-- [ ] Dependencies installed (`pip install -r requirements.txt --break-system-packages`)
-- [ ] Database initialized (`python -c "from database.postgres_client import init_database; import asyncio; asyncio.run(init_database())"`)
+Run through this after any deployment to confirm everything is working.
 
 ---
 
-## Every Time You Start
+## After Railway Deploy (Backend)
 
-- [ ] Open Command Prompt #1 → `cd backend` → `python main.py`
-  - Wait for: "✅ Pandora's Box is live"
-  
-- [ ] Open Command Prompt #2 → `cd frontend` → `python -m http.server 3000`
-  - Wait for: "Serving HTTP on 0.0.0.0 port 3000"
-  
-- [ ] Open browser → http://localhost:3000
-  - Dashboard loads
-  - Connection status shows "Live" (green dot)
+- [ ] Health check passes:
+  ```bash
+  curl https://pandoras-box-production.up.railway.app/health
+  ```
+- [ ] Response includes: `"status":"healthy"`, `"postgres":"connected"`, `"redis":"ok"`
+- [ ] WebSocket connections count is ≥1 (bot should be connected)
+- [ ] Check Railway dashboard for build errors (fabulous-essence → pandoras-box → Deployments)
 
 ---
 
-## Populate Test Data (First Time)
+## After VPS Deploy (Discord Bot)
 
-- [ ] Open Command Prompt #3 → `cd backend` → `python test_signals.py`
-- [ ] Choose option `4` (Do everything)
-- [ ] Verify in browser:
-  - Bias indicators show TORO MAJOR/MINOR (green)
-  - Equity column shows ~8 signals
-  - Crypto column shows BTC/ETH/SOL signals
-
----
-
-## Test Functionality
-
-### Signal Management
-- [ ] Click **✕ Dismiss** on a signal → disappears from list
-- [ ] Click **✓ Select** on a signal → moves to "Open Positions"
-- [ ] Click **↻ Refresh** → re-queries backend
-
-### Timeframe Selector
-- [ ] Change from Weekly → Daily → Monthly
-- [ ] Signals update (if you have different timeframe data)
-
-### Tabs
-- [ ] Click "Watchlist" tab → shows watchlist signals
-- [ ] Click "Market-Wide" tab → shows all market signals
-
-### Multi-Device Sync
-- [ ] Open http://localhost:3000 on another device
-- [ ] Dismiss signal on Device A → disappears on Device B instantly
-- [ ] Select signal on Device B → appears in positions on Device A
+- [ ] Service is running:
+  ```bash
+  ssh root@188.245.250.2 "systemctl status pivot-bot"
+  ```
+- [ ] No crash in recent logs:
+  ```bash
+  ssh root@188.245.250.2 "journalctl -u pivot-bot --since '5 minutes ago'"
+  ```
+- [ ] Bot responds in Discord #pivot-chat (send a test message)
+- [ ] Collector is running (if collector changes were made):
+  ```bash
+  ssh root@188.245.250.2 "systemctl status pivot-collector"
+  ```
 
 ---
 
-## What Success Looks Like
+## After Webhook Changes
 
-✅ **Visual:**
-- Dark teal background
-- Lime green for bullish signals
-- Orange for bearish signals
-- Clean, readable layout
-
-✅ **Performance:**
-- Signals appear instantly when test script runs
-- No lag when clicking buttons
-- WebSocket reconnects if backend restarts
-
-✅ **Functionality:**
-- All buttons work
-- Signals move between sections correctly
-- Open positions display properly
-- Connection status accurate
+- [ ] Test TradingView webhook format:
+  ```bash
+  curl -X POST https://pandoras-box-production.up.railway.app/webhook/tradingview \
+    -H "Content-Type: application/json" \
+    -d '{"ticker":"SPY","strategy":"test","direction":"LONG","timeframe":"15m"}'
+  ```
+- [ ] Response is 200 with signal ID
+- [ ] Signal appears in Discord (if bot is connected)
+- [ ] Signal appears in PostgreSQL signals table
 
 ---
 
-## Common Issues & Fixes
+## After Bot Personality/Prompt Changes
 
-### "Module not found" errors
-```bash
-pip install -r requirements.txt --break-system-packages --force-reinstall
-```
-
-### Backend won't start
-- Check `.env` has correct database credentials
-- Verify Redis/PostgreSQL are accessible
-- Look at error message in terminal
-
-### No test signals appear
-- Verify backend is running (check terminal #1)
-- Run test script again: `python test_signals.py` → option 1
-- Check browser console (F12) for errors
-
-### WebSocket won't connect
-- Backend must be running first
-- Check firewall isn't blocking port 8000
-- Restart browser
+- [ ] Updated `pivot/llm/prompts.py` deployed to VPS
+- [ ] Bot responds with updated behavior in #pivot-chat
+- [ ] Playbook v2.1 references are intact (check system prompt includes risk rules)
+- [ ] Bias challenge behavior works (test with a directionally biased question)
 
 ---
 
-## When You're Done Testing
+## After Factor/Collector Changes
 
-- [ ] Press any key in Command Prompt #1 (backend stops)
-- [ ] Press Ctrl+C in Command Prompt #2 (frontend stops)
-- [ ] Close browser tabs
-
-**OR if you used `start.bat`:**
-- [ ] Go back to the batch file window
-- [ ] Press any key → stops everything automatically
-
----
-
-## Next Steps After Successful Testing
-
-- [ ] Read `PROJECT_SUMMARY.md` to understand architecture
-- [ ] Review code comments to see how it works
-- [ ] Check `TODO.md` for aesthetic improvements
-- [ ] Deploy to production (see `QUICK_START.md` Step 10)
-- [ ] Configure real TradingView webhooks
-- [ ] Start receiving live trading signals!
+- [ ] Collector service restarted:
+  ```bash
+  ssh root@188.245.250.2 "systemctl restart pivot-collector"
+  ```
+- [ ] Factor data appearing in Redis (check via bias endpoint)
+- [ ] Factor history writing to PostgreSQL
+- [ ] EOD brief reflects new/updated factors
 
 ---
 
-**Everything working? You're ready for production deployment!**
+## After Database Schema Changes
+
+- [ ] Migration applied to Railway PostgreSQL
+- [ ] Health endpoint still shows `postgres: connected`
+- [ ] No errors in Railway deploy logs related to DB
+- [ ] Existing data preserved (check row counts on critical tables)
+
+---
+
+## Weekly Sanity Checks
+
+- [ ] Railway billing: free tier $5/month credit not exceeded
+- [ ] VPS disk space: `ssh root@188.245.250.2 "df -h"`
+- [ ] Bot uptime: `ssh root@188.245.250.2 "systemctl show pivot-bot --property=ActiveEnterTimestamp"`
+- [ ] Stale factors: Check which factors haven't updated recently
+- [ ] Signal accumulation: Are new signals being logged to PostgreSQL?
