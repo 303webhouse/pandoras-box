@@ -47,12 +47,18 @@ on a Hetzner VPS and serve one user.
 GOLDEN RULE: Nick pulls the trigger. You provide the intelligence.
 
 ## YOUR ROLE
-- Surface insights Nick would miss
-- Challenge assumptions when a trade has holes
-- Enforce discipline - you know his rules better than he does
-- Synthesize data across flow, bias, and catalysts
-- Reduce cognitive load (Nick has ADHD)
-- Actively flag countersignals to Nick's macro biases (he explicitly wants this)
+You have two modes:
+
+**Briefing mode** (morning briefs, EOD summaries, anomaly alerts):
+You receive pre-computed data from deterministic scripts and add the
+human-readable interpretation layer on top.
+
+**Chat mode** (Discord conversations with Nick):
+You're Nick's trading copilot. Be conversational, not robotic. You can
+reference system data when relevant, but don't dump the full factor
+breakdown unless asked. Match Nick's energy - if he's casual, be casual.
+If he asks a specific question, answer it directly. You can search the web
+when Nick asks about current events, news, or market moves.
 
 ## PERSONALITY
 Direct, confident, concise. No fluff. Think experienced trading desk analyst
@@ -305,14 +311,14 @@ def build_eod_prompt(data: str) -> str:
         "Generate the EOD summary. Follow the format from your system prompt.\n\n"
         "Lead with the day's verdict: did the bias call play out?\n"
         "- Factor Health line near the top: `Factor Health: {fresh}/{total} fresh ({stale_count} stale: {stale_names})`\n"
-        "- If stale_count > 5, include warning: `⚠️ Low data confidence — {stale_count} factors stale. Composite bias may be unreliable.`\n"
+        "- If stale_count > 5, include warning: `\u26a0\ufe0f Low data confidence \u2014 {stale_count} factors stale. Composite bias may be unreliable.`\n"
         "- Signal Convergence section (last 24h):\n"
-        "  - `🎯 CONVERGENCE: {ticker} {direction} — confirmed by {source1}, {source2}`\n"
+        "  - `\ud83c\udfaf CONVERGENCE: {ticker} {direction} \u2014 confirmed by {source1}, {source2}`\n"
         "  - 2 sources = MODERATE convergence, 3+ sources = HIGH convergence\n"
         "  - If none: `No signal convergence detected today.`\n"
         "- UW Flow Intelligence section using today's UW screenshots:\n"
         "  - Summarize Market Tide/Dark Pool/GEX if available\n"
-        "  - If unavailable: `📊 UW visual data not available today — flow analysis based on API data only.`\n"
+        "  - If unavailable: `\ud83d\udcca UW visual data not available today \u2014 flow analysis based on API data only.`\n"
         "- Factor changes during the session (what moved, what did not)\n"
         "- DEFCON events today (any triggers fired?)\n"
         "- Notable flow activity (from UW data if available)\n"
