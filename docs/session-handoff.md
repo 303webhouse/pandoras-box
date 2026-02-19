@@ -33,3 +33,16 @@
 - Added JSON payload sanitization for PostgreSQL signal writes to avoid serialization failures on nested non-native numeric/datetime types.
 - Validation run: `python -m py_compile backend/database/postgres_client.py backend/webhooks/tradingview.py backend/scheduler/bias_scheduler.py` passed.
 - Remaining follow-up: deploy and monitor logs for new DB-persistence error lines to confirm no silent divergence in production.
+
+## 2026-02-19 (deployment verification)
+
+- Pushed commit `db5b9b5` to `origin/main`.
+- Deployed on VPS `188.245.250.2`:
+  - `cd /opt/repo && git pull origin main`
+  - `cd /opt/repo && bash pivot/deploy.sh --update`
+- Runtime services after deploy:
+  - `pivot-bot.service`: active/running
+  - `pivot-collector.service`: active/running
+- Journal check showed clean startup with Discord gateway connection and scheduler jobs loaded; no import/runtime crashes from this deployment.
+- Noted deploy warning during rsync: `cannot delete non-empty directory: tools` (deployment still completed successfully).
+- Scope note: this VPS runs pivot bot/collector from `/opt/pivot`; backend API persistence changes (`backend/webhooks`, `backend/database`, `backend/scheduler`) are expected to deploy via the backend hosting path (Railway), not this host.
