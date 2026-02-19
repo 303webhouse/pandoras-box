@@ -56,7 +56,7 @@ The system must deliver:
 ### Signal Sources
 - **TradingView webhooks** — Strategy alerts, Whale Hunter, Circuit Breaker, Scout
 - **Unusual Whales** — Options flow alerts (via Discord Premium Bot monitoring)
-- **UW Screenshots** — Manual screenshots analyzed by Pivot via Gemini Vision
+- **UW Screenshots** — Manual screenshots analyzed by Pivot via Claude Vision
 - **Trade Ideas** — Manual trade concepts evaluated by Pivot
 
 ### Risk Rules (from Playbook v2.1)
@@ -75,8 +75,8 @@ The system must deliver:
 | Database | PostgreSQL | Railway-hosted (fabulous-essence project) |
 | Cache | Redis (Upstash) | Real-time state, requires SSL (`rediss://`) |
 | Frontend | Vanilla JS PWA | No framework, dark teal UI, 6-tab analytics |
-| Discord Bot | discord.py + Gemini Pro | VPS: 188.245.250.2 (`/opt/pivot`) |
-| LLM | Gemini Pro via OpenRouter | Analysis, evaluation, briefs |
+| Discord Bot | discord.py | VPS: 188.245.250.2 (`/opt/pivot`) |
+| LLM | Claude Sonnet 4.6 via OpenRouter | `anthropic/claude-sonnet-4.6` — analysis, evaluation, briefs |
 | Charts | TradingView embed | Webhook alerts for automation |
 | Version Control | GitHub | `303webhouse/pandoras-box`, push to `main` auto-deploys Railway |
 | VPS | Hetzner (PIVOT-EU) | 188.245.250.2, Debian, hosts bot + collector |
