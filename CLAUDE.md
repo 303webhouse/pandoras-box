@@ -4,11 +4,68 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Pandora's Box: Real-time trading signal dashboard with multi-device sync and sub-100ms latency. Includes a companion BTC crypto scalping system.
+Pandora's Box (codename **Pivot**): A real-time trading signal dashboard and AI-powered Discord trading assistant. The system processes TradingView alerts through automated strategies and bias filters, broadcasts trade recommendations via WebSocket, and provides interactive market analysis through a Discord bot.
+
+## Deployment Architecture
+
+### Production Infrastructure
+| Component | Platform | Details |
+|-----------|----------|---------|
+| **Backend API** | Railway (fabulous-essence) | FastAPI + WebSocket, auto-deploys from GitHub `main` |
+| **PostgreSQL** | Railway (fabulous-essence) | Same project as backend, linked via `${{Postgres.*}}` references |
+| **Discord Bot** | VPS (PIVOT-EU, 188.245.250.2) | Hetzner, runs as `pivot-bot.service` systemd unit |
+| **GitHub Repo** | 303webhouse/pandoras-box | Single `main` branch, pushes trigger Railway deploy |
+
+### Railway Service (pandoras-box)
+- **URL**: `pandoras-box-production.up.railway.app`
+- **Health**: `GET /health` → returns postgres/redis/websocket status
+- **Procfile**: `web: sh -c "cd backend && python -m uvicorn main:app --host 0.0.0.0 --port $PORT"`
+- **Runtime**: Python 3.12.8
+- **Region**: us-west2
+
+### VPS Discord Bot (PIVOT-EU)
+- **Host**: root@188.245.250.2
+- **Code location**: `/opt/pandoras-box/`
+- **Service**: `systemctl status pivot-bot` / `journalctl -u pivot-bot -f`
+- **Deploy**: `cd /opt/pandoras-box && git pull && systemctl restart pivot-bot`
+- **Intents**: Full (members + message_content + presences enabled in Discord Developer Portal)
+
+### Environment Variables
+
+Railway variables (pandoras-box service → Variables tab):
+- `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` → linked via `${{Postgres.*}}` references
+- `DISCORD_BOT_TOKEN`, `DISCORD_TOKEN`, `DISCORD_FLOW_CHANNEL_ID`, `DISCORD_WEBHOOK_SIGNALS`
+- `COINALYZE_API_KEY`, `CRYPTO_BINANCE_PERP_HTTP_PROXY`
+- `FRED_API_KEY`, `GEMINI_API_KEY`, `PIVOT_API_KEY`
+
+**Important pattern for env vars** — always use `or` instead of default parameter to handle empty strings:
+```python
+# CORRECT — handles empty string from Railway references
+DB_HOST = os.getenv("DB_HOST") or "localhost"
+DB_PORT = int(os.getenv("DB_PORT") or 5432)
+
+# WRONG — os.getenv returns '' (not None) when var exists but is empty
+DB_HOST = os.getenv("DB_HOST", "localhost")  # returns '' not 'localhost'
+DB_PORT = int(os.getenv("DB_PORT", 5432))    # int('') crashes
+```
 
 ## Commands
 
-### Main Trading Hub (port 8000)
+### Deploy Backend (Railway — automatic)
+```bash
+# Push to main triggers auto-deploy
+git add . && git commit -m "feat: description" && git push origin main
+```
+
+### Deploy Discord Bot (VPS — manual)
+```bash
+ssh root@188.245.250.2
+cd /opt/pandoras-box && git pull origin main
+systemctl restart pivot-bot
+journalctl -u pivot-bot -f  # verify startup
+```
+
+### Local Development
 ```bash
 # Start backend
 cd backend && python main.py
@@ -16,25 +73,16 @@ cd backend && python main.py
 # Start frontend (separate terminal)
 cd frontend && python -m http.server 3000
 
-# Windows quick start (runs both + opens browser)
-start.bat
-```
-
-### Crypto Scalper (port 8001)
-```bash
-cd crypto-scalper
-start.bat
-# Or manually:
-cd crypto-scalper/backend && uvicorn main:app --host 0.0.0.0 --port 8001 --reload
-```
-
-### Discord Bot
-```bash
+# Run Discord bot locally
 python run_discord_bot.py
+
+# Windows quick start (backend + frontend + browser)
+start.bat
 ```
 
-### Database Initialization
+### Database
 ```python
+# Initialize schema
 from backend.database.postgres_client import init_database
 import asyncio
 asyncio.run(init_database())
@@ -42,16 +90,16 @@ asyncio.run(init_database())
 
 ## Architecture
 
-### Signal Flow (target <30ms total)
+### Signal Flow
 ```
-TradingView Alert → POST /webhook/tradingview → Strategy Validator (10ms) →
-Bias Filter (5ms) → Signal Scorer (5ms) → Redis Cache (2ms) + PostgreSQL (async) →
-WebSocket Broadcast (3ms) → All Devices
+TradingView Alert → POST /webhook/tradingview → Strategy Validator →
+Bias Filter → Signal Scorer → Redis Cache + PostgreSQL (async) →
+WebSocket Broadcast → All Devices + Discord
 ```
 
 ### Two Applications
-- **Main Trading Hub** (`backend/`, `frontend/`): Equity signals, bias filters, TradingView webhooks
-- **Crypto Scalper** (`crypto-scalper/`): BTC perpetual futures, Bybit WebSocket, 4 scalping strategies
+- **Main Trading Hub** (`backend/`, `frontend/`): Equity signals, bias filters, TradingView webhooks, REST API
+- **Pivot Discord Bot** (`pivot/`, `run_discord_bot.py`): AI-powered trading assistant with market analysis
 
 ### Backend Structure (`backend/`)
 | Directory | Purpose |
@@ -67,9 +115,19 @@ WebSocket Broadcast (3ms) → All Devices
 | `alerts/` | Black swan detection, earnings calendar |
 | `discord_bridge/` | Unusual Whales data bridge |
 
+### Pivot Discord Bot (`pivot/`)
+| Directory | Purpose |
+|-----------|---------|
+| `bot.py` | Bot entry point, Discord gateway connection |
+| `llm/` | LLM integration (Gemini) for market analysis chat |
+| `collectors/` | Market data collectors |
+| `monitors/` | Market condition monitors |
+| `notifications/` | Discord notification handlers |
+| `scheduler/` | Scheduled tasks (market hours, data refresh) |
+
 ### Dual Database Pattern
 - **Redis**: Real-time state (<2ms), signals expire in 3600s, bias in 86400s
-- **PostgreSQL**: Permanent logging for backtesting, tables: signals, positions, options_positions, alerts, btc_sessions
+- **PostgreSQL**: Permanent logging for backtesting; tables: signals, positions, options_positions, alerts, btc_sessions
 
 ### WebSocket Messages
 ```python
@@ -85,11 +143,13 @@ WebSocket Broadcast (3ms) → All Devices
 1. Create `backend/strategies/[name].py`
 2. Import and register in `backend/webhooks/tradingview.py`
 3. Document in `docs/approved-strategies/`
+4. Add knowledgebase entry
 
 ### New Bias Filter
 1. Create `backend/bias_filters/[name].py`
 2. Add to signal processor pipeline
 3. Document in `docs/approved-bias-indicators/`
+4. Add knowledgebase entry
 
 ### New Knowledgebase Entry
 Every indicator, signal, strategy, filter, or scanner **must** have a corresponding entry in `data/knowledgebase.json`:
@@ -105,34 +165,12 @@ Every indicator, signal, strategy, filter, or scanner **must** have a correspond
 ```
 Reload cache: `POST /api/knowledgebase/reload`
 
-## Configuration
-
-Environment variables in `config/.env`:
-- `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`
-- `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`
-- `FRED_API_KEY`, `GEMINI_API_KEY`
-
 ## Key API Endpoints
 
-### Main Hub
-- `POST /webhook/tradingview` - Receive alerts
-- `GET /api/bias/{timeframe}` - Get bias level (DAILY/WEEKLY/MONTHLY)
-- `GET /api/positions` - Open positions
-- `GET /api/scanner` - Market scanner
-- `GET /api/btc-signals` - BTC macro signals
-- `WS /ws` - WebSocket connection
-
-### Crypto Scalper
-- `GET /api/signals` - Active BTC signals
-- `GET /api/strategies` - Strategy status
-- `GET /api/risk/status` - Account status
-- `GET /api/market` - Current market data
-- `WS /ws` - Real-time updates
-
-## Frontend
-
-PWA dashboard at `frontend/`:
-- `app.js`: WebSocket client + signal management
-- `styles.css`: Dark teal UI with lime/orange accents
-- `manifest.json`: PWA install config
-- `knowledgebase.html/js`: Strategy documentation viewer
+- `GET /health` — Service health check (postgres, redis, websocket status)
+- `POST /webhook/tradingview` — Receive TradingView alerts
+- `GET /api/bias/{timeframe}` — Get bias level (DAILY/WEEKLY/MONTHLY)
+- `GET /api/positions` — Open positions
+- `GET /api/scanner` — Market scanner
+- `GET /api/btc-signals` — BTC macro signals
+- `WS /ws` — WebSocket connection for real-time updates
