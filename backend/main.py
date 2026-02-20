@@ -180,6 +180,9 @@ async def get_bias_data(timeframe: str):
     if timeframe_lower == "composite":
         from api.bias import get_composite_bias
         return await get_composite_bias()
+    if timeframe_lower == "factor-health":
+        from api.bias import get_factor_health
+        return await get_factor_health()
     if timeframe_lower == "health":
         from api.bias import get_pivot_health
         return await get_pivot_health()
