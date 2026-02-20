@@ -407,3 +407,30 @@ Validation:
   - `systemctl restart pivot-bot` on `188.245.250.2`
   - Verified `pivot-bot.service` active/running after restart.
   - Followed logs via `journalctl -u pivot-bot -f` (bounded run) and confirmed Discord gateway reconnect + normal alert posting resumed.
+
+## 2026-02-20 (CTA Phase 2 - Selection Pipeline)
+
+- Started branch `fix/selection-pipeline` from `fix/scorer-integrity` (Phase 1 commit not yet in `origin/main` at implementation time).
+- Implemented score-first selection pipeline:
+  - `backend/scanners/cta_scanner.py`: `run_cta_scan()` now returns all signals in `top_signals` (scheduler owns final top-N selection).
+  - `backend/scheduler/bias_scheduler.py`: scheduler now scores all CTA signals first, sorts by computed score, then pushes top 10.
+- Implemented setup-aware cooldown:
+  - `backend/database/postgres_client.py`: `has_recent_active_signal()` now accepts optional `signal_type` filter.
+  - Scheduler now passes `signal_type` during cooldown checks (`ticker + strategy + signal_type`).
+- Preserved scorer explainability dicts in active-feed normalization:
+  - `backend/api/positions.py`: added `isinstance(tf, dict)` pass-through guard.
+- Demoted `ZONE_UPGRADE` from standalone signal to context bonus:
+  - `backend/scanners/cta_scanner.py`: zone upgrades no longer appended as standalone signals; zone context is injected into other signals per ticker.
+  - `backend/scanners/cta_scanner.py`: removed ZONE_UPGRADE confluence combo branch.
+  - `backend/scanners/cta_scanner.py`: removed `zone_upgrade_signals` from by-type scan response.
+  - `backend/scoring/trade_ideas_scorer.py`: removed `ZONE_UPGRADE` base score key and added `zone_upgrade_context` technical bonus handling.
+  - `backend/config/signal_profiles.py`: removed all `ZONE_UPGRADE` RR profile entries.
+- Validation completed:
+  - `python -m compileall backend` passed.
+  - Backend import sanity passed from backend cwd (`python -c "import main; print('backend import OK')"`).
+  - Grep checks passed for:
+    - no `all_signals[:10]` in scanner/scheduler,
+    - `signal_type` support in `has_recent_active_signal`,
+    - dict-preserving triggering_factors guard in positions API,
+    - no `"ZONE_UPGRADE"` key in scorer base score map,
+    - no `ZONE_UPGRADE` entries in `signal_profiles.py`.

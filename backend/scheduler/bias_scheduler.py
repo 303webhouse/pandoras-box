@@ -2949,17 +2949,25 @@ async def run_cta_scan_scheduled():
         # Get current bias status for alignment check
         bias_status = get_bias_status()
         
-        # Push each signal to Trade Ideas via WebSocket
-        pushed_count = 0
+        # Score all signals first, then select top 10 by score for push/persistence
+        scored_signals = []
         cooldown_hours = int(os.getenv("CTA_SIGNAL_COOLDOWN_HOURS", "24"))
-        for signal in all_signals[:10]:  # Limit to top 10
+        for signal in all_signals:
             ticker = signal.get("symbol")
             if not ticker:
                 continue
 
             try:
-                if await has_recent_active_signal(ticker, cooldown_hours, strategy="CTA Scanner"):
-                    logger.info(f"â³ Skipping CTA signal for {ticker} (cooldown {cooldown_hours}h)")
+                if await has_recent_active_signal(
+                    ticker,
+                    cooldown_hours,
+                    strategy="CTA Scanner",
+                    signal_type=signal.get("signal_type"),
+                ):
+                    logger.info(
+                        f"â³ Skipping CTA signal for {ticker}/{signal.get('signal_type')} "
+                        f"(cooldown {cooldown_hours}h)"
+                    )
                     continue
             except Exception as dedupe_err:
                 logger.warning(f"CTA cooldown check failed for {ticker}: {dedupe_err}")
@@ -2987,7 +2995,8 @@ async def run_cta_scan_scheduled():
                 "asset_class": "EQUITY",
                 "status": "ACTIVE",
                 "cta_zone": signal.get("cta_zone"),
-                "notes": notes
+                "notes": notes,
+                "zone_upgrade_context": signal.get("zone_upgrade_context"),
             }
             
             # Calculate score using the new scoring algorithm
@@ -3006,7 +3015,30 @@ async def run_cta_scan_scheduled():
                 trade_signal["confidence"] = "MEDIUM"
             else:
                 trade_signal["confidence"] = "LOW"
-            
+
+            scored_signals.append({
+                "trade_signal": trade_signal,
+                "signal": signal,
+                "setup": setup,
+                "score": score,
+                "bias_alignment": bias_alignment,
+                "triggering_factors": triggering_factors,
+            })
+
+        # Sort by score (highest first) and push top 10
+        scored_signals.sort(key=lambda x: x.get("score", 0), reverse=True)
+
+        # Push each signal to Trade Ideas via WebSocket
+        pushed_count = 0
+        for scored in scored_signals[:10]:
+            trade_signal = scored["trade_signal"]
+            signal = scored["signal"]
+            setup = scored["setup"]
+            score = scored["score"]
+            bias_alignment = scored["bias_alignment"]
+            triggering_factors = scored["triggering_factors"]
+            ticker = trade_signal["ticker"]
+
             # Persist first; skip Redis/broadcast if DB write fails.
             db_persisted = False
             try:
@@ -3073,7 +3105,11 @@ async def run_cta_scan_scheduled():
         _scheduler_status["cta_scanner"]["signals_found"] = len(all_signals)
         _scheduler_status["cta_scanner"]["status"] = "completed"
         
-        logger.info(f"âœ… CTA scheduled scan complete - {pushed_count}/{len(all_signals)} signals pushed to Trade Ideas")
+        logger.info(
+            f"âœ… CTA scheduled scan complete - {pushed_count}/"
+            f"{min(10, len(scored_signals))} top-scored signals pushed "
+            f"({len(scored_signals)} eligible after cooldown)"
+        )
         
     except Exception as e:
         _scheduler_status["cta_scanner"]["status"] = f"error: {str(e)}"
