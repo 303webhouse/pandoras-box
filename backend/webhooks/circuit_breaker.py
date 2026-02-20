@@ -38,6 +38,9 @@ _circuit_breaker_state = {
     "description": None
 }
 
+REDIS_CIRCUIT_BREAKER_KEY = "bias:circuit_breaker"
+REDIS_CIRCUIT_BREAKER_TTL = 86400
+
 
 class CircuitBreakerTrigger(BaseModel):
     """Payload from TradingView circuit breaker alert"""
@@ -74,8 +77,53 @@ def reset_circuit_breaker() -> Dict[str, Any]:
         "description": None
     }
 
-    logger.info("🔓 Circuit breaker RESET - normal operations resumed")
+    logger.info("Circuit breaker reset - normal operations resumed")
     return {"status": "reset", "state": _circuit_breaker_state}
+
+
+async def _persist_circuit_breaker_state() -> None:
+    try:
+        from database.redis_client import get_redis_client
+
+        client = await get_redis_client()
+        if not client:
+            return
+        await client.setex(
+            REDIS_CIRCUIT_BREAKER_KEY,
+            REDIS_CIRCUIT_BREAKER_TTL,
+            json.dumps(_circuit_breaker_state),
+        )
+    except Exception as exc:
+        logger.warning(f"Failed to persist circuit breaker state: {exc}")
+
+
+async def restore_circuit_breaker_state() -> bool:
+    """
+    Restore circuit-breaker state from Redis after process restart.
+    """
+    global _circuit_breaker_state
+    try:
+        from database.redis_client import get_redis_client
+
+        client = await get_redis_client()
+        if not client:
+            return False
+        raw = await client.get(REDIS_CIRCUIT_BREAKER_KEY)
+        if not raw:
+            return False
+
+        restored = json.loads(raw)
+        if isinstance(restored, dict):
+            _circuit_breaker_state = restored
+            logger.info(
+                "Circuit breaker state restored (trigger=%s active=%s)",
+                _circuit_breaker_state.get("trigger"),
+                _circuit_breaker_state.get("active"),
+            )
+            return True
+    except Exception as exc:
+        logger.warning(f"Failed to restore circuit breaker state: {exc}")
+    return False
 
 
 async def apply_circuit_breaker(trigger: str) -> Dict[str, Any]:
@@ -165,7 +213,7 @@ async def apply_circuit_breaker(trigger: str) -> Dict[str, Any]:
 
     else:
         raise ValueError(f"Unknown circuit breaker trigger: {trigger}")
-
+    await _persist_circuit_breaker_state()
     return _circuit_breaker_state
 
 
@@ -234,6 +282,7 @@ async def get_circuit_breaker_status():
 async def reset_circuit_breaker_endpoint():
     """Manually reset circuit breaker"""
     result = reset_circuit_breaker()
+    await _persist_circuit_breaker_state()
 
     # Trigger bias refresh after reset
     try:

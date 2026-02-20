@@ -25,7 +25,7 @@ from datetime import datetime
 from enum import Enum
 
 from bias_engine.composite import FactorReading
-from bias_engine.factor_utils import score_to_signal, get_latest_price, neutral_reading
+from bias_engine.factor_utils import score_to_signal, get_latest_price, get_price_history, neutral_reading
 
 logger = logging.getLogger(__name__)
 
@@ -161,47 +161,46 @@ def calculate_vix_term_bias(vix: float, vix3m: float = None) -> Dict[str, Any]:
 
 async def auto_fetch_and_update() -> Dict[str, Any]:
     """
-    Auto-fetch VIX term structure data using yfinance and update bias.
+    DEPRECATED: Legacy auto-refresh path used by old scheduler routes.
+    Uses shared get_price_history() to preserve cache validation.
     """
     global _vix_term_state
-    
+
+    logger.warning("auto_fetch_and_update called for vix_term_structure (deprecated path)")
+
     try:
-        import yfinance as yf
-        
-        # Fetch VIX
-        vix = yf.Ticker("^VIX")
-        vix_hist = vix.history(period="5d")
-        
-        if len(vix_hist) < 1:
+        vix_hist = await get_price_history("^VIX", days=10)
+        if vix_hist is None or vix_hist.empty or "close" not in vix_hist.columns:
             logger.warning("No VIX data available")
             return {"status": "error", "message": "No VIX data"}
-        
-        vix_current = float(vix_hist['Close'].iloc[-1])
-        
-        # Try to fetch VIX3M (may not be available)
+
+        vix_current = float(vix_hist["close"].iloc[-1])
+
+        # Try to fetch VIX3M (may be unavailable in some sessions)
         vix3m_current = None
         try:
-            vix3m = yf.Ticker("^VIX3M")
-            vix3m_hist = vix3m.history(period="5d")
-            if len(vix3m_hist) >= 1:
-                vix3m_current = float(vix3m_hist['Close'].iloc[-1])
+            vix3m_hist = await get_price_history("^VIX3M", days=10)
+            if vix3m_hist is not None and not vix3m_hist.empty and "close" in vix3m_hist.columns:
+                vix3m_current = float(vix3m_hist["close"].iloc[-1])
         except Exception as e:
             logger.warning(f"VIX3M not available, using VIX-only fallback: {e}")
-        
-        # Calculate bias
+
         result = calculate_vix_term_bias(vix_current, vix3m_current)
         _vix_term_state.update(result)
         _vix_term_state["last_updated"] = datetime.now().isoformat()
-        _vix_term_state["data_source"] = "yfinance_auto"
-        
-        logger.info(f"📉 VIX Term Structure updated: {result['bias']} (VIX: {vix_current:.1f})")
-        
+        _vix_term_state["data_source"] = "shared_price_cache"
+
+        logger.info(
+            "VIX Term Structure updated: %s (VIX: %.1f)",
+            result["bias"],
+            vix_current,
+        )
+
         return {"status": "success", "data": _vix_term_state}
-        
+
     except Exception as e:
         logger.error(f"Error fetching VIX term structure data: {e}")
         return {"status": "error", "message": str(e)}
-
 
 def get_vix_term_status() -> Dict[str, Any]:
     """Get current VIX term structure bias status"""

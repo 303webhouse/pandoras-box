@@ -50,3 +50,235 @@
   - `GET /health` returned `status=healthy`, `redis=ok`, `postgres=connected` at `2026-02-19 14:02:36 EST`.
   - `GET /api/signals/debug` returned matching active counts (`redis.count=26`, `postgresql.active_count=26`).
   - `GET /api/analytics/schema-status` returned non-zero persistence tables (`signals.rows=26`, `signal_outcomes.rows=23`, `factor_history.rows=48`, `price_history.rows=98396`).
+
+## 2026-02-19 (OpenClaw local audit)
+
+- Searched `c:\trading-hub` and local user paths for OpenClaw-related files to verify bot architecture.
+- Confirmed repository runtime is a custom Pivot Discord bot (`pivot/bot.py`, `backend/discord_bridge/bot.py`), while OpenClaw appears only in documentation/spec references.
+- Found local OpenClaw tooling install and state paths (`C:\Users\nickh\AppData\Roaming\npm\node_modules\openclaw`, `C:\Users\nickh\.openclaw`, `C:\tmp\openclaw\openclaw-2026-02-19.log`) but no running OpenClaw process/service.
+- No code or config changes made in this audit session.
+
+## 2026-02-19 (OpenClaw capability check for migration)
+
+- Verified installed OpenClaw version on this machine: `2026.2.2-3`.
+- Confirmed native support exists for all three migration prerequisites:
+  - Discord read/write actions (`openclaw message read|send`, plus Discord tool actions such as `readMessages`/`sendMessage` in docs).
+  - Webhook receiver endpoints (`POST /hooks/wake`, `POST /hooks/agent`) with token auth.
+  - Built-in cron scheduler (`openclaw cron add/list/run`, isolated/main session modes, delivery routing).
+- Nuance noted: OpenClaw docs clearly cover its own native slash commands and Discord message actions; programmatic invocation of third-party Discord slash commands was not explicitly confirmed in docs during this check.
+
+## 2026-02-19 (OpenClaw VPS PoC deploy: Pivot II)
+
+- Deployed OpenClaw on VPS `188.245.250.2` alongside existing Pivot services with isolation preserved.
+- Installed Node.js `v22.22.0` and npm `10.9.4`; installed global `openclaw` `2026.2.19-2`.
+- Created isolated runtime user/path:
+  - user: `openclaw`
+  - workspace: `/opt/openclaw/workspace`
+  - state/config: `/home/openclaw/.openclaw/`
+- Enabled bundled Discord plugin and configured Pivot II bot:
+  - bot/app id: `1474132133105766460`
+  - test channel allowlist: `1474135100521451813`
+  - DMs disabled for isolation; guild policy set to allowlist with only test channel allowed.
+- Wired OpenRouter auth via existing key source from `/opt/pivot/.env` into OpenClaw auth store (no edits to `/opt/pivot` files).
+- Set default model to `openrouter/anthropic/claude-sonnet-4.6`.
+- Created/updated service artifacts:
+  - `/etc/systemd/system/openclaw.service`
+  - `/etc/openclaw/openclaw.env` (root-only env file for OpenRouter key)
+- Validation checks passed:
+  - `openclaw.service` active/running.
+  - `openclaw health` shows Discord OK (`@Pivot II`).
+  - OpenClaw posted to Discord test channel via `openclaw message send`.
+  - Agent run returned using provider/model `openrouter` + `anthropic/claude-sonnet-4.6`.
+- Coexistence verified after deployment:
+  - `pivot-bot.service`: active/running
+  - `pivot-collector.service`: active/running
+  - No interruption or code/config edits under `/opt/pivot/`.
+
+## 2026-02-19 (OpenClaw local profile transplant check)
+
+- Searched local OpenClaw state for intake/personality/profile artifacts in:
+  - `C:\Users\nickh\.openclaw`
+  - `C:\Users\nickh\AppData\Roaming` (OpenClaw-related paths only)
+- Findings: local `.openclaw` contained only:
+  - `C:\Users\nickh\.openclaw\agents\main\agent\auth-profiles.json`
+  - `C:\Users\nickh\.openclaw\identity\device.json`
+- No local `openclaw.json`, `workspace/` personality files (`AGENTS.md`, `SOUL.md`, `IDENTITY.md`, `USER.md`), or session store files were present in local `.openclaw`.
+- Copied discovered files to VPS import path (without overwriting live runtime files):
+  - `/home/openclaw/.openclaw/imports/windows-local/agents/main/agent/auth-profiles.json`
+  - `/home/openclaw/.openclaw/imports/windows-local/identity/device.json`
+- Created backup before import:
+  - `/home/openclaw/.openclaw/backups/pre-import-20260219-203941.tgz`
+- Restarted `openclaw.service` after import copy and re-verified health:
+  - `openclaw.service`: active/running
+  - `openclaw health`: Discord OK (`@Pivot II`)
+  - `pivot-bot.service` and `pivot-collector.service` remained active/running.
+
+## 2026-02-19 (OpenClaw personality transplant from Pivot sources)
+
+- Built Pivot II personality/context from existing project sources (no invention pass):
+  - `/opt/pivot/llm/prompts.py`
+  - `/opt/pivot/llm/playbook_v2.1.md`
+  - `CLAUDE.md` (Nick working style constraints)
+- Updated OpenClaw workspace identity/personality files:
+  - `/opt/openclaw/workspace/AGENTS.md`
+  - `/opt/openclaw/workspace/SOUL.md`
+  - `/opt/openclaw/workspace/IDENTITY.md`
+  - `/opt/openclaw/workspace/USER.md`
+  - `/opt/openclaw/workspace/BOOTSTRAP.md` (set to completed/no-op to prevent first-run override)
+- Backup created before edits:
+  - `/opt/openclaw/workspace-backup-20260219-204418.tgz`
+- Restarted and validated service/runtime:
+  - `openclaw.service`: active/running
+  - `pivot-bot.service`: active/running
+  - `pivot-collector.service`: active/running
+- Personality confirmation test sent to `#pivot-ii` (channel id `1474135100521451813`) with prompt:
+  - `what is your name and what do you do`
+- Pivot II response confirmed transplanted persona and role (self-identified as Pivot II and described trade-analysis/risk-discipline function aligned to playbook).
+
+## 2026-02-19 (OpenClaw morning/EOD cron migration spike)
+
+- Synced local repo with GitHub (`main` fast-forwarded by 5 commits) and pulled new brief:
+  - `docs/codex-briefs/openclaw-morning-brief.md`
+- Resolved OpenClaw CLI admin/pairing mismatch on VPS so cron RPCs are manageable (`openclaw cron list/add/run` now works under `openclaw` user).
+- Added helper scripts on VPS for Discord/API/OpenRouter flow:
+  - `/opt/openclaw/workspace/scripts/pivot2_prep_ping.py`
+  - `/opt/openclaw/workspace/scripts/pivot2_brief.py`
+- Stored/confirmed Railway API creds for OpenClaw runtime:
+  - `/etc/openclaw/openclaw.env` includes `PANDORA_API_URL` and `PIVOT_API_KEY` (plus existing `OPENROUTER_API_KEY`)
+  - `openclaw config` also set `env.PANDORA_API_URL` and `env.PIVOT_API_KEY`
+- Created four ET cron jobs (Mon-Fri, exact timing, no stagger):
+  - `pivot2-morning-prep-ping` (`15 9 * * 1-5`, America/New_York)
+  - `pivot2-morning-brief` (`45 9 * * 1-5`, America/New_York)
+  - `pivot2-eod-prep-ping` (`15 16 * * 1-5`, America/New_York)
+  - `pivot2-eod-brief` (`30 16 * * 1-5`, America/New_York)
+- Manual execution validation:
+  - All four `openclaw cron run <jobId>` calls completed `status=ok`.
+  - Prep pings posted to `#pivot-ii`.
+  - Morning/EOD brief jobs posted multi-part briefs to `#pivot-ii`.
+  - No-screenshot branch validated via `--window-minutes 1`: output included UW visual-data gap warning.
+- Coexistence check after changes:
+  - `openclaw.service`: active/running
+  - `pivot-bot.service`: active/running
+  - `pivot-collector.service`: active/running
+
+## 2026-02-19 (OpenClaw compaction tuning)
+
+- Researched compaction mode options in the installed OpenClaw build and docs:
+  - Config schema (`/usr/lib/node_modules/openclaw/dist/daemon-cli.js`) supports only `agents.defaults.compaction.mode: "default" | "safeguard"` (no `aggressive`/`summarize` mode in this version).
+  - Docs confirm `default | safeguard` and related knobs under `agents.defaults.compaction`.
+- Applied stricter compaction settings on VPS to trim earlier and keep less history in-context:
+  - `agents.defaults.compaction.mode = "safeguard"`
+  - `agents.defaults.compaction.maxHistoryShare = 0.35` (down from implicit default 0.5)
+  - `agents.defaults.compaction.reserveTokensFloor = 30000` (up from default floor 20000)
+- Created a pre-change config backup:
+  - `/home/openclaw/.openclaw/openclaw.json.bak-compaction-<timestamp>`
+- Restarted and validated service health after update:
+  - `openclaw.service`: active/running
+  - `pivot-bot.service`: active/running
+  - `pivot-collector.service`: active/running
+
+## 2026-02-19 (VIX data corruption diagnosis in Trading Hub)
+
+- Diagnosed bad VIX behavior as a Redis price-cache poisoning issue in composite factor inputs, not a pure scoring math bug.
+- Live composite check showed corrupted volatility inputs:
+  - `vix_term.raw_data.vix` around `97.816`
+  - `vix_term.raw_data.vix3m` around `116.24`
+  - `dollar_smile` context using `VIX 334.74` and `DXY 684.48` in the same window
+- Direct yfinance calls on the local environment returned expected values at the same time window (roughly `^VIX 20.23`, `^VIX3M 21.88`, `DX-Y.NYB 97.84`), confirming divergence from cached composite inputs.
+- Verified poisoned Redis cache keys in the shared store:
+  - `prices:v3:^VIX:5:adj` -> last close `334.74`
+  - `prices:v3:^VIX3M:5:adj` -> last close `116.24`
+  - `prices:v3:DX-Y.NYB:60:adj` -> last close `684.48`
+- Code-path confirmation:
+  - Composite scheduler runs `score_all_factors()` every 15 minutes (`backend/scheduler/bias_scheduler.py`), then writes readings via `store_factor_reading`.
+  - Price cache validation guardrails currently apply only to `SPY` (`backend/bias_engine/factor_utils.py`, `PRICE_VALIDATION_SYMBOLS = {"SPY"}`), so bad `^VIX/^VIX3M/DX-Y.NYB` cache entries are not rejected.
+- Secondary contributor: dual writer pattern exists for factors (Pivot collector posts via `/api/bias/factors/{factor_name}` while backend scorer writes directly to composite Redis), which can produce inconsistent snapshots when one path is using poisoned cache.
+- No code changes were made in this diagnosis step; issue isolated and reproducible.
+
+## 2026-02-20 (VIX/macro data guardrails + writer ownership hotfix)
+
+- Implemented hard sanity bounds for macro/volatility symbols in `backend/bias_engine/factor_utils.py`:
+  - `^VIX`: 9 to 90
+  - `^VIX3M`: 9 to 60
+  - `DX-Y.NYB` (DXY): 80 to 120
+- Bounds are now enforced on both cached data and fresh downloads:
+  - Out-of-range values are logged as anomalous.
+  - Violating cache entries are deleted.
+  - Violating fetches return empty data and are not cached.
+- Expanded additional live-quote validation symbols from `{"SPY"}` to:
+  - `{"SPY", "^VIX", "^VIX3M", "DX-Y.NYB"}`
+
+- Fixed dual-writer overlap by enforcing factor ownership in `backend/bias_engine/factor_scorer.py`:
+  - Added `PIVOT_OWNED_FACTORS` set.
+  - Backend `score_all_factors()` now skips those keys so Pivot remains sole writer for:
+    - `credit_spreads`, `market_breadth`, `vix_term`, `tick_breadth`,
+    - `sector_rotation`, `dollar_smile`, `excess_cape`, `savita`
+
+- Purged poisoned Redis keys immediately from shared cache:
+  - Deleted all matches for `prices:v3:^VIX:*`, `prices:v3:^VIX3M:*`, `prices:v3:DX-Y.NYB:*` (and checked `prices:v3:DXY:*`).
+  - Verified post-delete there were zero remaining matches for those patterns.
+
+- Post-fix verification:
+  - `get_latest_price("^VIX")` -> ~20.23
+  - `get_latest_price("^VIX3M")` -> ~21.88
+  - `get_latest_price("DX-Y.NYB")` -> ~97.99
+  - Recreated `prices:v3:*:5:adj` keys for those symbols with in-range closes only.
+
+- Documentation updated to reflect behavior changes:
+  - `docs/specs/PROJECT_RULES.md` now includes:
+    - single-writer ownership rule for factor keys
+    - macro/volatility sanity bounds policy
+
+## 2026-02-20 (Bias + crypto scalper data-feed audit)
+
+- Completed end-to-end audit of bias-system and crypto-scalper feed paths for data accuracy, timeliness, and reliability alerting.
+- Verified recent hard bounds/caching fixes in `backend/bias_engine/factor_utils.py` are active for `^VIX`, `^VIX3M`, and `DX-Y.NYB`.
+- Confirmed dual-writer mitigation in `backend/bias_engine/factor_scorer.py` (`PIVOT_OWNED_FACTORS`) is present.
+- Identified critical freshness-masking risk in webhook-derived factors (`put_call_ratio`, `options_sentiment`, and `tick_breadth` path behavior): scorer timestamps are set at compute time rather than source-event time, which can make stale upstream payloads appear fresh in composite.
+- Captured live Redis evidence during audit window:
+  - `pcr:current.updated_at` was stale (~51h old) while `put_call_ratio` factor timestamp appeared fresh after scorer run.
+  - `uw:market_tide:latest` missing, so options sentiment was running on fallback.
+- Identified crypto-scalper integration reliability gaps:
+  - `crypto-scalper/backend/api/main_hub_bridge.py` is pinned to `https://pandoras-box-production.up.railway.app` which returned `404 Application not found` during this audit.
+  - Bridge expects `summary.*` fields for BTC confluence while hub endpoint provides `confluence.*`, causing degraded/failed confluence parsing.
+- Alerting assessment: existing health/alerts are largely heartbeat/log/outcome based; no immediate push alerting on feed staleness or fallback-mode activation for core bias feeds.
+
+## 2026-02-20 (Bias hardening v2 implementation pass)
+
+- Implemented core Parts 1-5, 7-8, 10-11 in backend code:
+  - Added universal `PRICE_BOUNDS` validation coverage in `backend/bias_engine/factor_utils.py` for all bias-system market tickers (not just vol/DXY), plus startup `purge_suspicious_cache_entries()`.
+  - Wired anomaly alert transport (`backend/bias_engine/anomaly_alerts.py`) and integrated alerts for:
+    - price anomalies (bounds rejections),
+    - factor score spikes,
+    - mass staleness,
+    - confidence collapse,
+    - composite bias-level changes.
+  - Added source-event timestamp integrity metadata support:
+    - `FactorReading.metadata` in `backend/bias_engine/composite.py`,
+    - `timestamp_source` handling in `put_call_ratio`, `options_sentiment`, and `tick_breadth`.
+    - Composite now exposes `unverifiable_factors` when fallback timestamps are used.
+  - Added diagnostic endpoint `GET /api/bias/factor-health` in `backend/api/bias.py`.
+  - Added circuit-breaker Redis persistence and startup restore in `backend/webhooks/circuit_breaker.py`, invoked during app startup in `backend/main.py`.
+  - Refactored legacy bypass paths (`auto_fetch_and_update`) in:
+    - `backend/bias_filters/vix_term_structure.py`,
+    - `backend/bias_filters/dollar_smile.py`,
+    - `backend/bias_filters/credit_spreads.py`,
+    to use shared validated `get_price_history()`.
+  - Added FRED fallback cache utility (`backend/bias_filters/fred_cache.py`) and integrated cache fallback for:
+    - `high_yield_oas`, `initial_claims`, `sahm_rule`, `ism_manufacturing`, `yield_curve`, and ECY real-yield fetch path.
+  - Added weekly audit endpoint `POST /api/bias/weekly-audit` (`backend/api/weekly_audit.py`) with deterministic checks + Discord alert report.
+
+- Implemented factor-history persistence required for weekly audits:
+  - `store_factor_reading()` now writes to Postgres `factor_readings`.
+  - Added table/index creation in `backend/database/postgres_client.py`.
+  - Added migration `migrations/006_factor_readings.sql`.
+
+- Router/startup wiring updates:
+  - Registered weekly audit router in `backend/main.py`.
+  - Startup now runs suspicious price-cache purge + circuit-breaker state restore.
+
+- Verification:
+  - Ran `python -m compileall backend` successfully after changes.
+
+- Scope gap noted:
+  - Crypto-scalper files referenced in the brief (`main_hub_bridge.py`, `btc_integration.py`, scalper `main.py`) are not present in this repository workspace, so Part 6/9 code changes could not be applied here.

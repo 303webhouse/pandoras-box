@@ -443,6 +443,25 @@ async def init_database():
                 ON factor_history (factor_name, collected_at DESC);
         """)
 
+        # Factor readings table (normalized history for weekly integrity audits)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS factor_readings (
+                id SERIAL PRIMARY KEY,
+                factor_id TEXT NOT NULL,
+                timestamp TIMESTAMP NOT NULL,
+                score FLOAT NOT NULL,
+                signal TEXT,
+                source TEXT,
+                metadata JSONB,
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_factor_readings_factor_time
+                ON factor_readings (factor_id, timestamp DESC);
+        """)
+
         # Composite bias history
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS bias_composite_history (

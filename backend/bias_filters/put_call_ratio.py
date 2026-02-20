@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
@@ -58,6 +58,7 @@ async def store_pcr_data(pcr_value: float, date: Optional[str] = None) -> Dict[s
             "pcr": pcr_value,
             "date": data_date,
             "score": score,
+            "updated_at": current_data["updated_at"],
         }
 
     except Exception as e:
@@ -89,6 +90,7 @@ async def compute_score(pcr_data: Optional[Dict[str, Any]] = None) -> Optional[F
             timestamp=datetime.utcnow(),
             source="fallback",
             raw_data={"fallback": True},
+            metadata={"timestamp_source": "fallback"},
         )
 
     pcr_value = float(pcr_data.get("pcr", 0) or 0)
@@ -102,19 +104,58 @@ async def compute_score(pcr_data: Optional[Dict[str, Any]] = None) -> Optional[F
             timestamp=datetime.utcnow(),
             source="fallback",
             raw_data={"fallback": True, "pcr_data": pcr_data},
+            metadata={"timestamp_source": "fallback"},
         )
 
     score = _score_pcr(pcr_value)
+    source_timestamp, timestamp_source = _extract_source_timestamp(pcr_data)
+    if timestamp_source == "fallback":
+        logger.warning(
+            "No source timestamp for put_call_ratio; using utcnow fallback (staleness reliability reduced)"
+        )
 
     return FactorReading(
         factor_id="put_call_ratio",
         score=score,
         signal=score_to_signal(score),
         detail=f"CBOE P/C ratio: {pcr_value:.3f} ({'fear' if pcr_value >= 0.9 else 'complacency' if pcr_value <= 0.7 else 'normal'})",
-        timestamp=datetime.utcnow(),
+        timestamp=source_timestamp,
         source="tradingview",
         raw_data=pcr_data,
+        metadata={"timestamp_source": timestamp_source},
     )
+
+
+def _extract_source_timestamp(payload: Dict[str, Any]) -> tuple[datetime, str]:
+    for key in ("updated_at", "timestamp", "received_at"):
+        raw = payload.get(key)
+        if not raw:
+            continue
+        parsed = _parse_timestamp(raw)
+        if parsed is not None:
+            return parsed, key
+    return datetime.utcnow(), "fallback"
+
+
+def _parse_timestamp(value: Any) -> Optional[datetime]:
+    if isinstance(value, datetime):
+        if value.tzinfo is not None:
+            return value.astimezone(timezone.utc).replace(tzinfo=None)
+        return value
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        try:
+            parsed = datetime.fromisoformat(text)
+            if parsed.tzinfo is not None:
+                return parsed.astimezone(timezone.utc).replace(tzinfo=None)
+            return parsed
+        except ValueError:
+            return None
+    return None
 
 
 def _score_pcr(pcr: float) -> float:

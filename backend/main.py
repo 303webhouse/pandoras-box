@@ -52,6 +52,28 @@ async def lifespan(app: FastAPI):
         logger.warning(f"⚠️ Could not initialize watchlist table: {e}")
     
     logger.info("✅ Database connections established")
+    # One-time cleanup of cached anomalous prices before schedulers consume data.
+    try:
+        from bias_engine.factor_utils import purge_suspicious_cache_entries
+
+        purge_result = await purge_suspicious_cache_entries()
+        logger.info(
+            "Price cache purge complete (scanned=%s purged=%s)",
+            purge_result.get("scanned", 0),
+            purge_result.get("purged", 0),
+        )
+    except Exception as e:
+        logger.warning(f"Could not purge suspicious cache entries: {e}")
+
+    # Restore circuit-breaker state so protective caps/floors survive restarts.
+    try:
+        from webhooks.circuit_breaker import restore_circuit_breaker_state
+
+        restored = await restore_circuit_breaker_state()
+        if restored:
+            logger.info("Circuit breaker state restored from Redis")
+    except Exception as e:
+        logger.warning(f"Could not restore circuit breaker state: {e}")
     
     # Start the bias scheduler
     try:
@@ -230,6 +252,7 @@ from api.options_positions import router as options_router
 from api.analyzer import router as analyzer_router
 from api.crypto_market import router as crypto_market_router
 from api.redis_health import router as redis_health_router
+from api.weekly_audit import router as weekly_audit_router
 from analytics.api import analytics_router
 
 app.include_router(webhook_router, prefix="/webhook", tags=["webhooks"])
@@ -256,6 +279,7 @@ app.include_router(options_router, prefix="/api", tags=["options"])
 app.include_router(analyzer_router, prefix="/api", tags=["analyzer"])
 app.include_router(crypto_market_router, prefix="/api", tags=["crypto-market"])
 app.include_router(redis_health_router, prefix="/api", tags=["health"])
+app.include_router(weekly_audit_router, prefix="/api", tags=["weekly-audit"])
 app.include_router(analytics_router, prefix="/api/analytics", tags=["analytics"])
 
 # Serve frontend static files

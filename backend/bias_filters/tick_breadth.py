@@ -324,15 +324,21 @@ async def compute_tick_score(tick_data: Dict[str, Any]) -> Optional[FactorReadin
         extreme_mod = 0.2
 
     score = max(-1.0, min(1.0, base + extreme_mod))
+    source_timestamp, timestamp_source = _extract_source_timestamp(tick_data)
+    if timestamp_source == "fallback":
+        logger.warning(
+            "No source timestamp for tick_breadth; using utcnow fallback (staleness reliability reduced)"
+        )
 
     return FactorReading(
         factor_id="tick_breadth",
         score=score,
         signal=score_to_signal(score),
         detail=f"TICK avg: {tick_avg:+.0f}, range: [{tick_low:.0f}, {tick_high:.0f}], close: {tick_close:+.0f}",
-        timestamp=datetime.utcnow(),
+        timestamp=source_timestamp,
         source="tradingview",
         raw_data=tick_data,
+        metadata={"timestamp_source": timestamp_source},
     )
 
 
@@ -353,3 +359,35 @@ async def compute_score(tick_data: Optional[Dict[str, Any]] = None) -> Optional[
             return None
 
     return await compute_tick_score(tick_data or {})
+
+
+def _extract_source_timestamp(payload: Dict[str, Any]) -> tuple[datetime, str]:
+    for key in ("updated_at", "timestamp", "received_at"):
+        raw = payload.get(key)
+        if not raw:
+            continue
+        parsed = _parse_timestamp(raw)
+        if parsed is not None:
+            return parsed, key
+    return datetime.utcnow(), "fallback"
+
+
+def _parse_timestamp(value: Any) -> Optional[datetime]:
+    if isinstance(value, datetime):
+        if value.tzinfo is not None:
+            return value.astimezone(timezone.utc).replace(tzinfo=None)
+        return value
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        try:
+            parsed = datetime.fromisoformat(text)
+            if parsed.tzinfo is not None:
+                return parsed.astimezone(timezone.utc).replace(tzinfo=None)
+            return parsed
+        except ValueError:
+            return None
+    return None

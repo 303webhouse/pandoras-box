@@ -173,6 +173,7 @@ async def receive_market_tide(data: MarketTideData):
             "call_premium": data.call_premium,
             "put_premium": data.put_premium,
             "timestamp": data.timestamp or datetime.now().isoformat(),
+            "updated_at": datetime.now().isoformat(),
             "received_at": datetime.now().isoformat()
         }
         _uw_data["last_updated"] = datetime.now().isoformat()

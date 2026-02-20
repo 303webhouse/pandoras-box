@@ -16,57 +16,76 @@ from datetime import datetime
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+FRED_CACHE_KEY = "fred:T10Y2Y:latest"
 
 try:
     from bias_engine.composite import FactorReading
     from bias_engine.factor_utils import score_to_signal
+    from bias_filters.fred_cache import cache_fred_snapshot, load_fred_snapshot
 except ImportError:
     from backend.bias_engine.composite import FactorReading
     from backend.bias_engine.factor_utils import score_to_signal
+    from backend.bias_filters.fred_cache import cache_fred_snapshot, load_fred_snapshot
 
 
 async def compute_score() -> Optional[FactorReading]:
     """Score based on 10Y-2Y Treasury spread from FRED."""
     fred_api_key = os.environ.get("FRED_API_KEY")
-    if not fred_api_key:
+    spread: Optional[float] = None
+    source = "fred"
+    cache_fetched_at: Optional[str] = None
+
+    if fred_api_key:
+        try:
+            from fredapi import Fred
+
+            fred = Fred(api_key=fred_api_key)
+            series = fred.get_series("T10Y2Y", observation_start="2024-01-01")
+            if series is not None and not series.empty:
+                spread = float(series.dropna().iloc[-1])
+                await cache_fred_snapshot(
+                    FRED_CACHE_KEY,
+                    {"value": spread, "series": "T10Y2Y", "fetched_at": datetime.utcnow().isoformat()},
+                )
+            else:
+                logger.warning("yield_curve: no data from FRED")
+        except ImportError:
+            logger.warning("yield_curve: fredapi not installed")
+        except Exception as e:
+            logger.error(f"yield_curve: FRED fetch failed: {e}")
+    else:
         logger.debug("yield_curve: FRED_API_KEY not configured")
-        return None
 
-    try:
-        from fredapi import Fred
-        fred = Fred(api_key=fred_api_key)
-
-        series = fred.get_series("T10Y2Y", observation_start="2024-01-01")
-        if series is None or series.empty:
-            logger.warning("yield_curve: no data from FRED")
+    if spread is None:
+        cached = await load_fred_snapshot(FRED_CACHE_KEY)
+        if not cached:
+            return None
+        try:
+            spread = float(cached.get("value"))
+            cache_fetched_at = cached.get("fetched_at")
+            source = "fred_cache"
+            logger.info("yield_curve: using cached FRED snapshot (%s)", cache_fetched_at)
+        except Exception:
             return None
 
-        spread = float(series.dropna().iloc[-1])
-        score = _score_yield_curve(spread)
+    score = _score_yield_curve(spread)
 
-        if spread > 0:
-            state = "normal"
-        elif spread > -0.5:
-            state = "flat/warning"
-        else:
-            state = "inverted"
+    if spread > 0:
+        state = "normal"
+    elif spread > -0.5:
+        state = "flat/warning"
+    else:
+        state = "inverted"
 
-        return FactorReading(
-            factor_id="yield_curve",
-            score=score,
-            signal=score_to_signal(score),
-            detail=f"10Y-2Y spread: {spread:+.2f}% ({state})",
-            timestamp=datetime.utcnow(),
-            source="fred",
-            raw_data={"spread_pct": spread},
-        )
-
-    except ImportError:
-        logger.warning("yield_curve: fredapi not installed")
-        return None
-    except Exception as e:
-        logger.error(f"yield_curve: FRED fetch failed: {e}")
-        return None
+    return FactorReading(
+        factor_id="yield_curve",
+        score=score,
+        signal=score_to_signal(score),
+        detail=f"10Y-2Y spread: {spread:+.2f}% ({state})",
+        timestamp=datetime.utcnow(),
+        source=source,
+        raw_data={"spread_pct": spread, "cached_fetched_at": cache_fetched_at},
+    )
 
 
 def _score_yield_curve(spread: float) -> float:
