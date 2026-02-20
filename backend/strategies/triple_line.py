@@ -21,26 +21,31 @@ async def validate_triple_line_signal(signal: Dict[Any, Any]) -> Tuple[bool, str
     line_separation = signal.get('line_separation')
     timestamp_str = signal.get('timestamp')
     
-    # Parse timestamp for time-based rules
+    # Parse timestamp and convert to ET for time-based rules
     try:
+        from zoneinfo import ZoneInfo
         signal_time = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
-        signal_hour = signal_time.hour
-        signal_minute = signal_time.minute
-    except:
-        signal_hour = datetime.now().hour
-        signal_minute = datetime.now().minute
+        et_time = signal_time.astimezone(ZoneInfo("America/New_York"))
+        signal_hour = et_time.hour
+        signal_minute = et_time.minute
+    except Exception:
+        # Fallback: use current ET time
+        from zoneinfo import ZoneInfo
+        et_now = datetime.now(ZoneInfo("America/New_York"))
+        signal_hour = et_now.hour
+        signal_minute = et_now.minute
     
     # Validation checks
     
-    # 1. ADX must be > 25 (default to 25 if not provided)
+    # 1. ADX must be > 25 (reject if missing)
     if adx is None:
-        adx = 25  # Default - passes minimum threshold
+        return False, "ADX not provided - cannot validate trend strength"
     if adx < 25:
         return False, f"ADX too low: {adx} < 25"
     
-    # 2. Lines must be separated by at least 10 points (default to 10 if not provided)
+    # 2. Lines must be separated by at least 10 points (reject if missing)
     if line_separation is None:
-        line_separation = 10  # Default - passes minimum threshold
+        return False, "Line separation not provided - cannot validate setup"
     if line_separation < 10:
         return False, f"Lines too close: {line_separation} < 10 points"
     
