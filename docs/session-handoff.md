@@ -500,3 +500,9 @@ Validation:
 - `rg -n "skipped_no_levels" backend/analytics/api.py` confirmed skip tracking and output metadata.
 - `python -m compileall backend` passed.
 - Backend import sanity from backend cwd passed (`python -c "import main; print('backend import OK')"`).
+
+## 2026-02-20 (Phase 4 merge-conflict resolution)
+
+- Rebased `fix/backtest-fidelity` onto latest `origin/main` after Phase 3 landed.
+- Resolved the rebase conflict in `docs/session-handoff.md` by preserving both existing Phase 3 notes and Phase 4 notes.
+- Force-pushed rebased branch (`b00fcb0` -> `cca4f5a`); PR #11 now reports CLEAN/MERGEABLE.
