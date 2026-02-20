@@ -434,3 +434,43 @@ Validation:
     - dict-preserving triggering_factors guard in positions API,
     - no `"ZONE_UPGRADE"` key in scorer base score map,
     - no `ZONE_UPGRADE` entries in `signal_profiles.py`.
+
+## 2026-02-20 (CTA Phase 3 - Outcome & Feedback Loops)
+
+- Implemented TradingView outcome tracking parity with CTA outcomes in `backend/webhooks/tradingview.py`.
+  - Added helper `_write_signal_outcome(signal_data)` to write PENDING rows to `signal_outcomes`.
+  - Added helper calls immediately after `log_signal()` in all handlers:
+    - `process_scout_signal`
+    - `process_exhaustion_signal`
+    - `process_sniper_signal`
+    - `process_triple_line_signal`
+    - `process_generic_signal`
+- Fixed TradingView signal-id collision risk by adding microseconds (`%f`) to all 5 signal-id formats (Scout + 4 strategy handlers).
+- Fixed Triple Line validation defaults/timezone behavior in `backend/strategies/triple_line.py`.
+  - Missing ADX now rejects signal (no silent pass-through default to 25).
+  - Missing line separation now rejects signal (no silent pass-through default to 10).
+  - Time gating now converts parsed timestamps to `America/New_York` via `zoneinfo.ZoneInfo`; fallback uses current ET.
+- Updated TradingView R:R logic to include target_2 in `backend/webhooks/tradingview.py`.
+  - `calculate_risk_reward()` now returns `{t1_rr, t2_rr, primary}`.
+  - Updated all caller handlers to store:
+    - `risk_reward` = `primary` (backward-compatible scalar)
+    - `risk_reward_t1`
+    - `risk_reward_t2`
+
+Validation:
+- `rg -n "_write_signal_outcome" backend/webhooks/tradingview.py` shows helper + 5 handler calls.
+- `rg -n "%H%M%S'" backend/webhooks/tradingview.py` returns no matches.
+- `rg -n "adx = 25|line_separation = 10" backend/strategies/triple_line.py` returns no matches.
+- `rg -n "ZoneInfo" backend/strategies/triple_line.py` shows ET conversion/fallback.
+- `rg -n "t2_rr|t1_rr" backend/webhooks/tradingview.py` shows new R:R fields and return structure.
+- `python -m compileall backend` passed.
+- Backend import sanity check from backend cwd passed (`python -c "import main; print('backend import OK')"`).
+
+## 2026-02-20 (Phase 3 merge-conflict resolution)
+
+- Resolved PR merge conflict for `fix/outcome-tracking` after Phase 2 landed on `main`.
+- Rebased `fix/outcome-tracking` onto `origin/main` (`ff5becc`) and resolved the only conflict in `docs/session-handoff.md`.
+- Force-pushed updated branch with lease:
+  - old: `b9ce052`
+  - new: `cbb4f8f`
+- Verified PR #10 is now clean/mergeable in GitHub.

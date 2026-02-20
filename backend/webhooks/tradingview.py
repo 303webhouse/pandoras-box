@@ -53,6 +53,39 @@ def is_crypto_ticker(ticker: str) -> bool:
     return ticker.upper() in CRYPTO_TICKERS
 
 
+async def _write_signal_outcome(signal_data: dict) -> None:
+    """
+    Write a PENDING outcome record for a TradingView signal.
+    Mirrors the CTA scheduler's outcome tracking so all signal sources
+    have consistent historical data for accuracy analysis.
+    """
+    try:
+        from database.postgres_client import get_postgres_client
+        pool = await get_postgres_client()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO signal_outcomes
+                    (signal_id, symbol, signal_type, direction, cta_zone,
+                     entry, stop, t1, t2, invalidation_level, created_at, outcome)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), 'PENDING')
+                ON CONFLICT (signal_id) DO NOTHING
+                """,
+                signal_data.get("signal_id"),
+                signal_data.get("ticker"),
+                signal_data.get("signal_type"),
+                signal_data.get("direction"),
+                signal_data.get("cta_zone"),
+                signal_data.get("entry_price"),
+                signal_data.get("stop_loss"),
+                signal_data.get("target_1"),
+                signal_data.get("target_2"),
+                signal_data.get("invalidation_level"),
+            )
+    except Exception as e:
+        logger.warning(f"Failed to record TV signal outcome: {e}")
+
+
 class TradingViewAlert(BaseModel):
     """Flexible payload from TradingView webhook - supports multiple strategies"""
     ticker: str
@@ -111,7 +144,7 @@ async def process_scout_signal(alert: TradingViewAlert, start_time: datetime):
     """
 
     # Build signal data with Scout-specific fields
-    signal_id = f"SCOUT_{alert.ticker}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    signal_id = f"SCOUT_{alert.ticker}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
 
     signal_data = {
         "signal_id": signal_id,
@@ -143,6 +176,7 @@ async def process_scout_signal(alert: TradingViewAlert, start_time: datetime):
 
     # Persist first to avoid Redis/DB divergence.
     await log_signal(signal_data)
+    await _write_signal_outcome(signal_data)  # Track outcome for accuracy analysis
     # Cache with shorter TTL (30 mins instead of 1 hour)
     await cache_signal(signal_id, signal_data, ttl=1800)
 
@@ -178,10 +212,10 @@ async def process_exhaustion_signal(alert: TradingViewAlert, start_time: datetim
     classification = classify_exhaustion_signal(alert.direction, alert.entry_price)
     
     # Calculate risk/reward
-    risk_reward = calculate_risk_reward(alert)
+    rr = calculate_risk_reward(alert)
     
     # Build signal data
-    signal_id = f"{alert.ticker}_{alert.direction}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    signal_id = f"{alert.ticker}_{alert.direction}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
     
     signal_data = {
         "signal_id": signal_id,
@@ -194,7 +228,9 @@ async def process_exhaustion_signal(alert: TradingViewAlert, start_time: datetim
         "stop_loss": alert.stop_loss,
         "target_1": alert.target_1,
         "target_2": alert.target_2,
-        "risk_reward": risk_reward,
+        "risk_reward": rr["primary"],
+        "risk_reward_t1": rr["t1_rr"],
+        "risk_reward_t2": rr["t2_rr"],
         "timeframe": alert.timeframe,
         "trade_type": "REVERSAL",
         "asset_class": "CRYPTO" if is_crypto_ticker(alert.ticker) else "EQUITY",
@@ -209,6 +245,7 @@ async def process_exhaustion_signal(alert: TradingViewAlert, start_time: datetim
     
     # Persist first to avoid Redis/DB divergence.
     await log_signal(signal_data)
+    await _write_signal_outcome(signal_data)  # Track outcome for accuracy analysis
     await cache_signal(signal_id, signal_data, ttl=3600)
     await manager.broadcast_signal_smart(signal_data, priority_threshold=75.0)
     
@@ -228,7 +265,7 @@ async def process_sniper_signal(alert: TradingViewAlert, start_time: datetime):
     """Process Sniper (Ursa/Taurus) signals"""
     
     # Calculate risk/reward
-    risk_reward = calculate_risk_reward(alert)
+    rr = calculate_risk_reward(alert)
     
     # Determine signal type based on direction
     if alert.direction.upper() in ["LONG", "BUY"]:
@@ -237,7 +274,7 @@ async def process_sniper_signal(alert: TradingViewAlert, start_time: datetime):
         signal_type = "BEAR_CALL"
     
     # Build signal data
-    signal_id = f"{alert.ticker}_{alert.direction}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    signal_id = f"{alert.ticker}_{alert.direction}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
     
     signal_data = {
         "signal_id": signal_id,
@@ -250,7 +287,9 @@ async def process_sniper_signal(alert: TradingViewAlert, start_time: datetime):
         "stop_loss": alert.stop_loss,
         "target_1": alert.target_1,
         "target_2": alert.target_2,
-        "risk_reward": risk_reward,
+        "risk_reward": rr["primary"],
+        "risk_reward_t1": rr["t1_rr"],
+        "risk_reward_t2": rr["t2_rr"],
         "timeframe": alert.timeframe,
         "trade_type": "CONTINUATION",
         "asset_class": "CRYPTO" if is_crypto_ticker(alert.ticker) else "EQUITY",
@@ -265,6 +304,7 @@ async def process_sniper_signal(alert: TradingViewAlert, start_time: datetime):
     
     # Persist first to avoid Redis/DB divergence.
     await log_signal(signal_data)
+    await _write_signal_outcome(signal_data)  # Track outcome for accuracy analysis
     await cache_signal(signal_id, signal_data, ttl=3600)
     await manager.broadcast_signal_smart(signal_data, priority_threshold=75.0)
     
@@ -305,10 +345,10 @@ async def process_triple_line_signal(alert: TradingViewAlert, start_time: dateti
     )
     
     # Calculate risk/reward
-    risk_reward = calculate_risk_reward(alert)
+    rr = calculate_risk_reward(alert)
     
     # Build signal data
-    signal_id = f"{alert.ticker}_{alert.direction}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    signal_id = f"{alert.ticker}_{alert.direction}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
     
     signal_data = {
         "signal_id": signal_id,
@@ -321,7 +361,9 @@ async def process_triple_line_signal(alert: TradingViewAlert, start_time: dateti
         "stop_loss": alert.stop_loss,
         "target_1": alert.target_1,
         "target_2": alert.target_2,
-        "risk_reward": risk_reward,
+        "risk_reward": rr["primary"],
+        "risk_reward_t1": rr["t1_rr"],
+        "risk_reward_t2": rr["t2_rr"],
         "timeframe": alert.timeframe,
         "bias_level": bias_level,
         "adx": alert.adx,
@@ -337,6 +379,7 @@ async def process_triple_line_signal(alert: TradingViewAlert, start_time: dateti
     
     # Persist first to avoid Redis/DB divergence.
     await log_signal(signal_data)
+    await _write_signal_outcome(signal_data)  # Track outcome for accuracy analysis
     await cache_signal(signal_id, signal_data, ttl=3600)
     await manager.broadcast_signal_smart(signal_data, priority_threshold=75.0)
     
@@ -354,7 +397,7 @@ async def process_triple_line_signal(alert: TradingViewAlert, start_time: dateti
 async def process_generic_signal(alert: TradingViewAlert, start_time: datetime):
     """Process signals from unknown/custom strategies"""
     
-    risk_reward = calculate_risk_reward(alert)
+    rr = calculate_risk_reward(alert)
     
     # Default signal type based on direction
     if alert.direction.upper() in ["LONG", "BUY"]:
@@ -362,7 +405,7 @@ async def process_generic_signal(alert: TradingViewAlert, start_time: datetime):
     else:
         signal_type = "BEAR_CALL"
     
-    signal_id = f"{alert.ticker}_{alert.direction}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    signal_id = f"{alert.ticker}_{alert.direction}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
     
     signal_data = {
         "signal_id": signal_id,
@@ -375,7 +418,9 @@ async def process_generic_signal(alert: TradingViewAlert, start_time: datetime):
         "stop_loss": alert.stop_loss,
         "target_1": alert.target_1,
         "target_2": alert.target_2,
-        "risk_reward": risk_reward,
+        "risk_reward": rr["primary"],
+        "risk_reward_t1": rr["t1_rr"],
+        "risk_reward_t2": rr["t2_rr"],
         "timeframe": alert.timeframe,
         "asset_class": "CRYPTO" if is_crypto_ticker(alert.ticker) else "EQUITY",
         "status": "ACTIVE",
@@ -389,6 +434,7 @@ async def process_generic_signal(alert: TradingViewAlert, start_time: datetime):
     
     # Persist first to avoid Redis/DB divergence.
     await log_signal(signal_data)
+    await _write_signal_outcome(signal_data)  # Track outcome for accuracy analysis
     await cache_signal(signal_id, signal_data, ttl=3600)
     await manager.broadcast_signal_smart(signal_data, priority_threshold=75.0)
     
@@ -403,32 +449,39 @@ async def process_generic_signal(alert: TradingViewAlert, start_time: datetime):
     }
 
 
-def calculate_risk_reward(alert: TradingViewAlert) -> float:
-    """Calculate risk/reward ratio from alert data"""
+def calculate_risk_reward(alert: TradingViewAlert) -> dict:
+    """
+    Calculate risk/reward ratios from alert data.
+    Returns dict with t1_rr and t2_rr (if target_2 exists).
+    For backward compat, also sets 'primary' to t2_rr if available, else t1_rr.
+    """
     if not alert.stop_loss or not alert.target_1:
-        return 0
+        return {"t1_rr": 0, "t2_rr": 0, "primary": 0}
 
     direction = (alert.direction or "").upper()
-    if direction in {"LONG", "BUY"}:
-        risk = alert.entry_price - alert.stop_loss
-        reward = alert.target_1 - alert.entry_price
-    else:
-        risk = alert.stop_loss - alert.entry_price
-        reward = alert.entry_price - alert.target_1
+    is_long = direction in {"LONG", "BUY"}
 
-    if risk <= 0 or reward <= 0:
+    risk = (alert.entry_price - alert.stop_loss) if is_long else (alert.stop_loss - alert.entry_price)
+    if risk <= 0:
         logger.warning(
-            "Invalid R:R inputs for %s %s (entry=%s stop=%s target=%s direction=%s)",
-            alert.strategy,
-            alert.ticker,
-            alert.entry_price,
-            alert.stop_loss,
-            alert.target_1,
-            alert.direction,
+            "Invalid risk for %s %s (entry=%s stop=%s direction=%s)",
+            alert.strategy, alert.ticker, alert.entry_price, alert.stop_loss, alert.direction,
         )
-        return 0
+        return {"t1_rr": 0, "t2_rr": 0, "primary": 0}
 
-    return round(reward / risk, 2)
+    reward_t1 = (alert.target_1 - alert.entry_price) if is_long else (alert.entry_price - alert.target_1)
+    t1_rr = round(reward_t1 / risk, 2) if reward_t1 > 0 else 0
+
+    t2_rr = 0
+    if alert.target_2:
+        reward_t2 = (alert.target_2 - alert.entry_price) if is_long else (alert.entry_price - alert.target_2)
+        t2_rr = round(reward_t2 / risk, 2) if reward_t2 > 0 else 0
+
+    return {
+        "t1_rr": t1_rr,
+        "t2_rr": t2_rr,
+        "primary": t2_rr if t2_rr > 0 else t1_rr,
+    }
 
 
 async def attach_bias_snapshot(signal_data: dict) -> dict:
