@@ -2500,7 +2500,7 @@ async def start_scheduler():
         from apscheduler.schedulers.asyncio import AsyncIOScheduler
         from apscheduler.triggers.cron import CronTrigger
         
-        scheduler = AsyncIOScheduler()
+        scheduler = AsyncIOScheduler(timezone=ET)
 
         # Circuit breaker reset at market open (9:30 AM ET)
         scheduler.add_job(
