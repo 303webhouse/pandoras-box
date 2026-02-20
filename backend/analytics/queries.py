@@ -428,6 +428,9 @@ async def get_signals_for_backtest(
             s.strategy,
             s.signal_type,
             s.entry_price,
+            s.stop_loss,
+            s.target_1,
+            s.target_2,
             s.score,
             s.bias_alignment
         FROM signals s
