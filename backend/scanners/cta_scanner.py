@@ -218,7 +218,7 @@ def calculate_cta_indicators(df: pd.DataFrame) -> pd.DataFrame:
 
 PREFERRED_STOP_ANCHORS = {
     "MAX_LONG": "sma20",
-    "RECOVERY": "sma50",
+    "TRANSITION": "sma50",   # Scanner zone label for SMA50 transition state
     "DE_LEVERAGING": "sma120",
 }
 
@@ -511,7 +511,7 @@ async def get_sector_wind(ticker: str, signal_direction: str) -> Dict[str, Any]:
                 }
 
             etf_zone = etf_zone.decode() if isinstance(etf_zone, bytes) else etf_zone
-            bullish_zones = {"MAX_LONG", "RECOVERY"}
+            bullish_zones = {"MAX_LONG", "TRANSITION"}
             bearish_zones = {"WATERFALL", "CAPITULATION", "DE_LEVERAGING"}
 
             if signal_direction == "LONG" and etf_zone in bullish_zones:
@@ -1328,16 +1328,18 @@ async def scan_ticker_cta(ticker: str, allow_shorts: bool = False) -> List[Dict]
             entry = setup.get("entry")
             stop = setup.get("stop")
             t2 = setup.get("t2")
-            if entry is not None and t2 is not None and conviction_mult != 1.0:
-                reward_distance = abs(t2 - entry)
-                adjusted_reward = reward_distance * conviction_mult
-                adjusted_t2 = entry + adjusted_reward if direction == "LONG" else entry - adjusted_reward
-                setup["t2"] = round(adjusted_t2, 2)
-                setup["target"] = setup["t2"]
-                if stop is not None:
-                    risk = abs(entry - stop)
-                    setup["rr_ratio"] = round(abs(setup["t2"] - entry) / risk, 1) if risk else setup.get("rr_ratio", 0)
-                setup_context["t2_anchor"] = f"{setup_context.get('t2_anchor', 't2')} (bias {bias_info.get('alignment', 'UNKNOWN')})"
+            # NOTE: t2 mutation removed 2026-02. Bias alignment is handled exclusively
+            # by the scorer (calculate_signal_score). Targets remain pure technical levels.
+            # if entry is not None and t2 is not None and conviction_mult != 1.0:
+            #     reward_distance = abs(t2 - entry)
+            #     adjusted_reward = reward_distance * conviction_mult
+            #     adjusted_t2 = entry + adjusted_reward if direction == "LONG" else entry - adjusted_reward
+            #     setup["t2"] = round(adjusted_t2, 2)
+            #     setup["target"] = setup["t2"]
+            #     if stop is not None:
+            #         risk = abs(entry - stop)
+            #         setup["rr_ratio"] = round(abs(setup["t2"] - entry) / risk, 1) if risk else setup.get("rr_ratio", 0)
+            #     setup_context["t2_anchor"] = f"{setup_context.get('t2_anchor', 't2')} (bias {bias_info.get('alignment', 'UNKNOWN')})"
 
             uw_flow = await get_uw_flow_confirmation(ticker, direction)
             setup_context["uw_flow"] = uw_flow
@@ -1466,16 +1468,18 @@ async def analyze_ticker_cta_from_df(ticker: str, df: pd.DataFrame) -> Dict[str,
             entry = setup.get("entry")
             stop = setup.get("stop")
             t2 = setup.get("t2")
-            if entry is not None and t2 is not None and conviction_mult != 1.0:
-                reward_distance = abs(t2 - entry)
-                adjusted_reward = reward_distance * conviction_mult
-                adjusted_t2 = entry + adjusted_reward if direction == "LONG" else entry - adjusted_reward
-                setup["t2"] = round(adjusted_t2, 2)
-                setup["target"] = setup["t2"]
-                if stop is not None:
-                    risk = abs(entry - stop)
-                    setup["rr_ratio"] = round(abs(setup["t2"] - entry) / risk, 1) if risk else setup.get("rr_ratio", 0)
-                setup_context["t2_anchor"] = f"{setup_context.get('t2_anchor', 't2')} (bias {bias_info.get('alignment', 'UNKNOWN')})"
+            # NOTE: t2 mutation removed 2026-02. Bias alignment is handled exclusively
+            # by the scorer (calculate_signal_score). Targets remain pure technical levels.
+            # if entry is not None and t2 is not None and conviction_mult != 1.0:
+            #     reward_distance = abs(t2 - entry)
+            #     adjusted_reward = reward_distance * conviction_mult
+            #     adjusted_t2 = entry + adjusted_reward if direction == "LONG" else entry - adjusted_reward
+            #     setup["t2"] = round(adjusted_t2, 2)
+            #     setup["target"] = setup["t2"]
+            #     if stop is not None:
+            #         risk = abs(entry - stop)
+            #         setup["rr_ratio"] = round(abs(setup["t2"] - entry) / risk, 1) if risk else setup.get("rr_ratio", 0)
+            #     setup_context["t2_anchor"] = f"{setup_context.get('t2_anchor', 't2')} (bias {bias_info.get('alignment', 'UNKNOWN')})"
 
             uw_flow = await get_uw_flow_confirmation(ticker, direction)
             setup_context["uw_flow"] = uw_flow

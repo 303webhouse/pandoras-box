@@ -27,6 +27,11 @@ STRATEGY_BASE_SCORES = {
     "TWO_CLOSE_VOLUME": 60,
     "ZONE_UPGRADE": 55,
     "PULLBACK_ENTRY": 50,
+    "TRAPPED_LONGS": 55,        # Short signal: bearish capitulation play
+    "TRAPPED_SHORTS": 55,       # Long signal: short squeeze play
+    "BEARISH_BREAKDOWN": 50,    # Short signal: key support break
+    "DEATH_CROSS": 60,          # Short signal: 50/200 SMA cross (high conviction)
+    "RESISTANCE_REJECTION": 45, # Short signal: failed breakout at resistance
     
     # Hunter Scanner signals
     "URSA_SIGNAL": 55,
@@ -183,7 +188,7 @@ def calculate_signal_score(
     tech_details = {}
     
     # RSI bonus
-    rsi = signal.get('rsi') or signal.get('adx')  # Some signals have RSI in metrics
+    rsi = signal.get('rsi')  # RSI only - never fall back to ADX
     if rsi:
         rsi_bonus = calculate_rsi_bonus(rsi, direction)
         tech_bonus += rsi_bonus

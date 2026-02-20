@@ -367,3 +367,43 @@
 - Remaining verification to do live in market hours:
   - heartbeat trigger-path validation under real market conditions,
   - sustained multi-image conversation stress test in Discord.
+
+## 2026-02-20 (CTA Phase 1 - Scorer Integrity)
+
+- Implemented Phase 1 scorer integrity fixes on branch `fix/scorer-integrity`.
+- `backend/scoring/trade_ideas_scorer.py`:
+  - Fixed RSI/ADX cross-contamination (`rsi` no longer falls back to `adx`).
+  - Added missing CTA short signal base scores: `TRAPPED_LONGS`, `TRAPPED_SHORTS`, `BEARISH_BREAKDOWN`, `DEATH_CROSS`, `RESISTANCE_REJECTION`.
+- `backend/config/signal_profiles.py`:
+  - Replaced legacy `RECOVERY` zone mappings with `TRANSITION` for RR profiles.
+- `backend/scanners/cta_scanner.py`:
+  - Updated zone anchor map to `TRANSITION`.
+  - Updated bullish zone set for sector wind to `TRANSITION`.
+  - Removed active t2 mutation in both scan paths (left as commented historical context), preserving pure technical targets.
+- `backend/scheduler/bias_scheduler.py`:
+  - Removed dead legacy bonus calculation/injection (`score_bonuses`) so scorer is the sole score authority.
+- Minor grep-hygiene comment update in `backend/webhooks/circuit_breaker.py` to keep `RECOVERY` references out of active backend code paths.
+
+Validation:
+- `python -m compileall backend` succeeded.
+- Backend import check succeeded from backend cwd: `python -c "import main; print('backend import OK')"`.
+- Grep checks:
+  - RSI fallback pattern: none
+  - `'RECOVERY'` keys in `signal_profiles.py`: none
+  - `'RECOVERY'` keys in `cta_scanner.py`: none
+  - New CTA short types present in `STRATEGY_BASE_SCORES`
+  - `score_bonuses` references: none
+  - `adjusted_t2` only appears in commented lines
+- `rg -n "RECOVERY" backend/` now reports only a comment note in `backend/config/signal_profiles.py`.
+
+## 2026-02-20 (Phase 1 branch push + PR + VPS restart)
+
+- Committed and pushed Phase 1 scorer-integrity changes to branch `fix/scorer-integrity`.
+  - Commit: `f10a303`
+  - Message: `fix: scorer integrity - Phase 1 (RSI/ADX bug, missing short scores, zone taxonomy, dead bonuses, t2 mutation)`
+- Opened PR to `main`:
+  - https://github.com/303webhouse/pandoras-box/pull/8
+- Restarted VPS bot service per deployment workflow:
+  - `systemctl restart pivot-bot` on `188.245.250.2`
+  - Verified `pivot-bot.service` active/running after restart.
+  - Followed logs via `journalctl -u pivot-bot -f` (bounded run) and confirmed Discord gateway reconnect + normal alert posting resumed.
