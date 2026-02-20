@@ -506,3 +506,40 @@ Validation:
 - Rebased `fix/backtest-fidelity` onto latest `origin/main` after Phase 3 landed.
 - Resolved the rebase conflict in `docs/session-handoff.md` by preserving both existing Phase 3 notes and Phase 4 notes.
 - Force-pushed rebased branch (`b00fcb0` -> `cca4f5a`); PR #11 now reports CLEAN/MERGEABLE.
+
+## 2026-02-20 (CTA Phase 5 - Structural Cleanup)
+
+- Implemented zone downgrade detection and scoring context support.
+  - `backend/scanners/cta_scanner.py`:
+    - Added `check_zone_downgrade()` (context-only detector, no standalone signal).
+    - Injects `zone_downgrade_context` into SHORT signals in both scan paths.
+  - `backend/scoring/trade_ideas_scorer.py`:
+    - Added technical bonus handling for `zone_downgrade_context`.
+- Consolidated short signal gating.
+  - `backend/scanners/cta_scanner.py`:
+    - `trapped_longs` (SHORT) now runs only inside `if allow_shorts:`.
+    - `trapped_shorts` (LONG) remains always-on.
+    - Added `allow_shorts` parameter to `analyze_ticker_cta_from_df()` and applied same short-gating pattern.
+    - `run_cta_scan()` now calls `scan_ticker_cta(ticker, allow_shorts=True)` so scheduled scans include all short setups.
+- Separated confluence from priority mutation and moved confluence scoring into scorer logic.
+  - `backend/scanners/cta_scanner.py`:
+    - `score_confluence()` no longer mutates `priority`.
+    - Confluence metadata is preserved; confidence is raised to HIGH for strong combos.
+  - `backend/scoring/trade_ideas_scorer.py`:
+    - Added confluence-based technical bonus (scaled/capped from scanner boost).
+  - `backend/scheduler/bias_scheduler.py`:
+    - Passes `confluence`, `zone_upgrade_context`, and `zone_downgrade_context` into scorer input payloads.
+- Added starter scorer test suite.
+  - Created `backend/tests/__init__.py`.
+  - Created `backend/tests/test_scorer.py` with tests for RSI bonus behavior, required base-score coverage, zone bonus polarity, and taxonomy guard.
+
+Validation:
+- `rg -n "def check_zone_downgrade" backend/scanners/cta_scanner.py` -> present.
+- `rg -n "zone_downgrade_context" backend/scoring/trade_ideas_scorer.py backend/scheduler/bias_scheduler.py backend/scanners/cta_scanner.py` -> present.
+- `rg -n "allow_shorts=True" backend/scanners/cta_scanner.py` -> present in `run_cta_scan()` call.
+- `rg -n "trapped_longs" backend/scanners/cta_scanner.py` -> short signal call is inside `if allow_shorts:` block.
+- `rg -n "priority.*total_boost|total_boost.*priority" backend/scanners/cta_scanner.py` -> no matches.
+- `rg -n "confluence" backend/scoring/trade_ideas_scorer.py` -> scorer confluence bonus present.
+- Installed pytest locally (`python -m pip install pytest`) and ran `python -m pytest backend/tests/ -v` -> 20 passed.
+- `python -m compileall backend` -> passed.
+- Backend import sanity from backend cwd (`python -c "import main; print('backend import OK')"`) -> passed (non-blocking Windows cp1252 emoji logging warnings still present).
