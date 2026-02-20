@@ -884,7 +884,8 @@ async def get_active_trade_ideas(limit: int = 10) -> List[Dict[Any, Any]]:
 async def has_recent_active_signal(
     ticker: str,
     max_age_hours: int = 24,
-    strategy: Optional[str] = None
+    strategy: Optional[str] = None,
+    signal_type: Optional[str] = None
 ) -> bool:
     """
     Check if a ticker already has a recent active signal.
@@ -899,6 +900,11 @@ async def has_recent_active_signal(
     if strategy:
         conditions.append("strategy = $3")
         params.append(strategy)
+
+    if signal_type:
+        param_num = len(params) + 1
+        conditions.append(f"signal_type = ${param_num}")
+        params.append(signal_type)
 
     where_clause = " AND ".join(conditions)
 

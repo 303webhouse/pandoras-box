@@ -1394,9 +1394,11 @@ async def get_active_signals_api():
                 ticker_groups[ticker]['strategies'] = [current_strategy] if current_strategy else []
                 current_sig_type = sig.get('signal_type', 'SIGNAL')
                 ticker_groups[ticker]['signal_types'] = [current_sig_type] if current_sig_type else []
-                # Ensure triggering_factors is a list
+                # Normalize triggering_factors - preserve dicts from scorer, coerce strings to list
                 tf = ticker_groups[ticker].get('triggering_factors')
-                if tf and isinstance(tf, str):
+                if isinstance(tf, dict):
+                    pass  # Scorer output - keep as-is
+                elif tf and isinstance(tf, str):
                     ticker_groups[ticker]['triggering_factors'] = [tf]
                 elif not isinstance(tf, list):
                     ticker_groups[ticker]['triggering_factors'] = []
