@@ -323,8 +323,9 @@ def start_scheduler() -> None:
 
     scheduler.add_job(heartbeat_job, CronTrigger(day_of_week="mon-fri", minute="*/15", timezone=TZ))
 
-    scheduler.add_job(morning_brief, CronTrigger(day_of_week="mon-fri", hour=10, minute=0, timezone=TZ))
-    scheduler.add_job(eod_brief, CronTrigger(day_of_week="mon-fri", hour=16, minute=30, timezone=TZ))
+    # DISABLED — Pivot II (OpenClaw) now handles briefs via pivot2_brief.py cron jobs
+    # scheduler.add_job(morning_brief, CronTrigger(day_of_week="mon-fri", hour=10, minute=0, timezone=TZ))
+    # scheduler.add_job(eod_brief, CronTrigger(day_of_week="mon-fri", hour=16, minute=30, timezone=TZ))
 
     scheduler.start()
     logger.info("Pivot scheduler started")

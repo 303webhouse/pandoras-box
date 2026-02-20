@@ -544,3 +544,4 @@ Validation:
 - `python -m compileall backend` -> passed.
 - Backend import sanity from backend cwd (`python -c "import main; print('backend import OK')"`) -> passed (non-blocking Windows cp1252 emoji logging warnings still present).
 - [2026-02-20 09:48:13 -07:00] Ops: Restarted VPS service pivot-bot on 188.245.250.2; service is active and logs show Discord connected + task loops running.
+- [2026-02-20 10:35:10 -07:00] Migration cutover: Added /opt/openclaw/workspace/scripts/pivot2_trade_poller.py, verified dry-run/live post, created OpenClaw cron pivot2-trade-poller (*/2 9-16 ET), confirmed collector briefs are disabled, restarted pivot-collector, and stopped+disabled pivot-bot. Note: /api/signals/active timed out from VPS, so poller falls back to /api/signals/queue for continuity.
