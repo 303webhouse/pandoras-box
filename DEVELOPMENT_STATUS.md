@@ -51,6 +51,19 @@ The original Pivot Discord bot (`pivot-bot`) has been **stopped and disabled**. 
 - Trade poller state: `/opt/openclaw/workspace/data/seen_signal_ids.json`
 - Zone shift state: `/opt/openclaw/workspace/data/last_zone_shift.json`
 
+### OpenClaw Script Sources (repo → VPS)
+
+Scripts in `pivot/openclaw_scripts/` are the source of truth and must be manually copied to `/opt/openclaw/workspace/scripts/` on deploy.
+
+| Repo path | VPS path | Purpose |
+|-----------|----------|---------|
+| `pivot/openclaw_scripts/market_data.py` | `/opt/openclaw/workspace/scripts/market_data.py` | Real-time price lookup (BTC via /crypto/market, equities via /hybrid/price) |
+
+Deploy command:
+```bash
+scp pivot/openclaw_scripts/market_data.py root@188.245.250.2:/opt/openclaw/workspace/scripts/
+```
+
 ### Not Yet Migrated
 
 - **UW channel monitoring/parsing** — Old bot watched UW Premium Bot channels, parsed embeds, forwarded to Pandora API. Needs lightweight watcher bot (no LLM).

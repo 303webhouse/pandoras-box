@@ -1801,7 +1801,7 @@ def _format_crypto_price_context(payload: Optional[Dict[str, Any]]) -> str:
     if isinstance(perp, (int, float)):
         segments.append(f"Perp: ${float(perp):,.2f}")
     if isinstance(basis_pct, (int, float)):
-        segments.append(f"Basis: {float(basis_pct) * 100:+.2f}%")
+        segments.append(f"Basis: {float(basis_pct):+.2f}%")
 
     return " | ".join(segments) if segments else "Crypto Price Context: unavailable"
 
