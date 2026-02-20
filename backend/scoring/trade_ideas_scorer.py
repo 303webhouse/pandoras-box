@@ -217,6 +217,30 @@ def calculate_signal_score(
             "to": zone_upgrade_ctx.get("current_zone"),
             "bonus": zone_up_bonus
         }
+
+    # Zone downgrade bonus - SHORT signal coincides with zone deterioration
+    zone_downgrade_ctx = signal.get('zone_downgrade_context')
+    if zone_downgrade_ctx and zone_downgrade_ctx.get('zone_downgraded'):
+        zone_down_bonus = TECHNICAL_BONUSES.get("favorable_zone", 4)
+        tech_bonus += zone_down_bonus
+        tech_details["zone_downgrade"] = {
+            "from": zone_downgrade_ctx.get("previous_zone"),
+            "to": zone_downgrade_ctx.get("current_zone"),
+            "bonus": zone_down_bonus
+        }
+
+    # Confluence bonus - multiple aligned signals on same ticker
+    confluence = signal.get('confluence')
+    if confluence and confluence.get('count', 0) >= 2:
+        confluence_boost = confluence.get('boost', 0)
+        # Scale scanner boost (25-65) to scorer range and cap at 10.
+        scorer_confluence_bonus = min(confluence_boost // 5, 10)
+        tech_bonus += scorer_confluence_bonus
+        tech_details["confluence"] = {
+            "signals": confluence.get("count"),
+            "combo": confluence.get("combo"),
+            "bonus": scorer_confluence_bonus
+        }
     
     # RVOL bonus
     rvol = signal.get('rvol') or signal.get('volume_ratio')
