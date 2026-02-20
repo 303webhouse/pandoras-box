@@ -79,6 +79,17 @@ Manual override (UI) ─────┘          │ Handle staleness     │─
 | Excess CAPE Yield | 8% | 7 days | Weekly | Pivot → web scrape |
 | Savita (BofA) | 4% | 45 days | Monthly | Manual entry (proprietary) |
 
+**Writer Ownership Rule (Feb 19, 2026 hotfix):** each factor key has one writer.
+- Pivot-owned keys: `credit_spreads`, `market_breadth`, `vix_term`, `tick_breadth`, `sector_rotation`, `dollar_smile`, `excess_cape`, `savita`.
+- Backend scorer-owned keys: all remaining factors in `bias_engine.factor_scorer`.
+- Backend scorer must skip Pivot-owned keys to prevent Redis overwrite races.
+
+**Macro/Volatility Price Sanity Bounds (Feb 19, 2026 hotfix):**
+- `^VIX`: 9 to 90
+- `^VIX3M`: 9 to 60
+- `DX-Y.NYB` (DXY): 80 to 120
+- Any out-of-range value is treated as anomalous, rejected, and never cached.
+
 **Graceful Degradation Rule:** When a factor goes stale (exceeds its staleness threshold), its weight is redistributed proportionally to remaining active factors. The system MUST always produce a valid bias reading from whatever subset of factors is available.
 
 #### Composite Score → Bias Level Mapping

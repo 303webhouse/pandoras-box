@@ -607,13 +607,8 @@ async def receive_tick_data(payload: TickDataPayload):
     
     # Auto-score tick_breadth and feed into composite bias engine
     try:
-        tick_data = {
-            "tick_high": payload.tick_high,
-            "tick_low": payload.tick_low,
-            "tick_close": payload.tick_close,
-            "tick_avg": payload.tick_avg,
-        }
-        reading = await compute_tick_score(tick_data)
+        # Read from Redis-backed source so factor timestamp reflects true source update time.
+        reading = await compute_tick_score()
         if reading:
             from bias_engine.composite import store_factor_reading, compute_composite
             await store_factor_reading(reading)
@@ -666,7 +661,11 @@ async def receive_pcr_data(payload: PCRPayload):
     
     # Auto-score put_call_ratio and feed into composite bias engine
     try:
-        pcr_data = {"pcr": payload.pcr}
+        pcr_data = {
+            "pcr": payload.pcr,
+            "updated_at": result.get("updated_at"),
+            "date": payload.date,
+        }
         reading = await compute_pcr_score(pcr_data)
         if reading:
             from bias_engine.composite import store_factor_reading, compute_composite

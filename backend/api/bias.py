@@ -47,6 +47,7 @@ try:
         compute_composite,
         record_factor_reading,
         get_cached_composite,
+        get_latest_reading,
         set_override,
         clear_override,
         score_to_bias
@@ -61,6 +62,11 @@ try:
     from utils.pivot_auth import verify_pivot_key
 except ModuleNotFoundError:
     from backend.utils.pivot_auth import verify_pivot_key
+
+try:
+    from bias_engine.factor_scorer import PIVOT_OWNED_FACTORS
+except ImportError:
+    PIVOT_OWNED_FACTORS = set()
 
 
 class SavitaUpdate(BaseModel):
@@ -375,6 +381,70 @@ async def get_composite_bias():
     return result.model_dump(mode="json")
 
 
+@router.get("/bias/factor-health")
+async def get_factor_health():
+    """
+    Diagnostic endpoint for factor freshness and score-health visibility.
+    """
+    if not COMPOSITE_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Composite bias engine not available")
+
+    now = datetime.utcnow()
+    factors: Dict[str, Dict[str, Any]] = {}
+    statuses: list[str] = []
+    unverifiable_count = 0
+
+    for factor_id, config in FACTOR_CONFIG.items():
+        reading = await get_latest_reading(factor_id)
+        max_age = timedelta(hours=config["staleness_hours"])
+
+        status = "MISSING"
+        age_minutes: Optional[float] = None
+        timestamp_source: Optional[str] = None
+
+        if reading is not None:
+            age = now - reading.timestamp.replace(tzinfo=None)
+            age_minutes = age.total_seconds() / 60.0
+            timestamp_source = (reading.metadata or {}).get("timestamp_source")
+
+            if age > max_age:
+                status = "STALE"
+            elif abs(reading.score) >= 0.9:
+                status = "EXTREME"
+            else:
+                status = "OK"
+
+            if timestamp_source == "fallback":
+                unverifiable_count += 1
+
+        statuses.append(status)
+        factors[factor_id] = {
+            "status": status,
+            "score": reading.score if reading else None,
+            "signal": reading.signal if reading else None,
+            "source": reading.source if reading else None,
+            "age_minutes": round(age_minutes, 1) if age_minutes is not None else None,
+            "staleness_limit_hours": config["staleness_hours"],
+            "timeframe": config["timeframe"],
+            "weight": config["weight"],
+            "timestamp_source": timestamp_source,
+            "last_updated": reading.timestamp.isoformat() if reading else None,
+        }
+
+    return {
+        "timestamp": now.isoformat(),
+        "summary": {
+            "ok": statuses.count("OK"),
+            "stale": statuses.count("STALE"),
+            "missing": statuses.count("MISSING"),
+            "extreme": statuses.count("EXTREME"),
+            "unverifiable_timestamp": unverifiable_count,
+            "total": len(factors),
+        },
+        "factors": factors,
+    }
+
+
 @router.get("/bias/composite/timeframes")
 async def get_composite_timeframes():
     """
@@ -526,6 +596,13 @@ async def update_factor_from_pivot(
     factor_id = factor_name.strip().lower()
     if factor_id not in FACTOR_CONFIG:
         raise HTTPException(status_code=400, detail=f"Unknown factor_name: {factor_id}")
+
+    if factor_id not in PIVOT_OWNED_FACTORS:
+        logger.info(
+            "API update for backend-owned factor %s from source=%s",
+            factor_id,
+            payload.source or "pivot",
+        )
 
     score = float(payload.score)
     if score < -1.0 or score > 1.0:

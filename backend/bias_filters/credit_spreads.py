@@ -111,48 +111,54 @@ def calculate_credit_spread_bias(hyg_return: float, tlt_return: float) -> Dict[s
 
 async def auto_fetch_and_update() -> Dict[str, Any]:
     """
-    Auto-fetch credit spread data using yfinance and update bias.
+    DEPRECATED: Legacy auto-refresh path used by old scheduler routes.
+    Uses shared get_price_history() to preserve cache validation.
     """
     global _credit_spread_state
-    
+
+    logger.warning("auto_fetch_and_update called for credit_spreads (deprecated path)")
+
     try:
-        import yfinance as yf
-        
-        # Fetch HYG (High Yield Corporate Bonds)
-        hyg = yf.Ticker("HYG")
-        hyg_hist = hyg.history(period="10d")
-        
-        # Fetch TLT (Long-term Treasuries)
-        tlt = yf.Ticker("TLT")
-        tlt_hist = tlt.history(period="10d")
-        
-        if len(hyg_hist) < 6 or len(tlt_hist) < 6:
+        hyg_hist = await get_price_history("HYG", days=10)
+        tlt_hist = await get_price_history("TLT", days=10)
+
+        if (
+            hyg_hist is None
+            or tlt_hist is None
+            or hyg_hist.empty
+            or tlt_hist.empty
+            or "close" not in hyg_hist.columns
+            or "close" not in tlt_hist.columns
+            or len(hyg_hist) < 6
+            or len(tlt_hist) < 6
+        ):
             logger.warning("Not enough data for credit spread calculation")
             return {"status": "error", "message": "Insufficient data"}
-        
-        # Calculate 5-day returns
-        hyg_current = float(hyg_hist['Close'].iloc[-1])
-        hyg_5d_ago = float(hyg_hist['Close'].iloc[-6])
+
+        hyg_current = float(hyg_hist["close"].iloc[-1])
+        hyg_5d_ago = float(hyg_hist["close"].iloc[-6])
         hyg_return = ((hyg_current - hyg_5d_ago) / hyg_5d_ago) * 100
-        
-        tlt_current = float(tlt_hist['Close'].iloc[-1])
-        tlt_5d_ago = float(tlt_hist['Close'].iloc[-6])
+
+        tlt_current = float(tlt_hist["close"].iloc[-1])
+        tlt_5d_ago = float(tlt_hist["close"].iloc[-6])
         tlt_return = ((tlt_current - tlt_5d_ago) / tlt_5d_ago) * 100
-        
-        # Calculate bias
+
         result = calculate_credit_spread_bias(hyg_return, tlt_return)
         _credit_spread_state.update(result)
         _credit_spread_state["last_updated"] = datetime.now().isoformat()
-        _credit_spread_state["data_source"] = "yfinance_auto"
-        
-        logger.info(f"💳 Credit Spreads updated: {result['bias']} (spread: {result['spread']:+.1f}%)")
-        
+        _credit_spread_state["data_source"] = "shared_price_cache"
+
+        logger.info(
+            "Credit Spreads updated: %s (spread: %+0.1f%%)",
+            result["bias"],
+            result["spread"],
+        )
+
         return {"status": "success", "data": _credit_spread_state}
-        
+
     except Exception as e:
         logger.error(f"Error fetching credit spread data: {e}")
         return {"status": "error", "message": str(e)}
-
 
 def get_credit_spread_status() -> Dict[str, Any]:
     """Get current credit spread bias status"""

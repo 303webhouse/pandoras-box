@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
@@ -48,6 +48,7 @@ async def compute_score(tide_data: Optional[Dict[str, Any]] = None) -> Optional[
             timestamp=datetime.utcnow(),
             source="fallback",
             raw_data={"fallback": True},
+            metadata={"timestamp_source": "fallback"},
         )
 
     sentiment = (tide_data.get("sentiment") or "").upper()
@@ -68,15 +69,21 @@ async def compute_score(tide_data: Optional[Dict[str, Any]] = None) -> Optional[
         net = call_premium - put_premium
         parts.append(f"Net premium: {'call' if net > 0 else 'put'} ${abs(net):,.0f}")
     detail = ", ".join(parts)
+    source_timestamp, timestamp_source = _extract_source_timestamp(tide_data)
+    if timestamp_source == "fallback":
+        logger.warning(
+            "No source timestamp for options_sentiment; using utcnow fallback (staleness reliability reduced)"
+        )
 
     return FactorReading(
         factor_id="options_sentiment",
         score=score,
         signal=score_to_signal(score),
         detail=detail,
-        timestamp=datetime.utcnow(),
+        timestamp=source_timestamp,
         source="unusual_whales",
         raw_data=tide_data,
+        metadata={"timestamp_source": timestamp_source},
     )
 
 
@@ -169,4 +176,36 @@ async def _get_latest_tide() -> Optional[Dict[str, Any]]:
     except Exception:
         pass
 
+    return None
+
+
+def _extract_source_timestamp(payload: Dict[str, Any]) -> tuple[datetime, str]:
+    for key in ("updated_at", "timestamp", "received_at"):
+        raw = payload.get(key)
+        if not raw:
+            continue
+        parsed = _parse_timestamp(raw)
+        if parsed is not None:
+            return parsed, key
+    return datetime.utcnow(), "fallback"
+
+
+def _parse_timestamp(value: Any) -> Optional[datetime]:
+    if isinstance(value, datetime):
+        if value.tzinfo is not None:
+            return value.astimezone(timezone.utc).replace(tzinfo=None)
+        return value
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        try:
+            parsed = datetime.fromisoformat(text)
+            if parsed.tzinfo is not None:
+                return parsed.astimezone(timezone.utc).replace(tzinfo=None)
+            return parsed
+        except ValueError:
+            return None
     return None

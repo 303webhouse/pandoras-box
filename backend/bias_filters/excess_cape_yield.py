@@ -29,8 +29,10 @@ from datetime import datetime
 
 from bias_engine.composite import FactorReading
 from bias_engine.factor_utils import score_to_signal, get_latest_price
+from bias_filters.fred_cache import cache_fred_snapshot, load_fred_snapshot
 
 logger = logging.getLogger(__name__)
+REAL_YIELD_CACHE_KEY = "fred:REAL_10Y:latest"
 
 # ECY Configuration
 ECY_CONFIG = {
@@ -71,6 +73,9 @@ async def fetch_real_yield_from_fred() -> Optional[float]:
     fred_api_key = os.environ.get("FRED_API_KEY")
     if not fred_api_key:
         logger.warning("FRED_API_KEY not configured for ECY")
+        cached = await load_fred_snapshot(REAL_YIELD_CACHE_KEY)
+        if cached and cached.get("value") is not None:
+            return float(cached["value"])
         return None
     
     try:
@@ -93,12 +98,28 @@ async def fetch_real_yield_from_fred() -> Optional[float]:
         # Cache the result
         ECY_CONFIG["real_yield"] = real_yield
         ECY_CONFIG["real_yield_updated"] = datetime.now().isoformat()
+        await cache_fred_snapshot(
+            REAL_YIELD_CACHE_KEY,
+            {
+                "value": real_yield,
+                "nominal_10y": nominal_10y,
+                "breakeven_10y": breakeven_10y,
+                "fetched_at": datetime.utcnow().isoformat(),
+            },
+        )
         
         return real_yield
         
     except Exception as e:
         logger.error(f"Error fetching real yield from FRED: {e}")
-        return ECY_CONFIG.get("real_yield")  # Return cached value if available
+        cached = await load_fred_snapshot(REAL_YIELD_CACHE_KEY)
+        if cached and cached.get("value") is not None:
+            logger.info(
+                "Using cached FRED real-yield snapshot for ECY (fetched: %s)",
+                cached.get("fetched_at"),
+            )
+            return float(cached["value"])
+        return ECY_CONFIG.get("real_yield")
 
 
 def calculate_ecy(cape: float = None, real_yield: float = None) -> Dict[str, Any]:

@@ -17,12 +17,31 @@ import yfinance as yf
 
 from database.redis_client import get_redis_client
 from bias_engine.composite import FactorReading
+from bias_engine.anomaly_alerts import send_alert
 
 logger = logging.getLogger(__name__)
 
 PRICE_CACHE_TTL = 900  # 15 minutes
 PRICE_CACHE_VERSION = "v3"
-PRICE_VALIDATION_SYMBOLS = {"SPY"}
+# Symbols with additional live-quote mismatch validation.
+PRICE_VALIDATION_SYMBOLS = {"SPY", "^VIX", "^VIX3M", "DX-Y.NYB"}
+# Plausibility bounds for all shared bias-system market tickers.
+# Values outside these ranges are treated as anomalous and rejected.
+PRICE_BOUNDS: Dict[str, tuple[float, float]] = {
+    "^VIX": (9.0, 90.0),
+    "^VIX3M": (9.0, 60.0),
+    "DX-Y.NYB": (80.0, 120.0),
+    "SPY": (100.0, 1200.0),
+    "HYG": (30.0, 120.0),
+    "TLT": (50.0, 200.0),
+    "COPX": (5.0, 100.0),
+    "GLD": (50.0, 500.0),
+    "RSP": (50.0, 400.0),
+    "XLK": (50.0, 500.0),
+    "XLY": (50.0, 400.0),
+    "XLP": (30.0, 200.0),
+    "XLU": (20.0, 150.0),
+}
 PRICE_MISMATCH_THRESHOLD = 0.25  # 25%
 ADJ_CLOSE_RATIO_ALERT = 1.5
 
@@ -90,6 +109,68 @@ def _latest_column_value(df: pd.DataFrame, column: str) -> Optional[float]:
     return _to_positive_float(series.iloc[-1])
 
 
+def _bounds_for_symbol(symbol: str) -> Optional[tuple[float, float]]:
+    return PRICE_BOUNDS.get(symbol)
+
+
+def _is_price_out_of_bounds(symbol: str, price: Optional[float]) -> bool:
+    bounds = _bounds_for_symbol(symbol)
+    if bounds is None or price is None:
+        return False
+    low, high = bounds
+    return price < low or price > high
+
+
+def _has_bounds_violation(symbol: str, df: pd.DataFrame, *, stage: str) -> bool:
+    bounds = _bounds_for_symbol(symbol)
+    if bounds is None:
+        return False
+
+    latest_close = _latest_column_value(df, "close")
+    low, high = bounds
+    if latest_close is None:
+        logger.error(
+            "Rejecting %s %s data: missing usable close for bounded symbol [%s, %s]",
+            symbol,
+            stage,
+            low,
+            high,
+        )
+        return True
+
+    if _is_price_out_of_bounds(symbol, latest_close):
+        logger.error(
+            "Rejecting %s %s data: close %.2f outside bounds [%.2f, %.2f]",
+            symbol,
+            stage,
+            latest_close,
+            low,
+            high,
+        )
+        _schedule_bounds_alert(symbol, latest_close, low, high, stage)
+        return True
+    return False
+
+
+def _schedule_bounds_alert(symbol: str, latest_close: float, low: float, high: float, stage: str) -> None:
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+
+    description = (
+        f"{symbol} close {latest_close:.4f} outside bounds [{low:.2f}, {high:.2f}] "
+        f"during {stage}; cache entry rejected."
+    )
+    loop.create_task(
+        send_alert(
+            "Price Anomaly Rejected",
+            description,
+            severity="critical",
+        )
+    )
+
+
 def _read_live_reference_price(symbol: str) -> Optional[float]:
     ticker = yf.Ticker(symbol)
 
@@ -148,7 +229,7 @@ def _prefer_adjusted_close(
         updated["close"] = pd.to_numeric(updated["adj_close"], errors="coerce")
         return updated
 
-    # Keep non-SPY behavior conservative: only backfill missing close.
+    # Keep non-validated symbol behavior conservative: only backfill missing close.
     if symbol not in PRICE_VALIDATION_SYMBOLS:
         return df
 
@@ -261,16 +342,20 @@ async def get_price_history(ticker: str, days: int = 30) -> pd.DataFrame:
                 df = _decode_cached_history(cached)
                 df = _normalize_history(df)
                 df = _prefer_adjusted_close(symbol, df, reference_price)
-                if not _has_price_mismatch(symbol, df, reference_price):
+                if _has_bounds_violation(symbol, df, stage="cached"):
+                    await client.delete(cache_key)
+                    logger.warning("Discarding cached %s prices due to bounds violation", symbol)
+                elif not _has_price_mismatch(symbol, df, reference_price):
                     return df
-                logger.warning(
-                    "Discarding cached %s prices (close %.2f mismatches live %.2f by > %.0f%%)",
-                    symbol,
-                    _latest_column_value(df, "close") or -1.0,
-                    reference_price or -1.0,
-                    PRICE_MISMATCH_THRESHOLD * 100,
-                )
-                await client.delete(cache_key)
+                else:
+                    logger.warning(
+                        "Discarding cached %s prices (close %.2f mismatches live %.2f by > %.0f%%)",
+                        symbol,
+                        _latest_column_value(df, "close") or -1.0,
+                        reference_price or -1.0,
+                        PRICE_MISMATCH_THRESHOLD * 100,
+                    )
+                    await client.delete(cache_key)
     except Exception as exc:
         logger.warning(f"Price cache read failed for {symbol}: {type(exc).__name__}")
         # Remove poisoned cache entries so they don't spam on every run.
@@ -283,6 +368,9 @@ async def get_price_history(ticker: str, days: int = 30) -> pd.DataFrame:
 
     data = _download_history(auto_adjust=True)
     data = _prefer_adjusted_close(symbol, data, reference_price)
+    if _has_bounds_violation(symbol, data, stage="download(auto_adjust=True)"):
+        logger.error("%s price feed failed bounds validation. Returning empty frame.", symbol)
+        return pd.DataFrame()
 
     if _has_price_mismatch(symbol, data, reference_price):
         logger.warning(
@@ -294,7 +382,14 @@ async def get_price_history(ticker: str, days: int = 30) -> pd.DataFrame:
         fallback = _download_history(auto_adjust=False)
         fallback = _prefer_adjusted_close(symbol, fallback, reference_price)
         if fallback is not None and not fallback.empty:
+            if _has_bounds_violation(symbol, fallback, stage="download(auto_adjust=False)"):
+                logger.error("%s fallback price feed failed bounds validation. Returning empty frame.", symbol)
+                return pd.DataFrame()
             data = fallback
+
+    if _has_bounds_violation(symbol, data, stage="final"):
+        logger.error("%s final price feed failed bounds validation. Returning empty frame.", symbol)
+        return pd.DataFrame()
 
     if _has_price_mismatch(symbol, data, reference_price):
         logger.error(
@@ -323,6 +418,47 @@ async def get_latest_price(ticker: str) -> Optional[float]:
     if data is None or data.empty or "close" not in data.columns:
         return None
     return float(data["close"].iloc[-1])
+
+
+async def purge_suspicious_cache_entries() -> Dict[str, int]:
+    """
+    One-time startup cleanup for cached price entries outside plausibility bounds.
+    """
+    scanned = 0
+    purged = 0
+    try:
+        client = await get_redis_client()
+        if not client:
+            return {"scanned": scanned, "purged": purged}
+
+        for symbol, (low, high) in PRICE_BOUNDS.items():
+            for days in (5, 30, 60):
+                key = f"prices:{PRICE_CACHE_VERSION}:{symbol}:{days}:adj"
+                scanned += 1
+                try:
+                    raw = await client.get(key)
+                    if not raw:
+                        continue
+                    df = _decode_cached_history(raw)
+                    df = _normalize_history(df)
+                    latest = _latest_column_value(df, "close")
+                    if latest is not None and (latest < low or latest > high):
+                        await client.delete(key)
+                        purged += 1
+                        logger.warning(
+                            "Purged corrupt cache key %s (close %.4f outside [%.2f, %.2f])",
+                            key,
+                            latest,
+                            low,
+                            high,
+                        )
+                except Exception:
+                    await client.delete(key)
+                    purged += 1
+                    logger.warning("Purged unreadable cache key %s", key)
+    except Exception as exc:
+        logger.warning("Cache purge failed: %s", exc)
+    return {"scanned": scanned, "purged": purged}
 
 
 def neutral_reading(

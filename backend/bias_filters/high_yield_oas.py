@@ -17,13 +17,16 @@ from datetime import datetime
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+FRED_CACHE_KEY = "fred:BAMLH0A0HYM2:latest"
 
 try:
     from bias_engine.composite import FactorReading
     from bias_engine.factor_utils import score_to_signal
+    from bias_filters.fred_cache import cache_fred_snapshot, load_fred_snapshot
 except ImportError:
     from backend.bias_engine.composite import FactorReading
     from backend.bias_engine.factor_utils import score_to_signal
+    from backend.bias_filters.fred_cache import cache_fred_snapshot, load_fred_snapshot
 
 
 async def compute_score() -> Optional[FactorReading]:
@@ -31,36 +34,51 @@ async def compute_score() -> Optional[FactorReading]:
     fred_api_key = os.environ.get("FRED_API_KEY")
     if not fred_api_key:
         logger.debug("high_yield_oas: FRED_API_KEY not configured")
-        return None
+    oas: Optional[float] = None
+    source = "fred"
+    cache_fetched_at: Optional[str] = None
 
-    try:
-        from fredapi import Fred
-        fred = Fred(api_key=fred_api_key)
+    if fred_api_key:
+        try:
+            from fredapi import Fred
 
-        series = fred.get_series("BAMLH0A0HYM2", observation_start="2024-01-01")
-        if series is None or series.empty:
-            logger.warning("high_yield_oas: no data from FRED")
+            fred = Fred(api_key=fred_api_key)
+            series = fred.get_series("BAMLH0A0HYM2", observation_start="2024-01-01")
+            if series is not None and not series.empty:
+                oas = float(series.dropna().iloc[-1])
+                await cache_fred_snapshot(
+                    FRED_CACHE_KEY,
+                    {"value": oas, "series": "BAMLH0A0HYM2", "fetched_at": datetime.utcnow().isoformat()},
+                )
+            else:
+                logger.warning("high_yield_oas: no data from FRED")
+        except ImportError:
+            logger.warning("high_yield_oas: fredapi not installed")
+        except Exception as e:
+            logger.error(f"high_yield_oas: FRED fetch failed: {e}")
+
+    if oas is None:
+        cached = await load_fred_snapshot(FRED_CACHE_KEY)
+        if not cached:
+            return None
+        try:
+            oas = float(cached.get("value"))
+            cache_fetched_at = cached.get("fetched_at")
+            source = "fred_cache"
+            logger.info("high_yield_oas: using cached FRED snapshot (%s)", cache_fetched_at)
+        except Exception:
             return None
 
-        oas = float(series.dropna().iloc[-1])
-        score = _score_oas(oas)
-
-        return FactorReading(
-            factor_id="high_yield_oas",
-            score=score,
-            signal=score_to_signal(score),
-            detail=f"HY OAS: {oas:.2f}% ({'crisis' if oas > 7 else 'stress' if oas > 5 else 'caution' if oas > 4 else 'normal' if oas > 3 else 'risk-on'})",
-            timestamp=datetime.utcnow(),
-            source="fred",
-            raw_data={"oas_pct": oas},
-        )
-
-    except ImportError:
-        logger.warning("high_yield_oas: fredapi not installed")
-        return None
-    except Exception as e:
-        logger.error(f"high_yield_oas: FRED fetch failed: {e}")
-        return None
+    score = _score_oas(oas)
+    return FactorReading(
+        factor_id="high_yield_oas",
+        score=score,
+        signal=score_to_signal(score),
+        detail=f"HY OAS: {oas:.2f}% ({'crisis' if oas > 7 else 'stress' if oas > 5 else 'caution' if oas > 4 else 'normal' if oas > 3 else 'risk-on'})",
+        timestamp=datetime.utcnow(),
+        source=source,
+        raw_data={"oas_pct": oas, "cached_fetched_at": cache_fetched_at},
+    )
 
 
 def _score_oas(oas: float) -> float:

@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 from database.redis_client import get_redis_client, sanitize_for_json
 from database.postgres_client import get_postgres_client
 from websocket.broadcaster import manager
+from bias_engine.anomaly_alerts import send_alert
 
 logger = logging.getLogger(__name__)
 
@@ -191,6 +192,7 @@ class FactorReading(BaseModel):
     timestamp: datetime
     source: str = "unknown"
     raw_data: Dict[str, Any] = Field(default_factory=dict)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
 class CompositeResult(BaseModel):
@@ -205,6 +207,7 @@ class CompositeResult(BaseModel):
     override_expires: Optional[datetime] = None
     timestamp: datetime
     confidence: str
+    unverifiable_factors: List[str] = Field(default_factory=list)
 
 
 def _clamp_score(value: float) -> float:
@@ -274,23 +277,49 @@ async def get_latest_reading(factor_id: str) -> Optional[FactorReading]:
 
 
 async def store_factor_reading(reading: FactorReading) -> None:
+    payload = _serialize_model(reading)
     try:
         client = await get_redis_client()
-        if not client:
-            return
-        key_latest = REDIS_KEY_FACTOR_LATEST.format(factor_id=reading.factor_id)
-        payload = _serialize_model(reading)
-        await client.setex(key_latest, REDIS_FACTOR_LATEST_TTL, payload)
+        if client:
+            key_latest = REDIS_KEY_FACTOR_LATEST.format(factor_id=reading.factor_id)
+            await client.setex(key_latest, REDIS_FACTOR_LATEST_TTL, payload)
 
-        key_history = REDIS_KEY_FACTOR_HISTORY.format(factor_id=reading.factor_id)
-        score_ts = _utc_naive(reading.timestamp).timestamp()
-        await client.zadd(key_history, {payload: score_ts})
-        await client.expire(key_history, REDIS_FACTOR_HISTORY_TTL)
+            key_history = REDIS_KEY_FACTOR_HISTORY.format(factor_id=reading.factor_id)
+            score_ts = _utc_naive(reading.timestamp).timestamp()
+            await client.zadd(key_history, {payload: score_ts})
+            await client.expire(key_history, REDIS_FACTOR_HISTORY_TTL)
 
-        cutoff = datetime.utcnow() - timedelta(seconds=REDIS_FACTOR_HISTORY_TTL)
-        await client.zremrangebyscore(key_history, 0, cutoff.timestamp())
+            cutoff = datetime.utcnow() - timedelta(seconds=REDIS_FACTOR_HISTORY_TTL)
+            await client.zremrangebyscore(key_history, 0, cutoff.timestamp())
+        else:
+            logger.debug("Redis unavailable; skipping factor reading cache for %s", reading.factor_id)
     except Exception as exc:
-        logger.warning(f"Failed to store factor reading {reading.factor_id}: {exc}")
+        logger.warning(f"Failed to store factor reading in Redis {reading.factor_id}: {exc}")
+
+    try:
+        pool = await get_postgres_client()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO factor_readings (factor_id, timestamp, score, signal, source, metadata)
+                VALUES ($1, $2, $3, $4, $5, $6)
+                """,
+                reading.factor_id,
+                _utc_naive(reading.timestamp),
+                reading.score,
+                reading.signal,
+                reading.source,
+                json.dumps(
+                    sanitize_for_json(
+                        {
+                            "raw_data": reading.raw_data or {},
+                            "metadata": reading.metadata or {},
+                        }
+                    )
+                ),
+            )
+    except Exception as exc:
+        logger.warning(f"Failed to store factor reading in Postgres {reading.factor_id}: {exc}")
 
 
 def build_factor_reading(payload: Dict[str, Any]) -> FactorReading:
@@ -303,6 +332,7 @@ def build_factor_reading(payload: Dict[str, Any]) -> FactorReading:
         timestamp=timestamp,
         source=payload.get("source", "unknown"),
         raw_data=payload.get("raw_data") or {},
+        metadata=payload.get("metadata") or {},
     )
 
 
@@ -512,12 +542,16 @@ async def compute_composite() -> CompositeResult:
 
     active: Dict[str, FactorReading] = {}
     stale_set = set()
+    unverifiable_factors: List[str] = []
 
     for factor_id in FACTOR_CONFIG:
         reading = readings.get(factor_id)
         if not reading:
             stale_set.add(factor_id)
             continue
+        timestamp_source = (reading.metadata or {}).get("timestamp_source")
+        if timestamp_source == "fallback":
+            unverifiable_factors.append(factor_id)
         max_age = timedelta(hours=FACTOR_CONFIG[factor_id]["staleness_hours"])
         reading_ts = _utc_naive(reading.timestamp)
         if (now - reading_ts) <= max_age:
@@ -586,14 +620,51 @@ async def compute_composite() -> CompositeResult:
         override_expires=override.get("expires") if override else None,
         timestamp=now,
         confidence=confidence,
+        unverifiable_factors=sorted(unverifiable_factors),
     )
 
     previous = await get_cached_composite()
     await cache_composite(result)
     await log_composite(result)
 
+    if len(stale_set) >= 5:
+        try:
+            stale_preview = ", ".join(sorted(stale_set)[:10])
+            await send_alert(
+                "Mass Factor Staleness",
+                f"{len(stale_set)} factors stale: {stale_preview}",
+                severity="warning",
+            )
+        except Exception as exc:
+            logger.warning(f"Mass staleness alert failed: {exc}")
+
+    if previous and previous.confidence == "HIGH" and result.confidence == "LOW":
+        try:
+            await send_alert(
+                "Bias Confidence Collapsed",
+                (
+                    "Composite confidence dropped from HIGH to LOW. "
+                    f"Active factors: {active_count}/{len(FACTOR_CONFIG)}"
+                ),
+                severity="critical",
+            )
+        except Exception as exc:
+            logger.warning(f"Confidence collapse alert failed: {exc}")
+
     if previous is None or previous.bias_level != result.bias_level:
         changed_from = previous.bias_level if previous else None
         await broadcast_bias_update(result, changed_from)
+        if previous is not None:
+            try:
+                await send_alert(
+                    "Bias Level Changed",
+                    (
+                        f"Composite bias changed: {previous.bias_level} -> {result.bias_level} "
+                        f"(score {result.composite_score:+.3f})"
+                    ),
+                    severity="info",
+                )
+            except Exception as exc:
+                logger.warning(f"Bias level change alert failed: {exc}")
 
     return result
