@@ -2964,40 +2964,10 @@ async def run_cta_scan_scheduled():
             except Exception as dedupe_err:
                 logger.warning(f"CTA cooldown check failed for {ticker}: {dedupe_err}")
 
-            base_score = signal.get("priority", 50)
-            
-            # Calculate bonus points
-            score_bonuses = []
-            
-            # 1. Watchlist bonus (+10)
-            if ticker in watchlist:
-                base_score += 10
-                score_bonuses.append("Watchlist")
-            
-            # 2. Bias alignment bonus (+10)
-            bias_aligned = await check_bias_alignment_for_cta(signal.get("direction"))
-            if bias_aligned:
-                base_score += 10
-                score_bonuses.append("Bias Aligned")
-            
-            # 3. Options flow confirmation (+10)
-            flow_confirmed = await check_flow_confirmation_for_cta(ticker, signal.get("direction"))
-            if flow_confirmed:
-                base_score += 10
-                score_bonuses.append("Flow Confirmed")
-            
-            # Update confidence based on final score
-            if base_score >= 70:
-                confidence = "HIGH"
-            elif base_score >= 55:
-                confidence = "MEDIUM"
-            else:
-                confidence = "LOW"
-            
-            # Build notes with bonuses
+            # NOTE: Legacy bonus block removed 2026-02. It computed watchlist/bias/flow
+            # bonuses that were overwritten by calculate_signal_score(). The scorer is the
+            # single source of truth for all score components.
             notes = signal.get("description", "")
-            if score_bonuses:
-                notes += f" [+{len(score_bonuses)*10}: {', '.join(score_bonuses)}]"
             
             # Convert CTA signal format to standard signal format
             setup = signal.get("setup", {}) or {}
@@ -3023,9 +2993,7 @@ async def run_cta_scan_scheduled():
             # Calculate score using the new scoring algorithm
             score, bias_alignment, triggering_factors = calculate_signal_score(trade_signal, current_bias)
             
-            # Add legacy bonus adjustments to triggering factors
-            if score_bonuses:
-                triggering_factors["legacy_bonuses"] = score_bonuses
+            # Legacy bonuses removed - scorer handles all scoring
             
             trade_signal["score"] = score
             trade_signal["bias_alignment"] = bias_alignment
