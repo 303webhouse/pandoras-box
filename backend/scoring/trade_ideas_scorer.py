@@ -25,7 +25,6 @@ STRATEGY_BASE_SCORES = {
     # CTA Scanner signals (highest quality)
     "GOLDEN_TOUCH": 65,
     "TWO_CLOSE_VOLUME": 60,
-    "ZONE_UPGRADE": 55,
     "PULLBACK_ENTRY": 50,
     "TRAPPED_LONGS": 55,        # Short signal: bearish capitulation play
     "TRAPPED_SHORTS": 55,       # Long signal: short squeeze play
@@ -207,6 +206,17 @@ def calculate_signal_score(
         zone_bonus = calculate_zone_bonus(cta_zone, direction)
         tech_bonus += zone_bonus
         tech_details["cta_zone"] = {"value": cta_zone, "bonus": zone_bonus}
+
+    # Zone upgrade bonus - signal coincides with zone improvement
+    zone_upgrade_ctx = signal.get('zone_upgrade_context')
+    if zone_upgrade_ctx and zone_upgrade_ctx.get('zone_upgraded'):
+        zone_up_bonus = TECHNICAL_BONUSES.get("favorable_zone", 4)
+        tech_bonus += zone_up_bonus
+        tech_details["zone_upgrade"] = {
+            "from": zone_upgrade_ctx.get("previous_zone"),
+            "to": zone_upgrade_ctx.get("current_zone"),
+            "bonus": zone_up_bonus
+        }
     
     # RVOL bonus
     rvol = signal.get('rvol') or signal.get('volume_ratio')

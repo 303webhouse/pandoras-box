@@ -463,9 +463,6 @@ def score_confluence(signals: List[Dict]) -> List[Dict]:
     if "GOLDEN_TOUCH" in signal_types and "TRAPPED_SHORTS" in signal_types:
         combo_boost = 40
         combo_label = "Squeeze into trend (Golden Touch + Trapped Shorts)"
-    elif "TWO_CLOSE_VOLUME" in signal_types and "ZONE_UPGRADE" in signal_types:
-        combo_boost = 30
-        combo_label = "Breakout confirmation (Volume + Zone Upgrade)"
     elif "GOLDEN_TOUCH" in signal_types and "TWO_CLOSE_VOLUME" in signal_types:
         combo_boost = 25
         combo_label = "Trend + Volume confirmation"
@@ -1285,10 +1282,6 @@ async def scan_ticker_cta(ticker: str, allow_shorts: bool = False) -> List[Dict]
         if pullback:
             signals.append(pullback)
         
-        zone_up = check_zone_upgrade(df, ticker)
-        if zone_up:
-            signals.append(zone_up)
-        
         # SHORT signals (only if enabled)
         if allow_shorts:
             death_cross = check_death_cross(df, ticker)
@@ -1310,6 +1303,18 @@ async def scan_ticker_cta(ticker: str, allow_shorts: bool = False) -> List[Dict]
         trapped_shorts = check_trapped_shorts(df, ticker)
         if trapped_shorts:
             signals.append(trapped_shorts)
+
+        zone_up = check_zone_upgrade(df, ticker)
+        # NOTE: Zone upgrade demoted from standalone signal to scoring context (2026-02).
+        # Zone info is injected into other signals for the same ticker.
+        if zone_up:
+            zone_context = {
+                "zone_upgraded": True,
+                "previous_zone": zone_up.get("context", {}).get("previous_zone"),
+                "current_zone": zone_up.get("cta_zone"),
+            }
+            for sig in signals:
+                sig["zone_upgrade_context"] = zone_context
 
         signals = score_confluence(signals)
 
@@ -1441,15 +1446,24 @@ async def analyze_ticker_cta_from_df(ticker: str, df: pd.DataFrame) -> Dict[str,
         pullback = check_pullback_entry(df, ticker)
         if pullback:
             signals.append(pullback)
-        zone_up = check_zone_upgrade(df, ticker)
-        if zone_up:
-            signals.append(zone_up)
         trapped_l = check_trapped_longs(df, ticker)
         if trapped_l:
             signals.append(trapped_l)
         trapped_s = check_trapped_shorts(df, ticker)
         if trapped_s:
             signals.append(trapped_s)
+
+        zone_up = check_zone_upgrade(df, ticker)
+        # NOTE: Zone upgrade demoted from standalone signal to scoring context (2026-02).
+        # Zone info is injected into other signals for the same ticker.
+        if zone_up:
+            zone_context = {
+                "zone_upgraded": True,
+                "previous_zone": zone_up.get("context", {}).get("previous_zone"),
+                "current_zone": zone_up.get("cta_zone"),
+            }
+            for sig in signals:
+                sig["zone_upgrade_context"] = zone_context
 
         signals = score_confluence(signals)
 
@@ -1945,8 +1959,6 @@ async def run_cta_scan(tickers: List[str] = None, include_watchlist: bool = True
     golden_touch = [s for s in all_signals if s["signal_type"] == "GOLDEN_TOUCH"]
     two_close = [s for s in all_signals if s["signal_type"] == "TWO_CLOSE_VOLUME"]
     pullbacks = [s for s in all_signals if s["signal_type"] == "PULLBACK_ENTRY"]
-    zone_upgrades = [s for s in all_signals if s["signal_type"] == "ZONE_UPGRADE"]
-    
     result = {
         "scan_time": datetime.now().isoformat(),
         "scan_duration_seconds": round(elapsed, 1),
@@ -1960,10 +1972,9 @@ async def run_cta_scan(tickers: List[str] = None, include_watchlist: bool = True
         "golden_touch_signals": golden_touch[:5],
         "two_close_signals": two_close[:10],
         "pullback_signals": pullbacks[:10],
-        "zone_upgrade_signals": zone_upgrades[:10],
         
-        # Top 10 overall (for quick action)
-        "top_signals": all_signals[:10],
+        # All signals - scheduler scores and selects top N
+        "top_signals": all_signals,
     }
     
     logger.info(f"✅ CTA Scan complete: {len(all_signals)} signals in {elapsed:.1f}s")

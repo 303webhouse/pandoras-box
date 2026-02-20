@@ -22,11 +22,6 @@ RR_PROFILES = {
     ("TWO_CLOSE_VOLUME", "TRANSITION"): (1.25, 2.5),
     ("TWO_CLOSE_VOLUME", "DE_LEVERAGING"): (1.5, 2.0),
 
-    # ZONE_UPGRADE: Zone just improved (e.g., WATERFALL -> TRANSITION)
-    ("ZONE_UPGRADE", "TRANSITION"): (1.5, 2.0),
-    ("ZONE_UPGRADE", "MAX_LONG"): (1.25, 2.5),
-    ("ZONE_UPGRADE", "DE_LEVERAGING"): (2.0, 2.0),
-
     # TRAPPED_LONGS (short signal): Bearish capitulation play
     ("TRAPPED_LONGS", "WATERFALL"): (1.25, 3.5),
     ("TRAPPED_LONGS", "DE_LEVERAGING"): (1.5, 3.0),
