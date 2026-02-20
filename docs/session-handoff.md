@@ -545,3 +545,8 @@ Validation:
 - Backend import sanity from backend cwd (`python -c "import main; print('backend import OK')"`) -> passed (non-blocking Windows cp1252 emoji logging warnings still present).
 - [2026-02-20 09:48:13 -07:00] Ops: Restarted VPS service pivot-bot on 188.245.250.2; service is active and logs show Discord connected + task loops running.
 - [2026-02-20 10:35:10 -07:00] Migration cutover: Added /opt/openclaw/workspace/scripts/pivot2_trade_poller.py, verified dry-run/live post, created OpenClaw cron pivot2-trade-poller (*/2 9-16 ET), confirmed collector briefs are disabled, restarted pivot-collector, and stopped+disabled pivot-bot. Note: /api/signals/active timed out from VPS, so poller falls back to /api/signals/queue for continuity.
+- [2026-02-20] Fix: market data retrieval for Pivot II — three bugs fixed:
+  1. `backend/api/hybrid_scanner.py` `/hybrid/price/{ticker}` returned null for crypto tickers (BTC, ETH, etc.) because yfinance requires "BTC-USD" format. Added `_normalize_yfinance_ticker()` mapping BTC→BTC-USD, ETH→ETH-USD, etc.
+  2. `backend/discord_bridge/bot.py` `_format_crypto_price_context()` was multiplying `basis_pct` by 100 a second time (API already returns a percentage). Fixed to display correctly.
+  3. Created `pivot/openclaw_scripts/market_data.py` — real-time price lookup script for Pivot II (OpenClaw). Routes BTC/crypto to `/api/crypto/market`, equities to `/api/hybrid/price/{ticker}`. Deploy: `scp pivot/openclaw_scripts/market_data.py root@188.245.250.2:/opt/openclaw/workspace/scripts/`
+  - DEVELOPMENT_STATUS.md updated with OpenClaw Script Sources table and deploy command.

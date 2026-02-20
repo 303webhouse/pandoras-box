@@ -51,20 +51,42 @@ async def get_scanner_status():
     }
 
 
+_CRYPTO_TICKER_MAP = {
+    "BTC": "BTC-USD",
+    "ETH": "ETH-USD",
+    "SOL": "SOL-USD",
+    "XRP": "XRP-USD",
+    "BNB": "BNB-USD",
+    "DOGE": "DOGE-USD",
+    "ADA": "ADA-USD",
+    "AVAX": "AVAX-USD",
+    "LINK": "LINK-USD",
+    "DOT": "DOT-USD",
+}
+
+
+def _normalize_yfinance_ticker(ticker: str) -> str:
+    """Map bare crypto symbols to yfinance-compatible format (e.g. BTC -> BTC-USD)."""
+    upper = ticker.upper()
+    return _CRYPTO_TICKER_MAP.get(upper, upper)
+
+
 @router.get("/price/{ticker}")
 async def get_current_price(ticker: str):
     """
     Get current price for a ticker (for P&L calculation)
-    Fast lookup using yfinance
+    Fast lookup using yfinance. Crypto tickers (BTC, ETH, etc.) are normalized
+    to their yfinance format (BTC-USD, ETH-USD, etc.) automatically.
     """
     try:
         import yfinance as yf
-        stock = yf.Ticker(ticker.upper())
+        yf_symbol = _normalize_yfinance_ticker(ticker)
+        stock = yf.Ticker(yf_symbol)
         hist = stock.history(period="1d")
-        
+
         if hist.empty:
             return {"ticker": ticker, "price": None, "error": "No data"}
-        
+
         price = float(hist['Close'].iloc[-1])
         return {"ticker": ticker.upper(), "price": round(price, 2)}
     except Exception as e:
