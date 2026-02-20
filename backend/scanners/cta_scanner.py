@@ -471,14 +471,16 @@ def score_confluence(signals: List[Dict]) -> List[Dict]:
     total_boost = base_boost + combo_boost
 
     for s in aligned_signals:
-        s["priority"] = s.get("priority", 50) + total_boost
-        s["confidence"] = "HIGH" if total_boost >= 40 else s.get("confidence", "MEDIUM")
+        # Don't mutate priority - let scorer handle all scoring.
+        # Pass confluence as metadata for scorer to use.
         s["confluence"] = {
             "count": len(aligned_signals),
             "signal_types": signal_types,
             "boost": total_boost,
             "combo": combo_label,
         }
+        if total_boost >= 40:
+            s["confidence"] = "HIGH"
 
     return signals
 
@@ -893,6 +895,44 @@ def check_zone_upgrade(df: pd.DataFrame, ticker: str) -> Optional[Dict]:
     return None
 
 
+def check_zone_downgrade(df: pd.DataFrame, ticker: str) -> Optional[Dict]:
+    """
+    Check for CTA Zone downgrades (moving to more bearish zone).
+    Returns context dict (not a standalone signal) for injection into SHORT signals.
+    """
+    if len(df) < 2:
+        return None
+
+    latest = df.iloc[-1]
+    prev = df.iloc[-2]
+
+    current_zone = latest['cta_zone']
+    prev_zone = prev['cta_zone']
+
+    zone_rank = {
+        "CAPITULATION": 0,
+        "WATERFALL": 1,
+        "DE_LEVERAGING": 2,
+        "TRANSITION": 3,
+        "MAX_LONG": 4,
+        "UNKNOWN": -1
+    }
+
+    current_rank = zone_rank.get(current_zone, -1)
+    prev_rank = zone_rank.get(prev_zone, -1)
+
+    # Zone downgrade: rank decreased, and previous zone was at least TRANSITION
+    if current_rank < prev_rank and prev_rank >= 3:
+        return {
+            "zone_downgraded": True,
+            "previous_zone": prev_zone,
+            "current_zone": current_zone,
+            "description": f"CTA zone downgraded from {prev_zone} to {current_zone}",
+        }
+
+    return None
+
+
 def check_trapped_longs(df: pd.DataFrame, ticker: str) -> Optional[Dict]:
     """
     URSA HUNTER: Detect trapped longs (bearish setup).
@@ -1296,10 +1336,11 @@ async def scan_ticker_cta(ticker: str, allow_shorts: bool = False) -> List[Dict]
             if resistance_rejection:
                 signals.append(resistance_rejection)
 
-        trapped_longs = check_trapped_longs(df, ticker)
-        if trapped_longs:
-            signals.append(trapped_longs)
+            trapped_longs = check_trapped_longs(df, ticker)  # SHORT signal
+            if trapped_longs:
+                signals.append(trapped_longs)
 
+        # trapped_shorts produces LONG signals - always check
         trapped_shorts = check_trapped_shorts(df, ticker)
         if trapped_shorts:
             signals.append(trapped_shorts)
@@ -1315,6 +1356,12 @@ async def scan_ticker_cta(ticker: str, allow_shorts: bool = False) -> List[Dict]
             }
             for sig in signals:
                 sig["zone_upgrade_context"] = zone_context
+
+        zone_down = check_zone_downgrade(df, ticker)
+        if zone_down:
+            for sig in signals:
+                if sig.get("direction") == "SHORT":
+                    sig["zone_downgrade_context"] = zone_down
 
         signals = score_confluence(signals)
 
@@ -1397,7 +1444,7 @@ async def analyze_ticker_cta(ticker: str) -> Dict[str, Any]:
     return convert_numpy_types(result)
 
 
-async def analyze_ticker_cta_from_df(ticker: str, df: pd.DataFrame) -> Dict[str, Any]:
+async def analyze_ticker_cta_from_df(ticker: str, df: pd.DataFrame, allow_shorts: bool = False) -> Dict[str, Any]:
     """
     Same as analyze_ticker_cta() but accepts pre-fetched DataFrame.
     Used by the unified analyzer to avoid duplicate yfinance calls.
@@ -1446,9 +1493,22 @@ async def analyze_ticker_cta_from_df(ticker: str, df: pd.DataFrame) -> Dict[str,
         pullback = check_pullback_entry(df, ticker)
         if pullback:
             signals.append(pullback)
-        trapped_l = check_trapped_longs(df, ticker)
-        if trapped_l:
-            signals.append(trapped_l)
+
+        if allow_shorts:
+            death_cross = check_death_cross(df, ticker)
+            if death_cross:
+                signals.append(death_cross)
+            bearish_breakdown = check_bearish_breakdown(df, ticker)
+            if bearish_breakdown:
+                signals.append(bearish_breakdown)
+            resistance_rejection = check_resistance_rejection(df, ticker)
+            if resistance_rejection:
+                signals.append(resistance_rejection)
+            trapped_l = check_trapped_longs(df, ticker)  # SHORT signal
+            if trapped_l:
+                signals.append(trapped_l)
+
+        # trapped_shorts produces LONG signals - always check
         trapped_s = check_trapped_shorts(df, ticker)
         if trapped_s:
             signals.append(trapped_s)
@@ -1464,6 +1524,12 @@ async def analyze_ticker_cta_from_df(ticker: str, df: pd.DataFrame) -> Dict[str,
             }
             for sig in signals:
                 sig["zone_upgrade_context"] = zone_context
+
+        zone_down = check_zone_downgrade(df, ticker)
+        if zone_down:
+            for sig in signals:
+                if sig.get("direction") == "SHORT":
+                    sig["zone_downgrade_context"] = zone_down
 
         signals = score_confluence(signals)
 
@@ -1928,7 +1994,7 @@ async def run_cta_scan(tickers: List[str] = None, include_watchlist: bool = True
         is_watchlist = ticker in watchlist
         
         try:
-            signals = await scan_ticker_cta(ticker)
+            signals = await scan_ticker_cta(ticker, allow_shorts=True)
             for signal in signals:
                 signal["from_watchlist"] = is_watchlist
                 all_signals.append(signal)

@@ -2997,6 +2997,8 @@ async def run_cta_scan_scheduled():
                 "cta_zone": signal.get("cta_zone"),
                 "notes": notes,
                 "zone_upgrade_context": signal.get("zone_upgrade_context"),
+                "zone_downgrade_context": signal.get("zone_downgrade_context"),
+                "confluence": signal.get("confluence"),
             }
             
             # Calculate score using the new scoring algorithm
@@ -3263,6 +3265,9 @@ async def run_crypto_scan_scheduled():
                     "status": "ACTIVE",
                     "cta_zone": cta_analysis.get("cta_zone"),
                     "confidence": best_signal.get("confidence", "MEDIUM"),
+                    "zone_upgrade_context": best_signal.get("zone_upgrade_context"),
+                    "zone_downgrade_context": best_signal.get("zone_downgrade_context"),
+                    "confluence": best_signal.get("confluence"),
                 }
                 
                 # Calculate score
