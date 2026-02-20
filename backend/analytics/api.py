@@ -66,9 +66,11 @@ _CONVICTION_ORDER = {"WATCH": 1, "MODERATE": 2, "HIGH": 3}
 
 
 class BacktestParams(BaseModel):
+    mode: str = "native"  # "native" = use signal's stop/target, "synthetic" = use % distances
     entry: str = "signal_price"
-    stop_distance_pct: float = 0.5
-    target_distance_pct: float = 1.0
+    stop_distance_pct: float = 0.5       # Only used in "synthetic" mode
+    target_distance_pct: float = 1.0     # Only used in "synthetic" mode
+    target_field: str = "target_2"       # "target_1" or "target_2" - which target to use in native mode
     risk_per_trade: float = 235.0
     min_conviction: Optional[str] = None
     require_convergence: bool = False
@@ -1714,6 +1716,8 @@ async def run_backtest(request: BacktestRequest):
             "parameters": request.model_dump(mode="json"),
             "results": {
                 "total_trades": 0,
+                "mode": request.params.mode,
+                "skipped_no_levels": 0,
                 "win_rate": 0.0,
                 "total_pnl": 0.0,
                 "avg_rr": 0.0,
@@ -1726,8 +1730,10 @@ async def run_backtest(request: BacktestRequest):
         _set_cached_backtest(cache_key, payload)
         return payload
 
+    use_native = request.params.mode == "native"
     stop_pct = request.params.stop_distance_pct / 100.0
     target_pct = request.params.target_distance_pct / 100.0
+    target_field = request.params.target_field  # "target_1" or "target_2"
     risk_per_trade = max(request.params.risk_per_trade, 1.0)
 
     trades: List[Dict[str, Any]] = []
@@ -1735,6 +1741,7 @@ async def run_backtest(request: BacktestRequest):
     equity_curve: List[Dict[str, Any]] = [{"date": request.start_date, "cumulative_pnl": 0.0}]
     rr_values: List[float] = []
     returns: List[float] = []
+    skipped_no_levels = 0
 
     for signal in signals:
         ticker = str(signal.get("ticker") or "").upper()
@@ -1753,14 +1760,33 @@ async def run_backtest(request: BacktestRequest):
             continue
 
         dir_label = direction_label(signal.get("direction"))
-        if dir_label == "BULLISH":
-            stop_price = entry * (1.0 - stop_pct)
-            target_price = entry * (1.0 + target_pct)
-            risk_per_share = max(entry - stop_price, 0.0001)
+        if use_native:
+            # Use signal's own stop/target levels
+            native_stop = _as_float(signal.get("stop_loss"))
+            native_target = _as_float(signal.get(target_field)) or _as_float(signal.get("target_1"))
+
+            if native_stop <= 0 or native_target <= 0:
+                # Signal has no native levels - skip it in native mode
+                skipped_no_levels += 1
+                continue
+
+            stop_price = native_stop
+            target_price = native_target
+
+            if dir_label == "BULLISH":
+                risk_per_share = max(entry - stop_price, 0.0001)
+            else:
+                risk_per_share = max(stop_price - entry, 0.0001)
         else:
-            stop_price = entry * (1.0 + stop_pct)
-            target_price = entry * (1.0 - target_pct)
-            risk_per_share = max(stop_price - entry, 0.0001)
+            # Synthetic mode (old behavior) - apply uniform % distances
+            if dir_label == "BULLISH":
+                stop_price = entry * (1.0 - stop_pct)
+                target_price = entry * (1.0 + target_pct)
+                risk_per_share = max(entry - stop_price, 0.0001)
+            else:
+                stop_price = entry * (1.0 + stop_pct)
+                target_price = entry * (1.0 - target_pct)
+                risk_per_share = max(stop_price - entry, 0.0001)
 
         qty = risk_per_trade / risk_per_share
         end_ts = ts + timedelta(days=5)
@@ -1811,10 +1837,16 @@ async def run_backtest(request: BacktestRequest):
         trades.append(
             {
                 "signal_id": signal.get("signal_id"),
+                "ticker": ticker,
+                "direction": dir_label,
+                "signal_type": signal.get("signal_type"),
                 "entry_date": ts.date().isoformat(),
                 "entry_price": round(entry, 4),
+                "stop_price": round(stop_price, 4),
+                "target_price": round(target_price, 4),
                 "exit_price": round(exit_price, 4),
                 "pnl": round(pnl, 3),
+                "rr_achieved": round(rr, 2),
                 "exit_reason": exit_reason,
             }
         )
@@ -1829,6 +1861,8 @@ async def run_backtest(request: BacktestRequest):
         "parameters": request.model_dump(mode="json"),
         "results": {
             "total_trades": len(trades),
+            "mode": request.params.mode,
+            "skipped_no_levels": skipped_no_levels if use_native else 0,
             "win_rate": round(win_rate, 3),
             "total_pnl": round(sum(t["pnl"] for t in trades), 3),
             "avg_rr": round(mean(rr_values), 3),
