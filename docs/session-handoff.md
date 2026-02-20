@@ -282,3 +282,23 @@
 
 - Scope gap noted:
   - Crypto-scalper files referenced in the brief (`main_hub_bridge.py`, `btc_integration.py`, scalper `main.py`) are not present in this repository workspace, so Part 6/9 code changes could not be applied here.
+
+## 2026-02-20 (Deploy + migration + smoke + weekly cron activation)
+
+- Pushed hardening changes to `main`:
+  - `e0c9160` (core hardening parts + weekly audit endpoint + persistence)
+  - `cb9f821` (fixed `/api/bias/factor-health` routing collision with `/api/bias/{timeframe}` dispatcher)
+- Executed DB migration against configured Postgres/Supabase:
+  - `migrations/006_factor_readings.sql` applied successfully (2 statements).
+- Railway smoke tests after deploy:
+  - `GET /api/bias/factor-health` => `200 OK` with 21 factors in summary.
+  - `POST /api/bias/weekly-audit` => `200 OK` (`status=audit_started`).
+- OpenClaw VPS gateway status check:
+  - `openclaw health` reports `Discord: ok (@Pivot II)` (no reconnect loop).
+- Registered weekly OpenClaw cron trigger on VPS:
+  - job id: `f4dc8ef8-d391-4b02-ae83-7bbceb704495`
+  - name: `weekly-data-audit`
+  - schedule: `0 16 * * 6` @ `UTC` (Saturday 10:00 AM ET)
+  - manual `openclaw cron run` succeeded (`status=ok`).
+- Added backup system cron fallback on VPS:
+  - `/etc/cron.d/weekly-audit-backup` with Saturday POST to `/api/bias/weekly-audit`.
