@@ -465,3 +465,12 @@ Validation:
 - `rg -n "t2_rr|t1_rr" backend/webhooks/tradingview.py` shows new R:R fields and return structure.
 - `python -m compileall backend` passed.
 - Backend import sanity check from backend cwd passed (`python -c "import main; print('backend import OK')"`).
+
+## 2026-02-20 (Phase 3 merge-conflict resolution)
+
+- Resolved PR merge conflict for `fix/outcome-tracking` after Phase 2 landed on `main`.
+- Rebased `fix/outcome-tracking` onto `origin/main` (`ff5becc`) and resolved the only conflict in `docs/session-handoff.md`.
+- Force-pushed updated branch with lease:
+  - old: `b9ce052`
+  - new: `cbb4f8f`
+- Verified PR #10 is now clean/mergeable in GitHub.
