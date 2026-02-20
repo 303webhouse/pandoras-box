@@ -474,3 +474,35 @@ Validation:
   - old: `b9ce052`
   - new: `cbb4f8f`
 - Verified PR #10 is now clean/mergeable in GitHub.
+
+## 2026-02-20 (CTA Phase 4 - Backtest Fidelity)
+
+- Implemented signal-native backtest mode with synthetic fallback.
+- `backend/analytics/queries.py`:
+  - Extended backtest signal query to include `stop_loss`, `target_1`, `target_2` from `signals`.
+- `backend/analytics/api.py`:
+  - Extended `BacktestParams` with:
+    - `mode` (default `native`)
+    - `target_field` (default `target_2`)
+    - retained synthetic `%` params for backward-compatible scenario mode.
+  - Updated `run_backtest()`:
+    - Native mode uses per-signal `stop_loss` + selected target field (`target_2` fallback to `target_1`).
+    - Synthetic mode preserves prior percent-distance behavior.
+    - Tracks `skipped_no_levels` for native mode coverage gaps.
+    - Trade output now includes ticker, direction, signal_type, stop/target prices, and achieved R:R.
+    - Results payload now includes `mode` and `skipped_no_levels` metadata.
+  - Empty-result payload also includes `mode` and `skipped_no_levels`.
+
+Validation:
+- `rg -n "s.stop_loss" backend/analytics/queries.py` confirmed stop-loss inclusion in backtest query.
+- `rg -n "mode.*native|mode.*synthetic" backend/analytics/api.py` confirmed mode handling.
+- `rg -n "target_field" backend/analytics/api.py` confirmed target selection logic.
+- `rg -n "skipped_no_levels" backend/analytics/api.py` confirmed skip tracking and output metadata.
+- `python -m compileall backend` passed.
+- Backend import sanity from backend cwd passed (`python -c "import main; print('backend import OK')"`).
+
+## 2026-02-20 (Phase 4 merge-conflict resolution)
+
+- Rebased `fix/backtest-fidelity` onto latest `origin/main` after Phase 3 landed.
+- Resolved the rebase conflict in `docs/session-handoff.md` by preserving both existing Phase 3 notes and Phase 4 notes.
+- Force-pushed rebased branch (`b00fcb0` -> `cca4f5a`); PR #11 now reports CLEAN/MERGEABLE.
