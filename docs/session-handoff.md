@@ -395,3 +395,15 @@ Validation:
   - `score_bonuses` references: none
   - `adjusted_t2` only appears in commented lines
 - `rg -n "RECOVERY" backend/` now reports only a comment note in `backend/config/signal_profiles.py`.
+
+## 2026-02-20 (Phase 1 branch push + PR + VPS restart)
+
+- Committed and pushed Phase 1 scorer-integrity changes to branch `fix/scorer-integrity`.
+  - Commit: `f10a303`
+  - Message: `fix: scorer integrity - Phase 1 (RSI/ADX bug, missing short scores, zone taxonomy, dead bonuses, t2 mutation)`
+- Opened PR to `main`:
+  - https://github.com/303webhouse/pandoras-box/pull/8
+- Restarted VPS bot service per deployment workflow:
+  - `systemctl restart pivot-bot` on `188.245.250.2`
+  - Verified `pivot-bot.service` active/running after restart.
+  - Followed logs via `journalctl -u pivot-bot -f` (bounded run) and confirmed Discord gateway reconnect + normal alert posting resumed.
