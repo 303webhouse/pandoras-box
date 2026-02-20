@@ -8,6 +8,7 @@ import json
 import logging
 from datetime import datetime, time, timedelta, timezone
 from typing import Any, Dict, List, Optional
+from zoneinfo import ZoneInfo
 
 import yfinance as yf
 from fastapi import APIRouter, BackgroundTasks
@@ -20,6 +21,8 @@ from database.redis_client import get_redis_client
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+ET = ZoneInfo("America/New_York")
+UTC = timezone.utc
 
 
 @router.post("/bias/weekly-audit")
@@ -35,11 +38,15 @@ async def run_weekly_audit(background_tasks: BackgroundTasks):
 
 
 async def _execute_weekly_audit() -> None:
-    week_start, week_end = _last_trading_week_window(datetime.utcnow())
+    week_start, week_end = _last_trading_week_window(datetime.now(UTC))
+    week_start_et = week_start.replace(tzinfo=UTC).astimezone(ET)
+    week_end_et = week_end.replace(tzinfo=UTC).astimezone(ET)
     logger.info(
-        "Weekly audit started for window %s -> %s",
+        "Weekly audit started for window %s -> %s UTC (%s -> %s ET)",
         week_start.isoformat(),
         week_end.isoformat(),
+        week_start_et.isoformat(),
+        week_end_et.isoformat(),
     )
 
     all_issues: List[Dict[str, Any]] = []
@@ -54,15 +61,23 @@ async def _execute_weekly_audit() -> None:
 
 
 def _last_trading_week_window(now_utc: datetime) -> tuple[datetime, datetime]:
-    now = now_utc.replace(tzinfo=None)
-    days_since_friday = (now.weekday() - 4) % 7
-    friday = (now - timedelta(days=days_since_friday)).date()
-    week_end = datetime.combine(friday, time(21, 0))
-    if week_end >= now:
-        week_end -= timedelta(days=7)
-    monday = (week_end - timedelta(days=4)).date()
-    week_start = datetime.combine(monday, time(13, 30))
-    return week_start, week_end
+    now_aware = now_utc if now_utc.tzinfo is not None else now_utc.replace(tzinfo=UTC)
+    now_et = now_aware.astimezone(ET)
+
+    # Find the most recent completed Friday close in US Eastern market time.
+    days_since_friday = (now_et.weekday() - 4) % 7
+    friday = (now_et - timedelta(days=days_since_friday)).date()
+    week_end_et = datetime.combine(friday, time(16, 0), tzinfo=ET)
+    if week_end_et >= now_et:
+        week_end_et -= timedelta(days=7)
+
+    monday = (week_end_et - timedelta(days=4)).date()
+    week_start_et = datetime.combine(monday, time(9, 30), tzinfo=ET)
+
+    # Convert to UTC-naive timestamps for DB queries (schema uses TIMESTAMP).
+    week_start_utc = week_start_et.astimezone(UTC).replace(tzinfo=None)
+    week_end_utc = week_end_et.astimezone(UTC).replace(tzinfo=None)
+    return week_start_utc, week_end_utc
 
 
 def _count_trading_days(start: datetime, end: datetime) -> int:

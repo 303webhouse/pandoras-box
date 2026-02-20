@@ -302,3 +302,30 @@
   - manual `openclaw cron run` succeeded (`status=ok`).
 - Added backup system cron fallback on VPS:
   - `/etc/cron.d/weekly-audit-backup` with Saturday POST to `/api/bias/weekly-audit`.
+
+## 2026-02-20 (CTA Scanner double-audit: setup quality, scoring, filtering, backtest)
+
+- Completed a two-pass audit of the CTA/trade-idea pipeline:
+  - Pass A: signal generation + scheduler + ranking/filtering path
+  - Pass B: ingestion persistence + outcomes + analytics/backtest path
+- Confirmed TradingView alerts are captured, scored, logged, cached, and broadcast via `backend/webhooks/tradingview.py`.
+- High-impact defects identified:
+  - Scoring bug in `backend/scoring/trade_ideas_scorer.py`: RSI bonus falls back to `adx` when RSI is missing (`rsi = signal.get('rsi') or signal.get('adx')`), which can inflate scores with incorrect momentum context.
+  - Missing base-score mappings for CTA short archetypes (`TRAPPED_LONGS`, `TRAPPED_SHORTS`, `BEARISH_BREAKDOWN`, `DEATH_CROSS`, `RESISTANCE_REJECTION`) causes fallback to `DEFAULT` scoring.
+  - CTA cooldown is ticker-level (`has_recent_active_signal(..., strategy='CTA Scanner')`) so stronger follow-up setups on the same ticker can be suppressed for 24h.
+  - Active feed (`/api/signals/active`) deduplicates by ticker and prefers recency over score, which can repeatedly surface refreshed/zone-chop ideas and hide stronger older setups.
+  - `signal_outcomes` insertion exists only in CTA scheduled push path; TradingView strategy signals are not enrolled in outcome tracking.
+  - `/api/analytics/backtest` uses synthetic fixed stop/target percentages instead of each signal’s native SL/TP/invalidation, so results are useful for scenario testing but not true setup replay.
+- Zone-shift behavior conclusion:
+  - Current code already suppresses standalone zone-shift posts in Discord bridge (`backend/discord_bridge/bot.py`) and uses zone context in follow-up alerts.
+  - Recommendation from audit: treat zone shift as a regime/scoring filter, not a standalone trade idea.
+- No code changes were made in this audit step; findings prepared for implementation planning.
+
+## 2026-02-20 (DST-safe weekly audit window + scheduler timezone hardening)
+
+- Updated `backend/api/weekly_audit.py` to remove hardcoded EST-only UTC conversions.
+  - Weekly window is now computed in `America/New_York` market hours (Mon 9:30 ET to Fri 4:00 ET) and then converted to UTC for DB queries.
+  - This makes weekly audit boundaries correct across both EST and EDT automatically.
+- Updated `backend/scheduler/bias_scheduler.py` APScheduler init to `AsyncIOScheduler(timezone=ET)` so cron jobs without explicit timezone follow Eastern time consistently and remain DST-safe.
+- Verification:
+  - `python -m compileall backend/api/weekly_audit.py backend/scheduler/bias_scheduler.py` completed successfully.
