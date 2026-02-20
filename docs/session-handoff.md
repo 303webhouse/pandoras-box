@@ -329,3 +329,41 @@
 - Updated `backend/scheduler/bias_scheduler.py` APScheduler init to `AsyncIOScheduler(timezone=ET)` so cron jobs without explicit timezone follow Eastern time consistently and remain DST-safe.
 - Verification:
   - `python -m compileall backend/api/weekly_audit.py backend/scheduler/bias_scheduler.py` completed successfully.
+
+## 2026-02-20 (Pivot II context/memory/intelligence upgrade on VPS)
+
+- Applied OpenClaw compaction tuning on VPS (`/home/openclaw/.openclaw/openclaw.json`):
+  - `reserveTokensFloor` set to `20000`
+  - `maxHistoryShare` set to `0.55`
+- Created and populated `/opt/openclaw/workspace/SESSION-STATE.md` for hot context persistence.
+- Rewrote `/opt/openclaw/workspace/AGENTS.md` with:
+  - screenshot extraction protocol,
+  - startup alignment including `SESSION-STATE.md`,
+  - memory/knowledge/post-mortem operating protocols.
+- Restructured `/opt/openclaw/workspace/MEMORY.md` into durable sections while preserving existing key facts.
+- Replaced `/opt/openclaw/workspace/HEARTBEAT.md` with a market-hours monitoring checklist.
+- Added memory utilities:
+  - `/opt/openclaw/workspace/skills/memory/capture.py`
+  - `/opt/openclaw/workspace/skills/memory/recall.py`
+  - `/opt/openclaw/workspace/skills/memory/postmortem.py`
+- Added knowledge utilities + index structure:
+  - `/opt/openclaw/workspace/skills/knowledge/ingest.py`
+  - `/opt/openclaw/workspace/skills/knowledge/query.py`
+  - `/opt/openclaw/workspace/knowledge/{books,strategies,playbook,papers}`
+  - `/opt/openclaw/workspace/knowledge/index.sqlite`
+- Ingested strategy/playbook content into knowledge DB (verified query returns matches).
+- Updated `/opt/openclaw/workspace/scripts/pivot2_twitter.py` to:
+  - log scored signals to `/opt/openclaw/workspace/data/twitter_signals.jsonl`,
+  - load required tokens/API settings from OpenClaw config env fallback,
+  - keep execution non-interactive for cron use.
+- Registered OpenClaw cron job on VPS:
+  - `pivot2-twitter-sentiment`
+  - `*/30 9-16 * * 1-5` in `America/New_York`
+  - isolated session, exec-once run of `pivot2_twitter.py`
+- Service/runtime checks:
+  - OpenClaw restarted cleanly,
+  - `openclaw health` reports Discord gateway OK for `@Pivot II`,
+  - twitter run + JSONL logging confirmed.
+- Remaining verification to do live in market hours:
+  - heartbeat trigger-path validation under real market conditions,
+  - sustained multi-image conversation stress test in Discord.
