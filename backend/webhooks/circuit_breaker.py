@@ -205,7 +205,7 @@ async def apply_circuit_breaker(trigger: str) -> Dict[str, Any]:
         }
         logger.info("✅ Circuit Breaker: SPY +2% Recovery")
 
-    # SPY RECOVERY - All Clear
+    # SPY rebound - all clear
     elif trigger_lower == "spy_recovery":
         reset_circuit_breaker()
         _circuit_breaker_state["description"] = "SPY back above prior close: All-clear signal"
