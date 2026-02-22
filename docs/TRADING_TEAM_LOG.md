@@ -33,7 +33,7 @@ After completing work on a Trading Team brief, append a new entry at the top of 
 | 04 — Outcome Tracking | ✅ | ✅ | ✅ | ✅ |
 | 05A — Gatekeeper Transparency + Override Feedback | ✅ | ✅ | ✅ | ⬜ |
 | 05B — Adaptive Calibration (needs ~3 weeks of outcome data) | ⬜ | ⬜ | ⬜ | ⬜ |
-| 06 — Post-Trade Autopsy | ⬜ | ⬜ | ⬜ | ⬜ |
+| 06 — Post-Trade Autopsy | ✅ | ⬜ | ⬜ | ⬜ |
 | 07 — Watchlist Re-Scorer | ⬜ | ⬜ | ⬜ | ⬜ |
 | 08 — Librarian Phase 1 (Knowledge Base) | ⬜ | ⬜ | ⬜ | ⬜ |
 | 09 — Librarian Phase 2 (Agent Training Loop) | ⬜ | ⬜ | ⬜ | ⬜ |
@@ -41,6 +41,13 @@ After completing work on a Trading Team brief, append a new entry at the top of 
 ---
 
 ## Log Entries
+
+### 2025-02-22 — Brief 06 Spec Written
+**Agent:** Claude.ai (Opus)
+**What happened:** Wrote Brief 06 (post-trade autopsy) spec. Haiku generates 3-5 sentence narratives for each resolved trade, wired into the nightly outcome matcher as a non-fatal follow-up step. Posts individual Discord embeds (color-coded WIN/LOSS/EXPIRED) and feeds narratives into Saturday weekly review for richer Sonnet synthesis. Also discovered that Brief 04's crons (nightly outcome matcher, Saturday review) were never registered in crontab — brief includes prerequisite fix with exact crontab entries.
+**Files changed:** `docs/codex-briefs/brief-06-post-trade-autopsy.md` (new)
+**Deviations from brief:** N/A — spec only
+**Next blocker:** CC needs to build. 1 new file (`committee_autopsy.py`), 2 modified files (`committee_outcomes.py`, `committee_review.py`). Must also register missing crons as prerequisite.
 
 ### 2025-02-22 — Brief 05A Built + Deployed
 **Agent:** Claude Code
