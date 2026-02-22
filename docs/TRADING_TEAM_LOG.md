@@ -31,12 +31,23 @@ After completing work on a Trading Team brief, append a new entry at the top of 
 | 03B — LLM Agents + Prompts | ✅ | ✅ | ✅ | ✅ |
 | 03C — Decision Tracking | ✅ | ✅ | ✅ | ✅ |
 | 04 — Outcome Tracking | ✅ | ✅ | ✅ | ✅ |
-| 05A — Gatekeeper Transparency + Override Feedback | ✅ | ⬜ | ⬜ | ⬜ |
+| 05A — Gatekeeper Transparency + Override Feedback | ✅ | ✅ | ✅ | ⬜ |
 | 05B — Adaptive Calibration (needs ~3 weeks of outcome data) | ⬜ | ⬜ | ⬜ | ⬜ |
+| 06 — Post-Trade Autopsy | ⬜ | ⬜ | ⬜ | ⬜ |
+| 07 — Watchlist Re-Scorer | ⬜ | ⬜ | ⬜ | ⬜ |
+| 08 — Librarian Phase 1 (Knowledge Base) | ⬜ | ⬜ | ⬜ | ⬜ |
+| 09 — Librarian Phase 2 (Agent Training Loop) | ⬜ | ⬜ | ⬜ | ⬜ |
 
 ---
 
 ## Log Entries
+
+### 2025-02-22 — Brief 05A Built + Deployed
+**Agent:** Claude Code
+**What happened:** Both parts of 05A implemented. Gatekeeper pass report now appears in every committee embed between Signal and Trade Parameters, with appropriate emoji flags for counter-bias, DEFCON, earnings proximity, daily budget. Override feedback enrichment adds per-override narratives to `format_analytics_for_llm()` output for weekly review consumption. Backward compatible — re-eval embeds omit gatekeeper report via `None` default.
+**Files changed:** `pivot2_committee.py` (modified — `build_gatekeeper_report()`, `build_committee_embed()` signature update, wired into `run()`), `committee_analytics.py` (modified — `compute_override_details()`, wired into `format_analytics_for_llm()`)
+**Deviations from brief:** None reported
+**Next blocker:** Needs live signal to verify embed rendering in Discord. Otherwise ready — no blockers for Brief 06.
 
 ### 2025-02-22 — Brief 05A Spec Written + Test Data Cleaned
 **Agent:** Claude.ai (Opus)
