@@ -22,6 +22,7 @@ pivot/cache/
 # Backend runtime state (generated at runtime; do not commit)
 data/bias_history.json
 data/weekly_baseline.json
+data/archives/
 
 # Backups
 *.backup.*

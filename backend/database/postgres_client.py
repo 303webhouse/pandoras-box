@@ -264,6 +264,11 @@ async def init_database():
                 ON price_history(ticker, timeframe, timestamp);
         """)
 
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_price_timeframe_timestamp
+                ON price_history(timeframe, timestamp);
+        """)
+
         # Multi-leg execution journal linked to trades.
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS trade_legs (
