@@ -755,6 +755,36 @@ async def get_pcr_status():
     return {"status": "no_data", "message": "No PCR data available"}
 
 
+@router.get("/outcomes/{signal_id}")
+async def get_signal_outcome(signal_id: str):
+    """
+    Return outcome data for a signal. Used by VPS outcome matcher.
+    Returns 404 if signal_id not found in signal_outcomes table.
+    """
+    from database.postgres_client import get_postgres_client
+
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM signal_outcomes WHERE signal_id = $1",
+            signal_id,
+        )
+
+    if row is None:
+        raise HTTPException(status_code=404, detail="Signal outcome not found")
+
+    # Serialize row: convert datetime/decimal types to JSON-safe values
+    result = {}
+    for key, value in dict(row).items():
+        if isinstance(value, datetime):
+            result[key] = value.isoformat()
+        elif hasattr(value, "as_tuple"):  # Decimal
+            result[key] = float(value)
+        else:
+            result[key] = value
+    return result
+
+
 @router.post("/test")
 async def test_webhook(request: Request):
     """Test endpoint to verify webhook is working"""
