@@ -31,12 +31,19 @@ After completing work on a Trading Team brief, append a new entry at the top of 
 | 03B — LLM Agents + Prompts | ✅ | ✅ | ✅ | ✅ |
 | 03C — Decision Tracking | ✅ | ✅ | ✅ | ✅ |
 | 04 — Outcome Tracking | ✅ | ✅ | ✅ | ✅ |
-| 05A — Score Breakdown + Override Feedback | ⬜ | ⬜ | ⬜ | ⬜ |
-| 05B — Adaptive Calibration (needs data) | ⬜ | ⬜ | ⬜ | ⬜ |
+| 05A — Gatekeeper Transparency + Override Feedback | ✅ | ⬜ | ⬜ | ⬜ |
+| 05B — Adaptive Calibration (needs ~3 weeks of outcome data) | ⬜ | ⬜ | ⬜ | ⬜ |
 
 ---
 
 ## Log Entries
+
+### 2025-02-22 — Brief 05A Spec Written + Test Data Cleaned
+**Agent:** Claude.ai (Opus)
+**What happened:** Wrote Brief 05A (gatekeeper transparency + override feedback enrichment), pushed to `docs/codex-briefs/brief-05a-gatekeeper-transparency.md`. Also cleaned stale 03C test data from `decision_log.jsonl` on VPS (all 5 entries were test signals — backed up to `.bak`, file cleared). System is clean for first real Saturday weekly review.
+**Files changed:** `docs/codex-briefs/brief-05a-gatekeeper-transparency.md` (new), VPS `data/decision_log.jsonl` (cleared)
+**Deviations from brief:** N/A — this is the spec, not implementation
+**Next blocker:** CC needs to build 05A. Only 2 files to modify: `pivot2_committee.py` and `committee_analytics.py`.
 
 ### 2025-02-22 — Brief 04 Built + Deployed + Tested
 **Agent:** Claude Code
