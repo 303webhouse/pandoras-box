@@ -627,7 +627,17 @@ async def compute_composite() -> CompositeResult:
     await cache_composite(result)
     await log_composite(result)
 
-    if len(stale_set) >= 5:
+    # Only alert on staleness during market hours (Mon-Fri 9:00-17:00 ET)
+    # Factors are expected to be stale on weekends/overnight
+    _et_now = datetime.now(timezone.utc).astimezone()
+    try:
+        import zoneinfo
+        _et_now = datetime.now(zoneinfo.ZoneInfo("America/New_York"))
+    except Exception:
+        pass
+    _market_session = _et_now.weekday() < 5 and 9 <= _et_now.hour <= 17
+
+    if len(stale_set) >= 5 and _market_session:
         try:
             stale_preview = ", ".join(sorted(stale_set)[:10])
             await send_alert(
@@ -638,7 +648,7 @@ async def compute_composite() -> CompositeResult:
         except Exception as exc:
             logger.warning(f"Mass staleness alert failed: {exc}")
 
-    if previous and previous.confidence == "HIGH" and result.confidence == "LOW":
+    if previous and previous.confidence == "HIGH" and result.confidence == "LOW" and _market_session:
         try:
             await send_alert(
                 "Bias Confidence Collapsed",
