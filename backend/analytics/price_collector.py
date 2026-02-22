@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -41,15 +42,61 @@ CRYPTO_TICKERS = {
 # ---------------------------------------------------------------------------
 # WAL-safety constants
 # ---------------------------------------------------------------------------
-UPSERT_BATCH_SIZE = 150          # rows per INSERT batch (keeps WAL per-txn small)
-BATCH_PAUSE_SECONDS = 0.1        # brief pause between batches for checkpoint breathing room
-VOLUME_WARN_MB = 350             # log warning when DB exceeds this size
-VOLUME_ABORT_MB = 430            # skip inserts entirely above this to protect the volume
-RETENTION_DAILY_DAYS = 90        # keep 90 days of daily bars
-RETENTION_INTRADAY_DAYS = 7      # keep 7 days of 5m bars
+def _int_env(name: str, default: int, minimum: int = 0) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning("Invalid integer env var %s=%r; using default=%d", name, raw, default)
+        return default
+    return max(value, minimum)
+
+
+def _float_env(name: str, default: float, minimum: float = 0.0) -> float:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        logger.warning("Invalid float env var %s=%r; using default=%.3f", name, raw, default)
+        return default
+    return max(value, minimum)
+
+
+def _bool_env(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+UPSERT_BATCH_SIZE = _int_env("PRICE_HISTORY_UPSERT_BATCH_SIZE", 100, minimum=1)
+BATCH_PAUSE_SECONDS = _float_env("PRICE_HISTORY_BATCH_PAUSE_SECONDS", 0.1, minimum=0.0)
+VOLUME_WARN_MB = _int_env("PRICE_HISTORY_DB_WARN_MB", 250, minimum=1)
+VOLUME_ABORT_MB = _int_env("PRICE_HISTORY_DB_ABORT_MB", 300, minimum=1)
+DB_ALERTS_ENABLED = _bool_env("PRICE_HISTORY_DB_ALERTS_ENABLED", True)
+DB_ALERT_COOLDOWN_MINUTES = _int_env("PRICE_HISTORY_DB_ALERT_COOLDOWN_MINUTES", 60, minimum=1)
+VACUUM_AFTER_TRIM_ENABLED = _bool_env("PRICE_HISTORY_VACUUM_AFTER_TRIM", False)
+VACUUM_AFTER_TRIM_MIN_DELETES = _int_env("PRICE_HISTORY_VACUUM_AFTER_TRIM_MIN_DELETES", 50000, minimum=1000)
+RETENTION_DAILY_DAYS = _int_env("PRICE_HISTORY_RETENTION_DAILY_DAYS", 30, minimum=7)
+RETENTION_INTRADAY_DAYS = _int_env("PRICE_HISTORY_RETENTION_INTRADAY_DAYS", 2, minimum=1)
+RECENT_SIGNAL_TICKER_DAYS = _int_env("PRICE_HISTORY_SIGNAL_LOOKBACK_DAYS", 14, minimum=1)
+MAX_SIGNAL_TICKERS = _int_env("PRICE_HISTORY_MAX_SIGNAL_TICKERS", 80, minimum=10)
+MAX_TICKERS_PER_CYCLE = _int_env("PRICE_HISTORY_MAX_TICKERS_PER_CYCLE", 100, minimum=10)
+MAX_ROWS_PER_CYCLE = _int_env("PRICE_HISTORY_MAX_ROWS_PER_CYCLE", 20000, minimum=1000)
+EQUITY_DAILY_PERIOD = os.getenv("PRICE_HISTORY_EQUITY_DAILY_PERIOD", "3d")
+EQUITY_INTRADAY_PERIOD = os.getenv("PRICE_HISTORY_EQUITY_INTRADAY_PERIOD", "1d")
+CRYPTO_DAILY_DAYS = _int_env("PRICE_HISTORY_CRYPTO_DAILY_DAYS", 2, minimum=1)
+CRYPTO_INTRADAY_DAYS = _int_env("PRICE_HISTORY_CRYPTO_INTRADAY_DAYS", 1, minimum=1)
+ENABLE_INTRADAY_COLLECTION = _bool_env("PRICE_HISTORY_ENABLE_INTRADAY", False)
 
 _backfill_lock = asyncio.Lock()
 _backfill_done = False
+_last_volume_alert_sent_at: Optional[datetime] = None
+_last_volume_alert_level: Optional[str] = None
 
 
 def _normalize_ohlcv_df(df: Any) -> Any:
@@ -221,12 +268,12 @@ async def _purge_malformed_daily_rows() -> int:
 
 async def _fetch_equity_rows(ticker: str, backfill: bool, include_intraday: bool) -> List[Tuple[str, str, datetime, Optional[float], Optional[float], Optional[float], Optional[float], Optional[float]]]:
     rows: List[Tuple[str, str, datetime, Optional[float], Optional[float], Optional[float], Optional[float], Optional[float]]] = []
-    daily_period = "6mo" if backfill else "10d"
+    daily_period = "6mo" if backfill else EQUITY_DAILY_PERIOD
     daily_df = await asyncio.to_thread(_fetch_yf_history_sync, ticker, daily_period, "1d")
     rows.extend(_parse_yf_rows(daily_df, ticker, "D"))
 
     if include_intraday:
-        intraday_period = "30d" if backfill else "2d"
+        intraday_period = "30d" if backfill else EQUITY_INTRADAY_PERIOD
         intraday_df = await asyncio.to_thread(_fetch_yf_history_sync, ticker, intraday_period, "5m")
         rows.extend(_parse_yf_rows(intraday_df, ticker, "5m"))
     return rows
@@ -309,10 +356,14 @@ def _parse_binance_rows(
     return rows
 
 
-async def _fetch_crypto_rows(ticker: str, backfill: bool) -> List[Tuple[str, str, datetime, Optional[float], Optional[float], Optional[float], Optional[float], Optional[float]]]:
+async def _fetch_crypto_rows(
+    ticker: str,
+    backfill: bool,
+    include_intraday: bool,
+) -> List[Tuple[str, str, datetime, Optional[float], Optional[float], Optional[float], Optional[float], Optional[float]]]:
     now_utc = datetime.now(timezone.utc)
-    daily_start = now_utc - timedelta(days=185 if backfill else 7)
-    intraday_start = now_utc - timedelta(days=30 if backfill else 2)
+    daily_start = now_utc - timedelta(days=185 if backfill else CRYPTO_DAILY_DAYS)
+    intraday_start = now_utc - timedelta(days=30 if backfill else CRYPTO_INTRADAY_DAYS)
     symbol = _normalize_binance_symbol(ticker)
     rows: List[Tuple[str, str, datetime, Optional[float], Optional[float], Optional[float], Optional[float], Optional[float]]] = []
 
@@ -326,14 +377,15 @@ async def _fetch_crypto_rows(ticker: str, backfill: bool) -> List[Tuple[str, str
         )
         rows.extend(_parse_binance_rows(ticker, "D", daily_klines))
 
-        intraday_klines = await _fetch_binance_klines(
-            client,
-            symbol,
-            "5m",
-            int(intraday_start.timestamp() * 1000),
-            int(now_utc.timestamp() * 1000),
-        )
-        rows.extend(_parse_binance_rows(ticker, "5m", intraday_klines))
+        if include_intraday:
+            intraday_klines = await _fetch_binance_klines(
+                client,
+                symbol,
+                "5m",
+                int(intraday_start.timestamp() * 1000),
+                int(now_utc.timestamp() * 1000),
+            )
+            rows.extend(_parse_binance_rows(ticker, "5m", intraday_klines))
 
     return rows
 
@@ -352,6 +404,42 @@ async def _get_db_size_mb() -> float:
     except Exception as exc:
         logger.warning("Could not check database size: %s", exc)
         return 0.0
+
+
+async def _maybe_send_volume_alert(level: str, db_mb: float, pending_rows: int) -> None:
+    """
+    Send Discord alert when DB size crosses warning/critical thresholds.
+    Alerts are throttled per severity level to avoid spam.
+    """
+    global _last_volume_alert_sent_at, _last_volume_alert_level
+
+    if not DB_ALERTS_ENABLED:
+        return
+
+    now = datetime.now(timezone.utc)
+    if (
+        _last_volume_alert_sent_at
+        and _last_volume_alert_level == level
+        and (now - _last_volume_alert_sent_at).total_seconds() < DB_ALERT_COOLDOWN_MINUTES * 60
+    ):
+        return
+
+    severity = "critical" if level == "critical" else "warning"
+    title = f"Price History DB Volume {level.upper()} ({db_mb:.1f} MB)"
+    description = (
+        f"Postgres volume crossed threshold (warn={VOLUME_WARN_MB} MB, abort={VOLUME_ABORT_MB} MB).\n"
+        f"Pending upsert rows in this cycle: {pending_rows}.\n"
+        "If unexpected, set ENABLE_PRICE_HISTORY_COLLECTION=false and verify retention/archive settings."
+    )
+
+    try:
+        from bias_engine.anomaly_alerts import send_alert
+
+        await send_alert(title=title, description=description, severity=severity)
+        _last_volume_alert_sent_at = now
+        _last_volume_alert_level = level
+    except Exception as exc:
+        logger.warning("Failed to send DB volume alert (%s): %s", level, exc)
 
 
 async def _upsert_price_rows(
@@ -374,12 +462,14 @@ async def _upsert_price_rows(
     db_mb = await _get_db_size_mb()
     if db_mb > VOLUME_ABORT_MB:
         logger.error(
-            "DB size %.0f MB exceeds abort threshold %d MB — skipping insert of %d rows to protect volume!",
+            "DB size %.0f MB exceeds abort threshold %d MB - skipping insert of %d rows to protect volume!",
             db_mb, VOLUME_ABORT_MB, len(payload),
         )
+        await _maybe_send_volume_alert("critical", db_mb, len(payload))
         return 0
     if db_mb > VOLUME_WARN_MB:
         logger.warning("DB size %.0f MB approaching limit (warn=%d MB).", db_mb, VOLUME_WARN_MB)
+        await _maybe_send_volume_alert("warning", db_mb, len(payload))
 
     pool = await get_postgres_client()
     upsert_sql = """
@@ -392,6 +482,10 @@ async def _upsert_price_rows(
             low = EXCLUDED.low,
             close = EXCLUDED.close,
             volume = EXCLUDED.volume
+        WHERE
+            (price_history.open, price_history.high, price_history.low, price_history.close, price_history.volume)
+            IS DISTINCT FROM
+            (EXCLUDED.open, EXCLUDED.high, EXCLUDED.low, EXCLUDED.close, EXCLUDED.volume)
     """
 
     total_inserted = 0
@@ -467,23 +561,90 @@ async def _trim_old_price_history() -> Dict[str, int]:
     return deleted
 
 
+async def _maybe_vacuum_price_history(trimmed: Dict[str, int]) -> bool:
+    """
+    Optional manual VACUUM to accelerate space reclaim after large trim events.
+    Disabled by default to avoid surprise maintenance overhead.
+    """
+    if not VACUUM_AFTER_TRIM_ENABLED:
+        return False
+
+    total_deleted = int(trimmed.get("daily", 0)) + int(trimmed.get("intraday", 0))
+    if total_deleted < VACUUM_AFTER_TRIM_MIN_DELETES:
+        return False
+
+    try:
+        pool = await get_postgres_client()
+        async with pool.acquire() as conn:
+            await conn.execute("VACUUM (ANALYZE) price_history")
+        logger.warning(
+            "Manual VACUUM executed for price_history after large trim (deleted=%d).",
+            total_deleted,
+        )
+        return True
+    except Exception as exc:
+        logger.warning("Manual VACUUM after trim failed: %s", exc)
+        return False
+
+
 async def _load_target_tickers() -> List[str]:
-    tickers = {t.upper() for t in DEFAULT_TICKERS}
+    ordered_tickers: List[str] = sorted({t.upper() for t in DEFAULT_TICKERS})
+
+    def _add_many(values: Iterable[Any]) -> None:
+        for value in values:
+            symbol = str(value).upper().strip() if value is not None else ""
+            if symbol:
+                ordered_tickers.append(symbol)
+
     pool = await get_postgres_client()
     async with pool.acquire() as conn:
         try:
-            rows = await conn.fetch("SELECT symbol FROM watchlist_tickers WHERE muted = false")
-            tickers.update(str(row["symbol"]).upper() for row in rows if row["symbol"])
+            rows = await conn.fetch(
+                """
+                SELECT symbol
+                FROM watchlist_tickers
+                WHERE muted = false
+                ORDER BY COALESCE(priority, 999), symbol ASC
+                """
+            )
+            _add_many(row["symbol"] for row in rows)
         except Exception as exc:
             logger.debug("watchlist_tickers unavailable for collector: %s", exc)
 
         try:
-            rows = await conn.fetch("SELECT DISTINCT ticker FROM signals WHERE ticker IS NOT NULL")
-            tickers.update(str(row["ticker"]).upper() for row in rows if row["ticker"])
+            rows = await conn.fetch(
+                """
+                SELECT ticker
+                FROM signals
+                WHERE ticker IS NOT NULL
+                  AND created_at >= NOW() - $1::interval
+                ORDER BY created_at DESC
+                LIMIT $2
+                """,
+                timedelta(days=RECENT_SIGNAL_TICKER_DAYS),
+                MAX_SIGNAL_TICKERS,
+            )
+            _add_many(row["ticker"] for row in rows)
         except Exception as exc:
             logger.debug("signals unavailable for collector: %s", exc)
 
-    return sorted(tickers)
+    deduped: List[str] = []
+    seen: set[str] = set()
+    for ticker in ordered_tickers:
+        if ticker in seen:
+            continue
+        seen.add(ticker)
+        deduped.append(ticker)
+
+    if len(deduped) > MAX_TICKERS_PER_CYCLE:
+        logger.warning(
+            "Price collector ticker list truncated from %d to %d (set PRICE_HISTORY_MAX_TICKERS_PER_CYCLE to adjust).",
+            len(deduped),
+            MAX_TICKERS_PER_CYCLE,
+        )
+        deduped = deduped[:MAX_TICKERS_PER_CYCLE]
+
+    return deduped
 
 
 async def collect_price_history_cycle(backfill: bool = False) -> Dict[str, Any]:
@@ -499,20 +660,41 @@ async def collect_price_history_cycle(backfill: bool = False) -> Dict[str, Any]:
     except Exception as exc:
         logger.warning("Could not purge malformed daily rows: %s", exc)
 
-    equity_intraday = backfill or _market_hours_equities()
+    intraday_enabled = ENABLE_INTRADAY_COLLECTION
+    equity_intraday = intraday_enabled and (backfill or _market_hours_equities())
+    crypto_intraday = intraday_enabled
     upserted = 0
     errors: List[str] = []
+    rows_attempted = 0
+    rows_truncated = 0
+    skipped_tickers = 0
 
     for ticker in tickers:
         try:
             if _is_crypto_ticker(ticker):
-                rows = await _fetch_crypto_rows(ticker, backfill=backfill)
+                rows = await _fetch_crypto_rows(
+                    ticker,
+                    backfill=backfill,
+                    include_intraday=crypto_intraday,
+                )
             else:
                 rows = await _fetch_equity_rows(
                     ticker,
                     backfill=backfill,
                     include_intraday=equity_intraday,
                 )
+            if not rows:
+                continue
+
+            remaining = MAX_ROWS_PER_CYCLE - rows_attempted
+            if remaining <= 0:
+                skipped_tickers += 1
+                continue
+            if len(rows) > remaining:
+                rows_truncated += len(rows) - remaining
+                rows = rows[-remaining:]
+
+            rows_attempted += len(rows)
             upserted += await _upsert_price_rows(rows)
         except Exception as exc:
             errors.append(f"{ticker}: {exc}")
@@ -520,8 +702,10 @@ async def collect_price_history_cycle(backfill: bool = False) -> Dict[str, Any]:
 
     # --- Trim old data after each collection cycle to keep volume lean ---
     trimmed = {"daily": 0, "intraday": 0}
+    vacuum_ran = False
     try:
         trimmed = await _trim_old_price_history()
+        vacuum_ran = await _maybe_vacuum_price_history(trimmed)
     except Exception as exc:
         logger.warning("Post-collection trim failed: %s", exc)
 
@@ -532,12 +716,26 @@ async def collect_price_history_cycle(backfill: bool = False) -> Dict[str, Any]:
     except Exception:
         pass
 
+    if rows_truncated > 0 or skipped_tickers > 0:
+        logger.warning(
+            "Price collection row cap applied: attempted=%d cap=%d truncated=%d skipped_tickers=%d",
+            rows_attempted,
+            MAX_ROWS_PER_CYCLE,
+            rows_truncated,
+            skipped_tickers,
+        )
+
     return {
         "status": "ok" if not errors else "partial",
         "rows_upserted": upserted,
+        "rows_attempted": rows_attempted,
+        "rows_truncated": rows_truncated,
+        "skipped_tickers": skipped_tickers,
         "tickers": len(tickers),
+        "intraday_enabled": intraday_enabled,
         "purged_daily_rows": deleted_bad_rows,
         "trimmed_rows": trimmed,
+        "vacuum_ran": vacuum_ran,
         "errors": errors[:10],
     }
 
