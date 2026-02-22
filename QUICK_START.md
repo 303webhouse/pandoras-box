@@ -108,6 +108,114 @@ DB_PORT = int(os.getenv("DB_PORT", 5432))
 
 ---
 
+## Price History Guardrails (Railway)
+
+These backend env vars limit price-history write amplification and reduce Postgres volume risk:
+
+```bash
+ENABLE_PRICE_HISTORY_COLLECTION=false
+ENABLE_PRICE_HISTORY_BACKFILL=false
+PRICE_HISTORY_DB_WARN_MB=250
+PRICE_HISTORY_DB_ABORT_MB=300
+PRICE_HISTORY_DB_ALERTS_ENABLED=true
+PRICE_HISTORY_DB_ALERT_COOLDOWN_MINUTES=60
+PRICE_HISTORY_VACUUM_AFTER_TRIM=false
+PRICE_HISTORY_VACUUM_AFTER_TRIM_MIN_DELETES=50000
+PRICE_HISTORY_RETENTION_DAILY_DAYS=30
+PRICE_HISTORY_RETENTION_INTRADAY_DAYS=2
+PRICE_HISTORY_MAX_TICKERS_PER_CYCLE=100
+PRICE_HISTORY_MAX_ROWS_PER_CYCLE=20000
+PRICE_HISTORY_ENABLE_INTRADAY=false
+PRICE_HISTORY_SIGNAL_LOOKBACK_DAYS=14
+PRICE_HISTORY_EQUITY_DAILY_PERIOD=3d
+PRICE_HISTORY_EQUITY_INTRADAY_PERIOD=1d
+PRICE_HISTORY_CRYPTO_DAILY_DAYS=2
+PRICE_HISTORY_CRYPTO_INTRADAY_DAYS=1
+```
+
+Optional Discord webhook for alerts (including DB-size warnings):
+```bash
+DISCORD_WEBHOOK_ALERTS=https://discord.com/api/webhooks/...
+```
+
+Keep collection disabled until you intentionally want to collect again. To re-enable:
+```bash
+ENABLE_PRICE_HISTORY_COLLECTION=true
+```
+To immediately stop writes again:
+```bash
+ENABLE_PRICE_HISTORY_COLLECTION=false
+```
+
+After large purges/deletes, verify space reclaim:
+```sql
+VACUUM (ANALYZE) price_history;
+SELECT pg_size_pretty(pg_database_size(current_database()));
+```
+If you want this automated for very large trim cycles, enable:
+```bash
+PRICE_HISTORY_VACUUM_AFTER_TRIM=true
+```
+
+---
+
+## Local Archive Workflow (PC)
+
+Run this from your PC to preserve full history offline while keeping Railway Postgres lean.
+
+Preview (no DB deletion):
+```bash
+python -m backend.jobs.archive_price_history --older-than-days 2 --dry-run
+```
+
+Archive only (no deletion):
+```bash
+python -m backend.jobs.archive_price_history --older-than-days 2
+```
+
+Archive + purge from Postgres (after you verify archive files):
+```bash
+python -m backend.jobs.archive_price_history --older-than-days 2 --purge
+```
+
+Outputs:
+- Compressed archive batches: `data/archives/price_history/run_*/batch_*.csv.gz`
+- Per-run manifest: `data/archives/price_history/run_*/manifest.json`
+
+Suggested cadence:
+- Run daily with `--older-than-days 2 --purge`
+- Keep Postgres as hot storage; use local archives for deep backtests.
+
+---
+
+## Automate Archive Task (Windows)
+
+Install/update the daily Task Scheduler job:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\register_price_history_archive_task.ps1
+```
+
+Run the task manually right now:
+
+```powershell
+schtasks /Run /TN "TradingHub-PriceHistoryArchive"
+```
+
+Check task status:
+
+```powershell
+schtasks /Query /TN "TradingHub-PriceHistoryArchive" /V /FO LIST
+```
+
+Task runner:
+- `scripts/run_price_history_archive.ps1`
+- Registered task:
+  - `\TradingHub-PriceHistoryArchive` (daily at 2:15 AM)
+- Logs: `data/archives/price_history/logs/archive_YYYY-MM-DD.log`
+
+---
+
 ## Infrastructure Map
 
 | What | Where | Access |
@@ -140,6 +248,8 @@ Credentials are NOT stored in the repo. They live in:
 | Bot offline | `ssh root@188.245.250.2 "systemctl restart pivot-bot"` |
 | Railway deploy stuck | Railway dashboard → Redeploy or check build logs |
 | Health returns `postgres: disconnected` | Check Railway Postgres service is running in fabulous-essence |
+| Railway Postgres crash-loop with `No space left on device` | Stop writers, increase Postgres volume, then restart. Do not manually delete Postgres WAL files. |
+| DB size not shrinking after purge | Run `VACUUM (ANALYZE) price_history;` then check `pg_database_size(current_database())` |
 | Health returns `redis: error` | Verify Upstash Redis URL in Railway env vars starts with `rediss://` |
 | Bot responds but no market data | Check `pivot-collector.service` is running |
 | Duplicate bot responses | Ensure only ONE bot instance (VPS only, not Railway) |
