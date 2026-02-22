@@ -29,6 +29,17 @@ def get_eastern_now() -> datetime:
     """Get current time in Eastern Time (market hours)"""
     return datetime.now(ET)
 
+
+def _bool_env(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+ENABLE_PRICE_HISTORY_COLLECTION = _bool_env("ENABLE_PRICE_HISTORY_COLLECTION", False)
+ENABLE_PRICE_HISTORY_BACKFILL = _bool_env("ENABLE_PRICE_HISTORY_BACKFILL", False)
+
 # State file for bias history
 BIAS_HISTORY_FILE = os.path.join(os.path.dirname(__file__), "..", "..", "data", "bias_history.json")
 BASELINE_FILE = os.path.join(os.path.dirname(__file__), "..", "..", "data", "weekly_baseline.json")
@@ -2163,6 +2174,16 @@ async def run_price_collection_job(backfill: bool = False):
     - backfill=False: incremental append cadence.
     """
     now = get_eastern_now()
+    if not ENABLE_PRICE_HISTORY_COLLECTION:
+        _scheduler_status["price_collection"]["status"] = "disabled"
+        _scheduler_status["price_collection"]["last_run"] = now.isoformat()
+        return {"status": "disabled", "reason": "ENABLE_PRICE_HISTORY_COLLECTION=false"}
+
+    if backfill and not ENABLE_PRICE_HISTORY_BACKFILL:
+        _scheduler_status["price_collection"]["status"] = "backfill_disabled"
+        _scheduler_status["price_collection"]["last_run"] = now.isoformat()
+        return {"status": "backfill_disabled", "reason": "ENABLE_PRICE_HISTORY_BACKFILL=false"}
+
     _scheduler_status["price_collection"]["status"] = "running"
     try:
         from analytics.price_collector import collect_price_history_cycle, run_price_backfill_once
@@ -2488,12 +2509,17 @@ async def start_scheduler():
     except Exception as e:
         logger.error(f"  âŒ Error during initial refresh: {e}")
 
-    # Kick off startup price-history backfill asynchronously.
-    try:
-        asyncio.create_task(run_price_collection_job(backfill=True))
-        logger.info("  ðŸ“¦ Analytics price backfill task started")
-    except Exception as e:
-        logger.warning(f"  âš ï¸ Could not start analytics backfill task: {e}")
+    # Kick off startup price-history backfill asynchronously (optional).
+    if ENABLE_PRICE_HISTORY_COLLECTION and ENABLE_PRICE_HISTORY_BACKFILL:
+        try:
+            asyncio.create_task(run_price_collection_job(backfill=True))
+            logger.info("  Price history backfill task started")
+        except Exception as e:
+            logger.warning(f"  Could not start price history backfill task: {e}")
+    elif not ENABLE_PRICE_HISTORY_COLLECTION:
+        logger.info("  Price history collection disabled via ENABLE_PRICE_HISTORY_COLLECTION=false")
+    else:
+        logger.info("  Price history backfill disabled via ENABLE_PRICE_HISTORY_BACKFILL=false")
     
     # Use APScheduler if available, otherwise use simple asyncio loop
     try:
@@ -2583,18 +2609,21 @@ async def start_scheduler():
             replace_existing=True
         )
 
-        # Price history collection every 5 minutes.
-        scheduler.add_job(
-            run_price_collection_job,
-            'interval',
-            minutes=5,
-            kwargs={"backfill": False},
-            id='price_history_collection',
-            name='Price History Collection',
-            replace_existing=True,
-            coalesce=True,
-            max_instances=1
-        )
+        # Price history collection every 5 minutes (optional).
+        if ENABLE_PRICE_HISTORY_COLLECTION:
+            scheduler.add_job(
+                run_price_collection_job,
+                'interval',
+                minutes=5,
+                kwargs={"backfill": False},
+                id='price_history_collection',
+                name='Price History Collection',
+                replace_existing=True,
+                coalesce=True,
+                max_instances=1
+            )
+        else:
+            logger.info("Price history scheduler disabled via ENABLE_PRICE_HISTORY_COLLECTION=false")
 
         # Daily analytics updates at/after market close.
         scheduler.add_job(
