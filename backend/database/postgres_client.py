@@ -663,7 +663,107 @@ async def init_database():
             CREATE INDEX IF NOT EXISTS idx_trades_structure ON trades(structure);
             CREATE INDEX IF NOT EXISTS idx_trades_signal_source ON trades(signal_source);
         """)
-        
+
+        # Brief 07: Account balances across all brokerages
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS account_balances (
+                id SERIAL PRIMARY KEY,
+                account_name TEXT NOT NULL UNIQUE,
+                broker TEXT NOT NULL,
+                balance NUMERIC(12,2) NOT NULL,
+                cash NUMERIC(12,2),
+                buying_power NUMERIC(12,2),
+                margin_total NUMERIC(12,2),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_by TEXT NOT NULL DEFAULT 'manual'
+            )
+        """)
+
+        # Brief 07: Open positions (RH active trading account only)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS open_positions (
+                id SERIAL PRIMARY KEY,
+                ticker TEXT NOT NULL,
+                position_type TEXT NOT NULL,
+                direction TEXT NOT NULL,
+                quantity INTEGER NOT NULL,
+                option_type TEXT,
+                strike NUMERIC(10,2),
+                expiry DATE,
+                spread_type TEXT,
+                short_strike NUMERIC(10,2),
+                cost_basis NUMERIC(10,2) NOT NULL,
+                cost_per_unit NUMERIC(10,2),
+                current_value NUMERIC(10,2),
+                current_price NUMERIC(10,2),
+                unrealized_pnl NUMERIC(10,2),
+                unrealized_pnl_pct NUMERIC(6,2),
+                opened_at TIMESTAMPTZ,
+                last_updated TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_by TEXT NOT NULL DEFAULT 'manual',
+                notes TEXT,
+                is_active BOOLEAN NOT NULL DEFAULT TRUE
+            )
+        """)
+
+        # Brief 07: Cash flow events for accurate P&L calculation
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS cash_flows (
+                id SERIAL PRIMARY KEY,
+                account_name TEXT NOT NULL DEFAULT 'Robinhood',
+                flow_type TEXT NOT NULL,
+                amount NUMERIC(10,2) NOT NULL,
+                description TEXT,
+                activity_date DATE NOT NULL,
+                imported_from TEXT DEFAULT 'csv'
+            )
+        """)
+
+        # Brief 07: RH trade history imported from CSV exports
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS rh_trade_history (
+                id SERIAL PRIMARY KEY,
+                activity_date DATE NOT NULL,
+                settle_date DATE,
+                ticker TEXT NOT NULL,
+                description TEXT NOT NULL,
+                trans_code TEXT NOT NULL,
+                quantity NUMERIC(10,4),
+                price NUMERIC(10,4),
+                amount NUMERIC(12,2) NOT NULL,
+                is_option BOOLEAN NOT NULL DEFAULT FALSE,
+                option_type TEXT,
+                strike NUMERIC(10,2),
+                expiry DATE,
+                trade_group_id TEXT,
+                signal_id TEXT,
+                imported_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                UNIQUE(activity_date, ticker, description, trans_code, quantity, price)
+            )
+        """)
+
+        # Brief 07: Seed account balances (only if table is empty)
+        await conn.execute("""
+            INSERT INTO account_balances (account_name, broker, balance, cash, buying_power, margin_total, updated_by)
+            SELECT 'Robinhood', 'robinhood', 4469.37, 2868.92, 6227.38, 3603.94, 'manual'
+            WHERE NOT EXISTS (SELECT 1 FROM account_balances WHERE account_name = 'Robinhood')
+        """)
+        await conn.execute("""
+            INSERT INTO account_balances (account_name, broker, balance, updated_by)
+            SELECT 'Fidelity 401A', 'fidelity', 10109.63, 'manual'
+            WHERE NOT EXISTS (SELECT 1 FROM account_balances WHERE account_name = 'Fidelity 401A')
+        """)
+        await conn.execute("""
+            INSERT INTO account_balances (account_name, broker, balance, updated_by)
+            SELECT 'Fidelity 403B', 'fidelity', 158.98, 'manual'
+            WHERE NOT EXISTS (SELECT 1 FROM account_balances WHERE account_name = 'Fidelity 403B')
+        """)
+        await conn.execute("""
+            INSERT INTO account_balances (account_name, broker, balance, updated_by)
+            SELECT 'Fidelity Roth', 'fidelity', 8233.52, 'manual'
+            WHERE NOT EXISTS (SELECT 1 FROM account_balances WHERE account_name = 'Fidelity Roth')
+        """)
+
         print("Database schema initialized")
 
 async def log_signal(
