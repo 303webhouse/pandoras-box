@@ -692,7 +692,7 @@ async def init_database():
                 expiry DATE,
                 spread_type TEXT,
                 short_strike NUMERIC(10,2),
-                cost_basis NUMERIC(10,2) NOT NULL,
+                cost_basis NUMERIC(10,2),
                 cost_per_unit NUMERIC(10,2),
                 current_value NUMERIC(10,2),
                 current_price NUMERIC(10,2),
