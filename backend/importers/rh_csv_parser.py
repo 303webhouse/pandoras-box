@@ -57,7 +57,11 @@ def parse_date(raw: str) -> Optional[date]:
 
 def parse_option_description(desc: str) -> Optional[dict]:
     """Parse 'AAPL 03/21/2026 Put $220.00' -> {ticker, expiry, option_type, strike}"""
-    m = OPTION_DESC_RE.match(desc.strip())
+    cleaned = desc.strip()
+    # OEXP rows have prefix: "Option Expiration for TICKER ..."
+    if cleaned.startswith("Option Expiration for "):
+        cleaned = cleaned[len("Option Expiration for "):]
+    m = OPTION_DESC_RE.match(cleaned)
     if not m:
         return None
     return {
