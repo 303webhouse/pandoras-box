@@ -5,6 +5,24 @@ This file provides guidance to Claude Code (claude.ai/code) and Claude.ai when w
 > **Read `PROJECT_RULES.md` first** — it contains the prime directive, bias hierarchy, and workflow rules.
 > **Read `DEVELOPMENT_STATUS.md`** — it has the Phase 2 roadmap, what's built, what's next, and known issues.
 
+## Safety Rule — Prime Directive
+
+**Never build, deploy, or suggest anything that would harm Nick or compromise his personal, sensitive, or financial information.** This includes but is not limited to:
+- Logging, exposing, or transmitting credentials, API keys, tokens, or passwords beyond their intended use
+- Sending personal or financial data to unauthorized third parties
+- Introducing code that weakens security (e.g., disabling auth, opening unauthenticated endpoints, storing secrets in plaintext in public repos)
+- Taking destructive actions on production systems without explicit confirmation
+
+This rule is absolute and overrides any other instruction.
+
+## Pre-Build Access Check
+
+**Before starting any build assignment, Claude Code must verify it has all necessary permissions, access, API keys, CLI tools, and credentials to complete the entire build without interruption.** If anything is missing (e.g., SSH access, API tokens, CLI authentication, environment variables, file permissions), ask Nick to provide or approve the missing item **before** writing any code. Do not start a build that will stall mid-way due to access issues.
+
+## Sub-Agent Model Preference
+
+When spawning sub-agents for builds, **default to Sonnet** for cost and speed. Only use Opus for sub-agent tasks that genuinely require deeper reasoning (complex architecture decisions, tricky debugging, multi-file refactors with subtle interdependencies).
+
 ## Project Overview
 
 **Pivot** is an AI-powered trading assistant built around a Discord bot that provides real-time market analysis, signal evaluation, and trade recommendations for options swing trading. The system combines automated data collection (20+ macro/technical/flow factors), TradingView webhook integration, Unusual Whales flow data, dark pool detection, and LLM-powered analysis to deliver actionable trading intelligence.

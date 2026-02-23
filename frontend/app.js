@@ -218,6 +218,14 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (error) {
         console.error('initCryptoScalper failed:', error);
     }
+
+    // Portfolio tracker (Brief 07-E)
+    try {
+        loadPortfolioBalances();
+        loadPortfolioPositions();
+    } catch (error) {
+        console.error('Portfolio load failed:', error);
+    }
 });
 
 function initRouting() {
@@ -2061,6 +2069,130 @@ function flashCompositeBanner() {
     banner.classList.add('flash');
     setTimeout(() => banner.classList.remove('flash'), 1500);
 }
+
+// ==================== PORTFOLIO BALANCES (Brief 07-E) ====================
+
+async function loadPortfolioBalances() {
+    try {
+        const res = await fetch(`${API_URL.replace('/api', '')}/api/portfolio/balances`);
+        if (!res.ok) return;
+        const accounts = await res.json();
+
+        const container = document.getElementById('balance-rows');
+        const totalEl = document.getElementById('balance-total');
+        const updatedEl = document.getElementById('balance-updated-time');
+
+        if (!container || !accounts.length) return;
+
+        let total = 0;
+        let latestUpdate = null;
+        let html = '';
+
+        for (const acct of accounts) {
+            const bal = parseFloat(acct.balance);
+            total += bal;
+
+            if (acct.updated_at && (!latestUpdate || new Date(acct.updated_at) > new Date(latestUpdate))) {
+                latestUpdate = acct.updated_at;
+            }
+
+            const isRH = acct.broker === 'robinhood';
+            const rowClass = isRH ? 'active-account' : 'passive-account';
+
+            html += `<div class="balance-row ${rowClass}">
+                <span class="balance-label">${escapeHtml(acct.account_name)}</span>
+                <span class="balance-value">$${bal.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+            </div>`;
+
+            if (isRH && acct.cash != null) {
+                html += `<div class="balance-row active-account">
+                    <span class="balance-sub">Cash: $${parseFloat(acct.cash).toLocaleString('en-US', {minimumFractionDigits: 2})} · BP: $${parseFloat(acct.buying_power).toLocaleString('en-US', {minimumFractionDigits: 2})}</span>
+                </div>`;
+            }
+        }
+
+        container.innerHTML = html;
+        totalEl.textContent = `$${total.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+
+        if (latestUpdate) {
+            const ago = getTimeAgo(new Date(latestUpdate));
+            updatedEl.textContent = `Updated ${ago}`;
+        }
+    } catch (err) {
+        console.error('Failed to load portfolio balances:', err);
+    }
+}
+
+// ==================== OPEN POSITIONS (Brief 07-E) ====================
+
+async function loadPortfolioPositions() {
+    try {
+        const res = await fetch(`${API_URL.replace('/api', '')}/api/portfolio/positions`);
+        if (!res.ok) return;
+        const positions = await res.json();
+
+        const tbody = document.getElementById('portfolio-positions-tbody');
+        const countEl = document.getElementById('positions-count');
+        if (!tbody) return;
+
+        countEl.textContent = positions.length;
+
+        if (positions.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-secondary);">No open positions</td></tr>';
+            return;
+        }
+
+        let html = '';
+        for (const pos of positions) {
+            let desc = '';
+            if (pos.position_type === 'option_spread') {
+                desc = `${pos.option_type || ''} ${pos.strike}/${pos.short_strike} ${pos.spread_type || ''}`;
+                if (pos.expiry) desc += ` ${formatExpiry(pos.expiry)}`;
+            } else if (pos.position_type === 'option_single') {
+                desc = `${pos.option_type || ''} ${pos.strike}`;
+                if (pos.expiry) desc += ` ${formatExpiry(pos.expiry)}`;
+            } else if (pos.position_type === 'short_stock') {
+                desc = 'Short';
+            } else {
+                desc = 'Stock';
+            }
+
+            const cost = pos.cost_basis != null ? `$${parseFloat(pos.cost_basis).toFixed(2)}` : '\u2014';
+            const value = pos.current_value != null ? `$${parseFloat(pos.current_value).toFixed(2)}` : '\u2014';
+
+            let pnlHtml = '\u2014';
+            if (pos.unrealized_pnl != null) {
+                const pnl = parseFloat(pos.unrealized_pnl);
+                const pnlPct = pos.unrealized_pnl_pct != null ? ` (${parseFloat(pos.unrealized_pnl_pct).toFixed(1)}%)` : '';
+                const cls = pnl >= 0 ? 'pnl-positive' : 'pnl-negative';
+                const sign = pnl >= 0 ? '+' : '';
+                pnlHtml = `<span class="${cls}">${sign}$${pnl.toFixed(2)}${pnlPct}</span>`;
+            }
+
+            html += `<tr>
+                <td><strong>${escapeHtml(pos.ticker)}</strong></td>
+                <td>${escapeHtml(desc)}</td>
+                <td>${pos.quantity}</td>
+                <td>${cost}</td>
+                <td>${value}</td>
+                <td>${pnlHtml}</td>
+            </tr>`;
+        }
+
+        tbody.innerHTML = html;
+    } catch (err) {
+        console.error('Failed to load positions:', err);
+    }
+}
+
+function formatExpiry(dateStr) {
+    if (!dateStr) return '';
+    const d = new Date(dateStr + 'T00:00:00');
+    return `${d.getMonth()+1}/${d.getDate()}`;
+}
+
+setInterval(loadPortfolioBalances, 60000);
+setInterval(loadPortfolioPositions, 60000);
 
 
 // Display effective bias when hierarchical modifier is applied

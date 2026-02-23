@@ -142,6 +142,53 @@
             </div>
         </section>
 
+        <!-- Portfolio Overview Row -->
+        <section class="portfolio-row" id="portfolio-row">
+            <!-- Account Balances Card -->
+            <div class="card portfolio-balances-card" id="portfolio-balances">
+                <div class="card-header">
+                    <h3>PORTFOLIO</h3>
+                    <span class="balance-updated" id="balance-updated-time">&mdash;</span>
+                </div>
+                <div class="card-body">
+                    <div class="balance-rows" id="balance-rows">
+                        <div class="balance-loading">Loading...</div>
+                    </div>
+                    <div class="balance-total-row" id="balance-total-row">
+                        <span class="balance-label">Total</span>
+                        <span class="balance-value" id="balance-total">&mdash;</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Open Positions Card -->
+            <div class="card positions-card" id="open-positions-card">
+                <div class="card-header">
+                    <h3>OPEN POSITIONS</h3>
+                    <span class="positions-count" id="positions-count">0</span>
+                </div>
+                <div class="card-body">
+                    <div class="positions-table-wrap">
+                        <table class="portfolio-positions-table" id="portfolio-positions-table">
+                            <thead>
+                                <tr>
+                                    <th>Ticker</th>
+                                    <th>Position</th>
+                                    <th>Qty</th>
+                                    <th>Cost</th>
+                                    <th>Value</th>
+                                    <th>P&amp;L</th>
+                                </tr>
+                            </thead>
+                            <tbody id="portfolio-positions-tbody">
+                                <tr><td colspan="6" class="loading">Loading...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </section>
+
         <!-- Sector Rotation Strip -->
         <section class="sector-rotation-strip" id="sectorRotationStrip">
             <div class="sector-chips" id="sectorChips">
