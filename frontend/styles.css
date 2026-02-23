@@ -10216,4 +10216,146 @@ body[data-mode="analytics"] .analytics-shell {
     }
 }
 
+/* ==================== PORTFOLIO ROW (Brief 07-E) ==================== */
 
+.portfolio-row {
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    gap: 16px;
+    margin-bottom: 20px;
+}
+
+.portfolio-balances-card,
+.positions-card {
+    background: var(--card-bg);
+    border: 2px solid var(--border-color);
+    border-radius: 10px;
+    padding: 12px 14px;
+}
+
+.portfolio-balances-card .card-header,
+.positions-card .card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.portfolio-balances-card .card-header h3,
+.positions-card .card-header h3 {
+    font-family: 'Orbit', sans-serif;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--text-secondary);
+    margin: 0;
+}
+
+.balance-updated {
+    font-size: 0.65rem;
+    color: var(--text-secondary);
+}
+
+.balance-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.balance-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 3px 0;
+    font-size: 0.82rem;
+}
+
+.balance-row.active-account {
+    font-weight: 600;
+}
+
+.balance-row.passive-account {
+    opacity: 0.55;
+    font-size: 0.78rem;
+}
+
+.balance-label {
+    color: var(--text-secondary);
+}
+
+.balance-value {
+    font-family: 'JetBrains Mono', monospace;
+    font-variant-numeric: tabular-nums;
+}
+
+.balance-sub {
+    font-size: 0.68rem;
+    color: var(--text-secondary);
+    margin-left: auto;
+    padding-left: 8px;
+}
+
+.balance-total-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-top: 8px;
+    margin-top: 8px;
+    border-top: 1px solid var(--border-color);
+    font-weight: 700;
+    font-size: 0.95rem;
+}
+
+.balance-value.positive { color: #4ade80; }
+.balance-value.negative { color: #f87171; }
+
+.balance-loading {
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+}
+
+/* Positions Table */
+.positions-table-wrap {
+    overflow-x: auto;
+}
+
+.portfolio-positions-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.82rem;
+}
+
+.portfolio-positions-table th {
+    text-align: left;
+    padding: 6px 8px;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-secondary);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.portfolio-positions-table td {
+    padding: 7px 8px;
+    border-bottom: 1px solid rgba(51, 65, 85, 0.4);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.78rem;
+}
+
+.portfolio-positions-table .pnl-positive { color: #4ade80; }
+.portfolio-positions-table .pnl-negative { color: #f87171; }
+
+.positions-count {
+    background: rgba(51, 65, 85, 0.5);
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 0.7rem;
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--text-secondary);
+}
+
+@media (max-width: 768px) {
+    .portfolio-row {
+        grid-template-columns: 1fr;
+    }
+}

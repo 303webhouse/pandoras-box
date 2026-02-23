@@ -33,7 +33,7 @@ After completing work on a Trading Team brief, append a new entry at the top of 
 | 04 — Outcome Tracking | ✅ | ✅ | ✅ | ✅ |
 | 05A — Gatekeeper Transparency + Override Feedback | ✅ | ✅ | ✅ | ⬜ |
 | 05B — Adaptive Calibration (needs ~3 weeks of outcome data) | ⬜ | ⬜ | ⬜ | ⬜ |
-| 06 — Post-Trade Autopsy | ✅ | ⬜ | ⬜ | ⬜ |
+| 06 — Post-Trade Autopsy | ✅ | ✅ | ✅ | ✅ |
 | 07 — Watchlist Re-Scorer | ⬜ | ⬜ | ⬜ | ⬜ |
 | 08 — Librarian Phase 1 (Knowledge Base) | ⬜ | ⬜ | ⬜ | ⬜ |
 | 09 — Librarian Phase 2 (Agent Training Loop) | ⬜ | ⬜ | ⬜ | ⬜ |
@@ -41,6 +41,13 @@ After completing work on a Trading Team brief, append a new entry at the top of 
 ---
 
 ## Log Entries
+
+### 2026-02-22 — Brief 06 Built + Deployed + Tested
+**Agent:** Claude Code (Opus)
+**What happened:** Full Brief 06 implementation — post-trade autopsy system. Creates narrative explanations of resolved trades using Claude Haiku (`anthropic/claude-3.5-haiku`), posts color-coded Discord embeds (green/red/gray for WIN/LOSS/EXPIRED), and feeds narratives into Saturday weekly review for richer Sonnet synthesis. Also registered missing crontab entries for nightly outcome matcher (4 AM UTC) and Saturday weekly review (4 PM UTC) as prerequisite fix.
+**Files changed:** `committee_autopsy.py` (new — 352 lines), `committee_outcomes.py` (modified — autopsy call wired after each successful outcome match, non-fatal try/except), `committee_review.py` (modified — load_recent_autopsies injection into LLM context, + User-Agent fix for Discord API)
+**Deviations from brief:** Model ID changed from `anthropic/claude-3.5-haiku-20241022` (not found on OpenRouter) to `anthropic/claude-3.5-haiku`. Added `User-Agent: Pivot-II/2.0` header to Discord API calls in both `committee_autopsy.py` and `committee_review.py` — Cloudflare blocks default Python urllib User-Agent with error 1010.
+**Next blocker:** None — ready for next brief. Brief 05B (Adaptive Calibration) needs ~3 weeks of outcome data to accumulate first.
 
 ### 2025-02-22 — Brief 06 Spec Written
 **Agent:** Claude.ai (Opus)
