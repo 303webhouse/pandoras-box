@@ -67,7 +67,7 @@
   - Built-in cron scheduler (`openclaw cron add/list/run`, isolated/main session modes, delivery routing).
 - Nuance noted: OpenClaw docs clearly cover its own native slash commands and Discord message actions; programmatic invocation of third-party Discord slash commands was not explicitly confirmed in docs during this check.
 
-## 2026-02-19 (OpenClaw VPS PoC deploy: Pivot II)
+## 2026-02-19 (OpenClaw VPS PoC deploy: Pivot)
 
 - Deployed OpenClaw on VPS `188.245.250.2` alongside existing Pivot services with isolation preserved.
 - Installed Node.js `v22.22.0` and npm `10.9.4`; installed global `openclaw` `2026.2.19-2`.
@@ -75,7 +75,7 @@
   - user: `openclaw`
   - workspace: `/opt/openclaw/workspace`
   - state/config: `/home/openclaw/.openclaw/`
-- Enabled bundled Discord plugin and configured Pivot II bot:
+- Enabled bundled Discord plugin and configured Pivot bot:
   - bot/app id: `1474132133105766460`
   - test channel allowlist: `1474135100521451813`
   - DMs disabled for isolation; guild policy set to allowlist with only test channel allowed.
@@ -86,7 +86,7 @@
   - `/etc/openclaw/openclaw.env` (root-only env file for OpenRouter key)
 - Validation checks passed:
   - `openclaw.service` active/running.
-  - `openclaw health` shows Discord OK (`@Pivot II`).
+  - `openclaw health` shows Discord OK (`@Pivot`).
   - OpenClaw posted to Discord test channel via `openclaw message send`.
   - Agent run returned using provider/model `openrouter` + `anthropic/claude-sonnet-4.6`.
 - Coexistence verified after deployment:
@@ -110,12 +110,12 @@
   - `/home/openclaw/.openclaw/backups/pre-import-20260219-203941.tgz`
 - Restarted `openclaw.service` after import copy and re-verified health:
   - `openclaw.service`: active/running
-  - `openclaw health`: Discord OK (`@Pivot II`)
+  - `openclaw health`: Discord OK (`@Pivot`)
   - `pivot-bot.service` and `pivot-collector.service` remained active/running.
 
 ## 2026-02-19 (OpenClaw personality transplant from Pivot sources)
 
-- Built Pivot II personality/context from existing project sources (no invention pass):
+- Built Pivot personality/context from existing project sources (no invention pass):
   - `/opt/pivot/llm/prompts.py`
   - `/opt/pivot/llm/playbook_v2.1.md`
   - `CLAUDE.md` (Nick working style constraints)
@@ -133,7 +133,7 @@
   - `pivot-collector.service`: active/running
 - Personality confirmation test sent to `#pivot-ii` (channel id `1474135100521451813`) with prompt:
   - `what is your name and what do you do`
-- Pivot II response confirmed transplanted persona and role (self-identified as Pivot II and described trade-analysis/risk-discipline function aligned to playbook).
+- Pivot response confirmed transplanted persona and role (self-identified as Pivot and described trade-analysis/risk-discipline function aligned to playbook).
 
 ## 2026-02-19 (OpenClaw morning/EOD cron migration spike)
 
@@ -294,7 +294,7 @@
   - `GET /api/bias/factor-health` => `200 OK` with 21 factors in summary.
   - `POST /api/bias/weekly-audit` => `200 OK` (`status=audit_started`).
 - OpenClaw VPS gateway status check:
-  - `openclaw health` reports `Discord: ok (@Pivot II)` (no reconnect loop).
+  - `openclaw health` reports `Discord: ok (@Pivot)` (no reconnect loop).
 - Registered weekly OpenClaw cron trigger on VPS:
   - job id: `f4dc8ef8-d391-4b02-ae83-7bbceb704495`
   - name: `weekly-data-audit`
@@ -330,7 +330,7 @@
 - Verification:
   - `python -m compileall backend/api/weekly_audit.py backend/scheduler/bias_scheduler.py` completed successfully.
 
-## 2026-02-20 (Pivot II context/memory/intelligence upgrade on VPS)
+## 2026-02-20 (Pivot context/memory/intelligence upgrade on VPS)
 
 - Applied OpenClaw compaction tuning on VPS (`/home/openclaw/.openclaw/openclaw.json`):
   - `reserveTokensFloor` set to `20000`
@@ -362,7 +362,7 @@
   - isolated session, exec-once run of `pivot2_twitter.py`
 - Service/runtime checks:
   - OpenClaw restarted cleanly,
-  - `openclaw health` reports Discord gateway OK for `@Pivot II`,
+  - `openclaw health` reports Discord gateway OK for `@Pivot`,
   - twitter run + JSONL logging confirmed.
 - Remaining verification to do live in market hours:
   - heartbeat trigger-path validation under real market conditions,
@@ -558,3 +558,4 @@ Validation:
 - [2026-02-20 20:06:52 UTC] Post-wipe hardening: set price-history collection to opt-in by default (ENABLE_PRICE_HISTORY_COLLECTION=false in scheduler default and env examples), retained backfill opt-in, added PRICE_HISTORY_ENABLE_INTRADAY default false, reduced retention/ticker defaults, and added PRICE_HISTORY_MAX_ROWS_PER_CYCLE hard cap with truncation/skipped metrics in backend/analytics/price_collector.py. Updated config/.env.example and QUICK_START.md; validation passed (python -m compileall backend/analytics/price_collector.py backend/scheduler/bias_scheduler.py, python -m pytest backend/tests -q => 20 passed).
 - [2026-02-22 07:38:56 UTC] Follow-up hardening from review: confirmed env/doc vars are present in workspace; added DB-volume Discord alert throttling in backend/analytics/price_collector.py via anomaly alert transport (PRICE_HISTORY_DB_ALERTS_ENABLED, PRICE_HISTORY_DB_ALERT_COOLDOWN_MINUTES), updated config/.env.example + QUICK_START.md with alert vars/webhook + VACUUM reclaim guidance and troubleshooting entry. Validation: compileall passed, pytest backend/tests passed (20). AGENTS pnpm commands attempted but failed because repo has no package.json (ERR_PNPM_NO_PKG_MANIFEST, ERR_PNPM_NO_IMPORTER_MANIFEST_FOUND).
 - [2026-02-22 07:39:50 UTC] Review follow-up completed: added DB-size Discord alerts with cooldown in backend/analytics/price_collector.py (_maybe_send_volume_alert, env: PRICE_HISTORY_DB_ALERTS_ENABLED/PRICE_HISTORY_DB_ALERT_COOLDOWN_MINUTES, uses DISCORD_WEBHOOK_ALERTS), added optional post-trim VACUUM automation (off by default; env: PRICE_HISTORY_VACUUM_AFTER_TRIM/PRICE_HISTORY_VACUUM_AFTER_TRIM_MIN_DELETES), and updated config/.env.example + QUICK_START.md with new vars and space-reclaim guidance. Validation: compileall passed for price_collector, pytest backend/tests passed (20).
+- [2026-02-22 10:17:17 UTC] Secrets lookup support: verified Railway CLI context (`fabulous-essence` / `production` / `pandoras-box`) and confirmed the live `PIVOT_API_KEY` value from Railway service variables for user request resolution; no code changes were made.

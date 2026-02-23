@@ -6,19 +6,19 @@ This is the single source of truth for what has been built, what's in progress, 
 
 ---
 
-## ⚡ Pivot II Migration (COMPLETED Feb 20, 2026)
+## ⚡ Pivot Migration (COMPLETED Feb 20, 2026)
 
-The original Pivot Discord bot (`pivot-bot`) has been **stopped and disabled**. All chat, briefs, and trade alerts now run through **Pivot II (OpenClaw)**.
+The original Pivot Discord bot (`pivot-bot`) has been **stopped and disabled**. All chat, briefs, and trade alerts now run through **Pivot (OpenClaw)**.
 
 ### Current VPS Services
 
 | Service | Status | Purpose |
 |---------|--------|---------|
-| `openclaw` | **active** | Pivot II — Discord chat, briefs, trade poller, twitter sentiment |
+| `openclaw` | **active** | Pivot — Discord chat, briefs, trade poller, twitter sentiment |
 | `pivot-collector` | **active** | Data collection crons (factors, VIX, CAPE, sector strength). No LLM. |
 | `pivot-bot` | **inactive, disabled** | OLD bot. Do not restart. |
 
-### What Pivot II Handles
+### What Pivot Handles
 
 - **Discord chat** in #pivot-chat (Haiku 3.5 default, Sonnet 4.6 for heavy analysis)
 - **Morning brief** (9:45 ET) via `pivot2_brief.py` — Sonnet 4.6
@@ -135,7 +135,7 @@ Key result: DEATH_CROSS, BEARISH_BREAKDOWN, RESISTANCE_REJECTION signals now run
 ---
 
 ### ✅ Phase 2E: Interactive Discord Chat
-**What:** Full conversational interface in #pivot-chat via Pivot II (OpenClaw).
+**What:** Full conversational interface in #pivot-chat via Pivot (OpenClaw).
 
 **Capabilities:**
 - Natural language market analysis (Haiku 3.5 default, Sonnet 4.6 for deep analysis)
@@ -252,7 +252,7 @@ PineScript indicator on TradingView detects institutional absorption patterns vi
 Monitors Unusual Whales Premium Bot Discord channels. Parses flow alerts into structured signals with filtering (min DTE 7, max DTE 180, min premium $50K, min score 80 for alerts).
 
 ### Collectors (`pivot/collectors/`)
-Scheduled data fetchers: VIX term structure, credit spreads, sector rotation, TICK breadth, market breadth, dollar smile, CAPE yield, Savita indicator. Run on cron via `scheduler/cron_runner.py`. Morning/EOD briefs disabled (Pivot II handles these now).
+Scheduled data fetchers: VIX term structure, credit spreads, sector rotation, TICK breadth, market breadth, dollar smile, CAPE yield, Savita indicator. Run on cron via `scheduler/cron_runner.py`. Morning/EOD briefs disabled (Pivot handles these now).
 
 ### Monitors (`pivot/monitors/`)
 Alert monitors: bias shift detection, CTA zone proximity, factor velocity (rapid changes), volume anomalies, earnings calendar, economic calendar.
