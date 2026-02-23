@@ -102,7 +102,7 @@ class PositionData(BaseModel):
     expiry: Optional[str] = None
     spread_type: Optional[str] = None
     short_strike: Optional[float] = None
-    cost_basis: float
+    cost_basis: Optional[float] = None
     cost_per_unit: Optional[float] = None
     current_value: Optional[float] = None
     current_price: Optional[float] = None
