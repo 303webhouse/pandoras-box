@@ -34,6 +34,7 @@ After completing work on a Trading Team brief, append a new entry at the top of 
 | 05A — Gatekeeper Transparency + Override Feedback | ✅ | ✅ | ✅ | ⬜ |
 | 05B — Adaptive Calibration (needs ~3 weeks of outcome data) | ⬜ | ⬜ | ⬜ | ⬜ |
 | 06 — Post-Trade Autopsy | ✅ | ✅ | ✅ | ✅ |
+| 06A — Twitter Sentiment Context + Skill | ✅ | ✅ | ✅ | ✅ |
 | 07 — Watchlist Re-Scorer | ⬜ | ⬜ | ⬜ | ⬜ |
 | 08 — Librarian Phase 1 (Knowledge Base) | ⬜ | ⬜ | ⬜ | ⬜ |
 | 09 — Librarian Phase 2 (Agent Training Loop) | ⬜ | ⬜ | ⬜ | ⬜ |
@@ -41,6 +42,13 @@ After completing work on a Trading Team brief, append a new entry at the top of 
 ---
 
 ## Log Entries
+
+### 2026-02-23 — Brief 06A Built + Deployed + Verified
+**Agent:** Claude Code (Opus)
+**What happened:** Twitter sentiment integration — 3 parts. (1) Added `_get_twitter_sentiment_context()` to `committee_context.py` so TORO/URSA/Risk/Pivot agents now see Twitter sentiment (ticker-specific mentions, strongest signals, alerts) when evaluating signals during market hours. (2) Created chatbot skill at `skills/twitter/sentiment.py` so Pivot can answer "what's Twitter saying?" with bull/bear grouping, ticker mentions, and score filtering. (3) Added `@Citrini7` (Citrini Research — megatrend baskets, global macro, 115K followers) to tracked accounts in `pivot2_twitter.py` with category `macro`, weight `0.9`.
+**Files changed:** `committee_context.py` (modified — new function + injection call), `skills/twitter/sentiment.py` (new), `pivot2_twitter.py` (modified — added Citrini7)
+**Deviations from brief:** None. Brief noted lessons_context was already injected — confirmed and kept existing injection, added Twitter injection before it.
+**Next blocker:** None — takes effect on next committee run and next cron cycle. Citrini7 tweets will appear in next `pivot2_twitter.py` run.
 
 ### 2026-02-22 — Brief 06 Built + Deployed + Tested
 **Agent:** Claude Code (Opus)
