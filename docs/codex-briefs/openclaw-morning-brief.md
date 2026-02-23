@@ -17,10 +17,10 @@ OpenClaw is now running on the VPS as `openclaw.service` alongside the existing 
 
 ## Key Design Change: Two-Step UW Data Flow
 
-The current Pivot bot generates briefs without Unusual Whales visual data because it can't request it from Nick. **Pivot II fixes this** with a two-step flow:
+The current Pivot bot generates briefs without Unusual Whales visual data because it can't request it from Nick. **Pivot fixes this** with a two-step flow:
 
-1. **Prep ping** — Pivot II posts a message asking Nick to drop UW screenshots (Market Tide, Dark Pool levels, notable flow)
-2. **Brief generation** — After a wait window, Pivot II collects any screenshots Nick posted, adds them to the composite data as image context, and generates the full brief
+1. **Prep ping** — Pivot posts a message asking Nick to drop UW screenshots (Market Tide, Dark Pool levels, notable flow)
+2. **Brief generation** — After a wait window, Pivot collects any screenshots Nick posted, adds them to the composite data as image context, and generates the full brief
 
 If Nick doesn't respond within the wait window, the brief fires anyway and notes the UW data gap. This way the brief is never blocked, but is richer when Nick engages.
 
@@ -31,7 +31,7 @@ If Nick doesn't respond within the wait window, the brief fires anyway and notes
 ### Morning Brief
 | Step | Time ET | Time MT | What happens |
 |------|---------|---------|-------------|
-| Prep ping | 9:15 AM | 7:15 AM | Pivot II asks Nick for UW screenshots in #pivot-ii |
+| Prep ping | 9:15 AM | 7:15 AM | Pivot asks Nick for UW screenshots in #pivot-ii |
 | Brief generation | 9:45 AM | 7:45 AM | Brief fires with composite + any UW data Nick posted |
 
 Rationale: 15 minutes after market open lets the opening rotation settle. Nick gets the ping when he wakes (~7:15 MT), has 30 min to drop screenshots, and gets the brief at 7:45 MT.
@@ -39,7 +39,7 @@ Rationale: 15 minutes after market open lets the opening rotation settle. Nick g
 ### EOD Brief
 | Step | Time ET | Time MT | What happens |
 |------|---------|---------|-------------|
-| Prep ping | 4:15 PM | 2:15 PM | Pivot II asks Nick for EOD UW screenshots in #pivot-ii |
+| Prep ping | 4:15 PM | 2:15 PM | Pivot asks Nick for EOD UW screenshots in #pivot-ii |
 | Brief generation | 4:30 PM | 2:30 PM | Brief fires with composite + convergence + any UW data |
 
 ---
@@ -85,7 +85,7 @@ Rationale: 15 minutes after market open lets the opening rotation settle. Nick g
 **Schedule:** `15 9 * * 1-5` (9:15 AM ET, Mon-Fri)
 **Channel:** 1474135100521451813 (#pivot-ii)
 
-Pivot II posts a message like:
+Pivot posts a message like:
 
 ```
 ☀️ Morning brief in 30 minutes. Drop any of these in this channel and I'll include them in the analysis:
@@ -259,7 +259,7 @@ OpenClaw with Claude Sonnet 4.6 supports vision (image analysis). The key challe
 1. **Reading recent channel messages** — OpenClaw's Discord plugin should support reading message history. Look for a way to fetch recent messages from a channel and filter for image attachments.
 2. **Passing images to LLM** — The images need to be included in the LLM prompt as image content (base64 or URL). OpenClaw should support multi-modal prompts since it uses Claude.
 3. **Filtering by time window** — Only collect images posted AFTER the prep ping and BEFORE the brief generation time. Don't pick up old screenshots from yesterday.
-4. **Filtering by author** — Only collect images from Nick (the server owner), not from Pivot II's own messages.
+4. **Filtering by author** — Only collect images from Nick (the server owner), not from Pivot's own messages.
 
 If OpenClaw doesn't natively support reading channel history + passing images to LLM in a skill, the fallback is a helper script that uses the Discord API to fetch recent messages with attachments.
 
@@ -299,8 +299,8 @@ If OpenClaw doesn't natively support reading channel history + passing images to
 | `/opt/pivot/llm/prompts.py` (line 302) | build_eod_prompt() |
 | `/opt/pivot/collectors/base_collector.py` | get_json() helper with retry logic |
 | `/opt/pivot/.env` | PANDORA_API_URL and PIVOT_API_KEY |
-| `/opt/openclaw/workspace/IDENTITY.md` | Pivot II personality |
-| `/opt/openclaw/workspace/SOUL.md` | Pivot II behavioral rules |
+| `/opt/openclaw/workspace/IDENTITY.md` | Pivot personality |
+| `/opt/openclaw/workspace/SOUL.md` | Pivot behavioral rules |
 
 ---
 
