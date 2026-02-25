@@ -1,6 +1,6 @@
 # Pivot — Current Priorities
 
-**Last Updated:** February 19, 2026
+**Last Updated:** February 25, 2026
 
 Prioritized list of what needs building, fixing, or improving. For full phase details, see `DEVELOPMENT_STATUS.md`.
 
@@ -8,6 +8,15 @@ Prioritized list of what needs building, fixing, or improving. For full phase de
 
 ## 🔴 Critical Fixes
 
+- [ ] **IBKR Account Setup (Nick manual task)** — Sequence: fund account → create read-only API user → give credentials to Pivot. Steps:
+  1. Fund the IBKR account (gateway won't authenticate until funded)
+  2. Client Portal → Profile icon → Settings → Users & Access Rights → click + to add user
+  3. Username: `pivot-api`, strong password, your email
+  4. Permissions: **Disable** all Trading Access and Funding Access. **Enable** Reporting Access (Activity Statements, Flex Queries, PortfolioAnalyst, Margin Reports) and Account Settings (Account Details, Financial Information)
+  5. Complete email verification immediately (code expires fast)
+  6. E-sign Proof of Trader Authority if prompted
+  7. IBKR approves next business day
+  8. Give username + password to Pivot → update ibeam credentials → flip the switch
 
 ---
 
@@ -22,6 +31,7 @@ Prioritized list of what needs building, fixing, or improving. For full phase de
 
 ## 🟡 Medium Priority
 
+- [ ] **Position close flow (Brief 10 Phase 2)** — Screenshot-based close detection OR typed exit data, CSV import dedup, frontend open positions panel with IBKR live P&L, closed_positions → performance metrics
 - [ ] **Robinhood trade import** — CSV parser + signal matching to backfill historical trades into analytics. Codex brief deployed.
 - [ ] **UW screenshot scheduler** — Auto-request screenshots at 10AM, 3PM, 4:05PM ET. Codex brief deployed.
 - [ ] **DXY macro factor** — Dollar index as secondary confirmation signal (low weight). Codex brief deployed.
@@ -34,7 +44,6 @@ Prioritized list of what needs building, fixing, or improving. For full phase de
 
 - [ ] **TICK-Whale cross-reference** — Cross-reference TICK breadth with Whale Hunter timing. Codex brief deployed.
 - [ ] **Crypto sandbox** — Autonomous trading on Coinbase (~$150 account). Architecture not started.
-- [ ] **Broker API integration** — Automated trade execution via Robinhood API. Far future.
 - [ ] **Complex multi-leg tracking** — Iron condors, butterflies. `trade_legs` table exists but not wired.
 - [ ] **Learning Protocol** — Self-correcting system where Pivot tracks recommendation accuracy and adjusts weighting. Designed but not implemented.
 
@@ -52,6 +61,7 @@ Prioritized list of what needs building, fixing, or improving. For full phase de
 
 ## ✅ Recently Completed
 
+- [x] **Brief 10: Position tracking gap fixes** — DB schema (signal_id, account columns, closed_positions table), partial sync flag, single position create endpoint, committee TAKE → screenshot prompt, IBKR cron activation, yfinance fallback pricer
 - [x] **Signal persistence hardening** - Enforced DB-first signal persistence (webhooks and schedulers), skipped Redis/broadcast on DB write failure for scheduled signals, and fixed CTA `signal_outcomes.symbol` fallback to ticker
 - [x] **SPY price feed fix** - Added SPY quote validation and fallback handling in `backend/bias_engine/factor_utils.py` to prevent split-scale mismatches from corrupting 9 EMA / 200 SMA factors (deploy verification pending)
 - [x] Railway Postgres fix — moved to same project (fabulous-essence), linked via `${{Postgres.*}}`
