@@ -80,6 +80,26 @@ class BiasCheckRequest(BaseModel):
     direction: str  # "LONG" or "SHORT"
 
 
+def _savita_reading_to_score(reading: float) -> float:
+    """Convert a Savita reading (%) to a bias score (-1 to 1).
+
+    This is a CONTRARIAN indicator so high readings = bearish score.
+    Mirrors the logic in savita_indicator.compute_savita_score().
+    """
+    if reading >= 65:
+        return -0.8
+    elif reading >= 60:
+        return -0.4
+    elif reading >= 55:
+        return -0.1
+    elif reading >= 50:
+        return 0.1
+    elif reading >= 45:
+        return 0.4
+    else:
+        return 0.8
+
+
 # ====================
 # SAVITA INDICATOR
 # ====================
@@ -111,7 +131,8 @@ async def get_savita():
 @router.put("/bias/savita")
 async def update_savita(update: SavitaUpdate):
     """
-    Update the Savita Indicator with a new reading from BofA monthly report
+    Update the Savita Indicator with a new reading from BofA monthly report.
+    Persists to both the in-memory config AND the composite bias engine (Redis).
     
     Example:
     {
@@ -123,8 +144,43 @@ async def update_savita(update: SavitaUpdate):
         raise HTTPException(status_code=503, detail="Savita indicator not available")
     
     try:
+        # 1. Update in-memory config (backward compat for /bias/savita GET)
         result = update_savita_reading(update.reading, update.date)
         logger.info(f"Savita updated to {update.reading}%")
+
+        # 2. Persist to composite bias engine so the frontend sees it
+        if COMPOSITE_AVAILABLE and "savita" in FACTOR_CONFIG:
+            score = _savita_reading_to_score(update.reading)
+            signal = score_to_bias(score)[0]
+            update_date = update.date or datetime.utcnow().strftime("%Y-%m-%d")
+            try:
+                collected_at = datetime.fromisoformat(update_date)
+            except (ValueError, TypeError):
+                collected_at = datetime.utcnow()
+
+            factor_payload = {
+                "factor_id": "savita",
+                "score": score,
+                "signal": signal,
+                "detail": f"BofA Sell Side Indicator: {update.reading:.1f}%",
+                "source": "manual",
+                "raw_data": {"value": float(update.reading), "date": update_date},
+                "timestamp": collected_at,
+            }
+            await record_factor_reading(factor_payload)
+            await _log_factor_history(
+                factor_id="savita",
+                score=score,
+                bias=signal,
+                data={"value": float(update.reading), "date": update_date},
+                collected_at=collected_at,
+            )
+            composite = await compute_composite()
+            logger.info(
+                "Savita persisted to composite engine: score=%.2f signal=%s composite=%s",
+                score, signal, composite.bias_level,
+            )
+
         return {
             "status": "success",
             "message": f"Savita Indicator updated to {update.reading}%",
