@@ -1,0 +1,46 @@
+{
+  "jobs": [
+    {
+      "name": "pivot2-trade-poller",
+      "schedule": "*/15 13-21 * * 1-5",
+      "command": "python3 /opt/openclaw/workspace/scripts/pivot2_trade_poller.py",
+      "description": "Poll Pivot API for active signals and post committee recommendations",
+      "enabled": true
+    },
+    {
+      "name": "pivot2-morning-brief",
+      "schedule": "30 13 * * 1-5",
+      "command": "python3 /opt/openclaw/workspace/scripts/pivot2_brief.py morning",
+      "description": "Post morning market brief to Discord at 9:30 AM ET",
+      "enabled": true
+    },
+    {
+      "name": "pivot2-eod-brief",
+      "schedule": "0 21 * * 1-5",
+      "command": "python3 /opt/openclaw/workspace/scripts/pivot2_brief.py eod",
+      "description": "Post end-of-day brief to Discord at 5:00 PM ET",
+      "enabled": true
+    },
+    {
+      "name": "twitter-sentiment",
+      "schedule": "*/30 13-21 * * 1-5",
+      "command": "python3 /opt/openclaw/workspace/scripts/pivot2_twitter.py",
+      "description": "Fetch and score Twitter/X sentiment for active tickers",
+      "enabled": false
+    },
+    {
+      "name": "ibkr-position-poller",
+      "schedule": "*/5 14-21 * * 1-5",
+      "command": "python3 /opt/openclaw/workspace/scripts/ibkr_poller.py",
+      "description": "Poll IBKR positions and balances every 5 min during market hours (UTC). Adjust to 13-20 UTC when DST starts (March 9, 2026).",
+      "enabled": true
+    },
+    {
+      "name": "ibkr-quotes-poller",
+      "schedule": "*/1 14-21 * * 1-5",
+      "command": "python3 /opt/openclaw/workspace/scripts/ibkr_quotes.py",
+      "description": "Fetch IBKR market data quotes every 1 min during market hours (UTC). Adjust to 13-20 UTC when DST starts (March 9, 2026).",
+      "enabled": true
+    }
+  ]
+}
