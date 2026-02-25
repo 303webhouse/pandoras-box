@@ -702,8 +702,67 @@ async def init_database():
                 last_updated TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 updated_by TEXT NOT NULL DEFAULT 'manual',
                 notes TEXT,
-                is_active BOOLEAN NOT NULL DEFAULT TRUE
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                signal_id TEXT,
+                account TEXT NOT NULL DEFAULT 'robinhood'
             )
+        """)
+
+        # Brief 10: Add signal_id and account to existing open_positions installs
+        await conn.execute("""
+            ALTER TABLE open_positions ADD COLUMN IF NOT EXISTS signal_id TEXT
+        """)
+        await conn.execute("""
+            ALTER TABLE open_positions ADD COLUMN IF NOT EXISTS account TEXT NOT NULL DEFAULT 'robinhood'
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_open_positions_signal
+            ON open_positions (signal_id) WHERE signal_id IS NOT NULL
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_open_positions_account
+            ON open_positions (account)
+        """)
+
+        # Brief 10: Closed positions — proper P&L analytics table
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS closed_positions (
+                id SERIAL PRIMARY KEY,
+                position_id INTEGER,
+                ticker TEXT NOT NULL,
+                position_type TEXT NOT NULL,
+                direction TEXT NOT NULL,
+                quantity INTEGER NOT NULL,
+                option_type TEXT,
+                strike NUMERIC(10,2),
+                short_strike NUMERIC(10,2),
+                expiry DATE,
+                spread_type TEXT,
+                cost_basis NUMERIC(10,2),
+                exit_value NUMERIC(10,2),
+                exit_price NUMERIC(10,2),
+                pnl_dollars NUMERIC(10,2),
+                pnl_percent NUMERIC(6,2),
+                opened_at TIMESTAMPTZ,
+                closed_at TIMESTAMPTZ DEFAULT NOW(),
+                hold_days INTEGER,
+                signal_id TEXT,
+                account TEXT DEFAULT 'robinhood',
+                close_reason TEXT,
+                notes TEXT
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_closed_positions_ticker
+            ON closed_positions (ticker)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_closed_positions_signal
+            ON closed_positions (signal_id) WHERE signal_id IS NOT NULL
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_closed_positions_date
+            ON closed_positions (closed_at DESC)
         """)
 
         # Brief 07: Cash flow events for accurate P&L calculation
