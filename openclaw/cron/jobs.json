@@ -41,6 +41,13 @@
       "command": "python3 /opt/openclaw/workspace/scripts/ibkr_quotes.py",
       "description": "Fetch IBKR market data quotes every 1 min during market hours (UTC). Adjust to 13-20 UTC when DST starts (March 9, 2026).",
       "enabled": true
+    },
+    {
+      "name": "yfinance-price-updater",
+      "schedule": "*/15 14-21 * * 1-5",
+      "command": "python3 /opt/openclaw/workspace/scripts/yfinance_price_updater.py",
+      "description": "Fetch current prices for non-IBKR positions via yfinance every 15 min during market hours (UTC). Adjust to 13-20 UTC when DST starts (March 9, 2026).",
+      "enabled": true
     }
   ]
 }
