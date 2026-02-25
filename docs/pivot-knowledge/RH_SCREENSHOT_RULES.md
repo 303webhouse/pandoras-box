@@ -23,27 +23,13 @@ When Nick sends a screenshot of his Robinhood account overview:
 }
 ```
 
-### Position Sync
+## API Call Formats
+
+### Screenshot sync (portfolio list view — multiple positions)
+ALWAYS send `partial: true`. Screenshots may not show all positions.
+
 **Endpoint:** `POST /api/portfolio/positions/sync`
 
-When Nick sends a screenshot of his positions:
-1. Extract ALL visible positions
-2. For each position, determine:
-   - `ticker` — the stock/ETF symbol
-   - `position_type` — one of: `option_spread`, `option_single`, `stock`, `short_stock`
-   - `direction` — `LONG` or `SHORT`
-   - `quantity` — number of contracts or shares
-   - `option_type` — `Call` or `Put` (if applicable)
-   - `strike` — primary strike price (for options)
-   - `expiry` — expiration date as `YYYY-MM-DD`
-   - `spread_type` — `debit` or `credit` (if spread)
-   - `short_strike` — second leg strike (if spread)
-   - `cost_basis` — total cost paid for the position
-   - `current_value` — current market value shown
-   - `unrealized_pnl` — profit/loss shown
-   - `unrealized_pnl_pct` — percentage return shown
-
-3. Send all positions in one request:
 ```json
 {
     "positions": [
@@ -62,14 +48,59 @@ When Nick sends a screenshot of his positions:
             "unrealized_pnl": 25.0,
             "unrealized_pnl_pct": 14.28
         }
+    ],
+    "partial": true,
+    "account": "robinhood"
+}
+```
+
+The API returns:
+```json
+{
+    "added": [...],
+    "updated": [...],
+    "closed": [...],
+    "possibly_closed": [
+        {"id": 12, "ticker": "SPY", "strike": 580.0, "expiry": "2026-03-20", "direction": "SHORT"}
     ]
 }
 ```
 
-4. The API returns: `{ "added": [...], "updated": [...], "closed": [...] }`
-5. **If the `closed` array is not empty:** These are positions that were in the database but NOT in the screenshot — meaning Nick probably closed them.
-   - For each closed position, ask Nick: "Looks like you closed **{ticker} {strike} {expiry}**. What was the exit? Send a screenshot or tell me the exit price."
-   - Once Nick provides exit info, call the close endpoint.
+**If `possibly_closed` is not empty:** Ask Nick for each entry:
+> "I noticed **{ticker} {strike} {expiry}** wasn't in this screenshot. Did you close it?"
+- **Yes** → call `POST /api/portfolio/positions/close` with whatever exit details Nick provides
+- **No** → do nothing (it'll reappear on the next sync)
+
+### Single fill screenshot (one new position, especially after TAKE)
+Use `POST /api/portfolio/positions` to create a single position.
+
+**Before calling this endpoint**, check `/opt/openclaw/workspace/data/last_take.json`.
+If the file exists and:
+1. Was written within the last 15 minutes
+2. The ticker matches the screenshot
+
+Then include its `signal_id` in your POST call to link the position to the committee recommendation.
+
+```json
+{
+    "ticker": "TSLA",
+    "position_type": "option_spread",
+    "direction": "BEARISH",
+    "quantity": 2,
+    "option_type": "Put",
+    "strike": 250.0,
+    "expiry": "2026-03-21",
+    "spread_type": "debit",
+    "short_strike": 240.0,
+    "cost_basis": 340.0,
+    "cost_per_unit": 1.70,
+    "signal_id": "sig_xxx",
+    "account": "robinhood"
+}
+```
+
+Returns the created position row. If a 409 Conflict is returned, the position already exists —
+use `POST /api/portfolio/positions/sync` with `partial: true` to update it instead.
 
 ### Position Close
 **Endpoint:** `POST /api/portfolio/positions/close`
@@ -80,12 +111,28 @@ When Nick sends a screenshot of his positions:
     "strike": 590.0,
     "expiry": "2026-03-20",
     "short_strike": 580.0,
+    "direction": "SHORT",
+    "exit_value": 150.0,
     "exit_price": 1.50,
-    "exit_date": "2026-02-24",
-    "realized_pnl": -50.00,
+    "close_reason": "stopped out",
+    "closed_at": "2026-02-24T14:30:00",
+    "account": "robinhood",
     "notes": "Stopped out on gap up"
 }
 ```
+
+Returns the `closed_positions` row with computed `pnl_dollars`, `pnl_percent`, and `hold_days`.
+The position is removed from `open_positions`.
+
+## Linking positions to committee recommendations
+
+Before calling `POST /api/portfolio/positions` for a fill screenshot, check
+`/opt/openclaw/workspace/data/last_take.json`. If it exists and:
+1. Was written within the last 15 minutes
+2. The ticker matches the screenshot
+
+Then include its `signal_id` in your POST call. This links the position back to the committee
+recommendation for analytics.
 
 ## Position Type Detection
 
