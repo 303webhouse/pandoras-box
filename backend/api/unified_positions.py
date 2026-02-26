@@ -319,6 +319,128 @@ async def list_positions(
     return {"positions": positions, "count": len(positions)}
 
 
+# ── PORTFOLIO SUMMARY ─────────────────────────────────────────────────
+# NOTE: Must be defined BEFORE /v2/positions/{position_id} to avoid
+#       "summary" being captured as a position_id path parameter.
+
+@router.get("/v2/positions/summary")
+async def portfolio_summary():
+    """
+    Portfolio summary for the bias row widget and committee context.
+    Returns: total positions, capital at risk, net direction, nearest expiry.
+    """
+    pool = await get_postgres_client()
+
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT * FROM unified_positions WHERE status = 'OPEN' ORDER BY COALESCE(expiry, '2099-12-31'::date) ASC"
+        )
+
+    positions = [_row_to_dict(r) for r in rows]
+
+    if not positions:
+        # Fetch account balance even if no positions
+        balance = 0.0
+        try:
+            async with pool.acquire() as conn:
+                bal_row = await conn.fetchrow(
+                    "SELECT balance FROM account_balances WHERE account_name = 'Robinhood'"
+                )
+            if bal_row:
+                balance = float(bal_row["balance"])
+        except Exception:
+            pass
+
+        return {
+            "account_balance": balance,
+            "position_count": 0,
+            "capital_at_risk": 0.0,
+            "capital_at_risk_pct": 0.0,
+            "nearest_expiry": None,
+            "nearest_dte": None,
+            "net_direction": "FLAT",
+            "positions": [],
+        }
+
+    # Fetch account balance
+    balance = 0.0
+    try:
+        async with pool.acquire() as conn:
+            bal_row = await conn.fetchrow(
+                "SELECT balance FROM account_balances WHERE account_name = 'Robinhood'"
+            )
+        if bal_row:
+            balance = float(bal_row["balance"])
+    except Exception:
+        pass
+
+    # Calculate summary
+    total_max_loss = sum(p.get("max_loss") or 0 for p in positions)
+    today = date.today()
+
+    # Nearest expiry
+    nearest_expiry = None
+    nearest_dte = None
+    for p in positions:
+        if p.get("expiry"):
+            try:
+                exp = date.fromisoformat(str(p["expiry"])[:10])
+                dte = max(0, (exp - today).days)
+                if nearest_dte is None or dte < nearest_dte:
+                    nearest_dte = dte
+                    nearest_expiry = p["expiry"]
+            except (ValueError, TypeError):
+                pass
+
+    # Net direction
+    long_count = sum(1 for p in positions if p.get("direction") == "LONG")
+    short_count = sum(1 for p in positions if p.get("direction") == "SHORT")
+    mixed_count = sum(1 for p in positions if p.get("direction") == "MIXED")
+    if long_count > short_count:
+        net_direction = "BULLISH"
+    elif short_count > long_count:
+        net_direction = "BEARISH"
+    else:
+        net_direction = "NEUTRAL"
+
+    # Compact position summaries
+    summaries = []
+    for p in positions:
+        dte = None
+        if p.get("expiry"):
+            try:
+                exp = date.fromisoformat(str(p["expiry"])[:10])
+                dte = max(0, (exp - today).days)
+            except (ValueError, TypeError):
+                pass
+        summaries.append({
+            "position_id": p["position_id"],
+            "ticker": p["ticker"],
+            "structure": p.get("structure"),
+            "direction": p.get("direction"),
+            "quantity": p.get("quantity"),
+            "long_strike": p.get("long_strike"),
+            "short_strike": p.get("short_strike"),
+            "expiry": p.get("expiry"),
+            "dte": dte,
+            "max_loss": p.get("max_loss"),
+            "unrealized_pnl": p.get("unrealized_pnl"),
+            "entry_price": p.get("entry_price"),
+        })
+
+    return {
+        "account_balance": balance,
+        "position_count": len(positions),
+        "capital_at_risk": round(total_max_loss, 2),
+        "capital_at_risk_pct": round(total_max_loss / balance * 100, 2) if balance > 0 else 0.0,
+        "nearest_expiry": nearest_expiry,
+        "nearest_dte": nearest_dte,
+        "net_direction": net_direction,
+        "direction_breakdown": {"long": long_count, "short": short_count, "mixed": mixed_count},
+        "positions": summaries,
+    }
+
+
 @router.get("/v2/positions/{position_id}")
 async def get_position(position_id: str):
     """Get a single position by ID."""
@@ -854,121 +976,3 @@ async def mark_to_market():
     return {"status": "updated", "updated": updated, "prices": prices}
 
 
-# ── PORTFOLIO SUMMARY ─────────────────────────────────────────────────
-
-@router.get("/v2/positions/summary")
-async def portfolio_summary():
-    """
-    Portfolio summary for the bias row widget and committee context.
-    Returns: total positions, capital at risk, net direction, nearest expiry.
-    """
-    pool = await get_postgres_client()
-
-    async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            "SELECT * FROM unified_positions WHERE status = 'OPEN' ORDER BY COALESCE(expiry, '2099-12-31'::date) ASC"
-        )
-
-    positions = [_row_to_dict(r) for r in rows]
-
-    if not positions:
-        # Fetch account balance even if no positions
-        balance = 0.0
-        try:
-            async with pool.acquire() as conn:
-                bal_row = await conn.fetchrow(
-                    "SELECT balance FROM account_balances WHERE account_name = 'Robinhood'"
-                )
-            if bal_row:
-                balance = float(bal_row["balance"])
-        except Exception:
-            pass
-
-        return {
-            "account_balance": balance,
-            "position_count": 0,
-            "capital_at_risk": 0.0,
-            "capital_at_risk_pct": 0.0,
-            "nearest_expiry": None,
-            "nearest_dte": None,
-            "net_direction": "FLAT",
-            "positions": [],
-        }
-
-    # Fetch account balance
-    balance = 0.0
-    try:
-        async with pool.acquire() as conn:
-            bal_row = await conn.fetchrow(
-                "SELECT balance FROM account_balances WHERE account_name = 'Robinhood'"
-            )
-        if bal_row:
-            balance = float(bal_row["balance"])
-    except Exception:
-        pass
-
-    # Calculate summary
-    total_max_loss = sum(p.get("max_loss") or 0 for p in positions)
-    today = date.today()
-
-    # Nearest expiry
-    nearest_expiry = None
-    nearest_dte = None
-    for p in positions:
-        if p.get("expiry"):
-            try:
-                exp = date.fromisoformat(str(p["expiry"])[:10])
-                dte = max(0, (exp - today).days)
-                if nearest_dte is None or dte < nearest_dte:
-                    nearest_dte = dte
-                    nearest_expiry = p["expiry"]
-            except (ValueError, TypeError):
-                pass
-
-    # Net direction
-    long_count = sum(1 for p in positions if p.get("direction") == "LONG")
-    short_count = sum(1 for p in positions if p.get("direction") == "SHORT")
-    mixed_count = sum(1 for p in positions if p.get("direction") == "MIXED")
-    if long_count > short_count:
-        net_direction = "BULLISH"
-    elif short_count > long_count:
-        net_direction = "BEARISH"
-    else:
-        net_direction = "NEUTRAL"
-
-    # Compact position summaries
-    summaries = []
-    for p in positions:
-        dte = None
-        if p.get("expiry"):
-            try:
-                exp = date.fromisoformat(str(p["expiry"])[:10])
-                dte = max(0, (exp - today).days)
-            except (ValueError, TypeError):
-                pass
-        summaries.append({
-            "position_id": p["position_id"],
-            "ticker": p["ticker"],
-            "structure": p.get("structure"),
-            "direction": p.get("direction"),
-            "quantity": p.get("quantity"),
-            "long_strike": p.get("long_strike"),
-            "short_strike": p.get("short_strike"),
-            "expiry": p.get("expiry"),
-            "dte": dte,
-            "max_loss": p.get("max_loss"),
-            "unrealized_pnl": p.get("unrealized_pnl"),
-            "entry_price": p.get("entry_price"),
-        })
-
-    return {
-        "account_balance": balance,
-        "position_count": len(positions),
-        "capital_at_risk": round(total_max_loss, 2),
-        "capital_at_risk_pct": round(total_max_loss / balance * 100, 2) if balance > 0 else 0.0,
-        "nearest_expiry": nearest_expiry,
-        "nearest_dte": nearest_dte,
-        "net_direction": net_direction,
-        "direction_breakdown": {"long": long_count, "short": short_count, "mixed": mixed_count},
-        "positions": summaries,
-    }
