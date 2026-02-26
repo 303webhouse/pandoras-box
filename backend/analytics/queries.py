@@ -589,9 +589,9 @@ async def find_matching_signals(
             FROM signals
             WHERE LOWER(ticker) = LOWER($1)
               AND UPPER(direction) = ANY($2::text[])
-              AND timestamp BETWEEN $3 - ($4 || ' hours')::interval
-                              AND $3 + ($4 || ' hours')::interval
-            ORDER BY ABS(EXTRACT(EPOCH FROM (timestamp - $3)))
+              AND timestamp BETWEEN ($3::timestamp - ($4::int * INTERVAL '1 hour'))
+                              AND ($3::timestamp + ($4::int * INTERVAL '1 hour'))
+            ORDER BY ABS(EXTRACT(EPOCH FROM (timestamp - $3::timestamp)))
             LIMIT 5
             """,
             ticker,
@@ -620,7 +620,7 @@ async def trade_exists_duplicate(
             FROM trades
             WHERE UPPER(ticker) = UPPER($1)
               AND ($2::text IS NULL OR UPPER(COALESCE(direction,'')) = UPPER($2))
-              AND DATE(COALESCE(opened_at, NOW())) BETWEEN DATE($3 - INTERVAL '1 day') AND DATE($3 + INTERVAL '1 day')
+              AND DATE(COALESCE(opened_at, NOW())) BETWEEN (DATE($3::timestamp) - 1) AND (DATE($3::timestamp) + 1)
               AND (
                     ($4::numeric IS NULL AND strike IS NULL)
                     OR ABS(COALESCE(strike, 0) - COALESCE($4, 0)) < 0.01
