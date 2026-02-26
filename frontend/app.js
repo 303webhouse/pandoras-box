@@ -1017,7 +1017,7 @@ async function loadInitialData() {
         loadSignals(),
         fetchCompositeBias(),
         fetchTimeframeBias(),
-        loadOpenPositions()
+        loadOpenPositionsEnhanced()
     ]);
 
     // Initialize Scout Alerts section
@@ -4799,7 +4799,7 @@ function renderPositions(positions) {
 }
 
 function updatePosition(positionData) {
-    loadOpenPositions();
+    loadOpenPositionsEnhanced();
 }
 
 // ==========================================
@@ -7900,68 +7900,72 @@ function updatePositionSummary() {
 
 async function confirmPositionEntry() {
     if (!pendingPositionSignal) return;
-    
+
     if (currentTradeType === 'options') {
         await confirmOptionsPositionEntry();
         return;
     }
-    
+
+    // Save signal reference before modal close nulls it
+    const signal = pendingPositionSignal;
+    const card = pendingPositionCard;
+
     const entryPrice = parseFloat(document.getElementById('positionEntryPrice').value);
     const qty = parseFloat(document.getElementById('positionQuantity').value);
-    
+
     if (!entryPrice || !qty) {
         alert('Please enter both entry price and quantity');
         return;
     }
-    
+
     try {
         // Accept signal via new API endpoint (includes full logging)
-        const response = await fetch(`${API_URL}/signals/${pendingPositionSignal.signal_id}/accept`, {
+        const response = await fetch(`${API_URL}/signals/${signal.signal_id}/accept`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                signal_id: pendingPositionSignal.signal_id,
+                signal_id: signal.signal_id,
                 actual_entry_price: entryPrice,
                 quantity: qty,
-                stop_loss: pendingPositionSignal.stop_loss,
-                target_1: pendingPositionSignal.target_1,
-                target_2: pendingPositionSignal.target_2,
+                stop_loss: signal.stop_loss,
+                target_1: signal.target_1,
+                target_2: signal.target_2,
                 notes: `Accepted via Trade Ideas UI`
             })
         });
-        
+
         const data = await response.json();
-        
+
         if (data.status === 'accepted' || data.position_id) {
             // Remove signal card with animation
-            if (pendingPositionCard) {
-                pendingPositionCard.style.opacity = '0';
-                pendingPositionCard.style.transform = 'translateX(-20px)';
+            if (card) {
+                card.style.opacity = '0';
+                card.style.transform = 'translateX(-20px)';
                 setTimeout(() => {
-                    pendingPositionCard.remove();
+                    card.remove();
                     // Auto-refill Trade Ideas list
                     refillTradeIdeas();
                 }, 300);
             }
-            
+
             // Close modal
             closePositionEntryModal();
-            
+
             // Reload positions
             await loadOpenPositionsEnhanced();
-            
+
             // Add ticker to chart tabs
-            addPositionChartTab(pendingPositionSignal.ticker);
-            
+            addPositionChartTab(signal.ticker);
+
             // Store price levels for chart display
-            storePriceLevels(pendingPositionSignal.ticker, {
+            storePriceLevels(signal.ticker, {
                 entry: entryPrice,
-                stop: pendingPositionSignal.stop_loss,
-                target1: pendingPositionSignal.target_1,
-                target2: pendingPositionSignal.target_2
+                stop: signal.stop_loss,
+                target1: signal.target_1,
+                target2: signal.target_2
             });
-            
-            console.log(`ðŸ“ˆ Position accepted: ${pendingPositionSignal.ticker} ${pendingPositionSignal.direction} @ $${entryPrice}`);
+
+            console.log(`Position accepted: ${signal.ticker} ${signal.direction} @ $${entryPrice}`);
         } else {
             alert('Failed to accept signal: ' + (data.detail || data.message || 'Unknown error'));
         }
@@ -8236,9 +8240,22 @@ function storePriceLevels(ticker, levels) {
 
 async function loadOpenPositionsEnhanced() {
     try {
-        const response = await fetch(`${API_URL}/positions/open`);
-        const data = await response.json();
-        
+        // Try v2 API first, fall back to v1
+        let response = await fetch(`${API_URL}/v2/positions?status=OPEN`);
+        let data = await response.json();
+
+        if (data.positions) {
+            openPositions = data.positions;
+            renderPositionsEnhanced();
+            updatePositionsCount();
+            updatePositionChartTabs();
+            loadPortfolioSummary();
+            return;
+        }
+
+        // Fallback to v1
+        response = await fetch(`${API_URL}/positions/open`);
+        data = await response.json();
         if (data.status === 'success') {
             openPositions = data.positions || [];
             renderPositionsEnhanced();
@@ -8248,6 +8265,57 @@ async function loadOpenPositionsEnhanced() {
     } catch (error) {
         console.error('Error loading positions:', error);
     }
+}
+
+async function loadPortfolioSummary() {
+    try {
+        const response = await fetch(`${API_URL}/v2/positions/summary`);
+        const data = await response.json();
+        renderPortfolioSummaryWidget(data);
+    } catch (error) {
+        console.error('Error loading portfolio summary:', error);
+    }
+}
+
+function renderPortfolioSummaryWidget(summary) {
+    const widget = document.getElementById('portfolio-summary-widget');
+    if (!widget) return;
+
+    const balanceStr = '$' + (summary.account_balance || 0).toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0});
+    const riskStr = '$' + (summary.capital_at_risk || 0).toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0});
+    const riskPct = (summary.capital_at_risk_pct || 0).toFixed(1);
+    const riskClass = summary.capital_at_risk_pct > 40 ? 'risk-high' : summary.capital_at_risk_pct > 25 ? 'risk-medium' : 'risk-low';
+
+    const directionEmoji = summary.net_direction === 'BULLISH' ? 'BULL' : summary.net_direction === 'BEARISH' ? 'BEAR' : 'FLAT';
+    const dirClass = summary.net_direction === 'BULLISH' ? 'direction-bull' : summary.net_direction === 'BEARISH' ? 'direction-bear' : 'direction-flat';
+
+    let expiryLine = '';
+    if (summary.nearest_dte !== null && summary.nearest_dte !== undefined) {
+        const urgency = summary.nearest_dte <= 7 ? 'dte-urgent' : summary.nearest_dte <= 14 ? 'dte-soon' : 'dte-ok';
+        expiryLine = `<div class="portfolio-stat"><span class="stat-label">Nearest Exp</span><span class="stat-value ${urgency}">${summary.nearest_dte} DTE</span></div>`;
+    }
+
+    widget.innerHTML = `
+        <div class="portfolio-summary-grid">
+            <div class="portfolio-stat">
+                <span class="stat-label">Balance</span>
+                <span class="stat-value">${balanceStr}</span>
+            </div>
+            <div class="portfolio-stat">
+                <span class="stat-label">Positions</span>
+                <span class="stat-value">${summary.position_count || 0}</span>
+            </div>
+            <div class="portfolio-stat">
+                <span class="stat-label">At Risk</span>
+                <span class="stat-value ${riskClass}">${riskStr} (${riskPct}%)</span>
+            </div>
+            <div class="portfolio-stat">
+                <span class="stat-label">Lean</span>
+                <span class="stat-value ${dirClass}">${directionEmoji}</span>
+            </div>
+            ${expiryLine}
+        </div>
+    `;
 }
 
 function updatePositionsCount() {
@@ -8260,49 +8328,66 @@ function updatePositionsCount() {
 function renderPositionsEnhanced() {
     const container = document.getElementById('openPositions');
     if (!container) return;
-    
+
     if (!openPositions || openPositions.length === 0) {
         container.innerHTML = '<p class="empty-state">No open positions</p>';
         return;
     }
-    
-    container.innerHTML = openPositions.map(pos => {
-        const currentPrice = currentPrices[pos.ticker] || pos.entry_price;
-        const pnl = calculatePnL(pos, currentPrice);
+
+    // Sort by DTE (soonest first), then by ticker
+    const sorted = [...openPositions].sort((a, b) => {
+        const dteA = a.dte ?? 9999;
+        const dteB = b.dte ?? 9999;
+        if (dteA !== dteB) return dteA - dteB;
+        return (a.ticker || '').localeCompare(b.ticker || '');
+    });
+
+    container.innerHTML = sorted.map(pos => {
+        const posId = pos.position_id || pos.id || pos.signal_id;
+
+        // P&L display
+        const pnl = pos.unrealized_pnl || 0;
         const pnlClass = pnl >= 0 ? 'positive' : 'negative';
-        const pnlStr = (pnl >= 0 ? '+' : '') + '$' + pnl.toFixed(2);
-        const pnlPct = ((currentPrice - pos.entry_price) / pos.entry_price * 100);
-        const pnlPctStr = (pnlPct >= 0 ? '+' : '') + pnlPct.toFixed(2) + '%';
-        
-        // Format entry time as "Jan 28, 1:45 PM" (convert from UTC)
-        let entryTimeStr = '';
-        if (pos.entry_time) {
-            try {
-                // Server stores UTC without 'Z', so add it for proper parsing
-                let timeStr = pos.entry_time;
-                if (!timeStr.endsWith('Z') && !timeStr.includes('+') && !timeStr.includes('-', 10)) {
-                    timeStr += 'Z';  // Treat as UTC
-                }
-                const entryDate = new Date(timeStr);
-                const options = { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true };
-                entryTimeStr = entryDate.toLocaleString('en-US', options);
-            } catch (e) {
-                entryTimeStr = '';
-            }
+        const pnlStr = (pnl >= 0 ? '+' : '') + '$' + Math.abs(pnl).toFixed(2);
+
+        // Structure badge
+        const structure = pos.structure || pos.strategy || 'EQUITY';
+        const structureDisplay = structure.replace(/_/g, ' ').toUpperCase();
+
+        // Strikes + DTE line for options
+        let strikeLine = '';
+        if (pos.long_strike || pos.short_strike) {
+            const strikes = [pos.long_strike, pos.short_strike].filter(Boolean).join('/');
+            const expiryStr = pos.expiry ? new Date(pos.expiry + 'T00:00:00').toLocaleDateString('en-US', {month: 'numeric', day: 'numeric'}) : '';
+            const dteStr = pos.dte !== null && pos.dte !== undefined ? `${pos.dte} DTE` : '';
+            const dteBadge = pos.dte !== null && pos.dte <= 7 ? 'dte-urgent' : pos.dte <= 14 ? 'dte-soon' : '';
+            strikeLine = `<div class="position-strikes">${strikes} ${expiryStr} <span class="${dteBadge}">${dteStr}</span></div>`;
+        } else if (pos.expiry) {
+            const expiryStr = new Date(pos.expiry + 'T00:00:00').toLocaleDateString('en-US', {month: 'numeric', day: 'numeric'});
+            const dteStr = pos.dte !== null && pos.dte !== undefined ? `${pos.dte} DTE` : '';
+            strikeLine = `<div class="position-strikes">${expiryStr} <span>${dteStr}</span></div>`;
         }
-        
-        // Strategy/Signal info
-        const strategyInfo = pos.strategy || pos.signal_type || 'MANUAL';
-        
+
+        // Max loss bar
+        let maxLossBar = '';
+        if (pos.max_loss && pos.max_loss > 0) {
+            const lossConsumed = Math.min(100, Math.max(0, (Math.abs(pnl) / pos.max_loss) * 100));
+            const barClass = pnl < 0 ? (lossConsumed > 75 ? 'loss-severe' : lossConsumed > 50 ? 'loss-warning' : 'loss-ok') : 'loss-ok';
+            maxLossBar = `
+                <div class="max-loss-bar-wrap">
+                    <div class="max-loss-bar ${barClass}" style="width: ${lossConsumed}%"></div>
+                    <span class="max-loss-label">Max loss: $${pos.max_loss.toFixed(0)}</span>
+                </div>`;
+        }
+
         return `
-            <div class="position-card" data-position-id="${pos.id || pos.signal_id}">
-                <button class="position-remove-btn" data-position-id="${pos.id || pos.signal_id}" title="Remove position">x</button>
+            <div class="position-card" data-position-id="${posId}">
+                <button class="position-remove-btn" data-position-id="${posId}" title="Remove position">x</button>
                 <div class="position-card-header">
                     <span class="position-ticker" data-ticker="${pos.ticker}">${pos.ticker}</span>
-                    <span class="position-direction ${pos.direction}">${pos.direction}</span>
+                    <span class="position-structure-badge">${structureDisplay}</span>
                 </div>
-                ${entryTimeStr ? `<div class="position-timestamp">${entryTimeStr}</div>` : ''}
-                ${strategyInfo !== 'MANUAL' ? `<div class="position-strategy">${strategyInfo}</div>` : ''}
+                ${strikeLine}
                 <div class="position-details">
                     <div class="position-detail">
                         <div class="position-detail-label">Entry</div>
@@ -8314,19 +8399,21 @@ function renderPositionsEnhanced() {
                     </div>
                     <div class="position-detail">
                         <div class="position-detail-label">Stop</div>
-                        <div class="position-detail-value">$${pos.stop_loss?.toFixed(2) || '--'}</div>
+                        <div class="position-detail-value">${pos.stop_loss ? '$' + pos.stop_loss.toFixed(2) : '--'}</div>
                     </div>
                     <div class="position-detail">
                         <div class="position-detail-label">Target</div>
-                        <div class="position-detail-value">$${pos.target_1?.toFixed(2) || '--'}</div>
+                        <div class="position-detail-value">${pos.target_1 ? '$' + pos.target_1.toFixed(2) : '--'}</div>
                     </div>
                 </div>
+                ${maxLossBar}
                 <div class="position-pnl">
                     <span class="pnl-label">Unrealized P&L</span>
-                    <span class="pnl-value ${pnlClass}">${pnlStr} (${pnlPctStr})</span>
+                    <span class="pnl-value ${pnlClass}">${pnlStr}</span>
                 </div>
                 <div class="position-actions">
-                    <button class="position-btn-small close-btn" data-position-id="${pos.id || pos.signal_id}">Close Position</button>
+                    <button class="position-btn-small edit-btn" data-position-id="${posId}">Edit</button>
+                    <button class="position-btn-small close-btn" data-position-id="${posId}">Close</button>
                 </div>
             </div>
         `;
@@ -8339,13 +8426,22 @@ function renderPositionsEnhanced() {
             changeChartSymbol(e.target.dataset.ticker);
         });
     });
-    
+
     container.querySelectorAll('.close-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
             e.stopPropagation();
             const positionId = btn.dataset.positionId;
-            const position = openPositions.find(p => (p.id || p.signal_id) == positionId);
+            const position = openPositions.find(p => (p.position_id || p.id || p.signal_id) == positionId);
             if (position) openPositionCloseModal(position);
+        });
+    });
+
+    container.querySelectorAll('.edit-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const positionId = btn.dataset.positionId;
+            const position = openPositions.find(p => (p.position_id || p.id || p.signal_id) == positionId);
+            if (position) openPositionEditModal(position);
         });
     });
 
@@ -8353,7 +8449,7 @@ function renderPositionsEnhanced() {
         btn.addEventListener('click', (e) => {
             e.stopPropagation();
             const positionId = btn.dataset.positionId;
-            const position = openPositions.find(p => (p.id || p.signal_id) == positionId);
+            const position = openPositions.find(p => (p.position_id || p.id || p.signal_id) == positionId)
             if (position) openPositionRemoveModal(position);
         });
     });
@@ -8424,17 +8520,22 @@ function openPositionRemoveModal(position) {
 
 async function removePositionWithoutArchive(position) {
     try {
-        if (!position.id) {
+        const posId = position.position_id || position.id;
+        if (!posId) {
             alert('Cannot remove position: missing id');
             return;
         }
-        const response = await fetch(`${API_URL}/positions/${position.id}`, {
-            method: 'DELETE'
-        });
+        // Try v2 first, fall back to v1
+        let response;
+        if (position.position_id) {
+            response = await fetch(`${API_URL}/v2/positions/${posId}`, { method: 'DELETE' });
+        } else {
+            response = await fetch(`${API_URL}/positions/${posId}`, { method: 'DELETE' });
+        }
         const data = await response.json();
 
-        if (data.status === 'removed') {
-            openPositions = openPositions.filter(p => (p.id || p.signal_id) !== position.id);
+        if (data.status === 'deleted' || data.status === 'removed') {
+            openPositions = openPositions.filter(p => (p.position_id || p.id || p.signal_id) !== posId);
             renderPositionsEnhanced();
             updatePositionsCount();
             updatePositionChartTabs();
@@ -8586,37 +8687,54 @@ function showLossClassificationModal(position, exitPrice, closeQty, pnl) {
 
 async function executePositionClose(positionId, exitPrice, closeQty, tradeOutcome, lossReason, notes, stopHit = false) {
     try {
-        const response = await fetch(`${API_URL}/positions/close`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                position_id: positionId,
-                exit_price: exitPrice,
-                quantity_closed: closeQty,
-                trade_outcome: tradeOutcome,
-                loss_reason: lossReason,
-                actual_stop_hit: stopHit,
-                notes: notes
-            })
-        });
-        
-        const data = await response.json();
-        
+        // Save reference before modal close might null it
+        const position = closingPosition;
+
+        // Try v2 close endpoint first (creates trade record automatically)
+        let response;
+        let data;
+        if (position && position.position_id) {
+            response = await fetch(`${API_URL}/v2/positions/${position.position_id}/close`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    exit_price: exitPrice,
+                    notes: [lossReason, notes].filter(Boolean).join(' | ') || null
+                })
+            });
+            data = await response.json();
+        } else {
+            // Fallback to v1
+            response = await fetch(`${API_URL}/positions/close`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    position_id: positionId,
+                    exit_price: exitPrice,
+                    quantity_closed: closeQty,
+                    trade_outcome: tradeOutcome,
+                    loss_reason: lossReason,
+                    actual_stop_hit: stopHit,
+                    notes: notes
+                })
+            });
+            data = await response.json();
+        }
+
         if (data.status === 'success' || data.status === 'closed' || data.status === 'partial_close') {
             closePositionCloseModal();
             await loadOpenPositionsEnhanced();
-            
+
             // Remove chart tab if fully closed
-            if (closeQty >= closingPosition.quantity) {
-                removePositionChartTab(closingPosition.ticker);
-                // Remove price levels
+            if (position && closeQty >= position.quantity) {
+                removePositionChartTab(position.ticker);
                 if (window.activePriceLevels) {
-                    delete window.activePriceLevels[closingPosition.ticker];
+                    delete window.activePriceLevels[position.ticker];
                 }
             }
-            
-            const emoji = tradeOutcome === 'WIN' ? 'WIN' : tradeOutcome === 'LOSS' ? 'LOSS' : '-';
-            console.log(`${emoji} Position closed: ${closingPosition.ticker} - ${tradeOutcome} - P&L: $${data.realized_pnl?.toFixed(2) || '--'}`);
+
+            const outcome = data.trade_outcome || tradeOutcome;
+            console.log(`Position closed: ${position?.ticker} - ${outcome} - P&L: $${data.realized_pnl?.toFixed(2) || '--'}`);
         } else {
             alert('Failed to close position: ' + (data.detail || data.message || 'Unknown error'));
         }
@@ -8624,6 +8742,290 @@ async function executePositionClose(positionId, exitPrice, closeQty, tradeOutcom
         console.error('Error closing position:', error);
         alert('Failed to close position');
     }
+}
+
+// ==========================================
+// UNIFIED POSITION ENTRY FORM (Brief 10 — C3)
+// ==========================================
+
+function openUnifiedPositionModal() {
+    let modal = document.getElementById('unifiedPositionModal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'unifiedPositionModal';
+        modal.className = 'signal-modal-overlay';
+        modal.innerHTML = `
+            <div class="signal-modal unified-position-modal">
+                <div class="modal-header">
+                    <h3>Add Position</h3>
+                    <button class="modal-close" id="closeUnifiedPositionModal">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-row">
+                        <label>Ticker</label>
+                        <input type="text" id="upTicker" placeholder="SPY" style="text-transform: uppercase;">
+                    </div>
+                    <div class="form-row">
+                        <label>Structure</label>
+                        <select id="upStructure">
+                            <option value="stock">Stock</option>
+                            <option value="long_call">Long Call</option>
+                            <option value="long_put">Long Put</option>
+                            <option value="put_credit_spread" selected>Put Credit Spread</option>
+                            <option value="put_debit_spread">Put Debit Spread</option>
+                            <option value="call_credit_spread">Call Credit Spread</option>
+                            <option value="call_debit_spread">Call Debit Spread</option>
+                            <option value="iron_condor">Iron Condor</option>
+                        </select>
+                    </div>
+                    <div class="form-row spread-fields">
+                        <label>Long Strike</label>
+                        <input type="number" id="upLongStrike" step="0.5" placeholder="48">
+                    </div>
+                    <div class="form-row spread-fields">
+                        <label>Short Strike</label>
+                        <input type="number" id="upShortStrike" step="0.5" placeholder="50">
+                    </div>
+                    <div class="form-row options-fields">
+                        <label>Expiry</label>
+                        <input type="date" id="upExpiry">
+                    </div>
+                    <div class="form-row">
+                        <label>Net Premium / Entry Price</label>
+                        <input type="number" id="upEntryPrice" step="0.01" placeholder="0.35">
+                    </div>
+                    <div class="form-row">
+                        <label>Quantity</label>
+                        <input type="number" id="upQuantity" value="1" min="1">
+                    </div>
+                    <div class="form-row">
+                        <label>Stop Loss</label>
+                        <input type="number" id="upStopLoss" step="0.01" placeholder="Optional">
+                    </div>
+                    <div class="form-row">
+                        <label>Target</label>
+                        <input type="number" id="upTarget" step="0.01" placeholder="Optional">
+                    </div>
+                    <div class="form-row">
+                        <label>Notes</label>
+                        <input type="text" id="upNotes" placeholder="Optional">
+                    </div>
+                    <div class="risk-calc-preview" id="upRiskPreview"></div>
+                </div>
+                <div class="modal-actions">
+                    <button class="modal-btn cancel" id="upCancel">Cancel</button>
+                    <button class="modal-btn accept" id="upSubmit">Add Position</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+
+        // Events
+        document.getElementById('closeUnifiedPositionModal').addEventListener('click', () => modal.classList.remove('active'));
+        document.getElementById('upCancel').addEventListener('click', () => modal.classList.remove('active'));
+        modal.addEventListener('click', (e) => { if (e.target === modal) modal.classList.remove('active'); });
+        document.getElementById('upSubmit').addEventListener('click', submitUnifiedPosition);
+        document.getElementById('upStructure').addEventListener('change', updateUnifiedFormFields);
+
+        // Auto-calculate risk on input change
+        ['upLongStrike', 'upShortStrike', 'upEntryPrice', 'upQuantity'].forEach(id => {
+            document.getElementById(id).addEventListener('input', updateRiskPreview);
+        });
+    }
+
+    updateUnifiedFormFields();
+    document.getElementById('upRiskPreview').innerHTML = '';
+    modal.classList.add('active');
+}
+
+function updateUnifiedFormFields() {
+    const structure = document.getElementById('upStructure').value;
+    const isSpread = structure.includes('spread') || structure === 'iron_condor';
+    const isOptions = structure !== 'stock';
+
+    document.querySelectorAll('.spread-fields').forEach(el => el.style.display = isSpread ? '' : 'none');
+    document.querySelectorAll('.options-fields').forEach(el => el.style.display = isOptions ? '' : 'none');
+}
+
+function updateRiskPreview() {
+    const structure = document.getElementById('upStructure').value;
+    const longStrike = parseFloat(document.getElementById('upLongStrike').value) || 0;
+    const shortStrike = parseFloat(document.getElementById('upShortStrike').value) || 0;
+    const entryPrice = parseFloat(document.getElementById('upEntryPrice').value) || 0;
+    const quantity = parseInt(document.getElementById('upQuantity').value) || 1;
+    const preview = document.getElementById('upRiskPreview');
+
+    if (!entryPrice) { preview.innerHTML = ''; return; }
+
+    const isSpread = structure.includes('spread');
+    const isStock = structure === 'stock';
+
+    if (isStock) {
+        const maxLoss = entryPrice * quantity;
+        preview.innerHTML = `<div class="risk-preview-line">Max Loss: $${maxLoss.toFixed(2)} (full position)</div>`;
+        return;
+    }
+
+    if (isSpread && longStrike && shortStrike) {
+        const width = Math.abs(shortStrike - longStrike);
+        const isCredit = structure.includes('credit');
+        const premium = Math.abs(entryPrice);
+        const maxLoss = isCredit ? (width - premium) * 100 * quantity : premium * 100 * quantity;
+        const maxProfit = isCredit ? premium * 100 * quantity : (width - premium) * 100 * quantity;
+        preview.innerHTML = `
+            <div class="risk-preview-line">Max Loss: $${maxLoss.toFixed(2)}</div>
+            <div class="risk-preview-line">Max Profit: $${maxProfit.toFixed(2)}</div>
+        `;
+    } else if (!isStock) {
+        const premium = Math.abs(entryPrice);
+        const maxLoss = premium * 100 * quantity;
+        preview.innerHTML = `<div class="risk-preview-line">Max Loss: $${maxLoss.toFixed(2)} (premium paid)</div>`;
+    }
+}
+
+async function submitUnifiedPosition() {
+    const ticker = document.getElementById('upTicker').value.trim().toUpperCase();
+    if (!ticker) { alert('Enter a ticker'); return; }
+
+    const structure = document.getElementById('upStructure').value;
+    const entryPrice = parseFloat(document.getElementById('upEntryPrice').value);
+    if (!entryPrice && entryPrice !== 0) { alert('Enter an entry price/premium'); return; }
+
+    const body = {
+        ticker: ticker,
+        asset_type: structure === 'stock' ? 'EQUITY' : 'OPTION',
+        structure: structure,
+        entry_price: entryPrice,
+        quantity: parseInt(document.getElementById('upQuantity').value) || 1,
+        source: 'MANUAL',
+    };
+
+    const longStrike = parseFloat(document.getElementById('upLongStrike').value);
+    const shortStrike = parseFloat(document.getElementById('upShortStrike').value);
+    const expiry = document.getElementById('upExpiry').value;
+    const stopLoss = parseFloat(document.getElementById('upStopLoss').value);
+    const target = parseFloat(document.getElementById('upTarget').value);
+    const notes = document.getElementById('upNotes').value.trim();
+
+    if (longStrike) body.long_strike = longStrike;
+    if (shortStrike) body.short_strike = shortStrike;
+    if (expiry) body.expiry = expiry;
+    if (stopLoss) body.stop_loss = stopLoss;
+    if (target) body.target_1 = target;
+    if (notes) body.notes = notes;
+
+    try {
+        const response = await fetch(`${API_URL}/v2/positions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        const data = await response.json();
+
+        if (data.status === 'created') {
+            document.getElementById('unifiedPositionModal').classList.remove('active');
+            await loadOpenPositionsEnhanced();
+            addPositionChartTab(ticker);
+        } else {
+            alert('Failed to create position: ' + (data.detail || JSON.stringify(data)));
+        }
+    } catch (error) {
+        console.error('Error creating position:', error);
+        alert('Failed to create position');
+    }
+}
+
+// ==========================================
+// POSITION EDIT MODAL (Brief 10 — C2)
+// ==========================================
+
+function openPositionEditModal(position) {
+    let modal = document.getElementById('positionEditModal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'positionEditModal';
+        modal.className = 'signal-modal-overlay';
+        modal.innerHTML = `
+            <div class="signal-modal">
+                <div class="modal-header">
+                    <h3 id="editModalTitle">Edit Position</h3>
+                    <button class="modal-close" id="closeEditModal">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-row">
+                        <label>Stop Loss</label>
+                        <input type="number" id="editStopLoss" step="0.01">
+                    </div>
+                    <div class="form-row">
+                        <label>Target</label>
+                        <input type="number" id="editTarget" step="0.01">
+                    </div>
+                    <div class="form-row">
+                        <label>Current Price</label>
+                        <input type="number" id="editCurrentPrice" step="0.01">
+                    </div>
+                    <div class="form-row">
+                        <label>Notes</label>
+                        <input type="text" id="editNotes">
+                    </div>
+                </div>
+                <div class="modal-actions">
+                    <button class="modal-btn cancel" id="editCancel">Cancel</button>
+                    <button class="modal-btn accept" id="editSave">Save</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+
+        document.getElementById('closeEditModal').addEventListener('click', () => modal.classList.remove('active'));
+        document.getElementById('editCancel').addEventListener('click', () => modal.classList.remove('active'));
+        modal.addEventListener('click', (e) => { if (e.target === modal) modal.classList.remove('active'); });
+    }
+
+    document.getElementById('editModalTitle').textContent = `Edit ${position.ticker}`;
+    document.getElementById('editStopLoss').value = position.stop_loss || '';
+    document.getElementById('editTarget').value = position.target_1 || '';
+    document.getElementById('editCurrentPrice').value = position.current_price || '';
+    document.getElementById('editNotes').value = position.notes || '';
+
+    // Rebind save button
+    const saveBtn = document.getElementById('editSave');
+    const newSaveBtn = saveBtn.cloneNode(true);
+    saveBtn.parentNode.replaceChild(newSaveBtn, saveBtn);
+    newSaveBtn.addEventListener('click', async () => {
+        const posId = position.position_id || position.id;
+        const updates = {};
+        const sl = parseFloat(document.getElementById('editStopLoss').value);
+        const tgt = parseFloat(document.getElementById('editTarget').value);
+        const cp = parseFloat(document.getElementById('editCurrentPrice').value);
+        const notes = document.getElementById('editNotes').value.trim();
+        if (sl) updates.stop_loss = sl;
+        if (tgt) updates.target_1 = tgt;
+        if (cp) updates.current_price = cp;
+        if (notes) updates.notes = notes;
+
+        if (Object.keys(updates).length === 0) { alert('No changes'); return; }
+
+        try {
+            const response = await fetch(`${API_URL}/v2/positions/${posId}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(updates)
+            });
+            const data = await response.json();
+            if (data.status === 'updated') {
+                modal.classList.remove('active');
+                await loadOpenPositionsEnhanced();
+            } else {
+                alert('Failed to update: ' + (data.detail || JSON.stringify(data)));
+            }
+        } catch (error) {
+            console.error('Error updating position:', error);
+            alert('Failed to update position');
+        }
+    });
+
+    modal.classList.add('active');
 }
 
 // Chart tabs for open positions
@@ -8718,7 +9120,7 @@ function initManualPositionModal() {
     
     document.querySelectorAll('[data-action="add-manual-position"]').forEach((btn) => {
         btn.addEventListener('click', () => {
-            openManualPositionModal(btn.dataset.context || 'equity');
+            openUnifiedPositionModal();
         });
     });
     
@@ -8869,7 +9271,6 @@ async function submitManualPosition() {
             }
             
             // Refresh positions from server
-            await loadOpenPositions();
             await loadOpenPositionsEnhanced();
         } else {
             alert(`Error: ${result.detail || 'Failed to create position'}`);
