@@ -8,7 +8,7 @@ import csv
 import io
 import json
 import hashlib
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from fastapi import APIRouter, HTTPException, Path, Query, UploadFile, File
@@ -260,6 +260,22 @@ def _parse_dt(value: Any) -> Optional[datetime]:
         text = value.strip().replace("Z", "+00:00")
         try:
             return datetime.fromisoformat(text)
+        except ValueError:
+            return None
+    return None
+
+
+def _parse_date(value: Any) -> Optional[date]:
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            return datetime.fromisoformat(text.replace("Z", "+00:00")).date()
         except ValueError:
             return None
     return None
@@ -2020,7 +2036,7 @@ async def import_trades(request: ImportTradesRequest):
                 "status": (trade.get("status") or "open"),
                 "origin": "imported",
                 "strike": strike,
-                "expiry": trade.get("expiry"),
+                "expiry": _parse_date(trade.get("expiry")),
                 "short_strike": short_strike,
                 "long_strike": trade.get("long_strike"),
                 "exit_price": trade.get("exit_price"),
@@ -2072,7 +2088,7 @@ async def import_trades(request: ImportTradesRequest):
                             "quantity": _as_float(leg.get("quantity"), 0.0),
                             "price": _as_float(leg.get("price"), 0.0),
                             "strike": leg.get("strike"),
-                            "expiry": leg.get("expiry"),
+                            "expiry": _parse_date(leg.get("expiry")),
                             "leg_type": leg.get("leg_type") or leg.get("option_type") or payload.get("structure"),
                             "commission": _as_float(leg.get("commission"), 0.0),
                             "notes": leg.get("trans_code"),
