@@ -1,11 +1,11 @@
 """
-ISM Manufacturing PMI Factor — leading economic indicator.
+Manufacturing Health Factor — leading economic indicator via employment trends.
 
-ISM Manufacturing PMI above 50 indicates economic expansion.
-Below 50 indicates contraction. This is a monthly indicator.
+NAPM (ISM Manufacturing PMI) was removed from FRED in 2016. We use MANEMP
+(All Employees, Manufacturing) as a proxy — rising manufacturing employment
+signals expansion, declining signals contraction. Scored on 12-month YoY change.
 
-Source: FRED series NAPM (ISM Manufacturing PMI)
-        Falls back to MANEMP (ISM Manufacturing Employment) if NAPM unavailable.
+Source: FRED series MANEMP (All Employees, Manufacturing, thousands)
 Timeframe: Macro (staleness: 720h / 30 days — monthly data)
 """
 
@@ -30,10 +30,10 @@ except ImportError:
 
 
 async def compute_score() -> Optional[FactorReading]:
-    """Score based on ISM Manufacturing data from FRED."""
+    """Score based on manufacturing employment trend from FRED (MANEMP)."""
     fred_api_key = os.environ.get("FRED_API_KEY")
-    pmi_value: Optional[float] = None
-    source_series: Optional[str] = None
+    yoy_pct: Optional[float] = None
+    latest_value: Optional[float] = None
     source = "fred"
     cache_fetched_at: Optional[str] = None
 
@@ -43,92 +43,104 @@ async def compute_score() -> Optional[FactorReading]:
 
             fred = Fred(api_key=fred_api_key)
 
-            for series_id in ["NAPM", "MANEMP"]:
-                try:
-                    series = fred.get_series(series_id, observation_start="2024-01-01")
-                    if series is not None and not series.empty:
-                        pmi_value = float(series.dropna().iloc[-1])
-                        source_series = series_id
-                        break
-                except Exception:
-                    continue
+            # Fetch 14 months of data to compute YoY change
+            series = fred.get_series("MANEMP", observation_start="2024-10-01")
+            if series is not None and not series.empty:
+                clean = series.dropna()
+                if len(clean) >= 2:
+                    latest_value = float(clean.iloc[-1])
+                    # Find reading ~12 months ago (monthly data, so index -12 or -13)
+                    if len(clean) >= 12:
+                        year_ago = float(clean.iloc[-12])
+                    else:
+                        year_ago = float(clean.iloc[0])
+                    if year_ago > 0:
+                        yoy_pct = ((latest_value - year_ago) / year_ago) * 100
 
-            if pmi_value is not None:
+            if yoy_pct is not None:
                 await cache_fred_snapshot(
                     FRED_CACHE_KEY,
                     {
-                        "value": pmi_value,
-                        "series": source_series,
+                        "yoy_pct": yoy_pct,
+                        "latest_value": latest_value,
+                        "series": "MANEMP",
                         "fetched_at": datetime.utcnow().isoformat(),
                     },
                 )
             else:
-                logger.warning("ism_manufacturing: no data from FRED (tried NAPM, MANEMP)")
+                logger.warning("ism_manufacturing: insufficient MANEMP data for YoY calculation")
         except ImportError:
             logger.warning("ism_manufacturing: fredapi not installed")
         except Exception as e:
-            logger.error(f"ism_manufacturing: FRED fetch failed: {e}")
+            logger.error("ism_manufacturing: FRED fetch failed: %s", e)
     else:
         logger.debug("ism_manufacturing: FRED_API_KEY not configured")
 
-    if pmi_value is None:
+    if yoy_pct is None:
         cached = await load_fred_snapshot(FRED_CACHE_KEY)
         if not cached:
             return None
         try:
-            pmi_value = float(cached.get("value"))
-            source_series = str(cached.get("series") or "cached")
+            yoy_pct = float(cached.get("yoy_pct"))
+            latest_value = float(cached.get("latest_value") or 0)
             cache_fetched_at = cached.get("fetched_at")
             source = "fred_cache"
             logger.info("ism_manufacturing: using cached FRED snapshot (%s)", cache_fetched_at)
         except Exception:
             return None
 
-    score = _score_ism(pmi_value)
+    score = _score_mfg_employment(yoy_pct)
 
-    if pmi_value >= 55:
+    if yoy_pct >= 2.0:
         state = "strong expansion"
-    elif pmi_value >= 50:
+    elif yoy_pct >= 0.5:
         state = "expansion"
-    elif pmi_value >= 47:
-        state = "contraction risk"
-    elif pmi_value >= 45:
+    elif yoy_pct >= -0.5:
+        state = "flat"
+    elif yoy_pct >= -2.0:
         state = "contraction"
     else:
         state = "deep contraction"
+
+    latest_k = f"{latest_value / 1000:.1f}M" if latest_value else "?"
 
     return FactorReading(
         factor_id="ism_manufacturing",
         score=score,
         signal=score_to_signal(score),
-        detail=f"ISM Mfg ({source_series}): {pmi_value:.1f} ({state})",
+        detail=f"Mfg Employment: {latest_k}, YoY {yoy_pct:+.1f}% ({state})",
         timestamp=datetime.utcnow(),
         source=source,
-        raw_data={"pmi_value": pmi_value, "series": source_series, "cached_fetched_at": cache_fetched_at},
+        raw_data={
+            "yoy_pct": round(yoy_pct, 2),
+            "latest_value": latest_value,
+            "series": "MANEMP",
+            "cached_fetched_at": cache_fetched_at,
+        },
     )
 
 
-def _score_ism(pmi: float) -> float:
+def _score_mfg_employment(yoy_pct: float) -> float:
     """
-    Score based on ISM Manufacturing PMI.
-    Above 50 = expansion = bullish.
-    Below 50 = contraction = bearish.
+    Score manufacturing employment YoY change.
+    Rising employment = expansion = bullish.
+    Declining employment = contraction = bearish.
     """
-    if pmi >= 58:
-        return 0.7
-    elif pmi >= 55:
+    if yoy_pct >= 3.0:
+        return 0.7   # Strong hiring = robust expansion
+    elif yoy_pct >= 1.5:
         return 0.5
-    elif pmi >= 52:
+    elif yoy_pct >= 0.5:
         return 0.3
-    elif pmi >= 50:
-        return 0.1
-    elif pmi >= 48:
-        return -0.15
-    elif pmi >= 46:
-        return -0.3
-    elif pmi >= 44:
-        return -0.5
-    elif pmi >= 42:
-        return -0.7
+    elif yoy_pct >= 0.0:
+        return 0.1   # Barely growing
+    elif yoy_pct >= -0.5:
+        return -0.1  # Flat/stagnating
+    elif yoy_pct >= -1.5:
+        return -0.3  # Mild contraction
+    elif yoy_pct >= -3.0:
+        return -0.5  # Moderate contraction
+    elif yoy_pct >= -5.0:
+        return -0.7  # Severe contraction
     else:
-        return -0.9
+        return -0.9  # Recession-level decline

@@ -7,7 +7,10 @@ from __future__ import annotations
 import logging
 from typing import Dict
 
-from bias_engine.composite import FactorReading, get_latest_reading, store_factor_reading
+from bias_engine.composite import (
+    FactorReading, get_latest_reading, store_factor_reading,
+    REDIS_KEY_FACTOR_LATEST,
+)
 from bias_engine.anomaly_alerts import send_alert
 
 logger = logging.getLogger(__name__)
@@ -86,6 +89,19 @@ async def score_all_factors() -> Dict[str, FactorReading]:
                         )
                     except Exception as alert_exc:
                         logger.warning("Score spike alert failed for %s: %s", factor_id, alert_exc)
+            else:
+                # compute_score() returned None — no data available.
+                # Delete stale Redis key so composite excludes this factor
+                # instead of using an old cached fallback reading.
+                try:
+                    from database.redis_client import get_redis_client
+                    client = await get_redis_client()
+                    if client:
+                        key = REDIS_KEY_FACTOR_LATEST.format(factor_id=factor_id)
+                        await client.delete(key)
+                        logger.debug("Cleared stale Redis key for %s (compute_score returned None)", factor_id)
+                except Exception as del_exc:
+                    logger.warning("Failed to clear stale key for %s: %s", factor_id, del_exc)
         except Exception as exc:
             logger.error(f"Factor {factor_id} scoring failed: {exc}")
 
