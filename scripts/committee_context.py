@@ -697,13 +697,13 @@ def format_technical_data(snapshot: dict) -> str:
         lines.append(vol_line)
         # Regime guidance (HV percentile as IV proxy — HV and IV are highly correlated for swing timeframes)
         if hv_pct < 25:
-            lines.append("Vol regime: Low HV — options premium is cheap relative to history. Debit structures (long options, debit spreads) are attractive.")
+            lines.append("Vol regime: Low HV — options premium is cheap relative to history. Debit structures (long options, debit spreads) are attractively priced for convex trades.")
         elif hv_pct < 50:
-            lines.append("Vol regime: Below-average HV — neutral premium environment.")
+            lines.append("Vol regime: Below-average HV — neutral premium environment. Debit spreads work well here.")
         elif hv_pct < 75:
-            lines.append("Vol regime: Elevated HV — options are historically expensive. Lean toward selling premium (credit spreads).")
+            lines.append("Vol regime: Elevated HV — options are historically expensive. Use debit SPREADS to reduce vega exposure while maintaining convex payoff. Reduce position size if needed.")
         else:
-            lines.append("Vol regime: High HV — strong lean toward selling premium; avoid buying expensive options. Credit structures have structural edge.")
+            lines.append("Vol regime: High HV — premium is very expensive. Use tighter debit spreads (narrower width) or go further OTM to manage cost. Reduce size. Do NOT switch to credit/selling strategies — that's an institutional approach, not retail.")
 
     return "\n".join(lines)
 
