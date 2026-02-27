@@ -53,8 +53,8 @@ async def _compute_aggregate_iv(spy_price: float) -> Optional[float]:
     Uses VWAP of available IVs weighted by open interest.
     Falls back to simple average if OI is unavailable.
     """
-    strike_lo = round(spy_price * 0.95, 0)  # ±5% NTM
-    strike_hi = round(spy_price * 1.05, 0)
+    strike_lo = round(spy_price * 0.90, 0)  # ±10% NTM (wider to ensure enough IV data)
+    strike_hi = round(spy_price * 1.10, 0)
 
     chain = await get_options_snapshot(
         "SPY",
@@ -66,7 +66,7 @@ async def _compute_aggregate_iv(spy_price: float) -> Optional[float]:
 
     today = datetime.utcnow().date()
     min_exp = today + timedelta(days=7)
-    max_exp = today + timedelta(days=45)
+    max_exp = today + timedelta(days=60)
 
     ivs = []
     iv_missing = 0
