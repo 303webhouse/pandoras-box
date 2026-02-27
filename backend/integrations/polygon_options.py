@@ -60,7 +60,7 @@ async def get_options_snapshot(
         params["contract_type"] = contract_type
 
     all_results = []
-    max_pages = 10  # Safety limit — avoid infinite pagination on huge chains
+    max_pages = 20  # Safety limit — SPY NTM alone can be 2000+ contracts
     page = 0
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
