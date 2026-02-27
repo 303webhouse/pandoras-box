@@ -3180,11 +3180,15 @@ body.override-active-bearish .override-toggle[data-active="true"] {
     right: 0;
     bottom: 0;
     background: rgba(0, 0, 0, 0.8);
-    display: flex;
+    display: none;
     align-items: center;
     justify-content: center;
     z-index: 1000;
     animation: fadeIn 0.2s ease;
+}
+
+.signal-modal-overlay.active {
+    display: flex;
 }
 
 @keyframes fadeIn {

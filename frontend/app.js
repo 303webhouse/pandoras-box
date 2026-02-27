@@ -4636,7 +4636,7 @@ async function dismissSignalWithReason(signalId, reason, notes, card) {
 
 function openDismissModal(signal, card) {
     const modal = document.createElement('div');
-    modal.className = 'signal-modal-overlay';
+    modal.className = 'signal-modal-overlay active';
     modal.innerHTML = `
         <div class="signal-modal dismiss-modal">
             <div class="modal-header">
@@ -8486,7 +8486,7 @@ function closePositionCloseModal() {
 
 function openPositionRemoveModal(position) {
     const modal = document.createElement('div');
-    modal.className = 'signal-modal-overlay';
+    modal.className = 'signal-modal-overlay active';
     modal.innerHTML = `
         <div class="signal-modal remove-modal">
             <div class="modal-header">
@@ -8616,7 +8616,7 @@ async function confirmPositionClose() {
 
 function showLossClassificationModal(position, exitPrice, closeQty, pnl) {
     const modal = document.createElement('div');
-    modal.className = 'signal-modal-overlay';
+    modal.className = 'signal-modal-overlay active';
     modal.innerHTML = `
         <div class="signal-modal loss-modal">
             <div class="modal-header">
@@ -8776,7 +8776,15 @@ function openUnifiedPositionModal() {
                             <option value="call_credit_spread">Call Credit Spread</option>
                             <option value="call_debit_spread">Call Debit Spread</option>
                             <option value="iron_condor">Iron Condor</option>
+                            <option value="iron_butterfly">Iron Butterfly</option>
+                            <option value="straddle">Straddle</option>
+                            <option value="strangle">Strangle</option>
+                            <option value="custom">Custom (enter below)</option>
                         </select>
+                    </div>
+                    <div class="form-row custom-structure-field" style="display:none;">
+                        <label>Custom Structure Name</label>
+                        <input type="text" id="upCustomStructure" placeholder="e.g. broken_wing_butterfly">
                     </div>
                     <div class="form-row spread-fields">
                         <label>Long Strike</label>
@@ -8833,6 +8841,19 @@ function openUnifiedPositionModal() {
         });
     }
 
+    // Clear form on each open
+    document.getElementById('upTicker').value = '';
+    document.getElementById('upStructure').value = 'put_credit_spread';
+    document.getElementById('upLongStrike').value = '';
+    document.getElementById('upShortStrike').value = '';
+    document.getElementById('upExpiry').value = '';
+    document.getElementById('upEntryPrice').value = '';
+    document.getElementById('upQuantity').value = '1';
+    document.getElementById('upStopLoss').value = '';
+    document.getElementById('upTarget').value = '';
+    document.getElementById('upNotes').value = '';
+    const customInput = document.getElementById('upCustomStructure');
+    if (customInput) customInput.value = '';
     updateUnifiedFormFields();
     document.getElementById('upRiskPreview').innerHTML = '';
     modal.classList.add('active');
@@ -8840,11 +8861,14 @@ function openUnifiedPositionModal() {
 
 function updateUnifiedFormFields() {
     const structure = document.getElementById('upStructure').value;
-    const isSpread = structure.includes('spread') || structure === 'iron_condor';
+    const isCustom = structure === 'custom';
+    const multiStrike = ['straddle', 'strangle', 'iron_condor', 'iron_butterfly'];
+    const isSpread = structure.includes('spread') || multiStrike.includes(structure) || isCustom;
     const isOptions = structure !== 'stock';
 
     document.querySelectorAll('.spread-fields').forEach(el => el.style.display = isSpread ? '' : 'none');
     document.querySelectorAll('.options-fields').forEach(el => el.style.display = isOptions ? '' : 'none');
+    document.querySelectorAll('.custom-structure-field').forEach(el => el.style.display = isCustom ? '' : 'none');
 }
 
 function updateRiskPreview() {
@@ -8857,7 +8881,7 @@ function updateRiskPreview() {
 
     if (!entryPrice) { preview.innerHTML = ''; return; }
 
-    const isSpread = structure.includes('spread');
+    const isSpread = structure.includes('spread') || structure === 'iron_condor' || structure === 'iron_butterfly' || structure === 'custom';
     const isStock = structure === 'stock';
 
     if (isStock) {
@@ -8887,7 +8911,11 @@ async function submitUnifiedPosition() {
     const ticker = document.getElementById('upTicker').value.trim().toUpperCase();
     if (!ticker) { alert('Enter a ticker'); return; }
 
-    const structure = document.getElementById('upStructure').value;
+    let structure = document.getElementById('upStructure').value;
+    if (structure === 'custom') {
+        structure = document.getElementById('upCustomStructure').value.trim().toLowerCase().replace(/\s+/g, '_');
+        if (!structure) { alert('Enter a custom structure name'); return; }
+    }
     const entryPrice = parseFloat(document.getElementById('upEntryPrice').value);
     if (!entryPrice && entryPrice !== 0) { alert('Enter an entry price/premium'); return; }
 
@@ -8995,13 +9023,13 @@ function openPositionEditModal(position) {
     newSaveBtn.addEventListener('click', async () => {
         const posId = position.position_id || position.id;
         const updates = {};
-        const sl = parseFloat(document.getElementById('editStopLoss').value);
-        const tgt = parseFloat(document.getElementById('editTarget').value);
-        const cp = parseFloat(document.getElementById('editCurrentPrice').value);
+        const slVal = document.getElementById('editStopLoss').value.trim();
+        const tgtVal = document.getElementById('editTarget').value.trim();
+        const cpVal = document.getElementById('editCurrentPrice').value.trim();
         const notes = document.getElementById('editNotes').value.trim();
-        if (sl) updates.stop_loss = sl;
-        if (tgt) updates.target_1 = tgt;
-        if (cp) updates.current_price = cp;
+        if (slVal !== '') updates.stop_loss = parseFloat(slVal);
+        if (tgtVal !== '') updates.target_1 = parseFloat(tgtVal);
+        if (cpVal !== '') updates.current_price = parseFloat(cpVal);
         if (notes) updates.notes = notes;
 
         if (Object.keys(updates).length === 0) { alert('No changes'); return; }
