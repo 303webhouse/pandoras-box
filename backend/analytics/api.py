@@ -2107,14 +2107,6 @@ async def import_trades(request: ImportTradesRequest):
     }
 
 
-@analytics_router.delete("/trades/{trade_id}")
-async def delete_trade_by_id(trade_id: int):
-    """Delete a single trade and its legs."""
-    await fetch_rows("DELETE FROM trade_legs WHERE trade_id = $1", [trade_id])
-    await fetch_rows("DELETE FROM trades WHERE id = $1", [trade_id])
-    return {"deleted": trade_id}
-
-
 @analytics_router.delete("/trades")
 async def delete_all_imported_trades(origin: Optional[str] = Query(None)):
     """Delete all imported trades (and their legs). Use ?origin=imported to limit."""
@@ -2131,6 +2123,14 @@ async def delete_all_imported_trades(origin: Optional[str] = Query(None)):
             f"DELETE FROM trades WHERE id = ANY($1::int[])", [ids]
         )
     return {"deleted": len(ids)}
+
+
+@analytics_router.delete("/trades/{trade_id}")
+async def delete_trade_by_id(trade_id: int):
+    """Delete a single trade and its legs."""
+    await fetch_rows("DELETE FROM trade_legs WHERE trade_id = $1", [trade_id])
+    await fetch_rows("DELETE FROM trades WHERE id = $1", [trade_id])
+    return {"deleted": trade_id}
 
 
 @analytics_router.get("/export/signals")
