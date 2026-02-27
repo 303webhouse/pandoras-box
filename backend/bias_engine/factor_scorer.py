@@ -23,7 +23,6 @@ PIVOT_OWNED_FACTORS = {
     "vix_term",
     "tick_breadth",
     "sector_rotation",
-    "dollar_smile",
     "excess_cape",
     "savita",
 }
@@ -34,24 +33,23 @@ async def score_all_factors() -> Dict[str, FactorReading]:
     results: Dict[str, FactorReading] = {}
 
     scorers = {
-        # Intraday (6)
+        # Intraday (5)
         "vix_term": "bias_filters.vix_term_structure",
         "tick_breadth": "bias_filters.tick_breadth",
         "vix_regime": "bias_filters.vix_regime",
         "spy_trend_intraday": "bias_filters.spy_trend_intraday",
-        "breadth_momentum": "bias_filters.breadth_momentum",
-        "options_sentiment": "bias_filters.options_sentiment",
-        # Swing (7)
+        "breadth_intraday": "bias_filters.breadth_intraday",
+        # Swing (9)
         "credit_spreads": "bias_filters.credit_spreads",
         "market_breadth": "bias_filters.market_breadth",
         "sector_rotation": "bias_filters.sector_rotation",
         "spy_200sma_distance": "bias_filters.spy_200sma_distance",
         "high_yield_oas": "bias_filters.high_yield_oas",
-        "dollar_smile": "bias_filters.dollar_smile",
         "put_call_ratio": "bias_filters.put_call_ratio",
         "polygon_pcr": "bias_filters.polygon_pcr",
-        "iv_skew": "bias_filters.iv_skew",
-        # Macro (7)
+        "polygon_oi_ratio": "bias_filters.polygon_oi_ratio",
+        "iv_regime": "bias_filters.iv_regime",
+        # Macro (8)
         "yield_curve": "bias_filters.yield_curve",
         "initial_claims": "bias_filters.initial_claims",
         "sahm_rule": "bias_filters.sahm_rule",

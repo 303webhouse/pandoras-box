@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 FACTOR_CONFIG = {
     # =====================================================================
-    # INTRADAY FACTORS (6 factors, total weight: 0.28)
+    # INTRADAY FACTORS (5 factors, total weight: 0.28)
     # Fast-moving indicators that change throughout the trading day.
     # =====================================================================
     "vix_term": {
@@ -39,31 +39,25 @@ FACTOR_CONFIG = {
         "timeframe": "intraday",
     },
     "vix_regime": {
-        "weight": 0.05,
+        "weight": 0.06,
         "staleness_hours": 4,
         "description": "Absolute VIX level - overall market fear/complacency",
         "timeframe": "intraday",
     },
     "spy_trend_intraday": {
-        "weight": 0.05,
+        "weight": 0.06,
         "staleness_hours": 4,
         "description": "SPY price vs 9 EMA - short-term momentum",
         "timeframe": "intraday",
     },
-    "breadth_momentum": {
+    "breadth_intraday": {
         "weight": 0.03,
-        "staleness_hours": 24,
-        "description": "RSP/SPY ratio rate of change - breadth improving or deteriorating",
-        "timeframe": "intraday",
-    },
-    "options_sentiment": {
-        "weight": 0.02,
-        "staleness_hours": 8,
-        "description": "UW Market Tide - institutional options flow sentiment",
+        "staleness_hours": 4,
+        "description": "$UVOL/$DVOL ratio - intraday up/down volume breadth via TradingView webhook",
         "timeframe": "intraday",
     },
     # =====================================================================
-    # SWING FACTORS (9 factors, total weight: 0.42)
+    # SWING FACTORS (9 factors, total weight: 0.41)
     # Multi-day trend indicators for swing trade alignment.
     # =====================================================================
     "credit_spreads": {
@@ -73,7 +67,7 @@ FACTOR_CONFIG = {
         "timeframe": "swing",
     },
     "market_breadth": {
-        "weight": 0.08,
+        "weight": 0.07,
         "staleness_hours": 48,
         "description": "RSP vs SPY ratio - equal-weight vs cap-weight divergence",
         "timeframe": "swing",
@@ -85,43 +79,45 @@ FACTOR_CONFIG = {
         "timeframe": "swing",
     },
     "spy_200sma_distance": {
-        "weight": 0.07,
+        "weight": 0.08,
         "staleness_hours": 24,
         "description": "SPY percent distance from 200-day SMA - trend strength",
         "timeframe": "swing",
     },
     "high_yield_oas": {
-        "weight": 0.03,
+        "weight": 0.02,
         "staleness_hours": 48,
         "description": "ICE BofA HY OAS - precise credit stress gauge (correlated with credit_spreads)",
         "timeframe": "swing",
     },
-    "dollar_smile": {
-        "weight": 0.02,
-        "staleness_hours": 48,
-        "description": "DXY trend - risk-on weakness vs risk-off strength (correlated with dxy_trend)",
-        "timeframe": "swing",
-    },
     "put_call_ratio": {
-        "weight": 0.03,
+        "weight": 0.02,
         "staleness_hours": 72,
-        "description": "CBOE equity put/call ratio - contrarian sentiment gauge",
+        "description": "CBOE equity put/call ratio - contrarian sentiment gauge (self-heals via Polygon fallback)",
         "timeframe": "swing",
     },
     "polygon_pcr": {
-        "weight": 0.03,
+        "weight": 0.04,
         "staleness_hours": 8,
         "description": "Polygon SPY put/call volume ratio - automated flow sentiment (15-min delayed)",
         "timeframe": "swing",
     },
-    "iv_skew": {
+    "polygon_oi_ratio": {
         "weight": 0.02,
         "staleness_hours": 8,
-        "description": "Polygon SPY IV skew - put vs call implied volatility (NTM, 7-45 DTE)",
+        "description": "Polygon SPY put/call open interest ratio - contrarian positioning gauge",
         "timeframe": "swing",
     },
+    "iv_regime": {
+        "weight": 0.02,
+        "staleness_hours": 24,
+        "description": "SPY IV rank percentile from Polygon chain - options pricing regime",
+        "timeframe": "swing",
+    },
+    # NOTE: breadth_momentum, options_sentiment, dollar_smile, iv_skew removed
+    # (committee review: redundant, unreliable, or merged into other factors)
     # =====================================================================
-    # MACRO FACTORS (8 factors, total weight: 0.30)
+    # MACRO FACTORS (8 factors, total weight: 0.31)
     # Long-term economic and structural indicators.
     # =====================================================================
     "yield_curve": {
@@ -149,9 +145,9 @@ FACTOR_CONFIG = {
         "timeframe": "macro",
     },
     "dxy_trend": {
-        "weight": 0.05,
+        "weight": 0.06,
         "staleness_hours": 48,
-        "description": "DXY 5d trend + SMA20 context - strong USD is typically risk-off for equities",
+        "description": "DXY 5d trend + SMA20 context + VIX interaction - strong USD risk-off signal",
         "timeframe": "macro",
     },
     "excess_cape": {
@@ -173,6 +169,13 @@ FACTOR_CONFIG = {
         "timeframe": "macro",
     },
 }
+
+# Permanent guardrail: weights must sum to 1.00 (±0.001 for floating-point)
+_WEIGHT_SUM = sum(cfg["weight"] for cfg in FACTOR_CONFIG.values())
+assert abs(_WEIGHT_SUM - 1.0) < 0.001, (
+    f"FACTOR_CONFIG weights sum to {_WEIGHT_SUM:.4f}, expected 1.0000. "
+    f"Fix weights before deploying."
+)
 
 BIAS_NUMERIC = {
     "URSA_MAJOR": 1,
@@ -215,6 +218,7 @@ class CompositeResult(BaseModel):
     active_factors: List[str]
     stale_factors: List[str]
     velocity_multiplier: float
+    rvol_modifier: float = 1.0
     override: Optional[str] = None
     override_expires: Optional[datetime] = None
     timestamp: datetime
@@ -576,6 +580,172 @@ async def get_active_override() -> Optional[Dict[str, Any]]:
         return None
 
 
+# --- RVOL Conviction Modifier ---
+# Relative volume amplifies or dampens bias conviction.
+RVOL_ACTIVATE_THRESHOLD = 1.5    # Enter amplified state above this
+RVOL_DEACTIVATE_THRESHOLD = 1.2  # Stay amplified until below this (hysteresis)
+RVOL_LOW_THRESHOLD = 0.5         # Low volume dampening
+RVOL_CACHE_TTL = 3600            # 60-minute cache (not 15)
+RVOL_REDIS_KEY = "bias:rvol:state"
+RVOL_CACHE_KEY = "bias:rvol:cache"
+
+
+async def compute_rvol_modifier(adjusted_score: float, confidence: str) -> tuple[float, Dict[str, Any]]:
+    """
+    Compute RVOL conviction modifier with full guardrails.
+
+    Guardrails:
+    - Asymmetric: bearish amplification 1.20x, bullish 1.10x
+    - Hysteresis: activate at 1.5, deactivate at 1.2
+    - 60-minute cache TTL
+    - Confidence gate: force 1.0 when confidence is LOW
+    - Dead zone: force 1.0 when |score| <= 0.10
+    - Data: Polygon snapshot + bars, yfinance fallback
+    """
+    import time
+
+    meta: Dict[str, Any] = {"rvol": None, "modifier": 1.0, "reason": "not_computed"}
+
+    # Confidence gate: no amplification when confidence is LOW
+    if confidence == "LOW":
+        meta["reason"] = "confidence_gate"
+        return 1.0, meta
+
+    # Dead zone: no amplification when score is near zero
+    if abs(adjusted_score) <= 0.10:
+        meta["reason"] = "dead_zone"
+        return 1.0, meta
+
+    try:
+        from database.redis_client import get_redis_client
+        import json
+
+        client = await get_redis_client()
+        if not client:
+            return 1.0, meta
+
+        # Check cache first (60-minute TTL)
+        cached = await client.get(RVOL_CACHE_KEY)
+        if cached:
+            cache_data = json.loads(cached)
+            cache_age = time.time() - cache_data.get("ts", 0)
+            if cache_age < RVOL_CACHE_TTL:
+                rvol = cache_data.get("rvol")
+                if rvol is not None:
+                    modifier = _apply_rvol_hysteresis(rvol, adjusted_score, client, cache_data.get("active", False))
+                    meta.update({"rvol": round(rvol, 3), "modifier": modifier, "reason": "cached", "cache_age_min": round(cache_age / 60, 1)})
+                    return modifier, meta
+
+        # Fetch current SPY volume from Polygon snapshot
+        rvol = await _fetch_rvol()
+        if rvol is None:
+            meta["reason"] = "fetch_failed"
+            return 1.0, meta
+
+        # Load hysteresis state
+        state_raw = await client.get(RVOL_REDIS_KEY)
+        was_active = False
+        if state_raw:
+            state = json.loads(state_raw)
+            was_active = state.get("active", False)
+
+        modifier = _apply_rvol_hysteresis(rvol, adjusted_score, None, was_active)
+
+        # Determine if currently in active (amplified) state
+        now_active = False
+        if rvol >= RVOL_ACTIVATE_THRESHOLD:
+            now_active = True
+        elif was_active and rvol >= RVOL_DEACTIVATE_THRESHOLD:
+            now_active = True  # Sticky — stays active until below deactivate threshold
+
+        # Store hysteresis state + cache
+        state_payload = json.dumps({"active": now_active, "rvol": round(rvol, 3), "ts": time.time()})
+        await client.setex(RVOL_REDIS_KEY, 86400, state_payload)
+
+        cache_payload = json.dumps({"rvol": round(rvol, 3), "active": now_active, "ts": time.time()})
+        await client.setex(RVOL_CACHE_KEY, RVOL_CACHE_TTL, cache_payload)
+
+        meta.update({"rvol": round(rvol, 3), "modifier": modifier, "reason": "computed", "hysteresis_active": now_active})
+        return modifier, meta
+
+    except Exception as exc:
+        logger.warning("RVOL modifier computation failed: %s", exc)
+        meta["reason"] = f"error: {exc}"
+        return 1.0, meta
+
+
+def _apply_rvol_hysteresis(rvol: float, score: float, _client: Any, was_active: bool) -> float:
+    """Apply asymmetric RVOL modifier with hysteresis."""
+    is_bearish = score < 0
+
+    # High RVOL amplification (with hysteresis)
+    if rvol >= RVOL_ACTIVATE_THRESHOLD or (was_active and rvol >= RVOL_DEACTIVATE_THRESHOLD):
+        if is_bearish:
+            return 1.20  # Bearish + high volume = stronger conviction
+        else:
+            return 1.10  # Bullish + high volume = moderate amplification
+
+    # Low RVOL dampening
+    if rvol < RVOL_LOW_THRESHOLD:
+        return 0.85  # Low volume = reduced conviction
+
+    return 1.0  # Normal volume = no adjustment
+
+
+async def _fetch_rvol() -> Optional[float]:
+    """
+    Fetch relative volume for SPY.
+    RVOL = current session volume / average volume (20-day).
+    Uses Polygon snapshot for current volume, bars for history.
+    Falls back to yfinance if Polygon unavailable.
+    """
+    try:
+        # Try Polygon first
+        from integrations.polygon_equities import get_snapshot, get_bars
+        from datetime import date
+
+        snapshot = await get_snapshot("SPY")
+        if snapshot:
+            # Polygon snapshot has day.volume for current session
+            day_data = snapshot.get("day", {})
+            current_vol = day_data.get("v") or day_data.get("volume") or 0
+
+            if current_vol > 0:
+                # Get 20-day average volume from bars
+                today = date.today()
+                from_date = (today - timedelta(days=35)).isoformat()
+                to_date = (today - timedelta(days=1)).isoformat()
+                bars = await get_bars("SPY", 1, "day", from_date, to_date)
+
+                if bars and len(bars) >= 10:
+                    volumes = [b.get("v", 0) for b in bars[-20:] if b.get("v", 0) > 0]
+                    if volumes:
+                        avg_vol = sum(volumes) / len(volumes)
+                        if avg_vol > 0:
+                            return current_vol / avg_vol
+
+    except ImportError:
+        pass
+    except Exception as exc:
+        logger.debug("RVOL Polygon fetch failed, trying yfinance: %s", exc)
+
+    # yfinance fallback
+    try:
+        from bias_engine.factor_utils import get_price_history
+        data = await get_price_history("SPY", days=25)
+        if data is not None and not data.empty and "volume" in data.columns:
+            volumes = data["volume"].dropna()
+            if len(volumes) >= 10:
+                current_vol = float(volumes.iloc[-1])
+                avg_vol = float(volumes.iloc[-21:-1].mean())
+                if avg_vol > 0 and current_vol > 0:
+                    return current_vol / avg_vol
+    except Exception as exc:
+        logger.debug("RVOL yfinance fallback failed: %s", exc)
+
+    return None
+
+
 async def compute_composite() -> CompositeResult:
     now = datetime.utcnow()
     readings: Dict[str, FactorReading] = {}
@@ -628,6 +798,27 @@ async def compute_composite() -> CompositeResult:
 
         adjusted_score = _clamp_score(raw_score * velocity_multiplier)
 
+    # --- RVOL Conviction Modifier ---
+    # Applied after velocity multiplier, before circuit breaker.
+    active_count = len(active)
+    if active_count >= 6:
+        _conf = "HIGH"
+    elif active_count >= 4:
+        _conf = "MEDIUM"
+    else:
+        _conf = "LOW"
+
+    rvol_modifier = 1.0
+    rvol_meta: Dict[str, Any] = {}
+    try:
+        rvol_modifier, rvol_meta = await compute_rvol_modifier(adjusted_score, _conf)
+        if rvol_modifier != 1.0:
+            adjusted_score = _clamp_score(adjusted_score * rvol_modifier)
+            logger.info("RVOL modifier applied: %.2fx (rvol=%.2f, reason=%s)",
+                        rvol_modifier, rvol_meta.get("rvol", 0), rvol_meta.get("reason", ""))
+    except Exception as exc:
+        logger.warning("RVOL modifier failed: %s", exc)
+
     bias_level, bias_numeric = score_to_bias(adjusted_score)
 
     override = await get_active_override()
@@ -643,19 +834,46 @@ async def compute_composite() -> CompositeResult:
 
     # --- Circuit Breaker Integration ---
     # Apply score penalties and bias caps/floors from circuit breaker state.
+    # Also runs decay check on every scoring cycle.
     cb_meta: Optional[Dict[str, Any]] = None
     try:
-        from webhooks.circuit_breaker import get_circuit_breaker_state
+        from webhooks.circuit_breaker import get_circuit_breaker_state, check_decay
         cb_state = get_circuit_breaker_state()
+
+        # Run decay check (condition-verified) on every scoring cycle
+        if cb_state.get("active"):
+            try:
+                await check_decay()
+                # Re-read state after decay check (may have transitioned to pending_reset)
+                cb_state = get_circuit_breaker_state()
+            except Exception as decay_exc:
+                logger.debug("CB decay check failed: %s", decay_exc)
+
         if cb_state.get("active"):
             trigger = cb_state.get("trigger", "unknown")
             scoring_mod = float(cb_state.get("scoring_modifier", 1.0))
             bias_cap_name = cb_state.get("bias_cap")
             bias_floor_name = cb_state.get("bias_floor")
 
-            # Apply scoring modifier to composite score (penalises bullish during risk-off)
+            # During pending_reset: fade scoring modifier linearly toward 1.0
+            # but keep bias cap/floor until Nick accepts
+            if cb_state.get("pending_reset"):
+                decay_fade = float(cb_state.get("decay_fade", 1.0))
+                # Interpolate: scoring_mod fades toward 1.0
+                scoring_mod = 1.0 + (scoring_mod - 1.0) * decay_fade
+
+            # Apply scoring modifier to composite score.
+            # For bearish CB events (scoring_mod > 1.0): multiply to amplify bearishness.
+            # For bullish CB events (scoring_mod < 1.0 won't happen, but spy_up_2pct
+            # uses scoring_mod=1.1 to boost bullishness): use additive offset so
+            # negative scores move toward zero instead of becoming more negative.
             if scoring_mod != 1.0:
-                adjusted_score = _clamp_score(adjusted_score * scoring_mod)
+                is_bullish_trigger = trigger in ("spy_up_2pct", "spy_recovery")
+                if is_bullish_trigger:
+                    # Additive: shift score toward bullish direction
+                    adjusted_score = _clamp_score(adjusted_score + (scoring_mod - 1.0) * 0.5)
+                else:
+                    adjusted_score = _clamp_score(adjusted_score * scoring_mod)
                 bias_level, bias_numeric = score_to_bias(adjusted_score)
 
             # Enforce bias cap (max bullishness allowed)
@@ -679,6 +897,8 @@ async def compute_composite() -> CompositeResult:
                 "bias_cap": bias_cap_name,
                 "bias_floor": bias_floor_name,
                 "triggered_at": cb_state.get("triggered_at"),
+                "pending_reset": cb_state.get("pending_reset", False),
+                "decay_fade": cb_state.get("decay_fade", 1.0),
             }
             logger.info(
                 "Circuit breaker applied to composite: trigger=%s mod=%.2f cap=%s floor=%s → %s",
@@ -689,17 +909,18 @@ async def compute_composite() -> CompositeResult:
     except Exception as exc:
         logger.warning("Circuit breaker integration failed: %s", exc)
 
-    active_count = len(active)
-    if active_count >= 6:
-        confidence = "HIGH"
-    elif active_count >= 4:
-        confidence = "MEDIUM"
-    else:
-        confidence = "LOW"
+    # Confidence was already computed before RVOL; reuse _conf
+    confidence = _conf
 
     factors = {factor_id: readings.get(factor_id) for factor_id in FACTOR_CONFIG}
     active_factors = [factor_id for factor_id in FACTOR_CONFIG if factor_id in active]
     stale_factors = [factor_id for factor_id in FACTOR_CONFIG if factor_id in stale_set]
+
+    # Attach RVOL metadata to circuit breaker dict for frontend visibility
+    if rvol_meta and rvol_meta.get("rvol") is not None:
+        if cb_meta is None:
+            cb_meta = {}
+        cb_meta["rvol"] = rvol_meta
 
     result = CompositeResult(
         composite_score=adjusted_score,
@@ -709,6 +930,7 @@ async def compute_composite() -> CompositeResult:
         active_factors=active_factors,
         stale_factors=stale_factors,
         velocity_multiplier=velocity_multiplier,
+        rvol_modifier=rvol_modifier,
         override=override.get("level") if override else None,
         override_expires=override.get("expires") if override else None,
         timestamp=now,
