@@ -1,6 +1,6 @@
 # Pivot — Current Priorities
 
-**Last Updated:** February 25, 2026
+**Last Updated:** February 27, 2026
 
 Prioritized list of what needs building, fixing, or improving. For full phase details, see `DEVELOPMENT_STATUS.md`.
 
@@ -26,6 +26,7 @@ Prioritized list of what needs building, fixing, or improving. For full phase de
 - [ ] **Phase 2G: Auto-Scout** — Screen incoming UW flow + Alpha Feed ideas automatically, identify setups matching Playbook criteria, post formatted picks to Discord. Depends on Phase 2F.
 - [ ] **Factor freshness in EOD brief** — Show which factors are fresh vs stale in daily summaries. Codex brief deployed.
 - [ ] **Convergence summary in EOD brief** — Highlight when multiple independent sources agree. Codex brief deployed.
+- [ ] **Brief 05B: Adaptive Calibration** — Dynamic thresholds + agent trust weighting for Trading Team. Needs ~3 weeks of accumulated outcome data.
 
 ---
 
@@ -34,18 +35,18 @@ Prioritized list of what needs building, fixing, or improving. For full phase de
 - [ ] **Position close flow (Brief 10 Phase 2)** — Screenshot-based close detection OR typed exit data, CSV import dedup, frontend open positions panel with IBKR live P&L, closed_positions → performance metrics
 - [ ] **Robinhood trade import** — CSV parser + signal matching to backfill historical trades into analytics. Codex brief deployed.
 - [ ] **UW screenshot scheduler** — Auto-request screenshots at 10AM, 3PM, 4:05PM ET. Codex brief deployed.
-- [ ] **DXY macro factor** — Dollar index as secondary confirmation signal (low weight). Codex brief deployed.
-- [ ] **RVOL conviction modifier** — Add relative volume to Whale Hunter signal scoring. Codex brief deployed.
-- [ ] **Stale factor reliability** — options_sentiment, put_call_ratio, savita_indicator have ongoing reliability issues.
+- [ ] **Brief 07: Watchlist Re-Scorer** — Re-evaluate WATCHING decisions on timer. Spec not yet written.
+- [ ] **Brief 08-09: Librarian** — Knowledge base + agent training loop. Specs not yet written.
+- [ ] **TICK-Whale cross-reference** — Cross-reference TICK breadth with Whale Hunter timing. Codex brief deployed.
 
 ---
 
 ## 🟢 Lower Priority
 
-- [ ] **TICK-Whale cross-reference** — Cross-reference TICK breadth with Whale Hunter timing. Codex brief deployed.
 - [ ] **Crypto sandbox** — Autonomous trading on Coinbase (~$150 account). Architecture not started.
 - [ ] **Complex multi-leg tracking** — Iron condors, butterflies. `trade_legs` table exists but not wired.
 - [ ] **Learning Protocol** — Self-correcting system where Pivot tracks recommendation accuracy and adjusts weighting. Designed but not implemented.
+- [ ] **UW watcher bot** — Lightweight service to monitor UW/whale Discord channels and forward parsed data to Pandora API (no LLM needed).
 
 ---
 
@@ -59,14 +60,19 @@ Prioritized list of what needs building, fixing, or improving. For full phase de
 
 ---
 
-## ✅ Recently Completed
+## ✅ Recently Completed (Feb 23-27)
 
-- [x] **Brief 10: Position tracking gap fixes** — DB schema (signal_id, account columns, closed_positions table), partial sync flag, single position create endpoint, committee TAKE → screenshot prompt, IBKR cron activation, yfinance fallback pricer
-- [x] **Signal persistence hardening** - Enforced DB-first signal persistence (webhooks and schedulers), skipped Redis/broadcast on DB write failure for scheduled signals, and fixed CTA `signal_outcomes.symbol` fallback to ticker
-- [x] **SPY price feed fix** - Added SPY quote validation and fallback handling in `backend/bias_engine/factor_utils.py` to prevent split-scale mismatches from corrupting 9 EMA / 200 SMA factors (deploy verification pending)
-- [x] Railway Postgres fix — moved to same project (fabulous-essence), linked via `${{Postgres.*}}`
-- [x] Documentation overhaul — CLAUDE.md, CODEX.md, PROJECT_SUMMARY.md, PROJECT_RULES.md rewritten
-- [x] DEVELOPMENT_STATUS.md — Full phase roadmap with system component inventory
-- [x] Phase 2A-2E — Playbook, trade journal, DEFCON, market data, interactive chat all live
-- [x] Analytics Phases 1-3 — Schema, API endpoints, 6-tab UI all deployed
-- [x] Empty env var pattern — Documented and applied across codebase
+- [x] **Brief 10: Unified Position Ledger** — Replaced 3 fragmented tables with unified_positions, 10-endpoint v2 API, options-aware frontend, portfolio summary widget, Polygon mark-to-market, committee context integration
+- [x] **Polygon.io Integration** — Options Starter + Stocks Starter ($58/mo total). Real spread P&L, portfolio greeks, NTM-filtered chains, 3 new bias factors (polygon_pcr, polygon_oi_ratio, iv_regime)
+- [x] **Bias System Overhaul (Tier 1+2)** — 22 factors (removed 4 dead, added 3 new), weights normalized to 1.00, None-not-zero pattern, Redis TTL per-factor, stale key cleanup, self-healing PCR
+- [x] **Circuit Breaker Overhaul** — Condition-verified decay, state machine, no-downgrade guard, Discord notifications, dashboard accept/reject, spy_up_2pct direction fix
+- [x] **RVOL Conviction Modifier** — Asymmetric amplification (bearish 1.20x, bullish 1.10x), hysteresis, confidence gate
+- [x] **Committee dpg/GEX Training** — All 4 agents retrained with convexity-first philosophy, debit default, fractional Kelly sizing
+- [x] **Cost Reduction** — OpenRouter → Direct Anthropic API, trade poller */2→*/15, session cleanup, ~$1/day
+- [x] **Brief 06A: Twitter Sentiment** — Committee context + chatbot skill + Citrini7 account
+- [x] **Position Tracking Gap Fixes** — signal_id/account columns, partial sync, closed_positions table, IBKR cron activation
+- [x] **Savita Persistence Fix** — PUT endpoint writes to composite engine + recomputes bias
+- [x] **Frontend Fixes** — Position modal overlay, signal card HTML corruption, P&L display, timeframe labels, momentum delta threshold, custom structures, edit modal falsy zero
+- [x] **DXY macro factor** — Merged into dxy_trend (8 DXY+VIX combinations) during Tier 2 overhaul
+- [x] **RVOL conviction modifier** — Deployed as part of Tier 2 overhaul
+- [x] **Stale factor reliability** — options_sentiment removed, put_call_ratio self-heals via Polygon, savita TTL extended

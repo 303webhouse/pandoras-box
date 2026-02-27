@@ -38,10 +38,53 @@ After completing work on a Trading Team brief, append a new entry at the top of 
 | 07 — Watchlist Re-Scorer | ⬜ | ⬜ | ⬜ | ⬜ |
 | 08 — Librarian Phase 1 (Knowledge Base) | ⬜ | ⬜ | ⬜ | ⬜ |
 | 09 — Librarian Phase 2 (Agent Training Loop) | ⬜ | ⬜ | ⬜ | ⬜ |
+| 10 — Unified Position Ledger | ✅ | ✅ | ✅ | ✅ |
 
 ---
 
 ## Log Entries
+
+### 2026-02-27 — Committee Agent Training (dpg/GEX Convexity Philosophy)
+**Agent:** Claude.ai (Opus) + Claude Code
+**What happened:** All four Trading Team agents (TORO, URSA, TECHNICALS/Risk, PIVOT) retrained with dpg's convexity-first options philosophy. TORO now evaluates asymmetric payoff and debit-first ideation. URSA trained on credit trap detection, sizing discipline, and concurrent position limits. TECHNICALS adds convexity assessment (R:R from chart structure, extended targets, strike zone, liquidity flags) and IV guidance recommending debit spreads. PIVOT system prompt rewritten with new structure rules (default debit), risk management (fractional Kelly ~2.5%), flat sizing, and profit management (let winners run, trailing stops, staged exits). Vol regime guidance aligned with anti-credit philosophy.
+**Files changed:** `committee_prompts.py` (all 4 agent system prompts rewritten)
+**Deviations from brief:** N/A — direct prompt engineering, no brief needed
+**Next blocker:** None — takes effect on next committee run.
+
+### 2026-02-27 — Bias System Tier 2 Overhaul
+**Agent:** Claude.ai (Opus) + Claude Code
+**What happened:** Full factor restructure driven by Opus committee review. 22 factors total (removed 4 dead: iv_skew, breadth_momentum, options_sentiment, dollar_smile; added 3 new: breadth_intraday, polygon_oi_ratio, iv_regime). Merged dollar_smile VIX logic into dxy_trend (8 DXY+VIX combinations). Rebalanced weights to exactly 1.00 (intraday 0.28, swing 0.41, macro 0.31). Added weight sum assertion guardrail. Self-heal put_call_ratio via Polygon PCR fallback. Working flow weight increased 4%→10%. `/webhook/breadth` endpoint added for $UVOL/$DVOL TradingView alerts.
+**Files changed:** `backend/bias_engine/composite.py`, `backend/bias_engine/factors/` (multiple factor files), `backend/bias_engine/polygon_options.py`, `backend/webhooks/tradingview.py`
+**Deviations from brief:** N/A — architect-driven overhaul, not brief-based
+**Next blocker:** None.
+
+### 2026-02-27 — Bias System Tier 1 Bug Fixes + Circuit Breaker Overhaul
+**Agent:** Claude.ai (Opus) + Claude Code
+**What happened:** Multiple scoring bugs fixed: options_sentiment/put_call_ratio return None instead of 0.0 on no data, ISM switched to MANEMP series, TICK breadth elif→if fix, VIX regime thresholds corrected, score_to_bias asymmetry fixed, factor weights normalized to 1.00, Redis TTL per-factor (was hardcoded 24h), stale key cleanup on None scores. Circuit breaker overhauled: condition-verified decay, state machine (active→pending_reset→accepted/rejected), no-downgrade guard, Discord webhook notifications, dashboard accept/reject buttons with amber banner, spy_up_2pct modifier direction fix. RVOL conviction modifier added: asymmetric (bearish 1.20x, bullish 1.10x, low-vol 0.85x), hysteresis, confidence gate, dead zone.
+**Files changed:** `backend/bias_engine/composite.py`, `backend/bias_engine/factor_scorer.py`, `backend/webhooks/circuit_breaker.py`, `frontend/app.js`, `frontend/style.css`, multiple factor files
+**Deviations from brief:** N/A
+**Next blocker:** None.
+
+### 2026-02-27 — Polygon.io Integration (Options + Stocks)
+**Agent:** Claude.ai (Opus) + Claude Code
+**What happened:** Two Polygon Starter plans integrated. Options: polygon_options.py client for chain snapshots, contract matching, spread valuation, greeks extraction, NTM-filtered queries. GET /v2/positions/greeks endpoint for portfolio greeks. Committee context now fetches greeks alongside position summary. Stocks: Polygon-first routing for ETF/equity tickers, yfinance fallback. New bias factors: polygon_pcr (automated SPY P/C volume ratio), polygon_oi_ratio (SPY P/C open interest), iv_regime (VIX rank vs 20-day history). Multiple fixes: NTM filtering for PCR (340 vs 15000 contracts), open_interest top-level field fix, iv_regime NTM band widened, max_pages increased.
+**Files changed:** `backend/bias_engine/polygon_options.py` (new), `backend/api/v2_positions.py`, `backend/bias_engine/factors/polygon_pcr.py` (new), `backend/bias_engine/factors/iv_regime.py` (new), `backend/bias_engine/factors/polygon_oi_ratio.py` (new), `committee_context.py`
+**Deviations from brief:** N/A — architect-driven
+**Next blocker:** None.
+
+### 2026-02-26 — Brief 10 Unified Position Ledger Deployed
+**Agent:** Claude Code (Opus/Sonnet)
+**What happened:** Full Brief 10 implementation. Replaced 3 fragmented position tables with unified_positions. 10-endpoint v2 API (CRUD, sync, close, summary, greeks). Position risk calculator for common options structures. Options-aware frontend with structure badges, strikes+DTE, max loss bars. Portfolio summary widget in bias row. Committee context reads v2 summary with v1 fallback. Pivot position manager skill. Data migration from old tables. Mark-to-market via Polygon + yfinance fallback.
+**Files changed:** `backend/api/v2_positions.py` (new), `backend/positions/risk_calculator.py` (new), `backend/positions/models.py` (new), `backend/models/unified_positions.py` (new), `frontend/app.js`, `frontend/style.css`, `committee_context.py`, `skills/positions/manager.py` (new)
+**Deviations from brief:** FastAPI route ordering required /summary before /{position_id} to prevent capture.
+**Next blocker:** None — position close flow (screenshot-based detection, CSV import dedup) planned as follow-up.
+
+### 2026-02-25 — Position Tracking Gap Fixes
+**Agent:** Claude Code
+**What happened:** Pre-Brief 10 gap fixes. Added signal_id + account columns to open_positions (ALTER TABLE + indexes). Partial sync flag (partial=true for RH screenshots, false for IBKR full sync). POST /positions single create endpoint with duplicate check and committee linkage. closed_positions table with full P&L schema. Committee TAKE button saves last_take.json and prompts for fill screenshot. IBKR cron activation (position poller */5, quotes */1). Savita persistence fix (PUT endpoint now writes to composite engine via record_factor_reading, recomputes bias).
+**Files changed:** `backend/api/positions.py`, `backend/models/`, `committee_decisions.py`, `pivot2_committee.py`, `backend/bias_engine/composite.py`
+**Deviations from brief:** None
+**Next blocker:** Brief 10 (unified ledger) superseded fragmented approach.
 
 ### 2026-02-25 — Cost Reduction: OpenRouter → Direct Anthropic + Optimizations
 **Agent:** Claude.ai (Opus)

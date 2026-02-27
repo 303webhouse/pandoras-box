@@ -25,7 +25,7 @@ When spawning sub-agents for builds, **default to Sonnet** for cost and speed. O
 
 ## Project Overview
 
-**Pivot** is an AI-powered trading assistant built around a Discord bot that provides real-time market analysis, signal evaluation, and trade recommendations for options swing trading. The system combines automated data collection (20+ macro/technical/flow factors), TradingView webhook integration, Unusual Whales flow data, dark pool detection, and LLM-powered analysis to deliver actionable trading intelligence.
+**Pivot** is an AI-powered trading assistant built around a Discord bot that provides real-time market analysis, signal evaluation, and trade recommendations for options swing trading. The system combines automated data collection (22 macro/technical/flow factors), TradingView webhook integration, Unusual Whales flow data, dark pool detection, Polygon.io market data, and LLM-powered analysis to deliver actionable trading intelligence.
 
 The project was originally called "Pandora's Box" — the name persists in some URLs, database names, and older code. **Pivot** is the current name for the overall system and the Discord bot personality.
 
@@ -35,10 +35,10 @@ The project was originally called "Pandora's Box" — the name persists in some 
 ┌─────────────────────────────────────────────────────────────────────┐
 │                     THREE DEPLOYMENT TARGETS                        │
 ├──────────────────────┬──────────────────────┬───────────────────────┤
-│   Railway (Backend)  │   VPS (Discord Bot)  │  Frontend (Static)    │
-│   FastAPI + Postgres │   bot.py + scheduler │  Dashboard + Charts   │
-│   Auto-deploys from  │   /opt/pivot on VPS  │  analytics.js         │
-│   main branch push   │   systemd services   │  Served from VPS      │
+│   Railway (Backend)  │   VPS (Pivot II)     │  Frontend (Static)    │
+│   FastAPI + Postgres │   OpenClaw + crons   │  Dashboard + Charts   │
+│   Auto-deploys from  │   /opt/openclaw on   │  analytics.js         │
+│   main branch push   │   VPS (systemd)      │  Served from VPS      │
 └──────────┬───────────┴──────────┬───────────┴───────────┬───────────┘
            │                      │                       │
            ▼                      ▼                       ▼
@@ -49,33 +49,55 @@ The project was originally called "Pandora's Box" — the name persists in some 
 
 ### Backend (Railway — `backend/`)
 - **FastAPI** app in `main.py` — all API routers, webhooks, WebSocket
-- **PostgreSQL** (Railway, same project `fabulous-essence`) — signals, trades, factor_history, analytics tables. Linked via `${{Postgres.*}}` references.
-- **Redis** (Upstash) — real-time cache for bias state, signals. Requires SSL (`rediss://`).
+- **PostgreSQL** (Railway, same project `fabulous-essence`) — signals, trades, factor_history, unified_positions, closed_positions, analytics tables. Linked via `${{Postgres.*}}` references.
+- **Redis** (Upstash) — real-time cache for bias state, factor scores, signals. Requires SSL (`rediss://`). Per-factor TTLs (24h default, up to 1080h for Savita).
 - Auto-deploys on push to `main` branch
-- Key endpoints: `/webhook/tradingview`, `/api/bias/*`, `/api/analytics/*`, `/health`
+- Key endpoints: `/webhook/tradingview`, `/webhook/breadth`, `/webhook/circuit-breaker/*`, `/api/bias/*`, `/api/analytics/*`, `/v2/positions/*`, `/health`
 - Health check: `curl https://pandoras-box-production.up.railway.app/health`
 
-### Discord Bot (VPS — `pivot/` + `backend/discord_bridge/`)
-- **VPS**: Hetzner PIVOT-EU at `188.245.250.2`, code at `/opt/pivot/`
-- **Two systemd services**: `pivot-bot.service` (Discord bot) + `pivot-collector.service` (data collectors)
-- **`backend/discord_bridge/bot.py`** — The actual running bot (3,466 lines), lives on VPS at `/opt/pivot/discord_bridge/bot.py`
-- **LLM agent** — Claude Sonnet 4.6 (`anthropic/claude-sonnet-4.6`) via OpenRouter for market analysis, screenshot parsing, trade evaluation
-- **Playbook** — `pivot/llm/playbook_v2.1.md` contains trading rules, risk parameters, account details
-- **Intents**: Full (members, message_content, presences, guilds)
-- Deploy: `ssh root@188.245.250.2` → `cd /opt/pivot && git pull && systemctl restart pivot-bot`
+### Pivot II (VPS — OpenClaw)
+- **VPS**: Hetzner PIVOT-EU at `188.245.250.2`, code at `/opt/openclaw/workspace/`
+- **Three systemd services**: `openclaw` (Pivot chat/briefs/pollers), `pivot-collector` (data collectors), `pivot2-interactions` (committee button handler)
+- **LLM provider**: Direct Anthropic API (NOT OpenRouter). Haiku 4.5 (`claude-haiku-4-5-20251001`) for chat and analysis, Sonnet 4.6 for briefs and committee synthesis. Env var: `ANTHROPIC_API_KEY`.
+- **OpenClaw config**: `/home/openclaw/.openclaw/openclaw.json`
+- **Cron jobs**: `/home/openclaw/.openclaw/cron/jobs.json` — trade poller (*/15), twitter sentiment (*/30), morning/EOD briefs, prep pings, outcome matcher, weekly review, session cleanup
+- Deploy: SSH → edit files at `/opt/openclaw/workspace/scripts/` → restart relevant service
 
 ### Frontend (`frontend/`)
-- `index.html` + `app.js` — Main dashboard (bias cards, signals, charts)
+- `index.html` + `app.js` — Main dashboard (bias cards with timeframe sub-scores, signals, circuit breaker banner, position summary widget, portfolio greeks)
 - `analytics.js` — Analytics UI (6 tabs: Dashboard, Trade Journal, Signal Explorer, Factor Lab, Backtest, Risk)
+- Position modals: add/edit/close/dismiss with structure support (debit_spread, credit_spread, iron_butterfly, straddle, strangle, custom)
 - PWA-installable, dark teal theme with dynamic accent colors based on bias level
+- **Cache busting**: CSS uses `?v=39`, app.js uses `?v=54`. Increment on UI changes.
 
 ## Key Subsystems
 
 ### Bias Engine (`backend/bias_engine/`)
-20+ factors across macro, technical, flow, and breadth categories. Each factor scores -2 to +2. Composite weighted average maps to 5-level system:
-- **URSA MAJOR** (strongly bearish) → **URSA MINOR** → **NEUTRAL** → **TORO MINOR** → **TORO MAJOR** (strongly bullish)
+22 factors across INTRADAY (5), SWING (9), and MACRO (8) categories. Each factor scores -1.0 to +1.0. Composite weighted average maps to 5-level system:
+- **URSA MAJOR** (strongly bearish, ≤ -0.60) → **URSA MINOR** → **NEUTRAL** → **TORO MINOR** → **TORO MAJOR** (strongly bullish)
 
-Factor sources: yfinance (SPY technicals, VIX, sector data), FRED (credit spreads, yield curve, claims), TradingView webhooks (TICK breadth, circuit breaker), UW (options flow, dark pool).
+Weights sum to exactly 1.00 (enforced by assertion at import time): intraday 0.28, swing 0.41, macro 0.31.
+
+**Data sources:** Polygon.io Options Starter ($29/mo — chains, greeks, OI, volume), Polygon.io Stocks Starter ($29/mo — ETF/equity prices), yfinance (VIX, indices, fallback), FRED (credit spreads, yield curve, claims, ISM/MANEMP), TradingView webhooks (TICK breadth, $UVOL/$DVOL breadth_intraday, circuit breaker), Twitter sentiment (30+ accounts via `pivot2_twitter.py`).
+
+**Important patterns:**
+- Factors return `None` (not `0.0`) when data is unavailable — prevents neutral dilution
+- Redis keys are deleted when `compute_score()` returns None — prevents ghost 0.0 readings
+- Per-factor Redis TTLs (ISM: 720h, Savita: 1080h, most others: 24h)
+- Polygon uses NTM-filtered queries (±10% SPY price) to fetch 5-10 contracts instead of 2,500+
+- VIX is used as SPY 30-day IV proxy (Polygon Starter plan doesn't populate `implied_volatility`)
+
+### Circuit Breaker (`backend/webhooks/circuit_breaker.py`)
+TradingView alerts trigger automatic bias overrides during extreme events. **Condition-verified decay** (NOT pure time-based) — both timer AND market condition must clear. State machine: active → pending_reset → Nick accepts/rejects via dashboard → inactive. No-downgrade guard (spy_down_1pct can't overwrite spy_down_2pct). Discord webhook notifications via `DISCORD_WEBHOOK_CB`. Integrated into `compute_composite()` as scoring modifier + bias cap/floor.
+
+Triggers: `spy_down_1pct`, `spy_down_2pct`, `spy_up_2pct`, `vix_spike`, `vix_extreme`.
+
+### Position Ledger (`backend/api/v2_positions.py` + `backend/positions/`)
+Unified position tracking across all accounts (RH, IBKR, 401k). Options-aware with structure detection. Mark-to-market via Polygon options API (actual bid/ask mid-prices for both spread legs) with yfinance fallback for equities. Portfolio greeks endpoint. Committee context integration.
+
+**v2 API (10 endpoints):** POST create, GET list (filtered), GET single, PUT update, POST close, DELETE soft-delete, POST sync (partial flag), GET summary, GET greeks, POST bulk-import.
+
+**Important:** FastAPI matches routes in declaration order. `/v2/positions/summary` and `/v2/positions/greeks` must be declared BEFORE `/{position_id}` to prevent capture.
 
 ### Signal Pipeline
 ```
@@ -84,23 +106,21 @@ Strategy Validation → Bias Filter → Signal Scorer → PostgreSQL + Redis →
 WebSocket Broadcast + Discord Alert
 ```
 
-### Whale Hunter (Dark Pool Detection)
-PineScript indicator on TradingView detects institutional absorption patterns via volume footprint analysis (consecutive bars with matched POC levels). Sends webhooks to Pivot for LLM evaluation.
+### Trading Team (Committee)
+Multi-analyst AI committee evaluating signals. Pipeline: Gatekeeper → Context Builder → 4 parallel agents (TORO bull / URSA bear / Risk assessor / Pivot synthesizer) → Discord embed with Take/Pass/Watching buttons → Decision logging → Nightly outcome matching → Saturday weekly review.
 
-### Circuit Breaker (`backend/webhooks/circuit_breaker.py`)
-TradingView alerts trigger automatic bias overrides during extreme market events. Adjusts scoring modifiers and bias caps/floors. Triggers: `spy_down_1pct`, `spy_down_2pct`, `vix_spike`, `vix_extreme`.
+Runs on VPS at `/opt/openclaw/workspace/scripts/`. Uses Anthropic API directly (Haiku for TORO/URSA/Risk, Sonnet for Pivot). ~$0.02/committee run.
+
+See `docs/TRADING_TEAM_LOG.md` for build status and `TRADING_TEAM_STATUS.md` (project file) for architecture.
+
+### Whale Hunter (Dark Pool Detection)
+PineScript indicator on TradingView detects institutional absorption patterns via volume footprint analysis. Sends webhooks to Railway → evaluated by committee → posted to Discord.
 
 ### UW Flow Parser (`backend/discord_bridge/uw/`)
 Monitors Unusual Whales Premium Bot Discord channels, parses flow alerts into structured signals. Filters: min DTE 7, max DTE 180, min premium $50K, min score 80.
 
-### Analytics System (`backend/analytics/`)
-See `DEVELOPMENT_STATUS.md` for full details. Three phases deployed:
-- Phase 1: Data collection schema (signals, trades, factors, prices)
-- Phase 2: API endpoints (stats, health, performance, backtesting)
-- Phase 3: 6-tab UI (Dashboard, Trade Journal, Signal Explorer, Factor Lab, Backtest, Risk)
-
 ### Collectors (`pivot/collectors/`)
-Scheduled data fetchers for each factor: VIX term structure, credit spreads, sector rotation, TICK breadth, market breadth, dollar smile, CAPE yield, Savita indicator. Run on cron via `scheduler/cron_runner.py`.
+Scheduled data fetchers: VIX term structure, credit spreads, sector rotation, TICK breadth, market breadth, CAPE yield, Savita indicator. Run on cron via `scheduler/cron_runner.py`.
 
 ### Monitors (`pivot/monitors/`)
 Alert monitors: bias shift, CTA zones, factor velocity, volume anomaly, earnings calendar, economic calendar, DEFCON behavioral layer.
@@ -114,14 +134,16 @@ git push origin main
 # Verify backend
 curl https://pandoras-box-production.up.railway.app/health
 
-# Deploy Discord bot (VPS — manual)
+# Deploy Pivot II scripts (VPS — manual)
 ssh root@188.245.250.2
-cd /opt/pivot && git pull origin main
-systemctl restart pivot-bot
-journalctl -u pivot-bot -f  # verify startup
+# edit files at /opt/openclaw/workspace/scripts/
+systemctl restart openclaw              # chat, briefs, pollers
+systemctl restart pivot2-interactions   # committee button handler
+systemctl restart pivot-collector       # data collectors
+journalctl -u openclaw -f               # verify startup
 
-# Both services together
-systemctl status pivot-bot pivot-collector
+# Check all services
+systemctl status openclaw pivot-collector pivot2-interactions
 
 # Local development
 cd backend && python main.py          # API on port 8000
@@ -132,12 +154,17 @@ cd frontend && python -m http.server 3000  # UI on port 3000
 
 ### Railway (pandoras-box service)
 - `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` → linked via `${{Postgres.*}}`
-- `DISCORD_BOT_TOKEN`, `DISCORD_TOKEN`, `DISCORD_FLOW_CHANNEL_ID`, `DISCORD_WEBHOOK_SIGNALS`
+- `DISCORD_BOT_TOKEN`, `DISCORD_TOKEN`, `DISCORD_FLOW_CHANNEL_ID`, `DISCORD_WEBHOOK_SIGNALS`, `DISCORD_WEBHOOK_CB`
 - `COINALYZE_API_KEY`, `CRYPTO_BINANCE_PERP_HTTP_PROXY`
 - `FRED_API_KEY`, `PIVOT_API_KEY`
+- `POLYGON_API_KEY` — Polygon.io API key (Options + Stocks Starter plans)
 
-### VPS (`/opt/pivot/.env`)
-See `pivot/.env.example` for full list. Key vars: `DISCORD_BOT_TOKEN`, `PANDORA_API_URL`, `PIVOT_API_KEY`, `LLM_API_KEY` (OpenRouter key), `LLM_MODEL` (`anthropic/claude-sonnet-4.6`), `FRED_API_KEY`, UW channel IDs, Discord webhook URLs.
+### VPS (OpenClaw env)
+Set in `/home/openclaw/.openclaw/openclaw.json` under `env`. Key vars:
+- `ANTHROPIC_API_KEY` — Direct Anthropic API (NOT OpenRouter)
+- `DISCORD_BOT_TOKEN`, `PANDORA_API_URL`, `PIVOT_API_KEY`
+- `FRED_API_KEY`
+- UW channel IDs, Discord webhook URLs
 
 **Critical pattern for env vars** — always use `or` to handle Railway empty strings:
 ```python
@@ -153,18 +180,25 @@ DB_PORT = int(os.getenv("DB_PORT", 5432))    # int('') crashes
 ## Adding Components
 
 ### New Factor
-1. Create collector in `pivot/collectors/factor_[name].py`
-2. Create bias filter in `backend/bias_filters/[name].py`
-3. Register in `backend/bias_engine/composite.py` with weight and timeframe
-4. Add to scheduler in `pivot/scheduler/cron_runner.py`
-5. Add knowledgebase entry in `data/knowledgebase.json`
+1. Create factor file in `backend/bias_engine/factors/factor_[name].py` with `compute_score() → float | None`
+2. Register in `backend/bias_engine/composite.py` with weight and timeframe category
+3. **Weight sum must remain 1.00** — adjust existing weights to accommodate. Assertion will fail on import if sum ≠ 1.00.
+4. Factor returns `None` when data unavailable (NOT 0.0)
+5. Add collector/cron if factor needs periodic data refresh
+6. Add to frontend factor display if user-visible
 
 ### New Signal Source
 1. Create webhook handler in `backend/webhooks/[name].py`
 2. Register route in `backend/main.py`
 3. Add signal type to scoring pipeline
-4. Add evaluation template in `pivot/llm/prompts.py`
-5. Update Discord alert formatting in bot
+4. Wire into Trading Team committee (ask Nick if this signal type should go through committee review)
+5. Update Discord alert formatting
+
+### New v2 Position Endpoint
+1. Add to `backend/api/v2_positions.py`
+2. **Route ordering matters** — fixed paths (`/summary`, `/greeks`) BEFORE parameterized (`/{position_id}`)
+3. Add models to `backend/positions/models.py` if new request/response shapes needed
+4. Update committee context in `committee_context.py` if position data affects agent analysis
 
 ### New Analytics Feature
 1. Add database tables/queries in `backend/analytics/db.py`
@@ -176,25 +210,42 @@ DB_PORT = int(os.getenv("DB_PORT", 5432))    # int('') crashes
 
 | File | Purpose |
 |------|---------|
-| `pivot/llm/prompts.py` | System prompts — Pivot's personality, analysis instructions, all behavioral rules |
-| `pivot/llm/playbook_v2.1.md` | Trading rules, risk parameters, account balances, strategy specs |
-| `backend/bias_engine/composite.py` | Factor weighting, composite bias calculation |
-| `backend/discord_bridge/bot.py` | Discord bot main file (3,466 lines — VPS copy is the live one) |
-| `backend/webhooks/tradingview.py` | TradingView webhook receiver |
-| `backend/webhooks/circuit_breaker.py` | Circuit breaker logic |
-| `backend/discord_bridge/uw/parser.py` | UW flow message parser |
-| `backend/discord_bridge/uw/aggregator.py` | UW flow aggregation and scoring |
-| `backend/discord_bridge/whale_parser.py` | Whale Hunter signal parser |
-| `pivot/scheduler/cron_runner.py` | Heartbeat scheduler for all monitors |
-| `pivot/deploy.sh` | VPS deployment script (rsync + systemd setup) |
+| `backend/bias_engine/composite.py` | Factor registration, weights (must sum to 1.00), composite bias calculation |
+| `backend/bias_engine/factor_scorer.py` | Score computation, Redis caching, None handling, stale key cleanup |
+| `backend/bias_engine/polygon_options.py` | Polygon.io options client (chains, greeks, spread valuation, NTM filtering) |
+| `backend/webhooks/circuit_breaker.py` | Circuit breaker logic (condition-verified decay, state machine, no-downgrade) |
+| `backend/webhooks/tradingview.py` | TradingView webhook receiver + /webhook/breadth endpoint |
+| `backend/api/v2_positions.py` | Unified position ledger API (10 endpoints, route ordering matters) |
+| `backend/positions/risk_calculator.py` | Options structure risk calculation (max loss, breakeven) |
+| `frontend/app.js` | Main dashboard JS (bias cards, signals, positions, circuit breaker banner) |
 | `frontend/analytics.js` | Analytics UI (6 tabs) |
 | `DEVELOPMENT_STATUS.md` | Phase roadmap, what's built, what's planned |
+| `docs/TRADING_TEAM_LOG.md` | Trading Team build status log |
+
+### VPS / Trading Team Files
+
+| File | Purpose |
+|------|---------|
+| `scripts/pivot2_committee.py` | Committee orchestrator + gatekeeper |
+| `scripts/committee_context.py` | Market data enrichment + bias challenge + lessons + Twitter injection |
+| `scripts/committee_prompts.py` | 4 agent system prompts (dpg/GEX trained — convexity-first, debit default) |
+| `scripts/committee_parsers.py` | `call_agent()` + response parsers (Anthropic API direct, NOT OpenRouter) |
+| `scripts/committee_decisions.py` | Decision logging, disk-backed pending store, button components |
+| `scripts/committee_interaction_handler.py` | Persistent Discord bot for button clicks, modal, reminders |
+| `scripts/committee_outcomes.py` | Nightly outcome matcher + Railway API fetcher |
+| `scripts/committee_analytics.py` | Pattern analytics computation |
+| `scripts/committee_review.py` | Weekly self-review LLM + Discord posting + lessons bank |
+| `scripts/committee_autopsy.py` | Post-trade narrative generation (Haiku) |
+| `scripts/pivot2_brief.py` | Morning/EOD brief generation (Sonnet, Anthropic API direct) |
+| `scripts/pivot2_twitter.py` | Twitter sentiment collection (30+ accounts, Haiku scoring) |
 
 ## Nick's Working Style
 
 - Has ADHD — prefers step-by-step guidance broken into manageable chunks
 - Non-engineer background — explain technical decisions simply
-- Uses **Claude.ai** for architecture planning, strategic discussions, and writing Codex briefs
-- Uses **Claude Code (Codex)** for implementation — receives briefs as markdown files
-- Workflow: discuss in Claude.ai → write brief → hand to Codex → deploy → verify
+- Uses **Claude.ai** for architecture planning, strategic discussions, and writing briefs
+- Uses **Claude Code** for implementation — receives briefs as markdown files
+- Workflow: discuss in Claude.ai → write brief → hand to Claude Code → deploy → verify
 - Strongly opinionated trader — bearish on macro/Trump admin, bullish on AI disruption. Pivot should challenge these biases.
+- **Local repo: `C:\trading-hub`** — the ONLY local clone. Never create a second clone.
+- **Timezone: America/Denver** (Colorado, observes DST)
