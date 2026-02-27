@@ -37,7 +37,7 @@ async def compute_score() -> Optional[FactorReading]:
         factor_id="vix_regime",
         score=score,
         signal=score_to_signal(score),
-        detail=f"VIX at {vix:.1f} ({'panic' if vix > 30 else 'fear' if vix > 25 else 'elevated' if vix > 18 else 'normal' if vix > 14 else 'complacent'})",
+        detail=f"VIX at {vix:.1f} ({'panic' if vix > 30 else 'fear' if vix > 25 else 'elevated' if vix > 20 else 'cautious' if vix > 18 else 'normal' if vix > 14 else 'complacent'})",
         timestamp=datetime.utcnow(),
         source="yfinance",
         raw_data={"vix": float(vix)},
@@ -57,9 +57,9 @@ def _score_vix_level(vix: float) -> float:
     elif vix > 25:
         return -0.5
     elif vix > 20:
-        return -0.2
+        return -0.3
     elif vix > 18:
-        return 0.0
+        return -0.1   # Elevated — lean slightly bearish (was 0.0)
     elif vix > 14:
         return 0.2
     elif vix > 12:

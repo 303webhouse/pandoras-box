@@ -4,8 +4,8 @@ ISM Manufacturing PMI Factor — leading economic indicator.
 ISM Manufacturing PMI above 50 indicates economic expansion.
 Below 50 indicates contraction. This is a monthly indicator.
 
-Source: FRED series MANEMP (ISM Manufacturing Employment Index)
-        Falls back to NAPM (ISM PMI) if MANEMP unavailable.
+Source: FRED series NAPM (ISM Manufacturing PMI)
+        Falls back to MANEMP (ISM Manufacturing Employment) if NAPM unavailable.
 Timeframe: Macro (staleness: 720h / 30 days — monthly data)
 """
 
@@ -43,7 +43,7 @@ async def compute_score() -> Optional[FactorReading]:
 
             fred = Fred(api_key=fred_api_key)
 
-            for series_id in ["MANEMP", "NAPM"]:
+            for series_id in ["NAPM", "MANEMP"]:
                 try:
                     series = fred.get_series(series_id, observation_start="2024-01-01")
                     if series is not None and not series.empty:
@@ -63,7 +63,7 @@ async def compute_score() -> Optional[FactorReading]:
                     },
                 )
             else:
-                logger.warning("ism_manufacturing: no data from FRED (tried MANEMP, NAPM)")
+                logger.warning("ism_manufacturing: no data from FRED (tried NAPM, MANEMP)")
         except ImportError:
             logger.warning("ism_manufacturing: fredapi not installed")
         except Exception as e:
