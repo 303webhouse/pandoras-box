@@ -2561,6 +2561,7 @@ body.override-active-bearish .override-toggle[data-active="true"] {
     border-left: 4px solid var(--accent-lime);
     transition: all 0.2s;
     cursor: pointer;
+    min-height: 120px;
 }
 
 .signal-card:hover {
@@ -2785,7 +2786,6 @@ body.override-active-bearish .override-toggle[data-active="true"] {
     box-shadow: 0 0 20px rgba(16, 185, 129, 0.4), 0 0 40px rgba(16, 185, 129, 0.2);
     animation: apisGlow 1.5s ease-in-out infinite alternate;
     position: relative;
-    overflow: hidden;
 }
 
 /* No emoji - clean design */
@@ -2817,7 +2817,6 @@ body.override-active-bearish .override-toggle[data-active="true"] {
     box-shadow: 0 0 20px rgba(229, 55, 14, 0.4), 0 0 40px rgba(229, 55, 14, 0.2);
     animation: kodiakGlow 1.5s ease-in-out infinite alternate;
     position: relative;
-    overflow: hidden;
 }
 
 /* No emoji - clean design */
