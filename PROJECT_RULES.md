@@ -33,6 +33,7 @@ The system must deliver:
 4. **Modular architecture** — New factors, signals, and strategies plug in without rewriting core
 5. **Brief-driven development** — Architecture decisions happen in Claude.ai conversations. Implementation specs are written as markdown briefs and handed to Codex for building.
 6. **Empty-safe env vars** — Always use `os.getenv("VAR") or default` pattern, never `os.getenv("VAR", default)` to handle Railway's empty string references.
+7. **Data source priority** — Polygon.io is the primary data source for all equity/ETF price data (OHLCV, volume, snapshots) and options data (chains, greeks, IV, OI). yfinance is the fallback source, used only when Polygon fails or for data types Polygon does not cover. VIX and index tickers (`^VIX`, `^VIX3M`, `^ADVN`, `^DECLN`, `DX-Y.NYB`) remain on yfinance — no Polygon Indices subscription.
 
 ---
 

@@ -21,6 +21,9 @@ from bias_engine.anomaly_alerts import send_alert
 
 logger = logging.getLogger(__name__)
 
+# Tickers that must stay on yfinance (no Polygon Indices/Currencies subscription).
+_YFINANCE_ONLY_SYMBOLS = {"^VIX", "^VIX3M", "^ADVN", "^DECLN", "DX-Y.NYB"}
+
 PRICE_CACHE_TTL = 900  # 15 minutes
 PRICE_CACHE_VERSION = "v3"
 # Symbols with additional live-quote mismatch validation.
@@ -368,6 +371,34 @@ async def get_price_history(ticker: str, days: int = 30) -> pd.DataFrame:
         except Exception:
             pass
 
+    # --- Polygon primary path (equity/ETF tickers only) ---
+    if symbol not in _YFINANCE_ONLY_SYMBOLS:
+        try:
+            from integrations.polygon_equities import get_bars_as_dataframe as _polygon_bars
+            polygon_df = await _polygon_bars(symbol, days)
+            if polygon_df is not None and not polygon_df.empty:
+                polygon_df = _normalize_history(polygon_df)
+                if not _has_bounds_violation(symbol, polygon_df, stage="polygon"):
+                    if not _has_price_mismatch(symbol, polygon_df, reference_price):
+                        # Cache Polygon result in Redis
+                        try:
+                            client = await get_redis_client()
+                            if client and polygon_df is not None and not polygon_df.empty:
+                                payload = polygon_df.to_json(orient="split")
+                                await client.setex(cache_key, PRICE_CACHE_TTL, payload)
+                        except Exception as exc:
+                            logger.warning("Price cache write failed for %s (polygon): %s", symbol, type(exc).__name__)
+                        return polygon_df
+                    else:
+                        logger.warning("Polygon %s data mismatches live quote, falling back to yfinance", symbol)
+                else:
+                    logger.warning("Polygon %s data failed bounds check, falling back to yfinance", symbol)
+        except ImportError:
+            pass  # polygon_equities module not available
+        except Exception as exc:
+            logger.warning("Polygon fetch failed for %s, falling back to yfinance: %s", symbol, exc)
+
+    # --- yfinance fallback path ---
     data = _download_history(auto_adjust=True)
     data = _prefer_adjusted_close(symbol, data, reference_price)
     if _has_bounds_violation(symbol, data, stage="download(auto_adjust=True)"):
