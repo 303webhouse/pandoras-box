@@ -30,6 +30,27 @@ except ImportError:
     from backend.bias_engine.factor_utils import score_to_signal
 
 
+async def _polygon_pcr_fallback() -> Optional[Dict[str, Any]]:
+    """
+    Self-healing fallback: derive PCR from Polygon SPY options chain
+    when the TradingView $CPCE webhook hasn't fired.
+    """
+    try:
+        from bias_filters.polygon_pcr import compute_score as compute_polygon_pcr
+        reading = await compute_polygon_pcr()
+        if reading and reading.raw_data:
+            pcr_value = reading.raw_data.get("pcr")
+            if pcr_value and pcr_value > 0:
+                return {
+                    "pcr": pcr_value,
+                    "source": "polygon_fallback",
+                    "updated_at": datetime.utcnow().isoformat(),
+                }
+    except Exception as e:
+        logger.debug("Polygon PCR fallback failed: %s", e)
+    return None
+
+
 async def store_pcr_data(pcr_value: float, date: Optional[str] = None) -> Dict[str, Any]:
     """
     Store put/call ratio data from TradingView webhook.
@@ -81,8 +102,12 @@ async def compute_score(pcr_data: Optional[Dict[str, Any]] = None) -> Optional[F
             logger.warning(f"Error loading PCR data for scoring: {e}")
 
     if not pcr_data:
-        logger.warning("Put/Call ratio: no PCR payload available — excluding from composite")
-        return None
+        # Self-heal: try Polygon PCR as fallback when TV webhook hasn't fired
+        pcr_data = await _polygon_pcr_fallback()
+        if not pcr_data:
+            logger.warning("Put/Call ratio: no PCR payload available (TV + Polygon both empty) — excluding from composite")
+            return None
+        logger.info("Put/Call ratio: self-healed via Polygon PCR fallback")
 
     pcr_value = float(pcr_data.get("pcr", 0) or 0)
     if pcr_value <= 0:
@@ -96,13 +121,14 @@ async def compute_score(pcr_data: Optional[Dict[str, Any]] = None) -> Optional[F
             "No source timestamp for put_call_ratio; using utcnow fallback (staleness reliability reduced)"
         )
 
+    data_source = "polygon_fallback" if pcr_data.get("source") == "polygon_fallback" else "tradingview"
     return FactorReading(
         factor_id="put_call_ratio",
         score=score,
         signal=score_to_signal(score),
-        detail=f"CBOE P/C ratio: {pcr_value:.3f} ({'fear' if pcr_value >= 0.9 else 'complacency' if pcr_value <= 0.7 else 'normal'})",
+        detail=f"CBOE P/C ratio: {pcr_value:.3f} ({'fear' if pcr_value >= 0.9 else 'complacency' if pcr_value <= 0.7 else 'normal'}){' [Polygon fallback]' if data_source == 'polygon_fallback' else ''}",
         timestamp=source_timestamp,
-        source="tradingview",
+        source=data_source,
         raw_data=pcr_data,
         metadata={"timestamp_source": timestamp_source},
     )

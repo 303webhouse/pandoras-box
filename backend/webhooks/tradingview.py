@@ -620,6 +620,55 @@ async def apply_signal_scoring(signal_data: dict) -> dict:
         return signal_data
 
 
+class BreadthPayload(BaseModel):
+    """Payload for $UVOL/$DVOL breadth data from TradingView"""
+    uvol: float  # NYSE Up Volume (e.g., 1500000000)
+    dvol: float  # NYSE Down Volume (e.g., 800000000)
+
+
+@router.post("/breadth")
+async def receive_breadth_data(payload: BreadthPayload):
+    """
+    Receive NYSE UVOL/DVOL breadth data from TradingView webhook.
+
+    TradingView Alert Setup:
+    - Create a custom indicator or use two alerts
+    - Symbol: $UVOL (NYSE up volume) and $DVOL (NYSE down volume)
+    - Condition: Every 15 minutes during market hours
+    - Webhook URL: https://pandoras-box-production.up.railway.app/webhook/breadth
+    - Message (JSON): {"uvol": {{close of $UVOL}}, "dvol": {{close of $DVOL}}}
+    """
+    from bias_filters.breadth_intraday import store_breadth_data, compute_score as compute_breadth_score
+
+    logger.info("breadth webhook received: UVOL=%.0f, DVOL=%.0f", payload.uvol, payload.dvol)
+
+    if payload.dvol <= 0:
+        return {"status": "rejected", "reason": "DVOL must be positive"}
+
+    result = await store_breadth_data(uvol=payload.uvol, dvol=payload.dvol)
+
+    # Auto-score and feed into composite bias engine
+    try:
+        reading = await compute_breadth_score()
+        if reading:
+            from bias_engine.composite import store_factor_reading, compute_composite
+            await store_factor_reading(reading)
+            composite = await compute_composite()
+            logger.info(
+                "breadth factor scored: %+.2f (%s) -> composite %s (%+.2f)",
+                reading.score, reading.signal, composite.bias_level, composite.composite_score,
+            )
+            result["factor_score"] = reading.score
+            result["factor_signal"] = reading.signal
+            result["composite_bias"] = composite.bias_level
+        else:
+            logger.warning("breadth factor scoring returned None")
+    except Exception as e:
+        logger.error("breadth factor scoring failed (data still stored): %s", e)
+
+    return result
+
+
 class TickDataPayload(BaseModel):
     """Payload for TICK range data from TradingView"""
     tick_high: float  # Daily/session TICK high (e.g., +1200)
