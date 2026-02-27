@@ -46,6 +46,7 @@ class ParsedLeg:
     option_type: Optional[str] = None
     leg_type: Optional[str] = None
     trans_code: Optional[str] = None
+    amount: Optional[float] = None  # actual cash flow from Amount column
 
 
 def detect_csv_format(header_row: Sequence[str]) -> str:
@@ -188,20 +189,36 @@ def _build_trade_from_spread_legs(
             direction = "BEARISH"
             structure = "call_spread"
 
-    entry_net = max(0.0, open_buy.price - open_sell.price)
+    # Allow negative entry_net for credit spreads (sell price > buy price = credit received)
+    entry_net = open_buy.price - open_sell.price
     exit_net: Optional[float] = None
     status = "open"
     exit_date = None
     pnl_dollars: Optional[float] = None
     pnl_percent: Optional[float] = None
 
+    # Use Amount-based cash flow P&L when available (most accurate, includes commissions)
+    all_legs = [open_buy, open_sell]
+
     if close_sell and close_buy:
         exit_net = close_sell.price - close_buy.price
         status = "closed"
         exit_date = close_sell.timestamp.date().isoformat()
-        pnl_dollars = (exit_net - entry_net) * quantity * 100.0
-        if entry_net > 0:
-            pnl_percent = (exit_net - entry_net) / entry_net * 100.0
+        all_legs.extend([close_sell, close_buy])
+
+        # Sum all leg amounts for cash-flow P&L (positive = money in, negative = money out)
+        leg_amounts = [leg.amount for leg in all_legs if leg.amount is not None]
+        if len(leg_amounts) == len(all_legs):
+            pnl_dollars = sum(leg_amounts)
+        else:
+            # Fallback to price-based calc
+            pnl_dollars = (exit_net - entry_net) * quantity * 100.0
+
+        if abs(entry_net) > 0:
+            pnl_percent = (pnl_dollars / (abs(entry_net) * quantity * 100.0)) * 100.0
+
+    # For display, store entry_price as absolute value (debit cost or credit received)
+    entry_price_display = abs(entry_net)
 
     return {
         "ticker": ticker,
@@ -209,8 +226,8 @@ def _build_trade_from_spread_legs(
         "structure": structure,
         "entry_date": open_buy.timestamp.date().isoformat(),
         "exit_date": exit_date,
-        "entry_price": round(entry_net, 4),
-        "exit_price": round(exit_net, 4) if exit_net is not None else None,
+        "entry_price": round(entry_price_display, 4),
+        "exit_price": round(abs(exit_net), 4) if exit_net is not None else None,
         "strike": long_strike,
         "short_strike": short_strike,
         "long_strike": long_strike,
@@ -219,6 +236,7 @@ def _build_trade_from_spread_legs(
         "status": status,
         "pnl_dollars": round(pnl_dollars, 2) if pnl_dollars is not None else None,
         "pnl_percent": round(pnl_percent, 2) if pnl_percent is not None else None,
+        "is_credit": entry_net < 0,
         "legs": [
             open_buy.__dict__,
             open_sell.__dict__,
@@ -251,6 +269,7 @@ def _statement_rows_to_legs(rows: List[Dict[str, Any]]) -> Tuple[List[ParsedLeg]
 
         quantity = abs(_as_float(row.get("Quantity"), 0.0))
         price = _as_float(row.get("Price"), 0.0)
+        amount = _as_float(row.get("Amount"), 0.0)  # actual cash flow
         if quantity <= 0 or price <= 0:
             skipped_by_reason["invalid_qty_price"] += 1
             filtered_out += 1
@@ -301,6 +320,7 @@ def _statement_rows_to_legs(rows: List[Dict[str, Any]]) -> Tuple[List[ParsedLeg]
                     option_type=opt["option_type"],
                     leg_type="option",
                     trans_code=trans_code,
+                    amount=amount,
                 )
             )
             continue
@@ -327,6 +347,7 @@ def _statement_rows_to_legs(rows: List[Dict[str, Any]]) -> Tuple[List[ParsedLeg]
                 price=price,
                 leg_type="shares",
                 trans_code=trans_code,
+                amount=amount,
             )
         )
 
@@ -481,7 +502,11 @@ def _group_legs_into_trades(legs: List[ParsedLeg]) -> Tuple[List[Dict[str, Any]]
             is_long = opened.action == "buy_to_open"
             entry = opened.price
             exit_px = leg.price
-            pnl = (exit_px - entry) * qty * 100.0 if is_long else (entry - exit_px) * qty * 100.0
+            # Use Amount-based cash flow P&L when available
+            if opened.amount is not None and leg.amount is not None:
+                pnl = opened.amount + leg.amount
+            else:
+                pnl = (exit_px - entry) * qty * 100.0 if is_long else (entry - exit_px) * qty * 100.0
             direction = "BEARISH" if opened.option_type == "put" and is_long else "BULLISH"
             if opened.option_type == "call":
                 direction = "BULLISH" if is_long else "BEARISH"
@@ -548,7 +573,10 @@ def _group_legs_into_trades(legs: List[ParsedLeg]) -> Tuple[List[Dict[str, Any]]
             if short_lot_idx is not None:
                 opened = open_lots.pop(short_lot_idx)
                 qty = min(opened.quantity, leg.quantity)
-                pnl = (opened.price - leg.price) * qty
+                if opened.amount is not None and leg.amount is not None:
+                    pnl = opened.amount + leg.amount
+                else:
+                    pnl = (opened.price - leg.price) * qty
                 closed_trades.append(
                     {
                         "ticker": ticker,
@@ -576,7 +604,10 @@ def _group_legs_into_trades(legs: List[ParsedLeg]) -> Tuple[List[Dict[str, Any]]
             if long_lot_idx is not None:
                 opened = open_lots.pop(long_lot_idx)
                 qty = min(opened.quantity, leg.quantity)
-                pnl = (leg.price - opened.price) * qty
+                if opened.amount is not None and leg.amount is not None:
+                    pnl = opened.amount + leg.amount
+                else:
+                    pnl = (leg.price - opened.price) * qty
                 closed_trades.append(
                     {
                         "ticker": ticker,
