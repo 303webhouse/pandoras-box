@@ -24,26 +24,28 @@ const CONFIDENCE_COLORS = {
 };
 
 const COMPOSITE_FACTOR_DISPLAY_ORDER = [
-    // Intraday
+    // Intraday (5)
     'vix_term',
     'tick_breadth',
     'vix_regime',
     'spy_trend_intraday',
-    'breadth_momentum',
-    'options_sentiment',
-    // Swing
+    'breadth_intraday',
+    // Swing (9)
     'credit_spreads',
     'market_breadth',
     'sector_rotation',
     'spy_200sma_distance',
     'high_yield_oas',
-    'dollar_smile',
     'put_call_ratio',
-    // Macro
+    'polygon_pcr',
+    'polygon_oi_ratio',
+    'iv_regime',
+    // Macro (8)
     'yield_curve',
     'initial_claims',
     'sahm_rule',
     'copper_gold_ratio',
+    'dxy_trend',
     'excess_cape',
     'ism_manufacturing',
     'savita'
@@ -693,6 +695,87 @@ function handleWebSocketMessage(message) {
             loadFlowData();
             checkFlowStatus();
             break;
+        case 'circuit_breaker':
+            // CB state change (trigger, reset, etc.)
+            handleCircuitBreakerUpdate(message.state || message);
+            fetchCompositeBias();
+            break;
+        case 'circuit_breaker_pending_reset':
+            // CB decay complete, condition cleared — show accept/reject banner
+            handleCircuitBreakerPendingReset(message.state || message);
+            break;
+    }
+}
+
+
+function handleCircuitBreakerUpdate(state) {
+    const banner = document.getElementById('cbPendingResetBanner');
+    if (!banner) return;
+
+    if (!state || !state.active) {
+        banner.style.display = 'none';
+        return;
+    }
+
+    if (state.pending_reset) {
+        handleCircuitBreakerPendingReset(state);
+        return;
+    }
+
+    banner.style.display = 'none';
+}
+
+
+function handleCircuitBreakerPendingReset(state) {
+    const banner = document.getElementById('cbPendingResetBanner');
+    if (!banner) return;
+
+    const trigger = (state && state.trigger) || 'unknown';
+    const triggerLabel = trigger.replace(/_/g, ' ').toUpperCase();
+
+    banner.style.display = 'flex';
+    const msgEl = banner.querySelector('.cb-pending-message');
+    if (msgEl) {
+        msgEl.textContent = 'Circuit breaker "' + triggerLabel + '" is ready to reset. Accept or keep active?';
+    }
+
+    const acceptBtn = document.getElementById('cbAcceptReset');
+    const rejectBtn = document.getElementById('cbRejectReset');
+
+    if (acceptBtn) {
+        const newAccept = acceptBtn.cloneNode(true);
+        acceptBtn.parentNode.replaceChild(newAccept, acceptBtn);
+        newAccept.addEventListener('click', async () => {
+            newAccept.disabled = true;
+            try {
+                const resp = await fetch('/webhook/circuit_breaker/accept_reset', { method: 'POST' });
+                if (resp.ok) {
+                    banner.style.display = 'none';
+                    fetchCompositeBias();
+                }
+            } catch (e) {
+                console.error('CB accept failed:', e);
+            }
+            newAccept.disabled = false;
+        });
+    }
+
+    if (rejectBtn) {
+        const newReject = rejectBtn.cloneNode(true);
+        rejectBtn.parentNode.replaceChild(newReject, rejectBtn);
+        newReject.addEventListener('click', async () => {
+            newReject.disabled = true;
+            try {
+                const resp = await fetch('/webhook/circuit_breaker/reject_reset', { method: 'POST' });
+                if (resp.ok) {
+                    banner.style.display = 'none';
+                    fetchCompositeBias();
+                }
+            } catch (e) {
+                console.error('CB reject failed:', e);
+            }
+            newReject.disabled = false;
+        });
     }
 }
 
@@ -1625,12 +1708,27 @@ function renderCompositeBias(data, dailyData = null) {
     }
 
     if (overrideEl) {
+        const cb = data.circuit_breaker;
         if (data.override) {
             overrideEl.style.display = 'block';
-            overrideEl.textContent = `Override active: ${data.override.replace(/_/g, ' ')}`;
+            overrideEl.textContent = 'Override active: ' + data.override.replace(/_/g, ' ');
+            overrideEl.className = 'override-indicator';
+        } else if (cb && cb.active && cb.pending_reset) {
+            overrideEl.style.display = 'block';
+            overrideEl.textContent = 'CB pending reset: ' + (cb.trigger || '').replace(/_/g, ' ') + ' (fading)';
+            overrideEl.className = 'override-indicator cb-pending';
+        } else if (cb && cb.active) {
+            overrideEl.style.display = 'block';
+            overrideEl.textContent = 'Circuit breaker: ' + (cb.trigger || '').replace(/_/g, ' ');
+            overrideEl.className = 'override-indicator cb-active';
         } else {
             overrideEl.style.display = 'none';
         }
+    }
+
+    // Show/hide pending reset banner from API response
+    if (data.circuit_breaker && data.circuit_breaker.pending_reset) {
+        handleCircuitBreakerPendingReset(data.circuit_breaker);
     }
 
     if (factorList) {

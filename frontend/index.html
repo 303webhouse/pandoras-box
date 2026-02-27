@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Pandora - Real-time Trading Signal Dashboard">
     <title>Pandora</title>
-    <link rel="stylesheet" href="/styles.css?v=39">
+    <link rel="stylesheet" href="/styles.css?v=40">
     <link rel="manifest" href="/manifest.json">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -91,6 +91,14 @@
                 </div>
 
                 <div class="override-indicator" id="compositeOverrideIndicator" style="display: none;"></div>
+
+                <div class="cb-pending-reset-banner" id="cbPendingResetBanner" style="display: none;">
+                    <span class="cb-pending-message">Circuit breaker ready to reset.</span>
+                    <div class="cb-pending-actions">
+                        <button class="cb-pending-btn cb-accept" id="cbAcceptReset">Accept Reset</button>
+                        <button class="cb-pending-btn cb-reject" id="cbRejectReset">Keep Active</button>
+                    </div>
+                </div>
 
                 <div class="factor-breakdown">
                     <div class="factor-breakdown-header" id="factorBreakdownToggle">

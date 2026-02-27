@@ -1,6 +1,6 @@
 # Pivot — Development Status & Roadmap
 
-**Last Updated:** February 20, 2026
+**Last Updated:** February 27, 2026
 
 This is the single source of truth for what has been built, what's in progress, and what's planned. Agents should read this before starting any work to avoid rebuilding existing features or building on assumptions about unbuilt ones.
 
@@ -237,10 +237,14 @@ These upgrades have been specified as markdown briefs and handed to Codex for im
 ## Key System Components Already Built
 
 ### Bias Engine (`backend/bias_engine/`)
-20+ factors across MACRO, TECHNICAL, FLOW, and BREADTH categories. Each scores -2 to +2. Composite weighted average maps to 5-level system: URSA MAJOR → URSA MINOR → NEUTRAL → TORO MINOR → TORO MAJOR.
+22 factors across INTRADAY (5), SWING (9), and MACRO (8) categories. Each scores -1.0 to +1.0. Composite weighted average maps to 5-level system: URSA MAJOR → URSA MINOR → NEUTRAL → TORO MINOR → TORO MAJOR. Weights sum to 1.00 (enforced by assertion). Polygon.io primary data source for equities/ETFs, yfinance fallback.
+
+**Tier 2 Overhaul (Feb 27, 2026):** Opus committee review (TORO/URSA/TECHNICALS agents) drove a full factor cleanup. Removed 4 dead/unreliable factors (iv_skew, breadth_momentum, options_sentiment, dollar_smile). Added 3 new factors (breadth_intraday, polygon_oi_ratio, iv_regime). Merged dollar_smile VIX logic into dxy_trend. Added RVOL conviction modifier with asymmetric amplification, hysteresis, confidence gate, dead zone. Self-healing put_call_ratio via Polygon fallback. Working flow weight increased from 4% to 10%.
 
 ### Circuit Breaker (`backend/webhooks/circuit_breaker.py`)
 TradingView alerts trigger automatic bias overrides during extreme market events (SPY -1%/-2%, VIX spikes). Adjusts scoring modifiers and bias caps/floors algorithmically.
+
+**Tier 2 Overhaul (Feb 27, 2026):** Condition-verified decay (NOT pure time-based). State machine: active → (timer + condition cleared) → pending_reset → (Nick accepts/rejects via dashboard) → inactive. No-downgrade guard (spy_down_1pct can't overwrite spy_down_2pct). Discord webhook notifications. Fixed spy_up_2pct modifier direction bug (was making negative scores more negative). Dashboard accept/reject buttons with amber pending banner.
 
 ### Scout Early Warning
 15-minute timeframe TradingView alerts with automatic expiration. Posts early warnings to Discord before confirming on higher timeframes.
@@ -263,7 +267,7 @@ Alert monitors: bias shift detection, CTA zone proximity, factor velocity (rapid
 
 - ⚠️ **`/api/signals/active` timeout from VPS**: Endpoint times out intermittently. Trade poller includes fallback to `/signals/queue`.
 - ⚠️ **SPY price feed verification pending**: Guardrails were added in `backend/bias_engine/factor_utils.py` (live quote validation + fallback), but production deployment/runtime verification is still required.
-- ⚠️ **Stale factors**: options_sentiment, put_call_ratio, and savita_indicator have reliability issues. EOD brief doesn't indicate which are fresh vs stale yet.
+- ✅ **Stale factors resolved (Feb 27)**: options_sentiment removed. put_call_ratio self-heals via Polygon fallback. savita_indicator staleness window extended.
 - ⚠️ **Analytics tables mostly empty**: System deployed but needs signal accumulation time and trade imports to populate meaningful data.
 - ⚠️ **Trade journal has no historical data**: Robinhood import system designed but not built yet.
 - ⚠️ **Signal persistence verification pending**: DB-first persistence guardrails were added (webhooks + schedulers) to prevent Redis-only signals, but production runtime verification is still required.
