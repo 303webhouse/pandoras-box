@@ -580,9 +580,9 @@ async def get_composite_timeframes():
                 if old_total_weight > 0:
                     old_sub_score = sum(s * w for s, w in old_scores) / old_total_weight
                     delta = sub_score - old_sub_score
-                    if delta > 0.05:
+                    if delta > 0.03:
                         momentum = "strengthening"
-                    elif delta < -0.05:
+                    elif delta < -0.03:
                         momentum = "weakening"
         except Exception:
             pass

@@ -237,13 +237,27 @@ async def receive_circuit_breaker_alert(alert: CircuitBreakerTrigger):
         # Apply circuit breaker logic
         state = await apply_circuit_breaker(alert.trigger)
 
-        # Trigger immediate bias refresh to apply new constraints
+        # Force re-score all factors with fresh data, then recompute composite
+        try:
+            from bias_engine.factor_scorer import score_all_factors
+            logger.info("🔄 Circuit breaker: forcing full factor re-score...")
+            await score_all_factors()
+        except Exception as e:
+            logger.warning(f"Could not re-score factors: {e}")
+
+        try:
+            from bias_engine.composite import compute_composite
+            logger.info("🔄 Circuit breaker: recomputing composite with CB constraints...")
+            await compute_composite()
+        except Exception as e:
+            logger.warning(f"Could not recompute composite: {e}")
+
+        # Also refresh legacy daily bias for backward compatibility
         try:
             from scheduler.bias_scheduler import refresh_daily_bias
-            logger.info("🔄 Triggering bias refresh after circuit breaker...")
             await refresh_daily_bias()
         except Exception as e:
-            logger.warning(f"Could not trigger bias refresh: {e}")
+            logger.warning(f"Could not trigger legacy bias refresh: {e}")
 
         # Broadcast circuit breaker state via WebSocket
         try:
@@ -284,13 +298,19 @@ async def reset_circuit_breaker_endpoint():
     result = reset_circuit_breaker()
     await _persist_circuit_breaker_state()
 
-    # Trigger bias refresh after reset
+    # Recompute composite without CB constraints, then refresh legacy bias
+    try:
+        from bias_engine.composite import compute_composite
+        logger.info("🔄 Circuit breaker reset: recomputing composite...")
+        await compute_composite()
+    except Exception as e:
+        logger.warning(f"Could not recompute composite: {e}")
+
     try:
         from scheduler.bias_scheduler import refresh_daily_bias
-        logger.info("🔄 Triggering bias refresh after circuit breaker reset...")
         await refresh_daily_bias()
     except Exception as e:
-        logger.warning(f"Could not trigger bias refresh: {e}")
+        logger.warning(f"Could not trigger legacy bias refresh: {e}")
 
     # Broadcast reset via WebSocket
     try:

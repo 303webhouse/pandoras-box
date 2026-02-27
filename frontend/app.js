@@ -1810,24 +1810,28 @@ function renderTimeframeCards(data) {
         const card = document.getElementById(cardIds[tf]);
         if (!card) continue;
 
-        const voteValue = Number.isFinite(Number(tfData.vote_sum))
-            ? Math.trunc(Number(tfData.vote_sum))
-            : scoreToTimeframeVote(typeof tfData.sub_score === 'number' ? tfData.sub_score : 0);
-        const level = timeframeVoteToBiasLabel(voteValue);
-        const visualLevel = normalizeCompositeBiasLevel(level);
+        // Use API-computed bias_level (same score_to_bias thresholds as composite)
+        const apiLevel = tfData.bias_level || '';
+        const visualLevel = normalizeCompositeBiasLevel(apiLevel) || 'NEUTRAL';
+        // Fallback to vote conversion only if API didn't provide bias_level
+        const displayLevel = apiLevel ? visualLevel : (() => {
+            const voteValue = scoreToTimeframeVote(typeof tfData.sub_score === 'number' ? tfData.sub_score : 0);
+            return normalizeCompositeBiasLevel(timeframeVoteToBiasLabel(voteValue));
+        })();
+        const subScore = typeof tfData.sub_score === 'number' ? tfData.sub_score : 0;
         const momentum = tfData.momentum || 'stable';
 
         // Update level
         const levelEl = card.querySelector('.tf-level');
         if (levelEl) {
-            levelEl.textContent = level.replace('_', ' ');
+            levelEl.textContent = visualLevel.replace(/_/g, ' ');
         }
 
-        // Update score
+        // Update score — show sub_score as compact value
         const scoreEl = card.querySelector('.tf-score');
         if (scoreEl) {
-            const voteText = `${voteValue >= 0 ? '+' : ''}${voteValue}`;
-            scoreEl.textContent = `(${voteText})`;
+            const scoreText = `${subScore >= 0 ? '+' : ''}${subScore.toFixed(2)}`;
+            scoreEl.textContent = `(${scoreText})`;
         }
 
         // Update momentum
