@@ -41,6 +41,8 @@ PRICE_BOUNDS: Dict[str, tuple[float, float]] = {
     "XLY": (50.0, 400.0),
     "XLP": (30.0, 200.0),
     "XLU": (20.0, 150.0),
+    "^ADVN": (0.0, 5000.0),
+    "^DECLN": (0.0, 5000.0),
 }
 PRICE_MISMATCH_THRESHOLD = 0.25  # 25%
 ADJ_CLOSE_RATIO_ALERT = 1.5
