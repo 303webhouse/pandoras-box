@@ -108,6 +108,18 @@ FACTOR_CONFIG = {
         "description": "CBOE equity put/call ratio - contrarian sentiment gauge",
         "timeframe": "swing",
     },
+    "polygon_pcr": {
+        "weight": 0.04,
+        "staleness_hours": 8,
+        "description": "Polygon SPY put/call volume ratio - automated flow sentiment (15-min delayed)",
+        "timeframe": "swing",
+    },
+    "iv_skew": {
+        "weight": 0.03,
+        "staleness_hours": 8,
+        "description": "Polygon SPY IV skew - put vs call implied volatility (NTM, 7-45 DTE)",
+        "timeframe": "swing",
+    },
     # =====================================================================
     # MACRO FACTORS (8 factors, total weight: 0.30 before normalization)
     # Long-term economic and structural indicators.
@@ -282,7 +294,12 @@ async def store_factor_reading(reading: FactorReading) -> None:
         client = await get_redis_client()
         if client:
             key_latest = REDIS_KEY_FACTOR_LATEST.format(factor_id=reading.factor_id)
-            await client.setex(key_latest, REDIS_FACTOR_LATEST_TTL, payload)
+            # Use factor-specific TTL: at least the global default, or the factor's
+            # staleness window — whichever is longer.  Fixes factors like savita
+            # (1080 h) whose Redis key was expiring after only 24 h.
+            staleness_hours = FACTOR_CONFIG.get(reading.factor_id, {}).get("staleness_hours", 0)
+            factor_ttl = max(REDIS_FACTOR_LATEST_TTL, int(staleness_hours * 3600))
+            await client.setex(key_latest, factor_ttl, payload)
 
             key_history = REDIS_KEY_FACTOR_HISTORY.format(factor_id=reading.factor_id)
             score_ts = _utc_naive(reading.timestamp).timestamp()

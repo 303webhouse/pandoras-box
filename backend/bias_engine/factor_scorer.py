@@ -46,6 +46,8 @@ async def score_all_factors() -> Dict[str, FactorReading]:
         "high_yield_oas": "bias_filters.high_yield_oas",
         "dollar_smile": "bias_filters.dollar_smile",
         "put_call_ratio": "bias_filters.put_call_ratio",
+        "polygon_pcr": "bias_filters.polygon_pcr",
+        "iv_skew": "bias_filters.iv_skew",
         # Macro (7)
         "yield_curve": "bias_filters.yield_curve",
         "initial_claims": "bias_filters.initial_claims",
