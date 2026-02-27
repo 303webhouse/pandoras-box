@@ -25,24 +25,39 @@ _chain_cache: Dict[str, tuple] = {}
 _CACHE_TTL = 300  # 5 minutes
 
 
-async def get_options_snapshot(underlying: str) -> Optional[List[Dict[str, Any]]]:
+async def get_options_snapshot(
+    underlying: str,
+    expiration_date: Optional[str] = None,
+    strike_gte: Optional[float] = None,
+    strike_lte: Optional[float] = None,
+    contract_type: Optional[str] = None,
+) -> Optional[List[Dict[str, Any]]]:
     """
-    Fetch full options chain snapshot for a ticker.
+    Fetch options chain snapshot for a ticker, optionally filtered.
     Returns list of contract snapshots with greeks, quotes, and underlying info.
-    Uses a 5-minute in-memory cache to avoid redundant API calls for same ticker.
+    Uses a 5-minute in-memory cache keyed by ticker + filters.
     """
     if not POLYGON_API_KEY:
         logger.warning("POLYGON_API_KEY not set — skipping options snapshot")
         return None
 
-    # Check cache
-    cached = _chain_cache.get(underlying.upper())
+    # Build cache key from all parameters
+    cache_key = f"{underlying.upper()}|{expiration_date}|{strike_gte}|{strike_lte}|{contract_type}"
+    cached = _chain_cache.get(cache_key)
     if cached and (time.time() - cached[0]) < _CACHE_TTL:
-        logger.info("Using cached chain for %s (age %.0fs)", underlying, time.time() - cached[0])
+        logger.info("Using cached chain for %s (age %.0fs)", cache_key, time.time() - cached[0])
         return cached[1]
 
     url = f"{POLYGON_BASE}/v3/snapshot/options/{underlying}"
-    params = {"apiKey": POLYGON_API_KEY, "limit": 250}
+    params: Dict[str, Any] = {"apiKey": POLYGON_API_KEY, "limit": 250}
+    if expiration_date:
+        params["expiration_date"] = expiration_date
+    if strike_gte is not None:
+        params["strike_price.gte"] = strike_gte
+    if strike_lte is not None:
+        params["strike_price.lte"] = strike_lte
+    if contract_type:
+        params["contract_type"] = contract_type
 
     all_results = []
     max_pages = 10  # Safety limit — avoid infinite pagination on huge chains
@@ -74,7 +89,7 @@ async def get_options_snapshot(underlying: str) -> Optional[List[Dict[str, Any]]
     logger.info("Fetched %d contracts for %s (%d pages)", len(all_results), underlying, page)
 
     # Cache the result
-    _chain_cache[underlying.upper()] = (time.time(), all_results)
+    _chain_cache[cache_key] = (time.time(), all_results)
 
     return all_results
 
@@ -115,21 +130,36 @@ def find_contract(
 
 
 def get_contract_mid(contract: Dict[str, Any]) -> Optional[float]:
-    """Get mid-price from a contract's last quote."""
+    """
+    Get mid-price from a contract snapshot.
+
+    Priority: bid/ask mid > last trade > day close > day vwap.
+    Starter plan often lacks last_quote — fall back to day data.
+    """
+    # 1. Bid/ask mid (best — real-time quote)
     quote = contract.get("last_quote", {})
-    if not quote:
-        return None
+    if quote:
+        bid = quote.get("bid")
+        ask = quote.get("ask")
+        if bid is not None and ask is not None and bid > 0 and ask > 0:
+            return round((bid + ask) / 2, 4)
 
-    bid = quote.get("bid")
-    ask = quote.get("ask")
-
-    if bid is not None and ask is not None and bid > 0 and ask > 0:
-        return round((bid + ask) / 2, 4)
-
-    # Fall back to last trade price
+    # 2. Last trade price
     trade = contract.get("last_trade", {})
-    if trade and trade.get("price"):
+    if trade and trade.get("price") and float(trade["price"]) > 0:
         return float(trade["price"])
+
+    # 3. Day close (Starter plan — 15-min delayed, always present)
+    day = contract.get("day", {})
+    if day:
+        close = day.get("close")
+        if close is not None and float(close) > 0:
+            return float(close)
+
+        # 4. Day VWAP as last resort
+        vwap = day.get("vwap")
+        if vwap is not None and float(vwap) > 0:
+            return float(vwap)
 
     return None
 
@@ -164,10 +194,6 @@ async def get_spread_value(
         short_greeks: greeks of the short leg
         underlying_price: current underlying price
     """
-    chain = await get_options_snapshot(underlying)
-    if not chain:
-        return None
-
     # Determine option types based on structure
     s = (structure or "").lower()
 
@@ -178,6 +204,19 @@ async def get_spread_value(
         long_type = "call"
         short_type = "call"
     else:
+        return None
+
+    # Fetch only the contracts we need (filtered by expiry, strike range, type)
+    strike_lo = min(long_strike, short_strike) - 0.5
+    strike_hi = max(long_strike, short_strike) + 0.5
+    chain = await get_options_snapshot(
+        underlying,
+        expiration_date=str(expiry)[:10],
+        strike_gte=strike_lo,
+        strike_lte=strike_hi,
+        contract_type=long_type,
+    )
+    if not chain:
         return None
 
     # Find both legs
@@ -232,7 +271,13 @@ async def get_single_option_value(
     option_type: str,  # "call" or "put"
 ) -> Optional[Dict[str, Any]]:
     """Get current value of a single option leg (for long_put, long_call, etc.)."""
-    chain = await get_options_snapshot(underlying)
+    chain = await get_options_snapshot(
+        underlying,
+        expiration_date=str(expiry)[:10],
+        strike_gte=strike - 0.5,
+        strike_lte=strike + 0.5,
+        contract_type=option_type,
+    )
     if not chain:
         return None
 
