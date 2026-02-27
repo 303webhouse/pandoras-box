@@ -324,7 +324,11 @@ if frontend_path:
     @app.get("/app.js", response_class=FileResponse)
     async def serve_app_js():
         return FileResponse(os.path.join(frontend_path, "app.js"))
-    
+
+    @app.get("/analytics.js", response_class=FileResponse)
+    async def serve_analytics_js():
+        return FileResponse(os.path.join(frontend_path, "analytics.js"))
+
     @app.get("/knowledgebase.js", response_class=FileResponse)
     async def serve_knowledgebase_js():
         return FileResponse(os.path.join(frontend_path, "knowledgebase.js"))
