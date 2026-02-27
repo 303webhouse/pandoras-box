@@ -441,6 +441,64 @@ async def portfolio_summary():
     }
 
 
+@router.get("/v2/positions/greeks")
+async def portfolio_greeks():
+    """
+    Get aggregate portfolio greeks from Polygon.io options snapshots.
+    Returns per-ticker and total portfolio greeks for committee context.
+    """
+    from integrations.polygon_options import get_ticker_greeks_summary, POLYGON_API_KEY
+
+    if not POLYGON_API_KEY:
+        raise HTTPException(status_code=503, detail="Polygon API key not configured")
+
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT * FROM unified_positions WHERE status = 'OPEN'"
+        )
+
+    if not rows:
+        return {"status": "no_positions", "tickers": {}, "portfolio": {}}
+
+    positions = [_row_to_dict(r) for r in rows]
+
+    # Group positions by ticker
+    by_ticker: Dict[str, list] = {}
+    for p in positions:
+        by_ticker.setdefault(p["ticker"], []).append(p)
+
+    ticker_greeks = {}
+    total_delta = 0.0
+    total_gamma = 0.0
+    total_theta = 0.0
+    total_vega = 0.0
+
+    for ticker, pos_list in by_ticker.items():
+        try:
+            result = await get_ticker_greeks_summary(ticker, pos_list)
+            if result:
+                ticker_greeks[ticker] = result
+                total_delta += result.get("net_delta", 0)
+                total_gamma += result.get("net_gamma", 0)
+                total_theta += result.get("net_theta", 0)
+                total_vega += result.get("net_vega", 0)
+        except Exception as e:
+            logger.warning("Greeks fetch failed for %s: %s", ticker, e)
+            ticker_greeks[ticker] = {"error": str(e)}
+
+    return {
+        "status": "ok",
+        "tickers": ticker_greeks,
+        "portfolio": {
+            "net_delta": round(total_delta, 2),
+            "net_gamma": round(total_gamma, 4),
+            "net_theta": round(total_theta, 2),
+            "net_vega": round(total_vega, 2),
+        },
+    }
+
+
 @router.get("/v2/positions/{position_id}")
 async def get_position(position_id: str):
     """Get a single position by ID."""
