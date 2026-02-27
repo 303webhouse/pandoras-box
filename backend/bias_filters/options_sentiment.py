@@ -39,17 +39,8 @@ async def compute_score(tide_data: Optional[Dict[str, Any]] = None) -> Optional[
         tide_data = await _get_latest_tide()
 
     if not tide_data:
-        logger.warning("Options sentiment: no Market Tide data available, using neutral fallback")
-        return FactorReading(
-            factor_id="options_sentiment",
-            score=0.0,
-            signal="NEUTRAL",
-            detail="No UW Market Tide data received; neutral fallback",
-            timestamp=datetime.utcnow(),
-            source="fallback",
-            raw_data={"fallback": True},
-            metadata={"timestamp_source": "fallback"},
-        )
+        logger.warning("Options sentiment: no Market Tide data available — excluding from composite")
+        return None
 
     sentiment = (tide_data.get("sentiment") or "").upper()
     bullish_pct = tide_data.get("bullish_pct")

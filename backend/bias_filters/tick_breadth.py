@@ -319,9 +319,9 @@ async def compute_tick_score(tick_data: Dict[str, Any]) -> Optional[FactorReadin
 
     extreme_mod = 0.0
     if tick_low < -1000:
-        extreme_mod = -0.2
-    elif tick_high > 1000:
-        extreme_mod = 0.2
+        extreme_mod -= 0.2
+    if tick_high > 1000:
+        extreme_mod += 0.2
 
     score = max(-1.0, min(1.0, base + extreme_mod))
     source_timestamp, timestamp_source = _extract_source_timestamp(tick_data)

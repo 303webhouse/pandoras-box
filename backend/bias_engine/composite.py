@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 FACTOR_CONFIG = {
     # =====================================================================
-    # INTRADAY FACTORS (6 factors, total weight: 0.30)
+    # INTRADAY FACTORS (6 factors, total weight: 0.28)
     # Fast-moving indicators that change throughout the trading day.
     # =====================================================================
     "vix_term": {
@@ -51,35 +51,35 @@ FACTOR_CONFIG = {
         "timeframe": "intraday",
     },
     "breadth_momentum": {
-        "weight": 0.04,
+        "weight": 0.03,
         "staleness_hours": 24,
         "description": "RSP/SPY ratio rate of change - breadth improving or deteriorating",
         "timeframe": "intraday",
     },
     "options_sentiment": {
-        "weight": 0.03,
+        "weight": 0.02,
         "staleness_hours": 8,
         "description": "UW Market Tide - institutional options flow sentiment",
         "timeframe": "intraday",
     },
     # =====================================================================
-    # SWING FACTORS (7 factors, total weight: 0.45)
+    # SWING FACTORS (9 factors, total weight: 0.42)
     # Multi-day trend indicators for swing trade alignment.
     # =====================================================================
     "credit_spreads": {
-        "weight": 0.09,
+        "weight": 0.08,
         "staleness_hours": 48,
         "description": "HYG vs TLT ratio - measures credit market risk appetite",
         "timeframe": "swing",
     },
     "market_breadth": {
-        "weight": 0.09,
+        "weight": 0.08,
         "staleness_hours": 48,
         "description": "RSP vs SPY ratio - equal-weight vs cap-weight divergence",
         "timeframe": "swing",
     },
     "sector_rotation": {
-        "weight": 0.07,
+        "weight": 0.06,
         "staleness_hours": 48,
         "description": "XLK/XLY vs XLP/XLU - offensive vs defensive flows",
         "timeframe": "swing",
@@ -91,37 +91,37 @@ FACTOR_CONFIG = {
         "timeframe": "swing",
     },
     "high_yield_oas": {
-        "weight": 0.05,
+        "weight": 0.03,
         "staleness_hours": 48,
-        "description": "ICE BofA HY OAS - precise credit stress gauge",
+        "description": "ICE BofA HY OAS - precise credit stress gauge (correlated with credit_spreads)",
         "timeframe": "swing",
     },
     "dollar_smile": {
-        "weight": 0.04,
+        "weight": 0.02,
         "staleness_hours": 48,
-        "description": "DXY trend - risk-on weakness vs risk-off strength",
+        "description": "DXY trend - risk-on weakness vs risk-off strength (correlated with dxy_trend)",
         "timeframe": "swing",
     },
     "put_call_ratio": {
-        "weight": 0.04,
+        "weight": 0.03,
         "staleness_hours": 72,
         "description": "CBOE equity put/call ratio - contrarian sentiment gauge",
         "timeframe": "swing",
     },
     "polygon_pcr": {
-        "weight": 0.04,
+        "weight": 0.03,
         "staleness_hours": 8,
         "description": "Polygon SPY put/call volume ratio - automated flow sentiment (15-min delayed)",
         "timeframe": "swing",
     },
     "iv_skew": {
-        "weight": 0.03,
+        "weight": 0.02,
         "staleness_hours": 8,
         "description": "Polygon SPY IV skew - put vs call implied volatility (NTM, 7-45 DTE)",
         "timeframe": "swing",
     },
     # =====================================================================
-    # MACRO FACTORS (8 factors, total weight: 0.30 before normalization)
+    # MACRO FACTORS (8 factors, total weight: 0.30)
     # Long-term economic and structural indicators.
     # =====================================================================
     "yield_curve": {
@@ -220,6 +220,34 @@ class CompositeResult(BaseModel):
     timestamp: datetime
     confidence: str
     unverifiable_factors: List[str] = Field(default_factory=list)
+    circuit_breaker: Optional[Dict[str, Any]] = None
+
+
+# Map circuit breaker's scheduler-style level names to composite's 5-level system.
+# Circuit breaker uses: LEAN_TORO, MINOR_TORO, LEAN_URSA, MINOR_URSA
+# Composite uses: TORO_MAJOR, TORO_MINOR, NEUTRAL, URSA_MINOR, URSA_MAJOR
+_CB_LEVEL_MAP = {
+    "MAJOR_TORO": "TORO_MAJOR",
+    "MINOR_TORO": "TORO_MINOR",
+    "LEAN_TORO": "TORO_MINOR",   # closest composite equivalent
+    "LEAN_URSA": "URSA_MINOR",   # closest composite equivalent
+    "MINOR_URSA": "URSA_MINOR",
+    "MAJOR_URSA": "URSA_MAJOR",
+    # In case composite-style names are used directly:
+    "TORO_MAJOR": "TORO_MAJOR",
+    "TORO_MINOR": "TORO_MINOR",
+    "NEUTRAL": "NEUTRAL",
+    "URSA_MINOR": "URSA_MINOR",
+    "URSA_MAJOR": "URSA_MAJOR",
+}
+
+
+def _cb_level_to_numeric(level_name: str) -> Optional[int]:
+    """Convert a circuit breaker level name to composite numeric (1-5)."""
+    mapped = _CB_LEVEL_MAP.get(level_name.upper())
+    if mapped:
+        return BIAS_NUMERIC.get(mapped)
+    return None
 
 
 def _clamp_score(value: float) -> float:
@@ -239,7 +267,7 @@ def score_to_bias(score: float) -> tuple[str, int]:
         return "TORO_MINOR", 4
     if score >= -0.20:
         return "NEUTRAL", 3
-    if score >= -0.59:
+    if score >= -0.60:
         return "URSA_MINOR", 2
     return "URSA_MAJOR", 1
 
@@ -613,6 +641,54 @@ async def compute_composite() -> CompositeResult:
             bias_level = override_level
             bias_numeric = override_level_num
 
+    # --- Circuit Breaker Integration ---
+    # Apply score penalties and bias caps/floors from circuit breaker state.
+    cb_meta: Optional[Dict[str, Any]] = None
+    try:
+        from webhooks.circuit_breaker import get_circuit_breaker_state
+        cb_state = get_circuit_breaker_state()
+        if cb_state.get("active"):
+            trigger = cb_state.get("trigger", "unknown")
+            scoring_mod = float(cb_state.get("scoring_modifier", 1.0))
+            bias_cap_name = cb_state.get("bias_cap")
+            bias_floor_name = cb_state.get("bias_floor")
+
+            # Apply scoring modifier to composite score (penalises bullish during risk-off)
+            if scoring_mod != 1.0:
+                adjusted_score = _clamp_score(adjusted_score * scoring_mod)
+                bias_level, bias_numeric = score_to_bias(adjusted_score)
+
+            # Enforce bias cap (max bullishness allowed)
+            if bias_cap_name:
+                cap_num = _cb_level_to_numeric(bias_cap_name)
+                if cap_num and bias_numeric > cap_num:
+                    bias_numeric = cap_num
+                    bias_level = [k for k, v in BIAS_NUMERIC.items() if v == cap_num][0]
+
+            # Enforce bias floor (min bearishness enforced)
+            if bias_floor_name:
+                floor_num = _cb_level_to_numeric(bias_floor_name)
+                if floor_num and bias_numeric < floor_num:
+                    bias_numeric = floor_num
+                    bias_level = [k for k, v in BIAS_NUMERIC.items() if v == floor_num][0]
+
+            cb_meta = {
+                "active": True,
+                "trigger": trigger,
+                "scoring_modifier": scoring_mod,
+                "bias_cap": bias_cap_name,
+                "bias_floor": bias_floor_name,
+                "triggered_at": cb_state.get("triggered_at"),
+            }
+            logger.info(
+                "Circuit breaker applied to composite: trigger=%s mod=%.2f cap=%s floor=%s → %s",
+                trigger, scoring_mod, bias_cap_name, bias_floor_name, bias_level,
+            )
+    except ImportError:
+        pass  # circuit breaker module not available
+    except Exception as exc:
+        logger.warning("Circuit breaker integration failed: %s", exc)
+
     active_count = len(active)
     if active_count >= 6:
         confidence = "HIGH"
@@ -638,6 +714,7 @@ async def compute_composite() -> CompositeResult:
         timestamp=now,
         confidence=confidence,
         unverifiable_factors=sorted(unverifiable_factors),
+        circuit_breaker=cb_meta,
     )
 
     previous = await get_cached_composite()

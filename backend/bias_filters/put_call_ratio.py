@@ -81,31 +81,13 @@ async def compute_score(pcr_data: Optional[Dict[str, Any]] = None) -> Optional[F
             logger.warning(f"Error loading PCR data for scoring: {e}")
 
     if not pcr_data:
-        logger.warning("Put/Call ratio: no PCR payload available, using neutral fallback")
-        return FactorReading(
-            factor_id="put_call_ratio",
-            score=0.0,
-            signal="NEUTRAL",
-            detail="No fresh CBOE PCR webhook data; neutral fallback",
-            timestamp=datetime.utcnow(),
-            source="fallback",
-            raw_data={"fallback": True},
-            metadata={"timestamp_source": "fallback"},
-        )
+        logger.warning("Put/Call ratio: no PCR payload available — excluding from composite")
+        return None
 
     pcr_value = float(pcr_data.get("pcr", 0) or 0)
     if pcr_value <= 0:
-        logger.warning("Put/Call ratio: invalid PCR value, using neutral fallback")
-        return FactorReading(
-            factor_id="put_call_ratio",
-            score=0.0,
-            signal="NEUTRAL",
-            detail="Invalid CBOE PCR value; neutral fallback",
-            timestamp=datetime.utcnow(),
-            source="fallback",
-            raw_data={"fallback": True, "pcr_data": pcr_data},
-            metadata={"timestamp_source": "fallback"},
-        )
+        logger.warning("Put/Call ratio: invalid PCR value — excluding from composite")
+        return None
 
     score = _score_pcr(pcr_value)
     source_timestamp, timestamp_source = _extract_source_timestamp(pcr_data)
