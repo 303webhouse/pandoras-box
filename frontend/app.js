@@ -3836,7 +3836,7 @@ function createCryptoSignalCard(signal) {
     const signalTypeClass = signal.signal_type || '';
 
     return `
-        <div class="crypto-signal-card ${signalTypeClass}" data-signal-id="${signal.signal_id || ''}" data-signal='${JSON.stringify(signal).replace(/'/g, "&#39;")}'>
+        <div class="crypto-signal-card ${signalTypeClass}" data-signal-id="${signal.signal_id || ''}" data-signal="${encodeURIComponent(JSON.stringify(signal))}">
             <div class="crypto-signal-header">
                 <span class="crypto-signal-ticker" data-action="view-chart">${escapeHtml(signal.ticker || '--')}</span>
                 <div class="crypto-signal-meta">
@@ -3921,7 +3921,7 @@ function createSignalCard(signal) {
     return `
         <div class="signal-card ${signal.signal_type || ''} ${biasAlignmentClass} ${pulseClass} ${counterTrendClass}" 
              data-signal-id="${signal.signal_id}" 
-             data-signal='${JSON.stringify(signal).replace(/'/g, "&#39;")}'>
+             data-signal="${encodeURIComponent(JSON.stringify(signal))}">
             
             <div class="signal-header">
                 <div>
@@ -4533,7 +4533,7 @@ function attachSignalActions() {
         ticker.addEventListener('click', (e) => {
             e.stopPropagation();
             const card = e.target.closest('.signal-card');
-            const signal = JSON.parse(card.dataset.signal);
+            const signal = JSON.parse(decodeURIComponent(card.dataset.signal));
             showTradeOnChart(signal);
         });
     });
@@ -4592,14 +4592,14 @@ async function handleSignalAction(event) {
     
     if (action === 'SELECT') {
         // Open position entry modal instead of directly selecting
-        const signal = JSON.parse(card.dataset.signal.replace(/&#39;/g, "'"));
+        const signal = JSON.parse(decodeURIComponent(card.dataset.signal));
         openPositionEntryModal(signal, card);
         return;
     }
     
     if (action === 'DISMISS') {
         // Open dismiss modal with reason selection
-        const signal = JSON.parse(card.dataset.signal.replace(/&#39;/g, "'"));
+        const signal = JSON.parse(decodeURIComponent(card.dataset.signal));
         openDismissModal(signal, card);
         return;
     }

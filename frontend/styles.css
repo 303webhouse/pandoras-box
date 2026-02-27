@@ -2561,7 +2561,6 @@ body.override-active-bearish .override-toggle[data-active="true"] {
     border-left: 4px solid var(--accent-lime);
     transition: all 0.2s;
     cursor: pointer;
-    min-height: 120px;
 }
 
 .signal-card:hover {
