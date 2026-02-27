@@ -2165,8 +2165,8 @@ async function loadPortfolioPositions() {
                 const pnl = parseFloat(pos.unrealized_pnl);
                 const pnlPct = pos.unrealized_pnl_pct != null ? ` (${parseFloat(pos.unrealized_pnl_pct).toFixed(1)}%)` : '';
                 const cls = pnl >= 0 ? 'pnl-positive' : 'pnl-negative';
-                const sign = pnl >= 0 ? '+' : '';
-                pnlHtml = `<span class="${cls}">${sign}$${pnl.toFixed(2)}${pnlPct}</span>`;
+                const sign = pnl >= 0 ? '+' : '-';
+                pnlHtml = `<span class="${cls}">${sign}$${Math.abs(pnl).toFixed(2)}${pnlPct}</span>`;
             }
 
             html += `<tr>
@@ -8348,7 +8348,7 @@ function renderPositionsEnhanced() {
         // P&L display
         const pnl = pos.unrealized_pnl || 0;
         const pnlClass = pnl >= 0 ? 'positive' : 'negative';
-        const pnlStr = (pnl >= 0 ? '+' : '') + '$' + Math.abs(pnl).toFixed(2);
+        const pnlStr = (pnl >= 0 ? '+' : '-') + '$' + Math.abs(pnl).toFixed(2);
 
         // Structure badge
         const structure = pos.structure || pos.strategy || 'EQUITY';
@@ -9912,7 +9912,7 @@ function renderOptionsPositions(positions) {
             `${leg.action} ${leg.quantity}x ${leg.strike} ${leg.option_type} ${leg.expiration}`
         ).join(' | ');
 
-        const pnlDisplay = pnl !== null ? ((pnl >= 0 ? '+' : '') + pnl.toFixed(2)) : '--';
+        const pnlDisplay = pnl !== null ? ((pnl >= 0 ? '+' : '-') + '$' + Math.abs(pnl).toFixed(2)) : '--';
         const thetaDisplay = metrics.net_theta ? metrics.net_theta.toFixed(2) : '--';
 
         return `
