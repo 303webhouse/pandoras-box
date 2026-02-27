@@ -920,7 +920,15 @@ async def reconcile_positions(req: ReconcileRequest):
 
 @router.post("/v2/positions/mark-to-market")
 async def mark_to_market():
-    """Fetch current prices via yfinance for all open equity/option positions and update unrealized P&L."""
+    """
+    Fetch current spread values via Polygon.io options snapshots.
+    Falls back to yfinance underlying price for equity positions.
+    Updates unrealized P&L based on actual spread mid-prices.
+    """
+    from integrations.polygon_options import (
+        get_spread_value, get_single_option_value, POLYGON_API_KEY
+    )
+
     pool = await get_postgres_client()
 
     async with pool.acquire() as conn:
@@ -931,48 +939,95 @@ async def mark_to_market():
     if not rows:
         return {"status": "no_open_positions", "updated": 0}
 
-    # Get unique tickers
-    tickers = list({r["ticker"] for r in rows})
-
-    # Fetch current prices
-    prices = {}
-    try:
-        import yfinance as yf
-        for ticker in tickers:
-            try:
-                t = yf.Ticker(ticker)
-                info = t.fast_info
-                prices[ticker] = float(info.last_price) if hasattr(info, 'last_price') else None
-            except Exception:
-                pass
-    except ImportError:
-        return {"status": "yfinance_not_available", "updated": 0}
-
     updated = 0
+    errors = []
+    use_polygon = bool(POLYGON_API_KEY)
+
+    # Cache chain snapshots per ticker to avoid duplicate API calls
     for row in rows:
         ticker = row["ticker"]
-        if ticker not in prices or prices[ticker] is None:
-            continue
-
-        current_price = prices[ticker]
+        structure = (row.get("structure") or "").lower()
         entry_price = float(row["entry_price"]) if row["entry_price"] else None
+        quantity = row["quantity"]
+        expiry = row.get("expiry")
+        long_strike = float(row["long_strike"]) if row.get("long_strike") else None
+        short_strike = float(row["short_strike"]) if row.get("short_strike") else None
+
         if entry_price is None:
             continue
 
-        unrealized = _compute_unrealized_pnl(
-            entry_price, current_price,
-            row["quantity"], row.get("structure") or ""
-        )
+        current_price = None
+        unrealized = None
+        greeks_json = None
 
-        async with pool.acquire() as conn:
-            await conn.execute("""
-                UPDATE unified_positions SET
-                    current_price = $1, unrealized_pnl = $2,
-                    price_updated_at = NOW(), updated_at = NOW()
-                WHERE position_id = $3
-            """, current_price, unrealized, row["position_id"])
-        updated += 1
+        # --- Polygon path: real spread-level pricing ---
+        if use_polygon and expiry and long_strike:
+            try:
+                if short_strike and ("spread" in structure or "credit" in structure or "debit" in structure):
+                    # Spread position — get both legs
+                    result = await get_spread_value(
+                        ticker, long_strike, short_strike, str(expiry), structure
+                    )
+                    if result and result.get("spread_value") is not None:
+                        current_price = result["spread_value"]
+                        # P&L = (current_spread - entry_debit) * 100 * qty for debits
+                        # P&L = (entry_credit - current_cost_to_close) * 100 * qty for credits
+                        if "credit" in structure:
+                            unrealized = round((entry_price - current_price) * 100 * quantity, 2)
+                        else:
+                            unrealized = round((current_price - entry_price) * 100 * quantity, 2)
 
-    return {"status": "updated", "updated": updated, "prices": prices}
+                        greeks_json = json.dumps({
+                            "long": result.get("long_greeks"),
+                            "short": result.get("short_greeks"),
+                            "underlying_price": result.get("underlying_price"),
+                        })
+
+                else:
+                    # Single leg (long_put, long_call, etc.)
+                    opt_type = "put" if "put" in structure else "call"
+                    result = await get_single_option_value(
+                        ticker, long_strike, str(expiry), opt_type
+                    )
+                    if result and result.get("option_value") is not None:
+                        current_price = result["option_value"]
+                        unrealized = round((current_price - entry_price) * 100 * quantity, 2)
+                        greeks_json = json.dumps({
+                            "greeks": result.get("greeks"),
+                            "underlying_price": result.get("underlying_price"),
+                        })
+
+            except Exception as e:
+                errors.append({"position_id": row["position_id"], "error": str(e)})
+                logger.warning("Polygon mark-to-market failed for %s: %s", row["position_id"], e)
+
+        # --- Fallback: yfinance for equity or if Polygon failed ---
+        if current_price is None and structure in ("stock", "stock_long", "long_stock", "stock_short", "short_stock", ""):
+            try:
+                import yfinance as yf
+                t = yf.Ticker(ticker)
+                info = t.fast_info
+                if hasattr(info, 'last_price') and info.last_price:
+                    current_price = float(info.last_price)
+                    unrealized = _compute_unrealized_pnl(
+                        entry_price, current_price, quantity, structure
+                    )
+            except Exception:
+                pass
+
+        if current_price is not None and unrealized is not None:
+            async with pool.acquire() as conn:
+                await conn.execute("""
+                    UPDATE unified_positions SET
+                        current_price = $1, unrealized_pnl = $2,
+                        price_updated_at = NOW(), updated_at = NOW()
+                    WHERE position_id = $3
+                """, current_price, unrealized, row["position_id"])
+            updated += 1
+
+    result = {"status": "updated", "updated": updated, "source": "polygon" if use_polygon else "yfinance"}
+    if errors:
+        result["errors"] = errors
+    return result
 
 
