@@ -10,6 +10,7 @@ Starter plan ($29/mo): 15-min delayed, unlimited calls.
 
 import os
 import logging
+import time
 import httpx
 from typing import Dict, List, Optional, Any
 from datetime import date
@@ -19,23 +20,36 @@ logger = logging.getLogger(__name__)
 POLYGON_API_KEY = os.getenv("POLYGON_API_KEY") or ""
 POLYGON_BASE = "https://api.polygon.io"
 
+# In-memory chain cache: {ticker: (timestamp, chain_data)}
+_chain_cache: Dict[str, tuple] = {}
+_CACHE_TTL = 300  # 5 minutes
+
 
 async def get_options_snapshot(underlying: str) -> Optional[List[Dict[str, Any]]]:
     """
     Fetch full options chain snapshot for a ticker.
     Returns list of contract snapshots with greeks, quotes, and underlying info.
+    Uses a 5-minute in-memory cache to avoid redundant API calls for same ticker.
     """
     if not POLYGON_API_KEY:
         logger.warning("POLYGON_API_KEY not set — skipping options snapshot")
         return None
 
+    # Check cache
+    cached = _chain_cache.get(underlying.upper())
+    if cached and (time.time() - cached[0]) < _CACHE_TTL:
+        logger.info("Using cached chain for %s (age %.0fs)", underlying, time.time() - cached[0])
+        return cached[1]
+
     url = f"{POLYGON_BASE}/v3/snapshot/options/{underlying}"
     params = {"apiKey": POLYGON_API_KEY, "limit": 250}
 
     all_results = []
+    max_pages = 10  # Safety limit — avoid infinite pagination on huge chains
+    page = 0
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
-            while url:
+            while url and page < max_pages:
                 resp = await client.get(url, params=params)
                 if resp.status_code != 200:
                     logger.error("Polygon snapshot %s: HTTP %s — %s", underlying, resp.status_code, resp.text[:200])
@@ -43,6 +57,7 @@ async def get_options_snapshot(underlying: str) -> Optional[List[Dict[str, Any]]
 
                 data = resp.json()
                 all_results.extend(data.get("results", []))
+                page += 1
 
                 # Handle pagination
                 next_url = data.get("next_url")
@@ -56,7 +71,17 @@ async def get_options_snapshot(underlying: str) -> Optional[List[Dict[str, Any]]
         logger.error("Polygon snapshot %s failed: %s", underlying, e)
         return None
 
+    logger.info("Fetched %d contracts for %s (%d pages)", len(all_results), underlying, page)
+
+    # Cache the result
+    _chain_cache[underlying.upper()] = (time.time(), all_results)
+
     return all_results
+
+
+def clear_chain_cache():
+    """Clear the in-memory chain cache."""
+    _chain_cache.clear()
 
 
 def find_contract(
