@@ -93,8 +93,7 @@ async def compute_score() -> Optional[FactorReading]:
         if expiry > max_exp:
             continue
 
-        day = contract.get("day", {})
-        oi = day.get("open_interest") or 0
+        oi = contract.get("open_interest") or 0
 
         if contract_type == "put":
             put_oi += oi
