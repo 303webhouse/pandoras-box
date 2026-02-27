@@ -20,12 +20,13 @@ logger = logging.getLogger(__name__)
 
 try:
     from bias_engine.composite import FactorReading
-    from bias_engine.factor_utils import score_to_signal
+    from bias_engine.factor_utils import score_to_signal, get_price_history
     from integrations.polygon_options import get_options_snapshot, POLYGON_API_KEY
 except ImportError:
     FactorReading = None
     score_to_signal = None
     get_options_snapshot = None
+    get_price_history = None
     POLYGON_API_KEY = ""
 
 # Near-the-money filter parameters
@@ -34,34 +35,48 @@ MIN_DTE = 7
 MAX_DTE = 45
 
 
+async def _get_spy_price() -> Optional[float]:
+    """Get current SPY price for NTM filtering."""
+    try:
+        if get_price_history:
+            data = await get_price_history("SPY", days=5)
+            if data is not None and not data.empty and "close" in data.columns:
+                return float(data["close"].iloc[-1])
+    except Exception as e:
+        logger.warning("iv_skew: failed to get SPY price: %s", e)
+    return None
+
+
 async def compute_score() -> Optional[FactorReading]:
     """
     Compare average IV of near-the-money puts vs calls.
     Rising put IV = fear/hedging = bearish signal.
+
+    Uses NTM-filtered Polygon API call (±5% of price) for better contract
+    coverage within pagination limits.
     """
     if not POLYGON_API_KEY:
         logger.warning("iv_skew: POLYGON_API_KEY not set — skipping")
         return None
 
-    chain = await get_options_snapshot("SPY")
-    if not chain:
-        logger.warning("iv_skew: Polygon returned empty SPY chain")
-        return None
-
-    # Get underlying price from first contract with underlying_asset data
-    underlying_price = None
-    for contract in chain:
-        ua = contract.get("underlying_asset", {})
-        if ua and ua.get("price"):
-            underlying_price = float(ua["price"])
-            break
-
+    # Get current SPY price for NTM filtering
+    underlying_price = await _get_spy_price()
     if not underlying_price:
-        logger.warning("iv_skew: Could not determine SPY underlying price")
+        logger.warning("iv_skew: cannot determine SPY price — skipping")
         return None
 
-    lower_bound = underlying_price * (1 - NTM_BAND_PCT)
-    upper_bound = underlying_price * (1 + NTM_BAND_PCT)
+    lower_bound = round(underlying_price * (1 - NTM_BAND_PCT), 0)
+    upper_bound = round(underlying_price * (1 + NTM_BAND_PCT), 0)
+
+    # Use filtered API call to get only NTM contracts
+    chain = await get_options_snapshot(
+        "SPY",
+        strike_gte=lower_bound,
+        strike_lte=upper_bound,
+    )
+    if not chain:
+        logger.warning("iv_skew: Polygon returned empty NTM chain")
+        return None
 
     today = datetime.utcnow().date()
     min_exp = today + timedelta(days=MIN_DTE)
@@ -69,18 +84,23 @@ async def compute_score() -> Optional[FactorReading]:
 
     put_ivs = []
     call_ivs = []
+    iv_missing_count = 0
 
     for contract in chain:
         details = contract.get("details", {})
         contract_type = (details.get("contract_type") or "").lower()
         strike = details.get("strike_price")
         expiry_str = str(details.get("expiration_date", ""))[:10]
+
+        # Check both top-level implied_volatility and greeks dict
         iv = contract.get("implied_volatility")
+        if iv is None:
+            greeks = contract.get("greeks") or {}
+            iv = greeks.get("iv") or greeks.get("implied_volatility")
 
         if strike is None or iv is None or iv <= 0:
-            continue
-
-        if not (lower_bound <= float(strike) <= upper_bound):
+            if iv is None:
+                iv_missing_count += 1
             continue
 
         try:
@@ -95,10 +115,16 @@ async def compute_score() -> Optional[FactorReading]:
         elif contract_type == "call":
             call_ivs.append(float(iv))
 
+    if iv_missing_count > 0:
+        logger.info(
+            "iv_skew: %d/%d contracts missing implied_volatility (Polygon plan limitation?)",
+            iv_missing_count, len(chain)
+        )
+
     if len(put_ivs) < 3 or len(call_ivs) < 3:
         logger.warning(
-            "iv_skew: insufficient NTM contracts (puts=%d, calls=%d) — skipping",
-            len(put_ivs), len(call_ivs),
+            "iv_skew: insufficient NTM contracts with IV (puts=%d, calls=%d, total_chain=%d, iv_missing=%d) — skipping",
+            len(put_ivs), len(call_ivs), len(chain), iv_missing_count,
         )
         return None
 
@@ -125,6 +151,8 @@ async def compute_score() -> Optional[FactorReading]:
             "put_count": len(put_ivs),
             "call_count": len(call_ivs),
             "underlying_price": round(float(underlying_price), 2),
+            "iv_missing_count": iv_missing_count,
+            "chain_total": len(chain),
         },
     )
 
