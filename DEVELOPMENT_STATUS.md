@@ -1,6 +1,6 @@
 # Pivot — Development Status & Roadmap
 
-**Last Updated:** February 27, 2026
+**Last Updated:** March 1, 2026
 
 This is the single source of truth for what has been built, what's in progress, and what's planned. Agents should read this before starting any work to avoid rebuilding existing features or building on assumptions about unbuilt ones.
 
@@ -72,7 +72,7 @@ The original Pivot Discord bot (`pivot-bot`) has been **stopped and disabled**. 
 18 critical bugs fixed across 5 phases (PRs #8–#12). All merged and deployed.
 
 | Phase | PR | What Fixed |
-|-------|----|-----------|
+|-------|----|-----------:|
 | 1: Scorer Integrity | #8 | Removed RECOVERY references, added missing base scores, fixed RSI/zone bonus contamination |
 | 2: Selection Pipeline | #9 | Added DB persistence before selection, fixed top-N bias, added per-ticker dedup |
 | 3: Outcome Tracking | #10 | Fixed signal_id matching, added price_at_signal capture, wired outcome tracking to webhooks |
@@ -186,15 +186,24 @@ Two-tier overhaul driven by Opus committee review (TORO/URSA/TECHNICALS agents).
 
 ---
 
-## Committee dpg/GEX Training (COMPLETED Feb 27, 2026)
+## Committee Training Bible + v2 Prompts (COMPLETED Mar 1, 2026)
 
-All four Trading Team agents retrained with dpg's convexity-first options philosophy:
+Two-part upgrade to the Trading Team committee system:
 
-- **TORO:** Convexity framework — asymmetric payoff, debit > credit default, flow-first ideation, retail speed edge
-- **URSA:** Strategy structure risks — credit trap awareness, sizing discipline, concurrent position limits, anti-institutional copying
-- **TECHNICALS (Risk):** Convexity assessment — R:R from chart structure, extended targets, strike zone selection, liquidity flags, IV guidance (debit spreads preferred)
-- **PIVOT:** Rewritten structure rules (default debit), risk management (fractional Kelly ~2.5%), flat sizing, profit management (let winners run, trailing stops, staged exits)
-- Vol regime guidance aligned with anti-credit philosophy
+### Training Bible (`docs/committee-training-parameters.md`)
+Comprehensive 89-rule reference document organized into 12 sections: Market Structure (M), Flow Analysis (F), Chart/Technical (C), Volume Profile (V), Execution (E), Risk Management (R), Bias System (B), dpg Convexity Philosophy (P), Approved Strategies (S), Playbook Risk Rules (K), Levels/Tools (L), Decision Framework (D). Consolidates all trading knowledge into a single citable reference that agents use by rule number.
+
+### v2 Agent Prompts (`committee_prompts.py`)
+All four committee agents rewritten to cite Bible rules by section/rule number instead of inlining education:
+- **TORO:** -28% lines (85→61). Bull case analysis with rule citations (M.04, F.01-02, C.01-04, B.01-02)
+- **URSA:** -9% lines (75→68). Bear case + explicit B.06 bias challenge duty (flag AI-bull, macro-bear tendencies)
+- **TECHNICALS:** +11% lines (90→100). Scope expanded to hybrid technical+risk role — now owns entry/stop/target/R:R/structure/size calculations (previously split with PIVOT). References Nick's charting setup (L.06: EMA 9/20/55, SMA 50/120/200, Rolling VWAPs)
+- **PIVOT:** -35% lines (130→84). No longer calculates levels/sizing from scratch — validates or adjusts TECHNICALS' output. Still owns final TAKE/PASS/WATCHING decision with conviction level
+
+Net result: 384→325 lines (-15%). Agents now produce analysis grounded in specific, citable rules rather than vague heuristics.
+
+### Previous: dpg/GEX Convexity Training (Feb 27, 2026)
+All four agents previously retrained with dpg's convexity-first options philosophy (debit > credit default, fractional Kelly sizing, asymmetric payoff focus). The Training Bible codifies these principles as persistent rules rather than prompt-inlined education.
 
 ---
 
@@ -285,6 +294,9 @@ TradingView alerts trigger automatic bias overrides during extreme market events
 
 ### Position Ledger (`backend/api/v2_positions.py` + `backend/positions/`)
 Unified position tracking for all accounts (RH, IBKR, 401k). Options-aware with structure detection (debit/credit spreads, single legs). Mark-to-market via Polygon options API (bid/ask mid-prices for spreads) with yfinance fallback for equities. Portfolio greeks (delta, gamma, theta, vega). Committee context integration.
+
+### Committee Training Bible (`docs/committee-training-parameters.md`)
+89-rule reference document across 12 sections. All committee agents cite rules by number (e.g., "Per M.04, this sweep-and-reclaim..."). Consolidates trading knowledge from playbook, approved strategies, dpg philosophy, and bias system into a single citable source. TECHNICALS agent owns risk parameter calculations; PIVOT validates/adjusts.
 
 ### Scout Early Warning
 15-minute timeframe TradingView alerts with automatic expiration. Posts early warnings to Discord before confirming on higher timeframes.
