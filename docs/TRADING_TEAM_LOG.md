@@ -44,6 +44,13 @@ After completing work on a Trading Team brief, append a new entry at the top of 
 
 ## Log Entries
 
+### 2026-03-01 — Committee Training Bible + v2 Prompts Deployed
+**Agent:** Claude.ai (Opus)
+**What happened:** Created the Committee Training Bible (`docs/committee-training-parameters.md`) — a comprehensive 89-rule reference document covering 12 sections (Market Structure, Flow Analysis, Chart/Technical, Volume Profile, Execution, Risk Management, Bias System, dpg Convexity Philosophy, Approved Strategies, Playbook Risk Rules, Levels/Tools, Decision Framework). All four committee agent prompts rewritten to reference Bible by section/rule number instead of inlining education. TECHNICALS agent scope expanded to include risk parameter calculations (entry/stop/target/size/structure) previously owned by PIVOT. PIVOT now validates/adjusts TECHNICALS output rather than calculating from scratch. Net size reduction: 384→325 lines (-15%). Deployed to VPS with backup preserved.
+**Files changed:** `docs/committee-training-parameters.md` (new — 89 rules, 29,610 bytes), `/opt/openclaw/workspace/scripts/committee_prompts.py` (rewritten — 4 agent prompts, 325 lines)
+**Deviations from brief:** N/A — architect-driven prompt engineering, no brief needed. TECHNICALS kept its name (was considered renaming to RISK) but expanded scope to hybrid technical+risk role.
+**Next blocker:** None — takes effect on next committee run. Rollback available via `.bak` file on VPS.
+
 ### 2026-02-27 — Committee Agent Training (dpg/GEX Convexity Philosophy)
 **Agent:** Claude.ai (Opus) + Claude Code
 **What happened:** All four Trading Team agents (TORO, URSA, TECHNICALS/Risk, PIVOT) retrained with dpg's convexity-first options philosophy. TORO now evaluates asymmetric payoff and debit-first ideation. URSA trained on credit trap detection, sizing discipline, and concurrent position limits. TECHNICALS adds convexity assessment (R:R from chart structure, extended targets, strike zone, liquidity flags) and IV guidance recommending debit spreads. PIVOT system prompt rewritten with new structure rules (default debit), risk management (fractional Kelly ~2.5%), flat sizing, and profit management (let winners run, trailing stops, staged exits). Vol regime guidance aligned with anti-credit philosophy.
@@ -67,7 +74,7 @@ After completing work on a Trading Team brief, append a new entry at the top of 
 
 ### 2026-02-27 — Polygon.io Integration (Options + Stocks)
 **Agent:** Claude.ai (Opus) + Claude Code
-**What happened:** Two Polygon Starter plans integrated. Options: polygon_options.py client for chain snapshots, contract matching, spread valuation, greeks extraction, NTM-filtered queries. GET /v2/positions/greeks endpoint for portfolio greeks. Committee context now fetches greeks alongside position summary. Stocks: Polygon-first routing for ETF/equity tickers, yfinance fallback. New bias factors: polygon_pcr (automated SPY P/C volume ratio), polygon_oi_ratio (SPY P/C open interest), iv_regime (VIX rank vs 20-day history). Multiple fixes: NTM filtering for PCR (340 vs 15000 contracts), open_interest top-level field fix, iv_regime NTM band widened, max_pages increased.
+**What happened:** Two Polygon Starter plans integrated. Options: polygon_options.py client for chain snapshots, contract matching, spread valuation, greeks extraction. GET /v2/positions/greeks endpoint for portfolio greeks. Committee context now fetches greeks alongside position summary. Stocks: Polygon-first routing for ETF/equity tickers, yfinance fallback. New bias factors: polygon_pcr (automated SPY P/C volume ratio), polygon_oi_ratio (SPY P/C open interest), iv_regime (VIX rank vs 20-day history). Multiple fixes: NTM filtering for PCR (340 vs 15000 contracts), open_interest top-level field fix, iv_regime NTM band widened, max_pages increased.
 **Files changed:** `backend/bias_engine/polygon_options.py` (new), `backend/api/v2_positions.py`, `backend/bias_engine/factors/polygon_pcr.py` (new), `backend/bias_engine/factors/iv_regime.py` (new), `backend/bias_engine/factors/polygon_oi_ratio.py` (new), `committee_context.py`
 **Deviations from brief:** N/A — architect-driven
 **Next blocker:** None.
