@@ -331,6 +331,7 @@ from api.unified_positions import router as unified_positions_router
 from api.trade_ideas import router as trade_ideas_router
 from api.accept_flow import router as accept_flow_router
 from api.committee_bridge import router as committee_bridge_router
+from api.market_data import router as market_data_router
 
 app.include_router(webhook_router, prefix="/webhook", tags=["webhooks"])
 app.include_router(circuit_breaker_router, prefix="/webhook", tags=["circuit-breaker"])
@@ -363,6 +364,7 @@ app.include_router(unified_positions_router, prefix="/api", tags=["unified-posit
 app.include_router(trade_ideas_router, prefix="/api", tags=["trade-ideas"])
 app.include_router(accept_flow_router, prefix="/api", tags=["accept-flow"])
 app.include_router(committee_bridge_router, prefix="/api", tags=["committee"])
+app.include_router(market_data_router, prefix="/api", tags=["market-data"])
 
 # Serve frontend static files
 # Multiple path resolution strategies for different deployment environments
