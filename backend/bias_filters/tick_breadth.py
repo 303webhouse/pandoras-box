@@ -96,8 +96,9 @@ async def store_tick_data(
             json.dumps(history)
         )
         
-        # Calculate weekly bias if we have enough history
+        # Calculate weekly + composite bias
         weekly_bias = await calculate_weekly_bias(history)
+        composite_bias = await calculate_composite_bias(tick_high, tick_low, history)
         
         logger.info(f"TICK data stored: high={tick_high}, low={tick_low}, daily={daily_bias}, weekly={weekly_bias}")
         
@@ -110,6 +111,7 @@ async def store_tick_data(
             "date": data_date,
             "daily_bias": daily_bias,
             "weekly_bias": weekly_bias,
+            "composite_bias": composite_bias,
             "history_days": len(history)
         }
         
@@ -152,6 +154,7 @@ async def get_tick_status() -> Dict[str, Any]:
         # Recalculate biases
         daily_bias = await calculate_daily_bias(current["tick_high"], current["tick_low"])
         weekly_bias = await calculate_weekly_bias(history)
+        composite_bias = await calculate_composite_bias(current["tick_high"], current["tick_low"], history)
         
         return {
             "status": "ok",
@@ -162,6 +165,7 @@ async def get_tick_status() -> Dict[str, Any]:
             "date": current["date"],
             "daily_bias": daily_bias,
             "weekly_bias": weekly_bias,
+            "composite_bias": composite_bias,
             "updated_at": current.get("updated_at"),
             "history_days": len(history),
             "history": history[-5:]  # Last 5 days
@@ -227,24 +231,27 @@ def calculate_bias_strength(bias_level: str) -> float:
     
     return bias_scores.get(bias_level, 0.0)
 
-async def calculate_daily_bias(tick_high: int, tick_low: int) -> str:
+async def calculate_daily_bias(tick_high: float, tick_low: float) -> str:
     """
-    Calculate daily bias based on TICK range
-    
-    Wide range (high > +1000 OR low < -1000) = Bullish
-    Narrow range (high < +500 AND low > -500) = Bearish
-    Mixed = Neutral
+    Calculate daily bias based on TICK range width.
+    Uses the same graduated scoring as compute_tick_score for consistency (C2, M13).
+
+    Wide range = Bullish breadth (strong participation)
+    Narrow range = Bearish breadth (weak participation)
     """
-    
-    is_wide = tick_high > 1000 or tick_low < -1000
-    is_narrow = tick_high < 500 and tick_low > -500
-    
-    if is_wide:
-        return "TORO_MINOR"  # Wide range = bullish participation
-    elif is_narrow:
-        return "URSA_MINOR"  # Narrow range = weak participation
+    tick_range = tick_high - tick_low
+
+    # Graduated classification matching compute_tick_score thresholds
+    if tick_range >= 2000:
+        return "TORO_MAJOR_DAILY"  # Very wide — strong daily bullish breadth
+    elif tick_range >= 1500:
+        return "TORO_MINOR"  # Wide — bullish breadth
+    elif tick_range >= 700:
+        return "NEUTRAL"  # Normal range
+    elif tick_range >= 400:
+        return "URSA_MINOR"  # Narrow — bearish breadth
     else:
-        return "NEUTRAL"
+        return "URSA_MAJOR_DAILY"  # Very narrow — strong daily bearish breadth
 
 async def calculate_weekly_bias(tick_history: list) -> str:
     """
@@ -289,6 +296,39 @@ async def calculate_weekly_bias(tick_history: list) -> str:
         return "NEUTRAL"
 
 
+async def calculate_composite_bias(tick_high: float, tick_low: float, tick_history: list) -> str:
+    """
+    Full 5-level bias mapping per approved spec.
+    Combines daily + weekly signals into final bias level.
+
+    TORO_MAJOR: 4+ wide days in past week AND current day wide range
+    TORO_MINOR: 3 wide days OR bullish daily but mixed weekly
+    NEUTRAL: Mixed signals or mid-range TICK
+    URSA_MINOR: 3 narrow days OR bearish daily but mixed weekly
+    URSA_MAJOR: 4+ narrow days in past week AND current day narrow range
+    """
+    daily = await calculate_daily_bias(tick_high, tick_low)
+    weekly = await calculate_weekly_bias(tick_history)
+
+    # TORO_MAJOR: weekly strongly bullish AND daily confirms
+    if weekly == "TORO_MAJOR" and daily in ("TORO_MAJOR_DAILY", "TORO_MINOR"):
+        return "TORO_MAJOR"
+
+    # URSA_MAJOR: weekly strongly bearish AND daily confirms
+    if weekly == "URSA_MAJOR" and daily in ("URSA_MAJOR_DAILY", "URSA_MINOR"):
+        return "URSA_MAJOR"
+
+    # TORO_MINOR: weekly bullish OR daily bullish with mixed weekly
+    if weekly in ("TORO_MAJOR", "TORO_MINOR") or daily in ("TORO_MAJOR_DAILY", "TORO_MINOR"):
+        return "TORO_MINOR"
+
+    # URSA_MINOR: weekly bearish OR daily bearish with mixed weekly
+    if weekly in ("URSA_MAJOR", "URSA_MINOR") or daily in ("URSA_MAJOR_DAILY", "URSA_MINOR"):
+        return "URSA_MINOR"
+
+    return "NEUTRAL"
+
+
 async def compute_tick_score(tick_data: Dict[str, Any]) -> Optional[FactorReading]:
     """
     Score based on TICK readings received from TradingView.
@@ -306,22 +346,37 @@ async def compute_tick_score(tick_data: Dict[str, Any]) -> Optional[FactorReadin
     tick_close = float(tick_data.get("tick_close", 0) or 0)
     tick_avg = float(tick_data.get("tick_avg", tick_close) or 0)
 
-    if tick_avg > 400:
-        base = 0.8
-    elif tick_avg > 200:
-        base = 0.4
-    elif tick_avg > -200:
-        base = 0.0
-    elif tick_avg > -400:
-        base = -0.4
-    else:
-        base = -0.8
+    # --- Breadth scoring (range width, NOT direction) ---
+    # Wide range = bullish breadth (strong participation) → positive score
+    # Narrow range = bearish breadth (weak participation) → negative score
+    tick_range = tick_high - tick_low
 
+    # Graduated scoring based on range width (M10, M11)
+    # Typical ranges: narrow < 1000, normal 1000-2000, wide > 2000
+    if tick_range >= 2500:
+        base = 1.0   # Extremely wide — very strong participation
+    elif tick_range >= 2000:
+        base = 0.8   # Wide range — strong participation
+    elif tick_range >= 1500:
+        base = 0.5   # Above-average range — moderate bullish breadth
+    elif tick_range >= 1000:
+        base = 0.2   # Normal range — slight bullish lean
+    elif tick_range >= 700:
+        base = 0.0   # Neutral zone
+    elif tick_range >= 500:
+        base = -0.3  # Below-average — slight bearish breadth
+    elif tick_range >= 300:
+        base = -0.6  # Narrow range — weak participation
+    else:
+        base = -0.9  # Very narrow — extremely weak participation
+
+    # Extreme modifier: bonus for reaching beyond ±1000 thresholds
+    # Per spec: wide = high > +1000 OR low < -1000
     extreme_mod = 0.0
-    if tick_low < -1000:
-        extreme_mod -= 0.2
     if tick_high > 1000:
-        extreme_mod += 0.2
+        extreme_mod += 0.1
+    if tick_low < -1000:
+        extreme_mod += 0.1  # ALSO bullish — wide range = participation
 
     score = max(-1.0, min(1.0, base + extreme_mod))
     source_timestamp, timestamp_source = _extract_source_timestamp(tick_data)
@@ -369,7 +424,7 @@ def _extract_source_timestamp(payload: Dict[str, Any]) -> tuple[datetime, str]:
         parsed = _parse_timestamp(raw)
         if parsed is not None:
             return parsed, key
-    return datetime.utcnow(), "fallback"
+    return datetime.now(timezone.utc).replace(tzinfo=None), "fallback"
 
 
 def _parse_timestamp(value: Any) -> Optional[datetime]:
