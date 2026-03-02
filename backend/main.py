@@ -91,11 +91,46 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"⚠️ Could not sync positions: {e}")
     
+    # Start signal expiry background task
+    async def signal_expiry_loop():
+        """Expire stale signals every 5 minutes."""
+        while True:
+            try:
+                from api.trade_ideas import expire_stale_signals
+                await expire_stale_signals()
+            except Exception as e:
+                logger.warning(f"Signal expiry loop error: {e}")
+            await asyncio.sleep(300)  # 5 minutes
+
+    # Universe enrichment cache refresh (every 30 min during market hours)
+    async def universe_cache_loop():
+        """Refresh universe enrichment cache during market hours."""
+        import pytz
+        from datetime import datetime as dt_cls
+
+        while True:
+            try:
+                et = dt_cls.now(pytz.timezone("America/New_York"))
+                # Only refresh during extended market hours (8 AM - 5 PM ET, weekdays)
+                if et.weekday() < 5 and 8 <= et.hour < 17:
+                    from enrichment.universe_cache import refresh_universe
+                    await refresh_universe()
+                else:
+                    logger.debug("Universe cache: outside market hours, skipping")
+            except Exception as e:
+                logger.warning(f"Universe cache loop error: {e}")
+            await asyncio.sleep(1800)  # 30 minutes
+
+    expiry_task = asyncio.create_task(signal_expiry_loop())
+    universe_task = asyncio.create_task(universe_cache_loop())
+
     logger.info("✅ Pandora's Box is live")
-    
+
     yield
-    
+
     # Shutdown
+    expiry_task.cancel()
+    universe_task.cancel()
     logger.info("🛑 Shutting down Pandora's Box...")
     await redis_client.close()
     await postgres_client.close()
@@ -259,6 +294,7 @@ from api.weekly_audit import router as weekly_audit_router
 from analytics.api import analytics_router
 from api.portfolio import router as portfolio_router
 from api.unified_positions import router as unified_positions_router
+from api.trade_ideas import router as trade_ideas_router
 
 app.include_router(webhook_router, prefix="/webhook", tags=["webhooks"])
 app.include_router(circuit_breaker_router, prefix="/webhook", tags=["circuit-breaker"])
@@ -288,6 +324,7 @@ app.include_router(weekly_audit_router, prefix="/api", tags=["weekly-audit"])
 app.include_router(analytics_router, prefix="/api/analytics", tags=["analytics"])
 app.include_router(portfolio_router, prefix="/api/portfolio", tags=["portfolio"])
 app.include_router(unified_positions_router, prefix="/api", tags=["unified-positions"])
+app.include_router(trade_ideas_router, prefix="/api", tags=["trade-ideas"])
 
 # Serve frontend static files
 # Multiple path resolution strategies for different deployment environments

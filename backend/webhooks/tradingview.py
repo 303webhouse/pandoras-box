@@ -25,6 +25,7 @@ from database.postgres_client import log_signal, update_signal_with_score
 from websocket.broadcaster import manager
 from scheduler.bias_scheduler import get_bias_status
 from utils.bias_snapshot import get_bias_snapshot
+from signals.pipeline import process_signal_unified
 
 logger = logging.getLogger(__name__)
 
@@ -56,8 +57,9 @@ def is_crypto_ticker(ticker: str) -> bool:
 async def _write_signal_outcome(signal_data: dict) -> None:
     """
     Write a PENDING outcome record for a TradingView signal.
-    Mirrors the CTA scheduler's outcome tracking so all signal sources
-    have consistent historical data for accuracy analysis.
+
+    DEPRECATED: Use signals.pipeline.write_signal_outcome() instead.
+    Kept for backward compatibility during Phase 4 migration.
     """
     try:
         from database.postgres_client import get_postgres_client
@@ -172,19 +174,14 @@ async def process_scout_signal(alert: TradingViewAlert, start_time: datetime):
         "note": "Early warning - confirm with 1H Sniper before entry"
     }
 
-    signal_data = await attach_bias_snapshot(signal_data)
-
-    # Persist first to avoid Redis/DB divergence.
-    await log_signal(signal_data)
-    await _write_signal_outcome(signal_data)  # Track outcome for accuracy analysis
-    # Cache with shorter TTL (30 mins instead of 1 hour)
-    await cache_signal(signal_id, signal_data, ttl=1800)
-
-    # Broadcast to UI - use dedicated scout broadcast (no priority threshold)
-    await manager.broadcast({
-        "type": "SCOUT_ALERT",
-        "data": signal_data
-    })
+    # Scout signals skip scoring (flat score=40) and use shorter cache TTL
+    signal_data = await process_signal_unified(
+        signal_data,
+        source="tradingview",
+        skip_scoring=True,
+        cache_ttl=1800,
+        priority_threshold=0,  # Always broadcast scouts
+    )
 
     elapsed = (datetime.now() - start_time).total_seconds() * 1000
     logger.info(f"⚠️ Scout alert: {alert.ticker} {alert.direction} (RSI: {alert.rsi}, RVOL: {alert.rvol}) in {elapsed:.1f}ms")
@@ -239,19 +236,12 @@ async def process_exhaustion_signal(alert: TradingViewAlert, start_time: datetim
         "adx": alert.adx
     }
     
-    # Apply proper scoring (this will also upgrade to APIS/KODIAK if high score)
-    signal_data = await apply_signal_scoring(signal_data)
-    signal_data = await attach_bias_snapshot(signal_data)
-    
-    # Persist first to avoid Redis/DB divergence.
-    await log_signal(signal_data)
-    await _write_signal_outcome(signal_data)  # Track outcome for accuracy analysis
-    await cache_signal(signal_id, signal_data, ttl=3600)
-    await manager.broadcast_signal_smart(signal_data, priority_threshold=75.0)
-    
+    # Unified pipeline handles scoring, persistence, caching, and broadcast
+    signal_data = await process_signal_unified(signal_data, source="tradingview")
+
     elapsed = (datetime.now() - start_time).total_seconds() * 1000
     logger.info(f"✅ Exhaustion signal processed: {alert.ticker} {signal_data['signal_type']} in {elapsed:.1f}ms")
-    
+
     return {
         "status": "success",
         "signal_id": signal_id,
@@ -298,23 +288,16 @@ async def process_sniper_signal(alert: TradingViewAlert, start_time: datetime):
         "adx": alert.adx
     }
     
-    # Apply proper scoring
-    signal_data = await apply_signal_scoring(signal_data)
-    signal_data = await attach_bias_snapshot(signal_data)
-    
-    # Persist first to avoid Redis/DB divergence.
-    await log_signal(signal_data)
-    await _write_signal_outcome(signal_data)  # Track outcome for accuracy analysis
-    await cache_signal(signal_id, signal_data, ttl=3600)
-    await manager.broadcast_signal_smart(signal_data, priority_threshold=75.0)
-    
+    # Unified pipeline handles scoring, persistence, caching, and broadcast
+    signal_data = await process_signal_unified(signal_data, source="tradingview")
+
     elapsed = (datetime.now() - start_time).total_seconds() * 1000
     logger.info(f"✅ Sniper signal processed: {alert.ticker} {signal_type} in {elapsed:.1f}ms")
-    
+
     return {
         "status": "success",
         "signal_id": signal_id,
-        "signal_type": signal_type,
+        "signal_type": signal_data.get("signal_type", signal_type),
         "processing_time_ms": round(elapsed, 1)
     }
 
@@ -373,23 +356,16 @@ async def process_triple_line_signal(alert: TradingViewAlert, start_time: dateti
         "status": "ACTIVE"
     }
     
-    # Apply proper scoring
-    signal_data = await apply_signal_scoring(signal_data)
-    signal_data = await attach_bias_snapshot(signal_data)
-    
-    # Persist first to avoid Redis/DB divergence.
-    await log_signal(signal_data)
-    await _write_signal_outcome(signal_data)  # Track outcome for accuracy analysis
-    await cache_signal(signal_id, signal_data, ttl=3600)
-    await manager.broadcast_signal_smart(signal_data, priority_threshold=75.0)
-    
+    # Unified pipeline handles scoring, persistence, caching, and broadcast
+    signal_data = await process_signal_unified(signal_data, source="tradingview")
+
     elapsed = (datetime.now() - start_time).total_seconds() * 1000
-    logger.info(f"✅ Signal processed: {alert.ticker} {signal_type} in {elapsed:.1f}ms")
-    
+    logger.info(f"✅ Signal processed: {alert.ticker} {signal_data.get('signal_type', signal_type)} in {elapsed:.1f}ms")
+
     return {
         "status": "success",
         "signal_id": signal_id,
-        "signal_type": signal_type,
+        "signal_type": signal_data.get("signal_type", signal_type),
         "processing_time_ms": round(elapsed, 1)
     }
 
@@ -428,23 +404,16 @@ async def process_generic_signal(alert: TradingViewAlert, start_time: datetime):
         "adx": alert.adx
     }
     
-    # Apply proper scoring
-    signal_data = await apply_signal_scoring(signal_data)
-    signal_data = await attach_bias_snapshot(signal_data)
-    
-    # Persist first to avoid Redis/DB divergence.
-    await log_signal(signal_data)
-    await _write_signal_outcome(signal_data)  # Track outcome for accuracy analysis
-    await cache_signal(signal_id, signal_data, ttl=3600)
-    await manager.broadcast_signal_smart(signal_data, priority_threshold=75.0)
-    
+    # Unified pipeline handles scoring, persistence, caching, and broadcast
+    signal_data = await process_signal_unified(signal_data, source="tradingview")
+
     elapsed = (datetime.now() - start_time).total_seconds() * 1000
-    logger.info(f"✅ Generic signal processed: {alert.ticker} {signal_type} in {elapsed:.1f}ms")
-    
+    logger.info(f"✅ Generic signal processed: {alert.ticker} {signal_data.get('signal_type', signal_type)} in {elapsed:.1f}ms")
+
     return {
         "status": "success",
         "signal_id": signal_id,
-        "signal_type": signal_type,
+        "signal_type": signal_data.get("signal_type", signal_type),
         "processing_time_ms": round(elapsed, 1)
     }
 
@@ -494,8 +463,10 @@ async def attach_bias_snapshot(signal_data: dict) -> dict:
 async def apply_signal_scoring(signal_data: dict) -> dict:
     """
     Apply the Trade Ideas Scorer to a signal.
-    Gets current bias and calculates proper score, alignment, and triggering factors.
-    
+
+    DEPRECATED: Use signals.pipeline.apply_scoring() instead.
+    Kept for backward compatibility during Phase 4 migration.
+
     High-scoring signals get upgraded to special signal types:
     - APIS_CALL: Strong LONG signal (score >= 75)
     - KODIAK_CALL: Strong SHORT signal (score >= 75)
