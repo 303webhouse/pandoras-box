@@ -1,6 +1,6 @@
 # Pivot — Current Priorities
 
-**Last Updated:** February 27, 2026
+**Last Updated:** March 2, 2026
 
 Prioritized list of what needs building, fixing, or improving. For full phase details, see `DEVELOPMENT_STATUS.md`.
 
@@ -22,6 +22,7 @@ Prioritized list of what needs building, fixing, or improving. For full phase de
 
 ## 🟠 High Priority (Next Up)
 
+- [ ] **Phase 3: New Scanner Builds** — 9 new scanners for the Trade Ideas system. Specs not yet written.
 - [ ] **Phase 2F: UW Dashboard API scraping** — Replace manual screenshot analysis with structured API calls to Unusual Whales dashboard. Investigate UW API access. Brief not yet written.
 - [ ] **Phase 2G: Auto-Scout** — Screen incoming UW flow + Alpha Feed ideas automatically, identify setups matching Playbook criteria, post formatted picks to Discord. Depends on Phase 2F.
 - [ ] **Factor freshness in EOD brief** — Show which factors are fresh vs stale in daily summaries. Codex brief deployed.
@@ -38,6 +39,7 @@ Prioritized list of what needs building, fixing, or improving. For full phase de
 - [ ] **Brief 07: Watchlist Re-Scorer** — Re-evaluate WATCHING decisions on timer. Spec not yet written.
 - [ ] **Brief 08-09: Librarian** — Knowledge base + agent training loop. Specs not yet written.
 - [ ] **TICK-Whale cross-reference** — Cross-reference TICK breadth with Whale Hunter timing. Codex brief deployed.
+- [ ] **Remaining Whale Hunter per-chart alerts** — Add Dark Pool Whale Hunter v2 alerts to remaining tickers from options list (17 total, partial done).
 
 ---
 
@@ -60,7 +62,16 @@ Prioritized list of what needs building, fixing, or improving. For full phase de
 
 ---
 
-## ✅ Recently Completed (Feb 23-27)
+## ✅ Recently Completed (Mar 1-2)
+
+- [x] **Trade Ideas 4-Phase Overhaul** — Complete rebuild of signal intake → scoring → committee pipeline. Phase 1: unified signal intake. Phase 2: scoring v2 engine. Phase 3: CTA scanner refactor. Phase 4: VPS bridge + committee integration. All deployed to Railway + VPS.
+- [x] **Phase 2 Master Fix List (45 fixes)** — Brief 2A: TICK breadth (5 fixes). Brief 2B: CTA scanner (8 fixes). Brief 2C: PineScript indicators (16 fixes across 3 scripts). Brief 2D: cross-cutting (13 fixes). 2 deferred (L6/L7 Dark Pool rename), 1 killed (Exhaustion Levels).
+- [x] **PineScript v2 Indicators** — Hub Sniper v2.1 (confirmation candles, wider stops, time filter, ADX regime, fixed R targets). Scout Sniper v3.1 (time filter, SMA regime, structural awareness, quality score, R-multiple targets). Dark Pool Whale Hunter v2 (RVOL floor, lunch filter, 3-bar match, structural context, trade framework, regime overlay).
+- [x] **TradingView Alerts Configured** — Hub Sniper watchlist alert #1 (15m), Scout Sniper watchlist alert #2 (15m), Whale Hunter per-chart alerts (5m, partial).
+- [x] **Whale Hunter Confluence Pipeline** — Whale webhook caches in Redis (30 min TTL), committee context builder fetches recent whale hits for ticker under review, renders "WHALE VOLUME DETECTED" section in committee prompt. Full end-to-end verified.
+- [x] **Committee Training Bible + v2 Prompts** — 89-rule reference doc across 12 sections. All 4 agents rewritten to cite Bible rules by number. Net -15% prompt lines.
+
+## ✅ Previously Completed (Feb 23-27)
 
 - [x] **Brief 10: Unified Position Ledger** — Replaced 3 fragmented tables with unified_positions, 10-endpoint v2 API, options-aware frontend, portfolio summary widget, Polygon mark-to-market, committee context integration
 - [x] **Polygon.io Integration** — Options Starter + Stocks Starter ($58/mo total). Real spread P&L, portfolio greeks, NTM-filtered chains, 3 new bias factors (polygon_pcr, polygon_oi_ratio, iv_regime)
