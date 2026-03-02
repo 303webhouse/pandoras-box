@@ -101,7 +101,8 @@ CTA_CONFIG = {
     
     # Volume Settings
     "volume": {
-        "breakout_threshold": 1.10,  # 10% above 30-day avg
+        "breakout_threshold": 1.50,  # 50% above 30-day avg (H2: was 1.10)
+        "golden_touch_threshold": 2.00,  # 100% above avg for Golden Touch (H5)
         "avg_period": 30,
     },
     
@@ -126,6 +127,35 @@ CTA_CONFIG = {
         "zone_upgrade": 40,
     }
 }
+
+# H11: Signal type categories for distinct risk profiles
+SIGNAL_CATEGORIES = {
+    "HIGH_CONVICTION": ["GOLDEN_TOUCH", "TWO_CLOSE_VOLUME"],
+    "MEAN_REVERSION": ["TRAPPED_SHORTS", "TRAPPED_LONGS"],
+    "BREAKDOWN": ["BEARISH_BREAKDOWN", "DEATH_CROSS"],
+    "REVERSAL": ["RESISTANCE_REJECTION"],
+    "TREND_FOLLOWING": ["PULLBACK_ENTRY", "ZONE_UPGRADE"],
+}
+
+
+def _get_signal_category(signal_type: str) -> str:
+    """Map signal type to risk profile category (H11)."""
+    for cat, types in SIGNAL_CATEGORIES.items():
+        if signal_type in types:
+            return cat
+    return "OTHER"
+
+
+def _check_tick_alignment(direction: Optional[str], tick_status: Optional[Dict]) -> Optional[bool]:
+    """M15: Check if signal direction aligns with current TICK breadth bias."""
+    if not tick_status or not direction:
+        return None
+    bias = tick_status.get("composite_bias", "NEUTRAL")
+    if direction == "LONG":
+        return bias in ("TORO_MINOR", "TORO_MAJOR")
+    elif direction == "SHORT":
+        return bias in ("URSA_MINOR", "URSA_MAJOR")
+    return None
 
 
 def get_cta_zone(price: float, sma20: float, sma50: float, sma120: float) -> Tuple[str, str]:
@@ -250,7 +280,7 @@ def calculate_smart_stop(
 ) -> tuple[float, str]:
     stop_mult, _ = get_rr_profile(signal_type, zone)
     atr_stop = price - (atr * stop_mult) if direction == "LONG" else price + (atr * stop_mult)
-    buffer = atr * 0.25
+    buffer = atr * 0.5  # H7: was 0.25 — wider buffer avoids stop hunts
 
     preferred_key = PREFERRED_STOP_ANCHORS.get(zone)
     if preferred_key:
@@ -318,7 +348,7 @@ def calculate_entry_window(
                 entry_low = round(sma20, 2)
                 entry_high = round(sma20 + (atr * 0.75), 2)
             else:
-                entry_low = round(price - (atr * 0.25), 2)
+                entry_low = round(price - (atr * 0.5), 2)
                 entry_high = round(price + (atr * 0.5), 2)
 
         elif signal_type == "PULLBACK_ENTRY":
@@ -327,11 +357,11 @@ def calculate_entry_window(
                 entry_low = round(sma50, 2)
                 entry_high = round(sma50 + (atr * 0.75), 2)
             else:
-                entry_low = round(price - (atr * 0.25), 2)
+                entry_low = round(price - (atr * 0.5), 2)
                 entry_high = round(price + (atr * 0.5), 2)
 
         elif signal_type == "TWO_CLOSE_VOLUME":
-            entry_low = round(price - (atr * 0.25), 2)
+            entry_low = round(price - (atr * 0.5), 2)
             entry_high = round(price + (atr * 1.0), 2)
 
         elif signal_type == "TRAPPED_SHORTS":
@@ -415,6 +445,13 @@ def _build_signal_setup(
     t1, t1_anchor = _calculate_t1(direction, entry, t2, smas, risk)
     rr_ratio = round((abs(t2 - entry) / risk), 1) if risk else 0
 
+    # H10: Flag low R:R signals (additive flag, not a filter)
+    rr_warning = None
+    filtered_low_rr = False
+    if rr_ratio < 2.0 and rr_ratio > 0:
+        rr_warning = f"Low R:R: {rr_ratio:.1f}:1"
+        filtered_low_rr = True
+
     setup = {
         "entry": entry,
         "entry_window": calculate_entry_window(signal_type, direction, entry, smas, atr),
@@ -422,8 +459,11 @@ def _build_signal_setup(
         "t1": t1,
         "t2": t2,
         "rr_ratio": rr_ratio,
+        "rr_warning": rr_warning,
+        "filtered_low_rr": filtered_low_rr,
         "invalidation_level": invalidation_level,
         "invalidation_reason": invalidation_reason,
+        "category": _get_signal_category(signal_type),  # H11
     }
     # Backward-compat shim for existing UI consumers
     setup["target"] = setup["t2"]
@@ -649,10 +689,15 @@ def check_golden_touch(df: pd.DataFrame, ticker: str) -> Optional[Dict]:
     valid_correction = config["min_correction_pct"] <= correction <= config["max_correction_pct"]
     uptrend_intact = sma20 > sma120
 
-    if touching_120 and was_above_long and valid_correction and uptrend_intact:
+    # H5: Golden Touch requires volume confirmation at the touch candle
+    touch_vol_ratio = latest.get("vol_ratio")
+    vol_at_touch = (pd.notna(touch_vol_ratio) and
+                    touch_vol_ratio >= CTA_CONFIG["volume"]["golden_touch_threshold"])
+
+    if touching_120 and was_above_long and valid_correction and uptrend_intact and vol_at_touch:
         smas = _extract_smas(latest)
         zone = latest.get("cta_zone") or get_cta_zone(price, smas.get("sma20"), smas.get("sma50"), smas.get("sma120"))[0]
-        invalidation_level = round((smas.get("sma50") - (atr * 0.25)), 2) if smas.get("sma50") else None
+        invalidation_level = round((smas.get("sma50") - (atr * 0.5)), 2) if smas.get("sma50") else None
 
         setup, setup_context = _build_signal_setup(
             "GOLDEN_TOUCH",
@@ -788,7 +833,7 @@ def check_pullback_entry(df: pd.DataFrame, ticker: str) -> Optional[Dict]:
         price = latest["Close"]
         atr = latest["atr"]
         smas = _extract_smas(latest)
-        invalidation_level = round((smas.get("sma120") - (atr * 0.25)), 2) if smas.get("sma120") else None
+        invalidation_level = round((smas.get("sma120") - (atr * 0.5)), 2) if smas.get("sma120") else None
 
         setup, setup_context = _build_signal_setup(
             "PULLBACK_ENTRY",
@@ -939,7 +984,7 @@ def check_trapped_longs(df: pd.DataFrame, ticker: str) -> Optional[Dict]:
     All conditions must be true:
     - Price < 200 SMA (macro bearish)
     - Price < 20-day VWAP (buyers underwater)
-    - ADX > 20 (trending, not choppy)
+    - ADX > 25 (strong trend context, M14: was 20)
     - RSI > 40 (room to fall, not already oversold)
     - RVOL > 1.25x (institutional activity)
     """
@@ -958,7 +1003,7 @@ def check_trapped_longs(df: pd.DataFrame, ticker: str) -> Optional[Dict]:
     if not all([
         price < sma200,
         price < vwap,
-        adx > 20,
+        adx > 25,  # M14: was 20 — require strong trend for trapped signals
         rsi > 40,
         rvol > 1.25,
     ]):
@@ -966,7 +1011,7 @@ def check_trapped_longs(df: pd.DataFrame, ticker: str) -> Optional[Dict]:
 
     smas = _extract_smas(latest)
     zone = latest.get("cta_zone") or get_cta_zone(price, smas.get("sma20"), smas.get("sma50"), smas.get("sma120"))[0]
-    invalidation_level = round((smas.get("sma200") + (atr * 0.25)), 2) if smas.get("sma200") else None
+    invalidation_level = round((smas.get("sma200") + (atr * 0.5)), 2) if smas.get("sma200") else None
 
     setup, setup_context = _build_signal_setup(
         "TRAPPED_LONGS",
@@ -1012,7 +1057,7 @@ def check_trapped_shorts(df: pd.DataFrame, ticker: str) -> Optional[Dict]:
     All conditions must be true:
     - Price > 200 SMA (macro bullish)
     - Price > 20-day VWAP (shorts underwater)
-    - ADX > 20 (trending)
+    - ADX > 25 (strong trend context, M14: was 20)
     - RSI < 60 (room to rise, not already overbought)
     - RVOL > 1.25x (institutional activity)
     """
@@ -1031,7 +1076,7 @@ def check_trapped_shorts(df: pd.DataFrame, ticker: str) -> Optional[Dict]:
     if not all([
         price > sma200,
         price > vwap,
-        adx > 20,
+        adx > 25,  # M14: was 20 — require strong trend for trapped signals
         rsi < 60,
         rvol > 1.25,
     ]):
@@ -1039,7 +1084,7 @@ def check_trapped_shorts(df: pd.DataFrame, ticker: str) -> Optional[Dict]:
 
     smas = _extract_smas(latest)
     zone = latest.get("cta_zone") or get_cta_zone(price, smas.get("sma20"), smas.get("sma50"), smas.get("sma120"))[0]
-    invalidation_level = round((smas.get("sma200") - (atr * 0.25)), 2) if smas.get("sma200") else None
+    invalidation_level = round((smas.get("sma200") - (atr * 0.5)), 2) if smas.get("sma200") else None
 
     setup, setup_context = _build_signal_setup(
         "TRAPPED_SHORTS",
@@ -1121,7 +1166,7 @@ def check_bearish_breakdown(df: pd.DataFrame, ticker: str) -> Optional[Dict]:
         atr = latest["atr"]
         smas = _extract_smas(latest)
         zone = latest.get("cta_zone") or get_cta_zone(price, smas.get("sma20"), smas.get("sma50"), smas.get("sma120"))[0]
-        invalidation_level = round((smas.get("sma50") + (atr * 0.25)), 2) if smas.get("sma50") else None
+        invalidation_level = round((smas.get("sma50") + (atr * 0.5)), 2) if smas.get("sma50") else None
 
         setup, setup_context = _build_signal_setup(
             "BEARISH_BREAKDOWN",
@@ -1183,7 +1228,7 @@ def check_death_cross(df: pd.DataFrame, ticker: str) -> Optional[Dict]:
         atr = latest["atr"]
         smas = _extract_smas(latest)
         zone = latest.get("cta_zone") or get_cta_zone(price, smas.get("sma20"), smas.get("sma50"), smas.get("sma120"))[0]
-        invalidation_level = round((smas.get("sma200") + (atr * 0.25)), 2) if smas.get("sma200") else None
+        invalidation_level = round((smas.get("sma200") + (atr * 0.5)), 2) if smas.get("sma200") else None
 
         setup, setup_context = _build_signal_setup(
             "DEATH_CROSS",
@@ -1244,7 +1289,7 @@ def check_resistance_rejection(df: pd.DataFrame, ticker: str) -> Optional[Dict]:
         atr = latest["atr"]
         smas = _extract_smas(latest)
         zone = latest.get("cta_zone") or get_cta_zone(price, smas.get("sma20"), smas.get("sma50"), smas.get("sma120"))[0]
-        invalidation_level = round((smas.get("sma50") + (atr * 0.25)), 2) if smas.get("sma50") else None
+        invalidation_level = round((smas.get("sma50") + (atr * 0.5)), 2) if smas.get("sma50") else None
 
         setup, setup_context = _build_signal_setup(
             "RESISTANCE_REJECTION",
@@ -2013,7 +2058,27 @@ async def run_cta_scan(tickers: List[str] = None, include_watchlist: bool = True
         await asyncio.sleep(0.05)  # Faster rate limiting (was 0.1)
     
     elapsed = (datetime.now() - start_time).total_seconds()
-    
+
+    # ── M15: TICK breadth cross-reference ──────────────────────
+    tick_bias = "UNKNOWN"
+    tick_composite = None
+    try:
+        from bias_filters.tick_breadth import get_tick_status
+        tick_status = await get_tick_status()
+        tick_bias = tick_status.get("composite_bias", "NEUTRAL")
+        tick_composite = tick_status
+    except Exception as e:
+        logger.warning(f"TICK breadth lookup failed (degraded): {e}")
+
+    for sig in all_signals:
+        # M15: attach TICK context
+        sig["tick_bias"] = tick_bias
+        sig["tick_aligned"] = _check_tick_alignment(sig.get("direction"), tick_composite)
+
+        # M16: sector field for correlation awareness
+        sig["sector"] = detect_sector(sig.get("ticker", ""))
+        sig["correlation_warning"] = None
+
     # Sort by: watchlist first, then priority, then confidence
     def sort_key(s):
         conf_rank = {"HIGH": 3, "MEDIUM": 2, "LOW": 1}.get(s.get("confidence", "LOW"), 0)
