@@ -379,6 +379,17 @@ async def compute_tick_score(tick_data: Dict[str, Any]) -> Optional[FactorReadin
         extreme_mod += 0.1  # ALSO bullish — wide range = participation
 
     score = max(-1.0, min(1.0, base + extreme_mod))
+
+    # VIX context adjustment (M7)
+    # During high VIX (>25), wide TICK is less meaningful — everyone is moving
+    # During low VIX (<15), wide TICK is MORE meaningful — real conviction
+    vix_val = float(tick_data.get("vix", 0) or 0)
+    if vix_val > 25 and score > 0:
+        score *= 0.7  # Discount bullish breadth during high vol
+    elif vix_val < 15 and score > 0:
+        score = min(1.0, score * 1.2)  # Amplify bullish breadth during low vol
+    score = round(score, 4)
+
     source_timestamp, timestamp_source = _extract_source_timestamp(tick_data)
     if timestamp_source == "fallback":
         logger.warning(

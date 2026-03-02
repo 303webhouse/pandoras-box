@@ -298,7 +298,25 @@ async def process_signal_unified(
         except Exception as e:
             logger.warning(f"Failed to update score in DB: {e}")
 
-    # 4b. Enrich signal with market context data
+    # 4b. Calculate R:R if entry, stop, and target are available (H9)
+    entry = signal_data.get("entry_price") or signal_data.get("entry")
+    stop = signal_data.get("stop_loss") or signal_data.get("stop")
+    target = signal_data.get("target_price") or signal_data.get("target") or signal_data.get("tp1")
+    if entry and stop and target:
+        try:
+            risk = abs(float(entry) - float(stop))
+            reward = abs(float(target) - float(entry))
+            if risk > 0:
+                signal_data["risk_reward"] = round(reward / risk, 2)
+                signal_data["risk_reward_display"] = f"{signal_data['risk_reward']}:1"
+            else:
+                signal_data["risk_reward"] = None
+        except (ValueError, TypeError):
+            signal_data["risk_reward"] = None
+    else:
+        signal_data["risk_reward"] = signal_data.get("risk_reward")
+
+    # 4c. Enrich signal with market context data
     try:
         from enrichment.signal_enricher import enrich_signal, persist_enrichment
         signal_data = await enrich_signal(signal_data)
@@ -308,7 +326,7 @@ async def process_signal_unified(
     except Exception as e:
         logger.warning(f"Enrichment failed (signal still processed): {e}")
 
-    # 4c. Compute score v2 (full score with enrichment data)
+    # 4d. Compute score v2 (full score with enrichment data)
     try:
         from scoring.score_v2 import compute_score_v2, persist_score_v2
         score_v2, v2_factors = compute_score_v2(signal_data)

@@ -158,6 +158,18 @@ def _check_tick_alignment(direction: Optional[str], tick_status: Optional[Dict])
     return None
 
 
+def classify_regime(adx: float, atr_pct: float, vix: Optional[float] = None) -> str:
+    """M5: Classify market regime for signal context."""
+    if vix and vix > 30:
+        return "VOLATILE"
+    if adx > 25:
+        return "TRENDING"
+    elif adx < 18:
+        return "RANGE_BOUND"
+    else:
+        return "TRANSITIONAL"
+
+
 def get_cta_zone(price: float, sma20: float, sma50: float, sma120: float) -> Tuple[str, str]:
     """
     Determine CTA zone and bias
@@ -1206,61 +1218,45 @@ def check_bearish_breakdown(df: pd.DataFrame, ticker: str) -> Optional[Dict]:
 
 def check_death_cross(df: pd.DataFrame, ticker: str) -> Optional[Dict]:
     """
-    Check for Death Cross (50 SMA crosses below 200 SMA)
-    
-    Strong bearish signal - trend is broken
+    Check for Death Cross (50 SMA crosses below 200 SMA).
+
+    L5: Reframed as a "no new longs" filter instead of a standalone short signal.
+    Returns a filter marker that suppresses bullish signals on this ticker.
     """
     if len(df) < 2:
         return None
-    
+
     latest = df.iloc[-1]
     prev = df.iloc[-2]
-    
+
     if pd.isna(latest['sma50']) or pd.isna(latest['sma200']):
         return None
-    
-    # Death cross just happened
-    death_cross = (latest['sma50'] < latest['sma200'] and 
+
+    # Death cross just happened (or is active)
+    death_cross = (latest['sma50'] < latest['sma200'] and
                   prev['sma50'] >= prev['sma200'])
-    
+
     if death_cross:
-        price = latest["Close"]
-        atr = latest["atr"]
-        smas = _extract_smas(latest)
-        zone = latest.get("cta_zone") or get_cta_zone(price, smas.get("sma20"), smas.get("sma50"), smas.get("sma120"))[0]
-        invalidation_level = round((smas.get("sma200") + (atr * 0.5)), 2) if smas.get("sma200") else None
-
-        setup, setup_context = _build_signal_setup(
-            "DEATH_CROSS",
-            "SHORT",
-            price,
-            smas,
-            atr,
-            zone,
-            invalidation_level,
-            "Price reclaiming 200 SMA negates death cross thesis",
-        )
-
         return {
             "signal_id": str(uuid.uuid4()),
             "timestamp": datetime.now().isoformat(),
             "symbol": ticker,
             "signal_type": "DEATH_CROSS",
-            "direction": "SHORT",
-            "priority": 90,
-            "description": "Death Cross: 50 SMA crossed below 200 SMA. Major trend reversal.",
-            "cta_zone": zone,
-            "setup": setup,
-            "setup_context": setup_context,
+            "direction": "FILTER",  # Not a tradeable signal — suppresses longs
+            "priority": 0,
+            "description": "Death Cross active: 50 SMA below 200 SMA. No new longs.",
+            "cta_zone": latest.get("cta_zone", "UNKNOWN"),
+            "setup": {},
+            "setup_context": {},
             "context": {
-                "cta_zone": zone,
                 "sma50": round(latest["sma50"], 2) if pd.notna(latest.get("sma50")) else None,
                 "sma200": round(latest["sma200"], 2) if pd.notna(latest.get("sma200")) else None,
             },
             "confidence": "HIGH",
-            "notes": "Major bearish trend change. Long-term downtrend likely."
+            "notes": "No-longs filter. Suppresses bullish signals on this ticker.",
+            "is_filter": True,
         }
-    
+
     return None
 
 
@@ -1367,12 +1363,16 @@ async def scan_ticker_cta(ticker: str, allow_shorts: bool = False) -> List[Dict]
         if pullback:
             signals.append(pullback)
         
+        # L5: Death Cross as no-longs filter (always check, not gated by allow_shorts)
+        death_cross = check_death_cross(df, ticker)
+        if death_cross:
+            # Suppress LONG signals when death cross is active
+            signals = [s for s in signals if s.get("direction") != "LONG"]
+            for sig in signals:
+                sig["death_cross_filter"] = True
+
         # SHORT signals (only if enabled)
         if allow_shorts:
-            death_cross = check_death_cross(df, ticker)
-            if death_cross:
-                signals.append(death_cross)
-            
             bearish_breakdown = check_bearish_breakdown(df, ticker)
             if bearish_breakdown:
                 signals.append(bearish_breakdown)
@@ -2070,6 +2070,18 @@ async def run_cta_scan(tickers: List[str] = None, include_watchlist: bool = True
     except Exception as e:
         logger.warning(f"TICK breadth lookup failed (degraded): {e}")
 
+    # ── M5: Fetch VIX for regime classification ───────────────
+    vix_val = None
+    try:
+        from database.redis_client import get_redis_client
+        r = await get_redis_client()
+        if r:
+            vix_raw = await r.get("factor:vix_regime:raw")
+            if vix_raw:
+                vix_val = float(json.loads(vix_raw).get("vix", 0) or 0)
+    except Exception:
+        pass
+
     for sig in all_signals:
         # M15: attach TICK context
         sig["tick_bias"] = tick_bias
@@ -2078,6 +2090,12 @@ async def run_cta_scan(tickers: List[str] = None, include_watchlist: bool = True
         # M16: sector field for correlation awareness
         sig["sector"] = detect_sector(sig.get("ticker", ""))
         sig["correlation_warning"] = None
+
+        # M5: regime classification
+        ctx = sig.get("context") or {}
+        adx_val = ctx.get("adx") or 22  # default mid-range if not available
+        atr_pct = 0  # placeholder — not used in current thresholds
+        sig["regime"] = classify_regime(float(adx_val), atr_pct, vix_val)
 
     # Sort by: watchlist first, then priority, then confidence
     def sort_key(s):
