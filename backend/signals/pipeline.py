@@ -18,6 +18,51 @@ from utils.bias_snapshot import get_bias_snapshot
 
 logger = logging.getLogger(__name__)
 
+COMMITTEE_SCORE_THRESHOLD = 70.0  # Minimum score_v2 to trigger committee
+
+
+async def _maybe_flag_for_committee(signal_data: Dict[str, Any]) -> None:
+    """
+    Flag signal for committee review if it meets the threshold.
+    Sets status=COMMITTEE_REVIEW and committee_requested_at.
+    Skips Scout alerts and signals that already have committee data.
+    """
+    # Skip scouts and manual signals
+    if signal_data.get("signal_type") in ("SCOUT_ALERT", "MANUAL"):
+        return
+
+    # Skip if already has committee data
+    if signal_data.get("committee_data") or signal_data.get("committee_run_id"):
+        return
+
+    # Check score threshold (prefer score_v2, fall back to score)
+    score = signal_data.get("score_v2") or signal_data.get("score") or 0
+    if score < COMMITTEE_SCORE_THRESHOLD:
+        return
+
+    signal_id = signal_data.get("signal_id")
+    if not signal_id:
+        return
+
+    try:
+        from database.postgres_client import get_postgres_client
+        pool = await get_postgres_client()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE signals
+                SET status = 'COMMITTEE_REVIEW',
+                    committee_requested_at = NOW()
+                WHERE signal_id = $1
+                AND status = 'ACTIVE'
+                """,
+                signal_id,
+            )
+        signal_data["status"] = "COMMITTEE_REVIEW"
+        logger.info(f"🧠 Flagged for committee: {signal_data.get('ticker')} (score={score})")
+    except Exception as e:
+        logger.warning(f"Failed to flag {signal_id} for committee: {e}")
+
 
 def calculate_expiry(signal_data: Dict[str, Any]) -> Optional[datetime]:
     """
@@ -285,6 +330,12 @@ async def process_signal_unified(
         await manager.broadcast_signal_smart(signal_data, priority_threshold=priority_threshold)
     except Exception as e:
         logger.warning(f"Failed to broadcast signal: {e}")
+
+    # 7. Flag for committee review if score warrants it
+    try:
+        await _maybe_flag_for_committee(signal_data)
+    except Exception as e:
+        logger.warning(f"Committee flagging failed: {e}")
 
     elapsed_ms = (datetime.utcnow() - start).total_seconds() * 1000
     logger.info(
