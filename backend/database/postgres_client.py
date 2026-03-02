@@ -587,6 +587,52 @@ async def init_database():
             ADD COLUMN IF NOT EXISTS market_event TEXT
         """)
 
+        # Phase 4: Trade Ideas lifecycle columns on existing signals table
+        await conn.execute("""
+            ALTER TABLE signals
+            ADD COLUMN IF NOT EXISTS status VARCHAR(30) DEFAULT 'ACTIVE',
+            ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP,
+            ADD COLUMN IF NOT EXISTS enrichment_data JSONB,
+            ADD COLUMN IF NOT EXISTS enriched_at TIMESTAMP,
+            ADD COLUMN IF NOT EXISTS committee_run_id VARCHAR(100),
+            ADD COLUMN IF NOT EXISTS committee_data JSONB,
+            ADD COLUMN IF NOT EXISTS committee_requested_at TIMESTAMP,
+            ADD COLUMN IF NOT EXISTS committee_completed_at TIMESTAMP,
+            ADD COLUMN IF NOT EXISTS pending_trade_id VARCHAR(100),
+            ADD COLUMN IF NOT EXISTS decided_at TIMESTAMP,
+            ADD COLUMN IF NOT EXISTS decision_source VARCHAR(20),
+            ADD COLUMN IF NOT EXISTS source VARCHAR(50) DEFAULT 'tradingview',
+            ADD COLUMN IF NOT EXISTS regime VARCHAR(30),
+            ADD COLUMN IF NOT EXISTS confluence_score DECIMAL(5, 2),
+            ADD COLUMN IF NOT EXISTS score_v2 DECIMAL(5, 2),
+            ADD COLUMN IF NOT EXISTS score_v2_factors JSONB
+        """)
+
+        # Phase 4: Indexes for Trade Ideas feed queries
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_signals_status ON signals(status);
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_signals_status_score ON signals(status, score DESC NULLS LAST);
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_signals_expires ON signals(expires_at) WHERE expires_at IS NOT NULL;
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_signals_source ON signals(source);
+        """)
+
+        # Backfill: existing signals without status get ACTIVE if undecided, DISMISSED/SELECTED if acted on
+        await conn.execute("""
+            UPDATE signals SET status = 'DISMISSED' WHERE status IS NULL AND user_action = 'DISMISSED'
+        """)
+        await conn.execute("""
+            UPDATE signals SET status = 'ACCEPTED_OPTIONS' WHERE status IS NULL AND user_action = 'SELECTED'
+        """)
+        await conn.execute("""
+            UPDATE signals SET status = 'ACTIVE' WHERE status IS NULL AND user_action IS NULL
+        """)
+
         # Add recommendation capture fields to the trade journal table.
         await conn.execute("""
             ALTER TABLE IF EXISTS trades
