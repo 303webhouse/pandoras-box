@@ -89,6 +89,17 @@ RECENCY_CONFIG = {
     "max_bonus": 8              # Maximum recency bonus points (reduced from 15)
 }
 
+# Time-of-day adjustments (Training Bible E.03)
+# Market opens 9:30 AM ET. These penalties discourage trading during
+# low-quality windows where false signals are more common.
+TIME_OF_DAY_PENALTIES = {
+    "pre_open": -10,       # Before 9:45 AM ET — first 15 min chaos
+    "lunch_lull": -5,      # 11:30 AM - 1:00 PM ET — low volume/follow-through
+    "late_session": -5,    # After 3:30 PM ET — EOD noise
+    "power_hour_bonus": 0, # 2:00 - 3:30 PM ET — no penalty (good window)
+    "prime_time": 0,       # 9:45 AM - 11:30 AM ET — best window, no penalty
+}
+
 # Sector priority bonuses
 SECTOR_PRIORITY_BONUS = {
     "leading_aligned": 8,       # Signal in leading sector, aligned with bullish bias
@@ -303,95 +314,39 @@ def calculate_signal_score(
             "rank": sector_data.get("rank")
         }
     
-    # Calculate final score
-    raw_score = base_score + tech_bonus + recency_bonus + rr_bonus + sector_bonus
-    final_score = raw_score * alignment_multiplier
+    # 6. Time-of-day adjustment (NEW — Training Bible E.03)
+    timestamp = signal.get('timestamp')
+    tod_adjustment, tod_window = calculate_time_of_day_adjustment(timestamp)
+    triggering_factors["time_of_day"] = {
+        "adjustment": tod_adjustment,
+        "window": tod_window,
+    }
 
     # =========================================================================
-    # CIRCUIT BREAKER SCORING MODIFIERS
+    # HYBRID SCORING MODEL (C1 fix)
+    # Pre-alignment factors are multiplied by bias alignment.
+    # Post-alignment factors are added AFTER the multiplier.
+    # This prevents bias from double-counting sector/RVOL which are independent.
     # =========================================================================
-    circuit_breaker_modifier = 1.0
-    cb_applied = False
 
-    try:
-        from webhooks.circuit_breaker import get_circuit_breaker_state
-        cb_state = get_circuit_breaker_state()
+    # Pre-alignment score (affected by bias multiplier)
+    pre_alignment = base_score + tech_bonus + recency_bonus + rr_bonus + tod_adjustment
+    pre_alignment = max(0, pre_alignment)  # Floor at 0 before multiplying
 
-        if cb_state.get("active"):
-            cb_trigger = cb_state.get("trigger", "")
-            scoring_mod = cb_state.get("scoring_modifier", 1.0)
-            is_long = direction in ["LONG", "BUY"]
-            is_short = direction in ["SHORT", "SELL"]
+    # Apply bias alignment multiplier (R1 fix: this is the ONLY place bias affects score)
+    aligned_score = pre_alignment * alignment_multiplier
 
-            # Determine signal type for exhaustion/reversal bonus
-            is_exhaustion = signal_type in ["EXHAUSTION", "EXHAUSTION_TOP", "EXHAUSTION_BOTTOM"]
-            is_reversal = signal.get("trade_type", "").upper() == "REVERSAL"
+    # Post-alignment bonuses (NOT affected by bias multiplier)
+    post_alignment = sector_bonus  # sector_bonus already computed above
 
-            # BEARISH circuit breaker (SPY down, VIX spike)
-            if cb_trigger in ["spy_down_1pct", "spy_down_2pct", "vix_spike", "vix_extreme"]:
-                if is_long:
-                    # Penalize LONG signals
-                    circuit_breaker_modifier = scoring_mod
-                    cb_applied = True
-                    triggering_factors["circuit_breaker_penalty"] = {
-                        "trigger": cb_trigger,
-                        "direction": "LONG",
-                        "modifier": scoring_mod,
-                        "reason": "Bearish circuit breaker penalizes longs"
-                    }
-                elif is_short:
-                    # Boost SHORT signals
-                    circuit_breaker_modifier = 1.3
-                    cb_applied = True
-                    triggering_factors["circuit_breaker_bonus"] = {
-                        "trigger": cb_trigger,
-                        "direction": "SHORT",
-                        "modifier": 1.3,
-                        "reason": "Bearish circuit breaker boosts shorts"
-                    }
+    # Combine
+    raw_score = pre_alignment  # For logging
+    final_score = aligned_score + post_alignment
 
-                    # Extra boost for exhaustion/reversal shorts
-                    if is_exhaustion or is_reversal:
-                        circuit_breaker_modifier *= 1.2
-                        triggering_factors["circuit_breaker_bonus"]["exhaustion_boost"] = 1.2
-                        triggering_factors["circuit_breaker_bonus"]["total_modifier"] = circuit_breaker_modifier
-
-            # BULLISH circuit breaker (SPY recovery)
-            elif cb_trigger in ["spy_up_2pct", "spy_recovery"]:
-                if is_short:
-                    # Penalize SHORT signals
-                    circuit_breaker_modifier = scoring_mod
-                    cb_applied = True
-                    triggering_factors["circuit_breaker_penalty"] = {
-                        "trigger": cb_trigger,
-                        "direction": "SHORT",
-                        "modifier": scoring_mod,
-                        "reason": "Bullish circuit breaker penalizes shorts"
-                    }
-                elif is_long:
-                    # Boost LONG signals
-                    circuit_breaker_modifier = 1.3
-                    cb_applied = True
-                    triggering_factors["circuit_breaker_bonus"] = {
-                        "trigger": cb_trigger,
-                        "direction": "LONG",
-                        "modifier": 1.3,
-                        "reason": "Bullish circuit breaker boosts longs"
-                    }
-
-                    # Extra boost for exhaustion/reversal longs
-                    if is_exhaustion or is_reversal:
-                        circuit_breaker_modifier *= 1.2
-                        triggering_factors["circuit_breaker_bonus"]["exhaustion_boost"] = 1.2
-                        triggering_factors["circuit_breaker_bonus"]["total_modifier"] = circuit_breaker_modifier
-
-            # Apply modifier
-            if cb_applied:
-                final_score *= circuit_breaker_modifier
-                logger.info(f"⚠️ Circuit breaker modifier applied to {signal.get('ticker')}: {circuit_breaker_modifier:.2f}x")
-
-    except Exception as e:
-        logger.warning(f"Error applying circuit breaker modifiers: {e}")
+    # NOTE: Circuit breaker scoring was REMOVED (R3 fix).
+    # CB already flows through composite engine → bias alignment multiplier.
+    # Applying it here caused double-penalty (e.g., 0.85 × 0.7 = 0.595x).
+    # CB effects are now captured solely via the bias_alignment multiplier above.
 
     # Cap at 100
     final_score = min(100, max(0, final_score))
@@ -404,7 +359,6 @@ def calculate_signal_score(
         "sector_bonus": sector_bonus,
         "raw_score": raw_score,
         "alignment_multiplier": alignment_multiplier,
-        "circuit_breaker_modifier": circuit_breaker_modifier if cb_applied else None,
         "final_score": round(final_score, 2)
     }
     
@@ -432,13 +386,15 @@ def calculate_bias_alignment(direction: str, bias_data: Dict[str, Any]) -> Tuple
     # Flip sign for shorts so the same thresholds work for both directions
     directional_score = composite_score if is_long else -composite_score
     
-    if directional_score >= 0.4:
+    # Thresholds aligned with composite engine boundaries (C2 fix):
+    # Composite: >=0.60 TORO_MAJOR, >=0.20 TORO_MINOR, >=-0.20 NEUTRAL, >=-0.60 URSA_MINOR
+    if directional_score >= 0.60:
         return "STRONG_ALIGNED", BIAS_ALIGNMENT["STRONG_ALIGNED"]
-    elif directional_score >= 0.1:
+    elif directional_score >= 0.20:
         return "ALIGNED", BIAS_ALIGNMENT["ALIGNED"]
-    elif directional_score >= -0.1:
+    elif directional_score >= -0.20:
         return "NEUTRAL", BIAS_ALIGNMENT["NEUTRAL"]
-    elif directional_score >= -0.4:
+    elif directional_score >= -0.60:
         return "COUNTER_BIAS", BIAS_ALIGNMENT["COUNTER_BIAS"]
     else:
         return "STRONG_COUNTER", BIAS_ALIGNMENT["STRONG_COUNTER"]
@@ -577,6 +533,71 @@ def calculate_recency_bonus(timestamp) -> int:
     except Exception as e:
         logger.warning(f"Error calculating recency bonus: {e}")
         return 0
+
+
+def calculate_time_of_day_adjustment(timestamp=None) -> tuple:
+    """
+    Calculate time-of-day scoring adjustment per Training Bible E.03.
+
+    Returns (adjustment_points, time_window_name) tuple.
+    Uses signal timestamp if available, otherwise current time.
+    """
+    import pytz
+
+    try:
+        et = pytz.timezone("America/New_York")
+
+        if timestamp:
+            if isinstance(timestamp, str):
+                from datetime import datetime as dt_cls
+                signal_time = dt_cls.fromisoformat(timestamp.replace('Z', '+00:00'))
+            else:
+                signal_time = timestamp
+
+            if signal_time.tzinfo is None:
+                signal_time = pytz.utc.localize(signal_time)
+            et_time = signal_time.astimezone(et)
+        else:
+            et_time = datetime.now(et)
+
+        hour = et_time.hour
+        minute = et_time.minute
+        time_decimal = hour + minute / 60.0
+
+        # Weekend — no adjustment
+        if et_time.weekday() >= 5:
+            return 0, "weekend"
+
+        # Pre-market / before 9:45 AM ET
+        if time_decimal < 9.75:
+            return TIME_OF_DAY_PENALTIES["pre_open"], "pre_open"
+
+        # Prime time: 9:45 AM - 11:30 AM ET
+        if time_decimal < 11.5:
+            return TIME_OF_DAY_PENALTIES["prime_time"], "prime_time"
+
+        # Lunch lull: 11:30 AM - 1:00 PM ET
+        if time_decimal < 13.0:
+            return TIME_OF_DAY_PENALTIES["lunch_lull"], "lunch_lull"
+
+        # Afternoon: 1:00 PM - 2:00 PM ET
+        if time_decimal < 14.0:
+            return 0, "afternoon"
+
+        # Power hour: 2:00 PM - 3:30 PM ET
+        if time_decimal < 15.5:
+            return TIME_OF_DAY_PENALTIES["power_hour_bonus"], "power_hour"
+
+        # Late session: after 3:30 PM ET
+        if time_decimal < 16.0:
+            return TIME_OF_DAY_PENALTIES["late_session"], "late_session"
+
+        # After hours
+        return -10, "after_hours"
+
+    except Exception as e:
+        logger.warning(f"Time-of-day calculation failed: {e}")
+        return 0, "unknown"
 
 
 def score_signal_batch(signals: list, current_bias: Dict[str, Any], sector_strength: Dict[str, Any] = None) -> list:
