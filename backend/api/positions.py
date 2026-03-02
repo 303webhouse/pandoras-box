@@ -1034,7 +1034,41 @@ async def close_position(request: ClosePositionRequest):
                 )
             except Exception as db_err:
                 logger.warning(f"Failed to update signal outcome: {db_err}")
-        
+
+            # Update signal lifecycle status to terminal close state
+            try:
+                from database.postgres_client import get_postgres_client
+                close_status_map = {
+                    "WIN": "CLOSED_WIN",
+                    "LOSS": "CLOSED_LOSS",
+                    "BREAKEVEN": "CLOSED_BREAKEVEN",
+                }
+                close_status = close_status_map.get(trade_outcome, "CLOSED_BREAKEVEN")
+                pool = await get_postgres_client()
+                async with pool.acquire() as conn:
+                    await conn.execute(
+                        """
+                        UPDATE signals
+                        SET status = $2, notes = COALESCE(notes, '') || $3
+                        WHERE signal_id = $1
+                        AND status IN ('ACCEPTED_STOCKS', 'ACCEPTED_OPTIONS', 'ACTIVE')
+                        """,
+                        signal_id,
+                        close_status,
+                        f" | Closed: {trade_outcome} P&L=${realized_pnl:.2f}",
+                    )
+                    # Also mark any pending_trade as COMPLETED
+                    await conn.execute(
+                        """
+                        UPDATE pending_trades
+                        SET status = 'COMPLETED'
+                        WHERE signal_id = $1 AND status = 'FILLED'
+                        """,
+                        signal_id,
+                    )
+            except Exception as lifecycle_err:
+                logger.warning(f"Failed to update signal lifecycle on close: {lifecycle_err}")
+
         # Check if partial or full close
         remaining_qty = position.get("quantity", 1) - quantity_closed
         
@@ -1099,6 +1133,30 @@ async def close_position(request: ClosePositionRequest):
     except Exception as e:
         logger.error(f"Error closing position: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+class CloseExpiredRequest(BaseModel):
+    """Close an options position that expired worthless."""
+    position_id: int
+    notes: Optional[str] = None
+
+
+@router.post("/positions/close-expired")
+async def close_expired_position(request: CloseExpiredRequest):
+    """
+    Shortcut to close an options position that expired worthless.
+    Sets exit_price=0, trade_outcome=LOSS, loss_reason=EXPIRED_WORTHLESS.
+    """
+    close_req = ClosePositionRequest(
+        position_id=request.position_id,
+        exit_price=0.0,
+        trade_outcome="LOSS",
+        loss_reason="EXPIRED_WORTHLESS",
+        actual_stop_hit=False,
+        notes=request.notes or "Options expired worthless",
+    )
+    return await close_position(close_req)
+
 
 @router.get("/positions/open")
 async def get_open_positions_api():
