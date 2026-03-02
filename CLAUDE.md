@@ -50,9 +50,9 @@ The project was originally called "Pandora's Box" — the name persists in some 
 ### Backend (Railway — `backend/`)
 - **FastAPI** app in `main.py` — all API routers, webhooks, WebSocket
 - **PostgreSQL** (Railway, same project `fabulous-essence`) — signals, trades, factor_history, unified_positions, closed_positions, analytics tables. Linked via `${{Postgres.*}}` references.
-- **Redis** (Upstash) — real-time cache for bias state, factor scores, signals. Requires SSL (`rediss://`). Per-factor TTLs (24h default, up to 1080h for Savita).
+- **Redis** (Upstash) — real-time cache for bias state, factor scores, signals, whale context. Requires SSL (`rediss://`). Per-factor TTLs (24h default, up to 1080h for Savita). Whale context: 30 min TTL at `whale:recent:{TICKER}`.
 - Auto-deploys on push to `main` branch
-- Key endpoints: `/webhook/tradingview`, `/webhook/breadth`, `/webhook/circuit-breaker/*`, `/api/bias/*`, `/api/analytics/*`, `/v2/positions/*`, `/health`
+- Key endpoints: `/webhook/tradingview`, `/webhook/whale`, `/webhook/whale/recent/{ticker}`, `/webhook/breadth`, `/webhook/circuit-breaker/*`, `/api/bias/*`, `/api/analytics/*`, `/v2/positions/*`, `/health`
 - Health check: `curl https://pandoras-box-production.up.railway.app/health`
 
 ### Pivot II (VPS — OpenClaw)
@@ -101,20 +101,36 @@ Unified position tracking across all accounts (RH, IBKR, 401k). Options-aware wi
 
 ### Signal Pipeline
 ```
-TradingView Alert / UW Flow / Whale Hunter → POST /webhook/* →
+TradingView Alert / UW Flow → POST /webhook/tradingview →
 Strategy Validation → Bias Filter → Signal Scorer → PostgreSQL + Redis →
-WebSocket Broadcast + Discord Alert
+WebSocket Broadcast + Discord Alert + Committee Bridge (if score ≥ 75)
+
+Whale Hunter Alert → POST /webhook/whale →
+Redis cache (30 min TTL) + Discord embed (context-only, no committee trigger)
+→ Later: committee run on same ticker fetches GET /webhook/whale/recent/{ticker}
+→ Whale volume injected as supporting context for TORO/URSA/Risk/Pivot agents
 ```
 
-### Trading Team (Committee)
-Multi-analyst AI committee evaluating signals. Pipeline: Gatekeeper → Context Builder → 4 parallel agents (TORO bull / URSA bear / Risk assessor / Pivot synthesizer) → Discord embed with Take/Pass/Watching buttons → Decision logging → Nightly outcome matching → Saturday weekly review.
+### TradingView Indicators (v2 — deployed Mar 2, 2026)
+Three custom PineScript indicators on TradingView with webhook alerts:
 
-Runs on VPS at `/opt/openclaw/workspace/scripts/`. Uses Anthropic API directly (Haiku for TORO/URSA/Risk, Sonnet for Pivot). ~$0.02/committee run.
+| Indicator | Timeframe | Webhook | Alert Type |
+|-----------|-----------|---------|------------|
+| **Hub Sniper v2.1** | 15m | `/webhook/tradingview` | Watchlist alert #1 |
+| **Scout Sniper v3.1** | 15m | `/webhook/tradingview` | Watchlist alert #2 |
+| **Dark Pool Whale Hunter v2** | 5m | `/webhook/whale` | Per-chart alerts |
+
+Hub Sniper and Scout Sniper share `/webhook/tradingview` — the backend reads the `"strategy"` field to route them. Whale Hunter uses a separate `/webhook/whale` endpoint with a different payload schema. Whale signals are **context-only** — they never trigger committee runs or appear as scored trade ideas.
+
+### Trading Team (Committee)
+Multi-analyst AI committee evaluating signals. Pipeline: Gatekeeper → Context Builder (includes whale confluence, Twitter sentiment, lessons bank) → 4 parallel agents (TORO bull / URSA bear / TECHNICALS risk / Pivot synthesizer) → Discord embed with Take/Pass/Watching buttons → Decision logging → Nightly outcome matching → Saturday weekly review.
+
+Runs on VPS at `/opt/openclaw/workspace/scripts/`. Uses Anthropic API directly (Haiku for TORO/URSA/TECHNICALS, Sonnet for Pivot). ~$0.02/committee run. All agents cite rules from the Committee Training Bible (`docs/committee-training-parameters.md`) by section/rule number.
 
 See `docs/TRADING_TEAM_LOG.md` for build status and `TRADING_TEAM_STATUS.md` (project file) for architecture.
 
-### Whale Hunter (Dark Pool Detection)
-PineScript indicator on TradingView detects institutional absorption patterns via volume footprint analysis. Sends webhooks to Railway → evaluated by committee → posted to Discord.
+### Whale Hunter Confluence (`backend/webhooks/whale.py`)
+Dark Pool Whale Hunter v2 PineScript indicator detects institutional volume absorption patterns on 5-minute charts. Signals are cached in Redis (`whale:recent:{TICKER}`, 30 min TTL) and posted to Discord. When a Hub Sniper or Scout Sniper signal later triggers a committee run on the same ticker, the VPS orchestrator fetches cached whale data via `GET /webhook/whale/recent/{ticker}` and injects it as "⚠️ WHALE VOLUME DETECTED" context for the committee agents. This provides institutional volume evidence as supporting context without triggering separate committee runs.
 
 ### UW Flow Parser (`backend/discord_bridge/uw/`)
 Monitors Unusual Whales Premium Bot Discord channels, parses flow alerts into structured signals. Filters: min DTE 7, max DTE 180, min premium $50K, min score 80.
@@ -215,20 +231,22 @@ DB_PORT = int(os.getenv("DB_PORT", 5432))    # int('') crashes
 | `backend/bias_engine/polygon_options.py` | Polygon.io options client (chains, greeks, spread valuation, NTM filtering) |
 | `backend/webhooks/circuit_breaker.py` | Circuit breaker logic (condition-verified decay, state machine, no-downgrade) |
 | `backend/webhooks/tradingview.py` | TradingView webhook receiver + /webhook/breadth endpoint |
+| `backend/webhooks/whale.py` | Whale Hunter webhook + Redis caching + GET /whale/recent/{ticker} |
 | `backend/api/v2_positions.py` | Unified position ledger API (10 endpoints, route ordering matters) |
 | `backend/positions/risk_calculator.py` | Options structure risk calculation (max loss, breakeven) |
 | `frontend/app.js` | Main dashboard JS (bias cards, signals, positions, circuit breaker banner) |
 | `frontend/analytics.js` | Analytics UI (6 tabs) |
 | `DEVELOPMENT_STATUS.md` | Phase roadmap, what's built, what's planned |
 | `docs/TRADING_TEAM_LOG.md` | Trading Team build status log |
+| `docs/committee-training-parameters.md` | 89-rule Training Bible cited by all committee agents |
 
 ### VPS / Trading Team Files
 
 | File | Purpose |
 |------|---------|
-| `scripts/pivot2_committee.py` | Committee orchestrator + gatekeeper |
-| `scripts/committee_context.py` | Market data enrichment + bias challenge + lessons + Twitter injection |
-| `scripts/committee_prompts.py` | 4 agent system prompts (dpg/GEX trained — convexity-first, debit default) |
+| `scripts/pivot2_committee.py` | Committee orchestrator + gatekeeper + whale context fetch |
+| `scripts/committee_context.py` | Market data enrichment + bias challenge + lessons + Twitter + whale confluence rendering |
+| `scripts/committee_prompts.py` | 4 agent system prompts (Bible-referenced, dpg/GEX trained — convexity-first, debit default) |
 | `scripts/committee_parsers.py` | `call_agent()` + response parsers (Anthropic API direct, NOT OpenRouter) |
 | `scripts/committee_decisions.py` | Decision logging, disk-backed pending store, button components |
 | `scripts/committee_interaction_handler.py` | Persistent Discord bot for button clicks, modal, reminders |
