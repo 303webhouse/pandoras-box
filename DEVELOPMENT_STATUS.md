@@ -1,6 +1,6 @@
 # Pivot — Development Status & Roadmap
 
-**Last Updated:** March 1, 2026
+**Last Updated:** March 2, 2026
 
 This is the single source of truth for what has been built, what's in progress, and what's planned. Agents should read this before starting any work to avoid rebuilding existing features or building on assumptions about unbuilt ones.
 
@@ -64,6 +64,81 @@ The original Pivot Discord bot (`pivot-bot`) has been **stopped and disabled**. 
 ### Runtime Note
 
 `GET /api/signals/active` times out intermittently from VPS. Trade poller includes fallback to `/signals/queue`.
+
+---
+
+## Trade Ideas 4-Phase Overhaul (COMPLETED Mar 2, 2026)
+
+Complete rebuild of the signal intake → scoring → committee pipeline. 45 fixes deployed across backend and PineScript indicators.
+
+### Phase 1: Unified Signal Intake Pipeline
+Refactored `backend/signals/pipeline.py` to eliminate duplicated logic across webhook handlers. Single `process_signal_unified()` function handles scoring, persistence, caching, broadcast, and committee bridge for all signal sources (TradingView, CTA scanner, whale alerts).
+
+### Phase 2: Scoring v2 Engine
+New `calculate_signal_score()` with bias alignment multipliers, contrarian qualification, sector rotation bonus, and RVOL conviction modifier. Score tiers (APIS_CALL ≥85, HIGH ≥75, MEDIUM ≥55, LOW <55) drive committee threshold at 75.
+
+### Phase 3: CTA Scanner Refactor
+CTA scanner rebuilt to use unified pipeline. Signal deduplication, proper DB persistence before selection, native stop/target mode.
+
+### Phase 4: VPS Bridge + Committee Integration
+`committee_bridge_router` on Railway accepts committee-ready signals from VPS. VPS orchestrator fetches signals via Railway API, runs Gatekeeper → 4-agent committee → Discord embed → decision tracking.
+
+### Phase 2 Master Fix List (45 fixes across 7 components)
+
+| Brief | Scope | Fixes | Deploy Target |
+|-------|-------|-------|---------------|
+| **2A** | TICK breadth scoring | 5 | Railway (auto-deploy) |
+| **2B** | CTA scanner pipeline | 8 | Railway (auto-deploy) |
+| **2C** | PineScript indicators | 16 | TradingView (manual) |
+| **2D** | Cross-cutting (scoring, pipeline, enrichment) | 13 | Railway (auto-deploy) |
+| Deferred | L6/L7 Dark Pool rename/demotion | 2 | — |
+| Killed | Exhaustion Levels indicator | 1 | — |
+
+### PineScript v2 Indicators (deployed to TradingView)
+
+**Hub Sniper v2.1** (5 fixes):
+- H3: Confirmation candle requirement (engulfing/hammer + 1.2x RVOL) for normal mode signals
+- H8: Stop buffer widened 0.5 → 0.85 ATR
+- M1: Time filter (no signals before 10 AM ET, blocks lunch 12-1 PM)
+- M6: ADX regime awareness (direction + slope tracking, STRONG/WEAK/NO TREND display)
+- M20: TP1 changed from VWAP basis → 1.5R fixed target, min 1.5:1 R:R gate
+
+**Scout Sniper v3.1** (5 fixes):
+- M2: Time filter (no signals first 15 min, blocks lunch)
+- M9: SMA 50/120/200 HTF regime filter (stacked bullish/bearish/mixed), plotted on chart
+- L1: Structural level awareness (won't long into swing highs or short into swing lows)
+- L2: Signal quality score 0-6 (shown on labels, debug table, alert payload)
+- L3: R-multiple targets in trending environments (option to force 1.5R/2R vs VWAP targets when SMAs aligned)
+
+**Dark Pool Whale Hunter v2** (6 fixes):
+- H4: Volume floor 1.5x RVOL minimum (was zero)
+- M3: Lunch hour excluded (12-1 PM ET)
+- M21: 3 consecutive matched bars required (was 2)
+- M22: Structural context (flags signals at swing high/low, ★ marker for confirmed)
+- M23: Full trade framework (entry/stop/target levels drawn + in alert payload)
+- M24: Regime/trend context (SMA 50/200 + ADX in table and alert)
+
+### TradingView Alert Configuration
+
+| Indicator | Timeframe | Alert Type | Webhook |
+|-----------|-----------|------------|---------|
+| Hub Sniper v2.1 | 15m | Watchlist alert #1 | `/webhook/tradingview` |
+| Scout Sniper v3.1 | 15m | Watchlist alert #2 | `/webhook/tradingview` |
+| Dark Pool Whale Hunter v2 | 5m | Per-chart alerts | `/webhook/whale` |
+
+Hub Sniper and Scout Sniper share the `/webhook/tradingview` endpoint — the backend reads the `"strategy"` field to route them. Whale Hunter uses a separate `/webhook/whale` endpoint with a different payload schema.
+
+### Whale Hunter Confluence Pipeline
+
+Whale Hunter signals are **context-only** — they never trigger committee runs or appear as trade ideas. The pipeline:
+1. TradingView alert → `POST /webhook/whale` (Railway)
+2. Signal cached in Redis at `whale:recent:{TICKER}` with 30-minute TTL
+3. Discord embed posted (existing behavior)
+4. When a Sniper/Scout signal later triggers a committee run on the same ticker, the VPS orchestrator calls `GET /webhook/whale/recent/{TICKER}`
+5. If cached whale data exists, committee context builder renders "⚠️ WHALE VOLUME DETECTED" section with lean, RVOL, regime, structural confirmation
+6. Committee agents see institutional volume evidence as supporting context
+
+Whale Hunter candidates: single stocks from Nick's options watchlist (TSLA, NVDA, PLTR, AMZN, GOOG, NFLX, CRWD, PANW, GS, TOST, LUV, TFC, CRCL, FCX, UBER, WM, WMT). Skip indices/ETFs (SPY, QQQ, etc.) — too noisy for whale detection.
 
 ---
 
@@ -298,11 +373,11 @@ Unified position tracking for all accounts (RH, IBKR, 401k). Options-aware with 
 ### Committee Training Bible (`docs/committee-training-parameters.md`)
 89-rule reference document across 12 sections. All committee agents cite rules by number (e.g., "Per M.04, this sweep-and-reclaim..."). Consolidates trading knowledge from playbook, approved strategies, dpg philosophy, and bias system into a single citable source. TECHNICALS agent owns risk parameter calculations; PIVOT validates/adjusts.
 
-### Scout Early Warning
-15-minute timeframe TradingView alerts with automatic expiration. Posts early warnings to Discord before confirming on higher timeframes.
-
-### Whale Hunter (Dark Pool Detection)
-PineScript indicator on TradingView detects institutional absorption patterns via volume footprint analysis. Sends webhooks to Railway → evaluated by LLM → posted to Discord.
+### TradingView Indicators (v2 — Mar 2, 2026)
+Three PineScript indicators deployed to TradingView with webhook alerts:
+- **Hub Sniper v2.1** — Primary signal generator (15m). Confirmation candles, time filter, ADX regime, 1.5R fixed targets, 0.85 ATR stops. Webhook: `/webhook/tradingview`
+- **Scout Sniper v3.1** — Early warning (15m). SMA regime filter, structural awareness, quality score 0-6, R-multiple targets. Webhook: `/webhook/tradingview`
+- **Dark Pool Whale Hunter v2** — Confluence indicator (5m). 1.5x RVOL floor, 3-bar consecutive match, structural context, trade framework, regime overlay. Webhook: `/webhook/whale`. Cached in Redis (30 min TTL) for committee confluence — does NOT trigger committee runs or appear as trade ideas.
 
 ### UW Flow Parser (`backend/discord_bridge/uw/`)
 Monitors Unusual Whales Premium Bot Discord channels. Parses flow alerts into structured signals with filtering (min DTE 7, max DTE 180, min premium $50K, min score 80 for alerts).
@@ -348,6 +423,7 @@ Batch of UI bug fixes deployed:
 
 ## Not Yet Built
 
+- **Phase 3: New Scanner Builds** — 9 new scanners for the Trade Ideas system. Specs not yet written.
 - **UW watcher bot:** Lightweight service to monitor UW/whale Discord channels and forward parsed data to Pandora API (no LLM needed)
 - **Phase 2F:** UW dashboard API scraping
 - **Phase 2G:** Auto-scout (screen UW flow → generate options picks)
@@ -361,7 +437,7 @@ Batch of UI bug fixes deployed:
 
 ---
 
-## Known Issues (as of Feb 27, 2026)
+## Known Issues (as of Mar 2, 2026)
 
 - ⚠️ **`/api/signals/active` timeout from VPS**: Endpoint times out intermittently. Trade poller includes fallback to `/signals/queue`.
 - ⚠️ **Analytics tables mostly empty**: System deployed but needs signal accumulation time and trade imports to populate meaningful data.
