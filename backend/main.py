@@ -128,8 +128,34 @@ async def lifespan(app: FastAPI):
                 logger.warning(f"Universe cache loop error: {e}")
             await asyncio.sleep(1800)  # 30 minutes
 
+    # Mark-to-market: refresh position prices every 15 min during market hours
+    async def mark_to_market_loop():
+        """Fetch live Polygon prices for open positions during market hours."""
+        import pytz
+        from datetime import datetime as dt_cls
+
+        while True:
+            try:
+                et = dt_cls.now(pytz.timezone("America/New_York"))
+                # Market hours + buffer: 9:00 AM - 4:30 PM ET, weekdays
+                if et.weekday() < 5 and 9 <= et.hour < 17:
+                    from api.unified_positions import run_mark_to_market
+                    result = await run_mark_to_market()
+                    updated = result.get("updated", 0)
+                    errors = result.get("errors", [])
+                    if updated > 0:
+                        logger.info("📊 Mark-to-market: updated %d positions", updated)
+                    if errors:
+                        logger.warning("📊 Mark-to-market: %d errors", len(errors))
+                else:
+                    logger.debug("Mark-to-market: outside market hours, skipping")
+            except Exception as e:
+                logger.warning("Mark-to-market loop error: %s", e)
+            await asyncio.sleep(900)  # 15 minutes
+
     expiry_task = asyncio.create_task(signal_expiry_loop())
     universe_task = asyncio.create_task(universe_cache_loop())
+    mtm_task = asyncio.create_task(mark_to_market_loop())
 
     logger.info("✅ Pandora's Box is live")
 
@@ -138,6 +164,7 @@ async def lifespan(app: FastAPI):
     # Shutdown
     expiry_task.cancel()
     universe_task.cancel()
+    mtm_task.cancel()
     logger.info("🛑 Shutting down Pandora's Box...")
     await redis_client.close()
     await postgres_client.close()

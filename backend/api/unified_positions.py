@@ -976,10 +976,10 @@ async def reconcile_positions(req: ReconcileRequest):
 
 # ── MARK TO MARKET ────────────────────────────────────────────────────
 
-@router.post("/v2/positions/mark-to-market")
-async def mark_to_market():
+async def run_mark_to_market() -> dict:
     """
-    Fetch current spread values via Polygon.io options snapshots.
+    Core mark-to-market logic. Callable from background loop or HTTP endpoint.
+    Fetches current spread values via Polygon.io options snapshots.
     Falls back to yfinance underlying price for equity positions.
     Updates unrealized P&L based on actual spread mid-prices.
     """
@@ -1028,8 +1028,6 @@ async def mark_to_market():
                     )
                     if result and result.get("spread_value") is not None:
                         current_price = result["spread_value"]
-                        # P&L = (current_spread - entry_debit) * 100 * qty for debits
-                        # P&L = (entry_credit - current_cost_to_close) * 100 * qty for credits
                         if "credit" in structure:
                             unrealized = round((entry_price - current_price) * 100 * quantity, 2)
                         else:
@@ -1087,5 +1085,11 @@ async def mark_to_market():
     if errors:
         result["errors"] = errors
     return result
+
+
+@router.post("/v2/positions/mark-to-market")
+async def mark_to_market():
+    """HTTP wrapper for mark-to-market. Background loop calls run_mark_to_market() directly."""
+    return await run_mark_to_market()
 
 
