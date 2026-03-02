@@ -18,7 +18,7 @@ from utils.bias_snapshot import get_bias_snapshot
 
 logger = logging.getLogger(__name__)
 
-COMMITTEE_SCORE_THRESHOLD = 70.0  # Minimum score_v2 to trigger committee
+COMMITTEE_SCORE_THRESHOLD = 75.0  # Minimum score_v2 to trigger committee
 
 
 async def _maybe_flag_for_committee(signal_data: Dict[str, Any]) -> None:
