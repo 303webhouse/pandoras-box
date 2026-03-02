@@ -100,6 +100,13 @@ async def lifespan(app: FastAPI):
                 await expire_stale_signals()
             except Exception as e:
                 logger.warning(f"Signal expiry loop error: {e}")
+            try:
+                from database.postgres_client import expire_pending_trades
+                expired = await expire_pending_trades()
+                if expired > 0:
+                    logger.info(f"🕐 Expired {expired} stale pending trades")
+            except Exception as e:
+                logger.warning(f"Pending trade expiry error: {e}")
             await asyncio.sleep(300)  # 5 minutes
 
     # Universe enrichment cache refresh (every 30 min during market hours)
@@ -295,6 +302,7 @@ from analytics.api import analytics_router
 from api.portfolio import router as portfolio_router
 from api.unified_positions import router as unified_positions_router
 from api.trade_ideas import router as trade_ideas_router
+from api.accept_flow import router as accept_flow_router
 
 app.include_router(webhook_router, prefix="/webhook", tags=["webhooks"])
 app.include_router(circuit_breaker_router, prefix="/webhook", tags=["circuit-breaker"])
@@ -325,6 +333,7 @@ app.include_router(analytics_router, prefix="/api/analytics", tags=["analytics"]
 app.include_router(portfolio_router, prefix="/api/portfolio", tags=["portfolio"])
 app.include_router(unified_positions_router, prefix="/api", tags=["unified-positions"])
 app.include_router(trade_ideas_router, prefix="/api", tags=["trade-ideas"])
+app.include_router(accept_flow_router, prefix="/api", tags=["accept-flow"])
 
 # Serve frontend static files
 # Multiple path resolution strategies for different deployment environments
