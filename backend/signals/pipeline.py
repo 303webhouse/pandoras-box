@@ -263,6 +263,17 @@ async def process_signal_unified(
     except Exception as e:
         logger.warning(f"Enrichment failed (signal still processed): {e}")
 
+    # 4c. Compute score v2 (full score with enrichment data)
+    try:
+        from scoring.score_v2 import compute_score_v2, persist_score_v2
+        score_v2, v2_factors = compute_score_v2(signal_data)
+        if score_v2 is not None:
+            signal_data["score_v2"] = score_v2
+            signal_data["score_v2_factors"] = v2_factors
+            await persist_score_v2(signal_data["signal_id"], score_v2, v2_factors)
+    except Exception as e:
+        logger.warning(f"Score v2 computation failed (flash score still valid): {e}")
+
     # 5. Cache in Redis
     try:
         await cache_signal(signal_data["signal_id"], signal_data, ttl=cache_ttl)

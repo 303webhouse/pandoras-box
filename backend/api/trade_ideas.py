@@ -59,7 +59,7 @@ async def get_trade_ideas_feed(
         idx += 1
 
     if min_score is not None:
-        conditions.append(f"COALESCE(score, 0) >= ${idx}")
+        conditions.append(f"COALESCE(score_v2, score, 0) >= ${idx}")
         params.append(min_score)
         idx += 1
 
@@ -79,7 +79,7 @@ async def get_trade_ideas_feed(
             f"""
             SELECT * FROM signals
             WHERE {where_clause}
-            ORDER BY COALESCE(score, 0) DESC, created_at DESC
+            ORDER BY COALESCE(score_v2, score, 0) DESC, created_at DESC
             LIMIT ${idx} OFFSET ${idx + 1}
             """,
             *params,
