@@ -942,6 +942,37 @@ async def init_database():
             WHERE NOT EXISTS (SELECT 1 FROM account_balances WHERE account_name = 'Interactive Brokers')
         """)
 
+        # Phase 4E: pending_trades table (signal-to-position bridge)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS pending_trades (
+                id SERIAL PRIMARY KEY,
+                signal_id TEXT NOT NULL REFERENCES signals(signal_id),
+                trade_type TEXT NOT NULL DEFAULT 'STOCKS',
+                status TEXT NOT NULL DEFAULT 'PENDING',
+                planned_entry FLOAT,
+                planned_stop FLOAT,
+                planned_target FLOAT,
+                planned_quantity FLOAT,
+                options_structure TEXT,
+                options_legs JSONB,
+                options_net_premium FLOAT,
+                options_max_loss FLOAT,
+                options_expiry TEXT,
+                notes TEXT,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                expires_at TIMESTAMPTZ,
+                filled_at TIMESTAMPTZ,
+                expired_at TIMESTAMPTZ,
+                position_id INTEGER
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_pending_trades_signal ON pending_trades(signal_id);
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_pending_trades_status ON pending_trades(status);
+        """)
+
         print("Database schema initialized")
 
 async def log_signal(
@@ -1874,3 +1905,77 @@ async def get_options_archive(
     async with pool.acquire() as conn:
         rows = await conn.fetch(query, *params)
         return [serialize_db_row(dict(row)) for row in rows]
+
+
+# =========================================================================
+# Pending Trades (Phase 4E)
+# =========================================================================
+
+async def create_pending_trade(signal_id: str, trade_type: str, params: dict) -> int:
+    """Create a pending trade and return its ID."""
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            INSERT INTO pending_trades
+            (signal_id, trade_type, planned_entry, planned_stop, planned_target,
+             planned_quantity, options_structure, options_legs, options_net_premium,
+             options_max_loss, options_expiry, notes, expires_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW() + INTERVAL '5 days')
+            RETURNING id
+            """,
+            signal_id,
+            trade_type,
+            params.get("planned_entry"),
+            params.get("planned_stop"),
+            params.get("planned_target"),
+            params.get("planned_quantity"),
+            params.get("options_structure"),
+            json.dumps(params.get("options_legs")) if params.get("options_legs") else None,
+            params.get("options_net_premium"),
+            params.get("options_max_loss"),
+            params.get("options_expiry"),
+            params.get("notes"),
+        )
+        return row["id"]
+
+
+async def get_pending_trades(status: str = "PENDING") -> list:
+    """Get pending trades by status."""
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT * FROM pending_trades WHERE status = $1 ORDER BY created_at DESC",
+            status,
+        )
+        return [serialize_db_row(dict(row)) for row in rows]
+
+
+async def fill_pending_trade(pending_id: int, position_id: int) -> None:
+    """Mark a pending trade as filled with the resulting position ID."""
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE pending_trades SET status = 'FILLED', filled_at = NOW(), position_id = $2 WHERE id = $1",
+            pending_id,
+            position_id,
+        )
+
+
+async def expire_pending_trades() -> int:
+    """Expire pending trades past their expiry window. Returns count expired."""
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        result = await conn.execute("""
+            UPDATE pending_trades
+            SET status = 'EXPIRED', expired_at = NOW()
+            WHERE status = 'PENDING'
+            AND expires_at IS NOT NULL
+            AND expires_at < NOW()
+        """)
+        count = 0
+        if result:
+            parts = result.split()
+            if len(parts) >= 2 and parts[-1].isdigit():
+                count = int(parts[-1])
+        return count
