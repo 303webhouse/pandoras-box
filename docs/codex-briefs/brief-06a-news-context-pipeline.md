@@ -4,7 +4,7 @@
 **LLM cost impact:** ZERO additional LLM calls
 **API cost:** $0 (Polygon News API included in Stocks Starter plan)
 **Estimated build time:** 2–3 hours
-**Agent target:** Codex / Sonnet (implementation)
+**Agent target:** Claude Code (implementation)
 
 ---
 
