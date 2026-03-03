@@ -1100,7 +1100,8 @@ async function loadInitialData() {
         loadSignals(),
         fetchCompositeBias(),
         fetchTimeframeBias(),
-        loadOpenPositionsEnhanced()
+        loadOpenPositionsEnhanced(),
+        loadHeadlines()
     ]);
 
     // Initialize Scout Alerts section
@@ -8377,6 +8378,60 @@ async function loadPortfolioSummary() {
     } catch (error) {
         console.error('Error loading portfolio summary:', error);
     }
+}
+
+// ── Headlines ────────────────────────────────────────────────────────
+async function loadHeadlines() {
+    try {
+        const response = await fetch(`${API_URL}/market/news?limit=10`);
+        const data = await response.json();
+        renderHeadlines(data.articles || []);
+    } catch (error) {
+        console.error('Error loading headlines:', error);
+        const list = document.getElementById('headlinesList');
+        if (list) list.innerHTML = '<li class="headlines-empty">Headlines unavailable</li>';
+    }
+}
+
+function renderHeadlines(articles) {
+    const heading = document.getElementById('headlinesHeading');
+    if (heading) {
+        const now = new Date();
+        const dayName = now.toLocaleDateString('en-US', { weekday: 'long' }).toUpperCase();
+        const dateStr = now.toLocaleDateString('en-US', { month: 'long', day: 'numeric' }).toUpperCase();
+        heading.textContent = `HEADLINES FOR ${dayName}, ${dateStr}`;
+    }
+
+    const list = document.getElementById('headlinesList');
+    if (!list) return;
+
+    if (!articles.length) {
+        list.innerHTML = '<li class="headlines-empty">No headlines available</li>';
+        return;
+    }
+
+    list.innerHTML = articles.map(a => {
+        const tickers = (a.tickers || []).slice(0, 3).map(t =>
+            `<span class="headline-ticker">${t}</span>`
+        ).join('');
+
+        let timeStr = '';
+        if (a.published) {
+            const mins = Math.round((Date.now() - new Date(a.published).getTime()) / 60000);
+            timeStr = mins < 1 ? 'just now' : mins < 60 ? `${mins}m ago` : mins < 1440 ? `${Math.round(mins / 60)}h ago` : `${Math.round(mins / 1440)}d ago`;
+        }
+
+        const source = a.source ? `<span>${a.source}</span>` : '';
+
+        return `<li>
+            <a class="headline-link" href="${a.url}" target="_blank" rel="noopener">${a.title}</a>
+            <div class="headline-meta">
+                ${source}
+                ${timeStr ? `<span>${timeStr}</span>` : ''}
+                ${tickers ? `<span class="headline-tickers">${tickers}</span>` : ''}
+            </div>
+        </li>`;
+    }).join('');
 }
 
 function renderPortfolioSummaryWidget(summary) {

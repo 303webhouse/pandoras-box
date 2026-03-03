@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Pandora - Real-time Trading Signal Dashboard">
     <title>Pandora</title>
-    <link rel="stylesheet" href="/styles.css?v=41">
+    <link rel="stylesheet" href="/styles.css?v=42">
     <link rel="manifest" href="/manifest.json">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -126,6 +126,13 @@
                 <div class="tf-factors" id="tfIntradayFactors" style="display:none;"></div>
                 <div class="tf-expand-toggle" data-target="tfIntradayFactors">Factors ></div>
             </div>
+            <div class="headlines-card" id="headlinesCard">
+                <h3 id="headlinesHeading">HEADLINES</h3>
+                <ul class="headlines-list" id="headlinesList">
+                    <li class="headlines-empty">Loading headlines...</li>
+                </ul>
+            </div>
+
             <div class="tf-card" id="tfSwing" data-timeframe="swing">
                 <h3>SWING</h3>
                 <div class="tf-display">
@@ -2123,7 +2130,7 @@
     <!-- TradingView Widget Script -->
     <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
-    <script src="/app.js?v=55"></script>
+    <script src="/app.js?v=56"></script>
     <script src="/analytics.js?v=2"></script>
 </body>
 </html>
