@@ -183,6 +183,9 @@ body {
     overflow: hidden;
     display: flex;
     flex-direction: column;
+    /* Height is set by JS to match .bias-composite-panel */
+    align-self: start;
+    max-height: 400px; /* fallback until JS syncs */
 }
 
 #tfIntraday {
