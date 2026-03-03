@@ -1,6 +1,6 @@
 # Pivot — Project Rules
 
-**Last Updated:** February 19, 2026
+**Last Updated:** March 3, 2026
 
 ---
 
@@ -31,7 +31,7 @@ The system must deliver:
 2. **Fail visible** — If data is stale or missing, say so explicitly. Never silently use bad data.
 3. **Bias toward action** — Ship incremental improvements over perfect plans
 4. **Modular architecture** — New factors, signals, and strategies plug in without rewriting core
-5. **Brief-driven development** — Architecture decisions happen in Claude.ai conversations. Implementation specs are written as markdown briefs and handed to Codex for building.
+5. **Brief-driven development** — Architecture decisions happen in Claude.ai conversations. Implementation specs are written as markdown briefs and handed to Claude Code for building. Codex is a backup builder only.
 6. **Empty-safe env vars** — Always use `os.getenv("VAR") or default` pattern, never `os.getenv("VAR", default)` to handle Railway's empty string references.
 7. **Data source priority** — Polygon.io is the primary data source for all equity/ETF price data (OHLCV, volume, snapshots) and options data (chains, greeks, IV, OI). yfinance is the fallback source, used only when Polygon fails or for data types Polygon does not cover. VIX and index tickers (`^VIX`, `^VIX3M`, `^ADVN`, `^DECLN`, `DX-Y.NYB`) remain on yfinance — no Polygon Indices subscription.
 
@@ -76,32 +76,33 @@ The system must deliver:
 | Database | PostgreSQL | Railway-hosted (fabulous-essence project) |
 | Cache | Redis (Upstash) | Real-time state, requires SSL (`rediss://`) |
 | Frontend | Vanilla JS PWA | No framework, dark teal UI, 6-tab analytics |
-| Discord Bot | discord.py | VPS: 188.245.250.2 (`/opt/pivot`) |
-| LLM | Claude Sonnet 4.6 via OpenRouter | `anthropic/claude-sonnet-4.6` — analysis, evaluation, briefs |
+| Pivot II | OpenClaw + discord.py | VPS: 188.245.250.2 (`/opt/openclaw`) |
+| LLM (Pivot II) | Anthropic API direct | Haiku 4.5 for chat/analysis, Sonnet 4.5 for briefs/synthesis |
+| LLM (Committee) | Anthropic API direct | Haiku for TORO/URSA/TECHNICALS, Sonnet for Pivot synthesizer |
 | Charts | TradingView embed | Webhook alerts for automation |
 | Version Control | GitHub | `303webhouse/pandoras-box`, push to `main` auto-deploys Railway |
-| VPS | Hetzner (PIVOT-EU) | 188.245.250.2, Debian, hosts bot + collector |
+| VPS | Hetzner (PIVOT-EU) | 188.245.250.2, Debian, hosts Pivot II + collectors |
 
 ---
 
 ## Deployment Rules
 
 - **Railway backend**: Auto-deploys on push to `main`. Postgres must be in the SAME Railway project — never use `${{Postgres.*}}` references across different projects.
-- **VPS Discord bot**: Manual deploy via SSH → `git pull` → `systemctl restart pivot-bot`. Always check `journalctl -u pivot-bot -f` after restart.
+- **VPS Pivot II**: Manual deploy via SSH → edit files at `/opt/openclaw/workspace/scripts/` → `systemctl restart openclaw`. Always check `journalctl -u openclaw -f` after restart.
+- **VPS has no git repo**: Deployment uses direct file edits on VPS + service restart, OR `rsync` from local clone. There is no `git pull` on VPS.
 - **One bot instance only**: The Discord bot runs on VPS only. Never run a second instance on Railway (causes duplicate gateway connections).
-- **VPS has TWO services**: `pivot-bot.service` (Discord bot) and `pivot-collector.service` (data collector). Both managed via systemd.
-- **bot.py source of truth**: Edit `backend/discord_bridge/bot.py` in the repo. The VPS copy at `/opt/pivot/discord_bridge/bot.py` is synced from git.
+- **VPS has THREE services**: `openclaw` (Pivot chat/briefs/pollers), `pivot-collector.service` (data collectors), `pivot2-interactions.service` (committee button handler). All managed via systemd.
 
 ---
 
 ## Workflow Rules
 
 - **Architecture decisions**: Discuss in Claude.ai with Nick → document rationale
-- **Implementation**: Write detailed markdown brief → hand to Codex → deploy → verify
+- **Implementation**: Write detailed markdown brief → hand to Claude Code → deploy → verify. Codex is backup only.
 - **New indicators**: Classify as MACRO/TECHNICAL/FLOW/BREADTH before building
-- **New signals**: Must include evaluation template in `pivot/llm/prompts.py`
+- **New signals**: Must include evaluation template in committee prompts or Pivot system prompt
 - **UI changes**: Ask Nick how it should look — suggest options but get approval
-- **Prompt changes**: `prompts.py` is Pivot's brain — edit carefully, test in Discord after deploy
+- **Prompt changes**: Committee prompts and Pivot system prompts are the system's brain — edit carefully, test after deploy
 - **Step-by-step guidance**: Nick has ADHD — break complex tasks into small, manageable chunks
 - **Use Claude Code for implementation, Claude.ai for architecture/planning**
 
@@ -109,7 +110,7 @@ The system must deliver:
 
 ## Agent Maintenance Protocol
 
-**All Claude.ai (Opus) and Claude Code (Codex/Sonnet) agents must follow these rules to maintain project continuity.**
+**All Claude.ai (Opus) and Claude Code agents must follow these rules to maintain project continuity.**
 
 ### 1. Update Documentation After Significant Changes
 
@@ -156,5 +157,5 @@ When making architecture decisions, document **why** not just **what**. Future a
 - [ ] Auto-scout: screen UW flow + Alpha Feed ideas → Discord picks (Phase 2G)
 - [ ] Crypto autonomous trading sandbox (Coinbase)
 - [ ] Robinhood trade import (CSV parser, signal matching)
-- [ ] DXY macro factor (in Codex brief)
+- [ ] DXY macro factor
 - [ ] Dark Pool Whale Hunter RVOL conviction modifier
