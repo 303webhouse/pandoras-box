@@ -35,6 +35,8 @@ After completing work on a Trading Team brief, append a new entry at the top of 
 | 05B — Adaptive Calibration (needs ~3 weeks of outcome data) | ⬜ | ⬜ | ⬜ | ⬜ |
 | 06 — Post-Trade Autopsy | ✅ | ✅ | ✅ | ✅ |
 | 06A — Twitter Sentiment Context + Skill | ✅ | ✅ | ✅ | ✅ |
+| 06A-news — News Context Pipeline (Polygon) | ✅ | ⬜ | ⬜ | ⬜ |
+| 06B — Holy Grail Pullback Continuation | ✅ | ✅ | ✅ | ✅ |
 | 07 — Watchlist Re-Scorer | ⬜ | ⬜ | ⬜ | ⬜ |
 | 08 — Librarian Phase 1 (Knowledge Base) | ⬜ | ⬜ | ⬜ | ⬜ |
 | 09 — Librarian Phase 2 (Agent Training Loop) | ⬜ | ⬜ | ⬜ | ⬜ |
@@ -43,6 +45,13 @@ After completing work on a Trading Team brief, append a new entry at the top of 
 ---
 
 ## Log Entries
+
+### 2026-03-03 — Brief 06B Built + Deployed + Verified
+**Agent:** Claude Code (implementation), Claude.ai Opus (brief/architecture)
+**What happened:** Holy Grail Pullback Continuation (Raschke-style) integrated into full signal pipeline. Committee double-pass review approved the indicator with two modifications: tighter 0.15% EMA tolerance for webhooks, and DI spread carried via rvol field. Four parts deployed: (1) PineScript webhook version with JSON alert payload, (2) Railway backend handler with timeframe-based signal typing (HOLY_GRAIL_1H base 50, HOLY_GRAIL_15M base 40), (3) VPS pre-qualified committee routing, (4) strategy documentation. Curl tests verified: 1H LONG (379ms), 15M SHORT (550ms), VPS pre-qualification confirmed.
+**Files changed:** `docs/pinescript/holy_grail_webhook_v1.pine` (new), `docs/pinescript/holy_grail_pullback.pine` (new — visual version), `backend/webhooks/tradingview.py` (modified — holy_grail route + handler), `backend/scoring/trade_ideas_scorer.py` (modified — 3 base score entries), `pivot2_committee.py` on VPS (modified — holy_grail added to TV_COMMITTEE_STRATEGIES), `docs/approved-strategies/holy-grail-pullback.md` (new)
+**Deviations from brief:** None
+**Next blocker:** Nick needs to load `holy_grail_webhook_v1.pine` on TradingView, apply to SPY/QQQ on 15m and 1h charts, set webhook alert URL. Brief 06A-news (Polygon news context) still awaiting API key from Nick.
 
 ### 2026-03-02 — Trade Ideas 4-Phase Overhaul + PineScript v2 + Whale Confluence
 **Agent:** Claude.ai (Opus) for architecture/briefs, Claude Code for Railway/VPS deployment
