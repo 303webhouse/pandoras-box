@@ -2139,6 +2139,61 @@ body.override-active-bearish .override-toggle[data-active="true"] {
     font-weight: 600;
 }
 
+/* Mark price display */
+.position-mark {
+    margin-top: 8px;
+    padding: 6px 8px;
+    background: rgba(20, 184, 166, 0.06);
+    border-radius: 4px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.mark-legs {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.mark-leg {
+    color: var(--text-secondary);
+    font-size: 10px;
+}
+
+.mark-leg-price {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+
+.mark-divider {
+    color: var(--text-secondary);
+    opacity: 0.4;
+}
+
+.mark-net {
+    color: var(--accent-teal);
+    font-weight: 600;
+}
+
+.mark-label {
+    color: var(--text-secondary);
+    font-size: 10px;
+}
+
+.mark-price {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+
+.pnl-freshness {
+    font-size: 9px;
+    opacity: 0.5;
+    font-weight: 400;
+}
+
 .position-pnl {
     margin-top: 10px;
     padding-top: 10px;

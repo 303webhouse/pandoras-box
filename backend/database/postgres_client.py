@@ -840,6 +840,8 @@ async def init_database():
 
                 -- Current state
                 current_price NUMERIC,
+                long_leg_price NUMERIC,
+                short_leg_price NUMERIC,
                 unrealized_pnl NUMERIC,
                 price_updated_at TIMESTAMPTZ,
 
@@ -877,6 +879,12 @@ async def init_database():
         """)
         await conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_unified_positions_signal ON unified_positions(signal_id)
+        """)
+        # Add leg price columns for mark-to-market display
+        await conn.execute("""
+            ALTER TABLE unified_positions
+            ADD COLUMN IF NOT EXISTS long_leg_price NUMERIC,
+            ADD COLUMN IF NOT EXISTS short_leg_price NUMERIC
         """)
 
         # Brief 07: Cash flow events for accurate P&L calculation

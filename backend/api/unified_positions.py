@@ -1017,6 +1017,8 @@ async def run_mark_to_market() -> dict:
         current_price = None
         unrealized = None
         greeks_json = None
+        long_leg_price = None
+        short_leg_price = None
 
         # --- Polygon path: real spread-level pricing ---
         if use_polygon and expiry and long_strike:
@@ -1028,6 +1030,8 @@ async def run_mark_to_market() -> dict:
                     )
                     if result and result.get("spread_value") is not None:
                         current_price = result["spread_value"]
+                        long_leg_price = result.get("long_mid")
+                        short_leg_price = result.get("short_mid")
                         if "credit" in structure:
                             unrealized = round((entry_price - current_price) * 100 * quantity, 2)
                         else:
@@ -1047,6 +1051,7 @@ async def run_mark_to_market() -> dict:
                     )
                     if result and result.get("option_value") is not None:
                         current_price = result["option_value"]
+                        long_leg_price = result["option_value"]
                         unrealized = round((current_price - entry_price) * 100 * quantity, 2)
                         greeks_json = json.dumps({
                             "greeks": result.get("greeks"),
@@ -1076,9 +1081,10 @@ async def run_mark_to_market() -> dict:
                 await conn.execute("""
                     UPDATE unified_positions SET
                         current_price = $1, unrealized_pnl = $2,
+                        long_leg_price = $3, short_leg_price = $4,
                         price_updated_at = NOW(), updated_at = NOW()
-                    WHERE position_id = $3
-                """, current_price, unrealized, row["position_id"])
+                    WHERE position_id = $5
+                """, current_price, unrealized, long_leg_price, short_leg_price, row["position_id"])
             updated += 1
 
     result = {"status": "updated", "updated": updated, "source": "polygon" if use_polygon else "yfinance"}
