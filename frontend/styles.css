@@ -157,10 +157,10 @@ body {
     box-shadow: 0 4px 12px rgba(20, 184, 166, 0.3);
 }
 
-/* Bias Section — 4-col 2-row grid (Brief 10 layout) */
+/* Bias Section — 5-col 2-row grid */
 .bias-section {
     display: grid;
-    grid-template-columns: 1fr 1fr 1fr 1fr;
+    grid-template-columns: 1.3fr 1.3fr 1fr 1fr 1fr;
     grid-template-rows: auto 1fr;
     gap: 16px;
     margin-bottom: 20px;
@@ -172,14 +172,9 @@ body {
     grid-row: 1 / 3;
 }
 
-#tfIntraday {
-    grid-column: 2;
-    grid-row: 1;
-}
-
 .headlines-card {
     grid-column: 2;
-    grid-row: 2;
+    grid-row: 1 / 3;
     background: var(--card-bg);
     border: 2px solid var(--border-color);
     border-radius: 10px;
@@ -188,6 +183,11 @@ body {
     overflow: hidden;
     display: flex;
     flex-direction: column;
+}
+
+#tfIntraday {
+    grid-column: 3;
+    grid-row: 1;
 }
 
 .headlines-card h3 {
@@ -200,6 +200,7 @@ body {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    flex-shrink: 0;
 }
 
 .headlines-list {
@@ -208,6 +209,25 @@ body {
     padding: 0;
     overflow-y: auto;
     flex: 1;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(20, 184, 166, 0.3) transparent;
+}
+
+.headlines-list::-webkit-scrollbar {
+    width: 5px;
+}
+
+.headlines-list::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.headlines-list::-webkit-scrollbar-thumb {
+    background: rgba(20, 184, 166, 0.3);
+    border-radius: 3px;
+}
+
+.headlines-list::-webkit-scrollbar-thumb:hover {
+    background: rgba(20, 184, 166, 0.5);
 }
 
 .headlines-list li {
@@ -263,17 +283,17 @@ body {
 }
 
 #tfSwing {
-    grid-column: 3;
-    grid-row: 1;
-}
-
-#tfMacro {
     grid-column: 4;
     grid-row: 1;
 }
 
+#tfMacro {
+    grid-column: 5;
+    grid-row: 1;
+}
+
 .portfolio-summary-card {
-    grid-column: 3 / 5;
+    grid-column: 3 / 6;
     grid-row: 2;
     background: var(--card-bg);
     border: 2px solid var(--border-color);
