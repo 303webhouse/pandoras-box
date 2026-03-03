@@ -105,9 +105,10 @@ shortTarget = shortStop > 0 and shortRisk > 0 ? close - (shortRisk * 2.0) : na
 diSpread = plusDI - minusDI
 
 // Fire webhook alerts
+// NOTE: PineScript str.format() uses {{ and }} for literal braces
 if enableWebhook and longSignal
     alert(str.format(
-     '\{"ticker": "{0}", "strategy": "holy_grail", "direction": "LONG", "entry_price": {1}, "stop_loss": {2}, "target_1": {3}, "adx": {4}, "rsi": {5}, "timeframe": "{6}", "rvol": {7}\}',
+     '{{"ticker": "{0}", "strategy": "holy_grail", "direction": "LONG", "entry_price": {1}, "stop_loss": {2}, "target_1": {3}, "adx": {4}, "rsi": {5}, "timeframe": "{6}", "rvol": {7}}}',
      syminfo.ticker,
      math.round(close, 2),
      math.round(nz(longStop, close * 0.99), 2),
@@ -120,7 +121,7 @@ if enableWebhook and longSignal
 
 if enableWebhook and shortSignal
     alert(str.format(
-     '\{"ticker": "{0}", "strategy": "holy_grail", "direction": "SHORT", "entry_price": {1}, "stop_loss": {2}, "target_1": {3}, "adx": {4}, "rsi": {5}, "timeframe": "{6}", "rvol": {7}\}',
+     '{{"ticker": "{0}", "strategy": "holy_grail", "direction": "SHORT", "entry_price": {1}, "stop_loss": {2}, "target_1": {3}, "adx": {4}, "rsi": {5}, "timeframe": "{6}", "rvol": {7}}}',
      syminfo.ticker,
      math.round(close, 2),
      math.round(nz(shortStop, close * 1.01), 2),
