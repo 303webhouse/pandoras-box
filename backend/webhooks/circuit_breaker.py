@@ -21,7 +21,7 @@ Decay System (condition-verified):
 - No-downgrade: spy_down_1pct cannot overwrite spy_down_2pct (severity ranking)
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
 from datetime import datetime, timezone, timedelta
@@ -548,8 +548,46 @@ async def apply_circuit_breaker(trigger: str) -> Dict[str, Any]:
     return _circuit_breaker_state
 
 
+async def _circuit_breaker_background_work(state: dict):
+    """Heavy follow-up work after circuit breaker triggers. Runs as background task."""
+    # Force re-score all factors with fresh data, then recompute composite
+    try:
+        from bias_engine.factor_scorer import score_all_factors
+        logger.info("Circuit breaker: forcing full factor re-score...")
+        await score_all_factors()
+    except Exception as e:
+        logger.warning("Could not re-score factors: %s", e)
+
+    try:
+        from bias_engine.composite import compute_composite
+        logger.info("Circuit breaker: recomputing composite with CB constraints...")
+        await compute_composite()
+    except Exception as e:
+        logger.warning("Could not recompute composite: %s", e)
+
+    # Also refresh legacy daily bias for backward compatibility
+    try:
+        from scheduler.bias_scheduler import refresh_daily_bias
+        await refresh_daily_bias()
+    except Exception as e:
+        logger.warning("Could not trigger legacy bias refresh: %s", e)
+
+    # Broadcast circuit breaker state via WebSocket
+    try:
+        from websocket.broadcaster import manager
+        await manager.broadcast({
+            "type": "circuit_breaker",
+            "state": state,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        })
+    except Exception as e:
+        logger.warning("Could not broadcast circuit breaker state: %s", e)
+
+    logger.info("Circuit breaker background work complete for trigger: %s", state.get("trigger"))
+
+
 @router.post("/circuit_breaker")
-async def receive_circuit_breaker_alert(alert: CircuitBreakerTrigger):
+async def receive_circuit_breaker_alert(alert: CircuitBreakerTrigger, background_tasks: BackgroundTasks):
     """
     Receive circuit breaker trigger from TradingView
 
@@ -565,41 +603,11 @@ async def receive_circuit_breaker_alert(alert: CircuitBreakerTrigger):
     logger.info("Circuit breaker webhook received: %s", alert.trigger)
 
     try:
-        # Apply circuit breaker logic
+        # Apply circuit breaker logic (fast — in-memory + Redis write)
         state = await apply_circuit_breaker(alert.trigger)
 
-        # Force re-score all factors with fresh data, then recompute composite
-        try:
-            from bias_engine.factor_scorer import score_all_factors
-            logger.info("Circuit breaker: forcing full factor re-score...")
-            await score_all_factors()
-        except Exception as e:
-            logger.warning("Could not re-score factors: %s", e)
-
-        try:
-            from bias_engine.composite import compute_composite
-            logger.info("Circuit breaker: recomputing composite with CB constraints...")
-            await compute_composite()
-        except Exception as e:
-            logger.warning("Could not recompute composite: %s", e)
-
-        # Also refresh legacy daily bias for backward compatibility
-        try:
-            from scheduler.bias_scheduler import refresh_daily_bias
-            await refresh_daily_bias()
-        except Exception as e:
-            logger.warning("Could not trigger legacy bias refresh: %s", e)
-
-        # Broadcast circuit breaker state via WebSocket
-        try:
-            from websocket.broadcaster import manager
-            await manager.broadcast({
-                "type": "circuit_breaker",
-                "state": state,
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            })
-        except Exception as e:
-            logger.warning("Could not broadcast circuit breaker state: %s", e)
+        # Schedule heavy re-scoring work as background task so TradingView gets a fast response
+        background_tasks.add_task(_circuit_breaker_background_work, state)
 
         return {
             "status": "success",
