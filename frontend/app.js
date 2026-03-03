@@ -1106,7 +1106,10 @@ async function loadInitialData() {
 
     // Initialize Scout Alerts section
     renderScoutAlerts();
-    
+
+    // Schedule headline refreshes at midday and 1h before close
+    startHeadlineScheduler();
+
     // Initialize timeframe card toggles
     initTimeframeToggles();
 
@@ -8383,7 +8386,7 @@ async function loadPortfolioSummary() {
 // ── Headlines ────────────────────────────────────────────────────────
 async function loadHeadlines() {
     try {
-        const response = await fetch(`${API_URL}/market/news?limit=10`);
+        const response = await fetch(`${API_URL}/market/news?limit=20`);
         const data = await response.json();
         renderHeadlines(data.articles || []);
     } catch (error) {
@@ -8391,6 +8394,30 @@ async function loadHeadlines() {
         const list = document.getElementById('headlinesList');
         if (list) list.innerHTML = '<li class="headlines-empty">Headlines unavailable</li>';
     }
+}
+
+// Refresh headlines at midday (12:00 ET) and 1h before close (15:00 ET)
+function startHeadlineScheduler() {
+    const REFRESH_HOURS_ET = [12, 15]; // noon and 3pm Eastern
+    const fired = new Set();
+
+    setInterval(() => {
+        // Get current ET time
+        const nowET = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+        const h = nowET.getHours();
+        const m = nowET.getMinutes();
+        const day = nowET.getDay();
+        // Weekdays only
+        if (day === 0 || day === 6) return;
+        const key = `${nowET.toDateString()}-${h}`;
+        if (REFRESH_HOURS_ET.includes(h) && m < 5 && !fired.has(key)) {
+            fired.add(key);
+            console.log(`Headlines scheduled refresh at ${h}:00 ET`);
+            loadHeadlines();
+        }
+        // Clean old keys at midnight
+        if (h === 0 && m < 2) fired.clear();
+    }, 60000); // check every minute
 }
 
 function renderHeadlines(articles) {
