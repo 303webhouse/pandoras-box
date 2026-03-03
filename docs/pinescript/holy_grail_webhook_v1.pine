@@ -1,0 +1,149 @@
+// Holy Grail Pullback Continuation — Webhook Version
+// Linda Raschke-style continuation entries with JSON webhook for Trading Hub pipeline.
+// ADX >= 25 (strong trend) + pullback to 20 EMA + confirmation candle
+//
+// @version=5
+indicator("Holy Grail Webhook", shorttitle="HG Webhook", overlay=true, max_labels_count=100)
+
+// ============ INPUTS ============
+
+grpSetup = "Setup"
+adxLen         = input.int(14, "ADX Length", minval=5, maxval=50, group=grpSetup)
+adxThreshold   = input.float(25.0, "ADX Threshold", minval=15.0, step=1.0, group=grpSetup)
+emaLen         = input.int(20, "EMA Length", minval=5, maxval=50, group=grpSetup)
+touchTolerancePct = input.float(0.15, "EMA Touch Tolerance %", minval=0.0, step=0.05, group=grpSetup,
+     tooltip="How close price must get to the EMA to count as a pullback touch. 0.15 = within 0.15% of EMA. Tighter than visual version for fewer false signals.")
+cooldownBars   = input.int(5, "Cooldown Bars Between Signals", minval=1, maxval=20, group=grpSetup)
+
+grpFilter = "Filters"
+useRsiFilter   = input.bool(true, "RSI Filter", group=grpFilter,
+     tooltip="Long: RSI must be below 70 (not overbought). Short: RSI must be above 30 (not oversold).")
+rsiLen         = input.int(14, "RSI Length", minval=5, maxval=50, group=grpFilter)
+
+grpVisual = "Visual"
+showEma        = input.bool(true, "Show 20 EMA", group=grpVisual)
+showSignalLabels = input.bool(true, "Show Signal Labels", group=grpVisual)
+
+grpWebhook = "Webhook"
+enableWebhook = input.bool(true, "Enable Webhook Alerts", group=grpWebhook,
+     tooltip="When enabled, fires alert() with JSON payload on signals for the Trading Hub pipeline.")
+
+// ============ CALCULATIONS ============
+
+// ADX + DI
+[plusDI, minusDI, adx] = ta.dmi(adxLen, adxLen)
+
+// 20 EMA
+ema20 = ta.ema(close, emaLen)
+
+// RSI
+rsi = ta.rsi(close, rsiLen)
+
+// EMA touch detection (within tolerance band)
+emaTolerance = ema20 * (touchTolerancePct / 100.0)
+emaUpper = ema20 + emaTolerance
+emaLower = ema20 - emaTolerance
+
+// Pullback bar: price touches or crosses EMA zone
+longPullbackBar  = low <= emaUpper and low >= emaLower or (low < emaLower and close >= emaLower)
+shortPullbackBar = high >= emaLower and high <= emaUpper or (high > emaUpper and close <= emaUpper)
+
+// Confirmation: next bar closes back in trend direction
+// Long: ADX strong, uptrend (DI+ > DI-), pulled back last bar, closes above EMA
+longConfirmation = adx >= adxThreshold and plusDI > minusDI and longPullbackBar[1] and close > ema20
+
+// Short: ADX strong, downtrend (DI- > DI+), pulled back last bar, closes below EMA
+shortConfirmation = adx >= adxThreshold and minusDI > plusDI and shortPullbackBar[1] and close < ema20
+
+// RSI filter
+longRsiOk  = not useRsiFilter or rsi < 70
+shortRsiOk = not useRsiFilter or rsi > 30
+
+// Signal flags (before cooldown)
+longRaw  = longConfirmation and longRsiOk
+shortRaw = shortConfirmation and shortRsiOk
+
+// Cooldown logic
+var int lastLongSignalBar  = na
+var int lastShortSignalBar = na
+
+longCooldownOk  = na(lastLongSignalBar)  or (bar_index - lastLongSignalBar)  >= cooldownBars
+shortCooldownOk = na(lastShortSignalBar) or (bar_index - lastShortSignalBar) >= cooldownBars
+
+longSignal  = longRaw  and longCooldownOk
+shortSignal = shortRaw and shortCooldownOk
+
+if longSignal
+    lastLongSignalBar := bar_index
+if shortSignal
+    lastShortSignalBar := bar_index
+
+// ============================================================================
+// WEBHOOK PAYLOAD
+// ============================================================================
+
+// Track pullback bar levels for stop loss
+var float pullbackLow  = na
+var float pullbackHigh = na
+
+if longPullbackBar
+    pullbackLow := low
+
+if shortPullbackBar
+    pullbackHigh := high
+
+// Calculate stop and target levels
+longStop   = pullbackLow
+longRisk   = close - longStop
+longTarget = longStop > 0 and longRisk > 0 ? close + (longRisk * 2.0) : na
+
+shortStop   = pullbackHigh
+shortRisk   = shortStop - close
+shortTarget = shortStop > 0 and shortRisk > 0 ? close - (shortRisk * 2.0) : na
+
+// DI spread (useful for scoring)
+diSpread = plusDI - minusDI
+
+// Fire webhook alerts
+if enableWebhook and longSignal
+    alert(str.format(
+     '\{"ticker": "{0}", "strategy": "holy_grail", "direction": "LONG", "entry_price": {1}, "stop_loss": {2}, "target_1": {3}, "adx": {4}, "rsi": {5}, "timeframe": "{6}", "rvol": {7}\}',
+     syminfo.ticker,
+     math.round(close, 2),
+     math.round(nz(longStop, close * 0.99), 2),
+     math.round(nz(longTarget, close * 1.02), 2),
+     math.round(adx, 1),
+     math.round(ta.rsi(close, 14), 1),
+     timeframe.period,
+     math.round(nz(diSpread, 0), 1)
+     ), alert.freq_once_per_bar)
+
+if enableWebhook and shortSignal
+    alert(str.format(
+     '\{"ticker": "{0}", "strategy": "holy_grail", "direction": "SHORT", "entry_price": {1}, "stop_loss": {2}, "target_1": {3}, "adx": {4}, "rsi": {5}, "timeframe": "{6}", "rvol": {7}\}',
+     syminfo.ticker,
+     math.round(close, 2),
+     math.round(nz(shortStop, close * 1.01), 2),
+     math.round(nz(shortTarget, close * 0.98), 2),
+     math.round(adx, 1),
+     math.round(ta.rsi(close, 14), 1),
+     timeframe.period,
+     math.round(nz(diSpread, 0), 1)
+     ), alert.freq_once_per_bar)
+
+// ============ VISUALS ============
+
+plot(showEma ? ema20 : na, "20 EMA", color=color.new(color.orange, 20), linewidth=2)
+
+plotshape(showSignalLabels and longSignal,  title="Long Signal",  style=shape.labelup,
+     location=location.belowbar, color=color.new(color.green, 20), text="HG", textcolor=color.white, size=size.small)
+plotshape(showSignalLabels and shortSignal, title="Short Signal", style=shape.labeldown,
+     location=location.abovebar, color=color.new(color.red, 20),   text="HG", textcolor=color.white, size=size.small)
+
+// ADX background tint when trend is strong
+bgcolor(adx >= adxThreshold ? color.new(plusDI > minusDI ? color.green : color.red, 95) : na)
+
+// ============ ALERTS ============
+
+alertcondition(longSignal,  title="Holy Grail Long",  message="Holy Grail LONG on {{ticker}} at {{close}}")
+alertcondition(shortSignal, title="Holy Grail Short", message="Holy Grail SHORT on {{ticker}} at {{close}}")
