@@ -1110,6 +1110,11 @@ async function loadInitialData() {
     // Schedule headline refreshes at midday and 1h before close
     startHeadlineScheduler();
 
+    // Sync headlines height to Market Bias panel (after render settles)
+    requestAnimationFrame(() => syncHeadlinesHeight());
+    setTimeout(() => syncHeadlinesHeight(), 500); // second pass after late paints
+    window.addEventListener('resize', syncHeadlinesHeight);
+
     // Initialize timeframe card toggles
     initTimeframeToggles();
 
@@ -8384,6 +8389,18 @@ async function loadPortfolioSummary() {
 }
 
 // ── Headlines ────────────────────────────────────────────────────────
+
+// Sync headlines card height to match the Market Bias composite panel
+function syncHeadlinesHeight() {
+    const biasPanel = document.querySelector('.bias-composite-panel');
+    const headlinesCard = document.getElementById('headlinesCard');
+    if (!biasPanel || !headlinesCard) return;
+    const h = biasPanel.offsetHeight;
+    if (h > 0) {
+        headlinesCard.style.maxHeight = h + 'px';
+    }
+}
+
 async function loadHeadlines() {
     try {
         const response = await fetch(`${API_URL}/market/news?limit=20`);
