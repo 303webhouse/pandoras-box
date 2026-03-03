@@ -93,7 +93,7 @@ class TradingViewAlert(BaseModel):
     ticker: str
     strategy: str
     direction: str  # "LONG" or "SHORT"
-    entry_price: float
+    entry_price: Optional[float] = 0  # Optional: Scout signals don't send entry_price
     stop_loss: Optional[float] = None
     target_1: Optional[float] = None
     target_2: Optional[float] = None
