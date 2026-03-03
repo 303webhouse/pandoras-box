@@ -12,6 +12,7 @@ from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
 from datetime import datetime
+import asyncio
 import logging
 
 from strategies.triple_line import validate_triple_line_signal
@@ -52,6 +53,22 @@ CRYPTO_TICKERS = {
 def is_crypto_ticker(ticker: str) -> bool:
     """Check if a ticker is a cryptocurrency"""
     return ticker.upper() in CRYPTO_TICKERS
+
+
+async def _recompute_composite_background(factor_name: str) -> None:
+    """
+    Background task: recompute composite bias after a factor update.
+    Runs AFTER the webhook response is sent so TradingView doesn't timeout.
+    """
+    try:
+        from bias_engine.composite import compute_composite
+        composite = await compute_composite()
+        logger.info(
+            "🔄 Background composite recomputed after %s: %s (%+.2f)",
+            factor_name, composite.bias_level, composite.composite_score,
+        )
+    except Exception as e:
+        logger.error("🔄 Background composite recomputation failed after %s: %s", factor_name, e)
 
 
 async def _write_signal_outcome(signal_data: dict) -> None:
@@ -684,20 +701,16 @@ async def receive_breadth_data(payload: BreadthPayload):
 
     result = await store_breadth_data(uvol=payload.uvol, dvol=payload.dvol)
 
-    # Auto-score and feed into composite bias engine
+    # Score the factor and store reading (fast — Redis only)
     try:
         reading = await compute_breadth_score()
         if reading:
-            from bias_engine.composite import store_factor_reading, compute_composite
+            from bias_engine.composite import store_factor_reading
             await store_factor_reading(reading)
-            composite = await compute_composite()
-            logger.info(
-                "breadth factor scored: %+.2f (%s) -> composite %s (%+.2f)",
-                reading.score, reading.signal, composite.bias_level, composite.composite_score,
-            )
             result["factor_score"] = reading.score
             result["factor_signal"] = reading.signal
-            result["composite_bias"] = composite.bias_level
+            # Defer heavy composite recomputation to background
+            asyncio.ensure_future(_recompute_composite_background("breadth_intraday"))
         else:
             logger.warning("breadth factor scoring returned None")
     except Exception as e:
@@ -744,21 +757,16 @@ async def receive_tick_data(payload: TickDataPayload):
         tick_avg=payload.tick_avg,
     )
     
-    # Auto-score tick_breadth and feed into composite bias engine
+    # Score the factor and store reading (fast — Redis only)
     try:
-        # Read from Redis-backed source so factor timestamp reflects true source update time.
         reading = await compute_tick_score()
         if reading:
-            from bias_engine.composite import store_factor_reading, compute_composite
+            from bias_engine.composite import store_factor_reading
             await store_factor_reading(reading)
-            composite = await compute_composite()
-            logger.info(
-                f"📊 TICK factor scored: {reading.score:+.2f} ({reading.signal}) → "
-                f"composite {composite.bias_level} ({composite.composite_score:+.2f})"
-            )
             result["factor_score"] = reading.score
             result["factor_signal"] = reading.signal
-            result["composite_bias"] = composite.bias_level
+            # Defer heavy composite recomputation to background
+            asyncio.ensure_future(_recompute_composite_background("tick_breadth"))
         else:
             logger.warning("📊 TICK factor scoring returned None")
     except Exception as e:
@@ -798,7 +806,7 @@ async def receive_pcr_data(payload: PCRPayload):
     
     result = await store_pcr_data(pcr_value=payload.pcr, date=payload.date)
     
-    # Auto-score put_call_ratio and feed into composite bias engine
+    # Score the factor and store reading (fast — Redis only)
     try:
         pcr_data = {
             "pcr": payload.pcr,
@@ -807,16 +815,12 @@ async def receive_pcr_data(payload: PCRPayload):
         }
         reading = await compute_pcr_score(pcr_data)
         if reading:
-            from bias_engine.composite import store_factor_reading, compute_composite
+            from bias_engine.composite import store_factor_reading
             await store_factor_reading(reading)
-            composite = await compute_composite()
-            logger.info(
-                f"📊 PCR factor scored: {reading.score:+.2f} ({reading.signal}) → "
-                f"composite {composite.bias_level} ({composite.composite_score:+.2f})"
-            )
             result["factor_score"] = reading.score
             result["factor_signal"] = reading.signal
-            result["composite_bias"] = composite.bias_level
+            # Defer heavy composite recomputation to background
+            asyncio.ensure_future(_recompute_composite_background("put_call_ratio"))
         else:
             logger.warning("📊 PCR factor scoring returned None")
     except Exception as e:
