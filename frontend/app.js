@@ -8482,6 +8482,36 @@ function renderPositionsEnhanced() {
                 </div>`;
         }
 
+        // Current mark price display
+        let markLine = '';
+        const struct = (pos.structure || '').toLowerCase();
+        const isSpread = struct.includes('spread') || struct.includes('credit') || struct.includes('debit');
+        if (isSpread && pos.long_leg_price != null && pos.short_leg_price != null) {
+            markLine = `
+                <div class="position-mark">
+                    <div class="mark-legs">
+                        <span class="mark-leg">Long <span class="mark-leg-price">$${pos.long_leg_price.toFixed(2)}</span></span>
+                        <span class="mark-divider">/</span>
+                        <span class="mark-leg">Short <span class="mark-leg-price">$${pos.short_leg_price.toFixed(2)}</span></span>
+                    </div>
+                    <div class="mark-net">Net: $${pos.current_price?.toFixed(2) || '--'}</div>
+                </div>`;
+        } else if (pos.current_price != null) {
+            markLine = `
+                <div class="position-mark">
+                    <span class="mark-label">Mark</span>
+                    <span class="mark-price">$${pos.current_price.toFixed(2)}</span>
+                </div>`;
+        }
+
+        // Price freshness
+        let freshness = '';
+        if (pos.price_updated_at) {
+            const updatedAt = new Date(pos.price_updated_at);
+            const mins = Math.round((Date.now() - updatedAt.getTime()) / 60000);
+            freshness = mins < 1 ? 'just now' : mins < 60 ? `${mins}m ago` : `${Math.round(mins / 60)}h ago`;
+        }
+
         return `
             <div class="position-card" data-position-id="${posId}">
                 <button class="position-remove-btn" data-position-id="${posId}" title="Remove position">x</button>
@@ -8509,8 +8539,9 @@ function renderPositionsEnhanced() {
                     </div>
                 </div>
                 ${maxLossBar}
+                ${markLine}
                 <div class="position-pnl">
-                    <span class="pnl-label">Unrealized P&L</span>
+                    <span class="pnl-label">Unrealized P&L${freshness ? ` <span class="pnl-freshness">${freshness}</span>` : ''}</span>
                     <span class="pnl-value ${pnlClass}">${pnlStr}</span>
                 </div>
                 <div class="position-actions">
