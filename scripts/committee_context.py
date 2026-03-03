@@ -19,6 +19,14 @@ from pathlib import Path
 
 _log = logging.getLogger("committee_context")
 
+# News context (Brief 06A)
+try:
+    from committee_news import fetch_news_context, format_news_context
+    _HAS_NEWS = True
+except ImportError:
+    _HAS_NEWS = False
+    _log.warning("committee_news not available — news context disabled")
+
 
 def format_signal_context(signal: dict, context: dict) -> str:
     """
@@ -90,6 +98,42 @@ def format_signal_context(signal: dict, context: dict) -> str:
             f"UW analysis: {whale_meta.get('uw_screenshot_description', 'N/A')}\n"
             f"Confirmation delay: {whale_meta.get('confirmation_delay_seconds', 'N/A')}s"
         )
+
+    # ── Whale volume context (Whale Hunter indicator) ──
+    wv = context.get("whale_volume")
+    if wv and isinstance(wv, dict):
+        _ca = wv.get("cached_at", "")
+        _age = "recently"
+        try:
+            import datetime as _dm
+            _cd = _dm.datetime.fromisoformat(_ca.replace("Z","+00:00"))
+            _nu = _dm.datetime.now(_dm.timezone.utc)
+            _age = f"{int((_nu - _cd).total_seconds() / 60)} min ago"
+        except Exception:
+            pass
+        _lean = wv.get("lean", "?")
+        _rvol = wv.get("rvol", "?")
+        _bars = wv.get("consec_bars", "?")
+        _struct = "confirmed" if wv.get("structural") else "unconfirmed"
+        _regime = wv.get("regime", "?")
+        sections.append(
+            f"## WHALE VOLUME DETECTED ({_age})\n"
+            f"Lean: {_lean} | RVOL: {_rvol}x | Bars: {_bars}\n"
+            f"Structural: {_struct} | Regime: {_regime}\n"
+            f"NOTE: Volume-proxy, not dark pool data."
+        )
+
+    # Inject market news context (Brief 06A)
+    if _HAS_NEWS:
+        _polygon_key = _get_polygon_api_key()
+        if _polygon_key:
+            try:
+                news_data = fetch_news_context(api_key=_polygon_key, ticker=signal.get("ticker"))
+                news_text = format_news_context(news_data)
+                if news_text:
+                    sections.append(news_text)
+            except Exception as e:
+                _log.warning("News context injection failed: %s", e)
 
     # Inject Twitter sentiment context
     ticker = signal.get("ticker")
@@ -202,6 +246,21 @@ def _get_recent_lessons_context() -> str:
     except FileNotFoundError:
         pass
     return ""
+
+
+def _get_polygon_api_key() -> str | None:
+    """Get Polygon API key from environment or OpenClaw config."""
+    import os
+    key = os.environ.get("POLYGON_API_KEY", "")
+    if not key:
+        try:
+            cfg_path = Path("/home/openclaw/.openclaw/openclaw.json")
+            if cfg_path.exists():
+                cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+                key = (cfg.get("env") or {}).get("POLYGON_API_KEY", "")
+        except Exception:
+            pass
+    return key or None
 
 
 def get_bias_challenge_context(signal: dict, context: dict) -> str:
@@ -697,13 +756,13 @@ def format_technical_data(snapshot: dict) -> str:
         lines.append(vol_line)
         # Regime guidance (HV percentile as IV proxy — HV and IV are highly correlated for swing timeframes)
         if hv_pct < 25:
-            lines.append("Vol regime: Low HV — options premium is cheap relative to history. Debit structures (long options, debit spreads) are attractively priced for convex trades.")
+            lines.append("Vol regime: Low HV — options premium is cheap relative to history. Debit structures (long options, debit spreads) are attractive.")
         elif hv_pct < 50:
-            lines.append("Vol regime: Below-average HV — neutral premium environment. Debit spreads work well here.")
+            lines.append("Vol regime: Below-average HV — neutral premium environment.")
         elif hv_pct < 75:
-            lines.append("Vol regime: Elevated HV — options are historically expensive. Use debit SPREADS to reduce vega exposure while maintaining convex payoff. Reduce position size if needed.")
+            lines.append("Vol regime: Elevated HV — options are historically expensive. Lean toward selling premium (credit spreads).")
         else:
-            lines.append("Vol regime: High HV — premium is very expensive. Use tighter debit spreads (narrower width) or go further OTM to manage cost. Reduce size. Do NOT switch to credit/selling strategies — that's an institutional approach, not retail.")
+            lines.append("Vol regime: High HV — strong lean toward selling premium; avoid buying expensive options. Credit structures have structural edge.")
 
     return "\n".join(lines)
 
@@ -779,27 +838,7 @@ def fetch_portfolio_context(api_url: str) -> dict:
     base = api_url.rstrip("/")
     result = {}
 
-    # Try v2 unified positions summary first (Brief 10)
-    try:
-        req = urllib.request.Request(f"{base}/api/v2/positions/summary")
-        with urllib.request.urlopen(req, timeout=8) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-            if "position_count" in data:
-                result = {"v2_summary": data}
-                # Also try to fetch greeks from Polygon.io
-                try:
-                    greq = urllib.request.Request(f"{base}/api/v2/positions/greeks")
-                    with urllib.request.urlopen(greq, timeout=15) as gresp:
-                        greeks_data = json.loads(gresp.read().decode("utf-8"))
-                        if greeks_data.get("status") == "ok":
-                            result["greeks"] = greeks_data
-                except Exception as ge:
-                    _log.debug("Portfolio greeks unavailable: %s", ge)
-                return result
-    except Exception as e:
-        _log.debug("v2 portfolio summary unavailable, falling back to v1: %s", e)
-
-    # Fallback: Fetch balances
+    # Fetch balances
     try:
         req = urllib.request.Request(f"{base}/api/portfolio/balances")
         with urllib.request.urlopen(req, timeout=8) as resp:
@@ -807,7 +846,7 @@ def fetch_portfolio_context(api_url: str) -> dict:
     except Exception as e:
         _log.debug("Portfolio balances unavailable: %s", e)
 
-    # Fallback: Fetch active positions
+    # Fetch active positions
     try:
         req = urllib.request.Request(f"{base}/api/portfolio/positions")
         with urllib.request.urlopen(req, timeout=8) as resp:
@@ -823,51 +862,9 @@ def format_portfolio_context(portfolio: dict) -> str:
     if not portfolio:
         return ""
 
-    # v2 unified summary (Brief 10) — uses max_loss for capital at risk
-    v2 = portfolio.get("v2_summary")
-    if v2:
-        lines = ["## PORTFOLIO CONTEXT"]
-        bal = v2.get("account_balance", 0)
-        lines.append(f"Account: ${bal:,.0f} (Robinhood)")
-        count = v2.get("position_count", 0)
-        risk = v2.get("capital_at_risk", 0)
-        risk_pct = v2.get("capital_at_risk_pct", 0)
-        lines.append(f"Open: {count} positions | Capital at risk: ${risk:,.0f} ({risk_pct:.1f}% of account) — sum of max losses")
-        for p in (v2.get("positions") or []):
-            ticker = p.get("ticker", "?")
-            structure = (p.get("structure") or "equity").replace("_", " ")
-            strikes = ""
-            if p.get("long_strike") or p.get("short_strike"):
-                s_parts = [str(int(s)) for s in [p.get("long_strike"), p.get("short_strike")] if s]
-                strikes = "/".join(s_parts) + " "
-            expiry = str(p["expiry"])[:10] + " " if p.get("expiry") else ""
-            qty = p.get("quantity", 1)
-            max_loss = p.get("max_loss")
-            ml_str = f"max loss ${max_loss:,.0f}" if max_loss else "risk unknown"
-            dte = p.get("dte")
-            dte_str = f"DTE {dte}" if dte is not None else ""
-            lines.append(f"- {ticker} {structure} {strikes}{expiry}({qty} contracts) — {ml_str}, {dte_str}")
-        nearest = v2.get("nearest_dte")
-        if nearest is not None:
-            lines.append(f"Nearest expiry: {nearest} DTE")
-        net_dir = v2.get("net_direction", "FLAT")
-        bd = v2.get("direction_breakdown", {})
-        lines.append(f"Net lean: {net_dir.lower()} ({bd.get('long', 0)} bullish, {bd.get('short', 0)} bearish, {bd.get('mixed', 0)} neutral)")
-        # Greeks context (from Polygon.io if available)
-        greeks = portfolio.get("greeks")
-        if greeks:
-            port_g = greeks.get("portfolio", {})
-            lines.append(f"Portfolio greeks: delta {port_g.get('net_delta', '?')}, gamma {port_g.get('net_gamma', '?')}, theta {port_g.get('net_theta', '?')}/day, vega {port_g.get('net_vega', '?')}")
-            for tk, tg in (greeks.get("tickers") or {}).items():
-                if "error" not in tg:
-                    lines.append(f"  {tk}: delta {tg.get('net_delta', '?')}, theta {tg.get('net_theta', '?')}/day, underlying ${tg.get('underlying_price', '?')}")
-
-        lines.append("NOTE: Portfolio context is for awareness only. Evaluate this signal on its own setup quality.")
-        return "\n".join(lines)
-
-    # Fallback to v1 format
     lines = ["## PORTFOLIO CONTEXT"]
 
+    # Account balance
     balances = portfolio.get("balances") or []
     rh = None
     account_balance = None
@@ -876,7 +873,7 @@ def format_portfolio_context(portfolio: dict) -> str:
             rh = b
             break
     if not rh and balances:
-        rh = balances[0]
+        rh = balances[0]  # fallback to first account
 
     if rh:
         account_balance = rh.get("balance")
@@ -886,6 +883,7 @@ def format_portfolio_context(portfolio: dict) -> str:
             bal_str += f" | Buying power: ${buying_power:,.0f}"
         lines.append(bal_str)
 
+    # Active positions
     positions = portfolio.get("positions") or []
     if positions:
         total_cost = 0.0

@@ -122,6 +122,8 @@ async def receive_tradingview_alert(alert: TradingViewAlert):
         # Scout signals first (early warning, not full trade signals)
         if "scout" in strategy_lower:
             return await process_scout_signal(alert, start_time)
+        elif "holy_grail" in strategy_lower or "holygrail" in strategy_lower:
+            return await process_holy_grail_signal(alert, start_time)
         elif "exhaustion" in strategy_lower:
             return await process_exhaustion_signal(alert, start_time)
         elif "sniper" in strategy_lower:
@@ -191,6 +193,70 @@ async def process_scout_signal(alert: TradingViewAlert, start_time: datetime):
         "signal_id": signal_id,
         "signal_type": "SCOUT_ALERT",
         "message": "Early warning - not a trade signal",
+        "processing_time_ms": round(elapsed, 1)
+    }
+
+
+async def process_holy_grail_signal(alert: TradingViewAlert, start_time: datetime):
+    """
+    Process Holy Grail Pullback Continuation signals (Raschke-style).
+
+    These are continuation entries: strong trend (ADX >= 25), pullback to 20 EMA,
+    confirmation candle back in trend direction. Full committee review signals.
+
+    Timeframe affects signal type:
+    - 1H  -> HOLY_GRAIL_1H  (higher base score — cleaner pullbacks)
+    - 15m -> HOLY_GRAIL_15M (lower base score — noisier)
+    """
+
+    # Determine signal type based on timeframe
+    tf = (alert.timeframe or "15").upper().replace("M", "").replace("MIN", "")
+    if tf in ("60", "1H", "H", "1"):
+        signal_type_suffix = "1H"
+    else:
+        signal_type_suffix = "15M"
+
+    signal_type = f"HOLY_GRAIL_{signal_type_suffix}"
+
+    # Calculate risk/reward
+    rr = calculate_risk_reward(alert)
+
+    # Build signal data
+    signal_id = f"HG_{alert.ticker}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
+
+    signal_data = {
+        "signal_id": signal_id,
+        "timestamp": alert.timestamp or datetime.now().isoformat(),
+        "ticker": alert.ticker,
+        "strategy": "Holy_Grail",
+        "direction": alert.direction,
+        "signal_type": signal_type,
+        "entry_price": alert.entry_price,
+        "stop_loss": alert.stop_loss,
+        "target_1": alert.target_1,
+        "target_2": alert.target_2,
+        "risk_reward": rr["primary"],
+        "risk_reward_t1": rr["t1_rr"],
+        "risk_reward_t2": rr["t2_rr"],
+        "timeframe": alert.timeframe,
+        "trade_type": "CONTINUATION",
+        "asset_class": "CRYPTO" if is_crypto_ticker(alert.ticker) else "EQUITY",
+        "status": "ACTIVE",
+        "rsi": alert.rsi,
+        "adx": alert.adx,
+        "rvol": alert.rvol,  # Carries DI spread from PineScript
+    }
+
+    # Unified pipeline handles scoring, persistence, caching, and broadcast
+    signal_data = await process_signal_unified(signal_data, source="tradingview")
+
+    elapsed = (datetime.now() - start_time).total_seconds() * 1000
+    logger.info(f"Holy Grail signal processed: {alert.ticker} {signal_type} ({alert.timeframe}) in {elapsed:.1f}ms")
+
+    return {
+        "status": "success",
+        "signal_id": signal_id,
+        "signal_type": signal_data.get("signal_type", signal_type),
         "processing_time_ms": round(elapsed, 1)
     }
 

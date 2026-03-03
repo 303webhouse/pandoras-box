@@ -54,7 +54,14 @@ STRATEGY_BASE_SCORES = {
     "SNIPER": 40,
     "SNIPER_URSA": 40,
     "SNIPER_TAURUS": 40,
-    
+
+    # Holy Grail Pullback Continuation (Raschke-style)
+    # 1H scores higher — cleaner pullbacks, better R:R
+    # 15M scores lower — noisier, mid-move risk
+    "HOLY_GRAIL": 45,
+    "HOLY_GRAIL_1H": 50,
+    "HOLY_GRAIL_15M": 40,
+
     # Generic types
     "BULLISH_TRADE": 35,
     "BEAR_CALL": 35,
