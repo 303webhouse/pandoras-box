@@ -64,6 +64,9 @@ class UpdatePositionRequest(BaseModel):
     notes: Optional[str] = None
     tags: Optional[List[str]] = None
     quantity: Optional[int] = None
+    entry_price: Optional[float] = None
+    cost_basis: Optional[float] = None
+    legs: Optional[str] = None
 
 
 class ClosePositionRequest(BaseModel):
@@ -553,6 +556,18 @@ async def update_position(position_id: str, req: UpdatePositionRequest):
         params.append(req.current_price)
         idx += 1
         sets.append(f"price_updated_at = NOW()")
+    if req.entry_price is not None:
+        sets.append(f"entry_price = ${idx}")
+        params.append(req.entry_price)
+        idx += 1
+    if req.cost_basis is not None:
+        sets.append(f"cost_basis = ${idx}")
+        params.append(req.cost_basis)
+        idx += 1
+    if req.legs is not None:
+        sets.append(f"legs = ${idx}")
+        params.append(req.legs)
+        idx += 1
 
     if len(sets) <= 1:
         raise HTTPException(status_code=400, detail="No fields to update")
@@ -572,10 +587,10 @@ async def update_position(position_id: str, req: UpdatePositionRequest):
 
     result = _row_to_dict(row)
 
-    # Recalculate unrealized P&L if current_price was updated
-    if req.current_price is not None and result.get("entry_price"):
+    # Recalculate unrealized P&L if current_price or entry_price was updated
+    if (req.current_price is not None or req.entry_price is not None or req.quantity is not None) and result.get("entry_price") and result.get("current_price"):
         unrealized = _compute_unrealized_pnl(
-            result["entry_price"], req.current_price,
+            result["entry_price"], result["current_price"],
             result["quantity"], result.get("structure", "")
         )
         async with pool.acquire() as conn:

@@ -3656,6 +3656,46 @@ body.override-active-bearish .override-toggle[data-active="true"] {
 }
 
 /* Modal Actions */
+/* Edit modal — position info + add-to-position */
+.edit-position-info {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    padding: 8px 0 4px;
+    font-family: 'JetBrains Mono', monospace;
+}
+
+.edit-add-section {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border-color);
+}
+
+.edit-add-header {
+    font-family: 'Orbit', sans-serif;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--accent-teal);
+    margin-bottom: 8px;
+}
+
+.form-row-inline {
+    display: flex;
+    gap: 12px;
+}
+
+.form-row-inline .form-row {
+    flex: 1;
+}
+
+.edit-add-preview {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.8rem;
+    color: var(--accent-lime);
+    margin-top: 6px;
+    min-height: 1.2em;
+}
+
 .modal-actions {
     display: flex;
     gap: 12px;
