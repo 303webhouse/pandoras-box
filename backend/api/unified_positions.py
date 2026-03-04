@@ -404,6 +404,9 @@ async def portfolio_summary():
 
     # Calculate summary
     total_max_loss = sum(p.get("max_loss") or 0 for p in positions)
+    total_unrealized_pnl = sum(p.get("unrealized_pnl") or 0 for p in positions)
+    # Adjust displayed balance: stored base + unrealized PnL movement
+    adjusted_balance = round(balance + total_unrealized_pnl, 2)
     today = date.today()
 
     # Nearest expiry
@@ -457,16 +460,41 @@ async def portfolio_summary():
         })
 
     return {
-        "account_balance": balance,
+        "account_balance": adjusted_balance,
+        "stored_balance": balance,
+        "total_unrealized_pnl": round(total_unrealized_pnl, 2),
         "position_count": len(positions),
         "capital_at_risk": round(total_max_loss, 2),
-        "capital_at_risk_pct": round(total_max_loss / balance * 100, 2) if balance > 0 else 0.0,
+        "capital_at_risk_pct": round(total_max_loss / adjusted_balance * 100, 2) if adjusted_balance > 0 else 0.0,
         "nearest_expiry": nearest_expiry,
         "nearest_dte": nearest_dte,
         "net_direction": net_direction,
         "direction_breakdown": {"long": long_count, "short": short_count, "mixed": mixed_count},
         "positions": summaries,
     }
+
+
+@router.patch("/v2/positions/account-balance")
+async def update_account_balance(request: Request):
+    """
+    Update the stored Robinhood account balance (base value for PnL adjustment).
+    Body: {"balance": 4080.00}
+    The displayed balance = stored balance + total unrealized PnL.
+    """
+    body = await request.json()
+    new_balance = body.get("balance")
+    if new_balance is None:
+        raise HTTPException(status_code=400, detail="balance field required")
+
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE account_balances SET balance = $1, updated_at = NOW(), updated_by = 'dashboard' WHERE account_name = 'Robinhood'",
+            float(new_balance),
+        )
+
+    logger.info("Account balance updated to %.2f", float(new_balance))
+    return {"status": "ok", "balance": float(new_balance)}
 
 
 @router.get("/v2/positions/greeks")

@@ -1002,6 +1002,13 @@ async function loadInitialData() {
     // Redis health checks
     checkRedisHealth();
     setInterval(checkRedisHealth, 2 * 60 * 1000);
+
+    // Position + portfolio refresh every 10 seconds (visibility-gated)
+    setInterval(() => {
+        if (document.visibilityState === 'visible') {
+            loadOpenPositionsEnhanced();
+        }
+    }, 10 * 1000);
 }
 
 let cryptoTvWidget = null;
