@@ -42,7 +42,7 @@ async def get_committee_queue(
     """
     Get signals awaiting committee review.
     VPS polls this every 3 minutes during market hours.
-    Returns signals with status=COMMITTEE_REVIEW, oldest first.
+    Returns signals with status=PENDING_REVIEW or COMMITTEE_REVIEW, oldest first.
     """
     pool = await get_postgres_client()
 
@@ -55,7 +55,7 @@ async def get_committee_queue(
                    score_v2_factors, timeframe, asset_class, source,
                    created_at, committee_requested_at
             FROM signals
-            WHERE status = 'COMMITTEE_REVIEW'
+            WHERE status IN ('PENDING_REVIEW', 'COMMITTEE_REVIEW')
             ORDER BY committee_requested_at ASC NULLS LAST, created_at ASC
             LIMIT $1
             """,
@@ -87,7 +87,7 @@ async def submit_committee_results(body: CommitteeResult):
 
         # Allow results even if signal moved past COMMITTEE_REVIEW
         # (e.g., user accepted while committee was running)
-        if current["status"] not in ("COMMITTEE_REVIEW", "ACTIVE"):
+        if current["status"] not in ("PENDING_REVIEW", "COMMITTEE_REVIEW", "ACTIVE"):
             logger.warning(
                 f"Committee results for {body.signal_id} arrived but signal is "
                 f"{current['status']} — storing results anyway"
@@ -115,7 +115,7 @@ async def submit_committee_results(body: CommitteeResult):
                 committee_run_id = $3,
                 committee_completed_at = NOW(),
                 status = CASE
-                    WHEN status = 'COMMITTEE_REVIEW' THEN 'ACTIVE'
+                    WHEN status IN ('PENDING_REVIEW', 'COMMITTEE_REVIEW') THEN 'ACTIVE'
                     ELSE status
                 END
             WHERE signal_id = $1

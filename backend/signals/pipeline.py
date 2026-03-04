@@ -23,8 +23,8 @@ COMMITTEE_SCORE_THRESHOLD = 75.0  # Minimum score_v2 to trigger committee
 
 async def _maybe_flag_for_committee(signal_data: Dict[str, Any]) -> None:
     """
-    Flag signal for committee review if it meets the threshold.
-    Sets status=COMMITTEE_REVIEW and committee_requested_at.
+    Flag signal for display in #signals channel with Analyze button.
+    Sets status=PENDING_REVIEW — committee does NOT run automatically.
     Skips Scout alerts and signals that already have committee data.
     """
     # Skip scouts and manual signals
@@ -51,15 +51,15 @@ async def _maybe_flag_for_committee(signal_data: Dict[str, Any]) -> None:
             await conn.execute(
                 """
                 UPDATE signals
-                SET status = 'COMMITTEE_REVIEW',
+                SET status = 'PENDING_REVIEW',
                     committee_requested_at = NOW()
                 WHERE signal_id = $1
                 AND status = 'ACTIVE'
                 """,
                 signal_id,
             )
-        signal_data["status"] = "COMMITTEE_REVIEW"
-        logger.info(f"🧠 Flagged for committee: {signal_data.get('ticker')} (score={score})")
+        signal_data["status"] = "PENDING_REVIEW"
+        logger.info(f"📡 Flagged for signals channel: {signal_data.get('ticker')} (score={score})")
     except Exception as e:
         logger.warning(f"Failed to flag {signal_id} for committee: {e}")
 
