@@ -95,7 +95,6 @@ let ws = null;
 let tvWidget = null;
 let currentSymbol = 'SPY';
 let currentTimeframe = 'WEEKLY';
-let activeAssetType = 'equity';
 const APP_MODES = {
     HUB: 'hub',
     CRYPTO: 'crypto',
@@ -922,15 +921,6 @@ function initEventListeners() {
         });
     });
     
-    // Asset type toggle (Equities / Crypto)
-    document.querySelectorAll('.toggle-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            document.querySelectorAll('.toggle-btn').forEach(b => b.classList.remove('active'));
-            e.target.classList.add('active');
-            activeAssetType = e.target.dataset.asset;
-            refreshSignalViews();
-        });
-    });
     
     // Hybrid Scanner
     initHybridScanner();
@@ -3646,35 +3636,20 @@ async function loadOpenPositions() {
     }
 }
 
-// Signal Rendering
+// Signal Rendering — unified feed (equity + crypto combined)
 function renderSignals() {
     const container = document.getElementById('tradeSignals');
-    
-    // Top 20 crypto by market cap (+ common variations)
-    const SUPPORTED_CRYPTO = [
-        // Base tickers
-        'BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'XRP', 'USDC', 'ADA', 'AVAX', 'DOGE',
-        'DOT', 'TRX', 'LINK', 'MATIC', 'POL', 'SHIB', 'TON', 'LTC', 'BCH', 'XLM', 'UNI',
-        // TradingView USD pairs
-        'BTCUSD', 'ETHUSD', 'SOLUSD', 'XRPUSD', 'ADAUSD', 'AVAXUSD', 'DOGEUSD',
-        'DOTUSD', 'LINKUSD', 'MATICUSD', 'LTCUSD', 'BCHUSD', 'XLMUSD', 'UNIUSD',
-        // TradingView USDT pairs
-        'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT', 'ADAUSDT', 'AVAXUSDT', 'DOGEUSDT',
-        'DOTUSDT', 'LINKUSDT', 'MATICUSDT', 'LTCUSDT', 'BCHUSDT', 'XLMUSDT', 'UNIUSDT'
-    ];
-    
-    // Get signals based on active asset type
-    const activeSignals = activeAssetType === 'equity' 
-        ? signals.equity 
-        : signals.crypto.filter(s => SUPPORTED_CRYPTO.includes(s.ticker.toUpperCase()));
-    
-    if (activeSignals.length === 0) {
-        const assetLabel = activeAssetType === 'equity' ? 'equity' : 'crypto';
-        container.innerHTML = `<p class="empty-state">No ${assetLabel} signals</p>`;
+
+    // Combine all signals into one feed, sorted by score descending
+    const allSignals = [...signals.equity, ...signals.crypto]
+        .sort((a, b) => (b.score || 0) - (a.score || 0));
+
+    if (allSignals.length === 0) {
+        container.innerHTML = '<p class="empty-state">No trade ideas</p>';
         return;
     }
-    
-    const pagination = tradeIdeasPagination[activeAssetType];
+
+    const pagination = tradeIdeasPagination.equity;
     const loadMoreText = pagination?.loading ? 'Loading...' : 'Reload previous';
     const loadMoreDisabled = pagination?.loading ? 'disabled' : '';
     const loadMoreButton = pagination?.hasMore
@@ -3682,14 +3657,11 @@ function renderSignals() {
                 <button class="reload-previous-btn" ${loadMoreDisabled}>${loadMoreText}</button>
            </div>`
         : '';
-    
-    container.innerHTML = activeSignals.map(signal => createSignalCard(signal)).join('') + loadMoreButton;
-    
-    // Add event listeners to action buttons and cards
+
+    container.innerHTML = allSignals.map(signal => createSignalCard(signal)).join('') + loadMoreButton;
+
     attachSignalActions();
     attachReloadPreviousHandler();
-    
-    // Attach KB link handlers to dynamically created content
     attachDynamicKbHandlers(container);
 }
 
@@ -4518,24 +4490,27 @@ function attachReloadPreviousHandler() {
 }
 
 async function loadMoreTradeIdeas() {
-    const pagination = tradeIdeasPagination[activeAssetType];
+    const pagination = tradeIdeasPagination.equity;
     if (!pagination || pagination.loading || !pagination.hasMore) return;
 
     pagination.loading = true;
     refreshSignalViews();
 
     try {
-        const assetClass = activeAssetType === 'equity' ? 'EQUITY' : 'CRYPTO';
         const response = await fetch(
-            `${API_URL}/signals/active/paged?limit=${pagination.limit}&offset=${pagination.offset}&asset_class=${assetClass}`
+            `${API_URL}/signals/active/paged?limit=${pagination.limit}&offset=${pagination.offset}`
         );
         const data = await response.json();
 
         if (data.status === 'success' && Array.isArray(data.signals)) {
-            const existingIds = new Set(signals[activeAssetType].map(s => s.signal_id));
-            const newSignals = data.signals.filter(s => !existingIds.has(s.signal_id));
-            signals[activeAssetType] = signals[activeAssetType].concat(newSignals);
-            pagination.offset = signals[activeAssetType].length;
+            const allExisting = new Set([...signals.equity, ...signals.crypto].map(s => s.signal_id));
+            const newSignals = data.signals.filter(s => !allExisting.has(s.signal_id));
+            // Route into correct bucket
+            newSignals.forEach(s => {
+                if (s.asset_class === 'CRYPTO') signals.crypto.push(s);
+                else signals.equity.push(s);
+            });
+            pagination.offset = signals.equity.length + signals.crypto.length;
             pagination.hasMore = data.has_more ?? (newSignals.length >= pagination.limit);
         } else {
             pagination.hasMore = false;
@@ -7642,7 +7617,7 @@ function applyFiltersAndRefresh() {
 
 function filterTradeIdeas() {
     // Get all signals
-    const currentSignals = activeAssetType === 'equity' ? signals.equity : signals.crypto;
+    const currentSignals = [...signals.equity, ...signals.crypto];
 
     // Apply filters
     const filtered = currentSignals.filter(signal => {
@@ -9766,14 +9741,6 @@ window.linkKnowledgebaseTerms = linkKnowledgebaseTerms;
 let currentLegCount = 1;
 
 function initOptionsTab() {
-    // Tab switching for Equities/Options
-    document.querySelectorAll('.asset-toggle .toggle-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            const asset = e.target.dataset.asset;
-            switchAssetTab(asset);
-        });
-    });
-
     // Modal controls
     document.getElementById('openOptionsModalBtn')?.addEventListener('click', openOptionsModal);
     document.getElementById('closeOptionsModalBtn')?.addEventListener('click', closeOptionsModal);
@@ -9799,26 +9766,6 @@ function initOptionsTab() {
     }
 
     console.log('Options tab initialized');
-}
-
-function switchAssetTab(asset) {
-    // Update toggle buttons
-    document.querySelectorAll('.asset-toggle .toggle-btn').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.asset === asset);
-    });
-
-    // Show/hide content
-    const equityContent = document.getElementById('tradeSignals');
-    const optionsContent = document.getElementById('optionsTabContent');
-
-    if (asset === 'options') {
-        if (equityContent) equityContent.style.display = 'none';
-        if (optionsContent) optionsContent.style.display = '';
-        loadOptionsPositions();
-    } else {
-        if (equityContent) equityContent.style.display = '';
-        if (optionsContent) optionsContent.style.display = 'none';
-    }
 }
 
 function openOptionsModal() {

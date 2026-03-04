@@ -2056,36 +2056,6 @@ body.override-active-bearish .override-toggle[data-active="true"] {
     margin-bottom: 12px;
 }
 
-.asset-toggle {
-    display: flex;
-    gap: 0;
-    background: var(--dark-bg);
-    border-radius: 8px;
-    padding: 4px;
-}
-
-.toggle-btn {
-    flex: 1;
-    background: transparent;
-    color: var(--text-secondary);
-    border: none;
-    padding: 10px 16px;
-    border-radius: 6px;
-    font-size: 13px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s;
-}
-
-.toggle-btn.active {
-    background: var(--accent-teal);
-    color: var(--dark-bg);
-}
-
-.toggle-btn:hover:not(.active) {
-    color: var(--text-primary);
-}
-
 .signals-container {
     display: flex;
     flex-direction: column;
@@ -8727,44 +8697,8 @@ body[data-mode="analytics"] .analytics-shell {
 }
 
 /* =========================================================================
-   OPTIONS TAB
+   SHARED STATS / METRICS
    ========================================================================= */
-
-.options-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 1rem;
-}
-
-.options-btn {
-    padding: 0.5rem 1rem;
-    border: none;
-    border-radius: 6px;
-    cursor: pointer;
-    font-weight: 500;
-    transition: all 0.2s;
-}
-
-.options-btn.primary {
-    background: var(--accent-teal);
-    color: white;
-}
-
-.options-btn.primary:hover {
-    background: #0d9488;
-}
-
-.options-summary {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 1rem;
-    margin-bottom: 1.5rem;
-    padding: 1rem;
-    background: var(--dark-bg);
-    border-radius: 8px;
-    border: 1px solid var(--border-color);
-}
 
 .summary-stat {
     text-align: center;
