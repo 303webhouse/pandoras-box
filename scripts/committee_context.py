@@ -53,13 +53,31 @@ def format_signal_context(signal: dict, context: dict) -> str:
     )
 
     # ── Market regime ──
-    sections.append(
-        f"## MARKET REGIME\n"
-        f"Bias: {bias.get('bias_level', 'UNKNOWN')}\n"
-        f"Composite Score: {bias.get('composite_score', 'N/A')}\n"
-        f"Confidence: {bias.get('confidence', 'UNKNOWN')}\n"
-        f"DEFCON: {context.get('defcon', 'UNKNOWN')}"
-    )
+    regime_lines = [
+        f"## MARKET REGIME",
+        f"Composite: {bias.get('bias_level', 'UNKNOWN')} ({bias.get('composite_score', 'N/A')}) | Confidence: {bias.get('confidence', 'UNKNOWN')}",
+    ]
+
+    # Three-timeframe sub-scores (if available from build_market_context)
+    timeframes = bias.get("timeframes") or {}
+    tf_labels = {"intraday": "Intraday", "swing": "Swing", "macro": "Macro"}
+    divergent_tfs = []
+    for tf_key in ("intraday", "swing", "macro"):
+        tf = timeframes.get(tf_key, {})
+        if tf:
+            tf_bias = tf.get("bias_level", "?")
+            tf_score = tf.get("sub_score", "?")
+            momentum = tf.get("momentum", "stable")
+            arrow = {"strengthening": "\u2191", "weakening": "\u2193"}.get(momentum, "\u2192")
+            regime_lines.append(f"  {tf_labels[tf_key]}: {tf_bias} ({tf_score:+.2f}) {arrow} {momentum}" if isinstance(tf_score, (int, float)) else f"  {tf_labels[tf_key]}: {tf_bias} ({tf_score}) {arrow} {momentum}")
+            if tf.get("divergent"):
+                divergent_tfs.append(tf_labels[tf_key])
+
+    if divergent_tfs:
+        regime_lines.append(f"DIVERGENCE: {', '.join(divergent_tfs)} diverging from composite")
+
+    regime_lines.append(f"DEFCON: {context.get('defcon', 'UNKNOWN')}")
+    sections.append("\n".join(regime_lines))
 
     # ── Circuit breaker alerts ──
     if cbs:

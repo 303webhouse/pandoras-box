@@ -76,7 +76,9 @@ PENDING_SIGNALS_FILE = DATA_DIR / "pending_signals.json"
 ZONE_RE = re.compile(r"from\s+([A-Z_]+)\s+to\s+([A-Z_]+)", re.IGNORECASE)
 
 MIN_SCORE_CTA = 60
-MIN_SCORE_COUNTER_BIAS = 80
+MIN_SCORE_COUNTER_BIAS = 80  # legacy fallback
+# Graduated thresholds — stronger bias = higher bar for counter-bias signals
+GATEKEEPER_THRESHOLDS = {"MAJOR": 85, "MINOR": 70, "NEUTRAL": 60}
 MAX_DAILY_RUNS = 20
 SIGNAL_MAX_AGE_MIN = 30
 CB_RETENTION_HOURS = 2
@@ -372,10 +374,22 @@ def gatekeeper(signal: dict, bias_level: str, defcon: str, daily: dict) -> tuple
         is_bullish = direction in ("LONG", "BULLISH", "BUY")
         is_bearish = direction in ("SHORT", "BEARISH", "SELL")
 
-        if "TORO" in bias_upper and is_bearish and score < MIN_SCORE_COUNTER_BIAS:
-            return False, "counter_bias_score_too_low"
-        if "URSA" in bias_upper and is_bullish and score < MIN_SCORE_COUNTER_BIAS:
-            return False, "counter_bias_score_too_low"
+        # Graduated thresholds: MAJOR bias = 85, MINOR = 70
+        counter_bias = False
+        if "TORO" in bias_upper and is_bearish:
+            counter_bias = True
+        elif "URSA" in bias_upper and is_bullish:
+            counter_bias = True
+
+        if counter_bias:
+            if "MAJOR" in bias_upper:
+                threshold = GATEKEEPER_THRESHOLDS["MAJOR"]
+            elif "MINOR" in bias_upper:
+                threshold = GATEKEEPER_THRESHOLDS["MINOR"]
+            else:
+                threshold = GATEKEEPER_THRESHOLDS["NEUTRAL"]
+            if score < threshold:
+                return False, f"counter_bias_score_too_low ({score} < {threshold} for {bias_upper})"
 
     return True, None
 
@@ -405,14 +419,18 @@ def build_gatekeeper_report(
         is_bearish = direction in ("SHORT", "BEARISH", "SELL")
         counter_bias = False
         if "TORO" in bias_upper and is_bearish:
-            threshold = MIN_SCORE_COUNTER_BIAS
             counter_bias = True
         elif "URSA" in bias_upper and is_bullish:
-            threshold = MIN_SCORE_COUNTER_BIAS
             counter_bias = True
 
         if counter_bias:
-            lines.append(f"\u26a0\ufe0f Score: {int(score)} (counter-bias threshold: {threshold})")
+            if "MAJOR" in bias_upper:
+                threshold = GATEKEEPER_THRESHOLDS["MAJOR"]
+            elif "MINOR" in bias_upper:
+                threshold = GATEKEEPER_THRESHOLDS["MINOR"]
+            else:
+                threshold = GATEKEEPER_THRESHOLDS["NEUTRAL"]
+            lines.append(f"\u26a0\ufe0f Score: {int(score)} (counter-bias threshold: {threshold} for {bias_upper})")
         else:
             lines.append(f"\u2705 Score: {int(score)} (threshold: {threshold})")
 
@@ -550,6 +568,30 @@ def check_earnings_proximity(ticker: str, dte_days: int = 30) -> dict:
     return {"has_earnings": False, "days_until": None, "date": None, "within_dte_window": False}
 
 
+def _compute_timeframe_fit(direction: str, context: dict) -> str:
+    """Compute which timeframes align with the signal direction."""
+    bias = context.get("bias_composite") or {}
+    timeframes = bias.get("timeframes") or {}
+    if not timeframes:
+        return ""
+
+    is_bullish = direction in ("LONG", "BULLISH", "BUY")
+    is_bearish = direction in ("SHORT", "BEARISH", "SELL")
+    if not is_bullish and not is_bearish:
+        return ""
+
+    aligned = []
+    for tf_name in ("intraday", "swing", "macro"):
+        tf = timeframes.get(tf_name, {})
+        tf_bias = tf.get("bias_level", "NEUTRAL")
+        if is_bullish and "TORO" in tf_bias:
+            aligned.append(f"{tf_name}-aligned")
+        elif is_bearish and "URSA" in tf_bias:
+            aligned.append(f"{tf_name}-aligned")
+
+    return ", ".join(aligned) if aligned else "no alignment"
+
+
 def build_market_context(signal: dict, api_url: str, api_key: str) -> dict:
     """Build full context dict for committee agents."""
     headers = {"Authorization": f"Bearer {api_key}"}
@@ -588,11 +630,21 @@ def build_market_context(signal: dict, api_url: str, api_key: str) -> dict:
     except Exception:
         pass
 
+    # 7. Timeframe sub-scores
+    timeframes = {}
+    try:
+        tf_data = http_json(url=f"{base}/bias/composite/timeframes", headers=headers, timeout=30)
+        if isinstance(tf_data, dict):
+            timeframes = tf_data.get("timeframes", {})
+    except Exception:
+        pass
+
     return {
         "bias_composite": {
             "bias_level": composite.get("bias_level", "UNKNOWN") if isinstance(composite, dict) else "UNKNOWN",
             "composite_score": composite.get("composite_score") if isinstance(composite, dict) else None,
             "confidence": composite.get("confidence", "UNKNOWN") if isinstance(composite, dict) else "UNKNOWN",
+            "timeframes": timeframes,
         },
         "defcon": defcon,
         "circuit_breakers": cb_events,
@@ -879,6 +931,15 @@ def build_committee_embed(recommendation: dict, context: dict, gatekeeper_report
             "inline": False,
         },
     ]
+
+    # Timeframe alignment
+    tf_fit = _compute_timeframe_fit(direction, context)
+    if tf_fit:
+        fields.append({
+            "name": "Timeframe Fit",
+            "value": tf_fit,
+            "inline": True,
+        })
 
     # Earnings warning
     earnings = context.get("earnings") or {}
@@ -1190,6 +1251,15 @@ def run(channel_id: str, dry_run: bool) -> dict:
                 "name": "\U0001f50d Gatekeeper",
                 "value": truncate(gatekeeper_report, 1024),
                 "inline": False,
+            })
+
+        # Timeframe alignment badge
+        tf_fit = _compute_timeframe_fit(direction_display, context)
+        if tf_fit:
+            alert_embed["fields"].append({
+                "name": "Timeframe Fit",
+                "value": tf_fit,
+                "inline": True,
             })
 
         # Run Committee button
