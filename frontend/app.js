@@ -8607,11 +8607,14 @@ function calculatePnL(position, currentPrice) {
 
 function openPositionCloseModal(position) {
     closingPosition = position;
-    const isOption = position.asset_type === 'OPTION' || position.structure;
+    const struct = (position.structure || '').toLowerCase();
+    const stockStructures = ['stock', 'stock_long', 'long_stock', 'stock_short', 'short_stock'];
+    const isStock = stockStructures.includes(struct) || (!struct && position.asset_type === 'EQUITY');
+    const isOption = !isStock && (position.asset_type === 'OPTION' || position.asset_type === 'SPREAD' || (struct && !stockStructures.includes(struct)));
     const unitLabel = isOption ? 'contracts' : (position.asset_class === 'CRYPTO' ? 'tokens' : 'shares');
 
     document.getElementById('closeTickerDisplay').textContent = position.ticker
-        + (position.structure ? ` (${position.structure.replace(/_/g, ' ')})` : '');
+        + (position.structure && !isStock ? ` (${position.structure.replace(/_/g, ' ')})` : '');
 
     const exitInput = document.getElementById('positionExitPrice');
     exitInput.value = '';
@@ -8619,7 +8622,6 @@ function openPositionCloseModal(position) {
     exitInput.step = isOption ? '0.01' : '0.01';
 
     // Structure-aware label for exit price
-    const struct = (position.structure || '').toLowerCase();
     const spreadKeywords = ['spread', 'condor', 'butterfly', 'strangle', 'straddle'];
     const isSpread = spreadKeywords.some(kw => struct.includes(kw));
     if (isSpread) {
@@ -8764,15 +8766,18 @@ async function confirmPositionClose() {
         return;
     }
     
-    // Calculate P&L to determine if this is a loss
+    // Calculate P&L to determine if this is a loss (must match backend + updateCloseSummary)
     const entryPrice = closingPosition.entry_price || 0;
-    const isOption = closingPosition.asset_type === 'OPTION' || closingPosition.structure;
-    const multiplier = isOption ? 100 : 1;
+    const closeStruct = (closingPosition.structure || '').toLowerCase();
+    const closeIsStock = ['stock', 'stock_long', 'long_stock', 'stock_short', 'short_stock'].includes(closeStruct);
+    const closeIsCredit = CREDIT_STRUCTURES.has(closeStruct);
     let pnl;
-    if (closingPosition.direction === 'LONG') {
-        pnl = (exitPrice - entryPrice) * closeQty * multiplier;
+    if (closeIsStock) {
+        pnl = (exitPrice - entryPrice) * closeQty;
+    } else if (closeIsCredit) {
+        pnl = (entryPrice - exitPrice) * closeQty * 100;
     } else {
-        pnl = (entryPrice - exitPrice) * closeQty * multiplier;
+        pnl = (exitPrice - entryPrice) * closeQty * 100;
     }
     
     // Determine trade outcome

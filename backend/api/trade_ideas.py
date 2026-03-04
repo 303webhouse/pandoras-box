@@ -173,6 +173,12 @@ async def update_trade_idea_status(signal_id: str, body: StatusUpdate):
             update_params.append(body.reason)
             param_idx += 1
 
+        # Set committee_requested_at when transitioning to COMMITTEE_REVIEW
+        if new_status == "COMMITTEE_REVIEW":
+            update_fields.append(f"committee_requested_at = COALESCE(committee_requested_at, ${param_idx})")
+            update_params.append(datetime.utcnow())
+            param_idx += 1
+
         await conn.execute(
             f"UPDATE signals SET {', '.join(update_fields)} WHERE signal_id = $1",
             *update_params,
