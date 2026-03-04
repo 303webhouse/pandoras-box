@@ -144,12 +144,14 @@ def _row_to_dict(row) -> dict:
     return d
 
 
-def _compute_unrealized_pnl(entry_price: float, current_price: float, quantity: int, structure: str) -> float:
+def _compute_unrealized_pnl(entry_price: float, current_price: float, quantity: int, structure: str, asset_type: str = "") -> float:
     """Compute unrealized P&L based on position type and credit/debit nature."""
     if not entry_price or not current_price:
         return 0.0
     s = (structure or "").lower()
-    if s in ("stock", "stock_long", "long_stock", "stock_short", "short_stock"):
+    at = (asset_type or "").upper()
+    is_stock = s in ("stock", "stock_long", "long_stock", "stock_short", "short_stock") or (not s and at == "EQUITY")
+    if is_stock:
         return round((current_price - entry_price) * quantity, 2)
     if s in CREDIT_STRUCTURES:
         # Credit: received premium at open, pay to close → profit when current < entry
@@ -644,7 +646,9 @@ async def close_position(position_id: str, req: ClosePositionRequest):
 
     # Calculate realized P&L
     s = structure.lower()
-    if s in ("stock", "stock_long", "long_stock", "stock_short", "short_stock"):
+    asset_type = (pos.get("asset_type") or "").upper()
+    is_stock = s in ("stock", "stock_long", "long_stock", "stock_short", "short_stock") or (not s and asset_type == "EQUITY")
+    if is_stock:
         realized_pnl = round((req.exit_price - entry_price) * pos["quantity"], 2)
     elif s in CREDIT_STRUCTURES:
         # Credit structures: received premium at open, paid to close
