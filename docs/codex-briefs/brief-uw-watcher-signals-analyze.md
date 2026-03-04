@@ -27,10 +27,23 @@ Currently this data sits in Discord unread by any system. This brief builds thre
 
 ---
 
+## Discord Channel IDs (confirmed)
+
+```python
+UW_FLOW_CHANNEL_ID = 1463692055694807201    # #uw-flow-alerts — UW bot auto-posts ticker updates here
+UW_NEWS_CHANNEL_ID = 1478626930805702756    # #uw-economic-news — market news, UW tweets, trading halts (future use)
+SIGNALS_CHANNEL_ID = 1470164076049989785    # #📊-signals — signal display with Analyze button
+UW_BOT_USER_ID = <PENDING>                  # UW Bot's Discord user ID — Nick must right-click bot → Copy User ID
+```
+
+**Note:** `#uw-economic-news` receives market news alerts, UW tweets, and trading halts. This brief does NOT parse that channel, but it's a future candidate for news context injection into the committee. Store the ID for later use.
+
+---
+
 ## Architecture Overview
 
 ```
-UW Bot auto-posts to #uw-flow-alerts
+UW Bot auto-posts to #uw-flow-alerts (1463692055694807201)
   → UW Watcher Bot sees message (discord.py on_message)
   → Parses Ticker Updates text into structured JSON
   → POSTs to Railway API: POST /webhook/uw/ticker-updates
@@ -40,7 +53,7 @@ UW Bot auto-posts to #uw-flow-alerts
 TradingView webhook fires
   → Railway pipeline scores + persists signal
   → Flags for committee if score ≥ 75
-  → POSTs signal summary to #📊-signals via Discord REST API
+  → POSTs signal summary to #📊-signals (1470164076049989785) via Discord REST API
   → Embed includes signal info + "🔬 Analyze" button
   → Nick clicks Analyze
   → Interaction handler triggers committee pipeline for that signal
@@ -62,12 +75,13 @@ TradingView webhook fires
 
 ### Discord Channel & Bot IDs
 
-The watcher needs to know:
-- **Channel to watch:** `#uw-flow-alerts` — get the channel ID from Discord (right-click channel → Copy Channel ID, with Developer Mode enabled in Discord settings)
-- **UW Bot user ID:** The UW Bot's Discord user ID — get from right-clicking the UW Bot in the member list → Copy User ID
-- **Bot token:** Use the existing Pivot II (OpenClaw) bot token from `/home/openclaw/.openclaw/openclaw.json` — the watcher just needs to READ messages, it doesn't post anything to Discord. Alternatively, use a dedicated bot token if available.
+```python
+# Config at top of uw_watcher.py
+UW_FLOW_CHANNEL_ID = 1463692055694807201
+UW_BOT_USER_ID = <PENDING — Nick must provide>
+```
 
-Store these in environment variables or a config dict at the top of the script.
+The watcher uses the existing Pivot II (OpenClaw) bot token from `/home/openclaw/.openclaw/openclaw.json` — it just needs to READ messages, it doesn't post anything to Discord.
 
 ### Parsing Logic: Ticker Updates
 
@@ -287,7 +301,9 @@ This gives Nick:
 
 ### Discord Channel
 
-**`#📊-signals`** — This channel already exists in Nick's server (visible in the screenshot as `📊-signals` under `pivot-ii`). Use its channel ID.
+```python
+SIGNALS_CHANNEL_ID = 1470164076049989785  # #📊-signals
+```
 
 ### Signal Embed Format
 
@@ -621,15 +637,14 @@ if rh:
 
 ## Environment Variables
 
-The watcher bot needs these (same as other VPS scripts):
-
-```bash
-PANDORA_API_URL=https://pandoras-box-production.up.railway.app
-PIVOT_API_KEY=<existing key from /opt/openclaw scripts>
-DISCORD_BOT_TOKEN=<existing OpenClaw bot token or dedicated token>
-UW_FLOW_CHANNEL_ID=<channel ID for #uw-flow-alerts>
-UW_BOT_USER_ID=<UW Bot's Discord user ID>
-SIGNALS_CHANNEL_ID=<channel ID for #📊-signals>
+```python
+# Add to uw_watcher.py config (or read from openclaw.json)
+PANDORA_API_URL = "https://pandoras-box-production.up.railway.app"
+PIVOT_API_KEY = "<existing key from /opt/openclaw scripts>"
+DISCORD_BOT_TOKEN = "<existing OpenClaw bot token>"
+UW_FLOW_CHANNEL_ID = 1463692055694807201
+UW_BOT_USER_ID = <PENDING — Nick must provide>
+SIGNALS_CHANNEL_ID = 1470164076049989785
 ```
 
 ---
@@ -690,11 +705,13 @@ SIGNALS_CHANNEL_ID=<channel ID for #📊-signals>
 
 ---
 
-## Channel IDs Needed From Nick
+## BLOCKED: UW Bot User ID
 
-Before Claude Code can build this, Nick needs to provide:
+All channel IDs are confirmed. The only missing piece is the **UW Bot's Discord user ID**. Nick must:
 
-1. **`#uw-flow-alerts` channel ID** — right-click → Copy Channel ID (enable Developer Mode in Discord Settings → Advanced first)
-2. **`#📊-signals` channel ID** — same
-3. **UW Bot user ID** — right-click UW Bot in member list → Copy User ID
-4. **Confirm bot token** — Is Claude Code using the OpenClaw bot token, or does Nick want a separate token for the watcher?
+1. Go to `#uw-flow-alerts` in Discord
+2. Find any message posted by the UW Bot
+3. Right-click the bot's **name/avatar** on that message
+4. Click **Copy User ID**
+
+Once provided, replace `<PENDING>` in the config section above and this brief is ready for Claude Code.
