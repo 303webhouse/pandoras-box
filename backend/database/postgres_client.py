@@ -925,23 +925,23 @@ async def init_database():
 
         # Brief 07: Seed account balances (only if table is empty)
         await conn.execute("""
-            INSERT INTO account_balances (account_name, broker, balance, cash, buying_power, margin_total, updated_by)
-            SELECT 'Robinhood', 'robinhood', 4469.37, 2868.92, 6227.38, 3603.94, 'manual'
+            INSERT INTO account_balances (account_name, broker, balance, updated_by)
+            SELECT 'Robinhood', 'robinhood', 4607.0, 'manual'
             WHERE NOT EXISTS (SELECT 1 FROM account_balances WHERE account_name = 'Robinhood')
         """)
         await conn.execute("""
             INSERT INTO account_balances (account_name, broker, balance, updated_by)
-            SELECT 'Fidelity 401A', 'fidelity', 10109.63, 'manual'
+            SELECT 'Fidelity 401A', 'fidelity', 10107.90, 'manual'
             WHERE NOT EXISTS (SELECT 1 FROM account_balances WHERE account_name = 'Fidelity 401A')
         """)
         await conn.execute("""
             INSERT INTO account_balances (account_name, broker, balance, updated_by)
-            SELECT 'Fidelity 403B', 'fidelity', 158.98, 'manual'
+            SELECT 'Fidelity 403B', 'fidelity', 233.15, 'manual'
             WHERE NOT EXISTS (SELECT 1 FROM account_balances WHERE account_name = 'Fidelity 403B')
         """)
         await conn.execute("""
             INSERT INTO account_balances (account_name, broker, balance, updated_by)
-            SELECT 'Fidelity Roth', 'fidelity', 8233.52, 'manual'
+            SELECT 'Fidelity Roth', 'fidelity', 8223.41, 'manual'
             WHERE NOT EXISTS (SELECT 1 FROM account_balances WHERE account_name = 'Fidelity Roth')
         """)
         await conn.execute("""
