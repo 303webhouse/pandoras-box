@@ -2384,6 +2384,25 @@ body.override-active-bearish .override-toggle[data-active="true"] {
     color: var(--accent-orange);
 }
 
+/* Counter-signal warning on position cards */
+.counter-signal-warning {
+    background: rgba(255, 152, 0, 0.15);
+    border-left: 3px solid #ff9800;
+    color: #ffb74d;
+    padding: 6px 10px;
+    margin: 4px 0 6px;
+    font-size: 0.78rem;
+    border-radius: 4px;
+    line-height: 1.4;
+}
+.counter-signal-warning .counter-signal-time {
+    opacity: 0.6;
+    margin-left: 8px;
+}
+.position-card.has-counter-signal {
+    border-color: rgba(255, 152, 0, 0.4);
+}
+
 .position-actions {
     display: flex;
     gap: 8px;

@@ -48,6 +48,16 @@ const COMPOSITE_FACTOR_DISPLAY_ORDER = [
     'savita'
 ];
 
+// Direction alignment check — used by WebSocket handlers and position card logic
+function isDirectionAligned(posDirection, signalDirection) {
+    const pos = (posDirection || '').toUpperCase();
+    const sig = (signalDirection || '').toUpperCase();
+    const bullish = ['LONG', 'BULLISH', 'BUY'];
+    const bearish = ['SHORT', 'BEARISH', 'SELL'];
+    return (bullish.includes(pos) && bullish.includes(sig)) ||
+           (bearish.includes(pos) && bearish.includes(sig));
+}
+
 // Shared helpers
 function escapeHtml(value) {
     if (value === null || value === undefined) return '';
@@ -799,6 +809,17 @@ function playSignalAlert(priority = false) {
 function handleNewSignal(signalData) {
     if (!signalData || !signalData.signal_id) return;
 
+    // Suppress signals for tickers with open positions
+    const sigTicker = (signalData.ticker || '').toUpperCase();
+    const matchingPos = openPositions.find(p => (p.ticker || '').toUpperCase() === sigTicker);
+    if (matchingPos) {
+        if (!isDirectionAligned(matchingPos.direction, signalData.direction)) {
+            // Counter-signal — refresh positions to show warning banner
+            loadOpenPositionsEnhanced();
+        }
+        return;
+    }
+
     // Add to appropriate signal list
     if (signalData.asset_class === 'EQUITY' || !signalData.asset_class) {
         signals.equity = signals.equity.filter(s => s.signal_id !== signalData.signal_id);
@@ -829,7 +850,17 @@ function handleNewSignal(signalData) {
 function handlePrioritySignal(signalData) {
     // High-priority signal - insert at top with animation
     console.log('ðŸ”¥ Priority signal received:', signalData.ticker, signalData.score);
-    
+
+    // Suppress signals for tickers with open positions
+    const sigTicker = (signalData.ticker || '').toUpperCase();
+    const matchingPos = openPositions.find(p => (p.ticker || '').toUpperCase() === sigTicker);
+    if (matchingPos) {
+        if (!isDirectionAligned(matchingPos.direction, signalData.direction)) {
+            loadOpenPositionsEnhanced();
+        }
+        return;
+    }
+
     if (signalData.asset_class === 'EQUITY' || !signalData.asset_class) {
         // Remove if already exists
         signals.equity = signals.equity.filter(s => s.signal_id !== signalData.signal_id);
@@ -8170,13 +8201,32 @@ function renderPositionsEnhanced() {
             freshness = mins < 1 ? 'just now' : mins < 60 ? `${mins}m ago` : `${Math.round(mins / 60)}h ago`;
         }
 
+        // Counter-signal warning
+        let counterBanner = '';
+        if (pos.counter_signal) {
+            const cs = pos.counter_signal;
+            let csTime = '';
+            if (cs.timestamp) {
+                try {
+                    const csDate = new Date(cs.timestamp);
+                    const csMin = Math.round((Date.now() - csDate.getTime()) / 60000);
+                    csTime = csMin < 1 ? 'just now' : csMin < 60 ? `${csMin}m ago` : `${Math.round(csMin / 60)}h ago`;
+                } catch(e) {}
+            }
+            counterBanner = `
+                <div class="counter-signal-warning">
+                    Counter-signal: ${cs.direction || '?'} ${cs.strategy || ''} (score: ${cs.score || 'N/A'})${csTime ? ` <span class="counter-signal-time">${csTime}</span>` : ''}
+                </div>`;
+        }
+
         return `
-            <div class="position-card" data-position-id="${posId}">
+            <div class="position-card${pos.counter_signal ? ' has-counter-signal' : ''}" data-position-id="${posId}">
                 <button class="position-remove-btn" data-position-id="${posId}" title="Remove position">x</button>
                 <div class="position-card-header">
                     <span class="position-ticker" data-ticker="${pos.ticker}">${pos.ticker}</span>
                     <span class="position-structure-badge">${structureDisplay}</span>
                 </div>
+                ${counterBanner}
                 ${strikeLine}
                 <div class="position-details">
                     <div class="position-detail">
