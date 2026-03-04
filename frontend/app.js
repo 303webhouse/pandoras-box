@@ -8470,45 +8470,39 @@ function renderHeadlines(articles) {
     }).join('');
 }
 
+// Fidelity balances (manually updated — no API integration yet)
+const FIDELITY_RETIREMENT = 10341.05;  // 401A + 403B
+const FIDELITY_ACTIVE = 8223.41;       // Roth Brokerage
+
 function renderPortfolioSummaryWidget(summary) {
-    const widget = document.getElementById('portfolio-summary-widget');
-    if (!widget) return;
+    const rhBalance = summary.account_balance || 0;
+    const combinedBalance = rhBalance + FIDELITY_RETIREMENT + FIDELITY_ACTIVE;
 
-    const balanceStr = '$' + (summary.account_balance || 0).toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0});
-    const riskStr = '$' + (summary.capital_at_risk || 0).toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0});
-    const riskPct = (summary.capital_at_risk_pct || 0).toFixed(1);
-    const riskClass = summary.capital_at_risk_pct > 40 ? 'risk-high' : summary.capital_at_risk_pct > 25 ? 'risk-medium' : 'risk-low';
-
-    const directionEmoji = summary.net_direction === 'BULLISH' ? 'BULL' : summary.net_direction === 'BEARISH' ? 'BEAR' : 'FLAT';
-    const dirClass = summary.net_direction === 'BULLISH' ? 'direction-bull' : summary.net_direction === 'BEARISH' ? 'direction-bear' : 'direction-flat';
-
-    let expiryLine = '';
-    if (summary.nearest_dte !== null && summary.nearest_dte !== undefined) {
-        const urgency = summary.nearest_dte <= 7 ? 'dte-urgent' : summary.nearest_dte <= 14 ? 'dte-soon' : 'dte-ok';
-        expiryLine = `<div class="portfolio-stat"><span class="stat-label">Nearest Exp</span><span class="stat-value ${urgency}">${summary.nearest_dte} DTE</span></div>`;
+    // Combined balance (extra large)
+    const combinedEl = document.getElementById('portfolioCombinedBalance');
+    if (combinedEl) {
+        combinedEl.textContent = '$' + combinedBalance.toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0});
     }
 
-    widget.innerHTML = `
-        <div class="portfolio-summary-grid">
-            <div class="portfolio-stat">
-                <span class="stat-label">Balance</span>
-                <span class="stat-value">${balanceStr}</span>
-            </div>
-            <div class="portfolio-stat">
-                <span class="stat-label">Positions</span>
-                <span class="stat-value">${summary.position_count || 0}</span>
-            </div>
-            <div class="portfolio-stat">
-                <span class="stat-label">At Risk</span>
-                <span class="stat-value ${riskClass}">${riskStr} (${riskPct}%)</span>
-            </div>
-            <div class="portfolio-stat">
-                <span class="stat-label">Lean</span>
-                <span class="stat-value ${dirClass}">${directionEmoji}</span>
-            </div>
-            ${expiryLine}
-        </div>
-    `;
+    // RH balance + meta (positions, risk, lean, DTE)
+    const rhBalEl = document.getElementById('rhBalance');
+    if (rhBalEl) {
+        rhBalEl.textContent = '$' + rhBalance.toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0});
+    }
+    const rhMeta = document.getElementById('rhMeta');
+    if (rhMeta) {
+        const parts = [];
+        if (summary.position_count) parts.push(summary.position_count + ' pos');
+        if (summary.net_direction && summary.net_direction !== 'FLAT') parts.push(summary.net_direction);
+        if (summary.nearest_dte !== null && summary.nearest_dte !== undefined) parts.push(summary.nearest_dte + ' DTE');
+        rhMeta.textContent = parts.join(' \u00B7 ');
+    }
+
+    // Fidelity balances are static in HTML, but update combined on refresh
+    const retEl = document.getElementById('fidelityRetirementBalance');
+    if (retEl) retEl.textContent = '$' + FIDELITY_RETIREMENT.toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0});
+    const actEl = document.getElementById('fidelityActiveBalance');
+    if (actEl) actEl.textContent = '$' + FIDELITY_ACTIVE.toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0});
 }
 
 function updatePositionsCount() {
