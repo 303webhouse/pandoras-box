@@ -502,7 +502,7 @@ async def accept_signal_as_options(signal_id: str, request: AcceptSignalAsOption
                 position_id, request.underlying.upper(), asset_type,
                 request.strategy_type, direction,
                 json.dumps(legs_json),
-                request.net_premium, request.contracts, cost_basis,
+                abs(request.net_premium), request.contracts, cost_basis,
                 request.max_loss, request.max_profit,
                 signal_data.get("stop_loss"), signal_data.get("target_1"),
                 expiry, dte, long_strike, short_strike,
