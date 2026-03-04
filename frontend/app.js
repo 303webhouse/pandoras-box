@@ -8471,8 +8471,8 @@ function renderHeadlines(articles) {
 }
 
 // Fidelity balances (manually updated — no API integration yet)
-const FIDELITY_RETIREMENT = 10341.05;  // 401A + 403B
-const FIDELITY_ACTIVE = 8223.41;       // Roth Brokerage
+const FIDELITY_RETIREMENT = 10341;     // 401A ($10,108) + 403B ($233)
+const FIDELITY_ACTIVE = 8223;          // Roth Brokerage
 
 function renderPortfolioSummaryWidget(summary) {
     const rhBalance = summary.account_balance || 0;
