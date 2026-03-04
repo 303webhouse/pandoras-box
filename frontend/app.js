@@ -914,6 +914,11 @@ function initEventListeners() {
         });
     });
     
+    // Price levels panel close button
+    document.getElementById('priceLevelsClose')?.addEventListener('click', () => {
+        document.getElementById('priceLevelsPanel').style.display = 'none';
+    });
+
     // Chart tabs (SPY, VIX, BTC)
     document.querySelectorAll('.chart-tab').forEach(tab => {
         tab.addEventListener('click', (e) => {

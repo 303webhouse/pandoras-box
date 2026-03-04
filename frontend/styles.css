@@ -1944,9 +1944,8 @@ body.override-active-bearish .override-toggle[data-active="true"] {
 /* Price Levels Panel */
 .price-levels-panel {
     position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
+    bottom: 12px;
+    left: 12px;
     width: 160px;
     background: rgba(30, 41, 59, 0.95);
     border: 2px solid var(--bias-border-color);
@@ -1958,12 +1957,27 @@ body.override-active-bearish .override-toggle[data-active="true"] {
 
 .price-levels-header {
     display: flex;
-    justify-content: space-between;
     align-items: center;
+    gap: 6px;
     padding: 8px 10px;
     background: var(--dark-bg);
     border-bottom: 1px solid var(--border-color);
     border-radius: 8px 8px 0 0;
+}
+
+.price-levels-close {
+    margin-left: auto;
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 16px;
+    cursor: pointer;
+    padding: 0 2px;
+    line-height: 1;
+}
+
+.price-levels-close:hover {
+    color: var(--text-primary);
 }
 
 .price-levels-ticker {
