@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Pandora - Real-time Trading Signal Dashboard">
     <title>Pandora</title>
-    <link rel="stylesheet" href="/styles.css?v=45">
+    <link rel="stylesheet" href="/styles.css?v=46">
     <link rel="manifest" href="/manifest.json">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -167,13 +167,6 @@
             </div>
         </section>
 
-        <!-- Sector Rotation Strip -->
-        <section class="sector-rotation-strip" id="sectorRotationStrip">
-            <div class="sector-chips" id="sectorChips">
-                <!-- Populated by JS -->
-            </div>
-        </section>
-
         <!-- Main Content: Chart + Trade Ideas + Open Positions -->
         <section class="main-content">
             <!-- Chart Area (1/2 width) -->
@@ -186,6 +179,12 @@
                 <div class="chart-container" id="chartContainer">
                     <!-- TradingView Widget -->
                     <div id="tradingview-widget"></div>
+                </div>
+                <!-- Sector Rotation Strip -->
+                <div class="sector-rotation-strip" id="sectorRotationStrip">
+                    <div class="sector-chips" id="sectorChips">
+                        <!-- Populated by JS -->
+                    </div>
                 </div>
                 
                 <!-- Price Levels Panel (shows entry/stop/target for open positions) -->
