@@ -33,21 +33,16 @@ async def score_all_factors() -> Dict[str, FactorReading]:
     results: Dict[str, FactorReading] = {}
 
     scorers = {
-        # Intraday (5)
+        # Intraday (4)
         "vix_term": "bias_filters.vix_term_structure",
         "tick_breadth": "bias_filters.tick_breadth",
-        "vix_regime": "bias_filters.vix_regime",
         "spy_trend_intraday": "bias_filters.spy_trend_intraday",
         "breadth_intraday": "bias_filters.breadth_intraday",
-        # Swing (9)
+        # Swing (5)
         "credit_spreads": "bias_filters.credit_spreads",
         "market_breadth": "bias_filters.market_breadth",
         "sector_rotation": "bias_filters.sector_rotation",
         "spy_200sma_distance": "bias_filters.spy_200sma_distance",
-        "high_yield_oas": "bias_filters.high_yield_oas",
-        "put_call_ratio": "bias_filters.put_call_ratio",
-        "polygon_pcr": "bias_filters.polygon_pcr",
-        "polygon_oi_ratio": "bias_filters.polygon_oi_ratio",
         "iv_regime": "bias_filters.iv_regime",
         # Macro (8)
         "yield_curve": "bias_filters.yield_curve",

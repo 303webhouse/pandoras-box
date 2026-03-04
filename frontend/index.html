@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Pandora - Real-time Trading Signal Dashboard">
     <title>Pandora</title>
-    <link rel="stylesheet" href="/styles.css?v=58">
+    <link rel="stylesheet" href="/styles.css?v=59">
     <link rel="manifest" href="/manifest.json">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -58,10 +58,7 @@
                         </div>
                     </div>
                     <div class="bias-composite-actions">
-                        <button class="bias-settings-btn" id="dailyBiasSettingsBtn" title="Daily Bias Factor Settings">D&#9881;</button>
-                        <button class="bias-settings-btn" id="weeklyBiasSettingsBtn" title="Weekly Bias Factor Settings">W&#9881;</button>
-                        <button class="bias-settings-btn" id="cyclicalBiasSettingsBtn" title="Cyclical Bias Factor Settings">C&#9881;</button>
-                        <button class="savita-update-btn" id="savitaUpdateBtn" title="Update Savita Indicator">
+<button class="savita-update-btn" id="savitaUpdateBtn" title="Update Savita Indicator">
                             Savita
                         </button>
                         <div class="bias-override-controls">
@@ -844,217 +841,6 @@
             </div>
         </div>
 
-        <!-- Weekly Bias Factor Settings Modal -->
-        <div class="modal-overlay" id="weeklyBiasSettingsModal">
-            <div class="factors-modal">
-                <div class="factors-modal-header">
-                    <h2>Weekly Bias Factors</h2>
-                    <button class="modal-close" id="closeWeeklyBiasSettingsBtn">✕</button>
-                </div>
-                <div class="factors-modal-body">
-                    <div class="factor-toggle" data-factor="index_trends">
-                        <label>
-                            <input type="checkbox" checked>
-                            <span class="factor-name kb-factor-link" data-kb-term="weekly-bias">Index Trends (SPY/QQQ/IWM/SMH)</span>
-                        </label>
-                        <span class="factor-vote" data-vote="0">(vote: 0)</span>
-                    </div>
-                    <div class="factor-toggle" data-factor="dollar_trend">
-                        <label>
-                            <input type="checkbox" checked>
-                            <span class="factor-name kb-factor-link" data-kb-term="dollar-smile">Dollar Trend (DXY)</span>
-                        </label>
-                        <span class="factor-vote" data-vote="0">(vote: 0)</span>
-                    </div>
-                    <div class="factor-toggle" data-factor="sector_rotation">
-                        <label>
-                            <input type="checkbox" checked>
-                            <span class="factor-name kb-factor-link" data-kb-term="sector-rotation">Sector Rotation (XLK vs XLU)</span>
-                        </label>
-                        <span class="factor-vote" data-vote="0">(vote: 0)</span>
-                    </div>
-                    <div class="factor-toggle" data-factor="credit_spreads">
-                        <label>
-                            <input type="checkbox" checked>
-                            <span class="factor-name kb-factor-link" data-kb-term="credit-spreads">Credit Spreads (HYG vs TLT)</span>
-                        </label>
-                        <span class="factor-vote" data-vote="0">(vote: 0)</span>
-                    </div>
-                    <div class="factor-toggle" data-factor="market_breadth">
-                        <label>
-                            <input type="checkbox" checked>
-                            <span class="factor-name kb-factor-link" data-kb-term="market-breadth">Market Breadth (RSP vs SPY)</span>
-                        </label>
-                        <span class="factor-vote" data-vote="0">(vote: 0)</span>
-                    </div>
-                    <div class="factor-toggle" data-factor="vix_term_structure">
-                        <label>
-                            <input type="checkbox" checked>
-                            <span class="factor-name kb-factor-link" data-kb-term="vix-term-structure">VIX Term Structure</span>
-                        </label>
-                        <span class="factor-vote" data-vote="0">(vote: 0)</span>
-                    </div>
-                    <div class="factor-divider"></div>
-                    <div class="factor-toggle personal-bias-toggle" data-timeframe="weekly">
-                        <label>
-                            <input type="checkbox" id="weeklyPersonalBiasToggle" checked>
-                            <span class="factor-name">Apply My Personal Bias</span>
-                        </label>
-                        <span class="factor-note">(adjusts score by +/-1)</span>
-                    </div>
-                </div>
-                <div class="factors-modal-footer">
-                    <button class="factors-btn reset" id="resetFactorsBtn">Reset All</button>
-                    <button class="factors-btn apply" id="applyFactorsBtn">Apply</button>
-                </div>
-            </div>
-        </div>
-
-        <!-- Daily Bias Factor Settings Modal -->
-        <div class="modal-overlay" id="dailyBiasSettingsModal">
-            <div class="factors-modal">
-                <div class="factors-modal-header">
-                    <h2>Daily Bias Factors</h2>
-                    <button class="modal-close" id="closeDailyBiasSettingsBtn">✕</button>
-                </div>
-                <div class="factors-modal-body">
-                    <div class="factor-toggle" data-factor="spy_rsi">
-                        <label>
-                            <input type="checkbox" checked>
-                            <span class="factor-name kb-factor-link" data-kb-term="rsi">SPY RSI (Momentum)</span>
-                        </label>
-                        <span class="factor-vote" data-vote="0">(vote: 0)</span>
-                    </div>
-                    <div class="factor-toggle" data-factor="vix_level">
-                        <label>
-                            <input type="checkbox" checked>
-                            <span class="factor-name kb-factor-link" data-kb-term="vix-term-structure">VIX Level (Fear)</span>
-                        </label>
-                        <span class="factor-vote" data-vote="0">(vote: 0)</span>
-                    </div>
-                    <div class="factor-toggle" data-factor="tech_leadership">
-                        <label>
-                            <input type="checkbox" checked>
-                            <span class="factor-name kb-factor-link" data-kb-term="daily-bias">Tech Leadership (QQQ vs SPY)</span>
-                        </label>
-                        <span class="factor-vote" data-vote="0">(vote: 0)</span>
-                    </div>
-                    <div class="factor-toggle" data-factor="small_cap_risk">
-                        <label>
-                            <input type="checkbox" checked>
-                            <span class="factor-name kb-factor-link" data-kb-term="daily-bias">Small Cap Risk (IWM vs SPY)</span>
-                        </label>
-                        <span class="factor-vote" data-vote="0">(vote: 0)</span>
-                    </div>
-                    <div class="factor-toggle" data-factor="spy_trend">
-                        <label>
-                            <input type="checkbox" checked>
-                            <span class="factor-name kb-factor-link" data-kb-term="daily-bias">SPY Trend</span>
-                        </label>
-                        <span class="factor-vote" data-vote="0">(vote: 0)</span>
-                    </div>
-                    <div class="factor-toggle" data-factor="market_breadth">
-                        <label>
-                            <input type="checkbox" checked>
-                            <span class="factor-name kb-factor-link" data-kb-term="market-breadth">Market Breadth (RSP vs SPY)</span>
-                        </label>
-                        <span class="factor-vote" data-vote="0">(vote: 0)</span>
-                    </div>
-                    <div class="factor-toggle" data-factor="tick_breadth">
-                        <label>
-                            <input type="checkbox" checked>
-                            <span class="factor-name kb-factor-link" data-kb-term="tick-breadth">TICK Range Breadth</span>
-                        </label>
-                        <span class="factor-vote" data-vote="0">(vote: 0)</span>
-                    </div>
-                    <div class="factor-divider"></div>
-                    <div class="factor-toggle personal-bias-toggle" data-timeframe="daily">
-                        <label>
-                            <input type="checkbox" id="dailyPersonalBiasToggle" checked>
-                            <span class="factor-name">Apply My Personal Bias</span>
-                        </label>
-                        <span class="factor-note">(adjusts score by +/-1)</span>
-                    </div>
-                </div>
-                <div class="factors-modal-footer">
-                    <button class="factors-btn reset" id="resetDailyFactorsBtn">Reset All</button>
-                    <button class="factors-btn apply" id="applyDailyFactorsBtn">Apply</button>
-                </div>
-            </div>
-        </div>
-
-        <!-- Cyclical Bias Factor Settings Modal -->
-        <div class="modal-overlay" id="cyclicalBiasSettingsModal">
-            <div class="factors-modal">
-                <div class="factors-modal-header">
-                    <h2>Cyclical Bias Factors</h2>
-                    <button class="modal-close" id="closeCyclicalBiasSettingsBtn">✕</button>
-                </div>
-                <div class="factors-modal-body">
-                    <div class="factor-toggle" data-factor="sma_200_positions">
-                        <label>
-                            <input type="checkbox" checked>
-                            <span class="factor-name kb-factor-link" data-kb-term="cyclical-bias">200 SMA Positions</span>
-                        </label>
-                        <span class="factor-vote" data-vote="0">(vote: 0)</span>
-                    </div>
-                    <div class="factor-toggle" data-factor="yield_curve">
-                        <label>
-                            <input type="checkbox" checked>
-                            <span class="factor-name kb-factor-link" data-kb-term="cyclical-bias">Yield Curve</span>
-                        </label>
-                        <span class="factor-vote" data-vote="0">(vote: 0)</span>
-                    </div>
-                    <div class="factor-toggle" data-factor="credit_spreads">
-                        <label>
-                            <input type="checkbox" checked>
-                            <span class="factor-name kb-factor-link" data-kb-term="credit-spreads">Credit Spreads</span>
-                        </label>
-                        <span class="factor-vote" data-vote="0">(vote: 0)</span>
-                    </div>
-                    <div class="factor-toggle" data-factor="excess_cape_yield">
-                        <label>
-                            <input type="checkbox" checked>
-                            <span class="factor-name kb-factor-link" data-kb-term="excess-cape-yield">Excess CAPE Yield</span>
-                        </label>
-                        <span class="factor-vote" data-vote="0">(vote: 0)</span>
-                    </div>
-                    <div class="factor-toggle" data-factor="savita_indicator" style="opacity: 0.6;">
-                        <label>
-                            <input type="checkbox" checked>
-                            <span class="factor-name kb-factor-link" data-kb-term="savita-indicator">Savita (Optional)</span>
-                        </label>
-                        <span class="factor-vote" data-vote="0">(vote: 0)</span>
-                    </div>
-                    <div class="factor-toggle" data-factor="longterm_breadth">
-                        <label>
-                            <input type="checkbox" checked>
-                            <span class="factor-name kb-factor-link" data-kb-term="market-breadth">Long-term Breadth</span>
-                        </label>
-                        <span class="factor-vote" data-vote="0">(vote: 0)</span>
-                    </div>
-                    <div class="factor-toggle" data-factor="sahm_rule">
-                        <label>
-                            <input type="checkbox" checked>
-                            <span class="factor-name kb-factor-link" data-kb-term="cyclical-bias">Sahm Rule</span>
-                        </label>
-                        <span class="factor-vote" data-vote="0">(vote: 0)</span>
-                    </div>
-                    <div class="factor-divider"></div>
-                    <div class="factor-toggle personal-bias-toggle" data-timeframe="cyclical">
-                        <label>
-                            <input type="checkbox" id="cyclicalPersonalBiasToggle" checked>
-                            <span class="factor-name">Apply My Personal Bias</span>
-                        </label>
-                        <span class="factor-note">(adjusts score by +/-1)</span>
-                    </div>
-                </div>
-                <div class="factors-modal-footer">
-                    <button class="factors-btn reset" id="resetCyclicalFactorsBtn">Reset All</button>
-                    <button class="factors-btn apply" id="applyCyclicalFactorsBtn">Apply</button>
-                </div>
-            </div>
-        </div>
     </div>
 
     <!-- Savita Update Modal -->
@@ -2103,7 +1889,7 @@
     <!-- TradingView Widget Script -->
     <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
-    <script src="/app.js?v=70"></script>
+    <script src="/app.js?v=71"></script>
     <script src="/analytics.js?v=2"></script>
 </body>
 </html>

@@ -37,7 +37,15 @@ async def store_breadth_data(uvol: float, dvol: float) -> Dict[str, Any]:
         if not redis:
             return {"error": "Redis not available"}
 
-        ratio = uvol / dvol if dvol > 0 else 0.0
+        if dvol <= 0 or uvol <= 0:
+            logger.warning("breadth_intraday: invalid UVOL=%.0f DVOL=%.0f — skipping", uvol, dvol)
+            return {"error": "invalid UVOL/DVOL values"}
+
+        ratio = uvol / dvol
+        if ratio > 10.0 or ratio < 0.1:
+            logger.warning("breadth_intraday: ratio %.2f out of plausible range [0.1, 10.0] — skipping", ratio)
+            return {"error": f"ratio {ratio:.2f} out of range"}
+
         data = {
             "uvol": uvol,
             "dvol": dvol,

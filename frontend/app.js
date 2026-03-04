@@ -24,21 +24,16 @@ const CONFIDENCE_COLORS = {
 };
 
 const COMPOSITE_FACTOR_DISPLAY_ORDER = [
-    // Intraday (5)
+    // Intraday (4)
     'vix_term',
     'tick_breadth',
-    'vix_regime',
     'spy_trend_intraday',
     'breadth_intraday',
-    // Swing (9)
+    // Swing (5)
     'credit_spreads',
     'market_breadth',
     'sector_rotation',
     'spy_200sma_distance',
-    'high_yield_oas',
-    'put_call_ratio',
-    'polygon_pcr',
-    'polygon_oi_ratio',
     'iv_regime',
     // Macro (8)
     'yield_curve',
@@ -666,7 +661,6 @@ function handleWebSocketMessage(message) {
             } else {
                 // Handle weekly bias updates with factor filtering
                 if (message.data.timeframe === 'weekly' || message.data.timeframe === 'WEEKLY') {
-                    checkAndResetFactorsForNewDay(message.data);
                     weeklyBiasFullData = message.data;
                     updateWeeklyBiasWithFactors(message.data);
                 } else {
@@ -929,11 +923,6 @@ function initEventListeners() {
     
     // Hybrid Scanner
     initHybridScanner();
-    
-    // Bias Factor Settings Modals
-    initWeeklyBiasSettings();
-    initDailyBiasSettings();
-    initCyclicalBiasSettings();
     
     // Savita Update Modal
     initSavitaUpdateModal();
@@ -1285,9 +1274,6 @@ function syncTradeIdeasOffset(assetType) {
 }
 
 async function loadBiasData() {
-    loadDailyFactorStatesFromStorage();
-    loadCyclicalFactorStatesFromStorage();
-
     // Load all biases from the auto-scheduler endpoint (includes trends!)
     try {
         const response = await fetch(`${API_URL}/bias-auto/status`);
@@ -1314,9 +1300,8 @@ async function loadBiasData() {
                 }
             }
             
-            // Update Weekly Bias - store full data and check for new day reset
+            // Update Weekly Bias - store full data
             if (data.weekly) {
-                checkAndResetFactorsForNewDay(data.weekly);
                 weeklyBiasFullData = data.weekly;
                 updateWeeklyBiasWithFactors(data.weekly);
                 
@@ -2589,9 +2574,6 @@ function updateWeeklyBiasWithFactors(biasData) {
         return;
     }
     
-    // Load factor states from localStorage
-    loadFactorStatesFromStorage();
-    
     // Preserve shift indicator before updating
     const weeklyLevelElement = document.getElementById('weeklyLevel');
     const shiftIndicator = weeklyLevelElement ? weeklyLevelElement.querySelector('.bias-shift-indicator') : null;
@@ -2652,45 +2634,7 @@ function updateWeeklyBiasWithFactors(biasData) {
     updateWarningBadge(enabledCount, 'weekly', totalFactors);
 }
 
-// Check if new day and reset factors
-function checkAndResetFactorsForNewDay(biasData) {
-    if (!biasData || !biasData.timestamp) return;
-    
-    const lastResetDate = localStorage.getItem('weeklyBiasLastReset');
-    const currentDate = new Date(biasData.timestamp).toDateString();
-    
-    if (!lastResetDate || lastResetDate !== currentDate) {
-        // New day detected - reset all factors to enabled
-        weeklyBiasFactorStates = {
-            index_trends: true,
-            dollar_trend: true,
-            sector_rotation: true,
-            credit_spreads: true,
-            market_breadth: true,
-            vix_term_structure: true
-        };
-        localStorage.setItem('weeklyBiasFactors', JSON.stringify(weeklyBiasFactorStates));
-        localStorage.setItem('weeklyBiasLastReset', currentDate);
-        console.log('ðŸ”„ New day detected - reset all weekly bias factors to enabled');
-    }
-}
 
-// Load factor states from localStorage
-function loadFactorStatesFromStorage() {
-    const stored = localStorage.getItem('weeklyBiasFactors');
-    if (stored) {
-        try {
-            weeklyBiasFactorStates = { ...weeklyBiasFactorStates, ...JSON.parse(stored) };
-        } catch (e) {
-            console.error('Error loading factor states:', e);
-        }
-    }
-}
-
-// Save factor states to localStorage
-function saveFactorStatesToStorage() {
-    localStorage.setItem('weeklyBiasFactors', JSON.stringify(weeklyBiasFactorStates));
-}
 
 // Update warning badge for any timeframe
 function updateWarningBadge(enabledCount, timeframe = 'weekly', totalFactorsOverride = null) {
@@ -2829,218 +2773,6 @@ function updateCyclicalBiasWithFactors(biasData) {
     updateWarningBadge(enabledCount, 'cyclical', totalFactors);
 }
 
-// Initialize Weekly Bias Settings Modal
-function initWeeklyBiasSettings() {
-    const settingsBtn = document.getElementById('weeklyBiasSettingsBtn');
-    const modal = document.getElementById('weeklyBiasSettingsModal');
-    const closeBtn = document.getElementById('closeWeeklyBiasSettingsBtn');
-    const resetBtn = document.getElementById('resetFactorsBtn');
-    const applyBtn = document.getElementById('applyFactorsBtn');
-    
-    if (!settingsBtn || !modal) {
-        console.warn('Weekly bias settings elements not found');
-        return;
-    }
-    
-    // Open modal
-    settingsBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        try {
-            loadFactorStatesIntoModal('weekly', weeklyBiasFactorStates, weeklyBiasFullData);
-        } catch (err) {
-            console.error('Error loading factor states:', err);
-        }
-        modal.classList.add('active');
-    });
-    
-    // Close modal
-    const closeModal = () => {
-        modal.classList.remove('active');
-    };
-    
-    if (closeBtn) closeBtn.addEventListener('click', closeModal);
-    modal.addEventListener('click', (e) => {
-        if (e.target === modal) closeModal();
-    });
-    
-    // Reset all factors
-    if (resetBtn) {
-        resetBtn.addEventListener('click', () => {
-            document.querySelectorAll('#weeklyBiasSettingsModal input[type="checkbox"]').forEach(cb => {
-                cb.checked = true;
-            });
-        });
-    }
-    
-    // Apply factors
-    if (applyBtn) {
-        applyBtn.addEventListener('click', () => {
-            // Save checkbox states
-            document.querySelectorAll('#weeklyBiasSettingsModal .factor-toggle:not(.personal-bias-toggle)').forEach(toggle => {
-                const factorName = toggle.dataset.factor;
-                const checkbox = toggle.querySelector('input[type="checkbox"]');
-                if (factorName) weeklyBiasFactorStates[factorName] = checkbox.checked;
-            });
-            
-            // Save personal bias toggle for this timeframe
-            const personalBiasToggle = document.getElementById('weeklyPersonalBiasToggle');
-            if (personalBiasToggle) {
-                personalBiasAppliesTo.weekly = personalBiasToggle.checked;
-                savePersonalBiasState();
-                reRenderBiasCardsWithPersonalBias();  // Re-render with new settings
-                applyPersonalBiasToCards();  // Update badges
-                checkBiasAlignment();
-            }
-            
-            saveFactorStatesToStorage();
-            
-            // Recalculate and update display
-            if (weeklyBiasFullData) {
-                updateWeeklyBiasWithFactors(weeklyBiasFullData);
-            }
-            
-            closeModal();
-        });
-    }
-}
-
-// Initialize Daily Bias Settings Modal
-function initDailyBiasSettings() {
-    const settingsBtn = document.getElementById('dailyBiasSettingsBtn');
-    const modal = document.getElementById('dailyBiasSettingsModal');
-    const closeBtn = document.getElementById('closeDailyBiasSettingsBtn');
-    const resetBtn = document.getElementById('resetDailyFactorsBtn');
-    const applyBtn = document.getElementById('applyDailyFactorsBtn');
-    
-    if (!settingsBtn || !modal) {
-        console.warn('Daily bias settings elements not found');
-        return;
-    }
-    
-    // Open modal
-    settingsBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        loadFactorStatesIntoModal('daily', dailyBiasFactorStates, dailyBiasFullData);
-        modal.classList.add('active');
-    });
-    
-    // Close modal
-    const closeModal = () => modal.classList.remove('active');
-    
-    if (closeBtn) closeBtn.addEventListener('click', closeModal);
-    modal.addEventListener('click', (e) => {
-        if (e.target === modal) closeModal();
-    });
-    
-    // Reset all factors
-    if (resetBtn) {
-        resetBtn.addEventListener('click', () => {
-            document.querySelectorAll('#dailyBiasSettingsModal input[type="checkbox"]').forEach(cb => {
-                cb.checked = true;
-            });
-        });
-    }
-    
-    // Apply factors
-    if (applyBtn) {
-        applyBtn.addEventListener('click', () => {
-            document.querySelectorAll('#dailyBiasSettingsModal .factor-toggle:not(.personal-bias-toggle)').forEach(toggle => {
-                const factorName = toggle.dataset.factor;
-                const checkbox = toggle.querySelector('input[type="checkbox"]');
-                if (factorName) dailyBiasFactorStates[factorName] = checkbox.checked;
-            });
-            
-            // Save personal bias toggle for this timeframe
-            const personalBiasToggle = document.getElementById('dailyPersonalBiasToggle');
-            if (personalBiasToggle) {
-                personalBiasAppliesTo.daily = personalBiasToggle.checked;
-                savePersonalBiasState();
-                reRenderBiasCardsWithPersonalBias();  // Re-render with new settings
-                applyPersonalBiasToCards();  // Update badges
-                checkBiasAlignment();
-            }
-            
-            saveDailyFactorStatesToStorage();
-            
-            if (dailyBiasFullData) {
-                updateDailyBiasWithFactors(dailyBiasFullData);
-            }
-            
-            closeModal();
-        });
-    }
-}
-
-// Initialize Cyclical Bias Settings Modal
-function initCyclicalBiasSettings() {
-    const settingsBtn = document.getElementById('cyclicalBiasSettingsBtn');
-    const modal = document.getElementById('cyclicalBiasSettingsModal');
-    const closeBtn = document.getElementById('closeCyclicalBiasSettingsBtn');
-    const resetBtn = document.getElementById('resetCyclicalFactorsBtn');
-    const applyBtn = document.getElementById('applyCyclicalFactorsBtn');
-    
-    if (!settingsBtn || !modal) {
-        console.warn('Cyclical bias settings elements not found');
-        return;
-    }
-    
-    // Open modal
-    settingsBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        loadFactorStatesIntoModal('cyclical', cyclicalBiasFactorStates, cyclicalBiasFullData);
-        modal.classList.add('active');
-    });
-    
-    // Close modal
-    const closeModal = () => modal.classList.remove('active');
-    
-    if (closeBtn) closeBtn.addEventListener('click', closeModal);
-    modal.addEventListener('click', (e) => {
-        if (e.target === modal) closeModal();
-    });
-    
-    // Reset all factors
-    if (resetBtn) {
-        resetBtn.addEventListener('click', () => {
-            document.querySelectorAll('#cyclicalBiasSettingsModal input[type="checkbox"]').forEach(cb => {
-                cb.checked = true;
-            });
-        });
-    }
-    
-    // Apply factors
-    if (applyBtn) {
-        applyBtn.addEventListener('click', () => {
-            document.querySelectorAll('#cyclicalBiasSettingsModal .factor-toggle:not(.personal-bias-toggle)').forEach(toggle => {
-                const factorName = toggle.dataset.factor;
-                const checkbox = toggle.querySelector('input[type="checkbox"]');
-                if (factorName) cyclicalBiasFactorStates[factorName] = checkbox.checked;
-            });
-            
-            // Save personal bias toggle for this timeframe
-            const personalBiasToggle = document.getElementById('cyclicalPersonalBiasToggle');
-            if (personalBiasToggle) {
-                personalBiasAppliesTo.cyclical = personalBiasToggle.checked;
-                savePersonalBiasState();
-                reRenderBiasCardsWithPersonalBias();  // Re-render with new settings
-                applyPersonalBiasToCards();  // Update badges
-                checkBiasAlignment();
-            }
-            
-            saveCyclicalFactorStatesToStorage();
-            
-            if (cyclicalBiasFullData) {
-                updateCyclicalBiasWithFactors(cyclicalBiasFullData);
-            }
-            
-            closeModal();
-        });
-    }
-}
-
 // =========================================================================
 // PERSONAL BIAS & OVERRIDE CONTROLS
 // =========================================================================
@@ -3168,15 +2900,6 @@ function loadPersonalBiasState() {
                 };
             }
         }
-        
-        // Apply to per-timeframe toggle checkboxes
-        const dailyToggle = document.getElementById('dailyPersonalBiasToggle');
-        const weeklyToggle = document.getElementById('weeklyPersonalBiasToggle');
-        const cyclicalToggle = document.getElementById('cyclicalPersonalBiasToggle');
-        
-        if (dailyToggle) dailyToggle.checked = personalBiasAppliesTo.daily;
-        if (weeklyToggle) weeklyToggle.checked = personalBiasAppliesTo.weekly;
-        if (cyclicalToggle) cyclicalToggle.checked = personalBiasAppliesTo.cyclical;
         
         // Apply to UI elements
         const personalBiasSelector = document.getElementById('personalBiasSelector');
@@ -3364,85 +3087,7 @@ function isSignalAlignedWithBias(signalDirection) {
     return true; // Unknown direction, allow
 }
 
-// Generic function to load factor states into any modal
-function loadFactorStatesIntoModal(timeframe, factorStates, fullData) {
-    try {
-        const modalId = `${timeframe}BiasSettingsModal`;
-        
-        // Load from storage first
-        const stored = localStorage.getItem(`${timeframe}BiasFactors`);
-        if (stored) {
-            try {
-                Object.assign(factorStates, JSON.parse(stored));
-            } catch (e) {
-                console.error(`Error loading ${timeframe} factor states:`, e);
-            }
-        }
-        
-        // Update checkboxes
-        document.querySelectorAll(`#${modalId} .factor-toggle`).forEach(toggle => {
-            const factorName = toggle.dataset.factor;
-            const checkbox = toggle.querySelector('input[type="checkbox"]');
-            if (checkbox) {
-                checkbox.checked = factorStates[factorName] !== false;
-            }
-        });
-        
-        // Update vote displays if we have factor data
-        if (fullData && fullData.details && fullData.details.factors) {
-            const factors = fullData.details.factors;
-            document.querySelectorAll(`#${modalId} .factor-toggle:not(.personal-bias-toggle)`).forEach(toggle => {
-                const factorName = toggle.dataset.factor;
-                const voteElement = toggle.querySelector('.factor-vote');
-                if (voteElement && factors[factorName]) {
-                    const vote = factors[factorName].vote || 0;
-                    const sign = vote >= 0 ? '+' : '';
-                    voteElement.textContent = `(vote: ${sign}${vote})`;
-                    voteElement.dataset.vote = vote;
-                }
-            });
-        }
-        
-        // Set personal bias toggle state for this timeframe
-        const personalBiasToggle = document.getElementById(`${timeframe}PersonalBiasToggle`);
-        if (personalBiasToggle) {
-            personalBiasToggle.checked = personalBiasAppliesTo[timeframe] !== false;
-        }
-    } catch (err) {
-        console.error(`Error in loadFactorStatesIntoModal for ${timeframe}:`, err);
-    }
-}
 
-// Storage functions for each timeframe
-function saveDailyFactorStatesToStorage() {
-    localStorage.setItem('dailyBiasFactors', JSON.stringify(dailyBiasFactorStates));
-}
-
-function loadDailyFactorStatesFromStorage() {
-    const stored = localStorage.getItem('dailyBiasFactors');
-    if (stored) {
-        try {
-            dailyBiasFactorStates = { ...dailyBiasFactorStates, ...JSON.parse(stored) };
-        } catch (e) {
-            console.error('Error loading daily factor states:', e);
-        }
-    }
-}
-
-function saveCyclicalFactorStatesToStorage() {
-    localStorage.setItem('cyclicalBiasFactors', JSON.stringify(cyclicalBiasFactorStates));
-}
-
-function loadCyclicalFactorStatesFromStorage() {
-    const stored = localStorage.getItem('cyclicalBiasFactors');
-    if (stored) {
-        try {
-            cyclicalBiasFactorStates = { ...cyclicalBiasFactorStates, ...JSON.parse(stored) };
-        } catch (e) {
-            console.error('Error loading cyclical factor states:', e);
-        }
-    }
-}
 
 // Fetch and display bias shift status (weekly bias shift from Monday baseline)
 async function fetchBiasShiftStatus() {

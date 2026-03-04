@@ -782,68 +782,6 @@ async def get_tick_status_endpoint():
     return await get_tick_status()
 
 
-class PCRPayload(BaseModel):
-    """Payload for Put/Call Ratio data from TradingView"""
-    pcr: float  # CBOE equity put/call ratio (e.g., 0.85)
-    date: Optional[str] = None  # Optional date (YYYY-MM-DD), defaults to today
-
-
-@router.post("/pcr")
-async def receive_pcr_data(payload: PCRPayload):
-    """
-    Receive CBOE Put/Call Ratio data from TradingView webhook.
-    
-    TradingView Alert Setup:
-    - Symbol: $CPCE (CBOE equity put/call ratio)
-    - Timeframe: Daily
-    - Condition: Once per bar close
-    - Webhook URL: https://your-app.railway.app/webhook/pcr
-    - Message (JSON): {"pcr": {{close}}}
-    """
-    from bias_filters.put_call_ratio import store_pcr_data, compute_score as compute_pcr_score
-    
-    logger.info(f"📊 PCR webhook received: {payload.pcr:.3f}")
-    
-    result = await store_pcr_data(pcr_value=payload.pcr, date=payload.date)
-    
-    # Score the factor and store reading (fast — Redis only)
-    try:
-        pcr_data = {
-            "pcr": payload.pcr,
-            "updated_at": result.get("updated_at"),
-            "date": payload.date,
-        }
-        reading = await compute_pcr_score(pcr_data)
-        if reading:
-            from bias_engine.composite import store_factor_reading
-            await store_factor_reading(reading)
-            result["factor_score"] = reading.score
-            result["factor_signal"] = reading.signal
-            # Defer heavy composite recomputation to background
-            asyncio.ensure_future(_recompute_composite_background("put_call_ratio"))
-        else:
-            logger.warning("📊 PCR factor scoring returned None")
-    except Exception as e:
-        logger.error(f"📊 PCR factor scoring failed (data still stored): {e}")
-    
-    return result
-
-
-@router.get("/pcr/status")
-async def get_pcr_status():
-    """Get current Put/Call Ratio data and status"""
-    from bias_filters.put_call_ratio import compute_score
-    reading = await compute_score()
-    if reading:
-        return {
-            "status": "ok",
-            "pcr": reading.raw_data.get("pcr"),
-            "score": reading.score,
-            "signal": reading.signal,
-            "detail": reading.detail,
-        }
-    return {"status": "no_data", "message": "No PCR data available"}
-
 
 @router.get("/outcomes/{signal_id}")
 async def get_signal_outcome(signal_id: str):

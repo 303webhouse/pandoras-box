@@ -2076,7 +2076,7 @@ async def run_cta_scan(tickers: List[str] = None, include_watchlist: bool = True
         from database.redis_client import get_redis_client
         r = await get_redis_client()
         if r:
-            vix_raw = await r.get("factor:vix_regime:raw")
+            vix_raw = await r.get("factor:vix_term:raw")
             if vix_raw:
                 vix_val = float(json.loads(vix_raw).get("vix", 0) or 0)
     except Exception:
