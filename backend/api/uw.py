@@ -20,6 +20,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/uw", tags=["unusual-whales"])
 
 FLOW_TTL = 3600        # 1 hour
+TICKER_UPDATE_TTL = 3600  # 1 hour for UW ticker update data
+MARKET_FLOW_TTL = 3600    # 1 hour for aggregate market flow
 DISCOVERY_TTL = 14400  # 4 hours
 RECENT_LIST_MAX = 50   # Max items in the recent alerts list
 
@@ -157,3 +159,106 @@ async def get_uw_discovery():
     if data:
         return {"status": "success", "tickers": json.loads(data)}
     return {"status": "success", "tickers": []}
+
+
+# ── UW Ticker Updates (from UW Watcher Bot) ─────────────────
+
+
+@router.post("/ticker-updates")
+async def receive_uw_ticker_updates(request: Request, _: str = Depends(verify_pivot_key)):
+    """
+    Receive parsed UW Ticker Update data from the VPS watcher bot.
+    Stores per-ticker data and aggregate market flow snapshot in Redis.
+    """
+    try:
+        body = await request.json()
+        tickers = body.get("tickers", [])
+        timestamp = body.get("timestamp", datetime.now(timezone.utc).isoformat())
+
+        client = await get_redis_client()
+        if not client:
+            return {"status": "error", "message": "Redis unavailable"}
+
+        written = 0
+        spy_data = None
+        qqq_data = None
+        total_premium = 0.0
+        bearish_count = 0
+        bullish_count = 0
+
+        for td in tickers:
+            ticker = td.get("ticker")
+            if not ticker:
+                continue
+
+            # Store per-ticker data
+            ticker_upper = ticker.upper()
+            td["received_at"] = datetime.now(timezone.utc).isoformat()
+            td["source_timestamp"] = timestamp
+            await client.set(f"uw:ticker:{ticker_upper}", json.dumps(td), ex=TICKER_UPDATE_TTL)
+            written += 1
+
+            # Track aggregate stats
+            total_premium += float(td.get("total_premium") or 0)
+            sentiment = td.get("flow_sentiment")
+            if sentiment == "BEARISH":
+                bearish_count += 1
+            elif sentiment == "BULLISH":
+                bullish_count += 1
+
+            if ticker_upper == "SPY":
+                spy_data = td
+            elif ticker_upper == "QQQ":
+                qqq_data = td
+
+        # Store aggregate market flow snapshot
+        if written > 0:
+            market_flow = {
+                "timestamp": timestamp,
+                "spy_pc_ratio": spy_data["pc_ratio"] if spy_data else None,
+                "qqq_pc_ratio": qqq_data["pc_ratio"] if qqq_data else None,
+                "total_premium_all": total_premium,
+                "bearish_flow_count": bearish_count,
+                "bullish_flow_count": bullish_count,
+                "ticker_count": written,
+            }
+            await client.set("uw:market_flow:latest", json.dumps(market_flow), ex=MARKET_FLOW_TTL)
+
+        logger.info("UW ticker updates: cached %s tickers", written)
+        return {"status": "success", "cached": written}
+
+    except Exception as e:
+        logger.error(f"Error receiving UW ticker updates: {e}")
+        return {"status": "error", "message": str(e)}
+
+
+@router.get("/market-flow")
+async def get_uw_market_flow():
+    """
+    Read the aggregate UW market flow snapshot.
+    Used by committee context builder for SPY/QQQ P/C ratios and sentiment.
+    """
+    client = await get_redis_client()
+    if not client:
+        return {"status": "error", "available": False}
+
+    data = await client.get("uw:market_flow:latest")
+    if data:
+        return {"status": "success", "available": True, "flow": json.loads(data)}
+    return {"status": "success", "available": False, "flow": None}
+
+
+@router.get("/ticker/{ticker}")
+async def get_uw_ticker(ticker: str):
+    """
+    Read cached UW Ticker Update data for a specific ticker.
+    Used by committee context builder for per-ticker flow data.
+    """
+    client = await get_redis_client()
+    if not client:
+        return {"status": "error", "available": False}
+
+    data = await client.get(f"uw:ticker:{ticker.upper()}")
+    if data:
+        return {"status": "success", "available": True, "ticker_data": json.loads(data)}
+    return {"status": "success", "available": False, "ticker_data": None}

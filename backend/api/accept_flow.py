@@ -101,7 +101,7 @@ async def accept_as_stocks(signal_id: str, body: AcceptAsStocksRequest):
 
     signal = dict(signal)
     current_status = signal.get("status") or "ACTIVE"
-    if current_status not in ("ACTIVE", "COMMITTEE_REVIEW"):
+    if current_status not in ("ACTIVE", "PENDING_REVIEW", "COMMITTEE_REVIEW"):
         raise HTTPException(status_code=409, detail=f"Signal in {current_status}, cannot accept")
 
     # Build pending trade params (override from signal defaults)
@@ -158,7 +158,7 @@ async def accept_as_options(signal_id: str, body: AcceptAsOptionsRequest):
 
     signal = dict(signal)
     current_status = signal.get("status") or "ACTIVE"
-    if current_status not in ("ACTIVE", "COMMITTEE_REVIEW"):
+    if current_status not in ("ACTIVE", "PENDING_REVIEW", "COMMITTEE_REVIEW"):
         raise HTTPException(status_code=409, detail=f"Signal in {current_status}, cannot accept")
 
     params = {

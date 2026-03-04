@@ -824,6 +824,88 @@ def format_economic_calendar(events: list[dict]) -> str:
     return "\n".join(lines)
 
 
+# ── UW Flow Context ──────────────────────────────────────────
+
+def build_uw_flow_context(ticker: str, api_url: str, api_key: str) -> str:
+    """Fetch UW flow data for a ticker from the Pandora API."""
+    import urllib.request
+    import urllib.error
+
+    base = api_url.rstrip("/")
+    parts = []
+
+    # Fetch ticker update data (price, volume, P/C ratio)
+    try:
+        req = urllib.request.Request(f"{base}/api/uw/ticker/{ticker.upper()}")
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            if data.get("available") and data.get("ticker_data"):
+                td = data["ticker_data"]
+                parts.append(f"UW Flow Data ({ticker.upper()}):")
+                parts.append(f"  P/C Ratio: {td.get('pc_ratio', 'N/A')}")
+                if td.get("put_volume") is not None and td.get("call_volume") is not None:
+                    parts.append(f"  Put Volume: {td['put_volume']:,} | Call Volume: {td['call_volume']:,}")
+                if td.get("total_premium") is not None:
+                    parts.append(f"  Total Premium: ${td['total_premium']:,.0f}")
+                sentiment = td.get("flow_sentiment")
+                if sentiment:
+                    pct = td.get("flow_pct", "")
+                    pct_str = f" ({pct}%)" if pct else ""
+                    parts.append(f"  Flow Sentiment: {sentiment}{pct_str}")
+    except Exception:
+        pass
+
+    # Fetch existing UW flow data (sweeps/blocks from discord bot)
+    try:
+        req = urllib.request.Request(f"{base}/api/uw/flow/{ticker.upper()}")
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            if data.get("available") and data.get("flow"):
+                flow = data["flow"]
+                if not parts:
+                    parts.append(f"UW Flow Data ({ticker.upper()}):")
+                sentiment = flow.get("sentiment", "UNKNOWN")
+                parts.append(f"  UW Sweep Sentiment: {sentiment}")
+                if flow.get("unusual_count"):
+                    parts.append(f"  Unusual Activity Count: {flow['unusual_count']}")
+    except Exception:
+        pass
+
+    return "\n".join(parts)
+
+
+def build_market_flow_context(api_url: str, api_key: str) -> str:
+    """Fetch aggregate UW market flow snapshot from the Pandora API."""
+    import urllib.request
+    import urllib.error
+
+    base = api_url.rstrip("/")
+    try:
+        req = urllib.request.Request(f"{base}/api/uw/market-flow")
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            if data.get("available") and data.get("flow"):
+                flow = data["flow"]
+                lines = ["UW Market Flow Snapshot:"]
+                spy_pc = flow.get("spy_pc_ratio")
+                qqq_pc = flow.get("qqq_pc_ratio")
+                if spy_pc is not None or qqq_pc is not None:
+                    parts = []
+                    if spy_pc is not None:
+                        parts.append(f"SPY P/C: {spy_pc}")
+                    if qqq_pc is not None:
+                        parts.append(f"QQQ P/C: {qqq_pc}")
+                    lines.append(f"  {' | '.join(parts)}")
+                bear = flow.get("bearish_flow_count", 0)
+                bull = flow.get("bullish_flow_count", 0)
+                if bear or bull:
+                    lines.append(f"  Bearish Flow Tickers: {bear} | Bullish: {bull}")
+                return "\n".join(lines)
+    except Exception:
+        pass
+    return ""
+
+
 # ── Portfolio Context ─────────────────────────────────────────
 
 def fetch_portfolio_context(api_url: str) -> dict:
@@ -859,6 +941,8 @@ def fetch_portfolio_context(api_url: str) -> dict:
 
 def format_portfolio_context(portfolio: dict) -> str:
     """Render terse portfolio summary as a context block for LLM agents."""
+    from datetime import datetime, timezone, timedelta
+
     if not portfolio:
         return ""
 
@@ -883,6 +967,25 @@ def format_portfolio_context(portfolio: dict) -> str:
             bal_str += f" | Buying power: ${buying_power:,.0f}"
         lines.append(bal_str)
 
+        # Pre-calculated risk limits so agents don't need to do math
+        if account_balance and account_balance > 0:
+            standard_risk = round(account_balance * 0.025, 2)
+            high_risk = round(account_balance * 0.035, 2)
+            lines.append(f"Max risk per trade (2.5% standard): ${standard_risk:,.0f}")
+            lines.append(f"Max risk per trade (3.5% high conviction): ${high_risk:,.0f}")
+            lines.append(f"Max correlated exposure (2 positions): ${standard_risk * 2:,.0f}")
+
+        # Balance staleness warning
+        updated_at = rh.get("updated_at") or rh.get("last_updated") or ""
+        if updated_at:
+            try:
+                bal_time = datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
+                bal_age_hours = (datetime.now(timezone.utc) - bal_time).total_seconds() / 3600
+                if bal_age_hours > 24:
+                    lines.append(f"WARNING: BALANCE LAST UPDATED {bal_age_hours:.0f}h AGO — may be stale")
+            except (ValueError, TypeError):
+                pass
+
     # Active positions
     positions = portfolio.get("positions") or []
     if positions:
@@ -904,8 +1007,23 @@ def format_portfolio_context(portfolio: dict) -> str:
                 pct = (total_cost / account_balance) * 100
                 cap_str += f" (~{pct:.1f}% of account)"
             lines.append(cap_str)
+
+        # Position staleness warning
+        try:
+            timestamps = []
+            for p in positions:
+                ts = p.get("last_updated") or p.get("updated_at") or ""
+                if ts:
+                    timestamps.append(datetime.fromisoformat(ts.replace("Z", "+00:00")))
+            if timestamps:
+                newest = max(timestamps)
+                age_hours = (datetime.now(timezone.utc) - newest).total_seconds() / 3600
+                if age_hours > 4:
+                    lines.append(f"WARNING: POSITION DATA IS {age_hours:.0f} HOURS OLD — may not reflect current holdings")
+        except (ValueError, TypeError):
+            pass
     else:
-        lines.append("Open positions: none recorded")
+        lines.append("WARNING: NO POSITIONS RECORDED — Nick may have open trades not reflected here. Size conservatively.")
 
     return "\n".join(lines) if len(lines) > 1 else ""
 

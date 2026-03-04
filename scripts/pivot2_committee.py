@@ -599,6 +599,8 @@ def build_market_context(signal: dict, api_url: str, api_key: str) -> dict:
         "earnings": earnings,
         "zone": zone,
         "portfolio": portfolio,
+        "api_url": api_url,
+        "api_key": api_key,
     }
 
 
@@ -625,6 +627,23 @@ def run_committee(signal: dict, context: dict, api_key: str, technical_data: dic
             base_context = base_context + "\n\n" + econ_block
     except Exception as e:
         log.warning("Failed to inject economic calendar: %s", e)
+
+    # Inject UW flow data for the signal ticker + market flow
+    try:
+        from committee_context import build_uw_flow_context, build_market_flow_context
+        api_url = context.get("api_url") or os.environ.get("PANDORA_API_URL") or ""
+        api_key_val = context.get("api_key") or os.environ.get("PIVOT_API_KEY") or ""
+        ticker = signal.get("ticker", "")
+        if ticker and api_url:
+            uw_ticker_block = build_uw_flow_context(ticker, api_url, api_key_val)
+            if uw_ticker_block:
+                base_context = base_context + "\n\n" + uw_ticker_block
+        if api_url:
+            uw_market_block = build_market_flow_context(api_url, api_key_val)
+            if uw_market_block:
+                base_context = base_context + "\n\n" + uw_market_block
+    except Exception as e:
+        log.warning("Failed to inject UW flow context: %s", e)
 
     # Inject portfolio context (balances + open positions)
     try:
