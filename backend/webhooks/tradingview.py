@@ -193,24 +193,22 @@ async def process_scout_signal(alert: TradingViewAlert, start_time: datetime):
         "note": "Early warning - confirm with 1H Sniper before entry"
     }
 
-    # Scout signals skip scoring (flat score=40) and use shorter cache TTL
-    signal_data = await process_signal_unified(
+    # Fire-and-forget: return 200 immediately, process in background
+    asyncio.ensure_future(process_signal_unified(
         signal_data,
         source="tradingview",
         skip_scoring=True,
         cache_ttl=1800,
         priority_threshold=0,  # Always broadcast scouts
-    )
+    ))
 
-    elapsed = (datetime.now() - start_time).total_seconds() * 1000
-    logger.info(f"⚠️ Scout alert: {alert.ticker} {alert.direction} (RSI: {alert.rsi}, RVOL: {alert.rvol}) in {elapsed:.1f}ms")
+    logger.info(f"⚠️ Scout alert accepted: {alert.ticker} {alert.direction} (RSI: {alert.rsi}, RVOL: {alert.rvol})")
 
     return {
-        "status": "success",
+        "status": "accepted",
         "signal_id": signal_id,
         "signal_type": "SCOUT_ALERT",
         "message": "Early warning - not a trade signal",
-        "processing_time_ms": round(elapsed, 1)
     }
 
 
@@ -264,24 +262,22 @@ async def process_holy_grail_signal(alert: TradingViewAlert, start_time: datetim
         "rvol": alert.rvol,  # Carries DI spread from PineScript
     }
 
-    # Unified pipeline handles scoring, persistence, caching, and broadcast
-    signal_data = await process_signal_unified(signal_data, source="tradingview")
+    # Fire-and-forget: return 200 immediately, process in background
+    asyncio.ensure_future(process_signal_unified(signal_data, source="tradingview"))
 
-    elapsed = (datetime.now() - start_time).total_seconds() * 1000
-    logger.info(f"Holy Grail signal processed: {alert.ticker} {signal_type} ({alert.timeframe}) in {elapsed:.1f}ms")
+    logger.info(f"📨 Holy Grail accepted: {alert.ticker} {signal_type} ({alert.timeframe})")
 
     return {
-        "status": "success",
+        "status": "accepted",
         "signal_id": signal_id,
-        "signal_type": signal_data.get("signal_type", signal_type),
-        "processing_time_ms": round(elapsed, 1)
+        "signal_type": signal_type,
     }
 
 
 async def process_exhaustion_signal(alert: TradingViewAlert, start_time: datetime):
     """Process Exhaustion strategy signals with BTC macro confluence check"""
     
-    # Validate exhaustion signal
+    # Validate exhaustion signal (keep sync — fast, no I/O)
     is_valid, validation_details = await validate_exhaustion_signal(alert.dict())
     
     if not is_valid:
@@ -319,18 +315,15 @@ async def process_exhaustion_signal(alert: TradingViewAlert, start_time: datetim
         "adx": alert.adx
     }
     
-    # Unified pipeline handles scoring, persistence, caching, and broadcast
-    signal_data = await process_signal_unified(signal_data, source="tradingview")
+    # Fire-and-forget: return 200 immediately, process in background
+    asyncio.ensure_future(process_signal_unified(signal_data, source="tradingview"))
 
-    elapsed = (datetime.now() - start_time).total_seconds() * 1000
-    logger.info(f"✅ Exhaustion signal processed: {alert.ticker} {signal_data['signal_type']} in {elapsed:.1f}ms")
+    logger.info(f"📨 Exhaustion accepted: {alert.ticker} {classification['signal_type']}")
 
     return {
-        "status": "success",
+        "status": "accepted",
         "signal_id": signal_id,
-        "signal_type": signal_data["signal_type"],
-        "macro_confluence": signal_data.get("macro_confluence"),
-        "processing_time_ms": round(elapsed, 1)
+        "signal_type": classification["signal_type"],
     }
 
 
@@ -371,24 +364,22 @@ async def process_sniper_signal(alert: TradingViewAlert, start_time: datetime):
         "adx": alert.adx
     }
     
-    # Unified pipeline handles scoring, persistence, caching, and broadcast
-    signal_data = await process_signal_unified(signal_data, source="tradingview")
+    # Fire-and-forget: return 200 immediately, process in background
+    asyncio.ensure_future(process_signal_unified(signal_data, source="tradingview"))
 
-    elapsed = (datetime.now() - start_time).total_seconds() * 1000
-    logger.info(f"✅ Sniper signal processed: {alert.ticker} {signal_type} in {elapsed:.1f}ms")
+    logger.info(f"📨 Sniper accepted: {alert.ticker} {signal_type}")
 
     return {
-        "status": "success",
+        "status": "accepted",
         "signal_id": signal_id,
-        "signal_type": signal_data.get("signal_type", signal_type),
-        "processing_time_ms": round(elapsed, 1)
+        "signal_type": signal_type,
     }
 
 
 async def process_triple_line_signal(alert: TradingViewAlert, start_time: datetime):
     """Process Triple Line strategy signals (original handler)"""
     
-    # Validate strategy setup
+    # Validate strategy setup (keep sync — fast, no heavy I/O)
     is_valid, validation_details = await validate_triple_line_signal(alert.dict())
     
     if not is_valid:
@@ -439,17 +430,15 @@ async def process_triple_line_signal(alert: TradingViewAlert, start_time: dateti
         "status": "ACTIVE"
     }
     
-    # Unified pipeline handles scoring, persistence, caching, and broadcast
-    signal_data = await process_signal_unified(signal_data, source="tradingview")
+    # Fire-and-forget: return 200 immediately, process in background
+    asyncio.ensure_future(process_signal_unified(signal_data, source="tradingview"))
 
-    elapsed = (datetime.now() - start_time).total_seconds() * 1000
-    logger.info(f"✅ Signal processed: {alert.ticker} {signal_data.get('signal_type', signal_type)} in {elapsed:.1f}ms")
+    logger.info(f"📨 Triple Line accepted: {alert.ticker} {signal_type}")
 
     return {
-        "status": "success",
+        "status": "accepted",
         "signal_id": signal_id,
-        "signal_type": signal_data.get("signal_type", signal_type),
-        "processing_time_ms": round(elapsed, 1)
+        "signal_type": signal_type,
     }
 
 
@@ -487,17 +476,15 @@ async def process_generic_signal(alert: TradingViewAlert, start_time: datetime):
         "adx": alert.adx
     }
     
-    # Unified pipeline handles scoring, persistence, caching, and broadcast
-    signal_data = await process_signal_unified(signal_data, source="tradingview")
+    # Fire-and-forget: return 200 immediately, process in background
+    asyncio.ensure_future(process_signal_unified(signal_data, source="tradingview"))
 
-    elapsed = (datetime.now() - start_time).total_seconds() * 1000
-    logger.info(f"✅ Generic signal processed: {alert.ticker} {signal_data.get('signal_type', signal_type)} in {elapsed:.1f}ms")
+    logger.info(f"📨 Generic signal accepted: {alert.ticker} {signal_type}")
 
     return {
-        "status": "success",
+        "status": "accepted",
         "signal_id": signal_id,
-        "signal_type": signal_data.get("signal_type", signal_type),
-        "processing_time_ms": round(elapsed, 1)
+        "signal_type": signal_type,
     }
 
 
