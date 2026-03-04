@@ -41,10 +41,18 @@ After completing work on a Trading Team brief, append a new entry at the top of 
 | 08 — Librarian Phase 1 (Knowledge Base) | ⬜ | ⬜ | ⬜ | ⬜ |
 | 09 — Librarian Phase 2 (Agent Training Loop) | ⬜ | ⬜ | ⬜ | ⬜ |
 | 10 — Unified Position Ledger | ✅ | ✅ | ✅ | ✅ |
+| UW Watcher + Signals Channel + Portfolio Fix | ✅ | ✅ | ✅ | ⬜ |
 
 ---
 
 ## Log Entries
+
+### 2026-03-04 — UW Watcher + Signals Channel + Portfolio Fix — Built + Deployed
+**Agent:** Claude Code (build), Claude.ai Opus (brief/architecture + VPS deployment)
+**What happened:** Three-part brief built, committed, and deployed. (1) Portfolio Fix: removed hardcoded dollar amounts ($4,700/$118/$165) from committee_prompts.py SIZE RULES — agents now reference live PORTFOLIO CONTEXT with pre-calculated risk limits (2.5% standard, 3.5% high conviction) and staleness warnings. (2) Signals Channel: pipeline.py changed COMMITTEE_REVIEW → PENDING_REVIEW; signal_notifier.py rewritten with rich embeds (score tier, bias, levels, R:R), green/red color coding, Analyze + Dismiss buttons posted to #📊-signals; committee_interaction_handler.py handles analyze/dismiss clicks triggering on-demand committee runs. (3) UW Watcher: new uw_watcher.py discord.py bot watches #uw-flow-alerts, parses ticker updates via regex, POSTs to Railway; 3 new Railway endpoints (POST /api/uw/ticker-updates, GET /api/uw/ticker/{ticker}, GET /api/uw/market-flow) cache in Redis with 1h TTL. UW flow data wired into committee context for ticker-specific and market-wide flow awareness.
+**Files changed:** `scripts/uw_watcher.py` (new), `scripts/signal_notifier.py` (rewritten), `scripts/committee_interaction_handler.py` (modified — analyze/dismiss handlers + __main__ block), `scripts/committee_context.py` (modified — UW flow context builders + portfolio staleness), `scripts/committee_prompts.py` (modified — removed hardcoded balances), `scripts/pivot2_committee.py` (modified — UW flow wired into market context), `backend/api/uw.py` (modified — 3 new endpoints), `backend/signals/pipeline.py` (modified — PENDING_REVIEW status), `backend/webhooks/committee_bridge.py` (modified — accept PENDING_REVIEW), `backend/webhooks/accept_flow.py` (modified — accept PENDING_REVIEW)
+**Deviations from brief:** (1) uw_watcher.py needed token fallback patch — brief's `pick_env()` didn't check `cfg['channels']['discord']['token']` where the bot token actually lives; patched on VPS and in repo. (2) committee_interaction_handler.py was missing `__main__` entry point — CC dropped it during rewrite; added back on VPS and in repo. (3) CC extended existing `backend/api/uw.py` instead of creating new `uw_webhook.py` (improvement — avoids duplicate routers). (4) CC modified `signal_notifier.py` instead of creating `signal_poster.py` (improvement — reuses existing Discord posting patterns).
+**Next blocker:** Awaiting first UW Bot ticker update during market hours to verify end-to-end flow (watcher → Railway → Redis → committee context). First real test: next trading day morning.
 
 ### 2026-03-03 — Brief 06B Built + Deployed + Verified
 **Agent:** Claude Code (implementation), Claude.ai Opus (brief/architecture)
