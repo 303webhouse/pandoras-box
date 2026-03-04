@@ -3827,6 +3827,12 @@ function createSignalCard(signal) {
     // Safe number formatting
     const formatPrice = (val) => val ? parseFloat(val).toFixed(2) : '-';
     const formatRR = (val) => formatRiskReward(val);
+
+    // Committee data rendering
+    const committeeData = signal.committee_data ?
+        (typeof signal.committee_data === 'string' ? JSON.parse(signal.committee_data) : signal.committee_data)
+        : null;
+    const hasCommittee = !!(committeeData && committeeData.action);
     
     // Handle multiple strategies (deduplicated signals)
     let strategiesHtml = '';
@@ -3920,8 +3926,24 @@ function createSignalCard(signal) {
             
             <div class="signal-actions">
                 <button class="action-btn dismiss-btn" data-action="dismiss">X Dismiss</button>
+                ${hasCommittee ? (() => {
+                    const action = committeeData.action;
+                    const conviction = committeeData.conviction || '';
+                    const badgeClass = action === 'TAKE' ? 'committee-take' : (action === 'PASS' ? 'committee-pass' : 'committee-watch');
+                    return `<div class="committee-badge ${badgeClass}" data-action="toggle-committee">${action} &middot; ${conviction}</div>`;
+                })() : `<button class="action-btn committee-btn" data-action="committee">&#x1F9E0; Committee</button>`}
                 <button class="action-btn select-btn" data-action="select">OK Accept</button>
             </div>
+            ${hasCommittee ? (() => {
+                const r = committeeData.risk || {};
+                const pivotText = committeeData.pivot ? committeeData.pivot.substring(0, 200) + (committeeData.pivot.length > 200 ? '...' : '') : '';
+                return `
+                <div class="committee-panel" style="display:none;">
+                    <div class="committee-panel-header">Trading Team Analysis</div>
+                    ${pivotText ? `<div class="committee-synthesis">${pivotText}</div>` : ''}
+                    ${r.entry ? `<div class="committee-risk-row">Entry: <strong>${r.entry}</strong> | Stop: <strong>${r.stop || '--'}</strong> | Size: <strong>${r.size || '--'}</strong></div>` : ''}
+                </div>`;
+            })() : ''}
         </div>
     `;
 }
@@ -4550,6 +4572,41 @@ async function handleSignalAction(event) {
         openDismissModal(signal, card);
         return;
     }
+
+    if (action === 'COMMITTEE') {
+        const signal = JSON.parse(decodeURIComponent(card.dataset.signal));
+        await requestCommitteeReview(signal, card);
+        return;
+    }
+
+    if (action === 'TOGGLE-COMMITTEE') {
+        const panel = card.querySelector('.committee-panel');
+        if (panel) {
+            panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+        }
+        return;
+    }
+}
+
+async function requestCommitteeReview(signal, card) {
+    try {
+        const response = await fetch(`${API_URL}/trade-ideas/${signal.signal_id}/status`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'COMMITTEE_REVIEW', decision_source: 'dashboard' })
+        });
+        const data = await response.json();
+        if (data.new_status === 'COMMITTEE_REVIEW') {
+            const btn = card.querySelector('.committee-btn');
+            if (btn) {
+                btn.textContent = 'Pending...';
+                btn.disabled = true;
+                btn.classList.add('committee-pending');
+            }
+        }
+    } catch (err) {
+        console.error('Committee request failed:', err);
+    }
 }
 
 async function dismissSignalWithReason(signalId, reason, notes, card) {
@@ -4582,6 +4639,24 @@ async function dismissSignalWithReason(signalId, reason, notes, card) {
 }
 
 function openDismissModal(signal, card) {
+    // Check for committee override context
+    let committeeData = signal.committee_data;
+    if (typeof committeeData === 'string') {
+        try { committeeData = JSON.parse(committeeData); } catch(e) { committeeData = null; }
+    }
+    const isCommitteeOverride = committeeData && committeeData.action === 'TAKE';
+
+    const committeeWarningHtml = isCommitteeOverride ? `
+        <div class="committee-override-warning">
+            Trading Team said <strong class="committee-take">TAKE</strong>
+            (${committeeData.conviction || ''}) &mdash; dismissing this is an override.
+        </div>
+        <div class="modal-field">
+            <label>Override Reason (helps the team learn)</label>
+            <input type="text" id="dismissOverrideReason" placeholder="e.g. Too wide spread, better setup available...">
+        </div>
+    ` : '';
+
     const modal = document.createElement('div');
     modal.className = 'signal-modal-overlay active';
     modal.innerHTML = `
@@ -4591,6 +4666,7 @@ function openDismissModal(signal, card) {
                 <button class="modal-close">&times;</button>
             </div>
             <div class="modal-body">
+                ${committeeWarningHtml}
                 <p>Why are you dismissing this signal?</p>
                 <div class="dismiss-reasons">
                     <label class="dismiss-reason">
@@ -4621,22 +4697,24 @@ function openDismissModal(signal, card) {
             </div>
         </div>
     `;
-    
+
     document.body.appendChild(modal);
-    
+
     // Handle close
     modal.querySelector('.modal-close').addEventListener('click', () => modal.remove());
     modal.querySelector('.modal-btn.cancel').addEventListener('click', () => modal.remove());
-    
+
     // Handle dismiss
     modal.querySelector('.modal-btn.dismiss').addEventListener('click', async () => {
         const reason = modal.querySelector('input[name="dismissReason"]:checked')?.value || 'OTHER';
         const notes = modal.querySelector('#dismissNotes').value;
-        
+        const overrideReason = modal.querySelector('#dismissOverrideReason')?.value || '';
+        const combinedNotes = overrideReason ? `${overrideReason} | ${notes}` : notes;
+
         modal.remove();
-        await dismissSignalWithReason(signal.signal_id, reason, notes, card);
+        await dismissSignalWithReason(signal.signal_id, reason, combinedNotes, card);
     });
-    
+
     // Close on backdrop click
     modal.addEventListener('click', (e) => {
         if (e.target === modal) modal.remove();
@@ -8539,13 +8617,24 @@ function openPositionCloseModal(position) {
     exitInput.value = '';
     exitInput.placeholder = isOption ? 'e.g. 0.45' : 'e.g. 235.00';
     exitInput.step = isOption ? '0.01' : '0.01';
-    exitInput.previousElementSibling.textContent = isOption ? 'Exit Price per Contract *' : 'Exit Price *';
+
+    // Structure-aware label for exit price
+    const struct = (position.structure || '').toLowerCase();
+    const spreadKeywords = ['spread', 'condor', 'butterfly', 'strangle', 'straddle'];
+    const isSpread = spreadKeywords.some(kw => struct.includes(kw));
+    if (isSpread) {
+        exitInput.previousElementSibling.textContent = 'Net Close Premium per Spread *';
+    } else if (isOption) {
+        exitInput.previousElementSibling.textContent = 'Exit Premium per Contract *';
+    } else {
+        exitInput.previousElementSibling.textContent = 'Exit Price *';
+    }
 
     document.getElementById('closeQuantity').value = position.quantity;
     document.getElementById('closeQtyLabel').textContent = isOption ? 'Contracts to Close *' : 'Quantity to Close *';
     document.getElementById('closeQtyHint').textContent = `You have ${position.quantity} ${unitLabel}`;
-    document.getElementById('closeEntryPrice').textContent = '$' + (position.entry_price?.toFixed(2) || '--')
-        + (isOption ? ' /contract' : '');
+    const entryUnit = isSpread ? '/spread' : (isOption ? '/contract' : '');
+    document.getElementById('closeEntryPrice').textContent = '$' + (position.entry_price?.toFixed(2) || '--') + entryUnit;
     document.getElementById('closeRealizedPnL').textContent = '$--';
     document.getElementById('closeRealizedPnL').className = '';
 
@@ -8621,6 +8710,15 @@ async function removePositionWithoutArchive(position) {
     }
 }
 
+// Credit structures where entry_price is premium received (must match backend CREDIT_STRUCTURES)
+const CREDIT_STRUCTURES = new Set([
+    'credit_spread', 'put_credit_spread', 'bull_put_spread',
+    'call_credit_spread', 'bear_call_spread',
+    'iron_condor', 'iron_butterfly',
+    'short_call', 'naked_call', 'short_put', 'naked_put',
+    'cash_secured_put', 'covered_call',
+]);
+
 function updateCloseSummary() {
     if (!closingPosition) return;
 
@@ -8628,13 +8726,19 @@ function updateCloseSummary() {
     const closeQty = parseFloat(document.getElementById('closeQuantity').value) || 0;
 
     if (exitPrice && closeQty) {
-        const isOption = closingPosition.asset_type === 'OPTION' || closingPosition.structure;
-        const multiplier = isOption ? 100 : 1;
+        const struct = (closingPosition.structure || '').toLowerCase();
+        const isStock = ['stock', 'stock_long', 'long_stock', 'stock_short', 'short_stock'].includes(struct);
+        const isCredit = CREDIT_STRUCTURES.has(struct);
+        const multiplier = isStock ? 1 : 100;
         let pnl;
-        if (closingPosition.direction === 'LONG') {
-            pnl = (exitPrice - closingPosition.entry_price) * closeQty * multiplier;
-        } else {
+        if (isStock) {
+            pnl = (exitPrice - closingPosition.entry_price) * closeQty;
+        } else if (isCredit) {
+            // Credit: received premium at open, pay to close
             pnl = (closingPosition.entry_price - exitPrice) * closeQty * multiplier;
+        } else {
+            // Debit: paid premium at open, receive to close
+            pnl = (exitPrice - closingPosition.entry_price) * closeQty * multiplier;
         }
 
         const pnlStr = (pnl >= 0 ? '+' : '') + '$' + pnl.toFixed(2);
