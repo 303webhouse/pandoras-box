@@ -1892,6 +1892,10 @@ async function fetchTimeframeBias() {
                 if (data.composite_bias === 'TORO_MAJOR') banner.classList.add('pulse-toro');
                 else if (data.composite_bias === 'URSA_MAJOR') banner.classList.add('pulse-ursa');
             }
+
+            // Set bias-colored borders on all major sections
+            const biasColors = BIAS_COLORS[data.composite_bias] || BIAS_COLORS.NEUTRAL;
+            document.documentElement.style.setProperty('--bias-border-color', biasColors.accent);
         }
     } catch (err) {
         console.error('Failed to fetch timeframe bias:', err);
