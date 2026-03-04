@@ -8529,15 +8529,26 @@ function calculatePnL(position, currentPrice) {
 
 function openPositionCloseModal(position) {
     closingPosition = position;
-    
-    document.getElementById('closeTickerDisplay').textContent = position.ticker;
-    document.getElementById('positionExitPrice').value = '';
+    const isOption = position.asset_type === 'OPTION' || position.structure;
+    const unitLabel = isOption ? 'contracts' : (position.asset_class === 'CRYPTO' ? 'tokens' : 'shares');
+
+    document.getElementById('closeTickerDisplay').textContent = position.ticker
+        + (position.structure ? ` (${position.structure.replace(/_/g, ' ')})` : '');
+
+    const exitInput = document.getElementById('positionExitPrice');
+    exitInput.value = '';
+    exitInput.placeholder = isOption ? 'e.g. 0.45' : 'e.g. 235.00';
+    exitInput.step = isOption ? '0.01' : '0.01';
+    exitInput.previousElementSibling.textContent = isOption ? 'Exit Price per Contract *' : 'Exit Price *';
+
     document.getElementById('closeQuantity').value = position.quantity;
-    document.getElementById('closeQtyHint').textContent = `You have ${position.quantity} ${position.asset_class === 'CRYPTO' ? 'tokens' : 'shares'}`;
-    document.getElementById('closeEntryPrice').textContent = '$' + (position.entry_price?.toFixed(2) || '--');
+    document.getElementById('closeQtyLabel').textContent = isOption ? 'Contracts to Close *' : 'Quantity to Close *';
+    document.getElementById('closeQtyHint').textContent = `You have ${position.quantity} ${unitLabel}`;
+    document.getElementById('closeEntryPrice').textContent = '$' + (position.entry_price?.toFixed(2) || '--')
+        + (isOption ? ' /contract' : '');
     document.getElementById('closeRealizedPnL').textContent = '$--';
     document.getElementById('closeRealizedPnL').className = '';
-    
+
     document.getElementById('positionCloseModal').classList.add('active');
 }
 
@@ -8612,18 +8623,20 @@ async function removePositionWithoutArchive(position) {
 
 function updateCloseSummary() {
     if (!closingPosition) return;
-    
+
     const exitPrice = parseFloat(document.getElementById('positionExitPrice').value) || 0;
     const closeQty = parseFloat(document.getElementById('closeQuantity').value) || 0;
-    
+
     if (exitPrice && closeQty) {
+        const isOption = closingPosition.asset_type === 'OPTION' || closingPosition.structure;
+        const multiplier = isOption ? 100 : 1;
         let pnl;
         if (closingPosition.direction === 'LONG') {
-            pnl = (exitPrice - closingPosition.entry_price) * closeQty;
+            pnl = (exitPrice - closingPosition.entry_price) * closeQty * multiplier;
         } else {
-            pnl = (closingPosition.entry_price - exitPrice) * closeQty;
+            pnl = (closingPosition.entry_price - exitPrice) * closeQty * multiplier;
         }
-        
+
         const pnlStr = (pnl >= 0 ? '+' : '') + '$' + pnl.toFixed(2);
         const pnlEl = document.getElementById('closeRealizedPnL');
         pnlEl.textContent = pnlStr;
@@ -8649,11 +8662,13 @@ async function confirmPositionClose() {
     
     // Calculate P&L to determine if this is a loss
     const entryPrice = closingPosition.entry_price || 0;
+    const isOption = closingPosition.asset_type === 'OPTION' || closingPosition.structure;
+    const multiplier = isOption ? 100 : 1;
     let pnl;
     if (closingPosition.direction === 'LONG') {
-        pnl = (exitPrice - entryPrice) * closeQty;
+        pnl = (exitPrice - entryPrice) * closeQty * multiplier;
     } else {
-        pnl = (entryPrice - exitPrice) * closeQty;
+        pnl = (entryPrice - exitPrice) * closeQty * multiplier;
     }
     
     // Determine trade outcome
