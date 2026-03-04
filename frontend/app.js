@@ -9202,6 +9202,7 @@ function openPositionEditModal(position) {
                     <button class="modal-close" id="closeEditModal">&times;</button>
                 </div>
                 <div class="modal-body">
+                    <div class="edit-position-info" id="editPositionInfo"></div>
                     <div class="form-row">
                         <label>Stop Loss</label>
                         <input type="number" id="editStopLoss" step="0.01">
@@ -9217,6 +9218,20 @@ function openPositionEditModal(position) {
                     <div class="form-row">
                         <label>Notes</label>
                         <input type="text" id="editNotes">
+                    </div>
+                    <div class="edit-add-section">
+                        <div class="edit-add-header">Add to Position</div>
+                        <div class="form-row-inline">
+                            <div class="form-row">
+                                <label>Additional Qty</label>
+                                <input type="number" id="editAddQty" min="1" step="1" placeholder="0">
+                            </div>
+                            <div class="form-row">
+                                <label>Cost per Contract</label>
+                                <input type="number" id="editAddCost" step="0.01" placeholder="0.00">
+                            </div>
+                        </div>
+                        <div class="edit-add-preview" id="editAddPreview"></div>
                     </div>
                 </div>
                 <div class="modal-actions">
@@ -9237,6 +9252,30 @@ function openPositionEditModal(position) {
     document.getElementById('editTarget').value = position.target_1 || '';
     document.getElementById('editCurrentPrice').value = position.current_price || '';
     document.getElementById('editNotes').value = position.notes || '';
+    document.getElementById('editAddQty').value = '';
+    document.getElementById('editAddCost').value = '';
+
+    // Show current position info
+    const infoEl = document.getElementById('editPositionInfo');
+    const curQty = position.quantity || 0;
+    const curEntry = position.entry_price || 0;
+    infoEl.innerHTML = `<span>Current: ${curQty} contracts @ $${curEntry.toFixed(2)}</span>`;
+
+    // Live preview of cost basis recalc
+    const previewEl = document.getElementById('editAddPreview');
+    const updatePreview = () => {
+        const addQty = parseInt(document.getElementById('editAddQty').value) || 0;
+        const addCost = parseFloat(document.getElementById('editAddCost').value) || 0;
+        if (addQty > 0 && addCost > 0) {
+            const newTotalQty = curQty + addQty;
+            const newAvgCost = ((curEntry * curQty) + (addCost * addQty)) / newTotalQty;
+            previewEl.innerHTML = `New: ${newTotalQty} contracts @ $${newAvgCost.toFixed(2)} avg`;
+        } else {
+            previewEl.innerHTML = '';
+        }
+    };
+    document.getElementById('editAddQty').addEventListener('input', updatePreview);
+    document.getElementById('editAddCost').addEventListener('input', updatePreview);
 
     // Rebind save button
     const saveBtn = document.getElementById('editSave');
@@ -9253,6 +9292,17 @@ function openPositionEditModal(position) {
         if (tgtVal !== '') updates.target_1 = parseFloat(tgtVal);
         if (cpVal !== '') updates.current_price = parseFloat(cpVal);
         if (notes) updates.notes = notes;
+
+        // Handle "Add to Position"
+        const addQty = parseInt(document.getElementById('editAddQty').value) || 0;
+        const addCost = parseFloat(document.getElementById('editAddCost').value) || 0;
+        if (addQty > 0 && addCost > 0) {
+            const newTotalQty = curQty + addQty;
+            const newAvgCost = ((curEntry * curQty) + (addCost * addQty)) / newTotalQty;
+            updates.quantity = newTotalQty;
+            updates.entry_price = parseFloat(newAvgCost.toFixed(4));
+            updates.cost_basis = parseFloat((newAvgCost * newTotalQty * 100).toFixed(2));
+        }
 
         if (Object.keys(updates).length === 0) { alert('No changes'); return; }
 
