@@ -6,7 +6,7 @@ Manages selected trades and open positions with comprehensive logging for backte
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
-from datetime import datetime
+from datetime import datetime, date, timezone
 import logging
 import json
 
@@ -341,25 +341,44 @@ async def accept_signal(signal_id: str, request: AcceptSignalRequest):
         if not db_position_id:
             _position_counter += 1
         
+        # Check for committee override (accepting a PASS recommendation)
+        try:
+            committee_data = signal_data.get("committee_data")
+            if isinstance(committee_data, str):
+                committee_data = json.loads(committee_data)
+            if committee_data and committee_data.get("action") == "PASS":
+                from database.postgres_client import get_postgres_client
+                pool = await get_postgres_client()
+                async with pool.acquire() as conn:
+                    await conn.execute("""
+                        UPDATE signals SET
+                            is_committee_override = TRUE,
+                            override_reason = 'Accepted despite PASS recommendation'
+                        WHERE signal_id = $1
+                    """, signal_id)
+                logger.info(f"📊 Committee override: accepted PASS for {signal_data.get('ticker', signal_id)}")
+        except Exception as e:
+            logger.warning(f"Could not record committee override: {e}")
+
         # Remove from active signals cache
         await delete_signal(signal_id)
 
         await _upsert_watchlist_for_position(position["ticker"], position["id"])
-        
+
         # Broadcast to all devices
         await manager.broadcast_position_update({
             "action": "POSITION_OPENED",
             "signal_id": signal_id,
             "position": position
         })
-        
+
         # Broadcast signal removal from Trade Ideas
         await manager.broadcast({
             "type": "SIGNAL_ACCEPTED",
             "signal_id": signal_id,
             "position_id": position["id"]
         })
-        
+
         logger.info(f"✅ Signal accepted: {position['ticker']} {position['direction']} @ ${request.actual_entry_price}")
         
         return {
@@ -376,57 +395,42 @@ async def accept_signal(signal_id: str, request: AcceptSignalRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+_DIRECTION_MAP = {
+    "BULLISH": "LONG",
+    "BEARISH": "SHORT",
+    "NEUTRAL": "MIXED",
+    "VOLATILITY": "MIXED",
+}
+
+_SPREAD_KEYWORDS = ("spread", "condor", "butterfly", "strangle", "straddle")
+
+
 @router.post("/signals/{signal_id}/accept-options")
 async def accept_signal_as_options(signal_id: str, request: AcceptSignalAsOptionsRequest):
     """
-    Accept a trade signal and open an OPTIONS position instead of equity.
-    
-    This endpoint:
-    1. Marks the signal as SELECTED (same as equity accept)
-    2. Creates an options position via the options_positions module
-    3. Logs the acceptance with full signal context for backtesting
+    Accept a trade signal and open an OPTIONS position.
+
+    Persists directly to unified_positions (PostgreSQL) so positions
+    survive Railway redeploys.
     """
     try:
         # Get signal data from Redis or PostgreSQL
         signal_data = await get_signal(signal_id)
         if not signal_data:
             signal_data = await get_signal_by_id(signal_id)
-        
+
         if not signal_data:
             raise HTTPException(status_code=404, detail="Signal not found")
-        
+
         # Update signal as SELECTED in database
         await update_signal_action(signal_id, "SELECTED")
-        
-        # Log the acceptance to signal record (include premium as entry context)
+
+        # Log the acceptance to signal record
         await update_signal_outcome(
             signal_id,
             notes=request.notes or f"Accepted as OPTIONS: {request.strategy_type} | Premium: {request.net_premium}"
         )
-        
-        # Capture bias snapshot at time of entry (same as equity path)
-        bias_at_open = await get_bias_snapshot()
-        
-        # Create options position via options_positions module
-        from api.options_positions import (
-            CreateOptionsPositionRequest,
-            OptionLeg,
-            create_options_position
-        )
-        
-        # Convert legs to the options module format
-        option_legs = [
-            OptionLeg(
-                action=leg.action,
-                option_type=leg.option_type,
-                strike=leg.strike,
-                expiration=leg.expiration,
-                quantity=leg.quantity,
-                premium=leg.premium
-            )
-            for leg in request.legs
-        ]
-        
+
         # Build notes with signal context for backtesting traceability
         backtest_notes = (
             f"Signal: {signal_id} | "
@@ -437,67 +441,124 @@ async def accept_signal_as_options(signal_id: str, request: AcceptSignalAsOption
         )
         if request.notes:
             backtest_notes = f"{request.notes} | {backtest_notes}"
-        
-        options_request = CreateOptionsPositionRequest(
-            underlying=request.underlying.upper(),
-            strategy_type=request.strategy_type,
-            direction=request.direction,
-            legs=option_legs,
-            net_premium=request.net_premium,
-            max_profit=request.max_profit,
-            max_loss=request.max_loss,
-            breakeven=request.breakeven,
-            notes=backtest_notes,
-            thesis=request.thesis
-        )
-        
-        options_result = await create_options_position(options_request)
-        
-        # Attach signal_id and bias snapshot to the options position for backtesting
-        options_position_id = options_result.get("position_id")
-        if options_position_id:
-            from api.options_positions import _options_positions
-            if options_position_id in _options_positions:
-                _options_positions[options_position_id]["signal_id"] = signal_id
-                _options_positions[options_position_id]["bias_at_open"] = bias_at_open
-                _options_positions[options_position_id]["signal_score"] = signal_data.get("score")
-                _options_positions[options_position_id]["signal_strategy"] = signal_data.get("strategy")
-                _options_positions[options_position_id]["signal_entry_price"] = signal_data.get("entry_price")
-            
-            # Persist signal_id and bias to database
-            try:
-                from database.postgres_client import link_options_position_to_signal
-                await link_options_position_to_signal(
-                    options_position_id, signal_id, bias_at_open, signal_data
+
+        # Map direction to unified format
+        direction = _DIRECTION_MAP.get(request.direction.upper(), "LONG")
+
+        # Determine asset_type
+        strategy_lower = request.strategy_type.lower()
+        asset_type = "SPREAD" if any(kw in strategy_lower for kw in _SPREAD_KEYWORDS) else "OPTION"
+
+        # Build legs JSON
+        legs_json = [
+            {"action": leg.action, "option_type": leg.option_type, "strike": leg.strike,
+             "expiration": leg.expiration, "quantity": leg.quantity, "premium": leg.premium}
+            for leg in request.legs
+        ]
+
+        # Extract expiry from legs (earliest)
+        expiry = None
+        dte = None
+        try:
+            expirations = [leg.expiration for leg in request.legs if leg.expiration]
+            if expirations:
+                expiry_str = min(expirations)
+                expiry = date.fromisoformat(str(expiry_str)[:10])
+                dte = max(0, (expiry - date.today()).days)
+        except (ValueError, TypeError):
+            pass
+
+        # Extract strikes
+        long_strike = next((leg.strike for leg in request.legs if leg.action.upper() == "BUY"), None)
+        short_strike = next((leg.strike for leg in request.legs if leg.action.upper() == "SELL"), None)
+
+        # Cost basis = total capital committed
+        cost_basis = abs(request.net_premium) * 100 * request.contracts
+
+        # Generate position_id (same pattern as unified_positions.py)
+        now = datetime.now(timezone.utc)
+        position_id = f"POS_{request.underlying.upper()}_{now.strftime('%Y%m%d_%H%M%S')}"
+
+        # Create position directly in unified_positions table
+        from database.postgres_client import get_postgres_client
+        pool = await get_postgres_client()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                INSERT INTO unified_positions (
+                    position_id, ticker, asset_type, structure, direction, legs,
+                    entry_price, quantity, cost_basis,
+                    max_loss, max_profit, stop_loss, target_1,
+                    expiry, dte, long_strike, short_strike,
+                    source, signal_id, account, notes
+                ) VALUES (
+                    $1, $2, $3, $4, $5, $6::jsonb,
+                    $7, $8, $9,
+                    $10, $11, $12, $13,
+                    $14, $15, $16, $17,
+                    $18, $19, $20, $21
                 )
-            except Exception as e:
-                logger.warning(f"Could not persist signal link to DB: {e}")
-        
+                RETURNING *
+            """,
+                position_id, request.underlying.upper(), asset_type,
+                request.strategy_type, direction,
+                json.dumps(legs_json),
+                request.net_premium, request.contracts, cost_basis,
+                request.max_loss, request.max_profit,
+                signal_data.get("stop_loss"), signal_data.get("target_1"),
+                expiry, dte, long_strike, short_strike,
+                "SIGNAL", signal_id, "ROBINHOOD", backtest_notes
+            )
+
+        # Check for committee override (accepting a PASS recommendation)
+        try:
+            committee_data = signal_data.get("committee_data")
+            if isinstance(committee_data, str):
+                committee_data = json.loads(committee_data)
+            if committee_data and committee_data.get("action") == "PASS":
+                async with pool.acquire() as conn:
+                    await conn.execute("""
+                        UPDATE signals SET
+                            is_committee_override = TRUE,
+                            override_reason = 'Accepted as options despite PASS recommendation'
+                        WHERE signal_id = $1
+                    """, signal_id)
+                logger.info(f"📊 Committee override: accepted PASS for {request.underlying}")
+        except Exception as e:
+            logger.warning(f"Could not record committee override: {e}")
+
         # Remove from active signals cache
         await delete_signal(signal_id)
-        
+
         # Broadcast signal removal from Trade Ideas
         await manager.broadcast({
             "type": "SIGNAL_ACCEPTED",
             "signal_id": signal_id,
-            "position_id": options_result.get("position_id"),
+            "position_id": position_id,
             "trade_type": "OPTIONS"
         })
-        
+
         logger.info(
             f"✅ Signal accepted as OPTIONS: {request.underlying} "
-            f"{request.strategy_type} {request.direction} - "
+            f"{request.strategy_type} {direction} - "
             f"Premium: ${request.net_premium} (from signal {signal_id})"
         )
-        
+
+        # Serialize row for response (convert Decimal/date types)
+        result = dict(row) if row else {}
+        for k, v in result.items():
+            if hasattr(v, 'as_integer_ratio'):  # Decimal
+                result[k] = float(v)
+            elif isinstance(v, (datetime, date)):
+                result[k] = v.isoformat()
+
         return {
             "status": "accepted",
             "trade_type": "OPTIONS",
             "signal_id": signal_id,
-            "position_id": options_result.get("position_id"),
-            "position": options_result.get("position")
+            "position_id": position_id,
+            "position": result
         }
-    
+
     except HTTPException:
         raise
     except Exception as e:
@@ -533,7 +594,27 @@ async def dismiss_signal(signal_id: str, request: DismissSignalRequest):
             notes += f" - {request.notes}"
         
         await update_signal_outcome(signal_id, notes=notes)
-        
+
+        # Check for committee override (dismissing a TAKE recommendation)
+        try:
+            committee_data = signal_data.get("committee_data")
+            if isinstance(committee_data, str):
+                committee_data = json.loads(committee_data)
+            if committee_data and committee_data.get("action") == "TAKE":
+                from database.postgres_client import get_postgres_client
+                pool = await get_postgres_client()
+                override_reason = request.notes or "Dismissed despite TAKE recommendation"
+                async with pool.acquire() as conn:
+                    await conn.execute("""
+                        UPDATE signals SET
+                            is_committee_override = TRUE,
+                            override_reason = $2
+                        WHERE signal_id = $1
+                    """, signal_id, override_reason)
+                logger.info(f"📊 Committee override: dismissed TAKE for {signal_data.get('ticker', signal_id)}")
+        except Exception as e:
+            logger.warning(f"Could not record committee override: {e}")
+
         # Remove from Redis cache
         await delete_signal(signal_id)
 
@@ -550,14 +631,14 @@ async def dismiss_signal(signal_id: str, request: DismissSignalRequest):
                     await client.set(key, 0)
         except Exception:
             pass
-        
+
         # Broadcast dismissal to all devices
         await manager.broadcast({
             "type": "SIGNAL_DISMISSED",
             "signal_id": signal_id,
             "reason": request.reason
         })
-        
+
         logger.info(f"❌ Signal dismissed: {signal_data.get('ticker', signal_id)} - {request.reason}")
         
         return {

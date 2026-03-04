@@ -20,6 +20,15 @@ from models.position_risk import calculate_position_risk, infer_direction
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+# Structures where entry_price is credit received — PnL flips: (entry - exit) * 100 * qty
+CREDIT_STRUCTURES = frozenset({
+    "credit_spread", "put_credit_spread", "bull_put_spread",
+    "call_credit_spread", "bear_call_spread",
+    "iron_condor", "iron_butterfly",
+    "short_call", "naked_call", "short_put", "naked_put",
+    "cash_secured_put", "covered_call",
+})
+
 PIVOT_API_KEY = os.getenv("PIVOT_API_KEY") or ""
 
 
@@ -136,17 +145,16 @@ def _row_to_dict(row) -> dict:
 
 
 def _compute_unrealized_pnl(entry_price: float, current_price: float, quantity: int, structure: str) -> float:
-    """Compute unrealized P&L based on position type."""
+    """Compute unrealized P&L based on position type and credit/debit nature."""
     if not entry_price or not current_price:
         return 0.0
     s = (structure or "").lower()
     if s in ("stock", "stock_long", "long_stock", "stock_short", "short_stock"):
-        # Stock: (current - entry) * shares
         return round((current_price - entry_price) * quantity, 2)
-    # Options: (current - entry) * 100 * contracts
-    # For credits: entry is positive (received), current is what you'd pay to close
-    # P&L = (entry - current) * 100 * qty for credits
-    # P&L = (current - entry) * 100 * qty for debits
+    if s in CREDIT_STRUCTURES:
+        # Credit: received premium at open, pay to close → profit when current < entry
+        return round((entry_price - current_price) * 100 * quantity, 2)
+    # Debit: paid premium at open → profit when current > entry
     return round((current_price - entry_price) * 100 * quantity, 2)
 
 
@@ -638,7 +646,11 @@ async def close_position(position_id: str, req: ClosePositionRequest):
     s = structure.lower()
     if s in ("stock", "stock_long", "long_stock", "stock_short", "short_stock"):
         realized_pnl = round((req.exit_price - entry_price) * pos["quantity"], 2)
+    elif s in CREDIT_STRUCTURES:
+        # Credit structures: received premium at open, paid to close
+        realized_pnl = round((entry_price - req.exit_price) * 100 * pos["quantity"], 2)
     else:
+        # Debit structures: paid premium at open, received to close
         realized_pnl = round((req.exit_price - entry_price) * 100 * pos["quantity"], 2)
 
     # Determine outcome

@@ -887,6 +887,19 @@ async def init_database():
             ADD COLUMN IF NOT EXISTS short_leg_price NUMERIC
         """)
 
+        # Brief 05: Committee override tracking on signals and trades
+        await conn.execute("""
+            ALTER TABLE signals
+            ADD COLUMN IF NOT EXISTS is_committee_override BOOLEAN DEFAULT FALSE,
+            ADD COLUMN IF NOT EXISTS override_reason TEXT
+        """)
+        await conn.execute("""
+            ALTER TABLE trades
+            ADD COLUMN IF NOT EXISTS committee_action VARCHAR(20),
+            ADD COLUMN IF NOT EXISTS committee_conviction VARCHAR(20),
+            ADD COLUMN IF NOT EXISTS is_committee_override BOOLEAN DEFAULT FALSE
+        """)
+
         # Brief 07: Cash flow events for accurate P&L calculation
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS cash_flows (

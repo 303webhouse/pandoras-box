@@ -3153,6 +3153,105 @@ body.override-active-bearish .override-toggle[data-active="true"] {
     animation: newSignalFlash 0.5s ease-out 3;
 }
 
+/* ============================================
+   COMMITTEE UI — Brief 05
+   ============================================ */
+
+.committee-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    cursor: pointer;
+    flex: 1;
+    justify-content: center;
+    border: none;
+    transition: opacity 0.2s;
+}
+
+.committee-badge:hover {
+    opacity: 0.85;
+}
+
+.committee-badge.committee-take {
+    background: rgba(16, 185, 129, 0.2);
+    color: #10b981;
+    border: 1px solid rgba(16, 185, 129, 0.4);
+}
+
+.committee-badge.committee-pass {
+    background: rgba(239, 68, 68, 0.2);
+    color: #ef4444;
+    border: 1px solid rgba(239, 68, 68, 0.4);
+}
+
+.committee-badge.committee-watch {
+    background: rgba(245, 158, 11, 0.2);
+    color: #f59e0b;
+    border: 1px solid rgba(245, 158, 11, 0.4);
+}
+
+.committee-btn {
+    background: rgba(99, 102, 241, 0.15) !important;
+    color: #a5b4fc !important;
+    border: 1px solid rgba(99, 102, 241, 0.3) !important;
+}
+
+.committee-btn:hover {
+    background: rgba(99, 102, 241, 0.25) !important;
+}
+
+.committee-btn.committee-pending {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.committee-panel {
+    margin-top: 10px;
+    padding: 10px;
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 6px;
+    border-left: 3px solid rgba(99, 102, 241, 0.5);
+    font-size: 12px;
+}
+
+.committee-panel-header {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #a5b4fc;
+    margin-bottom: 6px;
+}
+
+.committee-synthesis {
+    color: var(--text-secondary);
+    line-height: 1.5;
+    margin-bottom: 6px;
+}
+
+.committee-risk-row {
+    font-size: 11px;
+    color: var(--text-primary);
+}
+
+.committee-override-warning {
+    background: rgba(245, 158, 11, 0.15);
+    border: 1px solid rgba(245, 158, 11, 0.4);
+    border-radius: 6px;
+    padding: 10px 12px;
+    margin-bottom: 12px;
+    font-size: 13px;
+    color: var(--text-primary);
+}
+
+.committee-override-warning strong.committee-take {
+    color: #10b981;
+}
+
 /* Signal Score Bar */
 .signal-score-bar {
     display: flex;
