@@ -1897,6 +1897,7 @@ body.override-active-bearish .override-toggle[data-active="true"] {
     overflow: hidden;
     display: flex;
     flex-direction: column;
+    position: relative;
 }
 
 .chart-tabs {
@@ -1943,15 +1944,16 @@ body.override-active-bearish .override-toggle[data-active="true"] {
 /* Price Levels Panel */
 .price-levels-panel {
     position: absolute;
-    top: 60px;
-    right: 12px;
-    width: 120px;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 160px;
     background: rgba(30, 41, 59, 0.95);
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
+    border: 2px solid var(--bias-border-color);
+    border-radius: 10px;
     padding: 0;
     z-index: 10;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
 }
 
 .price-levels-header {
