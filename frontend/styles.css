@@ -301,23 +301,62 @@ body {
     background: var(--card-bg);
     border: 2px solid var(--border-color);
     border-radius: 10px;
-    padding: 12px 14px;
+    padding: 14px 16px;
     min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
 }
 
-.portfolio-summary-card h3 {
-    font-family: 'Orbit', sans-serif;
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 1.5px;
-    color: var(--text-secondary);
-    margin: 0 0 8px 0;
+.portfolio-combined-balance {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 1.8rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    text-align: center;
+    letter-spacing: 1px;
+    line-height: 1;
 }
 
-.portfolio-summary-grid {
+.portfolio-accounts {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+}
+
+.portfolio-account {
+    border-left: 3px solid var(--border-color);
+    padding-left: 10px;
+}
+
+.portfolio-account-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
     gap: 8px;
+}
+
+.portfolio-account-name {
+    font-family: 'Orbit', sans-serif;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-secondary);
+}
+
+.portfolio-account-balance {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.portfolio-account-meta {
+    display: flex;
+    gap: 8px;
+    font-size: 0.6rem;
+    color: var(--text-secondary);
+    margin-top: 2px;
 }
 
 .portfolio-stat {
