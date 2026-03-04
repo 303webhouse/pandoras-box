@@ -6480,25 +6480,21 @@ body.override-active-bearish .override-toggle[data-active="true"] {
 
 /* KB Button in Header */
 .kb-btn {
-    background: var(--card-bg);
-    color: var(--accent-teal);
-    border: 2px solid var(--accent-teal);
-    padding: 8px 16px;
-    border-radius: 8px;
-    font-size: 14px;
-    font-weight: 700;
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    padding: 6px 14px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: all 0.2s ease;
     text-decoration: none;
-    display: flex;
-    align-items: center;
-    gap: 6px;
 }
 
 .kb-btn:hover {
-    background: var(--accent-teal);
-    color: var(--dark-bg);
-    transform: scale(1.05);
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.05);
 }
 
 /* KB Popup Modal */
