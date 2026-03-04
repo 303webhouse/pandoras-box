@@ -1,6 +1,6 @@
 # Pivot — Development Status & Roadmap
 
-**Last Updated:** March 2, 2026
+**Last Updated:** March 4, 2026
 
 This is the single source of truth for what has been built, what's in progress, and what's planned. Agents should read this before starting any work to avoid rebuilding existing features or building on assumptions about unbuilt ones.
 
@@ -16,7 +16,8 @@ The original Pivot Discord bot (`pivot-bot`) has been **stopped and disabled**. 
 |---------|--------|---------|
 | `openclaw` | **active** | Pivot — Discord chat, briefs, trade poller, twitter sentiment |
 | `pivot-collector` | **active** | Data collection crons (factors, VIX, CAPE, sector strength). No LLM. |
-| `pivot2-interactions` | **active** | Committee button handler (Take/Pass/Watching clicks, re-eval modal) |
+| `pivot2-interactions` | **active** | Committee button handler (Take/Pass/Watching/Analyze/Dismiss clicks) |
+| `uw-watcher` | **active** | UW flow watcher — parses #uw-flow-alerts, POSTs to Railway Redis cache |
 | `pivot-bot` | **inactive, disabled** | OLD bot. Do not restart. |
 
 ### What Pivot Handles
@@ -57,13 +58,35 @@ The original Pivot Discord bot (`pivot-bot`) has been **stopped and disabled**. 
 
 ### Not Yet Migrated
 
-- **UW channel monitoring/parsing** — Old bot watched UW Premium Bot channels, parsed embeds, forwarded to Pandora API. Needs lightweight watcher bot (no LLM).
-- **Whale alerts forwarding** — Old bot watched #whale-alerts. Bundle with UW watcher.
+- ✅ **UW channel monitoring/parsing** — Replaced by `uw-watcher.service` (Mar 4, 2026). Watches #uw-flow-alerts, parses ticker updates, caches in Redis via Railway API.
+- **Whale alerts forwarding** — Old bot watched #whale-alerts. Low priority (whale confluence already handled via TradingView webhook pipeline).
 - **UW scheduled commands** — `/market_tide`, `/sectorflow`, etc. sent to UW bot at set times. Low priority.
 
 ### Runtime Note
 
 `GET /api/signals/active` times out intermittently from VPS. Trade poller includes fallback to `/signals/queue`.
+
+---
+
+## UW Watcher + Signals Channel + Portfolio Fix (COMPLETED Mar 4, 2026)
+
+Three-part deployment: UW flow data ingestion, on-demand committee analysis, and dynamic portfolio context.
+
+### Part 1: UW Watcher Bot (`uw-watcher.service`)
+Lightweight discord.py bot that watches `#uw-flow-alerts` (channel 1463692055694807201) for messages from UW Bot (user 1100705854271008798). Parses ticker update lines via regex into structured JSON (ticker, price, change%, volume, P/C ratio, put/call volume, total premium, flow sentiment). POSTs to Railway API which caches in Redis with 1-hour TTL. No LLM, $0/run.
+
+**Railway endpoints:**
+- `POST /api/uw/ticker-updates` — Bulk ingest parsed ticker data → Redis
+- `GET /api/uw/ticker/{ticker}` — Fetch cached UW data for a specific ticker
+- `GET /api/uw/market-flow` — Latest market-wide flow snapshot
+
+**Noise management:** Latest-only overwrite per ticker (no history), 1h TTL auto-cleanup, committee sees ~100 tokens of UW context per run.
+
+### Part 2: Signals Channel with Analyze Button
+Pipeline status changed from `COMMITTEE_REVIEW` (auto-run committee) to `PENDING_REVIEW` (human-triggered). Qualifying signals now post to `#📊-signals` (channel 1470164076049989785) with rich embeds showing score tier, bias alignment, key levels, and R:R estimate. Each signal has **Analyze** and **Dismiss** buttons. Analyze triggers a full 4-agent committee run on demand; Dismiss marks the signal as skipped. UW flow data for the ticker is automatically injected into committee context when available.
+
+### Part 3: Portfolio Fix (Dynamic Risk Limits)
+Removed hardcoded dollar amounts ($4,700, $118, $165) from `committee_prompts.py` SIZE RULES. Committee agents now reference live PORTFOLIO CONTEXT with pre-calculated risk limits (2.5% standard, 3.5% high conviction) from `committee_context.py`. Added staleness warnings: balance >24h old, positions >4h old, "NO POSITIONS RECORDED" when portfolio empty.
 
 ---
 
@@ -379,8 +402,8 @@ Three PineScript indicators deployed to TradingView with webhook alerts:
 - **Scout Sniper v3.1** — Early warning (15m). SMA regime filter, structural awareness, quality score 0-6, R-multiple targets. Webhook: `/webhook/tradingview`
 - **Dark Pool Whale Hunter v2** — Confluence indicator (5m). 1.5x RVOL floor, 3-bar consecutive match, structural context, trade framework, regime overlay. Webhook: `/webhook/whale`. Cached in Redis (30 min TTL) for committee confluence — does NOT trigger committee runs or appear as trade ideas.
 
-### UW Flow Parser (`backend/discord_bridge/uw/`)
-Monitors Unusual Whales Premium Bot Discord channels. Parses flow alerts into structured signals with filtering (min DTE 7, max DTE 180, min premium $50K, min score 80 for alerts).
+### UW Flow Watcher (`scripts/uw_watcher.py` + `backend/api/uw.py`)
+Discord bot watches #uw-flow-alerts for UW Bot ticker updates, parses via regex, POSTs to Railway Redis cache (1h TTL). Committee context builder fetches ticker-specific and market-wide flow data during analysis. Latest-only overwrite per ticker — no history accumulation, auto-cleanup via TTL.
 
 ### Collectors (`pivot/collectors/`)
 Scheduled data fetchers: VIX term structure, credit spreads, sector rotation, TICK breadth, market breadth, CAPE yield, Savita indicator. Run on cron via `scheduler/cron_runner.py`.
@@ -424,7 +447,6 @@ Batch of UI bug fixes deployed:
 ## Not Yet Built
 
 - **Phase 3: New Scanner Builds** — 9 new scanners for the Trade Ideas system. Specs not yet written.
-- **UW watcher bot:** Lightweight service to monitor UW/whale Discord channels and forward parsed data to Pandora API (no LLM needed)
 - **Phase 2F:** UW dashboard API scraping
 - **Phase 2G:** Auto-scout (screen UW flow → generate options picks)
 - **Crypto sandbox:** Autonomous trading on Coinbase (~$150 account)
@@ -437,12 +459,12 @@ Batch of UI bug fixes deployed:
 
 ---
 
-## Known Issues (as of Mar 2, 2026)
+## Known Issues (as of Mar 4, 2026)
 
 - ⚠️ **`/api/signals/active` timeout from VPS**: Endpoint times out intermittently. Trade poller includes fallback to `/signals/queue`.
 - ⚠️ **Analytics tables mostly empty**: System deployed but needs signal accumulation time and trade imports to populate meaningful data.
 - ⚠️ **Trade journal has no historical data**: Robinhood import system designed but not built yet.
-- ⚠️ **UW channel monitoring paused**: Old bot handled UW/whale channel parsing. Needs lightweight watcher replacement.
+- ✅ **UW channel monitoring restored (Mar 4)**: `uw-watcher.service` deployed. Parses #uw-flow-alerts → Redis. Awaiting first live market test.
 - ⚠️ **IBKR account not funded**: Position poller crons are active but IBKR gateway won't authenticate until account is funded. Read-only API user setup pending.
 - ⚠️ **Polygon Starter plan limitations**: `last_quote` not always populated (use `day.close`/`day.vwap` fallback), `implied_volatility` field empty (use VIX as SPY IV proxy).
 - ✅ **Stale factors resolved (Feb 27)**: options_sentiment removed. put_call_ratio self-heals via Polygon fallback. savita_indicator staleness window extended. Redis TTL per-factor.
