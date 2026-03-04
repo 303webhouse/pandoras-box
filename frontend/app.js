@@ -177,10 +177,6 @@ let personalBiasAppliesTo = {
     cyclical: true
 };
 
-// Scout Alert State
-let scoutAlerts = [];
-const SCOUT_ALERT_MAX_VISIBLE = 3;
-const SCOUT_ALERT_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
 let manualPositionContext = 'equity';
 
 // Initialize app
@@ -685,8 +681,6 @@ function handleWebSocketMessage(message) {
             updatePosition(message.data);
             break;
         case 'SCOUT_ALERT':
-            displayScoutAlert(message.data);
-            // Also feed Scout into Trade Ideas stream in real time.
             handleNewSignal(message.data);
             break;
         case 'FLOW_UPDATE':
@@ -810,9 +804,6 @@ function playSignalAlert(priority = false) {
 function handleNewSignal(signalData) {
     if (!signalData || !signalData.signal_id) return;
 
-    const isScout = (signalData.signal_type || '').toUpperCase() === 'SCOUT_ALERT'
-        || (signalData.strategy || '').toLowerCase().includes('scout');
-
     // Add to appropriate signal list
     if (signalData.asset_class === 'EQUITY' || !signalData.asset_class) {
         signals.equity = signals.equity.filter(s => s.signal_id !== signalData.signal_id);
@@ -838,10 +829,6 @@ function handleNewSignal(signalData) {
         refreshSignalViews();
     }
 
-    // Auto-dismiss Scout alert if a real signal fires for the same ticker
-    if (!isScout && signalData.ticker) {
-        dismissScoutAlertByTicker(signalData.ticker);
-    }
 }
 
 function handlePrioritySignal(signalData) {
@@ -900,130 +887,6 @@ function highlightNewSignal(signalId) {
 }
 
 // ============================================
-// SCOUT ALERT FUNCTIONS
-// Early warning signals (15m) before main Sniper (1H)
-// ============================================
-
-function displayScoutAlert(data) {
-    console.log('ðŸ”­ Scout Alert received:', data.ticker, data.direction);
-
-    // Check if we already have a scout alert for this ticker
-    const existingIndex = scoutAlerts.findIndex(a => a.ticker === data.ticker);
-    if (existingIndex !== -1) {
-        // Update existing alert
-        scoutAlerts[existingIndex] = data;
-    } else {
-        // Add new alert
-        scoutAlerts.unshift(data);
-    }
-
-    // Enforce max visible limit (oldest drops off)
-    if (scoutAlerts.length > SCOUT_ALERT_MAX_VISIBLE) {
-        scoutAlerts = scoutAlerts.slice(0, SCOUT_ALERT_MAX_VISIBLE);
-    }
-
-    // Set auto-dismiss timeout
-    setTimeout(() => {
-        dismissScoutAlert(data.signal_id);
-    }, SCOUT_ALERT_TIMEOUT_MS);
-
-    renderScoutAlerts();
-}
-
-function dismissScoutAlert(signalId) {
-    scoutAlerts = scoutAlerts.filter(a => a.signal_id !== signalId);
-    renderScoutAlerts();
-}
-
-function dismissScoutAlertByTicker(ticker) {
-    // Called when a real Sniper signal fires for the same ticker
-    const alert = scoutAlerts.find(a => a.ticker === ticker);
-    if (alert) {
-        console.log('ðŸŽ¯ Scout alert confirmed by Sniper signal:', ticker);
-        scoutAlerts = scoutAlerts.filter(a => a.ticker !== ticker);
-        renderScoutAlerts();
-    }
-}
-
-function createScoutAlertCard(alert) {
-    const directionClass = alert.direction === 'LONG' ? 'scout-long' : 'scout-short';
-    const directionIcon = alert.direction === 'LONG' ? '^' : 'v';
-
-    return `
-        <div class="scout-alert-card ${directionClass}" data-scout-id="${alert.signal_id}" data-ticker="${alert.ticker}">
-            <div class="scout-alert-header">
-                <div class="scout-badge">
-                    <span class="scout-icon">!</span>
-                    <span class="scout-label">SCOUT</span>
-                </div>
-                <button class="scout-dismiss-btn" data-action="dismiss-scout" title="Dismiss">x</button>
-            </div>
-            <div class="scout-alert-content">
-                <div class="scout-ticker-row">
-                    <span class="scout-ticker">${alert.ticker}</span>
-                    <span class="scout-direction ${directionClass}">${directionIcon} ${alert.direction}</span>
-                </div>
-                <div class="scout-metrics">
-                    <div class="scout-metric">
-                        <span class="scout-metric-label">RSI</span>
-                        <span class="scout-metric-value">${alert.rsi?.toFixed(1) || '--'}</span>
-                    </div>
-                    <div class="scout-metric">
-                        <span class="scout-metric-label">RVOL</span>
-                        <span class="scout-metric-value">${alert.rvol?.toFixed(2) || '--'}x</span>
-                    </div>
-                    <div class="scout-metric">
-                        <span class="scout-metric-label">TF</span>
-                        <span class="scout-metric-value">${alert.timeframe}m</span>
-                    </div>
-                </div>
-                <div class="scout-note">${alert.note || 'Early warning - confirm with 1H Sniper'}</div>
-            </div>
-        </div>
-    `;
-}
-
-function renderScoutAlerts() {
-    const container = document.getElementById('scoutAlertsContainer');
-    if (!container) return;
-
-    const countEl = document.getElementById('scoutAlertCount');
-    if (countEl) {
-        countEl.textContent = scoutAlerts.length;
-        countEl.style.display = scoutAlerts.length > 0 ? 'inline-flex' : 'none';
-    }
-
-    if (scoutAlerts.length === 0) {
-        container.innerHTML = '<p class="scout-empty-state">No active scout alerts</p>';
-        return;
-    }
-
-    container.innerHTML = scoutAlerts.map(alert => createScoutAlertCard(alert)).join('');
-    attachScoutAlertActions();
-}
-
-function attachScoutAlertActions() {
-    document.querySelectorAll('.scout-dismiss-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            const card = e.target.closest('.scout-alert-card');
-            const signalId = card.dataset.scoutId;
-            dismissScoutAlert(signalId);
-        });
-    });
-
-    // Click on card to show ticker on chart
-    document.querySelectorAll('.scout-alert-card').forEach(card => {
-        card.addEventListener('click', (e) => {
-            if (e.target.classList.contains('scout-dismiss-btn')) return;
-            const ticker = card.dataset.ticker;
-            if (ticker && typeof changeChartSymbol === 'function') {
-                changeChartSymbol(ticker);
-            }
-        });
-    });
-}
-
 function updateConnectionStatus(connected) {
     const statusDot = document.querySelector('.status-dot');
     const statusText = document.querySelector('.status-text');
@@ -1095,9 +958,6 @@ async function loadInitialData() {
         loadOpenPositionsEnhanced(),
         loadHeadlines()
     ]);
-
-    // Initialize Scout Alerts section
-    renderScoutAlerts();
 
     // Schedule headline refreshes at midday and 1h before close
     startHeadlineScheduler();
