@@ -252,13 +252,19 @@ def main():
 
     api_url = pick_env("PANDORA_API_URL", cfg, env_file) or DEFAULT_PANDORA_API_URL
     api_key = pick_env("PIVOT_API_KEY", cfg, env_file)
+
+    # Discord token: env var first, then openclaw.json channels.discord.token
     discord_token = pick_env("DISCORD_BOT_TOKEN", cfg, env_file)
+    if not discord_token:
+        discord_token = (
+            ((cfg.get("channels") or {}).get("discord") or {}).get("token") or ""
+        ).strip()
 
     if not api_key:
         logger.error("PIVOT_API_KEY is required")
         sys.exit(1)
     if not discord_token:
-        logger.error("DISCORD_BOT_TOKEN is required")
+        logger.error("DISCORD_BOT_TOKEN not found in env, openclaw.json, or env file")
         sys.exit(1)
 
     logger.info(f"Starting UW Watcher Bot — API: {api_url}")

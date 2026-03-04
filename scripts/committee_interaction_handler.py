@@ -462,3 +462,46 @@ def setup_committee_buttons(bot: discord.Client) -> None:
             signal_id = custom_id[len("committee_run_"):]
             await handle_run_committee(interaction, signal_id)
             return
+
+
+# ── Standalone Entry Point ───────────────────────────────────
+
+
+def main():
+    """Run the interaction handler as a standalone Discord bot."""
+    from pivot2_committee import load_openclaw_config, load_env_file, pick_env, OPENCLAW_ENV_FILE
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    )
+
+    cfg = load_openclaw_config()
+    env_file = load_env_file(OPENCLAW_ENV_FILE)
+
+    # Discord token: env var first, then openclaw.json channels.discord.token
+    discord_token = pick_env("DISCORD_BOT_TOKEN", cfg, env_file)
+    if not discord_token:
+        discord_token = (
+            ((cfg.get("channels") or {}).get("discord") or {}).get("token") or ""
+        ).strip()
+
+    if not discord_token:
+        logger.error("DISCORD_BOT_TOKEN not found")
+        return 1
+
+    intents = discord.Intents.default()
+    intents.message_content = True
+    bot = discord.Client(intents=intents)
+
+    @bot.event
+    async def on_ready():
+        logger.info(f"Committee Interaction Handler ready as {bot.user}")
+
+    setup_committee_buttons(bot)
+    bot.run(discord_token, log_handler=None)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
