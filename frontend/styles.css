@@ -312,10 +312,11 @@ body {
     font-family: 'JetBrains Mono', monospace;
     font-size: 3.2rem;
     font-weight: 700;
-    color: var(--text-primary);
+    color: var(--accent-lime);
     text-align: center;
     letter-spacing: 1px;
     line-height: 1;
+    margin-bottom: 16px;
 }
 
 .portfolio-accounts {
@@ -2391,12 +2392,12 @@ body.override-active-bearish .override-toggle[data-active="true"] {
 }
 
 .position-btn-small.close-btn {
-    background: var(--accent-orange);
+    background: var(--accent-teal);
     color: white;
 }
 
 .position-btn-small.close-btn:hover {
-    background: #e5370e;
+    background: #0d9488;
 }
 
 /* Brief 10 — Options-aware position card styles */
@@ -3678,12 +3679,12 @@ body.override-active-bearish .override-toggle[data-active="true"] {
 }
 
 .modal-btn.close-position {
-    background: #e5370e;
+    background: var(--accent-teal);
     color: white;
 }
 
 .modal-btn.close-position:hover {
-    background: #e5370e;
+    background: #0d9488;
 }
 
 .modal-btn.remove-position {
