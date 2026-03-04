@@ -329,6 +329,21 @@ async def list_positions(
             except (ValueError, TypeError):
                 pass
 
+    # Attach counter-signal warnings from Redis for open positions
+    if status.upper() == "OPEN":
+        try:
+            from database.redis_client import get_redis_client
+            redis = await get_redis_client()
+            if redis:
+                for p in positions:
+                    ticker = (p.get("ticker") or "").upper()
+                    if ticker:
+                        raw = await redis.get(f"counter_signal:{ticker}")
+                        if raw:
+                            p["counter_signal"] = json.loads(raw)
+        except Exception as e:
+            logger.warning(f"Failed to attach counter-signals: {e}")
+
     return {"positions": positions, "count": len(positions)}
 
 

@@ -1508,14 +1508,61 @@ async def get_active_signals_api():
                     sig['score'] = 50  # Default
                     sig['bias_alignment'] = 'NEUTRAL'
         
-        # Filter out tickers that have open positions
-        open_tickers = set()
+        # Filter out tickers that have open positions (direction-aware)
         try:
             open_pos = await get_open_positions()
-            open_tickers = {pos.get('ticker', '').upper() for pos in open_pos if pos.get('ticker')}
-            if open_tickers:
-                signals = [s for s in signals if s.get('ticker', '').upper() not in open_tickers]
-                logger.info(f"📊 Filtered out {len(open_tickers)} tickers with open positions: {open_tickers}")
+            # Build {TICKER: direction} map from open positions
+            pos_directions: Dict[str, str] = {}
+            for pos in open_pos:
+                t = (pos.get('ticker') or '').upper()
+                if t:
+                    pos_directions[t] = (pos.get('direction') or '').upper()
+
+            if pos_directions:
+                _BULLISH = {'LONG', 'BULLISH', 'BUY'}
+                _BEARISH = {'SHORT', 'BEARISH', 'SELL'}
+                filtered = []
+                counter_count = 0
+                for sig in signals:
+                    sig_ticker = (sig.get('ticker') or '').upper()
+                    if sig_ticker not in pos_directions:
+                        filtered.append(sig)
+                        continue
+                    # Ticker matches an open position — check direction
+                    pos_dir = pos_directions[sig_ticker]
+                    sig_dir = (sig.get('direction') or '').upper()
+                    pos_bull = pos_dir in _BULLISH
+                    sig_bull = sig_dir in _BULLISH
+                    same_direction = (pos_bull and sig_bull) or (not pos_bull and not sig_bull)
+                    if same_direction:
+                        logger.info(f"📊 Suppressed same-direction signal {sig_ticker} {sig_dir} (open position {pos_dir})")
+                    else:
+                        # Counter-signal: store in Redis for position card warning
+                        counter_count += 1
+                        try:
+                            from database.redis_client import get_redis_client
+                            redis = await get_redis_client()
+                            if redis:
+                                counter_data = {
+                                    "signal_id": sig.get("signal_id"),
+                                    "ticker": sig_ticker,
+                                    "direction": sig.get("direction"),
+                                    "strategy": sig.get("strategy"),
+                                    "score": sig.get("score"),
+                                    "signal_type": sig.get("signal_type"),
+                                    "timestamp": sig.get("timestamp") or sig.get("created_at") or datetime.utcnow().isoformat(),
+                                }
+                                await redis.setex(
+                                    f"counter_signal:{sig_ticker}",
+                                    14400,  # 4h TTL
+                                    json.dumps(counter_data),
+                                )
+                                logger.info(f"⚠️ Counter-signal stored: {sig_ticker} {sig_dir} vs open {pos_dir}")
+                        except Exception as redis_err:
+                            logger.warning(f"Failed to store counter-signal: {redis_err}")
+                    # Either way, suppress from trade ideas feed
+                signals = filtered
+                logger.info(f"📊 Position filter: {len(pos_directions)} open tickers, {counter_count} counter-signals stored")
         except Exception as e:
             logger.warning(f"Could not filter open positions: {e}")
         

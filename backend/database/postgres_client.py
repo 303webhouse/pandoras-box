@@ -1144,7 +1144,7 @@ async def get_open_positions() -> List[Dict[Any, Any]]:
     
     async with pool.acquire() as conn:
         rows = await conn.fetch("""
-            SELECT * FROM positions 
+            SELECT * FROM unified_positions
             WHERE status = 'OPEN'
             ORDER BY created_at DESC
         """)
@@ -1195,7 +1195,7 @@ async def get_active_trade_ideas(limit: int = 10) -> List[Dict[Any, Any]]:
                     AND dismissed_at > NOW() - INTERVAL '24 hours'
                 )
                 AND ticker NOT IN (
-                    SELECT DISTINCT ticker FROM positions
+                    SELECT DISTINCT ticker FROM unified_positions
                     WHERE status = 'OPEN'
                 )
                 ORDER BY COALESCE(score, 0) DESC, created_at DESC
@@ -1287,7 +1287,7 @@ async def get_active_trade_ideas_paginated(
     """)
     filters.append("""
         ticker NOT IN (
-            SELECT DISTINCT ticker FROM positions
+            SELECT DISTINCT ticker FROM unified_positions
             WHERE status = 'OPEN'
         )
     """)
