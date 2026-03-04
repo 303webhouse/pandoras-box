@@ -13,6 +13,7 @@
     --accent-orange-dark: #e5370e;
     --accent-red: #e5370e;
     --bearish-color: #e5370e;
+    --bias-border-color: #334155;
 }
 
 * {
@@ -782,6 +783,29 @@ body {
 .hierarchy-connector {
     color: var(--accent-teal);
     font-size: 14px;
+}
+
+/* Bias-colored borders on all major dashboard sections */
+.headlines-card,
+.portfolio-summary-card,
+.bias-banner,
+.tf-card,
+.bias-card,
+.chart-area,
+.trades-panel,
+.positions-panel,
+.strategies-section,
+.positions-section,
+.watchlist-container,
+.ticker-analyzer,
+.hunter-section,
+.cta-section,
+.strategy-filter-section,
+.flow-section,
+.hybrid-scanner-section,
+.portfolio-balances-card,
+.positions-card {
+    border-color: var(--bias-border-color) !important;
 }
 
 /* Bias Alignment Glow - When Cyclical & Weekly are aligned */
