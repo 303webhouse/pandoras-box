@@ -23,23 +23,23 @@ logger = logging.getLogger(__name__)
 
 FACTOR_CONFIG = {
     # =====================================================================
-    # INTRADAY FACTORS (4 factors, total weight: 0.25)
+    # INTRADAY FACTORS (5 factors, total weight: 0.26)
     # Fast-moving indicators that change throughout the trading day.
     # =====================================================================
     "vix_term": {
-        "weight": 0.08,
+        "weight": 0.07,
         "staleness_hours": 4,
         "description": "VIX vs VIX3M - near-term fear vs longer-term expectations",
         "timeframe": "intraday",
     },
     "tick_breadth": {
-        "weight": 0.07,
+        "weight": 0.06,
         "staleness_hours": 4,
         "description": "Intraday TICK readings - buying/selling pressure",
         "timeframe": "intraday",
     },
     "spy_trend_intraday": {
-        "weight": 0.07,
+        "weight": 0.06,
         "staleness_hours": 4,
         "description": "SPY price vs 9 EMA - short-term momentum",
         "timeframe": "intraday",
@@ -50,30 +50,36 @@ FACTOR_CONFIG = {
         "description": "$UVOL/$DVOL ratio - intraday up/down volume breadth via TradingView webhook",
         "timeframe": "intraday",
     },
+    "gex": {
+        "weight": 0.04,
+        "staleness_hours": 4,
+        "description": "SPY net gamma exposure - positive=compression, negative=amplification",
+        "timeframe": "intraday",
+    },
     # =====================================================================
-    # SWING FACTORS (5 factors, total weight: 0.37)
+    # SWING FACTORS (6 factors, total weight: 0.38)
     # Multi-day trend indicators for swing trade alignment.
     # =====================================================================
     "credit_spreads": {
-        "weight": 0.10,
+        "weight": 0.09,
         "staleness_hours": 48,
         "description": "HYG vs TLT ratio - measures credit market risk appetite",
         "timeframe": "swing",
     },
     "market_breadth": {
-        "weight": 0.08,
+        "weight": 0.07,
         "staleness_hours": 48,
         "description": "RSP vs SPY ratio - equal-weight vs cap-weight divergence",
         "timeframe": "swing",
     },
     "sector_rotation": {
-        "weight": 0.07,
+        "weight": 0.06,
         "staleness_hours": 48,
         "description": "XLK/XLY vs XLP/XLU - offensive vs defensive flows",
         "timeframe": "swing",
     },
     "spy_200sma_distance": {
-        "weight": 0.10,
+        "weight": 0.09,
         "staleness_hours": 24,
         "description": "SPY percent distance from 200-day SMA - trend strength",
         "timeframe": "swing",
@@ -84,8 +90,14 @@ FACTOR_CONFIG = {
         "description": "SPY IV rank percentile from Polygon chain - options pricing regime",
         "timeframe": "swing",
     },
+    "mcclellan_oscillator": {
+        "weight": 0.05,
+        "staleness_hours": 48,
+        "description": "McClellan Oscillator - 19d vs 39d EMA of NYSE net advances",
+        "timeframe": "swing",
+    },
     # =====================================================================
-    # MACRO FACTORS (8 factors, total weight: 0.38)
+    # MACRO FACTORS (8 factors, total weight: 0.36)
     # Long-term economic and structural indicators.
     # =====================================================================
     "yield_curve": {
@@ -95,7 +107,7 @@ FACTOR_CONFIG = {
         "timeframe": "macro",
     },
     "initial_claims": {
-        "weight": 0.06,
+        "weight": 0.05,
         "staleness_hours": 168,
         "description": "Weekly initial jobless claims - labor market health",
         "timeframe": "macro",
@@ -113,7 +125,7 @@ FACTOR_CONFIG = {
         "timeframe": "macro",
     },
     "dxy_trend": {
-        "weight": 0.07,
+        "weight": 0.06,
         "staleness_hours": 48,
         "description": "DXY 5d trend + SMA20 context + VIX interaction - strong USD risk-off signal",
         "timeframe": "macro",
@@ -193,6 +205,7 @@ class CompositeResult(BaseModel):
     confidence: str
     unverifiable_factors: List[str] = Field(default_factory=list)
     circuit_breaker: Optional[Dict[str, Any]] = None
+    timeframe_scores: Optional[Dict[str, Any]] = None
 
 
 # Map circuit breaker's scheduler-style level names to composite's 5-level system.
@@ -884,6 +897,24 @@ async def compute_composite() -> CompositeResult:
     active_factors = [factor_id for factor_id in FACTOR_CONFIG if factor_id in active]
     stale_factors = [factor_id for factor_id in FACTOR_CONFIG if factor_id in stale_set]
 
+    # Compute per-timeframe sub-scores from active factors
+    timeframe_scores = {}
+    for tf_name in ("intraday", "swing", "macro"):
+        tf_active = {fid: r for fid, r in active.items()
+                     if FACTOR_CONFIG[fid].get("timeframe") == tf_name}
+        if tf_active:
+            tf_weight_sum = sum(FACTOR_CONFIG[f]["weight"] for f in tf_active)
+            tf_score = sum(tf_active[f].score * FACTOR_CONFIG[f]["weight"] for f in tf_active) / tf_weight_sum if tf_weight_sum > 0 else 0.0
+            tf_score = _clamp_score(tf_score)
+        else:
+            tf_score = 0.0
+        tf_bias, tf_numeric = score_to_bias(tf_score)
+        timeframe_scores[tf_name] = {
+            "sub_score": round(tf_score, 3),
+            "bias_level": tf_bias,
+            "bias_numeric": tf_numeric,
+        }
+
     # Attach RVOL metadata to circuit breaker dict for frontend visibility
     if rvol_meta and rvol_meta.get("rvol") is not None:
         if cb_meta is None:
@@ -905,6 +936,7 @@ async def compute_composite() -> CompositeResult:
         confidence=confidence,
         unverifiable_factors=sorted(unverifiable_factors),
         circuit_breaker=cb_meta,
+        timeframe_scores=timeframe_scores,
     )
 
     previous = await get_cached_composite()

@@ -24,17 +24,19 @@ const CONFIDENCE_COLORS = {
 };
 
 const COMPOSITE_FACTOR_DISPLAY_ORDER = [
-    // Intraday (4)
+    // Intraday (5)
     'vix_term',
     'tick_breadth',
     'spy_trend_intraday',
     'breadth_intraday',
-    // Swing (5)
+    'gex',
+    // Swing (6)
     'credit_spreads',
     'market_breadth',
     'sector_rotation',
     'spy_200sma_distance',
     'iv_regime',
+    'mcclellan_oscillator',
     // Macro (8)
     'yield_curve',
     'initial_claims',
