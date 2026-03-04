@@ -3636,12 +3636,12 @@ async function loadOpenPositions() {
     }
 }
 
-// Signal Rendering — unified feed (equity + crypto combined)
+// Signal Rendering — unified feed (exclude raw crypto, keep equity tickers like IBIT)
 function renderSignals() {
     const container = document.getElementById('tradeSignals');
 
-    // Combine all signals into one feed, sorted by score descending
-    const allSignals = [...signals.equity, ...signals.crypto]
+    // Show all equity signals; exclude asset_class=CRYPTO (raw crypto pairs)
+    const allSignals = signals.equity
         .sort((a, b) => (b.score || 0) - (a.score || 0));
 
     if (allSignals.length === 0) {
@@ -7617,7 +7617,7 @@ function applyFiltersAndRefresh() {
 
 function filterTradeIdeas() {
     // Get all signals
-    const currentSignals = [...signals.equity, ...signals.crypto];
+    const currentSignals = signals.equity;
 
     // Apply filters
     const filtered = currentSignals.filter(signal => {
