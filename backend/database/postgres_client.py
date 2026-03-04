@@ -900,6 +900,14 @@ async def init_database():
             ADD COLUMN IF NOT EXISTS is_committee_override BOOLEAN DEFAULT FALSE
         """)
 
+        # Brief 05b: Fix negative entry_price for options positions
+        # Entry price should always be positive; structure determines credit vs debit PnL
+        await conn.execute("""
+            UPDATE unified_positions
+            SET entry_price = ABS(entry_price)
+            WHERE entry_price < 0
+        """)
+
         # Brief 07: Cash flow events for accurate P&L calculation
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS cash_flows (

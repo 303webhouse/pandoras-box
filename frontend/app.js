@@ -3925,14 +3925,14 @@ function createSignalCard(signal) {
             </div>
             
             <div class="signal-actions">
-                <button class="action-btn dismiss-btn" data-action="dismiss">X Dismiss</button>
+                <button class="action-btn dismiss-btn" data-action="dismiss">Reject</button>
                 ${hasCommittee ? (() => {
                     const action = committeeData.action;
                     const conviction = committeeData.conviction || '';
                     const badgeClass = action === 'TAKE' ? 'committee-take' : (action === 'PASS' ? 'committee-pass' : 'committee-watch');
                     return `<div class="committee-badge ${badgeClass}" data-action="toggle-committee">${action} &middot; ${conviction}</div>`;
-                })() : `<button class="action-btn committee-btn" data-action="committee">&#x1F9E0; Committee</button>`}
-                <button class="action-btn select-btn" data-action="select">OK Accept</button>
+                })() : `<button class="action-btn committee-btn" data-action="committee">Analyze</button>`}
+                <button class="action-btn select-btn" data-action="select">Accept</button>
             </div>
             ${hasCommittee ? (() => {
                 const r = committeeData.risk || {};
@@ -4589,7 +4589,13 @@ async function handleSignalAction(event) {
 }
 
 async function requestCommitteeReview(signal, card) {
+    const btn = card.querySelector('.committee-btn');
     try {
+        if (btn) {
+            btn.textContent = 'Pending';
+            btn.disabled = true;
+            btn.classList.add('committee-pending');
+        }
         const response = await fetch(`${API_URL}/trade-ideas/${signal.signal_id}/status`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
@@ -4597,15 +4603,13 @@ async function requestCommitteeReview(signal, card) {
         });
         const data = await response.json();
         if (data.new_status === 'COMMITTEE_REVIEW') {
-            const btn = card.querySelector('.committee-btn');
-            if (btn) {
-                btn.textContent = 'Pending...';
-                btn.disabled = true;
-                btn.classList.add('committee-pending');
-            }
+            if (btn) btn.textContent = 'Sent';
+        } else {
+            if (btn) { btn.textContent = 'Failed'; btn.classList.remove('committee-pending'); }
         }
     } catch (err) {
         console.error('Committee request failed:', err);
+        if (btn) { btn.textContent = 'Failed'; btn.disabled = false; btn.classList.remove('committee-pending'); }
     }
 }
 
@@ -8152,17 +8156,17 @@ function updateOptionsSummary() {
     document.getElementById('optSummaryStrategy').textContent = strategyNames[strategy] || strategy;
     document.getElementById('optSummaryDirection').textContent = direction;
     
-    // Net premium (total = per-contract premium * contracts * 100 for standard options)
-    const totalPremium = premium * contracts;
-    const premiumStr = totalPremium !== 0 ? '$' + Math.abs(totalPremium).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '$--';
-    document.getElementById('optSummaryPremium').textContent = (premium < 0 ? '-' : '+') + premiumStr;
-    
-    // Max risk
+    // Net premium display (premium is always positive = what you paid)
+    const absPremium = Math.abs(premium);
+    const totalPremium = absPremium * contracts;
+    const premiumStr = totalPremium !== 0 ? '$' + totalPremium.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '$--';
+    document.getElementById('optSummaryPremium').textContent = premiumStr;
+
+    // Max risk — default to premium paid if not specified
     if (maxLoss) {
         document.getElementById('optSummaryRisk').textContent = '$' + Math.abs(maxLoss).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
-    } else if (premium < 0) {
-        // For debit positions, max risk is the premium paid
-        document.getElementById('optSummaryRisk').textContent = '$' + Math.abs(totalPremium).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+    } else if (absPremium > 0) {
+        document.getElementById('optSummaryRisk').textContent = '$' + totalPremium.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
     } else {
         document.getElementById('optSummaryRisk').textContent = '$--';
     }
@@ -8208,7 +8212,7 @@ async function confirmOptionsPositionEntry() {
                 strategy_type: strategy,
                 direction: direction,
                 legs: legs,
-                net_premium: premium,
+                net_premium: Math.abs(premium),
                 contracts: contracts,
                 max_profit: maxProfit,
                 max_loss: maxLoss,
