@@ -24,19 +24,58 @@ Currently this data sits in Discord unread by any system. This brief builds thre
 - No slash command automation (can't be done — Discord API limitation)
 - No image/chart OCR parsing (Highest Volume Contracts image is skipped; text data sufficient)
 - No changes to existing bias factor calculation logic
+- No `#uw-economic-news` parsing (see "Data Volume & Noise Management" for future plan)
 
 ---
 
-## Discord Channel IDs (confirmed)
+## Discord Channel & Bot IDs (all confirmed)
 
 ```python
 UW_FLOW_CHANNEL_ID = 1463692055694807201    # #uw-flow-alerts — UW bot auto-posts ticker updates here
 UW_NEWS_CHANNEL_ID = 1478626930805702756    # #uw-economic-news — market news, UW tweets, trading halts (future use)
 SIGNALS_CHANNEL_ID = 1470164076049989785    # #📊-signals — signal display with Analyze button
-UW_BOT_USER_ID = <PENDING>                  # UW Bot's Discord user ID — Nick must right-click bot → Copy User ID
+UW_BOT_USER_ID     = 1100705854271008798    # UW Bot's Discord user ID
 ```
 
-**Note:** `#uw-economic-news` receives market news alerts, UW tweets, and trading halts. This brief does NOT parse that channel, but it's a future candidate for news context injection into the committee. Store the ID for later use.
+---
+
+## Data Volume & Noise Management
+
+UW pushes a LOT of data. Here's how each stream is kept lean:
+
+### Ticker Updates (`#uw-flow-alerts`) — handled by this brief
+
+**Volume:** ~26 posts/day during market hours (every 15 min), each with 6-8 tickers = ~150-200 data points/day.
+
+**Strategy: Latest-only overwrite.** Each ticker update REPLACES the previous one in Redis. At any given moment there's exactly ONE data point per ticker, not a history. 1-hour TTL auto-cleans after market close. No database storage at all.
+
+**Context injection: Targeted pull, not bulk push.** The committee only fetches UW data for the **specific ticker being analyzed** — not all tickers. That's ~5 lines / ~50 tokens added to context. The market flow snapshot (SPY/QQQ aggregate) adds another ~4 lines. Total UW footprint in committee context: **~100 tokens**. Negligible.
+
+### Economic News (`#uw-economic-news`) — future brief, NOT in this build
+
+**Volume:** High and unpredictable — market news, UW tweets, trading halts, earnings alerts. Could be 50+ messages/day.
+
+**Planned strategy: Categorize → Filter → Summary buffer.**
+
+When we build the news watcher (separate brief), it will:
+
+1. **Categorize** each message: trading halt, earnings, Fed/macro, sector move, geopolitical, noise
+2. **Filter by impact:** Only keep HIGH impact items (halts, Fed decisions, earnings for watched tickers). Drop noise.
+3. **Summary buffer:** Store max 5 most recent high-impact items in a single Redis key (`uw:news:recent`) with 2-hour TTL. New items push old ones out.
+4. **Targeted injection:** Committee only sees news items matching the signal's ticker OR macro-relevant events. If analyzing NVDA, it sees "NVDA halt lifted 2:15 PM" but NOT "EU proposes crypto regulation."
+
+**Result:** Committee context gets 0-3 relevant news lines per analysis, not a firehose.
+
+### What does NOT get stored
+
+- Highest Volume Contracts images — skipped entirely (no OCR)
+- Duplicate ticker updates within same 15-min window — overwritten, not accumulated
+- News items below HIGH impact threshold — dropped at parse time
+- Any data older than TTL — auto-expired by Redis, zero cleanup needed
+
+### Database impact: Zero
+
+All UW data lives exclusively in Redis with TTLs. Nothing hits Postgres. Nothing accumulates. If the VPS reboots or Redis restarts, the data rebuilds from the next UW Bot post (~15 min max gap).
 
 ---
 
@@ -45,9 +84,10 @@ UW_BOT_USER_ID = <PENDING>                  # UW Bot's Discord user ID — Nick 
 ```
 UW Bot auto-posts to #uw-flow-alerts (1463692055694807201)
   → UW Watcher Bot sees message (discord.py on_message)
+  → Filters: only messages from UW Bot (1100705854271008798)
   → Parses Ticker Updates text into structured JSON
   → POSTs to Railway API: POST /webhook/uw/ticker-updates
-  → Railway stores in Redis + updates bias factors
+  → Railway stores in Redis (latest-only overwrite, 1h TTL)
   → Committee context builder reads UW data on next run
 
 TradingView webhook fires
@@ -78,7 +118,7 @@ TradingView webhook fires
 ```python
 # Config at top of uw_watcher.py
 UW_FLOW_CHANNEL_ID = 1463692055694807201
-UW_BOT_USER_ID = <PENDING — Nick must provide>
+UW_BOT_USER_ID = 1100705854271008798
 ```
 
 The watcher uses the existing Pivot II (OpenClaw) bot token from `/home/openclaw/.openclaw/openclaw.json` — it just needs to READ messages, it doesn't post anything to Discord.
@@ -181,6 +221,7 @@ async def receive_uw_ticker_updates(payload: dict):
 
 ```python
 # Per-ticker latest data (committee context builder reads these)
+# OVERWRITES previous — no accumulation
 redis.setex(f"uw:ticker:{ticker}", 3600, json.dumps(ticker_data))
 
 # Aggregate market flow snapshot (bias engine reads this)
@@ -643,7 +684,7 @@ PANDORA_API_URL = "https://pandoras-box-production.up.railway.app"
 PIVOT_API_KEY = "<existing key from /opt/openclaw scripts>"
 DISCORD_BOT_TOKEN = "<existing OpenClaw bot token>"
 UW_FLOW_CHANNEL_ID = 1463692055694807201
-UW_BOT_USER_ID = <PENDING — Nick must provide>
+UW_BOT_USER_ID = 1100705854271008798
 SIGNALS_CHANNEL_ID = 1470164076049989785
 ```
 
@@ -705,13 +746,14 @@ SIGNALS_CHANNEL_ID = 1470164076049989785
 
 ---
 
-## BLOCKED: UW Bot User ID
+## STATUS: READY FOR CLAUDE CODE
 
-All channel IDs are confirmed. The only missing piece is the **UW Bot's Discord user ID**. Nick must:
+All IDs confirmed. Brief is unblocked. Claude Code can begin implementation.
 
-1. Go to `#uw-flow-alerts` in Discord
-2. Find any message posted by the UW Bot
-3. Right-click the bot's **name/avatar** on that message
-4. Click **Copy User ID**
-
-Once provided, replace `<PENDING>` in the config section above and this brief is ready for Claude Code.
+```python
+# All confirmed IDs
+UW_FLOW_CHANNEL_ID = 1463692055694807201    # #uw-flow-alerts
+UW_NEWS_CHANNEL_ID = 1478626930805702756    # #uw-economic-news (future use)
+SIGNALS_CHANNEL_ID = 1470164076049989785    # #📊-signals
+UW_BOT_USER_ID     = 1100705854271008798    # UW Bot Discord user
+```
