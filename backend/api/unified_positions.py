@@ -4,7 +4,7 @@ One table, one API, one source of truth for all positions.
 Replaces the fragmented positions + open_positions + options_positions system.
 """
 
-from fastapi import APIRouter, HTTPException, Header, Query
+from fastapi import APIRouter, HTTPException, Header, Query, Request
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 from datetime import datetime, date, timezone
