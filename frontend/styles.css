@@ -1211,7 +1211,7 @@ body.override-active-bearish .override-toggle[data-active="true"] {
     display: flex;
     align-items: center;
     gap: 6px;
-    margin-bottom: 12px;
+    margin-top: 8px;
     padding: 4px 0;
     overflow-x: auto;
     scrollbar-width: none;
