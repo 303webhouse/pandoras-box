@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Pandora - Real-time Trading Signal Dashboard">
     <title>Pandora</title>
-    <link rel="stylesheet" href="/styles.css?v=53">
+    <link rel="stylesheet" href="/styles.css?v=54">
     <link rel="manifest" href="/manifest.json">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -241,45 +241,9 @@
             <div class="trades-panel">
                 <div class="trades-header">
                     <h2><span class="kb-link" data-kb-term="trade-ideas">TRADE IDEAS</span></h2>
-                    <div class="asset-toggle">
-                        <button class="toggle-btn active" data-asset="equity">Equities</button>
-                        <button class="toggle-btn" data-asset="options">Options</button>
-                    </div>
                 </div>
-                <!-- Equity Signals Container -->
                 <div class="signals-container" id="tradeSignals">
-                    <!-- Signals will be populated by JavaScript -->
                     <p class="empty-state">No signals available</p>
-                </div>
-                <!-- Options Tab Content -->
-                <div class="options-tab-content" id="optionsTabContent" style="display: none;">
-                    <div class="options-header">
-                        <h3>Open Options Positions</h3>
-                        <button class="options-btn primary" id="openOptionsModalBtn">+ Add Position</button>
-                    </div>
-                    <!-- Options Summary -->
-                    <div class="options-summary" id="optionsSummary">
-                        <div class="summary-stat">
-                            <span class="stat-label">Open Positions</span>
-                            <span class="stat-value" id="optionsCount">0</span>
-                        </div>
-                        <div class="summary-stat">
-                            <span class="stat-label">Total P&L</span>
-                            <span class="stat-value" id="optionsTotalPnl">$0.00</span>
-                        </div>
-                        <div class="summary-stat">
-                            <span class="stat-label">Net Delta</span>
-                            <span class="stat-value" id="optionsNetDelta">0</span>
-                        </div>
-                        <div class="summary-stat">
-                            <span class="stat-label">Daily Theta</span>
-                            <span class="stat-value" id="optionsDailyTheta">$0.00</span>
-                        </div>
-                    </div>
-                    <!-- Options Positions List -->
-                    <div class="options-positions-list" id="optionsPositionsList">
-                        <p class="empty-state">No open options positions</p>
-                    </div>
                 </div>
             </div>
 
@@ -2138,7 +2102,7 @@
     <!-- TradingView Widget Script -->
     <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
-    <script src="/app.js?v=64"></script>
+    <script src="/app.js?v=65"></script>
     <script src="/analytics.js?v=2"></script>
 </body>
 </html>
