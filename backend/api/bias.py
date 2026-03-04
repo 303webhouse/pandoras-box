@@ -6,7 +6,7 @@ Provides endpoints for all macro bias filters including:
 - Future: VIX, Put/Call Ratio, etc.
 """
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
@@ -907,3 +907,45 @@ async def _get_pivot_status() -> str:
         return "unknown"
     except Exception:
         return "unknown"
+
+
+# ── Savita Indicator endpoints (migrated from bias_scheduler) ──
+
+
+@router.get("/bias-auto/savita")
+async def get_savita_status():
+    """Get current Savita Indicator (BofA Sell Side Indicator) status."""
+    try:
+        from bias_filters.savita_indicator import get_savita_reading, get_savita_config
+
+        return {
+            "status": "success",
+            "data": get_savita_reading(),
+            "config": get_savita_config(),
+        }
+    except Exception as e:
+        logger.error(f"Error getting Savita status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/bias-auto/savita/update")
+async def update_savita(
+    reading: float = Query(..., ge=40, le=70, description="New Savita reading (40-70%)"),
+    date: Optional[str] = Query(None, description="Date of reading (YYYY-MM-DD)"),
+):
+    """Manually update the Savita Indicator reading."""
+    try:
+        from bias_filters.savita_indicator import update_savita_reading
+
+        result = update_savita_reading(reading, date)
+
+        return {
+            "status": "success",
+            "message": f"Savita updated to {reading}%",
+            "data": result,
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error updating Savita: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

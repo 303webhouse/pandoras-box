@@ -36,12 +36,12 @@ async def compute_score() -> FactorReading:
     prior_5 = float(close.iloc[-6])
     pct_change_5d = ((current - prior_5) / prior_5) * 100 if prior_5 else 0.0
     above_sma = current > sma_20
-    rising = pct_change_5d > 0.5
-    falling = pct_change_5d < -0.5
+    rising = pct_change_5d > 1.0
+    falling = pct_change_5d < -1.0
 
     # Fetch VIX for interaction scoring (absorbed from dollar_smile)
     vix = await get_latest_price("^VIX")
-    vix_elevated = vix is not None and vix > 20
+    vix_elevated = vix is not None and vix > 25
 
     score = _score_dxy_vix(rising, falling, above_sma, vix_elevated)
 
@@ -80,18 +80,18 @@ def _score_dxy_vix(rising: bool, falling: bool, above_sma: bool, vix_elevated: b
     Falling DXY + below SMA = risk-on (bullish).
     """
     if rising and above_sma and vix_elevated:
-        return -1.0   # Strong risk-off: DXY surging + fear
+        return -0.7   # Strong risk-off: DXY surging + fear
     if rising and above_sma and not vix_elevated:
-        return -0.3   # Benign strength: DXY rising but no fear (was -1.0 without VIX)
+        return -0.3   # Benign strength: DXY rising but no fear
     if not rising and not falling and above_sma and vix_elevated:
-        return -0.6   # Fear drag: DXY flat but elevated + VIX high
+        return -0.5   # Fear drag: DXY flat but elevated + VIX high
     if not rising and not falling and above_sma and not vix_elevated:
-        return -0.2   # Mild drag: DXY flat-above-SMA, VIX calm
+        return -0.15  # Mild drag: DXY flat-above-SMA, VIX calm
     if falling and not above_sma:
-        return 1.0    # Risk-on: DXY falling below SMA
+        return 0.7    # Risk-on: DXY falling below SMA
     if falling and above_sma:
-        return 0.5    # Weakening strength
+        return 0.4    # Weakening strength
     if rising and not above_sma:
-        return -0.5   # Rising from below: potential regime change
+        return -0.4   # Rising from below: potential regime change
     return 0.0
 

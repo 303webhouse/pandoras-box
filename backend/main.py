@@ -258,20 +258,6 @@ async def get_bias_data(timeframe: str):
     if timeframe_lower not in {"daily", "weekly", "monthly", "cyclical"}:
         raise HTTPException(status_code=404, detail="Unknown bias timeframe")
 
-    if timeframe_lower in {"daily", "weekly", "cyclical"}:
-        try:
-            from api.bias_scheduler import get_timeframe_bias
-            scheduler_result = await get_timeframe_bias(timeframe_lower)
-            if (
-                isinstance(scheduler_result, dict)
-                and scheduler_result.get("status") == "success"
-                and scheduler_result.get("data")
-            ):
-                return scheduler_result["data"]
-        except Exception:
-            # Fall back to legacy Redis cache below.
-            pass
-
     from database.redis_client import get_bias
     
     bias = await get_bias(timeframe.upper())
@@ -315,7 +301,7 @@ from api.dollar_smile import router as dollar_smile_router
 from api.sector_rotation import router as sector_rotation_router
 from api.market_indicators import router as market_indicators_router
 from api.hybrid_scanner import router as hybrid_scanner_router
-from api.bias_scheduler import router as bias_scheduler_router
+
 from api.knowledgebase import router as knowledgebase_router
 from api.alerts import router as alerts_router
 from api.uw_integration import router as uw_integration_router
@@ -347,7 +333,7 @@ app.include_router(flow_router, prefix="/api", tags=["options-flow"])
 app.include_router(dollar_smile_router, prefix="/api", tags=["dollar-smile"])
 app.include_router(sector_rotation_router, prefix="/api", tags=["sector-rotation"])
 app.include_router(market_indicators_router, prefix="/api", tags=["market-indicators"])
-app.include_router(bias_scheduler_router, prefix="/api", tags=["bias-scheduler"])
+
 app.include_router(hybrid_scanner_router, prefix="/api", tags=["hybrid-scanner"])
 app.include_router(knowledgebase_router, prefix="/api", tags=["knowledgebase"])
 app.include_router(alerts_router, prefix="/api", tags=["alerts"])

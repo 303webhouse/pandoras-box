@@ -23,29 +23,23 @@ logger = logging.getLogger(__name__)
 
 FACTOR_CONFIG = {
     # =====================================================================
-    # INTRADAY FACTORS (5 factors, total weight: 0.28)
+    # INTRADAY FACTORS (4 factors, total weight: 0.25)
     # Fast-moving indicators that change throughout the trading day.
     # =====================================================================
     "vix_term": {
-        "weight": 0.07,
+        "weight": 0.08,
         "staleness_hours": 4,
         "description": "VIX vs VIX3M - near-term fear vs longer-term expectations",
         "timeframe": "intraday",
     },
     "tick_breadth": {
-        "weight": 0.06,
+        "weight": 0.07,
         "staleness_hours": 4,
         "description": "Intraday TICK readings - buying/selling pressure",
         "timeframe": "intraday",
     },
-    "vix_regime": {
-        "weight": 0.06,
-        "staleness_hours": 4,
-        "description": "Absolute VIX level - overall market fear/complacency",
-        "timeframe": "intraday",
-    },
     "spy_trend_intraday": {
-        "weight": 0.06,
+        "weight": 0.07,
         "staleness_hours": 4,
         "description": "SPY price vs 9 EMA - short-term momentum",
         "timeframe": "intraday",
@@ -57,55 +51,31 @@ FACTOR_CONFIG = {
         "timeframe": "intraday",
     },
     # =====================================================================
-    # SWING FACTORS (9 factors, total weight: 0.41)
+    # SWING FACTORS (5 factors, total weight: 0.37)
     # Multi-day trend indicators for swing trade alignment.
     # =====================================================================
     "credit_spreads": {
-        "weight": 0.08,
+        "weight": 0.10,
         "staleness_hours": 48,
         "description": "HYG vs TLT ratio - measures credit market risk appetite",
         "timeframe": "swing",
     },
     "market_breadth": {
-        "weight": 0.07,
+        "weight": 0.08,
         "staleness_hours": 48,
         "description": "RSP vs SPY ratio - equal-weight vs cap-weight divergence",
         "timeframe": "swing",
     },
     "sector_rotation": {
-        "weight": 0.06,
+        "weight": 0.07,
         "staleness_hours": 48,
         "description": "XLK/XLY vs XLP/XLU - offensive vs defensive flows",
         "timeframe": "swing",
     },
     "spy_200sma_distance": {
-        "weight": 0.08,
+        "weight": 0.10,
         "staleness_hours": 24,
         "description": "SPY percent distance from 200-day SMA - trend strength",
-        "timeframe": "swing",
-    },
-    "high_yield_oas": {
-        "weight": 0.02,
-        "staleness_hours": 48,
-        "description": "ICE BofA HY OAS - precise credit stress gauge (correlated with credit_spreads)",
-        "timeframe": "swing",
-    },
-    "put_call_ratio": {
-        "weight": 0.02,
-        "staleness_hours": 72,
-        "description": "CBOE equity put/call ratio - contrarian sentiment gauge (self-heals via Polygon fallback)",
-        "timeframe": "swing",
-    },
-    "polygon_pcr": {
-        "weight": 0.04,
-        "staleness_hours": 8,
-        "description": "Polygon SPY put/call volume ratio - automated flow sentiment (15-min delayed)",
-        "timeframe": "swing",
-    },
-    "polygon_oi_ratio": {
-        "weight": 0.02,
-        "staleness_hours": 8,
-        "description": "Polygon SPY put/call open interest ratio - contrarian positioning gauge",
         "timeframe": "swing",
     },
     "iv_regime": {
@@ -114,50 +84,48 @@ FACTOR_CONFIG = {
         "description": "SPY IV rank percentile from Polygon chain - options pricing regime",
         "timeframe": "swing",
     },
-    # NOTE: breadth_momentum, options_sentiment, dollar_smile, iv_skew removed
-    # (committee review: redundant, unreliable, or merged into other factors)
     # =====================================================================
-    # MACRO FACTORS (8 factors, total weight: 0.31)
+    # MACRO FACTORS (8 factors, total weight: 0.38)
     # Long-term economic and structural indicators.
     # =====================================================================
     "yield_curve": {
-        "weight": 0.05,
+        "weight": 0.06,
         "staleness_hours": 72,
         "description": "10Y-2Y Treasury spread - recession predictor",
         "timeframe": "macro",
     },
     "initial_claims": {
-        "weight": 0.05,
+        "weight": 0.06,
         "staleness_hours": 168,
         "description": "Weekly initial jobless claims - labor market health",
         "timeframe": "macro",
     },
     "sahm_rule": {
-        "weight": 0.04,
+        "weight": 0.05,
         "staleness_hours": 168,
         "description": "Sahm Rule - real-time recession probability",
         "timeframe": "macro",
     },
     "copper_gold_ratio": {
-        "weight": 0.03,
+        "weight": 0.04,
         "staleness_hours": 48,
         "description": "COPX/GLD - economic activity vs safety demand",
         "timeframe": "macro",
     },
     "dxy_trend": {
-        "weight": 0.06,
+        "weight": 0.07,
         "staleness_hours": 48,
         "description": "DXY 5d trend + SMA20 context + VIX interaction - strong USD risk-off signal",
         "timeframe": "macro",
     },
     "excess_cape": {
-        "weight": 0.03,
+        "weight": 0.04,
         "staleness_hours": 168,
         "description": "Excess CAPE yield - valuation risk level",
         "timeframe": "macro",
     },
     "ism_manufacturing": {
-        "weight": 0.03,
+        "weight": 0.04,
         "staleness_hours": 720,
         "description": "ISM Manufacturing PMI - leading economic indicator",
         "timeframe": "macro",
