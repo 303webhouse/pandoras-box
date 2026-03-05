@@ -102,18 +102,45 @@ async def compute_score() -> Optional[FactorReading]:
     Compute IV regime score from VIX rank.
     High VIX rank = expensive options = caution for debit strategies.
     Low VIX rank = cheap options = favorable environment.
+
+    Uses 52-week VIX range from yfinance for rank calculation (not rolling
+    Redis window, which adapts too fast and normalizes spikes away).
+    Falls back to Redis history if yfinance 1Y fetch fails.
     """
     vix = await _get_vix()
     if not vix:
         logger.warning("iv_regime: cannot get VIX — skipping")
         return None
 
-    # Store this reading and load history
+    # Store this reading for fallback
     await _store_vix_reading(vix)
-    history = await _get_iv_history()
 
-    iv_rank = _compute_iv_rank(vix, history)
+    # Primary: 52-week range from yfinance
+    iv_rank = None
+    vix_52w_min = None
+    vix_52w_max = None
+    try:
+        from bias_engine.factor_utils import get_price_history
+        vix_hist = await get_price_history("^VIX", days=365)
+        if vix_hist is not None and not vix_hist.empty and "close" in vix_hist.columns:
+            closes = vix_hist["close"].dropna()
+            if len(closes) >= 20:
+                vix_52w_min = float(closes.min())
+                vix_52w_max = float(closes.max())
+                if vix_52w_max > vix_52w_min:
+                    iv_rank = ((vix - vix_52w_min) / (vix_52w_max - vix_52w_min)) * 100
+                    logger.debug("iv_regime: 52w range [%.1f, %.1f], VIX=%.1f → rank=%.0f%%",
+                                 vix_52w_min, vix_52w_max, vix, iv_rank)
+    except Exception as e:
+        logger.warning("iv_regime: 52w yfinance fetch failed, using Redis fallback: %s", e)
+
+    # Fallback: Redis rolling history
     if iv_rank is None:
+        history = await _get_iv_history()
+        iv_rank = _compute_iv_rank(vix, history)
+
+    if iv_rank is None:
+        history = await _get_iv_history()
         logger.info("iv_regime: insufficient history (%d readings) — building baseline", len(history))
         return FactorReading(
             factor_id="iv_regime",
@@ -124,7 +151,7 @@ async def compute_score() -> Optional[FactorReading]:
             source="yfinance",
             raw_data={
                 "vix": round(vix, 2),
-                "history_count": len(history),
+                "history_count": len(history) if history else 0,
                 "iv_rank": None,
             },
         )
@@ -154,9 +181,9 @@ async def compute_score() -> Optional[FactorReading]:
         raw_data={
             "vix": round(vix, 2),
             "iv_rank": round(iv_rank, 1),
-            "history_count": len(history),
-            "vix_min": round(min(history), 2) if history else None,
-            "vix_max": round(max(history), 2) if history else None,
+            "vix_52w_min": round(vix_52w_min, 2) if vix_52w_min else None,
+            "vix_52w_max": round(vix_52w_max, 2) if vix_52w_max else None,
+            "rank_source": "52w_yfinance" if vix_52w_min else "redis_rolling",
         },
     )
 
