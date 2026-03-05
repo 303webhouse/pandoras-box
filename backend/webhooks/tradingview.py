@@ -795,6 +795,117 @@ async def get_tick_status_endpoint():
     return await get_tick_status()
 
 
+class McClellanPayload(BaseModel):
+    """Daily NYSE advancing/declining issues from TradingView"""
+    advn: float  # NYSE advancing issues count
+    decln: float  # NYSE declining issues count
+
+
+@router.post("/mcclellan")
+async def receive_mcclellan_data(payload: McClellanPayload):
+    """
+    Receive daily NYSE ADVN/DECLN from TradingView webhook.
+    Stores net advances in Redis history and recomputes McClellan Oscillator.
+    Fires once per day at market close.
+    """
+    import json as _json
+    from bias_filters.mcclellan_oscillator import (
+        REDIS_KEY_MCCLELLAN_HISTORY,
+        REDIS_MCCLELLAN_TTL,
+        _compute_mcclellan,
+        _score_mcclellan,
+    )
+    from bias_engine.composite import FactorReading, store_factor_reading
+    from bias_engine.factor_utils import score_to_signal
+    import pandas as pd
+
+    logger.info("McClellan webhook: ADVN=%.0f, DECLN=%.0f", payload.advn, payload.decln)
+
+    if payload.advn <= 0 or payload.decln <= 0:
+        return {"status": "rejected", "reason": "ADVN and DECLN must be positive"}
+
+    net = payload.advn - payload.decln
+    now = datetime.now()
+    date_str = now.strftime("%Y-%m-%d")
+
+    try:
+        from database.redis_client import get_redis_client
+        redis = await get_redis_client()
+        if not redis:
+            return {"status": "error", "reason": "Redis unavailable"}
+
+        # Store this day's reading
+        entry = _json.dumps({
+            "net": round(net, 0),
+            "advn": round(payload.advn, 0),
+            "decln": round(payload.decln, 0),
+            "date": date_str,
+        })
+        ts = now.timestamp()
+        await redis.zadd(REDIS_KEY_MCCLELLAN_HISTORY, {entry: ts})
+        await redis.expire(REDIS_KEY_MCCLELLAN_HISTORY, REDIS_MCCLELLAN_TTL)
+
+        # Trim to last 90 entries
+        total = await redis.zcard(REDIS_KEY_MCCLELLAN_HISTORY)
+        if total > 90:
+            await redis.zremrangebyrank(REDIS_KEY_MCCLELLAN_HISTORY, 0, total - 91)
+
+        # Read full history and compute McClellan
+        entries = await redis.zrangebyscore(
+            REDIS_KEY_MCCLELLAN_HISTORY, "-inf", "+inf"
+        )
+        net_values = [float(_json.loads(e)["net"]) for e in entries]
+
+        if len(net_values) < 40:
+            logger.info("McClellan: building baseline (%d/40 days)", len(net_values))
+            return {
+                "status": "accepted",
+                "net_advances": net,
+                "history_days": len(net_values),
+                "message": f"Building baseline ({len(net_values)}/40 days)",
+            }
+
+        series = pd.Series(net_values)
+        mcclellan = _compute_mcclellan(series)
+        if mcclellan is None:
+            return {"status": "error", "reason": "McClellan computation failed"}
+
+        score = _score_mcclellan(mcclellan)
+
+        reading = FactorReading(
+            factor_id="mcclellan_oscillator",
+            score=score,
+            signal=score_to_signal(score),
+            detail=f"McClellan Oscillator: {mcclellan:.1f} (from webhook, {len(net_values)} days)",
+            timestamp=now,
+            source="tradingview",
+            raw_data={
+                "mcclellan": round(mcclellan, 2),
+                "net_advances": round(net, 0),
+                "data_points": len(net_values),
+            },
+        )
+        await store_factor_reading(reading)
+
+        # Recompute composite in background
+        asyncio.ensure_future(_recompute_composite_background("mcclellan_oscillator"))
+
+        logger.info("McClellan webhook scored: %.1f (score=%+.2f, %d days)",
+                     mcclellan, score, len(net_values))
+
+        return {
+            "status": "accepted",
+            "net_advances": net,
+            "mcclellan": round(mcclellan, 2),
+            "score": score,
+            "history_days": len(net_values),
+        }
+
+    except Exception as e:
+        logger.error("McClellan webhook error: %s", e)
+        return {"status": "error", "reason": str(e)}
+
+
 
 @router.get("/outcomes/{signal_id}")
 async def get_signal_outcome(signal_id: str):
