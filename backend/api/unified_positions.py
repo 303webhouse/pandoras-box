@@ -46,6 +46,43 @@ def _match_account_balance(account_filter: str, balance_name: str) -> bool:
     return name_lower in aliases or name_lower.startswith(filter_upper.lower())
 
 
+def normalize_spread_strikes(
+    long_strike: float | None,
+    short_strike: float | None,
+    structure: str | None,
+) -> tuple[float | None, float | None]:
+    """
+    Ensure long_strike/short_strike match option spread conventions.
+
+    For debit spreads the LONG leg is the more expensive option:
+      - put_debit:  long = MAX strike (higher put costs more)
+      - call_debit: long = MIN strike (lower call costs more)
+    For credit spreads the SHORT leg is the more expensive option:
+      - put_credit:  short = MAX strike → long = MIN
+      - call_credit: short = MIN strike → long = MAX
+    """
+    if not long_strike or not short_strike or not structure:
+        return long_strike, short_strike
+
+    s = structure.lower()
+    hi, lo = max(long_strike, short_strike), min(long_strike, short_strike)
+
+    # put_debit / bear_put → long = higher strike
+    # call_credit / bear_call → long = higher strike
+    if ("put" in s and "debit" in s) or ("put" in s and "bear" in s) \
+       or ("call" in s and "credit" in s) or ("call" in s and "bear" in s):
+        return hi, lo
+
+    # call_debit / bull_call → long = lower strike
+    # put_credit / bull_put → long = lower strike
+    if ("call" in s and "debit" in s) or ("call" in s and "bull" in s) \
+       or ("put" in s and "credit" in s) or ("put" in s and "bull" in s):
+        return lo, hi
+
+    # Fallback: don't change
+    return long_strike, short_strike
+
+
 # ── Pydantic models ──────────────────────────────────────────────────
 
 class CreatePositionRequest(BaseModel):
@@ -90,6 +127,8 @@ class UpdatePositionRequest(BaseModel):
     entry_price: Optional[float] = None
     cost_basis: Optional[float] = None
     legs: Optional[str] = None
+    long_strike: Optional[float] = None
+    short_strike: Optional[float] = None
 
 
 class ClosePositionRequest(BaseModel):
@@ -200,6 +239,11 @@ async def create_position(req: CreatePositionRequest):
         direction = infer_direction(req.structure)
     direction = direction or "LONG"
 
+    # Normalize strike order based on spread type before any calculation
+    norm_long, norm_short = normalize_spread_strikes(
+        req.long_strike, req.short_strike, req.structure
+    )
+
     # Auto-calculate risk if structure is provided and max_loss not overridden
     max_loss = req.max_loss
     max_profit = req.max_profit
@@ -209,8 +253,8 @@ async def create_position(req: CreatePositionRequest):
             structure=req.structure,
             entry_price=req.entry_price,
             quantity=req.quantity,
-            long_strike=req.long_strike,
-            short_strike=req.short_strike,
+            long_strike=norm_long,
+            short_strike=norm_short,
             legs=req.legs,
         )
         max_loss = risk["max_loss"]
@@ -260,7 +304,7 @@ async def create_position(req: CreatePositionRequest):
             req.entry_price, req.quantity, cost_basis,
             max_loss, max_profit, req.stop_loss, req.target_1, req.target_2,
             breakeven if breakeven else None,
-            expiry, dte, req.long_strike, req.short_strike,
+            expiry, dte, norm_long, norm_short,
             req.source, req.signal_id, (req.account or "ROBINHOOD").upper(), req.notes,
             req.tags if req.tags else None,
         )
@@ -651,6 +695,14 @@ async def update_position(position_id: str, req: UpdatePositionRequest):
         sets.append(f"legs = ${idx}")
         params.append(req.legs)
         idx += 1
+    if req.long_strike is not None:
+        sets.append(f"long_strike = ${idx}")
+        params.append(req.long_strike)
+        idx += 1
+    if req.short_strike is not None:
+        sets.append(f"short_strike = ${idx}")
+        params.append(req.short_strike)
+        idx += 1
 
     if len(sets) <= 1:
         raise HTTPException(status_code=400, detail="No fields to update")
@@ -871,6 +923,11 @@ async def bulk_create_positions(req: BulkRequest):
             # Infer direction
             direction = item.direction or (infer_direction(item.structure) if item.structure else "LONG")
 
+            # Normalize strikes before risk calc
+            n_long, n_short = normalize_spread_strikes(
+                item.long_strike, item.short_strike, item.structure
+            )
+
             # Calculate risk
             max_loss = None
             max_profit = None
@@ -880,8 +937,8 @@ async def bulk_create_positions(req: BulkRequest):
                     structure=item.structure,
                     entry_price=item.entry_price,
                     quantity=item.quantity,
-                    long_strike=item.long_strike,
-                    short_strike=item.short_strike,
+                    long_strike=n_long,
+                    short_strike=n_short,
                     legs=item.legs,
                 )
                 max_loss = risk["max_loss"]
@@ -940,7 +997,7 @@ async def bulk_create_positions(req: BulkRequest):
                     json.dumps(item.legs) if item.legs else None,
                     item.entry_price, item.quantity, max_loss, max_profit,
                     breakeven if breakeven else None,
-                    expiry, dte, item.long_strike, item.short_strike,
+                    expiry, dte, n_long, n_short,
                     item.source, item.notes, status,
                     exit_price, exit_date_val, realized_pnl, trade_outcome,
                 )
@@ -1114,6 +1171,10 @@ async def run_mark_to_market() -> dict:
         expiry = row.get("expiry")
         long_strike = float(row["long_strike"]) if row.get("long_strike") else None
         short_strike = float(row["short_strike"]) if row.get("short_strike") else None
+        # Normalize strike order in case DB has them swapped
+        long_strike, short_strike = normalize_spread_strikes(
+            long_strike, short_strike, structure
+        )
 
         if entry_price is None:
             continue
