@@ -8095,10 +8095,17 @@ function renderPortfolioSummaryWidget(summary) {
         combinedEl.textContent = '$' + combinedBalance.toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0});
     }
 
-    // RH balance + meta (positions, risk, lean, DTE)
+    // RH balance + breakdown
     const rhBalEl = document.getElementById('rhBalance');
     if (rhBalEl) {
         rhBalEl.textContent = '$' + rhBalance.toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0});
+    }
+    const rhBreakdown = document.getElementById('rhBreakdown');
+    if (rhBreakdown && summary.cash != null) {
+        const cashStr = '$' + summary.cash.toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0});
+        const posVal = summary.position_value || 0;
+        const posStr = '$' + posVal.toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0});
+        rhBreakdown.innerHTML = `<span>Cash ${cashStr}</span><span>Positions ${posStr}</span>`;
     }
     const rhMeta = document.getElementById('rhMeta');
     if (rhMeta) {
