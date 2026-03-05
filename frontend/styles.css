@@ -966,6 +966,7 @@ body {
 }
 
 /* Bias-colored borders on all major dashboard sections */
+.bias-composite-panel,
 .headlines-card,
 .portfolio-summary-card,
 .bias-banner,
