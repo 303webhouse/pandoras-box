@@ -31,6 +31,20 @@ CREDIT_STRUCTURES = frozenset({
 
 PIVOT_API_KEY = os.getenv("PIVOT_API_KEY") or ""
 
+# Robust account name matching — handles case and naming variations
+ACCOUNT_DISPLAY_MAP = {
+    "ROBINHOOD": ["robinhood", "rh", "robinhood - individual"],
+    "FIDELITY": ["fidelity", "fidelity - individual", "fid"],
+}
+
+
+def _match_account_balance(account_filter: str, balance_name: str) -> bool:
+    """Check if a balance row name matches the requested account filter."""
+    filter_upper = account_filter.upper()
+    name_lower = balance_name.lower().strip()
+    aliases = ACCOUNT_DISPLAY_MAP.get(filter_upper, [])
+    return name_lower in aliases or name_lower.startswith(filter_upper.lower())
+
 
 # ── Pydantic models ──────────────────────────────────────────────────
 
@@ -247,7 +261,7 @@ async def create_position(req: CreatePositionRequest):
             max_loss, max_profit, req.stop_loss, req.target_1, req.target_2,
             breakeven if breakeven else None,
             expiry, dte, req.long_strike, req.short_strike,
-            req.source, req.signal_id, req.account, req.notes,
+            req.source, req.signal_id, (req.account or "ROBINHOOD").upper(), req.notes,
             req.tags if req.tags else None,
         )
 
@@ -352,10 +366,11 @@ async def list_positions(
 #       "summary" being captured as a position_id path parameter.
 
 @router.get("/v2/positions/summary")
-async def portfolio_summary():
+async def portfolio_summary(account: Optional[str] = Query(None)):
     """
     Portfolio summary for the bias row widget and committee context.
     Returns: total positions, capital at risk, net direction, nearest expiry.
+    Optional account filter: ?account=ROBINHOOD or ?account=FIDELITY
     """
     pool = await get_postgres_client()
 
@@ -366,15 +381,29 @@ async def portfolio_summary():
 
     positions = [_row_to_dict(r) for r in rows]
 
+    # Filter by account if specified
+    if account:
+        account_upper = account.upper()
+        positions = [
+            p for p in positions
+            if (p.get("account") or "ROBINHOOD").upper() == account_upper
+        ]
+
     # Fetch cash balance from account_balances
     cash = 0.0
     try:
         async with pool.acquire() as conn:
-            bal_row = await conn.fetchrow(
-                "SELECT cash, balance FROM account_balances WHERE account_name = 'Robinhood'"
-            )
-        if bal_row:
-            cash = float(bal_row["cash"] or 0)
+            if account:
+                # Find matching account balance row
+                bal_rows = await conn.fetch("SELECT account_name, cash, balance FROM account_balances")
+                for br in bal_rows:
+                    if _match_account_balance(account, br["account_name"]):
+                        cash = float(br["cash"] or 0)
+                        break
+            else:
+                # Default: sum all account cash balances
+                bal_rows = await conn.fetch("SELECT cash FROM account_balances")
+                cash = sum(float(br["cash"] or 0) for br in bal_rows)
     except Exception:
         pass
 

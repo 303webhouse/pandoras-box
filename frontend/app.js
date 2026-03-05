@@ -7452,6 +7452,12 @@ let closingPosition = null;
 let currentPrices = {};  // Cache of current prices for P&L calculation
 let priceUpdateInterval = null;
 let currentTradeType = 'equity';  // 'equity' or 'options'
+let activePositionsAccount = 'ALL';  // 'ALL', 'ROBINHOOD', or 'FIDELITY'
+
+function getSelectedAccount() {
+    const active = document.querySelector('#accountToggle .trade-type-btn.active');
+    return active ? active.dataset.account : 'ROBINHOOD';
+}
 
 function initPositionModals() {
     // Entry modal
@@ -7521,6 +7527,26 @@ function initPositionModals() {
     
     // Start price updates for P&L
     startPriceUpdates();
+
+    // Account tabs (All / RH / Fidelity)
+    document.querySelectorAll('.positions-tab').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.positions-tab').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            activePositionsAccount = btn.dataset.account;
+            renderPositionsEnhanced();
+            updatePositionsCount();
+            loadPortfolioSummary();
+        });
+    });
+
+    // Account toggle in signal acceptance modal
+    document.querySelectorAll('#accountToggle .trade-type-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('#accountToggle .trade-type-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+        });
+    });
 }
 
 function openPositionEntryModal(signal, card) {
@@ -7644,6 +7670,7 @@ async function confirmPositionEntry() {
                 stop_loss: signal.stop_loss,
                 target_1: signal.target_1,
                 target_2: signal.target_2,
+                account: getSelectedAccount(),
                 notes: `Accepted via Trade Ideas UI`
             })
         });
@@ -7903,6 +7930,7 @@ async function confirmOptionsPositionEntry() {
                 max_loss: maxLoss,
                 breakeven: breakeven,
                 thesis: thesis,
+                account: getSelectedAccount(),
                 notes: `Accepted via Trade Ideas UI (Options: ${strategy})`
             })
         });
@@ -7983,7 +8011,10 @@ async function loadOpenPositionsEnhanced() {
 
 async function loadPortfolioSummary() {
     try {
-        const response = await fetch(`${API_URL}/v2/positions/summary`);
+        const accountParam = activePositionsAccount !== 'ALL'
+            ? `?account=${activePositionsAccount}`
+            : '';
+        const response = await fetch(`${API_URL}/v2/positions/summary${accountParam}`);
         const data = await response.json();
         renderPortfolioSummaryWidget(data);
     } catch (error) {
@@ -8086,8 +8117,14 @@ const FIDELITY_RETIREMENT = 10341;     // 401A ($10,108) + 403B ($233)
 const FIDELITY_ACTIVE = 8223;          // Roth Brokerage
 
 function renderPortfolioSummaryWidget(summary) {
+    const accountLabel = activePositionsAccount === 'ALL' ? 'All Accounts'
+        : activePositionsAccount === 'ROBINHOOD' ? 'RH'
+        : 'Fidelity';
+
     const rhBalance = summary.account_balance || 0;
-    const combinedBalance = rhBalance + FIDELITY_RETIREMENT + FIDELITY_ACTIVE;
+    const combinedBalance = activePositionsAccount === 'ALL'
+        ? rhBalance + FIDELITY_RETIREMENT + FIDELITY_ACTIVE
+        : rhBalance;
 
     // Combined balance (extra large)
     const combinedEl = document.getElementById('portfolioCombinedBalance');
@@ -8172,7 +8209,12 @@ function showCashUpdateModal(currentCash) {
 function updatePositionsCount() {
     const countEl = document.getElementById('positionsCount');
     if (countEl) {
-        countEl.textContent = openPositions.length;
+        const count = activePositionsAccount === 'ALL'
+            ? openPositions.length
+            : openPositions.filter(p =>
+                (p.account || 'ROBINHOOD').toUpperCase() === activePositionsAccount
+            ).length;
+        countEl.textContent = count;
     }
 }
 
@@ -8180,13 +8222,20 @@ function renderPositionsEnhanced() {
     const container = document.getElementById('openPositions');
     if (!container) return;
 
-    if (!openPositions || openPositions.length === 0) {
+    // Filter by active account tab
+    const filteredPositions = activePositionsAccount === 'ALL'
+        ? openPositions
+        : openPositions.filter(p =>
+            (p.account || 'ROBINHOOD').toUpperCase() === activePositionsAccount
+        );
+
+    if (!filteredPositions || filteredPositions.length === 0) {
         container.innerHTML = '<p class="empty-state">No open positions</p>';
         return;
     }
 
     // Sort by DTE (soonest first), then by ticker
-    const sorted = [...openPositions].sort((a, b) => {
+    const sorted = [...filteredPositions].sort((a, b) => {
         const dteA = a.dte ?? 9999;
         const dteB = b.dte ?? 9999;
         if (dteA !== dteB) return dteA - dteB;
@@ -8709,6 +8758,13 @@ function openUnifiedPositionModal() {
                 </div>
                 <div class="modal-body">
                     <div class="form-row">
+                        <label>Account</label>
+                        <select id="upAccount">
+                            <option value="ROBINHOOD">Robinhood</option>
+                            <option value="FIDELITY">Fidelity</option>
+                        </select>
+                    </div>
+                    <div class="form-row">
                         <label>Ticker</label>
                         <input type="text" id="upTicker" placeholder="SPY" style="text-transform: uppercase;">
                     </div>
@@ -8789,6 +8845,7 @@ function openUnifiedPositionModal() {
     }
 
     // Clear form on each open
+    document.getElementById('upAccount').value = (activePositionsAccount !== 'ALL') ? activePositionsAccount : 'ROBINHOOD';
     document.getElementById('upTicker').value = '';
     document.getElementById('upStructure').value = 'put_credit_spread';
     document.getElementById('upLongStrike').value = '';
@@ -8873,6 +8930,7 @@ async function submitUnifiedPosition() {
         entry_price: entryPrice,
         quantity: parseInt(document.getElementById('upQuantity').value) || 1,
         source: 'MANUAL',
+        account: document.getElementById('upAccount').value,
     };
 
     const longStrike = parseFloat(document.getElementById('upLongStrike').value);
@@ -8929,6 +8987,10 @@ function openPositionEditModal(position) {
                 <div class="modal-body">
                     <div class="edit-position-info" id="editPositionInfo"></div>
                     <div class="form-row">
+                        <label>Account</label>
+                        <input type="text" id="editPositionAccount" readonly style="opacity: 0.6; cursor: not-allowed;">
+                    </div>
+                    <div class="form-row">
                         <label>Stop Loss</label>
                         <input type="number" id="editStopLoss" step="0.01">
                     </div>
@@ -8974,6 +9036,7 @@ function openPositionEditModal(position) {
 
     document.getElementById('editModalTitle').textContent = `Edit ${position.ticker}`;
     document.getElementById('editStopLoss').value = position.stop_loss || '';
+    document.getElementById('editPositionAccount').value = position.account || 'ROBINHOOD';
     document.getElementById('editTarget').value = position.target_1 || '';
     document.getElementById('editCurrentPrice').value = position.current_price || '';
     document.getElementById('editNotes').value = position.notes || '';
@@ -9053,6 +9116,28 @@ function openPositionEditModal(position) {
     modal.classList.add('active');
 }
 
+// Auto-scale chart tab font/padding so all tickers fit in one row
+function autoScaleChartTabs() {
+    const container = document.getElementById('chartTabs');
+    if (!container) return;
+    const tabs = container.querySelectorAll('.chart-tab');
+    const count = tabs.length;
+    let fontSize, padding;
+    if (count <= 5) {
+        fontSize = '14px'; padding = '12px 24px';
+    } else if (count <= 8) {
+        fontSize = '12px'; padding = '10px 14px';
+    } else if (count <= 12) {
+        fontSize = '11px'; padding = '8px 10px';
+    } else {
+        fontSize = '10px'; padding = '6px 7px';
+    }
+    tabs.forEach(t => {
+        t.style.fontSize = fontSize;
+        t.style.padding = padding;
+    });
+}
+
 // Chart tabs for open positions
 function addPositionChartTab(ticker) {
     const tabsContainer = document.getElementById('chartTabs');
@@ -9069,6 +9154,7 @@ function addPositionChartTab(ticker) {
     tab.addEventListener('click', () => changeChartSymbol(ticker));
     
     tabsContainer.appendChild(tab);
+    autoScaleChartTabs();
 }
 
 function removePositionChartTab(ticker) {
@@ -9085,6 +9171,7 @@ function removePositionChartTab(ticker) {
     const tab = tabsContainer.querySelector(`[data-symbol="${ticker}"]`);
     if (tab && tab.classList.contains('position-tab')) {
         tab.remove();
+        autoScaleChartTabs();
     }
 }
 
@@ -9093,6 +9180,7 @@ function updatePositionChartTabs() {
     openPositions.forEach(pos => {
         addPositionChartTab(pos.ticker);
     });
+    autoScaleChartTabs();
 }
 
 // Price updates for real-time P&L
