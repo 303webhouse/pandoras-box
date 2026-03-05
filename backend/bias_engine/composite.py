@@ -844,17 +844,26 @@ async def compute_composite() -> CompositeResult:
                 scoring_mod = 1.0 + (scoring_mod - 1.0) * decay_fade
 
             # Apply scoring modifier to composite score.
-            # For bearish CB events (scoring_mod > 1.0): multiply to amplify bearishness.
-            # For bullish CB events (scoring_mod < 1.0 won't happen, but spy_up_2pct
-            # uses scoring_mod=1.1 to boost bullishness): use additive offset so
-            # negative scores move toward zero instead of becoming more negative.
+            # For bearish CB events (vix_extreme, spy_down_2pct, etc.):
+            #   - If score is positive (bullish despite selloff): dampen toward zero
+            #   - If score is negative (already bearish): AMPLIFY the bearishness
+            # For bullish CB events (spy_up_2pct, spy_recovery):
+            #   - Additive offset toward bullish direction
             if scoring_mod != 1.0:
                 is_bullish_trigger = trigger in ("spy_up_2pct", "spy_recovery")
                 if is_bullish_trigger:
                     # Additive: shift score toward bullish direction
                     adjusted_score = _clamp_score(adjusted_score + (scoring_mod - 1.0) * 0.5)
                 else:
-                    adjusted_score = _clamp_score(adjusted_score * scoring_mod)
+                    # Bearish CB trigger
+                    if adjusted_score > 0:
+                        # Score is bullish despite bearish event — dampen it
+                        adjusted_score = _clamp_score(adjusted_score * scoring_mod)
+                    else:
+                        # Score is already bearish — amplify it
+                        # scoring_mod=0.7 → amplifier=1.3 (mirror the dampening)
+                        amplifier = 2.0 - scoring_mod
+                        adjusted_score = _clamp_score(adjusted_score * amplifier)
                 bias_level, bias_numeric = score_to_bias(adjusted_score)
 
             # Enforce bias cap (max bullishness allowed)
@@ -865,9 +874,11 @@ async def compute_composite() -> CompositeResult:
                     bias_level = [k for k, v in BIAS_NUMERIC.items() if v == cap_num][0]
 
             # Enforce bias floor (min bearishness enforced)
+            # Floor = URSA_MINOR (2) means reading can't be LESS bearish (higher number)
+            # e.g., NEUTRAL (3) > floor (2) → clamp down to floor
             if bias_floor_name:
                 floor_num = _cb_level_to_numeric(bias_floor_name)
-                if floor_num and bias_numeric < floor_num:
+                if floor_num and bias_numeric > floor_num:
                     bias_numeric = floor_num
                     bias_level = [k for k, v in BIAS_NUMERIC.items() if v == floor_num][0]
 
