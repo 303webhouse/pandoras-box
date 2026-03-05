@@ -21,7 +21,6 @@ logger = logging.getLogger(__name__)
 # — VPS collector was producing NaN data from index-misaligned DataFrames.
 # Railway's compute_score() functions handle alignment correctly.
 PIVOT_OWNED_FACTORS = {
-    "vix_term",
     "tick_breadth",
     "excess_cape",
     "savita",

@@ -23,9 +23,10 @@ except ImportError:
     from backend.bias_engine.composite import FactorReading
     from backend.bias_engine.factor_utils import score_to_signal, get_latest_price, neutral_reading
 
-# Normalization baseline — typical SPY GEX magnitude in dollars.
+# Normalization baseline — adjusted for Polygon Starter plan which typically
+# returns 100-300 contracts with greeks (vs thousands on full-data plans).
 # Dividing raw GEX by this puts the value in a [-1, 1]-ish range.
-GEX_SCALE_FACTOR = 5_000_000_000  # $5B
+GEX_SCALE_FACTOR = 2_000_000_000  # $2B (was $5B — too large for limited contract set)
 
 
 async def compute_score() -> Optional[FactorReading]:
@@ -86,11 +87,11 @@ async def compute_score() -> Optional[FactorReading]:
 
     if normalized > 0.5:
         label = "strong compression (dealers long gamma)"
-    elif normalized > 0.1:
+    elif normalized > 0.05:
         label = "mild compression"
-    elif normalized > -0.1:
+    elif normalized > -0.05:
         label = "neutral/transition"
-    elif normalized > -0.5:
+    elif normalized > -0.2:
         label = "mild amplification"
     else:
         label = "strong amplification (dealers short gamma)"
@@ -122,16 +123,20 @@ def _score_gex(normalized: float) -> float:
 
     Positive GEX = compression = bullish (dealers dampen moves).
     Negative GEX = amplification = bearish skew (dealers amplify moves).
+
+    Bands tightened for Polygon Starter plan contract set (~150 contracts).
     """
-    if normalized > 0.5:
-        return 0.4    # Strong compression — bullish dampening
+    if normalized > 0.4:
+        return 0.5    # Strong compression — significant dampening
     elif normalized > 0.2:
-        return 0.2    # Moderate compression
-    elif normalized > -0.1:
+        return 0.3    # Moderate compression
+    elif normalized > 0.05:
+        return 0.1    # Mild compression
+    elif normalized > -0.05:
         return 0.0    # Neutral / transition zone
+    elif normalized > -0.15:
+        return -0.2   # Mild amplification — dealers slightly short gamma
     elif normalized > -0.3:
-        return -0.2   # Mild amplification
-    elif normalized > -0.5:
         return -0.3   # Moderate amplification
     else:
         return -0.5   # Strong amplification — bearish volatility risk
