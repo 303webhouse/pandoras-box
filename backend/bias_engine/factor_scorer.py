@@ -15,14 +15,14 @@ from bias_engine.anomaly_alerts import send_alert
 
 logger = logging.getLogger(__name__)
 
-# Pivot collector is the single source of truth for these factors.
-# Backend scorer intentionally does not write these keys.
+# Factors scored by external sources (VPS collector, TradingView webhooks).
+# Backend scorer skips these to avoid overwriting fresher data.
+# NOTE: credit_spreads, market_breadth, sector_rotation removed 2026-03-05
+# — VPS collector was producing NaN data from index-misaligned DataFrames.
+# Railway's compute_score() functions handle alignment correctly.
 PIVOT_OWNED_FACTORS = {
-    "credit_spreads",
-    "market_breadth",
     "vix_term",
     "tick_breadth",
-    "sector_rotation",
     "excess_cape",
     "savita",
 }

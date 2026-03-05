@@ -189,7 +189,15 @@ async def compute_breadth_score() -> Optional[FactorReading]:
     if "close" not in rsp.columns or "close" not in spy.columns:
         return None
 
-    ratio = (rsp["close"] / spy["close"]).dropna()
+    # Align indices before dividing to prevent NaN from mismatched dates
+    rsp_close = rsp["close"].dropna().reset_index(drop=True)
+    spy_close = spy["close"].dropna().reset_index(drop=True)
+    min_len = min(len(rsp_close), len(spy_close))
+    if min_len < 20:
+        return None
+    rsp_close = rsp_close.iloc[-min_len:]
+    spy_close = spy_close.iloc[-min_len:]
+    ratio = (rsp_close / spy_close).dropna()
     if len(ratio) < 20:
         return None
 

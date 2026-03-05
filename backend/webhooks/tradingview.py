@@ -64,11 +64,11 @@ async def _recompute_composite_background(factor_name: str) -> None:
         from bias_engine.composite import compute_composite
         composite = await compute_composite()
         logger.info(
-            "\U0001f504 Background composite recomputed after %s: %s (%+.2f)",
+            "🔄 Background composite recomputed after %s: %s (%+.2f)",
             factor_name, composite.bias_level, composite.composite_score,
         )
     except Exception as e:
-        logger.error("\U0001f504 Background composite recomputation failed after %s: %s", factor_name, e)
+        logger.error("🔄 Background composite recomputation failed after %s: %s", factor_name, e)
 
 
 async def _write_signal_outcome(signal_data: dict) -> None:
@@ -143,7 +143,7 @@ async def receive_tradingview_alert(alert: TradingViewAlert):
     start_time = datetime.now()
     strategy_lower = alert.strategy.lower()
     
-    logger.info(f"\U0001f4e8 Webhook received: {alert.ticker} {alert.direction} ({alert.strategy})")
+    logger.info(f"📨 Webhook received: {alert.ticker} {alert.direction} ({alert.strategy})")
     
     try:
         # Route to appropriate strategy handler
@@ -225,7 +225,7 @@ async def process_scout_signal(alert: TradingViewAlert, start_time: datetime):
     ))
 
     logger.info(
-        f"\u26a0\ufe0f Scout alert accepted: {alert.ticker} {alert.direction} "
+        f"⚠️ Scout alert accepted: {alert.ticker} {alert.direction} "
         f"(RSI: {alert.rsi}, RVOL: {alert.rvol}, "
         f"entry: {signal_data.get('entry_price')}, stop: {signal_data.get('stop_loss')}, tp1: {signal_data.get('target_1')})"
     )
@@ -246,8 +246,8 @@ async def process_holy_grail_signal(alert: TradingViewAlert, start_time: datetim
     confirmation candle back in trend direction. Full committee review signals.
 
     Timeframe affects signal type:
-    - 1H  -> HOLY_GRAIL_1H  (higher base score \u2014 cleaner pullbacks)
-    - 15m -> HOLY_GRAIL_15M (lower base score \u2014 noisier)
+    - 1H  -> HOLY_GRAIL_1H  (higher base score — cleaner pullbacks)
+    - 15m -> HOLY_GRAIL_15M (lower base score — noisier)
     """
 
     # Determine signal type based on timeframe
@@ -291,7 +291,7 @@ async def process_holy_grail_signal(alert: TradingViewAlert, start_time: datetim
     # Fire-and-forget: return 200 immediately, process in background
     asyncio.ensure_future(process_signal_unified(signal_data, source="tradingview"))
 
-    logger.info(f"\U0001f4e8 Holy Grail accepted: {alert.ticker} {signal_type} ({alert.timeframe})")
+    logger.info(f"📨 Holy Grail accepted: {alert.ticker} {signal_type} ({alert.timeframe})")
 
     return {
         "status": "accepted",
@@ -303,7 +303,7 @@ async def process_holy_grail_signal(alert: TradingViewAlert, start_time: datetim
 async def process_exhaustion_signal(alert: TradingViewAlert, start_time: datetime):
     """Process Exhaustion strategy signals with BTC macro confluence check"""
     
-    # Validate exhaustion signal (keep sync \u2014 fast, no I/O)
+    # Validate exhaustion signal (keep sync — fast, no I/O)
     is_valid, validation_details = await validate_exhaustion_signal(alert.dict())
     
     if not is_valid:
@@ -344,7 +344,7 @@ async def process_exhaustion_signal(alert: TradingViewAlert, start_time: datetim
     # Fire-and-forget: return 200 immediately, process in background
     asyncio.ensure_future(process_signal_unified(signal_data, source="tradingview"))
 
-    logger.info(f"\U0001f4e8 Exhaustion accepted: {alert.ticker} {classification['signal_type']}")
+    logger.info(f"📨 Exhaustion accepted: {alert.ticker} {classification['signal_type']}")
 
     return {
         "status": "accepted",
@@ -393,7 +393,7 @@ async def process_sniper_signal(alert: TradingViewAlert, start_time: datetime):
     # Fire-and-forget: return 200 immediately, process in background
     asyncio.ensure_future(process_signal_unified(signal_data, source="tradingview"))
 
-    logger.info(f"\U0001f4e8 Sniper accepted: {alert.ticker} {signal_type}")
+    logger.info(f"📨 Sniper accepted: {alert.ticker} {signal_type}")
 
     return {
         "status": "accepted",
@@ -405,7 +405,7 @@ async def process_sniper_signal(alert: TradingViewAlert, start_time: datetime):
 async def process_triple_line_signal(alert: TradingViewAlert, start_time: datetime):
     """Process Triple Line strategy signals (original handler)"""
     
-    # Validate strategy setup (keep sync \u2014 fast, no heavy I/O)
+    # Validate strategy setup (keep sync — fast, no heavy I/O)
     is_valid, validation_details = await validate_triple_line_signal(alert.dict())
     
     if not is_valid:
@@ -459,7 +459,7 @@ async def process_triple_line_signal(alert: TradingViewAlert, start_time: dateti
     # Fire-and-forget: return 200 immediately, process in background
     asyncio.ensure_future(process_signal_unified(signal_data, source="tradingview"))
 
-    logger.info(f"\U0001f4e8 Triple Line accepted: {alert.ticker} {signal_type}")
+    logger.info(f"📨 Triple Line accepted: {alert.ticker} {signal_type}")
 
     return {
         "status": "accepted",
@@ -505,7 +505,7 @@ async def process_generic_signal(alert: TradingViewAlert, start_time: datetime):
     # Fire-and-forget: return 200 immediately, process in background
     asyncio.ensure_future(process_signal_unified(signal_data, source="tradingview"))
 
-    logger.info(f"\U0001f4e8 Generic signal accepted: {alert.ticker} {signal_type}")
+    logger.info(f"📨 Generic signal accepted: {alert.ticker} {signal_type}")
 
     return {
         "status": "accepted",
@@ -578,7 +578,7 @@ async def apply_signal_scoring(signal_data: dict) -> dict:
         except Exception as comp_err:
             logger.warning(f"Composite bias unavailable, falling back to old system: {comp_err}")
         
-        # Build bias data \u2014 prefer composite, fall back to old voting system
+        # Build bias data — prefer composite, fall back to old voting system
         if composite_score is not None:
             current_bias = {"composite_score": composite_score}
         else:
@@ -617,7 +617,7 @@ async def apply_signal_scoring(signal_data: dict) -> dict:
                         "restored_multiplier": 1.0,
                     }
                     bias_alignment = "CONTRARIAN_QUALIFIED"
-                    logger.info(f"\U0001f504 Contrarian restored: {signal_data.get('ticker')} {direction} (reasons: {cq['reasons']})")
+                    logger.info(f"🔄 Contrarian restored: {signal_data.get('ticker')} {direction} (reasons: {cq['reasons']})")
             except Exception as cq_err:
                 logger.warning(f"Contrarian qualification check failed: {cq_err}")
         
@@ -663,7 +663,7 @@ async def apply_signal_scoring(signal_data: dict) -> dict:
             signal_data["confidence"] = "LOW"
             signal_data["priority"] = "LOW"
         
-        logger.info(f"\U0001f4ca Signal scored: {signal_data.get('ticker')} = {score} ({bias_alignment})")
+        logger.info(f"📊 Signal scored: {signal_data.get('ticker')} = {score} ({bias_alignment})")
         
         # Update score in database
         try:
@@ -714,7 +714,7 @@ async def receive_breadth_data(payload: BreadthPayload):
 
     result = await store_breadth_data(uvol=payload.uvol, dvol=payload.dvol)
 
-    # Score the factor and store reading (fast \u2014 Redis only)
+    # Score the factor and store reading (fast — Redis only)
     try:
         reading = await compute_breadth_score()
         if reading:
@@ -760,7 +760,7 @@ async def receive_tick_data(payload: TickDataPayload):
     """
     from bias_filters.tick_breadth import store_tick_data, compute_score as compute_tick_score
     
-    logger.info(f"\U0001f4ca TICK webhook received: high={payload.tick_high}, low={payload.tick_low}, close={payload.tick_close}, avg={payload.tick_avg}")
+    logger.info(f"📊 TICK webhook received: high={payload.tick_high}, low={payload.tick_low}, close={payload.tick_close}, avg={payload.tick_avg}")
     
     result = await store_tick_data(
         tick_high=payload.tick_high,
@@ -770,7 +770,7 @@ async def receive_tick_data(payload: TickDataPayload):
         tick_avg=payload.tick_avg,
     )
     
-    # Score the factor and store reading (fast \u2014 Redis only)
+    # Score the factor and store reading (fast — Redis only)
     try:
         reading = await compute_tick_score()
         if reading:
@@ -781,9 +781,9 @@ async def receive_tick_data(payload: TickDataPayload):
             # Defer heavy composite recomputation to background
             asyncio.ensure_future(_recompute_composite_background("tick_breadth"))
         else:
-            logger.warning("\U0001f4ca TICK factor scoring returned None")
+            logger.warning("📊 TICK factor scoring returned None")
     except Exception as e:
-        logger.error(f"\U0001f4ca TICK factor scoring failed (data still stored): {e}")
+        logger.error(f"📊 TICK factor scoring failed (data still stored): {e}")
     
     return result
 
