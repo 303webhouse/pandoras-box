@@ -395,9 +395,14 @@ async def portfolio_summary():
     # Calculate summary
     total_max_loss = sum(p.get("max_loss") or 0 for p in positions)
     # Position market value = cost_basis + unrealized_pnl (what positions are currently worth)
+    # Fallback: if cost_basis is null, compute from entry_price * quantity * 100
     total_position_value = 0.0
     for p in positions:
-        cost = p.get("cost_basis") or 0
+        cost = p.get("cost_basis")
+        if cost is None:
+            ep = p.get("entry_price") or 0
+            qty = p.get("quantity") or 0
+            cost = ep * qty * 100
         pnl = p.get("unrealized_pnl") or 0
         total_position_value += cost + pnl
     total_position_value = round(total_position_value, 2)
