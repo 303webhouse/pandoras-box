@@ -952,11 +952,7 @@ function initEventListeners() {
             changeChartSymbol(e.target.dataset.symbol);
         });
     });
-    
-    
-    // Hybrid Scanner
-    initHybridScanner();
-    
+
     // Savita Update Modal
     initSavitaUpdateModal();
 
@@ -5810,291 +5806,6 @@ function createCtaCard(signal) {
 }
 
 
-// ==========================================
-// HYBRID MARKET SCANNER (Batch Scan Only)
-// ==========================================
-
-function initHybridScanner() {
-    const scanBtn = document.getElementById('runHybridScanBtn');
-    
-    if (scanBtn) {
-        scanBtn.addEventListener('click', runHybridScan);
-    }
-}
-
-async function analyzeHybridTicker(ticker) {
-    // Show loading state
-    updateHybridGauges({
-        technical: { signal: 'Loading...', loading: true },
-        analyst: { signal: 'Loading...', loading: true },
-        combined: { signal: 'Loading...', loading: true }
-    });
-    
-    try {
-        const response = await fetch(`${API_URL}/hybrid/combined/${ticker}`);
-        const data = await response.json();
-        
-        if (data.status === 'success') {
-            // API returns data at root level, not nested under 'data'
-            renderHybridAnalysis(data);
-        } else {
-            updateHybridGauges({
-                technical: { signal: 'Error', error: true },
-                analyst: { signal: 'Error', error: true },
-                combined: { signal: data.message || data.detail || 'Error', error: true }
-            });
-        }
-    } catch (error) {
-        console.error('Hybrid analysis error:', error);
-        updateHybridGauges({
-            technical: { signal: 'Error', error: true },
-            analyst: { signal: 'Error', error: true },
-            combined: { signal: 'Failed to fetch', error: true }
-        });
-    }
-}
-
-function renderHybridAnalysis(data) {
-    // Use the actual API response structure
-    const tech = data.technical_gauge || {};
-    const analyst = data.analyst_gauge || {};
-    const combined = data.combined || {};
-    const meta = data.metadata || {};
-    const price = data.price || {};
-    
-    // Technical Gauge
-    const techSignal = document.getElementById('techSignal');
-    const techScoreEl = document.getElementById('techScore');
-    const techDetails = document.getElementById('techDetails');
-    
-    if (techSignal) {
-        const signal = tech.signal || '--';
-        techSignal.textContent = signal.replace('_', ' ');
-        techSignal.className = 'gauge-signal ' + getSignalClass(signal);
-    }
-    
-    if (techScoreEl) {
-        const score = tech.score || {};
-        const buyCount = score.buy || 0;
-        const sellCount = score.sell || 0;
-        techScoreEl.innerHTML = `<span class="buy-count">${buyCount} Buy</span> / <span class="sell-count">${sellCount} Sell</span>`;
-    }
-    
-    if (techDetails) {
-        const oscSignal = tech.oscillators_summary || '--';
-        const maSignal = tech.ma_summary || '--';
-        techDetails.innerHTML = `
-            <div>Oscillators: <span>${oscSignal?.replace('_', ' ') || '--'}</span></div>
-            <div>Moving Avgs: <span>${maSignal?.replace('_', ' ') || '--'}</span></div>
-        `;
-    }
-    
-    // Analyst Gauge
-    const analystSignal = document.getElementById('analystSignal');
-    const analystScoreEl = document.getElementById('analystScore');
-    const analystDetails = document.getElementById('analystDetails');
-    
-    if (analystSignal) {
-        const rec = analyst.consensus || '--';
-        const displayRec = rec.toUpperCase().replace('_', ' ');
-        analystSignal.textContent = displayRec;
-        analystSignal.className = 'gauge-signal ' + getAnalystClass(rec);
-    }
-    
-    if (analystScoreEl) {
-        const numAnalysts = analyst.num_analysts || '?';
-        analystScoreEl.innerHTML = `<span class="analyst-count">${numAnalysts} analysts</span>`;
-    }
-    
-    if (analystDetails) {
-        const targetPrice = analyst.price_target;
-        const upsidePct = analyst.upside_pct;
-        let upside = '--';
-        let upsideClass = '';
-        
-        if (upsidePct !== undefined && upsidePct !== null) {
-            upside = (upsidePct > 0 ? '+' : '') + upsidePct.toFixed(1) + '%';
-            upsideClass = upsidePct > 0 ? 'upside-positive' : 'upside-negative';
-        }
-        
-        analystDetails.innerHTML = `
-            <div>Price Target: <span>$${targetPrice?.toFixed(2) || '--'}</span></div>
-            <div>Upside: <span class="${upsideClass}">${upside}</span></div>
-        `;
-    }
-    
-    // Combined Gauge
-    const combinedSignal = document.getElementById('combinedSignal');
-    const combinedScoreEl = document.getElementById('combinedScore');
-    const tickerMeta = document.getElementById('tickerMeta');
-    
-    if (combinedSignal) {
-        const rec = combined.recommendation || 'NEUTRAL';
-        combinedSignal.textContent = rec.replace('_', ' ');
-        combinedSignal.className = 'gauge-signal ' + getSignalClass(rec);
-    }
-    
-    if (combinedScoreEl) {
-        const score = combined.score || '--';
-        combinedScoreEl.textContent = `Score: ${score}/5`;
-    }
-    
-    if (tickerMeta) {
-        const name = meta.name || data.ticker || '--';
-        const sector = meta.sector || '--';
-        tickerMeta.innerHTML = `
-            <div id="tickerName">${name}</div>
-            <div id="tickerSector">${sector}</div>
-        `;
-    }
-}
-
-function updateHybridGauges(state) {
-    // Technical
-    const techSignal = document.getElementById('techSignal');
-    if (techSignal) {
-        techSignal.textContent = state.technical?.signal || '--';
-        techSignal.className = state.technical?.error ? 'gauge-signal error' : 'gauge-signal';
-    }
-    
-    // Analyst
-    const analystSignal = document.getElementById('analystSignal');
-    if (analystSignal) {
-        analystSignal.textContent = state.analyst?.signal || '--';
-        analystSignal.className = state.analyst?.error ? 'gauge-signal error' : 'gauge-signal';
-    }
-    
-    // Combined
-    const combinedSignal = document.getElementById('combinedSignal');
-    if (combinedSignal) {
-        combinedSignal.textContent = state.combined?.signal || '--';
-        combinedSignal.className = state.combined?.error ? 'gauge-signal error' : 'gauge-signal';
-    }
-}
-
-function getSignalClass(signal) {
-    const s = (signal || '').toLowerCase();
-    if (s.includes('strong buy')) return 'strong-buy';
-    if (s.includes('buy')) return 'buy';
-    if (s.includes('strong sell')) return 'strong-sell';
-    if (s.includes('sell')) return 'sell';
-    return 'neutral';
-}
-
-function getAnalystClass(rec) {
-    const r = (rec || '').toLowerCase();
-    if (r === 'strong_buy' || r === 'strongbuy') return 'strong-buy';
-    if (r.includes('buy')) return 'buy';
-    if (r === 'strong_sell' || r === 'strongsell') return 'strong-sell';
-    if (r.includes('sell') || r.includes('under')) return 'sell';
-    return 'neutral';
-}
-
-function calculateHybridScore(tech, fund) {
-    let score = 3; // Neutral baseline
-    
-    const techSig = (tech.summary_signal || '').toLowerCase();
-    const analystRec = (fund.recommendation_key || '').toLowerCase();
-    
-    // Technical contribution
-    if (techSig.includes('strong buy')) score += 1;
-    else if (techSig.includes('buy')) score += 0.5;
-    else if (techSig.includes('strong sell')) score -= 1;
-    else if (techSig.includes('sell')) score -= 0.5;
-    
-    // Analyst contribution
-    if (analystRec === 'strong_buy' || analystRec === 'strongbuy') score += 1;
-    else if (analystRec.includes('buy')) score += 0.5;
-    else if (analystRec === 'strong_sell' || analystRec === 'strongsell') score -= 1;
-    else if (analystRec.includes('sell') || analystRec.includes('under')) score -= 0.5;
-    
-    return Math.max(1, Math.min(5, Math.round(score)));
-}
-
-async function runHybridScan() {
-    const btn = document.getElementById('runHybridScanBtn');
-    const resultsDiv = document.getElementById('hybridResults');
-    const tableBody = document.getElementById('hybridTableBody');
-    
-    if (btn) {
-        btn.disabled = true;
-        btn.textContent = 'Scanning...';
-    }
-    
-    try {
-        // Scan a mix of popular tickers
-        const tickers = 'NVDA,AAPL,MSFT,GOOGL,META,AMZN,TSLA,AMD,NFLX,SPY';
-        const response = await fetch(`${API_URL}/hybrid/scan?tickers=${tickers}&limit=10`);
-        const data = await response.json();
-        
-        // API returns results directly or under data.results
-        const results = data.results || data.data?.results;
-        if (data.status === 'success' && results) {
-            renderHybridTable(results);
-            if (resultsDiv) resultsDiv.style.display = 'block';
-        } else {
-            if (tableBody) tableBody.innerHTML = '<tr><td colspan="6" style="text-align:center">No results</td></tr>';
-        }
-        
-    } catch (error) {
-        console.error('Hybrid scan error:', error);
-        if (tableBody) tableBody.innerHTML = '<tr><td colspan="6" style="text-align:center">Scan failed</td></tr>';
-    } finally {
-        if (btn) {
-            btn.disabled = false;
-            btn.textContent = 'Scan Top 10';
-        }
-    }
-}
-
-function renderHybridTable(results) {
-    const tableBody = document.getElementById('hybridTableBody');
-    if (!tableBody) return;
-    
-    if (!results || results.length === 0) {
-        tableBody.innerHTML = '<tr><td colspan="6" style="text-align:center">No results</td></tr>';
-        return;
-    }
-    
-    tableBody.innerHTML = results.map(item => {
-        // Use the actual API response structure
-        const tech = item.technical_gauge || item.technical || {};
-        const analyst = item.analyst_gauge || item.fundamental || {};
-        const meta = item.metadata || {};
-        
-        const techSignal = (tech.signal || '--').replace('_', ' ');
-        const techClass = getSignalClass(tech.signal);
-        
-        const analystRec = (analyst.consensus || '--').toUpperCase().replace('_', ' ');
-        const analystClass = getAnalystClass(analyst.consensus);
-        
-        // Calculate upside from API response
-        let upside = '--';
-        let upsideClass = '';
-        if (analyst.upside_pct !== undefined && analyst.upside_pct !== null) {
-            upside = (analyst.upside_pct > 0 ? '+' : '') + analyst.upside_pct.toFixed(1) + '%';
-            upsideClass = analyst.upside_pct > 0 ? 'upside-positive' : 'upside-negative';
-        }
-        
-        // Calculate strength (buy - sell) from score
-        const score = tech.score || {};
-        const strength = (score.buy || 0) - (score.sell || 0);
-        const strengthStr = strength > 0 ? '+' + strength : String(strength);
-        
-        const sector = meta.sector || '--';
-        
-        return `
-            <tr>
-                <td><strong style="cursor:pointer" onclick="changeChartSymbol('${item.ticker}')">${item.ticker}</strong></td>
-                <td class="signal-${techClass.replace(' ', '-')}">${techSignal}</td>
-                <td>${strengthStr}</td>
-                <td class="signal-${analystClass.replace(' ', '-')}">${analystRec}</td>
-                <td class="${upsideClass}">${upside}</td>
-                <td>${sector}</td>
-            </tr>
-        `;
-    }).join('');
-}
 
 // Enhanced Analyzer with Context Cards
 async function analyzeTickerEnhanced(ticker) {
@@ -6782,46 +6493,25 @@ function formatUtcRangeToDenver(utcRange) {
 
 
 // ==========================================
-// OPTIONS FLOW (Unusual Whales)
+// OPTIONS FLOW (Compact — in Headlines card)
 // ==========================================
 
 let flowHotTickers = [];
 let flowRecentAlerts = [];
 
 function initOptionsFlow() {
-    const refreshBtn = document.getElementById('refreshFlowBtn');
-    
-    if (refreshBtn) {
-        refreshBtn.addEventListener('click', loadFlowData);
-    }
-    
-    // Check connection status and load data
-    checkFlowStatus();
-    loadFlowData();
-}
+    // Set up headlines card tab switching
+    document.querySelectorAll('.headlines-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            document.querySelectorAll('.headlines-tab').forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            const target = tab.dataset.tab;
+            document.getElementById('flowTabContent').style.display = target === 'flow' ? '' : 'none';
+            document.getElementById('headlinesTabContent').style.display = target === 'headlines' ? '' : 'none';
+        });
+    });
 
-async function checkFlowStatus() {
-    const statusEl = document.getElementById('flowStatus');
-    if (!statusEl) return;
-    
-    try {
-        const response = await fetch(`${API_URL}/flow/status`);
-        const data = await response.json();
-        
-        if (data.configured && data.source === 'discord_bot') {
-            statusEl.textContent = `Live (${data.active_tickers} tickers)`;
-            statusEl.classList.add('connected');
-        } else if (data.configured) {
-            statusEl.textContent = 'Connected';
-            statusEl.classList.add('connected');
-        } else {
-            statusEl.textContent = 'Manual Mode';
-            statusEl.classList.remove('connected');
-        }
-    } catch (error) {
-        statusEl.textContent = 'Offline';
-        statusEl.classList.remove('connected');
-    }
+    loadFlowData();
 }
 
 async function loadFlowData() {
@@ -6835,419 +6525,76 @@ async function loadHotTickers() {
     try {
         const response = await fetch(`${API_URL}/flow/hot`);
         const data = await response.json();
-        
         flowHotTickers = data.tickers || [];
-        renderHotTickers();
+        renderFlowCompact();
     } catch (error) {
         console.error('Error loading hot tickers:', error);
     }
-}
-
-function renderHotTickers() {
-    const container = document.getElementById('flowHotList');
-    if (!container) return;
-    
-    if (flowHotTickers.length === 0) {
-        container.innerHTML = '<p class="empty-state">No flow data yet - add manually or connect Unusual Whales</p>';
-        return;
-    }
-    
-    container.innerHTML = flowHotTickers.map(ticker => {
-        const premium = ticker.total_premium || 0;
-        const premiumStr = premium >= 1000000 
-            ? `$${(premium / 1000000).toFixed(1)}M` 
-            : `$${(premium / 1000).toFixed(0)}K`;
-        const score = ticker.unusualness_score ? Math.round(ticker.unusualness_score) : null;
-        const alertCount = ticker.alert_count || ticker.unusual_count || 0;
-        const callPrem = ticker.call_premium || 0;
-        const putPrem = ticker.put_premium || 0;
-        const dte = ticker.avg_dte ? `${Math.round(ticker.avg_dte)}d` : '';
-        
-        return `
-            <div class="flow-hot-card ${ticker.sentiment}" data-ticker="${ticker.ticker}">
-                <div class="flow-hot-top">
-                    <div class="flow-hot-ticker">${ticker.ticker}</div>
-                    ${score ? `<div class="flow-hot-score">${score}</div>` : ''}
-                </div>
-                <div class="flow-hot-sentiment ${ticker.sentiment}">${ticker.sentiment}</div>
-                <div class="flow-hot-premium">${premiumStr}</div>
-                <div class="flow-hot-details">
-                    ${alertCount ? `<span class="flow-hot-count">${alertCount} alert${alertCount > 1 ? 's' : ''}</span>` : ''}
-                    ${dte ? `<span class="flow-hot-dte">${dte}</span>` : ''}
-                </div>
-                ${(callPrem || putPrem) ? `
-                    <div class="flow-hot-breakdown">
-                        <span class="flow-calls">C: $${(callPrem / 1000).toFixed(0)}K</span>
-                        <span class="flow-puts">P: $${(putPrem / 1000).toFixed(0)}K</span>
-                    </div>
-                ` : ''}
-            </div>
-        `;
-    }).join('');
-    
-    // Click to view on chart
-    container.querySelectorAll('.flow-hot-card').forEach(card => {
-        card.addEventListener('click', () => {
-            changeChartSymbol(card.dataset.ticker);
-        });
-    });
 }
 
 async function loadRecentAlerts() {
     try {
         const response = await fetch(`${API_URL}/flow/recent?limit=10`);
         const data = await response.json();
-        
         flowRecentAlerts = data.alerts || [];
-        renderRecentAlerts();
+        renderFlowCompact();
     } catch (error) {
         console.error('Error loading recent alerts:', error);
     }
 }
 
-function renderRecentAlerts() {
-    const container = document.getElementById('flowAlertsList');
+function renderFlowCompact() {
+    const container = document.getElementById('flowCompactList');
     if (!container) return;
-    
-    if (flowRecentAlerts.length === 0) {
-        container.innerHTML = '<p class="empty-state">No recent alerts</p>';
+
+    // Merge hot tickers and recent alerts into a single compact list
+    const items = [];
+
+    flowHotTickers.forEach(t => {
+        items.push({
+            ticker: t.ticker,
+            sentiment: t.sentiment || '',
+            type: 'HOT',
+            premium: t.total_premium || 0
+        });
+    });
+
+    flowRecentAlerts.forEach(a => {
+        if (items.some(i => i.ticker === a.ticker)) return;
+        items.push({
+            ticker: a.ticker,
+            sentiment: a.sentiment || '',
+            type: a.type || 'FLOW',
+            premium: a.premium || 0
+        });
+    });
+
+    if (items.length === 0) {
+        container.innerHTML = '<p class="empty-state" style="font-size:11px;padding:8px 0;">No flow data yet</p>';
         return;
     }
-    
-    container.innerHTML = flowRecentAlerts.map(alert => {
-        const time = new Date(alert.received_at || alert.timestamp).toLocaleTimeString();
-        const premium = alert.premium ? (alert.premium >= 1000000 
-            ? `$${(alert.premium / 1000000).toFixed(1)}M` 
-            : `$${(alert.premium / 1000).toFixed(0)}K`) : '-';
-        const score = alert.unusualness_score ? Math.round(alert.unusualness_score) : null;
-        const strike = alert.strike ? `$${alert.strike}` : '';
-        const expiry = alert.expiry || '';
-        const optType = alert.option_type || '';
-        const dte = alert.avg_dte ? `${Math.round(alert.avg_dte)}DTE` : '';
-        const count = alert.unusual_count || 0;
-        const source = alert.source === 'discord_bot' ? 'UW' : (alert.source === 'manual' ? 'Manual' : '');
-        
-        // Build detail chips
-        let details = [];
-        if (strike && optType) details.push(`${optType} ${strike}`);
-        else if (strike) details.push(strike);
-        if (expiry) details.push(expiry);
-        if (dte) details.push(dte);
-        if (count > 1) details.push(`${count}x`);
-        
+
+    container.innerHTML = items.map(item => {
+        const premStr = item.premium >= 1000000
+            ? `$${(item.premium / 1000000).toFixed(1)}M`
+            : item.premium >= 1000
+                ? `$${(item.premium / 1000).toFixed(0)}K`
+                : '';
         return `
-            <div class="flow-alert-item" data-ticker="${alert.ticker}">
-                <div class="flow-alert-left">
-                    <span class="flow-alert-ticker">${alert.ticker}</span>
-                    <span class="flow-alert-type ${alert.type || ''}">${alert.type || 'FLOW'}</span>
-                    <span class="flow-alert-sentiment ${alert.sentiment}">${alert.sentiment}</span>
-                    ${score ? `<span class="flow-alert-score">${score}</span>` : ''}
-                </div>
-                <div class="flow-alert-center">
-                    ${details.length > 0 ? details.map(d => `<span class="flow-alert-detail">${d}</span>`).join('') : ''}
-                </div>
-                <div class="flow-alert-right">
-                    <div class="flow-alert-premium">${premium}</div>
-                    <div class="flow-alert-meta">
-                        <span class="flow-alert-time">${time}</span>
-                        ${source ? `<span class="flow-alert-source">${source}</span>` : ''}
-                    </div>
-                </div>
+            <div class="flow-compact-item" data-ticker="${item.ticker}">
+                <span class="flow-compact-ticker">${item.ticker}</span>
+                <span class="flow-compact-sentiment ${item.sentiment}">${item.sentiment === 'BULLISH' ? 'BULL' : item.sentiment === 'BEARISH' ? 'BEAR' : ''}</span>
+                <span class="flow-compact-type">${item.type}</span>
+                ${premStr ? `<span class="flow-compact-premium">${premStr}</span>` : ''}
             </div>
         `;
     }).join('');
-    
-    // Click alert to view ticker on chart
-    container.querySelectorAll('.flow-alert-item').forEach(item => {
-        item.addEventListener('click', () => {
-            const ticker = item.dataset.ticker;
-            if (ticker) changeChartSymbol(ticker);
+
+    container.querySelectorAll('.flow-compact-item').forEach(el => {
+        el.addEventListener('click', () => {
+            if (el.dataset.ticker) changeChartSymbol(el.dataset.ticker);
         });
     });
-}
-
-// Flow Entry Modal State
-let flowModalData = {
-    ticker: '',
-    sentiment: null,
-    type: null,
-    premium: null,
-    expiry: null,
-    voloi: null,
-    repeat: null,
-    notes: ''
-};
-
-function initFlowModal() {
-    const openBtn = document.getElementById('openFlowModalBtn');
-    const closeBtn = document.getElementById('closeFlowModalBtn');
-    const cancelBtn = document.getElementById('cancelFlowBtn');
-    const submitBtn = document.getElementById('submitFlowBtn');
-    const overlay = document.getElementById('flowModalOverlay');
-    
-    if (openBtn) {
-        openBtn.addEventListener('click', openFlowModal);
-    }
-    
-    if (closeBtn) {
-        closeBtn.addEventListener('click', closeFlowModal);
-    }
-    
-    if (cancelBtn) {
-        cancelBtn.addEventListener('click', closeFlowModal);
-    }
-    
-    if (submitBtn) {
-        submitBtn.addEventListener('click', submitFlowFromModal);
-    }
-    
-    if (overlay) {
-        overlay.addEventListener('click', (e) => {
-            if (e.target === overlay) closeFlowModal();
-        });
-    }
-    
-    // Ticker input
-    const tickerInput = document.getElementById('modalFlowTicker');
-    if (tickerInput) {
-        tickerInput.addEventListener('input', (e) => {
-            flowModalData.ticker = e.target.value.toUpperCase();
-            calculateFlowScore();
-        });
-    }
-    
-    // Notes input
-    const notesInput = document.getElementById('modalFlowNotes');
-    if (notesInput) {
-        notesInput.addEventListener('input', (e) => {
-            flowModalData.notes = e.target.value;
-        });
-    }
-    
-    // Option buttons
-    document.querySelectorAll('.flow-option-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const field = btn.dataset.field;
-            const value = btn.dataset.value;
-            
-            // Remove selected from siblings
-            btn.parentElement.querySelectorAll('.flow-option-btn').forEach(b => {
-                b.classList.remove('selected');
-            });
-            
-            // Select this one
-            btn.classList.add('selected');
-            
-            // Update data
-            flowModalData[field] = value;
-            
-            // Recalculate score
-            calculateFlowScore();
-        });
-    });
-}
-
-function openFlowModal() {
-    // Reset data
-    flowModalData = {
-        ticker: '',
-        sentiment: null,
-        type: null,
-        premium: null,
-        expiry: null,
-        voloi: null,
-        repeat: null,
-        notes: ''
-    };
-    
-    // Reset UI
-    document.getElementById('modalFlowTicker').value = '';
-    document.getElementById('modalFlowNotes').value = '';
-    document.querySelectorAll('.flow-option-btn').forEach(btn => {
-        btn.classList.remove('selected');
-    });
-    
-    // Reset score display
-    updateScoreDisplay(0, 'Fill in details below', '');
-    updateVerdict('');
-    document.getElementById('submitFlowBtn').disabled = true;
-    
-    // Show modal
-    document.getElementById('flowModalOverlay').classList.add('active');
-}
-
-function closeFlowModal() {
-    document.getElementById('flowModalOverlay').classList.remove('active');
-}
-
-function calculateFlowScore() {
-    let score = 0;
-    let factors = [];
-    
-    // Premium scoring (0-30 points)
-    const premiumScores = {
-        '25000': 5,
-        '75000': 15,
-        '150000': 25,
-        '500000': 30
-    };
-    if (flowModalData.premium) {
-        score += premiumScores[flowModalData.premium] || 0;
-        if (flowModalData.premium === '500000') factors.push('Large premium');
-        else if (flowModalData.premium === '150000') factors.push('Good size');
-    }
-    
-    // Type scoring (0-25 points)
-    const typeScores = {
-        'SWEEP': 25,
-        'BLOCK': 20,
-        'UNUSUAL_VOLUME': 15,
-        'DARK_POOL': 10
-    };
-    if (flowModalData.type) {
-        score += typeScores[flowModalData.type] || 0;
-        if (flowModalData.type === 'SWEEP') factors.push('Aggressive sweep');
-    }
-    
-    // Expiry scoring (0-20 points) - sweet spot is 2-4 weeks
-    const expiryScores = {
-        '0dte': 5,      // Too short, could be gambling
-        'week': 15,     // Good
-        '2-4weeks': 20, // Optimal
-        'monthly': 10,  // OK
-        'leaps': 0      // Too far out
-    };
-    if (flowModalData.expiry) {
-        score += expiryScores[flowModalData.expiry] || 0;
-        if (flowModalData.expiry === '2-4weeks') factors.push('Optimal expiry');
-        if (flowModalData.expiry === 'leaps') factors.push('LEAPS (less urgent)');
-    }
-    
-    // Volume vs OI scoring (0-15 points)
-    const voloiScores = {
-        'low': 0,
-        'normal': 5,
-        'high': 12,
-        'extreme': 15
-    };
-    if (flowModalData.voloi) {
-        score += voloiScores[flowModalData.voloi] || 0;
-        if (flowModalData.voloi === 'extreme') factors.push('Extreme volume');
-    }
-    
-    // Repeat activity (0-10 points)
-    if (flowModalData.repeat === 'yes') {
-        score += 10;
-        factors.push('Repeat hits');
-    }
-    
-    // Determine label and class
-    let label, scoreClass, verdictClass, verdict;
-    
-    if (score >= 80) {
-        label = 'EXCEPTIONAL - Must track!';
-        scoreClass = 'exceptional';
-        verdictClass = 'must-add';
-        verdict = 'This is significant institutional activity. Definitely add this!';
-    } else if (score >= 60) {
-        label = 'HIGH - Worth tracking';
-        scoreClass = 'high';
-        verdictClass = 'add';
-        verdict = 'Notable flow that could move the stock. Add it!';
-    } else if (score >= 40) {
-        label = 'MEDIUM - Maybe track';
-        scoreClass = 'medium';
-        verdictClass = 'maybe';
-        verdict = 'Decent activity but not exceptional. Add if it matches your thesis.';
-    } else {
-        label = 'LOW - Probably skip';
-        scoreClass = 'low';
-        verdictClass = 'skip';
-        verdict = 'Likely noise. Skip unless you have other conviction.';
-    }
-    
-    // Add factors to label
-    if (factors.length > 0) {
-        label += '\n' + factors.join(' | ');
-    }
-    
-    updateScoreDisplay(score, label, scoreClass);
-    updateVerdict(verdict, verdictClass);
-    
-    // Enable submit if we have required fields and decent score
-    const hasRequired = flowModalData.ticker && flowModalData.sentiment && 
-                       flowModalData.type && flowModalData.premium;
-    document.getElementById('submitFlowBtn').disabled = !hasRequired;
-}
-
-function updateScoreDisplay(score, label, scoreClass) {
-    const circle = document.getElementById('flowScoreCircle');
-    const value = document.getElementById('flowScoreValue');
-    const labelEl = document.getElementById('flowScoreLabel');
-    
-    value.textContent = score;
-    labelEl.textContent = label;
-    
-    // Update classes
-    circle.className = 'flow-score-circle ' + scoreClass;
-    labelEl.className = 'flow-score-label ' + scoreClass;
-}
-
-function updateVerdict(text, verdictClass = '') {
-    const verdict = document.getElementById('flowVerdict');
-    verdict.textContent = text;
-    verdict.className = 'flow-verdict ' + verdictClass;
-}
-
-async function submitFlowFromModal() {
-    const ticker = flowModalData.ticker.trim().toUpperCase();
-    
-    if (!ticker || !flowModalData.sentiment || !flowModalData.type || !flowModalData.premium) {
-        alert('Please fill in all required fields');
-        return;
-    }
-    
-    try {
-        const response = await fetch(`${API_URL}/flow/manual`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                ticker,
-                sentiment: flowModalData.sentiment,
-                flow_type: flowModalData.type,
-                premium: parseInt(flowModalData.premium),
-                notes: flowModalData.notes || `Expiry: ${flowModalData.expiry || 'N/A'}, Vol/OI: ${flowModalData.voloi || 'N/A'}, Repeat: ${flowModalData.repeat || 'N/A'}`
-            })
-        });
-        
-        const data = await response.json();
-        
-        if (data.status === 'success') {
-            closeFlowModal();
-            loadFlowData();
-            console.log(`ðŸ‹ Added flow: ${ticker} ${flowModalData.sentiment} (Score: calculated)`);
-        }
-    } catch (error) {
-        console.error('Error adding flow:', error);
-        alert('Failed to add flow. Please try again.');
-    }
-}
-
-// Initialize modal on page load
-document.addEventListener('DOMContentLoaded', () => {
-    setTimeout(initFlowModal, 1200);
-});
-
-// Check flow confirmation for a signal
-async function checkFlowConfirmation(ticker, direction) {
-    try {
-        const response = await fetch(`${API_URL}/flow/confirm/${ticker}?direction=${direction}`);
-        const data = await response.json();
-        return data;
-    } catch (error) {
-        console.error('Error checking flow confirmation:', error);
-        return null;
-    }
 }
 
 // Initialize on page load
@@ -7256,189 +6603,6 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 
-// ==========================================
-// STRATEGY FILTER SYSTEM
-// ==========================================
-
-const strategyFilters = {
-    strategies: new Set([
-        'golden_touch', 'pullback_entry', 'taurus_signal', 'triple_line',
-        'two_close_vol', 'zone_upgrade', 'exhaustion', 'ursa_signal',
-        'apis_call', 'kodiak_call'
-    ]),
-    directions: new Set(['LONG', 'SHORT']),
-    minScore: 1
-};
-
-function initStrategyFilters() {
-    const selectAllBtn = document.getElementById('selectAllStrategies');
-    const clearAllBtn = document.getElementById('clearAllStrategies');
-    const scoreInput = document.getElementById('scoreThreshold');
-    const filterLong = document.getElementById('filterLong');
-    const filterShort = document.getElementById('filterShort');
-    const strategyCheckboxes = document.querySelectorAll('.strategy-checkbox');
-
-    // Select All button
-    if (selectAllBtn) {
-        selectAllBtn.addEventListener('click', () => {
-            strategyCheckboxes.forEach(checkbox => {
-                checkbox.checked = true;
-                strategyFilters.strategies.add(checkbox.dataset.strategy);
-            });
-            updateFilterSummary();
-            applyFiltersAndRefresh();
-        });
-    }
-
-    // Clear All button
-    if (clearAllBtn) {
-        clearAllBtn.addEventListener('click', () => {
-            strategyCheckboxes.forEach(checkbox => {
-                checkbox.checked = false;
-            });
-            strategyFilters.strategies.clear();
-            updateFilterSummary();
-            applyFiltersAndRefresh();
-        });
-    }
-
-    // Strategy checkboxes
-    strategyCheckboxes.forEach(checkbox => {
-        checkbox.addEventListener('change', (e) => {
-            const strategy = e.target.dataset.strategy;
-            if (e.target.checked) {
-                strategyFilters.strategies.add(strategy);
-            } else {
-                strategyFilters.strategies.delete(strategy);
-            }
-            updateFilterSummary();
-            applyFiltersAndRefresh();
-        });
-    });
-
-    // Score input
-    if (scoreInput) {
-        scoreInput.addEventListener('input', (e) => {
-            let value = parseInt(e.target.value) || 1;
-            // Clamp value between 1 and 100
-            value = Math.max(1, Math.min(100, value));
-            strategyFilters.minScore = value;
-            document.getElementById('activeMinScore').textContent = value;
-            applyFiltersAndRefresh();
-        });
-    }
-
-    // Direction filters
-    if (filterLong) {
-        filterLong.addEventListener('change', (e) => {
-            if (e.target.checked) {
-                strategyFilters.directions.add('LONG');
-            } else {
-                strategyFilters.directions.delete('LONG');
-            }
-            updateFilterSummary();
-            applyFiltersAndRefresh();
-        });
-    }
-
-    if (filterShort) {
-        filterShort.addEventListener('change', (e) => {
-            if (e.target.checked) {
-                strategyFilters.directions.add('SHORT');
-            } else {
-                strategyFilters.directions.delete('SHORT');
-            }
-            updateFilterSummary();
-            applyFiltersAndRefresh();
-        });
-    }
-
-    // Initial summary
-    updateFilterSummary();
-}
-
-function updateFilterSummary() {
-    const strategyCountEl = document.getElementById('activeStrategyCount');
-    const directionsEl = document.getElementById('activeDirections');
-    const minScoreEl = document.getElementById('activeMinScore');
-
-    if (strategyCountEl) {
-        strategyCountEl.textContent = strategyFilters.strategies.size;
-    }
-
-    if (directionsEl) {
-        const dirs = Array.from(strategyFilters.directions);
-        if (dirs.length === 2) {
-            directionsEl.textContent = 'LONG + SHORT';
-        } else if (dirs.length === 1) {
-            directionsEl.textContent = dirs[0];
-        } else {
-            directionsEl.textContent = 'NONE';
-        }
-    }
-
-    if (minScoreEl) {
-        minScoreEl.textContent = strategyFilters.minScore;
-    }
-}
-
-function applyFiltersAndRefresh() {
-    // Filter and re-render trade ideas
-    filterTradeIdeas();
-}
-
-function filterTradeIdeas() {
-    // Get all signals
-    const currentSignals = signals.equity;
-
-    // Apply filters
-    const filtered = currentSignals.filter(signal => {
-        // Check strategy
-        const signalStrategy = signal.strategy_name ? signal.strategy_name.toLowerCase().replace(/\s+/g, '_').replace(/\+/g, '') : '';
-        const matchesStrategy = strategyFilters.strategies.size === 0 || strategyFilters.strategies.has(signalStrategy);
-
-        // Check direction
-        const matchesDirection = strategyFilters.directions.has(signal.direction);
-
-        // Check score
-        const matchesScore = (signal.score || 0) >= strategyFilters.minScore;
-
-        return matchesStrategy && matchesDirection && matchesScore;
-    });
-
-    // Update display
-    renderFilteredSignals(filtered);
-    updateEmptyState(filtered.length);
-}
-
-function renderFilteredSignals(filtered) {
-    // Use the existing renderSignals logic but with filtered data
-    const container = document.getElementById('tradeSignals');
-    if (!container) return;
-
-    if (filtered.length === 0) {
-        container.innerHTML = '<p class="empty-state">No signals match current filters</p>';
-        return;
-    }
-
-    // Render top 10 signals
-    const top10 = filtered.slice(0, 10);
-    container.innerHTML = top10.map(signal => createSignalCard(signal)).join('');
-}
-
-function updateEmptyState(count) {
-    const container = document.getElementById('tradeSignals');
-    if (!container) return;
-
-    if (count === 0) {
-        container.innerHTML = '<p class="empty-state">No signals match current filters</p>';
-    }
-}
-
-// Initialize strategy filters on page load
-document.addEventListener('DOMContentLoaded', () => {
-    setTimeout(initStrategyFilters, 500);
-});
 
 
 // ==========================================
