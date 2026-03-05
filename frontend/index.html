@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Pandora - Real-time Trading Signal Dashboard">
     <title>Pandora</title>
-    <link rel="stylesheet" href="/styles.css?v=65">
+    <link rel="stylesheet" href="/styles.css?v=66">
     <link rel="manifest" href="/manifest.json">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -124,10 +124,20 @@
                 <div class="tf-expand-toggle" data-target="tfIntradayFactors">Factors ></div>
             </div>
             <div class="headlines-card" id="headlinesCard">
-                <h3 id="headlinesHeading">HEADLINES</h3>
-                <ul class="headlines-list" id="headlinesList">
-                    <li class="headlines-empty">Loading headlines...</li>
-                </ul>
+                <div class="headlines-tabs">
+                    <button class="headlines-tab active" data-tab="flow">FLOW</button>
+                    <button class="headlines-tab" data-tab="headlines">HEADLINES</button>
+                </div>
+                <div class="headlines-tab-content" id="flowTabContent">
+                    <div class="flow-compact-list" id="flowCompactList">
+                        <p class="empty-state">No flow data yet</p>
+                    </div>
+                </div>
+                <div class="headlines-tab-content" id="headlinesTabContent" style="display:none;">
+                    <ul class="headlines-list" id="headlinesList">
+                        <li class="headlines-empty">Loading headlines...</li>
+                    </ul>
+                </div>
             </div>
 
             <div class="tf-card" id="tfSwing" data-timeframe="swing">
@@ -374,273 +384,6 @@
                 </div>
             </div>
         </section>
-
-        <!-- Strategy Filter Panel -->
-        <section class="strategy-filter-section">
-            <div class="strategy-filter-header">
-                <h2><span class="icon-teal">&#9881;</span> STRATEGY FILTERS</h2>
-                <span class="header-divider">|</span>
-                <div class="header-controls">
-                    <label class="direction-toggle">
-                        <input type="checkbox" id="filterLong" checked>
-                        <span class="direction-label long">LONG</span>
-                    </label>
-                    <label class="direction-toggle">
-                        <input type="checkbox" id="filterShort" checked>
-                        <span class="direction-label short">SHORT</span>
-                    </label>
-                    <span class="header-divider">|</span>
-                    <label class="min-score-label">Min Score:</label>
-                    <input type="number" id="scoreThreshold" class="score-input" min="1" max="100" value="1">
-                    <span class="header-divider">|</span>
-                    <span class="filter-status"><span id="activeStrategyCount">10</span> strategies, <span id="activeDirections">LONG + SHORT</span>, min <span id="activeMinScore">1</span></span>
-                </div>
-                <div class="strategy-filter-controls">
-                    <button class="filter-btn select-all" id="selectAllStrategies">Select All</button>
-                    <button class="filter-btn clear-all" id="clearAllStrategies">Clear All</button>
-                </div>
-            </div>
-
-            <!-- Strategy Groups (scrollable) -->
-            <div class="strategy-groups-container">
-                <div class="strategy-groups">
-                    <!-- Trend Following -->
-                    <div class="strategy-group">
-                        <h3 class="strategy-group-title"><span class="icon-teal">&#8593;</span> Trend Following</h3>
-                        <div class="strategy-toggles">
-                            <label class="strategy-toggle">
-                                <input type="checkbox" class="strategy-checkbox" data-strategy="golden_touch" checked>
-                                <span class="strategy-name">Golden Touch</span>
-                            </label>
-                            <label class="strategy-toggle">
-                                <input type="checkbox" class="strategy-checkbox" data-strategy="pullback_entry" checked>
-                                <span class="strategy-name">Pullback Entry</span>
-                            </label>
-                            <label class="strategy-toggle">
-                                <input type="checkbox" class="strategy-checkbox" data-strategy="taurus_signal" checked>
-                                <span class="strategy-name">Taurus Signal</span>
-                            </label>
-                            <label class="strategy-toggle">
-                                <input type="checkbox" class="strategy-checkbox" data-strategy="triple_line" checked>
-                                <span class="strategy-name">Triple Line</span>
-                            </label>
-                        </div>
-                    </div>
-
-                    <!-- Breakout -->
-                    <div class="strategy-group">
-                        <h3 class="strategy-group-title"><span class="icon-teal">&#9650;</span> Breakout</h3>
-                        <div class="strategy-toggles">
-                            <label class="strategy-toggle">
-                                <input type="checkbox" class="strategy-checkbox" data-strategy="two_close_vol" checked>
-                                <span class="strategy-name">Two-Close + Vol</span>
-                            </label>
-                            <label class="strategy-toggle">
-                                <input type="checkbox" class="strategy-checkbox" data-strategy="zone_upgrade" checked>
-                                <span class="strategy-name">Zone Upgrade</span>
-                            </label>
-                        </div>
-                    </div>
-
-                    <!-- Reversal -->
-                    <div class="strategy-group">
-                        <h3 class="strategy-group-title"><span class="icon-teal">&#8635;</span> Reversal</h3>
-                        <div class="strategy-toggles">
-                            <label class="strategy-toggle">
-                                <input type="checkbox" class="strategy-checkbox" data-strategy="exhaustion" checked>
-                                <span class="strategy-name">Exhaustion</span>
-                            </label>
-                            <label class="strategy-toggle">
-                                <input type="checkbox" class="strategy-checkbox" data-strategy="ursa_signal" checked>
-                                <span class="strategy-name">Ursa Signal</span>
-                            </label>
-                        </div>
-                    </div>
-
-                    <!-- Macro Confluence -->
-                    <div class="strategy-group">
-                        <h3 class="strategy-group-title"><span class="icon-teal">&#9673;</span> Macro Confluence</h3>
-                        <div class="strategy-toggles">
-                            <label class="strategy-toggle">
-                                <input type="checkbox" class="strategy-checkbox" data-strategy="apis_call" checked>
-                                <span class="strategy-name">APIS Call</span>
-                            </label>
-                            <label class="strategy-toggle">
-                                <input type="checkbox" class="strategy-checkbox" data-strategy="kodiak_call" checked>
-                                <span class="strategy-name">Kodiak Call</span>
-                            </label>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-        </section>
-
-        <!-- Hybrid Market Scanner (Batch Scan Results) -->
-        <section class="hybrid-scanner-section">
-            <div class="hybrid-header">
-                <h2>📡 <span class="kb-link" data-kb-term="hybrid-scanner">HYBRID BATCH SCANNER</span></h2>
-                <div class="hybrid-controls">
-                    <button class="hybrid-btn" id="runHybridScanBtn">Scan Watchlist</button>
-                </div>
-            </div>
-            <p class="hybrid-info">Scans your watchlist with Technical + Analyst analysis</p>
-            
-            <!-- Scan Results Table -->
-            <div class="hybrid-results" id="hybridResults" style="display: none;">
-                <h3>📋 Scan Results</h3>
-                <table class="hybrid-table">
-                    <thead>
-                        <tr>
-                            <th>Ticker</th>
-                            <th>Technical</th>
-                            <th>Strength</th>
-                            <th>Analyst</th>
-                            <th>Upside</th>
-                            <th>Sector</th>
-                        </tr>
-                    </thead>
-                    <tbody id="hybridTableBody">
-                    </tbody>
-                </table>
-            </div>
-        </section>
-
-        <!-- Options Flow (Unusual Whales) -->
-        <section class="flow-section">
-            <div class="flow-header">
-                <h2>🐋 OPTIONS FLOW</h2>
-                <div class="flow-controls">
-                    <button class="flow-btn" id="refreshFlowBtn">↻ Refresh</button>
-                    <span class="flow-status" id="flowStatus">Not Connected</span>
-                </div>
-            </div>
-            <p class="flow-info">Unusual Whales integration • Manual entry available • Auto-confirms CTA signals</p>
-            
-            <!-- Hot Tickers -->
-            <div class="flow-hot-tickers">
-                <h3>🔥 Hot Flow</h3>
-                <div class="flow-hot-list" id="flowHotList">
-                    <p class="empty-state">No flow data yet</p>
-                </div>
-            </div>
-            
-            <!-- Recent Alerts -->
-            <div class="flow-recent">
-                <h3>📊 Recent Alerts</h3>
-                <div class="flow-alerts-list" id="flowAlertsList">
-                    <p class="empty-state">No recent alerts</p>
-                </div>
-            </div>
-            
-            <!-- Manual Entry Button -->
-            <div class="flow-manual-entry">
-                <button class="flow-btn add full-width" id="openFlowModalBtn">➕ Add Flow Observation</button>
-            </div>
-        </section>
-
-        <!-- Flow Entry Modal -->
-        <div class="modal-overlay" id="flowModalOverlay">
-            <div class="flow-modal">
-                <div class="flow-modal-header">
-                    <h2>🐋 Add Flow Observation</h2>
-                    <button class="modal-close" id="closeFlowModalBtn">✕</button>
-                </div>
-                
-                <!-- Notability Score -->
-                <div class="flow-score-display" id="flowScoreDisplay">
-                    <div class="flow-score-circle" id="flowScoreCircle">
-                        <span class="flow-score-value" id="flowScoreValue">0</span>
-                    </div>
-                    <div class="flow-score-label" id="flowScoreLabel">Fill in details below</div>
-                </div>
-                
-                <div class="flow-modal-body">
-                    <!-- Ticker -->
-                    <div class="flow-field">
-                        <label>Ticker Symbol *</label>
-                        <input type="text" id="modalFlowTicker" placeholder="e.g. NVDA" class="flow-modal-input">
-                    </div>
-                    
-                    <!-- Direction -->
-                    <div class="flow-field">
-                        <label>Direction *</label>
-                        <div class="flow-btn-group">
-                            <button class="flow-option-btn" data-field="sentiment" data-value="BULLISH">🟢 Calls (Bullish)</button>
-                            <button class="flow-option-btn" data-field="sentiment" data-value="BEARISH">🔴 Puts (Bearish)</button>
-                        </div>
-                    </div>
-                    
-                    <!-- Flow Type -->
-                    <div class="flow-field">
-                        <label>Flow Type * <span class="field-hint">(Sweeps = most aggressive)</span></label>
-                        <div class="flow-btn-group">
-                            <button class="flow-option-btn" data-field="type" data-value="SWEEP">🔥 Sweep</button>
-                            <button class="flow-option-btn" data-field="type" data-value="BLOCK">📦 Block</button>
-                            <button class="flow-option-btn" data-field="type" data-value="UNUSUAL_VOLUME">📊 Unusual Vol</button>
-                            <button class="flow-option-btn" data-field="type" data-value="DARK_POOL">🌑 Dark Pool</button>
-                        </div>
-                    </div>
-                    
-                    <!-- Premium -->
-                    <div class="flow-field">
-                        <label>Premium Size * <span class="field-hint">(Total $ of the trade)</span></label>
-                        <div class="flow-btn-group">
-                            <button class="flow-option-btn" data-field="premium" data-value="25000">$25K-$50K</button>
-                            <button class="flow-option-btn" data-field="premium" data-value="75000">$50K-$100K</button>
-                            <button class="flow-option-btn" data-field="premium" data-value="150000">$100K-$250K</button>
-                            <button class="flow-option-btn" data-field="premium" data-value="500000">$250K+</button>
-                        </div>
-                    </div>
-                    
-                    <!-- Expiry -->
-                    <div class="flow-field">
-                        <label>Expiry Timeframe <span class="field-hint">(How soon do contracts expire?)</span></label>
-                        <div class="flow-btn-group">
-                            <button class="flow-option-btn" data-field="expiry" data-value="0dte">0DTE</button>
-                            <button class="flow-option-btn" data-field="expiry" data-value="week">This Week</button>
-                            <button class="flow-option-btn" data-field="expiry" data-value="2-4weeks">2-4 Weeks</button>
-                            <button class="flow-option-btn" data-field="expiry" data-value="monthly">Monthly+</button>
-                            <button class="flow-option-btn" data-field="expiry" data-value="leaps">LEAPS (6mo+)</button>
-                        </div>
-                    </div>
-                    
-                    <!-- Volume vs OI -->
-                    <div class="flow-field">
-                        <label>Volume vs Open Interest <span class="field-hint">(Is volume unusually high?)</span></label>
-                        <div class="flow-btn-group">
-                            <button class="flow-option-btn" data-field="voloi" data-value="low">Vol < OI</button>
-                            <button class="flow-option-btn" data-field="voloi" data-value="normal">Vol ≈ OI</button>
-                            <button class="flow-option-btn" data-field="voloi" data-value="high">Vol > OI</button>
-                            <button class="flow-option-btn" data-field="voloi" data-value="extreme">Vol >> OI (5x+)</button>
-                        </div>
-                    </div>
-                    
-                    <!-- Repeat Activity -->
-                    <div class="flow-field">
-                        <label>Repeat Activity? <span class="field-hint">(Same strike getting hit multiple times?)</span></label>
-                        <div class="flow-btn-group">
-                            <button class="flow-option-btn" data-field="repeat" data-value="no">Single Trade</button>
-                            <button class="flow-option-btn" data-field="repeat" data-value="yes">Multiple Hits</button>
-                        </div>
-                    </div>
-                    
-                    <!-- Notes -->
-                    <div class="flow-field">
-                        <label>Notes (optional)</label>
-                        <input type="text" id="modalFlowNotes" placeholder="e.g. Before earnings, unusual timing..." class="flow-modal-input">
-                    </div>
-                </div>
-                
-                <div class="flow-modal-footer">
-                    <div class="flow-verdict" id="flowVerdict">
-                        <!-- Verdict will appear here -->
-                    </div>
-                    <button class="flow-btn cancel" id="cancelFlowBtn">Cancel</button>
-                    <button class="flow-btn add" id="submitFlowBtn" disabled>Add Flow</button>
-                </div>
-            </div>
-        </div>
 
         <!-- Strategy Controls -->
         <section class="strategies-section">
@@ -1218,75 +961,6 @@
                 </div>
             </section>
 
-                        <!-- Row 3: Strategy Filters -->
-            <section class="crypto-strategy-bottom">
-                <div class="crypto-strategy-half">
-                    <div class="crypto-strategy-section">
-                        <div class="crypto-strategy-header">
-                            <h2>STRATEGY FILTERS</h2>
-                            <div class="crypto-strategy-controls">
-                                <label class="direction-toggle">
-                                    <input type="checkbox" id="cryptoFilterLong" checked>
-                                    <span class="direction-label long">LONG</span>
-                                </label>
-                                <label class="direction-toggle">
-                                    <input type="checkbox" id="cryptoFilterShort" checked>
-                                    <span class="direction-label short">SHORT</span>
-                                </label>
-                                <label class="direction-toggle auto-bias-toggle">
-                                    <input type="checkbox" id="cryptoAutoBiasToggle" checked>
-                                    <span class="direction-label neutral">AUTO BIAS</span>
-                                </label>
-                                <span class="header-divider">|</span>
-                                <label class="min-score-label">Min Score:</label>
-                                <input type="number" id="cryptoScoreThreshold" class="score-input" min="1" max="100" value="1">
-                            </div>
-                        </div>
-                        <div class="crypto-strategy-toggles" id="cryptoStrategyToggles">
-                            <label class="strategy-toggle">
-                                <input type="checkbox" class="crypto-strategy-cb" data-strategy="scout" checked data-direction="LONG">
-                                <span class="strategy-name">Scout (15m Early)</span>
-                            </label>
-                            <label class="strategy-toggle">
-                                <input type="checkbox" class="crypto-strategy-cb" data-strategy="sniper" checked data-direction="LONG">
-                                <span class="strategy-name">Sniper (1H Confirm)</span>
-                            </label>
-                            <label class="strategy-toggle">
-                                <input type="checkbox" class="crypto-strategy-cb" data-strategy="exhaustion" checked>
-                                <span class="strategy-name">Exhaustion</span>
-                            </label>
-                            <label class="strategy-toggle">
-                                <input type="checkbox" class="crypto-strategy-cb" data-strategy="triple_line" checked>
-                                <span class="strategy-name">Triple Line</span>
-                            </label>
-                            <label class="strategy-toggle">
-                                <input type="checkbox" class="crypto-strategy-cb" data-strategy="golden_touch" checked>
-                                <span class="strategy-name">Golden Touch</span>
-                            </label>
-                            <label class="strategy-toggle">
-                                <input type="checkbox" class="crypto-strategy-cb" data-strategy="pullback_entry" checked>
-                                <span class="strategy-name">Pullback Entry</span>
-                            </label>
-                            <label class="strategy-toggle">
-                                <input type="checkbox" class="crypto-strategy-cb" data-strategy="taurus_signal" checked>
-                                <span class="strategy-name">Taurus Signal</span>
-                            </label>
-                            <label class="strategy-toggle">
-                                <input type="checkbox" class="crypto-strategy-cb" data-strategy="ursa_signal" checked>
-                                <span class="strategy-name">Ursa Signal</span>
-                            </label>
-                            <label class="strategy-toggle">
-                                <input type="checkbox" class="crypto-strategy-cb" data-strategy="two_close_vol" checked>
-                                <span class="strategy-name">Two-Close + Vol</span>
-                            </label>
-                            <label class="strategy-toggle">
-                                <input type="checkbox" class="crypto-strategy-cb" data-strategy="zone_upgrade" checked>
-                                <span class="strategy-name">Zone Upgrade</span>
-                            </label>
-                        </div>
-                    </div>
-                </div>
-            </section>
 
         </main>
 
@@ -1901,7 +1575,7 @@
     <!-- TradingView Widget Script -->
     <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
-    <script src="/app.js?v=77"></script>
+    <script src="/app.js?v=78"></script>
     <script src="/analytics.js?v=2"></script>
 </body>
 </html>
