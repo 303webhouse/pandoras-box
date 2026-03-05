@@ -243,15 +243,15 @@ async def calculate_daily_bias(tick_high: float, tick_low: float) -> str:
 
     # Graduated classification matching compute_tick_score thresholds
     if tick_range >= 2000:
-        return "TORO_MAJOR_DAILY"  # Very wide — strong daily bullish breadth
+        return "TORO_MAJOR_DAILY"  # Very wide \u2014 strong daily bullish breadth
     elif tick_range >= 1500:
-        return "TORO_MINOR"  # Wide — bullish breadth
+        return "TORO_MINOR"  # Wide \u2014 bullish breadth
     elif tick_range >= 700:
         return "NEUTRAL"  # Normal range
     elif tick_range >= 400:
-        return "URSA_MINOR"  # Narrow — bearish breadth
+        return "URSA_MINOR"  # Narrow \u2014 bearish breadth
     else:
-        return "URSA_MAJOR_DAILY"  # Very narrow — strong daily bearish breadth
+        return "URSA_MAJOR_DAILY"  # Very narrow \u2014 strong daily bearish breadth
 
 async def calculate_weekly_bias(tick_history: list) -> str:
     """
@@ -347,48 +347,77 @@ async def compute_tick_score(tick_data: Dict[str, Any]) -> Optional[FactorReadin
     tick_avg = float(tick_data.get("tick_avg", tick_close) or 0)
 
     # --- Breadth scoring (range width, NOT direction) ---
-    # Wide range = bullish breadth (strong participation) → positive score
-    # Narrow range = bearish breadth (weak participation) → negative score
+    # Wide range = bullish breadth (strong participation) \u2192 positive score
+    # Narrow range = bearish breadth (weak participation) \u2192 negative score
     tick_range = tick_high - tick_low
 
     # Graduated scoring based on range width (M10, M11)
     # Typical ranges: narrow < 1000, normal 1000-2000, wide > 2000
     if tick_range >= 2500:
-        base = 1.0   # Extremely wide — very strong participation
+        base = 1.0   # Extremely wide \u2014 very strong participation
     elif tick_range >= 2000:
-        base = 0.8   # Wide range — strong participation
+        base = 0.8   # Wide range \u2014 strong participation
     elif tick_range >= 1500:
-        base = 0.5   # Above-average range — moderate bullish breadth
+        base = 0.5   # Above-average range \u2014 moderate bullish breadth
     elif tick_range >= 1000:
-        base = 0.2   # Normal range — slight bullish lean
+        base = 0.2   # Normal range \u2014 slight bullish lean
     elif tick_range >= 700:
         base = 0.0   # Neutral zone
     elif tick_range >= 500:
-        base = -0.3  # Below-average — slight bearish breadth
+        base = -0.3  # Below-average \u2014 slight bearish breadth
     elif tick_range >= 300:
-        base = -0.6  # Narrow range — weak participation
+        base = -0.6  # Narrow range \u2014 weak participation
     else:
-        base = -0.9  # Very narrow — extremely weak participation
+        base = -0.9  # Very narrow \u2014 extremely weak participation
 
-    # Extreme modifier: bonus for reaching beyond ±1000 thresholds
+    # Extreme modifier: bonus for reaching beyond \u00b11000 thresholds
     # Per spec: wide = high > +1000 OR low < -1000
     extreme_mod = 0.0
     if tick_high > 1000:
         extreme_mod += 0.1
     if tick_low < -1000:
-        extreme_mod += 0.1  # ALSO bullish — wide range = participation
+        extreme_mod += 0.1  # ALSO bullish \u2014 wide range = participation
 
     score = max(-1.0, min(1.0, base + extreme_mod))
 
+    # \u2500\u2500 DIRECTIONAL MODIFIER \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+    # Range width alone is insufficient. TICK close and average tell you
+    # whether the participation was buying or selling.
+    # Wide range + negative close = heavy selling (bearish), not bullish.
+    # Wide range + positive close = real bullish breadth.
+    dir_mod = 0.0
+    if tick_close < -400:
+        dir_mod = -0.8  # Heavy selling pressure
+    elif tick_close < -200:
+        dir_mod = -0.5  # Moderate selling
+    elif tick_close < -50:
+        dir_mod = -0.2  # Slight selling lean
+    elif tick_close > 400:
+        dir_mod = 0.4   # Strong buying pressure
+    elif tick_close > 200:
+        dir_mod = 0.2   # Moderate buying
+    elif tick_close > 50:
+        dir_mod = 0.1   # Slight buying lean
+
+    # Average TICK confirms sustained direction (not just a spike)
+    if tick_avg < -100 and dir_mod < 0:
+        dir_mod -= 0.15  # Sustained selling \u2014 amplify bearish
+    elif tick_avg > 100 and dir_mod > 0:
+        dir_mod += 0.1   # Sustained buying \u2014 amplify bullish
+
+    # Blend: range-based score gets 40% weight, directional gets 60%
+    # This ensures a wide-range selloff reads bearish, not bullish
+    score = (score * 0.4) + (dir_mod * 0.6)
+
     # VIX context adjustment (M7)
-    # During high VIX (>25), wide TICK is less meaningful — everyone is moving
-    # During low VIX (<15), wide TICK is MORE meaningful — real conviction
+    # During high VIX (>25), wide TICK is less meaningful \u2014 everyone is moving
+    # During low VIX (<15), wide TICK is MORE meaningful \u2014 real conviction
     vix_val = float(tick_data.get("vix", 0) or 0)
     if vix_val > 25 and score > 0:
         score *= 0.7  # Discount bullish breadth during high vol
     elif vix_val < 15 and score > 0:
         score = min(1.0, score * 1.2)  # Amplify bullish breadth during low vol
-    score = round(score, 4)
+    score = max(-1.0, min(1.0, round(score, 4)))
 
     source_timestamp, timestamp_source = _extract_source_timestamp(tick_data)
     if timestamp_source == "fallback":
