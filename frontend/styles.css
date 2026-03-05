@@ -3214,13 +3214,13 @@ body.override-active-bearish .override-toggle[data-active="true"] {
 }
 
 .committee-btn {
-    background: rgba(99, 102, 241, 0.15) !important;
-    color: #a5b4fc !important;
-    border: 1px solid rgba(99, 102, 241, 0.3) !important;
+    background: transparent !important;
+    color: #ffffff !important;
+    border: 1px solid #2dd4bf !important;
 }
 
 .committee-btn:hover {
-    background: rgba(99, 102, 241, 0.25) !important;
+    background: rgba(45, 212, 191, 0.15) !important;
 }
 
 .committee-btn.committee-pending {
