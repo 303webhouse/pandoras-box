@@ -366,21 +366,23 @@ async def portfolio_summary():
 
     positions = [_row_to_dict(r) for r in rows]
 
-    if not positions:
-        # Fetch account balance even if no positions
-        balance = 0.0
-        try:
-            async with pool.acquire() as conn:
-                bal_row = await conn.fetchrow(
-                    "SELECT balance FROM account_balances WHERE account_name = 'Robinhood'"
-                )
-            if bal_row:
-                balance = float(bal_row["balance"])
-        except Exception:
-            pass
+    # Fetch cash balance from account_balances
+    cash = 0.0
+    try:
+        async with pool.acquire() as conn:
+            bal_row = await conn.fetchrow(
+                "SELECT cash, balance FROM account_balances WHERE account_name = 'Robinhood'"
+            )
+        if bal_row:
+            cash = float(bal_row["cash"] or 0)
+    except Exception:
+        pass
 
+    if not positions:
         return {
-            "account_balance": balance,
+            "account_balance": cash,
+            "cash": cash,
+            "position_value": 0.0,
             "position_count": 0,
             "capital_at_risk": 0.0,
             "capital_at_risk_pct": 0.0,
@@ -390,23 +392,17 @@ async def portfolio_summary():
             "positions": [],
         }
 
-    # Fetch account balance
-    balance = 0.0
-    try:
-        async with pool.acquire() as conn:
-            bal_row = await conn.fetchrow(
-                "SELECT balance FROM account_balances WHERE account_name = 'Robinhood'"
-            )
-        if bal_row:
-            balance = float(bal_row["balance"])
-    except Exception:
-        pass
-
     # Calculate summary
     total_max_loss = sum(p.get("max_loss") or 0 for p in positions)
-    total_unrealized_pnl = sum(p.get("unrealized_pnl") or 0 for p in positions)
-    # Adjust displayed balance: stored base + unrealized PnL movement
-    adjusted_balance = round(balance + total_unrealized_pnl, 2)
+    # Position market value = cost_basis + unrealized_pnl (what positions are currently worth)
+    total_position_value = 0.0
+    for p in positions:
+        cost = p.get("cost_basis") or 0
+        pnl = p.get("unrealized_pnl") or 0
+        total_position_value += cost + pnl
+    total_position_value = round(total_position_value, 2)
+    # Total account = cash + position market value
+    account_balance = round(cash + total_position_value, 2)
     today = date.today()
 
     # Nearest expiry
@@ -460,12 +456,12 @@ async def portfolio_summary():
         })
 
     return {
-        "account_balance": adjusted_balance,
-        "stored_balance": balance,
-        "total_unrealized_pnl": round(total_unrealized_pnl, 2),
+        "account_balance": account_balance,
+        "cash": cash,
+        "position_value": total_position_value,
         "position_count": len(positions),
         "capital_at_risk": round(total_max_loss, 2),
-        "capital_at_risk_pct": round(total_max_loss / adjusted_balance * 100, 2) if adjusted_balance > 0 else 0.0,
+        "capital_at_risk_pct": round(total_max_loss / account_balance * 100, 2) if account_balance > 0 else 0.0,
         "nearest_expiry": nearest_expiry,
         "nearest_dte": nearest_dte,
         "net_direction": net_direction,
@@ -477,24 +473,24 @@ async def portfolio_summary():
 @router.patch("/v2/positions/account-balance")
 async def update_account_balance(request: Request):
     """
-    Update the stored Robinhood account balance (base value for PnL adjustment).
-    Body: {"balance": 4080.00}
-    The displayed balance = stored balance + total unrealized PnL.
+    Update the stored Robinhood cash balance.
+    Body: {"cash": 3044.19}
+    Total account balance = cash + sum(position market values).
     """
     body = await request.json()
-    new_balance = body.get("balance")
-    if new_balance is None:
-        raise HTTPException(status_code=400, detail="balance field required")
+    new_cash = body.get("cash")
+    if new_cash is None:
+        raise HTTPException(status_code=400, detail="cash field required")
 
     pool = await get_postgres_client()
     async with pool.acquire() as conn:
         await conn.execute(
-            "UPDATE account_balances SET balance = $1, updated_at = NOW(), updated_by = 'dashboard' WHERE account_name = 'Robinhood'",
-            float(new_balance),
+            "UPDATE account_balances SET cash = $1, updated_at = NOW(), updated_by = 'dashboard' WHERE account_name = 'Robinhood'",
+            float(new_cash),
         )
 
-    logger.info("Account balance updated to %.2f", float(new_balance))
-    return {"status": "ok", "balance": float(new_balance)}
+    logger.info("RH cash balance updated to %.2f", float(new_cash))
+    return {"status": "ok", "cash": float(new_cash)}
 
 
 @router.get("/v2/positions/greeks")
