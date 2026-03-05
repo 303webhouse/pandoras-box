@@ -127,7 +127,45 @@ body {
 
 .header-controls {
     display: flex;
-    gap: 15px;
+    gap: 8px;
+    align-items: center;
+}
+
+.mode-switcher {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+}
+
+.mode-btn,
+.kb-btn {
+    background: transparent;
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    padding: 6px 14px;
+    border-radius: 6px;
+    font-family: 'Orbit', sans-serif;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    text-decoration: none;
+    white-space: nowrap;
+}
+
+.mode-btn:hover,
+.kb-btn:hover {
+    color: var(--text-primary);
+    border-color: var(--accent-teal);
+    background: rgba(20, 184, 166, 0.08);
+}
+
+.mode-btn.active {
+    color: var(--dark-bg);
+    background: var(--accent-teal);
+    border-color: var(--accent-teal);
 }
 
 .timeframe-selector {
@@ -5692,24 +5730,7 @@ body.override-active-bearish .override-toggle[data-active="true"] {
    KNOWLEDGEBASE STYLES
    ============================================ */
 
-/* KB Button in Header */
-.kb-btn {
-    background: transparent;
-    border: none;
-    color: var(--text-secondary);
-    padding: 6px 14px;
-    border-radius: 999px;
-    font-size: 12px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    text-decoration: none;
-}
-
-.kb-btn:hover {
-    color: var(--text-primary);
-    background: rgba(255, 255, 255, 0.05);
-}
+/* KB Button in Header — styled via .kb-btn combined with .mode-btn above */
 
 /* KB Popup Modal */
 .kb-popup-modal {
