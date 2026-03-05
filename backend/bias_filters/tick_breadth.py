@@ -376,7 +376,11 @@ async def compute_tick_score(tick_data: Dict[str, Any]) -> Optional[FactorReadin
     if tick_high > 1000:
         extreme_mod += 0.1
     if tick_low < -1000:
-        extreme_mod += 0.1  # ALSO bullish — wide range = participation
+        # Only bullish if avg confirms buying. Otherwise it's panic range.
+        if tick_avg > 0:
+            extreme_mod += 0.1
+        else:
+            extreme_mod -= 0.1  # Deep negative low with bearish avg = panic selling
 
     score = max(-1.0, min(1.0, base + extreme_mod))
 
@@ -405,6 +409,13 @@ async def compute_tick_score(tick_data: Dict[str, Any]) -> Optional[FactorReadin
     elif tick_avg > 100 and dir_mod > 0:
         dir_mod += 0.1   # Sustained buying — amplify bullish
 
+    # Conflict: average says selling but close says buying (late bounce)
+    # Average represents full session, close is a snapshot — trust the average
+    if tick_avg < -100 and dir_mod > 0:
+        dir_mod = min(dir_mod * 0.25, 0.05)  # Nearly zero out bullish close signal
+    elif tick_avg > 100 and dir_mod < 0:
+        dir_mod = max(dir_mod * 0.25, -0.05)  # Nearly zero out bearish close signal
+
     # Blend: range-based score gets 40% weight, directional gets 60%
     # This ensures a wide-range selloff reads bearish, not bullish
     score = (score * 0.4) + (dir_mod * 0.6)
@@ -412,10 +423,12 @@ async def compute_tick_score(tick_data: Dict[str, Any]) -> Optional[FactorReadin
     # VIX context adjustment (M7)
     # During high VIX (>25), wide TICK is less meaningful — everyone is moving
     # During low VIX (<15), wide TICK is MORE meaningful — real conviction
-    vix_val = float(tick_data.get("vix", 0) or 0)
-    if vix_val > 25 and score > 0:
+    vix_val = tick_data.get("vix")
+    if vix_val is not None:
+        vix_val = float(vix_val or 0)
+    if vix_val is not None and vix_val > 25 and score > 0:
         score *= 0.7  # Discount bullish breadth during high vol
-    elif vix_val < 15 and score > 0:
+    elif vix_val is not None and vix_val < 15 and score > 0:
         score = min(1.0, score * 1.2)  # Amplify bullish breadth during low vol
     score = max(-1.0, min(1.0, round(score, 4)))
 

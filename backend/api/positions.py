@@ -64,6 +64,7 @@ class AcceptSignalRequest(BaseModel):
     stop_loss: Optional[float] = None
     target_1: Optional[float] = None
     target_2: Optional[float] = None
+    account: str = "ROBINHOOD"
     notes: Optional[str] = None
 
 class OptionLegRequest(BaseModel):
@@ -88,6 +89,7 @@ class AcceptSignalAsOptionsRequest(BaseModel):
     max_loss: Optional[float] = None
     breakeven: Optional[List[float]] = None
     thesis: Optional[str] = None
+    account: str = "ROBINHOOD"
     notes: Optional[str] = None
 
 class DismissSignalRequest(BaseModel):
@@ -295,6 +297,7 @@ async def accept_signal(signal_id: str, request: AcceptSignalRequest):
         bias_at_open = await get_bias_snapshot()
 
         # Create position in database with full details
+        account = (request.account or "ROBINHOOD").upper()
         position_data = {
             "ticker": signal_data.get('ticker'),
             "direction": signal_data.get('direction'),
@@ -310,7 +313,8 @@ async def accept_signal(signal_id: str, request: AcceptSignalRequest):
             "signal_type": signal_data.get('signal_type'),
             "bias_level": signal_data.get('bias_alignment'),
             "bias_at_open": bias_at_open,
-            "broker": "MANUAL"
+            "broker": "MANUAL",
+            "account": account,
         }
         
         db_position_id = await create_position(signal_id, position_data)
@@ -506,7 +510,7 @@ async def accept_signal_as_options(signal_id: str, request: AcceptSignalAsOption
                 request.max_loss, request.max_profit,
                 signal_data.get("stop_loss"), signal_data.get("target_1"),
                 expiry, dte, long_strike, short_strike,
-                "SIGNAL", signal_id, "ROBINHOOD", backtest_notes
+                "SIGNAL", signal_id, (request.account or "ROBINHOOD").upper(), backtest_notes
             )
 
         # Check for committee override (accepting a PASS recommendation)
