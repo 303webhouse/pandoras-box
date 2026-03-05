@@ -365,6 +365,76 @@ body {
     color: rgba(255, 255, 255, 0.5);
     margin-top: 2px;
 }
+.rh-cash-link {
+    cursor: pointer;
+    text-decoration: underline;
+    text-decoration-style: dotted;
+    text-underline-offset: 2px;
+}
+.rh-cash-link:hover { color: #2dd4bf; }
+
+#cashUpdateModal {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0, 0, 0, 0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+}
+.cash-update-modal {
+    background: var(--card-bg, #1a2332);
+    border: 1px solid rgba(45, 212, 191, 0.3);
+    border-radius: 10px;
+    padding: 20px;
+    width: 280px;
+    text-align: center;
+}
+.cash-update-modal h3 {
+    margin: 0 0 14px;
+    font-size: 0.95rem;
+    color: #e2e8f0;
+}
+.cash-update-modal input {
+    width: 100%;
+    padding: 8px 10px;
+    background: rgba(0,0,0,0.3);
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 6px;
+    color: #fff;
+    font-size: 1.1rem;
+    text-align: center;
+    box-sizing: border-box;
+}
+.cash-update-modal input:focus {
+    outline: none;
+    border-color: #2dd4bf;
+}
+.cash-modal-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 14px;
+    justify-content: center;
+}
+.cash-modal-btn {
+    padding: 6px 18px;
+    border-radius: 6px;
+    border: none;
+    cursor: pointer;
+    font-size: 0.8rem;
+}
+.cash-modal-btn.save {
+    background: #2dd4bf;
+    color: #0f172a;
+    font-weight: 600;
+}
+.cash-modal-btn.save:hover { background: #5eead4; }
+.cash-modal-btn.cancel {
+    background: transparent;
+    color: rgba(255,255,255,0.6);
+    border: 1px solid rgba(255,255,255,0.15);
+}
+.cash-modal-btn.cancel:hover { color: #fff; }
 
 .portfolio-account-meta {
     display: flex;

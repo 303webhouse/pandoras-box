@@ -8105,7 +8105,8 @@ function renderPortfolioSummaryWidget(summary) {
         const cashStr = '$' + summary.cash.toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0});
         const posVal = summary.position_value || 0;
         const posStr = '$' + posVal.toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0});
-        rhBreakdown.innerHTML = `<span>Cash ${cashStr}</span><span>Positions ${posStr}</span>`;
+        rhBreakdown.innerHTML = `<span class="rh-cash-link" title="Update cash balance">Cash ${cashStr}</span><span>Positions ${posStr}</span>`;
+        rhBreakdown.querySelector('.rh-cash-link').addEventListener('click', () => showCashUpdateModal(summary.cash));
     }
     const rhMeta = document.getElementById('rhMeta');
     if (rhMeta) {
@@ -8121,6 +8122,51 @@ function renderPortfolioSummaryWidget(summary) {
     if (retEl) retEl.textContent = '$' + FIDELITY_RETIREMENT.toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0});
     const actEl = document.getElementById('fidelityActiveBalance');
     if (actEl) actEl.textContent = '$' + FIDELITY_ACTIVE.toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0});
+}
+
+function showCashUpdateModal(currentCash) {
+    const existing = document.getElementById('cashUpdateModal');
+    if (existing) existing.remove();
+
+    const modal = document.createElement('div');
+    modal.id = 'cashUpdateModal';
+    modal.className = 'modal-overlay';
+    modal.innerHTML = `
+        <div class="cash-update-modal">
+            <h3>Update RH Cash Balance</h3>
+            <input type="number" id="cashUpdateInput" step="0.01" value="${(currentCash || 0).toFixed(2)}" />
+            <div class="cash-modal-actions">
+                <button id="cashUpdateSave" class="cash-modal-btn save">Save</button>
+                <button id="cashUpdateCancel" class="cash-modal-btn cancel">Cancel</button>
+            </div>
+        </div>`;
+    document.body.appendChild(modal);
+
+    const input = document.getElementById('cashUpdateInput');
+    input.select();
+
+    document.getElementById('cashUpdateSave').addEventListener('click', async () => {
+        const val = parseFloat(input.value);
+        if (isNaN(val)) return;
+        try {
+            await fetch(`${API_URL}/v2/positions/account-balance`, {
+                method: 'PATCH',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({cash: val}),
+            });
+            modal.remove();
+            loadPortfolioSummary();
+        } catch (e) {
+            console.error('Failed to update cash:', e);
+        }
+    });
+
+    document.getElementById('cashUpdateCancel').addEventListener('click', () => modal.remove());
+    modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') document.getElementById('cashUpdateSave').click();
+        if (e.key === 'Escape') modal.remove();
+    });
 }
 
 function updatePositionsCount() {
