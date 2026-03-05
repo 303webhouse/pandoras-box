@@ -52,7 +52,7 @@ The project was originally called "Pandora's Box" — the name persists in some 
 - **PostgreSQL** (Railway, same project `fabulous-essence`) — signals, trades, factor_history, unified_positions, closed_positions, analytics tables. Linked via `${{Postgres.*}}` references.
 - **Redis** (Upstash) — real-time cache for bias state, factor scores, signals, whale context. Requires SSL (`rediss://`). Per-factor TTLs (24h default, up to 1080h for Savita). Whale context: 30 min TTL at `whale:recent:{TICKER}`.
 - Auto-deploys on push to `main` branch
-- Key endpoints: `/webhook/tradingview`, `/webhook/whale`, `/webhook/whale/recent/{ticker}`, `/webhook/breadth`, `/webhook/circuit-breaker/*`, `/api/bias/*`, `/api/analytics/*`, `/v2/positions/*`, `/health`
+- Key endpoints: `/webhook/tradingview`, `/webhook/whale`, `/webhook/whale/recent/{ticker}`, `/webhook/breadth`, `/webhook/tick`, `/webhook/mcclellan`, `/webhook/circuit-breaker/*`, `/api/bias/*`, `/api/analytics/*`, `/v2/positions/*`, `/api/uw/*`, `/health`
 - Health check: `curl https://pandoras-box-production.up.railway.app/health`
 
 ### Pivot II (VPS — OpenClaw)
@@ -68,15 +68,15 @@ The project was originally called "Pandora's Box" — the name persists in some 
 - `analytics.js` — Analytics UI (6 tabs: Dashboard, Trade Journal, Signal Explorer, Factor Lab, Backtest, Risk)
 - Position modals: add/edit/close/dismiss with structure support (debit_spread, credit_spread, iron_butterfly, straddle, strangle, custom)
 - PWA-installable, dark teal theme with dynamic accent colors based on bias level
-- **Cache busting**: CSS uses `?v=39`, app.js uses `?v=54`. Increment on UI changes.
+- **Cache busting**: CSS uses `?v=66`, app.js uses `?v=79`. Increment on UI changes.
 
 ## Key Subsystems
 
 ### Bias Engine (`backend/bias_engine/`)
-22 factors across INTRADAY (5), SWING (9), and MACRO (8) categories. Each factor scores -1.0 to +1.0. Composite weighted average maps to 5-level system:
+20 factors across INTRADAY (5), SWING (6), and MACRO (9) categories. Each factor scores -1.0 to +1.0. Composite weighted average maps to 5-level system:
 - **URSA MAJOR** (strongly bearish, ≤ -0.60) → **URSA MINOR** → **NEUTRAL** → **TORO MINOR** → **TORO MAJOR** (strongly bullish)
 
-Weights sum to exactly 1.00 (enforced by assertion at import time): intraday 0.28, swing 0.41, macro 0.31.
+Weights sum to exactly 1.00 (enforced by assertion at import time): intraday 0.26, swing 0.34, macro 0.40.
 
 **Data sources:** Polygon.io Options Starter ($29/mo — chains, greeks, OI, volume), Polygon.io Stocks Starter ($29/mo — ETF/equity prices), yfinance (VIX, indices, fallback), FRED (credit spreads, yield curve, claims, ISM/MANEMP), TradingView webhooks (TICK breadth, $UVOL/$DVOL breadth_intraday, circuit breaker), Twitter sentiment (30+ accounts via `pivot2_twitter.py`).
 
