@@ -10,6 +10,7 @@ from datetime import datetime, date, timezone
 import logging
 import json
 
+from api.unified_positions import _adjust_account_cash, CREDIT_STRUCTURES
 from database.redis_client import get_signal, delete_signal, cache_signal
 from database.postgres_client import (
     update_signal_action,
@@ -512,6 +513,15 @@ async def accept_signal_as_options(signal_id: str, request: AcceptSignalAsOption
                 expiry, dte, long_strike, short_strike,
                 "SIGNAL", signal_id, (request.account or "ROBINHOOD").upper(), backtest_notes
             )
+
+        # Auto-adjust cash: deduct cost for debit, add premium for credit
+        if cost_basis:
+            s = (request.strategy_type or "").lower()
+            cash_delta = cost_basis if s in CREDIT_STRUCTURES else -cost_basis
+            try:
+                await _adjust_account_cash(pool, (request.account or "ROBINHOOD").upper(), cash_delta)
+            except Exception as e:
+                logger.warning("Cash adjustment failed on signal accept: %s", e)
 
         # Check for committee override (accepting a PASS recommendation)
         try:
