@@ -1540,7 +1540,9 @@ function renderCompositeBias(data, dailyData = null) {
     const lastUpdateEl = document.getElementById('compositeLastUpdate');
 
     const dailySource = _dailyBiasPrimaryData || dailyBiasFullData || {};
-    const dailyLevel = normalizeDailyBiasLevel(dailySource.level || data.bias_level || 'NEUTRAL');
+    // Use composite bias_level as primary (includes CB floor/cap overrides),
+    // fall back to old daily bias system only if composite unavailable
+    const dailyLevel = normalizeDailyBiasLevel(data.bias_level || dailySource.level || 'NEUTRAL');
     const dailyVoteRaw = Number(dailySource?.details?.total_vote);
     const dailyVote = Number.isFinite(dailyVoteRaw) ? Math.trunc(dailyVoteRaw) : null;
     const dailyColorKey = normalizeCompositeBiasLevel(dailyLevel);
@@ -1565,7 +1567,10 @@ function renderCompositeBias(data, dailyData = null) {
         levelEl.style.color = colors.accent;
     }
     if (scoreEl) {
-        const scoreText = dailyVote === null ? '--' : `${dailyVote >= 0 ? '+' : ''}${dailyVote}`;
+        // Show composite score when available, fall back to old daily vote
+        const scoreText = Number.isFinite(scoreValue)
+            ? scoreValue.toFixed(2)
+            : (dailyVote === null ? '--' : `${dailyVote >= 0 ? '+' : ''}${dailyVote}`);
         scoreEl.textContent = `(${scoreText})`;
     }
     if (confEl) {
