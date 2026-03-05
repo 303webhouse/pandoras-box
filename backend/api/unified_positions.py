@@ -46,6 +46,24 @@ def _match_account_balance(account_filter: str, balance_name: str) -> bool:
     return name_lower in aliases or name_lower.startswith(filter_upper.lower())
 
 
+async def _adjust_account_cash(pool, account: str, delta: float):
+    """
+    Atomically adjust cash balance for the given account.
+    delta > 0 = cash increases, delta < 0 = cash decreases.
+    """
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT account_name, cash FROM account_balances")
+        for row in rows:
+            if _match_account_balance(account, row["account_name"]):
+                await conn.execute(
+                    "UPDATE account_balances SET cash = cash + $1, updated_at = NOW(), updated_by = 'auto' WHERE account_name = $2",
+                    round(delta, 2), row["account_name"],
+                )
+                logger.info("Cash adjusted for %s: %+.2f", row["account_name"], delta)
+                return
+    logger.warning("No matching account_balance row for account=%s", account)
+
+
 def normalize_spread_strikes(
     long_strike: float | None,
     short_strike: float | None,
@@ -308,6 +326,15 @@ async def create_position(req: CreatePositionRequest):
             req.source, req.signal_id, (req.account or "ROBINHOOD").upper(), req.notes,
             req.tags if req.tags else None,
         )
+
+    # Auto-adjust cash: deduct cost for debit, add premium for credit
+    if cost_basis:
+        s = (req.structure or "").lower()
+        cash_delta = cost_basis if s in CREDIT_STRUCTURES else -cost_basis
+        try:
+            await _adjust_account_cash(pool, (req.account or "ROBINHOOD").upper(), cash_delta)
+        except Exception as e:
+            logger.warning("Cash adjustment failed on create: %s", e)
 
     # If from signal, update signal action
     if req.signal_id:
@@ -864,6 +891,19 @@ async def close_position(position_id: str, req: ClosePositionRequest):
         except Exception as e:
             logger.warning(f"Could not update signal outcome: {e}")
 
+    # Auto-adjust cash: return exit proceeds (debit) or pay to close (credit)
+    if req.exit_price is not None:
+        s = (pos.get("structure") or "").lower()
+        a_type = (pos.get("asset_type") or "").upper()
+        is_stock = s in ("stock", "stock_long", "long_stock", "stock_short", "short_stock") or (not s and a_type == "EQUITY")
+        multiplier = 1 if is_stock else 100
+        exit_value = round(abs(req.exit_price) * multiplier * pos["quantity"], 2)
+        cash_delta = -exit_value if s in CREDIT_STRUCTURES else exit_value
+        try:
+            await _adjust_account_cash(pool, pos.get("account", "ROBINHOOD"), cash_delta)
+        except Exception as e:
+            logger.warning("Cash adjustment failed on close: %s", e)
+
     result = _row_to_dict(updated) if updated else pos
 
     try:
@@ -1001,6 +1041,16 @@ async def bulk_create_positions(req: BulkRequest):
                     item.source, item.notes, status,
                     exit_price, exit_date_val, realized_pnl, trade_outcome,
                 )
+
+            # Auto-adjust cash for OPEN positions only (closed imports don't affect current cash)
+            if status == "OPEN" and item.entry_price:
+                s_lower = (item.structure or "").lower()
+                bulk_cost = abs(item.entry_price) * (1 if s_lower in ("stock", "stock_long", "long_stock") else 100) * item.quantity
+                cash_delta = bulk_cost if s_lower in CREDIT_STRUCTURES else -bulk_cost
+                try:
+                    await _adjust_account_cash(pool, "ROBINHOOD", cash_delta)
+                except Exception:
+                    pass
 
             created.append({"position_id": position_id, "ticker": item.ticker, "status": status})
         except Exception as e:
