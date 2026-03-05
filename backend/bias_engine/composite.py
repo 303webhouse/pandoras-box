@@ -57,17 +57,17 @@ FACTOR_CONFIG = {
         "timeframe": "intraday",
     },
     # =====================================================================
-    # SWING FACTORS (6 factors, total weight: 0.38)
+    # SWING FACTORS (6 factors, total weight: 0.34)
     # Multi-day trend indicators for swing trade alignment.
     # =====================================================================
     "credit_spreads": {
-        "weight": 0.09,
+        "weight": 0.08,
         "staleness_hours": 48,
         "description": "HYG vs TLT ratio - measures credit market risk appetite",
         "timeframe": "swing",
     },
     "market_breadth": {
-        "weight": 0.07,
+        "weight": 0.06,
         "staleness_hours": 48,
         "description": "RSP vs SPY ratio - equal-weight vs cap-weight divergence",
         "timeframe": "swing",
@@ -78,10 +78,10 @@ FACTOR_CONFIG = {
         "description": "XLK/XLY vs XLP/XLU - offensive vs defensive flows",
         "timeframe": "swing",
     },
-    "spy_200sma_distance": {
-        "weight": 0.09,
+    "spy_50sma_distance": {
+        "weight": 0.07,
         "staleness_hours": 24,
-        "description": "SPY percent distance from 200-day SMA - trend strength",
+        "description": "SPY percent distance from 50-day SMA - intermediate trend strength",
         "timeframe": "swing",
     },
     "iv_regime": {
@@ -97,9 +97,15 @@ FACTOR_CONFIG = {
         "timeframe": "swing",
     },
     # =====================================================================
-    # MACRO FACTORS (8 factors, total weight: 0.36)
+    # MACRO FACTORS (9 factors, total weight: 0.40)
     # Long-term economic and structural indicators.
     # =====================================================================
+    "spy_200sma_distance": {
+        "weight": 0.04,
+        "staleness_hours": 24,
+        "description": "SPY percent distance from 200-day SMA - structural trend",
+        "timeframe": "macro",
+    },
     "yield_curve": {
         "weight": 0.06,
         "staleness_hours": 72,
