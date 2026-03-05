@@ -43,6 +43,7 @@ async def score_all_factors() -> Dict[str, FactorReading]:
         "market_breadth": "bias_filters.market_breadth",
         "sector_rotation": "bias_filters.sector_rotation",
         "spy_200sma_distance": "bias_filters.spy_200sma_distance",
+        "spy_50sma_distance": "bias_filters.spy_50sma_distance",
         "iv_regime": "bias_filters.iv_regime",
         "mcclellan_oscillator": "bias_filters.mcclellan_oscillator",
         # Macro (8)
