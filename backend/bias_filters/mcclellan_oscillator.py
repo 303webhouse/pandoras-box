@@ -35,12 +35,29 @@ except ImportError:
 
 async def compute_score() -> Optional[FactorReading]:
     """Compute McClellan Oscillator from NYSE advance/decline data."""
-    # Fetch advancing and declining issues
-    advn_data = await get_price_history("^ADVN", days=60)
-    decln_data = await get_price_history("^DECLN", days=60)
+    # Try multiple symbol variants — Yahoo Finance changes these periodically
+    advn_symbols = ["^ADVN", "^ADV", "ADVN"]
+    decln_symbols = ["^DECLN", "^DEC", "DECLN"]
+
+    advn_data = None
+    for sym in advn_symbols:
+        advn_data = await get_price_history(sym, days=60)
+        if advn_data is not None and not advn_data.empty and "close" in advn_data.columns:
+            logger.debug("mcclellan: ADVN fetched via %s (%d rows)", sym, len(advn_data))
+            break
+        advn_data = None
+
+    decln_data = None
+    for sym in decln_symbols:
+        decln_data = await get_price_history(sym, days=60)
+        if decln_data is not None and not decln_data.empty and "close" in decln_data.columns:
+            logger.debug("mcclellan: DECLN fetched via %s (%d rows)", sym, len(decln_data))
+            break
+        decln_data = None
 
     if advn_data is None or advn_data.empty or decln_data is None or decln_data.empty:
-        logger.warning("mcclellan: cannot fetch ADVN/DECLN data — trying Redis history")
+        logger.warning("mcclellan: cannot fetch ADVN/DECLN data (tried %s / %s) — trying Redis history",
+                       advn_symbols, decln_symbols)
         return await _compute_from_redis_history()
 
     # Extract close prices (daily values)
@@ -53,8 +70,14 @@ async def compute_score() -> Optional[FactorReading]:
     advn = advn_data[advn_col].astype(float)
     decln = decln_data[decln_col].astype(float)
 
-    # Align indices (both should be date-indexed)
-    combined = pd.DataFrame({"advn": advn, "decln": decln}).dropna()
+    # Align by position (indices may differ between symbols)
+    advn_vals = advn.dropna().reset_index(drop=True)
+    decln_vals = decln.dropna().reset_index(drop=True)
+    min_len = min(len(advn_vals), len(decln_vals))
+    combined = pd.DataFrame({
+        "advn": advn_vals.iloc[-min_len:].values,
+        "decln": decln_vals.iloc[-min_len:].values,
+    })
     if len(combined) < MIN_HISTORY_FOR_EMA:
         logger.info("mcclellan: insufficient data (%d days, need %d) — building baseline",
                      len(combined), MIN_HISTORY_FOR_EMA)

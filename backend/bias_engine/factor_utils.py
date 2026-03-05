@@ -22,7 +22,7 @@ from bias_engine.anomaly_alerts import send_alert
 logger = logging.getLogger(__name__)
 
 # Tickers that must stay on yfinance (no Polygon Indices/Currencies subscription).
-_YFINANCE_ONLY_SYMBOLS = {"^VIX", "^VIX3M", "^ADVN", "^DECLN", "DX-Y.NYB"}
+_YFINANCE_ONLY_SYMBOLS = {"^VIX", "^VIX3M", "^ADVN", "^DECLN", "^ADV", "^DEC", "ADVN", "DECLN", "DX-Y.NYB"}
 
 PRICE_CACHE_TTL = 900  # 15 minutes
 PRICE_CACHE_VERSION = "v3"

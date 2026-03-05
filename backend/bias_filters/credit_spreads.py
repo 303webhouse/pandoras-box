@@ -195,7 +195,15 @@ async def compute_credit_spread_score() -> Optional[FactorReading]:
     if "close" not in hyg.columns or "close" not in tlt.columns:
         return None
 
-    ratio = (hyg["close"] / tlt["close"]).dropna()
+    # Align indices before dividing to prevent NaN from mismatched dates
+    hyg_close = hyg["close"].dropna().reset_index(drop=True)
+    tlt_close = tlt["close"].dropna().reset_index(drop=True)
+    min_len = min(len(hyg_close), len(tlt_close))
+    if min_len < 20:
+        return None
+    hyg_close = hyg_close.iloc[-min_len:]
+    tlt_close = tlt_close.iloc[-min_len:]
+    ratio = (hyg_close / tlt_close).dropna()
     if len(ratio) < 20:
         return None
 
