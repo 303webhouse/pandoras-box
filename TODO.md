@@ -1,6 +1,6 @@
 # Pivot — Priorities & TODO
 
-**Last Updated:** March 6, 2026
+**Last Updated:** March 6, 2026 (end of session)
 
 ---
 
@@ -14,7 +14,7 @@
 
 ---
 
-## 🟠 Phase 1: Trading Strategies Review — ~85% Complete
+## 🟠 Phase 1: Trading Strategies Review — ~90% Complete
 
 ### ✅ Done (March 5-6 Sessions)
 
@@ -42,11 +42,8 @@
 - [x] Auto-committee disabled — cron commented out until confluence system dialed in
 - [x] Dead code cleanup — Triple Line handler, deprecated functions, old PineScript archived
 - [x] Twitter scraper tokens refreshed + daily health check cron added
-
-### 🔧 Building Now
-
-- [ ] **Trade logging pipeline** — Auto-detect when Nick takes a trade in Discord, prompt to confirm, write to decision_log.jsonl + Railway outcomes. `/log-trade` slash command backup. CC building.
-- [ ] **Macro narrative context** — Raw headlines block, macro prices (oil, gold, 10Y, DXY), persistent regime briefing file. CC building.
+- [x] Trade logging pipeline — auto-detect trades in Discord, confirmation buttons, `/log-trade` command, writes to decision_log.jsonl + Railway outcomes
+- [x] Macro narrative context — raw headlines block, macro prices (oil, gold, 10Y, DXY, VIX), persistent regime briefing file, `/macro-update` Discord command, Railway endpoint
 
 ### 📋 Remaining
 
@@ -115,7 +112,7 @@
 
 ---
 
-## ✅ Completed (March 6, 2026 Session)
+## ✅ Completed (March 6, 2026 Session) — 19 builds shipped
 
 - [x] Full signal system health audit (389 trade ideas, 6 strategies, 9 CTA sub-types)
 - [x] All 10 PineScripts backed up to repo + inventory doc
@@ -142,6 +139,8 @@
 - [x] PLTR Monday playbook alert scheduled (9:30 AM ET Discord)
 - [x] Macro briefing file seeded on VPS (Iran war, oil, stagflation context)
 - [x] Dead code cleanup (Triple Line, deprecated functions, old PineScript archived)
+- [x] Trade logging pipeline (auto-detect trades, confirmation buttons, /log-trade, dual logging)
+- [x] Macro narrative context (raw headlines, macro prices, regime briefing, /macro-update command)
 
 ## ✅ Completed (March 5, 2026 Session)
 
