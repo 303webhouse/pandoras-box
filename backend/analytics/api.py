@@ -1936,6 +1936,33 @@ async def log_trade_leg(request: LogTradeLegRequest):
     return {"status": "ok", "leg": created}
 
 
+class ManualOutcomeRequest(BaseModel):
+    signal_id: str
+    symbol: str
+    signal_type: str = "MANUAL"
+    direction: str = ""
+    entry: Optional[float] = None
+    stop: Optional[float] = None
+    t1: Optional[float] = None
+
+
+@analytics_router.post("/outcomes/manual")
+async def create_manual_outcome(request: ManualOutcomeRequest):
+    """Create a PENDING signal outcome for a manually-logged trade."""
+    from signals.pipeline import write_signal_outcome
+    signal_data = {
+        "signal_id": request.signal_id,
+        "ticker": request.symbol,
+        "signal_type": request.signal_type,
+        "direction": request.direction,
+        "entry_price": request.entry,
+        "stop_loss": request.stop,
+        "target_1": request.t1,
+    }
+    await write_signal_outcome(signal_data)
+    return {"status": "ok", "signal_id": request.signal_id}
+
+
 @analytics_router.post("/log-signal")
 async def log_signal_endpoint(request: LogSignalRequest):
     data = request.model_dump()

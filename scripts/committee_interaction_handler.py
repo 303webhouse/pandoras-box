@@ -1,11 +1,16 @@
 """
-Committee Interaction Handler — Brief 03C / Brief 10 / Committee Refactor
+Committee Interaction Handler — Brief 03C / Brief 10 / Committee Refactor / Trade Logging
 
 Handles Discord button interactions for committee recommendations:
   - RUN COMMITTEE → load pending signal, run 4-agent committee, replace embed
   - TAKE  → log decision, prompt Nick for fill screenshot, save last_take.json
   - PASS  → log decision
   - LATER → log decision (deferred for re-evaluation)
+
+Trade logging features:
+  - Auto-detect trade entry messages ("went short PLTR", "I'm in", etc.)
+  - /log-trade text command for explicit manual logging
+  - Confirm via buttons → write decision_log.jsonl + POST to Railway
 
 Deploy path: /opt/openclaw/workspace/scripts/committee_interaction_handler.py
 """
@@ -14,8 +19,11 @@ import json
 import logging
 import os
 import pathlib
+import re
 import sys
-from datetime import datetime, timezone
+import urllib.request
+import urllib.error
+from datetime import datetime, timezone, timedelta
 
 import discord
 
@@ -32,6 +40,102 @@ if str(SCRIPT_DIR) not in sys.path:
 # In-memory store for pending committee recommendations awaiting interaction
 # Key: message_id (int), Value: recommendation dict
 _pending_recommendations: dict[int, dict] = {}
+
+
+# ── Trade Detection ──────────────────────────────────────────────────────────
+
+TRADE_ENTRY_PATTERNS = [
+    re.compile(r"\btook the trade\b", re.I),
+    re.compile(r"\bjust entered\b", re.I),
+    re.compile(r"\bi['\u2019]m in\b", re.I),
+    re.compile(r"\bwent (long|short)\b", re.I),
+    re.compile(r"\b(bought|sold|opened|filled|executed)\s", re.I),
+    re.compile(r"\btook a position\b", re.I),
+    re.compile(r"\bentered (a |the )?(long|short)\b", re.I),
+    re.compile(r"\bfilled (at|on)\b", re.I),
+]
+
+TICKER_RE = re.compile(r"\b([A-Z]{1,5})\b")
+PRICE_RE = re.compile(r"\$\s?([\d]+(?:\.[\d]{1,2})?)")
+
+DIRECTION_KEYWORDS = {
+    "long": "LONG", "short": "SHORT", "bull": "LONG", "bear": "SHORT",
+    "bought": "LONG", "sold": "SHORT", "calls": "LONG", "puts": "SHORT",
+}
+
+# Common English words that look like tickers — filter these out
+_TICKER_BLACKLIST = frozenset({
+    "I", "A", "IT", "AT", "IN", "ON", "OR", "AM", "PM", "OK", "UP", "DO",
+    "GO", "SO", "IF", "NO", "IS", "HE", "WE", "AN", "TO", "THE", "FOR",
+    "AND", "BUT", "NOT", "ALL", "HAS", "HAD", "GET", "GOT", "WAS", "ARE",
+    "CAN", "DID", "MAY", "SAY", "NOW", "NEW", "OLD", "BIG", "OUT", "PUT",
+    "SET", "RUN", "OUR", "TWO", "HOW", "ITS", "LET", "TOP", "FEW", "TRY",
+    "OWN", "DAY", "TOO", "USE", "HER", "HIM", "JUST", "LONG", "SHORT",
+    "TAKE", "PASS", "FILL", "SKIP", "LOG",
+})
+
+
+def _extract_trade_details(text: str) -> dict:
+    """Extract ticker, direction, and entry price from a message."""
+    details: dict = {"ticker": None, "direction": None, "entry_price": None}
+
+    # Direction
+    text_lower = text.lower()
+    for kw, direction in DIRECTION_KEYWORDS.items():
+        if kw in text_lower.split():
+            details["direction"] = direction
+            break
+
+    # Ticker — first uppercase 1-5 letter word not in blacklist
+    for m in TICKER_RE.finditer(text):
+        candidate = m.group(1)
+        if candidate not in _TICKER_BLACKLIST and len(candidate) >= 2:
+            details["ticker"] = candidate
+            break
+
+    # Price — first $XXX.XX pattern
+    price_match = PRICE_RE.search(text)
+    if price_match:
+        try:
+            details["entry_price"] = float(price_match.group(1))
+        except ValueError:
+            pass
+
+    return details
+
+
+def _load_last_take() -> dict | None:
+    """Load last_take.json if it exists and is < 2 hours old."""
+    state_path = STATE_DIR / "last_take.json"
+    try:
+        if not state_path.exists():
+            return None
+        data = json.loads(state_path.read_text())
+        ts_str = data.get("timestamp", "")
+        if ts_str:
+            ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+            if datetime.now(timezone.utc) - ts > timedelta(hours=2):
+                return None
+        return data
+    except Exception:
+        return None
+
+
+def _post_to_railway(path: str, payload: dict, api_key: str, base_url: str) -> dict | None:
+    """POST JSON to a Railway API endpoint. Returns response dict or None."""
+    url = f"{base_url.rstrip('/')}{path}"
+    headers = {
+        "Content-Type": "application/json",
+        "X-API-Key": api_key,
+    }
+    body = json.dumps(payload, default=str).encode("utf-8")
+    try:
+        req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except Exception as e:
+        logger.warning("Railway POST %s failed: %s", path, e)
+        return None
 
 
 def register_pending(message_id: int, recommendation: dict) -> None:
@@ -170,6 +274,214 @@ class CommitteeView(discord.ui.View):
             ephemeral=True,
         )
         self.stop()
+
+
+# ── Trade Log Confirmation View ──────────────────────────────────────────────
+
+class TradeLogView(discord.ui.View):
+    """Confirm & Log / Cancel buttons for trade entry detection."""
+
+    def __init__(self, trade_details: dict, cfg: dict = None, env_file: dict = None, timeout: float = 300.0):
+        super().__init__(timeout=timeout)
+        self.trade_details = trade_details
+        self._cfg = cfg or {}
+        self._env_file = env_file or {}
+
+    @discord.ui.button(label="\u2705 Confirm & Log", style=discord.ButtonStyle.green)
+    async def confirm_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer()
+        details = self.trade_details
+        ticker = details.get("ticker", "?")
+        signal_id = details.get("signal_id", "MANUAL")
+
+        # 1. Write to decision_log.jsonl (VPS)
+        try:
+            from committee_decisions import log_decision
+            is_committee = not signal_id.startswith("MANUAL_")
+            log_decision(
+                signal_id=signal_id,
+                nick_decision="TAKE",
+                committee_action="REVIEWED" if is_committee else "NOT_REVIEWED",
+                is_override=False,
+                recommendation={
+                    "signal": {
+                        "ticker": ticker,
+                        "direction": details.get("direction"),
+                        "signal_type": "MANUAL" if not is_committee else None,
+                        "entry_price": details.get("entry_price"),
+                        "stop_loss": details.get("stop_loss"),
+                        "target_1": details.get("target"),
+                    },
+                },
+            )
+            logger.info("Logged manual trade to decision_log: %s %s", ticker, signal_id)
+        except Exception as e:
+            logger.warning("Failed to log manual trade: %s", e)
+
+        # 2. POST to Railway /api/analytics/log-trade
+        from pivot2_committee import load_openclaw_config, load_env_file, pick_env, OPENCLAW_ENV_FILE
+        cfg = self._cfg or load_openclaw_config()
+        env_file = self._env_file or load_env_file(OPENCLAW_ENV_FILE)
+        api_key = pick_env("PIVOT_API_KEY", cfg, env_file) or ""
+        base_url = pick_env("PANDORA_API_URL", cfg, env_file) or "https://pandoras-box-production.up.railway.app"
+
+        trade_payload = {
+            "signal_id": signal_id,
+            "ticker": ticker,
+            "direction": details.get("direction"),
+            "entry_price": details.get("entry_price"),
+            "stop_loss": details.get("stop_loss"),
+            "target_1": details.get("target"),
+            "notes": details.get("vehicle") or "",
+            "origin": "pivot_chat",
+        }
+        _post_to_railway("/api/analytics/log-trade", trade_payload, api_key, base_url)
+
+        # 3. POST to Railway /api/analytics/outcomes/manual
+        outcome_payload = {
+            "signal_id": signal_id,
+            "symbol": ticker,
+            "signal_type": f"MANUAL_{details.get('direction', 'UNK')}",
+            "direction": details.get("direction") or "",
+            "entry": details.get("entry_price"),
+            "stop": details.get("stop_loss"),
+            "t1": details.get("target"),
+        }
+        _post_to_railway("/api/analytics/outcomes/manual", outcome_payload, api_key, base_url)
+
+        # 4. Confirm + disable buttons
+        await interaction.followup.send(
+            f"\u2705 **Trade logged:** {ticker} {details.get('direction', '')} "
+            f"@ ${details.get('entry_price', '?')} \u2014 signal `{signal_id}`"
+        )
+        for child in self.children:
+            child.disabled = True
+        try:
+            await interaction.message.edit(view=self)
+        except Exception:
+            pass
+        self.stop()
+
+    @discord.ui.button(label="\u274c Cancel", style=discord.ButtonStyle.grey)
+    async def cancel_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
+        await interaction.followup.send("Trade logging cancelled.", ephemeral=True)
+        for child in self.children:
+            child.disabled = True
+        try:
+            await interaction.message.edit(view=self)
+        except Exception:
+            pass
+        self.stop()
+
+
+# ── Trade Detection Handlers ─────────────────────────────────────────────────
+
+async def _handle_trade_detection(message: discord.Message, cfg: dict, env_file: dict) -> None:
+    """Check message for trade entry patterns and prompt to log."""
+    text = message.content.strip()
+
+    details = _extract_trade_details(text)
+    last_take = _load_last_take()
+
+    # Link to recent committee TAKE if ticker matches
+    if last_take and details.get("ticker") and last_take.get("ticker") == details["ticker"]:
+        details["signal_id"] = last_take["signal_id"]
+        details["direction"] = details.get("direction") or last_take.get("direction")
+    elif last_take and not details.get("ticker"):
+        # No ticker in message but recent TAKE — assume same ticker
+        details["ticker"] = last_take["ticker"]
+        details["direction"] = details.get("direction") or last_take.get("direction")
+        details["signal_id"] = last_take["signal_id"]
+
+    if not details.get("ticker"):
+        await message.reply(
+            "\U0001f4dd Looks like you entered a trade but I couldn't extract the ticker. "
+            "Use `/log-trade TICKER DIRECTION PRICE` to log it manually."
+        )
+        return
+
+    # Generate signal_id if not from committee
+    if not details.get("signal_id"):
+        ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        details["signal_id"] = f"MANUAL_{details['ticker']}_{details.get('direction', 'UNK')}_{ts}"
+
+    linked = "" if details["signal_id"].startswith("MANUAL_") else " (linked to committee signal)"
+    confirm_msg = (
+        f"\U0001f4dd **Trade entry detected{linked}:**\n"
+        f"Ticker: **{details.get('ticker', '?')}**\n"
+        f"Direction: **{details.get('direction', '?')}**\n"
+        f"Entry: **${details.get('entry_price', '?')}**\n"
+        f"Signal: `{details.get('signal_id', 'MANUAL')}`\n\n"
+        f"Confirm to log, or tell me the correct details."
+    )
+    view = TradeLogView(details, cfg=cfg, env_file=env_file)
+    await message.reply(confirm_msg, view=view)
+
+
+async def _handle_log_trade_command(message: discord.Message, cfg: dict, env_file: dict) -> None:
+    """Parse: /log-trade PLTR SHORT 158.50 stop=161.50 target=150 vehicle=155p/150p"""
+    text = message.content[len("/log-trade"):].strip()
+    parts = text.split()
+
+    if len(parts) < 2:
+        await message.reply(
+            "Usage: `/log-trade TICKER DIRECTION [PRICE] [stop=X] [target=X] [vehicle=desc]`\n"
+            "Example: `/log-trade PLTR SHORT 158.50 stop=161.50 target=150`"
+        )
+        return
+
+    ticker = parts[0].upper()
+    direction = parts[1].upper() if len(parts) > 1 else "?"
+    entry_price = None
+    stop_loss = None
+    target = None
+    vehicle = None
+
+    for p in parts[2:]:
+        if p.startswith("stop="):
+            try:
+                stop_loss = float(p[5:])
+            except ValueError:
+                pass
+        elif p.startswith("target="):
+            try:
+                target = float(p[7:])
+            except ValueError:
+                pass
+        elif p.startswith("vehicle="):
+            vehicle = p[8:].strip("\"'")
+        else:
+            try:
+                entry_price = float(p.replace("$", ""))
+            except ValueError:
+                pass
+
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    details = {
+        "ticker": ticker,
+        "direction": direction,
+        "entry_price": entry_price,
+        "stop_loss": stop_loss,
+        "target": target,
+        "vehicle": vehicle,
+        "signal_id": f"MANUAL_{ticker}_{direction}_{ts}",
+    }
+
+    # Link to last committee TAKE if ticker matches
+    last_take = _load_last_take()
+    if last_take and last_take.get("ticker") == ticker:
+        details["signal_id"] = last_take["signal_id"]
+
+    linked = "" if details["signal_id"].startswith("MANUAL_") else " (linked to committee signal)"
+    confirm_msg = (
+        f"\U0001f4dd **Log trade{linked}:**\n"
+        f"Ticker: **{ticker}** | Direction: **{direction}**\n"
+        f"Entry: **${entry_price or '?'}** | Stop: **${stop_loss or '?'}** | Target: **${target or '?'}**\n"
+        f"Signal: `{details['signal_id']}`"
+    )
+    view = TradeLogView(details, cfg=cfg, env_file=env_file)
+    await message.reply(confirm_msg, view=view)
 
 
 # ── Run Committee Button Handler ──────────────────────────────────────────────
@@ -494,9 +806,48 @@ def main():
     intents.message_content = True
     bot = discord.Client(intents=intents)
 
+    # Channel IDs to watch for trade entry messages
+    _watch_channel_ids: set[int] = set()
+    committee_ch = pick_env("COMMITTEE_CHANNEL_ID", cfg, env_file)
+    if committee_ch:
+        try:
+            _watch_channel_ids.add(int(committee_ch))
+        except ValueError:
+            pass
+
     @bot.event
     async def on_ready():
         logger.info(f"Committee Interaction Handler ready as {bot.user}")
+        if _watch_channel_ids:
+            logger.info(f"Watching channels for trade detection: {_watch_channel_ids}")
+        else:
+            logger.warning("No COMMITTEE_CHANNEL_ID set — trade detection disabled")
+
+    @bot.event
+    async def on_message(message: discord.Message):
+        # Ignore bots and messages outside watched channels
+        if message.author.bot:
+            return
+        if _watch_channel_ids and message.channel.id not in _watch_channel_ids:
+            return
+
+        text = message.content.strip()
+        if not text:
+            return
+
+        # /log-trade command
+        if text.lower().startswith("/log-trade"):
+            await _handle_log_trade_command(message, cfg, env_file)
+            return
+
+        # "skip fill" acknowledgement
+        if text.lower() == "skip fill":
+            await message.reply("Got it \u2014 skipping fill logging for this one.")
+            return
+
+        # Auto-detect trade entry patterns
+        if any(p.search(text) for p in TRADE_ENTRY_PATTERNS):
+            await _handle_trade_detection(message, cfg, env_file)
 
     setup_committee_buttons(bot)
     bot.run(discord_token, log_handler=None)
