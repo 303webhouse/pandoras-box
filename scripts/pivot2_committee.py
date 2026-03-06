@@ -543,8 +543,23 @@ def save_circuit_breaker(signal: dict) -> None:
     CB_FILE.write_text(json.dumps(events, indent=2), encoding="utf-8")
 
 
+# ETFs don't have earnings — skip yfinance quoteSummary call (returns 404 for ETFs)
+_ETF_TICKERS = {
+    "SPY", "QQQ", "IWM", "DIA", "SMH", "XLF", "XLE", "XLU",
+    "XLK", "XLV", "XLI", "XLP", "XLY", "XLB", "XLRE",
+    "EFA", "EEM", "GLD", "SLV", "TLT", "HYG", "LQD",
+    "VTI", "VOO", "ARKK", "SOXX", "KRE", "XBI", "IBB",
+    "FXI", "KWEB", "GDX", "GDXJ", "USO", "UNG",
+}
+
+
 def check_earnings_proximity(ticker: str, dte_days: int = 30) -> dict:
     """Check if ticker has earnings within the DTE window (default 30 days for swing trades)."""
+    _no_earnings = {"has_earnings": False, "days_until": None, "date": None, "within_dte_window": False}
+
+    if not ticker or ticker.upper() in _ETF_TICKERS:
+        return _no_earnings
+
     try:
         import yfinance as yf
         t = yf.Ticker(ticker)
@@ -563,9 +578,9 @@ def check_earnings_proximity(ticker: str, dte_days: int = 30) -> dict:
                     "date": str(earn_date),
                     "within_dte_window": days <= dte_days,
                 }
-    except Exception:
-        pass
-    return {"has_earnings": False, "days_until": None, "date": None, "within_dte_window": False}
+    except Exception as e:
+        log.warning("Earnings check failed for %s: %s", ticker, e)
+    return _no_earnings
 
 
 def _compute_timeframe_fit(direction: str, context: dict) -> str:
@@ -600,7 +615,7 @@ def build_market_context(signal: dict, api_url: str, api_key: str) -> dict:
     # 1. Bias composite
     composite = {}
     try:
-        composite = http_json(url=f"{base}/bias/composite", headers=headers, timeout=30)
+        composite = http_json(url=f"{base}/api/bias/composite", headers=headers, timeout=30)
     except Exception:
         pass
 
@@ -633,11 +648,21 @@ def build_market_context(signal: dict, api_url: str, api_key: str) -> dict:
     # 7. Timeframe sub-scores
     timeframes = {}
     try:
-        tf_data = http_json(url=f"{base}/bias/composite/timeframes", headers=headers, timeout=30)
+        tf_data = http_json(url=f"{base}/api/bias/composite/timeframes", headers=headers, timeout=30)
         if isinstance(tf_data, dict):
             timeframes = tf_data.get("timeframes", {})
     except Exception:
         pass
+
+    # 8. Circuit breaker live status from Railway
+    cb_status = {}
+    try:
+        cb_status = http_json(url=f"{base}/webhook/circuit_breaker/status", headers=headers, timeout=10)
+    except Exception:
+        pass
+
+    # Extract key factors from composite response for agent context
+    factors_raw = composite.get("factors", {}) if isinstance(composite, dict) else {}
 
     return {
         "bias_composite": {
@@ -645,9 +670,11 @@ def build_market_context(signal: dict, api_url: str, api_key: str) -> dict:
             "composite_score": composite.get("composite_score") if isinstance(composite, dict) else None,
             "confidence": composite.get("confidence", "UNKNOWN") if isinstance(composite, dict) else "UNKNOWN",
             "timeframes": timeframes,
+            "factors": factors_raw,
         },
         "defcon": defcon,
         "circuit_breakers": cb_events,
+        "circuit_breaker_status": cb_status.get("circuit_breaker", {}) if isinstance(cb_status, dict) else {},
         "earnings": earnings,
         "zone": zone,
         "portfolio": portfolio,
