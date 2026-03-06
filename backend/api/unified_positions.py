@@ -1436,6 +1436,104 @@ async def sync_v2_to_legacy() -> dict:
     return {"added": added, "updated": updated, "closed": closed}
 
 
+async def sync_legacy_to_v2() -> dict:
+    """
+    Reverse sync: push legacy open_positions changes into unified_positions.
+    Called after screenshot sync so v2 stays current.
+    - Active in legacy but missing in v2 → create in v2
+    - Active in legacy with different qty → update v2
+    - OPEN in v2 but inactive/missing in legacy → close in v2
+    """
+    pool = await get_postgres_client()
+
+    async with pool.acquire() as conn:
+        legacy_rows = await conn.fetch(
+            "SELECT * FROM open_positions WHERE is_active = TRUE"
+        )
+        v2_rows = await conn.fetch(
+            "SELECT * FROM unified_positions WHERE status = 'OPEN'"
+        )
+
+    # Index v2 by (ticker, long_strike, short_strike, expiry)
+    def _v2_key(row):
+        return (
+            row["ticker"],
+            float(row["long_strike"]) if row.get("long_strike") else None,
+            float(row["short_strike"]) if row.get("short_strike") else None,
+            str(row["expiry"]) if row.get("expiry") else None,
+        )
+
+    v2_map = {}
+    for row in v2_rows:
+        v2_map[_v2_key(row)] = row
+
+    added = 0
+    updated = 0
+    closed = 0
+    matched_keys = set()
+
+    async with pool.acquire() as conn:
+        for leg in legacy_rows:
+            strike = float(leg["strike"]) if leg.get("strike") else None
+            ss = float(leg["short_strike"]) if leg.get("short_strike") else None
+            exp_str = str(leg["expiry"]) if leg.get("expiry") else None
+
+            key = (leg["ticker"], strike, ss, exp_str)
+            v2 = v2_map.get(key)
+
+            if v2:
+                matched_keys.add(_v2_key(v2))
+                # Update qty if changed
+                if leg["quantity"] != v2["quantity"]:
+                    await conn.execute(
+                        "UPDATE unified_positions SET quantity = $1, updated_at = NOW() WHERE position_id = $2",
+                        leg["quantity"], v2["position_id"],
+                    )
+                    updated += 1
+            else:
+                # Create in v2
+                position_id = _generate_position_id(leg["ticker"])
+                opt = (leg.get("option_type") or "").lower()
+                spread = (leg.get("spread_type") or "").lower()
+                direction = leg.get("direction") or "LONG"
+
+                # Infer structure
+                if ss:
+                    structure = f"{opt}_{spread}_spread" if spread else f"{opt}_spread"
+                else:
+                    structure = f"long_{opt}" if direction == "LONG" else f"short_{opt}"
+
+                v2_dir = "BEARISH" if direction == "SHORT" else "BULLISH"
+                cost = float(leg["cost_basis"]) if leg.get("cost_basis") else None
+                entry = round(cost / (leg["quantity"] * 100), 2) if cost and leg["quantity"] else None
+
+                await conn.execute("""
+                    INSERT INTO unified_positions (
+                        position_id, ticker, asset_type, structure, direction,
+                        entry_price, quantity, cost_basis,
+                        expiry, long_strike, short_strike,
+                        source, account, status
+                    ) VALUES ($1, $2, 'OPTION', $3, $4, $5, $6, $7, $8, $9, $10, 'SCREENSHOT_SYNC', $11, 'OPEN')
+                """, position_id, leg["ticker"], structure, v2_dir,
+                    entry, leg["quantity"], cost,
+                    leg.get("expiry"), strike, ss,
+                    (leg.get("account") or "robinhood").upper())
+                added += 1
+
+        # Close v2 positions not in legacy
+        for row in v2_rows:
+            if _v2_key(row) not in matched_keys:
+                await conn.execute(
+                    "UPDATE unified_positions SET status = 'CLOSED', exit_date = NOW(), updated_at = NOW() WHERE position_id = $1",
+                    row["position_id"],
+                )
+                closed += 1
+
+    if added or updated or closed:
+        logger.info("legacy→v2 sync: added=%d updated=%d closed=%d", added, updated, closed)
+    return {"added": added, "updated": updated, "closed": closed}
+
+
 @router.post("/v2/positions/mark-to-market")
 async def mark_to_market():
     """HTTP wrapper for mark-to-market. Background loop calls run_mark_to_market() directly."""
