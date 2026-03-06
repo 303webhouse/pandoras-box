@@ -521,3 +521,62 @@ async def get_trade_history_stats():
         },
         "total_cash_flows": float(cf_total),
     }
+
+
+# ── 8. Cash Flow Logging (withdrawals / deposits) ──
+
+class CashFlowCreate(BaseModel):
+    amount: float  # positive = deposit, negative = withdrawal
+    flow_type: str = "ACH"  # ACH, WIRE, TRANSFER, ADJUSTMENT
+    description: Optional[str] = None
+    activity_date: Optional[str] = None  # ISO date, defaults to today
+    account_name: str = "Robinhood"
+    adjust_balance: bool = True  # auto-adjust account_balances cash
+
+
+@router.post("/cash-flows")
+async def log_cash_flow(body: CashFlowCreate, _=Depends(verify_api_key)):
+    """Log a withdrawal or deposit. Optionally adjusts account cash balance."""
+    pool = await get_postgres_client()
+
+    act_date = date.today()
+    if body.activity_date:
+        try:
+            act_date = date.fromisoformat(body.activity_date)
+        except ValueError:
+            pass
+
+    row = await pool.fetchrow("""
+        INSERT INTO cash_flows (account_name, flow_type, amount, description, activity_date, imported_from)
+        VALUES ($1, $2, $3, $4, $5, 'manual')
+        RETURNING *
+    """, body.account_name, body.flow_type, body.amount, body.description, act_date)
+
+    result = _row_to_dict(row)
+
+    if body.adjust_balance:
+        updated = await pool.execute("""
+            UPDATE account_balances
+            SET cash = cash + $1, balance = balance + $1,
+                updated_at = NOW(), updated_by = 'cash_flow'
+            WHERE account_name = $2
+        """, body.amount, body.account_name)
+        result["balance_adjusted"] = updated != "UPDATE 0"
+
+    return result
+
+
+@router.get("/cash-flows")
+async def get_cash_flows(
+    account: Optional[str] = Query(None),
+    limit: int = Query(50, ge=1, le=500),
+):
+    """List recent cash flows (withdrawals, deposits)."""
+    pool = await get_postgres_client()
+    rows = await pool.fetch("""
+        SELECT * FROM cash_flows
+        WHERE ($1::text IS NULL OR account_name = $1)
+        ORDER BY activity_date DESC, id DESC
+        LIMIT $2
+    """, account, limit)
+    return [_row_to_dict(r) for r in rows]
