@@ -1480,6 +1480,27 @@ def _format_sector_rotation_context(data: Any) -> str:
     return f"Sector Rotation: {bias}{spread_text}{sector_text}" + (f" — {desc}" if desc and desc != "Awaiting data" else "")
 
 
+def _format_macro_briefing_context(data: Any) -> str:
+    """Format persistent macro briefing into terse context block."""
+    if not isinstance(data, dict):
+        return "Macro Backdrop: unavailable"
+    briefing = data.get("briefing")
+    if not isinstance(briefing, dict):
+        return "Macro Backdrop: not set"
+    regime = briefing.get("regime") or "UNKNOWN"
+    narrative = briefing.get("narrative") or ""
+    key_facts = briefing.get("key_facts") or []
+    if not narrative and not key_facts:
+        return f"Macro Backdrop: {regime}"
+    lines = [f"Macro Backdrop: {regime}"]
+    if narrative:
+        lines.append(narrative)
+    if key_facts:
+        for fact in key_facts[:7]:
+            lines.append(f"- {fact}")
+    return "\n".join(lines)
+
+
 async def get_strategy_health_context(days: int = 30) -> str:
     endpoint = f"/analytics/strategy-health?days={max(1, int(days))}"
     async with aiohttp.ClientSession() as session:
@@ -1824,6 +1845,7 @@ async def build_market_context(user_text: str = "", ticker_hint: Optional[str] =
             _fetch_json(session, "/api/trade-ideas?limit=5&status=ACTIVE"),
             _fetch_json(session, "/webhook/circuit_breaker/status"),
             _fetch_json(session, "/api/sector-rotation/status"),
+            _fetch_json(session, "/api/macro/briefing"),
         ]
         results = await asyncio.gather(*(base_tasks + quote_tasks + hub_tasks), return_exceptions=True)
 
@@ -1848,6 +1870,7 @@ async def build_market_context(user_text: str = "", ticker_hint: Optional[str] =
     trade_ideas_data = safe_result(hub_offset + 2)
     cb_data = safe_result(hub_offset + 3)
     sector_data = safe_result(hub_offset + 4)
+    macro_briefing_data = as_dict(safe_result(hub_offset + 5))
 
     lines = [
         _format_bias_context(bias_state),
@@ -1863,6 +1886,7 @@ async def build_market_context(user_text: str = "", ticker_hint: Optional[str] =
     lines.append(_format_trade_ideas_context(trade_ideas_data))
     lines.append(_format_circuit_breaker_context(cb_data))
     lines.append(_format_sector_rotation_context(sector_data))
+    lines.append(_format_macro_briefing_context(macro_briefing_data))
 
     return "\n".join(lines)
 
