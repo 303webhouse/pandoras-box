@@ -153,9 +153,32 @@ async def lifespan(app: FastAPI):
                 logger.warning("Mark-to-market loop error: %s", e)
             await asyncio.sleep(900)  # 15 minutes
 
+    # Confluence engine: group signals by ticker+direction every 15 min
+    async def confluence_engine_loop():
+        """Run confluence scan during market hours."""
+        import pytz
+        from datetime import datetime as dt_cls
+
+        # Initial delay to let other systems start first
+        await asyncio.sleep(60)
+
+        while True:
+            try:
+                et = dt_cls.now(pytz.timezone("America/New_York"))
+                # Market hours: 9:30 AM - 4:30 PM ET, weekdays
+                if et.weekday() < 5 and 9 <= et.hour < 17:
+                    from confluence.engine import run_confluence_scan
+                    await run_confluence_scan()
+                else:
+                    logger.debug("Confluence engine: outside market hours, skipping")
+            except Exception as e:
+                logger.warning("Confluence engine error: %s", e)
+            await asyncio.sleep(900)  # 15 minutes
+
     expiry_task = asyncio.create_task(signal_expiry_loop())
     universe_task = asyncio.create_task(universe_cache_loop())
     mtm_task = asyncio.create_task(mark_to_market_loop())
+    confluence_task = asyncio.create_task(confluence_engine_loop())
 
     logger.info("✅ Pandora's Box is live")
 
@@ -165,6 +188,7 @@ async def lifespan(app: FastAPI):
     expiry_task.cancel()
     universe_task.cancel()
     mtm_task.cancel()
+    confluence_task.cancel()
     logger.info("🛑 Shutting down Pandora's Box...")
     await redis_client.close()
     await postgres_client.close()
@@ -318,6 +342,7 @@ from api.trade_ideas import router as trade_ideas_router
 from api.accept_flow import router as accept_flow_router
 from api.committee_bridge import router as committee_bridge_router
 from api.market_data import router as market_data_router
+from api.confluence import router as confluence_router
 
 app.include_router(webhook_router, prefix="/webhook", tags=["webhooks"])
 app.include_router(circuit_breaker_router, prefix="/webhook", tags=["circuit-breaker"])
@@ -351,6 +376,7 @@ app.include_router(trade_ideas_router, prefix="/api", tags=["trade-ideas"])
 app.include_router(accept_flow_router, prefix="/api", tags=["accept-flow"])
 app.include_router(committee_bridge_router, prefix="/api", tags=["committee"])
 app.include_router(market_data_router, prefix="/api", tags=["market-data"])
+app.include_router(confluence_router, prefix="/api", tags=["confluence"])
 
 # Serve frontend static files
 # Multiple path resolution strategies for different deployment environments
@@ -436,5 +462,5 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=8000,
         reload=True,
-        log_level="info"
+        log_level="info",
     )
