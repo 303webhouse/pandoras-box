@@ -1,0 +1,11 @@
+//@version=6
+indicator("McClellan Webhook", overlay=false)
+
+advn = request.security("ADVN", "D", close)
+decln = request.security("DECN", "D", close)
+
+plot(advn, "ADVN", color.green)
+plot(decln, "DECN", color.red)
+
+if barstate.isconfirmed
+    alert('{"advn":' + str.tostring(advn) + ',"decln":' + str.tostring(decln) + '}', alert.freq_once_per_bar)
