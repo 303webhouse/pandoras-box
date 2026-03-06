@@ -40,6 +40,26 @@ HG_CONFIG = {
 # Track last signal bar index per ticker to enforce cooldown
 _cooldown_tracker: Dict[str, int] = {}
 
+# VIX-adjusted touch tolerance (refreshed each scan cycle)
+_hg_touch_tolerance: float = HG_CONFIG["touch_tolerance_pct"]
+
+
+async def _refresh_hg_vix_adjustments() -> None:
+    """Widen touch tolerance in high-VIX environments."""
+    global _hg_touch_tolerance
+    try:
+        from bias_engine.composite import get_cached_composite
+        cached = await get_cached_composite()
+        if cached and cached.factors:
+            vix = cached.factors.get("vix_term")
+            if vix and vix.raw_data:
+                vix_level = vix.raw_data.get("vix", 0)
+                _hg_touch_tolerance = 0.25 if vix_level >= 25 else 0.15
+                return
+    except Exception:
+        pass
+    _hg_touch_tolerance = HG_CONFIG["touch_tolerance_pct"]
+
 
 def _fetch_1h_bars(ticker: str) -> pd.DataFrame:
     """Fetch 1H bars via yfinance (blocking — call via asyncio.to_thread)."""
@@ -72,8 +92,8 @@ def calculate_holy_grail_indicators(df: pd.DataFrame) -> pd.DataFrame:
     # RSI
     df["rsi"] = ta.rsi(df["Close"], length=HG_CONFIG["rsi_length"])
 
-    # EMA touch tolerance band
-    df["ema_tolerance"] = df["ema20"] * (HG_CONFIG["touch_tolerance_pct"] / 100.0)
+    # EMA touch tolerance band (VIX-adjusted at scan time via _hg_touch_tolerance)
+    df["ema_tolerance"] = df["ema20"] * (_hg_touch_tolerance / 100.0)
     df["ema_upper"] = df["ema20"] + df["ema_tolerance"]
     df["ema_lower"] = df["ema20"] - df["ema_tolerance"]
 
@@ -133,12 +153,17 @@ def check_holy_grail_signals(df: pd.DataFrame, ticker: str) -> List[Dict]:
     )
 
     # Short: ADX strong, downtrend, previous bar pulled back to EMA, current closes below EMA
+    # In strong downtrends (ADX >= 30 + DI- > 1.5x DI+), RSI stays "oversold" for weeks.
+    # Skip RSI floor for continuation shorts — Holy Grail is trend continuation, not mean reversion.
+    strong_bearish_trend = (adx >= 30 and di_minus > di_plus * 1.5)
+    rsi_ok_for_short = (rsi > HG_CONFIG["rsi_short_min"]) or strong_bearish_trend
+
     short_signal = (
         adx >= HG_CONFIG["adx_threshold"] and
         di_minus > di_plus and
         prev.get("short_pullback", False) and
         latest["Close"] < ema20 and
-        rsi > HG_CONFIG["rsi_short_min"]
+        rsi_ok_for_short
     )
 
     now_str = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
@@ -208,6 +233,7 @@ def check_holy_grail_signals(df: pd.DataFrame, ticker: str) -> List[Dict]:
 
 async def scan_ticker_holy_grail(ticker: str) -> List[Dict]:
     """Scan a single ticker for Holy Grail setups."""
+    await _refresh_hg_vix_adjustments()
     try:
         df = await _fetch_1h_bars_async(ticker)
 
