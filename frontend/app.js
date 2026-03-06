@@ -7311,8 +7311,9 @@ function renderPortfolioSummaryWidget(summary) {
         const cashStr = '$' + summary.cash.toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0});
         const posVal = summary.position_value || 0;
         const posStr = '$' + posVal.toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0});
-        rhBreakdown.innerHTML = `<span class="rh-cash-link" title="Update cash balance">Cash ${cashStr}</span><span>Positions ${posStr}</span>`;
+        rhBreakdown.innerHTML = `<span class="rh-cash-link" title="Update cash balance">Cash ${cashStr}</span><button class="withdraw-btn" title="Log withdrawal or deposit">W/D</button><span>Positions ${posStr}</span>`;
         rhBreakdown.querySelector('.rh-cash-link').addEventListener('click', () => showCashUpdateModal(summary.cash));
+        rhBreakdown.querySelector('.withdraw-btn').addEventListener('click', () => showWithdrawModal());
     }
     const rhMeta = document.getElementById('rhMeta');
     if (rhMeta) {
@@ -7371,6 +7372,72 @@ function showCashUpdateModal(currentCash) {
     modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
     input.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') document.getElementById('cashUpdateSave').click();
+        if (e.key === 'Escape') modal.remove();
+    });
+}
+
+function showWithdrawModal() {
+    const existing = document.getElementById('withdrawModal');
+    if (existing) existing.remove();
+
+    const modal = document.createElement('div');
+    modal.id = 'withdrawModal';
+    modal.className = 'modal-overlay';
+    modal.innerHTML = `
+        <div class="cash-update-modal">
+            <h3>Log Withdrawal / Deposit</h3>
+            <div class="withdraw-type-toggle">
+                <button class="withdraw-toggle active" data-type="withdraw">Withdraw</button>
+                <button class="withdraw-toggle" data-type="deposit">Deposit</button>
+            </div>
+            <input type="number" id="withdrawAmountInput" step="0.01" placeholder="Amount" min="0" />
+            <input type="text" id="withdrawNoteInput" placeholder="Note (optional)" />
+            <div class="cash-modal-actions">
+                <button id="withdrawSave" class="cash-modal-btn save">Log</button>
+                <button id="withdrawCancel" class="cash-modal-btn cancel">Cancel</button>
+            </div>
+        </div>`;
+    document.body.appendChild(modal);
+
+    let flowType = 'withdraw';
+    const toggles = modal.querySelectorAll('.withdraw-toggle');
+    toggles.forEach(btn => btn.addEventListener('click', () => {
+        toggles.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        flowType = btn.dataset.type;
+    }));
+
+    const amtInput = document.getElementById('withdrawAmountInput');
+    amtInput.focus();
+
+    document.getElementById('withdrawSave').addEventListener('click', async () => {
+        const val = parseFloat(amtInput.value);
+        if (isNaN(val) || val <= 0) return;
+        const amount = flowType === 'withdraw' ? -val : val;
+        const note = document.getElementById('withdrawNoteInput').value.trim();
+        try {
+            await fetch(`${API_URL}/portfolio/cash-flows`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    amount: amount,
+                    flow_type: 'ACH',
+                    description: note || (flowType === 'withdraw' ? 'Withdrawal' : 'Deposit'),
+                    account_name: 'Robinhood',
+                    adjust_balance: true,
+                }),
+            });
+            modal.remove();
+            loadPortfolioSummary();
+        } catch (e) {
+            console.error('Failed to log cash flow:', e);
+        }
+    });
+
+    document.getElementById('withdrawCancel').addEventListener('click', () => modal.remove());
+    modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+    amtInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') document.getElementById('withdrawSave').click();
         if (e.key === 'Escape') modal.remove();
     });
 }

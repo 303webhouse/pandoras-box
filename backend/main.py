@@ -139,7 +139,7 @@ async def lifespan(app: FastAPI):
                 et = dt_cls.now(pytz.timezone("America/New_York"))
                 # Market hours + buffer: 9:00 AM - 4:30 PM ET, weekdays
                 if et.weekday() < 5 and 9 <= et.hour < 17:
-                    from api.unified_positions import run_mark_to_market
+                    from api.unified_positions import run_mark_to_market, sync_v2_to_legacy
                     result = await run_mark_to_market()
                     updated = result.get("updated", 0)
                     errors = result.get("errors", [])
@@ -147,6 +147,8 @@ async def lifespan(app: FastAPI):
                         logger.info("📊 Mark-to-market: updated %d positions", updated)
                     if errors:
                         logger.warning("📊 Mark-to-market: %d errors", len(errors))
+                    # Keep legacy table in sync with v2 after MTM
+                    await sync_v2_to_legacy()
                 else:
                     logger.debug("Mark-to-market: outside market hours, skipping")
             except Exception as e:
