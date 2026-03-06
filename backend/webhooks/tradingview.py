@@ -15,17 +15,7 @@ from datetime import datetime
 import asyncio
 import logging
 
-from strategies.triple_line import validate_triple_line_signal
 from strategies.exhaustion import validate_exhaustion_signal, classify_exhaustion_signal
-from bias_filters.tick_breadth import check_bias_alignment
-from bias_filters.macro_confluence import upgrade_signal_if_confluence
-from scoring.rank_trades import classify_signal
-from scoring.trade_ideas_scorer import calculate_signal_score, get_score_tier
-from database.redis_client import cache_signal
-from database.postgres_client import log_signal, update_signal_with_score
-from websocket.broadcaster import manager
-from scheduler.bias_scheduler import get_bias_status
-from utils.bias_snapshot import get_bias_snapshot
 from signals.pipeline import process_signal_unified
 
 logger = logging.getLogger(__name__)
@@ -69,40 +59,6 @@ async def _recompute_composite_background(factor_name: str) -> None:
         )
     except Exception as e:
         logger.error("🔄 Background composite recomputation failed after %s: %s", factor_name, e)
-
-
-async def _write_signal_outcome(signal_data: dict) -> None:
-    """
-    Write a PENDING outcome record for a TradingView signal.
-
-    DEPRECATED: Use signals.pipeline.write_signal_outcome() instead.
-    Kept for backward compatibility during Phase 4 migration.
-    """
-    try:
-        from database.postgres_client import get_postgres_client
-        pool = await get_postgres_client()
-        async with pool.acquire() as conn:
-            await conn.execute(
-                """
-                INSERT INTO signal_outcomes
-                    (signal_id, symbol, signal_type, direction, cta_zone,
-                     entry, stop, t1, t2, invalidation_level, created_at, outcome)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), 'PENDING')
-                ON CONFLICT (signal_id) DO NOTHING
-                """,
-                signal_data.get("signal_id"),
-                signal_data.get("ticker"),
-                signal_data.get("signal_type"),
-                signal_data.get("direction"),
-                signal_data.get("cta_zone"),
-                signal_data.get("entry_price"),
-                signal_data.get("stop_loss"),
-                signal_data.get("target_1"),
-                signal_data.get("target_2"),
-                signal_data.get("invalidation_level"),
-            )
-    except Exception as e:
-        logger.warning(f"Failed to record TV signal outcome: {e}")
 
 
 class TradingViewAlert(BaseModel):
@@ -163,8 +119,6 @@ async def receive_tradingview_alert(alert: TradingViewAlert):
             return await process_exhaustion_signal(alert, start_time)
         elif "sniper" in strategy_lower:
             return await process_sniper_signal(alert, start_time)
-        elif "triple" in strategy_lower or "line" in strategy_lower:
-            return await process_triple_line_signal(alert, start_time)
         elif "absorption" in strategy_lower or "wall" in strategy_lower:
             return await process_absorption_signal(alert, start_time)
         else:
@@ -411,72 +365,6 @@ async def process_sniper_signal(alert: TradingViewAlert, start_time: datetime):
     }
 
 
-async def process_triple_line_signal(alert: TradingViewAlert, start_time: datetime):
-    """Process Triple Line strategy signals (original handler)"""
-    
-    # Validate strategy setup (keep sync — fast, no heavy I/O)
-    is_valid, validation_details = await validate_triple_line_signal(alert.dict())
-    
-    if not is_valid:
-        logger.warning(f"Invalid signal rejected: {alert.ticker} - {validation_details}")
-        return {"status": "rejected", "reason": validation_details}
-    
-    # Check bias alignment
-    bias_level, bias_aligned = await check_bias_alignment(
-        alert.direction,
-        alert.timeframe
-    )
-    
-    # Classify signal strength
-    signal_type = classify_signal(
-        direction=alert.direction,
-        bias_level=bias_level,
-        bias_aligned=bias_aligned,
-        adx=alert.adx or 25,
-        line_separation=alert.line_separation or 10
-    )
-    
-    # Calculate risk/reward
-    rr = calculate_risk_reward(alert)
-    
-    # Build signal data
-    signal_id = f"{alert.ticker}_{alert.direction}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
-    
-    signal_data = {
-        "signal_id": signal_id,
-        "timestamp": alert.timestamp or datetime.now().isoformat(),
-        "ticker": alert.ticker,
-        "strategy": "Triple Line Trend Retracement",
-        "direction": alert.direction,
-        "signal_type": signal_type,
-        "entry_price": alert.entry_price,
-        "stop_loss": alert.stop_loss,
-        "target_1": alert.target_1,
-        "target_2": alert.target_2,
-        "risk_reward": rr["primary"],
-        "risk_reward_t1": rr["t1_rr"],
-        "risk_reward_t2": rr["t2_rr"],
-        "timeframe": alert.timeframe,
-        "bias_level": bias_level,
-        "adx": alert.adx,
-        "rsi": alert.rsi,
-        "line_separation": alert.line_separation,
-        "asset_class": "CRYPTO" if is_crypto_ticker(alert.ticker) else "EQUITY",
-        "status": "ACTIVE"
-    }
-    
-    # Fire-and-forget: return 200 immediately, process in background
-    asyncio.ensure_future(process_signal_unified(signal_data, source="tradingview"))
-
-    logger.info(f"📨 Triple Line accepted: {alert.ticker} {signal_type}")
-
-    return {
-        "status": "accepted",
-        "signal_id": signal_id,
-        "signal_type": signal_type,
-    }
-
-
 async def process_absorption_signal(alert: TradingViewAlert, start_time: datetime):
     """Process Absorption Wall signals with order flow context."""
     signal_id = f"WALL_{alert.ticker}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
@@ -589,144 +477,6 @@ def calculate_risk_reward(alert: TradingViewAlert) -> dict:
         "t2_rr": t2_rr,
         "primary": t2_rr if t2_rr > 0 else t1_rr,
     }
-
-
-async def attach_bias_snapshot(signal_data: dict) -> dict:
-    """Attach bias indicator snapshot at signal time for archiving."""
-    if not signal_data.get("bias_at_signal"):
-        signal_data["bias_at_signal"] = await get_bias_snapshot()
-    return signal_data
-
-
-async def apply_signal_scoring(signal_data: dict) -> dict:
-    """
-    Apply the Trade Ideas Scorer to a signal.
-
-    DEPRECATED: Use signals.pipeline.apply_scoring() instead.
-    Kept for backward compatibility during Phase 4 migration.
-
-    High-scoring signals get upgraded to special signal types:
-    - APIS_CALL: Strong LONG signal (score >= 75)
-    - KODIAK_CALL: Strong SHORT signal (score >= 75)
-    """
-    try:
-        # Primary: use composite engine score for bias alignment
-        composite_score = None
-        try:
-            from bias_engine.composite import get_cached_composite
-            cached = await get_cached_composite()
-            if cached:
-                composite_score = cached.composite_score
-        except Exception as comp_err:
-            logger.warning(f"Composite bias unavailable, falling back to old system: {comp_err}")
-        
-        # Build bias data — prefer composite, fall back to old voting system
-        if composite_score is not None:
-            current_bias = {"composite_score": composite_score}
-        else:
-            bias_status = get_bias_status()
-            current_bias = {
-                "daily": bias_status.get("daily", {}),
-                "weekly": bias_status.get("weekly", {}),
-                "cyclical": bias_status.get("cyclical", {})
-            }
-        
-        # Calculate score using the scorer
-        score, bias_alignment, triggering_factors = calculate_signal_score(signal_data, current_bias)
-        
-        # Contrarian qualification: if signal is counter-bias, check if it qualifies
-        # for penalty removal (multiplier restored to 1.0x)
-        if bias_alignment in ("COUNTER_BIAS", "STRONG_COUNTER") and composite_score is not None:
-            try:
-                from scoring.contrarian_qualifier import qualify_contrarian
-                direction = signal_data.get("direction", "").upper()
-                cq = await qualify_contrarian(signal_data, composite_score, direction)
-                if cq["qualified"]:
-                    # Recalculate: restore multiplier to 1.0x
-                    original_multiplier = triggering_factors.get("bias_alignment", {}).get("multiplier", 1.0)
-                    if original_multiplier < 1.0:
-                        # Re-score with neutral multiplier
-                        raw_score = triggering_factors.get("calculation", {}).get("raw_score", score)
-                        score = min(100, max(0, raw_score * 1.0))
-                        score = round(score, 2)
-
-                    signal_data["contrarian_qualified"] = True
-                    signal_data["contrarian_reasons"] = cq["reasons"]
-                    triggering_factors["contrarian"] = {
-                        "qualified": True,
-                        "reasons": cq["reasons"],
-                        "original_multiplier": original_multiplier,
-                        "restored_multiplier": 1.0,
-                    }
-                    bias_alignment = "CONTRARIAN_QUALIFIED"
-                    logger.info(f"🔄 Contrarian restored: {signal_data.get('ticker')} {direction} (reasons: {cq['reasons']})")
-            except Exception as cq_err:
-                logger.warning(f"Contrarian qualification check failed: {cq_err}")
-        
-        # Sector rotation bonus
-        try:
-            from scoring.sector_rotation_bonus import get_sector_bonus
-            sector_rot_bonus = await get_sector_bonus(signal_data)
-            if sector_rot_bonus != 0:
-                score = min(100, max(0, score + sector_rot_bonus))
-                score = round(score, 2)
-                triggering_factors["sector_rotation_bonus"] = sector_rot_bonus
-        except ImportError:
-            pass  # Module not yet built (Phase 4)
-        except Exception as sr_err:
-            logger.debug(f"Sector rotation bonus check failed: {sr_err}")
-        
-        # Update signal data
-        signal_data["score"] = score
-        signal_data["bias_alignment"] = bias_alignment
-        signal_data["triggering_factors"] = triggering_factors
-        signal_data["scoreTier"] = get_score_tier(score)
-        
-        # Set confidence and potentially upgrade signal type based on score
-        direction = signal_data.get("direction", "").upper()
-        
-        if score >= 85:
-            signal_data["confidence"] = "HIGH"
-            signal_data["priority"] = "HIGH"
-            # Upgrade to APIS/KODIAK for strongest signals (rare, 85+ only)
-            if direction in ["LONG", "BUY"]:
-                signal_data["signal_type"] = "APIS_CALL"
-                logger.info(f"APIS CALL: {signal_data.get('ticker')} (score: {score})")
-            elif direction in ["SHORT", "SELL"]:
-                signal_data["signal_type"] = "KODIAK_CALL"
-                logger.info(f"KODIAK CALL: {signal_data.get('ticker')} (score: {score})")
-        elif score >= 75:
-            signal_data["confidence"] = "HIGH"
-            signal_data["priority"] = "HIGH"
-        elif score >= 55:
-            signal_data["confidence"] = "MEDIUM"
-            signal_data["priority"] = "MEDIUM"
-        else:
-            signal_data["confidence"] = "LOW"
-            signal_data["priority"] = "LOW"
-        
-        logger.info(f"📊 Signal scored: {signal_data.get('ticker')} = {score} ({bias_alignment})")
-        
-        # Update score in database
-        try:
-            await update_signal_with_score(
-                signal_data.get("signal_id"),
-                score,
-                bias_alignment,
-                triggering_factors
-            )
-        except Exception as db_err:
-            logger.warning(f"Failed to update score in DB: {db_err}")
-        
-        return signal_data
-        
-    except Exception as e:
-        logger.warning(f"Error applying signal scoring: {e}")
-        # Return signal with defaults if scoring fails
-        signal_data["score"] = 50
-        signal_data["bias_alignment"] = "NEUTRAL"
-        signal_data["confidence"] = "MEDIUM"
-        return signal_data
 
 
 class BreadthPayload(BaseModel):
