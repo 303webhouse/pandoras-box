@@ -7864,6 +7864,7 @@ async function executePositionClose(positionId, exitPrice, closeQty, tradeOutcom
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     exit_price: exitPrice,
+                    quantity: closeQty,
                     notes: [lossReason, notes].filter(Boolean).join(' | ') || null
                 })
             });

@@ -152,6 +152,7 @@ class UpdatePositionRequest(BaseModel):
 class ClosePositionRequest(BaseModel):
     exit_price: float
     notes: Optional[str] = None
+    quantity: Optional[int] = None  # If < total qty, partial close (reduce position, keep remainder open)
 
 
 class BulkPositionItem(BaseModel):
@@ -795,19 +796,22 @@ async def close_position(position_id: str, req: ClosePositionRequest):
     pos = _row_to_dict(row)
     entry_price = pos.get("entry_price") or 0
     structure = pos.get("structure") or ""
+    total_qty = pos["quantity"]
 
-    # Calculate realized P&L
+    # Determine close quantity (partial vs full)
+    close_qty = req.quantity if req.quantity and req.quantity < total_qty else total_qty
+    is_partial = close_qty < total_qty
+
+    # Calculate realized P&L on closed portion only
     s = structure.lower()
     asset_type = (pos.get("asset_type") or "").upper()
     is_stock = s in ("stock", "stock_long", "long_stock", "stock_short", "short_stock") or (not s and asset_type == "EQUITY")
     if is_stock:
-        realized_pnl = round((req.exit_price - entry_price) * pos["quantity"], 2)
+        realized_pnl = round((req.exit_price - entry_price) * close_qty, 2)
     elif s in CREDIT_STRUCTURES:
-        # Credit structures: received premium at open, paid to close
-        realized_pnl = round((entry_price - req.exit_price) * 100 * pos["quantity"], 2)
+        realized_pnl = round((entry_price - req.exit_price) * 100 * close_qty, 2)
     else:
-        # Debit structures: paid premium at open, received to close
-        realized_pnl = round((req.exit_price - entry_price) * 100 * pos["quantity"], 2)
+        realized_pnl = round((req.exit_price - entry_price) * 100 * close_qty, 2)
 
     # Determine outcome
     if realized_pnl > 0:
@@ -819,7 +823,7 @@ async def close_position(position_id: str, req: ClosePositionRequest):
 
     now = datetime.now(timezone.utc)
 
-    # Create trade record for analytics
+    # Create trade record for the closed portion
     trade_id = None
     try:
         async with pool.acquire() as conn:
@@ -843,7 +847,7 @@ async def close_position(position_id: str, req: ClosePositionRequest):
                 pos.get("account", "ROBINHOOD"), pos.get("structure"),
                 pos.get("source", "MANUAL"),
                 entry_price, pos.get("stop_loss"), pos.get("target_1"),
-                pos["quantity"],
+                close_qty,
                 datetime.fromisoformat(pos["entry_date"]) if isinstance(pos.get("entry_date"), str) else pos.get("entry_date", now),
                 now, req.exit_price,
                 realized_pnl, req.notes or "Closed via unified positions",
@@ -857,47 +861,62 @@ async def close_position(position_id: str, req: ClosePositionRequest):
     except Exception as e:
         logger.warning(f"Could not create trade record: {e}")
 
-    # Close the position
-    async with pool.acquire() as conn:
-        updated = await conn.fetchrow("""
-            UPDATE unified_positions SET
-                status = 'CLOSED',
-                exit_price = $1,
-                exit_date = $2,
-                realized_pnl = $3,
-                trade_outcome = $4,
-                trade_id = $5,
-                notes = COALESCE($6, notes),
-                updated_at = NOW()
-            WHERE position_id = $7
-            RETURNING *
-        """, req.exit_price, now, realized_pnl, trade_outcome,
-            trade_id, req.notes, position_id)
+    if is_partial:
+        # Partial close: reduce quantity, adjust cost_basis proportionally, keep OPEN
+        remaining_qty = total_qty - close_qty
+        old_cost_basis = pos.get("cost_basis") or 0
+        new_cost_basis = round(old_cost_basis * remaining_qty / total_qty, 2) if total_qty > 0 else 0
+        async with pool.acquire() as conn:
+            updated = await conn.fetchrow("""
+                UPDATE unified_positions SET
+                    quantity = $1,
+                    cost_basis = $2,
+                    notes = COALESCE(notes || ' | ', '') || $3,
+                    updated_at = NOW()
+                WHERE position_id = $4
+                RETURNING *
+            """, remaining_qty, new_cost_basis,
+                f"Partial close {close_qty}/{total_qty} @ {req.exit_price} ({trade_outcome} ${realized_pnl:+.2f})",
+                position_id)
+    else:
+        # Full close
+        async with pool.acquire() as conn:
+            updated = await conn.fetchrow("""
+                UPDATE unified_positions SET
+                    status = 'CLOSED',
+                    exit_price = $1,
+                    exit_date = $2,
+                    realized_pnl = $3,
+                    trade_outcome = $4,
+                    trade_id = $5,
+                    notes = COALESCE($6, notes),
+                    updated_at = NOW()
+                WHERE position_id = $7
+                RETURNING *
+            """, req.exit_price, now, realized_pnl, trade_outcome,
+                trade_id, req.notes, position_id)
 
-    # Update linked signal outcome if applicable
-    if pos.get("signal_id"):
-        try:
-            async with pool.acquire() as conn:
-                await conn.execute("""
-                    UPDATE signals SET
-                        trade_outcome = $1,
-                        actual_exit_price = $2,
-                        notes = COALESCE(notes || ' | ', '') || $3,
-                        updated_at = NOW()
-                    WHERE signal_id = $4
-                """, trade_outcome, req.exit_price,
-                    f"Closed: {trade_outcome} (${realized_pnl:+.2f})",
-                    pos["signal_id"])
-        except Exception as e:
-            logger.warning(f"Could not update signal outcome: {e}")
+        # Update linked signal outcome only on full close
+        if pos.get("signal_id"):
+            try:
+                async with pool.acquire() as conn:
+                    await conn.execute("""
+                        UPDATE signals SET
+                            trade_outcome = $1,
+                            actual_exit_price = $2,
+                            notes = COALESCE(notes || ' | ', '') || $3,
+                            updated_at = NOW()
+                        WHERE signal_id = $4
+                    """, trade_outcome, req.exit_price,
+                        f"Closed: {trade_outcome} (${realized_pnl:+.2f})",
+                        pos["signal_id"])
+            except Exception as e:
+                logger.warning(f"Could not update signal outcome: {e}")
 
-    # Auto-adjust cash: return exit proceeds (debit) or pay to close (credit)
+    # Auto-adjust cash for the closed portion
     if req.exit_price is not None:
-        s = (pos.get("structure") or "").lower()
-        a_type = (pos.get("asset_type") or "").upper()
-        is_stock = s in ("stock", "stock_long", "long_stock", "stock_short", "short_stock") or (not s and a_type == "EQUITY")
         multiplier = 1 if is_stock else 100
-        exit_value = round(abs(req.exit_price) * multiplier * pos["quantity"], 2)
+        exit_value = round(abs(req.exit_price) * multiplier * close_qty, 2)
         cash_delta = -exit_value if s in CREDIT_STRUCTURES else exit_value
         try:
             await _adjust_account_cash(pool, pos.get("account", "ROBINHOOD"), cash_delta)
@@ -908,18 +927,20 @@ async def close_position(position_id: str, req: ClosePositionRequest):
 
     try:
         await manager.broadcast_position_update({
-            "action": "POSITION_CLOSED",
+            "action": "POSITION_PARTIAL_CLOSE" if is_partial else "POSITION_CLOSED",
             "position": result,
         })
     except Exception:
         pass
 
     return {
-        "status": "closed",
+        "status": "partial_close" if is_partial else "closed",
         "position": result,
         "trade_id": trade_id,
         "realized_pnl": realized_pnl,
         "trade_outcome": trade_outcome,
+        "closed_qty": close_qty,
+        "remaining_qty": total_qty - close_qty if is_partial else 0,
     }
 
 
