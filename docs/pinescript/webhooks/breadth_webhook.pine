@@ -1,0 +1,11 @@
+//@version=6
+indicator("Breadth Webhook", overlay=false)
+
+uvol = request.security("UVOL", timeframe.period, close)
+dvol = request.security("DVOL", timeframe.period, close)
+
+plot(uvol, "UVOL", color.green)
+plot(dvol, "DVOL", color.red)
+
+if barstate.isconfirmed
+    alert('{"uvol":' + str.tostring(uvol) + ',"dvol":' + str.tostring(dvol) + '}', alert.freq_once_per_bar)
