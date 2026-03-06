@@ -1,0 +1,369 @@
+// Dark Pool Whale Hunter v2
+// Detects algorithmic execution fingerprints: consecutive bars with matched
+// total volume transacting at the same price level (POC).
+// v2: Volume floor, time filter, 3-bar confirmation, structural context,
+//     trade framework, regime awareness
+// ============================================================================
+
+//@version=5
+indicator("Dark Pool Whale Hunter v2", overlay=true, max_bars_back=500, max_lines_count=500, max_labels_count=500)
+
+// --- INPUTS ---
+grpCore    = "Core Signal"
+volTol     = input.float(0.08, title="Volume Match Tolerance", minval=0.01, maxval=0.30, step=0.01, group=grpCore, tooltip="How close two bars' total volume must be to count as 'matched'. 0.08 = within 8%.")
+pocTol     = input.float(0.002, title="POC Match Tolerance", minval=0.0005, maxval=0.01, step=0.0005, group=grpCore, tooltip="How close two bars' POC price must be to count as 'matched'. 0.002 = within 0.2%.")
+ltfSource  = input.timeframe("1", title="Lower TF for POC Calc", group=grpCore, tooltip="Timeframe used to approximate intra-bar POC. Use 1min for most cases.")
+showContested = input.bool(false, title="Include Contested Signals", group=grpCore, tooltip="If disabled, only directional (bullish/bearish) signals fire alerts.")
+// [H4] Volume floor
+min_rvol = input.float(1.5, title="Min RVOL to fire signal", step=0.1, group=grpCore, tooltip="Signal requires at least this relative volume. 1.5 = 150% of 20-bar avg.")
+// [M21] Consecutive bar requirement
+min_consec_bars = input.int(3, title="Min consecutive matched bars", minval=2, maxval=5, group=grpCore, tooltip="How many consecutive bars must match volume+POC. 3 = stricter than original 2.")
+
+// [M3] Time filter
+grpTime    = "Time Filter"
+use_time_filter = input.bool(true, title="Enable Time Filter", group=grpTime)
+avoid_lunch = input.bool(true, title="Exclude 12-1 PM ET", group=grpTime)
+
+// [M23] Trade framework
+grpTrade   = "Trade Framework"
+show_trade_plan = input.bool(true, title="Show Entry/Stop/Target levels", group=grpTrade)
+atr_stop_mult = input.float(0.85, title="Stop distance (ATR mult)", step=0.05, group=grpTrade)
+tp1_r = input.float(1.5, title="TP1 (R-multiple)", step=0.25, group=grpTrade)
+tp2_r = input.float(2.5, title="TP2 (R-multiple)", step=0.25, group=grpTrade)
+plan_extend_bars = input.int(30, title="Plan line length (bars)", group=grpTrade)
+
+grpVis     = "Visualization"
+showVolBars   = input.bool(true, title="Show Volume Overlay Bars", group=grpVis)
+showPOCDots   = input.bool(true, title="Show POC Dots", group=grpVis)
+showBattleLine = input.bool(true, title="Show Battle Lines on Signal", group=grpVis)
+volumeScale   = input.float(5.0, title="Volume Bar Height Divisor", group=grpVis)
+pocLineExtend = input.int(20, title="POC Line Extend (bars)", group=grpVis, tooltip="How many bars forward to extend the POC level line after a signal.")
+
+grpMacro   = "Macro Context (Optional)"
+useMacro   = input.bool(false, title="Enable DXY Context Coloring", group=grpMacro)
+dxyTicker  = input.symbol("TVC:DXY", title="Dollar Index Ticker", group=grpMacro)
+dxyLen     = input.int(50, title="DXY Trend Length", group=grpMacro)
+
+// ============================================================================
+// POC CALCULATION VIA LOWER TIMEFRAME
+// ============================================================================
+
+[ltfOpen, ltfHigh, ltfLow, ltfClose, ltfVolume] = request.security_lower_tf(syminfo.tickerid, ltfSource, [open, high, low, close, volume])
+
+calcPOC() =>
+    float maxVol = 0.0
+    float pocPrice = hlc3
+    if array.size(ltfVolume) > 0
+        for i = 0 to array.size(ltfVolume) - 1
+            float sv = array.get(ltfVolume, i)
+            if sv > maxVol
+                maxVol := sv
+                float h = array.get(ltfHigh, i)
+                float l = array.get(ltfLow, i)
+                float c = array.get(ltfClose, i)
+                pocPrice := (h + l + c) / 3.0
+    pocPrice
+
+poc = calcPOC()
+
+// ============================================================================
+// CORE CALCULATIONS
+// ============================================================================
+
+atr = ta.atr(14)
+vol_ma = ta.sma(volume, 20)
+rvol = vol_ma > 0 ? volume / vol_ma : 0.0
+
+// [M3] Time filter
+market_hour_et = hour(time, "America/New_York")
+is_lunch = avoid_lunch and market_hour_et == 12
+time_ok = (not use_time_filter) or (not is_lunch)
+
+// [M24] Regime/trend context
+sma50  = ta.sma(close, 50)
+sma200 = ta.sma(close, 200)
+[diplus, diminus, adx_val] = ta.dmi(14, 14)
+trend_bull = close > sma50 and sma50 > sma200
+trend_bear = close < sma50 and sma50 < sma200
+trend_strong = adx_val > 25
+regime_txt_val = trend_bull ? "BULL" : trend_bear ? "BEAR" : "RANGE"
+
+// ============================================================================
+// CORE SIGNAL LOGIC
+// [M21] Now requires 3 consecutive matched bars (not just 2)
+// [H4] Volume floor applied
+// ============================================================================
+
+// Volume match: percentage difference between consecutive bars
+volAvg   = math.avg(volume, volume[1])
+volDiff  = volAvg > 0 ? math.abs(volume - volume[1]) / volAvg : 1.0
+volMatch = volDiff < volTol
+
+// POC match: percentage difference between consecutive POCs
+pocAvg   = math.avg(poc, poc[1])
+pocDiff  = pocAvg > 0 ? math.abs(poc - poc[1]) / pocAvg : 1.0
+pocMatch = pocDiff < pocTol
+
+// [M21] Check consecutive bars (2 or 3 based on input)
+pair_match_0 = volMatch and pocMatch  // bar[0] vs bar[1]
+
+// For 3-bar: also check bar[1] vs bar[2]
+volAvg_1   = math.avg(volume[1], volume[2])
+volDiff_1  = volAvg_1 > 0 ? math.abs(volume[1] - volume[2]) / volAvg_1 : 1.0
+pocAvg_1   = math.avg(poc[1], poc[2])
+pocDiff_1  = pocAvg_1 > 0 ? math.abs(poc[1] - poc[2]) / pocAvg_1 : 1.0
+pair_match_1 = volDiff_1 < volTol and pocDiff_1 < pocTol
+
+consec_match = min_consec_bars >= 3 ? (pair_match_0 and pair_match_1) : pair_match_0
+
+// [H4] Volume floor + time filter
+isWhaleSignal = consec_match and rvol >= min_rvol and time_ok
+
+// Directional bias
+bullishLean = close > poc and close[1] > poc[1]
+bearishLean = close < poc and close[1] < poc[1]
+
+// [M22] Structural context — is signal at a meaningful level?
+swing_high_50 = ta.highest(high, 50)
+swing_low_50  = ta.lowest(low, 50)
+near_swing_high = high >= swing_high_50 * 0.995
+near_swing_low  = low <= swing_low_50 * 1.005
+at_structural_level = near_swing_high or near_swing_low
+// Bullish whale at support = stronger, bearish at resistance = stronger
+structural_confirms = (bullishLean and near_swing_low) or (bearishLean and near_swing_high)
+
+// ============================================================================
+// MACRO CONTEXT (OPTIONAL)
+// ============================================================================
+
+dxyClose = request.security(dxyTicker, timeframe.period, close)
+dxyMA    = request.security(dxyTicker, timeframe.period, ta.sma(close, dxyLen))
+dxyWeak  = dxyClose < dxyMA
+dxyStrong = dxyClose > dxyMA
+
+// ============================================================================
+// [M23] TRADE FRAMEWORK — Entry / Stop / Target
+// ============================================================================
+
+float whaleLevel = isWhaleSignal ? math.avg(poc, poc[1]) : na
+
+var line  tf_entry_line = na
+var line  tf_sl_line    = na
+var line  tf_tp1_line   = na
+var line  tf_tp2_line   = na
+var label tf_plan_label = na
+
+if isWhaleSignal and show_trade_plan and (bullishLean or bearishLean)
+    // Clean up previous plan
+    line.delete(tf_entry_line)
+    line.delete(tf_sl_line)
+    line.delete(tf_tp1_line)
+    line.delete(tf_tp2_line)
+    label.delete(tf_plan_label)
+
+    float entry = close
+    float stop = na
+    float tp1 = na
+    float tp2 = na
+
+    if bullishLean
+        stop := entry - atr * atr_stop_mult
+        float risk = entry - stop
+        tp1 := entry + risk * tp1_r
+        tp2 := entry + risk * tp2_r
+    else
+        stop := entry + atr * atr_stop_mult
+        float risk = stop - entry
+        tp1 := entry - risk * tp1_r
+        tp2 := entry - risk * tp2_r
+
+    x1 = bar_index
+    x2 = bar_index + plan_extend_bars
+
+    tf_entry_line := line.new(x1, entry, x2, entry, color=color.yellow, style=line.style_dashed, width=1)
+    tf_sl_line    := line.new(x1, stop,  x2, stop,  color=color.red,    style=line.style_dotted, width=1)
+    tf_tp1_line   := line.new(x1, tp1,   x2, tp1,   color=color.green,  style=line.style_dotted, width=1)
+    tf_tp2_line   := line.new(x1, tp2,   x2, tp2,   color=color.teal,   style=line.style_dotted, width=1)
+
+    dir_txt = bullishLean ? "LONG" : "SHORT"
+    struct_txt = structural_confirms ? " ★STRUCT" : at_structural_level ? " ~struct" : ""
+    float risk_val = bullishLean ? (entry - stop) : (stop - entry)
+    rr_txt = risk_val > 0 ? str.tostring(tp1_r, "#.#") + "R" : "?"
+
+    plan_txt = "🐋 " + dir_txt + struct_txt + "\n" +
+         "Entry: " + str.tostring(entry, "#.##") + "\n" +
+         "Stop: " + str.tostring(stop, "#.##") + "\n" +
+         "TP1: " + str.tostring(tp1, "#.##") + " (" + rr_txt + ")\n" +
+         "TP2: " + str.tostring(tp2, "#.##") + "\n" +
+         "RVOL: " + str.tostring(rvol, "#.##") + "x | " + regime_txt_val
+
+    boxColor = bullishLean ? color.lime : color.red
+    tf_plan_label := label.new(x2, entry, plan_txt, style=label.style_label_left, color=boxColor, textcolor=color.black, size=size.small)
+
+// ============================================================================
+// VISUALIZATION
+// ============================================================================
+
+// --- Volume Overlay Bars ---
+lowestLow  = ta.lowest(low, 50)
+priceRange = ta.highest(high, 50) - lowestLow
+maxVol     = ta.highest(volume, 100)
+scaledVol  = maxVol > 0 ? (volume / maxVol) * (priceRange / volumeScale) : 0
+baseLevel  = lowestLow - (priceRange * 0.08)
+
+volBarColor = color.new(color.gray, 80)
+if isWhaleSignal
+    if bullishLean
+        volBarColor := color.new(color.lime, 20)
+    else if bearishLean
+        volBarColor := color.new(color.red, 20)
+    else
+        volBarColor := color.new(color.yellow, 20)
+else
+    volBarColor := close >= open ? color.new(color.green, 85) : color.new(color.red, 85)
+
+plotcandle(
+     showVolBars ? baseLevel : na,
+     showVolBars ? baseLevel + scaledVol : na,
+     showVolBars ? baseLevel : na,
+     showVolBars ? baseLevel + scaledVol : na,
+     color=volBarColor, bordercolor=volBarColor, wickcolor=volBarColor,
+     title="Volume Overlay")
+
+// --- POC Dots ---
+plotshape(showPOCDots ? poc : na, style=shape.circle, location=location.absolute, 
+         color=color.new(color.white, 60), size=size.tiny, title="POC Level")
+
+// --- Signal Markers (now with structural context via marker size) ---
+// [M22] Structural confirms get larger markers
+plotshape(isWhaleSignal and bullishLean and structural_confirms, style=shape.triangleup, location=location.belowbar, 
+         color=color.lime, size=size.normal, title="Bullish Whale (Struct)", text="🐋★")
+plotshape(isWhaleSignal and bullishLean and not structural_confirms, style=shape.triangleup, location=location.belowbar, 
+         color=color.lime, size=size.small, title="Bullish Whale", text="🐋")
+plotshape(isWhaleSignal and bearishLean and structural_confirms, style=shape.triangledown, location=location.abovebar, 
+         color=color.red, size=size.normal, title="Bearish Whale (Struct)", text="🐋★")
+plotshape(isWhaleSignal and bearishLean and not structural_confirms, style=shape.triangledown, location=location.abovebar, 
+         color=color.red, size=size.small, title="Bearish Whale", text="🐋")
+plotshape(isWhaleSignal and not bullishLean and not bearishLean, style=shape.diamond, location=location.abovebar, 
+         color=color.yellow, size=size.small, title="Contested Whale", text="🐋")
+
+// --- POC Level Line ---
+if isWhaleSignal and showBattleLine
+    float wLevel = math.avg(poc, poc[1])
+    lineCol = bullishLean ? color.lime : bearishLean ? color.red : color.yellow
+    
+    line.new(bar_index - 1, wLevel, bar_index + pocLineExtend, wLevel, 
+             color=lineCol, width=2, style=line.style_solid)
+    
+    float pocZone = wLevel * pocTol
+    line.new(bar_index - 1, wLevel + pocZone, bar_index + pocLineExtend, wLevel + pocZone, 
+             color=color.new(lineCol, 60), width=1, style=line.style_dotted)
+    line.new(bar_index - 1, wLevel - pocZone, bar_index + pocLineExtend, wLevel - pocZone, 
+             color=color.new(lineCol, 60), width=1, style=line.style_dotted)
+    
+    label.new(bar_index + pocLineExtend, wLevel, 
+              "🐋 " + str.tostring(wLevel, "#.##"), 
+              color=color.new(lineCol, 70), textcolor=lineCol, 
+              style=label.style_label_left, size=size.small)
+
+// --- Macro Background ---
+macroColor = dxyWeak ? color.new(color.green, 95) : color.new(color.red, 95)
+bgcolor(useMacro ? macroColor : na, title="DXY Context")
+
+// ============================================================================
+// INFO TABLE
+// ============================================================================
+
+var table infoPanel = table.new(position.top_right, 2, 9, bgcolor=color.new(color.black, 80), border_width=1)
+
+if barstate.islast
+    table.cell(infoPanel, 0, 0, "Vol Δ", text_color=color.gray, text_size=size.small)
+    table.cell(infoPanel, 1, 0, str.tostring(volDiff * 100, "#.##") + "%", 
+               text_color=volMatch ? color.lime : color.gray, text_size=size.small)
+    
+    table.cell(infoPanel, 0, 1, "POC Δ", text_color=color.gray, text_size=size.small)
+    table.cell(infoPanel, 1, 1, str.tostring(pocDiff * 100, "#.###") + "%", 
+               text_color=pocMatch ? color.lime : color.gray, text_size=size.small)
+    
+    table.cell(infoPanel, 0, 2, "POC", text_color=color.gray, text_size=size.small)
+    table.cell(infoPanel, 1, 2, str.tostring(poc, "#.##"), text_color=color.white, text_size=size.small)
+    
+    table.cell(infoPanel, 0, 3, "Vol Tol", text_color=color.gray, text_size=size.small)
+    table.cell(infoPanel, 1, 3, str.tostring(volTol * 100) + "%", text_color=color.gray, text_size=size.small)
+    
+    table.cell(infoPanel, 0, 4, "POC Tol", text_color=color.gray, text_size=size.small)
+    table.cell(infoPanel, 1, 4, str.tostring(pocTol * 100, "#.##") + "%", text_color=color.gray, text_size=size.small)
+
+    // [H4] RVOL display
+    table.cell(infoPanel, 0, 5, "RVOL", text_color=color.gray, text_size=size.small)
+    table.cell(infoPanel, 1, 5, str.tostring(rvol, "#.##") + "x",
+               text_color=rvol >= min_rvol ? color.lime : color.red, text_size=size.small)
+
+    // [M21] Consecutive match count
+    consec_txt = pair_match_0 and pair_match_1 ? "3+" : pair_match_0 ? "2" : "0"
+    table.cell(infoPanel, 0, 6, "MATCH", text_color=color.gray, text_size=size.small)
+    table.cell(infoPanel, 1, 6, consec_txt + " bars",
+               text_color=consec_match ? color.lime : color.gray, text_size=size.small)
+
+    // [M3] Time filter
+    table.cell(infoPanel, 0, 7, "TIME", text_color=color.gray, text_size=size.small)
+    table.cell(infoPanel, 1, 7, time_ok ? "OK" : "LUNCH",
+               text_color=time_ok ? color.lime : color.red, text_size=size.small)
+
+    // [M24] Regime
+    table.cell(infoPanel, 0, 8, "REGIME", text_color=color.gray, text_size=size.small)
+    regime_col = trend_bull ? color.lime : trend_bear ? color.red : color.orange
+    table.cell(infoPanel, 1, 8, regime_txt_val + (trend_strong ? " ↑" : ""),
+               text_color=regime_col, text_size=size.small)
+
+// ============================================================================
+// ALERTS — [M23] Now includes trade framework levels + [M22] structural context
+// ============================================================================
+
+alertcondition(isWhaleSignal and bullishLean, title="Bullish Whale Signal", 
+               message="🐋 Bullish Whale: Matched volume + POC on {{ticker}} ({{interval}})")
+alertcondition(isWhaleSignal and bearishLean, title="Bearish Whale Signal", 
+               message="🐋 Bearish Whale: Matched volume + POC on {{ticker}} ({{interval}})")
+alertcondition(isWhaleSignal, title="Any Whale Signal", 
+               message="🐋 Whale Signal: Matched volume + POC on {{ticker}} ({{interval}})")
+
+if isWhaleSignal and barstate.isconfirmed and (bullishLean or bearishLean or showContested)
+    string lean = bullishLean ? "BULLISH" : bearishLean ? "BEARISH" : "CONTESTED"
+    float wLevel = math.avg(poc, poc[1])
+
+    // [M23] Compute trade levels for alert payload
+    float a_entry = close
+    float a_stop = na
+    float a_tp1 = na
+    float a_tp2 = na
+    if bullishLean
+        a_stop := a_entry - atr * atr_stop_mult
+        float a_risk = a_entry - a_stop
+        a_tp1 := a_entry + a_risk * tp1_r
+        a_tp2 := a_entry + a_risk * tp2_r
+    else if bearishLean
+        a_stop := a_entry + atr * atr_stop_mult
+        float a_risk = a_stop - a_entry
+        a_tp1 := a_entry - a_risk * tp1_r
+        a_tp2 := a_entry - a_risk * tp2_r
+
+    string payload = '{"signal":"WHALE",' +
+         '"ticker":"' + syminfo.ticker + '",' +
+         '"tf":"' + timeframe.period + '",' +
+         '"lean":"' + lean + '",' +
+         '"poc":' + str.tostring(wLevel, "#.####") + ',' +
+         '"price":' + str.tostring(close, "#.####") + ',' +
+         '"entry":' + str.tostring(a_entry, "#.##") + ',' +
+         '"stop":' + (na(a_stop) ? "null" : str.tostring(a_stop, "#.##")) + ',' +
+         '"tp1":' + (na(a_tp1) ? "null" : str.tostring(a_tp1, "#.##")) + ',' +
+         '"tp2":' + (na(a_tp2) ? "null" : str.tostring(a_tp2, "#.##")) + ',' +
+         '"rvol":' + str.tostring(rvol, "#.##") + ',' +
+         '"consec_bars":' + (pair_match_1 ? "3" : "2") + ',' +
+         '"structural":' + (structural_confirms ? "true" : "false") + ',' +
+         '"regime":"' + regime_txt_val + '",' +
+         '"adx":' + str.tostring(adx_val, "#.#") + ',' +
+         '"vol":' + str.tostring(volume) + ',' +
+         '"vol_delta_pct":' + str.tostring(volDiff * 100, "#.##") + ',' +
+         '"poc_delta_pct":' + str.tostring(pocDiff * 100, "#.###") + ',' +
+         '"time":"' + str.tostring(year) + '-' + str.tostring(month, "00") + '-' + str.tostring(dayofmonth, "00") + 'T' + str.tostring(hour, "00") + ':' + str.tostring(minute, "00") + '"}'
+    alert(payload, alert.freq_once_per_bar)
