@@ -94,7 +94,7 @@ CTA_CONFIG = {
     
     # Golden Touch Settings
     "golden_touch": {
-        "min_bars_above_120": 50,  # Must be above 120 for 50+ days
+        "min_bars_above_120": 30,  # Must be above 120 for 30+ days (aligned with strategy doc)
         "min_correction_pct": 5.0,  # 5% minimum correction from high
         "max_correction_pct": 12.0,  # Not too deep (>12% = broken trend)
     },
@@ -102,7 +102,7 @@ CTA_CONFIG = {
     # Volume Settings
     "volume": {
         "breakout_threshold": 1.50,  # 50% above 30-day avg (H2: was 1.10)
-        "golden_touch_threshold": 2.00,  # 100% above avg for Golden Touch (H5)
+        "golden_touch_threshold": 1.30,  # 30% above avg for Golden Touch (was 2.00 — too strict, never fired)
         "avg_period": 30,
     },
     
@@ -670,17 +670,18 @@ async def get_uw_flow_confirmation(ticker: str, signal_direction: str) -> Dict[s
 
 def check_golden_touch(df: pd.DataFrame, ticker: str) -> Optional[Dict]:
     """
-    Check for 120 SMA Golden Touch setup
-    
-    Criteria:
+    Check for 120 SMA Golden Touch setup (3-bar window)
+
+    Criteria (any of last 3 bars):
     - Price touching or crossing 120 SMA
-    - Was above 120 for 50+ days prior
+    - Was above 120 for 30+ days prior
     - Correction of 5-12% from recent high
     - 20 SMA still above 120 (uptrend intact)
+    - Volume >= 1.3x 30-day avg in window
     """
     config = CTA_CONFIG["golden_touch"]
 
-    if len(df) < 2:
+    if len(df) < 4:
         return None
 
     latest = df.iloc[-1]
@@ -696,15 +697,28 @@ def check_golden_touch(df: pd.DataFrame, ticker: str) -> Optional[Dict]:
     if pd.isna(sma120) or pd.isna(sma20) or pd.isna(days_above):
         return None
 
-    touching_120 = (latest["Low"] <= sma120 * 1.01 and price >= sma120 * 0.99)
+    # Check touch across a 3-bar window (120 SMA is a zone, not a laser line)
+    touching_120 = False
+    for i in range(-1, -4, -1):
+        bar = df.iloc[i]
+        bar_sma120 = bar.get("sma120")
+        if pd.notna(bar_sma120) and bar["Low"] <= bar_sma120 * 1.01 and bar["Close"] >= bar_sma120 * 0.99:
+            touching_120 = True
+            break
+
     was_above_long = days_above >= config["min_bars_above_120"]
     valid_correction = config["min_correction_pct"] <= correction <= config["max_correction_pct"]
     uptrend_intact = sma20 > sma120
 
-    # H5: Golden Touch requires volume confirmation at the touch candle
-    touch_vol_ratio = latest.get("vol_ratio")
-    vol_at_touch = (pd.notna(touch_vol_ratio) and
-                    touch_vol_ratio >= CTA_CONFIG["volume"]["golden_touch_threshold"])
+    # Volume confirmation across 3-bar window (institutional accumulation can be spread)
+    vol_threshold = CTA_CONFIG["volume"]["golden_touch_threshold"]
+    vol_at_touch = False
+    for i in range(-1, -4, -1):
+        bar = df.iloc[i]
+        bar_vol = bar.get("vol_ratio")
+        if pd.notna(bar_vol) and bar_vol >= vol_threshold:
+            vol_at_touch = True
+            break
 
     if touching_120 and was_above_long and valid_correction and uptrend_intact and vol_at_touch:
         smas = _extract_smas(latest)
