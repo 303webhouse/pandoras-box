@@ -175,10 +175,34 @@ async def lifespan(app: FastAPI):
                 logger.warning("Confluence engine error: %s", e)
             await asyncio.sleep(900)  # 15 minutes
 
+    # Holy Grail scanner: scan for ADX+EMA pullback setups every 15 min
+    async def holy_grail_scan_loop():
+        """Run Holy Grail scanner during market hours."""
+        import pytz
+        from datetime import datetime as dt_cls
+
+        # Offset from other scanners to spread load
+        await asyncio.sleep(180)  # 3 min after startup
+
+        while True:
+            try:
+                et = dt_cls.now(pytz.timezone("America/New_York"))
+                # Market hours: 9:30 AM - 4:00 PM ET, weekdays
+                if et.weekday() < 5 and 9 <= et.hour < 16:
+                    from scanners.holy_grail_scanner import run_holy_grail_scan, HG_SCANNER_AVAILABLE
+                    if HG_SCANNER_AVAILABLE:
+                        await run_holy_grail_scan()
+                else:
+                    logger.debug("Holy Grail scanner: outside market hours, skipping")
+            except Exception as e:
+                logger.warning("Holy Grail scan loop error: %s", e)
+            await asyncio.sleep(900)  # 15 minutes
+
     expiry_task = asyncio.create_task(signal_expiry_loop())
     universe_task = asyncio.create_task(universe_cache_loop())
     mtm_task = asyncio.create_task(mark_to_market_loop())
     confluence_task = asyncio.create_task(confluence_engine_loop())
+    holy_grail_task = asyncio.create_task(holy_grail_scan_loop())
 
     logger.info("✅ Pandora's Box is live")
 
@@ -189,6 +213,7 @@ async def lifespan(app: FastAPI):
     universe_task.cancel()
     mtm_task.cancel()
     confluence_task.cancel()
+    holy_grail_task.cancel()
     logger.info("🛑 Shutting down Pandora's Box...")
     await redis_client.close()
     await postgres_client.close()
