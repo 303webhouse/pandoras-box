@@ -1,0 +1,32 @@
+//@version=5
+indicator("TICK Reporter (Webhook)", overlay=false)
+
+inSession = not na(time(timeframe.period, "0930-1600"))
+
+var float dayHigh = na
+var float dayLow = na
+var float daySum = 0.0
+var int dayCount = 0
+
+newDay = ta.change(time("D"))
+if newDay
+    dayHigh := na
+    dayLow := na
+    daySum := 0.0
+    dayCount := 0
+
+if inSession
+    dayHigh := na(dayHigh) ? high : math.max(dayHigh, high)
+    dayLow := na(dayLow) ? low : math.min(dayLow, low)
+    daySum += close
+    dayCount += 1
+
+dayAvg = dayCount > 0 ? daySum / dayCount : na
+ready = inSession and not na(dayHigh) and not na(dayLow) and not na(dayAvg)
+
+if ready and barstate.isconfirmed
+    payload = '{"tick_high":' + str.tostring(dayHigh, "#.##") + ',"tick_low":' + str.tostring(dayLow, "#.##") + ',"tick_close":' + str.tostring(close, "#.##") + ',"tick_avg":' + str.tostring(dayAvg, "#.##") + '}'
+    alert(payload, alert.freq_once_per_bar)
+
+plot(close, "TICK Close", color=color.white)
+hline(0, "Zero", color=color.gray, linestyle=hline.style_dotted)
