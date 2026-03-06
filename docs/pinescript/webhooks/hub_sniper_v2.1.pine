@@ -1,0 +1,397 @@
+//@version=5
+indicator("Hub Sniper v2.1", overlay=true, max_lines_count=500)
+
+// =============================================================================
+// INPUTS
+// =============================================================================
+
+// -- Timeframe Filter --
+use_tf_filter = input.bool(true, title="Only Show on Specific Timeframe", group="Timeframe")
+allowed_tf = input.string("15", title="Allowed Timeframe", options=["15", "30", "60", "120", "240", "D"], group="Timeframe", tooltip="15 = 15m recommended")
+
+// -- Core Settings --
+lookback = input.int(20, title="VWAP Stdev Lookback", group="Core")
+adx_threshold = input.int(20, title="Min Trend Strength (ADX)", minval=1, group="Core")
+vol_threshold = input.float(1.25, title="Min RVOL (Normal Mode)", step=0.1, group="Core")
+
+// NEW: Proximity to bands (helps signal frequency without adding noise)
+use_proximity = input.bool(true, "Allow proximity to VAH/VAL (instead of exact touch)", group="Core")
+prox_atr = input.float(0.25, "Proximity (ATR)", step=0.05, group="Core")
+
+// -- Flush Detection --
+flush_pct = input.float(3.0, title="Flush Detection (%)", step=0.5, group="Flush Mode", tooltip="Price move % that triggers Flush Mode")
+flush_bars = input.int(5, title="Flush Lookback (bars)", group="Flush Mode")
+flush_atr_mult = input.float(2.0, title="Flush ATR Multiple", step=0.5, group="Flush Mode", tooltip="Alternative trigger: move exceeds this many ATRs")
+
+// -- Exhaustion Filters (Flush Mode) --
+exhaust_rvol = input.float(2.0, title="Min RVOL (Flush Mode)", step=0.25, group="Exhaustion Filters")
+exhaust_wick_pct = input.float(0.5, title="Min Wick Ratio", step=0.1, group="Exhaustion Filters", tooltip="Wick must be > this × body size")
+require_rsi_hook = input.bool(true, title="Require RSI Hook", group="Exhaustion Filters")
+
+// -- Risk Management --
+// [H8] Stop buffer increased from 0.5 to 0.85 ATR
+atr_sl_buffer = input.float(0.85, title="SL Buffer (ATR multiple)", step=0.1, group="Risk Management")
+show_tp2 = input.bool(true, title="Show TP2 (2R)", group="Risk Management")
+// [M20] Minimum R:R requirement
+min_rr = input.float(1.5, title="Min R:R to fire signal", step=0.25, group="Risk Management")
+
+// -- Time Filter [M1] --
+use_time_filter = input.bool(true, title="Enable Time Filter", group="Time Filter")
+no_before_hour = input.int(10, title="No signals before (ET hour)", group="Time Filter")
+avoid_lunch = input.bool(true, title="Avoid 12-1 PM ET", group="Time Filter")
+
+// -- Line Management --
+hours_to_clear = input.int(4, title="Clear Lines After (hours)", group="Lines")
+line_extend_bars = input.int(50, title="Line Length (bars)", group="Lines")
+
+// ───────────────────────────────────────────────────────────────
+// AVWAP Context
+// ───────────────────────────────────────────────────────────────
+use_avwap_gate   = input.bool(true, "Gate signals by Context AVWAP", group="AVWAP Context")
+show_avwap_line  = input.bool(true, "Show Context AVWAP line", group="AVWAP Context")
+show_avwap_tp    = input.bool(false, "Show AVWAP as extra TP marker", group="AVWAP Context")
+avwap_src        = input.source(hlc3, "AVWAP Source", group="AVWAP Context")
+
+// Perps-friendly "stickiness" buffer
+gate_buffer_atr  = input.float(0.10, "AVWAP Gate Buffer (ATR)", step=0.05, minval=0.0, group="AVWAP Context")
+
+// =============================================================================
+// CALCULATIONS
+// =============================================================================
+
+// -- VWAP Bands --
+basis = ta.vwap(close)
+dev = ta.stdev(close, lookback) * 2
+vah = basis + dev
+val = basis - dev
+
+// -- Trend Strength --
+[diplus, diminus, adx_val] = ta.dmi(14, 14)
+valid_trend = adx_val > adx_threshold
+
+// [M6] Regime awareness — ADX direction + slope, not just level
+adx_rising = ta.change(adx_val, 3) > 0
+strong_trend = adx_val > 25 and adx_rising
+weakening_trend = adx_val > adx_threshold and not adx_rising
+trend_direction_bull = diplus > diminus
+trend_direction_bear = diminus > diplus
+
+// -- RSI --
+rsi_val = ta.rsi(close, 14)
+
+// -- Volume --
+vol_avg = ta.sma(volume, 20)
+rvol = volume / vol_avg
+
+// -- ATR --
+atr = ta.atr(14)
+
+// =============================================================================
+// AVWAP CONTEXT (Weekly on intraday; Monthly on Daily+)
+// =============================================================================
+isNewWeek  = ta.change(time("W"))
+isNewMonth = ta.change(time("M"))
+
+f_avwap(_reset) =>
+    var float cumV  = na
+    var float cumPV = na
+    if _reset or na(cumV)
+        cumV  := volume
+        cumPV := avwap_src * volume
+    else
+        cumV  += volume
+        cumPV += avwap_src * volume
+    cumV > 0 ? (cumPV / cumV) : na
+
+avwapCtx = timeframe.isintraday ? f_avwap(isNewWeek) : f_avwap(isNewMonth)
+
+// Buffered AVWAP gate thresholds
+buf = atr * gate_buffer_atr
+long_bias_ok  = close >= (avwapCtx - buf)
+short_bias_ok = close <= (avwapCtx + buf)
+
+// =============================================================================
+// TIME FILTER [M1]
+// =============================================================================
+market_hour_et = hour(time, "America/New_York")
+too_early = market_hour_et < no_before_hour
+lunch_dead_zone = avoid_lunch and market_hour_et == 12
+time_ok = (not use_time_filter) or (not too_early and not lunch_dead_zone)
+
+// =============================================================================
+// MODE DETECTION
+// =============================================================================
+
+price_change_pct = ((close - close[flush_bars]) / close[flush_bars]) * 100
+atr_move = math.abs(close - close[flush_bars]) / atr
+
+flush_down = price_change_pct < -flush_pct or (close < close[flush_bars] and atr_move > flush_atr_mult)
+flush_up = price_change_pct > flush_pct or (close > close[flush_bars] and atr_move > flush_atr_mult)
+flush_mode = flush_down or flush_up
+normal_mode = not flush_mode
+
+// =============================================================================
+// EXHAUSTION DETECTION
+// =============================================================================
+
+vol_capitulation = rvol >= exhaust_rvol
+
+body = math.abs(close - open)
+lower_wick = math.min(open, close) - low
+upper_wick = high - math.max(open, close)
+bullish_wick = lower_wick > (body * exhaust_wick_pct)
+bearish_wick = upper_wick > (body * exhaust_wick_pct)
+
+rsi_oversold_hook = rsi_val < 30 and rsi_val > rsi_val[1]
+rsi_overbought_hook = rsi_val > 70 and rsi_val < rsi_val[1]
+
+bullish_exhaustion = vol_capitulation and bullish_wick and (not require_rsi_hook or rsi_oversold_hook)
+bearish_exhaustion = vol_capitulation and bearish_wick and (not require_rsi_hook or rsi_overbought_hook)
+
+// =============================================================================
+// [H3] CONFIRMATION CANDLE (Normal Mode)
+// Normal mode now requires a reversal pattern at the band + volume
+// =============================================================================
+is_bullish_engulf = close > open and close > high[1]
+is_hammer = lower_wick > body * 0.5 and upper_wick < body * 0.3
+is_bullish_confirm = is_bullish_engulf or is_hammer
+
+is_bearish_engulf = close < open and close < low[1]
+is_shooting_star = upper_wick > body * 0.5 and lower_wick < body * 0.3
+is_bearish_confirm = is_bearish_engulf or is_shooting_star
+
+confirm_vol_ok = rvol >= 1.2  // Confirmation candle needs at least 1.2x RVOL
+
+// =============================================================================
+// SIGNAL LOGIC
+// =============================================================================
+
+// Timeframe filter
+tf_ok = not use_tf_filter or timeframe.period == allowed_tf
+
+normal_vol_ok = rvol >= vol_threshold
+normal_rsi_bull = rsi_val < 60
+normal_rsi_bear = rsi_val > 40
+
+// NEW: proximity-based "touch"
+val_touch = use_proximity ? (low <= (val + atr * prox_atr)) : (low <= val)
+vah_touch = use_proximity ? (high >= (vah - atr * prox_atr)) : (high >= vah)
+
+// [H3] Normal mode now requires confirmation candle + confirmation volume
+normal_long  = tf_ok and time_ok and normal_mode and val_touch and (close > val) and valid_trend and normal_rsi_bull and normal_vol_ok and is_bullish_confirm and confirm_vol_ok
+normal_short = tf_ok and time_ok and normal_mode and vah_touch and (close < vah) and valid_trend and normal_rsi_bear and normal_vol_ok and is_bearish_confirm and confirm_vol_ok
+
+// Flush mode unchanged (already has exhaustion filters which serve as confirmation)
+flush_long  = tf_ok and time_ok and flush_down and val_touch and (close > val) and bullish_exhaustion
+flush_short = tf_ok and time_ok and flush_up   and vah_touch and (close < vah) and bearish_exhaustion
+
+// AVWAP gate (buffered)
+if use_avwap_gate
+    normal_long  := normal_long  and long_bias_ok
+    flush_long   := flush_long   and long_bias_ok
+    normal_short := normal_short and short_bias_ok
+    flush_short  := flush_short  and short_bias_ok
+
+long_signal  = normal_long or flush_long
+short_signal = normal_short or flush_short
+
+// =============================================================================
+// ENTRY / SL / TP CALCULATION
+// [M20] TP1 = 1.5R (not VWAP basis), TP2 = 2R, with min R:R gate
+// =============================================================================
+
+long_entry = close
+long_sl = low - (atr * atr_sl_buffer)
+long_risk = long_entry - long_sl
+long_tp1 = long_entry + (long_risk * 1.5)   // [M20] 1.5R target
+long_tp2 = long_entry + (long_risk * 2)      // 2R target
+long_rr = long_risk > 0 ? long_tp1 / long_risk : 0  // Effective R:R at TP1
+
+short_entry = close
+short_sl = high + (atr * atr_sl_buffer)
+short_risk = short_sl - short_entry
+short_tp1 = short_entry - (short_risk * 1.5) // [M20] 1.5R target
+short_tp2 = short_entry - (short_risk * 2)   // 2R target
+short_rr = short_risk > 0 ? short_tp1 / short_risk : 0
+
+// [M20] R:R gate — suppress signal if R:R too low
+if long_signal and long_risk > 0 and (long_tp1 - long_entry) / long_risk < min_rr
+    long_signal := false
+if short_signal and short_risk > 0 and (short_entry - short_tp1) / short_risk < min_rr
+    short_signal := false
+
+// Optional extra TP marker = AVWAP context
+long_tp_avwap  = avwapCtx
+short_tp_avwap = avwapCtx
+
+// =============================================================================
+// LINE MANAGEMENT
+// =============================================================================
+
+var line entry_line = na
+var line sl_line = na
+var line tp1_line = na
+var line tp2_line = na
+var line tpx_line = na
+
+var label entry_label = na
+var label sl_label = na
+var label tp1_label = na
+var label tp2_label = na
+var label tpx_label = na
+
+var int signal_bar = na
+var string last_direction = na
+
+bars_to_clear = math.round(hours_to_clear * 60 / timeframe.multiplier)
+
+clear_drawings() =>
+    line.delete(entry_line)
+    line.delete(sl_line)
+    line.delete(tp1_line)
+    line.delete(tp2_line)
+    line.delete(tpx_line)
+    label.delete(entry_label)
+    label.delete(sl_label)
+    label.delete(tp1_label)
+    label.delete(tp2_label)
+    label.delete(tpx_label)
+
+// Draw lines for LONG signal
+if long_signal
+    clear_drawings()
+    entry_line := line.new(bar_index, long_entry, bar_index + line_extend_bars, long_entry, color=color.yellow, style=line.style_dashed, width=1)
+    entry_label := label.new(bar_index + line_extend_bars, long_entry, "ENTRY " + str.tostring(long_entry, "#.##"), style=label.style_label_left, color=color.new(color.yellow, 80), textcolor=color.yellow, size=size.small)
+
+    sl_line := line.new(bar_index, long_sl, bar_index + line_extend_bars, long_sl, color=color.red, style=line.style_dotted, width=1)
+    sl_label := label.new(bar_index + line_extend_bars, long_sl, "SL " + str.tostring(long_sl, "#.##"), style=label.style_label_left, color=color.new(color.red, 80), textcolor=color.red, size=size.small)
+
+    tp1_line := line.new(bar_index, long_tp1, bar_index + line_extend_bars, long_tp1, color=color.green, style=line.style_dotted, width=1)
+    tp1_label := label.new(bar_index + line_extend_bars, long_tp1, "TP1 1.5R " + str.tostring(long_tp1, "#.##"), style=label.style_label_left, color=color.new(color.green, 80), textcolor=color.green, size=size.small)
+
+    if show_tp2
+        tp2_line := line.new(bar_index, long_tp2, bar_index + line_extend_bars, long_tp2, color=color.teal, style=line.style_dotted, width=1)
+        tp2_label := label.new(bar_index + line_extend_bars, long_tp2, "TP2 2R " + str.tostring(long_tp2, "#.##"), style=label.style_label_left, color=color.new(color.teal, 80), textcolor=color.teal, size=size.small)
+
+    if show_avwap_tp
+        tpx_line := line.new(bar_index, long_tp_avwap, bar_index + line_extend_bars, long_tp_avwap, color=color.blue, style=line.style_dotted, width=1)
+        tpx_label := label.new(bar_index + line_extend_bars, long_tp_avwap, "AVWAP " + str.tostring(long_tp_avwap, "#.##"), style=label.style_label_left, color=color.new(color.blue, 85), textcolor=color.blue, size=size.small)
+
+    signal_bar := bar_index
+    last_direction := "LONG"
+
+// Draw lines for SHORT signal
+if short_signal
+    clear_drawings()
+    entry_line := line.new(bar_index, short_entry, bar_index + line_extend_bars, short_entry, color=color.yellow, style=line.style_dashed, width=1)
+    entry_label := label.new(bar_index + line_extend_bars, short_entry, "ENTRY " + str.tostring(short_entry, "#.##"), style=label.style_label_left, color=color.new(color.yellow, 80), textcolor=color.yellow, size=size.small)
+
+    sl_line := line.new(bar_index, short_sl, bar_index + line_extend_bars, short_sl, color=color.red, style=line.style_dotted, width=1)
+    sl_label := label.new(bar_index + line_extend_bars, short_sl, "SL " + str.tostring(short_sl, "#.##"), style=label.style_label_left, color=color.new(color.red, 80), textcolor=color.red, size=size.small)
+
+    tp1_line := line.new(bar_index, short_tp1, bar_index + line_extend_bars, short_tp1, color=color.green, style=line.style_dotted, width=1)
+    tp1_label := label.new(bar_index + line_extend_bars, short_tp1, "TP1 1.5R " + str.tostring(short_tp1, "#.##"), style=label.style_label_left, color=color.new(color.green, 80), textcolor=color.green, size=size.small)
+
+    if show_tp2
+        tp2_line := line.new(bar_index, short_tp2, bar_index + line_extend_bars, short_tp2, color=color.teal, style=line.style_dotted, width=1)
+        tp2_label := label.new(bar_index + line_extend_bars, short_tp2, "TP2 2R " + str.tostring(short_tp2, "#.##"), style=label.style_label_left, color=color.new(color.teal, 80), textcolor=color.teal, size=size.small)
+
+    if show_avwap_tp
+        tpx_line := line.new(bar_index, short_tp_avwap, bar_index + line_extend_bars, short_tp_avwap, color=color.blue, style=line.style_dotted, width=1)
+        tpx_label := label.new(bar_index + line_extend_bars, short_tp_avwap, "AVWAP " + str.tostring(short_tp_avwap, "#.##"), style=label.style_label_left, color=color.new(color.blue, 85), textcolor=color.blue, size=size.small)
+
+    signal_bar := bar_index
+    last_direction := "SHORT"
+
+// Auto-clear after time elapsed
+if not na(signal_bar) and (bar_index - signal_bar) >= bars_to_clear
+    clear_drawings()
+    signal_bar := na
+    last_direction := na
+
+// =============================================================================
+// PLOTTING
+// =============================================================================
+
+plot(vah, color=color.new(color.red, 30), linewidth=2, title="VAH (Short Zone)")
+plot(basis, color=color.new(color.gray, 50), linewidth=1, title="VWAP")
+plot(val, color=color.new(color.green, 30), linewidth=2, title="VAL (Long Zone)")
+
+plot(show_avwap_line ? avwapCtx : na, color=color.new(color.blue, 0), linewidth=2, title="Context AVWAP")
+
+bgcolor(flush_down ? color.new(color.red, 92) : flush_up ? color.new(color.green, 92) : na, title="Flush Mode Background")
+
+plotshape(normal_long, style=shape.triangleup, location=location.belowbar, color=color.green, size=size.small, text="SNIPE", textcolor=color.white, title="Normal Long")
+plotshape(flush_long, style=shape.triangleup, location=location.belowbar, color=color.lime, size=size.normal, text="SNIPE", textcolor=color.white, title="Flush Long")
+plotshape(normal_short, style=shape.triangledown, location=location.abovebar, color=color.red, size=size.small, text="SNIPE", textcolor=color.white, title="Flush Short")
+plotshape(flush_short, style=shape.triangledown, location=location.abovebar, color=color.fuchsia, size=size.normal, text="SNIPE", textcolor=color.white, title="Flush Short")
+
+// =============================================================================
+// INFO TABLE
+// =============================================================================
+
+var table infoTable = table.new(position.top_right, 2, 12, bgcolor=color.new(color.black, 70), border_width=1)
+
+if barstate.islast
+    mode_text = flush_down ? "FLUSH ↓" : flush_up ? "FLUSH ↑" : "NORMAL"
+    mode_color = flush_down ? color.red : flush_up ? color.green : color.gray
+    table.cell(infoTable, 0, 0, "MODE", text_color=color.gray, text_size=size.small)
+    table.cell(infoTable, 1, 0, mode_text, text_color=mode_color, text_size=size.small)
+
+    table.cell(infoTable, 0, 1, "ADX", text_color=color.gray, text_size=size.small)
+    table.cell(infoTable, 1, 1, str.tostring(adx_val, "#.#") + (adx_rising ? " ↑" : " ↓"), text_color=valid_trend ? color.green : color.red, text_size=size.small)
+
+    rsi_color = rsi_val < 30 ? color.green : rsi_val > 70 ? color.red : color.white
+    table.cell(infoTable, 0, 2, "RSI", text_color=color.gray, text_size=size.small)
+    table.cell(infoTable, 1, 2, str.tostring(rsi_val, "#.#"), text_color=rsi_color, text_size=size.small)
+
+    rvol_ok = normal_mode ? rvol >= vol_threshold : rvol >= exhaust_rvol
+    table.cell(infoTable, 0, 3, "RVOL", text_color=color.gray, text_size=size.small)
+    table.cell(infoTable, 1, 3, str.tostring(rvol, "#.##") + "x", text_color=rvol_ok ? color.green : color.red, text_size=size.small)
+
+    table.cell(infoTable, 0, 4, "MOVE", text_color=color.gray, text_size=size.small)
+    table.cell(infoTable, 1, 4, str.tostring(price_change_pct, "#.##") + "%", text_color=price_change_pct >= 0 ? color.green : color.red, text_size=size.small)
+
+    table.cell(infoTable, 0, 5, "VAH", text_color=color.red, text_size=size.small)
+    table.cell(infoTable, 1, 5, str.tostring(vah, "#.##"), text_color=color.red, text_size=size.small)
+
+    table.cell(infoTable, 0, 6, "VAL", text_color=color.green, text_size=size.small)
+    table.cell(infoTable, 1, 6, str.tostring(val, "#.##"), text_color=color.green, text_size=size.small)
+
+    table.cell(infoTable, 0, 7, "AVWAP", text_color=color.blue, text_size=size.small)
+    table.cell(infoTable, 1, 7, str.tostring(avwapCtx, "#.##"), text_color=color.blue, text_size=size.small)
+
+    table.cell(infoTable, 0, 8, "PROX(ATR)", text_color=color.orange, text_size=size.small)
+    table.cell(infoTable, 1, 8, str.tostring(prox_atr, "#.##"), text_color=color.orange, text_size=size.small)
+
+    // [M6] Regime display
+    regime_txt = strong_trend ? "STRONG" : weakening_trend ? "WEAK" : "NO TREND"
+    regime_col = strong_trend ? color.lime : weakening_trend ? color.orange : color.red
+    table.cell(infoTable, 0, 9, "REGIME", text_color=color.gray, text_size=size.small)
+    table.cell(infoTable, 1, 9, regime_txt, text_color=regime_col, text_size=size.small)
+
+    // [M1] Time filter display
+    time_txt = time_ok ? "OK" : too_early ? "TOO EARLY" : "LUNCH"
+    table.cell(infoTable, 0, 10, "TIME", text_color=color.gray, text_size=size.small)
+    table.cell(infoTable, 1, 10, time_txt, text_color=time_ok ? color.green : color.red, text_size=size.small)
+
+    signal_text = na(last_direction) ? "--" : last_direction
+    signal_color = last_direction == "LONG" ? color.green : last_direction == "SHORT" ? color.red : color.gray
+    table.cell(infoTable, 0, 11, "SIGNAL", text_color=color.gray, text_size=size.small)
+    table.cell(infoTable, 1, 11, signal_text, text_color=signal_color, text_size=size.small)
+
+// =============================================================================
+// ALERTS
+// =============================================================================
+
+if long_signal
+    mode_str = flush_down ? "Flush" : "Normal"
+    rr_str = long_risk > 0 ? str.tostring((long_tp1 - long_entry) / long_risk, "#.#") : "?"
+    alert_msg = '{"ticker": "' + syminfo.ticker + '", "strategy": "Sniper", "direction": "LONG", "entry_price": ' + str.tostring(close) + ', "stop_loss": ' + str.tostring(long_sl) + ', "target_1": ' + str.tostring(long_tp1) + ', "target_2": ' + str.tostring(long_tp2) + ', "risk_reward": ' + rr_str + ', "timeframe": "' + timeframe.period + '", "adx": ' + str.tostring(adx_val, "#.#") + ', "adx_rising": ' + (adx_rising ? "true" : "false") + ', "rsi": ' + str.tostring(rsi_val, "#.#") + ', "rvol": ' + str.tostring(rvol, "#.##") + ', "mode": "' + mode_str + '", "avwap_ctx": ' + str.tostring(avwapCtx, "#.##") + ', "avwap_buf_atr": ' + str.tostring(gate_buffer_atr, "#.##") + ', "prox_atr": ' + str.tostring(prox_atr, "#.##") + '}'
+    alert(alert_msg, alert.freq_once_per_bar)
+
+if short_signal
+    mode_str = flush_up ? "Flush" : "Normal"
+    rr_str = short_risk > 0 ? str.tostring((short_entry - short_tp1) / short_risk, "#.#") : "?"
+    alert_msg = '{"ticker": "' + syminfo.ticker + '", "strategy": "Sniper", "direction": "SHORT", "entry_price": ' + str.tostring(close) + ', "stop_loss": ' + str.tostring(short_sl) + ', "target_1": ' + str.tostring(short_tp1) + ', "target_2": ' + str.tostring(short_tp2) + ', "risk_reward": ' + rr_str + ', "timeframe": "' + timeframe.period + '", "adx": ' + str.tostring(adx_val, "#.#") + ', "adx_rising": ' + (adx_rising ? "true" : "false") + ', "rsi": ' + str.tostring(rsi_val, "#.#") + ', "rvol": ' + str.tostring(rvol, "#.##") + ', "mode": "' + mode_str + '", "avwap_ctx": ' + str.tostring(avwapCtx, "#.##") + ', "avwap_buf_atr": ' + str.tostring(gate_buffer_atr, "#.##") + ', "prox_atr": ' + str.tostring(prox_atr, "#.##") + '}'
+    alert(alert_msg, alert.freq_once_per_bar)
