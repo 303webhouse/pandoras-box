@@ -3,7 +3,7 @@ Confluence Engine — Groups active signals by ticker+direction,
 assigns STANDALONE / CONFIRMED / CONVICTION tiers.
 
 Runs as a background task every 15 minutes during market hours.
-Reads from trade_ideas table, updates confluence metadata, broadcasts via WebSocket.
+Reads from signals table, updates confluence metadata, broadcasts via WebSocket.
 """
 
 import logging
@@ -53,10 +53,11 @@ async def run_confluence_scan() -> Dict[str, Any]:
             # Fetch active signals from last N hours
             rows = await conn.fetch("""
                 SELECT id, signal_id, ticker, direction, strategy, signal_type,
-                       score, timestamp, confidence
-                FROM trade_ideas
+                       score, timestamp, source
+                FROM signals
                 WHERE timestamp >= $1
                   AND status = 'ACTIVE'
+                  AND (expires_at IS NULL OR expires_at > NOW())
                 ORDER BY ticker, direction, timestamp
             """, cutoff)
     except Exception as e:
@@ -121,7 +122,7 @@ async def run_confluence_scan() -> Dict[str, Any]:
         try:
             async with pool.acquire() as conn:
                 await conn.execute("""
-                    UPDATE trade_ideas
+                    UPDATE signals
                     SET confluence_tier = $1,
                         confluence_count = $2,
                         confluence_updated_at = NOW()
@@ -208,7 +209,7 @@ def _determine_tier(independent: int, lenses: set, signals: list) -> str:
                 except (ValueError, TypeError):
                     pass
 
-            # High-scoring signal from any strategy (score >= 80 in the trade_ideas scorer)
+            # High-scoring signal from any strategy (score >= 80 in the signals scorer)
             if sig.get("score") is not None:
                 try:
                     if float(sig["score"]) >= 80:
@@ -230,18 +231,18 @@ def _determine_tier(independent: int, lenses: set, signals: list) -> str:
 
 async def _ensure_confluence_columns(conn) -> None:
     """
-    Add confluence columns to trade_ideas table if they don't exist.
+    Add confluence columns to signals table if they don't exist.
     Safe to call repeatedly (IF NOT EXISTS).
     """
     try:
         await conn.execute("""
-            ALTER TABLE trade_ideas ADD COLUMN IF NOT EXISTS confluence_tier VARCHAR(20) DEFAULT 'STANDALONE';
+            ALTER TABLE signals ADD COLUMN IF NOT EXISTS confluence_tier VARCHAR(20) DEFAULT 'STANDALONE';
         """)
         await conn.execute("""
-            ALTER TABLE trade_ideas ADD COLUMN IF NOT EXISTS confluence_count INTEGER DEFAULT 0;
+            ALTER TABLE signals ADD COLUMN IF NOT EXISTS confluence_count INTEGER DEFAULT 0;
         """)
         await conn.execute("""
-            ALTER TABLE trade_ideas ADD COLUMN IF NOT EXISTS confluence_updated_at TIMESTAMP;
+            ALTER TABLE signals ADD COLUMN IF NOT EXISTS confluence_updated_at TIMESTAMP;
         """)
     except Exception as e:
         # Column might already exist or table structure differs
