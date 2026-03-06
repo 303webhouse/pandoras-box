@@ -135,6 +135,7 @@ class CreatePositionRequest(BaseModel):
 
 
 class UpdatePositionRequest(BaseModel):
+    status: Optional[str] = None  # OPEN, CLOSED, EXPIRED — allows reopening closed positions
     stop_loss: Optional[float] = None
     target_1: Optional[float] = None
     target_2: Optional[float] = None
@@ -682,6 +683,10 @@ async def update_position(position_id: str, req: UpdatePositionRequest):
     params = []
     idx = 1
 
+    if req.status is not None:
+        sets.append(f"status = ${idx}")
+        params.append(req.status.upper())
+        idx += 1
     if req.stop_loss is not None:
         sets.append(f"stop_loss = ${idx}")
         params.append(req.stop_loss)
@@ -741,12 +746,12 @@ async def update_position(position_id: str, req: UpdatePositionRequest):
     async with pool.acquire() as conn:
         row = await conn.fetchrow(f"""
             UPDATE unified_positions SET {set_clause}
-            WHERE position_id = ${idx} AND status = 'OPEN'
+            WHERE position_id = ${idx}
             RETURNING *
         """, *params)
 
     if not row:
-        raise HTTPException(status_code=404, detail=f"Open position {position_id} not found")
+        raise HTTPException(status_code=404, detail=f"Position {position_id} not found")
 
     result = _row_to_dict(row)
 
