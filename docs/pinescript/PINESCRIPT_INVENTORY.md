@@ -16,7 +16,7 @@
 
 ## Trade Signal Scripts (Generate Trade Ideas)
 
-### ✅ Holy Grail Webhook v1 — `holy_grail_webhook_v1.pine`
+### ✅ Holy Grail Webhook v1 — `webhooks/holy_grail_webhook_v1.pine`
 - **Status:** IN REPO + ACTIVE
 - **What it does:** Linda Raschke continuation entry. ADX ≥ 25, pullback to 20 EMA, confirmation candle. Sends JSON webhook.
 - **Webhook route:** `/webhook/tradingview` → `process_holy_grail_signal()`
@@ -24,6 +24,16 @@
 - **Trade Ideas count (all time):** 8
 - **Fields sent:** ticker, strategy ("holy_grail"), direction, entry_price, stop_loss, target_1, adx, rsi, timeframe, rvol (DI spread)
 - **Applied to:** QQQ, SPY, individual equities (multi-chart)
+
+### ✅ Dark Pool Whale Hunter v2 — `webhooks/whale_hunter_v2.pine`
+- **Status:** IN REPO + WEBHOOK-CAPABLE (alert not yet configured on TradingView)
+- **What it does:** Detects algorithmic execution fingerprints — consecutive bars with matched total volume transacting at the same price level (POC). v2 adds volume floor, time filter, 3-bar confirmation, structural context, trade framework, and regime awareness.
+- **Webhook route:** `/webhook/whale` → `whale.py` handler
+- **Signal types:** `WHALE` (with lean: BULLISH / BEARISH / CONTESTED)
+- **Trade Ideas count (all time):** 0 (webhook alert not yet set on TradingView)
+- **Fields sent:** ticker, tf, lean, poc, price, entry, stop, tp1, tp2, rvol, consec_bars, structural, regime, adx, vol, vol_delta_pct, poc_delta_pct, time
+- **Key features:** POC via lower-timeframe volume profile, RVOL ≥ 1.5x floor, 3-bar consecutive match, structural level detection (swing high/low), DXY macro context (optional), full trade plan (entry/stop/TP1/TP2)
+- **⚠️ TODO:** Set up TradingView alert on target charts pointing to `/webhook/whale`
 
 ### ⚠️ Scout Sniper — NOT IN REPO
 - **Status:** ACTIVE on TradingView, **SOURCE CODE NOT SAVED**
@@ -101,7 +111,7 @@
 ## Superseded / Deprecated
 
 ### 🔴 Holy Grail Pullback (Non-Webhook) — `holy_grail_pullback.pine`
-- **Superseded by:** `holy_grail_webhook_v1.pine`
+- **Superseded by:** `webhooks/holy_grail_webhook_v1.pine`
 - **What it does:** Same logic as the webhook version but only generates visual alerts, no JSON webhook payload
 - **Recommendation:** Archive or delete. The webhook version is the active one.
 
@@ -116,20 +126,19 @@ These are NOT PineScript indicators. They run as Python code on the Railway back
 | CTA Scanner | `backend/scanners/cta_scanner.py` (79KB) | PULLBACK_ENTRY, RESISTANCE_REJECTION, TWO_CLOSE_VOLUME, GOLDEN_TOUCH, TRAPPED_SHORTS/LONGS, BEARISH_BREAKDOWN, DEATH_CROSS | ✅ Active — 285 trade ideas |
 | Exhaustion | `backend/strategies/exhaustion.py` | EXHAUSTION_BULL, EXHAUSTION_BEAR | ✅ Active — 13 trade ideas |
 | Crypto Scanner | `backend/scanners/???` | Unknown sub-types | ✅ Active — 57 trade ideas (needs Phase 2 audit) |
-| Whale Hunter | `backend/scanners/hunter.py` + `backend/webhooks/whale.py` | Unknown | ❓ Handler exists, 0 trade ideas |
+| Whale Hunter | `backend/scanners/hunter.py` + `backend/webhooks/whale.py` | WHALE | ⚠️ Handler exists, PineScript now in repo, TV alert not yet configured |
 | Hybrid Scanner | `backend/scanners/hybrid_scanner.py` (42KB) | N/A | ❓ UI killed in Brief 09, backend status unknown |
 
 ---
 
 ## Proposed Folder Structure
 
-Once all scripts are exported from TradingView:
-
 ```
 docs/pinescript/
 ├── PINESCRIPT_INVENTORY.md          ← This file
 ├── webhooks/                        ← Scripts that send data to Railway
-│   ├── holy_grail_webhook_v1.pine
+│   ├── holy_grail_webhook_v1.pine   ✅ In repo
+│   ├── whale_hunter_v2.pine         ✅ In repo (alert not yet on TV)
 │   ├── scout_sniper_webhook.pine    ← EXPORT FROM TV
 │   ├── hub_sniper_webhook.pine      ← EXPORT FROM TV
 │   ├── tick_alert.pine              ← EXPORT FROM TV
