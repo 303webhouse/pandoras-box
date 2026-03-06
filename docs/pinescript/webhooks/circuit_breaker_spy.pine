@@ -1,0 +1,106 @@
+//@version=5
+indicator("Circuit Breaker Monitor (SPY)", overlay=true)
+
+// =============================================================================
+// CIRCUIT BREAKER MONITOR - SPY
+// =============================================================================
+// 
+// Monitors SPY for significant moves from the open and fires webhook alerts.
+// 
+// SETUP:
+//   1. Add this indicator to SPY chart (5m or 15m timeframe recommended)
+//   2. Create ONE alert: Condition → "Circuit Breaker Monitor (SPY)" → "Any alert() function call"
+//   3. Webhook URL: https://pandoras-box-production.up.railway.app/webhook/circuit_breaker
+//   4. Done - all triggers handled automatically
+//
+// =============================================================================
+
+// Inputs
+threshold_1 = input.float(1.0, "Level 1 Threshold (%)", step=0.1, group="Thresholds")
+threshold_2 = input.float(2.0, "Level 2 Threshold (%)", step=0.1, group="Thresholds")
+recovery_band = input.float(0.3, "Recovery Band (%)", step=0.1, group="Thresholds", tooltip="SPY within this % of open = recovered")
+
+// Get today's open
+var float today_open = na
+if ta.change(time("D"))
+    today_open := open
+
+// Calculate change from open
+change_from_open = ((close - today_open) / today_open) * 100
+
+// State tracking (to avoid duplicate alerts)
+var string last_state = "NORMAL"
+
+// Determine current state
+current_state = "NORMAL"
+if change_from_open <= -threshold_2
+    current_state := "DOWN_2PCT"
+else if change_from_open <= -threshold_1
+    current_state := "DOWN_1PCT"
+else if change_from_open >= threshold_2
+    current_state := "UP_2PCT"
+else if math.abs(change_from_open) <= recovery_band
+    current_state := "FLAT"
+
+// Detect state changes
+state_changed = current_state != last_state
+
+// Fire alerts on state change
+if state_changed
+    if current_state == "DOWN_2PCT" and last_state != "DOWN_2PCT"
+        alert('{"type": "circuit_breaker", "trigger": "spy_down_2pct"}', alert.freq_once_per_bar)
+    
+    else if current_state == "DOWN_1PCT" and last_state == "NORMAL"
+        alert('{"type": "circuit_breaker", "trigger": "spy_down_1pct"}', alert.freq_once_per_bar)
+    
+    else if current_state == "UP_2PCT" and last_state != "UP_2PCT"
+        alert('{"type": "circuit_breaker", "trigger": "spy_up_2pct"}', alert.freq_once_per_bar)
+    
+    else if current_state == "FLAT" and (last_state == "DOWN_1PCT" or last_state == "DOWN_2PCT" or last_state == "UP_2PCT")
+        alert('{"type": "circuit_breaker", "trigger": "spy_recovery"}', alert.freq_once_per_bar)
+    
+    last_state := current_state
+
+// =============================================================================
+// VISUAL DISPLAY
+// =============================================================================
+
+// Background color based on state
+bg_color = current_state == "DOWN_2PCT" ? color.new(color.red, 80) :
+           current_state == "DOWN_1PCT" ? color.new(color.orange, 85) :
+           current_state == "UP_2PCT" ? color.new(color.green, 80) :
+           na
+bgcolor(bg_color, title="Circuit Breaker Background")
+
+// Plot open line
+plot(today_open, color=color.gray, style=plot.style_linebr, linewidth=1, title="Today's Open")
+
+// Plot threshold lines
+plot(today_open * (1 - threshold_1/100), color=color.orange, style=plot.style_linebr, linewidth=1, title="-1% Level")
+plot(today_open * (1 - threshold_2/100), color=color.red, style=plot.style_linebr, linewidth=1, title="-2% Level")
+plot(today_open * (1 + threshold_2/100), color=color.green, style=plot.style_linebr, linewidth=1, title="+2% Level")
+
+// Info table
+var table infoTable = table.new(position.top_right, 2, 4, bgcolor=color.new(color.black, 70), border_width=1)
+
+if barstate.islast
+    // State
+    state_color = current_state == "DOWN_2PCT" ? color.red :
+                  current_state == "DOWN_1PCT" ? color.orange :
+                  current_state == "UP_2PCT" ? color.green :
+                  color.gray
+    table.cell(infoTable, 0, 0, "STATE", text_color=color.gray, text_size=size.small)
+    table.cell(infoTable, 1, 0, current_state, text_color=state_color, text_size=size.small)
+    
+    // Change %
+    chg_color = change_from_open >= 0 ? color.green : color.red
+    table.cell(infoTable, 0, 1, "CHG", text_color=color.gray, text_size=size.small)
+    table.cell(infoTable, 1, 1, str.tostring(change_from_open, "#.##") + "%", text_color=chg_color, text_size=size.small)
+    
+    // Open
+    table.cell(infoTable, 0, 2, "OPEN", text_color=color.gray, text_size=size.small)
+    table.cell(infoTable, 1, 2, str.tostring(today_open, "#.##"), text_color=color.white, text_size=size.small)
+    
+    // Close
+    table.cell(infoTable, 0, 3, "LAST", text_color=color.gray, text_size=size.small)
+    table.cell(infoTable, 1, 3, str.tostring(close, "#.##"), text_color=color.white, text_size=size.small)
