@@ -59,13 +59,22 @@
 
 ## Rejected Strategies
 
-*None formally rejected yet. All evaluated strategies are either active, deferred, or pending.*
+### Triple Line Trend Retracement (VWAP + Dual 200 EMA)
+- **Rejected:** March 6, 2026
+- **Reason:** Doesn't work. Strategy never generated a single Trade Idea. No PineScript webhook was built. Backend handler (`process_triple_line_signal`) and validation code (`strategies/triple_line.py`) are dead code.
+- **Dead code to remove:**
+  - `backend/strategies/triple_line.py` (3.4KB)
+  - `process_triple_line_signal()` handler in `backend/webhooks/tradingview.py`
+  - `from strategies.triple_line import validate_triple_line_signal` import
+  - `from bias_filters.tick_breadth import check_bias_alignment` import (only caller was Triple Line handler)
+  - `from scoring.rank_trades import classify_signal` import (verify no other callers before removing)
 
 ---
 
 ## Dead Code Candidates
 
-These exist in the codebase but have unclear status:
+### Triple Line (CONFIRMED DEAD — see Rejected above)
+All Triple Line code should be removed in the next cleanup pass.
 
 ### Hybrid Scanner (`backend/scanners/hybrid_scanner.py` — 42KB)
 - UI was killed in Brief 09
