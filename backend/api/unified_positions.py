@@ -1334,6 +1334,108 @@ async def run_mark_to_market() -> dict:
     return result
 
 
+async def sync_v2_to_legacy() -> dict:
+    """
+    Keep legacy open_positions in sync with unified_positions.
+    Runs after mark-to-market so Pivot/committee always see fresh data.
+    - OPEN in v2 but missing in legacy → insert
+    - OPEN in v2 with different qty/price → update legacy
+    - Active in legacy but CLOSED/missing in v2 → deactivate
+    """
+    pool = await get_postgres_client()
+
+    async with pool.acquire() as conn:
+        v2_rows = await conn.fetch(
+            "SELECT * FROM unified_positions WHERE status = 'OPEN'"
+        )
+        legacy_rows = await conn.fetch(
+            "SELECT * FROM open_positions WHERE is_active = TRUE"
+        )
+
+    # Index legacy by (ticker, strike, short_strike, expiry, direction)
+    def _legacy_key(row):
+        return (
+            row["ticker"],
+            float(row["strike"]) if row.get("strike") else None,
+            float(row["short_strike"]) if row.get("short_strike") else None,
+            str(row["expiry"]) if row.get("expiry") else None,
+            row["direction"],
+        )
+
+    legacy_map = {}
+    for row in legacy_rows:
+        legacy_map[_legacy_key(row)] = row
+
+    added = 0
+    updated = 0
+    closed = 0
+    matched_keys = set()
+
+    async with pool.acquire() as conn:
+        for v2 in v2_rows:
+            ls = float(v2["long_strike"]) if v2.get("long_strike") else None
+            ss = float(v2["short_strike"]) if v2.get("short_strike") else None
+            exp_str = str(v2["expiry"]) if v2.get("expiry") else None
+            direction = v2.get("direction") or "LONG"
+            # Map v2 direction to legacy convention
+            legacy_dir = "SHORT" if direction.upper() == "BEARISH" else "LONG" if direction.upper() == "BULLISH" else direction
+
+            key = (v2["ticker"], ls, ss, exp_str, legacy_dir)
+            # Also try matching on long_strike as legacy strike
+            key_alt = (v2["ticker"], ls, ss, exp_str, direction)
+
+            legacy = legacy_map.get(key) or legacy_map.get(key_alt)
+
+            if legacy:
+                matched_keys.add(_legacy_key(legacy))
+                # Update qty and price if changed
+                v2_val = round(float(v2["current_price"]) * 100 * v2["quantity"], 2) if v2.get("current_price") else None
+                needs_update = (
+                    legacy["quantity"] != v2["quantity"]
+                    or (v2_val is not None and legacy.get("current_value") != v2_val)
+                )
+                if needs_update:
+                    await conn.execute("""
+                        UPDATE open_positions
+                        SET quantity = $1, current_value = $2, last_updated = NOW(), updated_by = 'v2_sync'
+                        WHERE id = $3
+                    """, v2["quantity"], v2_val, legacy["id"])
+                    updated += 1
+            else:
+                # Insert missing position into legacy
+                structure = (v2.get("structure") or "").lower()
+                opt_type = "Put" if "put" in structure else "Call"
+                spread_type = "debit" if "debit" in structure else "credit" if "credit" in structure else "debit"
+                pos_type = "option_spread" if ss else "option"
+                cost_basis = float(v2["cost_basis"]) if v2.get("cost_basis") else None
+                v2_val = round(float(v2["current_price"]) * 100 * v2["quantity"], 2) if v2.get("current_price") else None
+                expiry_date = v2.get("expiry")
+
+                await conn.execute("""
+                    INSERT INTO open_positions
+                        (ticker, position_type, direction, quantity, option_type, strike,
+                         expiry, spread_type, short_strike, cost_basis, current_value,
+                         updated_by, account)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'v2_sync', $12)
+                """, v2["ticker"], pos_type, legacy_dir, v2["quantity"],
+                    opt_type, ls, expiry_date, spread_type, ss,
+                    cost_basis, v2_val, (v2.get("account") or "ROBINHOOD").lower())
+                added += 1
+
+        # Deactivate legacy positions not in v2
+        for row in legacy_rows:
+            if _legacy_key(row) not in matched_keys:
+                await conn.execute(
+                    "UPDATE open_positions SET is_active = FALSE, last_updated = NOW(), updated_by = 'v2_sync' WHERE id = $1",
+                    row["id"],
+                )
+                closed += 1
+
+    if added or updated or closed:
+        logger.info("v2→legacy sync: added=%d updated=%d closed=%d", added, updated, closed)
+    return {"added": added, "updated": updated, "closed": closed}
+
+
 @router.post("/v2/positions/mark-to-market")
 async def mark_to_market():
     """HTTP wrapper for mark-to-market. Background loop calls run_mark_to_market() directly."""

@@ -512,7 +512,7 @@ body {
 }
 .rh-cash-link:hover { color: #2dd4bf; }
 
-#cashUpdateModal {
+#cashUpdateModal, #withdrawModal {
     position: fixed;
     top: 0; left: 0; right: 0; bottom: 0;
     background: rgba(0, 0, 0, 0.7);
@@ -574,6 +574,48 @@ body {
     border: 1px solid rgba(255,255,255,0.15);
 }
 .cash-modal-btn.cancel:hover { color: #fff; }
+
+.withdraw-btn {
+    background: transparent;
+    border: 1px solid rgba(255,255,255,0.2);
+    color: rgba(255,255,255,0.5);
+    font-size: 0.6rem;
+    padding: 1px 5px;
+    border-radius: 4px;
+    cursor: pointer;
+    margin-left: 4px;
+    vertical-align: middle;
+}
+.withdraw-btn:hover {
+    border-color: #2dd4bf;
+    color: #2dd4bf;
+}
+.withdraw-type-toggle {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 12px;
+    justify-content: center;
+}
+.withdraw-toggle {
+    flex: 1;
+    padding: 5px 10px;
+    border-radius: 6px;
+    border: 1px solid rgba(255,255,255,0.15);
+    background: transparent;
+    color: rgba(255,255,255,0.5);
+    cursor: pointer;
+    font-size: 0.8rem;
+}
+.withdraw-toggle.active {
+    background: rgba(45, 212, 191, 0.15);
+    border-color: #2dd4bf;
+    color: #2dd4bf;
+}
+.cash-update-modal input[type="text"] {
+    margin-top: 8px;
+    font-size: 0.85rem;
+    text-align: left;
+}
 
 .portfolio-account-meta {
     display: flex;
