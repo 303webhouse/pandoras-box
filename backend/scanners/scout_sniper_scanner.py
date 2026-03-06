@@ -43,6 +43,27 @@ SCOUT_CONFIG = {
 # Cooldown: last signal bar index per ticker
 _cooldown_tracker: Dict[str, int] = {}
 
+# Cached composite score for bias-aware LONG suppression
+_scout_bias_cache: Dict[str, float] = {"score": 0.0, "expires": 0.0}
+
+
+async def _refresh_scout_bias() -> None:
+    """Refresh composite bias score for LONG suppression logic."""
+    import time as _time
+    now = _time.time()
+    if now < _scout_bias_cache["expires"]:
+        return
+    try:
+        from bias_engine.composite import get_cached_composite
+        cached = await get_cached_composite()
+        if cached:
+            _scout_bias_cache["score"] = cached.composite_score
+            _scout_bias_cache["expires"] = now + 300  # 5-min cache
+            return
+    except Exception:
+        pass
+    _scout_bias_cache["expires"] = now + 60
+
 
 def _fetch_15m_bars(ticker: str) -> pd.DataFrame:
     """Fetch 15-min bars via yfinance (blocking — call via asyncio.to_thread)."""
@@ -235,7 +256,14 @@ def check_scout_signals(df: pd.DataFrame, ticker: str) -> List[Dict]:
     )
 
     # TRADEABLE vs IGNORE: use SMA regime as proxy for HTF VWAP
-    tradeable_long = long_sig and (not sma_bearish or tier == "A")
+    # In strong bearish regime (composite < -0.3), suppress ALL longs to IGNORE
+    # Signals still generate (useful as "time to take profits on shorts") but won't
+    # trigger Discord pings or participate in confluence scoring.
+    strong_bearish_bias = _scout_bias_cache.get("score", 0.0) < -0.3
+    if strong_bearish_bias:
+        tradeable_long = False
+    else:
+        tradeable_long = long_sig and (not sma_bearish or tier == "A")
     tradeable_short = short_sig and (not sma_bullish or tier == "A")
 
     # Quality score (0-6)
@@ -308,6 +336,7 @@ def check_scout_signals(df: pd.DataFrame, ticker: str) -> List[Dict]:
 
 async def scan_ticker_scout(ticker: str) -> List[Dict]:
     """Scan a single ticker for Scout Sniper setups using 15-min bars."""
+    await _refresh_scout_bias()
     try:
         df = await _fetch_15m_bars_async(ticker)
 

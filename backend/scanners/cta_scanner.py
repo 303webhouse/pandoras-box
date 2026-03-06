@@ -146,6 +146,43 @@ def _get_signal_category(signal_type: str) -> str:
     return "OTHER"
 
 
+_VIX_REGIME_CACHE: Dict[str, Any] = {"regime": "NORMAL", "expires": 0.0}
+
+
+async def _refresh_vix_regime() -> str:
+    """Refresh VIX regime from cached bias composite. Call once per scan cycle."""
+    import time as _time
+    now = _time.time()
+    if now < _VIX_REGIME_CACHE["expires"]:
+        return _VIX_REGIME_CACHE["regime"]
+    try:
+        from bias_engine.composite import get_cached_composite
+        cached = await get_cached_composite()
+        if cached and cached.factors:
+            vix = cached.factors.get("vix_term")
+            if vix and vix.raw_data:
+                vix_level = vix.raw_data.get("vix", 0)
+                regime = "EXTREME" if vix_level >= 35 else "ELEVATED" if vix_level >= 25 else "NORMAL"
+                _VIX_REGIME_CACHE["regime"] = regime
+                _VIX_REGIME_CACHE["expires"] = now + 300  # 5-min cache
+                return regime
+    except Exception:
+        pass
+    _VIX_REGIME_CACHE["expires"] = now + 60
+    return _VIX_REGIME_CACHE["regime"]
+
+
+def _get_vix_regime_cached() -> str:
+    """Sync read of cached VIX regime (populated by _refresh_vix_regime)."""
+    return _VIX_REGIME_CACHE.get("regime", "NORMAL")
+
+
+def _get_stop_buffer(atr: float, vix_regime: str = "NORMAL") -> float:
+    """VIX-adjusted stop buffer. Wider in high-vol to avoid shakeouts."""
+    mult = 0.75 if vix_regime in ("ELEVATED", "EXTREME") else 0.5
+    return atr * mult
+
+
 def _check_tick_alignment(direction: Optional[str], tick_status: Optional[Dict]) -> Optional[bool]:
     """M15: Check if signal direction aligns with current TICK breadth bias."""
     if not tick_status or not direction:
@@ -292,7 +329,7 @@ def calculate_smart_stop(
 ) -> tuple[float, str]:
     stop_mult, _ = get_rr_profile(signal_type, zone)
     atr_stop = price - (atr * stop_mult) if direction == "LONG" else price + (atr * stop_mult)
-    buffer = atr * 0.5  # H7: was 0.25 — wider buffer avoids stop hunts
+    buffer = _get_stop_buffer(atr, _get_vix_regime_cached())  # H7: VIX-adjusted (0.5 normal, 0.75 elevated)
 
     preferred_key = PREFERRED_STOP_ANCHORS.get(zone)
     if preferred_key:
@@ -1299,6 +1336,14 @@ def check_resistance_rejection(df: pd.DataFrame, ticker: str) -> Optional[Dict]:
         atr = latest["atr"]
         smas = _extract_smas(latest)
         zone = latest.get("cta_zone") or get_cta_zone(price, smas.get("sma20"), smas.get("sma50"), smas.get("sma120"))[0]
+
+        # Zone-aware volume gate: in bearish zones, distribution happens on normal volume
+        vol_ratio = latest.get("vol_ratio", 0)
+        if pd.notna(vol_ratio):
+            min_vol = 0.8 if zone in ("WATERFALL", "CAPITULATION") else 1.5
+            if vol_ratio < min_vol:
+                return None
+
         invalidation_level = round((smas.get("sma50") + (atr * 0.5)), 2) if smas.get("sma50") else None
 
         setup, setup_context = _build_signal_setup(
@@ -1339,9 +1384,12 @@ async def scan_ticker_cta(ticker: str, allow_shorts: bool = False) -> List[Dict]
     """Scan a single ticker for all CTA signals"""
     if not CTA_SCANNER_AVAILABLE:
         return []
-    
+
+    # Refresh VIX regime cache (no-op if fresh)
+    await _refresh_vix_regime()
+
     signals = []
-    
+
     try:
         # Fetch data
         df = await _fetch_history_async(ticker, period="1y")
