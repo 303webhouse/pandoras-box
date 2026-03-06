@@ -808,7 +808,7 @@ def main():
 
     # Channel IDs to watch for trade entry messages
     _watch_channel_ids: set[int] = set()
-    committee_ch = pick_env("COMMITTEE_CHANNEL_ID", cfg, env_file)
+    committee_ch = pick_env("COMMITTEE_CHANNEL_ID", cfg, env_file) or "1474135100521451813"
     if committee_ch:
         try:
             _watch_channel_ids.add(int(committee_ch))
