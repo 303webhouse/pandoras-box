@@ -4,7 +4,7 @@ Committee Context Formatters + Bias Challenge + Technical Data + Playbook
 Formats the raw context dict from build_market_context() into
 readable text blocks for each LLM agent's user message.
 
-Position data removed — no agent gets portfolio information.
+Position data included via portfolio context (balances + open positions).
 Focus: signal details, market regime, circuit breakers, earnings, zone shifts,
 Twitter sentiment, lessons from recent reviews, live technical data (yfinance),
 playbook rules, and per-agent performance feedback.
@@ -77,6 +77,28 @@ def format_signal_context(signal: dict, context: dict) -> str:
         regime_lines.append(f"DIVERGENCE: {', '.join(divergent_tfs)} diverging from composite")
 
     regime_lines.append(f"DEFCON: {context.get('defcon', 'UNKNOWN')}")
+
+    # Key factor readings (extracted from composite response)
+    factors = bias.get("factors") or {}
+    key_factor_lines = []
+    for fid, label in [("vix_term", "VIX"), ("gex", "GEX"), ("spy_trend", "SPY Trend"), ("spy_trend_intraday", "SPY Intraday")]:
+        f = factors.get(fid)
+        if isinstance(f, dict) and f.get("detail"):
+            key_factor_lines.append(f"  {label}: {f['detail']} (score: {f.get('score', '?')})")
+    if key_factor_lines:
+        regime_lines.append("Key Factors:")
+        regime_lines.extend(key_factor_lines)
+
+    # Circuit breaker live status
+    cb_live = context.get("circuit_breaker_status") or {}
+    if cb_live.get("active"):
+        regime_lines.append(
+            f"CIRCUIT BREAKER ACTIVE: {cb_live.get('trigger', '?')} — "
+            f"{cb_live.get('description', '')} "
+            f"(cap: {cb_live.get('bias_cap', '?')}, floor: {cb_live.get('bias_floor', '?')}, "
+            f"scoring modifier: {cb_live.get('scoring_modifier', '?')})"
+        )
+
     sections.append("\n".join(regime_lines))
 
     # ── Circuit breaker alerts ──
@@ -354,6 +376,11 @@ def fetch_technical_snapshot(ticker: str) -> dict:
         return {}
 
     ticker = ticker.upper().strip()
+
+    # Normalize crypto tickers for yfinance (BTC → BTC-USD, ETH → ETH-USD)
+    _CRYPTO_BASE = {"BTC", "ETH", "SOL", "AVAX", "DOGE", "ADA", "XRP", "MATIC", "DOT", "LINK"}
+    if ticker in _CRYPTO_BASE:
+        ticker = f"{ticker}-USD"
 
     # Check cache
     cache_file = TECH_CACHE_DIR / f"{ticker}.json"
