@@ -24,7 +24,7 @@ async def get_active_confluence():
             col_check = await conn.fetchval("""
                 SELECT EXISTS (
                     SELECT 1 FROM information_schema.columns 
-                    WHERE table_name = 'trade_ideas' AND column_name = 'confluence_tier'
+                    WHERE table_name = 'signals' AND column_name = 'confluence_tier'
                 )
             """)
             if not col_check:
@@ -33,7 +33,7 @@ async def get_active_confluence():
             rows = await conn.fetch("""
                 SELECT signal_id, ticker, direction, strategy, signal_type,
                        score, confluence_tier, confluence_count, timestamp
-                FROM trade_ideas
+                FROM signals
                 WHERE confluence_tier IN ('CONFIRMED', 'CONVICTION')
                   AND timestamp >= $1
                 ORDER BY 
@@ -63,7 +63,7 @@ async def get_confluence_status():
             col_check = await conn.fetchval("""
                 SELECT EXISTS (
                     SELECT 1 FROM information_schema.columns 
-                    WHERE table_name = 'trade_ideas' AND column_name = 'confluence_tier'
+                    WHERE table_name = 'signals' AND column_name = 'confluence_tier'
                 )
             """)
             if not col_check:
@@ -75,7 +75,7 @@ async def get_confluence_status():
                     COUNT(*) FILTER (WHERE confluence_tier = 'CONVICTION') as conviction,
                     COUNT(*) FILTER (WHERE confluence_tier = 'STANDALONE' OR confluence_tier IS NULL) as standalone,
                     MAX(confluence_updated_at) as last_scan
-                FROM trade_ideas
+                FROM signals
                 WHERE timestamp >= $1
             """, cutoff)
 

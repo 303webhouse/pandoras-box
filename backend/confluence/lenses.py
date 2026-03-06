@@ -6,10 +6,11 @@ Two signals from DIFFERENT lenses are confirmation.
 Adjacent lenses count as CONFIRMED but at reduced weight toward CONVICTION.
 """
 
-# Strategy name (as it appears in trade_ideas.strategy column) -> lens category
+# Strategy name (as it appears in signals.strategy column) -> lens category
 LENS_MAP = {
     # Server-side scanners
     "CTA Scanner": "TREND_STRUCTURE",
+    "Crypto Scanner": "TREND_STRUCTURE",
     "Exhaustion": "REVERSAL_DETECTION",
 
     # TradingView webhook strategies
