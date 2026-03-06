@@ -1360,6 +1360,126 @@ def _format_strategy_health_context(payload: Optional[Dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def _format_portfolio_context(positions: Any, balances: Any) -> str:
+    """Format portfolio positions + account balances into terse context block."""
+    lines = ["Portfolio:"]
+    has_content = False
+
+    # Account balances
+    bal_list = balances if isinstance(balances, list) else []
+    rh = None
+    for b in bal_list:
+        if (b.get("broker") or b.get("account_name") or "").lower() in ("robinhood", "rh"):
+            rh = b
+            break
+    if not rh and bal_list:
+        rh = bal_list[0]
+
+    account_balance = None
+    if rh:
+        account_balance = rh.get("balance")
+        cash = rh.get("cash")
+        parts = []
+        if account_balance is not None:
+            parts.append(f"Balance: ${float(account_balance):,.0f}")
+        if cash is not None:
+            parts.append(f"Cash: ${float(cash):,.0f}")
+        bp = rh.get("buying_power")
+        if bp is not None:
+            parts.append(f"BP: ${float(bp):,.0f}")
+        if parts:
+            lines.append(" | ".join(parts))
+            has_content = True
+
+    # Open positions
+    pos_list = positions if isinstance(positions, list) else []
+    if pos_list:
+        total_cost = 0.0
+        pos_parts = []
+        for p in pos_list:
+            ticker = p.get("ticker", "?")
+            direction = (p.get("direction") or "?").upper()
+            spread = p.get("spread_type") or p.get("option_type") or "option"
+            cost = float(p.get("cost_basis") or 0)
+            total_cost += abs(cost)
+            pos_parts.append(f"{ticker} {direction} {spread}")
+        lines.append(f"Open positions ({len(pos_list)}): {', '.join(pos_parts[:8])}")
+        if len(pos_parts) > 8:
+            lines.append(f"  ... and {len(pos_parts) - 8} more")
+        if total_cost > 0:
+            cap_str = f"Capital at risk: ~${total_cost:,.0f}"
+            if account_balance and float(account_balance) > 0:
+                pct = (total_cost / float(account_balance)) * 100
+                cap_str += f" (~{pct:.1f}% of account)"
+            lines.append(cap_str)
+        has_content = True
+    elif has_content:
+        lines.append("No open positions.")
+
+    if not has_content:
+        return "Portfolio: unavailable"
+    return "\n".join(lines)
+
+
+def _format_trade_ideas_context(data: Any) -> str:
+    """Format active trade ideas/signals into terse context block."""
+    if not isinstance(data, dict):
+        return "Active Trade Ideas: unavailable"
+    signals = data.get("signals") or []
+    if not isinstance(signals, list) or not signals:
+        return "Active Trade Ideas: none"
+    lines = [f"Active Trade Ideas ({len(signals)}):"]
+    for sig in signals[:5]:
+        ticker = str(sig.get("ticker") or "?").upper()
+        direction = str(sig.get("direction") or "?").upper()
+        score = sig.get("score_v2") or sig.get("score") or "?"
+        source = sig.get("source") or sig.get("strategy") or "?"
+        lines.append(f"- {ticker} {direction} (score: {score}, source: {source})")
+    return "\n".join(lines)
+
+
+def _format_circuit_breaker_context(data: Any) -> str:
+    """Format circuit breaker status into terse context line."""
+    if not isinstance(data, dict):
+        return "Circuit Breaker: unavailable"
+    cb = data.get("circuit_breaker") or {}
+    if not isinstance(cb, dict):
+        return "Circuit Breaker: unavailable"
+    if not cb.get("active"):
+        return "Circuit Breaker: CLEAR (no active triggers)"
+    trigger = cb.get("trigger") or "unknown"
+    desc = cb.get("description") or ""
+    modifier = cb.get("scoring_modifier", 1.0)
+    pending = " | PENDING RESET" if cb.get("pending_reset") else ""
+    return f"Circuit Breaker: ACTIVE — {trigger} ({desc}) | scoring modifier: {modifier}{pending}"
+
+
+def _format_sector_rotation_context(data: Any) -> str:
+    """Format sector rotation status into terse context block."""
+    if not isinstance(data, dict):
+        return "Sector Rotation: unavailable"
+    inner = data.get("data") or data
+    if not isinstance(inner, dict):
+        return "Sector Rotation: unavailable"
+    bias = inner.get("bias") or "NEUTRAL"
+    spread = inner.get("spread")
+    desc = inner.get("description") or ""
+    spread_text = f" | spread: {float(spread):.2f}%" if spread is not None else ""
+    details = inner.get("sector_details") or {}
+    if details and isinstance(details, dict):
+        sorted_sectors = sorted(details.items(), key=lambda x: float(x[1]) if isinstance(x[1], (int, float)) else 0, reverse=True)
+        leaders = [f"{s[0]}({float(s[1]):+.1f}%)" for s in sorted_sectors[:3] if isinstance(s[1], (int, float))]
+        laggards = [f"{s[0]}({float(s[1]):+.1f}%)" for s in sorted_sectors[-3:] if isinstance(s[1], (int, float))]
+        sector_text = ""
+        if leaders:
+            sector_text += f" | Leading: {', '.join(leaders)}"
+        if laggards:
+            sector_text += f" | Lagging: {', '.join(laggards)}"
+    else:
+        sector_text = ""
+    return f"Sector Rotation: {bias}{spread_text}{sector_text}" + (f" — {desc}" if desc and desc != "Awaiting data" else "")
+
+
 async def get_strategy_health_context(days: int = 30) -> str:
     endpoint = f"/analytics/strategy-health?days={max(1, int(days))}"
     async with aiohttp.ClientSession() as session:
@@ -1690,25 +1810,44 @@ async def build_market_context(user_text: str = "", ticker_hint: Optional[str] =
         symbols.append(target_ticker)
 
     async with aiohttp.ClientSession() as session:
-        tasks = [
+        base_tasks = [
             _fetch_json(session, "/bias/DAILY"),
             _fetch_json(session, "/market-indicators/vix-term"),
             _fetch_json(session, "/bias/composite"),
             _fetch_json(session, "/analytics/strategy-health?days=30"),
             _fetch_json(session, "/analytics/convergence-stats?days=1&min_sources=2"),
         ]
-        tasks.extend(_fetch_json(session, f"/hybrid/price/{symbol}") for symbol in symbols)
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        quote_tasks = [_fetch_json(session, f"/hybrid/price/{symbol}") for symbol in symbols]
+        hub_tasks = [
+            _fetch_json(session, "/api/portfolio/positions"),
+            _fetch_json(session, "/api/portfolio/balances"),
+            _fetch_json(session, "/api/trade-ideas?limit=5&status=ACTIVE"),
+            _fetch_json(session, "/webhook/circuit_breaker/status"),
+            _fetch_json(session, "/api/sector-rotation/status"),
+        ]
+        results = await asyncio.gather(*(base_tasks + quote_tasks + hub_tasks), return_exceptions=True)
+
+    def safe_result(idx: int) -> Any:
+        if idx < len(results) and not isinstance(results[idx], BaseException):
+            return results[idx]
+        return None
 
     def as_dict(value: Any) -> Optional[Dict[str, Any]]:
         return value if isinstance(value, dict) else None
 
-    bias_state = as_dict(results[0])
-    vix_term = as_dict(results[1])
-    composite_payload = as_dict(results[2])
-    strategy_health_payload = as_dict(results[3])
-    convergence_payload = as_dict(results[4])
-    quote_results = [as_dict(value) for value in results[5:]]
+    bias_state = as_dict(safe_result(0))
+    vix_term = as_dict(safe_result(1))
+    composite_payload = as_dict(safe_result(2))
+    strategy_health_payload = as_dict(safe_result(3))
+    convergence_payload = as_dict(safe_result(4))
+    quote_results = [as_dict(safe_result(5 + i)) for i in range(len(symbols))]
+
+    hub_offset = 5 + len(symbols)
+    positions_data = safe_result(hub_offset)
+    balances_data = safe_result(hub_offset + 1)
+    trade_ideas_data = safe_result(hub_offset + 2)
+    cb_data = safe_result(hub_offset + 3)
+    sector_data = safe_result(hub_offset + 4)
 
     lines = [
         _format_bias_context(bias_state),
@@ -1719,6 +1858,11 @@ async def build_market_context(user_text: str = "", ticker_hint: Optional[str] =
     ]
     for symbol, quote_data in zip(symbols, quote_results):
         lines.append(_format_quote_context(symbol, quote_data))
+
+    lines.append(_format_portfolio_context(positions_data, balances_data))
+    lines.append(_format_trade_ideas_context(trade_ideas_data))
+    lines.append(_format_circuit_breaker_context(cb_data))
+    lines.append(_format_sector_rotation_context(sector_data))
 
     return "\n".join(lines)
 
