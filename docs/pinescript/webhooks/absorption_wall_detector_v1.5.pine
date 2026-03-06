@@ -226,3 +226,23 @@ alertcondition(bullWall, title="Bullish Absorption Wall",
 
 alertcondition(bearWall, title="Bearish Absorption Wall",
      message="type=absorption_wall_bear|symbol={{exchange}}:{{ticker}}|tf={{interval}}|time={{time}}|price={{close}}|vol={{volume}}|deltaRatio={{plot_0}}|buyPct={{plot_1}}|buyVol={{plot_2}}|sellVol={{plot_3}}|totVol={{plot_4}}|minDist={{plot_5}}")
+
+// JSON webhook alert for Trading Hub pipeline
+if wall and barstate.isconfirmed and (bullWall or bearWall)
+    string direction = bullWall ? "LONG" : "SHORT"
+    string wallType = bullWall ? "BULL_WALL" : "BEAR_WALL"
+
+    alert_payload = '{"ticker":"' + syminfo.ticker +
+         '","strategy":"AbsorptionWall"' +
+         ',"direction":"' + direction +
+         '","signal_type":"' + wallType +
+         '","entry_price":' + str.tostring(close) +
+         ',"timeframe":"' + timeframe.period +
+         '","delta_ratio":' + str.tostring(deltaRatio, "#.####") +
+         ',"buy_pct":' + str.tostring(buyPct, "#.####") +
+         ',"buy_vol":' + str.tostring(buyVol) +
+         ',"sell_vol":' + str.tostring(sellVol) +
+         ',"total_vol":' + str.tostring(totVol) +
+         ',"rvol":' + str.tostring(totVol / avgTotVol, "#.##") +
+         '}'
+    alert(alert_payload, alert.freq_once_per_bar)

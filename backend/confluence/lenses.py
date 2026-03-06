@@ -21,6 +21,7 @@ LENS_MAP = {
     "Scout": "REVERSAL_DETECTION",
     "Whale": "INSTITUTIONAL_FOOTPRINT",
     "absorption_wall": "ORDER_FLOW_BALANCE",
+    "AbsorptionWall": "ORDER_FLOW_BALANCE",
 
     # Context sources (not trade signals yet, but ready for future)
     "UW": "OPTIONS_FLOW",

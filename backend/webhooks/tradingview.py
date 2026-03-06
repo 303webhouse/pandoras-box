@@ -132,6 +132,13 @@ class TradingViewAlert(BaseModel):
     sma_regime: Optional[str] = None
     plan_printed: Optional[bool] = None
     score: Optional[float] = None  # Pine signal quality score (0-6)
+    # Absorption Wall fields (order flow data)
+    signal_type: Optional[str] = None
+    delta_ratio: Optional[float] = None
+    buy_pct: Optional[float] = None
+    buy_vol: Optional[float] = None
+    sell_vol: Optional[float] = None
+    total_vol: Optional[float] = None
 
 
 @router.post("/tradingview")
@@ -158,6 +165,8 @@ async def receive_tradingview_alert(alert: TradingViewAlert):
             return await process_sniper_signal(alert, start_time)
         elif "triple" in strategy_lower or "line" in strategy_lower:
             return await process_triple_line_signal(alert, start_time)
+        elif "absorption" in strategy_lower or "wall" in strategy_lower:
+            return await process_absorption_signal(alert, start_time)
         else:
             # Generic signal processing
             return await process_generic_signal(alert, start_time)
@@ -466,6 +475,39 @@ async def process_triple_line_signal(alert: TradingViewAlert, start_time: dateti
         "signal_id": signal_id,
         "signal_type": signal_type,
     }
+
+
+async def process_absorption_signal(alert: TradingViewAlert, start_time: datetime):
+    """Process Absorption Wall signals with order flow context."""
+    signal_id = f"WALL_{alert.ticker}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
+
+    direction = (alert.direction or "").upper()
+    signal_type = alert.signal_type or ("BULL_WALL" if direction in ["LONG", "BUY"] else "BEAR_WALL")
+
+    signal_data = {
+        "signal_id": signal_id,
+        "timestamp": alert.timestamp or datetime.now().isoformat(),
+        "ticker": alert.ticker,
+        "strategy": "AbsorptionWall",
+        "direction": alert.direction,
+        "signal_type": signal_type,
+        "entry_price": alert.entry_price,
+        "timeframe": alert.timeframe,
+        "trade_type": "ORDER_FLOW",
+        "asset_class": "CRYPTO" if is_crypto_ticker(alert.ticker) else "EQUITY",
+        "status": "ACTIVE",
+        "rvol": alert.rvol,
+        "delta_ratio": alert.delta_ratio,
+        "buy_pct": alert.buy_pct,
+    }
+
+    asyncio.ensure_future(process_signal_unified(signal_data, source="tradingview"))
+
+    logger.info("Absorption Wall accepted: %s %s (delta=%.4f)",
+                alert.ticker, signal_type,
+                alert.delta_ratio if alert.delta_ratio is not None else 0)
+
+    return {"status": "accepted", "signal_id": signal_id, "signal_type": signal_type}
 
 
 async def process_generic_signal(alert: TradingViewAlert, start_time: datetime):
