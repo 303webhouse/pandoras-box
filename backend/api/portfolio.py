@@ -472,6 +472,56 @@ async def get_closed_positions(
     return [_row_to_dict(r) for r in rows]
 
 
+# ── 5c. PATCH /positions/closed/{closed_id} — backfill P&L on closed positions ──
+
+class ClosedPositionUpdate(BaseModel):
+    exit_value: Optional[float] = None
+    exit_price: Optional[float] = None
+    pnl_dollars: Optional[float] = None
+    pnl_percent: Optional[float] = None
+    close_reason: Optional[str] = None
+    notes: Optional[str] = None
+
+
+@router.patch("/positions/closed/{closed_id}")
+async def update_closed_position(closed_id: int, body: ClosedPositionUpdate, _=Depends(verify_api_key)):
+    """Update a closed position — primarily for backfilling exit values and P&L."""
+    pool = await get_postgres_client()
+
+    existing = await pool.fetchrow(
+        "SELECT * FROM closed_positions WHERE id = $1", closed_id
+    )
+    if not existing:
+        raise HTTPException(status_code=404, detail=f"Closed position {closed_id} not found")
+
+    # Auto-calculate P&L if exit_value provided but pnl not
+    exit_val = body.exit_value
+    pnl_d = body.pnl_dollars
+    pnl_p = body.pnl_percent
+
+    if exit_val is not None and pnl_d is None:
+        cost_basis = float(existing["cost_basis"]) if existing.get("cost_basis") else None
+        if cost_basis is not None:
+            pnl_d = round(exit_val - cost_basis, 2)
+            if cost_basis != 0:
+                pnl_p = round((pnl_d / abs(cost_basis)) * 100, 2)
+
+    await pool.execute("""
+        UPDATE closed_positions
+        SET exit_value = COALESCE($1, exit_value),
+            exit_price = COALESCE($2, exit_price),
+            pnl_dollars = COALESCE($3, pnl_dollars),
+            pnl_percent = COALESCE($4, pnl_percent),
+            close_reason = COALESCE($5, close_reason),
+            notes = COALESCE($6, notes)
+        WHERE id = $7
+    """, exit_val, body.exit_price, pnl_d, pnl_p,
+        body.close_reason, body.notes, closed_id)
+
+    row = await pool.fetchrow("SELECT * FROM closed_positions WHERE id = $1", closed_id)
+    return _row_to_dict(row)
+
+
 # ── 6. GET /trade-history ──
 
 @router.get("/trade-history")
