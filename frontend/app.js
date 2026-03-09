@@ -7926,13 +7926,27 @@ async function executePositionClose(positionId, exitPrice, closeQty, tradeOutcom
         let response;
         let data;
         if (position && position.position_id) {
+            // Compute exit_value for closed_positions P&L tracking
+            const struct = (position.structure || '').toLowerCase();
+            const stockStructures = ['stock', 'stock_long', 'long_stock', 'stock_short', 'short_stock'];
+            const isStockClose = stockStructures.includes(struct) || (!struct && position.asset_type === 'EQUITY');
+            const multiplier = isStockClose ? 1 : 100;
+            const exitValue = Math.round(exitPrice * multiplier * closeQty * 100) / 100;
+
+            // Derive close_reason from outcome
+            const closeReason = lossReason ? 'loss' : (tradeOutcome === 'WIN' ? 'profit' : 'manual');
+
             response = await fetch(`${API_URL}/v2/positions/${position.position_id}/close`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     exit_price: exitPrice,
                     quantity: closeQty,
-                    notes: [lossReason, notes].filter(Boolean).join(' | ') || null
+                    exit_value: exitValue,
+                    trade_outcome: tradeOutcome,
+                    loss_reason: lossReason || null,
+                    close_reason: closeReason,
+                    notes: notes || null
                 })
             });
             data = await response.json();

@@ -154,6 +154,10 @@ class ClosePositionRequest(BaseModel):
     exit_price: float
     notes: Optional[str] = None
     quantity: Optional[int] = None  # If < total qty, partial close (reduce position, keep remainder open)
+    exit_value: Optional[float] = None       # Total exit value (exit_price × multiplier × qty)
+    trade_outcome: Optional[str] = None      # WIN / LOSS / BREAKEVEN (frontend-computed)
+    loss_reason: Optional[str] = None        # SETUP_FAILED / EXECUTION_ERROR / MARKET_CONDITIONS
+    close_reason: Optional[str] = "manual"   # profit / loss / expired / manual
 
 
 class BulkPositionItem(BaseModel):
@@ -927,6 +931,45 @@ async def close_position(position_id: str, req: ClosePositionRequest):
             await _adjust_account_cash(pool, pos.get("account", "ROBINHOOD"), cash_delta)
         except Exception as e:
             logger.warning("Cash adjustment failed on close: %s", e)
+
+    # Write to closed_positions table (for analytics/weekly review)
+    if not is_partial:
+        try:
+            exit_val = req.exit_value or round(abs(req.exit_price) * (1 if is_stock else 100) * close_qty, 2)
+            cost_basis_val = float(pos["cost_basis"]) if pos.get("cost_basis") else None
+            pnl_pct = round((realized_pnl / abs(cost_basis_val)) * 100, 2) if cost_basis_val and cost_basis_val != 0 else None
+            opened_at = datetime.fromisoformat(pos["entry_date"]) if isinstance(pos.get("entry_date"), str) else pos.get("entry_date")
+            hold_days = (now.date() - opened_at.date()).days if opened_at and hasattr(opened_at, "date") else None
+            struct_lower = s
+            opt_type = "Put" if "put" in struct_lower else "Call" if struct_lower else None
+            spread_type = "debit" if "debit" in struct_lower else "credit" if "credit" in struct_lower else None
+            pos_type = "option_spread" if pos.get("short_strike") else ("option" if pos.get("asset_type") == "OPTION" else "stock")
+
+            async with pool.acquire() as conn:
+                await conn.execute("""
+                    INSERT INTO closed_positions
+                        (ticker, position_type, direction, quantity,
+                         option_type, strike, short_strike, expiry, spread_type,
+                         cost_basis, exit_value, exit_price, pnl_dollars, pnl_percent,
+                         opened_at, closed_at, hold_days, signal_id, account,
+                         close_reason, notes)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+                            $14, $15, $16, $17, $18, $19, $20, $21)
+                """,
+                    pos["ticker"], pos_type, pos["direction"], close_qty,
+                    opt_type,
+                    float(pos["long_strike"]) if pos.get("long_strike") else None,
+                    float(pos["short_strike"]) if pos.get("short_strike") else None,
+                    date.fromisoformat(str(pos["expiry"])[:10]) if pos.get("expiry") else None,
+                    spread_type,
+                    cost_basis_val, exit_val, req.exit_price,
+                    realized_pnl, pnl_pct,
+                    opened_at, now, hold_days,
+                    pos.get("signal_id"), pos.get("account", "ROBINHOOD"),
+                    req.close_reason or "manual", req.notes,
+                )
+        except Exception as e:
+            logger.warning(f"closed_positions insert failed: {e}")
 
     result = _row_to_dict(updated) if updated else pos
 
