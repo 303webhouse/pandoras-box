@@ -1362,7 +1362,7 @@ def _format_strategy_health_context(payload: Optional[Dict[str, Any]]) -> str:
 
 def _format_portfolio_context(positions: Any, balances: Any) -> str:
     """Format portfolio positions + account balances into terse context block."""
-    lines = ["Portfolio:"]
+    lines = ["Portfolio [LIVE DATA — always trust over conversation memory]:"]
     has_content = False
 
     # Account balances
@@ -1873,6 +1873,7 @@ async def build_market_context(user_text: str = "", ticker_hint: Optional[str] =
     macro_briefing_data = as_dict(safe_result(hub_offset + 5))
 
     lines = [
+        f"=== MARKET CONTEXT [LIVE DATA as of {get_et_now().strftime('%I:%M %p ET')}] ===",
         _format_bias_context(bias_state),
         _format_vix_context(vix_term),
         _format_factor_health_context(composite_payload),
