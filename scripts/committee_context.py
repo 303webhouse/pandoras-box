@@ -40,6 +40,11 @@ def format_signal_context(signal: dict, context: dict) -> str:
 
     sections = []
 
+    # ── Macro backdrop (persistent regime narrative) ──
+    macro_briefing = _get_macro_briefing_context()
+    if macro_briefing:
+        sections.append(macro_briefing)
+
     # ── Signal info ──
     metadata = signal.get("metadata") or {}
     sections.append(
@@ -100,6 +105,11 @@ def format_signal_context(signal: dict, context: dict) -> str:
         )
 
     sections.append("\n".join(regime_lines))
+
+    # ── Macro prices (concrete numbers from factor raw_data + yfinance) ──
+    macro_prices = _get_macro_prices_context(bias)
+    if macro_prices:
+        sections.append(macro_prices)
 
     # ── Circuit breaker alerts ──
     if cbs:
@@ -181,6 +191,11 @@ def format_signal_context(signal: dict, context: dict) -> str:
     if twitter_ctx:
         sections.append(twitter_ctx)
 
+    # Inject raw headlines (actual tweet text, not just scores)
+    headline_ctx = _get_headline_context(ticker=ticker, lookback_hours=4, max_headlines=8)
+    if headline_ctx:
+        sections.append(headline_ctx)
+
     # Inject recent lessons from weekly reviews (if any)
     lessons_text = _get_recent_lessons_context()
     if lessons_text:
@@ -249,6 +264,196 @@ def _get_twitter_sentiment_context(ticker: str | None = None, lookback_hours: in
             sections.append(f"- @{s['username']}: {s.get('summary', 'ALERT')}")
 
     return "\n".join(sections) if len(sections) > 1 else ""
+
+
+def _get_headline_context(ticker: str | None = None, lookback_hours: int = 4, max_headlines: int = 8) -> str:
+    """
+    Extract top raw headlines from twitter_signals.jsonl.
+    Returns actual headline text (not scores) so agents can interpret
+    geopolitical events, macro shifts, and breaking news directly.
+    """
+    signals_path = Path("/opt/openclaw/workspace/data/twitter_signals.jsonl")
+    try:
+        with open(signals_path, "r") as f:
+            lines = f.readlines()
+    except FileNotFoundError:
+        return ""
+
+    cutoff = _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(hours=lookback_hours)
+    headlines = []
+    for line in lines[-200:]:
+        try:
+            entry = json.loads(line.strip())
+            ts = _dt.datetime.fromisoformat(entry["timestamp"])
+            if ts < cutoff:
+                continue
+            summary = (entry.get("summary") or "").strip()
+            if not summary:
+                continue
+            headlines.append({
+                "source": entry.get("username", "unknown"),
+                "text": summary,
+                "score": entry.get("score", 0),
+                "ts": ts,
+                "tickers": [t.upper() for t in entry.get("tickers", [])],
+            })
+        except (json.JSONDecodeError, KeyError, ValueError):
+            continue
+
+    if not headlines:
+        return ""
+
+    # Boost ticker-relevant headlines to the top
+    ticker_upper = (ticker or "").upper()
+
+    def sort_key(h):
+        ticker_match = -1 if ticker_upper and ticker_upper in h["tickers"] else 0
+        return (ticker_match, -abs(h["score"]), -h["ts"].timestamp())
+
+    headlines.sort(key=sort_key)
+    headlines = headlines[:max_headlines]
+
+    lines_out = [f"## RECENT HEADLINES (last {lookback_hours}h)"]
+    for h in headlines:
+        lines_out.append(f"- @{h['source']}: {h['text']}")
+
+    return "\n".join(lines_out)
+
+
+def _get_macro_prices_context(bias_composite: dict) -> str:
+    """
+    Extract key macro price levels from bias composite factor raw_data.
+    Gives agents concrete numbers: VIX, DXY, yields, SPY levels, oil, gold.
+    """
+    factors = bias_composite.get("factors") or {}
+    lines = ["## MACRO PRICES"]
+
+    # VIX
+    vix_data = factors.get("vix_term")
+    if isinstance(vix_data, dict):
+        raw = vix_data.get("raw_data") or {}
+        vix = raw.get("vix")
+        vix3m = raw.get("vix3m")
+        if vix is not None:
+            vix_str = f"VIX: {float(vix):.1f}"
+            if vix3m is not None:
+                ratio = float(vix) / float(vix3m) if float(vix3m) > 0 else 0
+                vix_str += f" (VIX/VIX3M: {ratio:.2f}{'  — BACKWARDATION' if ratio > 1.0 else ''})"
+            lines.append(vix_str)
+
+    # DXY
+    dxy_data = factors.get("dxy_trend")
+    if isinstance(dxy_data, dict):
+        raw = dxy_data.get("raw_data") or {}
+        dxy = raw.get("current")
+        if dxy is not None:
+            trend = raw.get("trend", "")
+            lines.append(f"DXY (Dollar): {float(dxy):.2f} ({trend})" if trend else f"DXY: {float(dxy):.2f}")
+
+    # Yield curve
+    yc_data = factors.get("yield_curve")
+    if isinstance(yc_data, dict):
+        raw = yc_data.get("raw_data") or {}
+        spread = raw.get("spread_pct")
+        ten_y = raw.get("ten_year")
+        two_y = raw.get("two_year")
+        parts = []
+        if ten_y is not None:
+            parts.append(f"10Y: {float(ten_y):.2f}%")
+        if two_y is not None:
+            parts.append(f"2Y: {float(two_y):.2f}%")
+        if spread is not None:
+            parts.append(f"Spread: {float(spread):.2f}%")
+        if parts:
+            lines.append("Yields: " + " | ".join(parts))
+
+    # Copper/Gold ratio
+    cg_data = factors.get("copper_gold_ratio")
+    if isinstance(cg_data, dict):
+        raw = cg_data.get("raw_data") or {}
+        cg_spread = raw.get("spread")
+        if cg_spread is not None:
+            lines.append(f"Copper vs Gold (20d): {float(cg_spread):.1f}% ({'risk-off' if float(cg_spread) < 0 else 'risk-on'})")
+
+    # SPY vs SMAs
+    for fid, sma_label in [("spy_50sma_distance", "50 SMA"), ("spy_200sma_distance", "200 SMA")]:
+        f = factors.get(fid)
+        if isinstance(f, dict):
+            raw = f.get("raw_data") or {}
+            price = raw.get("price")
+            pct = raw.get("pct_distance")
+            if price is not None and pct is not None:
+                lines.append(f"SPY: ${float(price):.2f} ({float(pct):+.1f}% from {sma_label})")
+                break  # Only show one SPY line
+
+    # Oil + Gold via yfinance (best-effort, non-blocking)
+    try:
+        import yfinance as yf
+        for symbol, label in [("CL=F", "Oil (WTI)"), ("GC=F", "Gold")]:
+            try:
+                info = yf.Ticker(symbol).fast_info
+                price = info.get("last_price") or info.get("regularMarketPrice")
+                if price:
+                    lines.append(f"{label}: ${float(price):,.2f}")
+            except Exception:
+                pass
+    except ImportError:
+        pass
+
+    if len(lines) <= 1:
+        return ""
+    return "\n".join(lines)
+
+
+def _get_macro_briefing_context() -> str:
+    """
+    Load persistent macro briefing — the geopolitical/economic backdrop
+    that persists across days/weeks and doesn't appear in any tweet window.
+    Updated by Nick via /macro-update or manually.
+    """
+    briefing_path = Path("/opt/openclaw/workspace/data/macro_briefing.json")
+    if not briefing_path.exists():
+        return ""
+
+    try:
+        data = json.loads(briefing_path.read_text(encoding="utf-8"))
+    except Exception:
+        return ""
+
+    # Check staleness
+    updated = data.get("updated_at", "")
+    stale_warning = ""
+    try:
+        updated_dt = _dt.datetime.fromisoformat(updated.replace("Z", "+00:00"))
+        age_days = (_dt.datetime.now(_dt.timezone.utc) - updated_dt).days
+        if age_days > 7:
+            stale_warning = f" (WARNING: {age_days} days old — may be outdated)"
+    except Exception:
+        pass
+
+    regime = data.get("regime", "UNKNOWN")
+    narrative = data.get("narrative", "")
+    key_facts = data.get("key_facts", [])
+
+    lines = [f"## MACRO BACKDROP{stale_warning}"]
+    lines.append(f"Regime: {regime}")
+    if narrative:
+        lines.append(f"\n{narrative}")
+    if key_facts:
+        lines.append("\nKey facts:")
+        for fact in key_facts[:10]:
+            lines.append(f"- {fact}")
+
+    sectors = data.get("sectors_to_watch", {})
+    if sectors:
+        bull = ", ".join(sectors.get("bullish", []))
+        bear = ", ".join(sectors.get("bearish", []))
+        if bull:
+            lines.append(f"\nSectors favored: {bull}")
+        if bear:
+            lines.append(f"Sectors under pressure: {bear}")
+
+    return "\n".join(lines)
 
 
 def _get_recent_lessons_context() -> str:
