@@ -55,6 +55,16 @@ TRADE_ENTRY_PATTERNS = [
     re.compile(r"\bfilled (at|on)\b", re.I),
 ]
 
+TRADE_EXIT_PATTERNS = [
+    re.compile(r"\bclosed\b", re.I),
+    re.compile(r"\btook profits?\b", re.I),
+    re.compile(r"\bexited\b", re.I),
+    re.compile(r"\bsold\b.*\b(position|spread|calls?|puts?)\b", re.I),
+    re.compile(r"\bclosed out\b", re.I),
+    re.compile(r"\bcut\b.*\b(loss|position)\b", re.I),
+    re.compile(r"\bstopped out\b", re.I),
+]
+
 TICKER_RE = re.compile(r"\b([A-Z]{1,5})\b")
 PRICE_RE = re.compile(r"\$\s?([\d]+(?:\.[\d]{1,2})?)")
 
@@ -104,6 +114,28 @@ def _extract_trade_details(text: str) -> dict:
     return details
 
 
+def _extract_exit_details(text: str) -> dict:
+    """Extract ticker and exit price from a trade-close message."""
+    details: dict = {"ticker": None, "exit_price": None}
+
+    # Ticker — first uppercase 1-5 letter word not in blacklist
+    for m in TICKER_RE.finditer(text):
+        candidate = m.group(1)
+        if candidate not in _TICKER_BLACKLIST and len(candidate) >= 2:
+            details["ticker"] = candidate
+            break
+
+    # Price — first $XXX.XX pattern
+    price_match = PRICE_RE.search(text)
+    if price_match:
+        try:
+            details["exit_price"] = float(price_match.group(1))
+        except ValueError:
+            pass
+
+    return details
+
+
 def _load_last_take() -> dict | None:
     """Load last_take.json if it exists and is < 2 hours old."""
     state_path = STATE_DIR / "last_take.json"
@@ -135,6 +167,19 @@ def _post_to_railway(path: str, payload: dict, api_key: str, base_url: str) -> d
             return json.loads(resp.read().decode("utf-8"))
     except Exception as e:
         logger.warning("Railway POST %s failed: %s", path, e)
+        return None
+
+
+def _get_from_railway(path: str, api_key: str, base_url: str) -> dict | list | None:
+    """GET from a Railway API endpoint. Returns response or None."""
+    url = f"{base_url.rstrip('/')}{path}"
+    headers = {"X-API-Key": api_key}
+    try:
+        req = urllib.request.Request(url, headers=headers, method="GET")
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except Exception as e:
+        logger.warning("Railway GET %s failed: %s", path, e)
         return None
 
 
@@ -419,6 +464,153 @@ async def _handle_trade_detection(message: discord.Message, cfg: dict, env_file:
     await message.reply(confirm_msg, view=view)
 
 
+# ── Trade Close Confirmation View ────────────────────────────────────────────
+
+class TradeCloseView(discord.ui.View):
+    """Confirm & Close / Cancel buttons for trade exit detection."""
+
+    def __init__(self, exit_details: dict, position: dict, cfg: dict = None, env_file: dict = None, timeout: float = 300.0):
+        super().__init__(timeout=timeout)
+        self.exit_details = exit_details
+        self.position = position
+        self._cfg = cfg or {}
+        self._env_file = env_file or {}
+
+    @discord.ui.button(label="\u2705 Confirm Close", style=discord.ButtonStyle.red)
+    async def confirm_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer()
+        details = self.exit_details
+        pos = self.position
+        ticker = details.get("ticker", "?")
+        exit_price = details.get("exit_price")
+
+        from pivot2_committee import load_openclaw_config, load_env_file, pick_env, OPENCLAW_ENV_FILE
+        cfg = self._cfg or load_openclaw_config()
+        env_file = self._env_file or load_env_file(OPENCLAW_ENV_FILE)
+        api_key = pick_env("PIVOT_API_KEY", cfg, env_file) or ""
+        base_url = pick_env("PANDORA_API_URL", cfg, env_file) or "https://pandoras-box-production.up.railway.app"
+
+        position_id = pos.get("position_id")
+        close_payload = {
+            "exit_price": exit_price,
+            "quantity": pos.get("quantity"),
+            "close_reason": "manual",
+            "notes": "Closed via Pivot chat detection",
+        }
+        result = _post_to_railway(
+            f"/api/v2/positions/{position_id}/close",
+            close_payload, api_key, base_url,
+        )
+
+        if result and result.get("status") in ("closed", "partial_close"):
+            pnl = result.get("realized_pnl", 0)
+            outcome = result.get("trade_outcome", "?")
+            pnl_str = f"+${pnl:.2f}" if pnl >= 0 else f"-${abs(pnl):.2f}"
+            await interaction.followup.send(
+                f"\u2705 **Position closed:** {ticker} @ ${exit_price} — "
+                f"{outcome} ({pnl_str})"
+            )
+        else:
+            detail = result.get("detail", "Unknown error") if result else "API call failed"
+            await interaction.followup.send(
+                f"\u26a0\ufe0f Close failed for {ticker}: {detail}\n"
+                f"Use the hub UI to close manually."
+            )
+
+        for child in self.children:
+            child.disabled = True
+        try:
+            await interaction.message.edit(view=self)
+        except Exception:
+            pass
+        self.stop()
+
+    @discord.ui.button(label="\u274c Skip", style=discord.ButtonStyle.grey)
+    async def cancel_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
+        await interaction.followup.send("Close logging skipped.", ephemeral=True)
+        for child in self.children:
+            child.disabled = True
+        try:
+            await interaction.message.edit(view=self)
+        except Exception:
+            pass
+        self.stop()
+
+
+async def _handle_trade_exit_detection(message: discord.Message, cfg: dict, env_file: dict) -> None:
+    """Check message for trade exit patterns and prompt to log the close."""
+    text = message.content.strip()
+    details = _extract_exit_details(text)
+
+    if not details.get("ticker"):
+        await message.reply(
+            "\U0001f4dd Looks like you closed a trade but I couldn't extract the ticker. "
+            "Close it via the hub UI or tell me: `closed TICKER at $PRICE`"
+        )
+        return
+
+    # Look up matching open position via Railway API
+    from pivot2_committee import load_openclaw_config, load_env_file, pick_env, OPENCLAW_ENV_FILE
+    cfg_local = cfg or load_openclaw_config()
+    env_file_local = env_file or load_env_file(OPENCLAW_ENV_FILE)
+    api_key = pick_env("PIVOT_API_KEY", cfg_local, env_file_local) or ""
+    base_url = pick_env("PANDORA_API_URL", cfg_local, env_file_local) or "https://pandoras-box-production.up.railway.app"
+
+    positions = _get_from_railway(
+        f"/api/v2/positions?status=OPEN&ticker={details['ticker']}",
+        api_key, base_url,
+    )
+
+    if not positions:
+        await message.reply(
+            f"\U0001f4dd No open position found for **{details['ticker']}**. "
+            f"It may already be closed, or close it via the hub UI."
+        )
+        return
+
+    # Use the first matching open position
+    pos = positions[0] if isinstance(positions, list) else None
+    if not pos or not pos.get("position_id"):
+        await message.reply(
+            f"\U0001f4dd Couldn't match an open position for **{details['ticker']}**. "
+            f"Close it via the hub UI."
+        )
+        return
+
+    entry_price = pos.get("entry_price", 0)
+    exit_price = details.get("exit_price")
+    price_str = f"${exit_price}" if exit_price else "not specified"
+
+    # Preview P&L if we have both prices
+    pnl_preview = ""
+    if exit_price and entry_price:
+        struct = (pos.get("structure") or "").lower()
+        is_stock = struct in ("stock", "stock_long", "long_stock", "stock_short", "short_stock")
+        mult = 1 if is_stock else 100
+        qty = pos.get("quantity", 1)
+        est_pnl = round((exit_price - entry_price) * mult * qty, 2)
+        pnl_preview = f"\nEst. P&L: **{'+'  if est_pnl >= 0 else ''}{est_pnl:.2f}**"
+
+    if not exit_price:
+        await message.reply(
+            f"\U0001f4dd Trade exit detected for **{details['ticker']}** but no exit price found.\n"
+            f"Tell me the price: `closed {details['ticker']} at $X.XX`"
+        )
+        return
+
+    confirm_msg = (
+        f"\U0001f4dd **Trade exit detected:**\n"
+        f"Ticker: **{details['ticker']}**\n"
+        f"Entry: **${entry_price}** → Exit: **{price_str}**\n"
+        f"Qty: **{pos.get('quantity', '?')}**"
+        f"{pnl_preview}\n\n"
+        f"Confirm to close position, or skip."
+    )
+    view = TradeCloseView(details, pos, cfg=cfg, env_file=env_file)
+    await message.reply(confirm_msg, view=view)
+
+
 async def _handle_log_trade_command(message: discord.Message, cfg: dict, env_file: dict) -> None:
     """Parse: /log-trade PLTR SHORT 158.50 stop=161.50 target=150 vehicle=155p/150p"""
     text = message.content[len("/log-trade"):].strip()
@@ -485,6 +677,92 @@ async def _handle_log_trade_command(message: discord.Message, cfg: dict, env_fil
 
 
 # ── Run Committee Button Handler ──────────────────────────────────────────────
+
+async def _handle_macro_update_command(message: discord.Message, cfg: dict, env_file: dict) -> None:
+    """
+    Handle /macro-update command to update the persistent macro briefing.
+
+    Usage:
+      /macro-update Oil back above $95, Iran strikes expanding
+      /macro-update regime=RISK-OFF narrative=New text here
+      /macro-update fact Oil above $95
+      /macro-update clear-facts  (reset key_facts list)
+    """
+    text = message.content[len("/macro-update"):].strip()
+    if not text:
+        await message.reply(
+            "Usage:\n"
+            "`/macro-update <text>` — add a key fact\n"
+            "`/macro-update regime=RISK-OFF / STAGFLATION` — update regime label\n"
+            "`/macro-update narrative=<full narrative>` — replace narrative\n"
+            "`/macro-update clear-facts` — reset key facts list"
+        )
+        return
+
+    briefing_path = pathlib.Path("/opt/openclaw/workspace/data/macro_briefing.json")
+
+    # Load existing or start fresh
+    try:
+        data = json.loads(briefing_path.read_text(encoding="utf-8"))
+    except Exception:
+        data = {
+            "regime": "UNKNOWN",
+            "narrative": "",
+            "key_facts": [],
+            "sectors_to_watch": {},
+        }
+
+    # Parse command
+    if text.lower() == "clear-facts":
+        data["key_facts"] = []
+        action = "Cleared all key facts"
+    elif text.lower().startswith("regime="):
+        data["regime"] = text[7:].strip()
+        action = f"Updated regime to: {data['regime']}"
+    elif text.lower().startswith("narrative="):
+        data["narrative"] = text[10:].strip()
+        action = "Updated narrative"
+    elif text.lower().startswith("fact "):
+        fact = text[5:].strip()
+        if "key_facts" not in data:
+            data["key_facts"] = []
+        data["key_facts"].append(fact)
+        action = f"Added fact: {fact}"
+    else:
+        # Default: add as key fact
+        if "key_facts" not in data:
+            data["key_facts"] = []
+        data["key_facts"].append(text)
+        action = f"Added fact: {text}"
+
+    # Update timestamp
+    data["updated_at"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    data["updated_by"] = str(message.author)
+
+    # Save locally
+    try:
+        briefing_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    except Exception as e:
+        await message.reply(f"Failed to save briefing: {e}")
+        return
+
+    # Sync to Railway Redis
+    from pivot2_committee import pick_env
+    api_key = pick_env("PIVOT_API_KEY", cfg, env_file) or ""
+    base_url = pick_env("PANDORA_API_URL", cfg, env_file) or ""
+    if base_url and api_key:
+        try:
+            _post_to_railway("/api/macro/briefing", data, api_key, base_url)
+        except Exception as e:
+            logger.warning("Failed to sync macro briefing to Railway: %s", e)
+
+    facts_count = len(data.get("key_facts", []))
+    await message.reply(
+        f"Macro briefing updated.\n"
+        f"**{action}**\n"
+        f"Regime: {data.get('regime', '?')} | Facts: {facts_count}"
+    )
+
 
 async def handle_analyze_signal(interaction: discord.Interaction, signal_id: str) -> None:
     """
@@ -840,9 +1118,19 @@ def main():
             await _handle_log_trade_command(message, cfg, env_file)
             return
 
+        # /macro-update command
+        if text.lower().startswith("/macro-update"):
+            await _handle_macro_update_command(message, cfg, env_file)
+            return
+
         # "skip fill" acknowledgement
         if text.lower() == "skip fill":
             await message.reply("Got it \u2014 skipping fill logging for this one.")
+            return
+
+        # Auto-detect trade exit patterns (check BEFORE entry — "sold" matches both)
+        if any(p.search(text) for p in TRADE_EXIT_PATTERNS):
+            await _handle_trade_exit_detection(message, cfg, env_file)
             return
 
         # Auto-detect trade entry patterns

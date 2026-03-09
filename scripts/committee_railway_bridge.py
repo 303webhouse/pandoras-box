@@ -102,37 +102,61 @@ def run_committee_on_signal(signal: dict) -> dict | None:
     """
     Run the existing committee pipeline on a Railway signal.
     Uses the same functions as the Discord-triggered flow.
+    Returns result dict for Railway API AND posts Discord embed.
     """
     from pivot2_committee import (
         run_committee,
         build_market_context,
+        build_committee_embed,
+        post_discord_embed,
         load_openclaw_config,
+        load_discord_token,
         load_env_file,
         pick_env,
         OPENCLAW_CONFIG,
         OPENCLAW_ENV_FILE,
+        DEFAULT_CHANNEL_ID,
     )
+    from committee_decisions import build_button_components, save_pending
 
     cfg = load_openclaw_config()
     env_file = load_env_file(OPENCLAW_ENV_FILE)
     api_key = pick_env("PIVOT_API_KEY", cfg, env_file)
+    anthropic_key = pick_env("ANTHROPIC_API_KEY", cfg, env_file)
     api_url = pick_env("PANDORA_API_URL", cfg, env_file) or RAILWAY_BASE + "/api"
 
     if not api_key:
-        log.error("PIVOT_API_KEY not found — cannot run committee")
+        log.error("PIVOT_API_KEY not found — cannot call Railway API")
+        return None
+
+    if not anthropic_key:
+        log.error("ANTHROPIC_API_KEY not found — cannot run committee LLM agents")
         return None
 
     start = time.time()
 
     try:
         context = build_market_context(signal, api_url, api_key)
-        recommendation = run_committee(signal, context, api_key)
+        recommendation = run_committee(signal, context, anthropic_key)
         elapsed_ms = (time.time() - start) * 1000
 
         pivot = recommendation.get("agents", {}).get("pivot", {})
         toro = recommendation.get("agents", {}).get("toro", {})
         ursa = recommendation.get("agents", {}).get("ursa", {})
         technicals = recommendation.get("agents", {}).get("technicals", {})
+
+        # Post committee embed to Discord
+        try:
+            discord_token = load_discord_token(cfg, env_file)
+            channel_id = pick_env("COMMITTEE_CHANNEL_ID", cfg, env_file) or DEFAULT_CHANNEL_ID
+            embed = build_committee_embed(recommendation, context)
+            signal_id = signal.get("signal_id", "")
+            buttons = build_button_components(signal_id)
+            save_pending(signal_id, recommendation)
+            post_discord_embed(discord_token, channel_id, embed, components=buttons)
+            log.info("Posted committee embed to Discord for %s", signal.get("ticker"))
+        except Exception as e:
+            log.error("Failed to post Discord embed for %s: %s", signal.get("ticker"), e)
 
         return {
             "signal_id": signal["signal_id"],
