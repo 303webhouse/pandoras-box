@@ -79,17 +79,91 @@ async def update_balance(body: BalanceUpdate, _=Depends(verify_api_key)):
     return _row_to_dict(row)
 
 
-# ── 3. GET /positions ──
+# ── 3. GET /positions (reads from unified_positions, mapped to legacy shape) ──
+
+_STOCK_STRUCTURES = {"stock", "stock_long", "long_stock", "stock_short", "short_stock"}
+
+
+def _v2_to_legacy_dict(row) -> dict:
+    """Map a unified_positions row to the legacy open_positions response shape."""
+    d = _row_to_dict(row)
+    s = (d.get("structure") or "").lower()
+    at = (d.get("asset_type") or "").upper()
+    is_stock = s in _STOCK_STRUCTURES or (not s and at == "EQUITY")
+    has_short_strike = d.get("short_strike") is not None
+
+    # Derive legacy position_type
+    if is_stock:
+        pos_type = "stock"
+    elif has_short_strike:
+        pos_type = "option_spread"
+    else:
+        pos_type = "option"
+
+    # Derive option_type from structure
+    option_type = None
+    if not is_stock:
+        option_type = "Put" if "put" in s else "Call"
+
+    # Derive spread_type from structure
+    spread_type = None
+    if has_short_strike:
+        spread_type = "credit" if "credit" in s else "debit"
+
+    # Compute current_value: current_price × qty × multiplier
+    cp = d.get("current_price")
+    qty = d.get("quantity") or 0
+    multiplier = 1 if is_stock else 100
+    current_value = round(cp * multiplier * qty, 2) if cp is not None else None
+
+    # Compute unrealized_pnl_pct
+    cost_basis = d.get("cost_basis")
+    unrealized_pnl = d.get("unrealized_pnl")
+    pnl_pct = None
+    if unrealized_pnl is not None and cost_basis and cost_basis != 0:
+        pnl_pct = round((unrealized_pnl / abs(cost_basis)) * 100, 2)
+
+    return {
+        "id": d.get("id"),
+        "ticker": d.get("ticker"),
+        "position_type": pos_type,
+        "direction": d.get("direction"),
+        "quantity": qty,
+        "option_type": option_type,
+        "strike": d.get("long_strike"),
+        "short_strike": d.get("short_strike"),
+        "expiry": d.get("expiry"),
+        "spread_type": spread_type,
+        "cost_basis": cost_basis,
+        "cost_per_unit": d.get("entry_price"),
+        "current_value": current_value,
+        "current_price": cp,
+        "unrealized_pnl": unrealized_pnl,
+        "unrealized_pnl_pct": pnl_pct,
+        "opened_at": d.get("entry_date"),
+        "last_updated": d.get("updated_at"),
+        "updated_by": d.get("source") or "manual",
+        "notes": d.get("notes"),
+        "is_active": True,
+        "signal_id": d.get("signal_id"),
+        "account": (d.get("account") or "robinhood").lower(),
+        # Pass through v2-only fields that some consumers may benefit from
+        "position_id": d.get("position_id"),
+        "structure": d.get("structure"),
+        "asset_type": d.get("asset_type"),
+        "entry_price": d.get("entry_price"),
+    }
+
 
 @router.get("/positions")
 async def get_positions():
     pool = await get_postgres_client()
     rows = await pool.fetch("""
-        SELECT * FROM open_positions
-        WHERE is_active = TRUE
+        SELECT * FROM unified_positions
+        WHERE status = 'OPEN'
         ORDER BY expiry ASC NULLS LAST, ticker ASC
     """)
-    return [_row_to_dict(r) for r in rows]
+    return [_v2_to_legacy_dict(r) for r in rows]
 
 
 # ── 4. POST /positions/sync ──
