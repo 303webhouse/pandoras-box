@@ -1,22 +1,23 @@
 # Pivot — Priorities & TODO
 
-**Last Updated:** March 6, 2026 (end of session)
+**Last Updated:** March 9, 2026 (end of session)
 
 ---
 
 ## 🔴 Immediate (This Week)
 
 - [ ] **Confluence validation gate** — After 20 CONFIRMED/CONVICTION events fire during market hours, compare 24-hour outcomes vs 20 random STANDALONE signals. Success: confluence beats standalone by ≥12% win rate or ≥0.3R average. If not, reassess architecture.
-- [ ] **PLTR trade management** — Monday 9:30 AM ET alert scheduled. Watch open below $158 = hold, above $160 past 10 AM = exit. Position: 152.5p/147p spread, 3/13 expiry.
-- [ ] **Verify Twitter scraper Monday AM** — Tokens refreshed March 6. Confirm tweets are flowing into `twitter_signals.jsonl` during market hours. Health check cron runs daily 10 AM ET.
+- [x] ~~**PLTR trade management**~~ — PLTR closed March 9 for $1.68 (+$35, +26.3%). Alert fired correctly.
+- [x] ~~**Verify Twitter scraper Monday AM**~~ — Tokens working. Scraper picking up headlines.
 - [ ] **Hub Sniper VWAP validation harness** — Run parallel TV + server-side VWAP on SPY for 5 trading days. Acceptance: mean error < 0.1%, max error < 0.5%. If fails, Hub Sniper stays on TV with 1 watchlist alert.
 - [ ] **tick_breadth tuning** — Late session TICK close bounces still overpower bearish avg. Consider weighting avg 2:1 over close.
+- [ ] **DST audit on all VPS crons** — DST shift March 8 caused PLTR alert to need manual correction (14:30→13:30 UTC). All crons using hardcoded UTC offsets need review. Twitter scraper (14-23 UTC), health check (15 UTC), nightly outcome matcher (04 UTC), Saturday review — verify all still fire at intended ET times.
 
 ---
 
-## 🟠 Phase 1: Trading Strategies Review — ~90% Complete
+## 🟠 Phase 1: Trading Strategies Review — ~95% Complete
 
-### ✅ Done (March 5-6 Sessions)
+### ✅ Done (March 5-6-9 Sessions)
 
 - [x] Signal flow audit — 389 trade ideas mapped, per-strategy breakdown, per-CTA-subtype counts
 - [x] Strategy-signal type mapping — full webhook handler routing documented
@@ -33,17 +34,21 @@
 - [x] CTA selloff tweaks — VIX-adjusted stops (0.5→0.75 ATR), zone-aware RESISTANCE_REJECTION volume (0.8x in bearish)
 - [x] Holy Grail selloff tweaks — RSI floor bypass in strong downtrends, VIX touch tolerance widening
 - [x] Scout Sniper selloff tweaks — bias-aware LONG suppression when composite < -0.3
+- [x] Exhaustion BULL suppression — bias-aware IGNORE when composite < -0.3 (deployed March 9)
 - [x] Golden Touch fix — thresholds relaxed (50→30 days, 2.0→1.3x volume, 3-bar window)
 - [x] ETF yfinance fix — skip earnings check for ETFs, prevents committee crash on QQQ/SMH/IWM
 - [x] Outcome tracking fix — removed 48h window, reads ALL decisions, 5 outcomes matched
 - [x] Committee data access fix — bias URL corrected, portfolio verified, enhanced factor context
 - [x] Committee prompts update — 4-agent TORO/URSA/TECHNICALS/PIVOT deployed to VPS
 - [x] Pivot Chat data access — 11 data sources (positions, balances, CB, sectors, trade ideas)
+- [x] Pivot Chat system prompt overhaul — data integrity rules, 4-agent committee format, signal pipeline awareness, removed stale hardcoded balances, 8→20 factors
 - [x] Auto-committee disabled — cron commented out until confluence system dialed in
 - [x] Dead code cleanup — Triple Line handler, deprecated functions, old PineScript archived
 - [x] Twitter scraper tokens refreshed + daily health check cron added
-- [x] Trade logging pipeline — auto-detect trades in Discord, confirmation buttons, `/log-trade` command, writes to decision_log.jsonl + Railway outcomes
+- [x] Trade logging pipeline — auto-detect entries AND exits in Discord, confirmation buttons, `/log-trade` command, writes to decision_log.jsonl + Railway outcomes
 - [x] Macro narrative context — raw headlines block, macro prices (oil, gold, 10Y, DXY, VIX), persistent regime briefing file, `/macro-update` Discord command, Railway endpoint
+- [x] Close position P&L tracking — frontend sends exit values, v2 writes to closed_positions, PATCH backfill endpoint, trade exit detection patterns on VPS
+- [x] Portfolio positions table deprecated — GET /api/portfolio/positions now reads from unified_positions. Single source of truth. No more v2/portfolio sync bugs.
 
 ### 📋 Remaining
 
@@ -54,7 +59,6 @@
 - [ ] **Confluence Phase C (combine PineScripts)** — Deferred. Merge Whale Hunter + Absorption Wall into 1 TV script. HIGH engineering risk, not needed yet.
 - [ ] **breadth_intraday verification** — Confirm webhook fires and factor moves from STALE to active.
 - [ ] **Shadow mode validation** — After 5 trading days, compare Holy Grail + Scout server-side vs TV signal overlap. Target ≥80%.
-- [ ] **Exhaustion BULL suppression** — Same pattern as Scout LONG suppression. Apply bias-aware IGNORE when composite < -0.3.
 
 ---
 
@@ -77,7 +81,7 @@
 
 **Goal:** Make analytics accurate, visual, and self-improving.
 
-**Progress:** Outcome tracking now operational (5 matched outcomes). Weekly review runs Saturday 9 AM MT.
+**Progress:** Outcome tracking operational. 9 outcomes now tracked (5 from nightly matcher + 4 manually backfilled March 9). Weekly review runs Saturday 9 AM MT. Close position P&L tracking now functional.
 
 - [ ] **Scoring accuracy audit** — Compare signal scores at generation vs outcomes. Is 75+ threshold meaningful?
 - [ ] **Data visualization overhaul** — Dashboard showing: win rate trend, factor contribution heatmap, strategy P&L curve, committee accuracy over time.
@@ -109,8 +113,22 @@
 - [ ] **Mobile optimization** — Bottom nav, pull-to-refresh, responsive position cards
 - [ ] **Whale Hunter remaining alerts** — Add per-chart alerts for full options watchlist
 - [ ] **DST fix deployment** — Convert hardcoded UTC offsets to IANA timezones. Brief written, not deployed.
+- [ ] **Clean up dead `sync_v2_to_legacy()` function** — Definition still in `unified_positions.py`, no callers. Remove when convenient.
+- [ ] **Drop `open_positions` table** — Now fully deprecated. Portfolio GET reads from `unified_positions`. Table can be dropped after confirming no other callers.
 
 ---
+
+## ✅ Completed (March 9, 2026 Session) — 9 builds shipped
+
+- [x] Exhaustion BULL suppression (bias-aware IGNORE when composite < -0.3)
+- [x] Macro briefing updated for crisis (oil $108, Strait of Hormuz closed, stagflation regime)
+- [x] PLTR alert DST-corrected (14:30→13:30 UTC for EDT)
+- [x] Pivot Chat system prompt — data integrity rules, 4-agent committee format (TORO/URSA/TECHNICALS/PIVOT), signal pipeline awareness (Scout/CTA/Holy Grail/Absorption/Confluence), removed stale hardcoded balances, fixed 8→20 factors
+- [x] Close position P&L tracking — frontend sends exit_value/trade_outcome/loss_reason/close_reason, v2 backend writes to closed_positions on full close, PATCH /api/portfolio/positions/closed/{id} backfill endpoint, trade exit detection on VPS (7 patterns)
+- [x] Portfolio positions table deprecated — GET /api/portfolio/positions reads from unified_positions with _v2_to_legacy_dict() mapper, removed sync_v2_to_legacy() from MTM loop
+- [x] RH balance corrected ($4,371.42 / $3,709.42 cash)
+- [x] All positions synced — PLTR/TSLA/IWM/TOST closed, IBIT (2 positions) + NEM added, AMZN/XLF quantities corrected to 1
+- [x] Closed trades P&L backfilled to outcome_log.jsonl — PLTR +$35, TSLA +$237, IWM +$94, TOST -$37 (total +$329, 3W/1L)
 
 ## ✅ Completed (March 6, 2026 Session) — 19 builds shipped
 
