@@ -275,7 +275,23 @@ async def process_exhaustion_signal(alert: TradingViewAlert, start_time: datetim
     
     # Classify the signal
     classification = classify_exhaustion_signal(alert.direction, alert.entry_price)
-    
+
+    # Suppress EXHAUSTION_BULL in strong bearish regime (< -0.3)
+    # Signal still persists (useful as short profit-taking awareness) but tagged IGNORE
+    suppressed = False
+    if classification["signal_type"] == "EXHAUSTION_BULL":
+        try:
+            from bias_engine.composite import get_cached_composite
+            cached = await get_cached_composite()
+            if cached and cached.composite_score < -0.3:
+                suppressed = True
+                logger.info(
+                    f"🔇 Exhaustion BULL suppressed: {alert.ticker} "
+                    f"(bias={cached.composite_score:.2f})"
+                )
+        except Exception:
+            pass
+
     # Calculate risk/reward
     rr = calculate_risk_reward(alert)
     
@@ -303,7 +319,11 @@ async def process_exhaustion_signal(alert: TradingViewAlert, start_time: datetim
         "rsi": alert.rsi,
         "adx": alert.adx
     }
-    
+
+    if suppressed:
+        signal_data["status"] = "IGNORE"
+        signal_data["note"] = "Exhaustion BULL suppressed — strong bearish bias. Use as short profit-taking indicator only."
+
     # Fire-and-forget: return 200 immediately, process in background
     asyncio.ensure_future(process_signal_unified(signal_data, source="tradingview"))
 
