@@ -10,6 +10,7 @@ __pycache__/
 .env
 *.env
 config/.env
+.mcp.json
 
 # Logs
 *.log
