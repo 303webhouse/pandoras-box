@@ -37,6 +37,10 @@ After completing work on a Trading Team brief, append a new entry at the top of 
 | 06A — Twitter Sentiment Context + Skill | ✅ | ✅ | ✅ | ✅ |
 | 06A-news — News Context Pipeline (Polygon) | ✅ | ⬜ | ⬜ | ⬜ |
 | 06B — Holy Grail Pullback Continuation | ✅ | ✅ | ✅ | ✅ |
+| Expert Review — 3-Agent Audit | ✅ | N/A | N/A | N/A |
+| Tier 1 — Options Data + Calendar + Structure | ✅ | ✅ | ✅ | ✅ |
+| Tier 2 — Divergences + SMAs + Portfolio + Sizing | ✅ | ✅ | ✅ | ✅ |
+| Tier 3 — BB/VWAP/Volume/RS/P&L/Prompts/BugFix | ✅ | ✅ | ✅ | ✅ |
 | 07 — Watchlist Re-Scorer | ⬜ | ⬜ | ⬜ | ⬜ |
 | 08 — Librarian Phase 1 (Knowledge Base) | ⬜ | ⬜ | ⬜ | ⬜ |
 | 09 — Librarian Phase 2 (Agent Training Loop) | ⬜ | ⬜ | ⬜ | ⬜ |
@@ -47,6 +51,7 @@ After completing work on a Trading Team brief, append a new entry at the top of 
 
 ## Log Entries
 
+<<<<<<< Updated upstream
 ### 2026-03-04 — UW Watcher + Signals Channel + Portfolio Fix — Built + Deployed
 **Agent:** Claude Code (build), Claude.ai Opus (brief/architecture + VPS deployment)
 **What happened:** Three-part brief built, committed, and deployed. (1) Portfolio Fix: removed hardcoded dollar amounts ($4,700/$118/$165) from committee_prompts.py SIZE RULES — agents now reference live PORTFOLIO CONTEXT with pre-calculated risk limits (2.5% standard, 3.5% high conviction) and staleness warnings. (2) Signals Channel: pipeline.py changed COMMITTEE_REVIEW → PENDING_REVIEW; signal_notifier.py rewritten with rich embeds (score tier, bias, levels, R:R), green/red color coding, Analyze + Dismiss buttons posted to #📊-signals; committee_interaction_handler.py handles analyze/dismiss clicks triggering on-demand committee runs. (3) UW Watcher: new uw_watcher.py discord.py bot watches #uw-flow-alerts, parses ticker updates via regex, POSTs to Railway; 3 new Railway endpoints (POST /api/uw/ticker-updates, GET /api/uw/ticker/{ticker}, GET /api/uw/market-flow) cache in Redis with 1h TTL. UW flow data wired into committee context for ticker-specific and market-wide flow awareness.
@@ -123,6 +128,36 @@ After completing work on a Trading Team brief, append a new entry at the top of 
 **Files changed:** `committee_parsers.py` (OpenRouter → Anthropic API: URL, headers, payload format, response parsing), `pivot2_committee.py` (model IDs `anthropic/claude-haiku-4.5` → `claude-haiku-4-5-20251001`, env var `OPENROUTER_API_KEY` → `ANTHROPIC_API_KEY`), `committee_review.py` (env var update), `pivot2_brief.py` (full rewrite of LLM call: `call_openrouter` → `call_anthropic`, removed `extract_openrouter_text`), `pivot2_twitter.py` (URL, headers, model ID, response parsing, env var), `session_image_cleanup.py` (new — strips base64 images from session JSONL files), OpenClaw config `openclaw.json` (added `anthropic:default` auth profile, updated model mappings, added `ANTHROPIC_API_KEY` to env), `cron/jobs.json` (trade poller `*/2` → `*/15`, twitter-sentiment `enabled: false`)
 **Deviations from brief:** OpenClaw successfully accepted direct Anthropic as provider (Option B in brief worked — no need for Option A fallback). Brief image format uses `{"type": "image", "source": {"type": "url", "url": ...}}` instead of OpenRouter's `{"type": "image_url", "image_url": {"url": ...}}` — may need testing on first morning brief with screenshots.
 **Next blocker:** Monitor first full trading day to verify all scripts work with Anthropic API. Watch for: (1) morning/EOD brief image handling, (2) committee runs completing, (3) Twitter sentiment scoring. Backup `.bak` files on VPS if rollback needed.
+=======
+### 2026-02-26 — Tier 3 Built + Deployed + Live Tested
+**Agent:** Claude Code (Opus)
+**What happened:** Implemented all feasible Tier 3 items (7 tasks + 1 bug fix). Skipped 3 items requiring paid APIs or missing infrastructure. (1) **Bollinger Bands + Squeeze**: BB(20,2) with bandwidth as % of price, squeeze detection (below 20th percentile of 90-day bandwidth history). (2) **Volume Trend**: Up-volume vs down-volume 10-day ratio — labels accumulation (>1.2), distribution (<0.8), neutral. (3) **5-day Rolling VWAP**: Typical price × volume weighted average, shown with above/below context. (4) **Relative Strength vs SPY**: 20-day return comparison, shown for non-SPY tickers only. Required MultiIndex fix for yfinance SPY download. (5) **P&L State Injection**: `fetch_recent_pnl_context()` reads `outcome_log.jsonl`, counts consecutive losses, triggers playbook "reduce to 50% size" warning after 2+ losses. Wired into `run_committee()`. (6) **Pin Risk + 0DTE Gamma**: Added pin risk warning to URSA prompt (credit spreads <7 DTE = early assignment risk), added gamma regime awareness section to TECHNICALS prompt (0DTE microstructure effects). (7) **MEDIUM Conviction Bug Fix**: Changed 4 locations in `compute_agent_accuracy()` where MEDIUM/WATCHING was unconditionally counted as "correct" — now treated as uninformative (no accuracy credit).
+**Skipped items:** #14 Dynamic DEFCON (SESSION-STATE.md doesn't exist), #16 GEX (needs paid SpotGamma API), #17 Expected Move (needs reliable options chain data).
+**Files changed:** `committee_context.py` (BB, volume, VWAP, RS, P&L function), `pivot2_committee.py` (P&L wiring), `committee_prompts.py` (pin risk, 0DTE gamma), `committee_analytics.py` (MEDIUM conviction fix)
+**Deviations from plan:** None. Cache bug caused initial rs_vs_spy=None on VPS (stale cached result from pre-fix test run), resolved by clearing tech cache.
+**Next blocker:** None — all 3 expert review tiers complete. Ready for Brief 07 (Watchlist Re-Scorer).
+
+### 2026-02-26 — Tier 2 Built + Deployed + Live Tested
+**Agent:** Claude Code (Opus)
+**What happened:** Implemented all 5 Tier 2 items (item #9 token limits already done in Tier 1). (1) **SMAs + CTA Zone**: Added SMA 20/50/120/200 alongside existing EMAs, plus CTA zone classification (GREEN/YELLOW/YELLOW-BEAR/RED/GREY) based on price-SMA alignment. (2) **RSI/MACD Divergence Detection**: Added swing pivot analysis (3-bar left/right comparison) over last 30 bars — detects bearish divergence (price higher high, indicator lower high) and bullish divergence (price lower low, indicator higher low) for both RSI and MACD histogram. (3) **Portfolio Risk Context**: New `fetch_portfolio_context()` calls Railway API (`/api/portfolio/balances` + `/api/portfolio/positions`), `format_portfolio_context()` renders terse summary (account balance, open positions, capital at risk %). Wired into `build_market_context()` and injected into `run_committee()`. (4) **SIZE field**: Added position sizing to PIVOT output — maps conviction to dollar risk (HIGH 3-5%, MEDIUM 1.5-2.5%, LOW watching). Added SIZE RULES to prompt, SIZE: to parser known_prefixes, and Position Size to Discord embed. (5) **Realized vol completion**: Surfaced MACD histogram value in formatted output, updated vol regime text to explicitly frame HV percentile as IV proxy.
+**Files changed:** `committee_context.py` (SMAs, divergence, portfolio, vol text), `pivot2_committee.py` (portfolio wiring, SIZE embed), `committee_prompts.py` (SIZE field + rules), `committee_parsers.py` (SIZE parsing)
+**Deviations from plan:** None. All 5 tasks implemented as designed.
+**Next blocker:** None — Tier 3 ready to build.
+
+### 2026-02-26 — Tier 1 Built + Deployed + Live Tested
+**Agent:** Claude Code (Opus)
+**What happened:** Implemented all 4 critical gaps identified by expert review + 6 bug fixes. (1) **HV20 + Vol Percentile**: Added historical volatility (20-day annualized) as IV proxy, percentile rank vs 1-year range, vol regime labels (Low/Below Avg/Elevated/High), and trend direction. (2) **Economic Calendar**: Created `data/econ_calendar_2026.json` (66 events: FOMC/CPI/NFP/PCE/GDP/OPEX), added `fetch_economic_calendar()` and `format_economic_calendar()` to context pipeline. (3) **DTE-aware earnings**: Changed `check_earnings_proximity()` window from hardcoded 14 days to `max(14, dte_days)` with default 30. (4) **STRUCTURE/LEVELS output**: Added options structure recommendation and entry/stop/target levels to PIVOT output format based on vol percentile rules (>50 credit, <30 debit, earnings=defined-risk). Bug fixes: ATR Wilder smoothing, MACD 4→7 bar lookback, OI 500→2000 threshold, bid-ask absolute→% of mid-price, SMA/EMA clarity notes, token limits TECHNICALS 500→750 / PIVOT 1000→1500.
+**Files changed:** `committee_context.py` (HV20, econ calendar, ATR, MACD fixes), `data/econ_calendar_2026.json` (new), `pivot2_committee.py` (DTE earnings, econ wiring, token limits, embed fields), `committee_prompts.py` (STRUCTURE/LEVELS, OI, bid-ask, SMA/EMA), `committee_parsers.py` (STRUCTURE/LEVELS parsing)
+**Deviations from plan:** Used HV percentile as IV proxy instead of options chain data — HV and IV are highly correlated for swing timeframes, and yfinance options chain is slow/fragile.
+**Next blocker:** None — Tier 2 ready to build.
+
+### 2026-02-26 — Expert Review Completed
+**Agent:** Claude Code (Opus) — 3 parallel Opus sub-agents
+**What happened:** Three expert reviewers (TA Expert, Buy-Side Analyst, Sell-Side Derivatives Strategist) independently audited the committee training system against best practices in options trading and The Stable education files. All three converged on the same critical gap: agents are well-instructed on options analysis but data-starved — told to "check IV rank" and "factor in IV crush" but never receive actual IV numbers. Produced 20-item roadmap across 3 tiers + 6 bug fixes. Saved to `docs/committee-review-recommendations.md`.
+**Files changed:** `docs/committee-review-recommendations.md` (new — full roadmap)
+**Deviations from brief:** N/A — review/audit task
+**Next blocker:** None — Tier 1 implemented same session.
+>>>>>>> Stashed changes
 
 ### 2026-02-23 — Brief 06A Built + Deployed + Verified
 **Agent:** Claude Code (Opus)
