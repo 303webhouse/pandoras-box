@@ -28,16 +28,18 @@
 - [x] **Hybrid scanner documented** — confirmed ACTIVE, added do-not-delete comment to `hybrid_scanner.py`
 - **Total: 233 lines removed, zero 404s in browser console**
 
-### Phase 0E — Data Durability ← **NEXT**
-- [ ] **Move decision_log to Postgres** (or SQLite on VPS) — JSONL kept as append-only audit
-- [ ] **Move committee_log, outcome_log, lessons_bank** same way
-- [ ] **Atomic write pattern** for any remaining JSONL appends (write temp → rename)
+### ✅ Phase 0E — Data Durability (COMPLETE — March 10)
+- [x] **`scripts/safe_jsonl.py` utility** — `safe_append()`, `safe_rewrite()`, `safe_rewrite_json()`, `safe_trim_jsonl()`, `safe_update_line()`. All use temp-file + `os.replace()` (atomic on Linux). Appends use `fsync`.
+- [x] **7 scripts converted** — `pivot2_committee.py`, `committee_decisions.py`, `committee_outcomes.py`, `committee_review.py`, `committee_interaction_handler.py`, `committee_autopsy.py`, `pivot2_twitter.py`
+- [x] Deployed to VPS via SCP, services restarted, verified running clean
+- **Deferred:** Postgres migration for JSONL logs (lower priority now that atomic writes prevent corruption)
 
-### Phase 0F — Resilience & Monitoring
+### Phase 0F — Resilience & Monitoring ← **NEXT**
 - [ ] **Committee heartbeat** — Alert to Discord if no committee run in 2h during market hours
 - [ ] **Factor staleness monitor** — Alert if any factor hasn't updated in 2× its expected TTL
 - [ ] **Webhook dedup in tradingview.py** — Check signal_id before Postgres insert
 - [ ] **Polygon degradation handling** — Return last-known value with stale flag instead of failing
+- **Brief:** `docs/codex-briefs/brief-phase-0f-resilience-monitoring.md`
 
 ### Phase 0G — Test Coverage (Sharp Edges Only)
 - [ ] Auth enforcement tests (unauthenticated → 401)
@@ -57,7 +59,7 @@
 
 ## 🟠 Phase 1: Trading Strategies Review — ~95% Complete
 
-### ✅ Done (March 5-6-9 Sessions)
+### ✅ Done (March 5-6-9-10 Sessions)
 
 - [x] Signal flow audit — 389 trade ideas mapped, per-strategy breakdown, per-CTA-subtype counts
 - [x] Strategy-signal type mapping — full webhook handler routing documented
@@ -89,6 +91,7 @@
 - [x] Macro narrative context — raw headlines block, macro prices (oil, gold, 10Y, DXY, VIX), persistent regime briefing file, `/macro-update` Discord command, Railway endpoint
 - [x] Close position P&L tracking — frontend sends exit values, v2 writes to closed_positions, PATCH backfill endpoint, trade exit detection patterns on VPS
 - [x] Portfolio positions table deprecated — GET /api/portfolio/positions now reads from unified_positions. Single source of truth. No more v2/portfolio sync bugs.
+- [x] **Sell the Rip scanner v1** — Server-side negative momentum fade with sector rotation layer. Two modes: confirmed downtrend (EMA/VWAP rejection) + early detection (sector ACTIVE_DISTRIBUTION). Convexity grading, spread suggestions, time stops, Holy Grail dedup, bias filter. `sector_rs.py` + `sell_the_rip_scanner.py` + scorer mods.
 
 ### 📋 Remaining
 
@@ -157,12 +160,14 @@
 
 ---
 
-## ✅ Completed (March 10, 2026) — Phase 0A + 0B + 0C + 0D
+## ✅ Completed (March 10, 2026) — Phase 0A-0E + Sell the Rip
 
 - [x] Phase 0A: Repo source of truth — 9 VPS scripts pulled, 8 untracked added, duplicates resolved, stale docs fixed, `config/.env` untracked, security fixes
 - [x] Phase 0B: Auth lockdown — unified `require_api_key()`, auth on all mutation routes, TradingView webhook secret, CORS env var, frontend `authHeaders()` on 30 calls
 - [x] Phase 0C: Positions migration — 1,268 lines removed. In-memory state killed, `accept_signal()` → unified_positions, 13 legacy routes deleted, sync functions deleted, frontend unified on v2
 - [x] Phase 0D: Frontend hygiene — 233 lines removed. Dead `bias-auto/*` and `signals/ticker` calls eliminated, analyzer fixed, polling consolidated (positions 10s→30s, prices 30s→60s, redundant portfolio poll removed), hybrid scanner documented as active
+- [x] Phase 0E: Data durability — `safe_jsonl.py` utility (atomic writes via temp+rename, fsync on appends). 7 committee scripts converted. Deployed to VPS.
+- [x] Sell the Rip scanner v1 — Server-side negative momentum fade + sector rotation layer. `sector_rs.py`, `sell_the_rip_scanner.py`, scorer mods, scan loops in main.py. Strategy doc + brief pushed.
 
 ## ✅ Completed (March 9, 2026 Session) — 9 builds shipped
 
