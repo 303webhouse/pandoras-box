@@ -62,6 +62,11 @@ STRATEGY_BASE_SCORES = {
     "HOLY_GRAIL_1H": 50,
     "HOLY_GRAIL_15M": 40,
 
+    # Sell the Rip — Negative momentum fade
+    "SELL_RIP_EMA": 45,          # Confirmed downtrend, EMA bounce rejection
+    "SELL_RIP_VWAP": 48,         # Confirmed downtrend, VWAP rejection (stronger)
+    "SELL_RIP_EARLY": 35,        # Early detection (sector distribution, relaxed criteria)
+
     # Generic types
     "BULLISH_TRADE": 35,
     "BEAR_CALL": 35,
@@ -267,6 +272,42 @@ def calculate_signal_score(
         tech_bonus += rvol_bonus
         tech_details["rvol"] = {"value": rvol, "bonus": rvol_bonus}
     
+    # Sell the Rip modifiers (sector RS, volume exhaustion, ADX, HG confluence)
+    if signal_type.startswith("SELL_RIP"):
+        str_details = {}
+        sector_class = signal.get("sector_classification", "NEUTRAL")
+        if sector_class == "ACTIVE_DISTRIBUTION":
+            tech_bonus += 10
+            str_details["sector_rs"] = {"classification": sector_class, "bonus": 10}
+        elif sector_class == "POTENTIAL_ROTATION":
+            tech_bonus += 5
+            str_details["sector_rs"] = {"classification": sector_class, "bonus": 5}
+        elif sector_class == "SECTOR_STRENGTH":
+            tech_bonus -= 10
+            str_details["sector_rs"] = {"classification": sector_class, "bonus": -10}
+
+        vol_ratio = signal.get("volume_ratio", 1.0)
+        if vol_ratio < 0.65:
+            tech_bonus += 5
+            str_details["volume_exhaustion"] = {"ratio": vol_ratio, "bonus": 5}
+        elif vol_ratio < 0.75:
+            tech_bonus += 3
+            str_details["volume_exhaustion"] = {"ratio": vol_ratio, "bonus": 3}
+
+        sig_adx = signal.get("adx", 0)
+        if sig_adx >= 30:
+            tech_bonus += 5
+            str_details["adx_strength"] = {"adx": sig_adx, "bonus": 5}
+        elif sig_adx >= 25:
+            tech_bonus += 3
+            str_details["adx_strength"] = {"adx": sig_adx, "bonus": 3}
+
+        if signal.get("confluence_holy_grail"):
+            tech_bonus += 8
+            str_details["holy_grail_confluence"] = {"bonus": 8}
+
+        tech_details["sell_the_rip"] = str_details
+
     triggering_factors["technical_confluence"] = {
         "total_bonus": tech_bonus,
         "details": tech_details
