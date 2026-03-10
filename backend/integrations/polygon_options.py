@@ -20,6 +20,17 @@ logger = logging.getLogger(__name__)
 POLYGON_API_KEY = os.getenv("POLYGON_API_KEY") or ""
 POLYGON_BASE = "https://api.polygon.io"
 
+
+def _record(success: bool, endpoint: str = "") -> None:
+    """Best-effort health recording."""
+    try:
+        from monitoring.polygon_health import record_polygon_call, check_and_alert
+        record_polygon_call(success=success, endpoint=endpoint)
+        if not success:
+            check_and_alert()
+    except Exception:
+        pass
+
 # In-memory chain cache: {ticker: (timestamp, chain_data)}
 _chain_cache: Dict[str, tuple] = {}
 _CACHE_TTL = 300  # 5 minutes
@@ -68,6 +79,7 @@ async def get_options_snapshot(
                 resp = await client.get(url, params=params)
                 if resp.status_code != 200:
                     logger.error("Polygon snapshot %s: HTTP %s — %s", underlying, resp.status_code, resp.text[:200])
+                    _record(False, "options_snapshot")
                     return None
 
                 data = resp.json()
@@ -84,8 +96,10 @@ async def get_options_snapshot(
 
     except Exception as e:
         logger.error("Polygon snapshot %s failed: %s", underlying, e)
+        _record(False, "options_snapshot")
         return None
 
+    _record(True, "options_snapshot")
     logger.info("Fetched %d contracts for %s (%d pages)", len(all_results), underlying, page)
 
     # Cache the result

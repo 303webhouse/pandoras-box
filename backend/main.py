@@ -260,6 +260,24 @@ async def lifespan(app: FastAPI):
                 logger.warning("Sell the Rip scan loop error: %s", e)
             await asyncio.sleep(300)  # 5 minutes
 
+    # Factor staleness monitor — check every 60 min
+    async def factor_staleness_loop():
+        """Check factor freshness and alert on stale readings."""
+        await asyncio.sleep(120)  # 2 min after startup
+        while True:
+            try:
+                from monitoring.factor_staleness import run_staleness_check
+                result = await run_staleness_check(alert=True)
+                stale_count = len(result.get("stale_factors", []))
+                missing_count = len(result.get("missing_factors", []))
+                if stale_count or missing_count:
+                    logger.warning(
+                        "Factor staleness: %d stale, %d missing", stale_count, missing_count
+                    )
+            except Exception as e:
+                logger.warning("Factor staleness loop error: %s", e)
+            await asyncio.sleep(3600)  # 60 minutes
+
     expiry_task = asyncio.create_task(signal_expiry_loop())
     universe_task = asyncio.create_task(universe_cache_loop())
     mtm_task = asyncio.create_task(mark_to_market_loop())
@@ -268,6 +286,7 @@ async def lifespan(app: FastAPI):
     scout_task = asyncio.create_task(scout_scan_loop())
     sector_rs_task = asyncio.create_task(sector_rs_loop())
     sell_the_rip_task = asyncio.create_task(sell_the_rip_scan_loop())
+    staleness_task = asyncio.create_task(factor_staleness_loop())
 
     logger.info("✅ Pandora's Box is live")
 
@@ -282,6 +301,7 @@ async def lifespan(app: FastAPI):
     scout_task.cancel()
     sector_rs_task.cancel()
     sell_the_rip_task.cancel()
+    staleness_task.cancel()
     logger.info("🛑 Shutting down Pandora's Box...")
     await redis_client.close()
     await postgres_client.close()
@@ -358,6 +378,20 @@ async def health_check():
 async def live_check():
     """Pure liveness probe for platform health checks."""
     return {"status": "alive"}
+
+
+@app.get("/api/monitoring/factor-staleness")
+async def factor_staleness_endpoint():
+    """Check factor freshness — returns stale, healthy, and missing factors."""
+    from monitoring.factor_staleness import check_factor_staleness
+    return await check_factor_staleness()
+
+
+@app.get("/api/monitoring/polygon-health")
+async def polygon_health_endpoint():
+    """Check Polygon.io API health from rolling call window."""
+    from monitoring.polygon_health import get_polygon_health
+    return get_polygon_health()
 
 @app.get("/api/bias/{timeframe}")
 async def get_bias_data(timeframe: str):

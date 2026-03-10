@@ -22,6 +22,17 @@ logger = logging.getLogger(__name__)
 POLYGON_API_KEY = os.getenv("POLYGON_API_KEY") or ""
 POLYGON_BASE = "https://api.polygon.io"
 
+
+def _record(success: bool, endpoint: str = "") -> None:
+    """Best-effort health recording."""
+    try:
+        from monitoring.polygon_health import record_polygon_call, check_and_alert
+        record_polygon_call(success=success, endpoint=endpoint)
+        if not success:
+            check_and_alert()
+    except Exception:
+        pass
+
 # In-memory cache: {cache_key: (timestamp, data)}
 _bars_cache: Dict[str, tuple] = {}
 _snapshot_cache: Dict[str, tuple] = {}
@@ -80,18 +91,22 @@ async def get_bars(
                     "Polygon bars %s: HTTP %s — %s",
                     ticker, resp.status_code, resp.text[:200],
                 )
+                _record(False, "bars")
                 return None
 
             data = resp.json()
             results = data.get("results")
             if not results:
                 logger.warning("Polygon bars %s: empty results", ticker)
+                _record(False, "bars")
                 return None
 
     except Exception as e:
         logger.error("Polygon bars %s failed: %s", ticker, e)
+        _record(False, "bars")
         return None
 
+    _record(True, "bars")
     logger.info("Fetched %d bars for %s (%s %s)", len(results), ticker, multiplier, timespan)
     _bars_cache[cache_key] = (time.time(), results)
     return results
@@ -165,18 +180,22 @@ async def get_snapshot(ticker: str) -> Optional[Dict[str, Any]]:
                     "Polygon snapshot %s: HTTP %s — %s",
                     ticker, resp.status_code, resp.text[:200],
                 )
+                _record(False, "snapshot")
                 return None
 
             data = resp.json()
             result = data.get("ticker")
             if not result:
                 logger.warning("Polygon snapshot %s: no ticker data", ticker)
+                _record(False, "snapshot")
                 return None
 
     except Exception as e:
         logger.error("Polygon snapshot %s failed: %s", ticker, e)
+        _record(False, "snapshot")
         return None
 
+    _record(True, "snapshot")
     _snapshot_cache[cache_key] = (time.time(), result)
     return result
 

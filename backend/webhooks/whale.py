@@ -35,6 +35,7 @@ from fastapi import APIRouter, Request
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+import hashlib
 import logging
 import os
 import httpx
@@ -155,6 +156,21 @@ async def _post_to_discord(payload: dict) -> None:
 @router.post("/whale")
 async def whale_webhook(data: WhaleSignal):
     """Receive a whale signal, forward to Discord, and cache for committee confluence."""
+    # Dedup: reject duplicate whale signals within 120s window
+    dedup_raw = f"{data.ticker}:{data.lean}:{data.poc}:{data.vol}"
+    dedup_hash = hashlib.md5(dedup_raw.encode()).hexdigest()[:16]
+    dedup_key = f"webhook:dedup:whale:{dedup_hash}"
+    try:
+        from database.redis_client import get_redis_client
+        _rc = await get_redis_client()
+        if _rc and await _rc.get(dedup_key):
+            logger.info("Whale dedup: skipping duplicate %s %s", data.ticker, data.lean)
+            return {"status": "duplicate", "detail": "duplicate whale signal within 120s window"}
+        if _rc:
+            await _rc.set(dedup_key, "1", ex=120)
+    except Exception:
+        pass  # dedup is best-effort
+
     logger.info(
         f"\U0001f40b Whale signal received: {data.ticker} {data.lean} "
         f"vol={data.vol} poc={data.poc} price={data.price}"
