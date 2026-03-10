@@ -13,7 +13,7 @@ import urllib.request
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
-from backend.bias_engine.composite import FACTOR_CONFIG, REDIS_KEY_FACTOR_LATEST
+from bias_engine.composite import FACTOR_CONFIG, REDIS_KEY_FACTOR_LATEST
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +35,7 @@ async def check_factor_staleness() -> Dict:
       - missing_factors: list of factor_ids with no reading at all
       - checked_at: ISO timestamp
     """
-    from backend.database.redis_client import get_redis_client
+    from database.redis_client import get_redis_client
 
     now = datetime.now(timezone.utc)
     stale: List[Dict] = []
