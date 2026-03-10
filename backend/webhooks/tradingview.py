@@ -15,10 +15,14 @@ from datetime import datetime
 import asyncio
 import logging
 
+import os
+
 from strategies.exhaustion import validate_exhaustion_signal, classify_exhaustion_signal
 from signals.pipeline import process_signal_unified
 
 logger = logging.getLogger(__name__)
+
+WEBHOOK_SECRET = os.getenv("TRADINGVIEW_WEBHOOK_SECRET") or ""
 
 router = APIRouter()
 
@@ -95,6 +99,7 @@ class TradingViewAlert(BaseModel):
     buy_vol: Optional[float] = None
     sell_vol: Optional[float] = None
     total_vol: Optional[float] = None
+    secret: Optional[str] = None
 
 
 @router.post("/tradingview")
@@ -103,6 +108,12 @@ async def receive_tradingview_alert(alert: TradingViewAlert):
     Receive and process TradingView webhook
     Routes to appropriate strategy handler based on strategy field
     """
+    # Webhook secret validation
+    if WEBHOOK_SECRET:
+        if (alert.secret or "") != WEBHOOK_SECRET:
+            logger.warning("Rejected TradingView webhook — invalid secret from %s", alert.ticker)
+            raise HTTPException(status_code=401, detail="Invalid webhook secret")
+
     start_time = datetime.now()
     strategy_lower = alert.strategy.lower()
     
@@ -503,6 +514,7 @@ class BreadthPayload(BaseModel):
     """Payload for $UVOL/$DVOL breadth data from TradingView"""
     uvol: float  # NYSE Up Volume (e.g., 1500000000)
     dvol: float  # NYSE Down Volume (e.g., 800000000)
+    secret: Optional[str] = None
 
 
 @router.post("/breadth")
@@ -518,6 +530,11 @@ async def receive_breadth_data(payload: BreadthPayload):
     - Message (JSON): {"uvol": {{close of $UVOL}}, "dvol": {{close of $DVOL}}}
     """
     from bias_filters.breadth_intraday import store_breadth_data, compute_score as compute_breadth_score
+
+    if WEBHOOK_SECRET:
+        if (payload.secret or "") != WEBHOOK_SECRET:
+            logger.warning("Rejected breadth webhook — invalid secret")
+            raise HTTPException(status_code=401, detail="Invalid webhook secret")
 
     logger.info("breadth webhook received: UVOL=%.0f, DVOL=%.0f", payload.uvol, payload.dvol)
 
@@ -551,6 +568,7 @@ class TickDataPayload(BaseModel):
     tick_close: Optional[float] = None  # Latest TICK close
     tick_avg: Optional[float] = None    # Session average TICK
     date: Optional[str] = None  # Optional date (YYYY-MM-DD), defaults to today
+    secret: Optional[str] = None
 
 
 @router.post("/tick")
@@ -570,8 +588,13 @@ async def receive_tick_data(payload: TickDataPayload):
         "tick_avg": {{hl2}}
       }
     """
+    if WEBHOOK_SECRET:
+        if (payload.secret or "") != WEBHOOK_SECRET:
+            logger.warning("Rejected TICK webhook — invalid secret")
+            raise HTTPException(status_code=401, detail="Invalid webhook secret")
+
     from bias_filters.tick_breadth import store_tick_data, compute_score as compute_tick_score
-    
+
     logger.info(f"📊 TICK webhook received: high={payload.tick_high}, low={payload.tick_low}, close={payload.tick_close}, avg={payload.tick_avg}")
     
     result = await store_tick_data(
@@ -611,6 +634,7 @@ class McClellanPayload(BaseModel):
     """Daily NYSE advancing/declining issues from TradingView"""
     advn: float  # NYSE advancing issues count
     decln: float  # NYSE declining issues count
+    secret: Optional[str] = None
 
 
 @router.post("/mcclellan")
@@ -630,6 +654,11 @@ async def receive_mcclellan_data(payload: McClellanPayload):
     from bias_engine.composite import FactorReading, store_factor_reading
     from bias_engine.factor_utils import score_to_signal
     import pandas as pd
+
+    if WEBHOOK_SECRET:
+        if (payload.secret or "") != WEBHOOK_SECRET:
+            logger.warning("Rejected McClellan webhook — invalid secret")
+            raise HTTPException(status_code=401, detail="Invalid webhook secret")
 
     logger.info("McClellan webhook: ADVN=%.0f, DECLN=%.0f", payload.advn, payload.decln)
 

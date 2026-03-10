@@ -8,6 +8,11 @@
 const IS_HTTPS = window.location.protocol === 'https:';
 const WS_URL = `${IS_HTTPS ? 'wss' : 'ws'}://${window.location.host}/ws`;
 const API_URL = `${window.location.origin}/api`;
+const API_KEY = 'PIVOT_KEY_PLACEHOLDER';
+
+function authHeaders(extraHeaders = {}) {
+    return { 'Content-Type': 'application/json', 'X-API-Key': API_KEY, ...extraHeaders };
+}
 
 const BIAS_COLORS = {
     TORO_MAJOR: { bg: '#0a2e1a', accent: '#00e676', text: '#00e676' },
@@ -747,7 +752,7 @@ function handleCircuitBreakerPendingReset(state) {
         newAccept.addEventListener('click', async () => {
             newAccept.disabled = true;
             try {
-                const resp = await fetch('/webhook/circuit_breaker/accept_reset', { method: 'POST' });
+                const resp = await fetch('/webhook/circuit_breaker/accept_reset', { method: 'POST', headers: { 'X-API-Key': API_KEY } });
                 if (resp.ok) {
                     banner.style.display = 'none';
                     fetchCompositeBias();
@@ -765,7 +770,7 @@ function handleCircuitBreakerPendingReset(state) {
         newReject.addEventListener('click', async () => {
             newReject.disabled = true;
             try {
-                const resp = await fetch('/webhook/circuit_breaker/reject_reset', { method: 'POST' });
+                const resp = await fetch('/webhook/circuit_breaker/reject_reset', { method: 'POST', headers: { 'X-API-Key': API_KEY } });
                 if (resp.ok) {
                     banner.style.display = 'none';
                     fetchCompositeBias();
@@ -1225,7 +1230,7 @@ async function dismissCryptoSignal(signalId) {
     try {
         await fetch(`${API_URL}/signals/${signalId}/dismiss`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: authHeaders(),
             body: JSON.stringify({ signal_id: signalId })
         });
         signals.crypto = signals.crypto.filter(s => s.signal_id !== signalId);
@@ -1716,7 +1721,7 @@ function initCompositeBiasControls() {
 
             await fetch(`${API_URL}/bias/override`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: authHeaders(),
                 body: JSON.stringify({
                     level,
                     reason,
@@ -1730,7 +1735,7 @@ function initCompositeBiasControls() {
 
     if (clearBtn) {
         clearBtn.addEventListener('click', async () => {
-            await fetch(`${API_URL}/bias/override`, { method: 'DELETE' });
+            await fetch(`${API_URL}/bias/override`, { method: 'DELETE', headers: { 'X-API-Key': API_KEY } });
             fetchCompositeBias();
         });
     }
@@ -2455,9 +2460,9 @@ function initSavitaUpdateModal() {
             let url = `${API_URL}/bias-auto/savita/update?reading=${reading}`;
             if (date) url += `&date=${date}`;
             
-            const response = await fetch(url, { method: 'POST' });
+            const response = await fetch(url, { method: 'POST', headers: { 'X-API-Key': API_KEY } });
             const result = await response.json();
-            
+
             if (result.status === 'success') {
                 alert(`Savita updated to ${reading}%`);
                 closeModal();
@@ -4284,7 +4289,7 @@ async function requestCommitteeReview(signal, card) {
         }
         const response = await fetch(`${API_URL}/trade-ideas/${signal.signal_id}/status`, {
             method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
+            headers: authHeaders(),
             body: JSON.stringify({ status: 'COMMITTEE_REVIEW', decision_source: 'dashboard' })
         });
         const data = await response.json();
@@ -4303,9 +4308,9 @@ async function dismissSignalWithReason(signalId, reason, notes, card) {
     try {
         const response = await fetch(`${API_URL}/signals/${signalId}/dismiss`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-                signal_id: signalId, 
+            headers: authHeaders(),
+            body: JSON.stringify({
+                signal_id: signalId,
                 reason: reason,
                 notes: notes
             })
@@ -4552,7 +4557,7 @@ async function runHunterScan() {
         // Trigger the scan
         const response = await fetch(`${API_URL}/scanner/run`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: authHeaders(),
             body: JSON.stringify({ mode: 'all' })
         });
         
@@ -5202,7 +5207,7 @@ async function toggleMuteTicker(symbol, muted) {
     try {
         const response = await fetch(`${API_URL}/watchlist/tickers/${encodeURIComponent(symbol)}/mute`, {
             method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
+            headers: authHeaders(),
             body: JSON.stringify({ muted })
         });
         const data = await response.json();
@@ -5221,7 +5226,7 @@ async function bulkMuteTickers(muted) {
     try {
         const response = await fetch(`${API_URL}/watchlist/tickers/bulk-mute`, {
             method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
+            headers: authHeaders(),
             body: JSON.stringify({ symbols: Array.from(selectedTickers), muted })
         });
         const data = await response.json();
@@ -5251,7 +5256,8 @@ async function deleteTicker(symbol, confirmDelete = true) {
     if (confirmDelete && !confirm(`Remove ${symbol} from watchlist?`)) return;
     try {
         const response = await fetch(`${API_URL}/watchlist/tickers/${encodeURIComponent(symbol)}`, {
-            method: 'DELETE'
+            method: 'DELETE',
+            headers: { 'X-API-Key': API_KEY }
         });
         const data = await response.json();
         if (data.status === 'success') {
@@ -5442,7 +5448,7 @@ async function addAnalyzedTickerToWatchlist() {
     try {
         const response = await fetch(`${API_URL}/watchlist/tickers/add`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: authHeaders(),
             body: JSON.stringify({ symbol: lastAnalyzedTicker, notes: 'Added from Analyzer' })
         });
         const data = await response.json();
@@ -5543,7 +5549,7 @@ async function toggleStrategy(strategyId, enabled) {
     try {
         const response = await fetch(`${API_URL}/strategies/${strategyId}/toggle`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: authHeaders(),
             body: JSON.stringify({ enabled })
         });
         
@@ -5575,7 +5581,8 @@ async function toggleStrategy(strategyId, enabled) {
 async function enableAllStrategies() {
     try {
         const response = await fetch(`${API_URL}/strategies/enable-all`, {
-            method: 'POST'
+            method: 'POST',
+            headers: { 'X-API-Key': API_KEY }
         });
         
         const data = await response.json();
@@ -5596,7 +5603,8 @@ async function disableAllStrategies() {
     
     try {
         const response = await fetch(`${API_URL}/strategies/disable-all`, {
-            method: 'POST'
+            method: 'POST',
+            headers: { 'X-API-Key': API_KEY }
         });
         
         const data = await response.json();
@@ -6109,7 +6117,8 @@ async function refreshBtcSignals() {
     
     try {
         const response = await fetch(`${API_URL}/btc/bottom-signals/refresh`, {
-            method: 'POST'
+            method: 'POST',
+            headers: { 'X-API-Key': API_KEY }
         });
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}`);
@@ -6272,7 +6281,8 @@ async function toggleBtcSignal(signalId) {
         if (confirm('Clear manual override and return to auto-fetch?')) {
             try {
                 await fetch(`${API_URL}/btc/bottom-signals/${signalId}/clear-override`, {
-                    method: 'POST'
+                    method: 'POST',
+                    headers: { 'X-API-Key': API_KEY }
                 });
                 loadBtcSignals();
             } catch (error) {
@@ -6294,7 +6304,7 @@ async function toggleBtcSignal(signalId) {
     try {
         const response = await fetch(`${API_URL}/btc/bottom-signals/${signalId}`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: authHeaders(),
             body: JSON.stringify({ status: newStatus })
         });
         
@@ -6312,7 +6322,7 @@ async function resetBtcSignals() {
     if (!confirm('Reset all signals to UNKNOWN and clear all manual overrides?')) return;
     
     try {
-        await fetch(`${API_URL}/btc/bottom-signals/reset`, { method: 'POST' });
+        await fetch(`${API_URL}/btc/bottom-signals/reset`, { method: 'POST', headers: { 'X-API-Key': API_KEY } });
         // After reset, refresh to get fresh data from APIs
         await refreshBtcSignals();
     } catch (error) {
@@ -6831,7 +6841,7 @@ async function confirmPositionEntry() {
         // Accept signal via new API endpoint (includes full logging)
         const response = await fetch(`${API_URL}/signals/${signal.signal_id}/accept`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: authHeaders(),
             body: JSON.stringify({
                 signal_id: signal.signal_id,
                 actual_entry_price: entryPrice,
@@ -7086,7 +7096,7 @@ async function confirmOptionsPositionEntry() {
         // Step 1: Create options position
         const optResponse = await fetch(`${API_URL}/signals/${pendingPositionSignal.signal_id}/accept-options`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: authHeaders(),
             body: JSON.stringify({
                 signal_id: pendingPositionSignal.signal_id,
                 underlying: pendingPositionSignal.ticker,
@@ -7358,7 +7368,7 @@ function showCashUpdateModal(currentCash) {
         try {
             await fetch(`${API_URL}/v2/positions/account-balance`, {
                 method: 'PATCH',
-                headers: {'Content-Type': 'application/json'},
+                headers: authHeaders(),
                 body: JSON.stringify({cash: val}),
             });
             modal.remove();
@@ -7418,7 +7428,7 @@ function showWithdrawModal() {
         try {
             await fetch(`${API_URL}/portfolio/cash-flows`, {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
+                headers: authHeaders(),
                 body: JSON.stringify({
                     amount: amount,
                     flow_type: 'ACH',
@@ -7738,9 +7748,9 @@ async function removePositionWithoutArchive(position) {
         // Try v2 first, fall back to v1
         let response;
         if (position.position_id) {
-            response = await fetch(`${API_URL}/v2/positions/${posId}`, { method: 'DELETE' });
+            response = await fetch(`${API_URL}/v2/positions/${posId}`, { method: 'DELETE', headers: { 'X-API-Key': API_KEY } });
         } else {
-            response = await fetch(`${API_URL}/positions/${posId}`, { method: 'DELETE' });
+            response = await fetch(`${API_URL}/positions/${posId}`, { method: 'DELETE', headers: { 'X-API-Key': API_KEY } });
         }
         const data = await response.json();
 
@@ -7938,7 +7948,7 @@ async function executePositionClose(positionId, exitPrice, closeQty, tradeOutcom
 
             response = await fetch(`${API_URL}/v2/positions/${position.position_id}/close`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: authHeaders(),
                 body: JSON.stringify({
                     exit_price: exitPrice,
                     quantity: closeQty,
@@ -7954,7 +7964,7 @@ async function executePositionClose(positionId, exitPrice, closeQty, tradeOutcom
             // Fallback to v1
             response = await fetch(`${API_URL}/positions/close`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: authHeaders(),
                 body: JSON.stringify({
                     position_id: positionId,
                     exit_price: exitPrice,
@@ -8201,7 +8211,7 @@ async function submitUnifiedPosition() {
     try {
         const response = await fetch(`${API_URL}/v2/positions`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: authHeaders(),
             body: JSON.stringify(body)
         });
         const data = await response.json();
@@ -8348,7 +8358,7 @@ function openPositionEditModal(position) {
         try {
             const response = await fetch(`${API_URL}/v2/positions/${posId}`, {
                 method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
+                headers: authHeaders(),
                 body: JSON.stringify(updates)
             });
             const data = await response.json();
@@ -8607,7 +8617,7 @@ async function submitManualPosition() {
     try {
         const response = await fetch(`${API_URL}/positions/manual`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: authHeaders(),
             body: JSON.stringify(positionData)
         });
         
@@ -9194,7 +9204,7 @@ async function saveOptionsPosition() {
     try {
         const response = await fetch(`${API_URL}/options/positions`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: authHeaders(),
             body: JSON.stringify(payload)
         });
 
@@ -9345,7 +9355,7 @@ async function closeOptionsPosition(positionId) {
     try {
         const response = await fetch(`${API_URL}/options/positions/${positionId}/close`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: authHeaders(),
             body: JSON.stringify({
                 position_id: positionId,
                 exit_premium: parseFloat(exitPremium),

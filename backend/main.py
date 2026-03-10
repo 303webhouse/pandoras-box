@@ -252,10 +252,16 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS middleware for cross-device access
+# CORS — restrict to known frontend origins
+_cors_origins = os.getenv("ALLOWED_ORIGINS") or "*"
+if _cors_origins == "*":
+    _allowed_origins = ["*"]
+else:
+    _allowed_origins = [o.strip() for o in _cors_origins.split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure this properly in production
+    allow_origins=_allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

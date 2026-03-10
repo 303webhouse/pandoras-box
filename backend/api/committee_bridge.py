@@ -12,7 +12,8 @@ import logging
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from utils.pivot_auth import require_api_key
 from pydantic import BaseModel
 
 from database.postgres_client import get_postgres_client, serialize_db_row
@@ -69,7 +70,7 @@ async def get_committee_queue(
 
 
 @router.post("/committee/results")
-async def submit_committee_results(body: CommitteeResult):
+async def submit_committee_results(body: CommitteeResult, _=Depends(require_api_key)):
     """
     Submit committee analysis results from VPS.
     Stores in signals.committee_data and transitions signal back to ACTIVE.
