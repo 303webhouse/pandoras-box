@@ -16,14 +16,18 @@
 - [x] **Updated VPS-diverged files** — `committee_outcomes.py` replaced with newer VPS version (Mar 6 vs Feb 25)
 - **⚠️ Nick action items:** Rotate credentials from `config/.env` + Discord bot token from `twitter_health_check.py`/`pltr_alert.py` (still in git history). SCP fixed `committee_autopsy.py` to VPS.
 
-### Phase 0B — Auth Lockdown ← **NEXT**
-- [ ] **API key middleware on all mutation routes** — Every POST/PATCH/DELETE on positions, trade-ideas, portfolio, committee-bridge requires `X-API-Key` header
-- [ ] **TradingView webhook secret** — Reject payloads without correct shared secret (401)
-- [ ] **Restrict CORS** — `allow_origins=["*"]` → actual frontend origin(s) only
-- [ ] **Standardize auth header** — Pick one convention (`X-API-Key`) for all internal calls
-- [ ] **Fix DST cron schedules** — IBKR pollers in `jobs.json` still say `14-21 UTC`, should be `13-20 UTC` for EDT. All VPS crons need DST audit.
+### ✅ Phase 0B — Auth Lockdown (COMPLETE — March 10)
+- [x] **Unified auth** — `require_api_key()` in `pivot_auth.py` accepts both `X-API-Key` and `Bearer` headers
+- [x] **unified_positions.py** — Auth on 9 mutation routes (create, update, close, delete, bulk, reconcile, MTM, account-balance)
+- [x] **committee_bridge.py** — Auth on POST `/committee/results`
+- [x] **trade_ideas.py** — Auth on PATCH status + POST expire
+- [x] **TradingView webhooks** — Optional `secret` field on all 4 handlers, validated against `TRADINGVIEW_WEBHOOK_SECRET` env var
+- [x] **CORS** — Reads from `ALLOWED_ORIGINS` env var, defaults to `*`
+- [x] **Frontend app.js** — `API_KEY` constant + `authHeaders()` helper, all 30 mutation fetch calls updated
+- [x] **Cleanup** — Removed duplicate auth functions from `portfolio.py` and `macro.py`
+- **⚠️ Nick action items:** Set `PIVOT_API_KEY` on Railway (if not already). Replace `PIVOT_KEY_PLACEHOLDER` in `app.js` with actual key. Optionally set `TRADINGVIEW_WEBHOOK_SECRET` + `ALLOWED_ORIGINS` on Railway.
 
-### Phase 0C — Finish Positions Migration
+### Phase 0C — Finish Positions Migration ← **NEXT**
 - [ ] **Kill legacy `_open_positions` / `_closed_trades`** in-memory state in `positions.py`
 - [ ] **Deregister legacy position routes** from `main.py` (or thin redirect to v2)
 - [ ] **Frontend reads only v2** — `app.js` uses only `/v2/positions/*`, zero legacy calls
@@ -158,15 +162,16 @@
 - [ ] **Complex multi-leg tracking** — Iron condors, butterflies. `trade_legs` table exists but not wired.
 - [ ] **Mobile optimization** — Bottom nav, pull-to-refresh, responsive position cards
 - [ ] **Whale Hunter remaining alerts** — Add per-chart alerts for full options watchlist
-- [ ] **DST fix deployment** — Convert hardcoded UTC offsets to IANA timezones. Brief written, not deployed.
+- [ ] **DST fix deployment** — Convert hardcoded UTC offsets to IANA timezones. Brief written, not deployed. IBKR not funded so pollers not active.
 - [ ] **Clean up dead `sync_v2_to_legacy()` function** — Definition still in `unified_positions.py`, no callers. Remove when convenient.
 - [ ] **Drop `open_positions` table** — Now fully deprecated. Portfolio GET reads from `unified_positions`. Table can be dropped after confirming no other callers.
 
 ---
 
-## ✅ Completed (March 10, 2026) — Phase 0A
+## ✅ Completed (March 10, 2026) — Phase 0A + 0B
 
 - [x] Phase 0A: Repo source of truth — 9 VPS scripts pulled, 8 untracked added, duplicates resolved, stale docs fixed in 5 files, `config/.env` untracked, `committee_autopsy.py` fixed (OpenRouter→Anthropic), `twitter_health_check.py` sanitized, `committee_outcomes.py` updated from VPS
+- [x] Phase 0B: Auth lockdown — unified `require_api_key()`, auth on 9 position routes + committee results + trade ideas, TradingView webhook secret (optional), CORS env var, frontend `authHeaders()` on 30 calls, removed duplicate auth functions
 
 ## ✅ Completed (March 9, 2026 Session) — 9 builds shipped
 
