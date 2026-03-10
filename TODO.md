@@ -9,40 +9,26 @@
 **Context:** External audit by GPT-5.4 (March 9) identified critical issues: repo not matching production, unauthenticated endpoints, position migration incomplete, frontend/API drift, JSONL fragility. Full audit saved in project chat history.
 
 ### ✅ Phase 0A — Repo Source of Truth (COMPLETE — March 10)
-- [x] **Pull all VPS-only scripts into repo** — 9 missing scripts pulled from VPS, 8 previously untracked added to git. 30 scripts on VPS, all now in `scripts/`.
-- [x] **Resolve duplicate interaction handler** — `openclaw/scripts/` deleted, canonical copies in `scripts/`
-- [x] **Fix stale docs** — Replaced `git pull` with SCP workflow in 5 files, updated Gemini→Claude, updated service names
-- [x] **Remove committed secrets** — `config/.env` untracked, `twitter_health_check.py` sanitized (hardcoded token removed), `committee_autopsy.py` fixed (OpenRouter→Anthropic API)
-- [x] **Updated VPS-diverged files** — `committee_outcomes.py` replaced with newer VPS version (Mar 6 vs Feb 25)
-- **⚠️ Nick action items:** Rotate credentials from `config/.env` + Discord bot token from `twitter_health_check.py`/`pltr_alert.py` (still in git history). SCP fixed `committee_autopsy.py` to VPS.
+- [x] 9 missing VPS scripts pulled, 8 untracked added, duplicates resolved, stale docs fixed, `config/.env` untracked, `committee_autopsy.py` fixed, `committee_outcomes.py` updated from VPS
+- **⚠️ Nick:** Rotate credentials from `config/.env` + Discord bot token. SCP fixed `committee_autopsy.py` to VPS.
 
 ### ✅ Phase 0B — Auth Lockdown (COMPLETE — March 10)
-- [x] **Unified auth** — `require_api_key()` in `pivot_auth.py` accepts both `X-API-Key` and `Bearer` headers
-- [x] **unified_positions.py** — Auth on 9 mutation routes (create, update, close, delete, bulk, reconcile, MTM, account-balance)
-- [x] **committee_bridge.py** — Auth on POST `/committee/results`
-- [x] **trade_ideas.py** — Auth on PATCH status + POST expire
-- [x] **TradingView webhooks** — Optional `secret` field on all 4 handlers, validated against `TRADINGVIEW_WEBHOOK_SECRET` env var
-- [x] **CORS** — Reads from `ALLOWED_ORIGINS` env var, defaults to `*`
-- [x] **Frontend app.js** — `API_KEY` constant + `authHeaders()` helper, all 30 mutation fetch calls updated
-- [x] **Cleanup** — Removed duplicate auth functions from `portfolio.py` and `macro.py`
-- **⚠️ Nick action items:** Set `PIVOT_API_KEY` on Railway (if not already). Replace `PIVOT_KEY_PLACEHOLDER` in `app.js` with actual key. Optionally set `TRADINGVIEW_WEBHOOK_SECRET` + `ALLOWED_ORIGINS` on Railway.
+- [x] Unified `require_api_key()`, auth on 9 position + committee + trade ideas routes, TradingView webhook secret, CORS env var, frontend `authHeaders()` on 30 calls, removed duplicate auth functions
+- **⚠️ Nick:** Replace `PIVOT_KEY_PLACEHOLDER` in `app.js`. Optionally set `TRADINGVIEW_WEBHOOK_SECRET` + `ALLOWED_ORIGINS` on Railway.
 
 ### ✅ Phase 0C — Finish Positions Migration (COMPLETE — March 10)
-- [x] **Killed in-memory state** — Removed `_open_positions`, `_closed_trades`, `_position_counter` from `positions.py`
-- [x] **Rewrote `accept_signal()`** — Now writes directly to `unified_positions` table instead of old `positions` table
-- [x] **Deleted 13 legacy position routes** — ~750 lines removed from `positions.py` (open, close, manual, history, debug, diagnose, force-sync, etc.)
-- [x] **Removed startup sync** — `sync_positions_from_database()` deleted from `positions.py`, startup call removed from `main.py`
-- [x] **Deleted v2↔legacy sync functions** — `sync_v2_to_legacy()` and `sync_legacy_to_v2()` removed from `unified_positions.py` + 3 calls removed from `portfolio.py`
-- [x] **Frontend unified** — Removed `_open_positions_cache`, `renderPositions()`, legacy fetch/close/delete fallbacks. Manual position creation uses v2.
-- [x] **Bonus fix** — `alerts.py` updated to read from `unified_positions` instead of deleted `_open_positions`
-- **Total: 1,268 lines of dead code removed across 7 files**
+- [x] 1,268 lines removed across 7 files. In-memory state killed, `accept_signal()` writes to unified_positions, 13 legacy routes deleted, sync functions deleted, frontend unified on v2.
 
-### Phase 0D — Frontend Hygiene ← **NEXT**
-- [ ] **Remove dead endpoint calls** — `/bias-auto/status`, `/bias-auto/shift-status`, `/bias-auto/CYCLICAL`, `/signals/ticker/{ticker}`
-- [ ] **Audit hybrid scanner usage** — Identify which hybrid endpoints frontend still needs vs safe to delete
-- [ ] **Consolidate polling intervals** — One interval per data type, remove duplicate refresh loops
+### ✅ Phase 0D — Frontend Hygiene (COMPLETE — March 10)
+- [x] **Dead endpoints removed** — `bias-auto/status`, `bias-auto/shift-status`, `bias-auto/CYCLICAL`, `signals/ticker/{ticker}` all eliminated
+- [x] **`fetchBiasShiftStatus()` + `updateBiasShiftDisplay()` deleted** — 82 lines, 5-minute dead polling removed
+- [x] **`loadCyclicalBiasFallback()` stubbed** — no more dead `bias-auto/CYCLICAL` call
+- [x] **Analyzer context fixed** — 2 dead fetches removed, bias replaced with working `bias/composite`
+- [x] **Polling consolidated** — positions 10s→30s, portfolio positions 60s removed, price updates 30s→60s
+- [x] **Hybrid scanner documented** — confirmed ACTIVE, added do-not-delete comment to `hybrid_scanner.py`
+- **Total: 233 lines removed, zero 404s in browser console**
 
-### Phase 0E — Data Durability
+### Phase 0E — Data Durability ← **NEXT**
 - [ ] **Move decision_log to Postgres** (or SQLite on VPS) — JSONL kept as append-only audit
 - [ ] **Move committee_log, outcome_log, lessons_bank** same way
 - [ ] **Atomic write pattern** for any remaining JSONL appends (write temp → rename)
@@ -171,11 +157,12 @@
 
 ---
 
-## ✅ Completed (March 10, 2026) — Phase 0A + 0B + 0C
+## ✅ Completed (March 10, 2026) — Phase 0A + 0B + 0C + 0D
 
-- [x] Phase 0A: Repo source of truth — 9 VPS scripts pulled, 8 untracked added, duplicates resolved, stale docs fixed in 5 files, `config/.env` untracked, `committee_autopsy.py` fixed (OpenRouter→Anthropic), `twitter_health_check.py` sanitized, `committee_outcomes.py` updated from VPS
-- [x] Phase 0B: Auth lockdown — unified `require_api_key()`, auth on 9 position routes + committee results + trade ideas, TradingView webhook secret (optional), CORS env var, frontend `authHeaders()` on 30 calls, removed duplicate auth functions
-- [x] Phase 0C: Positions migration complete — 1,268 lines removed. Killed in-memory `_open_positions`/`_closed_trades`, rewrote `accept_signal()` → unified_positions, deleted 13 legacy routes, removed startup sync, deleted `sync_v2_to_legacy()`/`sync_legacy_to_v2()`, frontend unified on v2, fixed `alerts.py` import
+- [x] Phase 0A: Repo source of truth — 9 VPS scripts pulled, 8 untracked added, duplicates resolved, stale docs fixed, `config/.env` untracked, security fixes
+- [x] Phase 0B: Auth lockdown — unified `require_api_key()`, auth on all mutation routes, TradingView webhook secret, CORS env var, frontend `authHeaders()` on 30 calls
+- [x] Phase 0C: Positions migration — 1,268 lines removed. In-memory state killed, `accept_signal()` → unified_positions, 13 legacy routes deleted, sync functions deleted, frontend unified on v2
+- [x] Phase 0D: Frontend hygiene — 233 lines removed. Dead `bias-auto/*` and `signals/ticker` calls eliminated, analyzer fixed, polling consolidated (positions 10s→30s, prices 30s→60s, redundant portfolio poll removed), hybrid scanner documented as active
 
 ## ✅ Completed (March 9, 2026 Session) — 9 builds shipped
 
