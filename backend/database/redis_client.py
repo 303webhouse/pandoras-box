@@ -8,7 +8,6 @@ from typing import Optional, Dict, Any
 import json
 import os
 from datetime import datetime, timedelta
-from dotenv import load_dotenv
 
 
 def sanitize_for_json(obj):
@@ -32,14 +31,13 @@ def sanitize_for_json(obj):
                 return obj.tolist()
     return obj
 
-# Load environment variables from .env file
-load_dotenv(os.path.join(os.path.dirname(__file__), '..', '..', 'config', '.env'))
-
-# Redis configuration
-REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
-REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
-REDIS_DB = int(os.getenv("REDIS_DB", 0))
-REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", None)
+# Redis configuration — supports REDIS_URL (full connection string) or individual vars.
+# Uses `or` pattern because Railway sets empty strings for unset vars.
+REDIS_URL = os.getenv("REDIS_URL") or ""
+REDIS_HOST = os.getenv("REDIS_HOST") or "localhost"
+REDIS_PORT = int(os.getenv("REDIS_PORT") or 6379)
+REDIS_DB = int(os.getenv("REDIS_DB") or 0)
+REDIS_PASSWORD = os.getenv("REDIS_PASSWORD") or None
 
 # Redis health telemetry (process-local)
 REDIS_HEALTH_WINDOW_SECONDS = int(os.getenv("REDIS_HEALTH_WINDOW_SECONDS", "600"))
@@ -124,8 +122,10 @@ async def get_redis_client() -> redis.Redis:
     global _redis_client
     
     if _redis_client is None:
-        # Build Redis URL with optional password and SSL support
-        if REDIS_PASSWORD:
+        # Prefer REDIS_URL (full connection string), fall back to individual vars
+        if REDIS_URL:
+            redis_url = REDIS_URL
+        elif REDIS_PASSWORD:
             # Use rediss:// for SSL (Upstash requires SSL)
             redis_url = f"rediss://default:{REDIS_PASSWORD}@{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}"
         else:
