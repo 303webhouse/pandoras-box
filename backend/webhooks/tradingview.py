@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from typing import Optional, Dict, Any
 from datetime import datetime
 import asyncio
+import hashlib
 import logging
 
 import os
@@ -114,9 +115,24 @@ async def receive_tradingview_alert(alert: TradingViewAlert):
             logger.warning("Rejected TradingView webhook — invalid secret from %s", alert.ticker)
             raise HTTPException(status_code=401, detail="Invalid webhook secret")
 
+    # Dedup: reject duplicate webhooks within 60s window
+    dedup_raw = f"{alert.ticker}:{alert.strategy}:{alert.direction}:{alert.interval}"
+    dedup_hash = hashlib.md5(dedup_raw.encode()).hexdigest()[:16]
+    dedup_key = f"webhook:dedup:tv:{dedup_hash}"
+    try:
+        from database.redis_client import get_redis_client
+        _rc = await get_redis_client()
+        if _rc and await _rc.get(dedup_key):
+            logger.info("Webhook dedup: skipping duplicate %s %s %s", alert.ticker, alert.strategy, alert.direction)
+            return {"status": "duplicate", "detail": "duplicate webhook within 60s window"}
+        if _rc:
+            await _rc.set(dedup_key, "1", ex=60)
+    except Exception:
+        pass  # dedup is best-effort, don't block signal processing
+
     start_time = datetime.now()
     strategy_lower = alert.strategy.lower()
-    
+
     logger.info(f"📨 Webhook received: {alert.ticker} {alert.direction} ({alert.strategy})")
     
     try:
