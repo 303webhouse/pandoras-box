@@ -304,19 +304,11 @@ async def sync_positions(body: PositionSync, _=Depends(require_api_key)):
                     "direction": db_row["direction"],
                 })
 
-    # Sync legacy changes to v2 table so both stay aligned
-    try:
-        from api.unified_positions import sync_legacy_to_v2
-        sync_result = await sync_legacy_to_v2()
-    except Exception:
-        sync_result = None
-
     return {
         "added": added,
         "updated": updated,
         "closed": closed,
         "possibly_closed": possibly_closed if body.partial else [],
-        "v2_sync": sync_result,
     }
 
 
@@ -402,13 +394,6 @@ async def create_position(body: SinglePositionCreate, _=Depends(require_api_key)
         body.short_strike, body.cost_basis, body.cost_per_unit,
         body.current_value, body.current_price,
         body.signal_id, body.account, body.notes)
-
-    # Sync to v2
-    try:
-        from api.unified_positions import sync_legacy_to_v2
-        await sync_legacy_to_v2()
-    except Exception:
-        pass
 
     return _row_to_dict(row)
 
@@ -514,13 +499,6 @@ async def close_position(body: PositionClose, _=Depends(require_api_key)):
         "UPDATE open_positions SET is_active = FALSE, last_updated = NOW() WHERE id = $1",
         match["id"],
     )
-
-    # Sync to v2
-    try:
-        from api.unified_positions import sync_legacy_to_v2
-        await sync_legacy_to_v2()
-    except Exception:
-        pass
 
     return _row_to_dict(closed_row)
 
