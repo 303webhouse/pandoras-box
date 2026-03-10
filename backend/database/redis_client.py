@@ -131,12 +131,15 @@ async def get_redis_client() -> redis.Redis:
         else:
             redis_url = f"redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}"
         
-        _redis_client = await TelemetryRedis.from_url(
-            redis_url,
-            encoding="utf-8",
-            decode_responses=True,
-            ssl_cert_reqs=None  # Don't verify SSL certificates for development
-        )
+        kwargs = dict(encoding="utf-8", decode_responses=True)
+        # For SSL connections, skip certificate verification (Upstash dev setup)
+        if redis_url.startswith("rediss://"):
+            import ssl
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            kwargs["ssl"] = ctx
+        _redis_client = await TelemetryRedis.from_url(redis_url, **kwargs)
     
     return _redis_client
 
