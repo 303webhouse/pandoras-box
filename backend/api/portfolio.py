@@ -11,7 +11,8 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from utils.pivot_auth import require_api_key
 from pydantic import BaseModel
 
 from database.postgres_client import get_postgres_client
@@ -19,11 +20,6 @@ from database.postgres_client import get_postgres_client
 router = APIRouter()
 
 PIVOT_API_KEY = os.getenv("PIVOT_API_KEY", "")
-
-
-def verify_api_key(x_api_key: str = Header(None)):
-    if PIVOT_API_KEY and x_api_key != PIVOT_API_KEY:
-        raise HTTPException(status_code=401, detail="Invalid API key")
 
 
 def _row_to_dict(row) -> dict:
@@ -61,7 +57,7 @@ class BalanceUpdate(BaseModel):
 
 
 @router.post("/balances/update")
-async def update_balance(body: BalanceUpdate, _=Depends(verify_api_key)):
+async def update_balance(body: BalanceUpdate, _=Depends(require_api_key)):
     pool = await get_postgres_client()
     result = await pool.execute("""
         UPDATE account_balances
@@ -196,7 +192,7 @@ class PositionSync(BaseModel):
 
 
 @router.post("/positions/sync")
-async def sync_positions(body: PositionSync, _=Depends(verify_api_key)):
+async def sync_positions(body: PositionSync, _=Depends(require_api_key)):
     pool = await get_postgres_client()
 
     # Fetch current active positions, filtered by account if specified
@@ -364,7 +360,7 @@ class SinglePositionCreate(BaseModel):
 
 
 @router.post("/positions")
-async def create_position(body: SinglePositionCreate, _=Depends(verify_api_key)):
+async def create_position(body: SinglePositionCreate, _=Depends(require_api_key)):
     pool = await get_postgres_client()
 
     expiry_date = None
@@ -434,7 +430,7 @@ class PositionClose(BaseModel):
 
 
 @router.post("/positions/close")
-async def close_position(body: PositionClose, _=Depends(verify_api_key)):
+async def close_position(body: PositionClose, _=Depends(require_api_key)):
     pool = await get_postgres_client()
 
     expiry_date = None
@@ -558,7 +554,7 @@ class ClosedPositionUpdate(BaseModel):
 
 
 @router.patch("/positions/closed/{closed_id}")
-async def update_closed_position(closed_id: int, body: ClosedPositionUpdate, _=Depends(verify_api_key)):
+async def update_closed_position(closed_id: int, body: ClosedPositionUpdate, _=Depends(require_api_key)):
     """Update a closed position — primarily for backfilling exit values and P&L."""
     pool = await get_postgres_client()
 

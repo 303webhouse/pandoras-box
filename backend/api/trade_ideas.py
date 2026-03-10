@@ -13,7 +13,8 @@ import logging
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from utils.pivot_auth import require_api_key
 from pydantic import BaseModel
 
 from database.postgres_client import get_postgres_client, serialize_db_row
@@ -107,7 +108,7 @@ async def get_trade_idea_detail(signal_id: str):
 
 
 @router.patch("/trade-ideas/{signal_id}/status")
-async def update_trade_idea_status(signal_id: str, body: StatusUpdate):
+async def update_trade_idea_status(signal_id: str, body: StatusUpdate, _=Depends(require_api_key)):
     """
     Update signal lifecycle status with optimistic locking.
 
@@ -189,7 +190,7 @@ async def update_trade_idea_status(signal_id: str, body: StatusUpdate):
 
 
 @router.post("/trade-ideas/expire")
-async def expire_stale_signals():
+async def expire_stale_signals(_=Depends(require_api_key)):
     """
     Auto-expire signals past their expires_at timestamp.
     Called by cron or scheduler. Safe to call frequently (idempotent).

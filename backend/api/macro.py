@@ -9,20 +9,15 @@ import json
 import os
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+from utils.pivot_auth import require_api_key
 from pydantic import BaseModel
 
 from database.redis_client import get_redis_client
 
 router = APIRouter()
 
-PIVOT_API_KEY = os.getenv("PIVOT_API_KEY") or ""
 REDIS_KEY = "macro:briefing"
-
-
-def verify_api_key(x_api_key: str = Header(None)):
-    if PIVOT_API_KEY and x_api_key != PIVOT_API_KEY:
-        raise HTTPException(status_code=401, detail="Invalid API key")
 
 
 class MacroBriefingUpdate(BaseModel):
@@ -49,7 +44,7 @@ async def get_macro_briefing():
 
 
 @router.post("/briefing")
-async def update_macro_briefing(body: MacroBriefingUpdate, _=Depends(verify_api_key)):
+async def update_macro_briefing(body: MacroBriefingUpdate, _=Depends(require_api_key)):
     """Update macro briefing in Redis. No TTL — persists until overwritten."""
     client = await get_redis_client()
     data = body.model_dump()

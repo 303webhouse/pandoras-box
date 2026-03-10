@@ -4,7 +4,8 @@ One table, one API, one source of truth for all positions.
 Replaces the fragmented positions + open_positions + options_positions system.
 """
 
-from fastapi import APIRouter, HTTPException, Header, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Header, Query, Request
+from utils.pivot_auth import require_api_key
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 from datetime import datetime, date, timezone
@@ -251,7 +252,7 @@ def _compute_dte(expiry_str: str) -> Optional[int]:
 # ── CREATE ────────────────────────────────────────────────────────────
 
 @router.post("/v2/positions")
-async def create_position(req: CreatePositionRequest):
+async def create_position(req: CreatePositionRequest, _=Depends(require_api_key)):
     """Create a new position. Auto-calculates max_loss for spreads."""
     pool = await get_postgres_client()
 
@@ -582,7 +583,7 @@ async def portfolio_summary(account: Optional[str] = Query(None)):
 
 
 @router.patch("/v2/positions/account-balance")
-async def update_account_balance(request: Request):
+async def update_account_balance(request: Request, _=Depends(require_api_key)):
     """
     Update the stored Robinhood cash balance.
     Body: {"cash": 3044.19}
@@ -678,7 +679,7 @@ async def get_position(position_id: str):
 # ── UPDATE ────────────────────────────────────────────────────────────
 
 @router.patch("/v2/positions/{position_id}")
-async def update_position(position_id: str, req: UpdatePositionRequest):
+async def update_position(position_id: str, req: UpdatePositionRequest, _=Depends(require_api_key)):
     """Update position fields. Recalculates unrealized P&L if current_price is updated."""
     pool = await get_postgres_client()
 
@@ -786,7 +787,7 @@ async def update_position(position_id: str, req: UpdatePositionRequest):
 # ── CLOSE (with trade bridge) ─────────────────────────────────────────
 
 @router.post("/v2/positions/{position_id}/close")
-async def close_position(position_id: str, req: ClosePositionRequest):
+async def close_position(position_id: str, req: ClosePositionRequest, _=Depends(require_api_key)):
     """
     Close a position: calculate realized P&L, create trades record, update signal if linked.
     This is the close-to-trade bridge (Phase A4).
@@ -995,7 +996,7 @@ async def close_position(position_id: str, req: ClosePositionRequest):
 # ── DELETE ────────────────────────────────────────────────────────────
 
 @router.delete("/v2/positions/{position_id}")
-async def delete_position(position_id: str):
+async def delete_position(position_id: str, _=Depends(require_api_key)):
     """Delete a position (for errors/test data). No trade record created."""
     pool = await get_postgres_client()
     async with pool.acquire() as conn:
@@ -1019,7 +1020,7 @@ async def delete_position(position_id: str):
 # ── BULK OPERATIONS ───────────────────────────────────────────────────
 
 @router.post("/v2/positions/bulk")
-async def bulk_create_positions(req: BulkRequest):
+async def bulk_create_positions(req: BulkRequest, _=Depends(require_api_key)):
     """Create or update multiple positions at once (CSV import, screenshot sync)."""
     pool = await get_postgres_client()
     created = []
@@ -1137,7 +1138,7 @@ async def bulk_create_positions(req: BulkRequest):
 # ── RECONCILE (screenshot sync) ──────────────────────────────────────
 
 @router.post("/v2/positions/reconcile")
-async def reconcile_positions(req: ReconcileRequest):
+async def reconcile_positions(req: ReconcileRequest, _=Depends(require_api_key)):
     """
     Reconcile incoming positions (from screenshot) against existing.
     Match by ticker+strike+expiry+direction. Update values, create new, flag missing.
@@ -1578,7 +1579,7 @@ async def sync_legacy_to_v2() -> dict:
 
 
 @router.post("/v2/positions/mark-to-market")
-async def mark_to_market():
+async def mark_to_market(_=Depends(require_api_key)):
     """HTTP wrapper for mark-to-market. Background loop calls run_mark_to_market() directly."""
     return await run_mark_to_market()
 
