@@ -153,8 +153,6 @@ let dailyBiasFactorStates = {
 let _compositeBiasData = null;
 let _dailyBiasPrimaryData = null;
 
-// Keep a reference to open positions for crypto rendering
-let _open_positions_cache = [];
 let cryptoMarketData = null;
 let cryptoMarketTimer = null;
 let cryptoMarketLastGood = {};
@@ -3317,20 +3315,6 @@ async function loadCyclicalBiasFallback() {
 }
 
 
-async function loadOpenPositions() {
-    try {
-        const response = await fetch(`${API_URL}/positions/open`);
-        const data = await response.json();
-
-        if (data.status === 'success') {
-            _open_positions_cache = data.positions || [];
-            renderPositions(data.positions);
-            renderCryptoPositions();
-        }
-    } catch (error) {
-        console.error('Error loading positions:', error);
-    }
-}
 
 // Signal Rendering — unified feed (exclude raw crypto, keep equity tickers like IBIT)
 function renderSignals() {
@@ -3746,7 +3730,7 @@ function renderCryptoPositions() {
 
     // Filter open positions for crypto
     const cryptoTickers = ['BTC', 'ETH', 'SOL', 'XRP', 'ADA', 'AVAX', 'DOGE', 'DOT', 'LINK', 'MATIC', 'LTC', 'UNI'];
-    const cryptoPositions = _open_positions_cache.filter(p => {
+    const cryptoPositions = openPositions.filter(p => {
         if (p.asset_class === 'CRYPTO') return true;
         const tickerBase = (p.ticker || '').toUpperCase().replace(/USD.*/, '');
         return cryptoTickers.includes(tickerBase);
@@ -4483,39 +4467,6 @@ function updateBias(biasData) {
     if (detailsElement && biasData.details) {
         detailsElement.innerHTML = biasData.details;
     }
-}
-
-// Position Management
-function renderPositions(positions) {
-    const container = document.getElementById('openPositions');
-    
-    if (!positions || positions.length === 0) {
-        container.innerHTML = '<p class="empty-state">No open positions</p>';
-        return;
-    }
-    
-    container.innerHTML = positions.map(pos => `
-        <div class="signal-card">
-            <div class="signal-header">
-                <div class="signal-ticker">${pos.ticker}</div>
-                <div class="signal-type">${pos.direction}</div>
-            </div>
-            <div class="signal-details">
-                <div class="signal-detail">
-                    <div class="signal-detail-label">Entry</div>
-                    <div class="signal-detail-value">${pos.entry_price?.toFixed(2) || 'N/A'}</div>
-                </div>
-                <div class="signal-detail">
-                    <div class="signal-detail-label">Stop</div>
-                    <div class="signal-detail-value">${pos.stop_loss != null ? Number(pos.stop_loss).toFixed(2) : 'N/A'}</div>
-                </div>
-                <div class="signal-detail">
-                    <div class="signal-detail-label">Target</div>
-                    <div class="signal-detail-value">${pos.target_1 != null ? Number(pos.target_1).toFixed(2) : 'N/A'}</div>
-                </div>
-            </div>
-        </div>
-    `).join('');
 }
 
 function updatePosition(positionData) {
@@ -7161,9 +7112,8 @@ function storePriceLevels(ticker, levels) {
 
 async function loadOpenPositionsEnhanced() {
     try {
-        // Try v2 API first, fall back to v1
-        let response = await fetch(`${API_URL}/v2/positions?status=OPEN`);
-        let data = await response.json();
+        const response = await fetch(`${API_URL}/v2/positions?status=OPEN`);
+        const data = await response.json();
 
         if (data.positions) {
             openPositions = data.positions;
@@ -7171,17 +7121,6 @@ async function loadOpenPositionsEnhanced() {
             updatePositionsCount();
             updatePositionChartTabs();
             loadPortfolioSummary();
-            return;
-        }
-
-        // Fallback to v1
-        response = await fetch(`${API_URL}/positions/open`);
-        data = await response.json();
-        if (data.status === 'success') {
-            openPositions = data.positions || [];
-            renderPositionsEnhanced();
-            updatePositionsCount();
-            updatePositionChartTabs();
         }
     } catch (error) {
         console.error('Error loading positions:', error);
@@ -7745,13 +7684,7 @@ async function removePositionWithoutArchive(position) {
             alert('Cannot remove position: missing id');
             return;
         }
-        // Try v2 first, fall back to v1
-        let response;
-        if (position.position_id) {
-            response = await fetch(`${API_URL}/v2/positions/${posId}`, { method: 'DELETE', headers: { 'X-API-Key': API_KEY } });
-        } else {
-            response = await fetch(`${API_URL}/positions/${posId}`, { method: 'DELETE', headers: { 'X-API-Key': API_KEY } });
-        }
+        const response = await fetch(`${API_URL}/v2/positions/${posId}`, { method: 'DELETE', headers: { 'X-API-Key': API_KEY } });
         const data = await response.json();
 
         if (data.status === 'deleted' || data.status === 'removed') {
@@ -7935,48 +7868,35 @@ async function executePositionClose(positionId, exitPrice, closeQty, tradeOutcom
         // Try v2 close endpoint first (creates trade record automatically)
         let response;
         let data;
-        if (position && position.position_id) {
-            // Compute exit_value for closed_positions P&L tracking
-            const struct = (position.structure || '').toLowerCase();
-            const stockStructures = ['stock', 'stock_long', 'long_stock', 'stock_short', 'short_stock'];
-            const isStockClose = stockStructures.includes(struct) || (!struct && position.asset_type === 'EQUITY');
-            const multiplier = isStockClose ? 1 : 100;
-            const exitValue = Math.round(exitPrice * multiplier * closeQty * 100) / 100;
-
-            // Derive close_reason from outcome
-            const closeReason = lossReason ? 'loss' : (tradeOutcome === 'WIN' ? 'profit' : 'manual');
-
-            response = await fetch(`${API_URL}/v2/positions/${position.position_id}/close`, {
-                method: 'POST',
-                headers: authHeaders(),
-                body: JSON.stringify({
-                    exit_price: exitPrice,
-                    quantity: closeQty,
-                    exit_value: exitValue,
-                    trade_outcome: tradeOutcome,
-                    loss_reason: lossReason || null,
-                    close_reason: closeReason,
-                    notes: notes || null
-                })
-            });
-            data = await response.json();
-        } else {
-            // Fallback to v1
-            response = await fetch(`${API_URL}/positions/close`, {
-                method: 'POST',
-                headers: authHeaders(),
-                body: JSON.stringify({
-                    position_id: positionId,
-                    exit_price: exitPrice,
-                    quantity_closed: closeQty,
-                    trade_outcome: tradeOutcome,
-                    loss_reason: lossReason,
-                    actual_stop_hit: stopHit,
-                    notes: notes
-                })
-            });
-            data = await response.json();
+        if (!position || !position.position_id) {
+            alert('Cannot close position: missing position_id');
+            return;
         }
+
+        // Compute exit_value for closed_positions P&L tracking
+        const struct = (position.structure || '').toLowerCase();
+        const stockStructures = ['stock', 'stock_long', 'long_stock', 'stock_short', 'short_stock'];
+        const isStockClose = stockStructures.includes(struct) || (!struct && position.asset_type === 'EQUITY');
+        const multiplier = isStockClose ? 1 : 100;
+        const exitValue = Math.round(exitPrice * multiplier * closeQty * 100) / 100;
+
+        // Derive close_reason from outcome
+        const closeReason = lossReason ? 'loss' : (tradeOutcome === 'WIN' ? 'profit' : 'manual');
+
+        response = await fetch(`${API_URL}/v2/positions/${position.position_id}/close`, {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify({
+                exit_price: exitPrice,
+                quantity: closeQty,
+                exit_value: exitValue,
+                trade_outcome: tradeOutcome,
+                loss_reason: lossReason || null,
+                close_reason: closeReason,
+                notes: notes || null
+            })
+        });
+        data = await response.json();
 
         if (data.status === 'success' || data.status === 'closed' || data.status === 'partial_close') {
             closePositionCloseModal();
@@ -8615,35 +8535,18 @@ async function submitManualPosition() {
     };
     
     try {
-        const response = await fetch(`${API_URL}/positions/manual`, {
+        const response = await fetch(`${API_URL}/v2/positions`, {
             method: 'POST',
             headers: authHeaders(),
             body: JSON.stringify(positionData)
         });
-        
+
         const result = await response.json();
-        
+
         if (response.ok) {
-            console.log('âœ… Manual position created:', result);
+            console.log('Manual position created:', result);
             closeManualPositionModal();
-            
-            // Add to local positions and refresh UI
-            if (result.position) {
-                openPositions.push(result.position);
-                _open_positions_cache.push(result.position);
-                renderPositions(openPositions);
-                renderCryptoPositions();
-                
-                // Store price levels for chart
-                if (result.position.stop_loss || result.position.target_1) {
-                    storePriceLevels(result.position.ticker, {
-                        entry_price: result.position.entry_price,
-                        stop_loss: result.position.stop_loss,
-                        target_1: result.position.target_1
-                    });
-                }
-            }
-            
+
             // Refresh positions from server
             await loadOpenPositionsEnhanced();
         } else {

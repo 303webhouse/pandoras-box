@@ -83,14 +83,6 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"⚠️ Could not start scheduler: {e}")
     
-    # Sync open positions from database
-    try:
-        from api.positions import sync_positions_from_database
-        await sync_positions_from_database()
-        logger.info("✅ Positions synced from database")
-    except Exception as e:
-        logger.warning(f"⚠️ Could not sync positions: {e}")
-    
     # Start signal expiry background task
     async def signal_expiry_loop():
         """Expire stale signals every 5 minutes."""

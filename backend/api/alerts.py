@@ -120,9 +120,13 @@ async def check_positions_earnings():
     """
     try:
         from alerts.earnings_calendar import check_open_position_earnings
-        from api.positions import _open_positions
-        
-        warnings = check_open_position_earnings(_open_positions)
+        from database.postgres_client import get_postgres_client, serialize_db_row
+        pool = await get_postgres_client()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch("SELECT * FROM unified_positions WHERE status = 'OPEN'")
+        positions = [serialize_db_row(dict(r)) for r in rows]
+
+        warnings = check_open_position_earnings(positions)
         
         return {
             "status": "success",
