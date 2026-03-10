@@ -1,17 +1,61 @@
 # Pivot — Priorities & TODO
 
-**Last Updated:** March 9, 2026 (end of session)
+**Last Updated:** March 10, 2026
 
 ---
 
-## 🔴 Immediate (This Week)
+## 🔴 Phase 0: Code Hygiene Cleanup (GPT-5.4 Audit Response)
+
+**Context:** External audit by GPT-5.4 (March 9) identified critical issues: repo not matching production, unauthenticated endpoints, position migration incomplete, frontend/API drift, JSONL fragility. Full audit saved in project chat history.
+
+### Phase 0A — Repo Source of Truth ← **START HERE, Brief written**
+- [ ] **Pull all VPS-only scripts into repo** — `committee_parsers.py`, `committee_decisions.py`, `committee_outcomes.py`, `committee_analytics.py`, `committee_review.py`, `pivot2_trade_poller.py`, `pivot2_brief.py`, `pivot2_twitter.py`, `ibkr_quotes.py` + any others found on VPS but not in repo
+- [ ] **Resolve duplicate interaction handler** — `scripts/committee_interaction_handler.py` vs `openclaw/scripts/committee_interaction_handler.py` have diverged. Pick canonical, delete the other.
+- [ ] **Fix stale docs** — Remove "git pull" deploy instructions from README. Remove Gemini references. Ensure CLAUDE.md, README, REVIEW_CONTEXT.md agree on deployment and LLM provider.
+- [ ] **Remove committed secrets** — `config/.env` contains live DB/Redis/Discord/API credentials. `git rm --cached`, purge from history, rotate any exposed keys.
+- [ ] **Fix DST cron schedules** — IBKR pollers in `jobs.json` still say `14-21 UTC`, should be `13-20 UTC` for EDT. All VPS crons need DST audit.
+
+### Phase 0B — Auth Lockdown
+- [ ] **API key middleware on all mutation routes** — Every POST/PATCH/DELETE on positions, trade-ideas, portfolio, committee-bridge requires `X-API-Key` header
+- [ ] **TradingView webhook secret** — Reject payloads without correct shared secret (401)
+- [ ] **Restrict CORS** — `allow_origins=["*"]` → actual frontend origin(s) only
+- [ ] **Standardize auth header** — Pick one convention (`X-API-Key`) for all internal calls
+
+### Phase 0C — Finish Positions Migration
+- [ ] **Kill legacy `_open_positions` / `_closed_trades`** in-memory state in `positions.py`
+- [ ] **Deregister legacy position routes** from `main.py` (or thin redirect to v2)
+- [ ] **Frontend reads only v2** — `app.js` uses only `/v2/positions/*`, zero legacy calls
+- [ ] **Kill `openPositions` / `_open_positions_cache` globals** in frontend
+
+### Phase 0D — Frontend Hygiene
+- [ ] **Remove dead endpoint calls** — `/bias-auto/status`, `/bias-auto/shift-status`, `/bias-auto/CYCLICAL`, `/signals/ticker/{ticker}`
+- [ ] **Audit hybrid scanner usage** — Identify which hybrid endpoints frontend still needs vs safe to delete
+- [ ] **Consolidate polling intervals** — One interval per data type, remove duplicate refresh loops
+
+### Phase 0E — Data Durability
+- [ ] **Move decision_log to Postgres** (or SQLite on VPS) — JSONL kept as append-only audit
+- [ ] **Move committee_log, outcome_log, lessons_bank** same way
+- [ ] **Atomic write pattern** for any remaining JSONL appends (write temp → rename)
+
+### Phase 0F — Resilience & Monitoring
+- [ ] **Committee heartbeat** — Alert to Discord if no committee run in 2h during market hours
+- [ ] **Factor staleness monitor** — Alert if any factor hasn't updated in 2× its expected TTL
+- [ ] **Webhook dedup in tradingview.py** — Check signal_id before Postgres insert
+- [ ] **Polygon degradation handling** — Return last-known value with stale flag instead of failing
+
+### Phase 0G — Test Coverage (Sharp Edges Only)
+- [ ] Auth enforcement tests (unauthenticated → 401)
+- [ ] Webhook secret validation tests
+- [ ] Position CRUD tests (create/close/reconcile via v2)
+- [ ] Frontend route smoke test (every endpoint the UI calls returns non-404)
+
+---
+
+## 🟡 Immediate (Trading)
 
 - [ ] **Confluence validation gate** — After 20 CONFIRMED/CONVICTION events fire during market hours, compare 24-hour outcomes vs 20 random STANDALONE signals. Success: confluence beats standalone by ≥12% win rate or ≥0.3R average. If not, reassess architecture.
-- [x] ~~**PLTR trade management**~~ — PLTR closed March 9 for $1.68 (+$35, +26.3%). Alert fired correctly.
-- [x] ~~**Verify Twitter scraper Monday AM**~~ — Tokens working. Scraper picking up headlines.
 - [ ] **Hub Sniper VWAP validation harness** — Run parallel TV + server-side VWAP on SPY for 5 trading days. Acceptance: mean error < 0.1%, max error < 0.5%. If fails, Hub Sniper stays on TV with 1 watchlist alert.
 - [ ] **tick_breadth tuning** — Late session TICK close bounces still overpower bearish avg. Consider weighting avg 2:1 over close.
-- [ ] **DST audit on all VPS crons** — DST shift March 8 caused PLTR alert to need manual correction (14:30→13:30 UTC). All crons using hardcoded UTC offsets need review. Twitter scraper (14-23 UTC), health check (15 UTC), nightly outcome matcher (04 UTC), Saturday review — verify all still fire at intended ET times.
 
 ---
 
