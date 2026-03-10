@@ -13,8 +13,6 @@ import urllib.request
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
-from bias_engine.composite import FACTOR_CONFIG, REDIS_KEY_FACTOR_LATEST
-
 logger = logging.getLogger(__name__)
 
 DISCORD_WEBHOOK_URL = (
@@ -36,6 +34,7 @@ async def check_factor_staleness() -> Dict:
       - checked_at: ISO timestamp
     """
     from database.redis_client import get_redis_client
+    from bias_engine.composite import FACTOR_CONFIG, REDIS_KEY_FACTOR_LATEST
 
     now = datetime.now(timezone.utc)
     stale: List[Dict] = []
