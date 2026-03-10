@@ -8,7 +8,7 @@
 const IS_HTTPS = window.location.protocol === 'https:';
 const WS_URL = `${IS_HTTPS ? 'wss' : 'ws'}://${window.location.host}/ws`;
 const API_URL = `${window.location.origin}/api`;
-const API_KEY = 'PIVOT_KEY_PLACEHOLDER';
+const API_KEY = 'rLl-7i2GqGjie5in9iHIlVtqlP5zpY7D5E6-8tzlNSk';
 
 function authHeaders(extraHeaders = {}) {
     return { 'Content-Type': 'application/json', 'X-API-Key': API_KEY, ...extraHeaders };
