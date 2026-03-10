@@ -213,12 +213,61 @@ async def lifespan(app: FastAPI):
                 logger.warning("Scout scan loop error: %s", e)
             await asyncio.sleep(900)  # 15 minutes
 
+    # Sector RS: compute daily pre-market, then check every hour
+    async def sector_rs_loop():
+        """Compute sector relative strength daily at 8:00 AM ET, recheck hourly."""
+        import pytz
+        from datetime import datetime as dt_cls
+
+        await asyncio.sleep(30)  # Brief startup delay
+
+        while True:
+            try:
+                et = dt_cls.now(pytz.timezone("America/New_York"))
+                # Run at 8:00 AM ET on weekdays, or if data is stale
+                if et.weekday() < 5 and (
+                    (7 <= et.hour <= 8) or et.hour == 0  # Pre-market window or midnight catch-up
+                ):
+                    from scanners.sector_rs import compute_sector_rs, is_sector_rs_stale
+                    if await is_sector_rs_stale():
+                        await compute_sector_rs()
+            except Exception as e:
+                logger.warning("Sector RS loop error: %s", e)
+            await asyncio.sleep(3600)  # Check hourly
+
+    # Sell the Rip scanner: fade relief rallies every 5 min during market hours
+    async def sell_the_rip_scan_loop():
+        """Run Sell the Rip scanner during market hours."""
+        import pytz
+        from datetime import datetime as dt_cls
+
+        # Offset from other scanners
+        await asyncio.sleep(480)  # 8 min after startup
+
+        while True:
+            try:
+                et = dt_cls.now(pytz.timezone("America/New_York"))
+                # Market hours: 9:35 AM - 3:55 PM ET, weekdays
+                if et.weekday() < 5 and 9 <= et.hour < 16:
+                    time_decimal = et.hour + et.minute / 60.0
+                    if time_decimal >= 9.583:  # 9:35 AM
+                        from scanners.sell_the_rip_scanner import run_sell_the_rip_scan, STR_SCANNER_AVAILABLE
+                        if STR_SCANNER_AVAILABLE:
+                            await run_sell_the_rip_scan()
+                else:
+                    logger.debug("Sell the Rip scanner: outside market hours, skipping")
+            except Exception as e:
+                logger.warning("Sell the Rip scan loop error: %s", e)
+            await asyncio.sleep(300)  # 5 minutes
+
     expiry_task = asyncio.create_task(signal_expiry_loop())
     universe_task = asyncio.create_task(universe_cache_loop())
     mtm_task = asyncio.create_task(mark_to_market_loop())
     confluence_task = asyncio.create_task(confluence_engine_loop())
     holy_grail_task = asyncio.create_task(holy_grail_scan_loop())
     scout_task = asyncio.create_task(scout_scan_loop())
+    sector_rs_task = asyncio.create_task(sector_rs_loop())
+    sell_the_rip_task = asyncio.create_task(sell_the_rip_scan_loop())
 
     logger.info("✅ Pandora's Box is live")
 
@@ -231,6 +280,8 @@ async def lifespan(app: FastAPI):
     confluence_task.cancel()
     holy_grail_task.cancel()
     scout_task.cancel()
+    sector_rs_task.cancel()
+    sell_the_rip_task.cancel()
     logger.info("🛑 Shutting down Pandora's Box...")
     await redis_client.close()
     await postgres_client.close()
