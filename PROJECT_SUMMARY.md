@@ -10,7 +10,7 @@ This document is a snapshot of what's deployed, what's working, and what's in pr
 
 ### Discord Bot (VPS — 188.245.250.2)
 - ✅ Interactive chat in #pivot-chat — responds to market questions, evaluates trade ideas
-- ✅ Screenshot analysis — Gemini Vision parses UW dashboards and charts
+- ✅ Screenshot analysis — Claude Vision parses UW dashboards and charts
 - ✅ Whale Hunter alerts — TradingView webhook → LLM evaluation → Discord alert
 - ✅ UW Premium Bot monitoring — watches flow alert channels, parses into signals
 - ✅ Circuit Breaker — TradingView alerts override bias during extreme market events

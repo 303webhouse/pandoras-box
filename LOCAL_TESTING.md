@@ -108,7 +108,7 @@ ssh root@188.245.250.2 "systemctl start pivot-bot"
 
 - **Don't run the Discord bot while VPS bot is running** — duplicate gateway connections
 - **Don't use `os.getenv("VAR", default)`** — use `os.getenv("VAR") or default` instead
-- **Don't edit files directly on VPS** — always commit to git and `git pull` on VPS
+- **Don't edit files directly on VPS** — edit locally, SCP to `/opt/openclaw/workspace/scripts/`, restart service
 - **Don't create a separate Postgres database** — use the Railway instance for consistency
 
 ---
@@ -122,5 +122,5 @@ The recommended workflow is:
 3. **Hand brief to Claude Code (Codex)** for implementation
 4. **Test locally** if needed (backend only)
 5. **Push to main** → Railway auto-deploys backend
-6. **SSH to VPS** → `git pull && systemctl restart pivot-bot` for bot changes
+6. **SCP to VPS** → copy scripts to `/opt/openclaw/workspace/scripts/` → `systemctl restart openclaw`
 7. **Verify** via health endpoint and Discord interaction

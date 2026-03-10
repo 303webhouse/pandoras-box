@@ -25,7 +25,7 @@ Several factors (options_sentiment, put_call_ratio, savita_indicator) have relia
 `backend/discord_bridge/bot.py` is 3,466 lines. It works, but it's getting harder to maintain. A future refactor could split it into separate modules: message handling, signal evaluation, screenshot analysis, trade journaling, and EOD brief generation.
 
 ### VPS/Railway Code Drift
-The VPS runs code from `/opt/pivot/` which is synced via `git pull`. If someone edits files directly on VPS without committing, the repo and VPS can drift silently. A deploy script that checksums files post-pull would catch this.
+The VPS runs code from `/opt/openclaw/workspace/scripts/` which is deployed via SCP (VPS is NOT a git repo). Files can drift between local repo and VPS if edits are made directly on either side without syncing. A deploy script that checksums files post-SCP would catch this.
 
 ---
 
