@@ -13,11 +13,11 @@ This is a quick reference for operating and deploying Pivot. For full architectu
 curl https://pandoras-box-production.up.railway.app/health
 # Expected: {"status":"healthy","postgres":"connected","redis":"ok","websocket_connections":N}
 
-# Discord bot status (VPS)
-ssh root@188.245.250.2 "systemctl status pivot-bot pivot-collector"
+# VPS service status
+ssh root@188.245.250.2 "systemctl status openclaw pivot-collector pivot2-interactions"
 
 # Bot logs (live tail)
-ssh root@188.245.250.2 "journalctl -u pivot-bot -f"
+ssh root@188.245.250.2 "journalctl -u openclaw -f"
 
 # Collector logs
 ssh root@188.245.250.2 "journalctl -u pivot-collector -f"
@@ -40,22 +40,21 @@ curl https://pandoras-box-production.up.railway.app/health
 
 ---
 
-## Deploy Discord Bot (VPS)
+## Deploy VPS Scripts (Pivot II)
 
-Manual process — SSH in, pull, restart:
+Manual process — SCP files, restart services. VPS is NOT a git repo.
 
 ```bash
-ssh root@188.245.250.2
-cd /opt/pivot
-git pull origin main
-systemctl restart pivot-bot
-journalctl -u pivot-bot -f   # ALWAYS verify startup
-```
+# Copy updated scripts to VPS
+scp scripts/my_script.py root@188.245.250.2:/opt/openclaw/workspace/scripts/
 
-If collector changes were made too:
-```bash
-systemctl restart pivot-collector
-journalctl -u pivot-collector -f
+# Restart the relevant service
+ssh root@188.245.250.2 "systemctl restart openclaw"            # chat, briefs, pollers
+ssh root@188.245.250.2 "systemctl restart pivot2-interactions"  # committee buttons
+ssh root@188.245.250.2 "systemctl restart pivot-collector"      # data collectors
+
+# Verify startup
+ssh root@188.245.250.2 "journalctl -u openclaw -f"
 ```
 
 ---
@@ -235,7 +234,7 @@ Task runner:
 Credentials are NOT stored in the repo. They live in:
 
 - **Railway env vars** — DB_*, DISCORD_*, API keys (Railway dashboard → pandoras-box service → Variables)
-- **VPS .env file** — `/opt/pivot/.env` (Discord token, API keys, webhook URLs)
+- **VPS config** — `/home/openclaw/.openclaw/openclaw.json` (Discord token, API keys, webhook URLs)
 - **Nick's Claude.ai memory** — Contains all tokens/keys for reference in conversations
 - **GitHub PAT** — Used for git operations on VPS, stored in git credential helper
 
@@ -245,7 +244,7 @@ Credentials are NOT stored in the repo. They live in:
 
 | Problem | Fix |
 |---------|-----|
-| Bot offline | `ssh root@188.245.250.2 "systemctl restart pivot-bot"` |
+| Bot offline | `ssh root@188.245.250.2 "systemctl restart openclaw"` |
 | Railway deploy stuck | Railway dashboard → Redeploy or check build logs |
 | Health returns `postgres: disconnected` | Check Railway Postgres service is running in fabulous-essence |
 | Railway Postgres crash-loop with `No space left on device` | Stop writers, increase Postgres volume, then restart. Do not manually delete Postgres WAL files. |

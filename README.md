@@ -18,7 +18,7 @@ Pivot lives in Discord. It monitors market data sources continuously, evaluates 
 | Component | Technology | Location |
 |-----------|-----------|----------|
 | Backend API | FastAPI + PostgreSQL + Redis | Railway (auto-deploys from `main`) |
-| Discord Bot | discord.py + Gemini Pro LLM | VPS at `188.245.250.2` |
+| Discord Bot (Pivot II) | discord.py + Claude (Anthropic API) | VPS at `188.245.250.2` |
 | Frontend | Vanilla JS PWA (6-tab analytics) | `frontend/` |
 | Indicators | PineScript | TradingView (Whale Hunter, CTA) |
 
@@ -64,9 +64,10 @@ pandoras-box/
 # Backend: push to main → Railway auto-deploys
 git push origin main
 
-# VPS bot: manual sync
-ssh root@188.245.250.2
-cd /opt/pivot && git pull origin main && systemctl restart pivot-bot
+# VPS bot: manual file sync (VPS is NOT a git repo)
+# Edit files locally, then SCP to /opt/openclaw/workspace/scripts/
+scp scripts/my_script.py root@188.245.250.2:/opt/openclaw/workspace/scripts/
+ssh root@188.245.250.2 "systemctl restart openclaw"
 
 # Verify
 curl https://pandoras-box-production.up.railway.app/health
