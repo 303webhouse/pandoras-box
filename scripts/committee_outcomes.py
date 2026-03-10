@@ -227,9 +227,8 @@ def write_outcome_entry(decision: dict, outcome_row: dict, classification: dict)
         "override_correct": _override_correct(decision, classification),
     }
 
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    with open(OUTCOME_LOG, "a") as f:
-        f.write(json.dumps(entry) + "\n")
+    from safe_jsonl import safe_append
+    safe_append(OUTCOME_LOG, entry)
 
 
 def _committee_was_right(committee_action: str, result: str) -> Optional[bool]:
@@ -284,8 +283,8 @@ def rotate_log_if_needed(log_path: Path, max_lines: int = 5000) -> None:
             lines = f.readlines()
         if len(lines) > max_lines:
             keep = lines[len(lines) - (max_lines // 2):]
-            with open(log_path, "w") as f:
-                f.writelines(keep)
+            from safe_jsonl import safe_rewrite
+            safe_rewrite(log_path, "".join(keep))
             log.info("Rotated %s: %d -> %d lines", log_path.name, len(lines), len(keep))
     except FileNotFoundError:
         pass

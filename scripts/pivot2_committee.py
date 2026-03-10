@@ -184,7 +184,8 @@ def ensure_data_dir() -> None:
 def load_seen_ids() -> list[str]:
     ensure_data_dir()
     if not SEEN_FILE.exists():
-        SEEN_FILE.write_text("[]\n", encoding="utf-8")
+        from safe_jsonl import safe_rewrite_json
+        safe_rewrite_json(SEEN_FILE, [])
         return []
     try:
         data = json.loads(SEEN_FILE.read_text(encoding="utf-8"))
@@ -198,7 +199,8 @@ def load_seen_ids() -> list[str]:
 def save_seen_ids(seen_ids: list[str]) -> None:
     ensure_data_dir()
     trimmed = seen_ids[-500:]
-    SEEN_FILE.write_text(json.dumps(trimmed, indent=2) + "\n", encoding="utf-8")
+    from safe_jsonl import safe_rewrite_json
+    safe_rewrite_json(SEEN_FILE, trimmed)
 
 
 def save_zone_shift(signal: dict[str, Any]) -> None:
@@ -216,7 +218,8 @@ def save_zone_shift(signal: dict[str, Any]) -> None:
         "to_zone": to_zone,
     }
     ensure_data_dir()
-    ZONE_FILE.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    from safe_jsonl import safe_rewrite_json
+    safe_rewrite_json(ZONE_FILE, payload)
 
 
 def is_zone_signal(signal: dict[str, Any]) -> bool:
@@ -274,7 +277,8 @@ def save_pending_signal(signal_id: str, signal: dict, context: dict) -> None:
         sorted_keys = sorted(pending.keys(), key=lambda k: pending[k].get("stored_at", ""))
         for k in sorted_keys[:-50]:
             del pending[k]
-    PENDING_SIGNALS_FILE.write_text(json.dumps(pending, default=str, indent=2), encoding="utf-8")
+    from safe_jsonl import safe_rewrite_json
+    safe_rewrite_json(PENDING_SIGNALS_FILE, pending)
 
 
 def pop_pending_signal(signal_id: str) -> dict | None:
@@ -282,7 +286,8 @@ def pop_pending_signal(signal_id: str) -> dict | None:
     pending = load_pending_signals()
     entry = pending.pop(signal_id, None)
     ensure_data_dir()
-    PENDING_SIGNALS_FILE.write_text(json.dumps(pending, default=str, indent=2), encoding="utf-8")
+    from safe_jsonl import safe_rewrite_json
+    safe_rewrite_json(PENDING_SIGNALS_FILE, pending)
     return entry
 
 
@@ -329,7 +334,8 @@ def load_daily_count() -> dict:
 
 def save_daily_count(data: dict) -> None:
     ensure_data_dir()
-    DAILY_COUNT_FILE.write_text(json.dumps(data, indent=2))
+    from safe_jsonl import safe_rewrite_json
+    safe_rewrite_json(DAILY_COUNT_FILE, data)
 
 
 def gatekeeper(signal: dict, bias_level: str, defcon: str, daily: dict) -> tuple[bool, str | None]:
@@ -540,7 +546,8 @@ def save_circuit_breaker(signal: dict) -> None:
         "entry_price": safe_float(signal.get("entry_price")),
         "notes": str(signal.get("notes") or signal.get("signal_type") or ""),
     })
-    CB_FILE.write_text(json.dumps(events, indent=2), encoding="utf-8")
+    from safe_jsonl import safe_rewrite_json
+    safe_rewrite_json(CB_FILE, events)
 
 
 # ETFs don't have earnings — skip yfinance quoteSummary call (returns 404 for ETFs)
@@ -1115,17 +1122,9 @@ def format_circuit_breaker_message(signal: dict) -> str:
 def log_committee_event(entry: dict) -> None:
     """Append to committee_log.jsonl, trim to LOG_MAX_LINES."""
     ensure_data_dir()
-    line = json.dumps(entry, default=str) + "\n"
-
-    with open(LOG_FILE, "a", encoding="utf-8") as f:
-        f.write(line)
-
-    try:
-        lines = LOG_FILE.read_text(encoding="utf-8").strip().split("\n")
-        if len(lines) > LOG_MAX_LINES:
-            LOG_FILE.write_text("\n".join(lines[-LOG_MAX_LINES:]) + "\n", encoding="utf-8")
-    except Exception:
-        pass
+    from safe_jsonl import safe_append, safe_trim_jsonl
+    safe_append(LOG_FILE, entry)
+    safe_trim_jsonl(LOG_FILE, LOG_MAX_LINES)
 
 
 # ── Main Pipeline ────────────────────────────────────────────

@@ -349,8 +349,9 @@ def main():
                 "tickers": r.get("tickers"),
             }
             try:
-                with open(signal_log_path, "a", encoding="utf-8") as f:
-                    f.write(json.dumps(entry) + "\n")
+                from safe_jsonl import safe_append
+                from pathlib import Path
+                safe_append(Path(signal_log_path), entry)
             except Exception:
                 pass
 
