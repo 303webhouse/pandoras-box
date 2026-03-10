@@ -27,13 +27,17 @@
 - [x] **Cleanup** — Removed duplicate auth functions from `portfolio.py` and `macro.py`
 - **⚠️ Nick action items:** Set `PIVOT_API_KEY` on Railway (if not already). Replace `PIVOT_KEY_PLACEHOLDER` in `app.js` with actual key. Optionally set `TRADINGVIEW_WEBHOOK_SECRET` + `ALLOWED_ORIGINS` on Railway.
 
-### Phase 0C — Finish Positions Migration ← **NEXT**
-- [ ] **Kill legacy `_open_positions` / `_closed_trades`** in-memory state in `positions.py`
-- [ ] **Deregister legacy position routes** from `main.py` (or thin redirect to v2)
-- [ ] **Frontend reads only v2** — `app.js` uses only `/v2/positions/*`, zero legacy calls
-- [ ] **Kill `openPositions` / `_open_positions_cache` globals** in frontend
+### ✅ Phase 0C — Finish Positions Migration (COMPLETE — March 10)
+- [x] **Killed in-memory state** — Removed `_open_positions`, `_closed_trades`, `_position_counter` from `positions.py`
+- [x] **Rewrote `accept_signal()`** — Now writes directly to `unified_positions` table instead of old `positions` table
+- [x] **Deleted 13 legacy position routes** — ~750 lines removed from `positions.py` (open, close, manual, history, debug, diagnose, force-sync, etc.)
+- [x] **Removed startup sync** — `sync_positions_from_database()` deleted from `positions.py`, startup call removed from `main.py`
+- [x] **Deleted v2↔legacy sync functions** — `sync_v2_to_legacy()` and `sync_legacy_to_v2()` removed from `unified_positions.py` + 3 calls removed from `portfolio.py`
+- [x] **Frontend unified** — Removed `_open_positions_cache`, `renderPositions()`, legacy fetch/close/delete fallbacks. Manual position creation uses v2.
+- [x] **Bonus fix** — `alerts.py` updated to read from `unified_positions` instead of deleted `_open_positions`
+- **Total: 1,268 lines of dead code removed across 7 files**
 
-### Phase 0D — Frontend Hygiene
+### Phase 0D — Frontend Hygiene ← **NEXT**
 - [ ] **Remove dead endpoint calls** — `/bias-auto/status`, `/bias-auto/shift-status`, `/bias-auto/CYCLICAL`, `/signals/ticker/{ticker}`
 - [ ] **Audit hybrid scanner usage** — Identify which hybrid endpoints frontend still needs vs safe to delete
 - [ ] **Consolidate polling intervals** — One interval per data type, remove duplicate refresh loops
@@ -163,15 +167,15 @@
 - [ ] **Mobile optimization** — Bottom nav, pull-to-refresh, responsive position cards
 - [ ] **Whale Hunter remaining alerts** — Add per-chart alerts for full options watchlist
 - [ ] **DST fix deployment** — Convert hardcoded UTC offsets to IANA timezones. Brief written, not deployed. IBKR not funded so pollers not active.
-- [ ] **Clean up dead `sync_v2_to_legacy()` function** — Definition still in `unified_positions.py`, no callers. Remove when convenient.
-- [ ] **Drop `open_positions` table** — Now fully deprecated. Portfolio GET reads from `unified_positions`. Table can be dropped after confirming no other callers.
+- [ ] **Drop `positions` and `open_positions` tables** — Now fully deprecated. All reads/writes go through `unified_positions`. Can drop after confirming zero callers.
 
 ---
 
-## ✅ Completed (March 10, 2026) — Phase 0A + 0B
+## ✅ Completed (March 10, 2026) — Phase 0A + 0B + 0C
 
 - [x] Phase 0A: Repo source of truth — 9 VPS scripts pulled, 8 untracked added, duplicates resolved, stale docs fixed in 5 files, `config/.env` untracked, `committee_autopsy.py` fixed (OpenRouter→Anthropic), `twitter_health_check.py` sanitized, `committee_outcomes.py` updated from VPS
 - [x] Phase 0B: Auth lockdown — unified `require_api_key()`, auth on 9 position routes + committee results + trade ideas, TradingView webhook secret (optional), CORS env var, frontend `authHeaders()` on 30 calls, removed duplicate auth functions
+- [x] Phase 0C: Positions migration complete — 1,268 lines removed. Killed in-memory `_open_positions`/`_closed_trades`, rewrote `accept_signal()` → unified_positions, deleted 13 legacy routes, removed startup sync, deleted `sync_v2_to_legacy()`/`sync_legacy_to_v2()`, frontend unified on v2, fixed `alerts.py` import
 
 ## ✅ Completed (March 9, 2026 Session) — 9 builds shipped
 
