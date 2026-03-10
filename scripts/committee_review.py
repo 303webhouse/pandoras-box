@@ -282,21 +282,10 @@ def _save_lessons(lessons: list[dict]) -> None:
     if not lessons:
         return
 
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    with open(LESSONS_BANK, "a") as f:
-        for lesson in lessons:
-            f.write(json.dumps(lesson) + "\n")
-
-    try:
-        with open(LESSONS_BANK, "r") as f:
-            lines = f.readlines()
-        if len(lines) > MAX_LESSONS:
-            keep = lines[-MAX_LESSONS:]
-            with open(LESSONS_BANK, "w") as f:
-                f.writelines(keep)
-            log.info("Rotated lessons_bank: %d -> %d", len(lines), len(keep))
-    except FileNotFoundError:
-        pass
+    from safe_jsonl import safe_append, safe_trim_jsonl
+    for lesson in lessons:
+        safe_append(LESSONS_BANK, lesson)
+    safe_trim_jsonl(LESSONS_BANK, MAX_LESSONS)
 
 
 def _load_recent_lessons(count: int = 5) -> list[dict]:
@@ -393,7 +382,8 @@ def _generate_agent_feedback(agent_accuracy: dict, analytics: dict, api_key: str
     # Save to file
     try:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
-        AGENT_FEEDBACK_FILE.write_text(json.dumps(feedback, indent=2), encoding="utf-8")
+        from safe_jsonl import safe_rewrite_json
+        safe_rewrite_json(AGENT_FEEDBACK_FILE, feedback)
         log.info("Agent feedback saved to %s", AGENT_FEEDBACK_FILE)
     except Exception as e:
         log.warning("Failed to save agent feedback: %s", e)

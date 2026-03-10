@@ -215,9 +215,8 @@ def _log_decision(decision: str, recommendation: dict, notes: str = "") -> None:
         "notes": notes,
     }
     try:
-        STATE_DIR.mkdir(parents=True, exist_ok=True)
-        with log_path.open("a") as f:
-            f.write(json.dumps(record) + "\n")
+        from safe_jsonl import safe_append
+        safe_append(log_path, record)
     except Exception as e:
         logger.warning(f"Failed to log committee decision: {e}")
 
@@ -236,7 +235,8 @@ def _save_last_take(recommendation: dict) -> None:
     state_path = STATE_DIR / "last_take.json"
     try:
         STATE_DIR.mkdir(parents=True, exist_ok=True)
-        state_path.write_text(json.dumps(take_state))
+        from safe_jsonl import safe_rewrite_json
+        safe_rewrite_json(state_path, take_state)
         logger.info(f"Saved last_take.json: {take_state}")
     except Exception as e:
         logger.warning(f"Failed to save last_take.json: {e}")
@@ -741,7 +741,8 @@ async def _handle_macro_update_command(message: discord.Message, cfg: dict, env_
 
     # Save locally
     try:
-        briefing_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        from safe_jsonl import safe_rewrite_json
+        safe_rewrite_json(briefing_path, data)
     except Exception as e:
         await message.reply(f"Failed to save briefing: {e}")
         return

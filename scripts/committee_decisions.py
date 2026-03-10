@@ -69,8 +69,8 @@ def log_decision(
     except (ValueError, TypeError):
         pass
 
-    with open(DECISION_LOG, "a", encoding="utf-8") as f:
-        f.write(json.dumps(entry, default=str) + "\n")
+    from safe_jsonl import safe_append
+    safe_append(DECISION_LOG, entry)
 
     log.info(
         "[DECISION] %s: Nick=%s Committee=%s Override=%s",
@@ -80,31 +80,21 @@ def log_decision(
 
 def update_committee_log(signal_id: str, nick_decision: str) -> None:
     """Backfill nick_decision into matching committee_log.jsonl entry."""
+    from safe_jsonl import safe_update_line
+
+    def match(entry):
+        return entry.get("signal_id") == signal_id and entry.get("nick_decision") is None
+
+    def update(entry):
+        entry["nick_decision"] = nick_decision
+        return entry
+
     try:
-        if not COMMITTEE_LOG.exists():
-            return
-        lines = COMMITTEE_LOG.read_text(encoding="utf-8").strip().split("\n")
-
-        scan_start = max(0, len(lines) - 100)
-        updated = False
-
-        for i in range(len(lines) - 1, scan_start - 1, -1):
-            try:
-                entry = json.loads(lines[i])
-                if entry.get("signal_id") == signal_id and entry.get("nick_decision") is None:
-                    entry["nick_decision"] = nick_decision
-                    lines[i] = json.dumps(entry, default=str)
-                    updated = True
-                    break
-            except json.JSONDecodeError:
-                continue
-
+        updated = safe_update_line(COMMITTEE_LOG, match, update, scan_limit=100)
         if updated:
-            COMMITTEE_LOG.write_text("\n".join(lines) + "\n", encoding="utf-8")
             log.info("Updated committee_log for %s: nick_decision=%s", signal_id, nick_decision)
         else:
             log.warning("Could not find %s in committee_log to update", signal_id)
-
     except Exception as e:
         log.error("Failed to update committee_log for %s: %s", signal_id, e)
 
@@ -115,7 +105,8 @@ def save_pending(signal_id: str, recommendation: dict) -> None:
     ensure_data_dir()
     pending = load_all_pending()
     pending[signal_id] = recommendation
-    PENDING_FILE.write_text(json.dumps(pending, default=str, indent=2), encoding="utf-8")
+    from safe_jsonl import safe_rewrite_json
+    safe_rewrite_json(PENDING_FILE, pending)
 
 
 def load_all_pending() -> dict:
@@ -131,7 +122,8 @@ def remove_pending(signal_id: str) -> None:
     pending = load_all_pending()
     pending.pop(signal_id, None)
     ensure_data_dir()
-    PENDING_FILE.write_text(json.dumps(pending, default=str, indent=2), encoding="utf-8")
+    from safe_jsonl import safe_rewrite_json
+    safe_rewrite_json(PENDING_FILE, pending)
 
 
 # ── Expiration ────────────────────────────────────────────────
@@ -180,7 +172,8 @@ def expire_stale_recommendations(**_kw) -> list[str]:
 
     if expired_ids:
         ensure_data_dir()
-        PENDING_FILE.write_text(json.dumps(pending, default=str, indent=2), encoding="utf-8")
+        from safe_jsonl import safe_rewrite_json
+        safe_rewrite_json(PENDING_FILE, pending)
 
     return expired_ids
 
@@ -192,7 +185,8 @@ def rotate_log_if_needed(log_path: pathlib.Path, max_lines: int = 5000) -> None:
         lines = log_path.read_text(encoding="utf-8").strip().split("\n")
         if len(lines) > max_lines:
             keep = lines[-(max_lines // 2):]
-            log_path.write_text("\n".join(keep) + "\n", encoding="utf-8")
+            from safe_jsonl import safe_rewrite
+            safe_rewrite(log_path, "\n".join(keep) + "\n")
             log.info("Rotated %s: %d -> %d lines", log_path.name, len(lines), len(keep))
     except FileNotFoundError:
         pass

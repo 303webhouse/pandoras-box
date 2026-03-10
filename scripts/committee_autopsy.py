@@ -244,21 +244,9 @@ def run_autopsy(decision: dict, outcome_entry: dict) -> Optional[dict]:
 
 def _write_autopsy(autopsy: dict) -> None:
     """Append autopsy to log. Rotate if over max."""
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    with open(AUTOPSY_LOG, "a") as f:
-        f.write(json.dumps(autopsy) + "\n")
-
-    # Rotate
-    try:
-        with open(AUTOPSY_LOG, "r") as f:
-            lines = f.readlines()
-        if len(lines) > MAX_AUTOPSY_ENTRIES:
-            keep = lines[-MAX_AUTOPSY_ENTRIES:]
-            with open(AUTOPSY_LOG, "w") as f:
-                f.writelines(keep)
-            log.info("Rotated autopsy_log: %d -> %d", len(lines), len(keep))
-    except FileNotFoundError:
-        pass
+    from safe_jsonl import safe_append, safe_trim_jsonl
+    safe_append(AUTOPSY_LOG, autopsy)
+    safe_trim_jsonl(AUTOPSY_LOG, MAX_AUTOPSY_ENTRIES)
 
 
 # ── Discord posting ──
