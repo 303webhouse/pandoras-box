@@ -1,3 +1,9 @@
+# NOTE: Despite UI for hybrid scanner being killed in Brief 09,
+# the following endpoints are still actively used by the frontend:
+#   - GET /hybrid/price/{ticker}  — position card price updates (updateCurrentPrices)
+#   - GET /hybrid/combined/{ticker} — analyzer per-ticker context
+# DO NOT remove this router without updating frontend/app.js.
+
 """
 Hybrid Market Scanner API Endpoints
 Technical + Fundamental analysis with directional change detection

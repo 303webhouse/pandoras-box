@@ -681,8 +681,7 @@ function handleWebSocketMessage(message) {
                 } else {
                     updateBias(message.data);
                 }
-                // Also refresh shift status when bias updates
-                fetchBiasShiftStatus();
+                // bias shift status removed (Phase 0D) — endpoint was dead
             }
             break;
         case 'POSITION_UPDATE':
@@ -986,10 +985,7 @@ async function loadInitialData() {
     // Initialize timeframe card toggles
     initTimeframeToggles();
 
-    // Set up auto-refresh for bias shift status every 5 minutes
-    setInterval(() => {
-        fetchBiasShiftStatus();
-    }, 5 * 60 * 1000); // 5 minutes
+    // bias-auto/shift-status polling removed (Phase 0D) — endpoint was dead
     
     // Refresh timeframe data every 2 minutes
     setInterval(fetchTimeframeBias, 2 * 60 * 1000);
@@ -1002,12 +998,12 @@ async function loadInitialData() {
     checkRedisHealth();
     setInterval(checkRedisHealth, 2 * 60 * 1000);
 
-    // Position + portfolio refresh every 10 seconds (visibility-gated)
+    // Position refresh every 30 seconds (visibility-gated). WebSocket pushes real-time updates.
     setInterval(() => {
         if (document.visibilityState === 'visible') {
             loadOpenPositionsEnhanced();
         }
-    }, 10 * 1000);
+    }, 30 * 1000);
 }
 
 let cryptoTvWidget = null;
@@ -1313,77 +1309,9 @@ function syncTradeIdeasOffset(assetType) {
 }
 
 async function loadBiasData() {
-    // Load all biases from the auto-scheduler endpoint (includes trends!)
-    try {
-        const response = await fetch(`${API_URL}/bias-auto/status`);
-        const result = await response.json();
-        
-        if (result.status === 'success' && result.data) {
-            const data = result.data;
-            const effective = result.effective;  // Hierarchical modifiers
-            
-            // Update Daily Bias - store full data and apply factor filters
-            if (data.daily) {
-                dailyBiasFullData = data.daily;
-                if (data.daily.details && data.daily.details.factors) {
-                    updateDailyBiasWithFactors(data.daily);
-                } else {
-                    updateBiasWithTrend('daily', data.daily);
-                }
-                
-                // Show effective bias if different from raw (hierarchical modifier applied)
-                if (effective && effective.daily && effective.daily !== data.daily.level) {
-                    updateEffectiveBias('daily', data.daily.level, effective.daily, effective.modifiers?.daily);
-                } else {
-                    hideEffectiveBias('daily');
-                }
-            }
-            
-            // Update Weekly Bias - store full data
-            if (data.weekly) {
-                weeklyBiasFullData = data.weekly;
-                updateWeeklyBiasWithFactors(data.weekly);
-                
-                // Show effective bias if different from raw (modified by Cyclical)
-                if (effective && effective.weekly && effective.weekly !== data.weekly.level) {
-                    updateEffectiveBias('weekly', data.weekly.level, effective.weekly, effective.modifiers?.weekly);
-                } else {
-                    hideEffectiveBias('weekly');
-                }
-            }
-            
-            // Update Cyclical Bias - store full data and apply factor filters
-            // Note: Cyclical has no modifier (it's the highest level)
-            if (data.cyclical) {
-                cyclicalBiasFullData = data.cyclical;
-                if (data.cyclical.details && data.cyclical.details.factors) {
-                    updateCyclicalBiasWithFactors(data.cyclical);
-                } else {
-                    updateBiasWithTrend('cyclical', data.cyclical);
-                }
-                
-                // Check for crisis mode and display alert
-                checkAndDisplayCrisisAlert(data.cyclical);
-                
-                // Check Savita status for update reminder
-                checkSavitaStatus(data.cyclical);
-            }
-        } else {
-            // Fallback to old endpoint if scheduler not ready
-            await loadBiasDataFallback();
-        }
-    } catch (error) {
-        console.error('Error loading bias data from scheduler:', error);
-        // Fallback to old endpoint
-        await loadBiasDataFallback();
-    }
-    
-    // Load shift status for weekly bias
-    await fetchBiasShiftStatus();
-
-    // Check and apply alignment styling
+    // bias-auto/status endpoint removed (Phase 0D). Use composite endpoints directly.
+    await loadBiasDataFallback();
     checkAndApplyBiasAlignment();
-
     renderCryptoBiasSummary();
 }
 
@@ -2183,7 +2111,7 @@ function formatExpiry(dateStr) {
 }
 
 setInterval(loadPortfolioBalances, 60000);
-setInterval(loadPortfolioPositions, 60000);
+// Portfolio positions 60s poll removed (Phase 0D) — redundant with 30s v2 position refresh
 
 
 // Display effective bias when hierarchical modifier is applied
@@ -3133,86 +3061,8 @@ function isSignalAlignedWithBias(signalDirection) {
 
 
 
-// Fetch and display bias shift status (weekly bias shift from Monday baseline)
-async function fetchBiasShiftStatus() {
-    try {
-        const response = await fetch(`${API_URL}/bias-auto/shift-status`);
-        const data = await response.json();
-        if (data.status === 'success') {
-            updateBiasShiftDisplay(data.data);
-        }
-    } catch (error) {
-        console.error('Error fetching bias shift:', error);
-    }
-}
-
-// Update weekly bias display with shift indicator
-function updateBiasShiftDisplay(shiftData) {
-    const weeklyLevelElement = document.getElementById('weeklyLevel');
-    const weeklyDetailsElement = document.getElementById('weeklyDetails');
-    
-    if (!shiftData || !weeklyLevelElement) {
-        return;
-    }
-    
-    // Remove any existing shift indicator
-    const existingIndicator = weeklyLevelElement.querySelector('.bias-shift-indicator');
-    if (existingIndicator) {
-        existingIndicator.remove();
-    }
-    
-    // Check if we have baseline data
-    if (!shiftData.has_baseline) {
-        // No baseline yet - don't show indicator
-        return;
-    }
-    
-    const shiftDirection = shiftData.shift_direction || 'STABLE';
-    const delta = shiftData.delta || 0;
-    
-    // Determine icon and class based on shift direction
-    let shiftIcon = '';
-    let shiftClass = '';
-    let shiftText = '';
-    
-    switch (shiftDirection) {
-        case 'IMPROVING':
-        case 'STRONGLY_IMPROVING':
-            shiftIcon = '^';
-            shiftClass = 'bias-shift-improving';
-            shiftText = shiftDirection === 'STRONGLY_IMPROVING' ? 'strongly improving' : 'improving';
-            break;
-        case 'DETERIORATING':
-        case 'STRONGLY_DETERIORATING':
-            shiftIcon = 'v';
-            shiftClass = 'bias-shift-deteriorating';
-            shiftText = shiftDirection === 'STRONGLY_DETERIORATING' ? 'strongly deteriorating' : 'deteriorating';
-            break;
-        case 'STABLE':
-        default:
-            shiftIcon = '-';
-            shiftClass = 'bias-shift-stable';
-            shiftText = 'stable';
-            break;
-    }
-    
-    // Create shift indicator element
-    const shiftIndicator = document.createElement('span');
-    shiftIndicator.className = `bias-shift-indicator ${shiftClass}`;
-    
-    // Add strong class for STRONGLY_* states
-    if (shiftDirection === 'STRONGLY_IMPROVING' || shiftDirection === 'STRONGLY_DETERIORATING') {
-        shiftIndicator.classList.add('bias-shift-strong');
-    }
-    
-    // Format delta (always show sign)
-    const deltaSign = delta >= 0 ? '+' : '';
-    shiftIndicator.innerHTML = `${shiftIcon} ${deltaSign}${delta}`;
-    shiftIndicator.title = `Shift: ${shiftText} (${deltaSign}${delta} from Monday baseline)`;
-    
-    // Append to level element (inline with bias level)
-    weeklyLevelElement.appendChild(shiftIndicator);
-}
+// fetchBiasShiftStatus + updateBiasShiftDisplay removed (Phase 0D)
+// bias-auto/shift-status endpoint no longer exists. Shift data comes from composite.
 
 async function loadBiasDataFallback() {
     // Fallback to old endpoints if scheduler not available
@@ -3257,61 +3107,8 @@ async function loadBiasDataFallback() {
 }
 
 async function loadCyclicalBiasFallback() {
-    try {
-        // Try to load from bias-auto endpoint first
-        const response = await fetch(`${API_URL}/bias-auto/CYCLICAL`);
-        const result = await response.json();
-        
-        const container = document.getElementById('cyclicalBias');
-        const levelElement = document.getElementById('cyclicalLevel');
-        const detailsElement = document.getElementById('cyclicalDetails');
-        
-        if (result.status === 'success' && result.data) {
-            const data = result.data;
-            const bias = data.level || 'LEAN_TORO';
-            
-            if (levelElement) {
-                levelElement.textContent = bias.replace('_', ' ');
-            }
-            
-            if (container) {
-                container.classList.remove('bullish', 'bearish', 'neutral');
-                if (bias.includes('TORO')) {
-                    container.classList.add('bullish');
-                } else if (bias.includes('URSA')) {
-                    container.classList.add('bearish');
-                } else {
-                    container.classList.add('neutral');
-                }
-            }
-            
-            if (detailsElement) {
-                const details = data.details || {};
-                const totalVote = details.total_vote !== undefined ? details.total_vote : '?';
-                const timestamp = data.timestamp ? new Date(data.timestamp).toLocaleString('en-US', {
-                    timeZone: 'America/New_York',
-                    month: 'short',
-                    day: 'numeric',
-                    hour: 'numeric',
-                    minute: '2-digit'
-                }) + ' ET' : 'Unknown';
-                detailsElement.innerHTML = `
-                    Vote: ${totalVote}/12 | Long-term macro<br>
-                    <small>Updated: ${timestamp}</small>
-                `;
-            }
-        } else {
-            if (detailsElement) {
-                detailsElement.textContent = 'Awaiting first refresh';
-            }
-        }
-    } catch (error) {
-        console.error('Error loading Cyclical bias:', error);
-        const detailsElement = document.getElementById('cyclicalDetails');
-        if (detailsElement) {
-            detailsElement.textContent = 'Failed to load';
-        }
-    }
+    // bias-auto/CYCLICAL endpoint removed (Phase 0D). Cyclical data comes from timeframe cards.
+    return;
 }
 
 
@@ -5781,12 +5578,11 @@ async function analyzeTickerEnhanced(ticker) {
         contextContainer.style.display = 'grid';
 
         // Fetch all data in parallel
-        const [ctaResponse, sectorResponse, biasResponse, flowResponse, signalsResponse, priceResponse] = await Promise.all([
+        const [ctaResponse, sectorResponse, biasResponse, flowResponse, priceResponse] = await Promise.all([
             fetch(`${API_URL}/cta/analyze/${ticker}`),
             fetch(`${API_URL}/hybrid/combined/${ticker}`),
-            fetch(`${API_URL}/bias-auto/status`),
+            fetch(`${API_URL}/bias/composite`),
             fetch(`${API_URL}/flow/ticker/${ticker}`),
-            fetch(`${API_URL}/signals/ticker/${ticker}`),
             fetch(`${API_URL}/hybrid/price/${ticker}`)
         ]);
 
@@ -5794,7 +5590,6 @@ async function analyzeTickerEnhanced(ticker) {
         const sectorData = await sectorResponse.json();
         const biasData = await biasResponse.json();
         const flowData = await flowResponse.json();
-        const signalsData = await signalsResponse.json();
         const priceData = await priceResponse.json();
 
         // Populate CTA Zone Card
@@ -5866,20 +5661,10 @@ async function analyzeTickerEnhanced(ticker) {
             flowSummary.innerHTML = '<p class="flow-empty">No recent flow data</p>';
         }
 
-        // Populate Recent Signals Card
+        // Recent Signals Card — per-ticker signal endpoint removed (Phase 0D)
         const signalsSummary = document.getElementById('contextSignalsSummary');
-        if (signalsData.signals && signalsData.signals.length > 0) {
-            const recentSignals = signalsData.signals.slice(0, 3);
-            signalsSummary.innerHTML = recentSignals.map(s => `
-                <div class="signal-item">
-                    <span class="signal-strategy">${s.strategy_name}</span>
-                    <span class="signal-direction ${s.direction === 'LONG' ? 'long' : 'short'}">
-                        ${s.direction}
-                    </span>
-                </div>
-            `).join('');
-        } else {
-            signalsSummary.innerHTML = '<p class="signals-empty">No recent signals</p>';
+        if (signalsSummary) {
+            signalsSummary.innerHTML = '<p class="signals-empty">No per-ticker signal data</p>';
         }
 
         // Wire up action buttons
@@ -8367,7 +8152,7 @@ function updatePositionChartTabs() {
 // Price updates for real-time P&L
 function startPriceUpdates() {
     // Update every 30 seconds
-    priceUpdateInterval = setInterval(updateCurrentPrices, 30000);
+    priceUpdateInterval = setInterval(updateCurrentPrices, 60000);
     // Initial update
     updateCurrentPrices();
 }
