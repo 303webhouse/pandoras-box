@@ -20,28 +20,20 @@
 - [x] 1,268 lines removed across 7 files. In-memory state killed, `accept_signal()` writes to unified_positions, 13 legacy routes deleted, sync functions deleted, frontend unified on v2.
 
 ### ✅ Phase 0D — Frontend Hygiene (COMPLETE — March 10)
-- [x] **Dead endpoints removed** — `bias-auto/status`, `bias-auto/shift-status`, `bias-auto/CYCLICAL`, `signals/ticker/{ticker}` all eliminated
-- [x] **`fetchBiasShiftStatus()` + `updateBiasShiftDisplay()` deleted** — 82 lines, 5-minute dead polling removed
-- [x] **`loadCyclicalBiasFallback()` stubbed** — no more dead `bias-auto/CYCLICAL` call
-- [x] **Analyzer context fixed** — 2 dead fetches removed, bias replaced with working `bias/composite`
-- [x] **Polling consolidated** — positions 10s→30s, portfolio positions 60s removed, price updates 30s→60s
-- [x] **Hybrid scanner documented** — confirmed ACTIVE, added do-not-delete comment to `hybrid_scanner.py`
+- [x] Dead `bias-auto/*` and `signals/ticker` calls eliminated, analyzer fixed, polling consolidated (positions 10s→30s, prices 30s→60s), hybrid scanner documented as active
 - **Total: 233 lines removed, zero 404s in browser console**
 
 ### ✅ Phase 0E — Data Durability (COMPLETE — March 10)
-- [x] **`scripts/safe_jsonl.py` utility** — `safe_append()`, `safe_rewrite()`, `safe_rewrite_json()`, `safe_trim_jsonl()`, `safe_update_line()`. All use temp-file + `os.replace()` (atomic on Linux). Appends use `fsync`.
-- [x] **7 scripts converted** — `pivot2_committee.py`, `committee_decisions.py`, `committee_outcomes.py`, `committee_review.py`, `committee_interaction_handler.py`, `committee_autopsy.py`, `pivot2_twitter.py`
-- [x] Deployed to VPS via SCP, services restarted, verified running clean
-- **Deferred:** Postgres migration for JSONL logs (lower priority now that atomic writes prevent corruption)
+- [x] `safe_jsonl.py` utility (atomic writes via temp+rename, fsync on appends). 7 committee scripts converted. Deployed to VPS.
 
-### Phase 0F — Resilience & Monitoring ← **NEXT**
-- [ ] **Committee heartbeat** — Alert to Discord if no committee run in 2h during market hours
-- [ ] **Factor staleness monitor** — Alert if any factor hasn't updated in 2× its expected TTL
-- [ ] **Webhook dedup in tradingview.py** — Check signal_id before Postgres insert
-- [ ] **Polygon degradation handling** — Return last-known value with stale flag instead of failing
-- **Brief:** `docs/codex-briefs/brief-phase-0f-resilience-monitoring.md`
+### ✅ Phase 0F — Resilience & Monitoring (COMPLETE — March 10)
+- [x] **Committee heartbeat** — `committee_heartbeat.py` on VPS, 2h WARNING / 4h CRITICAL to Discord, market-hours gated, cron every 30m
+- [x] **Factor staleness monitor** — `factor_staleness.py` on Railway, 60-min background loop, alerts to Discord, endpoint `GET /api/monitoring/factor-staleness`
+- [x] **Webhook dedup** — MD5 hash dedup in `tradingview.py` (60s TTL) and `whale.py` (120s TTL), best-effort (never blocks on Redis failure)
+- [x] **Polygon health tracking** — `polygon_health.py` rolling 100-call window, 30-min error rate, endpoint `GET /api/monitoring/polygon-health`
+- **Note:** Committee heartbeat logs to file until `DISCORD_WEBHOOK_SIGNALS` is added to VPS crontab env
 
-### Phase 0G — Test Coverage (Sharp Edges Only)
+### Phase 0G — Test Coverage (Sharp Edges Only) ← **NEXT**
 - [ ] Auth enforcement tests (unauthenticated → 401)
 - [ ] Webhook secret validation tests
 - [ ] Position CRUD tests (create/close/reconcile via v2)
@@ -160,14 +152,16 @@
 
 ---
 
-## ✅ Completed (March 10, 2026) — Phase 0A-0E + Sell the Rip
+## ✅ Completed (March 10, 2026) — Phase 0A-0F + Sell the Rip
 
 - [x] Phase 0A: Repo source of truth — 9 VPS scripts pulled, 8 untracked added, duplicates resolved, stale docs fixed, `config/.env` untracked, security fixes
 - [x] Phase 0B: Auth lockdown — unified `require_api_key()`, auth on all mutation routes, TradingView webhook secret, CORS env var, frontend `authHeaders()` on 30 calls
 - [x] Phase 0C: Positions migration — 1,268 lines removed. In-memory state killed, `accept_signal()` → unified_positions, 13 legacy routes deleted, sync functions deleted, frontend unified on v2
-- [x] Phase 0D: Frontend hygiene — 233 lines removed. Dead `bias-auto/*` and `signals/ticker` calls eliminated, analyzer fixed, polling consolidated (positions 10s→30s, prices 30s→60s, redundant portfolio poll removed), hybrid scanner documented as active
+- [x] Phase 0D: Frontend hygiene — 233 lines removed. Dead `bias-auto/*` and `signals/ticker` calls eliminated, analyzer fixed, polling consolidated
 - [x] Phase 0E: Data durability — `safe_jsonl.py` utility (atomic writes via temp+rename, fsync on appends). 7 committee scripts converted. Deployed to VPS.
-- [x] Sell the Rip scanner v1 — Server-side negative momentum fade + sector rotation layer. `sector_rs.py`, `sell_the_rip_scanner.py`, scorer mods, scan loops in main.py. Strategy doc + brief pushed.
+- [x] Phase 0F: Resilience & monitoring — committee heartbeat (VPS cron), factor staleness monitor (Railway background loop), webhook dedup (MD5 hash, Redis TTL), Polygon health tracking (rolling window + endpoint)
+- [x] Sell the Rip scanner v1 — server-side negative momentum fade + sector rotation layer
+- [x] Redis fix — `load_dotenv()` removed from `redis_client.py`, `REDIS_URL` env var pattern adopted
 
 ## ✅ Completed (March 9, 2026 Session) — 9 builds shipped
 
