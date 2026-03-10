@@ -8,18 +8,20 @@
 
 **Context:** External audit by GPT-5.4 (March 9) identified critical issues: repo not matching production, unauthenticated endpoints, position migration incomplete, frontend/API drift, JSONL fragility. Full audit saved in project chat history.
 
-### Phase 0A — Repo Source of Truth ← **START HERE, Brief written**
-- [ ] **Pull all VPS-only scripts into repo** — `committee_parsers.py`, `committee_decisions.py`, `committee_outcomes.py`, `committee_analytics.py`, `committee_review.py`, `pivot2_trade_poller.py`, `pivot2_brief.py`, `pivot2_twitter.py`, `ibkr_quotes.py` + any others found on VPS but not in repo
-- [ ] **Resolve duplicate interaction handler** — `scripts/committee_interaction_handler.py` vs `openclaw/scripts/committee_interaction_handler.py` have diverged. Pick canonical, delete the other.
-- [ ] **Fix stale docs** — Remove "git pull" deploy instructions from README. Remove Gemini references. Ensure CLAUDE.md, README, REVIEW_CONTEXT.md agree on deployment and LLM provider.
-- [ ] **Remove committed secrets** — `config/.env` contains live DB/Redis/Discord/API credentials. `git rm --cached`, purge from history, rotate any exposed keys.
-- [ ] **Fix DST cron schedules** — IBKR pollers in `jobs.json` still say `14-21 UTC`, should be `13-20 UTC` for EDT. All VPS crons need DST audit.
+### ✅ Phase 0A — Repo Source of Truth (COMPLETE — March 10)
+- [x] **Pull all VPS-only scripts into repo** — 9 missing scripts pulled from VPS, 8 previously untracked added to git. 30 scripts on VPS, all now in `scripts/`.
+- [x] **Resolve duplicate interaction handler** — `openclaw/scripts/` deleted, canonical copies in `scripts/`
+- [x] **Fix stale docs** — Replaced `git pull` with SCP workflow in 5 files, updated Gemini→Claude, updated service names
+- [x] **Remove committed secrets** — `config/.env` untracked, `twitter_health_check.py` sanitized (hardcoded token removed), `committee_autopsy.py` fixed (OpenRouter→Anthropic API)
+- [x] **Updated VPS-diverged files** — `committee_outcomes.py` replaced with newer VPS version (Mar 6 vs Feb 25)
+- **⚠️ Nick action items:** Rotate credentials from `config/.env` + Discord bot token from `twitter_health_check.py`/`pltr_alert.py` (still in git history). SCP fixed `committee_autopsy.py` to VPS.
 
-### Phase 0B — Auth Lockdown
+### Phase 0B — Auth Lockdown ← **NEXT**
 - [ ] **API key middleware on all mutation routes** — Every POST/PATCH/DELETE on positions, trade-ideas, portfolio, committee-bridge requires `X-API-Key` header
 - [ ] **TradingView webhook secret** — Reject payloads without correct shared secret (401)
 - [ ] **Restrict CORS** — `allow_origins=["*"]` → actual frontend origin(s) only
 - [ ] **Standardize auth header** — Pick one convention (`X-API-Key`) for all internal calls
+- [ ] **Fix DST cron schedules** — IBKR pollers in `jobs.json` still say `14-21 UTC`, should be `13-20 UTC` for EDT. All VPS crons need DST audit.
 
 ### Phase 0C — Finish Positions Migration
 - [ ] **Kill legacy `_open_positions` / `_closed_trades`** in-memory state in `positions.py`
@@ -161,6 +163,10 @@
 - [ ] **Drop `open_positions` table** — Now fully deprecated. Portfolio GET reads from `unified_positions`. Table can be dropped after confirming no other callers.
 
 ---
+
+## ✅ Completed (March 10, 2026) — Phase 0A
+
+- [x] Phase 0A: Repo source of truth — 9 VPS scripts pulled, 8 untracked added, duplicates resolved, stale docs fixed in 5 files, `config/.env` untracked, `committee_autopsy.py` fixed (OpenRouter→Anthropic), `twitter_health_check.py` sanitized, `committee_outcomes.py` updated from VPS
 
 ## ✅ Completed (March 9, 2026 Session) — 9 builds shipped
 
