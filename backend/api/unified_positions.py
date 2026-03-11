@@ -141,6 +141,8 @@ class CreatePositionRequest(BaseModel):
 
 class UpdatePositionRequest(BaseModel):
     status: Optional[str] = None  # OPEN, CLOSED, EXPIRED — allows reopening closed positions
+    direction: Optional[str] = None  # LONG, SHORT
+    structure: Optional[str] = None
     stop_loss: Optional[float] = None
     target_1: Optional[float] = None
     target_2: Optional[float] = None
@@ -226,15 +228,20 @@ def _row_to_dict(row) -> dict:
     return d
 
 
-def _compute_unrealized_pnl(entry_price: float, current_price: float, quantity: int, structure: str, asset_type: str = "") -> float:
+def _compute_unrealized_pnl(entry_price: float, current_price: float, quantity: int, structure: str, asset_type: str = "", direction: str = "") -> float:
     """Compute unrealized P&L based on position type and credit/debit nature."""
     if not entry_price or not current_price:
         return 0.0
     s = (structure or "").lower()
     at = (asset_type or "").upper()
+    d = (direction or "").upper()
     is_stock = s in ("stock", "stock_long", "long_stock", "stock_short", "short_stock") or (not s and at == "EQUITY")
     if is_stock:
-        return round((current_price - entry_price) * quantity, 2)
+        qty = abs(quantity)
+        if s in ("stock_short", "short_stock") or d == "SHORT":
+            # Short stock: profit when price drops
+            return round((entry_price - current_price) * qty, 2)
+        return round((current_price - entry_price) * qty, 2)
     if s in CREDIT_STRUCTURES:
         # Credit: received premium at open, pay to close → profit when current < entry
         return round((entry_price - current_price) * 100 * quantity, 2)
@@ -265,6 +272,11 @@ async def create_position(req: CreatePositionRequest, _=Depends(require_api_key)
     if not direction and req.structure:
         direction = infer_direction(req.structure)
     direction = direction or "LONG"
+
+    # Handle short stock: normalize negative qty to positive + SHORT direction
+    if req.quantity < 0:
+        req.quantity = abs(req.quantity)
+        direction = "SHORT"
 
     # Normalize strike order based on spread type before any calculation
     norm_long, norm_short = normalize_spread_strikes(
@@ -788,6 +800,14 @@ async def update_position(position_id: str, req: UpdatePositionRequest, _=Depend
         sets.append(f"status = ${idx}")
         params.append(req.status.upper())
         idx += 1
+    if req.direction is not None:
+        sets.append(f"direction = ${idx}")
+        params.append(req.direction.upper())
+        idx += 1
+    if req.structure is not None:
+        sets.append(f"structure = ${idx}")
+        params.append(req.structure)
+        idx += 1
     if req.stop_loss is not None:
         sets.append(f"stop_loss = ${idx}")
         params.append(req.stop_loss)
@@ -860,7 +880,8 @@ async def update_position(position_id: str, req: UpdatePositionRequest, _=Depend
     if (req.current_price is not None or req.entry_price is not None or req.quantity is not None) and result.get("entry_price") and result.get("current_price"):
         unrealized = _compute_unrealized_pnl(
             result["entry_price"], result["current_price"],
-            result["quantity"], result.get("structure", "")
+            result["quantity"], result.get("structure", ""),
+            direction=result.get("direction", "")
         )
         async with pool.acquire() as conn:
             await conn.execute(
@@ -1279,7 +1300,8 @@ async def reconcile_positions(req: ReconcileRequest, _=Depends(require_api_key))
                 if ep.get("entry_price"):
                     updates["unrealized_pnl"] = _compute_unrealized_pnl(
                         ep["entry_price"], item.current_value,
-                        ep["quantity"], ep.get("structure", "")
+                        ep["quantity"], ep.get("structure", ""),
+                        direction=ep.get("direction", "")
                     )
             if updates:
                 set_parts = []
@@ -1452,7 +1474,8 @@ async def run_mark_to_market() -> dict:
                 if hasattr(info, 'last_price') and info.last_price:
                     current_price = float(info.last_price)
                     unrealized = _compute_unrealized_pnl(
-                        entry_price, current_price, quantity, structure
+                        entry_price, current_price, quantity, structure,
+                        direction=pos.get("direction", "")
                     )
             except Exception:
                 pass
