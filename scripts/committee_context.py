@@ -420,14 +420,16 @@ def _get_macro_briefing_context() -> str:
     except Exception:
         return ""
 
-    # Check staleness
+    # Check staleness — tiered: <24h clean, 24-48h warning, >48h stale
     updated = data.get("updated_at", "")
     stale_warning = ""
     try:
         updated_dt = _dt.datetime.fromisoformat(updated.replace("Z", "+00:00"))
-        age_days = (_dt.datetime.now(_dt.timezone.utc) - updated_dt).days
-        if age_days > 7:
-            stale_warning = f" (WARNING: {age_days} days old — may be outdated)"
+        age_hours = (_dt.datetime.now(_dt.timezone.utc) - updated_dt).total_seconds() / 3600
+        if age_hours > 48:
+            stale_warning = f" (STALE: {age_hours:.0f}h old — pre-scan should refresh)"
+        elif age_hours > 24:
+            stale_warning = f" (WARNING: {age_hours:.0f}h old — verify before relying on details)"
     except Exception:
         pass
 
@@ -1366,3 +1368,211 @@ def _get_agent_feedback_context(agent_name: str) -> str:
     except Exception as e:
         _log.warning("Failed to load agent feedback for %s: %s", agent_name, e)
         return ""
+
+
+# ── Macro Pre-Scan ──────────────────────────────────────────
+
+MACRO_BRIEFING_PATH = Path("/opt/openclaw/workspace/data/macro_briefing.json")
+SONNET_MODEL = "claude-sonnet-4-5-20250929"
+
+
+def _macro_briefing_age_hours() -> float | None:
+    """Return the age of the macro briefing in hours, or None if missing/unparseable."""
+    try:
+        if not MACRO_BRIEFING_PATH.exists():
+            return None
+        data = json.loads(MACRO_BRIEFING_PATH.read_text(encoding="utf-8"))
+        updated = data.get("updated_at", "")
+        if not updated:
+            return None
+        updated_dt = _dt.datetime.fromisoformat(updated.replace("Z", "+00:00"))
+        return (_dt.datetime.now(_dt.timezone.utc) - updated_dt).total_seconds() / 3600
+    except Exception:
+        return None
+
+
+def ensure_fresh_macro_briefing(
+    api_url: str,
+    api_key: str,
+    anthropic_key: str,
+    polygon_key: str | None = None,
+) -> dict:
+    """
+    Check macro briefing freshness and run a Pivot pre-scan if stale (>48h).
+
+    Returns:
+        {"status": "READY", "briefing": <current briefing dict>}
+        {"status": "ASK_NICK", "reason": <str>}
+
+    Staleness tiers:
+        <24h  → READY (use as-is)
+        24-48h → READY (warning prepended by _get_macro_briefing_context)
+        >48h  → trigger Pivot scan → CONFIRM/UPDATE/UNCERTAIN
+    """
+    from committee_parsers import call_agent
+
+    age = _macro_briefing_age_hours()
+
+    # Load current briefing
+    try:
+        briefing = json.loads(MACRO_BRIEFING_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        briefing = {}
+
+    # Fresh enough — no scan needed
+    if age is not None and age <= 48:
+        _log.info("Macro briefing is %.1fh old — fresh enough, skipping pre-scan", age)
+        return {"status": "READY", "briefing": briefing}
+
+    _log.info("Macro briefing is %.1fh old — triggering Pivot pre-scan", age or 999)
+
+    # ── Gather fresh data for the scan ──
+
+    # 1. Polygon news (force fresh by deleting cache)
+    news_text = ""
+    if polygon_key:
+        try:
+            from committee_news import _write_cache, _fetch_polygon_news, format_news_context
+            # Force fresh fetch by clearing market cache
+            market_cache = Path("/opt/openclaw/workspace/data/news_cache/market.json")
+            if market_cache.exists():
+                market_cache.unlink()
+            news = {"market": _fetch_polygon_news(polygon_key, limit=10, lookback_hours=6)}
+            _write_cache("market", news["market"])
+            news_text = format_news_context(news)
+        except Exception as e:
+            _log.warning("Pre-scan news fetch failed: %s", e)
+
+    # 2. Twitter sentiment
+    twitter_text = _get_twitter_sentiment_context(lookback_hours=4)
+    headline_text = _get_headline_context(lookback_hours=6, max_headlines=10)
+
+    # 3. Macro prices from bias composite
+    macro_prices_text = ""
+    try:
+        import urllib.request as _ur
+        base = api_url.rstrip("/")
+        req = _ur.Request(f"{base}/api/bias/composite")
+        with _ur.urlopen(req, timeout=10) as resp:
+            composite = json.loads(resp.read().decode("utf-8"))
+        macro_prices_text = _get_macro_prices_context(composite)
+    except Exception as e:
+        _log.warning("Pre-scan macro prices fetch failed: %s", e)
+
+    # ── Build user message for Pivot scan ──
+    parts = ["## CURRENT MACRO BRIEFING (written by Nick)"]
+    parts.append(f"Updated: {briefing.get('updated_at', 'UNKNOWN')}")
+    parts.append(f"Regime: {briefing.get('regime', 'UNKNOWN')}")
+    parts.append(f"Narrative: {briefing.get('narrative', 'N/A')}")
+    facts = briefing.get("key_facts", [])
+    if facts:
+        parts.append("Key facts:")
+        for f in facts:
+            parts.append(f"- {f}")
+    sectors = briefing.get("sectors_to_watch", {})
+    if sectors:
+        for k, v in sectors.items():
+            if v:
+                parts.append(f"  {k}: {', '.join(v)}")
+
+    parts.append("\n## FRESH MARKET DATA (gathered just now)")
+    if macro_prices_text:
+        parts.append(macro_prices_text)
+    if news_text:
+        parts.append(news_text)
+    if headline_text:
+        parts.append(headline_text)
+    if twitter_text:
+        parts.append(twitter_text)
+
+    if not macro_prices_text and not news_text and not headline_text and not twitter_text:
+        _log.warning("Pre-scan has no fresh data — cannot assess, returning ASK_NICK")
+        return {"status": "ASK_NICK", "reason": "No fresh market data available for pre-scan comparison"}
+
+    user_message = "\n\n".join(parts)
+
+    # ── Call Sonnet ──
+    from committee_prompts import PIVOT_MACRO_SCAN_PROMPT
+
+    raw = call_agent(
+        system_prompt=PIVOT_MACRO_SCAN_PROMPT,
+        user_message=user_message,
+        api_key=anthropic_key,
+        max_tokens=800,
+        temperature=0.2,
+        agent_name="PIVOT_MACRO_SCAN",
+        timeout=30,
+        model=SONNET_MODEL,
+    )
+
+    if not raw:
+        _log.error("Pre-scan LLM call returned None — returning ASK_NICK")
+        return {"status": "ASK_NICK", "reason": "Pre-scan LLM call failed"}
+
+    # ── Parse response ──
+    verdict = None
+    reasoning = ""
+    briefing_json_str = ""
+    uncertain_reason = ""
+
+    in_json = False
+    json_lines = []
+
+    for line in raw.strip().split("\n"):
+        stripped = line.strip()
+        upper = stripped.upper()
+
+        if upper.startswith("VERDICT:"):
+            v = stripped[8:].strip().upper()
+            if v in ("CONFIRM", "UPDATE", "UNCERTAIN"):
+                verdict = v
+        elif upper.startswith("REASONING:"):
+            reasoning = stripped[10:].strip()
+        elif upper.startswith("REASON:"):
+            uncertain_reason = stripped[7:].strip()
+        elif stripped == "```json":
+            in_json = True
+        elif stripped == "```" and in_json:
+            in_json = False
+            briefing_json_str = "\n".join(json_lines)
+        elif in_json:
+            json_lines.append(stripped)
+
+    _log.info("Pre-scan verdict: %s — %s", verdict, reasoning)
+
+    if verdict == "CONFIRM":
+        # Touch updated_at to reset staleness clock
+        try:
+            briefing["updated_at"] = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            briefing["updated_by"] = "pivot_prescan_confirm"
+            MACRO_BRIEFING_PATH.write_text(json.dumps(briefing, indent=2), encoding="utf-8")
+            _log.info("Pre-scan CONFIRM — touched updated_at")
+        except Exception as e:
+            _log.warning("Failed to touch briefing updated_at: %s", e)
+        return {"status": "READY", "briefing": briefing}
+
+    elif verdict == "UPDATE" and briefing_json_str:
+        try:
+            new_data = json.loads(briefing_json_str)
+            new_briefing = {
+                "updated_at": _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "updated_by": "pivot_prescan_update",
+                "regime": new_data.get("regime", briefing.get("regime", "UNKNOWN")),
+                "narrative": new_data.get("narrative", briefing.get("narrative", "")),
+                "key_facts": new_data.get("key_facts", briefing.get("key_facts", [])),
+                "sectors_to_watch": new_data.get("sectors_to_watch", briefing.get("sectors_to_watch", {})),
+            }
+            MACRO_BRIEFING_PATH.write_text(json.dumps(new_briefing, indent=2), encoding="utf-8")
+            _log.info("Pre-scan UPDATE — wrote new briefing (regime: %s)", new_briefing["regime"])
+            return {"status": "READY", "briefing": new_briefing}
+        except (json.JSONDecodeError, Exception) as e:
+            _log.error("Pre-scan UPDATE but failed to parse JSON: %s", e)
+            return {"status": "ASK_NICK", "reason": f"Pre-scan suggested update but JSON parse failed: {e}"}
+
+    elif verdict == "UNCERTAIN":
+        reason = uncertain_reason or reasoning or "Pivot could not confidently assess macro state"
+        return {"status": "ASK_NICK", "reason": reason}
+
+    else:
+        _log.warning("Pre-scan returned unrecognized verdict: %s", verdict)
+        return {"status": "ASK_NICK", "reason": f"Pre-scan returned unrecognized verdict: {verdict}"}
