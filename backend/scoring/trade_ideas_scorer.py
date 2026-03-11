@@ -50,10 +50,15 @@ STRATEGY_BASE_SCORES = {
     "EXHAUSTION_TOP": 45,
     "EXHAUSTION_BOTTOM": 45,
     
-    # Sniper signals
+    # Sniper signals (legacy Ursa/Taurus continuation)
     "SNIPER": 40,
     "SNIPER_URSA": 40,
     "SNIPER_TAURUS": 40,
+
+    # Artemis (VWAP band mean reversion)
+    "ARTEMIS": 45,
+    "ARTEMIS_LONG": 45,
+    "ARTEMIS_SHORT": 45,
 
     # Holy Grail Pullback Continuation (Raschke-style)
     # 1H scores higher — cleaner pullbacks, better R:R
