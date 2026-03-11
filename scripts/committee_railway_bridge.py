@@ -118,12 +118,14 @@ def run_committee_on_signal(signal: dict) -> dict | None:
         DEFAULT_CHANNEL_ID,
     )
     from committee_decisions import build_button_components, save_pending
+    from committee_context import ensure_fresh_macro_briefing
 
     cfg = load_openclaw_config()
     env_file = load_env_file(OPENCLAW_ENV_FILE)
     api_key = pick_env("PIVOT_API_KEY", cfg, env_file)
     anthropic_key = pick_env("ANTHROPIC_API_KEY", cfg, env_file)
     api_url = pick_env("PANDORA_API_URL", cfg, env_file) or RAILWAY_BASE + "/api"
+    polygon_key = pick_env("POLYGON_API_KEY", cfg, env_file)
 
     if not api_key:
         log.error("PIVOT_API_KEY not found — cannot call Railway API")
@@ -136,6 +138,27 @@ def run_committee_on_signal(signal: dict) -> dict | None:
     start = time.time()
 
     try:
+        # ── Macro pre-scan: verify briefing freshness before committee ──
+        prescan = ensure_fresh_macro_briefing(
+            api_url=api_url,
+            api_key=api_key,
+            anthropic_key=anthropic_key,
+            polygon_key=polygon_key,
+        )
+
+        if prescan["status"] == "ASK_NICK":
+            reason = prescan.get("reason", "Unknown")
+            log.warning("Macro pre-scan returned ASK_NICK: %s — skipping %s",
+                        reason, signal.get("ticker"))
+            # Post a Discord message so Nick knows
+            try:
+                discord_token = load_discord_token(cfg, env_file)
+                channel_id = pick_env("COMMITTEE_CHANNEL_ID", cfg, env_file) or DEFAULT_CHANNEL_ID
+                _post_prescan_alert(discord_token, channel_id, signal, reason)
+            except Exception as e:
+                log.error("Failed to post pre-scan Discord alert: %s", e)
+            return None  # Signal stays in queue for next poll
+
         context = build_market_context(signal, api_url, api_key)
         recommendation = run_committee(signal, context, anthropic_key)
         elapsed_ms = (time.time() - start) * 1000
@@ -173,6 +196,39 @@ def run_committee_on_signal(signal: dict) -> dict | None:
     except Exception as e:
         log.error("Committee run failed for %s: %s", signal.get("signal_id"), e)
         return None
+
+
+# ── Pre-scan Discord alert ────────────────────────────────────
+
+def _post_prescan_alert(discord_token: str, channel_id: str, signal: dict, reason: str):
+    """Post a simple Discord message when macro pre-scan returns UNCERTAIN."""
+    ticker = signal.get("ticker", "???")
+    signal_id = signal.get("signal_id", "???")
+
+    content = (
+        f"**Macro Pre-Scan: Manual Review Needed**\n"
+        f"Signal `{ticker}` (`{signal_id}`) is waiting for committee review, "
+        f"but the macro briefing could not be auto-verified.\n"
+        f"**Reason:** {reason}\n"
+        f"Please run `/macro-update` or manually verify `macro_briefing.json`, "
+        f"then the next bridge poll will pick up the signal."
+    )
+
+    payload = json.dumps({"content": content}).encode()
+    url = f"https://discord.com/api/v10/channels/{channel_id}/messages"
+    req = urllib.request.Request(
+        url, data=payload,
+        headers={
+            "Authorization": f"Bot {discord_token}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            log.info("Posted pre-scan alert to Discord for %s", ticker)
+    except Exception as e:
+        log.error("Failed to post pre-scan alert: %s", e)
 
 
 # ── Main ─────────────────────────────────────────────────────
