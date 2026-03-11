@@ -53,6 +53,281 @@ const COMPOSITE_FACTOR_DISPLAY_ORDER = [
     'savita'
 ];
 
+// --- Daily Quote System ---
+const DAILY_QUOTES = {
+    greedy: [
+        ["Be fearful when others are greedy and greedy only when others are fearful.", "Warren Buffett"],
+        ["Bull markets are born on pessimism, grow on skepticism, mature on optimism, and die on euphoria.", "John Templeton"],
+        ["The most common cause of low prices is pessimism... It\u2019s optimism that is the enemy of the rational buyer.", "Warren Buffett"],
+        ["They know that overstaying the festivities... will eventually bring on pumpkins and mice.", "Warren Buffett"],
+        ["There\u2019s a problem, though: They are dancing in a room in which the clocks have no hands.", "Warren Buffett"],
+        ["When I see a bubble forming, I rush in to buy, adding fuel to the fire.", "George Soros"],
+        ["Three things ruin people: drugs, liquor, and leverage.", "Charlie Munger"],
+        ["The game of speculation is the most uniformly fascinating game in the world.", "Jesse Livermore"],
+        ["Greed, for lack of a better word, is good.", "Gordon Gekko"],
+        ["Greed is all right, by the way. I think greed is healthy.", "Ivan Boesky"],
+        ["The four most dangerous words in investing are: \u2018This time it\u2019s different.\u2019", "John Templeton"],
+        ["Only when the tide goes out do you discover who\u2019s been swimming naked.", "Warren Buffett"],
+        ["There is nothing new in Wall Street. There can\u2019t be because speculation is as old as the hills.", "Jesse Livermore"],
+        ["Markets are constantly in a state of uncertainty and flux and money is made by discounting the obvious and betting on the unexpected.", "George Soros"],
+        ["When beggars and shoeshine boys can tell you how to get rich, it is time to remind yourself that there is no more dangerous illusion than the belief that one can get something for nothing.", "Bernard Baruch"],
+        ["People calculate too much and think too little.", "Charlie Munger"],
+        ["It is not the strong who survive, but those who can manage change.", "Leon C. Megginson"],
+        ["Don\u2019t be a hero. Don\u2019t have an ego.", "Paul Tudor Jones"],
+        ["The idea of caring that someone is making money faster than you is one of the deadly sins.", "Charlie Munger"],
+        ["What the wise man does in the beginning, the fool does in the end.", "Howard Marks"],
+        ["The three stages of a bull market are the first, when only a few unusually perceptive people believe things will get better; the second, when most investors realize improvement is taking place; and the third, when everyone concludes things will get better forever.", "Howard Marks"],
+        ["You adapt, evolve, compete or die.", "Paul Tudor Jones"],
+        ["The problem with experts is that they do not know what they do not know.", "Nassim Nicholas Taleb"],
+        ["People overvalue their knowledge and underestimate the probability of their being wrong.", "Nassim Nicholas Taleb"],
+        ["For investors as a whole, returns decrease as motion increases.", "Warren Buffett"],
+        ["The stock market is a device for transferring money from the impatient to the patient.", "Warren Buffett"],
+        ["If you don\u2019t know who you are, this is an expensive place to find out.", "Adam Smith"],
+        ["The market can stay irrational longer than you can stay solvent.", "John Maynard Keynes"],
+        ["What counts for most people in investing is not how much they know, but rather how realistically they define what they don\u2019t know.", "Warren Buffett"],
+        ["It never was my thinking that made the big money for me. It always was my sitting.", "Jesse Livermore"],
+        ["The big money is not in the buying and selling, but in the waiting.", "Charlie Munger"],
+        ["You have to learn how to use your emotions to think, not think with your emotions.", "Robert Kiyosaki"],
+        ["The trend is your friend until the end when it bends.", "Ed Seykota"],
+        ["Risk means more things can happen than will happen.", "Elroy Dimson"],
+        ["Far more money has been lost by investors preparing for corrections than in corrections themselves.", "Peter Lynch"],
+        ["Successful speculation requires capital, courage and judgment.", "Philip Carret"],
+        ["Nothing sedates rationality like large doses of effortless money.", "Warren Buffett"],
+        ["Some people seem to like to lose, so they win by losing money.", "Ed Seykota"],
+        ["Never ask a barber if you need a haircut.", "Warren Buffett"],
+        ["If you buy them cheap enough, they watch themselves.", "Philip Carret"]
+    ],
+    optimistic: [
+        ["Never bet against America.", "Warren Buffett"],
+        ["An investment in knowledge pays the best interest.", "Benjamin Franklin"],
+        ["Our favorite holding period is forever.", "Warren Buffett"],
+        ["Don\u2019t look for the needle in the haystack. Just buy the haystack!", "John Bogle"],
+        ["The time of maximum pessimism is the best time to buy.", "John Templeton"],
+        ["Corporate profits will be a lot higher 10 years from now. They\u2019ll be a lot higher 20 years from now.", "Peter Lynch"],
+        ["The stock market is filled with individuals who know the price of everything, but the value of nothing.", "Philip Fisher"],
+        ["I\u2019m an optimist, both as a person and an investor.", "Philip Carret"],
+        ["If you aren\u2019t willing to own a stock for ten years, don\u2019t even think about owning it for ten minutes.", "Warren Buffett"],
+        ["The best chance to deploy capital is when things are going down.", "Warren Buffett"],
+        ["Wide diversification is only required when investors do not understand what they are doing.", "Warren Buffett"],
+        ["Opportunities come infrequently. When it rains gold, put out the bucket, not the thimble.", "Warren Buffett"],
+        ["It\u2019s an opportunity to buy more.", "John Bogle"],
+        ["The courage to press on regardless... is the quintessential attribute of the successful investor.", "John Bogle"],
+        ["Given a 10% chance of a 100 times payoff, you should take that bet every time.", "Jeff Bezos"],
+        ["With a good perspective on history, we can have a better understanding of the past and present, and thus a clear vision of the future.", "Carlos Slim Helu"],
+        ["Courage taught me no matter how bad a crisis gets... any sound investment will eventually pay off.", "Carlos Slim Helu"],
+        ["The stock market is a no-called-strike game. You don\u2019t have to swing at everything\u2014you can wait for your pitch.", "Warren Buffett"],
+        ["The best thing to do is to own the S&P 500 index fund.", "Warren Buffett"],
+        ["If you invested in a very low-cost index fund... you\u2019ll do better than 90% of people who start investing at the same time.", "Warren Buffett"],
+        ["Buy into a company because you want to own it, not because you want the stock to go up.", "Warren Buffett"],
+        ["The best thing that happens to us is when a great company gets into temporary trouble.", "Warren Buffett"],
+        ["Time is the friend of the wonderful company, the enemy of the mediocre.", "Warren Buffett"],
+        ["The stock market is designed to transfer money from the active to the patient.", "Warren Buffett"],
+        ["In the short run, the market is a voting machine but in the long run it is a weighing machine.", "Benjamin Graham"],
+        ["Invest for the long haul. Don\u2019t get too greedy and don\u2019t get too scared.", "Shelby M.C. Davis"],
+        ["I make no attempt to forecast the general market\u2014my efforts are devoted to finding undervalued securities.", "Warren Buffett"],
+        ["The most important quality for an investor is temperament, not intellect.", "Warren Buffett"],
+        ["Behind every stock is a company. Find out what it\u2019s doing.", "Peter Lynch"],
+        ["Know what you own, and know why you own it.", "Peter Lynch"],
+        ["To the extent we have been successful, it is because we concentrated on identifying one-foot hurdles that we could step over.", "Warren Buffett"],
+        ["Traders rarely die rich, patient investors often do.", "Philip Carret"],
+        ["All intelligent investing is value investing\u2014acquiring more than you are paying for.", "Charlie Munger"],
+        ["The best way to own common stocks is through an index fund.", "John Bogle"],
+        ["Finding the really outstanding companies and staying with them through all the fluctuations of a gyrating market proved far more profitable than trying to buy them cheap and sell them dear.", "Philip A. Fisher"],
+        ["The great thing about the stock market is that it is the only place where things go on sale and all the customers run out of the store.", "Cullen Roche"],
+        ["Buy when everyone else is selling and hold when everyone else is buying.", "J. Paul Getty"],
+        ["To invest successfully over a lifetime does not require a stratospheric IQ, unusual business insights, or inside information.", "Warren Buffett"],
+        ["A low-cost index fund is the most sensible equity investment for the great majority of investors.", "John Bogle"],
+        ["Stay the course.", "John Bogle"]
+    ],
+    pragmatic: [
+        ["Price is what you pay; value is what you get.", "Warren Buffett"],
+        ["Risk comes from not knowing what you\u2019re doing.", "Warren Buffett"],
+        ["The essence of investment management is the management of risks, not the management of returns.", "Benjamin Graham"],
+        ["Investment is most intelligent when it is most businesslike.", "Benjamin Graham"],
+        ["The individual investor should act consistently as an investor and not as a speculator.", "Benjamin Graham"],
+        ["In the world of money, which is a world shaped by human behavior, nobody has the foggiest notion of what will happen in the future.", "John Kenneth Galbraith"],
+        ["Most of the time we are punished if we go against the trend. Only at an inflection point are we rewarded.", "George Soros"],
+        ["It\u2019s not whether you\u2019re right or wrong that\u2019s important, but how much money you make when you\u2019re right and how much you lose when you\u2019re wrong.", "George Soros"],
+        ["My approach works not by making valid predictions, but by allowing me to correct false ones.", "George Soros"],
+        ["Trade only when the market is clearly bullish or bearish.", "Jesse Livermore"],
+        ["There are many times when I have been completely in cash.", "Jesse Livermore"],
+        ["The change in the major trend is what hurts most speculators.", "Jesse Livermore"],
+        ["Don\u2019t be a hero. Don\u2019t have an ego. Always question yourself and your ability.", "Paul Tudor Jones"],
+        ["The most important rule of trading is to play great defense, not great offense.", "Paul Tudor Jones"],
+        ["Losers average losers.", "Paul Tudor Jones"],
+        ["If you have a losing position that is making you uncomfortable, the solution is very simple: get out.", "Paul Tudor Jones"],
+        ["Cut your losses.", "George Soros"],
+        ["The investor\u2019s chief problem\u2014and even his worst enemy\u2014is likely to be himself.", "Benjamin Graham"],
+        ["I react pragmatically. Where the market works, I\u2019m for that. Where the government is necessary, I\u2019m for that.", "John Kenneth Galbraith"],
+        ["It will fluctuate.", "J. P. Morgan"],
+        ["Inflation is always and everywhere a monetary phenomenon.", "Milton Friedman"],
+        ["Economics is not simply a topic on which to express opinions or vent emotions.", "Thomas Sowell"],
+        ["Everyone responds to incentives, including people you want to help.", "Thomas Sowell"],
+        ["Many things that are desirable are not feasible.", "Thomas Sowell"],
+        ["Other people have more information about their abilities, their efforts, and their preferences than you do.", "Thomas Sowell"],
+        ["The market is there to serve you, not to instruct you.", "Benjamin Graham"],
+        ["Basically, price fluctuations have only one significant meaning for the true investor.", "Benjamin Graham"],
+        ["At other times he will do better if he forgets about the stock market and pays attention to his dividend returns and to the operating results of his companies.", "Benjamin Graham"],
+        ["The principal role of the mutual fund is to serve its investors.", "John Bogle"],
+        ["Beating the market is a zero-sum game for investors.", "John Bogle"],
+        ["The zero-sum game before costs becomes a loser\u2019s game after costs.", "John Bogle"],
+        ["Stock prices will always be far more volatile than cash-equivalent holdings.", "Warren Buffett"],
+        ["Volatility is far from synonymous with risk.", "Warren Buffett"],
+        ["We have no theory of the duration of a bubble. It can always go on longer than anyone expects.", "Paul Samuelson"],
+        ["The real reason that physicians are mediocre investors is that it never occurs to them that finance is a science.", "William J. Bernstein"],
+        ["A healthy portfolio requires a regular checkup\u2014perhaps every six months or so.", "Peter Lynch"],
+        ["The most important thing in investing is to use common sense.", "Philip Carret"],
+        ["If you don\u2019t understand a company, if you can\u2019t explain it to a ten-year-old in two minutes or less, don\u2019t own it.", "Peter Lynch"],
+        ["You get recessions, you have stock market declines. If you don\u2019t understand that\u2019s going to happen, then you\u2019re not ready.", "Peter Lynch"],
+        ["A speculator is a man who observes the future, and acts before it occurs.", "Bernard Baruch"]
+    ],
+    cynical: [
+        ["The function of economic forecasting is to make astrology look respectable.", "John Kenneth Galbraith"],
+        ["There are two kinds of forecasters: those who don\u2019t know, and those who don\u2019t know they don\u2019t know.", "John Kenneth Galbraith"],
+        ["The stock market has forecast nine of the last five recessions.", "Paul Samuelson"],
+        ["The world of finance is a mysterious world in which, incredible as the fact may appear, evaporation precedes liquidation.", "Joseph Conrad"],
+        ["FINANCE, n. The art or science of managing revenues and resources for the best advantage of the manager.", "Ambrose Bierce"],
+        ["ECONOMY, n. Purchasing the barrel of whiskey that you do not need for the price of the cow that you cannot afford.", "Ambrose Bierce"],
+        ["We have met the enemy and he is us.", "John Bogle"],
+        ["The business model of Wall Street is fraud.", "Bernie Sanders"],
+        ["Wall Street regulates the Congress.", "Bernie Sanders"],
+        ["The U.S. brokerage and investment banking industry has transformed the modern American stock market into nothing more than a mechanism for transferring wealth from shareholders to management.", "Peter Schiff"],
+        ["The dumbest reason in the world to buy a stock is because it\u2019s going up.", "Warren Buffett"],
+        ["Forecasts may tell you a great deal about the forecaster; they tell you nothing about the future.", "Warren Buffett"],
+        ["We\u2019ve long felt that the only value of stock forecasters is to make fortune tellers look good.", "Warren Buffett"],
+        ["Nothing in finance is more fatuous and harmful... than the attitude: \u2018If you don\u2019t like the management, sell your stock.\u2019", "Benjamin Graham"],
+        ["The rich are always advising the poor, but the poor do not get much benefit from their advice.", "John Selden"],
+        ["The public owners seem to have abdicated all claim to control over the paid superintendents of their property.", "Benjamin Graham"],
+        ["If past history was all there was to the game, the richest people would be librarians.", "Warren Buffett"],
+        ["It is difficult to get a man to understand something when his salary depends upon his not understanding it.", "Upton Sinclair"],
+        ["The whole notion of the free market... is a very thin rationale for unmitigated greed by a tiny oligarchic elite.", "Chris Hedges"],
+        ["When people behave badly they always invent a philosophy of life which represents their bad actions... as results of unalterable laws beyond their control.", "Leo Tolstoy"],
+        ["Capitalism is the astonishing belief that the nastiest motives of the nastiest men somehow or other work together for the best results.", "John Maynard Keynes"],
+        ["Wealth, in even the most improbable cases, manages to convey the aspect of intelligence.", "John Kenneth Galbraith"],
+        ["Politics is not the art of the possible. It consists in choosing between the disastrous and the unpalatable.", "John Kenneth Galbraith"],
+        ["There\u2019s no longer any reason to believe that the wizards of Wall Street actually contribute anything positive to society.", "Paul Krugman"],
+        ["It\u2019s hard to think of any major recent financial innovations that actually aided society, as opposed to being new, improved ways to blow bubbles.", "Paul Krugman"],
+        ["The U.S. stock market was now a class system, rooted in speed, of haves and have-nots.", "Michael Lewis"],
+        ["What had once been the world\u2019s most public, most democratic financial market had become... a private viewing of a stolen work of art.", "Michael Lewis"],
+        ["Money never sleeps.", "Gordon Gekko"],
+        ["The problem with money... it makes you do things you don\u2019t want to do.", "Lou Mannheim"],
+        ["Kid, you\u2019re on a roll. Enjoy it while it lasts, because it never does.", "Lou Mannheim"],
+        ["No such thing except death and taxes.", "Lou Mannheim"],
+        ["Quick-buck artists come and go with every bull market, but the steady players make it through the bear market.", "Lou Mannheim"],
+        ["It\u2019s a zero-sum game\u2014somebody wins, somebody loses.", "Gordon Gekko"],
+        ["I create nothing. I own.", "Gordon Gekko"],
+        ["We make the rules, pal.", "Gordon Gekko"],
+        ["The main purpose of the stock market is to make fools of as many men as possible.", "Bernard Baruch"],
+        ["Markets don\u2019t look after social needs.", "George Soros"],
+        ["Markets are designed to allow individuals to look after their private needs and to pursue profit.", "George Soros"],
+        ["I have already made up my mind, don\u2019t confuse me with facts.", "Philip A. Fisher"],
+        ["I can hire one half of the working class to kill the other half.", "Jay Gould"]
+    ],
+    pessimistic: [
+        ["Many of the greatest economic evils of our time are the fruits of risk, uncertainty, and ignorance.", "John Maynard Keynes"],
+        ["Bottoms in the investment world don\u2019t end with four-year lows; they end with 10- or 15-year lows.", "Jim Rogers"],
+        ["I haven\u2019t the faintest idea where the stock market is going. But I can promise you that someday there will be a big bear market\u2014and a lot of people will lose money.", "Philip Carret"],
+        ["I can calculate the movement of the stars, but not the madness of men.", "Isaac Newton"],
+        ["It was one of those rare manifestations of mass financial madness.", "Benjamin Graham"],
+        ["That man would be better off if his stocks had no market quotation at all.", "Benjamin Graham"],
+        ["The debt crisis is not a temporary problem, it is a structural one. We need rehab.", "Nassim Nicholas Taleb"],
+        ["Economic life should be definancialised.", "Nassim Nicholas Taleb"],
+        ["Markets do not harbour the certainties that normal citizens require.", "Nassim Nicholas Taleb"],
+        ["Prices are too high is far from synonymous with the next move will be downward.", "Howard Marks"],
+        ["You only learn who has been swimming naked when the tide goes out.", "Warren Buffett"],
+        ["In bear markets, things first decline to reasonable prices, then they fall to cheap prices, and then they reach unbelievable giveaway prices.", "Jim Rogers"],
+        ["After that, things get really bad, and everybody gets cleaned out.", "Jim Rogers"],
+        ["If the market persists in behaving foolishly, all he seems to need is ordinary common sense in order to exploit its foolishness.", "Benjamin Graham"],
+        ["Not all bubbles involve the extension of credit; some are based on equity leveraging.", "George Soros"],
+        ["Equilibrium itself has rarely been observed in real life\u2014market prices have a notorious habit of fluctuating.", "George Soros"],
+        ["The usual way I lose money is by buying concept stocks.", "Philip Carret"],
+        ["The investors operate with limited intelligence: they do not know everything.", "George Soros"],
+        ["The nature of unemployment today is totally different from what it was a year ago.", "John Maynard Keynes"],
+        ["Capitalism, wisely managed, can probably be made more efficient... but in itself it is in many ways extremely objectionable.", "John Maynard Keynes"],
+        ["The pre-1800 pattern of commercial panics had to be a case of non macro-efficiency of markets.", "Paul Samuelson"],
+        ["You cannot make money on correcting macro inefficiencies in the price level of the stock market.", "Paul Samuelson"],
+        ["We have no theory of the duration of a bubble.", "Paul Samuelson"],
+        ["The future can well witness the oldest business cycle mechanism, the South Sea Bubble, and that kind of thing.", "Paul Samuelson"],
+        ["There are old investors, and there are bold investors, but there are no old bold investors.", "Howard Marks"],
+        ["The world is not driven by greed. It\u2019s driven by envy.", "Charlie Munger"],
+        ["Envy is a really stupid sin because it\u2019s the only one you could never possibly have any fun at.", "Charlie Munger"],
+        ["When everybody thinks alike, everybody is likely to be wrong.", "Humphrey B. Neill"],
+        ["If you\u2019re in the poker game and you don\u2019t know who the patsy is, you\u2019re the patsy.", "Warren Buffett"],
+        ["There are old traders and there are bold traders, but there are very few old, bold traders.", "Wall Street saying"],
+        ["The first rule is not to lose. The second rule is not to forget the first rule.", "Warren Buffett"],
+        ["You can be certain that the market will eventually return to value.", "Benjamin Graham"],
+        ["History never looks like history when you are living through it.", "John W. Gardner"],
+        ["For every action, there is an equal and opposite government program.", "Bob Wells"],
+        ["Speculation is most dangerous when it looks easiest.", "Howard Marks"],
+        ["Investing is a popularity contest, and the most dangerous thing is to buy something at the peak of its popularity.", "Howard Marks"],
+        ["Skepticism and pessimism aren\u2019t synonymous. Skepticism calls for pessimism when optimism is excessive.", "Howard Marks"],
+        ["Bullish or bearish are terms used by people who do not engage in practicing uncertainty.", "Nassim Nicholas Taleb"],
+        ["The more the market goes up, the lower the prospective return.", "Howard Marks"],
+        ["This is not a market for the complacent.", "Howard Marks"]
+    ]
+};
+
+const BIAS_TO_QUOTE_CATEGORY = {
+    TORO_MAJOR: 'greedy',
+    TORO_MINOR: 'optimistic',
+    NEUTRAL: 'pragmatic',
+    URSA_MINOR: 'pessimistic',
+    URSA_MAJOR: 'cynical'
+};
+
+function getDailyQuote(biasLevel) {
+    const category = BIAS_TO_QUOTE_CATEGORY[biasLevel] || 'pragmatic';
+    const quotes = DAILY_QUOTES[category];
+    if (!quotes || quotes.length === 0) return null;
+
+    const storageKey = `dailyQuote_shown_${category}`;
+    const dateKey = `dailyQuote_date_${category}`;
+    const indexKey = `dailyQuote_index_${category}`;
+    const today = new Date().toISOString().slice(0, 10);
+
+    // If we already picked a quote for this category today, reuse it
+    const savedDate = localStorage.getItem(dateKey);
+    const savedIndex = parseInt(localStorage.getItem(indexKey), 10);
+    if (savedDate === today && Number.isFinite(savedIndex) && savedIndex < quotes.length) {
+        return { text: quotes[savedIndex][0], author: quotes[savedIndex][1] };
+    }
+
+    // Load shown indices for this category
+    let shown = [];
+    try { shown = JSON.parse(localStorage.getItem(storageKey) || '[]'); } catch (e) { shown = []; }
+
+    // If all shown, reset
+    if (shown.length >= quotes.length) shown = [];
+
+    // Build available pool
+    const available = [];
+    for (let i = 0; i < quotes.length; i++) {
+        if (!shown.includes(i)) available.push(i);
+    }
+
+    // Deterministic daily pick from available pool using date as seed
+    const dateSeed = today.split('-').join('');
+    const hash = Array.from(dateSeed).reduce((h, c) => ((h << 5) - h + c.charCodeAt(0)) | 0, 0);
+    const pick = available[Math.abs(hash) % available.length];
+
+    // Save state
+    shown.push(pick);
+    localStorage.setItem(storageKey, JSON.stringify(shown));
+    localStorage.setItem(dateKey, today);
+    localStorage.setItem(indexKey, String(pick));
+
+    return { text: quotes[pick][0], author: quotes[pick][1] };
+}
+
+function updateDailyQuote(biasLevel) {
+    const el = document.getElementById('dailyQuote');
+    if (!el) return;
+    const quote = getDailyQuote(biasLevel);
+    if (!quote) { el.innerHTML = ''; return; }
+    const colors = BIAS_COLORS[biasLevel] || BIAS_COLORS.NEUTRAL;
+    el.innerHTML = `\u201C${escapeHtml(quote.text)}\u201D <span class="quote-author" style="color:${colors.accent}">\u2014 ${escapeHtml(quote.author)}</span>`;
+}
+
 // Direction alignment check — used by WebSocket handlers and position card logic
 function isDirectionAligned(posDirection, signalDirection) {
     const pos = (posDirection || '').toUpperCase();
@@ -1482,6 +1757,9 @@ function renderCompositeBias(data, dailyData = null) {
     const dailyColorKey = normalizeCompositeBiasLevel(dailyLevel);
     const colors = BIAS_COLORS[dailyColorKey] || BIAS_COLORS.NEUTRAL;
 
+    // Update daily quote to match current bias
+    updateDailyQuote(dailyColorKey);
+
     const scoreValue = typeof data.composite_score === 'number'
         ? data.composite_score
         : parseFloat(data.composite_score || 0);
@@ -1877,14 +2155,10 @@ function checkPivotHealth() {
     const indicators = Array.from(document.querySelectorAll('[data-pivot-health="true"]'));
     if (!indicators.length) return;
 
-    const updateIndicators = (status, text) => {
+    const updateIndicators = (status) => {
         indicators.forEach(indicator => {
-            const dot = indicator.querySelector('.pivot-dot');
-            const textEl = indicator.querySelector('.pivot-text');
             indicator.classList.remove('online', 'offline');
             if (status) indicator.classList.add(status);
-            if (dot) dot.textContent = 'o';
-            if (textEl) textEl.textContent = text;
         });
     };
 
@@ -1892,20 +2166,20 @@ function checkPivotHealth() {
         .then(resp => resp.ok ? resp.json() : null)
         .then(data => {
             if (!data || !data.last_heartbeat) {
-                updateIndicators(null, 'Pivot unknown');
+                updateIndicators(null);
                 return;
             }
 
             const lastHeartbeat = new Date(data.last_heartbeat);
             const minutesAgo = (Date.now() - lastHeartbeat.getTime()) / 60000;
             if (minutesAgo < 30) {
-                updateIndicators('online', 'Pivot live');
+                updateIndicators('online');
             } else {
-                updateIndicators('offline', `Pivot offline (${Math.round(minutesAgo)}m)`);
+                updateIndicators('offline');
             }
         })
         .catch(() => {
-            updateIndicators(null, 'Pivot unknown');
+            updateIndicators(null);
         });
 }
 
@@ -1913,14 +2187,10 @@ function checkRedisHealth() {
     const indicators = Array.from(document.querySelectorAll('[data-redis-health="true"]'));
     if (!indicators.length) return;
 
-    const updateIndicators = (status, text, title) => {
+    const updateIndicators = (status, title) => {
         indicators.forEach(indicator => {
-            const dot = indicator.querySelector('.redis-dot');
-            const textEl = indicator.querySelector('.redis-text');
             indicator.classList.remove('ok', 'throttled', 'error');
             if (status) indicator.classList.add(status);
-            if (dot) dot.textContent = 'o';
-            if (textEl) textEl.textContent = text;
             if (title) {
                 indicator.title = title;
             } else {
@@ -1933,7 +2203,7 @@ function checkRedisHealth() {
         .then(resp => resp.ok ? resp.json() : null)
         .then(data => {
             if (!data) {
-                updateIndicators(null, 'Redis unknown');
+                updateIndicators(null);
                 return;
             }
 
@@ -1943,26 +2213,26 @@ function checkRedisHealth() {
             const minutesAgo = lastErrorAt ? Math.round((Date.now() - lastErrorAt.getTime()) / 60000) : null;
 
             if (status === 'throttled') {
-                const suffix = Number.isFinite(minutesAgo) ? ` (${minutesAgo}m)` : '';
-                updateIndicators('throttled', `Redis throttled${suffix}`, lastError || 'Redis throttled');
+                const suffix = Number.isFinite(minutesAgo) ? ` (${minutesAgo}m ago)` : '';
+                updateIndicators('throttled', `Throttled${suffix}: ${lastError || ''}`);
                 return;
             }
 
             if (status === 'error') {
-                const suffix = Number.isFinite(minutesAgo) ? ` (${minutesAgo}m)` : '';
-                updateIndicators('error', `Redis error${suffix}`, lastError || 'Redis error');
+                const suffix = Number.isFinite(minutesAgo) ? ` (${minutesAgo}m ago)` : '';
+                updateIndicators('error', `Error${suffix}: ${lastError || ''}`);
                 return;
             }
 
             if (status === 'ok') {
-                updateIndicators('ok', 'Redis ok');
+                updateIndicators('ok');
                 return;
             }
 
-            updateIndicators(null, 'Redis unknown');
+            updateIndicators(null);
         })
         .catch(() => {
-            updateIndicators(null, 'Redis unknown');
+            updateIndicators(null);
         });
 }
 

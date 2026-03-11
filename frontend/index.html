@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Pandora - Real-time Trading Signal Dashboard">
     <title>Pandora</title>
-    <link rel="stylesheet" href="/styles.css?v=73">
+    <link rel="stylesheet" href="/styles.css?v=75">
     <link rel="manifest" href="/manifest.json">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -27,11 +27,12 @@
                         <span class="status-text">Connecting...</span>
                     </div>
                     <div class="pivot-health header-pivot" id="pivotHealth" data-pivot-health="true">
-                        <span class="pivot-dot">o</span>
-                        <span class="pivot-text">Pivot unknown</span>
+                        <span class="pivot-dot"></span>
+                        <span class="pivot-text">Pivot</span>
                     </div>
                 </div>
             </div>
+            <div class="daily-quote" id="dailyQuote"></div>
             <div class="header-controls">
                 <div class="mode-switcher" role="tablist" aria-label="App Mode">
                     <button type="button" class="mode-btn active" id="modeHubBtn" data-mode="hub" role="tab" aria-selected="true">Agora</button>
@@ -53,14 +54,11 @@
                     <div class="bias-composite-title">
                         <h2>MARKET BIAS</h2>
                         <div class="redis-health" id="redisHealth" data-redis-health="true">
-                            <span class="redis-dot">o</span>
-                            <span class="redis-text">Redis unknown</span>
+                            <span class="redis-dot"></span>
+                            <span class="redis-text">Redis</span>
                         </div>
                     </div>
                     <div class="bias-composite-actions">
-<button class="savita-update-btn" id="savitaUpdateBtn" title="Update Savita Indicator">
-                            Savita
-                        </button>
                         <div class="bias-override-controls">
                             <select id="compositeOverrideSelect" class="bias-override-select">
                                 <option value="">Override Bias...</option>
@@ -104,6 +102,7 @@
                         <span class="factor-breakdown-count" id="factorActiveCount">0/20 active</span>
                     </div>
                     <div class="factor-list" id="compositeFactorList" style="display: none;"></div>
+                    <button class="savita-update-btn" id="savitaUpdateBtn" title="Update Savita Indicator">Savita</button>
                 </div>
 
                 <div class="bias-composite-footer">
@@ -1577,7 +1576,7 @@
     <!-- TradingView Widget Script -->
     <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
-    <script src="/app.js?v=91"></script>
+    <script src="/app.js?v=93"></script>
     <script src="/analytics.js?v=2"></script>
 </body>
 </html>

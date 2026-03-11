@@ -125,6 +125,23 @@ body {
     50% { opacity: 0.5; }
 }
 
+.daily-quote {
+    flex: 1;
+    text-align: center;
+    font-style: italic;
+    font-size: 12px;
+    line-height: 1.4;
+    color: var(--text-secondary);
+    padding: 0 16px;
+    min-width: 0;
+}
+
+.daily-quote .quote-author {
+    font-style: normal;
+    font-weight: 600;
+    margin-left: 6px;
+}
+
 .header-controls {
     display: flex;
     gap: 8px;
@@ -163,8 +180,8 @@ body {
 }
 
 .mode-btn.active {
-    color: var(--dark-bg);
-    background: var(--accent-teal);
+    color: var(--accent-teal);
+    background: transparent;
     border-color: var(--accent-teal);
 }
 
@@ -707,32 +724,57 @@ body {
     letter-spacing: 0.4px;
 }
 
-.pivot-health.online {
+.pivot-dot,
+.redis-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #666;
+    display: inline-block;
+    flex-shrink: 0;
+}
+
+.pivot-health.online .pivot-dot {
+    background: #00e676;
+    animation: pulse 2s infinite;
+}
+
+.pivot-health.online .pivot-text {
     color: #00e676;
 }
 
-.pivot-health.offline {
+.pivot-health.offline .pivot-dot {
+    background: #e5370e;
+}
+
+.pivot-health.offline .pivot-text {
     color: #e5370e;
 }
 
-.pivot-dot {
-    font-size: 10px;
+.redis-health.ok .redis-dot {
+    background: #00e676;
+    animation: pulse 2s infinite;
 }
 
-.redis-health.ok {
+.redis-health.ok .redis-text {
     color: #00e676;
 }
 
-.redis-health.throttled {
+.redis-health.throttled .redis-dot {
+    background: #ff9800;
+    animation: pulse 2s infinite;
+}
+
+.redis-health.throttled .redis-text {
     color: #ff9800;
 }
 
-.redis-health.error {
-    color: #e5370e;
+.redis-health.error .redis-dot {
+    background: #e5370e;
 }
 
-.redis-dot {
-    font-size: 10px;
+.redis-health.error .redis-text {
+    color: #e5370e;
 }
 
 .bias-composite-actions {
@@ -1295,24 +1337,24 @@ body.override-active-bearish .override-toggle[data-active="true"] {
 
 /* Savita Update Button (in bias section) */
 .savita-update-btn {
-    background: var(--accent-teal);
-    color: var(--dark-bg);
-    border: none;
+    background: transparent;
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
     border-radius: 6px;
     padding: 6px 12px;
     font-size: 11px;
     font-weight: 700;
     cursor: pointer;
     transition: all 0.2s;
-    margin-left: 12px;
+    margin-top: 8px;
     display: flex;
     align-items: center;
     gap: 4px;
 }
 
 .savita-update-btn:hover {
-    background: var(--accent-lime);
-    transform: scale(1.05);
+    border-color: var(--text-secondary);
+    color: #fff;
 }
 
 .savita-update-btn.stale {
