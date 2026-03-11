@@ -2367,6 +2367,53 @@ body.override-active-bearish .override-toggle[data-active="true"] {
     gap: 10px;
 }
 
+.positions-refresh-btn {
+    background: transparent;
+    color: var(--text-secondary, #8b9dc3);
+    border: 1px solid rgba(255,255,255,0.1);
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    font-size: 16px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+}
+
+.positions-refresh-btn:hover {
+    color: var(--accent-teal);
+    border-color: var(--accent-teal);
+}
+
+.positions-refresh-btn.refreshing {
+    animation: spin 0.8s linear infinite;
+    opacity: 0.6;
+    pointer-events: none;
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+.position-group-divider {
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-secondary, #8b9dc3);
+    padding: 0.5rem 0.75rem 0.25rem;
+    margin-top: 0.5rem;
+    border-top: 1px solid var(--border-color, rgba(255,255,255,0.06));
+}
+
+.position-group-divider:first-child {
+    margin-top: 0;
+    border-top: none;
+}
+
 .add-position-btn {
     background: var(--accent-teal);
     color: var(--dark-bg);

@@ -935,6 +935,9 @@ function initEventListeners() {
         location.reload(true);
     });
 
+    // Positions refresh button
+    document.getElementById('positionsRefreshBtn')?.addEventListener('click', refreshPositions);
+
     // Mode switcher
     document.querySelectorAll('.mode-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
@@ -7188,6 +7191,133 @@ function updatePositionsCount() {
     }
 }
 
+function renderPositionCard(pos) {
+    const posId = pos.position_id || pos.id || pos.signal_id;
+
+    // P&L display
+    const pnl = pos.unrealized_pnl || 0;
+    const pnlClass = pnl >= 0 ? 'positive' : 'negative';
+    const pnlStr = (pnl >= 0 ? '+' : '-') + '$' + Math.abs(pnl).toFixed(2);
+
+    // Structure badge
+    const structure = pos.structure || pos.strategy || 'EQUITY';
+    const structureDisplay = structure.replace(/_/g, ' ').toUpperCase();
+
+    // Strikes + DTE line for options
+    let strikeLine = '';
+    if (pos.long_strike || pos.short_strike) {
+        const strikes = [pos.long_strike, pos.short_strike].filter(Boolean).join('/');
+        const expiryStr = pos.expiry ? new Date(pos.expiry + 'T00:00:00').toLocaleDateString('en-US', {month: 'numeric', day: 'numeric'}) : '';
+        const dteStr = pos.dte !== null && pos.dte !== undefined ? `${pos.dte} DTE` : '';
+        const dteBadge = pos.dte !== null && pos.dte <= 7 ? 'dte-urgent' : pos.dte <= 14 ? 'dte-soon' : '';
+        strikeLine = `<div class="position-strikes">${strikes} ${expiryStr} <span class="${dteBadge}">${dteStr}</span></div>`;
+    } else if (pos.expiry) {
+        const expiryStr = new Date(pos.expiry + 'T00:00:00').toLocaleDateString('en-US', {month: 'numeric', day: 'numeric'});
+        const dteStr = pos.dte !== null && pos.dte !== undefined ? `${pos.dte} DTE` : '';
+        strikeLine = `<div class="position-strikes">${expiryStr} <span>${dteStr}</span></div>`;
+    }
+
+    // Max loss bar
+    let maxLossBar = '';
+    if (pos.max_loss && pos.max_loss > 0) {
+        const lossConsumed = Math.min(100, Math.max(0, (Math.abs(pnl) / pos.max_loss) * 100));
+        const barClass = pnl < 0 ? (lossConsumed > 75 ? 'loss-severe' : lossConsumed > 50 ? 'loss-warning' : 'loss-ok') : 'loss-ok';
+        maxLossBar = `
+            <div class="max-loss-bar-wrap">
+                <div class="max-loss-bar ${barClass}" style="width: ${lossConsumed}%"></div>
+                <span class="max-loss-label">Max loss: $${pos.max_loss.toFixed(0)}</span>
+            </div>`;
+    }
+
+    // Current mark price display
+    let markLine = '';
+    const struct = (pos.structure || '').toLowerCase();
+    const isSpread = struct.includes('spread') || struct.includes('credit') || struct.includes('debit');
+    if (isSpread && pos.long_leg_price != null && pos.short_leg_price != null) {
+        markLine = `
+            <div class="position-mark">
+                <div class="mark-legs">
+                    <span class="mark-leg">Long <span class="mark-leg-price">$${pos.long_leg_price.toFixed(2)}</span></span>
+                    <span class="mark-divider">/</span>
+                    <span class="mark-leg">Short <span class="mark-leg-price">$${pos.short_leg_price.toFixed(2)}</span></span>
+                </div>
+                <div class="mark-net">Net: $${pos.current_price?.toFixed(2) || '--'}</div>
+            </div>`;
+    } else if (pos.current_price != null) {
+        markLine = `
+            <div class="position-mark">
+                <span class="mark-label">Mark</span>
+                <span class="mark-price">$${pos.current_price.toFixed(2)}</span>
+            </div>`;
+    }
+
+    // Price freshness
+    let freshness = '';
+    if (pos.price_updated_at) {
+        const updatedAt = new Date(pos.price_updated_at);
+        const mins = Math.round((Date.now() - updatedAt.getTime()) / 60000);
+        freshness = mins < 1 ? 'just now' : mins < 60 ? `${mins}m ago` : `${Math.round(mins / 60)}h ago`;
+    }
+
+    // Counter-signal warning
+    let counterBanner = '';
+    if (pos.counter_signal) {
+        const cs = pos.counter_signal;
+        let csTime = '';
+        if (cs.timestamp) {
+            try {
+                const csDate = new Date(cs.timestamp);
+                const csMin = Math.round((Date.now() - csDate.getTime()) / 60000);
+                csTime = csMin < 1 ? 'just now' : csMin < 60 ? `${csMin}m ago` : `${Math.round(csMin / 60)}h ago`;
+            } catch(e) {}
+        }
+        counterBanner = `
+            <div class="counter-signal-warning">
+                Counter-signal: ${cs.direction || '?'} ${cs.strategy || ''} (score: ${cs.score || 'N/A'})${csTime ? ` <span class="counter-signal-time">${csTime}</span>` : ''}
+            </div>`;
+    }
+
+    return `
+        <div class="position-card${pos.counter_signal ? ' has-counter-signal' : ''}" data-position-id="${posId}">
+            <button class="position-remove-btn" data-position-id="${posId}" title="Remove position">x</button>
+            <div class="position-card-header">
+                <span class="position-ticker" data-ticker="${pos.ticker}">${pos.ticker}</span>
+                <span class="position-structure-badge">${structureDisplay}</span>
+            </div>
+            ${counterBanner}
+            ${strikeLine}
+            <div class="position-details">
+                <div class="position-detail">
+                    <div class="position-detail-label">Entry</div>
+                    <div class="position-detail-value">$${pos.entry_price?.toFixed(2) || '--'}</div>
+                </div>
+                <div class="position-detail">
+                    <div class="position-detail-label">Qty</div>
+                    <div class="position-detail-value">${pos.quantity || '--'}</div>
+                </div>
+                <div class="position-detail">
+                    <div class="position-detail-label">Stop</div>
+                    <div class="position-detail-value">${pos.stop_loss ? '$' + pos.stop_loss.toFixed(2) : '--'}</div>
+                </div>
+                <div class="position-detail">
+                    <div class="position-detail-label">Target</div>
+                    <div class="position-detail-value">${pos.target_1 ? '$' + pos.target_1.toFixed(2) : '--'}</div>
+                </div>
+            </div>
+            ${maxLossBar}
+            ${markLine}
+            <div class="position-pnl">
+                <span class="pnl-label">Unrealized P&L${freshness ? ` <span class="pnl-freshness">${freshness}</span>` : ''}</span>
+                <span class="pnl-value ${pnlClass}">${pnlStr}</span>
+            </div>
+            <div class="position-actions">
+                <button class="position-btn-small edit-btn" data-position-id="${posId}">Edit</button>
+                <button class="position-btn-small close-btn" data-position-id="${posId}">Close</button>
+            </div>
+        </div>
+    `;
+}
+
 function renderPositionsEnhanced() {
     const container = document.getElementById('openPositions');
     if (!container) return;
@@ -7204,140 +7334,57 @@ function renderPositionsEnhanced() {
         return;
     }
 
-    // Sort by DTE (soonest first), then by ticker
-    const sorted = [...filteredPositions].sort((a, b) => {
+    // Categorize positions into groups
+    const optionsLong = [];
+    const optionsShort = [];
+    const stocks = [];
+
+    for (const pos of filteredPositions) {
+        const struct = (pos.structure || '').toLowerCase();
+        const isStock = struct === 'stock' || struct === 'stock_long' || struct === 'long_stock' ||
+                        struct === 'stock_short' || struct === 'short_stock' ||
+                        (!struct && (pos.asset_type || '').toUpperCase() === 'EQUITY');
+
+        if (isStock) {
+            stocks.push(pos);
+        } else {
+            const isCreditSpread = struct.includes('credit') || struct.includes('short_call') ||
+                                   struct.includes('short_put') || struct.includes('naked') ||
+                                   struct.includes('covered');
+            if (isCreditSpread) {
+                optionsShort.push(pos);
+            } else {
+                optionsLong.push(pos);
+            }
+        }
+    }
+
+    // Sort each group: options by DTE (soonest first), stocks alphabetically
+    const sortByDte = (a, b) => {
         const dteA = a.dte ?? 9999;
         const dteB = b.dte ?? 9999;
         if (dteA !== dteB) return dteA - dteB;
         return (a.ticker || '').localeCompare(b.ticker || '');
-    });
+    };
+    optionsLong.sort(sortByDte);
+    optionsShort.sort(sortByDte);
+    stocks.sort((a, b) => (a.ticker || '').localeCompare(b.ticker || ''));
 
-    container.innerHTML = sorted.map(pos => {
-        const posId = pos.position_id || pos.id || pos.signal_id;
-
-        // P&L display
-        const pnl = pos.unrealized_pnl || 0;
-        const pnlClass = pnl >= 0 ? 'positive' : 'negative';
-        const pnlStr = (pnl >= 0 ? '+' : '-') + '$' + Math.abs(pnl).toFixed(2);
-
-        // Structure badge
-        const structure = pos.structure || pos.strategy || 'EQUITY';
-        const structureDisplay = structure.replace(/_/g, ' ').toUpperCase();
-
-        // Strikes + DTE line for options
-        let strikeLine = '';
-        if (pos.long_strike || pos.short_strike) {
-            const strikes = [pos.long_strike, pos.short_strike].filter(Boolean).join('/');
-            const expiryStr = pos.expiry ? new Date(pos.expiry + 'T00:00:00').toLocaleDateString('en-US', {month: 'numeric', day: 'numeric'}) : '';
-            const dteStr = pos.dte !== null && pos.dte !== undefined ? `${pos.dte} DTE` : '';
-            const dteBadge = pos.dte !== null && pos.dte <= 7 ? 'dte-urgent' : pos.dte <= 14 ? 'dte-soon' : '';
-            strikeLine = `<div class="position-strikes">${strikes} ${expiryStr} <span class="${dteBadge}">${dteStr}</span></div>`;
-        } else if (pos.expiry) {
-            const expiryStr = new Date(pos.expiry + 'T00:00:00').toLocaleDateString('en-US', {month: 'numeric', day: 'numeric'});
-            const dteStr = pos.dte !== null && pos.dte !== undefined ? `${pos.dte} DTE` : '';
-            strikeLine = `<div class="position-strikes">${expiryStr} <span>${dteStr}</span></div>`;
-        }
-
-        // Max loss bar
-        let maxLossBar = '';
-        if (pos.max_loss && pos.max_loss > 0) {
-            const lossConsumed = Math.min(100, Math.max(0, (Math.abs(pnl) / pos.max_loss) * 100));
-            const barClass = pnl < 0 ? (lossConsumed > 75 ? 'loss-severe' : lossConsumed > 50 ? 'loss-warning' : 'loss-ok') : 'loss-ok';
-            maxLossBar = `
-                <div class="max-loss-bar-wrap">
-                    <div class="max-loss-bar ${barClass}" style="width: ${lossConsumed}%"></div>
-                    <span class="max-loss-label">Max loss: $${pos.max_loss.toFixed(0)}</span>
-                </div>`;
-        }
-
-        // Current mark price display
-        let markLine = '';
-        const struct = (pos.structure || '').toLowerCase();
-        const isSpread = struct.includes('spread') || struct.includes('credit') || struct.includes('debit');
-        if (isSpread && pos.long_leg_price != null && pos.short_leg_price != null) {
-            markLine = `
-                <div class="position-mark">
-                    <div class="mark-legs">
-                        <span class="mark-leg">Long <span class="mark-leg-price">$${pos.long_leg_price.toFixed(2)}</span></span>
-                        <span class="mark-divider">/</span>
-                        <span class="mark-leg">Short <span class="mark-leg-price">$${pos.short_leg_price.toFixed(2)}</span></span>
-                    </div>
-                    <div class="mark-net">Net: $${pos.current_price?.toFixed(2) || '--'}</div>
-                </div>`;
-        } else if (pos.current_price != null) {
-            markLine = `
-                <div class="position-mark">
-                    <span class="mark-label">Mark</span>
-                    <span class="mark-price">$${pos.current_price.toFixed(2)}</span>
-                </div>`;
-        }
-
-        // Price freshness
-        let freshness = '';
-        if (pos.price_updated_at) {
-            const updatedAt = new Date(pos.price_updated_at);
-            const mins = Math.round((Date.now() - updatedAt.getTime()) / 60000);
-            freshness = mins < 1 ? 'just now' : mins < 60 ? `${mins}m ago` : `${Math.round(mins / 60)}h ago`;
-        }
-
-        // Counter-signal warning
-        let counterBanner = '';
-        if (pos.counter_signal) {
-            const cs = pos.counter_signal;
-            let csTime = '';
-            if (cs.timestamp) {
-                try {
-                    const csDate = new Date(cs.timestamp);
-                    const csMin = Math.round((Date.now() - csDate.getTime()) / 60000);
-                    csTime = csMin < 1 ? 'just now' : csMin < 60 ? `${csMin}m ago` : `${Math.round(csMin / 60)}h ago`;
-                } catch(e) {}
-            }
-            counterBanner = `
-                <div class="counter-signal-warning">
-                    Counter-signal: ${cs.direction || '?'} ${cs.strategy || ''} (score: ${cs.score || 'N/A'})${csTime ? ` <span class="counter-signal-time">${csTime}</span>` : ''}
-                </div>`;
-        }
-
-        return `
-            <div class="position-card${pos.counter_signal ? ' has-counter-signal' : ''}" data-position-id="${posId}">
-                <button class="position-remove-btn" data-position-id="${posId}" title="Remove position">x</button>
-                <div class="position-card-header">
-                    <span class="position-ticker" data-ticker="${pos.ticker}">${pos.ticker}</span>
-                    <span class="position-structure-badge">${structureDisplay}</span>
-                </div>
-                ${counterBanner}
-                ${strikeLine}
-                <div class="position-details">
-                    <div class="position-detail">
-                        <div class="position-detail-label">Entry</div>
-                        <div class="position-detail-value">$${pos.entry_price?.toFixed(2) || '--'}</div>
-                    </div>
-                    <div class="position-detail">
-                        <div class="position-detail-label">Qty</div>
-                        <div class="position-detail-value">${pos.quantity || '--'}</div>
-                    </div>
-                    <div class="position-detail">
-                        <div class="position-detail-label">Stop</div>
-                        <div class="position-detail-value">${pos.stop_loss ? '$' + pos.stop_loss.toFixed(2) : '--'}</div>
-                    </div>
-                    <div class="position-detail">
-                        <div class="position-detail-label">Target</div>
-                        <div class="position-detail-value">${pos.target_1 ? '$' + pos.target_1.toFixed(2) : '--'}</div>
-                    </div>
-                </div>
-                ${maxLossBar}
-                ${markLine}
-                <div class="position-pnl">
-                    <span class="pnl-label">Unrealized P&L${freshness ? ` <span class="pnl-freshness">${freshness}</span>` : ''}</span>
-                    <span class="pnl-value ${pnlClass}">${pnlStr}</span>
-                </div>
-                <div class="position-actions">
-                    <button class="position-btn-small edit-btn" data-position-id="${posId}">Edit</button>
-                    <button class="position-btn-small close-btn" data-position-id="${posId}">Close</button>
-                </div>
-            </div>
-        `;
-    }).join('');
+    // Render with section dividers
+    let html = '';
+    if (optionsLong.length > 0) {
+        html += '<div class="position-group-divider">Options (Long)</div>';
+        html += optionsLong.map(renderPositionCard).join('');
+    }
+    if (optionsShort.length > 0) {
+        html += '<div class="position-group-divider">Options (Short)</div>';
+        html += optionsShort.map(renderPositionCard).join('');
+    }
+    if (stocks.length > 0) {
+        html += '<div class="position-group-divider">Stocks</div>';
+        html += stocks.map(renderPositionCard).join('');
+    }
+    container.innerHTML = html;
     
     // Attach events
     container.querySelectorAll('.position-ticker').forEach(el => {
@@ -7686,6 +7733,7 @@ async function executePositionClose(positionId, exitPrice, closeQty, tradeOutcom
         if (data.status === 'success' || data.status === 'closed' || data.status === 'partial_close') {
             closePositionCloseModal();
             await loadOpenPositionsEnhanced();
+            updateCurrentPrices();
 
             // Remove chart tab if fully closed
             if (position && closeQty >= position.quantity) {
@@ -7925,6 +7973,7 @@ async function submitUnifiedPosition() {
             document.getElementById('unifiedPositionModal').classList.remove('active');
             await loadOpenPositionsEnhanced();
             addPositionChartTab(ticker);
+            updateCurrentPrices();
         } else {
             alert('Failed to create position: ' + (data.detail || JSON.stringify(data)));
         }
@@ -8150,6 +8199,35 @@ function updatePositionChartTabs() {
 }
 
 // Price updates for real-time P&L
+async function triggerMarkToMarket() {
+    try {
+        await fetch(`${API_URL}/v2/positions/mark-to-market`, {
+            method: 'POST',
+            headers: authHeaders()
+        });
+    } catch (e) {
+        console.warn('MTM trigger failed:', e);
+    }
+}
+
+async function refreshPositions() {
+    const refreshBtn = document.getElementById('positionsRefreshBtn');
+    if (refreshBtn) {
+        refreshBtn.classList.add('refreshing');
+        refreshBtn.disabled = true;
+    }
+    try {
+        await loadOpenPositionsEnhanced();
+        await triggerMarkToMarket();
+        await updateCurrentPrices();
+    } finally {
+        if (refreshBtn) {
+            refreshBtn.classList.remove('refreshing');
+            refreshBtn.disabled = false;
+        }
+    }
+}
+
 function startPriceUpdates() {
     // Update every 30 seconds
     priceUpdateInterval = setInterval(updateCurrentPrices, 60000);
@@ -8334,6 +8412,7 @@ async function submitManualPosition() {
 
             // Refresh positions from server
             await loadOpenPositionsEnhanced();
+            updateCurrentPrices();
         } else {
             alert(`Error: ${result.detail || 'Failed to create position'}`);
         }

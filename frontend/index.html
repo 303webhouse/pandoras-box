@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Pandora - Real-time Trading Signal Dashboard">
     <title>Pandora</title>
-    <link rel="stylesheet" href="/styles.css?v=70">
+    <link rel="stylesheet" href="/styles.css?v=71">
     <link rel="manifest" href="/manifest.json">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -266,6 +266,7 @@
                         <button class="positions-tab" data-account="FIDELITY">Fidelity</button>
                     </div>
                     <div class="positions-header-actions">
+                        <button class="positions-refresh-btn" id="positionsRefreshBtn" title="Refresh Prices">&#x21bb;</button>
                         <button class="add-position-btn" id="addPositionBtn" data-action="add-manual-position" data-context="equity" title="Add Manual Trade">+</button>
                         <span class="positions-count" id="positionsCount">0</span>
                     </div>
@@ -1575,7 +1576,7 @@
     <!-- TradingView Widget Script -->
     <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
-    <script src="/app.js?v=84"></script>
+    <script src="/app.js?v=85"></script>
     <script src="/analytics.js?v=2"></script>
 </body>
 </html>
