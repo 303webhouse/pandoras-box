@@ -2357,7 +2357,7 @@ body.override-active-bearish .override-toggle[data-active="true"] {
     font-size: 14px;
     font-weight: 700;
     letter-spacing: 2px;
-    color: var(--accent-lime);
+    color: var(--accent-teal);
     margin: 0;
 }
 
