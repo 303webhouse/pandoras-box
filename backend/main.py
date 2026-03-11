@@ -260,6 +260,31 @@ async def lifespan(app: FastAPI):
                 logger.warning("Sell the Rip scan loop error: %s", e)
             await asyncio.sleep(300)  # 5 minutes
 
+    # VWAP validation: compute server-side VWAP every 15 min (4-min offset) during market hours
+    async def vwap_validation_loop():
+        """Compute VWAP bands and log for TradingView comparison."""
+        import pytz
+        from datetime import datetime as dt_cls
+
+        # 4-minute offset from other 15-min loops
+        await asyncio.sleep(240)
+
+        while True:
+            try:
+                et = dt_cls.now(pytz.timezone("America/New_York"))
+                # Market hours: 9:30 AM - 4:15 PM ET, weekdays
+                if et.weekday() < 5 and 9 <= et.hour < 17:
+                    time_decimal = et.hour + et.minute / 60.0
+                    if time_decimal >= 9.5:  # After 9:30 AM
+                        from scanners.vwap_validator import run_vwap_validation, VALIDATOR_AVAILABLE
+                        if VALIDATOR_AVAILABLE:
+                            await run_vwap_validation()
+                else:
+                    logger.debug("VWAP validation: outside market hours, skipping")
+            except Exception as e:
+                logger.warning("VWAP validation loop error: %s", e)
+            await asyncio.sleep(900)  # 15 minutes
+
     # Factor staleness monitor — check every 60 min
     async def factor_staleness_loop():
         """Check factor freshness and alert on stale readings."""
@@ -287,6 +312,7 @@ async def lifespan(app: FastAPI):
     sector_rs_task = asyncio.create_task(sector_rs_loop())
     sell_the_rip_task = asyncio.create_task(sell_the_rip_scan_loop())
     staleness_task = asyncio.create_task(factor_staleness_loop())
+    vwap_task = asyncio.create_task(vwap_validation_loop())
 
     logger.info("✅ Pandora's Box is live")
 
@@ -302,6 +328,7 @@ async def lifespan(app: FastAPI):
     sector_rs_task.cancel()
     sell_the_rip_task.cancel()
     staleness_task.cancel()
+    vwap_task.cancel()
     logger.info("🛑 Shutting down Pandora's Box...")
     await redis_client.close()
     await postgres_client.close()
@@ -392,6 +419,31 @@ async def polygon_health_endpoint():
     """Check Polygon.io API health from rolling call window."""
     from monitoring.polygon_health import get_polygon_health
     return get_polygon_health()
+
+
+@app.get("/api/monitoring/vwap-validation")
+async def vwap_validation_endpoint():
+    """Compute current VWAP bands for SPY and return latest reading."""
+    from scanners.vwap_validator import run_vwap_validation
+    result = await run_vwap_validation()
+    if result:
+        return result
+    return {"status": "unavailable", "message": "VWAP validation not available (missing yfinance/pandas or outside market hours)"}
+
+
+@app.get("/api/analytics/confluence-validation")
+async def confluence_validation_endpoint(days: int = 30):
+    """Compare outcomes of confluent vs standalone signals."""
+    from analytics.confluence_validation import compute_confluence_validation
+    return await compute_confluence_validation(days=days)
+
+
+@app.get("/api/analytics/shadow-validation")
+async def shadow_validation_endpoint(days: int = 5):
+    """Compare server-side scanner signals vs TradingView webhook signals."""
+    from analytics.confluence_validation import compute_shadow_validation
+    return await compute_shadow_validation(days=days)
+
 
 @app.get("/api/bias/{timeframe}")
 async def get_bias_data(timeframe: str):

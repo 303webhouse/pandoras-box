@@ -411,10 +411,23 @@ async def compute_tick_score(tick_data: Dict[str, Any]) -> Optional[FactorReadin
 
     # Conflict: average says selling but close says buying (late bounce)
     # Average represents full session, close is a snapshot — trust the average
+    # Late-session MOC orders commonly cause close bounces that contradict the day
     if tick_avg < -100 and dir_mod > 0:
-        dir_mod = min(dir_mod * 0.25, 0.05)  # Nearly zero out bullish close signal
+        # Bearish session with bullish close — nearly fully override close
+        # Use average direction instead, scaled down
+        avg_dir = -0.3 if tick_avg < -200 else -0.15
+        dir_mod = avg_dir  # Replace bullish close signal with mild bearish from avg
     elif tick_avg > 100 and dir_mod < 0:
-        dir_mod = max(dir_mod * 0.25, -0.05)  # Nearly zero out bearish close signal
+        # Bullish session with bearish close — same logic, mirror
+        avg_dir = 0.3 if tick_avg > 200 else 0.15
+        dir_mod = avg_dir  # Replace bearish close signal with mild bullish from avg
+
+    # Reinforcement: when close and avg agree, strengthen the signal
+    if tick_avg < -200 and dir_mod < 0:
+        dir_mod *= 1.2  # Strong bearish session, amplify
+    elif tick_avg > 200 and dir_mod > 0:
+        dir_mod *= 1.2  # Strong bullish session, amplify
+    dir_mod = max(-1.0, min(1.0, dir_mod))  # Re-clamp
 
     # Blend: range-based score gets 40% weight, directional gets 60%
     # This ensures a wide-range selloff reads bearish, not bullish
