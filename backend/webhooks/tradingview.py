@@ -116,7 +116,7 @@ async def receive_tradingview_alert(alert: TradingViewAlert):
             raise HTTPException(status_code=401, detail="Invalid webhook secret")
 
     # Dedup: reject duplicate webhooks within 60s window
-    dedup_raw = f"{alert.ticker}:{alert.strategy}:{alert.direction}:{alert.interval}"
+    dedup_raw = f"{alert.ticker}:{alert.strategy}:{alert.direction}:{alert.timeframe}"
     dedup_hash = hashlib.md5(dedup_raw.encode()).hexdigest()[:16]
     dedup_key = f"webhook:dedup:tv:{dedup_hash}"
     try:
