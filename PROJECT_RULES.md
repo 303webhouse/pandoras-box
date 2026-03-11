@@ -1,6 +1,6 @@
 # Pivot — Project Rules
 
-**Last Updated:** March 3, 2026
+**Last Updated:** March 11, 2026
 
 ---
 
@@ -22,6 +22,49 @@ The system must deliver:
 3. **Bias challenge** — Pivot actively challenges Nick's directional biases with data
 4. **Multi-source convergence** — Flag when independent signals agree (whale + UW flow + sector rotation)
 5. **Performance tracking** — Analytics system measures what's working and what isn't
+
+---
+
+## Review Teams
+
+### Olympus (Trading Committee)
+
+4-agent double-pass review for **trade strategy evaluations, signal pipeline changes, and bias engine modifications**.
+
+| Agent | Role |
+|-------|------|
+| **TORO** | Bull analyst — finds reasons to take the trade |
+| **URSA** | Bear analyst — finds reasons to pass |
+| **TECHNICALS** | Risk/structure analyst — entry/stop/target/sizing |
+| **PIVOT** | Synthesizer — final recommendation with conviction level |
+
+**Use for:** Evaluating proposed strategies, reviewing signal pipeline changes, assessing bias engine modifications, trade-specific analysis.
+
+**Runs inside:** Claude.ai conversations (not VPS API) to avoid API costs.
+
+### The Titans (Software Design Team)
+
+4-agent double-pass review for **all significant builds, revisions, and adjacent projects** before any Brief is sent to Claude Code.
+
+| Agent | Role | Expertise |
+|-------|------|-----------|
+| **ATLAS** | Senior Backend Architect | Decades of experience at Wall Street and finance firms. Focuses on scalability, data integrity, API design, and system reliability. |
+| **HELIOS** | Frontend UI/UX Specialist | Designs clean, responsive, reliable interfaces for fast-paced and high-stress environments. Obsessive about usability and information hierarchy. |
+| **AEGIS** | Cybersecurity Expert | Obsessive about data security, privacy, authentication, and attack surface minimization. Reviews every external-facing change. |
+| **ATHENA** | Project Manager (Final Decision) | Award-winning attention to detail, usability, and aesthetics without sacrificing security or reliability. Presents the final plan to Nick. |
+
+**The Titans Workflow:**
+
+1. **Pass 1 (Independent):** Each Titan reviews the proposed build independently and makes their recommendations.
+2. **Pass 2 (Cross-Review):** Each Titan does a second pass incorporating all other Titans' suggestions, producing final recommendations.
+3. **ATHENA Overview:** ATHENA presents a unified plan to Nick with an overview of all recommendations, trade-offs, and any clarifications needed.
+4. **Nick Approval:** Nick reviews, asks questions, requests changes.
+5. **Brief Written:** Claude.ai writes the implementation brief targeting Claude Code.
+6. **Final Brief Review:** The Titans do a final double-pass review of the completed Brief before it's sent to Claude Code to build.
+
+**Use for:** Every significant revision, new build, or adjacent project. Not needed for small bug fixes or one-line config changes.
+
+**Runs inside:** Claude.ai conversations (this project).
 
 ---
 
@@ -56,8 +99,8 @@ The system must deliver:
 
 ### Signal Sources
 - **TradingView webhooks** — Strategy alerts, Whale Hunter, Circuit Breaker, Scout
-- **Unusual Whales** — Options flow alerts (via Discord Premium Bot monitoring)
-- **UW Screenshots** — Manual screenshots analyzed by Pivot via Claude Vision
+- **Unusual Whales** — Options flow alerts (via Discord Premium Bot monitoring → UW Watcher on VPS)
+- **Server-side scanners** — Holy Grail, Scout Sniper, Sell the Rip (Railway background loops)
 - **Trade Ideas** — Manual trade concepts evaluated by Pivot
 
 ### Risk Rules (from Playbook v2.1)
@@ -78,7 +121,7 @@ The system must deliver:
 | Frontend | Vanilla JS PWA | No framework, dark teal UI, 6-tab analytics |
 | Pivot II | OpenClaw + discord.py | VPS: 188.245.250.2 (`/opt/openclaw`) |
 | LLM (Pivot II) | Anthropic API direct | Haiku 4.5 for chat/analysis, Sonnet 4.5 for briefs/synthesis |
-| LLM (Committee) | Anthropic API direct | Haiku for TORO/URSA/TECHNICALS, Sonnet for Pivot synthesizer |
+| LLM (Olympus) | Anthropic API direct | Haiku for TORO/URSA/TECHNICALS, Sonnet for Pivot synthesizer |
 | Charts | TradingView embed | Webhook alerts for automation |
 | Version Control | GitHub | `303webhouse/pandoras-box`, push to `main` auto-deploys Railway |
 | VPS | Hetzner (PIVOT-EU) | 188.245.250.2, Debian, hosts Pivot II + collectors |
@@ -98,6 +141,8 @@ The system must deliver:
 ## Workflow Rules
 
 - **Architecture decisions**: Discuss in Claude.ai with Nick → document rationale
+- **Significant builds**: Run through **The Titans** review (Pass 1 → Pass 2 → ATHENA overview → Nick approval → Brief → Titans final review → Claude Code)
+- **Strategy/trading changes**: Run through **Olympus** review (TORO/URSA/TECHNICALS/PIVOT double-pass)
 - **Implementation**: Write detailed markdown brief → hand to Claude Code → deploy → verify. Codex is backup only.
 - **New indicators**: Classify as MACRO/TECHNICAL/FLOW/BREADTH before building
 - **New signals**: Must include evaluation template in committee prompts or Pivot system prompt
@@ -148,14 +193,3 @@ If documentation contradicts the actual code, **fix the documentation** and note
 When making architecture decisions, document **why** not just **what**. Future agents need to understand the reasoning.
 - ❌ "Added DXY factor with weight 0.05"
 - ✅ "Added DXY factor with weight 0.05 — kept low because dollar strength is a secondary confirmation signal, not a primary equity rotation driver."
-
----
-
-## Pending Automation Targets
-
-- [ ] UW Dashboard API scraping (Phase 2F)
-- [ ] Auto-scout: screen UW flow + Alpha Feed ideas → Discord picks (Phase 2G)
-- [ ] Crypto autonomous trading sandbox (Coinbase)
-- [ ] Robinhood trade import (CSV parser, signal matching)
-- [ ] DXY macro factor
-- [ ] Dark Pool Whale Hunter RVOL conviction modifier
