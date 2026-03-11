@@ -41,9 +41,10 @@ async def get_committee_queue(
     limit: int = Query(default=10, le=20),
 ):
     """
-    Get signals awaiting committee review.
+    Get signals explicitly requested for committee review via dashboard.
     VPS polls this every 3 minutes during market hours.
-    Returns signals with status=PENDING_REVIEW or COMMITTEE_REVIEW, oldest first.
+    Only returns COMMITTEE_REVIEW (manual Analyze clicks), NOT PENDING_REVIEW
+    (auto-flagged by pipeline). This ensures committee only runs when Nick asks.
     """
     pool = await get_postgres_client()
 
@@ -56,7 +57,7 @@ async def get_committee_queue(
                    score_v2_factors, timeframe, asset_class, source,
                    created_at, committee_requested_at
             FROM signals
-            WHERE status IN ('PENDING_REVIEW', 'COMMITTEE_REVIEW')
+            WHERE status = 'COMMITTEE_REVIEW'
             ORDER BY committee_requested_at ASC NULLS LAST, created_at ASC
             LIMIT $1
             """,
