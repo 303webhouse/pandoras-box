@@ -154,8 +154,8 @@ async def receive_tradingview_alert(alert: TradingViewAlert):
             return await process_artemis_signal(alert, start_time)
         elif "sniper" in strategy_lower:
             return await process_sniper_signal(alert, start_time)
-        elif "absorption" in strategy_lower or "wall" in strategy_lower:
-            return await process_absorption_signal(alert, start_time)
+        elif "phalanx" in strategy_lower or "absorption" in strategy_lower or "wall" in strategy_lower:
+            return await process_phalanx_signal(alert, start_time)
         else:
             # Generic signal processing
             return await process_generic_signal(alert, start_time)
@@ -420,35 +420,72 @@ async def process_sniper_signal(alert: TradingViewAlert, start_time: datetime):
     }
 
 
-async def process_absorption_signal(alert: TradingViewAlert, start_time: datetime):
-    """Process Absorption Wall signals with order flow context."""
-    signal_id = f"WALL_{alert.ticker}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
+async def process_phalanx_signal(alert: TradingViewAlert, start_time: datetime):
+    """
+    Process Phalanx (Absorption Wall) signals — institutional order flow detection.
+
+    Detects two-bar walls where matched volume + near-zero delta indicates large
+    orders absorbing directional pressure. Directional lean comes from approach:
+    price falling INTO wall = bullish support, rising INTO wall = bearish resistance.
+
+    No stop/target — this is a LEVEL IDENTIFICATION signal, not a trade generator.
+    Dual purpose: standalone ORDER_FLOW card + future confluence enrichment.
+    """
+    signal_id = f"PHALANX_{alert.ticker}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
 
     direction = (alert.direction or "").upper()
-    signal_type = alert.signal_type or ("BULL_WALL" if direction in ["LONG", "BUY"] else "BEAR_WALL")
+    signal_type = "PHALANX_BULL" if direction in ["LONG", "BUY"] else "PHALANX_BEAR"
+
+    wall_level = alert.entry_price or 0
 
     signal_data = {
         "signal_id": signal_id,
         "timestamp": alert.timestamp or datetime.now().isoformat(),
         "ticker": alert.ticker,
-        "strategy": "AbsorptionWall",
+        "strategy": "Phalanx",
         "direction": alert.direction,
         "signal_type": signal_type,
-        "entry_price": alert.entry_price,
+        "entry_price": wall_level,
         "timeframe": alert.timeframe,
         "trade_type": "ORDER_FLOW",
         "asset_class": "CRYPTO" if is_crypto_ticker(alert.ticker) else "EQUITY",
         "status": "ACTIVE",
+        "signal_category": "ORDER_FLOW",
         "rvol": alert.rvol,
         "delta_ratio": alert.delta_ratio,
         "buy_pct": alert.buy_pct,
+        "phalanx_wall_level": wall_level,
     }
 
     asyncio.ensure_future(process_signal_unified(signal_data, source="tradingview"))
 
-    logger.info("Absorption Wall accepted: %s %s (delta=%.4f)",
-                alert.ticker, signal_type,
-                alert.delta_ratio if alert.delta_ratio is not None else 0)
+    # Cache wall level in Redis for confluence enrichment (4-hour TTL)
+    try:
+        from database.redis_client import get_redis_client
+        import json as _json
+        client = await get_redis_client()
+        if client and wall_level > 0:
+            cache_key = f"phalanx:wall:{alert.ticker.upper()}"
+            cache_data = _json.dumps({
+                "wall_level": wall_level,
+                "direction": direction,
+                "signal_type": signal_type,
+                "delta_ratio": alert.delta_ratio,
+                "buy_pct": alert.buy_pct,
+                "rvol": alert.rvol,
+                "cached_at": datetime.utcnow().isoformat() + "Z",
+            })
+            await client.set(cache_key, cache_data, ex=14400)  # 4-hour TTL
+    except Exception as e:
+        logger.warning("Phalanx wall cache failed (signal still processed): %s", e)
+
+    logger.info(
+        "\U0001f6e1 Phalanx accepted: %s %s (wall=%.2f, delta=%.4f, buy%%=%.1f%%, rvol=%.2f)",
+        alert.ticker, signal_type, wall_level,
+        alert.delta_ratio if alert.delta_ratio is not None else 0,
+        (alert.buy_pct or 0) * 100,
+        alert.rvol if alert.rvol is not None else 0,
+    )
 
     return {"status": "accepted", "signal_id": signal_id, "signal_type": signal_type}
 

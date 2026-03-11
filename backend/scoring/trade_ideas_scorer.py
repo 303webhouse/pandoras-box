@@ -82,6 +82,11 @@ STRATEGY_BASE_SCORES = {
     "WHALE_BULLISH": 50,
     "WHALE_BEARISH": 50,
 
+    # Phalanx (absorption wall — institutional order flow)
+    "PHALANX": 40,
+    "PHALANX_BULL": 40,
+    "PHALANX_BEAR": 40,
+
     # UW Flow (institutional options flow intelligence)
     "UW_FLOW_LONG": 40,
     "UW_FLOW_SHORT": 40,
