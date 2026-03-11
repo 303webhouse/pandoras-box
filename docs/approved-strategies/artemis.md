@@ -1,4 +1,4 @@
-# Hub Sniper v2.1 (VWAP Band Mean Reversion)
+# Artemis v2.1 (VWAP Band Mean Reversion)
 
 ## Overview
 Mean-reversion strategy that trades bounces off VWAP standard deviation bands (VAH/VAL). Two modes: Normal (trend + confirmation candle at band) and Flush (exhaustion reversal after 3%+ move). Gated by weekly AVWAP context for directional bias.
@@ -51,14 +51,14 @@ Mirror: price rallied 3%+ into VAH with bearish exhaustion candle.
 - Optional: AVWAP as extra target marker
 
 ## Signal Types
-- `BULLISH_TRADE` — long signal (can upgrade to `APIS_CALL` at score ≥ 85)
-- `BEAR_CALL` — short signal (can upgrade to `KODIAK_CALL` at score ≥ 85)
+- `ARTEMIS_LONG` — long signal (can upgrade to `APIS_CALL` at score ≥ 85)
+- `ARTEMIS_SHORT` — short signal (can upgrade to `KODIAK_CALL` at score ≥ 85)
 
 ## Webhook Payload
-JSON with: ticker, strategy ("Sniper"), direction, entry_price, stop_loss, target_1, target_2, risk_reward, timeframe, adx, adx_rising, rsi, rvol, mode (Normal/Flush), avwap_ctx, avwap_buf_atr, prox_atr
+JSON with: ticker, strategy ("Artemis"), direction, entry_price, stop_loss, target_1, target_2, risk_reward, timeframe, adx, adx_rising, rsi, rvol, mode (Normal/Flush), avwap_ctx, avwap_buf_atr, prox_atr
 
 ## Pipeline Route
-`/webhook/tradingview` → `process_sniper_signal()` → `process_signal_unified()`
+`/webhook/tradingview` → `process_artemis_signal()` → `process_signal_unified()`
 
 ## Trade Ideas Generated
 6 all-time (as of Mar 6, 2026)

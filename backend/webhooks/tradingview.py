@@ -100,6 +100,12 @@ class TradingViewAlert(BaseModel):
     buy_vol: Optional[float] = None
     sell_vol: Optional[float] = None
     total_vol: Optional[float] = None
+    # Artemis (VWAP mean reversion) fields
+    mode: Optional[str] = None          # "Normal" or "Flush"
+    avwap_ctx: Optional[str] = None     # Weekly AVWAP context ("above"/"below")
+    avwap_buf_atr: Optional[float] = None  # AVWAP buffer in ATR units
+    prox_atr: Optional[float] = None    # Proximity to VWAP band in ATR units
+    adx_rising: Optional[bool] = None   # ADX direction
     secret: Optional[str] = None
 
 
@@ -144,6 +150,8 @@ async def receive_tradingview_alert(alert: TradingViewAlert):
             return await process_holy_grail_signal(alert, start_time)
         elif "exhaustion" in strategy_lower:
             return await process_exhaustion_signal(alert, start_time)
+        elif "artemis" in strategy_lower or "hub_sniper" in strategy_lower or "hubsniper" in strategy_lower:
+            return await process_artemis_signal(alert, start_time)
         elif "sniper" in strategy_lower:
             return await process_sniper_signal(alert, start_time)
         elif "absorption" in strategy_lower or "wall" in strategy_lower:
@@ -443,6 +451,72 @@ async def process_absorption_signal(alert: TradingViewAlert, start_time: datetim
                 alert.delta_ratio if alert.delta_ratio is not None else 0)
 
     return {"status": "accepted", "signal_id": signal_id, "signal_type": signal_type}
+
+
+async def process_artemis_signal(alert: TradingViewAlert, start_time: datetime):
+    """
+    Process Artemis (VWAP Band Mean Reversion) signals.
+
+    Two modes:
+    - Normal: trend + confirmation candle at VWAP band (VAH/VAL)
+    - Flush: exhaustion reversal after 3%+ move into VWAP band
+
+    Unique fields: mode, avwap_ctx, prox_atr (proximity to band in ATR units)
+    """
+    rr = calculate_risk_reward(alert)
+
+    direction = (alert.direction or "").upper()
+    mode = (alert.mode or "Normal").capitalize()
+
+    if direction in ["LONG", "BUY"]:
+        signal_type = "ARTEMIS_LONG"
+    else:
+        signal_type = "ARTEMIS_SHORT"
+
+    signal_id = f"ARTEMIS_{alert.ticker}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
+
+    signal_data = {
+        "signal_id": signal_id,
+        "timestamp": alert.timestamp or datetime.now().isoformat(),
+        "ticker": alert.ticker,
+        "strategy": "Artemis",
+        "direction": alert.direction,
+        "signal_type": signal_type,
+        "entry_price": alert.entry_price,
+        "stop_loss": alert.stop_loss,
+        "target_1": alert.target_1,
+        "target_2": alert.target_2,
+        "risk_reward": rr["primary"],
+        "risk_reward_t1": rr["t1_rr"],
+        "risk_reward_t2": rr["t2_rr"],
+        "timeframe": alert.timeframe,
+        "trade_type": "MEAN_REVERSION",
+        "asset_class": "CRYPTO" if is_crypto_ticker(alert.ticker) else "EQUITY",
+        "status": "ACTIVE",
+        "rsi": alert.rsi,
+        "adx": alert.adx,
+        "rvol": alert.rvol,
+        "artemis_mode": mode,
+        "avwap_ctx": alert.avwap_ctx,
+        "prox_atr": alert.prox_atr,
+        "adx_rising": alert.adx_rising,
+    }
+
+    asyncio.ensure_future(process_signal_unified(signal_data, source="tradingview"))
+
+    logger.info(
+        "\U0001f3f9 Artemis accepted: %s %s (%s mode, prox=%.2f ATR, avwap=%s)",
+        alert.ticker, signal_type, mode,
+        alert.prox_atr if alert.prox_atr is not None else 0,
+        alert.avwap_ctx or "unknown",
+    )
+
+    return {
+        "status": "accepted",
+        "signal_id": signal_id,
+        "signal_type": signal_type,
+        "mode": mode,
+    }
 
 
 async def process_generic_signal(alert: TradingViewAlert, start_time: datetime):
