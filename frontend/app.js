@@ -7108,12 +7108,14 @@ async function loadOpenPositionsEnhanced() {
 
 async function loadPortfolioSummary() {
     try {
-        const accountParam = activePositionsAccount !== 'ALL'
-            ? `?account=${activePositionsAccount}`
-            : '';
-        const response = await fetch(`${API_URL}/v2/positions/summary${accountParam}`);
-        const data = await response.json();
-        renderPortfolioSummaryWidget(data);
+        // Fetch RH and Fidelity Roth summaries separately so each section gets its own data
+        const [rhRes, fidRothRes] = await Promise.all([
+            fetch(`${API_URL}/v2/positions/summary?account=ROBINHOOD`),
+            fetch(`${API_URL}/v2/positions/summary?account=FIDELITY_ROTH`),
+        ]);
+        const rhData = await rhRes.json();
+        const fidRothData = await fidRothRes.json();
+        renderPortfolioSummaryWidget(rhData, fidRothData);
     } catch (error) {
         console.error('Error loading portfolio summary:', error);
     }
@@ -7209,19 +7211,13 @@ function renderHeadlines(articles) {
     }).join('');
 }
 
-// Fidelity balances (manually updated — no API integration yet)
+// Fidelity Retirement (401A + 403B) — no active trading, updated manually
 const FIDELITY_RETIREMENT = 10341;     // 401A ($10,108) + 403B ($233)
-const FIDELITY_ACTIVE = 8223;          // Roth Brokerage
 
-function renderPortfolioSummaryWidget(summary) {
-    const accountLabel = activePositionsAccount === 'ALL' ? 'All Accounts'
-        : activePositionsAccount === 'ROBINHOOD' ? 'RH'
-        : 'Fidelity';
-
-    const rhBalance = summary.account_balance || 0;
-    const combinedBalance = activePositionsAccount === 'ALL'
-        ? rhBalance + FIDELITY_RETIREMENT + FIDELITY_ACTIVE
-        : rhBalance;
+function renderPortfolioSummaryWidget(rhSummary, fidRothSummary) {
+    const rhBalance = rhSummary.account_balance || 0;
+    const fidRothBalance = fidRothSummary.account_balance || 0;
+    const combinedBalance = rhBalance + fidRothBalance + FIDELITY_RETIREMENT;
 
     // Combined balance (extra large)
     const combinedEl = document.getElementById('portfolioCombinedBalance');
@@ -7235,28 +7231,32 @@ function renderPortfolioSummaryWidget(summary) {
         rhBalEl.textContent = '$' + rhBalance.toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0});
     }
     const rhBreakdown = document.getElementById('rhBreakdown');
-    if (rhBreakdown && summary.cash != null) {
-        const cashStr = '$' + summary.cash.toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0});
-        const posVal = summary.position_value || 0;
+    if (rhBreakdown && rhSummary.cash != null) {
+        const cashStr = '$' + rhSummary.cash.toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0});
+        const posVal = rhSummary.position_value || 0;
         const posStr = '$' + posVal.toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0});
         rhBreakdown.innerHTML = `<span class="rh-cash-link" title="Update cash balance">Cash ${cashStr}</span><button class="withdraw-btn" title="Log withdrawal or deposit">W/D</button><span>Positions ${posStr}</span>`;
-        rhBreakdown.querySelector('.rh-cash-link').addEventListener('click', () => showCashUpdateModal(summary.cash));
+        rhBreakdown.querySelector('.rh-cash-link').addEventListener('click', () => showCashUpdateModal(rhSummary.cash));
         rhBreakdown.querySelector('.withdraw-btn').addEventListener('click', () => showWithdrawModal());
     }
     const rhMeta = document.getElementById('rhMeta');
     if (rhMeta) {
         const parts = [];
-        if (summary.position_count) parts.push(summary.position_count + ' pos');
-        if (summary.net_direction && summary.net_direction !== 'FLAT') parts.push(summary.net_direction);
-        if (summary.nearest_dte !== null && summary.nearest_dte !== undefined) parts.push(summary.nearest_dte + ' DTE');
+        if (rhSummary.position_count) parts.push(rhSummary.position_count + ' pos');
+        if (rhSummary.net_direction && rhSummary.net_direction !== 'FLAT') parts.push(rhSummary.net_direction);
+        if (rhSummary.nearest_dte !== null && rhSummary.nearest_dte !== undefined) parts.push(rhSummary.nearest_dte + ' DTE');
         rhMeta.textContent = parts.join(' \u00B7 ');
     }
 
-    // Fidelity balances are static in HTML, but update combined on refresh
+    // Fidelity Active Trading (Roth) — now from live data
+    const actEl = document.getElementById('fidelityActiveBalance');
+    if (actEl) {
+        actEl.textContent = '$' + fidRothBalance.toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0});
+    }
+
+    // Fidelity Retirement (static — no active trading)
     const retEl = document.getElementById('fidelityRetirementBalance');
     if (retEl) retEl.textContent = '$' + FIDELITY_RETIREMENT.toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0});
-    const actEl = document.getElementById('fidelityActiveBalance');
-    if (actEl) actEl.textContent = '$' + FIDELITY_ACTIVE.toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0});
 }
 
 function showCashUpdateModal(currentCash) {
