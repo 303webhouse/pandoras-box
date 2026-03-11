@@ -109,6 +109,7 @@ async def get_trade_ideas_grouped(
     conditions = [
         "status = 'ACTIVE'",
         "(expires_at IS NULL OR expires_at > NOW())",
+        "created_at > NOW() - INTERVAL '24 hours'",
     ]
     params = []
     idx = 1
@@ -348,8 +349,10 @@ async def expire_stale_signals(_=Depends(require_api_key)):
             UPDATE signals
             SET status = 'EXPIRED', user_action = 'DISMISSED', dismissed_at = NOW()
             WHERE status = 'ACTIVE'
-            AND expires_at IS NOT NULL
-            AND expires_at < NOW()
+            AND (
+                (expires_at IS NOT NULL AND expires_at < NOW())
+                OR (expires_at IS NULL AND created_at < NOW() - INTERVAL '24 hours')
+            )
         """)
 
     # Parse count from result string like "UPDATE 5"
