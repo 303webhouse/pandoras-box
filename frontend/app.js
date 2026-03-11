@@ -3318,7 +3318,7 @@ function renderGroupedSignals(groups) {
             const relatedItems = group.related_signals.map(rs => {
                 const ago = rs.timestamp ? getTimeAgo(rs.timestamp) : '';
                 return `<div class="related-signal-row">
-                    <span class="related-strategy">${rs.strategy || 'Unknown'}</span>
+                    <span class="related-strategy">${formatStrategyName(rs.strategy)}</span>
                     <span class="related-score">${Math.round(rs.score)}</span>
                     <span class="related-time">${ago}</span>
                 </div>`;
@@ -3341,8 +3341,8 @@ function renderGroupedSignals(groups) {
             <div class="signal-card grouped ${tierBorderClass}" data-signal-id="${signal.signal_id}" data-group-key="${group.group_key}" data-signal="${encodeURIComponent(JSON.stringify(signal))}">
                 <div class="signal-header">
                     <div>
-                        <div class="signal-type">${categoryIcon}${signal.signal_type || signal.strategy || 'SIGNAL'}</div>
-                        <div class="signal-strategy">${group.strategies.join(' + ')}</div>
+                        <div class="signal-type">${categoryIcon}${formatSignalType(signal.signal_type || signal.strategy)}</div>
+                        <div class="signal-strategy">${group.strategies.map(formatStrategyName).join(' + ')}</div>
                     </div>
                     <div class="signal-ticker ticker-link" data-action="view-chart">${group.ticker}</div>
                 </div>
@@ -3372,6 +3372,45 @@ function renderGroupedSignals(groups) {
 
     attachSignalActions();
     attachDynamicKbHandlers(container);
+}
+
+function formatStrategyName(raw) {
+    if (!raw) return 'Unknown';
+    // Known display names
+    const names = {
+        'artemis': 'Artemis', 'hub_sniper': 'Artemis', 'hubsniper': 'Artemis',
+        'phalanx': 'Phalanx', 'absorptionwall': 'Phalanx', 'absorption_wall': 'Phalanx',
+        'scout': 'Scout Sniper', 'scout_sniper': 'Scout Sniper',
+        'whale_hunter': 'Whale Hunter', 'whale': 'Whale Hunter',
+        'uw_flow': 'UW Flow', 'sell_the_rip': 'Sell the Rip',
+        'holy_grail': 'Holy Grail', 'holygrail': 'Holy Grail',
+        'sniper': 'Sniper', 'exhaustion': 'Exhaustion',
+    };
+    const key = raw.toLowerCase().replace(/[\s-]+/g, '_');
+    if (names[key]) return names[key];
+    // Fallback: replace underscores/hyphens with spaces, title case
+    return raw.replace(/[_-]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function formatSignalType(raw) {
+    if (!raw) return 'Signal';
+    const names = {
+        'ARTEMIS_LONG': 'Artemis Long', 'ARTEMIS_SHORT': 'Artemis Short',
+        'PHALANX_BULL': 'Phalanx Bull', 'PHALANX_BEAR': 'Phalanx Bear',
+        'SCOUT_ALERT': 'Scout Alert',
+        'WHALE_LONG': 'Whale Long', 'WHALE_SHORT': 'Whale Short',
+        'WHALE_BULLISH': 'Whale Bullish', 'WHALE_BEARISH': 'Whale Bearish',
+        'UW_FLOW_LONG': 'UW Flow Long', 'UW_FLOW_SHORT': 'UW Flow Short',
+        'HOLY_GRAIL': 'Holy Grail', 'HOLY_GRAIL_1H': 'Holy Grail 1H', 'HOLY_GRAIL_15M': 'Holy Grail 15M',
+        'SELL_RIP_EMA': 'Sell the Rip (EMA)', 'SELL_RIP_VWAP': 'Sell the Rip (VWAP)', 'SELL_RIP_EARLY': 'Sell the Rip (Early)',
+        'SNIPER_URSA': 'Sniper Ursa', 'SNIPER_TAURUS': 'Sniper Taurus',
+        'BULLISH_TRADE': 'Bullish Trade', 'BEAR_CALL': 'Bear Call',
+        'APIS_CALL': 'Apis Call', 'KODIAK_CALL': 'Kodiak Call',
+        'EXHAUSTION_TOP': 'Exhaustion Top', 'EXHAUSTION_BOTTOM': 'Exhaustion Bottom',
+        'BULL_WALL': 'Phalanx Bull', 'BEAR_WALL': 'Phalanx Bear',
+    };
+    if (names[raw]) return names[raw];
+    return raw.replace(/[_-]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 }
 
 function formatLargeNumber(n) {
@@ -3468,7 +3507,7 @@ function createCryptoSignalCard(signal) {
 }
 
 function createSignalCard(signal) {
-    const typeLabel = (signal.signal_type || 'SIGNAL').replace('_', ' ');
+    const typeLabel = formatSignalType(signal.signal_type || signal.strategy);
     
     // Calculate score tier and pulse class
     const score = signal.score || 0;
@@ -3497,10 +3536,10 @@ function createSignalCard(signal) {
     let strategiesHtml = '';
     if (signal.strategies && signal.strategies.length > 1) {
         // Multiple strategies - show all
-        strategiesHtml = signal.strategies.map(s => wrapWithKbLink(s)).join(' + ');
+        strategiesHtml = signal.strategies.map(s => wrapWithKbLink(formatStrategyName(s))).join(' + ');
     } else {
         // Single strategy
-        strategiesHtml = wrapWithKbLink(signal.strategy || 'Unknown');
+        strategiesHtml = wrapWithKbLink(formatStrategyName(signal.strategy));
     }
     
     const typeWithKb = wrapWithKbLink(typeLabel);
@@ -3737,7 +3776,7 @@ function renderCryptoPositions() {
                 Entry: $${p.entry_price ? parseFloat(p.entry_price).toLocaleString() : '--'}
                 &middot; Qty: ${p.quantity || '--'}
                 ${p.stop_loss ? `&middot; Stop: $${parseFloat(p.stop_loss).toLocaleString()}` : ''}
-                ${p.strategy ? `&middot; ${escapeHtml(p.strategy)}` : ''}
+                ${p.strategy ? `&middot; ${escapeHtml(formatStrategyName(p.strategy))}` : ''}
             </div>
         </div>
     `).join('');
@@ -5300,7 +5339,7 @@ function renderAnalyzerResultsV3(analysis) {
     const signalsHtml = signals.length
         ? signals.map(s => `
             <div class="analysis-card">
-                <div><strong>${escapeHtml(s.signal_type || 'SIGNAL')}</strong> (${escapeHtml(s.direction || '')})</div>
+                <div><strong>${escapeHtml(formatSignalType(s.signal_type || s.strategy))}</strong> (${escapeHtml(s.direction || '')})</div>
                 <div>Entry: ${s.setup?.entry ?? '-'}</div>
                 <div>Stop: ${s.setup?.stop ?? '-'}</div>
                 <div>Target: ${s.setup?.target ?? '-'}</div>
@@ -7460,7 +7499,7 @@ function renderPositionCard(pos) {
         }
         counterBanner = `
             <div class="counter-signal-warning">
-                Counter-signal: ${cs.direction || '?'} ${cs.strategy || ''} (score: ${cs.score || 'N/A'})${csTime ? ` <span class="counter-signal-time">${csTime}</span>` : ''}
+                Counter-signal: ${cs.direction || '?'} ${formatStrategyName(cs.strategy)} (score: ${cs.score || 'N/A'})${csTime ? ` <span class="counter-signal-time">${csTime}</span>` : ''}
             </div>`;
     }
 
