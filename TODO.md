@@ -68,26 +68,6 @@
 
 ---
 
-## 🔧 In Flight — Active Briefs (March 11)
-
-### Artemis (formerly Hub Sniper) — Plumbing Fix
-**Brief:** `docs/codex-briefs/brief-artemis-plumbing.md`
-**What:** Rename Hub Sniper → Artemis, dedicated webhook handler + route, Pydantic model fields (mode, avwap_ctx, prox_atr), scorer entries (ARTEMIS_LONG/SHORT: 45). Decouples from legacy Sniper route.
-**Nick TODO after deploy:** Update PineScript strategy field to `"Artemis"`.
-
-### Phalanx (formerly Absorption Wall) — Plumbing Fix
-**Brief:** `docs/codex-briefs/brief-phalanx-plumbing.md`
-**What:** Rename Absorption Wall → Phalanx, enrich handler with signal_category=ORDER_FLOW + Redis wall level caching (4h TTL), scorer entries (PHALANX_BULL/BEAR: 40), strategy doc created.
-**Nick TODO after deploy:** Update PineScript strategy field to `"Phalanx"` when convenient. Existing alerts route fine via backward-compat `"absorption"` match.
-
-### McClellan Oscillator — NYSE Proxy Fix (DEPLOYED)
-- [x] CC pushed NYSE Composite (^NYA) proxy fallback since Yahoo dropped ^ADVN/^DECLN. Three-tier data source: ADVN/DECLN → NYSE proxy → Redis history. Verified locally: McClellan=-59.1, score=-0.30.
-
-### Webhook Dedup Fix (DEPLOYED)
-- [x] `alert.interval` → `alert.timeframe` in tradingview.py dedup code. Was returning 500 on ALL TradingView webhooks.
-
----
-
 ## 🟠 Phase 2: Crypto Scalper Review/Overhaul ← **NEXT**
 
 **Goal:** Assess the crypto shell, determine what's working, what's orphaned, and build a real LTF scalping system.
@@ -132,7 +112,7 @@
 ## 🟡 Ongoing / Lower Priority
 
 - [ ] **Polygon-Powered Dynamic Scan Universe** — CONFIRMED: Polygon Stocks Starter ($29/mo) returns 12,367 tickers in a single snapshot API call with current price, volume, and daily change. Plan supports daily bars (delayed 15 min) and full-market snapshots but NOT intraday bars (15m/1H — needs Developer plan $79/mo). **Proposed architecture:** Stage 1 = Polygon snapshot pre-filter (1 API call, ~2s) filters to liquid, moving names by volume/price/change thresholds. Stage 2 = yfinance 15m bars only on the filtered set. Gets wider coverage (catching movers not in hardcoded lists) while being faster (skips dead tickers). For daily-bar strategies (CTA Scanner), can replace yfinance with Polygon entirely. Existing integration: `backend/integrations/polygon_equities.py` has `get_bars()`, `get_bars_as_dataframe()`, `get_snapshot()`, `get_previous_close()` all working. **Impact:** Scale server-side scanners from hardcoded 200 tickers to dynamic 500-1000+ without yfinance rate limit issues.
-- [ ] **Phalanx confluence enrichment** — After Phalanx plumbing is live and generating signals: when scoring other signals (CTA, Artemis, etc.), check Redis for nearby Phalanx wall levels. If signal entry_price within 0.5 ATR of cached wall AND direction matches: +10 confluence bonus. Separate brief.
+- [ ] **Phalanx confluence enrichment** — Phalanx plumbing is live and wall levels caching in Redis. Next step: when scoring other signals (CTA, Artemis, etc.), check Redis for nearby Phalanx wall levels. If signal entry_price within 0.5 ATR of cached wall AND direction matches: +10 confluence bonus. Separate brief.
 - [ ] **Artemis parameter loosening** — After 1 week of baseline data with webhook fix: widen proximity zone (0.25→0.4 ATR), convert AVWAP gate to score modifier (-15 pts), remove stacked confirmation candle RVOL, lower Flush mode RVOL (2.0→1.5x). Per Olympus review.
 - [ ] **IBKR account setup** — Fund account → create read-only API user → enable position polling
 - [ ] **Brief 05B: Adaptive Calibration** — Dynamic thresholds + agent trust weighting. Needs 3+ weeks outcome data.
@@ -144,12 +124,12 @@
 
 ---
 
-## ✅ Completed (March 11, 2026) — Webhook Fix + McClellan + Artemis/Phalanx Briefs
+## ✅ Completed (March 11, 2026) — Webhook Fix + McClellan + Artemis + Phalanx
 
 - [x] **Webhook dedup bug fix** — `alert.interval` → `alert.timeframe`. Was 500'ing ALL TradingView webhooks (Scout, Artemis, Exhaustion, Holy Grail, Phalanx). Deployed immediately.
 - [x] **McClellan Oscillator NYSE proxy** — CC added ^NYA daily returns as breadth proxy fallback. Factor no longer MISSING.
-- [x] **Artemis Olympus review** — 4-agent committee review of Hub Sniper strategy. Identified 3-layer problem (broken webhook + gateway plumbing + tight Pine parameters). Brief written.
-- [x] **Phalanx Olympus review** — 4-agent committee review of Absorption Wall. Never deployed (zero signals ever). PineScript is solid, plumbing was the blocker. Brief written + strategy doc created.
+- [x] **Artemis (formerly Hub Sniper) — DEPLOYED** — Olympus review → CC brief → deployed. Dedicated `process_artemis_signal()` handler, Pydantic fields (mode, avwap_ctx, prox_atr, adx_rising), scorer entries (ARTEMIS_LONG/SHORT: 45), strategy doc renamed. PineScript updated, TV watchlist alert active.
+- [x] **Phalanx (formerly Absorption Wall) — DEPLOYED** — Olympus review → CC brief → deployed. Dedicated `process_phalanx_signal()` handler with `signal_category=ORDER_FLOW`, Redis wall level caching (4h TTL), scorer entries (PHALANX_BULL/BEAR: 40), strategy doc created. PineScript updated, TV watchlist alert active.
 - [x] **Polygon scan universe discovery** — Confirmed Starter plan returns 12K tickers in single snapshot call. Architecture for dynamic scan universe documented.
 - [x] UI rename: Greek mythology theme (Agora, Stater Swap, Abacus, Great Library, Insights, Ledger)
 
