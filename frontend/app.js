@@ -6554,7 +6554,14 @@ let closingPosition = null;
 let currentPrices = {};  // Cache of current prices for P&L calculation
 let priceUpdateInterval = null;
 let currentTradeType = 'equity';  // 'equity' or 'options'
-let activePositionsAccount = 'ALL';  // 'ALL', 'ROBINHOOD', or 'FIDELITY'
+let activePositionsAccount = 'ALL';  // 'ALL', 'ROBINHOOD', 'FIDELITY', 'FIDELITY_ROTH', 'FIDELITY_401A'
+
+function matchesAccountFilter(posAccount, filterAccount) {
+    const pa = (posAccount || 'ROBINHOOD').toUpperCase();
+    if (filterAccount === 'ALL') return true;
+    if (filterAccount === 'FIDELITY') return pa.startsWith('FIDELITY');
+    return pa === filterAccount;
+}
 
 function getSelectedAccount() {
     const active = document.querySelector('#accountToggle .trade-type-btn.active');
@@ -7366,11 +7373,7 @@ function showWithdrawModal() {
 function updatePositionsCount() {
     const countEl = document.getElementById('positionsCount');
     if (countEl) {
-        const count = activePositionsAccount === 'ALL'
-            ? openPositions.length
-            : openPositions.filter(p =>
-                (p.account || 'ROBINHOOD').toUpperCase() === activePositionsAccount
-            ).length;
+        const count = openPositions.filter(p => matchesAccountFilter(p.account, activePositionsAccount)).length;
         countEl.textContent = count;
     }
 }
@@ -7507,11 +7510,7 @@ function renderPositionsEnhanced() {
     if (!container) return;
 
     // Filter by active account tab
-    const filteredPositions = activePositionsAccount === 'ALL'
-        ? openPositions
-        : openPositions.filter(p =>
-            (p.account || 'ROBINHOOD').toUpperCase() === activePositionsAccount
-        );
+    const filteredPositions = openPositions.filter(p => matchesAccountFilter(p.account, activePositionsAccount));
 
     if (!filteredPositions || filteredPositions.length === 0) {
         container.innerHTML = '<p class="empty-state">No open positions</p>';
@@ -7958,7 +7957,8 @@ function openUnifiedPositionModal() {
                         <label>Account</label>
                         <select id="upAccount">
                             <option value="ROBINHOOD">Robinhood</option>
-                            <option value="FIDELITY">Fidelity</option>
+                            <option value="FIDELITY_ROTH">Fidelity Roth</option>
+                            <option value="FIDELITY_401A">Fidelity 401A</option>
                         </select>
                     </div>
                     <div class="form-row">
@@ -8042,7 +8042,9 @@ function openUnifiedPositionModal() {
     }
 
     // Clear form on each open
-    document.getElementById('upAccount').value = (activePositionsAccount !== 'ALL') ? activePositionsAccount : 'ROBINHOOD';
+    const acctDefault = (activePositionsAccount !== 'ALL' && activePositionsAccount !== 'FIDELITY')
+        ? activePositionsAccount : 'ROBINHOOD';
+    document.getElementById('upAccount').value = acctDefault;
     document.getElementById('upTicker').value = '';
     document.getElementById('upStructure').value = 'put_credit_spread';
     document.getElementById('upLongStrike').value = '';
@@ -8152,11 +8154,14 @@ async function submitUnifiedPosition() {
         });
         const data = await response.json();
 
-        if (data.status === 'created') {
+        if (data.status === 'created' || data.status === 'combined') {
             document.getElementById('unifiedPositionModal').classList.remove('active');
             await loadOpenPositionsEnhanced();
             addPositionChartTab(ticker);
             updateCurrentPrices();
+            if (data.status === 'combined') {
+                console.log('Position combined:', data.detail);
+            }
         } else {
             alert('Failed to create position: ' + (data.detail || JSON.stringify(data)));
         }

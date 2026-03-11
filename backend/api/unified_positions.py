@@ -35,7 +35,9 @@ PIVOT_API_KEY = os.getenv("PIVOT_API_KEY") or ""
 # Robust account name matching — handles case and naming variations
 ACCOUNT_DISPLAY_MAP = {
     "ROBINHOOD": ["robinhood", "rh", "robinhood - individual"],
-    "FIDELITY": ["fidelity", "fidelity - individual", "fid"],
+    "FIDELITY_ROTH": ["fidelity roth"],
+    "FIDELITY_401A": ["fidelity 401a"],
+    "FIDELITY": ["fidelity", "fidelity - individual", "fid"],  # legacy fallback
 }
 
 
@@ -44,7 +46,9 @@ def _match_account_balance(account_filter: str, balance_name: str) -> bool:
     filter_upper = account_filter.upper()
     name_lower = balance_name.lower().strip()
     aliases = ACCOUNT_DISPLAY_MAP.get(filter_upper, [])
-    return name_lower in aliases or name_lower.startswith(filter_upper.lower())
+    # Normalize underscores to spaces for startsWith matching (FIDELITY_ROTH → fidelity roth)
+    filter_normalized = filter_upper.lower().replace("_", " ")
+    return name_lower in aliases or name_lower.startswith(filter_normalized)
 
 
 async def _adjust_account_cash(pool, account: str, delta: float):
@@ -253,10 +257,8 @@ def _compute_dte(expiry_str: str) -> Optional[int]:
 
 @router.post("/v2/positions")
 async def create_position(req: CreatePositionRequest, _=Depends(require_api_key)):
-    """Create a new position. Auto-calculates max_loss for spreads."""
+    """Create a new position, or add to existing if same ticker+account+structure is open."""
     pool = await get_postgres_client()
-
-    position_id = _generate_position_id(req.ticker)
 
     # Auto-infer direction if not provided
     direction = req.direction
@@ -268,6 +270,90 @@ async def create_position(req: CreatePositionRequest, _=Depends(require_api_key)
     norm_long, norm_short = normalize_spread_strikes(
         req.long_strike, req.short_strike, req.structure
     )
+
+    # --- Check for existing open position to combine with ---
+    account = (req.account or "ROBINHOOD").upper()
+    existing = None
+    async with pool.acquire() as conn:
+        existing = await conn.fetchrow("""
+            SELECT * FROM unified_positions
+            WHERE ticker = $1 AND account = $2 AND status = 'OPEN'
+              AND COALESCE(structure, '') = COALESCE($3, '')
+              AND COALESCE(long_strike, 0) = COALESCE($4, 0)
+              AND COALESCE(short_strike, 0) = COALESCE($5, 0)
+              AND COALESCE(expiry::text, '') = COALESCE($6, '')
+            LIMIT 1
+        """, req.ticker.upper(), account, req.structure,
+            norm_long or 0, norm_short or 0,
+            str(req.expiry)[:10] if req.expiry else "",
+        )
+
+    if existing and req.entry_price is not None:
+        # --- ADD TO EXISTING POSITION (weighted average cost basis) ---
+        old_qty = existing["quantity"] or 0
+        old_entry = float(existing["entry_price"] or 0)
+        add_qty = req.quantity
+        add_entry = req.entry_price
+
+        new_qty = old_qty + add_qty
+        new_entry = ((old_entry * old_qty) + (add_entry * add_qty)) / new_qty if new_qty else add_entry
+
+        # Recompute cost basis
+        s = (req.structure or existing["structure"] or "").lower()
+        is_stock = s in ("stock", "stock_long", "long_stock", "stock_short", "short_stock")
+        new_cost_basis = abs(new_entry) * new_qty * (1 if is_stock else 100)
+
+        # Recalculate risk for new quantity
+        new_max_loss = existing["max_loss"]
+        new_max_profit = existing["max_profit"]
+        new_breakeven = existing.get("breakeven")
+        structure = req.structure or existing["structure"]
+        if structure and new_max_loss is not None and old_qty > 0:
+            # Scale risk proportionally to new quantity
+            scale = new_qty / old_qty
+            new_max_loss = round(float(new_max_loss) * scale, 2) if new_max_loss else None
+            new_max_profit = round(float(new_max_profit) * scale, 2) if new_max_profit else None
+
+        pos_id = existing["position_id"]
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                UPDATE unified_positions
+                SET quantity = $2, entry_price = $3, cost_basis = $4,
+                    max_loss = $5, max_profit = $6, updated_at = NOW()
+                WHERE position_id = $1
+                RETURNING *
+            """, pos_id, new_qty, round(new_entry, 4), round(new_cost_basis, 2),
+                new_max_loss, new_max_profit,
+            )
+
+        # Adjust cash for the added portion only
+        add_cost = abs(add_entry) * add_qty * (1 if is_stock else 100)
+        if add_cost:
+            cash_delta = add_cost if s in CREDIT_STRUCTURES else -add_cost
+            try:
+                await _adjust_account_cash(pool, account, cash_delta)
+            except Exception as e:
+                logger.warning("Cash adjustment failed on add-to-position: %s", e)
+
+        result = _row_to_dict(row)
+        logger.info(
+            "Position combined: %s %s — %d+%d=%d @ $%.4f avg",
+            pos_id, req.ticker.upper(), old_qty, add_qty, new_qty, new_entry,
+        )
+
+        try:
+            await manager.broadcast_position_update({
+                "action": "POSITION_UPDATED",
+                "position": result,
+            })
+        except Exception:
+            pass
+
+        return {"status": "combined", "position": result,
+                "detail": f"Added {add_qty} to existing position ({old_qty} → {new_qty} @ ${new_entry:.4f} avg)"}
+
+    # --- CREATE NEW POSITION ---
+    position_id = _generate_position_id(req.ticker)
 
     # Auto-calculate risk if structure is provided and max_loss not overridden
     max_loss = req.max_loss
@@ -330,7 +416,7 @@ async def create_position(req: CreatePositionRequest, _=Depends(require_api_key)
             max_loss, max_profit, req.stop_loss, req.target_1, req.target_2,
             breakeven if breakeven else None,
             expiry, dte, norm_long, norm_short,
-            req.source, req.signal_id, (req.account or "ROBINHOOD").upper(), req.notes,
+            req.source, req.signal_id, account, req.notes,
             req.tags if req.tags else None,
         )
 
@@ -339,7 +425,7 @@ async def create_position(req: CreatePositionRequest, _=Depends(require_api_key)
         s = (req.structure or "").lower()
         cash_delta = cost_basis if s in CREDIT_STRUCTURES else -cost_basis
         try:
-            await _adjust_account_cash(pool, (req.account or "ROBINHOOD").upper(), cash_delta)
+            await _adjust_account_cash(pool, account, cash_delta)
         except Exception as e:
             logger.warning("Cash adjustment failed on create: %s", e)
 
@@ -394,9 +480,12 @@ async def list_positions(
         idx += 1
 
     if account:
-        conditions.append(f"account = ${idx}")
-        params.append(account.upper())
-        idx += 1
+        if account.upper() == "FIDELITY":
+            conditions.append("account LIKE 'FIDELITY%'")
+        else:
+            conditions.append(f"account = ${idx}")
+            params.append(account.upper())
+            idx += 1
 
     where = "WHERE " + " AND ".join(conditions) if conditions else ""
 
@@ -462,22 +551,27 @@ async def portfolio_summary(account: Optional[str] = Query(None)):
     # Filter by account if specified
     if account:
         account_upper = account.upper()
-        positions = [
-            p for p in positions
-            if (p.get("account") or "ROBINHOOD").upper() == account_upper
-        ]
+        if account_upper == "FIDELITY":
+            # Show all Fidelity sub-accounts
+            positions = [p for p in positions if (p.get("account") or "").upper().startswith("FIDELITY")]
+        else:
+            positions = [p for p in positions if (p.get("account") or "ROBINHOOD").upper() == account_upper]
 
     # Fetch cash balance from account_balances
     cash = 0.0
     try:
         async with pool.acquire() as conn:
             if account:
-                # Find matching account balance row
+                # Find matching account balance row(s)
                 bal_rows = await conn.fetch("SELECT account_name, cash, balance FROM account_balances")
-                for br in bal_rows:
-                    if _match_account_balance(account, br["account_name"]):
-                        cash = float(br["cash"] or 0)
-                        break
+                if account.upper() == "FIDELITY":
+                    # Sum all Fidelity sub-accounts
+                    cash = sum(float(br["cash"] or 0) for br in bal_rows if (br["account_name"] or "").lower().startswith("fidelity"))
+                else:
+                    for br in bal_rows:
+                        if _match_account_balance(account, br["account_name"]):
+                            cash = float(br["cash"] or 0)
+                            break
             else:
                 # Default: sum all account cash balances
                 bal_rows = await conn.fetch("SELECT cash FROM account_balances")
@@ -585,24 +679,26 @@ async def portfolio_summary(account: Optional[str] = Query(None)):
 @router.patch("/v2/positions/account-balance")
 async def update_account_balance(request: Request, _=Depends(require_api_key)):
     """
-    Update the stored Robinhood cash balance.
-    Body: {"cash": 3044.19}
-    Total account balance = cash + sum(position market values).
+    Update stored cash balance for any account.
+    Body: {"cash": 3044.19} or {"cash": 3044.19, "account_name": "Fidelity Roth"}
+    Defaults to Robinhood if account_name not specified.
     """
     body = await request.json()
     new_cash = body.get("cash")
     if new_cash is None:
         raise HTTPException(status_code=400, detail="cash field required")
 
+    account_name = body.get("account_name", "Robinhood")
+
     pool = await get_postgres_client()
     async with pool.acquire() as conn:
-        await conn.execute(
-            "UPDATE account_balances SET cash = $1, updated_at = NOW(), updated_by = 'dashboard' WHERE account_name = 'Robinhood'",
-            float(new_cash),
+        result = await conn.execute(
+            "UPDATE account_balances SET cash = $1, updated_at = NOW(), updated_by = 'dashboard' WHERE account_name = $2",
+            float(new_cash), account_name,
         )
 
-    logger.info("RH cash balance updated to %.2f", float(new_cash))
-    return {"status": "ok", "cash": float(new_cash)}
+    logger.info("Cash balance updated for %s to %.2f", account_name, float(new_cash))
+    return {"status": "ok", "account": account_name, "cash": float(new_cash)}
 
 
 @router.get("/v2/positions/greeks")
