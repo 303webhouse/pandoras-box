@@ -25,6 +25,7 @@ class TestFrontendEndpointsExist:
         "/api/portfolio/balances",
         "/api/monitoring/factor-staleness",
         "/api/monitoring/polygon-health",
+        "/api/trade-ideas/grouped",
     ]
 
     @pytest.mark.parametrize("path", FRONTEND_GET_ENDPOINTS)

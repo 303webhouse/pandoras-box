@@ -71,6 +71,16 @@ STRATEGY_BASE_SCORES = {
     "BULLISH_TRADE": 35,
     "BEAR_CALL": 35,
     
+    # Whale Hunter (dark pool algorithmic execution detection)
+    "WHALE_LONG": 50,
+    "WHALE_SHORT": 50,
+    "WHALE_BULLISH": 50,
+    "WHALE_BEARISH": 50,
+
+    # UW Flow (institutional options flow intelligence)
+    "UW_FLOW_LONG": 40,
+    "UW_FLOW_SHORT": 40,
+
     # Default for unknown strategies
     "DEFAULT": 30
 }

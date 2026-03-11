@@ -3211,10 +3211,194 @@ function renderCryptoSignals() {
     renderCryptoPositions();
 }
 
-function refreshSignalViews() {
-    if (typeof renderSignals === 'function') {
+async function loadGroupedSignals() {
+    try {
+        const response = await fetch(`${API_URL}/trade-ideas/grouped`);
+        const data = await response.json();
+        if (data.groups) {
+            renderGroupedSignals(data.groups);
+        }
+    } catch (error) {
+        console.warn('Grouped signals failed, falling back to flat view:', error);
         renderSignals();
     }
+}
+
+function renderGroupedSignals(groups) {
+    const container = document.getElementById('tradeSignals');
+    if (!container) return;
+
+    if (!groups || groups.length === 0) {
+        container.innerHTML = '<p class="empty-state">No trade ideas</p>';
+        return;
+    }
+
+    container.innerHTML = groups.map(group => {
+        const signal = group.primary_signal;
+        const isConviction = group.confluence_tier === 'CONVICTION';
+        const isConfirmed = group.confluence_tier === 'CONFIRMED';
+        const confluenceBadge = isConviction
+            ? '<span class="confluence-badge conviction">CONVICTION</span>'
+            : isConfirmed
+            ? '<span class="confluence-badge confirmed">CONFIRMED</span>'
+            : '';
+        const signalCountBadge = group.signal_count > 1
+            ? `<span class="signal-count-badge">${group.signal_count} signals</span>`
+            : '';
+        const category = (signal.signal_category || 'TRADE_SETUP');
+
+        // Position overlap check
+        let positionBadge = '';
+        const matchingPos = openPositions.find(p =>
+            (p.ticker || '').toUpperCase() === group.ticker
+        );
+        if (matchingPos) {
+            const posDir = (matchingPos.direction || '').toUpperCase();
+            const sigDir = group.direction.toUpperCase();
+            const aligns = (posDir === sigDir) ||
+                (posDir === 'BEARISH' && sigDir === 'SHORT') ||
+                (posDir === 'SHORT' && sigDir === 'BEARISH') ||
+                (posDir === 'BULLISH' && sigDir === 'LONG') ||
+                (posDir === 'LONG' && sigDir === 'BULLISH');
+            positionBadge = aligns
+                ? `<span class="position-overlap confirms">Confirms ${matchingPos.ticker} position</span>`
+                : `<span class="position-overlap counters">Counters ${matchingPos.ticker} position</span>`;
+        }
+
+        // Stale badge
+        let staleBadge = '';
+        if (group.newest_at) {
+            try {
+                const mins = Math.round((Date.now() - new Date(group.newest_at).getTime()) / 60000);
+                if (mins > 120) staleBadge = '<span class="stale-badge">Stale</span>';
+            } catch(e) {}
+        }
+
+        const formatPrice = (val) => val ? parseFloat(val).toFixed(2) : '-';
+        const formatRR = (val) => typeof formatRiskReward === 'function' ? formatRiskReward(val) : (val ? parseFloat(val).toFixed(1) + ':1' : '-');
+
+        // Card content varies by signal_category
+        let detailsHtml = '';
+        if (category === 'FLOW_INTEL') {
+            let meta = signal.metadata || {};
+            if (typeof meta === 'string') { try { meta = JSON.parse(meta); } catch(e) {} }
+            detailsHtml = `
+                <div class="signal-details flow-details">
+                    <div class="signal-detail"><div class="signal-detail-label">Premium</div><div class="signal-detail-value">$${formatLargeNumber(meta.total_premium)}</div></div>
+                    <div class="signal-detail"><div class="signal-detail-label">P/C</div><div class="signal-detail-value">${meta.pc_ratio || '-'}</div></div>
+                    <div class="signal-detail"><div class="signal-detail-label">Sentiment</div><div class="signal-detail-value">${meta.flow_sentiment || '-'}</div></div>
+                </div>`;
+        } else if (category === 'DARK_POOL') {
+            let meta = signal.metadata || {};
+            if (typeof meta === 'string') { try { meta = JSON.parse(meta); } catch(e) {} }
+            detailsHtml = `
+                <div class="signal-details">
+                    <div class="signal-detail"><div class="signal-detail-label">POC</div><div class="signal-detail-value">${formatPrice(meta.poc)}</div></div>
+                    <div class="signal-detail"><div class="signal-detail-label">Entry</div><div class="signal-detail-value">${formatPrice(signal.entry_price)}</div></div>
+                    <div class="signal-detail"><div class="signal-detail-label">Stop</div><div class="signal-detail-value">${formatPrice(signal.stop_loss)}</div></div>
+                    <div class="signal-detail"><div class="signal-detail-label">Target</div><div class="signal-detail-value">${formatPrice(signal.target_1)}</div></div>
+                </div>`;
+        } else {
+            // Standard TRADE_SETUP card
+            detailsHtml = `
+                <div class="signal-details">
+                    <div class="signal-detail"><div class="signal-detail-label">Entry</div><div class="signal-detail-value">${formatPrice(signal.entry_price)}</div></div>
+                    <div class="signal-detail"><div class="signal-detail-label">Stop</div><div class="signal-detail-value">${formatPrice(signal.stop_loss)}</div></div>
+                    <div class="signal-detail"><div class="signal-detail-label">Target</div><div class="signal-detail-value">${formatPrice(signal.target_1)}</div></div>
+                </div>
+                <div class="signal-details">
+                    <div class="signal-detail"><div class="signal-detail-label">R:R</div><div class="signal-detail-value">${formatRR(signal.risk_reward)}</div></div>
+                    <div class="signal-detail"><div class="signal-detail-label">Direction</div><div class="signal-detail-value direction-${(signal.direction || '').toLowerCase()}">${signal.direction || '-'}</div></div>
+                </div>`;
+        }
+
+        // Related signals expandable section
+        let relatedHtml = '';
+        if (group.related_signals && group.related_signals.length > 0) {
+            const relatedItems = group.related_signals.map(rs => {
+                const ago = rs.timestamp ? getTimeAgo(rs.timestamp) : '';
+                return `<div class="related-signal-row">
+                    <span class="related-strategy">${rs.strategy || 'Unknown'}</span>
+                    <span class="related-score">${Math.round(rs.score)}</span>
+                    <span class="related-time">${ago}</span>
+                </div>`;
+            }).join('');
+            relatedHtml = `
+                <div class="related-signals-toggle" onclick="this.nextElementSibling.classList.toggle('expanded')">
+                    + ${group.related_signals.length} supporting signal${group.related_signals.length > 1 ? 's' : ''}
+                </div>
+                <div class="related-signals-panel">
+                    ${relatedItems}
+                </div>`;
+        }
+
+        const score = Math.round(signal.score_v2 || signal.score || 0);
+        const scoreTier = score >= 85 ? 'CRITICAL' : score >= 75 ? 'HIGH' : score >= 55 ? 'MEDIUM' : 'LOW';
+        const tierBorderClass = isConviction ? 'conviction-border' : isConfirmed ? 'confirmed-border' : '';
+        const categoryIcon = '';
+
+        return `
+            <div class="signal-card grouped ${tierBorderClass}" data-signal-id="${signal.signal_id}" data-group-key="${group.group_key}" data-signal="${encodeURIComponent(JSON.stringify(signal))}">
+                <div class="signal-header">
+                    <div>
+                        <div class="signal-type">${categoryIcon}${signal.signal_type || signal.strategy || 'SIGNAL'}</div>
+                        <div class="signal-strategy">${group.strategies.join(' + ')}</div>
+                    </div>
+                    <div class="signal-ticker ticker-link" data-action="view-chart">${group.ticker}</div>
+                </div>
+
+                <div class="signal-badges">
+                    ${confluenceBadge}${signalCountBadge}${positionBadge}${staleBadge}
+                </div>
+
+                <div class="signal-score-bar">
+                    <div class="score-label">Score</div>
+                    <div class="score-value ${scoreTier.toLowerCase()}">${score}</div>
+                    <div class="score-tier ${scoreTier.toLowerCase()}">${scoreTier}</div>
+                </div>
+
+                ${detailsHtml}
+
+                ${relatedHtml}
+
+                <div class="signal-actions">
+                    <button class="action-btn dismiss-btn" data-action="dismiss">Reject</button>
+                    <button class="action-btn committee-btn" data-action="committee">Analyze</button>
+                    ${category === 'FLOW_INTEL' ? '' : '<button class="action-btn select-btn" data-action="select">Accept</button>'}
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    attachSignalActions();
+    attachDynamicKbHandlers(container);
+}
+
+function formatLargeNumber(n) {
+    if (!n) return '-';
+    n = parseFloat(n);
+    if (n >= 1_000_000_000) return (n / 1_000_000_000).toFixed(1) + 'B';
+    if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
+    if (n >= 1_000) return (n / 1_000).toFixed(0) + 'K';
+    return n.toFixed(0);
+}
+
+function getTimeAgo(timestamp) {
+    try {
+        const mins = Math.round((Date.now() - new Date(timestamp).getTime()) / 60000);
+        if (mins < 1) return 'just now';
+        if (mins < 60) return mins + 'm ago';
+        return Math.round(mins / 60) + 'h ago';
+    } catch(e) { return ''; }
+}
+
+function refreshSignalViews() {
+    // Use grouped view by default, fall back to flat
+    loadGroupedSignals().catch(() => {
+        if (typeof renderSignals === 'function') {
+            renderSignals();
+        }
+    });
     renderCryptoSignals();
 }
 

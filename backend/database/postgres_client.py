@@ -605,7 +605,8 @@ async def init_database():
             ADD COLUMN IF NOT EXISTS regime VARCHAR(30),
             ADD COLUMN IF NOT EXISTS confluence_score DECIMAL(5, 2),
             ADD COLUMN IF NOT EXISTS score_v2 DECIMAL(5, 2),
-            ADD COLUMN IF NOT EXISTS score_v2_factors JSONB
+            ADD COLUMN IF NOT EXISTS score_v2_factors JSONB,
+            ADD COLUMN IF NOT EXISTS signal_category VARCHAR(20) DEFAULT 'TRADE_SETUP'
         """)
 
         # Phase 4: Indexes for Trade Ideas feed queries
@@ -1045,11 +1046,11 @@ async def log_signal(
                 direction, signal_type, entry_price, stop_loss, target_1,
                 target_2, risk_reward, timeframe, bias_level, adx, line_separation,
                 score, bias_alignment, triggering_factors, bias_at_signal, notes,
-                day_of_week, hour_of_day, is_opex_week, days_to_earnings, market_event
+                day_of_week, hour_of_day, is_opex_week, days_to_earnings, market_event, signal_category
             ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
                 $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
-                $21, $22, $23, $24, $25, $26
+                $21, $22, $23, $24, $25, $26, $27
             )
             ON CONFLICT (signal_id) DO NOTHING
         """,
@@ -1079,6 +1080,7 @@ async def log_signal(
             calendar_fields.get("is_opex_week"),
             calendar_fields.get("days_to_earnings"),
             calendar_fields.get("market_event"),
+            signal_data.get("signal_category", "TRADE_SETUP"),
         )
         inserted = str(result).strip().endswith("1")
         if not inserted:
