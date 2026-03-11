@@ -25,6 +25,130 @@ MARKET_FLOW_TTL = 3600    # 1 hour for aggregate market flow
 DISCOVERY_TTL = 14400  # 4 hours
 RECENT_LIST_MAX = 50   # Max items in the recent alerts list
 
+# UW Flow → Signal thresholds (stored in Redis for tunability, these are defaults)
+UW_SIGNAL_DEFAULTS = {
+    "min_premium": 500_000,      # $500K total premium
+    "min_unusual_count": 3,      # 3+ unusual trades
+    "cooldown_seconds": 3600,    # 1 hour per-ticker cooldown
+}
+
+
+async def _maybe_create_uw_signal(ticker_data: dict) -> bool:
+    """
+    Check if a UW ticker update meets the threshold for independent signal creation.
+    Returns True if a signal was created.
+    """
+    ticker = ticker_data.get("ticker", "").upper()
+    if not ticker:
+        return False
+
+    total_premium = float(ticker_data.get("total_premium") or 0)
+    pc_ratio = float(ticker_data.get("pc_ratio") or 1.0)
+    flow_sentiment = ticker_data.get("flow_sentiment")
+
+    # Load thresholds from Redis (with defaults)
+    client = await get_redis_client()
+    min_premium = UW_SIGNAL_DEFAULTS["min_premium"]
+    cooldown = UW_SIGNAL_DEFAULTS["cooldown_seconds"]
+
+    if client:
+        try:
+            rp = await client.get("config:uw_flow:min_premium")
+            if rp:
+                min_premium = float(rp)
+            rc = await client.get("config:uw_flow:cooldown_seconds")
+            if rc:
+                cooldown = int(rc)
+        except Exception:
+            pass  # Use defaults
+
+    # Check thresholds
+    if total_premium < min_premium:
+        return False
+    if not flow_sentiment or flow_sentiment not in ("BULLISH", "BEARISH"):
+        return False
+
+    # Check bias alignment
+    try:
+        from bias_engine.composite import get_cached_composite
+        cached = await get_cached_composite()
+        if cached:
+            comp_score = cached.composite_score
+            # BULLISH flow in bearish regime = skip. BEARISH flow in bullish regime = skip.
+            if flow_sentiment == "BULLISH" and comp_score < -0.15:
+                logger.info(f"UW flow {ticker} BULLISH skipped — bearish bias ({comp_score:+.2f})")
+                return False
+            if flow_sentiment == "BEARISH" and comp_score > 0.15:
+                logger.info(f"UW flow {ticker} BEARISH skipped — bullish bias ({comp_score:+.2f})")
+                return False
+    except Exception:
+        pass  # If bias unavailable, proceed without filter
+
+    # Check per-ticker cooldown
+    if client:
+        cooldown_key = f"uw_signal_cooldown:{ticker}"
+        try:
+            if await client.get(cooldown_key):
+                logger.debug(f"UW flow {ticker} skipped — cooldown active")
+                return False
+        except Exception:
+            pass
+
+    # All gates passed — create signal
+    try:
+        from signals.pipeline import process_signal_unified
+        import hashlib
+
+        direction = "LONG" if flow_sentiment == "BULLISH" else "SHORT"
+        ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        short_hash = hashlib.md5(f"{ticker}{total_premium}{pc_ratio}".encode()).hexdigest()[:6]
+        signal_id = f"UW_{ticker}_{ts}_{short_hash}"
+
+        signal_data = {
+            "signal_id": signal_id,
+            "ticker": ticker,
+            "strategy": "UW_Flow",
+            "signal_type": f"UW_FLOW_{direction}",
+            "direction": direction,
+            "entry_price": float(ticker_data.get("price") or 0),
+            "stop_loss": None,
+            "target_1": None,
+            "target_2": None,
+            "timeframe": "D",
+            "asset_class": "EQUITY",
+            "source": "uw_flow",
+            "signal_category": "FLOW_INTEL",
+            "metadata": {
+                "total_premium": total_premium,
+                "flow_sentiment": flow_sentiment,
+                "pc_ratio": ticker_data.get("pc_ratio"),
+                "put_volume": ticker_data.get("put_volume"),
+                "call_volume": ticker_data.get("call_volume"),
+                "flow_premium": ticker_data.get("flow_premium"),
+                "flow_pct": ticker_data.get("flow_pct"),
+            },
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+        await process_signal_unified(signal_data, source="uw_flow")
+
+        # Set cooldown
+        if client:
+            try:
+                await client.set(cooldown_key, "1", ex=cooldown)
+            except Exception:
+                pass
+
+        logger.info(
+            f"UW Flow signal created: {signal_id} "
+            f"(premium=${total_premium:,.0f}, {flow_sentiment})"
+        )
+        return True
+
+    except Exception as e:
+        logger.warning(f"UW flow signal creation failed for {ticker}: {e}")
+        return False
+
 
 @router.post("/flow")
 async def receive_uw_flow(request: Request, _: str = Depends(verify_pivot_key)):
@@ -210,6 +334,12 @@ async def receive_uw_ticker_updates(request: Request, _: str = Depends(verify_pi
                 spy_data = td
             elif ticker_upper == "QQQ":
                 qqq_data = td
+
+            # Check if this ticker qualifies for independent signal creation
+            try:
+                await _maybe_create_uw_signal(td)
+            except Exception as e:
+                logger.debug(f"UW signal check failed for {ticker_upper}: {e}")
 
         # Store aggregate market flow snapshot
         if written > 0:

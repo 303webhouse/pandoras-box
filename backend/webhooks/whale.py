@@ -31,7 +31,7 @@ Discord:  Posts a whale embed to DISCORD_WEBHOOK_SIGNALS.
 Redis:    Caches at whale:recent:{TICKER} for 30 min (committee confluence).
 """
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
@@ -69,6 +69,7 @@ class WhaleSignal(BaseModel):
     structural: Optional[bool] = None
     regime: Optional[str] = None
     adx: Optional[float] = None
+    secret: Optional[str] = None
 
     model_config = {"extra": "allow"}
 
@@ -156,6 +157,14 @@ async def _post_to_discord(payload: dict) -> None:
 @router.post("/whale")
 async def whale_webhook(data: WhaleSignal):
     """Receive a whale signal, forward to Discord, and cache for committee confluence."""
+    # Validate webhook secret (same pattern as tradingview.py)
+    WEBHOOK_SECRET = os.getenv("TRADINGVIEW_WEBHOOK_SECRET") or ""
+    if WEBHOOK_SECRET:
+        payload_secret = data.secret or ""
+        if payload_secret != WEBHOOK_SECRET:
+            logger.warning("Rejected whale webhook — invalid secret")
+            raise HTTPException(status_code=401, detail="Invalid webhook secret")
+
     # Dedup: reject duplicate whale signals within 120s window
     dedup_raw = f"{data.ticker}:{data.lean}:{data.poc}:{data.vol}"
     dedup_hash = hashlib.md5(dedup_raw.encode()).hexdigest()[:16]
@@ -210,6 +219,62 @@ async def whale_webhook(data: WhaleSignal):
             logger.info(f"\U0001f40b Whale context cached: {cache_key} (TTL {WHALE_CONTEXT_TTL}s)")
     except Exception as e:
         logger.warning(f"Failed to cache whale context: {e}")
+
+    # --- Pipeline integration: write whale signals to signals table ---
+    try:
+        from signals.pipeline import process_signal_unified
+        import hashlib as _hashlib
+
+        # Map whale fields to standard signal dict
+        direction = "LONG" if (data.lean or "").upper() == "BULLISH" else (
+            "SHORT" if (data.lean or "").upper() == "BEARISH" else None
+        )
+
+        # Skip CONTESTED signals — no clear direction for the pipeline
+        if direction is None:
+            logger.info("Whale signal CONTESTED — skipped pipeline (Discord-only)")
+        else:
+            # Generate unique signal ID
+            ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+            short_hash = _hashlib.md5(f"{data.ticker}{data.poc}{data.vol}".encode()).hexdigest()[:6]
+            signal_id = f"WHALE_{data.ticker}_{ts}_{short_hash}"
+
+            signal_data = {
+                "signal_id": signal_id,
+                "ticker": data.ticker.upper(),
+                "strategy": "Whale_Hunter",
+                "signal_type": f"WHALE_{direction}",
+                "direction": direction,
+                "entry_price": data.entry or data.price,
+                "stop_loss": data.stop,
+                "target_1": data.tp1,
+                "target_2": data.tp2,
+                "timeframe": data.tf or "5",
+                "adx": data.adx,
+                "rvol": data.rvol,
+                "risk_reward": None,
+                "asset_class": "EQUITY",
+                "source": "whale_hunter",
+                "signal_category": "DARK_POOL",
+                "metadata": {
+                    "poc": data.poc,
+                    "lean": data.lean,
+                    "consec_bars": data.consec_bars,
+                    "structural": data.structural,
+                    "regime": data.regime,
+                    "vol": data.vol,
+                    "vol_delta_pct": data.vol_delta_pct,
+                    "poc_delta_pct": data.poc_delta_pct,
+                },
+                "timestamp": datetime.utcnow().isoformat(),
+            }
+
+            await process_signal_unified(signal_data, source="whale_hunter")
+            logger.info(f"Whale signal entered pipeline: {signal_id}")
+
+    except Exception as e:
+        # Pipeline failure should never break the whale webhook
+        logger.warning(f"Whale pipeline integration failed (Discord post succeeded): {e}")
 
     return {"status": "received"}
 

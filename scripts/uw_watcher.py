@@ -208,12 +208,16 @@ def create_bot(api_url: str, api_key: str) -> discord.Client:
         lines = message.content.strip().split("\n")
         parsed_tickers = []
         for line in lines:
-            result = parse_ticker_update(line.strip())
+            line = line.strip()
+            if line.startswith("<t:"):
+                continue
+            line = line.replace("**", "")
+            result = parse_ticker_update(line)
             if result:
                 parsed_tickers.append(result)
 
         if not parsed_tickers:
-            logger.debug(f"No parseable tickers in UW message ({len(lines)} lines)")
+            logger.info(f"No parseable tickers in UW message ({len(lines)} lines)")
             return
 
         # POST to Pandora API

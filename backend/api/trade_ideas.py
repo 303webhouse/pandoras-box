@@ -94,6 +94,152 @@ async def get_trade_ideas_feed(
     }
 
 
+@router.get("/trade-ideas/grouped")
+async def get_trade_ideas_grouped(
+    limit: int = Query(default=20, le=50),
+    min_score: Optional[float] = Query(default=None),
+):
+    """
+    Get Trade Ideas grouped by ticker+direction.
+    Each group shows the highest-scoring signal as primary,
+    with related signals and confluence tier.
+    """
+    pool = await get_postgres_client()
+
+    conditions = [
+        "status = 'ACTIVE'",
+        "(expires_at IS NULL OR expires_at > NOW())",
+    ]
+    params = []
+    idx = 1
+
+    if min_score is not None:
+        conditions.append(f"COALESCE(score_v2, score, 0) >= ${idx}")
+        params.append(min_score)
+        idx += 1
+
+    where_clause = " AND ".join(conditions)
+
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            f"""
+            SELECT * FROM signals
+            WHERE {where_clause}
+            ORDER BY COALESCE(score_v2, score, 0) DESC, created_at DESC
+            """,
+            *params,
+        )
+
+    if not rows:
+        return {"groups": [], "total_groups": 0, "total_signals": 0}
+
+    # Group by (ticker, direction)
+    from collections import OrderedDict
+    groups_map = OrderedDict()
+    for row in rows:
+        r = serialize_db_row(dict(row))
+        ticker = (r.get("ticker") or "").upper()
+        direction = (r.get("direction") or "").upper()
+        key = f"{ticker}:{direction}"
+
+        if key not in groups_map:
+            groups_map[key] = {
+                "group_key": key,
+                "ticker": ticker,
+                "direction": direction,
+                "primary_signal": r,
+                "confluence_tier": r.get("confluence_tier") or "STANDALONE",
+                "signal_count": 1,
+                "related_signals": [],
+                "strategies": [r.get("strategy") or r.get("signal_type") or "UNKNOWN"],
+                "signal_categories": [r.get("signal_category") or "TRADE_SETUP"],
+                "highest_score": float(r.get("score_v2") or r.get("score") or 0),
+                "newest_at": r.get("timestamp") or r.get("created_at"),
+                "oldest_at": r.get("timestamp") or r.get("created_at"),
+            }
+        else:
+            g = groups_map[key]
+            g["signal_count"] += 1
+            g["related_signals"].append({
+                "signal_id": r.get("signal_id"),
+                "strategy": r.get("strategy") or r.get("signal_type"),
+                "signal_category": r.get("signal_category"),
+                "score": float(r.get("score_v2") or r.get("score") or 0),
+                "timestamp": r.get("timestamp") or r.get("created_at"),
+                "confluence_tier": r.get("confluence_tier"),
+            })
+            # Promote highest confluence tier
+            tier_rank = {"CONVICTION": 3, "CONFIRMED": 2, "STANDALONE": 1}
+            current_tier = r.get("confluence_tier") or "STANDALONE"
+            if tier_rank.get(current_tier, 0) > tier_rank.get(g["confluence_tier"], 0):
+                g["confluence_tier"] = current_tier
+            # Track strategy diversity
+            strat = r.get("strategy") or r.get("signal_type") or "UNKNOWN"
+            if strat not in g["strategies"]:
+                g["strategies"].append(strat)
+            cat = r.get("signal_category") or "TRADE_SETUP"
+            if cat not in g["signal_categories"]:
+                g["signal_categories"].append(cat)
+            # Track time range
+            ts = r.get("timestamp") or r.get("created_at")
+            if ts and (not g["newest_at"] or str(ts) > str(g["newest_at"])):
+                g["newest_at"] = ts
+            if ts and (not g["oldest_at"] or str(ts) < str(g["oldest_at"])):
+                g["oldest_at"] = ts
+
+    # Compute composite rank for sorting
+    now = datetime.utcnow()
+    ranked_groups = []
+    for g in groups_map.values():
+        score = g["highest_score"]
+        tier_bonus = {"CONVICTION": 20, "CONFIRMED": 10, "STANDALONE": 0}.get(g["confluence_tier"], 0)
+
+        # Recency: minutes since newest signal in group (0-20 scale, decays over 4 hours)
+        try:
+            newest_str = str(g["newest_at"]).replace("Z", "+00:00")
+            if "+00:00" not in newest_str and "+" not in newest_str[10:]:
+                newest = datetime.fromisoformat(newest_str)
+            else:
+                newest = datetime.fromisoformat(newest_str.replace("+00:00", ""))
+            minutes_ago = max(0, (now - newest).total_seconds() / 60)
+            recency_bonus = max(0, 20 - (minutes_ago / 12))
+        except Exception:
+            recency_bonus = 10
+
+        # Expiry urgency: use primary signal's expires_at
+        urgency_bonus = 10
+        expires_at = g["primary_signal"].get("expires_at")
+        if expires_at:
+            try:
+                exp_str = str(expires_at).replace("Z", "+00:00")
+                if "+00:00" not in exp_str and "+" not in exp_str[10:]:
+                    exp = datetime.fromisoformat(exp_str)
+                else:
+                    exp = datetime.fromisoformat(exp_str.replace("+00:00", ""))
+                minutes_until = max(0, (exp - now).total_seconds() / 60)
+                urgency_bonus = max(0, 20 - (minutes_until / 12))
+            except Exception:
+                pass
+
+        composite_rank = (
+            score * 0.50 +
+            tier_bonus * 0.20 +
+            recency_bonus * 0.15 +
+            urgency_bonus * 0.15
+        )
+        g["composite_rank"] = round(composite_rank, 2)
+        ranked_groups.append(g)
+
+    # Sort by composite rank descending
+    ranked_groups.sort(key=lambda g: g["composite_rank"], reverse=True)
+
+    return {
+        "groups": ranked_groups[:limit],
+        "total_groups": len(ranked_groups),
+        "total_signals": sum(g["signal_count"] for g in ranked_groups),
+    }
+
+
 @router.get("/trade-ideas/{signal_id}")
 async def get_trade_idea_detail(signal_id: str):
     """Get full detail for a single signal including enrichment and committee data."""

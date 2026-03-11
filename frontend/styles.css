@@ -10013,3 +10013,28 @@ body[data-mode="analytics"] .analytics-shell {
         grid-row: auto;
     }
 }
+
+/* Grouped signal cards */
+.signal-card.conviction-border { border-left: 3px solid #ef4444; }
+.signal-card.confirmed-border { border-left: 3px solid #3b82f6; }
+
+.signal-badges { display: flex; flex-wrap: wrap; gap: 0.4rem; padding: 0.25rem 0.75rem; }
+.confluence-badge { font-size: 0.65rem; font-weight: 700; padding: 0.15rem 0.5rem; border-radius: 3px; }
+.confluence-badge.conviction { background: rgba(239,68,68,0.15); color: #f87171; }
+.confluence-badge.confirmed { background: rgba(59,130,246,0.15); color: #60a5fa; }
+.signal-count-badge { font-size: 0.6rem; color: var(--text-secondary); padding: 0.15rem 0.4rem; border: 1px solid var(--border-color); border-radius: 3px; }
+.position-overlap { font-size: 0.6rem; padding: 0.15rem 0.4rem; border-radius: 3px; }
+.position-overlap.confirms { background: rgba(34,197,94,0.12); color: #4ade80; }
+.position-overlap.counters { background: rgba(251,191,36,0.12); color: #fbbf24; }
+.stale-badge { font-size: 0.6rem; color: var(--text-secondary); opacity: 0.6; }
+
+.related-signals-toggle { font-size: 0.65rem; color: var(--text-secondary); padding: 0.4rem 0.75rem; cursor: pointer; }
+.related-signals-toggle:hover { color: var(--text-primary); }
+.related-signals-panel { display: none; padding: 0 0.75rem 0.4rem; }
+.related-signals-panel.expanded { display: block; }
+.related-signal-row { display: flex; justify-content: space-between; font-size: 0.6rem; color: var(--text-secondary); padding: 0.15rem 0; border-bottom: 1px solid rgba(255,255,255,0.03); }
+.related-strategy { flex: 1; }
+.related-score { width: 2rem; text-align: right; font-weight: 600; }
+.related-time { width: 4rem; text-align: right; opacity: 0.6; }
+
+.flow-details .signal-detail-value { color: #a78bfa; }
