@@ -7348,10 +7348,9 @@ function renderPositionsEnhanced() {
         if (isStock) {
             stocks.push(pos);
         } else {
-            const isCreditSpread = struct.includes('credit') || struct.includes('short_call') ||
-                                   struct.includes('short_put') || struct.includes('naked') ||
-                                   struct.includes('covered');
-            if (isCreditSpread) {
+            // Use direction field: LONG/BULLISH → Options (Long), SHORT/BEARISH → Options (Short)
+            const dir = (pos.direction || '').toUpperCase();
+            if (dir === 'SHORT' || dir === 'BEARISH') {
                 optionsShort.push(pos);
             } else {
                 optionsLong.push(pos);
