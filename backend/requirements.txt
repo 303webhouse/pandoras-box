@@ -45,6 +45,10 @@ fredapi>=0.5.1
 # Google Gemini API - AI-powered data extraction
 google-generativeai>=0.8.0
 
+# Testing
+pytest>=7.0
+pytest-asyncio>=0.23.0
+
 # Additional required packages
 annotated-types==0.6.0
 anyio==4.2.0
