@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Pandora - Real-time Trading Signal Dashboard">
     <title>Pandora</title>
-    <link rel="stylesheet" href="/styles.css?v=72">
+    <link rel="stylesheet" href="/styles.css?v=73">
     <link rel="manifest" href="/manifest.json">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -34,11 +34,11 @@
             </div>
             <div class="header-controls">
                 <div class="mode-switcher" role="tablist" aria-label="App Mode">
-                    <button type="button" class="mode-btn active" id="modeHubBtn" data-mode="hub" role="tab" aria-selected="true">Equities Swinger</button>
-                    <button type="button" class="mode-btn" id="modeCryptoBtn" data-mode="crypto" role="tab" aria-selected="false">Crypto Scalper</button>
-                    <button type="button" class="mode-btn" id="modeAnalyticsBtn" data-mode="analytics" role="tab" aria-selected="false">Analytics</button>
+                    <button type="button" class="mode-btn active" id="modeHubBtn" data-mode="hub" role="tab" aria-selected="true">Agora</button>
+                    <button type="button" class="mode-btn" id="modeCryptoBtn" data-mode="crypto" role="tab" aria-selected="false">Stater Swap</button>
+                    <button type="button" class="mode-btn" id="modeAnalyticsBtn" data-mode="analytics" role="tab" aria-selected="false">Abacus</button>
                 </div>
-                <a href="/knowledgebase" class="kb-btn" title="Knowledge Base">Knowledge Base</a>
+                <a href="/knowledgebase" class="kb-btn" title="Great Library">Great Library</a>
                 <button class="refresh-btn" id="refreshBtn">↻ Refresh</button>
             </div>
         </header>
@@ -249,17 +249,17 @@
             <!-- Trade Ideas (1/4 width) -->
             <div class="trades-panel">
                 <div class="trades-header">
-                    <h2><span class="kb-link" data-kb-term="trade-ideas">TRADE IDEAS</span></h2>
+                    <h2><span class="kb-link" data-kb-term="trade-ideas">INSIGHTS</span></h2>
                 </div>
                 <div class="signals-container" id="tradeSignals">
                     <p class="empty-state">No signals available</p>
                 </div>
             </div>
 
-            <!-- Open Positions (1/4 width) -->
+            <!-- Ledger (1/4 width) -->
             <div class="positions-panel">
                 <div class="positions-header">
-                    <h2>OPEN POSITIONS</h2>
+                    <h2>LEDGER</h2>
                     <div class="positions-account-tabs" id="positionsAccountTabs">
                         <button class="positions-tab active" data-account="ALL">All</button>
                         <button class="positions-tab" data-account="ROBINHOOD">RH</button>
@@ -910,10 +910,10 @@
                     </div>
                 </div>
 
-                <!-- Trade Ideas -->
+                <!-- Insights -->
                 <div class="crypto-trades-panel">
                     <div class="crypto-panel-header">
-                        <h2>TRADE IDEAS</h2>
+                        <h2>INSIGHTS</h2>
                         <div class="crypto-panel-controls">
                             <label for="cryptoSignalSort" class="crypto-label">Sort</label>
                             <select id="cryptoSignalSort" class="crypto-select">
@@ -927,10 +927,10 @@
                     </div>
                 </div>
 
-                <!-- Open Positions -->
+                <!-- Ledger -->
                 <div class="crypto-positions-panel">
                     <div class="crypto-panel-header">
-                        <h2>OPEN POSITIONS</h2>
+                        <h2>LEDGER</h2>
                         <div class="positions-header-actions">
                             <button class="add-position-btn" id="addCryptoPositionBtn" data-action="add-manual-position" data-context="crypto" title="Add Breakout Trade">+</button>
                             <span class="positions-count" id="cryptoPositionsCount">0</span>
@@ -1576,7 +1576,7 @@
     <!-- TradingView Widget Script -->
     <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
-    <script src="/app.js?v=87"></script>
+    <script src="/app.js?v=88"></script>
     <script src="/analytics.js?v=2"></script>
 </body>
 </html>
