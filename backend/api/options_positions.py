@@ -3,7 +3,8 @@ Options Position Tracking API
 Supports multi-leg options strategies with Greeks tracking
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+from utils.pivot_auth import require_api_key
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 from datetime import datetime, date
@@ -210,7 +211,7 @@ def get_strategy_display_name(strategy_type: str) -> str:
 # =========================================================================
 
 @router.post("/options/positions")
-async def create_options_position(request: CreateOptionsPositionRequest):
+async def create_options_position(request: CreateOptionsPositionRequest, _=Depends(require_api_key)):
     """
     Create a new options position.
     Automatically:
@@ -337,7 +338,7 @@ async def get_options_position(position_id: str):
 
 
 @router.put("/options/positions/{position_id}")
-async def update_options_position(position_id: str, request: UpdateOptionsPositionRequest):
+async def update_options_position(position_id: str, request: UpdateOptionsPositionRequest, _=Depends(require_api_key)):
     """Update an existing options position (e.g., update Greeks, current prices)"""
     position = _options_positions.get(position_id)
 
@@ -379,7 +380,7 @@ async def update_options_position(position_id: str, request: UpdateOptionsPositi
 
 
 @router.post("/options/positions/{position_id}/close")
-async def close_options_position(position_id: str, request: CloseOptionsPositionRequest):
+async def close_options_position(position_id: str, request: CloseOptionsPositionRequest, _=Depends(require_api_key)):
     """Close an options position with outcome logging"""
     position = _options_positions.get(position_id)
 
@@ -439,7 +440,7 @@ async def close_options_position(position_id: str, request: CloseOptionsPosition
 
 
 @router.delete("/options/positions/{position_id}")
-async def delete_options_position(position_id: str):
+async def delete_options_position(position_id: str, _=Depends(require_api_key)):
     """Delete an options position (use with caution)"""
     if position_id not in _options_positions:
         raise HTTPException(status_code=404, detail="Position not found")
@@ -473,7 +474,7 @@ async def get_strategy_templates():
 
 
 @router.post("/options/positions/sync-from-db")
-async def sync_positions_from_database():
+async def sync_positions_from_database(_=Depends(require_api_key)):
     """Sync options positions from PostgreSQL on startup"""
     global _options_positions
 

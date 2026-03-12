@@ -8,10 +8,12 @@ import csv
 import io
 import json
 import hashlib
+import logging
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from fastapi import APIRouter, HTTPException, Path, Query, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, UploadFile, File
+from utils.pivot_auth import require_api_key
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -57,6 +59,8 @@ from analytics.queries import (
 )
 from analytics.robinhood_parser import parse_robinhood_csv_bytes
 from database.postgres_client import log_signal
+
+logger = logging.getLogger(__name__)
 
 analytics_router = APIRouter()
 
@@ -930,7 +934,7 @@ async def health_alerts(
 
 
 @analytics_router.put("/health-alert/{alert_id}/dismiss")
-async def dismiss_health_alert(alert_id: int = Path(..., ge=1)):
+async def dismiss_health_alert(alert_id: int = Path(..., ge=1), _=Depends(require_api_key)):
     exists_rows = await fetch_rows("SELECT to_regclass('public.health_alerts') AS table_name")
     exists = bool(exists_rows and exists_rows[0].get("table_name"))
     if not exists:
@@ -1689,7 +1693,7 @@ async def risk_history(
 
 
 @analytics_router.post("/backtest")
-async def run_backtest(request: BacktestRequest):
+async def run_backtest(request: BacktestRequest, _=Depends(require_api_key)):
     cache_key = _backtest_cache_key(request)
     cached = _maybe_get_cached_backtest(cache_key)
     if cached is not None:
@@ -1893,7 +1897,7 @@ async def run_backtest(request: BacktestRequest):
 
 
 @analytics_router.post("/log-trade")
-async def log_trade(request: LogTradeRequest):
+async def log_trade(request: LogTradeRequest, _=Depends(require_api_key)):
     payload = request.model_dump()
     payload["ticker"] = request.ticker.upper()
     payload["origin"] = (request.origin or "manual").lower()
@@ -1923,6 +1927,7 @@ async def log_trade(request: LogTradeRequest):
 async def close_trade_endpoint(
     trade_id: int = Path(..., ge=1),
     request: CloseTradeRequest = ...,
+    _=Depends(require_api_key),
 ):
     updated = await close_trade(trade_id, request.model_dump())
     if not updated:
@@ -1931,7 +1936,7 @@ async def close_trade_endpoint(
 
 
 @analytics_router.post("/log-trade-leg")
-async def log_trade_leg(request: LogTradeLegRequest):
+async def log_trade_leg(request: LogTradeLegRequest, _=Depends(require_api_key)):
     created = await insert_trade_leg(request.model_dump())
     return {"status": "ok", "leg": created}
 
@@ -1947,7 +1952,7 @@ class ManualOutcomeRequest(BaseModel):
 
 
 @analytics_router.post("/outcomes/manual")
-async def create_manual_outcome(request: ManualOutcomeRequest):
+async def create_manual_outcome(request: ManualOutcomeRequest, _=Depends(require_api_key)):
     """Create a PENDING signal outcome for a manually-logged trade."""
     from signals.pipeline import write_signal_outcome
     signal_data = {
@@ -1964,7 +1969,7 @@ async def create_manual_outcome(request: ManualOutcomeRequest):
 
 
 @analytics_router.post("/log-signal")
-async def log_signal_endpoint(request: LogSignalRequest):
+async def log_signal_endpoint(request: LogSignalRequest, _=Depends(require_api_key)):
     data = request.model_dump()
     market_state = data.pop("market_state", None)
     factor_snapshot = data.pop("factor_snapshot", None)
@@ -1975,7 +1980,7 @@ async def log_signal_endpoint(request: LogSignalRequest):
 
 
 @analytics_router.post("/log-uw-snapshot")
-async def log_uw_snapshot(request: UwSnapshotRequest):
+async def log_uw_snapshot(request: UwSnapshotRequest, _=Depends(require_api_key)):
     payload = request.model_dump()
     payload["dashboard_type"] = str(payload.get("dashboard_type") or "").strip().lower()
     if payload["dashboard_type"] not in {"market_tide", "dark_pool", "gex"}:
@@ -1998,14 +2003,19 @@ async def get_uw_snapshots(
     }
 
 
+_CSV_MAX_BYTES = 10 * 1024 * 1024  # 10 MB
+
+
 @analytics_router.post("/parse-robinhood-csv")
-async def parse_robinhood_csv(file: UploadFile = File(...)):
+async def parse_robinhood_csv(file: UploadFile = File(...), _=Depends(require_api_key)):
     name = (file.filename or "").lower()
     if not name or not (name.endswith(".csv") or name.endswith(".txt")):
         raise HTTPException(status_code=400, detail="Upload a .csv or .txt file")
     raw = await file.read()
     if not raw:
         raise HTTPException(status_code=400, detail="CSV is empty")
+    if len(raw) > _CSV_MAX_BYTES:
+        raise HTTPException(status_code=400, detail="File too large (max 10 MB)")
     try:
         return parse_robinhood_csv_bytes(raw)
     except Exception as exc:
@@ -2013,7 +2023,7 @@ async def parse_robinhood_csv(file: UploadFile = File(...)):
 
 
 @analytics_router.post("/import-trades")
-async def import_trades(request: ImportTradesRequest):
+async def import_trades(request: ImportTradesRequest, _=Depends(require_api_key)):
     imported = 0
     signal_matched = 0
     duplicates_skipped = 0
@@ -2135,7 +2145,7 @@ async def import_trades(request: ImportTradesRequest):
 
 
 @analytics_router.delete("/trades")
-async def delete_all_imported_trades(origin: Optional[str] = Query(None)):
+async def delete_all_imported_trades(origin: Optional[str] = Query(None), _=Depends(require_api_key)):
     """Delete all imported trades (and their legs). Use ?origin=imported to limit."""
     if origin:
         rows = await fetch_rows("SELECT id FROM trades WHERE origin = $1", [origin])
@@ -2153,7 +2163,7 @@ async def delete_all_imported_trades(origin: Optional[str] = Query(None)):
 
 
 @analytics_router.delete("/trades/{trade_id}")
-async def delete_trade_by_id(trade_id: int):
+async def delete_trade_by_id(trade_id: int, _=Depends(require_api_key)):
     """Delete a single trade and its legs."""
     await fetch_rows("DELETE FROM trade_legs WHERE trade_id = $1", [trade_id])
     await fetch_rows("DELETE FROM trades WHERE id = $1", [trade_id])
@@ -2283,3 +2293,257 @@ async def schema_status():
         },
     }
     return {"tables": tables, "jobs": jobs}
+
+
+# ── Ariadne's Thread: Risk Budget + Counterfactuals ──────────────────
+
+
+@analytics_router.get("/risk-budget")
+async def get_risk_budget(account: Optional[str] = None):
+    """
+    Ariadne's Thread: live risk budget from the real book.
+    Shows remaining capacity before hitting drawdown limits.
+    """
+    from database.postgres_client import get_postgres_client
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        query = "SELECT * FROM unified_positions WHERE status = 'OPEN'"
+        params = []
+        if account:
+            query += " AND account = $1"
+            params.append(account.upper())
+        rows = await conn.fetch(query, *params)
+
+    positions = [dict(r) for r in rows]
+
+    equity_positions = [p for p in positions if (p.get("asset_type") or "").upper() != "CRYPTO"]
+    crypto_positions = [p for p in positions if (p.get("asset_type") or "").upper() == "CRYPTO"]
+
+    equity_max_loss = sum(abs(float(p.get("max_loss") or 0)) for p in equity_positions)
+    crypto_max_loss = sum(abs(float(p.get("max_loss") or 0)) for p in crypto_positions)
+
+    # Breakout prop account specifics
+    breakout_balance = 25000
+    breakout_static_dd = breakout_balance * 0.06  # $1,500
+    breakout_daily_limit = breakout_balance * 0.04  # $1,000
+    breakout_remaining_dd = breakout_static_dd - crypto_max_loss
+
+    return {
+        "equity": {
+            "open_positions": len(equity_positions),
+            "total_max_loss": round(equity_max_loss, 2),
+        },
+        "crypto": {
+            "open_positions": len(crypto_positions),
+            "max_concurrent": 2,
+            "total_max_loss": round(crypto_max_loss, 2),
+            "breakout_static_dd_remaining": round(breakout_remaining_dd, 2),
+            "breakout_daily_remaining": round(breakout_daily_limit, 2),
+            "can_open_new": len(crypto_positions) < 2 and breakout_remaining_dd > 250,
+        },
+        "combined": {
+            "total_positions": len(positions),
+            "total_max_loss": round(equity_max_loss + crypto_max_loss, 2),
+        },
+    }
+
+
+@analytics_router.post("/resolve-counterfactuals")
+async def resolve_counterfactuals(_=Depends(require_api_key)):
+    """
+    Ariadne's Thread: resolve 'what if' outcomes for passed/dismissed signals.
+    Checks if price hit target or stop after the signal was dismissed.
+    """
+    from database.postgres_client import get_postgres_client
+    pool = await get_postgres_client()
+    resolved = 0
+
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT signal_id, ticker, direction, entry_price, target_1, stop_loss, created_at
+            FROM signals
+            WHERE status IN ('DISMISSED', 'EXPIRED')
+            AND outcome IS NULL
+            AND created_at > NOW() - INTERVAL '14 days'
+            AND entry_price IS NOT NULL
+            AND target_1 IS NOT NULL
+        """)
+
+    if not rows:
+        return {"resolved": 0, "message": "No unresolved counterfactuals"}
+
+    for row in rows:
+        ticker = row["ticker"]
+        entry = float(row["entry_price"])
+        target = float(row["target_1"])
+        stop = float(row["stop_loss"]) if row["stop_loss"] else None
+        direction = row["direction"]
+        created = row["created_at"]
+
+        try:
+            import yfinance as yf
+            # Fetch daily bars since signal creation
+            tf = yf.Ticker(ticker)
+            hist = tf.history(start=created.strftime("%Y-%m-%d"), period="14d")
+            if hist.empty:
+                continue
+
+            hit_target = False
+            hit_stop = False
+
+            for _, bar in hist.iterrows():
+                if direction == "LONG":
+                    if bar["High"] >= target:
+                        hit_target = True
+                        break
+                    if stop and bar["Low"] <= stop:
+                        hit_stop = True
+                        break
+                else:  # SHORT
+                    if bar["Low"] <= target:
+                        hit_target = True
+                        break
+                    if stop and bar["High"] >= stop:
+                        hit_stop = True
+                        break
+
+            if hit_target or hit_stop:
+                outcome = "COUNTERFACTUAL_WIN" if hit_target else "COUNTERFACTUAL_LOSS"
+                pnl_pct = abs(target - entry) / entry * 100 if hit_target else (
+                    -abs(stop - entry) / entry * 100 if stop else 0
+                )
+                async with pool.acquire() as conn:
+                    await conn.execute("""
+                        UPDATE signals SET
+                            outcome = $2,
+                            outcome_pnl_pct = $3,
+                            outcome_resolved_at = NOW()
+                        WHERE signal_id = $1
+                    """, row["signal_id"], outcome, round(pnl_pct, 2))
+                resolved += 1
+        except Exception as e:
+            logger.warning(f"Counterfactual resolve error for {ticker}: {e}")
+            continue
+
+    return {"resolved": resolved, "total_checked": len(rows)}
+
+
+# ── Brief 3B: The Oracle — pre-computed insights endpoint ────────────
+
+@analytics_router.get("/oracle")
+async def get_oracle_insights(
+    days: int = Query(30, ge=7, le=365),
+    account: Optional[str] = Query(None),
+    asset_class: Optional[str] = Query(None),
+):
+    """
+    The Oracle — pre-computed analytics payload.
+    Served from Redis cache (refreshed hourly). Falls back to live compute.
+    """
+    from database.redis_client import get_redis_client
+
+    cache_key = f"oracle:insights:{days}:{account or 'ALL'}:{asset_class or 'ALL'}"
+
+    try:
+        redis = await get_redis_client()
+        cached = await redis.get(cache_key)
+        if cached:
+            return json.loads(cached)
+    except Exception as e:
+        logger.warning("Oracle cache read failed: %s", e)
+
+    # Cache miss — compute live
+    from analytics.oracle_engine import compute_oracle_payload
+
+    try:
+        payload = await compute_oracle_payload(
+            days=days, account=account, asset_class=asset_class
+        )
+    except Exception as e:
+        logger.error("Oracle compute failed: %s", e)
+        raise HTTPException(status_code=500, detail="Oracle computation failed")
+
+    # Cache the result
+    try:
+        redis = await get_redis_client()
+        await redis.set(cache_key, json.dumps(payload, default=str), ex=3600)
+    except Exception:
+        pass  # Cache write failure is non-fatal
+
+    return payload
+
+
+# ── Brief 3D: Hermes Dispatch — weekly reports endpoint ──────────────
+
+@analytics_router.get("/weekly-reports")
+async def get_weekly_reports(
+    limit: int = Query(12, ge=1, le=52),
+):
+    """
+    Retrieve weekly performance reports for the Chronicle tab.
+    """
+    from database.postgres_client import get_postgres_client
+
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT id, week_of, report_json, narrative, lessons,
+                   total_pnl, total_trades, win_rate, created_at
+            FROM weekly_reports
+            ORDER BY week_of DESC
+            LIMIT $1
+        """, limit)
+
+    return {
+        "reports": [
+            {
+                "id": r["id"],
+                "week_of": str(r["week_of"]),
+                "report": r["report_json"],
+                "narrative": r["narrative"],
+                "lessons": r["lessons"],
+                "total_pnl": r["total_pnl"],
+                "total_trades": r["total_trades"],
+                "win_rate": r["win_rate"],
+                "created_at": str(r["created_at"]),
+            }
+            for r in rows
+        ]
+    }
+
+
+class WeeklyReportCreate(BaseModel):
+    week_of: str
+    report_json: dict
+    narrative: Optional[str] = None
+    lessons: Optional[list] = None
+    total_pnl: Optional[float] = None
+    total_trades: Optional[int] = None
+    win_rate: Optional[float] = None
+
+
+@analytics_router.post("/weekly-reports")
+async def save_weekly_report(
+    req: WeeklyReportCreate,
+    _=Depends(require_api_key),
+):
+    """Save a weekly report from Hermes Dispatch (VPS → Railway)."""
+    from database.postgres_client import get_postgres_client
+
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            INSERT INTO weekly_reports
+                (week_of, report_json, narrative, lessons, total_pnl, total_trades, win_rate)
+            VALUES ($1, $2::jsonb, $3, $4::jsonb, $5, $6, $7)
+        """,
+            datetime.strptime(req.week_of, "%Y-%m-%d").date(),
+            json.dumps(req.report_json, default=str),
+            req.narrative,
+            json.dumps(req.lessons or [], default=str),
+            req.total_pnl,
+            req.total_trades,
+            req.win_rate,
+        )
+
+    return {"status": "saved", "week_of": req.week_of}

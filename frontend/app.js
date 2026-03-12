@@ -1487,12 +1487,23 @@ function openCryptoAcceptModal(signal) {
         dirDisplay.className = 'position-direction-display ' + (signal.direction || 'LONG');
     }
     if (entryInput) entryInput.value = signal.entry_price ? parseFloat(signal.entry_price).toFixed(2) : '';
-    if (qtyInput) { qtyInput.value = ''; qtyInput.placeholder = 'Contracts'; }
-    if (qtyLabel) qtyLabel.textContent = 'Quantity (Contracts) *';
+
+    // Pre-fill sizing from enrichment if available (Breakout risk model)
+    const enrichment = typeof signal.enrichment_data === 'string'
+        ? JSON.parse(signal.enrichment_data || '{}') : (signal.enrichment_data || {});
+    const sizing = enrichment.position_sizing || {};
+
+    if (qtyInput) {
+        qtyInput.value = sizing.contracts ? sizing.contracts : '';
+        qtyInput.placeholder = 'BTC Contracts';
+    }
+    if (qtyLabel) qtyLabel.textContent = sizing.leverage
+        ? `Quantity (BTC) — ${sizing.leverage}x leverage`
+        : 'Quantity (Contracts) *';
     if (summaryStop) summaryStop.textContent = signal.stop_loss ? `$${parseFloat(signal.stop_loss).toLocaleString()}` : '--';
     if (summaryTarget) summaryTarget.textContent = signal.target_1 ? `$${parseFloat(signal.target_1).toLocaleString()}` : '--';
-    if (summarySize) summarySize.textContent = '$--';
-    if (summaryRisk) summaryRisk.textContent = '$--';
+    if (summarySize) summarySize.textContent = sizing.notional_usd ? `$${sizing.notional_usd.toLocaleString()}` : '$--';
+    if (summaryRisk) summaryRisk.textContent = sizing.risk_usd ? `$${sizing.risk_usd} (${sizing.risk_pct}%)` : '$--';
 
     // Use classList.add('active') to match the hub modal open/close pattern
     modal.classList.add('active');
@@ -1500,10 +1511,10 @@ function openCryptoAcceptModal(signal) {
 
 async function dismissCryptoSignal(signalId) {
     try {
-        await fetch(`${API_URL}/signals/${signalId}/dismiss`, {
-            method: 'POST',
+        await fetch(`${API_URL}/trade-ideas/${signalId}/status`, {
+            method: 'PATCH',
             headers: authHeaders(),
-            body: JSON.stringify({ signal_id: signalId })
+            body: JSON.stringify({ status: 'DISMISSED', decision_source: 'dashboard' })
         });
         signals.crypto = signals.crypto.filter(s => s.signal_id !== signalId);
         renderCryptoSignals();
@@ -3456,6 +3467,23 @@ function renderCryptoSignals() {
         return true;
     });
 
+    // Apply score decay for stale signals (-5 per 5-min block after 15 min)
+    const now = Date.now();
+    cryptoSignals = cryptoSignals.map(s => {
+        let timeStr = s.timestamp || s.created_at || '';
+        if (timeStr && !timeStr.endsWith('Z') && !timeStr.includes('+') && !timeStr.includes('-', 10)) {
+            timeStr += 'Z';
+        }
+        const created = timeStr ? new Date(timeStr).getTime() : 0;
+        const ageMinutes = created ? (now - created) / 60000 : 0;
+        if (ageMinutes > 15) {
+            const decayBlocks = Math.floor((ageMinutes - 15) / 5);
+            const decay = decayBlocks * 5;
+            return { ...s, display_score: Math.max(0, (s.score || 0) - decay) };
+        }
+        return { ...s, display_score: s.score || 0 };
+    });
+
     if (cryptoSignals.length === 0) {
         container.innerHTML = '<p class="empty-state">No crypto signals match filters</p>';
         return;
@@ -3472,7 +3500,7 @@ function renderCryptoSignals() {
             const timeB = new Date(b.timestamp || b.created_at || 0).getTime();
             return timeB - timeA;
         }
-        return (Number(b.score) || 0) - (Number(a.score) || 0);
+        return (Number(b.display_score) || 0) - (Number(a.display_score) || 0);
     });
 
     container.innerHTML = cryptoSignals.map(signal => createCryptoSignalCard(signal)).join('');
@@ -3712,22 +3740,36 @@ function refreshSignalViews() {
 }
 
 function createCryptoSignalCard(signal) {
-    const score = signal.score !== undefined && signal.score !== null ? Number(signal.score).toFixed(1) : '--';
-    const scoreTier = typeof getScoreTier === 'function' ? getScoreTier(Number(score) || 0) : 'MODERATE';
+    const displayScore = signal.display_score !== undefined ? signal.display_score : (signal.score || 0);
+    const scoreStr = displayScore !== undefined && displayScore !== null ? Number(displayScore).toFixed(1) : '--';
+    const scoreTier = typeof getScoreTier === 'function' ? getScoreTier(Number(displayScore) || 0) : 'MODERATE';
     const direction = signal.direction || 'N/A';
     const strategy = signal.strategy || 'Crypto Scanner';
     const formatPrice = (val) => val ? `$${parseFloat(val).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}` : '--';
 
+    // Parse enrichment data
+    const enrichment = typeof signal.enrichment_data === 'string'
+        ? JSON.parse(signal.enrichment_data || '{}') : (signal.enrichment_data || {});
+    const ms = enrichment.market_structure || {};
+    const sizing = enrichment.position_sizing || {};
+
+    // Age indicator
     let timestampStr = '';
+    let ageLabel = '';
+    let ageClass = '';
     if (signal.timestamp || signal.created_at) {
         try {
             let timeStr = signal.timestamp || signal.created_at;
             if (!timeStr.endsWith('Z') && !timeStr.includes('+') && !timeStr.includes('-', 10)) {
                 timeStr += 'Z';
             }
+            const created = new Date(timeStr).getTime();
             timestampStr = new Date(timeStr).toLocaleString('en-US', {
                 hour: 'numeric', minute: '2-digit', month: 'short', day: 'numeric'
             });
+            const ageMin = Math.floor((Date.now() - created) / 60000);
+            ageLabel = ageMin < 5 ? 'FRESH' : `${ageMin}m ago`;
+            ageClass = ageMin < 5 ? 'fresh' : (ageMin >= 15 ? 'stale' : '');
         } catch (e) { /* ignore */ }
     }
 
@@ -3747,18 +3789,72 @@ function createCryptoSignalCard(signal) {
 
     const signalTypeClass = signal.signal_type || '';
 
+    // Market structure badge
+    const msLabel = ms.context_label || '';
+    const msBadgeHtml = msLabel ? `<span class="crypto-structure-badge ${msLabel.toLowerCase()}">${msLabel}<span class="structure-modifier">${ms.score_modifier > 0 ? '+' : ''}${ms.score_modifier || 0}</span></span>` : '';
+
+    // Market structure detail row
+    const msDetailHtml = (ms.poc || ms.cvd_direction || ms.book_imbalance) ? `
+            <div class="crypto-signal-structure">
+                <span><span class="crypto-signal-detail-label">POC</span> <span class="crypto-signal-detail-value">${ms.poc ? formatPrice(ms.poc) : '--'}</span></span>
+                <span><span class="crypto-signal-detail-label">CVD</span> <span class="crypto-signal-detail-value ${(ms.cvd_direction || '').toLowerCase()}">${ms.cvd_direction || '--'}</span></span>
+                <span><span class="crypto-signal-detail-label">Book</span> <span class="crypto-signal-detail-value">${ms.book_imbalance ? ms.book_imbalance.toFixed(2) + 'x' : '--'}</span></span>
+            </div>` : '';
+
+    // Breakout sizing row
+    const sizingHtml = (sizing.contracts || sizing.leverage) ? `
+            <div class="crypto-signal-sizing">
+                <span><span class="crypto-signal-detail-label">Size</span> <span class="crypto-signal-detail-value">${sizing.contracts ? sizing.contracts.toFixed(4) + ' BTC' : '--'}</span></span>
+                <span><span class="crypto-signal-detail-label">Leverage</span> <span class="crypto-signal-detail-value ${sizing.safe === false ? 'danger' : ''}">${sizing.leverage ? sizing.leverage.toFixed(1) + 'x' : '--'}</span></span>
+                <span><span class="crypto-signal-detail-label">Risk</span> <span class="crypto-signal-detail-value">${sizing.risk_usd ? '$' + sizing.risk_usd.toFixed(0) + ' (' + sizing.risk_pct + '%)' : '--'}</span></span>
+            </div>` : '';
+
+    // Strategy-specific context row
+    let contextHtml = '';
+    const sLower = (signal.strategy || '').toLowerCase();
+    if (sLower.includes('funding')) {
+        const fr = enrichment.funding_rate;
+        const mts = enrichment.minutes_to_settlement;
+        if (fr !== undefined) {
+            contextHtml = `<div class="crypto-signal-context"><span>Funding: <strong>${(fr * 100).toFixed(4)}%</strong></span>${mts !== undefined ? `<span>Settlement in: <strong>${mts}m</strong></span>` : ''}</div>`;
+        }
+    } else if (sLower.includes('session') || sLower.includes('sweep')) {
+        const session = enrichment.current_session || enrichment.session;
+        const sweepDir = enrichment.sweep_direction;
+        if (session) {
+            contextHtml = `<div class="crypto-signal-context"><span>Session: <strong>${session}</strong></span>${sweepDir ? `<span>Sweep: <strong>${sweepDir}</strong></span>` : ''}</div>`;
+        }
+    } else if (sLower.includes('liquidation') || sLower.includes('flush')) {
+        const sellVol = enrichment.sell_volume_usd || enrichment.liquidation_volume;
+        if (sellVol) {
+            contextHtml = `<div class="crypto-signal-context"><span>Sell Volume: <strong>$${(sellVol / 1e6).toFixed(1)}M</strong></span>${enrichment.price_change_pct !== undefined ? `<span>Move: <strong>${enrichment.price_change_pct}%</strong></span>` : ''}</div>`;
+        }
+    } else if (sLower.includes('holy_grail')) {
+        const adx = signal.adx || enrichment.adx;
+        const rsi = signal.rsi || enrichment.rsi;
+        if (adx || rsi) {
+            contextHtml = `<div class="crypto-signal-context">${adx ? `<span>ADX: <strong>${adx}</strong></span>` : ''}${rsi ? `<span>RSI: <strong>${rsi}</strong></span>` : ''}</div>`;
+        }
+    }
+
+    // Regime label
+    const regime = enrichment.regime;
+    const regimeHtml = regime ? `<span class="crypto-badge">${regime}</span>` : '';
+
     return `
         <div class="crypto-signal-card ${signalTypeClass}" data-signal-id="${signal.signal_id || ''}" data-signal="${encodeURIComponent(JSON.stringify(signal))}">
             <div class="crypto-signal-header">
                 <span class="crypto-signal-ticker" data-action="view-chart">${escapeHtml(signal.ticker || '--')}</span>
                 <div class="crypto-signal-meta">
                     ${badges.join('')}
+                    ${regimeHtml}
                     <span class="crypto-badge">${escapeHtml(direction)}</span>
                 </div>
             </div>
             <div class="crypto-signal-score">
-                <span class="crypto-score-value">${score}</span>
+                <span class="crypto-score-value">${scoreStr}</span>
                 <span class="crypto-score-tier ${scoreTier.toLowerCase()}">${scoreTier}</span>
+                ${msBadgeHtml}
                 <span style="margin-left:auto;font-size:11px;color:var(--text-secondary)">${escapeHtml(strategy)}</span>
             </div>
             <div class="crypto-signal-details">
@@ -3766,8 +3862,8 @@ function createCryptoSignalCard(signal) {
                 <span><span class="crypto-signal-detail-label">Stop</span> <span class="crypto-signal-detail-value">${formatPrice(signal.stop_loss)}</span></span>
                 <span><span class="crypto-signal-detail-label">Target</span> <span class="crypto-signal-detail-value">${formatPrice(signal.target_1)}</span></span>
                 <span><span class="crypto-signal-detail-label">R:R</span> <span class="crypto-signal-detail-value">${formatRiskReward(signal.risk_reward)}</span></span>
-            </div>
-            <div class="crypto-signal-bias ${biasClass}">${biasIcon} ${biasText}${timestampStr ? `  &middot;  ${timestampStr}` : ''}</div>
+            </div>${msDetailHtml}${sizingHtml}${contextHtml}
+            <div class="crypto-signal-bias ${biasClass}">${biasIcon} ${biasText}${ageLabel ? `  &middot;  <span class="signal-age ${ageClass}">${ageLabel}</span>` : ''}${timestampStr ? `  &middot;  ${timestampStr}` : ''}</div>
             <div class="crypto-signal-actions">
                 <button class="action-btn dismiss-btn" data-action="dismiss">&#10005; Dismiss</button>
                 <button class="action-btn select-btn" data-action="select">&#10003; Accept</button>
@@ -4059,7 +4155,7 @@ async function loadCryptoKeyLevels() {
     // the strip elements directly, so no container reference needed here.
 
     try {
-        const symbol = 'BTCUSDT';
+        const symbol = (cryptoCurrentSymbol || 'BTCUSD').replace(/USD$/, 'USDT');
         const daily = await fetchBinanceKlines(symbol, '1d', { limit: 3 });
         const weekly = await fetchBinanceKlines(symbol, '1w', { limit: 2 });
         const monthly = await fetchBinanceKlines(symbol, '1M', { limit: 2 });
@@ -4098,7 +4194,8 @@ async function loadCryptoMarketData() {
 
     let data = null;
     try {
-        const response = await fetch(`${API_URL}/crypto/market`);
+        const symbol = (cryptoCurrentSymbol || 'BTCUSD').replace(/USD$/, 'USDT');
+        const response = await fetch(`${API_URL}/crypto/market?symbol=${symbol}`);
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}`);
         }
@@ -6562,7 +6659,7 @@ async function resetBtcSignals() {
     }
 }
 
-// MOVED TO CRYPTO-SCALPER: BTC session functions relocated to dedicated crypto-scalper application
+// BTC session helper functions
 function getEasternTimeParts() {
     try {
         const formatter = new Intl.DateTimeFormat('en-US', {
@@ -9452,21 +9549,45 @@ async function saveOptionsPosition() {
         breakeven = breakevenStr.split(',').map(b => parseFloat(b.trim())).filter(b => !isNaN(b));
     }
 
+    // Map strategy_type to unified structure names
+    const STRATEGY_TO_STRUCTURE = {
+        'LONG_CALL': 'long_call',
+        'LONG_PUT': 'long_put',
+        'BULL_CALL_SPREAD': 'call_debit_spread',
+        'BEAR_PUT_SPREAD': 'put_debit_spread',
+        'BULL_PUT_SPREAD': 'put_credit_spread',
+        'BEAR_CALL_SPREAD': 'call_credit_spread',
+        'IRON_CONDOR': 'iron_condor',
+        'STRADDLE': 'straddle',
+        'STRANGLE': 'strangle',
+        'CUSTOM': 'custom'
+    };
+
+    // Extract strikes and expiry from legs
+    const strikes = legs.map(l => l.strike).sort((a, b) => a - b);
+    const longStrike = strikes[0] || null;
+    const shortStrike = strikes.length > 1 ? strikes[strikes.length - 1] : null;
+    const expiry = legs[0]?.expiration || null;
+
     const payload = {
-        underlying: underlying,
-        strategy_type: strategy,
-        direction: direction,
+        ticker: underlying,
+        asset_type: 'OPTION',
+        structure: STRATEGY_TO_STRUCTURE[strategy] || strategy.toLowerCase(),
+        direction: direction === 'BULLISH' ? 'LONG' : (direction === 'BEARISH' ? 'SHORT' : direction),
         legs: legs,
-        entry_date: entryDate,
-        net_premium: netPremium,
+        entry_price: Math.abs(netPremium / 100) || 0,
+        quantity: legs[0]?.quantity || 1,
         max_profit: maxProfit,
         max_loss: maxLoss,
-        breakeven: breakeven,
-        thesis: thesis
+        expiry: expiry,
+        long_strike: longStrike,
+        short_strike: shortStrike,
+        notes: thesis,
+        account: 'ROBINHOOD'
     };
 
     try {
-        const response = await fetch(`${API_URL}/options/positions`, {
+        const response = await fetch(`${API_URL}/v2/positions`, {
             method: 'POST',
             headers: authHeaders(),
             body: JSON.stringify(payload)
@@ -9474,12 +9595,13 @@ async function saveOptionsPosition() {
 
         const data = await response.json();
 
-        if (data.status === 'success') {
+        if (response.ok) {
             closeOptionsModal();
             loadOptionsPositions();
             console.log(`Options position added: ${underlying} ${strategy}`);
         } else {
-            alert('Error saving position: ' + (data.detail || 'Unknown error'));
+            const err = await response.json().catch(() => ({}));
+            alert('Error saving position: ' + (err.detail || 'Unknown error'));
         }
     } catch (e) {
         console.error('Error saving options position:', e);
@@ -9489,7 +9611,7 @@ async function saveOptionsPosition() {
 
 async function loadOptionsPositions() {
     try {
-        const response = await fetch(`${API_URL}/options/positions?status=OPEN`);
+        const response = await fetch(`${API_URL}/v2/positions?status=OPEN&asset_type=OPTION`);
         const data = await response.json();
 
         const positions = data.positions || [];
@@ -9510,30 +9632,47 @@ function renderOptionsPositions(positions) {
         return;
     }
 
+    const STRUCTURE_DISPLAY = {
+        'call_debit_spread': 'Bull Call Spread',
+        'put_debit_spread': 'Bear Put Spread',
+        'call_credit_spread': 'Bear Call Spread',
+        'put_credit_spread': 'Bull Put Spread',
+        'long_call': 'Long Call',
+        'long_put': 'Long Put',
+        'iron_condor': 'Iron Condor',
+        'straddle': 'Straddle',
+        'strangle': 'Strangle',
+        'stock': 'Stock',
+        'custom': 'Custom'
+    };
+
     container.innerHTML = positions.map(pos => {
-        const metrics = pos.metrics || {};
-        const dte = metrics.days_to_expiry;
+        const dte = pos.dte;
         const dteClass = dte > 14 ? 'safe' : (dte > 7 ? 'warning' : 'danger');
-        const pnl = metrics.unrealized_pnl;
+        const pnl = pos.unrealized_pnl;
         const pnlClass = pnl > 0 ? 'positive' : (pnl < 0 ? 'negative' : '');
 
-        // Build legs summary
-        const legsSummary = pos.legs.map(leg =>
-            `${leg.action} ${leg.quantity}x ${leg.strike} ${leg.option_type} ${leg.expiration}`
-        ).join(' | ');
+        // Build legs summary from unified legs field
+        const legs = pos.legs || [];
+        const legsSummary = legs.length > 0
+            ? legs.map(leg =>
+                `${leg.action} ${leg.quantity || 1}x ${leg.strike} ${leg.option_type} ${leg.expiration}`
+              ).join(' | ')
+            : `${pos.long_strike || ''}/${pos.short_strike || ''} ${pos.structure || ''}`;
 
-        const pnlDisplay = pnl !== null ? ((pnl >= 0 ? '+' : '-') + '$' + Math.abs(pnl).toFixed(2)) : '--';
-        const thetaDisplay = metrics.net_theta ? metrics.net_theta.toFixed(2) : '--';
+        const pnlDisplay = pnl != null ? ((pnl >= 0 ? '+' : '-') + '$' + Math.abs(pnl).toFixed(2)) : '--';
+        const strategyName = STRUCTURE_DISPLAY[pos.structure] || pos.structure || '--';
+        const directionClass = (pos.direction || '').toLowerCase();
 
         return `
             <div class="options-position-card" data-position-id="${pos.position_id}">
                 <div class="position-header">
                     <div class="position-ticker">
-                        <span class="ticker-symbol">${pos.underlying}</span>
-                        <span class="strategy-badge ${pos.direction.toLowerCase()}">${pos.strategy_display || pos.strategy_type}</span>
+                        <span class="ticker-symbol">${pos.ticker}</span>
+                        <span class="strategy-badge ${directionClass}">${strategyName}</span>
                     </div>
                     <div class="position-dte ${dteClass}">
-                        <span class="dte-value">${dte !== null ? dte : '--'}</span>
+                        <span class="dte-value">${dte != null ? dte : '--'}</span>
                         <span class="dte-label">DTE</span>
                     </div>
                 </div>
@@ -9543,7 +9682,7 @@ function renderOptionsPositions(positions) {
                 <div class="position-metrics">
                     <div class="metric">
                         <span class="metric-label">Entry</span>
-                        <span class="metric-value">${pos.net_premium >= 0 ? '+' : ''}${pos.net_premium?.toFixed(2) || '0.00'}</span>
+                        <span class="metric-value">${pos.entry_price != null ? '$' + pos.entry_price.toFixed(2) : '--'}</span>
                     </div>
                     <div class="metric">
                         <span class="metric-label">P&L</span>
@@ -9551,14 +9690,14 @@ function renderOptionsPositions(positions) {
                     </div>
                     <div class="metric">
                         <span class="metric-label">Delta</span>
-                        <span class="metric-value">${metrics.net_delta || '--'}</span>
+                        <span class="metric-value">--</span>
                     </div>
                     <div class="metric">
                         <span class="metric-label">Theta</span>
-                        <span class="metric-value">${thetaDisplay}/day</span>
+                        <span class="metric-value">--/day</span>
                     </div>
                 </div>
-                ${pos.thesis ? `<div class="position-thesis">"${pos.thesis}"</div>` : ''}
+                ${pos.notes ? `<div class="position-thesis">"${pos.notes}"</div>` : ''}
                 <div class="position-actions">
                     <button class="position-btn" onclick="viewPositionDetails('${pos.position_id}')">Details</button>
                     <button class="position-btn" onclick="closeOptionsPosition('${pos.position_id}')">Close</button>
@@ -9577,16 +9716,11 @@ function updateOptionsSummary(positions) {
     if (countEl) countEl.textContent = positions.length;
 
     let totalPnl = 0;
-    let totalDelta = 0;
-    let totalTheta = 0;
 
     positions.forEach(pos => {
-        const metrics = pos.metrics || {};
-        if (metrics.unrealized_pnl !== null && metrics.unrealized_pnl !== undefined) {
-            totalPnl += metrics.unrealized_pnl;
+        if (pos.unrealized_pnl != null) {
+            totalPnl += pos.unrealized_pnl;
         }
-        if (metrics.net_delta) totalDelta += metrics.net_delta;
-        if (metrics.net_theta) totalTheta += metrics.net_theta;
     });
 
     if (pnlEl) {
@@ -9594,13 +9728,13 @@ function updateOptionsSummary(positions) {
         pnlEl.className = 'stat-value ' + (totalPnl >= 0 ? 'positive' : 'negative');
     }
 
-    if (deltaEl) deltaEl.textContent = totalDelta.toFixed(0);
-    if (thetaEl) thetaEl.textContent = '$' + totalTheta.toFixed(2);
+    if (deltaEl) deltaEl.textContent = '--';
+    if (thetaEl) thetaEl.textContent = '--';
 }
 
 async function viewPositionDetails(positionId) {
     try {
-        const response = await fetch(`${API_URL}/options/positions/${positionId}`);
+        const response = await fetch(`${API_URL}/v2/positions/${positionId}`);
         const data = await response.json();
         console.log('Position details:', data);
         // Could open a detail modal here
@@ -9610,28 +9744,28 @@ async function viewPositionDetails(positionId) {
 }
 
 async function closeOptionsPosition(positionId) {
-    const exitPremium = prompt('Enter exit premium (positive for credit, negative for debit):');
-    if (exitPremium === null) return;
+    const exitPrice = prompt('Enter exit price per contract (e.g. 0.50):');
+    if (exitPrice === null) return;
 
-    const outcome = prompt('Outcome? (WIN, LOSS, BREAKEVEN, EXPIRED_WORTHLESS, ASSIGNED)');
-    if (!outcome) return;
+    const outcome = prompt('Outcome? (WIN, LOSS, BREAKEVEN)');
 
     try {
-        const response = await fetch(`${API_URL}/options/positions/${positionId}/close`, {
+        const response = await fetch(`${API_URL}/v2/positions/${positionId}/close`, {
             method: 'POST',
             headers: authHeaders(),
             body: JSON.stringify({
-                position_id: positionId,
-                exit_premium: parseFloat(exitPremium),
-                outcome: outcome.toUpperCase()
+                exit_price: parseFloat(exitPrice),
+                notes: outcome ? `Outcome: ${outcome.toUpperCase()}` : undefined,
+                trade_outcome: outcome ? outcome.toUpperCase() : undefined
             })
         });
 
         const data = await response.json();
 
-        if (data.status === 'success') {
+        if (response.ok) {
             loadOptionsPositions();
-            console.log(`Position closed - P&L: $${data.realized_pnl?.toFixed(2)}`);
+            const pnl = data.position?.realized_pnl || data.realized_pnl;
+            console.log(`Position closed${pnl != null ? ` - P&L: $${pnl.toFixed(2)}` : ''}`);
         }
     } catch (e) {
         console.error('Error closing position:', e);

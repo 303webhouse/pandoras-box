@@ -1,6 +1,6 @@
 # Pivot — Development Status
 
-**Last Updated:** March 5, 2026
+**Last Updated:** March 11, 2026
 
 Single source of truth for what's built, what's active, and what's next. Read before starting any work.
 
@@ -108,7 +108,7 @@ TradingView webhook → process_scout/sniper/holy_grail_signal()
 
 ## Position Tracking
 
-Unified `open_positions` table with account field (ROBINHOOD/FIDELITY). Options-aware with structure detection. Mark-to-market via Polygon (bid/ask mid-prices for spreads). v2 API (10 endpoints). Portfolio summary per account. Committee context integration.
+Unified `unified_positions` table with account field (ROBINHOOD/FIDELITY). Options-aware with structure detection. Mark-to-market via Polygon (bid/ask mid-prices for spreads). v2 API (10 endpoints). Portfolio summary per account. Committee context integration.
 
 **Frontend:** All/RH/Fidelity tab toggle on positions panel.
 
@@ -128,7 +128,21 @@ Unified `open_positions` table with account field (ROBINHOOD/FIDELITY). Options-
 
 ---
 
-## Known Issues (Mar 5, 2026)
+## Stater Swap (Crypto — Phase 2 Complete)
+
+BTC-native scalping system integrated into Railway backend. No separate deployment — shares the same FastAPI app.
+
+- **3 strategies**: Funding Rate Fade, Session Sweep Reversal, Liquidation Flush Reversal (`backend/strategies/crypto_setups.py`)
+- **Market structure filter**: Volume profile + CVD + orderbook imbalance modifies signal scores -45 to +35 (`backend/strategies/btc_market_structure.py`)
+- **Scheduler**: `crypto_scan_loop()` in `main.py` runs every 5 min, 24/7
+- **Discord delivery**: `signal_notifier.py --crypto` with crypto-specific embeds, Take/Pass/Watching buttons
+- **Position sizing**: Breakout 1% max risk model, $25K account, auto-calculates leverage and BTC contract size
+- **Bias bypass**: Crypto signals always get NEUTRAL bias alignment (equity bias is irrelevant)
+- **Symbol propagation**: Frontend passes selected coin to `/api/crypto/market?symbol=ETHUSDT` etc.
+
+---
+
+## Known Issues (Mar 11, 2026)
 
 - **tick_breadth still leans bullish during selloffs** — Late session bounces in TICK close overpower bearish avg. Needs further tuning (weight avg 2:1 over close).
 - **sector_rotation lags during trend changes** — Uses 20-day SMA baseline; won't flip for days after a selloff starts.

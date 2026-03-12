@@ -68,18 +68,38 @@
 
 ---
 
-## 🟠 Phase 2: Crypto Scalper Review/Overhaul ← **NEXT**
+## ✅ Phase 2: Crypto Scalper Review/Overhaul — COMPLETE
 
-**Goal:** Assess the crypto shell, determine what's working, what's orphaned, and build a real LTF scalping system.
+### ✅ Phase 2A — Plumbing & Auth (COMPLETE)
+- [x] Ticker normalization (.P suffix handling)
+- [x] Auth on BTC signal mutation routes
+- [x] Legacy route coupling killed
+- [x] Symbol propagation (selected coin → API)
+- [x] Dead code cleanup, smoke tests
 
-**Discovery (March 6):** Crypto Scanner is actively generating ~57 trade ideas. Source and configuration unknown — needs audit.
+### ✅ Phase 2B — BTC Setup Engine (COMPLETE)
+- [x] Crypto bias bypass (NEUTRAL alignment for crypto signals)
+- [x] Holy Grail + Exhaustion PineScript alerts on BTCUSDT.P
+- [x] 3 crypto-native strategies: Funding Rate Fade, Session Sweep, Liquidation Flush
+- [x] Breakout position sizing (1% max risk, $25K account)
+- [x] 5-minute scheduler, 24/7
 
-- [ ] **Current state audit** — The crypto scalper UI exists (`/crypto` route). What backend endpoints are active vs dead? What data is actually flowing? Where are the 57 trade ideas coming from?
-- [ ] **Signal reliability** — What crypto signals are coming in? From where? Same webhook pipeline or separate path?
-- [ ] **LTF strategy implementation** — Strategies for 1m-15m crypto/forex scalping. Evaluate: VWAP bounce, order flow imbalance, funding rate divergence, liquidation cascade detection.
-- [ ] **Architecture decision** — "Single app, two shells" approved. `/hub` (equities) and `/crypto` (scalping) sharing Railway backend.
-- [ ] **BTC session/bottom signal components** — Orphaned components from earlier builds. Reconnect or remove.
-- [ ] **Exchange integration** — Coinbase sandbox (~$150). API access for paper trading.
+### ✅ Phase 2B.5 — Market Structure Filter (COMPLETE)
+- [x] Volume Profile (POC/VAH/VAL from klines)
+- [x] CVD gate (flow confirmation/divergence)
+- [x] Orderbook imbalance (bid/ask ratio + wall detection)
+- [x] Score modifier: -45 to +35 per signal
+
+### ✅ Phase 2C — Discord Delivery (COMPLETE)
+- [x] Crypto-specific Discord embeds
+- [x] 24/7 notifier cron
+- [x] Take/Pass/Watching buttons (no committee)
+
+### ✅ Phase 2D — Cleanup (COMPLETE)
+- [x] Standalone crypto-scalper/ deleted
+- [x] Orphaned references removed
+- [x] crypto_market.py symbol derivation (no more hardcoded BTC)
+- [x] Docs updated
 
 ---
 

@@ -21,7 +21,8 @@ Decay System (condition-verified):
 - No-downgrade: spy_down_1pct cannot overwrite spy_down_2pct (severity ranking)
 """
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from utils.pivot_auth import require_api_key
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
 from datetime import datetime, timezone, timedelta
@@ -589,7 +590,11 @@ async def _circuit_breaker_background_work(state: dict):
 @router.post("/circuit_breaker")
 async def receive_circuit_breaker_alert(alert: CircuitBreakerTrigger, background_tasks: BackgroundTasks):
     """
-    Receive circuit breaker trigger from TradingView
+    Receive circuit breaker trigger from TradingView.
+
+    NOTE: Intentionally public — TradingView webhooks cannot send API key headers.
+    This endpoint only writes state; the management routes below (reset, accept, reject, test)
+    are protected with require_api_key.
 
     TradingView Alert Setup:
     - Symbol: SPY or VIX
@@ -632,7 +637,7 @@ async def get_circuit_breaker_status():
 
 
 @router.post("/circuit_breaker/reset")
-async def reset_circuit_breaker_endpoint():
+async def reset_circuit_breaker_endpoint(_=Depends(require_api_key)):
     """Manually reset circuit breaker"""
     result = reset_circuit_breaker()
     await _persist_circuit_breaker_state()
@@ -666,19 +671,19 @@ async def reset_circuit_breaker_endpoint():
 
 
 @router.post("/circuit_breaker/accept_reset")
-async def accept_reset_endpoint():
+async def accept_reset_endpoint(_=Depends(require_api_key)):
     """Nick accepts the pending circuit breaker reset — clear CB entirely."""
     return await accept_reset()
 
 
 @router.post("/circuit_breaker/reject_reset")
-async def reject_reset_endpoint():
+async def reject_reset_endpoint(_=Depends(require_api_key)):
     """Nick rejects the pending reset — keep CB active, reset timer."""
     return await reject_reset()
 
 
 @router.post("/circuit_breaker/test/{trigger}")
-async def test_circuit_breaker(trigger: str):
+async def test_circuit_breaker(trigger: str, _=Depends(require_api_key)):
     """
     Test circuit breaker with a specific trigger (for development)
 

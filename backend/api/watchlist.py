@@ -23,9 +23,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 try:
-    from utils.pivot_auth import verify_pivot_key
+    from utils.pivot_auth import require_api_key
 except ModuleNotFoundError:
-    from backend.utils.pivot_auth import verify_pivot_key
+    from backend.utils.pivot_auth import require_api_key
 
 # Watchlist storage path
 WATCHLIST_FILE = os.path.join(os.path.dirname(__file__), "..", "..", "data", "watchlist.json")
@@ -523,7 +523,7 @@ async def get_watchlist_sectors():
 
 
 @router.put("/watchlist")
-async def update_watchlist(update: WatchlistUpdate):
+async def update_watchlist(update: WatchlistUpdate, _=Depends(require_api_key)):
     """Replace the entire watchlist"""
     # Normalize tickers to uppercase
     tickers = [t.upper().strip() for t in update.tickers if t.strip()]
@@ -548,7 +548,7 @@ async def update_watchlist(update: WatchlistUpdate):
 
 
 @router.post("/watchlist/add")
-async def add_to_watchlist(action: TickerAction):
+async def add_to_watchlist(action: TickerAction, _=Depends(require_api_key)):
     """Add a single ticker to the watchlist (in specified sector)"""
     ticker = action.ticker.upper().strip()
     sector = action.sector or "Uncategorized"
@@ -586,7 +586,7 @@ async def add_to_watchlist(action: TickerAction):
 
 
 @router.post("/watchlist/remove")
-async def remove_from_watchlist(action: TickerAction):
+async def remove_from_watchlist(action: TickerAction, _=Depends(require_api_key)):
     """Remove a single ticker from the watchlist"""
     ticker = action.ticker.upper().strip()
     
@@ -622,7 +622,7 @@ async def remove_from_watchlist(action: TickerAction):
 
 
 @router.delete("/watchlist/clear")
-async def clear_watchlist():
+async def clear_watchlist(_=Depends(require_api_key)):
     """Clear the entire watchlist"""
     if await save_watchlist([]):
         logger.info("Watchlist cleared")
@@ -637,7 +637,7 @@ async def clear_watchlist():
 
 
 @router.post("/watchlist/reset")
-async def reset_watchlist():
+async def reset_watchlist(_=Depends(require_api_key)):
     """Reset watchlist to defaults"""
     if await save_watchlist_data_async(_copy_default_watchlist()):
         all_tickers = _flatten_tickers(DEFAULT_WATCHLIST.get("sectors", {}))
@@ -654,7 +654,7 @@ async def reset_watchlist():
 
 
 @router.post("/watchlist/sector-strength")
-async def update_sector_strength(update: SectorStrengthUpdate, _: str = Depends(verify_pivot_key)):
+async def update_sector_strength(update: SectorStrengthUpdate, _=Depends(require_api_key)):
     """Update sector strength rankings (called by bias scheduler)"""
     data = await load_watchlist_data_async()
     data["sector_strength"] = update.sector_strength
@@ -828,7 +828,7 @@ async def get_watchlist_tickers(
 
 
 @router.patch("/watchlist/tickers/{symbol}/mute")
-async def mute_watchlist_ticker(symbol: str, request: WatchlistTickerMute):
+async def mute_watchlist_ticker(symbol: str, request: WatchlistTickerMute, _=Depends(require_api_key)):
     symbol = symbol.upper().strip()
     if not symbol:
         raise HTTPException(status_code=400, detail="Symbol cannot be empty")
@@ -860,7 +860,7 @@ async def mute_watchlist_ticker(symbol: str, request: WatchlistTickerMute):
 
 
 @router.patch("/watchlist/tickers/bulk-mute")
-async def bulk_mute_watchlist_tickers(request: BulkMuteRequest):
+async def bulk_mute_watchlist_tickers(request: BulkMuteRequest, _=Depends(require_api_key)):
     if request.symbols and request.sector:
         raise HTTPException(status_code=400, detail="Provide symbols OR sector, not both")
     if not request.symbols and not request.sector:
@@ -902,7 +902,7 @@ async def bulk_mute_watchlist_tickers(request: BulkMuteRequest):
 
 
 @router.delete("/watchlist/tickers/{symbol}")
-async def delete_watchlist_ticker(symbol: str):
+async def delete_watchlist_ticker(symbol: str, _=Depends(require_api_key)):
     symbol = symbol.upper().strip()
     if not symbol:
         raise HTTPException(status_code=400, detail="Symbol cannot be empty")
@@ -937,7 +937,7 @@ async def delete_watchlist_ticker(symbol: str):
 
 
 @router.post("/watchlist/tickers/add")
-async def add_watchlist_ticker(request: WatchlistTickerAdd):
+async def add_watchlist_ticker(request: WatchlistTickerAdd, _=Depends(require_api_key)):
     symbol = request.symbol.upper().strip()
     if not symbol:
         raise HTTPException(status_code=400, detail="Symbol cannot be empty")

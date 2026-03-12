@@ -41,13 +41,52 @@ CRYPTO_TICKERS = {
     'DOTUSDT', 'LINKUSDT', 'MATICUSDT', 'LTCUSDT', 'BCHUSDT', 'XLMUSDT', 'UNIUSDT',
     'BNBUSDT', 'TRXUSDT', 'SHIBUSDT', 'TONUSDT',
     # Binance/Bybit perpetuals
-    'BTCUSDTPERP', 'ETHUSDTPERP', 'BTCPERP', 'ETHPERP'
+    'BTCUSDTPERP', 'ETHUSDTPERP', 'BTCPERP', 'ETHPERP',
+    # TradingView .P suffix (Bybit perps)
+    'BTCUSDT.P', 'ETHUSDT.P',
 }
 
 
 def is_crypto_ticker(ticker: str) -> bool:
-    """Check if a ticker is a cryptocurrency"""
-    return ticker.upper() in CRYPTO_TICKERS
+    """Check if a ticker is a cryptocurrency. Handles exchange suffixes like .P (perp)"""
+    t = ticker.upper()
+    if t in CRYPTO_TICKERS:
+        return True
+    # Strip common exchange suffixes
+    for suffix in ('.P', 'PERP', '.PERP', '-PERP'):
+        if t.endswith(suffix):
+            return t[:-len(suffix)] in CRYPTO_TICKERS
+    return False
+
+
+async def _process_with_market_structure(signal_data: dict, source: str = "tradingview", **kwargs) -> None:
+    """Process signal through pipeline, applying market structure filter for crypto."""
+    if signal_data.get("asset_class") == "CRYPTO" and signal_data.get("entry_price"):
+        try:
+            from strategies.btc_market_structure import get_market_structure_context
+            import json
+            structure = await get_market_structure_context(
+                ticker=signal_data["ticker"],
+                entry_price=signal_data["entry_price"],
+                direction=signal_data.get("direction", "LONG"),
+            )
+            enrichment = json.loads(signal_data.get("enrichment_data", "{}")) if isinstance(signal_data.get("enrichment_data"), str) else signal_data.get("enrichment_data", {})
+            enrichment["market_structure"] = {
+                "context_label": structure["context_label"],
+                "score_modifier": structure["score_modifier"],
+                "reasoning": structure["reasoning"],
+                "poc": structure["volume_profile"].get("poc"),
+                "vah": structure["volume_profile"].get("vah"),
+                "val": structure["volume_profile"].get("val"),
+                "cvd_direction": structure["cvd"].get("direction"),
+                "book_imbalance": structure["orderbook"].get("imbalance_ratio"),
+            }
+            signal_data["enrichment_data"] = json.dumps(enrichment) if isinstance(enrichment, dict) else enrichment
+            signal_data["_market_structure_modifier"] = structure["score_modifier"]
+        except Exception as e:
+            logger.warning(f"Market structure filter error (non-blocking): {e}")
+
+    await process_signal_unified(signal_data, source=source, **kwargs)
 
 
 async def _recompute_composite_background(factor_name: str) -> None:
@@ -214,13 +253,7 @@ async def process_scout_signal(alert: TradingViewAlert, start_time: datetime):
             signal_data["risk_reward"] = round(reward / risk, 2) if reward > 0 else 0
 
     # Fire-and-forget: return 200 immediately, process in background
-    asyncio.ensure_future(process_signal_unified(
-        signal_data,
-        source="tradingview",
-        skip_scoring=True,
-        cache_ttl=1800,
-        priority_threshold=0,  # Always broadcast scouts
-    ))
+    asyncio.ensure_future(_process_with_market_structure(signal_data, source="tradingview"))
 
     logger.info(
         f"⚠️ Scout alert accepted: {alert.ticker} {alert.direction} "
@@ -287,7 +320,7 @@ async def process_holy_grail_signal(alert: TradingViewAlert, start_time: datetim
     }
 
     # Fire-and-forget: return 200 immediately, process in background
-    asyncio.ensure_future(process_signal_unified(signal_data, source="tradingview"))
+    asyncio.ensure_future(_process_with_market_structure(signal_data, source="tradingview"))
 
     logger.info(f"📨 Holy Grail accepted: {alert.ticker} {signal_type} ({alert.timeframe})")
 
@@ -360,7 +393,7 @@ async def process_exhaustion_signal(alert: TradingViewAlert, start_time: datetim
         signal_data["note"] = "Exhaustion BULL suppressed — strong bearish bias. Use as short profit-taking indicator only."
 
     # Fire-and-forget: return 200 immediately, process in background
-    asyncio.ensure_future(process_signal_unified(signal_data, source="tradingview"))
+    asyncio.ensure_future(_process_with_market_structure(signal_data, source="tradingview"))
 
     logger.info(f"📨 Exhaustion accepted: {alert.ticker} {classification['signal_type']}")
 
@@ -409,7 +442,7 @@ async def process_sniper_signal(alert: TradingViewAlert, start_time: datetime):
     }
     
     # Fire-and-forget: return 200 immediately, process in background
-    asyncio.ensure_future(process_signal_unified(signal_data, source="tradingview"))
+    asyncio.ensure_future(_process_with_market_structure(signal_data, source="tradingview"))
 
     logger.info(f"📨 Sniper accepted: {alert.ticker} {signal_type}")
 
@@ -457,7 +490,7 @@ async def process_phalanx_signal(alert: TradingViewAlert, start_time: datetime):
         "phalanx_wall_level": wall_level,
     }
 
-    asyncio.ensure_future(process_signal_unified(signal_data, source="tradingview"))
+    asyncio.ensure_future(_process_with_market_structure(signal_data, source="tradingview"))
 
     # Cache wall level in Redis for confluence enrichment (4-hour TTL)
     try:
@@ -539,7 +572,7 @@ async def process_artemis_signal(alert: TradingViewAlert, start_time: datetime):
         "adx_rising": alert.adx_rising,
     }
 
-    asyncio.ensure_future(process_signal_unified(signal_data, source="tradingview"))
+    asyncio.ensure_future(_process_with_market_structure(signal_data, source="tradingview"))
 
     logger.info(
         "\U0001f3f9 Artemis accepted: %s %s (%s mode, prox=%.2f ATR, avwap=%s)",
@@ -591,7 +624,7 @@ async def process_generic_signal(alert: TradingViewAlert, start_time: datetime):
     }
     
     # Fire-and-forget: return 200 immediately, process in background
-    asyncio.ensure_future(process_signal_unified(signal_data, source="tradingview"))
+    asyncio.ensure_future(_process_with_market_structure(signal_data, source="tradingview"))
 
     logger.info(f"📨 Generic signal accepted: {alert.ticker} {signal_type}")
 

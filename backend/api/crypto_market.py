@@ -180,6 +180,13 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
     if _cache["data"] and (now - _cache["timestamp"]) < CACHE_TTL_SECONDS:
         return _cache["data"]
 
+    # Derive exchange-specific symbol formats from input (e.g. BTCUSDT)
+    # Strip "USDT" suffix to get base asset, then build per-exchange pairs
+    base_asset = symbol.replace("USDT", "")  # BTC, ETH, etc.
+    okx_spot_inst = f"{base_asset}-USDT"          # BTC-USDT
+    okx_swap_inst = f"{base_asset}-USDT-SWAP"     # BTC-USDT-SWAP
+    coinbase_pair = f"{base_asset}-USD"            # BTC-USD
+
     market_client_kwargs: Dict[str, Any] = {"timeout": 8.0, "follow_redirects": True}
     binance_client_kwargs: Dict[str, Any] = {"timeout": 8.0, "follow_redirects": True}
     if BINANCE_PERP_HTTP_PROXY:
@@ -190,8 +197,8 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
         tasks = {
             # Spot prices
             "binance_spot_price": _fetch_json(client, f"{BINANCE_SPOT_BASE}/api/v3/ticker/price", {"symbol": symbol}),
-            "coinbase_spot": _fetch_json(client, f"{COINBASE_BASE}/v2/prices/BTC-USD/spot"),
-            "okx_spot_price": _fetch_json(client, f"{OKX_BASE}/api/v5/market/ticker", {"instId": "BTC-USDT"}),
+            "coinbase_spot": _fetch_json(client, f"{COINBASE_BASE}/v2/prices/{coinbase_pair}/spot"),
+            "okx_spot_price": _fetch_json(client, f"{OKX_BASE}/api/v5/market/ticker", {"instId": okx_spot_inst}),
 
             # Binance perp (PRIMARY): price, funding, and tape
             "binance_perp_price": _fetch_json(binance_client, f"{BINANCE_PERP_API_ROOT}/ticker/price", {"symbol": symbol}),
@@ -199,11 +206,11 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
             "binance_trades": _fetch_json(binance_client, f"{BINANCE_PERP_API_ROOT}/trades", {"symbol": symbol, "limit": limit}),
 
             # Perp prices & funding via OKX (not geo-blocked)
-            "okx_perp_price": _fetch_json(client, f"{OKX_BASE}/api/v5/market/ticker", {"instId": "BTC-USDT-SWAP"}),
-            "okx_funding": _fetch_json(client, f"{OKX_BASE}/api/v5/public/funding-rate", {"instId": "BTC-USDT-SWAP"}),
+            "okx_perp_price": _fetch_json(client, f"{OKX_BASE}/api/v5/market/ticker", {"instId": okx_swap_inst}),
+            "okx_funding": _fetch_json(client, f"{OKX_BASE}/api/v5/public/funding-rate", {"instId": okx_swap_inst}),
 
             # Order flow / trades from OKX swap
-            "okx_trades": _fetch_json(client, f"{OKX_BASE}/api/v5/market/trades", {"instId": "BTC-USDT-SWAP", "limit": limit}),
+            "okx_trades": _fetch_json(client, f"{OKX_BASE}/api/v5/market/trades", {"instId": okx_swap_inst, "limit": limit}),
         }
         if use_bybit:
             tasks.update({

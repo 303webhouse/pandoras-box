@@ -10,7 +10,8 @@ ALL 9 SIGNALS AUTOMATED via:
 - yfinance (VIX)
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+from utils.pivot_auth import require_api_key
 from pydantic import BaseModel
 from typing import Optional, Any
 import logging
@@ -63,7 +64,7 @@ async def get_bottom_signals_dashboard():
 
 
 @router.post("/bottom-signals/refresh")
-async def refresh_all_signals():
+async def refresh_all_signals(_=Depends(require_api_key)):
     """
     Force refresh ALL signals from their respective APIs
     
@@ -94,7 +95,7 @@ async def get_single_signal(signal_id: str):
 
 
 @router.post("/bottom-signals/{signal_id}")
-async def update_signal(signal_id: str, update: ManualSignalUpdate):
+async def update_signal(signal_id: str, update: ManualSignalUpdate, _=Depends(require_api_key)):
     """
     Manually update a bottom signal's status
     
@@ -119,7 +120,7 @@ async def update_signal(signal_id: str, update: ManualSignalUpdate):
 
 
 @router.post("/bottom-signals/reset")
-async def reset_signals():
+async def reset_signals(_=Depends(require_api_key)):
     """Reset all signals to UNKNOWN status and clear manual overrides"""
     try:
         await reset_all_signals()
@@ -130,7 +131,7 @@ async def reset_signals():
 
 
 @router.post("/bottom-signals/{signal_id}/clear-override")
-async def clear_signal_override(signal_id: str):
+async def clear_signal_override(signal_id: str, _=Depends(require_api_key)):
     """
     Clear manual override for a signal and return to auto-fetching
     

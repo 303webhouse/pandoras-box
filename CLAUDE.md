@@ -38,7 +38,7 @@ The project was originally called "Pandora's Box" — the name persists in some 
 │   Railway (Backend)  │   VPS (Pivot II)     │  Frontend (Static)    │
 │   FastAPI + Postgres │   OpenClaw + crons   │  Dashboard + Charts   │
 │   Auto-deploys from  │   /opt/openclaw on   │  analytics.js         │
-│   main branch push   │   VPS (systemd)      │  Served from VPS      │
+│   main branch push   │   VPS (systemd)      │  Served from Railway   │
 └──────────┬───────────┴──────────┬───────────┴───────────┬───────────┘
            │                      │                       │
            ▼                      ▼                       ▼
@@ -72,6 +72,15 @@ The project was originally called "Pandora's Box" — the name persists in some 
 
 ## Key Subsystems
 
+### Stater Swap (Crypto — `backend/strategies/`, `backend/api/crypto_market.py`)
+BTC-native scalping system running on Railway alongside equities. Signals route via `asset_class=CRYPTO` to the Stater Swap UI tab.
+
+- **BTC Setup Engine** (`strategies/crypto_setups.py`) — 3 strategies (Funding Rate Fade, Session Sweep, Liquidation Flush) run every 5 min, 24/7. Breakout position sizing (1% max risk, $25K account).
+- **Market Structure Filter** (`strategies/btc_market_structure.py`) — Volume profile (POC/VAH/VAL), CVD gate, orderbook imbalance modify crypto signal scores by -45 to +35.
+- **TradingView Crypto** — Holy Grail + Exhaustion PineScript alerts fire for `BTCUSDT.P`. Handled by existing `/webhook/tradingview` with `.P` suffix normalization.
+- **Discord Delivery** — Crypto-specific embeds via `signal_notifier.py --crypto` (24/7 cron). Take/Pass/Watching buttons (no committee — too slow for scalping).
+- **Crypto signals bypass bias alignment** — always NEUTRAL (equity bias engine is irrelevant to BTC).
+
 ### Bias Engine (`backend/bias_engine/`)
 20 factors across INTRADAY (5), SWING (6), and MACRO (9) categories. Each factor scores -1.0 to +1.0. Composite weighted average maps to 5-level system:
 - **URSA MAJOR** (strongly bearish, ≤ -0.60) → **URSA MINOR** → **NEUTRAL** → **TORO MINOR** → **TORO MAJOR** (strongly bullish)
@@ -92,7 +101,7 @@ TradingView alerts trigger automatic bias overrides during extreme events. **Con
 
 Triggers: `spy_down_1pct`, `spy_down_2pct`, `spy_up_2pct`, `vix_spike`, `vix_extreme`.
 
-### Position Ledger (`backend/api/v2_positions.py` + `backend/positions/`)
+### Position Ledger (`backend/api/unified_positions.py` + `backend/positions/`)
 Unified position tracking across all accounts (RH, IBKR, 401k). Options-aware with structure detection. Mark-to-market via Polygon options API (actual bid/ask mid-prices for both spread legs) with yfinance fallback for equities. Portfolio greeks endpoint. Committee context integration.
 
 **v2 API (10 endpoints):** POST create, GET list (filtered), GET single, PUT update, POST close, DELETE soft-delete, POST sync (partial flag), GET summary, GET greeks, POST bulk-import.
@@ -211,7 +220,7 @@ DB_PORT = int(os.getenv("DB_PORT", 5432))    # int('') crashes
 5. Update Discord alert formatting
 
 ### New v2 Position Endpoint
-1. Add to `backend/api/v2_positions.py`
+1. Add to `backend/api/unified_positions.py`
 2. **Route ordering matters** — fixed paths (`/summary`, `/greeks`) BEFORE parameterized (`/{position_id}`)
 3. Add models to `backend/positions/models.py` if new request/response shapes needed
 4. Update committee context in `committee_context.py` if position data affects agent analysis
@@ -232,7 +241,7 @@ DB_PORT = int(os.getenv("DB_PORT", 5432))    # int('') crashes
 | `backend/webhooks/circuit_breaker.py` | Circuit breaker logic (condition-verified decay, state machine, no-downgrade) |
 | `backend/webhooks/tradingview.py` | TradingView webhook receiver + /webhook/breadth endpoint |
 | `backend/webhooks/whale.py` | Whale Hunter webhook + Redis caching + GET /whale/recent/{ticker} |
-| `backend/api/v2_positions.py` | Unified position ledger API (10 endpoints, route ordering matters) |
+| `backend/api/unified_positions.py` | Unified position ledger API (10 endpoints, route ordering matters) |
 | `backend/positions/risk_calculator.py` | Options structure risk calculation (max loss, breakeven) |
 | `frontend/app.js` | Main dashboard JS (bias cards, signals, positions, circuit breaker banner) |
 | `frontend/analytics.js` | Analytics UI (6 tabs) |

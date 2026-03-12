@@ -11,18 +11,15 @@
     ];
 
     const TAB_TO_PANE = {
-        dashboard: 'analyticsPaneDashboard',
-        'trade-journal': 'analyticsPaneTradeJournal',
-        'signal-explorer': 'analyticsPaneSignalExplorer',
-        'factor-lab': 'analyticsPaneFactorLab',
-        backtest: 'analyticsPaneBacktest',
-        risk: 'analyticsPaneRisk'
+        strategos: 'analyticsPaneStrategos',
+        chronicle: 'analyticsPaneChronicle',
+        symposium: 'analyticsPaneSymposium'
     };
 
     const state = {
         initialized: false,
         mode: document.body?.dataset?.mode || 'hub',
-        activeTab: 'dashboard',
+        activeTab: 'strategos',
         selectedSignalSource: null,
         dashboard: {
             account: '',
@@ -193,7 +190,7 @@
     }
 
     function setActiveTab(tabName) {
-        const tab = TAB_TO_PANE[tabName] ? tabName : 'dashboard';
+        const tab = TAB_TO_PANE[tabName] ? tabName : 'strategos';
         state.activeTab = tab;
 
         document.querySelectorAll('.analytics-subtab').forEach((button) => {
@@ -210,31 +207,19 @@
             pane.hidden = !active;
         });
 
-        if (tab === 'dashboard') {
+        if (tab === 'strategos') {
             startDashboardTimer();
-            loadDashboard();
+            loadStrategos();
         } else {
             stopDashboardTimer();
         }
 
-        if (tab === 'trade-journal') {
-            loadTradeJournal();
+        if (tab === 'chronicle') {
+            loadChronicle();
         }
 
-        if (tab === 'signal-explorer') {
-            loadSignalExplorer();
-        }
-
-        if (tab === 'factor-lab') {
-            loadFactorLab();
-        }
-
-        if (tab === 'backtest') {
-            initBacktestDefaults();
-        }
-
-        if (tab === 'risk') {
-            loadRiskTab();
+        if (tab === 'symposium') {
+            loadSymposium();
         }
     }
 
@@ -261,8 +246,8 @@
     function startDashboardTimer() {
         stopDashboardTimer();
         state.dashboardTimer = window.setInterval(() => {
-            if (state.mode === 'analytics' && state.activeTab === 'dashboard') {
-                loadDashboard({ silent: true });
+            if (state.mode === 'analytics' && state.activeTab === 'strategos') {
+                loadStrategos({ silent: true });
             }
         }, DASHBOARD_REFRESH_MS);
     }
@@ -277,7 +262,7 @@
     function onModeChange(mode) {
         state.mode = mode;
         if (mode === 'analytics') {
-            if (state.activeTab === 'dashboard') {
+            if (state.activeTab === 'strategos') {
                 startDashboardTimer();
             }
             refreshAll();
@@ -300,13 +285,21 @@
         if (account) {
             account.addEventListener('change', () => {
                 state.dashboard.account = account.value || '';
-                loadDashboard();
+                loadChronicle();
             });
         }
         if (range) {
             range.addEventListener('change', () => {
                 state.dashboard.days = asNumber(range.value, 30);
-                loadDashboard();
+                loadChronicle();
+            });
+        }
+
+        // Aegis bar asset filter
+        const aegisFilter = byId('aegisAssetFilter');
+        if (aegisFilter) {
+            aegisFilter.addEventListener('change', () => {
+                loadAegisBar(aegisFilter.value || null);
             });
         }
     }
@@ -905,6 +898,241 @@
                 select.value = currentValue;
             }
         });
+    }
+
+    // ── Aegis Bar (persistent P&L header) ─────────────────────────────
+    async function loadAegisBar(assetClass) {
+        const BASE = window.location.origin;
+        const acParam = assetClass ? `&asset_class=${assetClass}` : '';
+        try {
+            const res = await fetch(`${BASE}/api/analytics/oracle?days=30${acParam}`);
+            if (!res.ok) throw new Error(`${res.status}`);
+            const data = await res.json();
+            const h = data.system_health || {};
+
+            const totalEl = byId('aegisPnlTotal');
+            if (totalEl) {
+                const pnl = asNumber(h.pnl_total, 0);
+                totalEl.textContent = `${pnl >= 0 ? '+' : ''}$${Math.round(pnl).toLocaleString()}`;
+                totalEl.className = `pnl-total ${pnl >= 0 ? 'positive' : 'negative'}`;
+            }
+
+            const splitEl = byId('aegisPnlSplit');
+            if (splitEl) {
+                const eq = asNumber(h.pnl_equity, 0);
+                const cr = asNumber(h.pnl_crypto, 0);
+                splitEl.textContent = `[Equity: ${eq >= 0 ? '+' : ''}$${Math.round(eq)}] [Crypto: ${cr >= 0 ? '+' : ''}$${Math.round(cr)}]`;
+            }
+
+            const wrEl = byId('aegisWinRate');
+            if (wrEl) wrEl.textContent = `Win Rate: ${(asNumber(h.win_rate, 0) * 100).toFixed(1)}%`;
+
+            const streakEl = byId('aegisStreak');
+            if (streakEl && h.current_streak) {
+                const s = h.current_streak;
+                streakEl.textContent = `Streak: ${s.type === 'WIN' ? 'W' : 'L'}${s.count}`;
+                streakEl.className = s.count >= 3 ? (s.type === 'WIN' ? 'streak-hot' : 'streak-cold') : '';
+            }
+
+            const trajEl = byId('aegisTrajectory');
+            if (trajEl) {
+                const t = String(h.trajectory || 'STABLE').toUpperCase();
+                const arrow = t === 'IMPROVING' ? '▲' : t === 'DECLINING' ? '▼' : '—';
+                trajEl.textContent = `${arrow} ${t.charAt(0) + t.slice(1).toLowerCase()}`;
+                trajEl.className = `trajectory ${t.toLowerCase()}`;
+            }
+
+            const gradeEl = byId('aegisGrade');
+            if (gradeEl) gradeEl.textContent = h.overall_grade || '';
+        } catch (e) {
+            console.warn('Aegis bar load failed:', e);
+        }
+    }
+
+    // ── Oracle narrative + risk budget renderers ────────────────────────
+    async function loadOracleNarrative(assetClass) {
+        const BASE = window.location.origin;
+        const acParam = assetClass ? `&asset_class=${assetClass}` : '';
+        try {
+            const res = await fetch(`${BASE}/api/analytics/oracle?days=30${acParam}`);
+            if (!res.ok) return;
+            const data = await res.json();
+            const el = byId('oracleNarrative');
+            if (el && data.narrative) {
+                el.innerHTML = `<p>"${escapeHtml(data.narrative)}"</p><cite>— The Oracle</cite>`;
+            }
+
+            // Render strategy scorecards from Oracle
+            renderStrategyScorecards(data.strategy_scorecards || []);
+
+            // Render Prometheus (override review)
+            renderPrometheus(data.decision_quality || {});
+
+            // Render Cassandra (counterfactuals)
+            renderCassandra(data.decision_quality || {});
+        } catch (e) {
+            console.warn('Oracle load failed:', e);
+        }
+    }
+
+    function renderStrategyScorecards(scorecards) {
+        const container = byId('strategyScorecards');
+        if (!container) return;
+        if (!scorecards.length) {
+            container.innerHTML = '<div class="analytics-empty">No strategy data yet.</div>';
+            return;
+        }
+
+        const sorted = [...scorecards].sort((a, b) => asNumber(b.expectancy, 0) - asNumber(a.expectancy, 0));
+        const gradeColors = { A: '#22c55e', B: '#3b82f6', C: '#f59e0b', F: '#ef4444' };
+
+        container.innerHTML = sorted.map(s => {
+            const color = gradeColors[s.grade] || '#6b7280';
+            const pnl = asNumber(s.total_pnl, 0);
+            const exp = asNumber(s.expectancy, 0);
+            return `
+                <div class="analytics-health-card">
+                    <div class="analytics-health-card-header">
+                        <span class="scorecard-grade" style="background:${color}">${escapeHtml(s.grade)}</span>
+                        <span class="analytics-health-source">${escapeHtml(s.display_name || s.strategy)}</span>
+                    </div>
+                    <div class="analytics-health-card-stats">
+                        <span>${s.wins || 0}W / ${s.losses || 0}L</span>
+                        <span class="${pnl >= 0 ? 'positive' : 'negative'}">${pnl >= 0 ? '+' : ''}$${pnl.toFixed(0)}</span>
+                        <span>Exp: $${exp.toFixed(2)}</span>
+                    </div>
+                </div>`;
+        }).join('');
+    }
+
+    function renderPrometheus(dq) {
+        const el = byId('prometheusContent');
+        if (!el) return;
+        if (!dq.total_decisions) {
+            el.innerHTML = '<div class="analytics-empty">No decision data yet.</div>';
+            return;
+        }
+
+        const overrideWR = asNumber(dq.override_win_rate, 0) * 100;
+        const agreementRate = asNumber(dq.committee_agreement_rate, 0) * 100;
+        const overridePnl = asNumber(dq.override_net_pnl, 0);
+
+        el.innerHTML = `
+            <div class="analytics-metric-row"><span>Total Decisions</span><span>${dq.total_decisions}</span></div>
+            <div class="analytics-metric-row"><span>Overrides</span><span>${dq.overrides || 0}</span></div>
+            <div class="analytics-metric-row"><span>Override Win Rate</span><span>${overrideWR.toFixed(1)}%</span></div>
+            <div class="analytics-metric-row"><span>Override Net P&L</span><span class="${overridePnl >= 0 ? 'positive' : 'negative'}">${overridePnl >= 0 ? '+' : ''}$${overridePnl.toFixed(0)}</span></div>
+            <div class="analytics-metric-row"><span>Committee Agreement</span><span>${agreementRate.toFixed(1)}%</span></div>
+            ${dq.best_override ? `<div class="analytics-metric-row"><span>Best Override</span><span>${escapeHtml(dq.best_override.ticker)} +$${asNumber(dq.best_override.pnl, 0).toFixed(0)}</span></div>` : ''}
+            ${dq.worst_override ? `<div class="analytics-metric-row"><span>Worst Override</span><span>${escapeHtml(dq.worst_override.ticker)} $${asNumber(dq.worst_override.pnl, 0).toFixed(0)}</span></div>` : ''}
+        `;
+    }
+
+    function renderCassandra(dq) {
+        const el = byId('cassandraContent');
+        if (!el) return;
+        const wins = asNumber(dq.passed_would_have_won, 0);
+        const losses = asNumber(dq.passed_would_have_lost, 0);
+        if (!wins && !losses) {
+            el.innerHTML = '<div class="analytics-empty">No counterfactual data yet. Dismissed signals will be tracked here.</div>';
+            return;
+        }
+
+        el.innerHTML = `
+            <div class="analytics-metric-row"><span>Passed signals that would have WON</span><span class="positive">${wins}</span></div>
+            <div class="analytics-metric-row"><span>Passed signals that would have LOST</span><span class="negative">${losses}</span></div>
+            <div class="analytics-metric-row"><span>Pass accuracy</span><span>${((losses / (wins + losses)) * 100).toFixed(0)}% correctly avoided</span></div>
+        `;
+    }
+
+    async function loadRiskBudget() {
+        const BASE = window.location.origin;
+        try {
+            const res = await fetch(`${BASE}/api/analytics/risk-budget`);
+            if (!res.ok) return;
+            const data = await res.json();
+
+            // Equity
+            const eqEl = byId('riskBudgetEquity');
+            if (eqEl && data.equity) {
+                const eq = data.equity;
+                eqEl.innerHTML = `
+                    <div class="analytics-metric-row"><span>Open Positions</span><span>${eq.open_positions}</span></div>
+                    <div class="analytics-metric-row"><span>Total Max Loss</span><span class="negative">$${asNumber(eq.total_max_loss, 0).toFixed(0)}</span></div>
+                `;
+            }
+
+            // Crypto
+            const crEl = byId('riskBudgetCrypto');
+            if (crEl && data.crypto) {
+                const cr = data.crypto;
+                const ddPct = Math.min(100, (asNumber(cr.total_max_loss, 0) / 1500) * 100);
+                const dailyPct = 0; // daily tracking TBD
+                crEl.innerHTML = `
+                    <div class="analytics-metric-row"><span>Open Positions</span><span>${cr.open_positions} / ${cr.max_concurrent}</span></div>
+                    <div class="risk-budget-bar-wrap">
+                        <label>Static DD Used</label>
+                        <div class="risk-budget-bar"><div class="risk-budget-bar-fill ${ddPct > 80 ? 'danger' : ddPct > 50 ? 'warn' : ''}" style="width:${ddPct}%"></div></div>
+                        <span>$${asNumber(cr.breakout_static_dd_remaining, 0).toFixed(0)} remaining</span>
+                    </div>
+                    <div class="risk-budget-bar-wrap">
+                        <label>Daily Limit Used</label>
+                        <div class="risk-budget-bar"><div class="risk-budget-bar-fill" style="width:${dailyPct}%"></div></div>
+                        <span>$${asNumber(cr.breakout_daily_remaining, 0).toFixed(0)} remaining</span>
+                    </div>
+                    <div class="analytics-metric-row"><span>Can Open New</span><span class="${cr.can_open_new ? 'positive' : 'negative'}">${cr.can_open_new ? 'YES' : 'NO'}</span></div>
+                `;
+            }
+        } catch (e) {
+            console.warn('Risk budget load failed:', e);
+        }
+    }
+
+    // ── Tab loaders (Strategos / Chronicle / Symposium) ─────────────────
+    async function loadStrategos(options = {}) {
+        if (state.mode !== 'analytics') return;
+
+        // Load Aegis bar
+        const assetClass = byId('aegisAssetFilter')?.value || null;
+        loadAegisBar(assetClass);
+
+        // Load Oracle narrative + strategy scorecards
+        loadOracleNarrative(assetClass);
+
+        // Load risk budget
+        loadRiskBudget();
+
+        // Existing dashboard content (health cards, alerts, charts)
+        loadDashboard(options);
+
+        // Risk tab content (absorbed into Strategos)
+        loadRiskTab();
+    }
+
+    async function loadChronicle() {
+        if (state.mode !== 'analytics') return;
+        loadTradeJournal();
+
+        // Equity curve (moved from dashboard)
+        const account = byId('analyticsEquityAccount')?.value || '';
+        const days = asNumber(byId('analyticsEquityRange')?.value, 30);
+        state.dashboard.account = account;
+        state.dashboard.days = days;
+
+        try {
+            const tradeStats = await fetchJson('/trade-stats', { days, account });
+            renderKeyMetrics(tradeStats || {});
+            renderEquityChart(tradeStats || {});
+        } catch (e) {
+            console.warn('Chronicle equity load failed:', e);
+        }
+    }
+
+    async function loadSymposium() {
+        if (state.mode !== 'analytics') return;
+        loadSignalExplorer();
+        loadFactorLab();
+        initBacktestDefaults();
     }
 
     async function loadDashboard(options = {}) {
@@ -2271,11 +2499,9 @@
 
     function refreshAll() {
         if (state.mode !== 'analytics') return;
-        if (state.activeTab === 'dashboard') loadDashboard();
-        if (state.activeTab === 'trade-journal') loadTradeJournal();
-        if (state.activeTab === 'signal-explorer') loadSignalExplorer();
-        if (state.activeTab === 'factor-lab') loadFactorLab();
-        if (state.activeTab === 'risk') loadRiskTab();
+        if (state.activeTab === 'strategos') loadStrategos();
+        if (state.activeTab === 'chronicle') loadChronicle();
+        if (state.activeTab === 'symposium') loadSymposium();
     }
 
     function init() {
@@ -2296,7 +2522,7 @@
         });
 
         state.mode = document.body?.dataset?.mode || state.mode;
-        setActiveTab('dashboard');
+        setActiveTab('strategos');
 
         if (state.mode === 'analytics') {
             refreshAll();
@@ -2304,6 +2530,9 @@
 
         window.analyticsUI = {
             refreshAll,
+            loadStrategos,
+            loadChronicle,
+            loadSymposium,
             loadDashboard,
             loadTradeJournal,
             loadSignalExplorer,
