@@ -303,6 +303,21 @@ async def lifespan(app: FastAPI):
                 logger.warning("Factor staleness loop error: %s", e)
             await asyncio.sleep(3600)  # 60 minutes
 
+    # Crypto setup engine: scan for BTC funding/session/liquidation setups
+    async def crypto_scan_loop():
+        """Run crypto setup engine every 5 minutes (24/7 — crypto never sleeps)."""
+        await asyncio.sleep(90)  # 1.5 min after startup
+
+        while True:
+            try:
+                from strategies.crypto_setups import run_crypto_scan
+                signals = await run_crypto_scan()
+                if signals:
+                    logger.info("₿ Crypto scan: %d signal(s) generated", len(signals))
+            except Exception as e:
+                logger.warning("Crypto scan loop error: %s", e)
+            await asyncio.sleep(300)  # 5 minutes
+
     expiry_task = asyncio.create_task(signal_expiry_loop())
     universe_task = asyncio.create_task(universe_cache_loop())
     mtm_task = asyncio.create_task(mark_to_market_loop())
@@ -313,6 +328,35 @@ async def lifespan(app: FastAPI):
     sell_the_rip_task = asyncio.create_task(sell_the_rip_scan_loop())
     staleness_task = asyncio.create_task(factor_staleness_loop())
     vwap_task = asyncio.create_task(vwap_validation_loop())
+    crypto_scan_task = asyncio.create_task(crypto_scan_loop())
+
+    # Oracle insights: pre-compute analytics payload hourly
+    async def oracle_refresh_loop():
+        """Refresh Oracle insights cache every hour."""
+        await asyncio.sleep(120)  # 2 min after startup
+
+        while True:
+            try:
+                from analytics.oracle_engine import compute_oracle_payload
+                import json as _json
+
+                for asset_class in [None, "EQUITY", "CRYPTO"]:
+                    for days in [7, 30, 90]:
+                        payload = await compute_oracle_payload(
+                            days=days, asset_class=asset_class
+                        )
+                        cache_key = f"oracle:insights:{days}:ALL:{asset_class or 'ALL'}"
+                        await redis_client.set(
+                            cache_key,
+                            _json.dumps(payload, default=str),
+                            ex=3600,
+                        )
+                logger.info("🔮 Oracle insights refreshed (9 variants)")
+            except Exception as e:
+                logger.warning("Oracle refresh error: %s", e)
+            await asyncio.sleep(3600)  # 1 hour
+
+    oracle_task = asyncio.create_task(oracle_refresh_loop())
 
     logger.info("✅ Pandora's Box is live")
 
@@ -329,6 +373,8 @@ async def lifespan(app: FastAPI):
     sell_the_rip_task.cancel()
     staleness_task.cancel()
     vwap_task.cancel()
+    crypto_scan_task.cancel()
+    oracle_task.cancel()
     logger.info("🛑 Shutting down Pandora's Box...")
     await redis_client.close()
     await postgres_client.close()
@@ -515,7 +561,6 @@ from api.knowledgebase import router as knowledgebase_router
 from api.alerts import router as alerts_router
 from api.uw_integration import router as uw_integration_router
 from api.uw import router as uw_router
-from api.options_positions import router as options_router
 from api.analyzer import router as analyzer_router
 from api.crypto_market import router as crypto_market_router
 from api.redis_health import router as redis_health_router
@@ -550,7 +595,6 @@ app.include_router(knowledgebase_router, prefix="/api", tags=["knowledgebase"])
 app.include_router(alerts_router, prefix="/api", tags=["alerts"])
 app.include_router(uw_integration_router, prefix="/api", tags=["unusual-whales"])
 app.include_router(uw_router, prefix="/api", tags=["unusual-whales"])
-app.include_router(options_router, prefix="/api", tags=["options"])
 app.include_router(analyzer_router, prefix="/api", tags=["analyzer"])
 app.include_router(crypto_market_router, prefix="/api", tags=["crypto-market"])
 app.include_router(redis_health_router, prefix="/api", tags=["health"])

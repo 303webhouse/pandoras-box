@@ -7447,6 +7447,50 @@ body[data-mode="analytics"] .analytics-shell {
     color: #e5370e;
 }
 
+/* Market Structure Badge */
+.crypto-structure-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 10px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+}
+.crypto-structure-badge.strong { background: #1b5e20; color: #fff; }
+.crypto-structure-badge.neutral { background: #424242; color: #ccc; }
+.crypto-structure-badge.weak { background: #e65100; color: #fff; }
+.crypto-structure-badge.avoid { background: #b71c1c; color: #fff; }
+.structure-modifier { opacity: 0.7; font-weight: 400; }
+
+/* Signal enrichment rows */
+.crypto-signal-structure,
+.crypto-signal-sizing,
+.crypto-signal-context {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    font-size: 12px;
+    padding: 4px 0;
+    border-top: 1px solid rgba(255,255,255,0.06);
+}
+.crypto-signal-sizing .danger {
+    color: #ef5350;
+    font-weight: 600;
+}
+.crypto-signal-context {
+    font-size: 11px;
+    color: var(--text-secondary);
+}
+.crypto-signal-detail-value.bullish { color: #4caf50; }
+.crypto-signal-detail-value.bearish { color: #ef5350; }
+
+/* Signal age indicator */
+.signal-age.fresh { color: #4caf50; font-weight: 600; }
+.signal-age.stale { color: #ef5350; opacity: 0.7; }
+
 /* Positions Panel */
 .crypto-positions-panel {
     background: var(--card-bg);
@@ -9284,6 +9328,156 @@ body[data-mode="analytics"] .analytics-shell {
 .analytics-shell {
     padding: 18px 22px;
     min-width: 1200px;
+}
+
+/* ── Aegis Bar (persistent P&L header) ─────────────────────────────── */
+.abacus-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: linear-gradient(135deg, #0d1326 0%, #121a31 100%);
+    border: 1px solid #2b3a58;
+    border-radius: 10px;
+    padding: 10px 18px;
+    margin-bottom: 12px;
+    gap: 18px;
+    flex-wrap: wrap;
+}
+.abacus-pnl {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+}
+.pnl-total {
+    font-family: "Orbit", sans-serif;
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+}
+.pnl-total.positive { color: #22c55e; }
+.pnl-total.negative { color: #ef4444; }
+.pnl-split {
+    font-size: 11px;
+    color: #7a8eb5;
+}
+.abacus-metrics {
+    display: flex;
+    gap: 16px;
+    align-items: center;
+    font-size: 12px;
+    color: #9fb7ff;
+}
+.abacus-metrics .trajectory {
+    font-weight: 600;
+}
+.abacus-metrics .trajectory.improving { color: #22c55e; }
+.abacus-metrics .trajectory.declining { color: #ef4444; }
+.abacus-metrics .trajectory.stable { color: #6b7280; }
+.abacus-metrics .streak-hot { color: #22c55e; font-weight: 700; }
+.abacus-metrics .streak-cold { color: #ef4444; font-weight: 700; }
+.abacus-grade {
+    font-family: "Orbit", sans-serif;
+    font-size: 16px;
+    font-weight: 700;
+    color: #14b8a6;
+}
+.abacus-toggle select {
+    background: #121a31;
+    border: 1px solid #2b3a58;
+    color: #9fb7ff;
+    padding: 4px 8px;
+    border-radius: 6px;
+    font-size: 11px;
+}
+
+/* ── Oracle Narrative ──────────────────────────────────────────────── */
+.oracle-narrative {
+    background: linear-gradient(135deg, rgba(20, 184, 166, 0.08) 0%, rgba(13, 19, 38, 0.9) 100%);
+    border-left: 3px solid #14b8a6;
+    border-radius: 0 8px 8px 0;
+    padding: 14px 18px;
+    margin-bottom: 14px;
+    font-style: italic;
+    color: #d6f6f2;
+    font-size: 13px;
+    line-height: 1.6;
+}
+.oracle-narrative cite {
+    display: block;
+    text-align: right;
+    font-size: 11px;
+    color: #14b8a6;
+    margin-top: 6px;
+    font-style: normal;
+}
+
+/* ── Risk Budget progress bars ─────────────────────────────────────── */
+.risk-budget-content {
+    padding: 8px 0;
+}
+.risk-budget-bar-wrap {
+    margin: 8px 0;
+}
+.risk-budget-bar-wrap label {
+    display: block;
+    font-size: 11px;
+    color: #7a8eb5;
+    margin-bottom: 4px;
+}
+.risk-budget-bar-wrap span {
+    font-size: 11px;
+    color: #9fb7ff;
+}
+.risk-budget-bar {
+    height: 8px;
+    background: #1a2340;
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 3px;
+}
+.risk-budget-bar-fill {
+    height: 100%;
+    background: #14b8a6;
+    border-radius: 4px;
+    transition: width 0.4s ease;
+}
+.risk-budget-bar-fill.warn { background: #f59e0b; }
+.risk-budget-bar-fill.danger { background: #ef4444; }
+
+/* ── Strategy Scorecard grade badge ────────────────────────────────── */
+.scorecard-grade {
+    display: inline-block;
+    width: 24px;
+    height: 24px;
+    line-height: 24px;
+    text-align: center;
+    border-radius: 6px;
+    color: #fff;
+    font-weight: 700;
+    font-size: 13px;
+    font-family: "Orbit", sans-serif;
+}
+
+/* ── Metric row helper ─────────────────────────────────────────────── */
+.analytics-metric-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 5px 0;
+    font-size: 12px;
+    color: #9fb7ff;
+    border-bottom: 1px solid rgba(43, 58, 88, 0.4);
+}
+.analytics-metric-row .positive { color: #22c55e; }
+.analytics-metric-row .negative { color: #ef4444; }
+
+/* ── Section headers (Greek tabs) ──────────────────────────────────── */
+.analytics-section-header h2 {
+    font-family: "Orbit", sans-serif;
+    font-size: 14px;
+    letter-spacing: 0.5px;
+    color: #14b8a6;
+    text-transform: uppercase;
+    margin: 16px 0 8px;
 }
 
 .analytics-subtabs {

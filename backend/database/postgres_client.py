@@ -972,6 +972,31 @@ async def init_database():
             WHERE NOT EXISTS (SELECT 1 FROM account_balances WHERE account_name = 'Interactive Brokers')
         """)
 
+        # Brief 3A: Ariadne's Thread — outcome resolution columns on signals
+        await conn.execute("""
+            ALTER TABLE signals
+            ADD COLUMN IF NOT EXISTS outcome VARCHAR(30),
+            ADD COLUMN IF NOT EXISTS outcome_pnl_pct FLOAT,
+            ADD COLUMN IF NOT EXISTS outcome_pnl_dollars FLOAT,
+            ADD COLUMN IF NOT EXISTS outcome_resolved_at TIMESTAMPTZ,
+            ADD COLUMN IF NOT EXISTS outcome_options_metrics JSONB
+        """)
+
+        # Brief 3D: Hermes Dispatch — weekly performance reports
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS weekly_reports (
+                id SERIAL PRIMARY KEY,
+                week_of DATE NOT NULL,
+                report_json JSONB NOT NULL,
+                narrative TEXT,
+                lessons JSONB,
+                total_pnl FLOAT,
+                total_trades INT,
+                win_rate FLOAT,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+
         # Phase 4E: pending_trades table (signal-to-position bridge)
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS pending_trades (

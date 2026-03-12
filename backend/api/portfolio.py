@@ -655,7 +655,7 @@ class CashFlowCreate(BaseModel):
 
 
 @router.post("/cash-flows")
-async def log_cash_flow(body: CashFlowCreate):
+async def log_cash_flow(body: CashFlowCreate, _=Depends(require_api_key)):
     """Log a withdrawal or deposit. Optionally adjusts account cash balance."""
     pool = await get_postgres_client()
 

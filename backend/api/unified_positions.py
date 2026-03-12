@@ -473,6 +473,7 @@ async def list_positions(
     status: str = Query("OPEN", description="Filter by status: OPEN, CLOSED, EXPIRED, or ALL"),
     ticker: Optional[str] = Query(None),
     account: Optional[str] = Query(None),
+    asset_type: Optional[str] = Query(None, description="Filter by asset type: OPTION, EQUITY, SPREAD"),
 ):
     """List positions, filtered by status."""
     pool = await get_postgres_client()
@@ -489,6 +490,11 @@ async def list_positions(
     if ticker:
         conditions.append(f"ticker = ${idx}")
         params.append(ticker.upper())
+        idx += 1
+
+    if asset_type:
+        conditions.append(f"asset_type = ${idx}")
+        params.append(asset_type.upper())
         idx += 1
 
     if account:
@@ -911,6 +917,89 @@ async def update_position(position_id: str, req: UpdatePositionRequest, _=Depend
     return {"status": "updated", "position": result}
 
 
+# ── Ariadne's Thread: Signal Outcome Resolution ──────────────────────
+
+async def _resolve_signal_outcome(pool, position: dict, exit_price: float,
+                                   realized_pnl: float, trade_outcome: str,
+                                   closed_at) -> None:
+    """
+    When a position closes, resolve the full outcome chain back to the originating signal.
+    Ariadne's Thread: Signal → Position → Outcome with P&L and options metrics.
+    """
+    signal_id = position.get("signal_id")
+    if not signal_id:
+        return
+
+    entry = position.get("entry_price") or 0
+    direction = position.get("direction", "LONG")
+
+    # Compute P&L percentage
+    if entry and exit_price:
+        if direction == "LONG":
+            pnl_pct = ((exit_price - entry) / entry * 100)
+        else:
+            pnl_pct = ((entry - exit_price) / entry * 100)
+    else:
+        pnl_pct = 0
+
+    # Options-specific metrics
+    options_metrics = None
+    asset_type = (position.get("asset_type") or "").upper()
+    if asset_type == "OPTION":
+        expiry = position.get("expiry")
+        dte_at_exit = None
+        if expiry and closed_at:
+            try:
+                from datetime import date as date_type
+                exp_date = date_type.fromisoformat(str(expiry)[:10]) if not isinstance(expiry, date_type) else expiry
+                close_date = closed_at.date() if hasattr(closed_at, "date") else closed_at
+                dte_at_exit = (exp_date - close_date).days
+            except Exception:
+                pass
+
+        max_loss = position.get("max_loss")
+        max_profit = position.get("max_profit")
+        options_metrics = {
+            "structure": position.get("structure"),
+            "dte_at_exit": dte_at_exit,
+            "premium_at_risk": float(position.get("cost_basis") or 0),
+            "max_loss_utilization": round((realized_pnl / float(max_loss)) * 100, 1) if max_loss and float(max_loss) != 0 else None,
+            "max_profit_utilization": round((realized_pnl / float(max_profit)) * 100, 1) if max_profit and float(max_profit) != 0 else None,
+            "exit_quality": (
+                "EARLY_PROFIT" if pnl_pct > 0 and dte_at_exit and dte_at_exit > 7 else
+                "HELD_TO_EXPIRY" if dte_at_exit is not None and dte_at_exit <= 1 else
+                "STOPPED_OUT" if pnl_pct < -50 else "NORMAL"
+            ),
+        }
+
+    import json as _json
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            UPDATE signals SET
+                trade_outcome = $2,
+                actual_exit_price = $3,
+                outcome = $4,
+                outcome_pnl_pct = $5,
+                outcome_pnl_dollars = $6,
+                outcome_resolved_at = $7,
+                outcome_options_metrics = $8,
+                notes = COALESCE(notes || ' | ', '') || $9
+            WHERE signal_id = $1
+        """,
+            signal_id,
+            trade_outcome,
+            exit_price,
+            trade_outcome,  # outcome mirrors trade_outcome for taken signals
+            round(pnl_pct, 2),
+            round(realized_pnl, 2),
+            closed_at,
+            _json.dumps(options_metrics) if options_metrics else None,
+            f"Closed: {trade_outcome} (${realized_pnl:+.2f}, {pnl_pct:+.1f}%)",
+        )
+
+    logger.info(f"Ariadne: resolved {signal_id} -> {trade_outcome} ({pnl_pct:+.1f}%, ${realized_pnl:+.2f})")
+
+
 # ── CLOSE (with trade bridge) ─────────────────────────────────────────
 
 @router.post("/v2/positions/{position_id}/close")
@@ -1033,22 +1122,12 @@ async def close_position(position_id: str, req: ClosePositionRequest, _=Depends(
             """, req.exit_price, now, realized_pnl, trade_outcome,
                 trade_id, req.notes, position_id)
 
-        # Update linked signal outcome only on full close
+        # Ariadne's Thread: resolve signal outcome on full close
         if pos.get("signal_id"):
             try:
-                async with pool.acquire() as conn:
-                    await conn.execute("""
-                        UPDATE signals SET
-                            trade_outcome = $1,
-                            actual_exit_price = $2,
-                            notes = COALESCE(notes || ' | ', '') || $3,
-                            updated_at = NOW()
-                        WHERE signal_id = $4
-                    """, trade_outcome, req.exit_price,
-                        f"Closed: {trade_outcome} (${realized_pnl:+.2f})",
-                        pos["signal_id"])
+                await _resolve_signal_outcome(pool, pos, req.exit_price, realized_pnl, trade_outcome, now)
             except Exception as e:
-                logger.warning(f"Could not update signal outcome: {e}")
+                logger.warning(f"Could not resolve signal outcome: {e}")
 
     # Auto-adjust cash for the closed portion
     if req.exit_price is not None:

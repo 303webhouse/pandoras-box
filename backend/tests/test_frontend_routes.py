@@ -26,6 +26,15 @@ class TestFrontendEndpointsExist:
         "/api/monitoring/factor-staleness",
         "/api/monitoring/polygon-health",
         "/api/trade-ideas/grouped",
+        # Crypto / Stater Swap endpoints
+        "/api/crypto/market",
+        "/api/btc/bottom-signals",
+        # Analytics / Ariadne's Thread
+        "/api/analytics/risk-budget",
+        # Analytics / The Oracle
+        "/api/analytics/oracle",
+        # Analytics / Hermes Dispatch
+        "/api/analytics/weekly-reports",
     ]
 
     @pytest.mark.parametrize("path", FRONTEND_GET_ENDPOINTS)

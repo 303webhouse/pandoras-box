@@ -214,9 +214,12 @@ def calculate_signal_score(
         "source": strategy or signal_type or "DEFAULT"
     }
     
-    # 2. Bias alignment multiplier
+    # 2. Bias alignment multiplier (skip equity bias for crypto signals)
     direction = signal.get('direction', '').upper()
-    bias_alignment, alignment_multiplier = calculate_bias_alignment(direction, current_bias)
+    if signal.get('asset_class', '').upper() == 'CRYPTO':
+        bias_alignment, alignment_multiplier = "NEUTRAL", 1.0
+    else:
+        bias_alignment, alignment_multiplier = calculate_bias_alignment(direction, current_bias)
     triggering_factors["bias_alignment"] = {
         "value": bias_alignment,
         "multiplier": alignment_multiplier,

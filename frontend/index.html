@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Pandora - Real-time Trading Signal Dashboard">
     <title>Pandora</title>
-    <link rel="stylesheet" href="/styles.css?v=75">
+    <link rel="stylesheet" href="/styles.css?v=76">
     <link rel="manifest" href="/manifest.json">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -866,8 +866,6 @@
                         <button class="coin-chip" data-symbol="AVAXUSD">AVAX</button>
                         <button class="coin-chip" data-symbol="LINKUSD">LINK</button>
                         <button class="coin-chip" data-symbol="MATICUSD">MATIC</button>
-                        <button class="coin-chip" data-symbol="HYPEUSD">HYPE</button>
-                        <button class="coin-chip" data-symbol="ASTRUSD">ASTR</button>
                     </div>
                     <div class="crypto-chart-container" id="cryptoChartContainer">
                         <div id="crypto-tradingview-widget"></div>
@@ -966,24 +964,158 @@
         </main>
 
         <main id="analyticsShell" class="analytics-shell" hidden>
-            <section class="analytics-subtabs" role="tablist" aria-label="Analytics Views">
-                <button class="analytics-subtab active" data-analytics-tab="dashboard" role="tab" aria-selected="true">Dashboard</button>
-                <button class="analytics-subtab" data-analytics-tab="trade-journal" role="tab" aria-selected="false">Trade Journal</button>
-                <button class="analytics-subtab" data-analytics-tab="signal-explorer" role="tab" aria-selected="false">Signal Explorer</button>
-                <button class="analytics-subtab" data-analytics-tab="factor-lab" role="tab" aria-selected="false">Factor Lab</button>
-                <button class="analytics-subtab" data-analytics-tab="backtest" role="tab" aria-selected="false">Backtest</button>
-                <button class="analytics-subtab" data-analytics-tab="risk" role="tab" aria-selected="false">Risk</button>
+            <!-- Aegis Bar — persistent P&L header -->
+            <div class="abacus-header" id="aegisBar">
+                <div class="abacus-pnl">
+                    <span class="pnl-total" id="aegisPnlTotal">--</span>
+                    <span class="pnl-split" id="aegisPnlSplit"></span>
+                </div>
+                <div class="abacus-metrics">
+                    <span id="aegisWinRate">Win Rate: --</span>
+                    <span id="aegisStreak">Streak: --</span>
+                    <span class="trajectory" id="aegisTrajectory">--</span>
+                    <span class="abacus-grade" id="aegisGrade"></span>
+                </div>
+                <div class="abacus-toggle">
+                    <select id="aegisAssetFilter">
+                        <option value="">All</option>
+                        <option value="EQUITY">Equity</option>
+                        <option value="CRYPTO">Crypto</option>
+                    </select>
+                </div>
+            </div>
+
+            <section class="analytics-subtabs" role="tablist" aria-label="Abacus Views">
+                <button class="analytics-subtab active" data-analytics-tab="strategos" role="tab" aria-selected="true">Strategos</button>
+                <button class="analytics-subtab" data-analytics-tab="chronicle" role="tab" aria-selected="false">Chronicle</button>
+                <button class="analytics-subtab" data-analytics-tab="symposium" role="tab" aria-selected="false">Symposium</button>
             </section>
 
-            <section class="analytics-tab-pane active" id="analyticsPaneDashboard">
-                <div class="analytics-section-header">
-                    <h2>Strategy Health</h2>
-                    <span class="analytics-muted" id="analyticsHealthAsOf">Collecting data...</span>
-                </div>
-                <div class="analytics-health-grid" id="analyticsHealthCards">
-                    <div class="analytics-empty">Collecting data - metrics will appear after signals accumulate.</div>
+            <!-- ═══ TAB 1: STRATEGOS — The General's Command Center ═══ -->
+            <section class="analytics-tab-pane active" id="analyticsPaneStrategos">
+                <!-- 1a. Oracle Narrative -->
+                <blockquote class="oracle-narrative" id="oracleNarrative">
+                    <p>Consulting The Oracle...</p>
+                    <cite>— The Oracle</cite>
+                </blockquote>
+
+                <!-- 1b. Risk Budget (Aspis — The Shield) -->
+                <div class="analytics-section-header"><h2>Risk Budget</h2></div>
+                <div class="analytics-row analytics-row-2" id="riskBudgetPanel">
+                    <div class="analytics-card">
+                        <div class="analytics-card-header"><h3>Equity Exposure</h3></div>
+                        <div id="riskBudgetEquity" class="risk-budget-content">
+                            <div class="analytics-empty">Loading...</div>
+                        </div>
+                    </div>
+                    <div class="analytics-card">
+                        <div class="analytics-card-header"><h3>Crypto / Breakout</h3></div>
+                        <div id="riskBudgetCrypto" class="risk-budget-content">
+                            <div class="analytics-empty">Loading...</div>
+                        </div>
+                    </div>
                 </div>
 
+                <!-- 1c. Strategy Scorecards -->
+                <div class="analytics-section-header">
+                    <h2>Strategy Scorecards</h2>
+                    <span class="analytics-muted" id="analyticsHealthAsOf">Collecting data...</span>
+                </div>
+                <div class="analytics-health-grid" id="strategyScorecards">
+                    <div class="analytics-empty">Collecting data - scorecards will appear after signals accumulate.</div>
+                </div>
+
+                <!-- 1d. Health Alerts -->
+                <div class="analytics-card analytics-alerts-card">
+                    <div class="analytics-card-header"><h3>Active Alerts</h3></div>
+                    <div class="analytics-alerts-list" id="analyticsAlertsList">
+                        <div class="analytics-empty">No active alerts.</div>
+                    </div>
+                </div>
+
+                <!-- 1e. Regime Context -->
+                <div class="analytics-row analytics-row-2">
+                    <div class="analytics-card">
+                        <div class="analytics-card-header"><h3>Win Rate by Regime</h3></div>
+                        <div class="analytics-chart-wrap">
+                            <canvas id="analyticsRegimeChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="analytics-card">
+                        <div class="analytics-card-header"><h3>Signal Accuracy Over Time</h3></div>
+                        <div class="analytics-chart-wrap">
+                            <canvas id="analyticsAccuracyChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Risk details (absorbed from old Risk tab) -->
+                <div class="analytics-row analytics-row-4" id="riskAccountCards">
+                    <div class="analytics-empty">Loading risk cards...</div>
+                </div>
+                <div class="analytics-row analytics-row-3">
+                    <div class="analytics-card">
+                        <div class="analytics-card-header"><h3>Direction Exposure</h3></div>
+                        <div class="analytics-chart-wrap analytics-chart-wrap-sm">
+                            <canvas id="riskDirectionChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="analytics-card">
+                        <div class="analytics-card-header"><h3>Ticker Exposure</h3></div>
+                        <div class="analytics-chart-wrap analytics-chart-wrap-sm">
+                            <canvas id="riskTickerExposureChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+                <div class="analytics-row analytics-row-risk-bottom">
+                    <div class="analytics-card">
+                        <div class="analytics-card-header"><h3>Correlation Risk</h3></div>
+                        <div class="analytics-table-wrap">
+                            <table class="analytics-table">
+                                <thead>
+                                    <tr>
+                                        <th>Account</th>
+                                        <th>Direction</th>
+                                        <th>Tickers</th>
+                                        <th>Combined Risk</th>
+                                        <th>1% Move Impact</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="riskCorrelationTableBody">
+                                    <tr><td colspan="5" class="analytics-empty">No correlated clusters detected.</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="analytics-summary-row" id="riskCorrelationRecommendation">Collecting data...</div>
+                    </div>
+                    <div class="analytics-card">
+                        <div class="analytics-card-header">
+                            <h3>Risk Over Time</h3>
+                            <div class="analytics-controls">
+                                <select id="riskHistoryAccount">
+                                    <option value="robinhood">robinhood</option>
+                                    <option value="401k">401k</option>
+                                    <option value="breakout">breakout</option>
+                                    <option value="coinbase">coinbase</option>
+                                </select>
+                                <select id="riskHistoryDays">
+                                    <option value="14">14d</option>
+                                    <option value="30" selected>30d</option>
+                                    <option value="60">60d</option>
+                                    <option value="90">90d</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="analytics-chart-wrap analytics-chart-wrap-sm">
+                            <canvas id="riskHistoryChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ═══ TAB 2: CHRONICLE — Records of Time ═══ -->
+            <section class="analytics-tab-pane" id="analyticsPaneChronicle" hidden>
+                <!-- 2a. Equity Curve -->
                 <div class="analytics-row analytics-row-2">
                     <div class="analytics-card analytics-card-wide">
                         <div class="analytics-card-header">
@@ -1010,50 +1142,35 @@
                         </div>
                     </div>
                     <div class="analytics-card analytics-card-narrow">
-                        <div class="analytics-card-header">
-                            <h3>Key Metrics</h3>
-                        </div>
+                        <div class="analytics-card-header"><h3>Key Metrics</h3></div>
                         <div class="analytics-metrics-list" id="analyticsKeyMetrics">
                             <div class="analytics-empty">Loading metrics...</div>
                         </div>
                     </div>
                 </div>
 
-                <div class="analytics-row analytics-row-3">
-                    <div class="analytics-card">
-                        <div class="analytics-card-header">
-                            <h3>Signal Accuracy Over Time</h3>
-                        </div>
-                        <div class="analytics-chart-wrap">
-                            <canvas id="analyticsAccuracyChart"></canvas>
-                        </div>
-                    </div>
-                    <div class="analytics-card">
-                        <div class="analytics-card-header">
-                            <h3>Win Rate by Regime</h3>
-                        </div>
-                        <div class="analytics-chart-wrap">
-                            <canvas id="analyticsRegimeChart"></canvas>
-                        </div>
+                <!-- 2b. Override Review (Prometheus Panel) -->
+                <div class="analytics-card" id="prometheusPanel">
+                    <div class="analytics-card-header"><h3>Override Review (Prometheus)</h3></div>
+                    <div id="prometheusContent" class="analytics-metrics-list">
+                        <div class="analytics-empty">Loading override analysis...</div>
                     </div>
                 </div>
 
-                <div class="analytics-card analytics-alerts-card">
-                    <div class="analytics-card-header">
-                        <h3>Active Alerts</h3>
-                    </div>
-                    <div class="analytics-alerts-list" id="analyticsAlertsList">
-                        <div class="analytics-empty">No active alerts.</div>
+                <!-- 2c. Counterfactuals (Cassandra's Mirror) -->
+                <div class="analytics-card" id="cassandraPanel">
+                    <div class="analytics-card-header"><h3>Counterfactuals (Cassandra's Mirror)</h3></div>
+                    <div id="cassandraContent" class="analytics-metrics-list">
+                        <div class="analytics-empty">Loading counterfactual analysis...</div>
                     </div>
                 </div>
-            </section>
 
-            <section class="analytics-tab-pane" id="analyticsPaneTradeJournal" hidden>
+                <!-- 2d. Trade Log -->
                 <div class="analytics-card">
                     <div class="analytics-card-header">
                         <h3>Trade Journal</h3>
                         <div class="analytics-controls">
-                            <button class="analytics-btn analytics-btn-ghost" id="journalImportTradesBtn">📥 Import Trades</button>
+                            <button class="analytics-btn analytics-btn-ghost" id="journalImportTradesBtn">Import Trades</button>
                             <button class="analytics-btn" id="journalToggleFormBtn">+ Log Trade</button>
                         </div>
                     </div>
@@ -1124,17 +1241,13 @@
 
                 <div class="analytics-row analytics-row-journal">
                     <div class="analytics-card">
-                        <div class="analytics-card-header">
-                            <h3>Trade Details</h3>
-                        </div>
+                        <div class="analytics-card-header"><h3>Trade Details</h3></div>
                         <div id="journalTradeDetails" class="journal-details">
                             <div class="analytics-empty">Click a trade row to view legs, recommendation, and context.</div>
                         </div>
                     </div>
                     <div class="analytics-card" id="journalLogTradeCard" hidden>
-                        <div class="analytics-card-header">
-                            <h3>Log Trade</h3>
-                        </div>
+                        <div class="analytics-card-header"><h3>Log Trade</h3></div>
                         <div class="analytics-form-grid">
                             <input id="journalFormTicker" type="text" placeholder="Ticker">
                             <select id="journalFormDirection">
@@ -1163,9 +1276,7 @@
                         </div>
                     </div>
                     <div class="analytics-card" id="journalImportCard" hidden>
-                        <div class="analytics-card-header">
-                            <h3>Import Trades</h3>
-                        </div>
+                        <div class="analytics-card-header"><h3>Import Trades</h3></div>
                         <div class="analytics-form-grid">
                             <input id="journalImportCsv" type="file" accept=".csv,text/csv">
                             <textarea id="journalImportText" placeholder="Or paste trade history text here..."></textarea>
@@ -1182,10 +1293,12 @@
                 </div>
             </section>
 
-            <section class="analytics-tab-pane" id="analyticsPaneSignalExplorer" hidden>
+            <!-- ═══ TAB 3: SYMPOSIUM — The Analytical Deep Dive ═══ -->
+            <section class="analytics-tab-pane" id="analyticsPaneSymposium" hidden>
+                <!-- 3a. Signal Explorer (Hermes' Map) -->
                 <div class="analytics-card">
                     <div class="analytics-card-header">
-                        <h3>Signal Explorer</h3>
+                        <h3>Signal Explorer (Hermes' Map)</h3>
                     </div>
                     <div class="analytics-filters-grid analytics-filters-grid-8">
                         <select id="signalFilterSource">
@@ -1273,9 +1386,7 @@
                         </div>
                     </div>
                     <div class="analytics-card">
-                        <div class="analytics-card-header">
-                            <h3>Filtered Results</h3>
-                        </div>
+                        <div class="analytics-card-header"><h3>Filtered Results</h3></div>
                         <div class="analytics-metrics-list" id="signalStatsPanel">
                             <div class="analytics-empty">Loading stats...</div>
                         </div>
@@ -1284,29 +1395,22 @@
 
                 <div class="analytics-row analytics-row-3">
                     <div class="analytics-card">
-                        <div class="analytics-card-header">
-                            <h3>MFE / MAE Histogram</h3>
-                        </div>
+                        <div class="analytics-card-header"><h3>MFE / MAE Histogram</h3></div>
                         <div class="analytics-chart-wrap analytics-chart-wrap-sm">
                             <canvas id="signalMfeMaeChart"></canvas>
                         </div>
                     </div>
                     <div class="analytics-card">
-                        <div class="analytics-card-header">
-                            <h3>Accuracy by Hour</h3>
-                        </div>
+                        <div class="analytics-card-header"><h3>Accuracy by Hour</h3></div>
                         <div class="analytics-chart-wrap analytics-chart-wrap-sm">
                             <canvas id="signalAccuracyHourChart"></canvas>
                         </div>
                     </div>
                 </div>
-            </section>
 
-            <section class="analytics-tab-pane" id="analyticsPaneFactorLab" hidden>
+                <!-- 3b. Factor Lab (Athena's Forge) -->
+                <div class="analytics-section-header"><h2>Factor Lab (Athena's Forge)</h2></div>
                 <div class="analytics-card">
-                    <div class="analytics-card-header">
-                        <h3>Factor Lab</h3>
-                    </div>
                     <div class="analytics-filters-grid analytics-filters-grid-3">
                         <select id="factorLabFactorSelect">
                             <option value="">Select Factor</option>
@@ -1324,9 +1428,7 @@
                 </div>
 
                 <div class="analytics-card">
-                    <div class="analytics-card-header">
-                        <h3>Factor Timeline vs SPY</h3>
-                    </div>
+                    <div class="analytics-card-header"><h3>Factor Timeline vs SPY</h3></div>
                     <div class="analytics-chart-wrap">
                         <canvas id="factorLabTimelineChart"></canvas>
                     </div>
@@ -1352,21 +1454,17 @@
                 </div>
 
                 <div class="analytics-card">
-                    <div class="analytics-card-header">
-                        <h3>Correlation Matrix</h3>
-                    </div>
+                    <div class="analytics-card-header"><h3>Correlation Matrix</h3></div>
                     <div class="analytics-table-wrap correlation-matrix-wrap" id="factorLabCorrelationMatrix">
                         <div class="analytics-empty">Collecting data - matrix will appear after factor history accumulates.</div>
                     </div>
                 </div>
-            </section>
 
-            <section class="analytics-tab-pane" id="analyticsPaneBacktest" hidden>
+                <!-- 3c. Backtest Engine (Chronos' Sandbox) -->
+                <div class="analytics-section-header"><h2>Backtest Engine (Chronos' Sandbox)</h2></div>
                 <div class="analytics-row analytics-row-backtest">
                     <div class="analytics-card">
-                        <div class="analytics-card-header">
-                            <h3>Backtest Configuration</h3>
-                        </div>
+                        <div class="analytics-card-header"><h3>Backtest Configuration</h3></div>
                         <div class="analytics-form-grid">
                             <select id="backtestStrategy">
                                 <option value="whale_hunter">whale_hunter</option>
@@ -1433,9 +1531,7 @@
                             </table>
                         </div>
                         <div id="backtestComparePanel" hidden>
-                            <div class="analytics-section-header">
-                                <h2>Comparison Run</h2>
-                            </div>
+                            <div class="analytics-section-header"><h2>Comparison Run</h2></div>
                             <div class="analytics-form-grid">
                                 <select id="backtestCompareStrategy">
                                     <option value="whale_hunter">whale_hunter</option>
@@ -1477,78 +1573,6 @@
                     </div>
                 </div>
             </section>
-
-            <section class="analytics-tab-pane" id="analyticsPaneRisk" hidden>
-                <div class="analytics-row analytics-row-4" id="riskAccountCards">
-                    <div class="analytics-empty">Loading risk cards...</div>
-                </div>
-
-                <div class="analytics-row analytics-row-3">
-                    <div class="analytics-card">
-                        <div class="analytics-card-header">
-                            <h3>Direction Exposure</h3>
-                        </div>
-                        <div class="analytics-chart-wrap analytics-chart-wrap-sm">
-                            <canvas id="riskDirectionChart"></canvas>
-                        </div>
-                    </div>
-                    <div class="analytics-card">
-                        <div class="analytics-card-header">
-                            <h3>Ticker Exposure</h3>
-                        </div>
-                        <div class="analytics-chart-wrap analytics-chart-wrap-sm">
-                            <canvas id="riskTickerExposureChart"></canvas>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="analytics-row analytics-row-risk-bottom">
-                    <div class="analytics-card">
-                        <div class="analytics-card-header">
-                            <h3>Correlation Risk</h3>
-                        </div>
-                        <div class="analytics-table-wrap">
-                            <table class="analytics-table">
-                                <thead>
-                                    <tr>
-                                        <th>Account</th>
-                                        <th>Direction</th>
-                                        <th>Tickers</th>
-                                        <th>Combined Risk</th>
-                                        <th>1% Move Impact</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="riskCorrelationTableBody">
-                                    <tr><td colspan="5" class="analytics-empty">No correlated clusters detected.</td></tr>
-                                </tbody>
-                            </table>
-                        </div>
-                        <div class="analytics-summary-row" id="riskCorrelationRecommendation">Collecting data...</div>
-                    </div>
-                    <div class="analytics-card">
-                        <div class="analytics-card-header">
-                            <h3>Risk Over Time</h3>
-                            <div class="analytics-controls">
-                                <select id="riskHistoryAccount">
-                                    <option value="robinhood">robinhood</option>
-                                    <option value="401k">401k</option>
-                                    <option value="breakout">breakout</option>
-                                    <option value="coinbase">coinbase</option>
-                                </select>
-                                <select id="riskHistoryDays">
-                                    <option value="14">14d</option>
-                                    <option value="30" selected>30d</option>
-                                    <option value="60">60d</option>
-                                    <option value="90">90d</option>
-                                </select>
-                            </div>
-                        </div>
-                        <div class="analytics-chart-wrap analytics-chart-wrap-sm">
-                            <canvas id="riskHistoryChart"></canvas>
-                        </div>
-                    </div>
-                </div>
-            </section>
         </main>
 
     <!-- Knowledgebase Popup Modal -->
@@ -1577,7 +1601,7 @@
     <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
     <script src="/app.js?v=93"></script>
-    <script src="/analytics.js?v=2"></script>
+    <script src="/analytics.js?v=3"></script>
 </body>
 </html>
 
