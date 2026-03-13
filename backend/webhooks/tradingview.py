@@ -47,6 +47,46 @@ CRYPTO_TICKERS = {
 }
 
 
+# Strategy-specific cooldown windows (seconds).
+# Scan-based strategies that fire on persistent conditions need longer cooldowns
+# to prevent duplicate signals from inflating confluence scoring.
+# Event-driven strategies keep the default 60s Redis dedup.
+STRATEGY_COOLDOWNS = {
+    "Holy_Grail": {"equity": 14400, "crypto": 7200},   # 4h equity, 2h crypto
+    "Scout": {"equity": 14400, "crypto": 7200},          # 4h equity, 2h crypto
+    "Phalanx": {"equity": 3600, "crypto": 3600},         # 1h both
+}
+
+
+async def check_strategy_cooldown(ticker: str, strategy: str, direction: str, asset_class: str) -> bool:
+    """
+    Check if an ACTIVE signal with same ticker+strategy+direction exists
+    within the strategy's cooldown window. Returns True if signal should
+    be SKIPPED (cooldown active), False if signal should proceed.
+    """
+    cooldown_cfg = STRATEGY_COOLDOWNS.get(strategy)
+    if not cooldown_cfg:
+        return False
+
+    cooldown_secs = cooldown_cfg.get("crypto" if asset_class == "CRYPTO" else "equity", 0)
+    if cooldown_secs <= 0:
+        return False
+
+    cooldown_key = f"signal:cooldown:{ticker.upper()}:{strategy}:{direction.upper()}"
+    try:
+        from database.redis_client import get_redis_client
+        rc = await get_redis_client()
+        if rc and await rc.get(cooldown_key):
+            return True  # Cooldown active — skip this signal
+        # Set cooldown marker for future checks
+        if rc:
+            await rc.set(cooldown_key, "1", ex=cooldown_secs)
+    except Exception:
+        pass  # Redis failure — fail open, allow signal
+
+    return False
+
+
 def is_crypto_ticker(ticker: str) -> bool:
     """Check if a ticker is a cryptocurrency. Handles exchange suffixes like .P (perp)"""
     t = ticker.upper()
@@ -212,6 +252,12 @@ async def process_scout_signal(alert: TradingViewAlert, start_time: datetime):
     They get a special signal_type and lower priority so they show differently in the UI.
     """
 
+    # Strategy cooldown — skip if same ticker+direction fired recently
+    asset_class = "CRYPTO" if is_crypto_ticker(alert.ticker) else "EQUITY"
+    if await check_strategy_cooldown(alert.ticker, "Scout", alert.direction, asset_class):
+        logger.info("⏳ Scout cooldown: skipping %s %s", alert.ticker, alert.direction)
+        return {"status": "cooldown", "detail": f"Scout cooldown active for {alert.ticker} {alert.direction}"}
+
     # Build signal data with Scout-specific fields
     signal_id = f"SCOUT_{alert.ticker}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
 
@@ -289,6 +335,12 @@ async def process_holy_grail_signal(alert: TradingViewAlert, start_time: datetim
         signal_type_suffix = "15M"
 
     signal_type = f"HOLY_GRAIL_{signal_type_suffix}"
+
+    # Strategy cooldown — skip if same ticker+direction fired recently
+    asset_class = "CRYPTO" if is_crypto_ticker(alert.ticker) else "EQUITY"
+    if await check_strategy_cooldown(alert.ticker, "Holy_Grail", alert.direction, asset_class):
+        logger.info("⏳ Holy Grail cooldown: skipping %s %s %s", alert.ticker, alert.direction, signal_type)
+        return {"status": "cooldown", "detail": f"Holy Grail cooldown active for {alert.ticker} {alert.direction}"}
 
     # Calculate risk/reward
     rr = calculate_risk_reward(alert)
@@ -464,6 +516,12 @@ async def process_phalanx_signal(alert: TradingViewAlert, start_time: datetime):
     No stop/target — this is a LEVEL IDENTIFICATION signal, not a trade generator.
     Dual purpose: standalone ORDER_FLOW card + future confluence enrichment.
     """
+    # Strategy cooldown — skip if same ticker+direction fired recently
+    asset_class = "CRYPTO" if is_crypto_ticker(alert.ticker) else "EQUITY"
+    if await check_strategy_cooldown(alert.ticker, "Phalanx", alert.direction, asset_class):
+        logger.info("⏳ Phalanx cooldown: skipping %s %s", alert.ticker, alert.direction)
+        return {"status": "cooldown", "detail": f"Phalanx cooldown active for {alert.ticker} {alert.direction}"}
+
     signal_id = f"PHALANX_{alert.ticker}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
 
     direction = (alert.direction or "").upper()
