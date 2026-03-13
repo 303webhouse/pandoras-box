@@ -6868,40 +6868,46 @@ function renderSectorHeatmap(sectors, spyChange) {
         container.innerHTML = '<p class="empty-state">No sector data</p>';
         return;
     }
-    const sorted = [...sectors].sort((a, b) => b.weight - a.weight);
-    const rect = container.getBoundingClientRect();
-    const totalWidth = rect.width - 16;
-    const totalHeight = Math.max(200, rect.height - 16);
-    const totalArea = totalWidth * totalHeight;
-    container.innerHTML = '';
-    const cells = sorted.map(sector => ({ ...sector, area: sector.weight * totalArea }));
-    const topRow = cells.slice(0, 5);
-    const bottomRow = cells.slice(5);
-    const topWeight = topRow.reduce((s, c) => s + c.weight, 0);
-    const bottomWeight = bottomRow.reduce((s, c) => s + c.weight, 0);
-    const topHeight = totalHeight * (topWeight / (topWeight + bottomWeight));
-    const bottomHeight = totalHeight - topHeight;
 
-    function renderRow(items, rowWidth, rowHeight) {
-        const totalW = items.reduce((s, c) => s + c.weight, 0);
-        let html = '';
-        items.forEach(sector => {
-            const cellWidth = (sector.weight / totalW) * rowWidth;
+    // Sort by weight descending
+    const sorted = [...sectors].sort((a, b) => b.weight - a.weight);
+
+    // 3-row layout: row 1 = top 3 (Tech, Financials, Health), row 2 = next 4, row 3 = last 4
+    const rows = [
+        sorted.slice(0, 3),
+        sorted.slice(3, 7),
+        sorted.slice(7)
+    ];
+
+    // Row heights proportional to combined weight
+    const rowWeights = rows.map(r => r.reduce((s, c) => s + c.weight, 0));
+    const totalWeight = rowWeights.reduce((s, w) => s + w, 0);
+
+    let html = '';
+    rows.forEach((row, ri) => {
+        const rowPct = ((rowWeights[ri] / totalWeight) * 100).toFixed(1);
+        const rowTotal = row.reduce((s, c) => s + c.weight, 0);
+        const cellsHtml = row.map(sector => {
+            const widthPct = ((sector.weight / rowTotal) * 100).toFixed(2);
             const bgColor = getHeatmapColor(sector.change_1d);
             const changeSign = sector.change_1d >= 0 ? '+' : '';
-            html += `<div class="sector-heatmap-cell"
-                style="width:${cellWidth}px;height:${rowHeight}px;background:${bgColor};"
+            const changeVal = sector.change_1d != null ? sector.change_1d.toFixed(2) : '0.00';
+            return `<div class="sector-heatmap-cell"
+                style="width:${widthPct}%;background:${bgColor};"
                 data-etf="${sector.etf}"
-                title="${escapeHtml(sector.name)} (${sector.etf})\nDaily: ${changeSign}${sector.change_1d.toFixed(2)}%\nWeekly: ${sector.change_1w >= 0 ? '+' : ''}${sector.change_1w.toFixed(2)}%\nSPY Weight: ${(sector.weight * 100).toFixed(1)}%">
-                <span class="sector-name">${escapeHtml(sector.name)}</span>
-                <span class="sector-etf">${sector.etf}</span>
-                <span class="sector-change">${changeSign}${sector.change_1d.toFixed(2)}%</span>
+                title="${escapeHtml(sector.name)} (${sector.etf})\nDaily: ${changeSign}${changeVal}%\nWeekly: ${(sector.change_1w || 0) >= 0 ? '+' : ''}${(sector.change_1w || 0).toFixed(2)}%\nSPY Weight: ${(sector.weight * 100).toFixed(1)}%">
+                <span class="sector-hm-name">${escapeHtml(sector.name)}</span>
+                <span class="sector-hm-etf">${sector.etf}</span>
+                <span class="sector-hm-change">${changeSign}${changeVal}%</span>
             </div>`;
-        });
-        return html;
-    }
-    container.innerHTML = renderRow(topRow, totalWidth, topHeight) +
-                          renderRow(bottomRow, totalWidth, bottomHeight);
+        }).join('');
+
+        html += `<div class="sector-heatmap-row" style="height:${rowPct}%;">${cellsHtml}</div>`;
+    });
+
+    container.innerHTML = html;
+
+    // Click handler: change chart to sector ETF
     container.querySelectorAll('.sector-heatmap-cell').forEach(cell => {
         cell.addEventListener('click', () => {
             const etf = cell.dataset.etf;
@@ -6911,18 +6917,25 @@ function renderSectorHeatmap(sectors, spyChange) {
 }
 
 function getHeatmapColor(changePct) {
+    // Pandora theme: #7CFF6B green for positive, #FF6B35 orange for negative
     const clamped = Math.max(-3, Math.min(3, changePct));
     const intensity = Math.abs(clamped) / 3;
-    if (clamped >= 0) {
-        const r = Math.round(26 * (1 - intensity));
-        const g = Math.round(46 + (230 - 46) * intensity);
-        const b = Math.round(26 + (118 - 26) * intensity * 0.3);
+
+    if (clamped > 0.05) {
+        // Positive: blend from dark base (#0f1a14) to Pandora green (#7CFF6B)
+        const r = Math.round(15 + (124 - 15) * intensity * 0.5);
+        const g = Math.round(26 + (255 - 26) * intensity * 0.6);
+        const b = Math.round(20 + (107 - 20) * intensity * 0.4);
+        return `rgb(${r}, ${g}, ${b})`;
+    } else if (clamped < -0.05) {
+        // Negative: blend from dark base (#1a130f) to Pandora orange (#FF6B35)
+        const r = Math.round(26 + (255 - 26) * intensity * 0.6);
+        const g = Math.round(19 + (107 - 19) * intensity * 0.35);
+        const b = Math.round(15 + (53 - 15) * intensity * 0.25);
         return `rgb(${r}, ${g}, ${b})`;
     } else {
-        const r = Math.round(46 + (229 - 46) * intensity);
-        const g = Math.round(26 * (1 - intensity * 0.7));
-        const b = Math.round(26 * (1 - intensity * 0.8));
-        return `rgb(${r}, ${g}, ${b})`;
+        // Flat / near zero: neutral slate
+        return '#1a2228';
     }
 }
 
