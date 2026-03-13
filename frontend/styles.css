@@ -239,9 +239,7 @@ body {
     overflow: hidden;
     display: flex;
     flex-direction: column;
-    /* Height is set by JS to match .bias-composite-panel */
-    align-self: start;
-    max-height: 400px; /* fallback until JS syncs */
+    align-self: stretch;
 }
 
 #tfIntraday {
@@ -322,6 +320,8 @@ body {
     gap: 2px;
     width: 100%;
     box-sizing: border-box;
+    flex: 1;
+    min-height: 0;
 }
 
 .sector-heatmap-cell {
@@ -336,10 +336,14 @@ body {
     overflow: hidden;
     box-sizing: border-box;
     min-width: 0;
+    flex: 1;
 }
 
 .sector-heatmap-cell:hover {
     opacity: 0.8;
+}
+.sector-heatmap-cell.sector-neutral {
+    border: 1px solid rgba(255,255,255,0.15);
 }
 
 .sector-hm-name {
