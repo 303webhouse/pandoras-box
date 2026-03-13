@@ -169,6 +169,8 @@ class TestAuthEnforcement:
         ("PUT", "/api/analytics/trade/99999/close", {
             "exit_price": 100, "close_reason": "test",
         }),
+        # Olympus analysis (Agora — auth required)
+        ("POST", "/api/analyze/SPY/olympus", None),
     ]
 
     PUBLIC_ROUTES = [

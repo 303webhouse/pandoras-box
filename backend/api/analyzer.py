@@ -7,7 +7,8 @@ import logging
 from datetime import datetime, timezone
 from typing import Dict, Any
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
+from utils.pivot_auth import require_api_key
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -179,3 +180,231 @@ async def get_signal_hit_rates():
 
     rates = await get_hit_rates()
     return {"status": "success", "hit_rates": rates}
+
+
+@router.get("/analyze/{ticker}/signals")
+async def get_ticker_signals(ticker: str, days: int = Query(14, ge=1, le=90)):
+    """Recent signals for a specific ticker from the signals table."""
+    from database.postgres_client import get_postgres_client
+
+    ticker = ticker.upper().strip()
+    signals = []
+    try:
+        pool = await get_postgres_client()
+        if pool:
+            async with pool.acquire() as conn:
+                rows = await conn.fetch("""
+                    SELECT signal_id, strategy, direction, score, score_v2,
+                           signal_type, signal_category, status, created_at, metadata
+                    FROM signals
+                    WHERE ticker = $1
+                      AND created_at > NOW() - INTERVAL '1 day' * $2
+                    ORDER BY created_at DESC
+                    LIMIT 20
+                """, ticker, days)
+                for row in rows:
+                    signals.append({
+                        "signal_id": row["signal_id"],
+                        "strategy": row.get("strategy"),
+                        "direction": row.get("direction"),
+                        "score": row.get("score"),
+                        "signal_category": row.get("signal_category"),
+                        "status": row.get("status"),
+                        "created_at": row["created_at"].isoformat() if row.get("created_at") else None,
+                    })
+    except Exception as e:
+        logger.warning("Ticker signals query failed for %s: %s", ticker, e)
+
+    return {"ticker": ticker, "signals": signals, "count": len(signals), "days": days}
+
+
+@router.post("/analyze/{ticker}/olympus")
+async def run_olympus_analysis(ticker: str, _=Depends(require_api_key)):
+    """
+    On-demand 4-agent committee analysis for a single ticker.
+    Rate limited: 1 per ticker per 5 minutes. Results cached 30 min.
+    Requires API key auth.
+    """
+    import json
+    import os
+    from fastapi import HTTPException as HTTPErr
+    from database.redis_client import get_redis_client
+
+    ticker = ticker.upper().strip()
+    redis = await get_redis_client()
+
+    # Check cache first
+    cache_key = f"olympus:{ticker}:result"
+    if redis:
+        try:
+            cached = await redis.get(cache_key)
+            if cached:
+                result = json.loads(cached)
+                result["cached"] = True
+                return result
+        except Exception:
+            pass
+
+    # Rate limit check
+    rate_key = f"olympus:{ticker}:last_run"
+    if redis:
+        try:
+            last_run = await redis.get(rate_key)
+            if last_run:
+                raise HTTPErr(status_code=429, detail="Rate limited — try again in a few minutes")
+        except HTTPErr:
+            raise
+        except Exception:
+            pass
+
+    # Run analysis
+    try:
+        analysis_data = await _run_olympus_agents(ticker)
+    except Exception as e:
+        logger.error("Olympus analysis failed for %s: %s", ticker, e)
+        return {"error": str(e), "ticker": ticker}
+
+    result = {
+        "ticker": ticker,
+        "olympus": analysis_data,
+        "cached": False,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    # Cache result and set rate limit
+    if redis:
+        try:
+            await redis.set(cache_key, json.dumps(result), ex=1800)  # 30 min
+            await redis.set(rate_key, "1", ex=300)  # 5 min
+        except Exception:
+            pass
+
+    return result
+
+
+async def _run_olympus_agents(ticker: str) -> dict:
+    """Run 4-agent committee analysis using Anthropic API directly."""
+    import os
+    import httpx
+
+    api_key = os.getenv("ANTHROPIC_API_KEY")
+    if not api_key:
+        return {
+            "toro": {"conviction": "N/A", "summary": "Anthropic API key not configured"},
+            "ursa": {"conviction": "N/A", "summary": "Anthropic API key not configured"},
+            "risk": {"entry": "-", "stop": "-", "target": "-", "size": "-"},
+            "pivot": {"action": "PASS", "conviction": "N/A", "synthesis": "API key not configured"},
+        }
+
+    # Get context for the ticker
+    context = ""
+    try:
+        from database.redis_client import get_redis_client
+        redis = await get_redis_client()
+        if redis:
+            bias_data = await redis.get("bias:composite:latest")
+            if bias_data:
+                import json
+                bd = json.loads(bias_data)
+                context += f"Current Market Bias: {bd.get('level', 'NEUTRAL')} (score: {bd.get('score', 0):.2f})\n"
+    except Exception:
+        pass
+
+    headers = {
+        "x-api-key": api_key,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+    }
+
+    async def call_agent(role: str, system_prompt: str) -> str:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                "https://api.anthropic.com/v1/messages",
+                headers=headers,
+                json={
+                    "model": "claude-haiku-4-5-20251001" if role != "pivot" else "claude-sonnet-4-6",
+                    "max_tokens": 300,
+                    "system": system_prompt,
+                    "messages": [{"role": "user", "content": f"Analyze {ticker} for a potential options swing trade.\n\n{context}"}],
+                },
+            )
+            data = resp.json()
+            return data.get("content", [{}])[0].get("text", "No response")
+
+    toro_prompt = "You are TORO, a bullish analyst. Evaluate the bull case for this ticker. Respond with conviction level (HIGH/MEDIUM/LOW) on the first line, then a 2-3 sentence summary."
+    ursa_prompt = "You are URSA, a bearish analyst. Evaluate the bear case and risks for this ticker. Respond with conviction level (HIGH/MEDIUM/LOW) on the first line, then a 2-3 sentence summary."
+    risk_prompt = "You are a risk manager for options swing trades. For this ticker, provide: Entry price range, Stop loss level, Target price, and Position size recommendation (as % of portfolio). Format each on its own line starting with 'Entry:', 'Stop:', 'Target:', 'Size:'."
+    pivot_prompt = "You are Pivot, the lead analyst synthesizing bull, bear, and risk views. Decide: TAKE, PASS, or WATCHING. Respond with action on line 1, conviction (HIGH/MEDIUM/LOW) on line 2, then a 2-3 sentence synthesis. If PASS or WATCHING, note what would change your mind (invalidation)."
+
+    try:
+        toro_text, ursa_text, risk_text, pivot_text = await asyncio.gather(
+            call_agent("toro", toro_prompt),
+            call_agent("ursa", ursa_prompt),
+            call_agent("risk", risk_prompt),
+            call_agent("pivot", pivot_prompt),
+        )
+    except Exception as e:
+        logger.error("Olympus agent calls failed: %s", e)
+        return {
+            "toro": {"conviction": "ERROR", "summary": str(e)},
+            "ursa": {"conviction": "ERROR", "summary": str(e)},
+            "risk": {"entry": "-", "stop": "-", "target": "-", "size": "-"},
+            "pivot": {"action": "PASS", "conviction": "ERROR", "synthesis": str(e)},
+        }
+
+    def parse_conviction_summary(text):
+        lines = text.strip().split("\n", 1)
+        conviction = lines[0].strip().upper() if lines else "MEDIUM"
+        for level in ("HIGH", "MEDIUM", "LOW"):
+            if level in conviction:
+                conviction = level
+                break
+        else:
+            conviction = "MEDIUM"
+        summary = lines[1].strip() if len(lines) > 1 else text.strip()
+        return {"conviction": conviction, "summary": summary}
+
+    def parse_risk(text):
+        result = {"entry": "-", "stop": "-", "target": "-", "size": "-"}
+        for line in text.split("\n"):
+            lower = line.lower().strip()
+            if lower.startswith("entry"):
+                result["entry"] = line.split(":", 1)[-1].strip()
+            elif lower.startswith("stop"):
+                result["stop"] = line.split(":", 1)[-1].strip()
+            elif lower.startswith("target"):
+                result["target"] = line.split(":", 1)[-1].strip()
+            elif lower.startswith("size"):
+                result["size"] = line.split(":", 1)[-1].strip()
+        return result
+
+    def parse_pivot(text):
+        lines = text.strip().split("\n")
+        action = "WATCHING"
+        conviction = "MEDIUM"
+        if lines:
+            first = lines[0].strip().upper()
+            for a in ("TAKE", "PASS", "WATCHING"):
+                if a in first:
+                    action = a
+                    break
+        if len(lines) > 1:
+            second = lines[1].strip().upper()
+            for level in ("HIGH", "MEDIUM", "LOW"):
+                if level in second:
+                    conviction = level
+                    break
+        synthesis = "\n".join(lines[2:]).strip() if len(lines) > 2 else text.strip()
+        invalidation = None
+        for line in lines:
+            if "invalidat" in line.lower() or "change" in line.lower():
+                invalidation = line.strip()
+                break
+        return {"action": action, "conviction": conviction, "synthesis": synthesis, "invalidation": invalidation}
+
+    return {
+        "toro": parse_conviction_summary(toro_text),
+        "ursa": parse_conviction_summary(ursa_text),
+        "risk": parse_risk(risk_text),
+        "pivot": parse_pivot(pivot_text),
+    }

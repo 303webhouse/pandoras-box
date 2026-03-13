@@ -35,6 +35,12 @@ class TestFrontendEndpointsExist:
         "/api/analytics/oracle",
         # Analytics / Hermes Dispatch
         "/api/analytics/weekly-reports",
+        # Agora / Sector Heatmap
+        "/api/sectors/heatmap",
+        # Agora / Flow Summary
+        "/api/flow/summary",
+        # Agora / Analyzer signals
+        "/api/analyze/SPY/signals?days=14",
     ]
 
     @pytest.mark.parametrize("path", FRONTEND_GET_ENDPOINTS)
