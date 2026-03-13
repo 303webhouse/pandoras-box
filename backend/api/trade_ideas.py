@@ -22,6 +22,43 @@ from database.postgres_client import get_postgres_client, serialize_db_row
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+# Strategies that fire on persistent conditions (not discrete events).
+# Duplicates within DEDUP_WINDOW_SECONDS are collapsed in grouped view.
+SCAN_BASED_STRATEGIES = {"Holy_Grail", "Scout", "Phalanx", "holy_grail", "scout", "phalanx"}
+
+
+def _dedup_related_signals(related: list) -> list:
+    """
+    Collapse duplicate signals from scan-based strategies within a time window.
+    Keeps only the most recent signal per (strategy, direction) combo.
+    Event-driven strategies pass through untouched.
+    """
+    if not related:
+        return related
+
+    keep = []
+    scan_buckets = {}  # key: strategy_lower -> newest signal dict
+
+    for sig in related:
+        strat = (sig.get("strategy") or "").strip()
+        if strat in SCAN_BASED_STRATEGIES or strat.lower() in {s.lower() for s in SCAN_BASED_STRATEGIES}:
+            key = strat.lower()
+            existing = scan_buckets.get(key)
+            if existing is None:
+                scan_buckets[key] = sig
+            else:
+                # Keep whichever is newer
+                sig_ts = str(sig.get("timestamp") or "")
+                ex_ts = str(existing.get("timestamp") or "")
+                if sig_ts > ex_ts:
+                    scan_buckets[key] = sig
+        else:
+            keep.append(sig)
+
+    # Add back one representative per scan-based strategy
+    keep.extend(scan_buckets.values())
+    return keep
+
 
 class StatusUpdate(BaseModel):
     status: str  # DISMISSED, ACCEPTED_STOCKS, ACCEPTED_OPTIONS, COMMITTEE_REVIEW
@@ -187,6 +224,19 @@ async def get_trade_ideas_grouped(
                 g["newest_at"] = ts
             if ts and (not g["oldest_at"] or str(ts) < str(g["oldest_at"])):
                 g["oldest_at"] = ts
+
+    # Dedup scan-based strategies within each group
+    for g in groups_map.values():
+        g["related_signals"] = _dedup_related_signals(g["related_signals"])
+        # Recount after dedup: primary + related
+        g["signal_count"] = 1 + len(g["related_signals"])
+        # Rebuild strategy list from deduped signals
+        strats = [g["primary_signal"].get("strategy") or g["primary_signal"].get("signal_type") or "UNKNOWN"]
+        for rs in g["related_signals"]:
+            s = rs.get("strategy") or "UNKNOWN"
+            if s not in strats:
+                strats.append(s)
+        g["strategies"] = strats
 
     # Compute composite rank for sorting
     now = datetime.utcnow()
