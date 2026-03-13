@@ -6921,13 +6921,12 @@ function renderSectorHeatmap(sectors, spyChange) {
 }
 
 function getHeatmapColor(changePct) {
-    // 5 discrete colors: strong down (red), down (orange), neutral (grey outline),
-    // up (dark green), strong up (lime green)
-    if (changePct >= 1.0) return 'rgba(124, 255, 107, 0.25)';    // lime green — strong up
-    if (changePct >= 0.15) return 'rgba(20, 184, 166, 0.22)';    // teal/dark green — up
-    if (changePct <= -1.0) return 'rgba(229, 55, 14, 0.25)';     // red — strong down
-    if (changePct <= -0.15) return 'rgba(255, 107, 53, 0.22)';   // orange — down
-    return 'transparent';                                          // neutral — grey outline only
+    // 5 discrete solid colors — Pandora theme, no alpha
+    if (changePct >= 1.0) return '#7CFF6B';     // lime green — strong up
+    if (changePct >= 0.15) return '#14B8A6';    // teal — up
+    if (changePct <= -1.0) return '#E5370E';     // red — strong down
+    if (changePct <= -0.15) return '#FF6B35';   // Pandora orange — down
+    return 'transparent';                         // neutral — grey outline only
 }
 
 async function loadFlowData() {
