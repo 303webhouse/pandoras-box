@@ -6892,13 +6892,16 @@ function renderSectorHeatmap(sectors, spyChange) {
             const bgColor = getHeatmapColor(sector.change_1d);
             const changeSign = sector.change_1d >= 0 ? '+' : '';
             const changeVal = sector.change_1d != null ? sector.change_1d.toFixed(2) : '0.00';
+            const trend = sector.trend || 'flat';
+            const trendArrow = trend === 'up' ? '▲' : trend === 'down' ? '▼' : '→';
+            const trendClass = trend === 'up' ? 'trend-up' : trend === 'down' ? 'trend-down' : 'trend-flat';
             return `<div class="sector-heatmap-cell"
                 style="width:${widthPct}%;background:${bgColor};"
                 data-etf="${sector.etf}"
-                title="${escapeHtml(sector.name)} (${sector.etf})\nDaily: ${changeSign}${changeVal}%\nWeekly: ${(sector.change_1w || 0) >= 0 ? '+' : ''}${(sector.change_1w || 0).toFixed(2)}%\nSPY Weight: ${(sector.weight * 100).toFixed(1)}%">
+                title="${escapeHtml(sector.name)} (${sector.etf})\nDaily: ${changeSign}${changeVal}%\nWeekly: ${(sector.change_1w || 0) >= 0 ? '+' : ''}${(sector.change_1w || 0).toFixed(2)}%\nWeekly Trend: ${trend}\nSPY Weight: ${(sector.weight * 100).toFixed(1)}%">
                 <span class="sector-hm-name">${escapeHtml(sector.name)}</span>
                 <span class="sector-hm-etf">${sector.etf}</span>
-                <span class="sector-hm-change">${changeSign}${changeVal}%</span>
+                <span class="sector-hm-change">${changeSign}${changeVal}% <span class="sector-hm-trend ${trendClass}">${trendArrow}</span></span>
             </div>`;
         }).join('');
 
