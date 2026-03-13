@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Pandora - Real-time Trading Signal Dashboard">
     <title>Pandora</title>
-    <link rel="stylesheet" href="/styles.css?v=76">
+    <link rel="stylesheet" href="/styles.css?v=77">
     <link rel="manifest" href="/manifest.json">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -124,10 +124,16 @@
             </div>
             <div class="headlines-card" id="headlinesCard">
                 <div class="headlines-tabs">
-                    <button class="headlines-tab active" data-tab="flow">FLOW</button>
+                    <button class="headlines-tab active" data-tab="sectors">SECTORS</button>
+                    <button class="headlines-tab" data-tab="flow">FLOW</button>
                     <button class="headlines-tab" data-tab="headlines">HEADLINES</button>
                 </div>
-                <div class="headlines-tab-content" id="flowTabContent">
+                <div class="headlines-tab-content" id="sectorsTabContent">
+                    <div class="sector-heatmap" id="sectorHeatmap">
+                        <p class="empty-state">Loading sectors...</p>
+                    </div>
+                </div>
+                <div class="headlines-tab-content" id="flowTabContent" style="display:none;">
                     <div class="flow-compact-list" id="flowCompactList">
                         <p class="empty-state">No flow data yet</p>
                     </div>
@@ -306,32 +312,21 @@
                 <div class="watchlist-middle">
                     <div class="tickers-panel">
                         <div class="tickers-header">
-                            <h2>WATCHLIST TICKERS</h2>
-                            <div class="tickers-controls">
-                                <div class="tickers-control">
-                                    <label for="ticker-sort">Sort:</label>
-                                    <select id="ticker-sort">
-                                        <option value="sector">Sector</option>
-                                        <option value="change_1d">Daily Change %</option>
-                                        <option value="change_1w">Weekly Change %</option>
-                                        <option value="relative_volume">Relative Volume</option>
-                                        <option value="cta_zone">CTA Zone</option>
-                                    </select>
+                            <h2>RADAR</h2>
+                            <div class="tickers-controls radar-controls">
+                                <div class="radar-filters">
+                                    <button class="radar-filter-pill active" data-filter="all">All</button>
+                                    <button class="radar-filter-pill" data-filter="mine">Mine</button>
+                                    <button class="radar-filter-pill" data-filter="positions">Positions</button>
+                                    <button class="radar-filter-pill" data-filter="scanner">Scanner</button>
                                 </div>
-                                <div class="tickers-control">
-                                    <label for="ticker-filter">Filter:</label>
-                                    <select id="ticker-filter">
-                                        <option value="all">All</option>
-                                        <option value="mine">My Watchlist</option>
-                                        <option value="positions">Active Positions Only</option>
-                                        <option value="scanner">Scanner Universe</option>
-                                        <option value="muted">Muted Only</option>
-                                    </select>
+                                <div class="radar-sort-pills">
+                                    <button class="radar-sort-pill active" data-sort="change_1d" title="Sort by daily change">Δ%</button>
+                                    <button class="radar-sort-pill" data-sort="relative_volume" title="Sort by relative volume">Vol</button>
+                                    <button class="radar-sort-pill" data-sort="sector" title="Sort by sector">Sec</button>
+                                    <button class="radar-sort-pill" data-sort="cta_zone" title="Sort by CTA zone">CTA</button>
                                 </div>
-                                <div class="tickers-meta">
-                                    <span id="ticker-count">Showing: 0 tickers</span>
-                                    <span id="ticker-positions">Positions: 0 active</span>
-                                </div>
+                                <span class="radar-meta" id="ticker-count">0 tickers</span>
                             </div>
                         </div>
 
@@ -1600,7 +1595,7 @@
     <!-- TradingView Widget Script -->
     <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
-    <script src="/app.js?v=93"></script>
+    <script src="/app.js?v=94"></script>
     <script src="/analytics.js?v=3"></script>
 </body>
 </html>
