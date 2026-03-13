@@ -6883,12 +6883,15 @@ function renderSectorHeatmap(sectors, spyChange) {
     const rowWeights = rows.map(r => r.reduce((s, c) => s + c.weight, 0));
     const totalWeight = rowWeights.reduce((s, w) => s + w, 0);
 
+    const maxWeight = sorted[0].weight;
     let html = '';
     rows.forEach((row, ri) => {
         const rowFlex = (rowWeights[ri] / totalWeight).toFixed(4);
         const rowTotal = row.reduce((s, c) => s + c.weight, 0);
         const cellsHtml = row.map(sector => {
             const cellFlex = (sector.weight / rowTotal).toFixed(4);
+            // Scale text: 0.55–1.0 range based on weight relative to largest sector
+            const scale = (0.55 + 0.45 * (sector.weight / maxWeight)).toFixed(3);
             const bgColor = getHeatmapColor(sector.change_1d);
             const isNeutral = bgColor === 'transparent';
             const changeSign = sector.change_1d >= 0 ? '+' : '';
@@ -6897,7 +6900,7 @@ function renderSectorHeatmap(sectors, spyChange) {
             const trendArrow = trend === 'up' ? '▲' : trend === 'down' ? '▼' : '→';
             const trendClass = trend === 'up' ? 'trend-up' : trend === 'down' ? 'trend-down' : 'trend-flat';
             return `<div class="sector-heatmap-cell${isNeutral ? ' sector-neutral' : ''}"
-                style="flex:${cellFlex};background:${bgColor};"
+                style="flex:${cellFlex};background:${bgColor};--s:${scale};"
                 data-etf="${sector.etf}"
                 title="${escapeHtml(sector.name)} (${sector.etf})\nDaily: ${changeSign}${changeVal}%\nWeekly: ${(sector.change_1w || 0) >= 0 ? '+' : ''}${(sector.change_1w || 0).toFixed(2)}%\nWeekly Trend: ${trend}\nSPY Weight: ${(sector.weight * 100).toFixed(1)}%">
                 <span class="sector-hm-name">${escapeHtml(sector.name)}</span>
