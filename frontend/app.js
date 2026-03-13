@@ -7115,9 +7115,10 @@ function initPositionModals() {
     if (exitPriceInput) exitPriceInput.addEventListener('input', updateCloseSummary);
     if (closeQtyInput) closeQtyInput.addEventListener('input', updateCloseSummary);
     
-    // Load existing positions
+    // Load existing positions, then trigger MTM for live option prices
     loadOpenPositionsEnhanced();
-    
+    triggerMarkToMarket().then(() => loadOpenPositionsEnhanced());
+
     // Start price updates for P&L
     startPriceUpdates();
 
@@ -8889,8 +8890,10 @@ async function refreshPositions() {
         refreshBtn.disabled = true;
     }
     try {
-        await loadOpenPositionsEnhanced();
+        // MTM first — fetches live Polygon prices for options, updates DB
         await triggerMarkToMarket();
+        // Then reload positions (now with updated current_price + unrealized_pnl from DB)
+        await loadOpenPositionsEnhanced();
         await updateCurrentPrices();
     } finally {
         if (refreshBtn) {
