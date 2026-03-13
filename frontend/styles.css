@@ -320,7 +320,6 @@ body {
     gap: 2px;
     width: 100%;
     box-sizing: border-box;
-    flex: 1;
     min-height: 0;
 }
 
@@ -336,7 +335,6 @@ body {
     overflow: hidden;
     box-sizing: border-box;
     min-width: 0;
-    flex: 1;
 }
 
 .sector-heatmap-cell:hover {
@@ -348,9 +346,9 @@ body {
 
 .sector-hm-name {
     font-size: 10px;
-    font-weight: 400;
-    color: rgba(255,255,255,0.9);
-    text-shadow: 0 1px 3px rgba(0,0,0,0.6);
+    font-weight: 500;
+    color: #fff;
+    text-shadow: 0 1px 4px rgba(0,0,0,0.8), 0 0 2px rgba(0,0,0,0.6);
     text-align: center;
     line-height: 1.2;
     white-space: nowrap;
@@ -361,16 +359,16 @@ body {
 
 .sector-hm-etf {
     font-size: 18px;
-    font-weight: 400;
-    color: rgba(255,255,255,0.55);
-    text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+    font-weight: 600;
+    color: #fff;
+    text-shadow: 0 1px 4px rgba(0,0,0,0.8), 0 0 2px rgba(0,0,0,0.6);
 }
 
 .sector-hm-change {
     font-size: 11px;
     font-weight: 500;
     color: #fff;
-    text-shadow: 0 1px 3px rgba(0,0,0,0.6);
+    text-shadow: 0 1px 4px rgba(0,0,0,0.8), 0 0 2px rgba(0,0,0,0.6);
 }
 
 .sector-hm-trend { font-size: 9px; margin-left: 1px; }

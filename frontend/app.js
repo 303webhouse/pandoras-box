@@ -6885,10 +6885,10 @@ function renderSectorHeatmap(sectors, spyChange) {
 
     let html = '';
     rows.forEach((row, ri) => {
-        const rowPct = ((rowWeights[ri] / totalWeight) * 100).toFixed(1);
+        const rowFlex = (rowWeights[ri] / totalWeight).toFixed(4);
         const rowTotal = row.reduce((s, c) => s + c.weight, 0);
         const cellsHtml = row.map(sector => {
-            const widthPct = ((sector.weight / rowTotal) * 100).toFixed(2);
+            const cellFlex = (sector.weight / rowTotal).toFixed(4);
             const bgColor = getHeatmapColor(sector.change_1d);
             const isNeutral = bgColor === 'transparent';
             const changeSign = sector.change_1d >= 0 ? '+' : '';
@@ -6897,7 +6897,7 @@ function renderSectorHeatmap(sectors, spyChange) {
             const trendArrow = trend === 'up' ? '▲' : trend === 'down' ? '▼' : '→';
             const trendClass = trend === 'up' ? 'trend-up' : trend === 'down' ? 'trend-down' : 'trend-flat';
             return `<div class="sector-heatmap-cell${isNeutral ? ' sector-neutral' : ''}"
-                style="background:${bgColor};"
+                style="flex:${cellFlex};background:${bgColor};"
                 data-etf="${sector.etf}"
                 title="${escapeHtml(sector.name)} (${sector.etf})\nDaily: ${changeSign}${changeVal}%\nWeekly: ${(sector.change_1w || 0) >= 0 ? '+' : ''}${(sector.change_1w || 0).toFixed(2)}%\nWeekly Trend: ${trend}\nSPY Weight: ${(sector.weight * 100).toFixed(1)}%">
                 <span class="sector-hm-name">${escapeHtml(sector.name)}</span>
@@ -6906,7 +6906,7 @@ function renderSectorHeatmap(sectors, spyChange) {
             </div>`;
         }).join('');
 
-        html += `<div class="sector-heatmap-row">${cellsHtml}</div>`;
+        html += `<div class="sector-heatmap-row" style="flex:${rowFlex};">${cellsHtml}</div>`;
     });
 
     container.innerHTML = html;
