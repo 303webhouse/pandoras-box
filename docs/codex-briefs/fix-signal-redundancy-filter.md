@@ -108,6 +108,7 @@ def _is_redundant(signal_row: dict, existing_signals: list, cooldowns: dict) -> 
 
 ```
 
+
 ### Step 3: Add dedup check in the grouping loop
 
 Inside `get_trade_ideas_grouped()`, the grouping loop has an `else` branch that adds signals to `related_signals`. We need to add a redundancy check there.

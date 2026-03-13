@@ -345,7 +345,7 @@ body {
 }
 
 .sector-hm-name {
-    font-size: 10px;
+    font-size: calc(10px * var(--s, 1));
     font-weight: 500;
     color: #fff;
     text-shadow: 0 1px 4px rgba(0,0,0,0.8), 0 0 2px rgba(0,0,0,0.6);
@@ -358,20 +358,20 @@ body {
 }
 
 .sector-hm-etf {
-    font-size: 18px;
+    font-size: calc(20px * var(--s, 1));
     font-weight: 600;
     color: #fff;
     text-shadow: 0 1px 4px rgba(0,0,0,0.8), 0 0 2px rgba(0,0,0,0.6);
 }
 
 .sector-hm-change {
-    font-size: 11px;
+    font-size: calc(11px * var(--s, 1));
     font-weight: 500;
     color: #fff;
     text-shadow: 0 1px 4px rgba(0,0,0,0.8), 0 0 2px rgba(0,0,0,0.6);
 }
 
-.sector-hm-trend { font-size: 9px; margin-left: 1px; }
+.sector-hm-trend { font-size: calc(9px * var(--s, 1)); margin-left: 1px; }
 .sector-hm-trend.trend-up { color: #7CFF6B; }
 .sector-hm-trend.trend-down { color: #FF6B35; }
 .sector-hm-trend.trend-flat { color: rgba(255,255,255,0.4); }
