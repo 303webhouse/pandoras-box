@@ -6890,13 +6890,14 @@ function renderSectorHeatmap(sectors, spyChange) {
         const cellsHtml = row.map(sector => {
             const widthPct = ((sector.weight / rowTotal) * 100).toFixed(2);
             const bgColor = getHeatmapColor(sector.change_1d);
+            const isNeutral = bgColor === 'transparent';
             const changeSign = sector.change_1d >= 0 ? '+' : '';
             const changeVal = sector.change_1d != null ? sector.change_1d.toFixed(2) : '0.00';
             const trend = sector.trend || 'flat';
             const trendArrow = trend === 'up' ? '▲' : trend === 'down' ? '▼' : '→';
             const trendClass = trend === 'up' ? 'trend-up' : trend === 'down' ? 'trend-down' : 'trend-flat';
-            return `<div class="sector-heatmap-cell"
-                style="width:${widthPct}%;background:${bgColor};"
+            return `<div class="sector-heatmap-cell${isNeutral ? ' sector-neutral' : ''}"
+                style="background:${bgColor};"
                 data-etf="${sector.etf}"
                 title="${escapeHtml(sector.name)} (${sector.etf})\nDaily: ${changeSign}${changeVal}%\nWeekly: ${(sector.change_1w || 0) >= 0 ? '+' : ''}${(sector.change_1w || 0).toFixed(2)}%\nWeekly Trend: ${trend}\nSPY Weight: ${(sector.weight * 100).toFixed(1)}%">
                 <span class="sector-hm-name">${escapeHtml(sector.name)}</span>
@@ -6905,7 +6906,7 @@ function renderSectorHeatmap(sectors, spyChange) {
             </div>`;
         }).join('');
 
-        html += `<div class="sector-heatmap-row" style="height:${rowPct}%;">${cellsHtml}</div>`;
+        html += `<div class="sector-heatmap-row">${cellsHtml}</div>`;
     });
 
     container.innerHTML = html;
@@ -6920,26 +6921,13 @@ function renderSectorHeatmap(sectors, spyChange) {
 }
 
 function getHeatmapColor(changePct) {
-    // Pandora theme: #7CFF6B green for positive, #FF6B35 orange for negative
-    const clamped = Math.max(-3, Math.min(3, changePct));
-    const intensity = Math.abs(clamped) / 3;
-
-    if (clamped > 0.05) {
-        // Positive: blend from dark base (#0f1a14) to Pandora green (#7CFF6B)
-        const r = Math.round(15 + (124 - 15) * intensity * 0.5);
-        const g = Math.round(26 + (255 - 26) * intensity * 0.6);
-        const b = Math.round(20 + (107 - 20) * intensity * 0.4);
-        return `rgb(${r}, ${g}, ${b})`;
-    } else if (clamped < -0.05) {
-        // Negative: blend from dark base (#1a130f) to Pandora orange (#FF6B35)
-        const r = Math.round(26 + (255 - 26) * intensity * 0.6);
-        const g = Math.round(19 + (107 - 19) * intensity * 0.35);
-        const b = Math.round(15 + (53 - 15) * intensity * 0.25);
-        return `rgb(${r}, ${g}, ${b})`;
-    } else {
-        // Flat / near zero: neutral slate
-        return '#1a2228';
-    }
+    // 5 discrete colors: strong down (red), down (orange), neutral (grey outline),
+    // up (dark green), strong up (lime green)
+    if (changePct >= 1.0) return 'rgba(124, 255, 107, 0.25)';    // lime green — strong up
+    if (changePct >= 0.15) return 'rgba(20, 184, 166, 0.22)';    // teal/dark green — up
+    if (changePct <= -1.0) return 'rgba(229, 55, 14, 0.25)';     // red — strong down
+    if (changePct <= -0.15) return 'rgba(255, 107, 53, 0.22)';   // orange — down
+    return 'transparent';                                          // neutral — grey outline only
 }
 
 async function loadFlowData() {
