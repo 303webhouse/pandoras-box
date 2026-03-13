@@ -278,6 +278,108 @@ async def get_spread_value(
     }
 
 
+async def get_multi_leg_value(
+    underlying: str,
+    legs: List[Dict[str, Any]],
+    expiry: str,
+) -> Optional[Dict[str, Any]]:
+    """
+    Price a multi-leg options position (iron condor, straddle, strangle, etc.).
+
+    Each leg dict must have:
+        action: "BUY" or "SELL"
+        option_type: "call" or "put" (or "CALL"/"PUT")
+        strike: float
+        quantity: int (optional, defaults to 1)
+
+    Returns:
+        net_mark: current net value per share (what you'd pay/receive to close)
+        leg_details: list of per-leg pricing data
+        underlying_price: current underlying price
+    """
+    if not legs:
+        return None
+
+    strikes = [float(leg["strike"]) for leg in legs]
+    needs_puts = any(leg.get("option_type", "").lower() == "put" for leg in legs)
+    needs_calls = any(leg.get("option_type", "").lower() == "call" for leg in legs)
+
+    strike_lo = min(strikes) - 0.5
+    strike_hi = max(strikes) + 0.5
+    exp_str = str(expiry)[:10]
+
+    # Fetch chain — if we need both puts and calls, fetch without type filter
+    if needs_puts and needs_calls:
+        chain = await get_options_snapshot(
+            underlying,
+            expiration_date=exp_str,
+            strike_gte=strike_lo,
+            strike_lte=strike_hi,
+        )
+    elif needs_puts:
+        chain = await get_options_snapshot(
+            underlying, expiration_date=exp_str,
+            strike_gte=strike_lo, strike_lte=strike_hi,
+            contract_type="put",
+        )
+    else:
+        chain = await get_options_snapshot(
+            underlying, expiration_date=exp_str,
+            strike_gte=strike_lo, strike_lte=strike_hi,
+            contract_type="call",
+        )
+
+    if not chain:
+        return None
+
+    net_mark = 0.0
+    leg_details = []
+    underlying_price = None
+
+    for leg in legs:
+        opt_type = leg.get("option_type", "").lower()
+        strike = float(leg["strike"])
+        action = leg.get("action", "BUY").upper()
+        qty = leg.get("quantity", 1)
+
+        contract = find_contract(chain, strike, expiry, opt_type)
+        if not contract:
+            logger.warning(
+                "Multi-leg: missing %s %s %s %s",
+                underlying, strike, exp_str, opt_type,
+            )
+            return None  # Can't price incomplete position
+
+        mid = get_contract_mid(contract)
+        if mid is None:
+            logger.warning("Multi-leg: no mid for %s %s %s", underlying, strike, opt_type)
+            return None
+
+        # BUY legs add to position value, SELL legs subtract
+        sign = 1 if action == "BUY" else -1
+        net_mark += mid * sign * qty
+
+        if not underlying_price:
+            ua = contract.get("underlying_asset", {})
+            if ua and ua.get("price"):
+                underlying_price = float(ua["price"])
+
+        leg_details.append({
+            "action": action,
+            "option_type": opt_type,
+            "strike": strike,
+            "quantity": qty,
+            "mid": mid,
+            "greeks": get_contract_greeks(contract),
+        })
+
+    return {
+        "net_mark": round(net_mark, 4),
+        "leg_details": leg_details,
+        "underlying_price": underlying_price,
+    }
+
+
 async def get_single_option_value(
     underlying: str,
     strike: float,

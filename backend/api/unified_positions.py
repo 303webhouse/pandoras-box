@@ -243,7 +243,13 @@ def _compute_unrealized_pnl(entry_price: float, current_price: float, quantity: 
             return round((entry_price - current_price) * qty, 2)
         return round((current_price - entry_price) * qty, 2)
     if s in CREDIT_STRUCTURES:
-        # Credit: received premium at open, pay to close → profit when current < entry
+        # Most credit structures: received premium at open, pay to close
+        # Exception: iron condors/butterflies can be net debit depending on strikes
+        # LONG iron condor = debit (paid to open) → profit when value increases
+        # SHORT iron condor = credit (received to open) → profit when value decreases
+        if s in ("iron_condor", "iron_butterfly") and d == "LONG":
+            return round((current_price - entry_price) * 100 * quantity, 2)
+        # Standard credit: profit when current < entry
         return round((entry_price - current_price) * 100 * quantity, 2)
     # Debit: paid premium at open → profit when current > entry
     return round((current_price - entry_price) * 100 * quantity, 2)
@@ -1472,7 +1478,7 @@ async def run_mark_to_market() -> dict:
     Updates unrealized P&L based on actual spread mid-prices.
     """
     from integrations.polygon_options import (
-        get_spread_value, get_single_option_value, POLYGON_API_KEY
+        get_spread_value, get_single_option_value, get_multi_leg_value, POLYGON_API_KEY
     )
 
     pool = await get_postgres_client()
@@ -1512,8 +1518,31 @@ async def run_mark_to_market() -> dict:
         long_leg_price = None
         short_leg_price = None
 
+        # --- Multi-leg path: iron condors, straddles, etc. via legs JSONB ---
+        legs_data = row.get("legs")
+        if use_polygon and expiry and legs_data:
+            try:
+                if isinstance(legs_data, str):
+                    legs_data = json.loads(legs_data)
+                if isinstance(legs_data, list) and len(legs_data) >= 2:
+                    result = await get_multi_leg_value(ticker, legs_data, str(expiry))
+                    if result and result.get("net_mark") is not None:
+                        current_price = abs(result["net_mark"])
+                        direction = (row.get("direction") or "").upper()
+                        unrealized = _compute_unrealized_pnl(
+                            entry_price, current_price, quantity, structure,
+                            direction=direction,
+                        )
+                        greeks_json = json.dumps({
+                            "leg_details": result.get("leg_details"),
+                            "underlying_price": result.get("underlying_price"),
+                        })
+            except Exception as e:
+                errors.append({"position_id": row["position_id"], "error": str(e)})
+                logger.warning("Multi-leg mark-to-market failed for %s: %s", row["position_id"], e)
+
         # --- Polygon path: real spread-level pricing ---
-        if use_polygon and expiry and long_strike:
+        if current_price is None and use_polygon and expiry and long_strike:
             try:
                 if short_strike and ("spread" in structure or "credit" in structure or "debit" in structure):
                     # Spread position — get both legs
@@ -1524,10 +1553,11 @@ async def run_mark_to_market() -> dict:
                         current_price = result["spread_value"]
                         long_leg_price = result.get("long_mid")
                         short_leg_price = result.get("short_mid")
-                        if "credit" in structure:
-                            unrealized = round((entry_price - current_price) * 100 * quantity, 2)
-                        else:
-                            unrealized = round((current_price - entry_price) * 100 * quantity, 2)
+                        direction = (row.get("direction") or "").upper()
+                        unrealized = _compute_unrealized_pnl(
+                            entry_price, current_price, quantity, structure,
+                            direction=direction,
+                        )
 
                         greeks_json = json.dumps({
                             "long": result.get("long_greeks"),
@@ -1544,7 +1574,10 @@ async def run_mark_to_market() -> dict:
                     if result and result.get("option_value") is not None:
                         current_price = result["option_value"]
                         long_leg_price = result["option_value"]
-                        unrealized = round((current_price - entry_price) * 100 * quantity, 2)
+                        unrealized = _compute_unrealized_pnl(
+                            entry_price, current_price, quantity, structure,
+                            direction=(row.get("direction") or ""),
+                        )
                         greeks_json = json.dumps({
                             "greeks": result.get("greeks"),
                             "underlying_price": result.get("underlying_price"),
@@ -1564,7 +1597,7 @@ async def run_mark_to_market() -> dict:
                     current_price = float(info.last_price)
                     unrealized = _compute_unrealized_pnl(
                         entry_price, current_price, quantity, structure,
-                        direction=pos.get("direction", "")
+                        direction=row.get("direction", "")
                     )
             except Exception:
                 pass
