@@ -270,30 +270,40 @@ def _compute_dte(expiry_str: str) -> Optional[int]:
 MULTI_LEG_STRUCTURES = frozenset({"iron_condor", "iron_butterfly", "straddle", "strangle", "custom"})
 
 import re
-_LEG_PATTERN = re.compile(r'(long|short)\s+(\d+(?:\.\d+)?)\s*(p|c|put|call)', re.IGNORECASE)
+# Matches "long 36p/45c" or "short 30p/50c" — captures the action word and
+# the full slash-separated strike group so each strike inherits the action.
+_LEG_GROUP_PATTERN = re.compile(
+    r'(long|short)\s+([\d.]+\s*(?:p|c|put|call)(?:\s*/\s*[\d.]+\s*(?:p|c|put|call))*)',
+    re.IGNORECASE,
+)
+_STRIKE_PATTERN = re.compile(r'([\d.]+)\s*(p|c|put|call)', re.IGNORECASE)
 
 
 def _infer_legs_from_notes(notes: str) -> Optional[List[Dict[str, Any]]]:
     """
     Parse legs from notes like "4-leg: long 36p/45c, short 30p/50c".
+    Handles slash-separated strikes where all strikes after the slash
+    inherit the preceding long/short action.
     Returns list of leg dicts compatible with get_multi_leg_value(), or None.
     """
     if not notes:
         return None
-    matches = _LEG_PATTERN.findall(notes)
-    if len(matches) < 2:
-        return None
     legs = []
-    for action_word, strike_str, type_char in matches:
+    for action_match in _LEG_GROUP_PATTERN.finditer(notes):
+        action_word = action_match.group(1)   # "long" or "short"
+        strikes_part = action_match.group(2)  # "36p/45c" or "30p/50c"
         action = "BUY" if action_word.lower() == "long" else "SELL"
-        opt_type = "put" if type_char.lower().startswith("p") else "call"
-        legs.append({
-            "action": action,
-            "option_type": opt_type,
-            "strike": float(strike_str),
-            "quantity": 1,
-        })
-    return legs
+        for strike_match in _STRIKE_PATTERN.finditer(strikes_part):
+            strike_str = strike_match.group(1)
+            type_char = strike_match.group(2)
+            opt_type = "put" if type_char.lower().startswith("p") else "call"
+            legs.append({
+                "action": action,
+                "option_type": opt_type,
+                "strike": float(strike_str),
+                "quantity": 1,
+            })
+    return legs if len(legs) >= 2 else None
 
 
 # ── CREATE ────────────────────────────────────────────────────────────
