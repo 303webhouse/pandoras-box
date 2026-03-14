@@ -6892,20 +6892,19 @@ function renderSectorHeatmap(sectors, spyChange) {
             const cellFlex = (sector.weight / rowTotal).toFixed(4);
             // Scale text: 0.55–1.0 range based on weight relative to largest sector
             const scale = (0.55 + 0.45 * (sector.weight / maxWeight)).toFixed(3);
-            const bgColor = getHeatmapColor(sector.change_1d);
-            const isNeutral = bgColor === 'transparent';
+            const hm = getHeatmapStyle(sector.change_1d);
             const changeSign = sector.change_1d >= 0 ? '+' : '';
             const changeVal = sector.change_1d != null ? sector.change_1d.toFixed(2) : '0.00';
             const trend = sector.trend || 'flat';
             const trendArrow = trend === 'up' ? '▲' : trend === 'down' ? '▼' : '→';
             const trendClass = trend === 'up' ? 'trend-up' : trend === 'down' ? 'trend-down' : 'trend-flat';
-            return `<div class="sector-heatmap-cell${isNeutral ? ' sector-neutral' : ''}"
-                style="flex:${cellFlex};background:${bgColor};--s:${scale};"
+            return `<div class="sector-heatmap-cell"
+                style="flex:${cellFlex};--s:${scale};border-color:${hm.borderColor};box-shadow:${hm.glow};"
                 data-etf="${sector.etf}"
                 title="${escapeHtml(sector.name)} (${sector.etf})\nDaily: ${changeSign}${changeVal}%\nWeekly: ${(sector.change_1w || 0) >= 0 ? '+' : ''}${(sector.change_1w || 0).toFixed(2)}%\nWeekly Trend: ${trend}\nSPY Weight: ${(sector.weight * 100).toFixed(1)}%">
                 <span class="sector-hm-name">${escapeHtml(sector.name)}</span>
                 <span class="sector-hm-etf">${sector.etf}</span>
-                <span class="sector-hm-change">${changeSign}${changeVal}% <span class="sector-hm-trend ${trendClass}">${trendArrow}</span></span>
+                <span class="sector-hm-change" style="color:${hm.changeColor}">${changeSign}${changeVal}% <span class="sector-hm-trend ${trendClass}">${trendArrow}</span></span>
             </div>`;
         }).join('');
 
@@ -6923,13 +6922,30 @@ function renderSectorHeatmap(sectors, spyChange) {
     });
 }
 
-function getHeatmapColor(changePct) {
-    // 5 discrete solid colors — Pandora theme, no alpha
-    if (changePct >= 1.0) return '#7CFF6B';     // lime green — strong up
-    if (changePct >= 0.15) return '#14B8A6';    // teal — up
-    if (changePct <= -1.0) return '#E5370E';     // red — strong down
-    if (changePct <= -0.15) return '#FF6B35';   // Pandora orange — down
-    return 'transparent';                         // neutral — grey outline only
+function getHeatmapStyle(changePct) {
+    // Returns { borderColor, glowColor, changeColor } matching bias card aesthetic.
+    // Intensity scales with magnitude — stronger moves = brighter border + stronger glow.
+    const abs = Math.abs(changePct || 0);
+    if (abs < 0.10) {
+        // Neutral — default border, no glow
+        return { borderColor: 'rgba(255,255,255,0.1)', glow: 'none', changeColor: 'var(--text-secondary)' };
+    }
+    // Intensity: 0.3–1.0 range scaled by magnitude (caps at 2%)
+    const intensity = Math.min(1.0, 0.3 + 0.7 * (abs / 2.0));
+    if (changePct > 0) {
+        // Bullish — green family (matches .bias-card.bullish → --accent-lime #7CFF6B)
+        return {
+            borderColor: `rgba(124, 255, 107, ${(0.4 + 0.6 * intensity).toFixed(2)})`,
+            glow: `0 0 ${(6 + 8 * intensity).toFixed(0)}px rgba(124, 255, 107, ${(0.08 + 0.17 * intensity).toFixed(2)})`,
+            changeColor: '#7CFF6B',
+        };
+    }
+    // Bearish — orange family (matches .bias-card.bearish → --accent-orange #FF6B35)
+    return {
+        borderColor: `rgba(255, 107, 53, ${(0.4 + 0.6 * intensity).toFixed(2)})`,
+        glow: `0 0 ${(6 + 8 * intensity).toFixed(0)}px rgba(255, 107, 53, ${(0.08 + 0.17 * intensity).toFixed(2)})`,
+        changeColor: '#FF6B35',
+    };
 }
 
 async function loadFlowData() {
