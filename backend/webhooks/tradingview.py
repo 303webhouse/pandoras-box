@@ -189,11 +189,22 @@ class TradingViewAlert(BaseModel):
 
 
 @router.post("/tradingview")
-async def receive_tradingview_alert(alert: TradingViewAlert):
+async def receive_tradingview_alert(request: Request):
     """
     Receive and process TradingView webhook
-    Routes to appropriate strategy handler based on strategy field
+    Routes to appropriate strategy handler based on strategy field.
+    FOOTPRINT signals are forwarded to the footprint handler.
     """
+    payload = await request.json()
+
+    # Route FOOTPRINT signals to dedicated handler
+    if payload.get("signal") == "FOOTPRINT":
+        from webhooks.footprint import footprint_webhook, FootprintSignal
+        fp_data = FootprintSignal(**payload)
+        return await footprint_webhook(fp_data)
+
+    alert = TradingViewAlert(**payload)
+
     # Webhook secret validation
     if WEBHOOK_SECRET:
         if (alert.secret or "") != WEBHOOK_SECRET:
