@@ -34,18 +34,24 @@ body {
     display: none !important;
 }
 
-/* Orbit font for all major section headings */
+/* Orbit font + unified heading style for all major section headings */
 .bias-composite-title h2,
 .trades-header h2,
 .positions-header h2,
 .strategies-header h2,
 .watchlist-header h2,
 .analyzer-header h2,
+.tickers-header h2,
 .positions-section h2,
 .hunter-header h2,
 .savita-modal-header h2,
-.modal-header h3 {
+.modal-header h3,
+.crypto-strategy-section h2,
+.crypto-btc-signals-panel h2,
+.analytics-section-header h2 {
     font-family: 'Orbit', sans-serif;
+    font-weight: 700;
+    color: var(--text-secondary);
 }
 
 .container {
@@ -2456,9 +2462,7 @@ body.override-active-bearish .override-toggle[data-active="true"] {
 
 .trades-header h2 {
     font-size: 14px;
-    font-weight: 700;
     letter-spacing: 2px;
-    color: var(--accent-teal);
     margin-bottom: 12px;
 }
 
@@ -2491,9 +2495,7 @@ body.override-active-bearish .override-toggle[data-active="true"] {
 
 .positions-header h2 {
     font-size: 14px;
-    font-weight: 700;
     letter-spacing: 2px;
-    color: var(--accent-teal);
     margin: 0;
 }
 
@@ -4138,9 +4140,7 @@ body.override-active-bearish .override-toggle[data-active="true"] {
 
 .strategies-header h2 {
     font-size: 14px;
-    font-weight: 700;
     letter-spacing: 2px;
-    color: var(--accent-teal);
 }
 
 .strategies-actions {
@@ -4263,9 +4263,7 @@ body.override-active-bearish .override-toggle[data-active="true"] {
 
 .positions-section h2 {
     font-size: 14px;
-    font-weight: 700;
     letter-spacing: 2px;
-    color: var(--accent-teal);
     margin-bottom: 16px;
 }
 
@@ -4309,9 +4307,7 @@ body.override-active-bearish .override-toggle[data-active="true"] {
 .watchlist-header h2,
 .analyzer-header h2 {
     font-size: 14px;
-    font-weight: 700;
     letter-spacing: 2px;
-    color: var(--accent-teal);
 }
 
 .watchlist-count {
@@ -9044,11 +9040,9 @@ body[data-mode="analytics"] .analytics-shell {
     box-shadow: 0 8px 18px rgba(0, 0, 0, 0.18);
 }
 
-.tickers-header h2,
-.analyzer-header h2 {
+.tickers-header h2 {
     font-size: 14px;
-    letter-spacing: 0.6px;
-    color: #e0e8f0;
+    letter-spacing: 2px;
 }
 
 .tickers-controls {
@@ -9488,8 +9482,6 @@ body[data-mode="analytics"] .analytics-shell {
 .crypto-btc-signals-panel.inline {margin:0;}
 
 /* Strategy titles match header font */
-.crypto-strategy-section h2,
-.crypto-btc-signals-panel h2,
 .crypto-strategy-toggles .strategy-name {font-family:"Orbit",sans-serif;letter-spacing:0.4px;}
 .crypto-strategy-toggles .strategy-name {font-size:12px;}
 
@@ -9698,7 +9690,7 @@ body[data-mode="analytics"] .analytics-shell {
 
 .analytics-section-header h2 {
     font-size: 17px;
-    letter-spacing: 0.5px;
+    letter-spacing: 1px;
 }
 
 .analytics-muted {
