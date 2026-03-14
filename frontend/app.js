@@ -8238,7 +8238,11 @@ function updateCloseSummary() {
         const multiplier = isStock ? 1 : 100;
         let pnl;
         if (isStock) {
-            pnl = (exitPrice - closingPosition.entry_price) * closeQty;
+            if (closingPosition.direction === 'SHORT') {
+                pnl = (closingPosition.entry_price - exitPrice) * closeQty;
+            } else {
+                pnl = (exitPrice - closingPosition.entry_price) * closeQty;
+            }
         } else if (isCredit) {
             // Credit: received premium at open, pay to close
             pnl = (closingPosition.entry_price - exitPrice) * closeQty * multiplier;
@@ -8277,7 +8281,11 @@ async function confirmPositionClose() {
     const closeIsCredit = CREDIT_STRUCTURES.has(closeStruct);
     let pnl;
     if (closeIsStock) {
-        pnl = (exitPrice - entryPrice) * closeQty;
+        if (closingPosition.direction === 'SHORT') {
+            pnl = (entryPrice - exitPrice) * closeQty;
+        } else {
+            pnl = (exitPrice - entryPrice) * closeQty;
+        }
     } else if (closeIsCredit) {
         pnl = (entryPrice - exitPrice) * closeQty * 100;
     } else {
@@ -8695,6 +8703,10 @@ function openPositionEditModal(position) {
                         <input type="text" id="editPositionAccount" readonly style="opacity: 0.6; cursor: not-allowed;">
                     </div>
                     <div class="form-row">
+                        <label>Quantity</label>
+                        <input type="number" id="editQuantity" min="1" step="1">
+                    </div>
+                    <div class="form-row">
                         <label>Stop Loss</label>
                         <input type="number" id="editStopLoss" step="0.01">
                     </div>
@@ -8714,11 +8726,11 @@ function openPositionEditModal(position) {
                         <div class="edit-add-header">Add to Position</div>
                         <div class="form-row-inline">
                             <div class="form-row">
-                                <label>Additional Qty</label>
+                                <label id="editAddQtyLabel">Additional Qty</label>
                                 <input type="number" id="editAddQty" min="1" step="1" placeholder="0">
                             </div>
                             <div class="form-row">
-                                <label>Cost per Contract</label>
+                                <label id="editAddCostLabel">Cost per Contract</label>
                                 <input type="number" id="editAddCost" step="0.01" placeholder="0.00">
                             </div>
                         </div>
@@ -8751,7 +8763,17 @@ function openPositionEditModal(position) {
     const infoEl = document.getElementById('editPositionInfo');
     const curQty = position.quantity || 0;
     const curEntry = position.entry_price || 0;
-    infoEl.innerHTML = `<span>Current: ${curQty} contracts @ $${curEntry.toFixed(2)}</span>`;
+    const isStock = ['stock', 'stock_long', 'long_stock', 'stock_short', 'short_stock'].includes((position.structure || '').toLowerCase()) || (!position.structure && position.asset_type === 'EQUITY');
+    const unitLabel = isStock ? 'shares' : 'contracts';
+    const dirLabel = position.direction === 'SHORT' ? ' (SHORT)' : '';
+    infoEl.innerHTML = `<span>Current: ${curQty} ${unitLabel}${dirLabel} @ $${curEntry.toFixed(2)}</span>`;
+
+    // Stock-aware labels
+    document.getElementById('editAddCostLabel').textContent = isStock ? 'Cost per Share' : 'Cost per Contract';
+    document.getElementById('editAddQtyLabel').textContent = isStock ? 'Additional Shares' : 'Additional Contracts';
+
+    // Populate direct quantity field
+    document.getElementById('editQuantity').value = position.quantity || '';
 
     // Live preview of cost basis recalc
     const previewEl = document.getElementById('editAddPreview');
@@ -8761,7 +8783,7 @@ function openPositionEditModal(position) {
         if (addQty > 0 && addCost > 0) {
             const newTotalQty = curQty + addQty;
             const newAvgCost = ((curEntry * curQty) + (addCost * addQty)) / newTotalQty;
-            previewEl.innerHTML = `New: ${newTotalQty} contracts @ $${newAvgCost.toFixed(2)} avg`;
+            previewEl.innerHTML = `New: ${newTotalQty} ${unitLabel} @ $${newAvgCost.toFixed(2)} avg`;
         } else {
             previewEl.innerHTML = '';
         }
@@ -8785,7 +8807,15 @@ function openPositionEditModal(position) {
         if (cpVal !== '') updates.current_price = parseFloat(cpVal);
         if (notes) updates.notes = notes;
 
-        // Handle "Add to Position"
+        // Handle direct quantity edit
+        const qtyVal = document.getElementById('editQuantity').value.trim();
+        if (qtyVal !== '' && parseInt(qtyVal) !== curQty) {
+            updates.quantity = parseInt(qtyVal);
+            const costMultiplierDirect = isStock ? 1 : 100;
+            updates.cost_basis = parseFloat((curEntry * parseInt(qtyVal) * costMultiplierDirect).toFixed(2));
+        }
+
+        // Handle "Add to Position" (takes precedence over direct qty edit)
         const addQty = parseInt(document.getElementById('editAddQty').value) || 0;
         const addCost = parseFloat(document.getElementById('editAddCost').value) || 0;
         if (addQty > 0 && addCost > 0) {
@@ -8793,7 +8823,8 @@ function openPositionEditModal(position) {
             const newAvgCost = ((curEntry * curQty) + (addCost * addQty)) / newTotalQty;
             updates.quantity = newTotalQty;
             updates.entry_price = parseFloat(newAvgCost.toFixed(4));
-            updates.cost_basis = parseFloat((newAvgCost * newTotalQty * 100).toFixed(2));
+            const costMultiplier = isStock ? 1 : 100;
+            updates.cost_basis = parseFloat((newAvgCost * newTotalQty * costMultiplier).toFixed(2));
         }
 
         if (Object.keys(updates).length === 0) { alert('No changes'); return; }

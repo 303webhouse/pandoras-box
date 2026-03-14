@@ -1079,7 +1079,11 @@ async def close_position(position_id: str, req: ClosePositionRequest, _=Depends(
     asset_type = (pos.get("asset_type") or "").upper()
     is_stock = s in ("stock", "stock_long", "long_stock", "stock_short", "short_stock") or (not s and asset_type == "EQUITY")
     if is_stock:
-        realized_pnl = round((req.exit_price - entry_price) * close_qty, 2)
+        direction = (pos.get("direction") or "LONG").upper()
+        if direction == "SHORT":
+            realized_pnl = round((entry_price - req.exit_price) * close_qty, 2)
+        else:
+            realized_pnl = round((req.exit_price - entry_price) * close_qty, 2)
     elif s in CREDIT_STRUCTURES:
         realized_pnl = round((entry_price - req.exit_price) * 100 * close_qty, 2)
     else:
