@@ -266,6 +266,36 @@ def _compute_dte(expiry_str: str) -> Optional[int]:
         return None
 
 
+# Structures that require legs JSONB for correct pricing (>2 legs)
+MULTI_LEG_STRUCTURES = frozenset({"iron_condor", "iron_butterfly", "straddle", "strangle", "custom"})
+
+import re
+_LEG_PATTERN = re.compile(r'(long|short)\s+(\d+(?:\.\d+)?)\s*(p|c|put|call)', re.IGNORECASE)
+
+
+def _infer_legs_from_notes(notes: str) -> Optional[List[Dict[str, Any]]]:
+    """
+    Parse legs from notes like "4-leg: long 36p/45c, short 30p/50c".
+    Returns list of leg dicts compatible with get_multi_leg_value(), or None.
+    """
+    if not notes:
+        return None
+    matches = _LEG_PATTERN.findall(notes)
+    if len(matches) < 2:
+        return None
+    legs = []
+    for action_word, strike_str, type_char in matches:
+        action = "BUY" if action_word.lower() == "long" else "SELL"
+        opt_type = "put" if type_char.lower().startswith("p") else "call"
+        legs.append({
+            "action": action,
+            "option_type": opt_type,
+            "strike": float(strike_str),
+            "quantity": 1,
+        })
+    return legs
+
+
 # ── CREATE ────────────────────────────────────────────────────────────
 
 @router.post("/v2/positions")
@@ -1520,6 +1550,24 @@ async def run_mark_to_market() -> dict:
 
         # --- Multi-leg path: iron condors, straddles, etc. via legs JSONB ---
         legs_data = row.get("legs")
+
+        # Auto-infer legs from notes if missing for multi-leg structures
+        if not legs_data and structure in MULTI_LEG_STRUCTURES:
+            inferred = _infer_legs_from_notes(row.get("notes") or "")
+            if inferred:
+                legs_data = inferred
+                # Persist inferred legs back to DB so future MTM runs don't re-parse
+                try:
+                    legs_json_str = json.dumps(inferred)
+                    async with pool.acquire() as conn:
+                        await conn.execute(
+                            "UPDATE unified_positions SET legs = $1 WHERE position_id = $2",
+                            legs_json_str, row["position_id"],
+                        )
+                    logger.info("Auto-populated legs for %s from notes", row["position_id"])
+                except Exception as e:
+                    logger.warning("Failed to persist inferred legs for %s: %s", row["position_id"], e)
+
         if use_polygon and expiry and legs_data:
             try:
                 if isinstance(legs_data, str):
@@ -1540,6 +1588,15 @@ async def run_mark_to_market() -> dict:
             except Exception as e:
                 errors.append({"position_id": row["position_id"], "error": str(e)})
                 logger.warning("Multi-leg mark-to-market failed for %s: %s", row["position_id"], e)
+
+        # Guard: multi-leg structures without legs data must NOT fall through
+        # to spread/single-leg/yfinance paths — those produce wrong prices.
+        if current_price is None and structure in MULTI_LEG_STRUCTURES and not legs_data:
+            logger.warning(
+                "Skipping %s: structure=%s requires legs JSONB but none found",
+                row["position_id"], structure,
+            )
+            continue
 
         # --- Polygon path: real spread-level pricing ---
         if current_price is None and use_polygon and expiry and long_strike:
