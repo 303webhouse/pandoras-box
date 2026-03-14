@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Pandora - Real-time Trading Signal Dashboard">
     <title>Pandora</title>
-    <link rel="stylesheet" href="/styles.css?v=84">
+    <link rel="stylesheet" href="/styles.css?v=85">
     <link rel="manifest" href="/manifest.json">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -984,6 +984,7 @@
                 <button class="analytics-subtab active" data-analytics-tab="strategos" role="tab" aria-selected="true">Strategos</button>
                 <button class="analytics-subtab" data-analytics-tab="chronicle" role="tab" aria-selected="false">Chronicle</button>
                 <button class="analytics-subtab" data-analytics-tab="symposium" role="tab" aria-selected="false">Symposium</button>
+                <button class="analytics-subtab" data-analytics-tab="footprint" role="tab" aria-selected="false">Footprint Test</button>
             </section>
 
             <!-- ═══ TAB 1: STRATEGOS — The General's Command Center ═══ -->
@@ -1568,6 +1569,44 @@
                     </div>
                 </div>
             </section>
+
+            <!-- ═══ TAB 4: FOOTPRINT TEST — Forward Test Correlation ═══ -->
+            <section class="analytics-tab-pane" id="analyticsPaneFootprint" hidden>
+                <div class="analytics-section-header"><h2>Footprint Forward Test</h2></div>
+                <div class="footprint-countdown" id="footprintCountdown"></div>
+                <div class="footprint-summary" id="footprintSummary">
+                    <div class="footprint-bucket" id="fpBucketWhale">
+                        <div class="footprint-bucket-title">Whale Solo</div>
+                        <div class="footprint-bucket-count">-</div>
+                        <div class="footprint-bucket-wr">-</div>
+                    </div>
+                    <div class="footprint-bucket" id="fpBucketFootprint">
+                        <div class="footprint-bucket-title">Footprint Solo</div>
+                        <div class="footprint-bucket-count">-</div>
+                        <div class="footprint-bucket-wr">-</div>
+                    </div>
+                    <div class="footprint-bucket" id="fpBucketConfluence">
+                        <div class="footprint-bucket-title">Confluence</div>
+                        <div class="footprint-bucket-count">-</div>
+                        <div class="footprint-bucket-wr">-</div>
+                    </div>
+                </div>
+                <div class="analytics-table-wrap">
+                    <table class="analytics-table" id="footprintSignalsTable">
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>Ticker</th>
+                                <th>Source</th>
+                                <th>Direction</th>
+                                <th>Bucket</th>
+                                <th>Outcome</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </section>
         </main>
 
     <!-- Knowledgebase Popup Modal -->
@@ -1596,7 +1635,7 @@
     <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
     <script src="/app.js?v=103"></script>
-    <script src="/analytics.js?v=3"></script>
+    <script src="/analytics.js?v=4"></script>
 </body>
 </html>
 

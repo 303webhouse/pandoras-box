@@ -13,7 +13,8 @@
     const TAB_TO_PANE = {
         strategos: 'analyticsPaneStrategos',
         chronicle: 'analyticsPaneChronicle',
-        symposium: 'analyticsPaneSymposium'
+        symposium: 'analyticsPaneSymposium',
+        footprint: 'analyticsPaneFootprint'
     };
 
     const state = {
@@ -220,6 +221,10 @@
 
         if (tab === 'symposium') {
             loadSymposium();
+        }
+
+        if (tab === 'footprint') {
+            loadFootprintCorrelation();
         }
     }
 
@@ -2538,8 +2543,84 @@
             loadSignalExplorer,
             loadFactorLab,
             loadRiskTab,
+            loadFootprintCorrelation,
             activateTab: setActiveTab
         };
+    }
+
+    let _fpInterval = null;
+
+    async function loadFootprintCorrelation() {
+        const BASE = window.location.origin;
+        // Countdown to Mar 28, 2026
+        const endDate = new Date('2026-03-28T23:59:59Z');
+        const cdEl = byId('footprintCountdown');
+        if (cdEl) {
+            const now = new Date();
+            const daysLeft = Math.max(0, Math.ceil((endDate - now) / 86400000));
+            cdEl.textContent = daysLeft > 0
+                ? `Forward test: ${daysLeft} days remaining (ends Mar 28)`
+                : 'Forward test period complete — review results';
+        }
+
+        try {
+            const res = await fetch(`${BASE}/api/analytics/footprint-correlation?days=14&window_minutes=30`);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            renderFootprintBuckets(data.buckets);
+            renderFootprintTable(data.signals);
+        } catch (e) {
+            console.error('Footprint correlation load failed:', e);
+        }
+
+        // Auto-refresh every 60s while tab is active
+        if (_fpInterval) clearInterval(_fpInterval);
+        _fpInterval = setInterval(() => {
+            const pane = byId('analyticsPaneFootprint');
+            if (pane && !pane.hidden) loadFootprintCorrelation();
+            else { clearInterval(_fpInterval); _fpInterval = null; }
+        }, 60000);
+    }
+
+    function renderFootprintBuckets(buckets) {
+        const render = (elId, bucket) => {
+            const el = byId(elId);
+            if (!el) return;
+            const b = bucket || {};
+            el.querySelector('.footprint-bucket-count').textContent = b.count || 0;
+            const wr = b.win_rate != null ? `${b.win_rate}% win rate` : `${b.pending || 0} pending`;
+            el.querySelector('.footprint-bucket-wr').textContent = wr;
+            // Color border by win rate
+            if (b.win_rate != null) {
+                el.style.borderColor = b.win_rate >= 50 ? 'rgba(124,255,107,0.5)' : 'rgba(255,107,53,0.5)';
+            }
+        };
+        render('fpBucketWhale', buckets.whale_solo);
+        render('fpBucketFootprint', buckets.footprint_solo);
+        render('fpBucketConfluence', buckets.confluence);
+    }
+
+    function renderFootprintTable(signals) {
+        const tbody = document.querySelector('#footprintSignalsTable tbody');
+        if (!tbody) return;
+        if (!signals || signals.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-secondary);padding:20px;">No signals yet — waiting for footprint alerts</td></tr>';
+            return;
+        }
+        const sourceLabel = { 'DARK_POOL': 'Whale', 'FOOTPRINT': 'Footprint' };
+        const outcomeColor = { win: '#7CFF6B', loss: '#FF6B35', pending: 'var(--text-secondary)', expired: '#94a3b8' };
+        tbody.innerHTML = signals.map(s => {
+            const time = s.created_at ? new Date(s.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-';
+            const dirClass = s.direction === 'LONG' ? 'color:#7CFF6B' : s.direction === 'SHORT' ? 'color:#FF6B35' : '';
+            return `<tr>
+                <td>${time}</td>
+                <td><strong>${s.ticker}</strong></td>
+                <td>${sourceLabel[s.category] || s.category}</td>
+                <td style="${dirClass}">${s.direction || '-'}</td>
+                <td>${s.bucket === 'confluence' ? '<strong style="color:#14b8a6">Confluence</strong>' : s.bucket === 'whale_solo' ? 'Whale Solo' : 'Footprint Solo'}</td>
+                <td style="color:${outcomeColor[s.outcome] || 'inherit'}">${s.outcome || '-'}</td>
+            </tr>`;
+        }).join('');
     }
 
     document.addEventListener('DOMContentLoaded', init);

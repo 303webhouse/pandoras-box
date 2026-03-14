@@ -544,6 +544,7 @@ async def websocket_endpoint(websocket: WebSocket):
 from webhooks.tradingview import router as webhook_router
 from webhooks.circuit_breaker import router as circuit_breaker_router
 from webhooks.whale import router as whale_webhook_router
+from webhooks.footprint import router as footprint_webhook_router
 from api.positions import router as positions_router
 from api.scanner import router as scanner_router
 from api.watchlist import router as watchlist_router
@@ -566,6 +567,7 @@ from api.crypto_market import router as crypto_market_router
 from api.redis_health import router as redis_health_router
 from api.weekly_audit import router as weekly_audit_router
 from analytics.api import analytics_router
+from api.footprint_correlation import router as footprint_correlation_router
 from api.portfolio import router as portfolio_router
 from api.unified_positions import router as unified_positions_router
 from api.trade_ideas import router as trade_ideas_router
@@ -580,6 +582,7 @@ from api.flow_summary import router as flow_summary_router
 app.include_router(webhook_router, prefix="/webhook", tags=["webhooks"])
 app.include_router(circuit_breaker_router, prefix="/webhook", tags=["circuit-breaker"])
 app.include_router(whale_webhook_router, prefix="/webhook", tags=["whale"])
+app.include_router(footprint_webhook_router, prefix="/webhook", tags=["webhooks"])
 app.include_router(positions_router, prefix="/api", tags=["positions"])
 app.include_router(scanner_router, prefix="/api", tags=["scanner"])
 app.include_router(watchlist_router, prefix="/api", tags=["watchlist"])
@@ -602,6 +605,7 @@ app.include_router(crypto_market_router, prefix="/api", tags=["crypto-market"])
 app.include_router(redis_health_router, prefix="/api", tags=["health"])
 app.include_router(weekly_audit_router, prefix="/api", tags=["weekly-audit"])
 app.include_router(analytics_router, prefix="/api/analytics", tags=["analytics"])
+app.include_router(footprint_correlation_router, prefix="/api", tags=["footprint"])
 app.include_router(portfolio_router, prefix="/api/portfolio", tags=["portfolio"])
 app.include_router(unified_positions_router, prefix="/api", tags=["unified-positions"])
 app.include_router(trade_ideas_router, prefix="/api", tags=["trade-ideas"])

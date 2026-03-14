@@ -10440,3 +10440,42 @@ body[data-mode="analytics"] .analytics-shell {
 .related-time { width: 4rem; text-align: right; opacity: 0.6; }
 
 .flow-details .signal-detail-value { color: #a78bfa; }
+
+/* ── Footprint Forward Test Tab ──────────────────────────────────── */
+.footprint-countdown {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-bottom: 12px;
+}
+.footprint-summary {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin-bottom: 16px;
+}
+.footprint-bucket {
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    padding: 16px;
+    text-align: center;
+}
+.footprint-bucket-title {
+    font-family: 'Orbit', sans-serif;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 8px;
+}
+.footprint-bucket-count {
+    font-size: 28px;
+    font-weight: 700;
+    color: #fff;
+}
+.footprint-bucket-wr {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-top: 4px;
+}
