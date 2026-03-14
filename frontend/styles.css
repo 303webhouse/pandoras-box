@@ -307,7 +307,7 @@ body {
 .sector-heatmap {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 6px;
     padding: 4px;
     height: 100%;
     width: 100%;
@@ -317,58 +317,55 @@ body {
 
 .sector-heatmap-row {
     display: flex;
-    gap: 2px;
+    gap: 6px;
     width: 100%;
     box-sizing: border-box;
     min-height: 0;
 }
 
 .sector-heatmap-cell {
+    background: var(--card-bg);
     display: flex;
     flex-direction: column;
     justify-content: center;
     align-items: center;
-    border-radius: 3px;
-    padding: 2px 4px;
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    padding: 6px 8px;
     cursor: pointer;
-    transition: opacity 0.15s;
+    transition: border-color 0.2s, box-shadow 0.2s, opacity 0.15s;
     overflow: hidden;
     box-sizing: border-box;
     min-width: 0;
 }
 
 .sector-heatmap-cell:hover {
-    opacity: 0.8;
-}
-.sector-heatmap-cell.sector-neutral {
-    border: 1px solid rgba(255,255,255,0.15);
+    opacity: 0.85;
 }
 
 .sector-hm-name {
     font-size: calc(10px * var(--s, 1));
     font-weight: 500;
-    color: #fff;
-    text-shadow: 0 1px 4px rgba(0,0,0,0.8), 0 0 2px rgba(0,0,0,0.6);
+    color: var(--text-secondary);
     text-align: center;
     line-height: 1.2;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
     max-width: 100%;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
 }
 
 .sector-hm-etf {
-    font-size: calc(20px * var(--s, 1));
-    font-weight: 600;
+    font-size: calc(18px * var(--s, 1));
+    font-weight: 700;
     color: #fff;
-    text-shadow: 0 1px 4px rgba(0,0,0,0.8), 0 0 2px rgba(0,0,0,0.6);
 }
 
 .sector-hm-change {
     font-size: calc(11px * var(--s, 1));
-    font-weight: 500;
-    color: #fff;
-    text-shadow: 0 1px 4px rgba(0,0,0,0.8), 0 0 2px rgba(0,0,0,0.6);
+    font-weight: 600;
 }
 
 .sector-hm-trend { font-size: calc(9px * var(--s, 1)); margin-left: 1px; }
