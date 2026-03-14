@@ -8713,6 +8713,10 @@ function openPositionEditModal(position) {
                         <input type="text" id="editPositionAccount" readonly style="opacity: 0.6; cursor: not-allowed;">
                     </div>
                     <div class="form-row">
+                        <label>Entry Price</label>
+                        <input type="number" id="editEntryPrice" step="0.01" min="0">
+                    </div>
+                    <div class="form-row">
                         <label>Quantity</label>
                         <input type="number" id="editQuantity" min="1" step="1">
                     </div>
@@ -8761,6 +8765,7 @@ function openPositionEditModal(position) {
     }
 
     document.getElementById('editModalTitle').textContent = `Edit ${position.ticker}`;
+    document.getElementById('editEntryPrice').value = position.entry_price || '';
     document.getElementById('editStopLoss').value = position.stop_loss || '';
     document.getElementById('editPositionAccount').value = position.account || 'ROBINHOOD';
     document.getElementById('editTarget').value = position.target_1 || '';
@@ -8808,10 +8813,12 @@ function openPositionEditModal(position) {
     newSaveBtn.addEventListener('click', async () => {
         const posId = position.position_id || position.id;
         const updates = {};
+        const epVal = document.getElementById('editEntryPrice').value.trim();
         const slVal = document.getElementById('editStopLoss').value.trim();
         const tgtVal = document.getElementById('editTarget').value.trim();
         const cpVal = document.getElementById('editCurrentPrice').value.trim();
         const notes = document.getElementById('editNotes').value.trim();
+        if (epVal !== '' && parseFloat(epVal) !== curEntry) updates.entry_price = parseFloat(epVal);
         if (slVal !== '') updates.stop_loss = parseFloat(slVal);
         if (tgtVal !== '') updates.target_1 = parseFloat(tgtVal);
         if (cpVal !== '') updates.current_price = parseFloat(cpVal);
