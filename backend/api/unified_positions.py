@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Header, Query, Request
 from utils.pivot_auth import require_api_key
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
-from datetime import datetime, date, timezone
+from datetime import datetime, date, timezone, timedelta
 from decimal import Decimal
 import logging
 import json
@@ -51,10 +51,11 @@ def _match_account_balance(account_filter: str, balance_name: str) -> bool:
     return name_lower in aliases or name_lower.startswith(filter_normalized)
 
 
-async def _adjust_account_cash(pool, account: str, delta: float):
+async def _adjust_account_cash(pool, account: str, delta: float) -> bool:
     """
     Atomically adjust cash balance for the given account.
     delta > 0 = cash increases, delta < 0 = cash decreases.
+    Returns True if adjustment was applied, False if no matching account found.
     """
     async with pool.acquire() as conn:
         rows = await conn.fetch("SELECT account_name, cash FROM account_balances")
@@ -65,8 +66,9 @@ async def _adjust_account_cash(pool, account: str, delta: float):
                     round(delta, 2), row["account_name"],
                 )
                 logger.info("Cash adjusted for %s: %+.2f", row["account_name"], delta)
-                return
-    logger.warning("No matching account_balance row for account=%s", account)
+                return True
+    logger.error("CASH ADJUSTMENT FAILED: No matching account_balance row for account=%s (delta=%+.2f)", account, delta)
+    return False
 
 
 def normalize_spread_strikes(
@@ -386,12 +388,14 @@ async def create_position(req: CreatePositionRequest, _=Depends(require_api_key)
 
         # Adjust cash for the added portion only
         add_cost = abs(add_entry) * add_qty * (1 if is_stock else 100)
+        cash_ok = True
         if add_cost:
             cash_delta = add_cost if s in CREDIT_STRUCTURES else -add_cost
             try:
-                await _adjust_account_cash(pool, account, cash_delta)
+                cash_ok = await _adjust_account_cash(pool, account, cash_delta)
             except Exception as e:
-                logger.warning("Cash adjustment failed on add-to-position: %s", e)
+                logger.error("Cash adjustment failed on add-to-position: %s", e)
+                cash_ok = False
 
         result = _row_to_dict(row)
         logger.info(
@@ -479,13 +483,15 @@ async def create_position(req: CreatePositionRequest, _=Depends(require_api_key)
         )
 
     # Auto-adjust cash: deduct cost for debit, add premium for credit
+    cash_ok = True
     if cost_basis:
         s = (req.structure or "").lower()
         cash_delta = cost_basis if s in CREDIT_STRUCTURES else -cost_basis
         try:
-            await _adjust_account_cash(pool, account, cash_delta)
+            cash_ok = await _adjust_account_cash(pool, account, cash_delta)
         except Exception as e:
-            logger.warning("Cash adjustment failed on create: %s", e)
+            logger.error("Cash adjustment failed on create: %s", e)
+            cash_ok = False
 
     # If from signal, update signal action
     if req.signal_id:
@@ -509,7 +515,7 @@ async def create_position(req: CreatePositionRequest, _=Depends(require_api_key)
     except Exception:
         pass
 
-    return {"status": "created", "position": result}
+    return {"status": "created", "position": result, "cash_adjusted": cash_ok}
 
 
 # ── READ ──────────────────────────────────────────────────────────────
@@ -735,6 +741,24 @@ async def portfolio_summary(account: Optional[str] = Query(None)):
             "entry_price": p.get("entry_price"),
         })
 
+    # BUG 5: Flag positions with stale pricing (no update in 2+ hours)
+    now_utc = datetime.now(timezone.utc)
+    stale_count = 0
+    for p in positions:
+        pua = p.get("price_updated_at")
+        if not pua:
+            stale_count += 1
+        else:
+            try:
+                if isinstance(pua, str):
+                    pua_dt = datetime.fromisoformat(pua).replace(tzinfo=timezone.utc) if "+" not in pua and "Z" not in pua else datetime.fromisoformat(pua.replace("Z", "+00:00"))
+                else:
+                    pua_dt = pua if pua.tzinfo else pua.replace(tzinfo=timezone.utc)
+                if pua_dt < now_utc - timedelta(hours=2):
+                    stale_count += 1
+            except Exception:
+                stale_count += 1
+
     return {
         "account_balance": account_balance,
         "cash": cash,
@@ -746,6 +770,7 @@ async def portfolio_summary(account: Optional[str] = Query(None)):
         "nearest_dte": nearest_dte,
         "net_direction": net_direction,
         "direction_breakdown": {"long": long_count, "short": short_count, "mixed": mixed_count},
+        "stale_positions": stale_count,
         "positions": summaries,
     }
 
@@ -853,6 +878,15 @@ async def update_position(position_id: str, req: UpdatePositionRequest, _=Depend
     """Update position fields. Recalculates unrealized P&L if current_price is updated."""
     pool = await get_postgres_client()
 
+    # Fetch old row for cash delta calculation
+    async with pool.acquire() as conn:
+        old_row = await conn.fetchrow(
+            "SELECT * FROM unified_positions WHERE position_id = $1", position_id
+        )
+    if not old_row:
+        raise HTTPException(status_code=404, detail=f"Position {position_id} not found")
+    old_pos = _row_to_dict(old_row)
+
     # Build dynamic SET clause
     sets = ["updated_at = NOW()"]
     params = []
@@ -952,6 +986,30 @@ async def update_position(position_id: str, req: UpdatePositionRequest, _=Depend
             )
         result["unrealized_pnl"] = unrealized
 
+    # BUG 3: If entry_price or quantity changed on an OPEN position, adjust cash for the cost_basis delta
+    cash_ok = None
+    if (req.entry_price is not None or req.quantity is not None) and result.get("status", "").upper() == "OPEN":
+        old_cost = float(old_pos.get("cost_basis") or 0)
+        s = (result.get("structure") or "").lower()
+        is_stock = s in ("stock", "stock_long", "long_stock", "stock_short", "short_stock")
+        new_entry = float(result.get("entry_price") or 0)
+        new_qty = int(result.get("quantity") or 0)
+        new_cost = abs(new_entry) * new_qty * (1 if is_stock else 100)
+
+        if round(new_cost, 2) != round(old_cost, 2):
+            cost_delta = new_cost - old_cost
+            # For debit positions: more cost = less cash. For credit: more cost = more cash.
+            cash_delta = cost_delta if s in CREDIT_STRUCTURES else -cost_delta
+            cash_ok = await _adjust_account_cash(pool, result.get("account", "ROBINHOOD"), cash_delta)
+
+            # Update cost_basis in DB to match
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE unified_positions SET cost_basis = $1 WHERE position_id = $2",
+                    round(new_cost, 2), position_id
+                )
+            result["cost_basis"] = round(new_cost, 2)
+
     try:
         await manager.broadcast_position_update({
             "action": "POSITION_UPDATED",
@@ -960,7 +1018,10 @@ async def update_position(position_id: str, req: UpdatePositionRequest, _=Depend
     except Exception:
         pass
 
-    return {"status": "updated", "position": result}
+    resp = {"status": "updated", "position": result}
+    if cash_ok is not None:
+        resp["cash_adjusted"] = cash_ok
+    return resp
 
 
 # ── Ariadne's Thread: Signal Outcome Resolution ──────────────────────
@@ -1124,7 +1185,7 @@ async def close_position(position_id: str, req: ClosePositionRequest, _=Depends(
                 pos.get("source", "MANUAL"),
                 entry_price, pos.get("stop_loss"), pos.get("target_1"),
                 close_qty,
-                datetime.fromisoformat(pos["entry_date"]) if isinstance(pos.get("entry_date"), str) else pos.get("entry_date", now),
+                datetime.fromisoformat(str(pos.get("entry_date") or pos.get("created_at") or now)) if isinstance(pos.get("entry_date") or pos.get("created_at"), str) else (pos.get("entry_date") or pos.get("created_at") or now),
                 now, req.exit_price,
                 realized_pnl, req.notes or "Closed via unified positions",
                 req.notes,
@@ -1180,14 +1241,16 @@ async def close_position(position_id: str, req: ClosePositionRequest, _=Depends(
                 logger.warning(f"Could not resolve signal outcome: {e}")
 
     # Auto-adjust cash for the closed portion
+    close_cash_ok = True
     if req.exit_price is not None:
         multiplier = 1 if is_stock else 100
         exit_value = round(abs(req.exit_price) * multiplier * close_qty, 2)
         cash_delta = -exit_value if s in CREDIT_STRUCTURES else exit_value
         try:
-            await _adjust_account_cash(pool, pos.get("account", "ROBINHOOD"), cash_delta)
+            close_cash_ok = await _adjust_account_cash(pool, pos.get("account", "ROBINHOOD"), cash_delta)
         except Exception as e:
-            logger.warning("Cash adjustment failed on close: %s", e)
+            logger.error("Cash adjustment failed on close: %s", e)
+            close_cash_ok = False
 
     # Write to closed_positions table (for analytics/weekly review)
     if not is_partial:
@@ -1195,7 +1258,8 @@ async def close_position(position_id: str, req: ClosePositionRequest, _=Depends(
             exit_val = req.exit_value or round(abs(req.exit_price) * (1 if is_stock else 100) * close_qty, 2)
             cost_basis_val = float(pos["cost_basis"]) if pos.get("cost_basis") else None
             pnl_pct = round((realized_pnl / abs(cost_basis_val)) * 100, 2) if cost_basis_val and cost_basis_val != 0 else None
-            opened_at = datetime.fromisoformat(pos["entry_date"]) if isinstance(pos.get("entry_date"), str) else pos.get("entry_date")
+            raw_opened = pos.get("entry_date") or pos.get("created_at")
+            opened_at = datetime.fromisoformat(str(raw_opened)) if isinstance(raw_opened, str) else raw_opened
             hold_days = (now.date() - opened_at.date()).days if opened_at and hasattr(opened_at, "date") else None
             struct_lower = s
             opt_type = "Put" if "put" in struct_lower else "Call" if struct_lower else None
@@ -1246,6 +1310,7 @@ async def close_position(position_id: str, req: ClosePositionRequest, _=Depends(
         "trade_outcome": trade_outcome,
         "closed_qty": close_qty,
         "remaining_qty": total_qty - close_qty if is_partial else 0,
+        "cash_adjusted": close_cash_ok,
     }
 
 
@@ -1253,14 +1318,34 @@ async def close_position(position_id: str, req: ClosePositionRequest, _=Depends(
 
 @router.delete("/v2/positions/{position_id}")
 async def delete_position(position_id: str, _=Depends(require_api_key)):
-    """Delete a position (for errors/test data). No trade record created."""
+    """Delete a position (for errors/test data). Reverses cash adjustment from creation."""
     pool = await get_postgres_client()
     async with pool.acquire() as conn:
-        result = await conn.execute(
+        row = await conn.fetchrow(
+            "SELECT * FROM unified_positions WHERE position_id = $1", position_id
+        )
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Position {position_id} not found")
+
+    pos = _row_to_dict(row)
+
+    # Reverse cash for OPEN positions (closed positions already had cash adjusted on close)
+    cash_ok = True
+    if pos.get("status") == "OPEN" and pos.get("cost_basis"):
+        s = (pos.get("structure") or "").lower()
+        cost = float(pos["cost_basis"])
+        # Reverse: credit structures added cash at open → now subtract. Debit subtracted → now add.
+        cash_delta = -cost if s in CREDIT_STRUCTURES else cost
+        try:
+            cash_ok = await _adjust_account_cash(pool, pos.get("account", "ROBINHOOD"), cash_delta)
+        except Exception as e:
+            logger.error("Cash reversal failed on delete: %s", e)
+            cash_ok = False
+
+    async with pool.acquire() as conn:
+        await conn.execute(
             "DELETE FROM unified_positions WHERE position_id = $1", position_id
         )
-    if result == "DELETE 0":
-        raise HTTPException(status_code=404, detail=f"Position {position_id} not found")
 
     try:
         await manager.broadcast_position_update({
@@ -1270,7 +1355,7 @@ async def delete_position(position_id: str, _=Depends(require_api_key)):
     except Exception:
         pass
 
-    return {"status": "deleted", "position_id": position_id}
+    return {"status": "deleted", "position_id": position_id, "cash_reversed": cash_ok}
 
 
 # ── BULK OPERATIONS ───────────────────────────────────────────────────
@@ -1389,6 +1474,36 @@ async def bulk_create_positions(req: BulkRequest, _=Depends(require_api_key)):
         "positions": created,
         "error_details": errors,
     }
+
+
+# ── RECONCILE CASH ───────────────────────────────────────────────────
+
+@router.post("/v2/positions/reconcile-cash")
+async def reconcile_cash(request: Request, _=Depends(require_api_key)):
+    """Set cash to a known value from the broker. Fixes all accumulated drift."""
+    body = await request.json()
+    known_cash = body.get("cash")
+    account = body.get("account", "ROBINHOOD")
+    if known_cash is None:
+        raise HTTPException(status_code=400, detail="cash field required")
+
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT account_name, cash FROM account_balances")
+        for row in rows:
+            if _match_account_balance(account, row["account_name"]):
+                old_cash = float(row["cash"] or 0)
+                drift = round(float(known_cash) - old_cash, 2)
+                await conn.execute(
+                    "UPDATE account_balances SET cash = $1, updated_at = NOW(), updated_by = 'cash_reconcile' WHERE account_name = $2",
+                    round(float(known_cash), 2), row["account_name"],
+                )
+                logger.info("Cash reconciled for %s: was $%.2f, now $%.2f (drift: $%+.2f)",
+                           row["account_name"], old_cash, float(known_cash), drift)
+                return {"status": "reconciled", "account": row["account_name"],
+                        "old_cash": old_cash, "new_cash": float(known_cash), "drift": drift}
+
+    raise HTTPException(status_code=404, detail=f"No account_balance row matching '{account}'")
 
 
 # ── RECONCILE (screenshot sync) ──────────────────────────────────────

@@ -7746,6 +7746,7 @@ function renderPortfolioSummaryWidget(rhSummary, fidRothSummary) {
         if (rhSummary.position_count) parts.push(rhSummary.position_count + ' pos');
         if (rhSummary.net_direction && rhSummary.net_direction !== 'FLAT') parts.push(rhSummary.net_direction);
         if (rhSummary.nearest_dte !== null && rhSummary.nearest_dte !== undefined) parts.push(rhSummary.nearest_dte + ' DTE');
+        if (rhSummary.stale_positions > 0) parts.push(rhSummary.stale_positions + ' stale');
         rhMeta.textContent = parts.join(' \u00B7 ');
     }
 
@@ -7785,13 +7786,17 @@ function showCashUpdateModal(currentCash) {
         const val = parseFloat(input.value);
         if (isNaN(val)) return;
         try {
-            await fetch(`${API_URL}/v2/positions/account-balance`, {
-                method: 'PATCH',
+            const resp = await fetch(`${API_URL}/v2/positions/reconcile-cash`, {
+                method: 'POST',
                 headers: authHeaders(),
-                body: JSON.stringify({cash: val}),
+                body: JSON.stringify({cash: val, account: 'ROBINHOOD'}),
             });
+            const data = await resp.json();
             modal.remove();
             loadPortfolioSummary();
+            if (data.drift && Math.abs(data.drift) > 0.01) {
+                console.log(`Cash reconciled: drift was $${data.drift > 0 ? '+' : ''}${data.drift.toFixed(2)}`);
+            }
         } catch (e) {
             console.error('Failed to update cash:', e);
         }
@@ -8436,6 +8441,11 @@ async function executePositionClose(positionId, exitPrice, closeQty, tradeOutcom
 
             const outcome = data.trade_outcome || tradeOutcome;
             console.log(`Position closed: ${position?.ticker} - ${outcome} - P&L: $${data.realized_pnl?.toFixed(2) || '--'}`);
+
+            // BUG 6: Warn if cash adjustment failed
+            if (data.cash_adjusted === false) {
+                console.warn('Cash adjustment failed for position close — portfolio cash may be inaccurate');
+            }
         } else {
             alert('Failed to close position: ' + (data.detail || data.message || 'Unknown error'));
         }
