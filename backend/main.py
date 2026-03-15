@@ -122,20 +122,38 @@ async def lifespan(app: FastAPI):
 
     # Mark-to-market: refresh position prices every 15 min during market hours
     async def mark_to_market_loop():
-        """Fetch live Polygon prices for open positions during market hours."""
+        """Fetch live Polygon prices for open positions during market hours.
+        Runs every 15 min 9 AM - 5 PM ET weekdays.
+        Forces a closing bell run at 4:15 PM ET to capture near-close prices.
+        """
         import pytz
         from datetime import datetime as dt_cls
+
+        closing_bell_fired_today = None  # Track date to fire once per day
 
         while True:
             try:
                 et = dt_cls.now(pytz.timezone("America/New_York"))
-                # Market hours + buffer: 9:00 AM - 4:30 PM ET, weekdays
-                if et.weekday() < 5 and 9 <= et.hour < 17:
+                today_date = et.date()
+                is_weekday = et.weekday() < 5
+                in_market_window = is_weekday and 9 <= et.hour < 17
+
+                # Closing bell run: 4:15-4:30 PM ET, once per day
+                is_closing_bell = (
+                    is_weekday
+                    and et.hour == 16 and 15 <= et.minute < 30
+                    and closing_bell_fired_today != today_date
+                )
+
+                if in_market_window or is_closing_bell:
                     from api.unified_positions import run_mark_to_market
                     result = await run_mark_to_market()
                     updated = result.get("updated", 0)
                     errors = result.get("errors", [])
-                    if updated > 0:
+                    if is_closing_bell:
+                        closing_bell_fired_today = today_date
+                        logger.info("🔔 Closing bell MTM: updated %d positions", updated)
+                    elif updated > 0:
                         logger.info("📊 Mark-to-market: updated %d positions", updated)
                     if errors:
                         logger.warning("📊 Mark-to-market: %d errors", len(errors))
