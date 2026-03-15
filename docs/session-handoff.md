@@ -596,3 +596,6 @@ Validation:
 - All 4 files deployed to VPS (`/opt/openclaw/workspace/scripts/`), syntax verified, live tested. NVDA: rs_vs_spy=2.44, bb_width=12.32, vwap_5d=191.49, vol_ad_ratio=2.59. SPY: rs_vs_spy=None (correctly skipped). Cache permissions fixed. OpenClaw restarted.
 - **All 3 expert review tiers complete.** Ready for Brief 07 (Watchlist Re-Scorer).
 - UI tweak in `frontend/app.js`: the Market Bias confidence label beside the bias level (`HIGH (18/20 active)`) now renders in white instead of the confidence color map.
+- Follow-up fix for the Market Bias badge:
+  - composite confidence lookup now supports both `CompositeConfidence` and `compositeConfidence`
+  - CSS also forces both IDs to white to cover live DOM drift
