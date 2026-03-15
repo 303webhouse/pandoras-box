@@ -11,7 +11,7 @@ Payload schema:
   "signal":          "FOOTPRINT",
   "ticker":          "SPY",
   "tf":              "5",
-  "sub_type":        "stacked_buy",    // stacked_buy, stacked_sell, buy_absorption, sell_absorption
+  "sub_type":        "stacked_buy",    // stacked_buy, stacked_sell
   "direction":       "LONG",
   "price":           560.50,
   "stacked_layers":  4,
@@ -54,6 +54,10 @@ class FootprintSignal(BaseModel):
     stacked_layers: Optional[int] = None
     buy_imb_count: Optional[int] = None
     sell_imb_count: Optional[int] = None
+    # v2 quality-gate fields
+    density_pct: Optional[float] = None      # % of rows with imbalances
+    zone_coverage_pct: Optional[float] = None # stacked zone as % of bar range
+    vol_ratio: Optional[float] = None         # bar volume vs 20-SMA
     secret: Optional[str] = None
 
     model_config = {"extra": "allow"}
@@ -74,8 +78,6 @@ def _sub_type_display(sub_type: Optional[str]) -> str:
     return {
         "stacked_buy": "Stacked Buy Imbalance",
         "stacked_sell": "Stacked Sell Imbalance",
-        "buy_absorption": "Buy Absorption",
-        "sell_absorption": "Sell Absorption",
     }.get(sub_type or "", sub_type or "Unknown")
 
 
@@ -175,6 +177,9 @@ async def footprint_webhook(data: FootprintSignal):
                 "stacked_layers": data.stacked_layers,
                 "buy_imb_count": data.buy_imb_count,
                 "sell_imb_count": data.sell_imb_count,
+                "density_pct": data.density_pct,
+                "zone_coverage_pct": data.zone_coverage_pct,
+                "vol_ratio": data.vol_ratio,
                 "tf": data.tf,
                 "cached_at": datetime.utcnow().isoformat() + "Z",
             }
@@ -217,6 +222,9 @@ async def footprint_webhook(data: FootprintSignal):
                     "stacked_layers": data.stacked_layers,
                     "buy_imb_count": data.buy_imb_count,
                     "sell_imb_count": data.sell_imb_count,
+                    "density_pct": data.density_pct,
+                    "zone_coverage_pct": data.zone_coverage_pct,
+                    "vol_ratio": data.vol_ratio,
                 },
                 "timestamp": datetime.utcnow().isoformat(),
             }
