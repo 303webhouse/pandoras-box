@@ -390,7 +390,9 @@ async def create_position(req: CreatePositionRequest, _=Depends(require_api_key)
         add_cost = abs(add_entry) * add_qty * (1 if is_stock else 100)
         cash_ok = True
         if add_cost:
-            cash_delta = add_cost if s in CREDIT_STRUCTURES else -add_cost
+            d_existing = (existing.get("direction") or "").upper()
+            is_short_equity = d_existing == "SHORT" and is_stock
+            cash_delta = add_cost if (s in CREDIT_STRUCTURES or is_short_equity) else -add_cost
             try:
                 cash_ok = await _adjust_account_cash(pool, account, cash_delta)
             except Exception as e:
@@ -483,10 +485,13 @@ async def create_position(req: CreatePositionRequest, _=Depends(require_api_key)
         )
 
     # Auto-adjust cash: deduct cost for debit, add premium for credit
+    # Short stock: selling shares generates cash proceeds (like a credit)
     cash_ok = True
     if cost_basis:
         s = (req.structure or "").lower()
-        cash_delta = cost_basis if s in CREDIT_STRUCTURES else -cost_basis
+        d = (direction or "").upper()
+        is_short_equity = d == "SHORT" and s in ("stock", "stock_short", "short_stock", "")
+        cash_delta = cost_basis if (s in CREDIT_STRUCTURES or is_short_equity) else -cost_basis
         try:
             cash_ok = await _adjust_account_cash(pool, account, cash_delta)
         except Exception as e:
@@ -674,10 +679,13 @@ async def portfolio_summary(account: Optional[str] = Query(None)):
         d = (p.get("direction") or "").upper()
         is_short_stock = d == "SHORT" and s in ("stock", "stock_short", "short_stock", "")
         if is_short_stock:
-            # Short stock: the position is a liability (cost to buy back)
-            # Net value = unrealized P&L only (proceeds already in cash)
+            # Short stock: position is a liability (cost to buy back)
+            # Value = -(current_price * qty) = unrealized_pnl - cost_basis
+            # This correctly represents the buyback liability when cash
+            # already includes the short sale proceeds (as reported by broker)
             pnl = p.get("unrealized_pnl") or 0
-            total_position_value += pnl
+            cost = p.get("cost_basis") or 0
+            total_position_value += pnl - cost
         else:
             cost = p.get("cost_basis")
             if cost is None:
@@ -741,8 +749,32 @@ async def portfolio_summary(account: Optional[str] = Query(None)):
             "entry_price": p.get("entry_price"),
         })
 
-    # BUG 5: Flag positions with stale pricing (no update in 2+ hours)
+    # Flag positions with stale pricing
+    # During market hours: stale if no update in 30+ minutes
+    # Outside market hours: stale if not updated after 4:00 PM ET on most recent trading day
+    import pytz
     now_utc = datetime.now(timezone.utc)
+    et_tz = pytz.timezone("America/New_York")
+    now_et = now_utc.astimezone(et_tz)
+    is_market_hours = now_et.weekday() < 5 and 9 <= now_et.hour < 17
+
+    if is_market_hours:
+        stale_threshold = now_utc - timedelta(minutes=30)
+    else:
+        # Find most recent 4:00 PM ET (closing bell)
+        last_close_et = now_et.replace(hour=16, minute=0, second=0, microsecond=0)
+        if now_et.hour < 16 or now_et.weekday() >= 5:
+            # Before market close today or weekend — go back to last weekday
+            days_back = 1
+            if now_et.weekday() == 0 and now_et.hour < 16:
+                days_back = 3  # Monday before close → Friday
+            elif now_et.weekday() == 6:
+                days_back = 2  # Sunday → Friday
+            elif now_et.weekday() == 5:
+                days_back = 1  # Saturday → Friday
+            last_close_et = last_close_et - timedelta(days=days_back)
+        stale_threshold = last_close_et.astimezone(timezone.utc)
+
     stale_count = 0
     for p in positions:
         pua = p.get("price_updated_at")
@@ -754,7 +786,7 @@ async def portfolio_summary(account: Optional[str] = Query(None)):
                     pua_dt = datetime.fromisoformat(pua).replace(tzinfo=timezone.utc) if "+" not in pua and "Z" not in pua else datetime.fromisoformat(pua.replace("Z", "+00:00"))
                 else:
                     pua_dt = pua if pua.tzinfo else pua.replace(tzinfo=timezone.utc)
-                if pua_dt < now_utc - timedelta(hours=2):
+                if pua_dt < stale_threshold:
                     stale_count += 1
             except Exception:
                 stale_count += 1
@@ -972,8 +1004,8 @@ async def update_position(position_id: str, req: UpdatePositionRequest, _=Depend
 
     result = _row_to_dict(row)
 
-    # Recalculate unrealized P&L if current_price or entry_price was updated
-    if (req.current_price is not None or req.entry_price is not None or req.quantity is not None) and result.get("entry_price") and result.get("current_price"):
+    # Recalculate unrealized P&L if price, quantity, direction, or structure changed
+    if (req.current_price is not None or req.entry_price is not None or req.quantity is not None or req.direction is not None or req.structure is not None) and result.get("entry_price") and result.get("current_price"):
         unrealized = _compute_unrealized_pnl(
             result["entry_price"], result["current_price"],
             result["quantity"], result.get("structure", ""),
@@ -1241,11 +1273,14 @@ async def close_position(position_id: str, req: ClosePositionRequest, _=Depends(
                 logger.warning(f"Could not resolve signal outcome: {e}")
 
     # Auto-adjust cash for the closed portion
+    # Short stock close = buying back shares = cash outflow
     close_cash_ok = True
     if req.exit_price is not None:
         multiplier = 1 if is_stock else 100
         exit_value = round(abs(req.exit_price) * multiplier * close_qty, 2)
-        cash_delta = -exit_value if s in CREDIT_STRUCTURES else exit_value
+        d_close = (pos.get("direction") or "").upper()
+        is_short_equity = d_close == "SHORT" and is_stock
+        cash_delta = -exit_value if (s in CREDIT_STRUCTURES or is_short_equity) else exit_value
         try:
             close_cash_ok = await _adjust_account_cash(pool, pos.get("account", "ROBINHOOD"), cash_delta)
         except Exception as e:
@@ -1334,8 +1369,10 @@ async def delete_position(position_id: str, _=Depends(require_api_key)):
     if pos.get("status") == "OPEN" and pos.get("cost_basis"):
         s = (pos.get("structure") or "").lower()
         cost = float(pos["cost_basis"])
+        d_del = (pos.get("direction") or "").upper()
+        is_short_equity = d_del == "SHORT" and s in ("stock", "stock_short", "short_stock", "")
         # Reverse: credit structures added cash at open → now subtract. Debit subtracted → now add.
-        cash_delta = -cost if s in CREDIT_STRUCTURES else cost
+        cash_delta = -cost if (s in CREDIT_STRUCTURES or is_short_equity) else cost
         try:
             cash_ok = await _adjust_account_cash(pool, pos.get("account", "ROBINHOOD"), cash_delta)
         except Exception as e:
