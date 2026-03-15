@@ -1801,7 +1801,7 @@ function renderCompositeBias(data, dailyData = null) {
             ? ` (${activeCount}/${totalCount} active)`
             : '';
         confEl.textContent = `${confidence}${suffix}`;
-        confEl.style.color = CONFIDENCE_COLORS[confidence] || CONFIDENCE_COLORS.LOW;
+        confEl.style.color = '#ffffff';
     }
     if (secondaryEl) {
         const compositeLevel = String(data.bias_level || 'NEUTRAL').replace(/_/g, ' ');
@@ -4079,7 +4079,7 @@ function renderCryptoBiasSummary() {
     if (scoreEl) scoreEl.textContent = Number.isFinite(compositeScoreVal) ? `(${compositeScoreVal.toFixed(2)})` : '(--)';
     if (confEl) {
         confEl.textContent = compositeConf;
-        confEl.style.color = CONFIDENCE_COLORS[compositeConf] || CONFIDENCE_COLORS.LOW;
+        confEl.style.color = '#ffffff';
     }
 }
 
