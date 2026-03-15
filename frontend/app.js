@@ -1729,7 +1729,7 @@ async function fetchCompositeBias() {
 function showCompositeError() {
     const levelEl = document.getElementById('compositeBiasLevel');
     const scoreEl = document.getElementById('compositeBiasScore');
-    const confEl = document.getElementById('compositeConfidence');
+    const confEl = getCompositeConfidenceEl();
     const secondaryEl = document.getElementById('compositeBiasSecondary');
     const lastUpdateEl = document.getElementById('compositeLastUpdate');
 
@@ -1738,6 +1738,11 @@ function showCompositeError() {
     if (confEl) confEl.textContent = 'LOW';
     if (secondaryEl) secondaryEl.textContent = 'Composite: --';
     if (lastUpdateEl) lastUpdateEl.textContent = 'Last update: --';
+}
+
+function getCompositeConfidenceEl() {
+    return document.getElementById('CompositeConfidence')
+        || document.getElementById('compositeConfidence');
 }
 
 function renderCompositeBias(data, dailyData = null) {
@@ -1752,7 +1757,7 @@ function renderCompositeBias(data, dailyData = null) {
     const banner = document.getElementById('compositeBiasBanner');
     const levelEl = document.getElementById('compositeBiasLevel');
     const scoreEl = document.getElementById('compositeBiasScore');
-    const confEl = document.getElementById('compositeConfidence');
+    const confEl = getCompositeConfidenceEl();
     const secondaryEl = document.getElementById('compositeBiasSecondary');
     const overrideEl = document.getElementById('compositeOverrideIndicator');
     const factorList = document.getElementById('compositeFactorList');

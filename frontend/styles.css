@@ -970,6 +970,11 @@ body {
     background: rgba(255, 255, 255, 0.05);
 }
 
+#CompositeConfidence,
+#compositeConfidence {
+    color: #ffffff !important;
+}
+
 .override-indicator {
     font-size: 11px;
     color: #ff9800;
