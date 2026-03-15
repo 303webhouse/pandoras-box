@@ -1230,6 +1230,18 @@ async def close_position(position_id: str, req: ClosePositionRequest, _=Depends(
     except Exception as e:
         logger.warning(f"Could not create trade record: {e}")
 
+    # Proximity attribution — soft-link trade to recent signals
+    if trade_id:
+        try:
+            from analytics.proximity_attribution import attribute_trade
+            import asyncio as _asyncio
+            _asyncio.ensure_future(attribute_trade(
+                trade_id=trade_id, ticker=pos["ticker"],
+                action='close', timestamp=datetime.now(timezone.utc)
+            ))
+        except Exception as e:
+            logger.warning(f"Proximity attribution failed: {e}")
+
     if is_partial:
         # Partial close: reduce quantity, adjust cost_basis proportionally, keep OPEN
         remaining_qty = total_qty - close_qty

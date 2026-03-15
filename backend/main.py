@@ -376,6 +376,30 @@ async def lifespan(app: FastAPI):
 
     oracle_task = asyncio.create_task(oracle_refresh_loop())
 
+    # Price collector: daily OHLCV for SPY + watchlist (backtesting + factor accuracy)
+    async def price_collector_loop():
+        """Collect daily prices for SPY + watchlist tickers."""
+        await asyncio.sleep(180)  # 3 min startup delay
+        while True:
+            try:
+                from analytics.price_collector import collect_price_history_cycle
+                result = await collect_price_history_cycle()
+                upserted = result.get("rows_upserted", 0)
+                if upserted > 0:
+                    logger.info("📈 Price collector: %d rows upserted", upserted)
+            except Exception as e:
+                logger.warning("Price collector error: %s", e)
+            await asyncio.sleep(3600)  # 1 hour
+
+    price_collector_task = asyncio.create_task(price_collector_loop())
+
+    # Ensure proximity attribution columns exist
+    try:
+        from analytics.proximity_attribution import ensure_attribution_columns
+        await ensure_attribution_columns()
+    except Exception as e:
+        logger.warning("Attribution columns setup: %s", e)
+
     logger.info("✅ Pandora's Box is live")
 
     yield
@@ -393,6 +417,7 @@ async def lifespan(app: FastAPI):
     vwap_task.cancel()
     crypto_scan_task.cancel()
     oracle_task.cancel()
+    price_collector_task.cancel()
     logger.info("🛑 Shutting down Pandora's Box...")
     await redis_client.close()
     await postgres_client.close()
