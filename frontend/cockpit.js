@@ -126,7 +126,7 @@
 
     async function loadCockpit() {
         var results = await Promise.all([
-            fetchJson('/trade-stats?days=9999').catch(function () { return null; }),
+            fetchJson('/trade-stats?days=3650').catch(function () { return null; }),
             fetchJson('/signal-stats?days=90').catch(function () { return null; }),
             fetchJson('/bias-accuracy?days=30').catch(function () { return null; }),
             fetchJson('/cash-flows').catch(function () { return []; }),
@@ -162,12 +162,15 @@
         if (!container) return;
 
         var pnl = (stats && stats.pnl) || {};
-        var s   = (stats && stats.stats) || stats || {};
 
-        var realized   = asNumber(pnl.total_dollars, 0);
-        var unrealized = asNumber(pnl.unrealized_pnl, 0);
-        var wins  = asNumber(s.wins, 0);
-        var losses = asNumber(s.losses, 0);
+        var realized   = asNumber(pnl.realized_dollars, asNumber(pnl.total_dollars, 0));
+        var unrealized = asNumber(pnl.unrealized_dollars, 0);
+
+        // Compute wins/losses from win_rate and closed count
+        var closed = asNumber(stats && stats.closed, 0);
+        var winRate = asNumber(stats && stats.win_rate, 0);
+        var wins = Math.round(winRate * closed);
+        var losses = closed - wins;
 
         container.innerHTML =
             '<div style="text-align:center">' +
@@ -194,17 +197,18 @@
 
         var pnl  = (stats && stats.pnl)          || {};
         var risk = (stats && stats.risk_metrics)  || {};
-        var s    = (stats && stats.stats)         || stats || {};
 
-        var wins   = asNumber(s.wins, 0);
-        var losses = asNumber(s.losses, 0);
-        var total  = wins + losses;
-        var winRate = safeDivide(wins, total);
+        // Compute wins/losses from API fields
+        var closed = asNumber(stats && stats.closed, 0);
+        var winRate = asNumber(stats && stats.win_rate, 0);
+        var wins = Math.round(winRate * closed);
+        var losses = closed - wins;
+        var total = wins + losses;
 
         var rows = [
             { label: 'Win Rate',      value: formatRawPercent(winRate * 100, 1), cls: metricClass(winRate - 0.5) },
-            { label: 'Avg Win',       value: formatDollar(pnl.avg_win, 2),      cls: 'positive' },
-            { label: 'Avg Loss',      value: formatDollar(pnl.avg_loss, 2),     cls: 'negative' },
+            { label: 'Avg Win',       value: formatDollar(pnl.avg_win_dollars, 2), cls: 'positive' },
+            { label: 'Avg Loss',      value: formatDollar(pnl.avg_loss_dollars, 2), cls: 'negative' },
             { label: 'Expectancy',    value: formatDollar(pnl.expectancy_per_trade, 2), cls: metricClass(pnl.expectancy_per_trade) },
             { label: 'Profit Factor', value: formatRatio(risk.profit_factor),    cls: metricClass(asNumber(risk.profit_factor, 0) - 1) },
             { label: 'Sharpe Ratio',  value: formatRatio(risk.sharpe_ratio),     cls: metricClass(risk.sharpe_ratio) },
@@ -245,13 +249,12 @@
         }
 
         // Build withdrawal markers from cashFlows
-        var withdrawalPoints = [];
         var cfMap = {};
         for (var j = 0; j < cashFlows.length; j++) {
             var cf = cashFlows[j];
             if (asNumber(cf.amount, 0) < 0) {
-                var dateStr = String(cf.date || cf.created_at || '').slice(0, 10);
-                cfMap[dateStr] = cf;
+                var dateStr = String(cf.activity_date || cf.date || cf.created_at || '').slice(0, 10);
+                if (dateStr) cfMap[dateStr] = cf;
             }
         }
         var markerData = [];
@@ -335,12 +338,7 @@
         if (!container) return;
 
         var bySource = (tradeStats && tradeStats.by_signal_source) || {};
-        var signalBySource = {};
-        var signalSources = safeArray(signalStats && signalStats.by_source);
-        for (var s = 0; s < signalSources.length; s++) {
-            var src = signalSources[s];
-            if (src && src.source) signalBySource[src.source] = src;
-        }
+        var scoreBands = (signalStats && signalStats.accuracy_by_score_band) || {};
 
         var keys = Object.keys(bySource);
         if (!keys.length) {
@@ -352,18 +350,14 @@
         for (var i = 0; i < keys.length; i++) {
             var key  = keys[i];
             var data = bySource[key] || {};
-            var pnl  = (data.pnl && data.pnl.total_dollars) || (data.total_pnl) || 0;
-            var w    = asNumber(data.wins || (data.stats && data.stats.wins), 0);
-            var l    = asNumber(data.losses || (data.stats && data.stats.losses), 0);
-            var net  = asNumber(pnl, 0);
-            var borderColor = net >= 0 ? '#14b8a6' : '#e5370e';
 
-            var sigInfo = signalBySource[key];
-            var accLine = '';
-            if (sigInfo && sigInfo.accuracy != null) {
-                accLine = '<div style="font-size:0.8rem;color:var(--text-muted);margin-top:4px">Signal accuracy: ' +
-                    escapeHtml(formatRawPercent(asNumber(sigInfo.accuracy, 0) * 100, 1)) + '</div>';
-            }
+            // by_signal_source returns: {trades, pnl, win_rate}
+            var net  = asNumber(data.pnl, 0);
+            var trades = asNumber(data.trades, 0);
+            var wr = asNumber(data.win_rate, 0);
+            var w = Math.round(wr * trades);
+            var l = trades - w;
+            var borderColor = net >= 0 ? '#14b8a6' : '#e5370e';
 
             html +=
                 '<div class="analytics-card" style="border-left:3px solid ' + borderColor + ';padding:10px 14px;margin-bottom:8px">' +
@@ -372,9 +366,29 @@
                         '<span style="margin-right:12px">' + escapeHtml(String(w)) + 'W / ' + escapeHtml(String(l)) + 'L</span>' +
                         '<span class="' + metricClass(net) + '">' + escapeHtml(formatDollar(net, 2)) + '</span>' +
                     '</div>' +
-                    accLine +
+                    '<div style="font-size:0.8rem;color:var(--text-muted);margin-top:4px">Win rate: ' +
+                        escapeHtml(formatRawPercent(wr * 100, 1)) +
+                    '</div>' +
                 '</div>';
         }
+
+        // Score band summary if available
+        var bandKeys = Object.keys(scoreBands);
+        if (bandKeys.length) {
+            html += '<div style="margin-top:12px;font-size:0.85rem;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px">Signal Score Bands</div>';
+            for (var b = 0; b < bandKeys.length; b++) {
+                var band = bandKeys[b];
+                var bd = scoreBands[band] || {};
+                var bwr = asNumber(bd.win_rate, 0);
+                var bCls = bwr >= 0.5 ? 'positive' : bwr > 0 ? '' : 'negative';
+                html +=
+                    '<div class="analytics-metric-item">' +
+                        '<span class="analytics-metric-label">Score ' + escapeHtml(band) + ' (' + asNumber(bd.resolved, 0) + ' resolved)</span>' +
+                        '<span class="analytics-metric-value ' + bCls + '">' + escapeHtml(formatRawPercent(bwr * 100, 1)) + ' win</span>' +
+                    '</div>';
+            }
+        }
+
         container.innerHTML = html;
     }
 
@@ -393,25 +407,27 @@
 
         var dir  = (data.directional_accuracy) || {};
         var gate = (data.gatekeeper)           || {};
-        var overall = dir.overall;
-        var daysCollected = asNumber(data.days_collected || data.days, 0);
+        var overall = dir.overall || {};
+        var overallAcc = overall.accuracy;
 
         var html = '';
 
-        // Overall accuracy
         html +=
             '<div class="analytics-metric-item">' +
                 '<span class="analytics-metric-label">Directional Accuracy</span>' +
-                '<span class="analytics-metric-value ' + metricClass(asNumber(overall, 0) - 0.5) + '">' +
-                    escapeHtml(overall != null ? formatRawPercent(asNumber(overall, 0) * 100, 1) : '--') +
+                '<span class="analytics-metric-value ' + metricClass(asNumber(overallAcc, 0) - 0.5) + '">' +
+                    escapeHtml(overallAcc != null ? formatRawPercent(asNumber(overallAcc, 0) * 100, 1) : 'collecting...') +
                 '</span>' +
             '</div>';
 
-        // Gatekeeper stats
         html +=
             '<div class="analytics-metric-item">' +
-                '<span class="analytics-metric-label">Signals Blocked</span>' +
-                '<span class="analytics-metric-value">' + escapeHtml(String(asNumber(gate.signals_blocked, 0))) + '</span>' +
+                '<span class="analytics-metric-label">Signals Passed</span>' +
+                '<span class="analytics-metric-value">' + escapeHtml(String(asNumber(gate.signals_passed, 0))) + '</span>' +
+            '</div>' +
+            '<div class="analytics-metric-item">' +
+                '<span class="analytics-metric-label">Signals Rejected</span>' +
+                '<span class="analytics-metric-value">' + escapeHtml(String(asNumber(gate.signals_rejected, 0))) + '</span>' +
             '</div>' +
             '<div class="analytics-metric-item">' +
                 '<span class="analytics-metric-label">Filter Accuracy</span>' +
@@ -420,9 +436,10 @@
                 '</span>' +
             '</div>';
 
-        if (daysCollected > 0 && daysCollected < 14) {
+        var readings = asNumber(overall.readings, 0);
+        if (readings > 0 && readings < 30) {
             html += '<div style="font-size:0.8rem;color:var(--text-muted);margin-top:6px;font-style:italic">' +
-                'Collecting data (' + String(daysCollected) + ' of 14 days minimum)</div>';
+                'Based on ' + String(readings) + ' readings (accuracy improves with more data)</div>';
         }
 
         container.innerHTML = html;
@@ -513,8 +530,8 @@
             btn.classList.toggle('active', btn.dataset.period === period);
         });
 
-        var daysMap = { daily: 1, weekly: 7, monthly: 30, all: 9999 };
-        var days = daysMap[period] || 9999;
+        var daysMap = { daily: 1, weekly: 7, monthly: 30, all: 3650 };
+        var days = daysMap[period] || 3650;
 
         fetchJson('/trade-stats?days=' + days)
             .then(function (data) {
