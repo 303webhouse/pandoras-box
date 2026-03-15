@@ -121,6 +121,22 @@
     };
 
     /* ------------------------------------------------------------------ */
+    /*  Detect if currently in analytics mode                              */
+    /* ------------------------------------------------------------------ */
+
+    function isAnalyticsMode() {
+        // Check body dataset (set by app.js)
+        if (document.body && document.body.dataset && document.body.dataset.mode === 'analytics') return true;
+        // Check if analytics shell is visible
+        var shell = byId('analyticsShell');
+        if (shell && !shell.hidden) return true;
+        // Check if cockpit pane is visible
+        var pane = byId('analyticsPaneCockpit');
+        if (pane && !pane.hidden) return true;
+        return false;
+    }
+
+    /* ------------------------------------------------------------------ */
     /*  1. loadCockpit — master orchestrator                              */
     /* ------------------------------------------------------------------ */
 
@@ -198,12 +214,8 @@
         var pnl  = (stats && stats.pnl)          || {};
         var risk = (stats && stats.risk_metrics)  || {};
 
-        // Compute wins/losses from API fields
         var closed = asNumber(stats && stats.closed, 0);
         var winRate = asNumber(stats && stats.win_rate, 0);
-        var wins = Math.round(winRate * closed);
-        var losses = closed - wins;
-        var total = wins + losses;
 
         var rows = [
             { label: 'Win Rate',      value: formatRawPercent(winRate * 100, 1), cls: metricClass(winRate - 0.5) },
@@ -248,7 +260,6 @@
             pnlSeries.push(asNumber(points[i].cumulative_pnl, 0));
         }
 
-        // Build withdrawal markers from cashFlows
         var cfMap = {};
         for (var j = 0; j < cashFlows.length; j++) {
             var cf = cashFlows[j];
@@ -279,7 +290,6 @@
             }
         ];
 
-        // Add withdrawal markers if any exist
         var hasWithdrawals = markerData.some(function (v) { return v !== null; });
         if (hasWithdrawals) {
             datasets.push({
@@ -351,7 +361,6 @@
             var key  = keys[i];
             var data = bySource[key] || {};
 
-            // by_signal_source returns: {trades, pnl, win_rate}
             var net  = asNumber(data.pnl, 0);
             var trades = asNumber(data.trades, 0);
             var wr = asNumber(data.win_rate, 0);
@@ -372,7 +381,6 @@
                 '</div>';
         }
 
-        // Score band summary if available
         var bandKeys = Object.keys(scoreBands);
         if (bandKeys.length) {
             html += '<div style="margin-top:12px;font-size:0.85rem;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px">Signal Score Bands</div>';
@@ -557,12 +565,46 @@
             });
         });
 
-        // Listen for analytics mode activation
+        // Bind Cockpit/Laboratory tab buttons
+        document.querySelectorAll('.analytics-subtab').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var tab = btn.dataset.analyticsTab;
+
+                // Toggle active state on tab buttons
+                document.querySelectorAll('.analytics-subtab').forEach(function (b) {
+                    b.classList.toggle('active', b.dataset.analyticsTab === tab);
+                    b.setAttribute('aria-selected', b.dataset.analyticsTab === tab ? 'true' : 'false');
+                });
+
+                // Toggle pane visibility
+                var cockpitPane = byId('analyticsPaneCockpit');
+                var labPane = byId('analyticsPaneLaboratory');
+                if (cockpitPane) cockpitPane.hidden = tab !== 'cockpit';
+                if (labPane) labPane.hidden = tab !== 'laboratory';
+
+                // Load data for the active tab
+                if (tab === 'cockpit') {
+                    loadCockpit();
+                } else if (tab === 'laboratory' && window.laboratoryUI && window.laboratoryUI.loadLaboratory) {
+                    window.laboratoryUI.loadLaboratory();
+                }
+            });
+        });
+
+        // Listen for analytics mode activation (from app.js mode switching)
         document.addEventListener('pandora:modechange', function (e) {
             if (e && e.detail && e.detail.mode === 'analytics') {
                 loadCockpit();
             }
         });
+
+        // Initial load: if already in analytics mode, load immediately
+        // Use a short delay to let app.js set mode first
+        setTimeout(function () {
+            if (isAnalyticsMode()) {
+                loadCockpit();
+            }
+        }, 100);
     }
 
     document.addEventListener('DOMContentLoaded', init);
@@ -592,7 +634,11 @@
     window.cockpitUI = {
         loadCockpit: loadCockpit,
         setPnlPeriod: setPnlPeriod,
-        _switchToLab: null  // to be wired by app.js for tab switching
+        _switchToLab: function () {
+            // Programmatic switch to Laboratory tab
+            var labBtn = document.querySelector('.analytics-subtab[data-analytics-tab="laboratory"]');
+            if (labBtn) labBtn.click();
+        }
     };
 
 })();
