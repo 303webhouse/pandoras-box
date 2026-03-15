@@ -700,6 +700,14 @@ if frontend_path:
     async def serve_analytics_js():
         return FileResponse(os.path.join(frontend_path, "analytics.js"))
 
+    @app.get("/cockpit.js", response_class=FileResponse)
+    async def serve_cockpit_js():
+        return FileResponse(os.path.join(frontend_path, "cockpit.js"))
+
+    @app.get("/laboratory.js", response_class=FileResponse)
+    async def serve_laboratory_js():
+        return FileResponse(os.path.join(frontend_path, "laboratory.js"))
+
     @app.get("/knowledgebase.js", response_class=FileResponse)
     async def serve_knowledgebase_js():
         return FileResponse(os.path.join(frontend_path, "knowledgebase.js"))

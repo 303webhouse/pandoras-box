@@ -731,6 +731,7 @@ async def trade_stats(
     by_structure: Dict[str, Dict[str, Any]] = {}
     by_bias: Dict[str, Dict[str, Any]] = {}
     by_origin: Dict[str, Dict[str, Any]] = {}
+    by_signal_source: Dict[str, Dict[str, Any]] = {}
     exit_reason_counts: Dict[str, int] = {}
 
     for row in closed_rows:
@@ -738,18 +739,19 @@ async def trade_stats(
         struct = (row.get("structure") or "unknown").lower()
         bias = (row.get("bias_at_entry") or row.get("linked_signal_bias") or "UNKNOWN").upper()
         origin = (row.get("origin") or "manual").lower()
+        src = (row.get("signal_source") or "unattributed").lower()
         pnl = _as_float(row.get("pnl_dollars"))
         win_flag = 1 if pnl > 0 else 0
         reason = (row.get("exit_reason") or "unknown").lower()
         exit_reason_counts[reason] = exit_reason_counts.get(reason, 0) + 1
 
-        for bucket_map, key in ((by_account, acct), (by_structure, struct), (by_bias, bias), (by_origin, origin)):
+        for bucket_map, key in ((by_account, acct), (by_structure, struct), (by_bias, bias), (by_origin, origin), (by_signal_source, src)):
             bucket = bucket_map.setdefault(key, {"trades": 0, "wins": 0, "pnl": 0.0})
             bucket["trades"] += 1
             bucket["wins"] += win_flag
             bucket["pnl"] += pnl
 
-    for bucket_map in (by_account, by_structure, by_bias, by_origin):
+    for bucket_map in (by_account, by_structure, by_bias, by_origin, by_signal_source):
         for key, bucket in list(bucket_map.items()):
             bucket_map[key] = {
                 "trades": bucket["trades"],
@@ -796,6 +798,7 @@ async def trade_stats(
         "by_structure": by_structure,
         "by_bias_at_entry": by_bias,
         "by_origin": by_origin,
+        "by_signal_source": by_signal_source,
         "by_exit_reason": exit_reason_counts,
         "equity_curve": equity_curve,
         "benchmarks": {

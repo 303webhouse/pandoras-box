@@ -10479,3 +10479,52 @@ body[data-mode="analytics"] .analytics-shell {
     color: var(--text-secondary);
     margin-top: 4px;
 }
+
+/* ── Laboratory sub-tab navigation ── */
+.lab-subtab-nav {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 14px;
+    flex-wrap: wrap;
+}
+.lab-subtab {
+    background: #0e1526;
+    border: 1px solid #1e2c46;
+    color: #8899b0;
+    padding: 5px 14px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+.lab-subtab:hover {
+    border-color: #14b8a6;
+    color: #d6f6f2;
+}
+.lab-subtab.active {
+    background: rgba(20, 184, 166, 0.15);
+    border-color: #14b8a6;
+    color: #d6f6f2;
+}
+
+/* ── P&L toggle buttons ── */
+.pnl-toggle-btn {
+    background: #121a31;
+    border: 1px solid #2b3a58;
+    color: #8899b0;
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+.pnl-toggle-btn:hover {
+    border-color: #14b8a6;
+    color: #d6f6f2;
+}
+.pnl-toggle-btn.active {
+    background: rgba(20, 184, 166, 0.18);
+    border-color: #14b8a6;
+    color: #d6f6f2;
+}
