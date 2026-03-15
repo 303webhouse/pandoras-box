@@ -571,6 +571,41 @@ async def signal_stats(
     solo_rows = [r for r in resolved_rows if str(r.get("signal_id")) not in convergence_signal_ids]
     solo_accuracy = safe_div(sum(1 for r in solo_rows if r["is_accurate"]), len(solo_rows))
 
+    # Score-band accuracy
+    score_bands = {"0-50": {"signals": 0, "resolved": 0, "wins": 0},
+                   "50-60": {"signals": 0, "resolved": 0, "wins": 0},
+                   "60-70": {"signals": 0, "resolved": 0, "wins": 0},
+                   "70-80": {"signals": 0, "resolved": 0, "wins": 0},
+                   "80-90": {"signals": 0, "resolved": 0, "wins": 0},
+                   "90-100": {"signals": 0, "resolved": 0, "wins": 0}}
+    for r in rows:
+        score = r.get("score")
+        if score is None:
+            continue
+        score = float(score)
+        if score < 50:
+            band = "0-50"
+        elif score < 60:
+            band = "50-60"
+        elif score < 70:
+            band = "60-70"
+        elif score < 80:
+            band = "70-80"
+        elif score < 90:
+            band = "80-90"
+        else:
+            band = "90-100"
+        score_bands[band]["signals"] += 1
+        # Check if this signal has an outcome
+        outcome = classify_outcome(r.get("outcome"))
+        if outcome in ("positive", "negative"):
+            score_bands[band]["resolved"] += 1
+            if outcome == "positive":
+                score_bands[band]["wins"] += 1
+
+    for band_data in score_bands.values():
+        band_data["win_rate"] = round(safe_div(band_data["wins"], band_data["resolved"]), 3)
+
     return {
         "window_days": days,
         "filters_applied": {
@@ -597,6 +632,7 @@ async def signal_stats(
                 lambda r: derive_conviction(score=r.get("score")),
             ),
         },
+        "accuracy_by_score_band": score_bands,
         "excursion": {
             "avg_mfe_pct": round(mean(mfe_values), 3),
             "avg_mae_pct": round(mean(mae_values), 3),
@@ -639,6 +675,8 @@ async def trade_stats(
     open_rows = [r for r in rows if str(r.get("status", "")).lower() == "open"]
     closed_rows = [r for r in rows if str(r.get("status", "")).lower() != "open"]
     pnl_values = [_as_float(r.get("pnl_dollars")) for r in closed_rows if r.get("pnl_dollars") is not None]
+    realized_pnl = sum(pnl_values)
+    unrealized_pnl = sum(_as_float(r.get("pnl_dollars"), 0.0) for r in open_rows if r.get("pnl_dollars") is not None)
     pct_values = [_as_float(r.get("pnl_percent")) / 100.0 for r in closed_rows if r.get("pnl_percent") is not None]
 
     wins = [p for p in pnl_values if p > 0]
@@ -659,6 +697,28 @@ async def trade_stats(
         else:
             date_label = str(closed_at)[:10] if closed_at else datetime.utcnow().date().isoformat()
         equity_curve.append({"date": date_label, "cumulative_pnl": round(cumulative, 3)})
+
+    # Annotate equity curve with cash flow events (withdrawals/deposits)
+    try:
+        from database.postgres_client import get_postgres_client
+        pool = await get_postgres_client()
+        async with pool.acquire() as conn:
+            cf_rows = await conn.fetch(
+                "SELECT amount, flow_type, activity_date, description FROM cash_flows WHERE account_name ILIKE $1 ORDER BY activity_date",
+                f"%{account or 'robinhood'}%"
+            )
+        for cf in cf_rows:
+            cf_date = cf["activity_date"].isoformat() if cf["activity_date"] else None
+            if cf_date:
+                equity_curve.append({
+                    "date": cf_date,
+                    "withdrawal": True,
+                    "flow_type": cf["flow_type"],
+                    "amount": float(cf["amount"]),
+                    "description": cf.get("description", ""),
+                })
+    except Exception:
+        pass  # cash flow annotation is best-effort
 
     max_dd_pct, max_dd_dollars, peak_date, trough_date = compute_max_drawdown(equity_curve)
     profit_factor = compute_profit_factor(wins, losses)
@@ -712,6 +772,8 @@ async def trade_stats(
         "win_rate": round(win_rate, 3),
         "pnl": {
             "total_dollars": round(sum(pnl_values), 3),
+            "realized_dollars": round(realized_pnl, 3),
+            "unrealized_dollars": round(unrealized_pnl, 3),
             "total_percent": round(total_pct, 3),
             "avg_win_dollars": round(avg_win, 3),
             "avg_loss_dollars": round(avg_loss, 3),
@@ -2547,3 +2609,190 @@ async def save_weekly_report(
         )
 
     return {"status": "saved", "week_of": req.week_of}
+
+
+@analytics_router.post("/backfill-attribution")
+async def run_backfill_attribution(_=Depends(require_api_key)):
+    """One-time retroactive attribution of trades to signals by proximity."""
+    from analytics.proximity_attribution import backfill_all_attributions
+    result = await backfill_all_attributions()
+    return result
+
+
+@analytics_router.get("/cash-flows")
+async def list_cash_flows(account: Optional[str] = None, days: int = 365):
+    """List all cash flows (withdrawals, deposits)."""
+    from database.postgres_client import get_postgres_client
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        if account:
+            rows = await conn.fetch(
+                "SELECT * FROM cash_flows WHERE LOWER(account_name) = LOWER($1) ORDER BY activity_date DESC",
+                account
+            )
+        else:
+            rows = await conn.fetch("SELECT * FROM cash_flows ORDER BY activity_date DESC")
+    return [dict(r) for r in rows]
+
+@analytics_router.post("/cash-flows")
+async def log_cash_flow(body: dict, _=Depends(require_api_key)):
+    """Log a withdrawal or deposit. Body: {account, flow_type, amount, description, flow_date}"""
+    from database.postgres_client import get_postgres_client
+    pool = await get_postgres_client()
+    account = body.get("account", "robinhood")
+    flow_type = body.get("flow_type", "withdrawal")
+    amount = body.get("amount")
+    if amount is None:
+        raise HTTPException(status_code=400, detail="amount required")
+    description = body.get("description", "")
+    flow_date = body.get("flow_date")
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """INSERT INTO cash_flows (account_name, flow_type, amount, description, activity_date)
+               VALUES ($1, $2, $3, $4, COALESCE($5::date, CURRENT_DATE))
+               RETURNING *""",
+            account, flow_type, float(amount), description,
+            flow_date
+        )
+    return {"status": "created", "cash_flow": dict(row)}
+
+
+@analytics_router.get("/bias-accuracy")
+async def bias_accuracy_report(days: int = Query(30, ge=1, le=365)):
+    """Directional accuracy of bias + gatekeeper effectiveness."""
+    from database.postgres_client import get_postgres_client
+    pool = await get_postgres_client()
+
+    # Directional accuracy: compare daily bias to next-day SPY move
+    directional = {}
+    try:
+        async with pool.acquire() as conn:
+            bias_rows = await conn.fetch("""
+                SELECT DISTINCT ON (DATE(created_at))
+                    DATE(created_at) as bias_date,
+                    bias_level,
+                    composite_score
+                FROM bias_composite_history
+                WHERE created_at > NOW() - interval '%s days'
+                ORDER BY DATE(created_at), created_at DESC
+            """ % days)
+
+            spy_rows = await conn.fetch("""
+                SELECT DATE(timestamp) as price_date, close
+                FROM price_history
+                WHERE ticker = 'SPY' AND timeframe = 'D'
+                AND timestamp > NOW() - interval '%s days'
+                ORDER BY timestamp
+            """ % (days + 5))
+
+        spy_by_date = {r["price_date"]: float(r["close"]) for r in spy_rows}
+        spy_dates = sorted(spy_by_date.keys())
+
+        level_stats = {}
+        total_correct = 0
+        total_scored = 0
+
+        for br in bias_rows:
+            level = br["bias_level"]
+            bias_date = br["bias_date"]
+
+            # Find next trading day's close
+            idx = None
+            for i, d in enumerate(spy_dates):
+                if d == bias_date and i + 1 < len(spy_dates):
+                    idx = i
+                    break
+            if idx is None:
+                continue
+
+            today_close = spy_by_date.get(spy_dates[idx])
+            next_close = spy_by_date.get(spy_dates[idx + 1])
+            if today_close is None or next_close is None:
+                continue
+
+            change = next_close - today_close
+
+            if level == "NEUTRAL":
+                continue  # Neutral is not scored
+
+            is_correct = (
+                ("TORO" in level and change > 0) or
+                ("URSA" in level and change < 0)
+            )
+
+            if level not in level_stats:
+                level_stats[level] = {"readings": 0, "correct": 0}
+            level_stats[level]["readings"] += 1
+            if is_correct:
+                level_stats[level]["correct"] += 1
+                total_correct += 1
+            total_scored += 1
+
+        for level, stats in level_stats.items():
+            stats["accuracy"] = round(safe_div(stats["correct"], stats["readings"]), 3)
+
+        directional = level_stats
+        directional["overall"] = {
+            "readings": total_scored,
+            "correct": total_correct,
+            "accuracy": round(safe_div(total_correct, total_scored), 3),
+        }
+    except Exception as e:
+        logger.warning(f"Bias directional accuracy error: {e}")
+        directional = {"error": str(e)}
+
+    # Gatekeeper effectiveness
+    gatekeeper = {}
+    try:
+        async with pool.acquire() as conn:
+            rejected = await conn.fetch("""
+                SELECT signal_id, ticker, direction, score,
+                       trade_outcome, actual_stop_hit
+                FROM signals
+                WHERE created_at > NOW() - interval '%s days'
+                AND (bias_alignment = 'COUNTER_TREND' OR bias_alignment = 'false'
+                     OR status = 'BIAS_REJECTED')
+            """ % days)
+
+            passed = await conn.fetch("""
+                SELECT COUNT(*) as cnt FROM signals
+                WHERE created_at > NOW() - interval '%s days'
+                AND (bias_alignment = 'ALIGNED' OR bias_alignment = 'true'
+                     OR bias_alignment = 'NEUTRAL')
+            """ % days)
+
+        passed_count = passed[0]["cnt"] if passed else 0
+        rejected_count = len(rejected)
+        would_won = sum(1 for r in rejected if r.get("trade_outcome") == "HIT" or r.get("actual_stop_hit") is False)
+        would_lost = sum(1 for r in rejected if r.get("trade_outcome") == "MISS" or r.get("actual_stop_hit") is True)
+        unknown = rejected_count - would_won - would_lost
+
+        gatekeeper = {
+            "signals_passed": passed_count,
+            "signals_rejected": rejected_count,
+            "rejected_would_have_won": would_won,
+            "rejected_would_have_lost": would_lost,
+            "rejected_unknown": unknown,
+            "filter_accuracy": round(safe_div(would_lost, would_lost + would_won), 3) if (would_lost + would_won) > 0 else None,
+        }
+    except Exception as e:
+        logger.warning(f"Gatekeeper effectiveness error: {e}")
+        gatekeeper = {"error": str(e)}
+
+    # Data availability
+    data_since = None
+    try:
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow("SELECT MIN(created_at) as earliest FROM bias_composite_history")
+            if row and row["earliest"]:
+                data_since = row["earliest"].isoformat()
+    except Exception:
+        pass
+
+    return {
+        "directional_accuracy": directional,
+        "gatekeeper": gatekeeper,
+        "data_available_since": data_since,
+        "note": "Bias history logging active. Accuracy improves with more data." if data_since else "No bias history data yet.",
+    }
