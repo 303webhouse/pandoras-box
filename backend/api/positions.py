@@ -172,15 +172,16 @@ async def accept_signal(signal_id: str, request: AcceptSignalRequest):
         if not signal_data:
             raise HTTPException(status_code=404, detail="Signal not found")
 
-        # Update signal as SELECTED in database
-        await update_signal_action(signal_id, "SELECTED")
-
-        # Log the actual entry price to signal
-        await update_signal_outcome(
-            signal_id,
-            actual_entry_price=request.actual_entry_price,
-            notes=request.notes
-        )
+        # Update signal bookkeeping (non-critical — don't block position creation)
+        try:
+            await update_signal_action(signal_id, "SELECTED")
+            await update_signal_outcome(
+                signal_id,
+                actual_entry_price=request.actual_entry_price,
+                notes=request.notes
+            )
+        except Exception as e:
+            logger.warning(f"Signal bookkeeping failed for {signal_id} (position will still be created): {e}")
 
         # Create position in unified_positions (v2)
         from database.postgres_client import get_postgres_client
@@ -240,23 +241,30 @@ async def accept_signal(signal_id: str, request: AcceptSignalRequest):
         except Exception as e:
             logger.warning(f"Could not record committee override: {e}")
 
-        # Remove from active signals cache
-        await delete_signal(signal_id)
+        # Post-creation cleanup (all non-critical — position is already saved)
+        try:
+            await delete_signal(signal_id)
+        except Exception as e:
+            logger.warning(f"Failed to remove signal {signal_id} from cache: {e}")
 
-        await _upsert_watchlist_for_position(ticker, position_id)
+        try:
+            await _upsert_watchlist_for_position(ticker, position_id)
+        except Exception as e:
+            logger.warning(f"Failed to upsert watchlist for {ticker}: {e}")
 
-        # Broadcast to all devices
-        await manager.broadcast_position_update({
-            "action": "POSITION_OPENED",
-            "signal_id": signal_id,
-            "position": position
-        })
-
-        await manager.broadcast({
-            "type": "SIGNAL_ACCEPTED",
-            "signal_id": signal_id,
-            "position_id": position_id
-        })
+        try:
+            await manager.broadcast_position_update({
+                "action": "POSITION_OPENED",
+                "signal_id": signal_id,
+                "position": position
+            })
+            await manager.broadcast({
+                "type": "SIGNAL_ACCEPTED",
+                "signal_id": signal_id,
+                "position_id": position_id
+            })
+        except Exception as e:
+            logger.warning(f"Failed to broadcast signal acceptance for {signal_id}: {e}")
 
         logger.info(f"✅ Signal accepted: {ticker} {direction} @ ${request.actual_entry_price}")
 
@@ -301,14 +309,15 @@ async def accept_signal_as_options(signal_id: str, request: AcceptSignalAsOption
         if not signal_data:
             raise HTTPException(status_code=404, detail="Signal not found")
 
-        # Update signal as SELECTED in database
-        await update_signal_action(signal_id, "SELECTED")
-
-        # Log the acceptance to signal record
-        await update_signal_outcome(
-            signal_id,
-            notes=request.notes or f"Accepted as OPTIONS: {request.strategy_type} | Premium: {request.net_premium}"
-        )
+        # Update signal bookkeeping (non-critical — don't block position creation)
+        try:
+            await update_signal_action(signal_id, "SELECTED")
+            await update_signal_outcome(
+                signal_id,
+                notes=request.notes or f"Accepted as OPTIONS: {request.strategy_type} | Premium: {request.net_premium}"
+            )
+        except Exception as e:
+            logger.warning(f"Signal bookkeeping failed for {signal_id} (position will still be created): {e}")
 
         # Build notes with signal context for backtesting traceability
         backtest_notes = (
@@ -414,16 +423,22 @@ async def accept_signal_as_options(signal_id: str, request: AcceptSignalAsOption
         except Exception as e:
             logger.warning(f"Could not record committee override: {e}")
 
-        # Remove from active signals cache
-        await delete_signal(signal_id)
+        # Remove from active signals cache (non-critical)
+        try:
+            await delete_signal(signal_id)
+        except Exception as e:
+            logger.warning(f"Failed to remove signal {signal_id} from cache: {e}")
 
-        # Broadcast signal removal from Trade Ideas
-        await manager.broadcast({
-            "type": "SIGNAL_ACCEPTED",
-            "signal_id": signal_id,
-            "position_id": position_id,
-            "trade_type": "OPTIONS"
-        })
+        # Broadcast signal removal from Trade Ideas (non-critical)
+        try:
+            await manager.broadcast({
+                "type": "SIGNAL_ACCEPTED",
+                "signal_id": signal_id,
+                "position_id": position_id,
+                "trade_type": "OPTIONS"
+            })
+        except Exception as e:
+            logger.warning(f"Failed to broadcast signal acceptance for {signal_id}: {e}")
 
         logger.info(
             f"✅ Signal accepted as OPTIONS: {request.underlying} "
