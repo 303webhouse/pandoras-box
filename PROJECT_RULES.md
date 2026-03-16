@@ -46,7 +46,30 @@ Workflow: Pass 1 → Pass 2 → ATHENA overview → Nick approval → Brief → 
 4. **Modular architecture** — New factors/signals/strategies plug in without rewriting core
 5. **Brief-driven development** — Architecture in Claude.ai → markdown brief → Claude Code builds
 6. **Empty-safe env vars** — `os.getenv("VAR") or default`, never `os.getenv("VAR", default)`
-7. **Data source priority** — Polygon.io primary, yfinance fallback. VIX/indices stay on yfinance.
+7. **Data source priority** — See Data Source Hierarchy below. Default to Polygon for all equities/ETFs.
+
+## Data Source Hierarchy
+
+When building any feature that needs market data, use these sources in this priority order. Never default to yfinance for equities when Polygon is available.
+
+| Data Type | Primary Source | Fallback | Notes |
+|-----------|---------------|----------|-------|
+| **Equity/ETF daily bars** | Polygon `get_bars()` | yfinance | Polygon Stocks Starter ($29/mo), unlimited calls, 15-min delayed |
+| **Equity/ETF snapshots** | Polygon `get_snapshot()` | yfinance | Current price, prev close, volume |
+| **Options chains/greeks** | Polygon `polygon_options.py` | — | Options snapshot endpoint |
+| **VIX, indices (^VIX, ^GSPC)** | yfinance | — | Polygon doesn't cover index symbols with `^` prefix |
+| **Breadth data (^ADVN, ^DECLN)** | yfinance | — | NYSE advance/decline, not on Polygon |
+| **Crypto (BTC, ETH)** | Binance/Coinalyze | yfinance | Futures data via `binance_futures.py` |
+| **Macro (FRED series)** | FRED API | — | Interest rates, claims, yield curve |
+| **Sector ETF performance** | Polygon `get_bars()` | yfinance | All 11 SPDR sectors — never rely on enrichment cache alone |
+| **Options flow / unusual activity** | Unusual Whales (VPS watcher) | — | Parsed from Discord, not API |
+
+**Key rules:**
+- `backend/integrations/polygon_equities.py` has `get_bars()` and `get_snapshot()` — use them
+- Polygon results are cached 5 min in-memory (`_bars_cache`, `_snapshot_cache`)
+- yfinance is acceptable for indices/breadth that Polygon doesn't cover, and as a fallback when Polygon fails
+- Never use the enrichment cache (`watchlist:enriched`) as the sole data source for a feature — it only covers tickers in the watchlist
+- TradingView webhooks are for alerts/signals, not data fetching
 
 ## Bias Hierarchy
 
