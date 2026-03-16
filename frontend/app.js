@@ -2110,7 +2110,28 @@ function renderSectorRotationStrip(sectorData) {
     if (!container) return;
 
     if (!sectorData || !sectorData.sectors || sectorData.sectors.length === 0) {
-        container.innerHTML = '<span style="font-size:10px;color:var(--text-secondary)">Sector rotation data loading...</span>';
+        // Fallback: fetch from heatmap endpoint so all 11 sectors always show
+        fetch(API_URL + '/sectors/heatmap')
+            .then(function(r) { return r.ok ? r.json() : null; })
+            .then(function(data) {
+                if (!data || !data.sectors || data.sectors.length === 0) {
+                    container.innerHTML = '<span style="font-size:10px;color:var(--text-secondary)">Sector data unavailable</span>';
+                    return;
+                }
+                var fallbackSectors = data.sectors.map(function(s) {
+                    return {
+                        sector: s.name, etf: s.etf,
+                        rs_5d: s.change_1w || 0, rs_20d: s.change_1m || 0,
+                        rotation_momentum: s.rs_daily || 0, rank_change_5d: 0,
+                        acceleration: s.trend || 'unknown',
+                        status: (s.rs_daily || 0) > 0.3 ? 'SURGING' : (s.rs_daily || 0) < -0.3 ? 'DUMPING' : 'STEADY'
+                    };
+                });
+                renderSectorRotationStrip({ sectors: fallbackSectors });
+            })
+            .catch(function() {
+                container.innerHTML = '<span style="font-size:10px;color:var(--text-secondary)">Sector data unavailable</span>';
+            });
         return;
     }
 
@@ -6860,13 +6881,13 @@ async function loadSectorHeatmap() {
         const response = await fetch(`${API_URL}/sectors/heatmap`);
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
-        renderSectorHeatmap(data.sectors, data.spy_change_1d);
+        renderSectorHeatmap(data.sectors, data);
     } catch (error) {
         console.error('Sector heatmap load failed:', error);
     }
 }
 
-function renderSectorHeatmap(sectors, spyChange) {
+function renderSectorHeatmap(sectors, heatmapData) {
     const container = document.getElementById('sectorHeatmap');
     if (!container) return;
     if (!sectors || sectors.length === 0) {
@@ -6895,21 +6916,28 @@ function renderSectorHeatmap(sectors, spyChange) {
         const rowTotal = row.reduce((s, c) => s + c.weight, 0);
         const cellsHtml = row.map(sector => {
             const cellFlex = (sector.weight / rowTotal).toFixed(4);
-            // Scale text: 0.55–1.0 range based on weight relative to largest sector
             const scale = (0.55 + 0.45 * (sector.weight / maxWeight)).toFixed(3);
             const hm = getHeatmapStyle(sector.change_1d);
             const changeSign = sector.change_1d >= 0 ? '+' : '';
             const changeVal = sector.change_1d != null ? sector.change_1d.toFixed(2) : '0.00';
+            const change1w = (sector.change_1w || 0);
+            const change1wStr = (change1w >= 0 ? '+' : '') + change1w.toFixed(2);
+            const change1m = (sector.change_1m || 0);
+            const change1mStr = (change1m >= 0 ? '+' : '') + change1m.toFixed(2);
+            const rsDaily = (sector.rs_daily || 0);
+            const rsDailyStr = (rsDaily >= 0 ? '+' : '') + rsDaily.toFixed(2);
+            const weightStr = (sector.weight * 100).toFixed(1);
             const trend = sector.trend || 'flat';
             const trendArrow = trend === 'up' ? '▲' : trend === 'down' ? '▼' : '→';
             const trendClass = trend === 'up' ? 'trend-up' : trend === 'down' ? 'trend-down' : 'trend-flat';
             return `<div class="sector-heatmap-cell"
                 style="flex:${cellFlex};--s:${scale};border-color:${hm.borderColor};box-shadow:${hm.glow};"
                 data-etf="${sector.etf}"
-                title="${escapeHtml(sector.name)} (${sector.etf})\nDaily: ${changeSign}${changeVal}%\nWeekly: ${(sector.change_1w || 0) >= 0 ? '+' : ''}${(sector.change_1w || 0).toFixed(2)}%\nWeekly Trend: ${trend}\nSPY Weight: ${(sector.weight * 100).toFixed(1)}%">
+                title="${escapeHtml(sector.name)} (${sector.etf})\nDay: ${changeSign}${changeVal}%\nWeek: ${change1wStr}%\nMonth: ${change1mStr}%\nRS (daily): ${rsDailyStr}%\nRank: #${sector.strength_rank || '--'}\nSPY Weight: ${weightStr}%">
                 <span class="sector-hm-name">${escapeHtml(sector.name)}</span>
                 <span class="sector-hm-etf">${sector.etf}</span>
                 <span class="sector-hm-change" style="color:${hm.changeColor}">${changeSign}${changeVal}% <span class="sector-hm-trend ${trendClass}">${trendArrow}</span></span>
+                <span class="sector-hm-rs" style="color:${rsDaily >= 0 ? '#7CFF6B' : '#FF6B35'}">RS: ${rsDailyStr}%</span>
             </div>`;
         }).join('');
 

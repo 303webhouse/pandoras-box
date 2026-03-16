@@ -379,6 +379,13 @@ body {
 .sector-hm-trend.trend-down { color: #FF6B35; }
 .sector-hm-trend.trend-flat { color: rgba(255,255,255,0.4); }
 
+.sector-hm-rs {
+    font-size: calc(9px * var(--s, 1));
+    font-weight: 400;
+    opacity: 0.75;
+    line-height: 1.1;
+}
+
 .flow-compact-list {
     display: flex;
     flex-direction: column;
