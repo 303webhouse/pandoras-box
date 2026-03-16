@@ -15,7 +15,7 @@ Nick's RH account shows YTD P&L of **$2,486.57**. The database has **$2,129.55**
 - **1 phantom "TEST" trade** in DB with -$20 P&L that doesn't exist in RH.
 - **1 missing withdrawal** — DB has 7 ACH entries, CSV shows 8 (Jan 20 $250 is missing).
 
-The CSV file is at `C:\trading-hub\rh_export.csv` (copied from user upload). It covers Jan 2 – Mar 13, 2026, with 864 rows and 749 data rows.
+The CSV file is at `data/rh_export.csv` in the repo. It covers Jan 2 – Mar 13, 2026, with 864 rows and 749 data rows.
 
 ## Task
 
@@ -32,7 +32,7 @@ The RH parser at `backend/analytics/robinhood_parser.py` handles spread grouping
 Alternatively, import the parser directly:
 ```python
 from analytics.robinhood_parser import parse_robinhood_csv
-with open('rh_export.csv', 'rb') as f:
+with open('data/rh_export.csv', 'rb') as f:
     result = parse_robinhood_csv(f)
 # result has: trades, open_positions, warnings, format_detected, etc.
 ```
@@ -93,7 +93,7 @@ After reconciliation:
 
 ## Files
 
-- CSV: `C:\trading-hub\rh_export.csv` (also available as upload in Claude.ai conversation)
+- CSV: `data/rh_export.csv` (in repo root)
 - Parser: `backend/analytics/robinhood_parser.py`
 - Import endpoint: `POST /api/analytics/import-trades`
 - Cash flows endpoint: `POST /api/analytics/cash-flows`
