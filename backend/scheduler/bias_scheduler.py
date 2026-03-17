@@ -3051,8 +3051,23 @@ async def run_cta_scan_scheduled():
                 "confluence": signal.get("confluence"),
             }
             
-            # Calculate score using the new scoring algorithm
-            score, bias_alignment, triggering_factors = calculate_signal_score(trade_signal, current_bias)
+            # Fetch sector strength from Redis for scoring
+            sector_strength_data = None
+            try:
+                from database.redis_client import get_redis_client
+                import json as _json
+                redis = await get_redis_client()
+                if redis:
+                    raw = await redis.get("sector:strength")
+                    if raw:
+                        sector_strength_data = _json.loads(raw)
+            except Exception:
+                pass
+
+            # Calculate score using the new scoring algorithm (with sector strength)
+            score, bias_alignment, triggering_factors = calculate_signal_score(
+                trade_signal, current_bias, sector_strength=sector_strength_data
+            )
             
             # Legacy bonuses removed - scorer handles all scoring
             
@@ -3320,8 +3335,23 @@ async def run_crypto_scan_scheduled():
                     "confluence": best_signal.get("confluence"),
                 }
                 
-                # Calculate score
-                score, bias_alignment, triggering_factors = calculate_signal_score(trade_signal, current_bias)
+                # Fetch sector strength from Redis for scoring
+                sector_strength_data = None
+                try:
+                    from database.redis_client import get_redis_client
+                    import json as _json
+                    redis = await get_redis_client()
+                    if redis:
+                        raw = await redis.get("sector:strength")
+                        if raw:
+                            sector_strength_data = _json.loads(raw)
+                except Exception:
+                    pass
+
+                # Calculate score (with sector strength)
+                score, bias_alignment, triggering_factors = calculate_signal_score(
+                    trade_signal, current_bias, sector_strength=sector_strength_data
+                )
                 
                 trade_signal["score"] = score
                 trade_signal["bias_alignment"] = bias_alignment

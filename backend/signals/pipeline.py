@@ -159,9 +159,22 @@ async def apply_scoring(signal_data: Dict[str, Any]) -> Dict[str, Any]:
                 "cyclical": bias_status.get("cyclical", {}),
             }
 
-        # Calculate score
+        # Fetch sector strength from Redis (refreshed every 15s by sector_refresh_loop)
+        sector_strength = None
+        try:
+            from database.redis_client import get_redis_client
+            import json as _json
+            redis = await get_redis_client()
+            if redis:
+                raw = await redis.get("sector:strength")
+                if raw:
+                    sector_strength = _json.loads(raw)
+        except Exception as sect_err:
+            logger.debug(f"Sector strength unavailable for scoring: {sect_err}")
+
+        # Calculate score (with sector strength if available)
         score, bias_alignment, triggering_factors = calculate_signal_score(
-            signal_data, current_bias
+            signal_data, current_bias, sector_strength=sector_strength
         )
 
         # Contrarian qualification
@@ -188,18 +201,11 @@ async def apply_scoring(signal_data: Dict[str, Any]) -> Dict[str, Any]:
             except Exception as cq_err:
                 logger.warning(f"Contrarian check failed: {cq_err}")
 
-        # Sector rotation bonus
-        try:
-            from scoring.sector_rotation_bonus import get_sector_bonus
-            sector_rot_bonus = await get_sector_bonus(signal_data)
-            if sector_rot_bonus != 0:
-                score = min(100, max(0, score + sector_rot_bonus))
-                score = round(score, 2)
-                triggering_factors["sector_rotation_bonus"] = sector_rot_bonus
-        except ImportError:
-            pass
-        except Exception as sr_err:
-            logger.debug(f"Sector rotation bonus failed: {sr_err}")
+        # Sector rotation bonus: REMOVED (Brief 6D)
+        # Sector scoring is now handled inside calculate_signal_score() via the
+        # sector_strength parameter. The old sector_rotation_bonus.py path was
+        # a separate module that caused double-counting. All sector effects now
+        # flow through SECTOR_PRIORITY_BONUS in trade_ideas_scorer.py.
 
         # Update signal
         signal_data["score"] = score

@@ -1,3 +1,8 @@
+# DEPRECATED (Brief 6D): This module is no longer called by the pipeline.
+# Sector scoring is now handled via SECTOR_PRIORITY_BONUS in trade_ideas_scorer.py,
+# which receives sector_strength data from Redis (refreshed every 15s by Brief 6C).
+# Safe to delete in the next cleanup pass.
+
 """
 Sector Rotation Bonus for Signal Scoring
 
