@@ -2,7 +2,7 @@
 STRC Circuit Breaker Monitor
 
 Polygon-first price fetcher for STRC (Sarcos Technology and Robotics Corp).
-Tracks price relative to $1.00 par value. Fires a one-time Discord alert
+Tracks price relative to $100.00 par value. Fires a one-time Discord alert
 when price crosses below par. Caches in Redis with 5-min TTL, detects
 staleness at 15 min.
 
@@ -20,7 +20,7 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-PAR_VALUE = 1.00
+PAR_VALUE = 100.00
 CACHE_KEY = "circuit_breaker:strc"
 CACHE_TTL = 300  # 5 minutes
 STALE_THRESHOLD = 900  # 15 minutes
@@ -50,7 +50,7 @@ async def get_strc_price() -> Optional[Dict[str, Any]]:
             price = last_trade.get("p") or day_data.get("c")
             if price is not None:
                 return {
-                    "price": round(float(price), 4),
+                    "price": round(float(price), 2),
                     "source": "polygon_snapshot",
                     "fetched_at": datetime.now(timezone.utc).isoformat(),
                 }
@@ -86,7 +86,7 @@ async def get_strc_price() -> Optional[Dict[str, Any]]:
         price = await asyncio.get_event_loop().run_in_executor(None, _fetch)
         if price is not None:
             return {
-                "price": round(price, 4),
+                "price": round(price, 2),
                 "source": "yfinance",
                 "fetched_at": datetime.now(timezone.utc).isoformat(),
             }
@@ -106,7 +106,7 @@ async def _send_par_alert(price: float) -> None:
         "embeds": [{
             "title": "STRC Circuit Breaker -- Below Par",
             "description": (
-                f"**STRC** is trading at **${price:.4f}**, below the "
+                f"**STRC** is trading at **${price:.2f}**, below the "
                 f"**${PAR_VALUE:.2f} par value**.\n\n"
                 "Review Stater Swap crypto positions for potential forced liquidation risk."
             ),
@@ -120,7 +120,7 @@ async def _send_par_alert(price: float) -> None:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.post(DISCORD_WEBHOOK_CB, json=payload)
             if resp.status_code in (200, 204):
-                logger.info("STRC par alert sent (price=%.4f)", price)
+                logger.info("STRC par alert sent (price=%.2f)", price)
             else:
                 logger.warning("STRC Discord alert failed: HTTP %s", resp.status_code)
     except Exception as e:
@@ -135,7 +135,7 @@ async def check_strc_status() -> Dict[str, Any]:
     {
         "ticker": "STRC",
         "price": 0.85,
-        "par_value": 1.00,
+        "par_value": 100.00,
         "status": "BELOW_PAR" | "ABOVE_PAR" | "STALE" | "UNAVAILABLE",
         "severity": "red" | "amber" | "green" | "gray",
         "message": "...",
@@ -208,15 +208,15 @@ async def check_strc_status() -> Dict[str, Any]:
         if price < PAR_VALUE * 0.90:
             severity = "red"
             status = "BELOW_PAR"
-            message = f"STRC ${price:.4f} -- {abs(pct_from_par):.1f}% below par (CRITICAL)"
+            message = f"STRC ${price:.2f} -- {abs(pct_from_par):.1f}% below par (CRITICAL)"
         else:
             severity = "amber"
             status = "BELOW_PAR"
-            message = f"STRC ${price:.4f} -- {abs(pct_from_par):.1f}% below par"
+            message = f"STRC ${price:.2f} -- {abs(pct_from_par):.1f}% below par"
     else:
         severity = "green"
         status = "ABOVE_PAR"
-        message = f"STRC ${price:.4f} -- {pct_from_par:+.1f}% from par"
+        message = f"STRC ${price:.2f} -- {pct_from_par:+.1f}% from par"
 
     result = {
         "ticker": "STRC",
