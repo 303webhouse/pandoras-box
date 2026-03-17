@@ -48,7 +48,9 @@ async def _maybe_flag_for_committee(signal_data: Dict[str, Any]) -> None:
 
     # Check score threshold (prefer score_v2, fall back to score)
     score = signal_data.get("score_v2") or signal_data.get("score") or 0
-    if score < COMMITTEE_SCORE_THRESHOLD:
+    is_countertrend = signal_data.get("countertrend") or "wrr" in (signal_data.get("strategy") or "").lower()
+    threshold = COUNTERTREND_COMMITTEE_THRESHOLD if is_countertrend else COMMITTEE_SCORE_THRESHOLD
+    if score < threshold:
         return
 
     signal_id = signal_data.get("signal_id")
