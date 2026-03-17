@@ -48,15 +48,17 @@ Below the reversal candle low minus 0.5 ATR (longs). Above reversal candle high 
 ## Implementation Notes
 - PineScript webhook TBD (needs TradingView alert slot — currently both slots occupied by Artemis and Phalanx)
 - Server-side scanner implementation is the likely path (similar to Scout Sniper)
+- **Data source: Polygon.io** for daily bars. yfinance as fallback only.
 - Alternatively: manual signal entry via Agora UI when conditions visually align
 
 ## Pipeline Route
-Server-side scanner → `process_signal_unified()` with `lane: countertrend` flag → countertrend gatekeeper rules → committee review (if score ≥ 90)
+Server-side scanner → `process_signal_unified()` with `lane: countertrend` flag → countertrend scoring rules (in `trade_ideas_scorer.py`) → committee review (if score ≥ 90)
 
 ## Applied To
 Daily charts on individual equities, ETFs, and potentially BTC (via Stater Swap).
 
 ## Status
 - **Approved:** March 16, 2026 (Olympus Committee)
-- **Build status:** PENDING — awaiting Titans architecture review
+- **Titans Approved:** March 17, 2026
+- **Build status:** PENDING — awaiting CC brief
 - **Trade Ideas generated:** 0 (not yet implemented)
