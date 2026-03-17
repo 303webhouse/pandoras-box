@@ -2697,6 +2697,7 @@ body.override-active-bearish .override-toggle[data-active="true"] {
 .at-risk-col.toro .at-risk-label { color: #66bb6a; }
 .at-risk-col.ursa .at-risk-label { color: #ff9800; }
 .at-risk-col.hedged .at-risk-label { color: #42a5f5; }
+.at-risk-col.equities .at-risk-label { color: #b39ddb; }
 .at-risk-amount {
     font-size: 14px;
     font-weight: 700;
