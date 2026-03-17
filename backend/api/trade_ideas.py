@@ -26,6 +26,11 @@ router = APIRouter()
 # Duplicates within DEDUP_WINDOW_SECONDS are collapsed in grouped view.
 SCAN_BASED_STRATEGIES = {"Holy_Grail", "Scout", "Phalanx", "holy_grail", "scout", "phalanx"}
 
+# How long to suppress a ticker+direction after user acts on it (seconds).
+# Matches the 24-hour signal window so rejected insights don't reappear
+# when a different strategy fires on the same ticker.
+INSIGHT_SUPPRESSION_SECONDS = 86400  # 24 hours
+
 
 def _dedup_related_signals(related: list) -> list:
     """
@@ -327,7 +332,8 @@ async def act_on_trade_idea_group(body: GroupAction, _=Depends(require_api_key))
     When ACCEPTED: all active signals for this ticker+direction get user_action='SELECTED'.
     When REJECTED: all active signals for this ticker+direction get user_action='DISMISSED'.
 
-    A Redis key is set to suppress new Insights for this ticker+direction for 8 hours.
+    A Redis key is set to suppress new Insights for this ticker+direction for 24 hours
+    (matches the signal query window so rejected tickers don't reappear from new strategy fires).
     """
     pool = await get_postgres_client()
     action = body.action.upper()
@@ -372,13 +378,14 @@ async def act_on_trade_idea_group(body: GroupAction, _=Depends(require_api_key))
         if len(parts) >= 2 and parts[-1].isdigit():
             count = int(parts[-1])
 
-    # Set Redis suppression key — prevents this ticker+direction from reappearing for 8 hours
+    # Set Redis suppression key — prevents this ticker+direction from reappearing
+    # for 24 hours (matches signal query window)
     try:
         from database.redis_client import get_redis_client
         redis = await get_redis_client()
         if redis:
             suppress_key = f"insight_acted:{ticker}:{direction}"
-            await redis.set(suppress_key, action, ex=28800)  # 8 hours
+            await redis.set(suppress_key, action, ex=INSIGHT_SUPPRESSION_SECONDS)
     except Exception as e:
         logger.warning(f"Failed to set suppression key: {e}")
 
