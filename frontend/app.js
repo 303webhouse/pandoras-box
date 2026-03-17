@@ -8087,16 +8087,18 @@ function updatePositionsCount() {
 // AT-RISK FUNDS STRIP
 // ==========================================
 
+const STOCK_STRUCTURES = new Set([
+    'stock', 'stock_long', 'long_stock', 'stock_short', 'short_stock',
+]);
 const TORO_STRUCTURES = new Set([
     'long_call', 'call_debit_spread', 'bull_call_spread',
     'put_credit_spread', 'bull_put_spread', 'cash_secured_put',
-    'covered_call', 'stock', 'stock_long', 'long_stock',
+    'covered_call',
 ]);
 const URSA_STRUCTURES = new Set([
     'long_put', 'put_debit_spread', 'bear_put_spread',
     'call_credit_spread', 'bear_call_spread',
-    'short_stock', 'stock_short', 'short_call', 'naked_call',
-    'short_put', 'naked_put',
+    'short_call', 'naked_call', 'short_put', 'naked_put',
 ]);
 const HEDGED_STRUCTURES = new Set([
     'iron_condor', 'iron_butterfly', 'straddle', 'strangle',
@@ -8105,10 +8107,14 @@ const HEDGED_STRUCTURES = new Set([
 function classifyPositionLane(pos) {
     const struct = (pos.structure || '').toLowerCase();
     const dir = (pos.direction || '').toUpperCase();
+    const assetType = (pos.asset_type || '').toUpperCase();
+    // Equities first — stocks/ETFs go to their own lane
+    if (STOCK_STRUCTURES.has(struct) || assetType === 'EQUITY') return 'EQUITIES';
+    // Options classification
     if (HEDGED_STRUCTURES.has(struct)) return 'HEDGED';
     if (URSA_STRUCTURES.has(struct)) return 'URSA';
     if (TORO_STRUCTURES.has(struct)) return 'TORO';
-    // Fallback: classify by direction
+    // Fallback for unknown option structures: classify by direction
     if (dir === 'SHORT' || dir === 'BEARISH') return 'URSA';
     return 'TORO';
 }
@@ -8121,7 +8127,7 @@ function renderAtRiskStrip() {
         matchesAccountFilter(p.account, activePositionsAccount)
     );
 
-    const lanes = { TORO: { risk: 0, pnl: 0, count: 0 }, URSA: { risk: 0, pnl: 0, count: 0 }, HEDGED: { risk: 0, pnl: 0, count: 0 } };
+    const lanes = { TORO: { risk: 0, pnl: 0, count: 0 }, URSA: { risk: 0, pnl: 0, count: 0 }, HEDGED: { risk: 0, pnl: 0, count: 0 }, EQUITIES: { risk: 0, pnl: 0, count: 0 } };
 
     for (const pos of filtered) {
         const lane = classifyPositionLane(pos);
@@ -8136,6 +8142,7 @@ function renderAtRiskStrip() {
         { key: 'TORO', id: 'Toro', col: document.getElementById('atRiskToro') },
         { key: 'URSA', id: 'Ursa', col: document.getElementById('atRiskUrsa') },
         { key: 'HEDGED', id: 'Hedged', col: document.getElementById('atRiskHedged') },
+        { key: 'EQUITIES', id: 'Equities', col: document.getElementById('atRiskEquities') },
     ];
 
     for (const { key, id, col } of entries) {
