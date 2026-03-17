@@ -6879,6 +6879,37 @@ body[data-mode="analytics"] .analytics-shell {
    CRYPTO SCALPER â€” BIAS BAR (Row 1)
    ============================================= */
 
+/* STRC Circuit Breaker Banner */
+.strc-banner {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 18px;
+    margin-bottom: 10px;
+    border-radius: 10px;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    animation: strc-pulse 2s ease-in-out infinite;
+}
+.strc-banner[data-severity="amber"] {
+    background: rgba(255, 165, 0, 0.15);
+    border: 1px solid rgba(255, 165, 0, 0.5);
+    color: #ffb347;
+}
+.strc-banner[data-severity="red"] {
+    background: rgba(255, 68, 68, 0.18);
+    border: 1px solid rgba(255, 68, 68, 0.6);
+    color: #ff6b6b;
+}
+.strc-banner-icon { font-size: 16px; }
+.strc-banner-text { flex: 1; }
+.strc-banner-price { font-family: 'JetBrains Mono', monospace; font-size: 14px; font-weight: 700; }
+@keyframes strc-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.8; }
+}
+
 .crypto-bias-bar {
     background: var(--card-bg);
     border: 1px solid rgba(20, 184, 166, 0.2);
@@ -7458,6 +7489,17 @@ body[data-mode="analytics"] .analytics-shell {
 .crypto-badge.exhaustion {
     background: rgba(245, 158, 11, 0.25);
     color: #fcd34d;
+}
+.crypto-badge.countertrend {
+    background: rgba(255, 165, 0, 0.2);
+    color: #ffb347;
+    border: 1px solid rgba(255, 165, 0, 0.4);
+}
+.crypto-badge.half-size {
+    background: rgba(255, 100, 100, 0.15);
+    color: #ff8a8a;
+    font-size: 9px;
+    letter-spacing: 0.05em;
 }
 
 .crypto-signal-score {

@@ -1367,12 +1367,43 @@ function startCryptoMarketPolling() {
     loadCryptoMarketData();
     if (cryptoMarketTimer) clearInterval(cryptoMarketTimer);
     cryptoMarketTimer = setInterval(loadCryptoMarketData, CRYPTO_MARKET_POLL_MS);
+    // STRC circuit breaker polling (60s)
+    pollStrcCircuitBreaker();
+    if (window._strcTimer) clearInterval(window._strcTimer);
+    window._strcTimer = setInterval(pollStrcCircuitBreaker, 60000);
 }
 
 function stopCryptoMarketPolling() {
     if (!cryptoMarketTimer) return;
     clearInterval(cryptoMarketTimer);
     cryptoMarketTimer = null;
+    if (window._strcTimer) { clearInterval(window._strcTimer); window._strcTimer = null; }
+}
+
+async function pollStrcCircuitBreaker() {
+    try {
+        const resp = await fetch(`${getApiBase()}/api/crypto/circuit-breakers`);
+        if (!resp.ok) return;
+        const data = await resp.json();
+        const breakers = data.breakers || [];
+        const strc = breakers.find(b => b.ticker === 'STRC');
+        updateStrcBanner(strc);
+    } catch (e) { /* silent */ }
+}
+
+function updateStrcBanner(strc) {
+    const banner = document.getElementById('strcBanner');
+    if (!banner) return;
+    if (!strc || strc.status === 'ABOVE_PAR' || strc.severity === 'green' || strc.status === 'UNAVAILABLE') {
+        banner.hidden = true;
+        return;
+    }
+    banner.hidden = false;
+    banner.setAttribute('data-severity', strc.severity || 'amber');
+    const textEl = document.getElementById('strcBannerText');
+    const priceEl = document.getElementById('strcBannerPrice');
+    if (textEl) textEl.textContent = strc.message || 'STRC below par';
+    if (priceEl) priceEl.textContent = strc.price != null ? `$${Number(strc.price).toFixed(4)}` : '';
 }
 
 function initCryptoChart() {
@@ -3709,6 +3740,7 @@ function formatStrategyName(raw) {
         'uw_flow': 'UW Flow', 'sell_the_rip': 'Sell the Rip',
         'holy_grail': 'Holy Grail', 'holygrail': 'Holy Grail',
         'sniper': 'Sniper', 'exhaustion': 'Exhaustion',
+        'nemesis_wrr': 'Nemesis WRR', 'nemesis': 'Nemesis',
     };
     const key = raw.toLowerCase().replace(/[\s-]+/g, '_');
     if (names[key]) return names[key];
@@ -3732,6 +3764,7 @@ function formatSignalType(raw) {
         'APIS_CALL': 'Apis Call', 'KODIAK_CALL': 'Kodiak Call',
         'EXHAUSTION_TOP': 'Exhaustion Top', 'EXHAUSTION_BOTTOM': 'Exhaustion Bottom',
         'BULL_WALL': 'Phalanx Bull', 'BEAR_WALL': 'Phalanx Bear',
+        'NEMESIS_LONG': 'Nemesis Long', 'NEMESIS_SHORT': 'Nemesis Short',
     };
     if (names[raw]) return names[raw];
     return raw.replace(/[_-]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
@@ -3806,6 +3839,10 @@ function createCryptoSignalCard(signal) {
     if (strategyLower.includes('scout')) badges.push('<span class="crypto-badge scout">SCOUT</span>');
     if (strategyLower.includes('sniper')) badges.push('<span class="crypto-badge sniper">SNIPER</span>');
     if (strategyLower.includes('exhaustion')) badges.push('<span class="crypto-badge exhaustion">EXHAUST</span>');
+    if (signal.countertrend || strategyLower.includes('nemesis') || strategyLower.includes('wrr')) {
+        badges.push('<span class="crypto-badge countertrend">\u21BA COUNTERTREND</span>');
+        if (signal.half_size) badges.push('<span class="crypto-badge half-size">HALF-SIZE</span>');
+    }
 
     const biasAlignment = signal.bias_alignment || 'NEUTRAL';
     const isAligned = biasAlignment.includes('ALIGNED') && !biasAlignment.includes('COUNTER');
