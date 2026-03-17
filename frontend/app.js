@@ -3863,6 +3863,15 @@ async function actOnInsight(ticker, direction, action) {
             card.style.transform = action === 'ACCEPTED' ? 'translateX(50px)' : 'translateX(-50px)';
             setTimeout(() => card.remove(), 300);
         }
+
+        // If accepted, open position entry modal pre-filled with ticker
+        if (action === 'ACCEPTED') {
+            setTimeout(() => {
+                openUnifiedPositionModal();
+                const ti = document.getElementById('upTicker');
+                if (ti) ti.value = ticker;
+            }, 350);
+        }
     } catch (e) {
         console.error('Insight action error:', e);
     }
