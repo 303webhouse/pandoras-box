@@ -2260,6 +2260,30 @@ async def run_health_monitor_job():
         logger.error(f"Strategy health monitor error: {e}")
 
 
+async def run_wrr_scan_job():
+    """Run WRR Buy Model countertrend scanner after market close."""
+    now = get_eastern_now()
+    if not is_trading_day():
+        logger.info("WRR scan skipped — not a trading day")
+        return
+    try:
+        from strategies.wrr_buy_model import run_wrr_scan
+        logger.info("WRR Buy Model scan starting (scheduled)...")
+        await run_wrr_scan()
+    except Exception as e:
+        logger.error(f"WRR scan job error: {e}")
+
+
+async def run_strc_poller_job():
+    """Poll STRC price and update Redis cache for circuit breaker banner."""
+    try:
+        from circuit_breakers.strc_monitor import check_strc_status
+        result = await check_strc_status()
+        logger.debug(f"STRC poller: {result.get('status')} ${result.get('price')}")
+    except Exception as e:
+        logger.warning(f"STRC poller error: {e}")
+
+
 async def reset_circuit_breaker_scheduled():
     """
     Reset circuit breaker at market open (9:30 AM ET)
@@ -2609,6 +2633,16 @@ async def start_scheduler():
             replace_existing=True
         )
 
+        # STRC circuit breaker price poller (every 5 minutes)
+        scheduler.add_job(
+            run_strc_poller_job,
+            'interval',
+            minutes=5,
+            id='strc_circuit_breaker_poller',
+            name='STRC Circuit Breaker Poller',
+            replace_existing=True
+        )
+
         # Price history collection every 5 minutes (optional).
         if ENABLE_PRICE_HISTORY_COLLECTION:
             scheduler.add_job(
@@ -2650,6 +2684,15 @@ async def start_scheduler():
             replace_existing=True
         )
 
+        # WRR Buy Model countertrend scanner (4:20 PM ET, after market close)
+        scheduler.add_job(
+            run_wrr_scan_job,
+            CronTrigger(day_of_week='mon-fri', hour=16, minute=20, timezone=ET),
+            id='wrr_daily_scan',
+            name='WRR Buy Model Scanner',
+            replace_existing=True
+        )
+
         # Nightly signal outcome scoring + discovery cleanup (9:00 PM ET)
         scheduler.add_job(
             run_signal_scoring_job,
@@ -2665,9 +2708,11 @@ async def start_scheduler():
         logger.info("âœ… BTC Bottom Signals refresh scheduled every 5 minutes")
         logger.info("âœ… Auto-dismiss old signals scheduled every hour")
         logger.info("âœ… Composite bias refresh scheduled every 15 minutes")
+        logger.info("âœ… STRC circuit breaker poller scheduled every 5 minutes")
         logger.info("âœ… Price history collection scheduled every 5 minutes")
         logger.info("âœ… Benchmark tracker scheduled daily at 4:10 PM ET")
         logger.info("âœ… Portfolio monitor scheduled daily at 4:15 PM ET")
+        logger.info("âœ… WRR Buy Model scanner scheduled daily at 4:20 PM ET")
         logger.info("âœ… Strategy health monitor scheduled daily at 4:30 PM ET")
         logger.info("âœ… Signal outcome scoring scheduled for 9:00 PM ET")
         
