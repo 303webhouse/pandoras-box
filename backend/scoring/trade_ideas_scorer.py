@@ -132,12 +132,14 @@ TIME_OF_DAY_PENALTIES = {
     "prime_time": 0,       # 9:45 AM - 11:30 AM ET — best window, no penalty
 }
 
-# Sector priority bonuses
+# Sector priority bonuses (Olympus-approved asymmetric model)
+# Penalty > bonus by design: avoiding bad trades matters more than boosting good ones
+# Tiers based on sector rank: top 3 = leading, bottom 3 = lagging, middle 5 = neutral
 SECTOR_PRIORITY_BONUS = {
-    "leading_aligned": 8,       # Signal in leading sector, aligned with bullish bias
-    "lagging_counter": 8,       # Signal in lagging sector, aligned with bearish bias (short)
-    "neutral_sector": 0,        # Neutral sector, no bonus
-    "misaligned_sector": -5     # Signal against sector trend (e.g., long in lagging during bull)
+    "leading_aligned": 5,       # Signal in top-3 sector, direction aligned
+    "lagging_counter": 5,       # Signal shorting bottom-3 sector (aligned with weakness)
+    "neutral_sector": 0,        # Sector ranked #4-8, no effect
+    "misaligned_sector": -8     # Signal long in bottom-3 sector OR short in top-3 sector
 }
 
 # Ticker to sector mapping (common tickers)
@@ -354,35 +356,41 @@ def calculate_signal_score(
             rr_bonus = 5
         triggering_factors["risk_reward"] = {"value": rr, "bonus": rr_bonus}
     
-    # 6. Sector priority bonus
+    # 6. Sector priority bonus (Olympus-approved asymmetric: +5/-8, rank-based tiers)
     sector_bonus = 0
     ticker = signal.get('ticker', '').upper()
     sector = TICKER_SECTORS.get(ticker)
-    
+
     if sector and sector_strength:
         sector_data = sector_strength.get(sector, {})
+        sector_rank = sector_data.get("rank", 6)  # Default to middle
         sector_trend = sector_data.get("trend", "neutral")
-        
-        # Determine if sector alignment helps or hurts
+
         is_bullish_signal = direction in ["LONG", "BUY"]
         is_bearish_signal = direction in ["SHORT", "SELL"]
-        
-        if sector_trend == "leading":
+
+        # Rank-based tiers: top 3 = leading, bottom 3 = lagging, middle 5 = neutral
+        is_leading = sector_rank <= 3
+        is_lagging = sector_rank >= 9
+
+        if is_leading:
             if is_bullish_signal:
-                sector_bonus = SECTOR_PRIORITY_BONUS["leading_aligned"]
-            else:
-                sector_bonus = SECTOR_PRIORITY_BONUS["misaligned_sector"]
-        elif sector_trend == "lagging":
+                sector_bonus = SECTOR_PRIORITY_BONUS["leading_aligned"]   # +5
+            elif is_bearish_signal:
+                sector_bonus = SECTOR_PRIORITY_BONUS["misaligned_sector"]  # -8 (shorting a leader)
+        elif is_lagging:
             if is_bearish_signal:
-                sector_bonus = SECTOR_PRIORITY_BONUS["lagging_counter"]
-            else:
-                sector_bonus = SECTOR_PRIORITY_BONUS["misaligned_sector"]
-        
+                sector_bonus = SECTOR_PRIORITY_BONUS["lagging_counter"]    # +5
+            elif is_bullish_signal:
+                sector_bonus = SECTOR_PRIORITY_BONUS["misaligned_sector"]  # -8 (buying a lagger)
+        # Middle ranks (#4-8): no bonus or penalty
+
         triggering_factors["sector_priority"] = {
             "sector": sector,
+            "rank": sector_rank,
             "trend": sector_trend,
+            "tier": "leading" if is_leading else ("lagging" if is_lagging else "neutral"),
             "bonus": sector_bonus,
-            "rank": sector_data.get("rank")
         }
     
     # 6. Time-of-day adjustment (NEW — Training Bible E.03)
