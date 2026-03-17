@@ -2284,6 +2284,16 @@ async def run_strc_poller_job():
         logger.warning(f"STRC poller error: {e}")
 
 
+async def refresh_sector_sma_cache():
+    """Refresh sector SMA cache from Polygon daily bars. Runs once daily after close."""
+    try:
+        from integrations.sector_snapshot import refresh_sma_cache
+        result = await refresh_sma_cache()
+        logger.info(f"Sector SMA cache refreshed: {len(result)} tickers")
+    except Exception as e:
+        logger.error(f"Sector SMA cache refresh failed: {e}")
+
+
 async def reset_circuit_breaker_scheduled():
     """
     Reset circuit breaker at market open (9:30 AM ET)
@@ -2319,8 +2329,7 @@ async def run_scheduled_refreshes():
     if now.weekday() == 0:  # Monday
         await refresh_cyclical_bias()
     
-    # Run sector strength scan every morning
-    await scan_sector_strength()
+    # Sector strength scan now runs via dedicated 15-second loop
     
     # Compute sector rotation momentum
     try:
@@ -2376,126 +2385,44 @@ async def refresh_composite_bias():
 async def scan_sector_strength():
     """
     Scan sector ETFs to determine which sectors are leading/lagging.
-    Updates the watchlist with sector strength rankings.
-    
-    Criteria:
-    - Price vs 20 SMA (momentum)
-    - Price vs 50 SMA (trend)
-    - Relative strength vs SPY
-    """
-    logger.info("ðŸ“Š Scanning sector strength...")
-    
-    try:
-        import yfinance as yf
-        
-        # Sector ETFs to analyze
-        SECTOR_ETFS = {
-            "Technology": "XLK",
-            "Consumer Discretionary": "XLY",
-            "Healthcare": "XLV",
-            "Financials": "XLF",
-            "Industrials": "XLI",
-            "Consumer Staples": "XLP",
-            "Energy": "XLE",
-            "Utilities": "XLU",
-            "Materials": "XLB",
-            "Real Estate": "XLRE",
-            "Communication Services": "XLC"
-        }
-        
-        def _fetch_history(symbol: str):
-            ticker = yf.Ticker(symbol)
-            return ticker.history(period="3mo")
+    Uses Polygon.io bulk snapshot for real-time prices (1 API call).
+    SMA data from Redis cache (refreshed daily via refresh_sector_sma_cache).
 
-        # Get SPY as benchmark
-        spy_hist = await asyncio.to_thread(_fetch_history, "SPY")
-        if spy_hist.empty:
-            logger.warning("Could not fetch SPY data for sector comparison")
-            return
-        
-        spy_price = float(spy_hist['Close'].iloc[-1])
-        spy_sma20 = float(spy_hist['Close'].rolling(20).mean().iloc[-1])
-        spy_pct_change_month = (spy_price / spy_hist['Close'].iloc[-21] - 1) * 100 if len(spy_hist) >= 21 else 0
-        
-        sector_scores = {}
-        
-        for sector_name, etf in SECTOR_ETFS.items():
-            try:
-                hist = await asyncio.to_thread(_fetch_history, etf)
-                
-                if hist.empty or len(hist) < 50:
-                    continue
-                
-                price = float(hist['Close'].iloc[-1])
-                sma20 = float(hist['Close'].rolling(20).mean().iloc[-1])
-                sma50 = float(hist['Close'].rolling(50).mean().iloc[-1])
-                
-                # Calculate metrics
-                above_20sma = price > sma20
-                above_50sma = price > sma50
-                pct_change_month = (price / hist['Close'].iloc[-21] - 1) * 100 if len(hist) >= 21 else 0
-                
-                # Relative strength vs SPY
-                relative_strength = pct_change_month - spy_pct_change_month
-                
-                # Score: higher = stronger sector
-                score = 0
-                if above_20sma:
-                    score += 1
-                if above_50sma:
-                    score += 1
-                if relative_strength > 1:
-                    score += 2  # Outperforming SPY significantly
-                elif relative_strength > 0:
-                    score += 1  # Slightly outperforming
-                elif relative_strength < -1:
-                    score -= 1  # Underperforming
-                
-                sector_scores[sector_name] = {
-                    "etf": etf,
-                    "price": round(price, 2),
-                    "above_20sma": above_20sma,
-                    "above_50sma": above_50sma,
-                    "pct_change_month": round(pct_change_month, 2),
-                    "relative_strength": round(relative_strength, 2),
-                    "strength": score,
-                    "trend": "leading" if score >= 3 else ("lagging" if score <= 0 else "neutral")
-                }
-                
-            except Exception as e:
-                logger.warning(f"Error scanning {sector_name} ({etf}): {e}")
-                continue
-        
-        # Rank sectors by strength
-        sorted_sectors = sorted(sector_scores.items(), key=lambda x: x[1]["strength"], reverse=True)
-        for rank, (sector_name, data) in enumerate(sorted_sectors, 1):
-            sector_scores[sector_name]["rank"] = rank
-        
-        logger.info(f"âœ… Sector strength scan complete: {len(sector_scores)} sectors analyzed")
-        
-        # Log top and bottom sectors
-        if sorted_sectors:
-            top = sorted_sectors[0]
-            bottom = sorted_sectors[-1]
-            logger.info(f"   Leading: {top[0]} ({top[1]['etf']}) - score {top[1]['strength']}")
-            logger.info(f"   Lagging: {bottom[0]} ({bottom[1]['etf']}) - score {bottom[1]['strength']}")
-        
-        # Update watchlist with sector strength (direct call avoids localhost dependency)
+    Data source: Polygon.io (primary), yfinance (fallback).
+    Runs every 15 seconds during market hours.
+    """
+    try:
+        from integrations.sector_snapshot import compute_sector_strength
+
+        sector_scores = await compute_sector_strength()
+
+        if not sector_scores:
+            logger.warning("Sector strength scan returned no data")
+            return {}
+
+        # Log top and bottom (only every 60s to avoid log spam)
+        import time
+        _now = time.time()
+        if not hasattr(scan_sector_strength, "_last_log") or (_now - scan_sector_strength._last_log) > 60:
+            scan_sector_strength._last_log = _now
+            sorted_sectors = sorted(sector_scores.items(), key=lambda x: x[1]["strength"], reverse=True)
+            if sorted_sectors:
+                top = sorted_sectors[0]
+                bottom = sorted_sectors[-1]
+                logger.info(f"Sector scan: Leading={top[0]} ({top[1]['etf']}, score {top[1]['strength']}), Lagging={bottom[0]} ({bottom[1]['etf']}, score {bottom[1]['strength']})")
+
+        # Update watchlist with sector strength
         try:
             from api.watchlist import SectorStrengthUpdate, update_sector_strength
             await update_sector_strength(SectorStrengthUpdate(sector_strength=sector_scores), _="internal")
-            logger.info("   Sector strength saved to watchlist")
         except Exception as e:
             logger.warning(f"Could not update watchlist with sector strength: {e}")
-        
+
         return sector_scores
-        
+
     except Exception as e:
         logger.error(f"Error in sector strength scan: {e}")
-        import traceback
-        traceback.print_exc()
         return {}
-
 
 async def start_scheduler():
     """Start the background scheduler"""
@@ -2522,6 +2449,13 @@ async def start_scheduler():
         await refresh_daily_bias()
         await refresh_weekly_bias()
         await refresh_cyclical_bias()
+        # Seed sector SMA cache so the 15-second loop has data immediately
+        try:
+            from integrations.sector_snapshot import refresh_sma_cache
+            await refresh_sma_cache()
+            logger.info("  Sector SMA cache seeded")
+        except Exception as sma_err:
+            logger.warning(f"  Sector SMA seed failed: {sma_err}")
         # Score all composite factors (including FRED) so the composite engine
         # has data immediately on boot rather than waiting for the first 15-min cycle.
         try:
@@ -2684,6 +2618,15 @@ async def start_scheduler():
             replace_existing=True
         )
 
+        # Sector SMA cache refresh (daily after close)
+        scheduler.add_job(
+            refresh_sector_sma_cache,
+            CronTrigger(day_of_week='mon-fri', hour=16, minute=5, timezone=ET),
+            id='sector_sma_refresh',
+            name='Sector SMA Cache Refresh',
+            replace_existing=True
+        )
+
         # WRR Buy Model countertrend scanner (4:20 PM ET, after market close)
         scheduler.add_job(
             run_wrr_scan_job,
@@ -2724,6 +2667,39 @@ async def start_scheduler():
         logger.warning("APScheduler not installed, using fallback scheduler")
         # Fallback: Simple asyncio-based scheduler (handles both bias refresh AND scanners)
         asyncio.create_task(_fallback_scheduler())
+
+
+async def _sector_refresh_loop():
+    """
+    Dedicated loop for real-time sector strength refresh.
+    Runs every 15 seconds during market hours using Polygon bulk snapshot.
+    Uses ONE Polygon API call per cycle (all 12 sector ETFs + SPY).
+    """
+    import pytz
+    et = pytz.timezone('America/New_York')
+    logger.info("Starting sector refresh loop (15s interval, market hours)")
+
+    while True:
+        try:
+            now = datetime.now(et)
+            hour = now.hour
+            minute = now.minute
+            time_decimal = hour + minute / 60.0
+
+            # Only run during market hours (9:30 AM - 4:00 PM ET, weekdays)
+            is_market = (
+                is_trading_day()
+                and 9.5 <= time_decimal <= 16.0
+            )
+
+            if is_market:
+                await scan_sector_strength()
+
+            await asyncio.sleep(15)
+
+        except Exception as e:
+            logger.error(f"Error in sector refresh loop: {e}")
+            await asyncio.sleep(15)
 
 
 async def _scanner_loop():
