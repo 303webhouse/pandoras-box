@@ -2669,6 +2669,55 @@ body.override-active-bearish .override-toggle[data-active="true"] {
     opacity: 0.6;
 }
 
+/* At-Risk Funds Strip */
+.at-risk-strip {
+    display: flex;
+    gap: 6px;
+    padding: 6px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    margin-bottom: 6px;
+}
+.at-risk-col {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 6px 4px;
+    border-radius: 6px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.06);
+    transition: border-color 0.3s;
+}
+.at-risk-label {
+    font-size: 9px;
+    letter-spacing: 1.5px;
+    font-weight: 700;
+    margin-bottom: 2px;
+}
+.at-risk-col.toro .at-risk-label { color: #66bb6a; }
+.at-risk-col.ursa .at-risk-label { color: #ff9800; }
+.at-risk-col.hedged .at-risk-label { color: #42a5f5; }
+.at-risk-amount {
+    font-size: 14px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+.at-risk-amount.pnl-positive { color: #00e676; }
+.at-risk-amount.pnl-negative { color: #e5370e; }
+.at-risk-amount.pnl-zero { color: #78909c; }
+.at-risk-pnl {
+    font-size: 10px;
+    margin-top: 1px;
+    font-variant-numeric: tabular-nums;
+}
+.at-risk-pnl .ar-arrow { font-size: 9px; margin-right: 2px; }
+.at-risk-pnl .ar-arrow.up { color: #00e676; }
+.at-risk-pnl .ar-arrow.down { color: #e5370e; }
+.at-risk-pnl .ar-arrow.flat { color: #78909c; }
+.at-risk-col.empty {
+    opacity: 0.35;
+}
+
 .positions-container {
     display: flex;
     flex-direction: column;

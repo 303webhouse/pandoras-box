@@ -7343,6 +7343,7 @@ function initPositionModals() {
             activePositionsAccount = btn.dataset.account;
             renderPositionsEnhanced();
             updatePositionsCount();
+            renderAtRiskStrip();
             loadPortfolioSummary();
         });
     });
@@ -7796,6 +7797,7 @@ async function loadOpenPositionsEnhanced() {
             openPositions = data.positions;
             renderPositionsEnhanced();
             updatePositionsCount();
+            renderAtRiskStrip();
             updatePositionChartTabs();
             loadPortfolioSummary();
         }
@@ -8078,6 +8080,88 @@ function updatePositionsCount() {
     if (countEl) {
         const count = openPositions.filter(p => matchesAccountFilter(p.account, activePositionsAccount)).length;
         countEl.textContent = count;
+    }
+}
+
+// ==========================================
+// AT-RISK FUNDS STRIP
+// ==========================================
+
+const TORO_STRUCTURES = new Set([
+    'long_call', 'call_debit_spread', 'bull_call_spread',
+    'put_credit_spread', 'bull_put_spread', 'cash_secured_put',
+    'covered_call', 'stock', 'stock_long', 'long_stock',
+]);
+const URSA_STRUCTURES = new Set([
+    'long_put', 'put_debit_spread', 'bear_put_spread',
+    'call_credit_spread', 'bear_call_spread',
+    'short_stock', 'stock_short', 'short_call', 'naked_call',
+    'short_put', 'naked_put',
+]);
+const HEDGED_STRUCTURES = new Set([
+    'iron_condor', 'iron_butterfly', 'straddle', 'strangle',
+]);
+
+function classifyPositionLane(pos) {
+    const struct = (pos.structure || '').toLowerCase();
+    const dir = (pos.direction || '').toUpperCase();
+    if (HEDGED_STRUCTURES.has(struct)) return 'HEDGED';
+    if (URSA_STRUCTURES.has(struct)) return 'URSA';
+    if (TORO_STRUCTURES.has(struct)) return 'TORO';
+    // Fallback: classify by direction
+    if (dir === 'SHORT' || dir === 'BEARISH') return 'URSA';
+    return 'TORO';
+}
+
+function renderAtRiskStrip() {
+    const strip = document.getElementById('atRiskStrip');
+    if (!strip) return;
+
+    const filtered = openPositions.filter(p =>
+        matchesAccountFilter(p.account, activePositionsAccount)
+    );
+
+    const lanes = { TORO: { risk: 0, pnl: 0, count: 0 }, URSA: { risk: 0, pnl: 0, count: 0 }, HEDGED: { risk: 0, pnl: 0, count: 0 } };
+
+    for (const pos of filtered) {
+        const lane = classifyPositionLane(pos);
+        const risk = pos.max_loss || pos.cost_basis || 0;
+        const pnl = pos.unrealized_pnl || 0;
+        lanes[lane].risk += risk;
+        lanes[lane].pnl += pnl;
+        lanes[lane].count += 1;
+    }
+
+    const entries = [
+        { key: 'TORO', id: 'Toro', col: document.getElementById('atRiskToro') },
+        { key: 'URSA', id: 'Ursa', col: document.getElementById('atRiskUrsa') },
+        { key: 'HEDGED', id: 'Hedged', col: document.getElementById('atRiskHedged') },
+    ];
+
+    for (const { key, id, col } of entries) {
+        if (!col) continue;
+        const data = lanes[key];
+        const amtEl = document.getElementById(`atRisk${id}Amount`);
+        const pnlEl = document.getElementById(`atRisk${id}Pnl`);
+
+        col.classList.toggle('empty', data.count === 0);
+
+        if (amtEl) {
+            amtEl.textContent = '$' + data.risk.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+            amtEl.className = 'at-risk-amount ' + (data.pnl > 0.01 ? 'pnl-positive' : data.pnl < -0.01 ? 'pnl-negative' : 'pnl-zero');
+        }
+
+        if (pnlEl) {
+            if (data.count === 0) {
+                pnlEl.innerHTML = '--';
+            } else {
+                const sign = data.pnl >= 0 ? '+' : '-';
+                const arrowClass = data.pnl > 0.01 ? 'up' : data.pnl < -0.01 ? 'down' : 'flat';
+                const arrowChar = arrowClass === 'up' ? '\u25B2' : arrowClass === 'down' ? '\u25BC' : '\u2192';
+                const pnlStr = `${sign}$${Math.abs(data.pnl).toFixed(0)}`;
+                pnlEl.innerHTML = `<span class="ar-arrow ${arrowClass}">${arrowChar}</span>${pnlStr}`;
+            }
+        }
     }
 }
 
@@ -8408,6 +8492,7 @@ async function removePositionWithoutArchive(position) {
             openPositions = openPositions.filter(p => (p.position_id || p.id || p.signal_id) !== posId);
             renderPositionsEnhanced();
             updatePositionsCount();
+            renderAtRiskStrip();
             updatePositionChartTabs();
         } else {
             alert('Failed to remove position: ' + (data.detail || data.message || 'Unknown error'));
