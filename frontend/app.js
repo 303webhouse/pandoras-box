@@ -3715,6 +3715,7 @@ function renderGroupedSignals(groups) {
                 ${factorsHtml ? `<div class="insight-factors">${factorsHtml}</div>` : ''}
 
                 <div class="insight-actions">
+                    <button class="insight-btn insight-analyze" onclick="requestInsightCommittee('${signal.signal_id}', this)">&#9881; Analyze</button>
                     <button class="insight-btn insight-accept" onclick="actOnInsight('${group.ticker}', '${group.direction}', 'ACCEPTED')">&#10003; Accept</button>
                     <button class="insight-btn insight-reject" onclick="actOnInsight('${group.ticker}', '${group.direction}', 'REJECTED')">&#10007; Pass</button>
                 </div>
@@ -3788,7 +3789,16 @@ function formatLargeNumber(n) {
 
 function getTimeAgo(timestamp) {
     try {
-        const mins = Math.round((Date.now() - new Date(timestamp).getTime()) / 60000);
+        let ts = String(timestamp || '');
+        if (!ts) return '';
+        // Server stores UTC timestamps without 'Z' suffix — JS treats bare
+        // ISO strings as local time, which shifts them forward by the TZ offset
+        // (e.g. +6h in MDT).  Append 'Z' so Date parses them as UTC.
+        if (!ts.endsWith('Z') && !ts.includes('+') && !ts.includes('-', 10)) {
+            ts += 'Z';
+        }
+        const mins = Math.round((Date.now() - new Date(ts).getTime()) / 60000);
+        if (mins < 0) return 'just now'; // future-dated (clock skew)
         if (mins < 1) return 'just now';
         if (mins < 60) return mins + 'm ago';
         const hrs = Math.round(mins / 60);
@@ -3874,6 +3884,30 @@ async function actOnInsight(ticker, direction, action) {
         }
     } catch (e) {
         console.error('Insight action error:', e);
+    }
+}
+
+async function requestInsightCommittee(signalId, btnEl) {
+    if (!signalId) return;
+    try {
+        if (btnEl) {
+            btnEl.textContent = 'Pending...';
+            btnEl.disabled = true;
+        }
+        const response = await fetch(`${API_URL}/trade-ideas/${signalId}/status`, {
+            method: 'PATCH',
+            headers: authHeaders(),
+            body: JSON.stringify({ status: 'COMMITTEE_REVIEW', decision_source: 'dashboard' })
+        });
+        const data = await response.json();
+        if (data.new_status === 'COMMITTEE_REVIEW') {
+            if (btnEl) btnEl.textContent = '\u2713 Sent';
+        } else {
+            if (btnEl) { btnEl.textContent = 'Failed'; btnEl.disabled = false; }
+        }
+    } catch (err) {
+        console.error('Committee request failed:', err);
+        if (btnEl) { btnEl.textContent = 'Failed'; btnEl.disabled = false; }
     }
 }
 

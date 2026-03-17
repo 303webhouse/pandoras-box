@@ -10782,6 +10782,20 @@ body[data-mode="analytics"] .analytics-shell {
     background: rgba(156, 163, 175, 0.2);
 }
 
+.insight-analyze {
+    background: rgba(20, 184, 166, 0.12);
+    color: #14b8a6;
+}
+
+.insight-analyze:hover {
+    background: rgba(20, 184, 166, 0.22);
+}
+
+.insight-analyze:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
 .insights-toggle {
     display: flex;
     align-items: center;
