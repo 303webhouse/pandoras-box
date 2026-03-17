@@ -3568,7 +3568,11 @@ function renderCryptoSignals() {
 
 async function loadGroupedSignals() {
     try {
-        const response = await fetch(`${API_URL}/trade-ideas/grouped`);
+        const showAll = document.getElementById('insights-show-all')?.checked || false;
+        const url = showAll
+            ? `${API_URL}/trade-ideas/grouped?show_all=true`
+            : `${API_URL}/trade-ideas/grouped`;
+        const response = await fetch(url);
         const data = await response.json();
         if (data.groups) {
             renderGroupedSignals(data.groups);
@@ -3584,23 +3588,26 @@ function renderGroupedSignals(groups) {
     if (!container) return;
 
     if (!groups || groups.length === 0) {
-        container.innerHTML = '<p class="empty-state">No trade ideas</p>';
+        container.innerHTML = '<p class="empty-state">No qualifying insights — all signals below threshold or already acted on</p>';
         return;
     }
 
     container.innerHTML = groups.map(group => {
         const signal = group.primary_signal;
+        const score = Math.round(group.highest_score || signal.score_v2 || signal.score || 0);
+        const scoreClass = getScoreClass(score);
+        const dirClass = group.direction === 'LONG' ? 'direction-long' : 'direction-short';
+        const formatPrice = (val) => val ? '$' + parseFloat(val).toFixed(2) : '-';
+
+        // Confluence tier badge
         const isConviction = group.confluence_tier === 'CONVICTION';
         const isConfirmed = group.confluence_tier === 'CONFIRMED';
+        const tierBorderClass = isConviction ? 'conviction-border' : isConfirmed ? 'confirmed-border' : '';
         const confluenceBadge = isConviction
             ? '<span class="confluence-badge conviction">CONVICTION</span>'
             : isConfirmed
             ? '<span class="confluence-badge confirmed">CONFIRMED</span>'
             : '';
-        const signalCountBadge = group.signal_count > 1
-            ? `<span class="signal-count-badge">${group.signal_count} signals</span>`
-            : '';
-        const category = (signal.signal_category || 'TRADE_SETUP');
 
         // Position overlap check
         let positionBadge = '';
@@ -3616,116 +3623,116 @@ function renderGroupedSignals(groups) {
                 (posDir === 'BULLISH' && sigDir === 'LONG') ||
                 (posDir === 'LONG' && sigDir === 'BULLISH');
             positionBadge = aligns
-                ? `<span class="position-overlap confirms">Confirms ${matchingPos.ticker} position</span>`
-                : `<span class="position-overlap counters">Counters ${matchingPos.ticker} position</span>`;
+                ? '<span class="position-overlap confirms">Confirms position</span>'
+                : '<span class="position-overlap counters">Counters position</span>';
         }
 
-        // Stale badge
-        let staleBadge = '';
-        if (group.newest_at) {
-            try {
-                const mins = Math.round((Date.now() - new Date(group.newest_at).getTime()) / 60000);
-                if (mins > 120) staleBadge = '<span class="stale-badge">Stale</span>';
-            } catch(e) {}
-        }
+        // Countertrend badge
+        const counterBadge = signal.countertrend
+            ? '<span class="crypto-badge countertrend">Countertrend</span>' + (signal.half_size ? '<span class="crypto-badge half-size">Half Size</span>' : '')
+            : '';
 
-        const formatPrice = (val) => val ? parseFloat(val).toFixed(2) : '-';
-        const formatRR = (val) => typeof formatRiskReward === 'function' ? formatRiskReward(val) : (val ? parseFloat(val).toFixed(1) + ':1' : '-');
-
-        // Card content varies by signal_category
-        let detailsHtml = '';
+        // Primary setup section
+        const category = (signal.signal_category || 'TRADE_SETUP');
+        let primaryHtml = '';
         if (category === 'FLOW_INTEL') {
             let meta = signal.metadata || {};
             if (typeof meta === 'string') { try { meta = JSON.parse(meta); } catch(e) {} }
-            detailsHtml = `
-                <div class="signal-details flow-details">
-                    <div class="signal-detail"><div class="signal-detail-label">Premium</div><div class="signal-detail-value">$${formatLargeNumber(meta.total_premium)}</div></div>
-                    <div class="signal-detail"><div class="signal-detail-label">P/C</div><div class="signal-detail-value">${meta.pc_ratio || '-'}</div></div>
-                    <div class="signal-detail"><div class="signal-detail-label">Sentiment</div><div class="signal-detail-value">${meta.flow_sentiment || '-'}</div></div>
+            primaryHtml = `
+                <div class="insight-primary">
+                    <div class="insight-primary-label">Primary: ${formatStrategyName(signal.strategy)}</div>
+                    <div class="insight-levels">
+                        <span>Premium: $${typeof formatLargeNumber === 'function' ? formatLargeNumber(meta.total_premium) : (meta.total_premium || '-')}</span>
+                        <span>P/C: ${meta.pc_ratio || '-'}</span>
+                        <span>Sentiment: ${meta.flow_sentiment || '-'}</span>
+                    </div>
                 </div>`;
-        } else if (category === 'DARK_POOL') {
-            let meta = signal.metadata || {};
-            if (typeof meta === 'string') { try { meta = JSON.parse(meta); } catch(e) {} }
-            detailsHtml = `
-                <div class="signal-details">
-                    <div class="signal-detail"><div class="signal-detail-label">POC</div><div class="signal-detail-value">${formatPrice(meta.poc)}</div></div>
-                    <div class="signal-detail"><div class="signal-detail-label">Entry</div><div class="signal-detail-value">${formatPrice(signal.entry_price)}</div></div>
-                    <div class="signal-detail"><div class="signal-detail-label">Stop</div><div class="signal-detail-value">${formatPrice(signal.stop_loss)}</div></div>
-                    <div class="signal-detail"><div class="signal-detail-label">Target</div><div class="signal-detail-value">${formatPrice(signal.target_1)}</div></div>
+        } else if (category === 'ORDER_FLOW') {
+            primaryHtml = `
+                <div class="insight-primary">
+                    <div class="insight-primary-label">Primary: ${formatStrategyName(signal.strategy)}</div>
+                    <div class="insight-levels">
+                        <span>Wall: ${formatPrice(signal.entry_price)}</span>
+                    </div>
                 </div>`;
         } else {
-            // Standard TRADE_SETUP card
-            detailsHtml = `
-                <div class="signal-details">
-                    <div class="signal-detail"><div class="signal-detail-label">Entry</div><div class="signal-detail-value">${formatPrice(signal.entry_price)}</div></div>
-                    <div class="signal-detail"><div class="signal-detail-label">Stop</div><div class="signal-detail-value">${formatPrice(signal.stop_loss)}</div></div>
-                    <div class="signal-detail"><div class="signal-detail-label">Target</div><div class="signal-detail-value">${formatPrice(signal.target_1)}</div></div>
-                </div>
-                <div class="signal-details">
-                    <div class="signal-detail"><div class="signal-detail-label">R:R</div><div class="signal-detail-value">${formatRR(signal.risk_reward)}</div></div>
-                    <div class="signal-detail"><div class="signal-detail-label">Direction</div><div class="signal-detail-value direction-${(signal.direction || '').toLowerCase()}">${signal.direction || '-'}</div></div>
+            primaryHtml = `
+                <div class="insight-primary">
+                    <div class="insight-primary-label">Primary: ${formatStrategyName(signal.strategy)} ${signal.timeframe || ''}</div>
+                    <div class="insight-levels">
+                        <span>Entry: ${formatPrice(signal.entry_price)}</span>
+                        <span>Stop: ${formatPrice(signal.stop_loss)}</span>
+                        <span>T1: ${formatPrice(signal.target_1)}</span>
+                    </div>
                 </div>`;
         }
 
-        // Related signals expandable section
-        let relatedHtml = '';
+        // Confirming signals section (only distinct strategies)
+        let confirmingHtml = '';
         if (group.related_signals && group.related_signals.length > 0) {
-            const relatedItems = group.related_signals.map(rs => {
+            const items = group.related_signals.map(rs => {
                 const ago = rs.timestamp ? getTimeAgo(rs.timestamp) : '';
-                return `<div class="related-signal-row">
-                    <span class="related-strategy">${formatStrategyName(rs.strategy)}</span>
-                    <span class="related-score">${Math.round(rs.score)}</span>
-                    <span class="related-time">${ago}</span>
+                return `<div class="insight-confirming-item">
+                    <span class="confirming-strategy">${formatStrategyName(rs.strategy)} ${group.direction}</span>
+                    <span class="confirming-time">${ago}</span>
                 </div>`;
             }).join('');
-            relatedHtml = `
-                <div class="related-signals-toggle" onclick="this.nextElementSibling.classList.toggle('expanded')">
-                    + ${group.related_signals.length} supporting signal${group.related_signals.length > 1 ? 's' : ''}
-                </div>
-                <div class="related-signals-panel">
-                    ${relatedItems}
+            confirmingHtml = `
+                <div class="insight-confirming">
+                    <div class="insight-confirming-label">Confirming:</div>
+                    ${items}
                 </div>`;
         }
 
-        const score = Math.round(signal.score_v2 || signal.score || 0);
-        const scoreTier = score >= 85 ? 'CRITICAL' : score >= 75 ? 'HIGH' : score >= 55 ? 'MEDIUM' : 'LOW';
-        const tierBorderClass = isConviction ? 'conviction-border' : isConfirmed ? 'confirmed-border' : '';
-        const categoryIcon = '';
+        // Score factors
+        let tf = signal.triggering_factors;
+        if (typeof tf === 'string') { try { tf = JSON.parse(tf); } catch(e) { tf = null; } }
+        const factorsHtml = renderScoreFactors(tf);
 
         return `
-            <div class="signal-card grouped ${tierBorderClass}" data-signal-id="${signal.signal_id}" data-group-key="${group.group_key}" data-signal="${encodeURIComponent(JSON.stringify(signal))}">
-                <div class="signal-header">
-                    <div>
-                        <div class="signal-type">${categoryIcon}${formatSignalType(signal.signal_type || signal.strategy)}</div>
-                        <div class="signal-strategy">${group.strategies.map(formatStrategyName).join(' + ')}</div>
+            <div class="insight-card ${tierBorderClass}" data-ticker="${group.ticker}" data-direction="${group.direction}" data-signal-id="${signal.signal_id}" data-group-key="${group.group_key}" data-signal="${encodeURIComponent(JSON.stringify(signal))}">
+                <div class="insight-header">
+                    <div class="insight-ticker-row">
+                        <span class="insight-ticker ticker-link" data-action="view-chart">${group.ticker}</span>
+                        <span class="insight-direction ${dirClass}">${group.direction}</span>
+                        <span class="insight-score ${scoreClass}">${score}</span>
+                        ${confluenceBadge}
                     </div>
-                    <div class="signal-ticker ticker-link" data-action="view-chart">${group.ticker}</div>
+                    <div class="insight-meta">
+                        <span class="insight-updated" title="${group.last_signal_at || group.newest_at || ''}">${getTimeAgo(group.last_signal_at || group.newest_at)}</span>
+                        <span class="insight-strategies">${group.distinct_strategy_count || group.strategies.length} ${(group.distinct_strategy_count || group.strategies.length) === 1 ? 'strategy' : 'strategies'}</span>
+                    </div>
                 </div>
 
                 <div class="signal-badges">
-                    ${confluenceBadge}${signalCountBadge}${positionBadge}${staleBadge}
+                    ${positionBadge}${counterBadge}
                 </div>
 
-                <div class="signal-score-bar">
-                    <div class="score-label">Score</div>
-                    <div class="score-value ${scoreTier.toLowerCase()}">${score}</div>
-                    <div class="score-tier ${scoreTier.toLowerCase()}">${scoreTier}</div>
-                </div>
+                ${primaryHtml}
 
-                ${detailsHtml}
+                ${confirmingHtml}
 
-                ${relatedHtml}
+                ${factorsHtml ? `<div class="insight-factors">${factorsHtml}</div>` : ''}
 
-                <div class="signal-actions">
-                    <button class="action-btn dismiss-btn" data-action="dismiss">Reject</button>
-                    <button class="action-btn committee-btn" data-action="committee">Analyze</button>
-                    ${category === 'FLOW_INTEL' ? '' : '<button class="action-btn select-btn" data-action="select">Accept</button>'}
+                <div class="insight-actions">
+                    <button class="insight-btn insight-accept" onclick="actOnInsight('${group.ticker}', '${group.direction}', 'ACCEPTED')">&#10003; Accept</button>
+                    <button class="insight-btn insight-reject" onclick="actOnInsight('${group.ticker}', '${group.direction}', 'REJECTED')">&#10007; Pass</button>
                 </div>
             </div>
         `;
     }).join('');
 
-    attachSignalActions();
+    // Attach clickable tickers
+    container.querySelectorAll('.ticker-link').forEach(ticker => {
+        ticker.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const card = e.target.closest('.insight-card');
+            if (card?.dataset.signal) {
+                const signal = JSON.parse(decodeURIComponent(card.dataset.signal));
+                showTradeOnChart(signal);
+            }
+        });
+    });
     attachDynamicKbHandlers(container);
 }
 
@@ -3784,8 +3791,85 @@ function getTimeAgo(timestamp) {
         const mins = Math.round((Date.now() - new Date(timestamp).getTime()) / 60000);
         if (mins < 1) return 'just now';
         if (mins < 60) return mins + 'm ago';
-        return Math.round(mins / 60) + 'h ago';
+        const hrs = Math.round(mins / 60);
+        if (hrs < 24) return hrs + 'h ago';
+        return Math.floor(hrs / 24) + 'd ago';
     } catch(e) { return ''; }
+}
+
+function getScoreClass(score) {
+    if (score >= 75) return 'score-strong';
+    if (score >= 60) return 'score-moderate';
+    return 'score-weak';
+}
+
+function renderScoreFactors(triggeringFactors) {
+    if (!triggeringFactors) return '';
+    const pills = [];
+    const calc = triggeringFactors.calculation || {};
+
+    if (calc.base_score) pills.push({ label: `Base: ${calc.base_score}`, type: 'neutral' });
+    if (calc.alignment_multiplier && calc.alignment_multiplier !== 1.0) {
+        const type = calc.alignment_multiplier > 1 ? 'positive' : 'negative';
+        pills.push({ label: `Bias: \u00d7${calc.alignment_multiplier.toFixed(2)}`, type });
+    }
+
+    // Technical details
+    const tech = (triggeringFactors.technical_confluence || {}).details || {};
+    for (const [key, val] of Object.entries(tech)) {
+        if (val && val.bonus && val.bonus !== 0) {
+            const sign = val.bonus > 0 ? '+' : '';
+            const type = val.bonus > 0 ? 'positive' : 'negative';
+            const label = key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+            pills.push({ label: `${label}: ${sign}${val.bonus}`, type });
+        }
+    }
+
+    // R:R bonus
+    if (triggeringFactors.risk_reward && triggeringFactors.risk_reward.bonus) {
+        pills.push({ label: `R:R: +${triggeringFactors.risk_reward.bonus}`, type: 'positive' });
+    }
+
+    // Sector
+    if (triggeringFactors.sector_priority && triggeringFactors.sector_priority.bonus && triggeringFactors.sector_priority.bonus !== 0) {
+        const sb = triggeringFactors.sector_priority.bonus;
+        pills.push({ label: `Sector: ${sb > 0 ? '+' : ''}${sb}`, type: sb > 0 ? 'positive' : 'negative' });
+    }
+
+    return pills.slice(0, 6).map(p =>
+        `<span class="factor-pill factor-${p.type}">${p.label}</span>`
+    ).join('');
+}
+
+async function actOnInsight(ticker, direction, action) {
+    try {
+        const resp = await fetch(`${API_URL}/trade-ideas/group-action`, {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify({ action, ticker, direction })
+        });
+        if (!resp.ok) {
+            console.error('Group action failed:', await resp.text());
+            return;
+        }
+
+        // Immediately remove the card from the DOM
+        const card = document.querySelector(
+            `.insight-card[data-ticker="${ticker}"][data-direction="${direction}"]`
+        );
+        if (card) {
+            card.style.transition = 'opacity 0.3s, transform 0.3s';
+            card.style.opacity = '0';
+            card.style.transform = action === 'ACCEPTED' ? 'translateX(50px)' : 'translateX(-50px)';
+            setTimeout(() => card.remove(), 300);
+        }
+    } catch (e) {
+        console.error('Insight action error:', e);
+    }
+}
+
+function refreshInsights() {
+    loadGroupedSignals();
 }
 
 function refreshSignalViews() {
