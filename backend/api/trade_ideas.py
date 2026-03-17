@@ -247,14 +247,15 @@ async def get_trade_ideas_grouped(
     try:
         from database.redis_client import get_redis_client
         redis = await get_redis_client()
-        suppressed_keys = []
-        for key in list(groups_map.keys()):
-            ticker, direction = key.split(":")
-            suppress_key = f"insight_acted:{ticker}:{direction}"
-            if await redis.exists(suppress_key):
-                suppressed_keys.append(key)
-        for key in suppressed_keys:
-            del groups_map[key]
+        if redis:
+            suppressed_keys = []
+            for key in list(groups_map.keys()):
+                ticker, direction = key.split(":")
+                suppress_key = f"insight_acted:{ticker}:{direction}"
+                if await redis.exists(suppress_key):
+                    suppressed_keys.append(key)
+            for key in suppressed_keys:
+                del groups_map[key]
     except Exception as e:
         logger.warning(f"Suppression check failed (showing all groups): {e}")
 
@@ -337,16 +338,21 @@ async def act_on_trade_idea_group(body: GroupAction, _=Depends(require_api_key))
         raise HTTPException(status_code=400, detail="action must be ACCEPTED or REJECTED")
 
     user_action = "SELECTED" if action == "ACCEPTED" else "DISMISSED"
-    timestamp_field = "selected_at" if action == "ACCEPTED" else "dismissed_at"
+    new_status = "DISMISSED" if action == "REJECTED" else "ACTIVE"
+    note_text = f"Group {action.lower()} via dashboard"
 
     async with pool.acquire() as conn:
+        # Simplified SQL: only use columns guaranteed to exist (user_action, status, notes)
+        # Avoids selected_at/dismissed_at/decided_at which may not have been migrated
         result = await conn.execute(
-            f"""
+            """
             UPDATE signals
             SET user_action = $1,
-                {timestamp_field} = NOW(),
-                status = CASE WHEN $1 = 'DISMISSED' THEN 'DISMISSED' ELSE status END,
-                notes = COALESCE(notes || ' | ', '') || $4
+                status = $4,
+                notes = CASE
+                    WHEN notes IS NULL OR notes = '' THEN $5
+                    ELSE notes || ' | ' || $5
+                END
             WHERE UPPER(ticker) = $2
             AND UPPER(direction) = $3
             AND status = 'ACTIVE'
@@ -355,7 +361,8 @@ async def act_on_trade_idea_group(body: GroupAction, _=Depends(require_api_key))
             user_action,
             ticker,
             direction,
-            f"Group {action.lower()} via dashboard",
+            new_status,
+            note_text,
         )
 
     # Parse count
@@ -369,8 +376,9 @@ async def act_on_trade_idea_group(body: GroupAction, _=Depends(require_api_key))
     try:
         from database.redis_client import get_redis_client
         redis = await get_redis_client()
-        suppress_key = f"insight_acted:{ticker}:{direction}"
-        await redis.set(suppress_key, action, ex=28800)  # 8 hours
+        if redis:
+            suppress_key = f"insight_acted:{ticker}:{direction}"
+            await redis.set(suppress_key, action, ex=28800)  # 8 hours
     except Exception as e:
         logger.warning(f"Failed to set suppression key: {e}")
 
@@ -435,14 +443,12 @@ async def update_trade_idea_status(signal_id: str, body: StatusUpdate, _=Depends
         }
         user_action = user_action_map.get(new_status)
 
-        # Build update
+        # Build update — only use columns guaranteed to exist
         update_fields = [
             "status = $2",
-            "decided_at = $3",
-            "decision_source = $4",
         ]
-        update_params = [signal_id, new_status, datetime.utcnow(), body.decision_source]
-        param_idx = 5
+        update_params = [signal_id, new_status]
+        param_idx = 3
 
         if user_action:
             update_fields.append(f"user_action = ${param_idx}")
@@ -451,10 +457,6 @@ async def update_trade_idea_status(signal_id: str, body: StatusUpdate, _=Depends
 
             if user_action == "DISMISSED":
                 update_fields.append(f"dismissed_at = ${param_idx}")
-                update_params.append(datetime.utcnow())
-                param_idx += 1
-            elif user_action == "SELECTED":
-                update_fields.append(f"selected_at = ${param_idx}")
                 update_params.append(datetime.utcnow())
                 param_idx += 1
 
