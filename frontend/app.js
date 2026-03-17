@@ -1403,7 +1403,7 @@ function updateStrcBanner(strc) {
     const textEl = document.getElementById('strcBannerText');
     const priceEl = document.getElementById('strcBannerPrice');
     if (textEl) textEl.textContent = strc.message || 'STRC below par';
-    if (priceEl) priceEl.textContent = strc.price != null ? `$${Number(strc.price).toFixed(4)}` : '';
+    if (priceEl) priceEl.textContent = strc.price != null ? `$${Number(strc.price).toFixed(2)}` : '';
 }
 
 function initCryptoChart() {
