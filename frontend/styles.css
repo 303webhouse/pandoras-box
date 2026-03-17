@@ -219,24 +219,53 @@ body {
     box-shadow: 0 4px 12px rgba(20, 184, 166, 0.3);
 }
 
-/* Bias Section — 5-col 2-row grid */
+/* Bias Section — 3-col grid (Brief 7A) */
 .bias-section {
     display: grid;
-    grid-template-columns: 1.3fr 1.3fr 1fr 1fr 1fr;
-    grid-template-rows: auto 1fr;
+    grid-template-columns: 0.8fr 1.4fr 2fr;
     gap: 16px;
     margin-bottom: 20px;
     align-items: stretch;
+    min-height: 420px;
 }
 
 .bias-composite-panel {
     grid-column: 1;
-    grid-row: 1 / 3;
+}
+
+.bias-right-stack {
+    grid-column: 3;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 0;
+}
+
+.bias-right-tf-row {
+    display: flex;
+    gap: 10px;
+    flex: 0 0 30%;
+    min-height: 0;
+}
+
+.bias-right-tf-row .tf-card {
+    flex: 1;
+    min-width: 0;
+}
+
+.bias-right-stack .portfolio-summary-card {
+    flex: 0 0 45%;
+    min-height: 0;
+}
+
+.bias-right-stack .analyzer-panel {
+    flex: 1 1 25%;
+    min-height: 0;
+    overflow: auto;
 }
 
 .headlines-card {
     grid-column: 2;
-    grid-row: 1 / 3;
     background: var(--card-bg);
     border: 2px solid var(--border-color);
     border-radius: 10px;
@@ -248,10 +277,6 @@ body {
     align-self: stretch;
 }
 
-#tfIntraday {
-    grid-column: 3;
-    grid-row: 1;
-}
 
 .headlines-card h3 {
     font-family: 'Orbit', sans-serif;
@@ -549,19 +574,7 @@ body {
     padding: 16px 0;
 }
 
-#tfSwing {
-    grid-column: 4;
-    grid-row: 1;
-}
-
-#tfMacro {
-    grid-column: 5;
-    grid-row: 1;
-}
-
 .portfolio-summary-card {
-    grid-column: 3 / 6;
-    grid-row: 2;
     background: var(--card-bg);
     border: 2px solid var(--border-color);
     border-radius: 10px;
@@ -5071,8 +5084,14 @@ body.override-active-bearish .override-toggle[data-active="true"] {
     
     .bias-section {
         grid-template-columns: 1fr;
+        min-height: 0;
     }
-    
+    .bias-composite-panel,
+    .headlines-card,
+    .bias-right-stack {
+        grid-column: 1;
+    }
+
     .watchlist-section {
         grid-template-columns: 1fr;
     }
@@ -9069,19 +9088,18 @@ body[data-mode="analytics"] .analytics-shell {
 }
 
 /* ==============================
-   Watchlist v3 (Three-Column)
+   Watchlist v3 (Two-Column — analyzer moved to bias-right-stack)
    ============================== */
 .watchlist-v3 {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 16px;
     align-items: start;
     width: 100%;
 }
 
 .watchlist-left,
-.watchlist-middle,
-.watchlist-right {
+.watchlist-middle {
     min-width: 0;
 }
 
@@ -10457,16 +10475,19 @@ body[data-mode="analytics"] .analytics-shell {
 @media (max-width: 768px) {
     .bias-section {
         grid-template-columns: 1fr;
-        grid-template-rows: auto;
+        min-height: 0;
     }
     .bias-composite-panel,
-    #tfIntraday,
-    #tfSwing,
-    #tfMacro,
-    .portfolio-summary-card,
-    .headlines-card {
+    .headlines-card,
+    .bias-right-stack {
         grid-column: 1;
-        grid-row: auto;
+    }
+    .bias-right-tf-row {
+        flex-wrap: wrap;
+    }
+    .bias-right-stack .portfolio-summary-card,
+    .bias-right-stack .analyzer-panel {
+        flex-basis: auto;
     }
 }
 

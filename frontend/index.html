@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Pandora - Real-time Trading Signal Dashboard">
     <title>Pandora</title>
-    <link rel="stylesheet" href="/styles.css?v=89">
+    <link rel="stylesheet" href="/styles.css?v=90">
     <link rel="manifest" href="/manifest.json">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -110,18 +110,7 @@
                 </div>
             </div>
 
-            <!-- Timeframe Factor Group Cards (replace old Daily/Weekly/Cyclical) -->
-            <div class="tf-card" id="tfIntraday" data-timeframe="intraday">
-                <h3>INTRADAY</h3>
-                <div class="tf-display">
-                    <div class="tf-level" id="tfIntradayLevel">NEUTRAL</div>
-                    <div class="tf-score" id="tfIntradayScore">(0.00)</div>
-                    <div class="tf-momentum" id="tfIntradayMomentum"><span class="tf-momentum-arrow">→</span> Stable</div>
-                </div>
-                <div class="tf-divergence" id="tfIntradayDivergence" style="display:none;"></div>
-                <div class="tf-factors" id="tfIntradayFactors" style="display:none;"></div>
-                <div class="tf-expand-toggle" data-target="tfIntradayFactors">Factors ></div>
-            </div>
+            <!-- Headlines / Sectors / Flow (column 2) -->
             <div class="headlines-card" id="headlinesCard">
                 <div class="headlines-tabs">
                     <button class="headlines-tab active" data-tab="sectors">SECTORS</button>
@@ -145,59 +134,103 @@
                 </div>
             </div>
 
-            <div class="tf-card" id="tfSwing" data-timeframe="swing">
-                <h3>SWING</h3>
-                <div class="tf-display">
-                    <div class="tf-level" id="tfSwingLevel">NEUTRAL</div>
-                    <div class="tf-score" id="tfSwingScore">(0.00)</div>
-                    <div class="tf-momentum" id="tfSwingMomentum"><span class="tf-momentum-arrow">→</span> Stable</div>
+            <!-- Right stack: TF row → Portfolio → Analyzer (column 3) -->
+            <div class="bias-right-stack">
+                <div class="bias-right-tf-row">
+                    <div class="tf-card" id="tfIntraday" data-timeframe="intraday">
+                        <h3>INTRADAY</h3>
+                        <div class="tf-display">
+                            <div class="tf-level" id="tfIntradayLevel">NEUTRAL</div>
+                            <div class="tf-score" id="tfIntradayScore">(0.00)</div>
+                            <div class="tf-momentum" id="tfIntradayMomentum"><span class="tf-momentum-arrow">→</span> Stable</div>
+                        </div>
+                        <div class="tf-divergence" id="tfIntradayDivergence" style="display:none;"></div>
+                        <div class="tf-factors" id="tfIntradayFactors" style="display:none;"></div>
+                        <div class="tf-expand-toggle" data-target="tfIntradayFactors">Factors ></div>
+                    </div>
+                    <div class="tf-card" id="tfSwing" data-timeframe="swing">
+                        <h3>SWING</h3>
+                        <div class="tf-display">
+                            <div class="tf-level" id="tfSwingLevel">NEUTRAL</div>
+                            <div class="tf-score" id="tfSwingScore">(0.00)</div>
+                            <div class="tf-momentum" id="tfSwingMomentum"><span class="tf-momentum-arrow">→</span> Stable</div>
+                        </div>
+                        <div class="tf-divergence" id="tfSwingDivergence" style="display:none;"></div>
+                        <div class="tf-factors" id="tfSwingFactors" style="display:none;"></div>
+                        <div class="tf-expand-toggle" data-target="tfSwingFactors">Factors ></div>
+                    </div>
+                    <div class="tf-card" id="tfMacro" data-timeframe="macro">
+                        <h3>MACRO</h3>
+                        <div class="tf-display">
+                            <div class="tf-level" id="tfMacroLevel">NEUTRAL</div>
+                            <div class="tf-score" id="tfMacroScore">(0.00)</div>
+                            <div class="tf-momentum" id="tfMacroMomentum"><span class="tf-momentum-arrow">→</span> Stable</div>
+                        </div>
+                        <div class="tf-divergence" id="tfMacroDivergence" style="display:none;"></div>
+                        <div class="tf-factors" id="tfMacroFactors" style="display:none;"></div>
+                        <div class="tf-expand-toggle" data-target="tfMacroFactors">Factors ></div>
+                    </div>
                 </div>
-                <div class="tf-divergence" id="tfSwingDivergence" style="display:none;"></div>
-                <div class="tf-factors" id="tfSwingFactors" style="display:none;"></div>
-                <div class="tf-expand-toggle" data-target="tfSwingFactors">Factors ></div>
-            </div>
-            <div class="tf-card" id="tfMacro" data-timeframe="macro">
-                <h3>MACRO</h3>
-                <div class="tf-display">
-                    <div class="tf-level" id="tfMacroLevel">NEUTRAL</div>
-                    <div class="tf-score" id="tfMacroScore">(0.00)</div>
-                    <div class="tf-momentum" id="tfMacroMomentum"><span class="tf-momentum-arrow">→</span> Stable</div>
-                </div>
-                <div class="tf-divergence" id="tfMacroDivergence" style="display:none;"></div>
-                <div class="tf-factors" id="tfMacroFactors" style="display:none;"></div>
-                <div class="tf-expand-toggle" data-target="tfMacroFactors">Factors ></div>
-            </div>
 
-            <!-- Portfolio Summary Widget (Brief 10 — sits in bias row under Swing+Macro) -->
-            <div class="portfolio-summary-card" id="portfolio-summary-card">
-                <div class="portfolio-combined-balance" id="portfolioCombinedBalance">--</div>
-                <div class="portfolio-accounts">
-                    <div class="portfolio-account" id="portfolioRH">
-                        <div class="portfolio-account-header">
-                            <span class="portfolio-account-name">RH High-Risk</span>
-                            <span class="portfolio-account-balance" id="rhBalance">--</span>
+                <!-- Portfolio Summary Widget -->
+                <div class="portfolio-summary-card" id="portfolio-summary-card">
+                    <div class="portfolio-combined-balance" id="portfolioCombinedBalance">--</div>
+                    <div class="portfolio-accounts">
+                        <div class="portfolio-account" id="portfolioRH">
+                            <div class="portfolio-account-header">
+                                <span class="portfolio-account-name">RH High-Risk</span>
+                                <span class="portfolio-account-balance" id="rhBalance">--</span>
+                            </div>
+                            <div class="portfolio-account-breakdown" id="rhBreakdown"></div>
+                            <div class="portfolio-account-meta" id="rhMeta"></div>
                         </div>
-                        <div class="portfolio-account-breakdown" id="rhBreakdown"></div>
-                        <div class="portfolio-account-meta" id="rhMeta"></div>
+                        <div class="portfolio-account" id="portfolioRetirement">
+                            <div class="portfolio-account-header">
+                                <span class="portfolio-account-name">Fidelity Retirement</span>
+                                <span class="portfolio-account-balance" id="fidelityRetirementBalance">$10,341</span>
+                            </div>
+                            <div class="portfolio-account-meta">
+                                <span>401A $10,108</span>
+                                <span>403B $233</span>
+                            </div>
+                        </div>
+                        <div class="portfolio-account" id="portfolioActive">
+                            <div class="portfolio-account-header">
+                                <span class="portfolio-account-name">Fidelity Active Trading</span>
+                                <span class="portfolio-account-balance" id="fidelityActiveBalance">$8,223</span>
+                            </div>
+                            <div class="portfolio-account-meta">
+                                <span>Roth Brokerage</span>
+                            </div>
+                        </div>
                     </div>
-                    <div class="portfolio-account" id="portfolioRetirement">
-                        <div class="portfolio-account-header">
-                            <span class="portfolio-account-name">Fidelity Retirement</span>
-                            <span class="portfolio-account-balance" id="fidelityRetirementBalance">$10,341</span>
-                        </div>
-                        <div class="portfolio-account-meta">
-                            <span>401A $10,108</span>
-                            <span>403B $233</span>
+                </div>
+
+                <!-- Single Ticker Analyzer (moved from watchlist) -->
+                <div class="analyzer-panel">
+                    <div class="analyzer-header">
+                        <h2>🔬 SINGLE TICKER ANALYZER</h2>
+                        <div class="analyzer-header-actions">
+                            <button class="analyzer-action-btn add-watchlist" id="addToWatchlistBtn" disabled>
+                                + Add to Watchlist
+                            </button>
                         </div>
                     </div>
-                    <div class="portfolio-account" id="portfolioActive">
-                        <div class="portfolio-account-header">
-                            <span class="portfolio-account-name">Fidelity Active Trading</span>
-                            <span class="portfolio-account-balance" id="fidelityActiveBalance">$8,223</span>
+                    <div class="analyzer-controls">
+                        <div class="analyzer-input-group">
+                            <input type="text" id="analyzeTickerInput" class="analyzer-input" placeholder="Enter ticker to analyze">
+                            <select id="analyzeInterval" class="analyzer-interval">
+                                <option value="1d">1D</option>
+                                <option value="4h">4H</option>
+                                <option value="1h">1H</option>
+                                <option value="15m">15M</option>
+                            </select>
+                            <button class="analyzer-btn" id="analyzeTickerBtn">Analyze</button>
                         </div>
-                        <div class="portfolio-account-meta">
-                            <span>Roth Brokerage</span>
-                        </div>
+                    </div>
+
+                    <div class="analyzer-results-v3" id="analyzerResultsV3">
+                        <p class="empty-state">Enter a ticker to analyze</p>
                     </div>
                 </div>
             </div>
@@ -353,34 +386,6 @@
                     </div>
                 </div>
 
-                <div class="watchlist-right">
-                    <div class="analyzer-panel">
-                        <div class="analyzer-header">
-                            <h2>🔬 SINGLE TICKER ANALYZER</h2>
-                            <div class="analyzer-header-actions">
-                                <button class="analyzer-action-btn add-watchlist" id="addToWatchlistBtn" disabled>
-                                    + Add to Watchlist
-                                </button>
-                            </div>
-                        </div>
-                        <div class="analyzer-controls">
-                            <div class="analyzer-input-group">
-                                <input type="text" id="analyzeTickerInput" class="analyzer-input" placeholder="Enter ticker to analyze">
-                                <select id="analyzeInterval" class="analyzer-interval">
-                                    <option value="1d">1D</option>
-                                    <option value="4h">4H</option>
-                                    <option value="1h">1H</option>
-                                    <option value="15m">15M</option>
-                                </select>
-                                <button class="analyzer-btn" id="analyzeTickerBtn">Analyze</button>
-                            </div>
-                        </div>
-
-                        <div class="analyzer-results-v3" id="analyzerResultsV3">
-                            <p class="empty-state">Enter a ticker to analyze</p>
-                        </div>
-                    </div>
-                </div>
             </div>
         </section>
 
