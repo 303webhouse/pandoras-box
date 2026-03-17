@@ -619,3 +619,16 @@ async def get_binance_klines(
         return {"status": "error", "error": result.get("error")}
 
     return {"status": "success", "data": result["data"]}
+
+
+@router.get("/circuit-breakers")
+async def get_circuit_breakers():
+    """Return status of all crypto-related circuit breakers (currently: STRC par monitor)."""
+    from circuit_breakers.strc_monitor import check_strc_status
+
+    strc = await check_strc_status()
+    return {
+        "status": "success",
+        "breakers": [strc],
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }

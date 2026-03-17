@@ -20,6 +20,17 @@ logger = logging.getLogger(__name__)
 
 COMMITTEE_SCORE_THRESHOLD = 75.0  # Minimum score_v2 to trigger committee
 
+# ── Nemesis Countertrend Lane ──
+# Tickers always allowed through the countertrend gate (e.g. inverse ETFs)
+COUNTERTREND_WHITELIST = {"SQQQ", "SPXS", "TZA", "SDOW", "UVXY", "VXX", "SH", "SDS"}
+
+# Composite bias thresholds that qualify as "extreme" (unlock countertrend)
+BIAS_EXTREME_BULLISH = 75   # composite >= this = extreme bull -> allow counter-SHORT
+BIAS_EXTREME_BEARISH = 25   # composite <= this = extreme bear -> allow counter-LONG
+
+# Committee score floor for countertrend signals
+COUNTERTREND_COMMITTEE_THRESHOLD = 90
+
 
 async def _maybe_flag_for_committee(signal_data: Dict[str, Any]) -> None:
     """
@@ -194,6 +205,35 @@ async def apply_scoring(signal_data: Dict[str, Any]) -> Dict[str, Any]:
         signal_data["triggering_factors"] = triggering_factors
         signal_data["scoreTier"] = get_score_tier(score)
 
+        # ── Nemesis countertrend gate ──
+        # Reject countertrend signals unless bias is at an extreme
+        strategy_lower = (signal_data.get("strategy") or "").lower()
+        ticker = (signal_data.get("ticker") or "").upper()
+        is_countertrend = signal_data.get("countertrend") or "nemesis" in strategy_lower or "wrr" in strategy_lower
+        if is_countertrend and ticker not in COUNTERTREND_WHITELIST:
+            direction_ct = signal_data.get("direction", "").upper()
+            extreme_ok = False
+            if composite_score is not None:
+                if direction_ct in ("SHORT", "SELL") and composite_score >= BIAS_EXTREME_BULLISH:
+                    extreme_ok = True  # Extreme bull -> counter-short allowed
+                elif direction_ct in ("LONG", "BUY") and composite_score <= BIAS_EXTREME_BEARISH:
+                    extreme_ok = True  # Extreme bear -> counter-long allowed
+            if not extreme_ok:
+                signal_data["countertrend_rejected"] = True
+                signal_data["countertrend_reason"] = (
+                    f"Bias not extreme (composite={composite_score}). "
+                    f"Need >= {BIAS_EXTREME_BULLISH} for counter-short or <= {BIAS_EXTREME_BEARISH} for counter-long."
+                )
+                logger.info(
+                    f"Nemesis REJECTED: {ticker} {direction_ct} — {signal_data['countertrend_reason']}"
+                )
+            else:
+                signal_data["countertrend"] = True
+                signal_data["half_size"] = True
+                logger.info(
+                    f"Nemesis APPROVED: {ticker} {direction_ct} — extreme bias ({composite_score}), half-size"
+                )
+
         # Set confidence/priority based on score
         direction = signal_data.get("direction", "").upper()
         if score >= 85:
@@ -273,6 +313,14 @@ async def process_signal_unified(
     # 3. Score signal
     if not skip_scoring:
         signal_data = await apply_scoring(signal_data)
+
+    # 3b. Bail out if countertrend was rejected by bias gate
+    if signal_data.get("countertrend_rejected"):
+        signal_data["status"] = "REJECTED"
+        logger.info(
+            f"Pipeline bail-out: {signal_data.get('ticker')} countertrend rejected — not persisting"
+        )
+        return signal_data
 
     # 4. Persist to PostgreSQL
     try:
