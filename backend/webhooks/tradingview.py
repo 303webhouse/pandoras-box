@@ -309,6 +309,17 @@ async def process_scout_signal(alert: TradingViewAlert, start_time: datetime):
             reward = (t1 - ep) if is_long else (ep - t1)
             signal_data["risk_reward"] = round(reward / risk, 2) if reward > 0 else 0
 
+    # Dedup check — skip if same ticker+strategy+direction fired recently
+    from utils.signal_dedup import is_duplicate_signal
+    if await is_duplicate_signal(
+        ticker=signal_data.get("ticker", ""),
+        strategy=signal_data.get("strategy", ""),
+        direction=signal_data.get("direction", ""),
+        timeframe=signal_data.get("timeframe", "1H"),
+    ):
+        logger.info(f"Dedup skip: {signal_data.get('ticker')} {signal_data.get('strategy')}")
+        return {"status": "skipped", "reason": "duplicate_within_cooldown"}
+
     # Fire-and-forget: return 200 immediately, process in background
     asyncio.ensure_future(_process_with_market_structure(signal_data, source="tradingview"))
 
@@ -381,6 +392,17 @@ async def process_holy_grail_signal(alert: TradingViewAlert, start_time: datetim
         "adx": alert.adx,
         "rvol": alert.rvol,  # Carries DI spread from PineScript
     }
+
+    # Dedup check — skip if same ticker+strategy+direction fired recently
+    from utils.signal_dedup import is_duplicate_signal
+    if await is_duplicate_signal(
+        ticker=signal_data.get("ticker", ""),
+        strategy=signal_data.get("strategy", ""),
+        direction=signal_data.get("direction", ""),
+        timeframe=signal_data.get("timeframe", "1H"),
+    ):
+        logger.info(f"Dedup skip: {signal_data.get('ticker')} {signal_data.get('strategy')}")
+        return {"status": "skipped", "reason": "duplicate_within_cooldown"}
 
     # Fire-and-forget: return 200 immediately, process in background
     asyncio.ensure_future(_process_with_market_structure(signal_data, source="tradingview"))
@@ -455,6 +477,17 @@ async def process_exhaustion_signal(alert: TradingViewAlert, start_time: datetim
         signal_data["status"] = "IGNORE"
         signal_data["note"] = "Exhaustion BULL suppressed — strong bearish bias. Use as short profit-taking indicator only."
 
+    # Dedup check — skip if same ticker+strategy+direction fired recently
+    from utils.signal_dedup import is_duplicate_signal
+    if await is_duplicate_signal(
+        ticker=signal_data.get("ticker", ""),
+        strategy=signal_data.get("strategy", ""),
+        direction=signal_data.get("direction", ""),
+        timeframe=signal_data.get("timeframe", "1H"),
+    ):
+        logger.info(f"Dedup skip: {signal_data.get('ticker')} {signal_data.get('strategy')}")
+        return {"status": "skipped", "reason": "duplicate_within_cooldown"}
+
     # Fire-and-forget: return 200 immediately, process in background
     asyncio.ensure_future(_process_with_market_structure(signal_data, source="tradingview"))
 
@@ -504,6 +537,17 @@ async def process_sniper_signal(alert: TradingViewAlert, start_time: datetime):
         "adx": alert.adx
     }
     
+    # Dedup check — skip if same ticker+strategy+direction fired recently
+    from utils.signal_dedup import is_duplicate_signal
+    if await is_duplicate_signal(
+        ticker=signal_data.get("ticker", ""),
+        strategy=signal_data.get("strategy", ""),
+        direction=signal_data.get("direction", ""),
+        timeframe=signal_data.get("timeframe", "1H"),
+    ):
+        logger.info(f"Dedup skip: {signal_data.get('ticker')} {signal_data.get('strategy')}")
+        return {"status": "skipped", "reason": "duplicate_within_cooldown"}
+
     # Fire-and-forget: return 200 immediately, process in background
     asyncio.ensure_future(_process_with_market_structure(signal_data, source="tradingview"))
 
@@ -558,6 +602,17 @@ async def process_phalanx_signal(alert: TradingViewAlert, start_time: datetime):
         "buy_pct": alert.buy_pct,
         "phalanx_wall_level": wall_level,
     }
+
+    # Dedup check — skip if same ticker+strategy+direction fired recently
+    from utils.signal_dedup import is_duplicate_signal
+    if await is_duplicate_signal(
+        ticker=signal_data.get("ticker", ""),
+        strategy=signal_data.get("strategy", ""),
+        direction=signal_data.get("direction", ""),
+        timeframe=signal_data.get("timeframe", "1H"),
+    ):
+        logger.info(f"Dedup skip: {signal_data.get('ticker')} {signal_data.get('strategy')}")
+        return {"status": "skipped", "reason": "duplicate_within_cooldown"}
 
     asyncio.ensure_future(_process_with_market_structure(signal_data, source="tradingview"))
 
@@ -641,6 +696,17 @@ async def process_artemis_signal(alert: TradingViewAlert, start_time: datetime):
         "adx_rising": alert.adx_rising,
     }
 
+    # Dedup check — skip if same ticker+strategy+direction fired recently
+    from utils.signal_dedup import is_duplicate_signal
+    if await is_duplicate_signal(
+        ticker=signal_data.get("ticker", ""),
+        strategy=signal_data.get("strategy", ""),
+        direction=signal_data.get("direction", ""),
+        timeframe=signal_data.get("timeframe", "1H"),
+    ):
+        logger.info(f"Dedup skip: {signal_data.get('ticker')} {signal_data.get('strategy')}")
+        return {"status": "skipped", "reason": "duplicate_within_cooldown"}
+
     asyncio.ensure_future(_process_with_market_structure(signal_data, source="tradingview"))
 
     logger.info(
@@ -692,6 +758,17 @@ async def process_generic_signal(alert: TradingViewAlert, start_time: datetime):
         "adx": alert.adx
     }
     
+    # Dedup check — skip if same ticker+strategy+direction fired recently
+    from utils.signal_dedup import is_duplicate_signal
+    if await is_duplicate_signal(
+        ticker=signal_data.get("ticker", ""),
+        strategy=signal_data.get("strategy", ""),
+        direction=signal_data.get("direction", ""),
+        timeframe=signal_data.get("timeframe", "1H"),
+    ):
+        logger.info(f"Dedup skip: {signal_data.get('ticker')} {signal_data.get('strategy')}")
+        return {"status": "skipped", "reason": "duplicate_within_cooldown"}
+
     # Fire-and-forget: return 200 immediately, process in background
     asyncio.ensure_future(_process_with_market_structure(signal_data, source="tradingview"))
 
