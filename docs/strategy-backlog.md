@@ -1,17 +1,22 @@
 # Strategy Backlog — Evaluated but Not Integrated
 
-**Last Updated:** March 6, 2026
+**Last Updated:** March 16, 2026
 **Purpose:** Track strategies that have been evaluated by the Trading Committee or discussed for integration but were deferred, rejected, or are pending further work.
 
 ---
 
-## Deferred Strategies
+## Promoted Strategies
 
 ### WRR Buy Model (Linda Raschke)
-- **Evaluated:** Feb 2026
-- **Verdict:** DEFERRED — countertrend conflict
-- **Reason:** The WRR Buy Model is a countertrend/mean-reversion strategy. It conflicts with the system's trend-following bias (CTA framework, Holy Grail, etc.). Adding countertrend signals alongside trend-following signals would create conflicting recommendations in the committee pipeline.
-- **Revisit when:** If a dedicated countertrend module is built with separate risk rules and committee context.
+- **Originally Deferred:** Feb 2026 (countertrend conflict)
+- **Promoted:** March 16, 2026 — Olympus Committee APPROVED with conditions
+- **Strategy Doc:** `docs/approved-strategies/wrr-buy-model.md`
+- **Build Plan:** `docs/build-plans/phase-5-countertrend-lane.md`
+- **Notes:** First countertrend lane strategy. Operates under special gating rules: bias extreme required (≤25/≥75), confluence ≥90, half-size, 24-48h expiry. Pending Titans architecture review.
+
+---
+
+## Deferred Strategies
 
 ### Dollar Smile Strategy
 - **Evaluated:** Feb 2026
