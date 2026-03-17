@@ -134,7 +134,8 @@ async def get_trade_ideas_feed(
 @router.get("/trade-ideas/grouped")
 async def get_trade_ideas_grouped(
     limit: int = Query(default=20, le=50),
-    min_score: Optional[float] = Query(default=None),
+    min_score: Optional[float] = Query(default=70.0),
+    show_all: bool = Query(default=False),
 ):
     """
     Get Trade Ideas grouped by ticker+direction.
@@ -147,13 +148,15 @@ async def get_trade_ideas_grouped(
         "status = 'ACTIVE'",
         "(expires_at IS NULL OR expires_at > NOW())",
         "created_at > NOW() - INTERVAL '24 hours'",
+        "user_action IS NULL",  # Exclude accepted/rejected/dismissed signals
     ]
     params = []
     idx = 1
 
-    if min_score is not None:
+    effective_min_score = None if show_all else min_score
+    if effective_min_score is not None:
         conditions.append(f"COALESCE(score_v2, score, 0) >= ${idx}")
-        params.append(min_score)
+        params.append(effective_min_score)
         idx += 1
 
     where_clause = " AND ".join(conditions)
@@ -237,6 +240,23 @@ async def get_trade_ideas_grouped(
             if s not in strats:
                 strats.append(s)
         g["strategies"] = strats
+        g["distinct_strategy_count"] = len(set(s.lower() for s in strats))
+        g["last_signal_at"] = g["newest_at"]
+
+    # Filter out groups that have been recently acted on (Redis suppression)
+    try:
+        from database.redis_client import get_redis_client
+        redis = await get_redis_client()
+        suppressed_keys = []
+        for key in list(groups_map.keys()):
+            ticker, direction = key.split(":")
+            suppress_key = f"insight_acted:{ticker}:{direction}"
+            if await redis.exists(suppress_key):
+                suppressed_keys.append(key)
+        for key in suppressed_keys:
+            del groups_map[key]
+    except Exception as e:
+        logger.warning(f"Suppression check failed (showing all groups): {e}")
 
     # Compute composite rank for sorting
     now = datetime.utcnow()
@@ -288,6 +308,78 @@ async def get_trade_ideas_grouped(
         "groups": ranked_groups[:limit],
         "total_groups": len(ranked_groups),
         "total_signals": sum(g["signal_count"] for g in ranked_groups),
+    }
+
+
+class GroupAction(BaseModel):
+    action: str  # ACCEPTED or REJECTED
+    ticker: str
+    direction: str
+    reason: Optional[str] = None
+
+
+@router.post("/trade-ideas/group-action")
+async def act_on_trade_idea_group(body: GroupAction, _=Depends(require_api_key)):
+    """
+    Accept or reject all signals for a ticker+direction group.
+
+    When ACCEPTED: all active signals for this ticker+direction get user_action='SELECTED'.
+    When REJECTED: all active signals for this ticker+direction get user_action='DISMISSED'.
+
+    A Redis key is set to suppress new Insights for this ticker+direction for 8 hours.
+    """
+    pool = await get_postgres_client()
+    action = body.action.upper()
+    ticker = body.ticker.upper()
+    direction = body.direction.upper()
+
+    if action not in ("ACCEPTED", "REJECTED"):
+        raise HTTPException(status_code=400, detail="action must be ACCEPTED or REJECTED")
+
+    user_action = "SELECTED" if action == "ACCEPTED" else "DISMISSED"
+    timestamp_field = "selected_at" if action == "ACCEPTED" else "dismissed_at"
+
+    async with pool.acquire() as conn:
+        result = await conn.execute(
+            f"""
+            UPDATE signals
+            SET user_action = $1,
+                {timestamp_field} = NOW(),
+                status = CASE WHEN $1 = 'DISMISSED' THEN 'DISMISSED' ELSE status END,
+                notes = COALESCE(notes || ' | ', '') || $4
+            WHERE UPPER(ticker) = $2
+            AND UPPER(direction) = $3
+            AND status = 'ACTIVE'
+            AND user_action IS NULL
+            """,
+            user_action,
+            ticker,
+            direction,
+            f"Group {action.lower()} via dashboard",
+        )
+
+    # Parse count
+    count = 0
+    if result:
+        parts = result.split()
+        if len(parts) >= 2 and parts[-1].isdigit():
+            count = int(parts[-1])
+
+    # Set Redis suppression key — prevents this ticker+direction from reappearing for 8 hours
+    try:
+        from database.redis_client import get_redis_client
+        redis = await get_redis_client()
+        suppress_key = f"insight_acted:{ticker}:{direction}"
+        await redis.set(suppress_key, action, ex=28800)  # 8 hours
+    except Exception as e:
+        logger.warning(f"Failed to set suppression key: {e}")
+
+    logger.info(f"Group {action}: {ticker} {direction} — {count} signals updated")
+    return {
+        "action": action,
+        "ticker": ticker,
+        "direction": direction,
+        "signals_updated": count,
     }
 
 
