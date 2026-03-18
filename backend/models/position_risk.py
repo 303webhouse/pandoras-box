@@ -6,6 +6,33 @@ Used by the unified positions API and by the Pivot position manager skill.
 from typing import Optional
 
 
+def _is_debit_iron_condor(legs: list) -> bool:
+    """
+    Detect whether an iron condor is debit (long) or credit (short) from leg actions.
+
+    Debit IC: BUY the inner strikes (higher put, lower call), SELL the outer strikes.
+    Credit IC: SELL the inner strikes, BUY the outer strikes.
+
+    Returns True if debit (long), False if credit (short/standard).
+    """
+    put_legs = [l for l in legs if l.get("option_type", "").upper() == "PUT"]
+    call_legs = [l for l in legs if l.get("option_type", "").upper() == "CALL"]
+
+    if len(put_legs) < 2 or len(call_legs) < 2:
+        return False  # can't determine, assume credit
+
+    # Sort puts by strike descending (higher = inner for IC)
+    put_legs_sorted = sorted(put_legs, key=lambda l: l["strike"], reverse=True)
+    # Sort calls by strike ascending (lower = inner for IC)
+    call_legs_sorted = sorted(call_legs, key=lambda l: l["strike"])
+
+    inner_put_action = (put_legs_sorted[0].get("action") or "").upper()
+    inner_call_action = (call_legs_sorted[0].get("action") or "").upper()
+
+    # If inner strikes are bought → debit iron condor
+    return inner_put_action == "BUY" and inner_call_action == "BUY"
+
+
 def calculate_position_risk(
     structure: str,
     entry_price: float,
@@ -136,8 +163,11 @@ def calculate_position_risk(
             }
 
     if s in ("iron_condor",):
-        # Put credit spread + call credit spread
-        # Max loss = wider wing width * 100 * qty - total premium
+        # Detect debit vs credit from leg actions.
+        # Credit IC (standard): SELL inner strikes, BUY outer → collect premium
+        #   max_loss = wider_wing - premium,  max_profit = premium
+        # Debit IC (long): BUY inner strikes, SELL outer → pay premium
+        #   max_loss = premium,  max_profit = wider_wing - premium
         if legs and len(legs) >= 4:
             put_legs = [l for l in legs if l.get("option_type", "").upper() == "PUT"]
             call_legs = [l for l in legs if l.get("option_type", "").upper() == "CALL"]
@@ -145,12 +175,23 @@ def calculate_position_risk(
             call_width = abs(call_legs[0]["strike"] - call_legs[1]["strike"]) if len(call_legs) >= 2 else 0
             wider_wing = max(put_width, call_width)
             premium = abs(entry_price)
-            return {
-                "max_loss": round((wider_wing - premium) * multiplier * quantity, 2),
-                "max_profit": round(premium * multiplier * quantity, 2),
-                "breakeven": [],  # two breakevens, complex — skip for now
-                "direction": "MIXED",
-            }
+            is_debit = _is_debit_iron_condor(legs)
+            if is_debit:
+                # Debit IC: paid premium, profit on big moves
+                return {
+                    "max_loss": round(premium * multiplier * quantity, 2),
+                    "max_profit": round((wider_wing - premium) * multiplier * quantity, 2),
+                    "breakeven": [],
+                    "direction": "MIXED",
+                }
+            else:
+                # Credit IC: received premium, profit if price stays in range
+                return {
+                    "max_loss": round((wider_wing - premium) * multiplier * quantity, 2),
+                    "max_profit": round(premium * multiplier * quantity, 2),
+                    "breakeven": [],
+                    "direction": "MIXED",
+                }
         # Fallback if legs not provided but strikes are
         if long_strike is not None and short_strike is not None:
             width = abs(short_strike - long_strike)
