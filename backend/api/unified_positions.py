@@ -157,6 +157,10 @@ class UpdatePositionRequest(BaseModel):
     legs: Optional[str] = None
     long_strike: Optional[float] = None
     short_strike: Optional[float] = None
+    max_loss: Optional[float] = None
+    max_profit: Optional[float] = None
+    source: Optional[str] = None
+    signal_id: Optional[str] = None
 
 
 class ClosePositionRequest(BaseModel):
@@ -984,6 +988,22 @@ async def update_position(position_id: str, req: UpdatePositionRequest, _=Depend
     if req.short_strike is not None:
         sets.append(f"short_strike = ${idx}")
         params.append(req.short_strike)
+        idx += 1
+    if req.max_loss is not None:
+        sets.append(f"max_loss = ${idx}")
+        params.append(req.max_loss)
+        idx += 1
+    if req.max_profit is not None:
+        sets.append(f"max_profit = ${idx}")
+        params.append(req.max_profit)
+        idx += 1
+    if req.source is not None:
+        sets.append(f"source = ${idx}")
+        params.append(req.source)
+        idx += 1
+    if req.signal_id is not None:
+        sets.append(f"signal_id = ${idx}")
+        params.append(req.signal_id)
         idx += 1
 
     if len(sets) <= 1:
