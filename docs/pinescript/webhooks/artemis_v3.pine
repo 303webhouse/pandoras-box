@@ -350,16 +350,16 @@ if barstate.islast
     table.cell(infoTable, 1, 12, signal_text, text_color=signal_color, text_size=size.small)
 
 // =============================================================================
-// ALERTS
+// ALERTS — NaN-safe: all numeric fields wrapped in nz() to prevent invalid JSON
 // =============================================================================
 if long_signal
     mode_str = flush_down ? "Flush" : "Normal"
-    rr_str = long_risk > 0 ? str.tostring((long_tp1 - long_entry) / long_risk, "#.#") : "?"
-    alert_msg = '{"ticker": "' + syminfo.ticker + '", "strategy": "Artemis", "direction": "LONG", "entry_price": ' + str.tostring(close) + ', "stop_loss": ' + str.tostring(long_sl) + ', "target_1": ' + str.tostring(long_tp1) + ', "target_2": ' + str.tostring(long_tp2) + ', "risk_reward": ' + rr_str + ', "timeframe": "' + timeframe.period + '", "adx": ' + str.tostring(adx_val, "#.#") + ', "adx_rising": ' + (adx_rising ? "true" : "false") + ', "rsi": ' + str.tostring(rsi_val, "#.#") + ', "rvol": ' + str.tostring(rvol, "#.##") + ', "mode": "' + mode_str + '", "avwap_ctx": ' + str.tostring(avwapCtx, "#.##") + ', "avwap_buf_atr": ' + str.tostring(gate_buffer_atr, "#.##") + ', "prox_atr": ' + str.tostring(prox_atr, "#.##") + '}'
+    rr_str = long_risk > 0 ? str.tostring((long_tp1 - long_entry) / long_risk, "#.#") : "0"
+    alert_msg = '{"ticker": "' + syminfo.ticker + '", "strategy": "Artemis", "direction": "LONG", "entry_price": ' + str.tostring(nz(close, 0)) + ', "stop_loss": ' + str.tostring(nz(long_sl, 0)) + ', "target_1": ' + str.tostring(nz(long_tp1, 0)) + ', "target_2": ' + str.tostring(nz(long_tp2, 0)) + ', "risk_reward": ' + rr_str + ', "timeframe": "' + timeframe.period + '", "adx": ' + str.tostring(nz(adx_val, 0), "#.#") + ', "adx_rising": ' + (adx_rising ? "true" : "false") + ', "rsi": ' + str.tostring(nz(rsi_val, 0), "#.#") + ', "rvol": ' + str.tostring(nz(rvol, 0), "#.##") + ', "mode": "' + mode_str + '", "avwap_ctx": ' + str.tostring(nz(avwapCtx, 0), "#.##") + ', "avwap_buf_atr": ' + str.tostring(nz(gate_buffer_atr, 0), "#.##") + ', "prox_atr": ' + str.tostring(nz(prox_atr, 0), "#.##") + '}'
     alert(alert_msg, alert.freq_once_per_bar)
 
 if short_signal
     mode_str = flush_up ? "Flush" : "Normal"
-    rr_str = short_risk > 0 ? str.tostring((short_entry - short_tp1) / short_risk, "#.#") : "?"
-    alert_msg = '{"ticker": "' + syminfo.ticker + '", "strategy": "Artemis", "direction": "SHORT", "entry_price": ' + str.tostring(close) + ', "stop_loss": ' + str.tostring(short_sl) + ', "target_1": ' + str.tostring(short_tp1) + ', "target_2": ' + str.tostring(short_tp2) + ', "risk_reward": ' + rr_str + ', "timeframe": "' + timeframe.period + '", "adx": ' + str.tostring(adx_val, "#.#") + ', "adx_rising": ' + (adx_rising ? "true" : "false") + ', "rsi": ' + str.tostring(rsi_val, "#.#") + ', "rvol": ' + str.tostring(rvol, "#.##") + ', "mode": "' + mode_str + '", "avwap_ctx": ' + str.tostring(avwapCtx, "#.##") + ', "avwap_buf_atr": ' + str.tostring(gate_buffer_atr, "#.##") + ', "prox_atr": ' + str.tostring(prox_atr, "#.##") + '}'
+    rr_str = short_risk > 0 ? str.tostring((short_entry - short_tp1) / short_risk, "#.#") : "0"
+    alert_msg = '{"ticker": "' + syminfo.ticker + '", "strategy": "Artemis", "direction": "SHORT", "entry_price": ' + str.tostring(nz(close, 0)) + ', "stop_loss": ' + str.tostring(nz(short_sl, 0)) + ', "target_1": ' + str.tostring(nz(short_tp1, 0)) + ', "target_2": ' + str.tostring(nz(short_tp2, 0)) + ', "risk_reward": ' + rr_str + ', "timeframe": "' + timeframe.period + '", "adx": ' + str.tostring(nz(adx_val, 0), "#.#") + ', "adx_rising": ' + (adx_rising ? "true" : "false") + ', "rsi": ' + str.tostring(nz(rsi_val, 0), "#.#") + ', "rvol": ' + str.tostring(nz(rvol, 0), "#.##") + ', "mode": "' + mode_str + '", "avwap_ctx": ' + str.tostring(nz(avwapCtx, 0), "#.##") + ', "avwap_buf_atr": ' + str.tostring(nz(gate_buffer_atr, 0), "#.##") + ', "prox_atr": ' + str.tostring(nz(prox_atr, 0), "#.##") + '}'
     alert(alert_msg, alert.freq_once_per_bar)
