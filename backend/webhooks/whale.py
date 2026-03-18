@@ -35,6 +35,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+import asyncio
 import hashlib
 import logging
 import os
@@ -113,7 +114,6 @@ def _build_discord_message(data: WhaleSignal) -> dict:
         {"name": "Time", "value": time_str, "inline": True},
     ]
 
-    # Add v2 fields if present
     v2_parts = [s for s in [rvol_str, consec_str, regime_str, structural_str] if s]
     if v2_parts:
         fields.append({"name": "v2 Context", "value": " | ".join(v2_parts), "inline": False})
@@ -154,36 +154,10 @@ async def _post_to_discord(payload: dict) -> None:
         logger.error(f"Discord webhook failed: {exc}")
 
 
-@router.post("/whale")
-async def whale_webhook(data: WhaleSignal):
-    """Receive a whale signal, forward to Discord, and cache for committee confluence."""
-    # Validate webhook secret (same pattern as tradingview.py)
-    WEBHOOK_SECRET = os.getenv("TRADINGVIEW_WEBHOOK_SECRET") or ""
-    if WEBHOOK_SECRET:
-        payload_secret = data.secret or ""
-        if payload_secret != WEBHOOK_SECRET:
-            logger.warning("Rejected whale webhook — invalid secret")
-            raise HTTPException(status_code=401, detail="Invalid webhook secret")
-
-    # Dedup: reject duplicate whale signals within 120s window
-    dedup_raw = f"{data.ticker}:{data.lean}:{data.poc}:{data.vol}"
-    dedup_hash = hashlib.md5(dedup_raw.encode()).hexdigest()[:16]
-    dedup_key = f"webhook:dedup:whale:{dedup_hash}"
-    try:
-        from database.redis_client import get_redis_client
-        _rc = await get_redis_client()
-        if _rc and await _rc.get(dedup_key):
-            logger.info("Whale dedup: skipping duplicate %s %s", data.ticker, data.lean)
-            return {"status": "duplicate", "detail": "duplicate whale signal within 120s window"}
-        if _rc:
-            await _rc.set(dedup_key, "1", ex=120)
-    except Exception:
-        pass  # dedup is best-effort
-
-    logger.info(
-        f"\U0001f40b Whale signal received: {data.ticker} {data.lean} "
-        f"vol={data.vol} poc={data.poc} price={data.price}"
-    )
+async def _process_whale_background(data: WhaleSignal) -> None:
+    """Background processing: Discord post + Redis cache + pipeline.
+    Runs via asyncio.ensure_future so the webhook returns immediately
+    and TradingView doesn't timeout (~10s limit)."""
 
     discord_payload = _build_discord_message(data)
     await _post_to_discord(discord_payload)
@@ -220,21 +194,18 @@ async def whale_webhook(data: WhaleSignal):
     except Exception as e:
         logger.warning(f"Failed to cache whale context: {e}")
 
-    # --- Pipeline integration: write whale signals to signals table ---
+    # Pipeline integration: write whale signals to signals table
     try:
         from signals.pipeline import process_signal_unified
         import hashlib as _hashlib
 
-        # Map whale fields to standard signal dict
         direction = "LONG" if (data.lean or "").upper() == "BULLISH" else (
             "SHORT" if (data.lean or "").upper() == "BEARISH" else None
         )
 
-        # Skip CONTESTED signals — no clear direction for the pipeline
         if direction is None:
             logger.info("Whale signal CONTESTED — skipped pipeline (Discord-only)")
         else:
-            # Generate unique signal ID
             ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
             short_hash = _hashlib.md5(f"{data.ticker}{data.poc}{data.vol}".encode()).hexdigest()[:6]
             signal_id = f"WHALE_{data.ticker}_{ts}_{short_hash}"
@@ -273,18 +244,50 @@ async def whale_webhook(data: WhaleSignal):
             logger.info(f"Whale signal entered pipeline: {signal_id}")
 
     except Exception as e:
-        # Pipeline failure should never break the whale webhook
         logger.warning(f"Whale pipeline integration failed (Discord post succeeded): {e}")
+
+
+@router.post("/whale")
+async def whale_webhook(data: WhaleSignal):
+    """Receive a whale signal, forward to Discord, and cache for committee confluence."""
+    # Validate webhook secret
+    WEBHOOK_SECRET = os.getenv("TRADINGVIEW_WEBHOOK_SECRET") or ""
+    if WEBHOOK_SECRET:
+        payload_secret = data.secret or ""
+        if payload_secret != WEBHOOK_SECRET:
+            logger.warning("Rejected whale webhook — invalid secret")
+            raise HTTPException(status_code=401, detail="Invalid webhook secret")
+
+    # Dedup: reject duplicate whale signals within 120s window
+    dedup_raw = f"{data.ticker}:{data.lean}:{data.poc}:{data.vol}"
+    dedup_hash = hashlib.md5(dedup_raw.encode()).hexdigest()[:16]
+    dedup_key = f"webhook:dedup:whale:{dedup_hash}"
+    try:
+        from database.redis_client import get_redis_client
+        _rc = await get_redis_client()
+        if _rc and await _rc.get(dedup_key):
+            logger.info("Whale dedup: skipping duplicate %s %s", data.ticker, data.lean)
+            return {"status": "duplicate", "detail": "duplicate whale signal within 120s window"}
+        if _rc:
+            await _rc.set(dedup_key, "1", ex=120)
+    except Exception:
+        pass
+
+    logger.info(
+        f"\U0001f40b Whale signal received: {data.ticker} {data.lean} "
+        f"vol={data.vol} poc={data.poc} price={data.price}"
+    )
+
+    # Fire-and-forget: return 200 immediately, process in background
+    # (TradingView has ~10s webhook timeout — Discord + Redis + pipeline can exceed it)
+    asyncio.ensure_future(_process_whale_background(data))
 
     return {"status": "received"}
 
 
 @router.get("/whale/recent/{ticker}")
 async def get_recent_whale(ticker: str):
-    """
-    Return cached whale signal for a ticker (if any, within 30 min).
-    Used by VPS committee context builder for confluence detection.
-    """
+    """Return cached whale signal for a ticker (if any, within 30 min)."""
     try:
         from database.redis_client import get_redis_client
         import json as _json
