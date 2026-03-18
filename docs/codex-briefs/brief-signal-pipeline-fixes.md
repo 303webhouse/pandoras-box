@@ -2,7 +2,8 @@
 
 **Priority:** HIGH — These three issues combined mean zero signals from Artemis, Phalanx, and Scout Sniper have reached the committee pipeline since launch.  
 **Branch:** `main`  
-**Estimated scope:** 6 files backend, 2 PineScript (docs only — Nick must manually paste into TradingView), 1 frontend
+**Estimated scope:** 6 files backend, 2 PineScript (docs only — Nick must manually paste into TradingView), 1 frontend  
+**Olympus Review:** APPROVED with additions (see Part 3C-3D)
 
 ---
 
@@ -175,6 +176,8 @@ if wallPrev and (bullWallPrev or bearWallPrev)
 
 Leave the rest of the alert payload block (lines 235–248) unchanged — it constructs the JSON and calls `alert()`. Only the `if` condition and the two variables inside it change.
 
+**Note (from Olympus/URSA):** The alert payload still references current-bar `close`, `deltaRatio`, etc. — NOT the previous bar where the wall was detected. This is intentional and correct: the entry price should be the current price (when you'd enter the trade), not the wall detection price.
+
 **Note on `alert.freq_once_per_bar`:** This already handles dedup — the alert fires at most once per bar even if evaluated multiple times. Combined with the `[1]` lookback, the signal is stable: it refers to the previous bar's data which won't change.
 
 ### 2B. Backend — No changes needed
@@ -225,6 +228,7 @@ SCOUT_CONFIG = {
     "sma_lengths": [50, 120, 200],
     "structural_lookback": 20,
     "lookback_bars": 3,
+    "min_quality_score": 3,
     # Stop and target
     "atr_buffer_mult": 0.15,
     "fallback_tp1_r": 1.5,
@@ -232,7 +236,7 @@ SCOUT_CONFIG = {
 }
 ```
 
-Changes: `rsi_oversold` 30→35, `rsi_overbought` 70→65, add `"lookback_bars": 3`.
+Changes: `rsi_oversold` 30→35, `rsi_overbought` 70→65, add `"lookback_bars": 3`, add `"min_quality_score": 3`.
 
 ### 3B. Multi-bar lookback — `backend/scanners/scout_sniper_scanner.py`
 
@@ -290,7 +294,48 @@ After the `signals.append({...})` and `_cooldown_tracker[ticker] = bar_idx` bloc
             break  # One signal per ticker per scan
 ```
 
-### 3C. Add diagnostic logging — `backend/scanners/scout_sniper_scanner.py`
+### 3C. Quality gate (Olympus/URSA addition) — `backend/scanners/scout_sniper_scanner.py`
+
+In `run_scout_scan`, after the scan loop collects `all_signals` but BEFORE feeding them to `process_signal_unified`, add a quality filter:
+
+Find the loop that processes signals (after `await asyncio.sleep(0.05)`):
+```python
+    for signal in all_signals:
+        try:
+            from signals.pipeline import process_signal_unified
+            await process_signal_unified(
+```
+
+Insert BEFORE this loop:
+```python
+    # Quality gate: only process signals scoring >= min_quality_score (Olympus review)
+    min_score = SCOUT_CONFIG.get("min_quality_score", 3)
+    quality_signals = [s for s in all_signals if s.get("score", 0) >= min_score]
+    dropped = len(all_signals) - len(quality_signals)
+    if dropped > 0:
+        logger.info("Scout quality gate: dropped %d/%d signals below score %d", dropped, len(all_signals), min_score)
+```
+
+Then change the processing loop to iterate over `quality_signals` instead of `all_signals`:
+```python
+    for signal in quality_signals:
+```
+
+**Rationale (from Olympus/URSA):** Loosening RSI from 30/70 to 35/65 + 3-bar lookback could ~5-7x the candidate bars. The quality score (0-6) already exists and measures multi-factor strength. Requiring score ≥ 3 prevents low-quality signals from inflating confluence scores on otherwise marginal Holy Grail or Sell the Rip signals. Sub-threshold signals still count in the log for diagnostics.
+
+### 3D. IGNORE signals excluded from confluence (Olympus/URSA addition) — `backend/confluence/lenses.py`
+
+Verify that the confluence scoring engine does NOT count signals with `tradeable_status: "IGNORE"` toward confluence. Check if there is a filter in the confluence calculation. If there is NOT one already, add a filter wherever signals are aggregated for confluence scoring:
+
+```python
+# Only count TRADEABLE signals for confluence — IGNORE signals are logged but don't boost other strategies
+if signal.get("tradeable_status") == "IGNORE":
+    continue
+```
+
+If this filter already exists, skip. The key requirement: `IGNORE` signals should be stored (useful for analytics) but must NOT inflate confluence scores for other strategies.
+
+### 3E. Add diagnostic logging — `backend/scanners/scout_sniper_scanner.py`
 
 Find (lines 392–396):
 ```python
@@ -302,12 +347,17 @@ Find (lines 392–396):
 Replace:
 ```python
     logger.info(
-        "Scout scan: %d signals from %d tickers in %.1fs (RSI range: %d/%d, lookback: %d bars)",
-        len(all_signals), len(tickers), elapsed,
+        "Scout scan: %d signals (%d passed quality gate) from %d tickers in %.1fs (RSI range: %d/%d, lookback: %d bars)",
+        len(all_signals), len(quality_signals), len(tickers), elapsed,
         SCOUT_CONFIG["rsi_oversold"], SCOUT_CONFIG["rsi_overbought"],
         SCOUT_CONFIG.get("lookback_bars", 1),
     )
 ```
+
+### 3F. Notes for future iteration (from Olympus)
+
+- **RVOL gate (TORO):** If Scout signals remain sparse after 1 week with loosened RSI, the next tuning pass should lower `tier_b_rvol` from 1.1 to 0.9.
+- **Time filter (TECHNICALS):** The time filter currently uses `datetime.now()` (current wall-clock time), not the bar's own timestamp. On 15-min bars this is a max 45-minute discrepancy. Acceptable for v1; a future improvement should use `df.index[idx]` for time checks when using the multi-bar lookback.
 
 ---
 
@@ -329,7 +379,11 @@ After deploying:
 
 4. **Scout Sniper:** After deploy, check Railway logs during next market session for `Scout scan:` entries showing `RSI range: 35/65, lookback: 3 bars`. Monitor for first signal.
 
-5. **Analytics Hub:** Open the dashboard, verify "Artemis" appears in the strategy dropdown/filter (not "Sniper").
+5. **Scout quality gate:** If Scout fires, verify the log shows quality gate filtering (e.g., `dropped 2/5 signals below score 3`).
+
+6. **Confluence IGNORE check:** Verify that any Scout signal with `tradeable_status: "IGNORE"` does NOT appear in confluence scoring for co-occurring signals.
+
+7. **Analytics Hub:** Open the dashboard, verify "Artemis" appears in the strategy dropdown/filter (not "Sniper").
 
 ---
 
@@ -342,8 +396,8 @@ After deploying:
 | `docs/pinescript/webhooks/absorption_wall_detector_v1.5.pine` | DELETE (replaced by v2) |
 | `docs/pinescript/webhooks/absorption_wall_detector_v2.pine` | NEW — watchlist-safe alert using [1] lookback |
 | `backend/webhooks/tradingview.py` | Merge "sniper" route into Artemis handler |
-| `backend/confluence/lenses.py` | Add "Artemis" key |
-| `backend/scanners/scout_sniper_scanner.py` | Loosen RSI, add multi-bar lookback, add logging |
+| `backend/confluence/lenses.py` | Add "Artemis" key + verify IGNORE filter |
+| `backend/scanners/scout_sniper_scanner.py` | Loosen RSI, add multi-bar lookback, quality gate, logging |
 | `frontend/app.js` | Map 'sniper' display name to 'Artemis' |
 
 **PineScript note:** The `.pine` files in the repo are documentation/version control only. Nick must manually copy-paste the updated scripts into TradingView's Pine Editor, save, and recreate the watchlist alerts pointing to the correct webhook URL (`https://pandoras-box-production.up.railway.app/webhook/tradingview`).
