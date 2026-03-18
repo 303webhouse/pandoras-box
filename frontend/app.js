@@ -7083,50 +7083,39 @@ function renderSectorHeatmap(sectors, heatmapData) {
     // Sort by weight descending
     const sorted = [...sectors].sort((a, b) => b.weight - a.weight);
 
-    // 3-row layout: row 1 = top 3 (Tech, Financials, Health), row 2 = next 4, row 3 = last 4
-    const rows = [
-        sorted.slice(0, 3),
-        sorted.slice(3, 7),
-        sorted.slice(7)
-    ];
-
-    // Row heights proportional to combined weight
-    const rowWeights = rows.map(r => r.reduce((s, c) => s + c.weight, 0));
-    const totalWeight = rowWeights.reduce((s, w) => s + w, 0);
-
     const maxWeight = sorted[0].weight;
-    let html = '';
-    rows.forEach((row, ri) => {
-        const rowFlex = (rowWeights[ri] / totalWeight).toFixed(4);
-        const rowTotal = row.reduce((s, c) => s + c.weight, 0);
-        const cellsHtml = row.map(sector => {
-            const cellFlex = (sector.weight / rowTotal).toFixed(4);
-            const scale = (0.55 + 0.45 * (sector.weight / maxWeight)).toFixed(3);
-            const hm = getHeatmapStyle(sector.change_1d);
-            const changeSign = sector.change_1d >= 0 ? '+' : '';
-            const changeVal = sector.change_1d != null ? sector.change_1d.toFixed(2) : '0.00';
-            const change1w = (sector.change_1w || 0);
-            const change1wStr = (change1w >= 0 ? '+' : '') + change1w.toFixed(2);
-            const change1m = (sector.change_1m || 0);
-            const change1mStr = (change1m >= 0 ? '+' : '') + change1m.toFixed(2);
-            const rsDaily = (sector.rs_daily || 0);
-            const rsDailyStr = (rsDaily >= 0 ? '+' : '') + rsDaily.toFixed(2);
-            const weightStr = (sector.weight * 100).toFixed(1);
-            const trend = sector.trend || 'flat';
-            const trendArrow = trend === 'up' ? '▲' : trend === 'down' ? '▼' : '→';
-            const trendClass = trend === 'up' ? 'trend-up' : trend === 'down' ? 'trend-down' : 'trend-flat';
-            return `<div class="sector-heatmap-cell"
-                style="flex:${cellFlex};--s:${scale};border-color:${hm.borderColor};box-shadow:${hm.glow};"
-                data-etf="${sector.etf}"
-                title="${escapeHtml(sector.name)} (${sector.etf})\nDay: ${changeSign}${changeVal}%\nWeek: ${change1wStr}%\nMonth: ${change1mStr}%\nRS (daily): ${rsDailyStr}%\nRank: #${sector.strength_rank || '--'}\nSPY Weight: ${weightStr}%">
-                <span class="sector-hm-name">${escapeHtml(sector.name)}</span>
-                <span class="sector-hm-etf">${sector.etf}</span>
-                <span class="sector-hm-change" style="color:${hm.changeColor}">${changeSign}${changeVal}% <span class="sector-hm-trend ${trendClass}">${trendArrow}</span></span>
-                <span class="sector-hm-rs" style="color:${rsDaily >= 0 ? '#7CFF6B' : '#FF6B35'}">RS: ${rsDailyStr}%</span>
-            </div>`;
-        }).join('');
+    const minWeight = sorted[sorted.length - 1].weight;
 
-        html += `<div class="sector-heatmap-row" style="flex:${rowFlex};">${cellsHtml}</div>`;
+    // Map weight to square size: biggest cell ~160px, smallest ~80px
+    const minSize = 80, maxSize = 160;
+    let html = '';
+    sorted.forEach(sector => {
+        const t = minWeight === maxWeight ? 1 : (sector.weight - minWeight) / (maxWeight - minWeight);
+        const size = Math.round(minSize + t * (maxSize - minSize));
+        // Font scale: range 0.7 to 1.4 — bigger cells get proportionally larger fonts
+        const scale = (0.7 + 0.7 * t).toFixed(3);
+        const hm = getHeatmapStyle(sector.change_1d);
+        const changeSign = sector.change_1d >= 0 ? '+' : '';
+        const changeVal = sector.change_1d != null ? sector.change_1d.toFixed(2) : '0.00';
+        const change1w = (sector.change_1w || 0);
+        const change1wStr = (change1w >= 0 ? '+' : '') + change1w.toFixed(2);
+        const change1m = (sector.change_1m || 0);
+        const change1mStr = (change1m >= 0 ? '+' : '') + change1m.toFixed(2);
+        const rsDaily = (sector.rs_daily || 0);
+        const rsDailyStr = (rsDaily >= 0 ? '+' : '') + rsDaily.toFixed(2);
+        const weightStr = (sector.weight * 100).toFixed(1);
+        const trend = sector.trend || 'flat';
+        const trendArrow = trend === 'up' ? '▲' : trend === 'down' ? '▼' : '→';
+        const trendClass = trend === 'up' ? 'trend-up' : trend === 'down' ? 'trend-down' : 'trend-flat';
+        html += `<div class="sector-heatmap-cell"
+            style="width:${size}px;--s:${scale};border-color:${hm.borderColor};box-shadow:${hm.glow};"
+            data-etf="${sector.etf}"
+            title="${escapeHtml(sector.name)} (${sector.etf})\nDay: ${changeSign}${changeVal}%\nWeek: ${change1wStr}%\nMonth: ${change1mStr}%\nRS (daily): ${rsDailyStr}%\nRank: #${sector.strength_rank || '--'}\nSPY Weight: ${weightStr}%">
+            <span class="sector-hm-name">${escapeHtml(sector.name)}</span>
+            <span class="sector-hm-etf">${sector.etf}</span>
+            <span class="sector-hm-change" style="color:${hm.changeColor}">${changeSign}${changeVal}% <span class="sector-hm-trend ${trendClass}">${trendArrow}</span></span>
+            <span class="sector-hm-rs" style="color:${rsDaily >= 0 ? '#7CFF6B' : '#FF6B35'}">RS: ${rsDailyStr}%</span>
+        </div>`;
     });
 
     container.innerHTML = html;
