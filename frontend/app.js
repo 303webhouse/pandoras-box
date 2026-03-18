@@ -7082,18 +7082,24 @@ function renderSectorHeatmap(sectors, heatmapData) {
 
     // Sort by weight descending
     const sorted = [...sectors].sort((a, b) => b.weight - a.weight);
-
     const maxWeight = sorted[0].weight;
-    const minWeight = sorted[sorted.length - 1].weight;
 
-    // Map weight to square size: biggest cell ~160px, smallest ~80px
-    const minSize = 80, maxSize = 160;
+    // Squarified treemap layout — fills 100% of container
+    const W = container.clientWidth || 500;
+    const H = container.clientHeight || 400;
+    const gap = 3;
+    const rects = squarifyTreemap(sorted.map(s => s.weight), W, H, gap);
+
     let html = '';
-    sorted.forEach(sector => {
-        const t = minWeight === maxWeight ? 1 : (sector.weight - minWeight) / (maxWeight - minWeight);
-        const size = Math.round(minSize + t * (maxSize - minSize));
-        // Font scale: range 0.7 to 1.4 — bigger cells get proportionally larger fonts
-        const scale = (0.7 + 0.7 * t).toFixed(3);
+    sorted.forEach((sector, i) => {
+        const r = rects[i];
+        const area = r.w * r.h;
+        const maxArea = W * H;
+        // Font scale: sqrt of area ratio gives perceptual size scaling
+        const scale = (0.65 + 0.85 * Math.sqrt(area / maxArea) / Math.sqrt(maxWeight)).toFixed(3);
+        // Simpler: scale based on weight ratio with wider range
+        const t = sector.weight / maxWeight;
+        const fontScale = (0.7 + 0.7 * t).toFixed(3);
         const hm = getHeatmapStyle(sector.change_1d);
         const changeSign = sector.change_1d >= 0 ? '+' : '';
         const changeVal = sector.change_1d != null ? sector.change_1d.toFixed(2) : '0.00';
@@ -7108,7 +7114,7 @@ function renderSectorHeatmap(sectors, heatmapData) {
         const trendArrow = trend === 'up' ? '▲' : trend === 'down' ? '▼' : '→';
         const trendClass = trend === 'up' ? 'trend-up' : trend === 'down' ? 'trend-down' : 'trend-flat';
         html += `<div class="sector-heatmap-cell"
-            style="width:${size}px;--s:${scale};border-color:${hm.borderColor};box-shadow:${hm.glow};"
+            style="left:${r.x}px;top:${r.y}px;width:${r.w}px;height:${r.h}px;--s:${fontScale};border-color:${hm.borderColor};box-shadow:${hm.glow};"
             data-etf="${sector.etf}"
             title="${escapeHtml(sector.name)} (${sector.etf})\nDay: ${changeSign}${changeVal}%\nWeek: ${change1wStr}%\nMonth: ${change1mStr}%\nRS (daily): ${rsDailyStr}%\nRank: #${sector.strength_rank || '--'}\nSPY Weight: ${weightStr}%">
             <span class="sector-hm-name">${escapeHtml(sector.name)}</span>
@@ -7127,6 +7133,72 @@ function renderSectorHeatmap(sectors, heatmapData) {
             if (etf) changeChartSymbol(etf);
         });
     });
+}
+
+// Squarified treemap: attempt to produce near-square rectangles filling W×H
+function squarifyTreemap(values, W, H, gap) {
+    const total = values.reduce((s, v) => s + v, 0);
+    const areas = values.map(v => (v / total) * W * H);
+    const rects = new Array(values.length);
+    layoutRect(areas, 0, areas.length, 0, 0, W, H, rects, gap);
+    return rects;
+}
+
+function layoutRect(areas, start, end, x, y, w, h, rects, gap) {
+    if (start >= end) return;
+    if (end - start === 1) {
+        rects[start] = { x: x + gap/2, y: y + gap/2, w: w - gap, h: h - gap };
+        return;
+    }
+    const total = areas.slice(start, end).reduce((s, v) => s + v, 0);
+    const horizontal = w >= h;
+    let best = Infinity, bestSplit = start + 1;
+    let runSum = 0;
+    // Find split that minimizes worst aspect ratio in first strip
+    for (let i = start; i < end - 1; i++) {
+        runSum += areas[i];
+        const frac = runSum / total;
+        const stripLen = horizontal ? w * frac : h * frac;
+        const count = i - start + 1;
+        // Compute worst aspect ratio for items in this strip
+        let worstAR = 0;
+        let itemSum = 0;
+        for (let j = start; j <= i; j++) {
+            itemSum += areas[j];
+            const itemFrac = areas[j] / runSum;
+            const itemCross = horizontal ? h * itemFrac : w * itemFrac;
+            const ar = Math.max(stripLen / itemCross, itemCross / stripLen);
+            if (ar > worstAR) worstAR = ar;
+        }
+        if (worstAR < best) {
+            best = worstAR;
+            bestSplit = i + 1;
+        } else if (worstAR > best * 1.5) {
+            break; // past optimal, stop searching
+        }
+    }
+    // Layout first strip
+    const stripTotal = areas.slice(start, bestSplit).reduce((s, v) => s + v, 0);
+    const stripFrac = stripTotal / total;
+    if (horizontal) {
+        const stripW = w * stripFrac;
+        let cy = y;
+        for (let i = start; i < bestSplit; i++) {
+            const itemH = h * (areas[i] / stripTotal);
+            rects[i] = { x: x + gap/2, y: cy + gap/2, w: stripW - gap, h: itemH - gap };
+            cy += itemH;
+        }
+        layoutRect(areas, bestSplit, end, x + stripW, y, w - stripW, h, rects, gap);
+    } else {
+        const stripH = h * stripFrac;
+        let cx = x;
+        for (let i = start; i < bestSplit; i++) {
+            const itemW = w * (areas[i] / stripTotal);
+            rects[i] = { x: cx + gap/2, y: y + gap/2, w: itemW - gap, h: stripH - gap };
+            cx += itemW;
+        }
+        layoutRect(areas, bestSplit, end, x, y + stripH, w, h - stripH, rects, gap);
+    }
 }
 
 function getHeatmapStyle(changePct) {
