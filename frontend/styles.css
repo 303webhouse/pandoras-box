@@ -11,6 +11,7 @@
     --accent-orange: #e5370e;
     --accent-green-dark: #4CAF50;
     --accent-orange-dark: #e5370e;
+    --pnl-negative: #ff9800;
     --accent-red: #e5370e;
     --bearish-color: #e5370e;
     --bias-border-color: #334155;
@@ -2660,7 +2661,7 @@ body.override-active-bearish .override-toggle[data-active="true"] {
     padding: 6px 4px;
     border-radius: 6px;
     background: rgba(255,255,255,0.03);
-    border: 1px solid rgba(255,255,255,0.06);
+    border: 1px solid var(--border-color);
     transition: border-color 0.3s;
 }
 .at-risk-label {
@@ -2669,18 +2670,18 @@ body.override-active-bearish .override-toggle[data-active="true"] {
     font-weight: 700;
     margin-bottom: 2px;
 }
-.at-risk-col.toro .at-risk-label { color: #66bb6a; }
-.at-risk-col.ursa .at-risk-label { color: #ff9800; }
-.at-risk-col.hedged .at-risk-label { color: #42a5f5; }
-.at-risk-col.equities .at-risk-label { color: #b39ddb; }
+.at-risk-col.toro .at-risk-label { color: #00e676; }
+.at-risk-col.ursa .at-risk-label { color: #e5370e; }
+.at-risk-col.hedged .at-risk-label { color: var(--accent-teal); }
+.at-risk-col.equities .at-risk-label { color: var(--text-secondary); }
 .at-risk-amount {
     font-size: 14px;
     font-weight: 700;
     font-variant-numeric: tabular-nums;
 }
 .at-risk-amount.pnl-positive { color: #00e676; }
-.at-risk-amount.pnl-negative { color: #e5370e; }
-.at-risk-amount.pnl-zero { color: #78909c; }
+.at-risk-amount.pnl-negative { color: #ff9800; }
+.at-risk-amount.pnl-zero { color: var(--text-secondary); }
 .at-risk-pnl {
     font-size: 10px;
     margin-top: 1px;
@@ -2688,8 +2689,8 @@ body.override-active-bearish .override-toggle[data-active="true"] {
 }
 .at-risk-pnl .ar-arrow { font-size: 9px; margin-right: 2px; }
 .at-risk-pnl .ar-arrow.up { color: #00e676; }
-.at-risk-pnl .ar-arrow.down { color: #e5370e; }
-.at-risk-pnl .ar-arrow.flat { color: #78909c; }
+.at-risk-pnl .ar-arrow.down { color: #ff9800; }
+.at-risk-pnl .ar-arrow.flat { color: var(--text-secondary); }
 .at-risk-col.empty {
     opacity: 0.35;
 }
@@ -2880,7 +2881,7 @@ body.override-active-bearish .override-toggle[data-active="true"] {
 }
 
 .pnl-value.negative {
-    color: var(--accent-orange);
+    color: var(--pnl-negative);
 }
 
 /* Counter-signal warning on position cards */
@@ -3174,7 +3175,7 @@ body.override-active-bearish .override-toggle[data-active="true"] {
 }
 
 .pnl-row span:last-child.negative {
-    color: var(--accent-orange);
+    color: var(--pnl-negative);
 }
 
 .position-modal-footer {
@@ -9685,8 +9686,8 @@ body[data-mode="analytics"] .analytics-shell {
     font-weight: 700;
     letter-spacing: 0.5px;
 }
-.pnl-total.positive { color: #22c55e; }
-.pnl-total.negative { color: #ef4444; }
+.pnl-total.positive { color: #00e676; }
+.pnl-total.negative { color: var(--pnl-negative); }
 .pnl-split {
     font-size: 11px;
     color: #7a8eb5;
@@ -10394,7 +10395,7 @@ body[data-mode="analytics"] .analytics-shell {
 }
 
 .pnl-neg {
-    color: #e5370e;
+    color: var(--pnl-negative);
 }
 
 @media (max-width: 1400px) {
@@ -10553,8 +10554,8 @@ body[data-mode="analytics"] .analytics-shell {
     font-size: 0.78rem;
 }
 
-.portfolio-positions-table .pnl-positive { color: #4ade80; }
-.portfolio-positions-table .pnl-negative { color: #f87171; }
+.portfolio-positions-table .pnl-positive { color: #00e676; }
+.portfolio-positions-table .pnl-negative { color: var(--pnl-negative); }
 
 .positions-count {
     background: rgba(51, 65, 85, 0.5);
