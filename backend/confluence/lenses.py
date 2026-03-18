@@ -16,7 +16,8 @@ LENS_MAP = {
     # TradingView webhook strategies
     "Holy_Grail": "MOMENTUM_CONTINUATION",
     "holy_grail": "MOMENTUM_CONTINUATION",
-    "Sniper": "MEAN_REVERSION",          # Hub Sniper (VWAP bands)
+    "Artemis": "MEAN_REVERSION",         # Artemis (VWAP band mean reversion)
+    "Sniper": "MEAN_REVERSION",          # Legacy alias
     "ScoutSniper": "REVERSAL_DETECTION",
     "Scout": "REVERSAL_DETECTION",
     "Whale": "INSTITUTIONAL_FOOTPRINT",

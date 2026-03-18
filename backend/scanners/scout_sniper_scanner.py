@@ -25,8 +25,8 @@ except ImportError:
 
 SCOUT_CONFIG = {
     "rsi_length": 14,
-    "rsi_oversold": 30,
-    "rsi_overbought": 70,
+    "rsi_oversold": 35,
+    "rsi_overbought": 65,
     "vol_length": 20,
     "tier_a_rvol": 1.6,
     "tier_b_rvol": 1.1,
@@ -34,6 +34,8 @@ SCOUT_CONFIG = {
     "cooldown_bars": 4,
     "sma_lengths": [50, 120, 200],
     "structural_lookback": 20,
+    "lookback_bars": 3,
+    "min_quality_score": 3,
     # Stop and target
     "atr_buffer_mult": 0.15,
     "fallback_tp1_r": 1.5,
@@ -194,24 +196,26 @@ def check_scout_signals(df: pd.DataFrame, ticker: str) -> List[Dict]:
     if len(df) < 3:
         return signals
 
-    latest = df.iloc[-1]
-
-    rsi = latest.get("rsi")
-    rsi_prev = latest.get("rsi_prev")
-    rvol = latest.get("rvol")
-    vwap = latest.get("vwap")
-    atr = latest.get("atr")
-
-    if any(pd.isna(x) for x in [rsi, rsi_prev, rvol, vwap, atr]):
-        return signals
-
-    # Cooldown check
+    lookback = SCOUT_CONFIG.get("lookback_bars", 1)
     bar_idx = len(df) - 1
     last_signal_idx = _cooldown_tracker.get(ticker, -999)
     if (bar_idx - last_signal_idx) < SCOUT_CONFIG["cooldown_bars"]:
         return signals
 
-    # Time filter: skip first 15 min (9:30-9:45 ET) and lunch (12-1 PM ET)
+    for offset in range(lookback):
+        idx = -(offset + 1)
+        if abs(idx) > len(df):
+            break
+        latest = df.iloc[idx]
+        rsi = latest.get("rsi")
+        rsi_prev = latest.get("rsi_prev")
+        rvol = latest.get("rvol")
+        vwap = latest.get("vwap")
+        atr = latest.get("atr")
+        if any(pd.isna(x) for x in [rsi, rsi_prev, rvol, vwap, atr]):
+            continue
+
+        # Time filter: skip first 15 min (9:30-9:45 ET) and lunch (12-1 PM ET)
     try:
         import pytz
         et_now = datetime.now(pytz.timezone("America/New_York"))
@@ -373,9 +377,16 @@ async def run_scout_scan(tickers: List[str] = None) -> Dict:
 
     elapsed = (datetime.utcnow() - start).total_seconds()
 
-    # Feed each signal through the unified pipeline
+    # Quality gate (Olympus/URSA): only process signals >= min_quality_score
+    min_score = SCOUT_CONFIG.get("min_quality_score", 3)
+    quality_signals = [s for s in all_signals if s.get("score", 0) >= min_score]
+    dropped = len(all_signals) - len(quality_signals)
+    if dropped > 0:
+        logger.info("Scout quality gate: dropped %d/%d signals below score %d", dropped, len(all_signals), min_score)
+
+    # Feed quality signals through the unified pipeline
     # skip_scoring=True because Scout has its own quality score (0-6)
-    for signal in all_signals:
+    for signal in quality_signals:
         try:
             from signals.pipeline import process_signal_unified
             await process_signal_unified(
@@ -389,8 +400,9 @@ async def run_scout_scan(tickers: List[str] = None) -> Dict:
             logger.error("Failed to process Scout signal for %s: %s", signal.get("ticker"), e)
 
     logger.info(
-        "Scout scan: %d signals from %d tickers in %.1fs",
-        len(all_signals), len(tickers), elapsed,
+        "Scout scan: %d signals (%d passed quality gate) from %d tickers in %.1fs (RSI %d/%d, lookback %d)",
+        len(all_signals), len(quality_signals), len(tickers), elapsed,
+        SCOUT_CONFIG["rsi_oversold"], SCOUT_CONFIG["rsi_overbought"], SCOUT_CONFIG.get("lookback_bars", 1),
     )
 
     return {
