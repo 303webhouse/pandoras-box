@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Pandora - Real-time Trading Signal Dashboard">
     <title>Pandora</title>
-    <link rel="stylesheet" href="/styles.css?v=92">
+    <link rel="stylesheet" href="/styles.css?v=93">
     <link rel="manifest" href="/manifest.json">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -210,11 +210,6 @@
                 <div class="analyzer-panel">
                     <div class="analyzer-header">
                         <h2>🔬 SINGLE TICKER ANALYZER</h2>
-                        <div class="analyzer-header-actions">
-                            <button class="analyzer-action-btn add-watchlist" id="addToWatchlistBtn" disabled>
-                                + Add to Watchlist
-                            </button>
-                        </div>
                     </div>
                     <div class="analyzer-controls">
                         <div class="analyzer-input-group">
@@ -227,10 +222,6 @@
                             </select>
                             <button class="analyzer-btn" id="analyzeTickerBtn">Analyze</button>
                         </div>
-                    </div>
-
-                    <div class="analyzer-results-v3" id="analyzerResultsV3">
-                        <p class="empty-state">Enter a ticker to analyze</p>
                     </div>
                 </div>
             </div>
@@ -653,6 +644,22 @@
             <div class="savita-modal-footer">
                 <button class="savita-btn cancel" id="cancelSavitaUpdate">Cancel</button>
                 <button class="savita-btn submit" id="submitSavitaUpdate">Update</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Ticker Analyzer Modal -->
+    <div class="modal-overlay" id="analyzerModal">
+        <div class="analyzer-modal">
+            <div class="analyzer-modal-header">
+                <div class="analyzer-modal-title" id="analyzerModalTitle">Analyzing...</div>
+                <div class="analyzer-modal-actions">
+                    <button class="analyzer-action-btn add-watchlist" id="modalAddWatchlistBtn" disabled>+ Watchlist</button>
+                    <button class="modal-close" id="closeAnalyzerModal">✕</button>
+                </div>
+            </div>
+            <div class="analyzer-modal-body" id="analyzerModalBody">
+                <p class="empty-state">Analyzing...</p>
             </div>
         </div>
     </div>
@@ -1609,7 +1616,7 @@
     <!-- TradingView Widget Script -->
     <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
-    <script src="/app.js?v=107"></script>
+    <script src="/app.js?v=108"></script>
     <script src="/cockpit.js?v=1"></script>
     <script src="/laboratory.js?v=1"></script>
 </body>

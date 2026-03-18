@@ -5796,17 +5796,36 @@ function initTickerAnalyzer() {
     if (addBtn) {
         addBtn.addEventListener('click', addAnalyzedTickerToWatchlist);
     }
+
+    // Analyzer modal close handlers
+    const closeBtn = document.getElementById('closeAnalyzerModal');
+    const modal = document.getElementById('analyzerModal');
+    if (closeBtn) closeBtn.addEventListener('click', () => modal?.classList.remove('active'));
+    if (modal) modal.addEventListener('click', (e) => { if (e.target === modal) modal.classList.remove('active'); });
+
+    // Modal watchlist button
+    const modalAddBtn = document.getElementById('modalAddWatchlistBtn');
+    if (modalAddBtn) modalAddBtn.addEventListener('click', addAnalyzedTickerToWatchlist);
 }
 
 async function runUnifiedAnalyzer() {
     const input = document.getElementById('analyzeTickerInput');
-    const resultsContainer = document.getElementById('analyzerResultsV3');
-    const addBtn = document.getElementById('addToWatchlistBtn');
     const ticker = input ? input.value.trim().toUpperCase() : '';
-    if (!ticker || !resultsContainer) return;
+    if (!ticker) return;
     lastAnalyzedTicker = ticker;
-    if (addBtn) addBtn.disabled = true;
-    resultsContainer.innerHTML = '<p class="empty-state">Analyzing...</p>';
+
+    // Open modal immediately with loading state
+    const modal = document.getElementById('analyzerModal');
+    const modalTitle = document.getElementById('analyzerModalTitle');
+    const modalBody = document.getElementById('analyzerModalBody');
+    const modalAddBtn = document.getElementById('modalAddWatchlistBtn');
+    if (!modal || !modalBody) return;
+
+    modalTitle.textContent = `Analyzing ${ticker}...`;
+    modalBody.innerHTML = '<p class="empty-state">Analyzing...</p>';
+    if (modalAddBtn) modalAddBtn.disabled = true;
+    modal.classList.add('active');
+
     try {
         const [analysisResp, signalsResp] = await Promise.all([
             fetch(`${API_URL}/analyze/${encodeURIComponent(ticker)}`),
@@ -5816,19 +5835,20 @@ async function runUnifiedAnalyzer() {
         const signalsData = await signalsResp.json().catch(() => ({ signals: [] }));
         if (analysisData.status === 'success') {
             renderAnalyzerV4(analysisData.analysis || {}, signalsData.signals || [], ticker);
-            if (addBtn) addBtn.disabled = false;
+            if (modalAddBtn) modalAddBtn.disabled = false;
             openTickerChart(ticker);
         } else {
-            resultsContainer.innerHTML = `<p class="empty-state">${analysisData.message || 'Analysis failed'}</p>`;
+            modalBody.innerHTML = `<p class="empty-state">${analysisData.message || 'Analysis failed'}</p>`;
         }
     } catch (error) {
         console.error('Analyzer error:', error);
-        resultsContainer.innerHTML = '<p class="empty-state">Analysis failed</p>';
+        modalBody.innerHTML = '<p class="empty-state">Analysis failed</p>';
     }
 }
 
 function renderAnalyzerV4(analysis, recentSignals, ticker) {
-    const container = document.getElementById('analyzerResultsV3');
+    const container = document.getElementById('analyzerModalBody');
+    const modalTitle = document.getElementById('analyzerModalTitle');
     if (!container) return;
     const cta = analysis.cta || {};
     const ctaAnalysis = cta.cta_analysis || {};
@@ -5866,6 +5886,7 @@ function renderAnalyzerV4(analysis, recentSignals, ticker) {
     const upside = fund.price_target?.upside_pct;
     const trappedVerdict = trapped.verdict || 'NO_SIGNAL';
     const trappedClass = trappedVerdict.includes('BULL') ? 'good' : trappedVerdict.includes('BEAR') ? 'bad' : 'neutral';
+    if (modalTitle) modalTitle.innerHTML = `${escapeHtml(ticker)} <span style="color:var(--text-secondary);font-weight:400;">$${ctaAnalysis.current_price?.toFixed(2) || '--'}</span> <span class="analysis-pill ${zonePill}" style="font-size:10px;vertical-align:middle;">${escapeHtml(zone)}</span>`;
     container.innerHTML = `
         <div class="analyzer-v4-header">
             <div class="analyzer-v4-ticker-info">

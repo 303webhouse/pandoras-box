@@ -9560,6 +9560,59 @@ body[data-mode="analytics"] .analytics-shell {
 .agent-action.watching { background: rgba(255,152,0,0.15); color: #ff9800; }
 .agent-invalidation { font-size: 10px; color: #ff9800; margin-top: 2px; font-style: italic; }
 
+/* ==========================================
+   TICKER ANALYZER MODAL
+   ========================================== */
+.analyzer-modal {
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    width: 680px;
+    max-width: 95vw;
+    max-height: 85vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+}
+
+.analyzer-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
+}
+
+.analyzer-modal-title {
+    font-family: 'Orbit', sans-serif;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text-primary);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+}
+
+.analyzer-modal-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.analyzer-modal-body {
+    padding: 16px 18px;
+    overflow-y: auto;
+    flex: 1;
+}
+
+.analyzer-modal-body .analyzer-v4-columns {
+    gap: 14px;
+}
+
+.analyzer-modal-body .analyzer-v4-col {
+    min-width: 0;
+}
+
 @media (max-width: 1080px) {
     .watchlist-v3 {
         grid-template-columns: 1fr;
