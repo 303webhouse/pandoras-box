@@ -161,7 +161,8 @@ body {
 }
 
 .mode-btn,
-.kb-btn {
+.kb-btn,
+.refresh-btn {
     background: transparent;
     border: 1px solid var(--border-color);
     color: var(--text-secondary);
@@ -179,7 +180,8 @@ body {
 }
 
 .mode-btn:hover,
-.kb-btn:hover {
+.kb-btn:hover,
+.refresh-btn:hover {
     color: var(--text-primary);
     border-color: var(--accent-teal);
     background: rgba(20, 184, 166, 0.08);
@@ -202,22 +204,7 @@ body {
     cursor: pointer;
 }
 
-.refresh-btn {
-    background: var(--accent-teal);
-    color: var(--dark-bg);
-    border: none;
-    padding: 8px 20px;
-    border-radius: 8px;
-    font-size: 14px;
-    font-weight: 700;
-    cursor: pointer;
-    transition: all 0.2s;
-}
-
-.refresh-btn:hover {
-    transform: scale(1.05);
-    box-shadow: 0 4px 12px rgba(20, 184, 166, 0.3);
-}
+/* .refresh-btn now styled via .mode-btn/.kb-btn group above */
 
 /* Bias Section — 3-col grid (Brief 7A) */
 .bias-section {
