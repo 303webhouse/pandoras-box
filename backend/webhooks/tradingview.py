@@ -55,6 +55,7 @@ STRATEGY_COOLDOWNS = {
     "Holy_Grail": {"equity": 14400, "crypto": 7200},   # 4h equity, 2h crypto
     "Scout": {"equity": 14400, "crypto": 7200},          # 4h equity, 2h crypto
     "Phalanx": {"equity": 3600, "crypto": 3600},         # 1h both
+    "Artemis": {"equity": 1800, "crypto": 1800},         # 30 min both
 }
 
 
@@ -240,10 +241,8 @@ async def receive_tradingview_alert(request: Request):
             return await process_holy_grail_signal(alert, start_time)
         elif "exhaustion" in strategy_lower:
             return await process_exhaustion_signal(alert, start_time)
-        elif "artemis" in strategy_lower or "hub_sniper" in strategy_lower or "hubsniper" in strategy_lower:
+        elif "artemis" in strategy_lower or "hub_sniper" in strategy_lower or "hubsniper" in strategy_lower or strategy_lower == "sniper":
             return await process_artemis_signal(alert, start_time)
-        elif "sniper" in strategy_lower:
-            return await process_sniper_signal(alert, start_time)
         elif "phalanx" in strategy_lower or "absorption" in strategy_lower or "wall" in strategy_lower:
             return await process_phalanx_signal(alert, start_time)
         else:
@@ -295,7 +294,7 @@ async def process_scout_signal(alert: TradingViewAlert, start_time: datetime):
         "confidence": "SCOUT",  # Special confidence level
         "score": 40,  # Base score - scouts don't get full scoring
         "bias_alignment": "NEUTRAL",
-        "note": "Early warning - confirm with 1H Sniper before entry"
+        "note": "Early warning - confirm with 1H Artemis before entry"
     }
 
     # Calculate R:R if we have levels

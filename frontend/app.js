@@ -3747,7 +3747,7 @@ function formatStrategyName(raw) {
         'whale_hunter': 'Whale Hunter', 'whale': 'Whale Hunter',
         'uw_flow': 'UW Flow', 'sell_the_rip': 'Sell the Rip',
         'holy_grail': 'Holy Grail', 'holygrail': 'Holy Grail',
-        'sniper': 'Sniper', 'exhaustion': 'Exhaustion',
+        'sniper': 'Artemis', 'exhaustion': 'Exhaustion',
         'nemesis_wrr': 'Nemesis WRR', 'nemesis': 'Nemesis',
     };
     const key = raw.toLowerCase().replace(/[\s-]+/g, '_');
@@ -3964,7 +3964,7 @@ function createCryptoSignalCard(signal) {
     if (signal.signal_type === 'KODIAK_CALL') badges.push('<span class="crypto-badge kodiak">KODIAK</span>');
     const strategyLower = (strategy || '').toLowerCase();
     if (strategyLower.includes('scout')) badges.push('<span class="crypto-badge scout">SCOUT</span>');
-    if (strategyLower.includes('sniper')) badges.push('<span class="crypto-badge sniper">SNIPER</span>');
+    if (strategyLower.includes('sniper')) badges.push('<span class="crypto-badge artemis">ARTEMIS</span>');
     if (strategyLower.includes('exhaustion')) badges.push('<span class="crypto-badge exhaustion">EXHAUST</span>');
     if (signal.countertrend || strategyLower.includes('nemesis') || strategyLower.includes('wrr')) {
         badges.push('<span class="crypto-badge countertrend">\u21BA COUNTERTREND</span>');
