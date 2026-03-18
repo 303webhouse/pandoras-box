@@ -4417,8 +4417,7 @@ body.override-active-bearish .override-toggle[data-active="true"] {
     color: var(--text-secondary);
 }
 
-.watchlist-btn,
-.analyzer-btn {
+.watchlist-btn {
     background: var(--accent-teal);
     color: var(--dark-bg);
     border: none;
@@ -4431,10 +4430,26 @@ body.override-active-bearish .override-toggle[data-active="true"] {
     white-space: nowrap;
 }
 
-.watchlist-btn:hover,
-.analyzer-btn:hover {
+.analyzer-btn {
+    background: rgba(20,184,166,0.1);
+    color: #14b8a6;
+    border: 1px solid rgba(20,184,166,0.3);
+    padding: 8px 16px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+}
+
+.watchlist-btn:hover {
     transform: scale(1.02);
     box-shadow: 0 2px 8px rgba(20, 184, 166, 0.3);
+}
+
+.analyzer-btn:hover {
+    background: rgba(20,184,166,0.2);
 }
 
 .watchlist-btn.secondary {
