@@ -1,0 +1,254 @@
+//@version=5
+indicator("Phalanx v2", overlay=true, max_labels_count=500)
+
+//==============================
+// INPUTS
+//==============================
+grpAbs   = "Absorption Core"
+ltf      = input.timeframe("1", "Lower TF (intrabar)", group=grpAbs,
+     tooltip="Use a lower timeframe than your chart (e.g., 1m on a 5m/15m chart).")
+volLen   = input.int(20, "Volume MA Length", group=grpAbs, minval=1)
+volMult  = input.float(2.0, "Min Relative Volume (x avg)", group=grpAbs, minval=0.5, step=0.1)
+deltaTol = input.float(0.08, "Absorption: Max |Delta| / Vol", group=grpAbs, minval=0.0, step=0.01,
+     tooltip="Near-zero delta filter. 0.08 = delta must be within ±8% of total intrabar volume.")
+
+atrLen   = input.int(14, "ATR Length", group=grpAbs, minval=1)
+stallATR = input.float(0.30, "Price Stall (ATR fraction)", group=grpAbs, minval=0.0, step=0.05,
+     tooltip="How little price can move between the two bars for a 'wall'.")
+needOverlap = input.bool(true, "Require bar range overlap", group=grpAbs,
+     tooltip="Requires the two bars to overlap in price range (same fight zone).")
+
+grpMatch = "Two-Bar \"Exact\" Matching"
+strictExactVol = input.bool(false, "Strict EXACT total volume match (Vol == Vol[1])", group=grpMatch,
+     tooltip="Extremely strict/rare. Start with tolerance mode first.")
+volMatchTol    = input.float(0.05, "Volume match tolerance (if not strict)", group=grpMatch, minval=0.001, step=0.005,
+     tooltip="0.05 = within 5% (visually 'same height'). Try 0.03\u20130.05.")
+volBucket      = input.int(0, "Optional rounding bucket (0=off)", group=grpMatch, minval=0,
+     tooltip="Mimics 'visual exact' by requiring rounded volumes to match. Example: 1000 or 5000.")
+deltaMatchTol  = input.float(0.03, "Delta ratio match tolerance", group=grpMatch, minval=0.0, step=0.01)
+buyPctTol      = input.float(0.03, "Buy% match tolerance", group=grpMatch, minval=0.0, step=0.01)
+
+grpDir = "Direction Context"
+approachLen = input.int(3, "Approach lookback (bars)", group=grpDir, minval=1)
+
+grpLv = "Optional Level Filter (manual levels)"
+useLevels    = input.bool(false, "Only trigger near these levels", group=grpLv)
+levelDistATR = input.float(0.25, "Max distance from level (ATR fraction)", group=grpLv, minval=0.0, step=0.05)
+lvl1  = input.float(0.0, "Level 1",  group=grpLv)
+lvl2  = input.float(0.0, "Level 2",  group=grpLv)
+lvl3  = input.float(0.0, "Level 3",  group=grpLv)
+lvl4  = input.float(0.0, "Level 4",  group=grpLv)
+lvl5  = input.float(0.0, "Level 5",  group=grpLv)
+lvl6  = input.float(0.0, "Level 6",  group=grpLv)
+lvl7  = input.float(0.0, "Level 7",  group=grpLv)
+lvl8  = input.float(0.0, "Level 8",  group=grpLv)
+lvl9  = input.float(0.0, "Level 9",  group=grpLv)
+lvl10 = input.float(0.0, "Level 10", group=grpLv)
+
+grpDraw = "Wall Drawing"
+drawWalls   = input.bool(true, "Draw wall line + zone", group=grpDraw)
+extendBars  = input.int(150, "Extend right (bars)", group=grpDraw, minval=1)
+maxWalls    = input.int(50, "Max walls to keep", group=grpDraw, minval=1)
+zonePadATR  = input.float(0.00, "Zone padding (ATR)", group=grpDraw, minval=0.0, step=0.05,
+     tooltip="Optional: expand the zone by ATR padding above/below.")
+lineMode    = input.string("Mid Zone", "Line price", group=grpDraw, options=["Mid Zone","Close","HL2"])
+zoneOpacity = input.int(85, "Zone opacity (0-100)", group=grpDraw, minval=0, maxval=100)
+
+
+//==============================
+// INTRABAR BUY/SELL ESTIMATE (proxy for footprint delta)
+//==============================
+ltfO = request.security_lower_tf(syminfo.tickerid, ltf, open)
+ltfC = request.security_lower_tf(syminfo.tickerid, ltf, close)
+ltfV = request.security_lower_tf(syminfo.tickerid, ltf, volume)
+
+float buyVol  = 0.0
+float sellVol = 0.0
+
+int n = array.size(ltfV)
+if n > 0
+    float b = 0.0
+    float s = 0.0
+    for i = 0 to n - 1
+        float o = array.get(ltfO, i)
+        float c = array.get(ltfC, i)
+        float v = array.get(ltfV, i)
+        if not na(o) and not na(c) and not na(v)
+            if c > o
+                b += v
+            else if c < o
+                s += v
+            else
+                b += v * 0.5
+                s += v * 0.5
+    buyVol  := b
+    sellVol := s
+
+float totVol     = buyVol + sellVol
+float delta      = buyVol - sellVol
+float deltaRatio = totVol == 0.0 ? 0.0 : (delta / totVol)
+float buyPct     = totVol == 0.0 ? 0.5 : (buyVol / totVol)
+bool hasIntrabar = n > 0 and totVol > 0 and not na(totVol)
+
+
+//==============================
+// ABSORPTION BAR CONDITIONS  (use intrabar totVol for volume gating)
+//==============================
+avgTotVol = ta.sma(totVol, volLen)
+hiVol     = hasIntrabar and not na(avgTotVol) and totVol >= (avgTotVol * volMult)
+
+// absorption core = near-zero delta
+absCore   = hasIntrabar and (math.abs(deltaRatio) <= deltaTol)
+
+// absorption bar = absorption core + high intrabar volume
+absBar    = absCore and hiVol
+
+
+//==============================
+// "EXACT" MATCHING BETWEEN BAR0 AND BAR1
+//==============================
+float denom = math.max(math.max(totVol, totVol[1]), 1.0)
+float relVolDiff = math.abs(totVol - totVol[1]) / denom
+bool volMatch = strictExactVol ? (totVol == totVol[1]) : (relVolDiff <= volMatchTol)
+
+bool bucketMatch = volBucket > 0 ? (math.round(totVol / volBucket) == math.round(totVol[1] / volBucket)) : true
+bool deltaMatch  = math.abs(deltaRatio - deltaRatio[1]) <= deltaMatchTol
+bool buyPctMatch = math.abs(buyPct - buyPct[1]) <= buyPctTol
+
+
+//==============================
+// LEVEL FILTER (optional manual levels)
+//==============================
+f_minDistToLevels(float price) =>
+    float best = na
+    array<float> lvls = array.from(lvl1, lvl2, lvl3, lvl4, lvl5, lvl6, lvl7, lvl8, lvl9, lvl10)
+    for j = 0 to array.size(lvls) - 1
+        float L = array.get(lvls, j)
+        if L != 0.0
+            float d = math.abs(price - L)
+            best := na(best) ? d : math.min(best, d)
+    best
+
+atr = ta.atr(atrLen)
+
+minDist   = f_minDistToLevels(hl2)
+nearLevel = not useLevels ? true : (not na(minDist) and not na(atr) and (minDist <= atr * levelDistATR))
+
+//==============================
+// TWO-BAR WALL
+//==============================
+
+// price stall + overlap (must be defined BEFORE wallRaw uses them)
+
+stall   = math.abs(hl2 - hl2[1]) <= (atr * stallATR)
+overlap = (low <= high[1]) and (high >= low[1])
+
+bool wallRaw =
+     absBar and absBar[1] and
+     stall and
+     (not needOverlap or overlap) and
+     volMatch and bucketMatch and deltaMatch and buyPctMatch and
+     nearLevel
+
+// Only fire on confirmed bar close (no repaint)
+bool wall = wallRaw and barstate.isconfirmed
+
+// Direction context: did price drift down into the wall (support) or up into it (resistance)?
+float slope = ta.sma(ta.change(close), approachLen)[1]
+bool bullWall = wall and (slope < 0)   // falling into wall => support => bullish setup
+bool bearWall = wall and (slope > 0)   // rising into wall => resistance => bearish setup
+
+// Previous-bar detection for alert reliability (one bar delay for watchlist safety)
+bool wallPrev = wallRaw[1]
+float slopePrev = ta.sma(ta.change(close), approachLen)[2]
+bool bullWallPrev = wallPrev and (slopePrev < 0)
+bool bearWallPrev = wallPrev and (slopePrev > 0)
+
+//==============================
+// PLOTTING
+//==============================
+plotshape(absBar, title="Absorption Bar", style=shape.diamond, size=size.large,
+     color=color.new(color.yellow, 0), location=location.abovebar)
+
+plotshape(bullWall, title="Bull Wall", style=shape.labelup, text="WALL ▲", size=size.large,
+     color=color.new(color.green, 0), textcolor=color.black, location=location.belowbar)
+
+plotshape(bearWall, title="Bear Wall", style=shape.labeldown, text="WALL ▼", size=size.large,
+     color=color.new(color.red, 0), textcolor=color.black, location=location.abovebar)
+
+
+//==============================
+// WALL LINE + ZONE DRAWING (LOGIC ONLY — inputs already defined once above)
+//==============================
+var array<line> wallLines = array.new_line()
+var array<box>  wallBoxes = array.new_box()
+
+float zLow  = math.max(low,  low[1])
+float zHigh = math.min(high, high[1])
+
+if zLow > zHigh
+    zLow  := math.min(low,  low[1])
+    zHigh := math.max(high, high[1])
+
+float pad = ta.atr(atrLen) * zonePadATR
+zLow  -= pad
+zHigh += pad
+
+float linePrice = lineMode == "Close" ? close : lineMode == "HL2" ? hl2 : (zLow + zHigh) * 0.5
+color wallCol   = bullWall ? color.new(color.yellow, 0) : bearWall ? color.new(color.orange, 0) : color.new(color.white, 0)
+
+if drawWalls and wall
+    line ln = line.new(bar_index, linePrice, bar_index + extendBars, linePrice, xloc=xloc.bar_index, extend=extend.none, color=wallCol, width=2)
+    box  bx = box.new(bar_index - 1, zHigh, bar_index + extendBars, zLow, xloc=xloc.bar_index, border_color=wallCol, bgcolor=color.new(wallCol, zoneOpacity))
+
+    array.push(wallLines, ln)
+    array.push(wallBoxes, bx)
+
+    if array.size(wallLines) > maxWalls
+        line.delete(array.shift(wallLines))
+    if array.size(wallBoxes) > maxWalls
+        box.delete(array.shift(wallBoxes))
+
+
+//==============================
+// HIDDEN PLOTS (order matters for {{plot_0}}..{{plot_19}})
+//==============================
+plot(deltaRatio, title="DeltaRatio_est", display=display.none)   // {{plot_0}}
+plot(buyPct,     title="BuyPct_est",     display=display.none)   // {{plot_1}}
+plot(buyVol,     title="BuyVol_est",     display=display.none)   // {{plot_2}}
+plot(sellVol,    title="SellVol_est",    display=display.none)   // {{plot_3}}
+plot(totVol,     title="TotVol_est",     display=display.none)   // {{plot_4}}
+plot(minDist,    title="MinDistToLevel", display=display.none)   // {{plot_5}}
+
+
+//==============================
+// ALERTS (constant strings + placeholders)
+//==============================
+alertcondition(wall, title="Absorption Wall (Any)",
+     message="type=absorption_wall|symbol={{exchange}}:{{ticker}}|tf={{interval}}|time={{time}}|price={{close}}|vol={{volume}}|deltaRatio={{plot_0}}|buyPct={{plot_1}}|buyVol={{plot_2}}|sellVol={{plot_3}}|totVol={{plot_4}}|minDist={{plot_5}}")
+
+alertcondition(bullWall, title="Bullish Absorption Wall",
+     message="type=absorption_wall_bull|symbol={{exchange}}:{{ticker}}|tf={{interval}}|time={{time}}|price={{close}}|vol={{volume}}|deltaRatio={{plot_0}}|buyPct={{plot_1}}|buyVol={{plot_2}}|sellVol={{plot_3}}|totVol={{plot_4}}|minDist={{plot_5}}")
+
+alertcondition(bearWall, title="Bearish Absorption Wall",
+     message="type=absorption_wall_bear|symbol={{exchange}}:{{ticker}}|tf={{interval}}|time={{time}}|price={{close}}|vol={{volume}}|deltaRatio={{plot_0}}|buyPct={{plot_1}}|buyVol={{plot_2}}|sellVol={{plot_3}}|totVol={{plot_4}}|minDist={{plot_5}}")
+
+// JSON webhook alert for Trading Hub pipeline (one-bar delay for reliability)
+if wallPrev and (bullWallPrev or bearWallPrev)
+    string direction = bullWallPrev ? "LONG" : "SHORT"
+    string wallType = bullWallPrev ? "BULL_WALL" : "BEAR_WALL"
+
+    alert_payload = '{"ticker":"' + syminfo.ticker +
+         '","strategy":"Phalanx"' +
+         ',"direction":"' + direction +
+         '","signal_type":"' + wallType +
+         '","entry_price":' + str.tostring(close) +
+         ',"timeframe":"' + timeframe.period +
+         '","delta_ratio":' + str.tostring(deltaRatio, "#.####") +
+         ',"buy_pct":' + str.tostring(buyPct, "#.####") +
+         ',"buy_vol":' + str.tostring(buyVol) +
+         ',"sell_vol":' + str.tostring(sellVol) +
+         ',"total_vol":' + str.tostring(totVol) +
+         ',"rvol":' + str.tostring(totVol / avgTotVol, "#.##") +
+         '}'
+    alert(alert_payload, alert.freq_once_per_bar)
