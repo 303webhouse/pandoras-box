@@ -182,7 +182,7 @@ class TradingViewAlert(BaseModel):
     total_vol: Optional[float] = None
     # Artemis (VWAP mean reversion) fields
     mode: Optional[str] = None          # "Normal" or "Flush"
-    avwap_ctx: Optional[str] = None     # Weekly AVWAP context ("above"/"below")
+    avwap_ctx: Optional[float] = None   # Weekly AVWAP context level (numeric price)
     avwap_buf_atr: Optional[float] = None  # AVWAP buffer in ATR units
     prox_atr: Optional[float] = None    # Proximity to VWAP band in ATR units
     adx_rising: Optional[bool] = None   # ADX direction
@@ -712,7 +712,7 @@ async def process_artemis_signal(alert: TradingViewAlert, start_time: datetime):
         "\U0001f3f9 Artemis accepted: %s %s (%s mode, prox=%.2f ATR, avwap=%s)",
         alert.ticker, signal_type, mode,
         alert.prox_atr if alert.prox_atr is not None else 0,
-        alert.avwap_ctx or "unknown",
+        alert.avwap_ctx if alert.avwap_ctx is not None else "unknown",
     )
 
     return {
