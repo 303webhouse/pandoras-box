@@ -323,21 +323,13 @@ body {
 /* Sector Heatmap — fills container, 3-row layout */
 .sector-heatmap {
     display: flex;
-    flex-direction: column;
+    flex-wrap: wrap;
     gap: 6px;
     padding: 4px;
-    height: 100%;
     width: 100%;
     box-sizing: border-box;
     overflow: hidden;
-}
-
-.sector-heatmap-row {
-    display: flex;
-    gap: 6px;
-    width: 100%;
-    box-sizing: border-box;
-    min-height: 0;
+    align-content: start;
 }
 
 .sector-heatmap-cell {
@@ -353,7 +345,7 @@ body {
     transition: border-color 0.2s, box-shadow 0.2s, opacity 0.15s;
     overflow: hidden;
     box-sizing: border-box;
-    min-width: 0;
+    aspect-ratio: 1;
 }
 
 .sector-heatmap-cell:hover {
@@ -361,7 +353,7 @@ body {
 }
 
 .sector-hm-name {
-    font-size: calc(10px * var(--s, 1));
+    font-size: calc(13px * var(--s, 1));
     font-weight: 500;
     color: var(--text-secondary);
     text-align: center;
@@ -375,23 +367,23 @@ body {
 }
 
 .sector-hm-etf {
-    font-size: calc(18px * var(--s, 1));
+    font-size: calc(24px * var(--s, 1));
     font-weight: 700;
     color: #fff;
 }
 
 .sector-hm-change {
-    font-size: calc(11px * var(--s, 1));
+    font-size: calc(14px * var(--s, 1));
     font-weight: 600;
 }
 
-.sector-hm-trend { font-size: calc(9px * var(--s, 1)); margin-left: 1px; }
+.sector-hm-trend { font-size: calc(12px * var(--s, 1)); margin-left: 1px; }
 .sector-hm-trend.trend-up { color: #7CFF6B; }
 .sector-hm-trend.trend-down { color: #FF6B35; }
 .sector-hm-trend.trend-flat { color: rgba(255,255,255,0.4); }
 
 .sector-hm-rs {
-    font-size: calc(9px * var(--s, 1));
+    font-size: calc(12px * var(--s, 1));
     font-weight: 400;
     opacity: 0.75;
     line-height: 1.1;
