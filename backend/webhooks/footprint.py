@@ -30,6 +30,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+import asyncio
 import hashlib
 import logging
 import os
@@ -128,36 +129,12 @@ async def _post_to_discord(payload: dict) -> None:
         logger.error(f"Discord webhook failed: {exc}")
 
 
-@router.post("/footprint")
-async def footprint_webhook(data: FootprintSignal):
-    """Receive a footprint signal, forward to Discord, cache in Redis, enter pipeline."""
-    # Validate webhook secret
-    WEBHOOK_SECRET = os.getenv("TRADINGVIEW_WEBHOOK_SECRET") or ""
-    if WEBHOOK_SECRET:
-        if (data.secret or "") != WEBHOOK_SECRET:
-            logger.warning("Rejected footprint webhook \u2014 invalid secret")
-            raise HTTPException(status_code=401, detail="Invalid webhook secret")
+async def _process_footprint_background(data: FootprintSignal) -> None:
+    """Background processing: Discord post + Redis cache + pipeline.
+    Runs via asyncio.ensure_future so the webhook returns immediately
+    and TradingView doesn't timeout (~10s limit)."""
 
-    # Dedup: reject duplicate footprint signals within 300s window
-    dedup_raw = f"{data.ticker}:{data.sub_type}:{data.direction}:{data.price}"
-    dedup_hash = hashlib.md5(dedup_raw.encode()).hexdigest()[:16]
-    dedup_key = f"webhook:dedup:footprint:{dedup_hash}"
-    try:
-        from database.redis_client import get_redis_client
-        _rc = await get_redis_client()
-        if _rc and await _rc.get(dedup_key):
-            logger.info("Footprint dedup: skipping duplicate %s %s", data.ticker, data.sub_type)
-            return {"status": "duplicate", "detail": "duplicate footprint signal within 300s window"}
-        if _rc:
-            await _rc.set(dedup_key, "1", ex=DEDUP_WINDOW)
-    except Exception:
-        pass
-
-    logger.info(
-        f"\U0001f52c Footprint signal received: {data.ticker} {data.direction} "
-        f"sub_type={data.sub_type} stacked={data.stacked_layers} price={data.price}"
-    )
-
+    # Discord notification
     discord_payload = _build_discord_message(data)
     await _post_to_discord(discord_payload)
 
@@ -234,6 +211,41 @@ async def footprint_webhook(data: FootprintSignal):
 
     except Exception as e:
         logger.warning(f"Footprint pipeline integration failed (Discord post succeeded): {e}")
+
+
+@router.post("/footprint")
+async def footprint_webhook(data: FootprintSignal):
+    """Receive a footprint signal, forward to Discord, cache in Redis, enter pipeline."""
+    # Validate webhook secret
+    WEBHOOK_SECRET = os.getenv("TRADINGVIEW_WEBHOOK_SECRET") or ""
+    if WEBHOOK_SECRET:
+        if (data.secret or "") != WEBHOOK_SECRET:
+            logger.warning("Rejected footprint webhook \u2014 invalid secret")
+            raise HTTPException(status_code=401, detail="Invalid webhook secret")
+
+    # Dedup: reject duplicate footprint signals within 300s window
+    dedup_raw = f"{data.ticker}:{data.sub_type}:{data.direction}:{data.price}"
+    dedup_hash = hashlib.md5(dedup_raw.encode()).hexdigest()[:16]
+    dedup_key = f"webhook:dedup:footprint:{dedup_hash}"
+    try:
+        from database.redis_client import get_redis_client
+        _rc = await get_redis_client()
+        if _rc and await _rc.get(dedup_key):
+            logger.info("Footprint dedup: skipping duplicate %s %s", data.ticker, data.sub_type)
+            return {"status": "duplicate", "detail": "duplicate footprint signal within 300s window"}
+        if _rc:
+            await _rc.set(dedup_key, "1", ex=DEDUP_WINDOW)
+    except Exception:
+        pass
+
+    logger.info(
+        f"\U0001f52c Footprint signal received: {data.ticker} {data.direction} "
+        f"sub_type={data.sub_type} stacked={data.stacked_layers} price={data.price}"
+    )
+
+    # Fire-and-forget: return 200 immediately, process in background
+    # (TradingView has ~10s webhook timeout — Discord + Redis + pipeline can exceed it)
+    asyncio.ensure_future(_process_footprint_background(data))
 
     return {"status": "received"}
 
