@@ -246,9 +246,8 @@ body {
 }
 
 .bias-right-stack .analyzer-panel {
-    flex: 1 1 25%;
+    flex: 0 0 auto;
     min-height: 0;
-    overflow: auto;
 }
 
 .headlines-card {
