@@ -1,13 +1,18 @@
 """
-Sector Heatmap API — Polygon-powered sector data for all 11 S&P 500 sectors.
-Fetches daily bars directly from Polygon for SPY + 11 sector ETFs.
+Sector Heatmap API — yfinance-powered sector data for all 11 S&P 500 sectors.
+Fetches daily bars via yfinance batch download for SPY + 11 sector ETFs.
 Computes Day/Week/Month changes and daily RS rankings vs SPY.
+
+Uses yfinance as primary data source (near-real-time quotes, free).
+Polygon Starter only provides 15-min delayed data, so yfinance is faster
+for this use case with only 12 tickers.
 """
 
 import json
 import logging
+import asyncio
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 import pytz
 from fastapi import APIRouter
@@ -33,21 +38,37 @@ SECTOR_WEIGHTS = {
     "XLB": {"name": "Materials", "weight": 0.019},
 }
 
-HEATMAP_CACHE_KEY = "sector_heatmap:polygon"
-HEATMAP_LIVE_TTL = 30  # 30s during market hours for near-real-time updates
+ALL_TICKERS = ["SPY"] + list(SECTOR_WEIGHTS.keys())
+TICKER_STR = " ".join(ALL_TICKERS)
+
+# Cache keys
+HEATMAP_CACHE_KEY = "sector_heatmap:yf"
+HEATMAP_LIVE_TTL = 10  # 10s during market hours for near-real-time
 HEATMAP_STALE_KEY = "sector_heatmap:last_close"
 
 
-def _heatmap_cache_ttl() -> int:
-    """Return 30s during market hours, 4 hours outside."""
+def _is_market_hours() -> bool:
+    """Check if we're in US market hours (9:30-16:00 ET weekdays)."""
     try:
         et = datetime.now(pytz.timezone("America/New_York"))
-        if et.weekday() < 5 and 9 <= et.hour < 16:
-            return HEATMAP_LIVE_TTL
-        if et.weekday() < 5 and et.hour == 16 and et.minute < 30:
-            return HEATMAP_LIVE_TTL
+        if et.weekday() >= 5:
+            return False
+        # Include pre-market from 9:00 and post-market to 16:30
+        if et.hour == 9 and et.minute >= 0:
+            return True
+        if 10 <= et.hour < 16:
+            return True
+        if et.hour == 16 and et.minute < 30:
+            return True
+        return False
     except Exception:
-        pass
+        return False
+
+
+def _heatmap_cache_ttl() -> int:
+    """Return 10s during market hours, 4 hours outside."""
+    if _is_market_hours():
+        return HEATMAP_LIVE_TTL
     return 14400
 
 
@@ -61,44 +82,71 @@ def _pct_change(closes: List[float], offset: int) -> Optional[float]:
     return round((closes[-1] / old - 1) * 100, 2)
 
 
-async def _fetch_all_bars() -> Dict[str, List[float]]:
-    """Fetch ~25 daily closing prices for SPY + all 11 sector ETFs via Polygon."""
-    from integrations.polygon_equities import get_bars
+def _fetch_all_bars_sync() -> Dict[str, List[float]]:
+    """
+    Batch-fetch ~2 months of daily bars for SPY + 11 sector ETFs via yfinance.
 
-    tickers = ["SPY"] + list(SECTOR_WEIGHTS.keys())
+    Uses a single yf.download() call for all 12 tickers — one HTTP request total.
+    During market hours, today's partial bar is included with current price as 'Close'.
+    """
+    import yfinance as yf
+
     results: Dict[str, List[float]] = {}
 
-    for ticker in tickers:
-        bars = await get_bars(ticker, 1, "day")
-        if bars:
-            closes = [b["c"] for b in bars if b.get("c") is not None]
-            if closes:
-                results[ticker] = closes
-                continue
+    try:
+        # Single batch call for all 12 tickers
+        data = yf.download(
+            TICKER_STR,
+            period="2mo",
+            interval="1d",
+            progress=False,
+            group_by="ticker",
+            threads=True,
+        )
 
-        # Polygon failed — try yfinance fallback
-        try:
-            await _yf_fallback(ticker, results)
-        except Exception as e:
-            logger.warning("yfinance fallback for %s failed: %s", ticker, e)
+        if data is None or data.empty:
+            logger.warning("yfinance batch download returned empty data")
+            return results
+
+        for ticker in ALL_TICKERS:
+            try:
+                # yfinance batch download uses MultiIndex columns: (ticker, field)
+                if isinstance(data.columns, __import__('pandas').MultiIndex):
+                    ticker_data = data[ticker]
+                else:
+                    # Single ticker fallback (shouldn't happen with 12 tickers)
+                    ticker_data = data
+
+                if "Close" in ticker_data.columns:
+                    closes = ticker_data["Close"].dropna().tolist()
+                    closes = [float(c) for c in closes if c is not None]
+                    if closes:
+                        results[ticker] = closes
+                else:
+                    logger.warning("No Close column for %s", ticker)
+            except (KeyError, TypeError) as e:
+                logger.warning("Failed to extract %s from batch data: %s", ticker, e)
+
+    except Exception as e:
+        logger.error("yfinance batch download failed: %s", e)
+        # Fall back to individual fetches
+        for ticker in ALL_TICKERS:
+            try:
+                data = yf.download(ticker, period="2mo", interval="1d", progress=False)
+                if data is not None and not data.empty and "Close" in data.columns:
+                    closes = [float(c) for c in data["Close"].dropna().tolist()]
+                    if closes:
+                        results[ticker] = closes
+            except Exception as inner_e:
+                logger.warning("yfinance individual fetch for %s failed: %s", ticker, inner_e)
 
     return results
 
 
-async def _yf_fallback(ticker: str, results: Dict[str, List[float]]) -> None:
-    """Best-effort yfinance fallback for a single ticker."""
-    import yfinance as yf
-    import asyncio
-
-    def _fetch():
-        data = yf.download(ticker, period="2mo", interval="1d", progress=False)
-        if data is not None and len(data) > 0 and "Close" in data.columns:
-            return [float(c) for c in data["Close"].dropna().tolist()]
-        return None
-
-    closes = await asyncio.get_event_loop().run_in_executor(None, _fetch)
-    if closes:
-        results[ticker] = closes
+async def _fetch_all_bars() -> Dict[str, List[float]]:
+    """Async wrapper around synchronous yfinance batch download."""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, _fetch_all_bars_sync)
 
 
 @router.get("/heatmap")
@@ -115,7 +163,7 @@ async def get_sector_heatmap():
         except Exception:
             pass
 
-    # Fetch bars from Polygon
+    # Fetch bars from yfinance (single batch call)
     all_closes = await _fetch_all_bars()
 
     # Compute SPY changes
