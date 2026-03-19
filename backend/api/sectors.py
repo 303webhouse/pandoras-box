@@ -34,12 +34,12 @@ SECTOR_WEIGHTS = {
 }
 
 HEATMAP_CACHE_KEY = "sector_heatmap:polygon"
-HEATMAP_LIVE_TTL = 300  # 5 min during market hours
+HEATMAP_LIVE_TTL = 30  # 30s during market hours for near-real-time updates
 HEATMAP_STALE_KEY = "sector_heatmap:last_close"
 
 
 def _heatmap_cache_ttl() -> int:
-    """Return 5 min during market hours, 4 hours outside."""
+    """Return 30s during market hours, 4 hours outside."""
     try:
         et = datetime.now(pytz.timezone("America/New_York"))
         if et.weekday() < 5 and 9 <= et.hour < 16:
