@@ -7058,7 +7058,7 @@ function initOptionsFlow() {
 
     loadFlowData();
     loadSectorHeatmap();
-    setInterval(loadSectorHeatmap, 5 * 60 * 1000);
+    setInterval(loadSectorHeatmap, 30 * 1000);
 }
 
 async function loadSectorHeatmap() {
