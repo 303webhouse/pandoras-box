@@ -139,7 +139,7 @@ async def get_trade_ideas_feed(
 @router.get("/trade-ideas/grouped")
 async def get_trade_ideas_grouped(
     limit: int = Query(default=20, le=50),
-    min_score: Optional[float] = Query(default=70.0),
+    min_score: Optional[float] = Query(default=65.0),
     show_all: bool = Query(default=False),
 ):
     """
