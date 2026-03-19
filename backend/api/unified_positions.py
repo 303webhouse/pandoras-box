@@ -601,6 +601,9 @@ async def list_positions(
                         raw = await redis.get(f"counter_signal:{ticker}")
                         if raw:
                             p["counter_signal"] = json.loads(raw)
+                        raw_conf = await redis.get(f"confirming_signal:{ticker}")
+                        if raw_conf:
+                            p["confirming_signal"] = json.loads(raw_conf)
         except Exception as e:
             logger.warning(f"Failed to attach counter-signals: {e}")
 

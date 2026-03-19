@@ -274,6 +274,67 @@ async def apply_scoring(signal_data: Dict[str, Any]) -> Dict[str, Any]:
         return signal_data
 
 
+async def _maybe_tag_position_signal(signal_data: Dict[str, Any]) -> None:
+    """
+    If the signal's ticker has an open position, store it in Redis as either
+    confirming_signal:{TICKER} or counter_signal:{TICKER} based on direction
+    alignment.  Non-blocking — failures here never break the pipeline.
+    """
+    ticker = (signal_data.get("ticker") or "").upper()
+    if not ticker:
+        return
+
+    try:
+        from database.postgres_client import get_postgres_client
+        pool = await get_postgres_client()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT direction FROM unified_positions
+                WHERE UPPER(ticker) = $1 AND status = 'OPEN'
+                LIMIT 1
+                """,
+                ticker,
+            )
+        if not row:
+            return  # No open position for this ticker
+
+        pos_direction = (row["direction"] or "").upper()
+        sig_direction = (signal_data.get("direction") or "").upper()
+
+        bullish = {"LONG", "BUY", "BULLISH"}
+        bearish = {"SHORT", "SELL", "BEARISH"}
+        aligned = (
+            (pos_direction in bullish and sig_direction in bullish) or
+            (pos_direction in bearish and sig_direction in bearish)
+        )
+
+        import json as _json
+        from database.redis_client import get_redis_client
+        redis = await get_redis_client()
+        if not redis:
+            return
+
+        payload = _json.dumps({
+            "signal_id": signal_data.get("signal_id"),
+            "ticker": ticker,
+            "strategy": signal_data.get("strategy"),
+            "direction": sig_direction,
+            "score": signal_data.get("score_v2") or signal_data.get("score"),
+            "timestamp": signal_data.get("timestamp") or datetime.utcnow().isoformat(),
+        })
+
+        if aligned:
+            await redis.set(f"confirming_signal:{ticker}", payload, ex=14400)  # 4h TTL
+            logger.info(f"✅ Confirming signal tagged: {ticker} {sig_direction}")
+        else:
+            await redis.set(f"counter_signal:{ticker}", payload, ex=14400)  # 4h TTL
+            logger.info(f"⚠️ Counter signal tagged: {ticker} {sig_direction}")
+
+    except Exception as e:
+        logger.warning(f"Position signal tagging error for {ticker}: {e}")
+
+
 async def process_signal_unified(
     signal_data: Dict[str, Any],
     source: str = "tradingview",
@@ -404,6 +465,12 @@ async def process_signal_unified(
         await manager.broadcast_signal_smart(signal_data, priority_threshold=priority_threshold)
     except Exception as e:
         logger.warning(f"Failed to broadcast signal: {e}")
+
+    # 6b. Tag position-linked signals (confirming / counter) in Redis
+    try:
+        await _maybe_tag_position_signal(signal_data)
+    except Exception as e:
+        logger.warning(f"Position signal tagging failed: {e}")
 
     # 7. Flag for committee review if score warrants it
     try:

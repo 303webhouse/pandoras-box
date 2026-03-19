@@ -2902,6 +2902,23 @@ body.override-active-bearish .override-toggle[data-active="true"] {
 .position-card.has-counter-signal {
     border-color: rgba(255, 152, 0, 0.4);
 }
+.confirming-signal-banner {
+    background: rgba(0, 230, 118, 0.12);
+    border-left: 3px solid #00e676;
+    color: #69f0ae;
+    padding: 6px 10px;
+    margin: 4px 0 6px;
+    font-size: 0.78rem;
+    border-radius: 4px;
+    line-height: 1.4;
+}
+.confirming-signal-banner .confirming-signal-time {
+    opacity: 0.6;
+    margin-left: 8px;
+}
+.position-card.has-confirming-signal {
+    border-color: rgba(0, 230, 118, 0.3);
+}
 
 .position-actions {
     display: flex;
