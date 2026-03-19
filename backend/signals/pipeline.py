@@ -274,6 +274,111 @@ async def apply_scoring(signal_data: Dict[str, Any]) -> Dict[str, Any]:
         return signal_data
 
 
+async def _check_and_clear_conflicting_signals(signal_data: Dict[str, Any]) -> bool:
+    """
+    Check if there are active signals for this ticker going the opposite direction.
+    If so, dismiss ALL of them (old conflicting + the new incoming signal) with a
+    descriptive note for backtesting.
+
+    Returns True if a conflict was detected and signals were cleared.
+    Both the old and new signals are fully persisted to PostgreSQL before dismissal,
+    so backtesting data is preserved.
+    """
+    ticker = (signal_data.get("ticker") or "").upper()
+    new_direction = (signal_data.get("direction") or "").upper()
+    new_signal_id = signal_data.get("signal_id")
+    if not ticker or not new_direction or not new_signal_id:
+        return False
+
+    bullish = {"LONG", "BUY", "BULLISH"}
+    bearish = {"SHORT", "SELL", "BEARISH"}
+    new_is_bull = new_direction in bullish
+    new_is_bear = new_direction in bearish
+    if not new_is_bull and not new_is_bear:
+        return False
+
+    try:
+        from database.postgres_client import get_postgres_client
+        pool = await get_postgres_client()
+        async with pool.acquire() as conn:
+            # Find active signals for same ticker with opposite direction
+            opposite_dirs = list(bearish) if new_is_bull else list(bullish)
+            rows = await conn.fetch(
+                """
+                SELECT signal_id, strategy, direction
+                FROM signals
+                WHERE UPPER(ticker) = $1
+                  AND UPPER(direction) = ANY($2::text[])
+                  AND status IN ('ACTIVE', 'PENDING_REVIEW')
+                  AND created_at > NOW() - INTERVAL '24 hours'
+                """,
+                ticker,
+                [d.upper() for d in opposite_dirs],
+            )
+
+            if not rows:
+                return False
+
+            # Build conflict note
+            old_strategies = ", ".join(
+                f"{r['strategy']}({r['direction']})" for r in rows
+            )
+            new_strategy = signal_data.get("strategy", "?")
+            conflict_note = (
+                f"Auto-dismissed: conflicting signals on {ticker}. "
+                f"New {new_strategy}({new_direction}) vs active {old_strategies}. "
+                f"Both sides logged for backtesting."
+            )
+
+            # Dismiss all old conflicting signals
+            old_ids = [r["signal_id"] for r in rows]
+            await conn.execute(
+                """
+                UPDATE signals
+                SET status = 'DISMISSED',
+                    notes = COALESCE(notes, '') || $1
+                WHERE signal_id = ANY($2::text[])
+                """,
+                f" | {conflict_note}",
+                old_ids,
+            )
+
+            # Dismiss the new signal too
+            await conn.execute(
+                """
+                UPDATE signals
+                SET status = 'DISMISSED',
+                    notes = COALESCE(notes, '') || $1
+                WHERE signal_id = $2
+                """,
+                f" | {conflict_note}",
+                new_signal_id,
+            )
+
+            # Clear Redis cache for dismissed signals
+            try:
+                from database.redis_client import get_redis_client
+                redis = await get_redis_client()
+                if redis:
+                    for sid in old_ids:
+                        await redis.delete(f"signal:{sid}")
+                    await redis.delete(f"signal:{new_signal_id}")
+            except Exception:
+                pass  # Redis cleanup is best-effort
+
+            signal_data["status"] = "DISMISSED"
+            signal_data["conflict_note"] = conflict_note
+            logger.info(
+                f"⚔️ Conflict cleared: {ticker} — dismissed {len(old_ids)} old + 1 new signal. "
+                f"{conflict_note}"
+            )
+            return True
+
+    except Exception as e:
+        logger.warning(f"Conflict check failed for {ticker}: {e}")
+        return False
+
+
 async def _maybe_tag_position_signal(signal_data: Dict[str, Any]) -> None:
     """
     If the signal's ticker has an open position, store it in Redis as either
@@ -453,6 +558,21 @@ async def process_signal_unified(
             await persist_score_v2(signal_data["signal_id"], score_v2, v2_factors)
     except Exception as e:
         logger.warning(f"Score v2 computation failed (flash score still valid): {e}")
+
+    # 4f. Check for conflicting signals (opposite direction, same ticker)
+    #     Both old + new are already in PostgreSQL with full scores/enrichment.
+    #     If conflict detected, short-circuit — no broadcast, no committee, no Insight.
+    try:
+        conflict = await _check_and_clear_conflicting_signals(signal_data)
+        if conflict:
+            elapsed_ms = (datetime.utcnow() - start).total_seconds() * 1000
+            logger.info(
+                f"⚔️ Pipeline short-circuit: {signal_data.get('ticker')} conflicting signals "
+                f"dismissed in {elapsed_ms:.1f}ms"
+            )
+            return signal_data
+    except Exception as e:
+        logger.warning(f"Conflict check error (continuing pipeline): {e}")
 
     # 5. Cache in Redis
     try:
