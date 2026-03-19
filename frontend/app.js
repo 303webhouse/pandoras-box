@@ -3804,6 +3804,26 @@ function getTimeAgo(timestamp) {
     } catch(e) { return ''; }
 }
 
+// Live-update "Xm ago" timestamps on insight cards
+// Runs every 60s for first hour, then every 60min
+function updateInsightTimestamps() {
+    document.querySelectorAll('.insight-updated[title]').forEach(el => {
+        const ts = el.getAttribute('title');
+        if (ts) el.textContent = getTimeAgo(ts);
+    });
+    // Also update signal-age spans (flat signal cards)
+    document.querySelectorAll('.signal-age[data-ts]').forEach(el => {
+        const ts = el.getAttribute('data-ts');
+        if (ts) el.textContent = getTimeAgo(ts);
+    });
+}
+
+let _insightTimerFast = setInterval(updateInsightTimestamps, 60 * 1000);
+setTimeout(() => {
+    clearInterval(_insightTimerFast);
+    setInterval(updateInsightTimestamps, 60 * 60 * 1000);
+}, 60 * 60 * 1000);
+
 function getScoreClass(score) {
     if (score >= 75) return 'score-strong';
     if (score >= 60) return 'score-moderate';
@@ -4050,7 +4070,7 @@ function createCryptoSignalCard(signal) {
                 <span><span class="crypto-signal-detail-label">Target</span> <span class="crypto-signal-detail-value">${formatPrice(signal.target_1)}</span></span>
                 <span><span class="crypto-signal-detail-label">R:R</span> <span class="crypto-signal-detail-value">${formatRiskReward(signal.risk_reward)}</span></span>
             </div>${msDetailHtml}${sizingHtml}${contextHtml}
-            <div class="crypto-signal-bias ${biasClass}">${biasIcon} ${biasText}${ageLabel ? `  &middot;  <span class="signal-age ${ageClass}">${ageLabel}</span>` : ''}${timestampStr ? `  &middot;  ${timestampStr}` : ''}</div>
+            <div class="crypto-signal-bias ${biasClass}">${biasIcon} ${biasText}${ageLabel ? `  &middot;  <span class="signal-age ${ageClass}" data-ts="${signal.timestamp || signal.created_at || ''}">${ageLabel}</span>` : ''}${timestampStr ? `  &middot;  ${timestampStr}` : ''}</div>
             <div class="crypto-signal-actions">
                 <button class="action-btn dismiss-btn" data-action="dismiss">&#10005; Dismiss</button>
                 <button class="action-btn select-btn" data-action="select">&#10003; Accept</button>
