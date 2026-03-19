@@ -1090,10 +1090,8 @@ function handleNewSignal(signalData) {
     const sigTicker = (signalData.ticker || '').toUpperCase();
     const matchingPos = openPositions.find(p => (p.ticker || '').toUpperCase() === sigTicker);
     if (matchingPos) {
-        if (!isDirectionAligned(matchingPos.direction, signalData.direction)) {
-            // Counter-signal — refresh positions to show warning banner
-            loadOpenPositionsEnhanced();
-        }
+        // Refresh positions to show confirming or counter banner
+        loadOpenPositionsEnhanced();
         return;
     }
 
@@ -1132,9 +1130,8 @@ function handlePrioritySignal(signalData) {
     const sigTicker = (signalData.ticker || '').toUpperCase();
     const matchingPos = openPositions.find(p => (p.ticker || '').toUpperCase() === sigTicker);
     if (matchingPos) {
-        if (!isDirectionAligned(matchingPos.direction, signalData.direction)) {
-            loadOpenPositionsEnhanced();
-        }
+        // Refresh positions to show confirming or counter banner
+        loadOpenPositionsEnhanced();
         return;
     }
 
@@ -8340,14 +8337,35 @@ function renderPositionCard(pos) {
             </div>`;
     }
 
+    // Confirming-signal banner
+    let confirmBanner = '';
+    if (pos.confirming_signal) {
+        const cf = pos.confirming_signal;
+        let cfTime = '';
+        if (cf.timestamp) {
+            try {
+                const cfDate = new Date(cf.timestamp);
+                const cfMin = Math.round((Date.now() - cfDate.getTime()) / 60000);
+                cfTime = cfMin < 1 ? 'just now' : cfMin < 60 ? `${cfMin}m ago` : `${Math.round(cfMin / 60)}h ago`;
+            } catch(e) {}
+        }
+        confirmBanner = `
+            <div class="confirming-signal-banner">
+                Confirming: ${cf.direction || '?'} ${formatStrategyName(cf.strategy)} (score: ${cf.score || 'N/A'})${cfTime ? ` <span class="confirming-signal-time">${cfTime}</span>` : ''}
+            </div>`;
+    }
+
+    const cardClass = pos.counter_signal ? ' has-counter-signal' : pos.confirming_signal ? ' has-confirming-signal' : '';
+
     return `
-        <div class="position-card${pos.counter_signal ? ' has-counter-signal' : ''}" data-position-id="${posId}">
+        <div class="position-card${cardClass}" data-position-id="${posId}">
             <button class="position-remove-btn" data-position-id="${posId}" title="Remove position">x</button>
             <div class="position-card-header">
                 <span class="position-ticker" data-ticker="${pos.ticker}">${pos.ticker}</span>
                 <span class="position-structure-badge">${structureDisplay}</span>
             </div>
             ${counterBanner}
+            ${confirmBanner}
             ${strikeLine}
             <div class="position-details">
                 <div class="position-detail">
