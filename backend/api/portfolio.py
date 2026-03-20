@@ -686,6 +686,100 @@ async def log_cash_flow(body: CashFlowCreate, _=Depends(require_api_key)):
     return result
 
 
+@router.get("/pnl")
+async def get_portfolio_pnl():
+    """
+    Compare current balances to snapshots for daily, weekly, and monthly PnL.
+    Daily = today vs yesterday, Weekly = today vs last Friday,
+    Monthly = today vs first snapshot of this month.
+    """
+    pool = await get_postgres_client()
+    from datetime import timedelta
+
+    today = date.today()
+    yesterday = today - timedelta(days=1)
+    # Walk back to find last business day if yesterday was a weekend
+    while yesterday.weekday() >= 5:
+        yesterday -= timedelta(days=1)
+
+    # Last Friday
+    days_since_friday = (today.weekday() - 4) % 7
+    if days_since_friday == 0:
+        days_since_friday = 7  # If today is Friday, compare to last Friday
+    last_friday = today - timedelta(days=days_since_friday)
+
+    # First of month
+    first_of_month = today.replace(day=1)
+
+    # Current balances
+    current_rows = await pool.fetch("SELECT account_name, balance FROM account_balances")
+    current = {r["account_name"]: float(r["balance"] or 0) for r in current_rows}
+    current_total = sum(current.values())
+
+    async def get_snapshot_total(target_date):
+        """Get total balance from snapshot on or before target_date."""
+        rows = await pool.fetch("""
+            SELECT DISTINCT ON (account_name) account_name, balance
+            FROM balance_snapshots
+            WHERE snapshot_date <= $1
+            ORDER BY account_name, snapshot_date DESC
+        """, target_date)
+        if not rows:
+            return None
+        return sum(float(r["balance"] or 0) for r in rows)
+
+    daily_snap = await get_snapshot_total(yesterday)
+    weekly_snap = await get_snapshot_total(last_friday)
+    monthly_snap = await get_snapshot_total(first_of_month)
+
+    def calc_pnl(prev_total):
+        if prev_total is None or prev_total == 0:
+            return None, None
+        dollar = round(current_total - prev_total, 2)
+        pct = round((dollar / prev_total) * 100, 2)
+        return dollar, pct
+
+    daily_dollar, daily_pct = calc_pnl(daily_snap)
+    weekly_dollar, weekly_pct = calc_pnl(weekly_snap)
+    monthly_dollar, monthly_pct = calc_pnl(monthly_snap)
+
+    return {
+        "current_total": current_total,
+        "daily": {"dollar": daily_dollar, "pct": daily_pct, "compare_date": yesterday.isoformat()},
+        "weekly": {"dollar": weekly_dollar, "pct": weekly_pct, "compare_date": last_friday.isoformat()},
+        "monthly": {"dollar": monthly_dollar, "pct": monthly_pct, "compare_date": first_of_month.isoformat()},
+    }
+
+
+async def snapshot_account_balances():
+    """
+    Save a daily snapshot of each account balance for PnL tracking.
+    Uses UPSERT so running multiple times per day just updates the snapshot.
+    Called automatically after mark-to-market during market hours.
+    """
+    pool = await get_postgres_client()
+    import logging
+    logger = logging.getLogger(__name__)
+
+    try:
+        rows = await pool.fetch("SELECT account_name, balance, cash FROM account_balances")
+        today = date.today()
+        for r in rows:
+            # Compute position_value = balance - cash
+            balance = float(r["balance"] or 0)
+            cash = float(r["cash"] or 0)
+            position_value = round(balance - cash, 2)
+            await pool.execute("""
+                INSERT INTO balance_snapshots (snapshot_date, account_name, balance, cash, position_value)
+                VALUES ($1, $2, $3, $4, $5)
+                ON CONFLICT (snapshot_date, account_name)
+                DO UPDATE SET balance = $3, cash = $4, position_value = $5, created_at = NOW()
+            """, today, r["account_name"], balance, cash, position_value)
+        logger.info("📸 Balance snapshot saved for %d accounts", len(rows))
+    except Exception as e:
+        logger.warning("Balance snapshot failed: %s", e)
+
+
 @router.get("/cash-flows")
 async def get_cash_flows(
     account: Optional[str] = Query(None),

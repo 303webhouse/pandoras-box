@@ -7907,18 +7907,30 @@ async function loadOpenPositionsEnhanced() {
 
 async function loadPortfolioSummary() {
     try {
-        // Fetch RH and Fidelity Roth summaries separately so each section gets its own data
-        const [rhRes, fidRothRes] = await Promise.all([
+        const [rhRes, fidRothRes, pnlRes, balancesRes] = await Promise.all([
             fetch(`${API_URL}/v2/positions/summary?account=ROBINHOOD`),
             fetch(`${API_URL}/v2/positions/summary?account=FIDELITY_ROTH`),
+            fetch(`${API_URL}/portfolio/pnl`),
+            fetch(`${API_URL}/portfolio/balances`),
         ]);
         const rhData = await rhRes.json();
         const fidRothData = await fidRothRes.json();
-        renderPortfolioSummaryWidget(rhData, fidRothData);
+        const pnlData = pnlRes.ok ? await pnlRes.json() : null;
+        const balances = balancesRes.ok ? await balancesRes.json() : [];
+        renderPortfolioSummaryWidget(rhData, fidRothData, pnlData, balances);
     } catch (error) {
         console.error('Error loading portfolio summary:', error);
     }
 }
+
+// Auto-refresh portfolio every 15 min during market hours (9:30 AM - 4 PM ET)
+setInterval(() => {
+    const now = new Date();
+    const et = new Date(now.toLocaleString('en-US', {timeZone: 'America/New_York'}));
+    const h = et.getHours(), m = et.getMinutes(), day = et.getDay();
+    const inMarket = day >= 1 && day <= 5 && ((h === 9 && m >= 30) || (h >= 10 && h < 16));
+    if (inMarket) loadPortfolioSummary();
+}, 15 * 60 * 1000);
 
 // ── Headlines ────────────────────────────────────────────────────────
 
@@ -8011,17 +8023,67 @@ function renderHeadlines(articles) {
 }
 
 // Fidelity Retirement (401A + 403B) — no active trading, updated manually
-const FIDELITY_RETIREMENT = 10341;     // 401A ($10,108) + 403B ($233)
-
-function renderPortfolioSummaryWidget(rhSummary, fidRothSummary) {
+function renderPortfolioSummaryWidget(rhSummary, fidRothSummary, pnlData, balances) {
     const rhBalance = rhSummary.account_balance || 0;
     const fidRothBalance = fidRothSummary.account_balance || 0;
-    const combinedBalance = rhBalance + fidRothBalance + FIDELITY_RETIREMENT;
 
-    // Combined balance (extra large)
+    // Pull Fidelity retirement from DB balances (401A + 403B)
+    let fid401a = 0, fid403b = 0;
+    if (balances && balances.length) {
+        for (const b of balances) {
+            const name = (b.account_name || '').toLowerCase();
+            if (name.includes('401a')) fid401a = b.balance || 0;
+            if (name.includes('403b')) fid403b = b.balance || 0;
+        }
+    }
+    const fidRetirement = fid401a + fid403b;
+    const combinedBalance = rhBalance + fidRothBalance + fidRetirement;
+
+    // PnL helpers
+    const fmtDollar = (v) => v == null ? '' : (v >= 0 ? '+' : '') + '$' + Math.abs(v).toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0});
+    const fmtPct = (v) => v == null ? '' : (v >= 0 ? '+' : '') + v.toFixed(1) + '%';
+    const pnlClass = (v) => v == null ? '' : v >= 0 ? 'pnl-positive' : 'pnl-negative';
+
+    // Combined balance (extra large) + monthly PnL color
     const combinedEl = document.getElementById('portfolioCombinedBalance');
     if (combinedEl) {
         combinedEl.textContent = '$' + combinedBalance.toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0});
+        if (pnlData && pnlData.monthly && pnlData.monthly.dollar != null) {
+            combinedEl.className = 'portfolio-combined-balance ' + pnlClass(pnlData.monthly.dollar);
+        }
+    }
+
+    // Daily PnL (left of total)
+    const dailyEl = document.getElementById('portfolioDailyPnl');
+    if (dailyEl && pnlData && pnlData.daily) {
+        const d = pnlData.daily;
+        if (d.dollar != null) {
+            dailyEl.innerHTML = `<span class="${pnlClass(d.dollar)}">D: ${fmtDollar(d.dollar)}</span>`;
+        } else {
+            dailyEl.textContent = '';
+        }
+    }
+
+    // Weekly PnL (right of total)
+    const weeklyEl = document.getElementById('portfolioWeeklyPnl');
+    if (weeklyEl && pnlData && pnlData.weekly) {
+        const w = pnlData.weekly;
+        if (w.dollar != null) {
+            weeklyEl.innerHTML = `<span class="${pnlClass(w.dollar)}">W: ${fmtDollar(w.dollar)}</span>`;
+        } else {
+            weeklyEl.textContent = '';
+        }
+    }
+
+    // Monthly PnL % (below total)
+    const monthlyEl = document.getElementById('portfolioMonthlyPnl');
+    if (monthlyEl && pnlData && pnlData.monthly) {
+        const m = pnlData.monthly;
+        if (m.pct != null) {
+            monthlyEl.innerHTML = `<span class="${pnlClass(m.dollar)}">MTD: ${fmtDollar(m.dollar)} (${fmtPct(m.pct)})</span>`;
+        } else {
+            monthlyEl.textContent = '';
+        }
     }
 
     // RH balance + breakdown
@@ -8036,7 +8098,7 @@ function renderPortfolioSummaryWidget(rhSummary, fidRothSummary) {
         const posStr = '$' + posVal.toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0});
         rhBreakdown.innerHTML = `<span class="rh-cash-link" title="Update cash balance">Cash ${cashStr}</span><button class="withdraw-btn" title="Log withdrawal or deposit">W/D</button><span>Positions ${posStr}</span>`;
         rhBreakdown.querySelector('.rh-cash-link').addEventListener('click', () => showCashUpdateModal(rhSummary.cash));
-        rhBreakdown.querySelector('.withdraw-btn').addEventListener('click', () => showWithdrawModal());
+        rhBreakdown.querySelector('.withdraw-btn').addEventListener('click', () => showWithdrawModal('Robinhood'));
     }
     const rhMeta = document.getElementById('rhMeta');
     if (rhMeta) {
@@ -8048,18 +8110,47 @@ function renderPortfolioSummaryWidget(rhSummary, fidRothSummary) {
         rhMeta.textContent = parts.join(' \u00B7 ');
     }
 
-    // Fidelity Active Trading (Roth) — now from live data
+    // Fidelity Active Trading (Roth) — live from DB + click-to-edit cash + W/D
     const actEl = document.getElementById('fidelityActiveBalance');
     if (actEl) {
         actEl.textContent = '$' + fidRothBalance.toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0});
     }
+    const fidActiveBreakdown = document.getElementById('fidActiveBreakdown');
+    if (fidActiveBreakdown) {
+        const fidCash = fidRothSummary.cash || 0;
+        const fidCashStr = '$' + fidCash.toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0});
+        fidActiveBreakdown.innerHTML = `<span class="rh-cash-link" title="Update Fidelity Roth cash">Cash ${fidCashStr}</span><button class="withdraw-btn" title="Log withdrawal or deposit">W/D</button>`;
+        fidActiveBreakdown.querySelector('.rh-cash-link').addEventListener('click', () => showCashUpdateModal(fidCash, 'Fidelity Roth'));
+        fidActiveBreakdown.querySelector('.withdraw-btn').addEventListener('click', () => showWithdrawModal('Fidelity Roth'));
+    }
 
-    // Fidelity Retirement (static — no active trading)
+    // Fidelity Retirement — from DB, with editable sub-accounts + W/D
     const retEl = document.getElementById('fidelityRetirementBalance');
-    if (retEl) retEl.textContent = '$' + FIDELITY_RETIREMENT.toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0});
+    if (retEl) retEl.textContent = '$' + fidRetirement.toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0});
+
+    const ret401a = document.getElementById('fid401aBalance');
+    if (ret401a) {
+        ret401a.textContent = '$' + fid401a.toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0});
+        ret401a.classList.add('rh-cash-link');
+        ret401a.title = 'Update 401A balance';
+        ret401a.onclick = () => showBalanceEditModal('Fidelity 401A', fid401a);
+    }
+    const ret403b = document.getElementById('fid403bBalance');
+    if (ret403b) {
+        ret403b.textContent = '$' + fid403b.toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0});
+        ret403b.classList.add('rh-cash-link');
+        ret403b.title = 'Update 403B balance';
+        ret403b.onclick = () => showBalanceEditModal('Fidelity 403B', fid403b);
+    }
+    const retWd = document.getElementById('fidRetirementWd');
+    if (retWd) {
+        retWd.onclick = () => showWithdrawModal('Fidelity 401A', 'deposit');
+    }
 }
 
-function showCashUpdateModal(currentCash) {
+function showCashUpdateModal(currentCash, accountName) {
+    accountName = accountName || 'Robinhood';
+    const accountKey = accountName.toUpperCase().replace(/ /g, '_');
     const existing = document.getElementById('cashUpdateModal');
     if (existing) existing.remove();
 
@@ -8068,7 +8159,7 @@ function showCashUpdateModal(currentCash) {
     modal.className = 'modal-overlay';
     modal.innerHTML = `
         <div class="cash-update-modal">
-            <h3>Update RH Cash Balance</h3>
+            <h3>Update ${accountName} Cash</h3>
             <input type="number" id="cashUpdateInput" step="0.01" value="${(currentCash || 0).toFixed(2)}" />
             <div class="cash-modal-actions">
                 <button id="cashUpdateSave" class="cash-modal-btn save">Save</button>
@@ -8087,7 +8178,7 @@ function showCashUpdateModal(currentCash) {
             const resp = await fetch(`${API_URL}/v2/positions/reconcile-cash`, {
                 method: 'POST',
                 headers: authHeaders(),
-                body: JSON.stringify({cash: val, account: 'ROBINHOOD'}),
+                body: JSON.stringify({cash: val, account: accountKey}),
             });
             const data = await resp.json();
             modal.remove();
@@ -8108,19 +8199,69 @@ function showCashUpdateModal(currentCash) {
     });
 }
 
-function showWithdrawModal() {
+function showBalanceEditModal(accountName, currentBalance) {
+    const existing = document.getElementById('cashUpdateModal');
+    if (existing) existing.remove();
+
+    const modal = document.createElement('div');
+    modal.id = 'cashUpdateModal';
+    modal.className = 'modal-overlay';
+    modal.innerHTML = `
+        <div class="cash-update-modal">
+            <h3>Update ${accountName} Balance</h3>
+            <input type="number" id="cashUpdateInput" step="0.01" value="${(currentBalance || 0).toFixed(2)}" />
+            <div class="cash-modal-actions">
+                <button id="cashUpdateSave" class="cash-modal-btn save">Save</button>
+                <button id="cashUpdateCancel" class="cash-modal-btn cancel">Cancel</button>
+            </div>
+        </div>`;
+    document.body.appendChild(modal);
+
+    const input = document.getElementById('cashUpdateInput');
+    input.select();
+
+    document.getElementById('cashUpdateSave').addEventListener('click', async () => {
+        const val = parseFloat(input.value);
+        if (isNaN(val)) return;
+        try {
+            await fetch(`${API_URL}/portfolio/balances/update`, {
+                method: 'POST',
+                headers: authHeaders(),
+                body: JSON.stringify({account_name: accountName, balance: val, cash: val}),
+            });
+            modal.remove();
+            loadPortfolioSummary();
+        } catch (e) {
+            console.error('Failed to update balance:', e);
+        }
+    });
+
+    document.getElementById('cashUpdateCancel').addEventListener('click', () => modal.remove());
+    modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') document.getElementById('cashUpdateSave').click();
+        if (e.key === 'Escape') modal.remove();
+    });
+}
+
+function showWithdrawModal(accountName, defaultType) {
+    accountName = accountName || 'Robinhood';
+    defaultType = defaultType || 'withdraw';
     const existing = document.getElementById('withdrawModal');
     if (existing) existing.remove();
+
+    const wActive = defaultType === 'withdraw' ? ' active' : '';
+    const dActive = defaultType === 'deposit' ? ' active' : '';
 
     const modal = document.createElement('div');
     modal.id = 'withdrawModal';
     modal.className = 'modal-overlay';
     modal.innerHTML = `
         <div class="cash-update-modal">
-            <h3>Log Withdrawal / Deposit</h3>
+            <h3>${accountName}: Log W/D</h3>
             <div class="withdraw-type-toggle">
-                <button class="withdraw-toggle active" data-type="withdraw">Withdraw</button>
-                <button class="withdraw-toggle" data-type="deposit">Deposit</button>
+                <button class="withdraw-toggle${wActive}" data-type="withdraw">Withdraw</button>
+                <button class="withdraw-toggle${dActive}" data-type="deposit">Deposit</button>
             </div>
             <input type="number" id="withdrawAmountInput" step="0.01" placeholder="Amount" min="0" />
             <input type="text" id="withdrawNoteInput" placeholder="Note (optional)" />
@@ -8131,7 +8272,7 @@ function showWithdrawModal() {
         </div>`;
     document.body.appendChild(modal);
 
-    let flowType = 'withdraw';
+    let flowType = defaultType;
     const toggles = modal.querySelectorAll('.withdraw-toggle');
     toggles.forEach(btn => btn.addEventListener('click', () => {
         toggles.forEach(b => b.classList.remove('active'));
@@ -8155,7 +8296,7 @@ function showWithdrawModal() {
                     amount: amount,
                     flow_type: 'ACH',
                     description: note || (flowType === 'withdraw' ? 'Withdrawal' : 'Deposit'),
-                    account_name: 'Robinhood',
+                    account_name: accountName,
                     adjust_balance: true,
                 }),
             });
