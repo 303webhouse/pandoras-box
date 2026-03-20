@@ -972,6 +972,24 @@ async def init_database():
             WHERE NOT EXISTS (SELECT 1 FROM account_balances WHERE account_name = 'Interactive Brokers')
         """)
 
+        # Balance snapshots — daily EOD photo of each account for PnL tracking
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS balance_snapshots (
+                id SERIAL PRIMARY KEY,
+                snapshot_date DATE NOT NULL,
+                account_name TEXT NOT NULL,
+                balance NUMERIC(12,2) NOT NULL,
+                cash NUMERIC(12,2),
+                position_value NUMERIC(12,2),
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                UNIQUE(snapshot_date, account_name)
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_balance_snapshots_date
+            ON balance_snapshots(account_name, snapshot_date DESC)
+        """)
+
         # Brief 3A: Ariadne's Thread — outcome resolution columns on signals
         await conn.execute("""
             ALTER TABLE signals

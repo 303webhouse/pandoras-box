@@ -561,6 +561,21 @@ body {
     gap: 10px;
 }
 
+.portfolio-total-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    margin-bottom: 2px;
+}
+.portfolio-pnl-side {
+    font-size: 0.78rem;
+    font-family: 'JetBrains Mono', monospace;
+    min-width: 80px;
+    white-space: nowrap;
+}
+.portfolio-pnl-side:first-child { text-align: right; }
+.portfolio-pnl-side:last-child { text-align: left; }
 .portfolio-combined-balance {
     font-family: 'JetBrains Mono', monospace;
     font-size: 3.2rem;
@@ -569,8 +584,18 @@ body {
     text-align: center;
     letter-spacing: 1px;
     line-height: 1;
-    margin-bottom: 16px;
 }
+.portfolio-combined-balance.pnl-positive { color: #00e676; }
+.portfolio-combined-balance.pnl-negative { color: var(--pnl-negative); }
+.portfolio-monthly-pnl {
+    text-align: center;
+    font-size: 0.78rem;
+    font-family: 'JetBrains Mono', monospace;
+    margin-bottom: 14px;
+    min-height: 1.2em;
+}
+.pnl-positive { color: #00e676; }
+.pnl-negative { color: var(--pnl-negative); }
 
 .portfolio-accounts {
     display: grid;

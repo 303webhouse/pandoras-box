@@ -155,6 +155,12 @@ async def lifespan(app: FastAPI):
                         logger.info("🔔 Closing bell MTM: updated %d positions", updated)
                     elif updated > 0:
                         logger.info("📊 Mark-to-market: updated %d positions", updated)
+                    # Snapshot balances after MTM for PnL tracking
+                    try:
+                        from api.portfolio import snapshot_account_balances
+                        await snapshot_account_balances()
+                    except Exception as snap_err:
+                        logger.warning("Balance snapshot after MTM failed: %s", snap_err)
                     if errors:
                         logger.warning("📊 Mark-to-market: %d errors", len(errors))
                 else:
