@@ -7116,7 +7116,7 @@ function renderSectorHeatmap(sectors, heatmapData) {
         const scale = (0.65 + 0.85 * Math.sqrt(area / maxArea) / Math.sqrt(maxWeight)).toFixed(3);
         // Simpler: scale based on weight ratio with wider range
         const t = sector.weight / maxWeight;
-        const fontScale = (0.7 + 0.7 * t).toFixed(3);
+        const fontScale = Math.max(0.45, 0.7 + 0.7 * t).toFixed(3);
         const hm = getHeatmapStyle(sector.change_1d);
         const changeSign = sector.change_1d >= 0 ? '+' : '';
         const changeVal = sector.change_1d != null ? sector.change_1d.toFixed(2) : '0.00';
@@ -7130,14 +7130,34 @@ function renderSectorHeatmap(sectors, heatmapData) {
         const trend = sector.trend || 'flat';
         const trendArrow = trend === 'up' ? '▲' : trend === 'down' ? '▼' : '→';
         const trendClass = trend === 'up' ? 'trend-up' : trend === 'down' ? 'trend-down' : 'trend-flat';
+
+        // Conditional rendering based on cell size
+        const cellArea = r.w * r.h;
+        const isTiny = cellArea < 4000 || r.h < 50;    // barely fits 2 lines
+        const isSmall = cellArea < 8000 || r.h < 70;    // fits ETF + change + name
+        let cellContent;
+        if (isTiny) {
+            // Tiny: ETF ticker + change% only
+            cellContent = `<span class="sector-hm-etf">${sector.etf}</span>
+                <span class="sector-hm-change" style="color:${hm.changeColor}">${changeSign}${changeVal}%</span>`;
+        } else if (isSmall) {
+            // Small: name + ETF + change% (no RS, no trend arrow)
+            cellContent = `<span class="sector-hm-name">${escapeHtml(sector.name)}</span>
+                <span class="sector-hm-etf">${sector.etf}</span>
+                <span class="sector-hm-change" style="color:${hm.changeColor}">${changeSign}${changeVal}%</span>`;
+        } else {
+            // Normal: all 4 lines
+            cellContent = `<span class="sector-hm-name">${escapeHtml(sector.name)}</span>
+                <span class="sector-hm-etf">${sector.etf}</span>
+                <span class="sector-hm-change" style="color:${hm.changeColor}">${changeSign}${changeVal}% <span class="sector-hm-trend ${trendClass}">${trendArrow}</span></span>
+                <span class="sector-hm-rs" style="color:${rsDaily >= 0 ? '#7CFF6B' : '#FF6B35'}">RS: ${rsDailyStr}%</span>`;
+        }
+
         html += `<div class="sector-heatmap-cell"
             style="left:${r.x}px;top:${r.y}px;width:${r.w}px;height:${r.h}px;--s:${fontScale};border-color:${hm.borderColor};box-shadow:${hm.glow};"
             data-etf="${sector.etf}"
             title="${escapeHtml(sector.name)} (${sector.etf})\nDay: ${changeSign}${changeVal}%\nWeek: ${change1wStr}%\nMonth: ${change1mStr}%\nRS (daily): ${rsDailyStr}%\nRank: #${sector.strength_rank || '--'}\nSPY Weight: ${weightStr}%">
-            <span class="sector-hm-name">${escapeHtml(sector.name)}</span>
-            <span class="sector-hm-etf">${sector.etf}</span>
-            <span class="sector-hm-change" style="color:${hm.changeColor}">${changeSign}${changeVal}% <span class="sector-hm-trend ${trendClass}">${trendArrow}</span></span>
-            <span class="sector-hm-rs" style="color:${rsDaily >= 0 ? '#7CFF6B' : '#FF6B35'}">RS: ${rsDailyStr}%</span>
+            ${cellContent}
         </div>`;
     });
 
