@@ -604,6 +604,39 @@ async def list_positions(
                         raw_conf = await redis.get(f"confirming_signal:{ticker}")
                         if raw_conf:
                             p["confirming_signal"] = json.loads(raw_conf)
+                        # UW flow badge — compare flow sentiment to position direction
+                        raw_flow = await redis.get(f"uw:flow:{ticker}")
+                        if raw_flow:
+                            flow = json.loads(raw_flow)
+                            flow_sent = (flow.get("sentiment") or "").upper()
+                            pos_dir = (p.get("direction") or "").upper()
+                            bullish_dirs = {"LONG", "BUY", "BULLISH"}
+                            bearish_dirs = {"SHORT", "SELL", "BEARISH"}
+                            if flow_sent in ("BULLISH", "BEARISH") and pos_dir:
+                                flow_bull = flow_sent == "BULLISH"
+                                pos_bull = pos_dir in bullish_dirs
+                                pos_bear = pos_dir in bearish_dirs
+                                if (flow_bull and pos_bull) or (not flow_bull and pos_bear):
+                                    alignment = "CONFIRMING"
+                                elif (flow_bull and pos_bear) or (not flow_bull and pos_bull):
+                                    alignment = "OPPOSING"
+                                else:
+                                    alignment = "NEUTRAL"
+                            else:
+                                alignment = "NEUTRAL"
+                            # Strength: HIGH if total premium > $100M, else MODERATE
+                            tp = flow.get("total_premium") or 0
+                            strength = "HIGH" if tp > 100_000_000 else "MODERATE"
+                            p["flow_badge"] = {
+                                "sentiment": flow_sent or "NEUTRAL",
+                                "alignment": alignment,
+                                "strength": strength,
+                                "pc_ratio": flow.get("pc_ratio"),
+                                "total_premium": tp,
+                                "call_premium": flow.get("call_premium"),
+                                "put_premium": flow.get("put_premium"),
+                                "last_updated": flow.get("last_updated"),
+                            }
         except Exception as e:
             logger.warning(f"Failed to attach counter-signals: {e}")
 

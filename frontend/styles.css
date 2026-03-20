@@ -2946,6 +2946,29 @@ body.override-active-bearish .override-toggle[data-active="true"] {
 .position-card.has-confirming-signal {
     border-color: rgba(0, 230, 118, 0.3);
 }
+.flow-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    margin: 2px 0 4px;
+    font-size: 0.72rem;
+    border-radius: 4px;
+    cursor: default;
+}
+.flow-badge-icon { font-size: 0.8rem; }
+.flow-badge-confirm {
+    background: rgba(0, 230, 118, 0.10);
+    color: #69f0ae;
+}
+.flow-badge-oppose {
+    background: rgba(255, 152, 0, 0.12);
+    color: #ffb74d;
+}
+.flow-badge-neutral {
+    background: rgba(120, 144, 156, 0.12);
+    color: #90a4ae;
+}
 
 .position-actions {
     display: flex;

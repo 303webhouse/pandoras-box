@@ -8536,6 +8536,29 @@ function renderPositionCard(pos) {
             </div>`;
     }
 
+    // Flow badge
+    let flowBadge = '';
+    if (pos.flow_badge) {
+        const fb = pos.flow_badge;
+        const fmtPremium = (v) => v ? '$' + (v / 1e6).toFixed(0) + 'M' : '--';
+        let badgeClass, badgeIcon, badgeText;
+        if (fb.alignment === 'CONFIRMING') {
+            badgeClass = 'flow-badge-confirm';
+            badgeIcon = '✓';
+            badgeText = 'Flow confirms';
+        } else if (fb.alignment === 'OPPOSING') {
+            badgeClass = 'flow-badge-oppose';
+            badgeIcon = '⚠';
+            badgeText = 'Flow disagrees';
+        } else {
+            badgeClass = 'flow-badge-neutral';
+            badgeIcon = '●';
+            badgeText = 'Flow neutral';
+        }
+        const hoverDetail = `P/C: ${fb.pc_ratio != null ? fb.pc_ratio.toFixed(2) : '--'} | Call: ${fmtPremium(fb.call_premium)} | Put: ${fmtPremium(fb.put_premium)} | Total: ${fmtPremium(fb.total_premium)}`;
+        flowBadge = `<div class="flow-badge ${badgeClass}" title="${hoverDetail}"><span class="flow-badge-icon">${badgeIcon}</span> ${badgeText}</div>`;
+    }
+
     const cardClass = pos.counter_signal ? ' has-counter-signal' : pos.confirming_signal ? ' has-confirming-signal' : '';
 
     return `
@@ -8547,6 +8570,7 @@ function renderPositionCard(pos) {
             </div>
             ${counterBanner}
             ${confirmBanner}
+            ${flowBadge}
             ${strikeLine}
             <div class="position-details">
                 <div class="position-detail">
