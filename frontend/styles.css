@@ -242,7 +242,7 @@ body {
 }
 
 .bias-right-stack .portfolio-summary-card {
-    flex: 0 0 45%;
+    flex: 0 0 auto;
     min-height: 0;
 }
 
