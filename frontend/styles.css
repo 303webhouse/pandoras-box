@@ -232,7 +232,7 @@ body {
 .bias-right-tf-row {
     display: flex;
     gap: 10px;
-    flex: 0 0 30%;
+    flex: 0 0 auto;
     min-height: 0;
 }
 
@@ -508,7 +508,7 @@ body {
 }
 
 .headline-link {
-    font-size: 11px;
+    font-size: 13px;
     line-height: 1.35;
     color: var(--text-primary);
     text-decoration: none;
@@ -521,7 +521,7 @@ body {
 }
 
 .headline-meta {
-    font-size: 9px;
+    font-size: 10px;
     color: var(--text-secondary);
     margin-top: 2px;
     display: flex;
@@ -1101,6 +1101,8 @@ body {
     flex-direction: column;
     gap: 6px;
     margin-top: 8px;
+    max-height: 180px;
+    overflow-y: auto;
 }
 
 .factor-row {
