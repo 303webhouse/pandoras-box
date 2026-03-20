@@ -990,6 +990,36 @@ async def init_database():
             ON balance_snapshots(account_name, snapshot_date DESC)
         """)
 
+        # UW Flow events — persistent history for flow velocity analysis
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS flow_events (
+                id SERIAL PRIMARY KEY,
+                ticker TEXT NOT NULL,
+                pc_ratio NUMERIC(5,2),
+                call_volume BIGINT,
+                put_volume BIGINT,
+                total_premium BIGINT,
+                call_premium BIGINT,
+                put_premium BIGINT,
+                flow_sentiment TEXT,
+                price NUMERIC(10,2),
+                change_pct NUMERIC(6,2),
+                volume BIGINT,
+                source TEXT DEFAULT 'uw_watcher',
+                captured_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_flow_events_ticker_time ON flow_events(ticker, captured_at DESC)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_flow_events_time ON flow_events(captured_at DESC)
+        """)
+        # Auto-clean old flow events (>90 days) on deploy
+        await conn.execute("""
+            DELETE FROM flow_events WHERE captured_at < NOW() - INTERVAL '90 days'
+        """)
+
         # Brief 3A: Ariadne's Thread — outcome resolution columns on signals
         await conn.execute("""
             ALTER TABLE signals
