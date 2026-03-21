@@ -120,15 +120,17 @@ async def lifespan(app: FastAPI):
                 logger.warning(f"Universe cache loop error: {e}")
             await asyncio.sleep(1800)  # 30 minutes
 
-    # Mark-to-market: refresh position prices every 15 min during market hours
+    # Mark-to-market: refresh position prices at :02, :17, :32, :47 past each hour
+    # (2 minutes after Polygon's 15-min data refresh) during market hours
     async def mark_to_market_loop():
         """Fetch live Polygon prices for open positions during market hours.
-        Runs every 15 min 9 AM - 5 PM ET weekdays.
-        Forces a closing bell run at 4:15 PM ET to capture near-close prices.
+        Clock-aware: fires at :02, :17, :32, :47 past each hour (9 AM - 5 PM ET weekdays).
+        Forces a closing bell run at 4:17 PM ET to capture near-close prices.
         """
         import pytz
         from datetime import datetime as dt_cls
 
+        MTM_MINUTES = [2, 17, 32, 47]  # 2 min after Polygon refresh at :00/:15/:30/:45
         closing_bell_fired_today = None  # Track date to fire once per day
 
         while True:
@@ -138,14 +140,20 @@ async def lifespan(app: FastAPI):
                 is_weekday = et.weekday() < 5
                 in_market_window = is_weekday and 9 <= et.hour < 17
 
-                # Closing bell run: 4:15-4:30 PM ET, once per day
+                # Closing bell run: 4:17 PM ET, once per day
                 is_closing_bell = (
                     is_weekday
-                    and et.hour == 16 and 15 <= et.minute < 30
+                    and et.hour == 16 and et.minute >= 17 and et.minute < 30
                     and closing_bell_fired_today != today_date
                 )
 
+                should_run = False
                 if in_market_window or is_closing_bell:
+                    # Check if we're at one of the target minutes
+                    if et.minute in MTM_MINUTES or is_closing_bell:
+                        should_run = True
+
+                if should_run:
                     from api.unified_positions import run_mark_to_market
                     result = await run_mark_to_market()
                     updated = result.get("updated", 0)
@@ -154,7 +162,7 @@ async def lifespan(app: FastAPI):
                         closing_bell_fired_today = today_date
                         logger.info("🔔 Closing bell MTM: updated %d positions", updated)
                     elif updated > 0:
-                        logger.info("📊 Mark-to-market: updated %d positions", updated)
+                        logger.info("📊 Mark-to-market: updated %d positions (%02d:%02d ET)", updated, et.hour, et.minute)
                     # Snapshot balances after MTM for PnL tracking
                     try:
                         from api.portfolio import snapshot_account_balances
@@ -163,11 +171,24 @@ async def lifespan(app: FastAPI):
                         logger.warning("Balance snapshot after MTM failed: %s", snap_err)
                     if errors:
                         logger.warning("📊 Mark-to-market: %d errors", len(errors))
+
+                # Sleep until next target minute
+                # Calculate seconds until next :02/:17/:32/:47
+                now_min = et.minute
+                now_sec = et.second
+                next_targets = [m for m in MTM_MINUTES if m > now_min]
+                if next_targets:
+                    next_min = next_targets[0]
                 else:
-                    logger.debug("Mark-to-market: outside market hours, skipping")
+                    next_min = MTM_MINUTES[0] + 60  # wrap to next hour
+                sleep_secs = (next_min - now_min) * 60 - now_sec
+                if sleep_secs <= 0:
+                    sleep_secs = 60  # safety floor
+                sleep_secs = min(sleep_secs, 900)  # cap at 15 min
             except Exception as e:
                 logger.warning("Mark-to-market loop error: %s", e)
-            await asyncio.sleep(900)  # 15 minutes
+                sleep_secs = 60  # retry in 1 min on error
+            await asyncio.sleep(sleep_secs)
 
     # Confluence engine: group signals by ticker+direction every 15 min
     async def confluence_engine_loop():
