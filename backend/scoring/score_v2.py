@@ -75,11 +75,6 @@ def compute_score_v2(signal_data: Dict[str, Any]) -> Tuple[Optional[float], Dict
 
     post_enrichment_bonus += risk_bonus
 
-    # --- IV rank context (informational, not scored yet) ---
-    iv_rank = enrichment.get("iv_rank")
-    if iv_rank is not None:
-        factors["iv_rank"] = {"value": iv_rank, "note": "informational — affects options vs stock decision in 4E"}
-
     # --- Regime alignment penalty/bonus ---
     # Uses bias_level from bias_at_signal snapshot.
     # Penalizes counter-regime signals, rewards aligned signals.
@@ -136,6 +131,110 @@ def compute_score_v2(signal_data: Dict[str, Any]) -> Tuple[Optional[float], Dict
     }
 
     post_enrichment_bonus += regime_bonus
+
+    # ── OPTIONS VIABILITY LAYER ──────────────────────────────────────
+    # Evaluates whether this chart signal makes a good options swing trade.
+    # Only applies to equity signals (crypto skipped).
+    options_bonus = 0
+    options_factors = {}
+    asset_class = (signal_data.get("asset_class") or "EQUITY").upper()
+
+    if asset_class != "CRYPTO":
+        entry_price = signal_data.get("entry_price") or enrichment.get("current_price")
+        target_price = signal_data.get("target_1")
+        atr = enrichment.get("atr_14")
+        rr = signal_data.get("risk_reward")
+        avg_vol = enrichment.get("avg_volume_20d")
+        iv_rank = enrichment.get("iv_rank")
+
+        # Factor 1: Underlying price floor
+        price_penalty = 0
+        if entry_price is not None:
+            entry_f = float(entry_price)
+            if entry_f < 15:
+                price_penalty = -10
+            elif entry_f < 25:
+                price_penalty = -7
+            elif entry_f < 40:
+                price_penalty = -3
+        options_factors["underlying_price"] = {"value": entry_price, "bonus": price_penalty}
+        options_bonus += price_penalty
+
+        # Factor 2: Target move vs ATR
+        move_bonus = 0
+        target_in_atr = None
+        if entry_price and target_price and atr and float(atr) > 0:
+            target_move = abs(float(target_price) - float(entry_price))
+            target_in_atr = round(target_move / float(atr), 2)
+            if target_in_atr >= 3.0:
+                move_bonus = 5
+            elif target_in_atr >= 2.0:
+                move_bonus = 3
+            elif target_in_atr >= 1.5:
+                move_bonus = 0
+            elif target_in_atr >= 1.0:
+                move_bonus = -3
+            else:
+                move_bonus = -7
+        options_factors["target_move_atr"] = {"value": target_in_atr, "bonus": move_bonus}
+        options_bonus += move_bonus
+
+        # Factor 3: R:R minimum for options
+        rr_bonus = 0
+        if rr is not None:
+            rr_val = float(rr)
+            if rr_val >= 3.0:
+                rr_bonus = 5
+            elif rr_val >= 2.5:
+                rr_bonus = 3
+            elif rr_val >= 2.0:
+                rr_bonus = 0
+            elif rr_val >= 1.5:
+                rr_bonus = -5
+            else:
+                rr_bonus = -8
+        options_factors["risk_reward"] = {"value": rr, "bonus": rr_bonus}
+        options_bonus += rr_bonus
+
+        # Factor 4: Options liquidity proxy (underlying volume)
+        liquidity_bonus = 0
+        if avg_vol is not None:
+            avg_vol_f = float(avg_vol)
+            if avg_vol_f >= 5_000_000:
+                liquidity_bonus = 3
+            elif avg_vol_f >= 2_000_000:
+                liquidity_bonus = 1
+            elif avg_vol_f >= 500_000:
+                liquidity_bonus = 0
+            elif avg_vol_f >= 100_000:
+                liquidity_bonus = -5
+            else:
+                liquidity_bonus = -8
+        options_factors["liquidity"] = {"value": avg_vol, "bonus": liquidity_bonus}
+        options_bonus += liquidity_bonus
+
+        # Factor 5: IV rank — high IV penalizes debit spreads
+        iv_bonus = 0
+        if iv_rank is not None:
+            iv_val = float(iv_rank)
+            if iv_val <= 20:
+                iv_bonus = 3
+            elif iv_val <= 40:
+                iv_bonus = 1
+            elif iv_val <= 60:
+                iv_bonus = 0
+            elif iv_val <= 80:
+                iv_bonus = -2
+            else:
+                iv_bonus = -5
+        options_factors["iv_rank"] = {"value": iv_rank, "bonus": iv_bonus}
+        options_bonus += iv_bonus
+
+    factors["options_viability"] = {
+        "total_bonus": options_bonus,
+        "components": options_factors,
+    }
+    post_enrichment_bonus += options_bonus
 
     # --- Confluence bonus (placeholder — degraded until Phase 3 X1) ---
     confluence_score = signal_data.get("confluence_score")
