@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Pandora - Real-time Trading Signal Dashboard">
     <title>Pandora</title>
-    <link rel="stylesheet" href="/styles.css?v=103">
+    <link rel="stylesheet" href="/styles.css?v=104">
     <link rel="manifest" href="/manifest.json">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -110,27 +110,33 @@
                 </div>
             </div>
 
-            <!-- Headlines / Sectors / Flow (column 2) -->
-            <div class="headlines-card" id="headlinesCard">
-                <div class="headlines-tabs">
-                    <button class="headlines-tab active" data-tab="sectors">SECTORS</button>
-                    <button class="headlines-tab" data-tab="flow">FLOW</button>
-                    <button class="headlines-tab" data-tab="headlines">HEADLINES</button>
-                </div>
-                <div class="headlines-tab-content" id="sectorsTabContent">
+            <!-- Intelligence Center (column 2) -->
+            <div class="intel-center" id="intelCenter">
+                <!-- MARKET MAP: sector heatmap + pulse + headlines -->
+                <div class="market-map-section">
                     <div class="sector-heatmap" id="sectorHeatmap">
                         <p class="empty-state">Loading sectors...</p>
                     </div>
-                </div>
-                <div class="headlines-tab-content" id="flowTabContent" style="display:none;">
-                    <div class="flow-compact-list" id="flowCompactList">
-                        <p class="empty-state">No flow data yet</p>
+                    <div class="market-pulse-strip" id="marketPulseStrip">
+                        <span class="pulse-regime" id="pulseRegime">--</span>
+                        <span class="pulse-separator">&middot;</span>
+                        <span class="pulse-pc" id="pulsePcRatio">P/C --</span>
+                        <span class="pulse-separator">&middot;</span>
+                        <span class="pulse-premium" id="pulsePremium">$--</span>
+                    </div>
+                    <div class="headlines-strip" id="headlinesStrip">
+                        <div class="headline-compact">Loading headlines...</div>
                     </div>
                 </div>
-                <div class="headlines-tab-content" id="headlinesTabContent" style="display:none;">
-                    <ul class="headlines-list" id="headlinesList">
-                        <li class="headlines-empty">Loading headlines...</li>
-                    </ul>
+                <!-- FLOW RADAR: positions, unusual activity, sector rotation -->
+                <div class="flow-radar-section" id="flowRadarSection">
+                    <div class="radar-header">
+                        <span class="radar-title">FLOW RADAR</span>
+                        <span class="radar-status" id="radarStatus">--</span>
+                    </div>
+                    <div class="radar-content" id="radarContent">
+                        <p class="empty-state">Waiting for flow data...</p>
+                    </div>
                 </div>
             </div>
 
@@ -1617,7 +1623,7 @@
     <!-- TradingView Widget Script -->
     <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
-    <script src="/app.js?v=119"></script>
+    <script src="/app.js?v=120"></script>
     <script src="/cockpit.js?v=1"></script>
     <script src="/laboratory.js?v=1"></script>
 </body>
