@@ -52,8 +52,8 @@ CRYPTO_TICKERS = {
 # to prevent duplicate signals from inflating confluence scoring.
 # Event-driven strategies keep the default 60s Redis dedup.
 STRATEGY_COOLDOWNS = {
-    "Holy_Grail": {"equity": 14400, "crypto": 7200},   # 4h equity, 2h crypto
-    "Scout": {"equity": 14400, "crypto": 7200},          # 4h equity, 2h crypto
+    "Holy_Grail": {"equity": 7200, "crypto": 3600},    # 2h equity, 1h crypto (was 4h/2h — too aggressive on vol days)
+    "Scout": {"equity": 7200, "crypto": 3600},           # 2h equity, 1h crypto (was 4h/2h)
     "Phalanx": {"equity": 3600, "crypto": 3600},         # 1h both
     "Artemis": {"equity": 1800, "crypto": 1800},         # 30 min both
 }
@@ -695,6 +695,12 @@ async def process_artemis_signal(alert: TradingViewAlert, start_time: datetime):
         "adx_rising": alert.adx_rising,
     }
 
+    # Artemis equity signals are intraday setups — not viable as multi-day options holds.
+    # Route to INTRADAY_SETUP so they don't surface in Agora Insights.
+    # Crypto Artemis signals stay as TRADE_SETUP for the scalping interface.
+    if signal_data.get("asset_class") != "CRYPTO":
+        signal_data["signal_category"] = "INTRADAY_SETUP"
+
     # Dedup check — skip if same ticker+strategy+direction fired recently
     from utils.signal_dedup import is_duplicate_signal
     if await is_duplicate_signal(
@@ -756,7 +762,31 @@ async def process_generic_signal(alert: TradingViewAlert, start_time: datetime):
         "rsi": alert.rsi,
         "adx": alert.adx
     }
-    
+
+    # Extract triggering factors from alert fields for CTA Scanner / Sniper
+    strategy_lower = (alert.strategy or "").lower()
+    if "cta" in strategy_lower or "sniper" in strategy_lower or "scanner" in strategy_lower:
+        triggers = []
+        if alert.rsi is not None:
+            if alert.rsi <= 35:
+                triggers.append(f"RSI_{alert.rsi:.0f}_oversold")
+            elif alert.rsi >= 65:
+                triggers.append(f"RSI_{alert.rsi:.0f}_overbought")
+            else:
+                triggers.append(f"RSI_{alert.rsi:.0f}")
+        if alert.rvol is not None and alert.rvol >= 1.5:
+            triggers.append(f"RVOL_{alert.rvol:.1f}x")
+        if alert.adx is not None:
+            if alert.adx >= 25:
+                triggers.append(f"ADX_{alert.adx:.0f}_trending")
+            else:
+                triggers.append(f"ADX_{alert.adx:.0f}_weak")
+        if alert.score is not None:
+            triggers.append(f"quality_gate_{int(alert.score)}")
+        if triggers:
+            signal_data["triggering_factors"] = triggers
+            signal_data["note"] = (signal_data.get("note") or "") + f" Triggers: {', '.join(triggers)}"
+
     # Dedup check — skip if same ticker+strategy+direction fired recently
     from utils.signal_dedup import is_duplicate_signal
     if await is_duplicate_signal(

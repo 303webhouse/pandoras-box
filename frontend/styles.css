@@ -3477,6 +3477,18 @@ body.override-active-bearish .override-toggle[data-active="true"] {
     margin-top: 2px;
 }
 
+.signal-triggers { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 3px; }
+.trigger-tag {
+    font-size: 9px;
+    padding: 1px 5px;
+    border-radius: 3px;
+    background: rgba(20, 184, 166, 0.1);
+    color: var(--accent-teal);
+    border: 1px solid rgba(20, 184, 166, 0.2);
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
 .signal-ticker {
     font-size: 18px;
     font-weight: 700;
