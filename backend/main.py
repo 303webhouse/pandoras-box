@@ -649,6 +649,7 @@ from api.macro import router as macro_router
 from api.sectors import router as sectors_router
 from api.flow_summary import router as flow_summary_router
 from api.flow_ingestion import router as flow_ingestion_router
+from api.flow_radar import router as flow_radar_router
 
 app.include_router(webhook_router, prefix="/webhook", tags=["webhooks"])
 app.include_router(circuit_breaker_router, prefix="/webhook", tags=["circuit-breaker"])
@@ -687,6 +688,7 @@ app.include_router(confluence_router, prefix="/api", tags=["confluence"])
 app.include_router(macro_router, prefix="/api/macro", tags=["macro"])
 app.include_router(sectors_router, prefix="/api", tags=["sectors"])
 app.include_router(flow_summary_router, prefix="/api", tags=["flow-summary"])
+app.include_router(flow_radar_router, prefix="/api", tags=["flow-radar"])
 app.include_router(flow_ingestion_router, prefix="/api", tags=["uw-flow"])
 
 # Serve frontend static files

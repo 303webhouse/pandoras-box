@@ -7065,38 +7065,48 @@ let flowHotTickers = [];
 let flowRecentAlerts = [];
 
 function initOptionsFlow() {
-    // Set up headlines card tab switching (SECTORS / FLOW / HEADLINES)
-    document.querySelectorAll('.headlines-tab').forEach(tab => {
-        tab.addEventListener('click', () => {
-            document.querySelectorAll('.headlines-tab').forEach(t => t.classList.remove('active'));
-            tab.classList.add('active');
-            const target = tab.dataset.tab;
-            const sectorsEl = document.getElementById('sectorsTabContent');
-            const flowEl = document.getElementById('flowTabContent');
-            const headlinesEl = document.getElementById('headlinesTabContent');
-            if (sectorsEl) sectorsEl.style.display = target === 'sectors' ? '' : 'none';
-            if (flowEl) flowEl.style.display = target === 'flow' ? '' : 'none';
-            if (headlinesEl) headlinesEl.style.display = target === 'headlines' ? '' : 'none';
-        });
-    });
-
-    loadFlowData();
     loadSectorHeatmap();
     setInterval(loadSectorHeatmap, 10 * 1000);
+    // Flow radar loads with sector heatmap (piggybacked) + 2-min refresh during market hours
+    setInterval(() => {
+        const now = new Date();
+        const et = new Date(now.toLocaleString('en-US', {timeZone: 'America/New_York'}));
+        const h = et.getHours();
+        const m = et.getMinutes();
+        const day = et.getDay();
+        if (day >= 1 && day <= 5 && (h > 9 || (h === 9 && m >= 30)) && h < 17) {
+            loadFlowRadar();
+        }
+    }, 120000);
 }
 
 async function loadSectorHeatmap() {
     try {
-        const response = await fetch(`${API_URL}/sectors/heatmap`);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const data = await response.json();
-        renderSectorHeatmap(data.sectors, data);
+        const [sectorRes, radarRes] = await Promise.all([
+            fetch(`${API_URL}/sectors/heatmap`),
+            fetch(`${API_URL}/flow/radar`).catch(() => null),
+        ]);
+        const sectorData = await sectorRes.json();
+        const radarData = radarRes && radarRes.ok ? await radarRes.json() : null;
+
+        // Build sector flow lookup: ETF -> sentiment
+        const sectorFlowMap = {};
+        if (radarData && radarData.sector_flow) {
+            radarData.sector_flow.forEach(sf => {
+                sectorFlowMap[sf.etf] = sf.sentiment;
+            });
+        }
+
+        renderSectorHeatmap(sectorData.sectors, sectorData, sectorFlowMap);
+
+        // Also render the rest of the radar
+        if (radarData) renderFlowRadar(radarData);
     } catch (error) {
         console.error('Sector heatmap load failed:', error);
     }
 }
 
-function renderSectorHeatmap(sectors, heatmapData) {
+function renderSectorHeatmap(sectors, heatmapData, sectorFlowMap) {
     const container = document.getElementById('sectorHeatmap');
     if (!container) return;
     if (!sectors || sectors.length === 0) {
@@ -7160,11 +7170,18 @@ function renderSectorHeatmap(sectors, heatmapData) {
                 <span class="sector-hm-rs" style="color:${rsDaily >= 0 ? '#7CFF6B' : '#FF6B35'}">RS: ${rsDailyStr}%</span>`;
         }
 
+        // Flow dot overlay (from radar sector_flow data)
+        const flowSentiment = (sectorFlowMap || {})[sector.etf];
+        const flowDotHtml = flowSentiment
+            ? `<div class="sector-flow-dot ${flowSentiment.toLowerCase()}"></div>`
+            : '';
+
         html += `<div class="sector-heatmap-cell"
             style="left:${r.x}px;top:${r.y}px;width:${r.w}px;height:${r.h}px;--s:${fontScale};border-color:${hm.borderColor};box-shadow:${hm.glow};"
             data-etf="${sector.etf}"
             title="${escapeHtml(sector.name)} (${sector.etf})\nDay: ${changeSign}${changeVal}%\nWeek: ${change1wStr}%\nMonth: ${change1mStr}%\nRS (daily): ${rsDailyStr}%\nRank: #${sector.strength_rank || '--'}\nSPY Weight: ${weightStr}%">
             ${cellContent}
+            ${flowDotHtml}
         </div>`;
     });
 
@@ -7271,88 +7288,133 @@ function getHeatmapStyle(changePct) {
     };
 }
 
-async function loadFlowData() {
-    await loadFlowSummary();
-    setInterval(loadFlowSummary, 2 * 60 * 1000);
-}
-
-async function loadFlowSummary() {
+async function loadFlowRadar() {
     try {
-        const response = await fetch(`${API_URL}/flow/summary`);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const response = await fetch(`${API_URL}/flow/radar`);
+        if (!response.ok) return;
         const data = await response.json();
-        renderFlowSummary(data);
+        renderFlowRadar(data);
     } catch (error) {
-        console.error('Flow summary load failed:', error);
-        const container = document.getElementById('flowCompactList');
-        if (container) container.innerHTML = '<p class="empty-state">Flow data unavailable</p>';
+        console.error('Flow radar load failed:', error);
     }
 }
 
-function renderFlowSummary(data) {
-    const container = document.getElementById('flowCompactList');
-    if (!container) return;
-    const sentiment = data.sentiment || {};
-    const hotTickers = data.hot_tickers || [];
-    const recentSignals = data.recent_signals || [];
-    const pcRatio = sentiment.pc_ratio || 0;
-    const biasLabel = sentiment.bias || 'NEUTRAL';
-    const biasColor = biasLabel === 'BULLISH' ? '#00e676'
-                    : biasLabel === 'BEARISH' ? '#e5370e' : '#78909c';
-    const gaugePct = Math.max(5, Math.min(95, (1 - Math.min(pcRatio, 2) / 2) * 100));
-    const formatPremium = (val) => {
-        if (!val) return '$0';
-        if (val >= 1000000) return '$' + (val / 1000000).toFixed(1) + 'M';
-        if (val >= 1000) return '$' + (val / 1000).toFixed(0) + 'K';
-        return '$' + val;
-    };
-    const hotHtml = hotTickers.length > 0
-        ? hotTickers.map(t => {
-            const dirClass = (t.direction || '').toLowerCase();
-            const arrow = t.direction === 'BULLISH' ? '▲' : t.direction === 'BEARISH' ? '▼' : '→';
-            return `<div class="flow-hot-chip ${dirClass}" data-ticker="${escapeHtml(t.ticker)}">
-                <span class="flow-hot-ticker">${escapeHtml(t.ticker)}</span>
-                <span class="flow-hot-premium">${formatPremium(t.total_premium)}</span>
-                <span class="flow-hot-arrow">${arrow}</span>
+function renderFlowRadar(data) {
+    // --- Market Pulse Strip ---
+    const pulseRegime = document.getElementById('pulseRegime');
+    const pulsePc = document.getElementById('pulsePcRatio');
+    const pulsePremium = document.getElementById('pulsePremium');
+    const mp = data.market_pulse || {};
+
+    if (pulseRegime) {
+        const bl = mp.bias_level || 'NEUTRAL';
+        pulseRegime.textContent = bl;
+        pulseRegime.style.color = bl.includes('URSA') ? '#f87171'
+            : bl.includes('TORO') ? '#4ade80' : 'var(--text-secondary)';
+    }
+    if (pulsePc) {
+        const pc = mp.overall_pc_ratio;
+        pulsePc.textContent = pc != null ? `P/C ${pc.toFixed(2)}` : 'P/C --';
+        if (pc != null) {
+            pulsePc.style.color = pc < 0.7 ? '#4ade80' : pc > 1.3 ? '#f87171' : 'var(--text-secondary)';
+        }
+    }
+    if (pulsePremium) {
+        pulsePremium.textContent = mp.total_premium_display || '$--';
+    }
+
+    // --- Headlines Strip ---
+    const hlStrip = document.getElementById('headlinesStrip');
+    if (hlStrip && data.headlines && data.headlines.length > 0) {
+        hlStrip.innerHTML = data.headlines.map(h =>
+            `<div class="headline-compact">
+                <a href="${h.url || '#'}" target="_blank" rel="noopener">${escapeHtml(h.title)}</a>
+                ${h.source ? `<span class="hl-source">${escapeHtml(h.source)}</span>` : ''}
+            </div>`
+        ).join('');
+    }
+
+    // --- Radar Status ---
+    const radarStatus = document.getElementById('radarStatus');
+    if (radarStatus) {
+        const count = data.flow_tickers_loaded || 0;
+        radarStatus.textContent = count > 0 ? `${count} tickers \u00b7 live` : 'no flow data';
+    }
+
+    // --- Radar Content ---
+    const radarContent = document.getElementById('radarContent');
+    if (!radarContent) return;
+
+    let html = '';
+
+    // Section 1: Position Flow
+    const pf = data.position_flow || [];
+    if (pf.length > 0) {
+        html += '<div class="radar-sub-header">YOUR POSITIONS</div>';
+        pf.forEach(p => {
+            const icon = p.alignment === 'CONFIRMING' ? '\u2713' : p.alignment === 'COUNTER' ? '\u26a0' : '\u25cb';
+            const alignClass = p.alignment.toLowerCase();
+            const detail = p.alignment === 'CONFIRMING'
+                ? (p.strength === 'STRONG' ? 'Strong flow confirms' : 'Flow confirms')
+                : p.alignment === 'COUNTER'
+                ? (p.strength === 'STRONG' ? 'Strong flow disagrees' : 'Flow disagrees')
+                : 'Flow neutral';
+            html += `<div class="radar-row" data-ticker="${p.ticker}">
+                <span class="radar-ticker">${p.ticker}</span>
+                <span class="radar-alignment ${alignClass}">${icon}</span>
+                <span class="radar-detail">${detail}</span>
+                <span class="radar-pc">P/C ${p.pc_ratio != null ? p.pc_ratio.toFixed(2) : '--'}</span>
+                <span class="radar-premium">${p.premium_display || ''}</span>
             </div>`;
-        }).join('')
-        : '<span class="flow-empty-note">No unusual activity</span>';
-    const signalsHtml = recentSignals.length > 0
-        ? recentSignals.map(s => {
-            const dirClass = (s.direction || '').toLowerCase();
-            const ago = getTimeAgo(new Date(s.created_at));
-            return `<div class="flow-signal-mini ${dirClass}">
-                <span class="flow-signal-ticker">${escapeHtml(s.ticker)}</span>
-                <span class="flow-signal-premium">${formatPremium(s.total_premium)}</span>
-                <span class="flow-signal-score">${s.score}</span>
-                <span class="flow-signal-time">${ago}</span>
+        });
+    }
+
+    // Section 2: Unusual Watchlist Activity
+    const wu = data.watchlist_unusual || [];
+    if (wu.length > 0) {
+        html += '<div class="radar-sub-header">UNUSUAL ACTIVITY</div>';
+        wu.forEach(w => {
+            const sentIcon = w.sentiment === 'BULLISH' ? '\ud83d\udc02' : w.sentiment === 'BEARISH' ? '\ud83d\udc3b' : '\u2192';
+            const divBadge = w.divergence ? '<span class="radar-div-badge">DIV</span>' : '';
+            const changePct = w.change_pct != null ? ` ${w.change_pct >= 0 ? '+' : ''}${w.change_pct.toFixed(1)}%` : '';
+            html += `<div class="radar-row" data-ticker="${w.ticker}">
+                <span class="radar-ticker">${w.ticker}</span>
+                <span class="radar-alignment">${sentIcon}</span>
+                <span class="radar-detail">${changePct} ${divBadge}</span>
+                <span class="radar-pc">P/C ${w.pc_ratio != null ? w.pc_ratio.toFixed(2) : '--'}</span>
+                <span class="radar-premium">${w.premium_display || ''}</span>
             </div>`;
-        }).join('')
-        : '<span class="flow-empty-note">No flow signals (4h)</span>';
-    container.innerHTML = `
-        <div class="flow-sentiment-gauge">
-            <div class="flow-gauge-label">Smart Money Sentiment</div>
-            <div class="flow-gauge-bar">
-                <div class="flow-gauge-fill" style="width:${gaugePct}%;background:${biasColor};"></div>
-            </div>
-            <div class="flow-gauge-meta">
-                <span>P/C: ${pcRatio.toFixed(2)}</span>
-                <span style="color:${biasColor};font-weight:600;">${biasLabel}</span>
-                <span>Calls: ${formatPremium(sentiment.call_premium_total)} | Puts: ${formatPremium(sentiment.put_premium_total)}</span>
-            </div>
-        </div>
-        <div class="flow-hot-section">
-            <div class="flow-section-label">Hottest Tickers</div>
-            <div class="flow-hot-chips">${hotHtml}</div>
-        </div>
-        <div class="flow-signals-section">
-            <div class="flow-section-label">Recent Flow Signals</div>
-            <div class="flow-signal-list">${signalsHtml}</div>
-        </div>
-    `;
-    container.querySelectorAll('.flow-hot-chip').forEach(chip => {
-        chip.addEventListener('click', () => {
-            const ticker = chip.dataset.ticker;
+        });
+    }
+
+    // Section 3: Sector Rotation
+    const sf = data.sector_flow || [];
+    if (sf.length > 0) {
+        html += '<div class="radar-sub-header">SECTOR ROTATION</div>';
+        sf.forEach(s => {
+            const icon = s.sentiment === 'BULLISH' ? '\ud83d\udc02' : s.sentiment === 'BEARISH' ? '\ud83d\udc3b' : '\u2192';
+            const sentClass = s.sentiment.toLowerCase();
+            html += `<div class="radar-row">
+                <span class="radar-ticker">${s.etf}</span>
+                <span class="radar-sector-sentiment ${sentClass}">${icon}</span>
+                <span class="radar-detail">${s.ticker_count} tickers</span>
+                <span class="radar-pc">P/C ${s.avg_pc_ratio != null ? s.avg_pc_ratio.toFixed(2) : '--'}</span>
+                <span class="radar-premium">${s.premium_display || ''}</span>
+            </div>`;
+        });
+    }
+
+    // Empty state
+    if (!html) {
+        html = '<p class="empty-state">No flow data yet \u2014 updates during market hours</p>';
+    }
+
+    radarContent.innerHTML = html;
+
+    // Click handler: clicking a ticker row changes the chart
+    radarContent.querySelectorAll('.radar-row[data-ticker]').forEach(row => {
+        row.addEventListener('click', () => {
+            const ticker = row.dataset.ticker;
             if (ticker) changeChartSymbol(ticker);
         });
     });
@@ -7979,8 +8041,8 @@ async function loadHeadlines() {
         renderHeadlines(data.articles || []);
     } catch (error) {
         console.error('Error loading headlines:', error);
-        const list = document.getElementById('headlinesList');
-        if (list) list.innerHTML = '<li class="headlines-empty">Headlines unavailable</li>';
+        const strip = document.getElementById('headlinesStrip');
+        if (strip) strip.innerHTML = '<div class="headline-compact">Headlines unavailable</div>';
     }
 }
 
@@ -8009,43 +8071,22 @@ function startHeadlineScheduler() {
 }
 
 function renderHeadlines(articles) {
-    const heading = document.getElementById('headlinesHeading');
-    if (heading) {
-        const now = new Date();
-        const dayName = now.toLocaleDateString('en-US', { weekday: 'long' }).toUpperCase();
-        const dateStr = now.toLocaleDateString('en-US', { month: 'long', day: 'numeric' }).toUpperCase();
-        heading.textContent = `HEADLINES FOR ${dayName}, ${dateStr}`;
-    }
-
-    const list = document.getElementById('headlinesList');
-    if (!list) return;
+    // Render compact headlines into the always-visible strip
+    const strip = document.getElementById('headlinesStrip');
+    if (!strip) return;
 
     if (!articles.length) {
-        list.innerHTML = '<li class="headlines-empty">No headlines available</li>';
+        strip.innerHTML = '<div class="headline-compact">No headlines available</div>';
         return;
     }
 
-    list.innerHTML = articles.map(a => {
-        const tickers = (a.tickers || []).slice(0, 3).map(t =>
-            `<span class="headline-ticker">${t}</span>`
-        ).join('');
-
-        let timeStr = '';
-        if (a.published) {
-            const mins = Math.round((Date.now() - new Date(a.published).getTime()) / 60000);
-            timeStr = mins < 1 ? 'just now' : mins < 60 ? `${mins}m ago` : mins < 1440 ? `${Math.round(mins / 60)}h ago` : `${Math.round(mins / 1440)}d ago`;
-        }
-
-        const source = a.source ? `<span>${a.source}</span>` : '';
-
-        return `<li>
-            <a class="headline-link" href="${a.url}" target="_blank" rel="noopener">${a.title}</a>
-            <div class="headline-meta">
-                ${source}
-                ${timeStr ? `<span>${timeStr}</span>` : ''}
-                ${tickers ? `<span class="headline-tickers">${tickers}</span>` : ''}
-            </div>
-        </li>`;
+    // Show top 3 headlines in compact format
+    strip.innerHTML = articles.slice(0, 3).map(a => {
+        const source = a.source ? `<span class="hl-source">${escapeHtml(a.source)}</span>` : '';
+        return `<div class="headline-compact">
+            <a href="${a.url || '#'}" target="_blank" rel="noopener">${escapeHtml(a.title)}</a>
+            ${source}
+        </div>`;
     }).join('');
 }
 

@@ -251,12 +251,12 @@ body {
     min-height: 0;
 }
 
-.headlines-card {
+/* ===== Intelligence Center (column 2) ===== */
+.intel-center {
     grid-column: 2;
     background: var(--card-bg);
     border: 2px solid var(--border-color);
     border-radius: 10px;
-    padding: 12px 14px;
     min-width: 0;
     overflow: hidden;
     display: flex;
@@ -264,62 +264,205 @@ body {
     align-self: stretch;
 }
 
+.market-map-section {
+    flex: 0 0 auto;
+    padding: 10px 12px 0 12px;
+}
 
-.headlines-card h3 {
-    font-family: 'Orbit', sans-serif;
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 1.5px;
+/* Market pulse strip (one-line regime + P/C + premium) */
+.market-pulse-strip {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 0;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
     color: var(--text-secondary);
-    margin: 0 0 8px 0;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.pulse-regime { text-transform: uppercase; }
+.pulse-separator { opacity: 0.3; }
+
+/* Headlines compact strip (3 lines, always visible) */
+.headlines-strip {
+    padding: 6px 0;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.headline-compact {
+    font-size: 11px;
+    line-height: 1.35;
+    color: var(--text-primary);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    flex-shrink: 0;
+    padding: 2px 0;
 }
 
-.headlines-tabs {
-    display: flex;
-    gap: 2px;
-    margin-bottom: 8px;
-    flex-shrink: 0;
-    background: var(--dark-bg);
-    border-radius: 6px;
-    padding: 2px;
+.headline-compact a {
+    color: var(--text-primary);
+    text-decoration: none;
 }
 
-.headlines-tab {
-    flex: 1;
-    background: transparent;
-    border: none;
+.headline-compact a:hover {
+    color: var(--accent-teal);
+}
+
+.headline-compact .hl-source {
+    font-size: 9px;
     color: var(--text-secondary);
+    margin-left: 6px;
+}
+
+/* Flow Radar section */
+.flow-radar-section {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    padding: 0 12px 10px 12px;
+}
+
+.radar-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0 6px 0;
+    flex-shrink: 0;
+}
+
+.radar-title {
     font-family: 'Orbit', sans-serif;
     font-size: 10px;
     font-weight: 600;
-    letter-spacing: 1.2px;
+    letter-spacing: 1.5px;
     text-transform: uppercase;
-    padding: 5px 8px;
-    border-radius: 4px;
-    cursor: pointer;
-    transition: all 0.2s;
+    color: var(--text-secondary);
 }
 
-.headlines-tab:hover:not(.active) {
-    color: var(--text-primary);
+.radar-status {
+    font-size: 9px;
+    color: var(--text-secondary);
+    opacity: 0.6;
 }
 
-.headlines-tab.active {
-    background: var(--accent-teal);
-    color: var(--dark-bg);
-}
-
-.headlines-tab-content {
+.radar-content {
     flex: 1;
-    overflow-y: auto;
     min-height: 0;
+    overflow-y: auto;
     scrollbar-width: thin;
     scrollbar-color: rgba(20, 184, 166, 0.3) transparent;
 }
+
+/* Radar sub-section headers */
+.radar-sub-header {
+    font-size: 9px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-secondary);
+    padding: 8px 0 4px 0;
+    opacity: 0.7;
+}
+
+.radar-sub-header:first-child {
+    padding-top: 0;
+}
+
+/* Radar rows */
+.radar-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+    font-size: 11px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.radar-row:hover {
+    background: rgba(20, 184, 166, 0.05);
+}
+
+.radar-ticker {
+    font-weight: 700;
+    min-width: 48px;
+    color: var(--text-primary);
+}
+
+.radar-alignment {
+    font-size: 12px;
+    min-width: 16px;
+    text-align: center;
+}
+
+.radar-alignment.confirming { color: #4ade80; }
+.radar-alignment.counter { color: #f87171; }
+.radar-alignment.neutral { color: #78909c; }
+
+.radar-detail {
+    flex: 1;
+    font-size: 10px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.radar-pc {
+    font-size: 10px;
+    min-width: 50px;
+    text-align: right;
+    color: var(--text-secondary);
+}
+
+.radar-premium {
+    font-size: 10px;
+    min-width: 44px;
+    text-align: right;
+    color: var(--text-secondary);
+    opacity: 0.7;
+}
+
+/* Divergence badge */
+.radar-div-badge {
+    font-size: 8px;
+    font-weight: 700;
+    padding: 1px 4px;
+    border-radius: 3px;
+    background: rgba(251, 191, 36, 0.15);
+    color: #fbbf24;
+    border: 1px solid rgba(251, 191, 36, 0.3);
+    letter-spacing: 0.5px;
+}
+
+/* Sector flow row */
+.radar-sector-sentiment {
+    font-size: 11px;
+    min-width: 16px;
+}
+
+.radar-sector-sentiment.bullish { color: #4ade80; }
+.radar-sector-sentiment.bearish { color: #f87171; }
+.radar-sector-sentiment.neutral { color: #78909c; }
+
+/* Sector heatmap flow dot overlay */
+.sector-flow-dot {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    opacity: 0.85;
+}
+
+.sector-flow-dot.bullish { background: #4ade80; box-shadow: 0 0 4px rgba(74, 222, 128, 0.5); }
+.sector-flow-dot.bearish { background: #f87171; box-shadow: 0 0 4px rgba(248, 113, 113, 0.5); }
+.sector-flow-dot.neutral { background: #78909c; }
 
 /* Sector Heatmap — fills container, 3-row layout */
 .sector-heatmap {
@@ -1217,7 +1360,7 @@ body {
 
 /* Bias-colored borders on all major dashboard sections */
 .bias-composite-panel,
-.headlines-card,
+.intel-center,
 .portfolio-summary-card,
 .bias-banner,
 .tf-card,
@@ -5207,7 +5350,7 @@ body.override-active-bearish .override-toggle[data-active="true"] {
         min-height: 0;
     }
     .bias-composite-panel,
-    .headlines-card,
+    .intel-center,
     .bias-right-stack {
         grid-column: 1;
     }
@@ -10651,7 +10794,7 @@ body[data-mode="analytics"] .analytics-shell {
         min-height: 0;
     }
     .bias-composite-panel,
-    .headlines-card,
+    .intel-center,
     .bias-right-stack {
         grid-column: 1;
     }
