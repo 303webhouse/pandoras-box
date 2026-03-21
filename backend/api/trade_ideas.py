@@ -154,15 +154,50 @@ async def get_trade_ideas_grouped(
         "(expires_at IS NULL OR expires_at > NOW())",
         "created_at > NOW() - INTERVAL '24 hours'",
         "user_action IS NULL",  # Exclude accepted/rejected/dismissed signals
+        "COALESCE(signal_category, 'TRADE_SETUP') NOT IN ('INTRADAY_SETUP', 'FOOTPRINT')",
     ]
     params = []
     idx = 1
 
     effective_min_score = None if show_all else min_score
     if effective_min_score is not None:
-        conditions.append(f"COALESCE(score_v2, score, 0) >= ${idx}")
-        params.append(effective_min_score)
-        idx += 1
+        # Regime-aware threshold: lower the bar for direction-aligned signals
+        regime_bias = ""
+        try:
+            from database.redis_client import get_redis_client
+            import json as _json
+            redis = await get_redis_client()
+            if redis:
+                cached_raw = await redis.get("bias:composite:latest")
+                if cached_raw:
+                    cached = _json.loads(cached_raw)
+                    regime_bias = (cached.get("bias_level") or "").upper()
+        except Exception:
+            pass
+
+        if "URSA" in regime_bias:
+            # Bear regime: accept lower-scored SHORT signals (aligned with tape)
+            conditions.append(
+                f"(COALESCE(score_v2, score, 0) >= ${idx} OR "
+                f"(COALESCE(score_v2, score, 0) >= ${idx + 1} AND UPPER(direction) IN ('SHORT', 'SELL')))"
+            )
+            params.append(effective_min_score)           # normal threshold (65)
+            params.append(effective_min_score - 15)      # relaxed threshold for aligned (50)
+            idx += 2
+        elif "TORO" in regime_bias:
+            # Bull regime: accept lower-scored LONG signals (aligned with tape)
+            conditions.append(
+                f"(COALESCE(score_v2, score, 0) >= ${idx} OR "
+                f"(COALESCE(score_v2, score, 0) >= ${idx + 1} AND UPPER(direction) IN ('LONG', 'BUY')))"
+            )
+            params.append(effective_min_score)
+            params.append(effective_min_score - 15)
+            idx += 2
+        else:
+            # Neutral regime: standard threshold
+            conditions.append(f"COALESCE(score_v2, score, 0) >= ${idx}")
+            params.append(effective_min_score)
+            idx += 1
 
     where_clause = " AND ".join(conditions)
 

@@ -80,10 +80,62 @@ def compute_score_v2(signal_data: Dict[str, Any]) -> Tuple[Optional[float], Dict
     if iv_rank is not None:
         factors["iv_rank"] = {"value": iv_rank, "note": "informational — affects options vs stock decision in 4E"}
 
-    # --- Regime bonus (placeholder — degraded until Phase 3 X2) ---
-    regime = signal_data.get("regime")
+    # --- Regime alignment penalty/bonus ---
+    # Uses bias_level from bias_at_signal snapshot.
+    # Penalizes counter-regime signals, rewards aligned signals.
     regime_bonus = 0
-    factors["regime"] = {"value": regime, "bonus": regime_bonus, "note": "degraded until Phase 3 X2 regime module"}
+    bias_snapshot = signal_data.get("bias_at_signal") or {}
+    if isinstance(bias_snapshot, str):
+        try:
+            bias_snapshot = json.loads(bias_snapshot)
+        except Exception:
+            bias_snapshot = {}
+    if not isinstance(bias_snapshot, dict):
+        bias_snapshot = {}
+
+    # Extract bias_level from the nested snapshot structure
+    bias_level = ""
+    summary = bias_snapshot.get("summary") or {}
+    if isinstance(summary, dict):
+        bias_level = (summary.get("composite_bias") or summary.get("overall_macro_bias") or "").upper()
+    if not bias_level:
+        bias_level = (bias_snapshot.get("bias_level") or "").upper()
+
+    direction = (signal_data.get("direction") or "").upper()
+    is_long = direction in ("LONG", "BUY")
+    is_short = direction in ("SHORT", "SELL")
+
+    # Bearish regimes: penalize LONG, reward SHORT
+    if "URSA" in bias_level:
+        if is_long:
+            if "EXTREME" in bias_level:
+                regime_bonus = -20
+            elif "MAJOR" in bias_level:
+                regime_bonus = -15
+            else:  # URSA_MINOR
+                regime_bonus = -10
+        elif is_short:
+            regime_bonus = 5
+
+    # Bullish regimes: penalize SHORT, reward LONG
+    elif "TORO" in bias_level:
+        if is_short:
+            if "EXTREME" in bias_level:
+                regime_bonus = -20
+            elif "MAJOR" in bias_level:
+                regime_bonus = -15
+            else:  # TORO_MINOR
+                regime_bonus = -10
+        elif is_long:
+            regime_bonus = 5
+
+    factors["regime"] = {
+        "bias_level": bias_level,
+        "direction": direction,
+        "bonus": regime_bonus,
+    }
+
+    post_enrichment_bonus += regime_bonus
 
     # --- Confluence bonus (placeholder — degraded until Phase 3 X1) ---
     confluence_score = signal_data.get("confluence_score")

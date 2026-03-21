@@ -4148,6 +4148,13 @@ function createSignalCard(signal) {
                 <div>
                     <div class="signal-type ${signal.signal_type || ''}">${typeWithKb}${counterTrendTag}${contrarianTag}</div>
                     <div class="signal-strategy">${strategiesHtml}</div>
+                    ${(() => {
+                        const triggers = signal.triggering_factors || (signal.primary_signal && signal.primary_signal.triggering_factors) || [];
+                        if (!triggers.length) return '';
+                        return '<div class="signal-triggers">' + triggers.map(t =>
+                            '<span class="trigger-tag">' + t.replace(/_/g, ' ') + '</span>'
+                        ).join('') + '</div>';
+                    })()}
                 </div>
                 <div class="signal-ticker ticker-link" data-action="view-chart">${signal.ticker}</div>
             </div>
