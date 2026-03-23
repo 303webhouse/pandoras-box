@@ -7065,9 +7065,24 @@ let flowHotTickers = [];
 let flowRecentAlerts = [];
 
 function initOptionsFlow() {
+    // Intel Center tab switching (Sectors / Argus)
+    document.querySelectorAll('.intel-tab').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.intel-tab').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            const target = btn.dataset.tab;
+            const sectorsEl = document.getElementById('sectorsTabContent');
+            const argusEl = document.getElementById('argusTabContent');
+            if (sectorsEl) sectorsEl.style.display = target === 'sectors' ? '' : 'none';
+            if (argusEl) argusEl.style.display = target === 'argus' ? '' : 'none';
+            if (target === 'argus') loadFlowRadar();
+        });
+    });
+
     loadSectorHeatmap();
+    loadFlowRadar();
     setInterval(loadSectorHeatmap, 10 * 1000);
-    // Flow radar loads with sector heatmap (piggybacked) + 2-min refresh during market hours
+    // Flow radar: 2-min refresh during market hours
     setInterval(() => {
         const now = new Date();
         const et = new Date(now.toLocaleString('en-US', {timeZone: 'America/New_York'}));
@@ -7082,31 +7097,16 @@ function initOptionsFlow() {
 
 async function loadSectorHeatmap() {
     try {
-        const [sectorRes, radarRes] = await Promise.all([
-            fetch(`${API_URL}/sectors/heatmap`),
-            fetch(`${API_URL}/flow/radar`).catch(() => null),
-        ]);
-        const sectorData = await sectorRes.json();
-        const radarData = radarRes && radarRes.ok ? await radarRes.json() : null;
-
-        // Build sector flow lookup: ETF -> sentiment
-        const sectorFlowMap = {};
-        if (radarData && radarData.sector_flow) {
-            radarData.sector_flow.forEach(sf => {
-                sectorFlowMap[sf.etf] = sf.sentiment;
-            });
-        }
-
-        renderSectorHeatmap(sectorData.sectors, sectorData, sectorFlowMap);
-
-        // Also render the rest of the radar
-        if (radarData) renderFlowRadar(radarData);
+        const response = await fetch(`${API_URL}/sectors/heatmap`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        renderSectorHeatmap(data.sectors, data);
     } catch (error) {
         console.error('Sector heatmap load failed:', error);
     }
 }
 
-function renderSectorHeatmap(sectors, heatmapData, sectorFlowMap) {
+function renderSectorHeatmap(sectors, heatmapData) {
     const container = document.getElementById('sectorHeatmap');
     if (!container) return;
     if (!sectors || sectors.length === 0) {
@@ -7170,18 +7170,11 @@ function renderSectorHeatmap(sectors, heatmapData, sectorFlowMap) {
                 <span class="sector-hm-rs" style="color:${rsDaily >= 0 ? '#7CFF6B' : '#FF6B35'}">RS: ${rsDailyStr}%</span>`;
         }
 
-        // Flow dot overlay (from radar sector_flow data)
-        const flowSentiment = (sectorFlowMap || {})[sector.etf];
-        const flowDotHtml = flowSentiment
-            ? `<div class="sector-flow-dot ${flowSentiment.toLowerCase()}"></div>`
-            : '';
-
         html += `<div class="sector-heatmap-cell"
             style="left:${r.x}px;top:${r.y}px;width:${r.w}px;height:${r.h}px;--s:${fontScale};border-color:${hm.borderColor};box-shadow:${hm.glow};"
             data-etf="${sector.etf}"
             title="${escapeHtml(sector.name)} (${sector.etf})\nDay: ${changeSign}${changeVal}%\nWeek: ${change1wStr}%\nMonth: ${change1mStr}%\nRS (daily): ${rsDailyStr}%\nRank: #${sector.strength_rank || '--'}\nSPY Weight: ${weightStr}%">
             ${cellContent}
-            ${flowDotHtml}
         </div>`;
     });
 

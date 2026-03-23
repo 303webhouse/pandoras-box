@@ -264,9 +264,66 @@ body {
     align-self: stretch;
 }
 
-.market-map-section {
-    flex: 0 0 auto;
-    padding: 10px 12px 0 12px;
+/* Intel Center tabs (Sectors / Argus) */
+.intel-tabs {
+    display: flex;
+    gap: 2px;
+    flex-shrink: 0;
+    background: var(--dark-bg);
+    border-radius: 6px;
+    padding: 2px;
+    margin: 10px 12px 8px 12px;
+}
+
+.intel-tab {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    font-family: 'Orbit', sans-serif;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 1.2px;
+    text-transform: uppercase;
+    padding: 5px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.intel-tab:hover {
+    color: var(--text-primary);
+    background: rgba(20, 184, 166, 0.08);
+}
+
+.intel-tab.active {
+    background: rgba(20, 184, 166, 0.15);
+    color: var(--accent-teal);
+}
+
+.intel-tab-content {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+#sectorsTabContent .sector-heatmap {
+    flex: 1;
+    min-height: 0;
+}
+
+#argusTabContent {
+    padding: 0 12px 10px 12px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(20, 184, 166, 0.3) transparent;
+}
+
+#argusTabContent .flow-radar-section {
+    flex: 1;
+    min-height: 0;
 }
 
 /* Market pulse strip (one-line regime + P/C + premium) */
