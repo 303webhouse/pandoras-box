@@ -299,6 +299,13 @@ async def get_trade_ideas_grouped(
     except Exception as e:
         logger.warning(f"Suppression check failed (showing all groups): {e}")
 
+    # Add confirmation bonus: +2 per additional signal in group, capped at +5
+    for g in groups_map.values():
+        confirmation_bonus = min(5, max(0, (g["signal_count"] - 1) * 2))
+        base_score = g["primary_signal"].get("score_v2") or g["primary_signal"].get("score") or 0
+        g["display_score"] = min(100, base_score + confirmation_bonus)
+        g["confirmation_bonus"] = confirmation_bonus
+
     # Compute composite rank for sorting
     now = datetime.utcnow()
     ranked_groups = []

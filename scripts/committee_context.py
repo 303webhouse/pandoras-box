@@ -201,6 +201,52 @@ def format_signal_context(signal: dict, context: dict) -> str:
     if lessons_text:
         sections.append(lessons_text)
 
+    # ── Options flow context (from UW Watcher via flow radar) ──
+    flow = context.get("flow") or {}
+    if flow:
+        flow_lines = ["## OPTIONS FLOW (UW Watcher — last update)"]
+
+        mp = flow.get("market_pulse", {})
+        if mp:
+            flow_lines.append(
+                f"Market: P/C {mp.get('overall_pc_ratio', '?')} | "
+                f"Sentiment: {mp.get('overall_sentiment', '?')} | "
+                f"Premium: {mp.get('total_premium_display', '$?')} | "
+                f"Tickers: {mp.get('tickers_with_flow', 0)}"
+            )
+
+        pf = flow.get("position_flow", [])
+        if pf:
+            flow_lines.append("Position Flow:")
+            for p in pf[:5]:
+                flow_lines.append(
+                    f"  {p['ticker']} — {p['alignment']} ({p['strength']}) | "
+                    f"P/C {p.get('pc_ratio', '?')} | {p.get('premium_display', '')}"
+                )
+
+        wu = flow.get("watchlist_unusual", [])
+        if wu:
+            flow_lines.append("Unusual Activity (watchlist):")
+            for w in wu[:5]:
+                div_tag = " [DIVERGENCE]" if w.get("divergence") else ""
+                flow_lines.append(
+                    f"  {w['ticker']} — {w['sentiment']} | "
+                    f"P/C {w.get('pc_ratio', '?')} | {w.get('premium_display', '')}"
+                    f"{div_tag}"
+                )
+
+        sf = flow.get("sector_flow", [])
+        if sf:
+            flow_lines.append("Sector Rotation:")
+            for s in sf[:5]:
+                flow_lines.append(
+                    f"  {s['etf']} — {s['sentiment']} | "
+                    f"P/C {s.get('avg_pc_ratio', '?')} | {s.get('premium_display', '')}"
+                )
+
+        if len(flow_lines) > 1:
+            sections.append("\n".join(flow_lines))
+
     return "\n\n".join(sections)
 
 

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Pandora - Real-time Trading Signal Dashboard">
     <title>Pandora</title>
-    <link rel="stylesheet" href="/styles.css?v=105">
+    <link rel="stylesheet" href="/styles.css?v=106">
     <link rel="manifest" href="/manifest.json">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -45,6 +45,79 @@
         </header>
 
         <main id="hubShell" class="hub-shell">
+
+        <!-- REGIME BAR — Phase 5 Catalyst Awareness -->
+        <div id="regimeBar" class="regime-bar">
+            <div class="regime-bar-content">
+                <div class="regime-label-area">
+                    <span id="regimeSourceBadge" class="regime-source-badge">AUTO</span>
+                    <span id="regimeLabel" class="regime-label-text">Loading regime...</span>
+                    <span id="regimeExpiry" class="regime-expiry"></span>
+                </div>
+                <div class="regime-controls">
+                    <div class="regime-pills" id="regimePills"></div>
+                    <label class="reversal-toggle" title="Reversal Mode: rank signals by relative performance divergence">
+                        <input type="checkbox" id="reversalModeToggle">
+                        <span class="reversal-toggle-label">&#x27F2; REVERSAL</span>
+                    </label>
+                    <button id="regimeOverrideBtn" class="regime-override-btn" title="Manually set market regime">&#x270E; Override</button>
+                    <button id="regimeClearBtn" class="regime-clear-btn" style="display:none;" title="Clear manual override">&#x2715; Clear</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- REGIME OVERRIDE MODAL -->
+        <div id="regimeOverrideModal" class="modal" style="display:none;">
+            <div class="modal-content regime-modal">
+                <h3>Set Market Regime</h3>
+                <div class="regime-form">
+                    <label>Regime Label (plain English — what's driving the market?)</label>
+                    <textarea id="regimeOverrideLabel" rows="2" placeholder="Iran/oil driving all correlations. Favor energy and hedges. Avoid uncorrelated technical setups."></textarea>
+
+                    <label>Direction</label>
+                    <div class="regime-direction-pills">
+                        <button class="pill-btn" data-direction="BULLISH">Bullish</button>
+                        <button class="pill-btn" data-direction="BEARISH">Bearish</button>
+                        <button class="pill-btn active" data-direction="NEUTRAL">Neutral</button>
+                    </div>
+
+                    <label>Dominant Driver</label>
+                    <select id="regimeDominantDriver">
+                        <option value="">None</option>
+                        <option value="OIL">Oil / Energy</option>
+                        <option value="RATES">Interest Rates / Fed</option>
+                        <option value="GEOPOLITICAL">Geopolitical</option>
+                        <option value="EARNINGS">Earnings Season</option>
+                        <option value="OPEX">Options Expiration</option>
+                        <option value="ROTATION">Sector Rotation</option>
+                        <option value="OTHER">Other</option>
+                    </select>
+
+                    <label>Favored Sectors (comma-separated tickers: XLE, XOP, USO)</label>
+                    <input type="text" id="regimeSectorsFavored" placeholder="XLE, XOP, USO">
+
+                    <label>Avoided Sectors (comma-separated tickers: XLK, SMH)</label>
+                    <input type="text" id="regimeSectorsAvoided" placeholder="XLK, SMH">
+
+                    <label>Theme Keywords (for headline highlighting, comma-separated)</label>
+                    <input type="text" id="regimeKeywords" placeholder="iran, hormuz, oil, crude, brent, strait">
+
+                    <label>Reversal Mode</label>
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="regimeReversalMode">
+                        Prioritize relative performance divergence in signal ranking
+                    </label>
+
+                    <label>Expires in (hours)</label>
+                    <input type="number" id="regimeExpiresHours" value="8" min="1" max="72" step="1">
+
+                    <div class="regime-form-actions">
+                        <button id="regimeOverrideCancel" class="btn-secondary">Cancel</button>
+                        <button id="regimeOverrideSubmit" class="btn-primary">Set Regime</button>
+                    </div>
+                </div>
+            </div>
+        </div>
 
         <!-- Bias Indicators -->
         <section class="bias-section">
@@ -115,6 +188,7 @@
                 <div class="intel-tabs">
                     <button class="intel-tab active" data-tab="sectors">SECTORS</button>
                     <button class="intel-tab" data-tab="argus">ARGUS</button>
+                    <button class="intel-tab" data-tab="theme">THEME</button>
                 </div>
                 <div class="intel-tab-content" id="sectorsTabContent">
                     <div class="sector-heatmap" id="sectorHeatmap">
@@ -142,6 +216,11 @@
                         <div class="radar-content" id="radarContent">
                             <p class="empty-state">Waiting for flow data...</p>
                         </div>
+                    </div>
+                </div>
+                <div class="intel-tab-content" id="themeTabContent" style="display:none;">
+                    <div id="themeIntelContent" class="theme-intel-list">
+                        <p class="empty-state">No theme-matched intel</p>
                     </div>
                 </div>
             </div>
@@ -1629,7 +1708,7 @@
     <!-- TradingView Widget Script -->
     <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
-    <script src="/app.js?v=121"></script>
+    <script src="/app.js?v=122"></script>
     <script src="/cockpit.js?v=1"></script>
     <script src="/laboratory.js?v=1"></script>
 </body>

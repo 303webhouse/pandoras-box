@@ -6,7 +6,7 @@ Persistent Discord bot (discord.py) that watches #uw-flow-alerts for messages
 from the UW Bot, parses structured text content into JSON, and POSTs to the
 Pandora API for Redis caching and committee context consumption.
 
-No LLM. Pure text parsing. $0/run.
+Uses Haiku vision for image parsing (~$0.01/image), pure text parsing for text messages.
 
 Deploy: SCP to /opt/openclaw/workspace/scripts/uw_watcher.py
 Service: systemd uw-watcher.service
@@ -21,8 +21,13 @@ import re
 import sys
 from datetime import datetime, timezone
 
+import base64
+
 import discord
+import httpx
 import requests
+
+ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
 
 # ── Config ───────────────────────────────────────────────────
 
@@ -168,13 +173,116 @@ def parse_ticker_update(line: str) -> dict | None:
         return None
 
 
+# ── Image Parsing (Haiku Vision) ──────────────────────────────
+
+async def parse_uw_image(image_url: str, anthropic_key: str) -> list[dict] | None:
+    """
+    Download a UW image/chart and send to Haiku for structured data extraction.
+    Returns list of parsed ticker dicts or None if parsing fails.
+    Cost: ~$0.01-0.02 per image (Haiku vision).
+    """
+    if not anthropic_key:
+        logger.warning("No ANTHROPIC_API_KEY — cannot parse UW images")
+        return None
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            img_resp = await client.get(image_url)
+            if img_resp.status_code != 200:
+                logger.warning("Failed to download UW image: HTTP %s", img_resp.status_code)
+                return None
+
+            image_bytes = img_resp.content
+            content_type = img_resp.headers.get("content-type", "image/png")
+            if "jpeg" in content_type or "jpg" in content_type:
+                media_type = "image/jpeg"
+            elif "gif" in content_type:
+                media_type = "image/gif"
+            elif "webp" in content_type:
+                media_type = "image/webp"
+            else:
+                media_type = "image/png"
+
+            image_b64 = base64.b64encode(image_bytes).decode("utf-8")
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            haiku_resp = await client.post(
+                ANTHROPIC_API_URL,
+                headers={
+                    "x-api-key": anthropic_key,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                },
+                json={
+                    "model": "claude-haiku-4-5-20251001",
+                    "max_tokens": 1024,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "image",
+                                    "source": {
+                                        "type": "base64",
+                                        "media_type": media_type,
+                                        "data": image_b64,
+                                    },
+                                },
+                                {
+                                    "type": "text",
+                                    "text": (
+                                        "Extract all options flow data from this Unusual Whales chart/table. "
+                                        "Return ONLY a JSON array (no markdown, no backticks) where each element has: "
+                                        '{"ticker": "AAPL", "volume": 50000, "premium": 12000000, '
+                                        '"direction": "BULLISH" or "BEARISH" or "NEUTRAL", '
+                                        '"contract_type": "CALL" or "PUT" or "MIXED", '
+                                        '"strike": 150.0 or null, "expiry": "2026-04-17" or null, '
+                                        '"notes": "brief description of the flow"}. '
+                                        "If the image is not an options flow chart, return an empty array []."
+                                    ),
+                                },
+                            ],
+                        }
+                    ],
+                },
+            )
+
+            if haiku_resp.status_code != 200:
+                logger.warning("Haiku API error: %s %s", haiku_resp.status_code, haiku_resp.text[:200])
+                return None
+
+            haiku_data = haiku_resp.json()
+            text = ""
+            for block in haiku_data.get("content", []):
+                if block.get("type") == "text":
+                    text += block.get("text", "")
+
+            text = text.strip()
+            if text.startswith("```"):
+                text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+
+            parsed = json.loads(text)
+            if isinstance(parsed, list) and len(parsed) > 0:
+                logger.info("Haiku parsed %d entries from UW image", len(parsed))
+                return parsed
+            return None
+
+    except json.JSONDecodeError as e:
+        logger.warning("Haiku returned non-JSON: %s", e)
+        return None
+    except Exception as e:
+        logger.error("UW image parsing failed: %s", e)
+        return None
+
+
 # ── Discord Bot ──────────────────────────────────────────────
 
-def create_bot(api_url: str, api_key: str) -> discord.Client:
+def create_bot(api_url: str, api_key: str, anthropic_key: str = "") -> discord.Client:
     """Create the Discord bot with message content intent."""
     intents = discord.Intents.default()
     intents.message_content = True
     client = discord.Client(intents=intents)
+    client._anthropic_key = anthropic_key
 
     @client.event
     async def on_ready():
@@ -191,17 +299,79 @@ def create_bot(api_url: str, api_key: str) -> discord.Client:
         if message.author.id != UW_BOT_USER_ID:
             return
 
-        # Skip messages that are just images (Highest Volume Contracts chart)
-        if not message.content and message.attachments:
-            logger.info("Skipping image-only UW message (Highest Volume Contracts chart)")
-            return
-
-        # Skip embed-only messages (Highest Volume Contracts header)
-        if not message.content and message.embeds:
-            logger.info("Skipping embed-only UW message")
-            return
-
+        # Parse image messages via Haiku (attachments = charts, embeds = sweep alerts)
         if not message.content:
+            image_url = None
+
+            if message.attachments:
+                for att in message.attachments:
+                    if att.content_type and att.content_type.startswith("image/"):
+                        image_url = att.url
+                        break
+
+            if not image_url and message.embeds:
+                for embed in message.embeds:
+                    if embed.image and embed.image.url:
+                        image_url = embed.image.url
+                        break
+                    if embed.thumbnail and embed.thumbnail.url:
+                        image_url = embed.thumbnail.url
+                        break
+
+            if not image_url:
+                logger.info("UW message with no parseable content or images")
+                return
+
+            logger.info("Parsing UW image via Haiku: %s", image_url[:80])
+            parsed_entries = await parse_uw_image(image_url, client._anthropic_key)
+
+            if not parsed_entries:
+                logger.info("No flow data extracted from UW image")
+                return
+
+            haiku_tickers = []
+            for entry in parsed_entries:
+                ticker = (entry.get("ticker") or "").upper()
+                if not ticker or len(ticker) > 5:
+                    continue
+
+                direction = (entry.get("direction") or "NEUTRAL").upper()
+                premium = entry.get("premium") or 0
+
+                haiku_tickers.append({
+                    "ticker": ticker,
+                    "price": None,
+                    "change_pct": None,
+                    "volume": entry.get("volume") or 0,
+                    "pc_ratio": None,
+                    "put_volume": None,
+                    "call_volume": None,
+                    "total_premium": premium if isinstance(premium, int) else 0,
+                    "flow_sentiment": direction if direction in ("BULLISH", "BEARISH") else None,
+                    "flow_premium": None,
+                    "flow_pct": None,
+                })
+
+            if haiku_tickers:
+                payload = {
+                    "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
+                    "source": "uw_image_haiku",
+                    "tickers": haiku_tickers,
+                }
+                try:
+                    resp = requests.post(
+                        f"{api_url}/api/uw/ticker-updates",
+                        json=payload,
+                        headers={"Authorization": f"Bearer {api_key}"},
+                        timeout=10,
+                    )
+                    logger.info(
+                        "Posted %d Haiku-parsed tickers from UW image (status=%s)",
+                        len(haiku_tickers), resp.status_code,
+                    )
+                except Exception as e:
+                    logger.error("Failed to POST Haiku-parsed UW data: %s", e)
+
             return
 
         # Parse Ticker Updates from message content
@@ -272,7 +442,10 @@ def main():
         sys.exit(1)
 
     logger.info(f"Starting UW Watcher Bot — API: {api_url}")
-    bot = create_bot(api_url, api_key)
+    anthropic_key = pick_env("ANTHROPIC_API_KEY", cfg, env_file)
+    if not anthropic_key:
+        logger.warning("ANTHROPIC_API_KEY not set — UW image parsing will be disabled")
+    bot = create_bot(api_url, api_key, anthropic_key)
     bot.run(discord_token, log_handler=None)
 
 

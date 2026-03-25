@@ -668,6 +668,15 @@ def build_market_context(signal: dict, api_url: str, api_key: str) -> dict:
     except Exception:
         pass
 
+    # 9. Options flow context (from UW Watcher data via flow radar)
+    flow_context = {}
+    try:
+        flow_raw = http_json(url=f"{base}/api/flow/radar", headers=headers, timeout=15)
+        if isinstance(flow_raw, dict):
+            flow_context = flow_raw
+    except Exception:
+        pass
+
     # Extract key factors from composite response for agent context
     factors_raw = composite.get("factors", {}) if isinstance(composite, dict) else {}
 
@@ -685,6 +694,7 @@ def build_market_context(signal: dict, api_url: str, api_key: str) -> dict:
         "earnings": earnings,
         "zone": zone,
         "portfolio": portfolio,
+        "flow": flow_context,
         "api_url": api_url,
         "api_key": api_key,
     }
