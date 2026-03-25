@@ -19,6 +19,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/uw", tags=["uw-flow"])
 
 REDIS_FLOW_TTL = 21600  # 6 hours — keys expire after market close
+REDIS_TICKER_TTL = 3600  # 1 hour — per-ticker raw data for /api/uw/ticker/{ticker}
+REDIS_MARKET_FLOW_TTL = 3600  # 1 hour — aggregate market flow snapshot
 
 
 class TickerFlowData(BaseModel):
@@ -56,6 +58,13 @@ async def ingest_uw_ticker_updates(req: UWTickerUpdateRequest, _=Depends(require
     redis_written = 0
     pg_written = 0
     errors = []
+
+    # Aggregate tracking for uw:market_flow:latest
+    spy_data = None
+    qqq_data = None
+    agg_premium = 0.0
+    bearish_count = 0
+    bullish_count = 0
 
     for t in req.tickers:
         ticker = t.ticker.upper()
@@ -126,9 +135,40 @@ async def ingest_uw_ticker_updates(req: UWTickerUpdateRequest, _=Depends(require
                 }
                 await redis.set(redis_key, json.dumps(redis_val), ex=REDIS_FLOW_TTL)
                 redis_written += 1
+
+                # Also write uw:ticker:{SYMBOL} — raw per-ticker data consumed by
+                # /api/uw/ticker/{ticker}, flow_radar, and committee context builder
+                ticker_raw = {
+                    "ticker": ticker,
+                    "price": t.price,
+                    "change_pct": t.change_pct,
+                    "volume": t.volume,
+                    "pc_ratio": t.pc_ratio,
+                    "put_volume": t.put_volume,
+                    "call_volume": t.call_volume,
+                    "total_premium": t.total_premium,
+                    "flow_sentiment": sentiment,
+                    "flow_premium": t.flow_premium,
+                    "flow_pct": t.flow_pct,
+                    "received_at": now_iso,
+                    "source_timestamp": req.timestamp or now_iso,
+                }
+                await redis.set(f"uw:ticker:{ticker}", json.dumps(ticker_raw), ex=REDIS_TICKER_TTL)
+
             except Exception as e:
                 errors.append({"ticker": ticker, "target": "redis", "error": str(e)})
                 logger.warning("Redis write failed for %s: %s", ticker, e)
+
+        # --- Track aggregate stats for market flow snapshot ---
+        agg_premium += float(t.total_premium or 0)
+        if sentiment == "BEARISH":
+            bearish_count += 1
+        elif sentiment == "BULLISH":
+            bullish_count += 1
+        if ticker == "SPY":
+            spy_data = t
+        elif ticker == "QQQ":
+            qqq_data = t
 
         # --- 2. Write to Postgres flow_events (persistent history) ---
         if pool:
@@ -158,6 +198,22 @@ async def ingest_uw_ticker_updates(req: UWTickerUpdateRequest, _=Depends(require
             except Exception as e:
                 errors.append({"ticker": ticker, "target": "postgres", "error": str(e)})
                 logger.warning("Postgres write failed for %s: %s", ticker, e)
+
+    # --- 3. Write aggregate market flow snapshot (SPY/QQQ P:C, sentiment counts) ---
+    if redis and redis_written > 0:
+        try:
+            market_flow = {
+                "timestamp": req.timestamp or now_iso,
+                "spy_pc_ratio": spy_data.pc_ratio if spy_data else None,
+                "qqq_pc_ratio": qqq_data.pc_ratio if qqq_data else None,
+                "total_premium_all": agg_premium,
+                "bearish_flow_count": bearish_count,
+                "bullish_flow_count": bullish_count,
+                "ticker_count": redis_written,
+            }
+            await redis.set("uw:market_flow:latest", json.dumps(market_flow), ex=REDIS_MARKET_FLOW_TTL)
+        except Exception as e:
+            logger.warning("Market flow aggregate write failed: %s", e)
 
     logger.info(
         "UW ingestion: %d tickers received, %d Redis, %d Postgres, %d errors",
