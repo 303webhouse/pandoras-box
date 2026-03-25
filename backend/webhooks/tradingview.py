@@ -55,7 +55,7 @@ STRATEGY_COOLDOWNS = {
     "Holy_Grail": {"equity": 7200, "crypto": 3600},    # 2h equity, 1h crypto (was 4h/2h — too aggressive on vol days)
     "Scout": {"equity": 7200, "crypto": 3600},           # 2h equity, 1h crypto (was 4h/2h)
     "Phalanx": {"equity": 3600, "crypto": 3600},         # 1h both
-    "Artemis": {"equity": 1800, "crypto": 1800},         # 30 min both
+    "Artemis": {"equity": 14400, "crypto": 7200},         # 4h equity, 2h crypto (was 30min — too noisy)
 }
 
 
@@ -711,6 +711,41 @@ async def process_artemis_signal(alert: TradingViewAlert, start_time: datetime):
     ):
         logger.info(f"Dedup skip: {signal_data.get('ticker')} {signal_data.get('strategy')}")
         return {"status": "skipped", "reason": "duplicate_within_cooldown"}
+
+    # Regime-aware ADX filter for Artemis (Phase 5 — Olympus approved)
+    # In bearish regimes, Artemis mean-reversion is unreliable without trend confirmation.
+    # Skip low-ADX Artemis signals when composite < 40.
+    adx_val = None
+    try:
+        adx_val = float(alert.adx) if alert.adx is not None else None
+    except (TypeError, ValueError):
+        pass
+
+    if adx_val is not None and adx_val < 15:
+        try:
+            from database.redis_client import get_redis_client
+            rc = await get_redis_client()
+            composite_raw = rc and await rc.get("bias:composite:latest")
+            if composite_raw:
+                import json as _json
+                composite = _json.loads(composite_raw)
+                comp_score = composite.get("composite_score", 50)
+                if isinstance(comp_score, str):
+                    comp_score = float(comp_score)
+                if comp_score < 40:
+                    logger.info(
+                        "Artemis signal SKIPPED: ADX %.1f < 15 in bearish regime "
+                        "(composite %s). Ticker: %s",
+                        adx_val, comp_score, alert.ticker,
+                    )
+                    return {
+                        "status": "skipped",
+                        "reason": "low_adx_bearish_regime",
+                        "adx": adx_val,
+                        "composite": comp_score,
+                    }
+        except Exception as e:
+            logger.warning(f"Artemis regime filter check failed (proceeding): {e}")
 
     asyncio.ensure_future(_process_with_market_structure(signal_data, source="tradingview"))
 
