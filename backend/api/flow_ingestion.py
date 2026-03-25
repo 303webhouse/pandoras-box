@@ -164,12 +164,76 @@ async def ingest_uw_ticker_updates(req: UWTickerUpdateRequest, _=Depends(require
         len(req.tickers), redis_written, pg_written, len(errors),
     )
 
-    result = {
+    # === Flow-to-Signal Promotion (Whale Hunter Replacement) ===
+    # When a UW flow event exceeds the premium threshold, create a DARK_POOL
+    # signal in the signals table so it appears as a trade idea card.
+    promoted = 0
+    for t in req.tickers:
+        if not t.ticker or not t.flow_sentiment:
+            continue
+
+        premium = t.total_premium or 0
+        # Configurable threshold — check Redis first, fall back to default
+        try:
+            threshold_raw = redis and await redis.get("config:uw_flow:signal_threshold")
+            threshold = int(threshold_raw) if threshold_raw else 1_000_000
+        except Exception:
+            threshold = 1_000_000  # $1M default
+
+        if premium < threshold:
+            continue
+
+        # Check cooldown — don't re-promote same ticker+direction within 4 hours
+        direction = "LONG" if t.flow_sentiment == "BULLISH" else "SHORT"
+        cooldown_key = f"signal:cooldown:{t.ticker.upper()}:UW_FLOW:{direction}"
+        try:
+            if redis and await redis.get(cooldown_key):
+                continue
+            if redis:
+                await redis.set(cooldown_key, "1", ex=14400)  # 4 hour cooldown
+        except Exception:
+            pass
+
+        # Build signal data for the unified pipeline
+        premium_display = f"${premium/1_000_000:.1f}M" if premium >= 1_000_000 else f"${premium/1_000:.0f}K"
+        signal_data = {
+            "ticker": t.ticker.upper(),
+            "strategy": "UW_FLOW",
+            "direction": direction,
+            "signal_type": "DARK_POOL",
+            "signal_category": "DARK_POOL",
+            "entry_price": t.price or 0,
+            "timeframe": "flow",
+            "source": "uw_watcher",
+            "asset_class": "EQUITY",
+            "metadata": {
+                "total_premium": premium,
+                "premium_display": premium_display,
+                "flow_sentiment": t.flow_sentiment,
+                "pc_ratio": t.pc_ratio,
+                "put_volume": t.put_volume,
+                "call_volume": t.call_volume,
+                "volume": t.volume,
+            },
+        }
+
+        try:
+            from signals.pipeline import process_signal_unified
+            import asyncio
+            asyncio.ensure_future(process_signal_unified(signal_data, source="uw_flow"))
+            promoted += 1
+            logger.info(
+                "UW flow promoted to DARK_POOL signal: %s %s (%s premium)",
+                t.ticker.upper(), direction, premium_display,
+            )
+        except Exception as e:
+            logger.warning("Failed to promote UW flow to signal: %s", e)
+
+    return {
         "status": "ok",
         "received": len(req.tickers),
         "redis_written": redis_written,
         "pg_written": pg_written,
+        "signals_promoted": promoted,
+        "errors": errors[:5] if errors else [],
     }
-    if errors:
-        result["errors"] = errors
-    return result

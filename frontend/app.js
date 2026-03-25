@@ -3641,7 +3641,22 @@ function renderGroupedSignals(groups) {
         // Primary setup section
         const category = (signal.signal_category || 'TRADE_SETUP');
         let primaryHtml = '';
-        if (category === 'FLOW_INTEL') {
+        if (category === 'DARK_POOL') {
+            let meta = signal.metadata || {};
+            if (typeof meta === 'string') { try { meta = JSON.parse(meta); } catch(e) {} }
+            const isUwFlow = signal.strategy === 'UW_FLOW';
+            const stratLabel = isUwFlow ? 'UW Flow' : formatStrategyName(signal.strategy);
+            primaryHtml = `
+                <div class="insight-primary">
+                    <div class="insight-primary-label">Primary: ${stratLabel}</div>
+                    <div class="insight-levels">
+                        <span>${meta.premium_display || (meta.total_premium ? '$' + (typeof formatLargeNumber === 'function' ? formatLargeNumber(meta.total_premium) : meta.total_premium) : '-')}</span>
+                        <span class="${(meta.flow_sentiment || '').toLowerCase()}">${meta.flow_sentiment || '-'}</span>
+                        ${meta.pc_ratio ? `<span>P:C ${Number(meta.pc_ratio).toFixed(2)}</span>` : ''}
+                        ${!isUwFlow && signal.entry_price ? `<span>POC: ${formatPrice(signal.entry_price)}</span>` : ''}
+                    </div>
+                </div>`;
+        } else if (category === 'FLOW_INTEL') {
             let meta = signal.metadata || {};
             if (typeof meta === 'string') { try { meta = JSON.parse(meta); } catch(e) {} }
             primaryHtml = `

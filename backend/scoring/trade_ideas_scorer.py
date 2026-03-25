@@ -88,6 +88,7 @@ STRATEGY_BASE_SCORES = {
     "PHALANX_BEAR": 40,
 
     # UW Flow (institutional options flow intelligence)
+    "UW_FLOW": 55,          # Promoted large-premium flow (>$1M) — Whale Hunter replacement
     "UW_FLOW_LONG": 40,
     "UW_FLOW_SHORT": 40,
 
