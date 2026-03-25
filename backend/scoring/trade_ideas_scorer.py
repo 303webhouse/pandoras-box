@@ -187,20 +187,23 @@ TICKER_SECTORS = {
 def calculate_signal_score(
     signal: Dict[str, Any],
     current_bias: Dict[str, Any],
-    sector_strength: Dict[str, Any] = None
+    sector_strength: Dict[str, Any] = None,
+    regime_context: Dict[str, Any] = None
 ) -> Tuple[float, str, Dict[str, Any]]:
     """
     Calculate composite score for a trade signal.
-    
+
     Args:
         signal: Signal data dict with strategy, direction, ticker, etc.
         current_bias: Current bias state with daily, weekly, cyclical levels
         sector_strength: Optional sector strength data for priority scoring
-    
+        regime_context: Optional regime override data (theme_keywords, reversal_mode, etc.)
+
     Returns:
         Tuple of (score, bias_alignment, triggering_factors)
     """
     triggering_factors = {}
+    regime_context = regime_context or {}
     
     # 1. Base score from strategy
     strategy = signal.get('strategy', '').upper()
@@ -218,16 +221,30 @@ def calculate_signal_score(
     
     # 2. Bias alignment multiplier (skip equity bias for crypto signals)
     direction = signal.get('direction', '').upper()
+    reversal_mode = regime_context.get("reversal_mode", False)
     if signal.get('asset_class', '').upper() == 'CRYPTO':
         bias_alignment, alignment_multiplier = "NEUTRAL", 1.0
     else:
         bias_alignment, alignment_multiplier = calculate_bias_alignment(direction, current_bias)
+
+    # 5H — Reversal Mode: flip alignment so counter-bias signals are favored
+    if reversal_mode and bias_alignment not in ("NEUTRAL",):
+        _REVERSAL_MAP = {
+            "STRONG_ALIGNED": ("STRONG_COUNTER", BIAS_ALIGNMENT["STRONG_COUNTER"]),
+            "ALIGNED": ("COUNTER_BIAS", BIAS_ALIGNMENT["COUNTER_BIAS"]),
+            "COUNTER_BIAS": ("ALIGNED", BIAS_ALIGNMENT["ALIGNED"]),
+            "STRONG_COUNTER": ("STRONG_ALIGNED", BIAS_ALIGNMENT["STRONG_ALIGNED"]),
+        }
+        if bias_alignment in _REVERSAL_MAP:
+            bias_alignment, alignment_multiplier = _REVERSAL_MAP[bias_alignment]
+
     triggering_factors["bias_alignment"] = {
         "value": bias_alignment,
         "multiplier": alignment_multiplier,
         "direction": direction,
         "composite_score": current_bias.get("composite_score"),
-        "source": "composite" if "composite_score" in current_bias else "legacy_voting"
+        "source": "composite" if "composite_score" in current_bias else "legacy_voting",
+        "reversal_mode": reversal_mode,
     }
     
     # 3. Technical confluence bonuses
@@ -393,7 +410,26 @@ def calculate_signal_score(
             "bonus": sector_bonus,
         }
     
-    # 6. Time-of-day adjustment (NEW — Training Bible E.03)
+    # 7. Catalyst-alignment bonus (5G)
+    catalyst_bonus = 0
+    theme_keywords = regime_context.get("theme_keywords", [])
+    if theme_keywords:
+        ticker = signal.get('ticker', '').upper()
+        notes = (signal.get('notes', '') or '').lower()
+        signal_type_lower = (signal.get('signal_type', '') or '').lower()
+        matched = []
+        for kw in theme_keywords:
+            kw_lower = kw.lower()
+            if kw_lower in ticker.lower() or kw_lower in notes or kw_lower in signal_type_lower:
+                matched.append(kw)
+        if matched:
+            catalyst_bonus = min(8, len(matched) * 4)
+            triggering_factors["catalyst_alignment"] = {
+                "matched_keywords": matched,
+                "bonus": catalyst_bonus,
+            }
+
+    # 8. Time-of-day adjustment (Training Bible E.03)
     timestamp = signal.get('timestamp')
     tod_adjustment, tod_window = calculate_time_of_day_adjustment(timestamp)
     triggering_factors["time_of_day"] = {
@@ -409,7 +445,7 @@ def calculate_signal_score(
     # =========================================================================
 
     # Pre-alignment score (affected by bias multiplier)
-    pre_alignment = base_score + tech_bonus + recency_bonus + rr_bonus + tod_adjustment
+    pre_alignment = base_score + tech_bonus + recency_bonus + rr_bonus + tod_adjustment + catalyst_bonus
     pre_alignment = max(0, pre_alignment)  # Floor at 0 before multiplying
 
     # Apply bias alignment multiplier (R1 fix: this is the ONLY place bias affects score)
@@ -436,8 +472,10 @@ def calculate_signal_score(
         "recency_bonus": recency_bonus,
         "rr_bonus": rr_bonus,
         "sector_bonus": sector_bonus,
+        "catalyst_bonus": catalyst_bonus,
         "raw_score": raw_score,
         "alignment_multiplier": alignment_multiplier,
+        "reversal_mode": reversal_mode,
         "final_score": round(final_score, 2)
     }
     

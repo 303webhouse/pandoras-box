@@ -172,9 +172,23 @@ async def apply_scoring(signal_data: Dict[str, Any]) -> Dict[str, Any]:
         except Exception as sect_err:
             logger.debug(f"Sector strength unavailable for scoring: {sect_err}")
 
-        # Calculate score (with sector strength if available)
+        # Fetch regime context for catalyst-alignment + reversal mode scoring
+        regime_context = None
+        try:
+            from database.redis_client import get_redis_client as _get_rc
+            _rc = await _get_rc()
+            if _rc:
+                regime_raw = await _rc.get("regime:current_override")
+                if regime_raw:
+                    import json as _rj
+                    regime_context = _rj.loads(regime_raw)
+        except Exception:
+            pass
+
+        # Calculate score (with sector strength + regime context if available)
         score, bias_alignment, triggering_factors = calculate_signal_score(
-            signal_data, current_bias, sector_strength=sector_strength
+            signal_data, current_bias, sector_strength=sector_strength,
+            regime_context=regime_context
         )
 
         # Contrarian qualification
