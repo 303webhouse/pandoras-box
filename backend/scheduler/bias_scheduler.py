@@ -95,6 +95,21 @@ _scheduler_status = {
         "status": "idle",
         "interval": "Daily 4:30 PM ET"
     },
+    "correlation_scan": {
+        "last_run": None,
+        "status": "idle",
+        "interval": "Daily 4:35 PM ET"
+    },
+    "trip_wire_monitor": {
+        "last_run": None,
+        "status": "idle",
+        "interval": "15 min (market hours)"
+    },
+    "flow_confluence": {
+        "last_run": None,
+        "status": "idle",
+        "interval": "15 min (market hours)"
+    },
     "scheduler_started": None
 }
 
@@ -2424,6 +2439,60 @@ async def scan_sector_strength():
         logger.error(f"Error in sector strength scan: {e}")
         return {}
 
+async def run_correlation_scan_job():
+    """Scheduled job: run correlation collapse scan and cache results."""
+    _scheduler_status["correlation_scan"]["status"] = "running"
+    try:
+        from analysis.correlation_monitor import run_correlation_scan
+        result = await run_correlation_scan()
+        _scheduler_status["correlation_scan"]["last_run"] = get_eastern_now().isoformat()
+        _scheduler_status["correlation_scan"]["status"] = "completed"
+        collapses = result.get("collapse_count", 0)
+        if collapses > 0:
+            logger.warning("⚠️ Correlation collapse detected: %d pairs", collapses)
+    except Exception as e:
+        _scheduler_status["correlation_scan"]["status"] = f"error: {str(e)}"
+        logger.error("Correlation scan job failed: %s", e)
+
+
+async def run_trip_wire_job():
+    """Scheduled job: check trip wire levels during market hours."""
+    if not is_trading_day():
+        return
+    now = get_eastern_now()
+    hour = now.hour + now.minute / 60.0
+    if not (9.5 <= hour <= 16.25):
+        return
+    _scheduler_status["trip_wire_monitor"]["status"] = "running"
+    try:
+        from analysis.trip_wire_monitor import run_trip_wire_scan
+        await run_trip_wire_scan()
+        _scheduler_status["trip_wire_monitor"]["last_run"] = get_eastern_now().isoformat()
+        _scheduler_status["trip_wire_monitor"]["status"] = "completed"
+    except Exception as e:
+        _scheduler_status["trip_wire_monitor"]["status"] = f"error: {str(e)}"
+        logger.error("Trip wire scan failed: %s", e)
+
+
+async def run_flow_confluence_job():
+    """Scheduled job: detect flow-signal confluence during market hours."""
+    if not is_trading_day():
+        return
+    now = get_eastern_now()
+    hour = now.hour + now.minute / 60.0
+    if not (9.5 <= hour <= 16.25):
+        return
+    _scheduler_status["flow_confluence"]["status"] = "running"
+    try:
+        from analysis.flow_confluence import run_flow_confluence_scan
+        await run_flow_confluence_scan()
+        _scheduler_status["flow_confluence"]["last_run"] = get_eastern_now().isoformat()
+        _scheduler_status["flow_confluence"]["status"] = "completed"
+    except Exception as e:
+        _scheduler_status["flow_confluence"]["status"] = f"error: {str(e)}"
+        logger.error("Flow confluence scan failed: %s", e)
+
+
 async def start_scheduler():
     """Start the background scheduler"""
     global _scheduler_started, _weekly_baseline, _scheduler_status
@@ -2644,7 +2713,34 @@ async def start_scheduler():
             name='Signal Outcome Scoring',
             replace_existing=True
         )
-        
+
+        # Correlation collapse scan (daily after close, 4:35 PM ET)
+        scheduler.add_job(
+            run_correlation_scan_job,
+            CronTrigger(day_of_week='mon-fri', hour=16, minute=35, timezone=ET),
+            id='correlation_scan',
+            name='Correlation Collapse Scan',
+            replace_existing=True
+        )
+
+        # Trip wire monitor (every 15 min during market hours)
+        scheduler.add_job(
+            run_trip_wire_job,
+            CronTrigger(day_of_week='mon-fri', minute='*/15', timezone=ET),
+            id='trip_wire_monitor',
+            name='Trip Wire Monitor',
+            replace_existing=True
+        )
+
+        # Flow-signal confluence (every 15 min during market hours)
+        scheduler.add_job(
+            run_flow_confluence_job,
+            CronTrigger(day_of_week='mon-fri', minute='5,20,35,50', timezone=ET),
+            id='flow_confluence',
+            name='Flow-Signal Confluence',
+            replace_existing=True
+        )
+
         scheduler.start()
         logger.info("âœ… APScheduler started - bias refresh scheduled for 9:45 AM ET")
         logger.info("âœ… Savita auto-search scheduled for 8:00 AM ET (days 12-23)")
@@ -2658,7 +2754,11 @@ async def start_scheduler():
         logger.info("âœ… WRR Buy Model scanner scheduled daily at 4:20 PM ET")
         logger.info("âœ… Strategy health monitor scheduled daily at 4:30 PM ET")
         logger.info("âœ… Signal outcome scoring scheduled for 9:00 PM ET")
-        
+        logger.info("âœ… Correlation collapse scan scheduled daily at 4:35 PM ET")
+
+        # Run initial correlation scan on startup
+        asyncio.create_task(run_correlation_scan_job())
+
         # ALSO start the scanner loop (APScheduler doesn't handle the variable-interval scanners)
         asyncio.create_task(_scanner_loop())
         logger.info("âœ… Scanner loop started (CTA + Crypto)")

@@ -215,6 +215,20 @@ async def store_theme_hit(hit: ThemeHit, _=Depends(verify_pivot_key)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/regime/correlations")
+async def get_correlations():
+    """Get latest correlation collapse scan results."""
+    try:
+        redis = await get_redis_client()
+        raw = await redis.get("regime:correlations")
+        if raw:
+            return json.loads(raw)
+        return {"pairs": [], "alerts": [], "collapse_count": 0, "decorrelated_count": 0, "timestamp": None}
+    except Exception as e:
+        logger.error(f"Error fetching correlations: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/regime/theme-hits")
 async def get_theme_hits(limit: int = 20):
     """Get recent theme-matched tweets/headlines."""
@@ -225,4 +239,64 @@ async def get_theme_hits(limit: int = 20):
         return {"hits": hits, "count": len(hits)}
     except Exception as e:
         logger.error(f"Error fetching theme hits: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Trip Wire Endpoints ──────────────────────────────────────
+
+@router.get("/regime/trip-wires")
+async def get_trip_wires_endpoint():
+    """Get configured trip wires and latest scan results."""
+    try:
+        redis = await get_redis_client()
+        raw = await redis.get("regime:trip_wire_latest")
+        if raw:
+            return json.loads(raw)
+        # No scan yet — return the wire config
+        from analysis.trip_wire_monitor import get_trip_wires
+        wires = await get_trip_wires()
+        return {"wires": wires, "triggered_count": 0, "newly_breached": [], "timestamp": None}
+    except Exception as e:
+        logger.error(f"Error fetching trip wires: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/regime/trip-wires")
+async def update_trip_wires(wires: List[dict], _=Depends(verify_pivot_key)):
+    """Replace the full trip wire config."""
+    try:
+        from analysis.trip_wire_monitor import save_trip_wires
+        await save_trip_wires(wires)
+        return {"status": "success", "count": len(wires)}
+    except Exception as e:
+        logger.error(f"Error saving trip wires: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/regime/trip-wire-alerts")
+async def get_trip_wire_alerts(limit: int = 20):
+    """Get recent trip wire breach alerts."""
+    try:
+        redis = await get_redis_client()
+        raw_alerts = await redis.lrange("regime:trip_wire_alerts", 0, limit - 1)
+        alerts = [json.loads(a) for a in raw_alerts] if raw_alerts else []
+        return {"alerts": alerts, "count": len(alerts)}
+    except Exception as e:
+        logger.error(f"Error fetching trip wire alerts: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Flow-Signal Confluence Endpoint ──────────────────────────
+
+@router.get("/regime/flow-confluence")
+async def get_flow_confluence():
+    """Get tickers where active signals and UW flow overlap."""
+    try:
+        redis = await get_redis_client()
+        raw = await redis.get("regime:flow_confluence")
+        if raw:
+            return json.loads(raw)
+        return {"confluences": [], "count": 0, "timestamp": None}
+    except Exception as e:
+        logger.error(f"Error fetching flow confluence: {e}")
         raise HTTPException(status_code=500, detail=str(e))
