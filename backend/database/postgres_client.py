@@ -1076,6 +1076,22 @@ async def init_database():
             CREATE INDEX IF NOT EXISTS idx_pending_trades_status ON pending_trades(status);
         """)
 
+        # Regime overrides audit table
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS regime_overrides (
+                id SERIAL PRIMARY KEY,
+                regime_label TEXT NOT NULL,
+                direction TEXT NOT NULL DEFAULT 'NEUTRAL',
+                dominant_driver TEXT,
+                sectors_favored JSONB DEFAULT '[]',
+                sectors_avoided JSONB DEFAULT '[]',
+                theme_keywords JSONB DEFAULT '[]',
+                reversal_mode BOOLEAN DEFAULT FALSE,
+                expires_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+
         print("Database schema initialized")
 
 async def log_signal(

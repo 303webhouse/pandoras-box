@@ -53,6 +53,8 @@ Use this checklist when building the bull case:
    - Target at least 2:1 R:R; for swing trades, 3:1+ preferred
    - Measured moves: prior swing high distance from breakout = realistic target
 
+6. **Check Options Flow First**: Before analyzing the chart, look at the OPTIONS FLOW section in the context. If there's flow data for this ticker or sector, your analysis MUST reference it. Flow alignment (institutional money confirming the signal direction) significantly increases conviction. Flow divergence (smart money going the opposite direction) is a major red flag even if the chart looks good.
+
 ## CONVEXITY FRAMEWORK (dpg's edge philosophy)
 When building the bull case, evaluate it through the lens of ASYMMETRIC PAYOFF, not just directional probability:
 
@@ -145,7 +147,11 @@ Evaluate each trade through these structured risk categories:
    - Crowded long positioning (extreme OI + positive funding) = vulnerable to squeeze
    - "Long puke" cascades: forced liquidation triggers further liquidation
 
-5. **Options-Specific Risks (from Nick's playbook)**
+5. **Flow Conflict Risks**
+   - Flow conflict: if OPTIONS FLOW data shows institutional money moving opposite to the signal direction, this is a high-conviction counter-signal. Flag it prominently.
+   - Sector flow divergence: if the ticker's sector shows heavy put flow while this is a bullish signal (or vice versa), the setup is fighting institutional positioning.
+
+6. **Options-Specific Risks (from Nick's playbook)**
    - IV rank/percentile > 50: buying premium is expensive (lean toward selling strategies)
    - Bid-ask spread > 5% of mid-price = illiquid, bad fills
    - Open interest < 500 = illiquid strike; < 2,000 = use limit orders only
@@ -259,6 +265,12 @@ Evaluate every trade through this structured checklist:
 - For SPY/SPX signals: note whether the signal aligns with the current gamma regime
 - OPEX week amplifies these dynamics — gamma exposure unwinds can cause exaggerated moves Friday afternoon
 
+## OPTIONS FLOW INTEGRATION
+When OPTIONS FLOW data is available in the context, integrate it into your technical analysis:
+- Flow-confirmed breakouts (price breaking a level WITH aligned institutional flow) have significantly higher follow-through rates than chart-only breakouts.
+- Flow divergences at key levels (e.g., price at support but put flow accelerating) warn that the level may not hold.
+- Use flow data to assess conviction on your entry/exit recommendations.
+
 ## CONVEXITY ASSESSMENT (chart-based payoff structure)
 In addition to trend/level/volume analysis, assess whether the chart supports a CONVEX trade:
 
@@ -355,6 +367,13 @@ Apply these when making your recommendation:
 - **DTE > 21 for swing trades** to avoid theta decay trap.
 - **Don't copy institutional strategies**: Iron condors, naked puts, and premium selling are for accounts with $10M+ and 100+ concurrent positions. Your edge is convexity — small bets with outsized upside.
 - Check for earnings/FOMC/CPI within DTE window — factor in IV crush risk
+
+## FLOW ASSESSMENT
+When OPTIONS FLOW data is present, always include a "Flow Assessment" section in your synthesis:
+- Does the options market confirm or challenge this setup?
+- Any notable divergences between price action and institutional flow?
+- How does sector-level flow context affect the thesis?
+If no flow data is available for this ticker, note that as a gap.
 
 ## EDGE VALIDATION (from The Stable)
 Before recommending TAKE, verify the edge is real:

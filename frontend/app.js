@@ -1246,7 +1246,8 @@ async function loadInitialData() {
         fetchCompositeBias(),
         fetchTimeframeBias(),
         loadOpenPositionsEnhanced(),
-        loadHeadlines()
+        loadHeadlines(),
+        loadRegime()
     ]);
 
     // Schedule headline refreshes at midday and 1h before close
@@ -1259,6 +1260,9 @@ async function loadInitialData() {
 
     // Initialize timeframe card toggles
     initTimeframeToggles();
+
+    // Initialize regime bar controls
+    initRegimeBar();
 
     // bias-auto/shift-status polling removed (Phase 0D) — endpoint was dead
     
@@ -3591,7 +3595,7 @@ function renderGroupedSignals(groups) {
 
     container.innerHTML = groups.map(group => {
         const signal = group.primary_signal;
-        const score = Math.round(group.highest_score || signal.score_v2 || signal.score || 0);
+        const score = Math.round(group.display_score || group.highest_score || signal.score_v2 || signal.score || 0);
         const scoreClass = getScoreClass(score);
         const dirClass = group.direction === 'LONG' ? 'direction-long' : 'direction-short';
         const formatPrice = (val) => val ? '$' + parseFloat(val).toFixed(2) : '-';
@@ -3604,6 +3608,11 @@ function renderGroupedSignals(groups) {
             ? '<span class="confluence-badge conviction">CONVICTION</span>'
             : isConfirmed
             ? '<span class="confluence-badge confirmed">CONFIRMED</span>'
+            : '';
+
+        // Confirmation badge (5B)
+        const confirmBadge = group.signal_count > 1
+            ? `<span class="confirm-badge">\u00D7${group.signal_count} (${group.distinct_strategy_count} ${group.distinct_strategy_count === 1 ? 'strategy' : 'strategies'})</span>`
             : '';
 
         // Position overlap check
@@ -3693,7 +3702,7 @@ function renderGroupedSignals(groups) {
                         <span class="insight-ticker ticker-link" data-action="view-chart">${group.ticker}</span>
                         <span class="insight-direction ${dirClass}">${group.direction}</span>
                         <span class="insight-score ${scoreClass}">${score}</span>
-                        ${confluenceBadge}
+                        ${confluenceBadge}${confirmBadge}
                     </div>
                     <div class="insight-meta">
                         <span class="insight-updated" title="${group.last_signal_at || group.newest_at || ''}">${getTimeAgo(group.last_signal_at || group.newest_at)}</span>
@@ -7073,9 +7082,12 @@ function initOptionsFlow() {
             const target = btn.dataset.tab;
             const sectorsEl = document.getElementById('sectorsTabContent');
             const argusEl = document.getElementById('argusTabContent');
+            const themeEl = document.getElementById('themeTabContent');
             if (sectorsEl) sectorsEl.style.display = target === 'sectors' ? '' : 'none';
             if (argusEl) argusEl.style.display = target === 'argus' ? '' : 'none';
+            if (themeEl) themeEl.style.display = target === 'theme' ? '' : 'none';
             if (target === 'argus') loadFlowRadar();
+            if (target === 'theme') loadThemeIntel();
         });
     });
 
@@ -8073,10 +8085,14 @@ function renderHeadlines(articles) {
         return;
     }
 
+    // Apply theme keyword highlighting and sort matches to top (5C)
+    const highlighted = highlightHeadlinesByTheme(articles);
+
     // Show top 3 headlines in compact format
-    strip.innerHTML = articles.slice(0, 3).map(a => {
+    strip.innerHTML = highlighted.slice(0, 3).map(a => {
         const source = a.source ? `<span class="hl-source">${escapeHtml(a.source)}</span>` : '';
-        return `<div class="headline-compact">
+        const themeClass = a.themeMatch ? ' theme-highlight' : '';
+        return `<div class="headline-compact${themeClass}">
             <a href="${a.url || '#'}" target="_blank" rel="noopener">${escapeHtml(a.title)}</a>
             ${source}
         </div>`;
@@ -10561,6 +10577,271 @@ window.closeOptionsPosition = closeOptionsPosition;
 document.addEventListener('DOMContentLoaded', () => {
     setTimeout(initOptionsTab, 1600);
 });
+
+
+// ============================================
+// REGIME BAR — Phase 5 Catalyst Awareness
+// ============================================
+
+let currentRegime = null;
+
+async function loadRegime() {
+    try {
+        const response = await fetch(`${API_URL}/regime/current`);
+        const data = await response.json();
+        currentRegime = data;
+        renderRegimeBar(data);
+    } catch (error) {
+        console.warn('Failed to load regime:', error);
+        const el = document.getElementById('regimeLabel');
+        if (el) el.textContent = 'Regime data unavailable';
+    }
+}
+
+function renderRegimeBar(regime) {
+    const bar = document.getElementById('regimeBar');
+    const label = document.getElementById('regimeLabel');
+    const badge = document.getElementById('regimeSourceBadge');
+    const expiry = document.getElementById('regimeExpiry');
+    const pills = document.getElementById('regimePills');
+    const clearBtn = document.getElementById('regimeClearBtn');
+    const reversalToggle = document.getElementById('reversalModeToggle');
+
+    if (!bar || !label) return;
+
+    label.textContent = regime.regime_label;
+
+    // Source badge
+    if (regime.source === 'manual_override') {
+        badge.textContent = 'MANUAL';
+        badge.className = 'regime-source-badge manual';
+        clearBtn.style.display = 'inline-block';
+    } else {
+        badge.textContent = 'AUTO';
+        badge.className = 'regime-source-badge auto';
+        clearBtn.style.display = 'none';
+    }
+
+    // Direction-based bar color
+    bar.className = 'regime-bar';
+    if (regime.reversal_mode) {
+        bar.classList.add('reversal-active');
+    } else if (regime.direction === 'BULLISH') {
+        bar.classList.add('regime-bullish');
+    } else if (regime.direction === 'BEARISH') {
+        bar.classList.add('regime-bearish');
+    }
+
+    // Expiry countdown
+    if (regime.expires_at) {
+        const exp = new Date(regime.expires_at.endsWith('Z') ? regime.expires_at : regime.expires_at + 'Z');
+        const hoursLeft = Math.max(0, (exp - Date.now()) / 3600000).toFixed(1);
+        expiry.textContent = `Expires in ${hoursLeft}h`;
+        expiry.style.display = 'inline';
+    } else {
+        expiry.style.display = 'none';
+    }
+
+    // Render pills: dominant driver, favored, avoided
+    let pillsHtml = '';
+    if (regime.dominant_driver) {
+        pillsHtml += `<span class="regime-pill driver">\u26A1 ${regime.dominant_driver}</span>`;
+    }
+    (regime.sectors_favored || []).forEach(s => {
+        pillsHtml += `<span class="regime-pill favored">\u2713 ${s}</span>`;
+    });
+    (regime.sectors_avoided || []).forEach(s => {
+        pillsHtml += `<span class="regime-pill avoided">\u2715 ${s}</span>`;
+    });
+    if (regime.theme_keywords && regime.theme_keywords.length > 0) {
+        pillsHtml += `<span class="regime-pill keywords">\uD83D\uDD0D ${regime.theme_keywords.length} keywords</span>`;
+    }
+    pills.innerHTML = pillsHtml;
+
+    // Reversal mode toggle sync
+    if (reversalToggle) reversalToggle.checked = regime.reversal_mode || false;
+}
+
+function initRegimeBar() {
+    const overrideBtn = document.getElementById('regimeOverrideBtn');
+    const cancelBtn = document.getElementById('regimeOverrideCancel');
+    const submitBtn = document.getElementById('regimeOverrideSubmit');
+    const clearBtn = document.getElementById('regimeClearBtn');
+    const reversalToggle = document.getElementById('reversalModeToggle');
+    const modal = document.getElementById('regimeOverrideModal');
+
+    if (!overrideBtn) return;
+
+    // Override button opens modal
+    overrideBtn.addEventListener('click', () => {
+        modal.style.display = 'flex';
+        if (currentRegime && currentRegime.source === 'manual_override') {
+            document.getElementById('regimeOverrideLabel').value = currentRegime.regime_label || '';
+            document.getElementById('regimeDominantDriver').value = currentRegime.dominant_driver || '';
+            document.getElementById('regimeSectorsFavored').value = (currentRegime.sectors_favored || []).join(', ');
+            document.getElementById('regimeSectorsAvoided').value = (currentRegime.sectors_avoided || []).join(', ');
+            document.getElementById('regimeKeywords').value = (currentRegime.theme_keywords || []).join(', ');
+            document.getElementById('regimeReversalMode').checked = currentRegime.reversal_mode || false;
+        }
+    });
+
+    // Cancel modal
+    cancelBtn.addEventListener('click', () => { modal.style.display = 'none'; });
+
+    // Direction pills
+    document.querySelectorAll('.regime-direction-pills .pill-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.regime-direction-pills .pill-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+        });
+    });
+
+    // Submit override
+    submitBtn.addEventListener('click', async () => {
+        const direction = document.querySelector('.regime-direction-pills .pill-btn.active')?.dataset.direction || 'NEUTRAL';
+        const parseCsv = (val) => val ? val.split(',').map(s => s.trim().toUpperCase()).filter(Boolean) : [];
+
+        const payload = {
+            regime_label: document.getElementById('regimeOverrideLabel').value.trim(),
+            direction: direction,
+            dominant_driver: document.getElementById('regimeDominantDriver').value || null,
+            sectors_favored: parseCsv(document.getElementById('regimeSectorsFavored').value),
+            sectors_avoided: parseCsv(document.getElementById('regimeSectorsAvoided').value),
+            theme_keywords: document.getElementById('regimeKeywords').value
+                ? document.getElementById('regimeKeywords').value.split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
+                : [],
+            reversal_mode: document.getElementById('regimeReversalMode').checked,
+            expires_hours: parseFloat(document.getElementById('regimeExpiresHours').value) || 8,
+        };
+
+        if (!payload.regime_label) {
+            alert('Please enter a regime label.');
+            return;
+        }
+
+        try {
+            const response = await fetch(`${API_URL}/regime/override`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-API-Key': API_KEY },
+                body: JSON.stringify(payload),
+            });
+            const data = await response.json();
+            if (data.status === 'success') {
+                modal.style.display = 'none';
+                loadRegime();
+            } else {
+                alert('Failed to set regime: ' + JSON.stringify(data));
+            }
+        } catch (error) {
+            alert('Error setting regime: ' + error.message);
+        }
+    });
+
+    // Clear override
+    clearBtn.addEventListener('click', async () => {
+        try {
+            await fetch(`${API_URL}/regime/override`, {
+                method: 'DELETE',
+                headers: { 'X-API-Key': API_KEY },
+            });
+            loadRegime();
+        } catch (error) {
+            console.error('Failed to clear regime:', error);
+        }
+    });
+
+    // Reversal mode toggle
+    if (reversalToggle) {
+        reversalToggle.addEventListener('change', async (e) => {
+            if (currentRegime && currentRegime.source === 'manual_override') {
+                try {
+                    await fetch(`${API_URL}/regime/override`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-API-Key': API_KEY },
+                        body: JSON.stringify({
+                            regime_label: currentRegime.regime_label,
+                            direction: currentRegime.direction,
+                            dominant_driver: currentRegime.dominant_driver,
+                            sectors_favored: currentRegime.sectors_favored || [],
+                            sectors_avoided: currentRegime.sectors_avoided || [],
+                            theme_keywords: currentRegime.theme_keywords || [],
+                            reversal_mode: e.target.checked,
+                            expires_hours: 8,
+                        }),
+                    });
+                    loadRegime();
+                } catch (err) { console.error(err); }
+            }
+            localStorage.setItem('reversalMode', e.target.checked);
+        });
+    }
+
+    // Refresh regime every 5 minutes
+    setInterval(loadRegime, 300000);
+}
+
+
+// ============================================
+// HEADLINE KEYWORD HIGHLIGHTING — Phase 5C
+// ============================================
+
+function highlightHeadlinesByTheme(headlines) {
+    const keywords = currentRegime?.theme_keywords || [];
+    if (!keywords.length) return headlines;
+
+    return headlines.map(h => {
+        const text = (h.title || h.headline || '').toLowerCase();
+        const matches = keywords.some(kw => text.includes(kw.toLowerCase()));
+        return { ...h, themeMatch: matches };
+    }).sort((a, b) => {
+        if (a.themeMatch && !b.themeMatch) return -1;
+        if (!a.themeMatch && b.themeMatch) return 1;
+        return 0;
+    });
+}
+
+
+// ============================================
+// THEME INTEL — Phase 5D
+// ============================================
+
+async function loadThemeIntel() {
+    try {
+        const response = await fetch(`${API_URL}/regime/theme-hits?limit=10`);
+        const data = await response.json();
+
+        const container = document.getElementById('themeIntelContent');
+        if (!container) return;
+
+        if (!data.hits || data.hits.length === 0) {
+            container.innerHTML = '<p class="empty-state">No theme-matched intel</p>';
+            return;
+        }
+
+        container.innerHTML = data.hits.map(hit => {
+            const keywords = hit.matched_keywords.map(kw =>
+                `<span class="theme-keyword-tag">${escapeHtml(kw)}</span>`
+            ).join('');
+            const timeAgo = getTimeAgo(hit.timestamp);
+            const urlLink = hit.url ? `<a href="${escapeHtml(hit.url)}" target="_blank" rel="noopener" class="theme-link">\u2197</a>` : '';
+
+            return `
+                <div class="theme-hit-card">
+                    <div class="theme-hit-header">
+                        <span class="theme-hit-author">@${escapeHtml(hit.author)}</span>
+                        <span class="theme-hit-time">${timeAgo}</span>
+                        ${urlLink}
+                    </div>
+                    <div class="theme-hit-text">${escapeHtml(hit.text)}</div>
+                    <div class="theme-hit-keywords">${keywords}</div>
+                </div>
+            `;
+        }).join('');
+
+    } catch (error) {
+        console.warn('Failed to load theme intel:', error);
+    }
+}
 
 
 

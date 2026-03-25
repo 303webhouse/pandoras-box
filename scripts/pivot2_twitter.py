@@ -287,6 +287,55 @@ def push_alert(message: str, data: dict) -> bool:
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
+def check_tweet_for_theme(tweet_text: str, author: str, tweet_url: str = None):
+    """
+    Check if a scored tweet summary matches the active regime's theme keywords.
+    If it does, store it in Redis via the Railway API for frontend display.
+    """
+    try:
+        req = urllib.request.Request(
+            f"{PANDORA_API_URL}/regime/current",
+            headers={"X-API-Key": PIVOT_API_KEY},
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            regime = json.loads(resp.read().decode())
+
+        keywords = regime.get("theme_keywords", [])
+        if not keywords:
+            return False
+
+        text_lower = tweet_text.lower()
+        matched_keywords = [kw for kw in keywords if kw.lower() in text_lower]
+        if not matched_keywords:
+            return False
+
+        hit = json.dumps({
+            "text": tweet_text[:500],
+            "author": author,
+            "url": tweet_url,
+            "matched_keywords": matched_keywords,
+            "timestamp": dt.datetime.now(dt.timezone.utc).isoformat(),
+        }).encode()
+
+        req2 = urllib.request.Request(
+            f"{PANDORA_API_URL}/regime/theme-hit",
+            data=hit,
+            headers={
+                "Content-Type": "application/json",
+                "X-API-Key": PIVOT_API_KEY,
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req2, timeout=10) as resp2:
+            if resp2.status == 200:
+                print(f"  Theme hit stored: @{author} matched {matched_keywords}")
+                return True
+    except Exception as e:
+        # Non-critical — don't break the main scoring flow
+        pass
+    return False
+
+
 def main():
     results = []
     alerts = []
@@ -333,6 +382,11 @@ def main():
 
         if scored.get("alert") or has_alert_keyword(tweets):
             alerts.append(f"@{username}: {scored.get('summary', tweets[0][:100])}")
+
+        # Check for regime theme keyword matches (5D)
+        summary_text = scored.get("summary", "")
+        combined_text = summary_text + " " + " ".join(tweets[:3])
+        check_tweet_for_theme(combined_text, username)
 
     # After scoring loop, log signals for post-mortem correlation.
     signal_log_path = "/opt/openclaw/workspace/data/twitter_signals.jsonl"
