@@ -677,6 +677,19 @@ def build_market_context(signal: dict, api_url: str, api_key: str) -> dict:
     except Exception:
         pass
 
+    # 10. Whale volume context (Whale Hunter dark pool signals)
+    whale_context = {}
+    try:
+        if ticker:
+            whale_raw = http_json(
+                url=f"{base}/webhook/whale/recent/{ticker}",
+                headers=headers, timeout=10,
+            )
+            if isinstance(whale_raw, dict) and whale_raw.get("available"):
+                whale_context = whale_raw.get("whale", {})
+    except Exception:
+        pass
+
     # Extract key factors from composite response for agent context
     factors_raw = composite.get("factors", {}) if isinstance(composite, dict) else {}
 
@@ -695,6 +708,7 @@ def build_market_context(signal: dict, api_url: str, api_key: str) -> dict:
         "zone": zone,
         "portfolio": portfolio,
         "flow": flow_context,
+        "whale_volume": whale_context,
         "api_url": api_url,
         "api_key": api_key,
     }
