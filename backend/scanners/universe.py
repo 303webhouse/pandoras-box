@@ -87,9 +87,11 @@ async def build_scan_universe(
     max_tickers: int = 300,
     include_scanner_universe: bool = True,
     respect_muted: bool = True,
+    use_polygon_prefilter: bool = True,
 ) -> List[str]:
     """
     Build deduplicated scan universe in priority order:
+    0. Polygon pre-filter active universe (if available) — dynamic full-market scan
     1. Active position tickers (priority='high')
     2. Manual watchlist tickers (source='manual', not muted)
     3. Always-scan instruments (sector ETFs, indices, commodities, currencies, international)
@@ -105,6 +107,17 @@ async def build_scan_universe(
                 continue
             seen.add(ticker)
             universe.append(ticker)
+
+    # Stage 0: Polygon pre-filter (dynamic full-market scan)
+    if use_polygon_prefilter:
+        try:
+            from scanners.polygon_prefilter import get_active_universe
+            polygon_tickers = await get_active_universe()
+            if polygon_tickers:
+                logger.info("Polygon pre-filter provided %d active tickers", len(polygon_tickers))
+                add_unique(polygon_tickers)
+        except Exception as e:
+            logger.warning("Polygon pre-filter failed, using standard universe: %s", e)
 
     try:
         from database.postgres_client import get_postgres_client

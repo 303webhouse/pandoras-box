@@ -43,7 +43,7 @@ STR_CONFIG = {
     "bearish_candle_bottom_pct": 0.40,
     "lookback_bars": 3,
     "time_stop_bars": 3,
-    "cooldown_minutes": 30,
+    "cooldown_minutes": 1440,  # 24 hours — daily bars, one signal per ticker per day
 }
 
 SELL_RIP_FILTERS = {
@@ -53,8 +53,9 @@ SELL_RIP_FILTERS = {
     "max_rsi": 55,
 }
 
-# Track last signal time per ticker for cooldown
-_cooldown_tracker: Dict[str, datetime] = {}
+# Cooldown now stored in Redis (survives deploys)
+# Key format: scanner:str:cooldown:{ticker} with 24h TTL
+STR_COOLDOWN_SECONDS = 86400  # 24 hours
 
 
 # ── Data fetching ──
@@ -282,10 +283,7 @@ def check_sell_the_rip(
     if di_minus <= di_plus:
         return signals
 
-    # Cooldown check
-    last_signal = _cooldown_tracker.get(ticker)
-    if last_signal and (datetime.utcnow() - last_signal).total_seconds() < STR_CONFIG["cooldown_minutes"] * 60:
-        return signals
+    # Cooldown check is async — handled in run_sell_the_rip_scan via Redis
 
     # Sector RS data
     sector_class = "NEUTRAL"
@@ -405,9 +403,6 @@ def check_sell_the_rip(
                 idx=idx,
             )
             signals.append(signal)
-
-    if signals:
-        _cooldown_tracker[ticker] = datetime.utcnow()
 
     return signals
 
@@ -605,8 +600,16 @@ async def run_sell_the_rip_scan(tickers: List[str] = None) -> Dict:
     start = datetime.utcnow()
     all_signals = []
 
+    from database.redis_client import get_redis_client
+    redis = await get_redis_client()
+
     for ticker in tickers:
         try:
+            # Redis cooldown check (survives deploys)
+            cooldown_key = f"scanner:str:cooldown:{ticker}"
+            if redis and await redis.exists(cooldown_key):
+                continue
+
             df = await _fetch_daily_bars_async(ticker)
             if df.empty or len(df) < 60:
                 continue
@@ -618,6 +621,8 @@ async def run_sell_the_rip_scan(tickers: List[str] = None) -> Dict:
             sector_rs = all_sector_rs.get(sector_etf) if sector_etf else None
 
             signals = check_sell_the_rip(df, ticker, sector_etf, sector_rs)
+            if signals and redis:
+                await redis.set(cooldown_key, "1", ex=STR_COOLDOWN_SECONDS)
             all_signals.extend(signals)
         except Exception as e:
             logger.error("Sell the Rip scan error for %s: %s", ticker, e)
