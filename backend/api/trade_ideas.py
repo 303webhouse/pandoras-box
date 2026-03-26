@@ -24,7 +24,10 @@ router = APIRouter()
 
 # Strategies that fire on persistent conditions (not discrete events).
 # Duplicates within DEDUP_WINDOW_SECONDS are collapsed in grouped view.
-SCAN_BASED_STRATEGIES = {"Holy_Grail", "Scout", "Phalanx", "holy_grail", "scout", "phalanx"}
+SCAN_BASED_STRATEGIES = {
+    "Holy_Grail", "Scout", "Phalanx", "sell_the_rip", "CTA Scanner",
+    "holy_grail", "scout", "phalanx", "sell_the_rip", "cta scanner",
+}
 
 # How long to suppress a ticker+direction after user acts on it (seconds).
 # Matches the 24-hour signal window so rejected insights don't reappear
