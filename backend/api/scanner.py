@@ -220,3 +220,19 @@ async def analyze_ticker(ticker: str):
     except Exception as e:
         logger.error(f"Error analyzing {ticker}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/scanner/polygon-prefilter")
+async def get_polygon_prefilter_status():
+    """Check current Polygon pre-filter active universe."""
+    try:
+        from scanners.polygon_prefilter import get_active_universe, PREFILTER_CONFIG
+        universe = await get_active_universe()
+        return {
+            "active_tickers": len(universe) if universe else 0,
+            "tickers": universe[:20] if universe else [],
+            "config": PREFILTER_CONFIG,
+            "source": "polygon_snapshot",
+        }
+    except Exception as e:
+        return {"error": str(e), "active_tickers": 0, "tickers": []}

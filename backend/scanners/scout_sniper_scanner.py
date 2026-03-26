@@ -25,8 +25,8 @@ except ImportError:
 
 SCOUT_CONFIG = {
     "rsi_length": 14,
-    "rsi_oversold": 35,
-    "rsi_overbought": 65,
+    "rsi_oversold": 40,
+    "rsi_overbought": 60,
     "vol_length": 20,
     "tier_a_rvol": 1.6,
     "tier_b_rvol": 1.1,
@@ -35,7 +35,7 @@ SCOUT_CONFIG = {
     "sma_lengths": [50, 120, 200],
     "structural_lookback": 20,
     "lookback_bars": 3,
-    "min_quality_score": 3,
+    "min_quality_score": 2,
     # Stop and target
     "atr_buffer_mult": 0.15,
     "fallback_tp1_r": 1.5,
@@ -216,124 +216,122 @@ def check_scout_signals(df: pd.DataFrame, ticker: str) -> List[Dict]:
             continue
 
         # Time filter: skip first 15 min (9:30-9:45 ET) and lunch (12-1 PM ET)
-    try:
-        import pytz
-        et_now = datetime.now(pytz.timezone("America/New_York"))
-        is_first_15 = et_now.hour == 9 and et_now.minute < 45
-        is_lunch = et_now.hour == 12
-        time_ok = not is_first_15 and not is_lunch
-    except Exception:
-        time_ok = True  # If pytz fails, don't block signals
+        try:
+            import pytz
+            et_now = datetime.now(pytz.timezone("America/New_York"))
+            is_first_15 = et_now.hour == 9 and et_now.minute < 45
+            is_lunch = et_now.hour == 12
+            time_ok = not is_first_15 and not is_lunch
+        except Exception:
+            time_ok = True  # If pytz fails, don't block signals
 
-    if not time_ok:
-        return signals
-
-    # RVOL gate
-    if pd.isna(rvol) or rvol < SCOUT_CONFIG["tier_b_rvol"]:
-        return signals
-
-    tier = "A" if rvol >= SCOUT_CONFIG["tier_a_rvol"] else "B"
-
-    # Structural awareness
-    swing_high = latest.get("swing_high_20", float("inf"))
-    swing_low = latest.get("swing_low_20", 0)
-    structural_long_ok = not (latest["High"] >= swing_high - atr * 0.5)
-    structural_short_ok = not (latest["Low"] <= swing_low + atr * 0.5)
-
-    # SMA regime
-    sma_bullish = bool(latest.get("sma_bullish", False))
-    sma_bearish = bool(latest.get("sma_bearish", False))
-    sma_regime = "BULL" if sma_bullish else "BEAR" if sma_bearish else "MIXED"
-
-    # Long signal: RSI oversold hook + below VWAP + bullish reversal candle
-    long_sig = (
-        bool(latest.get("bull_hook", False)) and
-        latest["Close"] <= vwap and
-        bool(latest.get("bull_candle", False))
-    )
-
-    # Short signal: RSI overbought hook + above VWAP + bearish reversal candle
-    short_sig = (
-        bool(latest.get("bear_hook", False)) and
-        latest["Close"] >= vwap and
-        bool(latest.get("bear_candle", False))
-    )
-
-    # TRADEABLE vs IGNORE: use SMA regime as proxy for HTF VWAP
-    # In strong bearish regime (composite < -0.3), suppress ALL longs to IGNORE
-    # Signals still generate (useful as "time to take profits on shorts") but won't
-    # trigger Discord pings or participate in confluence scoring.
-    strong_bearish_bias = _scout_bias_cache.get("score", 0.0) < -0.3
-    if strong_bearish_bias:
-        tradeable_long = False
-    else:
-        tradeable_long = long_sig and (not sma_bearish or tier == "A")
-    tradeable_short = short_sig and (not sma_bullish or tier == "A")
-
-    # Quality score (0-6)
-    def calc_score(direction):
-        s = 0
-        s += 1 if time_ok else 0
-        s += 1 if (direction == "LONG" and not sma_bearish) or (direction == "SHORT" and not sma_bullish) else 0
-        s += 2 if tier == "A" else 1
-        s += 1 if (direction == "LONG" and sma_bullish) or (direction == "SHORT" and sma_bearish) else 0
-        s += 1 if (direction == "LONG" and structural_long_ok) or (direction == "SHORT" and structural_short_ok) else 0
-        return s
-
-    now_str = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-
-    for direction, sig, tradeable in [("LONG", long_sig, tradeable_long), ("SHORT", short_sig, tradeable_short)]:
-        if not sig:
+        if not time_ok:
             continue
 
-        score = calc_score(direction)
-        status = "TRADEABLE" if tradeable else "IGNORE"
+        # RVOL gate
+        if pd.isna(rvol) or rvol < SCOUT_CONFIG["tier_b_rvol"]:
+            continue
 
-        entry = round(float(latest["Close"]), 2)
-        if direction == "LONG":
-            stop = round(float(latest["Low"]) - float(atr) * SCOUT_CONFIG["atr_buffer_mult"], 2)
+        tier = "A" if rvol >= SCOUT_CONFIG["tier_a_rvol"] else "B"
+
+        # Structural awareness
+        swing_high = latest.get("swing_high_20", float("inf"))
+        swing_low = latest.get("swing_low_20", 0)
+        structural_long_ok = not (latest["High"] >= swing_high - atr * 0.5)
+        structural_short_ok = not (latest["Low"] <= swing_low + atr * 0.5)
+
+        # SMA regime
+        sma_bullish = bool(latest.get("sma_bullish", False))
+        sma_bearish = bool(latest.get("sma_bearish", False))
+        sma_regime = "BULL" if sma_bullish else "BEAR" if sma_bearish else "MIXED"
+
+        # Long signal: RSI oversold hook + bullish reversal candle (VWAP is quality bonus, not gate)
+        long_sig = (
+            bool(latest.get("bull_hook", False)) and
+            bool(latest.get("bull_candle", False))
+        )
+
+        # Short signal: RSI overbought hook + bearish reversal candle (VWAP is quality bonus, not gate)
+        short_sig = (
+            bool(latest.get("bear_hook", False)) and
+            bool(latest.get("bear_candle", False))
+        )
+
+        # TRADEABLE vs IGNORE: use SMA regime as proxy for HTF VWAP
+        # In strong bearish regime (composite < -0.3), suppress ALL longs to IGNORE
+        strong_bearish_bias = _scout_bias_cache.get("score", 0.0) < -0.3
+        if strong_bearish_bias:
+            tradeable_long = False
         else:
-            stop = round(float(latest["High"]) + float(atr) * SCOUT_CONFIG["atr_buffer_mult"], 2)
+            tradeable_long = long_sig and (not sma_bearish or tier == "A")
+        tradeable_short = short_sig and (not sma_bullish or tier == "A")
 
-        risk = abs(entry - stop)
-        if risk <= 0:
-            risk = float(atr) * 0.5
+        # Quality score (0-7)
+        def calc_score(direction):
+            s = 0
+            s += 1 if time_ok else 0
+            s += 1 if (direction == "LONG" and not sma_bearish) or (direction == "SHORT" and not sma_bullish) else 0
+            s += 2 if tier == "A" else 1
+            s += 1 if (direction == "LONG" and sma_bullish) or (direction == "SHORT" and sma_bearish) else 0
+            s += 1 if (direction == "LONG" and structural_long_ok) or (direction == "SHORT" and structural_short_ok) else 0
+            # VWAP confluence bonus: long below VWAP or short above VWAP
+            s += 1 if (direction == "LONG" and latest["Close"] <= vwap) or (direction == "SHORT" and latest["Close"] >= vwap) else 0
+            return s
 
-        if direction == "LONG":
-            tp1 = round(entry + risk * SCOUT_CONFIG["fallback_tp1_r"], 2)
-            tp2 = round(entry + risk * SCOUT_CONFIG["fallback_tp2_r"], 2)
-        else:
-            tp1 = round(entry - risk * SCOUT_CONFIG["fallback_tp1_r"], 2)
-            tp2 = round(entry - risk * SCOUT_CONFIG["fallback_tp2_r"], 2)
+        now_str = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
 
-        signals.append({
-            "signal_id": f"SCOUT_{ticker}_{now_str}",
-            "timestamp": datetime.utcnow().isoformat(),
-            "ticker": ticker,
-            "strategy": "Scout",
-            "direction": direction,
-            "signal_type": "SCOUT_ALERT",
-            "entry_price": entry,
-            "stop_loss": stop,
-            "target_1": tp1,
-            "target_2": tp2,
-            "risk_reward": round(SCOUT_CONFIG["fallback_tp1_r"], 1),
-            "timeframe": "15",
-            "trade_type": "EARLY_WARNING",
-            "asset_class": "EQUITY",
-            "status": "ACTIVE",
-            "rsi": round(float(rsi), 1),
-            "rvol": round(float(rvol), 2),
-            "score": score,
-            "tier": tier,
-            "tradeable_status": status,
-            "sma_regime": sma_regime,
-            "confidence": "SCOUT",
-            "priority": "LOW",
-            "source": "server",
-            "note": "Early warning - confirm with 1H setups before entry",
-        })
-        _cooldown_tracker[ticker] = bar_idx
+        for direction, sig, tradeable in [("LONG", long_sig, tradeable_long), ("SHORT", short_sig, tradeable_short)]:
+            if not sig:
+                continue
+
+            score = calc_score(direction)
+            status = "TRADEABLE" if tradeable else "IGNORE"
+
+            entry = round(float(latest["Close"]), 2)
+            if direction == "LONG":
+                stop = round(float(latest["Low"]) - float(atr) * SCOUT_CONFIG["atr_buffer_mult"], 2)
+            else:
+                stop = round(float(latest["High"]) + float(atr) * SCOUT_CONFIG["atr_buffer_mult"], 2)
+
+            risk = abs(entry - stop)
+            if risk <= 0:
+                risk = float(atr) * 0.5
+
+            if direction == "LONG":
+                tp1 = round(entry + risk * SCOUT_CONFIG["fallback_tp1_r"], 2)
+                tp2 = round(entry + risk * SCOUT_CONFIG["fallback_tp2_r"], 2)
+            else:
+                tp1 = round(entry - risk * SCOUT_CONFIG["fallback_tp1_r"], 2)
+                tp2 = round(entry - risk * SCOUT_CONFIG["fallback_tp2_r"], 2)
+
+            signals.append({
+                "signal_id": f"SCOUT_{ticker}_{now_str}",
+                "timestamp": datetime.utcnow().isoformat(),
+                "ticker": ticker,
+                "strategy": "Scout",
+                "direction": direction,
+                "signal_type": "SCOUT_ALERT",
+                "entry_price": entry,
+                "stop_loss": stop,
+                "target_1": tp1,
+                "target_2": tp2,
+                "risk_reward": round(SCOUT_CONFIG["fallback_tp1_r"], 1),
+                "timeframe": "15",
+                "trade_type": "EARLY_WARNING",
+                "asset_class": "EQUITY",
+                "status": "ACTIVE",
+                "rsi": round(float(rsi), 1),
+                "rvol": round(float(rvol), 2),
+                "score": score,
+                "tier": tier,
+                "tradeable_status": status,
+                "sma_regime": sma_regime,
+                "confidence": "SCOUT",
+                "priority": "LOW",
+                "source": "server",
+                "note": "Early warning - confirm with 1H setups before entry",
+            })
+            _cooldown_tracker[ticker] = bar_idx
 
     return signals
 

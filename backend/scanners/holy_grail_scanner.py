@@ -37,8 +37,10 @@ HG_CONFIG = {
     "target_r_multiple": 2.0,
 }
 
-# Track last signal bar index per ticker to enforce cooldown
-_cooldown_tracker: Dict[str, int] = {}
+# Cooldown now stored in Redis (survives deploys)
+# Key format: scanner:hg:cooldown:{ticker} with 24h TTL
+HG_COOLDOWN_SECONDS = 86400  # 24 hours
+HG_DAILY_CAP = 2  # Max signals per ticker per calendar day
 
 # VIX-adjusted touch tolerance (refreshed each scan cycle)
 _hg_touch_tolerance: float = HG_CONFIG["touch_tolerance_pct"]
@@ -137,11 +139,9 @@ def check_holy_grail_signals(df: pd.DataFrame, ticker: str) -> List[Dict]:
     if any(pd.isna(x) for x in [adx, di_plus, di_minus, rsi, ema20]):
         return signals
 
-    # Cooldown check — skip if last signal was within N bars
+    # Cooldown check is now async — handled in scan_ticker_holy_grail
+    # This function is sync, so we skip the check here
     bar_idx = len(df) - 1
-    last_signal_idx = _cooldown_tracker.get(ticker, -999)
-    if (bar_idx - last_signal_idx) < HG_CONFIG["cooldown_bars"]:
-        return signals
 
     # Long: ADX strong, uptrend, previous bar pulled back to EMA, current closes above EMA
     long_signal = (
@@ -196,7 +196,7 @@ def check_holy_grail_signals(df: pd.DataFrame, ticker: str) -> List[Dict]:
                 "rvol": di_spread,
                 "source": "server",
             })
-            _cooldown_tracker[ticker] = bar_idx
+            pass  # Redis cooldown set in scan_ticker_holy_grail
 
     if short_signal:
         entry = round(float(latest["Close"]), 2)
@@ -226,7 +226,7 @@ def check_holy_grail_signals(df: pd.DataFrame, ticker: str) -> List[Dict]:
                 "rvol": di_spread,
                 "source": "server",
             })
-            _cooldown_tracker[ticker] = bar_idx
+            pass  # Redis cooldown set in scan_ticker_holy_grail
 
     return signals
 
@@ -235,13 +235,36 @@ async def scan_ticker_holy_grail(ticker: str) -> List[Dict]:
     """Scan a single ticker for Holy Grail setups."""
     await _refresh_hg_vix_adjustments()
     try:
+        # Redis cooldown check (survives deploys)
+        from database.redis_client import get_redis_client
+        redis = await get_redis_client()
+        cooldown_key = f"scanner:hg:cooldown:{ticker}"
+        if redis and await redis.exists(cooldown_key):
+            return []
+
+        # Daily cap check
+        from datetime import date
+        cap_key = f"scanner:hg:daily_count:{ticker}:{date.today().isoformat()}"
+        if redis:
+            daily_count = await redis.get(cap_key)
+            if daily_count and int(daily_count) >= HG_DAILY_CAP:
+                return []
+
         df = await _fetch_1h_bars_async(ticker)
 
-        if df.empty or len(df) < 40:  # Need 20 EMA + 14 ADX warmup
+        if df.empty or len(df) < 40:
             return []
 
         df = calculate_holy_grail_indicators(df)
-        return check_holy_grail_signals(df, ticker)
+        signals = check_holy_grail_signals(df, ticker)
+
+        # Set cooldown and increment daily cap for each signal
+        if signals and redis:
+            await redis.set(cooldown_key, "1", ex=HG_COOLDOWN_SECONDS)
+            await redis.incr(cap_key)
+            await redis.expire(cap_key, 86400)  # TTL = 24h
+
+        return signals
 
     except Exception as e:
         logger.error("Holy Grail scan error for %s: %s", ticker, e)

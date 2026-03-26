@@ -303,7 +303,7 @@ async def lifespan(app: FastAPI):
                     logger.debug("Sell the Rip scanner: outside market hours, skipping")
             except Exception as e:
                 logger.warning("Sell the Rip scan loop error: %s", e)
-            await asyncio.sleep(300)  # 5 minutes
+            await asyncio.sleep(14400)  # 4 hours (daily bars don't change intraday)
 
     # VWAP validation: compute server-side VWAP every 15 min (4-min offset) during market hours
     async def vwap_validation_loop():

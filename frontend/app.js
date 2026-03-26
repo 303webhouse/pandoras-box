@@ -1827,9 +1827,10 @@ function renderCompositeBias(data, dailyData = null) {
         levelEl.style.color = colors.accent;
     }
     if (scoreEl) {
-        // Show composite score when available, fall back to old daily vote
+        // Map composite score (-1.0..+1.0) to 0-100 gauge for readability
+        // -1.0 = 0 (max bearish), 0.0 = 50 (neutral), +1.0 = 100 (max bullish)
         const scoreText = Number.isFinite(scoreValue)
-            ? scoreValue.toFixed(2)
+            ? `${Math.round(((scoreValue + 1) / 2) * 100)}/100`
             : (dailyVote === null ? '--' : `${dailyVote >= 0 ? '+' : ''}${dailyVote}`);
         scoreEl.textContent = `(${scoreText})`;
     }
@@ -1842,7 +1843,7 @@ function renderCompositeBias(data, dailyData = null) {
     }
     if (secondaryEl) {
         const compositeLevel = String(data.bias_level || 'NEUTRAL').replace(/_/g, ' ');
-        const compositeScoreText = Number.isFinite(scoreValue) ? scoreValue.toFixed(2) : '--';
+        const compositeScoreText = Number.isFinite(scoreValue) ? `${Math.round(((scoreValue + 1) / 2) * 100)}/100` : '--';
         const staleLabel = Number.isFinite(staleCount)
             ? ` - ${staleCount} stale factor${staleCount === 1 ? '' : 's'}`
             : '';
@@ -4314,7 +4315,7 @@ function renderCryptoBiasSummary() {
         levelEl.textContent = compositeLevel;
         levelEl.style.color = colors?.text || '#9fb7ff';
     }
-    if (scoreEl) scoreEl.textContent = Number.isFinite(compositeScoreVal) ? `(${compositeScoreVal.toFixed(2)})` : '(--)';
+    if (scoreEl) scoreEl.textContent = Number.isFinite(compositeScoreVal) ? `(${Math.round(((compositeScoreVal + 1) / 2) * 100)}/100)` : '(--)';
     if (confEl) {
         confEl.textContent = compositeConf;
         confEl.style.color = '#ffffff';
