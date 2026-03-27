@@ -1092,6 +1092,65 @@ async def init_database():
             )
         """)
 
+        # Sector constituents table (Phase 2 — sector drill-down popup)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS sector_constituents (
+                id SERIAL PRIMARY KEY,
+                sector_etf VARCHAR(10) NOT NULL,
+                sector_name VARCHAR(50) NOT NULL,
+                ticker VARCHAR(10) NOT NULL,
+                company_name VARCHAR(100) NOT NULL,
+                market_cap BIGINT,
+                avg_volume_20d BIGINT,
+                rank_in_sector INTEGER,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                updated_at TIMESTAMPTZ DEFAULT NOW(),
+                UNIQUE(sector_etf, ticker)
+            )
+        """)
+
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_sector_constituents_etf
+                ON sector_constituents(sector_etf);
+        """)
+
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_sector_constituents_ticker
+                ON sector_constituents(ticker);
+        """)
+
+        # Ticker profiles cache table (Phase 3 — single ticker analyzer)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS ticker_profiles (
+                ticker VARCHAR(10) PRIMARY KEY,
+                company_name VARCHAR(200),
+                description TEXT,
+                sector VARCHAR(50),
+                industry VARCHAR(100),
+                market_cap BIGINT,
+                high_52w NUMERIC(12,2),
+                low_52w NUMERIC(12,2),
+                pe_ratio NUMERIC(8,2),
+                dividend_yield NUMERIC(6,4),
+                next_earnings_date DATE,
+                analyst_consensus VARCHAR(20),
+                analyst_count INTEGER,
+                beta_spy NUMERIC(6,3),
+                beta_sector NUMERIC(6,3),
+                updated_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+
+        # Phase 4: Contextual Modifier columns on signals table
+        await conn.execute("""
+            ALTER TABLE signals
+            ADD COLUMN IF NOT EXISTS context_modifier INTEGER DEFAULT 0,
+            ADD COLUMN IF NOT EXISTS context_factors JSONB DEFAULT '{}',
+            ADD COLUMN IF NOT EXISTS adjusted_score INTEGER,
+            ADD COLUMN IF NOT EXISTS is_contrarian BOOLEAN DEFAULT FALSE,
+            ADD COLUMN IF NOT EXISTS context_updated_at TIMESTAMPTZ
+        """)
+
         print("Database schema initialized")
 
 async def log_signal(

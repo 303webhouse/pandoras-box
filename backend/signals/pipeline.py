@@ -573,6 +573,23 @@ async def process_signal_unified(
     except Exception as e:
         logger.warning(f"Score v2 computation failed (flash score still valid): {e}")
 
+    # 4e. Contextual confidence modifier (Phase 4) — fire-and-forget
+    try:
+        import asyncio as _asyncio
+        from enrichment.context_modifier import enrich_trade_idea
+        _base = signal_data.get("score") or signal_data.get("score_v2") or 50
+        _dir = signal_data.get("direction", "bearish").lower()
+        if _dir not in ("bullish", "bearish"):
+            _dir = "bearish" if _dir in ("short", "sell", "put") else "bullish"
+        _asyncio.ensure_future(enrich_trade_idea(
+            signal_id=signal_data["signal_id"],
+            ticker=signal_data.get("ticker", ""),
+            direction=_dir,
+            base_score=int(float(_base)),
+        ))
+    except Exception as e:
+        logger.warning(f"Context modifier launch failed (signal still processed): {e}")
+
     # 4f. Check for conflicting signals (opposite direction, same ticker)
     #     Both old + new are already in PostgreSQL with full scores/enrichment.
     #     If conflict detected, short-circuit — no broadcast, no committee, no Insight.

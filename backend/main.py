@@ -652,6 +652,7 @@ from api.flow_ingestion import router as flow_ingestion_router
 from api.flow_radar import router as flow_radar_router
 from api.regime import router as regime_router
 from api.catalyst_calendar import router as catalyst_router
+from api.ticker_profile import router as ticker_profile_router
 
 app.include_router(webhook_router, prefix="/webhook", tags=["webhooks"])
 app.include_router(circuit_breaker_router, prefix="/webhook", tags=["circuit-breaker"])
@@ -694,6 +695,7 @@ app.include_router(flow_radar_router, prefix="/api", tags=["flow-radar"])
 app.include_router(flow_ingestion_router, prefix="/api", tags=["uw-flow"])
 app.include_router(regime_router, prefix="/api", tags=["regime"])
 app.include_router(catalyst_router, prefix="/api", tags=["catalyst"])
+app.include_router(ticker_profile_router, prefix="/api", tags=["ticker-profile"])
 
 # Serve frontend static files
 # Multiple path resolution strategies for different deployment environments
