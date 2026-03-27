@@ -125,7 +125,7 @@ async def get_trade_ideas_feed(
             f"""
             SELECT * FROM signals
             WHERE {where_clause}
-            ORDER BY COALESCE(score_v2, score, 0) DESC, created_at DESC
+            ORDER BY COALESCE(adjusted_score, score_v2, score, 0) DESC, created_at DESC
             LIMIT ${idx} OFFSET ${idx + 1}
             """,
             *params,
@@ -209,7 +209,7 @@ async def get_trade_ideas_grouped(
             f"""
             SELECT * FROM signals
             WHERE {where_clause}
-            ORDER BY COALESCE(score_v2, score, 0) DESC, created_at DESC
+            ORDER BY COALESCE(adjusted_score, score_v2, score, 0) DESC, created_at DESC
             """,
             *params,
         )

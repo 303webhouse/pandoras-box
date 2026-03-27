@@ -1,23 +1,24 @@
 """
-Sector Heatmap API — yfinance-powered sector data for all 11 S&P 500 sectors.
-Fetches daily bars via yfinance batch download for SPY + 11 sector ETFs.
-Computes Day/Week/Month changes and daily RS rankings vs SPY.
+Sector API — heatmap + drill-down popup (Phase 2).
 
-Uses yfinance as primary data source (near-real-time quotes, free).
-Polygon Starter only provides 15-min delayed data, so yfinance is faster
-for this use case with only 12 tickers.
+Heatmap: yfinance-powered sector data for all 11 S&P 500 sectors.
+Leaders: Per-sector top-20 constituents with real-time Polygon snapshot data,
+         RSI, volume ratio, and options flow direction.
 """
 
 import json
 import logging
 import asyncio
-from datetime import datetime, timezone
+import os
+import aiohttp
+from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional
 
 import pytz
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException, Query
 
 from database.redis_client import get_redis_client
+from database.postgres_client import get_postgres_client
 
 logger = logging.getLogger(__name__)
 
@@ -238,3 +239,367 @@ async def get_sector_heatmap():
             pass
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 — Sector Drill-Down: seed data, snapshot helpers, leaders endpoint
+# ---------------------------------------------------------------------------
+
+POLYGON_API_KEY = os.getenv("POLYGON_API_KEY", "")
+SNAPSHOT_URL = "https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers"
+
+# Top-20 holdings per SPDR sector ETF (by market cap, as of Q1 2026)
+SECTOR_SEEDS: Dict[str, Dict] = {
+    "XLK": {
+        "name": "Technology",
+        "tickers": {
+            "AAPL": "Apple Inc", "MSFT": "Microsoft Corp", "NVDA": "NVIDIA Corp",
+            "AVGO": "Broadcom Inc", "ADBE": "Adobe Inc", "CRM": "Salesforce Inc",
+            "CSCO": "Cisco Systems", "ACN": "Accenture plc", "ORCL": "Oracle Corp",
+            "AMD": "Advanced Micro Devices", "INTC": "Intel Corp", "INTU": "Intuit Inc",
+            "TXN": "Texas Instruments", "QCOM": "Qualcomm Inc", "AMAT": "Applied Materials",
+            "MU": "Micron Technology", "NOW": "ServiceNow Inc", "LRCX": "Lam Research",
+            "ADI": "Analog Devices", "KLAC": "KLA Corp",
+        },
+    },
+    "XLF": {
+        "name": "Financials",
+        "tickers": {
+            "JPM": "JPMorgan Chase", "V": "Visa Inc", "MA": "Mastercard Inc",
+            "BAC": "Bank of America", "WFC": "Wells Fargo", "GS": "Goldman Sachs",
+            "MS": "Morgan Stanley", "SPGI": "S&P Global", "BLK": "BlackRock Inc",
+            "AXP": "American Express", "C": "Citigroup Inc", "SCHW": "Charles Schwab",
+            "CB": "Chubb Ltd", "MMC": "Marsh McLennan", "PGR": "Progressive Corp",
+            "ICE": "Intercontinental Exchange", "CME": "CME Group", "AON": "Aon plc",
+            "MET": "MetLife Inc", "AIG": "American Intl Group",
+        },
+    },
+    "XLE": {
+        "name": "Energy",
+        "tickers": {
+            "XOM": "Exxon Mobil", "CVX": "Chevron Corp", "COP": "ConocoPhillips",
+            "SLB": "Schlumberger", "EOG": "EOG Resources", "MPC": "Marathon Petroleum",
+            "PSX": "Phillips 66", "VLO": "Valero Energy", "OXY": "Occidental Petroleum",
+            "HAL": "Halliburton Co", "WMB": "Williams Cos", "KMI": "Kinder Morgan",
+            "FANG": "Diamondback Energy", "DVN": "Devon Energy", "HES": "Hess Corp",
+            "BKR": "Baker Hughes", "TRGP": "Targa Resources", "OKE": "ONEOK Inc",
+            "CTRA": "Coterra Energy", "EQT": "EQT Corp",
+        },
+    },
+    "XLV": {
+        "name": "Health Care",
+        "tickers": {
+            "UNH": "UnitedHealth Group", "JNJ": "Johnson & Johnson", "LLY": "Eli Lilly",
+            "ABBV": "AbbVie Inc", "MRK": "Merck & Co", "PFE": "Pfizer Inc",
+            "TMO": "Thermo Fisher", "ABT": "Abbott Labs", "DHR": "Danaher Corp",
+            "BMY": "Bristol-Myers Squibb", "AMGN": "Amgen Inc", "GILD": "Gilead Sciences",
+            "ISRG": "Intuitive Surgical", "REGN": "Regeneron", "VRTX": "Vertex Pharma",
+            "CI": "Cigna Group", "CVS": "CVS Health", "ELV": "Elevance Health",
+            "HUM": "Humana Inc", "ZTS": "Zoetis Inc",
+        },
+    },
+    "XLI": {
+        "name": "Industrials",
+        "tickers": {
+            "CAT": "Caterpillar Inc", "GE": "GE Aerospace", "UNP": "Union Pacific",
+            "UPS": "United Parcel Service", "RTX": "RTX Corp", "HON": "Honeywell",
+            "BA": "Boeing Co", "DE": "Deere & Co", "MMM": "3M Co",
+            "ITW": "Illinois Tool Works", "WM": "Waste Management", "EMR": "Emerson Electric",
+            "ETN": "Eaton Corp", "FDX": "FedEx Corp", "NSC": "Norfolk Southern",
+            "CSX": "CSX Corp", "GD": "General Dynamics", "LMT": "Lockheed Martin",
+            "TDG": "TransDigm Group", "PCAR": "PACCAR Inc",
+        },
+    },
+    "XLP": {
+        "name": "Consumer Staples",
+        "tickers": {
+            "WMT": "Walmart Inc", "PG": "Procter & Gamble", "KO": "Coca-Cola Co",
+            "PEP": "PepsiCo Inc", "COST": "Costco Wholesale", "PM": "Philip Morris",
+            "MO": "Altria Group", "MDLZ": "Mondelez Intl", "CL": "Colgate-Palmolive",
+            "GIS": "General Mills", "KMB": "Kimberly-Clark", "SYY": "Sysco Corp",
+            "ADM": "Archer-Daniels-Midland", "KHC": "Kraft Heinz", "HSY": "Hershey Co",
+            "STZ": "Constellation Brands", "K": "Kellanova", "TSN": "Tyson Foods",
+            "CAG": "Conagra Brands", "MKC": "McCormick & Co",
+        },
+    },
+    "XLY": {
+        "name": "Consumer Disc.",
+        "tickers": {
+            "AMZN": "Amazon.com", "TSLA": "Tesla Inc", "HD": "Home Depot",
+            "MCD": "McDonald's Corp", "NKE": "Nike Inc", "SBUX": "Starbucks Corp",
+            "TJX": "TJX Companies", "LOW": "Lowe's Cos", "BKNG": "Booking Holdings",
+            "MAR": "Marriott Intl", "GM": "General Motors", "F": "Ford Motor",
+            "ORLY": "O'Reilly Automotive", "AZO": "AutoZone Inc", "ROST": "Ross Stores",
+            "DHI": "D.R. Horton", "LEN": "Lennar Corp", "YUM": "Yum! Brands",
+            "CMG": "Chipotle Mexican Grill", "EBAY": "eBay Inc",
+        },
+    },
+    "XLC": {
+        "name": "Communication",
+        "tickers": {
+            "META": "Meta Platforms", "GOOGL": "Alphabet Inc", "NFLX": "Netflix Inc",
+            "DIS": "Walt Disney", "CMCSA": "Comcast Corp", "T": "AT&T Inc",
+            "VZ": "Verizon Comm", "TMUS": "T-Mobile US", "CHTR": "Charter Comm",
+            "EA": "Electronic Arts", "WBD": "Warner Bros Discovery", "OMC": "Omnicom Group",
+            "TTWO": "Take-Two Interactive", "LYV": "Live Nation", "PARA": "Paramount Global",
+            "MTCH": "Match Group", "NWSA": "News Corp A", "IPG": "Interpublic Group",
+            "FOXA": "Fox Corp A", "RBLX": "Roblox Corp",
+        },
+    },
+    "XLRE": {
+        "name": "Real Estate",
+        "tickers": {
+            "PLD": "Prologis Inc", "AMT": "American Tower", "EQIX": "Equinix Inc",
+            "PSA": "Public Storage", "WELL": "Welltower Inc", "SPG": "Simon Property",
+            "O": "Realty Income", "CBRE": "CBRE Group", "DLR": "Digital Realty",
+            "CCI": "Crown Castle", "AVB": "AvalonBay Comm", "EQR": "Equity Residential",
+            "VICI": "VICI Properties", "IRM": "Iron Mountain", "SBAC": "SBA Communications",
+            "WY": "Weyerhaeuser", "ARE": "Alexandria Real Estate", "MAA": "Mid-America Apt",
+            "UDR": "UDR Inc", "ESS": "Essex Property Trust",
+        },
+    },
+    "XLU": {
+        "name": "Utilities",
+        "tickers": {
+            "NEE": "NextEra Energy", "SO": "Southern Co", "DUK": "Duke Energy",
+            "AEP": "American Electric Power", "SRE": "Sempra", "D": "Dominion Energy",
+            "EXC": "Exelon Corp", "XEL": "Xcel Energy", "PCG": "PG&E Corp",
+            "WEC": "WEC Energy Group", "ED": "Consolidated Edison", "EIX": "Edison Intl",
+            "AWK": "American Water Works", "ETR": "Entergy Corp", "AEE": "Ameren Corp",
+            "PPL": "PPL Corp", "CMS": "CMS Energy", "FE": "FirstEnergy Corp",
+            "ES": "Eversource Energy", "DTE": "DTE Energy",
+        },
+    },
+    "XLB": {
+        "name": "Materials",
+        "tickers": {
+            "LIN": "Linde plc", "APD": "Air Products", "SHW": "Sherwin-Williams",
+            "ECL": "Ecolab Inc", "NEM": "Newmont Corp", "FCX": "Freeport-McMoRan",
+            "NUE": "Nucor Corp", "DOW": "Dow Inc", "DD": "DuPont de Nemours",
+            "VMC": "Vulcan Materials", "MLM": "Martin Marietta", "PPG": "PPG Industries",
+            "CTVA": "Corteva Inc", "IFF": "IFF Inc", "ALB": "Albemarle Corp",
+            "CF": "CF Industries", "BALL": "Ball Corp", "PKG": "Packaging Corp",
+            "IP": "International Paper", "CE": "Celanese Corp",
+        },
+    },
+}
+
+
+async def _ensure_sector_constituents():
+    """Populate sector_constituents table if empty (idempotent seed)."""
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        count = await conn.fetchval("SELECT COUNT(*) FROM sector_constituents")
+        if count > 0:
+            return  # Already seeded
+
+        logger.info("Seeding sector_constituents table with %d sectors", len(SECTOR_SEEDS))
+        for etf, info in SECTOR_SEEDS.items():
+            for rank, (ticker, name) in enumerate(info["tickers"].items(), 1):
+                await conn.execute(
+                    """INSERT INTO sector_constituents
+                       (sector_etf, sector_name, ticker, company_name, rank_in_sector)
+                       VALUES ($1, $2, $3, $4, $5)
+                       ON CONFLICT (sector_etf, ticker) DO NOTHING""",
+                    etf, info["name"], ticker, name, rank,
+                )
+        logger.info("Sector constituents seeded successfully")
+
+
+async def _fetch_sector_snapshot(tickers: List[str]) -> Dict[str, Dict]:
+    """Fetch Polygon snapshot for a list of tickers. Returns {ticker: snapshot_data}."""
+    if not POLYGON_API_KEY:
+        return {}
+
+    # Build a stable cache key from first 5 sorted tickers (per-sector)
+    cache_key = "sector:snapshot:" + ",".join(sorted(tickers[:5]))
+    redis = await get_redis_client()
+
+    # Check per-request cache (5s TTL)
+    if redis:
+        try:
+            cached = await redis.get(cache_key)
+            if cached:
+                return json.loads(cached)
+        except Exception:
+            pass
+
+    result: Dict[str, Dict] = {}
+    try:
+        ticker_str = ",".join(tickers)
+        url = f"{SNAPSHOT_URL}?tickers={ticker_str}&apiKey={POLYGON_API_KEY}"
+
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                if resp.status != 200:
+                    logger.warning("Polygon sector snapshot HTTP %d", resp.status)
+                    return result
+                data = await resp.json()
+                for t in data.get("tickers", []):
+                    sym = t.get("ticker", "")
+                    day = t.get("day", {})
+                    prev = t.get("prevDay", {})
+                    price = day.get("c") or prev.get("c") or 0
+                    prev_close = prev.get("c") or 0
+                    day_change_pct = round((price - prev_close) / prev_close * 100, 2) if prev_close else 0
+                    result[sym] = {
+                        "price": round(price, 2),
+                        "day_change_pct": day_change_pct,
+                        "volume": day.get("v", 0),
+                        "prev_volume": prev.get("v", 0),
+                    }
+    except Exception as e:
+        logger.error("Polygon sector snapshot error: %s", e)
+
+    # Cache for 5 seconds
+    if redis and result:
+        try:
+            await redis.set(cache_key, json.dumps(result), ex=5)
+        except Exception:
+            pass
+
+    return result
+
+
+async def _get_rsi_for_ticker(ticker: str, redis) -> Optional[int]:
+    """Read RSI from existing Redis cache. Returns None if unavailable."""
+    if not redis:
+        return None
+    try:
+        for key_pattern in [f"rsi:{ticker}", f"indicator:rsi:{ticker}", f"scanner:rsi:{ticker}"]:
+            val = await redis.get(key_pattern)
+            if val is not None:
+                return int(float(val))
+    except Exception:
+        pass
+    return None
+
+
+async def _get_flow_direction(ticker: str) -> str:
+    """Derive flow direction from flow_events table (last 24h)."""
+    try:
+        pool = await get_postgres_client()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """SELECT
+                       COALESCE(SUM(CASE WHEN contract_type = 'call' THEN premium ELSE 0 END), 0) AS call_premium,
+                       COALESCE(SUM(CASE WHEN contract_type = 'put' THEN premium ELSE 0 END), 0) AS put_premium
+                   FROM flow_events
+                   WHERE ticker = $1 AND created_at > NOW() - INTERVAL '24 hours'""",
+                ticker,
+            )
+            if not row:
+                return "neutral"
+            total = (row["call_premium"] or 0) + (row["put_premium"] or 0)
+            if total == 0:
+                return "neutral"
+            call_pct = (row["call_premium"] or 0) / total
+            if call_pct > 0.6:
+                return "bullish"
+            elif call_pct < 0.4:
+                return "bearish"
+            return "neutral"
+    except Exception:
+        return "neutral"
+
+
+@router.get("/{sector_etf}/leaders")
+async def get_sector_leaders(
+    sector_etf: str,
+    fast: bool = Query(False, description="If true, return only price fields for fast polling"),
+):
+    """
+    Sector drill-down: top-20 constituents sorted by sector-relative performance.
+    Use ?fast=true for 5-second price-only polls.
+    """
+    sector_etf = sector_etf.upper()
+
+    if sector_etf not in SECTOR_SEEDS:
+        raise HTTPException(status_code=404, detail=f"Unknown sector ETF: {sector_etf}")
+
+    await _ensure_sector_constituents()
+
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT ticker, company_name, market_cap, avg_volume_20d, rank_in_sector "
+            "FROM sector_constituents WHERE sector_etf = $1 ORDER BY rank_in_sector",
+            sector_etf,
+        )
+
+    if not rows:
+        raise HTTPException(status_code=404, detail=f"No constituents found for {sector_etf}")
+
+    constituent_tickers = [r["ticker"] for r in rows]
+    all_tickers = [sector_etf] + constituent_tickers
+
+    snapshot = await _fetch_sector_snapshot(all_tickers)
+
+    etf_data = snapshot.get(sector_etf, {})
+    sector_day_change = etf_data.get("day_change_pct", 0)
+
+    redis = await get_redis_client()
+
+    constituents = []
+    for r in rows:
+        ticker = r["ticker"]
+        snap = snapshot.get(ticker, {})
+        price = snap.get("price", 0)
+        day_change_pct = snap.get("day_change_pct", 0)
+        sector_relative_pct = round(day_change_pct - sector_day_change, 2)
+
+        entry = {
+            "ticker": ticker,
+            "price": price,
+            "day_change_pct": day_change_pct,
+            "sector_relative_pct": sector_relative_pct,
+        }
+
+        if not fast:
+            entry["company_name"] = r["company_name"]
+            entry["market_cap"] = r["market_cap"]
+
+            vol = snap.get("volume", 0)
+            avg_vol = r["avg_volume_20d"]
+            if avg_vol and avg_vol > 0:
+                entry["volume_ratio"] = round(vol / avg_vol, 1)
+            elif snap.get("prev_volume") and snap["prev_volume"] > 0:
+                entry["volume_ratio"] = round(vol / snap["prev_volume"], 1)
+            else:
+                entry["volume_ratio"] = None
+
+            entry["rsi_14"] = await _get_rsi_for_ticker(ticker, redis)
+            entry["flow_direction"] = await _get_flow_direction(ticker)
+            entry["week_change_pct"] = None
+            entry["month_change_pct"] = None
+
+        constituents.append(entry)
+
+    constituents.sort(key=lambda c: c["sector_relative_pct"], reverse=True)
+
+    sector_name = SECTOR_SEEDS[sector_etf]["name"]
+
+    response = {
+        "sector_etf": sector_etf,
+        "sector_day_change_pct": sector_day_change,
+        "constituents": constituents,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    if not fast:
+        response["sector_name"] = sector_name
+        response["is_market_hours"] = _is_market_hours()
+        response["etf_price"] = etf_data.get("price", 0)
+
+    return response
+
+
+@router.post("/seed-constituents")
+async def seed_sector_constituents():
+    """Admin endpoint: force re-seed sector_constituents from hardcoded data."""
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        await conn.execute("DELETE FROM sector_constituents")
+
+    await _ensure_sector_constituents()
+    return {"status": "ok", "sectors": len(SECTOR_SEEDS), "tickers_per_sector": 20}
