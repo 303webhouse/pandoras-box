@@ -2762,7 +2762,10 @@ async def start_scheduler():
         # ALSO start the scanner loop (APScheduler doesn't handle the variable-interval scanners)
         asyncio.create_task(_scanner_loop())
         logger.info("âœ… Scanner loop started (CTA + Crypto)")
-        
+
+        asyncio.create_task(_sector_refresh_loop())
+        logger.info("âœ… Sector refresh loop started (15s interval, market hours)")
+
     except ImportError:
         logger.warning("APScheduler not installed, using fallback scheduler")
         # Fallback: Simple asyncio-based scheduler (handles both bias refresh AND scanners)
