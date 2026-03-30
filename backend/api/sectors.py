@@ -1,7 +1,8 @@
 """
 Sector API — heatmap + drill-down popup (Phase 2).
 
-Heatmap: yfinance-powered sector data for all 11 S&P 500 sectors.
+Heatmap: Polygon snapshot for live daily prices (primary), yfinance for
+         weekly/monthly historical changes (cached 30 min).
 Leaders: Per-sector top-20 constituents with real-time Polygon snapshot data,
          RSI, volume ratio, and options flow direction.
 """
@@ -46,6 +47,8 @@ TICKER_STR = " ".join(ALL_TICKERS)
 HEATMAP_CACHE_KEY = "sector_heatmap:yf"
 HEATMAP_LIVE_TTL = 10  # 10s during market hours for near-real-time
 HEATMAP_STALE_KEY = "sector_heatmap:last_close"
+HEATMAP_HIST_KEY = "sector_heatmap:hist"  # yfinance historical bars (slow, long cache)
+HEATMAP_HIST_TTL = 1800  # 30 min — daily bars don't change intraday
 
 
 def _is_market_hours() -> bool:
@@ -164,21 +167,51 @@ async def get_sector_heatmap():
         except Exception:
             pass
 
-    # Fetch bars from yfinance (single batch call)
-    all_closes = await _fetch_all_bars()
+    # --- Live data from Polygon snapshot (primary) ---
+    polygon_snapshot = await _fetch_sector_snapshot(ALL_TICKERS)
+    spy_snap = polygon_snapshot.get("SPY", {})
 
-    # Compute SPY changes
+    # --- Historical data from yfinance for weekly/monthly (cached 30 min) ---
+    all_closes = {}
+    if redis:
+        try:
+            hist_cached = await redis.get(HEATMAP_HIST_KEY)
+            if hist_cached:
+                all_closes = json.loads(hist_cached)
+        except Exception:
+            pass
+    if not all_closes:
+        all_closes = await _fetch_all_bars()
+        # Cache the historical bars separately (30 min TTL)
+        if redis and all_closes:
+            try:
+                await redis.set(HEATMAP_HIST_KEY, json.dumps(all_closes), ex=HEATMAP_HIST_TTL)
+            except Exception:
+                pass
     spy_closes = all_closes.get("SPY", [])
-    spy_change_1d = _pct_change(spy_closes, 1) or 0.0
+
+    # SPY daily change: prefer Polygon (live), fall back to yfinance
+    spy_change_1d = spy_snap.get("day_change_pct") if spy_snap else None
+    if spy_change_1d is None:
+        spy_change_1d = _pct_change(spy_closes, 1) or 0.0
     spy_change_1w = _pct_change(spy_closes, 5)
     spy_change_1m = _pct_change(spy_closes, 21)
 
     # Build sector data
     sectors_data = []
     for etf, info in SECTOR_WEIGHTS.items():
+        snap = polygon_snapshot.get(etf, {})
         closes = all_closes.get(etf, [])
-        price = closes[-1] if closes else None
-        change_1d = _pct_change(closes, 1)
+
+        # Price + daily change: prefer Polygon (live), fall back to yfinance
+        if snap and snap.get("price"):
+            price = snap["price"]
+            change_1d = snap.get("day_change_pct", 0.0)
+        else:
+            price = closes[-1] if closes else None
+            change_1d = _pct_change(closes, 1)
+
+        # Weekly/monthly: always yfinance (daily bars are fine for these)
         change_1w = _pct_change(closes, 5)
         change_1m = _pct_change(closes, 21)
 
