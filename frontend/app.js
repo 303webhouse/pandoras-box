@@ -11627,3 +11627,183 @@ function renderBlackSwanAlerts(data) {
     }
 }
 
+// ===== PORTFOLIO GREEKS =====
+loadPortfolioGreeks();
+setInterval(loadPortfolioGreeks, 60 * 1000);
+
+document.getElementById('greeksToggle')?.addEventListener('click', function() {
+    const vals = document.getElementById('greeksValues');
+    if (vals) {
+        const show = vals.style.display === 'none';
+        vals.style.display = show ? 'flex' : 'none';
+        this.innerHTML = show ? 'Greeks &#x25BE;' : 'Greeks &#x25B8;';
+    }
+});
+
+async function loadPortfolioGreeks() {
+    try {
+        const resp = await fetch(`${API_URL}/v2/positions/greeks`);
+        if (!resp.ok) return;
+        const data = await resp.json();
+        renderPortfolioGreeks(data);
+    } catch (e) {
+        // Silently fail — greeks are optional
+    }
+}
+
+function renderPortfolioGreeks(data) {
+    const row = document.getElementById('portfolioGreeksRow');
+    if (!row) return;
+
+    const totals = data.totals || {};
+    const delta = totals.delta || 0;
+    const gamma = totals.gamma || 0;
+    const theta = totals.theta || 0;
+    const vega = totals.vega || 0;
+
+    if (delta === 0 && gamma === 0 && theta === 0 && vega === 0) return;
+    row.style.display = 'flex';
+
+    const fmt = (v, prefix) => {
+        const sign = v >= 0 ? '+' : '';
+        return `${prefix} ${sign}${Math.round(v)}`;
+    };
+    document.getElementById('greekDelta').textContent = fmt(delta, '\u0394');
+    document.getElementById('greekDelta').className = 'greek-cell ' + (delta >= 0 ? 'positive' : 'negative');
+    document.getElementById('greekGamma').textContent = fmt(gamma, '\u0393');
+    document.getElementById('greekGamma').className = 'greek-cell ' + (gamma >= 0 ? 'positive' : 'negative');
+    document.getElementById('greekTheta').textContent = fmt(theta, '\u0398');
+    document.getElementById('greekTheta').className = 'greek-cell ' + (theta >= 0 ? 'positive' : 'negative');
+    document.getElementById('greekVega').textContent = fmt(vega, 'V');
+    document.getElementById('greekVega').className = 'greek-cell ' + (vega >= 0 ? 'positive' : 'negative');
+
+    _setGreekTooltip('greekDelta', 'delta', delta);
+    _setGreekTooltip('greekGamma', 'gamma', gamma);
+    _setGreekTooltip('greekTheta', 'theta', theta);
+    _setGreekTooltip('greekVega', 'vega', vega);
+}
+
+function _setGreekTooltip(elId, greek, value) {
+    const el = document.getElementById(elId);
+    if (!el) return;
+
+    let tip = '';
+    const absVal = Math.abs(Math.round(value));
+
+    switch (greek) {
+        case 'delta':
+            if (value < -100) {
+                tip = `Your portfolio loses ~$${absVal} for every $1 SPY rises. You're heavily short-biased \u2014 big moves up hurt, big moves down pay.`;
+            } else if (value < 0) {
+                tip = `Your portfolio loses ~$${absVal} for every $1 SPY rises. Moderately short-biased \u2014 you profit when the market drops.`;
+            } else if (value > 100) {
+                tip = `Your portfolio gains ~$${absVal} for every $1 SPY rises. You're heavily long-biased \u2014 you need the market to go up.`;
+            } else if (value > 0) {
+                tip = `Your portfolio gains ~$${absVal} for every $1 SPY rises. Moderately long-biased.`;
+            } else {
+                tip = `Your portfolio is roughly neutral \u2014 moves up and down affect you about equally.`;
+            }
+            break;
+        case 'gamma':
+            if (value > 30) {
+                tip = `High gamma (+${absVal}): Your delta shifts fast as prices move. Big moves in either direction will accelerate your P&L.`;
+            } else if (value > 0) {
+                tip = `Positive gamma (+${absVal}): Price moves will push your delta in the direction of the move. You benefit from volatility.`;
+            } else if (value < -30) {
+                tip = `Negative gamma (${Math.round(value)}): Price moves push your delta against you. Steady, range-bound markets are your friend.`;
+            } else {
+                tip = `Low gamma (${Math.round(value)}): Your delta is relatively stable \u2014 price moves won't dramatically shift your exposure.`;
+            }
+            break;
+        case 'theta':
+            if (value < -50) {
+                tip = `You're losing ~$${absVal}/day to time decay. Every day without a move costs you. This is the price of holding options.`;
+            } else if (value < 0) {
+                tip = `You're losing ~$${absVal}/day to time decay. Your positions need to move in your favor to overcome this daily cost.`;
+            } else if (value > 0) {
+                tip = `You're earning ~$${absVal}/day from time decay. Time is on your side \u2014 you profit as long as prices stay in your range.`;
+            } else {
+                tip = `Roughly theta-neutral: time decay isn't significantly helping or hurting you.`;
+            }
+            break;
+        case 'vega':
+            if (value > 20) {
+                tip = `High vega (+${absVal}): You profit when implied volatility rises. Fear spikes and panic selling help your positions.`;
+            } else if (value > 0) {
+                tip = `Positive vega (+${absVal}): Rising volatility mildly benefits your portfolio.`;
+            } else if (value < -20) {
+                tip = `Negative vega (${Math.round(value)}): You profit when implied volatility drops. Calm, stable markets help your positions.`;
+            } else {
+                tip = `Low vega (${Math.round(value)}): Volatility changes don't significantly affect your portfolio value.`;
+            }
+            break;
+    }
+
+    el.onmouseenter = function() {
+        const existing = el.querySelector('.greek-tooltip');
+        if (existing) existing.remove();
+        const tipEl = document.createElement('div');
+        tipEl.className = 'greek-tooltip';
+        tipEl.textContent = tip;
+        el.appendChild(tipEl);
+    };
+    el.onmouseleave = function() {
+        const existing = el.querySelector('.greek-tooltip');
+        if (existing) existing.remove();
+    };
+}
+
+// ===== EXPIRY TIMELINE =====
+document.querySelectorAll('.at-risk-mode').forEach(btn => {
+    btn.addEventListener('click', function() {
+        document.querySelectorAll('.at-risk-mode').forEach(b => b.classList.remove('active'));
+        this.classList.add('active');
+        const mode = this.dataset.mode;
+        document.getElementById('atRiskStrip').style.display = mode === 'direction' ? 'flex' : 'none';
+        document.getElementById('expiryTimeline').style.display = mode === 'expiry' ? 'block' : 'none';
+        if (mode === 'expiry') loadExpiryTimeline();
+    });
+});
+
+loadExpiryTimeline();
+setInterval(loadExpiryTimeline, 120 * 1000);
+
+async function loadExpiryTimeline() {
+    try {
+        const resp = await fetch(`${API_URL}/v2/positions/summary`);
+        if (!resp.ok) return;
+        const data = await resp.json();
+        renderExpiryTimeline(data.expiry_clusters || []);
+    } catch (e) {
+        console.error('Expiry timeline failed:', e);
+    }
+}
+
+function renderExpiryTimeline(clusters) {
+    const container = document.getElementById('expiryTimeline');
+    if (!container || clusters.length === 0) {
+        if (container) container.innerHTML = '<p class="empty-state">No options positions</p>';
+        return;
+    }
+
+    const maxCost = Math.max(...clusters.map(c => c.total_cost));
+    const now = new Date();
+
+    container.innerHTML = clusters.map(c => {
+        const expDate = new Date(c.date + 'T16:00:00');
+        const daysLeft = Math.max(0, Math.round((expDate - now) / (1000 * 60 * 60 * 24)));
+        const barPct = Math.max(5, (c.total_cost / maxCost) * 100);
+        const urgency = daysLeft < 14 ? 'urgent' : daysLeft < 30 ? 'soon' : 'safe';
+        const dateStr = expDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
+        return `<div class="expiry-cluster" title="Click to filter ledger">
+            <span class="expiry-date">${dateStr} (${daysLeft}d)</span>
+            <div class="expiry-bar-container">
+                <div class="expiry-bar ${urgency}" style="width:${barPct}%"></div>
+            </div>
+            <span class="expiry-amount">$${Math.round(c.total_cost).toLocaleString()}</span>
+            <span class="expiry-count">${c.count}x</span>
+        </div>`;
+    }).join('');
+}
+
