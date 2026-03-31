@@ -935,48 +935,53 @@ async def portfolio_greeks():
     if not rows:
         return {"status": "no_positions", "tickers": {}, "totals": {"delta": 0, "gamma": 0, "theta": 0, "vega": 0}}
 
-    positions = [_row_to_dict(r) for r in rows]
+    try:
+        positions = [_row_to_dict(r) for r in rows]
 
-    # Group positions by ticker
-    by_ticker: Dict[str, list] = {}
-    for p in positions:
-        by_ticker.setdefault(p["ticker"], []).append(p)
+        # Group positions by ticker
+        by_ticker: Dict[str, list] = {}
+        for p in positions:
+            by_ticker.setdefault(p["ticker"], []).append(p)
 
-    ticker_greeks = {}
-    total_delta = 0.0
-    total_gamma = 0.0
-    total_theta = 0.0
-    total_vega = 0.0
+        ticker_greeks = {}
+        total_delta = 0.0
+        total_gamma = 0.0
+        total_theta = 0.0
+        total_vega = 0.0
 
-    for ticker, pos_list in by_ticker.items():
-        try:
-            result = await get_ticker_greeks_summary(ticker, pos_list)
-            if result:
-                ticker_greeks[ticker] = result
-                total_delta += result.get("net_delta", 0)
-                total_gamma += result.get("net_gamma", 0)
-                total_theta += result.get("net_theta", 0)
-                total_vega += result.get("net_vega", 0)
-        except Exception as e:
-            logger.warning("Greeks fetch failed for %s: %s", ticker, e)
-            ticker_greeks[ticker] = {"error": str(e)}
+        for ticker, pos_list in by_ticker.items():
+            try:
+                greeks_result = await get_ticker_greeks_summary(ticker, pos_list)
+                if greeks_result:
+                    ticker_greeks[ticker] = greeks_result
+                    total_delta += greeks_result.get("net_delta", 0)
+                    total_gamma += greeks_result.get("net_gamma", 0)
+                    total_theta += greeks_result.get("net_theta", 0)
+                    total_vega += greeks_result.get("net_vega", 0)
+            except Exception as e:
+                logger.warning("Greeks fetch failed for %s: %s", ticker, e)
+                ticker_greeks[ticker] = {"error": str(e)}
 
-    result = {
-        "status": "ok",
-        "tickers": ticker_greeks,
-        "totals": {
-            "delta": round(total_delta, 2),
-            "gamma": round(total_gamma, 4),
-            "theta": round(total_theta, 2),
-            "vega": round(total_vega, 2),
-        },
-        "portfolio": {
-            "net_delta": round(total_delta, 2),
-            "net_gamma": round(total_gamma, 4),
-            "net_theta": round(total_theta, 2),
-            "net_vega": round(total_vega, 2),
-        },
-    }
+        result = {
+            "status": "ok",
+            "tickers": ticker_greeks,
+            "totals": {
+                "delta": round(total_delta, 2),
+                "gamma": round(total_gamma, 4),
+                "theta": round(total_theta, 2),
+                "vega": round(total_vega, 2),
+            },
+            "portfolio": {
+                "net_delta": round(total_delta, 2),
+                "net_gamma": round(total_gamma, 4),
+                "net_theta": round(total_theta, 2),
+                "net_vega": round(total_vega, 2),
+            },
+        }
+
+    except Exception as e:
+        logger.error("Greeks computation failed: %s", e)
+        return {"status": "computation_error", "error": str(e), "tickers": {}, "totals": {"delta": 0, "gamma": 0, "theta": 0, "vega": 0}}
 
     # Cache for 60 seconds + stale cache for 24 hours (after-hours fallback)
     if redis:
