@@ -891,6 +891,7 @@ async def portfolio_greeks():
     """
     Get aggregate portfolio greeks from Polygon.io options snapshots.
     Returns per-ticker and total portfolio greeks for committee context.
+    Gracefully returns zeros if API is unavailable (e.g., after hours).
     """
     # Check Redis cache first (60s TTL)
     redis = await get_redis_client()
@@ -902,19 +903,37 @@ async def portfolio_greeks():
         except Exception:
             pass
 
-    from integrations.polygon_options import get_ticker_greeks_summary, POLYGON_API_KEY
+    # Also check stale cache (24h TTL) for after-hours display
+    if redis:
+        try:
+            stale = await redis.get("portfolio:greeks:stale")
+            if stale:
+                stale_data = json.loads(stale)
+                stale_data["stale"] = True
+                return stale_data
+        except Exception:
+            pass
+
+    try:
+        from integrations.polygon_options import get_ticker_greeks_summary, POLYGON_API_KEY
+    except ImportError:
+        return {"status": "unavailable", "tickers": {}, "totals": {"delta": 0, "gamma": 0, "theta": 0, "vega": 0}}
 
     if not POLYGON_API_KEY:
-        raise HTTPException(status_code=503, detail="Polygon API key not configured")
+        return {"status": "no_api_key", "tickers": {}, "totals": {"delta": 0, "gamma": 0, "theta": 0, "vega": 0}}
 
-    pool = await get_postgres_client()
-    async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            "SELECT * FROM unified_positions WHERE status = 'OPEN'"
-        )
+    try:
+        pool = await get_postgres_client()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT * FROM unified_positions WHERE status = 'OPEN'"
+            )
+    except Exception as e:
+        logger.error("Greeks: DB query failed: %s", e)
+        return {"status": "db_error", "tickers": {}, "totals": {"delta": 0, "gamma": 0, "theta": 0, "vega": 0}}
 
     if not rows:
-        return {"status": "no_positions", "tickers": {}, "portfolio": {}}
+        return {"status": "no_positions", "tickers": {}, "totals": {"delta": 0, "gamma": 0, "theta": 0, "vega": 0}}
 
     positions = [_row_to_dict(r) for r in rows]
 
@@ -959,10 +978,12 @@ async def portfolio_greeks():
         },
     }
 
-    # Cache for 60 seconds
+    # Cache for 60 seconds + stale cache for 24 hours (after-hours fallback)
     if redis:
         try:
-            await redis.set("portfolio:greeks:cache", json.dumps(result), ex=60)
+            result_json = json.dumps(result)
+            await redis.set("portfolio:greeks:cache", result_json, ex=60)
+            await redis.set("portfolio:greeks:stale", result_json, ex=86400)
         except Exception:
             pass
 
