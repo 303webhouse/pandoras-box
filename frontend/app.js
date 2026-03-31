@@ -11807,3 +11807,18 @@ function renderExpiryTimeline(clusters) {
     }).join('');
 }
 
+// ===== STRATEGY CONTROLS MODAL =====
+document.getElementById('settingsBtn')?.addEventListener('click', function() {
+    const modal = document.getElementById('strategiesModal');
+    if (modal) modal.style.display = 'flex';
+});
+
+document.getElementById('closeStrategiesModal')?.addEventListener('click', function() {
+    const modal = document.getElementById('strategiesModal');
+    if (modal) modal.style.display = 'none';
+});
+
+document.getElementById('strategiesModal')?.addEventListener('click', function(e) {
+    if (e.target === this) this.style.display = 'none';
+});
+
