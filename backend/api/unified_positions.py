@@ -831,6 +831,19 @@ async def portfolio_summary(account: Optional[str] = Query(None)):
             except Exception:
                 stale_count += 1
 
+    # Compute expiry clusters for timeline view
+    expiry_map = {}
+    for p in positions:
+        exp = p.get("expiry")
+        if not exp:
+            continue
+        exp_str = str(exp)[:10]
+        if exp_str not in expiry_map:
+            expiry_map[exp_str] = {"date": exp_str, "count": 0, "total_cost": 0}
+        expiry_map[exp_str]["count"] += 1
+        expiry_map[exp_str]["total_cost"] += abs(p.get("cost_basis") or 0)
+    expiry_clusters = sorted(expiry_map.values(), key=lambda x: x["date"])
+
     return {
         "account_balance": account_balance,
         "cash": cash,
@@ -843,6 +856,7 @@ async def portfolio_summary(account: Optional[str] = Query(None)):
         "net_direction": net_direction,
         "direction_breakdown": {"long": long_count, "short": short_count, "mixed": mixed_count},
         "stale_positions": stale_count,
+        "expiry_clusters": expiry_clusters,
         "positions": summaries,
     }
 
@@ -878,6 +892,16 @@ async def portfolio_greeks():
     Get aggregate portfolio greeks from Polygon.io options snapshots.
     Returns per-ticker and total portfolio greeks for committee context.
     """
+    # Check Redis cache first (60s TTL)
+    redis = await get_redis_client()
+    if redis:
+        try:
+            cached = await redis.get("portfolio:greeks:cache")
+            if cached:
+                return json.loads(cached)
+        except Exception:
+            pass
+
     from integrations.polygon_options import get_ticker_greeks_summary, POLYGON_API_KEY
 
     if not POLYGON_API_KEY:
@@ -918,9 +942,15 @@ async def portfolio_greeks():
             logger.warning("Greeks fetch failed for %s: %s", ticker, e)
             ticker_greeks[ticker] = {"error": str(e)}
 
-    return {
+    result = {
         "status": "ok",
         "tickers": ticker_greeks,
+        "totals": {
+            "delta": round(total_delta, 2),
+            "gamma": round(total_gamma, 4),
+            "theta": round(total_theta, 2),
+            "vega": round(total_vega, 2),
+        },
         "portfolio": {
             "net_delta": round(total_delta, 2),
             "net_gamma": round(total_gamma, 4),
@@ -928,6 +958,15 @@ async def portfolio_greeks():
             "net_vega": round(total_vega, 2),
         },
     }
+
+    # Cache for 60 seconds
+    if redis:
+        try:
+            await redis.set("portfolio:greeks:cache", json.dumps(result), ex=60)
+        except Exception:
+            pass
+
+    return result
 
 
 @router.get("/v2/positions/{position_id}")

@@ -11376,6 +11376,154 @@ body[data-mode="analytics"] .analytics-shell {
     border-bottom: 2px solid #FF6B35 !important;
 }
 
+/* ===== PORTFOLIO GREEKS ROW ===== */
+.portfolio-greeks-row {
+    border-top: 1px solid var(--border-color);
+    padding: 4px 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.greeks-toggle {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    cursor: pointer;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    user-select: none;
+}
+
+.greeks-toggle:hover { color: var(--accent-teal); }
+
+.greeks-values {
+    display: flex;
+    gap: 10px;
+    font-family: 'Orbit', sans-serif;
+}
+
+.greek-cell {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-primary);
+    cursor: help;
+    position: relative;
+}
+
+.greek-cell.positive { color: #7CFF6B; }
+.greek-cell.negative { color: #FF6B35; }
+
+.greek-tooltip {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 11px;
+    color: var(--text-primary);
+    white-space: normal;
+    width: 220px;
+    line-height: 1.4;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+    z-index: 1000;
+    pointer-events: none;
+    font-family: -apple-system, sans-serif;
+    font-weight: 400;
+}
+
+/* ===== AT-RISK MODE TOGGLE ===== */
+.at-risk-mode-toggle {
+    display: flex;
+    gap: 2px;
+    padding: 2px;
+    background: var(--dark-bg);
+    border-radius: 4px;
+    margin: 0 8px 4px;
+}
+
+.at-risk-mode {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    font-family: 'Orbit', sans-serif;
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+    padding: 3px 6px;
+    border-radius: 3px;
+    cursor: pointer;
+}
+
+.at-risk-mode.active {
+    background: rgba(20, 184, 166, 0.15);
+    color: var(--accent-teal);
+}
+
+/* ===== EXPIRY TIMELINE ===== */
+.expiry-timeline {
+    padding: 4px 8px;
+}
+
+.expiry-cluster {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 0;
+    cursor: pointer;
+}
+
+.expiry-cluster:hover { opacity: 0.8; }
+
+.expiry-date {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    width: 90px;
+    flex-shrink: 0;
+    font-family: 'Orbit', sans-serif;
+}
+
+.expiry-bar-container {
+    flex: 1;
+    height: 14px;
+    background: rgba(255,255,255,0.05);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.expiry-bar {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.3s;
+}
+
+.expiry-bar.urgent { background: rgba(255, 107, 53, 0.5); }
+.expiry-bar.soon { background: rgba(255, 152, 0, 0.4); }
+.expiry-bar.safe { background: rgba(124, 255, 107, 0.3); }
+
+.expiry-amount {
+    font-size: 10px;
+    font-weight: 500;
+    color: var(--text-primary);
+    width: 60px;
+    text-align: right;
+    flex-shrink: 0;
+}
+
+.expiry-count {
+    font-size: 9px;
+    color: var(--text-secondary);
+    width: 20px;
+    text-align: right;
+    flex-shrink: 0;
+}
+
 /* ===== REGIME BAR (Phase 5A) ===== */
 .regime-bar {
     background: rgba(255, 255, 255, 0.03);
