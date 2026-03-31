@@ -11182,6 +11182,200 @@ body[data-mode="analytics"] .analytics-shell {
     cursor: pointer;
 }
 
+/* ===== MACRO TICKER STRIP ===== */
+.macro-strip {
+    background: var(--dark-bg);
+    border-bottom: 1px solid var(--border-color);
+    padding: 4px 16px;
+    overflow: hidden;
+}
+
+.macro-strip-inner {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: nowrap;
+}
+
+.macro-cell {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    font-family: 'Orbit', sans-serif;
+    font-size: 11px;
+    white-space: nowrap;
+}
+
+.macro-cell-label {
+    color: var(--text-secondary);
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    font-size: 10px;
+}
+
+.macro-cell-price {
+    color: var(--text-primary);
+    font-weight: 500;
+}
+
+.macro-cell-change {
+    font-weight: 600;
+    font-size: 10px;
+}
+
+.macro-cell-change.positive { color: #7CFF6B; }
+.macro-cell-change.negative { color: #FF6B35; }
+
+.macro-sep {
+    color: var(--border-color);
+    font-size: 8px;
+    user-select: none;
+}
+
+/* ===== TRIP WIRE MONITOR ===== */
+.trip-wire-section {
+    margin-top: 8px;
+    border-top: 1px solid var(--border-color);
+    padding-top: 6px;
+}
+
+.trip-wire-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px 8px;
+    cursor: pointer;
+    font-family: 'Orbit', sans-serif;
+}
+
+.trip-wire-header:hover {
+    background: rgba(20, 184, 166, 0.05);
+    border-radius: 4px;
+}
+
+.trip-wire-title {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 1.2px;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+}
+
+.trip-wire-count {
+    font-size: 10px;
+    color: var(--text-secondary);
+}
+
+.trip-wire-count.alert {
+    color: #FF6B35;
+    font-weight: 700;
+}
+
+.trip-wire-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 8px;
+    font-size: 11px;
+}
+
+.tw-label {
+    flex: 1;
+    color: var(--text-secondary);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.tw-values {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-family: 'Orbit', sans-serif;
+}
+
+.tw-current {
+    color: var(--text-primary);
+    font-weight: 500;
+    font-size: 11px;
+}
+
+.tw-threshold {
+    color: var(--text-secondary);
+    font-size: 10px;
+}
+
+.tw-status {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    text-transform: uppercase;
+}
+
+.tw-status.cold {
+    background: rgba(100, 100, 100, 0.2);
+    color: #888;
+}
+
+.tw-status.warm {
+    background: rgba(255, 152, 0, 0.15);
+    color: #ffb74d;
+}
+
+.tw-status.hot {
+    background: rgba(255, 107, 53, 0.2);
+    color: #FF6B35;
+    animation: tw-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes tw-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+}
+
+.trip-wire-regime-alert {
+    background: rgba(255, 107, 53, 0.12);
+    border: 1px solid rgba(255, 107, 53, 0.3);
+    border-radius: 6px;
+    padding: 6px 10px;
+    margin: 6px 8px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #FF6B35;
+    text-align: center;
+    animation: tw-pulse 1.5s ease-in-out infinite;
+}
+
+/* ===== BLACK SWAN ALERT BADGES ===== */
+.bs-alert-badge {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 3px;
+    letter-spacing: 0.3px;
+    white-space: nowrap;
+}
+
+.bs-alert-badge.bs-critical {
+    background: rgba(255, 107, 53, 0.2);
+    color: #FF6B35;
+    animation: tw-pulse 1.5s ease-in-out infinite;
+}
+
+.bs-alert-badge.bs-warning {
+    background: rgba(255, 152, 0, 0.15);
+    color: #ffb74d;
+}
+
+.regime-bar-alert {
+    border-bottom: 2px solid #FF6B35 !important;
+}
+
 /* ===== REGIME BAR (Phase 5A) ===== */
 .regime-bar {
     background: rgba(255, 255, 255, 0.03);

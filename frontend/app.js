@@ -7749,7 +7749,13 @@ function initOptionsFlow() {
 
     loadSectorHeatmap();
     loadFlowRadar();
+    loadMacroStrip();
+    loadTripWires();
+    loadBlackSwanAlerts();
     setInterval(loadSectorHeatmap, 10 * 1000);
+    setInterval(loadMacroStrip, 10 * 1000);
+    setInterval(loadTripWires, 30 * 1000);
+    setInterval(loadBlackSwanAlerts, 60 * 1000);
     // Flow radar: 2-min refresh during market hours
     setInterval(() => {
         const now = new Date();
@@ -11500,6 +11506,124 @@ async function loadThemeIntel() {
 }
 
 
+// ===== MACRO TICKER STRIP =====
+async function loadMacroStrip() {
+    try {
+        const resp = await fetch(`${API_URL}/macro/strip`);
+        if (!resp.ok) return;
+        const data = await resp.json();
+        renderMacroStrip(data.tickers);
+    } catch (e) {
+        console.error('Macro strip load failed:', e);
+    }
+}
 
+function renderMacroStrip(tickers) {
+    const container = document.getElementById('macroStripInner');
+    if (!container || !tickers || tickers.length === 0) return;
 
+    container.innerHTML = tickers.map((t, i) => {
+        const sign = t.change_pct >= 0 ? '+' : '';
+        const cls = t.change_pct >= 0 ? 'positive' : 'negative';
+        const sep = i < tickers.length - 1 ? '<span class="macro-sep">&middot;</span>' : '';
+        return `<div class="macro-cell" title="${escapeHtml(t.name)}">
+            <span class="macro-cell-label">${escapeHtml(t.label)}</span>
+            <span class="macro-cell-price">${t.price.toFixed(2)}</span>
+            <span class="macro-cell-change ${cls}">${sign}${t.change_pct.toFixed(2)}%</span>
+        </div>${sep}`;
+    }).join('');
+}
+
+// ===== TRIP WIRE MONITOR =====
+document.getElementById('tripWireToggle')?.addEventListener('click', function() {
+    const body = document.getElementById('tripWireBody');
+    if (body) body.style.display = body.style.display === 'none' ? 'block' : 'none';
+});
+
+async function loadTripWires() {
+    try {
+        const resp = await fetch(`${API_URL}/trip-wires`);
+        if (!resp.ok) return;
+        const data = await resp.json();
+        renderTripWires(data);
+    } catch (e) {
+        console.error('Trip wires load failed:', e);
+    }
+}
+
+function renderTripWires(data) {
+    const body = document.getElementById('tripWireBody');
+    const count = document.getElementById('tripWireCount');
+    if (!body) return;
+
+    if (count) {
+        const hotCount = data.hot_count || 0;
+        count.textContent = `(${hotCount} of 4)`;
+        count.className = 'trip-wire-count' + (hotCount >= 2 ? ' alert' : '');
+    }
+
+    let html = '';
+    if (data.regime_change) {
+        html += '<div class="trip-wire-regime-alert">REGIME CHANGE — 2+ TRIP WIRES ACTIVE — CLOSE SHORTS</div>';
+        body.style.display = 'block';
+    }
+
+    (data.wires || []).forEach(w => {
+        const currentStr = w.current != null ? w.current : '--';
+        const statusCls = (w.status || 'cold').toLowerCase();
+        html += `<div class="trip-wire-row">
+            <span class="tw-label">${escapeHtml(w.label)}</span>
+            <div class="tw-values">
+                <span class="tw-current">${currentStr}</span>
+                <span class="tw-threshold">/ ${escapeHtml(w.threshold_display)}</span>
+            </div>
+            <span class="tw-status ${statusCls}">${w.status}</span>
+        </div>`;
+    });
+
+    body.innerHTML = html;
+}
+
+// ===== BLACK SWAN ALERTS =====
+async function loadBlackSwanAlerts() {
+    try {
+        const resp = await fetch(`${API_URL}/alerts/black-swan`);
+        if (!resp.ok) return;
+        const data = await resp.json();
+        renderBlackSwanAlerts(data);
+    } catch (e) {
+        console.error('Black swan alerts failed:', e);
+    }
+}
+
+function renderBlackSwanAlerts(data) {
+    const bar = document.getElementById('regimeBar');
+    if (!bar) return;
+
+    bar.querySelectorAll('.bs-alert-badge').forEach(el => el.remove());
+
+    const alerts = data.alerts || [];
+    if (alerts.length === 0) {
+        bar.classList.remove('regime-bar-alert');
+        return;
+    }
+
+    const controlsArea = bar.querySelector('.regime-controls');
+    if (!controlsArea) return;
+
+    alerts.forEach(alert => {
+        const badge = document.createElement('span');
+        badge.className = 'bs-alert-badge';
+        badge.className += alert.severity === 'CRITICAL' ? ' bs-critical' : ' bs-warning';
+        badge.textContent = alert.title || alert.alert_type;
+        badge.title = alert.description || '';
+        controlsArea.prepend(badge);
+    });
+
+    if (data.should_pause_trading) {
+        bar.classList.add('regime-bar-alert');
+    } else {
+        bar.classList.remove('regime-bar-alert');
+    }
+}
 
