@@ -230,6 +230,12 @@ async def receive_hermes_analysis(request: Request):
     if not event_id:
         raise HTTPException(status_code=400, detail="Missing event_id")
 
+    # Validate UUID format
+    try:
+        event_uuid = uuid.UUID(event_id)
+    except (ValueError, AttributeError):
+        raise HTTPException(status_code=400, detail=f"Invalid event_id format: {event_id}")
+
     pool = await get_postgres_client()
     async with pool.acquire() as conn:
         result = await conn.execute(
@@ -242,8 +248,13 @@ async def receive_hermes_analysis(request: Request):
             analysis.get("headline_summary", ""),
             analysis.get("catalyst_category", "unknown"),
             json.dumps(analysis),
-            uuid.UUID(event_id),
+            event_uuid,
         )
+        # Check if a row was actually updated
+        rows_affected = int(result.split()[-1]) if result else 0
+        if rows_affected == 0:
+            logger.warning("HERMES ANALYSIS: No catalyst_event found for id %s", event_id)
+            return {"status": "not_found", "event_id": event_id, "detail": "No matching catalyst event"}
 
     logger.info("HERMES ANALYSIS received for event %s: %s",
                 event_id, analysis.get("headline_summary", "")[:80])
