@@ -210,6 +210,59 @@ async def hermes_webhook(request: Request):
     }
 
 
+PIVOT_API_KEY = os.getenv("PIVOT_API_KEY") or ""
+
+
+@router.post("/hermes/analysis")
+async def receive_hermes_analysis(request: Request):
+    """
+    Receives Pivot's LLM analysis from VPS and updates the catalyst_events row.
+    Called by VPS after scrape burst completes — same auth pattern as committee bridge.
+    """
+    api_key = request.headers.get("X-API-Key")
+    if not PIVOT_API_KEY or api_key != PIVOT_API_KEY:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+
+    payload = await request.json()
+    event_id = payload.get("event_id")
+    analysis = payload.get("analysis", {})
+
+    if not event_id:
+        raise HTTPException(status_code=400, detail="Missing event_id")
+
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        result = await conn.execute(
+            """UPDATE catalyst_events
+               SET headline_summary = $1,
+                   catalyst_category = $2,
+                   pivot_analysis = $3,
+                   updated_at = NOW()
+               WHERE id = $4""",
+            analysis.get("headline_summary", ""),
+            analysis.get("catalyst_category", "unknown"),
+            json.dumps(analysis),
+            uuid.UUID(event_id),
+        )
+
+    logger.info("HERMES ANALYSIS received for event %s: %s",
+                event_id, analysis.get("headline_summary", "")[:80])
+
+    # Broadcast update via WebSocket
+    try:
+        from api.websocket_manager import broadcast_event
+        await broadcast_event("hermes_analysis", {
+            "event_id": event_id,
+            "headline_summary": analysis.get("headline_summary", ""),
+            "catalyst_category": analysis.get("catalyst_category", "unknown"),
+            "confidence": analysis.get("confidence", 0),
+        })
+    except Exception:
+        pass
+
+    return {"status": "updated", "event_id": event_id}
+
+
 @router.get("/hermes/alerts")
 async def get_hermes_alerts(
     limit: int = Query(20, ge=1, le=100),

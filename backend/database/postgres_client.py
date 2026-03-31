@@ -1924,6 +1924,48 @@ async def log_options_position(position: Dict[Any, Any]):
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_catalyst_events_tier ON catalyst_events (tier)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_catalyst_events_dismissed ON catalyst_events (dismissed)")
 
+        # System config table — key-value store for runtime configuration
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS system_config (
+                key TEXT PRIMARY KEY,
+                value JSONB NOT NULL,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                updated_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+
+        # Seed hermes_watchlist config if not present
+        await conn.execute("""
+            INSERT INTO system_config (key, value) VALUES (
+                'hermes_watchlist',
+                $1::jsonb
+            ) ON CONFLICT (key) DO NOTHING
+        """, json.dumps({
+            "tickers": {
+                "SPY":  {"threshold_pct": 1.0, "timeframe_min": 30, "category": "broad_market"},
+                "QQQ":  {"threshold_pct": 1.0, "timeframe_min": 30, "category": "tech"},
+                "SMH":  {"threshold_pct": 1.5, "timeframe_min": 30, "category": "semis"},
+                "XLF":  {"threshold_pct": 1.0, "timeframe_min": 30, "category": "financials"},
+                "HYG":  {"threshold_pct": 0.5, "timeframe_min": 30, "category": "credit"},
+                "IYR":  {"threshold_pct": 1.0, "timeframe_min": 30, "category": "real_estate"},
+                "TLT":  {"threshold_pct": 1.0, "timeframe_min": 30, "category": "bonds"},
+                "USO":  {"threshold_pct": 2.0, "timeframe_min": 30, "category": "oil"},
+                "GLD":  {"threshold_pct": 1.0, "timeframe_min": 30, "category": "safe_haven"},
+                "IBIT": {"threshold_pct": 2.0, "timeframe_min": 30, "category": "crypto"},
+            },
+            "correlation_groups": {
+                "credit_event":  ["XLF", "HYG", "IYR"],
+                "risk_off":      ["SPY", "QQQ", "SMH"],
+                "deescalation":  ["USO", "GLD", "TLT"],
+                "full_reversal": ["SPY", "QQQ", "SMH", "XLF", "HYG"],
+            },
+            "correlation_window_minutes": 5,
+            "correlation_min_tickers": 2,
+            "vps_trigger_url": "http://188.245.250.2:8000/api/hermes/trigger",
+            "vps_api_key": "FFlSBL-YT-69cLMa8G_NtMOMYYMMo89vnQL-Az8AqI0",
+            "cooldown_minutes": 15,
+        }))
+
         await conn.execute("""
             INSERT INTO options_positions (
                 position_id, underlying, strategy_type, direction, legs,

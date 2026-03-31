@@ -11895,7 +11895,14 @@ function showHermesAlert(event) {
 
     const intelEl = document.getElementById('hermes-intel');
     if (event.pivot_analysis) {
-        intelEl.textContent = event.pivot_analysis;
+        let pa = event.pivot_analysis;
+        if (typeof pa === 'string') { try { pa = JSON.parse(pa); } catch(e) { /* use raw */ } }
+        const headline = (typeof pa === 'object' && pa.headline_summary) ? pa.headline_summary : event.headline_summary || event.pivot_analysis;
+        intelEl.textContent = typeof headline === 'string' ? headline.substring(0, 120) : 'Analysis received';
+        intelEl.style.fontStyle = 'normal';
+        updateHermesPivotAnalysis(event.pivot_analysis, event.catalyst_category);
+    } else if (event.headline_summary) {
+        intelEl.textContent = event.headline_summary;
         intelEl.style.fontStyle = 'normal';
     } else {
         intelEl.textContent = 'Pivot analyzing...';
@@ -11946,13 +11953,36 @@ function buildHermesSectorGrid(velocities) {
     });
 }
 
-function updateHermesPivotAnalysis(analysis, category) {
+function updateHermesPivotAnalysis(analysisJson, category) {
+    let analysis = analysisJson;
+    if (typeof analysisJson === 'string') {
+        try { analysis = JSON.parse(analysisJson); } catch(e) { analysis = { full_analysis: analysisJson }; }
+    }
+
+    const headline = analysis.headline_summary || analysis.full_analysis || analysisJson;
+    const confidence = analysis.confidence || 0;
+    const thesisImpact = analysis.thesis_impact || '';
+    const sources = analysis.key_sources || [];
+
     const intelEl = document.getElementById('hermes-intel');
-    if (intelEl) { intelEl.textContent = analysis; intelEl.style.fontStyle = 'normal'; }
+    if (intelEl) {
+        intelEl.textContent = typeof headline === 'string' ? headline.substring(0, 120) : 'Analysis received';
+        intelEl.style.fontStyle = 'normal';
+    }
+
     const pivotPanel = document.getElementById('hermes-pivot-analysis');
     if (pivotPanel) {
-        const cat = category ? ` [${category.toUpperCase()}]` : '';
-        pivotPanel.textContent = `${cat} ${analysis}`;
+        const categoryBadge = category ? `<span class="hermes-category-badge">[${category.toUpperCase()}]</span>` : '';
+        const confidenceBar = `<span class="hermes-confidence" style="opacity: ${0.4 + confidence * 0.6}">${Math.round(confidence * 100)}% confidence</span>`;
+        const thesisLine = thesisImpact ? `<div class="hermes-thesis-impact"><strong>Thesis Impact:</strong> ${thesisImpact}</div>` : '';
+        const sourcesLine = sources.length ? `<div class="hermes-sources">Sources: ${sources.join(', ')}</div>` : '';
+
+        pivotPanel.innerHTML = `
+            <div class="hermes-analysis-header">${categoryBadge} ${confidenceBar}</div>
+            <div class="hermes-analysis-body">${analysis.full_analysis || ''}</div>
+            ${thesisLine}
+            ${sourcesLine}
+        `;
     }
 }
 
