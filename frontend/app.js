@@ -7757,6 +7757,7 @@ function initOptionsFlow() {
     setInterval(loadTripWires, 30 * 1000);
     setInterval(loadBlackSwanAlerts, 60 * 1000);
     initHermesFlash();
+    initHydra();
     // Flow radar: 2-min refresh during market hours
     setInterval(() => {
         const now = new Date();
@@ -11995,5 +11996,143 @@ async function dismissHermesAlert() {
     }
     document.getElementById('hermes-flash-container').style.display = 'none';
     hermesCurrentEvent = null;
+}
+
+// === HYDRA SQUEEZE MONITOR ===
+
+let hydraCurrentTab = 'defensive';
+
+function initHydra() {
+    fetchHydraExposure();
+    setInterval(fetchHydraExposure, 300000);
+    setInterval(checkHydraConvergence, 30000);
+}
+
+function toggleHydraPanel() {
+    const body = document.getElementById('hydra-body');
+    const toggle = document.getElementById('hydra-toggle');
+    if (body.style.display === 'none') {
+        body.style.display = 'block';
+        toggle.innerHTML = '&#x25BC;';
+    } else {
+        body.style.display = 'none';
+        toggle.innerHTML = '&#x25B6;';
+    }
+}
+
+function switchHydraTab(tab) {
+    hydraCurrentTab = tab;
+    document.getElementById('hydra-tab-defensive').classList.toggle('active', tab === 'defensive');
+    document.getElementById('hydra-tab-offensive').classList.toggle('active', tab === 'offensive');
+    document.getElementById('hydra-defensive-content').style.display = tab === 'defensive' ? 'block' : 'none';
+    document.getElementById('hydra-offensive-content').style.display = tab === 'offensive' ? 'block' : 'none';
+    if (tab === 'offensive') {
+        fetchHydraScores();
+    }
+}
+
+async function fetchHydraExposure() {
+    try {
+        const resp = await fetch(`${API_URL}/hydra/exposure`, { headers: getHeaders() });
+        if (!resp.ok) return;
+        const data = await resp.json();
+
+        const warningEl = document.getElementById('hydra-exposure-warning');
+        if (data.warning) {
+            warningEl.textContent = data.warning;
+            warningEl.style.display = 'block';
+            document.getElementById('hydra-warning-badge').style.display = 'flex';
+        } else {
+            warningEl.style.display = 'none';
+            document.getElementById('hydra-warning-badge').style.display = 'none';
+        }
+
+        const tbody = document.getElementById('hydra-exposure-tbody');
+        tbody.innerHTML = '';
+        (data.exposure || []).forEach(item => {
+            const row = document.createElement('tr');
+            const tierClass = `hydra-tier-${item.position_risk_level === 'beneficial' ? 'low' : item.squeeze_tier}`;
+            row.innerHTML = `
+                <td style="font-weight:600">${item.ticker}</td>
+                <td>${item.nick_position_structure || item.nick_position_direction || '—'}</td>
+                <td>${item.short_pct_float}%</td>
+                <td>${item.days_to_cover}</td>
+                <td>${item.composite_score}</td>
+                <td class="${tierClass}">${item.position_risk_level === 'beneficial' ? '✓ Long' : item.squeeze_tier.toUpperCase()}</td>
+            `;
+            tbody.appendChild(row);
+        });
+
+        document.getElementById('hydra-last-updated').textContent =
+            `Updated: ${new Date().toLocaleTimeString()}`;
+    } catch (err) {
+        console.error('Hydra exposure fetch error:', err);
+    }
+}
+
+async function fetchHydraScores() {
+    try {
+        const resp = await fetch(`${API_URL}/hydra/scores?limit=15&min_score=25`, { headers: getHeaders() });
+        if (!resp.ok) return;
+        const data = await resp.json();
+
+        const tbody = document.getElementById('hydra-scores-tbody');
+        tbody.innerHTML = '';
+        (data.scores || []).forEach(item => {
+            const row = document.createElement('tr');
+            const tierClass = `hydra-tier-${item.squeeze_tier}`;
+            const shortsPnl = item.price_vs_short_entry_pct || 0;
+            const pnlColor = shortsPnl > 0 ? '#f44336' : '#4caf50';
+            const pnlSign = shortsPnl >= 0 ? '+' : '';
+            row.innerHTML = `
+                <td style="font-weight:600">${item.ticker}</td>
+                <td>${item.short_pct_float}%</td>
+                <td>${item.days_to_cover}</td>
+                <td style="color:${pnlColor}">${pnlSign}${Number(shortsPnl).toFixed(1)}%</td>
+                <td>${Number(item.uw_call_flow_score).toFixed(0)}</td>
+                <td style="font-weight:700">${Number(item.composite_score).toFixed(0)}</td>
+                <td class="${tierClass}">${item.squeeze_tier.toUpperCase()}</td>
+            `;
+            tbody.appendChild(row);
+        });
+    } catch (err) {
+        console.error('Hydra scores fetch error:', err);
+    }
+}
+
+async function checkHydraConvergence() {
+    try {
+        const resp = await fetch(`${API_URL}/hydra/convergence`, { headers: getHeaders() });
+        if (!resp.ok) return;
+        const data = await resp.json();
+
+        const el = document.getElementById('hydra-convergence');
+        if (data.convergence) {
+            el.textContent = data.alert;
+            el.style.display = 'block';
+        } else {
+            el.style.display = 'none';
+        }
+    } catch (err) {
+        console.error('Hydra convergence check error:', err);
+    }
+}
+
+async function refreshHydra() {
+    const btn = document.querySelector('.hydra-refresh-btn');
+    btn.innerHTML = '&#x21BB; Scanning...';
+    btn.disabled = true;
+    try {
+        await fetch(`${API_URL}/hydra/refresh`, { method: 'POST', headers: getHeaders() });
+        if (hydraCurrentTab === 'defensive') {
+            await fetchHydraExposure();
+        } else {
+            await fetchHydraScores();
+        }
+    } catch (err) {
+        console.error('Hydra refresh error:', err);
+    }
+    btn.innerHTML = '&#x21BB; Refresh';
+    btn.disabled = false;
 }
 

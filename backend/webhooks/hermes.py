@@ -185,10 +185,30 @@ async def hermes_webhook(request: Request):
         except Exception as e:
             logger.error("HERMES: VPS trigger failed: %s", e)
 
+    # Hydra convergence check — are any involved tickers in squeeze territory?
+    convergence_alert = None
+    try:
+        from scanners.hydra_squeeze import calculate_squeeze_score
+        involved_tickers = [ticker] + [b["ticker"] for b in correlated]
+        for t in involved_tickers:
+            sv = sector_velocity.get(t, 0) if isinstance(sector_velocity, dict) else 0
+            score = await calculate_squeeze_score(t, sector_velocity=sv)
+            if score and score["composite_score"] >= 50:
+                logger.info("HERMES+HYDRA CONVERGENCE: %s catalyst + squeeze score %.1f",
+                            t, score["composite_score"])
+                convergence_alert = {
+                    "ticker": t,
+                    "squeeze_score": score["composite_score"],
+                    "squeeze_tier": score["squeeze_tier"],
+                }
+                break
+    except Exception as e:
+        logger.debug("Hydra convergence check in Hermes failed: %s", e)
+
     # Broadcast via WebSocket if available
     try:
         from api.websocket_manager import broadcast_event
-        await broadcast_event("hermes_flash", {
+        ws_payload = {
             "event_id": str(event_id),
             "tier": tier,
             "trigger_ticker": ticker,
@@ -197,7 +217,10 @@ async def hermes_webhook(request: Request):
             "correlated_tickers": correlated,
             "sector_velocity": sector_velocity,
             "trip_wire_status": trip_wire_status,
-        })
+        }
+        if convergence_alert:
+            ws_payload["hydra_convergence"] = convergence_alert
+        await broadcast_event("hermes_flash", ws_payload)
     except Exception:
         pass
 

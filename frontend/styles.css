@@ -11348,6 +11348,127 @@ body[data-mode="analytics"] .analytics-shell {
     opacity: 0.5;
 }
 
+/* === HYDRA SQUEEZE MONITOR === */
+.hydra-panel {
+    margin-top: 8px;
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 4px;
+    background: rgba(0,0,0,0.2);
+}
+.hydra-header {
+    display: flex;
+    align-items: center;
+    padding: 8px 12px;
+    cursor: pointer;
+    user-select: none;
+}
+.hydra-header:hover { background: rgba(255,255,255,0.03); }
+.hydra-title {
+    font-size: 13px;
+    font-weight: 600;
+    font-family: 'IBM Plex Mono', monospace;
+    color: rgba(255,255,255,0.8);
+    flex: 1;
+}
+.hydra-warning-badge {
+    background: #f44336;
+    color: #fff;
+    border-radius: 50%;
+    width: 18px;
+    height: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+    margin-right: 8px;
+    animation: hermes-badge-pulse 1.5s ease-in-out infinite;
+}
+.hydra-toggle { font-size: 10px; opacity: 0.5; }
+.hydra-body { padding: 0 12px 12px; }
+.hydra-tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 8px;
+    padding-top: 4px;
+}
+.hydra-tab {
+    padding: 4px 12px;
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 3px;
+    background: none;
+    color: rgba(255,255,255,0.5);
+    font-size: 12px;
+    cursor: pointer;
+}
+.hydra-tab.active {
+    background: rgba(255,255,255,0.08);
+    color: rgba(255,255,255,0.9);
+    border-color: rgba(255,255,255,0.2);
+}
+.hydra-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+    font-family: 'IBM Plex Mono', monospace;
+}
+.hydra-table th {
+    text-align: left;
+    padding: 4px 6px;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+    color: rgba(255,255,255,0.4);
+    font-weight: 500;
+    font-size: 10px;
+    text-transform: uppercase;
+}
+.hydra-table td {
+    padding: 5px 6px;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+    color: rgba(255,255,255,0.75);
+}
+.hydra-tier-extreme { color: #f44336; font-weight: 700; }
+.hydra-tier-high { color: #ff9800; font-weight: 600; }
+.hydra-tier-moderate { color: #ffc107; }
+.hydra-tier-low { color: rgba(255,255,255,0.4); }
+.hydra-exposure-warning {
+    padding: 6px 10px;
+    margin-bottom: 8px;
+    border-radius: 3px;
+    font-size: 12px;
+    background: rgba(244, 67, 54, 0.12);
+    border: 1px solid rgba(244, 67, 54, 0.3);
+    color: #f44336;
+}
+.hydra-convergence {
+    margin-top: 8px;
+    padding: 6px 10px;
+    border-radius: 3px;
+    font-size: 12px;
+    background: rgba(156, 39, 176, 0.12);
+    border: 1px solid rgba(156, 39, 176, 0.3);
+    color: #ce93d8;
+    font-weight: 600;
+}
+.hydra-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 8px;
+    padding-top: 6px;
+    border-top: 1px solid rgba(255,255,255,0.05);
+}
+.hydra-timestamp { font-size: 10px; opacity: 0.3; }
+.hydra-refresh-btn {
+    background: none;
+    border: 1px solid rgba(255,255,255,0.1);
+    color: rgba(255,255,255,0.5);
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 3px;
+    cursor: pointer;
+}
+.hydra-refresh-btn:hover { background: rgba(255,255,255,0.05); }
+
 /* ===== MACRO TICKER STRIP ===== */
 .macro-strip {
     background: var(--dark-bg);
