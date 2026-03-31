@@ -7756,6 +7756,7 @@ function initOptionsFlow() {
     setInterval(loadMacroStrip, 10 * 1000);
     setInterval(loadTripWires, 30 * 1000);
     setInterval(loadBlackSwanAlerts, 60 * 1000);
+    initHermesFlash();
     // Flow radar: 2-min refresh during market hours
     setInterval(() => {
         const now = new Date();
@@ -11831,4 +11832,138 @@ document.getElementById('closeStrategiesModal')?.addEventListener('click', funct
 document.getElementById('strategiesModal')?.addEventListener('click', function(e) {
     if (e.target === this) this.style.display = 'none';
 });
+
+// ===== HERMES FLASH =====
+let hermesCurrentEvent = null;
+
+function initHermesFlash() {
+    setInterval(fetchHermesAlerts, 10000);
+    fetchHermesAlerts();
+
+    document.getElementById('hermesExpandBtn')?.addEventListener('click', function() {
+        const panel = document.getElementById('hermes-detail-panel');
+        if (panel) panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+    });
+
+    document.getElementById('hermesDismissBtn')?.addEventListener('click', dismissHermesAlert);
+}
+
+async function fetchHermesAlerts() {
+    try {
+        const resp = await fetch(`${API_URL}/hermes/alerts?limit=1&include_dismissed=false&tier_min=1`);
+        if (!resp.ok) return;
+        const data = await resp.json();
+
+        if (data.alerts && data.alerts.length > 0) {
+            const latest = data.alerts[0];
+            if (!hermesCurrentEvent || latest.id !== hermesCurrentEvent.id) {
+                showHermesAlert(latest);
+            }
+            if (hermesCurrentEvent && latest.id === hermesCurrentEvent.id && latest.pivot_analysis && !hermesCurrentEvent.pivot_analysis) {
+                updateHermesPivotAnalysis(latest.pivot_analysis, latest.catalyst_category);
+                hermesCurrentEvent = latest;
+            }
+        }
+    } catch (err) {
+        // Silent — Hermes is optional
+    }
+}
+
+function showHermesAlert(event) {
+    hermesCurrentEvent = event;
+    const container = document.getElementById('hermes-flash-container');
+    const banner = document.getElementById('hermes-flash-banner');
+    if (!container || !banner) return;
+
+    banner.className = `hermes-flash-banner tier-${event.tier}`;
+    document.getElementById('hermes-tier-badge').textContent = `T${event.tier}`;
+
+    document.getElementById('hermes-trigger-ticker').textContent = event.trigger_ticker;
+    const sign = event.trigger_move_pct >= 0 ? '+' : '';
+    const moveEl = document.getElementById('hermes-trigger-move');
+    moveEl.textContent = `${sign}${event.trigger_move_pct}%`;
+    moveEl.style.color = event.trigger_move_pct >= 0 ? '#4caf50' : '#f44336';
+
+    const correlatedEl = document.getElementById('hermes-correlated');
+    if (event.correlated_tickers && event.correlated_tickers.length > 0) {
+        correlatedEl.style.display = 'inline';
+        document.getElementById('hermes-correlated-list').textContent =
+            event.correlated_tickers.map(c => `${c.ticker} ${c.move_pct >= 0 ? '+' : ''}${c.move_pct}%`).join(', ');
+    } else {
+        correlatedEl.style.display = 'none';
+    }
+
+    const intelEl = document.getElementById('hermes-intel');
+    if (event.pivot_analysis) {
+        intelEl.textContent = event.pivot_analysis;
+        intelEl.style.fontStyle = 'normal';
+    } else {
+        intelEl.textContent = 'Pivot analyzing...';
+        intelEl.style.fontStyle = 'italic';
+    }
+
+    if (event.trip_wire_status) {
+        const fired = Object.values(event.trip_wire_status).filter(v => v === true).length;
+        const twEl = document.getElementById('hermes-tripwires');
+        twEl.textContent = `Trip Wires: ${fired}/4 fired`;
+        if (fired >= 2) { twEl.style.color = '#f44336'; twEl.style.fontWeight = '700'; }
+    }
+
+    if (event.sector_velocity) {
+        buildHermesSectorGrid(event.sector_velocity);
+    }
+
+    container.style.display = 'block';
+
+    if (event.tier >= 2) {
+        try {
+            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.frequency.value = 880;
+            osc.type = 'sine';
+            gain.gain.value = 0.1;
+            osc.start();
+            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+            osc.stop(ctx.currentTime + 0.3);
+        } catch (e) { /* silent fallback */ }
+    }
+}
+
+function buildHermesSectorGrid(velocities) {
+    const grid = document.getElementById('hermes-sector-grid');
+    if (!grid) return;
+    grid.innerHTML = '';
+    ['SPY','QQQ','SMH','XLF','HYG','IYR','TLT','USO','GLD','IBIT'].forEach(ticker => {
+        const pct = velocities[ticker] || 0;
+        const div = document.createElement('div');
+        div.className = `hermes-sector-box ${pct > 0.1 ? 'positive' : pct < -0.1 ? 'negative' : 'neutral'}`;
+        const s = pct >= 0 ? '+' : '';
+        div.innerHTML = `<div style="font-weight:700">${ticker}</div><div>${s}${pct.toFixed(2)}%</div>`;
+        grid.appendChild(div);
+    });
+}
+
+function updateHermesPivotAnalysis(analysis, category) {
+    const intelEl = document.getElementById('hermes-intel');
+    if (intelEl) { intelEl.textContent = analysis; intelEl.style.fontStyle = 'normal'; }
+    const pivotPanel = document.getElementById('hermes-pivot-analysis');
+    if (pivotPanel) {
+        const cat = category ? ` [${category.toUpperCase()}]` : '';
+        pivotPanel.textContent = `${cat} ${analysis}`;
+    }
+}
+
+async function dismissHermesAlert() {
+    if (!hermesCurrentEvent) return;
+    try {
+        await fetch(`${API_URL}/hermes/alerts/${hermesCurrentEvent.id}/dismiss`, { method: 'PATCH' });
+    } catch (err) {
+        console.error('Hermes dismiss error:', err);
+    }
+    document.getElementById('hermes-flash-container').style.display = 'none';
+    hermesCurrentEvent = null;
+}
 

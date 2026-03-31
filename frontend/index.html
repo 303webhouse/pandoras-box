@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Pandora - Real-time Trading Signal Dashboard">
     <title>Pandora</title>
-    <link rel="stylesheet" href="/styles.css?v=110">
+    <link rel="stylesheet" href="/styles.css?v=111">
     <link rel="manifest" href="/manifest.json">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -46,6 +46,35 @@
         </header>
 
         <main id="hubShell" class="hub-shell">
+
+        <!-- Hermes Flash Alert Banner -->
+        <div id="hermes-flash-container" class="hermes-flash-container" style="display: none;">
+            <div id="hermes-flash-banner" class="hermes-flash-banner">
+                <div class="hermes-flash-tier-badge" id="hermes-tier-badge">T1</div>
+                <div class="hermes-flash-content">
+                    <span class="hermes-flash-ticker" id="hermes-trigger-ticker">SPY</span>
+                    <span class="hermes-flash-move" id="hermes-trigger-move">+1.45%</span>
+                    <span class="hermes-flash-separator">|</span>
+                    <span class="hermes-flash-correlated" id="hermes-correlated" style="display: none;">
+                        Correlated: <span id="hermes-correlated-list"></span>
+                        <span class="hermes-flash-separator">|</span>
+                    </span>
+                    <span class="hermes-flash-intel" id="hermes-intel">Pivot analyzing...</span>
+                    <span class="hermes-flash-separator">|</span>
+                    <span class="hermes-flash-tripwires" id="hermes-tripwires">Trip Wires: 0/4 fired</span>
+                </div>
+                <div class="hermes-flash-actions">
+                    <button class="hermes-flash-expand-btn" id="hermesExpandBtn" title="Expand details">&#x25BC;</button>
+                    <button class="hermes-flash-dismiss-btn" id="hermesDismissBtn" title="Dismiss">&#x2715;</button>
+                </div>
+            </div>
+            <div id="hermes-detail-panel" class="hermes-detail-panel" style="display: none;">
+                <div class="hermes-sector-velocity" id="hermes-sector-grid"></div>
+                <div class="hermes-pivot-analysis" id="hermes-pivot-analysis">
+                    Waiting for Pivot intelligence...
+                </div>
+            </div>
+        </div>
 
         <!-- MACRO TICKER STRIP -->
         <div class="macro-strip" id="macroStrip">
@@ -1718,7 +1747,7 @@
     <!-- TradingView Widget Script -->
     <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
-    <script src="/app.js?v=129"></script>
+    <script src="/app.js?v=130"></script>
     <script src="/cockpit.js?v=1"></script>
     <script src="/laboratory.js?v=1"></script>
 </body>
