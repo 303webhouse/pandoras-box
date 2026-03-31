@@ -190,8 +190,14 @@ async def get_sector_heatmap():
                 pass
     spy_closes = all_closes.get("SPY", [])
 
+    # Detect if market is closed (Polygon returns 0% for all sectors)
+    is_live = _is_market_hours()
+
     # SPY daily change: prefer Polygon (live), fall back to yfinance
     spy_change_1d = spy_snap.get("day_change_pct") if spy_snap else None
+    # If Polygon returns 0.0 outside market hours, use yfinance's last close-to-close
+    if spy_change_1d == 0.0 and not is_live:
+        spy_change_1d = _pct_change(spy_closes, 1) or 0.0
     if spy_change_1d is None:
         spy_change_1d = _pct_change(spy_closes, 1) or 0.0
     spy_change_1w = _pct_change(spy_closes, 5)
@@ -207,6 +213,9 @@ async def get_sector_heatmap():
         if snap and snap.get("price"):
             price = snap["price"]
             change_1d = snap.get("day_change_pct", 0.0)
+            # If Polygon returns 0.0 outside market hours, use yfinance
+            if change_1d == 0.0 and not is_live:
+                change_1d = _pct_change(closes, 1) or 0.0
         else:
             price = closes[-1] if closes else None
             change_1d = _pct_change(closes, 1)
@@ -247,6 +256,7 @@ async def get_sector_heatmap():
         "spy_change_1d": spy_change_1d,
         "spy_change_1w": spy_change_1w,
         "spy_change_1m": spy_change_1m,
+        "is_market_hours": is_live,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
