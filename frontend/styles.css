@@ -11206,6 +11206,113 @@ body[data-mode="analytics"] .analytics-shell {
     cursor: pointer;
 }
 
+/* ===== HERMES FLASH ===== */
+.hermes-flash-container {
+    position: relative;
+    z-index: 100;
+    margin-bottom: 4px;
+}
+
+.hermes-flash-banner {
+    display: flex;
+    align-items: center;
+    padding: 8px 12px;
+    border-radius: 4px;
+    font-size: 13px;
+    font-family: 'Orbit', sans-serif;
+    gap: 8px;
+    animation: hermes-pulse 2s ease-in-out 3;
+}
+
+.hermes-flash-banner.tier-1 {
+    background: rgba(255, 193, 7, 0.12);
+    border: 1px solid rgba(255, 193, 7, 0.3);
+    color: #ffc107;
+}
+.hermes-flash-banner.tier-2 {
+    background: rgba(255, 152, 0, 0.15);
+    border: 1px solid rgba(255, 152, 0, 0.4);
+    color: #ff9800;
+}
+.hermes-flash-banner.tier-3 {
+    background: rgba(244, 67, 54, 0.15);
+    border: 1px solid rgba(244, 67, 54, 0.4);
+    color: #f44336;
+}
+
+.hermes-flash-tier-badge {
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-weight: 700;
+    font-size: 11px;
+    min-width: 24px;
+    text-align: center;
+}
+.tier-1 .hermes-flash-tier-badge { background: rgba(255, 193, 7, 0.3); }
+.tier-2 .hermes-flash-tier-badge { background: rgba(255, 152, 0, 0.4); }
+.tier-3 .hermes-flash-tier-badge { background: rgba(244, 67, 54, 0.4); }
+
+.hermes-flash-content {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: wrap;
+}
+
+.hermes-flash-ticker { font-weight: 700; }
+.hermes-flash-move { font-weight: 700; }
+.hermes-flash-separator { opacity: 0.4; margin: 0 4px; }
+.hermes-flash-intel { font-style: italic; opacity: 0.85; }
+
+.hermes-flash-actions {
+    margin-left: auto;
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+}
+.hermes-flash-actions button {
+    background: none;
+    border: 1px solid rgba(255,255,255,0.15);
+    color: inherit;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 11px;
+}
+.hermes-flash-actions button:hover { background: rgba(255,255,255,0.1); }
+
+@keyframes hermes-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+}
+
+.hermes-detail-panel {
+    padding: 10px 12px;
+    background: rgba(0,0,0,0.3);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-top: none;
+    border-radius: 0 0 4px 4px;
+    font-size: 12px;
+}
+
+.hermes-sector-velocity {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+.hermes-sector-box {
+    padding: 4px 6px;
+    border-radius: 3px;
+    text-align: center;
+    font-family: 'Orbit', sans-serif;
+    font-size: 11px;
+}
+.hermes-sector-box.positive { background: rgba(76, 175, 80, 0.15); color: #4caf50; }
+.hermes-sector-box.negative { background: rgba(244, 67, 54, 0.15); color: #f44336; }
+.hermes-sector-box.neutral { background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.5); }
+
 /* ===== MACRO TICKER STRIP ===== */
 .macro-strip {
     background: var(--dark-bg);

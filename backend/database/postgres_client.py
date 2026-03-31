@@ -1899,6 +1899,31 @@ async def log_options_position(position: Dict[Any, Any]):
             )
         """)
 
+        # Catalyst events table — Hermes Flash velocity breach detection
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS catalyst_events (
+                id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+                event_type TEXT NOT NULL DEFAULT 'velocity_breach',
+                tier INTEGER NOT NULL DEFAULT 1 CHECK (tier BETWEEN 1 AND 3),
+                trigger_ticker TEXT NOT NULL,
+                trigger_move_pct NUMERIC(6,2),
+                trigger_timeframe TEXT DEFAULT '30min',
+                correlated_tickers JSONB DEFAULT '[]'::jsonb,
+                headline_summary TEXT,
+                catalyst_category TEXT,
+                pivot_analysis TEXT,
+                sector_velocity JSONB DEFAULT '{}'::jsonb,
+                trip_wire_status JSONB DEFAULT '{}'::jsonb,
+                dismissed BOOLEAN DEFAULT FALSE,
+                dismissed_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                updated_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_catalyst_events_created ON catalyst_events (created_at DESC)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_catalyst_events_tier ON catalyst_events (tier)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_catalyst_events_dismissed ON catalyst_events (dismissed)")
+
         await conn.execute("""
             INSERT INTO options_positions (
                 position_id, underlying, strategy_type, direction, legs,
