@@ -1,10 +1,12 @@
 """
 Trip Wire Monitor — checks 4 reversal conditions against live data.
 Reads existing bias factor Redis keys + macro strip for Brent.
+SPX approximated from SPY × 10. VIX via bias cache or yfinance fallback.
 """
 
 import json
 import logging
+import asyncio
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -14,6 +16,13 @@ from database.redis_client import get_redis_client
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/trip-wires", tags=["trip-wires"])
+
+# SPY-to-SPX multiplier (approximate; SPY ≈ SPX / 10)
+SPY_TO_SPX = 10.0
+
+# VIX fallback cache (avoid hammering yfinance on every request)
+_vix_fallback_cache = {"price": None, "ts": 0}
+VIX_FALLBACK_TTL = 60  # seconds
 
 
 async def _get_redis_float(redis, key: str) -> Optional[float]:
@@ -29,6 +38,47 @@ async def _get_redis_float(redis, key: str) -> Optional[float]:
     return None
 
 
+def _fetch_vix_yfinance_sync() -> Optional[float]:
+    """Synchronous yfinance VIX fetch (called in executor)."""
+    try:
+        import yfinance as yf
+        data = yf.download("^VIX", period="1d", interval="1d", progress=False)
+        if data is not None and not data.empty and "Close" in data.columns:
+            closes = data["Close"].dropna().tolist()
+            if closes:
+                return float(closes[-1])
+    except Exception as e:
+        logger.warning("VIX yfinance fallback failed: %s", e)
+    return None
+
+
+async def _get_vix_price(redis) -> Optional[float]:
+    """Get VIX price: try Redis bias cache first, then yfinance fallback."""
+    # Try Redis first
+    vix = await _get_redis_float(redis, "bias:factor:vix_price")
+    if vix is not None:
+        return vix
+
+    # Try yfinance fallback with simple in-memory cache
+    import time
+    now = time.time()
+    if _vix_fallback_cache["price"] is not None and (now - _vix_fallback_cache["ts"]) < VIX_FALLBACK_TTL:
+        return _vix_fallback_cache["price"]
+
+    loop = asyncio.get_event_loop()
+    vix = await loop.run_in_executor(None, _fetch_vix_yfinance_sync)
+    if vix is not None:
+        _vix_fallback_cache["price"] = vix
+        _vix_fallback_cache["ts"] = now
+        # Also cache in Redis for other consumers (5 min TTL)
+        if redis:
+            try:
+                await redis.set("bias:factor:vix_price", str(vix), ex=300)
+            except Exception:
+                pass
+    return vix
+
+
 @router.get("")
 async def get_trip_wires():
     """
@@ -40,8 +90,8 @@ async def get_trip_wires():
     # Wire 1: SPX distance to 200 DMA
     spy_price = await _get_redis_float(redis, "bias:factor:spy_price")
     spy_200dma = await _get_redis_float(redis, "bias:factor:spy_200sma")
-    if spy_price is None or spy_200dma is None:
-        # Fallback: try macro strip cache
+    if spy_price is None:
+        # Fallback: try macro strip cache for SPY price
         try:
             macro = await redis.get("macro:strip")
             if macro:
@@ -52,15 +102,26 @@ async def get_trip_wires():
                         break
         except Exception:
             pass
+    # Convert SPY to approximate SPX (×10) for display and threshold comparison
+    spx_approx = round(spy_price * SPY_TO_SPX, 0) if spy_price else None
+    spx_200dma_approx = round(spy_200dma * SPY_TO_SPX, 0) if spy_200dma else None
     spx_threshold = 6600
     spx_status = "COLD"
     spx_proximity = 0
-    if spy_price and spy_200dma:
-        spx_proximity = round(spy_price / spy_200dma * 100, 1)
-        if spy_price >= spy_200dma:
-            spx_status = "HOT"
-        elif spy_price >= spy_200dma * 0.97:
-            spx_status = "WARM"
+    if spx_approx is not None:
+        if spx_200dma_approx:
+            spx_proximity = round(spx_approx / spx_200dma_approx * 100, 1)
+            if spx_approx >= spx_200dma_approx:
+                spx_status = "HOT"
+            elif spx_approx >= spx_200dma_approx * 0.97:
+                spx_status = "WARM"
+        else:
+            # No 200 DMA available, compare directly to threshold
+            spx_proximity = round(spx_approx / spx_threshold * 100, 1)
+            if spx_approx >= spx_threshold:
+                spx_status = "HOT"
+            elif spx_approx >= spx_threshold * 0.97:
+                spx_status = "WARM"
 
     # Wire 2: Brent crude below $95 (USO proxy)
     brent_price = None
@@ -91,7 +152,7 @@ async def get_trip_wires():
         pass
 
     # Wire 4: VIX below 20 for 48 hours
-    vix_price = await _get_redis_float(redis, "bias:factor:vix_price")
+    vix_price = await _get_vix_price(redis)
     vix_threshold = 20
     vix_status = "COLD"
     vix_proximity = 0
@@ -121,11 +182,12 @@ async def get_trip_wires():
         {
             "id": "spx_200dma",
             "label": "SPX vs 200 DMA",
-            "current": round(spy_price, 2) if spy_price else None,
+            "current": int(spx_approx) if spx_approx else None,
             "threshold": f">{spx_threshold} (2 closes)",
             "threshold_display": str(spx_threshold),
             "status": spx_status,
             "proximity_pct": spx_proximity,
+            "note": "SPX approximated from SPY × 10",
         },
         {
             "id": "brent_crude",
