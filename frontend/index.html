@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Pandora - Real-time Trading Signal Dashboard">
     <title>Pandora</title>
-    <link rel="stylesheet" href="/styles.css?v=112">
+    <link rel="stylesheet" href="/styles.css?v=113">
     <link rel="manifest" href="/manifest.json">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -357,6 +357,58 @@
                             <span class="greek-cell" id="greekGamma" data-greek="gamma">&Gamma; --</span>
                             <span class="greek-cell" id="greekTheta" data-greek="theta">&Theta; --</span>
                             <span class="greek-cell" id="greekVega" data-greek="vega">V --</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Hydra Squeeze Monitor Panel -->
+                <div class="hydra-panel" id="hydra-panel">
+                    <div class="hydra-header" onclick="toggleHydraPanel()">
+                        <span class="hydra-title">HYDRA Squeeze Monitor</span>
+                        <span class="hydra-warning-badge" id="hydra-warning-badge" style="display:none;">!</span>
+                        <span class="hydra-toggle" id="hydra-toggle">&#x25B6;</span>
+                    </div>
+                    <div class="hydra-body" id="hydra-body" style="display:none;">
+                        <div class="hydra-tabs">
+                            <button class="hydra-tab active" onclick="switchHydraTab('defensive')" id="hydra-tab-defensive">Defensive</button>
+                            <button class="hydra-tab" onclick="switchHydraTab('offensive')" id="hydra-tab-offensive">Offensive</button>
+                        </div>
+                        <div class="hydra-tab-content" id="hydra-defensive-content">
+                            <div id="hydra-exposure-warning" class="hydra-exposure-warning" style="display:none;"></div>
+                            <table class="hydra-table" id="hydra-exposure-table">
+                                <thead>
+                                    <tr>
+                                        <th>Ticker</th>
+                                        <th>Your Position</th>
+                                        <th>Short %</th>
+                                        <th>DTC</th>
+                                        <th>Score</th>
+                                        <th>Risk</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="hydra-exposure-tbody"></tbody>
+                            </table>
+                        </div>
+                        <div class="hydra-tab-content" id="hydra-offensive-content" style="display:none;">
+                            <table class="hydra-table" id="hydra-scores-table">
+                                <thead>
+                                    <tr>
+                                        <th>Ticker</th>
+                                        <th>Short %</th>
+                                        <th>DTC</th>
+                                        <th>Shorts P&amp;L</th>
+                                        <th>Call Flow</th>
+                                        <th>Score</th>
+                                        <th>Tier</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="hydra-scores-tbody"></tbody>
+                            </table>
+                        </div>
+                        <div id="hydra-convergence" class="hydra-convergence" style="display:none;"></div>
+                        <div class="hydra-footer">
+                            <span id="hydra-last-updated" class="hydra-timestamp"></span>
+                            <button class="hydra-refresh-btn" onclick="refreshHydra()">&#x21BB; Refresh</button>
                         </div>
                     </div>
                 </div>
@@ -1747,7 +1799,7 @@
     <!-- TradingView Widget Script -->
     <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
-    <script src="/app.js?v=131"></script>
+    <script src="/app.js?v=132"></script>
     <script src="/cockpit.js?v=1"></script>
     <script src="/laboratory.js?v=1"></script>
 </body>

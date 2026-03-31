@@ -1966,6 +1966,34 @@ async def log_options_position(position: Dict[Any, Any]):
             "cooldown_minutes": 15,
         }))
 
+        # Hydra squeeze scores table
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS squeeze_scores (
+                id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+                ticker TEXT NOT NULL,
+                short_pct_float NUMERIC(8,2) DEFAULT 0,
+                days_to_cover NUMERIC(8,2) DEFAULT 0,
+                shares_short BIGINT DEFAULT 0,
+                short_trend TEXT DEFAULT 'stable',
+                price_vs_short_entry_pct NUMERIC(8,2) DEFAULT 0,
+                uw_call_flow_score NUMERIC(8,2) DEFAULT 0,
+                uw_put_call_ratio NUMERIC(8,2) DEFAULT 0,
+                sector TEXT,
+                sector_velocity NUMERIC(8,2) DEFAULT 0,
+                composite_score NUMERIC(8,2) DEFAULT 0,
+                squeeze_tier TEXT DEFAULT 'low',
+                nick_has_position BOOLEAN DEFAULT FALSE,
+                nick_position_direction TEXT,
+                nick_position_id TEXT,
+                data_source TEXT DEFAULT 'yfinance',
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                updated_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+        await conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_squeeze_scores_ticker ON squeeze_scores (ticker)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_squeeze_scores_composite ON squeeze_scores (composite_score DESC)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_squeeze_scores_exposure ON squeeze_scores (nick_has_position) WHERE nick_has_position = TRUE")
+
         await conn.execute("""
             INSERT INTO options_positions (
                 position_id, underlying, strategy_type, direction, legs,
