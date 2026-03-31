@@ -75,9 +75,11 @@ CREATE TABLE IF NOT EXISTS lightning_cards (
     bucket2_block_reason TEXT,
 
     -- Conflict detection
+    position_relationship TEXT DEFAULT 'UNRELATED' CHECK (position_relationship IN ('CONFIRMING', 'OPPOSING', 'UNRELATED')),
     conflict_detected BOOLEAN DEFAULT FALSE,
     conflict_position_id TEXT,
     conflict_details TEXT,                     -- e.g., "HYG $72/$68 put spread"
+    conflict_action_hint TEXT,                 -- e.g., "Thesis accelerating — tighten stops"
 
     -- Thesis integration
     catalyst_headline TEXT,
@@ -370,9 +372,11 @@ async def check_convergence_and_generate_lightning(pool, catalyst_event: Dict):
             "bucket2_block_reason": bucket2_status.get("reason"),
 
             # Conflict
-            "conflict_detected": conflict["detected"],
+            "conflict_detected": conflict.get("detected", False),
+            "position_relationship": conflict.get("relationship", "UNRELATED"),
             "conflict_position_id": conflict.get("position_id"),
             "conflict_details": conflict.get("details"),
+            "conflict_action_hint": conflict.get("action_hint"),
 
             # Thesis
             "catalyst_headline": catalyst_headline,
@@ -534,13 +538,43 @@ async def _check_bucket2_capacity(pool) -> Dict:
 
 async def _check_position_conflict(pool, ticker: str, direction: str) -> Dict:
     """
-    Check if a Lightning Card would conflict with an existing position.
-    E.g., suggesting bullish squeeze on HYG when Nick holds HYG puts.
-    Also checks correlated tickers (e.g., MRVL squeeze vs SMH puts).
+    Three-way position-aware classification:
+    
+    CONFIRMING — squeeze direction aligns with existing position.
+      e.g., bearish squeeze on SMH + Nick holds SMH puts = thesis accelerating.
+      Action: manage your winner (tighten stops, take partial profits, add).
+    
+    OPPOSING — squeeze direction works against existing position.
+      e.g., bullish squeeze on HYG + Nick holds HYG puts = position at risk.
+      Action: consider hedging, reducing size, or closing.
+    
+    UNRELATED — no position on this ticker.
+      Action: standard Bucket 2 opportunity card.
+    
+    Also checks correlated ETF relationships:
+      e.g., MRVL bullish squeeze + Nick holds SMH puts = OPPOSING (correlated).
     """
+    # Correlated ticker map: individual stock → ETF it belongs to
+    # If Nick is short the ETF, a squeeze on a component is relevant
+    correlation_map = {
+        # Semis → SMH
+        "NVDA": "SMH", "AMD": "SMH", "MRVL": "SMH", "AVGO": "SMH",
+        "INTC": "SMH", "QCOM": "SMH", "MU": "SMH", "LRCX": "SMH",
+        "AMAT": "SMH", "KLAC": "SMH", "SMCI": "SMH",
+        # Financials → XLF
+        "JPM": "XLF", "BAC": "XLF", "WFC": "XLF", "GS": "XLF",
+        "MS": "XLF", "C": "XLF", "SCHW": "XLF", "BLK": "XLF",
+        # Real estate → IYR
+        "AMT": "IYR", "PLD": "IYR", "SPG": "IYR", "O": "IYR",
+        # Crypto → IBIT
+        "COIN": "IBIT", "MSTR": "IBIT", "MARA": "IBIT", "RIOT": "IBIT",
+        # Small caps → IWM (broad correlation)
+        # Tech → QQQ (broad correlation)
+    }
+
     try:
-        # Direct ticker conflict
-        conflicts = await pool.fetch("""
+        # Check direct ticker match first
+        positions = await pool.fetch("""
             SELECT position_id, ticker, direction, option_type,
                    strike_price, expiry_date, quantity
             FROM unified_positions
@@ -548,31 +582,77 @@ async def _check_position_conflict(pool, ticker: str, direction: str) -> Dict:
             AND ticker = $1
         """, ticker)
 
-        for c in conflicts:
-            pos_direction = c.get("direction", "")
-            option_type = c.get("option_type", "")
-            # Conflict: suggesting bullish on a ticker Nick is short/has puts
-            is_conflict = (
-                (direction == "bullish" and (pos_direction in ["SHORT", "BEARISH"] or option_type == "PUT")) or
-                (direction == "bearish" and (pos_direction in ["LONG", "BULLISH"] or option_type == "CALL"))
-            )
-            if is_conflict:
-                strike = c.get("strike_price", "")
-                expiry = c.get("expiry_date", "")
-                details = f"{ticker} {option_type or pos_direction} {f'${strike}' if strike else ''} {expiry or ''}"
+        # If no direct match, check correlated ETF
+        correlated_etf = correlation_map.get(ticker)
+        if not positions and correlated_etf:
+            positions = await pool.fetch("""
+                SELECT position_id, ticker, direction, option_type,
+                       strike_price, expiry_date, quantity
+                FROM unified_positions
+                WHERE status = 'OPEN'
+                AND ticker = $1
+            """, correlated_etf)
+
+        if not positions:
+            return {
+                "relationship": "UNRELATED",
+                "detected": False,
+                "confirming": False,
+                "opposing": False
+            }
+
+        for pos in positions:
+            pos_direction = pos.get("direction", "")
+            option_type = pos.get("option_type", "")
+            pos_ticker = pos.get("ticker", "")
+
+            # Determine if the position is bearish or bullish
+            pos_is_bearish = pos_direction in ["SHORT", "BEARISH"] or option_type == "PUT"
+            pos_is_bullish = pos_direction in ["LONG", "BULLISH"] or option_type == "CALL"
+
+            strike = pos.get("strike_price", "")
+            expiry = pos.get("expiry_date", "")
+            details = f"{pos_ticker} {option_type or pos_direction} {f'${strike}' if strike else ''} {expiry or ''}"
+            is_correlated = (pos_ticker != ticker)
+            correlation_note = f" (correlated: {ticker} → {pos_ticker})" if is_correlated else ""
+
+            # CONFIRMING: squeeze direction MATCHES position direction
+            #   bullish squeeze + bullish position = confirming
+            #   bearish squeeze + bearish position = confirming
+            if (direction == "bullish" and pos_is_bullish) or (direction == "bearish" and pos_is_bearish):
                 return {
+                    "relationship": "CONFIRMING",
                     "detected": True,
-                    "position_id": c["position_id"],
-                    "details": details.strip()
+                    "confirming": True,
+                    "opposing": False,
+                    "position_id": pos["position_id"],
+                    "details": details.strip() + correlation_note,
+                    "action_hint": "Thesis accelerating — consider tightening stops, taking partial profits, or adding to winner"
                 }
 
-        # TODO V2: Check correlated ETF conflicts
-        # e.g., if ticker is MRVL and Nick has SMH puts, flag it
+            # OPPOSING: squeeze direction OPPOSES position direction
+            #   bullish squeeze + bearish position = opposing (shorts getting squeezed against you)
+            #   bearish squeeze + bullish position = opposing (longs getting crushed against you)
+            if (direction == "bullish" and pos_is_bearish) or (direction == "bearish" and pos_is_bullish):
+                return {
+                    "relationship": "OPPOSING",
+                    "detected": True,
+                    "confirming": False,
+                    "opposing": True,
+                    "position_id": pos["position_id"],
+                    "details": details.strip() + correlation_note,
+                    "action_hint": "Position at risk — consider hedging, reducing size, or closing"
+                }
 
     except Exception as e:
-        logger.debug(f"Conflict check error: {e}")
+        logger.debug(f"Position classification error: {e}")
 
-    return {"detected": False}
+    return {
+        "relationship": "UNRELATED",
+        "detected": False,
+        "confirming": False,
+        "opposing": False
+    }
 
 
 async def _get_options_structure(ticker: str, direction: str) -> Optional[Dict]:
@@ -1249,7 +1329,7 @@ Add to `frontend/app.js`:
 .lightning-card.bullish .lightning-thesis { background: rgba(0,230,118,0.06); border-left: 2px solid rgba(0,230,118,0.3); }
 .lightning-card.bearish .lightning-thesis { background: rgba(255,152,0,0.06); border-left: 2px solid rgba(255,152,0,0.3); }
 
-/* Conflict warning */
+/* Conflict/Opposing warning */
 .lightning-conflict {
     background: rgba(244, 67, 54, 0.12);
     border: 1px solid rgba(244, 67, 54, 0.3);
@@ -1258,6 +1338,25 @@ Add to `frontend/app.js`:
     margin-bottom: 6px;
     font-size: 11px;
     color: #f44336;
+}
+
+/* Confirming signal — thesis acceleration */
+.lightning-confirming {
+    background: rgba(0, 230, 118, 0.1);
+    border: 1px solid rgba(0, 230, 118, 0.3);
+    border-radius: 3px;
+    padding: 4px 8px;
+    margin-bottom: 6px;
+    font-size: 11px;
+    color: #00e676;
+}
+
+/* Action hint within confirming/opposing */
+.lightning-action-hint {
+    margin-top: 3px;
+    font-size: 10px;
+    font-style: italic;
+    opacity: 0.8;
 }
 
 /* Bucket 2 blocked warning */
@@ -1410,10 +1509,16 @@ function createLightningCard(card) {
         `;
     }
 
-    // Conflict warning
-    let conflictHtml = '';
-    if (card.conflict_detected) {
-        conflictHtml = `<div class="lightning-conflict">⚠️ CONFLICTS: ${card.conflict_details || 'Open position on this ticker'}</div>`;
+    // Position relationship display (CONFIRMING / OPPOSING / UNRELATED)
+    let relationshipHtml = '';
+    if (card.position_relationship === 'CONFIRMING') {
+        relationshipHtml = `<div class="lightning-confirming">✅ CONFIRMING: ${card.conflict_details || 'Aligns with existing position'}
+            <div class="lightning-action-hint">${card.conflict_action_hint || 'Thesis accelerating — manage your winner'}</div>
+        </div>`;
+    } else if (card.position_relationship === 'OPPOSING' || card.conflict_detected) {
+        relationshipHtml = `<div class="lightning-conflict">⚠️ OPPOSING: ${card.conflict_details || 'Works against existing position'}
+            <div class="lightning-action-hint">${card.conflict_action_hint || 'Position at risk — consider hedging'}</div>
+        </div>`;
     }
 
     // Bucket 2 blocked warning
@@ -1480,7 +1585,7 @@ function createLightningCard(card) {
         <div class="lightning-bucket2">Bucket 2: ${card.bucket2_slots_used || 0}/2 slots | $${parseFloat(card.bucket2_capital_deployed || 0).toFixed(0)} deployed</div>
 
         ${thesisHtml}
-        ${conflictHtml}
+        ${relationshipHtml}
         ${blockedHtml}
         ${postmortemHtml}
     `;
