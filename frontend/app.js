@@ -11661,8 +11661,18 @@ function renderPortfolioGreeks(data) {
     const theta = totals.theta || 0;
     const vega = totals.vega || 0;
 
-    if (delta === 0 && gamma === 0 && theta === 0 && vega === 0) return;
-    row.style.display = 'flex';
+    if (delta === 0 && gamma === 0 && theta === 0 && vega === 0) {
+        // Show dashes when no data (after hours, API error, etc.)
+        document.getElementById('greekDelta').textContent = '\u0394 --';
+        document.getElementById('greekGamma').textContent = '\u0393 --';
+        document.getElementById('greekTheta').textContent = '\u0398 --';
+        document.getElementById('greekVega').textContent = 'V --';
+        document.getElementById('greekDelta').className = 'greek-cell';
+        document.getElementById('greekGamma').className = 'greek-cell';
+        document.getElementById('greekTheta').className = 'greek-cell';
+        document.getElementById('greekVega').className = 'greek-cell';
+        return;
+    }
 
     const fmt = (v, prefix) => {
         const sign = v >= 0 ? '+' : '';
