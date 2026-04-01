@@ -11,7 +11,7 @@ from typing import List, Dict
 
 logger = logging.getLogger("fmp_client")
 
-FMP_BASE_URL = "https://financialmodelingprep.com/api/v3"
+FMP_BASE_URL = "https://financialmodelingprep.com/stable"
 FMP_API_KEY = os.getenv("FMP_API_KEY") or ""
 
 
@@ -26,7 +26,7 @@ async def fetch_earnings_calendar(date_from: date, date_to: date) -> List[Dict]:
         logger.warning("FMP_API_KEY not set — skipping earnings fetch")
         return []
 
-    url = f"{FMP_BASE_URL}/earning_calendar"
+    url = f"{FMP_BASE_URL}/earnings-calendar"
     params = {
         "from": date_from.isoformat(),
         "to": date_to.isoformat(),
