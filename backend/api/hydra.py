@@ -172,3 +172,61 @@ async def refresh_squeeze_scores():
             for s in scores[:5]
         ],
     }
+
+
+# === LIGHTNING CARD ENDPOINTS ===
+
+@router.get("/lightning")
+async def get_lightning_cards(
+    active_only: bool = Query(default=True),
+    limit: int = Query(default=5, le=20),
+):
+    """Get Lightning Cards for the Insights feed. Pinned at top of trade ideas."""
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        if active_only:
+            rows = await conn.fetch(
+                "SELECT * FROM lightning_cards WHERE status = 'active' ORDER BY created_at DESC LIMIT $1",
+                limit,
+            )
+        else:
+            rows = await conn.fetch(
+                "SELECT * FROM lightning_cards ORDER BY created_at DESC LIMIT $1",
+                limit,
+            )
+
+    cards = []
+    for r in rows:
+        d = dict(r)
+        for k, v in d.items():
+            if hasattr(v, "isoformat"):
+                d[k] = v.isoformat()
+            elif hasattr(v, "hex"):
+                d[k] = str(v)
+        cards.append(d)
+
+    return {"lightning_cards": cards}
+
+
+@router.patch("/lightning/{card_id}/status")
+async def update_lightning_status(card_id: str, request: Request):
+    """Update card status: dismissed, acted_on, expired."""
+    data = await request.json()
+    new_status = data.get("status")
+    if new_status not in ["dismissed", "acted_on", "expired"]:
+        return {"error": "Invalid status"}
+
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        if new_status == "expired":
+            await conn.execute(
+                "UPDATE lightning_cards SET status = $1, expired_at = NOW(), updated_at = NOW() WHERE id = $2",
+                new_status, card_id,
+            )
+        else:
+            await conn.execute(
+                "UPDATE lightning_cards SET status = $1, updated_at = NOW() WHERE id = $2",
+                new_status, card_id,
+            )
+
+    return {"status": "updated", "card_id": card_id}

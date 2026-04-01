@@ -186,6 +186,7 @@ async def hermes_webhook(request: Request):
             logger.error("HERMES: VPS trigger failed: %s", e)
 
     # Hydra convergence check — are any involved tickers in squeeze territory?
+    # If so, generate a Lightning Card
     convergence_alert = None
     try:
         from scanners.hydra_squeeze import calculate_squeeze_score
@@ -201,6 +202,66 @@ async def hermes_webhook(request: Request):
                     "squeeze_score": score["composite_score"],
                     "squeeze_tier": score["squeeze_tier"],
                 }
+
+                # === LIGHTNING CARD GENERATION ===
+                card_direction = "bullish" if direction == "up" else "bearish"
+                try:
+                    # Position classification: CONFIRMING / OPPOSING / UNRELATED
+                    relationship = await _classify_position_relationship(
+                        pool, t, card_direction
+                    )
+
+                    # Get current price for post-mortem tracking
+                    current_price = None
+                    try:
+                        import httpx
+                        poly_key = os.getenv("POLYGON_API_KEY", "")
+                        if poly_key:
+                            async with httpx.AsyncClient(timeout=5.0) as hc:
+                                snap = await hc.get(
+                                    f"https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers/{t}",
+                                    params={"apiKey": poly_key},
+                                )
+                                if snap.status_code == 200:
+                                    sd = snap.json().get("ticker", {})
+                                    current_price = (
+                                        sd.get("day", {}).get("c")
+                                        or sd.get("prevDay", {}).get("c")
+                                    )
+                    except Exception:
+                        pass
+
+                    async with pool.acquire() as conn:
+                        await conn.execute("""
+                            INSERT INTO lightning_cards (
+                                catalyst_event_id, ticker, direction,
+                                squeeze_composite_score, squeeze_tier,
+                                position_relationship, related_position_id,
+                                related_position_details, action_hint,
+                                catalyst_headline, catalyst_category,
+                                price_at_generation, status
+                            ) VALUES (
+                                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'active'
+                            )
+                        """,
+                            event_id, t, card_direction,
+                            score["composite_score"], score["squeeze_tier"],
+                            relationship.get("relationship", "UNRELATED"),
+                            relationship.get("position_id"),
+                            relationship.get("details"),
+                            relationship.get("action_hint"),
+                            None,  # headline filled later by Pivot
+                            None,  # category filled later by Pivot
+                            current_price,
+                        )
+                    logger.info(
+                        "LIGHTNING CARD created: %s %s (score %.1f, %s)",
+                        t, card_direction, score["composite_score"],
+                        relationship.get("relationship", "UNRELATED"),
+                    )
+                except Exception as lc_err:
+                    logger.error("Lightning Card creation failed: %s", lc_err)
+
                 break
     except Exception as e:
         logger.debug("Hydra convergence check in Hermes failed: %s", e)
@@ -293,6 +354,26 @@ async def receive_hermes_analysis(request: Request):
         })
     except Exception:
         pass
+
+    # Update any Lightning Cards linked to this event with Pivot's analysis
+    try:
+        async with pool.acquire() as conn:
+            await conn.execute("""
+                UPDATE lightning_cards
+                SET catalyst_headline = $1,
+                    catalyst_category = $2,
+                    thesis_impact = $3,
+                    updated_at = NOW()
+                WHERE catalyst_event_id = $4
+                AND status = 'active'
+            """,
+                analysis.get("headline_summary", ""),
+                analysis.get("catalyst_category", "unknown"),
+                analysis.get("thesis_impact", ""),
+                event_uuid,
+            )
+    except Exception as e:
+        logger.debug("Lightning Card update with Pivot analysis failed: %s", e)
 
     return {"status": "updated", "event_id": event_id}
 
@@ -419,3 +500,75 @@ async def _store_catalyst_event(**kwargs) -> str:
             json.dumps(kwargs.get("trip_wire_status", {})),
         )
         return row["id"]
+
+
+# Correlated ticker map: individual stock → ETF it belongs to
+_CORRELATION_MAP = {
+    "NVDA": "SMH", "AMD": "SMH", "MRVL": "SMH", "AVGO": "SMH",
+    "INTC": "SMH", "QCOM": "SMH", "MU": "SMH", "SMCI": "SMH",
+    "JPM": "XLF", "BAC": "XLF", "WFC": "XLF", "GS": "XLF",
+    "MS": "XLF", "C": "XLF", "SCHW": "XLF", "BLK": "XLF",
+    "AMT": "IYR", "PLD": "IYR", "SPG": "IYR", "O": "IYR",
+    "COIN": "IBIT", "MSTR": "IBIT", "MARA": "IBIT", "RIOT": "IBIT",
+}
+
+
+async def _classify_position_relationship(pool, ticker: str, direction: str) -> dict:
+    """
+    Three-way classification:
+      CONFIRMING  — squeeze aligns with position (thesis accelerating)
+      OPPOSING    — squeeze works against position (position at risk)
+      UNRELATED   — no position on this ticker
+    Also checks correlated ETFs (e.g. MRVL squeeze vs SMH puts).
+    """
+    try:
+        async with pool.acquire() as conn:
+            positions = await conn.fetch(
+                "SELECT position_id, ticker, direction, option_type, "
+                "strike_price, expiry_date FROM unified_positions "
+                "WHERE status = 'OPEN' AND ticker = $1",
+                ticker,
+            )
+            corr_etf = _CORRELATION_MAP.get(ticker)
+            if not positions and corr_etf:
+                positions = await conn.fetch(
+                    "SELECT position_id, ticker, direction, option_type, "
+                    "strike_price, expiry_date FROM unified_positions "
+                    "WHERE status = 'OPEN' AND ticker = $1",
+                    corr_etf,
+                )
+
+        if not positions:
+            return {"relationship": "UNRELATED"}
+
+        for pos in positions:
+            pos_dir = pos.get("direction", "")
+            opt_type = pos.get("option_type", "")
+            pos_bearish = pos_dir in ("SHORT", "BEARISH") or opt_type == "PUT"
+            pos_bullish = pos_dir in ("LONG", "BULLISH") or opt_type == "CALL"
+            pt = pos.get("ticker", "")
+            strike = pos.get("strike_price", "")
+            expiry = pos.get("expiry_date", "")
+            details = f"{pt} {opt_type or pos_dir} {'$' + str(strike) if strike else ''} {expiry or ''}".strip()
+            is_corr = pt != ticker
+            if is_corr:
+                details += f" (correlated: {ticker} → {pt})"
+
+            if (direction == "bullish" and pos_bullish) or (direction == "bearish" and pos_bearish):
+                return {
+                    "relationship": "CONFIRMING",
+                    "position_id": pos["position_id"],
+                    "details": details,
+                    "action_hint": "Thesis accelerating — tighten stops, take partials, or add to winner",
+                }
+            if (direction == "bullish" and pos_bearish) or (direction == "bearish" and pos_bullish):
+                return {
+                    "relationship": "OPPOSING",
+                    "position_id": pos["position_id"],
+                    "details": details,
+                    "action_hint": "Position at risk — consider hedging, reducing size, or closing",
+                }
+    except Exception as e:
+        logger.debug("Position classification error: %s", e)
+
+    return {"relationship": "UNRELATED"}
