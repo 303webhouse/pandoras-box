@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Pandora - Real-time Trading Signal Dashboard">
     <title>Pandora</title>
-    <link rel="stylesheet" href="/styles.css?v=114">
+    <link rel="stylesheet" href="/styles.css?v=115">
     <link rel="manifest" href="/manifest.json">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -350,15 +350,6 @@
                             </div>
                         </div>
                     </div>
-                    <div class="portfolio-greeks-row" id="portfolioGreeksRow">
-                        <div class="greeks-toggle" id="greeksToggle">Greeks &#x25B8;</div>
-                        <div class="greeks-values" id="greeksValues" style="display:none;">
-                            <span class="greek-cell" id="greekDelta" data-greek="delta">&Delta; --</span>
-                            <span class="greek-cell" id="greekGamma" data-greek="gamma">&Gamma; --</span>
-                            <span class="greek-cell" id="greekTheta" data-greek="theta">&Theta; --</span>
-                            <span class="greek-cell" id="greekVega" data-greek="vega">V --</span>
-                        </div>
-                    </div>
                 </div>
 
                 <!-- Hydra Squeeze Monitor Panel -->
@@ -525,6 +516,15 @@
                         <div class="at-risk-label">EQUITIES</div>
                         <div class="at-risk-amount" id="atRiskEquitiesAmount">$0</div>
                         <div class="at-risk-pnl" id="atRiskEquitiesPnl">--</div>
+                    </div>
+                </div>
+                <div class="portfolio-greeks-row" id="portfolioGreeksRow">
+                    <div class="greeks-toggle" id="greeksToggle">Greeks &#x25B8;</div>
+                    <div class="greeks-values" id="greeksValues" style="display:none;">
+                        <span class="greek-cell" id="greekDelta" data-greek="delta">&Delta; --</span>
+                        <span class="greek-cell" id="greekGamma" data-greek="gamma">&Gamma; --</span>
+                        <span class="greek-cell" id="greekTheta" data-greek="theta">&Theta; --</span>
+                        <span class="greek-cell" id="greekVega" data-greek="vega">V --</span>
                     </div>
                 </div>
                 <div class="expiry-timeline" id="expiryTimeline" style="display:none;">
@@ -1799,7 +1799,7 @@
     <!-- TradingView Widget Script -->
     <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
-    <script src="/app.js?v=133"></script>
+    <script src="/app.js?v=134"></script>
     <script src="/cockpit.js?v=1"></script>
     <script src="/laboratory.js?v=1"></script>
 </body>
