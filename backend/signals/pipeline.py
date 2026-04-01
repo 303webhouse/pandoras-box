@@ -510,6 +510,22 @@ async def process_signal_unified(
         )
         return signal_data
 
+    # 3c. Lightning card dedup — if an active lightning card exists for this ticker,
+    #     merge the signal as a confirmation instead of creating a separate card
+    try:
+        from api.hydra import check_lightning_card_match, add_lightning_confirmation
+        lc_match = await check_lightning_card_match(signal_data.get("ticker", ""))
+        if lc_match:
+            await add_lightning_confirmation(lc_match, signal_data)
+            logger.info(
+                "Lightning dedup: %s signal merged into card %s",
+                signal_data.get("ticker"), lc_match,
+            )
+            # Still persist the signal for history, but mark it as merged
+            signal_data["lightning_merged"] = True
+    except Exception as e:
+        logger.debug("Lightning dedup check skipped: %s", e)
+
     # 4. Persist to PostgreSQL
     try:
         await log_signal(signal_data)

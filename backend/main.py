@@ -67,6 +67,15 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"⚠️ Could not initialize Chronos table: {e}")
 
+    # Add confirmations column to lightning_cards if missing
+    try:
+        pool = await get_postgres_client()
+        async with pool.acquire() as conn:
+            await conn.execute("ALTER TABLE lightning_cards ADD COLUMN IF NOT EXISTS confirmations JSONB DEFAULT '[]'")
+        logger.info("✅ Lightning cards confirmations column ready")
+    except Exception as e:
+        logger.debug("Lightning cards column check: %s", e)
+
     logger.info("✅ Database connections established")
     # One-time cleanup of cached anomalous prices before schedulers consume data.
     try:
