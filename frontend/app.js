@@ -7758,6 +7758,7 @@ function initOptionsFlow() {
     setInterval(loadBlackSwanAlerts, 60 * 1000);
     initHermesFlash();
     initHydra();
+    initLightningCards();
     // Flow radar: 2-min refresh during market hours
     setInterval(() => {
         const now = new Date();
@@ -12134,5 +12135,204 @@ async function refreshHydra() {
     }
     btn.innerHTML = '&#x21BB; Refresh';
     btn.disabled = false;
+}
+
+// === LIGHTNING CARDS — Frontend Logic ===
+
+const _lightningCardsSounded = new Set();
+let lightningPollingInterval = null;
+
+function initLightningCards() {
+    lightningPollingInterval = setInterval(fetchLightningCards, 10000);
+    fetchLightningCards();
+}
+
+async function fetchLightningCards() {
+    try {
+        const resp = await fetch(`${API_URL}/hydra/lightning?active_only=true&limit=3`, {
+            headers: getHeaders()
+        });
+        if (!resp.ok) return;
+        const data = await resp.json();
+        renderLightningCards(data.lightning_cards || []);
+    } catch (err) {
+        console.error('Lightning card fetch error:', err);
+    }
+}
+
+function renderLightningCards(cards) {
+    const container = document.getElementById('tradeSignals');
+    if (!container) return;
+
+    // Remove existing lightning cards
+    container.querySelectorAll('.lightning-card').forEach(el => el.remove());
+
+    if (cards.length === 0) return;
+
+    // Insert at top of container, before existing signal cards
+    const firstChild = container.firstChild;
+
+    cards.forEach(card => {
+        const cardEl = createLightningCard(card);
+
+        // Only play thunder for cards we haven't seen before
+        if (!_lightningCardsSounded.has(card.id) && card.status === 'active') {
+            playThunderSound();
+            _lightningCardsSounded.add(card.id);
+        }
+
+        container.insertBefore(cardEl, firstChild);
+    });
+}
+
+function createLightningCard(card) {
+    const dir = card.direction || 'bullish';
+    const color = dir === 'bullish' ? '#00e676' : '#ff9800';
+    const isExpired = card.status === 'expired';
+
+    // Calculate countdown
+    const createdAt = new Date(card.created_at);
+    const ageMinutes = Math.floor((Date.now() - createdAt.getTime()) / 60000);
+    let countdownClass = '';
+    if (ageMinutes > 90) countdownClass = 'critical';
+    else if (ageMinutes > 60) countdownClass = 'urgent';
+
+    // Lightning bolt SVG — color matches direction
+    const lightningSvg = `<svg class="lightning-icon" viewBox="0 0 24 24" fill="${color}" xmlns="http://www.w3.org/2000/svg">
+        <path d="M13 2L3 14h8l-1 8 10-12h-8l1-8z" stroke="${color}" stroke-width="0.5" stroke-linejoin="round"/>
+    </svg>`;
+
+    // Position relationship display
+    let relationshipHtml = '';
+    if (card.position_relationship === 'CONFIRMING') {
+        relationshipHtml = `<div class="lightning-confirming">CONFIRMING: ${card.related_position_details || 'Aligns with existing position'}
+            <div class="lightning-action-hint">${card.action_hint || 'Thesis accelerating — manage your winner'}</div>
+        </div>`;
+    } else if (card.position_relationship === 'OPPOSING') {
+        relationshipHtml = `<div class="lightning-opposing">OPPOSING: ${card.related_position_details || 'Works against existing position'}
+            <div class="lightning-action-hint">${card.action_hint || 'Position at risk — consider hedging'}</div>
+        </div>`;
+    }
+
+    // Thesis impact
+    let thesisHtml = '';
+    if (card.thesis_impact) {
+        thesisHtml = `<div class="lightning-thesis"><strong>Thesis:</strong> ${card.thesis_impact}</div>`;
+    }
+
+    // Post-mortem overlay for expired cards
+    let postmortemHtml = '';
+    if (isExpired && card.actual_move_pct !== null && card.actual_move_pct !== undefined) {
+        const move = parseFloat(card.actual_move_pct || 0);
+        postmortemHtml = `
+            <div class="lightning-postmortem">
+                <div style="font-size:11px; opacity:0.7;">EXPIRED — ${card.ticker} moved ${move >= 0 ? '+' : ''}${move.toFixed(1)}%</div>
+            </div>
+        `;
+    }
+
+    const div = document.createElement('div');
+    div.className = `lightning-card ${dir} ${isExpired ? 'expired' : ''}`;
+    div.setAttribute('data-card-id', card.id);
+    div.innerHTML = `
+        <button class="lightning-dismiss" onclick="dismissLightningCard('${card.id}')" title="Dismiss">✕</button>
+
+        <div class="lightning-header">
+            ${lightningSvg}
+            <span class="lightning-ticker" style="color:${color}">${card.ticker}</span>
+            <span class="lightning-direction-badge ${dir}">SQUEEZE ${dir === 'bullish' ? 'LONG' : 'SHORT'}</span>
+            <span class="lightning-countdown ${countdownClass}">${ageMinutes}m ago</span>
+        </div>
+
+        <div class="lightning-catalyst">${card.catalyst_headline || 'Velocity breach + elevated squeeze score'}</div>
+
+        <div class="lightning-squeeze-stats">
+            <div class="lightning-stat">
+                <span class="lightning-stat-label">Score</span>
+                <span class="lightning-stat-value">${parseFloat(card.squeeze_composite_score || 0).toFixed(0)}/100</span>
+            </div>
+            <div class="lightning-stat">
+                <span class="lightning-stat-label">Tier</span>
+                <span class="lightning-stat-value">${(card.squeeze_tier || 'low').toUpperCase()}</span>
+            </div>
+        </div>
+
+        ${thesisHtml}
+        ${relationshipHtml}
+        ${postmortemHtml}
+    `;
+
+    // Start countdown updater for active cards
+    if (!isExpired) {
+        const countdownEl = div.querySelector('.lightning-countdown');
+        if (countdownEl) {
+            setInterval(() => {
+                const now = Date.now();
+                const age = Math.floor((now - createdAt.getTime()) / 60000);
+                countdownEl.textContent = `${age}m ago`;
+                countdownEl.className = 'lightning-countdown';
+                if (age > 90) countdownEl.classList.add('critical');
+                else if (age > 60) countdownEl.classList.add('urgent');
+            }, 30000);
+        }
+    }
+
+    return div;
+}
+
+function playThunderSound() {
+    try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+
+        // Low rumble (80Hz)
+        const rumble = ctx.createOscillator();
+        const rumbleGain = ctx.createGain();
+        rumble.type = 'sine';
+        rumble.frequency.value = 80;
+        rumbleGain.gain.setValueAtTime(0.15, ctx.currentTime);
+        rumbleGain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 1.5);
+        rumble.connect(rumbleGain);
+        rumbleGain.connect(ctx.destination);
+        rumble.start();
+        rumble.stop(ctx.currentTime + 1.5);
+
+        // Mid crack (120Hz sawtooth)
+        const crack = ctx.createOscillator();
+        const crackGain = ctx.createGain();
+        crack.type = 'sawtooth';
+        crack.frequency.value = 120;
+        crackGain.gain.setValueAtTime(0.08, ctx.currentTime);
+        crackGain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+        crack.connect(crackGain);
+        crackGain.connect(ctx.destination);
+        crack.start();
+        crack.stop(ctx.currentTime + 0.5);
+
+        // Sharp attack (300Hz burst)
+        const attack = ctx.createOscillator();
+        const attackGain = ctx.createGain();
+        attack.type = 'square';
+        attack.frequency.value = 300;
+        attackGain.gain.setValueAtTime(0.06, ctx.currentTime);
+        attackGain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
+        attack.connect(attackGain);
+        attackGain.connect(ctx.destination);
+        attack.start();
+        attack.stop(ctx.currentTime + 0.2);
+    } catch (e) { /* Audio not available */ }
+}
+
+async function dismissLightningCard(cardId) {
+    try {
+        await fetch(`${API_URL}/hydra/lightning/${cardId}/status`, {
+            method: 'PATCH',
+            headers: { ...getHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'dismissed' })
+        });
+        const el = document.querySelector(`[data-card-id="${cardId}"]`);
+        if (el) el.remove();
+    } catch (err) {
+        console.error('Lightning dismiss error:', err);
+    }
 }
 
