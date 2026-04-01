@@ -205,3 +205,133 @@ Then verify the Chronos tab in Agora shows data in "Market Movers" section.
 | `backend/integrations/fmp_client.py` | **MODIFY** — Fix timing normalization, handle 402 on ETF holdings, fix ETF endpoint path |
 | `backend/jobs/chronos_ingest.py` | **MODIFY** — Use None for missing fields, optional Polygon enrichment |
 | `backend/utils/position_overlap.py` | **MODIFY** — Guard refresh_etf_components against paid-only endpoint |
+
+---
+
+## FIX 5: Sector Heatmap 502 — yfinance Timeout Crash
+
+**Symptom:** `GET /api/sectors/heatmap` returns 502 (Railway timeout). Has been stuck for 2 days.
+
+**Root cause:** The `_fetch_all_bars_sync()` function in `backend/api/sectors.py` calls `yf.download()` for 12 tickers via `run_in_executor`. When yfinance hangs (which it does frequently — it's a scraper), the executor thread blocks indefinitely. Railway's 30-second request timeout fires and returns 502. Since the result is never cached, every subsequent request also hangs, creating a permanent failure loop.
+
+**The fix has three parts:**
+
+### 5a. Add timeout to yfinance call
+
+In `backend/api/sectors.py`, wrap the `_fetch_all_bars()` async wrapper with a timeout:
+
+```python
+async def _fetch_all_bars() -> Dict[str, List[float]]:
+    """Async wrapper around synchronous yfinance batch download with timeout."""
+    loop = asyncio.get_event_loop()
+    try:
+        return await asyncio.wait_for(
+            loop.run_in_executor(None, _fetch_all_bars_sync),
+            timeout=15.0  # 15 second max — if yfinance is slow, bail out
+        )
+    except asyncio.TimeoutError:
+        logger.warning("yfinance batch download timed out after 15s — using stale cache")
+        return {}
+    except Exception as e:
+        logger.warning("yfinance batch download error: %s — using stale cache", e)
+        return {}
+```
+
+This replaces the current `_fetch_all_bars()` which has no timeout.
+
+### 5b. Return stale cache immediately if yfinance fails
+
+In the `get_sector_heatmap()` endpoint, the code currently tries to load yfinance data and only falls back to stale cache at the very end if `has_real_data` is False. But Polygon snapshot data (the live daily data) is fine — it's only the weekly/monthly historical bars from yfinance that are failing.
+
+Restructure the endpoint to be more resilient. After the yfinance call, if `all_closes` is empty, proceed with Polygon-only data (daily changes work, weekly/monthly will show as null):
+
+Find this block:
+```python
+    if not all_closes:
+        all_closes = await _fetch_all_bars()
+```
+
+Replace with:
+```python
+    if not all_closes:
+        all_closes = await _fetch_all_bars()
+        if not all_closes:
+            logger.warning("Sector heatmap: no historical bars available (yfinance down). Daily data from Polygon only.")
+```
+
+This ensures the endpoint always returns something useful (Polygon daily changes) even when yfinance is completely dead. The weekly/monthly columns will show 0.0 or null, which is acceptable — "no data" is better than "entire heatmap dead."
+
+### 5c. Add Polygon fallback for historical bars (recommended but optional)
+
+The Stocks Starter plan ($29/mo) includes 5 years of daily bars. We can use Polygon instead of yfinance for the weekly/monthly changes. This eliminates the yfinance dependency entirely for the heatmap.
+
+Add a Polygon-based historical bar fetcher:
+
+```python
+async def _fetch_bars_polygon(tickers: List[str], days: int = 45) -> Dict[str, List[float]]:
+    """Fetch daily close bars from Polygon for multiple tickers."""
+    if not POLYGON_API_KEY:
+        return {}
+    
+    from datetime import date, timedelta
+    today = date.today()
+    from_date = (today - timedelta(days=days)).isoformat()
+    to_date = (today - timedelta(days=1)).isoformat()  # Yesterday (today's bar is partial)
+    
+    results = {}
+    async with aiohttp.ClientSession() as session:
+        for ticker in tickers:
+            try:
+                url = (
+                    f"https://api.polygon.io/v2/aggs/ticker/{ticker}/range/1/day"
+                    f"/{from_date}/{to_date}?adjusted=true&sort=asc&apiKey={POLYGON_API_KEY}"
+                )
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        bars = data.get("results", [])
+                        if bars:
+                            results[ticker] = [b["c"] for b in bars if "c" in b]
+            except Exception as e:
+                logger.debug("Polygon bars failed for %s: %s", ticker, e)
+    
+    return results
+```
+
+Then in the heatmap endpoint, use Polygon first, yfinance as fallback:
+
+```python
+    if not all_closes:
+        # Try Polygon first (reliable), yfinance fallback
+        all_closes = await _fetch_bars_polygon(ALL_TICKERS, days=45)
+        if not all_closes or len(all_closes) < 6:
+            logger.info("Polygon bars incomplete (%d tickers), trying yfinance", len(all_closes))
+            yf_closes = await _fetch_all_bars()
+            # Merge: Polygon wins on conflicts
+            for ticker, closes in yf_closes.items():
+                if ticker not in all_closes:
+                    all_closes[ticker] = closes
+```
+
+**Note:** This makes 12 API calls to Polygon (one per ticker). With the Starter plan's unlimited calls, this is fine. Cache the result for 30 min (same as current yfinance cache) to avoid repeated calls.
+
+---
+
+## UPDATED VERIFICATION
+
+After deploying all fixes:
+
+1. `POST /api/chronos/refresh` → should return 200 with `"message": "Earnings refresh complete"`
+2. `GET /api/chronos/this-week` → should show `total_earnings` > 0
+3. `GET /api/sectors/heatmap` → should return 200 with sector data (NOT 502)
+4. Sector heatmap in Agora should display colored cells with daily changes
+5. If weekly/monthly columns show 0.0, that's acceptable for V1 — daily is the critical data
+
+## UPDATED FILES MODIFIED
+
+| File | Action |
+|------|--------|
+| `backend/integrations/fmp_client.py` | **MODIFY** — Fix timing, handle 402, fix ETF path |
+| `backend/jobs/chronos_ingest.py` | **MODIFY** — Null missing fields, optional enrichment |
+| `backend/utils/position_overlap.py` | **MODIFY** — Guard refresh_etf_components |
+| `backend/api/sectors.py` | **MODIFY** — Add timeout to yfinance, stale fallback, optional Polygon bars |
