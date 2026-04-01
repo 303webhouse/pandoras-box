@@ -11469,6 +11469,163 @@ body[data-mode="analytics"] .analytics-shell {
 }
 .hydra-refresh-btn:hover { background: rgba(255,255,255,0.05); }
 
+/* === LIGHTNING CARDS === */
+
+.lightning-card {
+    position: relative;
+    border-radius: 6px;
+    padding: 12px 14px;
+    margin-bottom: 10px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    background: rgba(0,0,0,0.4);
+    overflow: hidden;
+    animation: lightning-border-pulse 2s ease-in-out infinite;
+}
+
+.lightning-card.bullish {
+    border: 1.5px solid #00e676;
+    box-shadow: 0 0 8px rgba(0, 230, 118, 0.15);
+}
+.lightning-card.bearish {
+    border: 1.5px solid #ff9800;
+    box-shadow: 0 0 8px rgba(255, 152, 0, 0.15);
+}
+
+@keyframes lightning-border-pulse {
+    0%, 100% { opacity: 1; filter: brightness(1); }
+    50% { opacity: 0.8; filter: brightness(1.3); }
+}
+
+.lightning-card.expired {
+    animation: none;
+    opacity: 0.4;
+    border-color: rgba(255,255,255,0.15);
+    box-shadow: none;
+}
+
+.lightning-icon {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+    animation: lightning-icon-pulse 2s ease-in-out infinite;
+}
+.lightning-card.expired .lightning-icon { animation: none; opacity: 0.3; }
+
+@keyframes lightning-icon-pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.7; transform: scale(1.08); }
+}
+
+.lightning-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+.lightning-ticker { font-size: 16px; font-weight: 700; }
+
+.lightning-direction-badge {
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+}
+.lightning-direction-badge.bullish { background: rgba(0, 230, 118, 0.2); color: #00e676; }
+.lightning-direction-badge.bearish { background: rgba(255, 152, 0, 0.2); color: #ff9800; }
+
+.lightning-countdown { margin-left: auto; font-size: 11px; opacity: 0.7; }
+.lightning-countdown.urgent { color: #ff9800; opacity: 1; }
+.lightning-countdown.critical { color: #f44336; opacity: 1; font-weight: 700; }
+
+.lightning-catalyst {
+    font-size: 11px;
+    margin-bottom: 8px;
+    padding: 4px 8px;
+    background: rgba(255,255,255,0.04);
+    border-radius: 3px;
+    color: rgba(255,255,255,0.8);
+    font-style: italic;
+}
+
+.lightning-squeeze-stats {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 8px;
+    font-size: 11px;
+}
+.lightning-stat { display: flex; flex-direction: column; align-items: center; }
+.lightning-stat-label { opacity: 0.5; font-size: 9px; text-transform: uppercase; letter-spacing: 0.5px; }
+.lightning-stat-value { font-weight: 700; font-size: 13px; }
+
+.lightning-thesis {
+    font-size: 11px;
+    padding: 4px 8px;
+    border-radius: 3px;
+    margin-bottom: 6px;
+}
+.lightning-card.bullish .lightning-thesis { background: rgba(0,230,118,0.06); border-left: 2px solid rgba(0,230,118,0.3); }
+.lightning-card.bearish .lightning-thesis { background: rgba(255,152,0,0.06); border-left: 2px solid rgba(255,152,0,0.3); }
+
+.lightning-confirming {
+    background: rgba(0, 230, 118, 0.1);
+    border: 1px solid rgba(0, 230, 118, 0.3);
+    border-radius: 3px;
+    padding: 4px 8px;
+    margin-bottom: 6px;
+    font-size: 11px;
+    color: #00e676;
+}
+
+.lightning-opposing {
+    background: rgba(244, 67, 54, 0.12);
+    border: 1px solid rgba(244, 67, 54, 0.3);
+    border-radius: 3px;
+    padding: 4px 8px;
+    margin-bottom: 6px;
+    font-size: 11px;
+    color: #f44336;
+}
+
+.lightning-action-hint {
+    margin-top: 3px;
+    font-size: 10px;
+    font-style: italic;
+    opacity: 0.8;
+}
+
+.lightning-dismiss {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    background: none;
+    border: 1px solid rgba(255,255,255,0.15);
+    color: rgba(255,255,255,0.5);
+    cursor: pointer;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 10px;
+}
+.lightning-dismiss:hover { background: rgba(255,255,255,0.1); color: white; }
+
+.lightning-postmortem {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 700;
+    flex-direction: column;
+    gap: 4px;
+}
+.lightning-postmortem .missed-pnl.positive { color: #00e676; }
+.lightning-postmortem .missed-pnl.negative { color: #f44336; }
+
 /* ===== MACRO TICKER STRIP ===== */
 .macro-strip {
     background: var(--dark-bg);
