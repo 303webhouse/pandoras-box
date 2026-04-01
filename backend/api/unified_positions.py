@@ -960,9 +960,20 @@ async def _portfolio_greeks_inner():
 
         for ticker, pos_list in by_ticker.items():
             try:
+                logger.info("Greeks: fetching for %s (%d positions). Strikes: %s",
+                           ticker, len(pos_list),
+                           [(p.get("long_strike"), p.get("short_strike"), p.get("expiry")) for p in pos_list])
                 greeks_result = await get_ticker_greeks_summary(ticker, pos_list)
                 if greeks_result:
+                    logger.info("Greeks: %s returned delta=%.2f gamma=%.4f theta=%.2f vega=%.2f",
+                               ticker,
+                               greeks_result.get("net_delta", 0),
+                               greeks_result.get("net_gamma", 0),
+                               greeks_result.get("net_theta", 0),
+                               greeks_result.get("net_vega", 0))
                     ticker_greeks[ticker] = greeks_result
+                else:
+                    logger.warning("Greeks: %s returned None (snapshot empty or no matching contracts)", ticker)
                     total_delta += greeks_result.get("net_delta", 0)
                     total_gamma += greeks_result.get("net_gamma", 0)
                     total_theta += greeks_result.get("net_theta", 0)
