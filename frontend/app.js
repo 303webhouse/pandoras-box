@@ -12450,11 +12450,8 @@ async function loadWatchlist() {
         const resp = await fetch(`${API_URL}/trade-watchlist`, { headers: authHeaders() });
         if (!resp.ok) return;
         const data = await resp.json();
-        const entries = data.entries || data.watchlist || [];
-        const longIdeas = entries.filter(e => e.direction === 'LONG');
-        const shortIdeas = entries.filter(e => e.direction === 'SHORT');
-        renderWatchlistCards(longIdeas, 'watchlist-long-cards', 'long');
-        renderWatchlistCards(shortIdeas, 'watchlist-short-cards', 'short');
+        renderWatchlistCards(data.long_ideas || [], 'watchlist-long-cards', 'long');
+        renderWatchlistCards(data.short_ideas || [], 'watchlist-short-cards', 'short');
     } catch (err) {
         console.error('Watchlist load error:', err);
     }
