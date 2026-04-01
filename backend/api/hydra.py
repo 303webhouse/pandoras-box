@@ -210,7 +210,7 @@ async def get_lightning_cards(
             if ticker:
                 try:
                     recent = await conn2.fetch("""
-                        SELECT strategy, direction, entry_price AS score, created_at
+                        SELECT strategy, direction, score, created_at
                         FROM signals
                         WHERE ticker = $1
                         AND created_at > NOW() - INTERVAL '30 minutes'
