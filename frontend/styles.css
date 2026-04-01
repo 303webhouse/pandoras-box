@@ -11479,7 +11479,7 @@ body[data-mode="analytics"] .analytics-shell {
     font-family: 'IBM Plex Mono', monospace;
     font-size: 12px;
     background: rgba(0,0,0,0.4);
-    overflow: hidden;
+    overflow: visible;
     animation: lightning-border-pulse 2s ease-in-out infinite;
 }
 
@@ -11622,6 +11622,7 @@ body[data-mode="analytics"] .analytics-shell {
     font-weight: 700;
     flex-direction: column;
     gap: 4px;
+    overflow: hidden;
 }
 .lightning-postmortem .missed-pnl.positive { color: #00e676; }
 .lightning-postmortem .missed-pnl.negative { color: #f44336; }
