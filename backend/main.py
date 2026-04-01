@@ -58,7 +58,15 @@ async def lifespan(app: FastAPI):
         logger.info("✅ Trade watchlist table ready")
     except Exception as e:
         logger.warning(f"⚠️ Could not initialize trade watchlist table: {e}")
-    
+
+    # Initialize earnings calendar table
+    try:
+        from api.chronos import init_chronos_table
+        await init_chronos_table()
+        logger.info("✅ Chronos earnings table ready")
+    except Exception as e:
+        logger.warning(f"⚠️ Could not initialize Chronos table: {e}")
+
     logger.info("✅ Database connections established")
     # One-time cleanup of cached anomalous prices before schedulers consume data.
     try:
@@ -449,6 +457,43 @@ async def lifespan(app: FastAPI):
 
     watchlist_alert_task = asyncio.create_task(watchlist_price_alert_loop())
 
+    # Chronos: refresh earnings calendar daily at 6 AM ET
+    async def chronos_earnings_loop():
+        """Daily earnings calendar refresh from FMP."""
+        import pytz
+        from datetime import datetime as dt_cls
+
+        await asyncio.sleep(60)  # 1 min startup delay
+
+        while True:
+            try:
+                et = dt_cls.now(pytz.timezone("America/New_York"))
+                # Run once daily around 6 AM ET on weekdays
+                if et.weekday() < 5 and (5 <= et.hour <= 6):
+                    from jobs.chronos_ingest import run_chronos_earnings_ingest
+                    await run_chronos_earnings_ingest()
+                    # Weekly ETF component refresh (Mondays only)
+                    if et.weekday() == 0:
+                        from utils.position_overlap import refresh_etf_components
+                        await refresh_etf_components()
+                elif et.hour == 7 and et.minute < 15:
+                    # Catch-up run if 6 AM was missed
+                    from jobs.chronos_ingest import run_chronos_earnings_ingest
+                    await run_chronos_earnings_ingest()
+            except Exception as e:
+                logger.warning("Chronos earnings loop error: %s", e)
+            await asyncio.sleep(3600)  # Check every hour (only runs at 6-7 AM)
+
+    chronos_task = asyncio.create_task(chronos_earnings_loop())
+
+    # Initial Chronos data load
+    try:
+        from jobs.chronos_ingest import run_chronos_earnings_ingest
+        asyncio.create_task(run_chronos_earnings_ingest())
+        logger.info("📅 Chronos initial earnings load queued")
+    except Exception as e:
+        logger.warning("Chronos initial load error: %s", e)
+
     # Ensure proximity attribution columns exist
     try:
         from analytics.proximity_attribution import ensure_attribution_columns
@@ -475,6 +520,7 @@ async def lifespan(app: FastAPI):
     oracle_task.cancel()
     price_collector_task.cancel()
     watchlist_alert_task.cancel()
+    chronos_task.cancel()
     logger.info("🛑 Shutting down Pandora's Box...")
     await redis_client.close()
     await postgres_client.close()
@@ -688,6 +734,7 @@ from api.regime import router as regime_router
 from api.catalyst_calendar import router as catalyst_router
 from api.ticker_profile import router as ticker_profile_router
 from api.trade_watchlist import router as trade_watchlist_router
+from api.chronos import router as chronos_router
 
 app.include_router(webhook_router, prefix="/webhook", tags=["webhooks"])
 app.include_router(circuit_breaker_router, prefix="/webhook", tags=["circuit-breaker"])
@@ -736,6 +783,7 @@ app.include_router(regime_router, prefix="/api", tags=["regime"])
 app.include_router(catalyst_router, prefix="/api", tags=["catalyst"])
 app.include_router(ticker_profile_router, prefix="/api", tags=["ticker-profile"])
 app.include_router(trade_watchlist_router, prefix="/api", tags=["trade-watchlist"])
+app.include_router(chronos_router, prefix="/api", tags=["chronos"])
 
 # Serve frontend static files
 # Multiple path resolution strategies for different deployment environments
