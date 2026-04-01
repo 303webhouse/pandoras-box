@@ -980,6 +980,31 @@ function handleWebSocketMessage(message) {
             // CB decay complete, condition cleared — show accept/reject banner
             handleCircuitBreakerPendingReset(message.state || message);
             break;
+        case 'watchlist_alert':
+            console.log(`🎯 WATCHLIST ALERT: ${message.ticker} hit target $${message.entry_target}`);
+            loadWatchlist();
+            break;
+        case 'lightning_confirmation': {
+            const card = document.querySelector(`[data-lightning-id="${message.card_id}"]`);
+            if (card) {
+                let strip = card.querySelector('.lightning-confluence');
+                if (!strip) {
+                    const actionsEl = card.querySelector('.lightning-actions');
+                    strip = document.createElement('div');
+                    strip.className = 'lightning-confluence';
+                    strip.innerHTML = '<span class="confluence-label">Hub confirms:</span>';
+                    if (actionsEl) actionsEl.parentNode.insertBefore(strip, actionsEl);
+                    else card.appendChild(strip);
+                }
+                const badge = document.createElement('span');
+                badge.className = 'confluence-signal flash-new';
+                badge.textContent = `${message.strategy} ${message.direction} ${message.score || ''}`;
+                strip.appendChild(badge);
+                card.classList.add('lightning-confirmed');
+                setTimeout(() => card.classList.remove('lightning-confirmed'), 3000);
+            }
+            break;
+        }
     }
 }
 
@@ -7761,6 +7786,7 @@ function initOptionsFlow() {
     initHermesFlash();
     initHydra();
     initLightningCards();
+    loadWatchlist();
     // Flow radar: 2-min refresh during market hours
     setInterval(() => {
         const now = new Date();
@@ -12239,9 +12265,30 @@ function createLightningCard(card) {
         `;
     }
 
+    // Recent signals confluence strip
+    let confluenceHtml = '';
+    if (card.recent_signals && card.recent_signals.length > 0) {
+        const badges = card.recent_signals.map(s =>
+            `<span class="confluence-signal">${s.strategy} ${s.direction} ${s.score || ''}</span>`
+        ).join('');
+        confluenceHtml = `<div class="lightning-confluence"><span class="confluence-label">Hub signals (30m):</span>${badges}</div>`;
+    }
+
+    // Action buttons (only for active cards)
+    let actionsHtml = '';
+    if (!isExpired) {
+        actionsHtml = `
+            <div class="lightning-actions">
+                <button class="lightning-btn analyze" onclick="analyzeLightningCard('${card.id}', '${card.ticker}')">Analyze</button>
+                <button class="lightning-btn accept" onclick="acceptLightningCard('${card.id}')">Accept</button>
+                <button class="lightning-btn pass" onclick="passLightningCard('${card.id}')">Pass</button>
+            </div>`;
+    }
+
     const div = document.createElement('div');
     div.className = `lightning-card ${dir} ${isExpired ? 'expired' : ''}`;
     div.setAttribute('data-card-id', card.id);
+    div.setAttribute('data-lightning-id', card.id);
     div.innerHTML = `
         <button class="lightning-dismiss" onclick="dismissLightningCard('${card.id}')" title="Dismiss">✕</button>
 
@@ -12267,6 +12314,8 @@ function createLightningCard(card) {
 
         ${thesisHtml}
         ${relationshipHtml}
+        ${confluenceHtml}
+        ${actionsHtml}
         ${postmortemHtml}
     `;
 
@@ -12342,5 +12391,217 @@ async function dismissLightningCard(cardId) {
     } catch (err) {
         console.error('Lightning dismiss error:', err);
     }
+}
+
+function analyzeLightningCard(cardId, ticker) {
+    // Populate the ticker analyzer input and trigger analysis
+    const input = document.getElementById('analyzeTickerInput');
+    const btn = document.getElementById('analyzeTickerBtn');
+    if (input && btn) {
+        input.value = ticker;
+        btn.click();
+    }
+}
+
+async function acceptLightningCard(cardId) {
+    try {
+        await fetch(`${API_URL}/hydra/lightning/${cardId}/status`, {
+            method: 'PATCH',
+            headers: { "X-API-Key": API_KEY, "Content-Type": "application/json" },
+            body: JSON.stringify({ status: 'acted_on' })
+        });
+        const el = document.querySelector(`[data-card-id="${cardId}"]`);
+        if (el) el.style.opacity = '0.5';
+    } catch (err) {
+        console.error('Lightning accept error:', err);
+    }
+}
+
+async function passLightningCard(cardId) {
+    try {
+        await fetch(`${API_URL}/hydra/lightning/${cardId}/status`, {
+            method: 'PATCH',
+            headers: { "X-API-Key": API_KEY, "Content-Type": "application/json" },
+            body: JSON.stringify({ status: 'dismissed' })
+        });
+        const el = document.querySelector(`[data-card-id="${cardId}"]`);
+        if (el) el.remove();
+    } catch (err) {
+        console.error('Lightning pass error:', err);
+    }
+}
+
+// === CHRONOS TAB SWITCHING ===
+function switchChronosTab(tabName) {
+    document.querySelectorAll('.chronos-tab').forEach(t => t.classList.remove('active'));
+    const activeTab = document.querySelector(`.chronos-tab[data-chronos-tab="${tabName}"]`);
+    if (activeTab) activeTab.classList.add('active');
+
+    document.getElementById('chronos-watchlist-content').style.display = tabName === 'watchlist' ? '' : 'none';
+    document.getElementById('chronos-earnings-content').style.display = tabName === 'earnings' ? '' : 'none';
+
+    if (tabName === 'watchlist') loadWatchlist();
+    if (tabName === 'earnings') loadChronosEarnings();
+}
+
+// === TRADE WATCHLIST ===
+async function loadWatchlist() {
+    try {
+        const resp = await fetch(`${API_URL}/trade-watchlist`, { headers: authHeaders() });
+        if (!resp.ok) return;
+        const data = await resp.json();
+        const entries = data.entries || data.watchlist || [];
+        const longIdeas = entries.filter(e => e.direction === 'LONG');
+        const shortIdeas = entries.filter(e => e.direction === 'SHORT');
+        renderWatchlistCards(longIdeas, 'watchlist-long-cards', 'long');
+        renderWatchlistCards(shortIdeas, 'watchlist-short-cards', 'short');
+    } catch (err) {
+        console.error('Watchlist load error:', err);
+    }
+}
+
+function renderWatchlistCards(entries, containerId, direction) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    if (!entries.length) {
+        container.innerHTML = '<p class="empty-state">No ideas yet</p>';
+        return;
+    }
+
+    container.innerHTML = entries.map(e => {
+        const dist = Math.abs(e.distance_to_target_pct || 0);
+        const distClass = dist < 3 ? 'close' : dist < 10 ? 'medium' : 'far';
+        const distLabel = e.entry_target ? `${dist.toFixed(1)}% away` : '\u2014';
+
+        let gradeBadgeClass = 'grade';
+        if (e.committee_grade && e.committee_grade.startsWith('B')) gradeBadgeClass = 'grade-b';
+        if (e.committee_grade && e.committee_grade.startsWith('C')) gradeBadgeClass = 'grade-c';
+
+        let earningsBadge = '';
+        if (e.next_earnings_date) {
+            const daysToEarnings = Math.ceil((new Date(e.next_earnings_date) - new Date()) / 86400000);
+            const earnClass = daysToEarnings <= 14 ? 'earnings-soon' : 'earnings';
+            const timing = e.earnings_timing ? ` ${e.earnings_timing}` : '';
+            earningsBadge = `<span class="watchlist-badge ${earnClass}">Earn: ${e.next_earnings_date}${timing}</span>`;
+        }
+
+        return `
+        <div class="watchlist-card ${direction}" data-wl-id="${e.id}" onclick="openWatchlistDetail('${e.id}')">
+            <div class="watchlist-card-top">
+                <span class="watchlist-card-ticker">${e.ticker}</span>
+                <span class="watchlist-card-price">$${Number(e.current_price || 0).toFixed(2)}</span>
+            </div>
+            <div class="watchlist-card-mid">
+                <span class="watchlist-card-target">${e.entry_target ? 'Target: $' + Number(e.entry_target).toFixed(2) : '\u2014'}</span>
+                <span class="watchlist-card-distance ${distClass}">${distLabel}</span>
+            </div>
+            <div class="watchlist-card-badges">
+                ${e.committee_grade ? `<span class="watchlist-badge ${gradeBadgeClass}">${e.committee_grade}</span>` : ''}
+                ${earningsBadge}
+                <span class="watchlist-badge source">${e.source || 'Manual'}</span>
+            </div>
+            ${e.thesis_note ? `<div class="watchlist-card-thesis">${e.thesis_note}</div>` : ''}
+        </div>`;
+    }).join('');
+}
+
+function openWatchlistAddModal() {
+    document.getElementById('watchlistAddModal').style.display = 'flex';
+    document.getElementById('wlTicker').value = '';
+    document.getElementById('wlDirection').value = 'LONG';
+    document.getElementById('wlEntryTarget').value = '';
+    document.getElementById('wlThesis').value = '';
+    document.getElementById('wlGrade').value = '';
+    document.getElementById('wlSource').value = 'MANUAL';
+    document.getElementById('wlBucket').value = '';
+    document.getElementById('wlTicker').focus();
+}
+
+function closeWatchlistAddModal() {
+    document.getElementById('watchlistAddModal').style.display = 'none';
+}
+
+async function submitWatchlistEntry() {
+    const ticker = document.getElementById('wlTicker').value.trim().toUpperCase();
+    if (!ticker) return;
+
+    const body = {
+        ticker,
+        direction: document.getElementById('wlDirection').value,
+        entry_target: parseFloat(document.getElementById('wlEntryTarget').value) || null,
+        thesis_note: document.getElementById('wlThesis').value.trim() || null,
+        committee_grade: document.getElementById('wlGrade').value || null,
+        source: document.getElementById('wlSource').value,
+        bucket: document.getElementById('wlBucket').value || null,
+    };
+
+    try {
+        const resp = await fetch(`${API_URL}/trade-watchlist`, {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify(body)
+        });
+        if (resp.ok) {
+            closeWatchlistAddModal();
+            loadWatchlist();
+        } else {
+            const err = await resp.json();
+            alert(err.detail || 'Failed to add entry');
+        }
+    } catch (err) {
+        console.error('Watchlist add error:', err);
+    }
+}
+
+async function deleteWatchlistEntry(id) {
+    if (!confirm('Remove from watchlist?')) return;
+    try {
+        await fetch(`${API_URL}/trade-watchlist/${id}`, {
+            method: 'DELETE',
+            headers: authHeaders()
+        });
+        loadWatchlist();
+    } catch (err) {
+        console.error('Watchlist delete error:', err);
+    }
+}
+
+function openWatchlistDetail(id) {
+    // Phase 2: open a detail/edit modal for the entry
+    console.log('Watchlist detail:', id);
+}
+
+// === CHRONOS EARNINGS ===
+async function loadChronosEarnings() {
+    try {
+        const resp = await fetch(`${API_URL}/chronos/this-week`, { headers: authHeaders() });
+        if (!resp.ok) return;
+        const data = await resp.json();
+
+        renderChronosEntries(data.book_impact || [], 'chronos-book-impact');
+        renderChronosEntries(data.market_movers || [], 'chronos-market-movers');
+    } catch (err) {
+        console.error('Chronos load error:', err);
+        const el = document.getElementById('chronos-book-impact');
+        if (el) el.innerHTML = '<p class="empty-state">Earnings data unavailable</p>';
+    }
+}
+
+function renderChronosEntries(entries, containerId) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    if (!entries.length) {
+        container.innerHTML = '<p class="empty-state">No earnings this period</p>';
+        return;
+    }
+
+    container.innerHTML = entries.slice(0, 10).map(e => `
+        <div class="chronos-entry">
+            <span class="chronos-entry-ticker">${e.ticker}</span>
+            <span class="chronos-entry-date">${e.report_date}</span>
+            <span class="chronos-entry-timing">${e.timing || '\u2014'}</span>
+            ${e.in_position_book ? `<span class="chronos-entry-overlap">${(e.position_overlap_details?.etf_positions || []).join(', ')}</span>` : ''}
+        </div>
+    `).join('');
 }
 

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Pandora - Real-time Trading Signal Dashboard">
     <title>Pandora</title>
-    <link rel="stylesheet" href="/styles.css?v=116">
+    <link rel="stylesheet" href="/styles.css?v=117">
     <link rel="manifest" href="/manifest.json">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -352,58 +352,6 @@
                     </div>
                 </div>
 
-                <!-- Hydra Squeeze Monitor Panel -->
-                <div class="hydra-panel" id="hydra-panel">
-                    <div class="hydra-header" onclick="toggleHydraPanel()">
-                        <span class="hydra-title">HYDRA Squeeze Monitor</span>
-                        <span class="hydra-warning-badge" id="hydra-warning-badge" style="display:none;">!</span>
-                        <span class="hydra-toggle" id="hydra-toggle">&#x25B6;</span>
-                    </div>
-                    <div class="hydra-body" id="hydra-body" style="display:none;">
-                        <div class="hydra-tabs">
-                            <button class="hydra-tab active" onclick="switchHydraTab('defensive')" id="hydra-tab-defensive">Defensive</button>
-                            <button class="hydra-tab" onclick="switchHydraTab('offensive')" id="hydra-tab-offensive">Offensive</button>
-                        </div>
-                        <div class="hydra-tab-content" id="hydra-defensive-content">
-                            <div id="hydra-exposure-warning" class="hydra-exposure-warning" style="display:none;"></div>
-                            <table class="hydra-table" id="hydra-exposure-table">
-                                <thead>
-                                    <tr>
-                                        <th>Ticker</th>
-                                        <th>Your Position</th>
-                                        <th>Short %</th>
-                                        <th>DTC</th>
-                                        <th>Score</th>
-                                        <th>Risk</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="hydra-exposure-tbody"></tbody>
-                            </table>
-                        </div>
-                        <div class="hydra-tab-content" id="hydra-offensive-content" style="display:none;">
-                            <table class="hydra-table" id="hydra-scores-table">
-                                <thead>
-                                    <tr>
-                                        <th>Ticker</th>
-                                        <th>Short %</th>
-                                        <th>DTC</th>
-                                        <th>Shorts P&amp;L</th>
-                                        <th>Call Flow</th>
-                                        <th>Score</th>
-                                        <th>Tier</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="hydra-scores-tbody"></tbody>
-                            </table>
-                        </div>
-                        <div id="hydra-convergence" class="hydra-convergence" style="display:none;"></div>
-                        <div class="hydra-footer">
-                            <span id="hydra-last-updated" class="hydra-timestamp"></span>
-                            <button class="hydra-refresh-btn" onclick="refreshHydra()">&#x21BB; Refresh</button>
-                        </div>
-                    </div>
-                </div>
-
                 <!-- Single Ticker Analyzer (moved from watchlist) -->
                 <div class="analyzer-panel">
                     <div class="analyzer-header">
@@ -536,7 +484,119 @@
             </div>
         </section>
 
-        <!-- Watchlist v3 -->
+        <!-- CHRONOS ROW: Hydra Squeeze (left 50%) + Watchlist/Chronos Tabs (right 50%) -->
+        <section class="chronos-row">
+            <!-- LEFT: Hydra Squeeze Monitor (moved from bias-right-stack) -->
+            <div class="chronos-hydra-col">
+                <div class="hydra-panel" id="hydra-panel">
+                    <div class="hydra-header" onclick="toggleHydraPanel()">
+                        <span class="hydra-title">HYDRA Squeeze Monitor</span>
+                        <span class="hydra-warning-badge" id="hydra-warning-badge" style="display:none;">!</span>
+                        <span class="hydra-toggle" id="hydra-toggle">&#x25BC;</span>
+                    </div>
+                    <div class="hydra-body" id="hydra-body" style="display:block;">
+                        <div class="hydra-tabs">
+                            <button class="hydra-tab active" onclick="switchHydraTab('defensive')" id="hydra-tab-defensive">Defensive</button>
+                            <button class="hydra-tab" onclick="switchHydraTab('offensive')" id="hydra-tab-offensive">Offensive</button>
+                        </div>
+                        <div class="hydra-tab-content" id="hydra-defensive-content">
+                            <div id="hydra-exposure-warning" class="hydra-exposure-warning" style="display:none;"></div>
+                            <table class="hydra-table" id="hydra-exposure-table">
+                                <thead>
+                                    <tr>
+                                        <th>Ticker</th>
+                                        <th>Your Position</th>
+                                        <th>Short %</th>
+                                        <th>DTC</th>
+                                        <th>Score</th>
+                                        <th>Risk</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="hydra-exposure-tbody"></tbody>
+                            </table>
+                        </div>
+                        <div class="hydra-tab-content" id="hydra-offensive-content" style="display:none;">
+                            <table class="hydra-table" id="hydra-scores-table">
+                                <thead>
+                                    <tr>
+                                        <th>Ticker</th>
+                                        <th>Short %</th>
+                                        <th>DTC</th>
+                                        <th>Shorts P&amp;L</th>
+                                        <th>Call Flow</th>
+                                        <th>Score</th>
+                                        <th>Tier</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="hydra-scores-tbody"></tbody>
+                            </table>
+                        </div>
+                        <div id="hydra-convergence" class="hydra-convergence" style="display:none;"></div>
+                        <div class="hydra-footer">
+                            <span id="hydra-last-updated" class="hydra-timestamp"></span>
+                            <button class="hydra-refresh-btn" onclick="refreshHydra()">&#x21BB; Refresh</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- RIGHT: Watchlist / Chronos Tabs -->
+            <div class="chronos-tabs-col">
+                <div class="chronos-tab-bar">
+                    <button class="chronos-tab active" data-chronos-tab="watchlist" onclick="switchChronosTab('watchlist')">WATCHLIST</button>
+                    <button class="chronos-tab" data-chronos-tab="earnings" onclick="switchChronosTab('earnings')">CHRONOS</button>
+                </div>
+
+                <!-- Watchlist Tab Content -->
+                <div class="chronos-tab-content" id="chronos-watchlist-content">
+                    <div class="watchlist-columns">
+                        <!-- LONG Column -->
+                        <div class="watchlist-col" id="watchlist-long-col">
+                            <div class="watchlist-col-header long">
+                                <span class="watchlist-col-label">LONG IDEAS</span>
+                                <span class="watchlist-col-line"></span>
+                            </div>
+                            <div class="watchlist-cards" id="watchlist-long-cards">
+                                <p class="empty-state">No long ideas yet</p>
+                            </div>
+                        </div>
+                        <!-- SHORT Column -->
+                        <div class="watchlist-col" id="watchlist-short-col">
+                            <div class="watchlist-col-header short">
+                                <span class="watchlist-col-label">SHORT IDEAS</span>
+                                <span class="watchlist-col-line"></span>
+                            </div>
+                            <div class="watchlist-cards" id="watchlist-short-cards">
+                                <p class="empty-state">No short ideas yet</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="watchlist-add-bar">
+                        <button class="watchlist-add-btn" id="watchlistAddBtn" onclick="openWatchlistAddModal()">+ Add Ticker</button>
+                    </div>
+                </div>
+
+                <!-- Chronos/Earnings Tab Content -->
+                <div class="chronos-tab-content" id="chronos-earnings-content" style="display: none;">
+                    <div class="chronos-sections">
+                        <div class="chronos-section">
+                            <h4 class="chronos-section-title">This Week — Book Impact</h4>
+                            <div id="chronos-book-impact" class="chronos-entries">
+                                <p class="empty-state">Loading earnings...</p>
+                            </div>
+                        </div>
+                        <div class="chronos-section">
+                            <h4 class="chronos-section-title">Market Movers</h4>
+                            <div id="chronos-market-movers" class="chronos-entries">
+                                <p class="empty-state">Loading...</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Watchlist v3 (existing RADAR) -->
         <section class="watchlist-section">
             <div class="watchlist-v3">
                 <!-- Sector Overview removed — redundant with heatmap + drill-down popup -->
@@ -1774,6 +1834,78 @@
             </section>
         </main>
 
+    <!-- Watchlist Add Modal -->
+    <div class="modal-overlay" id="watchlistAddModal" style="display: none;">
+        <div class="modal-content watchlist-add-modal">
+            <div class="modal-header">
+                <h3 id="watchlistModalTitle">Add to Watchlist</h3>
+                <button class="modal-close" id="closeWatchlistModalBtn" onclick="closeWatchlistAddModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Ticker</label>
+                        <input type="text" id="wlTicker" placeholder="AAPL" maxlength="10">
+                    </div>
+                    <div class="form-group">
+                        <label>Direction</label>
+                        <select id="wlDirection">
+                            <option value="LONG">LONG</option>
+                            <option value="SHORT">SHORT</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Entry Target Price</label>
+                        <input type="number" id="wlEntryTarget" step="0.01" placeholder="42.00">
+                    </div>
+                    <div class="form-group">
+                        <label>Bucket</label>
+                        <select id="wlBucket">
+                            <option value="">—</option>
+                            <option value="THESIS">Thesis</option>
+                            <option value="TACTICAL">Tactical</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Source</label>
+                        <select id="wlSource">
+                            <option value="MANUAL">Manual</option>
+                            <option value="UW_FLOW">UW Flow</option>
+                            <option value="SCANNER">Scanner</option>
+                            <option value="COMMITTEE">Committee</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Committee Grade</label>
+                        <select id="wlGrade">
+                            <option value="">—</option>
+                            <option value="A">A</option>
+                            <option value="A-">A-</option>
+                            <option value="B+">B+</option>
+                            <option value="B">B</option>
+                            <option value="B-">B-</option>
+                            <option value="C">C</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group full-width">
+                        <label>Thesis Note</label>
+                        <input type="text" id="wlThesis" placeholder="One-line thesis...">
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-cancel" onclick="closeWatchlistAddModal()">Cancel</button>
+                <button class="btn-confirm" id="confirmWatchlistAddBtn" onclick="submitWatchlistEntry()">Add to Watchlist</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Knowledgebase Popup Modal -->
     <div class="modal-overlay" id="kbPopupModal">
         <div class="kb-popup-modal">
@@ -1799,7 +1931,7 @@
     <!-- TradingView Widget Script -->
     <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
-    <script src="/app.js?v=134"></script>
+    <script src="/app.js?v=135"></script>
     <script src="/cockpit.js?v=1"></script>
     <script src="/laboratory.js?v=1"></script>
 </body>

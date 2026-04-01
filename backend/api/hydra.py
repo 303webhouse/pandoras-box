@@ -196,14 +196,40 @@ async def get_lightning_cards(
             )
 
     cards = []
-    for r in rows:
-        d = dict(r)
-        for k, v in d.items():
-            if hasattr(v, "isoformat"):
-                d[k] = v.isoformat()
-            elif hasattr(v, "hex"):
-                d[k] = str(v)
-        cards.append(d)
+    async with pool.acquire() as conn2:
+        for r in rows:
+            d = dict(r)
+            for k, v in d.items():
+                if hasattr(v, "isoformat"):
+                    d[k] = v.isoformat()
+                elif hasattr(v, "hex"):
+                    d[k] = str(v)
+
+            # Cross-reference recent signals (last 30 min) for confluence
+            ticker = d.get("ticker")
+            if ticker:
+                try:
+                    recent = await conn2.fetch("""
+                        SELECT strategy, direction, entry_price AS score, created_at
+                        FROM signals
+                        WHERE ticker = $1
+                        AND created_at > NOW() - INTERVAL '30 minutes'
+                        AND user_action IS DISTINCT FROM 'expired'
+                        ORDER BY created_at DESC
+                        LIMIT 3
+                    """, ticker)
+                    d["recent_signals"] = [
+                        {"strategy": s["strategy"], "direction": s["direction"],
+                         "score": float(s["score"]) if s["score"] else 0,
+                         "created_at": s["created_at"].isoformat()}
+                        for s in recent
+                    ] if recent else []
+                except Exception:
+                    d["recent_signals"] = []
+            else:
+                d["recent_signals"] = []
+
+            cards.append(d)
 
     return {"lightning_cards": cards}
 
@@ -230,3 +256,54 @@ async def update_lightning_status(card_id: str, request: Request):
             )
 
     return {"status": "updated", "card_id": card_id}
+
+
+# === LIGHTNING CARD DEDUP HELPERS ===
+
+async def check_lightning_card_match(ticker: str):
+    """Returns lightning card ID if an active card exists for this ticker, else None."""
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT id FROM lightning_cards WHERE ticker = $1 AND status = 'active'",
+            ticker,
+        )
+        return str(row["id"]) if row else None
+
+
+async def add_lightning_confirmation(card_id: str, signal_data: dict):
+    """Merge a new scanner signal into an existing lightning card as a confirmation."""
+    from datetime import datetime, timezone
+
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT confirmations FROM lightning_cards WHERE id = $1", card_id
+        )
+        existing = json.loads(row["confirmations"]) if row and row["confirmations"] else []
+
+        existing.append({
+            "strategy": signal_data.get("strategy", "unknown"),
+            "direction": signal_data.get("direction", ""),
+            "score": signal_data.get("score", 0),
+            "confirmed_at": datetime.now(timezone.utc).isoformat(),
+        })
+
+        await conn.execute(
+            "UPDATE lightning_cards SET confirmations = $1, updated_at = NOW() WHERE id = $2",
+            json.dumps(existing), card_id,
+        )
+
+    # Push WebSocket update for flash animation on frontend
+    try:
+        from websocket.broadcaster import manager
+        await manager.broadcast({
+            "type": "lightning_confirmation",
+            "card_id": card_id,
+            "ticker": signal_data.get("ticker"),
+            "strategy": signal_data.get("strategy"),
+            "direction": signal_data.get("direction"),
+            "score": signal_data.get("score"),
+        })
+    except Exception as e:
+        logger.debug("Lightning confirmation WS broadcast failed: %s", e)
