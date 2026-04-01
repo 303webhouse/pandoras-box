@@ -77,21 +77,24 @@ async def get_current_regime():
         composite_raw = await redis.get("bias:composite:latest")
         if composite_raw:
             composite = json.loads(composite_raw)
-            score = composite.get("composite_score", 0)
-            if isinstance(score, str):
+            raw_score = composite.get("composite_score", 0)
+            if isinstance(raw_score, str):
                 try:
-                    score = float(score)
+                    raw_score = float(raw_score)
                 except (ValueError, TypeError):
-                    score = 50
+                    raw_score = 0.0
+
+            # Convert from -1..+1 scale to 0..100 for display and thresholds
+            score = round(((raw_score + 1) / 2) * 100)
 
             if score >= 70:
-                label = f"Favorable environment (composite {score:.0f}/100). Full signal menu active. Normal position sizing."
+                label = f"Favorable ({score}/100) — full signal menu, normal sizing"
             elif score >= 50:
-                label = f"Cautious environment (composite {score:.0f}/100). Favor high-conviction setups only. Reduce position sizing."
+                label = f"Cautious ({score}/100) — high-conviction setups only"
             elif score >= 30:
-                label = f"Unfavorable environment (composite {score:.0f}/100). Minimal new positions. Hedge existing exposure."
+                label = f"Unfavorable ({score}/100) — minimal new positions, hedge exposure"
             else:
-                label = f"Hostile environment (composite {score:.0f}/100). Avoid new longs. Focus on capital preservation and catalyst-aligned trades only."
+                label = f"Hostile ({score}/100) — capital preservation only"
 
             return {
                 "regime_label": label,
