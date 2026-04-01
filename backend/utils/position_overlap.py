@@ -53,3 +53,24 @@ async def check_position_overlap(ticker: str) -> Dict:
         return {"overlaps": True, "positions": overlapping_positions, "relationship": "component"}
 
     return {"overlaps": False, "positions": [], "relationship": None}
+
+
+async def refresh_etf_components():
+    """
+    Refresh ETF_COMPONENTS dict from FMP ETF holdings API.
+    Call this weekly (or on demand) to keep holdings current.
+    Falls back to hardcoded values if FMP fails.
+    """
+    from integrations.fmp_client import fetch_etf_holdings
+
+    etf_tickers = ["XLF", "SMH", "IYR"]  # Only ETFs with meaningful single-stock components
+
+    for etf in etf_tickers:
+        try:
+            holdings = await fetch_etf_holdings(etf, limit=10)
+            if holdings:
+                ETF_COMPONENTS[etf] = [h.get("asset", "").upper() for h in holdings if h.get("asset")]
+                logger.info("Refreshed %s components: %s", etf, ETF_COMPONENTS[etf])
+        except Exception as e:
+            logger.warning("Failed to refresh %s components from FMP: %s", etf, e)
+            # Keep existing hardcoded values as fallback
