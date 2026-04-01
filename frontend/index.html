@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Pandora - Real-time Trading Signal Dashboard">
     <title>Pandora</title>
-    <link rel="stylesheet" href="/styles.css?v=117">
+    <link rel="stylesheet" href="/styles.css?v=118">
     <link rel="manifest" href="/manifest.json">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -83,25 +83,7 @@
             </div>
         </div>
 
-        <!-- REGIME BAR — Phase 5 Catalyst Awareness -->
-        <div id="regimeBar" class="regime-bar">
-            <div class="regime-bar-content">
-                <div class="regime-label-area">
-                    <span id="regimeSourceBadge" class="regime-source-badge">AUTO</span>
-                    <span id="regimeLabel" class="regime-label-text">Loading regime...</span>
-                    <span id="regimeExpiry" class="regime-expiry"></span>
-                </div>
-                <div class="regime-controls">
-                    <div class="regime-pills" id="regimePills"></div>
-                    <label class="reversal-toggle" title="Reversal Mode: rank signals by relative performance divergence">
-                        <input type="checkbox" id="reversalModeToggle">
-                        <span class="reversal-toggle-label">&#x27F2; REVERSAL</span>
-                    </label>
-                    <button id="regimeOverrideBtn" class="regime-override-btn" title="Manually set market regime">&#x270E; Override</button>
-                    <button id="regimeClearBtn" class="regime-clear-btn" style="display:none;" title="Clear manual override">&#x2715; Clear</button>
-                </div>
-            </div>
-        </div>
+        <!-- Regime bar moved into bias panel (Fix 3) -->
 
         <!-- REGIME OVERRIDE MODAL -->
         <div id="regimeOverrideModal" class="modal" style="display:none;">
@@ -202,6 +184,22 @@
                     <div class="cb-pending-actions">
                         <button class="cb-pending-btn cb-accept" id="cbAcceptReset">Accept Reset</button>
                         <button class="cb-pending-btn cb-reject" id="cbRejectReset">Keep Active</button>
+                    </div>
+                </div>
+
+                <!-- Condensed Regime Bar (moved from top) -->
+                <div id="regimeBar" class="regime-bar-inline">
+                    <span id="regimeSourceBadge" class="regime-source-badge-sm">AUTO</span>
+                    <span id="regimeLabel" class="regime-label-inline">Loading...</span>
+                    <span id="regimeExpiry" class="regime-expiry-sm"></span>
+                    <div class="regime-inline-controls">
+                        <div class="regime-pills" id="regimePills"></div>
+                        <label class="reversal-toggle-sm" title="Reversal Mode">
+                            <input type="checkbox" id="reversalModeToggle">
+                            <span>&#x27F2;</span>
+                        </label>
+                        <button id="regimeOverrideBtn" class="regime-override-btn-sm" title="Override">&#x270E;</button>
+                        <button id="regimeClearBtn" class="regime-clear-btn-sm" style="display:none;" title="Clear">&#x2715;</button>
                     </div>
                 </div>
 
@@ -1931,7 +1929,7 @@
     <!-- TradingView Widget Script -->
     <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
-    <script src="/app.js?v=137"></script>
+    <script src="/app.js?v=138"></script>
     <script src="/cockpit.js?v=1"></script>
     <script src="/laboratory.js?v=1"></script>
 </body>

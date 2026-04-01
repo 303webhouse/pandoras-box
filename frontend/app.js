@@ -1291,7 +1291,8 @@ async function loadInitialData() {
 
     // bias-auto/shift-status polling removed (Phase 0D) — endpoint was dead
     
-    // Refresh timeframe data every 2 minutes
+    // Refresh bias data every 2 minutes
+    setInterval(fetchCompositeBias, 2 * 60 * 1000);
     setInterval(fetchTimeframeBias, 2 * 60 * 1000);
 
     // Pivot health checks
@@ -11316,7 +11317,7 @@ function renderRegimeBar(regime) {
     }
 
     // Direction-based bar color
-    bar.className = 'regime-bar';
+    bar.className = 'regime-bar-inline';
     if (regime.reversal_mode) {
         bar.classList.add('reversal-active');
     } else if (regime.direction === 'BULLISH') {
