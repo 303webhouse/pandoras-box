@@ -261,26 +261,35 @@ Replace with:
 
 This ensures the endpoint always returns something useful (Polygon daily changes) even when yfinance is completely dead. The weekly/monthly columns will show 0.0 or null, which is acceptable — "no data" is better than "entire heatmap dead."
 
-### 5c. Add Polygon fallback for historical bars (recommended but optional)
+### 5c. Replace yfinance with Polygon for historical bars (MANDATORY)
 
-The Stocks Starter plan ($29/mo) includes 5 years of daily bars. We can use Polygon instead of yfinance for the weekly/monthly changes. This eliminates the yfinance dependency entirely for the heatmap.
+**Established project rule: Polygon.io is PRIMARY for ALL market data. yfinance is FALLBACK ONLY when Polygon is unavailable. This heatmap endpoint violates that rule by using yfinance as the primary source for weekly/monthly historical bars. Fix it.**
 
-Add a Polygon-based historical bar fetcher:
+Remove the `_fetch_all_bars_sync()` and `_fetch_all_bars()` functions entirely. Replace with a Polygon-based implementation. The Stocks Starter plan ($29/mo) includes unlimited API calls and 5 years of daily bars — more than enough for 45 days of history on 12 tickers.
+
+**Replace both functions** (`_fetch_all_bars_sync` and `_fetch_all_bars`) with a single async Polygon fetcher:
 
 ```python
-async def _fetch_bars_polygon(tickers: List[str], days: int = 45) -> Dict[str, List[float]]:
-    """Fetch daily close bars from Polygon for multiple tickers."""
+async def _fetch_all_bars(tickers: List[str] = None, days: int = 45) -> Dict[str, List[float]]:
+    """Fetch daily close bars from Polygon for SPY + sector ETFs.
+    
+    Primary data source: Polygon.io (Stocks Starter plan).
+    No yfinance dependency.
+    """
     if not POLYGON_API_KEY:
+        logger.warning("POLYGON_API_KEY not set — cannot fetch historical bars")
         return {}
     
-    from datetime import date, timedelta
-    today = date.today()
-    from_date = (today - timedelta(days=days)).isoformat()
-    to_date = (today - timedelta(days=1)).isoformat()  # Yesterday (today's bar is partial)
+    from datetime import date as date_cls, timedelta as td
+    today = date_cls.today()
+    from_date = (today - td(days=days)).isoformat()
+    to_date = (today - td(days=1)).isoformat()  # Yesterday — today's bar is partial
     
-    results = {}
+    target_tickers = tickers or ALL_TICKERS
+    results: Dict[str, List[float]] = {}
+    
     async with aiohttp.ClientSession() as session:
-        for ticker in tickers:
+        for ticker in target_tickers:
             try:
                 url = (
                     f"https://api.polygon.io/v2/aggs/ticker/{ticker}/range/1/day"
@@ -292,28 +301,24 @@ async def _fetch_bars_polygon(tickers: List[str], days: int = 45) -> Dict[str, L
                         bars = data.get("results", [])
                         if bars:
                             results[ticker] = [b["c"] for b in bars if "c" in b]
+                    else:
+                        logger.debug("Polygon bars HTTP %d for %s", resp.status, ticker)
+            except asyncio.TimeoutError:
+                logger.debug("Polygon bars timeout for %s", ticker)
             except Exception as e:
                 logger.debug("Polygon bars failed for %s: %s", ticker, e)
+    
+    if len(results) < 6:
+        logger.warning("Polygon returned bars for only %d/%d tickers", len(results), len(target_tickers))
     
     return results
 ```
 
-Then in the heatmap endpoint, use Polygon first, yfinance as fallback:
+**Also remove** all references to `_fetch_all_bars_sync`, the `yfinance` import at the top of the file (`import yfinance as yf`), and the `TICKER_STR` variable (only used by the old yfinance batch call).
 
-```python
-    if not all_closes:
-        # Try Polygon first (reliable), yfinance fallback
-        all_closes = await _fetch_bars_polygon(ALL_TICKERS, days=45)
-        if not all_closes or len(all_closes) < 6:
-            logger.info("Polygon bars incomplete (%d tickers), trying yfinance", len(all_closes))
-            yf_closes = await _fetch_all_bars()
-            # Merge: Polygon wins on conflicts
-            for ticker, closes in yf_closes.items():
-                if ticker not in all_closes:
-                    all_closes[ticker] = closes
-```
+**Remove `yfinance` from the heatmap code path entirely.** The only acceptable use of yfinance in this file is: NONE. If Polygon fails for a ticker, that ticker shows null for weekly/monthly — do not fall back to yfinance.
 
-**Note:** This makes 12 API calls to Polygon (one per ticker). With the Starter plan's unlimited calls, this is fine. Cache the result for 30 min (same as current yfinance cache) to avoid repeated calls.
+In the heatmap endpoint, the cache flow stays the same — check `HEATMAP_HIST_KEY` in Redis first, if miss then call `_fetch_all_bars()` (now Polygon), cache for 30 min.
 
 ---
 
