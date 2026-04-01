@@ -427,7 +427,9 @@ async def get_ticker_greeks_summary(
     """
     chain = await get_options_snapshot(underlying)
     if not chain:
+        logger.warning("Greeks: options snapshot for %s returned empty chain", underlying)
         return None
+    logger.debug("Greeks: %s chain has %d contracts", underlying, len(chain))
 
     total_delta = 0.0
     total_gamma = 0.0
