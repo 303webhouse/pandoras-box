@@ -3483,6 +3483,7 @@ function renderSignals() {
     attachSignalActions();
     attachReloadPreviousHandler();
     attachDynamicKbHandlers(container);
+    reinsertLightningCards();
 }
 
 function getCryptoFilterState() {
@@ -3757,6 +3758,7 @@ function renderGroupedSignals(groups) {
         });
     });
     attachDynamicKbHandlers(container);
+    reinsertLightningCards();
 }
 
 function formatStrategyName(raw) {
@@ -12141,6 +12143,7 @@ async function refreshHydra() {
 
 const _lightningCardsSounded = new Set();
 let lightningPollingInterval = null;
+let _lastLightningCards = [];
 
 function initLightningCards() {
     lightningPollingInterval = setInterval(fetchLightningCards, 10000);
@@ -12154,10 +12157,15 @@ async function fetchLightningCards() {
         });
         if (!resp.ok) return;
         const data = await resp.json();
-        renderLightningCards(data.lightning_cards || []);
+        _lastLightningCards = data.lightning_cards || [];
+        renderLightningCards(_lastLightningCards);
     } catch (err) {
         console.error('Lightning card fetch error:', err);
     }
+}
+
+function reinsertLightningCards() {
+    if (_lastLightningCards.length > 0) renderLightningCards(_lastLightningCards);
 }
 
 function renderLightningCards(cards) {
