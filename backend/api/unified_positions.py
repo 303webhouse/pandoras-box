@@ -893,6 +893,15 @@ async def portfolio_greeks():
     Returns per-ticker and total portfolio greeks for committee context.
     Gracefully returns zeros if API is unavailable (e.g., after hours).
     """
+    _zeros = {"delta": 0, "gamma": 0, "theta": 0, "vega": 0}
+    try:
+        return await _portfolio_greeks_inner()
+    except Exception as e:
+        logger.error("Greeks endpoint unhandled error: %s", e, exc_info=True)
+        return {"status": "error", "tickers": {}, "totals": _zeros}
+
+
+async def _portfolio_greeks_inner():
     # Check Redis cache first (60s TTL)
     redis = await get_redis_client()
     if redis:
