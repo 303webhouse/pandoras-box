@@ -202,3 +202,41 @@ async def refresh_earnings(request: Request):
     from jobs.chronos_ingest import run_chronos_earnings_ingest
     await run_chronos_earnings_ingest()
     return {"status": "ok", "message": "Earnings refresh complete"}
+
+
+# ── GET /chronos/next-earnings/{ticker} ────────────────────────────
+@router.get("/next-earnings/{ticker}")
+async def get_next_earnings(ticker: str):
+    """Get the next upcoming earnings date for a ticker."""
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT report_date, timing FROM earnings_calendar WHERE ticker = $1 AND report_date >= CURRENT_DATE ORDER BY report_date ASC LIMIT 1",
+            ticker.upper()
+        )
+    if row:
+        return {"ticker": ticker.upper(), "next_date": row["report_date"].isoformat(), "timing": row["timing"]}
+    return {"ticker": ticker.upper(), "next_date": None, "timing": None}
+
+
+# ── GET /chronos/next-earnings-batch ───────────────────────────────
+@router.get("/next-earnings-batch")
+async def get_next_earnings_batch(tickers: str = Query(..., description="Comma-separated tickers")):
+    """Batch fetch next earnings dates for multiple tickers."""
+    ticker_list = [t.strip().upper() for t in tickers.split(",") if t.strip()]
+    if not ticker_list:
+        return {"earnings": {}}
+
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT DISTINCT ON (ticker) ticker, report_date, timing
+               FROM earnings_calendar
+               WHERE ticker = ANY($1) AND report_date >= CURRENT_DATE
+               ORDER BY ticker, report_date ASC""",
+            ticker_list
+        )
+    result = {}
+    for r in rows:
+        result[r["ticker"]] = {"date": r["report_date"].isoformat(), "timing": r["timing"]}
+    return {"earnings": result}

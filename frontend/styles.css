@@ -12009,6 +12009,28 @@ body[data-mode="analytics"] .analytics-shell {
 .regime-override-btn-sm:hover,
 .regime-clear-btn-sm:hover { opacity: 1; }
 
+/* === EARNINGS DATE BADGES === */
+.earnings-date-badge {
+    display: inline-block;
+    font-size: 9px;
+    font-weight: 600;
+    padding: 1px 5px;
+    border-radius: 3px;
+    background: rgba(100, 181, 246, 0.12);
+    color: #64b5f6;
+    margin-left: auto;
+    white-space: nowrap;
+}
+.earnings-date-badge.soon {
+    background: rgba(255, 152, 0, 0.15);
+    color: #ff9800;
+}
+.earnings-date-badge.urgent {
+    background: rgba(229, 55, 14, 0.15);
+    color: #e5370e;
+    animation: pulse-subtle 2s infinite;
+}
+
 /* ===== MACRO TICKER STRIP ===== */
 .macro-strip {
     background: var(--dark-bg);
