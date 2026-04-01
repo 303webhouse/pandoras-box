@@ -1275,6 +1275,12 @@ async function loadInitialData() {
         loadRegime()
     ]);
 
+    // Pre-load Chronos earnings data so it's ready when tab is clicked
+    loadChronosEarnings();
+
+    // Enrich position/signal cards with earnings dates (runs after cards render)
+    setTimeout(enrichCardsWithEarnings, 3000);
+
     // Schedule headline refreshes at midday and 1h before close
     startHeadlineScheduler();
 
@@ -12572,6 +12578,47 @@ async function deleteWatchlistEntry(id) {
 function openWatchlistDetail(id) {
     // Phase 2: open a detail/edit modal for the entry
     console.log('Watchlist detail:', id);
+}
+
+// === EARNINGS DATE ENRICHMENT ===
+async function enrichCardsWithEarnings() {
+    const cards = document.querySelectorAll('[data-ticker]');
+    const tickers = [...new Set([...cards].map(c => c.dataset.ticker).filter(Boolean))];
+    if (!tickers.length) return;
+
+    try {
+        const resp = await fetch(`${API_URL}/chronos/next-earnings-batch?tickers=${tickers.join(',')}`, { headers: authHeaders() });
+        if (!resp.ok) return;
+        const data = await resp.json();
+        const earnings = data.earnings || {};
+
+        cards.forEach(card => {
+            const ticker = card.dataset.ticker;
+            if (!ticker || !earnings[ticker]) return;
+            if (card.querySelector('.earnings-date-badge')) return;
+
+            const e = earnings[ticker];
+            const earningsDate = new Date(e.date + 'T12:00:00');
+            const daysUntil = Math.ceil((earningsDate - new Date()) / 86400000);
+            if (daysUntil > 30 || daysUntil < 0) return;
+
+            const urgency = daysUntil <= 3 ? 'urgent' : daysUntil <= 7 ? 'soon' : '';
+            const timingLabel = e.timing === 'BMO' ? 'pre' : e.timing === 'AMC' ? 'post' : '';
+            const badge = document.createElement('span');
+            badge.className = `earnings-date-badge ${urgency}`;
+            badge.title = `Earnings: ${e.date} ${timingLabel}`;
+            badge.textContent = `\uD83D\uDCC5 ${daysUntil}d ${timingLabel}`;
+
+            const header = card.querySelector('.card-header, .position-card-header, .lightning-card-header');
+            if (header) {
+                header.appendChild(badge);
+            } else {
+                card.prepend(badge);
+            }
+        });
+    } catch (err) {
+        console.debug('Earnings enrichment error:', err);
+    }
 }
 
 // === CHRONOS EARNINGS ===
