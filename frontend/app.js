@@ -12033,7 +12033,9 @@ let hydraCurrentTab = 'defensive';
 
 function initHydra() {
     fetchHydraExposure();
+    fetchHydraScores();
     setInterval(fetchHydraExposure, 300000);
+    setInterval(fetchHydraScores, 300000);
     setInterval(checkHydraConvergence, 30000);
 }
 
@@ -12078,6 +12080,9 @@ async function fetchHydraExposure() {
 
         const tbody = document.getElementById('hydra-exposure-tbody');
         tbody.innerHTML = '';
+        if (!(data.exposure || []).length) {
+            tbody.innerHTML = '<tr><td colspan="6" style="color:#556;text-align:center;padding:12px">No open positions to check squeeze risk against</td></tr>';
+        }
         (data.exposure || []).forEach(item => {
             const row = document.createElement('tr');
             const tierClass = `hydra-tier-${item.position_risk_level === 'beneficial' ? 'low' : item.squeeze_tier}`;
