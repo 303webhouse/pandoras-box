@@ -99,7 +99,7 @@ async def _fetch_all_bars(tickers: List[str] = None, days: int = 45) -> Dict[str
     from datetime import date as date_cls, timedelta as td
     today = date_cls.today()
     from_date = (today - td(days=days)).isoformat()
-    to_date = (today - td(days=1)).isoformat()  # Yesterday — today's bar is partial
+    to_date = today.isoformat()  # Include today's partial bar for intraday fallback
 
     target_tickers = tickers or ALL_TICKERS
     results: Dict[str, List[float]] = {}
@@ -146,6 +146,10 @@ async def get_sector_heatmap():
 
     # --- Live data from Polygon snapshot (primary) ---
     polygon_snapshot = await _fetch_sector_snapshot(ALL_TICKERS)
+    if not polygon_snapshot:
+        logger.warning("Sector heatmap: Polygon snapshot returned empty — falling back to historical bars only")
+    else:
+        logger.debug("Sector heatmap: Polygon snapshot returned %d tickers", len(polygon_snapshot))
     spy_snap = polygon_snapshot.get("SPY", {})
 
     # --- Historical data from yfinance for weekly/monthly (cached 30 min) ---
@@ -454,7 +458,8 @@ async def _fetch_sector_snapshot(tickers: List[str]) -> Dict[str, Dict]:
         async with aiohttp.ClientSession() as session:
             async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
                 if resp.status != 200:
-                    logger.warning("Polygon sector snapshot HTTP %d", resp.status)
+                    body_preview = await resp.text()
+                    logger.warning("Polygon sector snapshot HTTP %d — body: %.200s", resp.status, body_preview)
                     return result
                 data = await resp.json()
                 for t in data.get("tickers", []):
