@@ -69,8 +69,13 @@ async def refresh_etf_components():
         try:
             holdings = await fetch_etf_holdings(etf, limit=10)
             if holdings:
-                ETF_COMPONENTS[etf] = [h.get("asset", "").upper() for h in holdings if h.get("asset")]
-                logger.info("Refreshed %s components: %s", etf, ETF_COMPONENTS[etf])
+                new_components = [h.get("asset", "").upper() for h in holdings if h.get("asset")]
+                if new_components:
+                    ETF_COMPONENTS[etf] = new_components
+                    logger.info("Refreshed %s components: %s", etf, ETF_COMPONENTS[etf])
+                else:
+                    logger.info("FMP returned empty holdings for %s — keeping hardcoded values", etf)
+            else:
+                logger.info("FMP ETF holdings unavailable for %s (likely paid-only) — keeping hardcoded values", etf)
         except Exception as e:
-            logger.warning("Failed to refresh %s components from FMP: %s", etf, e)
-            # Keep existing hardcoded values as fallback
+            logger.warning("Failed to refresh %s components from FMP: %s — keeping hardcoded values", etf, e)
