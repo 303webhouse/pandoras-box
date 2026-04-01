@@ -50,6 +50,12 @@ HEATMAP_STALE_KEY = "sector_heatmap:last_close"
 HEATMAP_HIST_KEY = "sector_heatmap:hist"  # yfinance historical bars (slow, long cache)
 HEATMAP_HIST_TTL = 1800  # 30 min — daily bars don't change intraday
 
+def _hist_cache_ttl() -> int:
+    """Shorter hist cache during market hours since we now include today's partial bar."""
+    if _is_market_hours():
+        return 120  # 2 min during market hours — today's bar changes
+    return HEATMAP_HIST_TTL
+
 
 def _is_market_hours() -> bool:
     """Check if we're in US market hours (9:30-16:00 ET weekdays)."""
@@ -144,12 +150,18 @@ async def get_sector_heatmap():
         except Exception:
             pass
 
+    logger.info("Sector heatmap: cache MISS (is_market_hours=%s, cache_ttl=%ds, hist_ttl=%ds)",
+                _is_market_hours(), _heatmap_cache_ttl(), _hist_cache_ttl())
+
     # --- Live data from Polygon snapshot (primary) ---
     polygon_snapshot = await _fetch_sector_snapshot(ALL_TICKERS)
     if not polygon_snapshot:
         logger.warning("Sector heatmap: Polygon snapshot returned empty — falling back to historical bars only")
     else:
-        logger.debug("Sector heatmap: Polygon snapshot returned %d tickers", len(polygon_snapshot))
+        logger.info("Sector heatmap: Polygon snapshot returned %d tickers. SPY snap: %s, XLK snap: %s",
+                     len(polygon_snapshot),
+                     polygon_snapshot.get("SPY", "MISSING"),
+                     polygon_snapshot.get("XLK", "MISSING"))
     spy_snap = polygon_snapshot.get("SPY", {})
 
     # --- Historical data from yfinance for weekly/monthly (cached 30 min) ---
@@ -168,7 +180,7 @@ async def get_sector_heatmap():
         # Cache the historical bars separately (30 min TTL)
         if redis and all_closes:
             try:
-                await redis.set(HEATMAP_HIST_KEY, json.dumps(all_closes), ex=HEATMAP_HIST_TTL)
+                await redis.set(HEATMAP_HIST_KEY, json.dumps(all_closes), ex=_hist_cache_ttl())
             except Exception:
                 pass
     spy_closes = all_closes.get("SPY", [])
@@ -176,11 +188,13 @@ async def get_sector_heatmap():
     # Detect if market is closed (Polygon returns 0% for all sectors)
     is_live = _is_market_hours()
 
-    # SPY daily change: prefer Polygon (live), fall back to yfinance
+    # SPY daily change: prefer Polygon (live), fall back to historical bars
     spy_change_1d = spy_snap.get("day_change_pct") if spy_snap else None
-    # If Polygon returns 0.0 outside market hours, use yfinance's last close-to-close
-    if spy_change_1d == 0.0 and not is_live:
-        spy_change_1d = _pct_change(spy_closes, 1) or 0.0
+    # If Polygon returns 0.0, use historical bars (snapshot may not have today's data)
+    if spy_change_1d == 0.0 and spy_closes:
+        hist_spy = _pct_change(spy_closes, 1)
+        if hist_spy is not None and hist_spy != 0.0:
+            spy_change_1d = hist_spy
     if spy_change_1d is None:
         spy_change_1d = _pct_change(spy_closes, 1) or 0.0
     spy_change_1w = _pct_change(spy_closes, 5)
@@ -192,16 +206,25 @@ async def get_sector_heatmap():
         snap = polygon_snapshot.get(etf, {})
         closes = all_closes.get(etf, [])
 
-        # Price + daily change: prefer Polygon (live), fall back to yfinance
+        # Price + daily change: prefer Polygon (live), fall back to historical bars
         if snap and snap.get("price"):
             price = snap["price"]
             change_1d = snap.get("day_change_pct", 0.0)
-            # If Polygon returns 0.0 outside market hours, use yfinance
-            if change_1d == 0.0 and not is_live:
-                change_1d = _pct_change(closes, 1) or 0.0
+            # If Polygon returns 0.0, use historical bars as fallback
+            # (snapshot may not have rolled over to today's trading session)
+            if change_1d == 0.0 and closes:
+                hist_change = _pct_change(closes, 1)
+                if hist_change is not None and hist_change != 0.0:
+                    change_1d = hist_change
+            if etf in ("XLK", "SPY"):
+                logger.info("Heatmap %s: SNAPSHOT path — price=%.2f change_1d=%.2f (snap_raw=%s, closes[-2:]=%s)",
+                           etf, price, change_1d, snap, closes[-2:] if len(closes) >= 2 else closes)
         else:
             price = closes[-1] if closes else None
             change_1d = _pct_change(closes, 1)
+            if etf in ("XLK", "SPY"):
+                logger.info("Heatmap %s: FALLBACK path — price=%s change_1d=%s (closes[-2:]=%s)",
+                           etf, price, change_1d, closes[-2:] if len(closes) >= 2 else closes)
 
         # Weekly/monthly: always yfinance (daily bars are fine for these)
         change_1w = _pct_change(closes, 5)
