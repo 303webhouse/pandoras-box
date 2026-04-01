@@ -50,6 +50,14 @@ async def lifespan(app: FastAPI):
         logger.info("✅ Watchlist table ready")
     except Exception as e:
         logger.warning(f"⚠️ Could not initialize watchlist table: {e}")
+
+    # Initialize trade watchlist table
+    try:
+        from api.trade_watchlist import init_trade_watchlist_table
+        await init_trade_watchlist_table()
+        logger.info("✅ Trade watchlist table ready")
+    except Exception as e:
+        logger.warning(f"⚠️ Could not initialize trade watchlist table: {e}")
     
     logger.info("✅ Database connections established")
     # One-time cleanup of cached anomalous prices before schedulers consume data.
@@ -420,6 +428,27 @@ async def lifespan(app: FastAPI):
 
     price_collector_task = asyncio.create_task(price_collector_loop())
 
+    # Watchlist price alert: check every 30 min during market hours
+    async def watchlist_price_alert_loop():
+        import pytz
+        from datetime import datetime as dt_cls
+
+        await asyncio.sleep(120)  # 2 min startup delay
+
+        while True:
+            try:
+                et = dt_cls.now(pytz.timezone("America/New_York"))
+                if et.weekday() < 5 and 9 <= et.hour < 16:
+                    from api.trade_watchlist import check_watchlist_price_alerts
+                    await check_watchlist_price_alerts()
+                else:
+                    logger.debug("Watchlist alerts: outside market hours, skipping")
+            except Exception as e:
+                logger.warning("Watchlist price alert error: %s", e)
+            await asyncio.sleep(1800)  # 30 minutes
+
+    watchlist_alert_task = asyncio.create_task(watchlist_price_alert_loop())
+
     # Ensure proximity attribution columns exist
     try:
         from analytics.proximity_attribution import ensure_attribution_columns
@@ -445,6 +474,7 @@ async def lifespan(app: FastAPI):
     crypto_scan_task.cancel()
     oracle_task.cancel()
     price_collector_task.cancel()
+    watchlist_alert_task.cancel()
     logger.info("🛑 Shutting down Pandora's Box...")
     await redis_client.close()
     await postgres_client.close()
@@ -657,6 +687,7 @@ from api.flow_radar import router as flow_radar_router
 from api.regime import router as regime_router
 from api.catalyst_calendar import router as catalyst_router
 from api.ticker_profile import router as ticker_profile_router
+from api.trade_watchlist import router as trade_watchlist_router
 
 app.include_router(webhook_router, prefix="/webhook", tags=["webhooks"])
 app.include_router(circuit_breaker_router, prefix="/webhook", tags=["circuit-breaker"])
@@ -704,6 +735,7 @@ app.include_router(flow_ingestion_router, prefix="/api", tags=["uw-flow"])
 app.include_router(regime_router, prefix="/api", tags=["regime"])
 app.include_router(catalyst_router, prefix="/api", tags=["catalyst"])
 app.include_router(ticker_profile_router, prefix="/api", tags=["ticker-profile"])
+app.include_router(trade_watchlist_router, prefix="/api", tags=["trade-watchlist"])
 
 # Serve frontend static files
 # Multiple path resolution strategies for different deployment environments
