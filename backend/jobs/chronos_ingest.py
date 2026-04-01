@@ -59,8 +59,15 @@ async def run_chronos_earnings_ingest():
             if not ticker:
                 continue
 
-            report_date = entry.get("date")
-            if not report_date:
+            report_date_str = entry.get("date")
+            if not report_date_str:
+                continue
+
+            # Convert string date to Python date object (asyncpg requires this)
+            try:
+                report_date = date.fromisoformat(report_date_str)
+            except (ValueError, TypeError):
+                logger.debug("Chronos: skipping %s — bad date %s", ticker, report_date_str)
                 continue
 
             # Check overlaps
@@ -70,7 +77,21 @@ async def run_chronos_earnings_ingest():
             if ticker in etf_overlap_map:
                 overlap_details = json.dumps({"etf_positions": etf_overlap_map[ticker]})
 
-            await conn.execute("""
+            # Coerce numeric fields — FMP can return strings, None, or numbers
+            def _to_float(v):
+                try:
+                    return float(v) if v is not None else None
+                except (ValueError, TypeError):
+                    return None
+
+            def _to_int(v):
+                try:
+                    return int(v) if v is not None else None
+                except (ValueError, TypeError):
+                    return None
+
+            try:
+                await conn.execute("""
                 INSERT INTO earnings_calendar
                     (ticker, company_name, report_date, fiscal_period, fiscal_year,
                      timing, eps_estimate, revenue_estimate, market_cap,
@@ -89,16 +110,18 @@ async def run_chronos_earnings_ingest():
                 entry.get("name") or entry.get("company_name"),
                 report_date,
                 entry.get("fiscalDateEnding"),
-                entry.get("fiscal_year"),
+                _to_int(entry.get("fiscal_year")),
                 entry.get("_timing"),
-                entry.get("epsEstimated"),
-                entry.get("revenueEstimated"),
-                entry.get("marketCap"),
+                _to_float(entry.get("epsEstimated")),
+                _to_int(entry.get("revenueEstimated")),
+                _to_int(entry.get("marketCap")),
                 in_book,
                 in_wl,
                 overlap_details
             )
-            upserted += 1
+                upserted += 1
+            except Exception as row_err:
+                logger.debug("Chronos: skipping %s on %s — %s", ticker, report_date, row_err)
 
         # 4. Also update trade_watchlist entries with next earnings dates
         for wl_ticker in watchlist_tickers:
