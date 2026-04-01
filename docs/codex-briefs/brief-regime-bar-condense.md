@@ -119,6 +119,43 @@ Add to `frontend/styles.css`:
 
 ---
 
+## STEP 3B: FIX — Composite Score Scale Mismatch in `backend/api/regime.py`
+
+**THIS IS THE ROOT CAUSE of the "0/100" bug.** The composite engine (`bias_engine/composite.py`) stores `composite_score` as a float from -1.0 to +1.0. But `regime.py` compares it against 0-100 thresholds (70, 50, 30), which can NEVER be exceeded by a value between -1 and 1. Result: every auto regime label says "Hostile environment (composite 0/100)".
+
+In `backend/api/regime.py`, find this block inside `get_current_regime()`:
+
+```python
+score = composite.get("composite_score", 0)
+if isinstance(score, str):
+    try:
+        score = float(score)
+    except (ValueError, TypeError):
+        score = 50
+```
+
+REPLACE the entire scoring block below it (the `if score >= 70` chain) with:
+
+```python
+# Convert -1.0 → 1.0 scale to 0-100 for display
+# -1.0 = 0/100, 0.0 = 50/100, 1.0 = 100/100
+display_score = int(round((score + 1) * 50))
+display_score = max(0, min(100, display_score))
+
+if score >= 0.40:
+    label = f"Favorable environment ({display_score}/100). Full signal menu active. Normal position sizing."
+elif score >= 0.0:
+    label = f"Cautious environment ({display_score}/100). Favor high-conviction setups only. Reduce position sizing."
+elif score >= -0.40:
+    label = f"Unfavorable environment ({display_score}/100). Minimal new positions. Hedge existing exposure."
+else:
+    label = f"Hostile environment ({display_score}/100). Avoid new longs. Focus on capital preservation and catalyst-aligned trades only."
+```
+
+**The math:** `-1.0 → 0`, `-0.40 → 30`, `0.0 → 50`, `+0.40 → 70`, `+1.0 → 100`. This aligns the display with intuitive 0-100 scale while matching the actual thresholds used by `score_to_bias()` in `composite.py`.
+
+---
+
 ## STEP 4: JavaScript — Populate Condensed Indicator
 
 In `frontend/app.js`, find the function that fetches and displays the regime data (search for `/regime/current` or `regimeLabel` or `regimeBar`). It currently populates:
