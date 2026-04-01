@@ -107,14 +107,14 @@ async def run_chronos_earnings_ingest():
                     last_updated = NOW()
             """,
                 ticker,
-                entry.get("name") or entry.get("company_name"),
+                None,  # company_name — not available from FMP Stable free tier
                 report_date,
-                entry.get("fiscalDateEnding"),
-                _to_int(entry.get("fiscal_year")),
-                entry.get("_timing"),
+                None,  # fiscal_period — not available from FMP Stable free tier
+                None,  # fiscal_year — not available from FMP Stable free tier
+                entry.get("_timing"),  # Will be None (see fmp_client fix)
                 _to_float(entry.get("epsEstimated")),
                 _to_int(entry.get("revenueEstimated")),
-                _to_int(entry.get("marketCap")),
+                None,  # market_cap — not available from FMP Stable free tier
                 in_book,
                 in_wl,
                 overlap_details

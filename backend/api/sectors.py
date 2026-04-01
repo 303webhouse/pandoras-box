@@ -148,9 +148,50 @@ def _fetch_all_bars_sync() -> Dict[str, List[float]]:
 
 
 async def _fetch_all_bars() -> Dict[str, List[float]]:
-    """Async wrapper around synchronous yfinance batch download."""
+    """Async wrapper around synchronous yfinance batch download with timeout."""
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, _fetch_all_bars_sync)
+    try:
+        return await asyncio.wait_for(
+            loop.run_in_executor(None, _fetch_all_bars_sync),
+            timeout=15.0  # 15 second max — if yfinance is slow, bail out
+        )
+    except asyncio.TimeoutError:
+        logger.warning("yfinance batch download timed out after 15s — using stale cache")
+        return {}
+    except Exception as e:
+        logger.warning("yfinance batch download error: %s — using stale cache", e)
+        return {}
+
+
+async def _fetch_bars_polygon(tickers, days=45):
+    """Fetch daily close bars from Polygon for multiple tickers."""
+    poly_key = os.getenv("POLYGON_API_KEY") or ""
+    if not poly_key:
+        return {}
+
+    from datetime import date as _date, timedelta as _td
+    today = _date.today()
+    from_date = (today - _td(days=days)).isoformat()
+    to_date = (today - _td(days=1)).isoformat()
+
+    results = {}
+    async with aiohttp.ClientSession() as session:
+        for ticker in tickers:
+            try:
+                url = (
+                    f"https://api.polygon.io/v2/aggs/ticker/{ticker}/range/1/day"
+                    f"/{from_date}/{to_date}?adjusted=true&sort=asc&apiKey={poly_key}"
+                )
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        bars = data.get("results", [])
+                        if bars:
+                            results[ticker] = [b["c"] for b in bars if "c" in b]
+            except Exception as e:
+                logger.debug("Polygon bars failed for %s: %s", ticker, e)
+
+    return results
 
 
 @router.get("/heatmap")
@@ -181,7 +222,16 @@ async def get_sector_heatmap():
         except Exception:
             pass
     if not all_closes:
-        all_closes = await _fetch_all_bars()
+        # Try Polygon first (reliable), yfinance fallback
+        all_closes = await _fetch_bars_polygon(ALL_TICKERS, days=45)
+        if not all_closes or len(all_closes) < 6:
+            logger.info("Polygon bars incomplete (%d tickers), trying yfinance", len(all_closes))
+            yf_closes = await _fetch_all_bars()
+            for ticker, closes in yf_closes.items():
+                if ticker not in all_closes:
+                    all_closes[ticker] = closes
+        if not all_closes:
+            logger.warning("Sector heatmap: no historical bars available. Daily data from Polygon only.")
         # Cache the historical bars separately (30 min TTL)
         if redis and all_closes:
             try:

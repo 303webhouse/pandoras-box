@@ -38,16 +38,10 @@ async def fetch_earnings_calendar(date_from: date, date_to: date) -> List[Dict]:
         resp.raise_for_status()
         data = resp.json()
 
-    # FMP returns a flat list of earnings entries
-    # Normalize the 'time' field: "bmo" → "BMO", "amc" → "AMC", else "TNS"
+    # Stable API does not include 'time' field (BMO/AMC)
+    # Default to None — timing can be enriched later from other sources
     for entry in data:
-        raw_time = (entry.get("time") or "").lower()
-        if "bmo" in raw_time or "before" in raw_time:
-            entry["_timing"] = "BMO"
-        elif "amc" in raw_time or "after" in raw_time:
-            entry["_timing"] = "AMC"
-        else:
-            entry["_timing"] = "TNS"
+        entry["_timing"] = None
 
     return data
 
@@ -61,13 +55,15 @@ async def fetch_etf_holdings(symbol: str, limit: int = 10) -> List[Dict]:
         logger.warning("FMP_API_KEY not set — skipping ETF holdings fetch")
         return []
 
-    url = f"{FMP_BASE_URL}/etf-holder/{symbol}"
-    params = {"apikey": FMP_API_KEY}
+    url = f"{FMP_BASE_URL}/etf/holdings"
+    params = {"symbol": symbol, "apikey": FMP_API_KEY}
 
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.get(url, params=params)
+        if resp.status_code in (402, 403):
+            logger.info("FMP ETF holdings endpoint is paid-only (status %d)", resp.status_code)
+            return []
         resp.raise_for_status()
         data = resp.json()
 
-    # FMP returns holdings sorted by weight descending
     return data[:limit] if data else []
