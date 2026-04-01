@@ -12034,7 +12034,7 @@ function switchHydraTab(tab) {
 
 async function fetchHydraExposure() {
     try {
-        const resp = await fetch(`${API_URL}/hydra/exposure`, { headers: getHeaders() });
+        const resp = await fetch(`${API_URL}/hydra/exposure`, { headers: { "X-API-Key": API_KEY } });
         if (!resp.ok) return;
         const data = await resp.json();
 
@@ -12073,7 +12073,7 @@ async function fetchHydraExposure() {
 
 async function fetchHydraScores() {
     try {
-        const resp = await fetch(`${API_URL}/hydra/scores?limit=15&min_score=25`, { headers: getHeaders() });
+        const resp = await fetch(`${API_URL}/hydra/scores?limit=15&min_score=25`, { headers: { "X-API-Key": API_KEY } });
         if (!resp.ok) return;
         const data = await resp.json();
 
@@ -12103,7 +12103,7 @@ async function fetchHydraScores() {
 
 async function checkHydraConvergence() {
     try {
-        const resp = await fetch(`${API_URL}/hydra/convergence`, { headers: getHeaders() });
+        const resp = await fetch(`${API_URL}/hydra/convergence`, { headers: { "X-API-Key": API_KEY } });
         if (!resp.ok) return;
         const data = await resp.json();
 
@@ -12124,7 +12124,7 @@ async function refreshHydra() {
     btn.innerHTML = '&#x21BB; Scanning...';
     btn.disabled = true;
     try {
-        await fetch(`${API_URL}/hydra/refresh`, { method: 'POST', headers: getHeaders() });
+        await fetch(`${API_URL}/hydra/refresh`, { method: 'POST', headers: { "X-API-Key": API_KEY } });
         if (hydraCurrentTab === 'defensive') {
             await fetchHydraExposure();
         } else {
@@ -12150,7 +12150,7 @@ function initLightningCards() {
 async function fetchLightningCards() {
     try {
         const resp = await fetch(`${API_URL}/hydra/lightning?active_only=true&limit=3`, {
-            headers: getHeaders()
+            headers: { "X-API-Key": API_KEY }
         });
         if (!resp.ok) return;
         const data = await resp.json();
@@ -12326,7 +12326,7 @@ async function dismissLightningCard(cardId) {
     try {
         await fetch(`${API_URL}/hydra/lightning/${cardId}/status`, {
             method: 'PATCH',
-            headers: { ...getHeaders(), 'Content-Type': 'application/json' },
+            headers: { "X-API-Key": API_KEY, "Content-Type": "application/json" },
             body: JSON.stringify({ status: 'dismissed' })
         });
         const el = document.querySelector(`[data-card-id="${cardId}"]`);
