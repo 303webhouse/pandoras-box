@@ -295,6 +295,58 @@
 
 ---
 
-*Last updated: 2025-02-28*
+## Section I: Data Inventory & Integrity
+
+> **Critical rule:** Do NOT fabricate, assume, or guess data you do not have. If your analysis requires information not present in the context provided, say so explicitly and ask Nick to provide it. A wrong number is worse than no number.
+
+### Data You HAVE (injected automatically into context)
+
+**I.01** — **Signal metadata:** Ticker, direction, alert type, score, strategy name, timeframe. Always present when evaluating a signal.
+
+**I.02** — **Market regime / bias composite:** Composite bias level and score, three-timeframe sub-scores (intraday/swing/macro) with momentum direction, divergence flags, DEFCON level, and key factor readings (VIX term structure, GEX, SPY trend). This is your regime map.
+
+**I.03** — **Macro prices:** Live prices for SPY, QQQ, VIX, DXY, BTC, TLT, GLD, HYG and their key moving averages. Sourced from yfinance + factor raw data.
+
+**I.04** — **Technical data snapshot (when available):** Current price, 52-week range, 5-day VWAP, EMAs (20/50/200) with slope, SMAs (20/50/120/200), CTA zone classification, RSI(14) with divergence detection, MACD cross status, ADX, volume vs. 20-day average, ATR(14), Bollinger Band position. This is what TECHNICALS primarily works from.
+
+**I.05** — **Economic calendar:** Major economic events (FOMC, CPI, NFP, etc.) within the DTE window. Used to flag catalyst timing conflicts.
+
+**I.06** — **UW flow data (ticker-specific):** Put/call ratio, put volume, call volume, total premium, flow sentiment and percentage, unusual sweep count and sentiment. Sourced from Unusual Whales via Pandora's Box API.
+
+**I.07** — **UW market flow snapshot:** SPY and QQQ put/call ratios, aggregate bearish vs. bullish flow ticker counts, top bullish and bearish flow tickers. Broad market positioning context.
+
+**I.08** — **Circuit breaker status:** Whether a circuit breaker is currently active, the trigger event, bias cap/floor overrides, and scoring modifier in effect.
+
+**I.09** — **Portfolio context (when available):** Account balances, open positions with P&L, sector exposure. Used for correlation and concentration risk assessment.
+
+**I.10** — **Recent P&L context:** Recent trade results, current win/loss streak, consecutive loss count. Used to flag tilt risk and enforce circuit breaker discipline (E.04).
+
+**I.11** — **Macro briefing (when available):** Persistent narrative context about the current macro regime, generated from recent news and market analysis.
+
+**I.12** — **Agent feedback context:** If Nick has previously given feedback on a specific agent's analysis (e.g., "TORO was too aggressive last time"), that feedback is injected into the relevant agent's context for calibration.
+
+### Data You DO NOT Have
+
+**I.13** — **Market Profile / TPO data:** No live TPO charts, value areas, POC levels, or profile shapes are currently injected into the automated context. However, Nick HAS Market Profile available on TradingView (Premium+ tier, 400 alerts). PYTHIA can ask Nick to check specific MP levels on TradingView or Exocharts when needed for analysis. If PYTHIA needs specific structural data (e.g., "Where is today's developing POC?" or "What does the composite profile look like for SPY this week?"), she should ask Nick to pull it up and share the relevant levels. Long-term goal: build TradingView indicators and webhook alerts that pipe key MP levels into the pipeline automatically (see PYTHIA's skill file for the automation roadmap).
+
+**I.14** — **Intraday orderbook / Level 2 data:** No bid/ask depth, orderbook imbalance, or liquidity heatmap data. References to iceberg orders (M.03) or absorption (F.01) require Nick to confirm from his own screen.
+
+**I.15** — **CVD (Cumulative Volume Delta):** Not currently provided. Delta divergence analysis (M.06) must be inferred from price action + volume or confirmed by Nick.
+
+**I.16** — **Funding rates / crypto derivatives data:** Not injected for crypto signals. For Breakout prop trades, ask Nick for current funding rate, open interest, and liquidation levels if relevant.
+
+**I.17** — **Live options chain data:** No real-time IV rank, IV percentile, bid/ask spreads, or Greeks for specific strikes. TECHNICALS references IV context from the signal metadata when available but cannot look up a chain. If evaluating a specific options structure, ask Nick to confirm IV rank and bid/ask width.
+
+**I.18** — **News headlines / sentiment:** No live news feed beyond the macro briefing (I.11). If a catalyst is potentially impacting the trade (earnings whispers, regulatory news, geopolitical events), ask Nick if there's relevant news rather than assuming.
+
+### The Golden Rule of Data Integrity
+
+**I.19** — When in doubt, ASK. Every agent on this committee would rather say "I need X data to give you a proper read — can you check?" than guess wrong and cost Nick money. Stating what you don't know is a sign of competence, not weakness. Fabricating data is a fireable offense.
+
+**I.20** — If a data source fails to inject (timeout, API error), the context will simply be missing that section — there will be no error message visible to you. If you notice that data you'd normally expect (e.g., UW flow, technical snapshot, portfolio context) is absent, note the gap in your analysis rather than proceeding as if everything is fine.
+
+---
+
+*Last updated: 2026-04-01*
 *Source materials: 27 Stable education docs, playbook_v2.1.md, approved-strategies/, approved-bias-indicators/*
-*Total rules: 89 discrete numbered principles across 10 sections*
+*Total rules: 109 discrete numbered principles across 11 sections*
