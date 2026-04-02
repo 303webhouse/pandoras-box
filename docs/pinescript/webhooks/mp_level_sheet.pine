@@ -1,0 +1,282 @@
+// PYTHIA Level Sheet — Market Profile Indicator + Webhook Pipeline
+// Computes prior session's Value Area (VAH, VAL, POC) from volume-at-price,
+// draws levels on chart, detects IB classification and 80% rule, fires webhooks.
+// Designed for 15-min or 30-min charts.
+
+//@version=5
+indicator("PYTHIA Level Sheet", overlay=true, max_lines_count=50, max_labels_count=30, max_boxes_count=5)
+
+// ── User Inputs ──
+num_bins     = input.int(50, "Number of price bins", minval=10, maxval=200)
+va_pct       = input.int(70, "Value Area %", minval=50, maxval=90)
+ib_minutes   = input.int(60, "IB duration (minutes)", minval=30, maxval=120)
+ib_lookback  = input.int(20, "IB average lookback (sessions)", minval=5, maxval=50)
+show_ib      = input.bool(true, "Show IB lines")
+show_va_fill = input.bool(true, "Show Value Area fill")
+webhook_url  = input.string("", "Webhook URL (for reference only)")
+
+// ── Session Detection ──
+is_new_session = ta.change(time("D")) != 0
+is_rth         = not na(time(timeframe.period, "0930-1600:23456", "America/New_York"))
+
+// ── Track prior session bars using arrays ──
+var float[] prior_highs  = array.new_float(0)
+var float[] prior_lows   = array.new_float(0)
+var float[] prior_vols   = array.new_float(0)
+var float   prior_sess_high = na
+var float   prior_sess_low  = na
+
+// Current session accumulators
+var float[] curr_highs = array.new_float(0)
+var float[] curr_lows  = array.new_float(0)
+var float[] curr_vols  = array.new_float(0)
+
+// Results
+var float vah_level = na
+var float val_level = na
+var float poc_level = na
+var float prev_vah  = na
+var float prev_val  = na
+var float prev_poc  = na
+
+// IB tracking
+var float ib_high      = na
+var float ib_low       = na
+var float ib_width     = na
+var float ib_avg_width = na
+var float[] ib_widths  = array.new_float(0)  // rolling IB widths
+var bool  ib_complete  = false
+var int   session_bar_count = 0
+
+// 80% rule tracking
+var bool  opened_outside_va = false
+var bool  rule_80_fired     = false
+var string rule_80_direction = ""
+
+// ── On new session: compute prior session's volume profile ──
+if is_new_session
+    // Save current results as "prior" for next session
+    prev_vah := vah_level
+    prev_val := val_level
+    prev_poc := poc_level
+
+    // Move current session data to prior
+    if array.size(curr_highs) > 0
+        array.clear(prior_highs)
+        array.clear(prior_lows)
+        array.clear(prior_vols)
+        for i = 0 to array.size(curr_highs) - 1
+            array.push(prior_highs, array.get(curr_highs, i))
+            array.push(prior_lows, array.get(curr_lows, i))
+            array.push(prior_vols, array.get(curr_vols, i))
+
+        // Compute profile from prior session bars
+        float sess_high = array.max(prior_highs)
+        float sess_low  = array.min(prior_lows)
+        prior_sess_high := sess_high
+        prior_sess_low  := sess_low
+
+        if sess_high > sess_low
+            float bin_size = (sess_high - sess_low) / num_bins
+            float[] bin_vol = array.new_float(num_bins, 0.0)
+
+            // Distribute volume across bins
+            for i = 0 to array.size(prior_highs) - 1
+                float bh = array.get(prior_highs, i)
+                float bl = array.get(prior_lows, i)
+                float bv = array.get(prior_vols, i)
+                int low_bin  = math.max(0, math.floor((bl - sess_low) / bin_size))
+                int high_bin = math.min(num_bins - 1, math.floor((bh - sess_low) / bin_size))
+                if high_bin < low_bin
+                    high_bin := low_bin
+                int span = high_bin - low_bin + 1
+                float vol_per_bin = bv / span
+                for b = low_bin to high_bin
+                    array.set(bin_vol, b, array.get(bin_vol, b) + vol_per_bin)
+
+            // Find POC (bin with max volume)
+            float max_vol = 0.0
+            int poc_bin = 0
+            for b = 0 to num_bins - 1
+                if array.get(bin_vol, b) > max_vol
+                    max_vol := array.get(bin_vol, b)
+                    poc_bin := b
+
+            poc_level := sess_low + (poc_bin + 0.5) * bin_size
+
+            // Compute Value Area — expand from POC
+            float total_vol = array.sum(bin_vol)
+            float va_target = total_vol * (va_pct / 100.0)
+            float va_vol    = array.get(bin_vol, poc_bin)
+            int va_lo = poc_bin
+            int va_hi = poc_bin
+
+            while va_vol < va_target and (va_lo > 0 or va_hi < num_bins - 1)
+                float up_vol   = va_hi < num_bins - 1 ? array.get(bin_vol, va_hi + 1) : 0.0
+                float down_vol = va_lo > 0 ? array.get(bin_vol, va_lo - 1) : 0.0
+                if up_vol >= down_vol and va_hi < num_bins - 1
+                    va_hi += 1
+                    va_vol += up_vol
+                else if va_lo > 0
+                    va_lo -= 1
+                    va_vol += down_vol
+                else
+                    va_hi += 1
+                    va_vol += up_vol
+
+            val_level := sess_low + va_lo * bin_size
+            vah_level := sess_low + (va_hi + 1) * bin_size
+
+    // Reset current session accumulators
+    array.clear(curr_highs)
+    array.clear(curr_lows)
+    array.clear(curr_vols)
+    ib_high := na
+    ib_low  := na
+    ib_complete := false
+    session_bar_count := 0
+    opened_outside_va := false
+    rule_80_fired := false
+    rule_80_direction := ""
+
+// ── Accumulate current session bars (RTH only for equities) ──
+if is_rth
+    array.push(curr_highs, high)
+    array.push(curr_lows, low)
+    array.push(curr_vols, volume)
+    session_bar_count += 1
+
+    // IB tracking: first N minutes
+    int bars_in_ib = math.ceil(ib_minutes / timeframe.in_seconds() * 60)
+    if session_bar_count <= bars_in_ib
+        if na(ib_high) or high > ib_high
+            ib_high := high
+        if na(ib_low) or low < ib_low
+            ib_low := low
+    else if not ib_complete
+        ib_complete := true
+        ib_width := ib_high - ib_low
+        // Add to rolling IB widths
+        array.push(ib_widths, ib_width)
+        if array.size(ib_widths) > ib_lookback
+            array.shift(ib_widths)
+        ib_avg_width := array.avg(ib_widths)
+
+    // 80% rule detection (after IB complete)
+    if ib_complete and not na(vah_level) and not na(val_level) and not rule_80_fired
+        // Check if session opened outside VA
+        if session_bar_count == 1
+            if open > vah_level
+                opened_outside_va := true
+                rule_80_direction := "BEARISH"
+            else if open < val_level
+                opened_outside_va := true
+                rule_80_direction := "BULLISH"
+
+        // Check if price re-entered VA
+        if opened_outside_va
+            if rule_80_direction == "BEARISH" and close <= vah_level and close >= val_level
+                rule_80_fired := true
+                alert('{"type":"mp_alert","ticker":"' + syminfo.ticker + '","alert_type":"80pct_rule","direction":"BEARISH","detail":"Price opened above VAH, re-entered value area. 80% probability of travel to VAL.","vah":' + str.tostring(vah_level) + ',"val":' + str.tostring(val_level) + ',"poc":' + str.tostring(poc_level) + ',"price":' + str.tostring(close) + ',"timestamp":"' + str.tostring(time) + '"}', alert.freq_once_per_bar)
+            else if rule_80_direction == "BULLISH" and close >= val_level and close <= vah_level
+                rule_80_fired := true
+                alert('{"type":"mp_alert","ticker":"' + syminfo.ticker + '","alert_type":"80pct_rule","direction":"BULLISH","detail":"Price opened below VAL, re-entered value area. 80% probability of travel to VAH.","vah":' + str.tostring(vah_level) + ',"val":' + str.tostring(val_level) + ',"poc":' + str.tostring(poc_level) + ',"price":' + str.tostring(close) + ',"timestamp":"' + str.tostring(time) + '"}', alert.freq_once_per_bar)
+
+// ── Session open webhook: fire once per session with levels ──
+if is_new_session and not na(vah_level) and not na(val_level) and not na(poc_level)
+    // VA migration classification
+    string va_migration = "OVERLAPPING"
+    if not na(prev_val) and not na(prev_vah)
+        if val_level > prev_val and vah_level > prev_vah
+            va_migration := "HIGHER"
+        else if val_level < prev_val and vah_level < prev_vah
+            va_migration := "LOWER"
+        else if val_level > prev_vah or vah_level < prev_val
+            va_migration := "NON-OVERLAPPING"
+
+    // IB classification
+    string ib_class = "NORMAL"
+    if not na(ib_width) and not na(ib_avg_width) and ib_avg_width > 0
+        if ib_width < ib_avg_width * 0.75
+            ib_class := "NARROW"
+        else if ib_width > ib_avg_width * 1.25
+            ib_class := "WIDE"
+
+    // Poor high/low detection (proxy: if high/low touched by only 1 bar on 30-min equivalent)
+    string high_quality = "EXCESS"
+    string low_quality  = "EXCESS"
+    if array.size(prior_highs) > 0
+        float sh = array.max(prior_highs)
+        float sl = array.min(prior_lows)
+        float threshold = (sh - sl) * 0.005  // 0.5% of range
+        int high_touches = 0
+        int low_touches  = 0
+        for i = 0 to array.size(prior_highs) - 1
+            if array.get(prior_highs, i) >= sh - threshold
+                high_touches += 1
+            if array.get(prior_lows, i) <= sl + threshold
+                low_touches += 1
+        if high_touches <= 1
+            high_quality := "POOR"
+        if low_touches <= 1
+            low_quality := "POOR"
+
+    alert('{"type":"mp_levels","ticker":"' + syminfo.ticker + '","timeframe":"' + timeframe.period + '","session_date":"' + str.tostring(year) + '-' + str.tostring(month, '00') + '-' + str.tostring(dayofmonth, '00') + '","vah":' + str.tostring(vah_level) + ',"val":' + str.tostring(val_level) + ',"poc":' + str.tostring(poc_level) + ',"ib_high":' + str.tostring(nz(ib_high)) + ',"ib_low":' + str.tostring(nz(ib_low)) + ',"ib_width":' + str.tostring(nz(ib_width)) + ',"ib_avg_width":' + str.tostring(nz(ib_avg_width)) + ',"ib_classification":"' + ib_class + '","va_migration":"' + va_migration + '","prior_vah":' + str.tostring(nz(prev_vah)) + ',"prior_val":' + str.tostring(nz(prev_val)) + ',"prior_poc":' + str.tostring(nz(prev_poc)) + ',"high_quality":"' + high_quality + '","low_quality":"' + low_quality + '","alert_type":"session_levels","timestamp":"' + str.tostring(time) + '"}', alert.freq_once_per_bar)
+
+// ── Drawing: Lines and Labels ──
+var line poc_line = na
+var line vah_line = na
+var line val_line = na
+var line ib_h_line = na
+var line ib_l_line = na
+var box  va_box = na
+
+// Update lines on every bar during RTH
+if is_rth and not na(vah_level)
+    // POC line (solid yellow)
+    if is_new_session
+        poc_line := line.new(bar_index, poc_level, bar_index + 1, poc_level, color=color.yellow, style=line.style_solid, width=2)
+        label.new(bar_index, poc_level, "POC " + str.tostring(poc_level, format.mintick), style=label.style_label_left, color=color.new(color.yellow, 80), textcolor=color.yellow, size=size.small)
+    else
+        line.set_x2(poc_line, bar_index)
+
+    // VAH line (dashed red)
+    if is_new_session
+        vah_line := line.new(bar_index, vah_level, bar_index + 1, vah_level, color=color.new(#FF6B6B, 0), style=line.style_dashed, width=1)
+        label.new(bar_index, vah_level, "VAH " + str.tostring(vah_level, format.mintick), style=label.style_label_left, color=color.new(#FF6B6B, 80), textcolor=color.new(#FF6B6B, 0), size=size.small)
+    else
+        line.set_x2(vah_line, bar_index)
+
+    // VAL line (dashed green)
+    if is_new_session
+        val_line := line.new(bar_index, val_level, bar_index + 1, val_level, color=color.new(#4ECDC4, 0), style=line.style_dashed, width=1)
+        label.new(bar_index, val_level, "VAL " + str.tostring(val_level, format.mintick), style=label.style_label_left, color=color.new(#4ECDC4, 80), textcolor=color.new(#4ECDC4, 0), size=size.small)
+    else
+        line.set_x2(val_line, bar_index)
+
+    // Value Area fill
+    if show_va_fill
+        if is_new_session
+            va_box := box.new(bar_index, vah_level, bar_index + 1, val_level, border_color=color.new(color.gray, 90), bgcolor=color.new(color.blue, 92))
+        else
+            box.set_right(va_box, bar_index)
+
+    // IB lines (dotted, lighter)
+    if show_ib and not na(ib_high) and ib_complete
+        if is_new_session or na(ib_h_line)
+            ib_h_line := line.new(bar_index, ib_high, bar_index + 1, ib_high, color=color.new(color.gray, 40), style=line.style_dotted, width=1)
+            ib_l_line := line.new(bar_index, ib_low, bar_index + 1, ib_low, color=color.new(color.gray, 40), style=line.style_dotted, width=1)
+            // IB classification label
+            string ib_label_text = "IB: " + str.tostring(ib_width, format.mintick)
+            color ib_label_color = color.gray
+            if not na(ib_avg_width) and ib_avg_width > 0
+                if ib_width < ib_avg_width * 0.75
+                    ib_label_text := ib_label_text + " NARROW"
+                    ib_label_color := color.orange
+                else if ib_width > ib_avg_width * 1.25
+                    ib_label_text := ib_label_text + " WIDE"
+                    ib_label_color := #4A90D9
+            label.new(bar_index, ib_high, ib_label_text, style=label.style_label_down, color=color.new(ib_label_color, 80), textcolor=ib_label_color, size=size.tiny)
+        else
+            line.set_x2(ib_h_line, bar_index)
+            line.set_x2(ib_l_line, bar_index)

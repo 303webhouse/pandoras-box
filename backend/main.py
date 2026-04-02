@@ -744,6 +744,8 @@ from api.catalyst_calendar import router as catalyst_router
 from api.ticker_profile import router as ticker_profile_router
 from api.trade_watchlist import router as trade_watchlist_router
 from api.chronos import router as chronos_router
+from api.mp import router as mp_router
+from webhooks.mp_levels import router as mp_webhook_router
 
 app.include_router(webhook_router, prefix="/webhook", tags=["webhooks"])
 app.include_router(circuit_breaker_router, prefix="/webhook", tags=["circuit-breaker"])
@@ -793,6 +795,8 @@ app.include_router(catalyst_router, prefix="/api", tags=["catalyst"])
 app.include_router(ticker_profile_router, prefix="/api", tags=["ticker-profile"])
 app.include_router(trade_watchlist_router, prefix="/api", tags=["trade-watchlist"])
 app.include_router(chronos_router, prefix="/api", tags=["chronos"])
+app.include_router(mp_router, prefix="/api", tags=["market-profile"])
+app.include_router(mp_webhook_router, prefix="/webhook", tags=["market-profile"])
 
 # Serve frontend static files
 # Multiple path resolution strategies for different deployment environments
