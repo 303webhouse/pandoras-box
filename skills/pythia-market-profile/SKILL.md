@@ -263,3 +263,89 @@ The Whale Hunter (`docs/approved-strategies/whale-hunter.md`) already detects in
 
 ### CTA Zone System (Section C of Training Parameters)
 The CTA SMA system (20/50/120) determines the macro trend regime. PYTHIA adds the microstructure layer: "Yes, the CTA zone says bullish, but is price at the top of a balanced profile (fade risk) or breaking out of a bracket into new value (continuation)?" The two systems together give both the trend and the structural context.
+
+## Automation Roadmap: Getting PYTHIA Live Data
+
+Currently PYTHIA has no automated MP data feed — she works from whatever Nick provides manually or infers from the technical snapshot. Nick has TradingView Premium+ (400 alerts, webhook-capable). The goal is to progressively build indicators and alerts that pipe key structural data into the Pandora's Box pipeline so PYTHIA can operate with real numbers instead of asking Nick to check his charts.
+
+### Phase 1: Key Level Alerts (TradingView → Webhook)
+
+Build Pine Script indicators that fire webhook alerts when structurally significant MP events occur:
+
+**Daily Value Area Levels Broadcast:**
+- At session open (or shortly after IB forms), compute prior day's VAH, VAL, POC from the TPO or volume profile
+- Send these levels via webhook to Pandora's Box as a "level sheet" that gets injected into committee context
+- Update developing POC/VA periodically (every 30 min or on significant change)
+- This alone transforms PYTHIA from "ask Nick" to "I can see the levels"
+
+**IB Range Alert:**
+- After first 60 minutes, compute IB width (high - low)
+- Compare to N-day average IB width
+- Fire alert: "Narrow IB" (< 75% of average → breakout likely) or "Wide IB" (> 125% of average → range likely set)
+- This gives PYTHIA early day-type classification
+
+**Value Area Migration Tracker:**
+- Compare today's developing VA to prior session's VA
+- Fire alert on: "Higher value" (VAL > prior VAL), "Lower value" (VAH < prior VAH), "Overlapping value" (VA largely overlaps prior), "Non-overlapping value" (gap between VAs — strong directional move)
+- This is the trending vs. bracketing signal PYTHIA needs most
+
+**80% Rule Alert:**
+- Detect when price opens outside prior VA then re-enters it
+- Fire alert with direction: "80% rule triggered — expect travel to opposite VA edge"
+- One of the highest-probability setups in MP; automating the detection removes discretion
+
+**Poor High / Poor Low Detection:**
+- At session close, evaluate whether the session high/low has excess (tail of 2+ TPOs) or is "poor" (flat/blunt)
+- Fire alert: "Poor high at $XXX — likely to be revisited" or "Poor low at $XXX — likely to be revisited"
+- These become next-session targets
+
+### Phase 2: Profile Shape Classification
+
+**Day Type Classifier:**
+- At session close (or mid-session for developing classification), analyze the profile shape
+- Classify as: Normal (bell curve), Trend (elongated/single prints), Double Distribution, P-shape, b-shape, Normal Variation
+- Fire webhook with classification and key levels
+- This feeds directly into M.05 (day type determines strategy) and helps the committee know whether to use trend-following or mean-reversion frameworks
+
+**Single Print Detection:**
+- Identify single-print sections in the developing profile
+- These are support/resistance levels + unfinished business targets
+- Fire alert when price approaches a single-print zone from a prior session
+
+### Phase 3: Composite Profile Dashboard
+
+**Multi-Session Composite:**
+- Build a composite profile over the last 5/10/20 sessions
+- Compute composite POC, composite VA, and identify developing balance areas vs. migration
+- Pipe this into the committee context as a "macro structure" block
+- This is the swing trade structural context PYTHIA needs for evaluating multi-day positions
+
+### Phase 4: Volume Delta Integration
+
+**CVD at Key MP Levels:**
+- When price reaches a key MP level (POC, VAH, VAL), check if volume delta (buying vs. selling pressure) confirms or diverges
+- Rally into VAH with declining delta = fade. Rally into VAH with accelerating delta = breakout.
+- This connects M.06 (delta divergence) to the structural levels
+
+### What This Gives Nick (Training Value)
+
+Building these indicators isn't just about feeding PYTHIA data — it's a structured way for Nick to learn Market Profile through the process of implementation:
+
+- **Building the IB alert** teaches what Initial Balance means and why width matters
+- **Building the VA migration tracker** teaches how to read trending vs. bracketing from the profile
+- **Building the 80% rule alert** teaches one of MP's highest-probability setups through hands-on construction
+- **Building the day type classifier** forces deep understanding of profile shapes and what they mean for strategy selection
+- **Using PYTHIA's analysis** in committee evaluations reinforces the concepts in live trading context — seeing PYTHIA say "we're at VAH in a balanced profile, this is a fade not a chase" in real-time builds pattern recognition
+
+Each phase can be built as a standalone Pine Script indicator on TradingView, tested visually on charts, and then connected via webhook to Pandora's Box once validated. Nick learns MP by building the tools, and PYTHIA gets progressively smarter data.
+
+## When Nick Asks PYTHIA for Help
+
+In direct conversation, PYTHIA should always be ready to:
+
+1. **Explain any MP concept** Nick is curious about — in plain language, with examples
+2. **Walk through a live chart** if Nick shares a screenshot or describes what he sees
+3. **Suggest what to look for** on his TradingView MP indicator for a specific trade idea
+4. **Help build the Pine Script indicators** described in the automation roadmap above
+5. **Debrief a trade** through the MP lens — "Here's what the profile was telling you at entry, and here's what changed"
+6. **Challenge Nick's directional bias** with structural evidence — "Your macro thesis says down, but the composite profile says we're building value higher. Structure doesn't care about narratives."
