@@ -153,6 +153,7 @@ class UpdatePositionRequest(BaseModel):
     target_1: Optional[float] = None
     target_2: Optional[float] = None
     current_price: Optional[float] = None
+    unrealized_pnl: Optional[float] = None
     notes: Optional[str] = None
     tags: Optional[List[str]] = None
     quantity: Optional[int] = None
@@ -161,6 +162,7 @@ class UpdatePositionRequest(BaseModel):
     legs: Optional[str] = None
     long_strike: Optional[float] = None
     short_strike: Optional[float] = None
+    expiry: Optional[str] = None
     max_loss: Optional[float] = None
     max_profit: Optional[float] = None
     source: Optional[str] = None
@@ -1131,6 +1133,22 @@ async def update_position(position_id: str, req: UpdatePositionRequest, _=Depend
     if req.short_strike is not None:
         sets.append(f"short_strike = ${idx}")
         params.append(req.short_strike)
+        idx += 1
+    if req.expiry is not None:
+        try:
+            exp_date = date.fromisoformat(str(req.expiry)[:10])
+            sets.append(f"expiry = ${idx}")
+            params.append(exp_date)
+            idx += 1
+            dte = max(0, (exp_date - date.today()).days)
+            sets.append(f"dte = ${idx}")
+            params.append(dte)
+            idx += 1
+        except (ValueError, TypeError):
+            pass
+    if req.unrealized_pnl is not None:
+        sets.append(f"unrealized_pnl = ${idx}")
+        params.append(req.unrealized_pnl)
         idx += 1
     if req.max_loss is not None:
         sets.append(f"max_loss = ${idx}")
