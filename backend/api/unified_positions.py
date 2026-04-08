@@ -1886,6 +1886,7 @@ async def run_mark_to_market() -> dict:
     for row in rows:
         ticker = row["ticker"]
         structure = (row.get("structure") or "").lower()
+        at = (row.get("asset_type") or "").upper()
         entry_price = float(row["entry_price"]) if row["entry_price"] else None
         quantity = row["quantity"]
         expiry = row.get("expiry")
@@ -2002,7 +2003,11 @@ async def run_mark_to_market() -> dict:
                 logger.warning("Polygon mark-to-market failed for %s: %s", row["position_id"], e)
 
         # --- Fallback: yfinance for equity or if Polygon failed ---
-        if current_price is None and structure in ("stock", "stock_long", "long_stock", "stock_short", "short_stock", ""):
+        # GUARD: Never use stock price for OPTION or SPREAD positions — even if
+        # structure is empty/null, asset_type tells us it's not a stock.
+        at = (row.get("asset_type") or "").upper()
+        is_equity_position = structure in ("stock", "stock_long", "long_stock", "stock_short", "short_stock", "") and at not in ("OPTION", "SPREAD")
+        if current_price is None and is_equity_position:
             try:
                 import yfinance as yf
                 t = yf.Ticker(ticker)
@@ -2026,6 +2031,18 @@ async def run_mark_to_market() -> dict:
                     WHERE position_id = $5
                 """, current_price, unrealized, long_leg_price, short_leg_price, row["position_id"])
             updated += 1
+        elif current_price is None and at in ("OPTION", "SPREAD") and row.get("current_price") is not None:
+            # Options/spread position we couldn't price — clear any stale/wrong
+            # stock-level price that may have been set by a previous buggy run
+            async with pool.acquire() as conn:
+                await conn.execute("""
+                    UPDATE unified_positions SET
+                        current_price = NULL, unrealized_pnl = 0,
+                        long_leg_price = NULL, short_leg_price = NULL,
+                        updated_at = NOW()
+                    WHERE position_id = $1
+                """, row["position_id"])
+            logger.info("Cleared stale stock-price from options position %s (%s)", row["position_id"], ticker)
 
     result = {"status": "updated", "updated": updated, "source": "polygon" if use_polygon else "yfinance"}
     if errors:
