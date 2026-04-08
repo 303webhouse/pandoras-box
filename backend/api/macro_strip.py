@@ -26,7 +26,9 @@ MACRO_TICKERS = {
     "IWM":  {"label": "IWM",  "name": "Russell 2K"},
     "USO":  {"label": "OIL",  "name": "Crude Oil"},
     "GLD":  {"label": "GOLD", "name": "Gold"},
-    "TLT":  {"label": "BONDS","name": "20Y Treasury"},
+    "SHY":  {"label": "2Y",   "name": "2Y Treasury"},
+    "IEF":  {"label": "10Y",  "name": "7-10Y Treasury"},
+    "TLT":  {"label": "20Y",  "name": "20Y Treasury"},
     "UUP":  {"label": "DXY",  "name": "US Dollar"},
     "HYG":  {"label": "HY",   "name": "High Yield"},
 }

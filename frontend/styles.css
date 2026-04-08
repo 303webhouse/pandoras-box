@@ -12035,16 +12035,36 @@ body[data-mode="analytics"] .analytics-shell {
 .macro-strip {
     background: var(--dark-bg);
     border-bottom: 1px solid var(--border-color);
-    padding: 4px 16px;
+    padding: 0 0;
     overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 32px;
 }
 
 .macro-strip-inner {
     display: flex;
-    gap: 6px;
     align-items: center;
-    justify-content: center;
     flex-wrap: nowrap;
+    animation: macroScroll 40s linear infinite;
+    width: max-content;
+}
+
+.macro-strip-inner:hover {
+    animation-play-state: paused;
+}
+
+.macro-scroll-set {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    flex-shrink: 0;
+}
+
+@keyframes macroScroll {
+    0% { transform: translateX(0); }
+    100% { transform: translateX(-50%); }
 }
 
 .macro-cell {
@@ -12082,6 +12102,159 @@ body[data-mode="analytics"] .analytics-shell {
     color: var(--border-color);
     font-size: 8px;
     user-select: none;
+}
+
+/* ===== EARNINGS BADGES ===== */
+.earnings-badge {
+    display: inline-block;
+    font-size: 9px;
+    font-weight: 600;
+    padding: 1px 6px;
+    border-radius: 3px;
+    letter-spacing: 0.3px;
+    white-space: nowrap;
+}
+
+.earnings-badge-urgent {
+    background: rgba(229, 62, 62, 0.2);
+    color: #e53e3e;
+    border: 1px solid rgba(229, 62, 62, 0.3);
+}
+
+.earnings-badge-soon {
+    background: rgba(236, 201, 75, 0.15);
+    color: #ecc94b;
+    border: 1px solid rgba(236, 201, 75, 0.25);
+}
+
+.earnings-badge-normal {
+    background: rgba(160, 174, 192, 0.1);
+    color: #a0aec0;
+    border: 1px solid rgba(160, 174, 192, 0.15);
+}
+
+.position-earnings-row {
+    font-size: 10px;
+    padding: 3px 8px;
+    margin: 2px 0 4px 0;
+    border-radius: 3px;
+    font-weight: 500;
+}
+
+.position-earnings-row.earnings-badge-urgent {
+    background: rgba(229, 62, 62, 0.15);
+    color: #fc8181;
+}
+
+.position-earnings-row.earnings-badge-soon {
+    background: rgba(236, 201, 75, 0.1);
+    color: #ecc94b;
+}
+
+.position-earnings-row.earnings-badge-normal {
+    background: rgba(160, 174, 192, 0.08);
+    color: #a0aec0;
+}
+
+.earnings-before-expiry {
+    background: rgba(229, 62, 62, 0.3);
+    color: #fed7d7;
+    font-size: 8px;
+    font-weight: 700;
+    padding: 0 4px;
+    border-radius: 2px;
+    margin-left: 4px;
+    letter-spacing: 0.5px;
+}
+
+/* ===== EARNINGS INTEL TAB ===== */
+.earnings-intel-panel {
+    padding: 8px 0;
+    max-height: 500px;
+    overflow-y: auto;
+}
+
+.earnings-intel-section { padding: 4px 12px; }
+
+.earnings-intel-section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+}
+
+.earnings-intel-section-title {
+    color: var(--text-secondary);
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.earnings-intel-section-meta {
+    color: var(--text-tertiary, #667);
+    font-size: 9px;
+}
+
+.earnings-intel-divider {
+    height: 1px;
+    background: var(--border-color);
+    margin: 8px 12px;
+}
+
+.earnings-intel-entry {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 6px;
+    border-radius: 4px;
+    font-size: 11px;
+    transition: background 0.15s;
+}
+
+.earnings-intel-entry:hover { background: rgba(255, 255, 255, 0.03); }
+
+.earnings-intel-entry.book-impact-entry {
+    border-left: 2px solid #ecc94b;
+    padding-left: 8px;
+}
+
+.earnings-intel-ticker {
+    color: var(--text-primary);
+    font-weight: 600;
+    min-width: 48px;
+    font-family: 'Orbit', monospace;
+}
+
+.earnings-intel-date {
+    color: var(--text-secondary);
+    font-size: 10px;
+    min-width: 70px;
+}
+
+.earnings-intel-timing {
+    color: var(--text-tertiary, #667);
+    font-size: 9px;
+    font-weight: 600;
+    min-width: 30px;
+    text-align: center;
+}
+
+.earnings-intel-overlap {
+    color: #ecc94b;
+    font-size: 9px;
+    font-weight: 500;
+    margin-left: auto;
+}
+
+.earnings-intel-book-flag {
+    font-size: 8px;
+    font-weight: 700;
+    color: #ecc94b;
+    background: rgba(236, 201, 75, 0.12);
+    padding: 0 4px;
+    border-radius: 2px;
+    margin-left: auto;
 }
 
 /* ===== TRIP WIRE MONITOR ===== */

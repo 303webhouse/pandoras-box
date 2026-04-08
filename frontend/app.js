@@ -392,6 +392,39 @@ let signals = {
     crypto: []
 };
 const TRADE_IDEAS_PAGE_SIZE = 10;
+// ===== EARNINGS CACHE =====
+let earningsCache = {};
+let earningsCacheLoaded = false;
+
+async function loadEarningsBatch(tickers) {
+    if (!tickers || tickers.length === 0) return;
+    try {
+        const tickerStr = [...new Set(tickers)].join(',');
+        const resp = await fetch(`${API_URL}/chronos/next-earnings-batch?tickers=${tickerStr}`, { headers: authHeaders() });
+        if (!resp.ok) return;
+        const data = await resp.json();
+        if (data.earnings) {
+            Object.assign(earningsCache, data.earnings);
+            earningsCacheLoaded = true;
+        }
+    } catch (e) {
+        console.warn('Earnings batch load failed:', e);
+    }
+}
+
+function getEarningsBadgeHtml(ticker) {
+    const earn = earningsCache[ticker];
+    if (!earn || !earn.date) return '';
+    const earnDate = new Date(earn.date + 'T00:00:00');
+    const now = new Date();
+    const daysUntil = Math.ceil((earnDate - now) / (1000 * 60 * 60 * 24));
+    if (daysUntil < 0 || daysUntil > 30) return '';
+    const dateStr = earnDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    const timingStr = earn.timing ? ` ${earn.timing}` : '';
+    const urgencyClass = daysUntil <= 3 ? 'earnings-badge-urgent' : daysUntil <= 7 ? 'earnings-badge-soon' : 'earnings-badge-normal';
+    return `<span class="earnings-badge ${urgencyClass}" title="Earnings in ${daysUntil} day${daysUntil !== 1 ? 's' : ''}">\u26A0 Earn: ${dateStr}${timingStr}</span>`;
+}
+
 let tradeIdeasPagination = {
     equity: { offset: 0, limit: TRADE_IDEAS_PAGE_SIZE, hasMore: true, loading: false },
     crypto: { offset: 0, limit: TRADE_IDEAS_PAGE_SIZE, hasMore: true, loading: false }
@@ -1277,6 +1310,7 @@ async function loadInitialData() {
 
     // Pre-load Chronos earnings data so it's ready when tab is clicked
     loadChronosEarnings();
+    loadEarningsIntelTab();
 
     // Enrich position/signal cards with earnings dates (runs after cards render)
     setTimeout(enrichCardsWithEarnings, 3000);
@@ -3610,6 +3644,8 @@ async function loadGroupedSignals() {
         const response = await fetch(url);
         const data = await response.json();
         if (data.groups) {
+            const tickers = data.groups.map(g => g.ticker).filter(Boolean);
+            await loadEarningsBatch(tickers);
             renderGroupedSignals(data.groups);
         }
     } catch (error) {
@@ -3760,7 +3796,7 @@ function renderGroupedSignals(groups) {
                 </div>
 
                 <div class="signal-badges">
-                    ${positionBadge}${counterBadge}
+                    ${positionBadge}${counterBadge}${getEarningsBadgeHtml(group.ticker)}
                 </div>
 
                 ${primaryHtml}
@@ -4281,6 +4317,7 @@ function createSignalCard(signal) {
                 </div>
             </div>
             
+            ${getEarningsBadgeHtml(signal.ticker)}
             <div class="signal-bias-indicator ${biasAlignmentClass}" title="${biasAlignmentText}">
                 <span class="bias-icon">${biasAlignmentIcon}</span>
                 <span class="bias-text">${biasAlignmentText}</span>
@@ -7772,12 +7809,12 @@ function initOptionsFlow() {
             const target = btn.dataset.tab;
             const sectorsEl = document.getElementById('sectorsTabContent');
             const argusEl = document.getElementById('argusTabContent');
-            const themeEl = document.getElementById('themeTabContent');
+            const earningsEl = document.getElementById('earningsTabContent');
             if (sectorsEl) sectorsEl.style.display = target === 'sectors' ? '' : 'none';
             if (argusEl) argusEl.style.display = target === 'argus' ? '' : 'none';
-            if (themeEl) themeEl.style.display = target === 'theme' ? '' : 'none';
+            if (earningsEl) earningsEl.style.display = target === 'earnings' ? '' : 'none';
             if (target === 'argus') loadFlowRadar();
-            if (target === 'theme') loadThemeIntel();
+            if (target === 'earnings') loadEarningsIntelTab();
         });
     });
 
@@ -8688,6 +8725,8 @@ async function loadOpenPositionsEnhanced() {
 
         if (data.positions) {
             openPositions = data.positions;
+            const posTickers = openPositions.map(p => p.ticker).filter(Boolean);
+            await loadEarningsBatch(posTickers);
             renderPositionsEnhanced();
             updatePositionsCount();
             renderAtRiskStrip();
@@ -9325,6 +9364,27 @@ function renderPositionCard(pos) {
                 <span class="position-ticker" data-ticker="${pos.ticker}">${pos.ticker}</span>
                 <span class="position-structure-badge">${structureDisplay}</span>
             </div>
+            ${(() => {
+                const earn = earningsCache[pos.ticker];
+                if (!earn || !earn.date) return '';
+                const earnDate = new Date(earn.date + 'T00:00:00');
+                const now = new Date();
+                const daysUntil = Math.ceil((earnDate - now) / (1000 * 60 * 60 * 24));
+                if (daysUntil < 0 || daysUntil > 30) return '';
+                const dateStr = earnDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                const timingStr = earn.timing ? ' ' + earn.timing : '';
+                let expiryWarning = '';
+                if (pos.expiry) {
+                    const expiryDate = new Date(pos.expiry + 'T00:00:00');
+                    if (earnDate <= expiryDate) {
+                        expiryWarning = ' <span class="earnings-before-expiry">BEFORE EXPIRY</span>';
+                    }
+                }
+                const urgencyClass = daysUntil <= 3 ? 'earnings-badge-urgent' : daysUntil <= 7 ? 'earnings-badge-soon' : 'earnings-badge-normal';
+                return '<div class="position-earnings-row ' + urgencyClass + '">' +
+                    '\u26A0 Earnings: ' + dateStr + timingStr +
+                    ' (' + daysUntil + 'd)' + expiryWarning + '</div>';
+            })()}
             ${counterBanner}
             ${confirmBanner}
             ${flowBadge}
@@ -11560,16 +11620,18 @@ function renderMacroStrip(tickers) {
     const container = document.getElementById('macroStripInner');
     if (!container || !tickers || tickers.length === 0) return;
 
-    container.innerHTML = tickers.map((t, i) => {
+    const cellsHtml = tickers.map((t, i) => {
         const sign = t.change_pct >= 0 ? '+' : '';
         const cls = t.change_pct >= 0 ? 'positive' : 'negative';
-        const sep = i < tickers.length - 1 ? '<span class="macro-sep">&middot;</span>' : '';
+        const sep = '<span class="macro-sep">&middot;</span>';
         return `<div class="macro-cell" title="${escapeHtml(t.name)}">
             <span class="macro-cell-label">${escapeHtml(t.label)}</span>
             <span class="macro-cell-price">${t.price.toFixed(2)}</span>
             <span class="macro-cell-change ${cls}">${sign}${t.change_pct.toFixed(2)}%</span>
         </div>${sep}`;
     }).join('');
+
+    container.innerHTML = `<div class="macro-scroll-set">${cellsHtml}</div><div class="macro-scroll-set">${cellsHtml}</div>`;
 }
 
 // ===== TRIP WIRE MONITOR =====
@@ -12633,6 +12695,71 @@ async function loadChronosEarnings() {
     } catch (err) {
         console.error('Chronos load error:', err);
         const el = document.getElementById('chronos-book-impact');
+        if (el) el.innerHTML = '<p class="empty-state">Earnings data unavailable</p>';
+    }
+}
+
+async function loadEarningsIntelTab() {
+    try {
+        const resp = await fetch(`${API_URL}/chronos/this-week`, { headers: authHeaders() });
+        if (!resp.ok) return;
+        const data = await resp.json();
+
+        const bookContainer = document.getElementById('earningsBookImpact');
+        const bookCount = document.getElementById('earningsBookCount');
+        const bookItems = data.book_impact || [];
+        if (bookCount) bookCount.textContent = bookItems.length > 0 ? `${bookItems.length} reporting` : '';
+
+        if (bookContainer) {
+            if (bookItems.length === 0) {
+                bookContainer.innerHTML = '<p class="empty-state">No position-linked earnings this week</p>';
+            } else {
+                bookContainer.innerHTML = bookItems.map(e => {
+                    const dateObj = new Date(e.report_date + 'T00:00:00');
+                    const dayName = dateObj.toLocaleDateString('en-US', { weekday: 'short' });
+                    const dateStr = dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                    const timing = e.timing || '\u2014';
+                    let overlapStr = '';
+                    if (e.position_overlap_details) {
+                        try {
+                            const details = typeof e.position_overlap_details === 'string' ? JSON.parse(e.position_overlap_details) : e.position_overlap_details;
+                            if (details.etf_positions) overlapStr = details.etf_positions.join(', ');
+                        } catch(ex) {}
+                    }
+                    return `<div class="earnings-intel-entry book-impact-entry">
+                        <span class="earnings-intel-ticker">${e.ticker}</span>
+                        <span class="earnings-intel-date">${dayName} ${dateStr}</span>
+                        <span class="earnings-intel-timing">${timing}</span>
+                        ${overlapStr ? `<span class="earnings-intel-overlap" title="Affects position">${overlapStr}</span>` : ''}
+                    </div>`;
+                }).join('');
+            }
+        }
+
+        const moversContainer = document.getElementById('earningsMarketMovers');
+        const movers = data.market_movers || [];
+        if (moversContainer) {
+            if (movers.length === 0) {
+                moversContainer.innerHTML = '<p class="empty-state">No major earnings this week</p>';
+            } else {
+                moversContainer.innerHTML = movers.slice(0, 15).map(e => {
+                    const dateObj = new Date(e.report_date + 'T00:00:00');
+                    const dayName = dateObj.toLocaleDateString('en-US', { weekday: 'short' });
+                    const dateStr = dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                    const timing = e.timing || '\u2014';
+                    const inBook = e.in_position_book ? '<span class="earnings-intel-book-flag">IN BOOK</span>' : '';
+                    return `<div class="earnings-intel-entry">
+                        <span class="earnings-intel-ticker">${e.ticker}</span>
+                        <span class="earnings-intel-date">${dayName} ${dateStr}</span>
+                        <span class="earnings-intel-timing">${timing}</span>
+                        ${inBook}
+                    </div>`;
+                }).join('');
+            }
+        }
+    } catch (err) {
+        console.error('Earnings intel tab load error:', err);
+        const el = document.getElementById('earningsBookImpact');
         if (el) el.innerHTML = '<p class="empty-state">Earnings data unavailable</p>';
     }
 }
