@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Pandora - Real-time Trading Signal Dashboard">
     <title>Pandora</title>
-    <link rel="stylesheet" href="/styles.css?v=119">
+    <link rel="stylesheet" href="/styles.css?v=120">
     <link rel="manifest" href="/manifest.json">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -234,7 +234,7 @@
                 <div class="intel-tabs">
                     <button class="intel-tab active" data-tab="sectors">SECTORS</button>
                     <button class="intel-tab" data-tab="argus">ARGUS</button>
-                    <button class="intel-tab" data-tab="theme">THEME</button>
+                    <button class="intel-tab" data-tab="earnings">EARNINGS</button>
                 </div>
                 <div class="intel-tab-content" id="sectorsTabContent">
                     <div class="sector-heatmap" id="sectorHeatmap">
@@ -264,9 +264,26 @@
                         </div>
                     </div>
                 </div>
-                <div class="intel-tab-content" id="themeTabContent" style="display:none;">
-                    <div id="themeIntelContent" class="theme-intel-list">
-                        <p class="empty-state">No theme-matched intel</p>
+                <div class="intel-tab-content" id="earningsTabContent" style="display:none;">
+                    <div class="earnings-intel-panel">
+                        <div class="earnings-intel-section">
+                            <div class="earnings-intel-section-header">
+                                <span class="earnings-intel-section-title">Position Book Impact</span>
+                                <span class="earnings-intel-section-meta" id="earningsBookCount"></span>
+                            </div>
+                            <div id="earningsBookImpact" class="earnings-intel-entries">
+                                <p class="empty-state">Loading...</p>
+                            </div>
+                        </div>
+                        <div class="earnings-intel-divider"></div>
+                        <div class="earnings-intel-section">
+                            <div class="earnings-intel-section-header">
+                                <span class="earnings-intel-section-title">Top Earnings This Week</span>
+                            </div>
+                            <div id="earningsMarketMovers" class="earnings-intel-entries">
+                                <p class="empty-state">Loading...</p>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1929,7 +1946,7 @@
     <!-- TradingView Widget Script -->
     <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
-    <script src="/app.js?v=139"></script>
+    <script src="/app.js?v=140"></script>
     <script src="/cockpit.js?v=1"></script>
     <script src="/laboratory.js?v=1"></script>
 </body>
