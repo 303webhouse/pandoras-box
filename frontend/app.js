@@ -1919,8 +1919,12 @@ function renderCompositeBias(data, dailyData = null) {
         if (Number.isFinite(staleCount) && staleCount > 0) {
             parts.push(`${staleCount} stale`);
         }
-        secondaryEl.textContent = parts.join(' \u2022 ');
+        // Inline confidence badge with secondary text
+        const confInline = confidence ? `<span class="confidence-inline confidence-${confidence.toLowerCase()}">${confidence}</span>` : '';
+        secondaryEl.innerHTML = parts.join(' \u2022 ') + (confInline ? ' ' + confInline : '');
     }
+    // Hide the standalone confidence badge (now inline with secondary text)
+    if (confEl) confEl.style.display = 'none';
 
     if (overrideEl) {
         const cb = data.circuit_breaker;
