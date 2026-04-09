@@ -1216,6 +1216,18 @@ body {
     padding: 2px 8px;
     border-radius: 4px;
     background: rgba(255, 255, 255, 0.05);
+    display: none; /* Hidden — now rendered inline with secondary text */
+}
+
+.confidence-inline {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    padding: 1px 5px;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.08);
+    color: #fff;
+    vertical-align: middle;
 }
 
 #CompositeConfidence,
@@ -12040,15 +12052,15 @@ body[data-mode="analytics"] .analytics-shell {
     display: flex;
     align-items: center;
     justify-content: center;
-    height: 32px;
-    line-height: 32px;
+    height: 44px;
+    line-height: 44px;
 }
 
 .macro-strip-inner {
     display: flex;
     align-items: center;
     flex-wrap: nowrap;
-    animation: macroScroll 40s linear infinite;
+    animation: macroScroll 60s linear infinite;
     width: max-content;
 }
 
@@ -12071,12 +12083,12 @@ body[data-mode="analytics"] .analytics-shell {
 .macro-cell {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
-    padding: 0 8px;
+    gap: 6px;
+    padding: 0 14px;
     font-family: 'Orbit', sans-serif;
-    font-size: 11px;
+    font-size: 16px;
     white-space: nowrap;
-    height: 32px;
+    height: 44px;
 }
 
 .macro-cell-label {
@@ -12084,7 +12096,7 @@ body[data-mode="analytics"] .analytics-shell {
     font-weight: 600;
     letter-spacing: 0.5px;
     text-transform: uppercase;
-    font-size: 10px;
+    font-size: 14px;
 }
 
 .macro-cell-price {
@@ -12094,7 +12106,7 @@ body[data-mode="analytics"] .analytics-shell {
 
 .macro-cell-change {
     font-weight: 600;
-    font-size: 10px;
+    font-size: 13px;
 }
 
 .macro-cell-change.positive { color: #7CFF6B; }
@@ -12102,11 +12114,11 @@ body[data-mode="analytics"] .analytics-shell {
 
 .macro-sep {
     color: var(--border-color);
-    font-size: 8px;
+    font-size: 10px;
     user-select: none;
     display: inline-flex;
     align-items: center;
-    height: 32px;
+    height: 44px;
 }
 
 /* ===== EARNINGS BADGES ===== */
