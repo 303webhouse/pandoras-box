@@ -1906,19 +1906,20 @@ function renderCompositeBias(data, dailyData = null) {
         scoreEl.textContent = `(${scoreText})`;
     }
     if (confEl) {
-        const suffix = Number.isFinite(activeCount) && Number.isFinite(totalCount)
-            ? ` (${activeCount}/${totalCount} active)`
-            : '';
-        confEl.textContent = `${confidence}${suffix}`;
+        confEl.textContent = confidence;
         confEl.style.color = '#ffffff';
     }
     if (secondaryEl) {
         const compositeLevel = String(data.bias_level || 'NEUTRAL').replace(/_/g, ' ');
         const compositeScoreText = Number.isFinite(scoreValue) ? `${Math.round(((scoreValue + 1) / 2) * 100)}/100` : '--';
-        const staleLabel = Number.isFinite(staleCount)
-            ? ` - ${staleCount} stale factor${staleCount === 1 ? '' : 's'}`
-            : '';
-        secondaryEl.textContent = `Composite: ${compositeLevel} (${compositeScoreText})${staleLabel}`;
+        const parts = [`Composite: ${compositeLevel} (${compositeScoreText})`];
+        if (Number.isFinite(activeCount) && Number.isFinite(totalCount)) {
+            parts.push(`${activeCount}/${totalCount} active`);
+        }
+        if (Number.isFinite(staleCount) && staleCount > 0) {
+            parts.push(`${staleCount} stale`);
+        }
+        secondaryEl.textContent = parts.join(' \u2022 ');
     }
 
     if (overrideEl) {

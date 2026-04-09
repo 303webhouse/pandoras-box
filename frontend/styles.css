@@ -12035,12 +12035,13 @@ body[data-mode="analytics"] .analytics-shell {
 .macro-strip {
     background: var(--dark-bg);
     border-bottom: 1px solid var(--border-color);
-    padding: 0 0;
+    padding: 0;
     overflow: hidden;
     display: flex;
     align-items: center;
     justify-content: center;
-    min-height: 32px;
+    height: 32px;
+    line-height: 32px;
 }
 
 .macro-strip-inner {
@@ -12068,13 +12069,14 @@ body[data-mode="analytics"] .analytics-shell {
 }
 
 .macro-cell {
-    display: flex;
+    display: inline-flex;
     align-items: center;
     gap: 4px;
-    padding: 2px 8px;
+    padding: 0 8px;
     font-family: 'Orbit', sans-serif;
     font-size: 11px;
     white-space: nowrap;
+    height: 32px;
 }
 
 .macro-cell-label {
@@ -12102,6 +12104,9 @@ body[data-mode="analytics"] .analytics-shell {
     color: var(--border-color);
     font-size: 8px;
     user-select: none;
+    display: inline-flex;
+    align-items: center;
+    height: 32px;
 }
 
 /* ===== EARNINGS BADGES ===== */
