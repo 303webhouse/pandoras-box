@@ -15,6 +15,7 @@ ETF_COMPONENTS = {
     "SMH": ["NVDA", "TSM", "AVGO", "ASML", "TXN", "QCOM", "AMD", "AMAT", "LRCX", "MU"],
     "XLE": ["XOM", "CVX", "EOG", "SLB", "COP", "MPC", "PSX", "WMB", "VLO", "OKE"],
     "SPY": ["AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "BRK.B", "AVGO", "JPM", "LLY"],
+    "XLY": ["AMZN", "TSLA", "HD", "MCD", "NKE", "LOW", "SBUX", "TJX", "BKNG", "ORLY"],
     "HYG": [],
     "IYR": ["PLD", "AMT", "EQIX", "WELL", "SPG", "DLR", "PSA", "O", "CCI", "VICI"],
     "IWM": [],
