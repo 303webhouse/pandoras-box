@@ -6,7 +6,7 @@ Replaces the fragmented positions + open_positions + options_positions system.
 
 from fastapi import APIRouter, Depends, HTTPException, Header, Query, Request
 from utils.pivot_auth import require_api_key
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
 from datetime import datetime, date, timezone, timedelta
 from decimal import Decimal
@@ -111,14 +111,16 @@ def normalize_spread_strikes(
 # ── Pydantic models ──────────────────────────────────────────────────
 
 class CreatePositionRequest(BaseModel):
+    model_config = {"populate_by_name": True}
+
     ticker: str
     asset_type: str = "OPTION"  # EQUITY, OPTION, SPREAD
-    structure: Optional[str] = None  # put_credit_spread, long_call, stock, etc.
+    structure: Optional[str] = Field(default=None, alias="strategy")
     direction: Optional[str] = None  # LONG, SHORT, MIXED — auto-inferred if omitted
     legs: Optional[List[Dict[str, Any]]] = None
 
     entry_price: Optional[float] = None
-    quantity: int = 1
+    quantity: int = Field(default=1, alias="contracts")
     cost_basis: Optional[float] = None
 
     # Risk — auto-calculated if structure is provided, can be overridden
@@ -128,10 +130,10 @@ class CreatePositionRequest(BaseModel):
     target_1: Optional[float] = None
     target_2: Optional[float] = None
 
-    # Options-specific
-    expiry: Optional[str] = None  # ISO date string
-    long_strike: Optional[float] = None
-    short_strike: Optional[float] = None
+    # Options-specific — accept both "expiry" and "expiration"
+    expiry: Optional[str] = Field(default=None, alias="expiration")
+    long_strike: Optional[float] = Field(default=None, alias="strike_long")
+    short_strike: Optional[float] = Field(default=None, alias="strike_short")
 
     # Metadata
     source: str = "MANUAL"
@@ -139,6 +141,8 @@ class CreatePositionRequest(BaseModel):
     account: str = "ROBINHOOD"
     notes: Optional[str] = None
     tags: Optional[List[str]] = None
+    bucket: Optional[str] = None
+    thesis: Optional[str] = None
 
 
 class UpdatePositionRequest(BaseModel):
@@ -161,6 +165,11 @@ class UpdatePositionRequest(BaseModel):
     max_profit: Optional[float] = None
     source: Optional[str] = None
     signal_id: Optional[str] = None
+    # Close-out fields
+    exit_price: Optional[float] = None
+    realized_pnl: Optional[float] = None
+    trade_outcome: Optional[str] = None
+    closed_at: Optional[str] = None
 
 
 class ClosePositionRequest(BaseModel):
@@ -215,6 +224,18 @@ class ReconcileRequest(BaseModel):
 
 
 # ── Helpers ───────────────────────────────────────────────────────────
+
+def _combine_notes(notes: Optional[str], thesis: Optional[str], bucket: Optional[str]) -> Optional[str]:
+    """Combine notes, thesis, and bucket into a single notes string."""
+    parts = []
+    if thesis:
+        parts.append(f"Thesis: {thesis}")
+    if bucket:
+        parts.append(f"Bucket: {bucket}")
+    if notes:
+        parts.append(notes)
+    return " | ".join(parts) if parts else None
+
 
 def _generate_position_id(ticker: str) -> str:
     now = datetime.now(timezone.utc)
@@ -484,7 +505,8 @@ async def create_position(req: CreatePositionRequest, _=Depends(require_api_key)
             max_loss, max_profit, req.stop_loss, req.target_1, req.target_2,
             breakeven if breakeven else None,
             expiry, dte, norm_long, norm_short,
-            req.source, req.signal_id, account, req.notes,
+            req.source, req.signal_id, account,
+            _combine_notes(req.notes, req.thesis, req.bucket),
             req.tags if req.tags else None,
         )
 
@@ -1125,6 +1147,22 @@ async def update_position(position_id: str, req: UpdatePositionRequest, _=Depend
     if req.signal_id is not None:
         sets.append(f"signal_id = ${idx}")
         params.append(req.signal_id)
+        idx += 1
+    if req.exit_price is not None:
+        sets.append(f"exit_price = ${idx}")
+        params.append(req.exit_price)
+        idx += 1
+    if req.realized_pnl is not None:
+        sets.append(f"realized_pnl = ${idx}")
+        params.append(req.realized_pnl)
+        idx += 1
+    if req.trade_outcome is not None:
+        sets.append(f"trade_outcome = ${idx}")
+        params.append(req.trade_outcome)
+        idx += 1
+    if req.closed_at is not None:
+        sets.append(f"exit_date = ${idx}")
+        params.append(datetime.fromisoformat(req.closed_at.replace("Z", "+00:00")))
         idx += 1
 
     if len(sets) <= 1:
