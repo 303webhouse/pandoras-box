@@ -222,21 +222,92 @@ async def get_next_earnings(ticker: str):
 # ── GET /chronos/next-earnings-batch ───────────────────────────────
 @router.get("/next-earnings-batch")
 async def get_next_earnings_batch(tickers: str = Query(..., description="Comma-separated tickers")):
-    """Batch fetch next earnings dates for multiple tickers."""
+    """Batch fetch next earnings dates for multiple tickers.
+    For ETF tickers, resolves component holdings and returns earliest component earnings.
+    """
     ticker_list = [t.strip().upper() for t in tickers.split(",") if t.strip()]
     if not ticker_list:
         return {"earnings": {}}
 
     pool = await get_postgres_client()
+    result = {}
+
+    # Separate direct tickers from ETF tickers
+    direct_tickers = []
+    etf_tickers = {}
+    for t in ticker_list:
+        components = ETF_COMPONENTS.get(t, [])
+        if components:
+            etf_tickers[t] = components
+        else:
+            direct_tickers.append(t)
+
+    async with pool.acquire() as conn:
+        # 1. Direct ticker lookups (individual stocks)
+        if direct_tickers:
+            rows = await conn.fetch(
+                """SELECT DISTINCT ON (ticker) ticker, report_date, timing
+                   FROM earnings_calendar
+                   WHERE ticker = ANY($1) AND report_date >= CURRENT_DATE
+                   ORDER BY ticker, report_date ASC""",
+                direct_tickers
+            )
+            for r in rows:
+                result[r["ticker"]] = {
+                    "date": r["report_date"].isoformat(),
+                    "timing": r["timing"]
+                }
+
+        # 2. ETF component lookups — find earliest component earnings for each ETF
+        for etf_ticker, components in etf_tickers.items():
+            if not components:
+                continue
+            comp_rows = await conn.fetch(
+                """SELECT ticker, report_date, timing
+                   FROM earnings_calendar
+                   WHERE ticker = ANY($1) AND report_date >= CURRENT_DATE
+                   ORDER BY report_date ASC
+                   LIMIT 10""",
+                components
+            )
+            if comp_rows:
+                first = comp_rows[0]
+                result[etf_ticker] = {
+                    "date": first["report_date"].isoformat(),
+                    "timing": first["timing"],
+                    "component": first["ticker"],
+                    "components_reporting": len(comp_rows),
+                    "is_etf": True
+                }
+
+    return {"earnings": result}
+
+
+# ── GET /chronos/upcoming ──────────────────────────────────────────
+@router.get("/upcoming")
+async def get_upcoming_earnings(days: int = Query(14, ge=1, le=30)):
+    """Upcoming earnings for the next N days, with position/watchlist flags."""
+    today = date.today()
+    d_to = today + timedelta(days=days)
+
+    pool = await get_postgres_client()
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            """SELECT DISTINCT ON (ticker) ticker, report_date, timing
+            """SELECT ticker, company_name, report_date, timing,
+                      eps_estimate, in_position_book, in_watchlist,
+                      position_overlap_details
                FROM earnings_calendar
-               WHERE ticker = ANY($1) AND report_date >= CURRENT_DATE
-               ORDER BY ticker, report_date ASC""",
-            ticker_list
+               WHERE report_date BETWEEN $1 AND $2
+               ORDER BY report_date ASC, ticker ASC""",
+            today, d_to
         )
-    result = {}
-    for r in rows:
-        result[r["ticker"]] = {"date": r["report_date"].isoformat(), "timing": r["timing"]}
-    return {"earnings": result}
+
+    entries = [dict(r) for r in rows]
+    book_impact = [e for e in entries if e.get("in_position_book")]
+
+    return {
+        "range": f"{today.isoformat()} to {d_to.isoformat()}",
+        "total": len(entries),
+        "book_impact": book_impact,
+        "all_earnings": entries,
+    }
