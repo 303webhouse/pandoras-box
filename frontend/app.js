@@ -421,8 +421,13 @@ function getEarningsBadgeHtml(ticker) {
     if (daysUntil < 0 || daysUntil > 30) return '';
     const dateStr = earnDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
     const timingStr = earn.timing ? ` ${earn.timing}` : '';
+    const componentStr = earn.component ? ` (${earn.component})` : '';
+    const countStr = earn.components_reporting && earn.components_reporting > 1 ? ` +${earn.components_reporting - 1} more` : '';
     const urgencyClass = daysUntil <= 3 ? 'earnings-badge-urgent' : daysUntil <= 7 ? 'earnings-badge-soon' : 'earnings-badge-normal';
-    return `<span class="earnings-badge ${urgencyClass}" title="Earnings in ${daysUntil} day${daysUntil !== 1 ? 's' : ''}">\u26A0 Earn: ${dateStr}${timingStr}</span>`;
+    const titleText = earn.is_etf
+        ? `${earn.components_reporting} component${earn.components_reporting !== 1 ? 's' : ''} reporting within 30 days. Next: ${earn.component} on ${dateStr}`
+        : `Earnings in ${daysUntil} day${daysUntil !== 1 ? 's' : ''}`;
+    return `<span class="earnings-badge ${urgencyClass}" title="${titleText}">\u26A0 Earn: ${dateStr}${timingStr}${componentStr}${countStr}</span>`;
 }
 
 let tradeIdeasPagination = {
@@ -9373,6 +9378,8 @@ function renderPositionCard(pos) {
                 if (daysUntil < 0 || daysUntil > 30) return '';
                 const dateStr = earnDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
                 const timingStr = earn.timing ? ' ' + earn.timing : '';
+                const componentStr = earn.component ? ' (' + earn.component + ')' : '';
+                const countStr = earn.components_reporting && earn.components_reporting > 1 ? ' +' + (earn.components_reporting - 1) + ' more' : '';
                 let expiryWarning = '';
                 if (pos.expiry) {
                     const expiryDate = new Date(pos.expiry + 'T00:00:00');
@@ -9382,7 +9389,7 @@ function renderPositionCard(pos) {
                 }
                 const urgencyClass = daysUntil <= 3 ? 'earnings-badge-urgent' : daysUntil <= 7 ? 'earnings-badge-soon' : 'earnings-badge-normal';
                 return '<div class="position-earnings-row ' + urgencyClass + '">' +
-                    '\u26A0 Earnings: ' + dateStr + timingStr +
+                    '\u26A0 Earnings: ' + dateStr + timingStr + componentStr + countStr +
                     ' (' + daysUntil + 'd)' + expiryWarning + '</div>';
             })()}
             ${counterBanner}
@@ -12701,18 +12708,19 @@ async function loadChronosEarnings() {
 
 async function loadEarningsIntelTab() {
     try {
-        const resp = await fetch(`${API_URL}/chronos/this-week`, { headers: authHeaders() });
+        const resp = await fetch(`${API_URL}/chronos/upcoming?days=14`, { headers: authHeaders() });
         if (!resp.ok) return;
         const data = await resp.json();
 
+        // === Book Impact section ===
         const bookContainer = document.getElementById('earningsBookImpact');
         const bookCount = document.getElementById('earningsBookCount');
         const bookItems = data.book_impact || [];
-        if (bookCount) bookCount.textContent = bookItems.length > 0 ? `${bookItems.length} reporting` : '';
+        if (bookCount) bookCount.textContent = bookItems.length > 0 ? `${bookItems.length} affecting positions` : '';
 
         if (bookContainer) {
             if (bookItems.length === 0) {
-                bookContainer.innerHTML = '<p class="empty-state">No position-linked earnings this week</p>';
+                bookContainer.innerHTML = '<p class="empty-state">No position-linked earnings in next 14 days</p>';
             } else {
                 bookContainer.innerHTML = bookItems.map(e => {
                     const dateObj = new Date(e.report_date + 'T00:00:00');
@@ -12736,25 +12744,36 @@ async function loadEarningsIntelTab() {
             }
         }
 
+        // === All Upcoming Earnings — date-grouped chip layout ===
         const moversContainer = document.getElementById('earningsMarketMovers');
-        const movers = data.market_movers || [];
+        const allEarnings = data.all_earnings || [];
         if (moversContainer) {
-            if (movers.length === 0) {
-                moversContainer.innerHTML = '<p class="empty-state">No major earnings this week</p>';
+            if (allEarnings.length === 0) {
+                moversContainer.innerHTML = '<p class="empty-state">No earnings in next 14 days</p>';
             } else {
-                moversContainer.innerHTML = movers.slice(0, 15).map(e => {
-                    const dateObj = new Date(e.report_date + 'T00:00:00');
-                    const dayName = dateObj.toLocaleDateString('en-US', { weekday: 'short' });
-                    const dateStr = dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-                    const timing = e.timing || '\u2014';
-                    const inBook = e.in_position_book ? '<span class="earnings-intel-book-flag">IN BOOK</span>' : '';
-                    return `<div class="earnings-intel-entry">
-                        <span class="earnings-intel-ticker">${e.ticker}</span>
-                        <span class="earnings-intel-date">${dayName} ${dateStr}</span>
-                        <span class="earnings-intel-timing">${timing}</span>
-                        ${inBook}
-                    </div>`;
-                }).join('');
+                const byDate = {};
+                allEarnings.forEach(e => {
+                    const key = e.report_date;
+                    if (!byDate[key]) byDate[key] = [];
+                    byDate[key].push(e);
+                });
+
+                let html = '<div class="earnings-date-groups">';
+                for (const [dateKey, entries] of Object.entries(byDate)) {
+                    const dateObj = new Date(dateKey + 'T00:00:00');
+                    const dayLabel = dateObj.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+                    html += `<div class="earnings-date-group">`;
+                    html += `<div class="earnings-date-label">${dayLabel} <span class="earnings-date-count">(${entries.length})</span></div>`;
+                    html += `<div class="earnings-date-tickers">`;
+                    entries.forEach(e => {
+                        const timing = e.timing || '';
+                        const inBook = e.in_position_book ? ' book-flag' : '';
+                        html += `<span class="earnings-ticker-chip${inBook}" title="${e.ticker} ${timing}">${e.ticker}${timing ? ' ' + timing : ''}</span>`;
+                    });
+                    html += `</div></div>`;
+                }
+                html += '</div>';
+                moversContainer.innerHTML = html;
             }
         }
     } catch (err) {

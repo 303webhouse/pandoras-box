@@ -12257,6 +12257,61 @@ body[data-mode="analytics"] .analytics-shell {
     margin-left: auto;
 }
 
+/* Earnings date-grouped display */
+.earnings-date-groups {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.earnings-date-group {
+    padding: 4px 0;
+}
+
+.earnings-date-label {
+    color: var(--text-secondary);
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    margin-bottom: 4px;
+    padding-left: 2px;
+}
+
+.earnings-date-count {
+    color: var(--text-tertiary, #556);
+    font-weight: 400;
+}
+
+.earnings-date-tickers {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.earnings-ticker-chip {
+    display: inline-block;
+    font-size: 10px;
+    font-family: 'Orbit', monospace;
+    padding: 2px 6px;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--text-secondary);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    white-space: nowrap;
+}
+
+.earnings-ticker-chip:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text-primary);
+}
+
+.earnings-ticker-chip.book-flag {
+    border-color: rgba(236, 201, 75, 0.3);
+    color: #ecc94b;
+    background: rgba(236, 201, 75, 0.08);
+}
+
 /* ===== TRIP WIRE MONITOR ===== */
 .trip-wire-section {
     margin-top: 8px;
