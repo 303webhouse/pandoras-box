@@ -31,6 +31,12 @@ MACRO_TICKERS = {
     "TLT":  {"label": "20Y",  "name": "20Y Treasury"},
     "UUP":  {"label": "DXY",  "name": "US Dollar"},
     "HYG":  {"label": "HY",   "name": "High Yield"},
+    "EWG":  {"label": "DE",   "name": "Germany (DAX)"},
+    "EWU":  {"label": "UK",   "name": "United Kingdom (FTSE)"},
+    "FXI":  {"label": "CN",   "name": "China Large-Cap"},
+    "EWY":  {"label": "KR",   "name": "South Korea (KOSPI)"},
+    "EWJ":  {"label": "JP",   "name": "Japan (Nikkei)"},
+    "INDA": {"label": "IN",   "name": "India (Nifty)"},
 }
 
 MACRO_CACHE_KEY = "macro:strip"
