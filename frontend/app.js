@@ -11639,7 +11639,7 @@ function renderMacroStrip(tickers) {
         </div>${sep}`;
     }).join('');
 
-    container.innerHTML = `<div class="macro-scroll-set">${cellsHtml}</div><div class="macro-scroll-set">${cellsHtml}</div>`;
+    container.innerHTML = `<div class="macro-scroll-set">${cellsHtml}</div><div class="macro-scroll-set">${cellsHtml}</div><div class="macro-scroll-set">${cellsHtml}</div><div class="macro-scroll-set">${cellsHtml}</div>`;
 }
 
 // ===== TRIP WIRE MONITOR =====
