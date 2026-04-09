@@ -127,6 +127,8 @@
 
 **E.12** — 12 recognized intraday setups (from Flow Playbook): Small Initial Balance, Monday Range Sweep, Asian Liquidity Trap, Round Number Reversal, Fast Spike + Trapped Delta, Wick Fill Reversal/Targeting, Trapped Trader Reversal, London Range Trap, Premarket High/Low Sweep, Inside Day, Engulfing Reversal. Each has specific context requirements. Citing the setup name in committee analysis helps Nick pattern-match.
 
+**E.13** — Single-name stock pre-screen: Before the committee evaluates any individual stock (not ETF), the Fundamental Health Gate (Section G) must run. If the stock scores FAIL, auto-substitute the sector ETF. If CAUTION, proceed but with mandatory risk disclosure. This prevents the committee from wasting time analyzing a fundamentally broken vehicle for an otherwise sound thesis. See G.01–G.07 for full gate rules.
+
 ---
 
 ## Section R: Risk Management
@@ -345,8 +347,102 @@
 
 **I.20** — If a data source fails to inject (timeout, API error), the context will simply be missing that section — there will be no error message visible to you. If you notice that data you'd normally expect (e.g., UW flow, technical snapshot, portfolio context) is absent, note the gap in your analysis rather than proceeding as if everything is fine.
 
+### Fundamental Data (for single-name stocks)
+
+**I.21** — **Analyst consensus (30-day window):** Recent analyst upgrades, downgrades, and price target changes. Direction of consensus matters more than the target number. 2+ downgrades in 30 days is a mandatory disclosure to the committee. Currently sourced via web search; future automation via scraper.
+
+**I.22** — **Last quarter earnings quality:** EPS actual vs. consensus, revenue actual vs. consensus, magnitude of miss/beat. A miss exceeding 20% is a red flag. Currently available from FMP (already integrated) via `/api/chronos/calendar` earnings data.
+
+**I.23** — **Recent 8-K material events (90 days):** Impairments, facility closures/idlings, management departures, restatements, DOJ/SEC investigations. These are company-specific landmines that can overwhelm any sector thesis. Currently requires manual check of SEC EDGAR; future automation via RSS feed.
+
+**I.24** — **Relative performance vs. sector ETF (60 days):** If a stock is underperforming its sector ETF by >10% over 60 days, the market knows something company-specific that the sector thesis doesn't capture. Calculable from Polygon snapshot data (already in stack).
+
+**I.25** — **Insider transactions (90 days):** Net insider buying vs. selling. Net insider selling >$1M on a stock the committee is recommending long = red flag. Management knows about facility closures before 8-Ks. Currently requires manual check of OpenInsider.com or SEC Form 4.
+
+**I.26** — **Short interest:** High short interest on a stock being recommended long is a warning — informed money has identified problems. Not a hard block (short squeezes exist), but must be disclosed.
+
 ---
 
-*Last updated: 2026-04-01*
+## Section G: Fundamental Health Gate
+
+> **Purpose:** Prevent the committee from recommending a fundamentally broken company as the vehicle for a sound sector/macro thesis. The MOS trade (April 2026) was the catalyst: the ag/fertilizer thesis was correct, but MOS had three analyst downgrades, a DOJ probe, a 55% EPS miss, and a $400M impairment — none of which were checked. The gate catches these before the committee wastes time analyzing a bad vehicle.
+>
+> **Scope:** Applies to ALL individual stock recommendations. Does NOT apply to ETFs, indices, or commodities — these don't have company-specific risk.
+
+**G.01** — The Fundamental Health Gate runs BEFORE the committee evaluates any single-name stock. If the ticker is an ETF (SPY, XLF, HYG, SMH, DBA, etc.), skip the gate entirely. If it's an individual company (MOS, TSLA, BX, AAPL, etc.), the gate is mandatory.
+
+**G.02** — Three-tier gate scoring:
+
+**PASS — proceed to committee normally:**
+- No analyst downgrades in 30 days
+- Last EPS within 15% of consensus
+- No active DOJ/SEC/FTC investigations
+- No 8-K impairments >5% of market cap in 90 days
+- Stock outperforming or within 5% of its sector ETF over 60 days
+- No net insider selling >$500K in 90 days
+
+**CAUTION — committee sees it but with mandatory risk flag in output:**
+- 1 analyst downgrade in 30 days
+- Last EPS miss 15–30%
+- Stock underperforming sector ETF by 5–15% over 60 days
+- Insider net selling $500K–$2M in 90 days
+- Short interest >15% of float
+
+**FAIL — auto-substitute the sector ETF; committee analyzes the ETF instead:**
+- 2+ analyst downgrades in 30 days
+- Last EPS miss >30%
+- Active DOJ/SEC/FTC investigation
+- 8-K impairment >10% of market cap in 90 days
+- Stock underperforming sector ETF by >15% over 60 days
+
+**G.03** — Gate override protocol: A FAIL can be overridden, but requires: (1) PIVOT explicitly approves the override with documented reasoning, (2) position size is halved (mandatory), (3) the notes field on the position records "Gate FAIL overridden: [reason]." Overrides are tracked — if they consistently lose money, the gate should be tightened.
+
+**G.04** — Example override scenario: A stock scores FAIL due to 3 analyst downgrades but PYTHIA identifies a completed distribution auction with capitulation volume and a bullish value area migration beginning. PIVOT can override because the downgrades represent consensus that is now fully priced in, and the structural evidence supports a reversal. This is a valid contrarian setup — but at half size.
+
+**G.05** — ETF default principle: When the committee wants to express a sector or macro thesis, the DEFAULT recommendation should be the sector ETF unless there is a specific, documented reason to use a single-name stock. "More upside potential" alone is insufficient. The single name must PASS the Fundamental Health Gate AND PYTHIA must confirm the auction supports the direction.
+
+**G.06** — Common ETF substitutions:
+- Fertilizer/Agriculture thesis → DBA (commodity prices) or MOO (agribusiness equities), not MOS or NTR
+- Bank/financial stress thesis → XLF (sector) or KRE (regional banks), not individual bank stocks
+- Software/cloud weakness thesis → IGV (expanded tech-software), not individual SaaS names
+- Semiconductor thesis → SMH (VanEck Semis), not individual chip stocks
+- Oil/energy thesis → USO (crude) or XLE (energy equities), not individual drillers
+- Credit stress thesis → HYG (high yield), not individual bond issuers
+- Consumer weakness thesis → XLY (consumer discretionary), not individual retailers
+
+**G.07** — Exceptions to ETF default: A single-name stock may be preferred over the sector ETF when: (1) the thesis is company-specific (e.g., a specific earnings catalyst, management change, or legal outcome), (2) the ETF doesn't exist or is too diluted (e.g., no clean private-credit ETF for the BX thesis), (3) options liquidity on the ETF is poor, or (4) the single name has materially better risk/reward due to higher beta or tighter correlation with the thesis.
+
+---
+
+## Section H: Pythia's Structural Confirmation Protocol
+
+> **Purpose:** Define what PYTHIA contributes to every committee review and when her analysis is the tiebreaker. PYTHIA was added to the committee to prevent the MOS-type failure — she reads whether the market's auction process confirms or denies the thesis, regardless of what the headlines, analysts, or macro thesis say.
+
+**H.01** — Committee speaking order: TORO → URSA → PYTHIA → TECHNICALS → PIVOT. PYTHIA speaks after the bull and bear cases are presented so she can provide structural confirmation or denial of each. She is the bridge between thesis (TORO/URSA) and execution (TECHNICALS/PIVOT).
+
+**H.02** — PYTHIA's mandatory output for every single-name stock evaluation:
+
+1. **Auction state:** Is this ticker currently in a balance (bracket/rotation) or imbalance (trending)? A balanced market favors mean-reversion plays. An imbalanced market favors trend-following. The committee must know which state it's operating in before recommending a direction.
+
+2. **Value area migration (3–5 sessions):** Is value migrating up, down, or sideways? Upward migration = buyers controlling the auction, supports TORO. Downward migration = sellers controlling the auction, supports URSA. Sideways = indecision, wait for resolution or play the range.
+
+3. **Structural acceptance vs. rejection:** Is price being accepted at current levels (building TPOs, widening value area, increasing time at price) or rejected (single prints, excess tails, poor highs/lows being created)? Acceptance confirms the current move. Rejection suggests reversal.
+
+4. **Structural inflection level:** The specific price level where the auction character would change. Example: "Value migration reverses if MOS builds a full session's value above $29 (March VAL). Until that happens, the auction favors sellers." This gives PIVOT and Nick a concrete invalidation point.
+
+5. **Unfinished business:** Where are the poor highs/lows and single prints that price is likely to revisit? These become natural targets for the trade and define where stops/exits should be placed.
+
+**H.03** — PYTHIA's tiebreaker role: When TORO and URSA present equally plausible cases, PYTHIA's auction state determines the committee's lean. If the auction confirms the bull case (upward value migration, buyer acceptance), the committee leans bullish. If the auction confirms the bear case (downward migration, seller control), the committee leans bearish. PIVOT always has final say, but PYTHIA's structural read carries heavy weight in ties.
+
+**H.04** — PYTHIA's veto authority: If PYTHIA identifies a clear structural contradiction — the committee is recommending a long trade but value is migrating sharply lower with no structural support — she should explicitly flag this as a "structural veto." PIVOT can still override, but must document the reasoning. This is stronger than a caution; it's PYTHIA saying "the market is telling you this is wrong."
+
+**H.05** — Data limitations (current): PYTHIA does not have automated TPO/Market Profile data injected into her context. She relies on: (1) Nick sharing MP levels from TradingView when asked, (2) inferred structure from price action and volume data that IS available (Polygon daily bars, relative performance), (3) general auction theory principles applied to available data. As automation improves (TradingView webhooks for MP levels), PYTHIA's reads will become more precise.
+
+**H.06** — When PYTHIA is less useful: For ETF-level trades (SPY, HYG, XLF), PYTHIA's value is in confirming the macro directional thesis via the ETF's auction structure. For single-name stocks, PYTHIA's value is much higher because she can identify company-specific distribution/accumulation that other agents miss.
+
+---
+
+*Last updated: 2026-04-09*
 *Source materials: 27 Stable education docs, playbook_v2.1.md, approved-strategies/, approved-bias-indicators/*
-*Total rules: 109 discrete numbered principles across 11 sections*
+*Total rules: 130 discrete numbered principles across 13 sections (M, F, V, L, E, T, B, P, A, D, C, I data, G gate, H pythia)*
+*Changelog: 2026-04-09 — Added Section G (Fundamental Health Gate), Section H (Pythia Structural Confirmation Protocol), and I.21–I.26 (fundamental data requirements). Driven by MOS post-mortem: committee recommended a single-name stock without checking company fundamentals.*
