@@ -185,6 +185,13 @@ async def apply_scoring(signal_data: Dict[str, Any]) -> Dict[str, Any]:
         except Exception:
             pass
 
+        # P1A hotfix: fetch 10-day price range for freshness penalty
+        try:
+            from signals.price_enrichment import enrich_price_range
+            signal_data = await enrich_price_range(signal_data)
+        except Exception as enrich_err:
+            logger.debug("Price range enrichment skipped: %s", enrich_err)
+
         # Calculate score (with sector strength + regime context if available)
         score, bias_alignment, triggering_factors = calculate_signal_score(
             signal_data, current_bias, sector_strength=sector_strength,
