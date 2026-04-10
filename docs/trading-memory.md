@@ -1,25 +1,80 @@
 # TRADING MEMORY — Pandora's Box / Olympus Committee
 # Last updated: April 10, 2026
 # Location: C:\trading-hub\docs\trading-memory.md
-# Rule: Check and update this file whenever trades or macro conditions are discussed.
+# Rule: Read this file before ANY trading discussion, committee review, or position analysis.
+#       Update it whenever trades open/close or macro conditions change.
+
+---
+
+## ⏰ TIME AWARENESS (MANDATORY)
+
+**Every Claude agent must note the exact current time at the start of any trading discussion.**
+State: current time (ET and MT), market status, and days to next major catalyst.
+
+Market session windows (all Eastern Time):
+- Pre-market: 4:00-9:30 AM — analysis and planning only
+- First 30 min: 9:30-10:00 AM — noise, do NOT react to moves here
+- Prime time: 10:00 AM-11:30 AM — best execution window
+- Midday: 11:30 AM-2:00 PM — low volume, chop
+- Power hour: 3:00-4:00 PM — end-of-day flows, institutional activity
+- After hours: 4:00-8:00 PM — analysis only, thin liquidity
+- Weekend/holiday: Analysis, planning, briefs only
+
+**Why this matters:** A signal at 9:35 AM is noise. The same signal at 10:15 AM is actionable.
+Friday afternoon selloffs often continue Monday. Weekend ceasefire news can gap positions.
+Always frame analysis in the context of WHEN it's happening.
+
+---
+
+## ⚠️ TRIP WIRE STATUS (check every session)
+
+Close ALL shorts if ANY TWO hit simultaneously:
+1. SPX reclaims 200 DMA ~6,600 for 2 consecutive closes — NOT FIRED
+2. Brent below $95 — ✓ FIRED (Apr 8)
+3. Ceasefire + Hormuz reopening — ✓ FIRED (fragile, Iran demands unlikely met)
+4. VIX below 20 for 48 hours — NOT FIRED (VIX back above 20 as of Apr 10)
+
+**STATUS: 2 of 4 fired. Nick has NOT acted. Ceasefire fragile.**
+**RULE: If a 3rd trip wire fires during ANY conversation, FLAG IT IMMEDIATELY.**
+
+---
+
+## 🧠 NICK'S BEHAVIORAL PATTERNS (actively counter these)
+
+1. **Right on direction, late on exits.** Enforced by the <21 DTE profit-taking rule.
+2. **Holds winners too long hoping for perfection.** Counter: take 60-70% of max and redeploy.
+3. **Generates too many new trade ideas when capital frees up.** Counter: evaluate existing positions FIRST. Ask "should you add to a current position instead?"
+4. **Overthinks and gets off task.** If Nick is spiraling, ask a sharp grounding question.
+
+---
+
+## 🚫 DON'TS (hard rules for every discussion)
+
+- Don't open new positions without checking existing book first
+- Don't trade ADRs or illiquid names with wide bid-ask spreads (>20% of ask)
+- Don't short into mechanical flow events (pension rebalance, OpEx, collar roll)
+- Don't hold Bucket 2 losers past 3 trading days
+- Don't buy watchlist names into gap-up rally days
+- Don't chase — if entry is >2% past the signal price, the trade is gone
+- Don't ignore trip wires — if 2+ fire, the thesis may be invalidating
 
 ---
 
 ## CURRENT POSITIONS (update whenever trades open/close)
 
 ### Robinhood — Bearish Book (~$1,123 deployed)
-- HYG $76/$74 put x3 Jun18 — $195 risk / $7,510 max (HOME RUN — credit crisis thesis)
-- PLTR $60/$50 put x1 Jan27 — $77 risk (LEAPS, AI valuation reset, fire-and-forget)
-- XLY $100/$90 put x2 Jun18 — $300 risk (consumer discretionary bear)
-- GLD $425/$420 put x2 May1 — $282 risk (gold pullback, re-entry setup for Fidelity GDX tranche)
-- TSLA $240/$230 put x1 Jun18 — $59 risk
-- BX $95/$85 put x1 May15 — $110 risk (alt manager stress, EARNINGS APR 17)
-- JETS $24/$20 put x2 May15 — $100 risk (airlines + oil + consumer, cut if no movement by late Apr)
+- HYG $76/$74 put x3 Jun18 — $195 risk / $7,510 max — HOME RUN. Thesis: private credit contagion (Quinn Step 2-3) cracks high-yield bonds. HYG broke $80 on Apr 10.
+- PLTR $60/$50 put x1 Jan27 — $77 risk — LEAPS. Thesis: AI valuation reset as macro deteriorates. Fire-and-forget.
+- XLY $100/$90 put x2 Jun18 — $300 risk — Thesis: consumer exhaustion (savings rate 4.0%, lowest since 2008). Discretionary spending contracts.
+- GLD $425/$420 put x2 May1 — $282 risk — Thesis: gold overextended near ATH, pullback setup. Pairs with Fidelity GDX tranche (buy shares after gold pulls back).
+- TSLA $240/$230 put x1 Jun18 — $59 risk — Thesis: broad market correction hits high-multiple names hardest.
+- BX $95/$85 put x1 May15 — $110 risk — Thesis: Blackstone is ground zero for private credit stress. EARNINGS APR 17.
+- JETS $24/$20 put x2 May15 — $100 risk — Thesis: elevated oil + consumer weakening + airlines overextended. Cut if no movement by late Apr.
 
 ### Robinhood — Bullish Book (~$435 deployed)
-- IBIT $43/$47 call x3 Apr20 — $114 risk (BTC relative strength, HARD EXIT Wed Apr 15 if <$42)
-- NEXT $8/$10 call x3 May15 — $105 risk (LNG/Hormuz thesis, committee approved, EARNINGS May 5)
-- DBA $29/$34 call x3 Oct16 — $216 risk (ag supply disruption, 6 months runway, no management needed)
+- IBIT $43/$47 call x3 Apr20 — $114 risk — Thesis: BTC showing relative strength vs equities in chop. HARD EXIT Wed Apr 15 if <$42.
+- NEXT $8/$10 call x3 May15 — $105 risk — Thesis: US LNG exporter, direct Hormuz beneficiary. "Asia wants more US LNG." Committee approved. EARNINGS May 5.
+- DBA $29/$34 call x3 Oct16 — $216 risk — Thesis: ag supply disruption from Hormuz (urea/fertilizer). 6 months runway. No management needed.
 
 ### Fidelity Roth IRA (~$8,500)
 - Tranche 1 FILLED: JEPI + EFA
@@ -31,6 +86,13 @@
 ### Closed/Expired
 - DAL $60/$56 put — expired Apr 10 worthless
 - UNG $15/$20 call x6 — expired Apr 17 worthless
+
+---
+
+## WATCHLIST
+- XLV: Healthcare sector ETF — defensive + AI exposure. Wait for clean pullback + hub signal with new scoring.
+- GDX/NEM: Gold miners for Fidelity Roth Tranche 2. Trigger: gold $4,400-4,500 holds 3 days.
+- URA: Uranium ETF for Fidelity Roth Tranche 3. Trigger: pullback to $40-42.
 
 ---
 
@@ -67,77 +129,66 @@
 
 ---
 
-## WATCHLIST
-- XLV: Healthcare sector ETF — defensive + AI exposure. Wait for clean pullback + hub signal with new scoring.
-- GDX/NEM: Gold miners for Fidelity Roth Tranche 2. Trigger: gold $4,400-4,500 holds 3 days.
-- URA: Uranium ETF for Fidelity Roth Tranche 3. Trigger: pullback to $40-42.
+## 🔮 PYTHIA READING GUIDE (for interpreting market profile data)
+
+When Nick shares a Pythia chart or profile data, here's how to read it:
+- **VAH/VAL/POC**: Value Area High, Low, and Point of Control. Where 70% of volume traded.
+- **VA migration "higher"**: Today's value area is above yesterday's — bullish, institutions accepting higher prices
+- **VA migration "lower"**: Value area shifting down — bearish, distribution
+- **VA migration "overlapping"**: Neutral, consolidating
+- **Poor Low (PL)**: >5% of session volume at the low — sellers leaning, bearish for longs. A healthy low has LITTLE volume (clean rejection).
+- **Poor High (PH)**: >5% of volume at the high — buyers leaning, bearish for shorts
+- **IB (Initial Balance)**: First hour range (9:30-10:30 ET). IB-BO = breakout above IB high (bullish). IB-BD = breakdown below IB low (bearish).
+- **HiVol**: Above-average volume. Increases confidence in any profile signal.
+- **Wide VA (>3% of price)**: No institutional consensus. Stock in discovery mode — signals less reliable.
+- **Tight VA (<1% of price)**: Strong consensus. Signals more trustworthy.
+
+---
+
+## TRADING RULES
+
+### Two-Bucket Strategy
+- **Bucket 1** = Thesis positions (longer-dated, hold for correction/credit crisis)
+- **Bucket 2** = Tactical momentum trades (3-5 day holds, 50-100%+ targets, max 2 open at a time, max $200-300 each, cut if not profitable in 3 days)
+
+### Short-Dated Position Rule (<21 DTE)
+Take profits at 60-70% of max value. Don't hold for perfection.
+
+### Positioning Awareness
+Check for mechanical flow events before opening short-dated positions: quarter-end pension rebalancing, JPM JHEQX collar roll (quarterly), monthly OpEx pin risk, VIX expiration.
+
+### Core Principle (stonXBT)
+"Trade the physical reality, not the tweets. Ships either transit or they don't." Focus on physical supply chain confirmation, not headlines.
 
 ---
 
 ## EXIT RULES
 - <21 DTE: Take profits at 60-70% of max value
 - Bucket 2 tactical: Cut if not profitable in 3 trading days
-- Trip wires (close ALL shorts if ANY TWO hit simultaneously):
-  1. SPX reclaims 200 DMA ~6,600 for 2 consecutive closes
-  2. Brent below $95 ✓ FIRED
-  3. Ceasefire + Hormuz reopening ✓ FIRED (fragile)
-  4. VIX below 20 for 48 hours
-- NOTE: 2 of 4 trip wires have fired. Nick has NOT acted yet. Ceasefire fragile.
-
----
-
-## MACRO THESIS SNAPSHOT (update weekly)
-- Quinn Thompson Steps 1-3 confirmed. Step 3 auction dysfunction confirmed Apr 8.
-- Ceasefire announced Apr 8 but fragile — Iran demands unlikely to be met
-- Oil crashed $112→$94 on ceasefire. US Gulf exports at record 4.9M b/d
-- GDP 4.4%→0.5% (stagflation). Personal savings rate 4.0% (2008 crisis levels)
-- HYG broke $80 on Apr 10 (credit stress emerging)
-- VIX back above 20
-
-
----
-
-## TRADING RULES (reference for all committee reviews)
-
-### Two-Bucket Strategy
-- **Bucket 1** = Thesis positions (longer-dated, hold for correction/credit crisis)
-- **Bucket 2** = Tactical momentum trades (3-5 day holds, 50-100%+ targets, max 2 open at a time, max $200-300 each, cut if not profitable in 3 days). Entries driven by UW real-time flows + hub signals.
-
-### Short-Dated Position Rule (<21 DTE)
-Take profits at 60-70% of max value. One tweet can erase days of gains. Bank winners, redeploy into longer-dated positions. Counters Nick's known weakness: right on direction, late on exits.
-
-### Positioning Awareness
-Before opening/holding short-dated positions, check for mechanical flow events: quarter-end pension rebalancing (last 1-2 days of Mar/Jun/Sep/Dec), JPM JHEQX collar roll (quarterly), monthly OpEx pin risk, VIX expiration. Plumbing, not signal. Don't short into mechanical bids.
-
-### Price Verification
-Always verify current prices before discussing any trade. Use web search in claude.ai; Polygon.io or yfinance in sandboxes.
-
-### Core Principle (stonXBT)
-"Trade the physical reality, not the tweets. Ships either transit or they don't. Urea either arrives at NOLA or it doesn't." Focus on physical supply chain confirmation, not headlines.
+- Trip wires: See top of document
 
 ---
 
 ## MACRO THESIS DETAIL (update as conditions change)
 
 ### Quinn Thompson Roadmap
-Steps 1-3 confirmed. Step 3 auction dysfunction confirmed Apr 8 (10Y "disaster"). Ceasefire + Hormuz reopening = potential disruption but fragile. GDP 4.4%→0.5% supports stagflation regardless.
+Step 1: Mag7 cash depletion (confirmed). Step 2: Private credit gating — Apollo/Ares/Blue Owl freezing redemptions (confirmed). Step 3: Failed Treasury auctions — 10Y "disaster" Apr 8, foreign private UST holders ($5.3T) with no Fed backstop (confirmed). Step 4: Semiconductor unwind — early signs (NVDA bearish flow, hyperscaler capex cuts).
 
 ### Treasury Vulnerability (Wallerstein/Clocktower)
-Foreign PRIVATE holders of USTs doubled to $5.3T since 2019 (~20% of debt). No Fed backstop (FIMA = official only). Oil-exporter SWFs facing Hormuz disruption may fire-sell. 2Y+5Y auctions both "D" grade. Structural driver behind failed auctions.
+Foreign PRIVATE holders of USTs doubled to $5.3T since 2019. No Fed backstop (FIMA = official only). Oil-exporter SWFs may fire-sell. Structural driver behind failed auctions.
 
 ### Physical vs Paper Oil
-Dubai physical was $126 vs Brent paper $112 pre-ceasefire. Gap held by SPR releases running out. Apr 8 ceasefire: oil crashed to $94. Ceasefire fragile — Iran demands unlikely to be met.
+Dubai physical was $126 vs Brent paper $112 pre-ceasefire. Apr 8 ceasefire crashed oil to $94. Ceasefire fragile. US Gulf exports at record 4.9M b/d.
 
-### Reversal Trip Wires (2 of 4 fired)
-Close ALL shorts if ANY TWO hit simultaneously:
-1. SPX reclaims 200 DMA ~6,600 for 2 consecutive closes
-2. Brent below $95 ✓ FIRED
-3. Ceasefire + Hormuz reopening ✓ FIRED (fragile)
-4. VIX below 20 for 48 hours
+### Key Macro Data Points
+- GDP: 4.4% → 0.5% (stagflation)
+- Personal savings rate: 4.0% (2nd-lowest since 2008 crisis)
+- HYG broke $80 on Apr 10
+- VIX back above 20
 
 ### Fidelity Roth Tranche Plan ($8,500, ETFs only)
 - Tranche 1 (FILLED): JEPI $750 + EFA $750
-- Tranche 2 (gold $4,400-4,500 holds 3d OR >$5,000 holds 2d): GDX $500
+- Tranche 2 (gold trigger): GDX $500
 - Tranche 3 (URA pullback $40-42): URA $500
 - Tranche 4 (SPX breaks 6,400): JEPI $750 + EFA $750
 - Tranche 5 (recession confirmed): JEPI $750 + EFA $750
