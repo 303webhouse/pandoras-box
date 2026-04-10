@@ -1,0 +1,202 @@
+// ============================================================
+// PYTHIA — Market Profile Value Area Alerts
+// Pandora's Box / Olympus Committee
+// ============================================================
+// Calculates developing daily Value Area (VAH, VAL, POC) from
+// intraday volume distribution. Fires webhook alerts when price
+// crosses VAL (potential long zone) or VAH (extension zone).
+//
+// Apply to full watchlist (200+ tickers). Set alerts per ticker:
+//   Alert 1: "Pythia VAL Cross" — price crosses below VAL
+//   Alert 2: "Pythia VAH Cross" — price crosses above VAH
+//
+// Webhook URL: https://188.245.250.2:8000/api/hermes/trigger
+// ============================================================
+
+//@version=5
+indicator("Pythia Market Profile", overlay=true, max_bars_back=500)
+
+// === INPUTS ===
+sessionType     = input.string("RTH", "Session", options=["RTH", "ETH"])
+numBins         = input.int(50, "Price bins", minval=20, maxval=100)
+valueAreaPct    = input.float(70.0, "Value area %", minval=50, maxval=90) / 100.0
+showLabels      = input.bool(true, "Show VAH/VAL/POC labels")
+showFill        = input.bool(true, "Fill value area")
+alertCooldown   = input.int(60, "Alert cooldown (bars)", minval=1)
+
+// === SESSION DETECTION ===
+
+rthSession = not na(time(timeframe.period, "0930-1600", "America/New_York"))
+ethSession = not na(time(timeframe.period, "0000-2359", "America/New_York"))
+inSession  = sessionType == "RTH" ? rthSession : ethSession
+
+// Detect new session start
+isNewSession = inSession and not inSession[1]
+
+// === VOLUME PROFILE CALCULATION ===
+// Build volume-at-price distribution for the current session
+// by bucketing each bar's volume into the price bin it falls in
+
+var float sessionHigh = na
+var float sessionLow  = na
+var float[] volBins    = array.new_float(numBins, 0.0)
+var float binSize      = na
+
+// Reset on new session
+if isNewSession
+    sessionHigh := high
+    sessionLow  := low
+    volBins     := array.new_float(numBins, 0.0)
+
+// Update session range
+if inSession
+    sessionHigh := math.max(nz(sessionHigh, high), high)
+    sessionLow  := math.min(nz(sessionLow, low), low)
+
+// Distribute volume into bins
+if inSession and not na(sessionHigh) and not na(sessionLow)
+    range_ = sessionHigh - sessionLow
+    if range_ > 0
+        binSize := range_ / numBins
+        // Determine which bin this bar's typical price falls into
+        typPrice = hlc3
+        binIdx = math.floor((typPrice - sessionLow) / binSize)
+        binIdx := math.max(0, math.min(numBins - 1, binIdx))
+        // Add this bar's volume to the appropriate bin
+        curVol = array.get(volBins, binIdx)
+        array.set(volBins, binIdx, curVol + volume)
+
+// === FIND POC (bin with highest volume) ===
+var int   pocBin  = 0
+var float pocVol  = 0.0
+var float totalVol = 0.0
+
+if inSession and not na(binSize) and binSize > 0
+    pocVol  := 0.0
+    totalVol := 0.0
+    for i = 0 to numBins - 1
+        bv = array.get(volBins, i)
+        totalVol += bv
+        if bv > pocVol
+            pocVol := bv
+            pocBin := i
+
+// === VALUE AREA: expand from POC until valueAreaPct of volume captured ===
+var int valBin = 0
+var int vahBin = 0
+
+if inSession and totalVol > 0 and not na(binSize) and binSize > 0
+    vaTarget = totalVol * valueAreaPct
+    vaVol    = array.get(volBins, pocBin)
+    loBin    = pocBin
+    hiBin    = pocBin
+
+    // Expand one bin at a time, picking the side with more volume
+    loopLimit = numBins
+    count = 0
+    while vaVol < vaTarget and count < loopLimit
+        count += 1
+        loNext = loBin > 0 ? array.get(volBins, loBin - 1) : 0.0
+        hiNext = hiBin < numBins - 1 ? array.get(volBins, hiBin + 1) : 0.0
+        if loNext >= hiNext and loBin > 0
+            loBin -= 1
+            vaVol += loNext
+        else if hiBin < numBins - 1
+            hiBin += 1
+            vaVol += hiNext
+        else
+            break
+
+    valBin := loBin
+    vahBin := hiBin
+
+// === CONVERT BINS TO PRICES ===
+pocPrice = not na(binSize) and binSize > 0 ? sessionLow + (pocBin + 0.5) * binSize : na
+valPrice = not na(binSize) and binSize > 0 ? sessionLow + valBin * binSize : na
+vahPrice = not na(binSize) and binSize > 0 ? sessionLow + (vahBin + 1) * binSize : na
+
+// === PLOT ===
+pocPlot = plot(inSession ? pocPrice : na, "POC", color=color.new(color.yellow, 30),
+     linewidth=2, style=plot.style_circles)
+valPlot = plot(inSession ? valPrice : na, "VAL", color=color.new(color.green, 40),
+     linewidth=1, style=plot.style_stepline)
+vahPlot = plot(inSession ? vahPrice : na, "VAH", color=color.new(color.red, 40),
+     linewidth=1, style=plot.style_stepline)
+
+// Fill between VAL and VAH
+fill(valPlot, vahPlot, color=showFill ? color.new(color.blue, 90) : na,
+     title="Value Area")
+
+// Labels (right edge only)
+if showLabels and barstate.islast and inSession
+    lPoc = label.new(bar_index + 2, pocPrice, "POC " + str.tostring(pocPrice, format.mintick),
+         style=label.style_label_left, color=color.yellow, textcolor=color.black, size=size.small)
+    lVal = label.new(bar_index + 2, valPrice, "VAL " + str.tostring(valPrice, format.mintick),
+         style=label.style_label_left, color=color.green, textcolor=color.white, size=size.small)
+    lVah = label.new(bar_index + 2, vahPrice, "VAH " + str.tostring(vahPrice, format.mintick),
+         style=label.style_label_left, color=color.red, textcolor=color.white, size=size.small)
+    label.delete(lPoc[1])
+    label.delete(lVal[1])
+    label.delete(lVah[1])
+
+// === ALERT CONDITIONS ===
+// Track bars since last alert to enforce cooldown
+var int barsSinceValAlert = 999
+var int barsSinceVahAlert = 999
+barsSinceValAlert += 1
+barsSinceVahAlert += 1
+
+// VAL cross: price crosses below Value Area Low
+valCrossBelow = inSession and not na(valPrice) and ta.crossunder(close, valPrice)
+valAlert = valCrossBelow and barsSinceValAlert > alertCooldown
+
+// VAH cross: price crosses above Value Area High
+vahCrossAbove = inSession and not na(vahPrice) and ta.crossover(close, vahPrice)
+vahAlert = vahCrossAbove and barsSinceVahAlert > alertCooldown
+
+if valAlert
+    barsSinceValAlert := 0
+if vahAlert
+    barsSinceVahAlert := 0
+
+// === WEBHOOK ALERT MESSAGES ===
+// JSON payload for Hermes VPS endpoint
+valMsg = '{"source":"pythia","event":"val_cross_below",' +
+     '"ticker":"' + syminfo.ticker + '",' +
+     '"price":' + str.tostring(close) + ',' +
+     '"val":' + str.tostring(valPrice, format.mintick) + ',' +
+     '"vah":' + str.tostring(vahPrice, format.mintick) + ',' +
+     '"poc":' + str.tostring(pocPrice, format.mintick) + ',' +
+     '"interpretation":"Price at or below Value Area Low - potential institutional buying zone"}'
+
+vahMsg = '{"source":"pythia","event":"vah_cross_above",' +
+     '"ticker":"' + syminfo.ticker + '",' +
+     '"price":' + str.tostring(close) + ',' +
+     '"val":' + str.tostring(valPrice, format.mintick) + ',' +
+     '"vah":' + str.tostring(vahPrice, format.mintick) + ',' +
+     '"poc":' + str.tostring(pocPrice, format.mintick) + ',' +
+     '"interpretation":"Price above Value Area High - thin volume extension zone"}'
+
+// Fire alerts — use alert() for dynamic webhook payloads
+if valAlert
+    alert(valMsg, alert.freq_once_per_bar)
+if vahAlert
+    alert(vahMsg, alert.freq_once_per_bar)
+
+// Visual markers on chart
+plotshape(valAlert, title="VAL Cross", location=location.belowbar,
+     style=shape.triangleup, color=color.green, size=size.small, text="VAL")
+plotshape(vahAlert, title="VAH Cross", location=location.abovebar,
+     style=shape.triangledown, color=color.red, size=size.small, text="VAH")
+
+// === INFO TABLE ===
+var table infoTbl = table.new(position.top_right, 2, 4, bgcolor=color.new(color.black, 80))
+if barstate.islast and inSession and not na(pocPrice)
+    table.cell(infoTbl, 0, 0, "PYTHIA", text_color=color.yellow, text_size=size.small)
+    table.cell(infoTbl, 1, 0, syminfo.ticker, text_color=color.white, text_size=size.small)
+    table.cell(infoTbl, 0, 1, "VAH", text_color=color.red, text_size=size.tiny)
+    table.cell(infoTbl, 1, 1, str.tostring(vahPrice, format.mintick), text_color=color.white, text_size=size.tiny)
+    table.cell(infoTbl, 0, 2, "POC", text_color=color.yellow, text_size=size.tiny)
+    table.cell(infoTbl, 1, 2, str.tostring(pocPrice, format.mintick), text_color=color.white, text_size=size.tiny)
+    table.cell(infoTbl, 0, 3, "VAL", text_color=color.green, text_size=size.tiny)
+    table.cell(infoTbl, 1, 3, str.tostring(valPrice, format.mintick), text_color=color.white, text_size=size.tiny)
