@@ -35,12 +35,20 @@ async def pythia_webhook(request: Request = None, payload: dict = None):
     vah = payload.get("vah")
     val = payload.get("val")
     poc = payload.get("poc")
+    # Rich fields from Pythia v2 PineScript
+    va_migration = payload.get("va_migration")
+    poor_high = payload.get("poor_high", False)
+    poor_low = payload.get("poor_low", False)
+    volume_quality = payload.get("volume_quality")
+    ib_high = payload.get("ib_high")
+    ib_low = payload.get("ib_low")
+    interpretation = payload.get("interpretation")
 
     if not ticker:
         return {"error": "missing ticker"}
 
-    logger.info("PYTHIA event: %s %s @ %s (VAH=%s POC=%s VAL=%s)",
-                ticker, alert_type, price, vah, poc, val)
+    logger.info("PYTHIA event: %s %s @ %s (VAH=%s POC=%s VAL=%s mig=%s vol=%s)",
+                ticker, alert_type, price, vah, poc, val, va_migration, volume_quality)
 
     # Store in database
     event_id = None
@@ -49,8 +57,10 @@ async def pythia_webhook(request: Request = None, payload: dict = None):
         async with pool.acquire() as conn:
             row = await conn.fetchrow("""
                 INSERT INTO pythia_events
-                    (ticker, alert_type, price, direction, vah, val, poc, raw_payload)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                    (ticker, alert_type, price, direction, vah, val, poc,
+                     va_migration, poor_high, poor_low, volume_quality,
+                     ib_high, ib_low, interpretation, raw_payload)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
                 RETURNING id
             """,
                 ticker, alert_type,
@@ -59,6 +69,13 @@ async def pythia_webhook(request: Request = None, payload: dict = None):
                 float(vah) if vah else None,
                 float(val) if val else None,
                 float(poc) if poc else None,
+                va_migration,
+                bool(poor_high) if poor_high is not None else False,
+                bool(poor_low) if poor_low is not None else False,
+                volume_quality,
+                float(ib_high) if ib_high else None,
+                float(ib_low) if ib_low else None,
+                interpretation,
                 json.dumps(payload),
             )
             event_id = row["id"] if row else None
