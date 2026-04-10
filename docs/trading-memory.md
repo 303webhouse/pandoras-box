@@ -230,6 +230,14 @@ Dubai physical was $126 vs Brent paper $112 pre-ceasefire. Apr 8 ceasefire crash
 - HYG broke $80 on Apr 10
 - VIX back above 20
 
+### stonXBT Market Structure Read (Apr 10)
+ES (S&P futures) sitting at range vVAL (Value Area Low). "Make or break here."
+- Accept at vVAL = bias shifts upside mid-long term
+- Fail at vVAL = "back to valhalla" (sharp leg down)
+This is the key level to watch going into next week. If ES holds here and accepts,
+the bearish thesis takes a hit. If it fails, the correction accelerates and Nick's
+put book (HYG, XLY, BX, JETS, PLTR, TSLA) all benefit.
+
 ### Fidelity Roth Tranche Plan ($8,500, ETFs only)
 - Tranche 1 (FILLED): JEPI $750 + EFA $750
 - Tranche 2 (gold trigger): GDX $500
