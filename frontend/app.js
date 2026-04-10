@@ -3537,8 +3537,12 @@ function renderSignals() {
     const container = document.getElementById('tradeSignals');
 
     // Show all equity signals; exclude asset_class=CRYPTO (raw crypto pairs)
-    const allSignals = signals.equity
-        .sort((a, b) => (b.score || 0) - (a.score || 0));
+    const allSignals = [...signals.equity];
+    if (insightsSortMode === 'score') {
+        allSignals.sort((a, b) => (b.score || 0) - (a.score || 0));
+    } else {
+        allSignals.sort((a, b) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime());
+    }
 
     if (allSignals.length === 0) {
         container.innerHTML = '<p class="empty-state">No trade ideas</p>';
@@ -3686,6 +3690,13 @@ function renderGroupedSignals(groups) {
     if (insightsSortMode === 'score') {
         groups = [...groups].sort((a, b) =>
             (b.display_score || b.highest_score || 0) - (a.display_score || a.highest_score || 0));
+    } else {
+        // Time sort: most recent first
+        groups = [...groups].sort((a, b) => {
+            const tA = a.primary_signal ? new Date(a.primary_signal.timestamp || 0).getTime() : 0;
+            const tB = b.primary_signal ? new Date(b.primary_signal.timestamp || 0).getTime() : 0;
+            return tB - tA;
+        });
     }
 
     container.innerHTML = groups.map(group => {
