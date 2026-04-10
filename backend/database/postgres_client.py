@@ -1181,6 +1181,36 @@ async def init_database():
         except Exception as e:
             print(f"WARNING: signals ALTER TABLE 5 skipped: {e}")
 
+        # Pythia Market Profile events table (P4)
+        try:
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS pythia_events (
+                    id SERIAL PRIMARY KEY,
+                    ticker VARCHAR(20) NOT NULL,
+                    alert_type VARCHAR(50),
+                    price DECIMAL(10, 2),
+                    direction VARCHAR(20),
+                    vah DECIMAL(10, 2),
+                    val DECIMAL(10, 2),
+                    poc DECIMAL(10, 2),
+                    va_migration VARCHAR(20),
+                    poor_high BOOLEAN DEFAULT FALSE,
+                    poor_low BOOLEAN DEFAULT FALSE,
+                    volume_quality VARCHAR(10),
+                    ib_high DECIMAL(10, 2),
+                    ib_low DECIMAL(10, 2),
+                    interpretation TEXT,
+                    raw_payload JSONB,
+                    timestamp TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_pythia_events_ticker
+                ON pythia_events(ticker, timestamp DESC)
+            """)
+        except Exception as e:
+            print(f"WARNING: pythia_events table creation skipped: {e}")
+
         print("Database schema initialized")
 
 async def log_signal(
