@@ -438,6 +438,45 @@ def calculate_signal_score(
         "window": tod_window,
     }
 
+    # 9. Freshness penalty — penalize signals where most of the move already happened
+    freshness_penalty = 0
+    range_consumed = None
+    entry_price = signal.get('entry_price')
+    direction = signal.get('direction', '').upper()
+    metadata = signal.get('metadata') or {}
+    if isinstance(metadata, str):
+        try:
+            import json as _json
+            metadata = _json.loads(metadata)
+        except Exception:
+            metadata = {}
+    # Check for pre-computed range_consumed (from enrichment or scanner)
+    if 'range_consumed' in metadata:
+        range_consumed = float(metadata['range_consumed'])
+    elif entry_price and entry_price > 0:
+        hi = metadata.get('ten_day_high') or metadata.get('high_10d')
+        lo = metadata.get('ten_day_low') or metadata.get('low_10d')
+        if hi and lo and float(hi) > float(lo):
+            hi, lo = float(hi), float(lo)
+            rng = hi - lo
+            if direction in ('LONG', 'BUY', 'BULLISH'):
+                range_consumed = (float(entry_price) - lo) / rng
+            else:
+                range_consumed = (hi - float(entry_price)) / rng
+            range_consumed = max(0.0, min(1.0, range_consumed))
+
+    if range_consumed is not None:
+        if range_consumed > 0.85:
+            freshness_penalty = -25
+        elif range_consumed > 0.70:
+            freshness_penalty = -15
+        elif range_consumed > 0.60:
+            freshness_penalty = -8
+    triggering_factors["freshness"] = {
+        "range_consumed": round(range_consumed, 3) if range_consumed is not None else None,
+        "penalty": freshness_penalty,
+    }
+
     # =========================================================================
     # HYBRID SCORING MODEL (C1 fix)
     # Pre-alignment factors are multiplied by bias alignment.
@@ -446,7 +485,7 @@ def calculate_signal_score(
     # =========================================================================
 
     # Pre-alignment score (affected by bias multiplier)
-    pre_alignment = base_score + tech_bonus + recency_bonus + rr_bonus + tod_adjustment + catalyst_bonus
+    pre_alignment = base_score + tech_bonus + recency_bonus + rr_bonus + tod_adjustment + catalyst_bonus + freshness_penalty
     pre_alignment = max(0, pre_alignment)  # Floor at 0 before multiplying
 
     # Apply bias alignment multiplier (R1 fix: this is the ONLY place bias affects score)
@@ -474,6 +513,8 @@ def calculate_signal_score(
         "rr_bonus": rr_bonus,
         "sector_bonus": sector_bonus,
         "catalyst_bonus": catalyst_bonus,
+        "freshness_penalty": freshness_penalty,
+        "range_consumed": round(range_consumed, 3) if range_consumed is not None else None,
         "raw_score": raw_score,
         "alignment_multiplier": alignment_multiplier,
         "reversal_mode": reversal_mode,

@@ -3725,10 +3725,10 @@ function renderGroupedSignals(groups) {
             let meta = signal.metadata || {};
             if (typeof meta === 'string') { try { meta = JSON.parse(meta); } catch(e) {} }
             const isUwFlow = signal.strategy === 'UW_FLOW';
-            const stratLabel = isUwFlow ? 'UW Flow' : formatStrategyName(signal.strategy);
+            const stratLabel = isUwFlow ? 'UW Flow' : formatSignalType(signal.signal_type || signal.strategy);
             primaryHtml = `
                 <div class="insight-primary">
-                    <div class="insight-primary-label">Primary: ${stratLabel}</div>
+                    <div class="insight-primary-label">${getTimingBadge(signal.triggering_factors)}Primary: ${stratLabel}</div>
                     <div class="insight-levels">
                         <span>${meta.premium_display || (meta.total_premium ? '$' + (typeof formatLargeNumber === 'function' ? formatLargeNumber(meta.total_premium) : meta.total_premium) : '-')}</span>
                         <span class="${(meta.flow_sentiment || '').toLowerCase()}">${meta.flow_sentiment || '-'}</span>
@@ -3759,7 +3759,7 @@ function renderGroupedSignals(groups) {
         } else {
             primaryHtml = `
                 <div class="insight-primary">
-                    <div class="insight-primary-label">Primary: ${formatStrategyName(signal.strategy)} ${signal.timeframe || ''}</div>
+                    <div class="insight-primary-label">${getTimingBadge(signal.triggering_factors)}Primary: ${formatSignalType(signal.signal_type || signal.strategy)} ${signal.timeframe || ''}</div>
                     <div class="insight-levels">
                         <span>Entry: ${formatPrice(signal.entry_price)}</span>
                         <span>Stop: ${formatPrice(signal.stop_loss)}</span>
@@ -3894,9 +3894,27 @@ function formatSignalType(raw) {
         'EXHAUSTION_TOP': 'Exhaustion Top', 'EXHAUSTION_BOTTOM': 'Exhaustion Bottom',
         'BULL_WALL': 'Phalanx Bull', 'BEAR_WALL': 'Phalanx Bear',
         'NEMESIS_LONG': 'Nemesis Long', 'NEMESIS_SHORT': 'Nemesis Short',
+        // CTA Scanner sub-strategies
+        'PULLBACK_ENTRY': 'Pullback Entry', 'RESISTANCE_REJECTION': 'Resistance Rejection',
+        'TRAPPED_SHORTS': 'Trapped Shorts', 'TRAPPED_LONGS': 'Trapped Longs',
+        'TWO_CLOSE_VOLUME': 'Two Close Volume', 'GOLDEN_TOUCH': 'Golden Touch',
+        'DEATH_CROSS': 'Death Cross', 'BEARISH_BREAKDOWN': 'Bearish Breakdown',
+        'Session_Sweep': 'Session Sweep',
+        'FOOTPRINT_SHORT': 'Footprint Short', 'FOOTPRINT_LONG': 'Footprint Long',
     };
     if (names[raw]) return names[raw];
     return raw.replace(/[_-]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function getTimingBadge(triggeringFactors) {
+    if (!triggeringFactors || Array.isArray(triggeringFactors)) return '';
+    const calc = triggeringFactors.calculation || {};
+    const rc = calc.range_consumed;
+    if (rc === undefined || rc === null) return '';
+    if (rc < 0.33) return '<span class="timing-dot early" title="Early catch (' + Math.round(rc * 100) + '% of range)">&#x25CF;</span>';
+    if (rc < 0.60) return '<span class="timing-dot ontime" title="On time (' + Math.round(rc * 100) + '% of range)">&#x25CF;</span>';
+    if (rc < 0.80) return '<span class="timing-dot late" title="Late (' + Math.round(rc * 100) + '% of range)">&#x25CF;</span>';
+    return '<span class="timing-dot very-late" title="Very late (' + Math.round(rc * 100) + '% of range done)">&#x25CF;</span>';
 }
 
 function formatLargeNumber(n) {
@@ -4236,11 +4254,15 @@ function createSignalCard(signal) {
     // Handle multiple strategies (deduplicated signals)
     let strategiesHtml = '';
     if (signal.strategies && signal.strategies.length > 1) {
-        // Multiple strategies - show all
-        strategiesHtml = signal.strategies.map(s => wrapWithKbLink(formatStrategyName(s))).join(' + ');
+        strategiesHtml = signal.strategies.map(s => wrapWithKbLink(formatSignalType(s))).join(' + ');
     } else {
-        // Single strategy
-        strategiesHtml = wrapWithKbLink(formatStrategyName(signal.strategy));
+        // Show sub-strategy (signal_type) as primary, parent strategy as secondary
+        const subType = formatSignalType(signal.signal_type || signal.strategy);
+        const parentStrat = formatStrategyName(signal.strategy);
+        strategiesHtml = wrapWithKbLink(subType);
+        if (subType !== parentStrat && signal.signal_type && signal.strategy) {
+            strategiesHtml += ` <span class="signal-parent-strategy">${parentStrat}</span>`;
+        }
     }
     
     const typeWithKb = wrapWithKbLink(typeLabel);
@@ -4274,7 +4296,7 @@ function createSignalCard(signal) {
             
             <div class="signal-header">
                 <div>
-                    <div class="signal-type ${signal.signal_type || ''}">${typeWithKb}${counterTrendTag}${contrarianTag}</div>
+                    <div class="signal-type ${signal.signal_type || ''}">${getTimingBadge(signal.triggering_factors)}${typeWithKb}${counterTrendTag}${contrarianTag}</div>
                     <div class="signal-strategy">${strategiesHtml}</div>
                     ${(() => {
                         const triggers = signal.triggering_factors || (signal.primary_signal && signal.primary_signal.triggering_factors) || [];
