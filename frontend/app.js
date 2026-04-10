@@ -3928,7 +3928,11 @@ function formatSignalType(raw) {
 }
 
 function getTimingBadge(triggeringFactors) {
-    if (!triggeringFactors || Array.isArray(triggeringFactors)) return '';
+    if (!triggeringFactors) return '';
+    if (typeof triggeringFactors === 'string') {
+        try { triggeringFactors = JSON.parse(triggeringFactors); } catch(e) { return ''; }
+    }
+    if (Array.isArray(triggeringFactors)) return '';
     const calc = triggeringFactors.calculation || {};
     const rc = calc.range_consumed;
     if (rc === undefined || rc === null) return '';

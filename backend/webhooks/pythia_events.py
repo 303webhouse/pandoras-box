@@ -29,7 +29,7 @@ async def pythia_webhook(request: Request = None, payload: dict = None):
     if payload is None:
         payload = await request.json()
     ticker = (payload.get("ticker") or "").upper()
-    alert_type = payload.get("alert_type") or payload.get("signal_type") or "unknown"
+    alert_type = payload.get("alert_type") or payload.get("event") or payload.get("signal_type") or "unknown"
     price = payload.get("price") or payload.get("close")
     direction = payload.get("direction") or ""
     vah = payload.get("vah")
