@@ -11032,9 +11032,77 @@ body[data-mode="analytics"] .analytics-shell {
     background: var(--card-bg, rgba(30, 30, 40, 0.8));
     border: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
     border-radius: 8px;
-    padding: 12px 16px;
-    margin-bottom: 8px;
+    padding: 8px 12px;
+    margin-bottom: 6px;
     transition: opacity 0.3s, transform 0.3s;
+}
+
+/* Compact two-line card layout (P3B) */
+.insight-compact { cursor: pointer; }
+.insight-compact:hover { opacity: 0.85; }
+
+.insight-line1 {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+}
+
+.insight-line1 .insight-ticker { font-weight: 700; font-size: 14px; }
+.insight-dir-arrow { font-weight: 700; font-size: 14px; }
+.insight-dir-arrow.direction-long { color: #7CFF6B; }
+.insight-dir-arrow.direction-short { color: #FF6B35; }
+.insight-entry { color: var(--text-secondary); font-family: 'Orbit', monospace; font-size: 12px; }
+.insight-line1 .insight-score { margin-left: auto; font-weight: 700; font-size: 13px; }
+
+.insight-line2 {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 2px;
+    font-size: 10px;
+    color: var(--text-secondary);
+}
+
+.insight-substrat { font-weight: 500; }
+.insight-ago { margin-left: auto; font-size: 9px; opacity: 0.7; }
+
+.conf-inline {
+    font-size: 9px;
+    font-weight: 600;
+    color: var(--accent-teal);
+    background: rgba(20, 184, 166, 0.1);
+    padding: 0 4px;
+    border-radius: 2px;
+}
+
+.squeeze-inline {
+    font-size: 8px;
+    font-weight: 700;
+    color: #ecc94b;
+    background: rgba(236, 201, 75, 0.12);
+    padding: 0 4px;
+    border-radius: 2px;
+    letter-spacing: 0.5px;
+}
+
+/* Time horizon pills (P3A) */
+.horizon-pill {
+    font-size: 9px;
+    font-weight: 600;
+    padding: 0 5px;
+    border-radius: 3px;
+    letter-spacing: 0.3px;
+}
+.horizon-sprint { color: #97C459; background: rgba(151, 196, 89, 0.12); }
+.horizon-swing { color: #85B7EB; background: rgba(133, 183, 235, 0.12); }
+.horizon-position { color: #C49BDB; background: rgba(196, 155, 219, 0.12); }
+
+/* Expandable detail section */
+.insight-detail {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border-color, rgba(255, 255, 255, 0.06));
 }
 
 .insight-header {
