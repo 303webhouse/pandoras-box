@@ -204,6 +204,14 @@ async def receive_tradingview_alert(request: Request):
         fp_data = FootprintSignal(**payload)
         return await footprint_webhook(fp_data)
 
+    # Route Pythia market profile alerts to dedicated handler
+    source = (payload.get("source") or "").lower()
+    strategy_raw = (payload.get("strategy") or "").lower()
+    alert_type = (payload.get("alert_type") or "").lower()
+    if source == "pythia" or "pythia" in strategy_raw or alert_type.startswith("pythia_"):
+        from webhooks.pythia_events import pythia_webhook
+        return await pythia_webhook(payload=payload)
+
     alert = TradingViewAlert(**payload)
 
     # Webhook secret validation

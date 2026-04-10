@@ -1954,6 +1954,23 @@ async def log_options_position(position: Dict[Any, Any]):
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_catalyst_events_tier ON catalyst_events (tier)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_catalyst_events_dismissed ON catalyst_events (dismissed)")
 
+        # Pythia Market Profile events table
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS pythia_events (
+                id SERIAL PRIMARY KEY,
+                ticker TEXT NOT NULL,
+                alert_type TEXT NOT NULL DEFAULT 'unknown',
+                price NUMERIC(12,2),
+                direction TEXT,
+                vah NUMERIC(12,2),
+                val NUMERIC(12,2),
+                poc NUMERIC(12,2),
+                raw_payload JSONB,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_pythia_events_ticker ON pythia_events (ticker, created_at DESC)")
+
         # System config table — key-value store for runtime configuration
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS system_config (

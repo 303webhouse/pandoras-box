@@ -281,6 +281,23 @@ async def apply_scoring(signal_data: Dict[str, Any]) -> Dict[str, Any]:
         except Exception:
             pass  # Flow pipeline not yet operational — expected
 
+        # P4B: Pythia market profile position cross-reference
+        try:
+            from webhooks.pythia_events import get_pythia_profile_position
+            pp_ticker = (signal_data.get("ticker") or "").upper()
+            pp_price = signal_data.get("entry_price")
+            pp_dir = (signal_data.get("direction") or "").upper()
+            if pp_ticker and pp_price and float(pp_price) > 0:
+                pp = await get_pythia_profile_position(pp_ticker, float(pp_price), pp_dir)
+                pp_bonus = pp.get("profile_bonus", 0)
+                if pp_bonus != 0:
+                    score = min(100, max(0, score + pp_bonus))
+                    triggering_factors["profile_position"] = pp
+                    logger.info("Pythia profile for %s: %s zone, %+d bonus",
+                                pp_ticker, pp.get("zone", "?"), pp_bonus)
+        except Exception as pp_err:
+            logger.debug("Pythia profile check skipped: %s", pp_err)
+
         # Update signal
         signal_data["score"] = score
         signal_data["bias_alignment"] = bias_alignment
