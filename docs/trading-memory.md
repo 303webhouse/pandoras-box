@@ -238,6 +238,15 @@ This is the key level to watch going into next week. If ES holds here and accept
 the bearish thesis takes a hit. If it fails, the correction accelerates and Nick's
 put book (HYG, XLY, BX, JETS, PLTR, TSLA) all benefit.
 
+### Fed Private Credit Probe (Apr 10, 4:47 PM ET — AFTER MARKET CLOSE)
+"FED SEEKS DETAILS ON US BANKS' EXPOSURE TO PRIVATE CREDIT FIRMS" (Walter Bloomberg)
+- $1.7T private credit market grew because it avoided bank regulation
+- Fed now investigating how much bank capital is actually embedded in private credit
+- Validates Quinn Thompson Step 2 (private credit contagion → banking system)
+- NOT YET PRICED IN — dropped after Friday close, no market reaction until Monday
+- Directly relevant to: HYG puts (credit stress), BX puts (BX reports Apr 17)
+- Key reply: "The scariest part isn't that the Fed is asking, it's what made them ask now"
+
 ### Fidelity Roth Tranche Plan ($8,500, ETFs only)
 - Tranche 1 (FILLED): JEPI $750 + EFA $750
 - Tranche 2 (gold trigger): GDX $500
