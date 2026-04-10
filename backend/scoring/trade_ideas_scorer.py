@@ -133,6 +133,35 @@ TIME_OF_DAY_PENALTIES = {
     "prime_time": 0,       # 9:45 AM - 11:30 AM ET — best window, no penalty
 }
 
+# Time horizon classification (P3A)
+_HORIZON_MAP = {
+    'TRAPPED_SHORTS': 'SPRINT', 'TRAPPED_LONGS': 'SPRINT',
+    'SELL_RIP_EMA': 'SPRINT', 'SELL_RIP_VWAP': 'SPRINT', 'SELL_RIP_EARLY': 'SPRINT',
+    'GOLDEN_TOUCH': 'SPRINT', 'Session_Sweep': 'SPRINT',
+    'SCOUT_ALERT': 'SPRINT', 'SNIPER_URSA': 'SPRINT', 'SNIPER_TAURUS': 'SPRINT',
+    'TWO_CLOSE_VOLUME': 'SWING', 'RESISTANCE_REJECTION': 'SWING',
+    'DEATH_CROSS': 'SWING', 'BEARISH_BREAKDOWN': 'SWING',
+    'HOLY_GRAIL': 'SWING', 'HOLY_GRAIL_1H': 'SWING', 'HOLY_GRAIL_15M': 'SPRINT',
+    'NEMESIS_LONG': 'SWING', 'NEMESIS_SHORT': 'SWING',
+    'EXHAUSTION_TOP': 'SPRINT', 'EXHAUSTION_BOTTOM': 'SPRINT',
+}
+
+
+def _get_time_horizon(signal_type: str, metadata: dict = None) -> str:
+    """Classify signal time horizon: SPRINT (1-3d), SWING (5-14d), POSITION (2-4w)."""
+    st = (signal_type or "").upper()
+    if st == 'PULLBACK_ENTRY':
+        anchor = ""
+        if metadata and isinstance(metadata, dict):
+            anchor = (metadata.get("anchor_level") or metadata.get("anchor") or "").lower()
+        if any(x in anchor for x in ('8ema', '8_ema', '20ema', '20_ema')):
+            return 'SPRINT'
+        elif any(x in anchor for x in ('200sma', '200_sma', '200dma', 'weekly')):
+            return 'POSITION'
+        return 'SWING'
+    return _HORIZON_MAP.get(st, 'SWING')
+
+
 # Sector priority bonuses (Olympus-approved asymmetric model)
 # Penalty > bonus by design: avoiding bad trades matters more than boosting good ones
 # Tiers based on sector rank: top 3 = leading, bottom 3 = lagging, middle 5 = neutral
@@ -496,6 +525,10 @@ def calculate_signal_score(
         "range_consumed": round(range_consumed, 3) if range_consumed is not None else None,
         "penalty": freshness_penalty,
     }
+
+    # 10. Time horizon classification (P3A)
+    time_horizon = _get_time_horizon(signal_type, metadata)
+    triggering_factors["time_horizon"] = time_horizon
 
     # =========================================================================
     # HYBRID SCORING MODEL (C1 fix)

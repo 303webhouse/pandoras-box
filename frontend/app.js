@@ -3790,35 +3790,56 @@ function renderGroupedSignals(groups) {
         if (typeof tf === 'string') { try { tf = JSON.parse(tf); } catch(e) { tf = null; } }
         const factorsHtml = renderScoreFactors(tf);
 
+        // Time horizon pill
+        const horizon = (tf && tf.time_horizon) || 'SWING';
+        const horizonLabel = horizon === 'SPRINT' ? 'Sprint (1-3d)' : horizon === 'POSITION' ? 'Position (2-4w)' : 'Swing (5-14d)';
+        const horizonClass = horizon === 'SPRINT' ? 'horizon-sprint' : horizon === 'POSITION' ? 'horizon-position' : 'horizon-swing';
+
+        // Direction arrow
+        const dirArrow = group.direction === 'LONG' ? '\u2191' : '\u2193';
+
+        // Confirming count inline
+        const confCount = group.signal_count > 1 ? `<span class="conf-inline">+${group.signal_count - 1} conf</span>` : '';
+
+        // Squeeze badge
+        const squeezeBadge = (tf && tf.squeeze && tf.squeeze.bonus > 0)
+            ? `<span class="squeeze-inline" title="Squeeze score ${tf.squeeze.composite_score}, ${tf.squeeze.squeeze_tier}">SQ</span>` : '';
+
         return `
             <div class="insight-card ${tierBorderClass}" data-ticker="${group.ticker}" data-direction="${group.direction}" data-signal-id="${signal.signal_id}" data-group-key="${group.group_key}" data-signal="${encodeURIComponent(JSON.stringify(signal))}">
-                <div class="insight-header">
-                    <div class="insight-ticker-row">
+                <div class="insight-compact" onclick="toggleInsightDetail(this)">
+                    <div class="insight-line1">
+                        ${getTimingBadge(tf)}
                         <span class="insight-ticker ticker-link" data-action="view-chart">${group.ticker}</span>
-                        <span class="insight-direction ${dirClass}">${group.direction}</span>
+                        <span class="insight-dir-arrow ${dirClass}">${dirArrow}</span>
+                        <span class="insight-entry">${formatPrice(signal.entry_price)}</span>
                         <span class="insight-score ${scoreClass}">${score}</span>
-                        ${confluenceBadge}${confirmBadge}
+                        ${positionBadge}
                     </div>
-                    <div class="insight-meta">
-                        <span class="insight-updated" title="${group.last_signal_at || group.newest_at || ''}">${getTimeAgo(group.last_signal_at || group.newest_at)}</span>
-                        <span class="insight-strategies">${group.distinct_strategy_count || group.strategies.length} ${(group.distinct_strategy_count || group.strategies.length) === 1 ? 'strategy' : 'strategies'}</span>
+                    <div class="insight-line2">
+                        <span class="insight-substrat">${formatSignalType(signal.signal_type || signal.strategy)}</span>
+                        <span class="horizon-pill ${horizonClass}">${horizonLabel}</span>
+                        ${confCount}${squeezeBadge}
+                        <span class="insight-ago">${getTimeAgo(group.last_signal_at || group.newest_at)}</span>
                     </div>
                 </div>
 
-                <div class="signal-badges">
-                    ${positionBadge}${counterBadge}${getEarningsBadgeHtml(group.ticker)}
-                </div>
+                <div class="insight-detail" style="display:none;">
+                    <div class="signal-badges">
+                        ${counterBadge}${getEarningsBadgeHtml(group.ticker)}${confluenceBadge}
+                    </div>
 
-                ${primaryHtml}
+                    ${primaryHtml}
 
-                ${confirmingHtml}
+                    ${confirmingHtml}
 
-                ${factorsHtml ? `<div class="insight-factors">${factorsHtml}</div>` : ''}
+                    ${factorsHtml ? `<div class="insight-factors">${factorsHtml}</div>` : ''}
 
-                <div class="insight-actions">
-                    <button class="insight-btn insight-analyze" onclick="requestInsightCommittee('${signal.signal_id}', this)">&#9881; Analyze</button>
-                    <button class="insight-btn insight-accept" onclick="actOnInsight('${group.ticker}', '${group.direction}', 'ACCEPTED')">&#10003; Accept</button>
-                    <button class="insight-btn insight-reject" onclick="actOnInsight('${group.ticker}', '${group.direction}', 'REJECTED')">&#10007; Pass</button>
+                    <div class="insight-actions">
+                        <button class="insight-btn insight-accept" onclick="event.stopPropagation(); actOnInsight('${group.ticker}', '${group.direction}', 'ACCEPTED')">&#10003; Accept</button>
+                        <button class="insight-btn insight-analyze" onclick="event.stopPropagation(); requestInsightCommittee('${signal.signal_id}', this)">&#9881; Analyze</button>
+                        <button class="insight-btn insight-reject" onclick="event.stopPropagation(); actOnInsight('${group.ticker}', '${group.direction}', 'REJECTED')">&#10007; Pass</button>
+                    </div>
                 </div>
             </div>
         `;
@@ -3970,6 +3991,14 @@ function getScoreClass(score) {
     if (score >= 75) return 'score-strong';
     if (score >= 60) return 'score-moderate';
     return 'score-weak';
+}
+
+function toggleInsightDetail(compactEl) {
+    const card = compactEl.closest('.insight-card');
+    if (!card) return;
+    const detail = card.querySelector('.insight-detail');
+    if (!detail) return;
+    detail.style.display = detail.style.display === 'none' ? 'block' : 'none';
 }
 
 function renderScoreFactors(triggeringFactors) {
