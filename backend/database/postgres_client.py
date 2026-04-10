@@ -129,7 +129,11 @@ async def get_postgres_client() -> asyncpg.Pool:
             user=DB_USER,
             password=DB_PASSWORD,
             min_size=2,
-            max_size=10
+            max_size=10,
+            server_settings={
+                'idle_in_transaction_session_timeout': '300000',  # 5 min — kill zombie transactions
+                'statement_timeout': '30000',  # 30s — prevent runaway queries
+            },
         )
     
     return _db_pool
@@ -147,8 +151,15 @@ async def init_database():
     Run this once on first deployment
     """
     pool = await get_postgres_client()
-    
+
     async with pool.acquire() as conn:
+        # Safety: fail fast on lock contention instead of blocking the table indefinitely.
+        # Without this, ALTER TABLE can hold ACCESS EXCLUSIVE lock for hours if another
+        # query is running, blocking ALL reads and writes to the table.
+        await conn.execute("SET lock_timeout = '5s'")
+        # Temporarily raise statement_timeout for DDL (CREATE TABLE can be slow on first run)
+        await conn.execute("SET statement_timeout = '60s'")
+
         # Signals table - logs every trade recommendation
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS signals (
@@ -568,46 +579,53 @@ async def init_database():
         
         # Add new columns to signals table for Trade Ideas enhancement
         # These are added separately to support existing databases
-        await conn.execute("""
-            ALTER TABLE signals 
-            ADD COLUMN IF NOT EXISTS score DECIMAL(5, 2),
-            ADD COLUMN IF NOT EXISTS bias_alignment VARCHAR(20),
-            ADD COLUMN IF NOT EXISTS triggering_factors JSONB,
-            ADD COLUMN IF NOT EXISTS actual_entry_price DECIMAL(10, 2),
-            ADD COLUMN IF NOT EXISTS actual_exit_price DECIMAL(10, 2),
-            ADD COLUMN IF NOT EXISTS actual_stop_hit BOOLEAN,
-            ADD COLUMN IF NOT EXISTS trade_outcome VARCHAR(20),
-            ADD COLUMN IF NOT EXISTS loss_reason VARCHAR(50),
-            ADD COLUMN IF NOT EXISTS notes TEXT,
-            ADD COLUMN IF NOT EXISTS bias_at_signal JSONB,
-            ADD COLUMN IF NOT EXISTS day_of_week INTEGER,
-            ADD COLUMN IF NOT EXISTS hour_of_day INTEGER,
-            ADD COLUMN IF NOT EXISTS is_opex_week BOOLEAN DEFAULT FALSE,
-            ADD COLUMN IF NOT EXISTS days_to_earnings INTEGER,
-            ADD COLUMN IF NOT EXISTS market_event TEXT
-        """)
+        # Wrapped in try/except: if lock_timeout fires, skip rather than crash startup
+        try:
+            await conn.execute("""
+                ALTER TABLE signals
+                ADD COLUMN IF NOT EXISTS score DECIMAL(5, 2),
+                ADD COLUMN IF NOT EXISTS bias_alignment VARCHAR(20),
+                ADD COLUMN IF NOT EXISTS triggering_factors JSONB,
+                ADD COLUMN IF NOT EXISTS actual_entry_price DECIMAL(10, 2),
+                ADD COLUMN IF NOT EXISTS actual_exit_price DECIMAL(10, 2),
+                ADD COLUMN IF NOT EXISTS actual_stop_hit BOOLEAN,
+                ADD COLUMN IF NOT EXISTS trade_outcome VARCHAR(20),
+                ADD COLUMN IF NOT EXISTS loss_reason VARCHAR(50),
+                ADD COLUMN IF NOT EXISTS notes TEXT,
+                ADD COLUMN IF NOT EXISTS bias_at_signal JSONB,
+                ADD COLUMN IF NOT EXISTS day_of_week INTEGER,
+                ADD COLUMN IF NOT EXISTS hour_of_day INTEGER,
+                ADD COLUMN IF NOT EXISTS is_opex_week BOOLEAN DEFAULT FALSE,
+                ADD COLUMN IF NOT EXISTS days_to_earnings INTEGER,
+                ADD COLUMN IF NOT EXISTS market_event TEXT
+            """)
+        except Exception as e:
+            print(f"WARNING: signals ALTER TABLE 1 skipped (lock timeout?): {e}")
 
         # Phase 4: Trade Ideas lifecycle columns on existing signals table
-        await conn.execute("""
-            ALTER TABLE signals
-            ADD COLUMN IF NOT EXISTS status VARCHAR(30) DEFAULT 'ACTIVE',
-            ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP,
-            ADD COLUMN IF NOT EXISTS enrichment_data JSONB,
-            ADD COLUMN IF NOT EXISTS enriched_at TIMESTAMP,
-            ADD COLUMN IF NOT EXISTS committee_run_id VARCHAR(100),
-            ADD COLUMN IF NOT EXISTS committee_data JSONB,
-            ADD COLUMN IF NOT EXISTS committee_requested_at TIMESTAMP,
-            ADD COLUMN IF NOT EXISTS committee_completed_at TIMESTAMP,
-            ADD COLUMN IF NOT EXISTS pending_trade_id VARCHAR(100),
-            ADD COLUMN IF NOT EXISTS decided_at TIMESTAMP,
-            ADD COLUMN IF NOT EXISTS decision_source VARCHAR(20),
-            ADD COLUMN IF NOT EXISTS source VARCHAR(50) DEFAULT 'tradingview',
-            ADD COLUMN IF NOT EXISTS regime VARCHAR(30),
-            ADD COLUMN IF NOT EXISTS confluence_score DECIMAL(5, 2),
-            ADD COLUMN IF NOT EXISTS score_v2 DECIMAL(5, 2),
-            ADD COLUMN IF NOT EXISTS score_v2_factors JSONB,
-            ADD COLUMN IF NOT EXISTS signal_category VARCHAR(20) DEFAULT 'TRADE_SETUP'
-        """)
+        try:
+            await conn.execute("""
+                ALTER TABLE signals
+                ADD COLUMN IF NOT EXISTS status VARCHAR(30) DEFAULT 'ACTIVE',
+                ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP,
+                ADD COLUMN IF NOT EXISTS enrichment_data JSONB,
+                ADD COLUMN IF NOT EXISTS enriched_at TIMESTAMP,
+                ADD COLUMN IF NOT EXISTS committee_run_id VARCHAR(100),
+                ADD COLUMN IF NOT EXISTS committee_data JSONB,
+                ADD COLUMN IF NOT EXISTS committee_requested_at TIMESTAMP,
+                ADD COLUMN IF NOT EXISTS committee_completed_at TIMESTAMP,
+                ADD COLUMN IF NOT EXISTS pending_trade_id VARCHAR(100),
+                ADD COLUMN IF NOT EXISTS decided_at TIMESTAMP,
+                ADD COLUMN IF NOT EXISTS decision_source VARCHAR(20),
+                ADD COLUMN IF NOT EXISTS source VARCHAR(50) DEFAULT 'tradingview',
+                ADD COLUMN IF NOT EXISTS regime VARCHAR(30),
+                ADD COLUMN IF NOT EXISTS confluence_score DECIMAL(5, 2),
+                ADD COLUMN IF NOT EXISTS score_v2 DECIMAL(5, 2),
+                ADD COLUMN IF NOT EXISTS score_v2_factors JSONB,
+                ADD COLUMN IF NOT EXISTS signal_category VARCHAR(20) DEFAULT 'TRADE_SETUP'
+            """)
+        except Exception as e:
+            print(f"WARNING: signals ALTER TABLE 2 skipped (lock timeout?): {e}")
 
         # Phase 4: Indexes for Trade Ideas feed queries
         await conn.execute("""
@@ -635,12 +653,15 @@ async def init_database():
         """)
 
         # Add recommendation capture fields to the trade journal table.
-        await conn.execute("""
-            ALTER TABLE IF EXISTS trades
-            ADD COLUMN IF NOT EXISTS pivot_recommendation TEXT,
-            ADD COLUMN IF NOT EXISTS pivot_conviction TEXT,
-            ADD COLUMN IF NOT EXISTS full_context JSONB DEFAULT '{}'::jsonb
-        """)
+        try:
+            await conn.execute("""
+                ALTER TABLE IF EXISTS trades
+                ADD COLUMN IF NOT EXISTS pivot_recommendation TEXT,
+                ADD COLUMN IF NOT EXISTS pivot_conviction TEXT,
+                ADD COLUMN IF NOT EXISTS full_context JSONB DEFAULT '{}'::jsonb
+            """)
+        except Exception as e:
+            print(f"WARNING: trades ALTER TABLE skipped: {e}")
 
         await conn.execute("""
             ALTER TABLE IF EXISTS trades
@@ -889,11 +910,14 @@ async def init_database():
         """)
 
         # Brief 05: Committee override tracking on signals and trades
-        await conn.execute("""
-            ALTER TABLE signals
-            ADD COLUMN IF NOT EXISTS is_committee_override BOOLEAN DEFAULT FALSE,
-            ADD COLUMN IF NOT EXISTS override_reason TEXT
-        """)
+        try:
+            await conn.execute("""
+                ALTER TABLE signals
+                ADD COLUMN IF NOT EXISTS is_committee_override BOOLEAN DEFAULT FALSE,
+                ADD COLUMN IF NOT EXISTS override_reason TEXT
+            """)
+        except Exception as e:
+            print(f"WARNING: signals ALTER TABLE 3 skipped: {e}")
         await conn.execute("""
             ALTER TABLE trades
             ADD COLUMN IF NOT EXISTS committee_action VARCHAR(20),
@@ -1021,14 +1045,17 @@ async def init_database():
         """)
 
         # Brief 3A: Ariadne's Thread — outcome resolution columns on signals
-        await conn.execute("""
-            ALTER TABLE signals
-            ADD COLUMN IF NOT EXISTS outcome VARCHAR(30),
-            ADD COLUMN IF NOT EXISTS outcome_pnl_pct FLOAT,
-            ADD COLUMN IF NOT EXISTS outcome_pnl_dollars FLOAT,
-            ADD COLUMN IF NOT EXISTS outcome_resolved_at TIMESTAMPTZ,
-            ADD COLUMN IF NOT EXISTS outcome_options_metrics JSONB
-        """)
+        try:
+            await conn.execute("""
+                ALTER TABLE signals
+                ADD COLUMN IF NOT EXISTS outcome VARCHAR(30),
+                ADD COLUMN IF NOT EXISTS outcome_pnl_pct FLOAT,
+                ADD COLUMN IF NOT EXISTS outcome_pnl_dollars FLOAT,
+                ADD COLUMN IF NOT EXISTS outcome_resolved_at TIMESTAMPTZ,
+                ADD COLUMN IF NOT EXISTS outcome_options_metrics JSONB
+            """)
+        except Exception as e:
+            print(f"WARNING: signals ALTER TABLE 4 skipped: {e}")
 
         # Brief 3D: Hermes Dispatch — weekly performance reports
         await conn.execute("""
@@ -1142,14 +1169,17 @@ async def init_database():
         """)
 
         # Phase 4: Contextual Modifier columns on signals table
-        await conn.execute("""
-            ALTER TABLE signals
-            ADD COLUMN IF NOT EXISTS context_modifier INTEGER DEFAULT 0,
-            ADD COLUMN IF NOT EXISTS context_factors JSONB DEFAULT '{}',
-            ADD COLUMN IF NOT EXISTS adjusted_score INTEGER,
-            ADD COLUMN IF NOT EXISTS is_contrarian BOOLEAN DEFAULT FALSE,
-            ADD COLUMN IF NOT EXISTS context_updated_at TIMESTAMPTZ
-        """)
+        try:
+            await conn.execute("""
+                ALTER TABLE signals
+                ADD COLUMN IF NOT EXISTS context_modifier INTEGER DEFAULT 0,
+                ADD COLUMN IF NOT EXISTS context_factors JSONB DEFAULT '{}',
+                ADD COLUMN IF NOT EXISTS adjusted_score INTEGER,
+                ADD COLUMN IF NOT EXISTS is_contrarian BOOLEAN DEFAULT FALSE,
+                ADD COLUMN IF NOT EXISTS context_updated_at TIMESTAMPTZ
+            """)
+        except Exception as e:
+            print(f"WARNING: signals ALTER TABLE 5 skipped: {e}")
 
         print("Database schema initialized")
 
