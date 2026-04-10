@@ -10,7 +10,7 @@
 
 ## Problem
 
-Nick has received 80-100 signals over the last few days from the trading hub. His gut says that by the time signals fire, the move has already happened. If true, this is a critical pipeline problem — it means the system is functioning as a lagging confirmation tool rather than an actionable alert system.
+Nick has noticed that the hub's highest-scored signals (score 80-100, the top tier) often seem to fire AFTER a significant portion of the price move has already occurred. If true, this means the system's BEST signals — the ones Nick should be acting on — are lagging indicators rather than actionable setups. The question is not about signal volume but about the reliability and timing of the cream-of-the-crop signals.
 
 We need hard data to answer:
 1. What percentage of the total price move has already occurred BEFORE each signal fires?
@@ -58,6 +58,7 @@ SELECT signal_id, timestamp, ticker, direction, signal_type, strategy,
 FROM signals
 WHERE created_at >= NOW() - INTERVAL '5 days'
   AND entry_price IS NOT NULL AND entry_price > 0 AND ticker IS NOT NULL
+  AND CAST(score AS NUMERIC) >= 80
 ORDER BY created_at DESC;
 ```
 Store results in a list of dicts. Log the count: `Found {N} signals in last 5 days`.
