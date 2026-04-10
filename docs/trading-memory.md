@@ -227,6 +227,7 @@ Dubai physical was $126 vs Brent paper $112 pre-ceasefire. Apr 8 ceasefire crash
 ### Key Macro Data Points
 - GDP: 4.4% → 0.5% (stagflation)
 - Personal savings rate: 4.0% (2nd-lowest since 2008 crisis)
+- M2 money supply: $22.6T record (Feb 2026), +4.8% YoY, 24th consecutive monthly increase
 - HYG broke $80 on Apr 10
 - VIX back above 20
 

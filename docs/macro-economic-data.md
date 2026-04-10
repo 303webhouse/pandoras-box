@@ -71,6 +71,7 @@ At the start of each month, compress this file:
 | Gold | ~$4,500+ | — | Apr 2026 | Near ATH |
 | Bitcoin | ~$71K | — | Apr 10 2026 | Relative strength |
 | DXY (dollar index) | — | — | — | |
+| M2 money supply | $22.6T (record) | — | Feb 2026 | +4.8% YoY, 24th consecutive monthly increase, +$7.1T since 2020 |
 
 ---
 
@@ -126,3 +127,7 @@ Keep the next 2 weeks of scheduled releases here. Update every Sunday.
 - Treasury auction failures are structural (foreign private holders, no FIMA backstop),
   not just war-driven. Even a ceasefire doesn't fix the $5.3T vulnerability.
 - Personal savings at 4.0% means consumers have no buffer for the next shock.
+- M2 money supply at record $22.6T (+4.8% YoY) while GDP collapses = textbook stagflation.
+  Dollar losing purchasing power at historic pace. Supports BTC thesis (IBIT) and gold
+  long-term thesis (Fidelity GDX tranche). Fed trapped: can't tighten (economy weakening)
+  but money supply keeps expanding.
