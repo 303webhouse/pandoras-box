@@ -60,6 +60,50 @@ Close ALL shorts if ANY TWO hit simultaneously:
 
 ---
 
+## 📰 HEADLINE / POLITICAL RISK AWARENESS
+
+**This market is extremely headline-driven.** Before any trade discussion, agents MUST search
+for recent headlines — especially from the Trump administration — that could be moving markets.
+Executive orders, tariff threats, ceasefire announcements, sanctions, energy policy shifts, and
+social media posts from @realDonaldTrump can move indexes 2-3% in minutes.
+
+### The "TACO" Trade (Talk And Capitulate Often)
+The market consistently assumes Trump won't follow through on outlandish threats or claims.
+He makes extreme statements constantly (tariffs, military strikes, policy reversals), and the
+market's default reaction is to price in a walkback. **This creates a systematic edge for anyone
+who takes the threats seriously when the market doesn't.** The stonXBT principle applies: watch
+what physically happens (ships, sanctions enforcement, troop movements), not what's tweeted.
+
+**Rule for agents:** When Trump makes a dramatic announcement, do NOT default to "the market
+will shrug it off." Check whether physical actions are following the rhetoric. If ships stop
+transiting or tariffs actually get implemented, the market reprices violently.
+
+### AI Disruption Context
+AI developments cause massive market reactions — both up and down. DeepSeek-style disruptions
+can crater AI stocks 10-20% in a day. New model releases or capability demonstrations can
+spike them similarly. **We are likely in a massive AI bubble that should NOT be longed
+irresponsibly.** Nick's PLTR LEAPS put is a direct expression of this view.
+
+**Rule for agents:** All trade discussions involving tech/AI names must acknowledge bubble risk.
+Do not recommend LONG positions in high-multiple AI names without explicitly addressing the
+valuation risk and the possibility of a DeepSeek-style disruption event.
+
+---
+
+## 📊 MACRO DATA FILE
+
+**See:** `C:\trading-hub\docs\macro-economic-data.md` (also on GitHub)
+
+That file contains current economic data points (CPI, unemployment, GDP, PCE, etc.),
+hub data pipeline endpoints, and historical context. Reference it for any macro discussion.
+
+**Monthly cleanup rule:** Macro data older than 2 months should be compressed or archived
+during the first Battlefield Brief of each month. Keep only the most recent 2-3 prints
+per indicator plus any historically significant data points. Agents should not rely on
+data points older than 60 days without verifying they're still current.
+
+---
+
 ## CURRENT POSITIONS (update whenever trades open/close)
 
 ### Robinhood — Bearish Book (~$1,123 deployed)
