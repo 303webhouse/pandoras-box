@@ -106,49 +106,137 @@ async def pythia_webhook(request: Request = None, payload: dict = None):
 
 async def get_pythia_profile_position(ticker: str, entry_price: float, direction: str) -> dict:
     """
-    Check where entry_price sits relative to the latest Pythia value area.
-    Returns profile_position scoring data for the scoring engine (P4B).
+    Three-tier Pythia scoring:
+    Tier 1 — Static position (entry vs VAH/VAL/POC)
+    Tier 2 — Dynamic session data (VA migration, poor extremes, volume quality)
+    Tier 3 — IB context (initial balance breakout/failure)
     """
     redis = await get_redis_client()
     if not redis:
-        return {"profile_bonus": 0}
+        return {"profile_bonus": 0, "total_pythia_adjustment": 0}
 
     try:
         raw = await redis.get(f"pythia:{ticker}")
         if not raw:
-            # Fallback: check mp_levels key
             raw = await redis.get(f"mp_levels:{ticker}")
         if not raw:
-            return {"profile_bonus": 0}
+            return {"profile_bonus": 0, "total_pythia_adjustment": 0}
 
         data = json.loads(raw)
         vah = data.get("vah")
         val = data.get("val")
         poc = data.get("poc")
         if not vah or not val or not poc:
-            return {"profile_bonus": 0}
+            return {"profile_bonus": 0, "total_pythia_adjustment": 0}
 
         vah, val, poc = float(vah), float(val), float(poc)
         is_long = direction.upper() in ("LONG", "BUY", "BULLISH")
 
+        # ── Tier 1: Static position ──
         if is_long:
             if entry_price <= val:
-                return {"profile_bonus": 8, "zone": "below_VAL", "vah": vah, "val": val, "poc": poc}
+                tier1 = 8; zone = "below_VAL"
             elif entry_price <= poc:
-                return {"profile_bonus": 3, "zone": "VAL_to_POC", "vah": vah, "val": val, "poc": poc}
+                tier1 = 3; zone = "VAL_to_POC"
             elif entry_price <= vah:
-                return {"profile_bonus": 0, "zone": "POC_to_VAH", "vah": vah, "val": val, "poc": poc}
+                tier1 = 0; zone = "POC_to_VAH"
             else:
-                return {"profile_bonus": -10, "zone": "above_VAH", "vah": vah, "val": val, "poc": poc}
+                tier1 = -10; zone = "above_VAH"
         else:
             if entry_price >= vah:
-                return {"profile_bonus": 8, "zone": "above_VAH", "vah": vah, "val": val, "poc": poc}
+                tier1 = 8; zone = "above_VAH"
             elif entry_price >= poc:
-                return {"profile_bonus": 3, "zone": "POC_to_VAH", "vah": vah, "val": val, "poc": poc}
+                tier1 = 3; zone = "POC_to_VAH"
             elif entry_price >= val:
-                return {"profile_bonus": 0, "zone": "VAL_to_POC", "vah": vah, "val": val, "poc": poc}
+                tier1 = 0; zone = "VAL_to_POC"
             else:
-                return {"profile_bonus": -10, "zone": "below_VAL", "vah": vah, "val": val, "poc": poc}
+                tier1 = -10; zone = "below_VAL"
+
+        # ── Tier 2: Dynamic session data ──
+        migration_adj = 0
+        poor_adj = 0
+        vol_quality = data.get("volume_quality", "normal")
+        va_migration = data.get("va_migration", "")
+        poor_high = data.get("poor_high", False)
+        poor_low = data.get("poor_low", False)
+        data_age = "current"
+
+        # Also check recent pythia_events for richer data
+        try:
+            pool = await get_postgres_client()
+            async with pool.acquire() as conn:
+                evt = await conn.fetchrow(
+                    "SELECT va_migration, poor_high, poor_low, volume_quality, "
+                    "ib_high, ib_low FROM pythia_events "
+                    "WHERE ticker = $1 AND created_at > NOW() - INTERVAL '4 hours' "
+                    "ORDER BY created_at DESC LIMIT 1", ticker
+                )
+                if evt:
+                    va_migration = evt["va_migration"] or va_migration
+                    poor_high = evt["poor_high"] if evt["poor_high"] is not None else poor_high
+                    poor_low = evt["poor_low"] if evt["poor_low"] is not None else poor_low
+                    vol_quality = evt["volume_quality"] or vol_quality
+                    data.update({
+                        "ib_high": float(evt["ib_high"]) if evt["ib_high"] else data.get("ib_high"),
+                        "ib_low": float(evt["ib_low"]) if evt["ib_low"] else data.get("ib_low"),
+                    })
+                else:
+                    data_age = "stale"
+        except Exception:
+            data_age = "stale"
+
+        # VA migration scoring
+        if va_migration:
+            mig = va_migration.lower()
+            if (is_long and "up" in mig) or (not is_long and "down" in mig):
+                migration_adj = 3
+            elif (is_long and "down" in mig) or (not is_long and "up" in mig):
+                migration_adj = -8
+
+        # Poor extreme scoring
+        if poor_low and is_long:
+            poor_adj = -10
+        elif poor_high and not is_long:
+            poor_adj = -10
+        elif poor_low and not is_long:
+            poor_adj = 5
+        elif poor_high and is_long:
+            poor_adj = 5
+
+        # Volume quality multiplier on Tier 1
+        if vol_quality == "high":
+            tier1 = round(tier1 * 1.5)
+        elif vol_quality == "thin":
+            tier1 = round(tier1 * 0.5)
+
+        # ── Tier 3: IB context ──
+        ib_adj = 0
+        ib_high = data.get("ib_high")
+        ib_low = data.get("ib_low")
+        if ib_high and ib_low:
+            ib_h, ib_l = float(ib_high), float(ib_low)
+            if entry_price > ib_h and is_long and vol_quality == "high":
+                ib_adj = 5
+            elif entry_price < ib_l and is_long:
+                ib_adj = -5
+            elif entry_price < ib_l and not is_long and vol_quality == "high":
+                ib_adj = 5
+            elif entry_price > ib_h and not is_long:
+                ib_adj = -5
+
+        total = tier1 + migration_adj + poor_adj + ib_adj
+
+        return {
+            "profile_bonus": tier1,
+            "migration_bonus": migration_adj,
+            "poor_extreme_bonus": poor_adj,
+            "ib_bonus": ib_adj,
+            "volume_quality": vol_quality,
+            "total_pythia_adjustment": total,
+            "zone": zone,
+            "vah": vah, "val": val, "poc": poc,
+            "data_age": data_age,
+        }
 
     except Exception as e:
         logger.debug("Pythia profile lookup failed for %s: %s", ticker, e)
