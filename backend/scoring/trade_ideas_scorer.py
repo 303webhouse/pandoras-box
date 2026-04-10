@@ -133,6 +133,19 @@ TIME_OF_DAY_PENALTIES = {
     "prime_time": 0,       # 9:45 AM - 11:30 AM ET — best window, no penalty
 }
 
+# Strategy-specific adjustments in choppy regime (SPY ADX < 20)
+CHOP_STRATEGY_ADJUSTMENTS = {
+    "PULLBACK_ENTRY": -8,
+    "GOLDEN_TOUCH": -8,
+    "RESISTANCE_REJECTION": 5,
+    "TRAPPED_SHORTS": 3,
+    "TRAPPED_LONGS": 3,
+    "SELL_RIP_EMA": 3,
+    "SELL_RIP_VWAP": 3,
+    "DEATH_CROSS": -5,
+    "BEARISH_BREAKDOWN": -5,
+}
+
 # Time horizon classification (P3A)
 _HORIZON_MAP = {
     'TRAPPED_SHORTS': 'SPRINT', 'TRAPPED_LONGS': 'SPRINT',
@@ -218,7 +231,8 @@ def calculate_signal_score(
     signal: Dict[str, Any],
     current_bias: Dict[str, Any],
     sector_strength: Dict[str, Any] = None,
-    regime_context: Dict[str, Any] = None
+    regime_context: Dict[str, Any] = None,
+    regime_data: Dict[str, Any] = None,
 ) -> Tuple[float, str, Dict[str, Any]]:
     """
     Calculate composite score for a trade signal.
@@ -228,12 +242,14 @@ def calculate_signal_score(
         current_bias: Current bias state with daily, weekly, cyclical levels
         sector_strength: Optional sector strength data for priority scoring
         regime_context: Optional regime override data (theme_keywords, reversal_mode, etc.)
+        regime_data: Optional SPY ADX regime data (adx, regime label)
 
     Returns:
         Tuple of (score, bias_alignment, triggering_factors)
     """
     triggering_factors = {}
     regime_context = regime_context or {}
+    regime_data = regime_data or {}
     
     # 1. Base score from strategy
     strategy = signal.get('strategy', '').upper()
@@ -526,7 +542,67 @@ def calculate_signal_score(
         "penalty": freshness_penalty,
     }
 
-    # 10. Time horizon classification (P3A)
+    # 10. Options flow adjustment (P2)
+    flow_bonus = 0
+    flow_meta = metadata.get("flow_pc_ratio") if isinstance(metadata, dict) else None
+    flow_dir = metadata.get("flow_net_premium_direction") if isinstance(metadata, dict) else None
+    if flow_meta is not None:
+        pc = float(flow_meta)
+        is_long = direction in ("LONG", "BUY", "BULLISH")
+        if is_long:
+            if pc < 0.5:
+                flow_bonus += 5
+            elif pc < 0.8:
+                flow_bonus += 3
+            elif pc > 1.8:
+                flow_bonus -= 8
+            elif pc > 1.2:
+                flow_bonus -= 5
+        else:
+            if pc > 1.8:
+                flow_bonus += 5
+            elif pc > 1.2:
+                flow_bonus += 3
+            elif pc < 0.5:
+                flow_bonus -= 5
+            elif pc < 0.8:
+                flow_bonus -= 3
+        if flow_dir:
+            signal_bullish = is_long
+            prem_bullish = flow_dir == "bullish"
+            if signal_bullish == prem_bullish:
+                flow_bonus += 3
+            else:
+                flow_bonus -= 5
+            if is_long and pc > 1.2 and prem_bullish and flow_bonus < 0:
+                flow_bonus = flow_bonus // 2
+        triggering_factors["flow_data"] = {
+            "pc_ratio": pc, "net_premium_direction": flow_dir, "bonus": flow_bonus,
+        }
+
+    # 11. Regime/chop penalty (P3) — SPY ADX-based
+    regime_penalty = 0
+    chop_strategy_adj = 0
+    spy_adx = regime_data.get("adx", 25)
+    if spy_adx >= 25:
+        regime_label = "trending"
+        max_align = 1.25
+    elif spy_adx >= 20:
+        regime_label = "transitional"
+        regime_penalty = -5
+        max_align = 1.15
+    else:
+        regime_label = "choppy"
+        regime_penalty = -10
+        max_align = 1.10
+        chop_strategy_adj = CHOP_STRATEGY_ADJUSTMENTS.get(signal_type, 0)
+    alignment_multiplier = min(alignment_multiplier, max_align)
+    triggering_factors["regime"] = {
+        "spy_adx": round(spy_adx, 1), "label": regime_label,
+        "penalty": regime_penalty, "strategy_adj": chop_strategy_adj,
+    }
+
+    # 12. Time horizon classification (P3A)
     time_horizon = _get_time_horizon(signal_type, metadata)
     triggering_factors["time_horizon"] = time_horizon
 
@@ -538,7 +614,7 @@ def calculate_signal_score(
     # =========================================================================
 
     # Pre-alignment score (affected by bias multiplier)
-    pre_alignment = base_score + tech_bonus + recency_bonus + rr_bonus + tod_adjustment + catalyst_bonus + freshness_penalty
+    pre_alignment = base_score + tech_bonus + recency_bonus + rr_bonus + tod_adjustment + catalyst_bonus + freshness_penalty + flow_bonus + regime_penalty + chop_strategy_adj
     pre_alignment = max(0, pre_alignment)  # Floor at 0 before multiplying
 
     # Apply bias alignment multiplier (R1 fix: this is the ONLY place bias affects score)
@@ -567,6 +643,9 @@ def calculate_signal_score(
         "sector_bonus": sector_bonus,
         "catalyst_bonus": catalyst_bonus,
         "freshness_penalty": freshness_penalty,
+        "flow_bonus": flow_bonus,
+        "regime_penalty": regime_penalty,
+        "chop_strategy_adj": chop_strategy_adj,
         "range_consumed": round(range_consumed, 3) if range_consumed is not None else None,
         "raw_score": raw_score,
         "alignment_multiplier": alignment_multiplier,

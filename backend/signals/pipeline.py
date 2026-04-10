@@ -192,10 +192,30 @@ async def apply_scoring(signal_data: Dict[str, Any]) -> Dict[str, Any]:
         except Exception as enrich_err:
             logger.debug("Price range enrichment skipped: %s", enrich_err)
 
-        # Calculate score (with sector strength + regime context if available)
+        # P2: Flow enrichment — yfinance options chain for P/C ratio + premium direction
+        try:
+            from signals.flow_enrichment import enrich_flow_data
+            signal_data = await enrich_flow_data(signal_data)
+        except Exception as flow_err:
+            logger.debug("Flow enrichment skipped: %s", flow_err)
+
+        # Fetch SPY ADX regime data for chop penalty
+        regime_data = {}
+        try:
+            from database.redis_client import get_redis_client as _get_regime_rc
+            import json as _regime_json
+            _rrc = await _get_regime_rc()
+            if _rrc:
+                _regime_raw = await _rrc.get("regime:spy_adx")
+                if _regime_raw:
+                    regime_data = _regime_json.loads(_regime_raw)
+        except Exception:
+            pass
+
+        # Calculate score (with sector strength + regime context + regime data)
         score, bias_alignment, triggering_factors = calculate_signal_score(
             signal_data, current_bias, sector_strength=sector_strength,
-            regime_context=regime_context
+            regime_context=regime_context, regime_data=regime_data
         )
 
         # Contrarian qualification
@@ -289,9 +309,9 @@ async def apply_scoring(signal_data: Dict[str, Any]) -> Dict[str, Any]:
             pp_dir = (signal_data.get("direction") or "").upper()
             if pp_ticker and pp_price and float(pp_price) > 0:
                 pp = await get_pythia_profile_position(pp_ticker, float(pp_price), pp_dir)
-                pp_bonus = pp.get("profile_bonus", 0)
-                if pp_bonus != 0:
-                    score = min(100, max(0, score + pp_bonus))
+                pp_total = pp.get("total_pythia_adjustment", pp.get("profile_bonus", 0))
+                if pp_total != 0:
+                    score = min(100, max(0, score + pp_total))
                     triggering_factors["profile_position"] = pp
                     logger.info("Pythia profile for %s: %s zone, %+d bonus",
                                 pp_ticker, pp.get("zone", "?"), pp_bonus)

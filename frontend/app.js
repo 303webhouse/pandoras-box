@@ -3664,13 +3664,28 @@ async function loadGroupedSignals() {
     }
 }
 
+let insightsSortMode = 'time';
+
+function setInsightsSort(mode, btn) {
+    insightsSortMode = mode;
+    document.querySelectorAll('.insights-sort-controls .sort-btn').forEach(b => b.classList.remove('active'));
+    if (btn) btn.classList.add('active');
+    refreshInsights();
+}
+
 function renderGroupedSignals(groups) {
     const container = document.getElementById('tradeSignals');
     if (!container) return;
 
     if (!groups || groups.length === 0) {
-        container.innerHTML = '<p class="empty-state">No qualifying insights — all signals below threshold or already acted on</p>';
+        container.innerHTML = '<p class="empty-state">No qualifying insights \u2014 all signals below threshold or already acted on</p>';
         return;
+    }
+
+    // Apply sort
+    if (insightsSortMode === 'score') {
+        groups = [...groups].sort((a, b) =>
+            (b.display_score || b.highest_score || 0) - (a.display_score || a.highest_score || 0));
     }
 
     container.innerHTML = groups.map(group => {
