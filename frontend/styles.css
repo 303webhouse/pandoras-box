@@ -2725,12 +2725,17 @@ body.override-active-bearish .override-toggle[data-active="true"] {
 
 .trades-header {
     margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
 }
 
 .trades-header h2 {
     font-size: 14px;
     letter-spacing: 2px;
-    margin-bottom: 12px;
+    margin-bottom: 0;
 }
 
 .signals-container {
@@ -3753,9 +3758,9 @@ body.override-active-bearish .override-toggle[data-active="true"] {
     letter-spacing: 0.5px;
 }
 .sort-btn.active {
-    background: rgba(20, 184, 166, 0.15);
-    color: var(--accent-teal);
-    border-color: var(--accent-teal);
+    background: rgba(20, 184, 166, 0.25);
+    color: #14b8a6;
+    border-color: #14b8a6;
 }
 
 .signal-triggers { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 3px; }
