@@ -2,9 +2,13 @@
 Price Range Enrichment — fetches 10-day daily bars and injects
 ten_day_high, ten_day_low, range_consumed into signal metadata.
 Feeds the freshness penalty in trade_ideas_scorer.py.
+
+Uses Redis cache (2h TTL) to avoid rate-limit failures on Polygon
+when burst signals arrive for the same ticker.
 """
 
 import asyncio
+import json as _json
 import logging
 import os
 from datetime import datetime, timedelta
@@ -14,6 +18,7 @@ import httpx
 logger = logging.getLogger("pipeline")
 
 POLYGON_API_KEY = os.getenv("POLYGON_API_KEY", "")
+RANGE_CACHE_TTL = 7200  # 2 hours — 10d range doesn't change fast
 
 
 async def enrich_price_range(signal_data: dict) -> dict:
@@ -43,20 +48,48 @@ async def enrich_price_range(signal_data: dict) -> dict:
     ten_day_high = None
     ten_day_low = None
 
-    # Try Polygon first
-    if POLYGON_API_KEY:
-        try:
-            ten_day_high, ten_day_low = await _fetch_range_polygon(ticker)
-        except Exception as e:
-            logger.debug("Polygon range fetch failed for %s: %s", ticker, e)
+    # Check Redis cache first (avoids rate limits on burst signals)
+    cache_key = f"price_range:{ticker}"
+    try:
+        from database.redis_client import get_redis_client
+        redis = await get_redis_client()
+        if redis:
+            cached = await redis.get(cache_key)
+            if cached:
+                cached_data = _json.loads(cached)
+                ten_day_high = cached_data["high"]
+                ten_day_low = cached_data["low"]
+                logger.debug("Price range cache hit for %s", ticker)
+    except Exception:
+        pass  # Redis unavailable — proceed to fetch
 
-    # Fallback to yfinance
+    # Fetch from API if not cached
     if ten_day_high is None or ten_day_low is None:
-        try:
-            ten_day_high, ten_day_low = await _fetch_range_yfinance(ticker)
-        except Exception as e2:
-            logger.debug("yfinance range fetch also failed for %s: %s", ticker, e2)
-            return signal_data
+        # Try Polygon first
+        if POLYGON_API_KEY:
+            try:
+                ten_day_high, ten_day_low = await _fetch_range_polygon(ticker)
+            except Exception as e:
+                logger.debug("Polygon range fetch failed for %s: %s", ticker, e)
+
+        # Fallback to yfinance
+        if ten_day_high is None or ten_day_low is None:
+            try:
+                ten_day_high, ten_day_low = await _fetch_range_yfinance(ticker)
+            except Exception as e2:
+                logger.debug("yfinance range fetch also failed for %s: %s", ticker, e2)
+                return signal_data
+
+        # Cache successful result in Redis
+        if ten_day_high is not None and ten_day_low is not None:
+            try:
+                redis = await get_redis_client()
+                if redis:
+                    await redis.set(cache_key, _json.dumps({
+                        "high": ten_day_high, "low": ten_day_low
+                    }), ex=RANGE_CACHE_TTL)
+            except Exception:
+                pass
 
     if ten_day_high is None or ten_day_low is None or ten_day_high <= ten_day_low:
         return signal_data
