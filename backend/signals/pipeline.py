@@ -221,6 +221,59 @@ async def apply_scoring(signal_data: Dict[str, Any]) -> Dict[str, Any]:
         # a separate module that caused double-counting. All sector effects now
         # flow through SECTOR_PRIORITY_BONUS in trade_ideas_scorer.py.
 
+        # P2B: Squeeze score cross-reference (post-score bonus)
+        try:
+            from database.postgres_client import get_postgres_client
+            pool = await get_postgres_client()
+            sq_ticker = (signal_data.get("ticker") or "").upper()
+            async with pool.acquire() as conn:
+                sq_row = await conn.fetchrow(
+                    "SELECT composite_score, squeeze_tier, short_pct_float, "
+                    "days_to_cover FROM squeeze_scores WHERE ticker = $1",
+                    sq_ticker,
+                )
+            if sq_row and (sq_row["composite_score"] or 0) >= 20:
+                cs = float(sq_row["composite_score"] or 0)
+                squeeze_bonus = 8 if cs >= 30 else 4
+                score = min(100, score + squeeze_bonus)
+                triggering_factors["squeeze"] = {
+                    "bonus": squeeze_bonus,
+                    "composite_score": cs,
+                    "squeeze_tier": sq_row["squeeze_tier"],
+                    "short_float": float(sq_row["short_pct_float"]) if sq_row["short_pct_float"] else None,
+                    "days_to_cover": float(sq_row["days_to_cover"]) if sq_row["days_to_cover"] else None,
+                }
+                logger.info("Squeeze confluence for %s: +%d (score %.0f, tier %s)",
+                            sq_ticker, squeeze_bonus, cs, sq_row["squeeze_tier"])
+        except Exception as sq_err:
+            logger.debug("Squeeze cross-reference skipped: %s", sq_err)
+
+        # P2C: Flow data cross-reference (BLOCKED — flow_events pipeline not operational)
+        # When flow_events is populated, add flow confluence check here.
+        # For now, gracefully skip.
+        try:
+            from database.postgres_client import get_postgres_client as _gpc
+            _pool = await _gpc()
+            fl_ticker = (signal_data.get("ticker") or "").upper()
+            async with _pool.acquire() as conn:
+                fl_row = await conn.fetchrow(
+                    "SELECT flow_sentiment, total_premium, pc_ratio "
+                    "FROM flow_events WHERE ticker = $1 "
+                    "AND captured_at > NOW() - INTERVAL '4 hours' "
+                    "ORDER BY captured_at DESC LIMIT 1",
+                    fl_ticker,
+                )
+            if fl_row and fl_row["total_premium"] and float(fl_row["total_premium"]) > 1_000_000:
+                flow_bonus = 5
+                score = min(100, score + flow_bonus)
+                triggering_factors["flow"] = {
+                    "bonus": flow_bonus,
+                    "sentiment": fl_row["flow_sentiment"],
+                    "premium": float(fl_row["total_premium"]),
+                }
+        except Exception:
+            pass  # Flow pipeline not yet operational — expected
+
         # Update signal
         signal_data["score"] = score
         signal_data["bias_alignment"] = bias_alignment

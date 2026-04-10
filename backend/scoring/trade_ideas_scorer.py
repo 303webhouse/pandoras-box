@@ -375,7 +375,9 @@ def calculate_signal_score(
         triggering_factors["risk_reward"] = {"value": rr, "bonus": rr_bonus}
     
     # 6. Sector priority bonus (Olympus-approved asymmetric: +5/-8, rank-based tiers)
+    #    + P2A sector momentum confluence: extra bonus when BOTH rank and daily RS agree
     sector_bonus = 0
+    sector_momentum_bonus = 0
     ticker = signal.get('ticker', '').upper()
     sector = TICKER_SECTORS.get(ticker)
 
@@ -383,6 +385,7 @@ def calculate_signal_score(
         sector_data = sector_strength.get(sector, {})
         sector_rank = sector_data.get("rank", 6)  # Default to middle
         sector_trend = sector_data.get("trend", "neutral")
+        relative_strength = sector_data.get("relative_strength", 0)
 
         is_bullish_signal = direction in ["LONG", "BUY"]
         is_bearish_signal = direction in ["SHORT", "SELL"]
@@ -403,12 +406,29 @@ def calculate_signal_score(
                 sector_bonus = SECTOR_PRIORITY_BONUS["misaligned_sector"]  # -8 (buying a lagger)
         # Middle ranks (#4-8): no bonus or penalty
 
+        # P2A: Sector momentum confluence
+        # If sector rank AND daily relative strength both confirm direction, extra bonus
+        daily_strong = relative_strength > 0.5  # outperforming SPY today
+        daily_weak = relative_strength < -0.5   # underperforming SPY today
+        if is_leading and daily_strong and is_bullish_signal:
+            sector_momentum_bonus = 5  # Rank + daily momentum both bullish
+        elif is_leading and not daily_strong and is_bullish_signal:
+            sector_momentum_bonus = 2  # Rank says leading but fading today
+        elif is_lagging and daily_weak and is_bearish_signal:
+            sector_momentum_bonus = 5  # Rank + daily momentum both bearish
+        elif is_lagging and not daily_weak and is_bearish_signal:
+            sector_momentum_bonus = 2  # Rank says lagging but recovering today
+
+        sector_bonus += sector_momentum_bonus
+
         triggering_factors["sector_priority"] = {
             "sector": sector,
             "rank": sector_rank,
             "trend": sector_trend,
+            "relative_strength": relative_strength,
             "tier": "leading" if is_leading else ("lagging" if is_lagging else "neutral"),
             "bonus": sector_bonus,
+            "momentum_bonus": sector_momentum_bonus,
         }
     
     # 7. Catalyst-alignment bonus (5G)
