@@ -72,6 +72,7 @@ At the start of each month, compress this file:
 | Bitcoin | ~$71K | — | Apr 10 2026 | Relative strength |
 | DXY (dollar index) | — | — | — | |
 | M2 money supply | $22.6T (record) | — | Feb 2026 | +4.8% YoY, 24th consecutive monthly increase, +$7.1T since 2020 |
+| USD share of global reserves | ~46% | ~61% (2017) | Apr 2026 | Lowest in 26 years. Excl gold: 57%, lowest since 1994. Central banks diversifying into gold. |
 
 ---
 
@@ -131,3 +132,7 @@ Keep the next 2 weeks of scheduled releases here. Update every Sunday.
   Dollar losing purchasing power at historic pace. Supports BTC thesis (IBIT) and gold
   long-term thesis (Fidelity GDX tranche). Fed trapped: can't tighten (economy weakening)
   but money supply keeps expanding.
+- USD share of global reserves has dropped 15 points since 2017 to ~46%. Last time it
+  fell below 50% was 1990-91 (elevated inflation, recession, crisis of confidence).
+  Central banks aggressively accumulating gold. Structural tailwind for GLD/GDX long-term,
+  structural headwind for dollar-denominated assets.
