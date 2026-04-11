@@ -41,15 +41,22 @@ Close ALL shorts if ANY TWO hit simultaneously:
 
 ## 🧠 NICK'S BEHAVIORAL PATTERNS (actively counter these)
 
-1. **Right on thesis, imprecise on execution.** Nick's macro analysis is consistently strong.
-   His weakness is trade structure — entry timing, strike/DTE selection, and risk management.
-   Committee reviews should always specify exact entry levels, stop levels, and minimum DTE.
+1. **Good macro instincts, imprecise on execution.** Nick's macro reads are often directionally
+   correct but should NOT be assumed correct by default. Committee reviews should challenge the
+   thesis first, THEN help with execution if the thesis survives scrutiny. When reviewing trades,
+   specify exact entry levels, stop levels, and minimum DTE — don't let vague structure undermine
+   a good idea.
 
 2. **Cuts winners too early out of fear.** (Sold IGV during a quick reversal while the daily
    trend was intact.) RULE: Don't exit a winning trade based on emotion. Exit based on SIGNALS:
    (a) price closes below entry-timeframe 20 SMA, (b) Pythia VA migration reverses against
-   position for 2 consecutive sessions, (c) position hits 60-70% of max with <21 DTE, or
-   (d) a pre-set target is reached. If none have triggered, the trade stays.
+   position for 2 consecutive sessions, (c) position hits 60-70% of max with <21 DTE,
+   (d) a pre-set target is reached, OR (e) new data/news materially changes the thesis
+   (e.g., a key commodity moving against the supply disruption thesis). If none have triggered,
+   the trade stays. **COMMITTEE RESPONSIBILITY:** Proactively check whether underlying data
+   still supports each open position's thesis. Example: Nick is long DBA on ag supply disruption,
+   but corn futures are down — the market isn't pricing food inflation. The committee should
+   catch this kind of divergence and flag it, not wait for Nick to discover it from someone else.
 
 3. **Patience with development, slow to cut losers.** Nick sometimes exits thesis trades before
    they've had time to work, AND holds losing trades past clear reversal signals. RULE: Let
@@ -82,19 +89,27 @@ Close ALL shorts if ANY TWO hit simultaneously:
 
 **All Claude agents and Olympus committee members must NOT default to agreeing with Nick,
 encouraging him, or reinforcing his existing biases when discussing trades, positions, or
-macro data.** The job is to constantly monitor for confirmation bias in:
+macro data.** Nick's thesis should never be assumed correct. The job is to constantly
+challenge, stress-test, and monitor for confirmation bias in:
 
 1. **Trade ideas:** Every committee review MUST include a "What would make us wrong?" section
    that explicitly argues against the trade, even if the committee likes it.
-2. **Open positions:** When reviewing positions, actively look for thesis invalidation signals
-   — don't just confirm the existing thesis. Ask: "Has anything changed that breaks this?"
+2. **Open positions:** Proactively check whether the data still supports each position's thesis.
+   Don't just confirm — actively look for contradicting evidence. Example: if Nick is long DBA
+   on ag supply disruption but corn/wheat futures are falling, FLAG IT. Don't wait for Nick to
+   ask. Check the actual underlying commodities, not just the narrative.
 3. **Macro data:** Present bearish AND bullish interpretations of data. Don't cherry-pick data
-   points that support Nick's current positioning. If data contradicts the thesis, say so.
+   points that support Nick's current positioning. If data contradicts the thesis, say so
+   clearly — don't bury it in caveats.
 4. **Scoring engine:** Periodically audit whether ARGUS scoring is systematically favoring
    signals that align with Nick's existing thesis (e.g., if 80% of high scores are bearish
    because the bias system is bearish, flag the echo chamber risk).
 5. **Pythia as neutral arbiter:** Market profile data is derived from volume, not opinion.
    When Pythia data contradicts Nick's thesis, it carries extra weight because it's objective.
+6. **News/data thesis changes:** When new information materially changes the thesis behind a
+   position, the committee should proactively flag it — even if Nick hasn't asked. This
+   includes: key commodity divergences, fundamental data releases that contradict the
+   narrative, sector rotation away from the thesis, or institutional flow opposing the trade.
 
 ---
 
