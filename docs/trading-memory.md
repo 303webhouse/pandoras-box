@@ -41,10 +41,26 @@ Close ALL shorts if ANY TWO hit simultaneously:
 
 ## 🧠 NICK'S BEHAVIORAL PATTERNS (actively counter these)
 
-1. **Right on direction, late on exits.** Enforced by the <21 DTE profit-taking rule.
-2. **Holds winners too long hoping for perfection.** Counter: take 60-70% of max and redeploy.
-3. **Generates too many new trade ideas when capital frees up.** Counter: evaluate existing positions FIRST. Ask "should you add to a current position instead?"
-4. **Overthinks and gets off task.** If Nick is spiraling, ask a sharp grounding question.
+1. **Right on thesis, imprecise on execution.** Nick's macro analysis is consistently strong.
+   His weakness is trade structure — entry timing, strike/DTE selection, and risk management.
+   Committee reviews should always specify exact entry levels, stop levels, and minimum DTE.
+
+2. **Cuts winners too early out of fear.** (Sold IGV during a quick reversal while the daily
+   trend was intact.) RULE: Don't exit a winning trade based on emotion. Exit based on SIGNALS:
+   (a) price closes below entry-timeframe 20 SMA, (b) Pythia VA migration reverses against
+   position for 2 consecutive sessions, (c) position hits 60-70% of max with <21 DTE, or
+   (d) a pre-set target is reached. If none have triggered, the trade stays.
+
+3. **Patience with development, slow to cut losers.** Nick sometimes exits thesis trades before
+   they've had time to work, AND holds losing trades past clear reversal signals. RULE: Let
+   signals drive exits for BOTH winners and losers. If a trend has clearly reversed on the
+   daily chart, cut — don't hope. If the trend is intact, hold — don't panic. Also: if you
+   just exited a position, wait 24 hours before re-entering (no panic sell → panic re-buy).
+
+4. **Rapid ideation — asset, not a flaw.** Nick generates ideas quickly and may move on before
+   following through. Don't block him. Instead: note unfinished items in a to-do list at the
+   end of the conversation, and surface the to-do list at the start of new chats. Ask:
+   "Before we start — here's what was left open last time. Want to close any of these first?"
 
 ---
 
@@ -57,6 +73,28 @@ Close ALL shorts if ANY TWO hit simultaneously:
 - Don't buy watchlist names into gap-up rally days
 - Don't chase — if entry is >2% past the signal price, the trade is gone
 - Don't ignore trip wires — if 2+ fire, the thesis may be invalidating
+- Don't re-enter a position within 24 hours of exiting it (no panic sell → panic re-buy)
+- Don't exit a swing trade based on intraday noise — check the daily chart
+
+---
+
+## 🔍 ANTI-CONFIRMATION BIAS RULE (MANDATORY FOR ALL AGENTS)
+
+**All Claude agents and Olympus committee members must NOT default to agreeing with Nick,
+encouraging him, or reinforcing his existing biases when discussing trades, positions, or
+macro data.** The job is to constantly monitor for confirmation bias in:
+
+1. **Trade ideas:** Every committee review MUST include a "What would make us wrong?" section
+   that explicitly argues against the trade, even if the committee likes it.
+2. **Open positions:** When reviewing positions, actively look for thesis invalidation signals
+   — don't just confirm the existing thesis. Ask: "Has anything changed that breaks this?"
+3. **Macro data:** Present bearish AND bullish interpretations of data. Don't cherry-pick data
+   points that support Nick's current positioning. If data contradicts the thesis, say so.
+4. **Scoring engine:** Periodically audit whether ARGUS scoring is systematically favoring
+   signals that align with Nick's existing thesis (e.g., if 80% of high scores are bearish
+   because the bias system is bearish, flag the echo chamber risk).
+5. **Pythia as neutral arbiter:** Market profile data is derived from volume, not opinion.
+   When Pythia data contradicts Nick's thesis, it carries extra weight because it's objective.
 
 ---
 
@@ -96,6 +134,14 @@ valuation risk and the possibility of a DeepSeek-style disruption event.
 
 That file contains current economic data points (CPI, unemployment, GDP, PCE, etc.),
 hub data pipeline endpoints, and historical context. Reference it for any macro discussion.
+
+## 📋 OPEN POSITIONS FILE
+
+**See:** `C:\trading-hub\docs\open-positions.md` (also on GitHub)
+
+Contains all open positions with structure, thesis tags, expiration clusters, deployment %,
+and Pythia profile state. **Sync against the hub Ledger (unified_positions table) at the
+start of every chat.** Flag differences immediately.
 
 **Monthly cleanup rule:** Macro data older than 2 months should be compressed or archived
 during the first Battlefield Brief of each month. Keep only the most recent 2-3 prints
