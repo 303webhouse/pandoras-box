@@ -57,6 +57,11 @@ async def _maybe_flag_for_committee(signal_data: Dict[str, Any]) -> None:
     if not signal_id:
         return
 
+    # Auto-promote high-score signals directly to COMMITTEE_REVIEW
+    # so the VPS bridge picks them up automatically (no manual click needed)
+    AUTO_PROMOTE_THRESHOLD = 80.0
+    new_status = "COMMITTEE_REVIEW" if score >= AUTO_PROMOTE_THRESHOLD else "PENDING_REVIEW"
+
     try:
         from database.postgres_client import get_postgres_client
         pool = await get_postgres_client()
@@ -64,15 +69,19 @@ async def _maybe_flag_for_committee(signal_data: Dict[str, Any]) -> None:
             await conn.execute(
                 """
                 UPDATE signals
-                SET status = 'PENDING_REVIEW',
+                SET status = $2,
                     committee_requested_at = NOW()
                 WHERE signal_id = $1
                 AND status = 'ACTIVE'
                 """,
                 signal_id,
+                new_status,
             )
-        signal_data["status"] = "PENDING_REVIEW"
-        logger.info(f"📡 Flagged for signals channel: {signal_data.get('ticker')} (score={score})")
+        signal_data["status"] = new_status
+        if new_status == "COMMITTEE_REVIEW":
+            logger.info(f"🤖 Auto-promoted to committee: {signal_data.get('ticker')} (score={score})")
+        else:
+            logger.info(f"📡 Flagged for signals channel: {signal_data.get('ticker')} (score={score})")
     except Exception as e:
         logger.warning(f"Failed to flag {signal_id} for committee: {e}")
 
