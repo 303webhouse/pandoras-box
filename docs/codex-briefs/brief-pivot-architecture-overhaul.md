@@ -473,6 +473,139 @@ curl -sH "X-API-Key: rLl-7i2GqGjie5in9iHIlVtqlP5zpY7D5E6-8tzlNSk" \
 
 ---
 
+### 2.5 — Auto-promotion + Cowork deep review pipeline + Discord webhook
+
+**This ties together the full automated flow: signal → VPS committee → Discord alert → Cowork deep review → Discord deep review notification → phone push.**
+
+#### A. Auto-promote signals scoring 80+ to COMMITTEE_REVIEW
+
+On the **Railway side** (Pandoras Box backend), find where signal status is set to `PENDING_REVIEW` after scoring. Change the logic so that signals with `score_v2 >= 80` (or `score >= 80` if score_v2 is null) are set directly to `COMMITTEE_REVIEW` instead of `PENDING_REVIEW`. Signals below 80 stay as `PENDING_REVIEW` (manual promotion via dashboard).
+
+Search for `PENDING_REVIEW` in the backend codebase to find the insertion point:
+```bash
+grep -rn "PENDING_REVIEW" C:\trading-hub\backend\
+```
+
+The change is a simple conditional:
+```python
+# Before:
+status = "PENDING_REVIEW"
+
+# After:
+score = signal.get("score_v2") or signal.get("score") or 0
+status = "COMMITTEE_REVIEW" if score >= 80 else "PENDING_REVIEW"
+```
+
+This means the VPS bridge will automatically pick up high-scoring signals on its next 3-minute poll.
+
+#### B. Add Discord webhook URL to VPS env
+
+On the VPS, append to `/etc/openclaw/openclaw.env`:
+```bash
+echo 'COWORK_DISCORD_WEBHOOK=https://discordapp.com/api/webhooks/1493053445291376824/Iuecb5TVpOMOxU2M72RtkJwzvx6poLckKSpBw75lfCmq-bLLlVZLNwpeocMAEkbAuFVB' >> /etc/openclaw/openclaw.env
+```
+
+#### C. Create Cowork workflow document
+
+Create `C:\trading-hub\docs\cowork-committee-workflow.md`:
+
+```markdown
+# Cowork Committee Deep Review Workflow
+
+## Purpose
+When the VPS bridge posts a streamlined committee review to Discord, Cowork runs
+a deeper analysis using tools the VPS doesn't have: web search, vision, Claude in
+Chrome for UW flow, and conversational follow-up.
+
+## Trigger
+Run this workflow every 30 minutes during market hours (9:30 AM - 4:00 PM ET),
+or on demand when Nick asks for a deep review.
+
+## Steps
+
+### 1. Check for new committee reviews
+Query the Railway API for reviews posted since last check:
+```
+curl -sH "X-API-Key: rLl-7i2GqGjie5in9iHIlVtqlP5zpY7D5E6-8tzlNSk" \
+  "https://pandoras-box-production.up.railway.app/api/committee/history?limit=5"
+```
+If no new reviews since last check, stop.
+
+### 2. For each new review, run deep analysis
+For each ticker in the new reviews:
+
+a. **Web search** for breaking news on the ticker (last 4 hours)
+b. **Web search** for Trump/political headlines that could affect the trade
+c. **Verify current price** via web search
+d. **Check open positions** in `C:\trading-hub\docs\open-positions.md` — does this
+   signal conflict with or complement existing positions?
+e. **Check the "what invalidates" column** for any related positions
+f. **Anti-confirmation bias check**: Does this signal reinforce Nick's existing
+   thesis? If so, actively look for counter-evidence.
+g. **Check macro-economic-data.md** for relevant data points
+
+### 3. Write deep review to local file
+Save to `C:\trading-hub\committee-reviews\<TICKER>-<YYYY-MM-DD>.md` with:
+- VPS committee summary (action, conviction, synthesis)
+- Deep analysis findings (news, price, position conflicts)
+- Anti-bias assessment
+- Final recommendation: agree with VPS committee, disagree, or flag for Nick
+
+### 4. Post notification to Discord
+```
+curl -X POST "https://discordapp.com/api/webhooks/1493053445291376824/Iuecb5TVpOMOxU2M72RtkJwzvx6poLckKSpBw75lfCmq-bLLlVZLNwpeocMAEkbAuFVB" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "Cowork Deep Review",
+    "content": "🔍 Deep review complete for **<TICKER>**",
+    "embeds": [{
+      "title": "<TICKER> — <ACTION> — <CONVICTION>",
+      "description": "<2-3 sentence summary of deep findings>",
+      "color": 3066993,
+      "fields": [
+        {"name": "VPS Committee", "value": "<TAKE/PASS/WATCHING>", "inline": true},
+        {"name": "Deep Review", "value": "<AGREE/DISAGREE/FLAG>", "inline": true},
+        {"name": "News Check", "value": "<any breaking news found>", "inline": false}
+      ]
+    }]
+  }'
+```
+
+### 5. Update tracking
+Note the timestamp of the last review processed to avoid re-processing.
+```
+
+#### D. Create the committee-reviews directory
+
+```bash
+mkdir -p C:\trading-hub\committee-reviews
+```
+Add to `.gitignore` (these are local working files, not version controlled):
+```
+committee-reviews/
+```
+
+#### E. Cowork project setup instructions for Nick
+
+1. Open Claude Desktop → Cowork tab
+2. Create a new project pointing at `C:\trading-hub\`
+3. In project settings, add this global instruction:
+   ```
+   You are Nick's trading committee deep review assistant. Follow the workflow
+   in docs/cowork-committee-workflow.md. Always note the current time (ET and MT)
+   at the start of any analysis. Read docs/trading-memory.md for behavioral
+   patterns and rules. Read docs/open-positions.md for current positions.
+   Apply the anti-confirmation-bias rule to every review.
+   ```
+4. Type `/schedule` and create a recurring task:
+   - **Name:** "Committee Deep Review Check"
+   - **Schedule:** Every 30 minutes, weekdays, 9:30 AM - 4:00 PM ET
+   - **Task:** "Check for new committee reviews from the Railway API and run deep analysis per the workflow doc. Post results to Discord."
+
+**Note:** Claude Desktop must be open and computer must be awake during market hours for scheduled tasks to run. Nick has confirmed he will keep it running.
+
+---
+
 ## TIER 3 — CLEANUP & CONSOLIDATION (45 minutes)
 
 ### 3.1 — Strip OpenClaw to essentials
@@ -778,6 +911,10 @@ After completing Tier 1+2:
 - [ ] Committee history endpoint deployed to Railway
 - [ ] Manual test committee review completes successfully
 - [ ] Committee bridge log shows: `[ANALYSTS] Response received` followed by `[PIVOT] Response received`
+- [ ] Signals scoring 80+ auto-promote to COMMITTEE_REVIEW status
+- [ ] Discord webhook URL saved in VPS env file
+- [ ] Cowork workflow doc created at `docs/cowork-committee-workflow.md`
+- [ ] `committee-reviews/` directory created and gitignored
 
 After completing Tier 3:
 - [ ] Dead directories removed
