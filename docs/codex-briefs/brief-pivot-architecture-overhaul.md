@@ -518,7 +518,7 @@ a deeper analysis using tools the VPS doesn't have: web search, vision, Claude i
 Chrome for UW flow, and conversational follow-up.
 
 ## Trigger
-Run this workflow every 30 minutes during market hours (9:30 AM - 4:00 PM ET),
+Run this workflow every 5 minutes during market hours (9:30 AM - 4:00 PM ET),
 or on demand when Nick asks for a deep review.
 
 ## Steps
@@ -599,7 +599,7 @@ committee-reviews/
    ```
 4. Type `/schedule` and create a recurring task:
    - **Name:** "Committee Deep Review Check"
-   - **Schedule:** Every 30 minutes, weekdays, 9:30 AM - 4:00 PM ET
+   - **Schedule:** Every 5 minutes, weekdays, 9:30 AM - 4:00 PM ET
    - **Task:** "Check for new committee reviews from the Railway API and run deep analysis per the workflow doc. Post results to Discord."
 
 **Note:** Claude Desktop must be open and computer must be awake during market hours for scheduled tasks to run. Nick has confirmed he will keep it running.
