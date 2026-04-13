@@ -553,6 +553,25 @@ async def create_position(req: CreatePositionRequest, _=Depends(require_api_key)
 
 # ── READ ──────────────────────────────────────────────────────────────
 
+async def _sweep_expired_positions():
+    """Mark OPEN positions as EXPIRED if their expiry date has passed."""
+    try:
+        pool = await get_postgres_client()
+        async with pool.acquire() as conn:
+            result = await conn.execute("""
+                UPDATE unified_positions
+                SET status = 'EXPIRED', updated_at = NOW()
+                WHERE status = 'OPEN'
+                  AND expiry IS NOT NULL
+                  AND expiry < CURRENT_DATE
+            """)
+            count = int(result.split()[-1]) if result else 0
+            if count > 0:
+                logger.info("Auto-expired %d positions past their expiry date", count)
+    except Exception as e:
+        logger.warning("Expired position sweep failed: %s", e)
+
+
 @router.get("/v2/positions")
 async def list_positions(
     status: str = Query("OPEN", description="Filter by status: OPEN, CLOSED, EXPIRED, or ALL"),
@@ -561,6 +580,9 @@ async def list_positions(
     asset_type: Optional[str] = Query(None, description="Filter by asset type: OPTION, EQUITY, SPREAD"),
 ):
     """List positions, filtered by status."""
+    # Auto-expire positions past their expiry date
+    await _sweep_expired_positions()
+
     pool = await get_postgres_client()
 
     conditions = []
@@ -671,6 +693,28 @@ async def list_positions(
 # NOTE: Must be defined BEFORE /v2/positions/{position_id} to avoid
 #       "summary" being captured as a position_id path parameter.
 
+@router.post("/v2/positions/expire-sweep")
+async def expire_sweep(_=Depends(require_api_key)):
+    """Manually trigger expiry sweep for positions past their expiry date."""
+    try:
+        pool = await get_postgres_client()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch("""
+                UPDATE unified_positions
+                SET status = 'EXPIRED', updated_at = NOW()
+                WHERE status = 'OPEN'
+                  AND expiry IS NOT NULL
+                  AND expiry < CURRENT_DATE
+                RETURNING position_id, ticker, expiry
+            """)
+        expired = [{"position_id": r["position_id"], "ticker": r["ticker"],
+                     "expiry": str(r["expiry"])} for r in rows]
+        return {"status": "ok", "expired_count": len(expired), "expired": expired}
+    except Exception as e:
+        logger.error("Expire sweep failed: %s", e)
+        return {"status": "error", "detail": str(e)}
+
+
 @router.get("/v2/positions/summary")
 async def portfolio_summary(account: Optional[str] = Query(None)):
     """
@@ -678,6 +722,9 @@ async def portfolio_summary(account: Optional[str] = Query(None)):
     Returns: total positions, capital at risk, net direction, nearest expiry.
     Optional account filter: ?account=ROBINHOOD or ?account=FIDELITY
     """
+    # Auto-expire first
+    await _sweep_expired_positions()
+
     pool = await get_postgres_client()
 
     async with pool.acquire() as conn:
