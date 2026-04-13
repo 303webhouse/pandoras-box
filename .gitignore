@@ -43,6 +43,9 @@ Thumbs.db
 .idea/
 .vscode/
 
+# Committee deep review working files
+committee-reviews/
+
 # Local scripts (machine-specific)
 start_discord_bot.bat
 start_discord_bot.ps1
