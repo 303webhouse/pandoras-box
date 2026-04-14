@@ -1984,6 +1984,26 @@ async def log_options_position(position: Dict[Any, Any]):
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_catalyst_events_tier ON catalyst_events (tier)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_catalyst_events_dismissed ON catalyst_events (dismissed)")
 
+        # Committee recommendations table — stores VPS committee review output
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS committee_recommendations (
+                id SERIAL PRIMARY KEY,
+                signal_id VARCHAR(100) UNIQUE NOT NULL,
+                ticker VARCHAR(20) NOT NULL,
+                action VARCHAR(20),
+                conviction VARCHAR(20),
+                synthesis TEXT,
+                invalidation TEXT,
+                structure TEXT,
+                levels TEXT,
+                size TEXT,
+                raw_json JSONB,
+                timestamp TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_committee_recs_ticker ON committee_recommendations(ticker)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_committee_recs_timestamp ON committee_recommendations(timestamp DESC)")
+
         # Source score comparison table — parallel scoring for Great Consolidation
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS source_score_comparisons (
