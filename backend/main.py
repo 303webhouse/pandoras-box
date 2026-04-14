@@ -702,6 +702,8 @@ from webhooks.whale import router as whale_webhook_router
 from webhooks.footprint import router as footprint_webhook_router
 from webhooks.hermes import router as hermes_webhook_router
 from webhooks.pythia_events import router as pythia_webhook_router
+from api.bias_source_comparison import router as bias_comparison_router
+from api.uw_health import router as uw_health_router
 from api.hydra import router as hydra_router
 from api.positions import router as positions_router
 from api.scanner import router as scanner_router
@@ -754,6 +756,8 @@ app.include_router(whale_webhook_router, prefix="/webhook", tags=["whale"])
 app.include_router(footprint_webhook_router, prefix="/webhook", tags=["webhooks"])
 app.include_router(hermes_webhook_router, prefix="/api", tags=["hermes"])
 app.include_router(pythia_webhook_router, prefix="/api", tags=["pythia"])
+app.include_router(bias_comparison_router, prefix="/api", tags=["bias-comparison"])
+app.include_router(uw_health_router, prefix="/api", tags=["uw-health"])
 app.include_router(hydra_router, prefix="/api", tags=["hydra"])
 app.include_router(positions_router, prefix="/api", tags=["positions"])
 app.include_router(scanner_router, prefix="/api", tags=["scanner"])

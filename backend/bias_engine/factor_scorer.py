@@ -100,4 +100,39 @@ async def score_all_factors() -> Dict[str, FactorReading]:
         except Exception as exc:
             logger.error(f"Factor {factor_id} scoring failed: {exc}")
 
+    # ── DUAL SCORING: parallel UW API source comparison ──
+    # When DATA_SOURCE_MODE=parallel, score GEX using both old (Polygon) and new (UW API)
+    # and log comparison to source_score_comparisons table.
+    import os
+    if os.getenv("DATA_SOURCE_MODE", "") == "parallel":
+        try:
+            from bias_filters.gex import compute_score_uw
+            uw_gex_reading = await compute_score_uw()
+
+            # Get the Polygon reading we just computed
+            polygon_gex = results.get("gex")
+
+            if uw_gex_reading and polygon_gex:
+                from api.bias_source_comparison import log_comparison
+                await log_comparison(
+                    factor_id="gex",
+                    old_source="polygon",
+                    old_score=polygon_gex.score,
+                    new_source="uw_api",
+                    new_score=uw_gex_reading.score,
+                    old_detail=polygon_gex.detail or "",
+                    new_detail=uw_gex_reading.detail or "",
+                )
+                logger.info(
+                    "DUAL SCORING gex: polygon=%+.2f uw_api=%+.2f agree=%s",
+                    polygon_gex.score, uw_gex_reading.score,
+                    "YES" if (polygon_gex.score > 0) == (uw_gex_reading.score > 0) else "NO",
+                )
+            elif uw_gex_reading and not polygon_gex:
+                logger.info("DUAL SCORING gex: polygon=NONE uw_api=%+.2f", uw_gex_reading.score)
+            elif polygon_gex and not uw_gex_reading:
+                logger.info("DUAL SCORING gex: polygon=%+.2f uw_api=NONE", polygon_gex.score)
+        except Exception as dual_err:
+            logger.debug("Dual scoring (GEX) skipped: %s", dual_err)
+
     return results

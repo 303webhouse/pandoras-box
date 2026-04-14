@@ -2766,10 +2766,84 @@ async def start_scheduler():
         asyncio.create_task(_sector_refresh_loop())
         logger.info("âœ… Sector refresh loop started (15s interval, market hours)")
 
+        asyncio.create_task(_uw_flow_polling_loop())
+        logger.info("âœ… UW flow polling loop started (30s interval, market hours)")
+
     except ImportError:
         logger.warning("APScheduler not installed, using fallback scheduler")
         # Fallback: Simple asyncio-based scheduler (handles both bias refresh AND scanners)
         asyncio.create_task(_fallback_scheduler())
+
+
+async def _uw_flow_polling_loop():
+    """
+    Poll UW API for flow data every 30 seconds during market hours.
+    Writes to the SAME Redis keys (uw:flow:{SYM}) that downstream consumers
+    (cta_scanner, hydra_squeeze) already read from.
+    API data overwrites Discord scraper data (fresher).
+    """
+    import pytz
+    et = pytz.timezone('America/New_York')
+    # Top tickers to poll flow for
+    FLOW_TICKERS = ["SPY", "QQQ", "IWM", "AAPL", "MSFT", "NVDA", "TSLA", "META",
+                    "AMZN", "GOOGL", "AMD", "XLF", "SMH", "HYG", "TLT"]
+    logger.info("Starting UW flow polling loop (30s interval, market hours, %d tickers)", len(FLOW_TICKERS))
+
+    while True:
+        try:
+            now = datetime.now(et)
+            hour = now.hour
+            minute = now.minute
+            time_decimal = hour + minute / 60.0
+            is_market = is_trading_day() and 9.5 <= time_decimal <= 16.0
+
+            if is_market:
+                try:
+                    from integrations.uw_api import get_flow_recent
+                    from database.redis_client import get_redis_client
+                    import json as _fj
+
+                    redis = await get_redis_client()
+                    if redis:
+                        for ticker in FLOW_TICKERS:
+                            try:
+                                flow = await get_flow_recent(ticker)
+                                if flow and isinstance(flow, list) and len(flow) > 0:
+                                    # Compute summary matching uw:flow:{ticker} schema
+                                    call_prem = sum(float(f.get("premium", 0)) for f in flow if f.get("option_type") == "call")
+                                    put_prem = sum(float(f.get("premium", 0)) for f in flow if f.get("option_type") == "put")
+                                    call_vol = sum(int(f.get("volume", 0) or 0) for f in flow if f.get("option_type") == "call")
+                                    put_vol = sum(int(f.get("volume", 0) or 0) for f in flow if f.get("option_type") == "put")
+                                    total_prem = call_prem + put_prem
+                                    pc_ratio = put_vol / call_vol if call_vol > 0 else 0
+
+                                    summary = {
+                                        "ticker": ticker,
+                                        "call_premium": round(call_prem, 2),
+                                        "put_premium": round(put_prem, 2),
+                                        "total_premium": round(total_prem, 2),
+                                        "net_premium": round(call_prem - put_prem, 2),
+                                        "call_volume": call_vol,
+                                        "put_volume": put_vol,
+                                        "pc_ratio": round(pc_ratio, 3),
+                                        "sentiment": "BULLISH" if call_prem > put_prem * 1.3 else "BEARISH" if put_prem > call_prem * 1.3 else "NEUTRAL",
+                                        "flow_count": len(flow),
+                                        "source": "uw_api",
+                                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                                    }
+                                    await redis.set(f"uw:flow:{ticker}", _fj.dumps(summary), ex=1800)
+                            except Exception as ft_err:
+                                logger.debug("UW flow poll failed for %s: %s", ticker, ft_err)
+                            await asyncio.sleep(0.5)  # Spread requests
+
+                except Exception as loop_err:
+                    logger.warning("UW flow polling cycle error: %s", loop_err)
+
+            await asyncio.sleep(30)
+
+        except Exception as e:
+            logger.error("Error in UW flow polling loop: %s", e)
+            await asyncio.sleep(30)
 
 
 async def _sector_refresh_loop():

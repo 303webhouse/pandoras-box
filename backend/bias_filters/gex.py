@@ -117,6 +117,83 @@ async def compute_score() -> Optional[FactorReading]:
     )
 
 
+async def compute_score_uw() -> Optional[FactorReading]:
+    """Compute GEX score from SPY options chain via UW API (shadow/parallel mode)."""
+    try:
+        from integrations.uw_api import get_greek_exposure, get_snapshot
+    except ImportError:
+        from backend.integrations.uw_api import get_greek_exposure, get_snapshot
+
+    # Get SPY price
+    snap = await get_snapshot("SPY")
+    spy_price = snap.get("day", {}).get("c") if snap else None
+    if not spy_price or spy_price <= 0:
+        spy_price = await get_latest_price("SPY")
+    if not spy_price or spy_price <= 0:
+        logger.warning("gex_uw: cannot get SPY price — skipping")
+        return None
+
+    # UW GEX endpoint returns pre-computed gamma exposure per expiry
+    gex_data = await get_greek_exposure("SPY")
+    if not gex_data:
+        logger.warning("gex_uw: no UW GEX data for SPY — skipping")
+        return None
+
+    # Sum net GEX across all expirations
+    # UW returns: call_gamma, put_gamma as strings per expiry date
+    net_gex = 0.0
+    expirations_used = 0
+    for entry in gex_data:
+        try:
+            call_g = float(entry.get("call_gamma") or 0)
+            put_g = float(entry.get("put_gamma") or 0)
+            # Net GEX = call gamma - |put gamma| (put gamma is already negative conceptually)
+            net_gex += call_g + put_g  # put_gamma from UW is already negative
+            expirations_used += 1
+        except (ValueError, TypeError):
+            continue
+
+    if expirations_used < 3:
+        return neutral_reading("gex", f"GEX(UW): insufficient expirations ({expirations_used})", source="uw_api")
+
+    # UW gamma values are much larger scale than Polygon (pre-multiplied by OI*100*price)
+    # Use a larger scale factor
+    uw_scale = 50_000_000_000  # $50B — calibrated for UW's aggregate gamma values
+    normalized = net_gex / uw_scale
+    score = _score_gex(normalized)
+
+    if normalized > 0.5:
+        label = "strong compression (dealers long gamma)"
+    elif normalized > 0.05:
+        label = "mild compression"
+    elif normalized > -0.05:
+        label = "neutral/transition"
+    elif normalized > -0.2:
+        label = "mild amplification"
+    else:
+        label = "strong amplification (dealers short gamma)"
+
+    logger.info(
+        "gex_uw: net_gex=$%.0fM, normalized=%.3f (%s), score=%+.2f, expirations=%d",
+        net_gex / 1e6, normalized, label, score, expirations_used,
+    )
+
+    return FactorReading(
+        factor_id="gex",
+        score=score,
+        signal=score_to_signal(score),
+        detail=f"GEX(UW): ${net_gex/1e9:.2f}B ({label}), {expirations_used} expirations",
+        timestamp=datetime.utcnow(),
+        source="uw_api",
+        raw_data={
+            "net_gex": round(net_gex, 0),
+            "normalized": round(normalized, 4),
+            "spy_price": round(spy_price, 2),
+            "expirations_used": expirations_used,
+        },
+    )
+
+
 def _score_gex(normalized: float) -> float:
     """
     Score normalized GEX value.
