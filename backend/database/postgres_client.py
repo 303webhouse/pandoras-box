@@ -1984,6 +1984,24 @@ async def log_options_position(position: Dict[Any, Any]):
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_catalyst_events_tier ON catalyst_events (tier)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_catalyst_events_dismissed ON catalyst_events (dismissed)")
 
+        # Source score comparison table — parallel scoring for Great Consolidation
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS source_score_comparisons (
+                id SERIAL PRIMARY KEY,
+                factor_id TEXT NOT NULL,
+                old_source TEXT NOT NULL,
+                old_score NUMERIC(8,4),
+                new_source TEXT NOT NULL,
+                new_score NUMERIC(8,4),
+                directional_agreement BOOLEAN,
+                magnitude_diff NUMERIC(8,4),
+                old_detail TEXT,
+                new_detail TEXT,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_source_comparisons_factor ON source_score_comparisons(factor_id, created_at DESC)")
+
         # Pythia Market Profile events table
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS pythia_events (
