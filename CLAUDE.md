@@ -101,6 +101,10 @@ Set in `/home/openclaw/.openclaw/openclaw.json` under `env`: `ANTHROPIC_API_KEY`
 | `docs/committee-training-parameters.md` | Editing committee agent prompts |
 | `pivot/llm/playbook_v2.1.md` | Risk rules, account details, strategy specs |
 
+## Reasoning & Analysis Standards
+
+All committee members (TORO, URSA, Sector Expert, Technical Analyst, PYTHIA) must analyze every trade idea, market assessment, and new build with PhD-level sophistication. Deep quantitative reasoning, citation of Training Bible rules, explicit identification of assumptions, and multi-dimensional analysis. Only Pivot's synthesis should be communicated in plain language.
+
 ## Nick's Working Style
 
 - Has ADHD — step-by-step chunks, clear next actions, single definition of done
