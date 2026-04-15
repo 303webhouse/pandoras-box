@@ -73,7 +73,7 @@ async def scan_wrr(tickers: Optional[List[str]] = None) -> Dict[str, Any]:
     """
     Run WRR scan across ticker universe. Returns dict with signals and metadata.
     """
-    from integrations.polygon_equities import get_bars
+    from integrations.uw_api import get_bars
 
     if tickers is None:
         try:

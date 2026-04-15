@@ -176,7 +176,7 @@ async def _check_spy_recovery(threshold_pct: float) -> bool:
     """Check if SPY is no longer down by threshold_pct from previous close."""
     try:
         # Try Polygon first
-        from integrations.polygon_equities import get_snapshot, get_previous_close
+        from integrations.uw_api import get_snapshot, get_previous_close
         snapshot = await get_snapshot("SPY")
         prev = await get_previous_close("SPY")
         if snapshot and prev:

@@ -40,7 +40,7 @@ async def get_strc_price() -> Optional[Dict[str, Any]]:
     """
     # Try Polygon snapshot first
     try:
-        from integrations.polygon_equities import get_snapshot
+        from integrations.uw_api import get_snapshot
         snap = await get_snapshot("STRC")
         if snap:
             # Snapshot has day.c (today's close so far) or lastTrade.p
@@ -59,7 +59,7 @@ async def get_strc_price() -> Optional[Dict[str, Any]]:
 
     # Try Polygon previous close
     try:
-        from integrations.polygon_equities import get_previous_close
+        from integrations.uw_api import get_previous_close
         prev = await get_previous_close("STRC")
         if prev and prev.get("c"):
             return {

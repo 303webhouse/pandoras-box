@@ -41,9 +41,9 @@ DECORRELATED_THRESHOLD = 0.30
 async def fetch_close_series(ticker: str, days: int = LOOKBACK_DAYS) -> Optional[List[float]]:
     """Fetch daily close prices from Polygon."""
     try:
-        from integrations.polygon_equities import get_bars
+        from integrations.uw_api import get_bars
     except ModuleNotFoundError:
-        from backend.integrations.polygon_equities import get_bars
+        from backend.integrations.uw_api import get_bars
 
     today = date.today()
     from_date = (today - timedelta(days=int(days * 1.8))).isoformat()

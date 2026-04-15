@@ -111,7 +111,7 @@ async def compute_iv_rank(ticker: str) -> Optional[float]:
     This is expensive — only called during universe cache refresh, not per-signal.
     """
     try:
-        from integrations.polygon_options import get_options_snapshot
+        from integrations.uw_api import get_options_snapshot
 
         # Get ATM options snapshot for nearest expiry
         chain = await get_options_snapshot(ticker, contract_type="call")
@@ -170,7 +170,7 @@ async def refresh_ticker(ticker: str) -> Optional[Dict[str, Any]]:
     # Try Polygon bars first (already has 5-min in-memory cache)
     bars = None
     try:
-        from integrations.polygon_equities import get_bars
+        from integrations.uw_api import get_bars
         raw_bars = await get_bars(ticker, 1, "day")
         if raw_bars and len(raw_bars) >= 15:
             bars = raw_bars
