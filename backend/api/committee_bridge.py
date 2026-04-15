@@ -175,14 +175,13 @@ async def get_committee_enrichment(ticker: str):
     iv_block = None
     iv_raw = _safe(iv_data)
     if iv_raw:
-        entry = iv_raw[0] if isinstance(iv_raw, list) and iv_raw else iv_raw
+        # Time series sorted ascending — take the LAST (most recent) entry
+        entry = iv_raw[-1] if isinstance(iv_raw, list) and iv_raw else iv_raw
         if isinstance(entry, dict):
             iv_block = {
-                "iv_rank": entry.get("iv_rank"),
-                "iv_pct": entry.get("iv_percentile") or entry.get("iv_pct"),
-                "current_iv": entry.get("implied_volatility") or entry.get("iv"),
-                "iv_high_52w": entry.get("iv_high"),
-                "iv_low_52w": entry.get("iv_low"),
+                "iv_rank": entry.get("iv_rank_1y"),
+                "current_iv": entry.get("volatility"),
+                "as_of": entry.get("date"),
             }
 
     # ── Market Tide ──
