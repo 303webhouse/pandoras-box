@@ -423,6 +423,51 @@ async def get_darkpool_recent() -> Optional[List[Dict[str, Any]]]:
     return result
 
 
+async def get_darkpool_ticker(ticker: str) -> Optional[List[Dict[str, Any]]]:
+    """Fetch dark pool prints for a specific ticker."""
+    cached = await cache_get("darkpool", ticker.upper())
+    if cached:
+        return cached
+
+    data = await _uw_request(f"/api/darkpool/{ticker.upper()}")
+    if not data or "data" not in data:
+        return None
+
+    result = data["data"]
+    await cache_set("darkpool", ticker.upper(), result)
+    return result
+
+
+async def get_max_pain(ticker: str) -> Optional[Dict[str, Any]]:
+    """Fetch max pain data for a ticker."""
+    cached = await cache_get("max_pain", ticker.upper())
+    if cached:
+        return cached
+
+    data = await _uw_request(f"/api/stock/{ticker.upper()}/max-pain")
+    if not data or "data" not in data:
+        return None
+
+    result = data["data"]
+    await cache_set("max_pain", ticker.upper(), result)
+    return result
+
+
+async def get_sector_etfs() -> Optional[List[Dict[str, Any]]]:
+    """Fetch sector ETF flow data."""
+    cached = await cache_get("sector_etfs", "market")
+    if cached:
+        return cached
+
+    data = await _uw_request("/api/market/sector-etfs")
+    if not data or "data" not in data:
+        return None
+
+    result = data["data"]
+    await cache_set("sector_etfs", "market", result)
+    return result
+
+
 async def get_iv_rank(ticker: str) -> Optional[List[Dict[str, Any]]]:
     """Fetch IV rank data for a ticker."""
     cached = await cache_get("iv_rank", ticker.upper())
