@@ -1,6 +1,6 @@
 """
 Short Interest Data Provider
-Tries Polygon first, falls back to yfinance.
+Tries UW API first, then Polygon, falls back to yfinance.
 Caches results in Redis (24h TTL) to avoid repeated API calls.
 """
 
@@ -31,7 +31,9 @@ async def get_short_interest(ticker: str) -> Optional[Dict]:
         if cached:
             return json.loads(cached)
 
-    data = await _try_polygon(ticker)
+    data = await _try_uw_api(ticker)
+    if not data:
+        data = await _try_polygon(ticker)
     if not data:
         data = await _try_yfinance(ticker)
 
@@ -39,6 +41,36 @@ async def get_short_interest(ticker: str) -> Optional[Dict]:
         await redis.set(f"hydra:short:{ticker}", json.dumps(data), ex=86400)
 
     return data
+
+
+async def _try_uw_api(ticker: str) -> Optional[Dict]:
+    """Attempt to get short interest from UW API."""
+    try:
+        from integrations.uw_api import get_short_interest as uw_short
+        data = await uw_short(ticker)
+        if data and isinstance(data, list) and len(data) > 0:
+            latest = data[0]
+            short_shares = int(latest.get("short_shares_available") or 0)
+            fee_rate = float(latest.get("fee_rate") or 0)
+            # UW /shorts/{ticker}/data returns availability data
+            # Map to our expected schema
+            if short_shares > 0:
+                return {
+                    "ticker": ticker,
+                    "short_pct_float": 0,  # Not directly in this endpoint
+                    "days_to_cover": 0,
+                    "shares_short": 0,
+                    "shares_short_prior": 0,
+                    "short_shares_available": short_shares,
+                    "fee_rate": fee_rate,
+                    "source": "uw_api",
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }
+    except ImportError:
+        logger.debug("uw_api not available for short interest")
+    except Exception as e:
+        logger.debug("UW API short interest failed for %s: %s", ticker, e)
+    return None
 
 
 async def _try_polygon(ticker: str) -> Optional[Dict]:

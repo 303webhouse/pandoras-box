@@ -136,9 +136,9 @@ async def _fetch_snapshot(ticker: str) -> Optional[Dict[str, Any]]:
 
     Returns dict with current_price, today_volume, prev_close or None.
     """
-    # Try Polygon snapshot first (5-min in-memory cache in polygon_equities.py)
+    # Try UW API snapshot first (Polygon-compatible schema)
     try:
-        from integrations.polygon_equities import get_snapshot
+        from integrations.uw_api import get_snapshot
         snap = await get_snapshot(ticker)
         if snap:
             result: Dict[str, Any] = {}
@@ -164,9 +164,29 @@ async def _fetch_snapshot(ticker: str) -> Optional[Dict[str, Any]]:
                 return result
 
     except ImportError:
-        logger.debug("polygon_equities not available")
+        logger.debug("uw_api not available, trying Polygon fallback")
+        try:
+            from integrations.polygon_equities import get_snapshot as polygon_get_snapshot
+            snap = await polygon_get_snapshot(ticker)
+            if snap:
+                result: Dict[str, Any] = {}
+                day_data = snap.get("day", {})
+                if day_data and day_data.get("c"):
+                    result["current_price"] = float(day_data["c"])
+                    result["today_volume"] = float(day_data.get("v", 0)) if day_data.get("v") else None
+                prev = snap.get("prevDay", {})
+                if prev and prev.get("c"):
+                    result["prev_close"] = float(prev["c"])
+                if not result.get("current_price"):
+                    last_trade = snap.get("lastTrade", {})
+                    if last_trade and last_trade.get("p"):
+                        result["current_price"] = float(last_trade["p"])
+                if result.get("current_price"):
+                    return result
+        except ImportError:
+            logger.debug("polygon_equities not available either")
     except Exception as e:
-        logger.debug(f"Polygon snapshot failed for {ticker}: {e}")
+        logger.debug(f"UW API snapshot failed for {ticker}: {e}")
 
     # yfinance fallback
     try:

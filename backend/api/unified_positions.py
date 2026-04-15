@@ -994,13 +994,20 @@ async def _portfolio_greeks_inner():
         except Exception:
             pass
 
+    # Try UW API first, fall back to Polygon
+    get_ticker_greeks_summary = None
     try:
-        from integrations.polygon_options import get_ticker_greeks_summary, POLYGON_API_KEY
+        from integrations.uw_api import get_options_snapshot as _uw_opts
+        from integrations.polygon_options import get_ticker_greeks_summary
     except ImportError:
-        return {"status": "unavailable", "tickers": {}, "totals": {"delta": 0, "gamma": 0, "theta": 0, "vega": 0}}
-
-    if not POLYGON_API_KEY:
-        return {"status": "no_api_key", "tickers": {}, "totals": {"delta": 0, "gamma": 0, "theta": 0, "vega": 0}}
+        pass
+    if not get_ticker_greeks_summary:
+        try:
+            from integrations.polygon_options import get_ticker_greeks_summary, POLYGON_API_KEY
+            if not POLYGON_API_KEY:
+                return {"status": "no_api_key", "tickers": {}, "totals": {"delta": 0, "gamma": 0, "theta": 0, "vega": 0}}
+        except ImportError:
+            return {"status": "unavailable", "tickers": {}, "totals": {"delta": 0, "gamma": 0, "theta": 0, "vega": 0}}
 
     try:
         pool = await get_postgres_client()
@@ -1929,9 +1936,16 @@ async def run_mark_to_market() -> dict:
     Falls back to yfinance underlying price for equity positions.
     Updates unrealized P&L based on actual spread mid-prices.
     """
-    from integrations.polygon_options import (
-        get_spread_value, get_single_option_value, get_multi_leg_value, POLYGON_API_KEY
-    )
+    # Import options valuation functions — UW API provides Polygon-compatible schemas
+    try:
+        from integrations.polygon_options import (
+            get_spread_value, get_single_option_value, get_multi_leg_value, POLYGON_API_KEY
+        )
+    except ImportError:
+        POLYGON_API_KEY = ""
+        get_spread_value = None
+        get_single_option_value = None
+        get_multi_leg_value = None
 
     pool = await get_postgres_client()
 
@@ -1945,7 +1959,7 @@ async def run_mark_to_market() -> dict:
 
     updated = 0
     errors = []
-    use_polygon = bool(POLYGON_API_KEY)
+    use_polygon = bool(POLYGON_API_KEY) and get_spread_value is not None
 
     # Cache chain snapshots per ticker to avoid duplicate API calls
     for row in rows:

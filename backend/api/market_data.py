@@ -128,14 +128,38 @@ async def get_option_value(
 async def get_news(
     limit: int = Query(10, ge=1, le=50),
 ):
-    """Top market headlines from Polygon.io reference news."""
-    if not POLYGON_API_KEY:
-        raise HTTPException(status_code=503, detail="Polygon API key not configured")
-
+    """Top market headlines — UW API primary, Polygon fallback."""
     cache_key = f"news:{limit}"
     cached = _news_cache.get(cache_key)
     if cached and (time.time() - cached[0]) < _NEWS_CACHE_TTL:
         return cached[1]
+
+    # Try UW API first
+    try:
+        from integrations.uw_api import get_news_headlines
+        uw_data = await get_news_headlines(limit=limit)
+        if uw_data:
+            articles = []
+            for item in uw_data:
+                articles.append({
+                    "title": item.get("headline"),
+                    "url": None,
+                    "source": item.get("source"),
+                    "published": item.get("created_at"),
+                    "tickers": item.get("tickers", []),
+                    "image_url": None,
+                    "sentiment": item.get("sentiment"),
+                    "is_major": item.get("is_major", False),
+                })
+            result = {"articles": articles, "count": len(articles), "source": "uw_api"}
+            _news_cache[cache_key] = (time.time(), result)
+            return result
+    except Exception as e:
+        logger.debug("UW news fetch failed, trying Polygon: %s", e)
+
+    # Polygon fallback
+    if not POLYGON_API_KEY:
+        raise HTTPException(status_code=503, detail="No news source configured")
 
     try:
         async with httpx.AsyncClient(timeout=15) as client:
@@ -162,13 +186,13 @@ async def get_news(
                 "image_url": item.get("image_url"),
             })
 
-        result = {"articles": articles, "count": len(articles)}
+        result = {"articles": articles, "count": len(articles), "source": "polygon"}
         _news_cache[cache_key] = (time.time(), result)
         return result
 
     except httpx.HTTPStatusError as e:
         logger.warning("Polygon news API error: %s", e)
-        raise HTTPException(status_code=502, detail="Polygon news unavailable")
+        raise HTTPException(status_code=502, detail="News unavailable")
     except Exception as e:
         logger.warning("Failed to fetch news: %s", e)
         raise HTTPException(status_code=502, detail="News fetch failed")
