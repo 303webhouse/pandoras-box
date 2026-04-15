@@ -91,9 +91,9 @@ async def save_trip_wires(wires: List[Dict[str, Any]]) -> None:
 async def _get_current_value(ticker: str, field: str) -> Any:
     """Fetch the current value for a trip wire check."""
     try:
-        from integrations.polygon_equities import get_snapshot, get_bars
+        from integrations.uw_api import get_snapshot, get_bars
     except ModuleNotFoundError:
-        from backend.integrations.polygon_equities import get_snapshot, get_bars
+        from backend.integrations.uw_api import get_snapshot, get_bars
 
     if field == "below_sma200":
         bars = await get_bars(ticker, 1, "day")

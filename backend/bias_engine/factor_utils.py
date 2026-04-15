@@ -374,7 +374,7 @@ async def get_price_history(ticker: str, days: int = 30) -> pd.DataFrame:
     # --- Polygon primary path (equity/ETF tickers only) ---
     if symbol not in _YFINANCE_ONLY_SYMBOLS:
         try:
-            from integrations.polygon_equities import get_bars_as_dataframe as _polygon_bars
+            from integrations.uw_api import get_bars_as_dataframe as _polygon_bars
             polygon_df = await _polygon_bars(symbol, days)
             if polygon_df is not None and not polygon_df.empty:
                 polygon_df = _normalize_history(polygon_df)

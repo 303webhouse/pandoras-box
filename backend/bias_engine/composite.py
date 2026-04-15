@@ -688,7 +688,7 @@ async def _fetch_rvol() -> Optional[float]:
     """
     try:
         # Try Polygon first
-        from integrations.polygon_equities import get_snapshot, get_bars
+        from integrations.uw_api import get_snapshot, get_bars
         from datetime import date
 
         snapshot = await get_snapshot("SPY")

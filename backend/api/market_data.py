@@ -32,7 +32,7 @@ _NEWS_CACHE_TTL = 600  # 10 minutes
 @router.get("/market/quote/{ticker}")
 async def get_quote(ticker: str):
     """Current stock/ETF snapshot (price, volume, change %)."""
-    from integrations.polygon_equities import get_snapshot
+    from integrations.uw_api import get_snapshot
 
     result = await get_snapshot(ticker.upper())
     if result is None:
@@ -43,7 +43,7 @@ async def get_quote(ticker: str):
 @router.get("/market/previous-close/{ticker}")
 async def get_previous_close(ticker: str):
     """Previous trading day OHLCV."""
-    from integrations.polygon_equities import get_previous_close as _get_prev
+    from integrations.uw_api import get_previous_close as _get_prev
 
     result = await _get_prev(ticker.upper())
     if result is None:
@@ -59,7 +59,7 @@ async def get_bars(
     multiplier: int = Query(1, ge=1, le=60),
 ):
     """OHLCV price history bars."""
-    from integrations.polygon_equities import get_bars as _get_bars
+    from integrations.uw_api import get_bars as _get_bars
 
     from_date = (date.today() - timedelta(days=int(days * 1.6) + 5)).isoformat()
     to_date = date.today().isoformat()
@@ -79,7 +79,7 @@ async def get_options_chain(
     contract_type: Optional[str] = Query(None),
 ):
     """Options chain snapshot with greeks, IV, bid/ask."""
-    from integrations.polygon_options import get_options_snapshot
+    from integrations.uw_api import get_options_snapshot
 
     result = await get_options_snapshot(
         ticker.upper(),

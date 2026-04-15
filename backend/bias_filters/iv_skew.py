@@ -21,13 +21,13 @@ logger = logging.getLogger(__name__)
 try:
     from bias_engine.composite import FactorReading
     from bias_engine.factor_utils import score_to_signal, get_price_history
-    from integrations.polygon_options import get_options_snapshot, POLYGON_API_KEY
+    from integrations.uw_api import get_options_snapshot
 except ImportError:
     FactorReading = None
     score_to_signal = None
     get_options_snapshot = None
     get_price_history = None
-    POLYGON_API_KEY = ""
+    pass
 
 # Near-the-money filter parameters
 NTM_BAND_PCT = 0.05   # ±5% of current price
@@ -55,8 +55,8 @@ async def compute_score() -> Optional[FactorReading]:
     Uses NTM-filtered Polygon API call (±5% of price) for better contract
     coverage within pagination limits.
     """
-    if not POLYGON_API_KEY:
-        logger.warning("iv_skew: POLYGON_API_KEY not set — skipping")
+    if not get_options_snapshot:
+        logger.warning("iv_skew: options snapshot function not available — skipping")
         return None
 
     # Get current SPY price for NTM filtering
