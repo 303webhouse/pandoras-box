@@ -584,6 +584,295 @@ async def get_congressional_trades(limit: int = 20) -> Optional[List[Dict[str, A
     return result
 
 
+# ── MTM Valuation Functions (Polygon-compatible) ─────────────────
+# These mirror polygon_options.py's spread/multi-leg/single/greeks functions.
+# They operate on the chain data from get_options_snapshot() which is already
+# normalized to Polygon schema.
+
+def _find_contract(chain: list, strike: float, expiry: str, option_type: str) -> Optional[dict]:
+    """Find a specific contract in the chain by strike/expiry/type."""
+    norm_expiry = str(expiry)[:10]
+    for c in chain:
+        details = c.get("details", {})
+        if not details:
+            continue
+        if (details.get("contract_type", "").lower() == option_type
+            and str(details.get("expiration_date", ""))[:10] == norm_expiry
+            and abs(float(details.get("strike_price", 0)) - strike) < 0.01):
+            return c
+    return None
+
+
+def _get_contract_mid(contract: dict) -> Optional[float]:
+    """Get mid-price from bid/ask, falling back to last trade, day close, vwap."""
+    # 1. Bid/ask mid
+    quote = contract.get("last_quote", {})
+    bid = quote.get("bid")
+    ask = quote.get("ask")
+    if bid and ask and float(bid) > 0 and float(ask) > 0:
+        return round((float(bid) + float(ask)) / 2, 4)
+    # 2. Last trade
+    trade = contract.get("last_trade", {})
+    price = trade.get("price")
+    if price and float(price) > 0:
+        return float(price)
+    # 3. Day close
+    day = contract.get("day", {})
+    close = day.get("close")
+    if close and float(close) > 0:
+        return float(close)
+    # 4. VWAP
+    vwap = day.get("vwap")
+    if vwap and float(vwap) > 0:
+        return float(vwap)
+    return None
+
+
+def _get_contract_greeks(contract: dict) -> dict:
+    """Extract greeks from a contract dict."""
+    greeks = contract.get("greeks", {})
+    return {
+        "delta": greeks.get("delta"),
+        "gamma": greeks.get("gamma"),
+        "theta": greeks.get("theta"),
+        "vega": greeks.get("vega"),
+        "iv": contract.get("implied_volatility"),
+    }
+
+
+async def get_spread_value(
+    underlying: str,
+    long_strike: float,
+    short_strike: float,
+    expiry: str,
+    structure: str,
+) -> Optional[Dict[str, Any]]:
+    """Get current spread value from UW options chain. Matches polygon_options schema."""
+    struct_lower = structure.lower()
+    if "put" in struct_lower:
+        opt_type = "put"
+    elif "call" in struct_lower:
+        opt_type = "call"
+    else:
+        return None
+
+    chain = await get_options_snapshot(
+        underlying,
+        expiration_date=str(expiry)[:10],
+        strike_gte=min(long_strike, short_strike) - 0.5,
+        strike_lte=max(long_strike, short_strike) + 0.5,
+        contract_type=opt_type,
+    )
+    if not chain:
+        return None
+
+    long_c = _find_contract(chain, long_strike, expiry, opt_type)
+    short_c = _find_contract(chain, short_strike, expiry, opt_type)
+    if not long_c or not short_c:
+        logger.warning("spread_value: missing contract for %s %s/%s %s", underlying, long_strike, short_strike, expiry)
+        return None
+
+    long_mid = _get_contract_mid(long_c)
+    short_mid = _get_contract_mid(short_c)
+    if long_mid is None or short_mid is None:
+        return None
+
+    if "credit" in struct_lower:
+        spread_value = round(short_mid - long_mid, 4)
+    else:
+        spread_value = round(long_mid - short_mid, 4)
+
+    underlying_price = None
+    for c in [long_c, short_c]:
+        ua = c.get("underlying_asset", {})
+        if ua and ua.get("price"):
+            underlying_price = float(ua["price"])
+            break
+
+    return {
+        "spread_value": spread_value,
+        "long_mid": long_mid,
+        "short_mid": short_mid,
+        "long_greeks": _get_contract_greeks(long_c),
+        "short_greeks": _get_contract_greeks(short_c),
+        "underlying_price": underlying_price,
+    }
+
+
+async def get_single_option_value(
+    underlying: str,
+    strike: float,
+    expiry: str,
+    option_type: str,
+) -> Optional[Dict[str, Any]]:
+    """Get current value of a single option contract. Matches polygon_options schema."""
+    chain = await get_options_snapshot(
+        underlying,
+        expiration_date=str(expiry)[:10],
+        strike_gte=strike - 0.5,
+        strike_lte=strike + 0.5,
+        contract_type=option_type,
+    )
+    if not chain:
+        return None
+
+    contract = _find_contract(chain, strike, expiry, option_type)
+    if not contract:
+        return None
+
+    mid = _get_contract_mid(contract)
+    if mid is None:
+        return None
+
+    underlying_price = None
+    ua = contract.get("underlying_asset", {})
+    if ua and ua.get("price"):
+        underlying_price = float(ua["price"])
+
+    return {
+        "option_value": mid,
+        "greeks": _get_contract_greeks(contract),
+        "underlying_price": underlying_price,
+    }
+
+
+async def get_multi_leg_value(
+    underlying: str,
+    legs: List[Dict[str, Any]],
+    expiry: str,
+) -> Optional[Dict[str, Any]]:
+    """Get net mark for a multi-leg position. Matches polygon_options schema."""
+    if not legs:
+        return None
+
+    strikes = [float(l.get("strike", 0)) for l in legs]
+    strike_lo = min(strikes) - 0.5
+    strike_hi = max(strikes) + 0.5
+
+    opt_types = set(l.get("option_type", "").lower() for l in legs)
+    ct_filter = None
+    if opt_types == {"put"}:
+        ct_filter = "put"
+    elif opt_types == {"call"}:
+        ct_filter = "call"
+
+    chain = await get_options_snapshot(
+        underlying,
+        expiration_date=str(expiry)[:10],
+        strike_gte=strike_lo,
+        strike_lte=strike_hi,
+        contract_type=ct_filter,
+    )
+    if not chain:
+        return None
+
+    net_mark = 0.0
+    leg_details = []
+    underlying_price = None
+
+    for leg in legs:
+        action = leg.get("action", "BUY").upper()
+        opt_type = leg.get("option_type", "call").lower()
+        strike = float(leg.get("strike", 0))
+        qty = int(leg.get("quantity", 1))
+
+        contract = _find_contract(chain, strike, expiry, opt_type)
+        if not contract:
+            logger.warning("multi_leg: missing %s %s %s %s", underlying, strike, expiry, opt_type)
+            return None
+
+        mid = _get_contract_mid(contract)
+        if mid is None:
+            return None
+
+        sign = 1 if action == "BUY" else -1
+        net_mark += mid * sign * qty
+
+        if underlying_price is None:
+            ua = contract.get("underlying_asset", {})
+            if ua and ua.get("price"):
+                underlying_price = float(ua["price"])
+
+        leg_details.append({
+            "action": action,
+            "option_type": opt_type,
+            "strike": strike,
+            "quantity": qty,
+            "mid": mid,
+            "greeks": _get_contract_greeks(contract),
+        })
+
+    return {
+        "net_mark": round(net_mark, 4),
+        "leg_details": leg_details,
+        "underlying_price": underlying_price,
+    }
+
+
+async def get_ticker_greeks_summary(
+    underlying: str,
+    positions: List[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    """Aggregate greeks for all positions in a ticker. Matches polygon_options schema."""
+    chain = await get_options_snapshot(underlying)
+    if not chain:
+        return None
+
+    total_delta = 0.0
+    total_gamma = 0.0
+    total_theta = 0.0
+    total_vega = 0.0
+    underlying_price = None
+
+    for pos in positions:
+        structure = (pos.get("structure") or "").lower()
+        qty = int(pos.get("quantity") or pos.get("qty") or 1)
+        expiry = pos.get("expiry") or pos.get("expiration")
+        long_strike = pos.get("long_strike")
+        short_strike = pos.get("short_strike")
+
+        if not expiry or not long_strike:
+            continue
+
+        if "put" in structure:
+            opt_type = "put"
+        elif "call" in structure:
+            opt_type = "call"
+        else:
+            continue
+
+        # Long leg
+        long_c = _find_contract(chain, float(long_strike), str(expiry), opt_type)
+        if long_c:
+            g = _get_contract_greeks(long_c)
+            total_delta += (g.get("delta") or 0) * qty * 100
+            total_gamma += (g.get("gamma") or 0) * qty * 100
+            total_theta += (g.get("theta") or 0) * qty * 100
+            total_vega += (g.get("vega") or 0) * qty * 100
+            if underlying_price is None:
+                ua = long_c.get("underlying_asset", {})
+                if ua and ua.get("price"):
+                    underlying_price = float(ua["price"])
+
+        # Short leg
+        if short_strike:
+            short_c = _find_contract(chain, float(short_strike), str(expiry), opt_type)
+            if short_c:
+                g = _get_contract_greeks(short_c)
+                total_delta -= (g.get("delta") or 0) * qty * 100
+                total_gamma -= (g.get("gamma") or 0) * qty * 100
+                total_theta -= (g.get("theta") or 0) * qty * 100
+                total_vega -= (g.get("vega") or 0) * qty * 100
+
+    return {
+        "underlying_price": underlying_price,
+        "net_delta": round(total_delta, 2),
+        "net_gamma": round(total_gamma, 4),
+        "net_theta": round(total_theta, 2),
+        "net_vega": round(total_vega, 2),
+    }
+
+
 # ── Health check data ────────────────────────────────────────────
 
 async def get_health() -> Dict[str, Any]:
