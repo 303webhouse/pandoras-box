@@ -5084,7 +5084,12 @@ async function handleSignalAction(event) {
     if (action === 'TOGGLE-COMMITTEE') {
         const panel = card.querySelector('.committee-panel');
         if (panel) {
-            panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+            const isOpening = panel.style.display === 'none';
+            panel.style.display = isOpening ? 'block' : 'none';
+            // Load per-ticker enrichment when opening
+            if (isOpening && signal && signal.ticker) {
+                loadSignalEnrichment(signal.ticker, panel);
+            }
         }
         return;
     }
@@ -7911,6 +7916,8 @@ function initOptionsFlow() {
 
     loadSectorHeatmap();
     loadFlowRadar();
+    loadMarketIntel();
+    loadMorningBriefing();
     loadMacroStrip();
     loadTripWires();
     loadBlackSwanAlerts();
@@ -7918,6 +7925,7 @@ function initOptionsFlow() {
     setInterval(loadMacroStrip, 10 * 1000);
     setInterval(loadTripWires, 30 * 1000);
     setInterval(loadBlackSwanAlerts, 60 * 1000);
+    setInterval(loadMarketIntel, 300000); // 5-min refresh
     initHermesFlash();
     initHydra();
     initLightningCards();
@@ -8129,6 +8137,162 @@ async function loadFlowRadar() {
         renderFlowRadar(data);
     } catch (error) {
         console.error('Flow radar load failed:', error);
+    }
+}
+
+// ── Market Intelligence Widget (UW Enrichment) ──────────────
+async function loadMarketIntel() {
+    try {
+        const resp = await fetch(`${API_URL}/committee/enrichment/SPY`);
+        if (!resp.ok) return;
+        const data = await resp.json();
+        renderMarketIntel(data);
+    } catch (e) {
+        console.debug('Market intel load failed:', e);
+    }
+}
+
+function renderMarketIntel(data) {
+    const container = document.getElementById('intelContent');
+    const status = document.getElementById('intelStatus');
+    if (!container) return;
+
+    const e = data.enrichment || {};
+
+    // IV Rank
+    const iv = e.iv_rank || {};
+    const ivRank = iv.iv_rank != null ? parseFloat(iv.iv_rank).toFixed(1) : '--';
+    const ivColor = ivRank === '--' ? 'var(--text-secondary)' :
+        parseFloat(ivRank) < 30 ? '#4ade80' : parseFloat(ivRank) > 60 ? '#f87171' : '#facc15';
+
+    // Market Tide
+    const tide = e.market_tide || {};
+    const netCall = tide.net_call_premium ? `$${(parseFloat(tide.net_call_premium)/1e6).toFixed(0)}M` : '--';
+    const netPut = tide.net_put_premium ? `$${(parseFloat(tide.net_put_premium)/1e6).toFixed(0)}M` : '--';
+    const tideDir = tide.net_call_premium && tide.net_put_premium ?
+        (parseFloat(tide.net_call_premium) > parseFloat(tide.net_put_premium) ? 'BULLISH' : 'BEARISH') : '--';
+    const tideColor = tideDir === 'BULLISH' ? '#4ade80' : tideDir === 'BEARISH' ? '#f87171' : 'var(--text-secondary)';
+
+    // Dark Pool
+    const dp = e.dark_pool || {};
+    const dpCount = dp.total_prints || '--';
+
+    // Sector Flow
+    const sf = e.sector_flow || {};
+    const posture = sf.risk_posture || '--';
+    const postureColor = posture === 'RISK-ON' ? '#4ade80' : posture === 'RISK-OFF' ? '#f87171' : '#facc15';
+
+    // Max Pain
+    const mp = e.max_pain;
+    const maxPainStr = mp ? `$${mp.max_pain_strike} (${mp.dte}d)` : 'N/A';
+
+    // News
+    const news = e.news_headlines || [];
+    const newsHtml = news.slice(0, 3).map(n =>
+        `<div class="intel-headline">[${n.source || '?'}] ${(n.headline || '').slice(0, 80)}</div>`
+    ).join('');
+
+    container.innerHTML = `
+        <div class="intel-metrics">
+            <div class="intel-metric">
+                <div class="intel-metric-label">IV Rank (1Y)</div>
+                <div class="intel-metric-value" style="color:${ivColor}">${ivRank}</div>
+            </div>
+            <div class="intel-metric">
+                <div class="intel-metric-label">Market Tide</div>
+                <div class="intel-metric-value" style="color:${tideColor}">${tideDir}</div>
+                <div class="intel-metric-sub">Call ${netCall} · Put ${netPut}</div>
+            </div>
+            <div class="intel-metric">
+                <div class="intel-metric-label">Sector Posture</div>
+                <div class="intel-metric-value" style="color:${postureColor}">${posture}</div>
+            </div>
+            <div class="intel-metric">
+                <div class="intel-metric-label">Dark Pool (SPY)</div>
+                <div class="intel-metric-value">${dpCount}</div>
+            </div>
+            <div class="intel-metric">
+                <div class="intel-metric-label">Max Pain (SPY)</div>
+                <div class="intel-metric-value">${maxPainStr}</div>
+            </div>
+        </div>
+        ${newsHtml ? `<div class="intel-news">${newsHtml}</div>` : ''}
+    `;
+
+    if (status) {
+        const ts = data.fetched_at ? new Date(data.fetched_at).toLocaleTimeString() : '--';
+        status.textContent = `Updated ${ts}`;
+    }
+}
+
+// ── Morning Briefing Display ────────────────────────────────
+async function loadMorningBriefing() {
+    try {
+        const resp = await fetch(`${API_URL}/briefing/premarket?limit=1`);
+        if (!resp.ok) return;
+        const data = await resp.json();
+        const briefings = data.briefings || [];
+        if (briefings.length === 0) return;
+
+        const latest = briefings[0];
+        const container = document.getElementById('intelContent');
+        if (!container) return;
+
+        const convColor = latest.conviction === 'HIGH' ? '#4ade80' :
+            latest.conviction === 'LOW' ? '#f87171' : '#facc15';
+
+        const briefHtml = `
+            <div class="intel-briefing">
+                <div class="intel-metric-label">Morning Brief (${latest.date})</div>
+                <div class="intel-briefing-text">${(latest.synthesis || '').slice(0, 400)}</div>
+                <div class="intel-metric-sub">Conviction: <span style="color:${convColor}">${latest.conviction}</span></div>
+            </div>
+        `;
+
+        // Append after existing intel content
+        container.insertAdjacentHTML('beforeend', briefHtml);
+    } catch (e) {
+        console.debug('Briefing load failed:', e);
+    }
+}
+
+// ── Per-ticker enrichment for signal detail panels ──────────
+async function loadSignalEnrichment(ticker, panel) {
+    // Avoid re-fetching if already loaded
+    if (panel.querySelector('.signal-enrichment')) return;
+    try {
+        const resp = await fetch(`${API_URL}/committee/enrichment/${ticker}`);
+        if (!resp.ok) return;
+        const data = await resp.json();
+        const e = data.enrichment || {};
+
+        const iv = e.iv_rank || {};
+        const ivRank = iv.iv_rank != null ? parseFloat(iv.iv_rank).toFixed(1) : '--';
+        const ivColor = ivRank === '--' ? '#94a3b8' :
+            parseFloat(ivRank) < 30 ? '#4ade80' : parseFloat(ivRank) > 60 ? '#f87171' : '#facc15';
+
+        const dp = e.dark_pool || {};
+        const mp = e.max_pain;
+        const mpStr = mp ? `$${mp.max_pain_strike} (${mp.dte}d)` : 'N/A';
+
+        const tide = e.market_tide || {};
+        const netCall = tide.net_call_premium ? `$${(parseFloat(tide.net_call_premium)/1e6).toFixed(0)}M` : '--';
+        const netPut = tide.net_put_premium ? `$${(parseFloat(tide.net_put_premium)/1e6).toFixed(0)}M` : '--';
+
+        const html = `
+            <div class="signal-enrichment" style="margin-top:8px;padding:8px;border-top:1px solid var(--border-color);font-size:0.8em;color:#94a3b8;">
+                <span style="color:${ivColor};font-weight:600;">IV Rank: ${ivRank}</span>
+                <span style="margin:0 6px;">·</span>
+                <span>DP: ${dp.total_prints || '--'} prints</span>
+                <span style="margin:0 6px;">·</span>
+                <span>Max Pain: ${mpStr}</span>
+                <span style="margin:0 6px;">·</span>
+                <span>Tide: Call ${netCall} / Put ${netPut}</span>
+            </div>
+        `;
+        panel.insertAdjacentHTML('beforeend', html);
+    } catch (e) {
+        console.debug('Signal enrichment load failed:', e);
     }
 }
 
