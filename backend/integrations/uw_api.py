@@ -483,6 +483,62 @@ async def get_short_interest(ticker: str) -> Optional[List[Dict[str, Any]]]:
     return result
 
 
+# ── News Headlines ───────────────────────────────────────────────
+
+async def get_news_headlines(limit: int = 20) -> Optional[List[Dict[str, Any]]]:
+    """Fetch market news headlines."""
+    cached = await cache_get("news", f"headlines_{limit}")
+    if cached:
+        return cached
+
+    data = await _uw_request("/api/news/headlines", params={"limit": limit})
+    if not data or "data" not in data:
+        return None
+
+    result = data["data"]
+    await cache_set("news", f"headlines_{limit}", result)
+    return result
+
+
+# ── Insider Transactions ─────────────────────────────────────────
+
+async def get_insider_transactions(ticker: Optional[str] = None, limit: int = 20) -> Optional[List[Dict[str, Any]]]:
+    """Fetch insider transactions (all or per-ticker)."""
+    cache_key = f"insider_{ticker or 'all'}_{limit}"
+    cached = await cache_get("insider", cache_key)
+    if cached:
+        return cached
+
+    if ticker:
+        data = await _uw_request(f"/api/insider/{ticker.upper()}")
+    else:
+        data = await _uw_request("/api/insider/transactions", params={"limit": limit})
+
+    if not data or "data" not in data:
+        return None
+
+    result = data["data"]
+    await cache_set("insider", cache_key, result)
+    return result
+
+
+# ── Congressional Trading ────────────────────────────────────────
+
+async def get_congressional_trades(limit: int = 20) -> Optional[List[Dict[str, Any]]]:
+    """Fetch recent congressional trades."""
+    cached = await cache_get("congress", f"trades_{limit}")
+    if cached:
+        return cached
+
+    data = await _uw_request("/api/congress/recent-trades", params={"limit": limit})
+    if not data or "data" not in data:
+        return None
+
+    result = data["data"]
+    await cache_set("congress", f"trades_{limit}", result)
+    return result
+
+
 # ── Health check data ────────────────────────────────────────────
 
 async def get_health() -> Dict[str, Any]:
