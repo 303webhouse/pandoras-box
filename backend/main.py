@@ -707,6 +707,7 @@ from api.committee_history import router as committee_history_router
 from api.uw_health import router as uw_health_router
 from api.insider import router as insider_router
 from api.briefing_store import router as briefing_store_router
+from api.mtm_compare import router as mtm_compare_router
 from api.hydra import router as hydra_router
 from api.positions import router as positions_router
 from api.scanner import router as scanner_router
@@ -764,6 +765,7 @@ app.include_router(committee_history_router, prefix="/api", tags=["committee-his
 app.include_router(uw_health_router, prefix="/api", tags=["uw-health"])
 app.include_router(insider_router, prefix="/api", tags=["insider-congress"])
 app.include_router(briefing_store_router, prefix="/api", tags=["briefing"])
+app.include_router(mtm_compare_router, prefix="/api", tags=["mtm-validation"])
 app.include_router(hydra_router, prefix="/api", tags=["hydra"])
 app.include_router(positions_router, prefix="/api", tags=["positions"])
 app.include_router(scanner_router, prefix="/api", tags=["scanner"])
