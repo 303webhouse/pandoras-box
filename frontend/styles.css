@@ -400,6 +400,72 @@ body {
     margin-left: 6px;
 }
 
+/* Market Intelligence section */
+.market-intel-section {
+    padding: 0 12px 8px 12px;
+    border-bottom: 1px solid var(--border-color);
+    margin-bottom: 4px;
+}
+
+.intel-metrics {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 8px;
+    padding: 6px 0;
+}
+
+.intel-metric {
+    text-align: center;
+}
+
+.intel-metric-label {
+    font-size: 9px;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 2px;
+}
+
+.intel-metric-value {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.intel-metric-sub {
+    font-size: 9px;
+    color: var(--text-secondary);
+    margin-top: 1px;
+}
+
+.intel-news {
+    padding: 4px 0;
+    border-top: 1px solid var(--border-color);
+    margin-top: 4px;
+}
+
+.intel-headline {
+    font-size: 10px;
+    color: var(--text-secondary);
+    padding: 2px 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.intel-briefing {
+    padding: 8px 0;
+    border-top: 1px solid var(--border-color);
+    margin-top: 6px;
+}
+
+.intel-briefing-text {
+    font-size: 11px;
+    color: var(--text-primary);
+    line-height: 1.4;
+    margin: 4px 0;
+}
+
 /* Flow Radar section */
 .flow-radar-section {
     flex: 1;
