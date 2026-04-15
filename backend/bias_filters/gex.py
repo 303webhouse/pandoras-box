@@ -1,10 +1,11 @@
 """
-GEX (Gamma Exposure) Factor — SPY net dealer gamma from Polygon options chain.
+GEX (Gamma Exposure) Factor — SPY net dealer gamma.
 
 Positive GEX = dealers long gamma → they sell rallies, buy dips → compression/dampening.
 Negative GEX = dealers short gamma → they amplify moves → increased volatility.
 
-Data source: Polygon.io options snapshot (Starter plan, 15-min delayed).
+Primary data source: UW API /greek-exposure (full chain, no contract limit).
+Fallback: Polygon.io options snapshot (Starter plan, 15-min delayed, 150 contract cap).
 Staleness: 4h — intraday timeframe.
 """
 
@@ -23,26 +24,39 @@ except ImportError:
     from backend.bias_engine.composite import FactorReading
     from backend.bias_engine.factor_utils import score_to_signal, get_latest_price, neutral_reading
 
-# Normalization baseline — adjusted for Polygon Starter plan which typically
-# returns 100-300 contracts with greeks (vs thousands on full-data plans).
-# Dividing raw GEX by this puts the value in a [-1, 1]-ish range.
-GEX_SCALE_FACTOR = 2_000_000_000  # $2B (was $5B — too large for limited contract set)
+# Normalization baselines
+GEX_SCALE_FACTOR = 2_000_000_000  # $2B — for Polygon contract-level calculation
+UW_GEX_SCALE = 50_000_000_000    # $50B — for UW pre-aggregated gamma values
 
 
 async def compute_score() -> Optional[FactorReading]:
-    """Compute GEX score from SPY options chain via Polygon snapshot."""
+    """Compute GEX score. UW API is primary, Polygon is fallback."""
+    # Try UW API first
+    reading = await compute_score_uw()
+    if reading:
+        return reading
+
+    # Fallback to Polygon
+    logger.info("gex: UW API unavailable, falling back to Polygon")
+    return await _compute_score_polygon()
+
+
+async def _compute_score_polygon() -> Optional[FactorReading]:
+    """Compute GEX score from SPY options chain via Polygon snapshot (fallback)."""
     try:
         from integrations.polygon_options import get_options_snapshot
     except ImportError:
-        from backend.integrations.polygon_options import get_options_snapshot
+        try:
+            from backend.integrations.polygon_options import get_options_snapshot
+        except ImportError:
+            logger.warning("gex: Polygon options module not available")
+            return None
 
-    # Get SPY price for NTM filtering
     spy_price = await get_latest_price("SPY")
     if not spy_price or spy_price <= 0:
         logger.warning("gex: cannot get SPY price — skipping")
         return None
 
-    # Fetch NTM contracts (±10% strike range)
     strike_lo = spy_price * 0.90
     strike_hi = spy_price * 1.10
     chain = await get_options_snapshot(
@@ -54,7 +68,6 @@ async def compute_score() -> Optional[FactorReading]:
         logger.warning("gex: no Polygon chain data for SPY — skipping")
         return None
 
-    # Compute net GEX from chain
     net_gex = 0.0
     contracts_used = 0
     for contract in chain:
@@ -67,9 +80,6 @@ async def compute_score() -> Optional[FactorReading]:
             continue
 
         contract_type = (details.get("contract_type") or "").lower()
-        # GEX contribution = gamma * OI * 100 (contract multiplier) * SPY price
-        # Calls: dealers are typically short calls → long gamma when hedging
-        # Puts: dealers are typically short puts → short gamma when hedging
         contribution = abs(gamma) * oi * 100 * spy_price
         if contract_type == "call":
             net_gex += contribution
@@ -81,7 +91,6 @@ async def compute_score() -> Optional[FactorReading]:
     if contracts_used < 10:
         return neutral_reading("gex", f"GEX: insufficient contracts ({contracts_used})", source="polygon")
 
-    # Normalize to a manageable scale
     normalized = net_gex / GEX_SCALE_FACTOR
     score = _score_gex(normalized)
 
@@ -97,7 +106,7 @@ async def compute_score() -> Optional[FactorReading]:
         label = "strong amplification (dealers short gamma)"
 
     logger.info(
-        "gex: net_gex=$%.0fM, normalized=%.3f (%s), score=%+.2f, contracts=%d",
+        "gex: net_gex=$%.0fM, normalized=%.3f (%s), score=%+.2f, contracts=%d [polygon fallback]",
         net_gex / 1e6, normalized, label, score, contracts_used,
     )
 
