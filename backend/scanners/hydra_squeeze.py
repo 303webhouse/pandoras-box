@@ -102,49 +102,43 @@ async def calculate_squeeze_score(
 async def _estimate_short_pnl(ticker: str) -> float:
     """
     Estimate how underwater shorts are.
-    Uses 30-day SMA via Polygon as proxy for average short entry.
+    Uses 30-day SMA via yfinance as proxy for average short entry.
     Positive = shorts losing money (squeeze pressure).
     """
     try:
-        import httpx
+        # Get current price via UW API (Polygon-compatible), fall back to yfinance
+        current_price = None
+        try:
+            from integrations.uw_api import get_snapshot
+            snap = await get_snapshot(ticker)
+            if snap:
+                current_price = (
+                    snap.get("day", {}).get("c", 0)
+                    or snap.get("lastTrade", {}).get("p", 0)
+                )
+        except Exception:
+            pass
 
-        api_key = os.environ.get("POLYGON_API_KEY") or ""
-        if not api_key:
+        if not current_price:
+            try:
+                from bias_engine.factor_utils import get_latest_price
+                current_price = await get_latest_price(ticker)
+            except Exception:
+                pass
+
+        if not current_price:
             return 0.0
 
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            snap_resp = await client.get(
-                f"https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers/{ticker}",
-                params={"apiKey": api_key},
-            )
-            if snap_resp.status_code != 200:
-                return 0.0
-
-            snap = snap_resp.json()
-            current_price = (
-                snap.get("ticker", {}).get("day", {}).get("c", 0)
-                or snap.get("ticker", {}).get("lastTrade", {}).get("p", 0)
-            )
-            if not current_price:
-                return 0.0
-
-            sma_resp = await client.get(
-                f"https://api.polygon.io/v1/indicators/sma/{ticker}",
-                params={
-                    "timespan": "day",
-                    "window": 30,
-                    "series_type": "close",
-                    "order": "desc",
-                    "limit": 1,
-                    "apiKey": api_key,
-                },
-            )
-            if sma_resp.status_code == 200:
-                sma_results = sma_resp.json().get("results", {}).get("values", [])
-                if sma_results:
-                    avg_entry = sma_results[0].get("value", current_price)
-                    if avg_entry > 0:
-                        return ((current_price - avg_entry) / avg_entry) * 100
+        # Get 30-day SMA via yfinance (bars)
+        try:
+            from integrations.uw_api import get_bars_as_dataframe
+            df = await get_bars_as_dataframe(ticker, days=40)
+            if df is not None and len(df) >= 20:
+                sma_30 = df["close"].tail(30).mean()
+                if sma_30 > 0:
+                    return ((current_price - sma_30) / sma_30) * 100
+        except Exception:
+            pass
 
     except Exception as e:
         logger.debug("HYDRA short PnL estimate failed for %s: %s", ticker, e)
