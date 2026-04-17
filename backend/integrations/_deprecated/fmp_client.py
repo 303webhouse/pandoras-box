@@ -1,9 +1,7 @@
 """
-Financial Modeling Prep (FMP) API Client  [DEPRECATED — F.5]
-
-Earnings calendar: migrated to UW API (chronos_ingest.py, Brief F).
-ETF holdings (fetch_etf_holdings): still used by position_overlap.py — separate migration decision.
-Do not add new callers. Migrate remaining use to UW API when position_overlap.py is refactored.
+Financial Modeling Prep (FMP) API Client
+Free tier: 250 calls/day
+Used for: earnings calendar, ETF holdings
 """
 import os
 import logging

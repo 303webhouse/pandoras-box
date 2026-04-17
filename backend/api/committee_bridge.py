@@ -18,6 +18,7 @@ from utils.pivot_auth import require_api_key
 from pydantic import BaseModel
 
 from database.postgres_client import get_postgres_client, serialize_db_row
+from committee.decision_parser import extract_committee_decision
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -110,6 +111,18 @@ async def submit_committee_results(body: CommitteeResult, _=Depends(require_api_
             "completed_at": datetime.utcnow().isoformat(),
         }
 
+        # Parse structured JSON decision block from PIVOT synthesis (Brief C v1.1)
+        parsed_decision = extract_committee_decision(body.pivot_synthesis or "")
+        if parsed_decision:
+            committee_data["decision"] = parsed_decision
+        else:
+            # Record the attempt so Phase 4 can measure parse failure rate
+            committee_data["decision_parse_failed"] = True
+            logger.warning(
+                "Committee ran but no valid JSON decision block parsed for signal %s",
+                body.signal_id,
+            )
+
         # Store results and transition back to ACTIVE
         await conn.execute(
             """
@@ -117,6 +130,8 @@ async def submit_committee_results(body: CommitteeResult, _=Depends(require_api_
             SET committee_data = $2,
                 committee_run_id = $3,
                 committee_completed_at = NOW(),
+                decision_source = 'committee',
+                decided_at = NOW(),
                 status = CASE
                     WHEN status IN ('PENDING_REVIEW', 'COMMITTEE_REVIEW') THEN 'ACTIVE'
                     ELSE status

@@ -1337,12 +1337,10 @@ def check_resistance_rejection(df: pd.DataFrame, ticker: str) -> Optional[Dict]:
         smas = _extract_smas(latest)
         zone = latest.get("cta_zone") or get_cta_zone(price, smas.get("sma20"), smas.get("sma50"), smas.get("sma120"))[0]
 
-        # Zone-aware volume gate: in bearish zones, distribution happens on normal volume
+        # Uniform 1.2x volume gate — bearish-zone carve-out removed (B.6)
         vol_ratio = latest.get("vol_ratio", 0)
-        if pd.notna(vol_ratio):
-            min_vol = 0.8 if zone in ("WATERFALL", "CAPITULATION") else 1.5
-            if vol_ratio < min_vol:
-                return None
+        if pd.notna(vol_ratio) and vol_ratio < 1.2:
+            return None
 
         invalidation_level = round((smas.get("sma50") + (atr * 0.5)), 2) if smas.get("sma50") else None
 

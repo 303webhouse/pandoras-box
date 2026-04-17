@@ -311,6 +311,7 @@ async def apply_scoring(signal_data: Dict[str, Any]) -> Dict[str, Any]:
             pass  # Flow pipeline not yet operational — expected
 
         # P4B: Pythia market profile position cross-reference
+        # Phase 0.3.2 — Option B: no Pythia coverage = watchlist ceiling (never top_feed)
         try:
             from webhooks.pythia_events import get_pythia_profile_position
             pp_ticker = (signal_data.get("ticker") or "").upper()
@@ -321,9 +322,20 @@ async def apply_scoring(signal_data: Dict[str, Any]) -> Dict[str, Any]:
                 pp_total = pp.get("total_pythia_adjustment", pp.get("profile_bonus", 0))
                 if pp_total != 0:
                     score = min(100, max(0, score + pp_total))
-                    triggering_factors["profile_position"] = pp
-                    logger.info("Pythia profile for %s: %s zone, %+d bonus",
-                                pp_ticker, pp.get("zone", "?"), pp_bonus)
+                triggering_factors["profile_position"] = pp
+                logger.info(
+                    "Pythia profile for %s: coverage=%s zone=%s adj=%+d",
+                    pp_ticker, pp.get("pythia_coverage"), pp.get("zone", "?"), pp_total,
+                )
+
+                # Option B gate: ticker not on Pythia watchlist → watchlist ceiling
+                if not pp.get("pythia_coverage", False):
+                    signal_data["feed_tier_ceiling"] = "watchlist"
+                    signal_data.setdefault("enrichment_data", {})["needs_structural_review"] = True
+                    logger.info(
+                        "Signal %s on %s has no Pythia coverage — watchlist ceiling applied",
+                        signal_data.get("signal_id", "?"), pp_ticker,
+                    )
         except Exception as pp_err:
             logger.debug("Pythia profile check skipped: %s", pp_err)
 

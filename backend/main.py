@@ -495,6 +495,28 @@ async def lifespan(app: FastAPI):
 
     chronos_task = asyncio.create_task(chronos_earnings_loop())
 
+    # Outcome resolver: walk 15m bars for accepted signals every 15 min (market hours)
+    async def outcome_resolver_loop():
+        """Resolve WIN/LOSS for accepted signals via intraday bar walk-forward."""
+        import pytz
+        from datetime import datetime as dt_cls
+        from jobs.outcome_resolver import resolve_signal_outcomes
+
+        await asyncio.sleep(120)  # 2 min startup delay
+
+        while True:
+            try:
+                et = dt_cls.now(pytz.timezone("America/New_York"))
+                if et.weekday() < 5 and 9 <= et.hour < 16:
+                    await resolve_signal_outcomes()
+                else:
+                    logger.debug("Outcome resolver: outside market hours, skipping")
+            except Exception as e:
+                logger.warning("Outcome resolver loop error: %s", e)
+            await asyncio.sleep(900)  # 15 minutes
+
+    outcome_resolver_task = asyncio.create_task(outcome_resolver_loop())
+
     # Initial Chronos data load
     try:
         from jobs.chronos_ingest import run_chronos_earnings_ingest
@@ -530,6 +552,7 @@ async def lifespan(app: FastAPI):
     price_collector_task.cancel()
     watchlist_alert_task.cancel()
     chronos_task.cancel()
+    outcome_resolver_task.cancel()
     logger.info("🛑 Shutting down Pandora's Box...")
     await redis_client.close()
     await postgres_client.close()
@@ -753,6 +776,7 @@ from api.trade_watchlist import router as trade_watchlist_router
 from api.chronos import router as chronos_router
 from api.mp import router as mp_router
 from webhooks.mp_levels import router as mp_webhook_router
+from api.signals import router as signals_router
 
 app.include_router(webhook_router, prefix="/webhook", tags=["webhooks"])
 app.include_router(circuit_breaker_router, prefix="/webhook", tags=["circuit-breaker"])
@@ -811,6 +835,7 @@ app.include_router(trade_watchlist_router, prefix="/api", tags=["trade-watchlist
 app.include_router(chronos_router, prefix="/api", tags=["chronos"])
 app.include_router(mp_router, prefix="/api", tags=["market-profile"])
 app.include_router(mp_webhook_router, prefix="/webhook", tags=["market-profile"])
+app.include_router(signals_router, prefix="/api", tags=["signals"])
 
 # Serve frontend static files
 # Multiple path resolution strategies for different deployment environments

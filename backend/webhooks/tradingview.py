@@ -53,7 +53,7 @@ CRYPTO_TICKERS = {
 # Event-driven strategies keep the default 60s Redis dedup.
 STRATEGY_COOLDOWNS = {
     "Holy_Grail": {"equity": 7200, "crypto": 3600},    # 2h equity, 1h crypto (was 4h/2h — too aggressive on vol days)
-    "Scout": {"equity": 7200, "crypto": 3600},           # 2h equity, 1h crypto (was 4h/2h)
+    "Scout Sniper": {"equity": 7200, "crypto": 3600},   # 2h equity, 1h crypto (was "Scout" — B.2)
     "Phalanx": {"equity": 3600, "crypto": 3600},         # 1h both
     "Artemis": {"equity": 14400, "crypto": 7200},         # 4h equity, 2h crypto (was 30min — too noisy)
 }
@@ -270,9 +270,14 @@ async def process_scout_signal(alert: TradingViewAlert, start_time: datetime):
     They get a special signal_type and lower priority so they show differently in the UI.
     """
 
+    # B.1 — TRADEABLE/IGNORE filter: PineScript sets status="IGNORE" for low-quality hooks
+    if (alert.status or "").upper() == "IGNORE":
+        logger.info("Scout IGNORE: skipping %s %s (PineScript status=IGNORE)", alert.ticker, alert.direction)
+        return {"status": "skipped", "reason": "tradingview_ignore"}
+
     # Strategy cooldown — skip if same ticker+direction fired recently
     asset_class = "CRYPTO" if is_crypto_ticker(alert.ticker) else "EQUITY"
-    if await check_strategy_cooldown(alert.ticker, "Scout", alert.direction, asset_class):
+    if await check_strategy_cooldown(alert.ticker, "Scout Sniper", alert.direction, asset_class):
         logger.info("⏳ Scout cooldown: skipping %s %s", alert.ticker, alert.direction)
         return {"status": "cooldown", "detail": f"Scout cooldown active for {alert.ticker} {alert.direction}"}
 
@@ -283,7 +288,7 @@ async def process_scout_signal(alert: TradingViewAlert, start_time: datetime):
         "signal_id": signal_id,
         "timestamp": alert.timestamp or datetime.now().isoformat(),
         "ticker": alert.ticker,
-        "strategy": "Scout",
+        "strategy": "Scout Sniper",  # B.2 — normalize name
         "direction": alert.direction,
         "signal_type": "SCOUT_ALERT",  # Special type for UI differentiation
         "entry_price": alert.entry or alert.price or alert.entry_price or 0,

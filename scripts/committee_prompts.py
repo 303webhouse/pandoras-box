@@ -403,6 +403,21 @@ STRUCTURE: <recommended options structure — see rules below. Write "N/A" if AC
 LEVELS: <entry, stop, target, and R:R — see rules below. Write "N/A" if ACTION is PASS>
 SIZE: <position sizing recommendation — see rules below. Write "N/A" if ACTION is PASS>
 
+After SIZE, end your response with a fenced JSON block containing your structured decision:
+
+```json
+{
+  "decision": "ENTER",
+  "conviction": "HIGH",
+  "key_risk": "What would make us wrong in one sentence"
+}
+```
+
+Map your ACTION to the decision field: TAKE → "ENTER", PASS → "PASS", WATCHING → "WATCH". Use "HEDGE" only when recommending a delta-hedge or offsetting position.
+Allowed values — decision: "ENTER" | "PASS" | "WATCH" | "HEDGE". conviction: "HIGH" | "MEDIUM" | "LOW".
+key_risk: one sentence describing the invalidation thesis (same as INVALIDATION above).
+This block must be the LAST content in your response. Nothing after it.
+
 ## STRUCTURE RULES (for options strategy recommendation)
 When recommending TAKE or WATCHING, recommend a specific options structure:
 
