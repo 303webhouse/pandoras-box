@@ -1257,6 +1257,19 @@ async def init_database():
         except Exception as e:
             print(f"WARNING: committee_accuracy view creation skipped: {e}")
 
+        # ZEUS Phase 2: Feed tier classification column
+        try:
+            await conn.execute("""
+                ALTER TABLE signals
+                ADD COLUMN IF NOT EXISTS feed_tier VARCHAR(20) DEFAULT 'research_log'
+            """)
+        except Exception as e:
+            print(f"WARNING: signals feed_tier column skipped (lock timeout?): {e}")
+
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_signals_feed_tier ON signals(feed_tier)
+        """)
+
         print("Database schema initialized")
 
 async def log_signal(
@@ -1300,11 +1313,12 @@ async def log_signal(
                 direction, signal_type, entry_price, stop_loss, target_1,
                 target_2, risk_reward, timeframe, bias_level, adx, line_separation,
                 score, bias_alignment, triggering_factors, bias_at_signal, notes,
-                day_of_week, hour_of_day, is_opex_week, days_to_earnings, market_event, signal_category
+                day_of_week, hour_of_day, is_opex_week, days_to_earnings, market_event, signal_category,
+                feed_tier
             ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
                 $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
-                $21, $22, $23, $24, $25, $26, $27
+                $21, $22, $23, $24, $25, $26, $27, $28
             )
             ON CONFLICT (signal_id) DO NOTHING
         """,
@@ -1335,6 +1349,7 @@ async def log_signal(
             calendar_fields.get("days_to_earnings"),
             calendar_fields.get("market_event"),
             signal_data.get("signal_category", "TRADE_SETUP"),
+            signal_data.get("feed_tier", "research_log"),
         )
         inserted = str(result).strip().endswith("1")
         if not inserted:
