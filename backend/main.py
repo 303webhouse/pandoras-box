@@ -719,7 +719,7 @@ async def health_check():
 
             # flow_events last 24h
             flow_count = await conn.fetchval(
-                "SELECT COUNT(*) FROM flow_events WHERE created_at > NOW() - INTERVAL '24 hours'"
+                "SELECT COUNT(*) FROM flow_events WHERE captured_at > NOW() - INTERVAL '24 hours'"
             )
             zeus_block["flow_events_24h"] = int(flow_count or 0)
 
