@@ -939,3 +939,54 @@ def get_score_tier(score: float) -> str:
         return "WEAK"
     else:
         return "LOW"
+
+
+def apply_tier3_confluence_bonus(
+    signal_data: Dict[str, Any],
+    score: float,
+    triggering_factors: Dict[str, Any],
+) -> Tuple[float, Dict[str, Any]]:
+    """
+    Apply Tier 3 TA scanner confluence bonus for Tier 1 signals (WH-*) that
+    have supporting TA confirmation found by the WH-CONFLUENCE enricher.
+
+    Reads 'wh_confluence' from triggering_factors (set by wh_confluence.py
+    before this function is called). Sums per-signal-type weights from
+    TIER3_CONFLUENCE_WEIGHTS, caps at TIER3_MAX_BONUS (+20), adds to score.
+
+    No-op for non-Tier-1 signals or when WH confluence was not detected.
+    Called from pipeline.py apply_scoring() after check_wh_confluence().
+    """
+    from scoring.feed_tier_classifier import TIER3_CONFLUENCE_WEIGHTS, apply_confluence_cap
+
+    # Only applies to Tier 1 (WH-*) signals
+    strategy    = (signal_data.get("strategy")    or "").upper()
+    signal_type = (signal_data.get("signal_type") or "").upper()
+    if not (strategy.startswith("WH-") or signal_type.startswith("WH_")):
+        return score, triggering_factors
+
+    wh_conf = triggering_factors.get("wh_confluence", {})
+    if not wh_conf.get("confluence_found"):
+        return score, triggering_factors
+
+    ta_signals = wh_conf.get("ta_signals", [])
+    if not ta_signals:
+        return score, triggering_factors
+
+    raw_bonus   = sum(TIER3_CONFLUENCE_WEIGHTS.get(s, 3) for s in ta_signals)
+    capped_bonus = apply_confluence_cap(raw_bonus)
+
+    if capped_bonus > 0:
+        score = round(min(100, score + capped_bonus), 2)
+        triggering_factors["tier3_confluence"] = {
+            "ta_signals":    ta_signals,
+            "raw_bonus":     raw_bonus,
+            "capped_bonus":  capped_bonus,
+        }
+        logger.info(
+            "Tier 3 confluence bonus for %s: +%d (capped from %d) — %s",
+            signal_data.get("ticker", "?"), capped_bonus, raw_bonus,
+            ", ".join(ta_signals),
+        )
+
+    return score, triggering_factors

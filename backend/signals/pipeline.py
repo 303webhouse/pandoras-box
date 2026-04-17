@@ -415,6 +415,34 @@ async def apply_scoring(signal_data: Dict[str, Any]) -> Dict[str, Any]:
         except Exception as _fe:
             logger.debug("P4A flow enrichment skipped: %s", _fe)
 
+        # WH-CONFLUENCE enrichment: check for WH-ACC backing + fresh darkpool blocks
+        # Must run BEFORE apply_tier3_confluence_bonus so the wh_confluence key is present.
+        try:
+            from enrichment.wh_confluence import check_wh_confluence
+            wh_ticker = (signal_data.get("ticker") or "").upper()
+            wh_dir    = (signal_data.get("direction") or "").upper()
+            wh_conf = await check_wh_confluence(wh_ticker, wh_dir)
+            if wh_conf.get("confluence_found"):
+                wh_acc_bonus = wh_conf.get("bonus", 0)
+                if wh_acc_bonus:
+                    score = min(100, max(0, score + wh_acc_bonus))
+                triggering_factors["wh_confluence"] = wh_conf
+                logger.info(
+                    "WH confluence: %s %s — acc_bonus=%+d ta_signals=%s",
+                    wh_ticker, wh_dir, wh_acc_bonus, wh_conf.get("ta_signals", []),
+                )
+        except Exception as _wc:
+            logger.debug("WH confluence enrichment skipped: %s", _wc)
+
+        # Tier 3 confluence cap: stack TA signal bonuses up to +20 for Tier 1 signals
+        try:
+            from scoring.trade_ideas_scorer import apply_tier3_confluence_bonus
+            score, triggering_factors = apply_tier3_confluence_bonus(
+                signal_data, score, triggering_factors
+            )
+        except Exception as _t3:
+            logger.debug("Tier 3 confluence bonus skipped: %s", _t3)
+
         # P4B: Pythia market profile position cross-reference
         # Phase 0.3.2 — Option B: no Pythia coverage = watchlist ceiling (never top_feed)
         try:
@@ -724,6 +752,17 @@ async def process_signal_unified(
     # 3. Score signal
     if not skip_scoring:
         signal_data = await apply_scoring(signal_data)
+
+    # 3a. Classify feed tier (ZEUS Phase 2)
+    try:
+        from scoring.feed_tier_classifier import classify_signal_tier
+        signal_data["feed_tier"] = classify_signal_tier(
+            signal_data, float(signal_data.get("score") or 0)
+        )
+        logger.debug("Feed tier: %s → %s", signal_data.get("ticker"), signal_data["feed_tier"])
+    except Exception as _ft_err:
+        logger.warning("Feed tier classification failed: %s", _ft_err)
+        signal_data.setdefault("feed_tier", "research_log")
 
     # 3b. Bail out if countertrend was rejected by bias gate
     if signal_data.get("countertrend_rejected"):
