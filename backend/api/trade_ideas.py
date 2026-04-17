@@ -74,6 +74,100 @@ class StatusUpdate(BaseModel):
     reason: Optional[str] = None
 
 
+async def _query_tier_groups(pool, tier: str, limit: int = 50) -> list:
+    """
+    Fetch and group active signals for a specific feed_tier.
+    Used by /main-feed 3-tier fallback logic.
+    """
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT * FROM signals
+            WHERE status = 'ACTIVE'
+              AND (expires_at IS NULL OR expires_at > NOW())
+              AND created_at > NOW() - INTERVAL '24 hours'
+              AND user_action IS NULL
+              AND COALESCE(signal_category, 'TRADE_SETUP') NOT IN ('INTRADAY_SETUP', 'FOOTPRINT')
+              AND feed_tier = $1
+            ORDER BY COALESCE(adjusted_score, score_v2, score, 0) DESC, created_at DESC
+            LIMIT $2
+            """,
+            tier,
+            limit * 3,  # over-fetch to account for grouping
+        )
+
+    if not rows:
+        return []
+
+    from collections import OrderedDict
+    groups_map: OrderedDict = OrderedDict()
+    for row in rows:
+        r = serialize_db_row(dict(row))
+        ticker = (r.get("ticker") or "").upper()
+        direction = (r.get("direction") or "").upper()
+        key = f"{ticker}:{direction}"
+
+        if key not in groups_map:
+            groups_map[key] = {
+                "group_key": key,
+                "ticker": ticker,
+                "direction": direction,
+                "primary_signal": r,
+                "feed_tier": tier,
+                "confluence_tier": r.get("confluence_tier") or "STANDALONE",
+                "signal_count": 1,
+                "related_signals": [],
+                "strategies": [r.get("strategy") or r.get("signal_type") or "UNKNOWN"],
+                "signal_categories": [r.get("signal_category") or "TRADE_SETUP"],
+                "highest_score": float(r.get("score_v2") or r.get("score") or 0),
+                "newest_at": r.get("timestamp") or r.get("created_at"),
+                "oldest_at": r.get("timestamp") or r.get("created_at"),
+            }
+        else:
+            g = groups_map[key]
+            g["signal_count"] += 1
+            g["related_signals"].append({
+                "signal_id": r.get("signal_id"),
+                "strategy": r.get("strategy") or r.get("signal_type"),
+                "signal_category": r.get("signal_category"),
+                "score": float(r.get("score_v2") or r.get("score") or 0),
+                "timestamp": r.get("timestamp") or r.get("created_at"),
+                "confluence_tier": r.get("confluence_tier"),
+            })
+            tier_rank = {"CONVICTION": 3, "CONFIRMED": 2, "STANDALONE": 1}
+            current_tier = r.get("confluence_tier") or "STANDALONE"
+            if tier_rank.get(current_tier, 0) > tier_rank.get(g["confluence_tier"], 0):
+                g["confluence_tier"] = current_tier
+            strat = r.get("strategy") or r.get("signal_type") or "UNKNOWN"
+            if strat not in g["strategies"]:
+                g["strategies"].append(strat)
+            ts = r.get("timestamp") or r.get("created_at")
+            if ts and (not g["newest_at"] or str(ts) > str(g["newest_at"])):
+                g["newest_at"] = ts
+            if ts and (not g["oldest_at"] or str(ts) < str(g["oldest_at"])):
+                g["oldest_at"] = ts
+
+    # Dedup, finalize, sort
+    for g in groups_map.values():
+        g["related_signals"] = _dedup_related_signals(g["related_signals"])
+        g["signal_count"] = 1 + len(g["related_signals"])
+        strats = [g["primary_signal"].get("strategy") or g["primary_signal"].get("signal_type") or "UNKNOWN"]
+        for rs in g["related_signals"]:
+            s = rs.get("strategy") or "UNKNOWN"
+            if s not in strats:
+                strats.append(s)
+        g["strategies"] = strats
+        g["distinct_strategy_count"] = len(set(s.lower() for s in strats))
+        g["last_signal_at"] = g["newest_at"]
+        confirmation_bonus = min(5, max(0, (g["signal_count"] - 1) * 2))
+        base_score = g["primary_signal"].get("score_v2") or g["primary_signal"].get("score") or 0
+        g["display_score"] = min(100, base_score + confirmation_bonus)
+        g["confirmation_bonus"] = confirmation_bonus
+        g["composite_rank"] = g["display_score"]
+
+    return sorted(groups_map.values(), key=lambda g: g["composite_rank"], reverse=True)[:limit]
+
+
 @router.get("/trade-ideas")
 async def get_trade_ideas_feed(
     limit: int = Query(default=20, le=50),
@@ -144,12 +238,19 @@ async def get_trade_ideas_grouped(
     limit: int = Query(default=20, le=50),
     min_score: Optional[float] = Query(default=65.0),
     show_all: bool = Query(default=False),
+    feed_tier: Optional[str] = Query(default=None),
 ):
     """
     Get Trade Ideas grouped by ticker+direction.
     Each group shows the highest-scoring signal as primary,
     with related signals and confluence tier.
+
+    feed_tier: filter to a specific tier (top_feed, watchlist, ta_feed, research_log).
+    When ZEUS routing is enabled and feed_tier is not specified, research_log signals
+    are excluded by default.
     """
+    from config import ZEUS_TIERED_ROUTING_ENABLED
+
     pool = await get_postgres_client()
 
     conditions = [
@@ -161,6 +262,14 @@ async def get_trade_ideas_grouped(
     ]
     params = []
     idx = 1
+
+    if feed_tier:
+        conditions.append(f"feed_tier = ${idx}")
+        params.append(feed_tier)
+        idx += 1
+    elif ZEUS_TIERED_ROUTING_ENABLED:
+        # Default: exclude research_log noise from the standard grouped view
+        conditions.append("feed_tier != 'research_log'")
 
     effective_min_score = None if show_all else min_score
     if effective_min_score is not None:
@@ -440,6 +549,63 @@ async def act_on_trade_idea_group(body: GroupAction, _=Depends(require_api_key))
         "ticker": ticker,
         "direction": direction,
         "signals_updated": count,
+    }
+
+
+@router.get("/trade-ideas/main-feed")
+async def get_main_feed():
+    """
+    ZEUS Phase 3 — Tiered main feed with 3-tier fallback.
+
+    Priority order:
+      1. top_feed  — whale + Pythia-backed conviction plays (≥3 groups)
+      2. watchlist — high-quality monitored-name setups (≥3 groups)
+      3. ta_feed   — top 10 TA scanner results by score (no minimum)
+
+    Returns {feed_source, banner, groups, total_groups}.
+    When ZEUS routing is disabled returns {feed_source: "pre_zeus", ...} using
+    the standard grouped endpoint (no banner, no tab switching in UI).
+    """
+    from config import ZEUS_TIERED_ROUTING_ENABLED
+
+    pool = await get_postgres_client()
+
+    if not ZEUS_TIERED_ROUTING_ENABLED:
+        result = await get_trade_ideas_grouped()
+        return {
+            "feed_source": "pre_zeus",
+            "banner": None,
+            "groups": result["groups"],
+            "total_groups": result["total_groups"],
+        }
+
+    TIER_CONFIG = [
+        ("top_feed",  3,    "TOP FEED \u2014 Conviction plays with whale + Pythia backing"),
+        ("watchlist", 3,    "WATCHLIST \u2014 High-quality setups on monitored names"),
+        ("ta_feed",   None, "TA FEED \u2014 Top technical setups by score"),
+    ]
+
+    for tier, min_groups, banner in TIER_CONFIG:
+        try:
+            groups = await _query_tier_groups(pool, tier)
+        except Exception as e:
+            logger.warning("main-feed tier query failed for %s: %s", tier, e)
+            groups = []
+
+        if min_groups is None or len(groups) >= min_groups:
+            return {
+                "feed_source": tier,
+                "banner": banner,
+                "groups": groups[:10] if tier == "ta_feed" else groups,
+                "total_groups": len(groups),
+            }
+
+    # All tiers empty — return empty ta_feed
+    return {
+        "feed_source": "ta_feed",
+        "banner": "TA FEED \u2014 Top technical setups by score",
+        "groups": [],
+        "total_groups": 0,
     }
 
 

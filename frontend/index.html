@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Pandora - Real-time Trading Signal Dashboard">
     <title>Pandora</title>
-    <link rel="stylesheet" href="/styles.css?v=127">
+    <link rel="stylesheet" href="/styles.css?v=128">
     <link rel="manifest" href="/manifest.json">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -60,8 +60,6 @@
                         <span class="hermes-flash-separator">|</span>
                     </span>
                     <span class="hermes-flash-intel" id="hermes-intel">Pivot analyzing...</span>
-                    <span class="hermes-flash-separator">|</span>
-                    <span class="hermes-flash-tripwires" id="hermes-tripwires">Trip Wires: 0/4 fired</span>
                 </div>
                 <div class="hermes-flash-actions">
                     <button class="hermes-flash-expand-btn" id="hermesExpandBtn" title="Expand details">&#x25BC;</button>
@@ -217,16 +215,6 @@
                     <span class="last-update" id="compositeLastUpdate">Last update: --</span>
                 </div>
 
-                <!-- Trip Wire Monitor -->
-                <div class="trip-wire-section" id="tripWireSection">
-                    <div class="trip-wire-header" id="tripWireToggle">
-                        <span class="trip-wire-title">TRIP WIRES</span>
-                        <span class="trip-wire-count" id="tripWireCount">(0 of 4)</span>
-                    </div>
-                    <div class="trip-wire-body" id="tripWireBody" style="display:none;">
-                        <!-- Populated by JS -->
-                    </div>
-                </div>
             </div>
 
             <!-- Intelligence Center (column 2) -->
@@ -449,6 +437,14 @@
                         </label>
                     </div>
                 </div>
+                <div class="feed-tabs" id="feedTabs" style="display:none;">
+                    <button class="feed-tab active" data-tier="main" onclick="switchFeedTab('main', this)">Main</button>
+                    <button class="feed-tab" data-tier="top_feed" onclick="switchFeedTab('top_feed', this)">Top Feed</button>
+                    <button class="feed-tab" data-tier="watchlist" onclick="switchFeedTab('watchlist', this)">Watchlist</button>
+                    <button class="feed-tab" data-tier="ta_feed" onclick="switchFeedTab('ta_feed', this)">TA</button>
+                    <button class="feed-tab" data-tier="research_log" onclick="switchFeedTab('research_log', this)">Research</button>
+                </div>
+                <div class="feed-banner" id="feedBanner" style="display:none;"></div>
                 <div class="signals-container" id="tradeSignals">
                     <p class="empty-state">No signals available</p>
                 </div>
@@ -1961,7 +1957,7 @@
     <!-- TradingView Widget Script -->
     <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
-    <script src="/app.js?v=146"></script>
+    <script src="/app.js?v=147"></script>
     <script src="/cockpit.js?v=1"></script>
     <script src="/laboratory.js?v=1"></script>
 </body>

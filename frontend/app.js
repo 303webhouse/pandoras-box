@@ -3649,6 +3649,78 @@ function renderCryptoSignals() {
     renderCryptoPositions();
 }
 
+let currentFeedTier = 'main';
+
+async function loadMainFeed() {
+    try {
+        const showAll = document.getElementById('insights-show-all')?.checked || false;
+        const qs = showAll ? '?show_all=true' : '';
+        const data = await fetch(`${API_URL}/trade-ideas/main-feed${qs}`).then(r => r.json());
+
+        const feedSource = data.feed_source;
+
+        // Show tabs only when ZEUS is live
+        const tabsEl = document.getElementById('feedTabs');
+        if (tabsEl) tabsEl.style.display = feedSource === 'pre_zeus' ? 'none' : 'flex';
+
+        // Banner
+        const bannerEl = document.getElementById('feedBanner');
+        if (bannerEl) {
+            if (data.banner) {
+                bannerEl.textContent = data.banner;
+                bannerEl.style.display = 'block';
+            } else {
+                bannerEl.style.display = 'none';
+            }
+        }
+
+        // Keep Main tab active
+        document.querySelectorAll('.feed-tab').forEach(b =>
+            b.classList.toggle('active', b.dataset.tier === 'main'));
+
+        if (data.groups) {
+            const tickers = data.groups.map(g => g.ticker).filter(Boolean);
+            await loadEarningsBatch(tickers);
+            renderGroupedSignals(data.groups);
+        } else {
+            renderGroupedSignals([]);
+        }
+    } catch (error) {
+        console.warn('Main feed failed, falling back to grouped view:', error);
+        await loadGroupedSignals();
+    }
+}
+
+function switchFeedTab(tier, btn) {
+    currentFeedTier = tier;
+    document.querySelectorAll('.feed-tab').forEach(b => b.classList.remove('active'));
+    if (btn) btn.classList.add('active');
+
+    const bannerEl = document.getElementById('feedBanner');
+    if (bannerEl) bannerEl.style.display = 'none';
+
+    if (tier === 'main') {
+        loadMainFeed();
+        return;
+    }
+
+    const showAll = document.getElementById('insights-show-all')?.checked || false;
+    let qs = `feed_tier=${tier}`;
+    if (showAll) qs += '&show_all=true';
+    if (tier === 'research_log') qs += '&min_score=0';
+
+    fetch(`${API_URL}/trade-ideas/grouped?${qs}`)
+        .then(r => r.json())
+        .then(async data => {
+            if (data.groups) {
+                const tickers = data.groups.map(g => g.ticker).filter(Boolean);
+                await loadEarningsBatch(tickers);
+                renderGroupedSignals(data.groups);
+            }
+        })
+        .catch(err => console.warn('Feed tier fetch failed:', err));
+}
+
 async function loadGroupedSignals() {
     try {
         const showAll = document.getElementById('insights-show-all')?.checked || false;
@@ -3831,6 +3903,15 @@ function renderGroupedSignals(groups) {
         const squeezeBadge = (tf && tf.squeeze && tf.squeeze.bonus > 0)
             ? `<span class="squeeze-inline" title="Squeeze score ${tf.squeeze.composite_score}, ${tf.squeeze.squeeze_tier}">SQ</span>` : '';
 
+        // Feed tier badge (ZEUS Phase 3)
+        const feedTierBadge = (() => {
+            const t = group.feed_tier || signal.feed_tier;
+            if (!t || t === 'research_log') return '';
+            const MAP = { top_feed: ['TOP', 'top-feed'], watchlist: ['WL', 'watchlist'], ta_feed: ['TA', 'ta-feed'] };
+            const [label, cls] = MAP[t] || [];
+            return label ? `<span class="feed-tier-badge ${cls}">${label}</span>` : '';
+        })();
+
         return `
             <div class="insight-card ${tierBorderClass}" data-ticker="${group.ticker}" data-direction="${group.direction}" data-signal-id="${signal.signal_id}" data-group-key="${group.group_key}" data-signal="${encodeURIComponent(JSON.stringify(signal))}">
                 <div class="insight-compact" onclick="toggleInsightDetail(this)">
@@ -3845,7 +3926,7 @@ function renderGroupedSignals(groups) {
                     <div class="insight-line2">
                         <span class="insight-substrat">${formatSignalType(signal.signal_type || signal.strategy)}</span>
                         <span class="horizon-pill ${horizonClass}">${horizonLabel}</span>
-                        ${confCount}${squeezeBadge}
+                        ${confCount}${squeezeBadge}${feedTierBadge}
                         <span class="insight-ago">${getTimeAgo(group.last_signal_at || group.newest_at)}</span>
                     </div>
                 </div>
@@ -4130,16 +4211,17 @@ async function requestInsightCommittee(signalId, btnEl) {
 }
 
 function refreshInsights() {
-    loadGroupedSignals();
+    if (currentFeedTier === 'main') {
+        loadMainFeed();
+    } else {
+        switchFeedTab(currentFeedTier, document.querySelector(`.feed-tab[data-tier="${currentFeedTier}"]`));
+    }
 }
 
 function refreshSignalViews() {
-    // Use grouped view by default, fall back to flat
-    loadGroupedSignals().catch(() => {
-        if (typeof renderSignals === 'function') {
-            renderSignals();
-        }
-    });
+    loadMainFeed().catch(() => loadGroupedSignals().catch(() => {
+        if (typeof renderSignals === 'function') renderSignals();
+    }));
     renderCryptoSignals();
 }
 
@@ -7919,11 +8001,9 @@ function initOptionsFlow() {
     loadMarketIntel();
     loadMorningBriefing();
     loadMacroStrip();
-    loadTripWires();
     loadBlackSwanAlerts();
     setInterval(loadSectorHeatmap, 10 * 1000);
     setInterval(loadMacroStrip, 10 * 1000);
-    setInterval(loadTripWires, 30 * 1000);
     setInterval(loadBlackSwanAlerts, 60 * 1000);
     setInterval(loadMarketIntel, 300000); // 5-min refresh
     initHermesFlash();
@@ -11891,56 +11971,6 @@ function renderMacroStrip(tickers) {
     container.innerHTML = `<div class="macro-scroll-set">${cellsHtml}</div><div class="macro-scroll-set">${cellsHtml}</div><div class="macro-scroll-set">${cellsHtml}</div><div class="macro-scroll-set">${cellsHtml}</div>`;
 }
 
-// ===== TRIP WIRE MONITOR =====
-document.getElementById('tripWireToggle')?.addEventListener('click', function() {
-    const body = document.getElementById('tripWireBody');
-    if (body) body.style.display = body.style.display === 'none' ? 'block' : 'none';
-});
-
-async function loadTripWires() {
-    try {
-        const resp = await fetch(`${API_URL}/trip-wires`);
-        if (!resp.ok) return;
-        const data = await resp.json();
-        renderTripWires(data);
-    } catch (e) {
-        console.error('Trip wires load failed:', e);
-    }
-}
-
-function renderTripWires(data) {
-    const body = document.getElementById('tripWireBody');
-    const count = document.getElementById('tripWireCount');
-    if (!body) return;
-
-    if (count) {
-        const hotCount = data.hot_count || 0;
-        count.textContent = `(${hotCount} of 4)`;
-        count.className = 'trip-wire-count' + (hotCount >= 2 ? ' alert' : '');
-    }
-
-    let html = '';
-    if (data.regime_change) {
-        html += '<div class="trip-wire-regime-alert">REGIME CHANGE — 2+ TRIP WIRES ACTIVE — CLOSE SHORTS</div>';
-        body.style.display = 'block';
-    }
-
-    (data.wires || []).forEach(w => {
-        const currentStr = w.current != null ? w.current : '--';
-        const statusCls = (w.status || 'cold').toLowerCase();
-        html += `<div class="trip-wire-row">
-            <span class="tw-label">${escapeHtml(w.label)}</span>
-            <div class="tw-values">
-                <span class="tw-current">${currentStr}</span>
-                <span class="tw-threshold">/ ${escapeHtml(w.threshold_display)}</span>
-            </div>
-            <span class="tw-status ${statusCls}">${w.status}</span>
-        </div>`;
-    });
-
-    body.innerHTML = html;
-}
-
 // ===== BLACK SWAN ALERTS =====
 async function loadBlackSwanAlerts() {
     try {
@@ -12263,13 +12293,6 @@ function showHermesAlert(event) {
     } else {
         intelEl.textContent = 'Pivot analyzing...';
         intelEl.style.fontStyle = 'italic';
-    }
-
-    if (event.trip_wire_status) {
-        const fired = Object.values(event.trip_wire_status).filter(v => v === true).length;
-        const twEl = document.getElementById('hermes-tripwires');
-        twEl.textContent = `Trip Wires: ${fired}/4 fired`;
-        if (fired >= 2) { twEl.style.color = '#f44336'; twEl.style.fontWeight = '700'; }
     }
 
     if (event.sector_velocity) {
