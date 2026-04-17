@@ -25,8 +25,8 @@ except ImportError:
 
 SCOUT_CONFIG = {
     "rsi_length": 14,
-    "rsi_oversold": 40,
-    "rsi_overbought": 60,
+    "rsi_oversold": 30,
+    "rsi_overbought": 70,
     "vol_length": 20,
     "tier_a_rvol": 1.6,
     "tier_b_rvol": 1.1,
@@ -35,7 +35,7 @@ SCOUT_CONFIG = {
     "sma_lengths": [50, 120, 200],
     "structural_lookback": 20,
     "lookback_bars": 3,
-    "min_quality_score": 2,
+    "min_quality_score": 3,
     # Stop and target
     "atr_buffer_mult": 0.15,
     "fallback_tp1_r": 1.5,
@@ -245,16 +245,18 @@ def check_scout_signals(df: pd.DataFrame, ticker: str) -> List[Dict]:
         sma_bearish = bool(latest.get("sma_bearish", False))
         sma_regime = "BULL" if sma_bullish else "BEAR" if sma_bearish else "MIXED"
 
-        # Long signal: RSI oversold hook + bullish reversal candle (VWAP is quality bonus, not gate)
+        # Long signal: RSI oversold hook + bullish reversal candle + price below VWAP (B.3-B)
         long_sig = (
             bool(latest.get("bull_hook", False)) and
-            bool(latest.get("bull_candle", False))
+            bool(latest.get("bull_candle", False)) and
+            float(latest["Close"]) <= float(vwap)
         )
 
-        # Short signal: RSI overbought hook + bearish reversal candle (VWAP is quality bonus, not gate)
+        # Short signal: RSI overbought hook + bearish reversal candle + price above VWAP (B.3-B)
         short_sig = (
             bool(latest.get("bear_hook", False)) and
-            bool(latest.get("bear_candle", False))
+            bool(latest.get("bear_candle", False)) and
+            float(latest["Close"]) >= float(vwap)
         )
 
         # TRADEABLE vs IGNORE: use SMA regime as proxy for HTF VWAP
@@ -274,8 +276,7 @@ def check_scout_signals(df: pd.DataFrame, ticker: str) -> List[Dict]:
             s += 2 if tier == "A" else 1
             s += 1 if (direction == "LONG" and sma_bullish) or (direction == "SHORT" and sma_bearish) else 0
             s += 1 if (direction == "LONG" and structural_long_ok) or (direction == "SHORT" and structural_short_ok) else 0
-            # VWAP confluence bonus: long below VWAP or short above VWAP
-            s += 1 if (direction == "LONG" and latest["Close"] <= vwap) or (direction == "SHORT" and latest["Close"] >= vwap) else 0
+            # VWAP is now a hard gate (see long_sig/short_sig above), not a score bonus (B.3-C)
             return s
 
         now_str = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
@@ -308,7 +309,7 @@ def check_scout_signals(df: pd.DataFrame, ticker: str) -> List[Dict]:
                 "signal_id": f"SCOUT_{ticker}_{now_str}",
                 "timestamp": datetime.utcnow().isoformat(),
                 "ticker": ticker,
-                "strategy": "Scout",
+                "strategy": "Scout Sniper",  # B.2
                 "direction": direction,
                 "signal_type": "SCOUT_ALERT",
                 "entry_price": entry,

@@ -1,11 +1,14 @@
 """
 Chronos Earnings Ingestion
-Runs daily at 6 AM ET. Pulls earnings from UW API (primary) or FMP (fallback),
+Runs daily at 6 AM ET. Pulls earnings from UW API (premarket + afterhours),
 cross-references with positions and watchlist, upserts to DB.
+
+F.4: FMP fallback removed — UW API is sole source. position_overlap.py still
+uses FMP for ETF holdings (separate decision, not changed here).
 """
 import logging
 import json
-from datetime import date, timedelta
+from datetime import date
 
 from database.postgres_client import get_postgres_client
 from utils.position_overlap import ETF_COMPONENTS
@@ -13,41 +16,37 @@ from utils.position_overlap import ETF_COMPONENTS
 logger = logging.getLogger("chronos_ingest")
 
 
+def _normalize_uw_entry(e: dict) -> dict:
+    return {
+        "symbol": e.get("symbol", ""),
+        "date": e.get("report_date", ""),
+        "_timing": e.get("report_time", ""),  # "premarket" or "afterhours"
+        "epsEstimated": e.get("street_mean_est"),
+        "revenueEstimated": None,
+        "_company_name": e.get("full_name"),
+        "_market_cap": e.get("marketcap"),
+        "_sector": e.get("sector"),
+        "_fiscal_quarter": e.get("ending_fiscal_quarter"),
+    }
+
+
 async def _fetch_uw_earnings() -> list:
-    """Fetch earnings from UW API — premarket and afterhours combined."""
+    """Fetch earnings from UW API — premarket and afterhours combined (F.4)."""
     try:
-        from integrations.uw_api import get_earnings_premarket
+        from integrations.uw_api import get_earnings_premarket, get_earnings_afterhours
         pre = await get_earnings_premarket() or []
-        # UW returns rich data per entry; normalize to our schema
+        ah = await get_earnings_afterhours() or []
+        seen = set()
         results = []
-        for e in pre:
-            results.append({
-                "symbol": e.get("symbol", ""),
-                "date": e.get("report_date", ""),
-                "_timing": e.get("report_time", ""),  # "premarket" or "afterhours"
-                "epsEstimated": e.get("street_mean_est"),
-                "revenueEstimated": None,  # UW premarket doesn't include revenue est
-                "_company_name": e.get("full_name"),
-                "_market_cap": e.get("marketcap"),
-                "_sector": e.get("sector"),
-                "_fiscal_quarter": e.get("ending_fiscal_quarter"),
-            })
+        for e in pre + ah:
+            key = (e.get("symbol", ""), e.get("report_date", ""))
+            if key in seen:
+                continue
+            seen.add(key)
+            results.append(_normalize_uw_entry(e))
         return results
     except Exception as ex:
         logger.warning("Chronos: UW earnings fetch failed: %s", ex)
-        return []
-
-
-async def _fetch_fmp_earnings(date_from, date_to) -> list:
-    """Fallback: fetch earnings from FMP."""
-    try:
-        from integrations.fmp_client import fetch_earnings_calendar
-        return await fetch_earnings_calendar(date_from, date_to) or []
-    except ImportError:
-        logger.debug("Chronos: fmp_client not available")
-        return []
-    except Exception as ex:
-        logger.warning("Chronos: FMP earnings fetch failed: %s", ex)
         return []
 
 
@@ -56,20 +55,14 @@ async def run_chronos_earnings_ingest():
     logger.info("📅 Chronos: starting earnings ingestion...")
 
     today = date.today()
-    date_from = today
-    date_to = today + timedelta(days=21)
 
-    # 1. Fetch earnings — UW API primary, FMP fallback
+    # 1. Fetch earnings — UW API only (FMP fallback removed in F.4)
     earnings = await _fetch_uw_earnings()
-    source = "uw_api"
     if not earnings:
-        earnings = await _fetch_fmp_earnings(date_from, date_to)
-        source = "fmp"
-    if not earnings:
-        logger.warning("Chronos: no earnings data from any source")
+        logger.warning("Chronos: no earnings data from UW API")
         return
 
-    logger.info("Chronos: fetched %d earnings entries from %s", len(earnings), source)
+    logger.info("Chronos: fetched %d earnings entries from uw_api", len(earnings))
 
     pool = await get_postgres_client()
     async with pool.acquire() as conn:

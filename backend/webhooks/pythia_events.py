@@ -111,23 +111,36 @@ async def get_pythia_profile_position(ticker: str, entry_price: float, direction
     Tier 2 — Dynamic session data (VA migration, poor extremes, volume quality)
     Tier 3 — IB context (initial balance breakout/failure)
     """
+    _no_coverage = {
+        "profile_bonus": 0,
+        "total_pythia_adjustment": 0,
+        "pythia_coverage": False,
+        "needs_structural_review": True,
+    }
+
     redis = await get_redis_client()
     if not redis:
-        return {"profile_bonus": 0, "total_pythia_adjustment": 0}
+        return _no_coverage
 
     try:
         raw = await redis.get(f"pythia:{ticker}")
         if not raw:
             raw = await redis.get(f"mp_levels:{ticker}")
         if not raw:
-            return {"profile_bonus": 0, "total_pythia_adjustment": 0}
+            # Telemetry: count coverage misses per ticker for weekly watchlist review
+            try:
+                await redis.incr(f"pythia_coverage_miss:{ticker}")
+                await redis.expire(f"pythia_coverage_miss:{ticker}", 604800)  # 7 days
+            except Exception:
+                pass
+            return _no_coverage
 
         data = json.loads(raw)
         vah = data.get("vah")
         val = data.get("val")
         poc = data.get("poc")
         if not vah or not val or not poc:
-            return {"profile_bonus": 0, "total_pythia_adjustment": 0}
+            return _no_coverage
 
         vah, val, poc = float(vah), float(val), float(poc)
         is_long = direction.upper() in ("LONG", "BUY", "BULLISH")
@@ -168,8 +181,8 @@ async def get_pythia_profile_position(ticker: str, entry_price: float, direction
                 evt = await conn.fetchrow(
                     "SELECT va_migration, poor_high, poor_low, volume_quality, "
                     "ib_high, ib_low FROM pythia_events "
-                    "WHERE ticker = $1 AND created_at > NOW() - INTERVAL '4 hours' "
-                    "ORDER BY created_at DESC LIMIT 1", ticker
+                    "WHERE ticker = $1 AND timestamp > NOW() - INTERVAL '4 hours' "
+                    "ORDER BY timestamp DESC LIMIT 1", ticker
                 )
                 if evt:
                     va_migration = evt["va_migration"] or va_migration
@@ -185,13 +198,15 @@ async def get_pythia_profile_position(ticker: str, entry_price: float, direction
         except Exception:
             data_age = "stale"
 
-        # VA migration scoring
+        # VA migration scoring — PineScript writes "higher"/"lower"/"overlapping"/"unknown"
         if va_migration:
-            mig = va_migration.lower()
-            if (is_long and "up" in mig) or (not is_long and "down" in mig):
+            mig = va_migration.lower().strip()
+            if (is_long and mig == "higher") or (not is_long and mig == "lower"):
                 migration_adj = 3
-            elif (is_long and "down" in mig) or (not is_long and "up" in mig):
+            elif (is_long and mig == "lower") or (not is_long and mig == "higher"):
                 migration_adj = -8
+            # "overlapping" and "unknown" stay 0 (no directional edge)
+        logger.debug("Pythia %s migration=%r adj=%+d", ticker, va_migration, migration_adj)
 
         # Poor extreme scoring
         if poor_low and is_long:
@@ -236,8 +251,11 @@ async def get_pythia_profile_position(ticker: str, entry_price: float, direction
             "zone": zone,
             "vah": vah, "val": val, "poc": poc,
             "data_age": data_age,
+            "pythia_coverage": True,
+            "needs_structural_review": False,
         }
 
     except Exception as e:
         logger.debug("Pythia profile lookup failed for %s: %s", ticker, e)
-        return {"profile_bonus": 0}
+        return {"profile_bonus": 0, "total_pythia_adjustment": 0,
+                "pythia_coverage": False, "needs_structural_review": True}

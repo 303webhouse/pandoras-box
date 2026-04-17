@@ -39,6 +39,17 @@ _LIKELY_CRYPTO_TICKERS = {
     "XLM",
 }
 
+# ETFs never have earnings dates — skip yfinance calendar lookup entirely (B.4)
+_KNOWN_ETF_TICKERS = {
+    "SPY", "QQQ", "IWM", "DIA", "MDY", "IWO", "IWN",
+    "GLD", "SLV", "USO", "UNG", "TLT", "IEF", "SHY", "LQD", "HYG",
+    "XLF", "XLK", "XLE", "XLV", "XLI", "XLU", "XLP", "XLB", "XLRE", "XLC",
+    "VTI", "VOO", "VEA", "VWO", "VNQ", "VXUS",
+    "SMH", "SOXX", "ARKK", "ARKW", "ARKG", "ARKF", "ARKQ",
+    "EEM", "EFA", "AGG", "BND", "MUB",
+    "SQQQ", "TQQQ", "SPXU", "SPXL", "UVXY", "SVXY",
+}
+
 
 def _third_friday(year: int, month: int) -> date:
     first_day = date(year, month, 1)
@@ -83,6 +94,7 @@ def _normalize_ticker_for_earnings(ticker: str) -> Optional[str]:
     symbol = ticker.upper().strip()
     if (
         symbol in _LIKELY_CRYPTO_TICKERS
+        or symbol in _KNOWN_ETF_TICKERS
         or symbol.endswith("USDT")
         or symbol.endswith("USDTPERP")
         or symbol.endswith("PERP")

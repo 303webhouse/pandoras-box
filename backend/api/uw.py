@@ -5,8 +5,9 @@ Also broadcasts flow updates via WebSocket for real-time frontend updates.
 import json
 import logging
 from datetime import datetime, timezone
+from typing import Optional
 
-from fastapi import APIRouter, Request, Depends
+from fastapi import APIRouter, Request, Depends, Query
 
 from database.redis_client import get_redis_client
 
@@ -184,6 +185,32 @@ async def get_uw_market_flow():
     if data:
         return {"status": "success", "available": True, "flow": json.loads(data)}
     return {"status": "success", "available": False, "flow": None}
+
+
+@router.get("/news")
+async def get_uw_news(
+    ticker: Optional[str] = None,
+    limit: int = 10,
+    _: str = Depends(verify_pivot_key),
+):
+    """
+    Fetch news headlines from UW API, optionally filtered to a ticker.
+    Used by VPS committee_news.py (B.7 / F.3).
+    Returns: {status, ticker, headlines: [...], count, source: 'uw'}
+    """
+    from integrations.uw_api import get_news_headlines
+
+    headlines = await get_news_headlines(limit=limit, ticker=ticker or None)
+    if headlines is None:
+        headlines = []
+
+    return {
+        "status": "ok",
+        "ticker": (ticker or "").upper() or None,
+        "headlines": headlines,
+        "count": len(headlines),
+        "source": "uw",
+    }
 
 
 @router.get("/ticker/{ticker}")

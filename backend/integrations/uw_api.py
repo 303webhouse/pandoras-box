@@ -484,7 +484,7 @@ async def get_iv_rank(ticker: str) -> Optional[List[Dict[str, Any]]]:
 
 
 async def get_earnings_premarket() -> Optional[List[Dict[str, Any]]]:
-    """Fetch premarket earnings data."""
+    """Fetch premarket earnings data. TTL: 3600s (F.3)."""
     cached = await cache_get("earnings", "premarket")
     if cached:
         return cached
@@ -498,8 +498,59 @@ async def get_earnings_premarket() -> Optional[List[Dict[str, Any]]]:
     return result
 
 
+async def get_earnings_afterhours() -> Optional[List[Dict[str, Any]]]:
+    """Fetch afterhours earnings data. TTL: 3600s (F.3)."""
+    cached = await cache_get("earnings", "afterhours")
+    if cached:
+        return cached
+
+    data = await _uw_request("/api/earnings/afterhours")
+    if not data or "data" not in data:
+        return None
+
+    result = data["data"]
+    await cache_set("earnings", "afterhours", result)
+    return result
+
+
+async def get_earnings_dates(ticker: str) -> Optional[List[Dict[str, Any]]]:
+    """Fetch historical + upcoming earnings dates for a ticker. TTL: 3600s (F.3)."""
+    symbol = ticker.upper()
+    cached = await cache_get("earnings", f"dates_{symbol}")
+    if cached:
+        return cached
+
+    data = await _uw_request(f"/api/earnings/{symbol}")
+    if not data or "data" not in data:
+        return None
+
+    result = data["data"]
+    await cache_set("earnings", f"dates_{symbol}", result)
+    return result
+
+
+async def get_next_earnings_date(ticker: str) -> Optional[str]:
+    """
+    Return the next upcoming earnings date string for a ticker, or None.
+    Tries get_earnings_dates first; falls back to None cleanly (F.3).
+    """
+    dates = await get_earnings_dates(ticker)
+    if not dates:
+        return None
+
+    today = date.today().isoformat()
+    future = []
+    for row in dates:
+        # Row may have 'report_date', 'date', or 'earnings_date' depending on UW schema
+        d = row.get("report_date") or row.get("date") or row.get("earnings_date") or ""
+        if d and d >= today:
+            future.append(d)
+
+    return min(future) if future else None
+
+
 async def get_economic_calendar() -> Optional[List[Dict[str, Any]]]:
-    """Fetch economic calendar events."""
+    """Fetch economic calendar events. TTL: 1800s (F.3)."""
     cached = await cache_get("calendar", "events")
     if cached:
         return cached
@@ -530,18 +581,22 @@ async def get_short_interest(ticker: str) -> Optional[List[Dict[str, Any]]]:
 
 # ── News Headlines ───────────────────────────────────────────────
 
-async def get_news_headlines(limit: int = 20) -> Optional[List[Dict[str, Any]]]:
-    """Fetch market news headlines."""
-    cached = await cache_get("news", f"headlines_{limit}")
+async def get_news_headlines(limit: int = 20, ticker: Optional[str] = None) -> Optional[List[Dict[str, Any]]]:
+    """Fetch market news headlines, optionally filtered to a specific ticker (B.7 / F.3)."""
+    cache_key = f"headlines_{ticker.upper() if ticker else 'all'}_{limit}"
+    cached = await cache_get("news", cache_key)
     if cached:
         return cached
 
-    data = await _uw_request("/api/news/headlines", params={"limit": limit})
+    params: Dict[str, Any] = {"limit": limit}
+    if ticker:
+        params["ticker"] = ticker.upper()
+    data = await _uw_request("/api/news/headlines", params=params)
     if not data or "data" not in data:
         return None
 
     result = data["data"]
-    await cache_set("news", f"headlines_{limit}", result)
+    await cache_set("news", cache_key, result)
     return result
 
 

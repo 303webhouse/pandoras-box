@@ -1211,6 +1211,52 @@ async def init_database():
         except Exception as e:
             print(f"WARNING: pythia_events table creation skipped: {e}")
 
+        # Brief C v1.1: committee_accuracy view for Phase 4 win-rate measurement
+        try:
+            await conn.execute("""
+                CREATE OR REPLACE VIEW committee_accuracy AS
+                SELECT
+                    s.signal_id,
+                    s.ticker,
+                    s.strategy,
+                    s.direction,
+                    s.created_at,
+                    s.decided_at                                          AS committee_decided_at,
+                    s.decision_source,
+                    -- Structured decision (Brief C v1.1 JSON block)
+                    s.committee_data -> 'decision' ->> 'recommendation'  AS committee_recommendation,
+                    s.committee_data -> 'decision' ->> 'conviction'      AS committee_conviction,
+                    s.committee_data -> 'decision' ->> 'key_risk'        AS committee_key_risk,
+                    -- Legacy label (pre-Brief C: TAKE/PASS/WATCHING)
+                    s.committee_data ->> 'action'                        AS legacy_action,
+                    -- Parse failure flag
+                    COALESCE(
+                        (s.committee_data -> 'decision_parse_failed')::TEXT::BOOLEAN,
+                        FALSE
+                    )                                                     AS decision_parse_failed,
+                    -- Nick's action (set via PATCH /api/signals/{id}/action)
+                    s.enrichment_data -> 'nick_decision' ->> 'action'    AS nick_action,
+                    (s.enrichment_data -> 'nick_decision' ->> 'price_at_decision')::FLOAT
+                                                                          AS nick_entry_price,
+                    (s.enrichment_data -> 'nick_decision' ->> 'decided_at')::TIMESTAMPTZ
+                                                                          AS nick_decided_at,
+                    -- Outcome (resolved by outcome_resolver.py)
+                    s.outcome,
+                    s.outcome_pnl_pct,
+                    s.outcome_resolved_at,
+                    -- Computed win flag (NULL = still open)
+                    CASE
+                        WHEN s.outcome = 'WIN'  THEN 1
+                        WHEN s.outcome = 'LOSS' THEN 0
+                        ELSE NULL
+                    END                                                   AS win_flag
+                FROM signals s
+                WHERE s.committee_data IS NOT NULL
+                  AND s.committee_data != '{}'::jsonb
+            """)
+        except Exception as e:
+            print(f"WARNING: committee_accuracy view creation skipped: {e}")
+
         print("Database schema initialized")
 
 async def log_signal(

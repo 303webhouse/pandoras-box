@@ -23,8 +23,9 @@ CACHE_TTLS = {
     "info": 15,           # 15s
     "option_contracts": 300,  # 5 min
     "iv_rank": 300,       # 5 min
-    "earnings": 3600,     # 1 hr
-    "calendar": 3600,     # 1 hr
+    "earnings": 3600,     # 1 hr (F.3)
+    "calendar": 1800,     # 30 min — was 1 hr, economic data changes intraday (F.3)
+    "news": 1800,         # 30 min (F.3 / B.7)
     "short_interest": 3600,  # 1 hr
 }
 
