@@ -36,7 +36,7 @@ async def run_backfill() -> None:
         rows = await conn.fetch(
             """
             SELECT id, signal_id, signal_type, signal_category, direction,
-                   score, triggering_factors, feed_tier_ceiling, status
+                   score, triggering_factors, strategy, status
             FROM signals
             WHERE created_at > NOW() - INTERVAL '7 days'
               AND feed_tier = 'research_log'
@@ -65,11 +65,11 @@ async def run_backfill() -> None:
                     pass
 
             signal_data = {
-                "signal_type":      d.get("signal_type") or "",
-                "signal_category":  d.get("signal_category") or "TRADE_SETUP",
-                "strategy":         "",   # not stored on old rows, default
-                "direction":        d.get("direction") or "",
-                "feed_tier_ceiling": d.get("feed_tier_ceiling"),
+                "signal_type":        d.get("signal_type") or "",
+                "signal_category":    d.get("signal_category") or "TRADE_SETUP",
+                "strategy":           d.get("strategy") or "",
+                "direction":          d.get("direction") or "",
+                "feed_tier_ceiling":  None,   # not persisted; safely absent
                 "triggering_factors": triggering_factors,
             }
 
