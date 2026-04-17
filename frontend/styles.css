@@ -11399,6 +11399,66 @@ body[data-mode="analytics"] .analytics-shell {
     cursor: pointer;
 }
 
+/* ===== ZEUS FEED TABS ===== */
+.feed-tabs {
+    display: flex;
+    gap: 4px;
+    padding: 5px 10px 4px;
+    border-bottom: 1px solid #1e293b;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+}
+.feed-tabs::-webkit-scrollbar { display: none; }
+.feed-tab {
+    background: transparent;
+    border: 1px solid #334155;
+    color: #94a3b8;
+    padding: 2px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.68rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    transition: all 0.2s;
+    white-space: nowrap;
+    font-family: 'Orbit', sans-serif;
+    letter-spacing: 0.5px;
+    line-height: 1.5;
+}
+.feed-tab.active {
+    background: rgba(20, 184, 166, 0.2);
+    border-color: #14b8a6;
+    color: #14b8a6;
+}
+.feed-tab:hover:not(.active) {
+    border-color: #64748b;
+    color: #cbd5e1;
+}
+.feed-banner {
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 1px;
+    padding: 4px 10px;
+    color: #2dd4bf;
+    background: rgba(20, 184, 166, 0.07);
+    border-bottom: 1px solid rgba(20, 184, 166, 0.12);
+    text-transform: uppercase;
+    font-family: 'Orbit', sans-serif;
+}
+.feed-tier-badge {
+    font-size: 0.58rem;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    padding: 1px 4px;
+    border-radius: 3px;
+    text-transform: uppercase;
+    vertical-align: middle;
+    margin-left: 3px;
+}
+.feed-tier-badge.top-feed  { background: rgba(245,158,11,0.15); color: #f59e0b; border: 1px solid rgba(245,158,11,0.4); }
+.feed-tier-badge.watchlist { background: rgba(20,184,166,0.12); color: #2dd4bf; border: 1px solid rgba(20,184,166,0.35); }
+.feed-tier-badge.ta-feed   { background: rgba(99,102,241,0.12); color: #818cf8; border: 1px solid rgba(99,102,241,0.35); }
+
 /* ===== HERMES FLASH ===== */
 .hermes-flash-container {
     position: relative;
@@ -12508,122 +12568,6 @@ body[data-mode="analytics"] .analytics-shell {
     border-color: rgba(236, 201, 75, 0.3);
     color: #ecc94b;
     background: rgba(236, 201, 75, 0.08);
-}
-
-/* ===== TRIP WIRE MONITOR ===== */
-.trip-wire-section {
-    margin-top: 8px;
-    border-top: 1px solid var(--border-color);
-    padding-top: 6px;
-}
-
-.trip-wire-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 4px 8px;
-    cursor: pointer;
-    font-family: 'Orbit', sans-serif;
-}
-
-.trip-wire-header:hover {
-    background: rgba(20, 184, 166, 0.05);
-    border-radius: 4px;
-}
-
-.trip-wire-title {
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 1.2px;
-    text-transform: uppercase;
-    color: var(--text-secondary);
-}
-
-.trip-wire-count {
-    font-size: 10px;
-    color: var(--text-secondary);
-}
-
-.trip-wire-count.alert {
-    color: #FF6B35;
-    font-weight: 700;
-}
-
-.trip-wire-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 4px 8px;
-    font-size: 11px;
-}
-
-.tw-label {
-    flex: 1;
-    color: var(--text-secondary);
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.3px;
-}
-
-.tw-values {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-family: 'Orbit', sans-serif;
-}
-
-.tw-current {
-    color: var(--text-primary);
-    font-weight: 500;
-    font-size: 11px;
-}
-
-.tw-threshold {
-    color: var(--text-secondary);
-    font-size: 10px;
-}
-
-.tw-status {
-    font-size: 9px;
-    font-weight: 700;
-    letter-spacing: 0.5px;
-    padding: 1px 6px;
-    border-radius: 3px;
-    text-transform: uppercase;
-}
-
-.tw-status.cold {
-    background: rgba(100, 100, 100, 0.2);
-    color: #888;
-}
-
-.tw-status.warm {
-    background: rgba(255, 152, 0, 0.15);
-    color: #ffb74d;
-}
-
-.tw-status.hot {
-    background: rgba(255, 107, 53, 0.2);
-    color: #FF6B35;
-    animation: tw-pulse 1.5s ease-in-out infinite;
-}
-
-@keyframes tw-pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.6; }
-}
-
-.trip-wire-regime-alert {
-    background: rgba(255, 107, 53, 0.12);
-    border: 1px solid rgba(255, 107, 53, 0.3);
-    border-radius: 6px;
-    padding: 6px 10px;
-    margin: 6px 8px;
-    font-size: 11px;
-    font-weight: 600;
-    color: #FF6B35;
-    text-align: center;
-    animation: tw-pulse 1.5s ease-in-out infinite;
 }
 
 /* ===== BLACK SWAN ALERT BADGES ===== */

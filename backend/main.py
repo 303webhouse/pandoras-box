@@ -595,6 +595,9 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("Attribution columns setup: %s", e)
 
+    # ZEUS Phase 3: verify feed_tier schema after startup
+    asyncio.create_task(verify_zeus_schema())
+
     logger.info("✅ Pandora's Box is live")
 
     yield
@@ -682,13 +685,84 @@ async def health_check():
     if postgres_state in {"error", "disconnected"}:
         overall = "degraded"
     
+    # ZEUS Phase 3 — feed_tier schema + distribution check
+    zeus_block: dict = {}
+    try:
+        from config import ZEUS_TIERED_ROUTING_ENABLED
+        zeus_block["routing_enabled"] = ZEUS_TIERED_ROUTING_ENABLED
+
+        pool = await get_postgres_client()
+        async with pool.acquire() as conn:
+            # Confirm feed_tier column exists
+            col_exists = await conn.fetchval(
+                """
+                SELECT COUNT(*) FROM information_schema.columns
+                WHERE table_name = 'signals' AND column_name = 'feed_tier'
+                """
+            )
+            zeus_block["feed_tier_column"] = bool(col_exists)
+
+            # 7-day tier distribution
+            if col_exists:
+                rows = await conn.fetch(
+                    """
+                    SELECT feed_tier, COUNT(*) AS n
+                    FROM signals
+                    WHERE created_at > NOW() - INTERVAL '7 days'
+                    GROUP BY feed_tier
+                    ORDER BY n DESC
+                    """
+                )
+                zeus_block["tier_distribution_7d"] = {
+                    r["feed_tier"] or "null": int(r["n"]) for r in rows
+                }
+
+            # flow_events last 24h
+            flow_count = await conn.fetchval(
+                "SELECT COUNT(*) FROM flow_events WHERE created_at > NOW() - INTERVAL '24 hours'"
+            )
+            zeus_block["flow_events_24h"] = int(flow_count or 0)
+
+    except Exception as _ze:
+        zeus_block["error"] = str(_ze)
+
     return {
         "status": overall,
         "server_time_et": now_et.strftime("%Y-%m-%d %H:%M:%S %Z"),
         "redis": redis_state,
         "postgres": postgres_state,
-        "websocket_connections": len(manager.active_connections)
+        "websocket_connections": len(manager.active_connections),
+        "zeus": zeus_block,
     }
+
+
+async def verify_zeus_schema() -> None:
+    """
+    Startup check — warn to Discord if feed_tier column is missing.
+    Fires once after a 30s delay to let DB pool initialize.
+    """
+    import asyncio
+    await asyncio.sleep(30)
+    try:
+        pool = await get_postgres_client()
+        async with pool.acquire() as conn:
+            col_exists = await conn.fetchval(
+                """
+                SELECT COUNT(*) FROM information_schema.columns
+                WHERE table_name = 'signals' AND column_name = 'feed_tier'
+                """
+            )
+        if not col_exists:
+            import os, urllib.request, json as _json
+            webhook = os.getenv("DISCORD_WEBHOOK_SIGNALS") or ""
+            if webhook:
+                payload = _json.dumps({
+                    "content": "**ZEUS WARNING** — `feed_tier` column missing from `signals` table. Run `backfill_feed_tier.py` and check DB migrations."
+                }).encode()
+                req = urllib.request.Request(webhook, data=payload, headers={"Content-Type": "application/json"})
+                urllib.request.urlopen(req, timeout=10)
+    except Exception:
+        pass  # Never crash startup
 
 
 @app.get("/live")
