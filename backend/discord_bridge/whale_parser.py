@@ -204,6 +204,39 @@ def format_whale_hunter_for_llm(parsed: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def format_wh_accumulation_embed(signal: Dict[str, Any]) -> str:
+    """
+    Format a WH-ACCUMULATION WATCHLIST_PROMOTION signal as a Discord embed string.
+    Used by VPS committee/notification system (ZEUS Phase 1A.3).
+    NOT a trade signal — informational only.
+    """
+    ticker = str(signal.get("ticker") or "?").upper()
+    confluence = signal.get("confluence") or {}
+    notes = signal.get("notes") or ""
+
+    dp_blocks = confluence.get("darkpool_blocks", 0)
+    dp_prem = confluence.get("darkpool_total_premium", 0)
+    call_prem = confluence.get("flow_call_premium", 0)
+    call_gamma = confluence.get("gex_call_gamma", 0)
+    put_gamma = confluence.get("gex_put_gamma", 0)
+
+    def _fmt_m(v):
+        try:
+            return f"${float(v) / 1e6:.1f}M"
+        except Exception:
+            return "N/A"
+
+    lines = [
+        f"🐋 WATCHLIST: WH-ACCUMULATION — {ticker}",
+        notes,
+        f"Darkpool: {dp_blocks} blocks / {_fmt_m(dp_prem)} total",
+        f"Flow: {_fmt_m(call_prem)} call premium",
+        f"GEX: call_gamma={_fmt_m(call_gamma)} put_gamma={_fmt_m(put_gamma)}",
+        "⚠️ NOT A TRADE SIGNAL — watching for pullback entry",
+    ]
+    return "\n".join(lines)
+
+
 def format_uw_embed_for_llm(parsed: Dict[str, Any]) -> str:
     ticker = str(parsed.get("ticker") or "?").upper()
     option_type = str(parsed.get("option_type") or "unknown").lower()
