@@ -388,6 +388,46 @@ async def lifespan(app: FastAPI):
                 logger.warning("Crypto scan loop error: %s", e)
             await asyncio.sleep(300)  # 5 minutes
 
+    # UW flow poller: populate flow_events every 5 min during market hours (ZEUS 1A.0)
+    async def uw_flow_poller_loop():
+        """Poll UW per-ticker flow and write to flow_events every 5 min."""
+        import pytz
+        from datetime import datetime as dt_cls
+
+        await asyncio.sleep(120)  # 2 min after startup (let DB connections settle)
+
+        while True:
+            try:
+                et = dt_cls.now(pytz.timezone("America/New_York"))
+                if et.weekday() < 5 and 9 <= et.hour < 16:
+                    from jobs.uw_flow_poller import run_flow_poller
+                    await run_flow_poller()
+                else:
+                    logger.debug("UW flow poller: outside market hours, skipping")
+            except Exception as e:
+                logger.warning("UW flow poller loop error: %s", e)
+            await asyncio.sleep(300)  # 5 minutes
+
+    # WH-ACCUMULATION scanner: detect institutional accumulation hourly (ZEUS 1A.3)
+    async def wh_accumulation_loop():
+        """Run WH-ACCUMULATION scanner every hour during market hours."""
+        import pytz
+        from datetime import datetime as dt_cls
+
+        await asyncio.sleep(600)  # 10 min after startup (let flow_events seed first)
+
+        while True:
+            try:
+                et = dt_cls.now(pytz.timezone("America/New_York"))
+                if et.weekday() < 5 and 9 <= et.hour < 16:
+                    from scanners.wh_accumulation import run_wh_accumulation_scan
+                    await run_wh_accumulation_scan()
+                else:
+                    logger.debug("WH-ACCUMULATION scanner: outside market hours, skipping")
+            except Exception as e:
+                logger.warning("WH-ACCUMULATION loop error: %s", e)
+            await asyncio.sleep(3600)  # 1 hour
+
     expiry_task = asyncio.create_task(signal_expiry_loop())
     universe_task = asyncio.create_task(universe_cache_loop())
     mtm_task = asyncio.create_task(mark_to_market_loop())
@@ -399,6 +439,8 @@ async def lifespan(app: FastAPI):
     staleness_task = asyncio.create_task(factor_staleness_loop())
     vwap_task = asyncio.create_task(vwap_validation_loop())
     crypto_scan_task = asyncio.create_task(crypto_scan_loop())
+    uw_flow_poller_task = asyncio.create_task(uw_flow_poller_loop())
+    wh_accumulation_task = asyncio.create_task(wh_accumulation_loop())
 
     # Oracle insights: pre-compute analytics payload hourly
     async def oracle_refresh_loop():
@@ -548,6 +590,8 @@ async def lifespan(app: FastAPI):
     staleness_task.cancel()
     vwap_task.cancel()
     crypto_scan_task.cancel()
+    uw_flow_poller_task.cancel()
+    wh_accumulation_task.cancel()
     oracle_task.cancel()
     price_collector_task.cancel()
     watchlist_alert_task.cancel()

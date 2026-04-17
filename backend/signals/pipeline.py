@@ -20,6 +20,60 @@ logger = logging.getLogger(__name__)
 
 COMMITTEE_SCORE_THRESHOLD = 75.0  # Minimum score_v2 to trigger committee
 
+# ── Cross-asset flow alignment map (ZEUS Phase 1A.1) ──
+# Component → list of related ETFs/tickers to check for sentiment confirmation
+COMPONENT_TO_ETF = {
+    "NVDA": ["XLK", "QQQ", "SMH"],
+    "AAPL": ["XLK", "QQQ"],
+    "MSFT": ["XLK", "QQQ"],
+    "GOOGL": ["XLC", "QQQ"],
+    "AMZN": ["XLC", "QQQ"],
+    "META": ["XLC", "QQQ"],
+    "TSLA": ["XLY", "QQQ"],
+    "AMD":  ["XLK", "SMH"],
+    "AVGO": ["XLK", "SMH"],
+    "JPM":  ["XLF"],
+    "BAC":  ["XLF"],
+    "GS":   ["XLF"],
+    "XOM":  ["XLE"],
+    "CVX":  ["XLE"],
+    # Reverse: ETF → representative components
+    "XLK":  ["NVDA", "MSFT"],
+    "XLF":  ["JPM", "BAC"],
+    "XLE":  ["XOM", "CVX"],
+    "SMH":  ["NVDA", "AVGO"],
+}
+
+
+async def _check_cross_asset_flow_alignment(
+    conn, ticker: str, sentiment: str, is_long: bool, is_short: bool,
+) -> int:
+    """
+    Returns +4 if the signal direction sentiment aligns on BOTH the signal ticker
+    AND a related ETF/component within the last 4 hours. Returns 0 otherwise.
+    """
+    related = COMPONENT_TO_ETF.get(ticker.upper(), [])
+    if not related or not sentiment:
+        return 0
+
+    want_sentiment = "BULLISH" if is_long else ("BEARISH" if is_short else None)
+    if not want_sentiment or sentiment != want_sentiment:
+        return 0
+
+    try:
+        related_row = await conn.fetchrow(
+            "SELECT ticker FROM flow_events "
+            "WHERE ticker = ANY($1::text[]) "
+            "AND flow_sentiment = $2 "
+            "AND captured_at > NOW() - INTERVAL '4 hours' "
+            "LIMIT 1",
+            related, sentiment,
+        )
+        return 4 if related_row else 0
+    except Exception:
+        return 0
+
+
 # ── Nemesis Countertrend Lane ──
 # Tickers always allowed through the countertrend gate (e.g. inverse ETFs)
 COUNTERTREND_WHITELIST = {"SQQQ", "SPXS", "TZA", "SDOW", "UVXY", "VXX", "SH", "SDS"}
@@ -284,31 +338,82 @@ async def apply_scoring(signal_data: Dict[str, Any]) -> Dict[str, Any]:
         except Exception as sq_err:
             logger.debug("Squeeze cross-reference skipped: %s", sq_err)
 
-        # P2C: Flow data cross-reference (BLOCKED — flow_events pipeline not operational)
-        # When flow_events is populated, add flow confluence check here.
-        # For now, gracefully skip.
+        # P2C / P4A: UW flow cross-reference — directional + premium-tiered (ZEUS 1A.1)
         try:
             from database.postgres_client import get_postgres_client as _gpc
             _pool = await _gpc()
             fl_ticker = (signal_data.get("ticker") or "").upper()
             async with _pool.acquire() as conn:
                 fl_row = await conn.fetchrow(
-                    "SELECT flow_sentiment, total_premium, pc_ratio "
+                    "SELECT total_premium, call_premium, put_premium, "
+                    "flow_sentiment, pc_ratio "
                     "FROM flow_events WHERE ticker = $1 "
                     "AND captured_at > NOW() - INTERVAL '4 hours' "
                     "ORDER BY captured_at DESC LIMIT 1",
                     fl_ticker,
                 )
-            if fl_row and fl_row["total_premium"] and float(fl_row["total_premium"]) > 1_000_000:
-                flow_bonus = 5
-                score = min(100, score + flow_bonus)
-                triggering_factors["flow"] = {
-                    "bonus": flow_bonus,
-                    "sentiment": fl_row["flow_sentiment"],
-                    "premium": float(fl_row["total_premium"]),
-                }
-        except Exception:
-            pass  # Flow pipeline not yet operational — expected
+
+                if fl_row:
+                    call_prem = float(fl_row["call_premium"] or 0)
+                    put_prem  = float(fl_row["put_premium"] or 0)
+                    total     = float(fl_row["total_premium"] or 0)
+                    sentiment = (fl_row["flow_sentiment"] or "").upper()
+                    pc_ratio  = float(fl_row["pc_ratio"] or 0) if fl_row["pc_ratio"] else None
+
+                    direction = (signal_data.get("direction") or "").upper()
+                    is_long   = direction in ("LONG", "BUY", "BULLISH")
+                    is_short  = direction in ("SHORT", "SELL", "BEARISH")
+
+                    flow_bonus  = 0
+                    flow_reason = []
+
+                    # Premium-tiered directional scoring
+                    if call_prem > 2_000_000 and sentiment == "BULLISH":
+                        if is_long:
+                            flow_bonus += 6
+                            flow_reason.append(f"bullish flow ${call_prem/1e6:.1f}M calls")
+                        elif is_short:
+                            flow_bonus -= 3
+                            flow_reason.append(f"WARN: short vs bullish flow ${call_prem/1e6:.1f}M calls")
+
+                    if put_prem > 2_000_000 and sentiment == "BEARISH":
+                        if is_short:
+                            flow_bonus += 6
+                            flow_reason.append(f"bearish flow ${put_prem/1e6:.1f}M puts")
+                        elif is_long:
+                            flow_bonus -= 3
+                            flow_reason.append(f"WARN: long vs bearish flow ${put_prem/1e6:.1f}M puts")
+
+                    # Legacy small-premium bonus (backward compat, downgraded +5→+2)
+                    if total > 1_000_000 and flow_bonus == 0:
+                        flow_bonus = 2
+                        flow_reason.append(f"flow ${total/1e6:.1f}M total, direction-neutral")
+
+                    # Cross-asset alignment bonus
+                    ca_bonus = await _check_cross_asset_flow_alignment(
+                        conn, fl_ticker, sentiment, is_long, is_short,
+                    )
+                    if ca_bonus:
+                        flow_bonus += ca_bonus
+                        flow_reason.append(f"cross-asset align +{ca_bonus}")
+
+                    if flow_bonus != 0:
+                        score = max(0, min(100, score + flow_bonus))
+                        triggering_factors["flow"] = {
+                            "bonus": flow_bonus,
+                            "sentiment": sentiment,
+                            "total_premium": total,
+                            "call_premium": call_prem,
+                            "put_premium": put_prem,
+                            "pc_ratio": pc_ratio,
+                            "reasons": flow_reason,
+                        }
+                        logger.info(
+                            "Flow enrichment %s %s: %+d (%s)",
+                            fl_ticker, direction, flow_bonus, "; ".join(flow_reason),
+                        )
+        except Exception as _fe:
+            logger.debug("P4A flow enrichment skipped: %s", _fe)
 
         # P4B: Pythia market profile position cross-reference
         # Phase 0.3.2 — Option B: no Pythia coverage = watchlist ceiling (never top_feed)
