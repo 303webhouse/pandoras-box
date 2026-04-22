@@ -828,16 +828,62 @@ async def get_bias_data(timeframe: str):
     if timeframe_lower == "health":
         from api.bias import get_pivot_health
         return await get_pivot_health()
+    # Composite-system timeframes: read from the composite engine
+    if timeframe_lower in {"intraday", "macro", "overall"}:
+        try:
+            from api.bias import get_composite_timeframes
+            tf_data = await get_composite_timeframes()
+            if timeframe_lower == "overall":
+                return {
+                    "level": tf_data.get("composite_bias", "NEUTRAL"),
+                    "score": tf_data.get("composite_score", 0.0),
+                    "data": {"confidence": tf_data.get("confidence")},
+                    "updated_at": tf_data.get("timestamp"),
+                }
+            entry = (tf_data.get("timeframes") or {}).get(timeframe_lower)
+            if entry:
+                return {
+                    "level": entry.get("bias_level", "NEUTRAL"),
+                    "score": entry.get("sub_score", 0.0),
+                    "data": {
+                        "momentum": entry.get("momentum"),
+                        "divergent": entry.get("divergent"),
+                        "active_count": entry.get("active_count"),
+                        "total_count": entry.get("total_count"),
+                    },
+                    "updated_at": tf_data.get("timestamp"),
+                }
+        except Exception as _ce:
+            logger.warning("Composite timeframe lookup failed for %s: %s", timeframe_lower, _ce)
+        return {"level": "NEUTRAL", "data": {}, "updated_at": None}
+
     if timeframe_lower not in {"daily", "weekly", "monthly", "cyclical"}:
         raise HTTPException(status_code=404, detail="Unknown bias timeframe")
 
     from database.redis_client import get_bias
-    
+
     bias = await get_bias(timeframe.upper())
     if bias:
         return bias
-    else:
-        return {"level": "NEUTRAL", "data": {}, "updated_at": None}
+
+    # Fallback: read from bias_history.json (populated by the scheduler)
+    # Handles the window between deploys and the next scheduler run.
+    try:
+        import json as _json
+        _hist = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "bias_history.json")
+        with open(_hist) as _f:
+            _history = _json.load(_f)
+        _current = (_history.get(timeframe_lower) or {}).get("current") or {}
+        if _current:
+            return {
+                "level": _current.get("level", "NEUTRAL"),
+                "data": _current.get("details", {}),
+                "updated_at": _current.get("timestamp"),
+            }
+    except Exception as _fe:
+        logger.debug("bias_history fallback failed for %s: %s", timeframe_lower, _fe)
+
+    return {"level": "NEUTRAL", "data": {}, "updated_at": None}
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):

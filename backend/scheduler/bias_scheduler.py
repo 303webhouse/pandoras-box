@@ -1044,7 +1044,18 @@ async def refresh_daily_bias() -> Dict[str, Any]:
         
         # Update bias with trend tracking
         result = update_bias(BiasTimeframe.DAILY, new_level, details=details)
-        
+
+        # Persist to Redis so /api/bias/daily returns live data
+        try:
+            from database.redis_client import set_bias as _set_bias
+            await _set_bias(
+                timeframe="DAILY",
+                bias_level=new_level,
+                bias_data={**(details or {}), "timestamp": result["current"]["timestamp"]},
+            )
+        except Exception as _re:
+            logger.warning("Redis bias sync (DAILY) failed: %s", _re)
+
         logger.info(f"âœ… Daily Bias updated: {new_level} (total vote: {total_vote}/{max_possible})")
         return result
         
@@ -1365,7 +1376,18 @@ async def refresh_weekly_bias() -> Dict[str, Any]:
     
     # Update bias with trend tracking
     result = update_bias(BiasTimeframe.WEEKLY, new_level, details=details)
-    
+
+    # Persist to Redis so /api/bias/weekly returns live data
+    try:
+        from database.redis_client import set_bias as _set_bias
+        await _set_bias(
+            timeframe="WEEKLY",
+            bias_level=new_level,
+            bias_data={**(details or {}), "timestamp": result["current"]["timestamp"]},
+        )
+    except Exception as _re:
+        logger.warning("Redis bias sync (WEEKLY) failed: %s", _re)
+
     # Add baseline and shift info to result
     result["baseline"] = {
         "timestamp": _weekly_baseline.get("timestamp"),
@@ -1985,7 +2007,18 @@ async def refresh_cyclical_bias() -> Dict[str, Any]:
         
         # Update bias with trend tracking
         result = update_bias(BiasTimeframe.CYCLICAL, new_level, details=details)
-        
+
+        # Persist to Redis so /api/bias/cyclical returns live data
+        try:
+            from database.redis_client import set_bias as _set_bias
+            await _set_bias(
+                timeframe="CYCLICAL",
+                bias_level=new_level,
+                bias_data={**(details or {}), "timestamp": result["current"]["timestamp"]},
+            )
+        except Exception as _re:
+            logger.warning("Redis bias sync (CYCLICAL) failed: %s", _re)
+
         mode_str = "CRISIS MODE" if crisis_active else "normal"
         logger.info(f"âœ… Cyclical Bias updated: {new_level} (vote: {total_vote}/Â±{max_possible_crisis}, {mode_str})")
         return result
