@@ -102,13 +102,17 @@ def _walk_bars(
     return None, None, None  # no touch yet
 
 
-async def resolve_signal_outcomes() -> None:
+async def resolve_signal_outcomes(backfill_days: int = 60) -> None:
     """
-    Scan accepted signals with no outcome. For each, walk bars from signal
-    timestamp to now to detect first touch of target or stop.
+    Walk-forward outcome resolution for all measurable signals.
 
-    Filters: user_action = 'SELECTED' (set by Nick's ACCEPTED action),
-    outcome IS NULL, signal within 60 days.
+    Scope: any signal with entry_price + stop_loss + target_1 that hasn't been
+    resolved yet and hasn't been explicitly DISMISSED by Nick.  No longer gated
+    on user_action='SELECTED' — we measure every signal the system fires so that
+    score bands have real win-rate data for URSA gates.
+
+    The resolver is idempotent: if bars don't yet show a target or stop touch,
+    it returns (None, None, None) and the signal stays unresolved until next run.
     """
     from database.postgres_client import get_postgres_client
 
@@ -118,15 +122,20 @@ async def resolve_signal_outcomes() -> None:
             SELECT signal_id, ticker, direction, entry_price,
                    stop_loss, target_1, timestamp
             FROM signals
-            WHERE user_action = 'SELECTED'
-              AND outcome IS NULL
-              AND timestamp > NOW() - INTERVAL '60 days'
-        """)
+            WHERE outcome IS NULL
+              AND timestamp > NOW() - INTERVAL '%s days'
+              AND status NOT IN ('DISMISSED', 'EXPIRED')
+              AND signal_type NOT IN ('SCOUT_ALERT')
+              AND entry_price IS NOT NULL
+              AND stop_loss IS NOT NULL
+              AND target_1 IS NOT NULL
+        """ % backfill_days)
 
     if not pending:
+        logger.info("Outcome resolver: no unresolved signals found")
         return
 
-    logger.info("Outcome resolver: checking %d accepted signals", len(pending))
+    logger.info("Outcome resolver: checking %d signals for WIN/LOSS", len(pending))
 
     for sig in pending:
         ticker = sig["ticker"]
@@ -162,3 +171,25 @@ async def resolve_signal_outcomes() -> None:
                 "Resolved %s %s %s: %s (%.2f%%) at %s",
                 ticker, direction, sig["signal_id"], outcome, pnl_pct or 0, resolved_at,
             )
+
+
+if __name__ == "__main__":
+    import argparse
+    import sys
+    import os
+
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+
+    parser = argparse.ArgumentParser(description="Outcome resolver backfill")
+    parser.add_argument("--backfill", action="store_true", help="Run a one-shot backfill pass")
+    parser.add_argument("--days", type=int, default=30, help="How many days back to resolve (default: 30)")
+    args = parser.parse_args()
+
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
+
+    if args.backfill:
+        logger.info("Running backfill: resolving signals from last %d days", args.days)
+        asyncio.run(resolve_signal_outcomes(backfill_days=args.days))
+        logger.info("Backfill complete")
+    else:
+        parser.print_help()

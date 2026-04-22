@@ -676,6 +676,19 @@ async def init_database():
         except Exception as e:
             print(f"WARNING: stuck-signal cleanup skipped: {e}")
 
+        # One-time cleanup: expire stale PENDING_REVIEW backlog (2026-04-22 threshold-raise)
+        # 156 signals stuck in pre-ZEUS PENDING_REVIEW queue, none reviewed in 7+ days
+        try:
+            await conn.execute("""
+                UPDATE signals
+                SET status = 'EXPIRED',
+                    notes = COALESCE(notes, '') || ' | Auto-expired 2026-04-22: stale PENDING_REVIEW backlog (pre-threshold-raise cleanup)'
+                WHERE status = 'PENDING_REVIEW'
+                  AND timestamp < NOW() - INTERVAL '7 days'
+            """)
+        except Exception as e:
+            print(f"WARNING: PENDING_REVIEW backlog cleanup skipped: {e}")
+
         # Backfill: existing signals without status get ACTIVE if undecided, DISMISSED/SELECTED if acted on
         await conn.execute("""
             UPDATE signals SET status = 'DISMISSED' WHERE status IS NULL AND user_action = 'DISMISSED'

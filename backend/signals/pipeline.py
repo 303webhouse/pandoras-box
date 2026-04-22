@@ -18,7 +18,7 @@ from utils.bias_snapshot import get_bias_snapshot
 
 logger = logging.getLogger(__name__)
 
-COMMITTEE_SCORE_THRESHOLD = 75.0  # Minimum score_v2 to trigger committee
+COMMITTEE_SCORE_THRESHOLD = 85.0  # Minimum score_v2 to trigger committee (raised from 75→80→85, 2026-04-22)
 
 # ── Cross-asset flow alignment map (ZEUS Phase 1A.1) ──
 # Component → list of related ETFs/tickers to check for sentiment confirmation
@@ -111,10 +111,10 @@ async def _maybe_flag_for_committee(signal_data: Dict[str, Any]) -> None:
     if not signal_id:
         return
 
-    # Auto-promote high-score signals directly to COMMITTEE_REVIEW
-    # so the VPS bridge picks them up automatically (no manual click needed)
-    AUTO_PROMOTE_THRESHOLD = 80.0
-    new_status = "COMMITTEE_REVIEW" if score >= AUTO_PROMOTE_THRESHOLD else "PENDING_REVIEW"
+    # All qualifying signals (score >= 85) go straight to COMMITTEE_REVIEW.
+    # No PENDING_REVIEW middle state — either committee or ACTIVE in feed.
+    AUTO_PROMOTE_THRESHOLD = 85.0
+    new_status = "COMMITTEE_REVIEW" if score >= AUTO_PROMOTE_THRESHOLD else "ACTIVE"
 
     try:
         from database.postgres_client import get_postgres_client
@@ -134,8 +134,6 @@ async def _maybe_flag_for_committee(signal_data: Dict[str, Any]) -> None:
         signal_data["status"] = new_status
         if new_status == "COMMITTEE_REVIEW":
             logger.info(f"🤖 Auto-promoted to committee: {signal_data.get('ticker')} (score={score})")
-        else:
-            logger.info(f"📡 Flagged for signals channel: {signal_data.get('ticker')} (score={score})")
     except Exception as e:
         logger.warning(f"Failed to flag {signal_id} for committee: {e}")
 
