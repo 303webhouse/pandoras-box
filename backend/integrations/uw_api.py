@@ -364,8 +364,8 @@ async def get_options_snapshot(
 
 
 async def get_flow_recent(ticker: str) -> Optional[List[Dict[str, Any]]]:
-    """Fetch recent options flow for a ticker."""
-    cached = await cache_get("flow", ticker.upper())
+    """Fetch recent individual options flow orders for a ticker (order-level records)."""
+    cached = await cache_get("flow_recent", ticker.upper())
     if cached:
         return cached
 
@@ -375,8 +375,30 @@ async def get_flow_recent(ticker: str) -> Optional[List[Dict[str, Any]]]:
 
     # UW returns list directly (not wrapped in "data")
     flow = data if isinstance(data, list) else data.get("data", data)
-    await cache_set("flow", ticker.upper(), flow)
+    await cache_set("flow_recent", ticker.upper(), flow)
     return flow
+
+
+async def get_flow_per_expiry(ticker: str) -> Optional[List[Dict[str, Any]]]:
+    """
+    Fetch aggregated option flow per expiry for the last trading day.
+
+    Returns rows with call_premium, put_premium, call_volume, put_volume
+    aggregated by expiry date — the correct schema for flow scoring.
+    Use this (NOT get_flow_recent) when you need aggregate call/put metrics.
+    """
+    cached = await cache_get("flow", ticker.upper())
+    if cached:
+        return cached
+
+    data = await _uw_request(f"/api/stock/{ticker.upper()}/flow-per-expiry")
+    if not data:
+        return None
+
+    flow = data if isinstance(data, list) else data.get("data", [])
+    if flow:
+        await cache_set("flow", ticker.upper(), flow)
+    return flow or None
 
 
 async def get_greek_exposure(ticker: str) -> Optional[List[Dict[str, Any]]]:

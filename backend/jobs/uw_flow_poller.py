@@ -55,10 +55,10 @@ async def aggregate_ticker_flow(ticker: str) -> Optional[Dict]:
     Flow-per-expiry schema: call_premium (str), put_premium (str),
     call_volume (int), put_volume (int) — already split by UW.
     """
-    from integrations.uw_api import get_flow_recent, get_snapshot
+    from integrations.uw_api import get_flow_per_expiry, get_snapshot
 
     try:
-        flow_data = await get_flow_recent(ticker)
+        flow_data = await get_flow_per_expiry(ticker)
     except Exception as e:
         logger.debug("Flow fetch failed for %s: %s", ticker, e)
         return None

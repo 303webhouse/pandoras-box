@@ -654,6 +654,18 @@ async def init_database():
         except Exception as e:
             print(f"WARNING: signals adx_value migration skipped: {e}")
 
+        # One-time cleanup: expire stuck COMMITTEE_REVIEW signals from April 2026 credit outage
+        try:
+            await conn.execute("""
+                UPDATE signals
+                SET status = 'EXPIRED',
+                    notes = COALESCE(notes, '') || ' | Auto-expired 2026-04-21: stuck COMMITTEE_REVIEW (7+ days, credit outage)'
+                WHERE signal_id IN ('HG_SNOW_20260414_131507', 'ARTEMIS_CRM_20260416_141203_140577')
+                  AND status = 'COMMITTEE_REVIEW'
+            """)
+        except Exception as e:
+            print(f"WARNING: stuck-signal cleanup skipped: {e}")
+
         # Backfill: existing signals without status get ACTIVE if undecided, DISMISSED/SELECTED if acted on
         await conn.execute("""
             UPDATE signals SET status = 'DISMISSED' WHERE status IS NULL AND user_action = 'DISMISSED'
