@@ -3742,6 +3742,30 @@ async function loadGroupedSignals() {
 
 let insightsSortMode = 'time';
 
+// Returns CSS class for committee-approved glow pulse, or '' if not qualifying.
+// Qualifying: committee ran, PIVOT conviction >= B+, action is directional (LONG/SHORT).
+function getCommitteeApprovedClass(signal) {
+    if (!signal || !signal.committee_data) return '';
+    let cd = signal.committee_data;
+    if (typeof cd === 'string') { try { cd = JSON.parse(cd); } catch(e) { return ''; } }
+    const conviction = (cd.pivot && cd.pivot.conviction) || cd.conviction || '';
+    const action = (cd.pivot && cd.pivot.action) || cd.action || '';
+    const QUALIFYING = ['A+', 'A', 'A-', 'B+'];
+    if (!QUALIFYING.includes(conviction)) return '';
+    if (action === 'LONG' || action === 'BUY') return 'committee-approved-long';
+    if (action === 'SHORT' || action === 'SELL') return 'committee-approved-short';
+    return '';
+}
+
+// Pause/resume committee pulse animations when the tab gains/loses focus.
+document.addEventListener('visibilitychange', () => {
+    const cls = document.hidden ? 'anim-paused' : null;
+    document.querySelectorAll('.committee-approved-long, .committee-approved-short').forEach(el => {
+        if (cls) el.classList.add('anim-paused');
+        else el.classList.remove('anim-paused');
+    });
+});
+
 function setInsightsSort(mode, btn) {
     insightsSortMode = mode;
     document.querySelectorAll('.insights-sort-controls .sort-btn').forEach(b => b.classList.remove('active'));
@@ -3912,8 +3936,10 @@ function renderGroupedSignals(groups) {
             return label ? `<span class="feed-tier-badge ${cls}">${label}</span>` : '';
         })();
 
+        const committeePulseClass = getCommitteeApprovedClass(signal);
+
         return `
-            <div class="insight-card ${tierBorderClass}" data-ticker="${group.ticker}" data-direction="${group.direction}" data-signal-id="${signal.signal_id}" data-group-key="${group.group_key}" data-signal="${encodeURIComponent(JSON.stringify(signal))}">
+            <div class="insight-card ${tierBorderClass} ${committeePulseClass}" data-ticker="${group.ticker}" data-direction="${group.direction}" data-signal-id="${signal.signal_id}" data-group-key="${group.group_key}" data-signal="${encodeURIComponent(JSON.stringify(signal))}">
                 <div class="insight-compact" onclick="toggleInsightDetail(this)">
                     <div class="insight-line1">
                         ${getTimingBadge(tf)}

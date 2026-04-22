@@ -13444,3 +13444,51 @@ body[data-mode="analytics"] .analytics-shell {
 }
 .ctx-factor-total span:nth-child(2) { flex: 1; }
 .ctx-factor-total span:nth-child(3) { min-width: 28px; text-align: right; }
+
+/* ── Committee-approved pulse animation (ZEUS Phase 5, 2026-04-22) ── */
+@keyframes committeePulseLong {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
+    border-color: rgba(16, 185, 129, 0.15);
+  }
+  50% {
+    box-shadow: 0 0 12px 2px rgba(16, 185, 129, 0.55);
+    border-color: rgba(16, 185, 129, 0.85);
+  }
+}
+@keyframes committeePulseShort {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(244, 63, 94, 0);
+    border-color: rgba(244, 63, 94, 0.15);
+  }
+  50% {
+    box-shadow: 0 0 12px 2px rgba(244, 63, 94, 0.55);
+    border-color: rgba(244, 63, 94, 0.85);
+  }
+}
+.insight-card.committee-approved-long {
+  border: 1px solid rgba(16, 185, 129, 0.15);
+  animation: committeePulseLong 2s ease-in-out infinite;
+}
+.insight-card.committee-approved-short {
+  border: 1px solid rgba(244, 63, 94, 0.15);
+  animation: committeePulseShort 2s ease-in-out infinite;
+}
+/* Pause animation when tab is not visible */
+.insight-card.committee-approved-long.anim-paused,
+.insight-card.committee-approved-short.anim-paused {
+  animation-play-state: paused;
+}
+/* Reduced-motion fallback */
+@media (prefers-reduced-motion: reduce) {
+  .insight-card.committee-approved-long {
+    animation: none;
+    border: 1.5px solid rgba(16, 185, 129, 0.6);
+    background-color: rgba(16, 185, 129, 0.04);
+  }
+  .insight-card.committee-approved-short {
+    animation: none;
+    border: 1.5px solid rgba(244, 63, 94, 0.6);
+    background-color: rgba(244, 63, 94, 0.04);
+  }
+}
