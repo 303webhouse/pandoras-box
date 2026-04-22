@@ -20,6 +20,8 @@ from datetime import datetime, timedelta, date
 from typing import Dict, Any, Optional, List
 from enum import Enum
 
+from signals.pipeline import process_signal_unified
+
 logger = logging.getLogger(__name__)
 
 # Eastern Time for market hours
@@ -3272,77 +3274,36 @@ async def run_cta_scan_scheduled():
         # Sort by score (highest first) and push top 10
         scored_signals.sort(key=lambda x: x.get("score", 0), reverse=True)
 
-        # Push each signal to Trade Ideas via WebSocket
+        # Push each signal to Trade Ideas via unified pipeline
         pushed_count = 0
         for scored in scored_signals[:10]:
             trade_signal = scored["trade_signal"]
             signal = scored["signal"]
             setup = scored["setup"]
-            score = scored["score"]
-            bias_alignment = scored["bias_alignment"]
-            triggering_factors = scored["triggering_factors"]
-            ticker = trade_signal["ticker"]
 
-            # Persist first; skip Redis/broadcast if DB write fails.
-            db_persisted = False
+            # Populate pipeline-expected fields from the CTA setup dict
+            trade_signal.setdefault("entry_price", setup.get("entry"))
+            trade_signal.setdefault("stop_loss", setup.get("stop"))
+            trade_signal.setdefault("target_1", setup.get("t1"))
+            trade_signal.setdefault("target_2", setup.get("t2"))
+            trade_signal.setdefault("invalidation_level", setup.get("invalidation_level"))
+
             try:
-                await log_signal(trade_signal)
-                await update_signal_with_score(
-                    trade_signal["signal_id"],
-                    score,
-                    bias_alignment,
-                    triggering_factors
+                await process_signal_unified(trade_signal, source="cta_scanner")
+                pushed_count += 1
+                logger.info(
+                    "📡 CTA signal pushed via unified pipeline: %s %s "
+                    "(score: %s, tier: %s)",
+                    trade_signal.get("ticker"),
+                    trade_signal.get("signal_type"),
+                    trade_signal.get("score"),
+                    trade_signal.get("feed_tier"),
                 )
-                db_persisted = True
-            except Exception as db_err:
-                logger.error("Skipping CTA signal %s due to DB persistence failure: %s", trade_signal.get("signal_id"), db_err)
-            if not db_persisted:
-                continue
-
-            # Cache in Redis (for quick access)
-            await cache_signal(trade_signal["signal_id"], trade_signal, ttl=7200)  # 2 hour TTL
-
-            try:
-                from database.redis_client import get_redis_client
-                client = await get_redis_client()
-                if client:
-                    await client.incr(f"signal:active:{ticker}")
-                    await client.expire(f"signal:active:{ticker}", 7200)
-            except Exception:
-                pass
-
-            # Record signal outcome tracking
-            try:
-                from database.postgres_client import get_postgres_client
-                pool = await get_postgres_client()
-                async with pool.acquire() as conn:
-                    await conn.execute(
-                        """
-                        INSERT INTO signal_outcomes
-                            (signal_id, symbol, signal_type, direction, cta_zone,
-                             entry, stop, t1, t2, invalidation_level, created_at, outcome)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), 'PENDING')
-                        ON CONFLICT (signal_id) DO NOTHING
-                        """,
-                        signal.get("signal_id"),
-                        signal.get("symbol") or ticker,
-                        signal.get("signal_type"),
-                        signal.get("direction"),
-                        signal.get("cta_zone"),
-                        setup.get("entry"),
-                        setup.get("stop"),
-                        setup.get("t1"),
-                        setup.get("t2"),
-                        setup.get("invalidation_level"),
-                    )
             except Exception as e:
-                logger.warning(f"Failed to record signal outcome: {e}")
-            
-            # Broadcast to all connected devices (use smart broadcast for priority handling)
-            await manager.broadcast_signal_smart(trade_signal, priority_threshold=75.0)
-            pushed_count += 1
-            
-            logger.info(f"ðŸ“¡ CTA signal pushed: {ticker} {signal.get('signal_type')} (score: {score}, {bias_alignment})")
+                logger.error(
+                    "CTA pipeline error for %s: %s",
+                    trade_signal.get("signal_id"), e,
+                )
         
         # Update scheduler status
         _scheduler_status["cta_scanner"]["last_run"] = get_eastern_now().isoformat()
