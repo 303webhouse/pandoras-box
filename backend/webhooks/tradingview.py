@@ -659,6 +659,55 @@ async def process_phalanx_signal(alert: TradingViewAlert, start_time: datetime):
     return {"status": "accepted", "signal_id": signal_id, "signal_type": signal_type}
 
 
+# ── ADX helpers (ZEUS Phase 5) ────────────────────────────────────────────────
+_adx_cache: dict = {}           # (ticker, timeframe) → (epoch_ts, adx_float|None)
+_ADX_CACHE_TTL = 300            # seconds — avoids redundant fetches within same scan
+
+
+def _compute_adx_yf(ticker: str, timeframe: str = "15m", period: int = 14) -> float | None:
+    """
+    Compute ADX(14) via yfinance. Fallback when TradingView alert doesn't carry ADX.
+    Cached per (ticker, timeframe) for 5 min. Returns None on failure (fail-open).
+    """
+    import time as _time
+    cache_key = (ticker, timeframe)
+    if cache_key in _adx_cache:
+        ts, val = _adx_cache[cache_key]
+        if _time.time() - ts < _ADX_CACHE_TTL:
+            return val
+    tf_map = {
+        "1D": ("1d", "3mo"), "D": ("1d", "3mo"), "1d": ("1d", "3mo"),
+        "1H": ("1h", "60d"), "H": ("1h", "60d"), "60": ("1h", "60d"),
+        "15m": ("15m", "5d"), "15": ("15m", "5d"),
+        "5m": ("5m", "5d"),   "5": ("5m", "5d"),
+    }
+    interval, lookback = tf_map.get(str(timeframe), ("15m", "5d"))
+    try:
+        import yfinance as yf
+        import pandas as pd
+        df = yf.Ticker(ticker).history(period=lookback, interval=interval)
+        if df.empty or len(df) < period * 2:
+            _adx_cache[cache_key] = (_time.time(), None)
+            return None
+        high, low, close = df["High"], df["Low"], df["Close"]
+        alpha = 1 / period
+        plus_dm  = high.diff().where((high.diff() > low.diff().abs()) & (high.diff() > 0), 0.0)
+        minus_dm = low.diff().abs().where((low.diff().abs() > high.diff()) & (low.diff() < 0), 0.0)
+        tr  = pd.concat([(high - low), (high - close.shift()).abs(), (low - close.shift()).abs()], axis=1).max(axis=1)
+        atr = tr.ewm(alpha=alpha, adjust=False).mean()
+        plus_di  = 100 * plus_dm.ewm(alpha=alpha, adjust=False).mean() / atr
+        minus_di = 100 * minus_dm.ewm(alpha=alpha, adjust=False).mean() / atr
+        dx  = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di)
+        adx_series = dx.ewm(alpha=alpha, adjust=False).mean()
+        val = float(adx_series.iloc[-1])
+        _adx_cache[cache_key] = (_time.time(), val)
+        return val
+    except Exception as exc:
+        logger.warning("ADX yfinance fallback failed for %s: %s", ticker, exc)
+        _adx_cache[cache_key] = (_time.time(), None)
+        return None
+
+
 async def process_artemis_signal(alert: TradingViewAlert, start_time: datetime):
     """
     Process Artemis (VWAP Band Mean Reversion) signals.
@@ -725,40 +774,49 @@ async def process_artemis_signal(alert: TradingViewAlert, start_time: datetime):
         logger.info(f"Dedup skip: {signal_data.get('ticker')} {signal_data.get('strategy')}")
         return {"status": "skipped", "reason": "duplicate_within_cooldown"}
 
-    # Regime-aware ADX filter for Artemis (Phase 5 — Olympus approved)
-    # In bearish regimes, Artemis mean-reversion is unreliable without trend confirmation.
-    # Skip low-ADX Artemis signals when composite < 40.
-    adx_val = None
+    # ── ZEUS Phase 5: Artemis ADX regime filter ─────────────────────────────
+    # Thresholds: Olympus committee 2026-04-21. Validated against 60-day backtest:
+    #   reject_<18 bucket → 33% win rate, avg −0.40% PnL → SHIP (gate passed).
+    # Scope: Artemis ONLY. Do NOT copy to Holy_Grail, Scout, or WH-* strategies.
+    ADX_REJECT    = 18.0   # choppy — reject outright
+    ADX_PASS      = 28.0   # trending — pass cleanly (Raschke doctrine)
+    ADX_SCORE_CAP = 60.0   # caution cap — demotes below top_feed threshold (70)
+
+    # Primary: use TradingView-supplied ADX (exact to signal bar).
+    # Fallback: compute via yfinance (slower, ~200ms, cached 5 min).
+    adx_val: float | None = None
     try:
         adx_val = float(alert.adx) if alert.adx is not None else None
     except (TypeError, ValueError):
         pass
+    if adx_val is None:
+        adx_val = _compute_adx_yf(alert.ticker, timeframe=str(alert.timeframe or "15m"))
 
-    if adx_val is not None and adx_val < 15:
-        try:
-            from database.redis_client import get_redis_client
-            rc = await get_redis_client()
-            composite_raw = rc and await rc.get("bias:composite:latest")
-            if composite_raw:
-                import json as _json
-                composite = _json.loads(composite_raw)
-                comp_score = composite.get("composite_score", 50)
-                if isinstance(comp_score, str):
-                    comp_score = float(comp_score)
-                if comp_score < 40:
-                    logger.info(
-                        "Artemis signal SKIPPED: ADX %.1f < 15 in bearish regime "
-                        "(composite %s). Ticker: %s",
-                        adx_val, comp_score, alert.ticker,
-                    )
-                    return {
-                        "status": "skipped",
-                        "reason": "low_adx_bearish_regime",
-                        "adx": adx_val,
-                        "composite": comp_score,
-                    }
-        except Exception as e:
-            logger.warning(f"Artemis regime filter check failed (proceeding): {e}")
+    signal_data["adx_value"] = adx_val  # persisted for outcome analysis
+
+    if adx_val is None:
+        logger.info("ADX unavailable for %s — Artemis proceeding fail-open", alert.ticker)
+    elif adx_val < ADX_REJECT:
+        logger.info(
+            "Artemis REJECTED: %s ADX=%.1f < %.0f (choppy regime)",
+            alert.ticker, adx_val, ADX_REJECT,
+        )
+        return {
+            "status": "skipped",
+            "reason": "low_adx_choppy_regime",
+            "adx": adx_val,
+            "threshold": ADX_REJECT,
+        }
+    elif adx_val < ADX_PASS:
+        logger.info(
+            "Artemis CAUTION: %s ADX=%.1f in [%.0f, %.0f) — score cap %.0f, tier ceiling ta_feed",
+            alert.ticker, adx_val, ADX_REJECT, ADX_PASS, ADX_SCORE_CAP,
+        )
+        signal_data["feed_tier_ceiling"]      = "ta_feed"
+        signal_data["_score_ceiling"]         = ADX_SCORE_CAP
+        signal_data["_score_ceiling_reason"]  = f"Artemis ADX {adx_val:.1f} in caution band (<{ADX_PASS})"
+    else:
+        logger.info("Artemis PASS: %s ADX=%.1f >= %.0f (trending)", alert.ticker, adx_val, ADX_PASS)
 
     asyncio.ensure_future(_process_with_market_structure(signal_data, source="tradingview"))
 

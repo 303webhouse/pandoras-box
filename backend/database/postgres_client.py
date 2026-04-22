@@ -641,6 +641,19 @@ async def init_database():
             CREATE INDEX IF NOT EXISTS idx_signals_source ON signals(source);
         """)
 
+        # ZEUS Phase 5: ADX value for Artemis regime filter + outcome analysis
+        try:
+            await conn.execute("""
+                ALTER TABLE signals
+                ADD COLUMN IF NOT EXISTS adx_value FLOAT
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_signals_adx
+                ON signals(adx_value) WHERE adx_value IS NOT NULL
+            """)
+        except Exception as e:
+            print(f"WARNING: signals adx_value migration skipped: {e}")
+
         # Backfill: existing signals without status get ACTIVE if undecided, DISMISSED/SELECTED if acted on
         await conn.execute("""
             UPDATE signals SET status = 'DISMISSED' WHERE status IS NULL AND user_action = 'DISMISSED'

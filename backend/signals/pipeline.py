@@ -848,6 +848,21 @@ async def process_signal_unified(
             signal_data["score_v2"] = score_v2
             signal_data["score_v2_factors"] = v2_factors
             await persist_score_v2(signal_data["signal_id"], score_v2, v2_factors)
+        # Apply score ceiling if set by upstream filter (e.g. Artemis ADX caution band)
+        ceiling = signal_data.get("_score_ceiling")
+        if ceiling is not None and signal_data.get("score_v2") is not None:
+            raw = signal_data["score_v2"]
+            if raw > ceiling:
+                signal_data["score_v2"] = ceiling
+                await persist_score_v2(
+                    signal_data["signal_id"], ceiling,
+                    signal_data.get("score_v2_factors") or {},
+                )
+                logger.info(
+                    "Score ceiling applied: score_v2 %.1f → %.1f (%s)",
+                    raw, ceiling,
+                    signal_data.get("_score_ceiling_reason", "upstream ceiling"),
+                )
     except Exception as e:
         logger.warning(f"Score v2 computation failed (flash score still valid): {e}")
 
