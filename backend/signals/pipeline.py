@@ -470,6 +470,50 @@ async def apply_scoring(signal_data: Dict[str, Any]) -> Dict[str, Any]:
         except Exception as pp_err:
             logger.debug("Pythia profile check skipped: %s", pp_err)
 
+        # ── iv_regime VIX gate ────────────────────────────────────────────
+        # Tier 1 fix from Olympus Holy Grail audit 2026-04-22.
+        # Holy Grail signals underperform in VIX regime extremes:
+        #   VIX < 15 = extreme complacency, breakouts whipsaw
+        #   VIX > 30 = extreme fear, continuation breaks down
+        # Cap affected signals at watchlist so they appear but don't reach
+        # top_feed/ta_feed surfaces. Scoped to Holy Grail only per brief;
+        # CTA/Artemis/Sell_the_Rip require per-strategy Olympus review first.
+        # Placed here rather than feed_tier_classifier.py to avoid async
+        # contract ripple; revisit if additional gates accumulate here.
+        try:
+            # Strategies this gate applies to — Holy Grail family only.
+            # CTA/Artemis/Sell_the_Rip added via separate tickets after
+            # per-strategy Olympus volatility sensitivity review.
+            TREND_CONTINUATION_STRATEGIES = {
+                "Holy_Grail",
+            }
+            strategy = (signal_data.get("strategy") or "").strip()
+
+            if strategy in TREND_CONTINUATION_STRATEGIES:
+                from bias_engine.composite import get_cached_composite
+                cached = await get_cached_composite()
+                if cached and cached.factors:
+                    iv_reading = cached.factors.get("iv_regime")
+                    if iv_reading and iv_reading.raw_data:
+                        vix_value = iv_reading.raw_data.get("vix")
+                        if vix_value is not None:
+                            regime_extreme = vix_value < 15.0 or vix_value > 30.0
+                            if regime_extreme:
+                                # Only apply if not already lower (watchlist beats ta_feed beats research_log)
+                                current_ceiling = signal_data.get("feed_tier_ceiling")
+                                if current_ceiling not in ("watchlist", "ta_feed", "research_log"):
+                                    signal_data["feed_tier_ceiling"] = "watchlist"
+                                    signal_data.setdefault("enrichment_data", {})["iv_regime_extreme"] = True
+                                    signal_data.setdefault("enrichment_data", {})["vix_at_signal"] = round(vix_value, 2)
+                                    signal_data.setdefault("_score_ceiling_reason", f"iv_regime extreme (VIX={vix_value:.1f})")
+                                    logger.info(
+                                        "Signal %s on %s: VIX=%.1f (extreme regime, strategy=%s) — watchlist ceiling applied",
+                                        signal_data.get("signal_id", "?"), signal_data.get("ticker", "?"),
+                                        vix_value, strategy,
+                                    )
+        except Exception as iv_err:
+            logger.debug("iv_regime gate check skipped: %s", iv_err)
+
         # Update signal
         signal_data["score"] = score
         signal_data["bias_alignment"] = bias_alignment
