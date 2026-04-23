@@ -119,9 +119,120 @@
 
 - [x] **Remove `hunter.py`** — self-deprecated, banked +1 anti-bloat slot. Commit `80b4aca` (619 lines). See `docs/codex-briefs/brief-hunter-py-removal.md`.
 - [x] **Strip hunter UI + `api/scanner.py` wrapper** — completes the deprecation end-to-end. Commit `07858cb` (461 lines across frontend/app.js, api/scanner.py, main.py, test_auth.py). See `docs/codex-briefs/brief-hunter-ui-strip.md`.
-- [ ] **Titans Pass 1 on 3-10 Oscillator** — ✅ completed via separate chat, committed to `docs/strategy-reviews/raschke/titans-brief-3-10-oscillator.md` at commit `123d66b`. Architecture locked in §11.
-- [ ] **3-10 Oscillator CC build** — 4-phase build brief at `docs/codex-briefs/brief-3-10-oscillator-core.md` (commit `49c91fb`). Phase 0 pre-flight check first, then phased execution with checkpoints. **NEXT CC TASK.**
-- [ ] **Holy Grail Tier 1 fixes** — covered within 3-10 build brief Phase 2 (dual-gate tagging) and Phase 3 (sector-rotation tag). iv_regime wiring is NOT yet covered and remains a separate Tier 1 fix — scope a follow-up brief after 3-10 build lands.
+- [x] **Titans Pass 1 on 3-10 Oscillator** — completed via separate chat, committed at `docs/strategy-reviews/raschke/titans-brief-3-10-oscillator.md`. Architecture locked in §11.
+- [x] **3-10 Oscillator CC build Phase 1** — indicator module + tests + schema migration. Branch `feature/raschke-3-10-phase-1` SHA `95e0bdd`. Merged to main via `040fa32`.
+- [x] **3-10 Oscillator CC build Phase 2** — HG dual-gate tagging + divergence persistence. Branch SHA `52c6744`. Merged to main via `040fa32`. **Railway auto-deployed — shadow-mode data collection LIVE.**
+- [x] **3-10 Oscillator CC build Phase 3** — Sector-ETF 3-10 + enrichment pipeline. Branch `feature/raschke-3-10-phase-3` SHA `b603759`. Scheduler loop wired. Awaiting Phase 4 + merge.
+- [ ] **3-10 Oscillator CC build Phase 4** — Dev view (`/api/dev/shadow-3-10` + HTML) + frequency cap self-check. In progress on `feature/raschke-3-10-phase-3`. Final phase before MVP complete.
+- [ ] **Post-deploy verification checklist (see section below)** — run after Phase 4 merges to main and Railway auto-deploys.
+- [ ] **Holy Grail Tier 1: iv_regime wiring** — NOT covered by the 3-10 build. Separate follow-up: `iv_regime` factor exists in `composite.py:87-92` but is not wired to Holy Grail's skip logic. Scope a brief to wire a VIX<15/>30 gate at `feed_tier_classifier.py`. Low-priority vs. waiting for shadow-mode data, but pick up after Phase 4 merges.
+
+---
+
+## ✅ Raschke 3-10 Post-Deploy Verification Checklist
+
+**When to run:** After Phase 4 merges to main AND Railway auto-deploys AND the next market open + 1 hour has elapsed.
+
+**Purpose:** Confirm the shadow-mode pipeline is actually capturing data correctly. None of these are decision gates — the 6-month shadow window is the real comparison gate — but they catch plumbing failures (migration didn't run, scanner didn't pick up 3-10, enrichment silently failing, etc.) BEFORE weeks of bad data accumulate.
+
+**All queries run against Railway production DB** (public URL: `postgresql://postgres:sioMAUjhdgNYWwZMZbkbcSyaAcwdJMty@trolley.proxy.rlwy.net:25012/railway` — per memory). Use whatever client is handy (psql, TablePlus, DBeaver, or a one-off Python script via Claude in Chrome's `javascript_tool` fetch pattern).
+
+### Test 1 — Gate distribution sanity check (CRITICAL)
+
+```sql
+SELECT gate_type, COUNT(*)
+FROM signals
+WHERE strategy = 'Holy_Grail'
+  AND created_at > NOW() - INTERVAL '2 hours'
+GROUP BY gate_type;
+```
+
+**Expected:** Mix of `rsi`, `3-10`, `both`, and `NULL` rows. NULL = legacy rows before migration. First real data point on whether 3-10 lets MORE or FEWER signals through than RSI.
+
+**Red flags:**
+- Only `NULL` appearing → migration didn't run, or scanner isn't tagging signals
+- Only `rsi` appearing and never `3-10`/`both` → 3-10 compute is silently failing in the scanner (check Railway logs for `3-10 oscillator compute failed` warnings)
+- Only `3-10` appearing and never `rsi`/`both` → RSI branch broke (PRODUCTION REGRESSION, roll back immediately)
+
+### Test 2 — Divergence events populating
+
+```sql
+SELECT COUNT(*), MIN(bar_timestamp), MAX(bar_timestamp)
+FROM divergence_events
+WHERE created_at > NOW() - INTERVAL '6 hours';
+```
+
+**Expected:** If ANY Holy Grail scans ran in the last 6 hours AND any tickers had 3-10 divergences on their 1H bars, count > 0. If count = 0 for 24+ hours across a full trading day, either divergence detection is too strict (unlikely, given the 10% threshold) or the persistence call is failing silently (check logs for `Divergence persistence failed for`).
+
+### Test 3 — Sector 3-10 enrichment landing on signals
+
+```sql
+SELECT
+  COUNT(*) FILTER (WHERE enrichment_data ? 'sector_3_10') AS with_sector_310,
+  COUNT(*) FILTER (WHERE enrichment_data -> 'sector_3_10' IS NOT NULL AND enrichment_data -> 'sector_3_10' != 'null'::jsonb) AS with_sector_310_populated,
+  COUNT(*) AS total_recent_signals
+FROM signals
+WHERE created_at > NOW() - INTERVAL '2 hours';
+```
+
+**Expected:** `with_sector_310` should equal `total_recent_signals` (every signal should have the field, even if null). `with_sector_310_populated` should be > 0 for tickers that map to a sector ETF.
+
+**Red flag:** `with_sector_310_populated = 0` across all recent signals → yfinance is failing, or `_DEFAULT_SECTOR_MAP` doesn't cover any of the tickers being scanned. Check Railway logs for `Sector 3-10 compute failed` or `yfinance fallback failed`.
+
+### Test 4 — Dev view endpoint is alive
+
+```bash
+curl -H "X-API-Key: $PIVOT_API_KEY" \
+  "https://pandoras-box-production.up.railway.app/api/dev/shadow-3-10?limit=10&since_hours=24"
+```
+
+**Expected:** JSON response with `signals`, `count`, `since_hours`. If `count=0` early on, that's fine — it means no `gate_type='3-10'` signals have fired yet. Route is working if it returns the shape correctly.
+
+**Also test auth enforcement:**
+```bash
+# Missing header — expect 401
+curl "https://pandoras-box-production.up.railway.app/api/dev/shadow-3-10"
+
+# Wrong key — expect 401
+curl -H "X-API-Key: wrong-key" "https://pandoras-box-production.up.railway.app/api/dev/shadow-3-10"
+```
+
+### Test 5 — Dev view HTML page renders
+
+Open `https://pandoras-box-production.up.railway.app/dev/shadow-3-10.html` directly in the browser. Expected: table renders (empty is fine if no shadow signals yet), no JS console errors, no nav link from main dashboard.
+
+### Test 6 — Frequency cap self-check is armed (delayed, not immediate)
+
+This one can only fire if a ticker gets >3 daily divergences in a rolling 30-day window. Unlikely to trigger in week 1. Instead, verify the code path exists:
+
+- Grep Railway logs for `FREQ_CAP_BREACH` — should appear if/when any ticker exceeds the threshold
+- Alternatively, once per month, run:
+  ```sql
+  SELECT ticker, COUNT(*) AS divs_last_30d
+  FROM divergence_events
+  WHERE timeframe = '1d'
+    AND bar_timestamp > NOW() - INTERVAL '30 days'
+  GROUP BY ticker
+  HAVING COUNT(*) > 3
+  ORDER BY divs_last_30d DESC;
+  ```
+  If any rows return, the warning SHOULD be appearing in logs. Cross-reference.
+
+### Ongoing cadence
+
+- **Week 1 after Phase 4 merge:** run Tests 1-5 daily for 5 trading days. Verify gate distribution is stable and enrichment is reliable.
+- **Day 30:** run Test 6's SQL variant to confirm frequency cap is tracking as expected.
+- **Day 90:** full Olympus checkpoint review — see separate item below.
+
+### Day-90 Olympus Checkpoint (separate item)
+
+At day 90 of shadow operation (~late July 2026 given a late-April merge), run an Olympus review on 3-10 vs RSI comparative performance. Requires:
+1. Statistical significance on win-rate or profit-factor delta (≥3pp win rate OR ≥0.1 PF)
+2. Sufficient out-of-sample trade volume (Olympus call)
+
+If both clear, Nick greenlights a follow-up CC brief to swap primary gate from RSI to 3-10. Otherwise, continue shadow mode to the 6-month mark.
+
+---
 
 ### ⏳ Phase 2: Scanners (gated on Phase 1 validation + backtest module live)
 
