@@ -472,16 +472,20 @@ async def apply_scoring(signal_data: Dict[str, Any]) -> Dict[str, Any]:
 
         # ── iv_regime VIX gate ────────────────────────────────────────────
         # Tier 1 fix from Olympus Holy Grail audit 2026-04-22.
-        # Trend-continuation signals underperform in regime extremes:
+        # Holy Grail signals underperform in VIX regime extremes:
         #   VIX < 15 = extreme complacency, breakouts whipsaw
         #   VIX > 30 = extreme fear, continuation breaks down
         # Cap affected signals at watchlist so they appear but don't reach
-        # top_feed/ta_feed surfaces. Only applies to trend-continuation
-        # strategies; mean-reversion and flow-triggered signals bypass.
+        # top_feed/ta_feed surfaces. Scoped to Holy Grail only per brief;
+        # CTA/Artemis/Sell_the_Rip require per-strategy Olympus review first.
+        # Placed here rather than feed_tier_classifier.py to avoid async
+        # contract ripple; revisit if additional gates accumulate here.
         try:
-            # Strategies this gate applies to (trend continuation / breakout)
+            # Strategies this gate applies to — Holy Grail family only.
+            # CTA/Artemis/Sell_the_Rip added via separate tickets after
+            # per-strategy Olympus volatility sensitivity review.
             TREND_CONTINUATION_STRATEGIES = {
-                "Holy_Grail", "CTA", "Artemis", "Sell_the_Rip",
+                "Holy_Grail",
             }
             strategy = (signal_data.get("strategy") or "").strip()
 
