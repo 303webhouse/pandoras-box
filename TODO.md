@@ -125,7 +125,7 @@
 - [x] **3-10 Oscillator CC build Phase 3** — Sector-ETF 3-10 + enrichment pipeline. Branch `feature/raschke-3-10-phase-3` SHA `b603759`. Scheduler loop wired. Awaiting Phase 4 + merge.
 - [ ] **3-10 Oscillator CC build Phase 4** — Dev view (`/api/dev/shadow-3-10` + HTML) + frequency cap self-check. In progress on `feature/raschke-3-10-phase-3`. Final phase before MVP complete.
 - [ ] **Post-deploy verification checklist (see section below)** — run after Phase 4 merges to main and Railway auto-deploys.
-- [ ] **Holy Grail Tier 1: iv_regime wiring** — NOT covered by the 3-10 build. Separate follow-up: `iv_regime` factor exists in `composite.py:87-92` but is not wired to Holy Grail's skip logic. Scope a brief to wire a VIX<15/>30 gate at `feed_tier_classifier.py`. Low-priority vs. waiting for shadow-mode data, but pick up after Phase 4 merges.
+- [ ] **Holy Grail Tier 1: iv_regime wiring** — NOT covered by the 3-10 build. `iv_regime` factor exists in `composite.py:87-92` but is not wired to Holy Grail's skip logic. **Brief ready at `docs/codex-briefs/brief-hg-tier1-iv-regime-gate.md`. NEXT CC TASK after Phase 4 merge.**
 
 ---
 
@@ -217,6 +217,23 @@ This one can only fire if a ticker gets >3 daily divergences in a rolling 30-day
   ORDER BY divs_last_30d DESC;
   ```
   If any rows return, the warning SHOULD be appearing in logs. Cross-reference.
+
+### Test 7 — VIX regime gate firing (post iv_regime wiring ONLY)
+
+Only applicable after `brief-hg-tier1-iv-regime-gate.md` ships. Confirms the shadow-mode VIX gate is correctly capping Holy Grail signals to `watchlist` when VIX is in extreme regime.
+
+```sql
+SELECT
+  COUNT(*) FILTER (WHERE score_ceiling_reason LIKE '%vix_regime_extreme%') AS gated_count,
+  COUNT(*) FILTER (WHERE strategy = 'Holy_Grail') AS total_hg_signals,
+  MIN(created_at), MAX(created_at)
+FROM signals
+WHERE created_at > NOW() - INTERVAL '24 hours';
+```
+
+**Expected:** `gated_count` is non-zero ONLY on days where VIX spent any time <15 or >30. Days with VIX in the 15-30 normal range should show `gated_count = 0`. If `gated_count > 0` during a fully-normal-VIX day, the gate logic has a bug. If `gated_count = 0` during an extreme-VIX day, the gate isn't firing.
+
+**Cross-reference:** VIX ranges from the cached `iv_regime` factor output (`SELECT raw_data->'vix' FROM factor_readings WHERE factor_id='iv_regime' ORDER BY timestamp DESC LIMIT 20`).
 
 ### Ongoing cadence
 
