@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3-10 Shadow Mode — Dev View</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Courier New', monospace;
+            background: #0a0e1a;
+            color: #c8d8e8;
+            padding: 24px;
+            font-size: 13px;
+        }
+        h1 { color: #4ecdc4; font-size: 18px; margin-bottom: 4px; }
+        .subtitle { color: #6b7a8d; font-size: 12px; margin-bottom: 20px; }
+        .controls { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+        .controls label { color: #8899aa; font-size: 12px; }
+        .controls input, .controls select {
+            background: #141928; border: 1px solid #2a3550; color: #c8d8e8;
+            padding: 4px 8px; border-radius: 4px; font-family: inherit; font-size: 12px;
+        }
+        .btn {
+            background: #1a2740; border: 1px solid #4ecdc4; color: #4ecdc4;
+            padding: 5px 14px; border-radius: 4px; cursor: pointer; font-family: inherit; font-size: 12px;
+        }
+        .btn:hover { background: #243350; }
+        .status { font-size: 12px; color: #6b7a8d; margin-bottom: 12px; min-height: 18px; }
+        .status.error { color: #e05a5a; }
+        table { width: 100%; border-collapse: collapse; }
+        th {
+            background: #141928; color: #4ecdc4; text-align: left;
+            padding: 8px 10px; border-bottom: 1px solid #2a3550; font-size: 11px;
+            text-transform: uppercase; letter-spacing: 0.05em; white-space: nowrap;
+        }
+        td { padding: 7px 10px; border-bottom: 1px solid #1a2230; vertical-align: top; }
+        tr:hover td { background: #111520; }
+        .dir-long  { color: #4ecdc4; font-weight: bold; }
+        .dir-short { color: #e05a5a; font-weight: bold; }
+        .gate { color: #f0a500; font-size: 11px; background: #1c1500; padding: 1px 5px; border-radius: 3px; }
+        .sector { font-size: 11px; color: #8899aa; }
+        .sector span { color: #c8d8e8; }
+        .empty { text-align: center; color: #4a5568; padding: 40px; }
+        .auth-box {
+            background: #141928; border: 1px solid #2a3550; border-radius: 6px;
+            padding: 20px; max-width: 420px; margin: 60px auto;
+        }
+        .auth-box h2 { color: #4ecdc4; margin-bottom: 12px; font-size: 15px; }
+        .auth-box input {
+            width: 100%; background: #0a0e1a; border: 1px solid #2a3550;
+            color: #c8d8e8; padding: 8px; border-radius: 4px; font-family: inherit;
+            font-size: 13px; margin-bottom: 10px;
+        }
+        .auth-box .btn { width: 100%; }
+        #main { display: none; }
+        #auth { display: block; }
+    </style>
+</head>
+<body>
+
+<!-- Auth gate — shown until key is set -->
+<div id="auth">
+    <div class="auth-box">
+        <h2>3-10 Shadow Dev View</h2>
+        <p style="color:#6b7a8d;font-size:12px;margin-bottom:14px;">Enter your X-API-Key to access shadow-mode signal data.</p>
+        <input type="password" id="keyInput" placeholder="X-API-Key" />
+        <button class="btn" onclick="submitKey()">Enter</button>
+        <p id="authErr" style="color:#e05a5a;font-size:12px;margin-top:8px;display:none;">Invalid key — check and retry.</p>
+    </div>
+</div>
+
+<!-- Main view — shown after auth -->
+<div id="main">
+    <h1>3-10 Oscillator — Shadow Mode</h1>
+    <p class="subtitle">gate_type = '3-10' signals only &bull; not surfaced to main feed &bull; internal dev tool</p>
+
+    <div class="controls">
+        <label>Window:
+            <select id="sinceHours">
+                <option value="24">Last 24 h</option>
+                <option value="72">Last 3 days</option>
+                <option value="168" selected>Last 7 days</option>
+                <option value="336">Last 14 days</option>
+                <option value="720">Last 30 days</option>
+            </select>
+        </label>
+        <label>Limit:
+            <select id="limit">
+                <option value="25">25</option>
+                <option value="50" selected>50</option>
+                <option value="100">100</option>
+                <option value="200">200</option>
+            </select>
+        </label>
+        <button class="btn" onclick="loadSignals()">Refresh</button>
+        <button class="btn" onclick="logout()" style="border-color:#6b7a8d;color:#6b7a8d;">Logout</button>
+    </div>
+
+    <div class="status" id="status">Loading…</div>
+
+    <table id="tbl">
+        <thead>
+            <tr>
+                <th>Ticker</th>
+                <th>Dir</th>
+                <th>Gate</th>
+                <th>Entry</th>
+                <th>Stop</th>
+                <th>T1</th>
+                <th>ADX</th>
+                <th>RSI</th>
+                <th>Sector 3-10</th>
+                <th>Created (UTC)</th>
+            </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+    </table>
+    <div class="empty" id="empty" style="display:none;">No 3-10-only signals in the selected window. Shadow data accumulates after first post-deploy market session.</div>
+</div>
+
+<script>
+    const API_URL = '';  // Same-origin
+
+    function getKey() { return localStorage.getItem('pivot_api_key') || ''; }
+    function setKey(k) { localStorage.setItem('pivot_api_key', k); }
+
+    // Auto-show main if key already stored
+    if (getKey()) { showMain(); }
+
+    function submitKey() {
+        const k = document.getElementById('keyInput').value.trim();
+        if (!k) return;
+        setKey(k);
+        // Validate by calling the endpoint
+        fetch(`${API_URL}/api/dev/shadow-3-10?limit=1&since_hours=1`, {
+            headers: { 'X-API-Key': k }
+        }).then(r => {
+            if (r.ok) { showMain(); }
+            else { document.getElementById('authErr').style.display = 'block'; localStorage.removeItem('pivot_api_key'); }
+        }).catch(() => { document.getElementById('authErr').style.display = 'block'; });
+    }
+
+    function showMain() {
+        document.getElementById('auth').style.display = 'none';
+        document.getElementById('main').style.display = 'block';
+        loadSignals();
+    }
+
+    function logout() {
+        localStorage.removeItem('pivot_api_key');
+        document.getElementById('main').style.display = 'none';
+        document.getElementById('auth').style.display = 'block';
+    }
+
+    async function loadSignals() {
+        const key = getKey();
+        const since = document.getElementById('sinceHours').value;
+        const limit = document.getElementById('limit').value;
+        const status = document.getElementById('status');
+        const tbody = document.getElementById('tbody');
+        const empty = document.getElementById('empty');
+
+        status.textContent = 'Loading…';
+        status.className = 'status';
+        tbody.innerHTML = '';
+        empty.style.display = 'none';
+
+        try {
+            const r = await fetch(`${API_URL}/api/dev/shadow-3-10?since_hours=${since}&limit=${limit}`, {
+                headers: { 'X-API-Key': key }
+            });
+            if (r.status === 401) { logout(); return; }
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+
+            const data = await r.json();
+            status.textContent = `${data.count} signal${data.count !== 1 ? 's' : ''} — last ${since}h — updated ${new Date().toUTCString()}`;
+
+            if (data.count === 0) { empty.style.display = 'block'; return; }
+
+            for (const s of data.signals) {
+                const ed = s.enrichment_data || {};
+                const sec = ed.sector_3_10;
+                const secHtml = sec
+                    ? `<div class="sector">${sec.sector_etf}: <span>F=${fmt(sec.osc_fast)} S=${fmt(sec.osc_slow)}</span> cross=${sec.osc_cross}</div>`
+                    : '<span style="color:#4a5568">—</span>';
+
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td><strong>${esc(s.ticker)}</strong></td>
+                    <td class="dir-${(s.direction||'').toLowerCase()}">${esc(s.direction)}</td>
+                    <td><span class="gate">${esc(s.gate_type)}</span></td>
+                    <td>${fmt(s.entry_price)}</td>
+                    <td>${fmt(s.stop_loss)}</td>
+                    <td>${fmt(s.target_1)}</td>
+                    <td>${fmt(s.adx)}</td>
+                    <td>${fmt(s.rsi)}</td>
+                    <td>${secHtml}</td>
+                    <td style="font-size:11px;color:#8899aa">${fmtDate(s.created_at)}</td>
+                `;
+                tbody.appendChild(row);
+            }
+        } catch (e) {
+            status.textContent = `Error: ${e.message}`;
+            status.className = 'status error';
+        }
+    }
+
+    function fmt(v) { return (v == null) ? '—' : (typeof v === 'number' ? v.toFixed(2) : v); }
+    function fmtDate(s) { if (!s) return '—'; const d = new Date(s); return d.toISOString().replace('T', ' ').slice(0, 19); }
+    function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+</script>
+</body>
+</html>
