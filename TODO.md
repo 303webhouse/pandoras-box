@@ -1,6 +1,6 @@
 # Pivot — Priorities & TODO
 
-**Last Updated:** March 11, 2026
+**Last Updated:** April 22, 2026
 
 ---
 
@@ -103,6 +103,45 @@
 
 ---
 
+## 🟢 Raschke Strategy Build (Olympus 2026-04-22)
+
+**Context:** Olympus committee deep review completed 2026-04-22 ratified 7 framework amendments (now in PROJECT_RULES.md) and classified 5 Raschke strategies under REPLACE-ELEVATE-ADD-REJECT. Holy Grail audit (same day) surfaced `iv_regime` factor exists in `composite.py:87-92` but NOT wired to Holy Grail, and `hunter.py` self-deprecated in header but still live. 15m HG variant confirmed as TV webhook at `tradingview.py:365-371` (not a separate Python file).
+
+**Key docs:**
+- `docs/strategy-reviews/raschke/olympus-review-2026-04-22.md` — committee output
+- `docs/strategy-reviews/raschke/titans-brief-3-10-oscillator.md` — Titans Pass 1 input
+- `docs/audits/holy-grail-audit-2026-04-22.md` — CC audit delta report
+- `docs/codex-briefs/brief-holy-grail-audit-olympus-expanded.md` — original audit brief
+- `docs/codex-briefs/brief-project-rules-framework-amendments.md` — framework brief
+- `docs/codex-briefs/brief-hunter-py-removal.md` — next CC task
+
+### ⏳ Phase 1: Foundation (in progress)
+
+- [ ] **Remove `hunter.py`** — self-deprecated, banks +1 anti-bloat slot. CC brief ready at `docs/codex-briefs/brief-hunter-py-removal.md`. **NEXT CC TASK.**
+- [ ] **Titans Pass 1 on 3-10 Oscillator** — see `docs/strategy-reviews/raschke/titans-brief-3-10-oscillator.md`. Run in fresh Claude.ai chat (simulated Titans).
+- [ ] **3-10 Oscillator CC build** — after Titans Pass 1 returns architecture decisions (ATHENA locks scope).
+- [ ] **Holy Grail Tier 1 fixes** — (a) wire `iv_regime` gate (VIX <15 or >30 skip at `feed_tier_classifier.py` — NEW build task since factor exists but isn't wired), (b) 3-10 as RSI replacement in shadow mode with dual-gate tagging, (c) sector-rotation tag at trigger time via `sector_rs` lookup.
+
+### ⏳ Phase 2: Scanners (gated on Phase 1 validation + backtest module live)
+
+- [ ] **80-20 Reversals scanner** — B3 equity with PYTHIA VAL/VAH gate mandatory in trigger definition. Then B2 daily variant.
+- [ ] **Turtle Soup as ELEVATE lane on `sell_the_rip_scanner`** — not a parallel scanner per audit finding. Vanilla daily first, then flow-augmented (UW net-sell + put sweep on failure bar), then B3 intraday parameterization.
+- [ ] **Holy Grail Tier 2 fixes** — session filter (config-gated, on for 15m webhook), EMA slope confirmation, HH/HL structure check, `asset_class` parameterization for crypto variant, PYTHIA VA-relative context tag, PYTHAGORAS ATR-alternative stop.
+
+### ⏳ Phase 3: Anti variant (gated on Phase 1+2 positive expectancy)
+
+- [ ] **The Anti as Holy Grail config branch** — shallow-pullback variant. Requires 3-10 live + backtest showing <50% overlap with standard HG fires. Dedupes at signal layer.
+- [ ] **Holy Grail Tier 3 fixes** — scale exit (50% at 1R + trail remainder), pullback sequence tracking (1st vs Nth after ADX ignition), URSA ticker-level circuit breaker (skip next fire after 2 consecutive losses in 10d).
+
+### ⏳ Phase 4: News Reversal + closeout
+
+- [ ] **News Reversal (moved from Phase 3 per Nick decision 2026-04-22)** — DAEDALUS + THALES joint design. Requires UW news classification upstream (may warrant own Titans brief). URSA's three pre-build gates: (1) fade direction aligned with broader trend, (2) IV crush pattern required, (3) mandatory DAEDALUS structure selection — no naked puts/calls on earnings plays. Crypto variant deferred pending DVOL integration trigger.
+- [ ] **Crypto variant reviews** — Turtle Soup/80-20/Holy Grail on BTC/ETH once HV-30 regime gate is in place. DVOL integration gated on first IV-sensitive crypto strategy (likely News Reversal crypto variant).
+- [ ] **`wh_reversal` compliance re-check** — auto-surface at Q3 2026 Olympus cadence to verify VAL-proximity absorption into location multiplier holds in production (not behaving as hidden factor).
+- [ ] **Backtest-driven deprecation sweep** — run backtest against any strategies flagged for possible REPLACE; close the anti-bloat loop.
+
+---
+
 ## 🟠 Phase 3: Analytics Review/Overhaul
 
 **Goal:** Make analytics accurate, visual, and self-improving.
@@ -141,6 +180,9 @@
 - [ ] **DST fix deployment** — Convert hardcoded UTC offsets to IANA timezones. Brief written, not deployed.
 - [ ] **Drop `positions` and `open_positions` tables** — Fully deprecated. Can drop after confirming zero callers.
 - [ ] **Credential rotation** — `config/.env` had live creds in git history. Repo is private, not urgent.
+- [ ] **Repo hygiene — mangled directory** — `ctrading-hubbackendintegrations_deprecated/` at repo root looks like a path typo that became a directory name (missed backslash somewhere). If empty/unused, delete via a dead-code-cleanup CC brief.
+- [ ] **Repo hygiene — stale backup zip** — `trading-hub-complete-20260128_113640.zip` at repo root. Git is the backup system; delete unless there's a specific reason to keep.
+- [ ] **Repo hygiene — consolidate agent config files** — `AGENTS.md`, `CLAUDE.md`, `CODEX.md`, `PROJECT_RULES.md`, `PROJECT_SUMMARY.md`, `QUICK_START.md`, `DEVELOPMENT_STATUS.md` overlap in "source of truth" role. A consolidation pass would reduce drift risk. Parked as a later cleanup, not urgent.
 
 ---
 
