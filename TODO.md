@@ -117,10 +117,11 @@
 
 ### ⏳ Phase 1: Foundation (in progress)
 
-- [ ] **Remove `hunter.py`** — self-deprecated, banks +1 anti-bloat slot. CC brief ready at `docs/codex-briefs/brief-hunter-py-removal.md`. **NEXT CC TASK.**
-- [ ] **Titans Pass 1 on 3-10 Oscillator** — see `docs/strategy-reviews/raschke/titans-brief-3-10-oscillator.md`. Run in fresh Claude.ai chat (simulated Titans).
-- [ ] **3-10 Oscillator CC build** — after Titans Pass 1 returns architecture decisions (ATHENA locks scope).
-- [ ] **Holy Grail Tier 1 fixes** — (a) wire `iv_regime` gate (VIX <15 or >30 skip at `feed_tier_classifier.py` — NEW build task since factor exists but isn't wired), (b) 3-10 as RSI replacement in shadow mode with dual-gate tagging, (c) sector-rotation tag at trigger time via `sector_rs` lookup.
+- [x] **Remove `hunter.py`** — self-deprecated, banked +1 anti-bloat slot. Commit `80b4aca` (619 lines). See `docs/codex-briefs/brief-hunter-py-removal.md`.
+- [x] **Strip hunter UI + `api/scanner.py` wrapper** — completes the deprecation end-to-end. Commit `07858cb` (461 lines across frontend/app.js, api/scanner.py, main.py, test_auth.py). See `docs/codex-briefs/brief-hunter-ui-strip.md`.
+- [ ] **Titans Pass 1 on 3-10 Oscillator** — ✅ completed via separate chat, committed to `docs/strategy-reviews/raschke/titans-brief-3-10-oscillator.md` at commit `123d66b`. Architecture locked in §11.
+- [ ] **3-10 Oscillator CC build** — 4-phase build brief at `docs/codex-briefs/brief-3-10-oscillator-core.md` (commit `49c91fb`). Phase 0 pre-flight check first, then phased execution with checkpoints. **NEXT CC TASK.**
+- [ ] **Holy Grail Tier 1 fixes** — covered within 3-10 build brief Phase 2 (dual-gate tagging) and Phase 3 (sector-rotation tag). iv_regime wiring is NOT yet covered and remains a separate Tier 1 fix — scope a follow-up brief after 3-10 build lands.
 
 ### ⏳ Phase 2: Scanners (gated on Phase 1 validation + backtest module live)
 
@@ -183,6 +184,7 @@
 - [ ] **Repo hygiene — mangled directory** — `ctrading-hubbackendintegrations_deprecated/` at repo root looks like a path typo that became a directory name (missed backslash somewhere). If empty/unused, delete via a dead-code-cleanup CC brief.
 - [ ] **Repo hygiene — stale backup zip** — `trading-hub-complete-20260128_113640.zip` at repo root. Git is the backup system; delete unless there's a specific reason to keep.
 - [ ] **Repo hygiene — consolidate agent config files** — `AGENTS.md`, `CLAUDE.md`, `CODEX.md`, `PROJECT_RULES.md`, `PROJECT_SUMMARY.md`, `QUICK_START.md`, `DEVELOPMENT_STATUS.md` overlap in "source of truth" role. A consolidation pass would reduce drift risk. Parked as a later cleanup, not urgent.
+- [ ] **Auth coverage gap on new routes** — `test_no_unprotected_mutations` now flags 16 routes without webhook-secret protection (was 2 when first noted, grew as new routes were added: trade-watchlist, hermes, hydra, etc.). Surfaced again during hunter UI strip (commit `07858cb`). Not a hunter-removal regression. Needs a targeted audit brief: identify which of the 16 routes SHOULD be secret-protected vs. which are legitimately public, then either (a) add auth to the ones that need it, or (b) update the test's allow-list with a comment explaining why each exempted route is safe. Don't bury this — it's growing.
 
 ---
 
