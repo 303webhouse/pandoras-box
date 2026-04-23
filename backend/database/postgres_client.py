@@ -1404,11 +1404,11 @@ async def log_signal(
                 target_2, risk_reward, timeframe, bias_level, adx, line_separation,
                 score, bias_alignment, triggering_factors, bias_at_signal, notes,
                 day_of_week, hour_of_day, is_opex_week, days_to_earnings, market_event, signal_category,
-                feed_tier, adx_value, feed_tier_ceiling, score_ceiling_reason
+                feed_tier, adx_value, feed_tier_ceiling, score_ceiling_reason, gate_type
             ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
                 $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
-                $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31
+                $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32
             )
             ON CONFLICT (signal_id) DO NOTHING
         """,
@@ -1443,6 +1443,7 @@ async def log_signal(
             signal_data.get("adx_value"),                          # $29 ZEUS Ph5: float from filter
             signal_data.get("feed_tier_ceiling"),                  # $30 ZEUS Ph5: tier ceiling label
             signal_data.get("_score_ceiling_reason"),              # $31 ZEUS Ph5: why ceiling applied
+            signal_data.get("gate_type"),                          # $32 Raschke P1: dual-gate shadow mode
         )
         inserted = str(result).strip().endswith("1")
         if not inserted:

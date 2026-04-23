@@ -94,6 +94,13 @@ def calculate_holy_grail_indicators(df: pd.DataFrame) -> pd.DataFrame:
     # RSI
     df["rsi"] = ta.rsi(df["Close"], length=HG_CONFIG["rsi_length"])
 
+    # 3-10 Oscillator (Raschke) — shadow-mode dual-gate companion to RSI
+    try:
+        from indicators.three_ten_oscillator import compute_3_10
+        df = compute_3_10(df)
+    except Exception as e:
+        logger.warning("3-10 oscillator compute failed; continuing RSI-only: %s", e)
+
     # EMA touch tolerance band (VIX-adjusted at scan time via _hg_touch_tolerance)
     df["ema_tolerance"] = df["ema20"] * (_hg_touch_tolerance / 100.0)
     df["ema_upper"] = df["ema20"] + df["ema_tolerance"]
@@ -120,6 +127,25 @@ def calculate_holy_grail_indicators(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def _resolve_gate_type(rsi_ok: bool, three_ten_ok: bool) -> Optional[str]:
+    """
+    Resolve which filter gate(s) qualified a setup.
+
+    Returns:
+        "both" if both RSI and 3-10 passed — primary signal, Nick-visible
+        "rsi"  if only RSI passed — current production behavior, Nick-visible
+        "3-10" if only 3-10 passed — shadow-mode-only, hidden from main feed
+        None   if neither passed — no signal emitted
+    """
+    if rsi_ok and three_ten_ok:
+        return "both"
+    if rsi_ok:
+        return "rsi"
+    if three_ten_ok:
+        return "3-10"
+    return None
+
+
 def check_holy_grail_signals(df: pd.DataFrame, ticker: str) -> List[Dict]:
     """Check for Holy Grail long and short setups on latest bars."""
     signals = []
@@ -143,28 +169,42 @@ def check_holy_grail_signals(df: pd.DataFrame, ticker: str) -> List[Dict]:
     # This function is sync, so we skip the check here
     bar_idx = len(df) - 1
 
-    # Long: ADX strong, uptrend, previous bar pulled back to EMA, current closes above EMA
-    long_signal = (
+    # Base conditions — everything EXCEPT the filter gate (RSI or 3-10).
+    # These are the structural HG criteria that must hold regardless of gate.
+    base_long = (
         adx >= HG_CONFIG["adx_threshold"] and
         di_plus > di_minus and
         prev.get("long_pullback", False) and
-        latest["Close"] > ema20 and
-        rsi < HG_CONFIG["rsi_long_max"]
+        latest["Close"] > ema20
     )
-
-    # Short: ADX strong, downtrend, previous bar pulled back to EMA, current closes below EMA
-    # In strong downtrends (ADX >= 30 + DI- > 1.5x DI+), RSI stays "oversold" for weeks.
-    # Skip RSI floor for continuation shorts — Holy Grail is trend continuation, not mean reversion.
     strong_bearish_trend = (adx >= 30 and di_minus > di_plus * 1.5)
-    rsi_ok_for_short = (rsi > HG_CONFIG["rsi_short_min"]) or strong_bearish_trend
-
-    short_signal = (
+    base_short = (
         adx >= HG_CONFIG["adx_threshold"] and
         di_minus > di_plus and
         prev.get("short_pullback", False) and
-        latest["Close"] < ema20 and
-        rsi_ok_for_short
+        latest["Close"] < ema20
     )
+
+    # RSI gate (existing filter — preserves current behavior).
+    rsi_long_ok = rsi < HG_CONFIG["rsi_long_max"]
+    rsi_short_ok = (rsi > HG_CONFIG["rsi_short_min"]) or strong_bearish_trend
+
+    # 3-10 gate (new — Raschke shadow mode).
+    # Fast > slow = bullish momentum; fast < slow = bearish momentum.
+    osc_fast = latest.get("osc_fast")
+    osc_slow = latest.get("osc_slow")
+    three_ten_available = (osc_fast is not None and osc_slow is not None
+                           and not pd.isna(osc_fast) and not pd.isna(osc_slow))
+    three_ten_long_ok = three_ten_available and osc_fast > osc_slow
+    three_ten_short_ok = three_ten_available and osc_fast < osc_slow
+
+    # Gate resolution: which gate(s) qualified the long/short setup?
+    long_gate = _resolve_gate_type(rsi_long_ok, three_ten_long_ok) if base_long else None
+    short_gate = _resolve_gate_type(rsi_short_ok, three_ten_short_ok) if base_short else None
+
+    # Emit signals — current contract preserved; gate_type is the new field.
+    long_signal = long_gate is not None
+    short_signal = short_gate is not None
 
     now_str = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
 
@@ -177,11 +217,12 @@ def check_holy_grail_signals(df: pd.DataFrame, ticker: str) -> List[Dict]:
             di_spread = round(float(di_plus - di_minus), 1)
 
             signals.append({
-                "signal_id": f"HG_{ticker}_{now_str}",
+                "signal_id": f"HG_{ticker}_{now_str}_{long_gate}",
                 "timestamp": datetime.utcnow().isoformat(),
                 "ticker": ticker,
                 "strategy": "Holy_Grail",
                 "direction": "LONG",
+                "gate_type": long_gate,
                 "signal_type": "HOLY_GRAIL_1H",
                 "entry_price": entry,
                 "stop_loss": stop,
@@ -207,11 +248,12 @@ def check_holy_grail_signals(df: pd.DataFrame, ticker: str) -> List[Dict]:
             di_spread = round(float(di_plus - di_minus), 1)
 
             signals.append({
-                "signal_id": f"HG_{ticker}_{now_str}",
+                "signal_id": f"HG_{ticker}_{now_str}_{short_gate}",
                 "timestamp": datetime.utcnow().isoformat(),
                 "ticker": ticker,
                 "strategy": "Holy_Grail",
                 "direction": "SHORT",
+                "gate_type": short_gate,
                 "signal_type": "HOLY_GRAIL_1H",
                 "entry_price": entry,
                 "stop_loss": stop,
@@ -256,6 +298,16 @@ async def scan_ticker_holy_grail(ticker: str) -> List[Dict]:
             return []
 
         df = calculate_holy_grail_indicators(df)
+
+        # Persist any 3-10 divergences detected on this scan for frequency-cap
+        # monitoring and future Turtle Soup consumption. Safe on failure —
+        # never blocks signal emission.
+        try:
+            from indicators.divergence_persister import persist_divergences
+            await persist_divergences(df, ticker=ticker, timeframe="1h")
+        except Exception as e:
+            logger.debug("Divergence persistence failed for %s: %s", ticker, e)
+
         signals = check_holy_grail_signals(df, ticker)
 
         # Set cooldown and increment daily cap for each signal
