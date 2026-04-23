@@ -342,6 +342,8 @@ These were blockers on Nick's side. Resolved in session with Opus before CC hand
 
 **All §12 blockers resolved. Phase 0 spike authorized. CC build brief can be authored after Phase 0 findings land.**
 
+**6. Phase 0 probe layer clarification (added mid-spike 2026-04-23):** §9.2 AEGIS protocol said "via the existing UW MCP" — intended as path-of-least-resistance for the spike, NOT as an architectural constraint on the backtest module itself. Clarified mid-spike after probe #1 (SPY flow_alerts, default call) returned only live-session data (1h 43m window) because the MCP `flow_alerts` tool exposes no historical parameters (`date`, `start_date`, `lookback`, etc.). The finding that MCP is scoped to live/interactive queries is itself architecturally useful. Production backtest module will call UW REST API directly (Python + UW_API_KEY env var); MCP does not ship with the backtest. Phase 0 probe grid pivoted to REST-direct against documented UW endpoints. If REST also lacks historical depth, §11.4 pivot tree still applies unchanged.
+
 ---
 
 ## §13 TODOs for CC Build Brief (separate from §12)
