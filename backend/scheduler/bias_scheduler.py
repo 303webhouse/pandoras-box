@@ -2804,6 +2804,9 @@ async def start_scheduler():
         asyncio.create_task(_uw_flow_polling_loop())
         logger.info("âœ… UW flow polling loop started (30s interval, market hours)")
 
+        asyncio.create_task(_sector_3_10_refresh_loop())
+        logger.info("âœ… Sector 3-10 cache loop started (15 min interval, market hours)")
+
     except ImportError:
         logger.warning("APScheduler not installed, using fallback scheduler")
         # Fallback: Simple asyncio-based scheduler (handles both bias refresh AND scanners)
@@ -2879,6 +2882,30 @@ async def _uw_flow_polling_loop():
         except Exception as e:
             logger.error("Error in UW flow polling loop: %s", e)
             await asyncio.sleep(30)
+
+
+async def _sector_3_10_refresh_loop():
+    """
+    Refresh the sector-ETF 3-10 Oscillator cache every 15 minutes during
+    market hours. Lazy first-run: enrichment pipeline triggers on-demand if
+    this loop hasn't fired yet. Raschke Phase 3.
+    """
+    import pytz
+    et = pytz.timezone('America/New_York')
+    logger.info("Starting sector 3-10 refresh loop (15 min interval, market hours)")
+
+    while True:
+        try:
+            now = datetime.now(et)
+            time_decimal = now.hour + now.minute / 60.0
+            is_market = is_trading_day() and 9.5 <= time_decimal <= 16.0
+            if is_market:
+                from indicators.sector_rotation_3_10 import refresh_sector_cache
+                await refresh_sector_cache()
+            await asyncio.sleep(900)  # 15 minutes
+        except Exception as e:
+            logger.error("Error in sector 3-10 refresh loop: %s", e)
+            await asyncio.sleep(900)
 
 
 async def _sector_refresh_loop():
