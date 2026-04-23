@@ -931,6 +931,7 @@ from api.market_indicators import router as market_indicators_router
 from api.hybrid_scanner import router as hybrid_scanner_router
 
 from api.knowledgebase import router as knowledgebase_router
+from api.dev_shadow import router as dev_shadow_router
 from api.alerts import router as alerts_router
 from api.uw_integration import router as uw_integration_router
 from api.uw import router as uw_router
@@ -989,6 +990,7 @@ app.include_router(market_indicators_router, prefix="/api", tags=["market-indica
 
 app.include_router(hybrid_scanner_router, prefix="/api", tags=["hybrid-scanner"])
 app.include_router(knowledgebase_router, prefix="/api", tags=["knowledgebase"])
+app.include_router(dev_shadow_router, tags=["dev-shadow"])  # prefix="/api/dev" already in router
 app.include_router(alerts_router, prefix="/api", tags=["alerts"])
 app.include_router(uw_integration_router, prefix="/api", tags=["unusual-whales"])
 app.include_router(uw_router, prefix="/api", tags=["unusual-whales"])
@@ -1052,6 +1054,11 @@ if frontend_path:
     async def serve_knowledgebase():
         """Serve the knowledgebase page"""
         return FileResponse(os.path.join(frontend_path, "knowledgebase.html"))
+
+    @app.get("/dev/shadow-3-10", response_class=FileResponse)
+    async def serve_shadow_3_10():
+        """Serve the 3-10 shadow-mode dev view. No nav link — direct URL only."""
+        return FileResponse(os.path.join(frontend_path, "shadow_3_10.html"))
     
     @app.get("/app.js", response_class=FileResponse)
     async def serve_app_js():
