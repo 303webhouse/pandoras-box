@@ -1,9 +1,9 @@
-# 3-10 Oscillator — Titans Pass 1 Brief
+# 3-10 Oscillator — Titans Pass 2 Brief (Final)
 
-**Type:** Pre-build architecture review (Titans Pass 1 → Pass 2 → ATHENA decision → CC brief)
+**Type:** Pre-build architecture review — **Pass 2 complete, ATHENA decision locked**
 **Source:** Olympus review 2026-04-22 — highest-leverage ELEVATE in Raschke suite
-**Priority:** Phase 1 build (gated only on CC audit completion)
-**Status:** Awaiting Titans Pass 1
+**Priority:** Phase 1 build (ships first in Raschke queue, gated on ZEUS Phase 3 + hunter.py deprecation)
+**Status:** Ready for CC build brief drafting
 
 ---
 
@@ -27,7 +27,7 @@ A system-wide momentum oscillator indicator that any strategy, scanner, or Olymp
 
 **Mathematical definition (Linda Raschke canonical):**
 - **Midpoint:** `(High + Low) / 2` per bar
-- **Raw line:** `3-bar SMA of midpoint − 10-bar SMA of midpoint` (i.e., the difference drives the oscillator value)
+- **Raw line:** `3-bar SMA of midpoint − 10-bar SMA of midpoint`
 - **Fast line:** `3-bar SMA of raw line`
 - **Slow line:** `10-bar SMA of raw line`
 
@@ -35,186 +35,200 @@ A system-wide momentum oscillator indicator that any strategy, scanner, or Olymp
 1. Fast line value
 2. Slow line value
 3. Crossover boolean (fast crossed slow up / down on this bar)
-4. Divergence flag (see mechanical rule below)
+4. Divergence flag (mechanical rule per §3.1)
 
 ---
 
-## 3. Non-Negotiables From Olympus
+## 3. Non-Negotiables From Olympus (Locked)
 
-These are locked — not up for Titans debate. Titans reviews HOW to implement, not WHETHER to include these:
+These are locked — not up for Titans debate.
 
-### 3.1 Mechanical Divergence Detection (URSA requirement)
-
-No visual/subjective interpretation. The divergence rule must be a mechanical boolean:
-
-> **Bullish divergence:** price makes a new N-bar low (default N=5), while fast line's corresponding pivot low is HIGHER than its prior pivot low by ≥X% (default X=10%).
->
-> **Bearish divergence:** price makes a new N-bar high, while fast line's corresponding pivot high is LOWER than its prior pivot high by ≥X%.
-
-Pivot detection: a 5-bar window (2 bars before + pivot + 2 bars after). Divergence flag fires only when both the price pivot AND the fast-line pivot are confirmed.
+### 3.1 Mechanical Divergence Detection
+- **Bullish:** price makes a new N-bar low (default N=5), while fast line's corresponding pivot low is HIGHER than its prior pivot low by ≥X% (default X=10%).
+- **Bearish:** price makes a new N-bar high, while fast line's corresponding pivot high is LOWER than its prior pivot high by ≥X%.
+- **Pivot detection:** 5-bar window (2 before + pivot + 2 after). Divergence flag fires only when both price pivot AND fast-line pivot are confirmed.
 
 ### 3.2 Timeframe Agnostic
+Serves 1m, 5m, 15m, 1H, Daily, Weekly. Input: DataFrame with `high`, `low` columns + DatetimeIndex. Output: same DataFrame + 4 appended columns.
 
-The same module must serve:
-- 1-minute scalping (B3 crypto)
-- 5-minute / 15-minute scalping (B3 equity)
-- 1H (Holy Grail current)
-- Daily (B2 swing + Turtle Soup divergence gate)
-- Weekly (B1 overlay + rare Anti divergence)
+### 3.3 Holy Grail RSI Replacement in Shadow Mode
+- Signals fire on BOTH gates; both logged with gate tag
+- 6-month default comparison window
+- Keep whichever gate wins by ≥3pp win rate OR ≥0.1 profit factor
+- Day-90 Olympus checkpoint reviews for early cutover eligibility
 
-Input: any DataFrame with `high`, `low` columns and a DatetimeIndex. Output: appended `osc_fast`, `osc_slow`, `osc_cross`, `osc_div` columns.
-
-### 3.3 Holy Grail RSI Replacement in Shadow Mode First
-
-Holy Grail currently uses RSI (length 14, long <70 / short >30 with strong-trend carve-out). 3-10 replaces this, but NOT directly — shadow mode A/B comparison required first:
-
-- Signals fire on BOTH the RSI gate AND the 3-10 gate
-- Both sets logged with `gate=rsi` or `gate=3_10` tag
-- After 6 months of out-of-sample data: compare win rate and profit factor
-- Keep whichever gate has ≥3pp higher win rate OR ≥0.1 higher profit factor
-- If 3-10 doesn't win, keep RSI and retain 3-10 as optional confirmation overlay
-
-### 3.4 Sector-ETF 3-10 From Day One (THALES requirement)
-
-Compute 3-10 on sector ETFs (XLK, XLF, XLE, XLY, XLV, XLP, XLU, XLI, XLB, XLRE, XLC) and feed readings into the sector-rotation signal enrichment. Zero marginal cost since the math is the same. Every trading signal should carry the sector 3-10 reading as context.
+### 3.4 Sector-ETF 3-10 From Day One (THALES)
+Compute 3-10 on XLK, XLF, XLE, XLY, XLV, XLP, XLU, XLI, XLB, XLRE, XLC. Every trading signal carries the sector 3-10 reading as context.
 
 ### 3.5 Frequency Cap Sanity Check (URSA)
-
-Divergence events firing more than **3 times per ticker per month** on daily bars = the rule is detecting noise, not divergences. Build a self-check that logs a warning if frequency exceeds this threshold in live operation.
+Divergence events >3/ticker/month on daily bars → warning log in `/var/log/committee_audit.log` or equivalent.
 
 ---
 
-## 4. Design Questions for Titans Pass 1
+## 4. Titans Pass 1 Design Questions (Retained for Record)
 
-Each Titans agent answers from their lens. Solo take first, then Pass 2 integrates.
+*Pass 1 questions preserved from v1 brief. Solo and Pass 2 responses in §9-§11 below.*
+
+[§4.1-§4.4 original agent questions retained verbatim from v1 — see commit history]
+
+---
+
+## 5. Proposed MVP Architecture (Superseded by §11)
+
+*v1 architecture proposal retained for traceability. §11 is the locked architecture.*
+
+---
+
+## 6-8. Deliverable, Dependencies, Out of Scope
+
+See §11 (ATHENA final) — supersedes original §6-§8.
+
+---
+
+## 9. Titans Pass 1 — Solo Agent Responses
 
 ### ATLAS (Backend Architect)
 
-**Q1: Where does the code live?**
-- New directory `backend/indicators/three_ten_oscillator.py`?
-- Alongside bias filters in `backend/bias_filters/`?
-- As a utility in `backend/shared/`?
-- Your call. Consider: this is the first system-wide indicator, so whatever you decide sets precedent for future indicators (ATR, TICK, other overlays).
+**Q1 — Location:** New package `backend/indicators/three_ten_oscillator.py`. Not `bias_filters/` (different domain — those score macro conditions). Not `shared/` (that's DB clients, logging). Indicators are a distinct domain and this sets precedent. Structure: `__init__.py` + `three_ten_oscillator.py`. Defer `base.py` abstract class until there's a second indicator (YAGNI).
 
-**Q2: API contract — what's the function signature?**
-- Proposed: `compute_3_10(df: pd.DataFrame, divergence_lookback: int = 5, divergence_threshold: float = 0.10) -> pd.DataFrame`
-- Return: original DataFrame with 4 columns appended (`osc_fast`, `osc_slow`, `osc_cross`, `osc_div`)
-- Stateless function or class with caching? Argue for one.
+**Q2 — API contract:** Stateless pure function. Signature: `compute_3_10(df: pd.DataFrame, divergence_lookback: int = 5, divergence_threshold: float = 0.10) -> pd.DataFrame`. Returns df with 4 appended columns: `osc_fast`, `osc_slow`, `osc_cross`, `osc_div`. Column names exported as module constants. Function is pure — zero side effects; logging/DB writes live in the caller.
 
-**Q3: Caching strategy?**
-- 3-10 is cheap to compute, but Holy Grail runs every 15 min against 200 tickers, and if Turtle Soup + 80-20 also call it, we're recomputing the same series repeatedly.
-- Redis cache with TTL keyed by `ticker:timeframe:as_of_bar_timestamp`?
-- Or trust pandas + let each scanner compute on demand?
+**Q3 — Caching:** `functools.lru_cache` keyed by `(ticker, timeframe, last_bar_timestamp)`, maxsize=5000. NOT Redis for MVP — pandas compute is sub-millisecond and Redis round-trip is slower than recompute. Escalation path documented; Redis only if profiling proves a bottleneck.
 
-**Q4: Shared with live + backtest?**
-- Per the backtest module brief (Titans reviews separately), strategy logic should be shared between backtest and live code.
-- 3-10 is infrastructure that BOTH will use. Does it live in a shared module, or is there duplication risk?
+**Q4 — Live/backtest sharing:** Direct import of same module. Pure deterministic function = zero duplication risk. Satisfies backtest/live parity requirement.
 
-**Q5: Sector-ETF 3-10 delivery?**
-- Where does the sector-rotation tag get enriched? At scanner output time (each scanner calls sector-ETF 3-10 itself), or in a downstream pipeline step (signal enrichment middleware reads the tag from a cache)?
-- Recommend the latter for DRY, but confirm.
+**Q5 — Sector-ETF delivery:** Centralized in `pipeline/signal_enrichment.py`. Computes all 11 ETF readings once per bar close, caches in-process, attaches sector reading to every signal passing through enrichment. DRY, cache hit rate near 100%. **Flag:** confirm `signal_enrichment.py` exists or scope creation.
 
 ### HELIOS (Frontend UI/UX)
 
-**Q1: Does 3-10 need a UI visualization?**
-- Trade idea cards currently show various indicators. Does 3-10 reading (fast line value + slow line value) appear on cards?
-- If yes: numeric display, color-coded zones, or mini-sparkline?
-- If no: is it available on-demand via a tooltip or detail view?
+**Q1 — UI viz:** No dedicated viz for MVP. 3-10 is an input, not a signal. Signal cards gain gate tag during shadow mode; sector-rotation tag already leverages 3-10 under the hood. Phase 2 could add sparkline in detail drawer if requested.
 
-**Q2: Divergence alerts?**
-- When 3-10 divergence fires on a tracked ticker, is there a UI alert? Or strictly backend-only (feeds into Olympus reviews but no human-facing surface)?
+**Q2 — Divergence alerts:** Backend-only. Divergences feed Olympus context and Turtle Soup/Anti inputs but aren't standalone signals. Revisit after 3 months of shadow signal-to-noise data.
 
-**Q3: Holy Grail shadow-mode display?**
-- During the 6-month A/B comparison, do both RSI-gated and 3-10-gated Holy Grail signals appear in the trade ideas feed, tagged differently? Or does the frontend hide one set and only show the "winning" gate's output?
-- If both shown: UX risk of duplicate signals confusing Nick during trading hours. Propose a display strategy.
+**Q3 — Shadow-mode display:** **Option C selected.** Main feed is unified, RSI-primary, with `3-10 confirms` badge when both gates agree. Separate dev view at `/dev/shadow-3-10` for 3-10-only signals. Nick builds intuition on 3-10 over shadow period without noise in the main feed. Options A (both visible) and B (3-10 silent) both rejected — A doubles noise, B blocks intuition-building.
 
 ### AEGIS (Security)
 
-**Q1: Attack surface?**
-- Pure OHLCV computation, no external API calls, no credentials. Should be zero-surface.
-- Confirm no inadvertent data leakage if 3-10 output is exposed via API endpoint.
+**Q1 — Attack surface:** Zero inherent surface. Pure OHLCV math, no creds, no external calls. Any exposing route requires `X-API-Key` — no public routes, no IP allow-list exceptions, no localhost escape hatches.
 
-**Q2: Logging & storage considerations?**
-- Per-bar 3-10 readings across 200 tickers × 5 timeframes × market hours = a LOT of rows if persisted. Is this ephemeral (in-memory only) or do we store historical 3-10 values for later analysis?
-- Recommend ephemeral compute + opportunistic caching, with only divergence events persisted to DB. Confirm or propose alternative.
+**Q2 — Storage:** Ephemeral compute + opportunistic cache + persist divergences only. Full persistence math is absurd (~390k rows/day on 5m alone). Divergence event schema:
+```
+divergence_events (
+  id SERIAL PRIMARY KEY,
+  ticker TEXT NOT NULL,
+  timeframe TEXT NOT NULL,
+  bar_timestamp TIMESTAMPTZ NOT NULL,
+  div_type TEXT NOT NULL,
+  fast_pivot_prev NUMERIC(12,6),
+  fast_pivot_curr NUMERIC(12,6),
+  price_pivot_prev NUMERIC(12,6),
+  price_pivot_curr NUMERIC(12,6),
+  threshold_used NUMERIC(5,4),
+  lookback_used INT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+)
+```
+`NUMERIC(12,6)` mandatory — float drift on 10% threshold comparison is a real risk.
 
 ### ATHENA (PM)
 
-**Q1: Scope — MVP vs. nice-to-have?**
-- MVP (must ship): core 3-10 math, divergence detection, Holy Grail shadow-mode integration, sector-ETF variant
-- Nice-to-have (Phase 2): frontend visualization, API endpoint for external consumers, divergence alerting
-- Agree or adjust?
+**Q1 — MVP scope:** Agreed + adds. Ships: (1) core math + divergence, (2) HG shadow-mode dual-gate integration, (3) sector-ETF variant + enrichment wiring, (4) freq cap self-check, (5) unit tests, (6) dev view `/dev/shadow-3-10`, (7) schema migrations for `gate_type` column + `divergence_events` table.
 
-**Q2: Priority vs. other work in queue?**
-- Competing priorities: ZEUS phase work, Abacus widget overhaul, Stater Swap crypto rebuild, Holy Grail fix list Tier 1.
-- 3-10 is prereq for HG Tier 1 fix #7 (RSI replacement) and The Anti. So it blocks two downstream items. Ship first?
+**Q2 — Priority:** First in Raschke queue. Ships after ZEUS Phase 3 + hunter.py deprecation; before The Anti P3 and 80-20 P2. ~6 days CC work.
 
-**Q3: Rollout gate?**
-- Build → unit tests → deploy to production → shadow mode on Holy Grail for 6 months → cutover decision.
-- Or: build → unit tests → deploy → immediately enable as Holy Grail gate (swap RSI)?
-- Recommend shadow mode per Olympus backtest gate rule. Confirm.
+**Q3 — Rollout gate:** 6-month shadow default; day-90 Olympus checkpoint for potential early cutover if statistical significance + OOS volume both clear.
 
-**Q4: Success criteria for the build (not the strategy)?**
-- Build is "done" when:
-  - 3-10 module computes correctly on known test vectors (Linda's own published examples — need to source)
-  - Holy Grail shadow mode is live and logging both gate outputs
-  - Sector-ETF 3-10 feeds into sector-rotation tag on every signal
-  - Divergence frequency self-check is operational
-  - Unit tests pass
-- Agree or add?
+**Q4 — Success criteria:** Agreed list + math to 4 decimal places on Raschke vectors; sector-ETF cache within 10s of bar close; dev view X-API-Key protected; unit tests cover math + divergence synthetics + freq cap trigger.
 
 ---
 
-## 5. Proposed MVP Architecture (For Titans to Critique)
+## 10. Titans Pass 2 — Cross-Reactions (Deltas Only)
 
-```
-backend/
-  indicators/
-    __init__.py
-    three_ten_oscillator.py       # core math + divergence detection
-    sector_rotation.py            # uses three_ten for sector-ETF 3-10; extends existing sector_rs output
-  scanners/
-    holy_grail_scanner.py         # modified: add 3-10 gate in shadow mode alongside RSI
-  pipeline/
-    signal_enrichment.py          # populates sector_rotation tag using indicators/sector_rotation.py
-  tests/
-    indicators/
-      test_three_ten_oscillator.py  # known-vector tests
-      test_divergence_detection.py  # synthetic divergence test cases
-```
+**ATLAS → HELIOS:** Option C requires scanner-level changes — Holy Grail emits `gate=rsi`, `gate=3-10`, `gate=both` channels. Adds ~1 day to estimate. Also requires `gate_type` column migration on trade signals table — in scope.
 
-**Data flow:**
-1. Scanner fetches OHLCV bars (existing code)
-2. Scanner calls `compute_3_10(df)` — returns df with 4 new columns
-3. Scanner uses `osc_fast` / `osc_slow` crossover for gating (Holy Grail) OR `osc_div` flag (Turtle Soup divergence)
-4. Signal enrichment step reads sector-ETF 3-10 from cache and adds sector-rotation tag
-5. Downstream pipeline unchanged
+**ATLAS → AEGIS:** In-process cache wiped on every Railway deploy. Shadow-mode comparison relies on `trade_signals` persistence with `gate_type`, not the cache. Migration in scope.
+
+**HELIOS → ATLAS:** Dev view implementation: `/dev/shadow-3-10` queries `trade_signals` filtered by `gate_type='3-10'`. No new storage, filtered read only.
+
+**HELIOS → ATHENA:** Dev view must be MVP, not Phase 2. Without it we collect 6 months of shadow data with Nick having no visibility, which delays cutover-readiness rather than solving it.
+
+**AEGIS → ATLAS + HELIOS:** `/dev/shadow-3-10` gets same `X-API-Key` auth as production routes. No exceptions.
+
+**AEGIS → ATHENA:** Schema accepted; `NUMERIC(12,6)` mandate confirmed.
+
+**ATLAS → ATHENA (pushback on v1 §7):** Hard dependency #2 in v1 is incorrect — pipeline cannot handle dual-gate tagging without changes. Migration + scanner split must be in build scope, not a separate ticket. Reflected in §11.
 
 ---
 
-## 6. What Titans Produces in Pass 1
+## 11. ATHENA Final — Architecture, Scope, Priority (LOCKED)
 
-Each agent: 1-2 paragraph solo response to the Q's above. Pass 2: agents incorporate each other's takes. ATHENA final: architecture decision + scope lock + priority placement.
+### Architecture
 
-Output: this brief updated with Titans Pass 2 answers, then handed to me for CC brief drafting.
+| Concern | Decision |
+|---|---|
+| Code location | `backend/indicators/three_ten_oscillator.py` (new package) |
+| API | Stateless pure function, named-constant column outputs |
+| Caching | `functools.lru_cache`, maxsize=5000, in-process |
+| Sector-ETF delivery | `pipeline/signal_enrichment.py` centralized |
+| Live/backtest | Shared via direct import |
+| Frontend | HELIOS Option C (unified feed + dev view) |
+| Auth | `X-API-Key` on all routes, including dev view |
+
+### Pipeline Changes In Scope
+
+1. Holy Grail scanner splits output into `gate=rsi` / `gate=3-10` / `gate=both` channels
+2. `trade_signals` schema migration: add `gate_type TEXT` column
+3. New `divergence_events` table (schema per §9 AEGIS spec)
+4. `signal_enrichment.py` verified or created; sector-ETF 3-10 wired
+5. Frequency cap self-check writes to audit log
+
+### MVP Done Criteria
+
+1. Math matches Raschke published vectors to 4 decimal places
+2. Mechanical divergence passes synthetic bull/bear test cases
+3. Holy Grail emits dual-gate signals with `gate_type` tagged and persisted
+4. Sector-ETF 3-10 cache refreshes within 10s of bar close; enriches all signals
+5. Divergence events persist to `divergence_events` table
+6. Frequency cap self-check logs warning at >3/ticker/month on daily
+7. Dev view `/dev/shadow-3-10` live, `X-API-Key` protected, no nav link
+8. Unit tests pass (math + divergence synthetics + freq cap trigger)
+
+### Priority Placement
+
+- Ships FIRST in Raschke queue
+- Gated on: ZEUS Phase 3 complete + hunter.py deprecation brief clear
+- Blocks downstream: HG Tier 1 RSI replacement, The Anti P3, Turtle Soup P1 divergence filter, sector-rotation enrichment
+
+### Estimate
+
+**~6 days CC work**
+- Indicator math + divergence: 2 days
+- Pipeline dual-gate + schema migration: 2 days
+- Enrichment + sector ETF: 1 day
+- Dev view + tests: 1 day
+
+### Rollout Gate
+
+6-month shadow default. Day-90 Olympus checkpoint reviews for potential early cutover — requires (a) statistical significance on ≥3pp win rate or ≥0.1 PF delta, (b) sufficient out-of-sample volume per Olympus call.
+
+### Hard Dependencies (Updated — Supersedes v1 §7)
+
+1. ✅ Mechanical divergence rule specified (§3.1)
+2. ✅ Pipeline dual-gate tagging + schema migration **in scope** (corrected from v1)
+3. ⏳ **TODO for Nick:** source 2-3 known 3-10 readings from Linda Raschke published examples for test vectors
+4. ⏳ **TODO for CC (first task):** verify `signal_enrichment.py` exists on repo; if not, scope creation
+
+### Out of Scope (Unchanged)
+
+- Options/futures timeframes beyond current
+- Custom divergence variants (hidden, multi-leg)
+- ML or parameter optimization
+- Historical backfill of 3-10 readings
+- Redis caching (MVP uses in-process LRU)
+- Public API endpoint for 3-10 values
+- Frontend visualization of oscillator values
+- Divergence alerting to Nick
 
 ---
 
-## 7. Hard Dependencies (Do Not Skip)
-
-1. Mechanical divergence rule must be specified before CC writes code (URSA)
-2. Holy Grail shadow mode requires pipeline support for dual-gate tagging — confirm pipeline can handle this without changes, or flag as blocker
-3. Test vectors for validation — need to source 2-3 known 3-10 readings from Linda's published examples to verify math correctness
-
----
-
-## 8. Out of Scope
-
-- Options/futures timeframes beyond what exists
-- Custom divergence variants (hidden divergence, multi-leg) — canonical divergence only for MVP
-- Machine learning or parameter optimization — defaults from Raschke's spec, no tuning
-- Historical backfill of 3-10 readings for all tickers — compute on demand
-
----
-
-**End of Titans Pass 1 brief for 3-10 Oscillator.**
+**End of Titans Pass 2 final brief. Ready for CC build brief drafting.**
