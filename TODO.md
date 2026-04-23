@@ -125,7 +125,8 @@
 - [x] **3-10 Oscillator CC build Phase 3** — Sector-ETF 3-10 + enrichment pipeline. Branch `feature/raschke-3-10-phase-3` SHA `b603759`. Scheduler loop wired. Awaiting Phase 4 + merge.
 - [ ] **3-10 Oscillator CC build Phase 4** — Dev view (`/api/dev/shadow-3-10` + HTML) + frequency cap self-check. In progress on `feature/raschke-3-10-phase-3`. Final phase before MVP complete.
 - [ ] **Post-deploy verification checklist (see section below)** — run after Phase 4 merges to main and Railway auto-deploys.
-- [ ] **Holy Grail Tier 1: iv_regime wiring** — NOT covered by the 3-10 build. `iv_regime` factor exists in `composite.py:87-92` but is not wired to Holy Grail's skip logic. **Brief ready at `docs/codex-briefs/brief-hg-tier1-iv-regime-gate.md`. NEXT CC TASK after Phase 4 merge.**
+- [ ] **Backtest Module (Titans-approved, §12 resolved 2026-04-23)** — Titans Pass 2 locked at `docs/strategy-reviews/backtest/titans-review-backtest-module-v1.md`. **NEXT ACTION: Nick runs Phase 0 UW historical depth spike via UW MCP in a fresh chat (~1 hour).** Probe grid: SPY × flow_alerts/dark_pool/GEX/net_premium × 90d/180d/365d/730d/1825d lookbacks. Write findings to `docs/strategy-reviews/backtest/uw-historical-depth-findings.md`. Phase 1 exemplar will be 3-10 Oscillator (override of Titans §7 Turtle Soup preference — 3-10 is already pure and has live shadow data to validate the engine against). This build gates Raschke Phase 2 (Turtle Soup ELEVATE, 80-20, Anti, News Reversal) since URSA's rule makes those PROVISIONAL until backtest validates.
+- [ ] **Holy Grail Tier 1: iv_regime wiring** — shipped 2026-04-23, PR #15 approved with scope correction. Brief at `docs/codex-briefs/brief-hg-tier1-iv-regime-gate.md`. Scope locked to Holy_Grail only (CTA/Artemis/Sell_the_Rip deferred pending per-strategy Olympus review). Awaiting merge to main + next-day verification via Test 7.
 
 ---
 
