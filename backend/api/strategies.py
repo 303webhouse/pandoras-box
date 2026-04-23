@@ -28,18 +28,6 @@ STRATEGIES_FILE = os.path.join(os.path.dirname(__file__), "..", "..", "data", "s
 
 # Default strategy configuration
 DEFAULT_STRATEGIES = {
-    "hunter": {
-        "name": "Hunter Scanner",
-        "description": "Scans for trapped traders (Ursa/Taurus) on S&P 500",
-        "enabled": True,
-        "category": "scanner",
-        "timeframes": ["DAILY", "WEEKLY"],
-        "settings": {
-            "adx_min": 20,
-            "rsi_range": [40, 60],
-            "rvol_min": 1.25
-        }
-    },
     "sniper": {
         "name": "Sniper Execution",
         "description": "Kill zone entry signals on TradingView",

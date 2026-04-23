@@ -21,21 +21,10 @@ _latest_scan_results = {
     "status": "idle"
 }
 
-# Try to import scanner
-try:
-    from scanners.hunter import (
-        run_full_scan, 
-        get_scanner_config, 
-        set_scanner_enabled,
-        update_scanner_filters,
-        analyze_single_ticker,
-        SP500_TOP_100,
-        SCANNER_AVAILABLE
-    )
-except ImportError:
-    SCANNER_AVAILABLE = False
-    analyze_single_ticker = None
-    logger.warning("Scanner module not available")
+# hunter.py removed — Olympus anti-bloat banked deprecation (2026-04-22)
+# Replaced by ursa_taurus.py. All scanner endpoints return unavailable.
+SCANNER_AVAILABLE = False
+analyze_single_ticker = None
 
 
 class ScanRequest(BaseModel):
