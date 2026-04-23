@@ -60,6 +60,8 @@ async def enrich_signal(signal_data: Dict[str, Any]) -> Dict[str, Any]:
         # Derived
         "atr_pct": None,  # ATR as % of current price
         "risk_in_atr": None,  # (entry - stop) / ATR — how many ATRs of risk
+        # Raschke Phase 3: sector 3-10 context
+        "sector_3_10": None,  # dict: {sector_etf, osc_fast, osc_slow, osc_cross}
     }
 
     # --- Tier 1: Read universe cache ---
@@ -113,6 +115,15 @@ async def enrich_signal(signal_data: Dict[str, Any]) -> Dict[str, Any]:
             enrichment["risk_in_atr"] = round(risk_dollars / enrichment["atr_14"], 2)
         except (TypeError, ValueError, ZeroDivisionError):
             pass
+
+    # --- Sector 3-10 context (Raschke Phase 3) ---
+    try:
+        from indicators.sector_rotation_3_10 import get_sector_3_10_for_ticker
+        sector_reading = await get_sector_3_10_for_ticker(ticker)
+        if sector_reading:
+            enrichment["sector_3_10"] = sector_reading
+    except Exception as e:
+        logger.debug(f"Sector 3-10 enrichment failed for {ticker}: {e}")
 
     # --- Write to signal ---
     signal_data["enrichment_data"] = enrichment

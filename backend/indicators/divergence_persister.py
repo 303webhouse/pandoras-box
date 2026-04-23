@@ -87,6 +87,8 @@ async def persist_divergences(
 
     if inserted > 0:
         logger.info("Persisted %d divergence events for %s (%s)", inserted, ticker, timeframe)
+        # Frequency cap sanity check (URSA — Olympus 2026-04-22)
+        await check_divergence_frequency(ticker, timeframe)
     return inserted
 
 
