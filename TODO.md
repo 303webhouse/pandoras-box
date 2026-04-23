@@ -185,6 +185,7 @@
 - [ ] **Repo hygiene — stale backup zip** — `trading-hub-complete-20260128_113640.zip` at repo root. Git is the backup system; delete unless there's a specific reason to keep.
 - [ ] **Repo hygiene — consolidate agent config files** — `AGENTS.md`, `CLAUDE.md`, `CODEX.md`, `PROJECT_RULES.md`, `PROJECT_SUMMARY.md`, `QUICK_START.md`, `DEVELOPMENT_STATUS.md` overlap in "source of truth" role. A consolidation pass would reduce drift risk. Parked as a later cleanup, not urgent.
 - [ ] **Auth coverage gap on new routes** — `test_no_unprotected_mutations` now flags 16 routes without webhook-secret protection (was 2 when first noted, grew as new routes were added: trade-watchlist, hermes, hydra, etc.). Surfaced again during hunter UI strip (commit `07858cb`). Not a hunter-removal regression. Needs a targeted audit brief: identify which of the 16 routes SHOULD be secret-protected vs. which are legitimately public, then either (a) add auth to the ones that need it, or (b) update the test's allow-list with a comment explaining why each exempted route is safe. Don't bury this — it's growing.
+- [ ] **Install `pytest-asyncio`** — surfaced during Raschke P1 full-suite run (commit `95e0bdd`). 19 async tests in `test_uw_api_mapping.py` were silently skipped in prior runs because `-x` stopped at earlier failures; they fail without `pytest-asyncio`. Trivial fix — add to `requirements-dev.txt` (or wherever test deps live). Do BEFORE next full-suite audit so test coverage is accurate.
 
 ---
 
