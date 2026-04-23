@@ -1318,6 +1318,48 @@ async def init_database():
             CREATE INDEX IF NOT EXISTS idx_signals_feed_tier ON signals(feed_tier)
         """)
 
+        # Raschke Phase 1 (migration 012): 3-10 Oscillator shadow-mode infrastructure
+        try:
+            await conn.execute("""
+                ALTER TABLE signals
+                ADD COLUMN IF NOT EXISTS gate_type VARCHAR(20)
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_signals_gate_type
+                ON signals(gate_type) WHERE gate_type IS NOT NULL
+            """)
+        except Exception as e:
+            print(f"WARNING: signals gate_type column skipped: {e}")
+
+        try:
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS divergence_events (
+                    id SERIAL PRIMARY KEY,
+                    ticker TEXT NOT NULL,
+                    timeframe TEXT NOT NULL,
+                    bar_timestamp TIMESTAMPTZ NOT NULL,
+                    div_type TEXT NOT NULL CHECK (div_type IN ('bull', 'bear')),
+                    fast_pivot_prev NUMERIC(12, 6),
+                    fast_pivot_curr NUMERIC(12, 6),
+                    price_pivot_prev NUMERIC(12, 6),
+                    price_pivot_curr NUMERIC(12, 6),
+                    threshold_used NUMERIC(5, 4),
+                    lookback_used INT,
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    UNIQUE(ticker, timeframe, bar_timestamp, div_type)
+                )
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_divergence_events_ticker_time
+                ON divergence_events(ticker, bar_timestamp DESC)
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_divergence_events_type
+                ON divergence_events(div_type, bar_timestamp DESC)
+            """)
+        except Exception as e:
+            print(f"WARNING: divergence_events table creation skipped: {e}")
+
         print("Database schema initialized")
 
 async def log_signal(
