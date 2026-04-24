@@ -36,19 +36,40 @@ OSC_SLOW = "osc_slow"
 OSC_CROSS = "osc_cross"
 OSC_DIV = "osc_div"
 
-# Default parameters per Raschke spec.
+# Default parameters per Raschke spec (calibrated post-Day-0 verification 2026-04-24).
 DEFAULT_DIVERGENCE_LOOKBACK = 5
-DEFAULT_DIVERGENCE_THRESHOLD = 0.10  # 10%
+DEFAULT_DIVERGENCE_THRESHOLD = 0.10  # 10% — canonical Raschke daily default
 PIVOT_WINDOW = 2  # Bars before and after pivot candidate (total window = 5 bars)
+
+# Timeframe-calibrated thresholds. Day-0 verification showed the canonical 10%
+# threshold over-fires on intraday bars (~20 events/month/ticker on 1h vs URSA's
+# <3/month cap). Wider thresholds for noisier intraday frames keep the signal
+# meaningful. Revisit at Day-30 cadence check with real post-deploy data.
+TIMEFRAME_DIVERGENCE_THRESHOLDS = {
+    "1m":   0.25,   # very noisy
+    "5m":   0.22,
+    "15m":  0.20,
+    "30m":  0.18,
+    "1h":   0.15,   # Day-0 data: 10% gave ~20/mo/ticker, target <3/mo
+    "4h":   0.12,
+    "1d":   0.10,   # canonical Raschke default
+    "1w":   0.08,   # wider windows, cleaner pivots
+}
 
 
 def compute_3_10(
     df: pd.DataFrame,
     divergence_lookback: int = DEFAULT_DIVERGENCE_LOOKBACK,
-    divergence_threshold: float = DEFAULT_DIVERGENCE_THRESHOLD,
+    divergence_threshold: float | None = None,
+    timeframe: str | None = None,
 ) -> pd.DataFrame:
     """
     Compute the 3-10 Oscillator and append four columns to df.
+
+    Day-0 calibration (2026-04-24): `timeframe` kwarg selects a calibrated
+    threshold from TIMEFRAME_DIVERGENCE_THRESHOLDS. Passing `divergence_threshold`
+    explicitly overrides. If neither is provided, falls back to the canonical
+    Raschke 10% default (suitable for daily bars).
 
     Args:
         df: DataFrame with at minimum 'high' and 'low' columns (case-insensitive
@@ -57,13 +78,24 @@ def compute_3_10(
             alignment.
         divergence_lookback: N-bar window for new-high/low detection.
         divergence_threshold: Minimum fractional gap between pivots to count as
-            divergence (0.10 = 10%).
+            divergence (0.10 = 10%). Explicit override — takes precedence over
+            `timeframe` lookup.
+        timeframe: Bar timeframe string (e.g. "1h", "1d"). Selects calibrated
+            threshold from TIMEFRAME_DIVERGENCE_THRESHOLDS when divergence_threshold
+            is not explicitly passed.
 
     Returns:
         The input DataFrame with OSC_FAST, OSC_SLOW, OSC_CROSS, OSC_DIV columns
         appended. Returns df unchanged if it has fewer than 20 bars (not enough
         data for the slow line's 10-bar SMA of the raw line).
     """
+    # Resolve effective threshold: explicit override > timeframe lookup > default
+    if divergence_threshold is None:
+        if timeframe and timeframe in TIMEFRAME_DIVERGENCE_THRESHOLDS:
+            divergence_threshold = TIMEFRAME_DIVERGENCE_THRESHOLDS[timeframe]
+        else:
+            divergence_threshold = DEFAULT_DIVERGENCE_THRESHOLD
+
     if df is None or df.empty or len(df) < 20:
         # Append empty columns so callers can rely on them existing.
         for col in (OSC_FAST, OSC_SLOW, OSC_CROSS, OSC_DIV):

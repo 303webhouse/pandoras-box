@@ -42,16 +42,73 @@ SECTOR_ETFS = [
 # sector_rs.py has no get_ticker_sector_etf(ticker) function as of 2026-04-22;
 # expand this map manually until that function exists.
 _DEFAULT_SECTOR_MAP = {
-    # Tech
-    "AAPL": "XLK", "MSFT": "XLK", "NVDA": "XLK", "GOOGL": "XLK", "META": "XLK",
-    "AMZN": "XLY", "TSLA": "XLY",
-    # Financials
-    "JPM": "XLF", "BAC": "XLF", "WFC": "XLF", "GS": "XLF", "MS": "XLF",
-    # Energy
-    "XOM": "XLE", "CVX": "XLE", "COP": "XLE",
-    # Health
-    "UNH": "XLV", "JNJ": "XLV", "LLY": "XLV", "PFE": "XLV",
-    # etc. Extend as needed.
+    # ── XLK — Technology ────────────────────────────────────────────────────
+    "AAPL": "XLK", "MSFT": "XLK", "NVDA": "XLK", "AVGO": "XLK", "ORCL": "XLK",
+    "CRM":  "XLK", "CSCO": "XLK", "ADBE": "XLK", "AMD":  "XLK", "QCOM": "XLK",
+    "INTU": "XLK", "TXN":  "XLK", "IBM":  "XLK", "NOW":  "XLK", "PANW": "XLK",
+    "MU":   "XLK", "ADI":  "XLK", "AMAT": "XLK", "LRCX": "XLK", "KLAC": "XLK",
+    "MRVL": "XLK", "SNPS": "XLK", "CDNS": "XLK", "ANET": "XLK", "FTNT": "XLK",
+    "SNOW": "XLK", "INTC": "XLK", "DOCU": "XLK", "HUBS": "XLK", "PLTR": "XLK",
+    "TEAM": "XLK", "WOLF": "XLK", "AEVA": "XLK", "NBIS": "XLK",
+
+    # ── XLC — Communication Services ────────────────────────────────────────
+    "GOOGL": "XLC", "GOOG": "XLC", "META": "XLC", "NFLX": "XLC", "DIS": "XLC",
+    "T":    "XLC",  "VZ":  "XLC",  "CMCSA": "XLC", "TMUS": "XLC", "CHTR": "XLC",
+    "TTD":  "XLC",  "RBLX": "XLC", "BIDU": "XLC", "LBRDK": "XLC", "ASTS": "XLC",
+
+    # ── XLY — Consumer Discretionary ────────────────────────────────────────
+    "AMZN": "XLY", "TSLA": "XLY", "HD":   "XLY", "MCD":  "XLY", "NKE":  "XLY",
+    "LOW":  "XLY", "BKNG": "XLY", "TJX":  "XLY", "SBUX": "XLY", "ABNB": "XLY",
+    "F":    "XLY", "GM":   "XLY", "RIVN": "XLY", "LYFT": "XLY", "HTZ":  "XLY",
+
+    # ── XLP — Consumer Staples ───────────────────────────────────────────────
+    "PG":   "XLP", "COST": "XLP", "WMT":  "XLP", "KO":   "XLP", "PEP":  "XLP",
+    "PM":   "XLP", "MO":   "XLP", "MDLZ": "XLP", "CL":   "XLP", "KMB":  "XLP",
+
+    # ── XLF — Financials ────────────────────────────────────────────────────
+    "JPM":  "XLF", "BAC":  "XLF", "WFC":  "XLF", "GS":   "XLF", "MS":   "XLF",
+    "C":    "XLF", "BLK":  "XLF", "AXP":  "XLF", "SCHW": "XLF", "SPGI": "XLF",
+    "V":    "XLF", "MA":   "XLF", "PGR":  "XLF", "CB":   "XLF", "PYPL": "XLF",
+    "COIN": "XLF", "CME":  "XLF", "STT":  "XLF", "AON":  "XLF", "LMND": "XLF",
+
+    # ── XLV — Health Care ───────────────────────────────────────────────────
+    "UNH":  "XLV", "JNJ":  "XLV", "LLY":  "XLV", "PFE":  "XLV", "ABBV": "XLV",
+    "MRK":  "XLV", "TMO":  "XLV", "ABT":  "XLV", "DHR":  "XLV", "AMGN": "XLV",
+    "BMY":  "XLV", "GILD": "XLV", "ISRG": "XLV", "ELV":  "XLV", "CVS":  "XLV",
+    "NVS":  "XLV",
+
+    # ── XLE — Energy ────────────────────────────────────────────────────────
+    "XOM":  "XLE", "CVX":  "XLE", "COP":  "XLE", "SLB":  "XLE", "OXY":  "XLE",
+    "EOG":  "XLE", "PSX":  "XLE", "MPC":  "XLE", "VLO":  "XLE", "HES":  "XLE",
+    "HAL":  "XLE", "USO":  "XLE", "LBRT": "XLE",
+
+    # ── XLI — Industrials ───────────────────────────────────────────────────
+    "CAT":  "XLI", "HON":  "XLI", "UNP":  "XLI", "DE":   "XLI", "RTX":  "XLI",
+    "LMT":  "XLI", "UPS":  "XLI", "BA":   "XLI", "GE":   "XLI", "GEV":  "XLI",
+    "MMM":  "XLI", "NOC":  "XLI", "ETN":  "XLI", "FDX":  "XLI", "ITW":  "XLI",
+    "CBRE": "XLRE",  # moved below — real estate services
+
+    # ── XLU — Utilities ─────────────────────────────────────────────────────
+    "NEE":  "XLU", "SO":   "XLU", "DUK":  "XLU", "AEP":  "XLU", "SRE":  "XLU",
+    "D":    "XLU", "EXC":  "XLU", "NRG":  "XLU",
+
+    # ── XLB — Materials ─────────────────────────────────────────────────────
+    "LIN":  "XLB", "FCX":  "XLB", "NEM":  "XLB", "APD":  "XLB", "DD":   "XLB",
+    "DOW":  "XLB", "SHW":  "XLB",
+
+    # ── XLRE — Real Estate ──────────────────────────────────────────────────
+    "PLD":  "XLRE", "AMT":  "XLRE", "EQIX": "XLRE", "CCI":  "XLRE",
+    "WELL": "XLRE", "SPG":  "XLRE", "O":    "XLRE", "CBRE": "XLRE",
+    "OPEN": "XLRE",
+
+    # ── INDEX — Sector-agnostic ETFs (no sector context applies) ────────────
+    # get_sector_3_10_for_ticker returns None for these — intentional.
+    "SPY":  "INDEX", "QQQ":  "INDEX", "IWM":  "INDEX", "DIA":  "INDEX",
+    "GLD":  "INDEX", "SLV":  "INDEX", "TLT":  "INDEX", "HYG":  "INDEX",
+    "SMH":  "INDEX", "XLE":  "INDEX", "XLB":  "INDEX", "XLC":  "INDEX",
+    "XLF":  "INDEX", "XLI":  "INDEX", "XLK":  "INDEX", "XLP":  "INDEX",
+    "XLRE": "INDEX", "XLU":  "INDEX", "XLV":  "INDEX", "XLY":  "INDEX",
+    "INDA": "INDEX",
 }
 
 # In-process cache: sector_etf -> latest 3-10 reading dict
@@ -68,6 +125,9 @@ async def get_sector_3_10_for_ticker(ticker: str) -> Optional[Dict]:
     Shape: {"sector_etf": "XLK", "osc_fast": 0.12, "osc_slow": 0.08, "osc_cross": 0}
     """
     sector_etf = _DEFAULT_SECTOR_MAP.get(ticker.upper())
+    # INDEX sentinel: mapped but intentionally sector-agnostic (SPY, QQQ, etc.)
+    if sector_etf == "INDEX":
+        return None
     if not sector_etf:
         # Try the sector_rs module for a broader lookup
         try:
