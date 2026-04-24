@@ -20,6 +20,15 @@ logger = logging.getLogger(__name__)
 
 COMMITTEE_SCORE_THRESHOLD = 85.0  # Minimum score_v2 to trigger committee (raised from 75→80→85, 2026-04-22)
 
+# ── VIX regime thresholds (Olympus 2026-04-22 Tier 1 fix #3) ─────────────────
+# Extreme regimes suppress Holy Grail signals from reaching top_feed:
+#   VIX < 15 → too quiet, trend continuation patterns under-perform
+#   VIX > 30 → too chaotic, mean reversion dominates, HG continuation fails
+VIX_REGIME_LOW_THRESHOLD  = 15.0
+VIX_REGIME_HIGH_THRESHOLD = 30.0
+
+TREND_CONTINUATION_STRATEGIES = {"Holy_Grail"}
+
 # ── Cross-asset flow alignment map (ZEUS Phase 1A.1) ──
 # Component → list of related ETFs/tickers to check for sentiment confirmation
 COMPONENT_TO_ETF = {
@@ -481,12 +490,6 @@ async def apply_scoring(signal_data: Dict[str, Any]) -> Dict[str, Any]:
         # Placed here rather than feed_tier_classifier.py to avoid async
         # contract ripple; revisit if additional gates accumulate here.
         try:
-            # Strategies this gate applies to — Holy Grail family only.
-            # CTA/Artemis/Sell_the_Rip added via separate tickets after
-            # per-strategy Olympus volatility sensitivity review.
-            TREND_CONTINUATION_STRATEGIES = {
-                "Holy_Grail",
-            }
             strategy = (signal_data.get("strategy") or "").strip()
 
             if strategy in TREND_CONTINUATION_STRATEGIES:
@@ -497,7 +500,7 @@ async def apply_scoring(signal_data: Dict[str, Any]) -> Dict[str, Any]:
                     if iv_reading and iv_reading.raw_data:
                         vix_value = iv_reading.raw_data.get("vix")
                         if vix_value is not None:
-                            regime_extreme = vix_value < 15.0 or vix_value > 30.0
+                            regime_extreme = vix_value < VIX_REGIME_LOW_THRESHOLD or vix_value > VIX_REGIME_HIGH_THRESHOLD
                             if regime_extreme:
                                 # Only apply if not already lower (watchlist beats ta_feed beats research_log)
                                 current_ceiling = signal_data.get("feed_tier_ceiling")
