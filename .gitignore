@@ -29,6 +29,10 @@ data/archives/
 *.backup.*
 *.bak
 
+# UW forward-logger cache (paid data, do not commit — AEGIS §10.2)
+data/cache/uw/
+*.parquet
+
 # Archives
 *.zip
 
