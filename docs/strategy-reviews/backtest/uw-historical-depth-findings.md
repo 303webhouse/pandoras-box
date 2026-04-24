@@ -382,3 +382,98 @@ Email to `dev@unusualwhales.com` goes out in parallel. Answer doesn't change the
 | 8+ | Phase 3 dashboard w/ dual-view, Phase 3.5 UI re-run, Phase 4 deprecation | Per Titans §11.3 sequence |
 
 **CC build brief NOT authored until steps 1-3 complete.** No exceptions.
+
+---
+
+## §12 Phase 0.75 — GEX variant probes (post-ATHENA sign-off)
+
+**Executed:** 2026-04-23, immediately after ATHENA sign-off.
+**Goal:** determine whether the three `/greek-exposure` variants share the no-date carve-out that bare `/greek-exposure` has, before Phase 1 CC brief is authored. This governs whether the Phase 1 context can use expiry-level or strike-level daily GEX history.
+
+### 12.1 Results
+
+| Endpoint | No-date call | `date=2026-01-23` (90d) |
+|---|---|---|
+| `/api/stock/SPY/greek-exposure/expiry` | 200 OK, **35 rows, all dated 2026-04-23** | 403 `historic_data_access_missing` |
+| `/api/stock/SPY/greek-exposure/strike` | 200 OK, **437 rows, all dated 2026-04-23** | 403 `historic_data_access_missing` |
+| `/api/stock/SPY/greek-exposure/strike-expiry` | 200 OK, **187 rows, all dated 2026-04-23** | 403 `historic_data_access_missing` |
+
+**Answer to the probe question: NO. None of the three variants share the no-date carve-out.**
+
+### 12.2 What the variants actually return
+
+The variants don't refuse history — they're *structurally different endpoints* from the bare `/greek-exposure`. Each returns a **single point-in-time snapshot** of today's GEX, sliced along a different dimension:
+
+- `/expiry` → 35 rows, one per active expiry (~35 expiries on SPY with non-zero GEX today)
+- `/strike` → 437 rows, one per active strike (aggregated across all expiries)
+- `/strike-expiry` → 187 rows, one per strike×expiry combination (likely filtered to near-term expiries)
+
+All rows carry `"date": "2026-04-23"`. There is no time series dimension in the response — only the cross-section at the current moment. With explicit `date` param, you get that date's snapshot (gated by the 30-day cap).
+
+### 12.3 Structural read — why the bare endpoint is unique
+
+The bare `/greek-exposure` endpoint is the only one in the family whose primary axis is **time**. The variants' primary axis is **strike** or **expiry** or both. The no-date carve-out appears to be a property of the time-series endpoint, not of the GEX namespace generally.
+
+Practical phrasing for the CC brief: *"UW exposes daily-aggregate GEX time series, but only at the ticker-aggregate level — not decomposed by strike or expiry. Strike- and expiry-level GEX is current-snapshot only within the 30-day window."*
+
+### 12.4 Bonus: bare /greek-exposure daily series schema
+
+While verifying the variant behavior, I inspected the actual fields on the bare `/greek-exposure` response. Documenting here because Phase 1 CC brief will need this:
+
+**Response shape:** `{"data": [...]}`, ~250 rows, ascending chronological (oldest row first, newest last), one row per trading day covering ~1 year.
+
+**Per-row fields (9):**
+- `date` (string, YYYY-MM-DD)
+- `call_delta`, `put_delta` — aggregate dollar-delta exposure
+- `call_charm`, `put_charm` — charm (dDelta/dTime) exposure
+- `call_vanna`, `put_vanna` — vanna (dDelta/dVol) exposure
+- `call_gamma`, `put_gamma` — gamma exposure (the canonical "dealer hedging sensitivity" metric)
+
+Example row (2026-04-23):
+```json
+{
+  "date": "2026-04-23",
+  "call_delta": "219534069.3148",
+  "put_delta": "-120228355.8165",
+  "call_charm": "-181846711.5561",
+  "call_vanna": "30161764.8428",
+  "put_charm": "429187193.7519",
+  "put_vanna": "-468296920.1779",
+  "call_gamma": "3971757.4003",
+  "put_gamma": "-4767743.1329"
+}
+```
+
+**Note:** All values are strings in the response (need float parsing in the data loader). Values are unit-less at the API level but represent dollar-weighted aggregate Greek exposures. Sign convention: put greek values are negative where applicable (put_delta, put_gamma). Net GEX = call_gamma + put_gamma per row.
+
+**What's missing vs. what a rich GEX augmentation would want:**
+- No spot-price-at-time-of-snapshot field → daily GEX row can't be directly anchored to a specific SPY price level without joining to a separate OHLC source. Data loader must merge with yfinance daily bars on `date`.
+- No pre-computed derived metrics (call wall, put wall, zero-gamma level, max pain). Those need to be computed at query time from the Greek components OR require separate endpoints that are themselves capped at 30 days (`max-pain`, `spot-exposures/strike`).
+
+**Implication for Phase 1 strategy augmentation:** the daily series supports *net-gamma-regime* filters ("is the market in positive-gamma or negative-gamma regime today?") and *gamma-delta ratio* filters, both of which are meaningful flow-augmentation signals. It does NOT directly support *price-proximity-to-gamma-wall* filters without a lot more plumbing. Recommend Phase 1 starts with the regime-based filters (low-plumbing, high-signal), and leaves price-level-based filters to Phase 2 forward-test after we've been logging `spot-exposures` for a few months.
+
+### 12.5 Updates to earlier sections
+
+- **§9 item 2** (GEX variants follow-up) → **RESOLVED.** Answer: no carve-out on any of the three variants.
+- **§1 TL;DR table** remains accurate — "Daily GEX levels" stays ✅, and the absence of expiry/strike-level daily GEX is correctly absent from the "viable" column.
+- **§4 GEX carve-out scope** — the "Applies to the bare `/greek-exposure` path only" caveat is now confirmed, not speculative.
+
+### 12.6 Handoff — Phase 1 CC brief implications
+
+**ATHENA note (added post-probe):** §12.6 was authored by the probe agent as forward-looking guidance, not commissioned scope. Reviewed post-hoc by ATHENA and accepted — the recommendations are empirically grounded in the probe data and align with ATHENA's locked Phase 1 scope (3-10 Oscillator exemplar, retrospective w/ daily GEX context). Treat §12.6 as the CC brief's default stance on GEX loader design, subject to further refinement during brief authorship.
+
+The CC brief for Phase 1 MVP should specify, in the context-loader section:
+
+1. **Primary GEX context source** for retrospective backtest: `GET /api/stock/{ticker}/greek-exposure` with no date parameter. Cache result keyed by `(ticker, fetch_date)`, refresh daily during market hours, treat closed days as immutable.
+2. **Context fields to hydrate into `ContextFrame.gex`:** `call_gamma`, `put_gamma` (required); `call_delta`, `put_delta`, `call_vanna`, `put_vanna`, `call_charm`, `put_charm` (recommended — cheap to include, useful for regime filters).
+3. **Derived fields to compute in the loader:** `net_gamma = call_gamma + put_gamma`, `gamma_regime = 'positive' if net_gamma > 0 else 'negative'`, `net_delta = call_delta + put_delta`. These are the canonical regime-based signals.
+4. **Join pattern:** merge daily GEX series with yfinance daily OHLC on `date` field before passing to `generate_signal`. This gives each bar its matching day's GEX context.
+5. **Explicitly NOT in Phase 1 scope:** price-proximity-to-wall filters, max-pain context, intraday GEX decay patterns. These all require data that's either capped at 30 days or not directly available in the daily series. Phase 2 forward-test territory.
+
+### 12.7 Closing note
+
+§12 is the last probe run in the Phase 0 spike lineage. The bifurcated Phase 2 scope + Phase 0.5 logger cron + Phase 1 MVP (3-10 Oscillator) are all unblocked for CC build brief authorship. No further probes recommended before CC pickup — the remaining §9 items (rate limits, earnings depth, news depth, pagination volume) can be addressed during Phase 1 build if/when they become relevant.
+
+### 12.8 Integration-test canary for CC Phase 1
+
+**ATHENA-added requirement**, per probe agent's closing ask: the Phase 1 backtest module's integration test suite MUST include a canary test that verifies the `/greek-exposure` no-date call still returns ≥200 rows of daily history. UW could tighten this carve-out silently at any time. Running this check as part of the weekly VPS cron catches the regression within ~7 days rather than at the next manual backtest. Failure mode: alert Nick via the existing VPS alert channel; do not silently swap to 30-day truncated data. CC build brief must specify this test explicitly.
