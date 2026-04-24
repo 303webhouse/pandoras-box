@@ -20,7 +20,7 @@ def fetch(ticker: str, api_key: str) -> pd.DataFrame:
     rows = uw_get(
         f"/api/stock/{ticker}/flow-alerts",
         api_key,
-        params={"limit": 500},
+        params={"limit": 200},  # UW max is 200, not 500
     )
     if not rows:
         return pd.DataFrame()

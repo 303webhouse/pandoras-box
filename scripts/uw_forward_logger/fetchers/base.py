@@ -117,5 +117,14 @@ def uw_get(
         elif resp.status_code == 401:
             raise RuntimeError(f"401 Unauthorized on {path} — check UW_API_KEY")
 
+        elif resp.status_code == 422:
+            # Unprocessable Entity — bad param (e.g. limit > UW max).
+            # Do NOT retry — caller must fix the request.
+            try:
+                body = resp.json()
+            except Exception:
+                body = resp.text[:200]
+            raise RuntimeError(f"422 Unprocessable on {path}: {body}")
+
         else:
             raise RuntimeError(f"Unexpected {resp.status_code} on {path}: {resp.text[:200]}")

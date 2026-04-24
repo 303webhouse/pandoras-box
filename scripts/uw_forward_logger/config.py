@@ -11,12 +11,17 @@ from pathlib import Path
 
 import yaml
 
-# ── Rate-limit throttle (update after Phase A probe) ─────────────────────────
-# Conservative defaults: 30 req/min steady-state, 15 req burst
-# These will be updated once uw-rate-limit-findings.md is written.
-THROTTLE_SLEEP_BETWEEN_CALLS_S: float = 2.0   # 30 req/min
-THROTTLE_MAX_BURST: int = 15                  # before a longer pause
-THROTTLE_BURST_PAUSE_S: float = 5.0           # pause after each burst group
+# ── Rate-limit throttle (from Phase A probe — 2026-04-24) ────────────────────
+# Probe results: burst 429 triggers at request #13 (rapid-fire).
+# Sustained 1 rps: 60/60 success (0 429s). No Retry-After header observed.
+# Interpretation: sliding burst window ~12 req; no per-minute hard cap at 1 rps.
+#
+# Settings: 10-call burst groups (below 12-limit), 1s between calls,
+# 15s pause between groups. Gives ~1.7 min for 50 calls (10 tickers × 5 types).
+# Well within 30-min alert threshold even with darkpool pagination.
+THROTTLE_SLEEP_BETWEEN_CALLS_S: float = 1.0   # 1 rps — matches sustained test
+THROTTLE_MAX_BURST: int = 10                  # below 12-request burst limit
+THROTTLE_BURST_PAUSE_S: float = 15.0          # pause after each burst group
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 _REPO_ROOT = Path(__file__).resolve().parents[2]
