@@ -19,11 +19,14 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from unittest.mock import patch
+
 from indicators.three_ten_oscillator import (
     OSC_CROSS,
     OSC_DIV,
     OSC_FAST,
     OSC_SLOW,
+    _detect_divergences,
     compute_3_10,
 )
 
@@ -94,6 +97,42 @@ def test_divergence_detection_handles_flat_series():
     df = _make_df([10.0] * 30, [9.0] * 30)
     result = compute_3_10(df)
     assert (result[OSC_DIV] == 0).all()
+
+
+# ---------------------------------------------------------------------------
+# Day-0 calibration tests — timeframe-aware divergence threshold
+# ---------------------------------------------------------------------------
+
+def test_timeframe_1h_uses_015_threshold():
+    """compute_3_10(timeframe='1h') must pass threshold=0.15 to _detect_divergences."""
+    df = _make_df([10 + i * 0.1 for i in range(30)], [9 + i * 0.1 for i in range(30)])
+    with patch("indicators.three_ten_oscillator._detect_divergences", wraps=_detect_divergences) as mock_div:
+        compute_3_10(df, timeframe="1h")
+        assert mock_div.call_args.kwargs["threshold"] == 0.15
+
+
+def test_timeframe_1d_uses_010_threshold():
+    """compute_3_10(timeframe='1d') must pass threshold=0.10 (canonical Raschke default)."""
+    df = _make_df([10 + i * 0.1 for i in range(30)], [9 + i * 0.1 for i in range(30)])
+    with patch("indicators.three_ten_oscillator._detect_divergences", wraps=_detect_divergences) as mock_div:
+        compute_3_10(df, timeframe="1d")
+        assert mock_div.call_args.kwargs["threshold"] == 0.10
+
+
+def test_explicit_threshold_overrides_timeframe():
+    """Explicit divergence_threshold=0.25 wins over any timeframe lookup."""
+    df = _make_df([10 + i * 0.1 for i in range(30)], [9 + i * 0.1 for i in range(30)])
+    with patch("indicators.three_ten_oscillator._detect_divergences", wraps=_detect_divergences) as mock_div:
+        compute_3_10(df, divergence_threshold=0.25, timeframe="1h")
+        assert mock_div.call_args.kwargs["threshold"] == 0.25
+
+
+def test_unknown_timeframe_falls_back_to_010():
+    """Unknown timeframe string falls back to DEFAULT_DIVERGENCE_THRESHOLD (0.10)."""
+    df = _make_df([10 + i * 0.1 for i in range(30)], [9 + i * 0.1 for i in range(30)])
+    with patch("indicators.three_ten_oscillator._detect_divergences", wraps=_detect_divergences) as mock_div:
+        compute_3_10(df, timeframe="unknown_tf")
+        assert mock_div.call_args.kwargs["threshold"] == 0.10
 
 
 @pytest.mark.skip(reason="Nick to supply Raschke published test vectors — see Phase 1 checkpoint")

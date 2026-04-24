@@ -97,7 +97,8 @@ def calculate_holy_grail_indicators(df: pd.DataFrame) -> pd.DataFrame:
     # 3-10 Oscillator (Raschke) — shadow-mode dual-gate companion to RSI
     try:
         from indicators.three_ten_oscillator import compute_3_10
-        df = compute_3_10(df)
+        # Holy Grail runs on 1h bars — use calibrated threshold per Day-0 finding
+        df = compute_3_10(df, timeframe="1h")
     except Exception as e:
         logger.warning("3-10 oscillator compute failed; continuing RSI-only: %s", e)
 
