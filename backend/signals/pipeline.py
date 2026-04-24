@@ -7,6 +7,7 @@ This replaces the duplicated log/score/cache/broadcast logic across handlers.
 """
 
 import logging
+import os
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional
 
@@ -19,6 +20,33 @@ from utils.bias_snapshot import get_bias_snapshot
 logger = logging.getLogger(__name__)
 
 COMMITTEE_SCORE_THRESHOLD = 85.0  # Minimum score_v2 to trigger committee (raised from 75→80→85, 2026-04-22)
+
+# ── VIX regime thresholds (Olympus 2026-04-22 Tier 1 fix #3) ─────────────────
+# Legacy absolute thresholds (v1, shipped 2026-04-23, commit 57ea60d).
+# KEEP THESE — rollback capability depends on legacy logic remaining live.
+VIX_REGIME_LOW_THRESHOLD  = 15.0
+VIX_REGIME_HIGH_THRESHOLD = 30.0
+
+# Percentile gate v2 (Olympus Pass 9, 2026-04-24). Shadow-mode dual-log
+# alongside v1 for 60 days, then promote to default or revert.
+# Per empirical finding: VIX ≥ 30 has become a crisis-regime marker in
+# post-2023 structural vol regime. Percentile-based gate corrects the drift.
+VIX_REGIME_USE_PERCENTILE       = True      # master feature flag
+VIX_REGIME_PERCENTILE_LOW        = 5.0       # 5th percentile of lookback
+VIX_REGIME_PERCENTILE_HIGH       = 90.0      # 90th percentile of lookback
+VIX_REGIME_PERCENTILE_LOOKBACK   = 252       # trading days
+VIX_REGIME_ABS_FLOOR             = 11.0      # always-suppress override (compressed, reversal-risk)
+VIX_REGIME_ABS_CEILING           = 35.0      # always-suppress override (crisis)
+VIX_REGIME_WARMUP_FALLBACK_LOW   = 14.0      # used if <252 days history in DB
+VIX_REGIME_WARMUP_FALLBACK_HIGH  = 28.0      # used if <252 days history in DB
+
+TREND_CONTINUATION_STRATEGIES = {"Holy_Grail"}
+# CTA/Artemis/Sell_the_Rip require per-strategy Olympus review first.
+# (Named here for context; not active in this gate.)
+
+# In-memory throttle for divergence alerts: {ticker: last_alert_datetime}
+_VIX_DIVERGENCE_ALERT_SENT: Dict[str, datetime] = {}
+DISCORD_WEBHOOK_ALERTS = os.getenv("DISCORD_WEBHOOK_ALERTS") or ""  # catchall until DISCORD_WEBHOOK_BRIEFS is provisioned
 
 # ── Cross-asset flow alignment map (ZEUS Phase 1A.1) ──
 # Component → list of related ETFs/tickers to check for sentiment confirmation
@@ -481,12 +509,6 @@ async def apply_scoring(signal_data: Dict[str, Any]) -> Dict[str, Any]:
         # Placed here rather than feed_tier_classifier.py to avoid async
         # contract ripple; revisit if additional gates accumulate here.
         try:
-            # Strategies this gate applies to — Holy Grail family only.
-            # CTA/Artemis/Sell_the_Rip added via separate tickets after
-            # per-strategy Olympus volatility sensitivity review.
-            TREND_CONTINUATION_STRATEGIES = {
-                "Holy_Grail",
-            }
             strategy = (signal_data.get("strategy") or "").strip()
 
             if strategy in TREND_CONTINUATION_STRATEGIES:
@@ -497,9 +519,72 @@ async def apply_scoring(signal_data: Dict[str, Any]) -> Dict[str, Any]:
                     if iv_reading and iv_reading.raw_data:
                         vix_value = iv_reading.raw_data.get("vix")
                         if vix_value is not None:
-                            regime_extreme = vix_value < 15.0 or vix_value > 30.0
-                            if regime_extreme:
-                                # Only apply if not already lower (watchlist beats ta_feed beats research_log)
+
+                            # ── v1 legacy gate (always computed for dual-logging) ──────────
+                            v1_suppressed = vix_value < VIX_REGIME_LOW_THRESHOLD or vix_value > VIX_REGIME_HIGH_THRESHOLD
+                            v1_threshold_used = f"{VIX_REGIME_LOW_THRESHOLD}/{VIX_REGIME_HIGH_THRESHOLD}"
+
+                            # ── v2 percentile gate (Olympus Pass 9) ──────────────────────
+                            v2_suppressed = False
+                            v2_threshold_used = None
+                            v2_meta: dict = {}
+
+                            if VIX_REGIME_USE_PERCENTILE:
+                                pct = await _compute_vix_percentiles(VIX_REGIME_PERCENTILE_LOOKBACK)
+                                if pct:
+                                    low, high = pct["p5_value"], pct["p90_value"]
+                                    v2_meta = {"p5": low, "p90": high, "n_days": pct["n_days"], "mode": "percentile"}
+                                    v2_threshold_used = f"p5={low:.2f}/p90={high:.2f}"
+                                    v2_suppressed = (
+                                        vix_value < low
+                                        or vix_value > high
+                                        or vix_value < VIX_REGIME_ABS_FLOOR
+                                        or vix_value > VIX_REGIME_ABS_CEILING
+                                    )
+                                else:
+                                    low, high = VIX_REGIME_WARMUP_FALLBACK_LOW, VIX_REGIME_WARMUP_FALLBACK_HIGH
+                                    v2_meta = {"mode": "warmup_fallback", "low": low, "high": high}
+                                    v2_threshold_used = f"warmup={low}/{high}"
+                                    v2_suppressed = vix_value < low or vix_value > high
+
+                            # ── Dual-logging ──────────────────────────────────────────────
+                            diverged = v1_suppressed != v2_suppressed
+                            signal_data.setdefault("committee_data", {})["iv_regime_legacy"] = {
+                                "decision": "suppress" if v1_suppressed else "allow",
+                                "threshold_used": v1_threshold_used,
+                                "vix_value": vix_value,
+                            }
+                            signal_data["committee_data"]["iv_regime_v2"] = {
+                                "decision": "suppress" if v2_suppressed else "allow",
+                                "threshold_used": v2_threshold_used,
+                                "vix_value": vix_value,
+                                **v2_meta,
+                            }
+                            signal_data["committee_data"]["iv_regime_diverged"] = diverged
+
+                            # ── Discord divergence alert (throttled 1/ticker/hr) ──────────
+                            if diverged and DISCORD_WEBHOOK_ALERTS:
+                                ticker_key = signal_data.get("ticker", "UNKNOWN")
+                                last_sent = _VIX_DIVERGENCE_ALERT_SENT.get(ticker_key)
+                                if last_sent is None or (datetime.now() - last_sent).total_seconds() > 3600:
+                                    _VIX_DIVERGENCE_ALERT_SENT[ticker_key] = datetime.now()
+                                    try:
+                                        import httpx as _httpx
+                                        msg = (
+                                            f"iv_regime gate divergence — {ticker_key} {strategy}\n"
+                                            f"  VIX: {vix_value:.2f}\n"
+                                            f"  v1 ({v1_threshold_used}): {'suppress' if v1_suppressed else 'allow'}\n"
+                                            f"  v2 ({v2_threshold_used}): {'suppress' if v2_suppressed else 'allow'}"
+                                        )
+                                        async with _httpx.AsyncClient(timeout=5.0) as _hc:
+                                            await _hc.post(DISCORD_WEBHOOK_ALERTS, json={"content": msg})
+                                    except Exception as _de:
+                                        logger.debug("iv_regime divergence alert failed: %s", _de)
+
+                            # ── Effective suppression: v1 authoritative until Pass 9 promotion ──
+                            # v2 runs shadow-only. Do NOT let v2 affect feed_tier_ceiling until
+                            # 60-day validation completes (promotion review: ~2026-06-24).
+                            if v1_suppressed:
                                 current_ceiling = signal_data.get("feed_tier_ceiling")
                                 if current_ceiling not in ("watchlist", "ta_feed", "research_log"):
                                     signal_data["feed_tier_ceiling"] = "watchlist"
@@ -579,6 +664,46 @@ async def apply_scoring(signal_data: Dict[str, Any]) -> Dict[str, Any]:
         signal_data["bias_alignment"] = "NEUTRAL"
         signal_data["confidence"] = "MEDIUM"
         return signal_data
+
+
+async def _compute_vix_percentiles(lookback_days: int = 252) -> Optional[dict]:
+    """
+    Compute VIX percentiles from factor_readings over lookback window.
+    Returns {'p5_value', 'p90_value', 'n_days'} or None if insufficient data.
+
+    Backfill rows (source='fred_backfill') and live rows (source='yfinance') are
+    both included — the gate only cares about the raw vix value in metadata.
+    """
+    try:
+        import numpy as np
+        from database.postgres_client import get_postgres_client
+        pool = await get_postgres_client()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT DISTINCT ON (DATE(timestamp))
+                    (metadata->'raw_data'->>'vix')::FLOAT AS vix
+                FROM factor_readings
+                WHERE factor_id = 'iv_regime'
+                  AND metadata->'raw_data'->>'vix' IS NOT NULL
+                  AND timestamp > NOW() - (INTERVAL '1 day' * $1)
+                ORDER BY DATE(timestamp), timestamp DESC
+                LIMIT $2
+                """,
+                int(lookback_days * 1.5),
+                lookback_days,
+            )
+        if len(rows) < lookback_days:
+            return None  # warmup — caller falls back to absolute thresholds
+        vix_values = [r["vix"] for r in rows]
+        return {
+            "p5_value":  float(np.percentile(vix_values, VIX_REGIME_PERCENTILE_LOW)),
+            "p90_value": float(np.percentile(vix_values, VIX_REGIME_PERCENTILE_HIGH)),
+            "n_days":    len(vix_values),
+        }
+    except Exception as exc:
+        logger.warning("VIX percentile computation failed: %s", exc)
+        return None
 
 
 async def _check_and_clear_conflicting_signals(signal_data: Dict[str, Any]) -> bool:
