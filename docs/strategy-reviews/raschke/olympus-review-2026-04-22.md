@@ -581,3 +581,95 @@ Phase 4 (closes anti-bloat loop):
 ---
 
 **End of Olympus deep review.**
+
+---
+
+## Pass 9 — VIX Threshold Recalibration (2026-04-24)
+
+**Context:** iv_regime Tier 1 gate shipped 2026-04-23 (PR #15, commit `57ea60d`) with `VIX_REGIME_LOW_THRESHOLD = 15.0` and `VIX_REGIME_HIGH_THRESHOLD = 30.0`. Nick surfaced an empirical concern Day-0: the S&P had a ~10% drawdown in the last 2 months where VIX barely exceeded 30 at any point. If 30 is the "chaotic" threshold but meaningful corrections don't breach it, the gate is anchored to stale volatility structure (pre-2023 era where VIX routinely spiked above 40 during selloffs).
+
+Ran full Olympus double-pass review in separate chat 2026-04-24. Findings below.
+
+### PIVOT Synthesis
+
+**Finding:** Nick's hypothesis is empirically confirmed. VIX ≥ 30 has become a crisis-regime marker in the post-2023 structural vol regime, not a "tape is chaotic" marker. Calibration drift is real and non-trivial; current thresholds mean the gate is functionally inert during the drawdowns it was designed to flag.
+
+**Consensus recommendation:** Replace current absolute thresholds with a percentile-based primary signal + absolute guardrails, using a 252-trading-day lookback, and treat the gate asymmetrically (high-VIX suppression does most of the real work; low-VIX is a soft floor for reversal-risk regimes).
+
+**Open questions parked for future passes:**
+- VX1–VX2 backwardation as v2 secondary signal (DAEDALUS)
+- Whether low-VIX suppression should be dropped entirely for HG (TORO)
+- Whether realized-vs-implied vol spread should replace absolute VIX as the cleaner input (DAEDALUS, weakly held)
+
+Shadow mode remains mandatory until dual-logging validates.
+
+
+### ATHENA Lock — Implementation Brief
+
+**Status:** Recalibration approved. Build as shadow-mode update; no promotion to hard-skip in this change.
+
+**Changes to ship:**
+
+1. **Add to config:**
+
+```python
+VIX_REGIME_USE_PERCENTILE        = True      # feature flag
+VIX_REGIME_PERCENTILE_LOW        = 5.0       # 5th percentile
+VIX_REGIME_PERCENTILE_HIGH       = 90.0      # 90th percentile
+VIX_REGIME_PERCENTILE_LOOKBACK   = 252       # trading days
+VIX_REGIME_ABS_FLOOR             = 11.0      # always-allow override
+VIX_REGIME_ABS_CEILING           = 35.0      # always-suppress override
+VIX_REGIME_WARMUP_FALLBACK_LOW   = 14.0      # used if <252 days data
+VIX_REGIME_WARMUP_FALLBACK_HIGH  = 28.0      # used if <252 days data
+```
+
+Keep existing `VIX_REGIME_LOW_THRESHOLD = 15.0` and `VIX_REGIME_HIGH_THRESHOLD = 30.0` for backward-compat/rollback.
+
+2. **Gate decision logic (shadow mode):**
+   - If `VIX_REGIME_USE_PERCENTILE is False` → use legacy absolute thresholds (current behavior).
+   - If `True` AND ≥252 days of VIX history in DB:
+     - Suppress if `VIX_current < P5(252d)` OR `VIX_current > P90(252d)`
+     - Override 1: `VIX_current < VIX_REGIME_ABS_FLOOR` → always suppress (abnormally compressed, reversal-risk zone)
+     - Override 2: `VIX_current > VIX_REGIME_ABS_CEILING` → always suppress (crisis override)
+   - If `True` AND <252 days of history → fall back to warmup absolute thresholds (14/28).
+
+3. **Logging (REQUIRED — this is the validation data):**
+   - For every HG signal, log BOTH: the legacy gate decision (30/15 absolute) AND the new gate decision (percentile + guardrails).
+   - Schema addition in `committee_data`:
+     - `iv_regime_legacy`: `{decision, threshold_used, vix_value}`
+     - `iv_regime_v2`: `{decision, threshold_used, vix_value, p5, p90, lookback_days}`
+     - `iv_regime_diverged: bool` — true if v2 and legacy disagree
+   - Discord alert to `#zeus-ta-feed`: when `iv_regime_diverged = true`, include both decisions + VIX context. This is the review data.
+
+4. **Promotion criteria (NOT in this ship):**
+   - After 60 trading days of dual-logging, Olympus reviews divergence cases.
+   - If v2 produces better outcome alignment (suppresses failed HG trades, permits successful ones at materially better rate), promote `VIX_REGIME_USE_PERCENTILE = True` as default and remove legacy.
+   - If no meaningful improvement, revert.
+
+5. **Not in scope (parked for v2):**
+   - VX1–VX2 term structure cross-check (DAEDALUS)
+   - IV-vs-RV spread signal
+   - Dropping low-VIX suppression entirely for HG (TORO)
+   - All re-open after 60-day validation.
+
+
+**Data dependency:** Requires ≥252 days of VIX close history in DB. Verify before ship. If gap, backfill from FRED (VIXCLS series) or UW. Warmup fallback covers transition.
+
+**Data dependency — empirical finding 2026-04-24:** DB query confirmed `factor_readings` currently has only ~37 trading days of VIX history (range 2026-02-27 to 2026-04-24). Well below the 252-day lookback requirement. Two options:
+
+- **Option A (ship with warmup):** Deploy Pass 9 with `VIX_REGIME_USE_PERCENTILE=True`. Falls back to warmup thresholds (14/28) until DB accumulates 252 days (~9 more months). Warmup thresholds are already better than legacy (28 suppresses where legacy 30 did not), so this is a net improvement from day 1.
+- **Option B (backfill first):** Pull VIX close history from FRED `VIXCLS` series (free API, covers back to 1990), backfill `factor_readings` with `source='fred_backfill'`, then ship Pass 9. Unlocks true percentile gate immediately. Estimated ~1-2 hours CC work (single REST endpoint, ~252 rows to write).
+
+**Recommendation: Option B.** The backfill is small, the benefit is material (true percentile gate ships functional on day 1 instead of 9 months later), and FRED's VIXCLS is the canonical public VIX close series that this calibration was designed against. Option A is a valid fallback if FRED access has any friction.
+
+**Rollback plan:** Flip `VIX_REGIME_USE_PERCENTILE = False`. Zero code change needed.
+
+**Testing:** Unit tests on percentile calculation with synthetic series (low-vol, high-vol, regime-shift). Integration test: replay March 2026 drawdown through gate with dual logging, confirm v2 suppresses HG at VIX 26–28 where legacy did not.
+
+**Review interval:** 30-day check-in on divergence rate. 60-day full promotion review.
+
+### Sequencing Note (updated by Nick 2026-04-24)
+
+Original Pass 9 output suggested this follows HG Tier 1 + smoke test. As of 2026-04-24 that stack is already complete: hunter removal ✅, 3-10 shadow mode ✅ (live since 2026-04-23), HG Tier 1 ✅ (PR #15 merged 2026-04-23). Pass 9 is now positioned as the immediate next iteration on the iv_regime gate rather than a future-stacked item.
+
+**Next step:** CC brief authored referencing this Pass 9 lock. Branch name convention: `feature/hg-iv-regime-percentile-v2`.
