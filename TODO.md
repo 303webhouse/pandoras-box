@@ -1,6 +1,6 @@
 # Pivot — Priorities & TODO
 
-**Last Updated:** April 22, 2026
+**Last Updated:** April 25, 2026
 
 ---
 
@@ -282,6 +282,90 @@ If both clear, Nick greenlights a follow-up CC brief to swap primary gate from R
 - [ ] **Crypto variant reviews** — Turtle Soup/80-20/Holy Grail on BTC/ETH once HV-30 regime gate is in place. DVOL integration gated on first IV-sensitive crypto strategy (likely News Reversal crypto variant).
 - [ ] **`wh_reversal` compliance re-check** — auto-surface at Q3 2026 Olympus cadence to verify VAL-proximity absorption into location multiplier holds in production (not behaving as hidden factor).
 - [ ] **Backtest-driven deprecation sweep** — run backtest against any strategies flagged for possible REPLACE; close the anti-bloat loop.
+
+---
+
+## 🟢 Insights Feed Tier Classifier v2 (Phase A shipped 2026-04-24)
+
+**Context:** Phase A built and shipped under PR #19 (`feature/feed-tier-classifier-v2-shadow`). Implements four-path top_feed qualification (A: high-quality scanner subtype, B: multi-scanner stack, C: standard + confluence, D: high-score override), dual-logging in shadow mode, sector_rs TTL bug fix (60→64800), Pythia tiebreaker bound (max 2/ticker/day), `flow_contradicting` and `sector_rotating_against` ceiling caps, frontend confluence badge render. Feature flag `FEED_TIER_USE_V2 = false` (Railway env). 28 unit + 6 integration tests passing.
+
+**Key docs:**
+- `docs/strategy-reviews/insights-feed-architecture-review-2026-04-24.md` (Section 13 = tier semantics lock)
+- PR #19: https://github.com/303webhouse/pandoras-box/pull/19
+- Phase A committee review (full transcripts in 2026-04-24 chat)
+
+**Phase A discovery findings (preserved for Phase B agent):**
+- Pythia coverage: 5.5% (87/1,578 over 14 days). `fully_confirmed` badge will be near-impossible during shadow phase. Coverage uplift queued as separate Pythia diagnostic brief.
+- Flow `bonus > 3` rate: 0.76% (12/1,578). Path C flow-confluence will rarely fire.
+- `sector_rs` cadence: EOD-only at 8:00 AM ET, with TTL fixed to 18h in this PR. Sector confluence is therefore a daily-bar-only signal in practice.
+- Schema collision check: clean — iv_regime v2 fields live in `committee_data` JSONB, feed_tier v2 fields live as top-level columns. No conflict.
+- Discord publisher: `backend/discord_bridge/bot.py` on VPS (openclaw systemd). Polls `/api/signals/active` every 2min, currently posts everything ≥ MIN_SCORE_FOR_ALERT=80 to one channel. Phase B refactors this.
+
+### ⏳ Today / This Week (Phase A landing)
+
+- [ ] Review and merge PR #19
+- [ ] Confirm shadow logging is producing dual-tier records post-deploy
+- [ ] Create `#zeus-ta-feed` Discord channel
+- [ ] Generate webhook for `#zeus-ta-feed`
+- [ ] Add `DISCORD_WEBHOOK_ZEUS_TA_FEED` to Railway env vars
+- [ ] Verify Railway startup warning is gone post-redeploy
+
+### ⏳ Shadow Window Check-Ins (calendar)
+
+- [ ] **Wed Apr 29 (FOMC Day 2)** — spot-check shadow logs capture FOMC volatility cleanly
+- [ ] **Fri May 1 (~Day 5)** — sanity peek at `feed_tier_v2='top_feed'` count
+- [ ] **🚨 Fri May 8 (~Day 7) — MANDATORY circuit-breaker query:**
+
+  ```sql
+  SELECT
+    COUNT(*) AS top_feed_v2_count_7d,
+    ROUND(COUNT(*) * 7.0 / 7, 1) AS per_week_rate
+  FROM signals
+  WHERE feed_tier_v2 = 'top_feed'
+    AND created_at > NOW() - INTERVAL '7 days';
+  ```
+
+  - If count **>20**: halt shadow, tune Path A floor (75→78 or 80), restart window
+  - If count **<2**: halt shadow, ping me, thresholds may be too tight
+  - If 2–20: keep going, full 21+ day window proceeds untouched
+
+- [ ] **Fri May 15 (OpEx)** — spot-check OpEx volume captured in dual-log
+- [ ] **Wed May 27 (~Day 21)** — pull full shadow dataset, run Olympus quant-gate review session
+- [ ] Fill in Phase B Metric 1 (top_feed precision bar) with real shadow numbers
+- [ ] Fill in Phase B Metric 2 (volume sanity confirmed)
+- [ ] Fill in Phase B Metric 3 (path balance — no single path >60% of top_feed)
+
+### ⏳ Phase B — Promote v2 + Discord Publisher Refactor — HELD
+
+**Status:** ⚠️ HOLD until Phase A shadow data + Olympus quant-gate review complete (see check-ins above). Brief drafted in 2026-04-24 chat with explicit blanks for the three metrics — re-derive from Section 13 of source review + the prerequisites here if chat is gone.
+
+**Why held:** Original promotion gate was qualitative ("Olympus approval"). Committee flagged that defaults to gut, which has documented "directionally correct but late on reversals" pattern. Quant bar must be defined AGAINST shadow data, not before.
+
+- [ ] Paste revised Phase B brief into CC (only after all 3 metrics filled with real numbers)
+- [ ] AEGIS audit: confirm `openclaw.json` permissions are 600
+- [ ] AEGIS audit: confirm webhook URLs not in git
+- [ ] AEGIS audit: confirm Railway Redis is private
+- [ ] Phase B build: flip `FEED_TIER_USE_V2 = true` env var
+- [ ] Phase B build: refactor Discord publisher with feed_tier-aware routing + score≥40 floor + Redis de-dup (`pub_dedup:{channel}:{ticker}` TTL=30m)
+- [ ] Phase B build: refined regression alert (3-condition AND: 0 top_feed in 24h + ≥100 scanner fires + market hours)
+- [ ] Phase B build: write `docs/architecture/discord-publisher-contract.md`
+- [ ] 30-day post-promotion cleanup brief: remove legacy classifier code path
+
+### ⏳ Pythia Coverage Diagnostic (queued, run after Phase A ships)
+
+**Goal:** Read-only investigation to identify why Pythia coverage is 5.5%. Output is `docs/diagnostics/pythia-coverage-2026-04-25.md` — no production changes. Categorizes cause as: (A) genuine coverage limit, (B) wiring failure, (C) upstream data gap, (D) definition mismatch, or (E) multiple stacking.
+
+**Why this matters:** Path C's Pythia arm and the `fully_confirmed` UI badge are nearly inert at 5.5%. Need to know which lever to pull (config tweak, wiring fix, data backfill, threshold relax) before designing remediation.
+
+- [ ] Run Pythia Coverage Diagnostic brief in CC (`diagnostic/pythia-coverage-investigation`)
+- [ ] Review Pythia diagnostic report, decide remediation path
+- [ ] Consider running parallel Flow Coverage Diagnostic (same shape — flow at 0.76% has the same structural problem)
+
+### Standing Reminders (this work)
+
+- [ ] Don't paste Phase B into CC until all three metrics filled with real numbers
+- [ ] Don't share `DISCORD_WEBHOOK_ZEUS_TA_FEED` value, don't commit to git
+- [ ] Phase B is structurally different from Phase A's classifier — touches Discord publisher infrastructure that powers existing alerts. Higher blast radius. Test rollback paths in staging before merge.
 
 ---
 
