@@ -305,9 +305,7 @@ If both clear, Nick greenlights a follow-up CC brief to swap primary gate from R
 
 - [ ] Review and merge PR #19
 - [ ] Confirm shadow logging is producing dual-tier records post-deploy
-- [ ] Create `#zeus-ta-feed` Discord channel
-- [ ] Generate webhook for `#zeus-ta-feed`
-- [ ] Add `DISCORD_WEBHOOK_ZEUS_TA_FEED` to Railway env vars
+- [x] Create `#zeus-ta-feed` Discord channel + webhook + add `DISCORD_WEBHOOK_ZEUS_TA_FEED` to Railway env (handed to CC 2026-04-25)
 - [ ] Verify Railway startup warning is gone post-redeploy
 
 ### ⏳ Shadow Window Check-Ins (calendar)
