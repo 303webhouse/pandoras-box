@@ -17,6 +17,13 @@ Discovery findings (2026-04-24):
   Flow qualifying:  0.76% — Path C flow arm near-inert during shadow
   Path A uncapped:  ~27.5/week — circuit-breaker gate at >20/week triggers tuning
 
+Pre-tune (2026-04-25, Olympus): retrospective replay (PR #20, 30-day window,
+3,203 signals) showed Path A floor=75 produces ~24.5 top_feed/week — would
+trigger the May 8 circuit-breaker. Olympus voted unanimously to raise
+TOP_FEED_FLOOR from 75 to 82 (10.5/week, midpoint of 5-15/week target).
+Path D / C / B floors unchanged. Validation: live data must show 5-15/week
+in first 7 days; if <5 or >15, retrospective model is wrong and re-tune.
+
 Rollback: FEED_TIER_USE_V2=false (Railway env var). Zero code change.
 """
 
@@ -39,7 +46,7 @@ FEED_TIER_USE_V2: bool = (os.getenv("FEED_TIER_USE_V2") or "false").lower() == "
 CIRCUIT_BREAKER_TOP_FEED_PER_WEEK = 20
 
 # ── Score thresholds ──────────────────────────────────────────────────────────
-TOP_FEED_FLOOR             = 75       # Path A / C / B minimum
+TOP_FEED_FLOOR             = 82       # Path A / C / B minimum (pre-tuned 75→82 by Olympus 2026-04-25 per retrospective PR #20)
 PATH_D_FLOOR_NORMAL        = 85       # Path D: normal iv_regime
 PATH_D_FLOOR_HIGH_VOL      = 90       # Path D: high_vol iv_regime
 PYTHIA_TIEBREAKER_MIN      = 73       # Score band eligible for tiebreaker
