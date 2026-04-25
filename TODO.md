@@ -304,9 +304,9 @@ If both clear, Nick greenlights a follow-up CC brief to swap primary gate from R
 ### ⏳ Today / This Week (Phase A landing)
 
 - [x] Review and merge PR #19 (squash-merged 2026-04-25 as commit `b43ca02`)
-- [ ] Confirm shadow logging is producing dual-tier records post-deploy
+- [ ] Confirm shadow logging is producing dual-tier records post-deploy (verify Monday Apr 27 after markets open — no signals flowed over weekend)
 - [x] Create `#zeus-ta-feed` Discord channel + webhook + add `DISCORD_WEBHOOK_ZEUS_TA_FEED` to Railway env (handed to CC 2026-04-25)
-- [ ] Verify Railway startup warning is gone post-redeploy
+- [x] Verify Railway startup warning is gone post-redeploy (deploy `62de5937` succeeded 2026-04-25 06:31 UTC, no missing-webhook warning logged)
 
 ### ⏳ Shadow Window Check-Ins (calendar)
 
