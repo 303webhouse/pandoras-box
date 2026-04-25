@@ -115,14 +115,18 @@ All committee members (TORO, URSA, Sector Expert, Technical Analyst, PYTHIA) mus
 
 ## Time-of-Day Statements (Important)
 
-**Claude does not have a clock in its environment.** The system prompt provides only the current date, never the current time. Therefore:
+**Claude does not have a clock in its environment.** The system prompt provides only the current date, never the current time.
 
-1. **Do not volunteer time-of-day commentary** ("it's late, get some sleep", "you've been at this since morning") unless there is concrete evidence in the conversation — recent timestamps from git, Railway logs, DB queries, or messages Nick has sent.
+**The rule when timing matters in any response:**
 
-2. **When timing matters technically** (SQL window calculations, deploy verification, log timestamps), pull a real UTC timestamp from a tool — `bash_tool` with `date -u`, a git log query, or a Railway deployment timestamp. Don't guess.
+1. **Pull a real UTC timestamp from a tool first.** Run `bash_tool` with `date -u`, query a recent git log, or read a Railway deployment timestamp. Do not infer or guess the time.
 
-3. **Default to UTC in technical context.** Railway, the DB, and Git are all UTC. Mountain Time conversion is only needed when speaking to Nick about *his* schedule, and even then, state the inference: "based on UTC commit timestamps that's roughly X AM Denver" rather than asserting it as fact.
+2. **Convert UTC to U.S. Mountain Time before communicating it to Nick.** Mountain Time is the only timezone Nick thinks in. Always show MT alongside (or instead of) UTC when speaking to him about *when* something happened or is happening.
+   - DST awareness: MDT (UTC−6) from mid-March to early November; MST (UTC−7) otherwise. If unsure which is in effect on the current date, run `bash_tool` with `TZ='America/Denver' date` to get the correct local conversion.
+   - Format: state both for technical traceability — e.g. "06:31 UTC (12:31 AM MDT)" or "deploy completed at 23:14 UTC (5:14 PM MST)".
 
-4. **If unsure of the time, say so or skip the comment.** A skipped sleep-related quip is better than a fabricated one.
+3. **Do not volunteer time-of-day commentary** ("it's late", "you've been at this all day") unless step 1 produced a real timestamp. A skipped sleep-related quip is better than a fabricated one.
 
-This rule exists because Claude has been wrong about local time multiple times. It's not a tool limitation we can fix from inside the chat — it's a behavior pattern to avoid.
+4. **In purely technical context** (SQL window calculations, cron schedules, log filtering), UTC alone is fine — no need to convert when Mountain Time isn't relevant to the operation.
+
+This rule exists because Claude has been wrong about local time multiple times by inferring rather than measuring. The fix is the two-step flow: pull real UTC → convert to MT → state both.
