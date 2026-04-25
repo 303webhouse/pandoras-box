@@ -112,3 +112,17 @@ All committee members (TORO, URSA, Sector Expert, Technical Analyst, PYTHIA) mus
 - Uses Claude.ai for architecture/planning, Claude Code for implementation (Codex is backup only)
 - Local repo: `C:\trading-hub` — the ONLY clone. Never create another.
 - Timezone: America/Denver (observes DST)
+
+## Time-of-Day Statements (Important)
+
+**Claude does not have a clock in its environment.** The system prompt provides only the current date, never the current time. Therefore:
+
+1. **Do not volunteer time-of-day commentary** ("it's late, get some sleep", "you've been at this since morning") unless there is concrete evidence in the conversation — recent timestamps from git, Railway logs, DB queries, or messages Nick has sent.
+
+2. **When timing matters technically** (SQL window calculations, deploy verification, log timestamps), pull a real UTC timestamp from a tool — `bash_tool` with `date -u`, a git log query, or a Railway deployment timestamp. Don't guess.
+
+3. **Default to UTC in technical context.** Railway, the DB, and Git are all UTC. Mountain Time conversion is only needed when speaking to Nick about *his* schedule, and even then, state the inference: "based on UTC commit timestamps that's roughly X AM Denver" rather than asserting it as fact.
+
+4. **If unsure of the time, say so or skip the comment.** A skipped sleep-related quip is better than a fabricated one.
+
+This rule exists because Claude has been wrong about local time multiple times. It's not a tool limitation we can fix from inside the chat — it's a behavior pattern to avoid.
