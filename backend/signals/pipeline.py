@@ -44,9 +44,16 @@ TREND_CONTINUATION_STRATEGIES = {"Holy_Grail"}
 # CTA/Artemis/Sell_the_Rip require per-strategy Olympus review first.
 # (Named here for context; not active in this gate.)
 
-# In-memory throttle for divergence alerts: {ticker: last_alert_datetime}
+# In-memory throttle for iv_regime divergence alerts: {ticker: last_alert_datetime}
 _VIX_DIVERGENCE_ALERT_SENT: Dict[str, datetime] = {}
 DISCORD_WEBHOOK_ALERTS = os.getenv("DISCORD_WEBHOOK_ALERTS") or ""  # catchall until DISCORD_WEBHOOK_BRIEFS is provisioned
+
+# ── Feed-tier v2 divergence alert throttle ────────────────────────────────────
+# Webhook: DISCORD_WEBHOOK_ZEUS_TA_FEED (Railway env var, stub no-ops if absent)
+_FEED_TIER_WEBHOOK = os.getenv("DISCORD_WEBHOOK_ZEUS_TA_FEED") or ""
+_FEED_TIER_DIVERGENCE_ALERTS_THIS_HOUR: list = []   # list of datetime, pruned each call
+_FEED_TIER_DIVERGENCE_MAX_PER_HOUR = 10
+_FT_WEBHOOK_MISSING_WARNED = False   # log startup warning at most once
 
 # ── Cross-asset flow alignment map (ZEUS Phase 1A.1) ──
 # Component → list of related ETFs/tickers to check for sentiment confirmation
@@ -666,6 +673,54 @@ async def apply_scoring(signal_data: Dict[str, Any]) -> Dict[str, Any]:
         return signal_data
 
 
+async def _send_feed_tier_divergence_alert(
+    signal_data: dict,
+    tier_v2: str,
+    path_v2: str,
+    tier_legacy: str,
+) -> None:
+    """
+    Post a Discord alert when feed_tier_diverged=True AND tier_v2='top_feed'.
+    Throttled to max 10 alerts/hour. No-ops silently if webhook not configured.
+    """
+    global _FEED_TIER_DIVERGENCE_ALERTS_THIS_HOUR, _FT_WEBHOOK_MISSING_WARNED
+
+    if not _FEED_TIER_WEBHOOK:
+        if not _FT_WEBHOOK_MISSING_WARNED:
+            logger.warning(
+                "DISCORD_WEBHOOK_ZEUS_TA_FEED not set — feed-tier divergence alerts disabled"
+            )
+            _FT_WEBHOOK_MISSING_WARNED = True
+        return
+
+    # Prune old entries and check rate limit
+    now = datetime.now()
+    _FEED_TIER_DIVERGENCE_ALERTS_THIS_HOUR = [
+        t for t in _FEED_TIER_DIVERGENCE_ALERTS_THIS_HOUR
+        if (now - t).total_seconds() < 3600
+    ]
+    if len(_FEED_TIER_DIVERGENCE_ALERTS_THIS_HOUR) >= _FEED_TIER_DIVERGENCE_MAX_PER_HOUR:
+        logger.debug("Feed-tier divergence alert throttled (>%d/hr)", _FEED_TIER_DIVERGENCE_MAX_PER_HOUR)
+        return
+
+    try:
+        import httpx as _hx
+        ticker  = signal_data.get("ticker", "?")
+        scanner = signal_data.get("strategy", signal_data.get("signal_type", "?"))
+        score   = signal_data.get("score", "?")
+        badge   = signal_data.get("confluence_badge", "none")
+        msg = (
+            f"feed_tier divergence — {ticker} ({scanner})\n"
+            f"  Score: {score}  |  Path: {path_v2}  |  Badge: {badge}\n"
+            f"  legacy: {tier_legacy}  →  v2: {tier_v2}"
+        )
+        async with _hx.AsyncClient(timeout=5.0) as _hc:
+            await _hc.post(_FEED_TIER_WEBHOOK, json={"content": msg})
+        _FEED_TIER_DIVERGENCE_ALERTS_THIS_HOUR.append(now)
+    except Exception as _ae:
+        logger.debug("Feed-tier divergence alert send failed: %s", _ae)
+
+
 async def _compute_vix_percentiles(lookback_days: int = 252) -> Optional[dict]:
     """
     Compute VIX percentiles from factor_readings over lookback window.
@@ -920,16 +975,84 @@ async def process_signal_unified(
     if not skip_scoring:
         signal_data = await apply_scoring(signal_data)
 
-    # 3a. Classify feed tier (ZEUS Phase 2)
+    # 3a. Classify feed tier — legacy v1 (ZEUS Phase 2)
     try:
         from scoring.feed_tier_classifier import classify_signal_tier
         signal_data["feed_tier"] = classify_signal_tier(
             signal_data, float(signal_data.get("score") or 0)
         )
-        logger.debug("Feed tier: %s → %s", signal_data.get("ticker"), signal_data["feed_tier"])
+        logger.debug("Feed tier v1: %s → %s", signal_data.get("ticker"), signal_data["feed_tier"])
     except Exception as _ft_err:
         logger.warning("Feed tier classification failed: %s", _ft_err)
         signal_data.setdefault("feed_tier", "research_log")
+
+    # 3a-v2. Feed tier v2 — shadow-mode dual classification (Olympus 2026-04-24)
+    # v1 stays authoritative while FEED_TIER_USE_V2=false (default).
+    # Dual-logs to feed_tier_v2 / feed_tier_v2_path / feed_tier_diverged for
+    # the ≥21-trading-day validation window before Phase B promotion.
+    try:
+        from scoring.feed_tier_classifier_v2 import (
+            classify_signal_tier_v2,
+            apply_v2_ceiling_caps,
+            FEED_TIER_USE_V2,
+            PYTHIA_TIEBREAKER_MIN,
+            PYTHIA_TIEBREAKER_MAX,
+        )
+        from scoring.feed_tier_v2_redis import path_b_stack_check, pythia_tiebreaker_check
+
+        _score_v2 = float(signal_data.get("score") or 0)
+
+        # Path B: async Redis stack check — must run before classifier
+        _path_b_ok, _race_note = await path_b_stack_check(signal_data)
+        if _path_b_ok:
+            signal_data["_path_b_qualified"] = True
+
+        # Pythia tiebreaker: check Redis counter if score in tiebreaker band
+        if PYTHIA_TIEBREAKER_MIN <= _score_v2 <= PYTHIA_TIEBREAKER_MAX:
+            _tb_ok, _ = await pythia_tiebreaker_check(
+                signal_data.get("ticker") or "UNKNOWN"
+            )
+            signal_data["_pythia_tiebreaker_approved"] = _tb_ok
+
+        # Apply new v2 ceiling caps (additive — only fires if no existing cap)
+        apply_v2_ceiling_caps(signal_data)
+
+        # Classify
+        _tier_v2, _path_v2, _badge_v2 = classify_signal_tier_v2(signal_data, _score_v2)
+
+        # Hard-floor drop: score < 30 — mark rejected, do not persist
+        if _tier_v2 is None and FEED_TIER_USE_V2:
+            signal_data["status"] = "REJECTED"
+            logger.info(
+                "Pipeline bail-out: %s score=%.1f below hard floor (v2) — not persisting",
+                signal_data.get("ticker"), _score_v2,
+            )
+            return signal_data
+
+        # Dual-log
+        _legacy_tier = signal_data.get("feed_tier", "research_log")
+        signal_data["feed_tier_v2"]      = _tier_v2
+        signal_data["feed_tier_v2_path"] = _path_v2
+        signal_data["confluence_badge"]  = _badge_v2
+        signal_data["feed_tier_diverged"] = (_legacy_tier != _tier_v2)
+
+        # Discord divergence alert when v2 would promote to top_feed but legacy wouldn't
+        if signal_data["feed_tier_diverged"] and _tier_v2 == "top_feed":
+            await _send_feed_tier_divergence_alert(
+                signal_data, _tier_v2, _path_v2, _legacy_tier
+            )
+
+        # Promotion: swap feed_tier to v2 decision when flag is true
+        if FEED_TIER_USE_V2 and _tier_v2 is not None:
+            signal_data["feed_tier"] = _tier_v2
+
+        logger.debug(
+            "Feed tier v2: %s legacy=%s v2=%s path=%s badge=%s diverged=%s",
+            signal_data.get("ticker"), _legacy_tier,
+            _tier_v2, _path_v2, _badge_v2, signal_data["feed_tier_diverged"],
+        )
+    except Exception as _ft2_err:
+        logger.warning("Feed tier v2 classification failed: %s", _ft2_err)
 
     # 3b. Bail out if countertrend was rejected by bias gate
     if signal_data.get("countertrend_rejected"):

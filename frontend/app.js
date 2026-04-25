@@ -4060,6 +4060,19 @@ function formatSignalType(raw) {
     return raw.replace(/[_-]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 }
 
+function getConfluenceBadge(signal) {
+    const badge = signal.confluence_badge;
+    if (!badge || badge === 'none') return '';
+    const cfg = {
+        fully_confirmed: { cls: 'badge-fully-confirmed', label: '&#9733; Fully Confirmed', tip: 'Pythia + flow + sector all positive' },
+        confirmed:       { cls: 'badge-confirmed',       label: 'Confirmed',                tip: 'At least one enricher (Pythia, flow, or sector) positive' },
+        ta_confirmed:    { cls: 'badge-ta-confirmed',    label: 'TA',                      tip: 'Technical path (A or D) — no enricher confirmation' },
+    };
+    const c = cfg[badge];
+    if (!c) return '';
+    return `<span class="confluence-badge ${c.cls}" title="${c.tip}">${c.label}</span>`;
+}
+
 function getTimingBadge(triggeringFactors) {
     if (!triggeringFactors) return '';
     if (typeof triggeringFactors === 'string') {
@@ -4473,7 +4486,10 @@ function createSignalCard(signal) {
                         ).join('') + '</div>';
                     })()}
                 </div>
-                <div class="signal-ticker ticker-link" data-action="view-chart">${signal.ticker}</div>
+                <div class="signal-ticker-group">
+                    ${getConfluenceBadge(signal)}
+                    <div class="signal-ticker ticker-link" data-action="view-chart">${signal.ticker}</div>
+                </div>
             </div>
             
             ${timestampStr ? `<div class="signal-timestamp">${timestampStr}</div>` : ''}

@@ -31,7 +31,7 @@ SECTOR_ETFS = {
     "XLB": "Materials",
 }
 
-RS_TTL = 60  # 60 seconds (4x the 15-second refresh interval)
+RS_TTL = 64800  # 18 hours — matches is_sector_rs_stale() threshold
 
 # Classification thresholds (percentage points vs SPY)
 ACTIVE_DISTRIBUTION_THRESHOLD = -1.0   # Both windows below -1%
