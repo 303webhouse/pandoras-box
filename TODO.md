@@ -333,6 +333,26 @@ If both clear, Nick greenlights a follow-up CC brief to swap primary gate from R
 - [ ] Fill in Phase B Metric 2 (volume sanity confirmed)
 - [ ] Fill in Phase B Metric 3 (path balance — no single path >60% of top_feed)
 
+### ⏳ v2 Classifier Retrospective Report (queued — run this weekend, BEFORE May 8 circuit-breaker)
+
+**Goal:** Read-only investigation that runs the v2 classifier against the last 30 days of historical signals to give directional confidence on threshold behavior BEFORE the May 8 circuit-breaker check fires. Output is `docs/diagnostics/feed-tier-v2-retrospective-2026-04-25.md` — no production changes.
+
+**Why now:** Pre-build discovery projected Path A would produce ~27.5 top_feed signals/week against the 5–15/week target. Rather than wait until May 8 to find out if the circuit-breaker fires (forcing a halt-and-tune restart), running the retrospective this weekend lets us pre-tune Path A floor with evidence — or confirm thresholds are fine and stop second-guessing.
+
+**Key replay decisions (PYTHIA's calls):**
+- Replay strategy: **Reconstructed replay** — call actual `classify_signal_v2()` on each historical signal, with Path B reconstructed from timestamps (bidirectional ticker-window scan) and sector regime skipped (historical Redis state lost; document as caveat).
+- Window: **30 days** — captures March OpEx + March FOMC + last 4 weeks of current production pipeline. 14 days too narrow (same as discovery sample), 90 days crosses the boundary of recent scanner architecture changes.
+- Output: **Markdown report only** at `docs/diagnostics/feed-tier-v2-retrospective-2026-04-25.md` (no CSV export, no Discord notification).
+
+**What this is NOT:** A substitute for shadow-window validation. Backtests can't capture forward price action (Phase B's top_feed precision metric needs that), can't catch live-pipeline wiring failures, and only approximate Path B / Pythia tiebreaker behavior. It IS a useful pre-flight check.
+
+- [ ] Run v2 Classifier Retrospective brief in CC (`diagnostic/feed-tier-v2-retrospective`)
+- [ ] Review report TL;DR — three possible outcomes:
+  - **Pre-tune Path A floor before shadow window** if v2 over-produces (>20/week projected after ceiling caps)
+  - **No pre-tune; rely on May 8 circuit-breaker** if rate is borderline or close to target
+  - **Adjust threshold sensitivity findings into Phase B's quant-gate definition** regardless of pre-tune decision
+- [ ] If pre-tune chosen: stop shadow mode, ship Path A floor change as small CC patch, restart shadow window from clean baseline
+
 ### ⏳ Phase B — Promote v2 + Discord Publisher Refactor — HELD
 
 **Status:** ⚠️ HOLD until Phase A shadow data + Olympus quant-gate review complete (see check-ins above). Brief drafted in 2026-04-24 chat with explicit blanks for the three metrics — re-derive from Section 13 of source review + the prerequisites here if chat is gone.
