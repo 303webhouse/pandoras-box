@@ -333,25 +333,44 @@ If both clear, Nick greenlights a follow-up CC brief to swap primary gate from R
 - [ ] Fill in Phase B Metric 2 (volume sanity confirmed)
 - [ ] Fill in Phase B Metric 3 (path balance — no single path >60% of top_feed)
 
-### ⏳ v2 Classifier Retrospective Report (queued — run this weekend, BEFORE May 8 circuit-breaker)
+### ✅ v2 Classifier Retrospective Report — COMPLETE 2026-04-25
 
-**Goal:** Read-only investigation that runs the v2 classifier against the last 30 days of historical signals to give directional confidence on threshold behavior BEFORE the May 8 circuit-breaker check fires. Output is `docs/diagnostics/feed-tier-v2-retrospective-2026-04-25.md` — no production changes.
+**Outcome:** Retrospective ran 3,203 signals through v2 over 30 days. Found Path A floor=75 would produce ~24.5 top_feed/week (64% above May 8 circuit-breaker). Olympus committee unanimously voted to pre-tune `TOP_FEED_FLOOR` from 75 → 82 (10.5/week, midpoint of 5-15 target band).
 
-**Why now:** Pre-build discovery projected Path A would produce ~27.5 top_feed signals/week against the 5–15/week target. Rather than wait until May 8 to find out if the circuit-breaker fires (forcing a halt-and-tune restart), running the retrospective this weekend lets us pre-tune Path A floor with evidence — or confirm thresholds are fine and stop second-guessing.
+- [x] Retrospective brief run by CC, PR #20 opened (squash-merged to main as `4befcdd`)
+- [x] Olympus review completed 2026-04-25, unanimous vote to pre-tune to 82
+- [x] Floor change shipped as commit `1f6597a` (single constant, file-header audit trail preserved)
+- **Report:** `docs/diagnostics/feed-tier-v2-retrospective-2026-04-25.md`
+- **Harness (read-only, kept for future use):** `scripts/feed_tier_v2_retrospective.py`
 
-**Key replay decisions (PYTHIA's calls):**
-- Replay strategy: **Reconstructed replay** — call actual `classify_signal_v2()` on each historical signal, with Path B reconstructed from timestamps (bidirectional ticker-window scan) and sector regime skipped (historical Redis state lost; document as caveat).
-- Window: **30 days** — captures March OpEx + March FOMC + last 4 weeks of current production pipeline. 14 days too narrow (same as discovery sample), 90 days crosses the boundary of recent scanner architecture changes.
-- Output: **Markdown report only** at `docs/diagnostics/feed-tier-v2-retrospective-2026-04-25.md` (no CSV export, no Discord notification).
+### ⏳ Shadow Window Check-Ins (calendar) — UPDATED post-pre-tune
 
-**What this is NOT:** A substitute for shadow-window validation. Backtests can't capture forward price action (Phase B's top_feed precision metric needs that), can't catch live-pipeline wiring failures, and only approximate Path B / Pythia tiebreaker behavior. It IS a useful pre-flight check.
+**New target band at floor=82: 5–15 top_feed/week.** Retrospective projected 10.5/week.
 
-- [ ] Run v2 Classifier Retrospective brief in CC (`diagnostic/feed-tier-v2-retrospective`)
-- [ ] Review report TL;DR — three possible outcomes:
-  - **Pre-tune Path A floor before shadow window** if v2 over-produces (>20/week projected after ceiling caps)
-  - **No pre-tune; rely on May 8 circuit-breaker** if rate is borderline or close to target
-  - **Adjust threshold sensitivity findings into Phase B's quant-gate definition** regardless of pre-tune decision
-- [ ] If pre-tune chosen: stop shadow mode, ship Path A floor change as small CC patch, restart shadow window from clean baseline
+- [ ] **Wed Apr 29 (FOMC Day 2)** — spot-check shadow logs capture FOMC volatility cleanly
+- [ ] **Fri May 1 (~Day 5)** — sanity peek at `feed_tier_v2='top_feed'` count
+- [ ] **🚨 Fri May 8 (~Day 7) — MANDATORY circuit-breaker query (UPDATED gates):**
+
+  ```sql
+  SELECT
+    COUNT(*) AS top_feed_v2_count_7d,
+    ROUND(COUNT(*) * 7.0 / 7, 1) AS per_week_rate
+  FROM signals
+  WHERE feed_tier_v2 = 'top_feed'
+    AND created_at > NOW() - INTERVAL '7 days';
+  ```
+
+  **Gates per Olympus 2026-04-25:**
+  - If count **>15**: retrospective under-projected; tune Path A floor up
+  - If count **<5**: retrospective over-projected (or live caps tightening too hard); investigate before tuning
+  - If 5–15: target band hit, continue full 21+ day window untouched
+
+- [ ] **Fri May 15 (OpEx)** — spot-check OpEx volume captured in dual-log
+- [ ] **Wed May 27 (~Day 21)** — pull full shadow dataset, run Olympus quant-gate review session
+- [ ] **PYTHIA addition (May 27 review):** explicitly assess whether the 21-day window spanned any vol-regime change. If VIX stayed in normal regime throughout, flag for follow-up vol-regime assessment before Phase B promotion (CTA subtypes are auction-state-dependent; floor tuning may need re-validation in high-vol regime).
+- [ ] Fill in Phase B Metric 1 (top_feed precision bar) with real shadow numbers
+- [ ] Fill in Phase B Metric 2 (volume sanity confirmed)
+- [ ] Fill in Phase B Metric 3 (path balance — no single path >60% of top_feed)
 
 ### ⏳ Phase B — Promote v2 + Discord Publisher Refactor — HELD
 
