@@ -1,10 +1,9 @@
 """
-Sector API — heatmap + drill-down popup (Phase 2).
+Sector API — heatmap + drill-down popup.
 
-Heatmap: Polygon snapshot for live daily prices (primary), Polygon daily bars
-         for weekly/monthly historical changes (cached 30 min).
-Leaders: Per-sector top-20 constituents with real-time Polygon snapshot data,
-         RSI, volume ratio, and options flow direction.
+Heatmap: UW API (yfinance under the hood) for live daily prices and historical bars.
+Leaders: Per-sector top-20 constituents with live snapshot data, RSI, volume ratio,
+         options flow metrics (direction + call %), IV rank, and dark pool activity.
 """
 
 import json
@@ -13,7 +12,7 @@ import asyncio
 import os
 import aiohttp
 from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import pytz
 from fastapi import APIRouter, HTTPException, Query
@@ -22,7 +21,6 @@ from database.redis_client import get_redis_client
 from database.postgres_client import get_postgres_client
 
 logger = logging.getLogger(__name__)
-POLYGON_API_KEY = os.getenv("POLYGON_API_KEY") or ""
 
 router = APIRouter(prefix="/sectors", tags=["sectors"])
 
@@ -122,14 +120,19 @@ async def _fetch_all_bars(tickers: List[str] = None, days: int = 45) -> Dict[str
 
 
 @router.get("/heatmap")
-async def get_sector_heatmap():
-    """Return sector data for treemap: all 11 sectors with Day/Week/Month changes and daily RS."""
+async def get_sector_heatmap(
+    metric: str = Query("price", regex="^(price|flow)$",
+                        description="Color metric: 'price' (% change) or 'flow' (options flow direction)"),
+):
+    """Return sector data for treemap: all 11 sectors with Day/Week/Month changes, daily RS,
+    and (when metric='flow') aggregate options flow direction per sector."""
     redis = await get_redis_client()
 
-    # Check cache first
+    # Check cache first — cache key is metric-aware
+    cache_key = f"{HEATMAP_CACHE_KEY}:{metric}"
     if redis:
         try:
-            cached = await redis.get(HEATMAP_CACHE_KEY)
+            cached = await redis.get(cache_key)
             if cached:
                 return json.loads(cached)
         except Exception:
@@ -224,7 +227,7 @@ async def get_sector_heatmap():
         else:
             trend = "flat"
 
-        sectors_data.append({
+        sector_entry = {
             "etf": etf,
             "name": info["name"],
             "weight": info["weight"],
@@ -235,7 +238,16 @@ async def get_sector_heatmap():
             "rs_daily": rs_daily if rs_daily is not None else 0.0,
             "trend": trend,
             "strength_rank": 99,  # placeholder, computed below
-        })
+        }
+
+        # When metric=flow, compute aggregate flow direction for the sector ETF itself.
+        if metric == "flow":
+            flow_metrics = await _get_flow_metrics(etf)
+            sector_entry["flow_direction"] = flow_metrics["direction"]
+            sector_entry["flow_call_pct"] = flow_metrics["call_pct"]
+            sector_entry["flow_premium"] = flow_metrics["total_premium"]
+
+        sectors_data.append(sector_entry)
 
     # Rank by rs_daily descending (rank 1 = strongest daily outperformer)
     ranked = sorted(sectors_data, key=lambda s: s["rs_daily"], reverse=True)
@@ -248,6 +260,7 @@ async def get_sector_heatmap():
         "spy_change_1w": spy_change_1w,
         "spy_change_1m": spy_change_1m,
         "is_market_hours": is_live,
+        "metric": metric,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -266,8 +279,8 @@ async def get_sector_heatmap():
     if redis:
         try:
             result_json = json.dumps(result)
-            await redis.set(HEATMAP_CACHE_KEY, result_json, ex=_heatmap_cache_ttl())
-            if has_real_data:
+            await redis.set(cache_key, result_json, ex=_heatmap_cache_ttl())
+            if has_real_data and metric == "price":
                 await redis.set(HEATMAP_STALE_KEY, result_json, ex=86400)
         except Exception:
             pass
@@ -278,9 +291,6 @@ async def get_sector_heatmap():
 # ---------------------------------------------------------------------------
 # Phase 2 — Sector Drill-Down: seed data, snapshot helpers, leaders endpoint
 # ---------------------------------------------------------------------------
-
-POLYGON_API_KEY = os.getenv("POLYGON_API_KEY", "")
-SNAPSHOT_URL = "https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers"
 
 # Top-20 holdings per SPDR sector ETF (by market cap, as of Q1 2026)
 SECTOR_SEEDS: Dict[str, Dict] = {
@@ -504,8 +514,15 @@ async def _get_rsi_for_ticker(ticker: str, redis) -> Optional[int]:
     return None
 
 
-async def _get_flow_direction(ticker: str) -> str:
-    """Derive flow direction from flow_events table (last 24h)."""
+async def _get_flow_metrics(ticker: str) -> Dict[str, Any]:
+    """Derive flow metrics from flow_events table (last 24h).
+
+    Returns dict with:
+        direction: 'bullish' / 'bearish' / 'neutral'
+        call_pct: float 0..1 (call premium share of total)
+        total_premium: dollar amount across both sides
+    """
+    default = {"direction": "neutral", "call_pct": None, "total_premium": 0.0}
     try:
         pool = await get_postgres_client()
         async with pool.acquire() as conn:
@@ -518,18 +535,105 @@ async def _get_flow_direction(ticker: str) -> str:
                 ticker,
             )
             if not row:
-                return "neutral"
-            total = (row["call_premium"] or 0) + (row["put_premium"] or 0)
+                return default
+            call_prem = float(row["call_premium"] or 0)
+            put_prem = float(row["put_premium"] or 0)
+            total = call_prem + put_prem
             if total == 0:
-                return "neutral"
-            call_pct = (row["call_premium"] or 0) / total
+                return default
+            call_pct = call_prem / total
             if call_pct > 0.6:
-                return "bullish"
+                direction = "bullish"
             elif call_pct < 0.4:
-                return "bearish"
-            return "neutral"
+                direction = "bearish"
+            else:
+                direction = "neutral"
+            return {
+                "direction": direction,
+                "call_pct": round(call_pct, 3),
+                "total_premium": round(total, 2),
+            }
     except Exception:
-        return "neutral"
+        return default
+
+
+# Backward-compat shim — old callers (heatmap aggregation) use the simple string form.
+async def _get_flow_direction(ticker: str) -> str:
+    metrics = await _get_flow_metrics(ticker)
+    return metrics["direction"]
+
+
+async def _get_iv_rank_for_ticker(ticker: str) -> Optional[Dict[str, Any]]:
+    """Fetch IV rank from UW. Returns dict with 'rank' (0-100) and 'tier' (low/mid/high).
+
+    Returns None if UW data unavailable. Cached upstream by uw_api_cache (300s TTL).
+    """
+    try:
+        from integrations.uw_api import get_iv_rank
+        data = await get_iv_rank(ticker)
+        if not data:
+            return None
+        latest = data[0] if isinstance(data, list) else data
+        rank = latest.get("iv_rank") or latest.get("rank")
+        if rank is None:
+            return None
+        rank_pct = float(rank)
+        if rank_pct <= 1.0:
+            rank_pct = rank_pct * 100
+        rank_pct = round(rank_pct, 1)
+        if rank_pct >= 70:
+            tier = "high"
+        elif rank_pct >= 30:
+            tier = "mid"
+        else:
+            tier = "low"
+        return {"rank": rank_pct, "tier": tier}
+    except Exception as e:
+        logger.debug("IV rank fetch failed for %s: %s", ticker, e)
+        return None
+
+
+async def _get_dp_activity_for_ticker(ticker: str) -> Optional[Dict[str, Any]]:
+    """Fetch recent dark pool activity for a ticker. Returns activity summary or None.
+
+    Considers a ticker "active" if it has DP prints in the last 30 minutes.
+    Cached upstream by uw_api_cache (300s TTL).
+    """
+    try:
+        from integrations.uw_api import get_darkpool_ticker
+        prints = await get_darkpool_ticker(ticker)
+        if not prints:
+            return None
+        from datetime import datetime as dt_cls, timezone as tz_cls
+        now_utc = dt_cls.now(tz_cls.utc)
+        cutoff = now_utc.timestamp() - 1800  # 30 min
+        recent = []
+        for p in prints if isinstance(prints, list) else []:
+            ts_raw = p.get("executed_at") or p.get("timestamp") or p.get("time")
+            if not ts_raw:
+                continue
+            try:
+                if isinstance(ts_raw, (int, float)):
+                    ts = float(ts_raw) / 1000 if ts_raw > 1e12 else float(ts_raw)
+                else:
+                    ts = dt_cls.fromisoformat(str(ts_raw).replace("Z", "+00:00")).timestamp()
+                if ts >= cutoff:
+                    recent.append(p)
+            except (ValueError, TypeError):
+                continue
+        if not recent:
+            return None
+        total_size = sum(float(p.get("size") or 0) for p in recent)
+        total_value = sum(float(p.get("size") or 0) * float(p.get("price") or 0) for p in recent)
+        return {
+            "active": True,
+            "prints_30m": len(recent),
+            "total_size": int(total_size),
+            "total_value": round(total_value, 0),
+        }
+    except Exception as e:
+        logger.debug("DP activity fetch failed for %s: %s", ticker, e)
+        return None
 
 
 @router.get("/{sector_etf}/leaders")
@@ -598,7 +702,23 @@ async def get_sector_leaders(
                 entry["volume_ratio"] = None
 
             entry["rsi_14"] = await _get_rsi_for_ticker(ticker, redis)
-            entry["flow_direction"] = await _get_flow_direction(ticker)
+
+            # Enriched flow metrics (P2)
+            flow_metrics = await _get_flow_metrics(ticker)
+            entry["flow_direction"] = flow_metrics["direction"]
+            entry["flow_call_pct"] = flow_metrics["call_pct"]
+            entry["flow_premium"] = flow_metrics["total_premium"]
+
+            # IV rank (P2)
+            iv_data = await _get_iv_rank_for_ticker(ticker)
+            entry["iv_rank"] = iv_data["rank"] if iv_data else None
+            entry["iv_tier"] = iv_data["tier"] if iv_data else None
+
+            # Dark pool activity (P2)
+            dp_data = await _get_dp_activity_for_ticker(ticker)
+            entry["dp_active"] = bool(dp_data and dp_data.get("active"))
+            entry["dp_prints_30m"] = dp_data["prints_30m"] if dp_data else 0
+
             entry["week_change_pct"] = None
             entry["month_change_pct"] = None
 

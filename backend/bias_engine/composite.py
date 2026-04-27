@@ -87,7 +87,7 @@ FACTOR_CONFIG = {
     "iv_regime": {
         "weight": 0.02,
         "staleness_hours": 24,
-        "description": "SPY IV rank percentile from Polygon chain - options pricing regime",
+        "description": "SPY IV rank percentile from UW IV rank endpoint - options pricing regime",
         "timeframe": "swing",
     },
     "mcclellan_oscillator": {

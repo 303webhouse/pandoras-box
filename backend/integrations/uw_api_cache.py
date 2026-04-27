@@ -30,7 +30,7 @@ CACHE_TTLS = {
 }
 
 DAILY_BUDGET = 20000     # UW Basic plan limit
-BUDGET_ALERT_PCT = 0.50  # Alert at 50%
+BUDGET_ALERT_THRESHOLDS = [0.50, 0.70, 0.85, 0.95]  # Alert at each crossing
 
 # In-memory stats (reset on deploy)
 _stats = {"hits": 0, "misses": 0}
@@ -87,12 +87,20 @@ async def increment_daily_counter() -> int:
         if count == 1:
             await redis.expire(day_key, 172800)
 
-        # Budget alert at threshold
-        alert_threshold = int(DAILY_BUDGET * BUDGET_ALERT_PCT)
-        if count == alert_threshold:
-            logger.warning("UW API daily budget at %d%% (%d/%d requests)",
-                           int(BUDGET_ALERT_PCT * 100), count, DAILY_BUDGET)
-            await _post_budget_alert(count)
+        # Budget alerts at multiple thresholds (50/70/85/95%)
+        # Use Redis flag per threshold per day to ensure each fires only once.
+        from datetime import date as _date
+        today_str = _date.today().isoformat()
+        for threshold_pct in BUDGET_ALERT_THRESHOLDS:
+            threshold_count = int(DAILY_BUDGET * threshold_pct)
+            if count >= threshold_count:
+                flag_key = f"uw:budget_alert_fired:{today_str}:{int(threshold_pct * 100)}"
+                already_fired = await redis.get(flag_key)
+                if not already_fired:
+                    await redis.setex(flag_key, 172800, "1")  # 48h TTL
+                    logger.warning("UW API daily budget at %d%% (%d/%d requests)",
+                                   int(threshold_pct * 100), count, DAILY_BUDGET)
+                    await _post_budget_alert(count, int(threshold_pct * 100))
 
         return count
     except Exception:
@@ -125,18 +133,30 @@ def get_cache_stats() -> dict:
     }
 
 
-async def _post_budget_alert(count: int) -> None:
-    """Post budget alert to Discord webhook."""
+async def _post_budget_alert(count: int, threshold_pct: int) -> None:
+    """Post budget alert to Discord webhook with explicit threshold tier."""
     try:
         import os
         import httpx
         webhook = os.getenv("DISCORD_WEBHOOK_SIGNALS", "")
         if not webhook:
             return
+        if threshold_pct >= 95:
+            emoji = "\U0001F6A8"  # rotating light
+            severity = "CRITICAL"
+        elif threshold_pct >= 85:
+            emoji = "\U000026A0\uFE0F"  # warning
+            severity = "WARNING"
+        elif threshold_pct >= 70:
+            emoji = "\U0001F4CA"  # bar chart
+            severity = "ELEVATED"
+        else:
+            emoji = "\U0001F4CB"  # clipboard
+            severity = "INFO"
         async with httpx.AsyncClient(timeout=5) as client:
             await client.post(webhook, json={
-                "content": f"**UW API Budget Alert:** {count}/{DAILY_BUDGET} requests "
-                           f"({int(count/DAILY_BUDGET*100)}%) — monitor usage"
+                "content": f"{emoji} **UW API Budget [{severity}]** — {count}/{DAILY_BUDGET} requests "
+                           f"({threshold_pct}% crossed) — monitor usage"
             })
     except Exception:
         pass
