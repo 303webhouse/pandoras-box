@@ -1,28 +1,22 @@
 """
-Market Data API — Polygon.io passthrough endpoints.
+Market Data API — UW API passthrough endpoints.
 
-Read-only endpoints wrapping existing Polygon integration functions
+Read-only endpoints wrapping existing UW API integration functions
 so Pivot (and other clients) can query live market data through the
-Trading Hub without needing direct Polygon credentials.
+Trading Hub without needing direct UW credentials.
 
-All data is 15-min delayed (Polygon Starter plan). Existing 5-min
-in-memory caches in the integration layer apply automatically.
+UW results are cached in Redis at the integration layer.
 """
 
 import logging
-import os
 import time
 from datetime import date, timedelta
 from typing import Optional
 
-import httpx
 from fastapi import APIRouter, HTTPException, Query
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
-
-POLYGON_API_KEY = os.getenv("POLYGON_API_KEY") or ""
-POLYGON_BASE = "https://api.polygon.io"
 
 # News cache: (timestamp, data)
 _news_cache: dict = {}
@@ -103,7 +97,7 @@ async def get_option_value(
     structure: Optional[str] = Query(None),
 ):
     """Single option or spread valuation + greeks."""
-    from integrations.polygon_options import get_spread_value, get_single_option_value
+    from integrations.uw_api import get_spread_value, get_single_option_value
 
     if short_strike is not None:
         if not structure:
@@ -155,44 +149,5 @@ async def get_news(
             _news_cache[cache_key] = (time.time(), result)
             return result
     except Exception as e:
-        logger.debug("UW news fetch failed, trying Polygon: %s", e)
-
-    # Polygon fallback
-    if not POLYGON_API_KEY:
-        raise HTTPException(status_code=503, detail="No news source configured")
-
-    try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.get(
-                f"{POLYGON_BASE}/v2/reference/news",
-                params={
-                    "apiKey": POLYGON_API_KEY,
-                    "limit": limit,
-                    "order": "desc",
-                    "sort": "published_utc",
-                },
-            )
-            resp.raise_for_status()
-            data = resp.json()
-
-        articles = []
-        for item in data.get("results", []):
-            articles.append({
-                "title": item.get("title"),
-                "url": item.get("article_url"),
-                "source": (item.get("publisher") or {}).get("name"),
-                "published": item.get("published_utc"),
-                "tickers": item.get("tickers", []),
-                "image_url": item.get("image_url"),
-            })
-
-        result = {"articles": articles, "count": len(articles), "source": "polygon"}
-        _news_cache[cache_key] = (time.time(), result)
-        return result
-
-    except httpx.HTTPStatusError as e:
-        logger.warning("Polygon news API error: %s", e)
+        logger.warning("UW news fetch failed: %s", e)
         raise HTTPException(status_code=502, detail="News unavailable")
-    except Exception as e:
-        logger.warning("Failed to fetch news: %s", e)
-        raise HTTPException(status_code=502, detail="News fetch failed")

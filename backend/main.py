@@ -146,16 +146,16 @@ async def lifespan(app: FastAPI):
             await asyncio.sleep(1800)  # 30 minutes
 
     # Mark-to-market: refresh position prices at :02, :17, :32, :47 past each hour
-    # (2 minutes after Polygon's 15-min data refresh) during market hours
+    # during market hours (offset 2 min from quarter-hour boundaries to allow data settle)
     async def mark_to_market_loop():
-        """Fetch live Polygon prices for open positions during market hours.
+        """Fetch live UW API prices for open positions during market hours.
         Clock-aware: fires at :02, :17, :32, :47 past each hour (9 AM - 5 PM ET weekdays).
         Forces a closing bell run at 4:17 PM ET to capture near-close prices.
         """
         import pytz
         from datetime import datetime as dt_cls
 
-        MTM_MINUTES = [2, 17, 32, 47]  # 2 min after Polygon refresh at :00/:15/:30/:45
+        MTM_MINUTES = [2, 17, 32, 47]  # 2 min offset from :00/:15/:30/:45 quarter-hours
         closing_bell_fired_today = None  # Track date to fire once per day
 
         while True:
@@ -778,13 +778,6 @@ async def factor_staleness_endpoint():
     return await check_factor_staleness()
 
 
-@app.get("/api/monitoring/polygon-health")
-async def polygon_health_endpoint():
-    """Check Polygon.io API health from rolling call window."""
-    from monitoring.polygon_health import get_polygon_health
-    return get_polygon_health()
-
-
 @app.get("/api/monitoring/vwap-validation")
 async def vwap_validation_endpoint():
     """Compute current VWAP bands for SPY and return latest reading."""
@@ -916,7 +909,6 @@ from api.committee_history import router as committee_history_router
 from api.uw_health import router as uw_health_router
 from api.insider import router as insider_router
 from api.briefing_store import router as briefing_store_router
-from api.mtm_compare import router as mtm_compare_router
 from api.hydra import router as hydra_router
 from api.positions import router as positions_router
 from api.watchlist import router as watchlist_router
@@ -975,7 +967,6 @@ app.include_router(committee_history_router, prefix="/api", tags=["committee-his
 app.include_router(uw_health_router, prefix="/api", tags=["uw-health"])
 app.include_router(insider_router, prefix="/api", tags=["insider-congress"])
 app.include_router(briefing_store_router, prefix="/api", tags=["briefing"])
-app.include_router(mtm_compare_router, prefix="/api", tags=["mtm-validation"])
 app.include_router(hydra_router, prefix="/api", tags=["hydra"])
 app.include_router(positions_router, prefix="/api", tags=["positions"])
 app.include_router(watchlist_router, prefix="/api", tags=["watchlist"])

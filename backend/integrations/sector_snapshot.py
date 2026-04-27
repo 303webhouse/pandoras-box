@@ -1,23 +1,17 @@
 """
-Sector Strength Snapshot — Polygon.io
+Sector Strength Snapshot
 
-Real-time sector ETF prices via Polygon bulk snapshot (1 API call).
+Real-time sector ETF prices via yfinance.
 SMA data cached separately (refreshed once daily).
 
-Data source: Polygon.io (primary), yfinance (fallback).
+Data source: yfinance (UW API migration in progress — see POST-CUTOVER-TODO.md P3).
 """
 import json
 import logging
-import os
-from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
-
-import httpx
 
 logger = logging.getLogger(__name__)
 
-POLYGON_API_KEY = os.getenv("POLYGON_API_KEY", "")
-POLYGON_BASE = "https://api.polygon.io"
 
 SECTOR_ETFS = {
     "Technology": "XLK",
@@ -41,49 +35,6 @@ SECTOR_SNAPSHOT_KEY = "sector:snapshot"        # Real-time prices (15s TTL)
 SECTOR_SMA_KEY = "sector:sma_cache"            # Daily SMA data (24h TTL)
 SECTOR_STRENGTH_KEY = "sector:strength"        # Computed strength scores (15s TTL)
 
-
-async def fetch_sector_prices_polygon() -> Dict[str, float]:
-    """
-    Fetch current prices for all sector ETFs + SPY in ONE Polygon API call.
-    Uses the multi-ticker snapshot endpoint.
-    Returns: {"SPY": 542.30, "XLK": 198.50, ...}
-    """
-    if not POLYGON_API_KEY:
-        logger.warning("POLYGON_API_KEY not set — cannot fetch sector prices")
-        return {}
-
-    try:
-        url = f"{POLYGON_BASE}/v2/snapshot/locale/us/markets/stocks/tickers"
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.get(url, params={
-                "apiKey": POLYGON_API_KEY,
-                "tickers": TICKER_LIST_STR,
-            })
-            resp.raise_for_status()
-            data = resp.json()
-
-        prices = {}
-        for t in data.get("tickers", []):
-            ticker = t.get("ticker")
-            # Use day close if available, else last trade, else prevDay close
-            day = t.get("day", {})
-            last_trade = t.get("lastTrade", {})
-            prev_day = t.get("prevDay", {})
-            price = (
-                day.get("c")
-                or last_trade.get("p")
-                or prev_day.get("c")
-            )
-            if ticker and price:
-                prices[ticker] = float(price)
-
-        if prices:
-            logger.debug(f"Polygon sector snapshot: {len(prices)} tickers")
-        return prices
-
-    except Exception as e:
-        logger.warning(f"Polygon sector snapshot failed: {e}")
-        return {}
 
 
 async def fetch_sector_prices_yfinance() -> Dict[str, float]:
@@ -112,50 +63,11 @@ async def fetch_sector_prices() -> Dict[str, float]:
 
 async def refresh_sma_cache() -> Dict[str, Dict[str, float]]:
     """
-    Compute 20-day and 50-day SMAs via yfinance (Polygon is deprecated).
+    Compute 20-day and 50-day SMAs via yfinance.
     Called once daily after close. Cached in Redis with 24h TTL.
     Returns: {"SPY": {"sma20": 540.5, "sma50": 535.2, "pct_1mo": 2.3}, ...}
     """
-    return await _refresh_sma_yfinance()
-
-    sma_data = {}
-    end_date = datetime.now(timezone.utc).date()
-    start_date = end_date - timedelta(days=80)  # ~55 trading days for 50-day SMA
-
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        for ticker in ALL_TICKERS:
-            try:
-                url = f"{POLYGON_BASE}/v2/aggs/ticker/{ticker}/range/1/day/{start_date}/{end_date}"
-                resp = await client.get(url, params={
-                    "apiKey": POLYGON_API_KEY,
-                    "adjusted": "true",
-                    "sort": "asc",
-                    "limit": 100,
-                })
-                resp.raise_for_status()
-                results = resp.json().get("results", [])
-
-                if not results:
-                    continue
-
-                closes = [r["c"] for r in results]
-
-                sma20 = sum(closes[-20:]) / min(20, len(closes)) if len(closes) >= 20 else None
-                sma50 = sum(closes[-50:]) / min(50, len(closes)) if len(closes) >= 50 else None
-
-                # 1-month performance (21 trading days)
-                pct_1mo = None
-                if len(closes) >= 22:
-                    pct_1mo = ((closes[-1] - closes[-22]) / closes[-22]) * 100
-
-                sma_data[ticker] = {
-                    "sma20": round(sma20, 2) if sma20 else None,
-                    "sma50": round(sma50, 2) if sma50 else None,
-                    "pct_1mo": round(pct_1mo, 2) if pct_1mo else None,
-                }
-
-            except Exception as e:
-                logger.warning(f"Polygon SMA fetch failed for {ticker}: {e}")
+    sma_data = await _refresh_sma_yfinance()
 
     # Cache in Redis
     if sma_data:
