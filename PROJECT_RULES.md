@@ -1,6 +1,6 @@
 # Pivot — Project Rules
 
-**Last Updated:** March 15, 2026
+**Last Updated:** April 27, 2026
 
 ## Prime Directive
 
@@ -114,30 +114,40 @@ Any strategy scoring below B- for 3 consecutive Olympus reviews → mandatory de
 4. **Modular architecture** — New factors/signals/strategies plug in without rewriting core
 5. **Brief-driven development** — Architecture in Claude.ai → markdown brief → Claude Code builds
 6. **Empty-safe env vars** — `os.getenv("VAR") or default`, never `os.getenv("VAR", default)`
-7. **Data source priority** — See Data Source Hierarchy below. Default to Polygon for all equities/ETFs.
+7. **Data source priority** — See Data Source Hierarchy below. UW API is PRIMARY for all equities/ETFs/options.
 
 ## Data Source Hierarchy
 
-When building any feature that needs market data, use these sources in this priority order. Never default to yfinance for equities when Polygon is available.
+When building any feature that needs market data, use these sources in this priority order. **Polygon.io and FMP are DEPRECATED — never add new dependencies on either.** UW API is the primary source for all market data.
 
 | Data Type | Primary Source | Fallback | Notes |
 |-----------|---------------|----------|-------|
-| **Equity/ETF daily bars** | Polygon `get_bars()` | yfinance | Polygon Stocks Starter ($29/mo), unlimited calls, 15-min delayed |
-| **Equity/ETF snapshots** | Polygon `get_snapshot()` | yfinance | Current price, prev close, volume |
-| **Options chains/greeks** | Polygon `polygon_options.py` | — | Options snapshot endpoint |
-| **VIX, indices (^VIX, ^GSPC)** | yfinance | — | Polygon doesn't cover index symbols with `^` prefix |
-| **Breadth data (^ADVN, ^DECLN)** | yfinance | — | NYSE advance/decline, not on Polygon |
+| **Equity/ETF daily bars** | UW API `uw_api.get_bars()` | yfinance | Wraps yfinance for OHLCV; Bearer-token auth |
+| **Equity/ETF snapshots** | UW API `uw_api.get_snapshot()` | yfinance | Real-time quotes, current price, prev close, volume |
+| **Options chains/greeks** | UW API `uw_api.py` | — | `get_spread_value`, `get_single_option_value`, `get_multi_leg_value`, `get_ticker_greeks_summary` |
+| **Options flow / unusual activity** | UW API `uw_api.get_flow_per_expiry()` | — | Real-time flow with $ premium, sweep detection |
+| **IV rank / IV regime** | UW API `uw_api.get_iv_rank()` | — | Purpose-built percentile, prefer over computing from yfinance chain |
+| **GEX / gamma exposure** | UW API `uw_api.get_greek_exposure()` | — | Already wired to bias engine |
+| **Dark pool prints** | UW API `uw_api.get_darkpool_ticker()` | — | Real-time DP volume |
+| **Max pain** | UW API `uw_api.get_max_pain()` | — | Per-expiry max pain levels |
+| **VIX, indices (^VIX, ^GSPC)** | yfinance | — | UW doesn't cover index symbols with `^` prefix |
+| **Breadth data (^ADVN, ^DECLN)** | yfinance / NYSE proxy | — | NYSE advance/decline, not on UW |
 | **Crypto (BTC, ETH)** | Binance/Coinalyze | yfinance | Futures data via `binance_futures.py` |
-| **Macro (FRED series)** | FRED API | — | Interest rates, claims, yield curve |
-| **Sector ETF performance** | Polygon `get_bars()` | yfinance | All 11 SPDR sectors — never rely on enrichment cache alone |
-| **Options flow / unusual activity** | Unusual Whales (VPS watcher) | — | Parsed from Discord, not API |
+| **Macro (FRED series)** | FRED API | — | Interest rates, claims, yield curve, ISM |
+| **Sector ETF performance** | UW API `uw_api.get_snapshot()` | yfinance | All 11 SPDR sectors |
+| **News headlines (per ticker)** | UW API `uw_api.get_news_headlines()` | — | Real-time news feed |
+| **Insider transactions** | UW API `uw_api.get_insider_transactions()` | — | |
+| **Congressional trades** | UW API `uw_api.get_congressional_trades()` | — | |
+| **Economic calendar** | UW API `uw_api.get_economic_calendar()` | FRED | |
 
 **Key rules:**
-- `backend/integrations/polygon_equities.py` has `get_bars()` and `get_snapshot()` — use them
-- Polygon results are cached 5 min in-memory (`_bars_cache`, `_snapshot_cache`)
-- yfinance is acceptable for indices/breadth that Polygon doesn't cover, and as a fallback when Polygon fails
-- Never use the enrichment cache (`watchlist:enriched`) as the sole data source for a feature — it only covers tickers in the watchlist
+- `backend/integrations/uw_api.py` is the canonical client — use the helpers there, do not call UW endpoints directly elsewhere
+- UW results are cached in Redis; respect existing TTLs and add new ones for new endpoints
+- yfinance is acceptable ONLY for indices/breadth that UW doesn't cover, and as a fallback when UW fails
+- **Never use the enrichment cache (`watchlist:enriched`) as the sole data source for a feature** — it only covers tickers in the watchlist
 - TradingView webhooks are for alerts/signals, not data fetching
+- **`backend/integrations/polygon_equities.py` and `backend/integrations/polygon_options.py` are DEAD CODE.** Polygon plan was canceled 2026-04-27. If your build references either file, that is a bug — use UW API instead.
+- **FMP is DEPRECATED.** No new dependencies on Financial Modeling Prep.
 
 ## Bias Hierarchy
 
@@ -172,8 +182,10 @@ When building any feature that needs market data, use these sources in this prio
 | New endpoint | `CLAUDE.md` reference docs |
 | New factor/signal | `CLAUDE.md`, `PROJECT_RULES.md` if new category |
 | Bug fix for known issue | `DEVELOPMENT_STATUS.md` |
+| Data source change | `PROJECT_RULES.md` Data Source Hierarchy |
 
 **Rules:**
 - Never describe planned features as built. Verify in code if unsure.
 - Code is source of truth over docs. Fix docs when they contradict code.
 - Document **why** not just **what** for architecture decisions.
+- **When deprecating a data source, update the Data Source Hierarchy in this file IMMEDIATELY.** Stale data-source guidance is a compounding foot-gun for every future build.
