@@ -13526,6 +13526,91 @@ body[data-mode="analytics"] .analytics-shell {
   }
 }
 
+/* ── P1.1: Live refresh pulse animation ────────────────────── */
+
+.live-data-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: 12px;
+    font-size: 0.7em;
+    color: var(--text-secondary, #888);
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    vertical-align: middle;
+}
+
+.live-data-dot {
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--accent-green, #00e676);
+    opacity: 0.45;
+    box-shadow: 0 0 0 0 transparent;
+    transition: background 0.3s, opacity 0.3s;
+}
+
+.live-data-dot.pulsing {
+    animation: live-data-pulse 600ms ease-out;
+}
+
+@keyframes live-data-pulse {
+    0% {
+        opacity: 1;
+        transform: scale(1.6);
+        box-shadow: 0 0 8px var(--accent-green, #00e676);
+    }
+    50% {
+        opacity: 0.9;
+        transform: scale(1.2);
+        box-shadow: 0 0 4px var(--accent-green, #00e676);
+    }
+    100% {
+        opacity: 0.45;
+        transform: scale(1);
+        box-shadow: 0 0 0 0 transparent;
+    }
+}
+
+.live-data-dot.stalled {
+    background: var(--accent-amber, #ffa726);
+    opacity: 0.55;
+    animation: none;
+}
+
+.live-data-indicator.stalled .live-data-label::after {
+    content: " · STALLED";
+    color: var(--accent-amber, #ffa726);
+}
+
+/* P1.1: Macro strip live indicator positioning */
+.macro-strip-container {
+    position: relative;
+}
+
+.macro-strip-container .live-data-indicator {
+    position: absolute;
+    top: 50%;
+    right: 12px;
+    transform: translateY(-50%);
+    z-index: 2;
+    background: rgba(0, 0, 0, 0.4);
+    -webkit-backdrop-filter: blur(4px);
+    backdrop-filter: blur(4px);
+    padding: 2px 8px;
+    border-radius: 10px;
+    pointer-events: none;
+}
+
+.sector-popup-footer {
+    position: relative;
+    min-height: 24px;
+    padding: 8px 16px 4px;
+    border-top: 1px solid var(--border-color, #2a2a2a);
+    margin-top: 8px;
+}
+
 /* === Staleness indicators (P1) === */
 .staleness-indicator {
   position: absolute;
@@ -13536,8 +13621,7 @@ body[data-mode="analytics"] .analytics-shell {
   color: #888;
   font-family: monospace;
   letter-spacing: 0.02em;
-  pointer-events: auto;
-  cursor: help;
+  pointer-events: none;
   z-index: 1;
   -webkit-user-select: none;
   user-select: none;

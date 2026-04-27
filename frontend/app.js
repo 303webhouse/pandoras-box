@@ -125,10 +125,11 @@ function renderStalenessIndicator(targetEl, timestamp) {
   }
   indicator.className = className;
   indicator.textContent = text;
+  indicator.removeAttribute('title');
   if (fullTimestamp) {
-    indicator.title = fullTimestamp;
+    indicator.setAttribute('data-ts', fullTimestamp);
   } else {
-    indicator.removeAttribute('title');
+    indicator.removeAttribute('data-ts');
   }
 }
 
@@ -139,13 +140,73 @@ function renderStalenessIndicator(targetEl, timestamp) {
 function refreshAllStalenessIndicators() {
   const indicators = document.querySelectorAll('.staleness-indicator');
   indicators.forEach(indicator => {
-    const fullTs = indicator.getAttribute('title');
+    const fullTs = indicator.getAttribute('data-ts');
     if (!fullTs) return;
     const { text, className } = computeStaleness(fullTs);
     indicator.className = className;
     indicator.textContent = text;
   });
 }
+
+// ===== Live refresh pulse animation (P1.1) =====
+// Fires a brief pulse on each successful data fetch. If no pulse fires within
+// 30 seconds, the dot transitions to "stalled" amber state.
+
+var _liveDataState = {};  // dotId -> { lastPulse: timestamp, stalled: bool }
+
+function ensureLiveDataIndicator(container, dotId, label) {
+    if (!container) return null;
+    var existing = container.querySelector('.live-data-indicator[data-dot-id="' + dotId + '"]');
+    if (existing) return existing.querySelector('.live-data-dot');
+
+    var indicator = document.createElement('span');
+    indicator.className = 'live-data-indicator';
+    indicator.setAttribute('data-dot-id', dotId);
+    indicator.innerHTML = '<span class="live-data-dot"></span>'
+                        + '<span class="live-data-label">' + (label || 'LIVE') + '</span>';
+    container.appendChild(indicator);
+    return indicator.querySelector('.live-data-dot');
+}
+
+function pulseLiveDataIndicator(dotId) {
+    var indicator = document.querySelector('.live-data-indicator[data-dot-id="' + dotId + '"]');
+    if (!indicator) return;
+    var dot = indicator.querySelector('.live-data-dot');
+    if (!dot) return;
+
+    indicator.classList.remove('stalled');
+    dot.classList.remove('stalled');
+
+    dot.classList.remove('pulsing');
+    void dot.offsetWidth;
+    dot.classList.add('pulsing');
+
+    _liveDataState[dotId] = { lastPulse: Date.now(), stalled: false };
+}
+
+// Stall watcher — checks every 5s whether any registered dot has gone >30s without a pulse
+setInterval(function() {
+    var now = Date.now();
+    Object.keys(_liveDataState).forEach(function(dotId) {
+        var state = _liveDataState[dotId];
+        if (!state) return;
+        var ageMs = now - state.lastPulse;
+        var indicator = document.querySelector('.live-data-indicator[data-dot-id="' + dotId + '"]');
+        if (!indicator) return;
+        var dot = indicator.querySelector('.live-data-dot');
+        if (!dot) return;
+
+        if (ageMs > 30000 && !state.stalled) {
+            indicator.classList.add('stalled');
+            dot.classList.add('stalled');
+            state.stalled = true;
+        } else if (ageMs <= 30000 && state.stalled) {
+            indicator.classList.remove('stalled');
+            dot.classList.remove('stalled');
+            state.stalled = false;
+        }
+    });
+}, 5000);
 
 // Start the global staleness refresh timer once the DOM is ready
 if (document.readyState === 'loading') {
@@ -5821,6 +5882,7 @@ function openSectorPopup(sectorEtf) {
                         <tbody id="sectorPopupBody"></tbody>
                     </table>
                 </div>
+                <div class="sector-popup-footer"></div>
             </div>`;
         document.body.appendChild(overlay);
 
@@ -5884,8 +5946,11 @@ async function _fetchSectorLeaders(sectorEtf, fast) {
                 staleEl.style.display = 'none';
             }
         }
-        var popupModal = document.querySelector('.sector-popup-modal');
-        renderStalenessIndicator(popupModal, data.updated_at);
+        // Anchor staleness indicator to popup footer to avoid overlap with table rows (P1.1)
+        var popupFooter = document.querySelector('.sector-popup-modal .sector-popup-footer')
+                        || document.querySelector('.sector-popup-modal .sector-popup-header')
+                        || document.querySelector('.sector-popup-modal');
+        renderStalenessIndicator(popupFooter, data.updated_at);
 
         if (fast && _sectorPopupFullData) {
             // Merge fast data into cached full data
@@ -7957,6 +8022,12 @@ async function loadSectorHeatmap() {
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
         renderSectorHeatmap(data.sectors, data);
+
+        // P1.1: live refresh pulse
+        var heatmapHeader = document.querySelector('#sectorHeatmap .heatmap-header')
+                          || document.getElementById('sectorHeatmap');
+        ensureLiveDataIndicator(heatmapHeader, 'heatmap', 'LIVE');
+        pulseLiveDataIndicator('heatmap');
     } catch (error) {
         console.error('Sector heatmap load failed:', error);
     }
@@ -8044,7 +8115,6 @@ function renderSectorHeatmap(sectors, heatmapData) {
         });
     });
 
-    renderStalenessIndicator(container, heatmapData && heatmapData.timestamp);
 }
 
 // Squarified treemap: attempt to produce near-square rectangles filling W×H
@@ -11885,7 +11955,15 @@ async function loadMacroStrip() {
         if (!resp.ok) return;
         const data = await resp.json();
         renderMacroStrip(data.tickers);
-        renderStalenessIndicator(document.getElementById('macroStripInner'), data.timestamp || new Date().toISOString());
+
+        // P1.1: live refresh pulse — anchor to parent of scrolling element
+        var stripInner = document.getElementById('macroStripInner');
+        var stripContainer = stripInner ? stripInner.parentElement : null;
+        var pulseTarget = stripContainer
+            ? (stripContainer.querySelector('.macro-strip-status') || stripContainer)
+            : null;
+        ensureLiveDataIndicator(pulseTarget, 'macroStrip', 'LIVE');
+        pulseLiveDataIndicator('macroStrip');
     } catch (e) {
         console.error('Macro strip load failed:', e);
     }
