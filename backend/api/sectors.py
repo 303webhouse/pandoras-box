@@ -93,14 +93,11 @@ def _pct_change(closes: List[float], offset: int) -> Optional[float]:
 
 
 async def _fetch_all_bars(tickers: List[str] = None, days: int = 45) -> Dict[str, List[float]]:
-    """Fetch daily close bars from Polygon for SPY + sector ETFs.
+    """Fetch daily close bars via uw_api.get_bars (yfinance under the hood).
 
-    Primary data source: Polygon.io (Stocks Starter plan).
-    No yfinance dependency.
+    Polygon is deprecated. UW API wraps yfinance for OHLCV bars.
     """
-    if not POLYGON_API_KEY:
-        logger.warning("POLYGON_API_KEY not set — cannot fetch historical bars")
-        return {}
+    from integrations.uw_api import get_bars
 
     from datetime import date as date_cls, timedelta as td
     today = date_cls.today()
@@ -110,28 +107,16 @@ async def _fetch_all_bars(tickers: List[str] = None, days: int = 45) -> Dict[str
     target_tickers = tickers or ALL_TICKERS
     results: Dict[str, List[float]] = {}
 
-    async with aiohttp.ClientSession() as session:
-        for ticker in target_tickers:
-            try:
-                url = (
-                    f"https://api.polygon.io/v2/aggs/ticker/{ticker}/range/1/day"
-                    f"/{from_date}/{to_date}?adjusted=true&sort=asc&apiKey={POLYGON_API_KEY}"
-                )
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        bars = data.get("results", [])
-                        if bars:
-                            results[ticker] = [b["c"] for b in bars if "c" in b]
-                    else:
-                        logger.debug("Polygon bars HTTP %d for %s", resp.status, ticker)
-            except asyncio.TimeoutError:
-                logger.debug("Polygon bars timeout for %s", ticker)
-            except Exception as e:
-                logger.debug("Polygon bars failed for %s: %s", ticker, e)
+    for ticker in target_tickers:
+        try:
+            bars = await get_bars(ticker, 1, "day", from_date, to_date)
+            if bars:
+                results[ticker] = [b["c"] for b in bars if "c" in b and b["c"] is not None]
+        except Exception as e:
+            logger.debug("uw_api bars failed for %s: %s", ticker, e)
 
     if len(results) < 6:
-        logger.warning("Polygon returned bars for only %d/%d tickers", len(results), len(target_tickers))
+        logger.warning("uw_api returned bars for only %d/%d tickers", len(results), len(target_tickers))
 
     return results
 
@@ -456,9 +441,11 @@ async def _ensure_sector_constituents():
 
 
 async def _fetch_sector_snapshot(tickers: List[str]) -> Dict[str, Dict]:
-    """Fetch Polygon snapshot for a list of tickers. Returns {ticker: snapshot_data}."""
-    if not POLYGON_API_KEY:
-        return {}
+    """Fetch live snapshot via uw_api.get_snapshot (yfinance under the hood).
+
+    Polygon is deprecated. UW API wraps yfinance for real-time quotes.
+    """
+    from integrations.uw_api import get_snapshot
 
     # Build a stable cache key from first 5 sorted tickers (per-sector)
     cache_key = "sector:snapshot:" + ",".join(sorted(tickers[:5]))
@@ -474,32 +461,24 @@ async def _fetch_sector_snapshot(tickers: List[str]) -> Dict[str, Dict]:
             pass
 
     result: Dict[str, Dict] = {}
-    try:
-        ticker_str = ",".join(tickers)
-        url = f"{SNAPSHOT_URL}?tickers={ticker_str}&apiKey={POLYGON_API_KEY}"
-
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
-                if resp.status != 200:
-                    body_preview = await resp.text()
-                    logger.warning("Polygon sector snapshot HTTP %d — body: %.200s", resp.status, body_preview)
-                    return result
-                data = await resp.json()
-                for t in data.get("tickers", []):
-                    sym = t.get("ticker", "")
-                    day = t.get("day", {})
-                    prev = t.get("prevDay", {})
-                    price = day.get("c") or prev.get("c") or 0
-                    prev_close = prev.get("c") or 0
-                    day_change_pct = round((price - prev_close) / prev_close * 100, 2) if prev_close else 0
-                    result[sym] = {
-                        "price": round(price, 2),
-                        "day_change_pct": day_change_pct,
-                        "volume": day.get("v", 0),
-                        "prev_volume": prev.get("v", 0),
-                    }
-    except Exception as e:
-        logger.error("Polygon sector snapshot error: %s", e)
+    for ticker in tickers:
+        try:
+            snap = await get_snapshot(ticker)
+            if not snap:
+                continue
+            day = snap.get("day", {}) or {}
+            prev = snap.get("prevDay", {}) or {}
+            price = day.get("c") or snap.get("lastTrade", {}).get("p") or prev.get("c") or 0
+            prev_close = prev.get("c") or 0
+            day_change_pct = round((price - prev_close) / prev_close * 100, 2) if prev_close else 0
+            result[ticker] = {
+                "price": round(float(price), 2) if price else 0,
+                "day_change_pct": day_change_pct,
+                "volume": day.get("v", 0) or 0,
+                "prev_volume": prev.get("v", 0) or 0,
+            }
+        except Exception as e:
+            logger.debug("uw_api snapshot failed for %s: %s", ticker, e)
 
     # Cache for 5 seconds
     if redis and result:

@@ -106,22 +106,17 @@ async def fetch_sector_prices_yfinance() -> Dict[str, float]:
 
 
 async def fetch_sector_prices() -> Dict[str, float]:
-    """Polygon first, yfinance fallback."""
-    prices = await fetch_sector_prices_polygon()
-    if len(prices) >= 6:  # At least half the tickers
-        return prices
-    logger.warning(f"Polygon returned only {len(prices)} tickers — trying yfinance fallback")
+    """yfinance only — Polygon is deprecated."""
     return await fetch_sector_prices_yfinance()
 
 
 async def refresh_sma_cache() -> Dict[str, Dict[str, float]]:
     """
-    Fetch historical daily bars from Polygon and compute 20-day and 50-day SMAs.
+    Compute 20-day and 50-day SMAs via yfinance (Polygon is deprecated).
     Called once daily after close. Cached in Redis with 24h TTL.
     Returns: {"SPY": {"sma20": 540.5, "sma50": 535.2, "pct_1mo": 2.3}, ...}
     """
-    if not POLYGON_API_KEY:
-        return await _refresh_sma_yfinance()
+    return await _refresh_sma_yfinance()
 
     sma_data = {}
     end_date = datetime.now(timezone.utc).date()

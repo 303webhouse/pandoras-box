@@ -169,35 +169,28 @@ def _score_flow(flow_direction: str, signal_direction: str) -> dict:
 # ---------------------------------------------------------------------------
 
 async def _get_snapshot(tickers: list) -> Dict[str, Dict]:
-    """Fetch Polygon snapshot for tickers."""
-    if not POLYGON_API_KEY:
-        return {}
-    try:
-        ticker_str = ",".join(tickers)
-        url = f"{SNAPSHOT_URL}?tickers={ticker_str}&apiKey={POLYGON_API_KEY}"
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                if resp.status != 200:
-                    return {}
-                data = await resp.json()
-                result = {}
-                for t in data.get("tickers", []):
-                    sym = t.get("ticker", "")
-                    day = t.get("day", {})
-                    prev = t.get("prevDay", {})
-                    price = day.get("c") or prev.get("c") or 0
-                    prev_close = prev.get("c") or 0
-                    day_change = round((price - prev_close) / prev_close * 100, 2) if prev_close else 0
-                    result[sym] = {
-                        "price": round(price, 2),
-                        "day_change_pct": day_change,
-                        "volume": day.get("v", 0),
-                        "prev_volume": prev.get("v", 0),
-                    }
-                return result
-    except Exception as e:
-        logger.warning("Context modifier snapshot error: %s", e)
-        return {}
+    """Fetch snapshot via uw_api.get_snapshot (yfinance under the hood)."""
+    from integrations.uw_api import get_snapshot
+    result = {}
+    for ticker in tickers:
+        try:
+            snap = await get_snapshot(ticker)
+            if not snap:
+                continue
+            day = snap.get("day", {}) or {}
+            prev = snap.get("prevDay", {}) or {}
+            price = day.get("c") or snap.get("lastTrade", {}).get("p") or prev.get("c") or 0
+            prev_close = prev.get("c") or 0
+            day_change = round((price - prev_close) / prev_close * 100, 2) if prev_close else 0
+            result[ticker] = {
+                "price": round(float(price), 2) if price else 0,
+                "day_change_pct": day_change,
+                "volume": day.get("v", 0) or 0,
+                "prev_volume": prev.get("v", 0) or 0,
+            }
+        except Exception as e:
+            logger.debug("Context modifier snapshot failed for %s: %s", ticker, e)
+    return result
 
 
 async def _get_rsi(ticker: str) -> Optional[int]:
@@ -380,7 +373,7 @@ async def enrich_trade_idea(signal_id: str, ticker: str, direction: str, base_sc
             await _manage_contrarian_cap(signal_id)
 
         logger.info(
-            "Context modifier for %s (id=%d): %+d (adjusted %d -> %d, contrarian=%s)",
+            "Context modifier for %s (id=%s): %+d (adjusted %d -> %d, contrarian=%s)",
             ticker, signal_id, context_modifier, base_score, adjusted_score, is_contrarian,
         )
 
@@ -396,7 +389,7 @@ async def enrich_trade_idea(signal_id: str, ticker: str, direction: str, base_sc
         }
 
     except Exception as e:
-        logger.error("Context modifier enrichment failed for %s (id=%d): %s", ticker, signal_id, e)
+        logger.error("Context modifier enrichment failed for %s (id=%s): %s", ticker, signal_id, e)
         return {
             "signal_id": signal_id,
             "ticker": ticker,

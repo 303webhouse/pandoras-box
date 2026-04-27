@@ -15,6 +15,7 @@ import json
 import os
 
 from database.postgres_client import get_postgres_client
+from database.redis_client import get_redis_client
 from websocket.broadcaster import manager
 from models.position_risk import calculate_position_risk, infer_direction
 
@@ -994,20 +995,13 @@ async def _portfolio_greeks_inner():
         except Exception:
             pass
 
-    # Try UW API first, fall back to Polygon
-    get_ticker_greeks_summary = None
+    # UW API only — Polygon is deprecated
     try:
-        from integrations.uw_api import get_options_snapshot as _uw_opts
-        from integrations.polygon_options import get_ticker_greeks_summary
+        from integrations.uw_api import get_ticker_greeks_summary, UW_API_KEY
+        if not UW_API_KEY:
+            return {"status": "no_api_key", "tickers": {}, "totals": {"delta": 0, "gamma": 0, "theta": 0, "vega": 0}}
     except ImportError:
-        pass
-    if not get_ticker_greeks_summary:
-        try:
-            from integrations.polygon_options import get_ticker_greeks_summary, POLYGON_API_KEY
-            if not POLYGON_API_KEY:
-                return {"status": "no_api_key", "tickers": {}, "totals": {"delta": 0, "gamma": 0, "theta": 0, "vega": 0}}
-        except ImportError:
-            return {"status": "unavailable", "tickers": {}, "totals": {"delta": 0, "gamma": 0, "theta": 0, "vega": 0}}
+        return {"status": "unavailable", "tickers": {}, "totals": {"delta": 0, "gamma": 0, "theta": 0, "vega": 0}}
 
     try:
         pool = await get_postgres_client()
@@ -1936,13 +1930,13 @@ async def run_mark_to_market() -> dict:
     Falls back to yfinance underlying price for equity positions.
     Updates unrealized P&L based on actual spread mid-prices.
     """
-    # Import options valuation functions — UW API provides Polygon-compatible schemas
+    # UW API only — Polygon is deprecated
     try:
-        from integrations.polygon_options import (
-            get_spread_value, get_single_option_value, get_multi_leg_value, POLYGON_API_KEY
+        from integrations.uw_api import (
+            get_spread_value, get_single_option_value, get_multi_leg_value, UW_API_KEY
         )
     except ImportError:
-        POLYGON_API_KEY = ""
+        UW_API_KEY = ""
         get_spread_value = None
         get_single_option_value = None
         get_multi_leg_value = None
@@ -1959,7 +1953,7 @@ async def run_mark_to_market() -> dict:
 
     updated = 0
     errors = []
-    use_polygon = bool(POLYGON_API_KEY) and get_spread_value is not None
+    use_options_pricing = bool(UW_API_KEY) and get_spread_value is not None
 
     # Cache chain snapshots per ticker to avoid duplicate API calls
     for row in rows:
@@ -2005,7 +1999,7 @@ async def run_mark_to_market() -> dict:
                 except Exception as e:
                     logger.warning("Failed to persist inferred legs for %s: %s", row["position_id"], e)
 
-        if use_polygon and expiry and legs_data:
+        if use_options_pricing and expiry and legs_data:
             try:
                 if isinstance(legs_data, str):
                     legs_data = json.loads(legs_data)
@@ -2036,7 +2030,7 @@ async def run_mark_to_market() -> dict:
             continue
 
         # --- Polygon path: real spread-level pricing ---
-        if current_price is None and use_polygon and expiry and long_strike:
+        if current_price is None and use_options_pricing and expiry and long_strike:
             try:
                 if short_strike and ("spread" in structure or "credit" in structure or "debit" in structure):
                     # Spread position — get both legs
@@ -2079,7 +2073,7 @@ async def run_mark_to_market() -> dict:
 
             except Exception as e:
                 errors.append({"position_id": row["position_id"], "error": str(e)})
-                logger.warning("Polygon mark-to-market failed for %s: %s", row["position_id"], e)
+                logger.warning("UW mark-to-market failed for %s: %s", row["position_id"], e)
 
         # --- Fallback: yfinance for equity or if Polygon failed ---
         # GUARD: Never use stock price for OPTION or SPREAD positions — even if
@@ -2123,7 +2117,7 @@ async def run_mark_to_market() -> dict:
                 """, row["position_id"])
             logger.info("Cleared stale stock-price from options position %s (%s)", row["position_id"], ticker)
 
-    result = {"status": "updated", "updated": updated, "source": "polygon" if use_polygon else "yfinance"}
+    result = {"status": "updated", "updated": updated, "source": "uw" if use_options_pricing else "yfinance"}
     if errors:
         result["errors"] = errors
     return result
