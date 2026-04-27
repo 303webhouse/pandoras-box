@@ -30,6 +30,19 @@
 
 ---
 
+## 🌅 Tomorrow's Pickup List (start-of-day orientation)
+
+Read these in order:
+
+1. **Verify P1.1 + P2 land cleanly** when CC picks them up — the verification checklists are in each brief
+2. **Retest `option-value` endpoint during market hours** (curl below in dedicated section)
+3. **Re-run Pythia v2.4 watchlist alert wizard** during market hours — see if 54 dropout improves with fresh data
+4. **Re-screenshot NVDA popup + XLK drill-down** during market hours to test data-density theory
+5. **NEW: Define `/open`, `/close`, `/trade` skill scope** — Nick to provide details, Claude to draft skills
+6. **NEW: Define Insights + Open Positions card tweaks** — Nick to provide details, Claude to scope changes
+
+---
+
 ## Open verification follow-up — `option-value` endpoint
 
 **Status:** 📋 CAPTURED — retest tomorrow during market hours
@@ -55,6 +68,60 @@ Expected: returns a price/value dict with non-null `mid` or `value`. If 404 pers
 2. Capture new "not calculated" count
 3. If count > 10: paste failing ticker list — likely v2.5 needs extended-hours VA fallback
 4. If count ≤ 10: park to v2.5 batch
+
+---
+
+## NEW: Trading workflow skills — `/open`, `/close`, `/trade`
+
+**Status:** 📋 CAPTURED — scope discussion needed with Nick before brief
+**Source:** End-of-day request 2026-04-27
+
+**What Nick wants** (from his note):
+- New "skills" (reusable structured instruction sets) that he can invoke as commands across all relevant Claude agents and committees
+- Three commands proposed: `/open`, `/close`, `/trade`
+- Will be used with Olympus, Titans, and any new committees built going forward
+- Nick will explain detailed scope tomorrow
+
+**What Claude is guessing** (to be confirmed):
+- `/open` — likely the structured workflow for opening a new position: pre-trade checklist (verify prices via web search → pull hub data: `/api/bias/composite/timeframes`, `/api/flow/radar`, `/api/watchlist/sector-strength`, `/api/hermes/alerts`, `/api/hydra/scores` → run Olympus committee review → confirm B1/B2/B3 bucket → log entry params)
+- `/close` — closing-side workflow: pull current position data from `unified_positions` → check exit triggers (60-70% of max value if <21 DTE, B2 cut-if-not-profitable-in-3-days, B3 same-day) → confirm with Olympus if thesis still holds → log close
+- `/trade` — possibly the wrapper that picks `/open` vs `/close` based on context, or a meta-command for general trade analysis
+
+**Pre-brief questions for Nick** (answer tomorrow):
+1. Are these CLI-style commands invoked in chat, or workflow templates Claude follows when topic comes up?
+2. What's the desired output format? (Checklist? Committee transcript? Single recommendation? All of the above?)
+3. Should they auto-pull hub data, or assume Nick provides ticker context?
+4. Where do they live? (skill files in claude_desktop_config? Project rules? Separate repo?)
+5. Which committees do they trigger by default? (Always Olympus? Sometimes Titans? Conditional?)
+6. Any standard pre-trade gates that MUST run? (e.g., always check open positions for sector concentration, always verify against PROJECT_RULES strategy anti-bloat caps)
+
+**Action required tomorrow:** Nick walks Claude through detailed scope. Claude drafts skill structure, validates with Nick, then writes formal definitions. May go through Titans review since it's a system-design change.
+
+---
+
+## NEW: Insights + Open Positions card tweaks
+
+**Status:** 📋 CAPTURED — scope discussion needed with Nick before brief
+**Source:** End-of-day request 2026-04-27
+
+**What Nick wants** (from his note):
+- "Additional tweaks to the Insights and Open Positions cards" — beyond P1/P1.1 freshness indicator work already shipped
+- Details to come tomorrow
+
+**What Claude needs to confirm tomorrow:**
+1. Which "Insights" panel? (Could refer to multiple panels — confirm which one)
+2. What specific tweaks for Open Positions cards? (Layout? Columns? P&L color states? Additional fields like sector concentration / DTE warning / Greek summary?)
+3. Are these visual/layout tweaks (frontend-only) or do they need new backend data?
+4. Priority relative to P3/P4 already in queue?
+
+**Possible scope candidates** (Nick to confirm/reject tomorrow):
+- Open Positions: add DTE-based color warning (red if <7 days, amber if 7-21, green if >21)
+- Open Positions: show flow alignment badge per position (P4-B4 was already captured for this — consolidate?)
+- Open Positions: clearer max-loss / target / stop visualization
+- Insights panel: more obvious priority indicators on signals
+- Insights panel: consolidate redundant cards
+
+**Action required tomorrow:** Nick details specific tweaks. Claude scopes whether each is P1.2 (cosmetic, fast brief) or rolls into P4 (cross-cutting enrichment).
 
 ---
 
@@ -130,6 +197,8 @@ Each is independently shippable. Listed in rough priority order for trader value
 | B5 | UW news headlines per watchlist ticker | `get_news_headlines` | 0.5 day | Medium |
 | B6 | Insider/Congressional cards verification (and build if missing) | `get_insider_transactions`, `get_congressional_trades` | 1 day | Medium |
 | B7 | Economic calendar overlay on bias panel | `get_economic_calendar` | 0.5 day | Medium |
+
+> **Note:** the new "Open Positions card tweaks" item above may overlap with B4 (flow alignment badge). Consolidate during scope discussion tomorrow.
 
 ---
 
@@ -263,4 +332,4 @@ Each is independently shippable. Listed in rough priority order for trader value
 
 ---
 
-*Last updated: 2026-04-27 — P1 verified DONE-WITH-CLEANUP, P1.1 brief shipped at commit `bd71a386`, P2 brief ready, Pythia v2.4 verified.*
+*Last updated: 2026-04-27 EOD — added Tomorrow's Pickup List, captured `/open` `/close` `/trade` skill scope, captured Insights + Open Positions card tweaks. P1.1 + P2 awaiting CC.*
