@@ -23,7 +23,8 @@
 | UW migration final cutover (MTM, sectors, context_modifier) | ✅ DONE | `brief-uw-migration-final-cutover.md` (4/5 PASS) |
 | PROJECT_RULES.md data source hierarchy update | ✅ DONE | commit `805e7747` |
 | Post-cutover cleanup (delete Polygon dead code) | ✅ DONE | `brief-post-cutover-cleanup.md` — commit `eb3a250`, 5/6 PASS (option-value: 404 expected after-hours, retest tomorrow during market hours) |
-| P1 Freshness Indicators | 🟡 IN PROGRESS | `brief-p1-freshness-indicators.md` — handed off to CC end-of-day |
+| P1 Freshness Indicators | ✅ DONE-WITH-CLEANUP | `brief-p1-freshness-indicators.md` — verified working (GLD card red on 2-day-old data, DAX card red on 30-min-old data); cosmetic issues captured in P1.1 |
+| P1.1 Freshness cleanup + live-pulse animation | 📝 BRIEFED | `brief-p1.1-freshness-cleanup-and-pulse-animation.md` (commit `bd71a386`) |
 | P2 Sector Drill-Down Enrichment + Heatmap Flow Toggle + AE2/AE5 | 📝 BRIEFED | `brief-p2-sector-drill-down-enrichment.md` (commit `c0caf500`) |
 | Pythia v2.4 PineScript (session reset bug fix) | ✅ DONE — 191→54 dropout improvement (72%) | inline conversation; remaining 54 deferred to v2.5 |
 
@@ -54,6 +55,17 @@ Expected: returns a price/value dict with non-null `mid` or `value`. If 404 pers
 2. Capture new "not calculated" count
 3. If count > 10: paste failing ticker list — likely v2.5 needs extended-hours VA fallback
 4. If count ≤ 10: park to v2.5 batch
+
+---
+
+## Other panel data-density issues to investigate tomorrow
+
+**Status:** 📋 CAPTURED — likely empty-cache states, retest during market hours
+**Context:** Tonight's screenshots showed two panels rendering with mostly N/A or dashes:
+- **NVDA ticker popup** — Price/Day showing $0.00/+0.00%, Week/Month/RSI/Volume all "-" or N/A, Beta N/A, Earnings N/A. Not new (pre-existed P1).
+- **XLK sector drill-down** — Week%/Month%/RSI/Volume columns all dashes, Flow column empty. Pre-existing — `week_change_pct` and `month_change_pct` are intentionally `None` in `sectors.py` (never built); RSI/Volume rely on caches that may not be populated after-hours.
+
+**Action required tomorrow (during market hours):** Re-screenshot both panels. If most fields populate during market hours, no action needed — confirms it's after-hours emptiness. If fields stay empty, file separate bug (likely a cache or scheduler issue not related to UW cutover).
 
 ---
 
@@ -192,6 +204,9 @@ Each is independently shippable. Listed in rough priority order for trader value
 ### Pythia v2.4 session reset bug
 **Status:** ✅ DONE — Loaded by Nick in TradingView 2026-04-27. Watchlist dropout went from 191 → 54 (72% improvement). Remaining failures deferred to v2.5 (extended-hours VA fallback + alert condition repaint protection).
 
+### P1 Freshness Indicators
+**Status:** ✅ DONE-WITH-CLEANUP — Verified live in production. GLD card showing red `as of 4/25/2026 1:12:38 AM` (2+ days old) and DAX card showing red `as of 5:04:25 PM` (30 min old) confirm the staleness color logic is working correctly. All 12 panels wired. Cosmetic positioning issues + ISO tooltip dev-noise + auto-refreshing-panel mismatch captured in P1.1 brief — none block trading.
+
 ---
 
 ## Open Bugs / Annoyances
@@ -220,6 +235,12 @@ Each is independently shippable. Listed in rough priority order for trader value
 - Always include rollback plan
 - **Always grep for the targeted patterns before writing the brief.** The cleanup brief missed `market_data.py` because the initial scan didn't grep `polygon_options|polygon_equities|mtm_compare|polygon_health` against the full backend tree. CC's pre-push grep caught it. Build that grep step into all future cleanup-style briefs.
 
+### UI principle: freshness indicator vs. live-pulse animation (added 2026-04-27 from P1 verification)
+- **Freshness indicators** (`as of HH:MM:SS` text with gray/amber/red color states) belong on panels where data **CAN be stale and where staleness affects a trade decision**: position cards, watchlist cards, signals, bias readings, alerts.
+- **Live-pulse animation** (small pulsing dot, brief flash on each successful fetch, amber after 30s of no fetch) belongs on **auto-refreshing always-fresh feeds**: heatmap, macro ticker tape, real-time price feeds.
+- Mixing the two is wrong. A freshness indicator on a 10-second auto-refresh feed is visual noise (perpetually flashes gray→amber→red→green). A pulse on a manually-loaded panel is a lie.
+- This principle should be added to PROJECT_RULES.md next time it gets touched.
+
 ---
 
 ## How to Use This File
@@ -242,4 +263,4 @@ Each is independently shippable. Listed in rough priority order for trader value
 
 ---
 
-*Last updated: 2026-04-27 — P1 handed off to CC, P2 brief shipped at commit `c0caf500`, Pythia v2.4 verified (54 dropout, parked to v2.5).*
+*Last updated: 2026-04-27 — P1 verified DONE-WITH-CLEANUP, P1.1 brief shipped at commit `bd71a386`, P2 brief ready, Pythia v2.4 verified.*
