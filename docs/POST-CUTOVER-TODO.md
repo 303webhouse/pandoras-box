@@ -23,8 +23,9 @@
 | UW migration final cutover (MTM, sectors, context_modifier) | ✅ DONE | `brief-uw-migration-final-cutover.md` (4/5 PASS) |
 | PROJECT_RULES.md data source hierarchy update | ✅ DONE | commit `805e7747` |
 | Post-cutover cleanup (delete Polygon dead code) | ✅ DONE | `brief-post-cutover-cleanup.md` — commit `eb3a250`, 5/6 PASS (option-value: 404 expected after-hours, retest tomorrow during market hours) |
-| P1 Freshness Indicators | 📝 BRIEFED | `brief-p1-freshness-indicators.md` |
-| Pythia v2.4 PineScript (session reset bug fix) | 🟡 IN PROGRESS | inline in conversation, awaiting Nick to load + test in TradingView |
+| P1 Freshness Indicators | 🟡 IN PROGRESS | `brief-p1-freshness-indicators.md` — handed off to CC end-of-day |
+| P2 Sector Drill-Down Enrichment + Heatmap Flow Toggle + AE2/AE5 | 📝 BRIEFED | `brief-p2-sector-drill-down-enrichment.md` (commit `c0caf500`) |
+| Pythia v2.4 PineScript (session reset bug fix) | ✅ DONE — 191→54 dropout improvement (72%) | inline conversation; remaining 54 deferred to v2.5 |
 
 ---
 
@@ -43,6 +44,19 @@ Expected: returns a price/value dict with non-null `mid` or `value`. If 404 pers
 
 ---
 
+## Pythia v2.4 verification follow-up
+
+**Status:** 📋 CAPTURED — retest tomorrow during market hours
+**Context:** Tonight's wizard test showed 54 of ~200 watchlist tickers "not calculated" — down from 191 in v2.2 (72% improvement, session reset bug confirmed fixed). The remaining 54 are mostly thin/illiquid names whose last-bar data is stale after-hours (BLNK, CHPT, COPX, DE, DHR, ECL, ELV, EQIX, EWG, etc.). TradingView is also flagging residual repaint risk on the alert conditions themselves (not just plotshape markers).
+
+**Action required tomorrow (during market hours):**
+1. Re-run watchlist alert wizard test (Alarm icon → Edit existing alert → reattach watchlist OR right-click chart → Add alert → reselect watchlist)
+2. Capture new "not calculated" count
+3. If count > 10: paste failing ticker list — likely v2.5 needs extended-hours VA fallback
+4. If count ≤ 10: park to v2.5 batch
+
+---
+
 ## Remaining safe Polygon import-fallback blocks
 
 **Status:** 📋 CAPTURED — non-urgent, can clean up in any future pass
@@ -52,32 +66,6 @@ Expected: returns a price/value dict with non-null `mid` or `value`. If 404 pers
 - `backend/enrichment/signal_enricher.py:180` — Polygon fallback inside try/except (degrades gracefully)
 
 **Action when convenient:** Remove the `except ImportError` blocks and any Polygon references inside them. Probably bundles cleanly into the P3 backend unification work.
-
----
-
-## P2 — Sector Drill-Down Enrichment
-
-**Status:** 📋 CAPTURED — write brief when ready to ship (estimated 2-3 days CC work)
-**Source:** Titans audit 2026-04-27, ATLAS A1+A2 + HELIOS H2 + AEGIS AE5
-**Why:** The biggest *trader-visible* upgrade in the post-cutover audit. Brings UW's flow + IV + DP data into the panels traders actually look at.
-
-**Scope:**
-- Sector heatmap "Best/Worst Performers" lists currently sort only by `sector_relative_pct`. Add 3 columns to constituent list:
-  - **Flow ratio** (call $ vs put $, color-coded) — UW `get_flow_per_expiry`
-  - **IV rank** (low/mid/high pill) — UW `get_iv_rank`
-  - **DP badge** (visible if dark pool prints in last 30 min) — UW `get_darkpool_ticker`
-- Heatmap "Flow / Price" toggle — color cells by flow direction instead of % change
-- Update `FACTOR_CONFIG.source` declarations in `bias_engine/composite.py` to match actual data sources post-cutover (AE5 — clean up "yfinance" labels for factors now backed by UW)
-
-**Caching/budget rider (AE2):**
-- All new UW calls behind cache layer with explicit TTLs
-- Target: ≤2x current daily UW call rate
-- Per-endpoint budget tracker — alarm at 70% of 20K/day quota
-
-**Pre-brief checklist (for Nick when ready):**
-1. Verify P1 freshness indicators have shipped first (P2 needs to compose with them)
-2. Re-pull `backend/api/sectors.py` from `main` to ensure brief anchors match post-cleanup state
-3. Decide whether B3 from P4 (UW news headlines per ticker) should bundle in or be separate
 
 ---
 
@@ -142,22 +130,29 @@ Each is independently shippable. Listed in rough priority order for trader value
 
 ### AE2 — UW budget alarm at 70%
 
-**Status:** 📋 CAPTURED — bundles into P2 cache/budget rider
-**Action:** Implement budget tracker that pages Discord at 70% of 20K daily UW calls. Per-endpoint caps via env vars. Will land as part of P2 brief.
+**Status:** 📝 BRIEFED — bundled into P2 brief (Phase C)
+**Action:** Multi-threshold alarm (50/70/85/95%) with idempotent firing. Pages Discord webhook with severity tiers. Per-endpoint env-var caps deferred (non-goal — revisit if budget burn rate increases post-P2).
 
 ### AE4 — yfinance circuit breaker
 
 **Status:** 📋 CAPTURED — 0.5 day CC work
 **Action:** Implement circuit breaker around yfinance calls similar to UW's. Falls back to last-cached value on 429/timeout. Critical because yfinance is now the single fallback for everything Polygon used to serve. **Becomes lower priority if P3 ships first**, since P3 reduces yfinance to indices+breadth only.
 
+### AE5 — FACTOR_CONFIG description fix
+
+**Status:** 📝 BRIEFED — bundled into P2 brief (Phase D)
+**Action:** Update `iv_regime` description in `bias_engine/composite.py` from "from Polygon chain" to "from UW IV rank endpoint" — matches actual post-cutover data source. (Single description fix; the broader source-attribution refactor was non-goal.)
+
 ---
 
 ## Pythia v2.5 (PARKED)
 
-**Status:** ❄️ PARKED — implement in v2.5 when v2.4 has been in production for at least 1 week
-**Source:** PYTHIA review of v2.4 (2026-04-27 conversation)
+**Status:** ❄️ PARKED — implement in v2.5 after v2.4 has been in production for at least 1 week
+**Source:** PYTHIA review of v2.4 (2026-04-27 conversation) + tonight's TradingView feedback
 
 ### Pine implementation improvements
+- **Alert condition repaint fix** — TV is flagging residual repaint risk on the alert conditions themselves. Need to gate `ta.crossunder` / `ta.crossover` checks on `barstate.isconfirmed` (the v2.4 fix only gated plotshape markers, not the alert conditions). HIGH priority for v2.5.
+- **Extended-hours VA fallback** — current logic stops building the volume profile when `inSession=false`. After-hours, thin tickers without intraday RTH data show `lastVAH/VAL/POC = na` and "fail to calculate" in the alert wizard. Add fallback that computes VA from any available bars when RTH bars are absent. HIGH priority for v2.5.
 - **Timezone input** — replace hardcoded `"America/New_York"` with an input parameter so the indicator works on FTSE/DAX/Nikkei
 - **`str.format` JSON assembly** — replace manual string concatenation in `comFields` with Pine's `str.format` for less error-prone payload construction
 - **Partial VA migration tier** — current logic only flags full migrations (current VAL above prev VAH = "higher"). Add "developing higher" / "developing lower" tiers for partial migrations
@@ -193,6 +188,9 @@ Each is independently shippable. Listed in rough priority order for trader value
 
 ### `market_data.py` Polygon imports
 **Status:** ✅ DONE — cleanup commit `eb3a250`. `/market/option-value` now uses uw_api; module docstring updated; dead Polygon news fallback removed; unused constants removed
+
+### Pythia v2.4 session reset bug
+**Status:** ✅ DONE — Loaded by Nick in TradingView 2026-04-27. Watchlist dropout went from 191 → 54 (72% improvement). Remaining failures deferred to v2.5 (extended-hours VA fallback + alert condition repaint protection).
 
 ---
 
@@ -244,4 +242,4 @@ Each is independently shippable. Listed in rough priority order for trader value
 
 ---
 
-*Last updated: 2026-04-27 — cleanup brief shipped (commit `eb3a250`).*
+*Last updated: 2026-04-27 — P1 handed off to CC, P2 brief shipped at commit `c0caf500`, Pythia v2.4 verified (54 dropout, parked to v2.5).*
