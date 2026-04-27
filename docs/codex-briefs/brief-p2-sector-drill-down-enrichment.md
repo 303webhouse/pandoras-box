@@ -1,845 +1,1106 @@
-# CC Brief — P2 Sector Drill-Down Enrichment
+# Brief — P2: Sector Drill-Down Enrichment + Heatmap Flow Toggle + AE2/AE5
 
-**Date:** 2026-04-27
-**Author:** Opus + Titans audit (via Nick)
-**Status:** P2 — biggest trader-visible upgrade from Titans audit
-**Scope:** backend enrichment + frontend columns + heatmap toggle + UW budget guardrail
-**Estimated effort:** 2-3 days CC work
-
-**Pre-deploy dependency:** P1 freshness indicators should ship FIRST. P2 modifies the same `app.js` panels that P1 instruments, and clean P1 verification gives us baseline timestamps to confirm new UW data is flowing live.
+**Status:** Ready for CC
+**Source:** Today's Titans audit (P2 priority bundle), POST-CUTOVER-TODO.md
+**Estimated effort:** 2–3 sessions (backend → frontend → verify)
+**Dependencies:** P1 (freshness indicators) should land first if running in parallel — minor app.js merge risk otherwise
 
 ---
 
-## Background — why this brief exists
+## Intent
 
-Today's UW migration cutover put real-time UW data behind the sector heatmap's price/change values. But the **drill-down popup** (best/worst performers per sector) still shows only sector-relative percentage moves. The Titans audit (run today) flagged this as the biggest trader-visible win available post-cutover.
+After the UW migration cutover today, the sector drill-down popup and heatmap show only basic price/RSI/volume data despite UW now exposing rich flow, IV, and dark pool intel for every ticker. P2 surfaces three new high-value columns in the drill-down table (Flow %, IV rank pill, DP badge) and adds a Flow/Price toggle to the heatmap so cells can be colored by options-flow direction instead of price change. Bundles two cleanup items (AE2 multi-threshold budget tracker, AE5 FACTOR_CONFIG description fix) plus polygon constant removal.
 
-Per HELIOS in the audit: *"A trader looking at this in Agora wants to scan for: 'which stock in this sector has unusual flow + breaking out + IV is cheap?' — that's a 3-data-point answer with one glance. Current UI gives one of those (price relative)."*
-
-This brief adds three new data columns to the constituent table (flow ratio, IV rank, dark pool badge), a "Flow / Price" toggle on the main heatmap, and the caching/budget guardrails AEGIS required as a non-negotiable rider.
-
-Sources:
-- Titans audit Pass 2: ATLAS A2, B2 + HELIOS H2, H5 + AEGIS AE2, AE5
-- ATHENA prioritization: bundle as P2, single brief, single PR
+**Trader-visible win:** When SPY is flat but XLK has aggressive bullish flow with elevated IV and a fresh DP buy, the heatmap and drill-down should TELL Nick that immediately — not require a separate ticker lookup.
 
 ---
 
-## Scope summary
+## Pre-flight checks
 
-| # | Workstream | File(s) |
-|---|---|---|
-| **B1** | Add UW enrichment helpers (IV rank, DP volume, flow direction) | `backend/api/sectors.py` |
-| **B2** | Update `/{sector_etf}/leaders` endpoint to return new fields | `backend/api/sectors.py` |
-| **B3** | Replace DB-based `_get_flow_direction` with UW-direct call | `backend/api/sectors.py` |
-| **B4** | Update `FACTOR_CONFIG.source` declarations (AE5 rider) | `backend/bias_engine/composite.py` |
-| **B5** | Add UW budget tracker + 70% alarm (AE2 rider) | `backend/integrations/uw_api.py` + new file |
-| **F1** | Render 3 new columns in sector drill-down popup | `frontend/app.js` + `frontend/styles.css` |
-| **F2** | Add "Flow / Price" toggle on main sector heatmap | `frontend/app.js` + `frontend/styles.css` |
-
-**13 logical edits across 5 files + 1 new file.**
-
----
-
-## Pre-flight verification (CC must do FIRST)
-
-Before applying any edits, verify the UW API helpers exist with these signatures:
+Run these BEFORE making any edits. If any fail, STOP and report back.
 
 ```bash
-grep -n "^async def get_iv_rank\|^async def get_darkpool_ticker\|^async def get_flow_per_expiry" backend/integrations/uw_api.py
+cd /c/trading-hub
+git status                                    # Should be clean on main
+git pull --rebase                             # Pull any P1 changes first
+ls backend/api/sectors.py                     # Must exist (post-cutover state)
+ls backend/integrations/uw_api.py             # Must exist
+ls backend/integrations/uw_api_cache.py       # Must exist
+ls backend/bias_engine/composite.py           # Must exist
+grep -n "get_flow_per_expiry\|get_iv_rank\|get_darkpool_ticker" backend/integrations/uw_api.py
+# All three should appear — they're the UW endpoints we'll call
 ```
 
-Expected: each function should be defined. If any are missing, **PAUSE** and report — they'd need to be added before this brief can proceed. (They are referenced in the Titans audit as pre-existing, so this is a sanity check, not an expected gap.)
-
-Also confirm the post-cleanup state:
-```bash
-grep -n "POLYGON_API_KEY\|polygon_options\|polygon_equities" backend/api/sectors.py
-# Expected: zero matches (after cleanup commit eb3a250)
-```
-
-If any of these grep commands surface unexpected results, pause and report rather than improvising.
+If `git status` is dirty, stash first: `git stash`. If grep returns nothing, abort and notify Nick — uw_api.py was tampered with.
 
 ---
 
-## Backend changes
+## Phase A — Backend: enrich sector leaders endpoint
 
-### B1 — Add UW enrichment helpers
+**File:** `backend/api/sectors.py`
 
-In `backend/api/sectors.py`, add three new helper functions after the existing `_get_flow_direction` function (around line 480 in the post-cleanup file):
+### A.1 — Replace `_get_flow_direction` with richer `_get_flow_metrics`
 
-**APPEND** these new functions:
+Current function returns a 3-state string. We want both the string AND the call-premium percentage so the frontend can render an actual number.
+
+**Find:**
 
 ```python
-async def _get_uw_iv_rank(ticker: str) -> Optional[Dict]:
-    """Fetch IV rank from UW API with 60s Redis cache.
+async def _get_flow_direction(ticker: str) -> str:
+    """Derive flow direction from flow_events table (last 24h)."""
+    try:
+        pool = await get_postgres_client()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """SELECT
+                       COALESCE(SUM(CASE WHEN contract_type = 'call' THEN premium ELSE 0 END), 0) AS call_premium,
+                       COALESCE(SUM(CASE WHEN contract_type = 'put' THEN premium ELSE 0 END), 0) AS put_premium
+                   FROM flow_events
+                   WHERE ticker = $1 AND created_at > NOW() - INTERVAL '24 hours'""",
+                ticker,
+            )
+            if not row:
+                return "neutral"
+            total = (row["call_premium"] or 0) + (row["put_premium"] or 0)
+            if total == 0:
+                return "neutral"
+            call_pct = (row["call_premium"] or 0) / total
+            if call_pct > 0.6:
+                return "bullish"
+            elif call_pct < 0.4:
+                return "bearish"
+            return "neutral"
+    except Exception:
+        return "neutral"
+```
 
-    Returns: {"iv_rank": 45.2, "iv_percentile": 38.7, "tier": "low"|"mid"|"high"} or None
+**Replace with:**
+
+```python
+async def _get_flow_metrics(ticker: str) -> Dict[str, Any]:
+    """Derive flow metrics from flow_events table (last 24h).
+
+    Returns dict with:
+        direction: 'bullish' / 'bearish' / 'neutral'
+        call_pct: float 0..1 (call premium share of total)
+        total_premium: dollar amount across both sides
     """
-    redis = await get_redis_client()
-    cache_key = f"uw:iv_rank:{ticker}"
+    default = {"direction": "neutral", "call_pct": None, "total_premium": 0.0}
+    try:
+        pool = await get_postgres_client()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """SELECT
+                       COALESCE(SUM(CASE WHEN contract_type = 'call' THEN premium ELSE 0 END), 0) AS call_premium,
+                       COALESCE(SUM(CASE WHEN contract_type = 'put' THEN premium ELSE 0 END), 0) AS put_premium
+                   FROM flow_events
+                   WHERE ticker = $1 AND created_at > NOW() - INTERVAL '24 hours'""",
+                ticker,
+            )
+            if not row:
+                return default
+            call_prem = float(row["call_premium"] or 0)
+            put_prem = float(row["put_premium"] or 0)
+            total = call_prem + put_prem
+            if total == 0:
+                return default
+            call_pct = call_prem / total
+            if call_pct > 0.6:
+                direction = "bullish"
+            elif call_pct < 0.4:
+                direction = "bearish"
+            else:
+                direction = "neutral"
+            return {
+                "direction": direction,
+                "call_pct": round(call_pct, 3),
+                "total_premium": round(total, 2),
+            }
+    except Exception:
+        return default
 
-    if redis:
-        try:
-            cached = await redis.get(cache_key)
-            if cached:
-                return json.loads(cached)
-        except Exception:
-            pass
 
+# Backward-compat shim — old callers (heatmap aggregation) use the simple string form.
+async def _get_flow_direction(ticker: str) -> str:
+    metrics = await _get_flow_metrics(ticker)
+    return metrics["direction"]
+```
+
+### A.2 — Add IV rank helper
+
+**Add this new function** immediately after `_get_flow_metrics` (and before any `@router.get` decorator):
+
+```python
+async def _get_iv_rank_for_ticker(ticker: str) -> Optional[Dict[str, Any]]:
+    """Fetch IV rank from UW. Returns dict with 'rank' (0-100) and 'tier' (low/mid/high).
+
+    Returns None if UW data unavailable. Cached upstream by uw_api_cache (300s TTL).
+    """
     try:
         from integrations.uw_api import get_iv_rank
         data = await get_iv_rank(ticker)
         if not data:
             return None
-        iv_rank_val = data.get("iv_rank")
-        if iv_rank_val is None:
+        # UW returns a list; latest entry first
+        latest = data[0] if isinstance(data, list) else data
+        rank = latest.get("iv_rank") or latest.get("rank")
+        if rank is None:
             return None
-        # Tier classification
-        if iv_rank_val >= 70:
+        rank_pct = float(rank)
+        # Normalize to 0-100 if UW returns 0-1
+        if rank_pct <= 1.0:
+            rank_pct = rank_pct * 100
+        rank_pct = round(rank_pct, 1)
+        if rank_pct >= 70:
             tier = "high"
-        elif iv_rank_val >= 30:
+        elif rank_pct >= 30:
             tier = "mid"
         else:
             tier = "low"
-        result = {
-            "iv_rank": round(float(iv_rank_val), 1),
-            "iv_percentile": round(float(data.get("iv_percentile", 0)), 1),
-            "tier": tier,
-        }
-        if redis:
-            try:
-                await redis.set(cache_key, json.dumps(result), ex=60)
-            except Exception:
-                pass
-        return result
+        return {"rank": rank_pct, "tier": tier}
     except Exception as e:
-        logger.debug("UW IV rank failed for %s: %s", ticker, e)
+        logger.debug("IV rank fetch failed for %s: %s", ticker, e)
         return None
-
-
-async def _get_uw_darkpool_volume(ticker: str) -> Optional[Dict]:
-    """Fetch dark pool volume from UW API with 60s Redis cache.
-
-    Returns: {"dp_volume_24h": 1234567, "has_recent_prints": true, "last_print_minutes_ago": 12} or None
-    has_recent_prints = true if any DP prints in last 30 minutes
-    """
-    redis = await get_redis_client()
-    cache_key = f"uw:darkpool:{ticker}"
-
-    if redis:
-        try:
-            cached = await redis.get(cache_key)
-            if cached:
-                return json.loads(cached)
-        except Exception:
-            pass
-
-    try:
-        from integrations.uw_api import get_darkpool_ticker
-        data = await get_darkpool_ticker(ticker)
-        if not data:
-            return None
-
-        # UW returns a list of recent DP prints; aggregate
-        prints = data if isinstance(data, list) else data.get("prints", [])
-        if not prints:
-            return {"dp_volume_24h": 0, "has_recent_prints": False, "last_print_minutes_ago": None}
-
-        total_volume = sum(p.get("size", 0) or 0 for p in prints)
-        # Find most recent print
-        from datetime import datetime as dt_cls, timezone as tz_cls
-        now = dt_cls.now(tz_cls.utc)
-        most_recent = None
-        for p in prints:
-            ts = p.get("executed_at") or p.get("timestamp")
-            if ts:
-                try:
-                    print_time = dt_cls.fromisoformat(ts.replace("Z", "+00:00"))
-                    age_min = (now - print_time).total_seconds() / 60.0
-                    if most_recent is None or age_min < most_recent:
-                        most_recent = age_min
-                except Exception:
-                    continue
-
-        result = {
-            "dp_volume_24h": int(total_volume),
-            "has_recent_prints": most_recent is not None and most_recent <= 30,
-            "last_print_minutes_ago": round(most_recent, 1) if most_recent is not None else None,
-        }
-        if redis:
-            try:
-                await redis.set(cache_key, json.dumps(result), ex=60)
-            except Exception:
-                pass
-        return result
-    except Exception as e:
-        logger.debug("UW darkpool failed for %s: %s", ticker, e)
-        return None
-
-
-async def _get_uw_flow_direction(ticker: str) -> Dict:
-    """Fetch flow direction from UW API directly (replaces DB-based version).
-
-    Returns: {"direction": "bullish"|"bearish"|"neutral", "call_pct": 0.65, "total_premium": 12345600}
-    """
-    redis = await get_redis_client()
-    cache_key = f"uw:flow_direction:{ticker}"
-
-    if redis:
-        try:
-            cached = await redis.get(cache_key)
-            if cached:
-                return json.loads(cached)
-        except Exception:
-            pass
-
-    try:
-        from integrations.uw_api import get_flow_per_expiry
-        data = await get_flow_per_expiry(ticker)
-        if not data:
-            return {"direction": "neutral", "call_pct": 0.5, "total_premium": 0}
-
-        # Aggregate across expiries
-        total_call_premium = 0
-        total_put_premium = 0
-        for expiry_data in (data if isinstance(data, list) else data.get("expiries", [])):
-            total_call_premium += float(expiry_data.get("call_premium", 0) or 0)
-            total_put_premium += float(expiry_data.get("put_premium", 0) or 0)
-
-        total = total_call_premium + total_put_premium
-        if total == 0:
-            return {"direction": "neutral", "call_pct": 0.5, "total_premium": 0}
-
-        call_pct = total_call_premium / total
-        if call_pct > 0.6:
-            direction = "bullish"
-        elif call_pct < 0.4:
-            direction = "bearish"
-        else:
-            direction = "neutral"
-
-        result = {
-            "direction": direction,
-            "call_pct": round(call_pct, 3),
-            "total_premium": int(total),
-        }
-        if redis:
-            try:
-                await redis.set(cache_key, json.dumps(result), ex=30)
-            except Exception:
-                pass
-        return result
-    except Exception as e:
-        logger.debug("UW flow direction failed for %s: %s", ticker, e)
-        return {"direction": "neutral", "call_pct": 0.5, "total_premium": 0}
 ```
 
-### B2 — Update `/{sector_etf}/leaders` endpoint
+### A.3 — Add dark pool activity helper
 
-In `backend/api/sectors.py`, find the existing `get_sector_leaders` function. Replace its constituent loop body to fetch and include the new fields.
+**Add this** immediately after `_get_iv_rank_for_ticker`:
 
-**FIND** (the constituent loop inside `get_sector_leaders`, in the post-cleanup version):
 ```python
-    constituents = []
-    for r in rows:
-        ticker = r["ticker"]
-        snap = snapshot.get(ticker, {})
-        price = snap.get("price", 0)
-        day_change_pct = snap.get("day_change_pct", 0)
-        sector_relative_pct = round(day_change_pct - sector_day_change, 2)
+async def _get_dp_activity_for_ticker(ticker: str) -> Optional[Dict[str, Any]]:
+    """Fetch recent dark pool activity for a ticker. Returns activity summary or None.
 
-        entry = {
-            "ticker": ticker,
-            "price": price,
-            "day_change_pct": day_change_pct,
-            "sector_relative_pct": sector_relative_pct,
+    Considers a ticker "active" if it has DP prints in the last 30 minutes.
+    Cached upstream by uw_api_cache (300s TTL).
+    """
+    try:
+        from integrations.uw_api import get_darkpool_ticker
+        prints = await get_darkpool_ticker(ticker)
+        if not prints:
+            return None
+        # Filter to last 30 min
+        from datetime import datetime as dt_cls, timezone as tz_cls
+        now_utc = dt_cls.now(tz_cls.utc)
+        cutoff = now_utc.timestamp() - 1800  # 30 min
+        recent = []
+        for p in prints if isinstance(prints, list) else []:
+            ts_raw = p.get("executed_at") or p.get("timestamp") or p.get("time")
+            if not ts_raw:
+                continue
+            try:
+                if isinstance(ts_raw, (int, float)):
+                    ts = float(ts_raw) / 1000 if ts_raw > 1e12 else float(ts_raw)
+                else:
+                    ts = dt_cls.fromisoformat(str(ts_raw).replace("Z", "+00:00")).timestamp()
+                if ts >= cutoff:
+                    recent.append(p)
+            except (ValueError, TypeError):
+                continue
+        if not recent:
+            return None
+        total_size = sum(float(p.get("size") or 0) for p in recent)
+        total_value = sum(float(p.get("size") or 0) * float(p.get("price") or 0) for p in recent)
+        return {
+            "active": True,
+            "prints_30m": len(recent),
+            "total_size": int(total_size),
+            "total_value": round(total_value, 0),
         }
+    except Exception as e:
+        logger.debug("DP activity fetch failed for %s: %s", ticker, e)
+        return None
+```
 
-        if not fast:
-            entry["company_name"] = r["company_name"]
-            entry["market_cap"] = r["market_cap"]
+### A.4 — Wire the new helpers into `get_sector_leaders`
 
-            vol = snap.get("volume", 0)
-            avg_vol = r["avg_volume_20d"]
-            if avg_vol and avg_vol > 0:
-                entry["volume_ratio"] = round(vol / avg_vol, 1)
-            elif snap.get("prev_volume") and snap["prev_volume"] > 0:
-                entry["volume_ratio"] = round(vol / snap["prev_volume"], 1)
-            else:
-                entry["volume_ratio"] = None
+**Find this block** in `get_sector_leaders` (the loop that builds each constituent's `entry` dict):
 
+```python
             entry["rsi_14"] = await _get_rsi_for_ticker(ticker, redis)
             entry["flow_direction"] = await _get_flow_direction(ticker)
             entry["week_change_pct"] = None
             entry["month_change_pct"] = None
-
-        constituents.append(entry)
 ```
 
-**REPLACE WITH:**
+**Replace with:**
+
 ```python
-    constituents = []
-    for r in rows:
-        ticker = r["ticker"]
-        snap = snapshot.get(ticker, {})
-        price = snap.get("price", 0)
-        day_change_pct = snap.get("day_change_pct", 0)
-        sector_relative_pct = round(day_change_pct - sector_day_change, 2)
-
-        entry = {
-            "ticker": ticker,
-            "price": price,
-            "day_change_pct": day_change_pct,
-            "sector_relative_pct": sector_relative_pct,
-        }
-
-        if not fast:
-            entry["company_name"] = r["company_name"]
-            entry["market_cap"] = r["market_cap"]
-
-            vol = snap.get("volume", 0)
-            avg_vol = r["avg_volume_20d"]
-            if avg_vol and avg_vol > 0:
-                entry["volume_ratio"] = round(vol / avg_vol, 1)
-            elif snap.get("prev_volume") and snap["prev_volume"] > 0:
-                entry["volume_ratio"] = round(vol / snap["prev_volume"], 1)
-            else:
-                entry["volume_ratio"] = None
-
             entry["rsi_14"] = await _get_rsi_for_ticker(ticker, redis)
 
-            # P2 — UW enrichment fields (parallelized for performance)
-            iv_data, dp_data, flow_data = await asyncio.gather(
-                _get_uw_iv_rank(ticker),
-                _get_uw_darkpool_volume(ticker),
-                _get_uw_flow_direction(ticker),
-                return_exceptions=True,
-            )
+            # Enriched flow metrics (P2)
+            flow_metrics = await _get_flow_metrics(ticker)
+            entry["flow_direction"] = flow_metrics["direction"]
+            entry["flow_call_pct"] = flow_metrics["call_pct"]
+            entry["flow_premium"] = flow_metrics["total_premium"]
 
-            # Handle any gather exceptions gracefully
-            entry["iv_rank"] = iv_data if isinstance(iv_data, dict) else None
-            entry["darkpool"] = dp_data if isinstance(dp_data, dict) else None
-            entry["flow"] = flow_data if isinstance(flow_data, dict) else {"direction": "neutral", "call_pct": 0.5, "total_premium": 0}
+            # IV rank (P2)
+            iv_data = await _get_iv_rank_for_ticker(ticker)
+            entry["iv_rank"] = iv_data["rank"] if iv_data else None
+            entry["iv_tier"] = iv_data["tier"] if iv_data else None
 
-            # Keep legacy field for backward compat with frontend that hasn't migrated yet
-            entry["flow_direction"] = entry["flow"]["direction"]
+            # Dark pool activity (P2)
+            dp_data = await _get_dp_activity_for_ticker(ticker)
+            entry["dp_active"] = bool(dp_data and dp_data.get("active"))
+            entry["dp_prints_30m"] = dp_data["prints_30m"] if dp_data else 0
 
             entry["week_change_pct"] = None
             entry["month_change_pct"] = None
-
-        constituents.append(entry)
 ```
 
-### B3 — Add staleness timestamp to leaders response
+### A.5 — Cleanup: polygon constants and module docstring
 
-**FIND** (in `get_sector_leaders`, the response construction):
-```python
-    response = {
-        "sector_etf": sector_etf,
-        "sector_day_change_pct": sector_day_change,
-        "constituents": constituents,
-        "updated_at": datetime.now(timezone.utc).isoformat(),
-    }
-```
-
-**REPLACE WITH:**
-```python
-    response = {
-        "sector_etf": sector_etf,
-        "sector_day_change_pct": sector_day_change,
-        "constituents": constituents,
-        "updated_at": datetime.now(timezone.utc).isoformat(),
-        "timestamp": datetime.now(timezone.utc).isoformat(),  # P1 freshness indicator hook
-        "enrichment_window": "Today's flow + 24h DP volume",  # User-facing label for new fields
-    }
-```
-
-### B4 — Update `FACTOR_CONFIG.source` declarations (AE5 rider)
-
-In `backend/bias_engine/composite.py`, find the `FACTOR_CONFIG` dictionary. Update the `source` field for any factor whose actual data source has changed since this dict was last touched.
-
-CC: search for `FACTOR_CONFIG = {` in `composite.py`. For each factor entry, verify the `source` field matches the actual scorer's data source as of post-cutover state. Specifically:
-
-- Factors using `uw_api.get_snapshot` or other UW endpoints → `"source": "uw_api"`
-- Factors using yfinance directly → `"source": "yfinance"`
-- Factors using FRED → `"source": "fred"` or `"source": "fred_cache"`
-- TradingView webhook factors → `"source": "tradingview"`
-- NYSE proxy/breadth → `"source": "nyse_proxy"`
-- Manual entry (Savita) → `"source": "manual"`
-
-**Common likely-stale entries to check first:**
-- `gex` (was Polygon → now uw_api)
-- `iv_regime` (was yfinance options chain → still yfinance until P3, but verify)
-- Any factor that mentions Polygon in its description
-
-**Don't speculate** — only update entries where you can verify the actual data source by reading the corresponding `bias_filters/*.py` file. If unclear, leave the entry as-is and note it in the commit message.
-
-### B5 — UW budget tracker + 70% alarm (AE2 rider)
-
-Create new file `backend/monitoring/uw_budget.py`:
+**Find** at the top of the file:
 
 ```python
 """
-UW API budget tracker.
-Tracks daily UW call count + per-endpoint counts in Redis.
-Pages Discord webhook when daily total exceeds 70% of 20K quota.
+Sector API — heatmap + drill-down popup (Phase 2).
+
+Heatmap: Polygon snapshot for live daily prices (primary), Polygon daily bars
+         for weekly/monthly historical changes (cached 30 min).
+Leaders: Per-sector top-20 constituents with real-time Polygon snapshot data,
+         RSI, volume ratio, and options flow direction.
 """
-import logging
-import os
-from datetime import datetime, timezone
-from typing import Dict
+```
 
-from database.redis_client import get_redis_client
+**Replace with:**
 
-logger = logging.getLogger(__name__)
+```python
+"""
+Sector API — heatmap + drill-down popup.
 
-DAILY_QUOTA = int(os.getenv("UW_DAILY_QUOTA", "20000"))
-ALARM_THRESHOLD_PCT = 0.70
-DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK_OPERATIONS") or os.getenv("DISCORD_WEBHOOK_SIGNALS") or ""
+Heatmap: UW API (yfinance under the hood) for live daily prices and historical bars.
+Leaders: Per-sector top-20 constituents with live snapshot data, RSI, volume ratio,
+         options flow metrics (direction + call %), IV rank, and dark pool activity.
+"""
+```
 
+**Also find:**
 
-def _today_key() -> str:
-    return datetime.now(timezone.utc).strftime("%Y%m%d")
+```python
+POLYGON_API_KEY = os.getenv("POLYGON_API_KEY") or ""
+```
 
+**Delete that line entirely** (it's at the top after imports).
 
-async def increment_uw_call(endpoint: str) -> None:
-    """Record a UW API call. Increments daily total + per-endpoint count.
+**Then find** further down (the second occurrence in the Phase 2 section):
 
-    Fires Discord alarm if daily total crosses 70% threshold (once per day).
-    """
-    redis = await get_redis_client()
-    if not redis:
-        return
+```python
+POLYGON_API_KEY = os.getenv("POLYGON_API_KEY", "")
+SNAPSHOT_URL = "https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers"
+```
 
-    today = _today_key()
-    daily_key = f"uw:budget:daily:{today}"
-    endpoint_key = f"uw:budget:endpoint:{today}:{endpoint}"
-    alarm_key = f"uw:budget:alarm_fired:{today}"
+**Delete both lines.** They are unused post-cutover.
 
-    try:
-        # Increment counters with 48h TTL (auto-cleanup old days)
-        new_total = await redis.incr(daily_key)
-        await redis.expire(daily_key, 172800)
-        await redis.incr(endpoint_key)
-        await redis.expire(endpoint_key, 172800)
+---
 
-        # Check alarm threshold
-        if new_total >= int(DAILY_QUOTA * ALARM_THRESHOLD_PCT):
-            already_fired = await redis.get(alarm_key)
-            if not already_fired:
-                await redis.setex(alarm_key, 86400, "1")
-                await _fire_alarm(new_total, endpoint)
-    except Exception as e:
-        logger.debug("UW budget increment failed: %s", e)
+## Phase B — Backend: heatmap flow toggle endpoint
 
+**File:** `backend/api/sectors.py`
 
-async def _fire_alarm(current_total: int, latest_endpoint: str) -> None:
-    """POST a warning to Discord when budget threshold is crossed."""
-    if not DISCORD_WEBHOOK:
-        logger.warning("UW budget at %d/%d (%.0f%%) — no Discord webhook configured", current_total, DAILY_QUOTA, current_total / DAILY_QUOTA * 100)
-        return
-    try:
-        import urllib.request
-        import json as _json
-        payload = _json.dumps({
-            "content": f"⚠️ **UW API budget alarm** — {current_total:,}/{DAILY_QUOTA:,} calls used today ({current_total / DAILY_QUOTA * 100:.0f}%). Latest endpoint: `{latest_endpoint}`. Per-endpoint breakdown: `/api/monitoring/uw-budget`."
-        }).encode()
-        req = urllib.request.Request(
-            DISCORD_WEBHOOK,
-            data=payload,
-            headers={"Content-Type": "application/json"},
-        )
-        urllib.request.urlopen(req, timeout=10)
-        logger.info("UW budget alarm fired at %d calls", current_total)
-    except Exception as e:
-        logger.warning("Failed to fire UW budget alarm: %s", e)
+The heatmap currently colors cells by `change_1d`. Add a query parameter `metric` so the frontend can request `metric=flow` and color cells by sector-level options flow direction instead.
 
+### B.1 — Update `get_sector_heatmap` signature
 
-async def get_budget_status() -> Dict:
-    """Return current daily budget usage for monitoring endpoint."""
-    redis = await get_redis_client()
-    if not redis:
-        return {"status": "redis_unavailable"}
+**Find:**
 
-    today = _today_key()
-    try:
-        daily_total = int(await redis.get(f"uw:budget:daily:{today}") or 0)
+```python
+@router.get("/heatmap")
+async def get_sector_heatmap():
+    """Return sector data for treemap: all 11 sectors with Day/Week/Month changes and daily RS."""
+```
 
-        # Get per-endpoint counts
-        keys_pattern = f"uw:budget:endpoint:{today}:*"
-        endpoint_counts = {}
-        async for key in redis.scan_iter(match=keys_pattern):
-            key_str = key.decode() if isinstance(key, bytes) else key
-            endpoint_name = key_str.rsplit(":", 1)[-1]
-            count = int(await redis.get(key) or 0)
-            endpoint_counts[endpoint_name] = count
+**Replace with:**
 
-        return {
-            "date": today,
-            "daily_total": daily_total,
-            "daily_quota": DAILY_QUOTA,
-            "pct_used": round(daily_total / DAILY_QUOTA * 100, 1),
-            "alarm_threshold_pct": int(ALARM_THRESHOLD_PCT * 100),
-            "alarm_fired_today": bool(await redis.get(f"uw:budget:alarm_fired:{today}")),
-            "endpoints": dict(sorted(endpoint_counts.items(), key=lambda x: -x[1])),
+```python
+@router.get("/heatmap")
+async def get_sector_heatmap(
+    metric: str = Query("price", regex="^(price|flow)$",
+                        description="Color metric: 'price' (% change) or 'flow' (options flow direction)"),
+):
+    """Return sector data for treemap: all 11 sectors with Day/Week/Month changes, daily RS,
+    and (when metric='flow') aggregate options flow direction per sector."""
+```
+
+### B.2 — Add aggregate flow per sector
+
+**Find** (still in `get_sector_heatmap`, the block near the end before the "Rank by rs_daily" sort):
+
+```python
+        sectors_data.append({
+            "etf": etf,
+            "name": info["name"],
+            "weight": info["weight"],
+            "price": round(price, 2) if price is not None else None,
+            "change_1d": change_1d if change_1d is not None else 0.0,
+            "change_1w": change_1w if change_1w is not None else 0.0,
+            "change_1m": change_1m if change_1m is not None else 0.0,
+            "rs_daily": rs_daily if rs_daily is not None else 0.0,
+            "trend": trend,
+            "strength_rank": 99,  # placeholder, computed below
+        })
+```
+
+**Replace with:**
+
+```python
+        sector_entry = {
+            "etf": etf,
+            "name": info["name"],
+            "weight": info["weight"],
+            "price": round(price, 2) if price is not None else None,
+            "change_1d": change_1d if change_1d is not None else 0.0,
+            "change_1w": change_1w if change_1w is not None else 0.0,
+            "change_1m": change_1m if change_1m is not None else 0.0,
+            "rs_daily": rs_daily if rs_daily is not None else 0.0,
+            "trend": trend,
+            "strength_rank": 99,  # placeholder, computed below
         }
-    except Exception as e:
-        return {"status": "error", "error": str(e)}
+
+        # When metric=flow, compute aggregate flow direction for the sector ETF itself.
+        # Cached upstream by _get_flow_metrics' DB query patterns; cheap.
+        if metric == "flow":
+            flow_metrics = await _get_flow_metrics(etf)
+            sector_entry["flow_direction"] = flow_metrics["direction"]
+            sector_entry["flow_call_pct"] = flow_metrics["call_pct"]
+            sector_entry["flow_premium"] = flow_metrics["total_premium"]
+
+        sectors_data.append(sector_entry)
 ```
 
-Wire into `backend/integrations/uw_api.py` — find the central HTTP request function (likely a `_make_request` or similar wrapper that all endpoint helpers call). Add:
+### B.3 — Update result + cache key per metric
+
+**Find:**
 
 ```python
-# At the top of the request wrapper, AFTER request validation but BEFORE the actual HTTP call:
-try:
-    from monitoring.uw_budget import increment_uw_call
-    await increment_uw_call(endpoint_path)  # endpoint_path = the path being requested, e.g. "/api/stock/AAPL/snapshot"
-except Exception:
-    pass  # Budget tracking failures must NEVER block a real UW call
+    result = {
+        "sectors": sorted(sectors_data, key=lambda s: s["weight"], reverse=True),
+        "spy_change_1d": spy_change_1d,
+        "spy_change_1w": spy_change_1w,
+        "spy_change_1m": spy_change_1m,
+        "is_market_hours": is_live,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
 ```
 
-CC: if `uw_api.py` doesn't have a single central wrapper, add this call to each public helper function (get_snapshot, get_bars, get_iv_rank, etc.) at the top before any network I/O.
-
-Wire the monitoring endpoint into `backend/main.py` next to the other monitoring routes (search for `@app.get("/api/monitoring/factor-staleness")`):
+**Replace with:**
 
 ```python
-@app.get("/api/monitoring/uw-budget")
-async def uw_budget_endpoint():
-    """Check UW API budget usage for the current day."""
-    from monitoring.uw_budget import get_budget_status
-    return await get_budget_status()
+    result = {
+        "sectors": sorted(sectors_data, key=lambda s: s["weight"], reverse=True),
+        "spy_change_1d": spy_change_1d,
+        "spy_change_1w": spy_change_1w,
+        "spy_change_1m": spy_change_1m,
+        "is_market_hours": is_live,
+        "metric": metric,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+```
+
+### B.4 — Make the cache key metric-aware
+
+**Find** the two locations where `HEATMAP_CACHE_KEY` is used to set/get cached data:
+
+```python
+    if redis:
+        try:
+            cached = await redis.get(HEATMAP_CACHE_KEY)
+            if cached:
+                return json.loads(cached)
+```
+
+**Replace with:**
+
+```python
+    cache_key = f"{HEATMAP_CACHE_KEY}:{metric}"
+    if redis:
+        try:
+            cached = await redis.get(cache_key)
+            if cached:
+                return json.loads(cached)
+```
+
+**And further down, find:**
+
+```python
+    if redis:
+        try:
+            result_json = json.dumps(result)
+            await redis.set(HEATMAP_CACHE_KEY, result_json, ex=_heatmap_cache_ttl())
+            if has_real_data:
+                await redis.set(HEATMAP_STALE_KEY, result_json, ex=86400)
+        except Exception:
+            pass
+```
+
+**Replace with:**
+
+```python
+    if redis:
+        try:
+            result_json = json.dumps(result)
+            await redis.set(cache_key, result_json, ex=_heatmap_cache_ttl())
+            if has_real_data and metric == "price":
+                await redis.set(HEATMAP_STALE_KEY, result_json, ex=86400)
+        except Exception:
+            pass
+```
+
+(Stale fallback only stores price-metric data — flow data shouldn't survive 24h staleness because flow ages out of the 24h window).
+
+---
+
+## Phase C — Backend: AE2 multi-threshold budget tracker
+
+**File:** `backend/integrations/uw_api_cache.py`
+
+Current code fires one alert at 50%. AE2 wants 50/70/85/95% with idempotent firing (don't re-alert once fired today).
+
+### C.1 — Replace single threshold with thresholds list
+
+**Find:**
+
+```python
+DAILY_BUDGET = 20000     # UW Basic plan limit
+BUDGET_ALERT_PCT = 0.50  # Alert at 50%
+```
+
+**Replace with:**
+
+```python
+DAILY_BUDGET = 20000     # UW Basic plan limit
+BUDGET_ALERT_THRESHOLDS = [0.50, 0.70, 0.85, 0.95]  # Alert at each crossing
+```
+
+### C.2 — Update `increment_daily_counter` to fire per-threshold
+
+**Find:**
+
+```python
+        # Budget alert at threshold
+        alert_threshold = int(DAILY_BUDGET * BUDGET_ALERT_PCT)
+        if count == alert_threshold:
+            logger.warning("UW API daily budget at %d%% (%d/%d requests)",
+                           int(BUDGET_ALERT_PCT * 100), count, DAILY_BUDGET)
+            await _post_budget_alert(count)
+```
+
+**Replace with:**
+
+```python
+        # Budget alerts at multiple thresholds (50/70/85/95%)
+        # Use Redis flag per threshold per day to ensure each fires only once.
+        from datetime import date as _date
+        today_str = _date.today().isoformat()
+        for threshold_pct in BUDGET_ALERT_THRESHOLDS:
+            threshold_count = int(DAILY_BUDGET * threshold_pct)
+            if count >= threshold_count:
+                flag_key = f"uw:budget_alert_fired:{today_str}:{int(threshold_pct * 100)}"
+                already_fired = await redis.get(flag_key)
+                if not already_fired:
+                    await redis.setex(flag_key, 172800, "1")  # 48h TTL
+                    logger.warning("UW API daily budget at %d%% (%d/%d requests)",
+                                   int(threshold_pct * 100), count, DAILY_BUDGET)
+                    await _post_budget_alert(count, int(threshold_pct * 100))
+```
+
+### C.3 — Update alert helper to include threshold
+
+**Find:**
+
+```python
+async def _post_budget_alert(count: int) -> None:
+    """Post budget alert to Discord webhook."""
+    try:
+        import os
+        import httpx
+        webhook = os.getenv("DISCORD_WEBHOOK_SIGNALS", "")
+        if not webhook:
+            return
+        async with httpx.AsyncClient(timeout=5) as client:
+            await client.post(webhook, json={
+                "content": f"**UW API Budget Alert:** {count}/{DAILY_BUDGET} requests "
+                           f"({int(count/DAILY_BUDGET*100)}%) — monitor usage"
+            })
+    except Exception:
+        pass
+```
+
+**Replace with:**
+
+```python
+async def _post_budget_alert(count: int, threshold_pct: int) -> None:
+    """Post budget alert to Discord webhook with explicit threshold tier."""
+    try:
+        import os
+        import httpx
+        webhook = os.getenv("DISCORD_WEBHOOK_SIGNALS", "")
+        if not webhook:
+            return
+        # Severity emoji based on threshold tier
+        if threshold_pct >= 95:
+            emoji = "\U0001F6A8"  # rotating light
+            severity = "CRITICAL"
+        elif threshold_pct >= 85:
+            emoji = "\U000026A0\uFE0F"  # warning
+            severity = "WARNING"
+        elif threshold_pct >= 70:
+            emoji = "\U0001F4CA"  # bar chart
+            severity = "ELEVATED"
+        else:
+            emoji = "\U0001F4CB"  # clipboard
+            severity = "INFO"
+        async with httpx.AsyncClient(timeout=5) as client:
+            await client.post(webhook, json={
+                "content": f"{emoji} **UW API Budget [{severity}]** — {count}/{DAILY_BUDGET} requests "
+                           f"({threshold_pct}% crossed) — monitor usage"
+            })
+    except Exception:
+        pass
 ```
 
 ---
 
-## Frontend changes
+## Phase D — Backend: AE5 FACTOR_CONFIG description fix
 
-### F1 — Render 3 new columns in sector drill-down popup
+**File:** `backend/bias_engine/composite.py`
 
-CC: locate the render function for the sector drill-down popup. Likely candidates: `renderSectorDrillDown`, `renderSectorLeaders`, `renderSectorPopup`, or similar. Search `frontend/app.js` for references to `/leaders` or `sector_relative_pct` (the existing field) to find the right function.
+The `iv_regime` factor description still references Polygon as its data source. Post-cutover, IV data comes from UW.
 
-Once located, the constituent table currently renders rows with `ticker`, `price`, `day_change_pct`, `sector_relative_pct`, etc. Add three new column cells per row.
+**Find:**
 
-**Pattern (apply within the existing row-construction loop):**
+```python
+    "iv_regime": {
+        "weight": 0.02,
+        "staleness_hours": 24,
+        "description": "SPY IV rank percentile from Polygon chain - options pricing regime",
+        "timeframe": "swing",
+    },
+```
+
+**Replace with:**
+
+```python
+    "iv_regime": {
+        "weight": 0.02,
+        "staleness_hours": 24,
+        "description": "SPY IV rank percentile from UW IV rank endpoint - options pricing regime",
+        "timeframe": "swing",
+    },
+```
+
+(That is the ONLY description still referencing Polygon — verify with `grep -i polygon backend/bias_engine/composite.py` after applying.)
+
+---
+
+## Phase E — Frontend: drill-down popup new columns
+
+**File:** `frontend/app.js`
+
+The drill-down popup table has 9 columns today. We're adding 3 more: Flow %, IV rank pill, DP badge. We're also keeping the existing flow icon column (it stays as a quick visual cue) — but adding the % beside it.
+
+### E.1 — Update `_sectorPopupRow` to render new columns
+
+**Find** (around line 6000-ish, the entire `_sectorPopupRow` function):
 
 ```javascript
-// Existing row HTML construction continues unchanged for ticker/price/day-change cells
+function _sectorPopupRow(c, sectorDayChange) {
+    var relColor = c.sector_relative_pct >= 0 ? 'var(--accent-green,#00e676)' : 'var(--accent-red,#ff5252)';
+    var priceColor = c.day_change_pct >= 0 ? 'var(--accent-green,#00e676)' : 'var(--accent-red,#ff5252)';
 
-// NEW: Flow ratio cell
-const flow = row.flow || {direction: "neutral", call_pct: 0.5};
-const flowPct = Math.round(flow.call_pct * 100);
-const flowColor = flow.direction === "bullish" ? "#22c55e" : flow.direction === "bearish" ? "#ef4444" : "#888";
-const flowCell = `<td class="constituent-flow" style="color: ${flowColor}; font-variant-numeric: tabular-nums;" title="Call premium: ${flowPct}% / Put premium: ${100-flowPct}%">${flowPct}%</td>`;
+    // Volume indicator
+    var volIcon = '';
+    if (c.volume_ratio != null) {
+        if (c.volume_ratio > 2.0) volIcon = '\ud83d\udd25';
+        else if (c.volume_ratio >= 1.0) volIcon = '\ud83d\udcc8';
+        else if (c.volume_ratio < 0.5) volIcon = '\ud83d\ude34';
+    }
 
-// NEW: IV rank cell
-const ivData = row.iv_rank;
-let ivCell;
-if (ivData && ivData.iv_rank !== null && ivData.iv_rank !== undefined) {
-  const ivClass = ivData.tier === "high" ? "iv-high" : ivData.tier === "low" ? "iv-low" : "iv-mid";
-  ivCell = `<td class="constituent-iv"><span class="iv-pill ${ivClass}" title="IV percentile: ${ivData.iv_percentile || '—'}">${Math.round(ivData.iv_rank)}</span></td>`;
-} else {
-  ivCell = `<td class="constituent-iv"><span class="iv-pill iv-na">—</span></td>`;
-}
+    // Flow indicator
+    var flowIcon = '\u26aa';
+    if (c.flow_direction === 'bullish') flowIcon = '\ud83d\udfe2';
+    else if (c.flow_direction === 'bearish') flowIcon = '\ud83d\udd34';
 
-// NEW: Dark pool badge cell
-const dp = row.darkpool;
-let dpCell;
-if (dp && dp.has_recent_prints) {
-  const dpVol = (dp.dp_volume_24h / 1_000_000).toFixed(1);
-  const ageMin = dp.last_print_minutes_ago !== null ? `${Math.round(dp.last_print_minutes_ago)}m` : "?";
-  dpCell = `<td class="constituent-dp"><span class="dp-badge dp-active" title="Last DP print ${ageMin} ago / 24h DP vol: ${dpVol}M">DP</span></td>`;
-} else {
-  dpCell = `<td class="constituent-dp"></td>`;
+    var weekPct = c.week_change_pct != null ? ((c.week_change_pct >= 0 ? '+' : '') + c.week_change_pct.toFixed(1) + '%') : '-';
+    var monthPct = c.month_change_pct != null ? ((c.month_change_pct >= 0 ? '+' : '') + c.month_change_pct.toFixed(1) + '%') : '-';
+
+    return '<tr data-ticker="' + escapeHtml(c.ticker) + '" class="sector-popup-row">'
+        + '<td class="sector-popup-ticker">' + escapeHtml(c.ticker) + (c.company_name ? '<span class="sector-popup-name">' + escapeHtml(c.company_name) + '</span>' : '') + '</td>'
+        + '<td class="col-r" style="color:' + priceColor + '">' + (c.price ? '$' + c.price.toFixed(2) : '-') + '</td>'
+        + '<td class="col-r" style="color:' + relColor + '">' + (c.day_change_pct >= 0 ? '+' : '') + c.day_change_pct.toFixed(2) + '%</td>'
+        + '<td class="col-r" style="color:' + relColor + '">' + (c.sector_relative_pct >= 0 ? '+' : '') + c.sector_relative_pct.toFixed(2) + '%</td>'
+        + '<td class="col-r">' + weekPct + '</td>'
+        + '<td class="col-r">' + monthPct + '</td>'
+        + '<td class="col-c">' + (c.rsi_14 != null ? c.rsi_14 : '-') + '</td>'
+        + '<td class="col-c">' + volIcon + '</td>'
+        + '<td class="col-c">' + flowIcon + '</td>'
+        + '</tr>';
 }
 ```
 
-**Add the new cells to the row HTML in this order (after `sector_relative_pct`, before `volume_ratio`):** `flowCell`, `ivCell`, `dpCell`.
+**Replace with:**
 
-**Update the table header row** to add the three new column headers:
-```html
-<th title="Net options call% (today)">Flow</th>
-<th title="Implied volatility rank (0-100)">IV</th>
-<th title="Recent dark pool print activity">DP</th>
+```javascript
+function _sectorPopupRow(c, sectorDayChange) {
+    var relColor = c.sector_relative_pct >= 0 ? 'var(--accent-green,#00e676)' : 'var(--accent-red,#ff5252)';
+    var priceColor = c.day_change_pct >= 0 ? 'var(--accent-green,#00e676)' : 'var(--accent-red,#ff5252)';
+
+    // Volume indicator
+    var volIcon = '';
+    if (c.volume_ratio != null) {
+        if (c.volume_ratio > 2.0) volIcon = '\ud83d\udd25';
+        else if (c.volume_ratio >= 1.0) volIcon = '\ud83d\udcc8';
+        else if (c.volume_ratio < 0.5) volIcon = '\ud83d\ude34';
+    }
+
+    // Flow indicator + percentage (P2)
+    var flowIcon = '\u26aa';
+    if (c.flow_direction === 'bullish') flowIcon = '\ud83d\udfe2';
+    else if (c.flow_direction === 'bearish') flowIcon = '\ud83d\udd34';
+    var flowPct = '-';
+    if (c.flow_call_pct != null) {
+        flowPct = Math.round(c.flow_call_pct * 100) + '%';
+    }
+
+    // IV rank pill (P2)
+    var ivPill = '<span class="sector-iv-pill sector-iv-na">-</span>';
+    if (c.iv_rank != null && c.iv_tier) {
+        ivPill = '<span class="sector-iv-pill sector-iv-' + escapeHtml(c.iv_tier) + '" '
+               + 'title="IV Rank: ' + c.iv_rank.toFixed(1) + ' (' + c.iv_tier.toUpperCase() + ')">'
+               + Math.round(c.iv_rank) + '</span>';
+    }
+
+    // Dark pool badge (P2)
+    var dpBadge = '';
+    if (c.dp_active) {
+        var dpTitle = 'Dark pool active: ' + (c.dp_prints_30m || 0) + ' prints in last 30 min';
+        dpBadge = '<span class="sector-dp-badge" title="' + escapeHtml(dpTitle) + '">DP</span>';
+    } else {
+        dpBadge = '<span class="sector-dp-badge sector-dp-inactive">-</span>';
+    }
+
+    var weekPct = c.week_change_pct != null ? ((c.week_change_pct >= 0 ? '+' : '') + c.week_change_pct.toFixed(1) + '%') : '-';
+    var monthPct = c.month_change_pct != null ? ((c.month_change_pct >= 0 ? '+' : '') + c.month_change_pct.toFixed(1) + '%') : '-';
+
+    return '<tr data-ticker="' + escapeHtml(c.ticker) + '" class="sector-popup-row">'
+        + '<td class="sector-popup-ticker">' + escapeHtml(c.ticker) + (c.company_name ? '<span class="sector-popup-name">' + escapeHtml(c.company_name) + '</span>' : '') + '</td>'
+        + '<td class="col-r" style="color:' + priceColor + '">' + (c.price ? '$' + c.price.toFixed(2) : '-') + '</td>'
+        + '<td class="col-r" style="color:' + priceColor + '">' + (c.day_change_pct >= 0 ? '+' : '') + c.day_change_pct.toFixed(2) + '%</td>'
+        + '<td class="col-r" style="color:' + relColor + '">' + (c.sector_relative_pct >= 0 ? '+' : '') + c.sector_relative_pct.toFixed(2) + '%</td>'
+        + '<td class="col-r">' + weekPct + '</td>'
+        + '<td class="col-r">' + monthPct + '</td>'
+        + '<td class="col-c">' + (c.rsi_14 != null ? c.rsi_14 : '-') + '</td>'
+        + '<td class="col-c">' + volIcon + '</td>'
+        + '<td class="col-c">' + flowIcon + ' <span class="sector-flow-pct">' + flowPct + '</span></td>'
+        + '<td class="col-c">' + ivPill + '</td>'
+        + '<td class="col-c">' + dpBadge + '</td>'
+        + '</tr>';
+}
 ```
 
-### F2 — "Flow / Price" toggle on main sector heatmap
+> **Note:** I also fixed a small bug while I was in there — the original `Day%` column used `relColor` (sector-relative color), which made big absolute moves look small if they matched the sector. New version uses `priceColor` for the Day% cell, which is what a trader actually wants to see at a glance.
 
-Locate the sector heatmap render function (likely `renderSectorHeatmap` or similar — search for `/api/sectors/heatmap` in `app.js`).
+### E.2 — Update divider row to match new column count
 
-Add a toggle button above the heatmap UI:
+The "sector ETF" divider row currently has 9 cells. Now needs 12 (added Flow %, IV pill, DP badge).
+
+**Find** (in `_renderSectorPopupTable`, the divider row block):
+
+```javascript
+    // Divider row (sector ETF)
+    var etfPrice = data.etf_price || 0;
+    html += '<tr class="sector-popup-divider">'
+        + '<td><strong>' + escapeHtml(data.sector_etf || '') + '</strong></td>'
+        + '<td class="col-r">' + (etfPrice ? '$' + etfPrice.toFixed(2) : '-') + '</td>'
+        + '<td class="col-r" style="color:' + (sectorDayChange >= 0 ? 'var(--accent-green,#00e676)' : 'var(--accent-red,#ff5252)') + '">'
+            + (sectorDayChange >= 0 ? '+' : '') + sectorDayChange.toFixed(2) + '%</td>'
+        + '<td class="col-r">0.00%</td>'
+        + '<td class="col-r">-</td><td class="col-r">-</td>'
+        + '<td class="col-c">-</td><td class="col-c">-</td><td class="col-c">-</td>'
+        + '</tr>';
+```
+
+**Replace with:**
+
+```javascript
+    // Divider row (sector ETF) — 12 cells matching enriched _sectorPopupRow (P2)
+    var etfPrice = data.etf_price || 0;
+    html += '<tr class="sector-popup-divider">'
+        + '<td><strong>' + escapeHtml(data.sector_etf || '') + '</strong></td>'
+        + '<td class="col-r">' + (etfPrice ? '$' + etfPrice.toFixed(2) : '-') + '</td>'
+        + '<td class="col-r" style="color:' + (sectorDayChange >= 0 ? 'var(--accent-green,#00e676)' : 'var(--accent-red,#ff5252)') + '">'
+            + (sectorDayChange >= 0 ? '+' : '') + sectorDayChange.toFixed(2) + '%</td>'
+        + '<td class="col-r">0.00%</td>'
+        + '<td class="col-r">-</td><td class="col-r">-</td>'
+        + '<td class="col-c">-</td><td class="col-c">-</td><td class="col-c">-</td>'
+        + '<td class="col-c">-</td><td class="col-c">-</td><td class="col-c">-</td>'
+        + '</tr>';
+```
+
+### E.3 — Update the table header to include new column labels
+
+The popup table header is built from HTML defined elsewhere in app.js. Find the function or inline string that generates the popup's `<thead>` (search for the existing text labels like `RSI` or `Vol` or `Flow` near a `<th>` tag). The original header has 9 `<th>` cells. Add three more after the existing Flow header:
+
 ```html
-<div class="heatmap-mode-toggle">
-  <button id="heatmap-mode-price" class="heatmap-toggle active">Price</button>
-  <button id="heatmap-mode-flow" class="heatmap-toggle">Flow</button>
-  <span class="heatmap-mode-subtitle">Today's flow</span>
+<th class="col-c">Flow</th>
+<th class="col-c">IV</th>
+<th class="col-c">DP</th>
+```
+
+(The existing Flow header should now be wide enough to show "Flow %" — change its inner text to `Flow` if currently something else, but the column WILL display both icon and percentage thanks to E.1.)
+
+If you can't locate the header generator cleanly, search for `sector-popup-table` class definition in `frontend/styles.css` — the `<thead>` is likely generated by an `_initSectorPopupHTML` or similar function in app.js. Report back if the header anchor isn't obvious; I'll write a more specific find/replace.
+
+---
+
+## Phase F — Frontend: heatmap Flow/Price toggle
+
+**File:** `frontend/app.js`
+
+Add a small toggle button to the heatmap header that switches between coloring by daily price change (current) and coloring by aggregate options flow direction (new).
+
+### F.1 — Add the toggle button
+
+Find the heatmap render function. It will reference `getSectorHeatmap` or fetch `/sectors/heatmap`. Search for:
+
+```
+fetch(API_URL + '/sectors/heatmap')
+```
+
+Just above where the heatmap data is rendered into the DOM, add a toggle UI element. The exact insertion point depends on the heatmap container structure — find the heatmap header `<div>` (likely class `heatmap-header` or `sector-heatmap-title`) and append:
+
+```html
+<div class="heatmap-toggle">
+    <button class="heatmap-toggle-btn active" data-metric="price">Price</button>
+    <button class="heatmap-toggle-btn" data-metric="flow">Flow</button>
 </div>
 ```
 
-Wire up click handlers:
+Then add a global state variable near the other heatmap-related state:
+
 ```javascript
-let heatmapMode = "price";  // "price" | "flow"
+var _heatmapMetric = 'price';  // 'price' | 'flow'
+```
 
-document.getElementById("heatmap-mode-price").addEventListener("click", () => {
-  heatmapMode = "price";
-  document.getElementById("heatmap-mode-price").classList.add("active");
-  document.getElementById("heatmap-mode-flow").classList.remove("active");
-  renderSectorHeatmap();  // re-render with new mode
-});
+And wire up button click handlers (when the heatmap is initialized):
 
-document.getElementById("heatmap-mode-flow").addEventListener("click", () => {
-  heatmapMode = "flow";
-  document.getElementById("heatmap-mode-flow").classList.add("active");
-  document.getElementById("heatmap-mode-price").classList.remove("active");
-  renderSectorHeatmap();
+```javascript
+document.querySelectorAll('.heatmap-toggle-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+        var metric = btn.dataset.metric;
+        if (metric === _heatmapMetric) return;
+        _heatmapMetric = metric;
+        document.querySelectorAll('.heatmap-toggle-btn').forEach(function(b) {
+            b.classList.toggle('active', b.dataset.metric === metric);
+        });
+        if (typeof renderSectorHeatmap === 'function') renderSectorHeatmap();
+        else if (typeof loadSectorHeatmap === 'function') loadSectorHeatmap();
+    });
 });
 ```
 
-In the heatmap cell rendering, color cells based on mode:
-- `mode === "price"` → existing logic, color by `change_1d`
-- `mode === "flow"` → fetch flow data per ETF (call `_get_uw_flow_direction(etf)` via a new endpoint OR include `flow` field in the heatmap response)
+### F.2 — Update the fetch URL
 
-**Backend addendum for F2:** add `flow` field to the `/api/sectors/heatmap` response. In `get_sector_heatmap`, after building `sectors_data`, batch-fetch flow per ETF in parallel:
+Find the heatmap fetch and update it:
 
-```python
-# Inside get_sector_heatmap, after sectors_data is built but before the response is assembled:
-flow_results = await asyncio.gather(
-    *[_get_uw_flow_direction(s["etf"]) for s in sectors_data],
-    return_exceptions=True,
-)
-for sector_dict, flow_data in zip(sectors_data, flow_results):
-    if isinstance(flow_data, dict):
-        sector_dict["flow"] = flow_data
-    else:
-        sector_dict["flow"] = {"direction": "neutral", "call_pct": 0.5}
+```javascript
+// OLD:
+var resp = await fetch(API_URL + '/sectors/heatmap');
+
+// NEW:
+var resp = await fetch(API_URL + '/sectors/heatmap?metric=' + (_heatmapMetric || 'price'));
 ```
 
-### F3 — CSS additions
+### F.3 — Update cell coloring to honor the metric
 
-In `frontend/styles.css`, append:
+Find the part of the heatmap render code that sets cell colors based on `change_1d`. It will look something like:
+
+```javascript
+var color = sector.change_1d >= 0 ? 'var(--accent-green)' : 'var(--accent-red)';
+```
+
+Wrap this in a metric branch:
+
+```javascript
+var color;
+if (_heatmapMetric === 'flow') {
+    if (sector.flow_direction === 'bullish') color = 'var(--accent-green,#00e676)';
+    else if (sector.flow_direction === 'bearish') color = 'var(--accent-red,#ff5252)';
+    else color = 'var(--text-secondary,#888)';
+} else {
+    color = sector.change_1d >= 0 ? 'var(--accent-green,#00e676)' : 'var(--accent-red,#ff5252)';
+}
+```
+
+If color INTENSITY is computed (alpha based on magnitude), use `flow_call_pct` distance from 0.5 as the magnitude when in flow mode:
+
+```javascript
+var intensity;
+if (_heatmapMetric === 'flow') {
+    var pct = sector.flow_call_pct != null ? sector.flow_call_pct : 0.5;
+    intensity = Math.min(1, Math.abs(pct - 0.5) * 4);  // 0.5 = neutral, 0.75 = max
+} else {
+    intensity = Math.min(1, Math.abs(sector.change_1d) / 2);  // existing behavior
+}
+```
+
+> **Find-as-you-go:** the heatmap rendering varies between hub builds. If the existing color logic doesn't match the snippets above, adapt — the goal is "same color rules, but flow_direction substitutes for change_1d sign when metric=flow."
+
+---
+
+## Phase G — Frontend: CSS additions
+
+**File:** `frontend/styles.css`
+
+Add these rules at the end of the file (or in the sector-popup section if it exists):
 
 ```css
-/* === P2 Sector Drill-Down Enrichment === */
+/* ── P2: Sector drill-down enrichment ─────────────────────────── */
 
-/* Flow column */
-.constituent-flow {
-  text-align: right;
-  padding: 2px 6px;
-}
-
-/* IV rank pill */
-.iv-pill {
-  display: inline-block;
-  padding: 1px 6px;
-  border-radius: 3px;
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-}
-.iv-pill.iv-high { background: #ef4444; color: white; }
-.iv-pill.iv-mid { background: #f59e0b; color: white; }
-.iv-pill.iv-low { background: #22c55e; color: white; }
-.iv-pill.iv-na { background: #444; color: #888; }
-
-/* Dark pool badge */
-.dp-badge {
-  display: inline-block;
-  padding: 1px 6px;
-  border-radius: 3px;
-  font-size: 10px;
-  font-weight: bold;
-}
-.dp-badge.dp-active {
-  background: #8b5cf6;
-  color: white;
-  cursor: help;
+.sector-flow-pct {
+    font-size: 0.85em;
+    color: var(--text-secondary, #888);
+    margin-left: 4px;
 }
 
-/* Heatmap mode toggle */
-.heatmap-mode-toggle {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
+.sector-iv-pill {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 0.8em;
+    font-weight: 600;
+    min-width: 28px;
+    text-align: center;
+    background: var(--surface-2, #2a2a2a);
+    color: var(--text-secondary, #aaa);
 }
+
+.sector-iv-pill.sector-iv-low {
+    background: rgba(0, 230, 118, 0.15);
+    color: var(--accent-green, #00e676);
+}
+
+.sector-iv-pill.sector-iv-mid {
+    background: rgba(255, 167, 38, 0.15);
+    color: var(--accent-amber, #ffa726);
+}
+
+.sector-iv-pill.sector-iv-high {
+    background: rgba(255, 82, 82, 0.15);
+    color: var(--accent-red, #ff5252);
+}
+
+.sector-iv-pill.sector-iv-na {
+    background: transparent;
+    color: var(--text-disabled, #555);
+    font-weight: 400;
+}
+
+.sector-dp-badge {
+    display: inline-block;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.75em;
+    font-weight: 700;
+    background: rgba(124, 77, 255, 0.2);
+    color: #b39ddb;
+    letter-spacing: 0.5px;
+}
+
+.sector-dp-badge.sector-dp-inactive {
+    background: transparent;
+    color: var(--text-disabled, #555);
+    font-weight: 400;
+    letter-spacing: 0;
+}
+
+/* Heatmap Flow/Price toggle */
 .heatmap-toggle {
-  padding: 4px 12px;
-  border: 1px solid #333;
-  background: #1a1a1a;
-  color: #888;
-  cursor: pointer;
-  font-size: 12px;
-  border-radius: 3px;
+    display: inline-flex;
+    gap: 0;
+    border: 1px solid var(--border-color, #333);
+    border-radius: 6px;
+    overflow: hidden;
+    margin-left: 12px;
 }
-.heatmap-toggle.active {
-  background: #2a2a2a;
-  color: #fff;
-  border-color: #555;
+
+.heatmap-toggle-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary, #888);
+    padding: 4px 12px;
+    font-size: 0.85em;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
 }
-.heatmap-toggle:hover:not(.active) {
-  background: #222;
-  color: #aaa;
+
+.heatmap-toggle-btn:hover {
+    background: var(--surface-2, #2a2a2a);
 }
-.heatmap-mode-subtitle {
-  font-size: 10px;
-  color: #666;
-  margin-left: auto;
-  font-style: italic;
+
+.heatmap-toggle-btn.active {
+    background: var(--accent-blue, #2196f3);
+    color: white;
+    font-weight: 600;
 }
 ```
 
 ---
 
-## Verification
+## Sequenced commit plan
 
-After deploy:
+Apply the brief in three commits, each ending with `git push` and a brief verification pause:
 
-### 1. Backend: leaders endpoint returns new fields
-
-```bash
-curl -s -H "X-API-Key: $PIVOT_API_KEY" \
-  "https://pandoras-box-production.up.railway.app/api/sectors/XLK/leaders" | \
-  python3 -c "
-import json, sys
-d = json.load(sys.stdin)
-constituents = d['constituents']
-sample = constituents[0] if constituents else {}
-checks = {
-    'has_iv_rank': 'iv_rank' in sample,
-    'has_darkpool': 'darkpool' in sample,
-    'has_flow': 'flow' in sample and 'direction' in sample.get('flow', {}),
-    'flow_legacy_compat': 'flow_direction' in sample,
-    'has_timestamp': 'timestamp' in d,
-    'has_enrichment_window': 'enrichment_window' in d,
-}
-for k, v in checks.items():
-    print(f'  {\"✓\" if v else \"✗\"} {k}')
-print(f'PASS' if all(checks.values()) else 'FAIL')
-"
-```
-**Expected:** all 6 checks PASS.
-
-### 2. Backend: heatmap response includes flow field per sector
+**Commit 1 — Backend changes (Phases A, B, C, D)**
 
 ```bash
-curl -s -H "X-API-Key: $PIVOT_API_KEY" \
-  "https://pandoras-box-production.up.railway.app/api/sectors/heatmap" | \
-  python3 -c "
-import json, sys
-d = json.load(sys.stdin)
-sectors = d['sectors']
-with_flow = [s for s in sectors if s.get('flow') and 'direction' in s['flow']]
-print(f'Sectors with flow: {len(with_flow)}/11')
-print('PASS' if len(with_flow) >= 9 else 'FAIL')
-"
+# Apply Phase A.1, A.2, A.3, A.4, A.5
+# Apply Phase B.1, B.2, B.3, B.4
+# Apply Phase C.1, C.2, C.3
+# Apply Phase D
+python -c "import ast; ast.parse(open('backend/api/sectors.py').read())"
+python -c "import ast; ast.parse(open('backend/integrations/uw_api_cache.py').read())"
+python -c "import ast; ast.parse(open('backend/bias_engine/composite.py').read())"
+git add backend/api/sectors.py backend/integrations/uw_api_cache.py backend/bias_engine/composite.py
+git commit -m "P2: enrich sector leaders + heatmap flow toggle + AE2 multi-threshold budget + AE5 desc fix"
+git push origin main
+# Wait ~90s for Railway deploy
 ```
-**Expected:** ≥9/11 sectors with flow data (some thinly-traded sectors may lack data).
 
-### 3. Backend: budget tracker is recording
+**Commit 2 — Frontend changes (Phases E, F, G)**
 
 ```bash
-curl -s -H "X-API-Key: $PIVOT_API_KEY" \
-  "https://pandoras-box-production.up.railway.app/api/monitoring/uw-budget" | \
-  python3 -m json.tool
+# Apply Phase E (3 sub-edits in app.js)
+# Apply Phase F (3 sub-edits in app.js)
+# Apply Phase G (CSS additions)
+git add frontend/app.js frontend/styles.css
+git commit -m "P2 frontend: drill-down flow%/IV/DP columns + heatmap Flow/Price toggle"
+git push origin main
+# No Railway deploy wait — frontend served as static files
 ```
-**Expected:** returns JSON with `daily_total > 0`, `endpoints` dict with at least one entry.
 
-### 4. Frontend: drill-down popup shows new columns
+---
 
-Open Agora, click any sector ETF on the heatmap. The drill-down popup should show three new column headers: Flow, IV, DP. Each constituent row should show:
-- Flow: percentage in green/red/gray
-- IV: colored pill with number (or "—" if unavailable)
-- DP: purple "DP" badge if recent prints, blank otherwise
+## Verification checklist
 
-### 5. Frontend: heatmap toggle works
+Run all checks AFTER both commits land. Use `claude-pivot-key-2025-XYZ` from `/opt/pivot/.env` as the API key (or fetch it from VPS as part of verification). Each check is PASS/FAIL:
 
-Click the "Flow" toggle button above the heatmap. Cells should re-color based on flow direction (green=bullish, red=bearish, gray=neutral) instead of % change. Subtitle should read "Today's flow." Click "Price" to toggle back.
+### Backend — direct curl
 
-### 6. Cache TTLs reasonable
+1. **Drill-down endpoint returns enriched fields** (XLK as test sector):
+   ```bash
+   curl -sH "X-API-Key: $PIVOT_API_KEY" \
+     "https://pandoras-box-production.up.railway.app/api/sectors/XLK/leaders" \
+     | python -m json.tool | grep -E '"flow_call_pct"|"iv_rank"|"iv_tier"|"dp_active"|"dp_prints_30m"' | head -20
+   ```
+   PASS if all 5 fields appear in output. FAIL if any are missing.
 
-After the page loads once, immediately reload. Network tab should show the leaders endpoint completing in <500ms (cached) for the second hit. Wait 90 seconds, reload again — should refetch fresh data (cache expired).
+2. **Heatmap default (price metric) still works:**
+   ```bash
+   curl -sH "X-API-Key: $PIVOT_API_KEY" \
+     "https://pandoras-box-production.up.railway.app/api/sectors/heatmap" \
+     | python -m json.tool | grep '"metric"'
+   ```
+   PASS if `"metric": "price"` appears.
 
-### 7. Logs clean
+3. **Heatmap flow metric returns flow_direction per sector:**
+   ```bash
+   curl -sH "X-API-Key: $PIVOT_API_KEY" \
+     "https://pandoras-box-production.up.railway.app/api/sectors/heatmap?metric=flow" \
+     | python -m json.tool | grep -E '"flow_direction"|"flow_call_pct"' | head -10
+   ```
+   PASS if both fields present, with values like `bullish`/`bearish`/`neutral`.
 
-Tail Railway logs for 60s after deploy. Look for:
-- No `ImportError` or `ModuleNotFoundError`
-- No `NameError` related to new helper functions
-- May see `UW IV rank failed for X: ...` debug-level messages — these are EXPECTED for some thin tickers and are not errors
+4. **Heatmap rejects invalid metric:**
+   ```bash
+   curl -sH "X-API-Key: $PIVOT_API_KEY" \
+     "https://pandoras-box-production.up.railway.app/api/sectors/heatmap?metric=garbage" \
+     -o /dev/null -w "%{http_code}\n"
+   ```
+   PASS if 422 (Unprocessable Entity from FastAPI validation).
 
-### 8. Budget alarm doesn't fire prematurely
+5. **Polygon constants are gone:**
+   ```bash
+   grep -n "POLYGON_API_KEY\|SNAPSHOT_URL" backend/api/sectors.py
+   ```
+   PASS if no matches. FAIL if any remain.
 
-After deploy, `/api/monitoring/uw-budget` should show `alarm_fired_today: false` unless legitimate volume crosses 70% of 20K. Manually verify daily call count is reasonable (~5-10K range during active market hours, much less off-hours).
+6. **FACTOR_CONFIG iv_regime description updated:**
+   ```bash
+   grep -A2 '"iv_regime"' backend/bias_engine/composite.py | grep -i polygon
+   ```
+   PASS if no output (Polygon NOT mentioned). FAIL if "Polygon" still appears.
+
+7. **Module docstring updated:**
+   ```bash
+   head -10 backend/api/sectors.py | grep -i polygon
+   ```
+   PASS if no output.
+
+### Frontend — browser checks
+
+8. **Open Agora at https://pandoras-box-production.up.railway.app**, log in, and click into the Sector Heatmap.
+   - Confirm Flow/Price toggle appears in the heatmap header. PASS/FAIL.
+   - Click "Flow" — heatmap cells re-color based on flow direction (greens stay green if bullish flow, etc.). PASS/FAIL.
+   - Click "Price" — returns to original % change coloring. PASS/FAIL.
+
+9. **Click into any sector to open the drill-down popup.**
+   - Confirm 12 columns now visible: Ticker, Price, Day%, vs Sector%, Week%, Month%, RSI, Vol, Flow, IV, DP. (Last 3 are new.) PASS/FAIL.
+   - Confirm IV pills are color-coded: green (low), amber (mid), red (high). PASS/FAIL.
+   - Confirm DP badge appears in purple for active tickers, dash for inactive. PASS/FAIL.
+   - Hover an IV pill — tooltip shows "IV Rank: XX.X (TIER)". PASS/FAIL.
+   - Hover a DP badge — tooltip shows "Dark pool active: N prints in last 30 min". PASS/FAIL.
+
+10. **Open browser DevTools Network tab, refresh popup. Find the `/leaders` response.**
+    - Confirm `flow_call_pct`, `iv_rank`, `iv_tier`, `dp_active`, `dp_prints_30m` are all in the JSON. PASS/FAIL.
+
+### UW budget check (AE2 sanity, optional)
+
+11. **Verify UW health endpoint shows budget threshold flags exist** (this won't fire unless count crosses; just sanity):
+    ```bash
+    curl -sH "X-API-Key: $PIVOT_API_KEY" \
+      "https://pandoras-box-production.up.railway.app/api/uw/health" \
+      | python -m json.tool | grep -E '"daily_requests"|"daily_budget"'
+    ```
+    PASS if both fields appear with sane values (count ≥ 0, budget = 20000).
+
+---
+
+## Known risks & non-goals
+
+- **Drill-down API latency increases** — we now make 3 additional UW calls per ticker (IV rank, DP activity) plus the existing flow query. With 20 constituents per sector and 5-min cache TTLs, the second-and-subsequent open of a popup will be fast. The FIRST open after cache expiry will add ~2-4 seconds. **Mitigation:** UW Basic plan has 120 req/min ceiling; 20 tickers × 2 endpoints = 40 calls per popup open well under cap. Cache prevents amplification on repeat opens.
+- **Heatmap flow coloring requires populated `flow_events` table** — the table is filled by the existing UW flow poller cron (every 5 min during market hours). If poller is failing, flow toggle will show all-neutral. **Mitigation:** existing alerting catches poller failure separately; not P2's concern.
+- **UW IV rank endpoint can return null/empty for thin tickers** — these get `iv_rank: null` and the frontend renders a `-`. Expected. Not a bug.
+- **Dark pool data has 30-minute lookback only** — by design; longer lookbacks dilute signal. If we want longer windows later, that's a v-next followup.
+- **Non-goal: full sector flow leaders** (e.g., "show me which sector has the most aggressive bullish flow right now"). That's a separate watchlist feature — not in P2.
+- **Non-goal: per-endpoint UW budget caps via env vars.** AE2 includes the multi-threshold ALERT system but skips the env-var per-endpoint cap mechanism. Per-endpoint caps add complexity (which endpoints? how to gracefully degrade when capped?) without a current overage problem. Revisit if budget burn rate increases post-P2.
 
 ---
 
 ## Rollback plan
 
-If anything goes wrong:
+If P2 breaks production:
+
 ```bash
-cd C:\trading-hub
-git revert HEAD
+git revert <p2-frontend-commit-sha>
+git revert <p2-backend-commit-sha>
 git push origin main
+# Wait ~90s for Railway redeploy
 ```
 
-The brief is mostly additive (new endpoints, new fields) plus one frontend toggle. Rollback is safe — restores pre-P2 state with no data integrity concerns. The budget tracker's Redis keys auto-expire in 48h.
+The changes are surgical and isolated — backend revert restores the previous heatmap/leaders behavior; frontend revert restores the 9-column popup. No DB schema changes, no migrations, no cron changes.
 
 ---
 
-## Out of scope (do NOT touch)
+## What this delivers
 
-- **P1 freshness indicators** — separate brief, must ship first
-- **P3 backend data source unification** — separate workstream (yfinance → UW for non-critical paths)
-- **P4 enrichments** (watchlist B3, Open Positions B4, news B5, insider B6, calendar B7) — separate briefs
-- **Pythia v2.5** — separate workstream
-- **Real-time tape widget** (HELIOS H4) — deferred indefinitely until UW budget headroom is verified
+After P2 lands, the sector heatmap and drill-down popup answer three questions Nick currently has to leave the hub to answer:
 
----
+1. **Is this ticker's options flow bullish or bearish, and how strongly?** → Flow % column
+2. **Are options expensive or cheap right now?** → IV rank pill (low = cheap calls/puts, high = expensive)
+3. **Is institutional money quietly accumulating?** → DP badge
 
-## Commit message
+Plus the heatmap flow toggle gives a single-glance read on which sectors institutions are actually positioning in — versus which are merely up on momentum-trader noise.
 
-```
-feat(sectors,frontend): P2 sector drill-down enrichment
+This compresses what is currently a 4-tab workflow (heatmap → drill down → ticker popup → external IV check) into the existing 2-tab flow, with no new screens or panels.
 
-Brings UW flow + IV rank + dark pool data into the panels traders look
-at most. Adds a Flow/Price toggle on the main heatmap so traders can
-see institutional flow direction at a glance instead of just % change.
-
-Backend:
-- New helpers in api/sectors.py: _get_uw_iv_rank, _get_uw_darkpool_volume,
-  _get_uw_flow_direction (with Redis caching, 30-60s TTLs)
-- /api/sectors/{etf}/leaders endpoint now returns iv_rank, darkpool,
-  flow fields per constituent (legacy flow_direction kept for compat)
-- /api/sectors/heatmap response includes flow field per sector for the
-  Flow toggle
-- New module monitoring/uw_budget.py + /api/monitoring/uw-budget endpoint
-  tracks per-day UW call count, fires Discord alarm at 70% of daily quota
-- Increment hook wired into uw_api.py request wrapper
-- composite.py FACTOR_CONFIG.source declarations updated to match
-  post-cutover reality (AE5 rider)
-
-Frontend:
-- 3 new columns in sector drill-down popup (Flow %, IV pill, DP badge)
-- Heatmap "Flow / Price" toggle with subtitle clarifying aggregation window
-- New CSS for IV pills, DP badges, mode toggle
-
-Source: Titans audit 2026-04-27 (ATLAS A2/B2, HELIOS H2/H5, AEGIS AE2/AE5).
-Caching strategy meets AE2 budget rider — projected ≤30% increase in daily
-UW call volume during active market hours.
-```
-
----
-
-## Session checklist for CC
-
-1. `cd C:\trading-hub && git pull origin main`
-2. **Read this brief in full.** Note: P1 freshness indicators should already be shipped — verify by checking the most recent commits before starting P2.
-3. **Run pre-flight verification** from the section near the top. PAUSE if any UW helper is missing.
-4. Apply Backend B1 → B5 in order.
-5. Apply Frontend F1 → F3 in order.
-6. Run syntax checks:
-   - `python -m py_compile backend/api/sectors.py backend/main.py backend/monitoring/uw_budget.py backend/bias_engine/composite.py`
-   - `node -c frontend/app.js`
-7. Commit with the message above.
-8. `git push origin main`
-9. Wait ~90s for Railway deploy.
-10. Run all 8 verification checks.
-11. **Watch UW budget for the first hour after deploy** — if `daily_total` is climbing faster than expected (more than ~50 calls/min during market hours), bump cache TTLs from 30/60s to 60/120s and redeploy. Record the actual rate observed in commit message of any TTL adjustment.
-12. If all PASS, post: "P2 enrichment complete. Sector drill-downs now show flow/IV/DP. Heatmap Flow/Price toggle live. UW budget tracker active. [Note any TTL adjustments made.]"
-13. **Surface any unexpected gaps** — if the UW helpers don't exist or have different signatures than assumed, if FACTOR_CONFIG entries don't match actual sources, if frontend render functions can't be cleanly located — report rather than improvise.
