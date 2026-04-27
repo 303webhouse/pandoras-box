@@ -5828,6 +5828,8 @@ function renderSectorWatchlist(data) {
 // SECTOR DRILL-DOWN POPUP (Phase 2)
 // ==========================================
 
+var _heatmapMetric = 'price';  // 'price' | 'flow' — P2 toggle state
+
 var _sectorPopupFastInterval = null;
 var _sectorPopupFullInterval = null;
 var _sectorPopupCurrentEtf = null;
@@ -5876,7 +5878,9 @@ function openSectorPopup(sectorEtf) {
                                 <th class="col-r">MO%</th>
                                 <th class="col-c">RSI</th>
                                 <th class="col-c">VOL</th>
-                                <th class="col-c">FLW</th>
+                                <th class="col-c">Flow</th>
+                                <th class="col-c">IV</th>
+                                <th class="col-c">DP</th>
                             </tr>
                         </thead>
                         <tbody id="sectorPopupBody"></tbody>
@@ -6046,7 +6050,7 @@ function _renderSectorPopupTable(data, preserveOrder) {
         html += _sectorPopupRow(c, sectorDayChange);
     });
 
-    // Divider row (sector ETF)
+    // Divider row (sector ETF) — 12 cells matching enriched _sectorPopupRow (P2)
     var etfPrice = data.etf_price || 0;
     html += '<tr class="sector-popup-divider">'
         + '<td><strong>' + escapeHtml(data.sector_etf || '') + '</strong></td>'
@@ -6055,6 +6059,7 @@ function _renderSectorPopupTable(data, preserveOrder) {
             + (sectorDayChange >= 0 ? '+' : '') + sectorDayChange.toFixed(2) + '%</td>'
         + '<td class="col-r">0.00%</td>'
         + '<td class="col-r">-</td><td class="col-r">-</td>'
+        + '<td class="col-c">-</td><td class="col-c">-</td><td class="col-c">-</td>'
         + '<td class="col-c">-</td><td class="col-c">-</td><td class="col-c">-</td>'
         + '</tr>';
 
@@ -6089,10 +6094,31 @@ function _sectorPopupRow(c, sectorDayChange) {
         else if (c.volume_ratio < 0.5) volIcon = '\ud83d\ude34';
     }
 
-    // Flow indicator
+    // Flow indicator + percentage (P2)
     var flowIcon = '\u26aa';
     if (c.flow_direction === 'bullish') flowIcon = '\ud83d\udfe2';
     else if (c.flow_direction === 'bearish') flowIcon = '\ud83d\udd34';
+    var flowPct = '-';
+    if (c.flow_call_pct != null) {
+        flowPct = Math.round(c.flow_call_pct * 100) + '%';
+    }
+
+    // IV rank pill (P2)
+    var ivPill = '<span class="sector-iv-pill sector-iv-na">-</span>';
+    if (c.iv_rank != null && c.iv_tier) {
+        ivPill = '<span class="sector-iv-pill sector-iv-' + escapeHtml(c.iv_tier) + '" '
+               + 'title="IV Rank: ' + c.iv_rank.toFixed(1) + ' (' + c.iv_tier.toUpperCase() + ')">'
+               + Math.round(c.iv_rank) + '</span>';
+    }
+
+    // Dark pool badge (P2)
+    var dpBadge = '';
+    if (c.dp_active) {
+        var dpTitle = 'Dark pool active: ' + (c.dp_prints_30m || 0) + ' prints in last 30 min';
+        dpBadge = '<span class="sector-dp-badge" title="' + escapeHtml(dpTitle) + '">DP</span>';
+    } else {
+        dpBadge = '<span class="sector-dp-badge sector-dp-inactive">-</span>';
+    }
 
     var weekPct = c.week_change_pct != null ? ((c.week_change_pct >= 0 ? '+' : '') + c.week_change_pct.toFixed(1) + '%') : '-';
     var monthPct = c.month_change_pct != null ? ((c.month_change_pct >= 0 ? '+' : '') + c.month_change_pct.toFixed(1) + '%') : '-';
@@ -6100,13 +6126,15 @@ function _sectorPopupRow(c, sectorDayChange) {
     return '<tr data-ticker="' + escapeHtml(c.ticker) + '" class="sector-popup-row">'
         + '<td class="sector-popup-ticker">' + escapeHtml(c.ticker) + (c.company_name ? '<span class="sector-popup-name">' + escapeHtml(c.company_name) + '</span>' : '') + '</td>'
         + '<td class="col-r" style="color:' + priceColor + '">' + (c.price ? '$' + c.price.toFixed(2) : '-') + '</td>'
-        + '<td class="col-r" style="color:' + relColor + '">' + (c.day_change_pct >= 0 ? '+' : '') + c.day_change_pct.toFixed(2) + '%</td>'
+        + '<td class="col-r" style="color:' + priceColor + '">' + (c.day_change_pct >= 0 ? '+' : '') + c.day_change_pct.toFixed(2) + '%</td>'
         + '<td class="col-r" style="color:' + relColor + '">' + (c.sector_relative_pct >= 0 ? '+' : '') + c.sector_relative_pct.toFixed(2) + '%</td>'
         + '<td class="col-r">' + weekPct + '</td>'
         + '<td class="col-r">' + monthPct + '</td>'
         + '<td class="col-c">' + (c.rsi_14 != null ? c.rsi_14 : '-') + '</td>'
         + '<td class="col-c">' + volIcon + '</td>'
-        + '<td class="col-c">' + flowIcon + '</td>'
+        + '<td class="col-c">' + flowIcon + ' <span class="sector-flow-pct">' + flowPct + '</span></td>'
+        + '<td class="col-c">' + ivPill + '</td>'
+        + '<td class="col-c">' + dpBadge + '</td>'
         + '</tr>';
 }
 
@@ -7989,6 +8017,28 @@ function initOptionsFlow() {
         });
     });
 
+    // P2: heatmap Flow/Price toggle
+    (function initHeatmapToggle() {
+        var tabContent = document.getElementById('sectorsTabContent');
+        if (!tabContent || tabContent.querySelector('.heatmap-toggle')) return;
+        var toggleHtml = '<div class="heatmap-toggle" style="padding:6px 8px 2px">'
+            + '<button class="heatmap-toggle-btn active" data-metric="price">Price</button>'
+            + '<button class="heatmap-toggle-btn" data-metric="flow">Flow</button>'
+            + '</div>';
+        tabContent.insertAdjacentHTML('afterbegin', toggleHtml);
+        tabContent.querySelectorAll('.heatmap-toggle-btn').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                var metric = btn.dataset.metric;
+                if (metric === _heatmapMetric) return;
+                _heatmapMetric = metric;
+                tabContent.querySelectorAll('.heatmap-toggle-btn').forEach(function(b) {
+                    b.classList.toggle('active', b.dataset.metric === metric);
+                });
+                loadSectorHeatmap();
+            });
+        });
+    })();
+
     loadSectorHeatmap();
     loadFlowRadar();
     loadMarketIntel();
@@ -8018,7 +8068,7 @@ function initOptionsFlow() {
 
 async function loadSectorHeatmap() {
     try {
-        const response = await fetch(`${API_URL}/sectors/heatmap`);
+        const response = await fetch(`${API_URL}/sectors/heatmap?metric=${_heatmapMetric || 'price'}`);
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
         renderSectorHeatmap(data.sectors, data);
@@ -8061,7 +8111,30 @@ function renderSectorHeatmap(sectors, heatmapData) {
         // Simpler: scale based on weight ratio with wider range
         const t = sector.weight / maxWeight;
         const fontScale = Math.max(0.45, 0.7 + 0.7 * t).toFixed(3);
-        const hm = getHeatmapStyle(sector.change_1d);
+        // P2: metric-aware cell coloring
+        let hm;
+        if (_heatmapMetric === 'flow') {
+            const fd = sector.flow_direction;
+            const pct = sector.flow_call_pct != null ? sector.flow_call_pct : 0.5;
+            const intensity = Math.min(1.0, 0.3 + 0.7 * Math.min(1, Math.abs(pct - 0.5) * 4));
+            if (fd === 'bullish') {
+                hm = {
+                    borderColor: `rgba(124, 255, 107, ${(0.4 + 0.6 * intensity).toFixed(2)})`,
+                    glow: `0 0 ${(6 + 8 * intensity).toFixed(0)}px rgba(124, 255, 107, ${(0.08 + 0.17 * intensity).toFixed(2)})`,
+                    changeColor: '#7CFF6B',
+                };
+            } else if (fd === 'bearish') {
+                hm = {
+                    borderColor: `rgba(255, 107, 53, ${(0.4 + 0.6 * intensity).toFixed(2)})`,
+                    glow: `0 0 ${(6 + 8 * intensity).toFixed(0)}px rgba(255, 107, 53, ${(0.08 + 0.17 * intensity).toFixed(2)})`,
+                    changeColor: '#FF6B35',
+                };
+            } else {
+                hm = { borderColor: 'rgba(255,255,255,0.1)', glow: 'none', changeColor: 'var(--text-secondary)' };
+            }
+        } else {
+            hm = getHeatmapStyle(sector.change_1d);
+        }
         const changeSign = sector.change_1d >= 0 ? '+' : '';
         const changeVal = sector.change_1d != null ? sector.change_1d.toFixed(2) : '0.00';
         const change1w = (sector.change_1w || 0);
