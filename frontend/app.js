@@ -53,6 +53,109 @@ const COMPOSITE_FACTOR_DISPLAY_ORDER = [
     'savita'
 ];
 
+// === Staleness Indicators (P1) ===
+// Single source of truth for displaying data freshness across all Agora panels.
+
+/**
+ * Format a timestamp into a staleness display string + color class.
+ * @param {string|number|Date|null|undefined} timestamp - ISO string, epoch ms, or Date
+ * @returns {{text: string, className: string, fullTimestamp: string|null, ageSeconds: number|null}}
+ */
+function computeStaleness(timestamp) {
+  if (timestamp === null || timestamp === undefined || timestamp === '') {
+    return {
+      text: 'no timestamp',
+      className: 'staleness-indicator stale-red',
+      fullTimestamp: null,
+      ageSeconds: null,
+    };
+  }
+
+  let date;
+  try {
+    date = (timestamp instanceof Date) ? timestamp : new Date(timestamp);
+    if (isNaN(date.getTime())) throw new Error('invalid date');
+  } catch {
+    return {
+      text: 'invalid timestamp',
+      className: 'staleness-indicator stale-red',
+      fullTimestamp: String(timestamp),
+      ageSeconds: null,
+    };
+  }
+
+  const ageMs = Date.now() - date.getTime();
+  const ageSeconds = Math.floor(ageMs / 1000);
+  const fullTimestamp = date.toISOString();
+
+  // > 24 hours: show date + time
+  let text;
+  if (ageSeconds > 86400) {
+    text = `as of ${date.toLocaleDateString()} ${date.toLocaleTimeString()}`;
+  } else {
+    text = `as of ${date.toLocaleTimeString()}`;
+  }
+
+  // Color by staleness
+  let className = 'staleness-indicator';
+  if (ageSeconds > 300) {
+    className += ' stale-red';
+  } else if (ageSeconds > 60) {
+    className += ' stale-amber';
+  }
+
+  return { text, className, fullTimestamp, ageSeconds };
+}
+
+/**
+ * Render or update a staleness indicator inside a target element.
+ * Idempotent — calling repeatedly updates the existing indicator rather than creating duplicates.
+ * @param {HTMLElement} targetEl - The container element to add the indicator to
+ * @param {string|number|Date|null} timestamp - The data timestamp
+ */
+function renderStalenessIndicator(targetEl, timestamp) {
+  if (!targetEl) return;
+
+  const { text, className, fullTimestamp } = computeStaleness(timestamp);
+
+  let indicator = targetEl.querySelector(':scope > .staleness-indicator');
+  if (!indicator) {
+    indicator = document.createElement('span');
+    targetEl.appendChild(indicator);
+  }
+  indicator.className = className;
+  indicator.textContent = text;
+  if (fullTimestamp) {
+    indicator.title = fullTimestamp;
+  } else {
+    indicator.removeAttribute('title');
+  }
+}
+
+/**
+ * Refresh all staleness indicators on the page. Called on a 1s timer to keep
+ * age calculations current without re-fetching data.
+ */
+function refreshAllStalenessIndicators() {
+  const indicators = document.querySelectorAll('.staleness-indicator');
+  indicators.forEach(indicator => {
+    const fullTs = indicator.getAttribute('title');
+    if (!fullTs) return;
+    const { text, className } = computeStaleness(fullTs);
+    indicator.className = className;
+    indicator.textContent = text;
+  });
+}
+
+// Start the global staleness refresh timer once the DOM is ready
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => {
+    setInterval(refreshAllStalenessIndicators, 1000);
+  });
+} else {
+  setInterval(refreshAllStalenessIndicators, 1000);
+}
+
 // --- Daily Quote System ---
 const DAILY_QUOTES = {
     greedy: [
@@ -2025,6 +2128,8 @@ function renderCompositeBias(data, dailyData = null) {
         const timeAgo = getTimeAgo(new Date(data.timestamp));
         lastUpdateEl.textContent = `Last update: ${timeAgo}`;
     }
+
+    renderStalenessIndicator(document.getElementById('compositeBiasBanner'), data.timestamp);
 }
 
 function initCompositeBiasControls() {
@@ -3564,6 +3669,12 @@ function renderSignals() {
     attachReloadPreviousHandler();
     attachDynamicKbHandlers(container);
     reinsertLightningCards();
+
+    // Staleness: most recent signal timestamp
+    const latestSignalTs = allSignals.length
+        ? allSignals.reduce((a, b) => (new Date(a.timestamp) > new Date(b.timestamp) ? a : b)).timestamp
+        : null;
+    renderStalenessIndicator(container, latestSignalTs);
 }
 
 function getCryptoFilterState() {
@@ -5773,6 +5884,8 @@ async function _fetchSectorLeaders(sectorEtf, fast) {
                 staleEl.style.display = 'none';
             }
         }
+        var popupModal = document.querySelector('.sector-popup-modal');
+        renderStalenessIndicator(popupModal, data.updated_at);
 
         if (fast && _sectorPopupFullData) {
             // Merge fast data into cached full data
@@ -7930,6 +8043,8 @@ function renderSectorHeatmap(sectors, heatmapData) {
             if (etf) openSectorPopup(etf);
         });
     });
+
+    renderStalenessIndicator(container, heatmapData && heatmapData.timestamp);
 }
 
 // Squarified treemap: attempt to produce near-square rectangles filling W×H
@@ -8310,6 +8425,8 @@ function renderFlowRadar(data) {
             if (ticker) changeChartSymbol(ticker);
         });
     });
+
+    renderStalenessIndicator(radarContent, data.fetched_at || data.timestamp);
 }
 
 // Initialize on page load
@@ -9670,6 +9787,11 @@ function renderPositionsEnhanced() {
             if (position) openPositionRemoveModal(position);
         });
     });
+
+    // Staleness: show age of oldest position's MTM price
+    const priceTimestamps = filteredPositions.map(p => p.price_updated_at).filter(Boolean);
+    const oldestPriceTs = priceTimestamps.length ? priceTimestamps.reduce((a, b) => a < b ? a : b) : null;
+    renderStalenessIndicator(container, oldestPriceTs);
 }
 
 function calculatePnL(position, currentPrice) {
@@ -11763,6 +11885,7 @@ async function loadMacroStrip() {
         if (!resp.ok) return;
         const data = await resp.json();
         renderMacroStrip(data.tickers);
+        renderStalenessIndicator(document.getElementById('macroStripInner'), data.timestamp || new Date().toISOString());
     } catch (e) {
         console.error('Macro strip load failed:', e);
     }
@@ -11893,6 +12016,8 @@ function renderPortfolioGreeks(data) {
     _setGreekTooltip('greekGamma', 'gamma', gamma);
     _setGreekTooltip('greekTheta', 'theta', theta);
     _setGreekTooltip('greekVega', 'vega', vega);
+
+    renderStalenessIndicator(row, data.timestamp || data.computed_at);
 }
 
 function _setGreekTooltip(elId, greek, value) {
@@ -12115,6 +12240,7 @@ function showHermesAlert(event) {
     }
 
     container.style.display = 'block';
+    renderStalenessIndicator(container, event.created_at || event.event_date || event.detected_at);
 
     if (event.tier >= 2) {
         try {
@@ -12293,6 +12419,7 @@ async function fetchHydraScores() {
             `;
             tbody.appendChild(row);
         });
+        renderStalenessIndicator(document.getElementById('hydra-body'), data.timestamp || data.fetched_at || new Date().toISOString());
     } catch (err) {
         console.error('Hydra scores fetch error:', err);
     }
@@ -12621,6 +12748,7 @@ async function loadWatchlist() {
         const data = await resp.json();
         renderWatchlistCards(data.long_ideas || [], 'watchlist-long-cards', 'long');
         renderWatchlistCards(data.short_ideas || [], 'watchlist-short-cards', 'short');
+        renderStalenessIndicator(document.getElementById('watchlist-long-cards'), data.timestamp || data.updated_at || new Date().toISOString());
     } catch (err) {
         console.error('Watchlist load error:', err);
     }
@@ -12787,6 +12915,8 @@ async function loadChronosEarnings() {
 
         renderChronosEntries(data.book_impact || [], 'chronos-book-impact');
         renderChronosEntries(data.market_movers || [], 'chronos-market-movers');
+        const chronosTs = data.timestamp || data.fetched_at || new Date().toISOString();
+        renderStalenessIndicator(document.getElementById('chronos-book-impact'), chronosTs);
     } catch (err) {
         console.error('Chronos load error:', err);
         const el = document.getElementById('chronos-book-impact');

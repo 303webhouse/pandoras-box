@@ -13525,3 +13525,48 @@ body[data-mode="analytics"] .analytics-shell {
     background-color: rgba(244, 63, 94, 0.04);
   }
 }
+
+/* === Staleness indicators (P1) === */
+.staleness-indicator {
+  position: absolute;
+  bottom: 6px;
+  right: 8px;
+  font-size: 10px;
+  line-height: 1;
+  color: #888;
+  font-family: monospace;
+  letter-spacing: 0.02em;
+  pointer-events: auto;
+  cursor: help;
+  z-index: 1;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.staleness-indicator.stale-amber {
+  color: #f59e0b;
+}
+
+.staleness-indicator.stale-red {
+  color: #ef4444;
+  font-weight: 500;
+}
+
+/* Ensure parent panels have position relative so absolute positioning works */
+.panel,
+.card,
+.widget,
+[data-staleness-target],
+#sectorHeatmap,
+#openPositions,
+#tradeSignals,
+#portfolioGreeksRow,
+#compositeBiasBanner,
+#radarContent,
+#hermes-flash-container,
+#hydra-body,
+#macroStripInner,
+.sector-popup-modal,
+#watchlist-long-cards {
+  position: relative;
+}
