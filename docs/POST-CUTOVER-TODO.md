@@ -22,9 +22,36 @@
 |---|---|---|
 | UW migration final cutover (MTM, sectors, context_modifier) | ✅ DONE | `brief-uw-migration-final-cutover.md` (4/5 PASS) |
 | PROJECT_RULES.md data source hierarchy update | ✅ DONE | commit `805e7747` |
-| Post-cutover cleanup (delete Polygon dead code) | 📝 BRIEFED | `brief-post-cutover-cleanup.md` |
+| Post-cutover cleanup (delete Polygon dead code) | ✅ DONE | `brief-post-cutover-cleanup.md` — commit `eb3a250`, 5/6 PASS (option-value: 404 expected after-hours, retest tomorrow during market hours) |
 | P1 Freshness Indicators | 📝 BRIEFED | `brief-p1-freshness-indicators.md` |
 | Pythia v2.4 PineScript (session reset bug fix) | 🟡 IN PROGRESS | inline in conversation, awaiting Nick to load + test in TradingView |
+
+---
+
+## Open verification follow-up — `option-value` endpoint
+
+**Status:** 📋 CAPTURED — retest tomorrow during market hours
+**Context:** Cleanup commit `eb3a250` swapped `/market/option-value` from `polygon_options` to `uw_api`. Verified it no longer 500s — but during after-hours testing it returned 404 ("No option data found"), which is expected when the underlying yfinance options chain has no live quotes.
+
+**Action required tomorrow (during market hours):**
+```bash
+curl -s -H "X-API-Key: $PIVOT_API_KEY" \
+  "https://pandoras-box-production.up.railway.app/api/market/option-value?underlying=SPY&long_strike=550&expiry=2026-05-16&option_type=call" \
+  | python3 -m json.tool
+```
+Expected: returns a price/value dict with non-null `mid` or `value`. If 404 persists during market hours, file a bug.
+
+---
+
+## Remaining safe Polygon import-fallback blocks
+
+**Status:** 📋 CAPTURED — non-urgent, can clean up in any future pass
+**Context:** Per CC's grep after cleanup commit `eb3a250`, two files still have Polygon references inside `try/except ImportError` blocks. They degrade silently with the deleted Polygon files, so they're not bugs — just untidy:
+
+- `backend/bias_filters/gex.py:47-50` — Polygon fallback inside try/except (degrades gracefully)
+- `backend/enrichment/signal_enricher.py:180` — Polygon fallback inside try/except (degrades gracefully)
+
+**Action when convenient:** Remove the `except ImportError` blocks and any Polygon references inside them. Probably bundles cleanly into the P3 backend unification work.
 
 ---
 
@@ -59,9 +86,9 @@
 **Status:** 📋 CAPTURED — low UX delta, high coherence value, ~1 day CC work
 **Source:** Titans audit ATLAS A6-A12 + AEGIS AE3 follow-through
 
-**Why:** Many bias factors and SPY/ETF queries still call yfinance even though UW provides the same data with consolidated quotes. No user-visible change but reduces foot-guns and creates one source of truth.
+**Why:** Many bias factors and SPY/ETF queries still call yfinance even though UW provides the same data with consolidated quotes. No user-visible change but reduces foot-guns and creates one source of truth. **Bundle the remaining `gex.py` and `signal_enricher.py` Polygon fallback cleanup into this work.**
 
-**Scope (~9 factor scorers + sector_snapshot + 1 IV rank fix):**
+**Scope (~9 factor scorers + sector_snapshot + 1 IV rank fix + 2 fallback-block cleanups):**
 
 | Factor / function | Current source | Migrate to | File |
 |---|---|---|---|
@@ -75,6 +102,8 @@
 | `iv_regime` | yfinance options chain | UW `get_iv_rank("SPY")` (purpose-built percentile) | `bias_filters/iv_regime.py` |
 | `sector_snapshot.fetch_sector_prices_yfinance` | yfinance | UW `get_snapshot` × 12 | `integrations/sector_snapshot.py` |
 | `sector_snapshot.refresh_sma_cache` | yfinance | UW `get_bars` × 12 | `integrations/sector_snapshot.py` |
+| Polygon fallback block cleanup | dead code | remove | `bias_filters/gex.py:47-50` |
+| Polygon fallback block cleanup | dead code | remove | `enrichment/signal_enricher.py:180` |
 
 **Keep on yfinance** (UW doesn't cover):
 - VIX, indices (`^VIX`, `^GSPC`)
@@ -82,9 +111,8 @@
 - DXY (`DX-Y.NYB`)
 
 **Pre-brief checklist:**
-1. Verify cleanup brief has shipped first
-2. Verify P2 has shipped (or is parallel-safe)
-3. Confirm UW daily call budget headroom — adding ~30 calls/cycle × multiple bias scoring loops could be significant
+1. Verify P2 has shipped (or is parallel-safe)
+2. Confirm UW daily call budget headroom — adding ~30 calls/cycle × multiple bias scoring loops could be significant
 
 ---
 
@@ -147,23 +175,32 @@ Each is independently shippable. Listed in rough priority order for trader value
 
 ---
 
-## Open Bugs / Annoyances
+## Closed Today
 
 ### Holy Grail signal logging TypeError
-**Status:** ✅ DONE in cutover (commit landed via `brief-uw-migration-final-cutover.md` Edits 4.2 + 4.3)
+**Status:** ✅ DONE — cutover commit (Edits 4.2 + 4.3 in `brief-uw-migration-final-cutover.md`)
 **Was:** `%d format` against VARCHAR `signal_id` → spammed logs
 **Fix:** Changed to `%s` in two places in `context_modifier.py`
 
 ### `get_redis_client` NameError on Greeks endpoint
-**Status:** ✅ DONE in cutover (Edit 1.1)
+**Status:** ✅ DONE — cutover commit (Edit 1.1)
 
-### `mtm-compare` 401 (post-cutover)
-**Status:** 📝 BRIEFED — will resolve via cleanup brief deletion
-**Note:** Endpoint will return 404 after cleanup brief ships. That's the desired state — its role as migration scaffolding is complete.
+### `mtm-compare` 401
+**Status:** ✅ DONE — cleanup commit `eb3a250`. Endpoint now returns 404 (route deleted, scaffolding role complete)
+
+### `polygon-health` endpoint
+**Status:** ✅ DONE — cleanup commit `eb3a250`. Endpoint now returns 404 (route deleted)
+
+### `market_data.py` Polygon imports
+**Status:** ✅ DONE — cleanup commit `eb3a250`. `/market/option-value` now uses uw_api; module docstring updated; dead Polygon news fallback removed; unused constants removed
+
+---
+
+## Open Bugs / Annoyances
 
 ### `_fetch_sector_snapshot` "5s TTL" cache TTL might be too short
 **Status:** 📋 CAPTURED — observe + adjust
-**Note:** Post-cutover, with UW now serving sector snapshots, the 5s TTL might cause excessive UW calls. Monitor UW health endpoint after Cleanup deploys; if call rate spikes, bump TTL to 30-60s.
+**Note:** Post-cutover, with UW now serving sector snapshots, the 5s TTL might cause excessive UW calls. Monitor UW health endpoint over the coming days; if call rate spikes, bump TTL to 30-60s.
 
 ---
 
@@ -183,6 +220,7 @@ Each is independently shippable. Listed in rough priority order for trader value
 - Always include explicit find/replace anchors
 - Always include verification curls
 - Always include rollback plan
+- **Always grep for the targeted patterns before writing the brief.** The cleanup brief missed `market_data.py` because the initial scan didn't grep `polygon_options|polygon_equities|mtm_compare|polygon_health` against the full backend tree. CC's pre-push grep caught it. Build that grep step into all future cleanup-style briefs.
 
 ---
 
@@ -206,4 +244,4 @@ Each is independently shippable. Listed in rough priority order for trader value
 
 ---
 
-*Last updated: 2026-04-27. Update this file every time something moves between statuses.*
+*Last updated: 2026-04-27 — cleanup brief shipped (commit `eb3a250`).*
