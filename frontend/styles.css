@@ -13526,6 +13526,95 @@ body[data-mode="analytics"] .analytics-shell {
   }
 }
 
+/* ── P2: Sector drill-down enrichment ─────────────────────────── */
+
+.sector-flow-pct {
+    font-size: 0.85em;
+    color: var(--text-secondary, #888);
+    margin-left: 4px;
+}
+
+.sector-iv-pill {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 0.8em;
+    font-weight: 600;
+    min-width: 28px;
+    text-align: center;
+    background: var(--surface-2, #2a2a2a);
+    color: var(--text-secondary, #aaa);
+}
+
+.sector-iv-pill.sector-iv-low {
+    background: rgba(0, 230, 118, 0.15);
+    color: var(--accent-green, #00e676);
+}
+
+.sector-iv-pill.sector-iv-mid {
+    background: rgba(255, 167, 38, 0.15);
+    color: var(--accent-amber, #ffa726);
+}
+
+.sector-iv-pill.sector-iv-high {
+    background: rgba(255, 82, 82, 0.15);
+    color: var(--accent-red, #ff5252);
+}
+
+.sector-iv-pill.sector-iv-na {
+    background: transparent;
+    color: var(--text-disabled, #555);
+    font-weight: 400;
+}
+
+.sector-dp-badge {
+    display: inline-block;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.75em;
+    font-weight: 700;
+    background: rgba(124, 77, 255, 0.2);
+    color: #b39ddb;
+    letter-spacing: 0.5px;
+}
+
+.sector-dp-badge.sector-dp-inactive {
+    background: transparent;
+    color: var(--text-disabled, #555);
+    font-weight: 400;
+    letter-spacing: 0;
+}
+
+/* Heatmap Flow/Price toggle */
+.heatmap-toggle {
+    display: inline-flex;
+    gap: 0;
+    border: 1px solid var(--border-color, #333);
+    border-radius: 6px;
+    overflow: hidden;
+    margin-left: 12px;
+}
+
+.heatmap-toggle-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary, #888);
+    padding: 4px 12px;
+    font-size: 0.85em;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+
+.heatmap-toggle-btn:hover {
+    background: var(--surface-2, #2a2a2a);
+}
+
+.heatmap-toggle-btn.active {
+    background: var(--accent-blue, #2196f3);
+    color: white;
+    font-weight: 600;
+}
+
 /* ── P1.1: Live refresh pulse animation ────────────────────── */
 
 .live-data-indicator {
