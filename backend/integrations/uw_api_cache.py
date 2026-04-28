@@ -19,7 +19,7 @@ CACHE_TTLS = {
     "greeks": 300,        # 5 min
     "darkpool": 300,      # 5 min
     "market_tide": 60,    # 1 min
-    "quote": 15,          # 15s
+    "quote": 60,          # 60s (P1.7 fix 2026-04-28) — was 15s, hammered UW /state, tripped breaker. Heatmap+macro polls every 10s, served from cache 4x.
     "info": 86400,        # 24 hours (P1.6 fix 2026-04-28) — metadata changes quarterly, was 15s causing UW rate limit cascade
     "option_contracts": 300,  # 5 min
     "iv_rank": 300,       # 5 min
