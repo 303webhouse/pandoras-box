@@ -12045,19 +12045,15 @@ async function loadThemeIntel() {
 // ===== MACRO TICKER STRIP =====
 async function loadMacroStrip() {
     try {
+        // P1.3: cleanup any leftover LIVE indicator from prior deploys
+        var leftover = document.querySelector('.macro-strip .live-data-indicator');
+        if (leftover) leftover.remove();
+
         const resp = await fetch(`${API_URL}/macro/strip`);
         if (!resp.ok) return;
         const data = await resp.json();
         renderMacroStrip(data.tickers);
-
-        // P1.1: live refresh pulse — anchor to parent of scrolling element
-        var stripInner = document.getElementById('macroStripInner');
-        var stripContainer = stripInner ? stripInner.parentElement : null;
-        var pulseTarget = stripContainer
-            ? (stripContainer.querySelector('.macro-strip-status') || stripContainer)
-            : null;
-        ensureLiveDataIndicator(pulseTarget, 'macroStrip', 'LIVE');
-        pulseLiveDataIndicator('macroStrip');
+        // P1.3: scrolling ticker motion IS the live signal — no separate pulse
     } catch (e) {
         console.error('Macro strip load failed:', e);
     }
