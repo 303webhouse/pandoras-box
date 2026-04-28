@@ -1,23 +1,26 @@
 """
 Macro Strip — persistent cross-asset ticker strip.
-Single Polygon snapshot call for macro tickers, 10s cache during market hours.
+
+Fetches latest quotes for ~16 macro ETF proxies in parallel via UW snapshot.
+Cached 10s during market hours, 5min when closed.
+
+Migration history:
+- Originally Polygon batch snapshot endpoint
+- Migrated to UW (via get_snapshot) on 2026-04-28 after Polygon plan cancellation
 """
 
+import asyncio
 import json
 import logging
-import os
 from datetime import datetime, timezone
 
-import aiohttp
 from fastapi import APIRouter
 
 from database.redis_client import get_redis_client
+from integrations.uw_api import get_snapshot
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/macro", tags=["macro"])
-
-POLYGON_API_KEY = os.getenv("POLYGON_API_KEY", "")
-SNAPSHOT_URL = "https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers"
 
 # Macro tickers: ETF proxies for cross-asset monitoring
 MACRO_TICKERS = {
@@ -56,6 +59,35 @@ def _is_market_hours():
     return False
 
 
+async def _fetch_one(ticker: str) -> dict | None:
+    """Fetch one snapshot via UW; return ticker entry or None on failure."""
+    try:
+        snap = await get_snapshot(ticker)
+        if not snap:
+            return None
+        info = MACRO_TICKERS[ticker]
+        # get_snapshot returns Polygon-compatible schema: day.c (close), prevDay.c (prev close)
+        day = snap.get("day") or {}
+        prev = snap.get("prevDay") or {}
+        price = day.get("c") or prev.get("c") or 0
+        prev_close = prev.get("c") or 0
+        change_pct = (
+            round((price - prev_close) / prev_close * 100, 2)
+            if prev_close
+            else 0
+        )
+        return {
+            "ticker": ticker,
+            "label": info["label"],
+            "name": info["name"],
+            "price": round(price, 2) if price else 0,
+            "change_pct": change_pct,
+        }
+    except Exception as e:
+        logger.warning("Macro strip UW fetch failed for %s: %s", ticker, e)
+        return None
+
+
 @router.get("/strip")
 async def get_macro_strip():
     """Return cross-asset macro data for the persistent ticker strip."""
@@ -70,39 +102,19 @@ async def get_macro_strip():
             pass
 
     tickers = list(MACRO_TICKERS.keys())
-    result_data = []
 
-    if POLYGON_API_KEY:
-        try:
-            ticker_str = ",".join(tickers)
-            url = f"{SNAPSHOT_URL}?tickers={ticker_str}&apiKey={POLYGON_API_KEY}"
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        for t in data.get("tickers", []):
-                            sym = t.get("ticker", "")
-                            if sym not in MACRO_TICKERS:
-                                continue
-                            day = t.get("day", {})
-                            prev = t.get("prevDay", {})
-                            price = day.get("c") or prev.get("c") or 0
-                            prev_close = prev.get("c") or 0
-                            change_pct = round((price - prev_close) / prev_close * 100, 2) if prev_close else 0
-                            info = MACRO_TICKERS[sym]
-                            result_data.append({
-                                "ticker": sym,
-                                "label": info["label"],
-                                "name": info["name"],
-                                "price": round(price, 2),
-                                "change_pct": change_pct,
-                            })
-        except Exception as e:
-            logger.error("Macro strip Polygon fetch failed: %s", e)
+    # Fetch all snapshots in parallel via UW
+    results = await asyncio.gather(
+        *(_fetch_one(t) for t in tickers),
+        return_exceptions=False,
+    )
+    result_data = [r for r in results if r is not None]
 
-    # Sort by MACRO_TICKERS order
+    # Sort by MACRO_TICKERS order (gather() may return in any order)
     ticker_order = list(MACRO_TICKERS.keys())
-    result_data.sort(key=lambda x: ticker_order.index(x["ticker"]) if x["ticker"] in ticker_order else 99)
+    result_data.sort(
+        key=lambda x: ticker_order.index(x["ticker"]) if x["ticker"] in ticker_order else 99
+    )
 
     result = {
         "tickers": result_data,
