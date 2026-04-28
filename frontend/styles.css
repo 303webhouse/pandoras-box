@@ -13585,34 +13585,71 @@ body[data-mode="analytics"] .analytics-shell {
     letter-spacing: 0;
 }
 
-/* Heatmap Flow/Price toggle */
+/* P1.2: Heatmap Flow/Price toggle — compact pill, absolute-positioned top-right of heatmap */
+#sectorsTabContent {
+    position: relative;
+}
+
 .heatmap-toggle {
+    position: absolute;
+    top: 4px;
+    right: 8px;
+    z-index: 3;
     display: inline-flex;
-    gap: 0;
-    border: 1px solid var(--border-color, #333);
-    border-radius: 6px;
+    gap: 1px;
+    background: rgba(10, 14, 39, 0.7);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
     overflow: hidden;
-    margin-left: 12px;
+    -webkit-backdrop-filter: blur(4px);
+    backdrop-filter: blur(4px);
+    pointer-events: auto;
+    font-family: 'Orbit', sans-serif;
 }
 
 .heatmap-toggle-btn {
     background: transparent;
     border: none;
-    color: var(--text-secondary, #888);
-    padding: 4px 12px;
-    font-size: 0.85em;
+    color: var(--text-secondary);
+    padding: 2px 9px;
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
     cursor: pointer;
     transition: background 0.15s, color 0.15s;
+    line-height: 16px;
 }
 
 .heatmap-toggle-btn:hover {
-    background: var(--surface-2, #2a2a2a);
+    background: rgba(20, 184, 166, 0.08);
+    color: var(--text-primary);
 }
 
 .heatmap-toggle-btn.active {
-    background: var(--accent-blue, #2196f3);
-    color: white;
-    font-weight: 600;
+    background: var(--accent-teal);
+    color: var(--dark-bg);
+    font-weight: 700;
+}
+
+/* P1.2: Flow mode "limited data" hint */
+.heatmap-flow-hint {
+    position: absolute;
+    bottom: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 3;
+    background: rgba(10, 14, 39, 0.85);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 4px 10px;
+    font-size: 10px;
+    color: var(--text-secondary);
+    letter-spacing: 0.3px;
+    -webkit-backdrop-filter: blur(4px);
+    backdrop-filter: blur(4px);
+    pointer-events: none;
+    font-family: 'Orbit', sans-serif;
 }
 
 /* ── P1.1: Live refresh pulse animation ────────────────────── */
@@ -13634,7 +13671,7 @@ body[data-mode="analytics"] .analytics-shell {
     width: 7px;
     height: 7px;
     border-radius: 50%;
-    background: var(--accent-green, #00e676);
+    background: var(--accent-lime);
     opacity: 0.45;
     box-shadow: 0 0 0 0 transparent;
     transition: background 0.3s, opacity 0.3s;
@@ -13648,12 +13685,12 @@ body[data-mode="analytics"] .analytics-shell {
     0% {
         opacity: 1;
         transform: scale(1.6);
-        box-shadow: 0 0 8px var(--accent-green, #00e676);
+        box-shadow: 0 0 8px var(--accent-lime);
     }
     50% {
         opacity: 0.9;
         transform: scale(1.2);
-        box-shadow: 0 0 4px var(--accent-green, #00e676);
+        box-shadow: 0 0 4px var(--accent-lime);
     }
     100% {
         opacity: 0.45;
@@ -13663,33 +13700,34 @@ body[data-mode="analytics"] .analytics-shell {
 }
 
 .live-data-dot.stalled {
-    background: var(--accent-amber, #ffa726);
-    opacity: 0.55;
+    background: var(--pnl-negative);
+    opacity: 0.7;
     animation: none;
 }
 
 .live-data-indicator.stalled .live-data-label::after {
     content: " · STALLED";
-    color: var(--accent-amber, #ffa726);
+    color: var(--pnl-negative);
 }
 
-/* P1.1: Macro strip live indicator positioning */
-.macro-strip-container {
+/* P1.2: Macro strip live indicator positioning (fixes ticker disappearance) */
+.macro-strip {
     position: relative;
 }
 
-.macro-strip-container .live-data-indicator {
+.macro-strip .live-data-indicator {
     position: absolute;
     top: 50%;
     right: 12px;
     transform: translateY(-50%);
     z-index: 2;
-    background: rgba(0, 0, 0, 0.4);
+    background: rgba(10, 14, 39, 0.7);
     -webkit-backdrop-filter: blur(4px);
     backdrop-filter: blur(4px);
     padding: 2px 8px;
     border-radius: 10px;
     pointer-events: none;
+    margin-left: 0;
 }
 
 .sector-popup-footer {

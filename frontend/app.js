@@ -8017,21 +8017,22 @@ function initOptionsFlow() {
         });
     });
 
-    // P2: heatmap Flow/Price toggle
+    // P1.2: heatmap Flow/Price toggle — anchored to heatmap container (was: row above)
     (function initHeatmapToggle() {
-        var tabContent = document.getElementById('sectorsTabContent');
-        if (!tabContent || tabContent.querySelector('.heatmap-toggle')) return;
-        var toggleHtml = '<div class="heatmap-toggle" style="padding:6px 8px 2px">'
-            + '<button class="heatmap-toggle-btn active" data-metric="price">Price</button>'
-            + '<button class="heatmap-toggle-btn" data-metric="flow">Flow</button>'
+        var heatmapEl = document.getElementById('sectorHeatmap');
+        if (!heatmapEl || heatmapEl.parentElement.querySelector('.heatmap-toggle')) return;
+        var toggleHtml = '<div class="heatmap-toggle">'
+            + '<button class="heatmap-toggle-btn active" data-metric="price" title="Color cells by daily price change">Price</button>'
+            + '<button class="heatmap-toggle-btn" data-metric="flow" title="Color cells by aggregate options flow direction">Flow</button>'
             + '</div>';
-        tabContent.insertAdjacentHTML('afterbegin', toggleHtml);
-        tabContent.querySelectorAll('.heatmap-toggle-btn').forEach(function(btn) {
+        // Insert into the heatmap's parent so the toggle can absolute-position relative to it
+        heatmapEl.parentElement.insertAdjacentHTML('afterbegin', toggleHtml);
+        heatmapEl.parentElement.querySelectorAll('.heatmap-toggle-btn').forEach(function(btn) {
             btn.addEventListener('click', function() {
                 var metric = btn.dataset.metric;
                 if (metric === _heatmapMetric) return;
                 _heatmapMetric = metric;
-                tabContent.querySelectorAll('.heatmap-toggle-btn').forEach(function(b) {
+                heatmapEl.parentElement.querySelectorAll('.heatmap-toggle-btn').forEach(function(b) {
                     b.classList.toggle('active', b.dataset.metric === metric);
                 });
                 loadSectorHeatmap();
@@ -8072,6 +8073,26 @@ async function loadSectorHeatmap() {
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
         renderSectorHeatmap(data.sectors, data);
+
+        // P1.2: in flow mode, show "limited flow data" hint when most sectors are neutral
+        var heatmapEl = document.getElementById('sectorHeatmap');
+        var existingHint = heatmapEl && heatmapEl.parentElement.querySelector('.heatmap-flow-hint');
+        if (_heatmapMetric === 'flow' && data.sectors && data.sectors.length > 0) {
+            var neutralCount = data.sectors.filter(function(s) {
+                return !s.flow_direction || s.flow_direction === 'neutral';
+            }).length;
+            var neutralPct = neutralCount / data.sectors.length;
+            if (neutralPct >= 0.8) {
+                if (!existingHint) {
+                    var hintHtml = '<div class="heatmap-flow-hint">Limited flow data — populates during market hours</div>';
+                    heatmapEl.parentElement.insertAdjacentHTML('beforeend', hintHtml);
+                }
+            } else if (existingHint) {
+                existingHint.remove();
+            }
+        } else if (existingHint) {
+            existingHint.remove();
+        }
 
         // P1.1: live refresh pulse
         var heatmapHeader = document.querySelector('#sectorHeatmap .heatmap-header')
