@@ -515,6 +515,42 @@ async def signal_stats(
     start: Optional[str] = None,
     end: Optional[str] = None,
 ):
+    """
+    P1.4 HOTFIX 2026-04-28: Returning stub response. Endpoint was timing out
+    (>10s) during market hours due to heavy convergence joins, blocking the
+    single worker. Re-enable after analytics backend optimization.
+    """
+    return {
+        "window_days": days,
+        "filters_applied": {
+            "source": source, "ticker": ticker, "direction": direction,
+            "bias_regime": bias_regime, "conviction": conviction,
+            "day_of_week": day_of_week, "hour_of_day": hour_of_day,
+            "start": start, "end": end,
+        },
+        "total_signals": 0,
+        "with_outcomes": 0,
+        "accuracy": {
+            "overall": 0,
+            "by_direction": {}, "by_regime": {}, "by_day_of_week": {},
+            "by_hour": {}, "by_conviction": {},
+        },
+        "accuracy_by_score_band": {},
+        "excursion": {
+            "avg_mfe_pct": 0, "avg_mae_pct": 0, "mfe_mae_ratio": 0,
+            "median_mfe_pct": 0, "median_mae_pct": 0,
+        },
+        "false_signal_rate": 0,
+        "avg_time_to_mfe_hours": 0,
+        "convergence": {
+            "convergence_signals": 0, "convergence_accuracy": 0,
+            "solo_signals": 0, "solo_accuracy": 0,
+        },
+        "timeline": [],
+        "stub": True,
+        "stub_reason": "P1.4 hotfix - endpoint disabled to prevent worker stalls during market hours",
+    }
+    # Original logic preserved below — re-enable after backend optimization
     rows = await get_signal_stats_rows(
         source=None,
         ticker=ticker,
@@ -2503,8 +2539,21 @@ async def get_oracle_insights(
 ):
     """
     The Oracle — pre-computed analytics payload.
-    Served from Redis cache (refreshed hourly). Falls back to live compute.
+
+    P1.4 HOTFIX 2026-04-28: Returning stub response. Endpoint was holding the
+    single worker for 8+ seconds during market hours (compute_oracle_payload
+    failures), blocking all parallel requests and causing 502 cascades.
+    Re-enable after analytics backend is optimized + worker count is bumped
+    with proper background-task gating.
     """
+    return {
+        "system_health": {},
+        "narrative": None,
+        "current_streak": None,
+        "stub": True,
+        "stub_reason": "P1.4 hotfix - endpoint disabled to prevent worker stalls during market hours",
+    }
+    # Original logic preserved below — re-enable after backend optimization
     from database.redis_client import get_redis_client
 
     cache_key = f"oracle:insights:{days}:{account or 'ALL'}:{asset_class or 'ALL'}"
