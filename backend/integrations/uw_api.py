@@ -159,37 +159,58 @@ async def get_snapshot(ticker: str) -> Optional[Dict[str, Any]]:
     """
     Get latest snapshot for a ticker. Matches polygon_equities.get_snapshot() schema:
     {ticker, day: {o, h, l, c, v}, prevDay: {o, h, l, c, v}, lastTrade: {p, s, t}, ...}
+
+    P1.5 HOTFIX 2026-04-28: Replaced yfinance with UW /state endpoint for live OHLCV.
+    yfinance was returning stale data during market hours — XLK showed +0.22% when
+    actual was -0.37%, prices off by $3+. Macro strip was returning empty arrays.
+    UW /state endpoint returns: close, open, high, low, volume, total_volume, prev_close.
     """
     cached = await cache_get("quote", ticker.upper())
     if cached:
         return cached
 
-    data = await _uw_request(f"/api/stock/{ticker.upper()}/info")
-    if not data or "data" not in data:
+    # Fetch /info (metadata) and /state (live OHLCV) in parallel
+    info_task = _uw_request(f"/api/stock/{ticker.upper()}/info")
+    state_task = _uw_request(f"/api/stock/{ticker.upper()}/state")
+    info_resp, state_resp = await asyncio.gather(info_task, state_task)
+
+    if not state_resp or "data" not in state_resp:
+        logger.warning("UW state unavailable for %s — returning None", ticker)
         return None
 
-    info = data["data"]
-    # UW /info doesn't have OHLCV — supplement with yfinance for real-time
-    price_data = await _get_yfinance_quote(ticker)
+    state = state_resp["data"]
+    info = info_resp.get("data", {}) if info_resp else {}
+
+    # UW /state returns numeric values as strings — parse safely
+    def _f(v):
+        try:
+            return float(v) if v is not None else None
+        except (ValueError, TypeError):
+            return None
+
+    close = _f(state.get("close"))
+    prev_close = _f(state.get("prev_close"))
+    change = (close - prev_close) if (close is not None and prev_close is not None) else None
+    change_pct = (change / prev_close * 100) if (change is not None and prev_close) else None
 
     result = {
         "ticker": ticker.upper(),
         "day": {
-            "o": price_data.get("open"),
-            "h": price_data.get("high"),
-            "l": price_data.get("low"),
-            "c": price_data.get("close"),
-            "v": price_data.get("volume"),
+            "o": _f(state.get("open")),
+            "h": _f(state.get("high")),
+            "l": _f(state.get("low")),
+            "c": close,
+            "v": state.get("total_volume") or state.get("volume"),
         },
         "prevDay": {
-            "c": price_data.get("prev_close"),
+            "c": prev_close,
         },
         "lastTrade": {
-            "p": price_data.get("close"),
+            "p": close,
         },
-        "todaysChange": price_data.get("change"),
-        "todaysChangePerc": price_data.get("change_pct"),
-        # Extra UW fields
+        "todaysChange": change,
+        "todaysChangePerc": change_pct,
+        # Extra UW fields from /info
         "beta": _safe_float(info.get("beta")),
         "sector": info.get("sector"),
         "full_name": info.get("full_name"),
