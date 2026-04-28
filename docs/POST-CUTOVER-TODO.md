@@ -24,8 +24,8 @@
 | PROJECT_RULES.md data source hierarchy update | ✅ DONE | commit `805e7747` |
 | Post-cutover cleanup (delete Polygon dead code) | ✅ DONE | `brief-post-cutover-cleanup.md` — commit `eb3a250`, 5/6 PASS (option-value: 404 expected after-hours, retest tomorrow during market hours) |
 | P1 Freshness Indicators | ✅ DONE-WITH-CLEANUP | `brief-p1-freshness-indicators.md` — verified working (GLD card red on 2-day-old data, DAX card red on 30-min-old data); cosmetic issues captured in P1.1 |
-| P1.1 Freshness cleanup + live-pulse animation | 📝 BRIEFED | `brief-p1.1-freshness-cleanup-and-pulse-animation.md` (commit `bd71a386`) |
-| P2 Sector Drill-Down Enrichment + Heatmap Flow Toggle + AE2/AE5 | 📝 BRIEFED | `brief-p2-sector-drill-down-enrichment.md` (commit `c0caf500`) |
+| P1.1 Freshness cleanup + live-pulse animation | ✅ CODE-VERIFIED 6/8 | `brief-p1.1-freshness-cleanup-and-pulse-animation.md` — Phase E skipped (HYDRA tab inconsistency); browser checks 7+8 pending tomorrow |
+| P2 Sector Drill-Down Enrichment + Heatmap Flow Toggle + AE2/AE5 | ✅ CODE-VERIFIED 11/13 | `brief-p2-sector-drill-down-enrichment.md` (commit `c0caf500`) — backend all PASS, AE2 confirmed wired (9,470/20,000 UW calls today); browser checks 8+9+10 pending tomorrow market hours |
 | Pythia v2.4 PineScript (session reset bug fix) | ✅ DONE — 191→54 dropout improvement (72%) | inline conversation; remaining 54 deferred to v2.5 |
 
 ---
@@ -34,12 +34,17 @@
 
 Read these in order:
 
-1. **Verify P1.1 + P2 land cleanly** when CC picks them up — the verification checklists are in each brief
-2. **Retest `option-value` endpoint during market hours** (curl below in dedicated section)
-3. **Re-run Pythia v2.4 watchlist alert wizard** during market hours — see if 54 dropout improves with fresh data
-4. **Re-screenshot NVDA popup + XLK drill-down** during market hours to test data-density theory
-5. **NEW: Define `/open`, `/close`, `/trade` skill scope** — Nick to provide details, Claude to draft skills
-6. **NEW: Define Insights + Open Positions card tweaks** — Nick to provide details, Claude to scope changes
+1. **P1.1 browser checks (7+8)** — Open Agora, verify pulse dots are visible on heatmap + macro strip, confirm no console errors. Optional: stall test (block `/sectors/heatmap` in DevTools, wait 35s, dot turns amber).
+2. **P2 browser checks (8+9+10)** — Open Agora during market hours:
+   - Heatmap header has Flow/Price toggle, clicking Flow recolors cells
+   - Sector drill-down popup has 12 columns including Flow %, IV pill, DP badge
+   - DevTools Network → click `/leaders` request → JSON contains `flow_call_pct`, `iv_rank`, `iv_tier`, `dp_active`, `dp_prints_30m`
+   - During market hours, flow_direction values should be populated (not all neutral as in after-hours testing)
+3. **Retest `option-value` endpoint during market hours** (curl below in dedicated section)
+4. **Re-run Pythia v2.4 watchlist alert wizard** during market hours — see if 54 dropout improves with fresh data
+5. **Re-screenshot NVDA popup + XLK drill-down** during market hours to test data-density theory
+6. **NEW: Define `/open`, `/close`, `/trade` skill scope** — Nick to provide details, Claude to draft skills
+7. **NEW: Define Insights + Open Positions card tweaks** — Nick to provide details, Claude to scope changes
 
 ---
 
@@ -211,8 +216,8 @@ Each is independently shippable. Listed in rough priority order for trader value
 
 ### AE2 — UW budget alarm at 70%
 
-**Status:** 📝 BRIEFED — bundled into P2 brief (Phase C)
-**Action:** Multi-threshold alarm (50/70/85/95%) with idempotent firing. Pages Discord webhook with severity tiers. Per-endpoint env-var caps deferred (non-goal — revisit if budget burn rate increases post-P2).
+**Status:** ✅ DONE (code-verified) — bundled into P2, multi-threshold alarm wired
+**Action shipped:** Multi-threshold alarm (50/70/85/95%) with idempotent firing. Pages Discord webhook with severity tiers. Confirmed live: UW health endpoint shows `daily_requests: 9470, daily_budget: 20000` — alerts will fire at 10K, 14K, 17K, 19K. Per-endpoint env-var caps deferred (non-goal). Will fire its first real alert when daily count crosses 10K (50% threshold).
 
 ### AE4 — yfinance circuit breaker
 
@@ -221,8 +226,8 @@ Each is independently shippable. Listed in rough priority order for trader value
 
 ### AE5 — FACTOR_CONFIG description fix
 
-**Status:** 📝 BRIEFED — bundled into P2 brief (Phase D)
-**Action:** Update `iv_regime` description in `bias_engine/composite.py` from "from Polygon chain" to "from UW IV rank endpoint" — matches actual post-cutover data source. (Single description fix; the broader source-attribution refactor was non-goal.)
+**Status:** ✅ DONE (code-verified) — bundled into P2, `iv_regime` description updated
+**Action shipped:** `iv_regime` description in `bias_engine/composite.py` now reads "from UW IV rank endpoint" — matches actual post-cutover data source. Verified by check 6 of P2 verification.
 
 ---
 
@@ -255,26 +260,24 @@ Each is independently shippable. Listed in rough priority order for trader value
 
 ### Holy Grail signal logging TypeError
 **Status:** ✅ DONE — cutover commit (Edits 4.2 + 4.3 in `brief-uw-migration-final-cutover.md`)
-**Was:** `%d format` against VARCHAR `signal_id` → spammed logs
-**Fix:** Changed to `%s` in two places in `context_modifier.py`
 
 ### `get_redis_client` NameError on Greeks endpoint
 **Status:** ✅ DONE — cutover commit (Edit 1.1)
 
-### `mtm-compare` 401
-**Status:** ✅ DONE — cleanup commit `eb3a250`. Endpoint now returns 404 (route deleted, scaffolding role complete)
-
-### `polygon-health` endpoint
-**Status:** ✅ DONE — cleanup commit `eb3a250`. Endpoint now returns 404 (route deleted)
-
-### `market_data.py` Polygon imports
-**Status:** ✅ DONE — cleanup commit `eb3a250`. `/market/option-value` now uses uw_api; module docstring updated; dead Polygon news fallback removed; unused constants removed
+### `mtm-compare` 401 + `polygon-health` endpoint + `market_data.py` Polygon imports
+**Status:** ✅ DONE — cleanup commit `eb3a250`
 
 ### Pythia v2.4 session reset bug
-**Status:** ✅ DONE — Loaded by Nick in TradingView 2026-04-27. Watchlist dropout went from 191 → 54 (72% improvement). Remaining failures deferred to v2.5 (extended-hours VA fallback + alert condition repaint protection).
+**Status:** ✅ DONE — Watchlist dropout went from 191 → 54 (72% improvement). Remaining failures deferred to v2.5.
 
 ### P1 Freshness Indicators
-**Status:** ✅ DONE-WITH-CLEANUP — Verified live in production. GLD card showing red `as of 4/25/2026 1:12:38 AM` (2+ days old) and DAX card showing red `as of 5:04:25 PM` (30 min old) confirm the staleness color logic is working correctly. All 12 panels wired. Cosmetic positioning issues + ISO tooltip dev-noise + auto-refreshing-panel mismatch captured in P1.1 brief — none block trading.
+**Status:** ✅ DONE-WITH-CLEANUP — All 12 panels wired, GLD/DAX color states verified. Cosmetic issues captured in P1.1.
+
+### P1.1 Freshness cleanup + live-pulse animation
+**Status:** ✅ CODE-VERIFIED 6/8 — Heatmap + macro strip pulse dots wired, popup indicator repositioned to footer, ISO tooltip removed, cursor:help removed. Phase E (HYDRA "Updated:" line) skipped due to tab inconsistency. Browser checks 7+8 pending tomorrow.
+
+### P2 Sector Drill-Down Enrichment
+**Status:** ✅ CODE-VERIFIED 11/13 — Backend all PASS (5 enriched fields on /leaders, heatmap metric param works, polygon constants gone, FACTOR_CONFIG description fixed). AE2 multi-threshold tracker confirmed wired (9,470/20,000 UW calls today). Browser checks 8+9+10 + market-hours verification of flow values pending tomorrow.
 
 ---
 
@@ -282,7 +285,7 @@ Each is independently shippable. Listed in rough priority order for trader value
 
 ### `_fetch_sector_snapshot` "5s TTL" cache TTL might be too short
 **Status:** 📋 CAPTURED — observe + adjust
-**Note:** Post-cutover, with UW now serving sector snapshots, the 5s TTL might cause excessive UW calls. Monitor UW health endpoint over the coming days; if call rate spikes, bump TTL to 30-60s.
+**Note:** Post-cutover, with UW now serving sector snapshots, the 5s TTL might cause excessive UW calls. Monitor UW health endpoint over the coming days; if call rate spikes, bump TTL to 30-60s. UW daily count was 9,470 at end-of-day on a moderate-activity day — comfortable headroom but worth watching.
 
 ---
 
@@ -332,4 +335,4 @@ Each is independently shippable. Listed in rough priority order for trader value
 
 ---
 
-*Last updated: 2026-04-27 EOD — added Tomorrow's Pickup List, captured `/open` `/close` `/trade` skill scope, captured Insights + Open Positions card tweaks. P1.1 + P2 awaiting CC.*
+*Last updated: 2026-04-27 EOD — P1.1 + P2 both code-verified, awaiting browser/market-hours checks tomorrow. AE2 + AE5 closed. Pickup List ready.*
