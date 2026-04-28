@@ -20,7 +20,7 @@ CACHE_TTLS = {
     "darkpool": 300,      # 5 min
     "market_tide": 60,    # 1 min
     "quote": 15,          # 15s
-    "info": 15,           # 15s
+    "info": 86400,        # 24 hours (P1.6 fix 2026-04-28) — metadata changes quarterly, was 15s causing UW rate limit cascade
     "option_contracts": 300,  # 5 min
     "iv_rank": 300,       # 5 min
     "earnings": 3600,     # 1 hr (F.3)

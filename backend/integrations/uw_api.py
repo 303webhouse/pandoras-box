@@ -155,31 +155,53 @@ async def _uw_request(path: str, params: dict = None) -> Optional[dict]:
 # ═════════════════════════════════════════════════════════════════
 
 
+async def _get_info_cached_long(ticker: str) -> Dict[str, Any]:
+    """
+    Get UW /info data with 24h cache. Returns empty dict on failure (non-critical).
+
+    P1.6 fix 2026-04-28: Info data is static metadata (beta, sector, marketcap_size,
+    has_options) that changes quarterly at most. Calling it every 15s as part of
+    every quote fetch wasted UW rate limit capacity, tripped circuit breaker, and
+    cascaded into the heatmap fallback path serving stale yfinance bars.
+    """
+    cached = await cache_get("info", ticker.upper())
+    if cached is not None:
+        return cached
+
+    resp = await _uw_request(f"/api/stock/{ticker.upper()}/info")
+    if resp and "data" in resp:
+        info = resp["data"]
+        await cache_set("info", ticker.upper(), info)
+        return info
+    # Don't cache empty results — let next call retry
+    return {}
+
+
 async def get_snapshot(ticker: str) -> Optional[Dict[str, Any]]:
     """
     Get latest snapshot for a ticker. Matches polygon_equities.get_snapshot() schema:
     {ticker, day: {o, h, l, c, v}, prevDay: {o, h, l, c, v}, lastTrade: {p, s, t}, ...}
 
     P1.5 HOTFIX 2026-04-28: Replaced yfinance with UW /state endpoint for live OHLCV.
-    yfinance was returning stale data during market hours — XLK showed +0.22% when
-    actual was -0.37%, prices off by $3+. Macro strip was returning empty arrays.
-    UW /state endpoint returns: close, open, high, low, volume, total_volume, prev_close.
+    P1.6 HOTFIX 2026-04-28: /info call now uses 24h cache + tolerates failure.
+    Previously the dual-call pattern was tripping the UW rate limiter (120/min),
+    opening the circuit breaker, and degrading sector heatmap to stale yfinance bars.
     """
     cached = await cache_get("quote", ticker.upper())
     if cached:
         return cached
 
-    # Fetch /info (metadata) and /state (live OHLCV) in parallel
-    info_task = _uw_request(f"/api/stock/{ticker.upper()}/info")
-    state_task = _uw_request(f"/api/stock/{ticker.upper()}/state")
-    info_resp, state_resp = await asyncio.gather(info_task, state_task)
-
+    # State is the critical path — direct call, no fallback acceptable
+    state_resp = await _uw_request(f"/api/stock/{ticker.upper()}/state")
     if not state_resp or "data" not in state_resp:
         logger.warning("UW state unavailable for %s — returning None", ticker)
         return None
 
     state = state_resp["data"]
-    info = info_resp.get("data", {}) if info_resp else {}
+
+    # Info is metadata — separately cached with long TTL (24h)
+    # If unavailable for any reason, snapshot still works with empty info
+    info = await _get_info_cached_long(ticker)
 
     # UW /state returns numeric values as strings — parse safely
     def _f(v):
@@ -210,7 +232,7 @@ async def get_snapshot(ticker: str) -> Optional[Dict[str, Any]]:
         },
         "todaysChange": change,
         "todaysChangePerc": change_pct,
-        # Extra UW fields from /info
+        # Extra UW fields from /info (may be empty if /info unavailable)
         "beta": _safe_float(info.get("beta")),
         "sector": info.get("sector"),
         "full_name": info.get("full_name"),
