@@ -203,7 +203,11 @@ async def get_snapshot(ticker: str) -> Optional[Dict[str, Any]]:
         return cached
 
     # State is the critical path — direct call, no fallback acceptable
-    state_resp = await _uw_request(f"/api/stock/{ticker.upper()}/state")
+    # P1.9 fix 2026-04-28: endpoint is /stock-state not /state. Prior commit 6262f54
+    # introduced the wrong path (UW MCP tool is named stock_state, but the REST URL
+    # uses kebab-case). UW returned 404 on every call, tripping the circuit breaker
+    # and degrading the heatmap to stale fallback data. Validated against api_spec.yaml.
+    state_resp = await _uw_request(f"/api/stock/{ticker.upper()}/stock-state")
     if not state_resp or "data" not in state_resp:
         logger.warning("UW state unavailable for %s — returning None", ticker)
         return None
