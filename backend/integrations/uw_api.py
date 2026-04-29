@@ -447,7 +447,23 @@ async def get_options_snapshot(
     if cached:
         return cached
 
-    data = await _uw_request(f"/api/stock/{underlying.upper()}/option-contracts")
+    # P2.0 fix 2026-04-28: UW limits this endpoint to 500 results per call.
+    # For tickers with many expirations (SMH, SPY, IWM, TSLA, etc.) the 500-cap
+    # cuts off the specific expiry/strike combos the position pricer needs,
+    # producing null current_price for every option position. Push native
+    # expiry/option_type filters down to UW so the response stays under cap and
+    # always contains the strikes we need. Strike range filters (strike_gte/lte)
+    # are not native UW params and remain client-side post-filters below.
+    params: Dict[str, Any] = {}
+    if expiration_date:
+        params["expiry"] = str(expiration_date)[:10]
+    if contract_type:
+        params["option_type"] = contract_type
+
+    data = await _uw_request(
+        f"/api/stock/{underlying.upper()}/option-contracts",
+        params=params or None,
+    )
     if not data or "data" not in data:
         return None
 
