@@ -123,14 +123,20 @@ async def _fetch_all_bars(tickers: List[str] = None, days: int = 45) -> Dict[str
 async def get_sector_heatmap(
     metric: str = Query("price", regex="^(price|flow)$",
                         description="Color metric: 'price' (% change) or 'flow' (options flow direction)"),
+    nocache: bool = Query(False,
+                          description="Bypass Redis cache and force fresh computation. P1.11 2026-04-28: added to verify P1.10 daily-change fix while the 4-hour outer cache still held stale data. Useful for cache invalidation without admin tooling."),
 ):
     """Return sector data for treemap: all 11 sectors with Day/Week/Month changes, daily RS,
     and (when metric='flow') aggregate options flow direction per sector."""
     redis = await get_redis_client()
 
     # Check cache first — cache key is metric-aware
+    # P1.11 fix 2026-04-28: skip cache GET when nocache=1 query param set, so callers
+    # can verify recent code changes without waiting up to 4 hours for the off-hours TTL.
+    # The cache SET at end of handler still runs, so a nocache call refreshes the blob
+    # for all subsequent normal callers.
     cache_key = f"{HEATMAP_CACHE_KEY}:{metric}"
-    if redis:
+    if redis and not nocache:
         try:
             cached = await redis.get(cache_key)
             if cached:
