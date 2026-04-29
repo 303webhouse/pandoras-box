@@ -48,9 +48,20 @@ _bucket_lock = asyncio.Lock()
 
 
 def _circuit_breaker_open() -> bool:
-    """Check if circuit breaker is open (should NOT make requests)."""
+    """Check if circuit breaker is open (should NOT make requests).
+
+    P1.8 fix 2026-04-28: Reset breaker state once cooldown elapses. Previously
+    `_cb_failures` was never zeroed when the cooldown window ended, so the stale
+    count (often >>5) caused the very next failure to immediately re-trip the
+    breaker. Effect: once tripped, breaker could only recover via process restart.
+    """
+    global _cb_failures, _cb_open_until
     if _cb_open_until > 0 and time.time() < _cb_open_until:
         return True
+    # Cooldown expired (or never opened) -- ensure clean state for next attempt window
+    if _cb_open_until > 0:
+        _cb_failures = 0
+        _cb_open_until = 0.0
     return False
 
 
