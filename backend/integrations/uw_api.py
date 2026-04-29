@@ -166,6 +166,74 @@ async def _uw_request(path: str, params: dict = None) -> Optional[dict]:
 # ═════════════════════════════════════════════════════════════════
 
 
+async def _get_regular_session_change(ticker: str) -> Optional[Dict[str, Any]]:
+    """Compute today's regular-session daily change from UW OHLC bars.
+
+    P1.10 fix 2026-04-28: UW's /stock-state endpoint returns prev_close/close
+    fields whose meaning shifts based on the current market session — during
+    post-market, prev_close rolls forward to today's regular close and close
+    becomes the post-market last trade, producing a bogus "+0.46%" reading
+    when XLK was actually -1.69% on the day.
+
+    /api/stock/{ticker}/ohlc/1d returns one bar per session per day tagged with
+    market_time ('pr', 'r', 'po'). Taking the last two bars where market_time
+    == 'r' gives a session-invariant daily change calculation that's correct
+    pre-market, regular hours, post-market, and overnight.
+
+    Returns dict with today_close, prev_close, change, change_pct, today_open,
+    today_high, today_low, today_volume — or None if data unavailable. Cached
+    under the same 'quote' TTL as get_snapshot.
+    """
+    cache_key = f"{ticker.upper()}:reg_change"
+    cached = await cache_get("quote", cache_key)
+    if cached is not None:
+        return cached
+
+    resp = await _uw_request(f"/api/stock/{ticker.upper()}/ohlc/1d")
+    if not resp or "data" not in resp:
+        return None
+
+    bars = resp["data"]
+    if not isinstance(bars, list):
+        return None
+
+    # Filter to regular-session bars only ('r'), preserve order
+    regular_bars = [b for b in bars if b.get("market_time") == "r"]
+    if len(regular_bars) < 2:
+        logger.warning("UW ohlc/1d returned <2 regular-session bars for %s", ticker)
+        return None
+
+    def _f(v):
+        try:
+            return float(v) if v is not None else None
+        except (ValueError, TypeError):
+            return None
+
+    today = regular_bars[-1]
+    prev = regular_bars[-2]
+
+    today_close = _f(today.get("close"))
+    prev_close = _f(prev.get("close"))
+    if today_close is None or prev_close is None or prev_close == 0:
+        return None
+
+    change = today_close - prev_close
+    change_pct = (change / prev_close) * 100
+
+    result = {
+        "today_close": today_close,
+        "today_open": _f(today.get("open")),
+        "today_high": _f(today.get("high")),
+        "today_low": _f(today.get("low")),
+        "today_volume": today.get("total_volume") or today.get("volume"),
+        "prev_close": prev_close,
+        "change": change,
+        "change_pct": change_pct,
+    }
+    await cache_set("quote", cache_key, result)
+    return result
+
+
 async def _get_info_cached_long(ticker: str) -> Dict[str, Any]:
     """
     Get UW /info data with 24h cache. Returns empty dict on failure (non-critical).
@@ -218,35 +286,61 @@ async def get_snapshot(ticker: str) -> Optional[Dict[str, Any]]:
     # If unavailable for any reason, snapshot still works with empty info
     info = await _get_info_cached_long(ticker)
 
-    # UW /state returns numeric values as strings — parse safely
+    # UW /stock-state returns numeric values as strings — parse safely
     def _f(v):
         try:
             return float(v) if v is not None else None
         except (ValueError, TypeError):
             return None
 
-    close = _f(state.get("close"))
-    prev_close = _f(state.get("prev_close"))
-    change = (close - prev_close) if (close is not None and prev_close is not None) else None
-    change_pct = (change / prev_close * 100) if (change is not None and prev_close) else None
+    # P1.10 fix 2026-04-28: /stock-state's prev_close and close fields shift
+    # meaning across market sessions (pre/regular/post). Computing daily change
+    # from those produces wrong numbers outside regular hours. Pull regular-
+    # session bars from /ohlc/1d for daily-change math; keep state.close as the
+    # live last-trade price. See _get_regular_session_change() for details.
+    state_close = _f(state.get("close"))  # live last trade, all sessions
+    reg = await _get_regular_session_change(ticker)
+
+    if reg is not None:
+        # Regular-session bars available — use them for daily change math
+        day_close = reg["today_close"]
+        prev_close = reg["prev_close"]
+        change = reg["change"]
+        change_pct = reg["change_pct"]
+        day_open = reg["today_open"]
+        day_high = reg["today_high"]
+        day_low = reg["today_low"]
+        day_volume = reg["today_volume"]
+    else:
+        # Fallback: OHLC bars unavailable, use state fields (only correct
+        # during regular hours, but better than nothing)
+        logger.warning("UW ohlc/1d unavailable for %s — falling back to /stock-state fields", ticker)
+        day_close = state_close
+        prev_close = _f(state.get("prev_close"))
+        change = (day_close - prev_close) if (day_close is not None and prev_close is not None) else None
+        change_pct = (change / prev_close * 100) if (change is not None and prev_close) else None
+        day_open = _f(state.get("open"))
+        day_high = _f(state.get("high"))
+        day_low = _f(state.get("low"))
+        day_volume = state.get("total_volume") or state.get("volume")
 
     result = {
         "ticker": ticker.upper(),
         "day": {
-            "o": _f(state.get("open")),
-            "h": _f(state.get("high")),
-            "l": _f(state.get("low")),
-            "c": close,
-            "v": state.get("total_volume") or state.get("volume"),
+            "o": day_open,
+            "h": day_high,
+            "l": day_low,
+            "c": day_close,        # today's regular-session close
+            "v": day_volume,
         },
         "prevDay": {
-            "c": prev_close,
+            "c": prev_close,       # yesterday's regular-session close
         },
         "lastTrade": {
-            "p": close,
+            "p": state_close,      # live last trade (post-market aware)
         },
-        "todaysChange": change,
-        "todaysChangePerc": change_pct,
+        "todaysChange": change,           # regular-session daily change
+        "todaysChangePerc": change_pct,   # regular-session daily change %
         # Extra UW fields from /info (may be empty if /info unavailable)
         "beta": _safe_float(info.get("beta")),
         "sector": info.get("sector"),
