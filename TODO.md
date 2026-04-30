@@ -1,6 +1,6 @@
 # Pivot — Priorities & TODO
 
-**Last Updated:** April 29, 2026
+**Last Updated:** April 30, 2026
 
 ---
 
@@ -489,6 +489,7 @@ If both clear, Nick greenlights a follow-up CC brief to swap primary gate from R
 
 ## 🟡 Ongoing / Lower Priority
 
+- [ ] **Build `/trade`, `/open`, `/close` chat-workflow skills** — three reusable skills invokable across Claude chats. `/trade` runs pre-flight checks before Olympus committee handoff for review. `/open` runs at the start of new chats. `/close` runs at chat wrap-up. Scope walk-through with Nick needed before brief — see Apr 28 chat for context and 6 open scope questions.
 - [ ] **Polygon-Powered Dynamic Scan Universe** — CONFIRMED: Polygon Stocks Starter ($29/mo) returns 12,367 tickers in a single snapshot API call with current price, volume, and daily change. Plan supports daily bars (delayed 15 min) and full-market snapshots but NOT intraday bars (15m/1H — needs Developer plan $79/mo). **Proposed architecture:** Stage 1 = Polygon snapshot pre-filter (1 API call, ~2s) filters to liquid, moving names by volume/price/change thresholds. Stage 2 = yfinance 15m bars only on the filtered set. Gets wider coverage (catching movers not in hardcoded lists) while being faster (skips dead tickers). For daily-bar strategies (CTA Scanner), can replace yfinance with Polygon entirely. Existing integration: `backend/integrations/polygon_equities.py` has `get_bars()`, `get_bars_as_dataframe()`, `get_snapshot()`, `get_previous_close()` all working. **Impact:** Scale server-side scanners from hardcoded 200 tickers to dynamic 500-1000+ without yfinance rate limit issues.
 - [ ] **Phalanx confluence enrichment** — Phalanx plumbing is live and wall levels caching in Redis. Next step: when scoring other signals (CTA, Artemis, etc.), check Redis for nearby Phalanx wall levels. If signal entry_price within 0.5 ATR of cached wall AND direction matches: +10 confluence bonus. Separate brief.
 - [ ] **Artemis parameter loosening** — After 1 week of baseline data with webhook fix: widen proximity zone (0.25→0.4 ATR), convert AVWAP gate to score modifier (-15 pts), remove stacked confirmation candle RVOL, lower Flush mode RVOL (2.0→1.5x). Per Olympus review.
@@ -542,4 +543,3 @@ If both clear, Nick greenlights a follow-up CC brief to swap primary gate from R
 ## ✅ Completed (March 5, 2026 Session)
 
 - [x] Bias engine overhaul: 20 factors, tick_breadth scoring, GEX recal, IV regime
-- [x] McClellan endpoint, breadth alerts, factor weights, Brief 08 + 09
