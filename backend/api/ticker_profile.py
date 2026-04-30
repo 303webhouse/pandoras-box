@@ -88,33 +88,21 @@ def _is_market_hours() -> bool:
 # ---------------------------------------------------------------------------
 
 async def _get_snapshot_price(ticker: str) -> Dict:
-    """Read price data from Polygon snapshot (via sector snapshot cache or direct)."""
-    if not POLYGON_API_KEY:
-        return {}
-    redis = await get_redis_client()
-
-    # Try sector snapshot cache first (set by Phase 2)
-    # Fall back to direct Polygon call for single ticker
+    """Read live price data from UW snapshot (replaces Polygon after migration)."""
     try:
-        url = f"https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers?tickers={ticker}&apiKey={POLYGON_API_KEY}"
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                if resp.status != 200:
-                    return {}
-                data = await resp.json()
-                for t in data.get("tickers", []):
-                    if t.get("ticker") == ticker:
-                        day = t.get("day", {})
-                        prev = t.get("prevDay", {})
-                        price = day.get("c") or prev.get("c") or 0
-                        prev_close = prev.get("c") or 0
-                        day_change_pct = round((price - prev_close) / prev_close * 100, 2) if prev_close else 0
-                        return {
-                            "price": round(price, 2),
-                            "day_change_pct": day_change_pct,
-                            "volume": day.get("v", 0),
-                            "prev_volume": prev.get("v", 0),
-                        }
+        from integrations.uw_api import get_snapshot
+        snap = await get_snapshot(ticker)
+        if not snap:
+            return {}
+        price = snap.get("lastTrade", {}).get("p") or snap.get("day", {}).get("c") or 0
+        change_pct = snap.get("todaysChangePerc") or 0
+        volume = snap.get("day", {}).get("v") or 0
+        return {
+            "price": round(float(price), 2) if price else 0,
+            "day_change_pct": round(float(change_pct), 2) if change_pct else 0,
+            "volume": volume,
+            "prev_volume": None,
+        }
     except Exception as e:
         logger.warning("Snapshot price fetch for %s: %s", ticker, e)
     return {}

@@ -132,6 +132,7 @@ async def _uw_request(path: str, params: dict = None) -> Optional[dict]:
     headers = {"Authorization": f"Bearer {UW_API_KEY}", "Accept": "application/json"}
 
     last_error = None
+    all_rate_limited = True  # flipped to False on any non-429 failure or success
     for attempt in range(3):
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
@@ -145,18 +146,25 @@ async def _uw_request(path: str, params: dict = None) -> Optional[dict]:
                     await asyncio.sleep(wait)
                     continue
                 else:
+                    all_rate_limited = False
                     logger.error("UW API %s: HTTP %d — %s", path, resp.status_code, resp.text[:200])
                     _record_failure()
                     return None
         except Exception as e:
+            all_rate_limited = False
             last_error = e
             wait = 2 ** attempt
             logger.warning("UW API %s attempt %d failed: %s (retry in %ds)",
                            path, attempt + 1, e, wait)
             await asyncio.sleep(wait)
 
-    logger.error("UW API %s failed after 3 retries: %s", path, last_error)
-    _record_failure()
+    if all_rate_limited:
+        # Persistent 429 is a rate-limit signal, not a broken API — do not trip the circuit breaker.
+        # The endpoint will be retried on the next natural call cycle.
+        logger.warning("UW API %s: rate limited on all retries — skipping, not counting as failure", path)
+    else:
+        logger.error("UW API %s failed after 3 retries: %s", path, last_error)
+        _record_failure()
     return None
 
 
