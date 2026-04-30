@@ -1,6 +1,6 @@
 # Pivot — Priorities & TODO
 
-**Last Updated:** April 25, 2026
+**Last Updated:** April 29, 2026
 
 ---
 
@@ -100,6 +100,61 @@
 - [x] Orphaned references removed
 - [x] crypto_market.py symbol derivation (no more hardcoded BTC)
 - [x] Docs updated
+
+---
+
+## 🟢 Close-Handler Refactor (C1 shipped 2026-04-29)
+
+**Context:** P0 fix for double-tap close-button corruption. Single-transaction wrap with `SELECT FOR UPDATE NOWAIT`, atomic `trades` + `unified_positions` + `closed_positions` + `account_balances` updates, two new audit tables (`close_attempts`, `background_task_failures`), one new endpoint (`GET /api/v2/positions/{position_id}/close-attempts`), background signal resolution with failure logging. Deployed 2026-04-29 after market close, 30-min monitoring clean. C2 (frontend UX) ships separately.
+
+**Key docs:**
+- `docs/codex-briefs/2026-04-29_close-handler-refactor.md` — CC implementation brief (FINAL)
+- `docs/titans-pre-review/2026-04-29_close-handler-refactor_athena-final-decision.md` — design source of truth
+- `docs/titans-pre-review/2026-04-29_close-handler-refactor.md` — original Pass-1 brief
+- Pass 1, Pass 2, and final-Titans-review files in same folder
+
+### ⏳ Thursday Apr 30 Follow-Up
+
+- [ ] **🚨 9:30 AM ET market-open check (CC)** — single passive-monitoring query against the audit tables for the last 18 hours:
+
+  ```sql
+  -- close_attempts: should be all 'completed' or 'started→completed' lifecycle pairs
+  SELECT status, COUNT(*) FROM close_attempts
+  WHERE attempted_at > NOW() - INTERVAL '18 hours' GROUP BY status;
+
+  -- background_task_failures: should be empty
+  SELECT task_name, error_class, COUNT(*) FROM background_task_failures
+  WHERE triggered_at > NOW() - INTERVAL '18 hours' GROUP BY task_name, error_class;
+  ```
+
+  Report counts + any `failed` rows or non-empty failures table. **If both clean during the first real market session, C1 is stable** and C2 (frontend) can be greenlit for Friday or early next week. If anything anomalous, ping Pivot before market action picks up.
+
+- [ ] **Pre-existing analytics drift query** — read-only, safe anytime (run with the market-open check is fine). Measures historical drift between `unified_positions` (CLOSED) and `closed_positions` from the period when legacy code silently swallowed INSERT exceptions:
+
+  ```sql
+  SELECT up.position_id, up.ticker, up.exit_date
+  FROM unified_positions up
+  LEFT JOIN closed_positions cp
+    ON cp.signal_id = up.signal_id AND cp.ticker = up.ticker
+  WHERE up.status = 'CLOSED'
+    AND cp.id IS NULL
+  ORDER BY up.exit_date DESC;
+  ```
+
+  0 rows = lucky, swallowed exceptions never actually fired. Non-zero = file separate brief next sprint to backfill.
+
+- [ ] **Document implementation deviations in `athena-final-decision.md`** — short addendum (~10 min write-up) capturing what shipped vs what was designed:
+  - `SELECT FOR UPDATE NOWAIT` substituted for `lock_timeout = 2s` (CC's call, retroactively approved — faster failure for single-user case, pool's 30s `statement_timeout` is sufficient backstop)
+  - `close_attempts` lifecycle pattern (`started → completed/failed`) substituted for single-row enum at end (CC's call, retroactively approved — captures row even if handler crashes mid-execution)
+  - Pre-existing analytics drift observation logged for next-sprint follow-up
+
+- [ ] **Post-market eval: greenlight C2?** — after market close Thursday, look at the audit tables one more time. If 0 unexpected rows, schedule C2 (frontend) for Friday EOD or early next week.
+
+### ⏳ Deferred to Next Sprint
+
+- [ ] **TOCTOU audit of remaining mutation endpoints** — `update_position`, `create_position`, trade entry handler. Same bug class as the close handler; not exploitable today (single-user, low volume) but fix before scaling. Per ATHENA's design doc Section 6.
+- [ ] **Pre-existing `closed_positions` drift backfill** — ONLY if Thursday's reconciliation query returns non-zero rows. Backfill `closed_positions` from `unified_positions` + `trades` for any orphaned closed rows.
+- [ ] **Component 2 — Frontend UX** — gated on C1 stability. Disable-on-click + 800ms debounce, dim-row optimistic UI, error/success toasts, polling state guard, mobile scroll-tap disable, `close_attempts` surfacing in position-history detail view, new `GET /api/v2/positions/{id}/close-attempts` endpoint surfacing UI. Brief sections 6.1–6.7 of CC implementation brief.
 
 ---
 
