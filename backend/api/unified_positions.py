@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
 from datetime import datetime, date, timezone, timedelta
 from decimal import Decimal
+import asyncio
 import logging
 import json
 import os
@@ -52,24 +53,27 @@ def _match_account_balance(account_filter: str, balance_name: str) -> bool:
     return name_lower in aliases or name_lower.startswith(filter_normalized)
 
 
-async def _adjust_account_cash(pool, account: str, delta: float) -> bool:
-    """
-    Atomically adjust cash balance for the given account.
-    delta > 0 = cash increases, delta < 0 = cash decreases.
-    Returns True if adjustment was applied, False if no matching account found.
-    """
-    async with pool.acquire() as conn:
-        rows = await conn.fetch("SELECT account_name, cash FROM account_balances")
-        for row in rows:
-            if _match_account_balance(account, row["account_name"]):
-                await conn.execute(
-                    "UPDATE account_balances SET cash = cash + $1, updated_at = NOW(), updated_by = 'auto' WHERE account_name = $2",
-                    round(delta, 2), row["account_name"],
-                )
-                logger.info("Cash adjusted for %s: %+.2f", row["account_name"], delta)
-                return True
+async def _adjust_account_cash_with_conn(conn, account: str, delta: float) -> bool:
+    """Adjust cash balance using an externally-provided connection.
+    Call this inside an existing transaction to keep cash updates atomic with position changes."""
+    rows = await conn.fetch("SELECT account_name, cash FROM account_balances")
+    for row in rows:
+        if _match_account_balance(account, row["account_name"]):
+            await conn.execute(
+                "UPDATE account_balances SET cash = cash + $1, updated_at = NOW(), updated_by = 'auto' WHERE account_name = $2",
+                round(delta, 2), row["account_name"],
+            )
+            logger.info("Cash adjusted for %s: %+.2f", row["account_name"], delta)
+            return True
     logger.error("CASH ADJUSTMENT FAILED: No matching account_balance row for account=%s (delta=%+.2f)", account, delta)
     return False
+
+
+async def _adjust_account_cash(pool, account: str, delta: float) -> bool:
+    """Backward-compatible pool-based cash adjustment. Use _adjust_account_cash_with_conn
+    when inside a transaction to keep cash updates atomic."""
+    async with pool.acquire() as conn:
+        return await _adjust_account_cash_with_conn(conn, account, delta)
 
 
 def normalize_spread_strikes(
@@ -1384,6 +1388,35 @@ async def _resolve_signal_outcome(pool, position: dict, exit_price: float,
     logger.info(f"Ariadne: resolved {signal_id} -> {trade_outcome} ({pnl_pct:+.1f}%, ${realized_pnl:+.2f})")
 
 
+async def _resolve_signal_with_failure_logging(
+    pool, position_dict: dict, exit_price: float,
+    realized_pnl: float, trade_outcome: str, closed_at,
+) -> None:
+    """Run signal resolution as a background task; log failures to background_task_failures."""
+    try:
+        await _resolve_signal_outcome(
+            pool, position_dict, exit_price, realized_pnl, trade_outcome, closed_at
+        )
+    except Exception as exc:
+        import traceback
+        try:
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    INSERT INTO background_task_failures
+                        (task_name, related_id, error_class, error_message, stack_trace)
+                    VALUES ($1, $2, $3, $4, $5)
+                    """,
+                    "_resolve_signal_outcome",
+                    position_dict.get("position_id"),
+                    type(exc).__name__,
+                    str(exc),
+                    traceback.format_exc(),
+                )
+        except Exception as log_exc:
+            logger.error("Failed to log background_task_failure: %s", log_exc)
+
+
 # ── CLOSE (with trade bridge) ─────────────────────────────────────────
 
 @router.post("/v2/positions/{position_id}/close")
@@ -1391,198 +1424,244 @@ async def close_position(position_id: str, req: ClosePositionRequest, _=Depends(
     """
     Close a position: calculate realized P&L, create trades record, update signal if linked.
     This is the close-to-trade bridge (Phase A4).
+    SELECT FOR UPDATE prevents double-close races; single transaction keeps position/cash/analytics atomic.
     """
     pool = await get_postgres_client()
-
-    # Fetch the position
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            "SELECT * FROM unified_positions WHERE position_id = $1 AND status = 'OPEN'",
-            position_id
-        )
-    if not row:
-        raise HTTPException(status_code=404, detail=f"Open position {position_id} not found")
-
-    pos = _row_to_dict(row)
-    entry_price = pos.get("entry_price") or 0
-    structure = pos.get("structure") or ""
-    total_qty = pos["quantity"]
-
-    # Determine close quantity (partial vs full)
-    close_qty = req.quantity if req.quantity and req.quantity < total_qty else total_qty
-    is_partial = close_qty < total_qty
-
-    # Calculate realized P&L on closed portion only
-    s = structure.lower()
-    asset_type = (pos.get("asset_type") or "").upper()
-    is_stock = s in ("stock", "stock_long", "long_stock", "stock_short", "short_stock") or (not s and asset_type == "EQUITY")
-    if is_stock:
-        direction = (pos.get("direction") or "LONG").upper()
-        if direction == "SHORT":
-            realized_pnl = round((entry_price - req.exit_price) * close_qty, 2)
-        else:
-            realized_pnl = round((req.exit_price - entry_price) * close_qty, 2)
-    elif s in CREDIT_STRUCTURES:
-        realized_pnl = round((entry_price - req.exit_price) * 100 * close_qty, 2)
-    else:
-        realized_pnl = round((req.exit_price - entry_price) * 100 * close_qty, 2)
-
-    # Determine outcome
-    if realized_pnl > 0:
-        trade_outcome = "WIN"
-    elif realized_pnl < 0:
-        trade_outcome = "LOSS"
-    else:
-        trade_outcome = "BREAKEVEN"
-
     now = datetime.now(timezone.utc)
 
-    # Create trade record for the closed portion
-    trade_id = None
+    # Record the attempt for auditability (outside main transaction — logged even on failure)
+    attempt_id = None
     try:
         async with pool.acquire() as conn:
-            trade_row = await conn.fetchrow("""
-                INSERT INTO trades (
-                    signal_id, ticker, direction, status, account, structure,
-                    signal_source, entry_price, stop_loss, target_1,
-                    quantity, opened_at, closed_at, exit_price,
-                    pnl_dollars, exit_reason, notes,
-                    strike, expiry, short_strike, long_strike, origin
-                ) VALUES (
-                    $1, $2, $3, 'closed', $4, $5,
-                    $6, $7, $8, $9,
-                    $10, $11, $12, $13,
-                    $14, $15, $16,
-                    $17, $18, $19, $20, $21
-                )
-                RETURNING id
-            """,
-                pos.get("signal_id"), pos["ticker"], pos["direction"],
-                pos.get("account", "ROBINHOOD"), pos.get("structure"),
-                pos.get("source", "MANUAL"),
-                entry_price, pos.get("stop_loss"), pos.get("target_1"),
-                close_qty,
-                datetime.fromisoformat(str(pos.get("entry_date") or pos.get("created_at") or now)) if isinstance(pos.get("entry_date") or pos.get("created_at"), str) else (pos.get("entry_date") or pos.get("created_at") or now),
-                now, req.exit_price,
-                realized_pnl, req.notes or "Closed via unified positions",
-                req.notes,
-                pos.get("long_strike") or pos.get("short_strike"),
-                date.fromisoformat(str(pos["expiry"])[:10]) if pos.get("expiry") else None,
-                pos.get("short_strike"), pos.get("long_strike"),
-                "position_ledger",
+            attempt_row = await conn.fetchrow(
+                "INSERT INTO close_attempts (position_id, exit_price) VALUES ($1, $2) RETURNING id",
+                position_id, req.exit_price,
             )
-            trade_id = trade_row["id"] if trade_row else None
-    except Exception as e:
-        logger.warning(f"Could not create trade record: {e}")
+            attempt_id = attempt_row["id"] if attempt_row else None
+    except Exception:
+        pass  # Audit table failure never blocks the close
 
-    # Proximity attribution — soft-link trade to recent signals
+    # These are set inside the try block; defined here so they're visible after it.
+    pos = None
+    row = None
+    trade_id = None
+    realized_pnl = 0.0
+    trade_outcome = "BREAKEVEN"
+    close_cash_ok = True
+    updated = None
+    total_qty = 0
+    close_qty = 0
+    is_partial = False
+    is_stock = False
+    s = ""
+
+    try:
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                # SELECT FOR UPDATE — row-level lock prevents double-close races.
+                # NOWAIT: a racing second request gets immediate 409 instead of queuing.
+                try:
+                    row = await conn.fetchrow(
+                        "SELECT * FROM unified_positions WHERE position_id = $1 AND status = 'OPEN' FOR UPDATE NOWAIT",
+                        position_id,
+                    )
+                except Exception as lock_exc:
+                    if "LockNotAvailable" in type(lock_exc).__name__ or "55P03" in str(lock_exc):
+                        raise HTTPException(status_code=409, detail="Position close already in progress; please retry.")
+                    raise
+
+                if not row:
+                    raise HTTPException(status_code=404, detail=f"Open position {position_id} not found")
+
+                pos = _row_to_dict(row)
+                entry_price = pos.get("entry_price") or 0
+                structure = pos.get("structure") or ""
+                total_qty = pos["quantity"]
+
+                close_qty = req.quantity if req.quantity and req.quantity < total_qty else total_qty
+                is_partial = close_qty < total_qty
+
+                s = structure.lower()
+                asset_type = (pos.get("asset_type") or "").upper()
+                is_stock = s in ("stock", "stock_long", "long_stock", "stock_short", "short_stock") or (not s and asset_type == "EQUITY")
+
+                if is_stock:
+                    direction = (pos.get("direction") or "LONG").upper()
+                    if direction == "SHORT":
+                        realized_pnl = round((entry_price - req.exit_price) * close_qty, 2)
+                    else:
+                        realized_pnl = round((req.exit_price - entry_price) * close_qty, 2)
+                elif s in CREDIT_STRUCTURES:
+                    realized_pnl = round((entry_price - req.exit_price) * 100 * close_qty, 2)
+                else:
+                    realized_pnl = round((req.exit_price - entry_price) * 100 * close_qty, 2)
+
+                trade_outcome = "WIN" if realized_pnl > 0 else "LOSS" if realized_pnl < 0 else "BREAKEVEN"
+
+                # INSERT trade record — inside main transaction for full atomicity.
+                # Failure rolls back the entire close so no position/trade drift can occur.
+                trade_row = await conn.fetchrow("""
+                    INSERT INTO trades (
+                        signal_id, ticker, direction, status, account, structure,
+                        signal_source, entry_price, stop_loss, target_1,
+                        quantity, opened_at, closed_at, exit_price,
+                        pnl_dollars, exit_reason, notes,
+                        strike, expiry, short_strike, long_strike, origin
+                    ) VALUES (
+                        $1, $2, $3, 'closed', $4, $5,
+                        $6, $7, $8, $9,
+                        $10, $11, $12, $13,
+                        $14, $15, $16,
+                        $17, $18, $19, $20, $21
+                    )
+                    RETURNING id
+                """,
+                    pos.get("signal_id"), pos["ticker"], pos["direction"],
+                    pos.get("account", "ROBINHOOD"), pos.get("structure"),
+                    pos.get("source", "MANUAL"),
+                    entry_price, pos.get("stop_loss"), pos.get("target_1"),
+                    close_qty,
+                    datetime.fromisoformat(str(pos.get("entry_date") or pos.get("created_at") or now)) if isinstance(pos.get("entry_date") or pos.get("created_at"), str) else (pos.get("entry_date") or pos.get("created_at") or now),
+                    now, req.exit_price,
+                    realized_pnl, req.notes or "Closed via unified positions",
+                    req.notes,
+                    pos.get("long_strike") or pos.get("short_strike"),
+                    date.fromisoformat(str(pos["expiry"])[:10]) if pos.get("expiry") else None,
+                    pos.get("short_strike"), pos.get("long_strike"),
+                    "position_ledger",
+                )
+                trade_id = trade_row["id"] if trade_row else None
+
+                # UPDATE unified_positions (partial or full close)
+                if is_partial:
+                    remaining_qty = total_qty - close_qty
+                    old_cost_basis = pos.get("cost_basis") or 0
+                    new_cost_basis = round(old_cost_basis * remaining_qty / total_qty, 2) if total_qty > 0 else 0
+                    updated = await conn.fetchrow("""
+                        UPDATE unified_positions SET
+                            quantity = $1,
+                            cost_basis = $2,
+                            notes = COALESCE(notes || ' | ', '') || $3,
+                            updated_at = NOW()
+                        WHERE position_id = $4
+                        RETURNING *
+                    """, remaining_qty, new_cost_basis,
+                        f"Partial close {close_qty}/{total_qty} @ {req.exit_price} ({trade_outcome} ${realized_pnl:+.2f})",
+                        position_id)
+                else:
+                    updated = await conn.fetchrow("""
+                        UPDATE unified_positions SET
+                            status = 'CLOSED',
+                            exit_price = $1,
+                            exit_date = $2,
+                            realized_pnl = $3,
+                            trade_outcome = $4,
+                            trade_id = $5,
+                            notes = COALESCE($6, notes),
+                            updated_at = NOW()
+                        WHERE position_id = $7
+                        RETURNING *
+                    """, req.exit_price, now, realized_pnl, trade_outcome,
+                        trade_id, req.notes, position_id)
+
+                    # INSERT closed_positions inside main transaction — full atomicity with position update.
+                    # Failure rolls back the entire close, keeping unified_positions and closed_positions in sync.
+                    exit_val = req.exit_value or round(abs(req.exit_price) * (1 if is_stock else 100) * close_qty, 2)
+                    cost_basis_val = float(pos["cost_basis"]) if pos.get("cost_basis") else None
+                    pnl_pct = round((realized_pnl / abs(cost_basis_val)) * 100, 2) if cost_basis_val and cost_basis_val != 0 else None
+                    raw_opened = pos.get("entry_date") or pos.get("created_at")
+                    opened_at = datetime.fromisoformat(str(raw_opened)) if isinstance(raw_opened, str) else raw_opened
+                    hold_days = (now.date() - opened_at.date()).days if opened_at and hasattr(opened_at, "date") else None
+                    opt_type = "Put" if "put" in s else "Call" if s else None
+                    spread_type = "debit" if "debit" in s else "credit" if "credit" in s else None
+                    pos_type = "option_spread" if pos.get("short_strike") else ("option" if pos.get("asset_type") == "OPTION" else "stock")
+
+                    await conn.execute("""
+                        INSERT INTO closed_positions
+                            (ticker, position_type, direction, quantity,
+                             option_type, strike, short_strike, expiry, spread_type,
+                             cost_basis, exit_value, exit_price, pnl_dollars, pnl_percent,
+                             opened_at, closed_at, hold_days, signal_id, account,
+                             close_reason, notes)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+                                $14, $15, $16, $17, $18, $19, $20, $21)
+                    """,
+                        pos["ticker"], pos_type, pos["direction"], close_qty,
+                        opt_type,
+                        float(pos["long_strike"]) if pos.get("long_strike") else None,
+                        float(pos["short_strike"]) if pos.get("short_strike") else None,
+                        date.fromisoformat(str(pos["expiry"])[:10]) if pos.get("expiry") else None,
+                        spread_type,
+                        cost_basis_val, exit_val, req.exit_price,
+                        realized_pnl, pnl_pct,
+                        opened_at, now, hold_days,
+                        pos.get("signal_id"), pos.get("account", "ROBINHOOD"),
+                        req.close_reason or "manual", req.notes,
+                    )
+
+                # Cash adjustment — same conn/transaction as position update
+                if req.exit_price is not None:
+                    multiplier = 1 if is_stock else 100
+                    exit_value = round(abs(req.exit_price) * multiplier * close_qty, 2)
+                    d_close = (pos.get("direction") or "").upper()
+                    is_short_equity = d_close == "SHORT" and is_stock
+                    cash_delta = -exit_value if (s in CREDIT_STRUCTURES or is_short_equity) else exit_value
+                    try:
+                        close_cash_ok = await _adjust_account_cash_with_conn(conn, pos.get("account", "ROBINHOOD"), cash_delta)
+                    except Exception as e:
+                        logger.error("Cash adjustment failed on close: %s", e)
+                        close_cash_ok = False
+
+    except HTTPException:
+        if attempt_id:
+            try:
+                async with pool.acquire() as conn:
+                    await conn.execute(
+                        "UPDATE close_attempts SET status = 'failed', error_message = $1 WHERE id = $2",
+                        "position not found or locked", attempt_id,
+                    )
+            except Exception:
+                pass
+        raise
+    except Exception as e:
+        if attempt_id:
+            try:
+                async with pool.acquire() as conn:
+                    await conn.execute(
+                        "UPDATE close_attempts SET status = 'failed', error_message = $1 WHERE id = $2",
+                        str(e)[:500], attempt_id,
+                    )
+            except Exception:
+                pass
+        raise HTTPException(status_code=500, detail=f"Close failed: {e}")
+
+    # Transaction committed — update audit record
+    if attempt_id:
+        try:
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE close_attempts SET status = 'completed', trade_id = $1 WHERE id = $2",
+                    trade_id, attempt_id,
+                )
+        except Exception:
+            pass
+
+    # Proximity attribution (background — fire after transaction commits)
     if trade_id:
         try:
             from analytics.proximity_attribution import attribute_trade
-            import asyncio as _asyncio
-            _asyncio.ensure_future(attribute_trade(
+            asyncio.ensure_future(attribute_trade(
                 trade_id=trade_id, ticker=pos["ticker"],
-                action='close', timestamp=datetime.now(timezone.utc)
+                action='close', timestamp=datetime.now(timezone.utc),
             ))
         except Exception as e:
             logger.warning(f"Proximity attribution failed: {e}")
 
-    if is_partial:
-        # Partial close: reduce quantity, adjust cost_basis proportionally, keep OPEN
-        remaining_qty = total_qty - close_qty
-        old_cost_basis = pos.get("cost_basis") or 0
-        new_cost_basis = round(old_cost_basis * remaining_qty / total_qty, 2) if total_qty > 0 else 0
-        async with pool.acquire() as conn:
-            updated = await conn.fetchrow("""
-                UPDATE unified_positions SET
-                    quantity = $1,
-                    cost_basis = $2,
-                    notes = COALESCE(notes || ' | ', '') || $3,
-                    updated_at = NOW()
-                WHERE position_id = $4
-                RETURNING *
-            """, remaining_qty, new_cost_basis,
-                f"Partial close {close_qty}/{total_qty} @ {req.exit_price} ({trade_outcome} ${realized_pnl:+.2f})",
-                position_id)
-    else:
-        # Full close
-        async with pool.acquire() as conn:
-            updated = await conn.fetchrow("""
-                UPDATE unified_positions SET
-                    status = 'CLOSED',
-                    exit_price = $1,
-                    exit_date = $2,
-                    realized_pnl = $3,
-                    trade_outcome = $4,
-                    trade_id = $5,
-                    notes = COALESCE($6, notes),
-                    updated_at = NOW()
-                WHERE position_id = $7
-                RETURNING *
-            """, req.exit_price, now, realized_pnl, trade_outcome,
-                trade_id, req.notes, position_id)
-
-        # Ariadne's Thread: resolve signal outcome on full close
-        if pos.get("signal_id"):
-            try:
-                await _resolve_signal_outcome(pool, pos, req.exit_price, realized_pnl, trade_outcome, now)
-            except Exception as e:
-                logger.warning(f"Could not resolve signal outcome: {e}")
-
-    # Auto-adjust cash for the closed portion
-    # Short stock close = buying back shares = cash outflow
-    close_cash_ok = True
-    if req.exit_price is not None:
-        multiplier = 1 if is_stock else 100
-        exit_value = round(abs(req.exit_price) * multiplier * close_qty, 2)
-        d_close = (pos.get("direction") or "").upper()
-        is_short_equity = d_close == "SHORT" and is_stock
-        cash_delta = -exit_value if (s in CREDIT_STRUCTURES or is_short_equity) else exit_value
-        try:
-            close_cash_ok = await _adjust_account_cash(pool, pos.get("account", "ROBINHOOD"), cash_delta)
-        except Exception as e:
-            logger.error("Cash adjustment failed on close: %s", e)
-            close_cash_ok = False
-
-    # Write to closed_positions table (for analytics/weekly review)
-    if not is_partial:
-        try:
-            exit_val = req.exit_value or round(abs(req.exit_price) * (1 if is_stock else 100) * close_qty, 2)
-            cost_basis_val = float(pos["cost_basis"]) if pos.get("cost_basis") else None
-            pnl_pct = round((realized_pnl / abs(cost_basis_val)) * 100, 2) if cost_basis_val and cost_basis_val != 0 else None
-            raw_opened = pos.get("entry_date") or pos.get("created_at")
-            opened_at = datetime.fromisoformat(str(raw_opened)) if isinstance(raw_opened, str) else raw_opened
-            hold_days = (now.date() - opened_at.date()).days if opened_at and hasattr(opened_at, "date") else None
-            struct_lower = s
-            opt_type = "Put" if "put" in struct_lower else "Call" if struct_lower else None
-            spread_type = "debit" if "debit" in struct_lower else "credit" if "credit" in struct_lower else None
-            pos_type = "option_spread" if pos.get("short_strike") else ("option" if pos.get("asset_type") == "OPTION" else "stock")
-
-            async with pool.acquire() as conn:
-                await conn.execute("""
-                    INSERT INTO closed_positions
-                        (ticker, position_type, direction, quantity,
-                         option_type, strike, short_strike, expiry, spread_type,
-                         cost_basis, exit_value, exit_price, pnl_dollars, pnl_percent,
-                         opened_at, closed_at, hold_days, signal_id, account,
-                         close_reason, notes)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
-                            $14, $15, $16, $17, $18, $19, $20, $21)
-                """,
-                    pos["ticker"], pos_type, pos["direction"], close_qty,
-                    opt_type,
-                    float(pos["long_strike"]) if pos.get("long_strike") else None,
-                    float(pos["short_strike"]) if pos.get("short_strike") else None,
-                    date.fromisoformat(str(pos["expiry"])[:10]) if pos.get("expiry") else None,
-                    spread_type,
-                    cost_basis_val, exit_val, req.exit_price,
-                    realized_pnl, pnl_pct,
-                    opened_at, now, hold_days,
-                    pos.get("signal_id"), pos.get("account", "ROBINHOOD"),
-                    req.close_reason or "manual", req.notes,
-                )
-        except Exception as e:
-            logger.warning(f"closed_positions insert failed: {e}")
+    # Signal resolution (background — safe after transaction commits; pool sees committed state)
+    if not is_partial and pos.get("signal_id"):
+        asyncio.ensure_future(
+            _resolve_signal_with_failure_logging(pool, dict(row), req.exit_price, realized_pnl, trade_outcome, now)
+        )
 
     result = _row_to_dict(updated) if updated else pos
 
@@ -1604,6 +1683,20 @@ async def close_position(position_id: str, req: ClosePositionRequest, _=Depends(
         "remaining_qty": total_qty - close_qty if is_partial else 0,
         "cash_adjusted": close_cash_ok,
     }
+
+
+# ── CLOSE ATTEMPTS (audit log) ────────────────────────────────────────
+
+@router.get("/v2/positions/{position_id}/close-attempts")
+async def get_close_attempts(position_id: str, _=Depends(require_api_key)):
+    """Return the audit log of close attempts for a position (most recent first)."""
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT * FROM close_attempts WHERE position_id = $1 ORDER BY attempted_at DESC LIMIT 20",
+            position_id,
+        )
+    return {"position_id": position_id, "attempts": [dict(r) for r in rows]}
 
 
 # ── DELETE ────────────────────────────────────────────────────────────
