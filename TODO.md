@@ -1,6 +1,6 @@
 # Pivot — Priorities & TODO
 
-**Last Updated:** April 30, 2026
+**Last Updated:** May 1, 2026
 
 ---
 
@@ -103,58 +103,42 @@
 
 ---
 
-## 🟢 Close-Handler Refactor (C1 shipped 2026-04-29)
+## 🟢 Close-Handler Refactor — C1 STABLE, C2 GREENLIT
 
-**Context:** P0 fix for double-tap close-button corruption. Single-transaction wrap with `SELECT FOR UPDATE NOWAIT`, atomic `trades` + `unified_positions` + `closed_positions` + `account_balances` updates, two new audit tables (`close_attempts`, `background_task_failures`), one new endpoint (`GET /api/v2/positions/{position_id}/close-attempts`), background signal resolution with failure logging. Deployed 2026-04-29 after market close, 30-min monitoring clean. C2 (frontend UX) ships separately.
+**Context:** P0 fix for double-tap close-button corruption. Single-transaction wrap with `SELECT FOR UPDATE NOWAIT`, atomic `trades` + `unified_positions` + `closed_positions` + `account_balances` updates, two new audit tables (`close_attempts`, `background_task_failures`), one new endpoint (`GET /api/v2/positions/{position_id}/close-attempts`), background signal resolution with failure logging. Deployed 2026-04-29 after market close.
+
+**Verification status:**
+- C1 deploy 2026-04-29 EOD: 30-min monitoring clean ✅
+- C1 production verification 2026-04-30: **7 atomic transactions across 6 real positions, zero failures, zero orphans** (DINO +$131, EOG +$20, IWM -$35, SMH -$53, URA partial-then-full +$71 combined, RSP -$22). Includes a successful partial-then-full close on URA — exercised lock release+re-acquire under real-world cadence. ✅
 
 **Key docs:**
-- `docs/codex-briefs/2026-04-29_close-handler-refactor.md` — CC implementation brief (FINAL)
+- `docs/codex-briefs/2026-04-29_close-handler-refactor.md` — C1 implementation brief (FINAL)
 - `docs/titans-pre-review/2026-04-29_close-handler-refactor_athena-final-decision.md` — design source of truth
 - `docs/titans-pre-review/2026-04-29_close-handler-refactor.md` — original Pass-1 brief
 - Pass 1, Pass 2, and final-Titans-review files in same folder
 
-### ⏳ Thursday Apr 30 Follow-Up
+### ✅ Thursday Apr 30 Follow-Up — COMPLETE
 
-- [ ] **🚨 9:30 AM ET market-open check (CC)** — single passive-monitoring query against the audit tables for the last 18 hours:
+- [x] **9:30 AM ET market-open check** — clean. close_attempts: 1 completed + 1 failed (test-row from prior night), background_task_failures empty, real-trade audit query later confirmed 7-for-7 atomicity across the day's actual closes.
+- [x] **Pre-existing analytics drift query** — confirmed ≥50 drift rows from pre-C1 silent-exception window (Mar 2026 → Apr 29 inclusive). Pre-C1 baseline; C1 prevents new drift. Backfill brief queued separately (see Deferred to Next Sprint below).
+- [x] **Production verification on real closes** — 7 closes through C1 handler today, 100% atomic, 0 failures, 0 background task failures.
 
-  ```sql
-  -- close_attempts: should be all 'completed' or 'started→completed' lifecycle pairs
-  SELECT status, COUNT(*) FROM close_attempts
-  WHERE attempted_at > NOW() - INTERVAL '18 hours' GROUP BY status;
+### ⏳ Friday May 1 — C2 GREENLIT
 
-  -- background_task_failures: should be empty
-  SELECT task_name, error_class, COUNT(*) FROM background_task_failures
-  WHERE triggered_at > NOW() - INTERVAL '18 hours' GROUP BY task_name, error_class;
-  ```
+- [ ] **Component 2 — Frontend UX deploy.** Brief authored 2026-05-01 in this chat. Deploy after market close 4:15pm ET. Disable-on-click + 800ms debounce, dim-row optimistic UI, polling state guard, error/success toasts with retry, mobile scroll-tap disable, `close_attempts` surfacing in position-history detail view, frontend wiring for `GET /api/v2/positions/{id}/close-attempts`. See `docs/codex-briefs/2026-05-01_close-handler-c2-frontend.md`.
 
-  Report counts + any `failed` rows or non-empty failures table. **If both clean during the first real market session, C1 is stable** and C2 (frontend) can be greenlit for Friday or early next week. If anything anomalous, ping Pivot before market action picks up.
+### ⏳ Document Implementation Deviations (~10 min, anytime)
 
-- [ ] **Pre-existing analytics drift query** — read-only, safe anytime (run with the market-open check is fine). Measures historical drift between `unified_positions` (CLOSED) and `closed_positions` from the period when legacy code silently swallowed INSERT exceptions:
-
-  ```sql
-  SELECT up.position_id, up.ticker, up.exit_date
-  FROM unified_positions up
-  LEFT JOIN closed_positions cp
-    ON cp.signal_id = up.signal_id AND cp.ticker = up.ticker
-  WHERE up.status = 'CLOSED'
-    AND cp.id IS NULL
-  ORDER BY up.exit_date DESC;
-  ```
-
-  0 rows = lucky, swallowed exceptions never actually fired. Non-zero = file separate brief next sprint to backfill.
-
-- [ ] **Document implementation deviations in `athena-final-decision.md`** — short addendum (~10 min write-up) capturing what shipped vs what was designed:
+- [ ] Append addendum to `athena-final-decision.md` capturing what shipped vs what was designed:
   - `SELECT FOR UPDATE NOWAIT` substituted for `lock_timeout = 2s` (CC's call, retroactively approved — faster failure for single-user case, pool's 30s `statement_timeout` is sufficient backstop)
   - `close_attempts` lifecycle pattern (`started → completed/failed`) substituted for single-row enum at end (CC's call, retroactively approved — captures row even if handler crashes mid-execution)
-  - Pre-existing analytics drift observation logged for next-sprint follow-up
-
-- [ ] **Post-market eval: greenlight C2?** — after market close Thursday, look at the audit tables one more time. If 0 unexpected rows, schedule C2 (frontend) for Friday EOD or early next week.
+  - Pre-existing analytics drift observation (≥50 rows confirmed, queued for next-sprint backfill)
 
 ### ⏳ Deferred to Next Sprint
 
 - [ ] **TOCTOU audit of remaining mutation endpoints** — `update_position`, `create_position`, trade entry handler. Same bug class as the close handler; not exploitable today (single-user, low volume) but fix before scaling. Per ATHENA's design doc Section 6.
-- [ ] **Pre-existing `closed_positions` drift backfill** — ONLY if Thursday's reconciliation query returns non-zero rows. Backfill `closed_positions` from `unified_positions` + `trades` for any orphaned closed rows.
-- [ ] **Component 2 — Frontend UX** — gated on C1 stability. Disable-on-click + 800ms debounce, dim-row optimistic UI, error/success toasts, polling state guard, mobile scroll-tap disable, `close_attempts` surfacing in position-history detail view, new `GET /api/v2/positions/{id}/close-attempts` endpoint surfacing UI. Brief sections 6.1–6.7 of CC implementation brief.
+- [ ] **Pre-existing `closed_positions` drift backfill** — confirmed ≥50 orphaned CLOSED rows from pre-C1 silent-exception window. Backfill `closed_positions` from `unified_positions` + `trades` for orphans. Read-only on `unified_positions` and `trades`, INSERT-only on `closed_positions`. Schedule AFTER C2 ships and stabilizes.
+- [ ] **Add `position_id` column to `closed_positions`** — surfaced during 2026-04-30 C1 audit. Currently cross-referencing `closed_positions` ↔ `unified_positions` requires going through `signal_id` + `ticker` + `date`. Adding a `position_id` FK would make every future audit, reconciliation query, and drift detection a one-step join instead of three. Small migration (add column + backfill from existing data via the same join), big audit-velocity payoff. Not urgent enough to gate C2.
 
 ---
 
@@ -363,31 +347,6 @@ If both clear, Nick greenlights a follow-up CC brief to swap primary gate from R
 - [x] Create `#zeus-ta-feed` Discord channel + webhook + add `DISCORD_WEBHOOK_ZEUS_TA_FEED` to Railway env (handed to CC 2026-04-25)
 - [x] Verify Railway startup warning is gone post-redeploy (deploy `62de5937` succeeded 2026-04-25 06:31 UTC, no missing-webhook warning logged)
 
-### ⏳ Shadow Window Check-Ins (calendar)
-
-- [ ] **Wed Apr 29 (FOMC Day 2)** — spot-check shadow logs capture FOMC volatility cleanly
-- [ ] **Fri May 1 (~Day 5)** — sanity peek at `feed_tier_v2='top_feed'` count
-- [ ] **🚨 Fri May 8 (~Day 7) — MANDATORY circuit-breaker query:**
-
-  ```sql
-  SELECT
-    COUNT(*) AS top_feed_v2_count_7d,
-    ROUND(COUNT(*) * 7.0 / 7, 1) AS per_week_rate
-  FROM signals
-  WHERE feed_tier_v2 = 'top_feed'
-    AND created_at > NOW() - INTERVAL '7 days';
-  ```
-
-  - If count **>20**: halt shadow, tune Path A floor (75→78 or 80), restart window
-  - If count **<2**: halt shadow, ping me, thresholds may be too tight
-  - If 2–20: keep going, full 21+ day window proceeds untouched
-
-- [ ] **Fri May 15 (OpEx)** — spot-check OpEx volume captured in dual-log
-- [ ] **Wed May 27 (~Day 21)** — pull full shadow dataset, run Olympus quant-gate review session
-- [ ] Fill in Phase B Metric 1 (top_feed precision bar) with real shadow numbers
-- [ ] Fill in Phase B Metric 2 (volume sanity confirmed)
-- [ ] Fill in Phase B Metric 3 (path balance — no single path >60% of top_feed)
-
 ### ✅ v2 Classifier Retrospective Report — COMPLETE 2026-04-25
 
 **Outcome:** Retrospective ran 3,203 signals through v2 over 30 days. Found Path A floor=75 would produce ~24.5 top_feed/week (64% above May 8 circuit-breaker). Olympus committee unanimously voted to pre-tune `TOP_FEED_FLOOR` from 75 → 82 (10.5/week, midpoint of 5-15 target band).
@@ -507,6 +466,11 @@ If both clear, Nick greenlights a follow-up CC brief to swap primary gate from R
 - [ ] **Install `pytest-asyncio`** — surfaced during Raschke P1 full-suite run (commit `95e0bdd`). 19 async tests in `test_uw_api_mapping.py` were silently skipped in prior runs because `-x` stopped at earlier failures; they fail without `pytest-asyncio`. Trivial fix — add to `requirements-dev.txt` (or wherever test deps live). Do BEFORE next full-suite audit so test coverage is accurate.
 
 ---
+
+## ✅ Completed (April 29-30, 2026) — Close-Handler Refactor C1
+
+- [x] **C1 backend transaction wrap shipped** — `SELECT FOR UPDATE NOWAIT`, atomic 4-table writes, 2 new audit tables (`close_attempts`, `background_task_failures`), 1 new endpoint, background signal resolution with failure logging. Commit shipped 2026-04-29 EOD, 30-min monitoring clean.
+- [x] **C1 production verification on real traffic** — 7 atomic transactions on 6 real positions across 2026-04-30 trading session: DINO +$131, EOG +$20, IWM -$35, SMH -$53, URA partial-then-full +$71, RSP -$22. Zero failures, zero orphans, zero background task failures. URA partial-then-full case exercised lock release+re-acquire under real-world cadence.
 
 ## ✅ Completed (March 11, 2026) — Webhook Fix + McClellan + Artemis + Phalanx
 
