@@ -9,7 +9,10 @@ Binding conditions from committee review:
 2. Token bucket rate limiter: 120 req/min
 3. Response normalization: output matches polygon_equities.py / polygon_options.py schemas
 4. Redis caching with configurable TTL per endpoint type
-5. Daily request counter with budget alerts at 50% (10K)
+5. Daily request counter with budget alerts at 50% (INFO), 70% (ELEVATED),
+   85% (WARNING), and 90% (CRITICAL) of DAILY_BUDGET (20K on Basic plan).
+   Each tier fires at most once per day via Redis-backed de-dup. Alerts
+   are observability only — calls continue past 90% until UW returns 429s.
 6. Retry with exponential backoff (max 3 retries)
 7. Bearer token auth from UW_API_KEY env var
 8. Health check via GET /api/uw/health
