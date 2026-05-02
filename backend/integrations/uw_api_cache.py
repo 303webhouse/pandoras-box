@@ -30,7 +30,7 @@ CACHE_TTLS = {
 }
 
 DAILY_BUDGET = 20000     # UW Basic plan limit
-BUDGET_ALERT_THRESHOLDS = [0.50, 0.70, 0.85, 0.95]  # Alert at each crossing
+BUDGET_ALERT_THRESHOLDS = [0.50, 0.70, 0.85, 0.90]  # Alert at each crossing — 90% is CRITICAL ceiling (drops 95% in favor of earlier-firing CRITICAL)
 
 # In-memory stats (reset on deploy)
 _stats = {"hits": 0, "misses": 0}
@@ -141,22 +141,28 @@ async def _post_budget_alert(count: int, threshold_pct: int) -> None:
         webhook = os.getenv("DISCORD_WEBHOOK_SIGNALS", "")
         if not webhook:
             return
-        if threshold_pct >= 95:
+        # Severity dispatch — CRITICAL now fires at 90% (was 95%) so Nick has
+        # ~2K requests / ~10 min headroom instead of 1K / ~5 min.
+        if threshold_pct >= 90:
             emoji = "\U0001F6A8"  # rotating light
             severity = "CRITICAL"
+            body = "only ~2K requests remaining — throttle now or expect 429s within ~10 min of normal usage."
         elif threshold_pct >= 85:
             emoji = "\U000026A0\uFE0F"  # warning
             severity = "WARNING"
+            body = "only ~3K requests remaining — reduce non-critical calls."
         elif threshold_pct >= 70:
             emoji = "\U0001F4CA"  # bar chart
             severity = "ELEVATED"
+            body = "usage is heavier than typical — monitor."
         else:
             emoji = "\U0001F4CB"  # clipboard
             severity = "INFO"
+            body = "informational, on track for normal day."
         async with httpx.AsyncClient(timeout=5) as client:
             await client.post(webhook, json={
                 "content": f"{emoji} **UW API Budget [{severity}]** — {count}/{DAILY_BUDGET} requests "
-                           f"({threshold_pct}% crossed) — monitor usage"
+                           f"({threshold_pct}% crossed) — {body}"
             })
     except Exception:
         pass
