@@ -1371,7 +1371,8 @@ async def _resolve_signal_outcome(pool, position: dict, exit_price: float,
                 outcome_pnl_dollars = $6,
                 outcome_resolved_at = $7,
                 outcome_options_metrics = $8,
-                notes = COALESCE(notes || ' | ', '') || $9
+                notes = COALESCE(notes || ' | ', '') || $9,
+                outcome_source = 'ACTUAL_TRADE'
             WHERE signal_id = $1
         """,
             signal_id,

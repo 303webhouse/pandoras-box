@@ -164,7 +164,8 @@ async def resolve_signal_outcomes(backfill_days: int = 60) -> None:
                     UPDATE signals
                     SET outcome = $1,
                         outcome_pnl_pct = $2,
-                        outcome_resolved_at = $3
+                        outcome_resolved_at = $3,
+                        outcome_source = 'BAR_WALK'
                     WHERE signal_id = $4
                 """, outcome, pnl_pct, resolved_at, sig["signal_id"])
             logger.info(

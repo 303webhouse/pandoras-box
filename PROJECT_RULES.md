@@ -189,3 +189,44 @@ When building any feature that needs market data, use these sources in this prio
 - Code is source of truth over docs. Fix docs when they contradict code.
 - Document **why** not just **what** for architecture decisions.
 - **When deprecating a data source, update the Data Source Hierarchy in this file IMMEDIATELY.** Stale data-source guidance is a compounding foot-gun for every future build.
+
+## Outcome Tracking Semantics
+
+`signals.outcome` carries three distinct meanings depending on which writer
+produced it. The `signals.outcome_source` column (added 2026-05-03 via
+migration 013) records the producer.
+
+| outcome_source | Meaning | Writer |
+|---|---|---|
+| `BAR_WALK` | Hypothetical: "if you'd held to target/stop, what happened?" | `outcome_resolver.py` (yfinance forward bar walk) |
+| `ACTUAL_TRADE` | Realized: "what did the trade actually return when closed?" | `unified_positions.py` Ariadne path |
+| `COUNTERFACTUAL` | What-if: "if this dismissed signal hadn't been dismissed, what would have happened?" | `analytics/api.py` `/resolve-counterfactuals` endpoint |
+| `EXPIRED` | Signal time-window elapsed without target or stop touch (label only; outcome stays NULL) | Phase A backfill from `signal_outcomes` |
+| `INVALIDATED` | Signal was contradicted before resolution (label only; outcome stays NULL) | Phase A backfill from `signal_outcomes` |
+| `PROJECTED_FROM_BAR_WALK` | Reserved for Phase C — `signal_outcomes`-projected values | (not yet used) |
+| `NULL` | Unresolved | — |
+
+**Query rules:**
+
+1. **Strategy-vs-strategy comparisons (win-rate calibration, score-band tuning)**
+   must use `signal_outcomes` directly, OR filter `signals` to
+   `outcome_source = 'BAR_WALK'`. Mixing semantics (especially Ariadne
+   actual-trade outcomes) corrupts the comparison.
+2. **P&L reporting (real money)** should use `signals.outcome` filtered to
+   `outcome_source = 'ACTUAL_TRADE'`, joined to `unified_positions` /
+   `closed_positions` for full context.
+3. **Counterfactual analysis** (what-if dashboards, missed-opportunity audits)
+   should use `outcome_source = 'COUNTERFACTUAL'` exclusively.
+4. **Drift detection** uses `v_outcome_drift` view, which is scoped to
+   bar-walk semantics only.
+
+**Known gap (Phase B):** the resolver's `outcome_resolved_at` is currently
+populated from yfinance `bar_ts`, which can predate `signals.timestamp` for
+~30-44% of resolver-written rows due to a bar-window edge case. **Do not rely
+on `outcome_resolved_at` for time-series analysis until Phase B ships.** Use
+`signal_outcomes.outcome_at` instead, which is correct.
+
+**Phase C (deferred):** `signal_outcomes` → `signals.outcome*` value
+projection backfill. Until Phase C ships, the existing 27% disagreement
+between the two tables persists. Use the appropriate source per query rules
+above; do not assume agreement.
