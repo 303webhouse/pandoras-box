@@ -2518,7 +2518,8 @@ async def resolve_counterfactuals(_=Depends(require_api_key)):
                         UPDATE signals SET
                             outcome = $2,
                             outcome_pnl_pct = $3,
-                            outcome_resolved_at = NOW()
+                            outcome_resolved_at = NOW(),
+                            outcome_source = 'COUNTERFACTUAL'
                         WHERE signal_id = $1
                     """, row["signal_id"], outcome, round(pnl_pct, 2))
                 resolved += 1
