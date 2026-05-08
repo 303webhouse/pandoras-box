@@ -52,9 +52,13 @@ def _walk_bars(
         )
 
     try:
+        # Phase B: do not subtract 15min — would deliberately reach pre-signal bars.
+        # Note: yfinance still returns the bar-aligned bar that *contains* signal_ts
+        # (whose bar_ts is before signal_ts), so the loop below has an explicit
+        # bar_ts < signal_ts guard. See docs/codex-briefs/outcome-tracking-phase-b-resolver-fix-2026-05-08.md
         bars = yf.download(
             ticker,
-            start=signal_ts - timedelta(minutes=15),  # include the signal bar
+            start=signal_ts,
             interval=interval,
             progress=False,
             auto_adjust=False,
@@ -76,6 +80,29 @@ def _walk_bars(
             high = float(bar["High"])
             low = float(bar["Low"])
         except (KeyError, ValueError, TypeError):
+            continue
+
+        # Phase B: skip bars stamped before signal creation. yfinance's bar-aligned
+        # start parameter cannot prevent the bar containing signal_ts (which is
+        # timestamped at the bar's start, before signal_ts) from being returned.
+        # Without this guard the resolver matches on pre-signal price action and
+        # registers phantom WINs.
+        try:
+            if hasattr(bar_ts, "tz_convert"):
+                bar_ts_utc = (
+                    bar_ts.tz_convert("UTC")
+                    if getattr(bar_ts, "tzinfo", None) is not None
+                    else bar_ts.tz_localize("UTC")
+                )
+            else:
+                bar_ts_utc = (
+                    bar_ts
+                    if getattr(bar_ts, "tzinfo", None) is not None
+                    else bar_ts.replace(tzinfo=timezone.utc)
+                )
+        except Exception:
+            bar_ts_utc = bar_ts
+        if bar_ts_utc < signal_ts:
             continue
 
         if direction == "LONG":
@@ -164,12 +191,12 @@ async def resolve_signal_outcomes(backfill_days: int = 60) -> None:
                     UPDATE signals
                     SET outcome = $1,
                         outcome_pnl_pct = $2,
-                        outcome_resolved_at = $3,
+                        outcome_resolved_at = NOW(),
                         outcome_source = 'BAR_WALK'
-                    WHERE signal_id = $4
-                """, outcome, pnl_pct, resolved_at, sig["signal_id"])
+                    WHERE signal_id = $3
+                """, outcome, pnl_pct, sig["signal_id"])
             logger.info(
-                "Resolved %s %s %s: %s (%.2f%%) at %s",
+                "Resolved %s %s %s: %s (%.2f%%) — matched bar at %s",
                 ticker, direction, sig["signal_id"], outcome, pnl_pct or 0, resolved_at,
             )
 

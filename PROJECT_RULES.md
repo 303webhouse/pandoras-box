@@ -220,11 +220,12 @@ migration 013) records the producer.
 4. **Drift detection** uses `v_outcome_drift` view, which is scoped to
    bar-walk semantics only.
 
-**Known gap (Phase B):** the resolver's `outcome_resolved_at` is currently
-populated from yfinance `bar_ts`, which can predate `signals.timestamp` for
-~30-44% of resolver-written rows due to a bar-window edge case. **Do not rely
-on `outcome_resolved_at` for time-series analysis until Phase B ships.** Use
-`signal_outcomes.outcome_at` instead, which is correct.
+**Phase B (shipped 2026-05-08):** resolver `outcome_resolved_at` is now
+wall-clock `NOW()` at write time (no longer derived from yfinance `bar_ts`),
+and the bar-walk loop now skips bars stamped before `signal_ts`. All
+existing BAR_WALK rows have been backfilled on corrected logic (see
+`signal_outcome_diff_log` for the full diff, keyed by backfill_run_id).
+Brief: `docs/codex-briefs/outcome-tracking-phase-b-resolver-fix-2026-05-08.md`.
 
 **Phase C (deferred):** `signal_outcomes` → `signals.outcome*` value
 projection backfill. Until Phase C ships, the existing 27% disagreement
