@@ -230,3 +230,28 @@ on `outcome_resolved_at` for time-series analysis until Phase B ships.** Use
 projection backfill. Until Phase C ships, the existing 27% disagreement
 between the two tables persists. Use the appropriate source per query rules
 above; do not assume agreement.
+
+## Deployment Verification
+
+"Committed and pushed" ≠ "deployed and running." Railway can silently fail a
+build, time out a deploy, or serve a stale image while reporting healthy.
+A May 2026 incident saw 4 days of "deployed" code that was never actually
+running. Every brief that ships code MUST verify the deployed image matches
+the committed code before declaring complete.
+
+**Required verification step in every CC brief acceptance criteria:**
+
+1. After `git push origin main`, confirm Railway deploy status:
+   `railway deployment list -s <service>` — most recent deployment must
+   show SUCCESS, not BUILDING / FAILED / CRASHED.
+2. Verify deploy SHA matches commit SHA being shipped. Mismatch = stale
+   container, retry deploy or trigger an empty commit to force rebuild.
+3. Empirically confirm the patched code is live — query the running
+   service for an observable side effect of the patch (new tag value,
+   new column write, new endpoint response, log line, etc.). Do NOT
+   accept `/health = OK` as proof; FastAPI health endpoints don't
+   reflect job-scheduler or background-worker patches.
+4. If deploy is silent for >5 min after `git push`, do not assume success.
+   Pull `railway logs -s <service> --tail` and check for build failures.
+
+A brief is not complete until step 3 is empirically confirmed.
