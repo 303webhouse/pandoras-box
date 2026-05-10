@@ -227,10 +227,39 @@ existing BAR_WALK rows have been backfilled on corrected logic (see
 `signal_outcome_diff_log` for the full diff, keyed by backfill_run_id).
 Brief: `docs/codex-briefs/outcome-tracking-phase-b-resolver-fix-2026-05-08.md`.
 
-**Phase C (deferred):** `signal_outcomes` → `signals.outcome*` value
-projection backfill. Until Phase C ships, the existing 27% disagreement
-between the two tables persists. Use the appropriate source per query rules
-above; do not assume agreement.
+### Phase C: Bar-walk projection rule
+
+- `signal_outcomes` is canonical bar-walk truth.
+- `signals.outcome*` is a denormalized projection of bar-walk truth, EXCEPT
+  when overridden by `ACTUAL_TRADE` (Ariadne, on position close) or
+  `COUNTERFACTUAL` (analytics).
+- The `outcome_resolver.py` writes `signals.outcome*` directly with
+  `outcome_source = 'BAR_WALK'`.
+- The `score_signals.py` writes `signal_outcomes` and projects to
+  `signals.outcome*` with `outcome_source = 'PROJECTED_FROM_BAR_WALK'`.
+- `signal_outcomes.max_favorable` is a snapshot, not a living number. To use
+  MFE for any decision more than 7 days post-resolution, run
+  `scripts/rewalk_signal_outcomes.py --dry-run` first to detect drift.
+
+### Canonical walker policy
+
+- 15-minute resolver (`outcome_resolver.py`) is canonical for:
+  intraday tactics (B3 scalps), MFE/MAE for entry/exit calibration,
+  stop-tightness studies.
+- Daily resolver (`score_signals.py`) is canonical for:
+  B1/B2 swing strategies where intraday wiggle is noise, weekly/monthly
+  aggregate studies, strategy promotion audits.
+- When the two agree: use either.
+- When they disagree on a signal: the canonical walker for the signal's
+  strategy/timeframe wins. Log the disagreement in
+  `signal_outcome_diff_log` with `reason='granularity_reconciliation'`.
+  Never silently average.
+- INVALIDATED carve-out: when `signal_outcomes.outcome = 'INVALIDATED'`
+  but `signal_outcomes.MAE` crossed `stop_loss` or `MFE` crossed `target_1`,
+  the BAR_WALK price-based verdict wins. Log with distinct
+  `reason='granularity_reconciliation_invalidated_override'` so these
+  cases are queryable as a quality signal on `score_signals`'s
+  contradiction logic.
 
 ## Deployment Verification
 
