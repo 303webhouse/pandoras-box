@@ -58,6 +58,16 @@ from pathlib import Path
 import psycopg2
 import psycopg2.extras
 
+# Pull MAX_SIGNAL_AGE_DAYS from score_signals.py so the EXPIRED age-cap
+# stays in lockstep with the canonical writer. Without this, any
+# stored-EXPIRED row whose age still exceeds the cap re-walks to PENDING
+# and registers as a false-positive verdict_change.
+sys.path.insert(
+    0,
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "backend"),
+)
+from jobs.score_signals import MAX_SIGNAL_AGE_DAYS  # noqa: E402
+
 DB_URL = os.environ.get("DATABASE_PUBLIC_URL") or os.environ.get("DATABASE_URL")
 if not DB_URL:
     sys.exit("FATAL: DATABASE_PUBLIC_URL/DATABASE_URL not set")
@@ -218,6 +228,8 @@ def fetch_rows(cur, since: datetime | None, signal_id: str | None):
 def main():
     ap = argparse.ArgumentParser(description="Phase C re-walk (signal_outcomes refresh)")
     ap.add_argument("--apply", action="store_true", help="Apply changes (default: dry-run)")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="Explicit dry-run flag (no-op; dry-run is the default behavior)")
     ap.add_argument("--batch-size", type=int, default=200)
     ap.add_argument("--resume", action="store_true", help="Continue from checkpoint file")
     ap.add_argument("--max-runtime", type=float, default=None,
@@ -263,6 +275,8 @@ def main():
     print()
 
     counters = Counter()
+    verdict_change_samples: list = []  # capture up to N for surfacing
+    SAMPLE_CAP = 10
     freshness_cutoff = datetime.now(timezone.utc) - timedelta(hours=FRESHNESS_HOURS)
 
     for i, row in enumerate(rows, 1):
@@ -310,6 +324,15 @@ def main():
                 df, row["direction"], entry, stop, t1, t2, inval,
                 created_at, outcome_at,
             )
+            # Mirror score_signals.py's EXPIRED age-cap. Applied AFTER the
+            # walk so terminal verdicts that landed within the cap window
+            # still surface — only PENDING rows past the cap get folded
+            # to EXPIRED.
+            age_days = (datetime.now(timezone.utc) - created_at).days
+            if new_outcome == "PENDING" and age_days > MAX_SIGNAL_AGE_DAYS:
+                new_outcome = "EXPIRED"
+                new_price = None
+                new_days = age_days
         except Exception as e:
             counters["walk_error"] += 1
             append_skipped({
@@ -337,6 +360,19 @@ def main():
         else:
             reason = "rewalk_verdict_change" if verdict_changed else "rewalk_snapshot_drift"
             counters[reason] += 1
+            if verdict_changed and len(verdict_change_samples) < SAMPLE_CAP:
+                verdict_change_samples.append({
+                    "signal_id": row["signal_id"],
+                    "ticker": row["symbol"],
+                    "signal_ts": str(row.get("created_at")),
+                    "outcome_at": str(outcome_at),
+                    "old_outcome": old_outcome,
+                    "new_outcome": new_outcome,
+                    "old_mfe": old_mfe,
+                    "new_mfe": new_mfe,
+                    "old_mae": old_mae,
+                    "new_mae": new_mae,
+                })
 
             if apply_mode:
                 cur.execute("""
@@ -380,7 +416,9 @@ def main():
     state["finished_at"] = datetime.now(timezone.utc).isoformat()
     save_checkpoint(state)
 
-    elapsed = time.time() - time.mktime(datetime.fromisoformat(state["started_at"]).timetuple())
+    # tz-aware ISO -> correct UTC epoch (time.mktime treats struct_time as
+    # local, which produces a 6h offset on MDT hosts).
+    elapsed = time.time() - datetime.fromisoformat(state["started_at"]).timestamp()
     print()
     print("=" * 78)
     print("Re-walk summary")
@@ -391,6 +429,17 @@ def main():
     print(f"  runtime:           {elapsed/60:.1f} min")
     print(f"  skipped report:    {SKIPPED_REPORT_PATH}")
     print(f"  checkpoint:        {CHECKPOINT_PATH}")
+
+    if verdict_change_samples:
+        print()
+        print("=" * 78)
+        print(f"Sample verdict_change rows (up to {SAMPLE_CAP}, for spot-check pick)")
+        print("=" * 78)
+        for s in verdict_change_samples:
+            print(f"  {s['signal_id']:<46s} {s['ticker']:<8s} "
+                  f"signal_ts={s['signal_ts'][:19]} outcome_at={s['outcome_at'][:19]}")
+            print(f"    {s['old_outcome']:<14s} -> {s['new_outcome']:<14s}  "
+                  f"MFE {s['old_mfe']} -> {s['new_mfe']}  MAE {s['old_mae']} -> {s['new_mae']}")
 
     cur.close(); conn.close()
 
