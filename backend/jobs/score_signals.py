@@ -216,13 +216,48 @@ async def _update_outcome(
     max_fav: float | None = None,
     max_adv: float | None = None,
 ) -> None:
+    # Phase C (2026-05-09): single data-modifying CTE atomically updates
+    # signal_outcomes AND projects onto signals.outcome* with
+    # outcome_source = 'PROJECTED_FROM_BAR_WALK'. The signals UPDATE has a
+    # WHERE outcome_source IS NULL guard so it never overwrites BAR_WALK
+    # (resolver), ACTUAL_TRADE (Ariadne), COUNTERFACTUAL (analytics), or
+    # prior PROJECTED_FROM_BAR_WALK rows. Idempotent.
     async with pool.acquire() as conn:
         await conn.execute(
             """
-            UPDATE signal_outcomes
-            SET outcome = $1, outcome_price = $2, outcome_at = NOW(),
-                days_to_outcome = $3, max_favorable = $4, max_adverse = $5
-            WHERE signal_id = $6
+            WITH updated_so AS (
+                UPDATE signal_outcomes
+                SET outcome = $1, outcome_price = $2, outcome_at = NOW(),
+                    days_to_outcome = $3, max_favorable = $4, max_adverse = $5
+                WHERE signal_id = $6
+                RETURNING signal_id
+            )
+            UPDATE signals s
+            SET outcome = CASE
+                    WHEN $1 IN ('HIT_T1', 'HIT_T2') THEN 'WIN'
+                    WHEN $1 = 'STOPPED_OUT' THEN 'LOSS'
+                    ELSE NULL
+                END,
+                outcome_pnl_pct = CASE
+                    WHEN $1 IN ('HIT_T1','HIT_T2') AND s.direction = 'LONG'  THEN (s.target_1 - s.entry_price) / s.entry_price * 100
+                    WHEN $1 IN ('HIT_T1','HIT_T2') AND s.direction = 'SHORT' THEN (s.entry_price - s.target_1) / s.entry_price * 100
+                    WHEN $1 = 'STOPPED_OUT'        AND s.direction = 'LONG'  THEN (s.stop_loss - s.entry_price) / s.entry_price * 100
+                    WHEN $1 = 'STOPPED_OUT'        AND s.direction = 'SHORT' THEN (s.entry_price - s.stop_loss) / s.entry_price * 100
+                    ELSE NULL
+                END,
+                outcome_resolved_at = CASE
+                    WHEN $1 IN ('HIT_T1','HIT_T2','STOPPED_OUT') THEN NOW()
+                    ELSE NULL
+                END,
+                outcome_source = CASE
+                    WHEN $1 IN ('HIT_T1','HIT_T2','STOPPED_OUT') THEN 'PROJECTED_FROM_BAR_WALK'
+                    WHEN $1 = 'EXPIRED' THEN 'EXPIRED'
+                    WHEN $1 = 'INVALIDATED' THEN 'INVALIDATED'
+                    ELSE NULL
+                END
+            FROM updated_so
+            WHERE s.signal_id = updated_so.signal_id
+              AND s.outcome_source IS NULL
             """,
             outcome,
             price,

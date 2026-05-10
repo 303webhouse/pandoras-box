@@ -1,0 +1,399 @@
+"""Phase C: re-walk every resolved signal_outcomes row against current yfinance.
+
+Purpose:
+  signal_outcomes was originally written by score_signals.py walking yfinance
+  daily bars at resolution time. yfinance silently drifts (Phase B's 28
+  phantom-WIN investigation showed this). This script re-walks each row
+  against TODAY's yfinance data, refreshes max_favorable / max_adverse /
+  days_to_outcome / outcome_price / outcome verdict, and logs every change to
+  signal_outcome_diff_log.
+
+Granularity:
+  Uses DAILY bars to mirror score_signals.py's walker exactly. The brief's
+  early script-spec section says "15m bars" but the same brief's CC note says
+  "use the same data source the original walk used or the comparison is
+  meaningless" — we go with the latter. Comparing daily-walked verdicts
+  against fresh daily bars is the apples-to-apples drift detection.
+
+Scope:
+  outcome IN ('STOPPED_OUT', 'HIT_T1', 'HIT_T2', 'EXPIRED', 'PENDING')
+  EXCLUDES 'INVALIDATED' per Phase C Gate 2 sign-off (re-walk can't restate
+  a non-price-based contradiction signal).
+
+Resume:
+  Checkpoint file at <tmpdir>/phase-c-rewalk-state.json holds processed
+  signal_ids and a runtime tally. --resume re-reads the file and skips
+  anything already done. Crash mid-batch is safe.
+
+Skipped report:
+  Rows that yfinance can't supply data for, or that error during walk, are
+  appended to <tmpdir>/phase-c-rewalk-skipped.jsonl as one JSON object per
+  line. No DB writes for these — operator inspects after run.
+
+Usage:
+  python scripts/rewalk_signal_outcomes.py                   # dry-run, full scope
+  python scripts/rewalk_signal_outcomes.py --apply           # writes
+  python scripts/rewalk_signal_outcomes.py --since 2026-04-25 --dry-run
+  python scripts/rewalk_signal_outcomes.py --signal-id HG_NXTS_20260423_192057_3-10
+  python scripts/rewalk_signal_outcomes.py --resume --max-runtime 8 --apply
+
+See docs/codex-briefs/outcome-tracking-phase-c-projection-2026-05-09.md
+"""
+from __future__ import annotations
+
+import argparse
+import asyncio
+import json
+import os
+import random
+import signal as signal_module
+import sys
+import tempfile
+import time
+import uuid
+from collections import Counter
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+import psycopg2
+import psycopg2.extras
+
+DB_URL = os.environ.get("DATABASE_PUBLIC_URL") or os.environ.get("DATABASE_URL")
+if not DB_URL:
+    sys.exit("FATAL: DATABASE_PUBLIC_URL/DATABASE_URL not set")
+
+CHECKPOINT_PATH = Path(tempfile.gettempdir()) / "phase-c-rewalk-state.json"
+SKIPPED_REPORT_PATH = Path(tempfile.gettempdir()) / "phase-c-rewalk-skipped.jsonl"
+
+SCOPE_OUTCOMES = ("STOPPED_OUT", "HIT_T1", "HIT_T2", "EXPIRED", "PENDING")
+FRESHNESS_HOURS = 24  # skip rows resolved within last N hours
+MAX_FETCH_ATTEMPTS = 3
+JITTER_RANGE_S = (0.2, 0.7)
+
+
+def _to_utc(ts):
+    if ts is None:
+        return None
+    return ts.replace(tzinfo=timezone.utc) if ts.tzinfo is None else ts
+
+
+def load_checkpoint(run_id: str | None) -> dict:
+    if not CHECKPOINT_PATH.exists():
+        return {"run_id": run_id or f"phase_c_rewalk_{uuid.uuid4().hex[:12]}",
+                "started_at": datetime.now(timezone.utc).isoformat(),
+                "processed_ids": []}
+    state = json.loads(CHECKPOINT_PATH.read_text())
+    if run_id and state.get("run_id") != run_id:
+        sys.exit(f"FATAL: checkpoint run_id mismatch (requested {run_id}, file {state.get('run_id')})")
+    return state
+
+
+def save_checkpoint(state: dict) -> None:
+    CHECKPOINT_PATH.write_text(json.dumps(state, indent=2))
+
+
+def append_skipped(record: dict) -> None:
+    with SKIPPED_REPORT_PATH.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(record, default=str) + "\n")
+
+
+def fetch_history(symbol: str, start: datetime):
+    """Daily yfinance pull. Mirrors score_signals.py._fetch_history."""
+    import yfinance as yf
+    ticker = yf.Ticker(symbol)
+    return ticker.history(start=start.strftime("%Y-%m-%d"))
+
+
+def walk_daily_bars(df, direction: str, entry: float, stop: float | None,
+                    t1: float | None, t2: float | None,
+                    invalidation: float | None,
+                    created_at: datetime, outcome_at_cap: datetime):
+    """Mirror of score_signals.py bar walk. Returns (outcome, outcome_price,
+    max_favorable, max_adverse, days_to_outcome).
+
+    outcome ∈ {STOPPED_OUT, HIT_T1, HIT_T2, INVALIDATED, EXPIRED, PENDING}
+    Walks bars only up to outcome_at_cap (don't extend past original window).
+    """
+    if df is None or df.empty:
+        return None, None, None, None, None
+
+    if direction == "LONG":
+        max_favorable = float(df["High"].max()) - entry
+        max_adverse = entry - float(df["Low"].min())
+    else:
+        max_favorable = entry - float(df["Low"].min())
+        max_adverse = float(df["High"].max()) - entry
+
+    outcome = None
+    outcome_price = None
+    hit_t1 = False
+    matched_at = None
+
+    for ts, bar in df.iterrows():
+        bar_dt = _to_utc(ts.to_pydatetime() if hasattr(ts, "to_pydatetime") else ts)
+        if bar_dt > outcome_at_cap + timedelta(days=1):
+            break  # don't walk past the original outcome window
+
+        if direction == "LONG":
+            if invalidation and bar["Close"] < invalidation:
+                outcome, outcome_price, matched_at = "INVALIDATED", round(float(bar["Close"]), 2), bar_dt
+                break
+            if stop and bar["Low"] <= stop:
+                outcome, outcome_price, matched_at = "STOPPED_OUT", stop, bar_dt
+                break
+            if t2 and bar["High"] >= t2:
+                outcome, outcome_price, matched_at = "HIT_T2", t2, bar_dt
+                break
+            if t1 and bar["High"] >= t1:
+                hit_t1 = True
+                outcome_price = t1
+                if matched_at is None:
+                    matched_at = bar_dt
+        else:  # SHORT
+            if invalidation and bar["Close"] > invalidation:
+                outcome, outcome_price, matched_at = "INVALIDATED", round(float(bar["Close"]), 2), bar_dt
+                break
+            if stop and bar["High"] >= stop:
+                outcome, outcome_price, matched_at = "STOPPED_OUT", stop, bar_dt
+                break
+            if t2 and bar["Low"] <= t2:
+                outcome, outcome_price, matched_at = "HIT_T2", t2, bar_dt
+                break
+            if t1 and bar["Low"] <= t1:
+                hit_t1 = True
+                outcome_price = t1
+                if matched_at is None:
+                    matched_at = bar_dt
+
+    if outcome is None and hit_t1:
+        outcome = "HIT_T1"
+    if outcome is None:
+        outcome = "PENDING"
+
+    days_to_outcome = (matched_at - created_at).days if matched_at else None
+    return (outcome, outcome_price,
+            round(max_favorable, 2), round(max_adverse, 2),
+            days_to_outcome)
+
+
+def fetch_with_retry(symbol: str, created_at: datetime):
+    """yfinance pull with backoff. Returns (df, error_str_or_None)."""
+    delay = 1.0
+    for attempt in range(MAX_FETCH_ATTEMPTS):
+        try:
+            df = fetch_history(symbol, created_at)
+            if df is None or df.empty:
+                return df, "empty_payload"
+            return df, None
+        except Exception as e:
+            if attempt == MAX_FETCH_ATTEMPTS - 1:
+                return None, f"yfinance_error: {e}"
+            time.sleep(delay + random.uniform(*JITTER_RANGE_S))
+            delay *= 2
+    return None, "exhausted_retries"
+
+
+def fetch_rows(cur, since: datetime | None, signal_id: str | None):
+    where = ["outcome IS NOT NULL", "outcome != 'INVALIDATED'", "outcome = ANY(%s)"]
+    params: list = [list(SCOPE_OUTCOMES)]
+    if since:
+        where.append("outcome_at >= %s")
+        params.append(since)
+    if signal_id:
+        where.append("signal_id = %s")
+        params.append(signal_id)
+    sql = f"""
+        SELECT id, signal_id, symbol, signal_type, direction,
+               entry, stop, t1, t2, invalidation_level,
+               created_at, outcome, outcome_at, outcome_price,
+               max_favorable, max_adverse, days_to_outcome
+        FROM signal_outcomes
+        WHERE {' AND '.join(where)}
+        ORDER BY outcome_at DESC
+    """
+    cur.execute(sql, params)
+    return cur.fetchall()
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Phase C re-walk (signal_outcomes refresh)")
+    ap.add_argument("--apply", action="store_true", help="Apply changes (default: dry-run)")
+    ap.add_argument("--batch-size", type=int, default=200)
+    ap.add_argument("--resume", action="store_true", help="Continue from checkpoint file")
+    ap.add_argument("--max-runtime", type=float, default=None,
+                    help="Max wall-clock hours; checkpoint and exit cleanly when reached")
+    ap.add_argument("--since", type=str, default=None,
+                    help="Only re-walk rows resolved on/after this date (YYYY-MM-DD)")
+    ap.add_argument("--signal-id", type=str, default=None, help="Re-walk one specific row")
+    ap.add_argument("--run-id", type=str, default=None,
+                    help="Override run_id (must match checkpoint if --resume)")
+    args = ap.parse_args()
+
+    apply_mode = args.apply
+    state = load_checkpoint(args.run_id) if args.resume else {
+        "run_id": args.run_id or f"phase_c_rewalk_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}",
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "processed_ids": [],
+    }
+    processed = set(state["processed_ids"])
+
+    print(f"run_id     = {state['run_id']}")
+    print(f"mode       = {'APPLY (writes)' if apply_mode else 'DRY RUN (no writes)'}")
+    print(f"checkpoint = {CHECKPOINT_PATH}")
+    print(f"skipped    = {SKIPPED_REPORT_PATH}")
+    if args.resume:
+        print(f"resume: {len(processed)} rows already processed")
+    print()
+
+    since_dt = None
+    if args.since:
+        since_dt = datetime.fromisoformat(args.since).replace(tzinfo=timezone.utc)
+
+    runtime_deadline = None
+    if args.max_runtime:
+        runtime_deadline = time.time() + args.max_runtime * 3600
+
+    conn = psycopg2.connect(DB_URL, connect_timeout=15)
+    conn.autocommit = False
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+    rows = fetch_rows(cur, since_dt, args.signal_id)
+    total = len(rows)
+    print(f"loaded {total} signal_outcomes rows in scope")
+    print()
+
+    counters = Counter()
+    freshness_cutoff = datetime.now(timezone.utc) - timedelta(hours=FRESHNESS_HOURS)
+
+    for i, row in enumerate(rows, 1):
+        if row["signal_id"] in processed:
+            counters["already_processed"] += 1
+            continue
+
+        if runtime_deadline and time.time() > runtime_deadline:
+            print(f"[{i}/{total}] max-runtime reached — checkpointing and exiting")
+            state["processed_ids"] = list(processed)
+            save_checkpoint(state)
+            cur.close(); conn.close()
+            return
+
+        outcome_at = _to_utc(row["outcome_at"])
+        if outcome_at and outcome_at > freshness_cutoff:
+            counters["skipped_recent"] += 1
+            processed.add(row["signal_id"])
+            continue
+
+        created_at = _to_utc(row["created_at"])
+        df, err = fetch_with_retry(row["symbol"], created_at)
+        if err:
+            counters[f"skipped_{err.split(':')[0]}"] += 1
+            append_skipped({
+                "signal_id": row["signal_id"], "symbol": row["symbol"],
+                "reason": err, "run_id": state["run_id"],
+                "checked_at": datetime.now(timezone.utc).isoformat(),
+            })
+            processed.add(row["signal_id"])
+            continue
+
+        try:
+            entry = float(row["entry"]) if row["entry"] is not None else None
+            stop = float(row["stop"]) if row["stop"] is not None else None
+            t1 = float(row["t1"]) if row["t1"] is not None else None
+            t2 = float(row["t2"]) if row["t2"] is not None else None
+            inval = float(row["invalidation_level"]) if row["invalidation_level"] is not None else None
+            if entry is None or row["direction"] not in ("LONG", "SHORT"):
+                counters["skipped_missing_fields"] += 1
+                processed.add(row["signal_id"])
+                continue
+
+            new_outcome, new_price, new_mfe, new_mae, new_days = walk_daily_bars(
+                df, row["direction"], entry, stop, t1, t2, inval,
+                created_at, outcome_at,
+            )
+        except Exception as e:
+            counters["walk_error"] += 1
+            append_skipped({
+                "signal_id": row["signal_id"], "symbol": row["symbol"],
+                "reason": f"walk_error: {e}", "run_id": state["run_id"],
+            })
+            processed.add(row["signal_id"])
+            continue
+
+        old_outcome = row["outcome"]
+        old_mfe = float(row["max_favorable"]) if row["max_favorable"] is not None else None
+        old_mae = float(row["max_adverse"]) if row["max_adverse"] is not None else None
+        old_price = float(row["outcome_price"]) if row["outcome_price"] is not None else None
+        old_days = row["days_to_outcome"]
+
+        verdict_changed = (old_outcome != new_outcome)
+        snapshot_changed = (
+            old_mfe is None or old_mae is None or new_mfe is None or new_mae is None or
+            abs(old_mfe - new_mfe) > 0.01 or abs(old_mae - new_mae) > 0.01
+        )
+
+        if not verdict_changed and not snapshot_changed:
+            counters["unchanged"] += 1
+            processed.add(row["signal_id"])
+        else:
+            reason = "rewalk_verdict_change" if verdict_changed else "rewalk_snapshot_drift"
+            counters[reason] += 1
+
+            if apply_mode:
+                cur.execute("""
+                    INSERT INTO signal_outcome_diff_log
+                        (signal_id, old_outcome, new_outcome,
+                         old_outcome_source, new_outcome_source,
+                         old_pnl_pct, new_pnl_pct,
+                         old_resolved_at, new_resolved_at,
+                         backfill_run_id)
+                    VALUES (%s, %s, %s, NULL, NULL, %s, %s, %s, NOW(), %s)
+                """, (
+                    row["signal_id"], old_outcome, new_outcome,
+                    old_mfe, new_mfe,  # repurpose pnl_pct columns to record MFE drift
+                    outcome_at, state["run_id"] + ":" + reason,
+                ))
+                cur.execute("""
+                    UPDATE signal_outcomes
+                    SET outcome = %s,
+                        outcome_price = %s,
+                        max_favorable = %s,
+                        max_adverse = %s,
+                        days_to_outcome = COALESCE(%s, days_to_outcome)
+                    WHERE id = %s
+                """, (new_outcome, new_price, new_mfe, new_mae, new_days, row["id"]))
+            processed.add(row["signal_id"])
+
+        if i % args.batch_size == 0:
+            if apply_mode:
+                conn.commit()
+            state["processed_ids"] = list(processed)
+            save_checkpoint(state)
+            print(f"  [{i}/{total}] processed={len(processed)} "
+                  f"verdict_changes={counters.get('rewalk_verdict_change', 0)} "
+                  f"snapshot_drift={counters.get('rewalk_snapshot_drift', 0)} "
+                  f"skipped={sum(v for k, v in counters.items() if k.startswith('skipped'))}")
+            time.sleep(random.uniform(*JITTER_RANGE_S))
+
+    if apply_mode:
+        conn.commit()
+    state["processed_ids"] = list(processed)
+    state["finished_at"] = datetime.now(timezone.utc).isoformat()
+    save_checkpoint(state)
+
+    elapsed = time.time() - time.mktime(datetime.fromisoformat(state["started_at"]).timetuple())
+    print()
+    print("=" * 78)
+    print("Re-walk summary")
+    print("=" * 78)
+    print(f"  total scanned:     {total}")
+    for k in sorted(counters.keys()):
+        print(f"  {k:<30s} {counters[k]}")
+    print(f"  runtime:           {elapsed/60:.1f} min")
+    print(f"  skipped report:    {SKIPPED_REPORT_PATH}")
+    print(f"  checkpoint:        {CHECKPOINT_PATH}")
+
+    cur.close(); conn.close()
+
+
+if __name__ == "__main__":
+    main()
