@@ -118,65 +118,84 @@ def walk_daily_bars(df, direction: str, entry: float, stop: float | None,
                     t1: float | None, t2: float | None,
                     invalidation: float | None,
                     created_at: datetime, outcome_at_cap: datetime):
-    """Mirror of score_signals.py bar walk. Returns (outcome, outcome_price,
-    max_favorable, max_adverse, days_to_outcome).
+    """First-terminal-touch walk semantics (Phase C fix #3).
 
-    outcome ∈ {STOPPED_OUT, HIT_T1, HIT_T2, INVALIDATED, EXPIRED, PENDING}
-    Walks bars only up to outcome_at_cap (don't extend past original window).
+    Returns (outcome, outcome_price, max_favorable, max_adverse, days_to_outcome).
+
+    Semantics:
+      Walk bars chronologically up to outcome_at_cap + 1 day. On each bar,
+      check terminal touches in same-bar priority order:
+          invalidation > stop > T2 > T1
+      The FIRST bar with ANY terminal touch terminates the walk — including
+      T1. This mirrors score_signals.py's emergent "frozen at first-walk
+      window with terminal touch" behavior (because score_signals never
+      re-walks rows once outcome != PENDING).
+      MFE/MAE are tracked incrementally and bounded to the bars actually
+      walked through (NOT the full df range), so they reflect the held
+      period rather than post-termination price action.
+      If the walk exits without any terminal: outcome = PENDING
+      (caller's age-cap fix may then promote PENDING -> EXPIRED).
     """
     if df is None or df.empty:
         return None, None, None, None, None
 
-    if direction == "LONG":
-        max_favorable = float(df["High"].max()) - entry
-        max_adverse = entry - float(df["Low"].min())
-    else:
-        max_favorable = entry - float(df["Low"].min())
-        max_adverse = float(df["High"].max()) - entry
-
     outcome = None
     outcome_price = None
-    hit_t1 = False
     matched_at = None
+    max_favorable = 0.0
+    max_adverse = 0.0
 
     for ts, bar in df.iterrows():
         bar_dt = _to_utc(ts.to_pydatetime() if hasattr(ts, "to_pydatetime") else ts)
         if bar_dt > outcome_at_cap + timedelta(days=1):
             break  # don't walk past the original outcome window
 
-        if direction == "LONG":
-            if invalidation and bar["Close"] < invalidation:
-                outcome, outcome_price, matched_at = "INVALIDATED", round(float(bar["Close"]), 2), bar_dt
-                break
-            if stop and bar["Low"] <= stop:
-                outcome, outcome_price, matched_at = "STOPPED_OUT", stop, bar_dt
-                break
-            if t2 and bar["High"] >= t2:
-                outcome, outcome_price, matched_at = "HIT_T2", t2, bar_dt
-                break
-            if t1 and bar["High"] >= t1:
-                hit_t1 = True
-                outcome_price = t1
-                if matched_at is None:
-                    matched_at = bar_dt
-        else:  # SHORT
-            if invalidation and bar["Close"] > invalidation:
-                outcome, outcome_price, matched_at = "INVALIDATED", round(float(bar["Close"]), 2), bar_dt
-                break
-            if stop and bar["High"] >= stop:
-                outcome, outcome_price, matched_at = "STOPPED_OUT", stop, bar_dt
-                break
-            if t2 and bar["Low"] <= t2:
-                outcome, outcome_price, matched_at = "HIT_T2", t2, bar_dt
-                break
-            if t1 and bar["Low"] <= t1:
-                hit_t1 = True
-                outcome_price = t1
-                if matched_at is None:
-                    matched_at = bar_dt
+        try:
+            high = float(bar["High"])
+            low = float(bar["Low"])
+            close = float(bar["Close"])
+        except (KeyError, ValueError, TypeError):
+            continue
 
-    if outcome is None and hit_t1:
-        outcome = "HIT_T1"
+        # Accumulate MFE/MAE for this bar BEFORE the terminal check, so
+        # MFE/MAE on the terminal bar includes the terminal bar's range.
+        if direction == "LONG":
+            day_fav = high - entry
+            day_adv = entry - low
+        else:
+            day_fav = entry - low
+            day_adv = high - entry
+        if day_fav > max_favorable:
+            max_favorable = day_fav
+        if day_adv > max_adverse:
+            max_adverse = day_adv
+
+        # Same-bar terminal priority: invalidation > stop > T2 > T1
+        # T1 now breaks the loop. The first bar with any terminal touch wins.
+        if direction == "LONG":
+            inval_hit = invalidation is not None and close < invalidation
+            stop_hit = stop is not None and low <= stop
+            t2_hit = t2 is not None and high >= t2
+            t1_hit = t1 is not None and high >= t1
+        else:  # SHORT
+            inval_hit = invalidation is not None and close > invalidation
+            stop_hit = stop is not None and high >= stop
+            t2_hit = t2 is not None and low <= t2
+            t1_hit = t1 is not None and low <= t1
+
+        if inval_hit:
+            outcome, outcome_price, matched_at = "INVALIDATED", round(close, 2), bar_dt
+            break
+        if stop_hit:
+            outcome, outcome_price, matched_at = "STOPPED_OUT", stop, bar_dt
+            break
+        if t2_hit:
+            outcome, outcome_price, matched_at = "HIT_T2", t2, bar_dt
+            break
+        if t1_hit:
+            outcome, outcome_price, matched_at = "HIT_T1", t1, bar_dt
+            break
+
     if outcome is None:
         outcome = "PENDING"
 
