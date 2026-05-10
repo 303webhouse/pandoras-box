@@ -223,25 +223,64 @@ def fetch_with_retry(symbol: str, created_at: datetime):
 
 
 def fetch_rows(cur, since: datetime | None, signal_id: str | None):
-    where = ["outcome IS NOT NULL", "outcome != 'INVALIDATED'", "outcome = ANY(%s)"]
-    params: list = [list(SCOPE_OUTCOMES)]
-    if since:
-        where.append("outcome_at >= %s")
-        params.append(since)
-    if signal_id:
-        where.append("signal_id = %s")
-        params.append(signal_id)
-    sql = f"""
-        SELECT id, signal_id, symbol, signal_type, direction,
-               entry, stop, t1, t2, invalidation_level,
-               created_at, outcome, outcome_at, outcome_price,
-               max_favorable, max_adverse, days_to_outcome
-        FROM signal_outcomes
-        WHERE {' AND '.join(where)}
-        ORDER BY outcome_at DESC
+    """Fetch resolved signal_outcomes rows in scope, excluding:
+      - orphans (no matching signals row -> FK violation on diff_log INSERT)
+      - NULL outcome_at (crashes walk_daily_bars's outcome_at_cap arithmetic)
+    Returns (rows, exclusion_counts).
     """
-    cur.execute(sql, params)
-    return cur.fetchall()
+    base_where = ["so.outcome IS NOT NULL",
+                  "so.outcome != 'INVALIDATED'",
+                  "so.outcome = ANY(%s)"]
+    base_params: list = [list(SCOPE_OUTCOMES)]
+    if since:
+        base_where.append("so.outcome_at >= %s")
+        base_params.append(since)
+    if signal_id:
+        base_where.append("so.signal_id = %s")
+        base_params.append(signal_id)
+
+    base_where_sql = " AND ".join(base_where)
+
+    # Count rows excluded by each filter, for visibility in run log
+    cur.execute(
+        f"""
+        SELECT
+          COUNT(*) AS in_scope,
+          COUNT(*) FILTER (WHERE NOT EXISTS (
+              SELECT 1 FROM signals s WHERE s.signal_id = so.signal_id))
+            AS orphan_excluded,
+          COUNT(*) FILTER (WHERE so.outcome_at IS NULL) AS null_outcome_at_excluded
+        FROM signal_outcomes so
+        WHERE {base_where_sql}
+        """,
+        base_params,
+    )
+    in_scope, orphan_n, null_ts_n = cur.fetchone()
+    exclusion_counts = {
+        "in_scope_total": in_scope,
+        "orphan_excluded": orphan_n,
+        "null_outcome_at_excluded": null_ts_n,
+    }
+
+    # Real fetch: apply both filters at source so excluded rows never enter
+    # the processing loop.
+    full_where = base_where + [
+        "so.outcome_at IS NOT NULL",
+        "EXISTS (SELECT 1 FROM signals s WHERE s.signal_id = so.signal_id)",
+    ]
+    sql = f"""
+        SELECT so.id, so.signal_id, so.symbol, so.signal_type, so.direction,
+               so.entry, so.stop, so.t1, so.t2, so.invalidation_level,
+               so.created_at, so.outcome, so.outcome_at, so.outcome_price,
+               so.max_favorable, so.max_adverse, so.days_to_outcome
+        FROM signal_outcomes so
+        WHERE {' AND '.join(full_where)}
+        ORDER BY so.outcome_at DESC
+    """
+    cur.execute(sql, base_params)
+    rows = cur.fetchall()
+    exclusion_counts["fetched_after_exclusion"] = len(rows)
+    return rows, exclusion_counts
 
 
 def main():
@@ -288,9 +327,12 @@ def main():
     conn.autocommit = False
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
-    rows = fetch_rows(cur, since_dt, args.signal_id)
+    rows, exclusion_counts = fetch_rows(cur, since_dt, args.signal_id)
     total = len(rows)
-    print(f"loaded {total} signal_outcomes rows in scope")
+    print(f"in-scope before exclusions:    {exclusion_counts['in_scope_total']}")
+    print(f"  - orphan rows excluded:      {exclusion_counts['orphan_excluded']}   (no matching signals row)")
+    print(f"  - NULL outcome_at excluded:  {exclusion_counts['null_outcome_at_excluded']}")
+    print(f"loaded {total} signal_outcomes rows in scope (post-exclusion)")
     print()
 
     counters = Counter()
