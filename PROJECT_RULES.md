@@ -285,3 +285,15 @@ the committed code before declaring complete.
    Pull `railway logs -s <service> --tail` and check for build failures.
 
 A brief is not complete until step 3 is empirically confirmed.
+
+## unified_positions Schema Limitation
+
+The `unified_positions` table represents spreads via `long_strike` and
+`short_strike` only. Structures with more than 2 legs (broken-wing spreads,
+butterflies, condors) are stored under a 2-leg approximation; middle/extra
+legs are structurally invisible to schema queries.
+
+Active example: **HYG 6/18 put ratio** (`POS_HYG_20260325_185236`) is the
+broken-wing `-4×$74P / +4×$75P / +4×$76P` recorded as `put_debit_spread`
+with `long_strike=76, short_strike=74`. The `+4×$75P` middle leg is not
+in the DB. Canonical full-structure reference: `docs/open-positions.md`.
