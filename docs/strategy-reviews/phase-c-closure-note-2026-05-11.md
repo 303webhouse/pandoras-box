@@ -147,6 +147,14 @@ Full forensic reconstruction available via `signal_outcome_diff_log` for any row
 
 **Verification scheduled:** first nightly run after 2026-05-11 01:00 UTC (Sunday night 9 PM ET / Monday 03:00 UTC) should produce same-transaction `signal_outcomes` UPDATE + `signals.outcome` population. Spot-check query: see §10.
 
+**Verified 2026-05-13:** 2 post-deploy nightlies (Mon 5/11, Tue 5/12)
+processed 234 terminal resolutions. 84/84 PROJECTED_FROM_BAR_WALK rows
+confirmed same-transaction with +0.00s delta. 100% outcome_source
+coverage (zero NULL tags). Hard guards held: ACTUAL_TRADE=2,
+COUNTERFACTUAL=432. Wed nightly pending at 5/14 01:00 UTC; not
+required for verification — the 84 observed CTE writes already
+demonstrate the patched same-transaction semantic.
+
 ---
 
 ## 10. Acceptance Checklist Closeout
@@ -157,7 +165,7 @@ Full forensic reconstruction available via `signal_outcome_diff_log` for any row
 | Rewalk script ran end-to-end, all drift to diff_log | ✅ `phase_c_rewalk_20260510_223023_ca952ecd` |
 | Projection populated `signals.outcome*` for eligible BAR_WALK signal_outcomes rows | ✅ 6,179 PROJECTED + 24 INVALIDATED writes |
 | Zero ACTUAL_TRADE / COUNTERFACTUAL mutations | ✅ Verified at every gate (§6) |
-| score_signals.py going-forward parity | ⏳ Spot-check pending first post-deploy nightly (~2026-05-11 03:00 UTC) |
+| score_signals.py going-forward parity | ✅ Verified 2026-05-13: 2 post-deploy nightlies, 234 resolutions, 84/84 PROJECTED_FROM_BAR_WALK writes same-tx (+0.00s), hard guards held |
 | `PROJECT_RULES.md` updated | ✅ Phase C projection rule + canonical-walker policy + INVALIDATED override |
 | Closure note | ✅ This document |
 | `v_outcome_drift` documented pre/post | ✅ 169 → 10 |
