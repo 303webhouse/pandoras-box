@@ -776,6 +776,7 @@ async def portfolio_summary(account: Optional[str] = Query(None)):
             "cash": cash,
             "position_value": 0.0,
             "position_count": 0,
+            "unpriced_count": 0,
             "capital_at_risk": 0.0,
             "capital_at_risk_pct": 0.0,
             "nearest_expiry": None,
@@ -789,8 +790,19 @@ async def portfolio_summary(account: Optional[str] = Query(None)):
     # Position market value = cost_basis + unrealized_pnl (what positions are currently worth)
     # Exception: short stock is a liability — value = -(current_price * qty)
     # Fallback: if cost_basis is null, compute from entry_price * quantity * 100
+    # Skip unpriced positions — market value can't be computed without current_price.
+    # Previously the `unrealized_pnl or 0` fallback let NULL-pnl rows contribute their
+    # full cost_basis to the total, silently inflating position_value. The frontend
+    # already renders an em-dash ("—") for these rows per-position; the aggregate
+    # total matches that semantic by excluding them. Count surfaced as unpriced_count
+    # in the response so consumers can show "X of Y priced".
     total_position_value = 0.0
+    unpriced_count = 0
     for p in positions:
+        if p.get("current_price") is None:
+            unpriced_count += 1
+            continue
+
         s = (p.get("structure") or "").lower()
         d = (p.get("direction") or "").upper()
         is_short_stock = d == "SHORT" and s in ("stock", "stock_short", "short_stock", "")
@@ -925,6 +937,7 @@ async def portfolio_summary(account: Optional[str] = Query(None)):
         "cash": cash,
         "position_value": total_position_value,
         "position_count": len(positions),
+        "unpriced_count": unpriced_count,
         "capital_at_risk": round(total_max_loss, 2),
         "capital_at_risk_pct": round(total_max_loss / account_balance * 100, 2) if account_balance > 0 else 0.0,
         "nearest_expiry": nearest_expiry,
