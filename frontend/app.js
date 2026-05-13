@@ -9337,6 +9337,31 @@ function renderPortfolioSummaryWidget(rhSummary, fidRothSummary, pnlData, balanc
     const rhBalEl = document.getElementById('rhBalance');
     if (rhBalEl) {
         rhBalEl.textContent = '$' + rhBalance.toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0});
+        rhBalEl.style.cursor = 'pointer';
+        rhBalEl.title = 'Click to update Robinhood balance from broker screenshot';
+        rhBalEl.onclick = () => showBalanceEditModalRH('Robinhood', rhBalance);
+    }
+    // Drift banner — shown only when stored balance and computed (cash+positions) diverge >$100
+    const driftBannerEl = document.getElementById('rhDriftBanner');
+    if (driftBannerEl) {
+        const drift = rhSummary.drift_dollars || 0;
+        if (Math.abs(drift) > 100) {
+            const updatedAt = rhSummary.balance_updated_at ? new Date(rhSummary.balance_updated_at) : null;
+            const ageDays = updatedAt ? Math.round((Date.now() - updatedAt.getTime()) / 86400000) : null;
+            const ageStr = ageDays !== null ? `Row last touched ${ageDays}d ago` : '';
+            const driftStr = drift >= 0 ? `+$${Math.abs(drift).toFixed(0)}` : `-$${Math.abs(drift).toFixed(0)}`;
+            driftBannerEl.innerHTML = `
+                <span class="drift-warning">⚠ Balance drift ${driftStr} vs computed</span>
+                ${ageStr ? `<span class="drift-age">${ageStr}</span>` : ''}
+                <button class="drift-reconcile-btn">Reconcile</button>`;
+            driftBannerEl.style.display = 'flex';
+            driftBannerEl.querySelector('.drift-reconcile-btn').addEventListener('click', () =>
+                showBalanceEditModalRH('Robinhood', rhBalance)
+            );
+        } else {
+            driftBannerEl.style.display = 'none';
+            driftBannerEl.innerHTML = '';
+        }
     }
     const rhBreakdown = document.getElementById('rhBreakdown');
     if (rhBreakdown && rhSummary.cash != null) {
@@ -9438,6 +9463,51 @@ function showCashUpdateModal(currentCash, accountName) {
         }
     });
 
+    document.getElementById('cashUpdateCancel').addEventListener('click', () => modal.remove());
+    modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') document.getElementById('cashUpdateSave').click();
+        if (e.key === 'Escape') modal.remove();
+    });
+}
+
+// Balance modal variant for accounts WITH positions (e.g., Robinhood). Sends
+// only `balance` so the COALESCE'd backend preserves the running cash. The
+// generic showBalanceEditModal below sends `cash: val` too — fine for Fidelity
+// retirement accounts (no positions, balance==cash) but would wipe cash for RH.
+async function showBalanceEditModalRH(accountName, currentBalance) {
+    const existing = document.getElementById('cashUpdateModal');
+    if (existing) existing.remove();
+
+    const modal = document.createElement('div');
+    modal.id = 'cashUpdateModal';
+    modal.className = 'modal-overlay';
+    modal.innerHTML = `
+        <div class="cash-update-modal">
+            <h3>Update ${accountName} Balance</h3>
+            <p style="font-size:11px;opacity:0.7;margin:4px 0 8px;">Enter total account value from broker. Cash field will not be touched.</p>
+            <input type="number" id="cashUpdateInput" step="0.01" value="${(currentBalance || 0).toFixed(2)}" />
+            <div class="cash-modal-actions">
+                <button id="cashUpdateSave" class="cash-modal-btn save">Save</button>
+                <button id="cashUpdateCancel" class="cash-modal-btn cancel">Cancel</button>
+            </div>
+        </div>`;
+    document.body.appendChild(modal);
+    const input = document.getElementById('cashUpdateInput');
+    input.select();
+    document.getElementById('cashUpdateSave').addEventListener('click', async () => {
+        const val = parseFloat(input.value);
+        if (isNaN(val)) return;
+        try {
+            await fetch(`${API_URL}/portfolio/balances/update`, {
+                method: 'POST',
+                headers: authHeaders(),
+                body: JSON.stringify({account_name: accountName, balance: val}),
+            });
+            modal.remove();
+            loadPortfolioSummary();
+        } catch (e) { console.error('Failed to update balance:', e); }
+    });
     document.getElementById('cashUpdateCancel').addEventListener('click', () => modal.remove());
     modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
     input.addEventListener('keydown', (e) => {
