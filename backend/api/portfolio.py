@@ -59,9 +59,16 @@ class BalanceUpdate(BaseModel):
 @router.post("/balances/update")
 async def update_balance(body: BalanceUpdate, _=Depends(require_api_key)):
     pool = await get_postgres_client()
+    # COALESCE on optional fields so a balance-only POST (e.g., from the RH
+    # balance modal) preserves cash/buying_power/margin_total instead of
+    # NULLing them. Backward-compatible — existing callers that send cash
+    # explicitly still update it (COALESCE($2, cash) = $2 when $2 is not NULL).
     result = await pool.execute("""
         UPDATE account_balances
-        SET balance = $1, cash = $2, buying_power = $3, margin_total = $4,
+        SET balance = $1,
+            cash = COALESCE($2, cash),
+            buying_power = COALESCE($3, buying_power),
+            margin_total = COALESCE($4, margin_total),
             updated_at = NOW(), updated_by = 'pivot_screenshot'
         WHERE account_name = $5
     """, body.balance, body.cash, body.buying_power, body.margin_total, body.account_name)

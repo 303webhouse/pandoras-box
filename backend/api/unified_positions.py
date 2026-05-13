@@ -748,31 +748,52 @@ async def portfolio_summary(account: Optional[str] = Query(None)):
         else:
             positions = [p for p in positions if (p.get("account") or "ROBINHOOD").upper() == account_upper]
 
-    # Fetch cash balance from account_balances
+    # Fetch cash + stored balance from account_balances.
+    # Path A: stored `balance` is the headline source of truth. `cash` continues
+    # as the running auto-adjusted cash. Both are returned; drift between
+    # `stored_balance` and `cash + position_value` triggers the frontend's
+    # reconcile banner.
     cash = 0.0
+    stored_balance = 0.0
+    balance_updated_at = None
     try:
         async with pool.acquire() as conn:
             if account:
-                # Find matching account balance row(s)
-                bal_rows = await conn.fetch("SELECT account_name, cash, balance FROM account_balances")
+                bal_rows = await conn.fetch(
+                    "SELECT account_name, cash, balance, updated_at FROM account_balances"
+                )
                 if account.upper() == "FIDELITY":
-                    # Sum all Fidelity sub-accounts
-                    cash = sum(float(br["cash"] or 0) for br in bal_rows if (br["account_name"] or "").lower().startswith("fidelity"))
+                    fid_rows = [br for br in bal_rows
+                                if (br["account_name"] or "").lower().startswith("fidelity")]
+                    cash = sum(float(br["cash"] or 0) for br in fid_rows)
+                    stored_balance = sum(float(br["balance"] or 0) for br in fid_rows)
+                    ts = [br["updated_at"] for br in fid_rows if br["updated_at"]]
+                    balance_updated_at = min(ts) if ts else None
                 else:
                     for br in bal_rows:
                         if _match_account_balance(account, br["account_name"]):
                             cash = float(br["cash"] or 0)
+                            stored_balance = float(br["balance"] or 0)
+                            balance_updated_at = br["updated_at"]
                             break
             else:
-                # Default: sum all account cash balances
-                bal_rows = await conn.fetch("SELECT cash FROM account_balances")
+                bal_rows = await conn.fetch(
+                    "SELECT cash, balance, updated_at FROM account_balances"
+                )
                 cash = sum(float(br["cash"] or 0) for br in bal_rows)
+                stored_balance = sum(float(br["balance"] or 0) for br in bal_rows)
+                ts = [br["updated_at"] for br in bal_rows if br["updated_at"]]
+                balance_updated_at = min(ts) if ts else None
     except Exception:
         pass
 
     if not positions:
+        computed_empty = round(cash, 2)
         return {
-            "account_balance": cash,
+            "account_balance": round(stored_balance, 2),
+            "computed_balance": computed_empty,
+            "drift_dollars": round(stored_balance - computed_empty, 2),
+            "balance_updated_at": balance_updated_at.isoformat() if balance_updated_at else None,
             "cash": cash,
             "position_value": 0.0,
             "position_count": 0,
@@ -823,8 +844,11 @@ async def portfolio_summary(account: Optional[str] = Query(None)):
             pnl = p.get("unrealized_pnl") or 0
             total_position_value += cost + pnl
     total_position_value = round(total_position_value, 2)
-    # Total account = cash + position market value
-    account_balance = round(cash + total_position_value, 2)
+    # Path A: stored balance is the headline. computed_balance is what cash + MTM
+    # implies; drift between them triggers the reconcile banner.
+    computed_balance = round(cash + total_position_value, 2)
+    account_balance = round(stored_balance, 2)
+    drift_dollars = round(stored_balance - computed_balance, 2)
     today = date.today()
 
     # Nearest expiry
@@ -934,6 +958,9 @@ async def portfolio_summary(account: Optional[str] = Query(None)):
 
     return {
         "account_balance": account_balance,
+        "computed_balance": computed_balance,
+        "drift_dollars": drift_dollars,
+        "balance_updated_at": balance_updated_at.isoformat() if balance_updated_at else None,
         "cash": cash,
         "position_value": total_position_value,
         "position_count": len(positions),
