@@ -2238,18 +2238,14 @@ async def run_mark_to_market() -> dict:
                     WHERE position_id = $5
                 """, current_price, unrealized, long_leg_price, short_leg_price, row["position_id"])
             updated += 1
-        elif current_price is None and at in ("OPTION", "SPREAD") and row.get("current_price") is not None:
-            # Options/spread position we couldn't price — clear any stale/wrong
-            # stock-level price that may have been set by a previous buggy run
-            async with pool.acquire() as conn:
-                await conn.execute("""
-                    UPDATE unified_positions SET
-                        current_price = NULL, unrealized_pnl = 0,
-                        long_leg_price = NULL, short_leg_price = NULL,
-                        updated_at = NOW()
-                    WHERE position_id = $1
-                """, row["position_id"])
-            logger.info("Cleared stale stock-price from options position %s (%s)", row["position_id"], ticker)
+        # NOTE: prior versions had an elif that wiped current_price/unrealized_pnl
+        # to NULL/0 for OPTION/SPREAD rows whose current cycle failed to price.
+        # That branch defended against a historical "stock price written to options
+        # row" bug already prevented by the is_equity_position guard above. The wipe
+        # caused legitimate prior prices to be erased on every UW 429 rate-limit
+        # cycle. Removed 2026-05-14 — outage behavior is now "retain prior price"
+        # rather than "wipe to NULL." Staleness is detected via price_updated_at
+        # downstream in portfolio_summary, not by clearing the field here.
 
     result = {"status": "updated", "updated": updated, "source": "uw" if use_options_pricing else "yfinance"}
     if errors:
