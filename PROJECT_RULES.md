@@ -297,3 +297,26 @@ Active example: **HYG 6/18 put ratio** (`POS_HYG_20260325_185236`) is the
 broken-wing `-4×$74P / +4×$75P / +4×$76P` recorded as `put_debit_spread`
 with `long_strike=76, short_strike=74`. The `+4×$75P` middle leg is not
 in the DB. Canonical full-structure reference: `docs/open-positions.md`.
+
+### Naked single-leg option pricing gap
+
+The price-updater builds option-chain keys from `long_strike` and
+`short_strike` columns on `unified_positions`. Naked single-leg long
+options (`structure IN ('long_call', 'long_put')`) leave both strike
+columns NULL, so the updater has no key to query and `current_price`/
+`current_value`/`unrealized_pnl` remain NULL.
+
+Affected positions are correctly excluded from `position_value` totals
+(via the `current_price IS NULL` skip in unified_positions.py — see
+Cluster C fix 2026-05-13). User-visible impact: per-row PnL column
+displays "—" for these positions.
+
+Canonical PnL reference for naked positions: broker app directly, or
+`docs/open-positions.md` if maintained.
+
+Active examples (as of 2026-05-13):
+- COUR 6/18 long_put × 3, $4 strike
+- WEAT 6/18 long_call × 8, $30 strike
+
+Future remediation candidate: extract strike from `notes` / `legs` jsonb
+/ `signal_id` lookup chain. Not scheduled.
