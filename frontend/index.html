@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Pandora - Real-time Trading Signal Dashboard">
     <title>Pandora</title>
-    <link rel="stylesheet" href="/styles.css?v=136">
+    <link rel="stylesheet" href="/styles.css?v=137">
     <link rel="manifest" href="/manifest.json">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -333,6 +333,7 @@
                     <div class="portfolio-monthly-pnl" id="portfolioMonthlyPnl"></div>
                     <div class="portfolio-accounts">
                         <div class="portfolio-account" id="portfolioRH">
+                            <div id="rhDriftBanner" class="drift-banner" style="display:none;"></div>
                             <div class="portfolio-account-header">
                                 <span class="portfolio-account-name">RH High-Risk</span>
                                 <span class="portfolio-account-balance" id="rhBalance">--</span>
@@ -1957,7 +1958,7 @@
     <!-- TradingView Widget Script -->
     <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
-    <script src="/app.js?v=154"></script>
+    <script src="/app.js?v=155"></script>
     <script src="/cockpit.js?v=1"></script>
     <script src="/laboratory.js?v=1"></script>
 </body>
