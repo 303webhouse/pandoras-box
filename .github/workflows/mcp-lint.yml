@@ -1,0 +1,28 @@
+name: MCP import lint
+
+on:
+  pull_request:
+    paths:
+      - 'backend/mcp/**'
+      - 'backend/services/read_only/**'
+      - 'scripts/lint_mcp_imports.py'
+      - '.github/workflows/mcp-lint.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'backend/mcp/**'
+      - 'backend/services/read_only/**'
+      - 'scripts/lint_mcp_imports.py'
+      - '.github/workflows/mcp-lint.yml'
+
+jobs:
+  lint:
+    name: Lint forbidden MCP imports
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run lint
+        run: python scripts/lint_mcp_imports.py

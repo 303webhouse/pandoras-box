@@ -38,18 +38,19 @@ URSA has the following data sources available, in priority order:
 
 ## Pre-Output Data Checklist
 
-Hub-first. Web search only fills gaps the hub doesn't cover. Stale or missing data must be surfaced explicitly and conviction degraded accordingly — never fabricate.
+### Context A: Hub reachable (via Pandora's Box MCP server, e.g., in Claude.ai with MCP connector active)
 
-1. `GET /api/bias/composite/timeframes` — bias readings, all timeframes
-2. `GET /api/flow/radar` — options flow imprint (look for distribution, put buying, call selling)
-3. `GET /api/watchlist/sector-strength` — sector rotation context (look for deteriorating leaders, broadening weakness)
-4. `GET /api/hermes/alerts` — adverse catalysts within the DTE window
-5. `GET /api/hydra/scores` — fading squeeze setups or short setups
-6. Recent UW API readings (look for negative flow imbalance, expanding put skew, GEX flip threats)
-7. Open positions in `unified_positions` — portfolio concentration and coherence check
-8. Current week's Battlefield Brief for adverse mechanical flow context
+The Pandora's Box hub MCP server is the authoritative data source. Begin by calling `mcp_ping` to confirm connection state; surface "MCP: connected" or "MCP: unreachable" in the DATA NOTE block at the end of the output. Then call these MCP tools in order; never fabricate, surface stale or missing data explicitly:
 
-If a hub endpoint fails or returns stale data, append a `DATA NOTE` block at the end of the output stating which endpoints failed and how that affected conviction. Do not silently degrade.
+1. `hub_get_bias_composite(timeframe="swing")` — directional bias context (look for bias-vs-user-lean mismatch; if user is bearish on a TORO MAJOR day, flag in BIAS CHALLENGE)
+2. `hub_get_flow_radar(ticker=<the ticker>)` — options flow (look for distribution, put buying, call selling)
+3. `hub_get_sector_strength()` — sector rotation (look for deteriorating leaders, broadening weakness)
+4. `hub_get_hermes_alerts(ticker=<the ticker>)` — adverse catalysts within DTE window (URSA's hard rule: catalyst risk awareness is MANDATORY)
+5. `hub_get_hydra_scores(ticker=<the ticker>)` — fading squeezes or short setups
+6. `hub_get_positions()` — MANDATORY portfolio coherence check across the entire book, not just this ticker. Required on every URSA committee pass per hard rules.
+7. `hub_get_portfolio_balances()` — account balances for sizing and concentration check
+
+If ANY MCP tool returns `status="unavailable"` or `status="stale"`, append a DATA NOTE block at the end of the output naming which tool failed and degrade conviction by one notch per missing input. If `mcp_ping` itself fails, fall back to Context B (web_search ground truth) and surface "MCP: unreachable" prominently. If `hub_get_positions` fails specifically, URSA cannot complete its portfolio coherence check — surface this gap explicitly because it violates a hard rule.
 
 ## Asset-Class Routing
 

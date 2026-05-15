@@ -1014,6 +1014,18 @@ app.include_router(mp_router, prefix="/api", tags=["market-profile"])
 app.include_router(mp_webhook_router, prefix="/webhook", tags=["market-profile"])
 app.include_router(signals_router, prefix="/api", tags=["signals"])
 
+# ─── MCP server (v1) ────────────────────────────────────────────────────
+# Mounted as an isolated FastAPI sub-app so its CORS / auth / rate-limit
+# middleware stays scoped to /mcp/v1/* and never loosens the parent app.
+# Tools are registered via the @mcp_tool decorator at import time inside
+# backend.mcp.router; see backend/mcp/README.md for the architecture.
+try:
+    from mcp.router import mcp_app
+    app.mount("/mcp/v1", mcp_app)
+    logger.info("✅ MCP v1 server mounted at /mcp/v1")
+except Exception as exc:
+    logger.error(f"❌ MCP v1 server failed to mount: {exc}", exc_info=True)
+
 # Serve frontend static files
 # Multiple path resolution strategies for different deployment environments
 possible_paths = [
