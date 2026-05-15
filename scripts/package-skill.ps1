@@ -4,6 +4,16 @@
 # A .skill file is a ZIP archive with a renamed extension. Claude.ai accepts
 # either .zip or .skill. We use .skill for clarity.
 #
+# IMPORTANT: We do NOT use PowerShell's Compress-Archive because Windows
+# PowerShell 5.1 writes ZIP entries with backslash separators, which violates
+# the ZIP spec and is rejected by Claude.ai's upload validator with the error
+# "Zip file contains path with invalid characters". Instead, we use
+# System.IO.Compression.ZipArchive directly so we can control entry names.
+#
+# Structure: SKILL.md is placed at the ZIP ROOT (not nested under a folder).
+# The skill's name comes from the YAML `name:` field in SKILL.md, not from
+# the archive's directory structure.
+#
 # Usage:
 #   .\scripts\package-skill.ps1 toro          # Packages skills/toro/ -> dist/skills/toro.skill
 #   .\scripts\package-skill.ps1 all           # Packages every subfolder in skills/
@@ -15,7 +25,9 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-# Resolve repo root: this script lives in scripts/, so parent of script dir = repo root
+Add-Type -AssemblyName System.IO.Compression
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot  = Split-Path -Parent $ScriptDir
 $SkillsDir = Join-Path $RepoRoot "skills"
@@ -46,14 +58,41 @@ function Package-Skill {
         return
     }
 
-    $ZipPath   = Join-Path $DistDir "$SkillName.zip"
     $SkillFile = Join-Path $DistDir "$SkillName.skill"
-
-    if (Test-Path $ZipPath)   { Remove-Item $ZipPath -Force }
     if (Test-Path $SkillFile) { Remove-Item $SkillFile -Force }
 
-    Compress-Archive -Path $SkillPath -DestinationPath $ZipPath -Force
-    Rename-Item -Path $ZipPath -NewName "$SkillName.skill" -Force
+    # Resolve the skill path so we can compute clean relative entries.
+    $SkillRoot = (Resolve-Path $SkillPath).Path.TrimEnd('\','/')
+    $Prefix    = $SkillRoot + [System.IO.Path]::DirectorySeparatorChar
+
+    $Zip = [System.IO.Compression.ZipFile]::Open(
+        $SkillFile,
+        [System.IO.Compression.ZipArchiveMode]::Create
+    )
+    try {
+        $Files = Get-ChildItem -Path $SkillRoot -Recurse -File
+        foreach ($File in $Files) {
+            # Compute relative path from skill root, normalize to forward slashes.
+            $Relative = $File.FullName.Substring($Prefix.Length).Replace('\','/')
+
+            # SKILL.md sits at the ZIP root; references/* and any other content
+            # is preserved at its relative path. The wrapping folder (e.g. "toro/")
+            # is intentionally stripped so the YAML `name:` field is canonical.
+            $Entry = $Zip.CreateEntry(
+                $Relative,
+                [System.IO.Compression.CompressionLevel]::Optimal
+            )
+            $Stream = $Entry.Open()
+            try {
+                $Bytes = [System.IO.File]::ReadAllBytes($File.FullName)
+                $Stream.Write($Bytes, 0, $Bytes.Length)
+            } finally {
+                $Stream.Dispose()
+            }
+        }
+    } finally {
+        $Zip.Dispose()
+    }
 
     $Size = [math]::Round((Get-Item $SkillFile).Length / 1KB, 1)
     Write-Host "  Packaged: $SkillFile ($Size KB)"
