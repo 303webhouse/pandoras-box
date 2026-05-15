@@ -4,19 +4,23 @@ This file is loaded when the bull case concerns equities, options, or high-conve
 
 ## Bull Pattern Library
 
-The setups TORO is actively scanning for:
+The setups TORO is actively scanning for, with Training Bible rule citations:
 
-**1. Squeeze setup.** Hydra score elevated; gamma flip level sitting below current price (so dealer hedging accelerates upside, not downside); ATM IV not stretched. Best B2 fit. Cross-reference with `/api/hydra/scores`.
+**1. Squeeze setup (per M.09, F.02).** Hydra score elevated; gamma flip level sitting below current price (so dealer hedging accelerates upside per F.08); ATM IV not stretched. Best B2 fit. Cross-reference with `/api/hydra/scores`.
 
-**2. Breakout with flow confirmation.** Price clearing a structural level (Pythia VAH, prior session high, prior swing high) AND `/api/flow/radar` shows confirming call buying or call spread imprint within the prior session. Without the flow confirm, this is a B3 candidate at best, never a B1/B2 thesis.
+**2. Breakout with flow confirmation (per F.01, M.11).** Price clearing a structural level (Pythia VAH, prior session high, prior swing high) AND `/api/flow/radar` shows confirming call buying or call spread imprint within the prior session. Without the flow confirm, this is a B3 candidate at best, never a B1/B2 thesis.
 
-**3. Sector RS leader inside a leading sector.** Ticker ranks top-quintile relative strength within a sector that itself is leading per `/api/watchlist/sector-strength`. Cross-reference with THALES output if available. Best B1/B2 fit.
+**3. Sector RS leader inside a leading sector (per C.01, C.02).** Ticker ranks top-quintile relative strength within a sector that itself is leading per `/api/watchlist/sector-strength`. Cross-reference with THALES output if available. Best B1/B2 fit.
 
-**4. Mechanical flow tailwind.** Pension rebalancing into month-end or quarter-end with current allocations skewed away from equities; JHEQX collar roll positioning that pulls SPX higher; OpEx pin sitting above current price with dealer gamma supporting the pin. Strong tactical (B2) tailwinds; never the sole reason to enter, but a meaningful conviction amplifier.
+**4. Mechanical flow tailwind (per F.06, F.07).** Pension rebalancing into month-end or quarter-end with current allocations skewed away from equities; JHEQX collar roll positioning that pulls SPX higher; OpEx pin sitting above current price with dealer gamma supporting the pin (F.08). Strong tactical (B2) tailwinds; never the sole reason to enter, but a meaningful conviction amplifier.
 
-**5. Catalyst-driven.** Active Hermes alert (earnings, FDA, M&A, macro print) with confirming flow positioning. The catalyst is the trigger; the flow is the conviction check. No flow confirm = pass.
+**5. Catalyst-driven (per F.12).** Active Hermes alert (earnings, FDA, M&A, macro print) with confirming flow positioning. The catalyst is the trigger; the flow is the conviction check. No flow confirm = pass.
 
-**6. Oversold mean reversion.** McClellan extreme (oscillator deeply negative); VIX spike with reversion underway; flow imprint quietly turning constructive (puts being sold, calls being bought). Tactical B2 setup; tight stops; do not size up on these.
+**6. Oversold mean reversion (per M.06).** McClellan extreme (oscillator deeply negative); VIX spike with reversion underway; flow imprint quietly turning constructive (puts being sold, calls being bought). Tactical B2 setup; tight stops; do not size up on these.
+
+**7. Stop-run reclaim (per M.04, F.03).** Price sweeps a key level (prior low, round number) and reclaims back above. The trapped breakout-failure shorts provide fuel. Wait for the reclaim to complete before entry — do not anticipate.
+
+**8. Golden Trade (per C.03).** Price pulls back to the 120 SMA in a confirmed uptrend (SMA stack bullish, 120 SMA rising). Highest-conviction dip-buy in the CTA framework. Best B1 fit.
 
 ## Options & High-Convexity Considerations
 

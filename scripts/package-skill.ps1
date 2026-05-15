@@ -105,7 +105,7 @@ function Package-Skill {
 Write-Host "Packaging Olympus skills..."
 
 if ($Target -eq "all") {
-    $Skills = Get-ChildItem -Path $SkillsDir -Directory
+    $Skills = Get-ChildItem -Path $SkillsDir -Directory | Where-Object { -not $_.Name.StartsWith("_") }
     if ($Skills.Count -eq 0) {
         Write-Warning "No skill folders found in $SkillsDir"
         exit 0
