@@ -10,9 +10,12 @@
 # "Zip file contains path with invalid characters". Instead, we use
 # System.IO.Compression.ZipArchive directly so we can control entry names.
 #
-# Structure: SKILL.md is placed at the ZIP ROOT (not nested under a folder).
-# The skill's name comes from the YAML `name:` field in SKILL.md, not from
-# the archive's directory structure.
+# Structure (confirmed against Claude.ai upload validator): the ZIP must
+# contain a TOP-LEVEL FOLDER named after the skill, with SKILL.md inside it.
+#   toro.skill -> toro/SKILL.md
+#                 toro/references/equities.md
+#                 toro/references/crypto.md
+# A flat layout (SKILL.md at the ZIP root, no wrapping folder) is rejected.
 #
 # Usage:
 #   .\scripts\package-skill.ps1 toro          # Packages skills/toro/ -> dist/skills/toro.skill
@@ -62,8 +65,11 @@ function Package-Skill {
     if (Test-Path $SkillFile) { Remove-Item $SkillFile -Force }
 
     # Resolve the skill path so we can compute clean relative entries.
+    # We anchor entries on the PARENT of the skill folder so the skill folder
+    # itself becomes the top-level directory inside the ZIP (toro/SKILL.md).
     $SkillRoot = (Resolve-Path $SkillPath).Path.TrimEnd('\','/')
-    $Prefix    = $SkillRoot + [System.IO.Path]::DirectorySeparatorChar
+    $ParentDir = (Split-Path -Parent $SkillRoot).TrimEnd('\','/')
+    $Prefix    = $ParentDir + [System.IO.Path]::DirectorySeparatorChar
 
     $Zip = [System.IO.Compression.ZipFile]::Open(
         $SkillFile,
@@ -72,12 +78,10 @@ function Package-Skill {
     try {
         $Files = Get-ChildItem -Path $SkillRoot -Recurse -File
         foreach ($File in $Files) {
-            # Compute relative path from skill root, normalize to forward slashes.
+            # Compute path relative to skills/ (the parent), normalize to
+            # forward slashes. Result: "toro/SKILL.md", "toro/references/...".
             $Relative = $File.FullName.Substring($Prefix.Length).Replace('\','/')
 
-            # SKILL.md sits at the ZIP root; references/* and any other content
-            # is preserved at its relative path. The wrapping folder (e.g. "toro/")
-            # is intentionally stripped so the YAML `name:` field is canonical.
             $Entry = $Zip.CreateEntry(
                 $Relative,
                 [System.IO.Compression.CompressionLevel]::Optimal
