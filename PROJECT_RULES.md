@@ -159,6 +159,22 @@ When building any feature that needs market data, use these sources in this prio
 | 2 | URSA MINOR | Lean bearish — reduced size |
 | 1 | URSA MAJOR | Strongly bearish — full size shorts |
 
+## Composite Bias Engine — Runtime Invariants
+
+These are operational rules for the composite bias engine. Detailed factor weights, score-to-bias mappings, and velocity multipliers live in `docs/specs/composite-bias-engine.md`. The rules below are the cross-cutting invariants every writer and reader must honor.
+
+**Writer Ownership Rule (Feb 19, 2026 hotfix):** Each factor key has exactly one writer.
+- Pivot-owned keys: `credit_spreads`, `market_breadth`, `vix_term`, `tick_breadth`, `sector_rotation`, `dollar_smile`, `excess_cape`, `savita`.
+- Backend scorer-owned keys: all remaining factors in `bias_engine.factor_scorer`.
+- Backend scorer MUST skip Pivot-owned keys to prevent Redis overwrite races.
+
+**Macro/Volatility Price Sanity Bounds (Feb 19, 2026 hotfix):** Out-of-range values are treated as anomalous, rejected, and never cached.
+- `^VIX`: 9 to 90
+- `^VIX3M`: 9 to 60
+- `DX-Y.NYB` (DXY): 80 to 120
+
+**Graceful Degradation:** When a factor goes stale (exceeds its staleness threshold), its weight is redistributed proportionally to remaining active factors. The system MUST always produce a valid bias reading from whatever subset of factors is available.
+
 ## Deployment Rules
 
 - **Railway:** Auto-deploys on push to `main`. Postgres must be in SAME Railway project.
