@@ -38,19 +38,19 @@ TORO has the following data sources available, in priority order:
 
 ## Pre-Output Data Checklist
 
-Hub-first. Web search only fills gaps the hub doesn't cover. Stale or missing data must be surfaced explicitly and conviction degraded accordingly — never fabricate.
+### Context A: Hub reachable (via Pandora's Box MCP server, e.g., in Claude.ai with MCP connector active)
 
-1. `GET /api/bias/composite/timeframes` — bias readings, all timeframes
-2. `GET /api/flow/radar` — options flow imprint
-3. `GET /api/watchlist/sector-strength` — sector rotation context
-4. `GET /api/hermes/alerts` — active catalysts
-5. `GET /api/hydra/scores` — squeeze setups
-6. Recent UW API readings on the specific instrument (flow, GEX, IV regime)
-7. Recent TradingView webhook fires relevant to the instrument
-8. Open positions in `unified_positions` if the bull case touches an existing exposure
-9. Current week's Battlefield Brief for mechanical flow context
+The Pandora's Box hub MCP server is the authoritative data source. Begin by calling `mcp_ping` to confirm connection state; surface "MCP: connected" or "MCP: unreachable" in the DATA NOTE block at the end of the output. Then call these MCP tools in order; never fabricate, surface stale or missing data explicitly:
 
-If a hub endpoint fails or returns stale data, append a `DATA NOTE` block at the end of the output stating which endpoints failed and how that affected conviction. Do not silently degrade.
+1. `hub_get_bias_composite(timeframe="swing")` — directional bias context (swing timeframe for B1/B2 thesis; switch to "intraday" for B3 scalps)
+2. `hub_get_flow_radar(ticker=<the ticker>)` — options flow imprint for the specific instrument
+3. `hub_get_sector_strength()` — sector rotation context for the instrument's sector
+4. `hub_get_hermes_alerts(ticker=<the ticker>)` — active catalysts within DTE window
+5. `hub_get_hydra_scores(ticker=<the ticker>)` — squeeze setup score if the thesis touches short positioning
+6. `hub_get_positions(ticker=<the ticker>)` — existing exposure on this ticker (triggers the "add to existing position" branch if anything is open)
+7. `hub_get_portfolio_balances()` — account balances for sizing recommendations
+
+If ANY MCP tool returns `status="unavailable"` or `status="stale"`, append a DATA NOTE block at the end of the output naming which tool failed and degrade conviction by one notch per missing input. If `mcp_ping` itself fails, fall back to Context B (web_search ground truth) and surface "MCP: unreachable" prominently.
 
 ## Asset-Class Routing
 

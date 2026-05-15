@@ -1,0 +1,345 @@
+"""Smoke tests for each of the 9 tools.
+
+Each test mocks the read_only namespace and asserts:
+  - tool returns a valid envelope shape
+  - status, schema_version, summary fields are present and well-typed
+  - on read_only failure the tool returns status="unavailable"
+"""
+
+from datetime import datetime, timezone
+from unittest.mock import AsyncMock, patch
+
+import pytest
+
+from mcp.envelope import SUMMARY_MAX_CHARS
+
+
+def _is_valid_envelope(r: dict) -> bool:
+    return (
+        isinstance(r, dict)
+        and r.get("schema_version") == "v1.0"
+        and r.get("status") in {"ok", "stale", "degraded", "unavailable"}
+        and isinstance(r.get("summary", ""), str)
+        and len(r["summary"]) <= SUMMARY_MAX_CHARS
+        and "data" in r
+        and "error" in r
+        and "staleness_seconds" in r
+    )
+
+
+# ─── hub_get_bias_composite ──────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_bias_composite_unavailable_when_no_cache():
+    from mcp.tools.bias_composite import hub_get_bias_composite
+
+    with patch(
+        "mcp.tools.bias_composite.get_composite_bias",
+        new=AsyncMock(return_value=None),
+    ):
+        r = await hub_get_bias_composite()
+    assert _is_valid_envelope(r)
+    assert r["status"] == "unavailable"
+
+
+@pytest.mark.asyncio
+async def test_bias_composite_ok_when_cached():
+    from mcp.tools.bias_composite import hub_get_bias_composite
+
+    payload = {
+        "composite_score": 0.34,
+        "bias_level": "TORO_MINOR",
+        "factors": {},
+        "active_factors": ["credit_spreads", "market_breadth"],
+        "stale_factors": [],
+        "confidence": "HIGH",
+        "velocity_multiplier": 1.0,
+    }
+    with patch(
+        "mcp.tools.bias_composite.get_composite_bias",
+        new=AsyncMock(return_value=payload),
+    ), patch(
+        "mcp.tools.bias_composite.get_manual_override",
+        new=AsyncMock(return_value=None),
+    ):
+        r = await hub_get_bias_composite()
+    assert _is_valid_envelope(r)
+    assert r["status"] == "ok"
+    assert "swing" in r["data"]["timeframes"]
+
+
+@pytest.mark.asyncio
+async def test_bias_composite_invalid_timeframe():
+    from mcp.tools.bias_composite import hub_get_bias_composite
+
+    r = await hub_get_bias_composite(timeframe="weekly")
+    assert _is_valid_envelope(r)
+    assert r["status"] == "unavailable"
+    assert "Invalid timeframe" in r["error"]
+
+
+# ─── hub_get_flow_radar ──────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_flow_radar_unavailable_when_source_fails():
+    from mcp.tools.flow_radar import hub_get_flow_radar
+
+    with patch(
+        "mcp.tools.flow_radar._read_flow", new=AsyncMock(return_value=None)
+    ):
+        r = await hub_get_flow_radar(ticker="TSLA")
+    assert _is_valid_envelope(r)
+    assert r["status"] == "unavailable"
+
+
+@pytest.mark.asyncio
+async def test_flow_radar_invalid_lookback():
+    from mcp.tools.flow_radar import hub_get_flow_radar
+
+    r = await hub_get_flow_radar(lookback_hours=99)
+    assert r["status"] == "unavailable"
+    assert "lookback_hours" in r["error"]
+
+
+@pytest.mark.asyncio
+async def test_flow_radar_ok():
+    from mcp.tools.flow_radar import hub_get_flow_radar
+
+    payload = {
+        "market_pulse": {
+            "net_premium_calls_usd": 1_000_000,
+            "net_premium_puts_usd": 500_000,
+            "direction": "BULLISH",
+        },
+        "watchlist_unusual": [],
+        "position_flow": [],
+    }
+    with patch(
+        "mcp.tools.flow_radar._read_flow", new=AsyncMock(return_value=payload)
+    ):
+        r = await hub_get_flow_radar()
+    assert _is_valid_envelope(r)
+    assert r["status"] == "ok"
+    assert r["data"]["net_premium_direction"] == "BULLISH"
+
+
+# ─── hub_get_sector_strength ─────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_sector_strength_unavailable_when_cache_empty():
+    from mcp.tools.sector_strength import hub_get_sector_strength
+
+    with patch(
+        "mcp.tools.sector_strength.get_sector_rotation",
+        new=AsyncMock(return_value=None),
+    ):
+        r = await hub_get_sector_strength()
+    assert r["status"] == "unavailable"
+
+
+@pytest.mark.asyncio
+async def test_sector_strength_ok():
+    from mcp.tools.sector_strength import hub_get_sector_strength
+
+    cache = {
+        "Technology": {"etf": "XLK", "rs_10d": 2.4, "rs_20d": 4.1, "status": "SURGING"},
+        "Energy": {"etf": "XLE", "rs_10d": -1.8, "rs_20d": -3.2, "status": "DUMPING"},
+        "Financials": {"etf": "XLF", "rs_10d": 0.6, "rs_20d": 0.9, "status": "STEADY"},
+    }
+    with patch(
+        "mcp.tools.sector_strength.get_sector_rotation",
+        new=AsyncMock(return_value=cache),
+    ):
+        r = await hub_get_sector_strength()
+    assert _is_valid_envelope(r)
+    assert r["status"] == "ok"
+    assert r["data"]["rotation_regime"] in {
+        "CONCENTRATED_LEADERSHIP",
+        "BROAD_ROTATION",
+        "REGIME_AGNOSTIC",
+        "ACTIVE_DISTRIBUTION",
+    }
+
+
+# ─── hub_get_hermes_alerts ───────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_hermes_unavailable_when_source_fails():
+    from mcp.tools.hermes_alerts import hub_get_hermes_alerts
+
+    with patch(
+        "mcp.tools.hermes_alerts.get_upcoming_catalysts",
+        new=AsyncMock(return_value=None),
+    ):
+        r = await hub_get_hermes_alerts()
+    assert r["status"] == "unavailable"
+
+
+@pytest.mark.asyncio
+async def test_hermes_ok_with_events():
+    from mcp.tools.hermes_alerts import hub_get_hermes_alerts
+
+    raw = {
+        "events": [
+            {
+                "date": "2026-06-20",
+                "category": "FOMC",
+                "name": "FOMC",
+                "impact": "CRITICAL",
+            }
+        ]
+    }
+    with patch(
+        "mcp.tools.hermes_alerts.get_upcoming_catalysts",
+        new=AsyncMock(return_value=raw),
+    ):
+        r = await hub_get_hermes_alerts(forward_days=60)
+    assert r["status"] == "ok"
+    assert len(r["data"]["alerts"]) == 1
+
+
+# ─── hub_get_hydra_scores ────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_hydra_invalid_min_score():
+    from mcp.tools.hydra_scores import hub_get_hydra_scores
+
+    r = await hub_get_hydra_scores(min_score=200)
+    assert r["status"] == "unavailable"
+
+
+@pytest.mark.asyncio
+async def test_hydra_ok_with_rows():
+    from mcp.tools.hydra_scores import hub_get_hydra_scores
+
+    rows = [
+        {
+            "ticker": "KRMN",
+            "composite_score": 88,
+            "short_interest_score": 90,
+            "short_interest_pct": 22.5,
+            "days_to_cover": 4.1,
+            "gamma_flip_level": 38.5,
+            "current_price": 36.2,
+        }
+    ]
+    with patch(
+        "mcp.tools.hydra_scores.get_squeeze_scores",
+        new=AsyncMock(return_value=rows),
+    ):
+        r = await hub_get_hydra_scores()
+    assert r["status"] == "ok"
+    assert r["data"]["candidate_count"] == 1
+
+
+# ─── hub_get_positions ───────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_positions_invalid_status():
+    from mcp.tools.positions import hub_get_positions
+
+    r = await hub_get_positions(status="FROZEN")
+    assert r["status"] == "unavailable"
+
+
+@pytest.mark.asyncio
+async def test_positions_ok():
+    from mcp.tools.positions import hub_get_positions
+
+    rows = [
+        {
+            "position_id": "POS_TSLA_1",
+            "ticker": "TSLA",
+            "account": "ROBINHOOD",
+            "structure": "call_debit_spread",
+            "quantity": 2,
+            "entry_price": 4.5,
+            "current_price": 6.0,
+            "current_value": 1200.0,
+            "unrealized_pnl": 300.0,
+            "max_loss": 900.0,
+            "long_strike": 400.0,
+            "short_strike": 420.0,
+            "expiry": "2026-06-20",
+            "status": "OPEN",
+        }
+    ]
+    with patch(
+        "mcp.tools.positions.list_positions", new=AsyncMock(return_value=rows)
+    ):
+        r = await hub_get_positions()
+    assert r["status"] == "ok"
+    assert r["data"]["position_count"] == 1
+
+
+# ─── hub_get_portfolio_balances ──────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_balances_invalid_account():
+    from mcp.tools.portfolio_balances import hub_get_portfolio_balances
+
+    r = await hub_get_portfolio_balances(account="schwab")
+    assert r["status"] == "unavailable"
+
+
+@pytest.mark.asyncio
+async def test_balances_ok():
+    from mcp.tools.portfolio_balances import hub_get_portfolio_balances
+
+    rows = [
+        {
+            "account_name": "ROBINHOOD",
+            "broker": "Robinhood",
+            "balance": 4500.0,
+            "cash": 1800.0,
+            "buying_power": 4500.0,
+            "margin_total": None,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+    ]
+    with patch(
+        "mcp.tools.portfolio_balances.get_account_balances",
+        new=AsyncMock(return_value=rows),
+    ):
+        r = await hub_get_portfolio_balances()
+    assert r["status"] == "ok"
+    assert r["data"]["total_balance"] == 4500.0
+
+
+# ─── mcp_ping ────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_ping_returns_ok():
+    from mcp.tools.ping import mcp_ping
+
+    r = await mcp_ping()
+    assert _is_valid_envelope(r)
+    assert r["status"] == "ok"
+    assert r["data"]["status"] == "ok"
+    assert r["data"]["schema_version"] == "v1.0"
+
+
+# ─── mcp_describe_tools ──────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_describe_lists_all_nine():
+    # Importing this triggers registration of every tool.
+    import mcp.tools  # noqa: F401
+    from mcp.tools.describe import mcp_describe_tools
+
+    r = await mcp_describe_tools()
+    assert _is_valid_envelope(r)
+    assert r["status"] == "ok"
+    assert r["data"]["tool_count"] == 9
+    names = {t["name"] for t in r["data"]["tools"]}
+    assert names == {
+        "hub_get_bias_composite",
+        "hub_get_flow_radar",
+        "hub_get_sector_strength",
+        "hub_get_hermes_alerts",
+        "hub_get_hydra_scores",
+        "hub_get_positions",
+        "hub_get_portfolio_balances",
+        "mcp_ping",
+        "mcp_describe_tools",
+    }
