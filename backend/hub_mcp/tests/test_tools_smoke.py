@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from mcp.envelope import SUMMARY_MAX_CHARS
+from hub_mcp.envelope import SUMMARY_MAX_CHARS
 
 
 def _is_valid_envelope(r: dict) -> bool:
@@ -31,10 +31,10 @@ def _is_valid_envelope(r: dict) -> bool:
 
 @pytest.mark.asyncio
 async def test_bias_composite_unavailable_when_no_cache():
-    from mcp.tools.bias_composite import hub_get_bias_composite
+    from hub_mcp.tools.bias_composite import hub_get_bias_composite
 
     with patch(
-        "mcp.tools.bias_composite.get_composite_bias",
+        "hub_mcp.tools.bias_composite.get_composite_bias",
         new=AsyncMock(return_value=None),
     ):
         r = await hub_get_bias_composite()
@@ -44,7 +44,7 @@ async def test_bias_composite_unavailable_when_no_cache():
 
 @pytest.mark.asyncio
 async def test_bias_composite_ok_when_cached():
-    from mcp.tools.bias_composite import hub_get_bias_composite
+    from hub_mcp.tools.bias_composite import hub_get_bias_composite
 
     payload = {
         "composite_score": 0.34,
@@ -56,10 +56,10 @@ async def test_bias_composite_ok_when_cached():
         "velocity_multiplier": 1.0,
     }
     with patch(
-        "mcp.tools.bias_composite.get_composite_bias",
+        "hub_mcp.tools.bias_composite.get_composite_bias",
         new=AsyncMock(return_value=payload),
     ), patch(
-        "mcp.tools.bias_composite.get_manual_override",
+        "hub_mcp.tools.bias_composite.get_manual_override",
         new=AsyncMock(return_value=None),
     ):
         r = await hub_get_bias_composite()
@@ -70,7 +70,7 @@ async def test_bias_composite_ok_when_cached():
 
 @pytest.mark.asyncio
 async def test_bias_composite_invalid_timeframe():
-    from mcp.tools.bias_composite import hub_get_bias_composite
+    from hub_mcp.tools.bias_composite import hub_get_bias_composite
 
     r = await hub_get_bias_composite(timeframe="weekly")
     assert _is_valid_envelope(r)
@@ -82,10 +82,10 @@ async def test_bias_composite_invalid_timeframe():
 
 @pytest.mark.asyncio
 async def test_flow_radar_unavailable_when_source_fails():
-    from mcp.tools.flow_radar import hub_get_flow_radar
+    from hub_mcp.tools.flow_radar import hub_get_flow_radar
 
     with patch(
-        "mcp.tools.flow_radar._read_flow", new=AsyncMock(return_value=None)
+        "hub_mcp.tools.flow_radar._read_flow", new=AsyncMock(return_value=None)
     ):
         r = await hub_get_flow_radar(ticker="TSLA")
     assert _is_valid_envelope(r)
@@ -94,7 +94,7 @@ async def test_flow_radar_unavailable_when_source_fails():
 
 @pytest.mark.asyncio
 async def test_flow_radar_invalid_lookback():
-    from mcp.tools.flow_radar import hub_get_flow_radar
+    from hub_mcp.tools.flow_radar import hub_get_flow_radar
 
     r = await hub_get_flow_radar(lookback_hours=99)
     assert r["status"] == "unavailable"
@@ -103,7 +103,7 @@ async def test_flow_radar_invalid_lookback():
 
 @pytest.mark.asyncio
 async def test_flow_radar_ok():
-    from mcp.tools.flow_radar import hub_get_flow_radar
+    from hub_mcp.tools.flow_radar import hub_get_flow_radar
 
     payload = {
         "market_pulse": {
@@ -115,7 +115,7 @@ async def test_flow_radar_ok():
         "position_flow": [],
     }
     with patch(
-        "mcp.tools.flow_radar._read_flow", new=AsyncMock(return_value=payload)
+        "hub_mcp.tools.flow_radar._read_flow", new=AsyncMock(return_value=payload)
     ):
         r = await hub_get_flow_radar()
     assert _is_valid_envelope(r)
@@ -127,10 +127,10 @@ async def test_flow_radar_ok():
 
 @pytest.mark.asyncio
 async def test_sector_strength_unavailable_when_cache_empty():
-    from mcp.tools.sector_strength import hub_get_sector_strength
+    from hub_mcp.tools.sector_strength import hub_get_sector_strength
 
     with patch(
-        "mcp.tools.sector_strength.get_sector_rotation",
+        "hub_mcp.tools.sector_strength.get_sector_rotation",
         new=AsyncMock(return_value=None),
     ):
         r = await hub_get_sector_strength()
@@ -139,7 +139,7 @@ async def test_sector_strength_unavailable_when_cache_empty():
 
 @pytest.mark.asyncio
 async def test_sector_strength_ok():
-    from mcp.tools.sector_strength import hub_get_sector_strength
+    from hub_mcp.tools.sector_strength import hub_get_sector_strength
 
     cache = {
         "Technology": {"etf": "XLK", "rs_10d": 2.4, "rs_20d": 4.1, "status": "SURGING"},
@@ -147,7 +147,7 @@ async def test_sector_strength_ok():
         "Financials": {"etf": "XLF", "rs_10d": 0.6, "rs_20d": 0.9, "status": "STEADY"},
     }
     with patch(
-        "mcp.tools.sector_strength.get_sector_rotation",
+        "hub_mcp.tools.sector_strength.get_sector_rotation",
         new=AsyncMock(return_value=cache),
     ):
         r = await hub_get_sector_strength()
@@ -165,10 +165,10 @@ async def test_sector_strength_ok():
 
 @pytest.mark.asyncio
 async def test_hermes_unavailable_when_source_fails():
-    from mcp.tools.hermes_alerts import hub_get_hermes_alerts
+    from hub_mcp.tools.hermes_alerts import hub_get_hermes_alerts
 
     with patch(
-        "mcp.tools.hermes_alerts.get_upcoming_catalysts",
+        "hub_mcp.tools.hermes_alerts.get_upcoming_catalysts",
         new=AsyncMock(return_value=None),
     ):
         r = await hub_get_hermes_alerts()
@@ -177,7 +177,7 @@ async def test_hermes_unavailable_when_source_fails():
 
 @pytest.mark.asyncio
 async def test_hermes_ok_with_events():
-    from mcp.tools.hermes_alerts import hub_get_hermes_alerts
+    from hub_mcp.tools.hermes_alerts import hub_get_hermes_alerts
 
     raw = {
         "events": [
@@ -190,7 +190,7 @@ async def test_hermes_ok_with_events():
         ]
     }
     with patch(
-        "mcp.tools.hermes_alerts.get_upcoming_catalysts",
+        "hub_mcp.tools.hermes_alerts.get_upcoming_catalysts",
         new=AsyncMock(return_value=raw),
     ):
         r = await hub_get_hermes_alerts(forward_days=60)
@@ -202,7 +202,7 @@ async def test_hermes_ok_with_events():
 
 @pytest.mark.asyncio
 async def test_hydra_invalid_min_score():
-    from mcp.tools.hydra_scores import hub_get_hydra_scores
+    from hub_mcp.tools.hydra_scores import hub_get_hydra_scores
 
     r = await hub_get_hydra_scores(min_score=200)
     assert r["status"] == "unavailable"
@@ -210,7 +210,7 @@ async def test_hydra_invalid_min_score():
 
 @pytest.mark.asyncio
 async def test_hydra_ok_with_rows():
-    from mcp.tools.hydra_scores import hub_get_hydra_scores
+    from hub_mcp.tools.hydra_scores import hub_get_hydra_scores
 
     rows = [
         {
@@ -224,7 +224,7 @@ async def test_hydra_ok_with_rows():
         }
     ]
     with patch(
-        "mcp.tools.hydra_scores.get_squeeze_scores",
+        "hub_mcp.tools.hydra_scores.get_squeeze_scores",
         new=AsyncMock(return_value=rows),
     ):
         r = await hub_get_hydra_scores()
@@ -236,7 +236,7 @@ async def test_hydra_ok_with_rows():
 
 @pytest.mark.asyncio
 async def test_positions_invalid_status():
-    from mcp.tools.positions import hub_get_positions
+    from hub_mcp.tools.positions import hub_get_positions
 
     r = await hub_get_positions(status="FROZEN")
     assert r["status"] == "unavailable"
@@ -244,7 +244,7 @@ async def test_positions_invalid_status():
 
 @pytest.mark.asyncio
 async def test_positions_ok():
-    from mcp.tools.positions import hub_get_positions
+    from hub_mcp.tools.positions import hub_get_positions
 
     rows = [
         {
@@ -265,7 +265,7 @@ async def test_positions_ok():
         }
     ]
     with patch(
-        "mcp.tools.positions.list_positions", new=AsyncMock(return_value=rows)
+        "hub_mcp.tools.positions.list_positions", new=AsyncMock(return_value=rows)
     ):
         r = await hub_get_positions()
     assert r["status"] == "ok"
@@ -276,7 +276,7 @@ async def test_positions_ok():
 
 @pytest.mark.asyncio
 async def test_balances_invalid_account():
-    from mcp.tools.portfolio_balances import hub_get_portfolio_balances
+    from hub_mcp.tools.portfolio_balances import hub_get_portfolio_balances
 
     r = await hub_get_portfolio_balances(account="schwab")
     assert r["status"] == "unavailable"
@@ -284,7 +284,7 @@ async def test_balances_invalid_account():
 
 @pytest.mark.asyncio
 async def test_balances_ok():
-    from mcp.tools.portfolio_balances import hub_get_portfolio_balances
+    from hub_mcp.tools.portfolio_balances import hub_get_portfolio_balances
 
     rows = [
         {
@@ -298,7 +298,7 @@ async def test_balances_ok():
         }
     ]
     with patch(
-        "mcp.tools.portfolio_balances.get_account_balances",
+        "hub_mcp.tools.portfolio_balances.get_account_balances",
         new=AsyncMock(return_value=rows),
     ):
         r = await hub_get_portfolio_balances()
@@ -310,7 +310,7 @@ async def test_balances_ok():
 
 @pytest.mark.asyncio
 async def test_ping_returns_ok():
-    from mcp.tools.ping import mcp_ping
+    from hub_mcp.tools.ping import mcp_ping
 
     r = await mcp_ping()
     assert _is_valid_envelope(r)
@@ -324,8 +324,8 @@ async def test_ping_returns_ok():
 @pytest.mark.asyncio
 async def test_describe_lists_all_nine():
     # Importing this triggers registration of every tool.
-    import mcp.tools  # noqa: F401
-    from mcp.tools.describe import mcp_describe_tools
+    import hub_mcp.tools  # noqa: F401
+    from hub_mcp.tools.describe import mcp_describe_tools
 
     r = await mcp_describe_tools()
     assert _is_valid_envelope(r)

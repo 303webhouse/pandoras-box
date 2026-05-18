@@ -1,6 +1,6 @@
 """Tests for backend/mcp/rate_limit.py."""
 
-from mcp.rate_limit import EXEMPT_TOOLS, LIMITS_PER_MINUTE, RateLimiter
+from hub_mcp.rate_limit import EXEMPT_TOOLS, LIMITS_PER_MINUTE, RateLimiter
 
 
 def test_under_limit_allowed():

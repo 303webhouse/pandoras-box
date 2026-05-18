@@ -1,6 +1,6 @@
 """Tests for backend/mcp/envelope.py."""
 
-from mcp.envelope import SUMMARY_MAX_CHARS, make_response
+from hub_mcp.envelope import SUMMARY_MAX_CHARS, make_response
 
 
 def test_status_ok():

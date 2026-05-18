@@ -3,7 +3,7 @@
 import pytest
 from fastapi import HTTPException, Request
 
-from mcp.auth import verify_bearer
+from hub_mcp.auth import verify_bearer
 
 
 def _make_request(headers: dict) -> Request:

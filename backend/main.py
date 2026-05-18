@@ -598,9 +598,23 @@ async def lifespan(app: FastAPI):
     # ZEUS Phase 3: verify feed_tier schema after startup
     asyncio.create_task(verify_zeus_schema())
 
+    # MCP server lifespan — must wrap the parent yield so FastMCP's
+    # StreamableHTTPSessionManager task group is live for the duration
+    # of the parent app. Imported lazily here to keep startup tolerant
+    # if hub_mcp fails to load (yield still runs).
+    try:
+        from hub_mcp.router import mcp_lifespan as _mcp_lifespan
+    except Exception as exc:
+        logger.error("MCP lifespan import failed; running without MCP: %s", exc)
+        _mcp_lifespan = None
+
     logger.info("✅ Pandora's Box is live")
 
-    yield
+    if _mcp_lifespan is None:
+        yield
+    else:
+        async with _mcp_lifespan(app):
+            yield
 
     # Shutdown
     expiry_task.cancel()
@@ -1015,12 +1029,15 @@ app.include_router(mp_webhook_router, prefix="/webhook", tags=["market-profile"]
 app.include_router(signals_router, prefix="/api", tags=["signals"])
 
 # ─── MCP server (v1) ────────────────────────────────────────────────────
-# Mounted as an isolated FastAPI sub-app so its CORS / auth / rate-limit
-# middleware stays scoped to /mcp/v1/* and never loosens the parent app.
-# Tools are registered via the @mcp_tool decorator at import time inside
-# backend.mcp.router; see backend/mcp/README.md for the architecture.
+# Mounted as an isolated ASGI sub-app at /mcp/v1. CORS / bearer auth /
+# rate limit / audit middleware are wrapped inside the sub-app so they
+# never loosen the parent app. Tools register via @mcp_tool at import
+# time inside hub_mcp.router. See backend/hub_mcp/README.md.
+#
+# The FastMCP lifespan is chained into the parent's lifespan above; the
+# session-manager task group needs to be live before any request fires.
 try:
-    from mcp.router import mcp_app
+    from hub_mcp.router import mcp_app
     app.mount("/mcp/v1", mcp_app)
     logger.info("✅ MCP v1 server mounted at /mcp/v1")
 except Exception as exc:

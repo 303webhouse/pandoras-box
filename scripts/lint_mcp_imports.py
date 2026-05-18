@@ -1,19 +1,21 @@
 #!/usr/bin/env python3
-"""AEGIS-mandated import lint for the MCP module.
+"""AEGIS-mandated import lint for the hub MCP module.
 
-Scans every `.py` under `backend/mcp/` and fails if any import references a
-write-capable module. This is layer 2 of the three-layer read-only
-enforcement (the @mcp_tool decorator is layer 1; AEGIS PR review is layer 3).
+Scans every `.py` under `backend/hub_mcp/` and fails if any import references
+a write-capable module. This is layer 2 of the three-layer read-only
+enforcement (the @mcp.tool registration is layer 1; AEGIS PR review is
+layer 3). The package is named `hub_mcp` to avoid colliding with the
+official Anthropic `mcp` SDK that `fastmcp` depends on.
 
 Rules:
-  - backend/mcp/* may import from backend.services.read_only.*
-  - backend/mcp/* may NOT import from backend.services.write.* (does not
+  - backend/hub_mcp/* may import from backend.services.read_only.*
+  - backend/hub_mcp/* may NOT import from backend.services.write.* (does not
     exist yet, defensive guard for v2)
-  - backend/mcp/* may NOT import any name from a curated set of write-capable
-    modules (e.g., `bias_engine.composite.cache_composite`)
-  - backend/mcp/* may NOT import an entire write-heavy module by bare name
-    (e.g., `import api.portfolio` would be flagged because api/portfolio.py
-    contains POST endpoints)
+  - backend/hub_mcp/* may NOT import any name from a curated set of write-
+    capable modules (e.g., `bias_engine.composite.cache_composite`)
+  - backend/hub_mcp/* may NOT import an entire write-heavy module by bare
+    name (e.g., `import api.portfolio` would be flagged because
+    api/portfolio.py contains POST endpoints)
 
 Exit codes:
   0 — clean
@@ -29,7 +31,7 @@ from pathlib import Path
 from typing import Iterable, List
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-MCP_ROOT = REPO_ROOT / "backend" / "mcp"
+MCP_ROOT = REPO_ROOT / "backend" / "hub_mcp"
 
 # Bare module imports that are categorically forbidden because they bundle
 # write capability. The full import path or any descendant of these triggers
