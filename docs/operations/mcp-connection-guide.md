@@ -2,14 +2,16 @@
 
 How to connect Claude.ai (Olympus committee skills + direct chats) to the hub MCP server so TORO, URSA, and the rest of Olympus can pull real hub data instead of fabricating context.
 
+**Auth model (v3+):** GitHub OAuth. The browser redirects to GitHub on first connect, you authorize the OAuth App, and Claude.ai stores the issued token. There's no bearer token to paste anywhere.
+
 ---
 
 ## What you need before connecting
 
 1. **The MCP URL:** `https://pandoras-box-production.up.railway.app/mcp/v1/`
-2. **The bearer token:** the value of the `MCP_BEARER_TOKEN` Railway env var. Keep it in your password manager — Claude.ai will store it but Anthropic does not surface it after the connector is configured.
+2. **A GitHub account** on the `MCP_ALLOWED_GITHUB_USERS` allowlist (currently `303webhouse` only). Any other GitHub user can complete the OAuth handshake but will be rejected at token-verification time and won't see any tools.
 
-If Nick rotated the token recently per `docs/operations/mcp-token-rotation.md`, use the new value, not whatever you remember.
+That's it. No tokens, no secrets — the GitHub OAuth App credentials live in Railway and are invisible to Claude.ai.
 
 ---
 
@@ -21,17 +23,23 @@ If Nick rotated the token recently per `docs/operations/mcp-token-rotation.md`, 
 4. Fill in:
    - **Name:** `Pandora's Box Hub` (or whatever; it shows in chat tool calls)
    - **URL:** `https://pandoras-box-production.up.railway.app/mcp/v1/`
-   - **Authentication:** Bearer
-   - **Bearer token:** paste the token
-5. Save.
-6. Claude.ai will probe `/mcp/v1/health` and display the connector as available.
+   - **OAuth Client ID:** leave **BLANK**
+   - **OAuth Client Secret:** leave **BLANK**
+
+   The OAuth fields stay blank because our server supports DCR (Dynamic Client Registration) via FastMCP's OAuthProxy — Claude.ai auto-registers itself with our server on first connect, then redirects to GitHub for user auth.
+
+5. Click **Add**.
+6. Browser redirects to GitHub. You'll see the "Pandora's Box MCP" OAuth App requesting `read:user` scope. Click **Authorize**.
+7. Browser redirects back to our server's `/mcp/v1/auth/callback`, which verifies your GitHub username against the allowlist, then back to Claude.ai.
+8. Connector shows up as "Connected" and the 9 tools become available.
 
 ## Verifying it works
 
 1. Open a new chat in the Pandora's Box project.
 2. Prompt: *"Use the Pandora's Box MCP to list available tools."*
-3. Claude should call `mcp_describe_tools` and return the 9-tool manifest. Look for:
+3. Claude should call `mcp_describe_tools` and return the 9-tool manifest:
    - `mcp_ping`
+   - `mcp_describe_tools`
    - `hub_get_bias_composite`
    - `hub_get_flow_radar`
    - `hub_get_sector_strength`
@@ -39,56 +47,57 @@ If Nick rotated the token recently per `docs/operations/mcp-token-rotation.md`, 
    - `hub_get_hydra_scores`
    - `hub_get_positions`
    - `hub_get_portfolio_balances`
-   - `mcp_describe_tools`
-
-If you only see 8 tools, that's a deploy issue — `mcp_describe_tools` should always be present because it reads the registry it's a member of. Check Railway logs.
 
 4. Test a real call: *"Run TORO on SPY."* TORO's skill is patched to call `mcp_ping` first and then `hub_get_bias_composite`, `hub_get_flow_radar`, etc. — you should see those tool calls happen in the chat.
 
 ## Mobile
 
-You connect once on desktop. Claude.ai's mobile app inherits connectors via account sync. There's no per-device pairing required.
+Connect once on desktop. Claude.ai's mobile app inherits the OAuth token via account sync — no separate pairing required. If the token ever expires on mobile, you'll be redirected to a mobile browser to re-auth through GitHub.
 
 ---
 
 ## Troubleshooting
 
-### "MCP: unreachable" in TORO/URSA output
+### "Couldn't reach the MCP server" when adding the connector
 
-Means `mcp_ping` failed. In order:
+In order of likelihood:
 
-1. **Token rotated?** If yes, update the connector with the new token per the rotation doc.
-2. **Railway healthy?** `curl https://pandoras-box-production.up.railway.app/health` — should return `status: healthy`. If not, MCP is down because the whole app is down.
-3. **MCP-specific health:** `curl https://pandoras-box-production.up.railway.app/mcp/v1/health` — should return `{"status":"ok","service":"mcp/v1"}` with no auth required.
-4. **CORS regression?** Check `backend/mcp/router.py` `ALLOWED_ORIGINS` — if Anthropic changed origins and we didn't update, the browser-side connector blocks the call. Curl from a terminal won't catch this because CORS is a browser policy.
+1. **Railway down or mid-deploy.** Verify: `curl https://pandoras-box-production.up.railway.app/health` should return `{"status":"healthy", ...}`. If it doesn't, the parent app is down.
+2. **MCP-specific down.** `curl https://pandoras-box-production.up.railway.app/mcp/v1/health` should return `{"status":"ok","service":"mcp/v1"}`. If parent health is fine but this 404s, the FastMCP mount failed at startup — check Railway logs for `MCP v1 server failed to mount`.
+3. **OAuth metadata endpoint broken.** `curl https://pandoras-box-production.up.railway.app/mcp/v1/.well-known/oauth-authorization-server` should return JSON with `issuer`, `authorization_endpoint`, `token_endpoint`. If it 404s, FastMCP's OAuthProxy didn't initialize — likely the GitHub OAuth env vars aren't set on Railway.
 
-### 401 Unauthorized on every call
+### "MCP: unreachable" inside a TORO/URSA committee output
 
-The bearer token saved in Claude.ai does not match `MCP_BEARER_TOKEN` on Railway. Either:
-- The Railway env var was rotated and the connector wasn't updated.
-- The connector was configured with whitespace or quotes accidentally pasted around the token.
+Means `mcp_ping` (the first call) failed mid-session. Either:
+- The connector was disconnected (Claude.ai → Settings → Connectors → reconnect)
+- The OAuth token expired and Claude.ai didn't auto-refresh — remove and re-add the connector
 
-Fix: re-paste the token in the connector settings.
+### GitHub OAuth redirect lands on "Authorization callback URL mismatch"
 
-### Rate limit hit during a normal committee pass
+The GitHub OAuth App's callback URL must be exactly `https://pandoras-box-production.up.railway.app/mcp/v1/auth/callback`. Go to github.com → Settings → Developer settings → OAuth Apps → Pandora's Box → verify and fix.
 
-`mcp_ping` is exempt from rate limiting (60/min, 5000/day). If TORO is hitting the per-minute limit, the skill is calling tools too aggressively. Check that TORO is caching the bias composite reading once per pass instead of re-calling each step.
+### GitHub OAuth completes but Claude.ai reports "Connection failed"
 
-### Tool returns `"status": "unavailable"` with error "Composite bias not cached"
+The GitHub username we authenticated as isn't in `MCP_ALLOWED_GITHUB_USERS`. Two reasons this could happen:
+- You authorized with the wrong GitHub account (signed into the browser as someone other than `303webhouse`).
+- The Railway env var got cleared or has a typo.
 
-The hub itself doesn't have a cached composite bias reading right now. This isn't an MCP problem — the bias_engine's scheduler hasn't run recently or Redis was flushed. Verify on the dashboard at the Railway URL first; if dashboard also shows blank bias, the upstream issue is on the hub.
+Fix: sign into github.com as `303webhouse` in the same browser, then re-trigger the connector setup in Claude.ai.
 
-### "Unknown tool" with a tool name that should exist
+### Tool returns `"status": "unavailable"` with error about cache
 
-Almost always means a Railway deploy didn't pick up new code. Check `git log -1` against the deployed SHA (visible in Railway logs). Trigger an empty commit + push to force redeploy if needed.
+The hub itself doesn't have cached data for that tool right now. Not an MCP/OAuth issue — check the relevant scheduler's last run in Railway logs.
 
 ---
 
-## When to disconnect
+## Revoking access
 
-Disconnect the connector if:
-- You're sharing your screen and don't want Claude.ai pulling live positions/balances.
-- You're investigating a suspected token leak — disconnect first, then rotate per the rotation doc.
-- You're running a Claude.ai chat against a different MCP and don't want this one in the mix.
+To kill an active session without redeploying:
 
-Reconnect by repeating the "Connecting in Claude.ai" steps above; the token can be reused as long as it hasn't been rotated on Railway.
+1. Go to **github.com → Settings → Applications → Authorized OAuth Apps**.
+2. Find **Pandora's Box MCP** (or whatever you named the OAuth App).
+3. Click **Revoke**.
+
+All issued access tokens are invalidated immediately. The next MCP call from Claude.ai will fail with 401, and the connector will prompt for re-auth.
+
+To rotate just the OAuth App credentials (without revoking sessions), see `docs/operations/mcp-token-rotation.md`.

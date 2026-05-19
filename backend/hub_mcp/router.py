@@ -1,17 +1,21 @@
 """MCP ASGI app mounted at /mcp/v1/ on the parent FastAPI.
 
-Architecture (this is the v2 fix — v1 shipped REST and was rejected by
-Claude.ai's connector):
+Architecture (v3 — OAuth migration):
 
     Parent FastAPI app
       └── mount("/mcp/v1", asgi_app)
-            └── BearerAuthMiddleware (401 on missing/wrong token)
-                  └── RateLimitMiddleware (429 on per-token quota; mcp_ping
-                      bypasses; per-token rolling window)
-                        └── AuditMiddleware (every request → audit logger)
-                              └── FastMCP Streamable HTTP ASGI app
-                                    (handles JSON-RPC, sessions, SSE
-                                    streaming, tools/list, tools/call)
+            └── RateLimitMiddleware (429 on per-token quota; mcp_ping bypasses;
+                key = Authorization header value, which after OAuth is
+                FastMCP's own access token, before-OAuth would be the bearer)
+                  └── AuditMiddleware (every request → audit logger)
+                        └── FastMCP Streamable HTTP ASGI app
+                              (auth = OAuthProxy(GitHub) + allowlisted
+                              verifier; FastMCP owns the auth surface)
+
+The bearer-auth middleware from v1/v2 is gone — Claude.ai's connector UI
+only accepts OAuth, and FastMCP's OAuthProxy is now the authoritative auth
+gate. Rate-limit + audit middleware stay because they're auth-scheme
+agnostic (they hash whatever's in the Authorization header).
 
 Tool registration: side-effect import of `hub_mcp.tools` triggers each
 tool module to call `@mcp_tool(...)` which delegates to FastMCP. After
@@ -25,7 +29,6 @@ import logging
 from typing import Optional
 
 from .audit import CallTimer, log_call
-from .auth import ENV_VAR as MCP_TOKEN_ENV_VAR
 from .rate_limit import EXEMPT_TOOLS, limiter
 from .server import mcp
 
@@ -67,6 +70,11 @@ async def _send_json(send, status_code: int, body: dict) -> None:
 
 
 def _extract_bearer_from_scope(scope: dict) -> Optional[str]:
+    """Extract the Authorization header value (post-'Bearer ' prefix).
+
+    Used only as a rate-limit/audit key — actual auth is owned by FastMCP's
+    OAuthProxy and happens inside the wrapped app.
+    """
     header = _get_header(scope, "authorization")
     if not header:
         return None
@@ -76,53 +84,19 @@ def _extract_bearer_from_scope(scope: dict) -> Optional[str]:
     return parts[1].strip() or None
 
 
-# ─── Middleware: Bearer auth ────────────────────────────────────────────
-
-class BearerAuthMiddleware:
-    """ASGI middleware enforcing MCP_BEARER_TOKEN on every HTTP request.
-
-    Stashes the verified token on scope["state"]["mcp_token"] for downstream
-    middleware (rate limit, audit). Constant-time compare via
-    secrets.compare_digest. Env var read on each request so token rotations
-    apply without a process restart.
-    """
-
-    def __init__(self, app):
-        self.app = app
-
-    async def __call__(self, scope, receive, send):
-        if scope["type"] != "http":
-            await self.app(scope, receive, send)
-            return
-
-        import os
-        import secrets
-
-        expected = os.environ.get(MCP_TOKEN_ENV_VAR)
-        if not expected:
-            logger.critical("MCP misconfigured: %s env var unset", MCP_TOKEN_ENV_VAR)
-            await _send_json(send, 500, {"error": "MCP server misconfigured"})
-            return
-
-        presented = _extract_bearer_from_scope(scope)
-        if not presented or not secrets.compare_digest(presented, expected):
-            await _send_json(send, 401, {"error": "Invalid or missing bearer token"})
-            return
-
-        state = scope.setdefault("state", {})
-        state["mcp_token"] = presented
-        await self.app(scope, receive, send)
-
-
 # ─── Middleware: rate limit ─────────────────────────────────────────────
 
 class RateLimitMiddleware:
     """Per-token rate-limit middleware.
 
-    Reads the token from scope["state"]["mcp_token"]. Buffers the request
-    body, peeks at the JSON-RPC method name to detect tools/call → tool
-    name, then replays the body downstream. Skips the limit for tools in
-    EXEMPT_TOOLS (currently just mcp_ping).
+    Keys off whatever's in the Authorization header (FastMCP-issued OAuth
+    access token after the OAuth flow; pre-OAuth the upstream GitHub token
+    during the handshake). Anonymous requests (no auth header — e.g. the
+    OAuth metadata endpoint or OAuth callback) get keyed off the caller IP.
+
+    Buffers the request body, peeks at the JSON-RPC method name to detect
+    tools/call → tool name, then replays the body downstream. Skips the
+    limit for tools in EXEMPT_TOOLS (currently just mcp_ping).
     """
 
     def __init__(self, app):
@@ -133,10 +107,12 @@ class RateLimitMiddleware:
             await self.app(scope, receive, send)
             return
 
-        token = (scope.get("state") or {}).get("mcp_token")
+        token = _extract_bearer_from_scope(scope)
         if not token:
-            await self.app(scope, receive, send)
-            return
+            # Anonymous endpoints (OAuth metadata, callback, /.well-known/*).
+            # Key off the caller IP so a misbehaving client still gets capped.
+            client = scope.get("client") or ("unknown", 0)
+            token = f"ip:{client[0]}"
 
         # Buffer request body so we can peek + replay.
         body_chunks: list[bytes] = []
@@ -182,9 +158,11 @@ class RateLimitMiddleware:
             if not sent:
                 sent = True
                 return {"type": "http.request", "body": body, "more_body": False}
-            await wait_event.wait()  # blocks forever in practice
+            await wait_event.wait()
             return {"type": "http.disconnect"}
 
+        scope["state"] = scope.get("state") or {}
+        scope["state"]["mcp_token"] = token
         scope["state"]["rate_limited_tool"] = tool_name
         try:
             await self.app(scope, receive_replay, send)
@@ -244,25 +222,22 @@ class AuditMiddleware:
 # ─── Public: build the mounted ASGI app ─────────────────────────────────
 
 # FastMCP's StreamableHTTPSessionManager needs its lifespan run on the
-# parent ASGI app. We construct the raw FastMCP starlette app here and
+# parent ASGI app. Construct the raw FastMCP starlette app here and
 # expose its `.lifespan` for main.py to chain into the parent FastAPI
-# app's lifespan. The middleware-wrapped variant is what we mount.
+# lifespan. The middleware-wrapped variant is what we mount.
 fastmcp_app = mcp.http_app(path="/", transport="http", stateless_http=True)
 
 
 def build_mcp_asgi_app():
     """Wrap the FastMCP app with our middleware chain.
 
-    Outermost → innermost: BearerAuth → RateLimit → Audit → FastMCP.
+    Outermost → innermost: RateLimit → Audit → FastMCP.
 
-    `stateless_http=True` keeps each request self-contained — no
-    Mcp-Session-Id required (the spec calls session IDs optional). FastMCP
-    still requires its lifespan to set up the session manager's task
-    group; main.py chains `fastmcp_app.lifespan` into the parent lifespan.
+    Auth is owned by FastMCP's OAuthProxy (configured in hub_mcp/server.py).
+    Our middleware only adds rate-limiting and audit-logging.
     """
     app = AuditMiddleware(fastmcp_app)
     app = RateLimitMiddleware(app)
-    app = BearerAuthMiddleware(app)
     return app
 
 
