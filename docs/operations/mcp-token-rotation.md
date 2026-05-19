@@ -1,96 +1,88 @@
-# Pandora's Box MCP — Token Rotation Procedure
+# Pandora's Box MCP — Credential Rotation Procedure
 
-The MCP server uses a single bearer token (`MCP_BEARER_TOKEN` Railway env var) for authentication. A leaked token grants full read access to bias composite, options flow, positions, and balances across all four accounts. Rotate immediately if you suspect leakage, and on a routine cadence otherwise.
+The MCP server (v3+) uses GitHub OAuth via FastMCP's OAuthProxy. Two distinct credentials need rotation procedures:
 
----
+1. **GitHub OAuth App Client Secret** — the secret Railway uses to exchange OAuth codes for GitHub access tokens. If leaked, an attacker with this secret + the Client ID could impersonate our server during an OAuth handshake.
+2. **GitHub OAuth Authorizations** — the per-user access tokens GitHub issues after authorization. Revoke at GitHub to kill all active sessions.
 
-## When to rotate
-
-- **Immediately:** suspected leak, accidental commit of the token, accidental paste into a public-visible doc/screen-share, sharing the value with anyone other than yourself.
-- **Quarterly:** treat it like any other long-lived credential — rotate every 90 days as routine hygiene.
-- **After any vendor/staff change** that touched the Railway dashboard. (N/A for Nick today — documented for completeness.)
+The pre-v3 `MCP_BEARER_TOKEN` is no longer in the live auth path; it can be removed from Railway as cleanup.
 
 ---
 
-## Rotation procedure (5 minutes, end-to-end)
+## Rotating the GitHub OAuth App Client Secret
 
-### 1. Generate a new token
+### When to rotate
 
-On any machine with Python:
+- **Immediately:** suspected leak (accidental commit, paste into a public-visible log, screen-share exposure).
+- **Quarterly:** treat like any long-lived credential — rotate every 90 days as hygiene.
+- **After a Railway env-var dump operation** that produced a transcript with the secret value.
 
-```
-python -c "import secrets; print(secrets.token_urlsafe(32))"
-```
+### Procedure (5-10 minutes end-to-end)
 
-Copy the output. This is 256 bits of entropy URL-safe-base64-encoded.
+1. Open the GitHub OAuth App settings:
+   `https://github.com/settings/developers` → OAuth Apps → **Pandora's Box MCP** (or whatever you named it).
 
-**Do not paste it into chat with Claude. Do not commit it. Do not log it.** The token belongs in two places: Railway env vars, and your password manager.
+2. Click **Generate a new client secret**.
 
-### 2. Update the Railway env var
+3. Copy the new secret. GitHub shows it once — paste into your password manager immediately.
 
-1. Open the Railway project: `https://railway.app/project/<project-id>`
-2. Open the **pandoras-box-production** service.
-3. **Variables** tab → find `MCP_BEARER_TOKEN`.
-4. Click the value, paste the new token, save.
-5. Railway redeploys automatically. Wait for the deploy to go green (~1-2 minutes).
+4. Open Railway → `pandoras-box-production` service → Variables. Find `GITHUB_OAUTH_CLIENT_SECRET`. Replace the value with the new secret. Save.
 
-### 3. Verify the old token is rejected
+5. Railway redeploys automatically (~1-2 minutes). Wait for the deploy to go green.
 
-From any terminal:
+6. In GitHub OAuth App settings, **delete the old client secret** (it's still listed until you explicitly remove it).
 
-```
-curl -X POST https://pandoras-box-production.up.railway.app/mcp/v1/tools/mcp_ping \
-  -H "Authorization: Bearer OLD_TOKEN_HERE" \
-  -H "Content-Type: application/json" \
-  -d '{}' -v
-```
+7. Existing Claude.ai sessions: any user with an OAuth access token already issued will continue to work until their token expires or they revoke at GitHub. The new client secret only matters for NEW OAuth handshakes. To force re-auth on a specific session, revoke at GitHub (procedure below).
 
-Expected: HTTP 401. If you get HTTP 200, Railway hasn't picked up the new env var yet — wait another minute and retry.
+8. Verify the new secret works: open a fresh Claude.ai chat. If your existing connector still works, the session was using a token issued BEFORE the rotation — that's expected. To test that NEW handshakes work, Settings → Connectors → Remove the connector → Re-add. The fresh OAuth flow exercises the new secret.
 
-### 4. Verify the new token works
+---
 
-Same curl with the new token:
+## Revoking active sessions (kill all OAuth tokens immediately)
 
-```
-curl -X POST https://pandoras-box-production.up.railway.app/mcp/v1/tools/mcp_ping \
-  -H "Authorization: Bearer NEW_TOKEN_HERE" \
-  -H "Content-Type: application/json" \
-  -d '{}'
-```
+1. `https://github.com/settings/applications`
+2. Find **Pandora's Box MCP** under "Authorized OAuth Apps".
+3. Click **Revoke**.
 
-Expected: HTTP 200 with envelope `{"status": "ok", "data": {...}, "schema_version": "v1.0", ...}`.
+All access tokens GitHub has issued for the app are invalidated immediately. The next MCP call from any active Claude.ai session will fail with 401 and the connector will prompt for re-auth.
 
-### 5. Update Claude.ai
+This is the heavy-handed option — use it if you suspect a specific GitHub session token leaked but don't want to rotate the App secret yet.
 
-1. Claude.ai → Settings → Connectors → **Pandora's Box Hub** (or whatever you named it) → Edit.
-2. Paste the new token in the Bearer field.
-3. Save.
+---
 
-### 6. Smoke-test the committee
+## Adjusting the allowlist (`MCP_ALLOWED_GITHUB_USERS`)
 
-In a fresh Claude.ai chat (Pandora's Box project):
+To add or remove allowed GitHub users:
 
-> Run TORO on SPY.
-
-TORO's first action is `mcp_ping`. If it returns "MCP: connected", the rotation is complete and the committee is reading the new token correctly.
-
-### 7. Store the new token
-
-Drop the new token into your password manager under the entry for the Pandora's Box Railway env var. Optionally annotate with the rotation date.
+1. Railway → Variables → `MCP_ALLOWED_GITHUB_USERS`.
+2. Update to comma-separated list (e.g., `303webhouse,trusted-other-user`).
+3. Save. Railway redeploys (~1-2 minutes).
+4. New allowlist takes effect on the next token-verification cycle. Cached verifications stay valid for `cache_ttl_seconds` (5 minutes) — so a user just removed from the list keeps working for up to 5 minutes. To kill immediately, also revoke at GitHub.
 
 ---
 
 ## What rotation does NOT cover
 
-- **Audit log gap:** Rotating the token does NOT invalidate audit log entries written under the old token. The audit log keeps a SHA-256 truncated hash of the token, not the token itself, so historical logs remain analyzable but you'll see a hash change on the cutover boundary. That's expected.
-- **Active connections:** Claude.ai's connector caches the token in-app. There's no signaling mechanism — until you update the connector (step 5), Claude will keep sending the old (now invalid) token and getting 401s. You'll see "MCP: unreachable" in TORO/URSA output as the signal.
-- **Multiple connectors:** if you've set up the MCP in multiple Claude.ai workspaces or installs, update each independently. There's no fan-out.
+- **Audit log gap:** rotation does NOT invalidate audit log entries. The audit log keeps a SHA-256 truncated hash of whatever token was in the Authorization header on each request. After rotation, new requests have different token hashes — historical hashes from before rotation can't be cross-referenced to current sessions.
+- **GitHub-side leak of the access token itself:** the OAuth Client Secret is OUR end of the trust chain. If a user's per-session GitHub access token leaks (e.g., from a compromised browser session), revoke at GitHub.
+
+---
+
+## Cleanup: removing the legacy `MCP_BEARER_TOKEN` env var
+
+After v3 is in production and confirmed working, remove the unused env var to reduce attack surface:
+
+1. Railway → Variables → find `MCP_BEARER_TOKEN`.
+2. Confirm no code path still reads it: `grep -r MCP_BEARER_TOKEN backend/` should return zero matches in active code. (`docs/` may still mention it historically — that's fine.)
+3. Delete the variable.
+
+No redeploy or downtime needed; nothing references it.
 
 ---
 
 ## v2 plans that affect this procedure
 
-- **Account-ID anonymization:** v2 will introduce per-account scoped tokens. Rotating the master token will not be sufficient — each per-account token will need its own rotation. This procedure will be expanded then.
-- **Token expiration with grace window:** v2 may issue tokens with explicit expiration timestamps, allowing scheduled rotation without the rejection cliff.
+- **Per-account scoped tokens:** v2 may issue tokens with finer scope (e.g., read-only-positions vs. read-only-balances) so a leak doesn't expose the whole book.
+- **Token TTL tuning:** currently relying on GitHub's default token lifetime (effectively indefinite, manually revocable). v2 may issue our own short-lived JWTs derived from the GitHub auth.
 
-Until those land, this single-token rotation is the only auth control. Treat it accordingly.
+Until those land, this OAuth rotation is the auth control. Treat the GitHub OAuth App credentials accordingly.

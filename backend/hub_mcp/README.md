@@ -45,21 +45,39 @@ Every tool returns:
 
 Direct dict construction is disallowed — use `envelope.make_response()`.
 
-## Authentication
+## Authentication (v3+: GitHub OAuth)
 
-- Single bearer token in `Authorization: Bearer <token>` header.
-- Verified against `MCP_BEARER_TOKEN` env var with `secrets.compare_digest`
-  (constant-time).
-- 401 on missing or mismatched token; 500 if env var is unset.
+FastMCP's `OAuthProxy` with GitHub as the upstream IdP. The protocol-layer
+auth is fully delegated to FastMCP; our `AllowlistedGitHubTokenVerifier`
+(`hub_mcp/auth.py`) subclasses the default `GitHubTokenVerifier` to also
+enforce a username allowlist after GitHub returns user info.
+
+- Required env vars: `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET`,
+  `MCP_ALLOWED_GITHUB_USERS` (comma-separated GitHub usernames).
+- Optional: `MCP_PUBLIC_BASE_URL` (defaults to the production Railway URL).
+- Scopes requested from GitHub: `read:user` only.
+- GitHub OAuth App callback URL: `<base>/auth/callback`
+  (= `https://pandoras-box-production.up.railway.app/mcp/v1/auth/callback`).
+- Token cache TTL: 5 minutes (so a user removed from the allowlist keeps
+  working for up to 5 minutes; revoke at GitHub to kill immediately).
+
+If any required env var is unset, `build_oauth_provider()` returns None and
+the FastMCP instance starts in unauthenticated mode — only acceptable for
+local pytest runs. In production, missing env vars are logged as a critical
+error and the server effectively becomes open; deploy with the env vars set.
+
+The pre-v3 `MCP_BEARER_TOKEN` env var is no longer read by any live code
+path. Remove it from Railway as cleanup after v3 has been stable for ~24h.
 
 ## Rate Limits
 
 - **60 requests/minute** per token (rolling 60s).
 - **5,000 requests/day** per token (rolling 24h).
+- Keying: the Authorization header value (FastMCP-issued OAuth access token).
+  Anonymous requests (OAuth metadata, callback) key off caller IP instead.
 - `mcp_ping` is exempt — Olympus calls it once per pass, exhausting the rate
   limit on health checks is wrong.
-- Rate-limit-exceeded returns the universal envelope with
-  `status="unavailable"`, not a bare HTTP 429.
+- Rate-limit-exceeded returns HTTP 429 with a JSON body describing the limit.
 
 ## Audit Logging
 
@@ -69,18 +87,35 @@ latency_ms, caller_ip, token_hash (sha256 trunc 8)`.
 
 Full tokens are NEVER logged.
 
-## v1 Risk Profile (AEGIS-mandated disclosure)
+## v1 Risk Profile (updated 2026-05-18 — OAuth migration)
 
-The v1 hub MCP server uses a single bearer token for authentication. The
-token grants full read access to: bias composite, options flow, sector
-strength, catalyst alerts, squeeze scores, all positions across all four
-accounts (Robinhood, Fidelity Roth, 401k BrokerageLink, Breakout Prop),
-and account balances. A token leak would expose Nick's full trading book
-to the attacker. **The leak does NOT grant write access — Olympus reads,
-Olympus does NOT trade.** Mitigation: rotate the token immediately if a
-leak is suspected per `docs/operations/mcp-token-rotation.md`. v2 plans
-introduce account-ID anonymization via a separate lookup tool to reduce
-the blast radius of a single-token leak.
+The hub MCP server uses GitHub OAuth via FastMCP's `OAuthProxy`. Access is
+restricted to authenticated GitHub users on the `MCP_ALLOWED_GITHUB_USERS`
+allowlist (currently `303webhouse`). Tokens are issued by FastMCP per
+session and verified per request (with a 5-minute cache to avoid hammering
+GitHub's API). Revocation is one click at GitHub.
+
+This is materially more secure than the previous bearer-token design:
+
+- No long-lived secret floating in chat transcripts or env-var dumps
+- Token leak does not grant indefinite access — revoke at GitHub, all
+  sessions die at next verification cycle (≤5 min cache TTL)
+- Per-session token isolation
+- GitHub-side audit log of authentication events
+- Allowlist enforcement means even a valid GitHub user from outside the
+  allowlist cannot access the tools
+
+The remaining risk surface: if Nick's GitHub account (`303webhouse`) is
+compromised AND the attacker has the MCP URL, they can authenticate and
+reach the trading book. **The leak does NOT grant write access — Olympus
+reads, Olympus does NOT trade.** Mitigations:
+- GitHub two-factor required on the `303webhouse` account
+- Consider hardware key (YubiKey or Passkey) for the GitHub account
+- Rotate the OAuth Client Secret if any env-var-dump command produced a
+  transcript containing it (procedure: `docs/operations/mcp-token-rotation.md`)
+
+v2 plans (separate brief): IP allowlist restricting to known Claude.ai
+egress IPs (additional defense-in-depth); per-account scoped tokens.
 
 ## Tool List (v1)
 
