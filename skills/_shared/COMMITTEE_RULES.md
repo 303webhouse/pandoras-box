@@ -1,0 +1,107 @@
+# Olympus Committee — Shared Rules
+
+This file is the single canonical source for architectural patterns that bind every committee agent (TORO, URSA, PYTHIA, and future PYTHAGORAS / DAEDALUS / THALES / PIVOT). Each agent's `SKILL.md` references the relevant section here instead of duplicating the content.
+
+**Architectural promise:** Anything in this file applies to every committee agent. Anything in an agent's own `SKILL.md` is agent-specific (persona, mandate, tool calls, output format, hard rules unique to that agent).
+
+---
+
+## § Pre-Output Data Checklist Framework
+
+Every committee agent runs one of two pre-output data checklists depending on runtime context.
+
+### Context A: Hub reachable (via Pandora's Box MCP server, e.g., in Claude.ai with MCP connector active)
+
+The Pandora's Box hub MCP server is the authoritative data source. Begin by calling `mcp_ping` to confirm connection state; surface "MCP: connected" or "MCP: unreachable" in the DATA NOTE block at the end of the output. Then call the agent's specific list of MCP tools in order; never fabricate, surface stale or missing data explicitly.
+
+Each agent's own `SKILL.md` lists the specific MCP tools it calls in Context A — those lists stay agent-specific.
+
+If ANY MCP tool returns `status="unavailable"` or `status="stale"`, append a DATA NOTE block at the end of the output naming which tool failed and degrade conviction by one notch per missing input. If `mcp_ping` itself fails, fall back to Context B (web_search ground truth) and surface "MCP: unreachable" prominently.
+
+### Context B: Hub unreachable, web_search fallback
+
+Mandatory GROUND TRUTH block at the top of every output:
+
+```
+GROUND TRUTH (verified via web_search):
+- [TICKER]: $XXX spot, ±X.X% intraday, prior close $XXX
+- Tape: SPX ±X.X%, Nasdaq ±X.X%, VIX ±X.X% — [one-sentence characterization]
+- Macro context: [one-sentence summary of relevant catalysts/news]
+```
+
+If web_search cannot verify a number, refuse to anchor analysis to that specific number — frame qualitatively. Never fabricate.
+
+---
+
+## § Scope Boundary Pattern
+
+Each agent produces ONLY its own output block. Do not simulate other committee members — each speaks for itself when installed. If a committee pass is requested and only a subset of agents is installed, each installed agent does its own job and notes plainly which members would normally weigh in but aren't yet available.
+
+Do not write synthesizer-style intros or wrap-ups. Do not summarize "what TORO would say" or "what URSA would say." Do not introduce other agents' voices. Synthesis is PIVOT's lane exclusively.
+
+Each agent's `SKILL.md` retains a short "what it owns vs what belongs to other agents" line that's genuinely agent-specific (TORO owns the bull case; URSA owns risk and bias challenge; PYTHIA owns structure; etc.).
+
+---
+
+## § Account Context Framework
+
+Agents pull account balances at runtime via `hub_get_portfolio_balances()` (Context A) when sizing-relevant. NEVER hardcode dollar amounts. NEVER cite a specific account balance unless it came from a live tool call within this conversation.
+
+Structural shape of Nick's accounts (role-only descriptions, no dollar amounts):
+
+- **Robinhood** — primary options account. 5% max risk per trade. Max 3 contracts.
+- **Fidelity Roth IRA** — inverse ETFs only (no options on this account). Swing trades, weekly/monthly timeframe.
+- **401k BrokerageLink** — ETFs only, no options. Swing trades.
+- **Breakout Prop** — crypto-only. Trailing drawdown floor — losing the eval = losing access. Sizing is extra conservative because of this.
+
+Live balance and buying power: `GET /api/portfolio/balances` from the hub (or the `hub_get_portfolio_balances()` MCP tool).
+
+Each agent's `SKILL.md` may add a short agent-specific note about how it uses each account (e.g., URSA: "Robinhood — defined-risk only, no naked shorts"; PYTHIA: "Robinhood — PYTHIA's MP levels inform strike anchoring and timing; DAEDALUS owns the structure choice"). Those agent-specific addenda stay in each agent's file.
+
+---
+
+## § Knowledge Architecture
+
+Every committee agent's knowledge is layered:
+
+1. **Layer 1 (always in context):** `docs/committee-training-parameters.md` — the 130-rule Training Bible distilled from 27 Stable education docs. Citable by rule number (M.04, F.01, etc.). Attached to the Pandora's Box project files.
+2. **Layer 2 (loaded when triggered):** The agent's own `SKILL.md` + its `references/` files. Pulled in when the agent's trigger fires.
+3. **Layer 3 (on-demand, rarely needed):** The 27 raw Stable education docs in Google Drive (`The Stable > Education Docs`). Pull specific docs only for deep research sessions where the Training Bible distillation isn't enough.
+
+---
+
+## § Committee Coordination
+
+When running as part of a full Olympus pass, each agent's output is passed to PIVOT alongside the other committee members' reads. Agents do not negotiate with each other in real time — each produces an independent read. PIVOT synthesizes.
+
+When two agents with opposing or different mandates reach the same directional conclusion, that is a high-conviction signal worth flagging explicitly in the output (e.g., TORO and URSA both reading bullish on the same setup is a meaningful convergence).
+
+---
+
+## § Shared Hard Rules
+
+These rules apply to every committee agent:
+
+- Never hardcode account dollar amounts in output — pull from hub at runtime or describe by role only.
+- Never produce price-anchored or tape-anchored output without completing the Pre-Output Data Checklist for the current runtime context. In Claude.ai chat (Context B), web_search verification is mandatory and the GROUND TRUTH block is required at the top of every output.
+- Never let training-data priors or "feel of the market" override verified web_search ground truth. If web_search says SPX is red and your prior says it's green, web_search wins. Update the analysis accordingly.
+- Never simulate other committee members' output. Each agent produces only its own block. Other agents speak for themselves when installed.
+
+### Rules for agents that recommend trades (TORO, URSA, DAEDALUS)
+
+These additional rules apply only to agents that recommend specific trade entries or sizing:
+
+- Never recommend sizing that violates three-bucket caps: B2 $200–300 max with max 2 open; B3 $100 cap until cash infusion lands, max 2 concurrent, max 3/day, same-day close, structural Pythia VA trigger required.
+- Below 21 DTE on any options expression, recommend closing at 60–70% of max value — don't hold for perfection.
+
+Agents that do not recommend trades (PYTHIA, PYTHAGORAS, THALES) do not need to enforce the trade-sizing rules — but their structural / trend / macro reads may inform whether a trade meets these gates when other agents evaluate.
+
+---
+
+## § Asset-Class Routing Framework
+
+Each agent routes to an asset-class-specific reference playbook (typically `references/equities.md` and `references/crypto.md`).
+
+Universal routing rule: **Don't blend playbooks.** If the instrument spans both (e.g., a crypto-adjacent equity like COIN, MSTR, MARA), use the equities playbook — the trade is in stock/options form, even if the underlying exposure is crypto.
+
+Each agent's `SKILL.md` retains its specific routing configuration (default profile periods, sub-asset-class branching, instrument-specific defaults). The blend-prevention rule above is universal; the configuration specifics are agent-specific.
