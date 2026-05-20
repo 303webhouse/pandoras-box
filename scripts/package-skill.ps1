@@ -12,14 +12,19 @@
 #
 # Structure (confirmed against Claude.ai upload validator): the ZIP must
 # contain a TOP-LEVEL FOLDER named after the skill, with SKILL.md inside it.
+# Shared committee rules (skills/_shared/) are nested INSIDE each agent's
+# top-level folder so the archive stays single-rooted (validator-safe) while
+# every agent gets its own copy of the shared file at a stable relative path:
 #   toro.skill -> toro/SKILL.md
 #                 toro/references/equities.md
 #                 toro/references/crypto.md
+#                 toro/_shared/COMMITTEE_RULES.md
+# Agent SKILL.md files reference the shared file as `_shared/COMMITTEE_RULES.md`.
 # A flat layout (SKILL.md at the ZIP root, no wrapping folder) is rejected.
 #
 # Usage:
-#   .\scripts\package-skill.ps1 toro          # Packages skills/toro/ -> dist/skills/toro.skill
-#   .\scripts\package-skill.ps1 all           # Packages every subfolder in skills/
+#   .\scripts\package-skill.ps1 toro          # Packages skills/toro/ + skills/_shared/ -> dist/skills/toro.skill
+#   .\scripts\package-skill.ps1 all           # Packages every non-underscore subfolder in skills/
 
 param(
     [Parameter(Mandatory=$true)]
@@ -92,6 +97,30 @@ function Package-Skill {
                 $Stream.Write($Bytes, 0, $Bytes.Length)
             } finally {
                 $Stream.Dispose()
+            }
+        }
+
+        # Nest skills/_shared/ contents inside the agent's folder at
+        # <agent>/_shared/<file>. Keeps the archive single-rooted (validator-safe)
+        # while giving every agent its own copy of shared committee rules.
+        $SharedDir = Join-Path $SkillsDir "_shared"
+        if (Test-Path $SharedDir -PathType Container) {
+            $SharedFiles = Get-ChildItem -Path $SharedDir -Recurse -File
+            foreach ($SharedFile in $SharedFiles) {
+                $SharedRelative = $SharedFile.FullName.Substring($SharedDir.Length).TrimStart('\','/').Replace('\','/')
+                $EntryName = "$SkillName/_shared/$SharedRelative"
+
+                $Entry = $Zip.CreateEntry(
+                    $EntryName,
+                    [System.IO.Compression.CompressionLevel]::Optimal
+                )
+                $Stream = $Entry.Open()
+                try {
+                    $Bytes = [System.IO.File]::ReadAllBytes($SharedFile.FullName)
+                    $Stream.Write($Bytes, 0, $Bytes.Length)
+                } finally {
+                    $Stream.Dispose()
+                }
             }
         }
     } finally {
