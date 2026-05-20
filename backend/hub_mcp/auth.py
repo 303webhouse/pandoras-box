@@ -32,15 +32,14 @@ GITHUB_CLIENT_ID_ENV = "GITHUB_OAUTH_CLIENT_ID"
 GITHUB_CLIENT_SECRET_ENV = "GITHUB_OAUTH_CLIENT_SECRET"
 ALLOWED_USERS_ENV = "MCP_ALLOWED_GITHUB_USERS"
 
-# Public base URL of the MCP server. MUST include the /mcp/v1 mount prefix
-# AND a trailing slash. The trailing slash is critical: without it, FastMCP
-# advertises `issuer: ".../mcp/v1"` (no slash), Claude.ai's connector uses
-# the issuer as the MCP endpoint URL and POSTs there, hits FastAPI's
-# mount-redirect (307 -> ".../mcp/v1/"), and aborts because most clients
-# don't follow 307 redirects on POST. With the trailing slash, FastMCP
-# advertises `issuer: ".../mcp/v1/"` directly and the 307 hop is avoided.
+# Public base URL of the MCP server. Must include the /mcp/v1 mount prefix
+# so OAuthProxy advertises the correct authorize / token / callback URLs.
+# (No trailing slash. The 307-redirect-on-POST issue that affected Claude.ai
+# is fixed at the parent-app level via FastAPI redirect_slashes=False in
+# backend/main.py — both `/mcp/v1` and `/mcp/v1/` reach the FastMCP app
+# without a redirect hop.)
 PUBLIC_BASE_URL_ENV = "MCP_PUBLIC_BASE_URL"
-DEFAULT_PUBLIC_BASE_URL = "https://pandoras-box-production.up.railway.app/mcp/v1/"
+DEFAULT_PUBLIC_BASE_URL = "https://pandoras-box-production.up.railway.app/mcp/v1"
 
 
 def _parse_allowlist(raw: Optional[str]) -> frozenset[str]:

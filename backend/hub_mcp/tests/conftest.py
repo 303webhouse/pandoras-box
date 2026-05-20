@@ -25,7 +25,7 @@ if str(_BACKEND) not in sys.path:
 os.environ.setdefault("GITHUB_OAUTH_CLIENT_ID", "dummy-id-for-tests")
 os.environ.setdefault("GITHUB_OAUTH_CLIENT_SECRET", "dummy-secret-for-tests")
 os.environ.setdefault("MCP_ALLOWED_GITHUB_USERS", "test-user")
-os.environ.setdefault("MCP_PUBLIC_BASE_URL", "http://localhost/mcp/v1/")
+os.environ.setdefault("MCP_PUBLIC_BASE_URL", "http://localhost/mcp/v1")
 
 
 @pytest.fixture(autouse=True)
