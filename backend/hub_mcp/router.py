@@ -28,6 +28,8 @@ import json
 import logging
 from typing import Optional
 
+from starlette.middleware.cors import CORSMiddleware
+
 from .audit import CallTimer, log_call
 from .rate_limit import EXEMPT_TOOLS, limiter
 from .server import mcp
@@ -231,13 +233,38 @@ fastmcp_app = mcp.http_app(path="/", transport="http", stateless_http=True)
 def build_mcp_asgi_app():
     """Wrap the FastMCP app with our middleware chain.
 
-    Outermost → innermost: RateLimit → Audit → FastMCP.
+    Outermost → innermost: CORS → RateLimit → Audit → FastMCP.
+
+    CORS is the OUTERMOST layer so OPTIONS preflight requests get answered
+    immediately by CORSMiddleware (200 OK with the right Access-Control-*
+    headers) — they never reach FastMCP, which would return 405 for OPTIONS
+    on the protocol root and break Claude.ai's browser-mediated handshake.
 
     Auth is owned by FastMCP's OAuthProxy (configured in hub_mcp/server.py).
-    Our middleware only adds rate-limiting and audit-logging.
+    Our middleware only adds CORS, rate-limiting, and audit-logging.
     """
     app = AuditMiddleware(fastmcp_app)
     app = RateLimitMiddleware(app)
+    # Anthropic / Claude.ai origins. allow_origin_regex catches anthropic.com
+    # subdomains (api.anthropic.com, console.anthropic.com, etc.) without
+    # listing each one. allow_credentials=False because we're bearer-auth
+    # only — no cookies.
+    app = CORSMiddleware(
+        app,
+        allow_origins=["https://claude.ai", "https://www.claude.ai"],
+        allow_origin_regex=r"https://([a-z0-9-]+\.)*anthropic\.com",
+        allow_methods=["GET", "POST", "OPTIONS", "DELETE"],
+        allow_headers=[
+            "Authorization",
+            "Content-Type",
+            "MCP-Protocol-Version",
+            "MCP-Session-Id",
+            "Last-Event-ID",
+        ],
+        expose_headers=["MCP-Session-Id"],
+        allow_credentials=False,
+        max_age=600,
+    )
     return app
 
 
