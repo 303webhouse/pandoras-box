@@ -1037,9 +1037,104 @@ app.include_router(signals_router, prefix="/api", tags=["signals"])
 # The FastMCP lifespan is chained into the parent's lifespan above; the
 # session-manager task group needs to be live before any request fires.
 try:
-    from hub_mcp.router import mcp_app
+    from hub_mcp.router import mcp_app, fastmcp_app as _fastmcp_inner
     app.mount("/mcp/v1", mcp_app)
     logger.info("✅ MCP v1 server mounted at /mcp/v1")
+
+    # OAuth discovery + DCR proxies at the DOMAIN ROOT. Claude.ai's MCP
+    # connector and RFC 8414 expect these well-known endpoints at the
+    # host root, but FastMCP serves them under its mount prefix (the
+    # /mcp/v1/.well-known/* path). These handlers forward the request to
+    # the unwrapped FastMCP app via ASGI scope rewriting so the same
+    # response bytes that the inner app would produce are surfaced at root.
+    from fastapi import Request
+    from fastapi.responses import Response as FastResponse
+
+    async def _forward_to_fastmcp(request: Request, target_path: str) -> FastResponse:
+        """Forward an HTTP request to fastmcp_app at the given path.
+
+        Bypasses the middleware chain in mcp_app — these discovery / DCR
+        endpoints are unauthenticated by design (clients hit them before
+        they have any credentials).
+        """
+        # Read the body up front so the inner app's receive() callable can
+        # replay it as a single chunk.
+        body = await request.body()
+
+        scope = dict(request.scope)
+        scope["path"] = target_path
+        scope["raw_path"] = target_path.encode("ascii")
+        scope["root_path"] = ""
+
+        sent = {"v": False}
+
+        async def receive():
+            if not sent["v"]:
+                sent["v"] = True
+                return {"type": "http.request", "body": body, "more_body": False}
+            # Block forever — inner app should not call receive again after
+            # consuming the body for a non-streaming request.
+            import asyncio as _asyncio
+
+            await _asyncio.Event().wait()
+            return {"type": "http.disconnect"}
+
+        status_holder = {"code": 0}
+        headers_holder: list = []
+        body_buf = bytearray()
+
+        async def send(message):
+            t = message.get("type")
+            if t == "http.response.start":
+                status_holder["code"] = message["status"]
+                headers_holder[:] = message.get("headers", [])
+            elif t == "http.response.body":
+                body_buf.extend(message.get("body", b""))
+
+        await _fastmcp_inner(scope, receive, send)
+
+        # Reconstruct the FastAPI response. Skip the content-length header
+        # — Starlette's Response will recompute it.
+        out_headers: dict[str, str] = {}
+        for k, v in headers_holder:
+            name = k.decode("latin-1")
+            if name.lower() == "content-length":
+                continue
+            out_headers[name] = v.decode("latin-1")
+
+        return FastResponse(
+            content=bytes(body_buf),
+            status_code=status_holder["code"] or 500,
+            headers=out_headers,
+        )
+
+    @app.get("/.well-known/oauth-authorization-server", include_in_schema=False)
+    async def _oauth_authz_metadata_root(request: Request):
+        return await _forward_to_fastmcp(
+            request, "/.well-known/oauth-authorization-server"
+        )
+
+    @app.get("/.well-known/oauth-authorization-server/mcp/v1", include_in_schema=False)
+    async def _oauth_authz_metadata_rfc8414(request: Request):
+        # RFC 8414 path-suffix form (issuer with path).
+        return await _forward_to_fastmcp(
+            request, "/.well-known/oauth-authorization-server"
+        )
+
+    @app.get("/.well-known/oauth-protected-resource", include_in_schema=False)
+    @app.get("/.well-known/oauth-protected-resource/mcp/v1", include_in_schema=False)
+    async def _oauth_protected_resource_root(request: Request):
+        return await _forward_to_fastmcp(
+            request, "/.well-known/oauth-protected-resource/mcp/v1/"
+        )
+
+    @app.post("/register", include_in_schema=False)
+    async def _dcr_register_root(request: Request):
+        return await _forward_to_fastmcp(request, "/register")
+
+    logger.info(
+        "✅ MCP OAuth discovery + DCR exposed at domain root for Claude.ai compatibility"
+    )
 except Exception as exc:
     logger.error(f"❌ MCP v1 server failed to mount: {exc}", exc_info=True)
 
