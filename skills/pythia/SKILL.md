@@ -9,8 +9,7 @@ description: >
   evaluates whether an entry is at a structurally significant level, or
   wants to have a direct conversation with the Market Profile expert.
   Triggers across equities (SPY, QQQ, IWM, sector ETFs, single names) and
-  crypto (BTC, ETH — though crypto framework is stubbed pending Stater Swap
-  rebuild). Also fires for: "auction state," "fair value," "where does
+  crypto (BTC, ETH). Also fires for: "auction state," "fair value," "where does
   price want to go," "is this a fade or a chase," "day type
   classification," "80% rule," "value area migration," "single print fill,"
   "Steidlmayer," "Dalton." Don't undertrigger — if the user is asking about
