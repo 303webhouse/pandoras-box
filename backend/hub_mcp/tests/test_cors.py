@@ -17,7 +17,7 @@ def _oauth_env():
     os.environ.setdefault("GITHUB_OAUTH_CLIENT_ID", "dummy-id")
     os.environ.setdefault("GITHUB_OAUTH_CLIENT_SECRET", "dummy-secret")
     os.environ.setdefault("MCP_ALLOWED_GITHUB_USERS", "test-user")
-    os.environ.setdefault("MCP_PUBLIC_BASE_URL", "http://localhost/mcp/v1")
+    os.environ.setdefault("MCP_PUBLIC_BASE_URL", "http://localhost/mcp/v1/")
 
 
 @pytest.mark.asyncio
@@ -67,6 +67,28 @@ async def test_cors_origin_not_in_allowlist_rejected():
         "Access-Control-Allow-Origin"
     )
     assert aco != "https://evil.example.com"
+
+
+@pytest.mark.asyncio
+async def test_oauth_metadata_issuer_has_trailing_slash():
+    """Regression guard for the Claude.ai 502 failure mode: the OAuth metadata
+    `issuer` URL MUST advertise the MCP endpoint with a trailing slash. Without
+    it, Claude.ai's connector POSTs to `/mcp/v1` and gets a 307 redirect from
+    FastAPI's mount, which it does not follow on POST. With the trailing
+    slash, the POST lands directly on the FastMCP endpoint."""
+    from hub_mcp.router import mcp_app, mcp_lifespan
+
+    async with mcp_lifespan(None):
+        transport = httpx.ASGITransport(app=mcp_app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://localhost") as c:
+            r = await c.get("/.well-known/oauth-authorization-server")
+    assert r.status_code == 200
+    meta = r.json()
+    issuer = meta.get("issuer", "")
+    assert issuer.endswith("/"), (
+        f"OAuth issuer must end with '/' to avoid the FastAPI mount 307 "
+        f"redirect that breaks Claude.ai connector. Got: {issuer!r}"
+    )
 
 
 @pytest.mark.asyncio
