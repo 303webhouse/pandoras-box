@@ -646,7 +646,14 @@ app = FastAPI(
     title="Pandora's Box API",
     description="Real-time trading signal processor",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
+    # redirect_slashes=False so requests to `/mcp/v1` (no trailing slash) reach
+    # the mounted MCP sub-app directly instead of getting 307-redirected to
+    # `/mcp/v1/`. Most MCP clients (including Claude.ai's connector) do not
+    # follow 307s on POST and surface the redirect as a generic "unreachable"
+    # error. Other routes in this app declare their paths explicitly (with or
+    # without trailing slash) so disabling auto-redirect is safe.
+    redirect_slashes=False,
 )
 
 # CORS — restrict to known frontend origins
