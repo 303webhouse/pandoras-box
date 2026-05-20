@@ -227,7 +227,13 @@ class AuditMiddleware:
 # parent ASGI app. Construct the raw FastMCP starlette app here and
 # expose its `.lifespan` for main.py to chain into the parent FastAPI
 # lifespan. The middleware-wrapped variant is what we mount.
-fastmcp_app = mcp.http_app(path="/", transport="http", stateless_http=True)
+# stateless_http=False enables GET on the MCP endpoint (for server-initiated
+# SSE streams per the Streamable HTTP spec). With stateless_http=True FastMCP
+# rejects GET with 405 — Claude.ai's connector treats that as "unreachable"
+# and aborts the handshake. The session manager's task group lifespan is
+# chained into the parent FastAPI app via mcp_lifespan in backend/main.py,
+# so stateful mode is safe.
+fastmcp_app = mcp.http_app(path="/", transport="http", stateless_http=False)
 
 
 def build_mcp_asgi_app():
