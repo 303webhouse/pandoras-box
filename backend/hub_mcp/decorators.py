@@ -12,7 +12,8 @@ from typing import Callable
 
 from .server import mcp
 
-# Hard-coded whitelist. Adding a 10th tool requires editing this list.
+# Hard-coded whitelist. Adding a new tool requires editing this list AND
+# the tools/__init__.py side-effect import list.
 REGISTERED_TOOL_NAMES = frozenset(
     {
         "hub_get_bias_composite",
@@ -22,6 +23,7 @@ REGISTERED_TOOL_NAMES = frozenset(
         "hub_get_hydra_scores",
         "hub_get_positions",
         "hub_get_portfolio_balances",
+        "hub_get_quote",
         "mcp_ping",
         "mcp_describe_tools",
     }

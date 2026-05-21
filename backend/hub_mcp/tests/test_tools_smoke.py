@@ -319,10 +319,117 @@ async def test_ping_returns_ok():
     assert r["data"]["schema_version"] == "v1.0"
 
 
+# ─── hub_get_quote ───────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_quote_missing_ticker_unavailable():
+    from hub_mcp.tools.quote import hub_get_quote
+
+    r = await hub_get_quote("")
+    assert _is_valid_envelope(r)
+    assert r["status"] == "unavailable"
+
+
+@pytest.mark.asyncio
+async def test_quote_uw_error_returns_unavailable_envelope():
+    """When the read_only layer returns an 'unavailable'-shell, the tool
+    surfaces status=unavailable with the shell as data."""
+    from hub_mcp.tools.quote import hub_get_quote
+
+    shell = {
+        "ticker": "TSLA",
+        "spot": None,
+        "prior_close": None,
+        "open": None,
+        "high": None,
+        "low": None,
+        "volume": None,
+        "avg_volume_30d": None,
+        "pct_change": None,
+        "wk52_high": None,
+        "wk52_low": None,
+        "market_state": "closed",
+        "source": "UW",
+        "uw_timestamp": None,
+        "status": "unavailable",
+    }
+    with patch(
+        "hub_mcp.tools.quote.get_quote",
+        new=AsyncMock(return_value=shell),
+    ):
+        r = await hub_get_quote("TSLA")
+    assert _is_valid_envelope(r)
+    assert r["status"] == "unavailable"
+    assert r["data"]["ticker"] == "TSLA"
+
+
+@pytest.mark.asyncio
+async def test_quote_live_ok():
+    from hub_mcp.tools.quote import hub_get_quote
+
+    live = {
+        "ticker": "TSLA",
+        "spot": 414.75,
+        "prior_close": 417.26,
+        "open": 416.50,
+        "high": 418.42,
+        "low": 413.10,
+        "volume": 45290000,
+        "avg_volume_30d": 57960000.0,
+        "pct_change": -0.60,
+        "wk52_high": 498.83,
+        "wk52_low": 273.21,
+        "market_state": "open",
+        "source": "UW",
+        "uw_timestamp": "2026-05-21T20:42:00Z",
+        "status": "live",
+    }
+    with patch(
+        "hub_mcp.tools.quote.get_quote", new=AsyncMock(return_value=live)
+    ):
+        r = await hub_get_quote("TSLA")
+    assert _is_valid_envelope(r)
+    assert r["status"] == "ok"
+    assert r["data"]["spot"] == 414.75
+    assert r["data"]["uw_timestamp"] == "2026-05-21T20:42:00Z"
+    assert "TSLA" in r["summary"] and "UW" in r["summary"]
+
+
+@pytest.mark.asyncio
+async def test_quote_stale_propagates_status():
+    """UW timestamp >5 min old during market hours → status='stale'."""
+    from hub_mcp.tools.quote import hub_get_quote
+
+    stale = {
+        "ticker": "TSLA",
+        "spot": 414.75,
+        "prior_close": 417.26,
+        "open": 416.50,
+        "high": 418.42,
+        "low": 413.10,
+        "volume": 45290000,
+        "avg_volume_30d": 57960000.0,
+        "pct_change": -0.60,
+        "wk52_high": 498.83,
+        "wk52_low": 273.21,
+        "market_state": "open",
+        "source": "UW",
+        "uw_timestamp": "2026-05-21T19:30:00Z",
+        "status": "stale",
+    }
+    with patch(
+        "hub_mcp.tools.quote.get_quote", new=AsyncMock(return_value=stale)
+    ):
+        r = await hub_get_quote("TSLA")
+    assert r["status"] == "stale"
+    assert r["staleness_seconds"] is not None
+
+
 # ─── mcp_describe_tools ──────────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_describe_lists_all_nine():
+async def test_describe_lists_all_ten():
     # Importing this triggers registration of every tool.
     import hub_mcp.tools  # noqa: F401
     from hub_mcp.tools.describe import mcp_describe_tools
@@ -330,7 +437,7 @@ async def test_describe_lists_all_nine():
     r = await mcp_describe_tools()
     assert _is_valid_envelope(r)
     assert r["status"] == "ok"
-    assert r["data"]["tool_count"] == 9
+    assert r["data"]["tool_count"] == 10
     names = {t["name"] for t in r["data"]["tools"]}
     assert names == {
         "hub_get_bias_composite",
@@ -340,6 +447,7 @@ async def test_describe_lists_all_nine():
         "hub_get_hydra_scores",
         "hub_get_positions",
         "hub_get_portfolio_balances",
+        "hub_get_quote",
         "mcp_ping",
         "mcp_describe_tools",
     }

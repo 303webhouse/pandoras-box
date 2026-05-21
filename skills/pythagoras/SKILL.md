@@ -59,9 +59,10 @@ See `_shared/COMMITTEE_RULES.md § Pre-Output Data Checklist Framework` for the 
 
 After running the universal framework, PYTHAGORAS calls these MCP tools in order:
 
-1. `hub_get_bias_composite(timeframe="swing")` — directional bias to cross-reference against the chart trend read
-2. `hub_get_flow_radar(ticker=<the ticker>)` — volume / flow context to confirm or contradict the chart breakout (volume confirmation is mandatory per C.05)
-3. `hub_get_positions(ticker=<the ticker>)` — does Nick already have positions at the levels PYTHAGORAS is about to call?
+1. `hub_get_quote(ticker=<the ticker>)` — real-time spot, intraday OHLCV, prior close, and UW server timestamp. The UW timestamp from `hub_get_quote` is the authoritative anchor for all price-anchored claims in this agent's output.
+2. `hub_get_bias_composite(timeframe="swing")` — directional bias to cross-reference against the chart trend read
+3. `hub_get_flow_radar(ticker=<the ticker>)` — volume / flow context to confirm or contradict the chart breakout (volume confirmation is mandatory per C.05)
+4. `hub_get_positions(ticker=<the ticker>)` — does Nick already have positions at the levels PYTHAGORAS is about to call?
 
 PYTHAGORAS does NOT typically call `hub_get_sector_strength` (THALES), `hub_get_hermes_alerts` (THALES), `hub_get_hydra_scores` (TORO/URSA), or `hub_get_portfolio_balances` (DAEDALUS) in committee mode. In direct conversation mode PYTHAGORAS MAY call any of them if Nick asks a question that requires that context.
 

@@ -59,9 +59,10 @@ See `_shared/COMMITTEE_RULES.md § Pre-Output Data Checklist Framework` for the 
 
 After running the universal framework, PYTHIA calls these MCP tools in order:
 
-1. `hub_get_bias_composite(timeframe="swing")` — directional bias context to cross-reference against the auction state read (e.g., "bias bullish + profile balanced + price at VAH = elevated fade risk into resistance")
-2. `hub_get_flow_radar(ticker=<the ticker>)` — volume imprint / delta context at key MP levels; PYTHIA reads CVD and aggressor footprints at structural inflection points
-3. `hub_get_positions(ticker=<the ticker>)` — existing exposure on this ticker (does Nick already have positions sitting at levels PYTHIA is about to flag?)
+1. `hub_get_quote(ticker=<the ticker>)` — real-time spot, intraday OHLCV, prior close, and UW server timestamp. The UW timestamp from `hub_get_quote` is the authoritative anchor for all price-anchored claims in this agent's output.
+2. `hub_get_bias_composite(timeframe="swing")` — directional bias context to cross-reference against the auction state read (e.g., "bias bullish + profile balanced + price at VAH = elevated fade risk into resistance")
+3. `hub_get_flow_radar(ticker=<the ticker>)` — volume imprint / delta context at key MP levels; PYTHIA reads CVD and aggressor footprints at structural inflection points
+4. `hub_get_positions(ticker=<the ticker>)` — existing exposure on this ticker (does Nick already have positions sitting at levels PYTHIA is about to flag?)
 
 PYTHIA does NOT typically call `hub_get_sector_strength`, `hub_get_hermes_alerts`, `hub_get_hydra_scores`, or `hub_get_portfolio_balances` in committee mode — those belong to THALES, THALES, TORO/URSA, and DAEDALUS respectively. In direct conversation mode PYTHIA MAY call any of them if Nick asks a question that requires that context.
 
