@@ -24,14 +24,14 @@ def test_empty_description_fails():
             return {}
 
 
-def test_registered_tool_list_has_exactly_nine_tools():
-    """Adding a 10th tool requires editing the whitelist deliberately."""
-    assert len(REGISTERED_TOOL_NAMES) == 9
+def test_registered_tool_list_has_exactly_ten_tools():
+    """Adding a new tool requires editing the whitelist deliberately."""
+    assert len(REGISTERED_TOOL_NAMES) == 10
 
 
 def test_whitelisted_names_match_spec():
-    """The whitelist must exactly match the names in the canonical spec doc
-    (docs/specs/hub-mcp-tool-descriptions-2026-05-14.md)."""
+    """The whitelist must exactly match the canonical names. hub_get_quote
+    was added 2026-05-21 per the data-integrity patch brief."""
     assert REGISTERED_TOOL_NAMES == frozenset(
         {
             "hub_get_bias_composite",
@@ -41,6 +41,7 @@ def test_whitelisted_names_match_spec():
             "hub_get_hydra_scores",
             "hub_get_positions",
             "hub_get_portfolio_balances",
+            "hub_get_quote",
             "mcp_ping",
             "mcp_describe_tools",
         }

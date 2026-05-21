@@ -44,13 +44,14 @@ See `_shared/COMMITTEE_RULES.md § Pre-Output Data Checklist Framework` for the 
 
 After running the universal framework, TORO calls these MCP tools in order:
 
-1. `hub_get_bias_composite(timeframe="swing")` — directional bias context (swing timeframe for B1/B2 thesis; switch to "intraday" for B3 scalps)
-2. `hub_get_flow_radar(ticker=<the ticker>)` — options flow imprint for the specific instrument
-3. `hub_get_sector_strength()` — sector rotation context for the instrument's sector
-4. `hub_get_hermes_alerts(ticker=<the ticker>)` — active catalysts within DTE window
-5. `hub_get_hydra_scores(ticker=<the ticker>)` — squeeze setup score if the thesis touches short positioning
-6. `hub_get_positions(ticker=<the ticker>)` — existing exposure on this ticker (triggers the "add to existing position" branch if anything is open)
-7. `hub_get_portfolio_balances()` — account balances for sizing recommendations
+1. `hub_get_quote(ticker=<the ticker>)` — real-time spot, intraday OHLCV, prior close, and UW server timestamp. The UW timestamp from `hub_get_quote` is the authoritative anchor for all price-anchored claims in this agent's output.
+2. `hub_get_bias_composite(timeframe="swing")` — directional bias context (swing timeframe for B1/B2 thesis; switch to "intraday" for B3 scalps)
+3. `hub_get_flow_radar(ticker=<the ticker>)` — options flow imprint for the specific instrument
+4. `hub_get_sector_strength()` — sector rotation context for the instrument's sector
+5. `hub_get_hermes_alerts(ticker=<the ticker>)` — active catalysts within DTE window
+6. `hub_get_hydra_scores(ticker=<the ticker>)` — squeeze setup score if the thesis touches short positioning
+7. `hub_get_positions(ticker=<the ticker>)` — existing exposure on this ticker (triggers the "add to existing position" branch if anything is open)
+8. `hub_get_portfolio_balances()` — account balances for sizing recommendations
 
 ## Asset-Class Routing
 

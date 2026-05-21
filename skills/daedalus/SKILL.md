@@ -57,10 +57,11 @@ See `_shared/COMMITTEE_RULES.md § Pre-Output Data Checklist Framework` for the 
 
 After running the universal framework, DAEDALUS calls these MCP tools in order:
 
-1. `hub_get_flow_radar(ticker=<the ticker>)` — options flow imprint (**PRIMARY** for DAEDALUS — this is the dominant data source for IV regime inference, structure selection, and unusual activity context)
-2. `hub_get_hydra_scores(ticker=<the ticker>)` — squeeze scoring informs structure selection (high squeeze score = long calls or call debit spreads; failed squeeze = long puts or call credits)
-3. `hub_get_portfolio_balances()` — account balances for sizing math (**PRIMARY** for DAEDALUS — sizing math requires real balances; never hardcode)
-4. `hub_get_positions(ticker=<the ticker>)` — existing options exposure on this ticker for correlation and concentration math
+1. `hub_get_quote(ticker=<the ticker>)` — real-time spot, intraday OHLCV, prior close, and UW server timestamp. The UW timestamp from `hub_get_quote` is the authoritative anchor for all price-anchored claims in this agent's output (strike selection, entry/stop math, premium-vs-spot calculations).
+2. `hub_get_flow_radar(ticker=<the ticker>)` — options flow imprint (**PRIMARY** for DAEDALUS — this is the dominant data source for IV regime inference, structure selection, and unusual activity context)
+3. `hub_get_hydra_scores(ticker=<the ticker>)` — squeeze scoring informs structure selection (high squeeze score = long calls or call debit spreads; failed squeeze = long puts or call credits)
+4. `hub_get_portfolio_balances()` — account balances for sizing math (**PRIMARY** for DAEDALUS — sizing math requires real balances; never hardcode)
+5. `hub_get_positions(ticker=<the ticker>)` — existing options exposure on this ticker for correlation and concentration math
 
 DAEDALUS does NOT typically call `hub_get_bias_composite` (TORO/URSA), `hub_get_sector_strength` (THALES), or `hub_get_hermes_alerts` (THALES) in committee mode unless answering a direct question that requires that context.
 

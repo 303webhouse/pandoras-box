@@ -14,7 +14,11 @@ Every committee agent runs one of two pre-output data checklists depending on ru
 
 The Pandora's Box hub MCP server is the authoritative data source. Begin by calling `mcp_ping` to confirm connection state; surface "MCP: connected" or "MCP: unreachable" in the DATA NOTE block at the end of the output. Then call the agent's specific list of MCP tools in order; never fabricate, surface stale or missing data explicitly.
 
-Each agent's own `SKILL.md` lists the specific MCP tools it calls in Context A — those lists stay agent-specific.
+**Mandatory call for any price-anchored output:** `hub_get_quote(ticker)` MUST be called before any output that cites a specific spot price, intraday level, or anchors analysis to "today's" tape. The UW timestamp from the response MUST be cited in the DATA NOTE block at the end of the output. If `hub_get_quote` returns `status="unavailable"`, the agent cannot produce price-anchored analysis — degrade to qualitative framing only or wait for hub recovery. If `status="stale"`, surface the staleness in the DATA NOTE and degrade conviction by one notch.
+
+**Web search for spot price is DEPRECATED in Context A.** Agents must not call web_search for current price, today's range, or intraday levels when the hub is reachable. The hub's UW data is authoritative; web search introduces stale-data risk via page-refresh-timestamp confusion (the 2026-05-21 TSLA pass surfaced this failure mode explicitly).
+
+Each agent's own `SKILL.md` lists the specific MCP tools it calls in Context A — those lists stay agent-specific. `hub_get_quote` is the first data-tool call after `mcp_ping` in every agent's list.
 
 If ANY MCP tool returns `status="unavailable"` or `status="stale"`, append a DATA NOTE block at the end of the output naming which tool failed and degrade conviction by one notch per missing input. If `mcp_ping` itself fails, fall back to Context B (web_search ground truth) and surface "MCP: unreachable" prominently.
 
@@ -23,11 +27,18 @@ If ANY MCP tool returns `status="unavailable"` or `status="stale"`, append a DAT
 Mandatory GROUND TRUTH block at the top of every output:
 
 ```
-GROUND TRUTH (verified via web_search):
-- [TICKER]: $XXX spot, ±X.X% intraday, prior close $XXX
-- Tape: SPX ±X.X%, Nasdaq ±X.X%, VIX ±X.X% — [one-sentence characterization]
-- Macro context: [one-sentence summary of relevant catalysts/news]
+GROUND TRUTH (web_search fallback, hub unreachable):
+- [TICKER]: $XXX spot (source: [name], data date: YYYY-MM-DD HH:MM TZ)
+- Tape: SPX ±X.X%, Nasdaq ±X.X%, VIX ±X.X% (sources + dates per ticker)
+- Macro context: [one-sentence summary]
 ```
+
+**Date-attribution requirements (hard rule):**
+
+- Every price citation must include the data DATE explicitly, not the page-refresh timestamp.
+- Cross-source consistency check: if two sources show the same numbers but different date stamps, that is a red flag — the data is likely from a previously-completed session being served under current-date cache headers. Verify with at least one source that explicitly shows real-time updating.
+- If intraday data is required and no source can be verified as fresh within the last 30 minutes during market hours, frame qualitatively only — no precision levels, no "today's low" claims, no anchored entries/stops.
+- If the data date can only be verified as "previous trading session," the agent must explicitly say so in output and frame all analysis as based on the last completed session, not "today."
 
 If web_search cannot verify a number, refuse to anchor analysis to that specific number — frame qualitatively. Never fabricate.
 
@@ -86,6 +97,7 @@ These rules apply to every committee agent:
 - Never produce price-anchored or tape-anchored output without completing the Pre-Output Data Checklist for the current runtime context. In Claude.ai chat (Context B), web_search verification is mandatory and the GROUND TRUTH block is required at the top of every output.
 - Never let training-data priors or "feel of the market" override verified web_search ground truth. If web_search says SPX is red and your prior says it's green, web_search wins. Update the analysis accordingly.
 - Never simulate other committee members' output. Each agent produces only its own block. Other agents speak for themselves when installed.
+- Never cite a current spot price, intraday level, or today's range without either (a) `hub_get_quote` result with UW timestamp (Context A) or (b) a fully date-verified web source per the Context B GROUND TRUTH discipline. Web pages displaying yesterday's data under today's page-refresh timestamp are a known failure mode — date attribution on the data itself is mandatory.
 
 ### Rules for agents that recommend trades (TORO, URSA, DAEDALUS)
 

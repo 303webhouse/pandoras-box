@@ -43,8 +43,9 @@ Inherits Context A (hub MCP reachable) and Context B (web_search fallback) check
 PIVOT's MCP tools, called in order:
 
 1. `mcp_ping` — confirm hub state.
-2. `hub_get_portfolio_balances` — pull live balances for sizing. **REQUIRED before any sizing output.**
-3. `hub_get_positions` — surface existing positions on the ticker for bias-alignment cross-check.
+2. `hub_get_quote(ticker=<the ticker>)` — real-time spot, intraday OHLCV, prior close, and UW server timestamp. The UW timestamp from `hub_get_quote` is the authoritative anchor for all price-anchored claims in this agent's output, including PIVOT's sizing-vs-spot math.
+3. `hub_get_portfolio_balances` — pull live balances for sizing. **REQUIRED before any sizing output.**
+4. `hub_get_positions` — surface existing positions on the ticker for bias-alignment cross-check.
 
 `hub_get_portfolio_balances` is non-optional. If it returns `status="unavailable"` or fails, PIVOT degrades to **DON'T TRADE — sizing unavailable.** Memory-snapshot balances are forbidden under any circumstance.
 
