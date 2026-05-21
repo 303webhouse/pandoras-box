@@ -1129,8 +1129,70 @@ try:
     async def _dcr_register_root(request: Request):
         return await _forward_to_fastmcp(request, "/register")
 
+    # ─── /mcp/v1 (no trailing slash) — avoid the FastAPI mount 307 ───
+    # Claude.ai's connector uses the OAuth `issuer` URL (".../mcp/v1" without
+    # trailing slash) as the MCP endpoint and POSTs there. FastAPI's mount at
+    # /mcp/v1 normally 307-redirects to /mcp/v1/, which Claude.ai does not
+    # follow on POST. This explicit handler bypasses the redirect by
+    # forwarding the request directly to the wrapped MCP ASGI app
+    # (mcp_app — the full CORS+RateLimit+Audit chain wrapping FastMCP).
+
+    async def _forward_to_mcp_app(request: Request) -> FastResponse:
+        body = await request.body()
+
+        scope = dict(request.scope)
+        # The mounted mcp_app expects to see paths relative to its mount
+        # point, i.e. "/" for the protocol root.
+        scope["path"] = "/"
+        scope["raw_path"] = b"/"
+        scope["root_path"] = "/mcp/v1"
+
+        body_sent = {"v": False}
+
+        async def receive():
+            if not body_sent["v"]:
+                body_sent["v"] = True
+                return {"type": "http.request", "body": body, "more_body": False}
+            return {"type": "http.disconnect"}
+
+        status_holder = {"code": 0}
+        headers_holder: list = []
+        body_buf = bytearray()
+
+        async def send(message):
+            t = message.get("type")
+            if t == "http.response.start":
+                status_holder["code"] = message["status"]
+                headers_holder[:] = message.get("headers", [])
+            elif t == "http.response.body":
+                body_buf.extend(message.get("body", b""))
+
+        await mcp_app(scope, receive, send)
+
+        out_headers: dict[str, str] = {}
+        for k, v in headers_holder:
+            name = k.decode("latin-1")
+            if name.lower() == "content-length":
+                continue
+            out_headers[name] = v.decode("latin-1")
+
+        return FastResponse(
+            content=bytes(body_buf),
+            status_code=status_holder["code"] or 500,
+            headers=out_headers,
+        )
+
+    @app.api_route(
+        "/mcp/v1",
+        methods=["GET", "POST", "DELETE"],
+        include_in_schema=False,
+    )
+    async def _mcp_v1_no_slash(request: Request):
+        return await _forward_to_mcp_app(request)
+
     logger.info(
-        "✅ MCP OAuth discovery + DCR exposed at domain root for Claude.ai"
+        "✅ MCP OAuth discovery + DCR exposed at domain root for Claude.ai; "
+        "/mcp/v1 (no slash) explicit handler installed"
     )
 except Exception as exc:
     logger.error(f"❌ MCP v1 server failed to mount: {exc}", exc_info=True)
