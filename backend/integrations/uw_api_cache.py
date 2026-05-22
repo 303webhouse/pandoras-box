@@ -27,8 +27,8 @@ CACHE_TTLS = {
     "calendar": 1800,     # 30 min — was 1 hr, economic data changes intraday (F.3)
     "news": 1800,         # 30 min (F.3 / B.7)
     "short_interest": 3600,  # 1 hr
-    "ohlc": 60,           # 60s — daily bars only roll once per session; the sector refresh job overwrites well before TTL.
-    "technical_indicator": 60,  # 60s — RSI(14) ticks slowly intraday; the refresh job is the canonical updater.
+    "ohlc": 300,          # 5 min (Phase A.3 fix 2026-05-22) — daily bars don't change minute-to-minute; the prior 60s TTL forced the refresh job to re-pull every tick, contributing to UW budget overdraw.
+    "technical_indicator": 300,  # 5 min (Phase A.3 fix 2026-05-22) — RSI(14) moves slowly; 60s TTL was unnecessary minute-fresh.
 }
 
 DAILY_BUDGET = 20000     # UW Basic plan limit

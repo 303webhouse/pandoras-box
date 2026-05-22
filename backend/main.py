@@ -480,12 +480,10 @@ async def lifespan(app: FastAPI):
             await asyncio.sleep(sleep_for)
 
     async def sector_refresh_slow_loop():
-        """Refresh MO% for every sector constituent.
+        """Refresh MO% for sector constituents.
 
-        3600s (1 h) cadence regardless of market state. The 21-session
-        derivative is insensitive to intraday motion, and the slower cadence
-        preserves UW rate-limit headroom for the fast loop and other UW
-        callers.
+        3600s (1 h) cadence; the refresh function itself no-ops during
+        market-closed hours via Phase A.3's market-hours guard.
         """
         await asyncio.sleep(300)  # 5 min after startup — let fast loop's first pass land
 
@@ -498,6 +496,39 @@ async def lifespan(app: FastAPI):
                 logger.warning("[sector_refresh] slow loop error: %s", e)
             elapsed = asyncio.get_event_loop().time() - tick_started
             await asyncio.sleep(max(5, 3600 - elapsed))
+
+    # Phase A.3 (2026-05-22): single weekday run at 16:05 ET captures the
+    # official 4 PM close into the cache. The refresh_fast / refresh_slow
+    # loops above no-op during market-closed hours, so this is the only
+    # path that populates the cache once the regular session ends.
+    async def sector_refresh_close_snapshot_loop():
+        """Fire refresh_close_snapshot() once per weekday at 16:05 ET."""
+        import pytz
+        from datetime import datetime as dt_cls, timedelta as td_cls
+
+        await asyncio.sleep(60)  # startup delay — let other init settle
+
+        ny_tz = pytz.timezone("America/New_York")
+        while True:
+            try:
+                now_et = dt_cls.now(ny_tz)
+                target = now_et.replace(hour=16, minute=5, second=0, microsecond=0)
+                if now_et >= target:
+                    target = target + td_cls(days=1)
+                while target.weekday() >= 5:
+                    target = target + td_cls(days=1)
+                wait_s = max(5.0, (target - now_et).total_seconds())
+                logger.info(
+                    "[sector_refresh] close-snapshot scheduled in %.0fs (target %s ET)",
+                    wait_s, target.strftime("%Y-%m-%d %H:%M %Z"),
+                )
+                await asyncio.sleep(wait_s)
+                from jobs.sector_constituent_refresh import refresh_close_snapshot
+                await refresh_close_snapshot()
+            except Exception as e:
+                logger.warning("[sector_refresh] close-snapshot loop error: %s", e)
+                # Sleep a defensive minute before retrying scheduling math
+                await asyncio.sleep(60)
 
     expiry_task = asyncio.create_task(signal_expiry_loop())
     universe_task = asyncio.create_task(universe_cache_loop())
@@ -515,6 +546,7 @@ async def lifespan(app: FastAPI):
     wh_reversal_task = asyncio.create_task(wh_reversal_loop())
     sector_refresh_fast_task = asyncio.create_task(sector_refresh_fast_loop())
     sector_refresh_slow_task = asyncio.create_task(sector_refresh_slow_loop())
+    sector_refresh_close_snapshot_task = asyncio.create_task(sector_refresh_close_snapshot_loop())
 
     # Oracle insights: pre-compute analytics payload hourly
     async def oracle_refresh_loop():

@@ -667,14 +667,20 @@ async def get_sector_leaders(
     # canonical sector cache populated by jobs/sector_constituent_refresh. Each
     # field is surfaced to the route response as {value, ts, source} so the
     # popup can render staleness + source attribution per cell.
+    # Phase A.3 (2026-05-22): also fetch the refresh universe so each row can
+    # carry a `tracked: bool` flag. Universe is top-3-per-sector; out-of-universe
+    # tickers display "not tracked" in the popup rather than "stale".
     if not fast:
         from integrations.sector_cache import read_many as _sector_cache_read_many
+        from jobs.sector_constituent_refresh import get_tracked_universe
         envelopes = await _sector_cache_read_many(
             constituent_tickers,
             ["wk_change_pct", "mo_change_pct", "rsi_14"],
         )
+        tracked_set = await get_tracked_universe()
     else:
         envelopes = {}
+        tracked_set = set()
 
     constituents = []
     for r in rows:
@@ -725,6 +731,9 @@ async def get_sector_leaders(
             entry["week_change_pct"] = ticker_env.get("wk_change_pct")
             entry["month_change_pct"] = ticker_env.get("mo_change_pct")
             entry["rsi_14"] = ticker_env.get("rsi_14")
+            # Phase A.3 (2026-05-22): tracked = ticker is in the refresh universe.
+            # Frontend uses this to render "not tracked" vs "no data" annotations.
+            entry["tracked"] = ticker.upper() in tracked_set
 
         constituents.append(entry)
 

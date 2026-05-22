@@ -1,70 +1,98 @@
 """
-Sector Constituent Refresh — Phase A (2026-05-22)
+Sector Constituent Refresh — Phase A (2026-05-22), revised Phase A.3 (2026-05-22)
 
 Populates the canonical Redis envelope cache (`integrations/sector_cache.py`)
-with per-constituent WK%, MO%, and RSI(14) for every ticker in the
-`sector_constituents` table. The Sector Heatmap popup and the ticker profile
-popup read from this cache; the route handlers never call UW directly for
-these three fields anymore.
+with per-constituent WK%, MO%, and RSI(14) for the **top-3-per-sector** ticker
+universe. The Sector Heatmap popup and the ticker profile popup read from
+this cache; the route handlers never call UW directly for these three fields.
+
+Phase A.3 changes (2026-05-22, incident remediation):
+- Universe cut from ~220 constituents → ~33 (top-3 per sector ETF, ordered by
+  `rank_in_sector` in `sector_constituents`).
+- Refresh loops pause during market-closed hours via `_is_market_hours()`
+  reused from `backend/api/sectors.py` (no new market-hours logic invented).
+- New `refresh_close_snapshot()` runs once per weekday at 16:05 ET to capture
+  the official 4 PM close into the cache as the canonical close-state value
+  (scheduled by `sector_refresh_close_snapshot_loop` in `main.py`).
+- Audit logging extended: per-tick universe / attempted / succeeded / 429d /
+  duration_ms metrics. The 429 count is sampled from `uw_api.get_total_429s()`
+  (delta between start and end of tick).
 
 Two refresh entry points are exported, each driven by its own scheduler loop
 in `main.py`:
 
-- `refresh_fast()`  — WK% + RSI(14). Cadence: 60s during market hours, 300s
-                      off-hours. Updates the two fields that move intraday.
-- `refresh_slow()`  — MO%. Cadence: 3600s (1h) regardless of market state.
-                      The 21-session derivative does not need minute-fresh
-                      refresh and the slower cadence preserves rate-limit
-                      headroom for the fast loop.
+- `refresh_fast()`  — WK% + RSI(14). 60s cadence during market hours; the
+                      market-state guard makes off-hours invocations no-ops.
+- `refresh_slow()`  — MO%. 3600s cadence; same market-state guard applies.
+- `refresh_close_snapshot()` — all three fields, fired once at 16:05 ET on
+                      weekdays regardless of the regular-hours guard.
 
-Rate-limit envelope (UW Basic plan, 120 req/min):
-- Fast tick attempts up to 2 calls per constituent (OHLC + technical-indicator
-  RSI). The UW client's token-bucket limiter (`_consume_token` in
-  `integrations/uw_api.py`) naturally throttles the loop without explicit
-  pacing here.
-- When headroom drops below ~20% of the bucket capacity, the fast loop drops
-  the lowest-priority refresh first (MO via the slow loop will defer its
-  next tick if invoked while the fast loop is mid-cycle). RSI is preserved
-  because it is the most operationally visible gap in the popup today.
-
-Cache semantics: writes always carry the current timestamp via
-`sector_cache.write_field`. A `value=None` write is intentional — it tells
-readers the refresh ran but UW returned no usable data, which is distinct
-from "we have not attempted recently" (absent key).
-
-The job logs structured audit lines: `[sector_refresh]` prefix, the loop
-tag (fast/slow), counts of refreshed/failed/skipped constituents per tick.
-Per `_shared/TITANS_RULES.md`, observable side effects (cache key writes)
-are the closure proof — log lines are the audit trail.
+Cache semantics (unchanged from Phase A):
+- Envelopes carry the timestamp of the refresh write, not the underlying
+  market timestamp. Readers infer close-state by comparing `ts` against the
+  current market state plus the most recent close timestamp.
+- `value=None` writes are intentional — they record that a refresh attempt
+  ran but UW returned no usable data.
 """
 
 import asyncio
 import logging
 import time
-from typing import List, Optional
+from typing import List, Optional, Set
 
 from database.postgres_client import get_postgres_client
 from integrations import sector_cache
-from integrations.uw_api import get_ohlc, get_technical_indicator
+from integrations.uw_api import get_ohlc, get_technical_indicator, get_total_429s
 
 logger = logging.getLogger("sector_refresh")
 
 WK_OFFSET = 5     # 5 regular sessions ago → week-to-date change
 MO_OFFSET = 21    # 21 regular sessions ago → month-to-date change
 
-# Headroom guard: when the UW token bucket has fewer than this fraction of its
-# capacity available, the fast loop skips the lower-priority refresh. The
-# bucket's actual capacity (_bucket_max) is 120; 0.20 ratio leaves ~24 tokens
-# of headroom for other UW callers (committee enrichment, ticker profile, etc.)
+# Phase A.3 (2026-05-22): refresh universe is top-N-per-sector by rank_in_sector.
+# Cut from ~220 (full table) to ~33 (11 sectors × 3) to keep UW call volume
+# inside the Basic-plan rate-limit envelope.
+TOP_N_PER_SECTOR = 3
+
+# Headroom guard retained from Phase A: when the UW token bucket has fewer
+# than this fraction of its capacity available, the fast loop skips the
+# lower-priority refresh. Less load-relevant now (universe is small) but
+# defensive against bursts when other UW callers are heavy.
 HEADROOM_GUARD_RATIO = 0.20
 
 
-async def _fetch_constituent_universe() -> List[str]:
-    """Load the constituent ticker universe from Postgres.
+def _is_market_hours_safe() -> bool:
+    """Detect US regular-session market state.
 
-    Returns the deduped list of constituent tickers across all sector ETFs.
-    Order is by sector ETF then rank — gives a stable iteration order so
-    Redis writes are predictable.
+    Imports the existing `_is_market_hours()` helper from `api/sectors.py`
+    per Phase A.3 brief direction (do not invent new market-hours logic).
+    Falls back to inline ET-hours check if the import fails for any reason
+    so that the refresh job never crashes on startup ordering issues.
+    """
+    try:
+        from api.sectors import _is_market_hours
+        return _is_market_hours()
+    except Exception:
+        try:
+            import pytz
+            from datetime import datetime as _dt
+            et = _dt.now(pytz.timezone("America/New_York"))
+            if et.weekday() >= 5:
+                return False
+            return 9 <= et.hour < 16
+        except Exception:
+            return True  # When in doubt, allow the refresh — safer than freezing the cache.
+
+
+async def _fetch_constituent_universe() -> List[str]:
+    """Load the refresh universe — top-N per sector ETF.
+
+    Phase A.3 change: filter to `rank_in_sector <= TOP_N_PER_SECTOR`. The seed
+    data in `api/sectors.py` SECTOR_SEEDS writes ranks 1..20 in market-cap
+    order, so rank <= 3 selects the top-3 mega-caps per sector.
+
+    Returns the deduped ticker list ordered by ticker so writes are
+    predictable. Out-of-universe tickers are NOT touched by this job.
     """
     pool = await get_postgres_client()
     if not pool:
@@ -72,18 +100,26 @@ async def _fetch_constituent_universe() -> List[str]:
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             "SELECT DISTINCT ticker FROM sector_constituents "
-            "ORDER BY ticker"
+            "WHERE rank_in_sector IS NOT NULL AND rank_in_sector <= $1 "
+            "ORDER BY ticker",
+            TOP_N_PER_SECTOR,
         )
     return [r["ticker"] for r in rows]
 
 
-def _regular_session_closes(bars: list) -> List[float]:
-    """Extract close prices from UW OHLC bars, regular-session only.
+async def get_tracked_universe() -> Set[str]:
+    """Public helper: return the current refresh universe as a set.
 
-    UW returns bars tagged with `market_time` ∈ {'pr', 'r', 'po'}. We filter
-    to regular sessions for change-vs-N-sessions-ago math; including extended
-    hours bars would double-count days.
+    Consumed by `/api/sectors/{etf}/leaders` and `/api/ticker/{symbol}/profile`
+    so they can attach a `tracked: bool` flag to each row; the frontend uses
+    that to distinguish "not tracked" from "no data" in the cell annotation.
     """
+    universe = await _fetch_constituent_universe()
+    return {t.upper() for t in universe}
+
+
+def _regular_session_closes(bars: list) -> List[float]:
+    """Extract close prices from UW OHLC bars, regular-session only."""
     closes: List[float] = []
     for b in bars or []:
         if b.get("market_time") != "r":
@@ -109,12 +145,7 @@ def _pct_change_back(closes: List[float], offset: int) -> Optional[float]:
 
 
 def _check_headroom() -> float:
-    """Return the current token-bucket headroom ratio (0..1).
-
-    Reads the live module-level bucket state from `integrations.uw_api`. A
-    value < HEADROOM_GUARD_RATIO is the signal to start shedding low-priority
-    refreshes this tick.
-    """
+    """Return the current token-bucket headroom ratio (0..1)."""
     try:
         from integrations import uw_api as _uw
         if _uw._bucket_max <= 0:
@@ -133,16 +164,25 @@ async def _refresh_ohlc_derived(
     """Pull one ticker's OHLC and write the requested derived fields.
 
     Returns a per-call status dict for the caller to aggregate audit counts.
+    Also counts UW call attempts (always 1 if either refresh flag is true).
     """
-    status = {"wk_written": False, "mo_written": False, "wk_value": None, "mo_value": None}
+    status = {
+        "wk_written": False,
+        "mo_written": False,
+        "wk_value": None,
+        "mo_value": None,
+        "attempted": 0,
+        "succeeded": 0,
+    }
     if not (refresh_wk or refresh_mo):
         return status
 
-    # Pull 35 calendar days to comfortably cover 21 trading sessions + buffer
+    status["attempted"] = 1
     bars = await get_ohlc(ticker, "1d", lookback_days=35)
+    if bars is not None:
+        status["succeeded"] = 1
     closes = _regular_session_closes(bars or [])
     if len(closes) < 2:
-        # Record null writes so readers know the attempt ran but data was unavailable
         if refresh_wk:
             await sector_cache.write_field(ticker, "wk_change_pct", None)
         if refresh_mo:
@@ -164,15 +204,19 @@ async def _refresh_ohlc_derived(
     return status
 
 
-async def _refresh_rsi(ticker: str) -> bool:
-    """Pull RSI(14) and write the envelope. Returns True on successful write."""
+async def _refresh_rsi(ticker: str) -> dict:
+    """Pull RSI(14) and write the envelope.
+
+    Returns a status dict with attempt/success counts so the caller can
+    aggregate audit metrics consistently with _refresh_ohlc_derived.
+    """
+    status = {"attempted": 1, "succeeded": 0, "written": False}
     payload = await get_technical_indicator(ticker, "RSI", lookback=14)
     if payload is None:
         await sector_cache.write_field(ticker, "rsi_14", None)
-        return False
+        return status
+    status["succeeded"] = 1
 
-    # UW returns either a dict with an `rsi` field or a list of timestamped
-    # readings — accept both, prefer the latest value.
     value: Optional[float] = None
     if isinstance(payload, dict):
         v = payload.get("rsi") or payload.get("value")
@@ -191,105 +235,209 @@ async def _refresh_rsi(ticker: str) -> bool:
                 except (TypeError, ValueError):
                     value = None
 
-    await sector_cache.write_field(ticker, "rsi_14", value)
-    return value is not None
+    ok = await sector_cache.write_field(ticker, "rsi_14", value)
+    status["written"] = ok and value is not None
+    return status
 
 
 async def refresh_fast() -> dict:
-    """One fast-loop tick: refresh WK% + RSI(14) for every constituent.
+    """One fast-loop tick: refresh WK% + RSI(14) for the top-3-per-sector universe.
 
-    Iterates the full universe sequentially; the UW client's token-bucket
-    rate limiter throttles the cadence so we don't need to pace explicitly.
-    Headroom guard: if the bucket drops below HEADROOM_GUARD_RATIO partway
-    through the tick, RSI refresh is preserved (most operationally visible
-    gap) and WK refresh is dropped for remaining tickers.
-
-    Returns audit counts for the scheduler loop to log.
+    Phase A.3 changes: market-hours guard, extended audit logging.
     """
+    if not _is_market_hours_safe():
+        logger.info("[sector_refresh] fast tick skipped — market closed")
+        return {"loop": "fast", "skipped": True, "reason": "market_closed"}
+
     universe = await _fetch_constituent_universe()
     if not universe:
         logger.warning("[sector_refresh] fast tick: empty constituent universe — seed step pending?")
-        return {"loop": "fast", "tickers": 0, "wk_ok": 0, "rsi_ok": 0, "failures": 0, "skipped_wk": 0}
+        return {"loop": "fast", "tickers": 0, "attempted": 0, "succeeded": 0, "rate_limited_429s": 0,
+                "wk_ok": 0, "rsi_ok": 0, "failures": 0, "skipped_wk": 0, "duration_ms": 0}
 
-    started = time.monotonic()
+    started_mono = time.monotonic()
+    started_429s = get_total_429s()
     wk_ok = 0
     rsi_ok = 0
     failures = 0
     skipped_wk = 0
+    attempted = 0
+    succeeded = 0
 
-    logger.info("[sector_refresh] fast tick start — universe=%d", len(universe))
+    logger.info(
+        "[sector_refresh] fast tick start — universe=%d top_n_per_sector=%d",
+        len(universe), TOP_N_PER_SECTOR,
+    )
 
     for ticker in universe:
-        # Re-check headroom each iteration; if it sinks mid-tick, drop WK first
         refresh_wk = _check_headroom() >= HEADROOM_GUARD_RATIO
         if not refresh_wk:
             skipped_wk += 1
 
         try:
             status = await _refresh_ohlc_derived(ticker, refresh_wk=refresh_wk, refresh_mo=False)
+            attempted += status["attempted"]
+            succeeded += status["succeeded"]
             if status["wk_written"]:
                 wk_ok += 1
-            ok = await _refresh_rsi(ticker)
-            if ok:
+
+            rsi_status = await _refresh_rsi(ticker)
+            attempted += rsi_status["attempted"]
+            succeeded += rsi_status["succeeded"]
+            if rsi_status["written"]:
                 rsi_ok += 1
         except Exception as e:
             failures += 1
             logger.debug("[sector_refresh] fast tick failure for %s: %s", ticker, e)
 
-    elapsed = round(time.monotonic() - started, 1)
+    duration_ms = int((time.monotonic() - started_mono) * 1000)
+    rate_limited_429s = get_total_429s() - started_429s
     logger.info(
-        "[sector_refresh] fast tick complete — universe=%d wk_ok=%d rsi_ok=%d "
-        "failures=%d skipped_wk=%d elapsed=%.1fs",
-        len(universe), wk_ok, rsi_ok, failures, skipped_wk, elapsed,
+        "[sector_refresh] fast tick complete — universe=%d attempted=%d succeeded=%d "
+        "rate_limited_429s=%d wk_ok=%d rsi_ok=%d failures=%d skipped_wk=%d duration_ms=%d",
+        len(universe), attempted, succeeded, rate_limited_429s,
+        wk_ok, rsi_ok, failures, skipped_wk, duration_ms,
     )
     return {
         "loop": "fast",
         "tickers": len(universe),
+        "attempted": attempted,
+        "succeeded": succeeded,
+        "rate_limited_429s": rate_limited_429s,
         "wk_ok": wk_ok,
         "rsi_ok": rsi_ok,
         "failures": failures,
         "skipped_wk": skipped_wk,
-        "elapsed_s": elapsed,
+        "duration_ms": duration_ms,
     }
 
 
 async def refresh_slow() -> dict:
-    """One slow-loop tick: refresh MO% for every constituent.
+    """One slow-loop tick: refresh MO% for the top-3-per-sector universe.
 
-    MO% derives from a 21-session-old close. It does not need minute-fresh
-    refresh — the slow loop fires once per hour regardless of market state.
-    Headroom guard is not applied here; the slow loop's cadence already keeps
-    UW load minimal (one full pass per hour).
+    Phase A.3 changes: market-hours guard, extended audit logging.
     """
+    if not _is_market_hours_safe():
+        logger.info("[sector_refresh] slow tick skipped — market closed")
+        return {"loop": "slow", "skipped": True, "reason": "market_closed"}
+
     universe = await _fetch_constituent_universe()
     if not universe:
         logger.warning("[sector_refresh] slow tick: empty constituent universe")
-        return {"loop": "slow", "tickers": 0, "mo_ok": 0, "failures": 0}
+        return {"loop": "slow", "tickers": 0, "attempted": 0, "succeeded": 0, "rate_limited_429s": 0,
+                "mo_ok": 0, "failures": 0, "duration_ms": 0}
 
-    started = time.monotonic()
+    started_mono = time.monotonic()
+    started_429s = get_total_429s()
     mo_ok = 0
     failures = 0
+    attempted = 0
+    succeeded = 0
 
-    logger.info("[sector_refresh] slow tick start — universe=%d", len(universe))
+    logger.info(
+        "[sector_refresh] slow tick start — universe=%d top_n_per_sector=%d",
+        len(universe), TOP_N_PER_SECTOR,
+    )
 
     for ticker in universe:
         try:
             status = await _refresh_ohlc_derived(ticker, refresh_wk=False, refresh_mo=True)
+            attempted += status["attempted"]
+            succeeded += status["succeeded"]
             if status["mo_written"]:
                 mo_ok += 1
         except Exception as e:
             failures += 1
             logger.debug("[sector_refresh] slow tick failure for %s: %s", ticker, e)
 
-    elapsed = round(time.monotonic() - started, 1)
+    duration_ms = int((time.monotonic() - started_mono) * 1000)
+    rate_limited_429s = get_total_429s() - started_429s
     logger.info(
-        "[sector_refresh] slow tick complete — universe=%d mo_ok=%d failures=%d elapsed=%.1fs",
-        len(universe), mo_ok, failures, elapsed,
+        "[sector_refresh] slow tick complete — universe=%d attempted=%d succeeded=%d "
+        "rate_limited_429s=%d mo_ok=%d failures=%d duration_ms=%d",
+        len(universe), attempted, succeeded, rate_limited_429s,
+        mo_ok, failures, duration_ms,
     )
     return {
         "loop": "slow",
         "tickers": len(universe),
+        "attempted": attempted,
+        "succeeded": succeeded,
+        "rate_limited_429s": rate_limited_429s,
         "mo_ok": mo_ok,
         "failures": failures,
-        "elapsed_s": elapsed,
+        "duration_ms": duration_ms,
+    }
+
+
+async def refresh_close_snapshot() -> dict:
+    """One close-snapshot tick: refresh WK + RSI + MO for the universe.
+
+    Phase A.3 (2026-05-22): scheduled at 16:05 ET on weekdays by
+    `sector_refresh_close_snapshot_loop` in `main.py`. Bypasses the
+    market-hours guard (16:05 ET is post-regular-session) so the official
+    close snapshot lands in the cache as the canonical close-state value.
+
+    All three fields run in one pass — ~33 tickers × 2 calls each = ~66 UW
+    calls, well within the rate-limit budget for a one-shot daily run.
+    """
+    universe = await _fetch_constituent_universe()
+    if not universe:
+        logger.warning("[sector_refresh] close-snapshot: empty constituent universe")
+        return {"loop": "close_snapshot", "tickers": 0, "attempted": 0, "succeeded": 0,
+                "rate_limited_429s": 0, "wk_ok": 0, "mo_ok": 0, "rsi_ok": 0,
+                "failures": 0, "duration_ms": 0}
+
+    started_mono = time.monotonic()
+    started_429s = get_total_429s()
+    wk_ok = 0
+    mo_ok = 0
+    rsi_ok = 0
+    failures = 0
+    attempted = 0
+    succeeded = 0
+
+    logger.info(
+        "[sector_refresh] close-snapshot start — universe=%d top_n_per_sector=%d",
+        len(universe), TOP_N_PER_SECTOR,
+    )
+
+    for ticker in universe:
+        try:
+            ohlc_status = await _refresh_ohlc_derived(ticker, refresh_wk=True, refresh_mo=True)
+            attempted += ohlc_status["attempted"]
+            succeeded += ohlc_status["succeeded"]
+            if ohlc_status["wk_written"]:
+                wk_ok += 1
+            if ohlc_status["mo_written"]:
+                mo_ok += 1
+
+            rsi_status = await _refresh_rsi(ticker)
+            attempted += rsi_status["attempted"]
+            succeeded += rsi_status["succeeded"]
+            if rsi_status["written"]:
+                rsi_ok += 1
+        except Exception as e:
+            failures += 1
+            logger.debug("[sector_refresh] close-snapshot failure for %s: %s", ticker, e)
+
+    duration_ms = int((time.monotonic() - started_mono) * 1000)
+    rate_limited_429s = get_total_429s() - started_429s
+    logger.info(
+        "[sector_refresh] close-snapshot complete — universe=%d attempted=%d succeeded=%d "
+        "rate_limited_429s=%d wk_ok=%d mo_ok=%d rsi_ok=%d failures=%d duration_ms=%d",
+        len(universe), attempted, succeeded, rate_limited_429s,
+        wk_ok, mo_ok, rsi_ok, failures, duration_ms,
+    )
+    return {
+        "loop": "close_snapshot",
+        "tickers": len(universe),
+        "attempted": attempted,
+        "succeeded": succeeded,
+        "rate_limited_429s": rate_limited_429s,
+        "wk_ok": wk_ok,
+        "mo_ok": mo_ok,
+        "rsi_ok": rsi_ok,
+        "failures": failures,
+        "duration_ms": duration_ms,
     }

@@ -326,6 +326,16 @@ async def get_ticker_profile(
     mo_env = await _get_change_envelope(symbol, "mo_change_pct")
     flow_dir, flow_events = await _get_flow_events(symbol)
 
+    # Phase A.3 (2026-05-22): tracked = symbol is in the sector refresh universe
+    # (top-3 per sector). Frontend uses this to render "not tracked" annotation
+    # for cells when the symbol falls outside the universe.
+    try:
+        from jobs.sector_constituent_refresh import get_tracked_universe
+        tracked_set = await get_tracked_universe()
+        is_tracked = symbol.upper() in tracked_set
+    except Exception:
+        is_tracked = False
+
     # Trigger async profile refresh if stale or missing
     needs_refresh = False
     if not profile:
@@ -388,6 +398,8 @@ async def get_ticker_profile(
         "ticker": symbol,
         "company_name": company_name,
         "description": profile.get("description") if profile else None,
+        # Phase A.3 (2026-05-22): tracked flag for frontend annotation logic
+        "tracked": is_tracked,
         "price_action": {
             "price": price,
             "day_change_pct": snap.get("day_change_pct", 0),
