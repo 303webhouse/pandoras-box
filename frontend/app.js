@@ -6029,6 +6029,8 @@ function _renderSectorPopupTable(data, preserveOrder) {
     }
 
     var sectorDayChange = data.sector_day_change_pct || 0;
+    // Phase A.3 (2026-05-22): popup-level annotation context, threaded into row helper
+    var popupContext = { marketOpen: data.is_market_hours !== false };
 
     // Default view: top 5 + bottom 5. Show All shows all 20.
     var outperformers = items.filter(function(c) { return c.sector_relative_pct >= 0; });
@@ -6047,7 +6049,7 @@ function _renderSectorPopupTable(data, preserveOrder) {
 
     // Outperformers
     topItems.forEach(function(c) {
-        html += _sectorPopupRow(c, sectorDayChange);
+        html += _sectorPopupRow(c, sectorDayChange, popupContext);
     });
 
     // Divider row (sector ETF) — 12 cells matching enriched _sectorPopupRow (P2)
@@ -6065,7 +6067,7 @@ function _renderSectorPopupTable(data, preserveOrder) {
 
     // Underperformers
     bottomItems.forEach(function(c) {
-        html += _sectorPopupRow(c, sectorDayChange);
+        html += _sectorPopupRow(c, sectorDayChange, popupContext);
     });
 
     tbody.innerHTML = html;
@@ -6083,6 +6085,7 @@ function _renderSectorPopupTable(data, preserveOrder) {
 }
 
 // Phase A 2026-05-22: envelope helpers for {value, ts, source} fields
+// Phase A.3 2026-05-22: four-state annotation \u2014 open / at-close / no-data / not-tracked
 // Backend returns either an envelope dict, null, or (legacy fields) a raw number.
 function _envValue(env) {
     if (env == null) return null;
@@ -6103,25 +6106,50 @@ function _formatAge(seconds) {
     if (seconds < 86400) return Math.floor(seconds / 3600) + 'h ago';
     return Math.floor(seconds / 86400) + 'd ago';
 }
-// Render the meta annotation (source + age) for an envelope. Returns HTML.
-// hasValue=false uses the 'stale' palette so missing data is visually distinct.
-function _cellMeta(env, hasValue) {
+// Render the meta annotation (source + state) for an envelope. Returns HTML.
+// Phase A.3 four states:
+//   1. open + valid + tracked              \u2192 "UW \u00b7 12s ago"        (cell-meta)
+//   2. closed + valid + tracked + recent ts \u2192 "UW \u00b7 AT CLOSE"       (cell-meta)
+//   3. closed + no value + tracked         \u2192 "no close data"        (cell-meta-stale)
+//   4. !tracked (any market state)         \u2192 "not tracked"          (cell-meta-untracked)
+function _cellMeta(env, hasValue, opts) {
+    opts = opts || {};
+    var marketOpen = opts.marketOpen !== false;  // default open if not specified
+    var tracked = opts.tracked !== false;        // default tracked if not specified
     var src = (env && env.source) ? env.source : 'UW';
     var age = _envAge(env);
     var label;
     var cls = 'cell-meta';
-    if (!hasValue) {
-        label = age == null ? 'n/a' : 'stale';
-        cls += ' cell-meta-stale';
+
+    if (!tracked) {
+        label = 'not tracked';
+        cls += ' cell-meta-untracked';
+    } else if (!marketOpen) {
+        // Market is closed
+        if (hasValue && age != null && age < 86400) {
+            label = src + ' \u00b7 AT CLOSE';
+        } else {
+            label = 'no close data';
+            cls += ' cell-meta-stale';
+        }
     } else {
-        label = src + ' \u00b7 ' + _formatAge(age);
+        // Market is open
+        if (hasValue) {
+            label = src + ' \u00b7 ' + _formatAge(age);
+        } else {
+            label = age == null ? 'n/a' : 'stale';
+            cls += ' cell-meta-stale';
+        }
     }
     return '<span class="' + cls + '">' + escapeHtml(label) + '</span>';
 }
 
-function _sectorPopupRow(c, sectorDayChange) {
+function _sectorPopupRow(c, sectorDayChange, popupContext) {
     var relColor = c.sector_relative_pct >= 0 ? 'var(--accent-green,#00e676)' : 'var(--accent-red,#ff5252)';
     var priceColor = c.day_change_pct >= 0 ? 'var(--accent-green,#00e676)' : 'var(--accent-red,#ff5252)';
+    // Phase A.3 (2026-05-22): annotation context — market state + per-row tracked flag
+    popupContext = popupContext || {};
+    var metaOpts = { marketOpen: popupContext.marketOpen !== false, tracked: c.tracked !== false };
 
     // Volume indicator
     var volIcon = '';
@@ -6164,9 +6192,9 @@ function _sectorPopupRow(c, sectorDayChange) {
     var weekPct = wkVal != null ? ((wkVal >= 0 ? '+' : '') + wkVal.toFixed(1) + '%') : '-';
     var monthPct = moVal != null ? ((moVal >= 0 ? '+' : '') + moVal.toFixed(1) + '%') : '-';
     var rsiTxt = rsiVal != null ? Math.round(rsiVal) : '-';
-    var wkMeta = _cellMeta(c.week_change_pct, wkVal != null);
-    var moMeta = _cellMeta(c.month_change_pct, moVal != null);
-    var rsiMeta = _cellMeta(c.rsi_14, rsiVal != null);
+    var wkMeta = _cellMeta(c.week_change_pct, wkVal != null, metaOpts);
+    var moMeta = _cellMeta(c.month_change_pct, moVal != null, metaOpts);
+    var rsiMeta = _cellMeta(c.rsi_14, rsiVal != null, metaOpts);
 
     return '<tr data-ticker="' + escapeHtml(c.ticker) + '" class="sector-popup-row">'
         + '<td class="sector-popup-ticker">' + escapeHtml(c.ticker) + (c.company_name ? '<span class="sector-popup-name">' + escapeHtml(c.company_name) + '</span>' : '') + '</td>'
@@ -6352,6 +6380,11 @@ function _renderTickerPopupFull(d) {
     var pa = d.price_action || {};
     var priceBody = document.getElementById('tpPriceBody');
     if (priceBody) {
+        // Phase A.3 2026-05-22: meta context — market state + tracked flag from profile payload
+        var tpMetaOpts = {
+            marketOpen: d.is_market_hours !== false,
+            tracked: d.tracked !== false,
+        };
         // Phase A 2026-05-22: rsi_14 is now an envelope {value, ts, source}
         var rsiVal = _envValue(pa.rsi_14);
         var rsiColor = '#999';
@@ -6359,7 +6392,7 @@ function _renderTickerPopupFull(d) {
             if (rsiVal < 30) rsiColor = 'var(--accent-green,#00e676)';
             else if (rsiVal > 70) rsiColor = 'var(--accent-red,#ff5252)';
         }
-        var rsiMetaInline = _cellMeta(pa.rsi_14, rsiVal != null);
+        var rsiMetaInline = _cellMeta(pa.rsi_14, rsiVal != null, tpMetaOpts);
         var volIcon = '';
         if (pa.volume_ratio != null) {
             if (pa.volume_ratio > 2.0) volIcon = '\ud83d\udd25 ';
@@ -6375,8 +6408,8 @@ function _renderTickerPopupFull(d) {
 
         priceBody.innerHTML =
             _tpRow('Day', pa.day_change_pct, true) +
-            _tpRow('Week', pa.week_change_pct, true) +
-            _tpRow('Month', pa.month_change_pct, true) +
+            _tpRow('Week', pa.week_change_pct, true, tpMetaOpts) +
+            _tpRow('Month', pa.month_change_pct, true, tpMetaOpts) +
             '<div class="tp-row"><span>RSI</span><span style="color:' + rsiColor + '">' + (rsiVal != null ? Math.round(rsiVal) : 'N/A') + rsiMetaInline + '</span></div>' +
             '<div class="tp-row"><span>Volume</span><span>' + volIcon + (pa.volume_ratio != null ? pa.volume_ratio.toFixed(1) + 'x' : 'N/A') + '</span></div>' +
             '<div class="tp-52w-bar"><div class="tp-52w-fill" style="width:' + rangePct + '%"></div></div>' +
@@ -6450,17 +6483,18 @@ function _renderTickerPopupFull(d) {
     }
 }
 
-function _tpRow(label, pct, isChange) {
+function _tpRow(label, pct, isChange, metaOpts) {
     // Phase A 2026-05-22: accept envelope {value, ts, source} OR raw number.
     // Envelope-shaped fields get a per-cell meta annotation; raw numbers do not.
+    // Phase A.3 2026-05-22: metaOpts threads market-state + tracked flag.
     var isEnvelope = (pct != null && typeof pct === 'object' && 'value' in pct);
     var val = isEnvelope ? pct.value : pct;
     if (val == null) {
-        var emptyMeta = isEnvelope ? _cellMeta(pct, false) : '';
+        var emptyMeta = isEnvelope ? _cellMeta(pct, false, metaOpts) : '';
         return '<div class="tp-row"><span>' + label + '</span><span>-' + emptyMeta + '</span></div>';
     }
     var color = isChange ? (val >= 0 ? 'var(--accent-green,#00e676)' : 'var(--accent-red,#ff5252)') : '';
-    var meta = isEnvelope ? _cellMeta(pct, true) : '';
+    var meta = isEnvelope ? _cellMeta(pct, true, metaOpts) : '';
     return '<div class="tp-row"><span>' + label + '</span><span style="color:' + color + '">'
         + (val >= 0 ? '+' : '') + val.toFixed(2) + '%' + meta + '</span></div>';
 }

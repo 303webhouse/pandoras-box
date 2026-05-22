@@ -13600,6 +13600,12 @@ body[data-mode="analytics"] .analytics-shell {
     color: var(--accent-amber, #ffa726);
     opacity: 0.85;
 }
+/* Phase A.3 2026-05-22: untracked annotation — out-of-refresh-universe cells */
+.cell-meta.cell-meta-untracked {
+    color: var(--text-disabled, #6c7a89);
+    opacity: 0.55;
+    font-style: italic;
+}
 
 /* P1.2: Heatmap Flow/Price toggle — compact pill, absolute-positioned top-right of heatmap */
 #sectorsTabContent {

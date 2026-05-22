@@ -49,6 +49,17 @@ _bucket_refill_rate = 2.0  # tokens/sec = 120/60
 _bucket_last_refill = time.time()
 _bucket_lock = asyncio.Lock()
 
+# ── 429 Counter (Phase A.3 audit instrumentation, 2026-05-22) ────
+# Process-lifetime monotonic count of 429 responses observed by _uw_request.
+# Snapshotted by callers (e.g. the sector refresh job) to compute per-tick 429
+# counts without modifying the wrapper return contract.
+_total_429s = 0
+
+
+def get_total_429s() -> int:
+    """Snapshot the lifetime 429 counter. Callers compute deltas across calls."""
+    return _total_429s
+
 
 def _circuit_breaker_open() -> bool:
     """Check if circuit breaker is open (should NOT make requests).
@@ -149,6 +160,8 @@ async def _uw_request(path: str, params: dict = None) -> Optional[dict]:
                     # stalling the heatmap and other polling endpoints. Return None immediately
                     # so cached data or fallbacks fire without delay. Do NOT trip the circuit
                     # breaker — a rate limit is not a broken API.
+                    global _total_429s
+                    _total_429s += 1
                     logger.warning("UW API %s: rate limited (429) — returning None without retry", path)
                     return None
                 else:
