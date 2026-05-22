@@ -6082,6 +6082,43 @@ function _renderSectorPopupTable(data, preserveOrder) {
     });
 }
 
+// Phase A 2026-05-22: envelope helpers for {value, ts, source} fields
+// Backend returns either an envelope dict, null, or (legacy fields) a raw number.
+function _envValue(env) {
+    if (env == null) return null;
+    if (typeof env === 'number') return env;
+    return env.value;
+}
+function _envAge(env) {
+    if (!env || !env.ts) return null;
+    try {
+        return Math.max(0, Math.floor((Date.now() - new Date(env.ts).getTime()) / 1000));
+    } catch (e) { return null; }
+}
+// Short human age \u2014 capped at 10 chars per the build spec
+function _formatAge(seconds) {
+    if (seconds == null) return 'n/a';
+    if (seconds < 60) return seconds + 's ago';
+    if (seconds < 3600) return Math.floor(seconds / 60) + 'm ago';
+    if (seconds < 86400) return Math.floor(seconds / 3600) + 'h ago';
+    return Math.floor(seconds / 86400) + 'd ago';
+}
+// Render the meta annotation (source + age) for an envelope. Returns HTML.
+// hasValue=false uses the 'stale' palette so missing data is visually distinct.
+function _cellMeta(env, hasValue) {
+    var src = (env && env.source) ? env.source : 'UW';
+    var age = _envAge(env);
+    var label;
+    var cls = 'cell-meta';
+    if (!hasValue) {
+        label = age == null ? 'n/a' : 'stale';
+        cls += ' cell-meta-stale';
+    } else {
+        label = src + ' \u00b7 ' + _formatAge(age);
+    }
+    return '<span class="' + cls + '">' + escapeHtml(label) + '</span>';
+}
+
 function _sectorPopupRow(c, sectorDayChange) {
     var relColor = c.sector_relative_pct >= 0 ? 'var(--accent-green,#00e676)' : 'var(--accent-red,#ff5252)';
     var priceColor = c.day_change_pct >= 0 ? 'var(--accent-green,#00e676)' : 'var(--accent-red,#ff5252)';
@@ -6120,17 +6157,25 @@ function _sectorPopupRow(c, sectorDayChange) {
         dpBadge = '<span class="sector-dp-badge sector-dp-inactive">-</span>';
     }
 
-    var weekPct = c.week_change_pct != null ? ((c.week_change_pct >= 0 ? '+' : '') + c.week_change_pct.toFixed(1) + '%') : '-';
-    var monthPct = c.month_change_pct != null ? ((c.month_change_pct >= 0 ? '+' : '') + c.month_change_pct.toFixed(1) + '%') : '-';
+    // Envelope-shape fields (Phase A) \u2014 value + per-cell meta annotation
+    var wkVal = _envValue(c.week_change_pct);
+    var moVal = _envValue(c.month_change_pct);
+    var rsiVal = _envValue(c.rsi_14);
+    var weekPct = wkVal != null ? ((wkVal >= 0 ? '+' : '') + wkVal.toFixed(1) + '%') : '-';
+    var monthPct = moVal != null ? ((moVal >= 0 ? '+' : '') + moVal.toFixed(1) + '%') : '-';
+    var rsiTxt = rsiVal != null ? Math.round(rsiVal) : '-';
+    var wkMeta = _cellMeta(c.week_change_pct, wkVal != null);
+    var moMeta = _cellMeta(c.month_change_pct, moVal != null);
+    var rsiMeta = _cellMeta(c.rsi_14, rsiVal != null);
 
     return '<tr data-ticker="' + escapeHtml(c.ticker) + '" class="sector-popup-row">'
         + '<td class="sector-popup-ticker">' + escapeHtml(c.ticker) + (c.company_name ? '<span class="sector-popup-name">' + escapeHtml(c.company_name) + '</span>' : '') + '</td>'
         + '<td class="col-r" style="color:' + priceColor + '">' + (c.price ? '$' + c.price.toFixed(2) : '-') + '</td>'
         + '<td class="col-r" style="color:' + priceColor + '">' + (c.day_change_pct >= 0 ? '+' : '') + c.day_change_pct.toFixed(2) + '%</td>'
         + '<td class="col-r" style="color:' + relColor + '">' + (c.sector_relative_pct >= 0 ? '+' : '') + c.sector_relative_pct.toFixed(2) + '%</td>'
-        + '<td class="col-r">' + weekPct + '</td>'
-        + '<td class="col-r">' + monthPct + '</td>'
-        + '<td class="col-c">' + (c.rsi_14 != null ? c.rsi_14 : '-') + '</td>'
+        + '<td class="col-r">' + weekPct + wkMeta + '</td>'
+        + '<td class="col-r">' + monthPct + moMeta + '</td>'
+        + '<td class="col-c">' + rsiTxt + rsiMeta + '</td>'
         + '<td class="col-c">' + volIcon + '</td>'
         + '<td class="col-c">' + flowIcon + ' <span class="sector-flow-pct">' + flowPct + '</span></td>'
         + '<td class="col-c">' + ivPill + '</td>'
@@ -6307,11 +6352,14 @@ function _renderTickerPopupFull(d) {
     var pa = d.price_action || {};
     var priceBody = document.getElementById('tpPriceBody');
     if (priceBody) {
+        // Phase A 2026-05-22: rsi_14 is now an envelope {value, ts, source}
+        var rsiVal = _envValue(pa.rsi_14);
         var rsiColor = '#999';
-        if (pa.rsi_14 != null) {
-            if (pa.rsi_14 < 30) rsiColor = 'var(--accent-green,#00e676)';
-            else if (pa.rsi_14 > 70) rsiColor = 'var(--accent-red,#ff5252)';
+        if (rsiVal != null) {
+            if (rsiVal < 30) rsiColor = 'var(--accent-green,#00e676)';
+            else if (rsiVal > 70) rsiColor = 'var(--accent-red,#ff5252)';
         }
+        var rsiMetaInline = _cellMeta(pa.rsi_14, rsiVal != null);
         var volIcon = '';
         if (pa.volume_ratio != null) {
             if (pa.volume_ratio > 2.0) volIcon = '\ud83d\udd25 ';
@@ -6329,7 +6377,7 @@ function _renderTickerPopupFull(d) {
             _tpRow('Day', pa.day_change_pct, true) +
             _tpRow('Week', pa.week_change_pct, true) +
             _tpRow('Month', pa.month_change_pct, true) +
-            '<div class="tp-row"><span>RSI</span><span style="color:' + rsiColor + '">' + (pa.rsi_14 != null ? pa.rsi_14 : 'N/A') + '</span></div>' +
+            '<div class="tp-row"><span>RSI</span><span style="color:' + rsiColor + '">' + (rsiVal != null ? Math.round(rsiVal) : 'N/A') + rsiMetaInline + '</span></div>' +
             '<div class="tp-row"><span>Volume</span><span>' + volIcon + (pa.volume_ratio != null ? pa.volume_ratio.toFixed(1) + 'x' : 'N/A') + '</span></div>' +
             '<div class="tp-52w-bar"><div class="tp-52w-fill" style="width:' + rangePct + '%"></div></div>' +
             '<div class="tp-52w-labels"><span>$' + (pa.low_52w || 0).toFixed(0) + '</span><span>52w</span><span>$' + (pa.high_52w || 0).toFixed(0) + '</span></div>';
@@ -6403,10 +6451,18 @@ function _renderTickerPopupFull(d) {
 }
 
 function _tpRow(label, pct, isChange) {
-    if (pct == null) return '<div class="tp-row"><span>' + label + '</span><span>-</span></div>';
-    var color = isChange ? (pct >= 0 ? 'var(--accent-green,#00e676)' : 'var(--accent-red,#ff5252)') : '';
+    // Phase A 2026-05-22: accept envelope {value, ts, source} OR raw number.
+    // Envelope-shaped fields get a per-cell meta annotation; raw numbers do not.
+    var isEnvelope = (pct != null && typeof pct === 'object' && 'value' in pct);
+    var val = isEnvelope ? pct.value : pct;
+    if (val == null) {
+        var emptyMeta = isEnvelope ? _cellMeta(pct, false) : '';
+        return '<div class="tp-row"><span>' + label + '</span><span>-' + emptyMeta + '</span></div>';
+    }
+    var color = isChange ? (val >= 0 ? 'var(--accent-green,#00e676)' : 'var(--accent-red,#ff5252)') : '';
+    var meta = isEnvelope ? _cellMeta(pct, true) : '';
     return '<div class="tp-row"><span>' + label + '</span><span style="color:' + color + '">'
-        + (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%</span></div>';
+        + (val >= 0 ? '+' : '') + val.toFixed(2) + '%' + meta + '</span></div>';
 }
 
 async function _runOlympusQuickReview(symbol) {

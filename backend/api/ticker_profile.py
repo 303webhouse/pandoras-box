@@ -159,18 +159,22 @@ async def _get_sector_info(ticker: str) -> Dict:
         return {}
 
 
-async def _get_rsi(ticker: str) -> Optional[int]:
-    redis = await get_redis_client()
-    if not redis:
-        return None
-    try:
-        for pat in [f"rsi:{ticker}", f"indicator:rsi:{ticker}", f"scanner:rsi:{ticker}"]:
-            val = await redis.get(pat)
-            if val is not None:
-                return int(float(val))
-    except Exception:
-        pass
-    return None
+async def _get_rsi_envelope(ticker: str) -> Optional[Dict[str, Any]]:
+    """Read RSI envelope from the sector_cache canonical store.
+
+    Returns the {value, ts, source} envelope or None when no refresh has
+    landed yet. Phase A (2026-05-22) moved RSI off the legacy `rsi:{ticker}`
+    Redis fanout onto the sector_cache pattern that the heatmap popup also
+    reads.
+    """
+    from integrations.sector_cache import read_field
+    return await read_field(ticker, "rsi_14")
+
+
+async def _get_change_envelope(ticker: str, field: str) -> Optional[Dict[str, Any]]:
+    """Read week/month change envelope from the sector_cache canonical store."""
+    from integrations.sector_cache import read_field
+    return await read_field(ticker, field)
 
 
 async def _get_flow_events(ticker: str, limit: int = 5) -> tuple:
@@ -317,7 +321,9 @@ async def get_ticker_profile(
     # Full profile
     profile = await _get_profile_from_db(symbol)
     sector_info = await _get_sector_info(symbol)
-    rsi = await _get_rsi(symbol)
+    rsi_env = await _get_rsi_envelope(symbol)
+    wk_env = await _get_change_envelope(symbol, "wk_change_pct")
+    mo_env = await _get_change_envelope(symbol, "mo_change_pct")
     flow_dir, flow_events = await _get_flow_events(symbol)
 
     # Trigger async profile refresh if stale or missing
@@ -385,11 +391,12 @@ async def get_ticker_profile(
         "price_action": {
             "price": price,
             "day_change_pct": snap.get("day_change_pct", 0),
-            "week_change_pct": None,  # TODO: calculate from bars
-            "month_change_pct": None,
+            # Phase A 2026-05-22: envelope shape {value, ts, source} or null
+            "week_change_pct": wk_env,
+            "month_change_pct": mo_env,
             "high_52w": high_52w,
             "low_52w": low_52w,
-            "rsi_14": rsi,
+            "rsi_14": rsi_env,
             "volume_ratio": volume_ratio,
             "volume_ratio_label": _volume_label(volume_ratio),
         },
@@ -488,7 +495,13 @@ async def quick_review(req: QuickReviewRequest):
     snap = await _get_snapshot_price(ticker)
     profile = await _get_profile_from_db(ticker)
     sector_info = await _get_sector_info(ticker)
-    rsi = await _get_rsi(ticker)
+    rsi_env = await _get_rsi_envelope(ticker)
+    rsi = rsi_env.get("value") if rsi_env else None
+    if rsi is not None:
+        try:
+            rsi = int(float(rsi))
+        except (TypeError, ValueError):
+            rsi = None
     flow_dir, flow_events = await _get_flow_events(ticker, limit=10)
 
     # Get existing positions

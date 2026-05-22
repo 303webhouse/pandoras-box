@@ -1,9 +1,12 @@
 """
 Sector API — heatmap + drill-down popup.
 
-Heatmap: UW API (yfinance under the hood) for live daily prices and historical bars.
+Heatmap: UW API for live daily prices and historical bars (yfinance fallback only for
+         indices/breadth UW does not cover).
 Leaders: Per-sector top-20 constituents with live snapshot data, RSI, volume ratio,
          options flow metrics (direction + call %), IV rank, and dark pool activity.
+         Week/month change and RSI are served from the Redis envelope cache populated
+         by jobs/sector_constituent_refresh (Phase A, 2026-05-22).
 """
 
 import json
@@ -457,10 +460,7 @@ async def _ensure_sector_constituents():
 
 
 async def _fetch_sector_snapshot(tickers: List[str]) -> Dict[str, Dict]:
-    """Fetch live snapshot via uw_api.get_snapshot (yfinance under the hood).
-
-    Polygon is deprecated. UW API wraps yfinance for real-time quotes.
-    """
+    """Fetch live snapshot via uw_api.get_snapshot."""
     from integrations.uw_api import get_snapshot
 
     # Build a stable cache key from first 5 sorted tickers (per-sector)
@@ -504,20 +504,6 @@ async def _fetch_sector_snapshot(tickers: List[str]) -> Dict[str, Dict]:
             pass
 
     return result
-
-
-async def _get_rsi_for_ticker(ticker: str, redis) -> Optional[int]:
-    """Read RSI from existing Redis cache. Returns None if unavailable."""
-    if not redis:
-        return None
-    try:
-        for key_pattern in [f"rsi:{ticker}", f"indicator:rsi:{ticker}", f"scanner:rsi:{ticker}"]:
-            val = await redis.get(key_pattern)
-            if val is not None:
-                return int(float(val))
-    except Exception:
-        pass
-    return None
 
 
 async def _get_flow_metrics(ticker: str) -> Dict[str, Any]:
@@ -677,7 +663,18 @@ async def get_sector_leaders(
     etf_data = snapshot.get(sector_etf, {})
     sector_day_change = etf_data.get("day_change_pct", 0)
 
-    redis = await get_redis_client()
+    # Phase A (2026-05-22): batch-read week/month change + RSI envelopes from the
+    # canonical sector cache populated by jobs/sector_constituent_refresh. Each
+    # field is surfaced to the route response as {value, ts, source} so the
+    # popup can render staleness + source attribution per cell.
+    if not fast:
+        from integrations.sector_cache import read_many as _sector_cache_read_many
+        envelopes = await _sector_cache_read_many(
+            constituent_tickers,
+            ["wk_change_pct", "mo_change_pct", "rsi_14"],
+        )
+    else:
+        envelopes = {}
 
     constituents = []
     for r in rows:
@@ -707,8 +704,6 @@ async def get_sector_leaders(
             else:
                 entry["volume_ratio"] = None
 
-            entry["rsi_14"] = await _get_rsi_for_ticker(ticker, redis)
-
             # Enriched flow metrics (P2)
             flow_metrics = await _get_flow_metrics(ticker)
             entry["flow_direction"] = flow_metrics["direction"]
@@ -725,8 +720,11 @@ async def get_sector_leaders(
             entry["dp_active"] = bool(dp_data and dp_data.get("active"))
             entry["dp_prints_30m"] = dp_data["prints_30m"] if dp_data else 0
 
-            entry["week_change_pct"] = None
-            entry["month_change_pct"] = None
+            # Envelope-shape fields (Phase A 2026-05-22): {value, ts, source} or null
+            ticker_env = envelopes.get(ticker.upper(), {})
+            entry["week_change_pct"] = ticker_env.get("wk_change_pct")
+            entry["month_change_pct"] = ticker_env.get("mo_change_pct")
+            entry["rsi_14"] = ticker_env.get("rsi_14")
 
         constituents.append(entry)
 
