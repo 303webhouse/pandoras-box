@@ -448,6 +448,57 @@ async def lifespan(app: FastAPI):
                 logger.warning("WH-REVERSAL loop error: %s", e)
             await asyncio.sleep(900)  # 15 minutes
 
+    # Sector constituent refresh (Phase A — 2026-05-22)
+    # Populates sector:constituent:{ticker}:{field} envelope cache that the
+    # sector heatmap popup + ticker profile popup read for WK%, MO%, RSI(14).
+    async def sector_refresh_fast_loop():
+        """Refresh WK% + RSI for every sector constituent.
+
+        60s cadence during market hours; 300s off-hours (the underlying values
+        only move during the regular session). The UW token-bucket limiter
+        inside `uw_api._consume_token` paces calls; if a tick takes longer
+        than the cadence the next tick fires back-to-back.
+        """
+        import pytz
+        from datetime import datetime as dt_cls
+
+        await asyncio.sleep(150)  # 2.5 min after startup — DB pool + sector seed must be live
+
+        while True:
+            tick_started = asyncio.get_event_loop().time()
+            try:
+                from jobs.sector_constituent_refresh import refresh_fast
+                await refresh_fast()
+            except Exception as e:
+                logger.warning("[sector_refresh] fast loop error: %s", e)
+
+            et = dt_cls.now(pytz.timezone("America/New_York"))
+            in_market = et.weekday() < 5 and 9 <= et.hour < 16
+            base_interval = 60 if in_market else 300
+            elapsed = asyncio.get_event_loop().time() - tick_started
+            sleep_for = max(5, base_interval - elapsed)
+            await asyncio.sleep(sleep_for)
+
+    async def sector_refresh_slow_loop():
+        """Refresh MO% for every sector constituent.
+
+        3600s (1 h) cadence regardless of market state. The 21-session
+        derivative is insensitive to intraday motion, and the slower cadence
+        preserves UW rate-limit headroom for the fast loop and other UW
+        callers.
+        """
+        await asyncio.sleep(300)  # 5 min after startup — let fast loop's first pass land
+
+        while True:
+            tick_started = asyncio.get_event_loop().time()
+            try:
+                from jobs.sector_constituent_refresh import refresh_slow
+                await refresh_slow()
+            except Exception as e:
+                logger.warning("[sector_refresh] slow loop error: %s", e)
+            elapsed = asyncio.get_event_loop().time() - tick_started
+            await asyncio.sleep(max(5, 3600 - elapsed))
+
     expiry_task = asyncio.create_task(signal_expiry_loop())
     universe_task = asyncio.create_task(universe_cache_loop())
     mtm_task = asyncio.create_task(mark_to_market_loop())
@@ -462,6 +513,8 @@ async def lifespan(app: FastAPI):
     uw_flow_poller_task = asyncio.create_task(uw_flow_poller_loop())
     wh_accumulation_task = asyncio.create_task(wh_accumulation_loop())
     wh_reversal_task = asyncio.create_task(wh_reversal_loop())
+    sector_refresh_fast_task = asyncio.create_task(sector_refresh_fast_loop())
+    sector_refresh_slow_task = asyncio.create_task(sector_refresh_slow_loop())
 
     # Oracle insights: pre-compute analytics payload hourly
     async def oracle_refresh_loop():

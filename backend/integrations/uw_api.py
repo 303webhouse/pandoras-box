@@ -173,6 +173,98 @@ async def _uw_request(path: str, params: dict = None) -> Optional[dict]:
 # ═════════════════════════════════════════════════════════════════
 
 
+async def get_ohlc(
+    ticker: str,
+    candle_size: str = "1d",
+    lookback_days: int = 30,
+) -> Optional[List[Dict[str, Any]]]:
+    """Fetch OHLC bars from UW `/api/stock/{ticker}/ohlc/{candle_size}`.
+
+    Returns the UW bars list directly (passthrough of the `data` array).
+    Each bar carries keys: open, high, low, close, total_volume (or volume),
+    start_time, market_time ('pr'/'r'/'po' for pre/regular/post sessions),
+    among others. Schema is not normalized to the Polygon-shaped get_bars()
+    response — callers that already work with the UW shape should use this.
+
+    candle_size: any UW-supported candle ('1m', '5m', '15m', '30m', '1h', '1d',
+        '1w', '1mo'). Defaults to daily.
+    lookback_days: passed to UW as a `date_from` query (today − lookback_days).
+        UW caps result size by candle; for daily candles 30 sessions is well
+        within budget.
+
+    Caching: 60s TTL via the 'ohlc' category; the sector constituent refresh
+    job rewrites the cache faster than the TTL so popup reads always hit warm
+    data.
+    """
+    symbol = ticker.upper()
+    cache_key = f"{symbol}|{candle_size}|{lookback_days}"
+    cached = await cache_get("ohlc", cache_key)
+    if cached is not None:
+        return cached
+
+    params: Dict[str, Any] = {}
+    if lookback_days and lookback_days > 0:
+        date_from = (date.today() - timedelta(days=int(lookback_days))).isoformat()
+        params["date_from"] = date_from
+
+    resp = await _uw_request(
+        f"/api/stock/{symbol}/ohlc/{candle_size}",
+        params=params or None,
+    )
+    if not resp or "data" not in resp:
+        return None
+
+    bars = resp["data"]
+    if not isinstance(bars, list):
+        return None
+
+    await cache_set("ohlc", cache_key, bars)
+    return bars
+
+
+async def get_technical_indicator(
+    ticker: str,
+    function: str = "RSI",
+    lookback: int = 14,
+) -> Optional[Dict[str, Any]]:
+    """Fetch a technical indicator from UW `/api/stock/{ticker}/technical-indicator/{function}`.
+
+    function: indicator name — currently supported: 'RSI'. UW exposes additional
+        functions (MACD, EMA, SMA, etc.) but only RSI is consumed by callers
+        today; expand the supported set as new consumers come online.
+    lookback: indicator period (e.g. RSI(14) → lookback=14). Passed to UW as the
+        `length` query parameter.
+
+    Returns the UW response's `data` payload as-is. For RSI this is typically a
+    dict with at minimum an `rsi` field (0-100); callers should be resilient to
+    missing keys. Dropped fields (relative to a hypothetical full UW response):
+    none enforced here — passthrough preserves whatever UW returns under `data`.
+
+    Caching: 60s TTL via the 'technical_indicator' category.
+    """
+    symbol = ticker.upper()
+    fn = function.upper()
+    cache_key = f"{symbol}|{fn}|{lookback}"
+    cached = await cache_get("technical_indicator", cache_key)
+    if cached is not None:
+        return cached
+
+    params: Dict[str, Any] = {}
+    if lookback:
+        params["length"] = int(lookback)
+
+    resp = await _uw_request(
+        f"/api/stock/{symbol}/technical-indicator/{fn}",
+        params=params or None,
+    )
+    if not resp or "data" not in resp:
+        return None
+
+    payload = resp["data"]
+    await cache_set("technical_indicator", cache_key, payload)
+    return payload
+
+
 async def _get_regular_session_change(ticker: str) -> Optional[Dict[str, Any]]:
     """Compute today's regular-session daily change from UW OHLC bars.
 
@@ -187,21 +279,20 @@ async def _get_regular_session_change(ticker: str) -> Optional[Dict[str, Any]]:
     == 'r' gives a session-invariant daily change calculation that's correct
     pre-market, regular hours, post-market, and overnight.
 
+    2026-05-22: refactored to route through the public get_ohlc() wrapper so
+    the OHLC endpoint has a single canonical entry point shared with the
+    sector constituent refresh job.
+
     Returns dict with today_close, prev_close, change, change_pct, today_open,
-    today_high, today_low, today_volume — or None if data unavailable. Cached
-    under the same 'quote' TTL as get_snapshot.
+    today_high, today_low, today_volume — or None if data unavailable.
     """
     cache_key = f"{ticker.upper()}:reg_change"
     cached = await cache_get("quote", cache_key)
     if cached is not None:
         return cached
 
-    resp = await _uw_request(f"/api/stock/{ticker.upper()}/ohlc/1d")
-    if not resp or "data" not in resp:
-        return None
-
-    bars = resp["data"]
-    if not isinstance(bars, list):
+    bars = await get_ohlc(ticker, "1d", lookback_days=10)
+    if not bars:
         return None
 
     # Filter to regular-session bars only ('r'), preserve order

@@ -13585,6 +13585,22 @@ body[data-mode="analytics"] .analytics-shell {
     letter-spacing: 0;
 }
 
+/* Phase A 2026-05-22: per-cell staleness + source annotation for envelope-shape fields */
+.cell-meta {
+    display: block;
+    font-size: 0.62em;
+    line-height: 1;
+    color: var(--text-disabled, #6c7a89);
+    letter-spacing: 0.2px;
+    margin-top: 1px;
+    font-weight: 400;
+    text-transform: lowercase;
+}
+.cell-meta.cell-meta-stale {
+    color: var(--accent-amber, #ffa726);
+    opacity: 0.85;
+}
+
 /* P1.2: Heatmap Flow/Price toggle — compact pill, absolute-positioned top-right of heatmap */
 #sectorsTabContent {
     position: relative;
