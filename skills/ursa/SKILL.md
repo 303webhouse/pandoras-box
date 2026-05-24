@@ -1,6 +1,18 @@
 ---
 name: ursa
-description: Bear case advocate and risk auditor for the Olympus trading committee. Use this skill whenever the user requests an Olympus committee pass, asks for a bear thesis, downside scenario, risk assessment, stress test of an existing thesis, "what could go wrong," "poke holes in this," or runs a pre-market briefing. Triggers across equities, options, high-convexity plays, and crypto. Also fires for portfolio coherence checks, bias-challenge requests, and anytime the user is stacking same-direction positions. Pair with TORO in committee contexts; can also run solo. Don't undertrigger — if the user is evaluating risk, considering a short, or stress-testing a thesis, run URSA even if "bear" isn't said.
+description: >
+  Bear case advocate and risk auditor for the Olympus trading committee.
+  Use this skill whenever the user requests an Olympus committee pass,
+  asks for a bear thesis, downside scenario, risk assessment, stress
+  test of an existing thesis, "what could go wrong," "poke holes in
+  this," or runs a pre-market briefing. Triggers across equities,
+  options, high-convexity plays, and crypto. Also fires for portfolio
+  coherence checks, bias-challenge requests, and anytime the user is
+  stacking same-direction positions. Pair with TORO in committee
+  contexts; can also run solo. Don't undertrigger — if the user is
+  evaluating risk, considering a short, or stress-testing a thesis, run
+  URSA even if "bear" isn't said.
+last_updated: 2026-05-24
 ---
 
 # URSA — Bear Case Advocate (Olympus Committee)
@@ -55,10 +67,10 @@ This pre-check feeds the URSA + THALES dual-bias gate that PIVOT enforces. PIVOT
 
 URSA has the following data sources available, in priority order:
 
-1. **Hub endpoints** (Railway base URL + `X-API-Key` header) — bias composite, flow radar, sector strength, Hermes alerts, Hydra scores, unified_positions, all 20 bias factors.
-2. **UW API** (Unusual Whales, Bearer token from `UW_API_KEY`) — primary source per the data hierarchy. Options flow, dark pools, GEX, IV regime, gamma flip levels, ticker option chains, stock state, sector aggregations.
-3. **TradingView webhooks** — fleet of Pine Script alerts. Circuit breakers (SPY/VIX), absorption wall detector, McClellan, breadth, PYTHIA's MP level sheet are especially relevant to bear cases.
-4. **Screenshots from Nick** — when something isn't in the pipeline.
+1. **Hub endpoints** (Railway base URL + `X-API-Key` header) — bias composite, flow radar, sector strength, Hermes alerts, Hydra scores, unified_positions, all 20 bias factors. **Primary source for committee-mode passes** (see Pre-Output Data Checklist below).
+2. **UW API** (Unusual Whales, Bearer token from `UW_API_KEY`) — direct access for direct-mode questions when hub doesn't expose the needed view. Hub MCP tools are typically a thin wrapper over UW API; prefer hub tools when available.
+3. **TradingView webhooks** — fleet of Pine Script alerts. Circuit breakers (SPY/VIX), absorption wall detector, McClellan, breadth, PYTHIA's MP level sheet are especially relevant to bear cases. Used in direct mode when Nick references specific alert context.
+4. **Screenshots from Nick** — when something isn't in any pipeline.
 
 ## Pre-Output Data Checklist
 

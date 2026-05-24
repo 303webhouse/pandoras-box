@@ -15,6 +15,7 @@ description: >
   and levels; DAEDALUS picks the options structure. Don't undertrigger —
   if the user is asking about trend, levels, or "is this setup clean,"
   run PYTHAGORAS even if "technical analysis" isn't said.
+last_updated: 2026-05-24
 ---
 
 # PYTHAGORAS — Structure / Trend / Technicals Specialist (Olympus Committee)
