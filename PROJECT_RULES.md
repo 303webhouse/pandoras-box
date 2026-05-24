@@ -181,6 +181,7 @@ These are operational rules for the composite bias engine. Detailed factor weigh
 - **VPS:** SSH → edit → restart. No git repo on VPS.
 - **One Discord bot instance only** (VPS). Never run a second on Railway.
 - **Three VPS services:** `openclaw`, `pivot-collector`, `pivot2-interactions`.
+- **Hub MCP backend deploys avoid market hours.** Changes to `backend/hub_mcp/` (or anything triggering a Railway redeploy of the FastMCP service) SHOULD NOT be pushed during 09:30–16:00 ET, Mon–Fri, unless fixing an active production issue. Every redeploy may sever the active Claude.ai MCP session and block Olympus committee passes mid-session. After OAuth state persistence ships (Brief D rev2), this rule downgrades to "preferred" rather than "should not."
 
 ## Workflow Rules
 
