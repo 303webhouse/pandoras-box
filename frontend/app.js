@@ -53,6 +53,51 @@ const COMPOSITE_FACTOR_DISPLAY_ORDER = [
     'savita'
 ];
 
+// ============================================================
+// Visibility-gated interval manager
+// Pauses UI data pollers when the tab is hidden, resumes on visible.
+// Use managedInterval(fn, ms) instead of setInterval for UI pollers.
+// Do NOT use for the WS heartbeat (needs to stay alive in background).
+// ============================================================
+const _managedIntervals = new Map();
+let _managedIntervalSeq = 0;
+
+function managedInterval(fn, ms) {
+    const seq = ++_managedIntervalSeq;
+    const entry = {
+        fn,
+        ms,
+        id: document.visibilityState === 'visible' ? setInterval(fn, ms) : null,
+    };
+    _managedIntervals.set(seq, entry);
+    return seq;
+}
+
+function clearManagedInterval(seq) {
+    const entry = _managedIntervals.get(seq);
+    if (!entry) return;
+    if (entry.id !== null) clearInterval(entry.id);
+    _managedIntervals.delete(seq);
+}
+
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+        _managedIntervals.forEach((entry) => {
+            if (entry.id !== null) {
+                clearInterval(entry.id);
+                entry.id = null;
+            }
+        });
+    } else {
+        _managedIntervals.forEach((entry) => {
+            if (entry.id === null) {
+                entry.id = setInterval(entry.fn, entry.ms);
+                try { entry.fn(); } catch (e) { console.error('managedInterval resume fire failed', e); }
+            }
+        });
+    }
+});
+
 // === Staleness Indicators (P1) ===
 // Single source of truth for displaying data freshness across all Agora panels.
 
@@ -543,6 +588,7 @@ function formatRiskReward(value) {
 
 // State
 let ws = null;
+let _wsHeartbeatId = null;
 let tvWidget = null;
 let currentSymbol = 'SPY';
 let currentTimeframe = 'WEEKLY';
@@ -1087,9 +1133,10 @@ function initWebSocket() {
     ws.onopen = () => {
         console.log('âœ… Connected to backend');
         updateConnectionStatus(true);
-        
-        // Send heartbeat every 30 seconds
-        setInterval(() => {
+
+        // Send heartbeat every 30 seconds. Tracked in _wsHeartbeatId so onclose/onerror can clear it — otherwise each reconnect stacks another heartbeat.
+        if (_wsHeartbeatId !== null) clearInterval(_wsHeartbeatId);
+        _wsHeartbeatId = setInterval(() => {
             if (ws.readyState === WebSocket.OPEN) {
                 ws.send('ping');
             }
@@ -1113,12 +1160,14 @@ function initWebSocket() {
     ws.onerror = (error) => {
         console.error('âŒ WebSocket error:', error);
         updateConnectionStatus(false);
+        if (_wsHeartbeatId !== null) { clearInterval(_wsHeartbeatId); _wsHeartbeatId = null; }
     };
-    
+
     ws.onclose = () => {
         console.log('ðŸ”Œ Connection closed. Reconnecting...');
         updateConnectionStatus(false);
-        
+        if (_wsHeartbeatId !== null) { clearInterval(_wsHeartbeatId); _wsHeartbeatId = null; }
+
         // Reconnect after 3 seconds
         setTimeout(initWebSocket, 3000);
     };
@@ -1512,12 +1561,8 @@ async function loadInitialData() {
     checkRedisHealth();
     setInterval(checkRedisHealth, 2 * 60 * 1000);
 
-    // Position refresh every 30 seconds (visibility-gated). WebSocket pushes real-time updates.
-    setInterval(() => {
-        if (document.visibilityState === 'visible') {
-            loadOpenPositionsEnhanced();
-        }
-    }, 30 * 1000);
+    // Position refresh every 30 seconds. WebSocket pushes real-time updates; managedInterval pauses when tab is hidden.
+    managedInterval(loadOpenPositionsEnhanced, 30 * 1000);
 }
 
 let cryptoTvWidget = null;
@@ -1601,8 +1646,8 @@ function initCryptoScalper() {
 
 function startCryptoMarketPolling() {
     loadCryptoMarketData();
-    if (cryptoMarketTimer) clearInterval(cryptoMarketTimer);
-    cryptoMarketTimer = setInterval(loadCryptoMarketData, CRYPTO_MARKET_POLL_MS);
+    if (cryptoMarketTimer) clearManagedInterval(cryptoMarketTimer);
+    cryptoMarketTimer = managedInterval(loadCryptoMarketData, CRYPTO_MARKET_POLL_MS);
     // STRC circuit breaker polling (60s)
     pollStrcCircuitBreaker();
     if (window._strcTimer) clearInterval(window._strcTimer);
@@ -1611,7 +1656,7 @@ function startCryptoMarketPolling() {
 
 function stopCryptoMarketPolling() {
     if (!cryptoMarketTimer) return;
-    clearInterval(cryptoMarketTimer);
+    clearManagedInterval(cryptoMarketTimer);
     cryptoMarketTimer = null;
     if (window._strcTimer) { clearInterval(window._strcTimer); window._strcTimer = null; }
 }
@@ -8136,8 +8181,8 @@ function initOptionsFlow() {
     loadMorningBriefing();
     loadMacroStrip();
     loadBlackSwanAlerts();
-    setInterval(loadSectorHeatmap, 10 * 1000);
-    setInterval(loadMacroStrip, 10 * 1000);
+    managedInterval(loadSectorHeatmap, 10 * 1000);
+    managedInterval(loadMacroStrip, 10 * 1000);
     setInterval(loadBlackSwanAlerts, 60 * 1000);
     setInterval(loadMarketIntel, 300000); // 5-min refresh
     initHermesFlash();
@@ -9277,8 +9322,8 @@ async function loadPortfolioSummary() {
     }
 }
 
-// Auto-refresh portfolio every 15 min during market hours (9:30 AM - 4 PM ET)
-setInterval(() => {
+// Auto-refresh portfolio every 15 min during market hours (9:30 AM - 4 PM ET). managedInterval pauses on hidden tab.
+managedInterval(() => {
     const now = new Date();
     const et = new Date(now.toLocaleString('en-US', {timeZone: 'America/New_York'}));
     const h = et.getHours(), m = et.getMinutes(), day = et.getDay();
@@ -12491,7 +12536,7 @@ document.getElementById('strategiesModal')?.addEventListener('click', function(e
 let hermesCurrentEvent = null;
 
 function initHermesFlash() {
-    setInterval(fetchHermesAlerts, 10000);
+    managedInterval(fetchHermesAlerts, 10000);
     fetchHermesAlerts();
 
     document.getElementById('hermesExpandBtn')?.addEventListener('click', function() {
@@ -12796,7 +12841,7 @@ let lightningPollingInterval = null;
 let _lastLightningCards = [];
 
 function initLightningCards() {
-    lightningPollingInterval = setInterval(fetchLightningCards, 10000);
+    lightningPollingInterval = managedInterval(fetchLightningCards, 10000);
     fetchLightningCards();
 }
 
@@ -12822,8 +12867,14 @@ function renderLightningCards(cards) {
     const container = document.getElementById('tradeSignals');
     if (!container) return;
 
-    // Remove existing lightning cards
-    container.querySelectorAll('.lightning-card').forEach(el => el.remove());
+    // Remove existing lightning cards — clear their per-card countdown timers first to avoid leaks
+    container.querySelectorAll('.lightning-card').forEach(el => {
+        if (el._countdownTimerId) {
+            clearInterval(el._countdownTimerId);
+            el._countdownTimerId = null;
+        }
+        el.remove();
+    });
 
     if (cards.length === 0) return;
 
@@ -12943,11 +12994,11 @@ function createLightningCard(card) {
         ${postmortemHtml}
     `;
 
-    // Start countdown updater for active cards
+    // Start countdown updater for active cards. Timer ID attached to DOM node so it can be cleared on card removal.
     if (!isExpired) {
         const countdownEl = div.querySelector('.lightning-countdown');
         if (countdownEl) {
-            setInterval(() => {
+            div._countdownTimerId = setInterval(() => {
                 const now = Date.now();
                 const age = Math.floor((now - createdAt.getTime()) / 60000);
                 countdownEl.textContent = `${age}m ago`;
