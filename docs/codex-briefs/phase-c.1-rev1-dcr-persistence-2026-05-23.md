@@ -1,5 +1,13 @@
 # CC Brief: Phase C.1-rev1 — MCP OAuth Reliability (DCR Persistence?) (2026-05-23)
 
+> **AMENDMENT 2026-05-24 — read this before executing any task.**
+>
+> Phase 1.A + 1.B empirical reproducer (2026-05-24 16:41-17:10 UTC) showed the lost in-memory state is FastMCP's **JTI mapping store** (`proxy.py:1684`), not specifically the DCR client registrations as this brief originally hypothesized. The architecture pattern is the same (persist OAuthProxy state to a network-backed store), but the **target is broader and more elegant**: swap the `client_storage` constructor argument on `OAuthProxy(...)` to a Redis-backed `AsyncKeyValue` implementation, which persists ALL six OAuthProxy state collections (JTI mappings, DCR clients, refresh tokens, transactions, auth codes, upstream tokens) at once. No new Postgres tables needed.
+>
+> **Authoritative on the corrected diagnosis and fix shape:** [docs/codex-briefs/phase-c.1-rev1-rca-2026-05-24.md](phase-c.1-rev1-rca-2026-05-24.md). Read the RCA before Task 2.
+>
+> What still applies from this brief: Task 1 (gating client-side discovery — done), Task 3 (DCR rate-limit verification), Task 4 (audit logging gaps), Task 5 (doc extension), Task 6 (smoke tests), Task 7 (closure note), the Gates section, the Olympus impact section, and the Done definition. What is **superseded**: Task 2's specific scoping around an `oauth_clients` table — see RCA §5 for the corrected fix shape.
+
 **Supersedes:** `docs/codex-briefs/phase-c.1-oauth-2026-05-22.md` (original Phase C.1 brief, scope retired after Task 0 findings).
 **Predecessor findings:** `docs/codex-briefs/phase-c.1-task0-findings-2026-05-23.md` (committed as `a6e2f09` on the `phase-c.1-oauth` branch).
 **Branch:** `phase-c.1-oauth` (continues; do not rebase or rename).
