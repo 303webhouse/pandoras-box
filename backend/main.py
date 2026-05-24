@@ -5,6 +5,7 @@ High-performance trading signal processor with sub-100ms latency
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, Response
 from contextlib import asynccontextmanager
@@ -748,6 +749,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Compress responses >1KB. AEGIS: minimum_size=1000 is the BREACH/CRIME floor — do not lower.
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 @app.get("/")
 async def root():
