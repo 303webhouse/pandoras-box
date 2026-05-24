@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 GITHUB_CLIENT_ID_ENV = "GITHUB_OAUTH_CLIENT_ID"
 GITHUB_CLIENT_SECRET_ENV = "GITHUB_OAUTH_CLIENT_SECRET"
 ALLOWED_USERS_ENV = "MCP_ALLOWED_GITHUB_USERS"
+REDIS_URL_ENV = "REDIS_URL"
 
 # Public base URL of the MCP server. Must include the /mcp/v1 mount prefix
 # so OAuthProxy advertises the correct authorize / token / callback URLs.
@@ -83,6 +84,62 @@ class AllowlistedGitHubTokenVerifier(GitHubTokenVerifier):
         return access
 
 
+def _build_client_storage(client_secret: str):
+    """Build a Redis-backed encrypted state store for FastMCP's OAuthProxy.
+
+    Phase C.1-rev1 fix (2026-05-24): FastMCP 3.3.1 OAuthProxy's default
+    client_storage is a FileTreeStore under settings.home / oauth-proxy /
+    <fingerprint>/. Railway containers have ephemeral filesystems — every
+    redeploy wipes the directory, which loses ALL six OAuthProxy state
+    collections (JTI mappings, DCR clients, refresh tokens, transactions,
+    auth codes, upstream tokens). Empirically reproduced 2026-05-24 17:07
+    UTC; full RCA in docs/codex-briefs/phase-c.1-rev1-rca-2026-05-24.md.
+
+    Replacing the backend with Redis (Upstash) persists all six collections
+    across restarts. The OAuthProxy interface is already pluggable via the
+    client_storage constructor arg; this helper assembles the backend.
+
+    Encryption-at-rest is preserved via Fernet, mirroring FastMCP's default
+    pattern. The encryption key is derived from GITHUB_OAUTH_CLIENT_SECRET
+    via the same HKDF that FastMCP uses for its own JWT signing key, with a
+    different salt to keep the derivations separated. FastMCP treats Fernet
+    decryption errors as cache misses (proxy.py:482-485 docstring), so if
+    the upstream secret rotates the failure mode is "clients re-register",
+    not "server breaks."
+
+    Returns None if REDIS_URL is unset, falling back to FastMCP's default.
+    """
+    redis_url = os.environ.get(REDIS_URL_ENV)
+    if not redis_url:
+        return None
+
+    try:
+        from cryptography.fernet import Fernet
+        from fastmcp.server.auth.jwt_issuer import derive_jwt_key
+        from key_value.aio.stores.redis import RedisStore
+        from key_value.aio.wrappers.encryption import FernetEncryptionWrapper
+    except ImportError as exc:
+        logger.warning(
+            "OAuth Redis-backed storage unavailable (import failed: %s). "
+            "Falling back to FastMCP's default file-backed store — state will "
+            "NOT survive Railway redeploys.",
+            exc,
+        )
+        return None
+
+    storage_key = derive_jwt_key(
+        high_entropy_material=client_secret,
+        salt="hub-mcp-oauth-storage-key-v1",
+    )
+
+    redis_store = RedisStore(url=redis_url, default_collection="fastmcp-oauth")
+    return FernetEncryptionWrapper(
+        key_value=redis_store,
+        fernet=Fernet(key=storage_key),
+        raise_on_decryption_error=False,
+    )
+
+
 def build_oauth_provider() -> Optional[OAuthProxy]:
     """Build the OAuthProxy for GitHub, or return None if env vars are unset.
 
@@ -117,6 +174,17 @@ def build_oauth_provider() -> Optional[OAuthProxy]:
         required_scopes=["user"],
         cache_ttl_seconds=300,
     )
+
+    client_storage = _build_client_storage(client_secret)
+    if client_storage is None:
+        logger.warning(
+            "%s not set — OAuthProxy will use FastMCP's default file-backed "
+            "store. OAuth state (DCR registrations, JTI mappings, refresh "
+            "tokens) will NOT survive Railway redeploys; clients will need to "
+            "manually reconnect after each deploy. Set %s to fix.",
+            REDIS_URL_ENV, REDIS_URL_ENV,
+        )
+
     proxy = OAuthProxy(
         upstream_authorization_endpoint="https://github.com/login/oauth/authorize",
         upstream_token_endpoint="https://github.com/login/oauth/access_token",
@@ -124,12 +192,15 @@ def build_oauth_provider() -> Optional[OAuthProxy]:
         upstream_client_secret=client_secret,
         token_verifier=verifier,
         base_url=base_url,
+        client_storage=client_storage,
         # redirect_path defaults to /auth/callback, which is what the GitHub
         # OAuth App is configured for (verified empirically 2026-05-15).
     )
     logger.info(
-        "OAuth enabled: GitHub upstream, %d allowed user(s), base=%s",
+        "OAuth enabled: GitHub upstream, %d allowed user(s), base=%s, "
+        "client_storage=%s",
         len(allowed_users),
         base_url,
+        "redis (persistent)" if client_storage is not None else "file (ephemeral)",
     )
     return proxy
