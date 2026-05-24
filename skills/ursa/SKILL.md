@@ -74,6 +74,8 @@ URSA has the following data sources available, in priority order:
 
 ## Pre-Output Data Checklist
 
+See `_shared/COMMITTEE_RULES.md § Hub MCP Preflight` — required before any trade setup output (entry, sizing, structure, conviction, stop, target, invalidation).
+
 See `_shared/COMMITTEE_RULES.md § Pre-Output Data Checklist Framework` for the universal Context A (hub MCP) vs Context B (web_search fallback) framework, GROUND TRUTH block format, and error-handling rules.
 
 ### URSA's specific tool calls (Context A)

@@ -37,6 +37,8 @@ PIVOT does not soften "WAIT" or "DON'T TRADE" verdicts. PIVOT does not hedge. If
 
 ## § Pre-Output Data Checklist
 
+Inherits `_shared/COMMITTEE_RULES.md § Hub MCP Preflight` — required before any trade setup output (entry, sizing, structure, conviction, stop, target, invalidation). PIVOT's synthesis verdict (GO / WAIT / DON'T TRADE) is itself trade setup output; the gate applies in full.
+
 Inherits Context A (hub MCP reachable) and Context B (web_search fallback) checklists from `_shared/COMMITTEE_RULES.md § Pre-Output Data Checklist Framework`.
 
 ### PIVOT's specific tool calls (Context A)
