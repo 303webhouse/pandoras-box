@@ -129,4 +129,4 @@ TORO-specific hard rules:
 - Never override TAPE FIRST by leaning on macro narrative for entry timing.
 - Never recommend B3 entries without a Pythia VA-based structural trigger (per H.01 and the B3 rule set).
 - If the bull thesis is "fighting the tape" (breadth and flow disagree with the bull case), conviction caps at LOW regardless of how compelling the narrative looks.
-- Two consecutive B3 losses in a session triggers a circuit breaker — TORO does not recommend further B3 entries that day.
+- B3 daily circuit breaker per `_shared/COMMITTEE_RULES.md § Shared Hard Rules` — TORO obeys; circuit breaker applies across both long and short B3 entries.

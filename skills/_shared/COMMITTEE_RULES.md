@@ -1,6 +1,6 @@
 # Olympus Committee — Shared Rules
 
-This file is the single canonical source for architectural patterns that bind every committee agent (TORO, URSA, PYTHIA, and future PYTHAGORAS / DAEDALUS / THALES / PIVOT). Each agent's `SKILL.md` references the relevant section here instead of duplicating the content.
+This file is the single canonical source for architectural patterns that bind every committee agent: TORO, URSA, PYTHIA, PYTHAGORAS, DAEDALUS, THALES, and PIVOT. Each agent's `SKILL.md` references the relevant section here instead of duplicating the content.
 
 **Architectural promise:** Anything in this file applies to every committee agent. Anything in an agent's own `SKILL.md` is agent-specific (persona, mandate, tool calls, output format, hard rules unique to that agent).
 
@@ -89,6 +89,24 @@ When two agents with opposing or different mandates reach the same directional c
 
 ---
 
+## § Bias and Thesis Labels
+
+When URSA's THESIS GROUPING pre-check or THALES's THESIS WORLD-CHECK classify the existing book against a coherent macro thesis, these are the canonical labels. Both agents use the same labels so PIVOT's dual-flag gate can detect agreement reliably.
+
+- **Iran-escalation thesis.** Long energy (XLE, USO, oil-equity), long ag (CF, MOS, food), short consumer discretionary (XLY), short high-multiple growth, short credit (HYG). Macro tells: oil rising, energy leading, ag inputs firming, geopolitical headlines elevated.
+- **AI-bubble-deflation thesis.** Short AI names (IGV, software), short semis, short hyperscaler infrastructure. Macro tells: semis breaking down, IGV/software de-rating, hyperscaler capex narratives cracking.
+- **Fed-hawkish thesis.** Short long-duration (TLT puts), short rate-sensitive (XLF puts, REITs), long short-duration cash equivalents. Macro tells: 10y yield rising, dollar firming, rate-cut expectations pushed out.
+- **Pure macro-bearish bias stack.** Broad short-index exposure with no offsetting long structure and no thematic coherence tying positions together. This is the failure mode the THESIS pre-checks exist to distinguish from the three coherent theses above.
+
+**Lane split:**
+- URSA reads BOOK coherence: do positions span multiple directions tied to a single coherent thesis?
+- THALES reads WORLD coherence: does the current macro environment support the thesis right now?
+- Both must rule out a coherent thesis before the BIAS-ALIGNMENT flag fires (per the PIVOT dual-flag gate).
+
+**Adding a new label:** When a new coherent thesis emerges in the book (e.g., a future "AI-capex-acceleration" thesis or "China-reopening" thesis), add it here first, then update URSA and THALES references. Don't let labels drift across agent files.
+
+---
+
 ## § Shared Hard Rules
 
 These rules apply to every committee agent:
@@ -105,6 +123,8 @@ These additional rules apply only to agents that recommend specific trade entrie
 
 - Never recommend sizing that violates three-bucket caps: B2 $200–300 max with max 2 open; B3 $100 cap until cash infusion lands, max 2 concurrent, max 3/day, same-day close, structural Pythia VA trigger required.
 - Below 21 DTE on any options expression, recommend closing at 60–70% of max value — don't hold for perfection.
+- **B3 daily circuit breaker.** Two consecutive B3 losses in a single session triggers a circuit breaker — no further B3 entries that day, regardless of direction or which agent surfaces the setup. Daily max loss cap remains $300 regardless of trade count. Applies to TORO long-B3 and URSA short-B3 entries equally; PIVOT enforces at synthesis time.
+- **20% portfolio risk cap.** Sum of max losses across all open positions must not exceed 20% of the relevant account balance pulled live from `hub_get_portfolio_balances`. DAEDALUS enforces at structure proposal; URSA surfaces in portfolio coherence check; PIVOT vetos via DON'T TRADE if a new position would push the book over the cap.
 
 Agents that do not recommend trades (PYTHIA, PYTHAGORAS, THALES) do not need to enforce the trade-sizing rules — but their structural / trend / macro reads may inform whether a trade meets these gates when other agents evaluate.
 

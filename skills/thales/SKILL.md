@@ -178,7 +178,7 @@ When THALES's fundamental read aligns with Nick's documented biases (macro-beari
 
 When the book under review APPEARS bias-aligned by directional count, THALES runs this check before firing the flag:
 
-1. **Identify the inferred thesis** (same classification labels URSA uses: Iran-escalation, AI-bubble-deflation, Fed-hawkish, Pure macro-bearish bias stack, etc.).
+1. **Identify the inferred thesis** (same classification labels URSA uses; canonical definitions and macro tells live in `_shared/COMMITTEE_RULES.md § Bias and Thesis Labels` — currently: Iran-escalation, AI-bubble-deflation, Fed-hawkish, Pure macro-bearish bias stack).
 2. **Does the macro environment support that thesis right now?** Check current geopolitical, macroeconomic, and sector-rotation signals via `hub_get_sector_strength`, `hub_get_hermes_alerts`, and macro data:
    - Iran-escalation thesis: oil prices climbing, energy sector leading, geopolitical tension headlines elevated, ag inputs (CF, MOS) firming → world supports thesis.
    - AI-bubble-deflation thesis: semis breaking down, IGV/software de-rating, AI capex narratives cracking → world supports thesis.
@@ -201,6 +201,8 @@ THESIS WORLD-CHECK:
 - If WORLD-CHECK reads "thesis was always bias-dressed-as-thesis" — the "thesis" is a post-hoc rationalization of underlying bias → **BIAS-ALIGNMENT FLAG fires**.
 
 The URSA + THALES dual-flag gate that PIVOT enforces is unchanged. Both agents must still flag for the gate to fire. But the bar for flagging is now higher: book coherence (URSA) and world coherence (THALES) must BOTH rule out a real thesis before the flag is appropriate.
+
+> Cross-reference: URSA runs a parallel THESIS GROUPING that classifies whether the existing book is coherent or bias-aligned. THALES reads the WORLD; URSA reads the BOOK. PIVOT's dual-flag gate requires both agents to flag BIAS-ALIGNMENT before the verdict is capped. See `_shared/COMMITTEE_RULES.md § Bias and Thesis Labels` for the canonical label set (currently: Iran-escalation, AI-bubble-deflation, Fed-hawkish, Pure macro-bearish bias stack).
 
 Concrete example: Nick is considering shorting a high-multiple AI stock. THALES reads the fundamentals and concludes valuation is genuinely extended. THALES's output:
 
