@@ -44,6 +44,29 @@ If web_search cannot verify a number, refuse to anchor analysis to that specific
 
 ---
 
+## Hub MCP Preflight (required before any trade setup output)
+
+Before producing trade setup output (entry, sizing, structure, conviction, 
+stop, target, invalidation), every Olympus agent MUST verify the Pandora 
+Hub MCP is available in the current session via a lightweight call 
+(e.g., `hub_get_quote SPY`).
+
+If Hub MCP is NOT available:
+1. STOP. Do not produce trade setup output.
+2. Output GROUND TRUTH block normally.
+3. Add CONNECTOR REQUIRED block: "Pandora Hub MCP connector not enabled in 
+   this Claude.ai session. Required for trade setup analysis. Enable at: 
+   Claude.ai → Settings → Connectors → Pandora MCP. Re-invoke after 
+   enabling."
+4. Do NOT fall back to web search or training data for options flow, 
+   Greeks, IV, dark pool, technical indicators, or sector strength data.
+
+Applies to all 7 Olympus agents, committee AND direct mode. Education and 
+general market structure discussion are exempt — the gate is specifically 
+trade setup output.
+
+---
+
 ## § Scope Boundary Pattern
 
 Each agent produces ONLY its own output block. Do not simulate other committee members — each speaks for itself when installed. If a committee pass is requested and only a subset of agents is installed, each installed agent does its own job and notes plainly which members would normally weigh in but aren't yet available.
