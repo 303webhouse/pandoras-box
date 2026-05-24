@@ -464,6 +464,93 @@ async def get_snapshot(ticker: str) -> Optional[Dict[str, Any]]:
     return result
 
 
+async def _get_bars_via_uw(
+    ticker: str,
+    from_date: Optional[str],
+    to_date: Optional[str],
+) -> Optional[List[Dict[str, Any]]]:
+    """Fetch daily bars from UW /ohlc/1d, translate to Polygon shape.
+
+    Phase B 2026-05-24: routes the `get_bars()` daily path through the
+    existing `get_ohlc()` wrapper (Phase A). Filters to regular-session
+    bars (`market_time == "r"`) to match yfinance's `interval="1d"`
+    semantic — one bar per regular trading session, no pre/post-market.
+    """
+    today = date.today()
+    if from_date:
+        try:
+            from_dt = date.fromisoformat(str(from_date)[:10])
+            lookback = max(7, (today - from_dt).days + 5)  # +5 day buffer
+        except (ValueError, TypeError):
+            lookback = 60
+    else:
+        lookback = 60  # matches _fetch_yfinance_bars() default window
+    lookback = min(lookback, 730)  # 2-year cap; revisit if a consumer needs more
+
+    raw = await get_ohlc(ticker, "1d", lookback_days=lookback)
+    if not raw:
+        return None
+
+    bars_out: List[Dict[str, Any]] = []
+    for b in raw:
+        if b.get("market_time") != "r":
+            continue
+        try:
+            o = float(b["open"])
+            h = float(b["high"])
+            l = float(b["low"])
+            c = float(b["close"])
+        except (TypeError, ValueError, KeyError):
+            continue
+        v_raw = b.get("total_volume") or b.get("volume") or 0
+        try:
+            v = int(v_raw)
+        except (TypeError, ValueError):
+            v = 0
+        ts_ms: Optional[int] = None
+        start_time = b.get("start_time")
+        if start_time:
+            try:
+                dt = datetime.fromisoformat(str(start_time).replace("Z", "+00:00"))
+                ts_ms = int(dt.timestamp() * 1000)
+            except (ValueError, TypeError):
+                pass
+        if ts_ms is None:
+            continue  # downstream consumers require `t`; skip unparseable
+        bars_out.append({
+            "o": o,
+            "h": h,
+            "l": l,
+            "c": c,
+            "v": v,
+            "vw": None,  # UW daily bars don't expose vwap (matches yfinance)
+            "t": ts_ms,
+            "n": None,   # UW daily bars don't expose trade count
+        })
+
+    # Apply requested date range post-translation. UW returns bars from
+    # today - lookback_days onward; we slice to the explicit window when given.
+    if from_date or to_date:
+        try:
+            from_ms = (
+                int(datetime.fromisoformat(str(from_date)[:10]).timestamp() * 1000)
+                if from_date else None
+            )
+            to_ms = (
+                int(datetime.fromisoformat(str(to_date)[:10]).timestamp() * 1000)
+                if to_date else None
+            )
+            bars_out = [
+                b for b in bars_out
+                if (from_ms is None or b["t"] >= from_ms)
+                and (to_ms is None or b["t"] <= to_ms + 86_400_000)  # inclusive end
+            ]
+        except (ValueError, TypeError):
+            pass  # if date parsing fails, return the unfiltered set
+
+    return bars_out
+
+
 async def get_bars(
     ticker: str,
     multiplier: int = 1,
@@ -472,13 +559,38 @@ async def get_bars(
     to_date: Optional[str] = None,
 ) -> Optional[List[Dict[str, Any]]]:
     """
-    Fetch OHLCV bars via yfinance. Matches polygon_equities.get_bars() schema:
-    List of dicts with keys: o, h, l, c, v, vw, t, n
+    Fetch OHLCV bars. Phase B 2026-05-24: UW `/api/stock/{ticker}/ohlc/1d`
+    is the primary source for daily bars; yfinance remains as fallback and
+    as the primary path for indices/breadth UW does not cover (`^VIX`,
+    `^GSPC`, `^ADVN`, `^DECLN`).
+
+    Matches polygon_equities.get_bars() schema:
+        List of dicts with keys: o, h, l, c, v, vw, t, n
     """
     cache_key = f"{ticker}|{multiplier}|{timespan}|{from_date}|{to_date}"
     cached = await cache_get("quote", cache_key)
     if cached:
         return cached
+
+    # UW path: daily only, and only for tickers UW carries. Yahoo-style
+    # indices/breadth (`^VIX`, `^GSPC`, `^ADVN`, `^DECLN`, ...) are not in
+    # UW's universe — skip the doomed round-trip and let yfinance handle
+    # them. Sub-daily timespans (intraday) also fall through to yfinance;
+    # no current consumer asks for sub-daily, but this preserves the
+    # existing public contract for any future caller.
+    if timespan == "day" and not ticker.startswith("^"):
+        try:
+            bars = await _get_bars_via_uw(ticker, from_date, to_date)
+        except Exception as e:
+            logger.warning("UW get_bars path raised for %s: %s — falling back to yfinance", ticker, e)
+            bars = None
+        if bars:
+            await cache_set("quote", cache_key, bars)
+            return bars
+        logger.info(
+            "UW /ohlc/1d unavailable or empty for %s — falling back to yfinance",
+            ticker,
+        )
 
     try:
         loop = asyncio.get_event_loop()
@@ -487,7 +599,7 @@ async def get_bars(
             await cache_set("quote", cache_key, bars)
         return bars
     except Exception as e:
-        logger.error("yfinance bars failed for %s: %s", ticker, e)
+        logger.error("yfinance bars fallback failed for %s: %s", ticker, e)
         return None
 
 
