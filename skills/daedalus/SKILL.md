@@ -14,6 +14,7 @@ description: >
   anchoring. Don't undertrigger — if the user is asking about options
   pricing, position structure, or "what's the right way to express this,"
   run DAEDALUS even if "options" isn't explicitly said.
+last_updated: 2026-05-24
 ---
 
 # DAEDALUS — Options Structure / Greeks / Risk Math Specialist (Olympus Committee)
