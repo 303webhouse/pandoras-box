@@ -206,7 +206,7 @@ skills/<agent>/
 
 **Edit workflow:**
 
-1. Edit source files in `skills/<agent>/` — never edit anything under `dist/`.
+1. Edit source files in `skills/<agent>/` or `skills/_shared/` — never edit anything under `dist/`. Editing `skills/_shared/COMMITTEE_RULES.md` or `skills/_shared/TITANS_RULES.md` affects every packaged bundle and requires re-running the packager.
 2. Re-run the packager:
    ```
    scripts\package-skill.bat <agent>      # one agent
@@ -220,7 +220,7 @@ skills/<agent>/
 - `dist/` is gitignored. The `.skill` file is a build artifact, not source.
 - Each agent's `SKILL.md` must include YAML frontmatter with `name:` and `description:` fields.
 - Crypto playbooks remain stubbed until the Stater Swap rebuild lands — do not author crypto methodology from general pretrained priors.
-- Shared hard rules (three-bucket caps, 60–70% close rule, B3 circuit breaker, etc.) currently live inside each agent's `SKILL.md`. After three agents exist, extract these into a shared `skills/_shared/rules.md` referenced by every agent.
+- Shared committee rules (three-bucket caps, 60–70% close rule, B3 circuit breaker, 20% portfolio risk cap, Bias and Thesis Labels, etc.) live in canonical `skills/_shared/COMMITTEE_RULES.md`. Per-agent `SKILL.md` files reference sections by name; do not duplicate the content. Titans share-rules live in `skills/_shared/TITANS_RULES.md` under the same pattern. The packager nests `skills/_shared/` into each `.skill` bundle at packaging time — there are no in-repo mirror copies.
 - Session/mode skills (slash commands like `/trade`, `/post-mortem`, `/battlefield-brief`) will be added as separate skill folders later — they layer workflow and rules on top of the agent skills, do not replace them.
 
 ## Agent Maintenance Protocol
