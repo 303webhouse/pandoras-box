@@ -1129,15 +1129,17 @@ try:
     import time as _time
     from datetime import datetime as _datetime, timezone as _timezone
 
-    from hub_mcp.router import mcp_app, fastmcp_app as _fastmcp_inner
-    app.mount("/mcp/v1", mcp_app)
-    logger.info("✅ MCP v1 server mounted at /mcp/v1")
-
     # Captured at module import (≈ container/worker start) so /mcp/v1/health
     # can report uptime + a "deploy timestamp" without an extra system call.
     _HUB_MCP_START_MONOTONIC = _time.monotonic()
     _HUB_MCP_START_UTC = _datetime.now(_timezone.utc)
 
+    # Register the health route BEFORE app.mount("/mcp/v1", ...) below.
+    # Starlette iterates app.routes in registration order; a Mount registered
+    # earlier swallows every path under its prefix, so a specific Route at
+    # /mcp/v1/health declared after the mount returns 404. (Verified
+    # empirically post-deploy 2026-05-24T22:30 UTC.) Register the Route
+    # first, then the Mount.
     @app.get("/mcp/v1/health", include_in_schema=False)
     async def _mcp_v1_health():
         # Unauthenticated by design — Nick needs to hit this from a browser
@@ -1153,6 +1155,10 @@ try:
             "version": (os.environ.get("RAILWAY_GIT_COMMIT_SHA") or "unknown")[:7],
         }
     logger.info("✅ /mcp/v1/health endpoint registered")
+
+    from hub_mcp.router import mcp_app, fastmcp_app as _fastmcp_inner
+    app.mount("/mcp/v1", mcp_app)
+    logger.info("✅ MCP v1 server mounted at /mcp/v1")
 
     # ─── OAuth discovery + DCR at the DOMAIN ROOT ────────────────────────
     # Claude.ai's MCP connector and RFC 8414 expect these endpoints at the
