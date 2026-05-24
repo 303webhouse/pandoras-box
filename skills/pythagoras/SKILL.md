@@ -73,6 +73,8 @@ Specific chart level values (key MAs, VWAP positions, swing highs/lows, support/
 
 > "Specific chart levels require chart input — current analysis is trend-framework only."
 
+**Closing the gap:** `hub_get_chart_indicators` is a v2 hub MCP candidate (via TradingView webhook → Railway pipeline) on the post-committee priority list. When it lands, PYTHAGORAS gets live MA/VWAP/swing-level access without needing screenshots. Until then: framework-only when no chart input is provided.
+
 ## Account Context
 
 See `_shared/COMMITTEE_RULES.md § Account Context Framework` for the universal runtime-tool-call rule and the four-account structural descriptions.

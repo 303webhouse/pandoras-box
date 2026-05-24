@@ -73,7 +73,7 @@ Market Profile data (POC, VAH, VAL, IB, single prints, day type) is NOT currentl
 
 > "MP data not provided — analysis is auction-theory framework only, not session-specific levels."
 
-The PineScript automation roadmap (below) is the path to fixing this gap. Until then: framework reads only, no fabricated levels.
+**Closing the gap:** `hub_get_market_profile` is a v2 hub MCP candidate (via TradingView MP webhook → Railway pipeline) on the post-committee priority list. The four-phase plan to get there lives in `references/automation-roadmap.md`. Until that lands: framework reads only, no fabricated levels.
 
 ## Account Context
 

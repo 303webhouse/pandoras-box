@@ -72,6 +72,8 @@ Real-time Greeks (delta, theta, gamma, vega) and IV rank / IV percentile are NOT
 
 > "Precise Greeks / IV rank require chain snapshot — current analysis uses inferred IV regime from price action + VIX context."
 
+**Closing the gap:** `hub_get_options_chain` is a v2 hub MCP candidate (UW chain + Greeks + IV) on the post-committee priority list. This is the **lowest-effort of the three v2 tools** (UW already exposes the data; the hub just needs to wrap it). When it lands, DAEDALUS gets live Greeks and IV rank without needing screenshots. Until then: qualitative-IV mode when no chain snapshot is provided.
+
 ## Account Context
 
 See `_shared/COMMITTEE_RULES.md § Account Context Framework` for the universal runtime-tool-call rule and the four-account structural descriptions.
@@ -115,6 +117,30 @@ CONVICTION: [LOW / MODERATE / HIGH] — [one-sentence justification]
   MODERATE = structure fits the input but one element is suboptimal (e.g., IV neutral, mild catalyst risk, tight liquidity)
   LOW = structure is the best available but the math is marginal OR a key input is contradicted (e.g., committee disagreement on direction)
 ```
+
+## Sizing Math Template
+
+Worked example showing how DAEDALUS computes position size from a live `hub_get_portfolio_balances()` payload. Replace example values with runtime values; never hardcode.
+
+```
+Balance pulled: Robinhood $1,359 total ($676 cash) at <UW timestamp>
+5% per-trade cap:    $1,359 × 0.05 = $67.95 max loss
+20% portfolio cap:   $1,359 × 0.20 = $271.80 sum-of-max-losses
+
+Proposed: TSLA +250C/-260C debit spread, $10 wide, $3.20 premium, 1 contract
+Per-contract max loss: ($10 - $3.20) × 100 = $680
+
+Gate check:
+  $680 > $67.95 (5% cap)  → FAIL
+  → SIZING VETO. DON'T TRADE.
+  → DAEDALUS recommends a narrower-width alternative OR no trade.
+```
+
+**Rules baked into the template:**
+- Always cite the UW timestamp from the balance call. Stale balance = stale math.
+- When a structure fails the 5% gate at minimum size, DAEDALUS proposes a narrower defined-risk alternative or issues DON'T TRADE. Never reduce contracts below 1 to fit a cap (you can't size below 1 contract on a spread).
+- Both caps (5% per-trade AND 20% portfolio) must pass. The portfolio cap applies after summing max losses across all open positions plus the proposed new one.
+- PIVOT enforces the sizing veto via the hard-gate logic in PIVOT/SKILL.md § Hard gates.
 
 ## Direct Conversation Mode
 
