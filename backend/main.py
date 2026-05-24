@@ -1126,9 +1126,33 @@ app.include_router(signals_router, prefix="/api", tags=["signals"])
 # The FastMCP lifespan is chained into the parent's lifespan above; the
 # session-manager task group needs to be live before any request fires.
 try:
+    import time as _time
+    from datetime import datetime as _datetime, timezone as _timezone
+
     from hub_mcp.router import mcp_app, fastmcp_app as _fastmcp_inner
     app.mount("/mcp/v1", mcp_app)
     logger.info("✅ MCP v1 server mounted at /mcp/v1")
+
+    # Captured at module import (≈ container/worker start) so /mcp/v1/health
+    # can report uptime + a "deploy timestamp" without an extra system call.
+    _HUB_MCP_START_MONOTONIC = _time.monotonic()
+    _HUB_MCP_START_UTC = _datetime.now(_timezone.utc)
+
+    @app.get("/mcp/v1/health", include_in_schema=False)
+    async def _mcp_v1_health():
+        # Unauthenticated by design — Nick needs to hit this from a browser
+        # to tell "session stale" apart from "server down" without touching
+        # an OAuth flow. See docs/operations/mcp-connection-guide.md § 1.
+        uptime = int(_time.monotonic() - _HUB_MCP_START_MONOTONIC)
+        return {
+            "status": "ok",
+            "service": "mcp/v1",
+            "uptime_seconds": uptime,
+            "deployed_at": _HUB_MCP_START_UTC.isoformat(),
+            "worker_id": f"pid-{os.getpid()}",
+            "version": (os.environ.get("RAILWAY_GIT_COMMIT_SHA") or "unknown")[:7],
+        }
+    logger.info("✅ /mcp/v1/health endpoint registered")
 
     # ─── OAuth discovery + DCR at the DOMAIN ROOT ────────────────────────
     # Claude.ai's MCP connector and RFC 8414 expect these endpoints at the

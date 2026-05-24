@@ -6,6 +6,21 @@ How to connect Claude.ai (Olympus committee skills + direct chats) to the hub MC
 
 ---
 
+## § 1 — Quick: Session went stale mid-trade
+
+If a committee pass fails with "MCP unreachable" or "tool unavailable":
+
+1. Open `https://pandoras-box-production.up.railway.app/mcp/v1/health` in a browser. If it returns `{"status":"ok",...}`, the server is up — your Claude.ai session is stale, go to step 2. If it doesn't respond or returns 5xx, the server itself is down; check Railway.
+2. Claude.ai → Settings → Connectors → "Pandora's Box Hub" → Disconnect → Connect. Approve the GitHub OAuth flow.
+3. Verify reconnection by asking Claude to run a small hub tool (e.g., "show me current bias composite").
+4. Resume the committee pass.
+
+Expected total time: 30 seconds.
+
+The `/mcp/v1/health` response also includes `uptime_seconds` and `deployed_at` — if uptime is < 60s, the server was just redeployed (which is what kills the OAuth session today). The `worker_id` field is a process-ID stamp; if it changes between two refreshes the process restarted under you.
+
+---
+
 ## What you need before connecting
 
 1. **The MCP URL:** `https://pandoras-box-production.up.railway.app/mcp/v1/`
@@ -63,7 +78,7 @@ Connect once on desktop. Claude.ai's mobile app inherits the OAuth token via acc
 In order of likelihood:
 
 1. **Railway down or mid-deploy.** Verify: `curl https://pandoras-box-production.up.railway.app/health` should return `{"status":"healthy", ...}`. If it doesn't, the parent app is down.
-2. **MCP-specific down.** `curl https://pandoras-box-production.up.railway.app/mcp/v1/health` should return `{"status":"ok","service":"mcp/v1"}`. If parent health is fine but this 404s, the FastMCP mount failed at startup — check Railway logs for `MCP v1 server failed to mount`.
+2. **MCP-specific down.** `curl https://pandoras-box-production.up.railway.app/mcp/v1/health` should return `{"status":"ok","service":"mcp/v1","uptime_seconds":...}`. If parent health is fine but this 404s, the FastMCP mount or the health route registration failed at startup — check Railway logs for `MCP v1 server failed to mount` or a missing `/mcp/v1/health endpoint registered` line.
 3. **OAuth metadata endpoint broken.** `curl https://pandoras-box-production.up.railway.app/mcp/v1/.well-known/oauth-authorization-server` should return JSON with `issuer`, `authorization_endpoint`, `token_endpoint`. If it 404s, FastMCP's OAuthProxy didn't initialize — likely the GitHub OAuth env vars aren't set on Railway.
 
 ### "MCP: unreachable" inside a TORO/URSA committee output
