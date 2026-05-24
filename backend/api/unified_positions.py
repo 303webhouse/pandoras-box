@@ -646,48 +646,61 @@ async def list_positions(
             from database.redis_client import get_redis_client
             redis = await get_redis_client()
             if redis:
+                position_tickers = []
+                keys = []
                 for p in positions:
                     ticker = (p.get("ticker") or "").upper()
                     if ticker:
-                        raw = await redis.get(f"counter_signal:{ticker}")
-                        if raw:
-                            p["counter_signal"] = json.loads(raw)
-                        raw_conf = await redis.get(f"confirming_signal:{ticker}")
-                        if raw_conf:
-                            p["confirming_signal"] = json.loads(raw_conf)
-                        # UW flow badge — compare flow sentiment to position direction
-                        raw_flow = await redis.get(f"uw:flow:{ticker}")
-                        if raw_flow:
-                            flow = json.loads(raw_flow)
-                            flow_sent = (flow.get("sentiment") or "").upper()
-                            pos_dir = (p.get("direction") or "").upper()
-                            bullish_dirs = {"LONG", "BUY", "BULLISH"}
-                            bearish_dirs = {"SHORT", "SELL", "BEARISH"}
-                            if flow_sent in ("BULLISH", "BEARISH") and pos_dir:
-                                flow_bull = flow_sent == "BULLISH"
-                                pos_bull = pos_dir in bullish_dirs
-                                pos_bear = pos_dir in bearish_dirs
-                                if (flow_bull and pos_bull) or (not flow_bull and pos_bear):
-                                    alignment = "CONFIRMING"
-                                elif (flow_bull and pos_bear) or (not flow_bull and pos_bull):
-                                    alignment = "OPPOSING"
-                                else:
-                                    alignment = "NEUTRAL"
+                        position_tickers.append((p, ticker))
+                        keys.extend([
+                            f"counter_signal:{ticker}",
+                            f"confirming_signal:{ticker}",
+                            f"uw:flow:{ticker}",
+                        ])
+
+                raw_values = await redis.mget(keys) if keys else []
+
+                for i, (p, ticker) in enumerate(position_tickers):
+                    base = i * 3
+                    raw = raw_values[base]
+                    raw_conf = raw_values[base + 1]
+                    raw_flow = raw_values[base + 2]
+                    if raw:
+                        p["counter_signal"] = json.loads(raw)
+                    if raw_conf:
+                        p["confirming_signal"] = json.loads(raw_conf)
+                    # UW flow badge — compare flow sentiment to position direction
+                    if raw_flow:
+                        flow = json.loads(raw_flow)
+                        flow_sent = (flow.get("sentiment") or "").upper()
+                        pos_dir = (p.get("direction") or "").upper()
+                        bullish_dirs = {"LONG", "BUY", "BULLISH"}
+                        bearish_dirs = {"SHORT", "SELL", "BEARISH"}
+                        if flow_sent in ("BULLISH", "BEARISH") and pos_dir:
+                            flow_bull = flow_sent == "BULLISH"
+                            pos_bull = pos_dir in bullish_dirs
+                            pos_bear = pos_dir in bearish_dirs
+                            if (flow_bull and pos_bull) or (not flow_bull and pos_bear):
+                                alignment = "CONFIRMING"
+                            elif (flow_bull and pos_bear) or (not flow_bull and pos_bull):
+                                alignment = "OPPOSING"
                             else:
                                 alignment = "NEUTRAL"
-                            # Strength: HIGH if total premium > $100M, else MODERATE
-                            tp = flow.get("total_premium") or 0
-                            strength = "HIGH" if tp > 100_000_000 else "MODERATE"
-                            p["flow_badge"] = {
-                                "sentiment": flow_sent or "NEUTRAL",
-                                "alignment": alignment,
-                                "strength": strength,
-                                "pc_ratio": flow.get("pc_ratio"),
-                                "total_premium": tp,
-                                "call_premium": flow.get("call_premium"),
-                                "put_premium": flow.get("put_premium"),
-                                "last_updated": flow.get("last_updated"),
-                            }
+                        else:
+                            alignment = "NEUTRAL"
+                        # Strength: HIGH if total premium > $100M, else MODERATE
+                        tp = flow.get("total_premium") or 0
+                        strength = "HIGH" if tp > 100_000_000 else "MODERATE"
+                        p["flow_badge"] = {
+                            "sentiment": flow_sent or "NEUTRAL",
+                            "alignment": alignment,
+                            "strength": strength,
+                            "pc_ratio": flow.get("pc_ratio"),
+                            "total_premium": tp,
+                            "call_premium": flow.get("call_premium"),
+                            "put_premium": flow.get("put_premium"),
+                            "last_updated": flow.get("last_updated"),
+                        }
         except Exception as e:
             logger.warning(f"Failed to attach counter-signals: {e}")
 
