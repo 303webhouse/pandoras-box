@@ -68,13 +68,6 @@ Items deeper in Tier 2 / Tier 3 that previously anchored on "post-ZEUS" now anch
 **Gates:** Phase A's `get_ohlc` wrapper shipped (✓ in `363cde6`). Independent of Phase C — can ship in parallel or after.
 **Unblocks:** Cleaner downstream consumers (sectors fallback, market_data, scanners, correlation_monitor, trip_wire_monitor). Closes ZEUS Phase I.
 
-### 3. PIVOT skill — last Olympus persona (post-ZEUS-Phase-I)
-**Bucket:** Foundation.
-**Status:** QUEUED. Held until ZEUS Phase I closes per Nick's "UW integration first" call on 2026-05-22.
-**Why:** Final Olympus committee member. Synthesis lane. Exists as `skills/user/pivot/SKILL.md` per available skills surface — needs cross-reference review, equities/crypto references, and integration check with the six existing analyst skills.
-**Gates:** ZEUS Phase I (Phase C bundle + Phase B) ships first.
-**Unblocks:** Olympus committee cross-review pass (all seven personas reviewing each other's skills).
-
 ---
 
 ## Tier 2 — Tactical / Queued
@@ -140,6 +133,7 @@ Items deeper in Tier 2 / Tier 3 that previously anchored on "post-ZEUS" now anch
 
 | Build | SHA | Closure note | Closed date |
 |---|---|---|---|
+| PIVOT skill — seventh and final Olympus committee agent | `fd0419b` | (no formal closure — skill file at `skills/pivot/SKILL.md`; 789c4a0 hygiene commit confirms "all 7 agents shipped") | (shipped earlier; verified 2026-05-24) |
 | Phase C.1-rev2 — pre-built redis client w/ health-check + retry (idle-drop fix) | `d0b5400` then reverted `b6f2082` | `docs/strategy-reviews/phase-c.1-rev2-closure-note-2026-05-24.md` | 2026-05-24 |
 | Phase C.1-rev1 — Redis-backed OAuth state persistence (initial attempt) | `21983bf` then reverted `8072c5c` | `docs/strategy-reviews/phase-c.1-rev1-closure-note-2026-05-24.md` | 2026-05-24 |
 | Phase A.3 — UW overdraw remediation + close-state annotations | `5a5b8be` + smoke-test update `3703cec` | `docs/strategy-reviews/phase-a3-uw-overdraw-remediation-closure-note-2026-05-22.md` | 2026-05-22 |
@@ -188,3 +182,4 @@ Recording priority calls made during ATHENA workflow passes that may set future 
 | 2026-05-24 | Closure | Phase C.1-rev1 (Redis-backed OAuth state via `RedisStore(url=...)`) shipped as `21983bf`, smoke failed (Redis idle-drop → ConnectionError on /register), reverted as `8072c5c`. Closure note `phase-c.1-rev1-closure-note-2026-05-24.md`. Discovered via Task 0 dual discovery that OAuth was already live via FastMCP OAuthProxy + GitHub upstream; brief scope reframed mid-cycle. |
 | 2026-05-24 | Closure | Phase C.1-rev2 (rev1 fix + idle-drop resilience via `health_check_interval=30` + `retry_on_timeout` + `socket_keepalive` + `decode_responses=False` on a pre-built redis-py client) shipped as `d0b5400`, smoke failed differently — write-read consistency bug on Redis-backed store (POST /register → 201 with client_id, immediate GET /authorize with same client_id → 400 "not registered"). Reverted as `b6f2082`. Closure note `phase-c.1-rev2-closure-note-2026-05-24.md`. |
 | 2026-05-24 | Scope sharpened | OAuth-on-hub_mcp Tier 1 item rewritten: the build is OAuth STATE PERSISTENCE, not OAuth itself (OAuth is already live). rev3 attempt explicitly backlogged as investigation-first (no code until reproducer outside FastMCP confirms root cause). Higher-leverage Phase C / Phase B / PIVOT work takes precedence. |
+| 2026-05-24 | Backlog hygiene | PIVOT skill confirmed shipped (commit `fd0419b`); Tier 1 item #3 removed and moved to Recent closures. Originally queued "post-ZEUS-Phase-I" per the 2026-05-22 v2 restructure; verified 2026-05-24 via git log on `skills/pivot/SKILL.md` and the "all 7 agents shipped" line in commit `789c4a0`'s body. Tier 1 now contains: Phase C bundle (#1), Phase B (#2). |
