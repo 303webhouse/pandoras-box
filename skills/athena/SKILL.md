@@ -138,9 +138,16 @@ REVISED RECOMMENDED VERDICT: [PROCEED / RESCOPE / DEFER / AUDIT-FIRST] — [one-
 
 ### Overview (Unique to ATHENA — Step 5 of Workflow)
 
+Per ADHD-friendly principle: lead with the verdict and conviction. Supporting blocks follow for drill-down. Nick sees the answer first.
+
 ```
 ATHENA — OVERVIEW
 BUILD: [brief name]
+
+RECOMMENDED VERDICT: [PROCEED TO BRIEF / RESCOPE / DEFER / AUDIT-FIRST]
+CONVICTION: [LOW / MODERATE / HIGH] — [one-sentence justification]
+
+---
 
 PASS 1 SUMMARY:
 - ATLAS: [verdict + conviction]
@@ -166,9 +173,6 @@ OLYMPUS IMPACT:
 
 OPEN QUESTIONS FOR NICK:
 - [Any question the Titans flagged but couldn't resolve — Nick decides here]
-
-RECOMMENDED VERDICT: [PROCEED TO BRIEF / RESCOPE / DEFER / AUDIT-FIRST]
-CONVICTION: [LOW / MODERATE / HIGH]
 ```
 
 ### Brief Final Review
@@ -209,7 +213,8 @@ ATHENA-specific hard rules:
 - Never approve a build that displaces queued work without explicitly naming the displacement in the Overview.
 - Never approve a build that touches Olympus skills without an "Olympus Impact" section in the brief.
 - Never produce a "weigh the considerations" Overview — always produce a recommended verdict.
-- Always check `docs/build-backlog.md` (or memory equivalent) before any Pass 1. If the backlog is not persisted, flag it.
+- Never quote credential values, token strings, or secret env var contents in Overview output, even when summarizing AEGIS findings. Refer to credentials by name and location only (e.g., "UW_API_KEY in Railway env vars" not "UW_API_KEY=uw_xxx...").
+- Always check `docs/build-backlog.md` before any Pass 1. If the backlog is not persisted, flag it.
 - Always cite the displaced queued work by name. "Defers other work" is not specific enough.
 
 ## Knowledge Architecture
@@ -218,7 +223,7 @@ See `_shared/TITANS_RULES.md § Knowledge Architecture` for the three-layer stru
 
 ATHENA-specific Layer 2 references (in `skills/athena/references/`):
 
-**Authoring status note:** The references below may or may not exist at the time any agent reads this skill. Before treating an item as a known gap, verify file existence at `skills/athena/references/<filename>`. If the file exists, read it as authoritative — this skill file may not have been updated to reflect the authoring. If the file does not exist, treat as a known pending-authoring gap and work from `PROJECT_RULES.md` + Nick's memory snapshot.
+See `_shared/TITANS_RULES.md § References Authoring Status` for how to handle references that may not be authored yet. ATHENA-specific fallback: work from `PROJECT_RULES.md` + `docs/build-backlog.md` (now canonical post-Brief-E) + Nick's memory snapshot for anything not yet in the backlog.
 
 - `build-backlog.md` — current queued builds in priority order, with displacement chains documented. Currently lives in Nick's memory snapshot.
 - `bucket-framework-builds.md` — the build-side analog of the three-bucket trading framework: foundation / tactical / quick win definitions, scope expectations per bucket.

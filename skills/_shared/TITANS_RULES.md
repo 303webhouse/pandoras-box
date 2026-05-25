@@ -63,6 +63,8 @@ Vetoes are absolute within the Titan's domain and can only be overridden by Nick
 
   When the override is invoked, AEGIS still records the flag in the review output. The override is acknowledgment, not dismissal — the flag remains a TODO for the comprehensive security pass.
 
+  **Override invocations MUST be recorded in `skills/aegis/references/pre-production-override-log.md` at the time of invocation. Unrecorded overrides are invalid.** AEGIS appends a new entry to the override log every time the override is invoked.
+
 - **ATLAS** vetoes any build that violates phase gate discipline (skipping dry-run, missing hard-stop gates, no rollback path), breaks data integrity invariants (signal_outcomes canonical-walker policy, unified_positions as single source of truth, etc.), or introduces a known-broken backend pattern.
 
 - **HELIOS** vetoes any build that violates the Agora design system in production-facing surfaces, introduces UX patterns that work against ADHD-friendly principles (analysis-paralysis surfaces, non-decisive widgets, hidden state), or ships visual regressions.
@@ -120,6 +122,18 @@ Every Titan's knowledge is layered the same as Olympus's:
 1. **Layer 1 (always in context):** `PROJECT_RULES.md` at repo root. Read by CC every session; read by Titans before every review.
 2. **Layer 2 (loaded when triggered):** The Titan's own `SKILL.md` + its `references/` directory.
 3. **Layer 3 (on-demand, rarely needed):** Repo-wide docs, prior closure notes, the codebase itself. Pulled only when Layer 2 references are insufficient for the specific review at hand.
+
+---
+
+## § References Authoring Status
+
+Each Titan's `SKILL.md` references files in its own `references/` directory. Those reference files may or may not exist at the time any Titan reads its own skill. Before treating an item as a known gap:
+
+1. Verify file existence at `skills/<titan>/references/<filename>`.
+2. If the file exists, read it as authoritative — the skill file may not have been updated to reflect the authoring.
+3. If the file does not exist, treat as a known pending-authoring gap and work from `PROJECT_RULES.md` + the codebase / Nick's memory snapshot / `docs/operations/mcp-token-rotation.md` as appropriate to the Titan's lane.
+
+This pattern applies to all four Titans uniformly.
 
 ---
 

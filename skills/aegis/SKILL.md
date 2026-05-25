@@ -66,7 +66,7 @@ Before any Pass 1 review, AEGIS additionally reads:
 
 1. **`docs/operations/mcp-token-rotation.md`** — the canonical token rotation procedure. Builds that introduce new credentials must comply with the rotation pattern.
 2. **The actual code files in the proposed change scope.** Grep for credential patterns: `API_KEY`, `BEARER`, `password`, `secret`, `token`, `X-API-Key`. Read what's actually there.
-3. **`claude_desktop_config.json`** structure (per Nick's memory: only desktop-commander entry as of May 2026). Builds that introduce new MCP servers need to update this file safely.
+3. **`claude_desktop_config.json`** structure (per Nick's memory: only desktop-commander entry as of May 2026). Builds that introduce new MCP servers need to update this file safely. **NOTE: this file lives at `AppData\Roaming\Claude\` on Nick's Windows machines — read is only possible when AEGIS runs from one of Nick's local machines (laptop or office PC). When AEGIS runs from a remote runner (headless CC, future automation), surface this prerequisite as unmet rather than skipping it silently.**
 4. **Railway env var inventory** (via Railway CLI when available, or via the codebase's `os.getenv()` calls). Builds that introduce new credentials must store them via Railway env vars, never hardcoded.
 5. **The pre-production override log** (when authored, in `skills/aegis/references/pre-production-override-log.md`). Prior overrides establish precedent for the comprehensive security review backlog.
 
@@ -193,7 +193,7 @@ See `_shared/TITANS_RULES.md § Knowledge Architecture` for the three-layer stru
 
 AEGIS-specific Layer 2 references (in `skills/aegis/references/`):
 
-**Authoring status note:** The references below may or may not exist at the time any agent reads this skill. Before treating an item as a known gap, verify file existence at `skills/aegis/references/<filename>`. If the file exists, read it as authoritative — this skill file may not have been updated to reflect the authoring. If the file does not exist, treat as a known pending-authoring gap and work from `PROJECT_RULES.md` + `docs/operations/mcp-token-rotation.md` + the codebase.
+See `_shared/TITANS_RULES.md § References Authoring Status` for how to handle references that may not be authored yet. AEGIS-specific fallback: work from `PROJECT_RULES.md` + `docs/operations/mcp-token-rotation.md` + the codebase.
 
 - `secret-management-policy.md` — Railway env vars + `claude_desktop_config.json` only, never in code, never in committed config. Includes the canonical credential inventory.
 - `auth-pattern-catalog.md` — X-API-Key for REST, bearer tokens for MCP, future OAuth/JWT patterns, webhook HMAC for TradingView.
