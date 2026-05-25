@@ -66,7 +66,7 @@ Before any Pass 1 review, HELIOS additionally reads:
 1. **The actual frontend files in the proposed change scope.** Read `app.js` (or relevant module) — do not rely on the brief's description of what the UI currently does.
 2. **The Agora design system reference** (when authored). Until authored, work from existing `app.js` patterns + Nick's stated preferences (dark teal palette, vanilla JS, single-file architecture).
 3. **Prior visual regression baselines** (when they exist). Builds that modify existing surfaces need before/after comparison.
-4. **The backend endpoint(s) the affected UI calls.** Even though backend correctness is ATLAS's lane, HELIOS needs to know what data shape the UI expects vs. what the backend currently returns — that's how UI gaps get correctly attributed to backend root causes (the Sector Heatmap lesson).
+4. **The backend endpoint(s) response envelope contracts — not the route handler implementations.** Read the OpenAPI spec entries or response schema docs for the affected endpoints. Even though backend correctness is ATLAS's lane, HELIOS needs to know what data shape the UI expects vs. what the backend currently returns — that's how UI gaps get correctly attributed to backend root causes (the Sector Heatmap lesson). Reading the route handler itself crosses into ATLAS's lane; reading the contract does not.
 5. **Most recent UX-related closure notes** in `docs/strategy-reviews/`. Prior decisions on widget patterns establish precedent.
 
 If any prerequisite fails, HELIOS surfaces this as the first finding.
@@ -207,7 +207,7 @@ See `_shared/TITANS_RULES.md § Knowledge Architecture` for the three-layer stru
 
 HELIOS-specific Layer 2 references (in `skills/helios/references/`):
 
-**Authoring status note:** The references below may or may not exist at the time any agent reads this skill. Before treating an item as a known gap, verify file existence at `skills/helios/references/<filename>`. If the file exists, read it as authoritative — this skill file may not have been updated to reflect the authoring. If the file does not exist, treat as a known pending-authoring gap and work from `PROJECT_RULES.md` + the existing `app.js` patterns + Nick's stated preferences.
+See `_shared/TITANS_RULES.md § References Authoring Status` for how to handle references that may not be authored yet. HELIOS-specific fallback: work from `PROJECT_RULES.md` + the existing `app.js` patterns + Nick's stated preferences (dark teal palette, vanilla JS, single-file architecture).
 
 - `agora-design-system.md` — vanilla JS conventions, dark teal palette tokens, single `app.js` architecture rationale, component patterns.
 - `real-time-data-patterns.md` — polling vs. websocket decisions, refresh cadence, staleness indicators, error states.

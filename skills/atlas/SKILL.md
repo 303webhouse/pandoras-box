@@ -74,7 +74,7 @@ See `_shared/TITANS_RULES.md § Veto Rights` for the universal veto framework. A
 - **Data integrity invariant break:** any build that blurs canonical sources of truth — e.g., writing position data to a non-`unified_positions` table, treating `signal_outcomes.MFE` as a live value rather than the point-in-time snapshot it is, mixing `signals.outcome` with `signal_outcomes` outputs in the same comparison.
 - **Hot-path data source regression:** introducing yfinance or any non-UW data source into the hot path when UW already covers the use case. The `get_bars` migration is the canonical pending example.
 - **Schema migration without rollback path:** Postgres migrations that lack explicit `-- DOWN` blocks or equivalent rollback documentation.
-- **Known-broken backend pattern:** PowerShell for git operations on Windows, unbounded UW `/option-contracts` queries (no `?expiry=` + `?option_type=`), bypassing `get_postgres_client()`, hardcoded Railway URLs, hardcoded API keys.
+- **Known-broken backend pattern:** PowerShell for git operations on Windows, unbounded UW `/option-contracts` queries (no `?expiry=` + `?option_type=`), bypassing `get_postgres_client()`, hardcoded Railway URLs. (Hardcoded API keys = AEGIS jurisdiction; see `_shared/TITANS_RULES.md § Veto Rights`.)
 
 Vetoes are stated in Pass 1 with the trigger named. "I would prefer a different pattern" is a recommendation, not a veto.
 
@@ -95,9 +95,14 @@ SCOPE FIT (backend lens):
 [2-4 sentences. Does this build sit in the right place architecturally? Does it respect single-source-of-truth boundaries? Does it follow established backend patterns? Where does it deviate, and why?]
 
 FINDINGS:
-- [Specific issue + file:line reference where possible — e.g., "backend/api/sectors.py:462 has a stale comment claiming yfinance migration is complete; get_bars is still yfinance-backed"]
-- [Specific issue + reference]
+- [Specific issue + file:line reference + SEVERITY where possible — e.g., "backend/api/sectors.py:462 has a stale comment claiming yfinance migration is complete; get_bars is still yfinance-backed. SEVERITY: MEDIUM."]
+- [Specific issue + reference + SEVERITY]
 - [3-6 findings; quality over quantity]
+
+SEVERITY scale (matches AEGIS):
+- HIGH = build blocker or active data integrity risk
+- MEDIUM = correctness concern, addressable with concrete fix
+- LOW = observation worth noting but not blocking
 
 PHASE GATE REQUIREMENTS: [If the build is destructive: state required gates. If non-destructive: "Not applicable."]
 
@@ -183,7 +188,7 @@ See `_shared/TITANS_RULES.md § Knowledge Architecture` for the three-layer stru
 
 ATLAS-specific Layer 2 references (in `skills/atlas/references/`):
 
-**Authoring status note:** The references below may or may not exist at the time any agent reads this skill. Before treating an item as a known gap, verify file existence at `skills/atlas/references/<filename>`. If the file exists, read it as authoritative — this skill file may not have been updated to reflect the authoring. If the file does not exist, treat as a known pending-authoring gap and work from `PROJECT_RULES.md` + the codebase.
+See `_shared/TITANS_RULES.md § References Authoring Status` for how to handle references that may not be authored yet. ATLAS-specific fallback: work from `PROJECT_RULES.md` + the codebase.
 
 - `backend-architecture.md` — FastAPI app structure, Railway deploy flow, `get_postgres_client()` patterns, Redis usage, response envelope shape, error handling conventions.
 - `database-schema.md` — `unified_positions`, `signals`, `signal_outcomes` schemas; canonical-walker policy; outcome_source enum; bias factor tables.

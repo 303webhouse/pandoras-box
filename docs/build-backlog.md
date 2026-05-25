@@ -41,7 +41,15 @@ Items deeper in Tier 2 / Tier 3 that previously anchored on "post-ZEUS" now anch
 
 ## Top of queue (active scope)
 
-*Empty.* Phase A closed as `363cde6` on 2026-05-22. The Phase C bundle (next Tier 1 item) promotes to active scope when its brief is authored and Titans-reviewed.
+### 1. Brief E — Titans skills cleanup (Ship 1 + Ship 2)
+**Bucket:** Tactical. Pre-Olympus-cross-review foundation work for the Titans review framework.
+**Status:** IN_FLIGHT.
+**Why:** Pass 1 cross-review findings need to land before the four Titans skill files are installed in Claude.ai. Ship 1 = pre-install blockers (this backlog file as ATHENA's canonical Pre-Review #1 source; AEGIS pre-production override log). Ship 2 = five Titans skill file edits per Pass 1 findings (SEVERITY tags on ATLAS, hardcoded-API-keys jurisdiction clarification, override-persistence path rule, ADHD-friendly verdict-first ATHENA Overview, reference-authoring-status deduplication).
+**Gates:** None blocking. Nick `--apply` gate on the staged diff before commit.
+**Displaces:** Nothing — foundation prerequisite for Titans to function on subsequent reviews.
+**Unblocks:** Olympus committee cross-reviews (P1 next).
+
+Phase A closed as `363cde6` on 2026-05-22. The Phase C bundle (next Tier 1 item) promotes to active scope when its brief is authored and Titans-reviewed.
 
 ---
 
