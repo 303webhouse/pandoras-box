@@ -18,7 +18,11 @@ These were settled in chat prior to brief authoring; the brief embeds them as co
 2. **Response shape stripped to fields DAEDALUS actually consumes.** Per output template at `skills/daedalus/SKILL.md` lines 96-121, that's: strike, expiration, option_type, bid, ask, mid (computed), volume, open_interest, delta, gamma, theta, vega, implied_volatility, and a bid-ask-spread-pct flag (DAEDALUS hard rule: >10% disqualifies). Everything else from the raw UW response is dropped at the service layer.
 3. **Cache TTL < 30s in a separate namespace from the existing slower-data cache.** Existing `option_contracts` cache uses 300s TTL — that's appropriate for the position-pricing path but too long for the live-strike-selection path DAEDALUS uses. New cache category `option_chain_live` at 25s TTL. Keeps the two paths from cross-contaminating cached state.
 4. **Chain-level aggregates included in same response.** IV rank (chain-level, from `/iv-rank`), max pain (from `/max-pain`), and total OI (computed sum across the chain) returned alongside the per-contract list in one envelope. Cohesion — DAEDALUS gets the full structural picture for the expiry in one call instead of three.
-5. **`option_type` default = "both"** (calls + puts combined). Filterable to `"call"` or `"put"` if needed. Rationale: most DAEDALUS structures span both sides of the chain (debit/credit spreads, condors, risk reversals); combined-default avoids forcing two calls when one suffices. Reconsider if quota becomes a concern in production (Tier 2 follow-up).
+5. **`option_type` default = "both"** (calls + puts combined). Filterable to `"call"` or `"put"` if needed. Rationale: most DAEDALUS structures span both sides of the chain (debit/credit spreads, condors, risk reversals); combined-default avoids forcing two calls when one suffices. **Concrete revisit triggers** (ATLAS-mandated, replaces "Tier 2 follow-up"): default behavior is reviewed for a tighter filter if EITHER of these conditions holds:
+   - **Budget pressure:** UW daily request counter exceeds 50% of the 20K budget (≥10K calls/day) for 3 consecutive trading days, attributable in part to `hub_get_options_chain` traffic — AND
+   - **Cache inefficiency:** the `option_chain_live` cache hit rate (tracked via `get_cache_stats()` in `uw_api_cache.py`) is below 30% over a 7-day rolling window.
+   
+   If both fire, the default flips to `"call"` for bull-biased committee context and `"put"` for bear-biased, with `"both"` available on explicit caller request. Until both fire, default stays at `"both"`.
 
 ## Pre-flight (mandatory)
 
@@ -32,21 +36,58 @@ These were settled in chat prior to brief authoring; the brief embeds them as co
 
 ## Tasks
 
-### Task 1 — Validate UW response shape against OpenAPI spec
+### Task 1 — Validate UW response shape + reconnaissance for Task 2 inputs
 
-**Before any schema design or code.** Open `docs/audit-artifacts/2026-05-22/uw-openapi.yaml` and read the three relevant endpoint definitions:
+**Before any schema design or code.** Three investigation threads, all output to the Task 1 findings note:
+
+#### 1A — OpenAPI spec validation
+
+Open `docs/audit-artifacts/2026-05-22/uw-openapi.yaml` and read the three relevant endpoint definitions:
 
 - `/api/stock/{ticker}/option-contracts` (line 20043 region) — confirm field availability and types: `option_symbol`, `nbbo_bid`, `nbbo_ask`, `last_price`, `volume`, `open_interest`, `delta`, `gamma`, `theta`, `vega`, `implied_volatility`. Note the 500-result cap (line 10294 advisory).
 - `/api/stock/{ticker}/iv-rank` (line 19566 region) — confirm `iv_rank` field shape and whether it's per-expiry or chain-wide.
 - `/api/stock/{ticker}/max-pain` (line 19614 region) — confirm `max_pain` field and series structure.
 
-**Output for Task 1:** a short findings note at `docs/codex-briefs/hub-get-options-chain-task1-spec-2026-05-24.md` documenting:
-- Each endpoint's actual field names + types (vs. the brief's assumed names)
-- Any fields the brief assumed exist but the spec doesn't expose
-- Any fields the spec exposes that the brief didn't account for but DAEDALUS would benefit from
-- Confirmation that DAEDALUS's required fields are all available in the UW response
+#### 1B — Cache-stampede / singleflight reconnaissance (ATLAS-mandated)
 
-**If any required field is missing or named differently from what the brief assumes, surface BEFORE proceeding to Task 2.** Don't silently substitute.
+Read the existing hub tool service layers (`backend/services/read_only/quote.py`, `backend/services/read_only/flow.py`) to determine whether they implement any concurrency coalescing for the "many requests for the same cache-missed key arrive simultaneously" scenario.
+
+Background: a cache stampede happens when N concurrent callers all hit a cache MISS for the same key and each independently fires the expensive upstream call. Singleflight (a.k.a. request coalescing) ensures only ONE upstream call fires; the others wait for the in-flight result. For option chains specifically, cold-cache fetch = 3 UW calls (chain + iv_rank + max_pain), each multi-hundred-ms; concurrent DAEDALUS invocations across overlapping committee passes are a realistic load profile.
+
+Output:
+- Whether existing tools have singleflight (yes / no / partial).
+- If absent: a recommended implementation approach for the new tool — likely a module-level `dict[str, asyncio.Future]` keyed by cache key, populated on miss, awaited by subsequent callers within the window. ~30 lines.
+- If present in some form: pattern reference for the new tool to adopt.
+
+Singleflight is a Task 2 schema decision (it affects whether the service layer signature is `async def get_options_chain(...)` vs. a coalesced variant) and a Task 3 implementation decision. Task 1 just collects the evidence.
+
+#### 1C — Options-math extraction reconnaissance (ATLAS-mandated)
+
+Read `backend/integrations/uw_api.py` `_get_contract_mid()` (lines ~858-880) and the surrounding helpers. Confirm that the `mid` computation (bid/ask mid with fallbacks to last_price, day close, vwap) is the canonical implementation in the codebase. Identify all callers — should be the get_spread_value / get_single_option_value / get_multi_leg_value / get_ticker_greeks_summary chain (per the audit).
+
+The brief's Task 2 schema needs a `mid` and `bid_ask_spread_pct` on every contract. The naive implementation duplicates the computation in the new service layer. ATLAS pushed back on the duplication risk (drift between the position-pricing path and the chain-display path is exactly the kind of subtle bug that causes "the quote and the live chain disagree by 2¢"). Instead:
+
+- Extract `_get_contract_mid()` and a new `compute_bid_ask_spread_pct(contract_dict)` helper to a new module `backend/utils/options_math.py`.
+- Update `uw_api.py` to import + delegate to the new module (preserves all existing callers; one import-line change per call site).
+- The new service layer (`backend/services/read_only/options_chain.py`) imports the same module.
+- Single source of truth eliminates drift.
+
+Output:
+- Confirm `_get_contract_mid()` is the canonical implementation and no rival mid-computation exists elsewhere.
+- Confirm all callers can be updated with a single import-line change.
+- Propose the `backend/utils/options_math.py` module signature: `compute_mid(contract: dict) -> Optional[float]` and `compute_bid_ask_spread_pct(contract: dict) -> Optional[float]`. The contract dict format is the existing `get_options_snapshot` normalized shape (with `last_quote.bid`, `last_quote.ask`, `last_trade.price`, `day.close`, `day.vwap` fields).
+- Flag any caller whose semantics differ from `_get_contract_mid()` and would break under a shared extraction (expected: none, but verify).
+
+#### Task 1 deliverable
+
+A single findings note at `docs/codex-briefs/hub-get-options-chain-task1-spec-2026-05-24.md` covering all three threads (1A, 1B, 1C):
+- Each endpoint's actual field names + types (1A)
+- Singleflight finding + recommendation (1B)
+- options_math extraction plan (1C)
+- Confirmation that DAEDALUS's required fields are all available in the UW response
+- Any fields the spec exposes that DAEDALUS would benefit from but the brief didn't account for
+
+**If any required field is missing or named differently from what the brief assumes, surface BEFORE proceeding to Task 2.** Don't silently substitute. Same for the singleflight and math-extraction decisions — they feed Task 2 and any deviation from this brief's strawman should be flagged.
 
 ### Task 2 — Response schema design
 
@@ -116,12 +157,29 @@ Composition logic:
 2. Call `integrations.uw_api.get_iv_rank(ticker)` — already exists.
 3. Call `integrations.uw_api.get_max_pain(ticker)` — already exists.
 4. Filter contracts to the requested expiry (the wrapper already does this, but defensive re-filter is cheap).
-5. Compute `mid` and `bid_ask_spread_pct` per contract at the service layer.
+5. Compute `mid` and `bid_ask_spread_pct` per contract via the shared `backend/utils/options_math.py` module (extracted in Task 1C). **No new computation site introduced in the service layer.**
 6. Compute `total_open_interest`, `total_call_oi`, `total_put_oi` by summing across `contracts`.
 7. Build the envelope (see Task 2 schema), populate `uw_timestamp` from whichever upstream call carries it.
 8. Wrap with the 25s cache (new category `option_chain_live` in `uw_api_cache.py`) — see Task 4.
+9. Apply singleflight coalescing per the Task 1B recommendation (if absent in existing tools and adopted for this one).
 
 The `get_options_snapshot` call already pushes native `expiry` + `option_type` filters down to UW (the 2026-04-28 P2.0 fix), keeping the response inside the 500-result cap.
+
+#### Partial-failure semantics (ATLAS-mandated)
+
+The 3-call composition has asymmetric criticality. The brief locks in **best-effort with status markers** for the aggregates, **hard fail for the chain**:
+
+| Upstream call | Criticality | Failure behavior |
+|---|---|---|
+| `get_options_snapshot` (the chain) | **REQUIRED.** Without it the response is empty. | If returns None → entire envelope returns `status="unavailable"` with `error` field naming the missing call. No partial data shipped. |
+| `get_iv_rank` (chain-level aggregate) | OPTIONAL. DAEDALUS can frame qualitatively if absent. | If returns None → `data.iv_rank = null`, add to `data.aggregates_errors` array: `{"field": "iv_rank", "reason": "upstream unavailable"}`. Envelope `status="ok"` (chain itself succeeded). |
+| `get_max_pain` (chain-level aggregate) | OPTIONAL. Same as iv_rank. | If returns None → `data.max_pain = null`, add to `data.aggregates_errors` array: `{"field": "max_pain", "reason": "upstream unavailable"}`. Envelope `status="ok"`. |
+
+Rationale: the chain is the consumer's primary need. The aggregates enrich the chain. If iv_rank or max_pain blip transiently (UW timeout, rate limit), DAEDALUS still gets the per-contract Greeks and can degrade to qualitative-IV-mode for the missing aggregate rather than getting nothing. If the chain itself is unavailable, there's no value in shipping aggregates alone — surface the failure cleanly.
+
+The `aggregates_errors` field is OMITTED from the envelope when empty (no error rows). When present, it's an array of `{field, reason}` objects so DAEDALUS can name in its DATA NOTE which aggregates were unavailable.
+
+`_summary()` text adapts to partial failures: e.g., *"AAPL 2026-06-21 chain: 142 contracts, IVR 42.1, max pain unavailable, total OI 387k"* if max_pain failed.
 
 ### Task 4 — Cache layer entry
 
@@ -133,7 +191,26 @@ In `backend/integrations/uw_api_cache.py`, add to the `CACHE_TTLS` dict:
                           # serves position-pricing. Per Brief design #3.
 ```
 
-Use `cache_get("option_chain_live", cache_key)` / `cache_set(...)` in the service layer. Key shape: `f"{ticker.upper()}|{expiry}|{option_type}"`.
+**Cache key format (literal, ATLAS-mandated):**
+
+```
+option_chain_live:{TICKER}:{expiry}:{option_type}
+```
+
+- `{TICKER}` is uppercase symbol (e.g., `SPY`, `AAPL`).
+- `{expiry}` is ISO date `YYYY-MM-DD` (e.g., `2026-06-20`).
+- `{option_type}` is lowercase: `both`, `call`, or `put`.
+- Separator throughout is `:` (NOT `|`), conforming to the format ATLAS specified.
+
+In the service layer:
+```python
+key = f"{ticker.upper()}:{expiry}:{option_type.lower()}"
+cached = await cache_get("option_chain_live", key)
+# resulting full Redis key per uw_api_cache.py:53 pattern:
+#   uw:option_chain_live:SPY:2026-06-20:both
+```
+
+Note: the `cache_get` / `cache_set` helpers in `uw_api_cache.py` prepend `uw:{category}:` to the passed `key` argument, so the literal Redis-side key is `uw:option_chain_live:{TICKER}:{expiry}:{option_type}` — matching ATLAS's specified shape with the existing `uw:` wrapper prefix preserved.
 
 ### Task 5 — MCP tool layer
 
@@ -186,12 +263,14 @@ Author `docs/strategy-reviews/hub-get-options-chain-closure-note-YYYY-MM-DD.md`.
 
 ## Output spec
 
-- Modified: `backend/integrations/uw_api_cache.py` (one new TTL entry)
-- New: `backend/services/read_only/options_chain.py`
-- New: `backend/hub_mcp/tools/options_chain.py`
+- Modified: `backend/integrations/uw_api_cache.py` (one new TTL entry: `option_chain_live: 25`)
+- Modified: `backend/integrations/uw_api.py` (`_get_contract_mid` extracted; one import-line change per call site — per Task 1C reconnaissance)
+- New: `backend/utils/options_math.py` (shared `compute_mid`, `compute_bid_ask_spread_pct` helpers — per Task 1C extraction)
+- New: `backend/services/read_only/options_chain.py` (service layer; optionally includes singleflight per Task 1B finding)
+- New: `backend/hub_mcp/tools/options_chain.py` (MCP tool layer)
 - Modified: `skills/daedalus/SKILL.md` (tool-list insertion + caveat update)
 - New: `dist/skills/daedalus.skill` rebuild (bundle artifact, dist/ is gitignored)
-- New: `docs/codex-briefs/hub-get-options-chain-task1-spec-2026-05-24.md` (Task 1 findings, committed BEFORE Task 3)
+- New: `docs/codex-briefs/hub-get-options-chain-task1-spec-2026-05-24.md` (Task 1 findings — three threads 1A/1B/1C — committed BEFORE Task 2)
 - New: `docs/strategy-reviews/hub-get-options-chain-closure-note-YYYY-MM-DD.md`
 
 Commit messages:
