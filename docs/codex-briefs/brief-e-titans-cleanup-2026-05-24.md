@@ -597,3 +597,60 @@ That cross-review may surface MCP-touching findings that affect Brief D (Hub MCP
 ---
 
 *End of Brief E.*
+
+---
+
+## Closure
+
+**Shipped:** 2026-05-25 02:15 UTC (2026-05-24 20:15 MDT)
+**Commit:** `9540abd` — 8 files changed, 673 insertions(+), 14 deletions(-)
+**Pushed to:** `origin/main`
+
+### What shipped
+
+All 7 tasks executed; 12 of 12 spec'd str_replace operations landed verbatim across the 5 SKILL files; both new files created.
+
+- Task 1 — `docs/build-backlog.md` (surgical merge; see deviation below)
+- Task 2 — `skills/aegis/references/pre-production-override-log.md` created from spec
+- Task 3 — `skills/_shared/TITANS_RULES.md`: override-persistence rule + new § References Authoring Status
+- Task 4 — `skills/atlas/SKILL.md`: 3 edits (jurisdiction note, SEVERITY tags + scale, shared-rules backref)
+- Task 5 — `skills/helios/SKILL.md`: 2 edits (response envelope contracts language, shared-rules backref)
+- Task 6 — `skills/aegis/SKILL.md`: 2 edits (Nick-local-machine note, shared-rules backref)
+- Task 7 — `skills/athena/SKILL.md`: 3 edits (Overview verdict-first reorder, credential-quote prohibition, shared-rules backref)
+
+This brief file committed per Done #8. All 5 modified SKILL files retain intact YAML frontmatter.
+
+### What changed from this brief
+
+**Task 1 became a Modify instead of a Create.** The brief assumed `docs/build-backlog.md` did not exist; in fact it existed at 186 lines with substantial pre-authored content (ZEUS phase structure I-IV, Phase C bundle scope, today's Phase C.1-rev1/rev2 closure notes, six 2026-05-22 arbitration precedents, full update log through today). Per Nick's mid-execution decision: surgical merge — add a single Brief E entry to the "Top of queue (active scope)" section, leave everything else byte-for-byte unchanged. The `*Empty.*` placeholder was replaced with the new entry; the contextual sentence about Phase A closure and Phase C bundle promotion was preserved below it.
+
+This was the right call. Overwriting per the brief's verbatim content would have destroyed today's Phase C.1 closure documentation and ZEUS phase architecture. Future Brief authors: check whether `docs/build-backlog.md` already exists before specifying "create new file."
+
+**Dry-run protocol modified.** Brief specified `git add -A`. Actual execution used explicit named-path `git add` because the working tree was not clean at pre-flight (one modified file `docs/session-handoff.md` + 13 untracked files including today's audit reports, MCP-related scripts, and other in-flight brief drafts). The explicit-stage approach preserved Brief E's single-commit Done #2 requirement without contaminating it with unrelated work.
+
+**Commit message adjusted** to (a) move `docs/build-backlog.md` from the Creates section to a Modifies section explaining the surgical-merge deviation and (b) list this brief file itself in the Creates section (per Done #8 — the brief's own commit message did not list itself).
+
+**Base SHA drift.** Pre-flight `git fetch && git status` showed HEAD and `origin/main` matched at `c51ee04`. By commit time, origin had advanced to `fc86293` via two intervening hub_mcp commits (`ddb7c3b` — Brief D rev2 Phase 0 OAuth-storage chain reproducer; `fc86293` — `hub_get_options_chain` MCP tool brief). My commit cleanly applied on top of `fc86293` with no file conflicts (the intervening commits touched `backend/hub_mcp/` and a docs/codex-briefs file that did not overlap Brief E's surface). Worth noting for cross-machine drift discipline: pre-flight is a point-in-time snapshot, not a frozen state — a long-running build session can race against other clones.
+
+### What didn't ship (deferred per the brief's Gates / what NOT to do section)
+
+- Reference file tiering (Ship 3)
+- Lightweight-review path definition (Ship 3)
+- "Read the actual code" principle consolidation (Ship 3 — kept Titan-specific per Gates)
+- ATLAS/AEGIS persona/voice differentiation (Ship 4)
+- Additional reference files in `skills/{atlas,helios,athena}/references/` (Ship 3 — only the one AEGIS stub was authored per spec)
+- Resolution of the three open questions in the build-backlog (ZEUS scope-doc need, Brief letter re-assignment, Olympus cross-reviews briefing approach) — these remain open for Nick to resolve when reviewing the backlog
+
+### Verification
+
+- `git status` post-commit: clean for Brief E files; Nick's pre-existing modifications and untracked files untouched.
+- `git diff --cached` reviewed and explicitly approved by Nick before commit (`--apply` gate honored).
+- All 5 modified SKILL.md files retain valid YAML frontmatter — no parse breakage.
+- Single commit on `main` (`9540abd`), pushed to `origin/main`.
+- No backend code change, no Olympus skill file change, no `_shared/COMMITTEE_RULES.md` change. Olympus Impact remains **None** as spec'd.
+
+### Next action
+
+Per the brief's Sequencing note: install the four Titans skill files in Claude.ai via the packager (`scripts\package-skill.bat all` per `PROJECT_RULES.md` § Olympus Committee Skills, applied to the four Titans the same way). Then proceed to the P1 build "Olympus committee cross-reviews" — each of the seven Olympus skills (TORO, URSA, PYTHAGORAS, PYTHIA, DAEDALUS, THALES, PIVOT) reviewed by the others in the same Pass 1 / Pass 2 / ATHENA Overview pattern that the Titans review themselves. That cross-review may surface MCP-touching findings that affect Brief D (Hub MCP OAuth state persistence) — Brief D should not ship until the cross-reviews complete.
+
+*End of Closure.*
