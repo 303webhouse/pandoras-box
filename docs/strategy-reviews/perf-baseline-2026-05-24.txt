@@ -1,0 +1,246 @@
+# Perf Architecture — Baseline Measurements
+# Brief: docs/codex-briefs/perf-architecture-2026-05-24.md
+# Predecessor (shipped): perf-quick-wins-2026-05-24 (commits 37f8949, 72a2b5c, 339c20b)
+# Captured: 2026-05-25 02:05:48 UTC (2026-05-24 20:05:48 MDT)
+# HEAD at capture: fc86293 docs(brief): hub_get_options_chain MCP tool
+# Methodology: 10 sequential curl requests per endpoint, one warm-up request first (not counted).
+#              Authed with the frontend API key. p50 = sorted[5], p95 = sorted[10] (= max of 10).
+
+================================================================================
+BACKEND BASELINE (Railway: pandoras-box-production.up.railway.app)
+================================================================================
+
+[positions]  /api/v2/positions?status=OPEN
+  time_total  min=0.330s  p50=1.400s  p95=3.602s  max=3.602s  mean=1.907s
+  size_download (median bytes): 13860
+  status codes: 200 (10/10)
+  notes: AFTER MGET fix from Quick Wins. Remaining latency = Postgres assembly +
+         business logic + per-row dte refresh. Phase 3 SWR target.
+
+[signals_active]  /api/signals/active
+  time_total  min=0.517s  p50=0.800s  p95=6.154s  max=6.154s  mean=1.552s
+  size_download (median bytes): 18245
+  status codes: 200 (10/10)
+  notes: Long p95 tail (6.15s). Likely the read-path DB writes (signal re-scoring +
+         update_signal_with_score on every GET). Phase 4 target.
+
+[sectors_heatmap]  /api/sectors/heatmap?metric=price
+  time_total  min=0.243s  p50=0.349s  p95=2.615s  max=2.615s  mean=0.681s
+  size_download (median bytes): 1969
+  status codes: 200 (10/10)
+  notes: Phase 1 brief listed this endpoint for baseline but Phase 1 fan-out work
+         targets the drill-down route (per-constituent enrichment). Heatmap
+         aggregate is fast already — keep as regression canary only.
+
+[sectors_drilldown_XLK]  /api/sectors/XLK/leaders     (added per Amendment Rev 1)
+  time_total  min=1.347s  p50=1.846s  p95=2.791s  max=2.791s  mean=1.924s
+  size_download (median bytes): 11239
+  status codes: 200 (10/10)
+  notes: Phase 1b target (sectors.py asyncio.gather refactor). XLK chosen per
+         amendment recommendation, but actual constituent count is 20 (the route
+         returns "top-20 by rank_in_sector"), not the ~70 assumed in the
+         amendment. Fan-out amplification is smaller than predicted.
+
+         COLD-CACHE FIRST HIT: 16.93s (UW snapshot + per-ticker IV/flow/DP all
+         uncached). Not a Phase 1 target — that's a different problem (cold-start
+         penalty across UW endpoints, hits any drill-down on first request per
+         5-min window). Surfacing it here for visibility.
+
+         All 10 warm times: 1.77 2.79 2.08 2.51 1.50 1.87 2.09 1.35 1.85 1.43
+
+         IMPORTANT: the parent brief predicted "60-85% p50 reduction" for the
+         gather refactor based on N≥30 constituents. With N=20 and warm UW
+         cache hits (each ~2-5ms), the absolute time spent in the 3 per-row
+         awaits is likely <300ms — the rest of the 1.85s is Postgres + the
+         outer envelope/snapshot fetches that are NOT being parallelized.
+         Expected post-Phase-1 p50: somewhere in 0.8-1.4s, not 0.28-0.74s.
+         If gather refactor lands and p50 doesn't improve at all, that's a
+         signal the helpers were never the bottleneck — pause Phase 1c before
+         applying SWR to flow/radar, and re-brief.
+
+[flow_radar]  /api/flow/radar
+  time_total  min=0.415s  p50=1.016s  p95=1.605s  max=1.605s  mean=1.028s
+  size_download (median bytes): 391
+  status codes: 200 (10/10)
+  notes: Phase 1 SCAN→indexed target. p50 is dominated by Redis SCAN over the
+         uw:flow:* keyspace. Expected: post-Phase-1, p50 should be flat regardless
+         of keyspace size.
+
+[crypto_market]  /api/crypto/market?symbol=BTCUSDT
+  time_total  min=0.205s  p50=0.262s  p95=1.724s  max=1.724s  mean=0.636s
+  size_download (median bytes): 3739
+  status codes: 200 (10/10)
+  notes: Regression-canary only — not a target of any phase. Cold-start outliers
+         likely account for the p95 tail.
+
+================================================================================
+FRONTEND BASELINE — TODO (requires Chrome DevTools, run manually)
+================================================================================
+
+Nick: capture this before Phase 1 ships. Procedure per brief:
+
+1. Open https://pandoras-box-production.up.railway.app/ in Chrome
+2. DevTools → Performance tab → click Record (●)
+3. Hard refresh (Ctrl-Shift-R) to capture cold load
+4. Wait 30 seconds while dashboard initializes and idles
+5. Click Stop
+6. Right-click on the timeline → "Save profile" → save as
+   docs/strategy-reviews/perf-trace-baseline-2026-05-24.json
+7. From the Summary panel, record the following numbers below:
+
+   Time-to-Interactive:          [TODO seconds]
+   Total Scripting time:         [TODO ms]
+   Total Rendering time:         [TODO ms]
+   Total Painting time:          [TODO ms]
+   Total blocking time:          [TODO ms]
+
+These are the falsification numbers for Phase 2 (lazy-init by mode) and Phase 5
+(incremental DOM patching). Without them, "feels faster" is unfalsifiable.
+
+================================================================================
+PHASE-BY-PHASE TARGETS (predictions from brief, fill in actuals after each ship)
+================================================================================
+
+Phase 1 (REVISED per Amendment Rev 1):
+  1a — Build backend/api/_swr_cache.py (foundational, no endpoint impact)
+  1b — sectors.py asyncio.gather refactor for /sectors/{etf}/leaders
+       - drill-down p50: currently 1.846s. Tempered prediction: drop to 0.8–1.4s
+         (NOT 60–85% — see baseline note above; helpers aren't the only cost).
+         If p50 doesn't move, pause 1c and re-brief.
+  1c — Apply SWR to /flow/radar (canary deployment of SWR module)
+       - flow_radar p50: currently 1.016s, expect <50ms on cache-hit path
+       - first request after stale_ttl=10s elapses expects ~1s (recompute), next
+         request immediately should be fast
+       - response envelope gains as_of + cache_age_seconds fields
+  Regression canaries (must NOT slow down):
+  - sectors_heatmap: currently p50=0.349s
+  - positions: currently p50=1.400s
+  - signals_active: currently p50=0.800s
+  - crypto_market: currently p50=0.262s
+
+Phase 2 (lazy-init by mode):
+  - cold-load TTI:    expect 30–60% drop
+  - subsystem switch: first switch into a non-default mode triggers its init
+
+Phase 3 (SWR on positions + signals_active):
+  - positions p50:    expect drop to <0.020s on cache-hit path
+  - positions p95:    expect drop to ~previous p50 (cache-miss / stale-refresh path)
+  - signals_active:   same shape
+  - new field:        as_of + cache_age_seconds on response envelope
+
+Phase 4 (read-path-write cleanup):
+  - positions p50/p95: additional 20–40% drop on top of Phase 3
+  - signals_active:    long tail (currently 6.15s p95) should collapse — DB writes
+                       move to background tasks
+  - DB query log:      zero UPDATE/INSERT logged from GET handler paths
+
+Phase 5 (incremental DOM patching — heatmap + macro):
+  - Scripting time on heatmap/macro tick: expect 50–80% drop
+  - Painting time on heatmap/macro tick:  significant drop
+  - No visual regression (HELIOS sign-off required from screenshot diff)
+
+================================================================================
+FRONTEND BASELINE (Playwright capture, label=baseline-2026-05-24)
+================================================================================
+Captured: 2026-05-26T03:06:58.650962+00:00
+URL:      https://pandoras-box-production.up.railway.app/app
+Final URL: https://pandoras-box-production.up.railway.app/app/hub  (redirected)
+Title:    Pandora
+Trace:    docs/strategy-reviews/perf-trace-baseline-2026-05-24.json  (373601 events)
+          (open in Chrome DevTools → Performance panel → Load profile)
+
+Web vitals + paint metrics:
+  fcp_ms                              1440
+  lcp_ms                              1440
+  dcl_ms                              1128.2999999970198
+  load_event_ms                       4808.5
+  cls                                 0.036111507654190064
+  long_tasks_count                    5
+  long_tasks_total_duration_ms        674
+  total_blocking_time_ms              47
+
+Navigation timing:
+  nav_request_start_ms                220.1000000089407
+  nav_response_end_ms                 320
+  nav_dom_interactive_ms              1105.7999999970198
+  nav_dom_complete_ms                 4808.4000000059605
+
+Resource summary:
+  resource_count                      112
+  resource_transfer_bytes             445572
+  resource_decoded_bytes              2023491
+  by initiator:
+    fetch                count=102  transfer_bytes=131094
+    iframe               count=1  transfer_bytes=0
+    img                  count=1  transfer_bytes=31441
+    link                 count=2  transfer_bytes=57695
+    other                count=1  transfer_bytes=300
+    script               count=5  transfer_bytes=225042
+
+visible_text_chars: 8717
+console_errors: none
+
+================================================================================
+PHASE 1b DECISION INSTRUMENTATION — /api/sectors/XLK/leaders per-section timing
+================================================================================
+Captured: 2026-05-26 03:09-03:11 UTC (2026-05-25 21:09-21:11 MDT, post-market)
+Instrumented at commit 86c740c (diag patch, will be reverted).
+HEAD at capture: 450ca1a. Warm-up + 10 timed warm-cache reqs (one URL: XLK).
+
+IMPORTANT: container had just been deployed (Railway cutover), so UW Redis caches
+were partially cold. Results are bimodal — see below. The previous warm baseline
+of 1.846s p50 was captured during market hours with deeply-warm UW caches; today
+is post-market and the snapshot+UW caches re-fill less aggressively. Treat the
+"warm steady state" rows as the real comparable signal for Phase 1b.
+
+Per-section summary (10 timed reqs, seconds):
+                  min      p50      p95     mean      max
+     total      7.318    7.673   24.240   12.556   24.240
+        pg      0.003    0.005    0.008    0.005    0.008
+      snap      2.576    2.592   16.487    6.761   16.487
+       env      0.115    0.116    0.400    0.144    0.400
+      loop      4.616    4.689   10.875    5.646   10.875
+        flow    0.051    0.064    0.078    0.063    0.078     <- per-row sum
+        iv      2.232    2.245    7.560    2.982    7.560     <- per-row sum
+        dp      2.308    2.382    3.613    2.599    3.613     <- per-row sum
+       asm      0.000    0.000    0.000    0.000    0.000
+
+Bimodal split:
+
+  Warm-steady-state (6 of 10 reqs):
+    total ≈ 7.40s
+    snap  ≈ 2.58s  (35% of total — UW batched snapshot for 21 tickers)
+    loop  ≈ 4.69s  (63% of total — 20 rows × 3 per-row UW awaits)
+      flow ≈ 0.066s (1% — Postgres flow_events 24h aggregate)
+      iv   ≈ 2.24s  (30% — UW iv_rank, ~112ms/row warm)
+      dp   ≈ 2.40s  (32% — UW darkpool_ticker, ~120ms/row warm)
+    env, pg, asm: <2% combined
+
+  Stale-cache bursts (4 of 10 reqs):
+    total 15.98-24.24s
+    snap spikes 10.5-16.5s (UW snapshot cache miss)
+    iv spikes 3.7-7.6s, dp spikes 3.2-3.6s (per-row UW cache miss)
+
+DECISION-TREE APPLICATION (Nick's criteria):
+  Per-row enrichment (loop=4.69s) dominates the warm total of 7.40s.
+  Threshold "> 1s of total" is exceeded by 4.7×.
+  Conclusion: **SHIP 1b AS PLANNED**.
+
+Predicted warm-cache win from Phase 1b (asyncio.gather of the 3 per-row helpers):
+  Loop time becomes ~max(flow, iv, dp) per row, dominated by dp (~120ms warm).
+  New loop time ≈ 20 × 0.12s = 2.4s (down from 4.69s, ~49% loop reduction).
+  New total ≈ snap(2.58) + loop(2.40) + env(0.12) + pg(0.005) ≈ 5.10s (post-market).
+  Equivalent during-market warm: previous 1.846s → predicted ~1.3s (29% total drop).
+
+Secondary findings (NOT Phase 1b scope, may warrant follow-up):
+  1. The UW snapshot fetch (`_fetch_sector_snapshot`) is a hot single-await call
+     costing 2.58s warm / 16.5s cold. Phase 1b does not touch it. If it becomes
+     the new dominant cost post-1b, a separate "warm UW snapshot cache via
+     background poll" change would be a clean follow-up.
+  2. IV and DP fetches carry near-identical per-row cost (~115ms warm each).
+     A gather over the two is sufficient to extract the win.
+  3. The flow_events Postgres query (3-4ms per row) is already cheap; including
+     it in the gather is free.
+  4. Cold-cache variance is huge (8-25s on the same endpoint within 2 min).
+     `return_exceptions=True` in the gather is essential — without it, one
+     ticker's UW timeout 500s the entire drill-down.
