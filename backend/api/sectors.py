@@ -13,7 +13,6 @@ import json
 import logging
 import asyncio
 import os
-import time as _perf_time  # PERF-INSTRUMENT (Phase 1b decision, temporary)
 import aiohttp
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
@@ -638,19 +637,11 @@ async def get_sector_leaders(
     Sector drill-down: top-20 constituents sorted by sector-relative performance.
     Use ?fast=true for 5-second price-only polls.
     """
-    # PERF-INSTRUMENT (Phase 1b decision, temporary) START
-    _t0 = _perf_time.perf_counter()
-    _t_flow = 0.0
-    _t_iv = 0.0
-    _t_dp = 0.0
-    # PERF-INSTRUMENT END
-
     sector_etf = sector_etf.upper()
 
     if sector_etf not in SECTOR_SEEDS:
         raise HTTPException(status_code=404, detail=f"Unknown sector ETF: {sector_etf}")
 
-    _t_pg_start = _perf_time.perf_counter()  # PERF-INSTRUMENT
     await _ensure_sector_constituents()
 
     pool = await get_postgres_client()
@@ -660,7 +651,6 @@ async def get_sector_leaders(
             "FROM sector_constituents WHERE sector_etf = $1 ORDER BY rank_in_sector",
             sector_etf,
         )
-    _t_pg_end = _perf_time.perf_counter()  # PERF-INSTRUMENT
 
     if not rows:
         raise HTTPException(status_code=404, detail=f"No constituents found for {sector_etf}")
@@ -668,9 +658,7 @@ async def get_sector_leaders(
     constituent_tickers = [r["ticker"] for r in rows]
     all_tickers = [sector_etf] + constituent_tickers
 
-    _t_snap_start = _perf_time.perf_counter()  # PERF-INSTRUMENT
     snapshot = await _fetch_sector_snapshot(all_tickers)
-    _t_snap_end = _perf_time.perf_counter()  # PERF-INSTRUMENT
 
     etf_data = snapshot.get(sector_etf, {})
     sector_day_change = etf_data.get("day_change_pct", 0)
@@ -682,7 +670,6 @@ async def get_sector_leaders(
     # Phase A.3 (2026-05-22): also fetch the refresh universe so each row can
     # carry a `tracked: bool` flag. Universe is top-3-per-sector; out-of-universe
     # tickers display "not tracked" in the popup rather than "stale".
-    _t_env_start = _perf_time.perf_counter()  # PERF-INSTRUMENT
     if not fast:
         from integrations.sector_cache import read_many as _sector_cache_read_many
         from jobs.sector_constituent_refresh import get_tracked_universe
@@ -694,9 +681,7 @@ async def get_sector_leaders(
     else:
         envelopes = {}
         tracked_set = set()
-    _t_env_end = _perf_time.perf_counter()  # PERF-INSTRUMENT
 
-    _t_loop_start = _perf_time.perf_counter()  # PERF-INSTRUMENT
     constituents = []
     for r in rows:
         ticker = r["ticker"]
@@ -726,24 +711,18 @@ async def get_sector_leaders(
                 entry["volume_ratio"] = None
 
             # Enriched flow metrics (P2)
-            _ts = _perf_time.perf_counter()  # PERF-INSTRUMENT
             flow_metrics = await _get_flow_metrics(ticker)
-            _t_flow += _perf_time.perf_counter() - _ts  # PERF-INSTRUMENT
             entry["flow_direction"] = flow_metrics["direction"]
             entry["flow_call_pct"] = flow_metrics["call_pct"]
             entry["flow_premium"] = flow_metrics["total_premium"]
 
             # IV rank (P2)
-            _ts = _perf_time.perf_counter()  # PERF-INSTRUMENT
             iv_data = await _get_iv_rank_for_ticker(ticker)
-            _t_iv += _perf_time.perf_counter() - _ts  # PERF-INSTRUMENT
             entry["iv_rank"] = iv_data["rank"] if iv_data else None
             entry["iv_tier"] = iv_data["tier"] if iv_data else None
 
             # Dark pool activity (P2)
-            _ts = _perf_time.perf_counter()  # PERF-INSTRUMENT
             dp_data = await _get_dp_activity_for_ticker(ticker)
-            _t_dp += _perf_time.perf_counter() - _ts  # PERF-INSTRUMENT
             entry["dp_active"] = bool(dp_data and dp_data.get("active"))
             entry["dp_prints_30m"] = dp_data["prints_30m"] if dp_data else 0
 
@@ -757,9 +736,7 @@ async def get_sector_leaders(
             entry["tracked"] = ticker.upper() in tracked_set
 
         constituents.append(entry)
-    _t_loop_end = _perf_time.perf_counter()  # PERF-INSTRUMENT
 
-    _t_asm_start = _perf_time.perf_counter()  # PERF-INSTRUMENT
     constituents.sort(key=lambda c: c["sector_relative_pct"], reverse=True)
 
     sector_name = SECTOR_SEEDS[sector_etf]["name"]
@@ -775,24 +752,6 @@ async def get_sector_leaders(
         response["sector_name"] = sector_name
         response["is_market_hours"] = _is_market_hours()
         response["etf_price"] = etf_data.get("price", 0)
-    _t_asm_end = _perf_time.perf_counter()  # PERF-INSTRUMENT
-
-    # PERF-INSTRUMENT (Phase 1b decision, temporary) — log per-section breakdown
-    logger.info(
-        "PERF[%s] total=%.3fs pg=%.3fs snap=%.3fs env=%.3fs loop=%.3fs "
-        "(flow=%.3fs iv=%.3fs dp=%.3fs) asm=%.3fs rows=%d fast=%s",
-        sector_etf,
-        _perf_time.perf_counter() - _t0,
-        _t_pg_end - _t_pg_start,
-        _t_snap_end - _t_snap_start,
-        _t_env_end - _t_env_start,
-        _t_loop_end - _t_loop_start,
-        _t_flow, _t_iv, _t_dp,
-        _t_asm_end - _t_asm_start,
-        len(rows),
-        fast,
-    )
-    # PERF-INSTRUMENT END
 
     return response
 
