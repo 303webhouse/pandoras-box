@@ -9,9 +9,10 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime, date, timezone
 import logging
 import json
+import time
 
 from api.unified_positions import _adjust_account_cash, CREDIT_STRUCTURES
-from database.redis_client import get_signal, delete_signal, cache_signal
+from database.redis_client import get_signal, delete_signal, cache_signal, get_redis_client
 from database.postgres_client import (
     update_signal_action,
     get_open_positions,
@@ -23,9 +24,29 @@ from database.postgres_client import (
     get_backtest_statistics,
 )
 from websocket.broadcaster import manager
+
+from api._swr_cache import SWRCache
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# Phase 3 SWR wrapper for /signals/active. ttl=10 / stale_ttl=30 means cached
+# responses are served immediately for ~40s while a background refresh fires
+# on stale hits. Signals don't change on sub-10s cadence — these TTLs are
+# conservative.
+#
+# Cache key namespacing (AEGIS): user_id placeholder fixed for single-user
+# mode. See unified_positions.py for the convention.
+_signals_swr_instance: Optional[SWRCache] = None
+
+
+async def _get_signals_swr() -> SWRCache:
+    global _signals_swr_instance
+    if _signals_swr_instance is None:
+        redis_client = await get_redis_client()
+        _signals_swr_instance = SWRCache(redis_client, default_ttl=10, stale_ttl=30)
+    return _signals_swr_instance
 
 # Legacy in-memory position state REMOVED (Phase 0C).
 # All position data lives in unified_positions table.
@@ -599,7 +620,30 @@ async def get_active_signals_api():
     """
     Get all active trade ideas (not dismissed or selected).
     Returns top 10 ranked by score with bias alignment.
-    
+
+    Phase 3 (perf-architecture brief): wrapped in SWR. The heavy assembly
+    (Redis + Postgres signal merge, re-scoring, position-aware filtering,
+    counter-trend tagging) lives in _compute_signals_active(); this handler
+    is a thin SWR wrapper that adds as_of + cache_age_seconds. Side effects
+    in the compute path (signal re-scoring DB writes, counter-signal Redis
+    writes) now fire on cache miss/refresh only, not on every request —
+    incidentally addresses part of the Phase 4 read-path-write concern.
+    """
+    swr = await _get_signals_swr()
+    data, age = await swr.get_or_refresh(
+        "signals:active:v1:default",
+        compute_fn=_compute_signals_active,
+    )
+    return {
+        **data,
+        "as_of": int(time.time() - age),
+        "cache_age_seconds": age,
+    }
+
+
+async def _compute_signals_active() -> Dict[str, Any]:
+    """Heavy assembly path for /signals/active — pulled out of the handler so SWR can wrap it.
+
     Falls back to Redis cache, then PostgreSQL for persistence.
     Re-scores signals that don't have proper scores.
     """

@@ -14,14 +14,35 @@ import asyncio
 import logging
 import json
 import os
+import time
 
 from database.postgres_client import get_postgres_client
 from database.redis_client import get_redis_client
 from websocket.broadcaster import manager
 from models.position_risk import calculate_position_risk, infer_direction
 
+from api._swr_cache import SWRCache
+
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+# Phase 3 SWR wrapper for /v2/positions. Polling cadence is 30s from the
+# dashboard, so the fresh+stale window (ttl=3 + stale_ttl=27) lines up with
+# the natural cadence: most polls hit the stale-but-servable window and
+# return cached data instantly while a background refresh fires.
+#
+# Cache key namespacing (AEGIS): the user-id placeholder is fixed for
+# single-user mode today. Swap "default" for the real user_id when multi-user
+# is added. The cache wrapper API supports user-scoping via the key string.
+_swr_instance: Optional[SWRCache] = None
+
+
+async def _get_swr() -> SWRCache:
+    global _swr_instance
+    if _swr_instance is None:
+        redis_client = await get_redis_client()
+        _swr_instance = SWRCache(redis_client, default_ttl=3, stale_ttl=27)
+    return _swr_instance
 
 # Structures where entry_price is credit received — PnL flips: (entry - exit) * 100 * qty
 CREDIT_STRUCTURES = frozenset({
@@ -584,7 +605,42 @@ async def list_positions(
     account: Optional[str] = Query(None),
     asset_type: Optional[str] = Query(None, description="Filter by asset type: OPTION, EQUITY, SPREAD"),
 ):
-    """List positions, filtered by status."""
+    """List positions, filtered by status.
+
+    Phase 3 (perf-architecture brief): wrapped in SWR. Repeat hits within the
+    3s fresh window return sub-200ms server-side; hits in the 3-30s
+    stale-but-servable window return cached data immediately and schedule a
+    background refresh. Response gains `as_of` + `cache_age_seconds`.
+    """
+    swr = await _get_swr()
+    status_upper = status.upper()
+    ticker_upper = ticker.upper() if ticker else None
+    account_upper = account.upper() if account else None
+    asset_type_upper = asset_type.upper() if asset_type else None
+
+    cache_key = (
+        f"positions:v1:default:{status_upper}:"
+        f"{ticker_upper or '*'}:{asset_type_upper or '*'}:{account_upper or '*'}"
+    )
+
+    async def _do_compute():
+        return await _compute_positions(status_upper, ticker_upper, account_upper, asset_type_upper)
+
+    data, age = await swr.get_or_refresh(cache_key, compute_fn=_do_compute)
+    return {
+        **data,
+        "as_of": int(time.time() - age),
+        "cache_age_seconds": age,
+    }
+
+
+async def _compute_positions(
+    status_upper: str,
+    ticker_upper: Optional[str],
+    account_upper: Optional[str],
+    asset_type_upper: Optional[str],
+) -> Dict[str, Any]:
+    """Heavy assembly path for /v2/positions — pulled out of the handler so SWR can wrap it."""
     # Auto-expire positions past their expiry date
     await _sweep_expired_positions()
 
@@ -594,27 +650,27 @@ async def list_positions(
     params = []
     idx = 1
 
-    if status.upper() != "ALL":
+    if status_upper != "ALL":
         conditions.append(f"status = ${idx}")
-        params.append(status.upper())
+        params.append(status_upper)
         idx += 1
 
-    if ticker:
+    if ticker_upper:
         conditions.append(f"ticker = ${idx}")
-        params.append(ticker.upper())
+        params.append(ticker_upper)
         idx += 1
 
-    if asset_type:
+    if asset_type_upper:
         conditions.append(f"asset_type = ${idx}")
-        params.append(asset_type.upper())
+        params.append(asset_type_upper)
         idx += 1
 
-    if account:
-        if account.upper() == "FIDELITY":
+    if account_upper:
+        if account_upper == "FIDELITY":
             conditions.append("account LIKE 'FIDELITY%'")
         else:
             conditions.append(f"account = ${idx}")
-            params.append(account.upper())
+            params.append(account_upper)
             idx += 1
 
     where = "WHERE " + " AND ".join(conditions) if conditions else ""
@@ -641,7 +697,7 @@ async def list_positions(
                 pass
 
     # Attach counter-signal warnings from Redis for open positions
-    if status.upper() == "OPEN":
+    if status_upper == "OPEN":
         try:
             from database.redis_client import get_redis_client
             redis = await get_redis_client()
