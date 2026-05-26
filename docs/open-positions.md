@@ -1,4 +1,29 @@
 # OPEN POSITIONS — Pandora's Box
+
+> **⚠️ DEPRECATED as a source of truth (2026-05-26).** Position data below is
+> stale and no longer manually maintained. The canonical source of truth for
+> open positions is the `unified_positions` table, queryable via
+> `hub_get_positions(account='robinhood', status='OPEN')` (MCP) or
+> `GET /v2/positions?account=ROBINHOOD&status=OPEN` (REST).
+>
+> **To re-sync from broker reality:** pull a fresh RH activity CSV, drop it in
+> `data/rh_csv/`, run `railway run python scripts/sync_rh_csv.py data/rh_csv/`
+> (dry-run) → review → `--apply`. See brief: `RH CSV Sync → unified_positions`
+> (2026-05-26).
+>
+> **HYG 3-leg structure** (the canonical reason this file used to exist as a
+> "full-structure reference"): now preserved in `unified_positions.legs` JSONB
+> on `POS_HYG_20260325_185236`. The 2-leg approximation in `long_strike` /
+> `short_strike` is unchanged for price-updater compatibility.
+>
+> **This file is retained for now** because committee context generation on the
+> VPS (`scripts/vps_deploy/patch_tier3_tier4.py`,
+> `scripts/vps_deploy/patch_context_and_pythia.py`) still reads it via
+> `sync_trading_docs.sh`. Migrating those scripts to call `hub_get_positions`
+> directly is a follow-up brief; until that ships, the thesis/invalidation
+> commentary below remains the only structured position narrative the VPS
+> committee sees.
+
 # Last synced with hub Ledger: April 15, 2026 (Wednesday close)
 # Location: C:\trading-hub\docs\open-positions.md
 # RULE: At the start of every chat, sync this file against the trading hub Ledger
