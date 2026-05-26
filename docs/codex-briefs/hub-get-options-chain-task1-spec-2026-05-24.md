@@ -1,8 +1,77 @@
 # Task 1 Findings — `hub_get_options_chain` Pre-Schema Reconnaissance (2026-05-25)
 
-**Status:** Task 1 complete. Three threads investigated (1A spec, 1B singleflight, 1C math extraction). One material finding flagged for Nick before Task 2 proceeds.
+**Status:** Task 1 complete + 2026-05-26 empirical UW probe addendum. The Greeks-presence question is now empirically resolved (NOT in the response). Schema needs material adjustment before Task 2.
 
 **Predecessor:** `docs/codex-briefs/hub-get-options-chain-2026-05-24.md` (brief + ATLAS amendments at `fc86293`, `eea7bc8`).
+
+---
+
+## ⚡ 2026-05-26 AMENDMENT — empirical UW probe results
+
+Per Nick's "verify-first" choice at PAUSE #1, ran a single chain probe against the production `/api/market/options-chain/SPY` endpoint with `strike_gte=580&strike_lte=620` (10 contracts returned spanning 2026-05-29 → 2026-09-18 expiries). Sample contract structure inspected:
+
+```json
+{
+  "details": {"contract_type": "put", "strike_price": 620.0, "expiration_date": "2026-08-21", "ticker": "SPY260821P00620000"},
+  "day": {"close": 3.21, "volume": 3883, "open_interest": 10519, "vwap": 3.13},
+  "last_quote": {"bid": 3.20, "ask": 3.21},
+  "last_trade": {"price": 3.21},
+  "greeks": {"delta": null, "gamma": null, "theta": null, "vega": null},   ← ALL NULL
+  "implied_volatility": 0.2633225834558551,
+  "open_interest": 10519
+}
+```
+
+**Result: Greeks (delta/gamma/theta/vega) are NULL for every contract.** Implied_volatility IS populated. Bid/ask/volume/OI/last_price/vwap all populated and accurate.
+
+**Explanation resolved:** the OpenAPI spec was correct. `/option-contracts` does not return per-contract Greeks. The existing `_get_contract_greeks()` in `uw_api.py` reads `c.get("delta")` etc. from the raw UW response, gets None, and silently propagates. Four production callers (`get_spread_value`, `get_single_option_value`, `get_multi_leg_value`, `get_ticker_greeks_summary`) have been returning null Greeks all along. No bug reports because:
+- Position-MTM (the primary use case for those callers) relies on `mid`, not Greeks
+- DAEDALUS has operated in documented qualitative-IV-mode where Greeks come from screenshots or inference, not the hub
+- `get_ticker_greeks_summary` would zero-aggregate silently — useless but not crash-y
+
+**Implications for Task 2 schema:**
+
+1. ❌ `delta`, `gamma`, `theta`, `vega` fields cannot be populated from `/option-contracts` alone.
+2. ✅ `implied_volatility` per-contract IS available.
+3. ✅ `iv_rank` (chain-level) IS available via `/iv-rank`.
+4. ✅ `max_pain` per-expiry IS available via `/max-pain`.
+5. ✅ Everything else in the schema (bid, ask, mid, OI, volume, bid_ask_spread_pct) IS available.
+
+**Three options for handling Greeks in the Task 2 schema:**
+
+| Option | Description | Effort | Recommendation |
+|---|---|---|---|
+| A | **Ship without Greeks.** Schema omits `delta/gamma/theta/vega` entirely. DAEDALUS gets IV rank + per-contract IV + max_pain + chain — that's 80% of the qualitative-IV-mode close. Greeks remain inference-only (matches existing fallback). Add explicit note in schema docs. | Same as original brief scope | **Recommended for v1** |
+| B | **Compute Greeks via Black-Scholes** at the service layer. Requires risk-free rate input (sane default: current 3M T-bill from FRED), dividend yield (zero for non-dividend underlyings — SPY/QQQ pay dividends though), and an actively-maintained BS implementation. ~50-100 lines new code plus a dependency or hand-rolled math. Drift risk vs. broker Greeks. | +1 day | Defer to follow-up |
+| C | **Find an alternate UW endpoint that exposes per-contract Greeks.** Audit Section 3.1 lists `/atm-chains`, `/interpolated-iv`, `/spot-exposures/expiry-strike` as candidates but their per-contract-Greeks coverage is unconfirmed. Would require another probe round. | +1-2 hours probe + redesign | Defer to follow-up |
+
+**My recommendation:** **Option A + queue a follow-up brief** for Greeks-source investigation. Rationale:
+- Delivers DAEDALUS's most-needed missing piece (IV rank) immediately — closes the bigger half of the qualitative-IV caveat
+- Avoids Black-Scholes-vs-broker-quote drift risk that would surface in DAEDALUS's output as "delta says 0.52 but my broker shows 0.48"
+- Keeps the brief small and shippable in one session
+- The follow-up brief becomes Tier 2: "Investigate UW per-contract-Greeks source (`/atm-chains` or BS computation)" with a clear empirical mandate
+
+DAEDALUS's SKILL.md update at Task 6 will need adjustment: the qualitative-IV-mode caveat (lines 71-77) becomes **partial-IV-mode** — DAEDALUS gets IV rank + per-contract IV, still infers Greeks qualitatively. Smaller win than the brief originally promised, but still meaningful.
+
+---
+
+## Pre-Task-2 surfacing for Nick — UPDATED
+
+**Greens (proceed to Task 2 schema design):**
+- ✅ Endpoint surface, singleflight pattern, math extraction (unchanged from original findings)
+- ✅ `implied_volatility`, `iv_rank`, `max_pain`, bid/ask/OI/volume all empirically confirmed in the response
+
+**Schema decision needed from Nick before Task 2 proceeds:**
+
+Which Option (A/B/C) for Greeks handling?
+
+- **Recommended: A** — ship without Greeks; queue Greeks-source as Tier 2 follow-up.
+- B: compute via Black-Scholes (adds scope + drift risk).
+- C: probe alternate UW endpoints first (adds 1-2 hours but might be cleaner long-term).
+
+Section below this addendum is the original Task 1 findings — left intact for reference. The Greeks-presence yellow at the bottom is now empirically resolved (it's a red, not a yellow — Greeks are NOT in the response).
+
+---
 
 ---
 
