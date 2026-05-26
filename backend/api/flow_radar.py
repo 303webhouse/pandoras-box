@@ -4,19 +4,42 @@ Flow Radar API — contextual flow intelligence for the Agora middle column.
 Combines UW options flow data with positions, watchlist, and sector data
 into a single dashboard-friendly payload. Replaces the old /flow/summary
 as the primary frontend data source.
+
+Perf-architecture Phase 1c: this endpoint is the SWR canary. The heavy
+assembly lives in _compute_flow_radar(); the route handler is a thin
+SWR wrapper that adds `as_of` + `cache_age_seconds` to the response.
 """
 
 import json
 import logging
+import time
 from datetime import datetime, timezone
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 from fastapi import APIRouter
 from database.redis_client import get_redis_client
 from database.postgres_client import get_postgres_client
 
+from api._swr_cache import SWRCache
+
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/flow", tags=["flow-radar"])
+
+# Module-level SWR cache instance, lazily initialized on first request so the
+# Redis client is fully connected by then. Phase 1c canary defaults:
+#   default_ttl=3   — fresh window (cache hits return in single-digit ms)
+#   stale_ttl=10    — stale-but-servable window (background refresh on hit)
+# Total Redis entry TTL is default_ttl + stale_ttl = 13s, after which the
+# next call recomputes synchronously.
+_swr_instance: Optional[SWRCache] = None
+
+
+async def _get_swr() -> SWRCache:
+    global _swr_instance
+    if _swr_instance is None:
+        redis_client = await get_redis_client()
+        _swr_instance = SWRCache(redis_client, default_ttl=3, stale_ttl=10)
+    return _swr_instance
 
 # Map sector names from watchlist_tickers to sector ETFs
 SECTOR_NAME_TO_ETF = {
@@ -58,13 +81,35 @@ async def get_flow_radar():
     """
     Contextual flow intelligence: positions, watchlist, sectors, market pulse.
 
+    Phase 1c (perf-architecture brief): wrapped in SWR. Repeat hits within
+    the 3s fresh window return sub-10ms; hits in the 3-13s stale-but-servable
+    window return cached data immediately and schedule a background refresh.
+
     Returns:
         position_flow: open positions matched with UW flow alignment
         watchlist_unusual: watchlist tickers with extreme flow activity
         sector_flow: per-sector aggregated flow from UW data
         market_pulse: overall market flow + bias regime
         headlines: latest 3 headlines for the strip (empty if no cache)
+        as_of: unix timestamp of the cached payload (computed from age)
+        cache_age_seconds: integer age of served data in seconds (0 on cold)
     """
+    swr = await _get_swr()
+    data, age = await swr.get_or_refresh(
+        "flow:radar:global",
+        compute_fn=_compute_flow_radar,
+    )
+    # Spread the existing top-level keys (backward compat for the frontend)
+    # and stamp the SWR freshness signal alongside.
+    return {
+        **data,
+        "as_of": int(time.time() - age),
+        "cache_age_seconds": age,
+    }
+
+
+async def _compute_flow_radar() -> Dict[str, Any]:
+    """Heavy assembly path — pulled out of the route handler so SWR can wrap it."""
     redis = await get_redis_client()
     pool = await get_postgres_client()
 
