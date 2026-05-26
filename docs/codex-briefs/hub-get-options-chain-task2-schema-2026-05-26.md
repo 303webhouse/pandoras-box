@@ -1,15 +1,29 @@
 # Task 2 — `hub_get_options_chain` Schema Design (2026-05-26)
 
-**Status:** Task 2 deliverable. Schema design only; no code. PAUSE #2 next — ATLAS-style sign-off before Task 3 implementation.
+**Status:** Task 2 deliverable. Schema design only; no code. PAUSE #2 next — canonical ATLAS skill review before Task 3 implementation.
 
 **Predecessors:**
 - Brief: [hub-get-options-chain-2026-05-24.md](hub-get-options-chain-2026-05-24.md) (`fc86293`)
 - ATLAS amendments: (`eea7bc8`)
 - Task 1 findings + amendments: [hub-get-options-chain-task1-spec-2026-05-24.md](hub-get-options-chain-task1-spec-2026-05-24.md) (`d4f96ae`, `e20a166`, `4c92db1`)
 
-**Nick decisions applied:**
-- PAUSE #1: empirical UW probe first (Option 2)
-- Greeks: ship v1 without Greeks (Option A) — UW does not expose per-contract Greeks via any chain-snapshot endpoint; Tier 2 follow-up brief queued
+> **AMENDMENT 2026-05-26 — Greeks-present assumption restored, Option-A fallback gated to Task 3.**
+>
+> The 2026-05-25 Memorial Day probe returned `delta/gamma/theta/vega = null` on the sample SPY contract. Two equally-consistent explanations:
+> 1. **Spec-correct interpretation:** Greeks are genuinely not in `/option-contracts` responses; existing 4 production-code consumers (`get_spread_value`, `get_single_option_value`, `get_multi_leg_value`, `get_ticker_greeks_summary`) read `c.get("delta")` and have been silently getting None for years without anyone noticing.
+> 2. **Market-closed interpretation:** UW doesn't refresh per-contract Greeks on non-trading days; the spec is just lagging. Greeks DO populate during live market sessions — that's why the 4 production consumers haven't surfaced visible bugs.
+>
+> The 4-production-consumer argument is empirically strong: zero delta on a real position priced at $1.50 mid would have produced obvious bugs (mark-to-market drift, sizing math errors, broker-quote mismatches). Nothing of the kind has been reported. Spec-lag is the overwhelmingly likely explanation.
+>
+> **Decision:** revert to Greeks-present assumption. Schema includes `delta/gamma/theta/vega` fields. Task 3 implementation must include an **empirical verification probe during a live market session** (Tuesday 2026-05-26 ≥09:30 ET) as the first smoke check — fail-stop if Greeks remain null then, with a documented Option-A fallback path (drop Greeks fields, ship as v1.5 with the qualitative-Greeks-mode caveat from the prior Task 1 Amendment #2).
+>
+> The earlier Task 1 Amendment #2 (Option C exhausted, Option A recommendation) is now superseded by this revision. The follow-up brief for per-contract Greeks (Black-Scholes / UW subscription tier / alternate provider) is descoped from v1 since Greeks are expected to populate from UW directly; it remains a useful Tier 2 item only if Task 3's empirical verification fails.
+
+**Nick decisions applied (final):**
+- PAUSE #1: empirical UW probe ran on Memorial Day, returned nulls (inconclusive due to market closure)
+- Greeks: **Greeks-present assumption restored** based on production-code chain evidence; Task 3 verification gate during live market session is fail-stop
+- Two Task 2 schema tweaks approved: `max_pain` filtered to requested expiry with `aggregates_errors` markers; `iv_rank` list-or-scalar normalization
+- PAUSE #2: canonical ATLAS skill review (not CC self-review) before Task 3 code
 
 ---
 
@@ -71,7 +85,11 @@ DESCRIPTION (visible to Claude as tool capability) — strawman to refine at Tas
         "bid_ask_spread_pct": 3.51,
         "volume": 1240,
         "open_interest": 8420,
-        "implied_volatility": 0.28
+        "implied_volatility": 0.28,
+        "delta": 0.52,
+        "gamma": 0.045,
+        "theta": -0.08,
+        "vega": 0.18
       },
       ...
     ]
@@ -107,9 +125,7 @@ DESCRIPTION (visible to Claude as tool capability) — strawman to refine at Tas
 - `volume` — int. Maps to `volume`.
 - `open_interest` — int. Maps to `open_interest`.
 - `implied_volatility` — float or null. Maps to `implied_volatility`.
-
-**Omitted from v1 (Option A):**
-- `delta`, `gamma`, `theta`, `vega` — not in UW's chain response. DAEDALUS continues to infer qualitatively. Tier 2 follow-up brief will reintroduce these.
+- `delta`, `gamma`, `theta`, `vega` — float or null. Maps to `delta`/`gamma`/`theta`/`vega` on the UW contract response. **Subject to Task 3 empirical verification gate**: if a live-market probe confirms these stay null during a real session, drop the fields and fall back to the Option-A v1.5 schema (qualitative-Greeks-mode caveat per prior Task 1 Amendment #2).
 
 **Why `last_price` / `last_trade` are not surfaced separately:**
 - They feed `compute_mid()`'s fallback chain at the service layer. Exposing them again at the consumer interface would invite drift; DAEDALUS only ever needs `mid` for premium math.
@@ -233,20 +249,40 @@ def compute_bid_ask_spread_pct(contract: Dict[str, Any]) -> Optional[float]:
 ### Refactor at `backend/integrations/uw_api.py`
 
 - Lines 1074-1096 (`_get_contract_mid`): delete the body; replace with `from utils.options_math import compute_mid` at top of file.
-- 3 call sites updated: `_get_contract_mid(c)` → `compute_mid(c)`.
-- `_get_contract_greeks` is NOT extracted in this phase (Option A: Greeks remain dropped from the schema; extraction has no consumer until the Tier 2 follow-up). Document as deferred in the closure note.
+- Lines 1099-1108 (`_get_contract_greeks`): delete the body; replace with `from utils.options_math import extract_greeks` at top of file.
+- 3 + 4 = **7 call-site replacements** total: `_get_contract_mid(c)` → `compute_mid(c)`; `_get_contract_greeks(c)` → `extract_greeks(c)`.
 
-Net effect: byte-for-byte identical position-pricing behavior; new chain-display path uses the same canonical `compute_mid`.
+The Greeks extraction comes back in scope under the Greeks-present assumption (the new service layer needs `extract_greeks` for the per-contract Greeks list, and consolidating with the 4 existing callers is the same single-source-of-truth ATLAS pattern from amendment (b)).
+
+Net effect: byte-for-byte identical position-pricing behavior; new chain-display path uses the same canonical `compute_mid` + `extract_greeks` helpers.
+
+`backend/utils/options_math.py` module signature gains a third function vs. the prior Option-A version:
+
+```python
+def extract_greeks(contract: Dict[str, Any]) -> Dict[str, Optional[float]]:
+    """Greeks dict from normalized contract. Single source of truth.
+    
+    Returns {delta, gamma, theta, vega, iv} — float-or-None values
+    propagated as-is from the normalized contract dict. The chain-display
+    path surfaces these in the contracts[] array; the position-pricing
+    path (get_spread_value etc.) consumes them via the same function.
+    """
+    # body identical to current _get_contract_greeks()
+```
 
 ---
 
-## DAEDALUS SKILL.md edit at Task 6 (final)
+## DAEDALUS SKILL.md edit at Task 6 (final under Greeks-present assumption)
 
 Replace `skills/daedalus/SKILL.md` lines 71-77 (the "DAEDALUS-specific data caveat") with:
 
-> **Closing the partial gap (post-`hub_get_options_chain` v1):** DAEDALUS now gets IV rank (chain-level), per-contract implied_volatility, max pain (per expiry), and full chain pricing (bid/ask/mid/volume/OI/spread-pct) via `hub_get_options_chain(ticker, expiry, option_type="both")`. Greeks (delta/gamma/theta/vega) are NOT in v1 — UW's chain endpoint doesn't expose them and `/atm-chains` / `/interpolated-iv` / `/spot-exposures` don't either. DAEDALUS continues to **infer Greeks qualitatively** while citing IV regime quantitatively. Tier 2 follow-up brief queued to add Greeks via Black-Scholes or an alternate source.
+> **Caveat closed (post-`hub_get_options_chain` v1):** DAEDALUS now gets per-contract Greeks (delta/gamma/theta/vega) + implied_volatility, chain-level IV rank, max pain (per expiry), and full chain pricing (bid/ask/mid/volume/OI/spread-pct) via `hub_get_options_chain(ticker, expiry, option_type="both")`. The qualitative-IV-mode fallback from the pre-v1 caveat is no longer the operating mode; DAEDALUS now reasons quantitatively about Greeks and IV regime by default.
 >
-> When `hub_get_options_chain` returns `aggregates_errors` populated (e.g., `iv_rank` missing), surface in the DATA NOTE and degrade conviction one notch per missing aggregate, same as the existing `hub_get_quote` staleness protocol.
+> Fallback contract: if `hub_get_options_chain` returns `status="unavailable"` (UW outage, rate-limit-induced failure, expiry not on the chain), DAEDALUS reverts to the original qualitative-IV/Greeks-inference mode — same as the pre-v1 default — and surfaces "chain unavailable" in the DATA NOTE.
+>
+> Per-aggregate degradation: when `hub_get_options_chain` returns `aggregates_errors` populated (e.g., `iv_rank` missing but chain succeeded), surface in the DATA NOTE and degrade conviction one notch per missing aggregate, same as the existing `hub_get_quote` staleness protocol.
+
+**If Task 3's empirical verification reveals Greeks come back null during live market hours:** revert the SKILL.md edit to the Option-A "qualitative-Greeks-mode" language from prior Task 1 Amendment #2. Schema also drops the four Greeks fields. This is the v1.5 fallback path documented above.
 
 Add `hub_get_options_chain` to the Context A tool calls list (lines 61-69), between current entries 2 (`hub_get_flow_radar`) and 3 (`hub_get_hydra_scores`):
 
@@ -279,17 +315,39 @@ Estimated implementation time: ~3-4 hours code + ~1 hour smoke + ~30 min closure
 
 ---
 
-## PAUSE #2 — ATLAS review checklist for Nick
+## Task 3 first-smoke gate (Greeks verification)
 
-Before Task 3 code begins, ATLAS pass should confirm:
+Before any other smoke check runs, Task 3 implementation must do an empirical live-market probe:
 
-1. **Schema completeness:** does the response give DAEDALUS everything it needs to produce its committee-mode output template (skills/daedalus/SKILL.md lines 96-121) MINUS the Greeks lines that v1 explicitly omits?
-2. **Singleflight pattern:** is the module-level dict + asyncio.Future approach idiomatic for this codebase? Or should it borrow from an existing helper somewhere?
-3. **Cache key correctness:** does the literal `uw:option_chain_live:{TICKER}:{expiry}:{option_type}` shape match what ATLAS specified, including the `:` separator throughout?
-4. **Partial-failure asymmetry:** are the chain-required / aggregates-optional split + `aggregates_errors[]` array shape sensible? Does omitting the field when empty (vs. always returning `null`) match the codebase's existing envelope conventions?
-5. **`compute_mid` extraction:** is it safe to move the function while preserving exact behavior? (Spot check: the bid/ask-mid → last_trade → day.close → day.vwap fallback chain matches what `get_spread_value` etc. rely on today.)
-6. **`compute_bid_ask_spread_pct` numerator:** spread = `abs(ask - bid)`, denominator = `mid`. Some shops compute as `spread/mid_at_mid_price`; some as `spread/ask`. Confirm `mid` is the right denominator for DAEDALUS's >10% gate.
-7. **DAEDALUS SKILL.md edit:** does the "qualitative-Greeks-mode" language correctly describe the post-v1 state, and is the Context A tool-list insertion position right (after flow_radar, before hydra_scores)?
+```
+GATE: hub_get_options_chain(ticker="SPY", expiry=<next monthly>, option_type="both")
+      called at ≥09:30 ET Tuesday 2026-05-26 (or any future trading-day open)
+
+Pass criterion: ≥ 50% of contracts in the response have non-null delta AND
+                non-null implied_volatility.
+
+If pass: proceed with the rest of Task 7 smoke checks; schema as designed is valid.
+If fail: stop. Drop delta/gamma/theta/vega from the schema. Revert SKILL.md edit to
+        the qualitative-Greeks-mode language from Task 1 Amendment #2. Ship as v1.5
+        (Option A schema) and queue the per-contract-Greeks follow-up brief.
+```
+
+The 50% threshold accounts for the long tail of OTM/illiquid strikes UW may not bother computing Greeks for, while requiring the broad-strike bulk of the chain be populated.
+
+---
+
+## PAUSE #2 — canonical ATLAS skill review checklist
+
+Nick will invoke the canonical ATLAS skill (not CC self-review) for the architectural pass. Items the review should confirm:
+
+1. **Schema completeness:** does the response give DAEDALUS everything it needs to produce its committee-mode output template (`skills/daedalus/SKILL.md` lines 96-121) including the Greeks lines under the Greeks-present assumption?
+2. **Greeks verification gate logic:** is the 50%-of-contracts threshold the right pass/fail criterion for the Task 3 first-smoke? Should the gate require non-null on a specific set of liquid ATM strikes instead, or is the simpler population-rate check sufficient?
+3. **Singleflight pattern:** is the module-level dict + asyncio.Future approach idiomatic for this codebase? Or should it borrow from an existing helper somewhere?
+4. **Cache key correctness:** does the literal `uw:option_chain_live:{TICKER}:{expiry}:{option_type}` shape match what ATLAS specified, including the `:` separator throughout?
+5. **Partial-failure asymmetry:** are the chain-required / aggregates-optional split + `aggregates_errors[]` array shape sensible? Does omitting the field when empty (vs. always returning `null`) match the codebase's existing envelope conventions?
+6. **`compute_mid` + `extract_greeks` extraction:** is it safe to move both functions while preserving exact behavior? (Spot check: the bid/ask-mid → last_trade → day.close → day.vwap fallback chain in `compute_mid`; the contract.get("greeks", {}) sub-dict reads in `extract_greeks`.)
+7. **`compute_bid_ask_spread_pct` denominator:** spread = `abs(ask - bid)`, denominator = `mid`. Some shops compute as `spread/mid_at_mid_price`; some as `spread/ask`. Confirm `mid` is the right denominator for DAEDALUS's >10% gate.
+8. **DAEDALUS SKILL.md edit (Greeks-present version):** does the "caveat closed" language correctly describe the post-v1 state, and is the Context A tool-list insertion position right (after `flow_radar`, before `hydra_scores`)? Plus: does the documented Option-A v1.5 fallback path read cleanly if Task 3's verification gate fails?
 
 If any flag, surface before Task 3 code starts.
 
