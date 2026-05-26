@@ -244,3 +244,146 @@ Secondary findings (NOT Phase 1b scope, may warrant follow-up):
   4. Cold-cache variance is huge (8-25s on the same endpoint within 2 min).
      `return_exceptions=True` in the gather is essential — without it, one
      ticker's UW timeout 500s the entire drill-down.
+
+================================================================================
+FRONTEND BASELINE (Playwright capture, label=phase1-post)
+================================================================================
+Captured: 2026-05-26T14:59:50.352251+00:00
+URL:      https://pandoras-box-production.up.railway.app/app
+Final URL: https://pandoras-box-production.up.railway.app/app/hub  (redirected)
+Title:    Pandora
+Trace:    docs/strategy-reviews/perf-trace-phase1-post.json  (275333 events)
+          (open in Chrome DevTools → Performance panel → Load profile)
+
+Web vitals + paint metrics:
+  fcp_ms                              1192
+  lcp_ms                              1192
+  dcl_ms                              854.5
+  load_event_ms                       7930.5999999940395
+  cls                                 0.0795735354953342
+  long_tasks_count                    7
+  long_tasks_total_duration_ms        1024
+  total_blocking_time_ms              190
+
+Navigation timing:
+  nav_request_start_ms                112.80000001192093
+  nav_response_end_ms                 210.09999999403954
+  nav_dom_interactive_ms              826
+  nav_dom_complete_ms                 7930.300000011921
+
+Resource summary:
+  resource_count                      97
+  resource_transfer_bytes             460427
+  resource_decoded_bytes              2404355
+  by initiator:
+    fetch                count=87  transfer_bytes=145949
+    iframe               count=1  transfer_bytes=0
+    img                  count=1  transfer_bytes=31441
+    link                 count=2  transfer_bytes=57695
+    other                count=1  transfer_bytes=300
+    script               count=5  transfer_bytes=225042
+
+visible_text_chars: 10115
+console_errors: none
+
+================================================================================
+PHASE 1 POST-SHIP — Actuals vs Predictions
+================================================================================
+Captured: 2026-05-26 14:55-15:00 UTC (08:55-09:00 MDT, pre-market through early
+market open). HEAD: 7f067c6 (perf(api): Phase 1 — SWR module + sectors gather +
+flow_radar SWR canary).
+
+CAVEAT: Original baseline was captured 2026-05-25 02:05 UTC (post-market). This
+post-ship capture is during pre/early market hours. Some endpoints show movement
+that is plausibly time-of-day rather than Phase 1. Each row tagged accordingly.
+
+Backend endpoint timing (10 reqs each after warm-up):
+
+                        baseline                phase1-post               delta
+endpoint               min   p50   p95         min   p50   p95         p50 / p95
+positions             0.33  1.40  3.60        0.29  0.35  1.92         -75% / -47%   [NOT P1 — time-of-day or unrelated]
+signals_active        0.52  0.80  6.15        1.63  1.76  2.76         +120% / -55%  [NOT P1 — time-of-day; p95 tail collapsed]
+sectors_heatmap       0.24  0.35  2.62        0.23  0.30  2.26         -15% / -14%   [canary, no regression]
+sectors_drilldown_XLK 1.35  1.85  2.79        0.82  0.93  12.90        -49% / +362%  [P1b target; p50 hit predicted ~0.8-1.4s; p95 = 1 cold outlier]
+flow_radar            0.42  1.02  1.61        0.25  0.83  1.37         -19% / -15%   [P1c canary; SWR working, see notes]
+crypto_market         0.21  0.26  1.72        0.19  0.26  2.29         -2% / +33%    [canary, no regression]
+
+Phase 1b assessment:
+  TARGET MET — sectors drill-down p50 dropped 49% (1.846s → 0.934s), beating
+  the tempered -29% prediction. Loop refactor with asyncio.gather +
+  return_exceptions=True is working as expected.
+  The p95 12.90s outlier is one cold-cache request hitting fresh UW data; the
+  other 9 reqs clustered tightly around 0.8-1.0s. Cold-cache resilience holds
+  (no 500s; one ticker's UW timeout would not 500 the whole drill-down).
+
+Phase 1c assessment:
+  CANARY VERIFIED — manual double-hit test confirms SWR is operating:
+    first hit  → cache_age_seconds=0 (cold compute)
+    second hit → cache_age_seconds=1 (served from Redis swr:flow:radar:global)
+  Steady-state 10-req loop shows 19% p50 reduction. Modest because:
+    - Network floor is ~250ms (TLS + edge proxy)
+    - The 13s total Redis TTL covers the 10-req loop (10 × 0.825s ≈ 8.3s),
+      so most reqs SHOULD hit cache. Variance in the data suggests some hits
+      are cache misses or stale-window refreshes. Worth investigating before
+      Phase 3 scales SWR to higher-stakes endpoints.
+  Response envelope confirmed: as_of + cache_age_seconds fields present, all
+  existing top-level keys preserved (no frontend breakage).
+
+Frontend Playwright capture (label=phase1-post):
+
+                        baseline   phase1-post   delta
+fcp_ms                  1440       1192          -17%   [improved]
+lcp_ms                  1440       1192          -17%   [improved]
+dcl_ms                  1128       854           -24%   [improved]
+load_event_ms           4808       7930          +65%   [degraded — see note]
+total_blocking_time_ms  47         190           +304%  [degraded — see note]
+long_tasks_count        5          7             +40%
+long_tasks_total_ms     674        1024          +52%
+cls                     0.036      0.080         +122%
+resource_count          112        97            -13%   [Phase 2 lazy-init target]
+fetch count             102        87            -15%
+resource_transfer_bytes 445572     460427        +3%    [flat]
+
+Frontend notes:
+  - First-paint metrics (FCP/LCP/DCL) all improved 17-24% — likely a knock-on
+    from faster backend responses and fewer fetches during init.
+  - Post-load metrics (load_event, TBT, long tasks, CLS) degraded. Possible
+    causes: time-of-day load (pre-market polling firing during the 10s idle
+    window), variance in a single capture, or genuine regression. Cannot
+    distinguish from one sample. Worth re-capturing in a quiet window before
+    drawing conclusions.
+  - resource_count dropped 13%, fetch count dropped 15% — meaningful and
+    aligns with SWR + sectors fan-out reducing redundant work. Phase 2
+    (lazy-init by mode) is the right next step IF the goal is further
+    cold-load TTI reduction.
+
+PHASE 2 vs PHASE 3 — recommendation:
+
+Phase 2 (lazy-init by mode):
+  + Lowers cold-load fetch volume (currently 87 fetches), already trending down
+  + Targets TTI directly; first-paint metrics are already moving in the right direction
+  + 1-1.5 days effort, "Low" risk per amendment
+  - Frontend-only; no backend leverage
+  - 6 init clusters need mapping to modes — pre-check risk
+
+Phase 3 (SWR applied to /v2/positions + /signals/active):
+  + SWR canary proved out in Phase 1c
+  + SWR module already shipped — Phase 3 is "apply" not "build" (0.5-1 day)
+  + Highest-volume polling endpoints; biggest win per byte of code
+  + AEGIS pre-check (user-scoped keys) is already understood — single-user OK for now
+  + signals_active still has tail latency (2.76s p95) that SWR collapses
+  - Medium risk per amendment (read-after-write semantics matter for these endpoints)
+  - HELIOS staleness indicator: extends from the Phase 1c pattern at zero cost
+
+Recommendation: **PHASE 3 NEXT.**
+  The SWR machinery is proven, the highest-value endpoints are still uncached,
+  and Phase 1c's behavioral data (the 19% improvement instead of expected
+  90%+ on cache hits) warrants Phase 3 to validate the pattern on
+  higher-volume endpoints where the cache-hit ratio will be more obvious.
+  Then Phase 2 to drive cold-load TTI further.
+
+  Counter-argument for Phase 2 first: cold-load fetch count is the most-felt
+  user issue per HELIOS. If the goal is "feels faster on first load," Phase 2
+  delivers more. Phase 3 delivers more on "feels faster during a session."
+
+  Open question for Nick to break the tie.
