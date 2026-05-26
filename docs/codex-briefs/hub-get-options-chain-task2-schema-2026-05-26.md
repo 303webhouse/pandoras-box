@@ -25,6 +25,8 @@
 - Two Task 2 schema tweaks approved: `max_pain` filtered to requested expiry with `aggregates_errors` markers; `iv_rank` list-or-scalar normalization
 - PAUSE #2: canonical ATLAS skill review (not CC self-review) before Task 3 code
 
+> **AMENDMENT 2026-05-26 #2 — ATLAS Pass 1 resolution.** Conviction MODERATE, no veto. Three MEDIUM findings + three LOW findings applied below. L1 and L2 verified against actual code before incorporating (per ATLAS's "no direct source-file access" caveat) — both correct. Task 3 code can begin after this amendment lands.
+
 ---
 
 ## Tool signature (final)
@@ -66,6 +68,7 @@ DESCRIPTION (visible to Claude as tool capability) — strawman to refine at Tas
     "expiry": "2026-06-19",
     "spot": 185.42,
     "uw_timestamp": "2026-05-26T20:15:33Z",
+    "uw_timestamp_source": "last_fill",
 
     "iv_rank": 42.1,
     "max_pain": 190.0,
@@ -100,7 +103,7 @@ DESCRIPTION (visible to Claude as tool capability) — strawman to refine at Tas
 ### Field-by-field decisions
 
 **Envelope (top-level):**
-- `status` — `ok` / `stale` / `unavailable`. `stale` fires if `uw_timestamp` is more than 5 minutes old during market hours (matches `hub_get_quote` precedent).
+- `status` — `ok` / `stale` / `unavailable`. **(ATLAS L1)** `stale` fires when the **UW source data is stale** — specifically, when `uw_timestamp` (= UW's `last_fill` time on the freshest contract in the chain) is more than 5 minutes old during market hours. This is the same semantic as `hub_get_quote` (verified at `backend/services/read_only/quote.py:175-181` against UW's `tape_time`). `stale` does **NOT** indicate the Redis cache is old — cache age is bounded by the 25s TTL and irrelevant to consumers. If the underlying UW source itself is stale, that's the signal DAEDALUS uses to degrade conviction.
 - `summary` — terse one-liner for the tool selector / DATA NOTE block. Adapts when aggregates fail (e.g., "max pain unavailable").
 - `staleness_seconds` — populated when `status="stale"`.
 - `error` — populated when `status="unavailable"`. Short string naming the failure (e.g., "UW chain endpoint returned no data" or "invalid expiry format").
@@ -109,7 +112,8 @@ DESCRIPTION (visible to Claude as tool capability) — strawman to refine at Tas
 - `ticker` — uppercased symbol.
 - `expiry` — echoed back as ISO date for caller verification.
 - `spot` — current underlying spot price. Either propagated from the `/option-contracts` response's `stock_price` field (the schema confirms its presence) or derived via a separate `get_snapshot()` call if `stock_price` is null. **Decision:** prefer `stock_price` from the chain response (1 call vs. 2); fall back to `get_snapshot()` only if absent.
-- `uw_timestamp` — propagated from the `/option-contracts` response's `last_fill` field on the most recent contract, OR `datetime.now(timezone.utc).isoformat()` with a synthetic flag if absent. **Decision:** use the chain response's freshest `last_fill` as authoritative; synthetic fallback (with no flag — keep envelope clean, log a WARNING at the service layer).
+- `uw_timestamp` — propagated from the `/option-contracts` response's `last_fill` field on the most recent contract, OR `datetime.now(timezone.utc).isoformat()` if absent. **Decision (ATLAS M2):** use the chain response's freshest `last_fill` as authoritative; synthetic fallback is explicit via the `uw_timestamp_source` field — service-layer WARNINGs aren't visible to DAEDALUS.
+- `uw_timestamp_source` — string, either `"last_fill"` (propagated from UW chain response) or `"synthetic"` (server-time fallback). Required field. DAEDALUS surfaces this in its DATA NOTE; "synthetic" means the timestamp can't anchor DAEDALUS's price-anchored claims and conviction degrades one notch.
 - `iv_rank` — chain-level scalar from `/iv-rank`. Extracted via `latest = response[0] if isinstance(response, list) else response; latest.get("iv_rank")`. Type: float (0-100) or null.
 - `max_pain` — filtered to the requested `expiry` from the `/max-pain` multi-expiry response. Type: float or null.
 - `total_open_interest`, `total_call_oi`, `total_put_oi` — computed at the service layer by summing `open_interest` across the filtered contract list. Integer.
@@ -241,10 +245,38 @@ def compute_mid(contract: Dict[str, Any]) -> Optional[float]:
 def compute_bid_ask_spread_pct(contract: Dict[str, Any]) -> Optional[float]:
     """Bid-ask spread as % of mid. Used by DAEDALUS's >10% liquidity flag.
 
-    Returns None if mid is unavailable/zero, or if bid/ask are missing.
+    ATLAS M3: REQUIRES both bid AND ask present and > 0; returns None
+    otherwise — even when mid is computable from fallback chain (last_trade,
+    day.close, vwap). Rationale: when bid/ask are unknown, "wide spread"
+    is the wrong concept; the liquidity status is "unknown" and the >10%
+    flag should NOT fire on a None value. DAEDALUS treats None as
+    "liquidity not assessable" rather than "fails the 10% gate."
+
+    Returns None if:
+    - last_quote.bid is missing/zero/None
+    - last_quote.ask is missing/zero/None
+    - computed mid is None or zero (defense in depth; shouldn't happen
+      if bid AND ask are both positive)
     """
-    # new helper — see Task 1 findings for body
+    quote = contract.get("last_quote", {}) or {}
+    bid = quote.get("bid")
+    ask = quote.get("ask")
+    if bid is None or ask is None:
+        return None
+    try:
+        bid_f = float(bid)
+        ask_f = float(ask)
+    except (TypeError, ValueError):
+        return None
+    if bid_f <= 0 or ask_f <= 0:
+        return None
+    mid = compute_mid(contract)
+    if mid is None or mid <= 0:
+        return None
+    return round((abs(ask_f - bid_f) / mid) * 100, 2)
 ```
+
+Implementation note for Task 3: `compute_mid` retains its fallback chain (last_trade → day.close → vwap) because position-pricing callers (`get_spread_value` etc.) rely on it. The two functions diverge on bid/ask availability: `compute_mid` finds a usable price; `compute_bid_ask_spread_pct` returns None when bid/ask can't be measured. This is the right asymmetry.
 
 ### Refactor at `backend/integrations/uw_api.py`
 
@@ -261,11 +293,20 @@ Net effect: byte-for-byte identical position-pricing behavior; new chain-display
 ```python
 def extract_greeks(contract: Dict[str, Any]) -> Dict[str, Optional[float]]:
     """Greeks dict from normalized contract. Single source of truth.
-    
+
     Returns {delta, gamma, theta, vega, iv} — float-or-None values
     propagated as-is from the normalized contract dict. The chain-display
     path surfaces these in the contracts[] array; the position-pricing
     path (get_spread_value etc.) consumes them via the same function.
+
+    ATLAS L2 — Per-Greek nullability is INDEPENDENT. Each greek field uses
+    contract.get("greeks", {}).get(<field>) and propagates None when the
+    upstream value is missing. A contract may legitimately return:
+        {delta: 0.52, gamma: 0.045, theta: -0.08, vega: None, iv: 0.28}
+    if UW computed all Greeks except vega for that strike. Callers must
+    null-check each Greek independently; do NOT treat any-None as
+    "all-Greeks-unavailable." (Verified against existing _get_contract_greeks
+    at backend/integrations/uw_api.py:1099-1108.)
     """
     # body identical to current _get_contract_greeks()
 ```
@@ -315,24 +356,53 @@ Estimated implementation time: ~3-4 hours code + ~1 hour smoke + ~30 min closure
 
 ---
 
-## Task 3 first-smoke gate (Greeks verification)
+## Task 3 first-smoke gate (Greeks verification) — ATLAS M1 sharpened
 
 Before any other smoke check runs, Task 3 implementation must do an empirical live-market probe:
 
 ```
 GATE: hub_get_options_chain(ticker="SPY", expiry=<next monthly>, option_type="both")
-      called at ≥09:30 ET Tuesday 2026-05-26 (or any future trading-day open)
+      called at ≥09:30 ET on a live trading day.
 
-Pass criterion: ≥ 50% of contracts in the response have non-null delta AND
-                non-null implied_volatility.
+Pass criterion (ATLAS M1): The 5 strikes immediately above ATM AND the 5
+                strikes immediately below ATM (10 contracts per side =
+                20 contracts total for "both") must ALL have:
+                  - non-null delta
+                  - non-null implied_volatility
 
 If pass: proceed with the rest of Task 7 smoke checks; schema as designed is valid.
-If fail: stop. Drop delta/gamma/theta/vega from the schema. Revert SKILL.md edit to
-        the qualitative-Greeks-mode language from Task 1 Amendment #2. Ship as v1.5
-        (Option A schema) and queue the per-contract-Greeks follow-up brief.
+If fail: revert to v1.5 — see "v1.5 revert checklist" below.
 ```
 
-The 50% threshold accounts for the long tail of OTM/illiquid strikes UW may not bother computing Greeks for, while requiring the broad-strike bulk of the chain be populated.
+**Why the 5-nearest-ATM-both-sides threshold (not 50% of full chain):**
+
+ATLAS's M1 finding: the 50% threshold could pass on a population that excludes the strikes DAEDALUS actually picks for spreads. A SPY chain might have 200+ contracts where the 100 deep-OTM strikes have null Greeks and the 100 near-ATM strikes are fully populated — that's 50% and the gate passes, but DAEDALUS's typical structure picks (ATM debit spreads, slightly-OTM credit spreads, near-ATM condors) all hit the populated band, so the gate signal is conflated with the band DAEDALUS doesn't use.
+
+By contrast, "5 nearest-to-ATM strikes both sides" anchors the verification to the strikes DAEDALUS picks 90%+ of the time. If those are populated, the schema is valid for DAEDALUS's actual workflow. If even one ATM-adjacent strike has null delta, that's a real gap and the gate fails.
+
+**Implementation note for Task 3:** the verification helper needs to:
+1. Pull current SPY spot from the response's `spot` field
+2. Sort the contracts list by `abs(strike - spot)` ascending
+3. Take the first 10 calls + first 10 puts (or fewer if the chain itself is narrower)
+4. Check `delta is not None AND implied_volatility is not None` on each
+5. Return `True` if all 20 pass; `False` otherwise
+
+This is a ~15-line check, runnable as a one-shot smoke test post-deploy.
+
+---
+
+## v1.5 revert checklist (ATLAS L3) — if Greeks verification gate fails
+
+Documented here for executability — if Task 3's first-smoke gate fails (≥1 of the 20 near-ATM strikes has null delta or null IV), the implementation reverts to the Option A v1.5 schema. Concrete revert steps:
+
+1. **Schema:** drop `delta`, `gamma`, `theta`, `vega` from the `contracts[]` shape in `backend/hub_mcp/tools/options_chain.py` and `backend/services/read_only/options_chain.py`. Keep `implied_volatility` (the empirical probe confirmed IV populates even on Memorial Day).
+2. **`extract_greeks` extraction:** keep the extraction (consolidation is still useful); but the service layer no longer calls it on the chain-display path. `_get_contract_greeks` removal from `uw_api.py` proceeds as planned (4 position-pricing callers continue to use it via `extract_greeks`).
+3. **DESCRIPTION string** on `hub_get_options_chain`: revert to the prior Option-A language that calls out Greeks as Tier 2 follow-up scope, not v1.
+4. **DAEDALUS SKILL.md edit:** revert lines 71-77 from "caveat closed" back to "qualitative-Greeks-mode" language per the prior Task 1 Amendment #2 wording. Re-render and re-upload `daedalus.skill`.
+5. **Closure note:** title becomes "v1.5 shipped (Greeks-gate failed)"; explicit subsection documents the verification probe's response shape (count of nulls), the decision, and the queue of the per-contract-Greeks follow-up brief.
+6. **Tier 2 follow-up brief:** mandatory if v1.5 ships. Title: "Per-contract Greeks for DAEDALUS — Black-Scholes vs UW subscription tier vs alternate provider."
+
+This checklist is reference material for the implementer; it's not run unless the gate fails.
 
 ---
 
