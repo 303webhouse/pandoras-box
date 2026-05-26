@@ -45,6 +45,62 @@ Per Nick's "verify-first" choice at PAUSE #1, ran a single chain probe against t
 | B | **Compute Greeks via Black-Scholes** at the service layer. Requires risk-free rate input (sane default: current 3M T-bill from FRED), dividend yield (zero for non-dividend underlyings — SPY/QQQ pay dividends though), and an actively-maintained BS implementation. ~50-100 lines new code plus a dependency or hand-rolled math. Drift risk vs. broker Greeks. | +1 day | Defer to follow-up |
 | C | **Find an alternate UW endpoint that exposes per-contract Greeks.** Audit Section 3.1 lists `/atm-chains`, `/interpolated-iv`, `/spot-exposures/expiry-strike` as candidates but their per-contract-Greeks coverage is unconfirmed. Would require another probe round. | +1-2 hours probe + redesign | Defer to follow-up |
 
+---
+
+## ⚡⚡ 2026-05-26 AMENDMENT #2 — Option C exhausted
+
+Per Nick's PAUSE #1 follow-up choice (Option C: probe alternate UW endpoints first), did a free OpenAPI-spec read of every plausible candidate before any further empirical probes. Result: **no chain-snapshot UW endpoint documents per-contract current Greeks.**
+
+### Schemas examined
+
+| Endpoint | Response schema (line in spec) | Has `delta/gamma/theta/vega`? | Has `implied_volatility`? | Verdict |
+|---|---|---|---|---|
+| `/option-contracts` | `Option contracts` (6490) | ❌ | ✅ | Original probe — Greeks NULL |
+| `/atm-chains` | `Option Contract Screener response.` (6047) | ❌ | ❌ | **Less informative than `/option-contracts`** |
+| `/interpolated-iv` | `Interpolated IV` (4510) | ❌ | ✅ (per DTE, not per-contract) | IV term structure only — no Greeks |
+| `/spot-exposures*` family | "Spot Exposure*" series | ❌ (dealer-side aggregated GEX) | n/a | Aggregate gamma exposure, not per-contract Greeks |
+| `/greek-exposure*` family | `Greek Exposure*` (2823 / 2866 / 2913 / 2956) | ❌ (`call_delta` / `put_delta` are dollar-aggregated) | n/a | Same — dealer-side aggregates |
+| `/greek-flow*` family | `Greek Flow*` (3003 / 3046) | ❌ (net flow aggregates) | n/a | Net traded delta/gamma flow, not per-contract |
+
+**The ONLY OpenAPI schema with full per-contract Greeks (`delta+gamma+theta+vega`) is `Option Trade` at line 6298** — used by per-trade flow event endpoints (`flow-recent`, `flow-alerts`, `option-contract/{id}/flow`, etc.). These are TRADE EVENTS, not CHAIN SNAPSHOTS. Greeks are captured at trade time, not "current Greeks on this contract right now."
+
+### Why per-trade Greeks aren't a viable chain-display source
+
+Stitching per-trade Greeks into a chain display would require:
+1. For each contract in the chain (could be 100+ contracts per expiry), call `/option-contract/{id}/flow` to get its most recent trade
+2. Use that trade's Greeks as a proxy for current Greeks
+3. **Problems**:
+   - 100+ API calls per chain request → blows out the rate limit
+   - Most contracts trade rarely (low-volume strikes) → "most recent trade" could be hours or days old
+   - Underlying moves between trade time and now → Greeks at trade time ≠ current Greeks
+   - This is approximately what existing `_get_contract_greeks` was probably trying to read from `/option-contracts` and silently failing on
+
+Not a viable path.
+
+### Verdict: Option C produces no alternate source
+
+The decision collapses back to **Option A vs Option B**:
+
+- **A (ship without Greeks):** still recommended for v1. Same rationale as in the first amendment.
+- **B (Black-Scholes compute):** still ~1-day scope. Could be the follow-up brief.
+
+**Updated recommendation: Option A for v1 + queue a Tier 2 follow-up brief titled "Per-contract Greeks for DAEDALUS — Black-Scholes vs UW subscription tier vs alternate provider."**
+
+The follow-up brief should explore:
+1. Whether UW offers a higher subscription tier that exposes per-contract Greeks via a documented endpoint we haven't seen (worth a 1-paragraph email to UW support)
+2. Black-Scholes implementation (~50-100 lines) with explicit DAEDALUS-side caveat language about theoretical-vs-broker drift
+3. Alternate provider (CBOE LiveVol, OPRA chain, Polygon options-greeks) — out of scope for now but worth knowing exists
+
+For v1: ship without Greeks. DAEDALUS gets IV rank + per-contract IV + max_pain + chain pricing. The qualitative-IV-mode caveat narrows to **qualitative-Greeks-mode**, which is a real improvement.
+
+### Updated SKILL.md edit at Task 6
+
+The DAEDALUS data caveat (lines 71-77 in `skills/daedalus/SKILL.md`) becomes:
+
+> **Closing the partial gap:** `hub_get_options_chain` lands IV rank, per-contract IV, max pain, and chain pricing. Per-contract Greeks (delta/gamma/theta/vega) remain inference-only — UW's chain endpoint does not return them; the only UW source for Greeks is per-trade flow events which doesn't fit chain display. Black-Scholes computation is a Tier 2 follow-up. Until then: DAEDALUS uses IV rank + IV regime quantitatively, Greeks qualitatively.
+
+This is honest and operationally accurate.
+
 **My recommendation:** **Option A + queue a follow-up brief** for Greeks-source investigation. Rationale:
 - Delivers DAEDALUS's most-needed missing piece (IV rank) immediately — closes the bigger half of the qualitative-IV caveat
 - Avoids Black-Scholes-vs-broker-quote drift risk that would surface in DAEDALUS's output as "delta says 0.52 but my broker shows 0.48"
