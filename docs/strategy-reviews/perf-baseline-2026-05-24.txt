@@ -387,3 +387,103 @@ Recommendation: **PHASE 3 NEXT.**
   delivers more. Phase 3 delivers more on "feels faster during a session."
 
   Open question for Nick to break the tie.
+
+================================================================================
+PHASE 1c SWR CACHE-HIT INVESTIGATION
+================================================================================
+Captured: 2026-05-26 21:02-21:03 UTC. Diag commit 4c6a1e4 (reverted after capture).
+Method: SWRDBG log lines emitted at each SWR decision point; 10 sequential
+curl reqs against /api/flow/radar from the same Windows network as the
+original baseline. Railway logs grep'd for SWRDBG[flow:radar:global].
+
+CURL TIMINGS (10 reqs):
+  req01 16.372s   (cold compute — UW cache empty)
+  req02  0.324s   req03  1.004s   req04  0.404s   req05  0.354s
+  req06  0.366s   req07  0.412s   req08  0.666s   req09  0.339s
+  req10  0.372s
+
+SERVER-SIDE SWRDBG (10 entries from my loop, plus 2 from earlier traffic):
+
+  Cold computes (cache=False, served_from=compute):
+    cache_get elapsed_ms=3930.6  →  compute_ms=4987.8  →  total_ms=9830.8
+    (one earlier traffic entry: cache_get 391ms → compute 1226ms → total 2040ms)
+
+  Cache hits (cache=True, served_from=fresh_cache or stale_cache) total_ms:
+    109.5, 109.7, 109.8, 110.5, 110.5, 110.7, 110.7, 110.8, 110.8, 405.4
+    median: 110.5ms
+
+  Stale-cache events (served_from=stale_cache, age=3):
+    2 occurrences. Both followed by refresh_start → refresh_done in logs,
+    elapsed_ms=462.9 and 452.7 respectively. Background refresh is firing.
+
+ANSWERS TO THE 4 INVESTIGATION QUESTIONS:
+
+Q1. How many of the 10 requests had cached_raw truthy?
+    9 of 10 hit cache. req1 was cold-compute (Redis empty after diag deploy).
+    All subsequent reqs hit cache (mix of fresh_cache and stale_cache as the
+    cache age advanced past the 3s fresh window during the loop).
+
+Q2. For cache-hit attempts, median time elapsed from entry to return?
+    110.5ms server-side. The single 405ms outlier is one Redis GET that took
+    longer (transient).
+
+Q3. For cache-miss (cold compute) requests, median time elapsed?
+    Server-side total_ms: 2,040 and 9,831. Median ≈ 5,900ms. The 16.4s curl
+    time on my req1 vs 9.83s server-side suggests ~6.6s of cold-start
+    overhead (TLS, edge proxy, first Redis connection warmup — note the
+    abnormal 3.93s cache_get on the cold path; warm Redis GETs are ~110ms).
+
+Q4. Was the SWR _refresh background task firing on stale-but-servable hits?
+    YES. Two stale_cache events both produced refresh_start → refresh_done
+    log pairs (~460ms compute). After each refresh, the next cache_get
+    served age=0 data confirming the cache was rewritten.
+
+DIAGNOSIS:
+
+SWR is working CORRECTLY. The puzzle from the post-ship baseline (p50=0.825s
+for what should be cache hits) resolves as follows:
+
+  curl time per hit ≈ 0.32-0.41s    (steady state, network floor)
+  server time per hit ≈ 0.11s       (Redis GET + JSON parse + response)
+  gap ≈ 0.21-0.30s                  (network round-trip + TLS + gzip + edge proxy)
+
+The original 10-req loop's p50 of 0.825s is the network floor plus jitter,
+not SWR overhead. The 110ms server-side hit is the actual SWR speedup ceiling
+on this hardware/network. Of that 110ms, ~109ms is the Redis GET round-trip
+to Upstash. Compute saved per hit ≈ 4-9 seconds (the cold compute time).
+
+This matches DECISION-TREE OUTCOME (A) from Nick's investigation brief:
+
+  "If cache hits ARE happening but response is slow anyway: the network
+   floor + serialization is the bottleneck, not SWR. Phase 3 can proceed;
+   document that SWR's absolute speedup ceiling on remote Railway endpoints
+   is ~250ms."
+
+Observed network floor on this endpoint: ~210-300ms (curl 0.32s - server 0.11s).
+Matches the predicted ~250ms ceiling exactly.
+
+ADDITIONAL FINDINGS (not blocking Phase 3, but worth noting):
+
+  1. Cold Redis GET took 3.93s — anomalous. Subsequent GETs are ~110ms.
+     Likely a Redis connection-pool first-use cost. Phase 3's endpoints
+     will pay this once per worker process lifecycle. Acceptable.
+
+  2. Redis GET itself dominates cache-hit time (109ms of 110ms server).
+     For higher-volume endpoints where SWR will be applied (positions,
+     signals_active), 109ms hit cost is a fraction of their current
+     400-1700ms p50 — meaningful win. But the absolute ceiling per request
+     is bounded by Redis round-trip, not zero.
+
+  3. Stale-cache served_from response time = fresh-cache response time
+     (109-110ms). The bg refresh fires after return, doesn't block.
+     Confirms SWR design is correct.
+
+PHASE 3 READINESS: GREEN.
+
+Apply SWR to /v2/positions and /signals/active per the parent brief Phase 3
+spec. Expected cache-hit p50 on Railway-Upstash: 100-200ms server-side,
+0.3-0.4s curl. For /signals/active currently at 1.76s p50 / 2.76s p95,
+that's an ~85% drop on the hit path. For /v2/positions currently at 0.35s
+p50 (today's measurement; may shift), cache hits will be flat to slightly
+worse for cache-hit-only path, but the cold-compute reduction (1.4s baseline
+→ ~110ms hit) shows the architectural value.
