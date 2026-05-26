@@ -13,6 +13,5 @@ from . import hydra_scores as _hydra  # noqa: F401
 from . import positions as _positions  # noqa: F401
 from . import portfolio_balances as _balances  # noqa: F401
 from . import quote as _quote  # noqa: F401
-from . import options_chain as _options_chain  # noqa: F401
 from . import ping as _ping  # noqa: F401
 from . import describe as _describe  # noqa: F401

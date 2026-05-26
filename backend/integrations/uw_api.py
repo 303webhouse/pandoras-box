@@ -1056,16 +1056,6 @@ async def get_congressional_trades(limit: int = 20) -> Optional[List[Dict[str, A
 # These mirror polygon_options.py's spread/multi-leg/single/greeks functions.
 # They operate on the chain data from get_options_snapshot() which is already
 # normalized to Polygon schema.
-#
-# 2026-05-26: mid + Greeks extraction moved to backend/utils/options_math.py
-# so the new hub_get_options_chain service layer can share the same canonical
-# implementations. compute_mid and extract_greeks are byte-for-byte the prior
-# _get_contract_mid / _get_contract_greeks. No behavior change to these
-# callers.
-
-from utils.options_math import compute_mid as _get_contract_mid  # noqa: F401
-from utils.options_math import extract_greeks as _get_contract_greeks  # noqa: F401
-
 
 def _find_contract(chain: list, strike: float, expiry: str, option_type: str) -> Optional[dict]:
     """Find a specific contract in the chain by strike/expiry/type."""
@@ -1079,6 +1069,43 @@ def _find_contract(chain: list, strike: float, expiry: str, option_type: str) ->
             and abs(float(details.get("strike_price", 0)) - strike) < 0.01):
             return c
     return None
+
+
+def _get_contract_mid(contract: dict) -> Optional[float]:
+    """Get mid-price from bid/ask, falling back to last trade, day close, vwap."""
+    # 1. Bid/ask mid
+    quote = contract.get("last_quote", {})
+    bid = quote.get("bid")
+    ask = quote.get("ask")
+    if bid and ask and float(bid) > 0 and float(ask) > 0:
+        return round((float(bid) + float(ask)) / 2, 4)
+    # 2. Last trade
+    trade = contract.get("last_trade", {})
+    price = trade.get("price")
+    if price and float(price) > 0:
+        return float(price)
+    # 3. Day close
+    day = contract.get("day", {})
+    close = day.get("close")
+    if close and float(close) > 0:
+        return float(close)
+    # 4. VWAP
+    vwap = day.get("vwap")
+    if vwap and float(vwap) > 0:
+        return float(vwap)
+    return None
+
+
+def _get_contract_greeks(contract: dict) -> dict:
+    """Extract greeks from a contract dict."""
+    greeks = contract.get("greeks", {})
+    return {
+        "delta": greeks.get("delta"),
+        "gamma": greeks.get("gamma"),
+        "theta": greeks.get("theta"),
+        "vega": greeks.get("vega"),
+        "iv": contract.get("implied_volatility"),
+    }
 
 
 async def get_spread_value(

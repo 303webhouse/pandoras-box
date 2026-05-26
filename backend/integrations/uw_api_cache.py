@@ -29,7 +29,6 @@ CACHE_TTLS = {
     "short_interest": 3600,  # 1 hr
     "ohlc": 300,          # 5 min (Phase A.3 fix 2026-05-22) — daily bars don't change minute-to-minute; the prior 60s TTL forced the refresh job to re-pull every tick, contributing to UW budget overdraw.
     "technical_indicator": 300,  # 5 min (Phase A.3 fix 2026-05-22) — RSI(14) moves slowly; 60s TTL was unnecessary minute-fresh.
-    "option_chain_live": 25,    # 25s (hub_get_options_chain Task 3, 2026-05-26) — DAEDALUS strike-selection path; separate namespace from option_contracts (300s) which serves the slower position-pricing path.
 }
 
 DAILY_BUDGET = 20000     # UW Basic plan limit
