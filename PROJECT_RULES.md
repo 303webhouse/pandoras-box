@@ -190,6 +190,11 @@ These are operational rules for the composite bias engine. Detailed factor weigh
 - New indicators → classify as MACRO/TECHNICAL/FLOW/BREADTH first.
 - UI changes → get Nick's approval before building.
 - Prompt changes → test after deploy (committee prompts are the system's brain).
+- **Position state changes flow through `unified_positions`.** When the table
+  drifts from broker reality, reconcile via `scripts/sync_rh_csv.py` (RH CSV
+  → unified_positions, dry-run-then-apply with audit logging). Don't maintain
+  parallel position-tracking artifacts as sources of truth; markdown files
+  like `docs/open-positions.md` are committee context only, not canonical state.
 
 ## Olympus Committee Skills
 
@@ -346,7 +351,10 @@ legs are structurally invisible to schema queries.
 Active example: **HYG 6/18 put ratio** (`POS_HYG_20260325_185236`) is the
 broken-wing `-4×$74P / +4×$75P / +4×$76P` recorded as `put_debit_spread`
 with `long_strike=76, short_strike=74`. The `+4×$75P` middle leg is not
-in the DB. Canonical full-structure reference: `docs/open-positions.md`.
+addressable via the 2-leg columns, but `scripts/sync_rh_csv.py` (2026-05-26)
+preserves the full leg set in the `unified_positions.legs` JSONB column on
+INSERT — so the middle leg is now machine-readable rather than living only in
+a markdown file. The price-updater still uses the 2-leg approximation.
 
 ### Naked single-leg option pricing gap
 
@@ -362,11 +370,16 @@ Cluster C fix 2026-05-13). User-visible impact: per-row PnL column
 displays "—" for these positions.
 
 Canonical PnL reference for naked positions: broker app directly, or
-`docs/open-positions.md` if maintained.
+`hub_get_positions(account='robinhood', status='OPEN')` for current state
+(returns NULL `current_price`/`unrealized_pnl` for these rows — see above).
 
-Active examples (as of 2026-05-13):
-- COUR 6/18 long_put × 3, $4 strike
-- WEAT 6/18 long_call × 8, $30 strike
+Active examples (as of 2026-05-26 sync):
+- COUR 6/18 long_put × 3, $4 strike (position_id POS_COUR_20260424_210121)
+- WEAT 6/18 long_call × 8, $30 strike (position_id POS_WEAT_20260429_062328)
 
 Future remediation candidate: extract strike from `notes` / `legs` jsonb
-/ `signal_id` lookup chain. Not scheduled.
+/ `signal_id` lookup chain. Not scheduled. Note: as of 2026-05-26,
+`scripts/sync_rh_csv.py` writes the strike into `legs` JSONB on INSERT for
+new naked-single-leg rows; existing rows (COUR, WEAT above) still have NULL
+strikes per the original convention. A backfill is the natural first step
+for the remediation when scheduled.

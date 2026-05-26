@@ -150,13 +150,29 @@ valuation risk and the possibility of a DeepSeek-style disruption event.
 That file contains current economic data points (CPI, unemployment, GDP, PCE, etc.),
 hub data pipeline endpoints, and historical context. Reference it for any macro discussion.
 
-## 📋 OPEN POSITIONS FILE
+## 📋 OPEN POSITIONS
 
-**See:** `C:\trading-hub\docs\open-positions.md` (also on GitHub)
+**Source of truth (as of 2026-05-26):** the `unified_positions` table, queryable via
+`hub_get_positions(account='robinhood', status='OPEN')` (MCP) or
+`GET /v2/positions?account=ROBINHOOD&status=OPEN` (REST). This is what
+TORO / URSA / PYTHIA / DAEDALUS / PIVOT read for position context.
 
-Contains all open positions with structure, thesis tags, expiration clusters, deployment %,
-and Pythia profile state. **Sync against the hub Ledger (unified_positions table) at the
-start of every chat.** Flag differences immediately.
+**If the hub looks stale** (closed positions still OPEN, qty wrong, new fills
+not reflected, etc.) — pull a fresh Robinhood activity CSV export covering
+the drift window, drop it in `data/rh_csv/`, and run:
+
+```powershell
+railway run python scripts\sync_rh_csv.py data\rh_csv\
+# Review the dry-run report. If it looks right:
+railway run python scripts\sync_rh_csv.py data\rh_csv\ --apply
+```
+
+The script reconciles the table against the CSV (single transaction, audit-logged
+to `position_sync_audit`). Re-running is idempotent.
+
+**Legacy file** (`C:\trading-hub\docs\open-positions.md`) is deprecated as a
+source of truth but retained — VPS committee context generation still reads it.
+Migrating those scripts to call `hub_get_positions` is a follow-up brief.
 
 **Monthly cleanup rule:** Macro data older than 2 months should be compressed or archived
 during the first Battlefield Brief of each month. Keep only the most recent 2-3 prints
