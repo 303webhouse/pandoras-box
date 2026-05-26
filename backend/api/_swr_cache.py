@@ -87,9 +87,6 @@ class SWRCache:
           - Redis unavailable, get error, or corrupt entry: compute synchronously,
             return (data, 0). No store attempt if Redis is None.
         """
-        # SWRDBG (Phase 1c cache-hit investigation, temporary) START
-        _t_entry = time.time()
-        # SWRDBG END
         ttl = ttl if ttl is not None else self.default_ttl
         stale_ttl = stale_ttl if stale_ttl is not None else self.stale_ttl
 
@@ -101,48 +98,21 @@ class SWRCache:
                 logger.warning("SWR get failed for %s: %s — falling through to compute", key, e)
                 cached_raw = None
 
-        # SWRDBG: report cache GET outcome
-        _t_after_get = time.time()
-        logger.info(
-            "SWRDBG[%s] action=cache_get cached=%s elapsed_ms=%.1f",
-            key, bool(cached_raw), (_t_after_get - _t_entry) * 1000.0,
-        )
-
         if cached_raw:
             try:
                 cached = json.loads(cached_raw)
                 age = int(time.time() - cached["timestamp"])
                 if age < ttl:
-                    logger.info(
-                        "SWRDBG[%s] action=return served_from=fresh_cache age=%d total_ms=%.1f",
-                        key, age, (time.time() - _t_entry) * 1000.0,
-                    )
                     return cached["data"], age
                 if age < ttl + stale_ttl:
                     # Stale but servable; refresh in background, return cached now
                     asyncio.create_task(self._refresh(key, compute_fn, ttl, stale_ttl))
-                    logger.info(
-                        "SWRDBG[%s] action=return served_from=stale_cache age=%d refresh_scheduled=true total_ms=%.1f",
-                        key, age, (time.time() - _t_entry) * 1000.0,
-                    )
                     return cached["data"], age
             except (json.JSONDecodeError, KeyError, TypeError) as e:
                 logger.warning("SWR cache for %s is corrupt: %s — recomputing", key, e)
 
-        # SWRDBG: about to compute synchronously
-        _t_before_compute = time.time()
-        logger.info(
-            "SWRDBG[%s] action=compute_start elapsed_ms=%.1f",
-            key, (_t_before_compute - _t_entry) * 1000.0,
-        )
         data = await compute_fn()
-        _t_after_compute = time.time()
         await self._store(key, data, ttl, stale_ttl)
-        logger.info(
-            "SWRDBG[%s] action=return served_from=compute compute_ms=%.1f total_ms=%.1f",
-            key, (_t_after_compute - _t_before_compute) * 1000.0,
-            (time.time() - _t_entry) * 1000.0,
-        )
         return data, 0
 
     async def _refresh(
@@ -155,18 +125,11 @@ class SWRCache:
         """Background refresh. Skipped if another refresh for the same key is in flight."""
         lock = self._refresh_locks.setdefault(key, asyncio.Lock())
         if lock.locked():
-            logger.info("SWRDBG[%s] action=refresh_skipped reason=locked", key)  # SWRDBG
             return
         async with lock:
-            _t0 = time.time()  # SWRDBG
-            logger.info("SWRDBG[%s] action=refresh_start", key)  # SWRDBG
             try:
                 data = await compute_fn()
                 await self._store(key, data, ttl, stale_ttl)
-                logger.info(  # SWRDBG
-                    "SWRDBG[%s] action=refresh_done elapsed_ms=%.1f",
-                    key, (time.time() - _t0) * 1000.0,
-                )
             except Exception as e:
                 logger.error("SWR background refresh failed for %s: %s", key, e)
 
