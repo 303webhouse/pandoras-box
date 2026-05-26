@@ -24,7 +24,6 @@ REGISTERED_TOOL_NAMES = frozenset(
         "hub_get_positions",
         "hub_get_portfolio_balances",
         "hub_get_quote",
-        "hub_get_options_chain",
         "mcp_ping",
         "mcp_describe_tools",
     }
