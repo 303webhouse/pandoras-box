@@ -710,19 +710,33 @@ async def get_sector_leaders(
             else:
                 entry["volume_ratio"] = None
 
-            # Enriched flow metrics (P2)
-            flow_metrics = await _get_flow_metrics(ticker)
+            # Phase 1b (perf-architecture brief): parallelize the 3 per-row
+            # enrichment awaits with asyncio.gather. Each helper has internal
+            # error handling, but return_exceptions=True is mandatory per the
+            # amendment — one ticker's UW hiccup must not 500 the whole drill-down.
+            flow_metrics, iv_data, dp_data = await asyncio.gather(
+                _get_flow_metrics(ticker),
+                _get_iv_rank_for_ticker(ticker),
+                _get_dp_activity_for_ticker(ticker),
+                return_exceptions=True,
+            )
+            if isinstance(flow_metrics, Exception):
+                logger.debug("flow_metrics gather-exception for %s: %s", ticker, flow_metrics)
+                flow_metrics = {"direction": "neutral", "call_pct": None, "total_premium": 0.0}
+            if isinstance(iv_data, Exception):
+                logger.debug("iv_data gather-exception for %s: %s", ticker, iv_data)
+                iv_data = None
+            if isinstance(dp_data, Exception):
+                logger.debug("dp_data gather-exception for %s: %s", ticker, dp_data)
+                dp_data = None
+
             entry["flow_direction"] = flow_metrics["direction"]
             entry["flow_call_pct"] = flow_metrics["call_pct"]
             entry["flow_premium"] = flow_metrics["total_premium"]
 
-            # IV rank (P2)
-            iv_data = await _get_iv_rank_for_ticker(ticker)
             entry["iv_rank"] = iv_data["rank"] if iv_data else None
             entry["iv_tier"] = iv_data["tier"] if iv_data else None
 
-            # Dark pool activity (P2)
-            dp_data = await _get_dp_activity_for_ticker(ticker)
             entry["dp_active"] = bool(dp_data and dp_data.get("active"))
             entry["dp_prints_30m"] = dp_data["prints_30m"] if dp_data else 0
 
