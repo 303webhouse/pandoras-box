@@ -14,7 +14,7 @@ logger = logging.getLogger("uw_api")
 
 # TTLs by endpoint type (seconds)
 CACHE_TTLS = {
-    "flow": 30,           # Near-real-time polling
+    "flow": 300,          # 5 min (Phase A.4a fix 2026-05-27) — was 30s, but flow poller runs every 300s so every poller tick was a guaranteed miss → ~6,900 UW calls/day forced. Cache TTL now aligns with poller cadence.
     "gex": 300,           # 5 min
     "greeks": 300,        # 5 min
     "darkpool": 300,      # 5 min
@@ -76,23 +76,44 @@ async def cache_set(endpoint_type: str, key: str, data: Any) -> None:
         logger.debug("Cache set failed for %s: %s", key, e)
 
 
-async def increment_daily_counter() -> int:
-    """Increment daily request counter. Returns current count."""
+async def increment_daily_counter(caller: str = "untagged") -> int:
+    """Increment daily request counter. Returns current count.
+
+    Phase A.4a 2026-05-27: also writes a per-caller hash counter
+    `uw:daily_requests_by_caller:{date}` via HINCRBY so the daily total
+    can be attributed to specific UW-calling code paths. `caller` is an
+    endpoint-grain tag (e.g. "snapshot", "flow_per_expiry", "ohlc")
+    passed from each _uw_request call site. Untagged callers bucket as
+    "untagged" — that bucket should trend toward zero as tag coverage
+    fills in. The legacy global counter (`uw:daily_requests:{date}`) is
+    preserved unchanged so /api/uw/health and budget-alert logic keep
+    working identically.
+    """
     redis = await _get_redis()
     if not redis:
         return 0
     try:
         from datetime import date
-        day_key = f"uw:daily_requests:{date.today().isoformat()}"
+        today_str = date.today().isoformat()
+        day_key = f"uw:daily_requests:{today_str}"
+        caller_key = f"uw:daily_requests_by_caller:{today_str}"
         count = await redis.incr(day_key)
+        # Per-caller attribution (Phase A.4a). Failure here must NOT break
+        # the global counter / budget alerts — wrap defensively.
+        try:
+            await redis.hincrby(caller_key, caller, 1)
+        except Exception as e:
+            logger.debug("HINCRBY for caller %s failed: %s", caller, e)
         # Set expiry on first increment (48h to survive timezone edge)
         if count == 1:
             await redis.expire(day_key, 172800)
+            try:
+                await redis.expire(caller_key, 172800)
+            except Exception:
+                pass
 
         # Budget alerts at multiple thresholds (50/70/85/95%)
         # Use Redis flag per threshold per day to ensure each fires only once.
-        from datetime import date as _date
-        today_str = _date.today().isoformat()
         for threshold_pct in BUDGET_ALERT_THRESHOLDS:
             threshold_count = int(DAILY_BUDGET * threshold_pct)
             if count >= threshold_count:
@@ -107,6 +128,65 @@ async def increment_daily_counter() -> int:
         return count
     except Exception:
         return 0
+
+
+async def increment_429_counter(caller: str = "untagged") -> None:
+    """Increment per-caller 429 counter (Phase A.4a instrumentation).
+
+    Best-effort write to `uw:daily_429s_by_caller:{date}` via HINCRBY.
+    Failure is silent — 429 attribution is observability, not control flow.
+    """
+    redis = await _get_redis()
+    if not redis:
+        return
+    try:
+        from datetime import date
+        today_str = date.today().isoformat()
+        key = f"uw:daily_429s_by_caller:{today_str}"
+        await redis.hincrby(key, caller, 1)
+        # Expire is idempotent in Redis — setting it on every increment is
+        # cheap and avoids the "first-increment" coordination from
+        # increment_daily_counter (where global INCR returns 1 on cold key).
+        await redis.expire(key, 172800)
+    except Exception:
+        pass
+
+
+async def get_counts_by_caller() -> dict:
+    """Return today's per-caller request + 429 counts.
+
+    Used by `GET /api/uw/health/by_caller` (Phase A.4a). Returns empty
+    dicts when Redis is unavailable so the route never errors.
+    """
+    empty = {"requests_by_caller": {}, "rate_limited_by_caller": {}}
+    redis = await _get_redis()
+    if not redis:
+        return empty
+    try:
+        from datetime import date
+        today_str = date.today().isoformat()
+        req_key = f"uw:daily_requests_by_caller:{today_str}"
+        err_key = f"uw:daily_429s_by_caller:{today_str}"
+        req = await redis.hgetall(req_key) or {}
+        err = await redis.hgetall(err_key) or {}
+
+        def _coerce(d: dict) -> dict:
+            out = {}
+            for k, v in d.items():
+                ks = k.decode() if isinstance(k, (bytes, bytearray)) else k
+                try:
+                    vs = int(v.decode() if isinstance(v, (bytes, bytearray)) else v)
+                except (ValueError, TypeError):
+                    continue
+                out[ks] = vs
+            return out
+
+        return {
+            "requests_by_caller": _coerce(req),
+            "rate_limited_by_caller": _coerce(err),
+        }
+    except Exception:
+        return empty
 
 
 async def get_daily_count() -> int:

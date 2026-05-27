@@ -28,7 +28,8 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 from integrations.uw_api_cache import (
-    cache_get, cache_set, increment_daily_counter, get_daily_count, get_cache_stats,
+    cache_get, cache_set, increment_daily_counter, increment_429_counter,
+    get_daily_count, get_cache_stats,
 )
 
 logger = logging.getLogger("uw_api")
@@ -126,10 +127,15 @@ async def _consume_token():
             _bucket_tokens -= 1
 
 
-async def _uw_request(path: str, params: dict = None) -> Optional[dict]:
+async def _uw_request(path: str, params: dict = None, caller: str = "untagged") -> Optional[dict]:
     """
     Core UW API request with circuit breaker, rate limiter, retry, and counting.
     Returns parsed JSON or None on failure.
+
+    `caller` (Phase A.4a 2026-05-27) is an endpoint-grain attribution tag
+    propagated to the per-caller Redis hash counter so daily UW load can be
+    broken down by code path. Default "untagged" → counter bucket of that
+    name; should trend toward zero as tag coverage fills in.
     """
     if not UW_API_KEY:
         logger.debug("UW_API_KEY not set — skipping request")
@@ -140,7 +146,7 @@ async def _uw_request(path: str, params: dict = None) -> Optional[dict]:
         return None
 
     await _consume_token()
-    await increment_daily_counter()
+    await increment_daily_counter(caller)
 
     url = f"{UW_BASE}{path}"
     headers = {"Authorization": f"Bearer {UW_API_KEY}", "Accept": "application/json"}
@@ -162,6 +168,7 @@ async def _uw_request(path: str, params: dict = None) -> Optional[dict]:
                     # breaker — a rate limit is not a broken API.
                     global _total_429s
                     _total_429s += 1
+                    await increment_429_counter(caller)
                     logger.warning("UW API %s: rate limited (429) — returning None without retry", path)
                     return None
                 else:
@@ -223,6 +230,7 @@ async def get_ohlc(
     resp = await _uw_request(
         f"/api/stock/{symbol}/ohlc/{candle_size}",
         params=params or None,
+        caller="ohlc",
     )
     if not resp or "data" not in resp:
         return None
@@ -269,6 +277,7 @@ async def get_technical_indicator(
     resp = await _uw_request(
         f"/api/stock/{symbol}/technical-indicator/{fn}",
         params=params or None,
+        caller="technical_indicator",
     )
     if not resp or "data" not in resp:
         return None
@@ -358,7 +367,7 @@ async def _get_info_cached_long(ticker: str) -> Dict[str, Any]:
     if cached is not None:
         return cached
 
-    resp = await _uw_request(f"/api/stock/{ticker.upper()}/info")
+    resp = await _uw_request(f"/api/stock/{ticker.upper()}/info", caller="stock_info")
     if resp and "data" in resp:
         info = resp["data"]
         await cache_set("info", ticker.upper(), info)
@@ -386,7 +395,7 @@ async def get_snapshot(ticker: str) -> Optional[Dict[str, Any]]:
     # introduced the wrong path (UW MCP tool is named stock_state, but the REST URL
     # uses kebab-case). UW returned 404 on every call, tripping the circuit breaker
     # and degrading the heatmap to stale fallback data. Validated against api_spec.yaml.
-    state_resp = await _uw_request(f"/api/stock/{ticker.upper()}/stock-state")
+    state_resp = await _uw_request(f"/api/stock/{ticker.upper()}/stock-state", caller="snapshot")
     if not state_resp or "data" not in state_resp:
         logger.warning("UW state unavailable for %s — returning None", ticker)
         return None
@@ -686,6 +695,7 @@ async def get_options_snapshot(
     data = await _uw_request(
         f"/api/stock/{underlying.upper()}/option-contracts",
         params=params or None,
+        caller="option_contracts",
     )
     if not data or "data" not in data:
         return None
@@ -760,7 +770,7 @@ async def get_flow_recent(ticker: str) -> Optional[List[Dict[str, Any]]]:
     if cached:
         return cached
 
-    data = await _uw_request(f"/api/stock/{ticker.upper()}/flow-recent")
+    data = await _uw_request(f"/api/stock/{ticker.upper()}/flow-recent", caller="flow_recent")
     if not data:
         return None
 
@@ -782,7 +792,7 @@ async def get_flow_per_expiry(ticker: str) -> Optional[List[Dict[str, Any]]]:
     if cached:
         return cached
 
-    data = await _uw_request(f"/api/stock/{ticker.upper()}/flow-per-expiry")
+    data = await _uw_request(f"/api/stock/{ticker.upper()}/flow-per-expiry", caller="flow_per_expiry")
     if not data:
         return None
 
@@ -798,7 +808,7 @@ async def get_greek_exposure(ticker: str) -> Optional[List[Dict[str, Any]]]:
     if cached:
         return cached
 
-    data = await _uw_request(f"/api/stock/{ticker.upper()}/greek-exposure")
+    data = await _uw_request(f"/api/stock/{ticker.upper()}/greek-exposure", caller="greek_exposure")
     if not data or "data" not in data:
         return None
 
@@ -813,7 +823,7 @@ async def get_market_tide() -> Optional[Dict[str, Any]]:
     if cached:
         return cached
 
-    data = await _uw_request("/api/market/market-tide")
+    data = await _uw_request("/api/market/market-tide", caller="market_tide")
     if not data:
         return None
 
@@ -827,7 +837,7 @@ async def get_darkpool_recent() -> Optional[List[Dict[str, Any]]]:
     if cached:
         return cached
 
-    data = await _uw_request("/api/darkpool/recent")
+    data = await _uw_request("/api/darkpool/recent", caller="darkpool_recent")
     if not data or "data" not in data:
         return None
 
@@ -842,7 +852,7 @@ async def get_darkpool_ticker(ticker: str) -> Optional[List[Dict[str, Any]]]:
     if cached:
         return cached
 
-    data = await _uw_request(f"/api/darkpool/{ticker.upper()}")
+    data = await _uw_request(f"/api/darkpool/{ticker.upper()}", caller="darkpool_ticker")
     if not data or "data" not in data:
         return None
 
@@ -857,7 +867,7 @@ async def get_max_pain(ticker: str) -> Optional[Dict[str, Any]]:
     if cached:
         return cached
 
-    data = await _uw_request(f"/api/stock/{ticker.upper()}/max-pain")
+    data = await _uw_request(f"/api/stock/{ticker.upper()}/max-pain", caller="max_pain")
     if not data or "data" not in data:
         return None
 
@@ -872,7 +882,7 @@ async def get_sector_etfs() -> Optional[List[Dict[str, Any]]]:
     if cached:
         return cached
 
-    data = await _uw_request("/api/market/sector-etfs")
+    data = await _uw_request("/api/market/sector-etfs", caller="sector_etfs")
     if not data or "data" not in data:
         return None
 
@@ -887,7 +897,7 @@ async def get_iv_rank(ticker: str) -> Optional[List[Dict[str, Any]]]:
     if cached:
         return cached
 
-    data = await _uw_request(f"/api/stock/{ticker.upper()}/iv-rank")
+    data = await _uw_request(f"/api/stock/{ticker.upper()}/iv-rank", caller="iv_rank")
     if not data or "data" not in data:
         return None
 
@@ -902,7 +912,7 @@ async def get_earnings_premarket() -> Optional[List[Dict[str, Any]]]:
     if cached:
         return cached
 
-    data = await _uw_request("/api/earnings/premarket")
+    data = await _uw_request("/api/earnings/premarket", caller="earnings_premarket")
     if not data or "data" not in data:
         return None
 
@@ -917,7 +927,7 @@ async def get_earnings_afterhours() -> Optional[List[Dict[str, Any]]]:
     if cached:
         return cached
 
-    data = await _uw_request("/api/earnings/afterhours")
+    data = await _uw_request("/api/earnings/afterhours", caller="earnings_afterhours")
     if not data or "data" not in data:
         return None
 
@@ -933,7 +943,7 @@ async def get_earnings_dates(ticker: str) -> Optional[List[Dict[str, Any]]]:
     if cached:
         return cached
 
-    data = await _uw_request(f"/api/earnings/{symbol}")
+    data = await _uw_request(f"/api/earnings/{symbol}", caller="earnings_dates")
     if not data or "data" not in data:
         return None
 
@@ -968,7 +978,7 @@ async def get_economic_calendar() -> Optional[List[Dict[str, Any]]]:
     if cached:
         return cached
 
-    data = await _uw_request("/api/market/economic-calendar")
+    data = await _uw_request("/api/market/economic-calendar", caller="economic_calendar")
     if not data or "data" not in data:
         return None
 
@@ -983,7 +993,7 @@ async def get_short_interest(ticker: str) -> Optional[List[Dict[str, Any]]]:
     if cached:
         return cached
 
-    data = await _uw_request(f"/api/shorts/{ticker.upper()}/interest-float/v2")
+    data = await _uw_request(f"/api/shorts/{ticker.upper()}/interest-float/v2", caller="short_interest")
     if not data or "data" not in data:
         return None
 
@@ -1004,7 +1014,7 @@ async def get_news_headlines(limit: int = 20, ticker: Optional[str] = None) -> O
     params: Dict[str, Any] = {"limit": limit}
     if ticker:
         params["ticker"] = ticker.upper()
-    data = await _uw_request("/api/news/headlines", params=params)
+    data = await _uw_request("/api/news/headlines", params=params, caller="news_headlines")
     if not data or "data" not in data:
         return None
 
@@ -1023,9 +1033,9 @@ async def get_insider_transactions(ticker: Optional[str] = None, limit: int = 20
         return cached
 
     if ticker:
-        data = await _uw_request(f"/api/insider/{ticker.upper()}")
+        data = await _uw_request(f"/api/insider/{ticker.upper()}", caller="insider_ticker")
     else:
-        data = await _uw_request("/api/insider/transactions", params={"limit": limit})
+        data = await _uw_request("/api/insider/transactions", params={"limit": limit}, caller="insider_all")
 
     if not data or "data" not in data:
         return None
@@ -1043,7 +1053,7 @@ async def get_congressional_trades(limit: int = 20) -> Optional[List[Dict[str, A
     if cached:
         return cached
 
-    data = await _uw_request("/api/congress/recent-trades", params={"limit": limit})
+    data = await _uw_request("/api/congress/recent-trades", params={"limit": limit}, caller="congressional")
     if not data or "data" not in data:
         return None
 

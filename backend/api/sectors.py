@@ -46,7 +46,7 @@ ALL_TICKERS = ["SPY"] + list(SECTOR_WEIGHTS.keys())
 
 # Cache keys
 HEATMAP_CACHE_KEY = "sector_heatmap:yf"
-HEATMAP_LIVE_TTL = 10  # 10s during market hours for near-real-time
+HEATMAP_LIVE_TTL = 30  # 30s during market hours (Phase A.4a 2026-05-27) — was 10s, but frontend polls /sectors/heatmap every 10s. Racing TTLs caused frequent misses; each miss = 11 UW snapshot calls. 30s gives 2-3x buffer against drift.
 HEATMAP_STALE_KEY = "sector_heatmap:last_close"
 HEATMAP_HIST_KEY = "sector_heatmap:hist"  # yfinance historical bars (slow, long cache)
 HEATMAP_HIST_TTL = 1800  # 30 min — daily bars don't change intraday
