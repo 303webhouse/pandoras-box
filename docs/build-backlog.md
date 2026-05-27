@@ -41,15 +41,7 @@ Items deeper in Tier 2 / Tier 3 that previously anchored on "post-ZEUS" now anch
 
 ## Top of queue (active scope)
 
-### 1. Brief E — Titans skills cleanup (Ship 1 + Ship 2)
-**Bucket:** Tactical. Pre-Olympus-cross-review foundation work for the Titans review framework.
-**Status:** IN_FLIGHT.
-**Why:** Pass 1 cross-review findings need to land before the four Titans skill files are installed in Claude.ai. Ship 1 = pre-install blockers (this backlog file as ATHENA's canonical Pre-Review #1 source; AEGIS pre-production override log). Ship 2 = five Titans skill file edits per Pass 1 findings (SEVERITY tags on ATLAS, hardcoded-API-keys jurisdiction clarification, override-persistence path rule, ADHD-friendly verdict-first ATHENA Overview, reference-authoring-status deduplication).
-**Gates:** None blocking. Nick `--apply` gate on the staged diff before commit.
-**Displaces:** Nothing — foundation prerequisite for Titans to function on subsequent reviews.
-**Unblocks:** Olympus committee cross-reviews (P1 next).
-
-Phase A closed as `363cde6` on 2026-05-22. The Phase C bundle (next Tier 1 item) promotes to active scope when its brief is authored and Titans-reviewed.
+*Empty.* Brief E (Titans skills cleanup) closed as `9540abd` on 2026-05-25 — Titans framework is now live in Claude.ai. Phase A closed as `363cde6` on 2026-05-22. The next major build (urgent overhaul TBD as of 2026-05-27) or the Phase C bundle promotes to active scope when its brief is authored and Titans-reviewed.
 
 ---
 
@@ -141,6 +133,7 @@ Phase A closed as `363cde6` on 2026-05-22. The Phase C bundle (next Tier 1 item)
 
 | Build | SHA | Closure note | Closed date |
 |---|---|---|---|
+| Brief E — Titans skills cleanup (Ship 1 + Ship 2) | `9540abd` + closure `0fdedfb` | `docs/codex-briefs/brief-e-titans-cleanup-2026-05-24.md` (Closure section appended inline) | 2026-05-25 |
 | PIVOT skill — seventh and final Olympus committee agent | `fd0419b` | (no formal closure — skill file at `skills/pivot/SKILL.md`; 789c4a0 hygiene commit confirms "all 7 agents shipped") | (shipped earlier; verified 2026-05-24) |
 | Phase C.1-rev2 — pre-built redis client w/ health-check + retry (idle-drop fix) | `d0b5400` then reverted `b6f2082` | `docs/strategy-reviews/phase-c.1-rev2-closure-note-2026-05-24.md` | 2026-05-24 |
 | Phase C.1-rev1 — Redis-backed OAuth state persistence (initial attempt) | `21983bf` then reverted `8072c5c` | `docs/strategy-reviews/phase-c.1-rev1-closure-note-2026-05-24.md` | 2026-05-24 |
@@ -191,3 +184,5 @@ Recording priority calls made during ATHENA workflow passes that may set future 
 | 2026-05-24 | Closure | Phase C.1-rev2 (rev1 fix + idle-drop resilience via `health_check_interval=30` + `retry_on_timeout` + `socket_keepalive` + `decode_responses=False` on a pre-built redis-py client) shipped as `d0b5400`, smoke failed differently — write-read consistency bug on Redis-backed store (POST /register → 201 with client_id, immediate GET /authorize with same client_id → 400 "not registered"). Reverted as `b6f2082`. Closure note `phase-c.1-rev2-closure-note-2026-05-24.md`. |
 | 2026-05-24 | Scope sharpened | OAuth-on-hub_mcp Tier 1 item rewritten: the build is OAuth STATE PERSISTENCE, not OAuth itself (OAuth is already live). rev3 attempt explicitly backlogged as investigation-first (no code until reproducer outside FastMCP confirms root cause). Higher-leverage Phase C / Phase B / PIVOT work takes precedence. |
 | 2026-05-24 | Backlog hygiene | PIVOT skill confirmed shipped (commit `fd0419b`); Tier 1 item #3 removed and moved to Recent closures. Originally queued "post-ZEUS-Phase-I" per the 2026-05-22 v2 restructure; verified 2026-05-24 via git log on `skills/pivot/SKILL.md` and the "all 7 agents shipped" line in commit `789c4a0`'s body. Tier 1 now contains: Phase C bundle (#1), Phase B (#2). |
+| 2026-05-25 | Closure | Brief E (Titans skills cleanup, Ship 1 + Ship 2) shipped as `9540abd` with closure appended as `0fdedfb`. Titans .skill bundles repackaged and uploaded to Claude.ai. Moved from Top of queue to Recent closures. |
+| 2026-05-27 | Top of queue restored to empty | Top of queue placeholder restored. Awaiting new major build entry (per Nick 2026-05-27 — urgent overhaul scope TBD) OR Phase C bundle brief authoring. |
