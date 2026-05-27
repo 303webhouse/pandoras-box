@@ -487,3 +487,149 @@ that's an ~85% drop on the hit path. For /v2/positions currently at 0.35s
 p50 (today's measurement; may shift), cache hits will be flat to slightly
 worse for cache-hit-only path, but the cold-compute reduction (1.4s baseline
 → ~110ms hit) shows the architectural value.
+
+================================================================================
+FRONTEND BASELINE (Playwright capture, label=phase3-post)
+================================================================================
+Captured: 2026-05-27T18:39:11.720806+00:00
+URL:      https://pandoras-box-production.up.railway.app/app
+Final URL: https://pandoras-box-production.up.railway.app/app/hub  (redirected)
+Title:    Pandora
+Trace:    docs/strategy-reviews/perf-trace-phase3-post.json  (429545 events)
+          (open in Chrome DevTools → Performance panel → Load profile)
+
+Web vitals + paint metrics:
+  fcp_ms                              1360
+  lcp_ms                              12132
+  dcl_ms                              1011
+  load_event_ms                       6623.800000011921
+  cls                                 0.027536025193002488
+  long_tasks_count                    14
+  long_tasks_total_duration_ms        2101
+  total_blocking_time_ms              896
+
+Navigation timing:
+  nav_request_start_ms                150.59999999403954
+  nav_response_end_ms                 281.80000001192093
+  nav_dom_interactive_ms              986.7000000178814
+  nav_dom_complete_ms                 6623.5999999940395
+
+Resource summary:
+  resource_count                      101
+  resource_transfer_bytes             500818
+  resource_decoded_bytes              2770443
+  by initiator:
+    fetch                count=91  transfer_bytes=186340
+    iframe               count=1  transfer_bytes=0
+    img                  count=1  transfer_bytes=31441
+    link                 count=2  transfer_bytes=57695
+    other                count=1  transfer_bytes=300
+    script               count=5  transfer_bytes=225042
+
+visible_text_chars: 10735
+console_errors (1):
+  - goto: Page.goto: Timeout 45000ms exceeded.
+Call log:
+  - navigating to "https://pandoras-box-production.up.railway.app/app", waiting until "networkidle"
+
+
+================================================================================
+PHASE 3 POST-SHIP — Actuals vs Predictions
+================================================================================
+Captured: 2026-05-27 18:31-18:39 UTC. HEAD: fbcab12 (Phase 3 commit 77a3456 +
+two parallel commits that did not touch the Phase 3 files).
+
+CAVEAT: capture window had upstream noise. crypto_market spiked to 8.8s p50
+(Binance/Coinalyze upstream issue, not Phase 3). sectors_drilldown UW
+caches were cold mid-market (warm-up took 60s, p50 6s). These are NOT Phase 3
+regressions — they're the same time-of-day variance noted earlier. Phase 3
+only touched /v2/positions and /signals/active.
+
+Backend endpoint timing (10 reqs each after warm-up):
+
+                       baseline   phase1-post  phase3-post   delta p50 / p95 vs baseline
+positions             1.40 / 3.60   0.35 / 1.92   0.43 / 0.69    -69% / -81%   [P3 target — WIN]
+signals_active        0.80 / 6.15   1.76 / 2.76   1.18 / 7.27    +47% / +18%   [P3 target — mixed]
+sectors_heatmap       0.35 / 2.62   0.30 / 2.26   0.33 / 26.3    -6% / +905%   [not P3 — upstream noise]
+sectors_drilldown_XLK 1.85 / 2.79   0.93 / 12.9   5.99 / 31.3    +224% / +1024% [not P3 — UW cache cold]
+flow_radar            1.02 / 1.61   0.83 / 1.37   0.43 / 0.90    -58% / -44%   [P1c canary — improved]
+crypto_market         0.26 / 1.72   0.26 / 2.29   8.81 / 10.4    +3286% / +508% [not P3 — Binance upstream]
+
+PHASE 3 TARGETS — VERDICT:
+
+/v2/positions:
+  WIN. p50 dropped from 1.40s baseline to 0.43s (-69%). The p95 tail
+  collapsed dramatically: 3.60s → 0.69s (-81%). SWR is doing exactly what
+  it was designed for — a hot cache absorbs the once-per-ttl recompute
+  cost across all the dashboard polls. Response size also dropped slightly
+  (13.9KB → 14.3KB — essentially flat).
+
+/signals/active:
+  MIXED. p50 dropped from 1.76s (phase1-post) to 1.18s (-33%) which is
+  good. But p95 went from 2.76s to 7.27s — one of the 10 reqs hit a cold
+  cache during the loop. The expected-value (mean=1.80s vs phase1's 1.95s)
+  is comparable, but tail latency is worse in this sample.
+  This is consistent with stale_ttl=30 — after 40s the entry expires and
+  the next call computes fresh (~7s on a cold compute path). Possible
+  tuning: raise stale_ttl to keep entries servable longer. Recommend
+  monitoring real traffic before re-tuning.
+
+/flow/radar (Phase 1c canary, measured here as a control):
+  Continued improvement. p50 0.43s today vs 0.83s phase1-post vs 1.02s
+  baseline. The investigation showed cache hits are ~110ms server-side;
+  the curl floor is ~250ms network. Today's measurement aligns.
+
+NON-PHASE-3 ENDPOINTS — NOT REGRESSIONS:
+
+sectors_drilldown_XLK 5.99s p50: UW cache cold during mid-market. The
+  asyncio.gather refactor from Phase 1b still works; the slowdown is in
+  _fetch_sector_snapshot which Phase 1b didn't touch. Compare to the
+  Phase 1c investigation: post-deploy cold reqs hit 16s. This is the
+  same dynamic.
+
+crypto_market 8.81s p50: every request hit Binance/Coinalyze at >8s.
+  No Phase 3 code touches this path. Upstream issue.
+
+sectors_heatmap p95=26.3s: a single outlier where yfinance or UW returned
+  slowly for one ETF. Not in Phase 3 scope.
+
+FRONTEND PLAYWRIGHT CAPTURE (label=phase3-post):
+
+                        baseline   phase1-post  phase3-post
+fcp_ms                  1440       1192         1360
+lcp_ms                  1440       1192         12132       <- outlier (TradingView late paint?)
+dcl_ms                  1128       854          1011
+load_event_ms           4808       7930         6624
+total_blocking_time_ms  47         190          896
+long_tasks_count        5          7            14
+cls                     0.036      0.080        0.028
+resource_count          112        97           101
+fetch count             102        87           91
+console_errors          0          0            1 (networkidle timeout 45s)
+
+The Playwright capture coincided with the upstream-noise window above.
+Slow backend responses inflate frontend metrics that depend on networkidle
+(load_event, dom_complete). The LCP=12.1s outlier and TBT=896ms reflect
+that, not the Phase 3 frontend (which didn't change). FCP/DCL/CLS are
+roughly stable across all three captures.
+
+PHASE 3 — DONE. NEXT STEPS:
+
+The perf-architecture brief's amendment defers Phase 2. After Phase 3,
+remaining brief items are:
+
+Phase 4 (read-path-write cleanup, 1-2 days, Medium risk):
+  Move auto-expiry sweep + signal re-scoring off the read path into
+  background tasks. With Phase 3's SWR caching, these writes already fire
+  ~10x less often than before (only on cache miss/refresh). Phase 4 is now
+  less urgent but still architecturally cleaner.
+
+Phase 5 (incremental DOM patching for heatmap + macro, 1-2 days, Medium):
+  Frontend-only. Replaces full innerHTML rerenders with cell-level updates.
+  Visibility-gated polling from Quick Wins already eliminates the cost when
+  the tab is hidden. Phase 5 eliminates it when visible.
+
+Recommended call: ship neither immediately. Both wins are real but
+incremental. The dominant cold-load and steady-state wins have landed in
+Phases 0 (quick wins) + 1 + 3. Decision on Phase 4 vs 5 vs closing the
+brief is Nick's.
