@@ -46,15 +46,16 @@ That's it. No tokens, no secrets — the GitHub OAuth App credentials live in Ra
 5. Click **Add**.
 6. Browser redirects to GitHub. You'll see the "Pandora's Box MCP" OAuth App requesting `read:user` scope. Click **Authorize**.
 7. Browser redirects back to our server's `/mcp/v1/auth/callback`, which verifies your GitHub username against the allowlist, then back to Claude.ai.
-8. Connector shows up as "Connected" and the 9 tools become available.
+8. Connector shows up as "Connected" and the 10 tools become available.
 
 ## Verifying it works
 
 1. Open a new chat in the Pandora's Box project.
 2. Prompt: *"Use the Pandora's Box MCP to list available tools."*
-3. Claude should call `mcp_describe_tools` and return the 9-tool manifest:
+3. Claude should call `mcp_describe_tools` and return the 10-tool manifest:
    - `mcp_ping`
    - `mcp_describe_tools`
+   - `hub_get_quote`
    - `hub_get_bias_composite`
    - `hub_get_flow_radar`
    - `hub_get_sector_strength`
