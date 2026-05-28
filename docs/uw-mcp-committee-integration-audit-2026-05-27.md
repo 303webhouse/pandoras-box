@@ -2,6 +2,20 @@
 
 **Status:** Audit-only. No code changes. No new MCP tools written. No resurrection of parked Task 3 code. No SKILL.md edits. All findings are empirical (file:line citations + git log + live tool inventory) or quoted from named documentation.
 
+> **CORRECTION (2026-05-28):** This audit's Part B claim that the Greeks
+> verification smoke "has never been run" is **WRONG**. The A.4a handoff doc
+> (`docs/codex-briefs/a4a-uw-overdraw-handoff-2026-05-27.md` §3) — which I
+> failed to read during this audit — documents that the smoke **WAS run on
+> 2026-05-27 ~15:14 ET and FAILED: 0/497 SPY contracts had Greeks** (delta/
+> gamma/theta/vega/IV all null, spot null; max_pain worked). **However**, UW
+> was at **102% of daily budget (20,366/20,000)** at smoke time and degrades
+> multiple endpoints together under load, so the failure is **confounded, not
+> conclusive**. The documented disposition was to **re-smoke Thursday
+> 2026-05-28 AM at low load** after the daily counter resets overnight. The
+> "unblock as-is, ~1h" framing below still holds IF the clean re-smoke passes;
+> if it fails at confirmed-low load, the v1.5 revert path applies. See the
+> ship brief and the closure note for the authoritative smoke result.
+
 **Predecessor:** [docs/rh-mcp-integration-audit-2026-05-27.md](rh-mcp-integration-audit-2026-05-27.md) (commit `2939476`). The RH audit confirmed RH MCP is equities-only, no Greeks, no options chain — so UW remains the only viable data source for the three half-powered committee agents. This audit answers the questions needed to draft the build brief that closes the gap.
 
 **Authoritative artifacts:**
@@ -15,7 +29,7 @@
 
 ## 1. Executive Summary
 
-- **Headline reframing on Part B:** Task 3 (`hub_get_options_chain`) is **NOT "parked with Greeks gate failed."** It is **STAGED but uncommitted** — fully built across 4 working-tree files, already wired into the tool registry, awaiting only the live-market Greeks-verification smoke and a commit. The "Greeks gate failure" framing in the predecessor brief came from a Memorial Day probe that returned null Greeks **but was inconclusive due to market closure**. The 2026-05-26 schema decision (commit `8267d3e` + `9307a9e`) restored the Greeks-present assumption based on production-code chain evidence and designed a live-market verification gate (the `scripts/options_chain_greeks_smoke.py` test). That smoke has never been run — most likely because today (2026-05-27) was consumed by the RH MCP launch + RH audit + A.4a remediation work. **Disposition: unblock as-is. ~1h to ship.**
+- **Headline reframing on Part B:** Task 3 (`hub_get_options_chain`) is **NOT "parked with Greeks gate failed."** It is **STAGED but uncommitted** — fully built across 4 working-tree files, already wired into the tool registry, awaiting only the live-market Greeks-verification smoke and a commit. The "Greeks gate failure" framing in the predecessor brief came from a Memorial Day probe that returned null Greeks **but was inconclusive due to market closure**. The 2026-05-26 schema decision (commit `8267d3e` + `9307a9e`) restored the Greeks-present assumption based on production-code chain evidence and designed a live-market verification gate (the `scripts/options_chain_greeks_smoke.py` test). **[CORRECTED 2026-05-28 — see top-of-doc note]** The smoke WAS run on 2026-05-27 ~15:14 ET and failed (0/497 Greeks), but UW was at 102% of daily budget at the time, so the result is confounded by load, not a clean endpoint verdict. The disposition is a low-load re-smoke on 2026-05-28 AM. **Disposition: unblock as-is IF the clean re-smoke passes. ~1h to ship.**
 - **Part A — UW MCP is NOT in Claude.ai connectors**, confirmed empirically by a fresh Claude.ai instance probing its own tool list on 2026-05-27. **However, Pandora MCP IS connected** — and committee skills already call it for hub state (`hub_get_quote`, `hub_get_positions`, etc.). The gap is **NOT "Pandora MCP is missing"**; the gap is **"Pandora MCP doesn't expose ticker-specific deep-dive analytical tools yet."** Three named tools — `hub_get_options_chain`, `hub_get_chart_indicators`, `hub_get_market_profile` — are explicitly called out as missing in each of [DAEDALUS](../skills/daedalus/SKILL.md), [PYTHAGORAS](../skills/pythagoras/SKILL.md), and [PYTHIA](../skills/pythia/SKILL.md)'s SKILL.md "Closing the gap" sections.
 - **Part A — `claude_desktop_config.json` contains ONLY `desktop-commander`** — no UW MCP, no TradingView MCP, no Pandora MCP. **The memory note "UW MCP and TradingView MCP installed in claude_desktop_config.json" is stale.** Claude Desktop config is **also not the surface where committee skills run** — committee work happens in Claude.ai (web/mobile), which uses account-level Connectors (also called MCP servers in the UI), a separate layer from Claude Desktop. Cross-layer confusion is a real risk and should be retired from future briefs.
 - **Part C / D — `hub_get_chart_indicators` doesn't need TradingView.** UW exposes `/api/stock/{ticker}/technical-indicator/{function}` ([uw-openapi.yaml:20706](audit-artifacts/2026-05-22/uw-openapi.yaml)) with 50+ functions including SMA, EMA, RSI, MACD, BBANDS, VWAP, ADX, ATR — every indicator PYTHAGORAS lists in its [SKILL.md](../skills/pythagoras/SKILL.md) Indicator Alignment section. **PYTHAGORAS becomes a pure Hub-wrap build**, same shape as Task 3, ~6–8h CC time.
@@ -109,7 +123,8 @@
 | 2026-05-26 | **Task 2 Amendment #1 — Greeks-present assumption RESTORED** based on production-code chain evidence (4 production callers in `integrations/uw_api.py` read `c.get("delta")` and have been silently getting None for years without surfacing bugs — that's empirically strong evidence Greeks DO populate during live market sessions, the spec just lagged). | `8267d3e` |
 | 2026-05-26 | Task 2 Amendment #2 — ATLAS Pass 1 resolution. Greeks-verification gate sharpened to "5 strikes ATM both sides must have non-null delta + IV." Code can begin. | `9307a9e` |
 | 2026-05-26 → 2026-05-27 | **Implementation written** (4 files, ~750 LoC) — `tools/options_chain.py`, `services/read_only/options_chain.py`, `utils/options_math.py`, `scripts/options_chain_greeks_smoke.py`. **Never committed.** | working tree |
-| 2026-05-27 | **Smoke never run.** Other work (RH MCP launch, RH audit, A.4a remediation) consumed the day. | git log + `docs/codex-briefs/a4a-uw-overdraw-handoff-2026-05-27.md` exists |
+| 2026-05-27 ~15:14 ET | **[CORRECTED] Smoke WAS run and FAILED: 0/497 SPY contracts had Greeks** (spot null, iv_rank field-missing; max_pain worked). **Confound: UW at 102% daily budget (20,366/20,000).** UW degrades multiple endpoints together under load, so this is inconclusive, not a clean endpoint verdict. | `docs/codex-briefs/a4a-uw-overdraw-handoff-2026-05-27.md` §3 |
+| 2026-05-28 AM | Planned clean re-smoke at low load (counter resets midnight ET + A.4a load reduction). This is the authoritative tiebreaker. | ship brief Task 2 |
 
 **The actual gate state is "not run, not failed."** Cite [scripts/options_chain_greeks_smoke.py:1-18](../scripts/options_chain_greeks_smoke.py#L1-L18) verbatim:
 
