@@ -337,7 +337,7 @@ async def _fetch_iv_rank(
         aggregates_errors.append({"field": "iv_rank", "reason": "unexpected shape"})
         return None
 
-    raw = latest.get("iv_rank") or latest.get("rank")
+    raw = latest.get("iv_rank") or latest.get("rank") or latest.get("iv_rank_1y")
     if raw is None:
         aggregates_errors.append({"field": "iv_rank", "reason": "field missing in response"})
         return None
