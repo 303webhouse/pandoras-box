@@ -4,7 +4,8 @@ Composes three existing UW wrappers (`get_options_snapshot`, `get_iv_rank`,
 `get_max_pain`) into a single DAEDALUS-shaped envelope:
 
   - Per-contract: strike, type, bid, ask, mid (computed), bid_ask_spread_pct
-    (computed), volume, OI, IV, delta, gamma, theta, vega
+    (computed), volume, OI, IV. Greeks (delta/gamma/theta/vega) are NOT in
+    v1.5 — UW /option-contracts does not return them. Deferred to Tier 2.
   - Chain-level: ticker, expiry, spot, uw_timestamp, uw_timestamp_source,
     iv_rank, max_pain (filtered to requested expiry), total_open_interest,
     total_call_oi, total_put_oi
@@ -41,7 +42,7 @@ from integrations.uw_api import (
     get_options_snapshot,
 )
 from integrations.uw_api_cache import cache_get, cache_set
-from utils.options_math import compute_bid_ask_spread_pct, compute_mid, extract_greeks
+from utils.options_math import compute_bid_ask_spread_pct, compute_mid
 
 logger = logging.getLogger(__name__)
 
@@ -195,8 +196,7 @@ async def _fetch_and_compose(
         else:
             total_put_oi += oi_i
 
-        greeks = extract_greeks(c)
-        iv = greeks.get("iv")
+        iv = c.get("implied_volatility")
 
         contracts_out.append({
             "strike": strike_f,
@@ -208,10 +208,6 @@ async def _fetch_and_compose(
             "volume": volume_i,
             "open_interest": oi_i,
             "implied_volatility": _safe_float(iv),
-            "delta": _safe_float(greeks.get("delta")),
-            "gamma": _safe_float(greeks.get("gamma")),
-            "theta": _safe_float(greeks.get("theta")),
-            "vega": _safe_float(greeks.get("vega")),
         })
 
         # Pick up underlying spot + timestamp once. UW's normalized

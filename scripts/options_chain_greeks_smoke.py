@@ -1,18 +1,18 @@
-"""Task 7 — Greeks verification gate smoke for hub_get_options_chain.
+"""v1.5 chain smoke for hub_get_options_chain.
 
-ATLAS M1 fail-stop: confirms UW's /option-contracts endpoint returns
-non-null delta/gamma/theta/vega for at least one SPY weekly contract.
-If this fails, the Greeks-present assumption from Task 2 is invalid
-and the schema must revert before Task 6 (DAEDALUS bundle rebuild).
+Confirms UW's /option-contracts endpoint returns a live SPY chain with
+non-null implied_volatility on near-ATM contracts. Greeks (delta/gamma/
+theta/vega) are NOT checked — confirmed absent from UW /option-contracts
+on 2026-05-29 at confirmed-low load (0/500 contracts with delta across
+the full SPY call chain). Greeks are deferred to a Tier 2 follow-up brief.
 
-Pass criteria (ATLAS Pass-1 amendment, governing at ship-time 2026-05-28):
+Pass criteria (v1.5, governing at ship-time 2026-05-29):
     Ticker:  SPY
     Expiry:  next Friday from today (weekly)
     Min:     the 5 strikes immediately above ATM AND the 5 immediately below
              ATM, on BOTH call and put sides (up to 20 contracts), must ALL
-             have non-null delta AND non-null implied_volatility. Anchors the
-             gate to the near-ATM strikes DAEDALUS actually trades, not a loose
-             population rate that could pass on deep-OTM strikes it never uses.
+             have non-null implied_volatility. Anchors the gate to the
+             near-ATM strikes DAEDALUS actually trades.
     Guard:   a null `spot` in the response is treated as FAIL/inconclusive — a
              null spot co-occurred with the load-degraded 2026-05-27 chain.
 
@@ -121,7 +121,7 @@ async def main() -> int:
     near_atm = near_calls + near_puts
 
     def _ok(c):
-        return c.get("delta") is not None and c.get("implied_volatility") is not None
+        return c.get("implied_volatility") is not None
 
     passing = [c for c in near_atm if _ok(c)]
     failing = [c for c in near_atm if not _ok(c)]
@@ -129,33 +129,30 @@ async def main() -> int:
     print(f"Spot: {spot}")
     print(f"Near-ATM contracts checked: {len(near_atm)} "
           f"({len(near_calls)} calls + {len(near_puts)} puts within ~5 strikes of ATM)")
-    print(f"With non-null delta AND IV: {len(passing)} / {len(near_atm)}")
+    print(f"With non-null IV: {len(passing)} / {len(near_atm)}")
 
     if failing or len(near_atm) < 2:
         print()
-        print("FAIL: Greeks-present assumption INVALID for near-ATM strikes.")
-        print("  >=1 near-ATM strike has null delta or null IV (or the chain is")
-        print("  too narrow to evaluate). Execute the v1.5 revert checklist")
-        print("  (Task 2 schema doc L394-405): drop the 4 Greeks fields, keep")
-        print("  implied_volatility, revert DAEDALUS SKILL.md to qualitative-")
-        print("  Greeks-mode. Surface to Nick BEFORE shipping v1.5.")
+        print("FAIL: IV not populated for near-ATM strikes (or chain too narrow).")
+        print("  >=1 near-ATM strike has null implied_volatility. The chain")
+        print("  endpoint may be degraded or the expiry has no data.")
+        print("  Surface to Nick before shipping.")
         for c in failing[:6]:
             print(f"    strike {c.get('strike')} {c.get('option_type')}: "
-                  f"delta={c.get('delta')} iv={c.get('implied_volatility')}")
+                  f"iv={c.get('implied_volatility')}")
         return 1
 
     sample = near_atm[0]
     print()
     print("PASS: every near-ATM strike (up to 5 each side, both call + put) has")
-    print("      non-null delta + IV.")
+    print("      non-null implied_volatility. (v1.5 — Greeks not checked.)")
     print(f"  Sample (nearest-ATM contract):")
     print(f"    strike:      {sample.get('strike')}")
     print(f"    option_type: {sample.get('option_type')}")
-    print(f"    delta:       {sample.get('delta')}")
-    print(f"    gamma:       {sample.get('gamma')}")
-    print(f"    theta:       {sample.get('theta')}")
-    print(f"    vega:        {sample.get('vega')}")
     print(f"    iv:          {sample.get('implied_volatility')}")
+    print(f"    bid:         {sample.get('bid')}")
+    print(f"    ask:         {sample.get('ask')}")
+    print(f"    mid:         {sample.get('mid')}")
     print()
     print("Cleared to commit + proceed to Task 5 (DAEDALUS SKILL.md + bundle).")
     return 0

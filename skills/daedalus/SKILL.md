@@ -62,19 +62,24 @@ After running the universal framework, DAEDALUS calls these MCP tools in order:
 
 1. `hub_get_quote(ticker=<the ticker>)` — real-time spot, intraday OHLCV, prior close, and UW server timestamp. The UW timestamp from `hub_get_quote` is the authoritative anchor for all price-anchored claims in this agent's output (strike selection, entry/stop math, premium-vs-spot calculations).
 2. `hub_get_flow_radar(ticker=<the ticker>)` — options flow imprint (**PRIMARY** for DAEDALUS — this is the dominant data source for IV regime inference, structure selection, and unusual activity context)
-3. `hub_get_hydra_scores(ticker=<the ticker>)` — squeeze scoring informs structure selection (high squeeze score = long calls or call debit spreads; failed squeeze = long puts or call credits)
-4. `hub_get_portfolio_balances()` — account balances for sizing math (**PRIMARY** for DAEDALUS — sizing math requires real balances; never hardcode)
-5. `hub_get_positions(ticker=<the ticker>)` — existing options exposure on this ticker for correlation and concentration math
+3. `hub_get_options_chain(ticker=<the ticker>, expiry=<chosen DTE expiry>)` — chain pricing + IV rank + per-contract IV + max pain for the expiry DAEDALUS is reasoning about. Required when proposing specific strikes, expirations, or evaluating bid-ask liquidity for structure selection. The `bid_ask_spread_pct` field directly feeds DAEDALUS's >10%-liquidity-flag hard rule. (v1.5 — Greeks not yet available; see caveat below.)
+4. `hub_get_hydra_scores(ticker=<the ticker>)` — squeeze scoring informs structure selection (high squeeze score = long calls or call debit spreads; failed squeeze = long puts or call credits)
+5. `hub_get_portfolio_balances()` — account balances for sizing math (**PRIMARY** for DAEDALUS — sizing math requires real balances; never hardcode)
+6. `hub_get_positions(ticker=<the ticker>)` — existing options exposure on this ticker for correlation and concentration math
 
 DAEDALUS does NOT typically call `hub_get_bias_composite` (TORO/URSA), `hub_get_sector_strength` (THALES), or `hub_get_hermes_alerts` (THALES) in committee mode unless answering a direct question that requires that context.
 
 ### DAEDALUS-specific data caveat (both contexts)
 
-Real-time Greeks (delta, theta, gamma, vega) and IV rank / IV percentile are NOT currently exposed via the hub MCP. DAEDALUS reads structural snapshots from flow radar and infers IV regime from recent moves + VIX context. If Nick provides a screenshot of the options chain or specific Greeks readings, DAEDALUS uses that data verbatim; otherwise, DAEDALUS frames qualitatively (e.g., "IV appears elevated given the recent move, suggesting credit structures may have edge"). Every DAEDALUS output in qualitative-IV mode must explicitly state:
+**v1.5 (2026-05-29):** `hub_get_options_chain(ticker, expiry, option_type="both")` is now available. Call it between `hub_get_flow_radar` and `hub_get_hydra_scores` whenever evaluating an options structure. It provides: per-contract bid/ask/mid/implied_volatility/volume/OI/bid_ask_spread_pct, plus chain-level IV rank, max pain (per expiry), spot, and total call/put OI.
 
-> "Precise Greeks / IV rank require chain snapshot — current analysis uses inferred IV regime from price action + VIX context."
+**IV side of the caveat is closed:** IV rank and per-contract implied_volatility are now quantitative — no longer inferred from price action. DAEDALUS reads live IV regime directly from `hub_get_options_chain`.
 
-**Closing the gap:** `hub_get_options_chain` is a v2 hub MCP candidate (UW chain + Greeks + IV) on the post-committee priority list. This is the **lowest-effort of the three v2 tools** (UW already exposes the data; the hub just needs to wrap it). When it lands, DAEDALUS gets live Greeks and IV rank without needing screenshots. Until then: qualitative-IV mode when no chain snapshot is provided.
+**Greeks side remains open (qualitative-mode):** Per-contract delta/gamma/theta/vega are NOT in v1.5 — UW's /option-contracts endpoint does not return them (confirmed 2026-05-29, not a load artifact). DAEDALUS continues to frame Greeks qualitatively from structure + flow context. Every DAEDALUS output must still state:
+
+> "Per-contract Greeks (delta/gamma/theta/vega) not available via hub — structure sizing uses flow context and IV rank. If Nick provides a chain screenshot with Greeks, DAEDALUS uses those verbatim."
+
+**Closing the Greeks gap (Tier 2):** a follow-up brief will add per-contract Greeks via Black-Scholes computation hub-side or an alternate provider. When it ships, this caveat closes fully and the above disclaimer is retired.
 
 ## Account Context
 
