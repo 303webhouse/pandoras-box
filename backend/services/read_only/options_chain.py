@@ -4,11 +4,11 @@ Composes three existing UW wrappers (`get_options_snapshot`, `get_iv_rank`,
 `get_max_pain`) into a single DAEDALUS-shaped envelope:
 
   - Per-contract: strike, type, bid, ask, mid (computed), bid_ask_spread_pct
-    (computed), volume, OI, IV. Greeks (delta/gamma/theta/vega) are NOT in
-    v1.5 — UW /option-contracts does not return them. Deferred to Tier 2.
+    (computed), volume, OI, IV, and Black-Scholes Greeks (delta, gamma, theta,
+    vega — Tier 2, computed hub-side from UW-provided IV).
   - Chain-level: ticker, expiry, spot, uw_timestamp, uw_timestamp_source,
     iv_rank, max_pain (filtered to requested expiry), total_open_interest,
-    total_call_oi, total_put_oi
+    total_call_oi, total_put_oi, greeks_source ("bs_computed")
   - Partial-failure: chain is REQUIRED (status=unavailable if missing);
     iv_rank / max_pain are OPTIONAL with aggregates_errors[] markers
 
@@ -41,8 +41,9 @@ from integrations.uw_api import (
     get_max_pain,
     get_options_snapshot,
 )
+from integrations.risk_free_rate import RISK_FREE_RATE_3M
 from integrations.uw_api_cache import cache_get, cache_set
-from utils.options_math import compute_bid_ask_spread_pct, compute_mid
+from utils.options_math import bs_greeks_from_iv, compute_bid_ask_spread_pct, compute_mid
 
 logger = logging.getLogger(__name__)
 
@@ -242,6 +243,34 @@ async def _fetch_and_compose(
         uw_ts = datetime.now(timezone.utc).isoformat()
         ts_source = "synthetic"
 
+    # Tier 2 — Black-Scholes Greeks. Computed after sort so underlying_price
+    # is settled. time_to_expiry uses calendar days / 365 (v1: simplest correct
+    # approach; market-days / 252 is more academic but requires holiday
+    # calendars — not justified for this DTE range).
+    now_utc = datetime.now(timezone.utc)
+    try:
+        from datetime import date as _date
+        exp_date = _date.fromisoformat(exp)
+        days_to_expiry = (exp_date - now_utc.date()).days
+        tte_years = max(days_to_expiry, 0) / 365.0
+    except (ValueError, AttributeError):
+        tte_years = 0.0
+
+    for contract in contracts_out:
+        iv_val = contract.get("implied_volatility")
+        greeks = bs_greeks_from_iv(
+            spot=underlying_price,
+            strike=contract["strike"],
+            time_to_expiry_years=tte_years,
+            risk_free_rate=RISK_FREE_RATE_3M,
+            iv=iv_val,
+            option_type=contract["option_type"],
+        )
+        contract["delta"] = greeks["delta"]
+        contract["gamma"] = greeks["gamma"]
+        contract["theta"] = greeks["theta"]
+        contract["vega"] = greeks["vega"]
+
     return {
         "ticker": tkr,
         "expiry": exp,
@@ -251,6 +280,7 @@ async def _fetch_and_compose(
         "uw_timestamp_source": ts_source,
         "iv_rank": iv_rank,
         "max_pain": max_pain,
+        "greeks_source": "bs_computed",
         "total_open_interest": total_oi,
         "total_call_oi": total_call_oi,
         "total_put_oi": total_put_oi,

@@ -17,8 +17,12 @@ both bid AND ask present and > 0 (ATLAS Pass 1 finding M3) — when
 either is missing, returns None so the >10% gate doesn't fire on a
 contract whose liquidity is unknown rather than wide.
 
-All three functions operate on the normalized contract dict shape
-returned by `integrations.uw_api.get_options_snapshot()` — keys:
+`bs_greeks_from_iv` is added in Tier 2 (2026-05-29): computes per-contract
+Black-Scholes Greeks from UW-provided IV. Requires no new dependencies —
+uses math.erf for the normal CDF approximation.
+
+All functions operate on the normalized contract dict shape returned by
+`integrations.uw_api.get_options_snapshot()` — keys:
     last_quote.{bid, ask}
     last_trade.price
     day.{close, vwap}
@@ -28,7 +32,18 @@ returned by `integrations.uw_api.get_options_snapshot()` — keys:
 
 from __future__ import annotations
 
+import math
 from typing import Any, Dict, Optional
+
+
+def _norm_cdf(x: float) -> float:
+    """Standard normal CDF via math.erf (Abramowitz & Stegun identity)."""
+    return (1.0 + math.erf(x / math.sqrt(2.0))) / 2.0
+
+
+def _norm_pdf(x: float) -> float:
+    """Standard normal PDF."""
+    return math.exp(-0.5 * x * x) / math.sqrt(2.0 * math.pi)
 
 
 def compute_mid(contract: Dict[str, Any]) -> Optional[float]:
@@ -119,3 +134,93 @@ def extract_greeks(contract: Dict[str, Any]) -> Dict[str, Optional[float]]:
         "vega": greeks.get("vega"),
         "iv": contract.get("implied_volatility"),
     }
+
+
+def bs_greeks_from_iv(
+    spot: float,
+    strike: float,
+    time_to_expiry_years: float,
+    risk_free_rate: float,
+    iv: Optional[float],
+    option_type: str,
+) -> Dict[str, Optional[float]]:
+    """Black-Scholes Greeks from UW-provided implied volatility.
+
+    Returns {delta, gamma, theta, vega} as floats, or all None when inputs
+    are invalid. Never raises — returns nulls on any degenerate input so the
+    chain envelope's per-contract null-rendering works correctly.
+
+    Conventions:
+        - vega is per 1% change in IV (divide by 100 from raw BSM vega)
+        - theta is per calendar day (divide by 365)
+        - delta (put) is negative: range [-1, 0]
+        - gamma is always positive
+        - theta is always negative for long positions
+
+    Limitations (v1, Tier 2):
+        - Assumes European exercise and zero dividends. For American-style
+          equity options with dividend-paying underlyings, modeled Greeks will
+          differ from broker-displayed Greeks at the margins — typically <5%
+          on delta/gamma for ATM contracts, larger for deep ITM puts on
+          high-yield underlyings. Tier 3 separate brief for dividend-yield
+          input and American-exercise adjustment.
+
+    Args:
+        spot: Underlying price.
+        strike: Option strike price.
+        time_to_expiry_years: Calendar days to expiry / 365. Must be > 0.
+        risk_free_rate: Annualized risk-free rate as a decimal (e.g. 0.0368).
+        iv: Implied volatility as a decimal (e.g. 0.25 for 25%). None / <=0 → all None.
+        option_type: "call" or "put" (case-insensitive).
+    """
+    _null = {"delta": None, "gamma": None, "theta": None, "vega": None}
+
+    if iv is None or iv <= 0:
+        return _null
+    if time_to_expiry_years <= 0:
+        return _null
+    if spot is None or spot <= 0 or strike is None or strike <= 0:
+        return _null
+
+    S = float(spot)
+    K = float(strike)
+    T = float(time_to_expiry_years)
+    r = float(risk_free_rate)
+    sigma = float(iv)
+    opt = option_type.lower()
+
+    try:
+        sqrt_T = math.sqrt(T)
+        d1 = (math.log(S / K) + (r + 0.5 * sigma * sigma) * T) / (sigma * sqrt_T)
+        d2 = d1 - sigma * sqrt_T
+
+        phi_d1 = _norm_pdf(d1)
+        N_d1 = _norm_cdf(d1)
+        N_d2 = _norm_cdf(d2)
+        N_neg_d1 = 1.0 - N_d1
+        N_neg_d2 = 1.0 - N_d2
+
+        if opt == "call":
+            delta = N_d1
+            theta = (
+                -S * phi_d1 * sigma / (2.0 * sqrt_T)
+                - r * K * math.exp(-r * T) * N_d2
+            ) / 365.0
+        else:
+            delta = N_d1 - 1.0
+            theta = (
+                -S * phi_d1 * sigma / (2.0 * sqrt_T)
+                + r * K * math.exp(-r * T) * N_neg_d2
+            ) / 365.0
+
+        gamma = phi_d1 / (S * sigma * sqrt_T)
+        vega = S * phi_d1 * sqrt_T / 100.0
+
+        return {
+            "delta": round(delta, 6),
+            "gamma": round(gamma, 6),
+            "theta": round(theta, 6),
+            "vega": round(vega, 6),
+        }
+    except (ValueError, ZeroDivisionError, OverflowError):
+        return _null
