@@ -131,7 +131,7 @@ Match DTE to timeframe AND to catalyst calendar:
 
 | Trade timeframe | DTE range | Notes |
 |---|---|---|
-| Intraday / B3 scalp | 0-2 DTE | Maximum gamma + theta both ways; only structural triggers per H.01 |
+| Intraday / B3 scalp | 0-2 DTE | Maximum gamma + theta both ways; only structural triggers per E.09 |
 | B2 tactical (3-5 days) | 7-14 DTE | Standard swing window; cut if not profitable in 3 days |
 | B1 thesis (multi-week) | 30-60 DTE minimum | Time for the thesis to play out without theta dominating |
 | Deep thesis (multi-month) | LEAPS or deep ITM | Long-dated convexity for multi-month directional bets |
