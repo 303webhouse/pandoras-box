@@ -92,9 +92,20 @@ cd607fc feat(hub_mcp): ship hub_get_options_chain v1.5 — IV/chain/max-pain, Gr
 
 ## Post-Deploy Verification
 
-**mcp_describe_tools:** pending — verify `hub_get_options_chain` appears in tool list from a fresh Claude.ai session with Pandora MCP connected after Railway deploy completes.
+**mcp_describe_tools:** ✅ VERIFIED — `hub_get_options_chain` confirmed in tool list from a fresh Claude.ai session with Pandora MCP connected. Server self-describes as v1.5 with Greeks deferred. Verified tool signature:
 
-**Railway deploy:** pushed to `origin/main` at ~13:02 ET 2026-05-29. Health endpoint was still on the prior deploy at time of writing; check `https://pandoras-box-production.up.railway.app/health` after a few minutes.
+```
+hub_get_options_chain(ticker, expiry, option_type?)
+  ticker      — string, required
+  expiry      — string, required, format YYYY-MM-DD
+  option_type — optional, defaults to "both" (pass "call" or "put" to narrow)
+```
+
+Quantitative fields available in v1.5: `iv_rank` (0–100), per-contract `implied_volatility`, `max_pain`, `spot`, `total_call_oi`, `total_put_oi`. Greeks (`delta`/`gamma`/`theta`/`vega`) deferred to Tier 2.
+
+**Railway deploy:** pushed to `origin/main` at ~13:02 ET 2026-05-29. Health confirmed healthy by ~13:18 ET.
+
+**Note on early post-deploy call failures:** The first Pandora MCP calls after deploy failed (~3 attempts). This was a cold-start timing race — server uptime at first attempt was ~276 seconds (~4.6 minutes), meaning calls hit mid-cold-start, not a fully initialized service. Not an OAuth data point.
 
 ---
 
