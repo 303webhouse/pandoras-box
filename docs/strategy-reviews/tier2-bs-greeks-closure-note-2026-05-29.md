@@ -124,23 +124,52 @@ b19a4ad fix(options_chain): fall back to get_snapshot() for spot when chain omit
 
 ## Post-Deploy Verification
 
-**Railway deploy:** pushed to `origin/main` at ~14:20 MT 2026-05-29. Verify health endpoint after deploy settles.
+**Railway deploy:** Initial auto-deploy webhook did not fire on the Tier 2 merge (`d4501fa`). Manual `railway redeploy` triggered at ~12:34 MDT; deploy `6b80ebc5` reached SUCCESS at ~12:38 MDT. Root cause: Railway GitHub webhook miss — code was on `main` throughout, Railway simply didn't trigger.
 
-**mcp_describe_tools verification:** PENDING — confirm from a fresh Claude.ai session that `hub_get_options_chain` description no longer carries "Greeks deferred (v1.5)" language and mentions Black-Scholes / modeled Greeks.
+**mcp_describe_tools verification:** ✅ PASS — "Greeks deferred (v1.5)" block gone, replaced with Black-Scholes / `greeks_source='bs_computed'` language. Confirmed from fresh Claude.ai session at ~12:41 MDT.
+
+**Note:** `server_schema_version` still read `v1.0` at verify time. Bumped to `v2.0` in a follow-up commit (`backend/hub_mcp/__init__.py`).
 
 ---
 
 ## Olympus Re-Test
 
-**Status:** PENDING — requires Olympus committee pass after Nick confirms bundle upload landed.
+**Status:** ✅ PASS — 2026-05-29 ~12:40 MDT (post-deploy, post-skill-upload)
 
-Confirm:
-1. DAEDALUS surfaces real numeric Greeks (delta/gamma/theta/vega) — values consistent with smoke output above.
-2. DAEDALUS includes BS-source disclosure in prose (modeled, not market-observed; dividend/American-exercise caveat).
-3. DAEDALUS renders null-IV contracts as "unavailable" — NOT fabricated numbers.
-4. PIVOT's demote-only conviction cap on options trades is fully lifted.
+All three mandatory criteria confirmed:
 
-Record re-test outcome as addendum to this note.
+| Criterion | Result |
+|---|---|
+| Real numeric Greeks populated | ✅ PASS |
+| BS-source disclosure in DAEDALUS prose | ✅ PASS |
+| Null-IV → null Greeks, rendered "unavailable" (no fabrication) | ✅ PASS |
+| PIVOT conviction cap fully lifted | ✅ PASS |
+
+**Evidence:**
+
+**1. Real numeric Greeks.** SPY 2026-06-05 chain, spot $756.66, 271 contracts. ATM cluster:
+
+| Strike | Type | Δ | Γ | Θ/day | ν | IV |
+|---|---|---|---|---|---|---|
+| 750C | call (ITM) | 0.703 | 0.025 | -0.394 | 0.363 | 13.2% |
+| 756C | call (ATM) | 0.541 | 0.032 | -0.394 | 0.416 | 11.9% |
+| 758C | call | 0.476 | 0.033 | -0.377 | 0.417 | 11.5% |
+| 765C | call (OTM) | 0.237 | 0.029 | -0.255 | 0.324 | 10.3% |
+| 770C | call (far OTM) | 0.101 | 0.018 | -0.133 | 0.185 | 9.5% |
+
+Textbook BS signature confirmed: delta declines monotonically with strike; gamma and vega both peak near ATM (Γ max ~0.033 at 758, ν max ~0.418 at 757); theta most negative ATM. Not filler — real computation.
+
+**2. BS-source disclosure in DAEDALUS prose.** Verbatim excerpt:
+
+> "These Greeks are modeled, not market-observed — greeks_source: bs_computed, computed hub-side from UW's implied vol via Black-Scholes (European exercise, zero dividends). On ATM SPY they'll sit within ~5% of what your broker shows; I'd cross-check before sizing anything large."
+
+DAEDALUS also self-flagged a stale-quote artifact: 712C printing Δ 0.99 / IV 19.8% against neighbors at IV ~27% — correctly identified as a junk-quote artifact, not a real read. Demonstrated the bid/ask liquidity flag still load-bearing even with quantitative Greeks.
+
+**3. Null-IV → null Greeks, no fabrication.** Strike 791C had OI 191 but no live quote → IV null → all four Greeks returned null. Far OTM wing (810C, 815C, 840C, 855C+) same. DAEDALUS rendered these as "unavailable" and moved on. **No hallucinated deltas.** TORO-fabrication-lesson check: CLEAN.
+
+**4. PIVOT conviction cap lifted.** Both the IV dimension (v1.5) and Greeks dimension (Tier 2) are now quantitative. PIVOT's demote-only cap on options trades is fully off.
+
+**DATA NOTE surfaced by DAEDALUS (pre-existing, not Tier 2 regression):** Chain returned `status: degraded` — `iv_rank` null (`aggregates_errors: iv_rank field missing`), `spot` via `snapshot_fallback`, `uw_timestamp_source: synthetic`. Per-contract IV and Greeks are solid; chain-level IV rank is the degraded aggregate. Isolated cleanly: aggregates bug, not a Greeks bug.
 
 ---
 
