@@ -114,17 +114,20 @@ async def main() -> int:
         side_c.sort(key=lambda c: abs(c["strike"] - spot))
         return side_c[:n]
 
-    near_calls = _nearest("call", 10)
-    near_puts = _nearest("put", 10)
-    near_atm = near_calls + near_puts
+    # Display 10 each for reference; sanity bands only apply to the 5 closest.
+    near_calls_display = _nearest("call", 10)
+    near_puts_display = _nearest("put", 10)
+    near_calls = near_calls_display[:5]   # 5 nearest calls — gate contracts
+    near_puts = near_puts_display[:5]     # 5 nearest puts — gate contracts
+    near_atm_display = near_calls_display + near_puts_display
 
-    print(f"\nNear-ATM sample: {len(near_atm)} contracts "
-          f"({len(near_calls)} calls + {len(near_puts)} puts)")
+    print(f"\nNear-ATM display: {len(near_atm_display)} contracts (10 calls + 10 puts)")
+    print(f"Sanity bands applied to: 5 nearest calls + 5 nearest puts")
 
     # ── Print table ──────────────────────────────────────────────────────
     print(f"\n{'Strike':>8} {'Type':>5} {'IV':>7} {'Delta':>8} {'Gamma':>8} {'Theta':>8} {'Vega':>8}")
     print("-" * 60)
-    for c in near_atm:
+    for c in near_atm_display:
         iv_v = c.get("implied_volatility")
         d = c.get("delta")
         g = c.get("gamma")
