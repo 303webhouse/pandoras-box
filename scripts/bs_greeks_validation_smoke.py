@@ -93,7 +93,7 @@ async def main() -> int:
     greeks_source = result.get("greeks_source")
 
     print(f"  Contracts returned: {len(contracts)}")
-    print(f"  Spot:               {spot}")
+    print(f"  Spot:               {spot}  [{result.get('spot_source', '?')}]")
     print(f"  greeks_source:      {greeks_source}")
     print(f"  iv_rank:            {result.get('iv_rank')}")
     print(f"  max_pain:           {result.get('max_pain')}")
