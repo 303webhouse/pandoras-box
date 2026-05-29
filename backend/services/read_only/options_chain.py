@@ -36,12 +36,13 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+from integrations.risk_free_rate import RISK_FREE_RATE_3M
 from integrations.uw_api import (
     get_iv_rank,
     get_max_pain,
     get_options_snapshot,
+    get_snapshot,
 )
-from integrations.risk_free_rate import RISK_FREE_RATE_3M
 from integrations.uw_api_cache import cache_get, cache_set
 from utils.options_math import bs_greeks_from_iv, compute_bid_ask_spread_pct, compute_mid
 
@@ -243,6 +244,26 @@ async def _fetch_and_compose(
         uw_ts = datetime.now(timezone.utc).isoformat()
         ts_source = "synthetic"
 
+    # Spot fallback: UW /option-contracts sometimes omits underlying_asset.price
+    # even when the chain itself is healthy (observed 2026-05-29 on SPY). Without
+    # spot, BS Greeks are all-null for every contract — defeating Tier 2. Fall back
+    # to get_snapshot().lastTrade.p (already cached via "quote" TTL in uw_api_cache).
+    spot_source = "chain"
+    if underlying_price is None:
+        try:
+            snap = await get_snapshot(tkr)
+            if snap:
+                snap_price = (snap.get("lastTrade") or {}).get("p")
+                if snap_price is not None:
+                    underlying_price = float(snap_price)
+                    spot_source = "snapshot_fallback"
+                    logger.info(
+                        "options_chain: spot missing from chain for %s — fell back to snapshot (%.2f)",
+                        tkr, underlying_price,
+                    )
+        except Exception as exc:
+            logger.debug("options_chain: snapshot fallback failed for %s: %s", tkr, exc)
+
     # Tier 2 — Black-Scholes Greeks. Computed after sort so underlying_price
     # is settled. time_to_expiry uses calendar days / 365 (v1: simplest correct
     # approach; market-days / 252 is more academic but requires holiday
@@ -276,6 +297,7 @@ async def _fetch_and_compose(
         "expiry": exp,
         "option_type": option_type.lower(),
         "spot": underlying_price,
+        "spot_source": spot_source,
         "uw_timestamp": uw_ts,
         "uw_timestamp_source": ts_source,
         "iv_rank": iv_rank,
