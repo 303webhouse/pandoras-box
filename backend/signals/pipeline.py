@@ -1212,6 +1212,14 @@ async def process_signal_unified(
     except Exception as e:
         logger.warning(f"Committee flagging failed: {e}")
 
+    # B2: fire-and-forget options expression creation (shadow — data collection only)
+    try:
+        import asyncio as _b2_asyncio
+        from jobs.b2_options_resolver import create_b2_expression
+        _b2_asyncio.ensure_future(create_b2_expression(dict(signal_data)))
+    except Exception as _b2_err:
+        logger.debug("B2 expression creation skipped: %s", _b2_err)
+
     elapsed_ms = (datetime.utcnow() - start).total_seconds() * 1000
     logger.info(
         f"✅ Pipeline complete: {signal_data.get('ticker')} "
