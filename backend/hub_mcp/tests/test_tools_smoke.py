@@ -15,9 +15,10 @@ from hub_mcp.envelope import SUMMARY_MAX_CHARS
 
 
 def _is_valid_envelope(r: dict) -> bool:
+    from hub_mcp import SCHEMA_VERSION
     return (
         isinstance(r, dict)
-        and r.get("schema_version") == "v1.0"
+        and r.get("schema_version") == SCHEMA_VERSION
         and r.get("status") in {"ok", "stale", "degraded", "unavailable"}
         and isinstance(r.get("summary", ""), str)
         and len(r["summary"]) <= SUMMARY_MAX_CHARS
@@ -315,8 +316,9 @@ async def test_ping_returns_ok():
     r = await mcp_ping()
     assert _is_valid_envelope(r)
     assert r["status"] == "ok"
+    from hub_mcp import SCHEMA_VERSION
     assert r["data"]["status"] == "ok"
-    assert r["data"]["schema_version"] == "v1.0"
+    assert r["data"]["schema_version"] == SCHEMA_VERSION
 
 
 # ─── hub_get_quote ───────────────────────────────────────────────────────
@@ -429,7 +431,7 @@ async def test_quote_stale_propagates_status():
 # ─── mcp_describe_tools ──────────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_describe_lists_all_ten():
+async def test_describe_lists_all_tools():
     # Importing this triggers registration of every tool.
     import hub_mcp.tools  # noqa: F401
     from hub_mcp.tools.describe import mcp_describe_tools
@@ -437,7 +439,7 @@ async def test_describe_lists_all_ten():
     r = await mcp_describe_tools()
     assert _is_valid_envelope(r)
     assert r["status"] == "ok"
-    assert r["data"]["tool_count"] == 10
+    assert r["data"]["tool_count"] == 12
     names = {t["name"] for t in r["data"]["tools"]}
     assert names == {
         "hub_get_bias_composite",
@@ -448,6 +450,133 @@ async def test_describe_lists_all_ten():
         "hub_get_positions",
         "hub_get_portfolio_balances",
         "hub_get_quote",
+        "hub_get_options_chain",
+        "hub_get_trade_ideas",
         "mcp_ping",
         "mcp_describe_tools",
     }
+
+
+# ─── hub_get_trade_ideas ─────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_trade_ideas_invalid_limit():
+    from hub_mcp.tools.trade_ideas import hub_get_trade_ideas
+
+    r = await hub_get_trade_ideas(limit=99)
+    assert _is_valid_envelope(r)
+    assert r["status"] == "unavailable"
+    assert "limit" in r["error"]
+
+
+@pytest.mark.asyncio
+async def test_trade_ideas_invalid_direction():
+    from hub_mcp.tools.trade_ideas import hub_get_trade_ideas
+
+    r = await hub_get_trade_ideas(direction="SIDEWAYS")
+    assert _is_valid_envelope(r)
+    assert r["status"] == "unavailable"
+    assert "direction" in r["error"]
+
+
+@pytest.mark.asyncio
+async def test_trade_ideas_db_unavailable():
+    from hub_mcp.tools.trade_ideas import hub_get_trade_ideas
+
+    with patch(
+        "hub_mcp.tools.trade_ideas.get_postgres_client",
+        side_effect=Exception("DB down"),
+    ):
+        r = await hub_get_trade_ideas()
+    assert _is_valid_envelope(r)
+    assert r["status"] == "unavailable"
+
+
+@pytest.mark.asyncio
+async def test_trade_ideas_ok_with_groups():
+    from hub_mcp.tools.trade_ideas import hub_get_trade_ideas
+    from signals.feed_service import get_active_trade_ideas
+
+    fake_primary = {
+        "signal_id": "SIG_001",
+        "ticker": "NVDA",
+        "direction": "LONG",
+        "strategy": "Holy_Grail",
+        "signal_type": "BREAKOUT",
+        "signal_category": "TRADE_SETUP",
+        "feed_tier": "watchlist",
+        "gate_type": None,
+        "entry_price": 950.0,
+        "stop_loss": 930.0,
+        "target_1": 980.0,
+        "target_2": 1000.0,
+        "risk_reward": 1.5,
+        "timeframe": "1D",
+        "bias_alignment": "ALIGNED",
+        "score_v2": 78.0,
+        "score": 78.0,
+        "adjusted_score": None,
+        "expires_at": None,
+    }
+    fake_group = {
+        "group_key": "NVDA:LONG",
+        "ticker": "NVDA",
+        "direction": "LONG",
+        "primary_signal": fake_primary,
+        "confluence_tier": "CONFIRMED",
+        "signal_count": 2,
+        "related_signals": [],
+        "strategies": ["Holy_Grail", "Scout"],
+        "distinct_strategy_count": 2,
+        "highest_score": 78.0,
+        "newest_at": "2026-06-02T14:00:00",
+        "display_score": 80.0,
+        "confirmation_bonus": 2,
+        "composite_rank": 51.5,
+        "last_signal_at": "2026-06-02T14:00:00",
+    }
+
+    async def _mock_feed(pool, **kwargs):
+        return [fake_group], True
+
+    with patch(
+        "hub_mcp.tools.trade_ideas.get_active_trade_ideas",
+        side_effect=_mock_feed,
+    ), patch(
+        "hub_mcp.tools.trade_ideas.get_postgres_client",
+        return_value=object(),
+    ):
+        r = await hub_get_trade_ideas(limit=5)
+
+    assert _is_valid_envelope(r)
+    assert r["status"] == "ok"
+    assert r["data"]["returned_count"] == 1
+    idea = r["data"]["ideas"][0]
+    assert idea["ticker"] == "NVDA"
+    assert idea["direction"] == "LONG"
+    assert idea["display_score"] == 80.0
+    assert "triggering_factors" not in idea
+    assert "bias_at_signal" not in idea
+    assert "enrichment_data" not in idea
+
+
+@pytest.mark.asyncio
+async def test_trade_ideas_degraded_when_redis_fails():
+    from hub_mcp.tools.trade_ideas import hub_get_trade_ideas
+    from signals.feed_service import get_active_trade_ideas
+
+    async def _mock_feed_degraded(pool, **kwargs):
+        return [], False  # redis_ok=False
+
+    with patch(
+        "hub_mcp.tools.trade_ideas.get_active_trade_ideas",
+        side_effect=_mock_feed_degraded,
+    ), patch(
+        "hub_mcp.tools.trade_ideas.get_postgres_client",
+        return_value=object(),
+    ):
+        r = await hub_get_trade_ideas()
+
+    assert _is_valid_envelope(r)
+    assert r["status"] == "degraded"
+    assert "Redis degraded" in r["summary"]
