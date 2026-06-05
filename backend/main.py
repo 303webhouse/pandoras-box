@@ -666,6 +666,39 @@ async def lifespan(app: FastAPI):
 
     outcome_resolver_task = asyncio.create_task(outcome_resolver_loop())
 
+    # B2 options-P&L resolver: capture entry/exit marks for signal_options_expressions
+    async def b2_options_resolver_loop():
+        """Capture entry/exit marks for B2 expression rows (15 min, market hours)."""
+        import pytz
+        from datetime import datetime as dt_cls
+        from jobs.b2_options_resolver import run_b2_resolver_tick, B2_SHADOW_MODE
+
+        if B2_SHADOW_MODE:
+            logger.info("B2 options resolver: shadow mode ON (data collection, no live decisions)")
+
+        await asyncio.sleep(150)  # offset 30s from outcome_resolver's 120s startup delay
+
+        while True:
+            try:
+                et = dt_cls.now(pytz.timezone("America/New_York"))
+                in_market = (
+                    et.weekday() < 5
+                    and (
+                        (et.hour == 9 and et.minute >= 30)
+                        or (10 <= et.hour < 16)
+                    )
+                )
+                if in_market:
+                    pool = await get_postgres_client()
+                    await run_b2_resolver_tick(pool)
+                else:
+                    logger.debug("B2 resolver: outside market hours, skipping")
+            except Exception as e:
+                logger.warning("B2 options resolver loop error: %s", e)
+            await asyncio.sleep(900)  # 15 minutes
+
+    b2_resolver_task = asyncio.create_task(b2_options_resolver_loop())
+
     # Initial Chronos data load
     try:
         from jobs.chronos_ingest import run_chronos_earnings_ingest
