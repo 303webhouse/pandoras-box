@@ -15,7 +15,10 @@ logger = logging.getLogger("uw_api")
 # TTLs by endpoint type (seconds)
 CACHE_TTLS = {
     "flow": 300,          # 5 min (Phase A.4a fix 2026-05-27) — was 30s, but flow poller runs every 300s so every poller tick was a guaranteed miss → ~6,900 UW calls/day forced. Cache TTL now aligns with poller cadence.
-    "gex": 300,           # 5 min
+    "gex": 3600,          # 1 hr — UW /greek-exposure is a DAILY snapshot (updates once/day,
+                          # not intraday). 300s was burning 12 UW calls/hr for stale data.
+                          # NOTE: B3/0DTE regime routing (C2) needs an intraday GEX source —
+                          # this endpoint is too coarse for same-day scalp gating.
     "greeks": 300,        # 5 min
     "darkpool": 300,      # 5 min
     "market_tide": 60,    # 1 min
