@@ -33,4 +33,13 @@ async def get_bias_snapshot() -> Dict[str, Any]:
     except Exception as err:
         snapshot["scheduler_error"] = str(err)
 
+    # B1: include gex_regime so signals carry regime-at-fire for Layer-2 routing.
+    # Additive key — no schema change, no backfill needed.
+    try:
+        from services.read_only.bias import get_composite_bias
+        _cb = await get_composite_bias()
+        snapshot["gex_regime"] = (_cb or {}).get("gex_regime")
+    except Exception:
+        snapshot["gex_regime"] = None
+
     return snapshot
