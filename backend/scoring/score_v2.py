@@ -33,6 +33,12 @@ def compute_score_v2(signal_data: Dict[str, Any]) -> Tuple[Optional[float], Dict
         return None, {}
 
     enrichment = signal_data.get("enrichment_data") or {}
+    metadata = signal_data.get("metadata") or {}
+    if isinstance(metadata, str):
+        try:
+            metadata = json.loads(metadata)
+        except Exception:
+            metadata = {}
     factors: Dict[str, Any] = {"flash_score": flash_score}
 
     post_enrichment_bonus = 0.0
@@ -236,10 +242,42 @@ def compute_score_v2(signal_data: Dict[str, Any]) -> Tuple[Optional[float], Dict
     }
     post_enrichment_bonus += options_bonus
 
-    # --- Confluence bonus (placeholder — degraded until Phase 3 X1) ---
-    confluence_score = signal_data.get("confluence_score")
+    # --- Confluence bonus — B3 darkpool shadow ---
+    # bonus=0 in shadow mode: data is logged for validation, not applied to score.
+    # Promote bonus to active in sub-brief 3 after validation gates clear.
     confluence_bonus = 0
-    factors["confluence"] = {"value": confluence_score, "bonus": confluence_bonus, "note": "degraded until Phase 3 X1 scanner"}
+    dp_status = metadata.get("darkpool_status") if isinstance(metadata, dict) else None
+    if dp_status == "ok":
+        dp_block = {
+            "source":             "uw_darkpool",
+            "status":             "ok",
+            "direction":          metadata.get("darkpool_direction"),
+            "total_premium_4h":   metadata.get("darkpool_total_premium_4h"),
+            "buy_premium":        metadata.get("darkpool_buy_premium"),
+            "sell_premium":       metadata.get("darkpool_sell_premium"),
+            "mid_premium":        metadata.get("darkpool_mid_premium"),
+            "net_premium":        metadata.get("darkpool_net_premium"),
+            "large_print_count":  metadata.get("darkpool_large_print_count"),
+            "total_print_count":  metadata.get("darkpool_total_print_count"),
+            "large_threshold_usd": metadata.get("darkpool_large_threshold_usd"),
+            "spread_fraction_k":   metadata.get("darkpool_spread_fraction_k"),
+            "spread_avg":          metadata.get("darkpool_spread_avg"),
+            "spread_median":       metadata.get("darkpool_spread_median"),
+            "no_nbbo_count":       metadata.get("darkpool_no_nbbo_count"),
+            "size_distribution":  metadata.get("darkpool_size_distribution"),
+            "oldest_ts":          metadata.get("darkpool_oldest_ts"),
+            "newest_ts":          metadata.get("darkpool_newest_ts"),
+            "bonus":              confluence_bonus,  # 0 — shadow
+            "shadow":             True,
+        }
+    else:
+        dp_block = {
+            "source":  "uw_darkpool",
+            "status":  dp_status or "no_data",   # explicit — never a spurious 0
+            "bonus":   confluence_bonus,
+            "shadow":  True,
+        }
+    factors["confluence"] = {"darkpool": dp_block}
 
     # --- Compute final v2 score ---
     score_v2 = flash_score + post_enrichment_bonus

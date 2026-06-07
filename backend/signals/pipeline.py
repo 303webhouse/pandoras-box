@@ -295,6 +295,15 @@ async def apply_scoring(signal_data: Dict[str, Any]) -> Dict[str, Any]:
         except Exception as flow_err:
             logger.debug("Flow enrichment skipped: %s", flow_err)
 
+        # B3: Darkpool confluence enrichment — shadow mode (no score effect)
+        try:
+            from signals.darkpool_enrichment import enrich_darkpool_data
+            signal_data = await enrich_darkpool_data(signal_data)
+        except Exception as dp_err:
+            # WARNING not debug — a persistent failure here means the whole
+            # shadow validation window produces no darkpool data silently.
+            logger.warning("Darkpool enrichment failed (shadow): %s", dp_err)
+
         # Fetch SPY ADX regime data for chop penalty
         regime_data = {}
         try:
