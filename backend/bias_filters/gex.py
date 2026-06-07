@@ -248,9 +248,14 @@ async def compute_score_uw() -> Optional[FactorReading]:
     else:
         label = "strong amplification (dealers short gamma)"
 
+    # B1 regime label — sign-based, no dead-band (by design).
+    # Fail-safe default NEUTRAL is already handled upstream: this point is only
+    # reached when net_gex is a valid parsed float, so the ternary is exhaustive.
+    gex_regime = "MOMENTUM" if net_gex < 0 else ("FADE" if net_gex > 0 else "NEUTRAL")
+
     logger.info(
-        "gex_uw: obs=%s net_gex=$%.3fM normalized=%.3f (%s) score=%+.2f",
-        latest_date, net_gex / 1e6, normalized, label, score,
+        "gex_uw: obs=%s net_gex=$%.3fM normalized=%.3f (%s) score=%+.2f regime=%s",
+        latest_date, net_gex / 1e6, normalized, label, score, gex_regime,
     )
 
     return FactorReading(
@@ -265,6 +270,7 @@ async def compute_score_uw() -> Optional[FactorReading]:
             "normalized":  round(normalized, 4),
             "spy_price":   round(float(spy_price), 2) if spy_price else None,
             "latest_date": latest_date,
+            "gex_regime":  gex_regime,  # B1 source of truth — read from here by composite
         },
     )
 

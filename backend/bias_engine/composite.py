@@ -212,6 +212,10 @@ class CompositeResult(BaseModel):
     unverifiable_factors: List[str] = Field(default_factory=list)
     circuit_breaker: Optional[Dict[str, Any]] = None
     timeframe_scores: Optional[Dict[str, Any]] = None
+    # B1 GEX regime gate — derived from gex factor raw_data["gex_regime"].
+    # "FADE" (net_gex > 0), "MOMENTUM" (net_gex < 0), "NEUTRAL" (zero or GEX absent).
+    # Read-only derived field; never affects composite_score or any factor weight.
+    gex_regime: Optional[str] = None
 
 
 # Map circuit breaker's scheduler-style level names to composite's 5-level system.
@@ -938,6 +942,16 @@ async def compute_composite() -> CompositeResult:
             cb_meta = {}
         cb_meta["rvol"] = rvol_meta
 
+    # B1: derive gex_regime from the GEX factor's raw_data (set by gex.py).
+    # Fail-safe: NEUTRAL when GEX is absent, stale, or raw_data is malformed.
+    # This is purely read-through — no score or weight is touched here.
+    _gex_regime = "NEUTRAL"
+    _gex_reading = factors.get("gex")
+    if _gex_reading is not None and isinstance(getattr(_gex_reading, "raw_data", None), dict):
+        _regime_candidate = _gex_reading.raw_data.get("gex_regime")
+        if _regime_candidate in ("FADE", "MOMENTUM", "NEUTRAL"):
+            _gex_regime = _regime_candidate
+
     result = CompositeResult(
         composite_score=adjusted_score,
         bias_level=bias_level,
@@ -954,6 +968,7 @@ async def compute_composite() -> CompositeResult:
         unverifiable_factors=sorted(unverifiable_factors),
         circuit_breaker=cb_meta,
         timeframe_scores=timeframe_scores,
+        gex_regime=_gex_regime,
     )
 
     previous = await get_cached_composite()

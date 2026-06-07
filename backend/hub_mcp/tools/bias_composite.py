@@ -137,6 +137,10 @@ async def hub_get_bias_composite(
         "timeframes": timeframes,
         "manual_override_active": bool(override and override.get("level")),
         "override_level": (override or {}).get("level"),
+        # B1 GEX regime — daily series, identical across timeframes; surfaced once.
+        # "FADE" (+GEX, dealers long gamma), "MOMENTUM" (-GEX, dealers short gamma),
+        # "NEUTRAL" (absent/stale/degenerate). Layer 3 (hub_get_regime) deferred.
+        "gex_regime": composite.get("gex_regime"),
     }
 
     confidence = (composite.get("confidence") or "").upper()
