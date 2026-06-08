@@ -82,8 +82,9 @@ async def submit_committee_results(body: CommitteeResult, _=Depends(require_api_
 
     async with pool.acquire() as conn:
         # Verify signal exists and is in COMMITTEE_REVIEW
+        # (ticker needed for the A4 committee_passes row — payload carries no ticker)
         current = await conn.fetchrow(
-            "SELECT status FROM signals WHERE signal_id = $1", body.signal_id
+            "SELECT status, ticker FROM signals WHERE signal_id = $1", body.signal_id
         )
 
         if not current:
@@ -142,6 +143,74 @@ async def submit_committee_results(body: CommitteeResult, _=Depends(require_api_
             json.dumps(committee_data),
             body.committee_run_id,
         )
+
+        # ── A4: durable structured committee-pass row (source of truth) ──
+        # Best-effort: a committee_passes failure must NOT break the existing
+        # committee_data contract the VPS bridge depends on. Logged at WARNING.
+        try:
+            risk = body.risk_params or {}
+
+            # Per-agent reads — current VPS payload carries TORO + URSA only.
+            # PYTHIA / PYTHAGORAS / THALES / DAEDALUS land here once the payload
+            # is extended (a VPS-bridge change, not a committee-skill change).
+            agent_reads = {}
+            if body.toro_analysis is not None:
+                agent_reads["toro"] = body.toro_analysis
+            if body.ursa_analysis is not None:
+                agent_reads["ursa"] = body.ursa_analysis
+
+            def _num(v):
+                try:
+                    return float(v) if v is not None else None
+                except (TypeError, ValueError):
+                    return None
+
+            # Verdict (ENTER/PASS/WATCH/HEDGE) + key_risk come from the already-
+            # parsed PIVOT decision block; NULL if it didn't parse (logged above).
+            recommendation = parsed_decision.get("recommendation") if parsed_decision else None
+            key_risk = parsed_decision.get("key_risk") if parsed_decision else None
+
+            # spot at pass time is NOT in the payload — left NULL rather than
+            # fabricated from the signal's entry_price (a different quantity).
+            # ON CONFLICT on committee_run_id makes a VPS bridge retry idempotent.
+            await conn.execute(
+                """
+                INSERT INTO committee_passes
+                    (ticker, pass_ts, spot, agent_reads, pivot_synthesis,
+                     conviction, recommendation, key_risk, committee_run_id,
+                     entry, stop, target, invalidation, signal_id)
+                VALUES ($1, NOW(), NULL, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                ON CONFLICT (committee_run_id) DO NOTHING
+                """,
+                current["ticker"],
+                json.dumps(agent_reads) if agent_reads else None,
+                body.pivot_synthesis,
+                body.conviction,
+                recommendation,
+                key_risk,
+                body.committee_run_id,
+                _num(risk.get("entry")),
+                _num(risk.get("stop")),
+                _num(risk.get("target")),
+                _num(risk.get("invalidation")),
+                body.signal_id,
+            )
+
+            # Secondary label — IS-NULL guard protects ACTUAL_TRADE / BAR_WALK
+            # already set. (Note: BAR_WALK resolver has no guard, so it will later
+            # overwrite COMMITTEE_REVIEW on resolution — see Gate 3 flag.)
+            await conn.execute(
+                """
+                UPDATE signals SET outcome_source = 'COMMITTEE_REVIEW'
+                WHERE signal_id = $1 AND outcome_source IS NULL
+                """,
+                body.signal_id,
+            )
+        except Exception as cp_err:
+            logger.warning(
+                "A4 committee_passes write failed for %s (committee_data intact): %s",
+                body.signal_id, cp_err,
+            )
 
     logger.info(
         f"🧠 Committee result stored: {body.signal_id} → "
