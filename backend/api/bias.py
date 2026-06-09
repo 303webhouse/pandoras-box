@@ -100,6 +100,60 @@ def _savita_reading_to_score(reading: float) -> float:
         return 0.8
 
 
+async def persist_savita_reading(reading: float, date: Optional[str] = None):
+    """Persist a Savita reading to the composite bias engine and recompute.
+
+    Shared by BOTH savita update routes (PUT /bias/savita and
+    POST /bias-auto/savita/update) so their record/recompute logic cannot
+    drift — the divergence was the original root cause of savita never
+    reaching the composite.
+
+    Validates the raw-% bound (40-70) up front so an out-of-range value can
+    never reach record_factor_reading()/compute_composite() and poison the
+    bias. Raises ValueError on an out-of-range reading.
+
+    Returns the recomputed CompositeResult, or None if the composite engine
+    is unavailable.
+    """
+    if reading < 40 or reading > 70:
+        raise ValueError("Savita reading must be between 40 and 70 (percentage)")
+
+    if not (COMPOSITE_AVAILABLE and "savita" in FACTOR_CONFIG):
+        return None
+
+    score = _savita_reading_to_score(reading)
+    signal = score_to_bias(score)[0]
+    update_date = date or datetime.utcnow().strftime("%Y-%m-%d")
+    try:
+        collected_at = datetime.fromisoformat(update_date)
+    except (ValueError, TypeError):
+        collected_at = datetime.utcnow()
+
+    factor_payload = {
+        "factor_id": "savita",
+        "score": score,
+        "signal": signal,
+        "detail": f"BofA Sell Side Indicator: {reading:.1f}%",
+        "source": "manual",
+        "raw_data": {"value": float(reading), "date": update_date},
+        "timestamp": collected_at,
+    }
+    await record_factor_reading(factor_payload)
+    await _log_factor_history(
+        factor_id="savita",
+        score=score,
+        bias=signal,
+        data={"value": float(reading), "date": update_date},
+        collected_at=collected_at,
+    )
+    composite = await compute_composite()
+    logger.info(
+        "Savita persisted to composite engine: score=%.2f signal=%s composite=%s",
+        score, signal, composite.bias_level,
+    )
+    return composite
+
+
 # ====================
 # SAVITA INDICATOR
 # ====================
@@ -149,37 +203,8 @@ async def update_savita(update: SavitaUpdate):
         logger.info(f"Savita updated to {update.reading}%")
 
         # 2. Persist to composite bias engine so the frontend sees it
-        if COMPOSITE_AVAILABLE and "savita" in FACTOR_CONFIG:
-            score = _savita_reading_to_score(update.reading)
-            signal = score_to_bias(score)[0]
-            update_date = update.date or datetime.utcnow().strftime("%Y-%m-%d")
-            try:
-                collected_at = datetime.fromisoformat(update_date)
-            except (ValueError, TypeError):
-                collected_at = datetime.utcnow()
-
-            factor_payload = {
-                "factor_id": "savita",
-                "score": score,
-                "signal": signal,
-                "detail": f"BofA Sell Side Indicator: {update.reading:.1f}%",
-                "source": "manual",
-                "raw_data": {"value": float(update.reading), "date": update_date},
-                "timestamp": collected_at,
-            }
-            await record_factor_reading(factor_payload)
-            await _log_factor_history(
-                factor_id="savita",
-                score=score,
-                bias=signal,
-                data={"value": float(update.reading), "date": update_date},
-                collected_at=collected_at,
-            )
-            composite = await compute_composite()
-            logger.info(
-                "Savita persisted to composite engine: score=%.2f signal=%s composite=%s",
-                score, signal, composite.bias_level,
-            )
+        #    (shared helper — see persist_savita_reading)
+        await persist_savita_reading(update.reading, update.date)
 
         return {
             "status": "success",
@@ -937,7 +962,15 @@ async def update_savita(
     try:
         from bias_filters.savita_indicator import update_savita_reading
 
+        # 1. Update in-memory config (kept additive — backward compat for
+        #    /bias-auto/savita GET readback and any status display).
         result = update_savita_reading(reading, date)
+
+        # 2. Persist to the composite bias engine (Redis + Postgres) and
+        #    recompute. This is the route the UI actually calls; without this
+        #    the entry never reached the composite. Shared helper keeps it
+        #    identical to PUT /bias/savita.
+        await persist_savita_reading(reading, date)
 
         return {
             "status": "success",
