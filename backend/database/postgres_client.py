@@ -1013,7 +1013,15 @@ async def init_database():
                 trade_group_id TEXT,
                 signal_id TEXT,
                 imported_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                UNIQUE(activity_date, ticker, description, trans_code, quantity, price)
+                occurrence SMALLINT NOT NULL DEFAULT 0,
+                -- occurrence = 0-indexed copy number for identical same-day same-price
+                -- fills. Robinhood CSVs carry no fill/order ID, so two genuine identical
+                -- fills are indistinguishable by content; the importer stamps occurrence
+                -- so both persist while re-imports stay idempotent. See import_rh_csv_cli.
+                -- NULLS NOT DISTINCT so OEXP rows (price = NULL) collide correctly and
+                -- don't re-insert on every import (NULL would otherwise read as distinct).
+                UNIQUE NULLS NOT DISTINCT
+                    (activity_date, ticker, description, trans_code, quantity, price, occurrence)
             )
         """)
 
