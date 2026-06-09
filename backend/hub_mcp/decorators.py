@@ -26,6 +26,7 @@ REGISTERED_TOOL_NAMES = frozenset(
         "hub_get_quote",
         "hub_get_options_chain",
         "hub_get_trade_ideas",
+        "hub_get_market_profile",
         "mcp_ping",
         "mcp_describe_tools",
     }

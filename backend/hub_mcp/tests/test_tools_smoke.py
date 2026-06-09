@@ -439,7 +439,7 @@ async def test_describe_lists_all_tools():
     r = await mcp_describe_tools()
     assert _is_valid_envelope(r)
     assert r["status"] == "ok"
-    assert r["data"]["tool_count"] == 12
+    assert r["data"]["tool_count"] == 13
     names = {t["name"] for t in r["data"]["tools"]}
     assert names == {
         "hub_get_bias_composite",
@@ -452,9 +452,99 @@ async def test_describe_lists_all_tools():
         "hub_get_quote",
         "hub_get_options_chain",
         "hub_get_trade_ideas",
+        "hub_get_market_profile",
         "mcp_ping",
         "mcp_describe_tools",
     }
+
+
+# ─── hub_get_market_profile ──────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_market_profile_unavailable_when_no_row():
+    from hub_mcp.tools.market_profile import hub_get_market_profile
+
+    with patch(
+        "hub_mcp.tools.market_profile.get_market_profile",
+        new=AsyncMock(return_value=None),
+    ):
+        r = await hub_get_market_profile("ZZZZ")
+    assert _is_valid_envelope(r)
+    assert r["status"] == "unavailable"
+    assert r["data"] is None
+
+
+@pytest.mark.asyncio
+async def test_market_profile_missing_ticker():
+    from hub_mcp.tools.market_profile import hub_get_market_profile
+
+    r = await hub_get_market_profile("")
+    assert _is_valid_envelope(r)
+    assert r["status"] == "unavailable"
+    assert "ticker" in (r["error"] or "")
+
+
+@pytest.mark.asyncio
+async def test_market_profile_ok_and_no_raw_payload_leak():
+    from hub_mcp.tools.market_profile import hub_get_market_profile
+
+    payload = {
+        "status": "ok",
+        "data": {
+            "ticker": "SPY", "poc": 597.2, "vah": 599.1, "val": 595.4,
+            "prev_poc": 596.0, "prev_vah": 598.0, "prev_val": 594.1,
+            "ib_high": 598.5, "ib_low": 595.9, "poor_high": False, "poor_low": True,
+            "va_migration": "higher", "volume_quality": "high",
+            "last_event": "vah_rejection", "interpretation": "…",
+            "price_at_event": 598.9, "session_date": "2026-06-09",
+            "as_of": "2026-06-09T19:30:56Z", "event_age_seconds": 120,
+            "source": "pythia_webhook_v2.3",
+            "single_prints": None, "day_type": None,
+            "note": "single_prints and day_type are not computed by Pine v2.3",
+        },
+        "staleness_seconds": 120,
+    }
+    with patch(
+        "hub_mcp.tools.market_profile.get_market_profile",
+        new=AsyncMock(return_value=payload),
+    ):
+        r = await hub_get_market_profile("SPY")
+    assert _is_valid_envelope(r)
+    assert r["status"] == "ok"
+    assert r["data"]["poc"] == 597.2
+    assert r["data"]["single_prints"] is None
+    assert r["data"]["day_type"] is None
+    # AEGIS amendment 2: never surface raw_payload verbatim
+    assert "raw_payload" not in r["data"]
+
+
+@pytest.mark.asyncio
+async def test_market_profile_stale_prior_session():
+    from hub_mcp.tools.market_profile import hub_get_market_profile
+
+    payload = {
+        "status": "stale",
+        "data": {
+            "ticker": "SPY", "poc": 719.5, "vah": 719.78, "val": 717.35,
+            "prev_poc": 719.5, "prev_vah": 719.78, "prev_val": 717.35,
+            "ib_high": 721.25, "ib_low": 721.25, "poor_high": False, "poor_low": False,
+            "va_migration": "overlapping", "volume_quality": "thin",
+            "last_event": "vah_cross_above", "interpretation": "…",
+            "price_at_event": 721.25, "session_date": "2026-05-01",
+            "as_of": "2026-05-01T13:30:01Z", "event_age_seconds": 3000000,
+            "source": "pythia_webhook_v2.3",
+            "single_prints": None, "day_type": None, "note": "…",
+        },
+        "staleness_seconds": 3000000,
+    }
+    with patch(
+        "hub_mcp.tools.market_profile.get_market_profile",
+        new=AsyncMock(return_value=payload),
+    ):
+        r = await hub_get_market_profile("SPY")
+    assert _is_valid_envelope(r)
+    assert r["status"] == "stale"
+    assert "PRIOR session" in r["summary"]
 
 
 # ─── hub_get_trade_ideas ─────────────────────────────────────────────────
