@@ -64,3 +64,11 @@ dist/
 
 # Perf architecture brief — Chrome DevTools traces (regenerable, often 100MB+)
 docs/strategy-reviews/perf-trace-*.json
+
+# Session scratch / scratch dumps (transient, never commit)
+tmp_*.json
+*_chunks.txt
+all_chunks_flat.txt
+/one
+data/_*.json
+scripts/retrospective_output.json
