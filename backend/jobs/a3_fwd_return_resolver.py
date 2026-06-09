@@ -145,7 +145,6 @@ async def resolve_fwd_returns(
                 FROM signals
                 WHERE signal_id = ANY($1::text[])
                   AND entry_price IS NOT NULL
-                  AND outcome_source IS NULL
                 """,
                 signal_ids,
             )
@@ -155,8 +154,7 @@ async def resolve_fwd_returns(
                 SELECT signal_id, ticker, direction,
                        timestamp AS signal_ts, entry_price
                 FROM signals
-                WHERE outcome_source IS NULL
-                  AND entry_price IS NOT NULL
+                WHERE entry_price IS NOT NULL
                   AND timestamp < NOW() - INTERVAL '1 day'
                   AND UPPER(direction) = ANY($1::text[])
                 ORDER BY timestamp DESC
