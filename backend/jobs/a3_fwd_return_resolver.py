@@ -208,6 +208,15 @@ async def resolve_fwd_returns(
             direction = (sig["direction"] or "").upper()
             sig_date  = sig["signal_ts"].date() if hasattr(sig["signal_ts"], "date") else sig["signal_ts"]
 
+            # Guard: entry must be > 0. Some legacy signals carry entry_price = 0
+            # (eligibility checks IS NOT NULL, not > 0), which would div-by-zero in
+            # the return calc. A zero/negative reference price can't yield a
+            # meaningful forward return — skip the signal.
+            if entry <= 0:
+                logger.debug("a3_fwd: %s entry_price=%s <= 0 — skipping", sig_id, entry)
+                skipped += 1
+                continue
+
             computed_any = False
             for horizon in HORIZONS:
                 target_date = _nth_trading_day(sig_date, horizon)
