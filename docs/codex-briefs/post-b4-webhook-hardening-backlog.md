@@ -36,3 +36,20 @@ required-field validation, secret-strip before persist.
 
 *Logged from B4 Chunk B per PM rider 3. Promote to a full investigation-first
 brief when scheduled.*
+
+---
+
+## Adjacent tickets (logged 2026-06-10, B4 close-out)
+
+- **#2 — UW `/stock-state` retry-once before `unavailable`.** The quote/snapshot
+  path returns `unavailable` on a single `/stock-state` blip. Add one retry
+  (short backoff) before degrading — the endpoint is flaky under load (e.g. CPI
+  days). Scope: `backend/integrations/uw_api.py`.
+- **#3 — Chain provenance flag review.** Audit how `hub_get_options_chain` /
+  marking surfaces `spot_source` / `greeks_source` / `uw_timestamp_source` so a
+  `snapshot_fallback` or synthetic-timestamp read is never mistaken for a clean
+  live mark.
+- **#4 — Add a `version` field to PYTHIA Pine comFields.** `hub_get_market_profile`
+  tags `source: "pythia_webhook_v2.4"` as a static string because the payload
+  carries no version (verified 2026-06-10). Emitting `"version"` from the Pine
+  would let the tool report true provenance instead of a hardcode.
