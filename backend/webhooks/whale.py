@@ -41,12 +41,23 @@ import logging
 import os
 import httpx
 
+from utils.webhook_auth import validate_webhook_secret
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_SIGNALS", "")
 WHALE_CONTEXT_TTL = 1800  # 30 minutes
+
+# ── Chunk B cutover toggle (RIDER 2: OBSERVE-only this sprint) ──
+# whale_hunter_v2.pine is dormant (not wired to a live TV alert), so the gate
+# stays in OBSERVE mode (validate-but-allow, logs verdict) through sprint end —
+# flipping a dormant endpoint to 503 now would be a future-surprise. The flip to
+# fail-closed happens LATER, in the same motion as wiring the live whale alert,
+# by setting WEBHOOK_WHALE_ENFORCE=1 (no redeploy). Reuses TRADINGVIEW_WEBHOOK_SECRET.
+def _whale_observe() -> bool:
+    return (os.getenv("WEBHOOK_WHALE_ENFORCE") or "").strip().lower() not in ("1", "true", "yes")
 
 
 class WhaleSignal(BaseModel):
@@ -249,14 +260,17 @@ async def _process_whale_background(data: WhaleSignal) -> None:
 
 @router.post("/whale")
 async def whale_webhook(data: WhaleSignal):
-    """Receive a whale signal, forward to Discord, and cache for committee confluence."""
-    # Validate webhook secret
-    WEBHOOK_SECRET = os.getenv("TRADINGVIEW_WEBHOOK_SECRET") or ""
-    if WEBHOOK_SECRET:
-        payload_secret = data.secret or ""
-        if payload_secret != WEBHOOK_SECRET:
-            logger.warning("Rejected whale webhook — invalid secret")
-            raise HTTPException(status_code=401, detail="Invalid webhook secret")
+    """Receive a whale signal, forward to Discord, and cache for committee confluence.
+
+    Shared AEGIS gate (Chunk B). Runs OBSERVE-only this sprint per Rider 2 — the
+    whale alert is dormant, so no fail-closed flip yet. Reuses TRADINGVIEW_WEBHOOK_SECRET.
+    """
+    validate_webhook_secret(
+        data.secret,
+        secret=os.getenv("TRADINGVIEW_WEBHOOK_SECRET") or "",
+        observe=_whale_observe(),
+        label="whale",
+    )
 
     # Dedup: reject duplicate whale signals within 120s window
     dedup_raw = f"{data.ticker}:{data.lean}:{data.poc}:{data.vol}"
