@@ -233,7 +233,13 @@ def compute_score_v2(signal_data: Dict[str, Any]) -> Tuple[Optional[float], Dict
                 iv_bonus = -2
             else:
                 iv_bonus = -5
-        options_factors["iv_rank"] = {"value": iv_rank, "bonus": iv_bonus}
+        # Chunk 1a: label the reason so None is distinguishable from real mid-IV
+        # (no unlabeled zeros). Live bonus magnitude unchanged.
+        options_factors["iv_rank"] = {
+            "value": iv_rank,
+            "bonus": iv_bonus,
+            "reason": "ok" if iv_rank is not None else "no_data",
+        }
         options_bonus += iv_bonus
 
     factors["options_viability"] = {
@@ -278,6 +284,25 @@ def compute_score_v2(signal_data: Dict[str, Any]) -> Tuple[Optional[float], Dict
             "shadow":  True,
         }
     factors["confluence"] = {"darkpool": dp_block}
+
+    # --- sub-brief 3 Chunk 1b: iv_rank proxy-vs-true SHADOW (namespaced) ---
+    # Strictly under sb3_shadow so it can NEVER be read as a live factor. The
+    # bonuses here are NOT added to post_enrichment_bonus — compute + log only,
+    # for the one-week proxy-vs-true divergence review before any promote.
+    from scoring.sb3_iv_units import iv_bonus_from_rank
+    _iv_proxy = enrichment.get("iv_rank")
+    _iv_uw = enrichment.get("iv_rank_uw_shadow")
+    factors["sb3_shadow"] = {
+        "iv_rank": {
+            "old": _iv_proxy,                          # proxy (current live source)
+            "new": _iv_uw,                             # UW true rank (iv_rank_1y x100)
+            "old_bonus": iv_bonus_from_rank(_iv_proxy),
+            "new_bonus": iv_bonus_from_rank(_iv_uw),
+            "reason_old": "ok" if _iv_proxy is not None else "no_data",
+            "reason_new": "ok" if _iv_uw is not None else "no_data",
+            "shadow": True,
+        },
+    }
 
     # --- Compute final v2 score ---
     score_v2 = flash_score + post_enrichment_bonus

@@ -36,6 +36,8 @@ import logging
 import os
 import httpx
 
+from utils.webhook_auth import validate_webhook_secret
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
@@ -43,6 +45,15 @@ router = APIRouter()
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_SIGNALS", "")
 FOOTPRINT_CONTEXT_TTL = 1800  # 30 minutes
 DEDUP_WINDOW = 300  # 5 minutes
+
+# ── Chunk A cutover toggle ──
+# The Trojan-Horse Pine already ships `secret`, so the gate runs in OBSERVE mode
+# (validate-but-allow, logs the verdict) until N consecutive valid secret-bearing
+# footprint POSTs are confirmed in logs across a live session. Flip to fail-closed
+# WITHOUT a redeploy by setting WEBHOOK_FOOTPRINT_ENFORCE=1 in Railway during the
+# cutover (env var TRADINGVIEW_WEBHOOK_SECRET must be set at the same time).
+def _footprint_observe() -> bool:
+    return (os.getenv("WEBHOOK_FOOTPRINT_ENFORCE") or "").strip().lower() not in ("1", "true", "yes")
 
 
 class FootprintSignal(BaseModel):
@@ -215,13 +226,19 @@ async def _process_footprint_background(data: FootprintSignal) -> None:
 
 @router.post("/footprint")
 async def footprint_webhook(data: FootprintSignal):
-    """Receive a footprint signal, forward to Discord, cache in Redis, enter pipeline."""
-    # Validate webhook secret
-    WEBHOOK_SECRET = os.getenv("TRADINGVIEW_WEBHOOK_SECRET") or ""
-    if WEBHOOK_SECRET:
-        if (data.secret or "") != WEBHOOK_SECRET:
-            logger.warning("Rejected footprint webhook \u2014 invalid secret")
-            raise HTTPException(status_code=401, detail="Invalid webhook secret")
+    """Receive a footprint signal, forward to Discord, cache in Redis, enter pipeline.
+
+    Chokepoint for BOTH the direct POST /webhook/footprint and the TV-router
+    forward (signal=="FOOTPRINT" early-return in tradingview.py) \u2014 enforcing here
+    covers both paths. Shared AEGIS helper: fail-closed + constant-time once flipped;
+    OBSERVE mode until the Chunk A cutover completes.
+    """
+    validate_webhook_secret(
+        data.secret,
+        secret=os.getenv("TRADINGVIEW_WEBHOOK_SECRET") or "",
+        observe=_footprint_observe(),
+        label="footprint",
+    )
 
     # Dedup: reject duplicate footprint signals within 300s window
     dedup_raw = f"{data.ticker}:{data.sub_type}:{data.direction}:{data.price}"
