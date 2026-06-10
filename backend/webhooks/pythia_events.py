@@ -5,11 +5,13 @@ Receives alerts when price crosses value area boundaries, stores in
 pythia_events table for scoring cross-reference (P4B) and committee context.
 """
 
+import hmac
 import json
 import logging
+import os
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 
 from database.postgres_client import get_postgres_client
 from database.redis_client import get_redis_client
@@ -17,17 +19,70 @@ from database.redis_client import get_redis_client
 logger = logging.getLogger("pythia_events")
 router = APIRouter(tags=["pythia"])
 
+# B4 Chunk B — AEGIS hardening.
+# This handler is the chokepoint for the live PYTHIA feed: the /webhook/tradingview
+# router forwards source=="pythia" payloads here (early-return BEFORE its own secret
+# check), AND it is directly POST-able at /api/webhook/pythia. Enforcing here covers
+# both paths.
+PYTHIA_WEBHOOK_SECRET = os.getenv("PYTHIA_WEBHOOK_SECRET") or ""
+MAX_PAYLOAD_BYTES = 8192  # reject oversized bodies
+
+
+def _pos_num(v):
+    """True only if v parses to a strictly positive float (rejects nz()-zeros)."""
+    try:
+        return float(v) > 0
+    except (TypeError, ValueError):
+        return False
+
+
+def _num_or_none(v):
+    """Float, but treat 0/0.0 and non-numeric as None.
+
+    Pine v2.4 serializes missing levels as nz(x,0) -> literal 0. A confident
+    zero is NOT data — store NULL, not a fake level.
+    """
+    try:
+        f = float(v)
+        return f if f != 0 else None
+    except (TypeError, ValueError):
+        return None
+
 
 @router.post("/webhook/pythia")
 async def pythia_webhook(request: Request = None, payload: dict = None):
     """
     Receive Pythia market profile alerts from TradingView.
-    Expected payload fields: ticker, alert_type (pythia_val_cross_below,
-    pythia_vah_cross_above, 80pct_rule), price, vah, val, poc, direction.
-    Can be called directly with a payload dict (from TV webhook router).
+    Expected payload fields: ticker, alert_type/event, price, vah, val, poc,
+    direction, secret, bar_time, and rich v2.4 fields.
+    Called directly (POST /api/webhook/pythia) or with a payload dict from the
+    /webhook/tradingview router. Both paths are authenticated here.
     """
     if payload is None:
+        # R-4: reject oversized bodies before reading them into memory (direct hits)
+        cl = request.headers.get("content-length") if request else None
+        if cl and cl.isdigit() and int(cl) > MAX_PAYLOAD_BYTES:
+            raise HTTPException(status_code=413, detail="payload too large")
         payload = await request.json()
+
+    # ── AEGIS: payload size cap (router-forward path / chunked bodies) ──
+    if len(json.dumps(payload).encode("utf-8")) > MAX_PAYLOAD_BYTES:
+        logger.warning("Rejected PYTHIA webhook — payload over size cap")
+        raise HTTPException(status_code=413, detail="payload too large")
+
+    # ── AEGIS: shared secret — constant-time, FAIL-CLOSED ──
+    if not PYTHIA_WEBHOOK_SECRET:
+        logger.error("PYTHIA_WEBHOOK_SECRET not configured — rejecting (fail-closed)")
+        raise HTTPException(status_code=503, detail="webhook auth not configured")
+    supplied = str(payload.get("secret") or "")
+    if not hmac.compare_digest(supplied, PYTHIA_WEBHOOK_SECRET):
+        logger.warning("Rejected PYTHIA webhook — invalid secret (ticker=%s)",
+                       payload.get("ticker"))
+        raise HTTPException(status_code=401, detail="invalid webhook secret")
+
+    # ── AEGIS: strip secret before ANY logging or persistence ──
+    payload = {k: v for k, v in payload.items() if k != "secret"}
+
     ticker = (payload.get("ticker") or "").upper()
     alert_type = payload.get("alert_type") or payload.get("event") or payload.get("signal_type") or "unknown"
     price = payload.get("price") or payload.get("close")
@@ -35,17 +90,25 @@ async def pythia_webhook(request: Request = None, payload: dict = None):
     vah = payload.get("vah")
     val = payload.get("val")
     poc = payload.get("poc")
-    # Rich fields from Pythia v2 PineScript
+
+    # ── AEGIS: required fields present + numeric + > 0 (reject confident-zeros) ──
+    if not ticker:
+        raise HTTPException(status_code=400, detail="missing ticker")
+    if not (_pos_num(vah) and _pos_num(val) and _pos_num(poc)):
+        logger.warning(
+            "Rejected PYTHIA webhook — vah/val/poc missing or <= 0 (ticker=%s vah=%s val=%s poc=%s)",
+            ticker, vah, val, poc,
+        )
+        raise HTTPException(status_code=400, detail="vah/val/poc required and must be > 0")
+
+    # Rich fields — treat 0.0 as null (nz()-zero scrub), not data
     va_migration = payload.get("va_migration")
     poor_high = payload.get("poor_high", False)
     poor_low = payload.get("poor_low", False)
     volume_quality = payload.get("volume_quality")
-    ib_high = payload.get("ib_high")
-    ib_low = payload.get("ib_low")
+    ib_high = _num_or_none(payload.get("ib_high"))
+    ib_low = _num_or_none(payload.get("ib_low"))
     interpretation = payload.get("interpretation")
-
-    if not ticker:
-        return {"error": "missing ticker"}
 
     logger.info("PYTHIA event: %s %s @ %s (VAH=%s POC=%s VAL=%s mig=%s vol=%s)",
                 ticker, alert_type, price, vah, poc, val, va_migration, volume_quality)
@@ -64,19 +127,19 @@ async def pythia_webhook(request: Request = None, payload: dict = None):
                 RETURNING id
             """,
                 ticker, alert_type,
-                float(price) if price else None,
+                _num_or_none(price),
                 direction,
-                float(vah) if vah else None,
-                float(val) if val else None,
-                float(poc) if poc else None,
+                float(vah),  # validated > 0 above
+                float(val),
+                float(poc),
                 va_migration,
                 bool(poor_high) if poor_high is not None else False,
                 bool(poor_low) if poor_low is not None else False,
                 volume_quality,
-                float(ib_high) if ib_high else None,
-                float(ib_low) if ib_low else None,
+                ib_high,     # already None-or-float (nz-zero scrubbed)
+                ib_low,
                 interpretation,
-                json.dumps(payload),
+                json.dumps(payload),  # secret already stripped above
             )
             event_id = row["id"] if row else None
     except Exception as e:
