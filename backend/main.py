@@ -531,6 +531,25 @@ async def lifespan(app: FastAPI):
                 # Sleep a defensive minute before retrying scheduling math
                 await asyncio.sleep(60)
 
+    async def adx_regime_loop():
+        """sub-brief 3 Chunk 3: SPY ADX(14) → regime:spy_adx_shadow (RTH, 15-min)."""
+        import pytz
+        from datetime import datetime as dt_cls
+
+        await asyncio.sleep(150)  # startup offset
+        while True:
+            try:
+                et = dt_cls.now(pytz.timezone("America/New_York"))
+                # RTH only (9:30 AM – 4:00 PM ET, weekdays); 90-min TTL lets the
+                # shadow key expire overnight → 'unknown' by design.
+                if et.weekday() < 5 and 9 <= et.hour < 16:
+                    if et.hour + et.minute / 60.0 >= 9.5:
+                        from jobs.adx_regime_job import compute_and_store_spy_adx
+                        await compute_and_store_spy_adx()
+            except Exception as e:
+                logger.warning("[adx_regime] loop error: %s", e)
+            await asyncio.sleep(900)  # 15 minutes
+
     expiry_task = asyncio.create_task(signal_expiry_loop())
     universe_task = asyncio.create_task(universe_cache_loop())
     mtm_task = asyncio.create_task(mark_to_market_loop())
@@ -543,6 +562,7 @@ async def lifespan(app: FastAPI):
     vwap_task = asyncio.create_task(vwap_validation_loop())
     crypto_scan_task = asyncio.create_task(crypto_scan_loop())
     uw_flow_poller_task = asyncio.create_task(uw_flow_poller_loop())
+    adx_regime_task = asyncio.create_task(adx_regime_loop())
     wh_accumulation_task = asyncio.create_task(wh_accumulation_loop())
     wh_reversal_task = asyncio.create_task(wh_reversal_loop())
     sector_refresh_fast_task = asyncio.create_task(sector_refresh_fast_loop())
