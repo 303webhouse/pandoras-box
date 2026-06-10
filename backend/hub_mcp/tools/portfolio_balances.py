@@ -96,7 +96,12 @@ async def hub_get_portfolio_balances(account: Optional[Account] = None) -> dict:
     total_balance = sum(a["balance"] for a in accounts)
     total_cash = sum(a["cash"] or 0 for a in accounts)
     total_bp = sum(a["buying_power"] or 0 for a in accounts)
-    any_stale = any(a["is_stale"] for a in accounts)
+    # Envelope-level staleness ignores zero-balance dormant accounts: a Feb-dated
+    # $0 account (e.g. IBKR) must not drag the whole envelope 'stale' and demote
+    # PIVOT conviction on otherwise-fresh balances. Per-account is_stale flags are
+    # unchanged — a consumer can still see which specific accounts are old.
+    funded = [a for a in accounts if a["balance"] != 0]
+    any_stale = any(a["is_stale"] for a in funded)
 
     data = {
         "accounts": accounts,

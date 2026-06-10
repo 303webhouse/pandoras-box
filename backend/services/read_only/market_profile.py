@@ -143,11 +143,15 @@ async def get_market_profile(ticker: str) -> Optional[Dict[str, Any]]:
         "session_date": event_session.isoformat(),
         "as_of": ts.astimezone(timezone.utc).isoformat(),
         "event_age_seconds": age_seconds,
-        "source": "pythia_webhook_v2.3",
-        # Not computed by Pine v2.3 — explicit null, never fabricated
+        # Static tag — the Pine payload carries no version field (verified
+        # 2026-06-10 against a live SPY raw_payload), so this can't read reality
+        # from the data. Reflects the current live Pine (v2.4). For true
+        # provenance, add a "version" field to the Pine comFields (ticketed).
+        "source": "pythia_webhook_v2.4",
+        # Not computed by Pine v2.4 — explicit null, never fabricated
         "single_prints": None,
         "day_type": None,
-        "note": "single_prints and day_type are not computed by Pine v2.3",
+        "note": "single_prints and day_type are not computed by Pine v2.4",
     }
 
     return {"status": status, "data": data, "staleness_seconds": age_seconds}
