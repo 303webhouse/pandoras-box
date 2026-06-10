@@ -317,6 +317,37 @@ async def apply_scoring(signal_data: Dict[str, Any]) -> Dict[str, Any]:
         except Exception:
             pass
 
+        # sub-brief 3 Chunk 3 (SHADOW): compare the new UW-bars ADX regime against
+        # the live default-25 path WITHOUT touching live scoring. Live gate below
+        # still reads regime:spy_adx (absent → default-25 → 'trending') unchanged.
+        try:
+            from scoring.adx_regime import classify_adx_regime as _classify_adx
+            from database.redis_client import get_redis_client as _get_adx_rc
+            import json as _adx_json
+            _arc = await _get_adx_rc()
+            _adx_raw = await _arc.get("regime:spy_adx_shadow") if _arc else None
+            if _adx_raw:
+                _adx_payload = _adx_json.loads(_adx_raw)
+                _new = _classify_adx(_adx_payload.get("adx"))
+            else:
+                _new = _classify_adx(None)  # absent shadow key → 'unknown'
+            # Mirror the live default-25 banding exactly (what the scorer does today)
+            _live_adx = regime_data.get("adx", 25)
+            if _live_adx >= 25:
+                _live_label = "trending"
+            elif _live_adx >= 20:
+                _live_label = "transitional"
+            else:
+                _live_label = "choppy"
+            signal_data["adx_shadow"] = {
+                "new_label": _new["label"], "new_adx": _new.get("adx"), "new_reason": _new["reason"],
+                "live_label": _live_label, "live_adx": _live_adx,
+                "live_reason": "default_25" if not regime_data.get("adx") else "ok",
+                "would_change": _new["label"] != _live_label,
+            }
+        except Exception:
+            pass
+
         # Calculate score (with sector strength + regime context + regime data)
         score, bias_alignment, triggering_factors = calculate_signal_score(
             signal_data, current_bias, sector_strength=sector_strength,

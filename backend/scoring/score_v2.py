@@ -303,6 +303,10 @@ def compute_score_v2(signal_data: Dict[str, Any]) -> Tuple[Optional[float], Dict
             "shadow": True,
         },
     }
+    # Chunk 3 shadow: ADX regime (new UW-bars vs live default-25) — log only.
+    _adx_shadow = signal_data.get("adx_shadow")
+    if isinstance(_adx_shadow, dict):
+        factors["sb3_shadow"]["adx"] = {**_adx_shadow, "shadow": True}
 
     # --- Compute final v2 score ---
     score_v2 = flash_score + post_enrichment_bonus
