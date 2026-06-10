@@ -20,12 +20,23 @@ import os
 
 from strategies.exhaustion import validate_exhaustion_signal, classify_exhaustion_signal
 from signals.pipeline import process_signal_unified
+from utils.webhook_auth import validate_webhook_secret
 
 logger = logging.getLogger(__name__)
 
 WEBHOOK_SECRET = os.getenv("TRADINGVIEW_WEBHOOK_SECRET") or ""
 
 router = APIRouter()
+
+
+# ── Chunk C cutover toggle (OBSERVE until market-hours flip) ──
+# Highest blast radius in the sprint: a bad flip drops EVERY live strategy signal.
+# The gate stays in OBSERVE mode (validate-but-allow, logs the verdict) until all 5
+# strategy families (Artemis, Holy Grail, Scout, Hub Sniper, Phalanx) log secret
+# PRESENT in a live session, THEN flips fail-closed by setting WEBHOOK_TV_ENFORCE=1
+# in Railway (no redeploy; env read at request time).
+def _tv_observe() -> bool:
+    return (os.getenv("WEBHOOK_TV_ENFORCE") or "").strip().lower() not in ("1", "true", "yes")
 
 # Top 20 crypto by market cap (+ common variations for TradingView)
 CRYPTO_TICKERS = {
@@ -214,11 +225,18 @@ async def receive_tradingview_alert(request: Request):
 
     alert = TradingViewAlert(**payload)
 
-    # Webhook secret validation
-    if WEBHOOK_SECRET:
-        if (alert.secret or "") != WEBHOOK_SECRET:
-            logger.warning("Rejected TradingView webhook — invalid secret from %s", alert.ticker)
-            raise HTTPException(status_code=401, detail="Invalid webhook secret")
+    # ── Chunk C hardening (shared AEGIS helper) ──
+    # Strategy fan-out chokepoint. The FOOTPRINT and PYTHIA early-returns ABOVE are
+    # each gated by their own chokepoint (footprint_webhook — Chunk A, observe;
+    # pythia_webhook — AEGIS fail-closed), so no inbound path reaches process_signal_unified
+    # ungated. This gate covers the remaining strategy fan-out. OBSERVE until all 5
+    # strategy families log secret PRESENT, then flip via WEBHOOK_TV_ENFORCE=1.
+    validate_webhook_secret(
+        alert.secret,
+        secret=os.getenv("TRADINGVIEW_WEBHOOK_SECRET") or "",
+        observe=_tv_observe(),
+        label="tradingview",
+    )
 
     # Dedup: reject duplicate webhooks within 60s window
     dedup_raw = f"{alert.ticker}:{alert.strategy}:{alert.direction}:{alert.timeframe}"

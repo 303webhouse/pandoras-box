@@ -53,6 +53,7 @@ zonePadATR  = input.float(0.00, "Zone padding (ATR)", group=grpDraw, minval=0.0,
      tooltip="Optional: expand the zone by ATR padding above/below.")
 lineMode    = input.string("Mid Zone", "Line price", group=grpDraw, options=["Mid Zone","Close","HL2"])
 zoneOpacity = input.int(85, "Zone opacity (0-100)", group=grpDraw, minval=0, maxval=100)
+webhookSecret = input.string("", "Webhook Secret", group="Webhook", tooltip="Must match TRADINGVIEW_WEBHOOK_SECRET env var. Sent as the payload 'secret' field for server-side auth.")
 
 
 //==============================
@@ -250,5 +251,5 @@ if wallPrev and (bullWallPrev or bearWallPrev)
          ',"sell_vol":' + str.tostring(sellVol) +
          ',"total_vol":' + str.tostring(totVol) +
          ',"rvol":' + str.tostring(totVol / avgTotVol, "#.##") +
-         '}'
+         ',"secret":"' + webhookSecret + '"}'
     alert(alert_payload, alert.freq_once_per_bar)

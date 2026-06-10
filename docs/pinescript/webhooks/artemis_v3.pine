@@ -9,6 +9,9 @@ indicator("Artemis v3.1", overlay=true, max_lines_count=500)
 use_tf_filter = input.bool(true, title="Only Show on Specific Timeframe", group="Timeframe")
 allowed_tf = input.string("15", title="Allowed Timeframe", options=["15", "30", "60", "120", "240", "D"], group="Timeframe", tooltip="15 = 15m recommended")
 
+// -- Webhook auth --
+webhookSecret = input.string("", title="Webhook Secret", group="Webhook", tooltip="Must match TRADINGVIEW_WEBHOOK_SECRET env var. Sent as the payload 'secret' field for server-side auth.")
+
 // -- Core Settings --
 lookback = input.int(20, title="VWAP Stdev Lookback", group="Core")
 adx_threshold = input.int(10, title="Min Trend Strength (ADX)", minval=1, group="Core")
@@ -355,11 +358,11 @@ if barstate.islast
 if long_signal
     mode_str = flush_down ? "Flush" : "Normal"
     rr_str = long_risk > 0 ? str.tostring((long_tp1 - long_entry) / long_risk, "#.#") : "0"
-    alert_msg = '{"ticker": "' + syminfo.ticker + '", "strategy": "Artemis", "direction": "LONG", "entry_price": ' + str.tostring(nz(close, 0)) + ', "stop_loss": ' + str.tostring(nz(long_sl, 0)) + ', "target_1": ' + str.tostring(nz(long_tp1, 0)) + ', "target_2": ' + str.tostring(nz(long_tp2, 0)) + ', "risk_reward": ' + rr_str + ', "timeframe": "' + timeframe.period + '", "adx": ' + str.tostring(nz(adx_val, 0), "#.#") + ', "adx_rising": ' + (adx_rising ? "true" : "false") + ', "rsi": ' + str.tostring(nz(rsi_val, 0), "#.#") + ', "rvol": ' + str.tostring(nz(rvol, 0), "#.##") + ', "mode": "' + mode_str + '", "avwap_ctx": ' + str.tostring(nz(avwapCtx, 0), "#.##") + ', "avwap_buf_atr": ' + str.tostring(nz(gate_buffer_atr, 0), "#.##") + ', "prox_atr": ' + str.tostring(nz(prox_atr, 0), "#.##") + '}'
+    alert_msg = '{"ticker": "' + syminfo.ticker + '", "strategy": "Artemis", "direction": "LONG", "entry_price": ' + str.tostring(nz(close, 0)) + ', "stop_loss": ' + str.tostring(nz(long_sl, 0)) + ', "target_1": ' + str.tostring(nz(long_tp1, 0)) + ', "target_2": ' + str.tostring(nz(long_tp2, 0)) + ', "risk_reward": ' + rr_str + ', "timeframe": "' + timeframe.period + '", "adx": ' + str.tostring(nz(adx_val, 0), "#.#") + ', "adx_rising": ' + (adx_rising ? "true" : "false") + ', "rsi": ' + str.tostring(nz(rsi_val, 0), "#.#") + ', "rvol": ' + str.tostring(nz(rvol, 0), "#.##") + ', "mode": "' + mode_str + '", "avwap_ctx": ' + str.tostring(nz(avwapCtx, 0), "#.##") + ', "avwap_buf_atr": ' + str.tostring(nz(gate_buffer_atr, 0), "#.##") + ', "prox_atr": ' + str.tostring(nz(prox_atr, 0), "#.##") + ', "secret": "' + webhookSecret + '"}'
     alert(alert_msg, alert.freq_once_per_bar)
 
 if short_signal
     mode_str = flush_up ? "Flush" : "Normal"
     rr_str = short_risk > 0 ? str.tostring((short_entry - short_tp1) / short_risk, "#.#") : "0"
-    alert_msg = '{"ticker": "' + syminfo.ticker + '", "strategy": "Artemis", "direction": "SHORT", "entry_price": ' + str.tostring(nz(close, 0)) + ', "stop_loss": ' + str.tostring(nz(short_sl, 0)) + ', "target_1": ' + str.tostring(nz(short_tp1, 0)) + ', "target_2": ' + str.tostring(nz(short_tp2, 0)) + ', "risk_reward": ' + rr_str + ', "timeframe": "' + timeframe.period + '", "adx": ' + str.tostring(nz(adx_val, 0), "#.#") + ', "adx_rising": ' + (adx_rising ? "true" : "false") + ', "rsi": ' + str.tostring(nz(rsi_val, 0), "#.#") + ', "rvol": ' + str.tostring(nz(rvol, 0), "#.##") + ', "mode": "' + mode_str + '", "avwap_ctx": ' + str.tostring(nz(avwapCtx, 0), "#.##") + ', "avwap_buf_atr": ' + str.tostring(nz(gate_buffer_atr, 0), "#.##") + ', "prox_atr": ' + str.tostring(nz(prox_atr, 0), "#.##") + '}'
+    alert_msg = '{"ticker": "' + syminfo.ticker + '", "strategy": "Artemis", "direction": "SHORT", "entry_price": ' + str.tostring(nz(close, 0)) + ', "stop_loss": ' + str.tostring(nz(short_sl, 0)) + ', "target_1": ' + str.tostring(nz(short_tp1, 0)) + ', "target_2": ' + str.tostring(nz(short_tp2, 0)) + ', "risk_reward": ' + rr_str + ', "timeframe": "' + timeframe.period + '", "adx": ' + str.tostring(nz(adx_val, 0), "#.#") + ', "adx_rising": ' + (adx_rising ? "true" : "false") + ', "rsi": ' + str.tostring(nz(rsi_val, 0), "#.#") + ', "rvol": ' + str.tostring(nz(rvol, 0), "#.##") + ', "mode": "' + mode_str + '", "avwap_ctx": ' + str.tostring(nz(avwapCtx, 0), "#.##") + ', "avwap_buf_atr": ' + str.tostring(nz(gate_buffer_atr, 0), "#.##") + ', "prox_atr": ' + str.tostring(nz(prox_atr, 0), "#.##") + ', "secret": "' + webhookSecret + '"}'
     alert(alert_msg, alert.freq_once_per_bar)
