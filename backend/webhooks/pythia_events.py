@@ -9,6 +9,7 @@ import hmac
 import json
 import logging
 import os
+import time
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Request
@@ -26,6 +27,10 @@ router = APIRouter(tags=["pythia"])
 # both paths.
 PYTHIA_WEBHOOK_SECRET = os.getenv("PYTHIA_WEBHOOK_SECRET") or ""
 MAX_PAYLOAD_BYTES = 8192  # reject oversized bodies
+
+# B4 Chunk C — replay protection + idempotency.
+REPLAY_WINDOW_MS = 10 * 60 * 1000   # ±10 min tolerance on bar_time (TV fire time)
+IDEMPOTENCY_TTL_S = 30 * 60          # pythia_seen:{ticker}:{event}:{bar_time} key TTL
 
 
 def _pos_num(v):
@@ -101,6 +106,18 @@ async def pythia_webhook(request: Request = None, payload: dict = None):
         )
         raise HTTPException(status_code=400, detail="vah/val/poc required and must be > 0")
 
+    # ── Chunk C: replay protection — bar_time required + within ±10 min ──
+    # Q-C1 ruling: missing/malformed bar_time → reject 400 (no confident default).
+    try:
+        bar_time_ms = int(float(payload.get("bar_time")))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="bar_time required and must be numeric epoch ms")
+    now_ms = int(time.time() * 1000)
+    if abs(now_ms - bar_time_ms) > REPLAY_WINDOW_MS:
+        logger.warning("Rejected PYTHIA webhook — bar_time outside replay window (ticker=%s skew_ms=%s)",
+                       ticker, now_ms - bar_time_ms)
+        raise HTTPException(status_code=400, detail="bar_time outside replay window (+/-10 min)")
+
     # Rich fields — treat 0.0 as null (nz()-zero scrub), not data
     va_migration = payload.get("va_migration")
     poor_high = payload.get("poor_high", False)
@@ -112,6 +129,22 @@ async def pythia_webhook(request: Request = None, payload: dict = None):
 
     logger.info("PYTHIA event: %s %s @ %s (VAH=%s POC=%s VAL=%s mig=%s vol=%s)",
                 ticker, alert_type, price, vah, poc, val, va_migration, volume_quality)
+
+    # ── Chunk C: idempotency — first writer wins per (ticker, event, bar_time) ──
+    # TV retries on non-2xx; SETNX is the atomic claim. Duplicate → 200, no row.
+    # Redis-down degrades open (allow the write) — never drop a real event for a
+    # cache outage.
+    _redis = await get_redis_client()
+    if _redis:
+        seen_key = f"pythia_seen:{ticker}:{alert_type}:{bar_time_ms}"
+        try:
+            is_new = await _redis.set(seen_key, "1", nx=True, ex=IDEMPOTENCY_TTL_S)
+        except Exception as exc:
+            logger.debug("PYTHIA idempotency SETNX failed (%s) — proceeding without dedup", exc)
+            is_new = True
+        if not is_new:
+            logger.info("PYTHIA duplicate suppressed: %s %s bar_time=%s", ticker, alert_type, bar_time_ms)
+            return {"status": "duplicate", "ticker": ticker, "alert_type": alert_type}
 
     # Store in database
     event_id = None
