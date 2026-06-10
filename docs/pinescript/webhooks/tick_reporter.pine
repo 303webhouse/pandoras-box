@@ -1,6 +1,8 @@
 //@version=5
 indicator("TICK Reporter (Webhook)", overlay=false)
 
+webhookSecret = input.string("", "Webhook Secret", tooltip="Must match TRADINGVIEW_WEBHOOK_SECRET env var. Sent as the payload 'secret' field for server-side auth.")
+
 inSession = not na(time(timeframe.period, "0930-1600"))
 
 var float dayHigh = na
@@ -25,7 +27,7 @@ dayAvg = dayCount > 0 ? daySum / dayCount : na
 ready = inSession and not na(dayHigh) and not na(dayLow) and not na(dayAvg)
 
 if ready and barstate.isconfirmed
-    payload = '{"tick_high":' + str.tostring(dayHigh, "#.##") + ',"tick_low":' + str.tostring(dayLow, "#.##") + ',"tick_close":' + str.tostring(close, "#.##") + ',"tick_avg":' + str.tostring(dayAvg, "#.##") + '}'
+    payload = '{"tick_high":' + str.tostring(dayHigh, "#.##") + ',"tick_low":' + str.tostring(dayLow, "#.##") + ',"tick_close":' + str.tostring(close, "#.##") + ',"tick_avg":' + str.tostring(dayAvg, "#.##") + ',"secret":"' + webhookSecret + '"}'
     alert(payload, alert.freq_once_per_bar)
 
 plot(close, "TICK Close", color=color.white)
