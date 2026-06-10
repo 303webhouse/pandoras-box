@@ -41,6 +41,9 @@ useMacro   = input.bool(false, title="Enable DXY Context Coloring", group=grpMac
 dxyTicker  = input.symbol("TVC:DXY", title="Dollar Index Ticker", group=grpMacro)
 dxyLen     = input.int(50, title="DXY Trend Length", group=grpMacro)
 
+grpHook    = "Webhook"
+webhookSecret = input.string("", title="Webhook Secret", group=grpHook, tooltip="Must match TRADINGVIEW_WEBHOOK_SECRET env var. Sent as the payload 'secret' field for server-side auth.")
+
 // ============================================================================
 // POC CALCULATION VIA LOWER TIMEFRAME
 // ============================================================================
@@ -347,5 +350,6 @@ if isWhaleSignalPrev and (bullishLeanPrev or bearishLeanPrev or showContested)
          '"vol":' + str.tostring(nz(volume[1], 0)) + ',' +
          '"vol_delta_pct":' + str.tostring(nz(volDiff[1], 0) * 100, "#.##") + ',' +
          '"poc_delta_pct":' + str.tostring(nz(pocDiff[1], 0) * 100, "#.###") + ',' +
-         '"time":"' + str.tostring(year) + '-' + str.tostring(month, "00") + '-' + str.tostring(dayofmonth, "00") + 'T' + str.tostring(hour, "00") + ':' + str.tostring(minute, "00") + '"}'
+         '"time":"' + str.tostring(year) + '-' + str.tostring(month, "00") + '-' + str.tostring(dayofmonth, "00") + 'T' + str.tostring(hour, "00") + ':' + str.tostring(minute, "00") + '",' +
+         '"secret":"' + webhookSecret + '"}'
     alert(payload, alert.freq_once_per_bar)
