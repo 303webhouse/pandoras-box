@@ -51,6 +51,9 @@ async def enrich_signal(signal_data: Dict[str, Any]) -> Dict[str, Any]:
         "atr_14": None,
         "avg_volume_20d": None,
         "iv_rank": None,
+        # sub-brief 3 Chunk 1b: UW true-rank (iv_rank_1y x100), SHADOW only —
+        # logged alongside the proxy for the 1-week comparison; not yet live.
+        "iv_rank_uw_shadow": None,
         # Tier 2 (live snapshot)
         "current_price": None,
         "today_volume": None,
@@ -74,6 +77,11 @@ async def enrich_signal(signal_data: Dict[str, Any]) -> Dict[str, Any]:
             enrichment["iv_rank"] = universe.get("iv_rank")
     except Exception as e:
         logger.debug(f"Universe cache read failed for {ticker}: {e}")
+
+    # --- sub-brief 3 Chunk 1b: UW true-rank shadow (best-effort, cached) ---
+    # UW get_iv_rank returns iv_rank_1y as a 0-1 fraction → x100. Logged for the
+    # proxy-vs-true comparison; does NOT affect the live score this chunk.
+    enrichment["iv_rank_uw_shadow"] = await _fetch_uw_iv_rank_shadow(ticker)
 
     # --- Tier 2: Live snapshot from Polygon ---
     snapshot = await _fetch_snapshot(ticker)
@@ -138,6 +146,26 @@ async def enrich_signal(signal_data: Dict[str, Any]) -> Dict[str, Any]:
     )
 
     return signal_data
+
+
+async def _fetch_uw_iv_rank_shadow(ticker: str) -> Optional[float]:
+    """UW true iv_rank (iv_rank_1y x100), best-effort + cached (sub-brief 3 Chunk 1b).
+
+    Returns None on any failure / no options (crypto) — never a fake 0. Uses the
+    uw_api `iv_rank` cache (300s) so repeated tickers don't add standing load.
+    """
+    try:
+        from integrations.uw_api import get_iv_rank
+        from scoring.sb3_iv_units import iv_rank_1y_to_100
+        data = await get_iv_rank(ticker)
+        if data:
+            # iv-rank series is ascending — latest is the last row
+            latest = data[-1] if isinstance(data, list) and data else data
+            if isinstance(latest, dict):
+                return iv_rank_1y_to_100(latest.get("iv_rank_1y"))
+    except Exception as exc:
+        logger.debug("UW iv_rank shadow failed for %s: %s", ticker, exc)
+    return None
 
 
 async def _fetch_snapshot(ticker: str) -> Optional[Dict[str, Any]]:
