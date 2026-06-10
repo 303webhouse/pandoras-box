@@ -1,0 +1,11 @@
+label,symbol,session,t0_date,role,convex_5,up_5,dn_5,dir_5,convex_10,up_10,dn_10,dir_10,gap_pct,gap_dir,mag,hold_fail,vol_ratio,fill,drift_t3,drift_t5,drift_t10,tm1_close,t0_open,t0_close,cutoff,error
+NOW Q4,NOW,AMC,2026-01-29,beat-but-dropped fade,Y,+4.2%,-12.9%,continuation,Y,+4.2%,-16.0%,continuation,-8.6%,down,large,NEUTRAL,5.0x,unfilled,-6.0%,-12.1%,-11.5%,129.62,118.53,116.73,2026-06-01,
+PLTR Q4,PLTR,AMC,2026-02-03,continuation-up,Y,-1.3%,-18.7%,reversal,Y,-1.3%,-20.0%,reversal,+11.7%,up,large,NEUTRAL,3.3x,T+1,-13.9%,-11.6%,-14.3%,147.76,165.05,157.88,2026-06-01,
+NXPI Q1,NXPI,AMC,2026-04-29,monster continuation-up,Y,+5.1%,-3.3%,continuation,Y,+6.0%,-3.3%,continuation,+22.1%,up,large,HOLD,4.7x,unfilled,+0.5%,+4.9%,+3.2%,230.39,281.41,289.25,2026-06-01,
+F Q1,F,AMC,2026-04-30,"non-tech, full window",Y,+1.8%,-5.2%,continuation,Y,+23.7%,-5.2%,both,-5.6%,down,medium,FAIL,2.2x,T+4,-3.2%,+0.8%,+19.9%,12.24,11.55,12.08,2026-06-01,
+TSN Q2,TSN,BMO,2026-05-04,non-tech up,Y,+1.1%,-5.2%,reversal,Y,+1.1%,-5.2%,reversal,+2.4%,up,small,HOLD,2.9x,T0,-1.2%,-2.4%,-3.0%,63.68,65.22,68.75,2026-06-01,
+PLTR Q1,PLTR,AMC,2026-05-05,FAILED gap / negative case,N,+3.7%,-3.5%,none,Y,+3.7%,-5.3%,continuation,-3.9%,down,medium,HOLD,1.9x,unfilled,+1.4%,+0.1%,-0.5%,146.03,140.29,135.91,2026-06-01,
+NVDA Q1,NVDA,AMC,2026-05-21,MUTED control,N,+0.7%,-4.9%,none,PENDING,PENDING,PENDING,PENDING,-0.5%,down,small,HOLD,1.4x,T0,-3.1%,-3.8%,PENDING,223.47,222.29,219.51,2026-06-01,
+WMT Q1,WMT,BMO,2026-05-21,"non-tech, partial window",Y,+0.5%,-5.5%,continuation,PENDING,PENDING,PENDING,PENDING,-4.9%,down,medium,HOLD,4.1x,PENDING,-2.3%,-4.6%,PENDING,130.85,124.41,121.34,2026-06-01,
+ZS Q3,ZS,AMC,2026-05-27,"gap-down, short window",PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,-25.7%,down,large,HOLD,11.4x,PENDING,+23.2%,PENDING,PENDING,184.60,137.16,126.41,2026-06-01,
+DELL Q1,DELL,AMC,2026-05-29,"monster gap, minimal window",PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,+31.8%,up,large,HOLD,6.2x,PENDING,PENDING,PENDING,PENDING,317.05,418.00,420.91,2026-06-01,
