@@ -1,6 +1,8 @@
 //@version=6
 indicator("Breadth Webhook", overlay=false)
 
+webhookSecret = input.string("", "Webhook Secret", tooltip="Must match TRADINGVIEW_WEBHOOK_SECRET env var. Sent as the payload 'secret' field for server-side auth.")
+
 uvol = request.security("UVOL", timeframe.period, close)
 dvol = request.security("DVOL", timeframe.period, close)
 
@@ -8,4 +10,4 @@ plot(uvol, "UVOL", color.green)
 plot(dvol, "DVOL", color.red)
 
 if barstate.isconfirmed
-    alert('{"uvol":' + str.tostring(uvol) + ',"dvol":' + str.tostring(dvol) + '}', alert.freq_once_per_bar)
+    alert('{"uvol":' + str.tostring(uvol) + ',"dvol":' + str.tostring(dvol) + ',"secret":"' + webhookSecret + '"}', alert.freq_once_per_bar)

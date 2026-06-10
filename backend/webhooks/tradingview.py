@@ -38,6 +38,15 @@ router = APIRouter()
 def _tv_observe() -> bool:
     return (os.getenv("WEBHOOK_TV_ENFORCE") or "").strip().lower() not in ("1", "true", "yes")
 
+
+# ── Chunk D cutover toggles (bias-factor webhooks: tick / breadth / mcclellan) ──
+# These move the composite bias, so they get the same staged observe→flip treatment
+# as Chunk C. Per-endpoint flag: WEBHOOK_TICK_ENFORCE / WEBHOOK_BREADTH_ENFORCE /
+# WEBHOOK_MCCLELLAN_ENFORCE. OBSERVE (validate-but-allow) until the factor's feed
+# logs secret PRESENT, then flip fail-closed (env read at request time, no redeploy).
+def _factor_observe(name: str) -> bool:
+    return (os.getenv(f"WEBHOOK_{name}_ENFORCE") or "").strip().lower() not in ("1", "true", "yes")
+
 # Top 20 crypto by market cap (+ common variations for TradingView)
 CRYPTO_TICKERS = {
     # Base tickers
@@ -990,10 +999,13 @@ async def receive_breadth_data(payload: BreadthPayload):
     """
     from bias_filters.breadth_intraday import store_breadth_data, compute_score as compute_breadth_score
 
-    if WEBHOOK_SECRET:
-        if (payload.secret or "") != WEBHOOK_SECRET:
-            logger.warning("Rejected breadth webhook — invalid secret")
-            raise HTTPException(status_code=401, detail="Invalid webhook secret")
+    # ── Chunk D hardening (shared AEGIS helper) — OBSERVE until market-hours flip ──
+    validate_webhook_secret(
+        payload.secret,
+        secret=os.getenv("TRADINGVIEW_WEBHOOK_SECRET") or "",
+        observe=_factor_observe("BREADTH"),
+        label="breadth",
+    )
 
     logger.info("breadth webhook received: UVOL=%.0f, DVOL=%.0f", payload.uvol, payload.dvol)
 
@@ -1047,10 +1059,13 @@ async def receive_tick_data(payload: TickDataPayload):
         "tick_avg": {{hl2}}
       }
     """
-    if WEBHOOK_SECRET:
-        if (payload.secret or "") != WEBHOOK_SECRET:
-            logger.warning("Rejected TICK webhook — invalid secret")
-            raise HTTPException(status_code=401, detail="Invalid webhook secret")
+    # ── Chunk D hardening (shared AEGIS helper) — OBSERVE until market-hours flip ──
+    validate_webhook_secret(
+        payload.secret,
+        secret=os.getenv("TRADINGVIEW_WEBHOOK_SECRET") or "",
+        observe=_factor_observe("TICK"),
+        label="tick",
+    )
 
     from bias_filters.tick_breadth import store_tick_data, compute_score as compute_tick_score
 
@@ -1114,10 +1129,13 @@ async def receive_mcclellan_data(payload: McClellanPayload):
     from bias_engine.factor_utils import score_to_signal
     import pandas as pd
 
-    if WEBHOOK_SECRET:
-        if (payload.secret or "") != WEBHOOK_SECRET:
-            logger.warning("Rejected McClellan webhook — invalid secret")
-            raise HTTPException(status_code=401, detail="Invalid webhook secret")
+    # ── Chunk D hardening (shared AEGIS helper) — OBSERVE until market-hours flip ──
+    validate_webhook_secret(
+        payload.secret,
+        secret=os.getenv("TRADINGVIEW_WEBHOOK_SECRET") or "",
+        observe=_factor_observe("MCCLELLAN"),
+        label="mcclellan",
+    )
 
     logger.info("McClellan webhook: ADVN=%.0f, DECLN=%.0f", payload.advn, payload.decln)
 
