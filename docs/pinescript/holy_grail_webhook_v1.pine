@@ -27,6 +27,8 @@ showSignalLabels = input.bool(true, "Show Signal Labels", group=grpVisual)
 grpWebhook = "Webhook"
 enableWebhook = input.bool(true, "Enable Webhook Alerts", group=grpWebhook,
      tooltip="When enabled, fires alert() with JSON payload on signals for the Trading Hub pipeline.")
+webhookSecret = input.string("", "Webhook Secret", group=grpWebhook,
+     tooltip="Must match TRADINGVIEW_WEBHOOK_SECRET env var. Sent as the payload 'secret' field for server-side auth.")
 
 // ============ CALCULATIONS ============
 
@@ -106,11 +108,11 @@ diSpread = plusDI - minusDI
 
 // Fire webhook alerts — uses string concatenation (str.format can't escape JSON braces)
 if enableWebhook and longSignal
-    alertPayload = '{"ticker": "' + syminfo.ticker + '", "strategy": "holy_grail", "direction": "LONG", "entry_price": ' + str.tostring(math.round(close, 2)) + ', "stop_loss": ' + str.tostring(math.round(nz(longStop, close * 0.99), 2)) + ', "target_1": ' + str.tostring(math.round(nz(longTarget, close * 1.02), 2)) + ', "adx": ' + str.tostring(math.round(adx, 1)) + ', "rsi": ' + str.tostring(math.round(ta.rsi(close, 14), 1)) + ', "timeframe": "' + timeframe.period + '", "rvol": ' + str.tostring(math.round(nz(diSpread, 0), 1)) + '}'
+    alertPayload = '{"ticker": "' + syminfo.ticker + '", "strategy": "holy_grail", "direction": "LONG", "entry_price": ' + str.tostring(math.round(close, 2)) + ', "stop_loss": ' + str.tostring(math.round(nz(longStop, close * 0.99), 2)) + ', "target_1": ' + str.tostring(math.round(nz(longTarget, close * 1.02), 2)) + ', "adx": ' + str.tostring(math.round(adx, 1)) + ', "rsi": ' + str.tostring(math.round(ta.rsi(close, 14), 1)) + ', "timeframe": "' + timeframe.period + '", "rvol": ' + str.tostring(math.round(nz(diSpread, 0), 1)) + ', "secret": "' + webhookSecret + '"}'
     alert(alertPayload, alert.freq_once_per_bar)
 
 if enableWebhook and shortSignal
-    alertPayload = '{"ticker": "' + syminfo.ticker + '", "strategy": "holy_grail", "direction": "SHORT", "entry_price": ' + str.tostring(math.round(close, 2)) + ', "stop_loss": ' + str.tostring(math.round(nz(shortStop, close * 1.01), 2)) + ', "target_1": ' + str.tostring(math.round(nz(shortTarget, close * 0.98), 2)) + ', "adx": ' + str.tostring(math.round(adx, 1)) + ', "rsi": ' + str.tostring(math.round(ta.rsi(close, 14), 1)) + ', "timeframe": "' + timeframe.period + '", "rvol": ' + str.tostring(math.round(nz(diSpread, 0), 1)) + '}'
+    alertPayload = '{"ticker": "' + syminfo.ticker + '", "strategy": "holy_grail", "direction": "SHORT", "entry_price": ' + str.tostring(math.round(close, 2)) + ', "stop_loss": ' + str.tostring(math.round(nz(shortStop, close * 1.01), 2)) + ', "target_1": ' + str.tostring(math.round(nz(shortTarget, close * 0.98), 2)) + ', "adx": ' + str.tostring(math.round(adx, 1)) + ', "rsi": ' + str.tostring(math.round(ta.rsi(close, 14), 1)) + ', "timeframe": "' + timeframe.period + '", "rvol": ' + str.tostring(math.round(nz(diSpread, 0), 1)) + ', "secret": "' + webhookSecret + '"}'
     alert(alertPayload, alert.freq_once_per_bar)
 
 // ============ VISUALS ============

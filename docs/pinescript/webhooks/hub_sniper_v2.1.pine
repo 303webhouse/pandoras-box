@@ -9,6 +9,9 @@ indicator("Hub Sniper v2.1", overlay=true, max_lines_count=500)
 use_tf_filter = input.bool(true, title="Only Show on Specific Timeframe", group="Timeframe")
 allowed_tf = input.string("15", title="Allowed Timeframe", options=["15", "30", "60", "120", "240", "D"], group="Timeframe", tooltip="15 = 15m recommended")
 
+// -- Webhook auth --
+webhookSecret = input.string("", title="Webhook Secret", group="Webhook", tooltip="Must match TRADINGVIEW_WEBHOOK_SECRET env var. Sent as the payload 'secret' field for server-side auth.")
+
 // -- Core Settings --
 lookback = input.int(20, title="VWAP Stdev Lookback", group="Core")
 adx_threshold = input.int(20, title="Min Trend Strength (ADX)", minval=1, group="Core")
@@ -387,11 +390,11 @@ if barstate.islast
 if long_signal
     mode_str = flush_down ? "Flush" : "Normal"
     rr_str = long_risk > 0 ? str.tostring((long_tp1 - long_entry) / long_risk, "#.#") : "?"
-    alert_msg = '{"ticker": "' + syminfo.ticker + '", "strategy": "Sniper", "direction": "LONG", "entry_price": ' + str.tostring(close) + ', "stop_loss": ' + str.tostring(long_sl) + ', "target_1": ' + str.tostring(long_tp1) + ', "target_2": ' + str.tostring(long_tp2) + ', "risk_reward": ' + rr_str + ', "timeframe": "' + timeframe.period + '", "adx": ' + str.tostring(adx_val, "#.#") + ', "adx_rising": ' + (adx_rising ? "true" : "false") + ', "rsi": ' + str.tostring(rsi_val, "#.#") + ', "rvol": ' + str.tostring(rvol, "#.##") + ', "mode": "' + mode_str + '", "avwap_ctx": ' + str.tostring(avwapCtx, "#.##") + ', "avwap_buf_atr": ' + str.tostring(gate_buffer_atr, "#.##") + ', "prox_atr": ' + str.tostring(prox_atr, "#.##") + '}'
+    alert_msg = '{"ticker": "' + syminfo.ticker + '", "strategy": "Sniper", "direction": "LONG", "entry_price": ' + str.tostring(close) + ', "stop_loss": ' + str.tostring(long_sl) + ', "target_1": ' + str.tostring(long_tp1) + ', "target_2": ' + str.tostring(long_tp2) + ', "risk_reward": ' + rr_str + ', "timeframe": "' + timeframe.period + '", "adx": ' + str.tostring(adx_val, "#.#") + ', "adx_rising": ' + (adx_rising ? "true" : "false") + ', "rsi": ' + str.tostring(rsi_val, "#.#") + ', "rvol": ' + str.tostring(rvol, "#.##") + ', "mode": "' + mode_str + '", "avwap_ctx": ' + str.tostring(avwapCtx, "#.##") + ', "avwap_buf_atr": ' + str.tostring(gate_buffer_atr, "#.##") + ', "prox_atr": ' + str.tostring(prox_atr, "#.##") + ', "secret": "' + webhookSecret + '"}'
     alert(alert_msg, alert.freq_once_per_bar)
 
 if short_signal
     mode_str = flush_up ? "Flush" : "Normal"
     rr_str = short_risk > 0 ? str.tostring((short_entry - short_tp1) / short_risk, "#.#") : "?"
-    alert_msg = '{"ticker": "' + syminfo.ticker + '", "strategy": "Sniper", "direction": "SHORT", "entry_price": ' + str.tostring(close) + ', "stop_loss": ' + str.tostring(short_sl) + ', "target_1": ' + str.tostring(short_tp1) + ', "target_2": ' + str.tostring(short_tp2) + ', "risk_reward": ' + rr_str + ', "timeframe": "' + timeframe.period + '", "adx": ' + str.tostring(adx_val, "#.#") + ', "adx_rising": ' + (adx_rising ? "true" : "false") + ', "rsi": ' + str.tostring(rsi_val, "#.#") + ', "rvol": ' + str.tostring(rvol, "#.##") + ', "mode": "' + mode_str + '", "avwap_ctx": ' + str.tostring(avwapCtx, "#.##") + ', "avwap_buf_atr": ' + str.tostring(gate_buffer_atr, "#.##") + ', "prox_atr": ' + str.tostring(prox_atr, "#.##") + '}'
+    alert_msg = '{"ticker": "' + syminfo.ticker + '", "strategy": "Sniper", "direction": "SHORT", "entry_price": ' + str.tostring(close) + ', "stop_loss": ' + str.tostring(short_sl) + ', "target_1": ' + str.tostring(short_tp1) + ', "target_2": ' + str.tostring(short_tp2) + ', "risk_reward": ' + rr_str + ', "timeframe": "' + timeframe.period + '", "adx": ' + str.tostring(adx_val, "#.#") + ', "adx_rising": ' + (adx_rising ? "true" : "false") + ', "rsi": ' + str.tostring(rsi_val, "#.#") + ', "rvol": ' + str.tostring(rvol, "#.##") + ', "mode": "' + mode_str + '", "avwap_ctx": ' + str.tostring(avwapCtx, "#.##") + ', "avwap_buf_atr": ' + str.tostring(gate_buffer_atr, "#.##") + ', "prox_atr": ' + str.tostring(prox_atr, "#.##") + ', "secret": "' + webhookSecret + '"}'
     alert(alert_msg, alert.freq_once_per_bar)

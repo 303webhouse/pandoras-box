@@ -6,6 +6,7 @@ indicator("Scout Sniper v3.1 (15m) - Tradeable/Ignore + VWAP Plan", overlay=true
 //==========================
 use_tf_filter = input.bool(true, "Only run on 15m", group="A) Timeframe")
 allowed_tf    = input.string("15", "Allowed TF", options=["5","15","30","60"], group="A) Timeframe")
+webhookSecret = input.string("", "Webhook Secret", group="Z) Webhook", tooltip="Must match TRADINGVIEW_WEBHOOK_SECRET env var. Sent as the payload 'secret' field for server-side auth.")
 
 rsi_len = input.int(14, "RSI Length", group="B) Signal Logic")
 rsi_os  = input.int(30, "Oversold (Hook)", group="B) Signal Logic")
@@ -423,7 +424,7 @@ if enable_alerts and any_signal
          ',"htf_tf":"' + htf_tf +
          '","htf_vwap":' + htf_vwap_str +
          ',"d_vwap":' + d_vwap_str +
-         '}'
+         ',"secret":"' + webhookSecret + '"}'
 
     alert(alert_msg, alert.freq_once_per_bar_close)
 
