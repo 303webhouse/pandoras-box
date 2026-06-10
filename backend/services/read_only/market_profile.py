@@ -43,6 +43,13 @@ def _safe_float(v: Any) -> Optional[float]:
         return None
 
 
+def _num_or_none(v: Any) -> Optional[float]:
+    """Float, but 0/0.0 → None. Pine v2.4 serializes missing levels as nz(x,0);
+    a confident zero is not data (B4 amendment — never surface fake levels)."""
+    f = _safe_float(v)
+    return f if (f is not None and f != 0) else None
+
+
 def _prev_weekday(d: date) -> date:
     """Most recent weekday strictly before d (skips Sat/Sun). Holidays not handled."""
     cur = d - timedelta(days=1)
@@ -120,12 +127,12 @@ async def get_market_profile(ticker: str) -> Optional[Dict[str, Any]]:
         "poc": _safe_float(row["poc"]),
         "vah": _safe_float(row["vah"]),
         "val": _safe_float(row["val"]),
-        # prev_* live in raw_payload only (Q-A2 verified)
-        "prev_poc": _safe_float(rp.get("prev_poc")),
-        "prev_vah": _safe_float(rp.get("prev_vah")),
-        "prev_val": _safe_float(rp.get("prev_val")),
-        "ib_high": _safe_float(row["ib_high"]),
-        "ib_low": _safe_float(row["ib_low"]),
+        # prev_* live in raw_payload only (Q-A2 verified). 0.0 → None (nz-zero scrub).
+        "prev_poc": _num_or_none(rp.get("prev_poc")),
+        "prev_vah": _num_or_none(rp.get("prev_vah")),
+        "prev_val": _num_or_none(rp.get("prev_val")),
+        "ib_high": _num_or_none(row["ib_high"]),
+        "ib_low": _num_or_none(row["ib_low"]),
         "poor_high": bool(row["poor_high"]) if row["poor_high"] is not None else None,
         "poor_low": bool(row["poor_low"]) if row["poor_low"] is not None else None,
         "va_migration": row["va_migration"],
