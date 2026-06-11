@@ -9,11 +9,12 @@
 > `cd56b5f`). The TV alert log then resolved the held rows:
 > - **FLIP-ELIGIBLE (delivery-healthy), after on-chart Pine re-arm:** **footprint**, **circuit_breaker
 >   (SPY)** (delivers fine, live 06-11 13:30Z). VIX is real but rare-fire (last 06-09) — expected.
-> - **Artemis + Holy Grail** — **BOTH LIVE** TV webhook strategies → flip GATE 3 only after **both**
->   are re-armed on-chart and observed `PRESENT`. **Correction (2026-06-11):** Holy Grail is NOT
->   dormant — DB ground-truth shows **14–63 signals/day** (`source=tradingview`, through today); the
->   "0 fires in 9-day alert log" was a bad read. Its server scanner exists/scheduled but contributes
->   0 rows in 14d — don't rely on it. Flipping with only Artemis armed drops Holy Grail's daily signals.
+> - **Artemis** — LIVE; **arm on-chart + observe now** (prep is fine). **Holy Grail** — LIVE on the
+>   **legacy TV path** (14–63/day, `source=tradingview`), but it was **moved hub-side ON PURPOSE** (to
+>   escape the TV watchlist-alert cap); `holy_grail_scanner` is meant to supersede it (currently 0 rows).
+>   Whether the hub scanner becomes the **sole** source is **under Titans review** → **do NOT re-arm
+>   Holy Grail on TV today** (work toward a path we may retire), and the **`WEBHOOK_TV_ENFORCE` flip is
+>   HELD entirely** until Titans decides — flipping now would 401 Holy Grail's live TV signals. See GATE 3.
 > - **tick / breadth — HOLD (do NOT flip).** Their alerts fire every bar, but **webhook delivery is
 >   timing out** (`"request took too long and timed out"`) — ~7% of all deliveries fail (138 timeouts
 >   + 9×502 of ~2000, clustered on the every-bar firers). This is the **upstream root cause** of the
@@ -80,8 +81,8 @@ Two preconditions for every flip:
    | A footprint | **Footprint Alert for Pandora** (shorttitle "Trojan-Horse") | `webhooks/trojan_horse_footprint_v2.pine` | **flip-eligible** (delivery-healthy) |
    | D bias | **TICK Reporter (Webhook)** | `webhooks/tick_reporter.pine` | **HOLD** — delivery timing out (Chunk 6) |
    | D bias | **Breadth Webhook** | `webhooks/breadth_webhook.pine` | **HOLD** — delivery timing out (Chunk 6) |
-   | C strat | **Artemis v3.1** | `webhooks/artemis_v3.pine` | **LIVE — re-arm live Pine first** |
-   | C strat | **Holy Grail Webhook** (shorttitle "HG Webhook") | `holy_grail_webhook_v1.pine` | **LIVE (14–63/day) — re-arm live Pine first** |
+   | C strat | **Artemis v3.1** | `webhooks/artemis_v3.pine` | **LIVE — arm + observe now** (flip held, see GATE 3) |
+   | C strat | **Holy Grail Webhook** (shorttitle "HG Webhook") | `holy_grail_webhook_v1.pine` | **LIVE on legacy TV path — PENDING TITANS; do NOT re-arm today** |
    | F (GATE 5) | **Circuit Breaker Monitor (SPY)** | `webhooks/circuit_breaker_spy.pine` | **flip-eligible** (delivers, live 13:30Z) |
    | F (GATE 5) | **Circuit Breaker Monitor (VIX)** | `webhooks/circuit_breaker_vix.pine` | rare-fire (expected) |
 
@@ -120,35 +121,33 @@ After the latency fix, flip the two **independently**, each after its own feed c
 - **Verify each:** the factor still scores (composite recompute logs) post-flip; a secretless test
   POST to that path returns 401.
 
-### GATE 3 — Chunk C TV-router · live: Artemis + Holy Grail (HIGHEST: a bad flip drops every live strategy signal)
-> **⚠ Root-cause precondition (2026-06-11):** the repo `.pine` edits **never propagated** to
-> TradingView — the live charts still run the OLD Pine **without** the secret input. Nick must paste
-> the updated Pine on-chart **first**, or it 401s on flip.
-> **TWO live webhook strategies, BOTH high-volume — BOTH must be re-armed and observed before the
-> single flip:**
-> - **Artemis** — live.
-> - **Holy Grail** — **LIVE, 14–63 signals/day** via the TV webhook (`source=tradingview`, through
->   today; the earlier "dormant / 0 fires in 9-day alert log" read was wrong — DB ground-truth
->   overrides it). The `holy_grail_scanner` exists and is scheduled (pandas_ta present) but contributes
->   **0 rows in 14d** (`source=server_scanner`) — available but dormant-in-effect; do **not** rely on it.
+### GATE 3 — Chunk C TV-router · ⛔ FLIP HELD pending Titans (Holy Grail source decision)
+> **The `WEBHOOK_TV_ENFORCE` flip is HELD entirely** — do not flip today. Two live TV strategies share
+> this one gate:
+> - **Artemis** — LIVE. **Arm on-chart + observe now** (prep is safe; see below). It alone would
+>   logically gate the flip.
+> - **Holy Grail** — LIVE on the **legacy TV path** (14–63/day, `source=tradingview`, through today),
+>   but it was **moved hub-side ON PURPOSE** to escape the TV watchlist-alert cap. The
+>   `holy_grail_scanner` is meant to supersede it (exists, scheduled, pandas_ta present — but **0 rows
+>   in 14d**, `source=server_scanner`). **Whether the hub scanner becomes the sole source is under
+>   Titans review (its own sub-chat).** → **Do NOT re-arm Holy Grail on TV** — that's work toward a
+>   path we may retire.
+>
+> **Why the flip is blocked even though Artemis alone "gates" it:** the single `WEBHOOK_TV_ENFORCE`
+> flag covers ALL of `/webhook/tradingview`. Holy Grail's live TV signals are **un-armed** (no secret),
+> so flipping now **401s its 14–63 daily signals**. The flip waits until Titans resolves HG's source:
+> - **If Titans retires the HG TV path** (hub scanner becomes sole source) → HG no longer POSTs TV →
+>   flip on Artemis alone, clean.
+> - **If Titans keeps HG on TV** → HG must be re-armed first, then flip on both.
 >
 > Scout/Hub Sniper/Phalanx removed — 0 sigs/30d.
 
-- **Single flag, BOTH must confirm first:** `WEBHOOK_TV_ENFORCE=1` gates **all** of
-  `/webhook/tradingview` at once (no per-family flag). **Flip ONLY after BOTH Artemis AND Holy Grail
-  show `PRESENT, match=True`.** Flipping with only Artemis armed **drops Holy Grail's 14–63 daily
-  signals** (it would 401) — do not.
-- **Family attribution:** the gate logs a generic `[tradingview] OBSERVE: payload secret …` line —
-  it does **not** name the strategy. Correlate each observe line with the very next
-  `📨 Webhook received: <ticker> <dir> (<strategy>)` to tick off **both** Artemis and Holy Grail.
-- **PM RULING 2 (FINAL):** for any family not yet seen in observe — do **NOT** push forced pipeline
-  alerts and do **NOT** stall for days: **(a)** visually verify its on-chart "Webhook Secret" input
-  is populated → **(b)** secretless curl against `/webhook/tradingview` (safe liveness probe) →
-  **(c)** flip → **(d)** watch its first natural fire land, **rollback armed** if it 401s.
-- **Flip:** set `WEBHOOK_TV_ENFORCE=1` only after **both** Artemis and Holy Grail confirm
-  `PRESENT, match=True` (both live Pines re-armed on-chart).
-- **Verify:** a real Artemis **and** a real Holy Grail signal still return `{"status":"accepted"}`;
-  a secretless POST to `/webhook/tradingview` returns 401.
+- **Now (safe prep):** re-arm **Artemis** on-chart and confirm `[tradingview] OBSERVE: payload secret
+  PRESENT, match=True` (attribute via the adjacent `📨 Webhook received: … (Artemis)` line). **Do not
+  set `WEBHOOK_TV_ENFORCE`.**
+- **Blocked until Titans:** the flip itself. Revisit this gate once HG's source is decided.
+- **PM RULING 2 (FINAL)** still applies to Artemis attribution if it's low-frequency in the observe
+  window (visual-verify input + secretless curl) — but the flip stays held regardless.
 
 ### GATE 5 — Chunk F circuit breaker (FLIP-ELIGIBLE: SPY delivery-healthy)
 - **Feed/Pines:** Circuit Breaker SPY + VIX. **SPY delivers successfully and was live 06-11 13:30Z →
@@ -196,14 +195,15 @@ the next request. Each gate is isolated; rolling one back does not touch the oth
 
 - [ ] `TRADINGVIEW_WEBHOOK_SECRET` set in Railway (Step 0.2).
 - [ ] The 7 retained indicators' "Webhook Secret" input populated on **every** chart instance (Step 0.3).
-- [ ] **BOTH Artemis AND Holy Grail live Pines re-pasted on-chart** (repo edits don't propagate —
-      root cause). Holy Grail is LIVE (14–63/day); its server scanner contributes 0 — don't rely on it.
+- [ ] **Artemis live Pine re-pasted on-chart** (repo edits don't propagate — root cause). **Holy Grail
+      NOT re-armed** — its TV path is pending Titans (may be retired); no work toward it today.
 - [ ] **tick/breadth: NOT flipped** until the Chunk 6 webhook-latency fix ships (delivery timing out).
-- [ ] Observe logs show `PRESENT, match=True` for: footprint; **Artemis AND Holy Grail** (both
-      attributed via the adjacent "Webhook received" line); circuit_breaker SPY (on natural fire).
-- [ ] Flip order honored: GATE 1 footprint → GATE 5 circuit_breaker (SPY) → GATE 3 (**Artemis +
-      Holy Grail — both confirmed**) → GATE 4 Hermes (addendum). **GATE 2 (tick/breadth) deferred to
-      post-latency-fix.**
+- [ ] Observe logs show `PRESENT, match=True` for: footprint; **Artemis** (attributed via the adjacent
+      "Webhook received" line); circuit_breaker SPY (on natural fire).
+- [ ] **GATE 3 (`WEBHOOK_TV_ENFORCE`): HELD — do not flip** until Titans decides Holy Grail's source
+      (flipping now 401s HG's live TV signals). Artemis can be armed + observed; the flip waits.
+- [ ] Flip order honored: GATE 1 footprint → GATE 5 circuit_breaker (SPY) → GATE 4 Hermes (addendum).
+      **GATE 3 (TV) HELD pending Titans; GATE 2 (tick/breadth) deferred to post-latency-fix.**
 - [ ] Hermes (GATE 4): `HERMES_WEBHOOK_SECRET` set; all 9 alert messages carry it (saved); dismiss
       PATCH gap noted as a separate follow-up.
 - [ ] Rollback path understood (unset the per-gate flag).
