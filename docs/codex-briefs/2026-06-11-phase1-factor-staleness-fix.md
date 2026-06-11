@@ -21,6 +21,21 @@ Observed: `bias:factor:tick_breadth:latest` stamped **2026-06-11T13:35Z** on **y
 empty metadata, written by an external `pandora_api` path (not in the Railway backend → almost
 certainly the VPS `pivot-collector`).
 
+### UPSTREAM ROOT CAUSE (TV alert log, 2026-06-11) — the feed isn't dead, the hub is too slow
+
+The TradingView alert log resolves *why* the data is stale: the **tick/breadth alerts fire every
+bar — but the hub can't ACK fast enough.** **~7% of all webhook deliveries fail** (138 timeouts +
+9 × 502 out of ~2000), **clustered on the every-bar firers** (tick/breadth/mcclellan). TV reports
+`"request took too long and timed out"` (tick/breadth last successful-ish attempt 06-11 16:30Z).
+So:
+- The alerts are **healthy**; the **hub webhook handler is too slow to respond within TV's ~3s
+  budget** → the POST times out → no fresh data lands → the recompute-on-stale-cache then **masks**
+  the gap (the Phase 0 symptom).
+- **Detection (Chunks 1-5) fixes the symptom** — it makes the hub *correctly label* the feed stale
+  instead of faking fresh. **But the feed stays broken** until the handler latency is fixed. Both
+  halves are real; ship detection first (safety net), track the cause (Chunk 6) or the data never
+  comes back.
+
 ---
 
 ## Shadow-first plan (sb3 discipline — measure before you change a number)
@@ -69,6 +84,31 @@ In `compute_composite`, alongside the existing gate, compute a **shadow verdict*
 - **VPS deploy discipline:** SCP + `systemctl restart` per CLAUDE.md; coordinate timing with this
   factor work so the contract change lands on both sides together.
 
+### Chunk 6 — ROOT CAUSE: hub webhook-handler latency (fast-ACK + async insert)
+> **Sibling track — this is the half that makes the data come back.** Chunks 1-5 make the hub
+> *honest* about staleness; Chunk 6 makes the feed *deliver* again. Can be a sibling ticket, but it
+> must be tracked alongside — detection without delivery = a correctly-labeled-dead feed.
+
+- **Symptom:** ~7% of webhook deliveries time out / 502, clustered on the every-bar firers
+  (`/webhook/tick`, `/webhook/breadth`, `/webhook/mcclellan`). TV's webhook timeout is ~3s; these
+  handlers do **synchronous** work (Redis writes + factor scoring + composite recompute) before
+  returning, so under load they blow the budget.
+- **Fix — fast-ACK + async insert** (the same pattern flagged in **B4** for the webhook path):
+  return `200` to TradingView **immediately** after minimal validation, then do the store + score +
+  `_recompute_composite_background` via `asyncio.ensure_future(...)` (the FOOTPRINT/strategy
+  handlers already do this — tick/breadth/mcclellan are the ones still doing inline work).
+  - Audit `receive_tick_data` / `receive_breadth_data` / `receive_mcclellan_data` in
+    `webhooks/tradingview.py`: move everything after payload-validation off the request path.
+  - Keep the response body minimal; defer `store_*_data` + `compute_*_score` + `store_factor_reading`
+    + composite recompute to the background task.
+  - Watch for the cold-start / event-loop contention that pushes p99 over 3s during the open.
+- **Interaction with the flip:** until this ships, **do NOT flip the tick/breadth gates** — adding a
+  401 path to a handler that's already timing out only makes delivery worse. Flip those gates only
+  after latency is fixed *and* a fresh live POST is observed.
+- **Validation:** webhook delivery failure rate for tick/breadth drops to ~0 in the TV log; factor
+  `updated_at` advances every bar in-session; the Chunk 1 shadow stops flagging them stale on a
+  normal day.
+
 ---
 
 ## Acceptance / validation
@@ -85,8 +125,13 @@ In `compute_composite`, alongside the existing gate, compute a **shadow verdict*
 - **Reading-contract change** touches every scorer — do the audit (Chunk 2) before enforce (Chunk 3).
 - **VPS** is a second writer on the same contract — Chunk 5 must land with Chunk 2/3, or the VPS
   keeps injecting faked-fresh reads.
+- **Chunk 6 touches `webhooks/tradingview.py`** (the tick/breadth/mcclellan handlers) — different
+  file/lane from Chunks 1-5. Coordinate via the worktree model; can be a sibling ticket owned
+  jointly. It is the only chunk that restores delivery — do not let it slip behind the detection work.
 - Lowering confidence on dead-feed days is the *correct* behavior but will visibly change composite
   confidence — flag for the committee so it's expected, not alarming.
+- **Sequencing:** ship detection (1-5, safety net) first; Chunk 6 (latency) is what actually un-breaks
+  the feed. Until Chunk 6 ships, tick/breadth stay observe-only and **unflipped** (per the runbook).
 
 ## Out of scope
 - The webhook flip (separate track). tick/breadth webhook *ingress* is being reconciled separately;
