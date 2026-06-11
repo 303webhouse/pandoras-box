@@ -8,14 +8,19 @@ import inspect
 import pytest
 
 
-# Routes that are intentionally public (with justification)
+# Routes exempt from HEADER/API-key auth by design.
+# NOTE (Phase 1 webhook hardening): the TradingView webhooks below are NOT plain-public —
+# they are gated by a shared body `secret` field via validate_webhook_secret() (TV can't send
+# headers). They run in OBSERVE mode and flip fail-closed per the flip-day runbook. They remain
+# in this set because the auto-discovery test only recognizes Depends(require_api_key)-style
+# header auth, not the body-secret gate. Post-flip a secretless POST returns 401.
 AUTH_EXEMPT_MUTATIONS = {
-    # TradingView webhooks — can't send headers, data-write only
+    # TradingView webhooks — header-less; body-secret gated (Phase 1, observe→flip)
     ("POST", "/webhook/tradingview"),
     ("POST", "/webhook/signal"),
     ("POST", "/webhook/circuit_breaker"),
     ("POST", "/webhook/whale"),
-    # Breadth/tick/mcclellan webhooks from TradingView
+    # Breadth/tick/mcclellan webhooks from TradingView — body-secret gated (Phase 1)
     ("POST", "/webhook/breadth"),
     ("POST", "/webhook/tick"),
     ("POST", "/webhook/mcclellan"),
@@ -80,7 +85,7 @@ AUTH_TODO_LOCKDOWN = {
     ("POST", "/api/flow/webhook"),
     ("POST", "/api/hybrid/refresh"),
     ("POST", "/api/knowledgebase/reload"),
-    ("POST", "/webhook/test"),
+    # ("POST", "/webhook/test") — locked down in Chunk G; now in PROTECTED_ROUTES
 }
 
 MUTATION_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
@@ -168,6 +173,8 @@ class TestAuthEnforcement:
         }),
         # Olympus analysis (Agora — auth required)
         ("POST", "/api/analyze/SPY/olympus", None),
+        # Test webhook (Chunk G — gated with require_api_key)
+        ("POST", "/webhook/test", {"ping": "test"}),
     ]
 
     PUBLIC_ROUTES = [
