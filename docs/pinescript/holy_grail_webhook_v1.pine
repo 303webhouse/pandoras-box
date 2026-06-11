@@ -1,8 +1,7 @@
+//@version=5
 // Holy Grail Pullback Continuation — Webhook Version
 // Linda Raschke-style continuation entries with JSON webhook for Trading Hub pipeline.
 // ADX >= 25 (strong trend) + pullback to 20 EMA + confirmation candle
-//
-// @version=5
 indicator("Holy Grail Webhook", shorttitle="HG Webhook", overlay=true, max_labels_count=100)
 
 // ============ INPUTS ============
