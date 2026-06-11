@@ -67,6 +67,8 @@ Two preconditions for every flip:
    | C strat | **Scout Sniper v3.1 (15m) – Tradeable/Ignore + VWAP Plan** | `webhooks/scout_sniper_v3.1.pine` |
    | C strat | **Hub Sniper v2.1** | `webhooks/hub_sniper_v2.1.pine` |
    | C strat | **Phalanx v2** | `webhooks/phalanx_v2.pine` |
+   | F (GATE 5) | **Circuit Breaker Monitor (SPY)** | `webhooks/circuit_breaker_spy.pine` |
+   | F (GATE 5) | **Circuit Breaker Monitor (VIX)** | `webhooks/circuit_breaker_vix.pine` |
 
    > ⚠ The Pine *code* now carries the field, but the on-chart input **defaults to empty**. An
    > un-populated input sends `"secret":""` → that feed will 401 the instant its gate flips.
@@ -122,6 +124,14 @@ Flip the three **independently**, each after its own feed confirms:
 - **Verify:** a real signal from each family still returns `{"status":"accepted"}`; a secretless
   POST to `/webhook/tradingview` returns 401.
 
+### GATE 5 — Chunk F circuit breaker (rare fires → Ruling 2 protocol)
+- **Feed/Pines:** Circuit Breaker SPY + VIX. **Secret:** shared `TRADINGVIEW_WEBHOOK_SECRET`
+  (TV-family — inputs populated in Step 0). **Flag:** `WEBHOOK_CB_ENFORCE=1`. **Watch:**
+  `[circuit_breaker] OBSERVE: payload secret PRESENT, match=True`. CB fires only on a state change
+  (rare) → apply **PM Ruling 2**: visual-verify both CB inputs populated → secretless curl against
+  `/webhook/circuit_breaker` (→401 post-flip) → flip → watch the first natural CB fire, rollback
+  armed. Closes the unauth bias-state write (`bias_cap`/`bias_floor`/`scoring_modifier`).
+
 ---
 
 ## Explicitly NOT flipped this sprint
@@ -145,6 +155,7 @@ the next request. Each gate is isolated; rolling one back does not touch the oth
 | breadth | `WEBHOOK_BREADTH_ENFORCE` |
 | mcclellan | `WEBHOOK_MCCLELLAN_ENFORCE` |
 | TV + 5 strategies | `WEBHOOK_TV_ENFORCE` |
+| Circuit Breaker (GATE 5) | `WEBHOOK_CB_ENFORCE` |
 | Hermes ×9 (addendum) | `WEBHOOK_HERMES_ENFORCE` |
 
 > Leaving `TRADINGVIEW_WEBHOOK_SECRET` set during a rollback is harmless (observe just keeps
@@ -167,8 +178,8 @@ the next request. Each gate is isolated; rolling one back does not touch the oth
 - [ ] Decision logged: any low-frequency strategy family — wait for natural fire vs forced test?
 
 *Pythia (`/api/webhook/pythia`) and mp_levels (`/webhook/mp_levels`) are already AEGIS fail-closed
-(B4) and are NOT part of this flip. Circuit Breaker (Chunk F) is a separate upcoming chunk with its
-own secret/flag — not in this runbook. **Hermes (Chunk E) is covered by the addendum below.***
+(B4) and are NOT part of this flip. **Circuit Breaker (Chunk F) is GATE 5 above; Hermes (Chunk E)
+is covered by the addendum below.***
 
 ---
 

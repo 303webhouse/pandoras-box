@@ -19,6 +19,7 @@ indicator("Circuit Breaker Monitor (SPY)", overlay=true)
 threshold_1 = input.float(1.0, "Level 1 Threshold (%)", step=0.1, group="Thresholds")
 threshold_2 = input.float(2.0, "Level 2 Threshold (%)", step=0.1, group="Thresholds")
 recovery_band = input.float(0.3, "Recovery Band (%)", step=0.1, group="Thresholds", tooltip="SPY within this % of open = recovered")
+webhookSecret = input.string("", "Webhook Secret", group="Webhook", tooltip="Must match TRADINGVIEW_WEBHOOK_SECRET env var. Sent as the payload 'secret' field for server-side auth.")
 
 // Get today's open
 var float today_open = na
@@ -48,16 +49,16 @@ state_changed = current_state != last_state
 // Fire alerts on state change
 if state_changed
     if current_state == "DOWN_2PCT" and last_state != "DOWN_2PCT"
-        alert('{"type": "circuit_breaker", "trigger": "spy_down_2pct"}', alert.freq_once_per_bar)
+        alert('{"type": "circuit_breaker", "trigger": "spy_down_2pct", "secret": "' + webhookSecret + '"}', alert.freq_once_per_bar)
     
     else if current_state == "DOWN_1PCT" and last_state == "NORMAL"
-        alert('{"type": "circuit_breaker", "trigger": "spy_down_1pct"}', alert.freq_once_per_bar)
+        alert('{"type": "circuit_breaker", "trigger": "spy_down_1pct", "secret": "' + webhookSecret + '"}', alert.freq_once_per_bar)
     
     else if current_state == "UP_2PCT" and last_state != "UP_2PCT"
-        alert('{"type": "circuit_breaker", "trigger": "spy_up_2pct"}', alert.freq_once_per_bar)
+        alert('{"type": "circuit_breaker", "trigger": "spy_up_2pct", "secret": "' + webhookSecret + '"}', alert.freq_once_per_bar)
     
     else if current_state == "FLAT" and (last_state == "DOWN_1PCT" or last_state == "DOWN_2PCT" or last_state == "UP_2PCT")
-        alert('{"type": "circuit_breaker", "trigger": "spy_recovery"}', alert.freq_once_per_bar)
+        alert('{"type": "circuit_breaker", "trigger": "spy_recovery", "secret": "' + webhookSecret + '"}', alert.freq_once_per_bar)
     
     last_state := current_state
 

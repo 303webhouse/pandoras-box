@@ -19,6 +19,7 @@ indicator("Circuit Breaker Monitor (VIX)", overlay=true)
 spike_threshold = input.float(15.0, "Spike Threshold (%)", step=1.0, group="Thresholds", tooltip="VIX up this % from prior close = spike")
 extreme_level = input.float(25.0, "Extreme Level", step=1.0, group="Thresholds", tooltip="VIX crossing above this = extreme fear")
 recovery_level = input.float(20.0, "Recovery Level", step=1.0, group="Thresholds", tooltip="VIX dropping below this after extreme = normalized")
+webhookSecret = input.string("", "Webhook Secret", group="Webhook", tooltip="Must match TRADINGVIEW_WEBHOOK_SECRET env var. Sent as the payload 'secret' field for server-side auth.")
 
 // Get prior day's close
 prior_close = request.security(syminfo.tickerid, "D", close[1], barmerge.gaps_off, barmerge.lookahead_on)
@@ -47,10 +48,10 @@ state_changed = current_state != last_state
 
 if state_changed
     if current_state == "EXTREME" and last_state != "EXTREME"
-        alert('{"type": "circuit_breaker", "trigger": "vix_extreme"}', alert.freq_once_per_bar)
+        alert('{"type": "circuit_breaker", "trigger": "vix_extreme", "secret": "' + webhookSecret + '"}', alert.freq_once_per_bar)
     
     else if current_state == "SPIKE" and last_state == "NORMAL"
-        alert('{"type": "circuit_breaker", "trigger": "vix_spike"}', alert.freq_once_per_bar)
+        alert('{"type": "circuit_breaker", "trigger": "vix_spike", "secret": "' + webhookSecret + '"}', alert.freq_once_per_bar)
     
     // Note: VIX recovery doesn't trigger spy_recovery - that's only for SPY
     // But we track it for display purposes
