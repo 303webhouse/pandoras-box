@@ -23,6 +23,7 @@ Decay System (condition-verified):
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from utils.pivot_auth import require_api_key
+from utils.webhook_auth import validate_webhook_secret
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
 from datetime import datetime, timezone, timedelta
@@ -34,6 +35,16 @@ import time
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+# ── Chunk F cutover toggle (OBSERVE until flip-day) ──
+# /webhook/circuit_breaker was intentionally public; an unauth POST can move
+# bias_cap/bias_floor/scoring_modifier (scoring-DoS vector). Gate with the shared TV
+# secret (reuses TRADINGVIEW_WEBHOOK_SECRET — CB is a TV-family Pine) and its own flag
+# so the flip is independent. OBSERVE (validate-but-allow, logs verdict) until a CB
+# fire logs secret PRESENT, then flip via WEBHOOK_CB_ENFORCE=1 (no redeploy).
+def _cb_observe() -> bool:
+    return (os.getenv("WEBHOOK_CB_ENFORCE") or "").strip().lower() not in ("1", "true", "yes")
 
 # Severity ranking: higher = more severe. Lower severity cannot overwrite higher.
 TRIGGER_SEVERITY = {
@@ -77,6 +88,7 @@ class CircuitBreakerTrigger(BaseModel):
     """Payload from TradingView circuit breaker alert"""
     trigger: str  # spy_down_1pct, spy_down_2pct, vix_spike, vix_extreme, spy_up_2pct, spy_recovery
     timestamp: Optional[str] = None
+    secret: Optional[str] = None
 
 
 def get_circuit_breaker_state() -> Dict[str, Any]:
@@ -592,9 +604,10 @@ async def receive_circuit_breaker_alert(alert: CircuitBreakerTrigger, background
     """
     Receive circuit breaker trigger from TradingView.
 
-    NOTE: Intentionally public — TradingView webhooks cannot send API key headers.
-    This endpoint only writes state; the management routes below (reset, accept, reject, test)
-    are protected with require_api_key.
+    AUTH (Chunk F): formerly intentionally public. Now gated by the shared webhook
+    secret via the CB Pine's "Webhook Secret" input (reuses TRADINGVIEW_WEBHOOK_SECRET).
+    Runs OBSERVE-mode until flip-day; flips fail-closed via WEBHOOK_CB_ENFORCE=1.
+    The management routes below (reset, accept, reject, test) remain require_api_key.
 
     TradingView Alert Setup:
     - Symbol: SPY or VIX
@@ -602,9 +615,18 @@ async def receive_circuit_breaker_alert(alert: CircuitBreakerTrigger, background
     - Webhook URL: https://pandoras-box-production.up.railway.app/webhook/circuit_breaker
     - Message (JSON):
       {
-        "trigger": "spy_down_1pct"
+        "trigger": "spy_down_1pct",
+        "secret": "<TRADINGVIEW_WEBHOOK_SECRET>"
       }
     """
+    # ── Chunk F hardening (shared AEGIS helper) — OBSERVE until market-hours flip ──
+    validate_webhook_secret(
+        alert.secret,
+        secret=os.getenv("TRADINGVIEW_WEBHOOK_SECRET") or "",
+        observe=_cb_observe(),
+        label="circuit_breaker",
+    )
+
     logger.info("Circuit breaker webhook received: %s", alert.trigger)
 
     try:
