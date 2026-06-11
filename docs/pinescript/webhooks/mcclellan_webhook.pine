@@ -1,8 +1,6 @@
 //@version=6
 indicator("McClellan Webhook", overlay=false)
 
-webhookSecret = input.string("", "Webhook Secret", tooltip="Must match TRADINGVIEW_WEBHOOK_SECRET env var. Sent as the payload 'secret' field for server-side auth.")
-
 advn = request.security("ADVN", "D", close)
 decln = request.security("DECN", "D", close)
 
@@ -10,4 +8,4 @@ plot(advn, "ADVN", color.green)
 plot(decln, "DECN", color.red)
 
 if barstate.isconfirmed
-    alert('{"advn":' + str.tostring(advn) + ',"decln":' + str.tostring(decln) + ',"secret":"' + webhookSecret + '"}', alert.freq_once_per_bar)
+    alert('{"advn":' + str.tostring(advn) + ',"decln":' + str.tostring(decln) + '}', alert.freq_once_per_bar)
