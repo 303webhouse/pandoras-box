@@ -1137,14 +1137,10 @@ async def receive_mcclellan_data(payload: McClellanPayload):
     from bias_engine.factor_utils import score_to_signal
     import pandas as pd
 
-    # ── Chunk D hardening (shared AEGIS helper) — OBSERVE until market-hours flip ──
-    validate_webhook_secret(
-        payload.secret,
-        secret=os.getenv("TRADINGVIEW_WEBHOOK_SECRET") or "",
-        observe=_factor_observe("MCCLELLAN"),
-        label="mcclellan",
-    )
-
+    # NOTE: webhook secret gate REMOVED (2026-06-11 reconciliation) — this McClellan
+    # webhook is a dead/legacy ingress: the factor is now computed server-side via the
+    # NYSE proxy (source=nyse_proxy). Endpoint kept as a Redis-history fallback feeder;
+    # it guards zero live TV traffic, so no auth gate is maintained here.
     logger.info("McClellan webhook: ADVN=%.0f, DECLN=%.0f", payload.advn, payload.decln)
 
     if payload.advn <= 0 or payload.decln <= 0:
