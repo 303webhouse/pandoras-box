@@ -23,6 +23,12 @@ from fastapi import APIRouter, Request, HTTPException, Query
 
 from database.postgres_client import get_postgres_client
 from database.redis_client import get_redis_client
+from utils.webhook_auth import (
+    validate_webhook_secret,
+    enforce_content_length_cap,
+    enforce_payload_size_cap,
+    strip_secret,
+)
 
 logger = logging.getLogger("hermes")
 router = APIRouter(tags=["hermes"])
@@ -55,6 +61,15 @@ HERMES_CONFIG = {
 
 VPS_API_KEY = os.getenv("HERMES_VPS_KEY") or ""
 
+# ── Chunk E cutover toggle (OBSERVE until flip-day) ──
+# /api/webhook/hermes is unauthenticated today and its real risk is the VPS-scrape-burst
+# lever (resource-abuse / amplification), not the catalyst cards. Gate with a SEPARATE
+# secret (HERMES_WEBHOOK_SECRET — isolated from the TV family) so its cutover is independent.
+# OBSERVE (validate-but-allow, logs verdict) until all 9 Hermes alerts log secret PRESENT,
+# then flip fail-closed by setting WEBHOOK_HERMES_ENFORCE=1 (no redeploy; env read at request time).
+def _hermes_observe() -> bool:
+    return (os.getenv("WEBHOOK_HERMES_ENFORCE") or "").strip().lower() not in ("1", "true", "yes")
+
 # In-memory sliding window for correlation detection
 recent_breaches: Dict[str, dict] = {}
 
@@ -79,6 +94,8 @@ async def hermes_webhook(request: Request):
     Receives TradingView velocity breach alerts.
     Evaluates tier (single vs correlated), stores event, triggers VPS if needed.
     """
+    # ── Chunk E: AEGIS size cap (pre-read, via Content-Length) ──
+    enforce_content_length_cap(request)
     try:
         payload = await request.json()
     except Exception:
@@ -87,6 +104,16 @@ async def hermes_webhook(request: Request):
             payload = json.loads(body.decode())
         except Exception:
             raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+    # ── Chunk E: AEGIS size cap (post-parse) + shared-secret gate (OBSERVE) ──
+    enforce_payload_size_cap(payload)
+    validate_webhook_secret(
+        payload.get("secret"),
+        secret=os.getenv("HERMES_WEBHOOK_SECRET") or "",
+        observe=_hermes_observe(),
+        label="hermes",
+    )
+    payload = strip_secret(payload)  # never persist/forward the secret
 
     ticker = payload.get("ticker")
     velocity_pct = payload.get("velocity_pct")

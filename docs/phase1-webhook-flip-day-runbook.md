@@ -1,8 +1,30 @@
-# Phase 1 Webhook Hardening — FLIP-DAY RUNBOOK (DRAFT for architecture review)
+# Phase 1 Webhook Hardening — FLIP-DAY RUNBOOK (FINAL)
 
-**Status:** DRAFT — review at the architecture layer **before any flipping**.
-**Authored:** 2026-06-10 (post-Chunk D). **Owner this run:** security session (`sec-work`).
+**Status:** ✅ FINAL — approved by PM 2026-06-10 with the two pre-flight rulings below.
+**Authored:** 2026-06-10 (post-Chunk D; Hermes addendum post-Chunk E). **Owner:** security session (`sec-work`).
 **Scope:** every observe-mode gate currently deployed and awaiting its fail-closed flip.
+
+---
+
+## PM PRE-FLIGHT RULINGS (FINAL)
+
+1. **McClellan may flip a session late — never block GATE 3 on it.** McClellan fires once/day at
+   the close, so its observe confirmation can lag a full session. This is **explicitly acceptable**:
+   flip tick + breadth when confirmed and proceed to GATE 3; flip McClellan whenever its next daily
+   fire logs `PRESENT`. McClellan is never a blocker for any other gate.
+2. **Unseen low-frequency families — no forced pipeline alerts, no multi-day waits.** Do **NOT**
+   push synthetic alerts through the real pipeline (signal pollution), and do **NOT** stall the
+   flip for days waiting on a natural fire. Protocol for a family/feed not yet seen in observe:
+   **(a)** visually verify the on-chart "Webhook Secret" input is populated; **(b)** run the
+   secretless/secreted **curl pair against the gate** to prove its auth behavior; **(c)** flip the
+   gate; **(d)** watch the **first natural fire** land, with **instant rollback ready** (unset the
+   flag) if it 401s.
+   - *Implementation note (pipeline-coupled gates — TV strategies, footprint, hermes):* the
+     **secretless** leg is the safe proof — post-flip it returns **401** at the gate with no
+     pipeline entry. The **secreted** positive is best confirmed by the **first natural fire**
+     rather than a synthetic secreted POST, because on these endpoints the secret gate sits ahead
+     of (and feeds) signal creation, so a synthetic secreted POST would itself pollute. Net: flip
+     after (a)+(b-secretless), then the next real signal is the positive confirmation, rollback armed.
 
 > All gates below are LIVE in production in **observe mode** (validate-but-allow, log the
 > verdict). Nothing rejects today. This runbook flips them to **fail-closed**, smallest-blast
@@ -74,8 +96,9 @@ Flip the three **independently**, each after its own feed confirms:
 - **Breadth** — `[breadth] … PRESENT, match=True` → set `WEBHOOK_BREADTH_ENFORCE=1`. (Every
   confirmed bar — confirms fast.)
 - **McClellan** — `[mcclellan] … PRESENT, match=True` → set `WEBHOOK_MCCLELLAN_ENFORCE=1`.
-  ⚠ **Fires once/day at the close** — its observe confirmation can take a **full session**. Do NOT
-  block GATE 3 waiting on it: flip tick+breadth when confirmed, flip mcclellan on its next daily fire.
+  ⚠ **Fires once/day at the close** (PM RULING 1, FINAL): its observe confirmation can lag a full
+  session, and that is **explicitly acceptable**. Flip tick+breadth when confirmed, proceed to
+  GATE 3, and flip McClellan whenever its next daily fire logs `PRESENT`. **Never block GATE 3 on it.**
 - **Verify each:** the factor still scores (composite recompute logs) post-flip; a secretless test
   POST to that path returns 401.
 
@@ -87,9 +110,14 @@ Flip the three **independently**, each after its own feed confirms:
   secret PRESENT, match=True` — it does **not** name the strategy. Correlate each observe line with
   the very next log line `📨 Webhook received: <ticker> <dir> (<strategy>)` to attribute the family.
   Tick off all 5 strategy names before flipping.
-- **Low-frequency risk:** some families fire only on a setup. A family not seen in the observe
-  window = **do not flip** (you'd silently drop it). Either wait for a natural fire, or push a
-  forced test alert per family with the secret populated.
+- **Low-frequency families (PM RULING 2, FINAL):** some families fire only on a setup. Do **NOT**
+  push forced alerts through the pipeline (signal pollution) and do **NOT** stall for days. For any
+  of the 5 not yet seen in observe: **(a)** visually verify its on-chart "Webhook Secret" input is
+  populated → **(b)** secretless/secreted curl pair against `/webhook/tradingview` (the secretless
+  POST is the safe liveness probe) → **(c)** flip `WEBHOOK_TV_ENFORCE=1` → **(d)** watch that
+  family's first natural fire land, **rollback armed** (unset the flag) if it 401s. See the
+  implementation note under PM Ruling 2 for why the positive is taken from the first natural fire,
+  not a synthetic secreted POST.
 - **Flip:** set `WEBHOOK_TV_ENFORCE=1` only after all 5 confirmed.
 - **Verify:** a real signal from each family still returns `{"status":"accepted"}`; a secretless
   POST to `/webhook/tradingview` returns 401.
@@ -117,6 +145,7 @@ the next request. Each gate is isolated; rolling one back does not touch the oth
 | breadth | `WEBHOOK_BREADTH_ENFORCE` |
 | mcclellan | `WEBHOOK_MCCLELLAN_ENFORCE` |
 | TV + 5 strategies | `WEBHOOK_TV_ENFORCE` |
+| Hermes ×9 (addendum) | `WEBHOOK_HERMES_ENFORCE` |
 
 > Leaving `TRADINGVIEW_WEBHOOK_SECRET` set during a rollback is harmless (observe just keeps
 > logging `match=…`). Only unset it if you intend to fully stand down all gates.
@@ -129,11 +158,71 @@ the next request. Each gate is isolated; rolling one back does not touch the oth
 - [ ] All 9 indicators' "Webhook Secret" input populated on **every** chart instance (Step 0.3).
 - [ ] Observe logs show `PRESENT, match=True` for: footprint; tick; breadth; mcclellan (next daily
       fire); and all 5 strategy families (attributed via the adjacent "Webhook received" line).
-- [ ] Flip order honored: GATE 1 → GATE 2 (tick, breadth, mcclellan) → GATE 3, each verified first.
+- [ ] Flip order honored: GATE 1 → GATE 2 (tick, breadth, mcclellan) → GATE 3 → GATE 4 Hermes
+      (addendum; after Gates 1–3, or day 2 — isolated, no coupling), each verified first.
+- [ ] Hermes (GATE 4): `HERMES_WEBHOOK_SECRET` set; all 9 alert messages carry it (saved); dismiss
+      PATCH gap noted as a separate follow-up.
 - [ ] Rollback path understood (unset the per-gate flag).
 - [ ] Decision logged: McClellan may flip a day later than the rest (once/day fire) — acceptable?
 - [ ] Decision logged: any low-frequency strategy family — wait for natural fire vs forced test?
 
 *Pythia (`/api/webhook/pythia`) and mp_levels (`/webhook/mp_levels`) are already AEGIS fail-closed
-(B4) and are NOT part of this flip. Circuit Breaker (Chunk F) and Hermes (Chunk E) are separate
-upcoming chunks with their own secrets/flags — not in this runbook.*
+(B4) and are NOT part of this flip. Circuit Breaker (Chunk F) is a separate upcoming chunk with its
+own secret/flag — not in this runbook. **Hermes (Chunk E) is covered by the addendum below.***
+
+---
+
+# ADDENDUM — GATE 4: Hermes ×9 (Chunk E)
+
+**Isolated from Gates 1–3 — no coupling.** Hermes uses a **separate secret** (`HERMES_WEBHOOK_SECRET`,
+not the shared `TRADINGVIEW_WEBHOOK_SECRET`) and its own flag (`WEBHOOK_HERMES_ENFORCE`). It joins
+flip-day **AFTER Gates 1–3 are done**, or **slides to day 2** if the morning runs long — its
+isolation means slipping it has zero effect on the other gates.
+
+**Why hardened:** the real risk is the **VPS-scrape-burst lever** (`/api/webhook/hermes` →
+`http://188.245.250.2:8000/api/hermes/trigger`, resource-abuse / amplification), not the catalyst
+cards.
+
+**Re-arm class — Message-box (easier than the Pine class):** Hermes has **no Pine in the repo**; the
+9 alerts are hand-authored JSON in the TradingView alert UI. **Message-box edits apply on save — no
+alert recreate, no indicator republish.** This is strictly easier than the Pine re-arm.
+
+### Step 0 (Hermes-specific)
+1. **Generate a separate secret value** (Nick, flip-day). Do not reuse `TRADINGVIEW_WEBHOOK_SECRET`.
+   PowerShell pattern:
+   ```powershell
+   # 32-byte URL-safe-ish random secret
+   [Convert]::ToBase64String((1..32 | ForEach-Object { Get-Random -Max 256 })) -replace '[+/=]',''
+   ```
+   Treat as a credential — do not paste into logs/Discord/tickets.
+2. **Set it in Railway:** `HERMES_WEBHOOK_SECRET=<value>`. Safe to set now — Hermes still only
+   enforces when `WEBHOOK_HERMES_ENFORCE=1`.
+
+### Step 1 — Re-arm the 9 Hermes alerts (message-box)
+For **each** of the 9 ticker alerts (SPY, QQQ, SMH, XLF, HYG, IYR, TLT, USO, GLD, IBIT — the
+`HERMES_CONFIG` set; confirm the live 9 on the TV alerts list), edit the alert's **Message** field
+and add a top-level `"secret"` key alongside the existing `hermes_flash` fields. Example message:
+```json
+{"alert_type":"hermes_flash","ticker":"SPY","velocity_pct":{{...}},"direction":"...","timeframe_min":30,"secret":"<HERMES_WEBHOOK_SECRET>"}
+```
+- Edit → **Save** (the edit applies immediately; no recreate).
+- Keep the same value in all 9.
+- ☑ Tick each ticker off as you save it — **all 9 must carry the secret before the flip.**
+
+### Step 2 — Observe
+Watch logs for `[hermes] OBSERVE: payload secret PRESENT, match=True`. Because Hermes fires only on
+a velocity breach (event-driven, can be infrequent), apply **PM Ruling 2** for any unseen ticker:
+visual-verify that alert's message has the secret saved → secretless/secreted curl pair against
+`/api/webhook/hermes` (secretless = safe liveness probe) → flip → watch first natural breach land,
+rollback armed.
+
+### Step 3 — Flip
+Set `WEBHOOK_HERMES_ENFORCE=1`. **Verify:** a secretless POST to `/api/webhook/hermes` returns
+**401**; a real velocity breach still creates its catalyst event. **Rollback:** unset
+`WEBHOOK_HERMES_ENFORCE` → instant return to observe.
+
+### Not done in Chunk E (separate follow-up)
+- The **`PATCH /api/hermes/alerts/{id}/dismiss`** state-mutation is still unauthenticated. It is
+  **frontend-driven and the UI sends no API key** (`app.js` `dismissHermesAlert` → bare PATCH), so
+  gating it with `require_api_key` would break the dashboard dismiss button. Closing it properly
+  needs a coordinated frontend change (send the key) — logged as a follow-up, **not** flipped here.
