@@ -488,6 +488,42 @@ async def apply_scoring(signal_data: Dict[str, Any]) -> Dict[str, Any]:
         except Exception as _fe:
             logger.debug("P4A flow enrichment skipped: %s", _fe)
 
+        # sub-brief 3 Chunk 2-R (SHADOW): reconcile P2 vs P4A into ONE flow verdict.
+        # Log only — live score still = P2 + P4A summed until 2R-b clears.
+        try:
+            from scoring.flow_reconciliation import reconcile_flow as _reconcile_flow
+            _p2 = triggering_factors.get("flow_data") or {}
+            _p4a_live = triggering_factors.get("flow") or {}
+            _p4a_age = None; _p4a_call = 0.0; _p4a_put = 0.0; _p4a_sent = None
+            try:
+                from database.postgres_client import get_postgres_client as _gpc2
+                _pool2 = await _gpc2()
+                async with _pool2.acquire() as _c2:
+                    _fr = await _c2.fetchrow(
+                        "SELECT call_premium, put_premium, flow_sentiment, "
+                        "EXTRACT(EPOCH FROM (NOW() - captured_at))/60.0 AS age_min "
+                        "FROM flow_events WHERE ticker=$1 ORDER BY captured_at DESC LIMIT 1",
+                        (signal_data.get("ticker") or "").upper(),
+                    )
+                if _fr:
+                    _p4a_call = float(_fr["call_premium"] or 0)
+                    _p4a_put = float(_fr["put_premium"] or 0)
+                    _p4a_sent = ((_fr["flow_sentiment"] or "").upper() or None)
+                    _p4a_age = float(_fr["age_min"]) if _fr["age_min"] is not None else None
+            except Exception:
+                pass
+            signal_data["flow_reconciled"] = _reconcile_flow(
+                signal_direction=signal_data.get("direction"),
+                p4a_sentiment=_p4a_sent,
+                p4a_call_premium=_p4a_call, p4a_put_premium=_p4a_put,
+                p4a_age_min=_p4a_age, p4a_raw_bonus=_p4a_live.get("bonus", 0) or 0,
+                p2_pc_ratio=_p2.get("pc_ratio"),
+                p2_net_premium_direction=_p2.get("net_premium_direction"),
+                p2_raw_bonus=_p2.get("bonus"),
+            )
+        except Exception as _rec_err:
+            logger.debug("flow reconciliation shadow skipped: %s", _rec_err)
+
         # WH-CONFLUENCE enrichment: check for WH-ACC backing + fresh darkpool blocks
         # Must run BEFORE apply_tier3_confluence_bonus so the wh_confluence key is present.
         try:
