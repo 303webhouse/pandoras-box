@@ -4,14 +4,21 @@
 **Authored:** 2026-06-10 (post-Chunk D; Hermes addendum post-Chunk E). **Owner:** security session (`sec-work`).
 **Scope:** every observe-mode gate currently deployed and awaiting its fail-closed flip.
 
+> **⚠ 2026-06-11 reconciliation trim:** Scout, Hub Sniper, Phalanx, and McClellan were **removed**
+> from this runbook — they guard **zero live TV traffic** (0 sigs/30d; McClellan replaced server-side
+> by `nyse_proxy`). Their gates were removed in commit `cd56b5f`. **tick/breadth** are retained but
+> **held pending an on-chart alert-existence check** (no live data since 06-10 20:00Z). See
+> [phase1-webhook-ingress-reconciliation.md](phase1-webhook-ingress-reconciliation.md) for the
+> per-feed evidence. Live flip set is now: **footprint, Artemis, Holy Grail, circuit_breaker**
+> (+ Hermes addendum), with tick/breadth on hold.
+
 ---
 
 ## PM PRE-FLIGHT RULINGS (FINAL)
 
-1. **McClellan may flip a session late — never block GATE 3 on it.** McClellan fires once/day at
-   the close, so its observe confirmation can lag a full session. This is **explicitly acceptable**:
-   flip tick + breadth when confirmed and proceed to GATE 3; flip McClellan whenever its next daily
-   fire logs `PRESENT`. McClellan is never a blocker for any other gate.
+1. ~~**McClellan may flip a session late — never block GATE 3 on it.**~~ **MOOT (2026-06-11):**
+   McClellan was removed from flip scope — it's now computed server-side (`nyse_proxy`) and its
+   webhook gate was deleted (commit `cd56b5f`). Ruling retained for history only.
 2. **Unseen low-frequency families — no forced pipeline alerts, no multi-day waits.** Do **NOT**
    push synthetic alerts through the real pipeline (signal pollution), and do **NOT** stall the
    flip for days waiting on a natural fire. Protocol for a family/feed not yet seen in observe:
@@ -53,22 +60,19 @@ Two preconditions for every flip:
    - ✅ Safe to set now: every gate still only enforces when its **own** `WEBHOOK_*_ENFORCE` flag
      is on. Setting the shared secret does **not** flip anything — it just lets the observe logs
      start reporting `match=True/False` instead of `env secret UNSET`.
-3. **Populate the on-chart "Webhook Secret" input** with that same value on **all 9 indicators**,
-   on **every chart/ticker each one runs on** (per-chart — an indicator on 5 tickers = 5 inputs):
+3. **Populate the on-chart "Webhook Secret" input** with that same value on the indicators below,
+   on **every chart/ticker each one runs on** (per-chart — an indicator on 5 tickers = 5 inputs).
+   *(Scout/Hub Sniper/Phalanx/McClellan removed per the 2026-06-11 reconciliation — dead feeds.)*
 
-   | Group | Indicator (on-chart name) | Pine file |
-   |-------|---------------------------|-----------|
-   | A footprint | **Footprint Alert for Pandora** (shorttitle "Trojan-Horse") | `webhooks/trojan_horse_footprint_v2.pine` |
-   | D bias | **TICK Reporter (Webhook)** | `webhooks/tick_reporter.pine` |
-   | D bias | **Breadth Webhook** | `webhooks/breadth_webhook.pine` |
-   | D bias | **McClellan Webhook** | `webhooks/mcclellan_webhook.pine` |
-   | C strat | **Artemis v3.1** | `webhooks/artemis_v3.pine` |
-   | C strat | **Holy Grail Webhook** (shorttitle "HG Webhook") | `holy_grail_webhook_v1.pine` |
-   | C strat | **Scout Sniper v3.1 (15m) – Tradeable/Ignore + VWAP Plan** | `webhooks/scout_sniper_v3.1.pine` |
-   | C strat | **Hub Sniper v2.1** | `webhooks/hub_sniper_v2.1.pine` |
-   | C strat | **Phalanx v2** | `webhooks/phalanx_v2.pine` |
-   | F (GATE 5) | **Circuit Breaker Monitor (SPY)** | `webhooks/circuit_breaker_spy.pine` |
-   | F (GATE 5) | **Circuit Breaker Monitor (VIX)** | `webhooks/circuit_breaker_vix.pine` |
+   | Group | Indicator (on-chart name) | Pine file | Status |
+   |-------|---------------------------|-----------|--------|
+   | A footprint | **Footprint Alert for Pandora** (shorttitle "Trojan-Horse") | `webhooks/trojan_horse_footprint_v2.pine` | flip-ready |
+   | D bias | **TICK Reporter (Webhook)** | `webhooks/tick_reporter.pine` | **HOLD** — verify alert exists |
+   | D bias | **Breadth Webhook** | `webhooks/breadth_webhook.pine` | **HOLD** — verify alert exists |
+   | C strat | **Artemis v3.1** | `webhooks/artemis_v3.pine` | re-arm live Pine first |
+   | C strat | **Holy Grail Webhook** (shorttitle "HG Webhook") | `holy_grail_webhook_v1.pine` | re-arm live Pine first |
+   | F (GATE 5) | **Circuit Breaker Monitor (SPY)** | `webhooks/circuit_breaker_spy.pine` | verify, then flip |
+   | F (GATE 5) | **Circuit Breaker Monitor (VIX)** | `webhooks/circuit_breaker_vix.pine` | verify, then flip |
 
    > ⚠ The Pine *code* now carries the field, but the on-chart input **defaults to empty**. An
    > un-populated input sends `"secret":""` → that feed will 401 the instant its gate flips.
@@ -91,36 +95,38 @@ Two preconditions for every flip:
 - **Verify:** a real footprint still returns `{"status":"received"}`; a hand-rolled secretless POST
   to `/webhook/footprint` now returns **401**.
 
-### GATE 2 — Chunk D bias factors (medium: 3 feeds, move composite bias)
-Flip the three **independently**, each after its own feed confirms:
-- **TICK** — `[tick] … PRESENT, match=True` → set `WEBHOOK_TICK_ENFORCE=1`. (Fires every confirmed
-  bar in-session — confirms fast.)
-- **Breadth** — `[breadth] … PRESENT, match=True` → set `WEBHOOK_BREADTH_ENFORCE=1`. (Every
-  confirmed bar — confirms fast.)
-- **McClellan** — `[mcclellan] … PRESENT, match=True` → set `WEBHOOK_MCCLELLAN_ENFORCE=1`.
-  ⚠ **Fires once/day at the close** (PM RULING 1, FINAL): its observe confirmation can lag a full
-  session, and that is **explicitly acceptable**. Flip tick+breadth when confirmed, proceed to
-  GATE 3, and flip McClellan whenever its next daily fire logs `PRESENT`. **Never block GATE 3 on it.**
+### GATE 2 — Chunk D bias factors (tick + breadth; move composite bias)
+> **⚠ HELD pending Nick's TV-alert existence check** — per the 2026-06-11 reconciliation, neither
+> tick nor breadth has delivered live data since 06-10 20:00Z (factors kept "fresh" by recompute on
+> stale cache — see the faked-fresh Phase 0). **Do not flip until a live POST is confirmed.**
+> McClellan was **removed** from this gate (replaced server-side by `nyse_proxy`).
+
+Flip the two **independently**, each after its own feed confirms a *live* POST:
+- **TICK** — `[tick] … PRESENT, match=True` (with a **fresh** `updated_at`) → set `WEBHOOK_TICK_ENFORCE=1`.
+- **Breadth** — `[breadth] … PRESENT, match=True` (fresh) → set `WEBHOOK_BREADTH_ENFORCE=1`.
 - **Verify each:** the factor still scores (composite recompute logs) post-flip; a secretless test
   POST to that path returns 401.
 
-### GATE 3 — Chunk C TV-router + 5 strategy families (HIGHEST: a bad flip drops every live strategy signal)
-- **Single flag, all 5 families:** `WEBHOOK_TV_ENFORCE=1` gates `/webhook/tradingview` for
-  Artemis, Holy Grail, Scout, Hub Sniper, Phalanx **at once**. There is no per-family flag — so
-  **all 5 must be confirmed before the one flip.**
+### GATE 3 — Chunk C TV-router + 2 live strategy families (HIGHEST: a bad flip drops every live strategy signal)
+> **⚠ Root-cause precondition (2026-06-11):** the repo `.pine` edits **never propagated** to
+> TradingView — the live charts still run the OLD Artemis/Holy Grail Pine **without** the secret
+> input. Nick must paste the updated Pine onto each chart **first**, or these will 401 on flip.
+> Scout/Hub Sniper/Phalanx removed — **0 sigs/30d**, no live TV source (see reconciliation).
+
+- **Single flag, both families:** `WEBHOOK_TV_ENFORCE=1` gates `/webhook/tradingview` for **Artemis
+  and Holy Grail** at once. There is no per-family flag — so **both must be confirmed before the one
+  flip.** (These are the only two live webhook strategies; everything else on this route is
+  server-side or dead.)
 - **Family attribution caveat:** the gate logs a generic label `[tradingview] OBSERVE: payload
   secret PRESENT, match=True` — it does **not** name the strategy. Correlate each observe line with
   the very next log line `📨 Webhook received: <ticker> <dir> (<strategy>)` to attribute the family.
-  Tick off all 5 strategy names before flipping.
-- **Low-frequency families (PM RULING 2, FINAL):** some families fire only on a setup. Do **NOT**
-  push forced alerts through the pipeline (signal pollution) and do **NOT** stall for days. For any
-  of the 5 not yet seen in observe: **(a)** visually verify its on-chart "Webhook Secret" input is
-  populated → **(b)** secretless/secreted curl pair against `/webhook/tradingview` (the secretless
-  POST is the safe liveness probe) → **(c)** flip `WEBHOOK_TV_ENFORCE=1` → **(d)** watch that
-  family's first natural fire land, **rollback armed** (unset the flag) if it 401s. See the
-  implementation note under PM Ruling 2 for why the positive is taken from the first natural fire,
-  not a synthetic secreted POST.
-- **Flip:** set `WEBHOOK_TV_ENFORCE=1` only after all 5 confirmed.
+  Tick off both (Artemis, Holy Grail) before flipping.
+- **Low-frequency families (PM RULING 2, FINAL):** if either isn't seen in observe — Do **NOT**
+  push forced alerts through the pipeline (signal pollution) and do **NOT** stall for days:
+  **(a)** visually verify its on-chart "Webhook Secret" input is populated → **(b)** secretless
+  curl against `/webhook/tradingview` (safe liveness probe) → **(c)** flip `WEBHOOK_TV_ENFORCE=1`
+  → **(d)** watch that family's first natural fire land, **rollback armed** if it 401s.
+- **Flip:** set `WEBHOOK_TV_ENFORCE=1` only after both confirmed.
 - **Verify:** a real signal from each family still returns `{"status":"accepted"}`; a secretless
   POST to `/webhook/tradingview` returns 401.
 
@@ -153,8 +159,7 @@ the next request. Each gate is isolated; rolling one back does not touch the oth
 | footprint | `WEBHOOK_FOOTPRINT_ENFORCE` |
 | tick | `WEBHOOK_TICK_ENFORCE` |
 | breadth | `WEBHOOK_BREADTH_ENFORCE` |
-| mcclellan | `WEBHOOK_MCCLELLAN_ENFORCE` |
-| TV + 5 strategies | `WEBHOOK_TV_ENFORCE` |
+| TV + Artemis/Holy Grail | `WEBHOOK_TV_ENFORCE` |
 | Circuit Breaker (GATE 5) | `WEBHOOK_CB_ENFORCE` |
 | Hermes ×9 (addendum) | `WEBHOOK_HERMES_ENFORCE` |
 
@@ -166,15 +171,17 @@ the next request. Each gate is isolated; rolling one back does not touch the oth
 ## Pre-flight checklist (architecture sign-off)
 
 - [ ] `TRADINGVIEW_WEBHOOK_SECRET` set in Railway (Step 0.2).
-- [ ] All 9 indicators' "Webhook Secret" input populated on **every** chart instance (Step 0.3).
-- [ ] Observe logs show `PRESENT, match=True` for: footprint; tick; breadth; mcclellan (next daily
-      fire); and all 5 strategy families (attributed via the adjacent "Webhook received" line).
-- [ ] Flip order honored: GATE 1 → GATE 2 (tick, breadth, mcclellan) → GATE 3 → GATE 4 Hermes
-      (addendum; after Gates 1–3, or day 2 — isolated, no coupling), each verified first.
+- [ ] The 7 retained indicators' "Webhook Secret" input populated on **every** chart instance (Step 0.3).
+- [ ] **Artemis + Holy Grail live Pine re-pasted on-chart** (repo edits don't propagate — root cause).
+- [ ] **tick/breadth alert-existence confirmed by Nick** (held until a fresh live POST is observed).
+- [ ] Observe logs show `PRESENT, match=True` for: footprint; both strategy families (Artemis, Holy
+      Grail — attributed via the adjacent "Webhook received" line); circuit_breaker (on natural fire).
+- [ ] Flip order honored: GATE 1 footprint → GATE 2 (tick, breadth — *if confirmed live*) → GATE 3
+      (Artemis, Holy Grail) → GATE 5 circuit_breaker → GATE 4 Hermes (addendum; after Gates 1–3, or
+      day 2 — isolated), each verified first.
 - [ ] Hermes (GATE 4): `HERMES_WEBHOOK_SECRET` set; all 9 alert messages carry it (saved); dismiss
       PATCH gap noted as a separate follow-up.
 - [ ] Rollback path understood (unset the per-gate flag).
-- [ ] Decision logged: McClellan may flip a day later than the rest (once/day fire) — acceptable?
 - [ ] Decision logged: any low-frequency strategy family — wait for natural fire vs forced test?
 
 *Pythia (`/api/webhook/pythia`) and mp_levels (`/webhook/mp_levels`) are already AEGIS fail-closed
