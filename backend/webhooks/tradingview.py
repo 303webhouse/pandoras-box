@@ -8,7 +8,7 @@ Supports multiple strategies:
 - Exhaustion (with BTC macro confluence)
 """
 
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, Request, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
 from datetime import datetime
@@ -20,7 +20,12 @@ import os
 
 from strategies.exhaustion import validate_exhaustion_signal, classify_exhaustion_signal
 from signals.pipeline import process_signal_unified
-from utils.webhook_auth import validate_webhook_secret
+from utils.webhook_auth import (
+    validate_webhook_secret,
+    enforce_content_length_cap,
+    enforce_payload_size_cap,
+)
+from utils.pivot_auth import require_api_key
 
 logger = logging.getLogger(__name__)
 
@@ -216,7 +221,10 @@ async def receive_tradingview_alert(request: Request):
     Routes to appropriate strategy handler based on strategy field.
     FOOTPRINT signals are forwarded to the footprint handler.
     """
+    # ── Chunk G (R-4): central raw-body size cap at the router entry ──
+    enforce_content_length_cap(request)
     payload = await request.json()
+    enforce_payload_size_cap(payload)
 
     # Route FOOTPRINT signals to dedicated handler
     if payload.get("signal") == "FOOTPRINT":
@@ -1230,6 +1238,12 @@ async def get_signal_outcome(signal_id: str):
     """
     Return outcome data for a signal. Used by VPS outcome matcher.
     Returns 404 if signal_id not found in signal_outcomes table.
+
+    Chunk G decision: LEFT UNAUTHENTICATED (read-only). Live VPS integration — the
+    outcome matcher polls this and sends no API key today, so gating would require a
+    coordinated VPS-side change. Risk is low: read-only, returns a single row only on
+    an exact signal_id match (timestamped IDs are not trivially enumerable). Revisit
+    when the VPS gains an API key.
     """
     from database.postgres_client import get_postgres_client
 
@@ -1256,8 +1270,14 @@ async def get_signal_outcome(signal_id: str):
 
 
 @router.post("/test")
-async def test_webhook(request: Request):
-    """Test endpoint to verify webhook is working"""
+async def test_webhook(request: Request, _=Depends(require_api_key)):
+    """Test endpoint to verify webhook is working.
+
+    Chunk G: gated with require_api_key (was unauthenticated — moved from the test
+    suite's AUTH_TODO_LOCKDOWN to PROTECTED_ROUTES). Also no longer echoes/logs the
+    raw body (removes the reflection + log-injection surface).
+    """
+    enforce_content_length_cap(request)
     body = await request.json()
-    logger.info(f"Test webhook received: {body}")
-    return {"status": "test_success", "received": body}
+    logger.info("Test webhook received (%d keys)", len(body) if isinstance(body, dict) else 0)
+    return {"status": "test_success"}
