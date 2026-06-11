@@ -307,6 +307,10 @@ def compute_score_v2(signal_data: Dict[str, Any]) -> Tuple[Optional[float], Dict
     _adx_shadow = signal_data.get("adx_shadow")
     if isinstance(_adx_shadow, dict):
         factors["sb3_shadow"]["adx"] = {**_adx_shadow, "shadow": True}
+    # Chunk 2-R shadow: reconciled flow verdict (P4A-primary + P2 gap-fill) — log only.
+    _flow_rec = signal_data.get("flow_reconciled")
+    if isinstance(_flow_rec, dict):
+        factors["sb3_shadow"]["flow_reconciled"] = _flow_rec
 
     # --- Compute final v2 score ---
     score_v2 = flash_score + post_enrichment_bonus
