@@ -4,13 +4,22 @@
 **Authored:** 2026-06-10 (post-Chunk D; Hermes addendum post-Chunk E). **Owner:** security session (`sec-work`).
 **Scope:** every observe-mode gate currently deployed and awaiting its fail-closed flip.
 
-> **⚠ 2026-06-11 reconciliation trim:** Scout, Hub Sniper, Phalanx, and McClellan were **removed**
-> from this runbook — they guard **zero live TV traffic** (0 sigs/30d; McClellan replaced server-side
-> by `nyse_proxy`). Their gates were removed in commit `cd56b5f`. **tick/breadth** are retained but
-> **held pending an on-chart alert-existence check** (no live data since 06-10 20:00Z). See
-> [phase1-webhook-ingress-reconciliation.md](phase1-webhook-ingress-reconciliation.md) for the
-> per-feed evidence. Live flip set is now: **footprint, Artemis, Holy Grail, circuit_breaker**
-> (+ Hermes addendum), with tick/breadth on hold.
+> **⚠ 2026-06-11 reconciliation + TV-alert-log resolution.** Scout/Hub Sniper/Phalanx/McClellan
+> **removed** (zero live TV traffic; McClellan replaced server-side by `nyse_proxy`; gates removed in
+> `cd56b5f`). The TV alert log then resolved the held rows:
+> - **FLIP-ELIGIBLE (delivery-healthy), after on-chart Pine re-arm:** **footprint**, **circuit_breaker
+>   (SPY)** (delivers fine, live 06-11 13:30Z). VIX is real but rare-fire (last 06-09) — expected.
+> - **Artemis** — live webhook strategy → flip after re-arm. **Holy Grail** — **dormant** (0 fires in
+>   the 9-day alert log despite past DB rows); don't rely on it to confirm the shared TV gate — Artemis
+>   is the live confirmer.
+> - **tick / breadth — HOLD (do NOT flip).** Their alerts fire every bar, but **webhook delivery is
+>   timing out** (`"request took too long and timed out"`) — ~7% of all deliveries fail (138 timeouts
+>   + 9×502 of ~2000, clustered on the every-bar firers). This is the **upstream root cause** of the
+>   faked-fresh staleness. Flipping a gate onto a feed that's already failing delivery only adds 401s
+>   to timeouts. **Hold until the hub webhook-latency fix (fast-ACK + async insert) ships** — tracked
+>   as Chunk 6 in [2026-06-11-phase1-factor-staleness-fix.md](codex-briefs/2026-06-11-phase1-factor-staleness-fix.md).
+>
+> Per-feed evidence: [phase1-webhook-ingress-reconciliation.md](phase1-webhook-ingress-reconciliation.md).
 
 ---
 
@@ -66,13 +75,13 @@ Two preconditions for every flip:
 
    | Group | Indicator (on-chart name) | Pine file | Status |
    |-------|---------------------------|-----------|--------|
-   | A footprint | **Footprint Alert for Pandora** (shorttitle "Trojan-Horse") | `webhooks/trojan_horse_footprint_v2.pine` | flip-ready |
-   | D bias | **TICK Reporter (Webhook)** | `webhooks/tick_reporter.pine` | **HOLD** — verify alert exists |
-   | D bias | **Breadth Webhook** | `webhooks/breadth_webhook.pine` | **HOLD** — verify alert exists |
-   | C strat | **Artemis v3.1** | `webhooks/artemis_v3.pine` | re-arm live Pine first |
-   | C strat | **Holy Grail Webhook** (shorttitle "HG Webhook") | `holy_grail_webhook_v1.pine` | re-arm live Pine first |
-   | F (GATE 5) | **Circuit Breaker Monitor (SPY)** | `webhooks/circuit_breaker_spy.pine` | verify, then flip |
-   | F (GATE 5) | **Circuit Breaker Monitor (VIX)** | `webhooks/circuit_breaker_vix.pine` | verify, then flip |
+   | A footprint | **Footprint Alert for Pandora** (shorttitle "Trojan-Horse") | `webhooks/trojan_horse_footprint_v2.pine` | **flip-eligible** (delivery-healthy) |
+   | D bias | **TICK Reporter (Webhook)** | `webhooks/tick_reporter.pine` | **HOLD** — delivery timing out (Chunk 6) |
+   | D bias | **Breadth Webhook** | `webhooks/breadth_webhook.pine` | **HOLD** — delivery timing out (Chunk 6) |
+   | C strat | **Artemis v3.1** | `webhooks/artemis_v3.pine` | re-arm live Pine first (live confirmer) |
+   | C strat | **Holy Grail Webhook** (shorttitle "HG Webhook") | `holy_grail_webhook_v1.pine` | DORMANT — re-arm only if keeping live |
+   | F (GATE 5) | **Circuit Breaker Monitor (SPY)** | `webhooks/circuit_breaker_spy.pine` | **flip-eligible** (delivers, live 13:30Z) |
+   | F (GATE 5) | **Circuit Breaker Monitor (VIX)** | `webhooks/circuit_breaker_vix.pine` | rare-fire (expected) |
 
    > ⚠ The Pine *code* now carries the field, but the on-chart input **defaults to empty**. An
    > un-populated input sends `"secret":""` → that feed will 401 the instant its gate flips.
@@ -96,47 +105,55 @@ Two preconditions for every flip:
   to `/webhook/footprint` now returns **401**.
 
 ### GATE 2 — Chunk D bias factors (tick + breadth; move composite bias)
-> **⚠ HELD pending Nick's TV-alert existence check** — per the 2026-06-11 reconciliation, neither
-> tick nor breadth has delivered live data since 06-10 20:00Z (factors kept "fresh" by recompute on
-> stale cache — see the faked-fresh Phase 0). **Do not flip until a live POST is confirmed.**
-> McClellan was **removed** from this gate (replaced server-side by `nyse_proxy`).
+> **⛔ HELD — do NOT flip until the webhook-latency fix ships.** TV-alert-log resolution (06-11):
+> the tick/breadth alerts **fire every bar**, but the **hub webhook delivery is timing out** (~7% of
+> all deliveries fail, clustered on these every-bar firers) → no fresh data lands → the faked-fresh
+> staleness. Flipping a gate onto a feed that's already failing delivery just **adds 401s to
+> timeouts**. Hold until **Chunk 6 (fast-ACK + async insert)** ships and a fresh live POST is observed.
+> McClellan **removed** from this gate (server-side `nyse_proxy`).
 
-Flip the two **independently**, each after its own feed confirms a *live* POST:
+After the latency fix, flip the two **independently**, each after its own feed confirms a *live* POST:
 - **TICK** — `[tick] … PRESENT, match=True` (with a **fresh** `updated_at`) → set `WEBHOOK_TICK_ENFORCE=1`.
 - **Breadth** — `[breadth] … PRESENT, match=True` (fresh) → set `WEBHOOK_BREADTH_ENFORCE=1`.
 - **Verify each:** the factor still scores (composite recompute logs) post-flip; a secretless test
   POST to that path returns 401.
 
-### GATE 3 — Chunk C TV-router + 2 live strategy families (HIGHEST: a bad flip drops every live strategy signal)
+### GATE 3 — Chunk C TV-router (live confirmer: Artemis) (HIGHEST: a bad flip drops every live strategy signal)
 > **⚠ Root-cause precondition (2026-06-11):** the repo `.pine` edits **never propagated** to
-> TradingView — the live charts still run the OLD Artemis/Holy Grail Pine **without** the secret
-> input. Nick must paste the updated Pine onto each chart **first**, or these will 401 on flip.
-> Scout/Hub Sniper/Phalanx removed — **0 sigs/30d**, no live TV source (see reconciliation).
+> TradingView — the live chart still runs the OLD Pine **without** the secret input. Nick must paste
+> the updated Pine on-chart **first**, or it 401s on flip.
+> **Artemis** is the only **live** webhook strategy → it's the confirmer. **Holy Grail is DORMANT**
+> (0 fires in the 9-day alert log despite past DB rows) — do **not** wait on it to confirm the flip;
+> if you still want HG live, re-arm its Pine too, otherwise it would 401 if it ever fires
+> un-re-armed (correct behavior). Scout/Hub Sniper/Phalanx removed — 0 sigs/30d.
 
-- **Single flag, both families:** `WEBHOOK_TV_ENFORCE=1` gates `/webhook/tradingview` for **Artemis
-  and Holy Grail** at once. There is no per-family flag — so **both must be confirmed before the one
-  flip.** (These are the only two live webhook strategies; everything else on this route is
-  server-side or dead.)
+- **Single flag:** `WEBHOOK_TV_ENFORCE=1` gates **all** of `/webhook/tradingview` at once (no
+  per-family flag). Flip is gated on **Artemis** showing `PRESENT, match=True` (the live strategy);
+  dormant strategies (Holy Grail et al.) can't confirm via observe — that's expected.
 - **Family attribution caveat:** the gate logs a generic label `[tradingview] OBSERVE: payload
   secret PRESENT, match=True` — it does **not** name the strategy. Correlate each observe line with
-  the very next log line `📨 Webhook received: <ticker> <dir> (<strategy>)` to attribute the family.
-  Tick off both (Artemis, Holy Grail) before flipping.
+  the very next log line `📨 Webhook received: <ticker> <dir> (<strategy>)` to confirm it's Artemis.
 - **Low-frequency families (PM RULING 2, FINAL):** if either isn't seen in observe — Do **NOT**
   push forced alerts through the pipeline (signal pollution) and do **NOT** stall for days:
   **(a)** visually verify its on-chart "Webhook Secret" input is populated → **(b)** secretless
   curl against `/webhook/tradingview` (safe liveness probe) → **(c)** flip `WEBHOOK_TV_ENFORCE=1`
   → **(d)** watch that family's first natural fire land, **rollback armed** if it 401s.
-- **Flip:** set `WEBHOOK_TV_ENFORCE=1` only after both confirmed.
-- **Verify:** a real signal from each family still returns `{"status":"accepted"}`; a secretless
-  POST to `/webhook/tradingview` returns 401.
+- **Flip:** set `WEBHOOK_TV_ENFORCE=1` after **Artemis** confirms `PRESENT, match=True` (with its
+  live Pine re-armed on-chart).
+- **Verify:** a real Artemis signal still returns `{"status":"accepted"}`; a secretless POST to
+  `/webhook/tradingview` returns 401.
 
-### GATE 5 — Chunk F circuit breaker (rare fires → Ruling 2 protocol)
-- **Feed/Pines:** Circuit Breaker SPY + VIX. **Secret:** shared `TRADINGVIEW_WEBHOOK_SECRET`
-  (TV-family — inputs populated in Step 0). **Flag:** `WEBHOOK_CB_ENFORCE=1`. **Watch:**
-  `[circuit_breaker] OBSERVE: payload secret PRESENT, match=True`. CB fires only on a state change
-  (rare) → apply **PM Ruling 2**: visual-verify both CB inputs populated → secretless curl against
-  `/webhook/circuit_breaker` (→401 post-flip) → flip → watch the first natural CB fire, rollback
-  armed. Closes the unauth bias-state write (`bias_cap`/`bias_floor`/`scoring_modifier`).
+### GATE 5 — Chunk F circuit breaker (FLIP-ELIGIBLE: SPY delivery-healthy)
+- **Feed/Pines:** Circuit Breaker SPY + VIX. **SPY delivers successfully and was live 06-11 13:30Z →
+  flip-eligible** once its on-chart Pine is re-armed. **VIX** is real but rare-fire (last 06-09) —
+  expected; don't wait on it.
+- **Secret:** shared `TRADINGVIEW_WEBHOOK_SECRET` (TV-family — inputs populated in Step 0).
+  **Flag:** `WEBHOOK_CB_ENFORCE=1`. **Watch:** `[circuit_breaker] OBSERVE: payload secret PRESENT,
+  match=True`.
+- CB fires only on a state change → apply **PM Ruling 2**: visual-verify both CB inputs populated →
+  secretless curl against `/webhook/circuit_breaker` (→401 post-flip) → flip → watch the first
+  natural CB fire (SPY confirms soonest), rollback armed. Closes the unauth bias-state write
+  (`bias_cap`/`bias_floor`/`scoring_modifier`).
 
 ---
 
@@ -172,13 +189,13 @@ the next request. Each gate is isolated; rolling one back does not touch the oth
 
 - [ ] `TRADINGVIEW_WEBHOOK_SECRET` set in Railway (Step 0.2).
 - [ ] The 7 retained indicators' "Webhook Secret" input populated on **every** chart instance (Step 0.3).
-- [ ] **Artemis + Holy Grail live Pine re-pasted on-chart** (repo edits don't propagate — root cause).
-- [ ] **tick/breadth alert-existence confirmed by Nick** (held until a fresh live POST is observed).
-- [ ] Observe logs show `PRESENT, match=True` for: footprint; both strategy families (Artemis, Holy
-      Grail — attributed via the adjacent "Webhook received" line); circuit_breaker (on natural fire).
-- [ ] Flip order honored: GATE 1 footprint → GATE 2 (tick, breadth — *if confirmed live*) → GATE 3
-      (Artemis, Holy Grail) → GATE 5 circuit_breaker → GATE 4 Hermes (addendum; after Gates 1–3, or
-      day 2 — isolated), each verified first.
+- [ ] **Artemis live Pine re-pasted on-chart** (repo edits don't propagate — root cause). Holy Grail
+      dormant — re-arm only if keeping it live.
+- [ ] **tick/breadth: NOT flipped** until the Chunk 6 webhook-latency fix ships (delivery timing out).
+- [ ] Observe logs show `PRESENT, match=True` for: footprint; **Artemis** (attributed via the
+      adjacent "Webhook received" line); circuit_breaker SPY (on natural fire).
+- [ ] Flip order honored: GATE 1 footprint → GATE 5 circuit_breaker (SPY) → GATE 3 (Artemis) →
+      GATE 4 Hermes (addendum). **GATE 2 (tick/breadth) deferred to post-latency-fix.**
 - [ ] Hermes (GATE 4): `HERMES_WEBHOOK_SECRET` set; all 9 alert messages carry it (saved); dismiss
       PATCH gap noted as a separate follow-up.
 - [ ] Rollback path understood (unset the per-gate flag).
