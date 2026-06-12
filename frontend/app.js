@@ -4019,6 +4019,19 @@ function _sv(alert) {
     return sv || {};
 }
 
+// A synthetic/verification event — visibly badged so a test card is never
+// mistaken for a live signal. Real scanner events use source "flow_scanner_v2".
+function _isTestEvent(alert) {
+    const sv = _sv(alert);
+    if (sv.test === true) return true;
+    return /test/i.test((sv.source || '').toString());
+}
+function _testChip(alert) {
+    return _isTestEvent(alert)
+        ? '<span style="background:#ff9800;color:#1a1a1a;font-size:11px;font-weight:800;padding:1px 7px;border-radius:4px;margin-right:8px;letter-spacing:.5px;">🧪 TEST</span>'
+        : '';
+}
+
 function _catalystLine(alert) {
     const sv = _sv(alert);
     if (sv.headline) return sv.headline;
@@ -4064,7 +4077,7 @@ function _catalystCardHTML(alert) {
     const ts = _catalystTsLabel(alert);
     const line = _catalystLine(alert).replace(/&/g, '&amp;').replace(/</g, '&lt;');
     return `<div class="catalyst-card" style="border-left:3px solid ${color};padding:10px 12px;margin:6px 0;background:#161b22;border-radius:6px;">`
-        + `<div style="font-size:18px;color:#e6edf3;line-height:1.35;">${line}</div>`
+        + `<div style="font-size:18px;color:#e6edf3;line-height:1.35;">${_testChip(alert)}${line}</div>`
         + `<div style="font-size:12px;color:#78909c;margin-top:4px;">${ts}</div></div>`;
 }
 
@@ -4075,7 +4088,7 @@ function _catalystHitCardHTML(alert) {
     const ts = _catalystTsLabel(alert);
     const line = _catalystLine(alert).replace(/&/g, '&amp;').replace(/</g, '&lt;');
     return `<div class="catalyst-hit-card" style="border:2px solid ${color};background:#2a2410;border-radius:8px;padding:12px 14px;margin:6px 0;box-shadow:0 0 0 1px ${color}55;">`
-        + `<div style="font-size:12px;color:#ffd54f;font-weight:700;letter-spacing:.6px;margin-bottom:4px;">★ TARGET</div>`
+        + `<div style="font-size:12px;color:#ffd54f;font-weight:700;letter-spacing:.6px;margin-bottom:4px;">${_testChip(alert)}★ TARGET</div>`
         + `<div style="font-size:20px;color:#ffffff;line-height:1.35;font-weight:600;">${line}</div>`
         + `<div style="font-size:12px;color:#b0bec5;margin-top:4px;">${ts}</div></div>`;
 }
