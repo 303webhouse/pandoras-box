@@ -8,11 +8,59 @@
 const IS_HTTPS = window.location.protocol === 'https:';
 const WS_URL = `${IS_HTTPS ? 'wss' : 'ws'}://${window.location.host}/ws`;
 const API_URL = `${window.location.origin}/api`;
-const API_KEY = 'rLl-7i2GqGjie5in9iHIlVtqlP5zpY7D5E6-8tzlNSk';
-
+// PIVOT_API_KEY no longer ships to the browser. The dashboard authenticates via an
+// HttpOnly session cookie (same-origin → sent automatically by fetch). authHeaders() now
+// carries only the CSRF custom header; mutations are gated server-side by the session.
 function authHeaders(extraHeaders = {}) {
-    return { 'Content-Type': 'application/json', 'X-API-Key': API_KEY, ...extraHeaders };
+    return { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest', ...extraHeaders };
 }
+
+// ── Dashboard session gate ──────────────────────────────────────────────
+// Wrap fetch so any 401 surfaces a login overlay; proactively check session on load.
+(function () {
+    let loginShown = false;
+    window.__rawFetch = window.fetch.bind(window);
+    window.fetch = async function (...args) {
+        const resp = await window.__rawFetch(...args);
+        if (resp && resp.status === 401) showLoginOverlay();
+        return resp;
+    };
+    function showLoginOverlay() {
+        if (loginShown || document.getElementById('login-overlay')) return;
+        loginShown = true;
+        const ov = document.createElement('div');
+        ov.id = 'login-overlay';
+        ov.style.cssText = 'position:fixed;inset:0;z-index:99999;background:#0d1117;display:flex;align-items:center;justify-content:center;font-family:system-ui,sans-serif;';
+        ov.innerHTML = '<form id="login-form" style="background:#161b22;padding:32px;border-radius:12px;border:1px solid #30363d;min-width:280px;display:flex;flex-direction:column;gap:12px;">'
+            + '<div style="color:#e6edf3;font-size:18px;font-weight:600;">Pandora’s Box</div>'
+            + '<input id="login-pw" type="password" placeholder="Password" autocomplete="current-password" style="padding:10px;border-radius:6px;border:1px solid #30363d;background:#0d1117;color:#e6edf3;">'
+            + '<button type="submit" style="padding:10px;border-radius:6px;border:none;background:#1f6feb;color:#fff;font-weight:600;cursor:pointer;">Sign in</button>'
+            + '<div id="login-err" style="color:#f85149;font-size:13px;min-height:16px;"></div></form>';
+        document.body.appendChild(ov);
+        const pwEl = ov.querySelector('#login-pw'); if (pwEl) pwEl.focus();
+        ov.querySelector('#login-form').addEventListener('submit', async function (e) {
+            e.preventDefault();
+            const err = ov.querySelector('#login-err'); err.textContent = '';
+            try {
+                const r = await window.__rawFetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                    body: JSON.stringify({ password: ov.querySelector('#login-pw').value }),
+                });
+                if (r.ok) { location.reload(); }
+                else { err.textContent = (r.status === 401) ? 'Invalid password' : 'Login unavailable'; }
+            } catch (_) { err.textContent = 'Network error'; }
+        });
+    }
+    window.showLoginOverlay = showLoginOverlay;
+    document.addEventListener('DOMContentLoaded', async function () {
+        try {
+            const r = await window.__rawFetch('/api/auth/session');
+            const j = await r.json();
+            if (!j.authenticated) showLoginOverlay();
+        } catch (_) { /* a 401 on any later call will still gate */ }
+    });
+})();
 
 const BIAS_COLORS = {
     TORO_MAJOR: { bg: '#0a2e1a', accent: '#00e676', text: '#00e676' },
@@ -1300,7 +1348,7 @@ function handleCircuitBreakerPendingReset(state) {
         newAccept.addEventListener('click', async () => {
             newAccept.disabled = true;
             try {
-                const resp = await fetch('/webhook/circuit_breaker/accept_reset', { method: 'POST', headers: { 'X-API-Key': API_KEY } });
+                const resp = await fetch('/webhook/circuit_breaker/accept_reset', { method: 'POST', headers: { 'X-Requested-With': 'XMLHttpRequest' } });
                 if (resp.ok) {
                     banner.style.display = 'none';
                     fetchCompositeBias();
@@ -1318,7 +1366,7 @@ function handleCircuitBreakerPendingReset(state) {
         newReject.addEventListener('click', async () => {
             newReject.disabled = true;
             try {
-                const resp = await fetch('/webhook/circuit_breaker/reject_reset', { method: 'POST', headers: { 'X-API-Key': API_KEY } });
+                const resp = await fetch('/webhook/circuit_breaker/reject_reset', { method: 'POST', headers: { 'X-Requested-With': 'XMLHttpRequest' } });
                 if (resp.ok) {
                     banner.style.display = 'none';
                     fetchCompositeBias();
@@ -2278,7 +2326,7 @@ function initCompositeBiasControls() {
 
     if (clearBtn) {
         clearBtn.addEventListener('click', async () => {
-            await fetch(`${API_URL}/bias/override`, { method: 'DELETE', headers: { 'X-API-Key': API_KEY } });
+            await fetch(`${API_URL}/bias/override`, { method: 'DELETE', headers: { 'X-Requested-With': 'XMLHttpRequest' } });
             fetchCompositeBias();
         });
     }
@@ -3016,7 +3064,7 @@ function initSavitaUpdateModal() {
             let url = `${API_URL}/bias-auto/savita/update?reading=${reading}`;
             if (date) url += `&date=${date}`;
             
-            const response = await fetch(url, { method: 'POST', headers: { 'X-API-Key': API_KEY } });
+            const response = await fetch(url, { method: 'POST', headers: { 'X-Requested-With': 'XMLHttpRequest' } });
             const result = await response.json();
 
             if (result.status === 'success') {
@@ -6827,7 +6875,7 @@ async function deleteTicker(symbol, confirmDelete = true) {
     try {
         const response = await fetch(`${API_URL}/watchlist/tickers/${encodeURIComponent(symbol)}`, {
             method: 'DELETE',
-            headers: { 'X-API-Key': API_KEY }
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
         });
         const data = await response.json();
         if (data.status === 'success') {
@@ -7214,7 +7262,7 @@ async function enableAllStrategies() {
     try {
         const response = await fetch(`${API_URL}/strategies/enable-all`, {
             method: 'POST',
-            headers: { 'X-API-Key': API_KEY }
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
         });
         
         const data = await response.json();
@@ -7236,7 +7284,7 @@ async function disableAllStrategies() {
     try {
         const response = await fetch(`${API_URL}/strategies/disable-all`, {
             method: 'POST',
-            headers: { 'X-API-Key': API_KEY }
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
         });
         
         const data = await response.json();
@@ -7738,7 +7786,7 @@ async function refreshBtcSignals() {
     try {
         const response = await fetch(`${API_URL}/btc/bottom-signals/refresh`, {
             method: 'POST',
-            headers: { 'X-API-Key': API_KEY }
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
         });
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}`);
@@ -7902,7 +7950,7 @@ async function toggleBtcSignal(signalId) {
             try {
                 await fetch(`${API_URL}/btc/bottom-signals/${signalId}/clear-override`, {
                     method: 'POST',
-                    headers: { 'X-API-Key': API_KEY }
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' }
                 });
                 loadBtcSignals();
             } catch (error) {
@@ -7942,7 +7990,7 @@ async function resetBtcSignals() {
     if (!confirm('Reset all signals to UNKNOWN and clear all manual overrides?')) return;
     
     try {
-        await fetch(`${API_URL}/btc/bottom-signals/reset`, { method: 'POST', headers: { 'X-API-Key': API_KEY } });
+        await fetch(`${API_URL}/btc/bottom-signals/reset`, { method: 'POST', headers: { 'X-Requested-With': 'XMLHttpRequest' } });
         // After reset, refresh to get fresh data from APIs
         await refreshBtcSignals();
     } catch (error) {
@@ -10257,7 +10305,7 @@ async function removePositionWithoutArchive(position) {
             alert('Cannot remove position: missing id');
             return;
         }
-        const response = await fetch(`${API_URL}/v2/positions/${posId}`, { method: 'DELETE', headers: { 'X-API-Key': API_KEY } });
+        const response = await fetch(`${API_URL}/v2/positions/${posId}`, { method: 'DELETE', headers: { 'X-Requested-With': 'XMLHttpRequest' } });
         const data = await response.json();
 
         if (data.status === 'deleted' || data.status === 'removed') {
@@ -12125,7 +12173,7 @@ function initRegimeBar() {
         try {
             const response = await fetch(`${API_URL}/regime/override`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-API-Key': API_KEY },
+                headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                 body: JSON.stringify(payload),
             });
             const data = await response.json();
@@ -12145,7 +12193,7 @@ function initRegimeBar() {
         try {
             await fetch(`${API_URL}/regime/override`, {
                 method: 'DELETE',
-                headers: { 'X-API-Key': API_KEY },
+                headers: { 'X-Requested-With': 'XMLHttpRequest' },
             });
             loadRegime();
         } catch (error) {
@@ -12160,7 +12208,7 @@ function initRegimeBar() {
                 try {
                     await fetch(`${API_URL}/regime/override`, {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json', 'X-API-Key': API_KEY },
+                        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                         body: JSON.stringify({
                             regime_label: currentRegime.regime_label,
                             direction: currentRegime.direction,
@@ -12727,7 +12775,7 @@ function switchHydraTab(tab) {
 
 async function fetchHydraExposure() {
     try {
-        const resp = await fetch(`${API_URL}/hydra/exposure`, { headers: { "X-API-Key": API_KEY } });
+        const resp = await fetch(`${API_URL}/hydra/exposure`, { headers: { "X-Requested-With": "XMLHttpRequest" } });
         if (!resp.ok) return;
         const data = await resp.json();
 
@@ -12769,7 +12817,7 @@ async function fetchHydraExposure() {
 
 async function fetchHydraScores() {
     try {
-        const resp = await fetch(`${API_URL}/hydra/scores?limit=15&min_score=25`, { headers: { "X-API-Key": API_KEY } });
+        const resp = await fetch(`${API_URL}/hydra/scores?limit=15&min_score=25`, { headers: { "X-Requested-With": "XMLHttpRequest" } });
         if (!resp.ok) return;
         const data = await resp.json();
 
@@ -12800,7 +12848,7 @@ async function fetchHydraScores() {
 
 async function checkHydraConvergence() {
     try {
-        const resp = await fetch(`${API_URL}/hydra/convergence`, { headers: { "X-API-Key": API_KEY } });
+        const resp = await fetch(`${API_URL}/hydra/convergence`, { headers: { "X-Requested-With": "XMLHttpRequest" } });
         if (!resp.ok) return;
         const data = await resp.json();
 
@@ -12821,7 +12869,7 @@ async function refreshHydra() {
     btn.innerHTML = '&#x21BB; Scanning...';
     btn.disabled = true;
     try {
-        await fetch(`${API_URL}/hydra/refresh`, { method: 'POST', headers: { "X-API-Key": API_KEY } });
+        await fetch(`${API_URL}/hydra/refresh`, { method: 'POST', headers: { "X-Requested-With": "XMLHttpRequest" } });
         if (hydraCurrentTab === 'defensive') {
             await fetchHydraExposure();
         } else {
@@ -12848,7 +12896,7 @@ function initLightningCards() {
 async function fetchLightningCards() {
     try {
         const resp = await fetch(`${API_URL}/hydra/lightning?active_only=true&limit=3`, {
-            headers: { "X-API-Key": API_KEY }
+            headers: { "X-Requested-With": "XMLHttpRequest" }
         });
         if (!resp.ok) return;
         const data = await resp.json();
@@ -13058,7 +13106,7 @@ async function dismissLightningCard(cardId) {
     try {
         await fetch(`${API_URL}/hydra/lightning/${cardId}/status`, {
             method: 'PATCH',
-            headers: { "X-API-Key": API_KEY, "Content-Type": "application/json" },
+            headers: { "X-Requested-With": "XMLHttpRequest", "Content-Type": "application/json" },
             body: JSON.stringify({ status: 'dismissed' })
         });
         const el = document.querySelector(`[data-card-id="${cardId}"]`);
@@ -13082,7 +13130,7 @@ async function acceptLightningCard(cardId) {
     try {
         await fetch(`${API_URL}/hydra/lightning/${cardId}/status`, {
             method: 'PATCH',
-            headers: { "X-API-Key": API_KEY, "Content-Type": "application/json" },
+            headers: { "X-Requested-With": "XMLHttpRequest", "Content-Type": "application/json" },
             body: JSON.stringify({ status: 'acted_on' })
         });
         const el = document.querySelector(`[data-card-id="${cardId}"]`);
@@ -13096,7 +13144,7 @@ async function passLightningCard(cardId) {
     try {
         await fetch(`${API_URL}/hydra/lightning/${cardId}/status`, {
             method: 'PATCH',
-            headers: { "X-API-Key": API_KEY, "Content-Type": "application/json" },
+            headers: { "X-Requested-With": "XMLHttpRequest", "Content-Type": "application/json" },
             body: JSON.stringify({ status: 'dismissed' })
         });
         const el = document.querySelector(`[data-card-id="${cardId}"]`);

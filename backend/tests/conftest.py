@@ -14,6 +14,8 @@ os.environ["PIVOT_API_KEY"] = "test-api-key-12345"
 os.environ["TRADINGVIEW_WEBHOOK_SECRET"] = "test-webhook-secret"
 os.environ["POLYGON_API_KEY"] = "test-polygon-key"
 os.environ["FRED_API_KEY"] = "test-fred-key"
+os.environ["DASHBOARD_SESSION_SECRET"] = "test-session-secret"
+os.environ["DASHBOARD_PASSWORD"] = "test-dashboard-password"
 
 from fastapi.testclient import TestClient
 
