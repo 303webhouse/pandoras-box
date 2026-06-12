@@ -451,7 +451,14 @@
                     <p class="empty-state">No signals available</p>
                 </div>
                 <div class="signals-container" id="catalystFeed" style="display:none;">
-                    <div class="catalyst-status" id="catalystStatus" style="font-size:13px;color:#78909c;padding:6px 4px;"></div>
+                    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 4px;">
+                        <div class="catalyst-status" id="catalystStatus" style="font-size:13px;color:#78909c;"></div>
+                        <button id="catalystSoundBtn" onclick="toggleCatalystSound()" style="font-size:12px;background:#21262d;color:#e6edf3;border:1px solid #30363d;border-radius:6px;padding:4px 10px;cursor:pointer;">🔔 Enable sound</button>
+                    </div>
+                    <div id="catalystHits" style="display:none;margin:4px 0 10px;">
+                        <div style="font-size:14px;color:#ffd54f;font-weight:600;padding:2px 4px;">🎯 Targeted Hits</div>
+                        <div id="catalystHitCards"></div>
+                    </div>
                     <div id="catalystCards"></div>
                     <p class="empty-state" id="catalystEmpty">ARMED — no qualifying clusters yet</p>
                 </div>
@@ -1964,7 +1971,7 @@
     <!-- TradingView Widget Script -->
     <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
-    <script src="/app.js?v=160"></script>
+    <script src="/app.js?v=161"></script>
     <script src="/cockpit.js?v=1"></script>
     <script src="/laboratory.js?v=1"></script>
 </body>
