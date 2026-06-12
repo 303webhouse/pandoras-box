@@ -444,10 +444,16 @@
                     <button class="feed-tab" data-tier="watchlist" onclick="switchFeedTab('watchlist', this)">Watchlist</button>
                     <button class="feed-tab" data-tier="ta_feed" onclick="switchFeedTab('ta_feed', this)">TA</button>
                     <button class="feed-tab" data-tier="research_log" onclick="switchFeedTab('research_log', this)">Research</button>
+                    <button class="feed-tab" data-tier="catalyst" onclick="switchFeedTab('catalyst', this)">Catalyst</button>
                 </div>
                 <div class="feed-banner" id="feedBanner" style="display:none;"></div>
                 <div class="signals-container" id="tradeSignals">
                     <p class="empty-state">No signals available</p>
+                </div>
+                <div class="signals-container" id="catalystFeed" style="display:none;">
+                    <div class="catalyst-status" id="catalystStatus" style="font-size:13px;color:#78909c;padding:6px 4px;"></div>
+                    <div id="catalystCards"></div>
+                    <p class="empty-state" id="catalystEmpty">ARMED — no qualifying clusters yet</p>
                 </div>
             </div>
 
@@ -1958,7 +1964,7 @@
     <!-- TradingView Widget Script -->
     <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
-    <script src="/app.js?v=159"></script>
+    <script src="/app.js?v=160"></script>
     <script src="/cockpit.js?v=1"></script>
     <script src="/laboratory.js?v=1"></script>
 </body>
