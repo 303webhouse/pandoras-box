@@ -4007,8 +4007,20 @@ function switchFeedTab(tier, btn) {
 // Display fields ride in alert.sector_velocity. Additive; weekend brief replaces the feed.
 let catalystLastEventTs = null;
 
+// Task D — targeted-hit threshold (edit here to retune). A targeted hit is a
+// HIGH-conviction one-sided cluster (>=80%), stricter than the tab's 0.70 floor.
+const DOMINANCE_HIT = 0.80;
+
+// sector_velocity arrives as an OBJECT over the WS live path but as a JSON
+// STRING from /api/hermes/alerts (jsonb serialized). Normalize both shapes.
+function _sv(alert) {
+    let sv = (alert && alert.sector_velocity) || {};
+    if (typeof sv === 'string') { try { sv = JSON.parse(sv); } catch (_) { sv = {}; } }
+    return sv || {};
+}
+
 function _catalystLine(alert) {
-    const sv = alert.sector_velocity || {};
+    const sv = _sv(alert);
     if (sv.headline) return sv.headline;
     const dir = sv.direction || '';
     const arrow = dir === 'BULLISH' ? '▲' : dir === 'BEARISH' ? '▼' : '■';
@@ -4019,6 +4031,22 @@ function _catalystLine(alert) {
     return `${arrow} ${alert.trigger_ticker || ''} ${dir} ${prem}${meta ? ` (${meta})` : ''}${scen}`.trim();
 }
 
+// Task D — targeted-hit predicate. ONE place to edit the thresholds.
+// dp_block: always setup-grade on a new listing (institutional print).
+// flow_cluster: only a hit at >=80% dominance AND a live trade scenario.
+function isTargetedHit(alert) {
+    const sv = _sv(alert);
+    const et = alert.event_type || '';
+    if (et === 'dp_block') return true;
+    if (et === 'flow_cluster') {
+        const dom = typeof sv.dominance === 'number' ? sv.dominance : parseFloat(sv.dominance);
+        const scen = (sv.scenario || '').toString();
+        const liveScenario = /Scenario A|Scenario B|forced-selling/i.test(scen);
+        return (dom >= DOMINANCE_HIT) && liveScenario;
+    }
+    return false;
+}
+
 function _catalystTs(raw) {
     if (!raw) return Date.now();
     const s = (raw.includes('Z') || raw.includes('+')) ? raw : raw + 'Z';
@@ -4026,15 +4054,86 @@ function _catalystTs(raw) {
     return isNaN(t) ? Date.now() : t;
 }
 
+function _catalystTsLabel(alert) {
+    try { return new Date(_catalystTs(alert.created_at)).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' }); } catch (_) { return ''; }
+}
+
 function _catalystCardHTML(alert) {
-    const dir = (alert.sector_velocity || {}).direction || '';
+    const dir = _sv(alert).direction || '';
     const color = dir === 'BULLISH' ? '#00e676' : dir === 'BEARISH' ? '#e5370e' : '#78909c';
-    let ts = '';
-    try { ts = new Date(_catalystTs(alert.created_at)).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' }); } catch (_) {}
+    const ts = _catalystTsLabel(alert);
     const line = _catalystLine(alert).replace(/&/g, '&amp;').replace(/</g, '&lt;');
     return `<div class="catalyst-card" style="border-left:3px solid ${color};padding:10px 12px;margin:6px 0;background:#161b22;border-radius:6px;">`
         + `<div style="font-size:18px;color:#e6edf3;line-height:1.35;">${line}</div>`
         + `<div style="font-size:12px;color:#78909c;margin-top:4px;">${ts}</div></div>`;
+}
+
+// Task D — HIT-style card: heavy border, accent background, ★ TARGET badge, 20px line.
+function _catalystHitCardHTML(alert) {
+    const dir = _sv(alert).direction || '';
+    const color = dir === 'BULLISH' ? '#00e676' : dir === 'BEARISH' ? '#e5370e' : '#ffd54f';
+    const ts = _catalystTsLabel(alert);
+    const line = _catalystLine(alert).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+    return `<div class="catalyst-hit-card" style="border:2px solid ${color};background:#2a2410;border-radius:8px;padding:12px 14px;margin:6px 0;box-shadow:0 0 0 1px ${color}55;">`
+        + `<div style="font-size:12px;color:#ffd54f;font-weight:700;letter-spacing:.6px;margin-bottom:4px;">★ TARGET</div>`
+        + `<div style="font-size:20px;color:#ffffff;line-height:1.35;font-weight:600;">${line}</div>`
+        + `<div style="font-size:12px;color:#b0bec5;margin-top:4px;">${ts}</div></div>`;
+}
+
+// Task D — pinned "Targeted Hits" strip (cap 5, newest first).
+let _catalystHitsState = [];
+function _renderCatalystHits() {
+    const wrap = document.getElementById('catalystHits');
+    const cont = document.getElementById('catalystHitCards');
+    if (!wrap || !cont) return;
+    if (!_catalystHitsState.length) { wrap.style.display = 'none'; cont.innerHTML = ''; return; }
+    wrap.style.display = '';
+    cont.innerHTML = _catalystHitsState.slice(0, 5).map(_catalystHitCardHTML).join('');
+}
+function _pushCatalystHit(alert) {
+    _catalystHitsState.unshift(alert);
+    if (_catalystHitsState.length > 5) _catalystHitsState.length = 5;
+    _renderCatalystHits();
+}
+
+// Task D — self-contained Web Audio alert (no asset dependency).
+let _catAudioCtx = null;
+let _catSoundArmed = false;
+let _catLastBeep = 0;
+function toggleCatalystSound() {
+    const btn = document.getElementById('catalystSoundBtn');
+    if (!_catSoundArmed) {
+        try {
+            _catAudioCtx = _catAudioCtx || new (window.AudioContext || window.webkitAudioContext)();
+            if (_catAudioCtx.state === 'suspended') _catAudioCtx.resume();
+            _catSoundArmed = true;
+            if (btn) { btn.textContent = '🔔 Sound ON'; btn.style.borderColor = '#00e676'; btn.style.color = '#00e676'; }
+            _catBeep();  // confirmation chirp (also unlocks the context on iOS)
+        } catch (e) { console.warn('Catalyst sound enable failed:', e); }
+    } else {
+        _catSoundArmed = false;
+        if (btn) { btn.textContent = '🔕 Sound muted'; btn.style.borderColor = '#30363d'; btn.style.color = '#e6edf3'; }
+    }
+}
+function _catBeep() {
+    if (!_catSoundArmed || !_catAudioCtx) return;          // sound is enhancement, never the only signal
+    const now = Date.now();
+    if (now - _catLastBeep < 3000) return;                  // debounce: max one beep / 3s (no alarm storms)
+    _catLastBeep = now;
+    try {
+        const ctx = _catAudioCtx, t0 = ctx.currentTime;
+        [[880, 0], [1175, 0.08]].forEach(function (pair) {  // two quick tones, ~150ms
+            const freq = pair[0], off = pair[1];
+            const osc = ctx.createOscillator(), gain = ctx.createGain();
+            osc.type = 'sine';
+            osc.frequency.value = freq;
+            gain.gain.setValueAtTime(0.0001, t0 + off);
+            gain.gain.exponentialRampToValueAtTime(0.25, t0 + off + 0.01);
+            gain.gain.exponentialRampToValueAtTime(0.0001, t0 + off + 0.07);
+            osc.connect(gain); gain.connect(ctx.destination);
+            osc.start(t0 + off); osc.stop(t0 + off + 0.08);
+        });
+    } catch (_) {}
 }
 
 function _catalystUpdateStatus() {
@@ -4060,6 +4159,9 @@ async function loadCatalystFeed() {
         }
         if (empty) empty.style.display = 'none';
         if (cards) cards.innerHTML = alerts.slice(0, 25).map(_catalystCardHTML).join('');
+        // Task D — rebuild the pinned hits strip from history (visual only; no beep on load).
+        _catalystHitsState = alerts.filter(isTargetedHit).slice(0, 5);
+        _renderCatalystHits();
         if (alerts[0] && alerts[0].created_at) catalystLastEventTs = _catalystTs(alerts[0].created_at);
         _catalystUpdateStatus();
     } catch (e) {
@@ -4071,7 +4173,9 @@ function prependCatalystCard(alert) {
     if (!alert) return;
     catalystLastEventTs = Date.now();
     _catalystUpdateStatus();
-    if (currentFeedTier !== 'catalyst') return;  // only touch DOM when the tab is visible
+    // Task D — escalate targeted hits: pin + beep fire regardless of which tab is active.
+    if (isTargetedHit(alert)) { _pushCatalystHit(alert); _catBeep(); }
+    if (currentFeedTier !== 'catalyst') return;  // only touch the rolling feed DOM when visible
     const cards = document.getElementById('catalystCards');
     const empty = document.getElementById('catalystEmpty');
     if (!cards) return;
