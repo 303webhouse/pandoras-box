@@ -1283,6 +1283,10 @@ function handleWebSocketMessage(message) {
             console.log(`🎯 WATCHLIST ALERT: ${message.ticker} hit target $${message.entry_target}`);
             loadWatchlist();
             break;
+        case 'catalyst_event':
+            // Catalyst tab v0 — flow-scanner cluster/DP-block event
+            prependCatalystCard(message.data || message);
+            break;
         case 'lightning_confirmation': {
             const card = document.querySelector(`[data-lightning-id="${message.card_id}"]`);
             if (card) {
@@ -3964,6 +3968,18 @@ function switchFeedTab(tier, btn) {
     const bannerEl = document.getElementById('feedBanner');
     if (bannerEl) bannerEl.style.display = 'none';
 
+    // ── Catalyst tab (v0, additive — IPO hotfix 2026-06-12) ──
+    const _sigEl = document.getElementById('tradeSignals');
+    const _catEl = document.getElementById('catalystFeed');
+    if (tier === 'catalyst') {
+        if (_sigEl) _sigEl.style.display = 'none';
+        if (_catEl) _catEl.style.display = '';
+        loadCatalystFeed();
+        return;
+    }
+    if (_catEl) _catEl.style.display = 'none';
+    if (_sigEl) _sigEl.style.display = '';
+
     if (tier === 'main') {
         loadMainFeed();
         return;
@@ -3984,6 +4000,84 @@ function switchFeedTab(tier, btn) {
             }
         })
         .catch(err => console.warn('Feed tier fetch failed:', err));
+}
+
+// ── Catalyst tab (v0 — IPO hotfix 2026-06-12) ──────────────────────────────
+// Reads catalyst_events via /api/hermes/alerts; live via the 'catalyst_event' WS message.
+// Display fields ride in alert.sector_velocity. Additive; weekend brief replaces the feed.
+let catalystLastEventTs = null;
+
+function _catalystLine(alert) {
+    const sv = alert.sector_velocity || {};
+    if (sv.headline) return sv.headline;
+    const dir = sv.direction || '';
+    const arrow = dir === 'BULLISH' ? '▲' : dir === 'BEARISH' ? '▼' : '■';
+    const prem = sv.premium ? (sv.premium >= 1e6 ? `$${(sv.premium / 1e6).toFixed(1)}M` : `$${Math.round(sv.premium / 1e3)}K`) : '';
+    const dom = sv.dominance ? `${Math.round(sv.dominance * 100)}% one-sided` : '';
+    const meta = [sv.sweeps ? `${sv.sweeps} sweeps` : '', dom].filter(Boolean).join(' · ');
+    const scen = sv.scenario ? ` → ${sv.scenario}` : '';
+    return `${arrow} ${alert.trigger_ticker || ''} ${dir} ${prem}${meta ? ` (${meta})` : ''}${scen}`.trim();
+}
+
+function _catalystTs(raw) {
+    if (!raw) return Date.now();
+    const s = (raw.includes('Z') || raw.includes('+')) ? raw : raw + 'Z';
+    const t = Date.parse(s);
+    return isNaN(t) ? Date.now() : t;
+}
+
+function _catalystCardHTML(alert) {
+    const dir = (alert.sector_velocity || {}).direction || '';
+    const color = dir === 'BULLISH' ? '#00e676' : dir === 'BEARISH' ? '#e5370e' : '#78909c';
+    let ts = '';
+    try { ts = new Date(_catalystTs(alert.created_at)).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' }); } catch (_) {}
+    const line = _catalystLine(alert).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+    return `<div class="catalyst-card" style="border-left:3px solid ${color};padding:10px 12px;margin:6px 0;background:#161b22;border-radius:6px;">`
+        + `<div style="font-size:18px;color:#e6edf3;line-height:1.35;">${line}</div>`
+        + `<div style="font-size:12px;color:#78909c;margin-top:4px;">${ts}</div></div>`;
+}
+
+function _catalystUpdateStatus() {
+    const s = document.getElementById('catalystStatus');
+    if (!s) return;
+    s.textContent = catalystLastEventTs
+        ? `last event ${new Date(catalystLastEventTs).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`
+        : 'ARMED — waiting for clusters';
+}
+
+async function loadCatalystFeed() {
+    const cards = document.getElementById('catalystCards');
+    const empty = document.getElementById('catalystEmpty');
+    try {
+        const r = await fetch(`${API_URL}/hermes/alerts?limit=50&tier_min=1`);
+        const data = await r.json();
+        const alerts = (data && data.alerts) || [];
+        if (!alerts.length) {
+            if (empty) empty.style.display = '';
+            if (cards) cards.innerHTML = '';
+            _catalystUpdateStatus();
+            return;
+        }
+        if (empty) empty.style.display = 'none';
+        if (cards) cards.innerHTML = alerts.slice(0, 25).map(_catalystCardHTML).join('');
+        if (alerts[0] && alerts[0].created_at) catalystLastEventTs = _catalystTs(alerts[0].created_at);
+        _catalystUpdateStatus();
+    } catch (e) {
+        console.warn('Catalyst feed fetch failed:', e);
+    }
+}
+
+function prependCatalystCard(alert) {
+    if (!alert) return;
+    catalystLastEventTs = Date.now();
+    _catalystUpdateStatus();
+    if (currentFeedTier !== 'catalyst') return;  // only touch DOM when the tab is visible
+    const cards = document.getElementById('catalystCards');
+    const empty = document.getElementById('catalystEmpty');
+    if (!cards) return;
+    if (empty) empty.style.display = 'none';
+    cards.insertAdjacentHTML('afterbegin', _catalystCardHTML(alert));
+    while (cards.children.length > 25) cards.removeChild(cards.lastChild);
 }
 
 async function loadGroupedSignals() {

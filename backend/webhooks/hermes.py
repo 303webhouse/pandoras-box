@@ -19,10 +19,11 @@ from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 
 import httpx
-from fastapi import APIRouter, Request, HTTPException, Query
+from fastapi import APIRouter, Request, HTTPException, Query, Body, Depends
 
 from database.postgres_client import get_postgres_client
 from database.redis_client import get_redis_client
+from utils.pivot_auth import require_api_key
 from utils.webhook_auth import (
     validate_webhook_secret,
     enforce_content_length_cap,
@@ -457,6 +458,60 @@ async def dismiss_hermes_alert(event_id: str):
             uuid.UUID(event_id),
         )
     return {"status": "dismissed", "event_id": event_id}
+
+
+@router.post("/catalyst/manual")
+async def catalyst_manual(payload: dict = Body(default=None), _=Depends(require_api_key)):
+    """
+    Catalyst Tab v0 ingest (2026-06-12 IPO hotfix). The PowerShell flow scanner posts its
+    cluster / DP-block events here with X-API-Key. Writes a catalyst_events row via the
+    existing _store_catalyst_event() and broadcasts a 'catalyst_event' WS message for the
+    Catalyst tab. ADDITIVE: does NOT touch the Hermes velocity path or the VPS scrape burst.
+    """
+    payload = payload or {}
+    ticker = (payload.get("ticker") or "").upper()
+    if not ticker:
+        raise HTTPException(status_code=400, detail="ticker required")
+    event_type = payload.get("event_type") or "flow_cluster"
+    # All display fields ride in sector_velocity (an existing jsonb column the alerts GET returns).
+    sv = {
+        "headline": payload.get("headline") or "",
+        "direction": payload.get("direction"),
+        "premium": payload.get("premium"),
+        "sweeps": payload.get("sweeps"),
+        "dominance": payload.get("dominance"),
+        "scenario": payload.get("scenario"),
+        "price": payload.get("price"),
+        "size": payload.get("size"),
+        "source": payload.get("source") or "flow_scanner_v2",
+    }
+    try:
+        event_id = await _store_catalyst_event(
+            event_type=event_type, trigger_ticker=ticker, sector_velocity=sv,
+        )
+    except Exception as exc:
+        logger.error("catalyst_manual store failed for %s: %s", ticker, exc)
+        raise HTTPException(status_code=500, detail="store failed")
+
+    # Best-effort live push for the Catalyst tab (must not fail the write).
+    # Use the real broadcaster (websocket.broadcaster.manager) — the api.websocket_manager
+    # path the Hermes handler uses does not exist, so those broadcasts are silent no-ops.
+    try:
+        from websocket.broadcaster import manager
+        await manager.broadcast({
+            "type": "catalyst_event",
+            "data": {
+                "id": str(event_id),
+                "event_type": event_type,
+                "trigger_ticker": ticker,
+                "sector_velocity": sv,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            },
+        })
+    except Exception as exc:
+        logger.debug("catalyst_event WS broadcast skipped: %s", exc)
+
+    return {"status": "ok", "id": str(event_id)}
 
 
 # --- Helpers ---
