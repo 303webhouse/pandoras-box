@@ -4051,6 +4051,7 @@ function isTargetedHit(alert) {
     const sv = _sv(alert);
     const et = alert.event_type || '';
     if (et === 'dp_block') return true;
+    if (et === 'confluence_flag') return true;   // Task E — signal×catalyst confluence pins + beeps
     if (et === 'flow_cluster') {
         const dom = typeof sv.dominance === 'number' ? sv.dominance : parseFloat(sv.dominance);
         const scen = (sv.scenario || '').toString();

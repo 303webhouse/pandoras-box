@@ -6,9 +6,10 @@ its payload into a standard signal dict, then calls process_signal_unified().
 This replaces the duplicated log/score/cache/broadcast logic across handlers.
 """
 
+import json
 import logging
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, Optional
 
 from database.postgres_client import log_signal, update_signal_with_score
@@ -1003,6 +1004,140 @@ async def _maybe_tag_position_signal(signal_data: Dict[str, Any]) -> None:
         logger.warning(f"Position signal tagging error for {ticker}: {e}")
 
 
+# ── Task E — Catalyst↔Signal confluence flag (2026-06-12) ────────────────────
+# Extends the same event-driven pattern as the lightning hook above. CONTEXT-ONLY:
+# confluence_flag is not conviction input until backtested (see closure note E.9).
+CONFLUENCE_WINDOW_MIN = 15  # minutes — catalyst↔signal lookback
+
+
+def _norm_dir(d) -> str:
+    d = (d or "").strip().upper()
+    if d in ("BULLISH", "BULL", "LONG", "UP", "CALL", "BUY"):
+        return "BULL"
+    if d in ("BEARISH", "BEAR", "SHORT", "DOWN", "PUT", "SELL"):
+        return "BEAR"
+    return ""
+
+
+async def _emit_catalyst_confluence(signal_data: Dict[str, Any]) -> None:
+    """Flag when a freshly-persisted signal coincides with a recent catalyst event
+    (flow_cluster / dp_block) on the same ticker, within CONFLUENCE_WINDOW_MIN.
+
+    FAIL-OPEN MANDATE (E.3): the whole body is try/except — any error logs a warning
+    and returns. Confluence must NEVER break, block, or delay signal emission. Writes
+    ONLY via _store_catalyst_event; touches no scoring, schema, or auth.
+    """
+    try:
+        signal_id = signal_data.get("signal_id")
+        ticker = (signal_data.get("ticker") or "").upper()
+        if not signal_id or not ticker:
+            return
+        sig_dir = _norm_dir(signal_data.get("direction"))
+        strategy = signal_data.get("strategy") or signal_data.get("signal_type") or "?"
+
+        from database.postgres_client import get_postgres_client
+        pool = await get_postgres_client()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT id, event_type, sector_velocity, created_at
+                     FROM catalyst_events
+                    WHERE trigger_ticker = $1
+                      AND event_type IN ('flow_cluster', 'dp_block')
+                      AND created_at >= NOW() - make_interval(mins => $2)
+                    ORDER BY created_at DESC
+                    LIMIT 10""",
+                ticker, CONFLUENCE_WINDOW_MIN,
+            )
+        if not rows:
+            return
+
+        # Most recent event that yields a directional match. dp_block is
+        # direction-agnostic (institutional print → matches either side).
+        match = None
+        for r in rows:
+            sv = r["sector_velocity"]
+            if isinstance(sv, str):
+                try:
+                    sv = json.loads(sv)
+                except Exception:
+                    sv = {}
+            sv = sv or {}
+            cat_dir = _norm_dir(sv.get("direction"))
+            if r["event_type"] == "dp_block":
+                match = (r, sv, "dp_agnostic")
+                break
+            if sig_dir and cat_dir and sig_dir == cat_dir:
+                match = (r, sv, "aligned")
+                break
+        if match is None:
+            return
+        r, sv, direction_match = match
+
+        # Dedupe — one confluence flag per signal (atomic SETNX claim).
+        try:
+            from database.redis_client import get_redis_client
+            redis = await get_redis_client()
+            if redis is not None:
+                claimed = await redis.set(
+                    f"catalyst:confluence:{signal_id}", "1", nx=True, ex=86400,
+                )
+                if not claimed:
+                    return  # already flagged this signal
+        except Exception as exc:
+            logger.debug("Confluence dedupe SETNX skipped (%s) — proceeding once", exc)
+
+        try:
+            evt_ts = r["created_at"]
+            delta_seconds = int((datetime.now(evt_ts.tzinfo) - evt_ts).total_seconds())
+        except Exception:
+            delta_seconds = None
+
+        cat_event_type = r["event_type"]
+        flag_payload = {
+            "signal_id": str(signal_id),
+            "strategy": strategy,
+            "signal_direction": signal_data.get("direction"),
+            "catalyst_event_id": str(r["id"]),
+            "catalyst_event_type": cat_event_type,
+            "catalyst_direction": sv.get("direction"),
+            "direction_match": direction_match,
+            "delta_seconds": delta_seconds,
+            "window_min": CONFLUENCE_WINDOW_MIN,
+            "source": "confluence_engine_v0",
+            "headline": (
+                f"CONFLUENCE — {strategy} signal aligns with {cat_event_type} on "
+                f"{ticker} (context, not entry timing)"
+            ),
+        }
+
+        from webhooks.hermes import _store_catalyst_event
+        flag_id = await _store_catalyst_event(
+            event_type="confluence_flag", trigger_ticker=ticker,
+            sector_velocity=flag_payload,
+        )
+
+        try:
+            await manager.broadcast({
+                "type": "catalyst_event",
+                "data": {
+                    "id": str(flag_id),
+                    "event_type": "confluence_flag",
+                    "trigger_ticker": ticker,
+                    "sector_velocity": flag_payload,
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                },
+            })
+        except Exception as exc:
+            logger.debug("Confluence WS broadcast skipped: %s", exc)
+
+        logger.info(
+            "Catalyst confluence: %s %s <- %s (%s, delta=%ss) flag=%s",
+            ticker, strategy, cat_event_type, direction_match, delta_seconds, flag_id,
+        )
+    except Exception as exc:
+        logger.warning("Catalyst confluence check failed (fail-open): %s", exc)
+
+
 async def process_signal_unified(
     signal_data: Dict[str, Any],
     source: str = "tradingview",
@@ -1165,6 +1300,12 @@ async def process_signal_unified(
         await write_signal_outcome(signal_data)
     except Exception as e:
         logger.warning(f"Failed to write signal outcome: {e}")
+
+    # 4a. Task E — catalyst↔signal confluence flag (context-only; fail-open, never blocks)
+    try:
+        await _emit_catalyst_confluence(signal_data)
+    except Exception as e:
+        logger.debug("Catalyst confluence hook skipped: %s", e)
 
     # Update score in DB (log_signal may have written without score if scoring was async)
     if signal_data.get("score") and signal_data.get("signal_id"):
