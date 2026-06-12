@@ -788,17 +788,24 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS — restrict to known frontend origins
-_cors_origins = os.getenv("ALLOWED_ORIGINS") or "*"
-if _cors_origins == "*":
-    _allowed_origins = ["*"]
+# CORS — restrict to known frontend origins.
+# SECURITY (2026-06-11, cookie auth): never combine "*" with allow_credentials — Starlette
+# reflects ANY origin for credentialed (cookie-bearing) requests, which would defeat the
+# session cookie. The dashboard is same-origin (CORS doesn't apply to it), so no cross-origin
+# credentialed access is needed by default. Set ALLOWED_ORIGINS to a real comma-separated
+# list ONLY if a genuine cross-origin browser caller is ever added.
+_cors_origins = (os.getenv("ALLOWED_ORIGINS") or "").strip()
+if _cors_origins in ("", "*"):
+    _allowed_origins: list[str] = []
+    _allow_credentials = False
 else:
     _allowed_origins = [o.strip() for o in _cors_origins.split(",") if o.strip()]
+    _allow_credentials = True
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_allowed_origins,
-    allow_credentials=True,
+    allow_credentials=_allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -1060,6 +1067,7 @@ from webhooks.whale import router as whale_webhook_router
 from webhooks.footprint import router as footprint_webhook_router
 from webhooks.hermes import router as hermes_webhook_router
 from webhooks.pythia_events import router as pythia_webhook_router
+from api.auth import router as auth_router
 from api.bias_source_comparison import router as bias_comparison_router
 from api.committee_history import router as committee_history_router
 from api.uw_health import router as uw_health_router
@@ -1118,6 +1126,7 @@ app.include_router(whale_webhook_router, prefix="/webhook", tags=["whale"])
 app.include_router(footprint_webhook_router, prefix="/webhook", tags=["webhooks"])
 app.include_router(hermes_webhook_router, prefix="/api", tags=["hermes"])
 app.include_router(pythia_webhook_router, prefix="/api", tags=["pythia"])
+app.include_router(auth_router, prefix="/api", tags=["auth"])  # /api/auth/login|logout|session
 app.include_router(bias_comparison_router, prefix="/api", tags=["bias-comparison"])
 app.include_router(committee_history_router, prefix="/api", tags=["committee-history"])
 app.include_router(uw_health_router, prefix="/api", tags=["uw-health"])

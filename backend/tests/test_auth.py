@@ -26,6 +26,9 @@ AUTH_EXEMPT_MUTATIONS = {
     ("POST", "/webhook/mcclellan"),
     # Alert ingestion
     ("POST", "/webhook/alerts/pivot"),
+    # Dashboard auth — intentionally public (login can't require a session; logout clears it)
+    ("POST", "/api/auth/login"),
+    ("POST", "/api/auth/logout"),
 }
 
 # Pre-existing routes that need auth but weren't in Phase 0H scope.
@@ -294,3 +297,45 @@ class TestAuthCompleteness:
             + "\n".join(f"  - {r}" for r in sorted(unprotected))
             + "\n\nEither add Depends(require_api_key) or add to AUTH_EXEMPT_MUTATIONS with justification."
         )
+
+
+class TestSessionAuth:
+    """Browser session cookie is accepted alongside the machine X-API-Key/Bearer path."""
+
+    def test_session_cookie_accepted_on_mutation(self, client):
+        from utils.session import issue_session, COOKIE_NAME
+        token = issue_session()
+        assert token, "issue_session() returned None — DASHBOARD_SESSION_SECRET not set"
+        r = client.post(
+            "/api/portfolio/cash-flows", json={"amount": 1},
+            headers={"X-Requested-With": "XMLHttpRequest"}, cookies={COOKIE_NAME: token},
+        )
+        assert r.status_code != 401, r.text
+
+    def test_session_mutation_without_csrf_header_is_403(self, client):
+        from utils.session import issue_session, COOKIE_NAME
+        token = issue_session()
+        r = client.post("/api/portfolio/cash-flows", json={"amount": 1}, cookies={COOKIE_NAME: token})
+        assert r.status_code == 403, r.text
+
+    def test_invalid_session_cookie_rejected(self, client):
+        from utils.session import COOKIE_NAME
+        r = client.post(
+            "/api/portfolio/cash-flows", json={"amount": 1},
+            headers={"X-Requested-With": "XMLHttpRequest"}, cookies={COOKIE_NAME: "garbage.notasig"},
+        )
+        assert r.status_code == 401, r.text
+
+    def test_machine_key_still_works(self, client, test_api_key):
+        # dual-accept must NOT regress the VPS/server header path (CSRF-exempt)
+        r = client.post("/api/portfolio/cash-flows", json={"amount": 1}, headers={"X-API-Key": test_api_key})
+        assert r.status_code != 401, r.text
+
+    def test_login_wrong_password_401(self, client):
+        assert client.post("/api/auth/login", json={"password": "nope"}).status_code == 401
+
+    def test_login_correct_password_then_logout(self, client):
+        r = client.post("/api/auth/login", json={"password": "test-dashboard-password"})
+        assert r.status_code == 200, r.text
+        assert "pivot_session" in r.headers.get("set-cookie", "")
+        assert client.post("/api/auth/logout").status_code == 200
