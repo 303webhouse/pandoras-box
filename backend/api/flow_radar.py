@@ -331,6 +331,12 @@ async def _compute_flow_radar() -> Dict[str, Any]:
         "total_premium_display": _format_premium(total_all),
         "bias_level": bias_level,
         "tickers_with_flow": len(flow_data),
+        # Aliases consumed by hub_get_flow_radar (MCP). Additive — the dashboard
+        # widget reads the *_total / overall_sentiment keys above; the MCP tool
+        # reads these. One source of truth, two key conventions. Do not remove.
+        "net_premium_calls_usd": total_call,
+        "net_premium_puts_usd": total_put,
+        "net_premium_direction": overall_sentiment,
     }
 
     # === 6. Compact headlines (empty — frontend loadHeadlines() is the fallback) ===

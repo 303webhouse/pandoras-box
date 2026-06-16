@@ -2802,7 +2802,7 @@ async def start_scheduler():
         logger.info("âœ… Sector refresh loop started (15s interval, market hours)")
 
         asyncio.create_task(_uw_flow_polling_loop())
-        logger.info("âœ… UW flow polling loop started (30s interval, market hours)")
+        logger.info("âœ… UW flow polling loop started (300s interval, market hours)")
 
         asyncio.create_task(_sector_3_10_refresh_loop())
         logger.info("âœ… Sector 3-10 cache loop started (15 min interval, market hours)")
@@ -2815,17 +2815,23 @@ async def start_scheduler():
 
 async def _uw_flow_polling_loop():
     """
-    Poll UW API for flow data every 30 seconds during market hours.
+    Poll UW API for flow data every 5 minutes during market hours.
     Writes to the SAME Redis keys (uw:flow:{SYM}) that downstream consumers
-    (cta_scanner, hydra_squeeze) already read from.
+    (cta_scanner, hydra_squeeze, contrarian_qualifier) already read from.
     API data overwrites Discord scraper data (fresher).
+
+    Cadence: 300s (was 30s). The 15-ticker poll at 30s consumed ~40-47% of the
+    20k/day UW budget for data the scanners don't need that fresh — no consumer
+    checks flow age, freshness is bounded only by the 30-min Redis TTL (ex=1800
+    >> 300). Triton fetches flow on-demand (decoupled from this poll), so the
+    cut does not starve it. See 2026-06-16-flow-radar-cleanup brief.
     """
     import pytz
     et = pytz.timezone('America/New_York')
     # Top tickers to poll flow for
     FLOW_TICKERS = ["SPY", "QQQ", "IWM", "AAPL", "MSFT", "NVDA", "TSLA", "META",
                     "AMZN", "GOOGL", "AMD", "XLF", "SMH", "HYG", "TLT"]
-    logger.info("Starting UW flow polling loop (30s interval, market hours, %d tickers)", len(FLOW_TICKERS))
+    logger.info("Starting UW flow polling loop (300s interval, market hours, %d tickers)", len(FLOW_TICKERS))
 
     while True:
         try:
@@ -2877,7 +2883,7 @@ async def _uw_flow_polling_loop():
                 except Exception as loop_err:
                     logger.warning("UW flow polling cycle error: %s", loop_err)
 
-            await asyncio.sleep(30)
+            await asyncio.sleep(300)  # 5-min cadence (was 30s) — UW budget cut, see brief 2026-06-16-flow-radar-cleanup
 
         except Exception as e:
             logger.error("Error in UW flow polling loop: %s", e)
