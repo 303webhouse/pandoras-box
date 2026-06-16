@@ -30,30 +30,52 @@ DESCRIPTION = (
 
 
 def _format_events(raw: Dict[str, Any], ticker: Optional[str]) -> List[Dict[str, Any]]:
-    """Extract flow events from the flow-radar payload into the canonical shape."""
+    """Extract ticker-level flow imprints from the flow-radar payload.
+
+    The `uw:flow:{ticker}` cache stores TICKER-LEVEL rollups (call/put premium,
+    pc_ratio, sentiment), NOT per-contract events. So we emit one flow-imprint
+    entry per ticker, using the keys that actually exist in `watchlist_unusual`
+    and `position_flow`. strike / expiry / side / size are intentionally absent
+    — the poll does not persist the raw per-contract flow list (out of scope).
+    """
     events: List[Dict[str, Any]] = []
     watchlist = raw.get("watchlist_unusual") or []
     position_flow = raw.get("position_flow") or []
-    for source in (watchlist, position_flow):
-        for entry in source:
-            tkr = (entry.get("ticker") or "").upper()
-            if ticker and tkr != ticker.upper():
-                continue
-            events.append(
-                {
-                    "ticker": tkr,
-                    "strike": entry.get("top_strike") or entry.get("strike"),
-                    "expiry": entry.get("top_expiry") or entry.get("expiry"),
-                    "option_type": entry.get("top_option_type")
-                    or entry.get("option_type"),
-                    "side": entry.get("side") or entry.get("flow_direction"),
-                    "premium_usd": entry.get("net_premium") or entry.get("premium"),
-                    "size": entry.get("size") or entry.get("contracts"),
-                    "unusual_ratio": entry.get("unusual_ratio"),
-                    "timestamp": entry.get("last_alert_at") or entry.get("timestamp"),
-                    "type": entry.get("type") or entry.get("alert_type") or "FLOW",
-                }
-            )
+
+    for entry in watchlist:
+        tkr = (entry.get("ticker") or "").upper()
+        if ticker and tkr != ticker.upper():
+            continue
+        events.append(
+            {
+                "ticker": tkr,
+                "source": "watchlist",
+                "sentiment": (entry.get("sentiment") or "NEUTRAL").upper(),
+                "pc_ratio": entry.get("pc_ratio"),
+                "total_premium_usd": entry.get("total_premium"),
+                "premium_display": entry.get("premium_display"),
+                "change_pct": entry.get("change_pct"),
+                "divergence": entry.get("divergence"),
+                "unusual": entry.get("unusual"),
+            }
+        )
+
+    for entry in position_flow:
+        tkr = (entry.get("ticker") or "").upper()
+        if ticker and tkr != ticker.upper():
+            continue
+        events.append(
+            {
+                "ticker": tkr,
+                "source": "position",
+                "sentiment": (entry.get("sentiment") or "NEUTRAL").upper(),
+                "pc_ratio": entry.get("pc_ratio"),
+                "total_premium_usd": entry.get("total_premium"),
+                "premium_display": entry.get("premium_display"),
+                "alignment": entry.get("alignment"),
+                "strength": entry.get("strength"),
+            }
+        )
     return events
 
 
@@ -97,7 +119,7 @@ async def hub_get_flow_radar(
     market_pulse = raw.get("market_pulse") or {}
     net_calls = float(market_pulse.get("net_premium_calls_usd", 0) or 0)
     net_puts = float(market_pulse.get("net_premium_puts_usd", 0) or 0)
-    direction = (market_pulse.get("direction") or "NEUTRAL").upper()
+    direction = (market_pulse.get("net_premium_direction") or "NEUTRAL").upper()
 
     events = _format_events(raw, ticker)
 

@@ -104,16 +104,49 @@ async def test_flow_radar_invalid_lookback():
 
 @pytest.mark.asyncio
 async def test_flow_radar_ok():
+    """Mirrors the REAL _compute_flow_radar payload shape: market_pulse carries
+    net_premium_calls_usd / net_premium_puts_usd / net_premium_direction (the
+    additive aliases), and watchlist_unusual / position_flow carry ticker-level
+    rollups — NOT per-contract events. Asserts the MCP tool reads non-zero net
+    premium, a non-NEUTRAL direction, and populated ticker-level events."""
     from hub_mcp.tools.flow_radar import hub_get_flow_radar
 
     payload = {
         "market_pulse": {
+            # real keys produced by _compute_flow_radar
+            "overall_pc_ratio": 0.5,
+            "overall_sentiment": "BULLISH",
+            "call_premium_total": 1_000_000,
+            "put_premium_total": 500_000,
+            # additive aliases the MCP tool actually reads
             "net_premium_calls_usd": 1_000_000,
             "net_premium_puts_usd": 500_000,
-            "direction": "BULLISH",
+            "net_premium_direction": "BULLISH",
         },
-        "watchlist_unusual": [],
-        "position_flow": [],
+        "watchlist_unusual": [
+            {
+                "ticker": "NVDA",
+                "sector": "Technology",
+                "sentiment": "BULLISH",
+                "pc_ratio": 0.4,
+                "total_premium": 2_500_000,
+                "premium_display": "$2.5M",
+                "change_pct": 1.8,
+                "divergence": False,
+                "unusual": True,
+            }
+        ],
+        "position_flow": [
+            {
+                "ticker": "TSLA",
+                "sentiment": "BEARISH",
+                "pc_ratio": 2.3,
+                "total_premium": 900_000,
+                "premium_display": "$900K",
+                "alignment": "COUNTER",
+                "strength": "STRONG",
+            }
+        ],
     }
     with patch(
         "hub_mcp.tools.flow_radar._read_flow", new=AsyncMock(return_value=payload)
@@ -121,7 +154,50 @@ async def test_flow_radar_ok():
         r = await hub_get_flow_radar()
     assert _is_valid_envelope(r)
     assert r["status"] == "ok"
+    # net premium reads non-zero (the bug returned $0 regardless of real flow)
+    assert r["data"]["net_premium_calls_usd"] == 1_000_000
+    assert r["data"]["net_premium_puts_usd"] == 500_000
+    # direction is non-NEUTRAL (the bug read a non-existent "direction" key)
     assert r["data"]["net_premium_direction"] == "BULLISH"
+    # ticker-level events are populated from keys that actually exist
+    assert r["data"]["event_count"] == 2
+    tickers = {e["ticker"] for e in r["data"]["events"]}
+    assert tickers == {"NVDA", "TSLA"}
+    # no fabricated per-contract fields leak into the imprint
+    for e in r["data"]["events"]:
+        assert "strike" not in e
+        assert "expiry" not in e
+        assert e["sentiment"] in {"BULLISH", "BEARISH", "NEUTRAL"}
+
+
+@pytest.mark.asyncio
+async def test_flow_radar_ticker_filter():
+    """A ticker filter narrows the ticker-level events to that symbol only."""
+    from hub_mcp.tools.flow_radar import hub_get_flow_radar
+
+    payload = {
+        "market_pulse": {
+            "net_premium_calls_usd": 1_000_000,
+            "net_premium_puts_usd": 500_000,
+            "net_premium_direction": "BULLISH",
+        },
+        "watchlist_unusual": [
+            {"ticker": "NVDA", "sentiment": "BULLISH", "pc_ratio": 0.4,
+             "total_premium": 2_500_000, "premium_display": "$2.5M",
+             "change_pct": 1.8, "divergence": False, "unusual": True},
+            {"ticker": "AAPL", "sentiment": "BEARISH", "pc_ratio": 1.9,
+             "total_premium": 800_000, "premium_display": "$800K",
+             "change_pct": -1.1, "divergence": True, "unusual": False},
+        ],
+        "position_flow": [],
+    }
+    with patch(
+        "hub_mcp.tools.flow_radar._read_flow", new=AsyncMock(return_value=payload)
+    ):
+        r = await hub_get_flow_radar(ticker="NVDA")
+    assert r["status"] == "ok"
+    assert r["data"]["event_count"] == 1
+    assert r["data"]["events"][0]["ticker"] == "NVDA"
 
 
 # ─── hub_get_sector_strength ─────────────────────────────────────────────
