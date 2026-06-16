@@ -475,10 +475,11 @@ async def lifespan(app: FastAPI):
 
             et = dt_cls.now(pytz.timezone("America/New_York"))
             in_market = et.weekday() < 5 and 9 <= et.hour < 16
-            base_interval = 60 if in_market else 300
-            elapsed = asyncio.get_event_loop().time() - tick_started
-            sleep_for = max(5, base_interval - elapsed)
-            await asyncio.sleep(sleep_for)
+            base_interval = 180 if in_market else 300  # was 60 - UW 429 incident 2026-06-16
+            # UW 429 incident 2026-06-16: sleep a FULL interval AFTER the tick completes.
+            # Never let a 429-throttled slow tick collapse to the old 5s floor and fire
+            # the next ~66-call burst back-to-back (the self-amplification that blew the cap).
+            await asyncio.sleep(base_interval)
 
     async def sector_refresh_slow_loop():
         """Refresh MO% for sector constituents.
