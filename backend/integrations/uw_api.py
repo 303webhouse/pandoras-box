@@ -260,6 +260,12 @@ async def get_ohlc(
         params=params or None,
         caller=caller,
     )
+    # B3: propagate the governor sentinel so quota-aware consumers (sector
+    # refresh) can distinguish "quota-blocked" from "genuine no-data" and skip
+    # the cache write — preserving last-good + its timestamp so the heatmap
+    # renders visible staleness instead of faking fresh.
+    if isinstance(resp, UWUnavailable):
+        return resp
     if not resp or "data" not in resp:
         return None
 
@@ -307,6 +313,10 @@ async def get_technical_indicator(
         params=params or None,
         caller="technical_indicator",
     )
+    # B3: propagate the governor sentinel (see get_ohlc) so the sector refresh
+    # skips the cache write on quota-block rather than blanking RSI cells.
+    if isinstance(resp, UWUnavailable):
+        return resp
     if not resp or "data" not in resp:
         return None
 

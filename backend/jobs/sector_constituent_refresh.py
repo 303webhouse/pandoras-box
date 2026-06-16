@@ -43,6 +43,14 @@ from typing import List, Optional, Set
 from database.postgres_client import get_postgres_client
 from integrations import sector_cache
 from integrations.uw_api import get_ohlc, get_technical_indicator, get_total_429s
+from integrations.uw_governor import is_unavailable
+
+# B3 (2026-06-16): inter-request spacing inside a tick so the sector loop
+# self-paces at the source (~2 req/s) and never drains the shared 60-token
+# bucket — this is what protects foreground (quotes/chains) from being paced
+# behind a sector burst. 0.5s matches the existing uw_flow poll precedent.
+# A ~33-ticker tick spreads to ~33s, well inside the 180s in-market cadence.
+INTER_REQUEST_SLEEP = 0.5
 
 logger = logging.getLogger("sector_refresh")
 
@@ -173,12 +181,20 @@ async def _refresh_ohlc_derived(
         "mo_value": None,
         "attempted": 0,
         "succeeded": 0,
+        "quota_blocked": False,
     }
     if not (refresh_wk or refresh_mo):
         return status
 
     status["attempted"] = 1
     bars = await get_ohlc(ticker, "1d", lookback_days=35, caller="ohlc_sector")
+    if is_unavailable(bars):
+        # B3: BACKGROUND quota exhausted (governor block). Do NOT overwrite the
+        # last-good envelope — neither with fresh data nor with None. Leaving the
+        # existing cache entry lets the heatmap render visible staleness
+        # ("stale as of HH:MM") from the aging timestamp. No faked-fresh cells.
+        status["quota_blocked"] = True
+        return status
     if bars is not None:
         status["succeeded"] = 1
     closes = _regular_session_closes(bars or [])
@@ -210,8 +226,13 @@ async def _refresh_rsi(ticker: str) -> dict:
     Returns a status dict with attempt/success counts so the caller can
     aggregate audit metrics consistently with _refresh_ohlc_derived.
     """
-    status = {"attempted": 1, "succeeded": 0, "written": False}
+    status = {"attempted": 1, "succeeded": 0, "written": False, "quota_blocked": False}
     payload = await get_technical_indicator(ticker, "RSI", lookback=14)
+    if is_unavailable(payload):
+        # B3: quota-blocked — preserve last-good RSI envelope (visible staleness),
+        # do not blank the cell with a None write.
+        status["quota_blocked"] = True
+        return status
     if payload is None:
         await sector_cache.write_field(ticker, "rsi_14", None)
         return status
@@ -263,6 +284,7 @@ async def refresh_fast() -> dict:
     skipped_wk = 0
     attempted = 0
     succeeded = 0
+    quota_blocked = 0
 
     logger.info(
         "[sector_refresh] fast tick start — universe=%d top_n_per_sector=%d",
@@ -280,22 +302,30 @@ async def refresh_fast() -> dict:
             succeeded += status["succeeded"]
             if status["wk_written"]:
                 wk_ok += 1
+            if status.get("quota_blocked"):
+                quota_blocked += 1
 
             rsi_status = await _refresh_rsi(ticker)
             attempted += rsi_status["attempted"]
             succeeded += rsi_status["succeeded"]
             if rsi_status["written"]:
                 rsi_ok += 1
+            if rsi_status.get("quota_blocked"):
+                quota_blocked += 1
         except Exception as e:
             failures += 1
             logger.debug("[sector_refresh] fast tick failure for %s: %s", ticker, e)
+
+        # B3 source-shaping: space requests so the tick self-paces (~2 req/s)
+        # and never drains the shared bucket, protecting foreground reads.
+        await asyncio.sleep(INTER_REQUEST_SLEEP)
 
     duration_ms = int((time.monotonic() - started_mono) * 1000)
     rate_limited_429s = get_total_429s() - started_429s
     logger.info(
         "[sector_refresh] fast tick complete — universe=%d attempted=%d succeeded=%d "
-        "rate_limited_429s=%d wk_ok=%d rsi_ok=%d failures=%d skipped_wk=%d duration_ms=%d",
-        len(universe), attempted, succeeded, rate_limited_429s,
+        "rate_limited_429s=%d quota_blocked=%d wk_ok=%d rsi_ok=%d failures=%d skipped_wk=%d duration_ms=%d",
+        len(universe), attempted, succeeded, rate_limited_429s, quota_blocked,
         wk_ok, rsi_ok, failures, skipped_wk, duration_ms,
     )
     return {
@@ -304,6 +334,7 @@ async def refresh_fast() -> dict:
         "attempted": attempted,
         "succeeded": succeeded,
         "rate_limited_429s": rate_limited_429s,
+        "quota_blocked": quota_blocked,
         "wk_ok": wk_ok,
         "rsi_ok": rsi_ok,
         "failures": failures,
