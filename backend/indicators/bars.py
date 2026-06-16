@@ -26,7 +26,7 @@ async def fetch_daily_ohlc(
 
         # ~1.6x calendar days per session + slack to clear weekends/holidays
         lookback_days = int(lookback_sessions * 1.6) + 10
-        bars = await get_ohlc(ticker, candle_size="1d", lookback_days=lookback_days)
+        bars = await get_ohlc(ticker, candle_size="1d", lookback_days=lookback_days, caller="ohlc_bars")
     except Exception as exc:
         logger.warning("fetch_daily_ohlc(%s) failed: %s", ticker, exc)
         return None

@@ -43,10 +43,18 @@ _cb_open_until = 0.0  # timestamp when circuit re-closes
 CB_FAILURE_THRESHOLD = 5
 CB_COOLDOWN_SECONDS = 300  # 5 minutes
 
-# ── Token Bucket Rate Limiter (120 req/min) ──────────────────────
-_bucket_tokens = 120.0
-_bucket_max = 120.0
-_bucket_refill_rate = 2.0  # tokens/sec = 120/60
+# ── Token Bucket Rate Limiter ────────────────────────────────────
+# B1 (2026-06-16 UW budget rework): burst cap lowered 120 → 60. Refill is
+# UNCHANGED at 2.0/sec (120/min sustained) — B1 smooths *bursts*, it does NOT
+# change daily pace (that's B2's per-caller quota job). The 60 floor is sized
+# so a foreground DAEDALUS options-chain pull (~3-4 UW calls) + a quote is
+# never paced even if a background loop is mid-burst; paired with B3 (sector
+# loop self-paces at source) so the bucket is a backstop, not the primary
+# burst control. Reversible one-constant tighten to 30 if post-deploy
+# telemetry still shows bursts breaching 60. See 2026-06-16-uw-budget-rework.
+_bucket_tokens = 60.0
+_bucket_max = 60.0
+_bucket_refill_rate = 2.0  # tokens/sec = 120/min sustained (UNCHANGED — burst-only change)
 _bucket_last_refill = time.time()
 _bucket_lock = asyncio.Lock()
 
@@ -197,6 +205,7 @@ async def get_ohlc(
     ticker: str,
     candle_size: str = "1d",
     lookback_days: int = 30,
+    caller: str = "ohlc",
 ) -> Optional[List[Dict[str, Any]]]:
     """Fetch OHLC bars from UW `/api/stock/{ticker}/ohlc/{candle_size}`.
 
@@ -230,7 +239,7 @@ async def get_ohlc(
     resp = await _uw_request(
         f"/api/stock/{symbol}/ohlc/{candle_size}",
         params=params or None,
-        caller="ohlc",
+        caller=caller,
     )
     if not resp or "data" not in resp:
         return None
@@ -313,7 +322,7 @@ async def _get_regular_session_change(ticker: str) -> Optional[Dict[str, Any]]:
     if cached is not None:
         return cached
 
-    bars = await get_ohlc(ticker, "1d", lookback_days=10)
+    bars = await get_ohlc(ticker, "1d", lookback_days=10, caller="ohlc_quote")
     if not bars:
         return None
 
@@ -496,7 +505,7 @@ async def _get_bars_via_uw(
         lookback = 60  # matches _fetch_yfinance_bars() default window
     lookback = min(lookback, 730)  # 2-year cap; revisit if a consumer needs more
 
-    raw = await get_ohlc(ticker, "1d", lookback_days=lookback)
+    raw = await get_ohlc(ticker, "1d", lookback_days=lookback, caller="ohlc_bars")
     if not raw:
         return None
 
