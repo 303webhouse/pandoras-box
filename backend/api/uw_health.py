@@ -35,3 +35,16 @@ async def uw_health_by_caller():
         "total": total,
         **counts,
     }
+
+
+@router.get("/governor")
+async def uw_governor_status():
+    """B2/B4 — UW budget governor state: mode (observe|enforce), total quota
+    allocation vs the 20k cap, and per-caller usage% (sorted hottest-first).
+    Watch this during the OBSERVE rollout to confirm the quota table doesn't
+    starve foreground before flipping to enforce. AEGIS-clean (no key/URL)."""
+    from integrations.uw_governor import governor_status
+    return {
+        "date": date.today().isoformat(),
+        **(await governor_status()),
+    }

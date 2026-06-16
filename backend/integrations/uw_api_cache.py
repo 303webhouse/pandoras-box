@@ -156,6 +156,25 @@ async def increment_429_counter(caller: str = "untagged") -> None:
         pass
 
 
+async def get_caller_count(caller: str) -> int:
+    """Today's request count for a single caller tag (B2 governor quota check).
+
+    Single HGET on the per-caller hash maintained by increment_daily_counter.
+    Fail-open: returns 0 when Redis is unavailable so the governor never blocks
+    a UW call because of an infra blip.
+    """
+    redis = await _get_redis()
+    if not redis:
+        return 0
+    try:
+        from datetime import date
+        key = f"uw:daily_requests_by_caller:{date.today().isoformat()}"
+        v = await redis.hget(key, caller)
+        return int(v) if v else 0
+    except Exception:
+        return 0
+
+
 async def get_counts_by_caller() -> dict:
     """Return today's per-caller request + 429 counts.
 

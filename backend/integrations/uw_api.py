@@ -31,6 +31,13 @@ from integrations.uw_api_cache import (
     cache_get, cache_set, increment_daily_counter, increment_429_counter,
     get_daily_count, get_cache_stats,
 )
+from integrations.uw_governor import (
+    precheck as _governor_precheck,
+    UWUnavailable,
+    NO_API_KEY as _GOV_NO_API_KEY,
+    CIRCUIT_OPEN as _GOV_CIRCUIT_OPEN,
+    RATE_LIMITED as _GOV_RATE_LIMITED,
+)
 
 logger = logging.getLogger("uw_api")
 
@@ -147,11 +154,19 @@ async def _uw_request(path: str, params: dict = None, caller: str = "untagged") 
     """
     if not UW_API_KEY:
         logger.debug("UW_API_KEY not set — skipping request")
-        return None
+        return UWUnavailable(_GOV_NO_API_KEY, caller=caller)
 
     if _circuit_breaker_open():
         logger.warning("UW API circuit breaker open — skipping %s", path)
-        return None
+        return UWUnavailable(_GOV_CIRCUIT_OPEN, caller=caller)
+
+    # B2 governor: per-caller daily quota gate. In observe mode this only logs
+    # would-block; in enforce mode it returns a typed sentinel BEFORE consuming
+    # a token or hitting UW, protecting foreground headroom (Part D). Falsy
+    # sentinel → existing `if not resp:` consumers degrade to cache/fallback.
+    _blocked = await _governor_precheck(caller)
+    if _blocked is not None:
+        return _blocked
 
     await _consume_token()
     await increment_daily_counter(caller)
@@ -177,8 +192,12 @@ async def _uw_request(path: str, params: dict = None, caller: str = "untagged") 
                     global _total_429s
                     _total_429s += 1
                     await increment_429_counter(caller)
-                    logger.warning("UW API %s: rate limited (429) — returning None without retry", path)
-                    return None
+                    # B2 / AEGIS: return a typed sentinel, NOT a silent None. A
+                    # silent None on throttle is indistinguishable from "no data"
+                    # — the fake-healthy pattern that made the 2026-06-16 outage
+                    # invisible. Falsy, so existing fallback paths still fire.
+                    logger.warning("UW API %s: rate limited (429) — returning UWUnavailable(RATE_LIMITED)", path)
+                    return UWUnavailable(_GOV_RATE_LIMITED, caller=caller)
                 else:
                     logger.error("UW API %s: HTTP %d — %s", path, resp.status_code, resp.text[:200])
                     _record_failure()
