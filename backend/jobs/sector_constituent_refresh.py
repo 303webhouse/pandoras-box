@@ -178,7 +178,7 @@ async def _refresh_ohlc_derived(
         return status
 
     status["attempted"] = 1
-    bars = await get_ohlc(ticker, "1d", lookback_days=35)
+    bars = await get_ohlc(ticker, "1d", lookback_days=35, caller="ohlc_sector")
     if bars is not None:
         status["succeeded"] = 1
     closes = _regular_session_closes(bars or [])
