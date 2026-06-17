@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 
 from ..decorators import mcp_tool
 from ..envelope import make_response
+from config.strategy_aliases import codename  # L0.4 display alias (additive)
 
 DESCRIPTION = (
     "Returns the hub's active scored trade ideas — the grouped Insights feed "
@@ -73,6 +74,7 @@ def _serialize_group(g: Dict[str, Any], now: datetime, include_related: bool) ->
         "distinct_strategy_count": g.get("distinct_strategy_count"),
         "strategies": g.get("strategies"),
         "signal_type": p.get("signal_type"),
+        "codename": codename(p.get("signal_type"), p.get("strategy")),  # L0.4 additive
         "signal_category": p.get("signal_category"),
         "entry_price": _safe_float(p.get("entry_price")),
         "stop_loss": _safe_float(p.get("stop_loss")),
@@ -94,6 +96,7 @@ def _serialize_group(g: Dict[str, Any], now: datetime, include_related: bool) ->
             {
                 "signal_id": rs.get("signal_id"),
                 "strategy": rs.get("strategy"),
+                "codename": rs.get("codename"),  # L0.4 additive (from feed_service)
                 "score": _safe_float(rs.get("score")),
                 "timestamp": str(rs.get("timestamp")) if rs.get("timestamp") else None,
                 "confluence_tier": rs.get("confluence_tier"),

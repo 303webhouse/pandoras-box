@@ -19,6 +19,7 @@ from pydantic import BaseModel
 
 from database.postgres_client import get_postgres_client, serialize_db_row
 from signals.feed_service import SCAN_BASED_STRATEGIES, _dedup_related_signals, get_active_trade_ideas
+from config.strategy_aliases import codename, attach_codename  # L0.4 display alias (additive)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -90,6 +91,7 @@ async def _query_tier_groups(pool, tier: str, limit: int = 50) -> list:
             g["related_signals"].append({
                 "signal_id": r.get("signal_id"),
                 "strategy": r.get("strategy") or r.get("signal_type"),
+                "codename": codename(r.get("signal_type"), r.get("strategy")),  # L0.4 additive
                 "signal_category": r.get("signal_category"),
                 "score": float(r.get("score_v2") or r.get("score") or 0),
                 "timestamp": r.get("timestamp") or r.get("created_at"),
@@ -110,6 +112,7 @@ async def _query_tier_groups(pool, tier: str, limit: int = 50) -> list:
 
     # Dedup, finalize, sort
     for g in groups_map.values():
+        attach_codename(g["primary_signal"])  # L0.4 additive (raw fields untouched)
         g["related_signals"] = _dedup_related_signals(g["related_signals"])
         g["signal_count"] = 1 + len(g["related_signals"])
         strats = [g["primary_signal"].get("strategy") or g["primary_signal"].get("signal_type") or "UNKNOWN"]
@@ -187,7 +190,8 @@ async def get_trade_ideas_feed(
         )
 
     return {
-        "signals": [serialize_db_row(dict(row)) for row in rows],
+        # L0.4: additive `codename` per row (raw signal_type/strategy untouched)
+        "signals": [attach_codename(serialize_db_row(dict(row))) for row in rows],
         "total": total or 0,
         "limit": limit,
         "offset": offset,

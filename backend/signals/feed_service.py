@@ -17,6 +17,8 @@ from collections import OrderedDict
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
+from config.strategy_aliases import codename, attach_codename  # L0.4 display alias (additive)
+
 logger = logging.getLogger(__name__)
 
 # Strategies that fire on persistent conditions (not discrete events).
@@ -180,6 +182,7 @@ async def get_active_trade_ideas(
             g["related_signals"].append({
                 "signal_id": r.get("signal_id"),
                 "strategy": r.get("strategy") or r.get("signal_type"),
+                "codename": codename(r.get("signal_type"), r.get("strategy")),  # L0.4 additive
                 "signal_category": r.get("signal_category"),
                 "score": float(r.get("score_v2") or r.get("score") or 0),
                 "timestamp": r.get("timestamp") or r.get("created_at"),
@@ -203,6 +206,7 @@ async def get_active_trade_ideas(
 
     # Dedup scan-based strategies, recount, rebuild strategy list
     for g in groups_map.values():
+        attach_codename(g["primary_signal"])  # L0.4 additive (raw fields untouched)
         g["related_signals"] = _dedup_related_signals(g["related_signals"])
         g["signal_count"] = 1 + len(g["related_signals"])
         strats = [g["primary_signal"].get("strategy") or g["primary_signal"].get("signal_type") or "UNKNOWN"]
