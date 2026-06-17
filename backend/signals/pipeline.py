@@ -1175,6 +1175,18 @@ async def process_signal_unified(
     signal_data["status"] = signal_data.get("status", "ACTIVE")
     signal_data["expires_at"] = signal_data.get("expires_at") or calculate_expiry(signal_data)
 
+    # 1a. L0.1a suppression gate (SHADOW) — compute the per-signal_type KEEP/
+    #     SUPPRESS decision at the chokepoint. SHADOW: we only compute here and
+    #     tag just before persistence (step 4); we do NOT drop/divert. The tag
+    #     write is deferred because apply_scoring() reassigns triggering_factors
+    #     wholesale (pipeline.py ~L689), which would clobber an early tag.
+    #     Enforce (actual divert) is a separate, separately-gated brief.
+    try:
+        from config.l0_routing import evaluate_l0_gate
+        signal_data["_l0_decision"] = evaluate_l0_gate(signal_data)
+    except Exception as _l0_err:
+        logger.warning("L0 gate evaluation failed (shadow, non-blocking): %s", _l0_err)
+
     # 2. Attach bias snapshot
     if not signal_data.get("bias_at_signal"):
         try:
@@ -1288,6 +1300,21 @@ async def process_signal_unified(
             signal_data["lightning_merged"] = True
     except Exception as e:
         logger.debug("Lightning dedup check skipped: %s", e)
+
+    # 3d. L0.1a SHADOW tag — write the gate decision into triggering_factors so
+    #     it persists with the row. Placed AFTER scoring (apply_scoring resets
+    #     triggering_factors at ~L689) and BEFORE log_signal so the INSERT and
+    #     the later update_signal_with_score both carry it. SHADOW: tag only.
+    try:
+        _l0_decision = signal_data.get("_l0_decision")
+        if _l0_decision is not None:
+            _tf = signal_data.get("triggering_factors")
+            if not isinstance(_tf, dict):
+                _tf = {}
+                signal_data["triggering_factors"] = _tf
+            _tf["l0_shadow"] = _l0_decision
+    except Exception as _l0_tag_err:
+        logger.warning("L0 shadow tag write failed (non-blocking): %s", _l0_tag_err)
 
     # 4. Persist to PostgreSQL
     try:
