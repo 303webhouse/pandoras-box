@@ -2,7 +2,7 @@
 
 Authoritative queue of in-flight, near-term, and deferred build work for Pandora's Box. Maintained as ATHENA's canonical reference for priority arbitration during Titans review passes.
 
-**Last updated:** 2026-05-22 (v2 — ZEUS phase structure added, Phase A closure incorporated, four arbitrations from 2026-05-22 session locked in)
+**Last updated:** 2026-06-17 (v3 — rebuild stack L0/L1/L2 seated as active top-of-queue; sb3 + sec-work tracks noted as in-flight)
 **Maintained by:** ATHENA (Olympus Titans synthesis lane). Nick or CC may update directly when items are added, promoted, demoted, or closed.
 
 ---
@@ -41,7 +41,17 @@ Items deeper in Tier 2 / Tier 3 that previously anchored on "post-ZEUS" now anch
 
 ## Top of queue (active scope)
 
-*Empty.* Brief E (Titans skills cleanup) closed as `9540abd` on 2026-05-25 — Titans framework is now live in Claude.ai. Phase A closed as `363cde6` on 2026-05-22. The next major build (urgent overhaul TBD as of 2026-05-27) or the Phase C bundle promotes to active scope when its brief is authored and Titans-reviewed.
+**THE REBUILD STACK (L0 → L1 → L2) — the "urgent overhaul" placeholder is now filled.**
+Forced by the signal-edge-validation finding (2026-06-16): the hub's score / feed-tier system has no demonstrable edge; edge lives in the liquid universe + regime-conditional shorting. Master brief: `docs/codex-briefs/2026-06-16-rebuild-stack-master-brief.md`.
+
+- **L0 — Foundation (subtraction + routing).** Brief `docs/codex-briefs/2026-06-17-L0-foundation-build-brief.md` — Titans-reviewed 2026-06-17, **unanimous APPROVE FOR CC** (`3671c85`). ACTIVE. Session 1 = L0.2 liquid allowlist + L0.1a suppression (shadow). L0.1b regime routing GATED on the sb3 ADX-regime promote (`signals.regime` verified 100% NULL on 12,837 rows).
+- **L1 — Signal Quality.** Flow + PYTHIA auction acceptance into signal GATING; canonical factor strategies (`docs/the-stable/`). Absorbs: Flow Radar key bug (Amendment 2), Artemis routing, the `feed_tier_classifier_v2._flow_aligned` third-flow-path check. QUEUED behind L0.
+- **L2 — Options Expression (Triton + Nemesis).** Only on L0+L1-validated signals + a forward-edge test. QUEUED.
+- **Sidecar (parallel track):** regime-gated `sell_the_rip` (Achilles) + kill-switch, shadow-first. Does NOT wait on the stack.
+
+**Parallel tracks in flight (NOT part of L0 — coordinate worktrees, never `git add .`):**
+- **sb3 (scoring correctness)** — three fixes (dead ADX regime gate, double-counted/false-bearish flow, iv_rank dispersion proxy) shadow-staged on `sb3-work` (C:/th-scoring); promote pending UW-recovery confirm (06-18 RTH, deploy after close). Handoff: `docs/sb3-handoff-for-strategy-overhaul.md`. **L0.1b depends on this promote.**
+- **sec-work (Fable security)** — plaintext Postgres pw rotation + move to env, pre-June-22. Branch `sec-work` (C:/th-security).
 
 ---
 
@@ -186,3 +196,4 @@ Recording priority calls made during ATHENA workflow passes that may set future 
 | 2026-05-24 | Backlog hygiene | PIVOT skill confirmed shipped (commit `fd0419b`); Tier 1 item #3 removed and moved to Recent closures. Originally queued "post-ZEUS-Phase-I" per the 2026-05-22 v2 restructure; verified 2026-05-24 via git log on `skills/pivot/SKILL.md` and the "all 7 agents shipped" line in commit `789c4a0`'s body. Tier 1 now contains: Phase C bundle (#1), Phase B (#2). |
 | 2026-05-25 | Closure | Brief E (Titans skills cleanup, Ship 1 + Ship 2) shipped as `9540abd` with closure appended as `0fdedfb`. Titans .skill bundles repackaged and uploaded to Claude.ai. Moved from Top of queue to Recent closures. |
 | 2026-05-27 | Top of queue restored to empty | Top of queue placeholder restored. Awaiting new major build entry (per Nick 2026-05-27 — urgent overhaul scope TBD) OR Phase C bundle brief authoring. |
+| 2026-06-17 | v3 — rebuild stack seated | Top of queue filled with the L0/L1/L2 rebuild stack (the 2026-05-27 "urgent overhaul" placeholder). Forced by the signal-edge-validation finding 2026-06-16. L0 brief Titans-reviewed → unanimous APPROVE FOR CC (`3671c85`). sb3 (scoring) + sec-work (Fable security) noted as in-flight parallel tracks. Tier-1 ZEUS Phase I items (Phase C bundle, Phase B) now sit BELOW the rebuild stack — displaced per ATHENA: fixing a foundation with no demonstrated edge outranks adding enrichment tools on top of it. |
