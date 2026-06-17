@@ -170,7 +170,7 @@ The card collapses to **one glanceable 3-state tag**, mapping 1:1 to the three s
 ## 8. Open re-analyses (RUN these — they are L0's first gating work)
 
 Not described-and-shelved — the first executable items of L0, and now that local compute is
-restored they get *run.* Each has explicit keep/kill logic.
+restored they get *run.* Each has explicit keep/kill logic. **(RESULTS now in §11 — all three RUN.)**
 
 **8.1 Gate-test Holy Grail.**
 Re-run filtered to **(ADX > 30) × (liquid universe) × (in-trend direction)**, split **1H vs 15m**.
@@ -226,3 +226,55 @@ not a kill candidate.
 
 **Nothing in L2 goes live until the signal under it has passed L0+L1+forward-edge. That sentence is
 the whole brief.**
+
+---
+
+## 11. Revision update — 2026-06-16 (post-analysis + naming)
+
+### Strategy naming (the revamp roster)
+Display names introduced with the rebuild. **These are display/branding names — the underlying
+`strategy` / `signal_type` identifiers in the DB stay unchanged until a careful alias migration
+(L0, ATLAS-owned), so accumulated outcome history and the n-gates are NOT orphaned.**
+
+| Codename | Underlying | What it is |
+|---|---|---|
+| **Midas \| Golden Touch** | CTA `GOLDEN_TOUCH` | low-freq high-edge signal (+1.75, 52% WR, n=21) — instrument + accumulate |
+| **Achilles \| Sell the Rip** | `sell_the_rip` | mean-reversion short; gate on ADX<~30 / bracketing auction |
+| **Hector \| Trapped Shorts** | CTA `TRAPPED_SHORTS` | mean-reversion (failed-breakdown return-to-value); same gate |
+| **Triton \| Whale Hunter** | L2 whale-led options (absorbs dead `Whale_Hunter`) | position-ahead; forward-edge-gated |
+| **Nemesis \| Impulse Ignition** | L2 acceleration/impulse primitive | shadow-first; ignition-vs-exhaustion |
+| **Icarus** | 0DTE SPY scalp (existing, shadow, n≥30 gate) | retained standalone; ALSO a confluence input for the above |
+
+### Re-analysis verdicts (resolves §8 — all RUN, READ-ONLY)
+- **§8.1 Holy_Grail — KILL confirmed.** ADX-rescue hypothesis falsified (higher ADX = worse; the 40+
+  bucket is the worst at −1.64). Min ADX in data = 25 (never fired in true chop). Suppress outright.
+  → `docs/strategy-reviews/holy-grail-gate-test-2026-06-16.md`
+- **§8.2 CTA — route by `signal_type`, do NOT kill the parent.** Keep Midas / APIS_CALL / Hector /
+  TWO_CLOSE_VOLUME; suppress PULLBACK_ENTRY, RESISTANCE_REJECTION (single-name only), TRAPPED_LONGS.
+  Routing flips CTA −592 → +190. The PULLBACK→top_feed hypothesis is falsified. Liquid-gating is
+  **signal_type-specific**, not global. → `docs/strategy-reviews/cta-artemis-decompose-and-uw-era-2026-06-16.md`
+- **§8.3 pre/post-UW — pessimism is STRUCTURAL, not a data artifact.** No strategy flips
+  negative→positive in the UW-era; Holy_Grail improves on clean data (−1.24→−0.56) but stays negative.
+  Kills hold. Same note.
+
+### The quantified gate (updates L0 + L1)
+- **Trend-strength gate, NOT bias direction.** Achilles + Hector are mean-reversion: edge in chop /
+  low-ADX (Achilles peaks at ADX 25–30 = +1.72; Hector +1.64 in chop), run over in strong trends
+  (edge gone above ADX 35; trending-regime cells −1.00 / −2.19). Deploy when **ADX < ~30 / regime not
+  trending / PYTHIA bracketing auction**; kill-switch on **ADX rising / trend ignition.** This refines
+  the validation doc's "bear regime" framing to the sharper trend-strength one.
+  → `docs/strategy-reviews/regime-gate-and-flow-audit-2026-06-16.md`
+- **Flow was never wired into the gate (L1 = near-greenfield, the headline overhaul).** 96% of signals
+  fired STANDALONE; options sweep present in 1 signal, dark/whale in 0; only GEX/positioning context
+  existed (98%). **L1 must feed UW order flow (sweeps, dark prints, whale trades, net flow) + PYTHIA
+  auction acceptance into the gate.** Gate shorthand: **"regime-appropriate + flow-confirmed +
+  auction-accepted."**
+
+### Icarus as confluence
+Beyond standing alone (0DTE SPY scalp), Icarus signals serve as a **confluence confirmation** for
+Achilles / Hector / Midas when they co-fire on SPY/index names — an additional gate input, never a
+standalone requirement. Validate like all confluence (currently unproven, n thin).
+
+### Security flag (for the "Fable" review, pre-June 22)
+Plaintext Postgres password committed in `.mcp.json` and hardcoded in
+`scripts/backfill_imported_to_unified.py` — AEGIS finding, rotate + move to env/secret.
