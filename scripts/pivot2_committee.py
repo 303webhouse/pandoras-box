@@ -54,6 +54,29 @@ from committee_decisions import (
 log = logging.getLogger("pivot2_committee")
 
 
+# ── L0.4 alias (display-only, additive) ──────────────────────
+# Canonical map = backend/config/strategy_aliases.py. Resolve when importable
+# (backend on path, or a sibling strategy_aliases.py deployed to the VPS scripts
+# dir); otherwise no-op so committee alerts are unchanged until the map ships.
+# NEVER mutates the raw signal_type/strategy the gatekeeper/routing branch on.
+try:
+    from config.strategy_aliases import codename as _alias_codename
+except Exception:  # pragma: no cover
+    try:
+        from strategy_aliases import codename as _alias_codename
+    except Exception:
+        def _alias_codename(signal_type=None, strategy=None):
+            return None
+
+
+def _codename_for(signal: dict[str, Any]) -> str:
+    """Roster codename for a signal, or '' if unmapped/unavailable."""
+    try:
+        return _alias_codename(signal.get("signal_type"), signal.get("strategy")) or ""
+    except Exception:
+        return ""
+
+
 # ── constants ────────────────────────────────────────────────
 SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
 DATA_DIR = SCRIPT_DIR.parent / "data"
@@ -1286,10 +1309,12 @@ def run(channel_id: str, dry_run: bool) -> dict:
         direction_display = str(signal.get("direction") or "???").upper()
         score = signal.get("score", "N/A")
         strategy = signal.get("strategy", signal.get("signal_type", "N/A"))
+        _cn = _codename_for(signal)
+        _strategy_display = f"{strategy} | {_cn}" if _cn else f"{strategy}"
 
         alert_embed = {
             "title": f"\U0001f4e1 Signal: {ticker} {direction_display}",
-            "description": f"**Strategy:** {strategy}\n**Score:** {score}\n**Bias:** {bias_level}",
+            "description": f"**Strategy:** {_strategy_display}\n**Score:** {score}\n**Bias:** {bias_level}",
             "color": 0x5865F2,  # Discord blurple
             "timestamp": now_utc().isoformat(),
             "fields": [],
