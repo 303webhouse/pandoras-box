@@ -4324,7 +4324,7 @@ function renderGroupedSignals(groups) {
             let meta = signal.metadata || {};
             if (typeof meta === 'string') { try { meta = JSON.parse(meta); } catch(e) {} }
             const isUwFlow = signal.strategy === 'UW_FLOW';
-            const stratLabel = isUwFlow ? 'UW Flow' : formatSignalType(signal.signal_type || signal.strategy);
+            const stratLabel = isUwFlow ? 'UW Flow' : signalDisplayName(signal);
             primaryHtml = `
                 <div class="insight-primary">
                     <div class="insight-primary-label">${getTimingBadge(signal.triggering_factors)}Primary: ${stratLabel}</div>
@@ -4340,7 +4340,7 @@ function renderGroupedSignals(groups) {
             if (typeof meta === 'string') { try { meta = JSON.parse(meta); } catch(e) {} }
             primaryHtml = `
                 <div class="insight-primary">
-                    <div class="insight-primary-label">Primary: ${formatStrategyName(signal.strategy)}</div>
+                    <div class="insight-primary-label">Primary: ${signal.codename || formatStrategyName(signal.strategy)}</div>
                     <div class="insight-levels">
                         <span>Premium: $${typeof formatLargeNumber === 'function' ? formatLargeNumber(meta.total_premium) : (meta.total_premium || '-')}</span>
                         <span>P/C: ${meta.pc_ratio || '-'}</span>
@@ -4350,7 +4350,7 @@ function renderGroupedSignals(groups) {
         } else if (category === 'ORDER_FLOW') {
             primaryHtml = `
                 <div class="insight-primary">
-                    <div class="insight-primary-label">Primary: ${formatStrategyName(signal.strategy)}</div>
+                    <div class="insight-primary-label">Primary: ${signal.codename || formatStrategyName(signal.strategy)}</div>
                     <div class="insight-levels">
                         <span>Wall: ${formatPrice(signal.entry_price)}</span>
                     </div>
@@ -4358,7 +4358,7 @@ function renderGroupedSignals(groups) {
         } else {
             primaryHtml = `
                 <div class="insight-primary">
-                    <div class="insight-primary-label">${getTimingBadge(signal.triggering_factors)}Primary: ${formatSignalType(signal.signal_type || signal.strategy)} ${signal.timeframe || ''}</div>
+                    <div class="insight-primary-label">${getTimingBadge(signal.triggering_factors)}Primary: ${signalDisplayName(signal)} ${signal.timeframe || ''}</div>
                     <div class="insight-levels">
                         <span>Entry: ${formatPrice(signal.entry_price)}</span>
                         <span>Stop: ${formatPrice(signal.stop_loss)}</span>
@@ -4373,7 +4373,7 @@ function renderGroupedSignals(groups) {
             const items = group.related_signals.map(rs => {
                 const ago = rs.timestamp ? getTimeAgo(rs.timestamp) : '';
                 return `<div class="insight-confirming-item">
-                    <span class="confirming-strategy">${formatStrategyName(rs.strategy)} ${group.direction}</span>
+                    <span class="confirming-strategy">${relatedDisplayName(rs)} ${group.direction}</span>
                     <span class="confirming-time">${ago}</span>
                 </div>`;
             }).join('');
@@ -4427,7 +4427,7 @@ function renderGroupedSignals(groups) {
                         ${positionBadge}
                     </div>
                     <div class="insight-line2">
-                        <span class="insight-substrat">${formatSignalType(signal.signal_type || signal.strategy)}</span>
+                        <span class="insight-substrat">${signalDisplayName(signal)}</span>
                         <span class="horizon-pill ${horizonClass}">${horizonLabel}</span>
                         ${confCount}${squeezeBadge}${feedTierBadge}
                         <span class="insight-ago">${getTimeAgo(group.last_signal_at || group.newest_at)}</span>
@@ -4535,6 +4535,21 @@ function formatSignalType(raw) {
     };
     if (names[raw]) return names[raw];
     return raw.replace(/[_-]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+// L0.4 alias layer: prefer the backend-provided `codename` (Midas / Achilles /
+// Hector / Apis / Kodiak / Triton / Nemesis), else fall back to the existing
+// formatters. The map lives in Python (backend/config/strategy_aliases.py) —
+// we do NOT duplicate it here; we only consume the additive field. Raw
+// signal_type/strategy stay untouched for CSS classes, filters, and logic.
+function signalDisplayName(signal) {
+    if (signal && signal.codename) return signal.codename;
+    return formatSignalType((signal && (signal.signal_type || signal.strategy)) || '');
+}
+
+function relatedDisplayName(rs) {
+    if (rs && rs.codename) return rs.codename;
+    return formatStrategyName((rs && rs.strategy) || '');
 }
 
 function getConfluenceBadge(signal) {
@@ -4879,7 +4894,7 @@ function createCryptoSignalCard(signal) {
 }
 
 function createSignalCard(signal) {
-    const typeLabel = formatSignalType(signal.signal_type || signal.strategy);
+    const typeLabel = signalDisplayName(signal);
     
     // Calculate score tier and pulse class — use adjusted_score if available
     const baseScore = signal.score || 0;
@@ -4914,7 +4929,7 @@ function createSignalCard(signal) {
         strategiesHtml = signal.strategies.map(s => wrapWithKbLink(formatSignalType(s))).join(' + ');
     } else {
         // Show sub-strategy (signal_type) as primary, parent strategy as secondary
-        const subType = formatSignalType(signal.signal_type || signal.strategy);
+        const subType = signalDisplayName(signal);
         const parentStrat = formatStrategyName(signal.strategy);
         strategiesHtml = wrapWithKbLink(subType);
         if (subType !== parentStrat && signal.signal_type && signal.strategy) {
@@ -5169,7 +5184,7 @@ function renderCryptoPositions() {
                 Entry: $${p.entry_price ? parseFloat(p.entry_price).toLocaleString() : '--'}
                 &middot; Qty: ${p.quantity || '--'}
                 ${p.stop_loss ? `&middot; Stop: $${parseFloat(p.stop_loss).toLocaleString()}` : ''}
-                ${p.strategy ? `&middot; ${escapeHtml(formatStrategyName(p.strategy))}` : ''}
+                ${p.strategy ? `&middot; ${escapeHtml(p.codename || formatStrategyName(p.strategy))}` : ''}
             </div>
         </div>
     `).join('');
@@ -7225,7 +7240,7 @@ function renderAnalyzerV4(analysis, recentSignals, ticker) {
             const ago = getTimeAgo(new Date(s.created_at));
             const dirClass = (s.direction || '').toLowerCase();
             return `<div class="analyzer-signal-row ${dirClass}">
-                <span class="analyzer-sig-strategy">${escapeHtml(formatStrategyName(s.strategy || ''))}</span>
+                <span class="analyzer-sig-strategy">${escapeHtml(s.codename || formatStrategyName(s.strategy || ''))}</span>
                 <span class="analyzer-sig-dir ${dirClass}">${s.direction || '-'}</span>
                 <span class="analyzer-sig-score">${Math.round(s.score || 0)}</span>
                 <span class="analyzer-sig-status">${s.status || '-'}</span>
@@ -10206,7 +10221,7 @@ function renderPositionCard(pos) {
         }
         counterBanner = `
             <div class="counter-signal-warning">
-                Counter-signal: ${cs.direction || '?'} ${formatStrategyName(cs.strategy)} (score: ${cs.score || 'N/A'})${csTime ? ` <span class="counter-signal-time">${csTime}</span>` : ''}
+                Counter-signal: ${cs.direction || '?'} ${cs.codename || formatStrategyName(cs.strategy)} (score: ${cs.score || 'N/A'})${csTime ? ` <span class="counter-signal-time">${csTime}</span>` : ''}
             </div>`;
     }
 
@@ -10224,7 +10239,7 @@ function renderPositionCard(pos) {
         }
         confirmBanner = `
             <div class="confirming-signal-banner">
-                Confirming: ${cf.direction || '?'} ${formatStrategyName(cf.strategy)} (score: ${cf.score || 'N/A'})${cfTime ? ` <span class="confirming-signal-time">${cfTime}</span>` : ''}
+                Confirming: ${cf.direction || '?'} ${cf.codename || formatStrategyName(cf.strategy)} (score: ${cf.score || 'N/A'})${cfTime ? ` <span class="confirming-signal-time">${cfTime}</span>` : ''}
             </div>`;
     }
 
