@@ -47,6 +47,15 @@ except ImportError:
     print("discord.py not installed. Run: pip install discord.py")
     raise
 
+# L0.4 alias (display-only, additive). Canonical map = config/strategy_aliases.
+# Defensive so the bot never fails to import if run outside the backend env;
+# never mutates raw signal_type/strategy.
+try:
+    from config.strategy_aliases import codename as _alias_codename
+except Exception:  # pragma: no cover
+    def _alias_codename(signal_type=None, strategy=None):
+        return None
+
 # ================================
 # CONFIGURATION
 # ================================
@@ -1113,8 +1122,9 @@ def format_trade_idea_embed(signal: Dict[str, Any]) -> discord.Embed:
         color=color
     )
 
+    _cn = _alias_codename(signal.get("signal_type"), signal.get("strategy"))
     embed.add_field(name="Score", value=f"{score:.0f}/100", inline=True)
-    embed.add_field(name="Strategy", value=strategy, inline=True)
+    embed.add_field(name="Strategy", value=(f"{strategy} | {_cn}" if _cn else strategy), inline=True)
     embed.add_field(name="Direction", value=direction, inline=True)
 
     embed.add_field(name="Entry", value=f"${entry:.2f}", inline=True)
