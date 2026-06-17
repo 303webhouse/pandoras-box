@@ -72,3 +72,5 @@ all_chunks_flat.txt
 /one
 data/_*.json
 scripts/retrospective_output.json
+# Windows Explorer folder metadata
+desktop.ini

@@ -1,0 +1,1112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Comprehensive Crude Oil Trading Guide – First-Year Pod Sheet</title>
+  <style>
+    :root{
+      --ink:#000000;
+      --bg:#ffffff;
+      --card:#ffffff;
+      --brand:#0a1628;
+      --brand2:#1e3a5f;
+      --muted:#666666;
+      --ok:#2e7d32;
+      --warn:#ed6c02;
+      --danger:#d32f2f;
+      --light-gray:#f5f5f5;
+      --border:#e0e0e0;
+    }
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      color:var(--ink);
+      background:var(--bg);
+      line-height:1.6;
+    }
+    .container{max-width:1280px;margin:0 auto;padding:40px 24px}
+    .header{
+      background:var(--brand);
+      color:#fff;
+      padding:48px 40px;
+      border-radius:12px;
+      margin-bottom:40px;
+      box-shadow:0 4px 6px rgba(0,0,0,0.1);
+    }
+    h1{font-size:2.8rem;letter-spacing:-0.02em;margin-bottom:12px;font-weight:700}
+    .subtitle{opacity:0.95;font-size:1.1rem;line-height:1.5}
+    .grid{display:grid;gap:20px}
+    .grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}
+    .grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}
+    @media (max-width:900px){.grid-2,.grid-3{grid-template-columns:1fr}}
+    .section{
+      background:var(--card);
+      border:1px solid var(--border);
+      border-radius:8px;
+      margin:28px 0;
+      overflow:hidden;
+      box-shadow:0 2px 4px rgba(0,0,0,0.06);
+    }
+    .section h2{
+      background:var(--brand);
+      color:#fff;
+      padding:18px 24px;
+      font-size:1.5rem;
+      font-weight:600;
+    }
+    .section h3{
+      color:var(--brand);
+      margin:20px 0 12px 0;
+      font-size:1.2rem;
+      font-weight:600;
+    }
+    .content{padding:24px}
+    .intro-section{
+      background:linear-gradient(135deg, #f8f9fa 0%, #e8eaf0 100%);
+      border:1px solid var(--border);
+      border-radius:8px;
+      padding:32px;
+      margin:32px 0;
+    }
+    .intro-section h2{
+      color:var(--brand);
+      margin-bottom:20px;
+      font-size:1.8rem;
+    }
+    .intro-grid{
+      display:grid;
+      grid-template-columns:repeat(auto-fit, minmax(300px, 1fr));
+      gap:24px;
+      margin-top:24px;
+    }
+    .intro-card{
+      background:var(--bg);
+      padding:20px;
+      border-radius:8px;
+      border-left:4px solid var(--brand2);
+    }
+    .intro-card h4{
+      color:var(--brand);
+      margin-bottom:10px;
+      font-size:1.1rem;
+    }
+    .callout{
+      border-left:4px solid var(--brand2);
+      background:var(--light-gray);
+      padding:16px 20px;
+      border-radius:6px;
+      margin:16px 0;
+    }
+    .warn{border-left-color:var(--warn);background:#fff3e0}
+    .danger{border-left-color:var(--danger);background:#ffebee}
+    .ok{border-left-color:var(--ok);background:#e8f5e9}
+    .note{color:var(--muted);font-size:0.95rem;margin-top:8px}
+    table{
+      width:100%;
+      border-collapse:separate;
+      border-spacing:0;
+      margin:16px 0;
+      background:#fff;
+      border-radius:8px;
+      overflow:hidden;
+      border:1px solid var(--border);
+    }
+    th,td{
+      padding:12px 14px;
+      border-bottom:1px solid var(--border);
+      text-align:left;
+    }
+    thead th{
+      background:var(--brand);
+      color:#fff;
+      font-weight:600;
+      text-align:left;
+    }
+    tbody tr:nth-child(even){background:var(--light-gray)}
+    tbody tr:last-child td{border-bottom:none}
+    .badge{
+      display:inline-block;
+      padding:3px 10px;
+      border-radius:12px;
+      background:var(--brand);
+      color:#fff;
+      font-weight:600;
+      font-size:0.85rem;
+      margin-right:6px;
+    }
+    .kpi{
+      background:var(--light-gray);
+      border:1px solid var(--border);
+      border-radius:8px;
+      padding:16px;
+      text-align:center;
+    }
+    .kpi .label{
+      color:var(--brand);
+      font-weight:600;
+      font-size:0.9rem;
+      text-transform:uppercase;
+      letter-spacing:0.5px;
+    }
+    .kpi .value{
+      font-size:1.6rem;
+      font-weight:700;
+      color:var(--ink);
+      margin-top:8px;
+    }
+    ul{margin:12px 0 12px 24px}
+    li{margin:8px 0}
+    .pill{
+      display:inline-block;
+      padding:6px 14px;
+      border-radius:20px;
+      border:1px solid var(--border);
+      margin:4px 6px 4px 0;
+      background:var(--light-gray);
+      font-size:0.9rem;
+    }
+    code, .mono{
+      font-family:"SF Mono", Monaco, "Cascadia Code", "Roboto Mono", monospace;
+      font-size:0.95em;
+      background:var(--light-gray);
+      border:1px solid var(--border);
+      border-radius:4px;
+      padding:2px 6px;
+    }
+    .footer{
+      color:var(--muted);
+      font-size:0.9rem;
+      margin-top:40px;
+      padding-top:20px;
+      border-top:1px solid var(--border);
+      text-align:center;
+    }
+    .highlight-box{
+      background:linear-gradient(135deg, #f0f4f8 0%, #d9e2ec 100%);
+      border:2px solid var(--brand2);
+      border-radius:8px;
+      padding:20px;
+      margin:20px 0;
+    }
+    .formula-box{
+      background:var(--light-gray);
+      border:1px solid var(--border);
+      border-radius:6px;
+      padding:16px;
+      margin:16px 0;
+      font-family:monospace;
+      font-size:1.1rem;
+      text-align:center;
+    }
+    strong{color:var(--brand)}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>Comprehensive Crude Oil Trading Guide</h1>
+      <p class="subtitle">Complete reference for WTI, Brent, refined products, term structure, geopolitics, and execution strategies. Everything you need to trade crude oil markets effectively.</p>
+    </div>
+
+    <!-- Why Crude Oil is Different -->
+    <div class="intro-section">
+      <h2>Why Trading Crude Oil is Different from Other Assets</h2>
+      <p>Crude oil stands apart from equities, bonds, and even other commodities due to its unique characteristics as both a physical commodity and a geopolitical instrument. Understanding these distinctions is crucial for successful trading.</p>
+      
+      <div class="intro-grid">
+        <div class="intro-card">
+          <h4>Physical Delivery & Storage Constraints</h4>
+          <p>Unlike financial assets, crude oil requires physical storage and transportation. Tank capacity at Cushing, Oklahoma can drive massive price dislocations. The April 2020 negative prices demonstrated how logistics trump financial models when storage fills. This creates opportunities and risks absent in purely financial markets.</p>
+        </div>
+        
+        <div class="intro-card">
+          <h4>Geopolitical Weapon</h4>
+          <p>Oil is the lifeblood of modern economies and a tool of statecraft. OPEC+ production decisions, sanctions on Russia/Iran, and control of chokepoints like the Strait of Hormuz (21% of global oil) create binary event risks. A single headline can move markets 3-5% instantly—volatility rarely seen in developed equity markets.</p>
+        </div>
+        
+        <div class="intro-card">
+          <h4>Multiple Interconnected Markets</h4>
+          <p>Trading crude means understanding a complex web: WTI vs Brent spreads, crack spreads with gasoline/diesel, natural gas substitution, shipping rates, and currency impacts. Each market influences the others. You're not just trading oil—you're trading the entire energy complex.</p>
+        </div>
+        
+        <div class="intro-card">
+          <h4>Term Structure as Primary Signal</h4>
+          <p>While equity traders focus on price levels, oil traders obsess over the curve. Backwardation vs contango tells you more about market fundamentals than absolute price. The shape of the forward curve drives storage economics, producer hedging, and consumer behavior in ways unique to commodities.</p>
+        </div>
+        
+        <div class="intro-card">
+          <h4>Weather & Seasonality Matter</h4>
+          <p>Hurricane season can knock out 20% of US refining capacity. Winter freezes boost heating oil demand. Summer driving season lifts gasoline consumption by 10%. These predictable patterns create trading opportunities but also correlation risks across your book.</p>
+        </div>
+        
+        <div class="intro-card">
+          <h4>24-Hour Global Market</h4>
+          <p>Oil never sleeps. Asian refiners, European traders, and US producers create three distinct sessions with different personalities. Liquidity fragments, spreads widen at night, and news breaks anytime. Risk management requires constant vigilance or specific session strategies.</p>
+        </div>
+      </div>
+      
+      <div class="highlight-box">
+        <strong>The Bottom Line:</strong> Oil combines the complexity of FX markets, the volatility of emerging markets, the physical constraints of agricultural commodities, and the geopolitical sensitivity of defense stocks. Success requires mastering multiple disciplines: fundamental analysis, technical trading, geopolitical assessment, and logistics understanding. This complexity creates inefficiencies—and opportunities—for prepared traders.
+      </div>
+    </div>
+
+    <!-- 1. Instruments & Specs -->
+    <section class="section" id="instruments">
+      <h2>1) Instruments & Specifications</h2>
+      <div class="content">
+        <div class="grid grid-2">
+          <div>
+            <h3>Benchmark Futures</h3>
+            <table>
+              <thead><tr><th>Symbol</th><th>Contract</th><th>Size</th><th>Min Tick</th><th>Tick Value</th><th>Settlement</th><th>Delivery/Notes</th></tr></thead>
+              <tbody>
+                <tr><td><strong>CL</strong> (NYMEX)</td><td>WTI Crude Oil</td><td>1,000 bbl</td><td>$0.01</td><td>$10</td><td>Physical</td><td>Cushing, OK delivery; monthly cycle</td></tr>
+                <tr><td><strong>MCL</strong> (NYMEX)</td><td>Micro WTI</td><td>100 bbl</td><td>$0.01</td><td>$1</td><td>Financial</td><td>Tracks WTI, micro sizing</td></tr>
+                <tr><td><strong>QM</strong> (NYMEX)</td><td>E-mini WTI</td><td>500 bbl</td><td>$0.025</td><td>$12.50</td><td>Financial</td><td>Intermediate sizing</td></tr>
+                <tr><td><strong>BRN</strong> (ICE)</td><td>Brent Crude</td><td>1,000 bbl</td><td>$0.01</td><td>$10</td><td>Cash</td><td>Seaborne benchmark; sets int'l slate</td></tr>
+                <tr><td><strong>WBS</strong> (ICE)</td><td>WTI Midland</td><td>1,000 bbl</td><td>$0.01</td><td>$10</td><td>Physical</td><td>Houston delivery; export benchmark</td></tr>
+                <tr><td><strong>SC</strong> (INE)</td><td>Shanghai Crude</td><td>1,000 bbl</td><td>¥0.1</td><td>¥100</td><td>Physical</td><td>Yuan-denominated; Asia benchmark</td></tr>
+              </tbody>
+            </table>
+            <p class="note">Trading Hours: Sunday 18:00 – Friday 17:00 ET with 60-min maintenance break (16:00-17:00 ET daily)</p>
+          </div>
+          <div>
+            <h3>Refined Products & Energy Complex</h3>
+            <table>
+              <thead><tr><th>Symbol</th><th>Contract</th><th>Size</th><th>Tick</th><th>Tick Value</th><th>Use Case</th></tr></thead>
+              <tbody>
+                <tr><td><strong>RB</strong></td><td>RBOB Gasoline</td><td>42,000 gal</td><td>$0.0001</td><td>$4.20</td><td>Gasoline leg of crack</td></tr>
+                <tr><td><strong>HO</strong></td><td>ULSD (Diesel)</td><td>42,000 gal</td><td>$0.0001</td><td>$4.20</td><td>Distillate leg</td></tr>
+                <tr><td><strong>NG</strong></td><td>Natural Gas</td><td>10,000 MMBtu</td><td>$0.001</td><td>$10</td><td>Power/heat cross</td></tr>
+                <tr><td><strong>BZ</strong></td><td>Brent Last Day</td><td>1,000 bbl</td><td>$0.01</td><td>$10</td><td>Cash-settled Brent</td></tr>
+                <tr><td><strong>CU</strong></td><td>Copper</td><td>25,000 lbs</td><td>$0.0005</td><td>$12.50</td><td>China demand proxy</td></tr>
+              </tbody>
+            </table>
+            <div class="callout warn"><strong>Delivery Risk:</strong> Roll CL positions by the 3rd business day before the 25th of the month preceding delivery. MCL/QM are cash-settled—use for precision without delivery concerns.</div>
+          </div>
+        </div>
+        
+        <h3>Key Metrics at a Glance</h3>
+        <div class="grid grid-3">
+          <div class="kpi"><div class="label">Value per $1 move (CL)</div><div class="value">$1,000/contract</div></div>
+          <div class="kpi"><div class="label">Typical Daily Range</div><div class="value">1.5–3.0%</div></div>
+          <div class="kpi"><div class="label">Margin Requirements</div><div class="value">$5,000–$8,000</div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2. What Actually Moves Oil -->
+    <section class="section" id="drivers">
+      <h2>2) What Actually Moves Crude Oil Markets</h2>
+      <div class="content">
+        <div class="grid grid-2">
+          <div>
+            <h3>Supply Factors (40% of price action)</h3>
+            <ul>
+              <li><span class="badge">OPEC+</span> 32M bpd production; Saudi Arabia as swing producer (2M bpd spare capacity)</li>
+              <li><span class="badge">US Shale</span> 13M bpd; responds to price in 3-6 months; rig count leading indicator</li>
+              <li><span class="badge">Russia</span> 10M bpd; sanctions evasion via shadow fleet; price cap dynamics</li>
+              <li><span class="badge">Disruptions</span> Libya (1.2M bpd), Nigeria, Iraq—frequently offline</li>
+              <li><span class="badge">SPR</span> US Strategic Reserve: 350M barrels remaining (down from 700M)</li>
+              <li><span class="badge">Maintenance</span> Seasonal refinery turnarounds remove 2-3M bpd demand</li>
+            </ul>
+            
+            <h3>Demand Factors (35% of price action)</h3>
+            <ul>
+              <li><strong>China:</strong> 15M bpd (15% of global); teapot refinery quotas, strategic stockpiling</li>
+              <li><strong>Transportation:</strong> 60% of oil use; jet fuel recovery post-COVID key metric</li>
+              <li><strong>Petrochemicals:</strong> 15% of demand; plastics/chemicals provide floor</li>
+              <li><strong>Seasonality:</strong> Q2 gasoline (US driving), Q4 distillate (heating)</li>
+              <li><strong>Economic Growth:</strong> GDP-to-oil demand elasticity ~0.7</li>
+            </ul>
+          </div>
+          <div>
+            <h3>Market Structure (25% of price action)</h3>
+            <ul>
+              <li><strong>Inventories:</strong> Cushing (capacity 76M bbl, operational 45M); tank bottoms at 20M</li>
+              <li><strong>Time Spreads:</strong> Front-month vs 2nd month spread leads flat price</li>
+              <li><strong>Crack Spreads:</strong> Refinery margins; 3-2-1 crack at $20-30 healthy</li>
+              <li><strong>Basis Differentials:</strong> WTI-Brent, WCS discount, Urals discount</li>
+              <li><strong>Options Positioning:</strong> Put/call skew, gamma hedging flows</li>
+              <li><strong>Dollar Strength:</strong> -0.3 correlation; 1% DXY = -0.5% oil typically</li>
+            </ul>
+            
+            <h3>Geopolitical Catalysts (Binary Events)</h3>
+            <ul>
+              <li><strong>Chokepoints:</strong> Hormuz (21% of oil), Suez (9%), Malacca (25%)</li>
+              <li><strong>Sanctions:</strong> Iran (2.5M bpd potential), Venezuela (800k bpd)</li>
+              <li><strong>Weather:</strong> Hurricanes in Gulf of Mexico (17% of US production)</li>
+              <li><strong>Elections:</strong> US energy policy, OPEC member stability</li>
+            </ul>
+          </div>
+        </div>
+        
+        <div class="highlight-box">
+          <strong>Hierarchy of Importance:</strong>
+          <ol>
+            <li>Physical flow disruptions (immediate 3-5% moves)</li>
+            <li>OPEC+ decisions (2-3% moves)</li>
+            <li>Inventory surprises vs expectations (1-2% moves)</li>
+            <li>Economic data/Dollar (0.5-1% moves)</li>
+            <li>Technical levels (defines ranges)</li>
+          </ol>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. Term Structure & Roll -->
+    <section class="section" id="term-structure">
+      <h2>3) Term Structure & Roll Mechanics</h2>
+      <div class="content">
+        <h3>Understanding the Forward Curve</h3>
+        <div class="grid grid-2">
+          <div>
+            <h4>Market Structures</h4>
+            <ul>
+              <li><strong>Backwardation:</strong> Front > Back; signals immediate tightness</li>
+              <li><strong>Contango:</strong> Front < Back; indicates oversupply</li>
+              <li><strong>Super Contango:</strong> >$1/month; storage arb kicks in</li>
+              <li><strong>Flat Price vs Structure:</strong> Structure leads direction 70% of time</li>
+            </ul>
+            
+            <div class="formula-box">
+              Roll Yield = (F2 - F1) / F1 × 12 / months between contracts
+            </div>
+            
+            <div class="callout ok">
+              <strong>Trading Signal:</strong> When prompt spreads flip from contango to backwardation, flat price rallies follow within 5-10 days in 75% of instances.
+            </div>
+          </div>
+          <div>
+            <h4>Practical Roll Management</h4>
+            <ul>
+              <li><strong>Goldman Roll:</strong> Days 5-9 of month preceding expiry (highest volume)</li>
+              <li><strong>Early Roll:</strong> Days 10-14 (avoid congestion, sacrifice liquidity)</li>
+              <li><strong>Index Rebalancing:</strong> S&P GSCI rolls create predictable flows</li>
+            </ul>
+            
+            <table>
+              <thead><tr><th>Contract Month</th><th>Last Trade</th><th>First Notice</th><th>Roll Window</th></tr></thead>
+              <tbody>
+                <tr><td>January CL</td><td>Dec 19</td><td>Dec 31</td><td>Dec 5-9</td></tr>
+                <tr><td>February CL</td><td>Jan 20</td><td>Jan 31</td><td>Jan 6-10</td></tr>
+                <tr><td>March CL</td><td>Feb 20</td><td>Feb 28</td><td>Feb 6-10</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        
+        <h3>Storage Economics</h3>
+        <div class="callout">
+          <strong>Contango Arbitrage:</strong> When contango exceeds storage costs (~$0.30-0.50/bbl/month), physical players lock in profits by buying spot, storing, and selling forward. This caps contango at storage cost + financing.
+        </div>
+      </div>
+    </section>
+
+    <!-- 4. Options & Volatility -->
+    <section class="section" id="options">
+      <h2>4) Options Market & Volatility Dynamics</h2>
+      <div class="content">
+        <div class="grid grid-2">
+          <div>
+            <h3>Options Characteristics</h3>
+            <ul>
+              <li><strong>Implied Volatility:</strong> Typically 25-35%; spikes to 50-80% on crisis</li>
+              <li><strong>Skew:</strong> Calls trade premium to puts (opposite of equity)</li>
+              <li><strong>Weekly Options:</strong> Monday/Wednesday/Friday expiries</li>
+              <li><strong>Strike Intervals:</strong> $0.50 near ATM, $1.00 wings</li>
+              <li><strong>Open Interest:</strong> Concentrated at round numbers ($70, $75, $80)</li>
+            </ul>
+            
+            <h4>Common Options Strategies</h4>
+            <ul>
+              <li><strong>Strangles:</strong> Long vol into OPEC meetings/EIA</li>
+              <li><strong>Call Spreads:</strong> Bullish with defined risk</li>
+              <li><strong>Collars:</strong> Producer hedging (long puts, short calls)</li>
+              <li><strong>Calendar Spreads:</strong> Play term structure with options</li>
+            </ul>
+          </div>
+          <div>
+            <h3>Volatility Patterns</h3>
+            <table>
+              <thead><tr><th>Event</th><th>Typical IV</th><th>Realized Move</th><th>Edge</th></tr></thead>
+              <tbody>
+                <tr><td>OPEC Meeting</td><td>+5-10%</td><td>2-4%</td><td>Short vol</td></tr>
+                <tr><td>EIA Wednesday</td><td>+2-3%</td><td>1-2%</td><td>Short vol</td></tr>
+                <tr><td>Geopolitical Crisis</td><td>+15-25%</td><td>3-8%</td><td>Long vol</td></tr>
+                <tr><td>Options Expiry</td><td>Normal</td><td>Pinning</td><td>Fade moves</td></tr>
+              </tbody>
+            </table>
+            
+            <div class="callout warn">
+              <strong>Gamma Effects:</strong> Large options OI creates "magnets" at strikes. Price tends to pin at max pain on expiry. Watch for acceleration through big strikes.
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 5. Spreads & Relative Value -->
+    <section class="section" id="spreads">
+      <h2>5) Spread Trading & Relative Value</h2>
+      <div class="content">
+        <h3>Calendar Spreads</h3>
+        <div class="grid grid-2">
+          <div>
+            <table>
+              <thead><tr><th>Spread</th><th>Typical Range</th><th>Signal</th><th>Trade</th></tr></thead>
+              <tbody>
+                <tr><td>CL1-CL2</td><td>-$1.00 to +$1.50</td><td>Prompt tightness</td><td>Long when draws accelerate</td></tr>
+                <tr><td>CL1-CL6</td><td>-$3.00 to +$4.00</td><td>Medium structure</td><td>Mean reversion</td></tr>
+                <tr><td>CL1-CL12</td><td>-$5.00 to +$6.00</td><td>Annual carry</td><td>Structural positions</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div>
+            <h4>Spread Entry Rules</h4>
+            <ul>
+              <li>Enter calendars when z-score exceeds ±1.5</li>
+              <li>Size at 2x contracts vs outright (lower vol)</li>
+              <li>Stop at 2x ATR of spread (not outright)</li>
+              <li>Target mean reversion or momentum break</li>
+            </ul>
+          </div>
+        </div>
+
+        <h3>Crack Spreads (Refinery Margins)</h3>
+        <div class="formula-box">
+          3-2-1 Crack = (3 × RB + 2 × HO - 5 × CL) / 5
+        </div>
+        
+        <div class="grid grid-3">
+          <div>
+            <h4>Gasoline Crack</h4>
+            <ul>
+              <li>Range: $5-$40/bbl</li>
+              <li>Peak: May-August</li>
+              <li>Trade: Long into driving season</li>
+            </ul>
+          </div>
+          <div>
+            <h4>Distillate Crack</h4>
+            <ul>
+              <li>Range: $10-$50/bbl</li>
+              <li>Peak: November-February</li>
+              <li>Trade: Long into winter</li>
+            </ul>
+          </div>
+          <div>
+            <h4>Combined 3-2-1</h4>
+            <ul>
+              <li>Range: $10-$35/bbl</li>
+              <li>Mean: $18-22/bbl</li>
+              <li>Trade: Mean reversion</li>
+            </ul>
+          </div>
+        </div>
+
+        <h3>Inter-Commodity Spreads</h3>
+        <table>
+          <thead><tr><th>Spread</th><th>Typical Range</th><th>Driver</th><th>Trade Setup</th></tr></thead>
+          <tbody>
+            <tr><td>WTI-Brent</td><td>-$5 to +$2</td><td>US exports, freight rates</td><td>Long when discount >$4</td></tr>
+            <tr><td>Brent-Dubai</td><td>$0 to $5</td><td>Asian demand, sour/sweet</td><td>Asian growth proxy</td></tr>
+            <tr><td>WTI-WCS</td><td>$10 to $30</td><td>Pipeline capacity, heavy/light</td><td>Canadian production</td></tr>
+            <tr><td>Oil/Gas Ratio</td><td>10:1 to 50:1</td><td>Substitution, weather</td><td>Mean reversion at extremes</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 6. Trading Sessions -->
+    <section class="section" id="sessions">
+      <h2>6) Trading Sessions & Microstructure</h2>
+      <div class="content">
+        <table>
+          <thead><tr><th>Session</th><th>Time (ET)</th><th>Volume %</th><th>Characteristics</th><th>Opportunities</th><th>Risks</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><strong>Asia</strong></td>
+              <td>18:00-02:00</td>
+              <td>15%</td>
+              <td>Thin liquidity, wide spreads</td>
+              <td>Breakouts, China data reactions</td>
+              <td>Gaps, stop runs</td>
+            </tr>
+            <tr>
+              <td><strong>Europe</strong></td>
+              <td>02:00-09:00</td>
+              <td>25%</td>
+              <td>Brent leads, spreads active</td>
+              <td>Trend initiation, Brent arb</td>
+              <td>False breaks</td>
+            </tr>
+            <tr>
+              <td><strong>US Premarket</strong></td>
+              <td>08:00-09:30</td>
+              <td>10%</td>
+              <td>Positioning for US open</td>
+              <td>API setup trades</td>
+              <td>Whipsaws</td>
+            </tr>
+            <tr>
+              <td><strong>US Regular</strong></td>
+              <td>09:30-14:30</td>
+              <td>40%</td>
+              <td>Maximum liquidity</td>
+              <td>All strategies viable</td>
+              <td>Crowded trades</td>
+            </tr>
+            <tr>
+              <td><strong>US Close</strong></td>
+              <td>14:30-17:00</td>
+              <td>10%</td>
+              <td>Settlement games</td>
+              <td>MOC imbalances</td>
+              <td>Squeezes</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Liquidity Profiles</h3>
+        <div class="grid grid-3">
+          <div class="kpi"><div class="label">Bid-Ask (Regular)</div><div class="value">1-2 ticks</div></div>
+          <div class="kpi"><div class="label">Bid-Ask (Overnight)</div><div class="value">3-5 ticks</div></div>
+          <div class="kpi"><div class="label">Size at Touch</div><div class="value">100-500 lots</div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 7. Event Calendar & Data -->
+    <section class="section" id="calendar">
+      <h2>7) Critical Events & Data Calendar</h2>
+      <div class="content">
+        <h3>Weekly Schedule</h3>
+        <table>
+          <thead><tr><th>Day</th><th>Time (ET)</th><th>Event</th><th>Importance</th><th>Expected Move</th><th>Trade Setup</th></tr></thead>
+          <tbody>
+            <tr><td>Monday</td><td>Various</td><td>Commitment of Traders</td><td>Medium</td><td>0.5-1%</td><td>Position analysis</td></tr>
+            <tr><td>Tuesday</td><td>16:30</td><td>API Inventory</td><td>Medium</td><td>1-2%</td><td>Pre-position for EIA</td></tr>
+            <tr><td>Wednesday</td><td>10:30</td><td>EIA Inventory</td><td>High</td><td>2-3%</td><td>Fade or momentum</td></tr>
+            <tr><td>Thursday</td><td>08:30</td><td>Jobless Claims</td><td>Low</td><td>0.5%</td><td>Risk-on/off</td></tr>
+            <tr><td>Friday</td><td>13:00</td><td>Baker Hughes Rigs</td><td>Medium</td><td>0.5-1%</td><td>Supply outlook</td></tr>
+          </tbody>
+        </table>
+
+        <h3>Monthly Events</h3>
+        <div class="grid grid-2">
+          <div>
+            <h4>Fixed Schedule</h4>
+            <ul>
+              <li><strong>1st Week:</strong> ISM PMI, China PMI (demand indicators)</li>
+              <li><strong>2nd Week:</strong> OPEC Monthly Report (supply/demand balance)</li>
+              <li><strong>3rd Week:</strong> IEA Monthly Report (Western perspective)</li>
+              <li><strong>4th Week:</strong> EIA Monthly Report, Options Expiry</li>
+            </ul>
+          </div>
+          <div>
+            <h4>Variable Schedule</h4>
+            <ul>
+              <li><strong>OPEC+ Meetings:</strong> Quarterly + emergency (2-5% moves)</li>
+              <li><strong>Fed Decisions:</strong> 8x yearly (dollar impact)</li>
+              <li><strong>China Data:</strong> Trade balance, industrial production</li>
+              <li><strong>Earnings:</strong> XOM, CVX, BP, SHEL (sentiment)</li>
+            </ul>
+          </div>
+        </div>
+
+        <h3>Seasonal Patterns</h3>
+        <table>
+          <thead><tr><th>Period</th><th>Pattern</th><th>Driver</th><th>Historical Edge</th></tr></thead>
+          <tbody>
+            <tr><td>February-April</td><td>Weakness</td><td>Refinery maintenance</td><td>Short crude, long products</td></tr>
+            <tr><td>May-August</td><td>Strength</td><td>Driving season</td><td>Long gasoline cracks</td></tr>
+            <tr><td>September-October</td><td>Weakness</td><td>Shoulder season</td><td>Short flat price</td></tr>
+            <tr><td>November-January</td><td>Strength</td><td>Winter heating</td><td>Long distillate cracks</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 8. Risk Management -->
+    <section class="section" id="risk">
+      <h2>8) Risk Management & Position Sizing</h2>
+      <div class="content">
+        <h3>Position Sizing Framework</h3>
+        <div class="formula-box">
+          Contracts = (Account × Risk%) / (Stop Distance × Point Value)<br>
+          Example: ($100,000 × 2%) / (50 ticks × $10) = 4 contracts
+        </div>
+
+        <div class="grid grid-2">
+          <div>
+            <h4>Stop Placement Guidelines</h4>
+            <table>
+              <thead><tr><th>Timeframe</th><th>ATR Multiple</th><th>Typical Ticks</th><th>Dollar Risk</th></tr></thead>
+              <tbody>
+                <tr><td>Scalping</td><td>0.5-1x</td><td>10-20</td><td>$100-200</td></tr>
+                <tr><td>Intraday</td><td>1-2x</td><td>25-50</td><td>$250-500</td></tr>
+                <tr><td>Swing</td><td>2-3x</td><td>75-150</td><td>$750-1500</td></tr>
+                <tr><td>Position</td><td>3-5x</td><td>200-400</td><td>$2000-4000</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div>
+            <h4>Risk Metrics to Monitor</h4>
+            <ul>
+              <li><strong>VaR (95%):</strong> Maximum expected daily loss</li>
+              <li><strong>Correlation Risk:</strong> WTI/products/spreads overlap</li>
+              <li><strong>Basis Risk:</strong> Contract vs physical exposure</li>
+              <li><strong>Roll Risk:</strong> Contango bleed on long positions</li>
+              <li><strong>Event Risk:</strong> Binary outcomes (OPEC, weather)</li>
+              <li><strong>Liquidity Risk:</strong> Position size vs daily volume</li>
+            </ul>
+          </div>
+        </div>
+
+        <h3>Portfolio Construction</h3>
+        <div class="grid grid-3">
+          <div>
+            <h4>Core Positions (60%)</h4>
+            <ul>
+              <li>Trend following</li>
+              <li>Term structure</li>
+              <li>Mean reversion</li>
+            </ul>
+          </div>
+          <div>
+            <h4>Satellites (30%)</h4>
+            <ul>
+              <li>Event trades</li>
+              <li>Seasonal plays</li>
+              <li>Cross-commodity</li>
+            </ul>
+          </div>
+          <div>
+            <h4>Hedges (10%)</h4>
+            <ul>
+              <li>Options protection</li>
+              <li>Opposite bias</li>
+              <li>Dollar hedge</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="callout danger">
+          <strong>Maximum Position Limits:</strong>
+          <ul>
+            <li>Never exceed 5% of account per trade idea</li>
+            <li>Maximum 20% correlation exposure (all energy)</li>
+            <li>Stop trading after 3 consecutive losses</li>
+            <li>Reduce size by 50% in overnight positions</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- 9. Execution Strategies -->
+    <section class="section" id="execution">
+      <h2>9) Trading Strategies & Execution</h2>
+      <div class="content">
+        <h3>Strategy Matrix</h3>
+        <table>
+          <thead><tr><th>Strategy</th><th>Timeframe</th><th>Win Rate</th><th>Risk/Reward</th><th>Setup</th><th>Exit</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><strong>EIA Fade</strong></td>
+              <td>30-60 min</td>
+              <td>65%</td>
+              <td>1:1.5</td>
+              <td>Opposite to surprise after spike</td>
+              <td>50% retrace or 30min</td>
+            </tr>
+            <tr>
+              <td><strong>Inventory Momentum</strong></td>
+              <td>1-3 days</td>
+              <td>55%</td>
+              <td>1:3</td>
+              <td>Break after EIA in direction</td>
+              <td>Next resistance or 3 days</td>
+            </tr>
+            <tr>
+              <td><strong>VWAP Mean Reversion</strong></td>
+              <td>Intraday</td>
+              <td>70%</td>
+              <td>1:1</td>
+              <td>±2 SD from VWAP</td>
+              <td>VWAP touch</td>
+            </tr>
+            <tr>
+              <td><strong>Term Structure Trend</strong></td>
+              <td>5-20 days</td>
+              <td>45%</td>
+              <td>1:4</td>
+              <td>Backwardation flip</td>
+              <td>Structure reversal</td>
+            </tr>
+            <tr>
+              <td><strong>Options Pinning</strong></td>
+              <td>Expiry day</td>
+              <td>60%</td>
+              <td>1:2</td>
+              <td>Fade moves from max OI</td>
+              <td>15min before close</td>
+            </tr>
+            <tr>
+              <td><strong>Crack Seasonal</strong></td>
+              <td>30-90 days</td>
+              <td>65%</td>
+              <td>1:3</td>
+              <td>Historical pattern entry</td>
+              <td>Target or time stop</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Entry Techniques</h3>
+        <div class="grid grid-2">
+          <div>
+            <h4>Momentum Entries</h4>
+            <ul>
+              <li><strong>Breakout:</strong> Above resistance + volume confirmation</li>
+              <li><strong>Pullback:</strong> Retrace to breakout point or moving average</li>
+              <li><strong>News Catalyst:</strong> Trade with surprise direction</li>
+              <li><strong>Opening Range:</strong> Break of first 30min high/low</li>
+            </ul>
+          </div>
+          <div>
+            <h4>Mean Reversion Entries</h4>
+            <ul>
+              <li><strong>Exhaustion:</strong> 3+ SD move with divergence</li>
+              <li><strong>Support/Resistance:</strong> Multiple touches + volume</li>
+              <li><strong>Time-Based:</strong> Europe close, US close reversals</li>
+              <li><strong>Spread Extremes:</strong> Z-score >2 on calendars</li>
+            </ul>
+          </div>
+        </div>
+
+        <h3>Trade Management</h3>
+        <div class="highlight-box">
+          <strong>Scaling Rules:</strong>
+          <ol>
+            <li>Enter 1/3 position on signal</li>
+            <li>Add 1/3 on confirmation (volume, continuation)</li>
+            <li>Final 1/3 on pullback or momentum</li>
+            <li>Take 50% at 1:1 risk/reward</li>
+            <li>Trail stop on remainder at breakeven</li>
+            <li>Final exit at target or reversal signal</li>
+          </ol>
+        </div>
+      </div>
+    </section>
+
+    <!-- 10. Technical Analysis -->
+    <section class="section" id="technicals">
+      <h2>10) Technical Analysis Framework</h2>
+      <div class="content">
+        <h3>Key Technical Levels</h3>
+        <div class="grid grid-2">
+          <div>
+            <h4>Support/Resistance Levels (WTI)</h4>
+            <table>
+              <thead><tr><th>Level</th><th>Price</th><th>Significance</th></tr></thead>
+              <tbody>
+                <tr><td>Major Support</td><td>$65-67</td><td>2023 lows, 200-week MA</td></tr>
+                <tr><td>Support</td><td>$70-72</td><td>Psychological, options</td></tr>
+                <tr><td>Pivot</td><td>$75-77</td><td>Fair value, mean</td></tr>
+                <tr><td>Resistance</td><td>$80-82</td><td>2024 highs</td></tr>
+                <tr><td>Major Resistance</td><td>$85-87</td><td>Multi-year highs</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div>
+            <h4>Technical Indicators</h4>
+            <ul>
+              <li><strong>Moving Averages:</strong> 20/50/200 day; 9/21 week</li>
+              <li><strong>RSI:</strong> Overbought >70, oversold <30</li>
+              <li><strong>MACD:</strong> Momentum shifts, divergences</li>
+              <li><strong>Bollinger Bands:</strong> 2 SD for mean reversion</li>
+              <li><strong>Volume Profile:</strong> High volume nodes as magnets</li>
+              <li><strong>Market Profile:</strong> Value area for range trading</li>
+            </ul>
+          </div>
+        </div>
+
+        <h3>Chart Patterns Success Rates</h3>
+        <table>
+          <thead><tr><th>Pattern</th><th>Success Rate</th><th>Typical Target</th><th>Time to Target</th></tr></thead>
+          <tbody>
+            <tr><td>Flag/Pennant</td><td>65%</td><td>Measured move</td><td>1-5 days</td></tr>
+            <tr><td>Head & Shoulders</td><td>55%</td><td>Neckline distance</td><td>5-20 days</td></tr>
+            <tr><td>Double Top/Bottom</td><td>60%</td><td>Pattern height</td><td>10-30 days</td></tr>
+            <tr><td>Triangle</td><td>58%</td><td>Triangle height</td><td>Apex timing</td></tr>
+            <tr><td>Channel</td><td>70%</td><td>Channel width</td><td>Touch to touch</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 11. Fundamental Analysis -->
+    <section class="section" id="fundamentals">
+      <h2>11) Fundamental Analysis & Balances</h2>
+      <div class="content">
+        <h3>Global Supply/Demand Balance</h3>
+        <table>
+          <thead><tr><th>Component</th><th>Million bpd</th><th>% of Total</th><th>Growth Rate</th><th>Key Variables</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Global Demand</strong></td><td>102</td><td>100%</td><td>+1.2%</td><td>GDP, efficiency</td></tr>
+            <tr><td>├─ OECD</td><td>46</td><td>45%</td><td>+0.3%</td><td>Economic cycle</td></tr>
+            <tr><td>├─ China</td><td>16</td><td>16%</td><td>+3.0%</td><td>Stimulus, COVID</td></tr>
+            <tr><td>├─ India</td><td>5</td><td>5%</td><td>+4.0%</td><td>Urbanization</td></tr>
+            <tr><td>└─ Other EM</td><td>35</td><td>34%</td><td>+2.0%</td><td>Development</td></tr>
+            <tr><td><strong>Global Supply</strong></td><td>102</td><td>100%</td><td>+0.8%</td><td>Investment</td></tr>
+            <tr><td>├─ OPEC</td><td>28</td><td>27%</td><td>Variable</td><td>Quotas</td></tr>
+            <tr><td>├─ Russia</td><td>10</td><td>10%</td><td>-0.5%</td><td>Sanctions</td></tr>
+            <tr><td>├─ US Shale</td><td>13</td><td>13%</td><td>+2.0%</td><td>Prices, capital</td></tr>
+            <tr><td>└─ Other</td><td>51</td><td>50%</td><td>+0.5%</td><td>Depletion</td></tr>
+          </tbody>
+        </table>
+
+        <h3>Inventory Analysis</h3>
+        <div class="grid grid-2">
+          <div>
+            <h4>US Inventory Levels (Million Barrels)</h4>
+            <table>
+              <thead><tr><th>Category</th><th>Current</th><th>5-Year Avg</th><th>Signal</th></tr></thead>
+              <tbody>
+                <tr><td>Crude</td><td>430</td><td>450</td><td>Bullish</td></tr>
+                <tr><td>Gasoline</td><td>220</td><td>235</td><td>Bullish</td></tr>
+                <tr><td>Distillate</td><td>115</td><td>130</td><td>Bullish</td></tr>
+                <tr><td>Cushing</td><td>25</td><td>35</td><td>V.Bullish</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div>
+            <h4>Days of Supply Coverage</h4>
+            <ul>
+              <li><strong>Global:</strong> 27 days (below 30 = tight)</li>
+              <li><strong>US Commercial:</strong> 25 days</li>
+              <li><strong>OECD:</strong> 60 days (including strategic)</li>
+              <li><strong>China:</strong> Unknown (state secret)</li>
+            </ul>
+            <div class="callout ok">
+              <strong>Rule:</strong> Below 25 days coverage = backwardation; Above 30 days = contango pressure
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 12. Geopolitical Framework -->
+    <section class="section" id="geopolitics">
+      <h2>12) Geopolitical Risk Framework</h2>
+      <div class="content">
+        <h3>Risk Matrix</h3>
+        <table>
+          <thead><tr><th>Event</th><th>Probability</th><th>Impact (M bpd)</th><th>Price Move</th><th>Duration</th><th>Hedge</th></tr></thead>
+          <tbody>
+            <tr><td>Hormuz Closure</td><td>Very Low</td><td>20</td><td>+50%</td><td>Days</td><td>Call options</td></tr>
+            <tr><td>Saudi Disruption</td><td>Low</td><td>5-10</td><td>+20%</td><td>Weeks</td><td>Long crude</td></tr>
+            <tr><td>Iran Escalation</td><td>Medium</td><td>2-3</td><td>+10%</td><td>Months</td><td>Call spreads</td></tr>
+            <tr><td>Libya/Nigeria</td><td>High</td><td>1-2</td><td>+3-5%</td><td>Weeks</td><td>Momentum</td></tr>
+            <tr><td>US-China Tensions</td><td>Medium</td><td>Demand</td><td>-5-10%</td><td>Months</td><td>Put protection</td></tr>
+            <tr><td>Russia Escalation</td><td>Medium</td><td>3-5</td><td>+15%</td><td>Months</td><td>Brent longs</td></tr>
+          </tbody>
+        </table>
+
+        <h3>Key Chokepoints</h3>
+        <div class="grid grid-3">
+          <div>
+            <h4>Strait of Hormuz</h4>
+            <ul>
+              <li>Flow: 21M bpd (21% of global)</li>
+              <li>Risk: Iran naval capability</li>
+              <li>Alternative: Limited pipelines</li>
+            </ul>
+          </div>
+          <div>
+            <h4>Strait of Malacca</h4>
+            <ul>
+              <li>Flow: 16M bpd (to Asia)</li>
+              <li>Risk: Piracy, accidents</li>
+              <li>Alternative: Longer routes</li>
+            </ul>
+          </div>
+          <div>
+            <h4>Suez Canal</h4>
+            <ul>
+              <li>Flow: 9M bpd + products</li>
+              <li>Risk: Closure (Ever Given)</li>
+              <li>Alternative: Cape route</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 13. Common Mistakes -->
+    <section class="section" id="mistakes">
+      <h2>13) Common Mistakes & How to Avoid Them</h2>
+      <div class="content">
+        <div class="grid grid-2">
+          <div>
+            <h4>Deadly Sins</h4>
+            <ol>
+              <li><strong>Ignoring term structure</strong> - Always check spreads before entries</li>
+              <li><strong>Fighting the tape on OPEC days</strong> - Wait for dust to settle</li>
+              <li><strong>Oversizing in thin markets</strong> - Cut position by 50% overnight</li>
+              <li><strong>Ignoring correlation</strong> - Don't duplicate risk across energy</li>
+              <li><strong>Missing the roll</strong> - Calendar alerts 5 days before</li>
+              <li><strong>Trading the wrong month</strong> - Always verify contract</li>
+              <li><strong>Inventory tunnel vision</strong> - Context matters more than headline</li>
+            </ol>
+          </div>
+          <div>
+            <h4>Cognitive Biases</h4>
+            <ul>
+              <li><strong>Recency bias:</strong> Last week's trend isn't permanent</li>
+              <li><strong>Anchoring:</strong> $100 oil isn't "expensive" if fundamentals support</li>
+              <li><strong>Confirmation bias:</strong> Read both bull and bear research</li>
+              <li><strong>Overconfidence:</strong> Oil humbles everyone eventually</li>
+              <li><strong>Loss aversion:</strong> Take stops; revenge trading kills</li>
+            </ul>
+            <div class="callout danger">
+              <strong>Account Killers:</strong> (1) No stop loss, (2) Adding to losers without plan, (3) Trading physical delivery contracts into expiry, (4) Ignoring margin calls
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 14. Resources & Tools -->
+    <section class="section" id="resources">
+      <h2>14) Essential Resources & Tools</h2>
+      <div class="content">
+        <h3>Data Sources</h3>
+        <div class="grid grid-3">
+          <div>
+            <h4>Free Resources</h4>
+            <ul>
+              <li>EIA.gov - US inventory data</li>
+              <li>IEA.org - Global balances</li>
+              <li>OPEC.org - Monthly reports</li>
+              <li>CME/ICE - Contract specs</li>
+              <li>TradingView - Charts</li>
+              <li>Twitter/FinTwit - Real-time news</li>
+            </ul>
+          </div>
+          <div>
+            <h4>Premium Services</h4>
+            <ul>
+              <li>Bloomberg Terminal - Everything</li>
+              <li>Reuters Eikon - News + data</li>
+              <li>Genscape - Storage data</li>
+              <li>ClipperData - Tanker tracking</li>
+              <li>Kpler - Flow tracking</li>
+              <li>Energy Aspects - Research</li>
+            </ul>
+          </div>
+          <div>
+            <h4>Key Follows</h4>
+            <ul>
+              <li>@JavierBlas - Bloomberg</li>
+              <li>@Amena__Bakr - OPEC</li>
+              <li>@JKempEnergy - Reuters</li>
+              <li>@chigrl - Trading</li>
+              <li>@ole_hansen - Saxo</li>
+              <li>@ericnuttall - Canadian</li>
+            </ul>
+          </div>
+        </div>
+
+        <h3>Reading List</h3>
+        <ul>
+          <li><strong>"Oil 101"</strong> by Morgan Downey - Comprehensive introduction</li>
+          <li><strong>"The Prize"</strong> by Daniel Yergin - Historical context</li>
+          <li><strong>"Oil Trading Manual"</strong> - Technical details</li>
+          <li><strong>BP Statistical Review</strong> - Annual data bible</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- Quick Reference -->
+    <section class="section" id="quickref">
+      <h2>Quick Reference Checklist</h2>
+      <div class="content">
+        <h3>Daily Pre-Market Routine</h3>
+        <div class="highlight-box">
+          <ol>
+            <li>☐ Check overnight price action and volume</li>
+            <li>☐ Review term structure changes (CL1-CL2, CL1-CL6)</li>
+            <li>☐ Note key support/resistance levels</li>
+            <li>☐ Check dollar index and 10-year yields</li>
+            <li>☐ Review crack spreads and product strength</li>
+            <li>☐ Scan overnight news (OPEC, geopolitics, weather)</li>
+            <li>☐ Check API expectations for Tuesday</li>
+            <li>☐ Review EIA consensus for Wednesday</li>
+            <li>☐ Note options expiry and max pain levels</li>
+            <li>☐ Assess Brent-WTI spread for arbitrage</li>
+            <li>☐ Check tanker rates and freight market</li>
+            <li>☐ Review calendar for economic data</li>
+          </ol>
+        </div>
+
+        <h3>Position Entry Checklist</h3>
+        <div class="grid grid-2">
+          <div>
+            <h4>Before Entry</h4>
+            <ul>
+              <li>☐ Fundamental narrative clear?</li>
+              <li>☐ Term structure supportive?</li>
+              <li>☐ Technical levels defined?</li>
+              <li>☐ Position size calculated?</li>
+              <li>☐ Stop loss determined?</li>
+              <li>☐ Target identified?</li>
+            </ul>
+          </div>
+          <div>
+            <h4>After Entry</h4>
+            <ul>
+              <li>☐ Order confirmed correct contract?</li>
+              <li>☐ Stop loss order placed?</li>
+              <li>☐ Calendar alert for roll?</li>
+              <li>☐ Risk dashboard updated?</li>
+              <li>☐ Exit plan documented?</li>
+              <li>☐ Correlated exposure checked?</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Glossary -->
+    <section class="section" id="glossary">
+      <h2>Comprehensive Glossary</h2>
+      <div class="content">
+        <p>
+          <span class="pill">API: American Petroleum Institute</span>
+          <span class="pill">Backwardation: Front > Back prices</span>
+          <span class="pill">Barrel: 42 US gallons</span>
+          <span class="pill">Basis: Location price differential</span>
+          <span class="pill">BOE: Barrels of oil equivalent</span>
+          <span class="pill">Contango: Front < Back prices</span>
+          <span class="pill">Crack Spread: Refining margin</span>
+          <span class="pill">Cushing: OK delivery hub</span>
+          <span class="pill">DUC: Drilled uncompleted well</span>
+          <span class="pill">EIA: Energy Information Admin</span>
+          <span class="pill">FID: Final investment decision</span>
+          <span class="pill">FND: First notice day</span>
+          <span class="pill">Heavy/Light: API gravity</span>
+          <span class="pill">IEA: International Energy Agency</span>
+          <span class="pill">IMO 2020: Shipping sulfur rules</span>
+          <span class="pill">LTD: Last trading day</span>
+          <span class="pill">OPEC+: OPEC + Russia allies</span>
+          <span class="pill">PADD: Petroleum Admin District</span>
+          <span class="pill">Prompt: Front month contract</span>
+          <span class="pill">RBOB: Reformulated gasoline</span>
+          <span class="pill">Refinery runs: Utilization rate</span>
+          <span class="pill">Roll yield: Gain/loss from rolling</span>
+          <span class="pill">Sour/Sweet: Sulfur content</span>
+          <span class="pill">SPR: Strategic Petroleum Reserve</span>
+          <span class="pill">Spread: Price

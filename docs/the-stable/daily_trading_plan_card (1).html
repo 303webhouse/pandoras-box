@@ -1,0 +1,621 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Daily Trading Plan Card</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            background: #f5f5f5;
+            color: #000;
+            font-size: 13px;
+            line-height: 1.4;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .header {
+            background: #0f1e3a;
+            color: white;
+            padding: 15px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .header h1 {
+            font-size: 18px;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+        }
+        
+        .date-box {
+            background: rgba(255,255,255,0.1);
+            padding: 5px 15px;
+            border-radius: 3px;
+            font-size: 12px;
+        }
+        
+        .content {
+            padding: 20px;
+        }
+        
+        .grid-layout {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .card {
+            background: white;
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        
+        .card-header {
+            background: #2c5aa0;
+            color: white;
+            padding: 8px 15px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .card-body {
+            padding: 15px;
+        }
+        
+        .input-group {
+            margin-bottom: 12px;
+        }
+        
+        .input-label {
+            font-size: 11px;
+            color: #666;
+            text-transform: uppercase;
+            margin-bottom: 4px;
+            font-weight: 600;
+        }
+        
+        input[type="text"], textarea, select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #d0d0d0;
+            border-radius: 3px;
+            font-size: 12px;
+            font-family: 'Segoe UI', Arial, sans-serif;
+            background: #fafafa;
+        }
+        
+        input[type="text"]:focus, textarea:focus, select:focus {
+            outline: none;
+            border-color: #2c5aa0;
+            background: white;
+        }
+        
+        textarea {
+            resize: vertical;
+            min-height: 60px;
+        }
+        
+        .checkbox-group {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+            margin: 8px 0;
+        }
+        
+        .checkbox-item {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 12px;
+        }
+        
+        .levels-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+        }
+        
+        .level-input {
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .level-input input {
+            margin-top: 4px;
+        }
+        
+        .setup-template {
+            background: #f8f9fa;
+            border-left: 3px solid #2c5aa0;
+            padding: 12px;
+            margin: 10px 0;
+            font-size: 11px;
+            line-height: 1.6;
+        }
+        
+        .setup-template strong {
+            color: #0f1e3a;
+            display: block;
+            margin-top: 8px;
+            text-transform: uppercase;
+            font-size: 10px;
+        }
+        
+        .risk-table {
+            width: 100%;
+            margin-top: 10px;
+            border-collapse: collapse;
+        }
+        
+        .risk-table th {
+            background: #f0f0f0;
+            padding: 6px;
+            text-align: left;
+            font-size: 11px;
+            font-weight: 600;
+            border: 1px solid #d0d0d0;
+        }
+        
+        .risk-table td {
+            padding: 6px;
+            border: 1px solid #d0d0d0;
+        }
+        
+        .risk-table input {
+            border: none;
+            background: transparent;
+            width: 100%;
+            padding: 2px;
+        }
+        
+        .alert-box {
+            background: #fff9e6;
+            border: 1px solid #ffd666;
+            padding: 12px;
+            margin: 15px 0;
+            border-radius: 3px;
+        }
+        
+        .alert-box h3 {
+            color: #d48806;
+            font-size: 11px;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+        }
+        
+        .rules-list {
+            columns: 2;
+            column-gap: 20px;
+            margin-top: 10px;
+        }
+        
+        .rules-list li {
+            font-size: 11px;
+            margin-bottom: 5px;
+            break-inside: avoid;
+        }
+        
+        .performance-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+            margin-top: 10px;
+        }
+        
+        .stat-box {
+            text-align: center;
+            padding: 8px;
+            background: #f8f9fa;
+            border-radius: 3px;
+        }
+        
+        .stat-label {
+            font-size: 10px;
+            color: #666;
+            text-transform: uppercase;
+        }
+        
+        .stat-value {
+            font-size: 16px;
+            font-weight: bold;
+            color: #0f1e3a;
+        }
+        
+        .journal-quick {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            margin-top: 10px;
+        }
+        
+        .positive { color: #00a651; }
+        .negative { color: #dc3545; }
+        .neutral { color: #666; }
+        
+        @media print {
+            body {
+                background: white;
+                padding: 0;
+            }
+            .container {
+                box-shadow: none;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>DAILY TRADING PLAN</h1>
+            <div class="date-box">
+                <input type="date" id="trading-date" style="background: transparent; border: none; color: white;">
+            </div>
+        </div>
+
+        <div class="content">
+            <!-- Pre-Market Analysis Section -->
+            <div class="card" style="margin-bottom: 20px;">
+                <div class="card-header">Pre-Market Analysis</div>
+                <div class="card-body">
+                    <div class="grid-layout">
+                        <div>
+                            <div class="input-group">
+                                <div class="input-label">Market Regime</div>
+                                <select>
+                                    <option>Trend Up</option>
+                                    <option>Trend Down</option>
+                                    <option>Range Bound</option>
+                                    <option>Volatile Expansion</option>
+                                    <option>Low Volatility Compression</option>
+                                </select>
+                            </div>
+                            <div class="input-group">
+                                <div class="input-label">Primary Context</div>
+                                <input type="text" placeholder="e.g., Above weekly pivot, testing monthly R1">
+                            </div>
+                            <div class="input-group">
+                                <div class="input-label">Secondary Context</div>
+                                <input type="text" placeholder="e.g., End of month rebalancing, FOMC week">
+                            </div>
+                        </div>
+                        <div>
+                            <div class="input-label">Key Economic Events Today</div>
+                            <div class="checkbox-group">
+                                <div class="checkbox-item">
+                                    <input type="checkbox" id="cpi">
+                                    <label for="cpi">CPI/PPI</label>
+                                </div>
+                                <div class="checkbox-item">
+                                    <input type="checkbox" id="fomc">
+                                    <label for="fomc">FOMC</label>
+                                </div>
+                                <div class="checkbox-item">
+                                    <input type="checkbox" id="earnings">
+                                    <label for="earnings">Major Earnings</label>
+                                </div>
+                                <div class="checkbox-item">
+                                    <input type="checkbox" id="opex">
+                                    <label for="opex">OpEx</label>
+                                </div>
+                                <div class="checkbox-item">
+                                    <input type="checkbox" id="auction">
+                                    <label for="auction">Bond Auction</label>
+                                </div>
+                                <div class="checkbox-item">
+                                    <input type="checkbox" id="other">
+                                    <label for="other">Other</label>
+                                </div>
+                            </div>
+                            <div class="input-group" style="margin-top: 10px;">
+                                <div class="input-label">Expected Volatility/ATR</div>
+                                <input type="text" placeholder="e.g., VIX: 18.5, SPY ATR: 5.2">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="grid-layout">
+                <!-- Trading Plan Section -->
+                <div class="card">
+                    <div class="card-header">Trading Plan</div>
+                    <div class="card-body">
+                        <div class="input-group">
+                            <div class="input-label">A-Setup for Today</div>
+                            <textarea placeholder="Context + Trigger + Invalidation"></textarea>
+                        </div>
+                        
+                        <div class="input-group">
+                            <div class="input-label">Key Levels & Alerts</div>
+                            <div class="levels-grid">
+                                <div class="level-input">
+                                    <span style="font-size: 10px; color: #00a651;">RESISTANCE 2</span>
+                                    <input type="text" placeholder="0.00">
+                                </div>
+                                <div class="level-input">
+                                    <span style="font-size: 10px; color: #00a651;">RESISTANCE 1</span>
+                                    <input type="text" placeholder="0.00">
+                                </div>
+                                <div class="level-input">
+                                    <span style="font-size: 10px; color: #666;">PIVOT</span>
+                                    <input type="text" placeholder="0.00">
+                                </div>
+                                <div class="level-input">
+                                    <span style="font-size: 10px; color: #dc3545;">SUPPORT 1</span>
+                                    <input type="text" placeholder="0.00">
+                                </div>
+                                <div class="level-input">
+                                    <span style="font-size: 10px; color: #dc3545;">SUPPORT 2</span>
+                                    <input type="text" placeholder="0.00">
+                                </div>
+                                <div class="level-input">
+                                    <span style="font-size: 10px; color: #2c5aa0;">VWAP/POC</span>
+                                    <input type="text" placeholder="0.00">
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="input-group">
+                            <div class="input-label">What I Will NOT Do Today</div>
+                            <textarea placeholder="e.g., No revenge trades, no trading during lunch chop, no adding to losers"></textarea>
+                        </div>
+
+                        <div class="input-group">
+                            <div class="input-label">Mental State Check</div>
+                            <div class="checkbox-group">
+                                <div class="checkbox-item">
+                                    <input type="radio" name="mental" id="focused">
+                                    <label for="focused">Focused</label>
+                                </div>
+                                <div class="checkbox-item">
+                                    <input type="radio" name="mental" id="neutral">
+                                    <label for="neutral">Neutral</label>
+                                </div>
+                                <div class="checkbox-item">
+                                    <input type="radio" name="mental" id="anxious">
+                                    <label for="anxious">Anxious</label>
+                                </div>
+                                <div class="checkbox-item">
+                                    <input type="radio" name="mental" id="tired">
+                                    <label for="tired">Tired</label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Risk Management Section -->
+                <div class="card">
+                    <div class="card-header">Risk Management</div>
+                    <div class="card-body">
+                        <div class="input-group">
+                            <div class="input-label">Daily Risk Parameters</div>
+                            <table class="risk-table">
+                                <tr>
+                                    <th>Max Daily Loss</th>
+                                    <td><input type="text" placeholder="$"></td>
+                                </tr>
+                                <tr>
+                                    <th>Max Position Size</th>
+                                    <td><input type="text" placeholder="shares/contracts"></td>
+                                </tr>
+                                <tr>
+                                    <th>Max # of Trades</th>
+                                    <td><input type="text" placeholder="5"></td>
+                                </tr>
+                                <tr>
+                                    <th>Profit Target</th>
+                                    <td><input type="text" placeholder="$"></td>
+                                </tr>
+                                <tr>
+                                    <th>R per Trade</th>
+                                    <td><input type="text" placeholder="1%"></td>
+                                </tr>
+                            </table>
+                        </div>
+
+                        <div class="alert-box">
+                            <h3>Circuit Breakers</h3>
+                            <div class="checkbox-group">
+                                <div class="checkbox-item">
+                                    <input type="checkbox" id="cb1">
+                                    <label for="cb1">2 losses = 30min break</label>
+                                </div>
+                                <div class="checkbox-item">
+                                    <input type="checkbox" id="cb2">
+                                    <label for="cb2">3 losses = done for day</label>
+                                </div>
+                                <div class="checkbox-item">
+                                    <input type="checkbox" id="cb3">
+                                    <label for="cb3">Daily max hit = close all</label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="input-group">
+                            <div class="input-label">Time Restrictions</div>
+                            <div class="checkbox-group">
+                                <div class="checkbox-item">
+                                    <input type="checkbox" id="no-first">
+                                    <label for="no-first">No trades first 15min</label>
+                                </div>
+                                <div class="checkbox-item">
+                                    <input type="checkbox" id="no-lunch">
+                                    <label for="no-lunch">No trades 12-1pm</label>
+                                </div>
+                                <div class="checkbox-item">
+                                    <input type="checkbox" id="no-last">
+                                    <label for="no-last">Flat by 3:30pm</label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Setup Template Card -->
+            <div class="card" style="margin-bottom: 20px;">
+                <div class="card-header">Setup Execution Template</div>
+                <div class="card-body">
+                    <div class="setup-template">
+                        <strong>Context Requirements:</strong>
+                        HTF level present (weekly/daily/monthly pivot, TPO VAH/VAL/POC), liquidity identified above/below, regime appropriate (not "trend only" for mean reversion)
+                        
+                        <strong>Entry Triggers:</strong>
+                        Price sweep + close back inside range | Footprint shows absorption at level | Delta divergence (fails to confirm new high/low) | Volume climax at extremes
+                        
+                        <strong>Invalidation Rules:</strong>
+                        Break beyond wick extreme by X ticks | Time stop: no movement in 15min | Context change (news, regime shift)
+                        
+                        <strong>Position Management:</strong>
+                        Entry: Market order on reclaim / Limit at retest | Scaling: Add only on first pullback if risk unchanged | Exits: Fixed target (VWAP/POC) or trailing stop on structure break
+                    </div>
+
+                    <div class="input-group" style="margin-top: 15px;">
+                        <div class="input-label">Today's Specific Setup Notes</div>
+                        <textarea placeholder="Customizations to template for today's market conditions"></textarea>
+                    </div>
+                </div>
+            </div>
+
+            <div class="grid-layout">
+                <!-- Screening SOP -->
+                <div class="card">
+                    <div class="card-header">Screening SOP</div>
+                    <div class="card-body">
+                        <div class="input-group">
+                            <div class="input-label">Universe Cap</div>
+                            <input type="text" value="20" placeholder="Max symbols to track">
+                        </div>
+
+                        <div class="input-group">
+                            <div class="input-label">Active Filters</div>
+                            <div class="checkbox-group">
+                                <div class="checkbox-item">
+                                    <input type="checkbox" id="atr" checked>
+                                    <label for="atr">24h ATR Rank Top 30%</label>
+                                </div>
+                                <div class="checkbox-item">
+                                    <input type="checkbox" id="htf" checked>
+                                    <label for="htf">Near HTF Level</label>
+                                </div>
+                                <div class="checkbox-item">
+                                    <input type="checkbox" id="event" checked>
+                                    <label for="event">Event Calendar Clear</label>
+                                </div>
+                                <div class="checkbox-item">
+                                    <input type="checkbox" id="volume">
+                                    <label for="volume">Volume > 1M</label>
+                                </div>
+                                <div class="checkbox-item">
+                                    <input type="checkbox" id="spread">
+                                    <label for="spread">Spread < 0.05%</label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="input-group">
+                            <div class="input-label">Shortlist 3 (Alerts Set)</div>
+                            <div style="display: grid; gap: 5px;">
+                                <input type="text" placeholder="Symbol 1 - Alert level">
+                                <input type="text" placeholder="Symbol 2 - Alert level">
+                                <input type="text" placeholder="Symbol 3 - Alert level">
+                            </div>
+                        </div>
+
+                        <div class="alert-box">
+                            <h3>Trading Rules</h3>
+                            <ul class="rules-list">
+                                <li>No trading outside shortlist</li>
+                                <li>One position at a time</li>
+                                <li>Wait for A-setup only</li>
+                                <li>Honor all stops</li>
+                                <li>Log every trade</li>
+                                <li>Review at session end</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Post-Market Review -->
+                <div class="card">
+                    <div class="card-header">Post-Market Review</div>
+                    <div class="card-body">
+                        <div class="input-group">
+                            <div class="input-label">Quick Stats</div>
+                            <div class="performance-grid">
+                                <div class="stat-box">
+                                    <div class="stat-label">P&L</div>
+                                    <input type="text" style="text-align: center; font-weight: bold;">
+                                </div>
+                                <div class="stat-box">
+                                    <div class="stat-label">Win Rate</div>
+                                    <input type="text" style="text-align: center;">
+                                </div>
+                                <div class="stat-box">
+                                    <div class="stat-label">Avg R</div>
+                                    <input type="text" style="text-align: center;">
+                                </div>
+                                <div class="stat-box">
+                                    <div class="stat-label">Trades</div>
+                                    <input type="text" style="text-align: center;">
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="input-group">
+                            <div class="input-label">Journal Entry (Quick)</div>
+                            <div class="journal-quick">
+                                <input type="text" placeholder="Regime accuracy">
+                                <input type="text" placeholder="Setup quality">
+                                <input type="text" placeholder="Entry timing">
+                                <input type="text" placeholder="Exit efficiency">
+                                <input type="text" placeholder="Hold time avg">
+                                <input type="text" placeholder="Rules broken Y/N">
+                            </div>
+                        </div>
+
+                        <div class="input-group">
+                            <div class="input-label">Key Lesson Today</div>
+                            <textarea placeholder="One thing to improve tomorrow"></textarea>
+                        </div>
+
+                        <div class="input-group">
+                            <div class="input-label">Tomorrow's Focus</div>
+                            <textarea placeholder="Based on today's performance, what to emphasize"></textarea>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Set today's date
+        document.getElementById('trading-date').valueAsDate = new Date();
+        
+        // Print function
+        function printCard() {
+            window.print();
+        }
+    </script>
+</body>
+</html>
