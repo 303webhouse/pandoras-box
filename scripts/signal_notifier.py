@@ -23,6 +23,29 @@ import urllib.error
 import urllib.request
 from typing import Any
 
+# L0.4 alias (display-only, additive). Canonical map = backend/config/
+# strategy_aliases.py. Resolve it when importable (backend on path, or a sibling
+# strategy_aliases.py copied next to this script on the VPS at deploy time);
+# otherwise degrade to a no-op so notifier output is byte-for-byte unchanged
+# until the map ships. Never mutates raw signal_type/strategy.
+try:
+    from config.strategy_aliases import codename as _alias_codename
+except Exception:  # pragma: no cover
+    try:
+        from strategy_aliases import codename as _alias_codename
+    except Exception:
+        def _alias_codename(signal_type=None, strategy=None):
+            return None
+
+
+def _codename_for(signal: "dict[str, Any]") -> str:
+    """Return the roster codename for a signal, or '' if unmapped/unavailable."""
+    try:
+        return _alias_codename(signal.get("signal_type"), signal.get("strategy")) or ""
+    except Exception:
+        return ""
+
+
 SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
 DATA_DIR = SCRIPT_DIR.parent / "data"
 OPENCLAW_STATE_DIR = pathlib.Path(os.environ.get("OPENCLAW_STATE_DIR", "/home/openclaw/.openclaw"))
@@ -208,8 +231,9 @@ def post_signal_alert(token: str, channel_id: str, signal: dict, signal_id: str)
     stop = signal.get("stop_loss")
     target = signal.get("target_1")
 
+    _cn = _codename_for(signal)
     desc_lines = [
-        f"**Strategy:** {strategy}",
+        f"**Strategy:** {strategy}" + (f" | {_cn}" if _cn else ""),
         f"**Score:** {score_num:.0f}/100 ({score_tier})",
         f"**Bias:** {bias}",
         f"**Timeframe:** {timeframe}",
@@ -372,8 +396,9 @@ def post_crypto_signal_alert(token: str, channel_id: str, signal: dict, signal_i
     # Color: green for LONG, red for SHORT
     color = 0x00e676 if direction in ("LONG", "BUY", "BULLISH") else 0xe5370e
 
+    _cn = _codename_for(signal)
     embed = {
-        "title": f"{dir_emoji} {direction} {ticker} | {strategy}",
+        "title": f"{dir_emoji} {direction} {ticker} | {strategy}" + (f" | {_cn}" if _cn else ""),
         "description": "\n".join(desc_lines),
         "color": color,
         "timestamp": now_utc().isoformat(),
