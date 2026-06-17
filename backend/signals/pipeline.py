@@ -724,8 +724,18 @@ async def apply_scoring(signal_data: Dict[str, Any]) -> Dict[str, Any]:
             signal_data["confidence"] = "HIGH"
             signal_data["priority"] = "HIGH"
             if direction in ("LONG", "BUY"):
-                signal_data["signal_type"] = "APIS_CALL"
-                logger.info(f"🐝 APIS CALL: {signal_data.get('ticker')} (score: {score})")
+                # L0.3: gate the APIS_CALL label to non-liquid tickers behind
+                # L0_APIS_ENFORCE (default False = unchanged). When withheld,
+                # the original signal_type is preserved (no overwrite).
+                from config.l0_apis import apply_apis_label
+                if apply_apis_label(ticker):
+                    signal_data["signal_type"] = "APIS_CALL"
+                    logger.info(f"🐝 APIS CALL: {signal_data.get('ticker')} (score: {score})")
+                else:
+                    logger.info(
+                        f"🐝 APIS withheld (liquid, L0_APIS_ENFORCE): "
+                        f"{signal_data.get('ticker')} (score: {score})"
+                    )
             elif direction in ("SHORT", "SELL"):
                 signal_data["signal_type"] = "KODIAK_CALL"
                 logger.info(f"🐻 KODIAK CALL: {signal_data.get('ticker')} (score: {score})")
