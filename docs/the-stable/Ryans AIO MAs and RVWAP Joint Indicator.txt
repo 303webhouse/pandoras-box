@@ -1,0 +1,210 @@
+//@version=5
+indicator("AIO MAs + Rolling VWAPs (Final English UI)", overlay=true)
+
+// ==========================================
+// 1. INPUT SETTINGS
+// ==========================================
+
+// --- EMA Settings ---
+grp_ema = "EMA Settings"
+show_ema1 = input.bool(true, "EMA 1", group=grp_ema, inline="e1")
+len_ema1  = input.int(9, "Len", minval=1, group=grp_ema, inline="e1")
+off_ema1  = input.int(5, "Label Offset", group=grp_ema, inline="e1") // Changed to avoid auto-translation
+col_ema1  = input.color(#2962FF, "", group=grp_ema, inline="e1")
+wid_ema1  = input.int(1, "Width", minval=1, group=grp_ema, inline="e1")
+
+show_ema2 = input.bool(true, "EMA 2", group=grp_ema, inline="e2")
+len_ema2  = input.int(20, "Len", minval=1, group=grp_ema, inline="e2")
+off_ema2  = input.int(5, "Label Offset", group=grp_ema, inline="e2")
+col_ema2  = input.color(#AF52DE, "", group=grp_ema, inline="e2")
+wid_ema2  = input.int(1, "Width", minval=1, group=grp_ema, inline="e2")
+
+show_ema3 = input.bool(false, "EMA 3", group=grp_ema, inline="e3")
+len_ema3  = input.int(55, "Len", minval=1, group=grp_ema, inline="e3")
+off_ema3  = input.int(5, "Label Offset", group=grp_ema, inline="e3")
+col_ema3  = input.color(#FF9800, "", group=grp_ema, inline="e3")
+wid_ema3  = input.int(1, "Width", minval=1, group=grp_ema, inline="e3")
+
+// --- SMA Settings ---
+grp_sma = "SMA Settings"
+show_sma1 = input.bool(true, "SMA 1", group=grp_sma, inline="s1")
+len_sma1  = input.int(50, "Len", minval=1, group=grp_sma, inline="s1")
+off_sma1  = input.int(5, "Label Offset", group=grp_sma, inline="s1")
+col_sma1  = input.color(#A52A2A, "", group=grp_sma, inline="s1")
+wid_sma1  = input.int(2, "Width", minval=1, group=grp_sma, inline="s1")
+
+show_sma2 = input.bool(true, "SMA 2", group=grp_sma, inline="s2")
+len_sma2  = input.int(120, "Len", minval=1, group=grp_sma, inline="s2")
+off_sma2  = input.int(5, "Label Offset", group=grp_sma, inline="s2")
+col_sma2  = input.color(#D32F2F, "", group=grp_sma, inline="s2")
+wid_sma2  = input.int(2, "Width", minval=1, group=grp_sma, inline="s2")
+
+show_sma3 = input.bool(true, "SMA 3", group=grp_sma, inline="s3")
+len_sma3  = input.int(200, "Len", minval=1, group=grp_sma, inline="s3")
+off_sma3  = input.int(5, "Label Offset", group=grp_sma, inline="s3")
+col_sma3  = input.color(#5D4037, "", group=grp_sma, inline="s3")
+wid_sma3  = input.int(2, "Width", minval=1, group=grp_sma, inline="s3")
+
+// --- Rolling VWAP Settings ---
+grp_vwap = "Rolling VWAP Settings (Days)"
+// VWAP 1
+show_vw1 = input.bool(false, "VWAP 1", group=grp_vwap, inline="v1")
+day_vw1  = input.float(2, "Days", minval=0.1, step=0.5, group=grp_vwap, inline="v1")
+off_vw1  = input.int(15, "Label Offset", group=grp_vwap, inline="v1")
+col_vw1  = input.color(color.new(#B2B5BE, 0), "", group=grp_vwap, inline="v1")
+wid_vw1  = input.int(1, "Width", minval=1, group=grp_vwap, inline="v1")
+
+// VWAP 2
+show_vw2 = input.bool(false, "VWAP 2", group=grp_vwap, inline="v2")
+day_vw2  = input.float(3, "Days", minval=0.1, step=0.5, group=grp_vwap, inline="v2")
+off_vw2  = input.int(15, "Label Offset", group=grp_vwap, inline="v2")
+col_vw2  = input.color(color.new(#5d606b, 0), "", group=grp_vwap, inline="v2")
+wid_vw2  = input.int(1, "Width", minval=1, group=grp_vwap, inline="v2")
+
+// VWAP 3
+show_vw3 = input.bool(false, "VWAP 3", group=grp_vwap, inline="v3")
+day_vw3  = input.float(7, "Days", minval=0.1, step=0.5, group=grp_vwap, inline="v3")
+off_vw3  = input.int(15, "Label Offset", group=grp_vwap, inline="v3")
+col_vw3  = input.color(color.new(#5d87a1, 0), "", group=grp_vwap, inline="v3")
+wid_vw3  = input.int(1, "Width", minval=1, group=grp_vwap, inline="v3")
+
+// VWAP 4
+show_vw4 = input.bool(false, "VWAP 4", group=grp_vwap, inline="v4")
+day_vw4  = input.float(30, "Days", minval=0.1, step=0.5, group=grp_vwap, inline="v4")
+off_vw4  = input.int(15, "Label Offset", group=grp_vwap, inline="v4")
+col_vw4  = input.color(color.new(#8d6e63, 0), "", group=grp_vwap, inline="v4")
+wid_vw4  = input.int(1, "Width", minval=1, group=grp_vwap, inline="v4")
+
+// --- Label Style Settings ---
+grp_lbl = "Label Style"
+show_labels = input.bool(true, "Show Labels", group=grp_lbl)
+lbl_size_str = input.string("small", "Size", options=["auto", "tiny", "small", "normal", "large"], group=grp_lbl)
+
+lbl_size = switch lbl_size_str
+    "auto"   => size.auto
+    "tiny"   => size.tiny
+    "small"  => size.small
+    "normal" => size.normal
+    "large"  => size.large
+    => size.small
+
+// ==========================================
+// 2. CALCULATIONS
+// ==========================================
+
+// 2.1 MA Calculations
+v_ema1 = show_ema1 ? ta.ema(close, len_ema1) : na
+v_ema2 = show_ema2 ? ta.ema(close, len_ema2) : na
+v_ema3 = show_ema3 ? ta.ema(close, len_ema3) : na
+
+v_sma1 = show_sma1 ? ta.sma(close, len_sma1) : na
+v_sma2 = show_sma2 ? ta.sma(close, len_sma2) : na
+v_sma3 = show_sma3 ? ta.sma(close, len_sma3) : na
+
+// 2.2 Rolling VWAP Calculations
+f_calc_bars(_days) =>
+    _mins_per_bar = timeframe.in_seconds(timeframe.period) / 60
+    _safe_mins = _mins_per_bar > 0 ? _mins_per_bar : 1440 
+    math.max(1, int((_days * 1440) / _safe_mins))
+
+len_vw1 = f_calc_bars(day_vw1)
+len_vw2 = f_calc_bars(day_vw2)
+len_vw3 = f_calc_bars(day_vw3)
+len_vw4 = f_calc_bars(day_vw4)
+
+v_vw1 = show_vw1 ? ta.vwma(hlc3, len_vw1) : na
+v_vw2 = show_vw2 ? ta.vwma(hlc3, len_vw2) : na
+v_vw3 = show_vw3 ? ta.vwma(hlc3, len_vw3) : na
+v_vw4 = show_vw4 ? ta.vwma(hlc3, len_vw4) : na
+
+// ==========================================
+// 3. PLOTTING
+// ==========================================
+
+plot(v_ema1, "EMA 1", col_ema1, wid_ema1)
+plot(v_ema2, "EMA 2", col_ema2, wid_ema2)
+plot(v_ema3, "EMA 3", col_ema3, wid_ema3)
+
+plot(v_sma1, "SMA 1", col_sma1, wid_sma1)
+plot(v_sma2, "SMA 2", col_sma2, wid_sma2)
+plot(v_sma3, "SMA 3", col_sma3, wid_sma3)
+
+plot(v_vw1, "VWAP 1", col_vw1, wid_vw1)
+plot(v_vw2, "VWAP 2", col_vw2, wid_vw2)
+plot(v_vw3, "VWAP 3", col_vw3, wid_vw3)
+plot(v_vw4, "VWAP 4", col_vw4, wid_vw4)
+
+// ==========================================
+// 4. LABEL LOGIC
+// ==========================================
+
+f_draw_label(_show_line, _show_lbl, _val, _text, _color, _offset, _size) =>
+    var label my_label = label.new(na, na, style=label.style_label_left, textcolor=color.white)
+    
+    if _show_line and _show_lbl and not na(_val)
+        if barstate.islast
+            label.set_xy(my_label, bar_index + _offset, _val)
+            label.set_text(my_label, _text) 
+            label.set_color(my_label, _color)
+            label.set_size(my_label, _size)
+            label.set_style(my_label, label.style_label_left)
+    else
+        label.set_xy(my_label, na, na)
+
+// MA Labels
+f_draw_label(show_ema1, show_labels, v_ema1, "EMA " + str.tostring(len_ema1), col_ema1, off_ema1, lbl_size)
+f_draw_label(show_ema2, show_labels, v_ema2, "EMA " + str.tostring(len_ema2), col_ema2, off_ema2, lbl_size)
+f_draw_label(show_ema3, show_labels, v_ema3, "EMA " + str.tostring(len_ema3), col_ema3, off_ema3, lbl_size)
+
+f_draw_label(show_sma1, show_labels, v_sma1, "SMA " + str.tostring(len_sma1), col_sma1, off_sma1, lbl_size)
+f_draw_label(show_sma2, show_labels, v_sma2, "SMA " + str.tostring(len_sma2), col_sma2, off_sma2, lbl_size)
+f_draw_label(show_sma3, show_labels, v_sma3, "SMA " + str.tostring(len_sma3), col_sma3, off_sma3, lbl_size)
+
+// VWAP Labels
+f_draw_label(show_vw1, show_labels, v_vw1, "VWAP " + str.tostring(day_vw1) + "d", col_vw1, off_vw1, lbl_size)
+f_draw_label(show_vw2, show_labels, v_vw2, "VWAP " + str.tostring(day_vw2) + "d", col_vw2, off_vw2, lbl_size)
+f_draw_label(show_vw3, show_labels, v_vw3, "VWAP " + str.tostring(day_vw3) + "d", col_vw3, off_vw3, lbl_size)
+f_draw_label(show_vw4, show_labels, v_vw4, "VWAP " + str.tostring(day_vw4) + "d", col_vw4, off_vw4, lbl_size)
+
+// ==========================================
+// 5. INFO TABLE
+// ==========================================
+show_table = input.bool(false, "Show Values Table", group="INFO TABLE")
+table_pos_str = input.string("top_right", "Position", options=["top_right", "top_left", "bottom_right", "bottom_left"], group="INFO TABLE")
+
+table_pos = switch table_pos_str
+    "top_right" => position.top_right
+    "top_left" => position.top_left
+    "bottom_right" => position.bottom_right
+    "bottom_left" => position.bottom_left
+    => position.top_right
+
+var table info_tbl = table.new(table_pos, 2, 11, border_width=1)
+
+f_fill_row(_row, _show, _name, _val, _col) =>
+    if _show
+        table.cell(info_tbl, 0, _row, _name, bgcolor=_col, text_color=color.white)
+        table.cell(info_tbl, 1, _row, str.tostring(_val, format.mintick), bgcolor=color.new(color.gray, 90), text_color=chart.fg_color)
+    else
+        table.cell(info_tbl, 0, _row, "") 
+        table.cell(info_tbl, 1, _row, "")
+
+if barstate.islast and show_table
+    table.cell(info_tbl, 0, 0, "Indicator", bgcolor=color.gray, text_color=color.white)
+    table.cell(info_tbl, 1, 0, "Value", bgcolor=color.gray, text_color=color.white)
+    
+    // MAs
+    f_fill_row(1, show_ema1, "EMA " + str.tostring(len_ema1), v_ema1, col_ema1)
+    f_fill_row(2, show_ema2, "EMA " + str.tostring(len_ema2), v_ema2, col_ema2)
+    f_fill_row(3, show_ema3, "EMA " + str.tostring(len_ema3), v_ema3, col_ema3)
+    f_fill_row(4, show_sma1, "SMA " + str.tostring(len_sma1), v_sma1, col_sma1)
+    f_fill_row(5, show_sma2, "SMA " + str.tostring(len_sma2), v_sma2, col_sma2)
+    f_fill_row(6, show_sma3, "SMA " + str.tostring(len_sma3), v_sma3, col_sma3)
+    
+    // VWAPs
+    f_fill_row(7, show_vw1, "VWAP " + str.tostring(day_vw1) + "d", v_vw1, col_vw1)
+    f_fill_row(8, show_vw2, "VWAP " + str.tostring(day_vw2) + "d", v_vw2, col_vw2)
+    f_fill_row(9, show_vw3, "VWAP " + str.tostring(day_vw3) + "d", v_vw3, col_vw3)
+    f_fill_row(10, show_vw4, "VWAP " + str.tostring(day_vw4) + "d", v_vw4, col_vw4)
+else if not show_table
+    table.clear(info_tbl, 0, 0, 1, 10)

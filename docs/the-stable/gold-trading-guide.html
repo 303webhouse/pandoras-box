@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>So You Want to Trade Gold?</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Arial', sans-serif;
+            background: #ffffff;
+            color: #000000;
+            line-height: 1.6;
+            padding: 40px 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        .hero {
+            text-align: center;
+            margin-bottom: 60px;
+            padding: 40px 0;
+            border-bottom: 3px solid #0a0a2e;
+        }
+        
+        h1 {
+            color: #0a0a2e;
+            font-size: 3em;
+            font-weight: 700;
+            margin-bottom: 20px;
+            letter-spacing: -1px;
+        }
+        
+        .subtitle {
+            color: #333;
+            font-size: 1.3em;
+            font-weight: 400;
+        }
+        
+        h2 {
+            color: #0a0a2e;
+            font-size: 2em;
+            margin-top: 40px;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #0a0a2e;
+            font-weight: 600;
+        }
+        
+        h3 {
+            color: #0a0a2e;
+            font-size: 1.3em;
+            margin-top: 25px;
+            margin-bottom: 12px;
+            font-weight: 600;
+        }
+        
+        p, li {
+            margin-bottom: 12px;
+            font-size: 1.05em;
+            line-height: 1.7;
+        }
+        
+        ul {
+            margin-left: 25px;
+            margin-bottom: 20px;
+        }
+        
+        li {
+            margin-bottom: 8px;
+        }
+        
+        .highlight-box {
+            background: #f0f0f5;
+            border-left: 4px solid #0a0a2e;
+            padding: 20px;
+            margin: 25px 0;
+            border-radius: 4px;
+        }
+        
+        .specs-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 30px;
+            margin: 25px 0;
+        }
+        
+        .spec-card {
+            background: #fafafa;
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid #ddd;
+        }
+        
+        .spec-card h3 {
+            color: #0a0a2e;
+            margin-top: 0;
+        }
+        
+        .key-point {
+            font-weight: 600;
+            color: #0a0a2e;
+        }
+        
+        .warning {
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 4px;
+        }
+        
+        .bottom-line {
+            background: #0a0a2e;
+            color: white;
+            padding: 30px;
+            border-radius: 8px;
+            margin-top: 50px;
+        }
+        
+        .bottom-line h2 {
+            color: white;
+            border-bottom: 2px solid white;
+        }
+        
+        strong {
+            color: #0a0a2e;
+            font-weight: 600;
+        }
+        
+        .metric {
+            font-family: 'Courier New', monospace;
+            background: #f5f5f5;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 0.95em;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="hero">
+            <h1>So You Want to Trade Gold?</h1>
+            <p class="subtitle">A Practical, Comprehensive Guide (Futures + ETFs)</p>
+        </div>
+
+        <div class="highlight-box">
+            <p><strong>Key Insight:</strong> Gold is a macro-financial asset disguised as a commodity. It doesn't behave like oil or wheat — it responds to real yields, FX, central banks, and capital flows.</p>
+        </div>
+
+        <h2>1) Instruments & Specs</h2>
+        
+        <div class="specs-grid">
+            <div class="spec-card">
+                <h3>COMEX Gold Futures (GC)</h3>
+                <ul>
+                    <li>Contract size: <span class="metric">100 troy oz</span></li>
+                    <li>Tick: <span class="metric">$0.10/oz → $10 per tick</span></li>
+                    <li><span class="metric">$1.00 move = $100/contract</span></li>
+                    <li><span class="metric">$10 move = $1,000/contract</span></li>
+                    <li>Hours: Sun–Fri, 6:00pm–5:00pm ET (1-hr break daily)</li>
+                    <li>Physically deliverable (most traders auto-roll before delivery)</li>
+                </ul>
+                <p><strong>Micro Gold (MGC):</strong> 10 oz contract, $1 per tick, more flexible sizing</p>
+            </div>
+            
+            <div class="spec-card">
+                <h3>Gold ETFs</h3>
+                <ul>
+                    <li><strong>GLD:</strong> 1/10 oz per share, physically backed, highly liquid</li>
+                    <li><strong>IAU/GLDM/SGOL:</strong> lower share price, cheaper fees, still physically backed</li>
+                    <li><strong>Leveraged/inverse ETFs:</strong> daily rebalanced, path-dependent, not for holding</li>
+                </ul>
+                <p><strong>Tax treatment (U.S.):</strong></p>
+                <ul>
+                    <li>Futures: Section 1256, 60/40 blended rate</li>
+                    <li>ETFs: Collectible treatment (up to 28%) if physically backed</li>
+                </ul>
+            </div>
+        </div>
+
+        <h2>2) How the Market Actually Works</h2>
+        <ul>
+            <li><strong>OTC/LBMA (London):</strong> wholesale physical market, "Good Delivery" bars, twice-daily auctions</li>
+            <li><strong>COMEX:</strong> futures/options for price discovery, linked to physical via EFP (Exchange for Physical)</li>
+            <li><strong>ETFs:</strong> creation/redemption with authorized participants keeps ETF prices near NAV</li>
+        </ul>
+
+        <h2>3) Core Drivers of Gold</h2>
+        <ul>
+            <li><span class="key-point">Real yields:</span> the #1 driver; falling real yields = bullish</li>
+            <li><span class="key-point">USD:</span> stronger dollar usually pressures gold (though not always)</li>
+            <li><span class="key-point">Monetary policy:</span> Fed hikes/cuts, CPI/NFP/PCE data</li>
+            <li><span class="key-point">Official demand:</span> central bank reserve buying has been a strong tailwind</li>
+            <li><span class="key-point">ETF flows:</span> creations/redemptions amplify trends</li>
+            <li><span class="key-point">Jewelry/physical demand:</span> India (festivals), China (Shanghai premiums)</li>
+            <li><span class="key-point">Geopolitics & risk events:</span> safe-haven flows, stress hedging</li>
+        </ul>
+
+        <h2>4) Gold vs Other Commodities</h2>
+        <p><strong>Gold is not like oil, wheat, or copper.</strong> Its unique role in the financial system changes how it trades:</p>
+
+        <h3>Monetary vs. consumable</h3>
+        <ul>
+            <li>Gold is primarily a monetary asset and store of value, not an industrial input</li>
+            <li>Oil, copper, wheat have end-user consumption driving supply/demand. Gold demand is largely investment, jewelry, and reserves</li>
+        </ul>
+
+        <h3>Supply elasticity</h3>
+        <ul>
+            <li>Annual mine output adds only ~1–2% to the above-ground stock</li>
+            <li>Contrast with oil or wheat, where yearly production swings directly shape price. Gold's stock-to-flow ratio is extremely high</li>
+        </ul>
+
+        <h3>Storage & carrying cost</h3>
+        <ul>
+            <li>Cheap to store relative to value, doesn't degrade</li>
+            <li>Gives it monetary longevity unlike soft commodities (spoil) or energy (high storage cost)</li>
+        </ul>
+
+        <h3>Correlation to macro, not cycles</h3>
+        <ul>
+            <li>Gold trades off real yields, FX, and policy</li>
+            <li>Base metals trade with global growth/industrial demand</li>
+            <li>Energy trades with supply shocks, OPEC policy, weather</li>
+        </ul>
+
+        <h3>Safe-haven premium</h3>
+        <ul>
+            <li>Gold often rallies because of financial stress, even if fundamentals don't justify it</li>
+            <li>Oil/copper usually fall in recessions or stress as demand collapses</li>
+        </ul>
+
+        <h3>ETF and central bank flows</h3>
+        <ul>
+            <li>No other commodity has the same scale of central bank buying or ETF demand as gold</li>
+            <li>This adds a financial layer of demand unique to gold</li>
+        </ul>
+
+        <div class="highlight-box">
+            <p><strong>In short:</strong> Oil and grains are <em>flow commodities</em> (production vs consumption sets price). Gold is a <em>stock commodity</em> (massive above-ground reserves, demand anchored in financial perception and monetary regime). That's why it trades closer to currencies or bonds than traditional commodities.</p>
+        </div>
+
+        <h2>5) Data & Dashboards Worth Tracking</h2>
+        <ul>
+            <li>Real yields (TIPS)</li>
+            <li>USD (DXY, key FX pairs)</li>
+            <li>ETF holdings (GLD/IAU/GLDM daily flows)</li>
+            <li>COT positioning</li>
+            <li>Shanghai premium vs London</li>
+            <li>COMEX warehouse stocks & EFP flows</li>
+            <li>Macro calendar: CPI, NFP, PCE, Fed</li>
+        </ul>
+
+        <h2>6) Trading Frameworks</h2>
+
+        <h3>For Futures</h3>
+        <ul>
+            <li>Event-driven trades around CPI/NFP/FOMC (treat like earnings)</li>
+            <li>Trend-following when macro regime is aligned (real yields falling)</li>
+            <li>Mean reversion between events (VWAP, prior-day value)</li>
+            <li><strong>Risk:</strong> GC = $1,000 per $10 move per contract; size accordingly</li>
+        </ul>
+
+        <h3>For ETFs</h3>
+        <ul>
+            <li>Simpler execution, no leverage; options markets (esp. GLD) are liquid</li>
+            <li>Great for expressing medium-term thematic views (hedges, collars, spreads)</li>
+            <li>Beware collectible tax treatment</li>
+            <li>Leveraged/inverse ETFs only for short-term tactical plays</li>
+        </ul>
+
+        <h2>7) Pitfalls</h2>
+        <div class="warning">
+            <ul style="margin-left: 0; list-style-position: inside;">
+                <li>Trading gold like oil/copper → you'll miss real drivers</li>
+                <li>Ignoring roll/basis in futures</li>
+                <li>Forgetting that "safe haven" narrative only works if positioning isn't already overloaded</li>
+                <li>Treating miners as 1:1 proxy (they carry equity risk and operational leverage)</li>
+            </ul>
+        </div>
+
+        <div class="bottom-line">
+            <h2>Bottom Line</h2>
+            <p>Gold is a macro-financial asset disguised as a commodity. It doesn't behave like oil or wheat — it responds to real yields, FX, central banks, and capital flows, with physical demand adding a background rhythm.</p>
+            <p>For futures traders, the key edge is knowing when macro catalysts align with positioning. For ETF traders, it's structuring trades around flows, options, and tax efficiency.</p>
+        </div>
+    </div>
+</body>
+</html>
