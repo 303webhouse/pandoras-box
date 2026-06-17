@@ -67,3 +67,13 @@ def is_liquid(ticker: Optional[str]) -> bool:
     A blank / None ticker is treated as non-liquid (returns False).
     """
     return normalize_ticker(ticker) in LIQUID_UNIVERSE
+
+
+def apis_eligible(ticker: Optional[str]) -> bool:
+    """L0.3 — whether a ticker is eligible for the APIS_CALL label.
+
+    APIS edge is non-liquid-only (LIVE 2026-06-17: liquid n=93 avg -0.126;
+    non-liquid n=62 avg +1.273), so eligibility is simply `not is_liquid`.
+    A blank/None ticker is treated as non-liquid → eligible.
+    """
+    return not is_liquid(ticker)
