@@ -715,7 +715,11 @@ async def _compute_signals_active() -> Dict[str, Any]:
                         sig['priority'] = "HIGH"
                         # Upgrade to APIS/KODIAK for strongest signals (rare, 85+ only)
                         if direction in ["LONG", "BUY"]:
-                            sig['signal_type'] = "APIS_CALL"
+                            # L0.3: gate APIS_CALL to non-liquid behind L0_APIS_ENFORCE
+                            # (default False = unchanged); preserve original type if withheld.
+                            from config.l0_apis import apply_apis_label
+                            if apply_apis_label(sig.get('ticker')):
+                                sig['signal_type'] = "APIS_CALL"
                         elif direction in ["SHORT", "SELL"]:
                             sig['signal_type'] = "KODIAK_CALL"
                     elif score >= 75:
