@@ -16,6 +16,7 @@ Downstream consumers:
 """
 
 import asyncio
+import json
 import logging
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
@@ -112,6 +113,46 @@ async def aggregate_ticker_flow(ticker: str) -> Optional[Dict]:
     }
 
 
+def build_flow_summary(row: Dict) -> Dict:
+    """Canonical uw:flow:{ticker} committee-flow summary — the contract read by
+    flow_radar / cta_scanner / contrarian_qualifier / unified_positions.
+
+    sentiment is PREMIUM-based (BULLISH if call_premium > put_premium*1.3, etc.)
+    to MATCH the legacy canonical writer — NOT row['flow_sentiment'], which is the
+    poller's volume-based definition (kept for flow_events/Postgres only). Single
+    source of the committee flow contract; exercised directly by the unit test so
+    a writer/reader shape or sentiment-semantics drift is caught (the Chunk-2 trap).
+    """
+    cp = row.get("call_premium") or 0
+    pp = row.get("put_premium") or 0
+    if cp > pp * 1.3:
+        sentiment = "BULLISH"
+    elif pp > cp * 1.3:
+        sentiment = "BEARISH"
+    else:
+        sentiment = "NEUTRAL"
+    pc = row.get("pc_ratio")
+    if pc == 999.0:  # all-put sentinel — don't leak the magic number to readers/UI
+        pc = None    # (bearishness is already carried by sentiment)
+    return {
+        "ticker": row["ticker"],
+        "sentiment": sentiment,
+        "pc_ratio": pc,
+        "call_premium": cp,
+        "put_premium": pp,
+        "total_premium": row.get("total_premium"),
+        "net_premium": cp - pp,
+        "call_volume": row.get("call_volume"),
+        "put_volume": row.get("put_volume"),
+        "change_pct": row.get("change_pct"),   # None — snapshot dropped in Chunk 4
+        # NOTE: unusual_count intentionally omitted — neither this poller nor the
+        # legacy writer ever produced it; cta_scanner's read was always None
+        # (pre-existing, zero regression).
+        "source": "railway_poller",
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 async def run_flow_poller():
     """
     Main poller entry point. Called every 5 min by main.py uw_flow_poller_loop.
@@ -121,6 +162,12 @@ async def run_flow_poller():
     if not pool:
         logger.error("Flow poller: no Postgres pool")
         return
+
+    # L1.0 Path A: this poller is now the SINGLE writer of the committee uw:flow:*
+    # summary keys (canonical shape). Redis publish is best-effort; the Postgres
+    # flow_events write is the source of truth.
+    from database.redis_client import get_redis_client
+    redis = await get_redis_client()
 
     written = 0
     errors = 0
@@ -154,6 +201,19 @@ async def run_flow_poller():
                     row["source"],
                 )
             written += 1
+
+            # L1.0 Path A: publish the canonical committee summary (sole writer of
+            # uw:flow:*). TTL gives honest staleness / dead-feed detection.
+            if redis:
+                try:
+                    await redis.set(
+                        f"uw:flow:{row['ticker']}",
+                        json.dumps(build_flow_summary(row)),
+                        ex=900,
+                    )
+                except Exception as _re:
+                    # AEGIS log hygiene: type only, never the exception body (no DSN leak).
+                    logger.warning("uw:flow publish failed for %s: %s", ticker, type(_re).__name__)
 
         except Exception as e:
             errors += 1

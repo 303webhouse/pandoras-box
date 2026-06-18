@@ -2801,8 +2801,11 @@ async def start_scheduler():
         asyncio.create_task(_sector_refresh_loop())
         logger.info("âœ… Sector refresh loop started (15s interval, market hours)")
 
-        asyncio.create_task(_uw_flow_polling_loop())
-        logger.info("âœ… UW flow polling loop started (300s interval, market hours)")
+        # DISABLED L1.0 Path A: get_flow_recent yields no usable writes, and leaving this
+        # racing the Chunk-4 poller on uw:flow:* risks shape drift. The poller is now the
+        # SINGLE uw:flow:* writer (canonical summary). Reclaims ~800 UW calls/session.
+        # asyncio.create_task(_uw_flow_polling_loop())
+        # logger.info("UW flow polling loop DISABLED (L1.0 Path A — poller is sole writer)")
 
         asyncio.create_task(_sector_3_10_refresh_loop())
         logger.info("âœ… Sector 3-10 cache loop started (15 min interval, market hours)")

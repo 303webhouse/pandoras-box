@@ -826,7 +826,7 @@ async def get_flow_per_expiry(ticker: str) -> Optional[List[Dict[str, Any]]]:
     aggregated by expiry date — the correct schema for flow scoring.
     Use this (NOT get_flow_recent) when you need aggregate call/put metrics.
     """
-    cached = await cache_get("flow", ticker.upper())
+    cached = await cache_get("flow_per_expiry", ticker.upper())
     if cached:
         return cached
 
@@ -836,7 +836,7 @@ async def get_flow_per_expiry(ticker: str) -> Optional[List[Dict[str, Any]]]:
 
     flow = data if isinstance(data, list) else data.get("data", [])
     if flow:
-        await cache_set("flow", ticker.upper(), flow)
+        await cache_set("flow_per_expiry", ticker.upper(), flow)
     return flow or None
 
 
