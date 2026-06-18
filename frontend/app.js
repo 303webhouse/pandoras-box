@@ -8886,6 +8886,13 @@ function renderFlowRadar(data) {
     const pulsePc = document.getElementById('pulsePcRatio');
     const pulsePremium = document.getElementById('pulsePremium');
     const mp = data.market_pulse || {};
+    // L1.0 Chunk 1b: when the flow feed is empty/unavailable, render the
+    // flow-derived pulse cells as a muted "No flow data" state instead of
+    // implying a live reading ($0 / neutral). The backend (Chunk 1) already
+    // stops the fabricated direction; this makes the widget explicit about why.
+    // Treat a missing flag as available (back-compat with cached responses).
+    // bias_level is composite-bias-derived (not flow) so it is left intact.
+    const flowAvailable = mp.flow_data_available !== false;
 
     if (pulseRegime) {
         const bl = mp.bias_level || 'NEUTRAL';
@@ -8894,14 +8901,24 @@ function renderFlowRadar(data) {
             : bl.includes('TORO') ? '#4ade80' : 'var(--text-secondary)';
     }
     if (pulsePc) {
-        const pc = mp.overall_pc_ratio;
-        pulsePc.textContent = pc != null ? `P/C ${pc.toFixed(2)}` : 'P/C --';
-        if (pc != null) {
-            pulsePc.style.color = pc < 0.7 ? '#4ade80' : pc > 1.3 ? '#f87171' : 'var(--text-secondary)';
+        if (!flowAvailable) {
+            pulsePc.textContent = 'No flow data';
+            pulsePc.style.color = 'var(--text-secondary)';
+        } else {
+            const pc = mp.overall_pc_ratio;
+            pulsePc.textContent = pc != null ? `P/C ${pc.toFixed(2)}` : 'P/C --';
+            pulsePc.style.color = (pc != null)
+                ? (pc < 0.7 ? '#4ade80' : pc > 1.3 ? '#f87171' : 'var(--text-secondary)')
+                : 'var(--text-secondary)';
         }
     }
     if (pulsePremium) {
-        pulsePremium.textContent = mp.total_premium_display || '$--';
+        if (!flowAvailable) {
+            pulsePremium.textContent = '—';
+            pulsePremium.style.color = 'var(--text-secondary)';
+        } else {
+            pulsePremium.textContent = mp.total_premium_display || '$--';
+        }
     }
 
     // --- Headlines Strip ---
