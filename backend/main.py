@@ -562,14 +562,12 @@ async def lifespan(app: FastAPI):
     staleness_task = asyncio.create_task(factor_staleness_loop())
     vwap_task = asyncio.create_task(vwap_validation_loop())
     crypto_scan_task = asyncio.create_task(crypto_scan_loop())
-    # DEACTIVATED 2026-06-16 (UW budget incident): the 41-ticker uw_flow_poller
-    # (get_flow_per_expiry + get_snapshot @ 5-min) was contributing ~3,900 UW
-    # calls/day while the daily 20k cap was already blown (22.7k by ~11am MT),
-    # causing 429 storms that starved the sector heatmap + Flow Radar. Re-enable
-    # only after the UW rate-plan rework lands (see handoff note). Downstream
-    # flow_events consumers (pipeline P2C, wh_accumulation, committee briefings)
-    # degrade to last-written rows until then.
-    # uw_flow_poller_task = asyncio.create_task(uw_flow_poller_loop())
+    # RE-ENABLED 2026-06-18 (L1.0 Chunk 4): trimmed to the L0.2 liquid universe
+    # (20 tickers) and flow-only (snapshot call dropped) → ~1,680 UW calls/day
+    # (~1 call/ticker @ 5-min over the session), down from the ~6,720 that caused
+    # the 06-16 budget incident. Self-gates to 09:00–16:00 ET. Restores the
+    # flow_events feed for pipeline P2C / wh_confluence / committee briefings.
+    uw_flow_poller_task = asyncio.create_task(uw_flow_poller_loop())
     adx_regime_task = asyncio.create_task(adx_regime_loop())
     wh_accumulation_task = asyncio.create_task(wh_accumulation_loop())
     wh_reversal_task = asyncio.create_task(wh_reversal_loop())
@@ -775,7 +773,7 @@ async def lifespan(app: FastAPI):
     staleness_task.cancel()
     vwap_task.cancel()
     crypto_scan_task.cancel()
-    # uw_flow_poller_task.cancel()  # DEACTIVATED 2026-06-16 (UW budget incident) — see creation site
+    uw_flow_poller_task.cancel()  # RE-ENABLED 2026-06-18 (L1.0 Chunk 4) — see creation site
     wh_accumulation_task.cancel()
     wh_reversal_task.cancel()
     oracle_task.cancel()

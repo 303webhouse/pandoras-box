@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 from database.postgres_client import get_postgres_client
+from config.liquid_universe import LIQUID_UNIVERSE
 
 logger = logging.getLogger("uw_flow_poller")
 
@@ -28,25 +29,9 @@ POLLER_CONFIG = {
     "max_errors_before_skip": 3,
 }
 
-# ~40 tickers. At 5-min cadence during 9-16 ET = ~480 calls/hour = ~8 req/min sustained.
-# UW cap is 120 req/min. Budget for other scanners: ~112 req/min remaining.
-FLOW_POLLER_TICKERS = [
-    # Mega-caps
-    "NVDA", "AAPL", "MSFT", "GOOGL", "AMZN", "META", "TSLA",
-    # Semis
-    "AMD", "AVGO", "MU", "INTC", "TSM", "ASML",
-    # High-flow single-stocks
-    "NFLX", "UBER", "CRM", "ORCL", "PLTR", "HOOD", "COIN", "MSTR",
-    "GE", "DIS", "BA", "CAT",
-    # Financials
-    "JPM", "BAC", "GS", "WFC",
-    # Energy / Commodities
-    "XOM", "CVX",
-    # Index ETFs
-    "SPY", "QQQ", "IWM", "DIA",
-    # Sector ETFs
-    "XLK", "XLF", "XLE", "XLV", "SMH", "XBI",
-]
+# L1.0 Chunk 4: trimmed 40->20 to the L0.2 liquid allowlist (UW budget).
+# Single source of truth = config/liquid_universe.py.
+FLOW_POLLER_TICKERS = sorted(LIQUID_UNIVERSE)
 
 
 async def aggregate_ticker_flow(ticker: str) -> Optional[Dict]:
@@ -55,7 +40,7 @@ async def aggregate_ticker_flow(ticker: str) -> Optional[Dict]:
     Flow-per-expiry schema: call_premium (str), put_premium (str),
     call_volume (int), put_volume (int) — already split by UW.
     """
-    from integrations.uw_api import get_flow_per_expiry, get_snapshot
+    from integrations.uw_api import get_flow_per_expiry
 
     try:
         flow_data = await get_flow_per_expiry(ticker)
@@ -105,18 +90,11 @@ async def aggregate_ticker_flow(ticker: str) -> Optional[Dict]:
     elif call_premium > 0 and put_premium > call_premium * 2:
         sentiment = "BEARISH"
 
-    # Get current price + change from snapshot
+    # L1.0 Chunk 4: snapshot enrichment dropped to halve UW budget load.
+    # /stock-state is flaky; price/change/volume are non-essential here.
     price = None
     change_pct = None
     volume = None
-    try:
-        snap = await get_snapshot(ticker)
-        if snap and isinstance(snap, dict):
-            price = snap.get("day", {}).get("c")
-            change_pct = snap.get("todaysChangePerc")
-            volume = snap.get("day", {}).get("v")
-    except Exception:
-        pass
 
     return {
         "ticker": ticker,
