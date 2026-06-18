@@ -14,7 +14,8 @@ Sector vocabulary mapping (from scanners/sector_rs.py _classify()):
 
 Discovery findings (2026-04-24):
   Pythia coverage: 5.5%  — fully_confirmed badge will be rare during shadow
-  Flow qualifying:  0.76% — Path C flow arm near-inert during shadow
+  Flow qualifying:  EXCISED L1.0 — flow arm was permanently dead (key+scope
+    mismatch vs P4A writer); rebuilt on canonical flow_events in L1a
   Path A uncapped:  ~27.5/week — circuit-breaker gate at >20/week triggers tuning
 
 Pre-tune (2026-04-25, Olympus): retrospective replay (PR #20, 30-day window,
@@ -116,50 +117,15 @@ def _pythia_confirms(signal_data: Dict[str, Any]) -> bool:
     return total_adj >= 0
 
 
-def _flow_bonus(signal_data: Dict[str, Any]) -> float:
-    flow = (signal_data.get("triggering_factors") or {}).get("flow", {})
-    return float(flow.get("bonus", 0) or 0) if isinstance(flow, dict) else 0.0
-
-
-def _flow_aligned(signal_data: Dict[str, Any]) -> bool:
-    """
-    Returns True if options flow direction matches signal direction
-    with net premium above threshold.
-    """
-    flow = (signal_data.get("triggering_factors") or {}).get("flow", {})
-    if not isinstance(flow, dict):
-        return False
-    net_call  = float(flow.get("net_call_premium", 0) or 0)
-    net_put   = float(flow.get("net_put_premium",  0) or 0)
-    net_prem  = float(flow.get("net_premium",      0) or 0)
-    direction = (signal_data.get("direction") or "").lower()
-
-    if direction in ("long", "buy"):
-        return net_call > net_put and net_prem > FLOW_NET_PREMIUM_THRESHOLD
-    if direction in ("short", "sell"):
-        return net_put > net_call and net_prem > FLOW_NET_PREMIUM_THRESHOLD
-    return False
-
-
-def _flow_contradicting(signal_data: Dict[str, Any]) -> bool:
-    """
-    Returns True if flow is active (bonus > 3) AND flow opposes signal direction.
-    Used for the flow_contradicting ceiling cap.
-    """
-    if _flow_bonus(signal_data) <= 3:
-        return False
-    flow = (signal_data.get("triggering_factors") or {}).get("flow", {})
-    if not isinstance(flow, dict):
-        return False
-    net_call  = float(flow.get("net_call_premium", 0) or 0)
-    net_put   = float(flow.get("net_put_premium",  0) or 0)
-    direction = (signal_data.get("direction") or "").lower()
-
-    if direction in ("long", "buy") and net_put > net_call:
-        return True
-    if direction in ("short", "sell") and net_call > net_put:
-        return True
-    return False
+# v2 flow arm excised L1.0 — _flow_bonus / _flow_aligned / _flow_contradicting
+# removed. Root cause: the classifier read market-tide-shaped keys
+# (net_call_premium / net_put_premium / net_premium) that the only writer (P4A,
+# signals/pipeline.py) never produces — it writes total_premium / call_premium /
+# put_premium — so every read fell back to 0 and the arm was permanently dead
+# (2 months). The $500K tide-scale FLOW_NET_PREMIUM_THRESHOLD never clears
+# per-ticker flow either, so a naive key-rename would stay inert. Flow
+# confluence is rebuilt on the canonical flow_events source (per-ticker
+# calibrated) in L1a.
 
 
 def _sector_regime_for_signal(signal_data: Dict[str, Any]) -> Optional[str]:
@@ -229,15 +195,7 @@ def apply_v2_ceiling_caps(signal_data: Dict[str, Any]) -> Dict[str, Any]:
     if signal_data.get("feed_tier_ceiling"):
         return signal_data  # existing cap takes precedence
 
-    # ── flow_contradicting → ta_feed ─────────────────────────────────────────
-    if _flow_contradicting(signal_data):
-        signal_data["feed_tier_ceiling"] = "ta_feed"
-        signal_data["_score_ceiling_reason"] = "flow_contradicting"
-        logger.debug(
-            "v2 cap: flow_contradicting on %s — capped to ta_feed",
-            signal_data.get("ticker", "?"),
-        )
-        return signal_data
+    # flow_contradicting cap removed L1.0 — rebuilt on canonical flow in L1a
 
     # ── sector_rotating_against → ta_feed ────────────────────────────────────
     if _sector_rotating_against(signal_data):
@@ -288,7 +246,10 @@ def classify_signal_tier_v2(
 
     # Pre-compute enricher states (used across multiple paths)
     pythia_ok  = _pythia_confirms(signal_data)
-    flow_ok    = _flow_bonus(signal_data) > 3 and _flow_aligned(signal_data)
+    # v2 flow arm excised L1.0 (key + scope mismatch made it permanently dead;
+    # naive key-rename stays inert under the tide-scale threshold). Flow
+    # confluence is rebuilt on the canonical flow_events source in L1a.
+    flow_ok    = False
     sector_ok  = _sector_confluence_positive(signal_data)
 
     # ── WATCHLIST_PROMOTION short-circuit ─────────────────────────────────────
