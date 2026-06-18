@@ -25,6 +25,22 @@ from api._swr_cache import SWRCache
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/flow", tags=["flow-radar"])
 
+
+def _staleness_from(data_updated_at: Optional[str]) -> Optional[int]:
+    """L1.0 Chunk 3: seconds since the oldest used flow summary's updated_at.
+
+    Returns None when age is unknown (no dated summaries / empty feed) — NEVER 0.
+    Zero would read as "perfectly fresh," a fake-healthy lie. One definition,
+    called by BOTH the dashboard response and the MCP envelope so they can't diverge.
+    """
+    if not data_updated_at:
+        return None
+    try:
+        age = (datetime.now(timezone.utc) - datetime.fromisoformat(data_updated_at)).total_seconds()
+        return int(max(0, age))
+    except Exception:
+        return None
+
 # Module-level SWR cache instance, lazily initialized on first request so the
 # Redis client is fully connected by then. Phase 1c canary defaults:
 #   default_ttl=3   — fresh window (cache hits return in single-digit ms)
@@ -105,6 +121,9 @@ async def get_flow_radar():
         **data,
         "as_of": int(time.time() - age),
         "cache_age_seconds": age,
+        # L1.0 Chunk 3: real staleness (read-time, from the data's updated_at).
+        # null when unknown — never 0. Same helper the MCP envelope uses.
+        "staleness_seconds": _staleness_from((data.get("market_pulse") or {}).get("data_updated_at")),
     }
 
 
@@ -338,6 +357,12 @@ async def _compute_flow_radar() -> Dict[str, Any]:
         except Exception:
             pass
 
+    # L1.0 Chunk 3: real data age = oldest updated_at across the summaries we used.
+    # None-safe: manual-fallback entries carry last_updated (not updated_at) and are
+    # excluded by design — staleness reflects the poller's canonical flow.
+    _ts = [s.get("updated_at") for s in flow_data.values() if s.get("updated_at")]
+    data_updated_at = min(_ts) if _ts else None
+
     market_pulse = {
         "overall_pc_ratio": overall_pc,
         "overall_sentiment": overall_sentiment,
@@ -349,6 +374,7 @@ async def _compute_flow_radar() -> Dict[str, Any]:
         "bias_level": bias_level,
         "tickers_with_flow": len(flow_data),
         "flow_data_available": flow_data_available,
+        "data_updated_at": data_updated_at,   # ISO string or None (real write time, not compute-time)
         # Aliases consumed by hub_get_flow_radar (MCP). Additive — the dashboard
         # widget reads the *_total / overall_sentiment keys above; the MCP tool
         # reads these. One source of truth, two key conventions. Do not remove.

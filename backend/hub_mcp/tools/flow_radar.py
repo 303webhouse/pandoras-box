@@ -138,5 +138,8 @@ async def hub_get_flow_radar(
         status="ok",
         data=data,
         summary=_summary(ticker, lookback_hours, net_calls, net_puts, direction, len(events)),
-        staleness_seconds=300,
+        # L1.0 Chunk 3: real staleness from the dashboard read-time compute (the
+        # exact same value get_flow_radar emits — single source, null when unknown,
+        # never the old hardcoded 300).
+        staleness_seconds=raw.get("staleness_seconds"),
     )

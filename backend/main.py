@@ -409,6 +409,99 @@ async def lifespan(app: FastAPI):
                 logger.warning("UW flow poller loop error: %s", e)
             await asyncio.sleep(300)  # 5 minutes
 
+    async def flow_deadfeed_watchdog_loop():
+        """L1.0 Chunk 3: RTH-gated, debounced dead-feed alarm for the uw:flow:* feed.
+
+        Independent of run_flow_poller on purpose — a stopped poller must still trip
+        this (dead-man's-switch). Evaluates uw:flow:* freshness directly each cycle;
+        fires ONCE per episode (Redis latch) and sends a recovery alert on heal.
+        """
+        import json as _json
+        from datetime import datetime as _dt, time as _t, timezone as _tz
+        from zoneinfo import ZoneInfo
+
+        STALE_S = 900            # matches the uw:flow TTL that governs flow_data_available
+        LATCH_KEY = "alarm:flow_dead:active"
+        LATCH_TTL = 7200         # ~2h — one alarm per dead episode, not per cycle
+
+        def _in_rth() -> bool:
+            # Strict 09:30–16:00 ET (NOT api/sectors._is_market_hours, which runs to
+            # ~16:30 and would false-alarm daily after the poller stops at 16:00).
+            # No half-day calendar: early-close days (~3-4/yr) may throw one false
+            # "feed dead" in the after-close window. Known, acceptable.
+            now = _dt.now(ZoneInfo("America/New_York"))
+            if now.weekday() >= 5:
+                return False
+            return _t(9, 30) <= now.time() <= _t(16, 0)
+
+        await asyncio.sleep(180)  # let the poller seed uw:flow:* first
+
+        while True:
+            try:
+                if _in_rth():
+                    redis = await get_redis_client()
+                    if redis:
+                        cursor = b"0"
+                        keys = []
+                        while True:
+                            cursor, batch = await redis.scan(cursor, match="uw:flow:*", count=200)
+                            keys.extend(batch)
+                            if cursor in (b"0", 0):
+                                break
+                        now_utc = _dt.now(_tz.utc)
+                        summaries = 0
+                        fresh = 0
+                        oldest_age = None
+                        newest_iso = None
+                        for k in keys:
+                            ks = k.decode() if isinstance(k, bytes) else k
+                            if ks.endswith(":recent"):
+                                continue  # the recent-alerts list, not a summary
+                            val = await redis.get(k)
+                            if not val:
+                                continue
+                            try:
+                                summ = _json.loads(val)
+                            except Exception:
+                                continue
+                            if not isinstance(summ, dict):
+                                continue
+                            dua = summ.get("updated_at")
+                            if not dua:
+                                continue
+                            try:
+                                age = (now_utc - _dt.fromisoformat(dua)).total_seconds()
+                            except Exception:
+                                continue
+                            summaries += 1
+                            if age <= STALE_S:
+                                fresh += 1
+                            if oldest_age is None or age > oldest_age:
+                                oldest_age = int(age)
+                            if newest_iso is None or dua > newest_iso:
+                                newest_iso = dua
+
+                        feed_dead = (fresh == 0)
+                        latched = bool(await redis.get(LATCH_KEY))
+                        if feed_dead and not latched:
+                            from bias_engine.anomaly_alerts import send_alert
+                            status = (f"No fresh uw:flow within {STALE_S}s during RTH. "
+                                      f"summaries={summaries} fresh=0 "
+                                      f"oldest_age={oldest_age}s last_write={newest_iso}")
+                            await send_alert("🚨 Flow feed dead", status, severity="warning")
+                            await redis.set(LATCH_KEY, "1", ex=LATCH_TTL)
+                            logger.warning("Flow dead-feed alarm FIRED: %s", status)
+                        elif (not feed_dead) and latched:
+                            from bias_engine.anomaly_alerts import send_alert
+                            status = (f"Flow feed healthy: {fresh} fresh tickers, "
+                                      f"oldest_age={oldest_age}s last_write={newest_iso}")
+                            await send_alert("✅ Flow feed restored", status, severity="info")
+                            await redis.delete(LATCH_KEY)
+                            logger.info("Flow dead-feed alarm CLEARED: %s", status)
+            except Exception as e:
+                logger.warning("Flow dead-feed watchdog error: %s", e)
+            await asyncio.sleep(300)  # 5-min cadence
+
     # WH-ACCUMULATION scanner: detect institutional accumulation hourly (ZEUS 1A.3)
     async def wh_accumulation_loop():
         """Run WH-ACCUMULATION scanner every hour during market hours."""
@@ -568,6 +661,7 @@ async def lifespan(app: FastAPI):
     # the 06-16 budget incident. Self-gates to 09:00–16:00 ET. Restores the
     # flow_events feed for pipeline P2C / wh_confluence / committee briefings.
     uw_flow_poller_task = asyncio.create_task(uw_flow_poller_loop())
+    flow_deadfeed_watchdog_task = asyncio.create_task(flow_deadfeed_watchdog_loop())  # L1.0 Chunk 3
     adx_regime_task = asyncio.create_task(adx_regime_loop())
     wh_accumulation_task = asyncio.create_task(wh_accumulation_loop())
     wh_reversal_task = asyncio.create_task(wh_reversal_loop())
@@ -774,6 +868,7 @@ async def lifespan(app: FastAPI):
     vwap_task.cancel()
     crypto_scan_task.cancel()
     uw_flow_poller_task.cancel()  # RE-ENABLED 2026-06-18 (L1.0 Chunk 4) — see creation site
+    flow_deadfeed_watchdog_task.cancel()  # L1.0 Chunk 3 dead-feed watchdog
     wh_accumulation_task.cancel()
     wh_reversal_task.cancel()
     oracle_task.cancel()

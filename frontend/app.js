@@ -8880,6 +8880,28 @@ async function loadSignalEnrichment(ticker, panel) {
     }
 }
 
+function _flowFmtAge(s) {
+    if (s == null) return '';
+    if (s < 60) return s + 's';
+    if (s < 3600) return Math.floor(s / 60) + 'm';
+    return Math.floor(s / 3600) + 'h';
+}
+
+// L1.0 Chunk 3: flow-specific 3-state staleness — NOT the generic red-stale system.
+// fresh = live/green; stale OR after-hours = muted/quiet (NEVER red); unknown = "—".
+// No client-side RTH logic: the RTH dead-feed loudness lives in the Discord alarm;
+// the widget just tells the truth about age. staleness_seconds is null when unknown
+// (never 0 → never a fake-fresh read).
+function flowStalenessState(staleness) {
+    if (staleness === null || staleness === undefined) {
+        return { label: '— stale: unknown', color: 'var(--text-secondary)' };
+    }
+    if (staleness < 900) {
+        return { label: _flowFmtAge(staleness) + ' fresh', color: '#4ade80' };
+    }
+    return { label: 'stale ' + _flowFmtAge(staleness), color: 'var(--text-secondary)' };
+}
+
 function renderFlowRadar(data) {
     // --- Market Pulse Strip ---
     const pulseRegime = document.getElementById('pulseRegime');
@@ -8932,11 +8954,13 @@ function renderFlowRadar(data) {
         ).join('');
     }
 
-    // --- Radar Status ---
+    // --- Radar Status --- (L1.0 Chunk 3: real 3-state staleness, not "live")
     const radarStatus = document.getElementById('radarStatus');
     if (radarStatus) {
         const count = data.flow_tickers_loaded || 0;
-        radarStatus.textContent = count > 0 ? `${count} tickers \u00b7 live` : 'no flow data';
+        const st = flowStalenessState(data.staleness_seconds);
+        radarStatus.textContent = (count > 0 ? `${count} tickers \u00b7 ` : '') + st.label;
+        radarStatus.style.color = st.color;
     }
 
     // --- Radar Content ---
