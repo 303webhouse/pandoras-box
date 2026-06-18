@@ -120,6 +120,7 @@ async def hub_get_flow_radar(
     net_calls = float(market_pulse.get("net_premium_calls_usd", 0) or 0)
     net_puts = float(market_pulse.get("net_premium_puts_usd", 0) or 0)
     direction = (market_pulse.get("net_premium_direction") or "NEUTRAL").upper()
+    flow_data_available = bool(market_pulse.get("flow_data_available", False))
 
     events = _format_events(raw, ticker)
 
@@ -129,6 +130,7 @@ async def hub_get_flow_radar(
         "net_premium_calls_usd": net_calls,
         "net_premium_puts_usd": net_puts,
         "net_premium_direction": direction,
+        "flow_data_available": flow_data_available,
         "events": events,
         "event_count": len(events),
     }
