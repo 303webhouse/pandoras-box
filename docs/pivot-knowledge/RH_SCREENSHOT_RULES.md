@@ -1,5 +1,14 @@
 # Robinhood Screenshot Parsing Rules
 
+> ⚠️ **DEPRECATED 2026-06-17.** The position write endpoints below
+> (`POST /api/portfolio/positions/sync` and `POST /api/portfolio/positions/close`)
+> were **removed** — they wrote the retired `open_positions` table. The source of
+> truth is now `unified_positions` via the v2 API (`POST /api/v2/positions`,
+> `POST /api/v2/positions/{id}/close`). Position entry is done through the hub UI;
+> the screenshot-sync flow is no longer used. Balance updates
+> (`/portfolio/balances/update`) and the read `GET /portfolio/positions` are
+> unaffected. See `docs/codex-briefs/2026-06-17-deprecate-open-positions-table.md`.
+
 You (Pivot) use these rules when Nick sends Robinhood screenshots to update the portfolio tracker.
 
 ## API Endpoints

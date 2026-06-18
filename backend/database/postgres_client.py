@@ -795,51 +795,10 @@ async def init_database():
             )
         """)
 
-        # Brief 07: Open positions (RH active trading account only)
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS open_positions (
-                id SERIAL PRIMARY KEY,
-                ticker TEXT NOT NULL,
-                position_type TEXT NOT NULL,
-                direction TEXT NOT NULL,
-                quantity INTEGER NOT NULL,
-                option_type TEXT,
-                strike NUMERIC(10,2),
-                expiry DATE,
-                spread_type TEXT,
-                short_strike NUMERIC(10,2),
-                cost_basis NUMERIC(10,2),
-                cost_per_unit NUMERIC(10,2),
-                current_value NUMERIC(10,2),
-                current_price NUMERIC(10,2),
-                unrealized_pnl NUMERIC(10,2),
-                unrealized_pnl_pct NUMERIC(6,2),
-                opened_at TIMESTAMPTZ,
-                last_updated TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                updated_by TEXT NOT NULL DEFAULT 'manual',
-                notes TEXT,
-                is_active BOOLEAN NOT NULL DEFAULT TRUE,
-                signal_id TEXT,
-                account TEXT NOT NULL DEFAULT 'robinhood'
-            )
-        """)
-
-        # Brief 10: Add signal_id and account to existing open_positions installs
-        await conn.execute("""
-            ALTER TABLE open_positions ADD COLUMN IF NOT EXISTS signal_id TEXT
-        """)
-        await conn.execute("""
-            ALTER TABLE open_positions ADD COLUMN IF NOT EXISTS account TEXT NOT NULL DEFAULT 'robinhood'
-        """)
-        await conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_open_positions_signal
-            ON open_positions (signal_id) WHERE signal_id IS NOT NULL
-        """)
-        await conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_open_positions_account
-            ON open_positions (account)
-        """)
-
+        # Brief 07 `open_positions` table REMOVED 2026-06-17 — superseded by
+        # unified_positions (single source of truth). Was recreated here on every
+        # boot; removed so DROP is not resurrected. See
+        # docs/codex-briefs/2026-06-17-deprecate-open-positions-table.md
         # Brief 10: Closed positions — proper P&L analytics table
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS closed_positions (
