@@ -137,11 +137,7 @@ class TestAuthEnforcement:
         ("POST", "/api/portfolio/cash-flows", {"amount": 100}),
         # Portfolio (existing, verify still protected)
         ("POST", "/api/portfolio/balances/update", {"account_name": "Robinhood", "balance": 1000}),
-        ("POST", "/api/portfolio/positions/sync", {"positions": []}),
-        ("POST", "/api/portfolio/positions", {
-            "ticker": "SPY", "position_type": "option", "direction": "BULLISH", "quantity": 1,
-        }),
-        ("POST", "/api/portfolio/positions/close", {"ticker": "SPY"}),
+        # legacy /positions/sync, /positions, /positions/close removed 2026-06-17 (open_positions deprecated)
         ("PATCH", "/api/portfolio/positions/closed/1", {"notes": "test"}),
         # Analytics mutations (Brief 3A)
         ("POST", "/api/analytics/resolve-counterfactuals", None),
