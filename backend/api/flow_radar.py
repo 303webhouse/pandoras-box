@@ -302,14 +302,31 @@ async def _compute_flow_radar() -> Dict[str, Any]:
     total_call = sum(f.get("call_premium") or 0 for f in flow_data.values())
     total_put = sum(f.get("put_premium") or 0 for f in flow_data.values())
     total_all = total_call + total_put
-    overall_pc = round(total_put / max(total_call, 1), 2) if total_call > 0 else 0
 
-    if overall_pc < 0.7:
-        overall_sentiment = "BULLISH"
-    elif overall_pc > 1.3:
-        overall_sentiment = "BEARISH"
-    else:
+    # L1.0 direction guard. Empty/degenerate flow MUST read NEUTRAL — never
+    # directional. Prior bug: on empty flow_data total_call==0 -> overall_pc
+    # fell back to 0 -> 0 < 0.7 emitted a fabricated "BULLISH" on ZERO data,
+    # fed to every committee agent AND the Agora market-pulse widget. The
+    # all-puts case (total_call==0, total_put>0) hit the same 0-fallback and
+    # also fabricated BULLISH on genuinely bearish flow. Both fixed here.
+    if total_all <= 0:
+        overall_pc = None
         overall_sentiment = "NEUTRAL"
+        flow_data_available = False
+    elif total_call <= 0:
+        # All-put flow, zero calls -> unambiguously bearish (no /max(call,1) trap).
+        overall_pc = None
+        overall_sentiment = "BEARISH"
+        flow_data_available = True
+    else:
+        overall_pc = round(total_put / total_call, 2)
+        if overall_pc < 0.7:
+            overall_sentiment = "BULLISH"
+        elif overall_pc > 1.3:
+            overall_sentiment = "BEARISH"
+        else:
+            overall_sentiment = "NEUTRAL"
+        flow_data_available = True
 
     bias_level = "NEUTRAL"
     if redis:
@@ -331,6 +348,7 @@ async def _compute_flow_radar() -> Dict[str, Any]:
         "total_premium_display": _format_premium(total_all),
         "bias_level": bias_level,
         "tickers_with_flow": len(flow_data),
+        "flow_data_available": flow_data_available,
         # Aliases consumed by hub_get_flow_radar (MCP). Additive — the dashboard
         # widget reads the *_total / overall_sentiment keys above; the MCP tool
         # reads these. One source of truth, two key conventions. Do not remove.
