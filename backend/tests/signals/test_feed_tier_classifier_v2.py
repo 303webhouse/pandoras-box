@@ -48,11 +48,17 @@ def _sig(
     if pythia:
         tf["profile_position"] = {"pythia_coverage": True, "total_pythia_adjustment": 5}
     if flow_bonus:
+        # Real P4A flow shape (signals/pipeline.py): call_premium / put_premium /
+        # total_premium / sentiment — NOT the fabricated tide-shaped
+        # net_*_premium keys the dead v2 arm used to read. As of L1.0 the v2 flow
+        # arm is excised, so this block is inert for tier decisions; kept real-
+        # shaped so no test re-introduces the fabricated dict.
         tf["flow"] = {
             "bonus": flow_bonus,
-            "net_call_premium": 600000 if direction == "LONG" and flow_aligned else 0,
-            "net_put_premium":  600000 if direction == "SHORT" and flow_aligned else 0,
-            "net_premium": 600000 if flow_aligned else 0,
+            "sentiment": "BULLISH" if direction == "LONG" else "BEARISH",
+            "call_premium": 600000 if direction == "LONG" else 200000,
+            "put_premium":  600000 if direction == "SHORT" else 200000,
+            "total_premium": 800000,
         }
     d = {
         "signal_type":  signal_type,
@@ -130,11 +136,16 @@ def test_path_c_pythia_confluence():
     assert badge in ("confirmed", "fully_confirmed")
 
 
-def test_path_c_flow_confluence():
+def test_flow_alone_does_not_promote_post_excision():
+    # L1.0: the v2 flow arm is excised (flow_ok hard False). Strong, aligned,
+    # real-shaped flow no longer provides Path C confluence — only pythia/sector
+    # remain until L1a rebuilds flow on canonical flow_events. (Replaces the old
+    # test_path_c_flow_confluence, which asserted flow-alone promotion.)
     s = _sig(signal_type="ARTEMIS_LONG", strategy="Artemis", score=TOP_FEED_FLOOR,
              flow_bonus=5, flow_aligned=True)
     tier, path, badge = classify_signal_tier_v2(s, TOP_FEED_FLOOR)
-    assert tier == "top_feed" and path == "C"
+    assert tier != "top_feed"            # flow no longer confers confluence
+    assert badge != "fully_confirmed"
 
 
 def test_path_c_sector_confluence():
@@ -259,8 +270,11 @@ def test_pythia_tiebreaker_redis_allows_first_use():
 # New ceiling caps
 # ─────────────────────────────────────────────────────────────────────────────
 
-def test_flow_contradicting_caps_to_ta_feed():
-    # Bearish signal + bullish flow (net_put < net_call → contradicting for SHORT)
+def test_flow_contradicting_cap_removed_post_excision():
+    # L1.0: the flow_contradicting ceiling cap is removed (the v2 flow arm was
+    # dead — key+scope mismatch). A signal whose flow opposes its direction must
+    # NOT be capped to ta_feed by flow anymore. (Replaces
+    # test_flow_contradicting_caps_to_ta_feed.) Real P4A flow shape used.
     s = {
         "signal_type": "HOLY_GRAIL_1H",
         "strategy": "Holy_Grail",
@@ -268,16 +282,17 @@ def test_flow_contradicting_caps_to_ta_feed():
         "triggering_factors": {
             "flow": {
                 "bonus": 5.0,
-                "net_call_premium": 800000,
-                "net_put_premium":  200000,
-                "net_premium": 800000,
+                "sentiment": "BULLISH",      # opposes the SHORT signal
+                "call_premium": 800000,
+                "put_premium":  200000,
+                "total_premium": 1000000,
             }
         },
         "enrichment_data": {},
     }
     apply_v2_ceiling_caps(s)
-    assert s.get("feed_tier_ceiling") == "ta_feed"
-    assert s.get("_score_ceiling_reason") == "flow_contradicting"
+    assert s.get("_score_ceiling_reason") != "flow_contradicting"
+    assert not s.get("feed_tier_ceiling")  # no flow-based cap remains
 
 
 def test_sector_rotating_against_caps_long_signal():
@@ -310,12 +325,13 @@ def test_caps_do_not_override_existing_ceiling():
     s = {
         "signal_type": "ARTEMIS_LONG",
         "direction": "LONG",
-        "triggering_factors": {"flow": {"bonus": 5, "net_call_premium": 0, "net_put_premium": 900000, "net_premium": 900000}},
-        "enrichment_data": {},
-        "feed_tier_ceiling": "watchlist",  # existing cap
+        "triggering_factors": None,
+        "enrichment_data": {"sector_rs_classification": "ACTIVE_DISTRIBUTION"},
+        "feed_tier_ceiling": "watchlist",  # existing cap takes precedence
     }
     apply_v2_ceiling_caps(s)
-    # Should NOT change the existing watchlist cap
+    # Should NOT change the existing watchlist cap (even though the long-in-
+    # distributing-sector cap would otherwise apply)
     assert s["feed_tier_ceiling"] == "watchlist"
 
 
@@ -323,13 +339,18 @@ def test_caps_do_not_override_existing_ceiling():
 # Confluence badge
 # ─────────────────────────────────────────────────────────────────────────────
 
-def test_fully_confirmed_badge_with_all_enrichers():
+def test_no_fully_confirmed_badge_post_excision():
+    # L1.0: fully_confirmed requires pythia AND flow AND sector, but the flow arm
+    # is excised (flow_ok hard False) so fully_confirmed is structurally
+    # unreachable. Even with pythia + sector + (inert) flow all present, the
+    # badge tops out at "confirmed". (Replaces test_fully_confirmed_badge...)
     s = _sig(
         signal_type="HOLY_GRAIL_1H", score=TOP_FEED_FLOOR,
         pythia=True, flow_bonus=5, flow_aligned=True, sector_rs="SECTOR_STRENGTH",
     )
     tier, path, badge = classify_signal_tier_v2(s, TOP_FEED_FLOOR)
-    assert badge == "fully_confirmed"
+    assert badge == "confirmed"
+    assert badge != "fully_confirmed"
 
 
 def test_ta_confirmed_badge_path_a_no_enrichers():
