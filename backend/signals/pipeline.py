@@ -1326,6 +1326,22 @@ async def process_signal_unified(
     except Exception as _l0_tag_err:
         logger.warning("L0 shadow tag write failed (non-blocking): %s", _l0_tag_err)
 
+    # 3e. L1a SHADOW gate (auction + flow) — tag only, diverts nothing. Written
+    #     here (beside l0_shadow, after apply_scoring) because triggering_factors
+    #     ["flow"] is only final post-scoring. Inert unless L1_GATE_SHADOW is on
+    #     (evaluate_l1_gate returns None when off). Enforce is a separate step.
+    try:
+        from config.l1_gate import evaluate_l1_gate
+        _l1_decision = await evaluate_l1_gate(signal_data)
+        if _l1_decision is not None:
+            _tf = signal_data.get("triggering_factors")
+            if not isinstance(_tf, dict):
+                _tf = {}
+                signal_data["triggering_factors"] = _tf
+            _tf["l1_shadow"] = _l1_decision
+    except Exception as _l1_tag_err:
+        logger.warning("L1 shadow gate write failed (non-blocking): %s", _l1_tag_err)
+
     # 4. Persist to PostgreSQL
     try:
         await log_signal(signal_data)
