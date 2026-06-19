@@ -3572,6 +3572,13 @@ async def run_crypto_scan_scheduled():
                 else:
                     trade_signal["confidence"] = "LOW"
                 
+                # L1a bypass-leak tag: this crypto path calls log_signal directly,
+                # skipping the chokepoint (no scoring/feed-tier/L0/L1 gate). Tag only
+                # so we can measure the bypass fraction — routing it through the
+                # chokepoint is a separate follow-up (not L1a scope).
+                if isinstance(trade_signal.get("triggering_factors"), dict):
+                    trade_signal["triggering_factors"]["bypass_source"] = "bias_scheduler_crypto"
+
                 # Persist first; skip Redis/broadcast if DB write fails.
                 db_persisted = False
                 try:

@@ -2076,6 +2076,13 @@ async def log_signal_endpoint(request: LogSignalRequest, _=Depends(require_api_k
     factor_snapshot = data.pop("factor_snapshot", None)
     if request.timestamp:
         data["timestamp"] = request.timestamp.isoformat()
+    # L1a bypass-leak tag: manual/external insert that skips the chokepoint
+    # (no scoring/feed-tier/L0/L1 gate). Tag only — measure the bypass fraction.
+    _tf = data.get("triggering_factors")
+    if not isinstance(_tf, dict):
+        _tf = {}
+        data["triggering_factors"] = _tf
+    _tf["bypass_source"] = "analytics_log_signal_endpoint"
     await log_signal(data, market_state=market_state, factor_snapshot=factor_snapshot)
     return {"status": "ok", "signal_id": request.signal_id}
 
