@@ -66,3 +66,52 @@ The gate's test **must assert on the REAL `triggering_factors` / `profile_positi
 - [ ] **Integration test** on real pipeline output passes; no fabricated-dict tests.
 - [ ] Full Olympus committee pass clean on a known-good ticker.
 - [ ] Pre-reqs (poller restored + sb3 ADX-regime promoted) confirmed before flow-half + regime-conditioning go live.
+
+
+---
+
+## Phase-0 Findings & Corrections — verified LIVE at `main @ 410b1e2` (2026-06-18, post-L1.0)
+
+> These supersede the body above where they conflict. All verified against live DB + code, not specs. The body's structure and Titans-approved scope hold; this is a factual-correction layer + the three open Phase-0 answers. **No scope change → no Titans re-run.**
+
+**Path selected (pre-req #2 resolved):** `signals.regime` is **0 / 13,150 filled — never written** (sb3 ADX-regime NOT promoted). → Build the **auction half + flow half now, shadow-first**; **defer regime-conditioning** (the ADX-derived auction-state / `signals.regime` dependency) behind the sb3 promote. Pre-req #1 (flow poller) is cleared — Chunk 4 + Path A.
+
+**Anchors re-verified at 410b1e2** (Chunk 3 did not touch `pipeline.py`; minor line drift from the ca68c01 baseline):
+- `process_signal_unified` def **L1151** · `evaluate_l0_gate` compute **~L1193** · `apply_scoring` call **~L1209** · L0.1a `_tf["l0_shadow"]` tag **~L1314 (step 3d)** · `log_signal` **~L1331**.
+- **Why the L0.1a tag is deferred to step 3d — mirror this exactly:** `apply_scoring()` **reassigns `triggering_factors` wholesale at ~L689**, so any tag written before scoring is clobbered. **The L1a `l1_shadow` tag MUST be written in the step-3d zone (after `apply_scoring`, before `log_signal`).**
+
+**Flow half — CORRECTIONS:**
+- **Liquid universe is 20, not ~40.** `LIQUID_UNIVERSE` (`config/liquid_universe.py`) = `{AAPL AMD AMZN AVGO FXI GOOGL HYG INTU ISRG IWM META MSFT NVDA QQQ SMH SPY TLT TSLA XLK ZS}`. Both halves are scoped to these 20.
+- **Flow plumbing already exists — nothing to build.** `triggering_factors["flow"]` is already populated per-signal with raw `call_premium` / `put_premium` / `total_premium` / `pc_ratio` (Path A). The gate **reads** these. **IGNORE the sub-dict's pre-computed `sentiment` / `bonus`** — that is the old volume-p/c logic (observed live tagging a premium-bullish QQQ read as BEARISH). Compute net independently.
+- **Threshold = dominance RATIO, not a dollar threshold (supersedes the `FLOW_NET_PREMIUM_THRESHOLD` placeholder).** Per-ticker premium spans **3 orders of magnitude** (SPY/QQQ ~$1.5B total flow → HYG ~$3M); any single dollar bar repeats the exact `_flow_aligned` scale mismatch. Use:
+  - `net = call_premium − put_premium`
+  - `ratio = |net| / total_premium`  (a self-scaling 0–1 number — "how lopsided is the flow as a fraction of its own size")
+  - **confirms** iff `sign(net)` matches signal direction **AND** `ratio ≥ L1_FLOW_DOMINANCE_RATIO` (env var, **start 0.15**, tune on shadow data).
+  - **Log the full vector** (`call`/`put`/`net`/`total`/`ratio`/`aligned`/`confirms`) in the shadow tag.
+- **Missing flow key** (absent on ~⅔ of recent signals when flow is stale) and **stale-during-RTH** → `state="unavailable"`, **never "confirms"** (Chunk 3 honesty; the `freshness` / `flow_data` keys carry the staleness flags).
+
+**Auction half — CORRECTIONS:**
+- **`pythia_events` has NO `last_event` column.** Actual columns: `alert_type, direction, ib_high, ib_low, interpretation, poc, poor_high, poor_low, price, raw_payload, ticker, timestamp, va_migration, vah, val, volume_quality`. **Wherever the body's verbatim acceptance logic references `last_event`, substitute `interpretation`** (plain-English auction state — e.g. "IB breakout to upside · initiative buying", "Price above VAH in thin extension · caution", "Price at VAL · institutional buying zone") **+ `alert_type` + `direction`.** `poor_high` / `poor_low` / `va_migration` confirmed present and usable. Timestamp col = `timestamp`.
+- **Freshness is RTH-gated.** The probe read ~8.8h stale across all tickers = the **expected after-hours null path** (market closed ~6h before the probe; MP fires only during RTH). The 3-state gate **must treat "market closed" as not-applicable**, distinct from "feed down." (Live-fresh values to be confirmed at next RTH open — same loose end as Chunk 3's next-RTH validation.)
+- **Regime-conditioning deferred (sb3 NULL).** Auction-state (bracketing vs trending) from ADX / `signals.regime` is **gated behind the sb3 promote**. **v1 auction half = acceptance fields + MP-read-path 3-state freshness ONLY.** Do not fabricate `day_type` (honest null).
+
+**Three open Phase-0 questions — ANSWERED:**
+- **(Q3a) Per-ticker threshold** → the dominance ratio above (`L1_FLOW_DOMINANCE_RATIO=0.15`).
+- **(Q3b) Asterisk review-routing target** → **none exists in code** (no review queue / flag / table anywhere in `backend/`). In shadow, **record the asterisk state in the `l1_shadow` tag only** (queryable / countable). A real PYTHIA-review queue is a **separate enforce-time follow-up — do NOT build it now.**
+- **(Q4) Feed-down channel** → `from bias_engine.anomaly_alerts import send_alert` → `await send_alert(title, description, severity="warning")` (`backend/bias_engine/anomaly_alerts.py:25`). Mirror Chunk 3's watchdog pattern (`main.py` L412, RTH-gated, Redis latch `alarm:flow_dead:active`). For MP feed-down use a **separate latch** (e.g. `alarm:mp_dead:active`). A full standalone watchdog loop is **optional in v1** — the gate calling `send_alert` (debounced) when it detects genuinely-down during RTH is sufficient for shadow.
+
+**`l1_shadow` tag schema — concrete target for CC:**
+```python
+triggering_factors["l1_shadow"] = {
+    "flow":    {"call": float, "put": float, "net": float, "total": float,
+                "ratio": float, "aligned": bool | None, "state": "fresh" | "stale" | "missing"},
+    "auction": {"interpretation": str | None, "va_migration": str | None, "direction": str | None,
+                "poor_high": bool | None, "poor_low": bool | None,
+                "accepted": bool | None, "state": "fresh_accepted" | "asterisk" | "feed_down" | "closed"},
+    "gate":    "pass" | "asterisk" | "flow_unavailable" | "fail",   # shadow decision — diverts nothing
+    "regime_conditioning": "deferred_sb3_null",
+}
+```
+(`bypass_source` tag stays on the two direct `log_signal` callers per the body's ATLAS decision.)
+
+**Unchanged / reaffirmed:** soft-PYTHIA 3-state design (Nick verbatim) · MP read-path freshness reuse (`services/read_only/market_profile.py`) · liquid-scoped asterisk · bypass-leak tagging (`bias_scheduler:3575`, `analytics/api:2079`) · **integration test on REAL `process_signal_unified` output (SPY/QQQ) — no fabricated dict** · shadow flag `L1_GATE_SHADOW` default OFF, divert nothing · post-build full Olympus committee pass on a known-good ticker.
