@@ -298,6 +298,7 @@ async def test_hydra_ok_with_rows():
             "days_to_cover": 4.1,
             "gamma_flip_level": 38.5,
             "current_price": 36.2,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
         }
     ]
     with patch(
@@ -307,6 +308,37 @@ async def test_hydra_ok_with_rows():
         r = await hub_get_hydra_scores()
     assert r["status"] == "ok"
     assert r["data"]["candidate_count"] == 1
+    assert r["data"]["stale"] is False
+
+
+@pytest.mark.asyncio
+async def test_hydra_stale_when_data_old():
+    """Rows older than HYDRA_STALE_SECONDS -> status='stale', real
+    staleness_seconds, STALE marker in summary. Guards the fake-healthy bug
+    where 79-day-old squeeze scores were served to the committee as if live."""
+    from hub_mcp.tools.hydra_scores import hub_get_hydra_scores
+
+    rows = [
+        {
+            "ticker": "GME",
+            "composite_score": 34,
+            "short_interest_score": 60,
+            "short_interest_pct": 18.0,
+            "days_to_cover": 2.5,
+            "gamma_flip_level": 25.0,
+            "current_price": 24.0,
+            "updated_at": "2026-04-01T15:40:37.205547+00:00",
+        }
+    ]
+    with patch(
+        "hub_mcp.tools.hydra_scores.get_squeeze_scores",
+        new=AsyncMock(return_value=rows),
+    ):
+        r = await hub_get_hydra_scores()
+    assert r["status"] == "stale"
+    assert r["staleness_seconds"] is not None and r["staleness_seconds"] > 86_400
+    assert "STALE" in r["summary"]
+    assert r["data"]["stale"] is True
 
 
 # ─── hub_get_positions ───────────────────────────────────────────────────
