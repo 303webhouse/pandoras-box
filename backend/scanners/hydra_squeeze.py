@@ -147,7 +147,26 @@ async def _estimate_short_pnl(ticker: str) -> float:
 
 
 async def _get_flow_score(ticker: str) -> tuple:
-    """Get unusual call flow score from UW data in Redis."""
+    """Get unusual call flow score from the canonical uw:flow:{ticker} summary.
+
+    Reads the L1.0 Path A canonical committee-flow shape written by the SOLE
+    writer jobs/uw_flow_poller.build_flow_summary — call_premium, put_premium,
+    call_volume, put_volume, pc_ratio (volume put/call, all-put-sentinel
+    normalized to None), sentiment. The pre-fix code read total_call_premium /
+    call_count / total_count / bullish_count, NONE of which the canonical writer
+    produces, so the score was structurally 0 for every ticker.
+
+    Score = 50% premium-based call dominance + 50% volume-based call dominance,
+    each a 0-100 "share that is calls" measure — the component's stated purpose
+    ("call buying amplifies squeeze"). Premium weights dollar conviction; volume
+    is the honest analog of the original count-based call_dominance. When only
+    one basis is present we use it alone rather than halving the score.
+
+    Returns (call_flow_score 0-100, put_call_ratio). The put_call_ratio is now
+    the canonical volume put/call (matches the uw_put_call_ratio field name); the
+    old code returned call/put under that name (inverted) — corrected here.
+    Returns (0.0, 1.0) when no flow data is cached for the ticker.
+    """
     try:
         redis = await get_redis_client()
         if not redis:
@@ -159,20 +178,38 @@ async def _get_flow_score(ticker: str) -> tuple:
 
         flow = json.loads(flow_data)
 
-        total_calls = flow.get("total_call_premium", 0)
-        total_puts = flow.get("total_put_premium", 0)
-        call_count = flow.get("call_count", 0)
-        total_count = flow.get("total_count", 1)
-        bullish_count = flow.get("bullish_count", 0)
+        call_premium = flow.get("call_premium") or 0
+        put_premium = flow.get("put_premium") or 0
+        call_volume = flow.get("call_volume") or 0
+        put_volume = flow.get("put_volume") or 0
 
-        if total_puts > 0:
-            pc_ratio = total_calls / total_puts
+        prem_denom = call_premium + put_premium
+        vol_denom = call_volume + put_volume
+
+        # No directional flow on either basis → no signal (don't fabricate a 50).
+        if prem_denom <= 0 and vol_denom <= 0:
+            return 0.0, 1.0
+
+        prem_dominance = (call_premium / prem_denom * 100) if prem_denom > 0 else 0.0
+        vol_dominance = (call_volume / vol_denom * 100) if vol_denom > 0 else 0.0
+
+        if prem_denom > 0 and vol_denom > 0:
+            score = prem_dominance * 0.5 + vol_dominance * 0.5
+        elif prem_denom > 0:
+            score = prem_dominance
         else:
-            pc_ratio = 2.0 if total_calls > 0 else 1.0
+            score = vol_dominance
 
-        call_dominance = (call_count / max(total_count, 1)) * 100
-        bullish_pct = (bullish_count / max(total_count, 1)) * 100
-        score = call_dominance * 0.5 + bullish_pct * 0.5
+        # Canonical pc_ratio is volume put/call, already sentinel-normalized
+        # (None == all-put or absent). Fall back to a premium-based put/call.
+        pc_ratio = flow.get("pc_ratio")
+        if pc_ratio is None:
+            if put_premium > 0 and call_premium > 0:
+                pc_ratio = put_premium / call_premium
+            elif put_premium > 0:
+                pc_ratio = 2.0  # all-put → strongly bearish proxy
+            else:
+                pc_ratio = 1.0
 
         return min(score, 100), round(pc_ratio, 2)
 
