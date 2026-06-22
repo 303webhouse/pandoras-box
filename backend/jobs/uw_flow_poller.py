@@ -41,7 +41,7 @@ async def aggregate_ticker_flow(ticker: str) -> Optional[Dict]:
     Flow-per-expiry schema: call_premium (str), put_premium (str),
     call_volume (int), put_volume (int) — already split by UW.
     """
-    from integrations.uw_api import get_flow_per_expiry
+    from integrations.uw_api import get_flow_per_expiry, _get_regular_session_change
 
     try:
         flow_data = await get_flow_per_expiry(ticker)
@@ -91,11 +91,22 @@ async def aggregate_ticker_flow(ticker: str) -> Optional[Dict]:
     elif call_premium > 0 and put_premium > call_premium * 2:
         sentiment = "BEARISH"
 
-    # L1.0 Chunk 4: snapshot enrichment dropped to halve UW budget load.
-    # /stock-state is flaky; price/change/volume are non-essential here.
+    # Cached-quote restore (2026-06-22): repopulate price/change_pct/volume from the
+    # proven P1.10 regular-session helper — one /ohlc/1d call, session-invariant,
+    # NOT the flaky /stock-state Chunk 4 removed. Feeds wh_reversal's price gate
+    # (flow_events.price) AND flow_radar divergence (uw:flow change_pct). Defensive:
+    # a UW miss leaves the fields None (degrade, never crash) — matches prior nulls.
     price = None
     change_pct = None
     volume = None
+    try:
+        reg = await _get_regular_session_change(ticker)
+        if reg:
+            price = reg.get("today_close")
+            change_pct = reg.get("change_pct")
+            volume = reg.get("today_volume")
+    except Exception as _qe:
+        logger.debug("reg-session quote enrich failed for %s: %s", ticker, type(_qe).__name__)
 
     return {
         "ticker": ticker,
