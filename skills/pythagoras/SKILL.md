@@ -63,19 +63,22 @@ See `_shared/COMMITTEE_RULES.md § Pre-Output Data Checklist Framework` for the 
 After running the universal framework, PYTHAGORAS calls these MCP tools in order:
 
 1. `hub_get_quote(ticker=<the ticker>)` — real-time spot, intraday OHLCV, prior close, and UW server timestamp. The UW timestamp from `hub_get_quote` is the authoritative anchor for all price-anchored claims in this agent's output.
-2. `hub_get_bias_composite(timeframe="swing")` — directional bias to cross-reference against the chart trend read
-3. `hub_get_flow_radar(ticker=<the ticker>)` — volume / flow context to confirm or contradict the chart breakout (volume confirmation is mandatory per C.05)
-4. `hub_get_positions(ticker=<the ticker>)` — does Nick already have positions at the levels PYTHAGORAS is about to call?
+2. `hub_get_chart_indicators(ticker=<the ticker>, timeframe="daily")` — live DAILY SMA stack (CTA zones) / EMA-200 / RSI / MACD / ATR (+atr_pct) / ADX / volume+RVOL, `uw_computed` from UW daily OHLC. PYTHAGORAS's primary trend/level read — call right after `hub_get_quote`. Daily-only (intraday VWAP / swing pivots are v1.1, still need a chart). Honor status: `degraded` → use the non-null indicators + note the gap; `unavailable` → framework-only.
+3. `hub_get_bias_composite(timeframe="swing")` — directional bias to cross-reference against the chart trend read
+4. `hub_get_flow_radar(ticker=<the ticker>)` — volume / flow context to confirm or contradict the chart breakout (volume confirmation is mandatory per C.05)
+5. `hub_get_positions(ticker=<the ticker>)` — does Nick already have positions at the levels PYTHAGORAS is about to call?
 
 PYTHAGORAS does NOT typically call `hub_get_sector_strength` (THALES), `hub_get_hermes_alerts` (THALES), `hub_get_hydra_scores` (TORO/URSA), or `hub_get_portfolio_balances` (DAEDALUS) in committee mode. In direct conversation mode PYTHAGORAS MAY call any of them if Nick asks a question that requires that context.
 
 ### PYTHAGORAS-specific data caveat (both contexts)
 
-Specific chart level values (key MAs, VWAP positions, swing highs/lows, support/resistance) require Nick to provide a chart screenshot OR specific levels via TradingView indicator. If neither is available, PYTHAGORAS frames qualitatively in trend-framework terms without fabricating specific level values. Every PYTHAGORAS output in this state must explicitly state:
+**DAILY** trend levels — the SMA stack (CTA zones), EMA-200, RSI, MACD, ATR-based stop distance, ADX trend strength, and volume/RVOL — now come live from `hub_get_chart_indicators(timeframe="daily")` (`uw_computed` from UW daily OHLC). PYTHAGORAS cites these directly; the blanket "framework-only" disclaimer does NOT apply to a daily setup when the tool returns `ok` or `degraded`.
 
-> "Specific chart levels require chart input — current analysis is trend-framework only."
+Still requiring a chart screenshot (or specific levels) from Nick: **intraday VWAP, intraday swing highs/lows, and fine-grained intraday pivots** — these are NOT in v1 (intraday/VWAP is v1.1, pending intraday-bar verification). When PYTHAGORAS needs those and they aren't provided, frame qualitatively and state:
 
-**Closing the gap:** `hub_get_chart_indicators` is a v2 hub MCP candidate (via TradingView webhook → Railway pipeline) on the post-committee priority list. When it lands, PYTHAGORAS gets live MA/VWAP/swing-level access without needing screenshots. Until then: framework-only when no chart input is provided.
+> "Intraday VWAP / pivot levels require chart input — the daily trend read is live; intraday levels are framework-only."
+
+If `hub_get_chart_indicators` returns `unavailable` (no bars / quota / error), fall back to the framework-only daily disclaimer — never fabricate levels.
 
 ## Account Context
 
