@@ -105,10 +105,11 @@ QUOTAS: Dict[str, Tuple[int, str]] = {
     "greek_exposure": (500, TIER_FOREGROUND),     # GEX
     "flow_recent": (1500, TIER_FOREGROUND),       # Flow Radar + wh_accumulation (committee-facing)
     "market_tide": (300, TIER_FOREGROUND),
+    "chart_indicators": (700, TIER_FOREGROUND),   # PYTHAGORAS daily technical feed (one ohlc/1d pull/call)
     # ── STANDARD (scanners / factors) ──
     "ohlc_bars": (1500, TIER_STANDARD),           # factor/indicator daily bars (bars.py + get_bars)
     "darkpool_ticker": (800, TIER_STANDARD),
-    "flow_per_expiry": (500, TIER_STANDARD),      # uw_flow_poller (deactivated) — small standby quota
+    "flow_per_expiry": (100, TIER_STANDARD),      # uw_flow_poller (deactivated) — standby reclaimed 500->100 to fund chart_indicators
     "news_headlines": (300, TIER_STANDARD),
     "stock_info": (300, TIER_STANDARD),
     "short_interest": (200, TIER_STANDARD),
@@ -123,8 +124,10 @@ QUOTAS: Dict[str, Tuple[int, str]] = {
     "ohlc_sector": (1500, TIER_BACKGROUND),       # sector WK% — heatmap, glanceable tier
     "technical_indicator": (1500, TIER_BACKGROUND),  # sector RSI
     "sector_etfs": (300, TIER_BACKGROUND),
-    "darkpool_recent": (300, TIER_BACKGROUND),
+    "darkpool_recent": (100, TIER_BACKGROUND),    # reclaimed 300->100 to fund chart_indicators
 }
+# QUOTAS sum = 17,500 (was 17,400; +700 chart_indicators, -400 flow_per_expiry,
+# -200 darkpool_recent). <= 18,000 cap, and <= 20,000 - QUOTA_SAFETY_BUFFER. ✓
 
 # Unknown / untagged callers: small STANDARD allowance so a new code path can't
 # silently blow the budget, but isn't instantly blocked either.
