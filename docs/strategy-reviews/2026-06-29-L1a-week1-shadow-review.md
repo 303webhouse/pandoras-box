@@ -73,5 +73,15 @@ Flow aligns ~43% of the time; when aligned the dominance ratio averages **0.28, 
 
 **CC recommendation:** A is the "correct" fix but gated on Pine-feed work; **B is the pragmatic path** to get L1a delivering value now without waiting on feed coverage, with A as the follow-on. Either way, **do not enforce on the current 1-week data** — `pass` is too rare and its edge is unmeasured.
 
+## 8b. Pine-feed realignment cost — A vs C (addendum 2026-06-29)
+
+**The MP feed is not "misaligned," it is DECAYING.** Distinct `pythia_events` tickers/day: **191 (06-10) → 142 → 108 → 85 → 72 → 65 → 54 → 49 → 42 → 41 → 30 → 30 → 23 (06-29)** — a clean monotonic bleed of ~12–15 tickers/day. Liquid-20 last-ever MP: SPY **2026-06-17** (dead 12d), HYG **2026-04-13**, ISRG/FXI/TLT/INTU/SMH/ZS/IWM/GOOGL/TSLA all died 06-10→06-18, MSFT 06-22, AMD 06-25; only AAPL/AMZN/NVDA/QQQ/META/AVGO/XLK still alive. This is the **same TradingView-alert failure mode** the B4 closure note recorded (obs #3): the feed had degraded to 3 tickers, was re-armed to 190 on 06-10, and has now decayed back toward 23 in 19 days.
+
+**Cost of A (realign/restore the feed):**
+- **Immediate re-arm:** delete + recreate the PYTHIA v2.4 watchlist alert on TradingView (the 06-10 precedent re-armed 190 tickers in one session). **~5–15 min, $0, no code.** Restores SPY + the full liquid-20 (all are in the v2.4 watchlist — SPY was live 06-10→06-17).
+- **Durability tax (the real cost):** re-arm is a band-aid — the feed has now decayed **twice**. Durable A needs (1) root-causing the symbol-shedding (likely a TradingView Pine `request.security` per-script cap (~40–64) or alert runtime/expiry — the decay floor sits in the ~20–50 range), and (2) a **per-liquid-name MP-freshness monitor** — the existing L1a/Chunk-3 feed-down alarm checks GLOBAL `pythia_events` freshness, so it stayed silent through a 191→23 decay because the megacaps never went stale. Est. a few hours eng for the monitor + investigation.
+
+**Verdict on A vs C:** **A dominates C, decisively.** C (narrow enforce to the ~7 surviving names) would permanently amputate 13 liquid names — including SPY/QQQ-adjacent coverage — to accommodate a feed that is simply **broken and cheaply restorable** (~15 min). There is no cost case for C. **Recommended: A (re-arm now) + a per-liquid-name freshness monitor + decay root-cause, paired with B** (decouple the auction half so L1a degrades to flow-primary instead of starving whenever the MP feed decays again — which, on this evidence, it will).
+
 ## 8. Standing enforce gates (unchanged)
 sb3 ADX-regime promote (regime-conditioning still `deferred_sb3_null`) + full Olympus committee pass + Nick's greenlight. This review addresses none of those — it surfaces a prerequisite feed-coverage problem that must be resolved (A/B/C) first.
