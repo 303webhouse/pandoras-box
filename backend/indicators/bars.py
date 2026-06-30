@@ -44,6 +44,12 @@ async def fetch_daily_ohlc(
     lows: List[float] = []
     closes: List[float] = []
     for b in bars:
+        # UW /ohlc/1d returns SESSION-SPLIT rows per date (market_time pr/r/po).
+        # Keep only the REGULAR-session ('r') bar per date — otherwise ADX(14)
+        # is computed on premarket/postmarket partials. Mirrors the existing
+        # filter in chart_indicators.py and uw_api._get_bars_via_uw.
+        if (b.get("market_time") or "").lower() != "r":
+            continue
         try:
             h = float(b["high"])
             l = float(b["low"])
