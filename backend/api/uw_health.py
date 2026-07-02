@@ -39,6 +39,28 @@ async def uw_health():
     except Exception as exc:
         health["triton_shadow"] = {"error": type(exc).__name__}
 
+    # F2: flow-poller Redis-write liveness. The 7/1 outage (Redis writes failing
+    # while Postgres stayed healthy) was invisible for a full RTH because the dark
+    # radar was the only symptom. Reads survive a write-outage, so this age (from
+    # the poller's uw:flow:_meta:last_write stamp) surfaces it same-day. Fail-safe.
+    try:
+        from datetime import datetime, timezone
+        from database.redis_client import get_redis_client
+        redis = await get_redis_client()
+        raw = await redis.get("uw:flow:_meta:last_write") if redis else None
+        if raw:
+            ts = raw.decode() if isinstance(raw, (bytes, bytearray)) else raw
+            age = int((datetime.now(timezone.utc) - datetime.fromisoformat(ts)).total_seconds())
+            # Poller cadence is 5 min; >15 min (3 missed cycles) is an ops concern.
+            health["flow_redis"] = {
+                "last_successful_write_age_seconds": age,
+                "status": "ok" if age <= 900 else "stale",
+            }
+        else:
+            health["flow_redis"] = {"last_successful_write_age_seconds": None, "status": "unknown"}
+    except Exception as exc:
+        health["flow_redis"] = {"error": type(exc).__name__}
+
     return health
 
 
