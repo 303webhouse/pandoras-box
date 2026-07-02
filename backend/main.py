@@ -663,6 +663,27 @@ async def lifespan(app: FastAPI):
     uw_flow_poller_task = asyncio.create_task(uw_flow_poller_loop())
     flow_deadfeed_watchdog_task = asyncio.create_task(flow_deadfeed_watchdog_loop())  # L1.0 Chunk 3
     adx_regime_task = asyncio.create_task(adx_regime_loop())
+
+    # Triton Step-0: whale-flow shadow poller (RTH 09:30-16:00 ET, 120s cadence).
+    # SHADOW-ONLY — writes triton_flow_shadow; nothing reads it for scoring.
+    async def triton_shadow_poller_loop():
+        import os, pytz
+        from datetime import datetime as _dt, time as _t
+        if os.getenv("TRITON_SHADOW_ENABLED", "true").lower() == "false":
+            logger.info("triton_shadow: disabled via TRITON_SHADOW_ENABLED=false")
+            return
+        await asyncio.sleep(150)  # let DB connections settle
+        while True:
+            try:
+                et = _dt.now(pytz.timezone("America/New_York"))
+                if et.weekday() < 5 and _t(9, 30) <= et.time() <= _t(16, 0):
+                    from jobs.triton_shadow_poller import run_triton_shadow_poller
+                    await run_triton_shadow_poller()
+            except Exception as e:
+                logger.warning("triton_shadow poller loop error: %s", e)
+            await asyncio.sleep(120)
+    triton_shadow_task = asyncio.create_task(triton_shadow_poller_loop())
+
     wh_accumulation_task = asyncio.create_task(wh_accumulation_loop())
     wh_reversal_task = asyncio.create_task(wh_reversal_loop())
     sector_refresh_fast_task = asyncio.create_task(sector_refresh_fast_loop())
@@ -869,6 +890,7 @@ async def lifespan(app: FastAPI):
     crypto_scan_task.cancel()
     uw_flow_poller_task.cancel()  # RE-ENABLED 2026-06-18 (L1.0 Chunk 4) — see creation site
     flow_deadfeed_watchdog_task.cancel()  # L1.0 Chunk 3 dead-feed watchdog
+    triton_shadow_task.cancel()  # Triton Step-0 shadow poller
     wh_accumulation_task.cancel()
     wh_reversal_task.cancel()
     oracle_task.cancel()

@@ -125,9 +125,11 @@ QUOTAS: Dict[str, Tuple[int, str]] = {
     "technical_indicator": (1500, TIER_BACKGROUND),  # sector RSI
     "sector_etfs": (300, TIER_BACKGROUND),
     "darkpool_recent": (100, TIER_BACKGROUND),    # reclaimed 300->100 to fund chart_indicators
+    "triton_flow_shadow": (450, TIER_BACKGROUND), # Triton Step-0 shadow logger: flow-alerts poll + ALL its bar-fetches (clean attribution; must never die as collateral when ohlc_bars throttles)
 }
-# QUOTAS sum = 17,500 (was 17,400; +700 chart_indicators, -400 flow_per_expiry,
-# -200 darkpool_recent). <= 18,000 cap, and <= 20,000 - QUOTA_SAFETY_BUFFER. ✓
+# QUOTAS sum = 17,950 (17,500 + 450 triton_flow_shadow). Under the 18,000 target
+# (DAILY_BUDGET 20,000 - QUOTA_SAFETY_BUFFER 2,000); safety buffer = 2,050. ✓
+# (Sized 450 not 500 to stay strictly UNDER 18,000 per the docstring's "held under".)
 
 # Unknown / untagged callers: small STANDARD allowance so a new code path can't
 # silently blow the budget, but isn't instantly blocked either.
