@@ -92,6 +92,55 @@ def _format_premium(val):
     return f"${val}"
 
 
+async def _load_flow_from_db(pool, lookback_minutes: int = 30):
+    """F1 db_fallback: reconstruct the uw:flow:* summaries from the LATEST
+    flow_events row per ticker when Redis is empty/errored (the 7/1 outage: the
+    poller's Redis writes failed while its Postgres writes stayed healthy).
+
+    Read-only, no UW. Rebuilds via build_flow_summary so sentiment stays
+    PREMIUM-based (identical to the Redis path), NOT flow_events.flow_sentiment
+    (volume-based). NUMERICs cast to float8 in SQL so no Decimal leaks into JSON.
+    Returns (flow_data, newest_captured_at_iso)."""
+    flow_data: Dict[str, Dict] = {}
+    newest = None
+    if not pool:
+        return flow_data, None
+    try:
+        from jobs.uw_flow_poller import build_flow_summary
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT DISTINCT ON (ticker)
+                       ticker,
+                       pc_ratio::float8       AS pc_ratio,
+                       total_premium::float8  AS total_premium,
+                       call_premium::float8   AS call_premium,
+                       put_premium::float8    AS put_premium,
+                       call_volume, put_volume,
+                       change_pct::float8     AS change_pct,
+                       captured_at
+                FROM flow_events
+                WHERE captured_at >= NOW() - ($1 * INTERVAL '1 minute')
+                ORDER BY ticker, captured_at DESC
+                """,
+                lookback_minutes,
+            )
+        for r in rows:
+            ticker = (r["ticker"] or "").upper()
+            if not ticker:
+                continue
+            summ = build_flow_summary(dict(r))
+            cap = r["captured_at"]
+            summ["updated_at"] = cap.isoformat() if cap else None  # REAL data time, not now()
+            summ["source"] = "flow_events_fallback"                # per-summary provenance
+            flow_data[ticker] = summ
+            if cap and (newest is None or cap > newest):
+                newest = cap
+    except Exception as e:
+        logger.warning("Flow radar DB fallback failed: %s", e)
+    return flow_data, (newest.isoformat() if newest else None)
+
+
 @router.get("/radar")
 async def get_flow_radar():
     """
@@ -158,6 +207,23 @@ async def _compute_flow_radar() -> Dict[str, Any]:
                         continue
         except Exception as e:
             logger.warning("Flow radar Redis scan failed: %s", e)
+
+    # === 1b. Source + F1 db_fallback ===
+    # Locked contract (7/1 Olympus): the payload LABELS where it came from and
+    # carries an honest age — never a fabricated-fresh 0. If Redis uw:flow:* is
+    # empty (poller Redis-write outage), serve the durable flow_events ledger.
+    source = "redis" if flow_data else None
+    if not flow_data:
+        db_flow, _newest_iso = await _load_flow_from_db(pool)
+        if db_flow:
+            flow_data = db_flow
+            source = "db_fallback"
+            logger.warning(
+                "flow_radar: uw:flow:* empty — served %d tickers from flow_events DB fallback",
+                len(db_flow),
+            )
+        else:
+            source = "none"
 
     # === 2. Load open positions ===
     position_flow = []
@@ -386,6 +452,11 @@ async def _compute_flow_radar() -> Dict[str, Any]:
     # === 6. Compact headlines (empty — frontend loadHeadlines() is the fallback) ===
     headlines_compact = []
 
+    # F1 age: now - NEWEST summary updated_at (freshness of the served set).
+    # null when no events — NEVER 0 (a fabricated-fresh fallback is the bug we hunt).
+    # ISO-8601 UTC strings compare lexicographically == chronologically.
+    data_age_seconds = _staleness_from(max(_ts)) if _ts else None
+
     return {
         "position_flow": position_flow,
         "watchlist_unusual": watchlist_unusual,
@@ -393,5 +464,7 @@ async def _compute_flow_radar() -> Dict[str, Any]:
         "market_pulse": market_pulse,
         "headlines": headlines_compact,
         "flow_tickers_loaded": len(flow_data),
+        "source": source,                     # "redis" | "db_fallback" | "none"
+        "data_age_seconds": data_age_seconds,  # freshness of served set; null when empty
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }

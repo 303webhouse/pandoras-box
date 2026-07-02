@@ -131,6 +131,11 @@ async def hub_get_flow_radar(
         "net_premium_puts_usd": net_puts,
         "net_premium_direction": direction,
         "flow_data_available": flow_data_available,
+        # F1 (7/1 db_fallback contract): provenance + honest freshness end-to-end.
+        # source: "redis" (normal) | "db_fallback" (Redis empty, served from
+        # flow_events) | "none" (both empty). data_age_seconds null when empty, never 0.
+        "source": raw.get("source"),
+        "data_age_seconds": raw.get("data_age_seconds"),
         "events": events,
         "event_count": len(events),
     }
