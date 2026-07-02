@@ -105,7 +105,7 @@ async def run_triton_shadow_poller() -> None:
                         (uw_alert_id, fired_at, ticker, direction, premium_usd, is_sweep,
                          liquidity_bucket, spot_at_fire, chg_pct_day, prior_5d_ret,
                          is_liquid20, is_megacap_ai, bias_level_at_fire, gex_regime_at_fire, raw)
-                    VALUES ($1, $2::timestamptz, $3, $4, $5, $6, $7, $8, $9, $10,
+                    VALUES ($1, $2::text::timestamptz, $3, $4, $5, $6, $7, $8, $9, $10,
                             $11, $12, $13, $14, $15::jsonb)
                     ON CONFLICT (uw_alert_id) DO NOTHING
                     """,
