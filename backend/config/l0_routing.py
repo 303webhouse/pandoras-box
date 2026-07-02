@@ -128,3 +128,42 @@ def should_divert(decision: Dict[str, Any]) -> bool:
     never calls it in a way that drops a signal.
     """
     return bool(decision.get("would_suppress")) and _enforce_enabled()
+
+
+# ── L0.1a ENFORCE (2026-07-02 flip brief) ────────────────────────────
+# Surface-suppression: keep persisting + grading suppressed signals (audit trail),
+# but EXCLUDE them from actionable read surfaces when L0_ENFORCE=true. The filter
+# keys on the recorded l0_shadow TAG (`would_suppress`), NOT the live signal_type
+# column: signal_type can drift after gate eval (a Holy_Grail signal relabeled
+# APIS_CALL keeps its correct SUPPRESS tag), and the tag is exactly what the
+# ≥2-week "zero keepers lost" shadow window validated. Rows with no tag
+# (pre-gate history, the crypto path that bypasses the chokepoint) COALESCE to keep.
+_L0_SUPPRESS_PREDICATE = (
+    "COALESCE((triggering_factors->'l0_shadow'->>'would_suppress')::boolean, false) = false"
+)
+
+
+def l0_enforce_where_clause() -> str:
+    """WHERE-fragment (no leading AND) that EXCLUDES gate-suppressed rows from
+    actionable feeds when enforcing; '' (no-op) in shadow mode. Static string —
+    safe to concatenate into a signals query (no user input, no params)."""
+    return _L0_SUPPRESS_PREDICATE if _enforce_enabled() else ""
+
+
+async def l0_status(pool) -> Dict[str, Any]:
+    """E3 enforcement visibility: {enforce, suppressed_today}. Read-only,
+    fail-safe. Makes enforcement observable — quiet success and quiet failure
+    look identical without a counter (the Triton Bug-1 lesson)."""
+    enabled = _enforce_enabled()
+    suppressed_today: Optional[int] = None
+    try:
+        if pool:
+            async with pool.acquire() as conn:
+                suppressed_today = await conn.fetchval(
+                    "SELECT COUNT(*) FROM signals "
+                    "WHERE created_at >= CURRENT_DATE AND "
+                    "COALESCE((triggering_factors->'l0_shadow'->>'would_suppress')::boolean, false)"
+                )
+    except Exception:
+        pass
+    return {"enforce": enabled, "suppressed_today": suppressed_today}

@@ -966,6 +966,15 @@ async def root():
         "version": "1.0.0"
     }
 
+@app.get("/api/l0/status")
+async def l0_status_endpoint():
+    """L0.1a enforcement visibility (E3): enforce flag + today's would_suppress
+    count, so suppression is never silent. Read-only, fail-safe, on-demand."""
+    from config.l0_routing import l0_status
+    from datetime import date as _date
+    pool = await get_postgres_client()
+    return {"date": _date.today().isoformat(), **(await l0_status(pool))}
+
 @app.get("/health")
 async def health_check():
     """Resilient health check (never throws on transient dependency failures)."""
