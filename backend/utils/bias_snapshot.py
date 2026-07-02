@@ -34,12 +34,16 @@ async def get_bias_snapshot() -> Dict[str, Any]:
         snapshot["scheduler_error"] = str(err)
 
     # B1: include gex_regime so signals carry regime-at-fire for Layer-2 routing.
-    # Additive key — no schema change, no backfill needed.
+    # Additive keys — no schema change, no backfill needed.
+    # bias_level added 2026-07-02: CompositeResult carries it top-level; consumers
+    # (Triton shadow poller) read snapshot["bias_level"] — was silently None before.
     try:
         from services.read_only.bias import get_composite_bias
         _cb = await get_composite_bias()
         snapshot["gex_regime"] = (_cb or {}).get("gex_regime")
+        snapshot["bias_level"] = (_cb or {}).get("bias_level")
     except Exception:
         snapshot["gex_regime"] = None
+        snapshot["bias_level"] = None
 
     return snapshot
