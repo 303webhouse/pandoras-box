@@ -217,17 +217,19 @@ async def run_flow_poller():
             # L1.0 Path A: publish the canonical committee summary (sole writer of
             # uw:flow:*). TTL gives honest staleness / dead-feed detection.
             if redis:
-                try:
-                    await redis.set(
-                        f"uw:flow:{row['ticker']}",
-                        json.dumps(build_flow_summary(row)),
-                        ex=900,
-                    )
-                    redis_writes += 1
-                except Exception as _re:
-                    # AEGIS log hygiene: type only, never the exception body (no DSN leak).
-                    # F2: distinct greppable tag "uw:flow publish failed" for outage triage.
-                    logger.warning("uw:flow publish failed for %s: %s", ticker, type(_re).__name__)
+                payload = json.dumps(build_flow_summary(row))
+                for _attempt in (1, 2):  # F3: retry-once — 7/1 RCA was a TRANSIENT Upstash blip
+                    try:
+                        await redis.set(f"uw:flow:{row['ticker']}", payload, ex=900)
+                        redis_writes += 1
+                        break
+                    except Exception as _re:
+                        if _attempt == 2:
+                            # AEGIS log hygiene: type only, never the exception body (no DSN leak).
+                            # F2: distinct greppable tag "uw:flow publish failed" for outage triage.
+                            logger.warning("uw:flow publish failed for %s: %s", ticker, type(_re).__name__)
+                        else:
+                            await asyncio.sleep(0.15)
 
         except Exception as e:
             errors += 1
