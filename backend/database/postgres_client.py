@@ -1099,11 +1099,14 @@ async def init_database():
             CREATE INDEX IF NOT EXISTS idx_triton_flow_shadow_ticker
                 ON triton_flow_shadow (ticker, fired_at DESC)
         """)
-        # v0 retention (Nick 2026-07-01): purge UNGRADED rows >30d; graded exempt
-        # until docs/strategy-reviews/triton-forward-edge-*.md exists.
+        # Retention (Nick 2026-07-01): purge UNGRADED rows >90d; graded exempt
+        # until docs/strategy-reviews/triton-forward-edge-*.md exists. Bumped 30d->90d
+        # after Railway CLI verified the postgres volume at 816/5000 MB (16%) — the
+        # "94% full" flag (6/23) was STALE; ample headroom. (Cap was 30d out of
+        # caution when the volume % was unknown at B1.)
         await conn.execute("""
             DELETE FROM triton_flow_shadow
-            WHERE created_at < NOW() - INTERVAL '30 days' AND graded_at IS NULL
+            WHERE created_at < NOW() - INTERVAL '90 days' AND graded_at IS NULL
         """)
 
         # Brief 3A: Ariadne's Thread — outcome resolution columns on signals
