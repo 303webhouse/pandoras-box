@@ -818,6 +818,35 @@ async def get_flow_recent(ticker: str) -> Optional[List[Dict[str, Any]]]:
     return flow
 
 
+async def get_flow_alerts(
+    min_premium: int = 250000,
+    is_ask_side: bool = True,
+    is_sweep: bool = True,
+    newer_than: Optional[str] = None,
+    caller: str = "triton_flow_shadow",
+) -> Optional[List[Dict[str, Any]]]:
+    """Market-wide whale flow alerts — UW /api/option-trades/flow-alerts.
+
+    ONE call regardless of universe size (server-side filters). NOT cached — the
+    Triton shadow poller streams fresh each tick with a `newer_than` cursor.
+    Governor `caller` defaults to the Triton BACKGROUND tag so it never competes
+    with the committee's FOREGROUND path. Returns the alert list, or None
+    (falsy UWUnavailable sentinel on quota/circuit block also returns None).
+    """
+    params: Dict[str, Any] = {"min_premium": int(min_premium)}
+    if is_ask_side:
+        params["is_ask_side"] = "true"
+    if is_sweep:
+        params["is_sweep"] = "true"
+    if newer_than:
+        params["newer_than"] = newer_than
+
+    data = await _uw_request("/api/option-trades/flow-alerts", params=params, caller=caller)
+    if not data:  # None or falsy UWUnavailable sentinel
+        return None
+    return data if isinstance(data, list) else data.get("data", data)
+
+
 async def get_flow_per_expiry(ticker: str) -> Optional[List[Dict[str, Any]]]:
     """
     Fetch aggregated option flow per expiry for the last trading day.
