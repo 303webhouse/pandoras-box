@@ -138,6 +138,15 @@ async def get_active_trade_ideas(
             params.append(min_score)
             idx += 1
 
+    # L0.1a ENFORCE (2026-07-02): exclude gate-suppressed rows from the actionable
+    # feed when L0_ENFORCE=true. Static predicate on the l0_shadow tag; no-op ('')
+    # in shadow mode. Covers REST /api/trade-ideas AND the hub_get_trade_ideas MCP
+    # passthrough (both route through here).
+    from config.l0_routing import l0_enforce_where_clause
+    _l0_clause = l0_enforce_where_clause()
+    if _l0_clause:
+        conditions.append(_l0_clause)
+
     where_clause = " AND ".join(conditions)
 
     async with pool.acquire() as conn:

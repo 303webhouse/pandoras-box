@@ -41,16 +41,21 @@ async def _query_tier_groups(pool, tier: str, limit: int = 50) -> list:
     Fetch and group active signals for a specific feed_tier.
     Used by /main-feed 3-tier fallback logic.
     """
+    # L0.1a ENFORCE (2026-07-02): exclude gate-suppressed rows from the main-feed
+    # when L0_ENFORCE=true. Static predicate on the l0_shadow tag; no-op in shadow.
+    from config.l0_routing import l0_enforce_where_clause
+    _l0 = l0_enforce_where_clause()
+    _l0_and = f" AND {_l0}" if _l0 else ""
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            """
+            f"""
             SELECT * FROM signals
             WHERE status = 'ACTIVE'
               AND (expires_at IS NULL OR expires_at > NOW())
               AND created_at > NOW() - INTERVAL '24 hours'
               AND user_action IS NULL
               AND COALESCE(signal_category, 'TRADE_SETUP') NOT IN ('INTRADAY_SETUP', 'FOOTPRINT')
-              AND feed_tier = $1
+              AND feed_tier = $1{_l0_and}
             ORDER BY COALESCE(adjusted_score, score_v2, score, 0) DESC, created_at DESC
             LIMIT $2
             """,
