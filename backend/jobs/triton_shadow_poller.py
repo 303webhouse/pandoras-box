@@ -21,6 +21,12 @@ MIN_PREMIUM = 250_000
 DAILY_CAP = 500          # disk guard: log + stop inserting beyond this many rows/day
 PRIOR_LOOKBACK_DAYS = 15  # ~10 sessions — enough for a 5-trading-day prior return
 
+# prior_5d_ret is a daily-close metric — it does NOT change intraday — so cache it
+# per (ticker, day) ACROSS ticks. A per-tick cache re-fetched the same ticker's bars
+# every 120s (MU et al. recur across ticks), driving ~1,400 UW calls/day vs the 450
+# BACKGROUND quota. Day-scoped => one bar-fetch/ticker/day (~345 calls/day, under 450).
+_PRIOR5_DAY_CACHE: dict = {}   # (ticker, date) -> prior_5d_ret
+
 
 async def run_triton_shadow_poller() -> None:
     """One poller tick. Never raises (fail-open)."""
@@ -62,7 +68,10 @@ async def run_triton_shadow_poller() -> None:
     except Exception:
         pass
 
-    prior5_cache: dict = {}   # ticker -> prior_5d_ret (one bar-fetch/ticker/tick)
+    today = date.today()
+    # prune prior-day cache entries so the module dict stays bounded
+    for _k in [k for k in _PRIOR5_DAY_CACHE if k[1] != today]:
+        del _PRIOR5_DAY_CACHE[_k]
     inserted = 0
 
     for a in alerts:
@@ -79,15 +88,17 @@ async def run_triton_shadow_poller() -> None:
             if spot is None:
                 spot = _f(a.get("price"))
 
-            # prior_5d_ret (RAW; analysis adjusts by direction) — cached per ticker/tick
-            if ticker not in prior5_cache:
+            # prior_5d_ret (RAW; analysis adjusts by direction) — cached per
+            # (ticker, day) across ticks so a recurring ticker is bar-fetched once/day.
+            ck = (ticker, today)
+            if ck not in _PRIOR5_DAY_CACHE:
                 idx = await fetch_r_close_index(ticker, PRIOR_LOOKBACK_DAYS)
                 p5 = None
                 ds = sorted(idx)
                 if len(ds) >= 6 and idx[ds[-6]]:
                     p5 = round((idx[ds[-1]] / idx[ds[-6]] - 1.0) * 100, 4)
-                prior5_cache[ticker] = p5
-            prior_5d = prior5_cache[ticker]
+                _PRIOR5_DAY_CACHE[ck] = p5
+            prior_5d = _PRIOR5_DAY_CACHE[ck]
 
             raw = {
                 "id": aid, "type": a.get("type"), "strike": a.get("strike"),
