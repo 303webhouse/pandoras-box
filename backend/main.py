@@ -684,6 +684,26 @@ async def lifespan(app: FastAPI):
             await asyncio.sleep(120)
     triton_shadow_task = asyncio.create_task(triton_shadow_poller_loop())
 
+    # Triton Step-0 grader: daily post-close direction-adjusted forward returns.
+    async def triton_grader_loop():
+        import os, pytz
+        from datetime import datetime as _dt, time as _t
+        if os.getenv("TRITON_SHADOW_ENABLED", "true").lower() == "false":
+            return
+        last_run = None
+        await asyncio.sleep(180)
+        while True:
+            try:
+                et = _dt.now(pytz.timezone("America/New_York"))
+                if et.weekday() < 5 and et.time() >= _t(16, 15) and last_run != et.date():
+                    from jobs.triton_shadow_grader import run_triton_shadow_grader
+                    await run_triton_shadow_grader()
+                    last_run = et.date()
+            except Exception as e:
+                logger.warning("triton_shadow grader loop error: %s", e)
+            await asyncio.sleep(1800)  # 30-min check
+    triton_grader_task = asyncio.create_task(triton_grader_loop())
+
     wh_accumulation_task = asyncio.create_task(wh_accumulation_loop())
     wh_reversal_task = asyncio.create_task(wh_reversal_loop())
     sector_refresh_fast_task = asyncio.create_task(sector_refresh_fast_loop())
@@ -891,6 +911,7 @@ async def lifespan(app: FastAPI):
     uw_flow_poller_task.cancel()  # RE-ENABLED 2026-06-18 (L1.0 Chunk 4) — see creation site
     flow_deadfeed_watchdog_task.cancel()  # L1.0 Chunk 3 dead-feed watchdog
     triton_shadow_task.cancel()  # Triton Step-0 shadow poller
+    triton_grader_task.cancel()  # Triton Step-0 grader
     wh_accumulation_task.cancel()
     wh_reversal_task.cancel()
     oracle_task.cancel()
