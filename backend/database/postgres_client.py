@@ -1059,6 +1059,53 @@ async def init_database():
             DELETE FROM flow_events WHERE captured_at < NOW() - INTERVAL '90 days'
         """)
 
+        # Triton Step-0 (migration 021): whale-flow forward-edge shadow logger.
+        # SHADOW-ONLY — nothing reads this for scoring/pipeline. Authoritative DDL
+        # (mirrors migrations/021_triton_flow_shadow.sql — keep in sync).
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS triton_flow_shadow (
+                id                  SERIAL PRIMARY KEY,
+                uw_alert_id         TEXT UNIQUE NOT NULL,
+                fired_at            TIMESTAMPTZ,
+                ticker              TEXT NOT NULL,
+                direction           TEXT,
+                premium_usd         BIGINT,
+                is_sweep            BOOLEAN,
+                liquidity_bucket    TEXT,
+                spot_at_fire        NUMERIC(12,4),
+                chg_pct_day         NUMERIC(8,4),
+                prior_5d_ret        NUMERIC(8,4),
+                is_liquid20         BOOLEAN,
+                is_megacap_ai       BOOLEAN,
+                bias_level_at_fire  TEXT,
+                gex_regime_at_fire  TEXT,
+                fwd_ret_1d          NUMERIC(8,4),
+                fwd_ret_3d          NUMERIC(8,4),
+                fwd_ret_5d          NUMERIC(8,4),
+                graded_at           TIMESTAMPTZ,
+                raw                 JSONB,
+                created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_triton_flow_shadow_ungraded
+                ON triton_flow_shadow (fired_at) WHERE graded_at IS NULL
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_triton_flow_shadow_fired
+                ON triton_flow_shadow (fired_at DESC)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_triton_flow_shadow_ticker
+                ON triton_flow_shadow (ticker, fired_at DESC)
+        """)
+        # v0 retention (Nick 2026-07-01): purge UNGRADED rows >30d; graded exempt
+        # until docs/strategy-reviews/triton-forward-edge-*.md exists.
+        await conn.execute("""
+            DELETE FROM triton_flow_shadow
+            WHERE created_at < NOW() - INTERVAL '30 days' AND graded_at IS NULL
+        """)
+
         # Brief 3A: Ariadne's Thread — outcome resolution columns on signals
         try:
             await conn.execute("""
