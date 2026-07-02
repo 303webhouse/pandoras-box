@@ -182,6 +182,7 @@ async def run_flow_poller():
 
     written = 0
     errors = 0
+    redis_writes = 0  # F2: successful uw:flow:* publishes this run (health visibility)
     logger.info("UW flow poller run starting — %d tickers", len(FLOW_POLLER_TICKERS))
 
     for ticker in FLOW_POLLER_TICKERS:
@@ -222,8 +223,10 @@ async def run_flow_poller():
                         json.dumps(build_flow_summary(row)),
                         ex=900,
                     )
+                    redis_writes += 1
                 except Exception as _re:
                     # AEGIS log hygiene: type only, never the exception body (no DSN leak).
+                    # F2: distinct greppable tag "uw:flow publish failed" for outage triage.
                     logger.warning("uw:flow publish failed for %s: %s", ticker, type(_re).__name__)
 
         except Exception as e:
@@ -233,4 +236,14 @@ async def run_flow_poller():
                 logger.error("Flow poller: error threshold %d hit, ending run early", errors)
                 break
 
-    logger.info("UW flow poller complete — %d written, %d errors", written, errors)
+    # F2: stamp last-successful-write so /api/uw/health surfaces a Redis-write
+    # outage same-day (7/1 stayed invisible for a full RTH). Best-effort; if this
+    # meta write also fails during an outage, the key goes stale -> health shows a
+    # growing age -> the outage is visible (reads survive even when writes fail).
+    if redis and redis_writes > 0:
+        try:
+            await redis.set("uw:flow:_meta:last_write", datetime.now(timezone.utc).isoformat())
+        except Exception:
+            pass
+
+    logger.info("UW flow poller complete — %d written, %d errors, %d redis", written, errors, redis_writes)
