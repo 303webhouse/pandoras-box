@@ -15,7 +15,31 @@ router = APIRouter(prefix="/uw", tags=["uw-health"])
 async def uw_health():
     """Return UW API health status."""
     from integrations.uw_api import get_health
-    return await get_health()
+    health = await get_health()
+
+    # Triton Step-0 B4: surface the shadow feed's liveness so THIS feed can't
+    # silently die for days like the MP feed did (191->23 decay went unseen).
+    # events_today + last_event_age_seconds; fail-safe (table may not exist pre-deploy).
+    try:
+        from database.postgres_client import get_postgres_client
+        pool = await get_postgres_client()
+        if pool:
+            async with pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    """
+                    SELECT COUNT(*) FILTER (WHERE created_at >= CURRENT_DATE) AS events_today,
+                           EXTRACT(EPOCH FROM (NOW() - MAX(fired_at)))::int   AS last_event_age_seconds
+                    FROM triton_flow_shadow
+                    """
+                )
+            health["triton_shadow"] = {
+                "events_today": int(row["events_today"] or 0),
+                "last_event_age_seconds": row["last_event_age_seconds"],
+            }
+    except Exception as exc:
+        health["triton_shadow"] = {"error": type(exc).__name__}
+
+    return health
 
 
 @router.get("/health/by_caller")
