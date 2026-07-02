@@ -12,9 +12,12 @@
 -- NOT EXISTS). This file is the human record; the authoritative DDL is mirrored
 -- verbatim in init_database(). Keep the two in sync.
 --
--- Retention (v0, Nick 2026-07-01): 30d, UNGRADED rows only. Graded rows
+-- Retention (Nick 2026-07-01): 90d, UNGRADED rows only. Graded rows
 -- (graded_at IS NOT NULL) are exempt until docs/strategy-reviews/triton-forward-edge-*.md
 -- exists. Daily insert cap (500 rows) enforced in the poller, not here.
+-- Bumped 30d->90d after Railway CLI verified the postgres volume at 816/5000 MB
+-- (16%) — the "94% full" flag (6/23) was STALE. (B1 shipped at 30d out of caution
+-- while the volume % was unknown.)
 
 CREATE TABLE IF NOT EXISTS triton_flow_shadow (
     id                  SERIAL PRIMARY KEY,
@@ -47,6 +50,6 @@ CREATE INDEX IF NOT EXISTS idx_triton_flow_shadow_fired
 CREATE INDEX IF NOT EXISTS idx_triton_flow_shadow_ticker
     ON triton_flow_shadow (ticker, fired_at DESC);
 
--- v0 retention: purge UNGRADED rows older than 30d; graded rows retained.
+-- Retention: purge UNGRADED rows older than 90d; graded rows retained.
 DELETE FROM triton_flow_shadow
-    WHERE created_at < NOW() - INTERVAL '30 days' AND graded_at IS NULL;
+    WHERE created_at < NOW() - INTERVAL '90 days' AND graded_at IS NULL;
