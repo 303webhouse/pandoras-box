@@ -146,6 +146,11 @@ document.addEventListener('visibilitychange', () => {
     }
 });
 
+// === Render-skip caches (P0 4b) ===
+// Cheap 80/20: skip a full DOM rebuild when the incoming payload (plus the
+// view-state that affects output) is byte-identical to the last render.
+let _rsFlow = null, _rsHeatmap = null, _rsSignals = null, _rsPositions = null;
+
 // === Staleness Indicators (P1) ===
 // Single source of truth for displaying data freshness across all Agora panels.
 
@@ -241,6 +246,29 @@ function refreshAllStalenessIndicators() {
   });
 }
 
+/**
+ * Shared countdown updater (P0 4a). Replaces per-card setInterval timers: every
+ * element carrying a [data-countdown] ISO timestamp gets its "Xm ago" label and
+ * urgency class refreshed from the single 1s ticker below.
+ */
+function updateCountdowns() {
+  const now = Date.now();
+  document.querySelectorAll('[data-countdown]').forEach(el => {
+    const ts = Date.parse(el.getAttribute('data-countdown'));
+    if (isNaN(ts)) return;
+    const age = Math.floor((now - ts) / 60000);
+    const txt = age + 'm ago';
+    if (el.textContent !== txt) el.textContent = txt;
+    el.className = 'lightning-countdown' + (age > 90 ? ' critical' : age > 60 ? ' urgent' : '');
+  });
+}
+
+// Single shared 1s ticker: staleness ages + card countdowns (P0 4a).
+function sharedOneSecondTick() {
+  refreshAllStalenessIndicators();
+  updateCountdowns();
+}
+
 // ===== Live refresh pulse animation (P1.1) =====
 // Fires a brief pulse on each successful data fetch. If no pulse fires within
 // 30 seconds, the dot transitions to "stalled" amber state.
@@ -301,13 +329,13 @@ setInterval(function() {
     });
 }, 5000);
 
-// Start the global staleness refresh timer once the DOM is ready
+// Start the global shared 1s ticker (staleness ages + countdowns) once DOM is ready
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', () => {
-    setInterval(refreshAllStalenessIndicators, 1000);
+    setInterval(sharedOneSecondTick, 1000);
   });
 } else {
-  setInterval(refreshAllStalenessIndicators, 1000);
+  setInterval(sharedOneSecondTick, 1000);
 }
 
 // Direction alignment check — used by WebSocket handlers and position card logic
@@ -621,11 +649,39 @@ function setMode(mode, options = {}) {
         setTimeout(initCryptoChart, 200);
     }
 
+    // Lazy-load the Abacus (analytics) controllers on first open (P0 4c). cockpit.js
+    // must load before laboratory.js (it defines window.analyticsUtils).
+    if (nextMode === APP_MODES.ANALYTICS) {
+        loadAnalyticsBundle();
+    }
+
     try {
         document.dispatchEvent(new CustomEvent('pandora:modechange', { detail: { mode: nextMode } }));
     } catch (error) {
         console.warn('Mode change event dispatch failed:', error);
     }
+}
+
+// Inject a script once and resolve when it has loaded (P0 4c bundle split).
+let _analyticsBundleState = 'idle'; // idle | loading | loaded
+function _injectScript(src) {
+    return new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = src;
+        s.async = false; // preserve execution order across injected scripts
+        s.onload = () => resolve();
+        s.onerror = () => reject(new Error('failed to load ' + src));
+        document.body.appendChild(s);
+    });
+}
+function loadAnalyticsBundle() {
+    if (_analyticsBundleState !== 'idle') return;
+    _analyticsBundleState = 'loading';
+    // cockpit.js first (exports window.analyticsUtils that laboratory.js depends on)
+    _injectScript('/cockpit.js?v=2')
+        .then(() => _injectScript('/laboratory.js?v=2'))
+        .then(() => { _analyticsBundleState = 'loaded'; })
+        .catch(err => { console.error('Analytics bundle load failed:', err); _analyticsBundleState = 'idle'; });
 }
 
 // TradingView Widget
@@ -1325,16 +1381,16 @@ async function loadInitialData() {
     // bias-auto/shift-status polling removed (Phase 0D) — endpoint was dead
     
     // Refresh bias data every 2 minutes
-    setInterval(fetchCompositeBias, 2 * 60 * 1000);
-    setInterval(fetchTimeframeBias, 2 * 60 * 1000);
+    managedInterval(fetchCompositeBias, 2 * 60 * 1000);
+    managedInterval(fetchTimeframeBias, 2 * 60 * 1000);
 
     // Pivot health checks
     checkPivotHealth();
-    setInterval(checkPivotHealth, 5 * 60 * 1000);
+    managedInterval(checkPivotHealth, 5 * 60 * 1000);
 
     // Redis health checks
     checkRedisHealth();
-    setInterval(checkRedisHealth, 2 * 60 * 1000);
+    managedInterval(checkRedisHealth, 2 * 60 * 1000);
 
     // Position refresh every 30 seconds. WebSocket pushes real-time updates; managedInterval pauses when tab is hidden.
     managedInterval(loadOpenPositionsEnhanced, 30 * 1000);
@@ -1407,11 +1463,11 @@ function initCryptoScalper() {
     }
 
     loadCryptoKeyLevels();
-    setInterval(loadCryptoKeyLevels, 10 * 60 * 1000);
+    managedInterval(loadCryptoKeyLevels, 10 * 60 * 1000);
 
     refreshCryptoWma9();
-    if (cryptoWmaTimer) clearInterval(cryptoWmaTimer);
-    cryptoWmaTimer = setInterval(refreshCryptoWma9, 15 * 60 * 1000);
+    if (cryptoWmaTimer) clearManagedInterval(cryptoWmaTimer);
+    cryptoWmaTimer = managedInterval(refreshCryptoWma9, 15 * 60 * 1000);
 
     // Start 5s market polling only if the crypto view is currently visible.
     if (document.body.dataset.mode === APP_MODES.CRYPTO) {
@@ -2512,7 +2568,7 @@ function formatExpiry(dateStr) {
     return `${d.getMonth()+1}/${d.getDate()}`;
 }
 
-setInterval(loadPortfolioBalances, 60000);
+managedInterval(loadPortfolioBalances, 60000);
 // Portfolio positions 60s poll removed (Phase 0D) — redundant with 30s v2 position refresh
 
 
@@ -3519,6 +3575,11 @@ async function loadCyclicalBiasFallback() {
 function renderSignals() {
     const container = document.getElementById('tradeSignals');
 
+    // P0 4b render-skip: identical signal set + sort + pagination -> no rebuild
+    const _k = insightsSortMode + '|' + JSON.stringify(signals.equity) + '|' + JSON.stringify(tradeIdeasPagination.equity);
+    if (_k === _rsSignals) return;
+    _rsSignals = _k;
+
     // Show all equity signals; exclude asset_class=CRYPTO (raw crypto pairs)
     const allSignals = [...signals.equity];
     if (insightsSortMode === 'score') {
@@ -4343,10 +4404,10 @@ function updateInsightTimestamps() {
     });
 }
 
-let _insightTimerFast = setInterval(updateInsightTimestamps, 60 * 1000);
+let _insightTimerFast = managedInterval(updateInsightTimestamps, 60 * 1000);
 setTimeout(() => {
-    clearInterval(_insightTimerFast);
-    setInterval(updateInsightTimestamps, 60 * 60 * 1000);
+    clearManagedInterval(_insightTimerFast);
+    managedInterval(updateInsightTimestamps, 60 * 60 * 1000);
 }, 60 * 60 * 1000);
 
 function getScoreClass(score) {
@@ -7610,7 +7671,7 @@ function initBtcSignals() {
     if (!hasBtcPanels) {
         if (sessionPill) {
             loadBtcSessions();
-            setInterval(loadBtcSessions, 10 * 60 * 1000);
+            managedInterval(loadBtcSessions, 10 * 60 * 1000);
         }
         return;
     }
@@ -7633,8 +7694,8 @@ function initBtcSignals() {
     loadBtcSessions();
 
     // Auto-refresh: signals every 5 min, sessions every 10 min
-    setInterval(loadBtcSignals, 5 * 60 * 1000);
-    setInterval(loadBtcSessions, 10 * 60 * 1000);
+    managedInterval(loadBtcSignals, 5 * 60 * 1000);
+    managedInterval(loadBtcSessions, 10 * 60 * 1000);
 }
 
 async function loadBtcSessions() {
@@ -8183,15 +8244,15 @@ function initOptionsFlow() {
     loadBlackSwanAlerts();
     managedInterval(loadSectorHeatmap, 10 * 1000);
     managedInterval(loadMacroStrip, 10 * 1000);
-    setInterval(loadBlackSwanAlerts, 60 * 1000);
-    setInterval(loadMarketIntel, 300000); // 5-min refresh
+    managedInterval(loadBlackSwanAlerts, 60 * 1000);
+    managedInterval(loadMarketIntel, 300000); // 5-min refresh
     initHermesFlash();
     initHydra();
     initLightningCards();
     loadWatchlist();
     managedInterval(loadWatchlist, 300000); // Focus List refresh (5-min)
     // Flow radar: 2-min refresh during market hours
-    setInterval(() => {
+    managedInterval(() => {
         const now = new Date();
         const et = new Date(now.toLocaleString('en-US', {timeZone: 'America/New_York'}));
         const h = et.getHours();
@@ -8241,6 +8302,11 @@ async function loadSectorHeatmap() {
 }
 
 function renderSectorHeatmap(sectors, heatmapData) {
+    // P0 4b render-skip: key on metric + sector data only (freshness fields are
+    // rendered separately, so they don't defeat the skip)
+    const _k = (_heatmapMetric || 'price') + '|' + JSON.stringify(sectors);
+    if (_k === _rsHeatmap) return;
+    _rsHeatmap = _k;
     const container = document.getElementById('sectorHeatmap');
     if (!container) return;
     if (!sectors || sectors.length === 0) {
@@ -8473,7 +8539,7 @@ function renderMarketIntel(data) {
     const iv = e.iv_rank || {};
     const ivRank = iv.iv_rank != null ? parseFloat(iv.iv_rank).toFixed(1) : '--';
     const ivColor = ivRank === '--' ? 'var(--text-secondary)' :
-        parseFloat(ivRank) < 30 ? '#4ade80' : parseFloat(ivRank) > 60 ? '#f87171' : '#facc15';
+        parseFloat(ivRank) < 30 ? 'var(--up)' : parseFloat(ivRank) > 60 ? 'var(--down)' : 'var(--warn)';
 
     // Market Tide
     const tide = e.market_tide || {};
@@ -8481,7 +8547,7 @@ function renderMarketIntel(data) {
     const netPut = tide.net_put_premium ? `$${(parseFloat(tide.net_put_premium)/1e6).toFixed(0)}M` : '--';
     const tideDir = tide.net_call_premium && tide.net_put_premium ?
         (parseFloat(tide.net_call_premium) > parseFloat(tide.net_put_premium) ? 'BULLISH' : 'BEARISH') : '--';
-    const tideColor = tideDir === 'BULLISH' ? '#4ade80' : tideDir === 'BEARISH' ? '#f87171' : 'var(--text-secondary)';
+    const tideColor = tideDir === 'BULLISH' ? 'var(--up)' : tideDir === 'BEARISH' ? 'var(--down)' : 'var(--text-secondary)';
 
     // Dark Pool
     const dp = e.dark_pool || {};
@@ -8490,7 +8556,7 @@ function renderMarketIntel(data) {
     // Sector Flow
     const sf = e.sector_flow || {};
     const posture = sf.risk_posture || '--';
-    const postureColor = posture === 'RISK-ON' ? '#4ade80' : posture === 'RISK-OFF' ? '#f87171' : '#facc15';
+    const postureColor = posture === 'RISK-ON' ? 'var(--up)' : posture === 'RISK-OFF' ? 'var(--down)' : 'var(--warn)';
 
     // Max Pain
     const mp = e.max_pain;
@@ -8548,8 +8614,8 @@ async function loadMorningBriefing() {
         const container = document.getElementById('intelContent');
         if (!container) return;
 
-        const convColor = latest.conviction === 'HIGH' ? '#4ade80' :
-            latest.conviction === 'LOW' ? '#f87171' : '#facc15';
+        const convColor = latest.conviction === 'HIGH' ? 'var(--up)' :
+            latest.conviction === 'LOW' ? 'var(--down)' : 'var(--warn)';
 
         const briefHtml = `
             <div class="intel-briefing">
@@ -8579,7 +8645,7 @@ async function loadSignalEnrichment(ticker, panel) {
         const iv = e.iv_rank || {};
         const ivRank = iv.iv_rank != null ? parseFloat(iv.iv_rank).toFixed(1) : '--';
         const ivColor = ivRank === '--' ? '#94a3b8' :
-            parseFloat(ivRank) < 30 ? '#4ade80' : parseFloat(ivRank) > 60 ? '#f87171' : '#facc15';
+            parseFloat(ivRank) < 30 ? 'var(--up)' : parseFloat(ivRank) > 60 ? 'var(--down)' : 'var(--warn)';
 
         const dp = e.dark_pool || {};
         const mp = e.max_pain;
@@ -8623,12 +8689,16 @@ function flowStalenessState(staleness) {
         return { label: '— stale: unknown', color: 'var(--text-secondary)' };
     }
     if (staleness < 900) {
-        return { label: _flowFmtAge(staleness) + ' fresh', color: '#4ade80' };
+        return { label: _flowFmtAge(staleness) + ' fresh', color: 'var(--up)' };
     }
     return { label: 'stale ' + _flowFmtAge(staleness), color: 'var(--text-secondary)' };
 }
 
 function renderFlowRadar(data) {
+    // P0 4b render-skip: identical payload -> no rebuild
+    const _k = JSON.stringify(data);
+    if (_k === _rsFlow) return;
+    _rsFlow = _k;
     // --- Market Pulse Strip ---
     const pulseRegime = document.getElementById('pulseRegime');
     const pulsePc = document.getElementById('pulsePcRatio');
@@ -8645,8 +8715,8 @@ function renderFlowRadar(data) {
     if (pulseRegime) {
         const bl = mp.bias_level || 'NEUTRAL';
         pulseRegime.textContent = bl;
-        pulseRegime.style.color = bl.includes('URSA') ? '#f87171'
-            : bl.includes('TORO') ? '#4ade80' : 'var(--text-secondary)';
+        pulseRegime.style.color = bl.includes('URSA') ? 'var(--down)'
+            : bl.includes('TORO') ? 'var(--up)' : 'var(--text-secondary)';
     }
     if (pulsePc) {
         if (!flowAvailable) {
@@ -8656,7 +8726,7 @@ function renderFlowRadar(data) {
             const pc = mp.overall_pc_ratio;
             pulsePc.textContent = pc != null ? `P/C ${pc.toFixed(2)}` : 'P/C --';
             pulsePc.style.color = (pc != null)
-                ? (pc < 0.7 ? '#4ade80' : pc > 1.3 ? '#f87171' : 'var(--text-secondary)')
+                ? (pc < 0.7 ? 'var(--up)' : pc > 1.3 ? 'var(--down)' : 'var(--text-secondary)')
                 : 'var(--text-secondary)';
         }
     }
@@ -9403,7 +9473,7 @@ function startHeadlineScheduler() {
     const REFRESH_HOURS_ET = [12, 15]; // noon and 3pm Eastern
     const fired = new Set();
 
-    setInterval(() => {
+    managedInterval(() => {
         // Get current ET time
         const nowET = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
         const h = nowET.getHours();
@@ -10135,6 +10205,11 @@ function renderPositionCard(pos) {
 function renderPositionsEnhanced() {
     const container = document.getElementById('openPositions');
     if (!container) return;
+
+    // P0 4b render-skip: identical positions + account tab + earnings -> no rebuild
+    const _k = activePositionsAccount + '|' + JSON.stringify(openPositions) + '|' + JSON.stringify(earningsCache);
+    if (_k === _rsPositions) return;
+    _rsPositions = _k;
 
     // Filter by active account tab
     const filteredPositions = openPositions.filter(p => matchesAccountFilter(p.account, activePositionsAccount));
@@ -11096,7 +11171,7 @@ async function refreshPositions() {
 
 function startPriceUpdates() {
     // Update every 30 seconds
-    priceUpdateInterval = setInterval(updateCurrentPrices, 60000);
+    priceUpdateInterval = managedInterval(updateCurrentPrices, 60000);
     // Initial update
     updateCurrentPrices();
 }
@@ -12253,7 +12328,7 @@ function initRegimeBar() {
     }
 
     // Refresh regime every 5 minutes
-    setInterval(loadRegime, 300000);
+    managedInterval(loadRegime, 300000);
 }
 
 
@@ -12400,7 +12475,7 @@ function renderBlackSwanAlerts(data) {
 
 // ===== PORTFOLIO GREEKS =====
 loadPortfolioGreeks();
-setInterval(loadPortfolioGreeks, 60 * 1000);
+managedInterval(loadPortfolioGreeks, 60 * 1000);
 
 document.getElementById('greeksToggle')?.addEventListener('click', function() {
     const vals = document.getElementById('greeksValues');
@@ -12549,7 +12624,7 @@ document.querySelectorAll('.at-risk-mode').forEach(btn => {
 });
 
 loadExpiryTimeline();
-setInterval(loadExpiryTimeline, 120 * 1000);
+managedInterval(loadExpiryTimeline, 120 * 1000);
 
 async function loadExpiryTimeline() {
     try {
@@ -12827,14 +12902,9 @@ function renderLightningCards(cards) {
     const container = document.getElementById('tradeSignals');
     if (!container) return;
 
-    // Remove existing lightning cards — clear their per-card countdown timers first to avoid leaks
-    container.querySelectorAll('.lightning-card').forEach(el => {
-        if (el._countdownTimerId) {
-            clearInterval(el._countdownTimerId);
-            el._countdownTimerId = null;
-        }
-        el.remove();
-    });
+    // Remove existing lightning cards (countdowns are driven by the shared ticker,
+    // so there are no per-card timers to clear).
+    container.querySelectorAll('.lightning-card').forEach(el => el.remove());
 
     if (cards.length === 0) return;
 
@@ -12954,19 +13024,11 @@ function createLightningCard(card) {
         ${postmortemHtml}
     `;
 
-    // Start countdown updater for active cards. Timer ID attached to DOM node so it can be cleared on card removal.
+    // Countdown: no per-card timer. Tag the element with its creation time and let
+    // the single shared 1s ticker (updateCountdowns) update all [data-countdown]s.
     if (!isExpired) {
         const countdownEl = div.querySelector('.lightning-countdown');
-        if (countdownEl) {
-            div._countdownTimerId = setInterval(() => {
-                const now = Date.now();
-                const age = Math.floor((now - createdAt.getTime()) / 60000);
-                countdownEl.textContent = `${age}m ago`;
-                countdownEl.className = 'lightning-countdown';
-                if (age > 90) countdownEl.classList.add('critical');
-                else if (age > 60) countdownEl.classList.add('urgent');
-            }, 30000);
-        }
+        if (countdownEl) countdownEl.setAttribute('data-countdown', createdAt.toISOString());
     }
 
     return div;

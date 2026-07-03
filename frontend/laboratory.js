@@ -1903,7 +1903,10 @@
         bindBacktestControls();
     }
 
-    document.addEventListener('DOMContentLoaded', init);
+    // Lazy-loaded (P0 4c): if the DOM is already parsed, init on the next tick so
+    // the window export below is in place first.
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+    else setTimeout(init, 0);
 
     /* ── Export on window ─────────────────────────────────────────────── */
     window.laboratoryUI = {
