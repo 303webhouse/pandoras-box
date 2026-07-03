@@ -588,22 +588,27 @@ body {
 .sector-flow-dot.neutral { background: #78909c; }
 
 /* Sector Heatmap — fills container, 3-row layout */
+/* Hotfix 2026-07-03: uniform CSS grid (equal tiles, wrapping 4-6/row) replaces the
+   weight-based treemap. Tiles are no longer absolutely positioned. */
 .sector-heatmap {
-    position: relative;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+    gap: 6px;
     width: 100%;
-    height: 100%;
-    min-height: 320px;
+    padding: 0 12px 10px 12px;
     box-sizing: border-box;
-    overflow: hidden;
+    align-content: start;
 }
 
 .sector-heatmap-cell {
-    position: absolute;
     background: var(--card-bg);
     display: flex;
     flex-direction: column;
     justify-content: center;
     align-items: center;
+    gap: 2px;
+    min-height: 62px;
+    padding: 8px 4px;
     border: 1px solid var(--border-color);
     border-radius: 8px;
     cursor: pointer;
@@ -631,14 +636,16 @@ body {
 }
 
 .sector-hm-etf {
-    font-size: calc(24px * var(--s, 1));
+    font-size: 15px;
     font-weight: 700;
     color: #fff;
+    letter-spacing: 0.5px;
 }
 
 .sector-hm-change {
-    font-size: calc(14px * var(--s, 1));
+    font-size: 12px;
     font-weight: 600;
+    font-variant-numeric: tabular-nums;
 }
 
 .sector-hm-trend { font-size: calc(12px * var(--s, 1)); margin-left: 1px; }
@@ -647,10 +654,21 @@ body {
 .sector-hm-trend.trend-flat { color: rgba(255,255,255,0.4); }
 
 .sector-hm-rs {
-    font-size: calc(12px * var(--s, 1));
-    font-weight: 400;
-    opacity: 0.75;
+    font-size: 10px;
+    font-weight: 500;
+    opacity: 0.9;
     line-height: 1.1;
+    font-variant-numeric: tabular-nums;
+}
+
+/* Sector panel header row: Price/Flow toggle + freshness chip (no longer floating) */
+.sector-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 6px 12px;
+    min-height: 24px;
 }
 
 .flow-compact-list {
@@ -13458,19 +13476,12 @@ body[data-mode="analytics"] .analytics-shell {
 }
 
 .heatmap-toggle {
-    position: absolute;
-    top: 4px;
-    right: 8px;
-    z-index: 3;
     display: inline-flex;
     gap: 1px;
-    background: rgba(10, 14, 39, 0.7);
+    background: var(--dark-bg);
     border: 1px solid var(--border-color);
     border-radius: 4px;
     overflow: hidden;
-    -webkit-backdrop-filter: blur(4px);
-    backdrop-filter: blur(4px);
-    pointer-events: auto;
     font-family: 'Orbit', sans-serif;
 }
 
@@ -13717,12 +13728,25 @@ body[data-mode="analytics"] .analytics-shell {
 
 /* === Heatmap freshness chip (P0 Task 5) — 3-state fresh/stale/unknown === */
 .heatmap-staleness-chip {
-    position: absolute;
-    top: 6px;
-    left: 8px;
-    z-index: 3;
     font-size: 10px;
     font-family: 'JetBrains Mono', monospace;
     letter-spacing: 0.3px;
-    pointer-events: none;
+    white-space: nowrap;
+}
+
+/* Relocated Market Intelligence + Flow Radar — full-width rows below the sector
+   grid (hotfix 2026-07-03), instead of sharing the sector column's space. */
+.intel-full-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+    gap: 16px;
+    margin-bottom: 16px;
+}
+.intel-full-row .market-intel-section,
+.intel-full-row .flow-radar-section {
+    background: var(--card-bg);
+    border: 2px solid var(--border-color);
+    border-radius: 12px;
+    padding: 12px 14px;
+    min-width: 0;
 }
