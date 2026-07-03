@@ -7,12 +7,12 @@ rule table instead of scattered per-scanner `if`s.
 
 SHADOW vs ENFORCE
 -----------------
-This module ONLY computes a decision and lets the caller TAG it (under
-`triggering_factors.l0_shadow`). It never drops, diverts, or alters signal
-flow. The `L0_ENFORCE` flag (default False) is the single switch a future,
-separately-gated enforce brief will flip; the actual divert wiring is NOT
-built here on purpose (see the L0 foundation brief — enforce is a distinct
-step, gated on a ≥1-week shadow window + greenlight).
+This module computes the KEEP/SUPPRESS decision and tags it (under
+`triggering_factors.l0_shadow`); it NEVER drops or alters persistence — the
+audit trail + outcome grading continue for suppressed rows. ENFORCE is now the
+default (2026-07-03 flip, after a >=2-week shadow window + Nick/Claude greenlight):
+actionable READ surfaces exclude would_suppress rows via l0_enforce_where_clause()
+(surface-suppression). `L0_ENFORCE=false` is the single-flag rollback to shadow.
 
 Routing keys on `signal_type`, NOT `strategy`
 ---------------------------------------------
@@ -67,18 +67,19 @@ SUPPRESS_IF_NON_LIQUID: frozenset[str] = frozenset({
 
 
 def _enforce_enabled() -> bool:
-    """Read the L0_ENFORCE flag (default False = shadow).
+    """Read the L0_ENFORCE flag (default True = ENFORCE as of 2026-07-03).
 
-    Follows the repo's empty-safe env pattern: `getenv(...) or default`, since
-    Railway returns '' (not None) for unset refs.
+    L0.1a enforcement is now the default; `L0_ENFORCE=false` (or 0/no/off) is the
+    single-flag rollback to shadow. Empty-safe pattern `getenv(...) or default`:
+    Railway returns '' (not None) for unset refs, so an empty/unset value defaults
+    to ENFORCE (the intended live state) — the rollback must be an EXPLICIT false.
     """
-    raw = (os.getenv("L0_ENFORCE") or "false").strip().lower()
+    raw = (os.getenv("L0_ENFORCE") or "true").strip().lower()
     return raw in ("1", "true", "yes", "on")
 
 
 # Module-level snapshot for cheap reads; tests/callers can also call
-# _enforce_enabled() directly. Kept as a function-backed constant so the
-# default-False intent is obvious at import.
+# _enforce_enabled() directly. Default True (2026-07-03 flip) = enforce live.
 L0_ENFORCE: bool = _enforce_enabled()
 
 

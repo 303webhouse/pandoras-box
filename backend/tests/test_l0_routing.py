@@ -75,23 +75,37 @@ def test_decision_shape():
     assert d["v"] == l0.L0_SHADOW_VERSION
 
 
-# --- shadow is the default; enforce is opt-in ---------------------------
-def test_default_mode_is_shadow(monkeypatch):
+# --- ENFORCE is the default (2026-07-03 flip); L0_ENFORCE=false is rollback ----
+def test_default_mode_is_enforce(monkeypatch):
     monkeypatch.delenv("L0_ENFORCE", raising=False)
+    importlib.reload(l0)
+    assert l0._enforce_enabled() is True
+    d = l0.evaluate_l0_gate({"signal_type": "HOLY_GRAIL_1H", "ticker": "AAPL"})
+    assert d["mode"] == "enforce"
+    # should_divert is True under the default-enforce for a would-suppress decision
+    assert l0.should_divert(d) is True
+
+
+def test_rollback_to_shadow_via_explicit_false(monkeypatch):
+    # The single-flag rollback: L0_ENFORCE=false returns to shadow.
+    monkeypatch.setenv("L0_ENFORCE", "false")
     importlib.reload(l0)
     assert l0._enforce_enabled() is False
     d = l0.evaluate_l0_gate({"signal_type": "HOLY_GRAIL_1H", "ticker": "AAPL"})
     assert d["mode"] == "shadow"
-    # should_divert is False in shadow even for a would-suppress decision
     assert l0.should_divert(d) is False
+    monkeypatch.delenv("L0_ENFORCE", raising=False)
+    importlib.reload(l0)
 
 
 def test_enforce_flag_parsing(monkeypatch):
-    for val in ("true", "1", "YES", "on"):
+    # Enforce-y values AND empty/unset (Railway '' -> default -> ENFORCE).
+    for val in ("true", "1", "YES", "on", ""):
         monkeypatch.setenv("L0_ENFORCE", val)
         importlib.reload(l0)
         assert l0._enforce_enabled() is True
-    for val in ("false", "0", "", "no"):
+    # Explicit rollback values -> shadow.
+    for val in ("false", "0", "no", "off"):
         monkeypatch.setenv("L0_ENFORCE", val)
         importlib.reload(l0)
         assert l0._enforce_enabled() is False
