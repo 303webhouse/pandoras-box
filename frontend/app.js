@@ -8271,6 +8271,10 @@ async function loadSectorHeatmap() {
         const data = await response.json();
         renderSectorHeatmap(data.sectors, data);
 
+        // P0 Task 5: heatmap freshness chip, driven by server data_age_seconds.
+        // Updated every poll (outside the render-skip). null age -> UNKNOWN, not fresh.
+        updateHeatmapStalenessChip(data.data_age_seconds);
+
         // P1.2: in flow mode, show "limited flow data" hint when most sectors are neutral
         var heatmapEl = document.getElementById('sectorHeatmap');
         var existingHint = heatmapEl && heatmapEl.parentElement.querySelector('.heatmap-flow-hint');
@@ -8684,6 +8688,24 @@ function _flowFmtAge(s) {
 // No client-side RTH logic: the RTH dead-feed loudness lives in the Discord alarm;
 // the widget just tells the truth about age. staleness_seconds is null when unknown
 // (never 0 → never a fake-fresh read).
+// P0 Task 5: heatmap freshness chip using the existing 3-state staleness pattern.
+// `ageSeconds === null/undefined` -> UNKNOWN (never fake-fresh); Governor enforce
+// prerequisite. Lives in the heatmap header, updated each poll.
+function updateHeatmapStalenessChip(ageSeconds) {
+    const heatmapEl = document.getElementById('sectorHeatmap');
+    if (!heatmapEl || !heatmapEl.parentElement) return;
+    const parent = heatmapEl.parentElement;
+    let chip = parent.querySelector('.heatmap-staleness-chip');
+    if (!chip) {
+        chip = document.createElement('span');
+        chip.className = 'heatmap-staleness-chip';
+        parent.insertAdjacentElement('afterbegin', chip);
+    }
+    const st = flowStalenessState(ageSeconds == null ? null : ageSeconds);
+    chip.textContent = st.label;
+    chip.style.color = st.color;
+}
+
 function flowStalenessState(staleness) {
     if (staleness === null || staleness === undefined) {
         return { label: '— stale: unknown', color: 'var(--text-secondary)' };
