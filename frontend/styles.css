@@ -862,6 +862,79 @@ body {
 .pnl-positive { color: #00e676; }
 .pnl-negative { color: var(--pnl-negative); }
 
+/* === P0 portfolio strip mode (2026-07-02): collapsed one-line strip + chips === */
+.portfolio-summary-card.portfolio-strip-mode {
+    padding: 10px 14px;
+    gap: 6px;
+}
+.portfolio-strip {
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    gap: 12px;
+    cursor: pointer;
+    flex-wrap: wrap;
+}
+.portfolio-strip-mode .portfolio-combined-balance {
+    font-size: 1.7rem;
+    letter-spacing: 0.5px;
+}
+.portfolio-strip .portfolio-pnl-side {
+    min-width: 0;
+    font-size: 0.72rem;
+}
+.portfolio-strip .portfolio-monthly-pnl {
+    margin: 0;
+    min-height: 0;
+    font-size: 0.72rem;
+    text-align: left;
+}
+.portfolio-strip-caret {
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+    margin-left: 2px;
+    -webkit-user-select: none;
+    user-select: none;
+}
+.portfolio-chips {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.portfolio-chip {
+    display: flex;
+    align-items: baseline;
+    gap: 5px;
+    padding: 3px 8px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.02);
+}
+.portfolio-chip-name {
+    font-family: 'Orbit', sans-serif;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-secondary);
+}
+.portfolio-chip .portfolio-account-balance {
+    font-size: 0.95rem;
+    font-weight: 600;
+}
+.portfolio-detail {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 4px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border-color);
+}
+.portfolio-detail .portfolio-account {
+    align-items: flex-start;
+    text-align: left;
+}
+
 .portfolio-accounts {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
@@ -2634,8 +2707,25 @@ body.override-active-bearish .override-toggle[data-active="true"] {
 
 .chart-container {
     flex: 1;
+    /* P0: compact chart dock by default (~40% of former 500px); expand restores */
+    min-height: 300px;
+}
+.chart-area.chart-expanded .chart-container {
     min-height: 500px;
 }
+.chart-expand-btn {
+    margin-left: auto;
+    background: transparent;
+    color: var(--text-secondary);
+    border: none;
+    padding: 0 14px;
+    font-size: 16px;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: color 0.2s;
+}
+.chart-expand-btn:hover { color: var(--accent-teal); }
+.chart-area.chart-expanded .chart-expand-btn { color: var(--accent-teal); }
 
 #tradingview-widget {
     width: 100%;
@@ -3018,7 +3108,8 @@ body.override-active-bearish .override-toggle[data-active="true"] {
     background: var(--dark-bg);
     border: 1px solid var(--border-color);
     border-radius: 8px;
-    padding: 12px;
+    /* P0 density: vertical padding trimmed 12px -> 8px (~33%); horizontal kept */
+    padding: 8px 12px;
     cursor: pointer;
     position: relative;
     transition: all 0.2s;
@@ -5532,10 +5623,6 @@ body.override-active-bearish .override-toggle[data-active="true"] {
         grid-column: 1;
     }
 
-    .watchlist-section {
-        grid-template-columns: 1fr;
-    }
-    
     .hunter-results {
         grid-template-columns: 1fr;
     }

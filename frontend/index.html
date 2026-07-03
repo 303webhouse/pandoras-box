@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Pandora - Real-time Trading Signal Dashboard">
     <title>Pandora</title>
-    <link rel="stylesheet" href="/styles.css?v=140">
+    <link rel="stylesheet" href="/styles.css?v=141">
     <link rel="manifest" href="/manifest.json">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -308,43 +308,58 @@
                     </div>
                 </div>
 
-                <!-- Portfolio Summary Widget -->
-                <div class="portfolio-summary-card" id="portfolio-summary-card">
-                    <div class="portfolio-total-row">
+                <!-- Portfolio Summary Widget (P0: collapsed strip; detail behind expand) -->
+                <div class="portfolio-summary-card portfolio-strip-mode" id="portfolio-summary-card">
+                    <div class="portfolio-strip" id="portfolioStripToggle" title="Click to show account details">
                         <span class="portfolio-pnl-side" id="portfolioDailyPnl"></span>
                         <div class="portfolio-combined-balance" id="portfolioCombinedBalance">--</div>
                         <span class="portfolio-pnl-side" id="portfolioWeeklyPnl"></span>
+                        <span class="portfolio-monthly-pnl" id="portfolioMonthlyPnl"></span>
+                        <span class="portfolio-strip-caret" id="portfolioStripCaret">&#x25B8;</span>
                     </div>
-                    <div class="portfolio-monthly-pnl" id="portfolioMonthlyPnl"></div>
-                    <div class="portfolio-accounts">
+                    <!-- Compact per-account chips (name + balance) -->
+                    <div class="portfolio-chips">
+                        <div class="portfolio-chip">
+                            <span class="portfolio-chip-name">RH</span>
+                            <span class="portfolio-account-balance" id="rhBalance">--</span>
+                        </div>
+                        <div class="portfolio-chip">
+                            <span class="portfolio-chip-name">Fid Active</span>
+                            <span class="portfolio-account-balance" id="fidelityActiveBalance">--</span>
+                        </div>
+                        <div class="portfolio-chip">
+                            <span class="portfolio-chip-name">Fid Ret</span>
+                            <span class="portfolio-account-balance" id="fidelityRetirementBalance">--</span>
+                        </div>
+                    </div>
+                    <!-- Drift banner stays always-visible when triggered (behavior intact) -->
+                    <div id="rhDriftBanner" class="drift-banner" style="display:none;"></div>
+                    <!-- Account breakdown/meta detail — collapsed by default -->
+                    <div class="portfolio-detail" id="portfolioDetail" style="display:none;">
                         <div class="portfolio-account" id="portfolioRH">
-                            <div id="rhDriftBanner" class="drift-banner" style="display:none;"></div>
                             <div class="portfolio-account-header">
                                 <span class="portfolio-account-name">RH High-Risk</span>
-                                <span class="portfolio-account-balance" id="rhBalance">--</span>
                             </div>
                             <div class="portfolio-account-breakdown" id="rhBreakdown"></div>
                             <div class="portfolio-account-meta" id="rhMeta"></div>
                         </div>
+                        <div class="portfolio-account" id="portfolioActive">
+                            <div class="portfolio-account-header">
+                                <span class="portfolio-account-name">Fidelity Active Trading</span>
+                            </div>
+                            <div class="portfolio-account-breakdown" id="fidActiveBreakdown"></div>
+                            <div class="portfolio-account-meta">
+                                <span>Roth Brokerage</span>
+                            </div>
+                        </div>
                         <div class="portfolio-account" id="portfolioRetirement">
                             <div class="portfolio-account-header">
                                 <span class="portfolio-account-name">Fidelity Retirement</span>
-                                <span class="portfolio-account-balance" id="fidelityRetirementBalance">--</span>
                             </div>
                             <div class="portfolio-account-meta">
                                 <span id="fid401aBalance">--</span>
                                 <span id="fid403bBalance">--</span>
                                 <button class="withdraw-btn" id="fidRetirementWd" title="Log deposit (paycheck)">W/D</button>
-                            </div>
-                        </div>
-                        <div class="portfolio-account" id="portfolioActive">
-                            <div class="portfolio-account-header">
-                                <span class="portfolio-account-name">Fidelity Active Trading</span>
-                                <span class="portfolio-account-balance" id="fidelityActiveBalance">--</span>
-                            </div>
-                            <div class="portfolio-account-breakdown" id="fidActiveBreakdown"></div>
-                            <div class="portfolio-account-meta">
-                                <span>Roth Brokerage</span>
                             </div>
                         </div>
                     </div>
@@ -368,11 +383,12 @@
         <!-- Main Content: Chart + Trade Ideas + Open Positions -->
         <section class="main-content">
             <!-- Chart Area (1/2 width) -->
-            <div class="chart-area">
+            <div class="chart-area" id="chartArea">
                 <div class="chart-tabs" id="chartTabs">
                     <button class="chart-tab active" data-symbol="SPY">SPY</button>
                     <button class="chart-tab" data-symbol="VIX">VIX</button>
                     <button class="chart-tab" data-symbol="BTCUSD">BTC</button>
+                    <button class="chart-expand-btn" id="chartExpandBtn" type="button" title="Expand chart">&#x2922;</button>
                 </div>
                 <div class="chart-container" id="chartContainer">
                     <!-- TradingView Widget -->
@@ -1799,7 +1815,7 @@
     <!-- TradingView Widget Script -->
     <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
-    <script src="/app.js?v=166"></script>
+    <script src="/app.js?v=167"></script>
     <script src="/cockpit.js?v=1"></script>
     <script src="/laboratory.js?v=1"></script>
 </body>

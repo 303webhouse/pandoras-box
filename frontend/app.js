@@ -5647,6 +5647,12 @@ document.addEventListener('DOMContentLoaded', () => {
     // triggered — the ticker-list DOM is gone. The function bodies remain as
     // never-invoked dead code pending a full RADAR JS teardown.
 
+    // Portfolio strip expand/collapse (P0 2026-07-02)
+    initPortfolioStrip();
+
+    // Chart dock expand/collapse (P0 2026-07-02)
+    initChartExpand();
+
     // Initialize Ticker Analyzer
     setTimeout(initTickerAnalyzer, 700);
 });
@@ -9588,6 +9594,37 @@ function renderPortfolioSummaryWidget(rhSummary, fidRothSummary, pnlData, balanc
     if (retWd) {
         retWd.onclick = () => showWithdrawModal('Fidelity 401A', 'deposit');
     }
+}
+
+// Portfolio strip: click to expand/collapse the per-account breakdown detail.
+// Expanded state is transient (no storage APIs), collapsed on load.
+function initPortfolioStrip() {
+    const toggle = document.getElementById('portfolioStripToggle');
+    const detail = document.getElementById('portfolioDetail');
+    const caret = document.getElementById('portfolioStripCaret');
+    if (!toggle || !detail) return;
+    toggle.addEventListener('click', () => {
+        const open = detail.style.display !== 'none';
+        detail.style.display = open ? 'none' : 'block';
+        if (caret) caret.innerHTML = open ? '&#x25B8;' : '&#x25BE;';
+        toggle.title = open ? 'Click to show account details' : 'Click to hide account details';
+    });
+}
+
+// Chart dock: compact by default; toggle .chart-expanded to restore full height.
+// State is a plain in-memory flag (no storage APIs), reset on load.
+let chartExpanded = false;
+function initChartExpand() {
+    const btn = document.getElementById('chartExpandBtn');
+    const area = document.getElementById('chartArea');
+    if (!btn || !area) return;
+    btn.addEventListener('click', () => {
+        chartExpanded = !chartExpanded;
+        area.classList.toggle('chart-expanded', chartExpanded);
+        btn.title = chartExpanded ? 'Collapse chart' : 'Expand chart';
+        // Nudge the TradingView widget to re-fit the new container height.
+        window.dispatchEvent(new Event('resize'));
+    });
 }
 
 function showCashUpdateModal(currentCash, accountName) {
