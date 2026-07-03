@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Pandora - Real-time Trading Signal Dashboard">
     <title>Pandora</title>
-    <link rel="stylesheet" href="/styles.css?v=141">
+    <link rel="stylesheet" href="/styles.css?v=142">
     <link rel="manifest" href="/manifest.json">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -524,6 +524,17 @@
                 <div class="positions-container" id="openPositions">
                     <p class="empty-state">No open positions</p>
                 </div>
+            </div>
+        </section>
+
+        <!-- Focus List v1 (P0): deduped union of watchlist + open-position tickers -->
+        <section class="focus-list-section" id="focusListSection">
+            <div class="focus-list-header">
+                <span class="focus-list-title">FOCUS LIST</span>
+                <span class="focus-list-status" id="focusListStatus"></span>
+            </div>
+            <div class="focus-list-strip" id="focusListStrip">
+                <span class="empty-state">No focus tickers</span>
             </div>
         </section>
 
@@ -1815,7 +1826,7 @@
     <!-- TradingView Widget Script -->
     <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
-    <script src="/app.js?v=167"></script>
+    <script src="/app.js?v=168"></script>
     <script src="/cockpit.js?v=1"></script>
     <script src="/laboratory.js?v=1"></script>
 </body>

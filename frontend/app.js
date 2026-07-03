@@ -8189,6 +8189,7 @@ function initOptionsFlow() {
     initHydra();
     initLightningCards();
     loadWatchlist();
+    managedInterval(loadWatchlist, 300000); // Focus List refresh (5-min)
     // Flow radar: 2-min refresh during market hours
     setInterval(() => {
         const now = new Date();
@@ -13067,6 +13068,11 @@ async function passLightningCard(cardId) {
 
 // === CHRONOS TAB SWITCHING ===
 // === TRADE WATCHLIST ===
+// Manual-watchlist tickers captured from the reused /trade-watchlist fetch, used
+// as one input to the Focus List (P0 2026-07-02).
+let focusWatchlistTickers = [];
+let focusWatchlistTimestamp = null;
+
 async function loadWatchlist() {
     try {
         const resp = await fetch(`${API_URL}/trade-watchlist`, { headers: authHeaders() });
@@ -13075,9 +13081,71 @@ async function loadWatchlist() {
         renderWatchlistCards(data.long_ideas || [], 'watchlist-long-cards', 'long');
         renderWatchlistCards(data.short_ideas || [], 'watchlist-short-cards', 'short');
         renderStalenessIndicator(document.getElementById('watchlist-long-cards'), data.timestamp || data.updated_at || new Date().toISOString());
+        // Capture watchlist tickers + freshness for the Focus List strip
+        const wl = [...(data.long_ideas || []), ...(data.short_ideas || [])];
+        focusWatchlistTickers = wl.map(e => (e.ticker || '').toUpperCase()).filter(Boolean);
+        focusWatchlistTimestamp = data.timestamp || data.updated_at || new Date().toISOString();
+        renderFocusList();
     } catch (err) {
         console.error('Watchlist load error:', err);
     }
+}
+
+// Focus List v1: deduped union of manual-watchlist tickers (W) and open-position
+// tickers (P). Daily change % is shown only if already in client memory, else '--'.
+// No new backend, no new UW calls. Clicking a row syncs the chart dock.
+function getInMemoryChangePct(ticker) {
+    // Best-effort: reuse whatever is already cached client-side; never fetch.
+    const t = (ticker || '').toUpperCase();
+    const hit = (watchlistTickerCache || []).find(x => (x.symbol || '').toUpperCase() === t);
+    if (hit && typeof hit.change_1d === 'number') return hit.change_1d;
+    return null;
+}
+
+function renderFocusList() {
+    const strip = document.getElementById('focusListStrip');
+    if (!strip) return;
+
+    const posTickers = (openPositions || [])
+        .map(p => (p.ticker || '').toUpperCase()).filter(Boolean);
+    const posSet = new Set(posTickers);
+    const wlSet = new Set(focusWatchlistTickers);
+
+    // Deduped union, positions first then watchlist-only, alphabetical within group
+    const union = Array.from(new Set([...posTickers, ...focusWatchlistTickers]));
+    union.sort((a, b) => {
+        const ap = posSet.has(a), bp = posSet.has(b);
+        if (ap !== bp) return ap ? -1 : 1;
+        return a.localeCompare(b);
+    });
+
+    if (union.length === 0) {
+        strip.innerHTML = '<span class="empty-state">No focus tickers</span>';
+    } else {
+        strip.innerHTML = union.map(t => {
+            const chg = getInMemoryChangePct(t);
+            const chgStr = chg == null ? '--' : (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%';
+            const chgClass = chg == null ? 'neutral' : chg >= 0 ? 'up' : 'down';
+            const src = posSet.has(t) ? 'P' : 'W';
+            const srcTitle = posSet.has(t) ? 'Open position' : 'Watchlist';
+            const dual = posSet.has(t) && wlSet.has(t) ? ' focus-chip-dual' : '';
+            return `<button type="button" class="focus-chip" data-ticker="${escapeHtml(t)}" title="Sync chart to ${escapeHtml(t)}">`
+                + `<span class="focus-chip-ticker">${escapeHtml(t)}</span>`
+                + `<span class="focus-chip-change ${chgClass}">${chgStr}</span>`
+                + `<span class="focus-chip-src${dual}" title="${srcTitle}">${src}</span>`
+                + `</button>`;
+        }).join('');
+        strip.querySelectorAll('.focus-chip[data-ticker]').forEach(el => {
+            el.addEventListener('click', () => {
+                const tk = el.dataset.ticker;
+                if (tk) changeChartSymbol(tk);
+            });
+        });
+    }
+
+    // Live-data staleness dot (existing dot system), keyed off the watchlist fetch
+    const statusEl = document.getElementById('focusListStatus');
+    if (statusEl) renderStalenessIndicator(statusEl, focusWatchlistTimestamp);
 }
 
 function renderWatchlistCards(entries, containerId, direction) {
