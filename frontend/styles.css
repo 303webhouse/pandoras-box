@@ -290,7 +290,7 @@ body {
     align-self: stretch;
 }
 
-/* Intel Center tabs (Sectors / Argus) */
+/* Intel Center tabs (Sectors / Earnings) */
 .intel-tabs {
     display: flex;
     gap: 2px;
@@ -340,17 +340,6 @@ body {
     min-height: 0;
 }
 
-#argusTabContent {
-    padding: 0 12px 10px 12px;
-    overflow-y: auto;
-    scrollbar-width: thin;
-    scrollbar-color: rgba(20, 184, 166, 0.3) transparent;
-}
-
-#argusTabContent .flow-radar-section {
-    flex: 1;
-    min-height: 0;
-}
 
 
 
