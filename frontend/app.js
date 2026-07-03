@@ -3571,17 +3571,49 @@ async function loadCyclicalBiasFallback() {
 
 
 
+// ── Retired-strategy display filter (hotfix 2026-07-03) ───────────────────────
+// Hide signals from retired strategy classes across ALL Insights tabs. Display
+// layer only — no backend or scoring change. Header toggle defaults OFF, so
+// nothing disappears silently: the "Show retired (N)" count is always visible.
+const RETIRED_STRATEGIES = new Set(['holy_grail', 'crypto_scanner', 'wh_accumulation', 'cta', 'icarus']);
+let showRetiredStrategies = false;
+let _retiredHiddenCount = 0;
+function _stratKey(s) { return (s || '').toString().toLowerCase().replace(/[\s-]+/g, '_'); }
+function isRetiredStrategy(signal) {
+    if (!signal) return false;
+    return RETIRED_STRATEGIES.has(_stratKey(signal.strategy)) || RETIRED_STRATEGIES.has(_stratKey(signal.signal_type));
+}
+// Filter a list, counting retired items regardless of toggle. getSig maps a list
+// item to its signal object (for grouped feeds where the item is a group).
+function applyRetiredFilter(list, getSig) {
+    let hidden = 0;
+    const out = [];
+    for (const item of (list || [])) {
+        const sig = getSig ? getSig(item) : item;
+        if (isRetiredStrategy(sig)) { hidden++; if (!showRetiredStrategies) continue; }
+        out.push(item);
+    }
+    _retiredHiddenCount = hidden;
+    const el = document.getElementById('retired-count');
+    if (el) el.textContent = hidden;
+    return out;
+}
+function toggleRetiredStrategies(cb) {
+    showRetiredStrategies = !!(cb && cb.checked);
+    refreshInsights();
+}
+
 // Signal Rendering — unified feed (exclude raw crypto, keep equity tickers like IBIT)
 function renderSignals() {
     const container = document.getElementById('tradeSignals');
 
-    // P0 4b render-skip: identical signal set + sort + pagination -> no rebuild
-    const _k = insightsSortMode + '|' + JSON.stringify(signals.equity) + '|' + JSON.stringify(tradeIdeasPagination.equity);
+    // P0 4b render-skip: identical signal set + sort + pagination + retired toggle
+    const _k = insightsSortMode + '|' + showRetiredStrategies + '|' + JSON.stringify(signals.equity) + '|' + JSON.stringify(tradeIdeasPagination.equity);
     if (_k === _rsSignals) return;
     _rsSignals = _k;
 
-    // Show all equity signals; exclude asset_class=CRYPTO (raw crypto pairs)
-    const allSignals = [...signals.equity];
+    // Show all equity signals; exclude asset_class=CRYPTO and retired strategy classes
+    const allSignals = applyRetiredFilter([...signals.equity]);
     if (insightsSortMode === 'score') {
         allSignals.sort((a, b) => (b.score || 0) - (a.score || 0));
     } else {
@@ -4051,6 +4083,13 @@ function renderGroupedSignals(groups) {
             const tB = b.primary_signal ? new Date(b.primary_signal.timestamp || 0).getTime() : 0;
             return tB - tA;
         });
+    }
+
+    // Hide retired strategy classes (display-only); count surfaces in the header toggle
+    groups = applyRetiredFilter(groups, g => g && g.primary_signal);
+    if (groups.length === 0) {
+        container.innerHTML = '<p class="empty-state">No active insights — all retired (enable "Show retired" to view)</p>';
+        return;
     }
 
     container.innerHTML = groups.map(group => {
@@ -8215,20 +8254,16 @@ function initOptionsFlow() {
 
     // P1.2: heatmap Flow/Price toggle — anchored to heatmap container (was: row above)
     (function initHeatmapToggle() {
-        var heatmapEl = document.getElementById('sectorHeatmap');
-        if (!heatmapEl || heatmapEl.parentElement.querySelector('.heatmap-toggle')) return;
-        var toggleHtml = '<div class="heatmap-toggle">'
-            + '<button class="heatmap-toggle-btn active" data-metric="price" title="Color cells by daily price change">Price</button>'
-            + '<button class="heatmap-toggle-btn" data-metric="flow" title="Color cells by aggregate options flow direction">Flow</button>'
-            + '</div>';
-        // Insert into the heatmap's parent so the toggle can absolute-position relative to it
-        heatmapEl.parentElement.insertAdjacentHTML('afterbegin', toggleHtml);
-        heatmapEl.parentElement.querySelectorAll('.heatmap-toggle-btn').forEach(function(btn) {
+        // Hotfix 2026-07-03: the Price/Flow toggle now lives in the sector-panel
+        // header (index.html), not floating over the tiles. Just wire the buttons.
+        var toggle = document.querySelector('.sector-panel-header .heatmap-toggle');
+        if (!toggle) return;
+        toggle.querySelectorAll('.heatmap-toggle-btn').forEach(function(btn) {
             btn.addEventListener('click', function() {
                 var metric = btn.dataset.metric;
                 if (metric === _heatmapMetric) return;
                 _heatmapMetric = metric;
-                heatmapEl.parentElement.querySelectorAll('.heatmap-toggle-btn').forEach(function(b) {
+                toggle.querySelectorAll('.heatmap-toggle-btn').forEach(function(b) {
                     b.classList.toggle('active', b.dataset.metric === metric);
                 });
                 loadSectorHeatmap();
@@ -8306,115 +8341,70 @@ async function loadSectorHeatmap() {
 }
 
 function renderSectorHeatmap(sectors, heatmapData) {
-    // P0 4b render-skip: key on metric + sector data only (freshness fields are
-    // rendered separately, so they don't defeat the skip)
-    const _k = (_heatmapMetric || 'price') + '|' + JSON.stringify(sectors);
+    // P0 4b render-skip: key on metric + sector data only (freshness rendered separately)
+    const _k = (_heatmapMetric || "price") + "|" + JSON.stringify(sectors);
     if (_k === _rsHeatmap) return;
     _rsHeatmap = _k;
-    const container = document.getElementById('sectorHeatmap');
+    const container = document.getElementById("sectorHeatmap");
     if (!container) return;
     if (!sectors || sectors.length === 0) {
         container.innerHTML = '<p class="empty-state">No sector data</p>';
         return;
     }
 
-    // Sort by weight descending
-    const sorted = [...sectors].sort((a, b) => b.weight - a.weight);
-    const maxWeight = sorted[0].weight;
+    // Hotfix 2026-07-03: uniform CSS-grid tiles (equal size, wrapping) replace the
+    // weight-based squarified treemap that the ARGUS relocation squished into
+    // truncated, unequal cells. Sorted by daily relative strength; each tile shows
+    // ticker + 1d%% + RS number. No long names to truncate, no absolute overlays.
+    const sorted = [...sectors].sort((a, b) => (b.rs_daily || 0) - (a.rs_daily || 0));
 
-    // Squarified treemap layout — fills 100% of container
-    const W = container.clientWidth || 500;
-    const H = container.clientHeight || 400;
-    const gap = 3;
-    const rects = squarifyTreemap(sorted.map(s => s.weight), W, H, gap);
-
-    let html = '';
-    sorted.forEach((sector, i) => {
-        const r = rects[i];
-        const area = r.w * r.h;
-        const maxArea = W * H;
-        // Font scale: sqrt of area ratio gives perceptual size scaling
-        const scale = (0.65 + 0.85 * Math.sqrt(area / maxArea) / Math.sqrt(maxWeight)).toFixed(3);
-        // Simpler: scale based on weight ratio with wider range
-        const t = sector.weight / maxWeight;
-        const fontScale = Math.max(0.45, 0.7 + 0.7 * t).toFixed(3);
-        // P2: metric-aware cell coloring
+    let html = "";
+    sorted.forEach(sector => {
         let hm;
-        if (_heatmapMetric === 'flow') {
+        if (_heatmapMetric === "flow") {
             const fd = sector.flow_direction;
             const pct = sector.flow_call_pct != null ? sector.flow_call_pct : 0.5;
             const intensity = Math.min(1.0, 0.3 + 0.7 * Math.min(1, Math.abs(pct - 0.5) * 4));
-            if (fd === 'bullish') {
-                hm = {
-                    borderColor: `rgba(124, 255, 107, ${(0.4 + 0.6 * intensity).toFixed(2)})`,
-                    glow: `0 0 ${(6 + 8 * intensity).toFixed(0)}px rgba(124, 255, 107, ${(0.08 + 0.17 * intensity).toFixed(2)})`,
-                    changeColor: '#7CFF6B',
-                };
-            } else if (fd === 'bearish') {
-                hm = {
-                    borderColor: `rgba(255, 107, 53, ${(0.4 + 0.6 * intensity).toFixed(2)})`,
-                    glow: `0 0 ${(6 + 8 * intensity).toFixed(0)}px rgba(255, 107, 53, ${(0.08 + 0.17 * intensity).toFixed(2)})`,
-                    changeColor: '#FF6B35',
-                };
+            if (fd === "bullish") {
+                hm = { borderColor: `rgba(124, 255, 107, ${(0.4 + 0.6 * intensity).toFixed(2)})`, changeColor: "var(--up)" };
+            } else if (fd === "bearish") {
+                hm = { borderColor: `rgba(255, 107, 53, ${(0.4 + 0.6 * intensity).toFixed(2)})`, changeColor: "var(--down)" };
             } else {
-                hm = { borderColor: 'rgba(255,255,255,0.1)', glow: 'none', changeColor: 'var(--text-secondary)' };
+                hm = { borderColor: "rgba(255,255,255,0.12)", changeColor: "var(--text-secondary)" };
             }
         } else {
             hm = getHeatmapStyle(sector.change_1d);
         }
-        const changeSign = sector.change_1d >= 0 ? '+' : '';
-        const changeVal = sector.change_1d != null ? sector.change_1d.toFixed(2) : '0.00';
-        const change1w = (sector.change_1w || 0);
-        const change1wStr = (change1w >= 0 ? '+' : '') + change1w.toFixed(2);
-        const change1m = (sector.change_1m || 0);
-        const change1mStr = (change1m >= 0 ? '+' : '') + change1m.toFixed(2);
-        const rsDaily = (sector.rs_daily || 0);
-        const rsDailyStr = (rsDaily >= 0 ? '+' : '') + rsDaily.toFixed(2);
+        const changeSign = sector.change_1d >= 0 ? "+" : "";
+        const changeVal = sector.change_1d != null ? sector.change_1d.toFixed(2) : "0.00";
+        const change1wStr = ((sector.change_1w || 0) >= 0 ? "+" : "") + (sector.change_1w || 0).toFixed(2);
+        const change1mStr = ((sector.change_1m || 0) >= 0 ? "+" : "") + (sector.change_1m || 0).toFixed(2);
+        const rsDaily = sector.rs_daily || 0;
+        const rsStr = (rsDaily >= 0 ? "+" : "") + rsDaily.toFixed(2);
         const weightStr = (sector.weight * 100).toFixed(1);
-        const trend = sector.trend || 'flat';
-        const trendArrow = trend === 'up' ? '▲' : trend === 'down' ? '▼' : '→';
-        const trendClass = trend === 'up' ? 'trend-up' : trend === 'down' ? 'trend-down' : 'trend-flat';
-
-        // Conditional rendering based on cell size
-        const cellArea = r.w * r.h;
-        const isTiny = cellArea < 4000 || r.h < 50;    // barely fits 2 lines
-        const isSmall = cellArea < 8000 || r.h < 70;    // fits ETF + change + name
-        let cellContent;
-        if (isTiny) {
-            // Tiny: ETF ticker + change% only
-            cellContent = `<span class="sector-hm-etf">${sector.etf}</span>
-                <span class="sector-hm-change" style="color:${hm.changeColor}">${changeSign}${changeVal}%</span>`;
-        } else if (isSmall) {
-            // Small: name + ETF + change% (no RS, no trend arrow)
-            cellContent = `<span class="sector-hm-name">${escapeHtml(sector.name)}</span>
-                <span class="sector-hm-etf">${sector.etf}</span>
-                <span class="sector-hm-change" style="color:${hm.changeColor}">${changeSign}${changeVal}%</span>`;
-        } else {
-            // Normal: all 4 lines
-            cellContent = `<span class="sector-hm-name">${escapeHtml(sector.name)}</span>
-                <span class="sector-hm-etf">${sector.etf}</span>
-                <span class="sector-hm-change" style="color:${hm.changeColor}">${changeSign}${changeVal}% <span class="sector-hm-trend ${trendClass}">${trendArrow}</span></span>
-                <span class="sector-hm-rs" style="color:${rsDaily >= 0 ? '#7CFF6B' : '#FF6B35'}">RS: ${rsDailyStr}%</span>`;
-        }
-
-        html += `<div class="sector-heatmap-cell"
-            style="left:${r.x}px;top:${r.y}px;width:${r.w}px;height:${r.h}px;--s:${fontScale};border-color:${hm.borderColor};box-shadow:${hm.glow};"
-            data-etf="${sector.etf}"
-            title="${escapeHtml(sector.name)} (${sector.etf})\nDay: ${changeSign}${changeVal}%\nWeek: ${change1wStr}%\nMonth: ${change1mStr}%\nRS (daily): ${rsDailyStr}%\nRank: #${sector.strength_rank || '--'}\nSPY Weight: ${weightStr}%">
-            ${cellContent}
+        html += `<div class="sector-heatmap-cell" data-etf="${sector.etf}"
+            style="border-color:${hm.borderColor};"
+            title="${escapeHtml(sector.name)} (${sector.etf})
+Day: ${changeSign}${changeVal}%
+Week: ${change1wStr}%
+Month: ${change1mStr}%
+RS (daily): ${rsStr}%
+Rank: #${sector.strength_rank || '--'}
+SPY Weight: ${weightStr}%">
+            <span class="sector-hm-etf">${sector.etf}</span>
+            <span class="sector-hm-change" style="color:${hm.changeColor}">${changeSign}${changeVal}%</span>
+            <span class="sector-hm-rs" style="color:${rsDaily >= 0 ? 'var(--up)' : 'var(--down)'}">RS ${rsStr}</span>
         </div>`;
     });
 
     container.innerHTML = html;
 
-    // Click handler: open sector drill-down popup
-    container.querySelectorAll('.sector-heatmap-cell').forEach(cell => {
-        cell.addEventListener('click', () => {
+    container.querySelectorAll(".sector-heatmap-cell").forEach(cell => {
+        cell.addEventListener("click", () => {
             const etf = cell.dataset.etf;
             if (etf) openSectorPopup(etf);
         });
     });
-
 }
 
 // Squarified treemap: attempt to produce near-square rectangles filling W×H
@@ -12445,6 +12435,15 @@ async function loadMacroStrip() {
 function renderMacroStrip(tickers) {
     const container = document.getElementById('macroStripInner');
     if (!container || !tickers || tickers.length === 0) return;
+
+    // Hotfix 2026-07-03: dedupe by label so entries like UK/KR don't render twice.
+    const _seen = new Set();
+    tickers = tickers.filter(t => {
+        const k = (t && t.label != null) ? String(t.label) : JSON.stringify(t);
+        if (_seen.has(k)) return false;
+        _seen.add(k);
+        return true;
+    });
 
     const cellsHtml = tickers.map((t, i) => {
         const sign = t.change_pct >= 0 ? '+' : '';
