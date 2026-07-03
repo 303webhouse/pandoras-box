@@ -92,7 +92,7 @@ def _format_premium(val):
     return f"${val}"
 
 
-async def _load_flow_from_db(pool, lookback_minutes: int = 30):
+async def _load_flow_from_db(pool, lookback_hours: int = 72):
     """F1 db_fallback: reconstruct the uw:flow:* summaries from the LATEST
     flow_events row per ticker when Redis is empty/errored (the 7/1 outage: the
     poller's Redis writes failed while its Postgres writes stayed healthy).
@@ -100,7 +100,13 @@ async def _load_flow_from_db(pool, lookback_minutes: int = 30):
     Read-only, no UW. Rebuilds via build_flow_summary so sentiment stays
     PREMIUM-based (identical to the Redis path), NOT flow_events.flow_sentiment
     (volume-based). NUMERICs cast to float8 in SQL so no Decimal leaks into JSON.
-    Returns (flow_data, newest_captured_at_iso)."""
+
+    lookback_hours is a generous QUERY BOUND, NOT a staleness gate (mini-brief §4:
+    do not hardcode a staleness threshold). DISTINCT ON picks each ticker's newest
+    row, so a 7/1-style intraday outage still serves seconds-old data; the wide
+    bound only adds weekend/holiday coverage (poller is off Sat/Sun -> Redis empties)
+    where it serves the last session with an HONEST data_age_seconds that the
+    existing stale-degradation rules discount. Returns (flow_data, newest_iso)."""
     flow_data: Dict[str, Dict] = {}
     newest = None
     if not pool:
@@ -120,10 +126,10 @@ async def _load_flow_from_db(pool, lookback_minutes: int = 30):
                        change_pct::float8     AS change_pct,
                        captured_at
                 FROM flow_events
-                WHERE captured_at >= NOW() - ($1 * INTERVAL '1 minute')
+                WHERE captured_at >= NOW() - ($1 * INTERVAL '1 hour')
                 ORDER BY ticker, captured_at DESC
                 """,
-                lookback_minutes,
+                lookback_hours,
             )
         for r in rows:
             ticker = (r["ticker"] or "").upper()
