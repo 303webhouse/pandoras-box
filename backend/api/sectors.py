@@ -285,6 +285,7 @@ async def get_sector_heatmap(
     for i, sector in enumerate(ranked):
         sector["strength_rank"] = i + 1
 
+    _snapshot_time = datetime.now(timezone.utc).isoformat()
     result = {
         "sectors": sorted(sectors_data, key=lambda s: s["weight"], reverse=True),
         "spy_change_1d": spy_change_1d,
@@ -292,14 +293,15 @@ async def get_sector_heatmap(
         "spy_change_1m": spy_change_1m,
         "is_market_hours": is_live,
         "metric": metric,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        # as_of = ISO-8601 UTC snapshot time of the underlying data. Renamed from the
+        # old "timestamp" key to match the Governor freshness contract exactly. Set
+        # below; stays null when there is no real data so the frontend shows UNKNOWN
+        # (never fake-fresh). data_age_seconds is attached per-response by _with_age.
+        "as_of": None,
     }
 
     has_real_data = any(s.get("price") for s in sectors_data)
-
-    # as_of = snapshot time of the underlying data (Task 5). Only set when we have
-    # real data; otherwise leave null so the frontend shows UNKNOWN, never fake-fresh.
-    result["as_of"] = result["timestamp"] if has_real_data else None
+    result["as_of"] = _snapshot_time if has_real_data else None
 
     # No data at all — try stale fallback
     if not has_real_data and redis:

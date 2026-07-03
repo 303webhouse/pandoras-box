@@ -8199,7 +8199,7 @@ let flowHotTickers = [];
 let flowRecentAlerts = [];
 
 function initOptionsFlow() {
-    // Intel Center tab switching (Sectors / Argus)
+    // Intel Center tab switching (Sectors / Earnings)
     document.querySelectorAll('.intel-tab').forEach(btn => {
         btn.addEventListener('click', () => {
             document.querySelectorAll('.intel-tab').forEach(b => b.classList.remove('active'));
@@ -8271,9 +8271,9 @@ async function loadSectorHeatmap() {
         const data = await response.json();
         renderSectorHeatmap(data.sectors, data);
 
-        // P0 Task 5: heatmap freshness chip, driven by server data_age_seconds.
+        // P0 Task 5: heatmap freshness chip, driven by server data_age_seconds + as_of.
         // Updated every poll (outside the render-skip). null age -> UNKNOWN, not fresh.
-        updateHeatmapStalenessChip(data.data_age_seconds);
+        updateHeatmapStalenessChip(data.data_age_seconds, data.as_of);
 
         // P1.2: in flow mode, show "limited flow data" hint when most sectors are neutral
         var heatmapEl = document.getElementById('sectorHeatmap');
@@ -8689,9 +8689,10 @@ function _flowFmtAge(s) {
 // the widget just tells the truth about age. staleness_seconds is null when unknown
 // (never 0 → never a fake-fresh read).
 // P0 Task 5: heatmap freshness chip using the existing 3-state staleness pattern.
-// `ageSeconds === null/undefined` -> UNKNOWN (never fake-fresh); Governor enforce
-// prerequisite. Lives in the heatmap header, updated each poll.
-function updateHeatmapStalenessChip(ageSeconds) {
+// Driven by server-computed data_age_seconds; reads `as_of` (contract field) for a
+// tooltip and as a client-side fallback if age is absent. Both null -> UNKNOWN
+// (never fake-fresh). Governor enforce prerequisite; lives in the heatmap header.
+function updateHeatmapStalenessChip(ageSeconds, asOf) {
     const heatmapEl = document.getElementById('sectorHeatmap');
     if (!heatmapEl || !heatmapEl.parentElement) return;
     const parent = heatmapEl.parentElement;
@@ -8701,7 +8702,14 @@ function updateHeatmapStalenessChip(ageSeconds) {
         chip.className = 'heatmap-staleness-chip';
         parent.insertAdjacentElement('afterbegin', chip);
     }
-    const st = flowStalenessState(ageSeconds == null ? null : ageSeconds);
+    // Prefer the authoritative server age; derive from as_of only if age is missing.
+    let age = (ageSeconds == null) ? null : ageSeconds;
+    if (age == null && asOf) {
+        const t = Date.parse(asOf);
+        if (!isNaN(t)) age = Math.max(0, Math.round((Date.now() - t) / 1000));
+    }
+    if (asOf) chip.title = 'Data as of ' + asOf; else chip.removeAttribute('title');
+    const st = flowStalenessState(age);
     chip.textContent = st.label;
     chip.style.color = st.color;
 }
