@@ -13657,3 +13657,59 @@ body[data-mode="analytics"] .analytics-shell {
     margin-left: auto;
 }
 .drift-reconcile-btn:hover { opacity: 0.85; }
+
+/* === Focus List v1 (P0 2026-07-02): compact ticker strip below positions === */
+.focus-list-section {
+    background: var(--card-bg);
+    border: 2px solid var(--border-color);
+    border-radius: 10px;
+    padding: 10px 14px;
+    margin-top: 12px;
+}
+.focus-list-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+.focus-list-title {
+    font-family: 'Orbit', sans-serif;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--text-secondary);
+}
+.focus-list-status { display: inline-flex; align-items: center; }
+.focus-list-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+.focus-chip {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 6px;
+    padding: 3px 8px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.02);
+    color: var(--text-primary);
+    cursor: pointer;
+    font-family: 'JetBrains Mono', monospace;
+    font-variant-numeric: tabular-nums;
+}
+.focus-chip:hover { border-color: var(--accent-teal); }
+.focus-chip-ticker { font-weight: 700; font-size: 0.8rem; }
+.focus-chip-change { font-size: 0.7rem; }
+.focus-chip-change.up { color: #00e676; }
+.focus-chip-change.down { color: var(--pnl-negative); }
+.focus-chip-change.neutral { color: var(--text-secondary); }
+.focus-chip-src {
+    font-size: 0.6rem;
+    font-weight: 700;
+    padding: 1px 4px;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text-secondary);
+}
+.focus-chip-src.focus-chip-dual { background: rgba(0, 230, 118, 0.18); color: #00e676; }
