@@ -122,6 +122,28 @@ async def _fetch_all_bars(tickers: List[str] = None, days: int = 45) -> Dict[str
     return results
 
 
+def _with_age(payload: dict) -> dict:
+    """Attach `data_age_seconds` computed at RESPONSE time from `as_of` (P0 Task 5).
+
+    Governor enforce-mode prerequisite: the frontend needs a real per-response age.
+    Follows the flow db_fallback contract — NEVER fake-fresh: if `as_of` is missing
+    or unparseable (true snapshot time unknown), age is None and the frontend renders
+    an UNKNOWN state instead of pretending the data is current.
+    """
+    as_of = payload.get("as_of")
+    age = None
+    if as_of:
+        try:
+            dt = datetime.fromisoformat(as_of)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            age = max(0, int((datetime.now(timezone.utc) - dt).total_seconds()))
+        except Exception:
+            age = None
+    payload["data_age_seconds"] = age
+    return payload
+
+
 @router.get("/heatmap")
 async def get_sector_heatmap(
     metric: str = Query("price", regex="^(price|flow)$",
@@ -143,7 +165,7 @@ async def get_sector_heatmap(
         try:
             cached = await redis.get(cache_key)
             if cached:
-                return json.loads(cached)
+                return _with_age(json.loads(cached))
         except Exception:
             pass
 
@@ -275,12 +297,16 @@ async def get_sector_heatmap(
 
     has_real_data = any(s.get("price") for s in sectors_data)
 
+    # as_of = snapshot time of the underlying data (Task 5). Only set when we have
+    # real data; otherwise leave null so the frontend shows UNKNOWN, never fake-fresh.
+    result["as_of"] = result["timestamp"] if has_real_data else None
+
     # No data at all — try stale fallback
     if not has_real_data and redis:
         try:
             stale = await redis.get(HEATMAP_STALE_KEY)
             if stale:
-                return json.loads(stale)
+                return _with_age(json.loads(stale))
         except Exception:
             pass
 
@@ -294,7 +320,7 @@ async def get_sector_heatmap(
         except Exception:
             pass
 
-    return result
+    return _with_age(result)
 
 
 # ---------------------------------------------------------------------------

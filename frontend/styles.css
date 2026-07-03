@@ -13725,3 +13725,15 @@ body[data-mode="analytics"] .analytics-shell {
     color: var(--text-secondary);
 }
 .focus-chip-src.focus-chip-dual { background: rgba(0, 230, 118, 0.18); color: #00e676; }
+
+/* === Heatmap freshness chip (P0 Task 5) — 3-state fresh/stale/unknown === */
+.heatmap-staleness-chip {
+    position: absolute;
+    top: 6px;
+    left: 8px;
+    z-index: 3;
+    font-size: 10px;
+    font-family: 'JetBrains Mono', monospace;
+    letter-spacing: 0.3px;
+    pointer-events: none;
+}
