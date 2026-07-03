@@ -132,22 +132,9 @@ body {
     50% { opacity: 0.5; }
 }
 
-.daily-quote {
-    flex: 1;
-    text-align: center;
-    font-style: italic;
-    font-size: 12px;
-    line-height: 1.4;
-    color: var(--text-secondary);
-    padding: 0 16px;
-    min-width: 0;
-}
 
-.daily-quote .quote-author {
-    font-style: normal;
-    font-weight: 600;
-    margin-left: 6px;
-}
+
+
 
 .header-controls {
     display: flex;
@@ -353,27 +340,12 @@ body {
     min-height: 0;
 }
 
-/* Market pulse strip (one-line regime + P/C + premium) */
-.market-pulse-strip {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 6px 0;
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 0.5px;
-    color: var(--text-secondary);
-    border-bottom: 1px solid var(--border-color);
-}
 
-.pulse-regime { text-transform: uppercase; }
-.pulse-separator { opacity: 0.3; }
 
-/* Headlines compact strip (3 lines, always visible) */
-.headlines-strip {
-    padding: 6px 0;
-    border-bottom: 1px solid var(--border-color);
-}
+
+
+
+
 
 .headline-compact {
     font-size: 11px;
@@ -4762,11 +4734,7 @@ body.override-active-bearish .override-toggle[data-active="true"] {
     font-style: italic;
 }
 
-/* Watchlist & Analyzer Section */
-.watchlist-section {
-    display: block;
-    margin-bottom: 20px;
-}
+
 
 .watchlist-container,
 .ticker-analyzer {
@@ -9559,13 +9527,7 @@ body[data-mode="analytics"] .analytics-shell {
     }
 }
 
-/* ==============================
-   Watchlist v3 (Two-Column — analyzer moved to bias-right-stack)
-   ============================== */
-.watchlist-v3 {
-    display: block;
-    width: 100%;
-}
+
 
 .watchlist-left,
 .watchlist-middle {
@@ -9581,42 +9543,15 @@ body[data-mode="analytics"] .analytics-shell {
     box-shadow: 0 8px 18px rgba(0, 0, 0, 0.18);
 }
 
-.tickers-header h2 {
-    font-size: 14px;
-    letter-spacing: 2px;
-}
 
-.tickers-controls {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 12px;
-    margin-top: 8px;
-}
 
-.tickers-control {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 11px;
-    color: #90a4ae;
-}
 
-.tickers-control select {
-    background: #0f1c2b;
-    border: 1px solid #1e3a5f;
-    color: #cfd8dc;
-    border-radius: 4px;
-    padding: 4px 8px;
-    font-size: 11px;
-}
 
-.tickers-meta {
-    display: flex;
-    gap: 12px;
-    font-size: 11px;
-    color: #78909c;
-}
+
+
+
+
+
 
 .ticker-list {
     border-top: 1px solid #1a2a3a;
@@ -9658,11 +9593,11 @@ body[data-mode="analytics"] .analytics-shell {
 .radar-position-label { font-size: 9px; margin-top: 3px; padding: 1px 4px; border-radius: 3px; text-align: center; }
 .radar-position-label.bearish, .radar-position-label.short { background: rgba(229,55,14,0.15); color: #e5370e; }
 .radar-position-label.bullish, .radar-position-label.long { background: rgba(0,230,118,0.15); color: #00e676; }
-.radar-controls { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 4px 0; }
-.radar-filters, .radar-sort-pills { display: flex; gap: 2px; }
+
+
 .radar-filter-pill, .radar-sort-pill { padding: 3px 8px; font-size: 10px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); background: transparent; color: #94a3b8; cursor: pointer; transition: all 0.15s; }
 .radar-filter-pill.active, .radar-sort-pill.active { background: rgba(20,184,166,0.15); border-color: #14b8a6; color: #14b8a6; }
-.radar-meta { font-size: 10px; color: #64748b; margin-left: auto; }
+
 
 .ticker-header-v3,
 .ticker-row-v3 {
@@ -9798,14 +9733,7 @@ body[data-mode="analytics"] .analytics-shell {
     color: #4fc3f7;
 }
 
-.tickers-footer {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding-top: 8px;
-    font-size: 11px;
-    color: #546e7a;
-}
+
 
 .bulk-actions {
     display: flex;
@@ -10031,9 +9959,7 @@ body[data-mode="analytics"] .analytics-shell {
 }
 
 @media (max-width: 1080px) {
-    .watchlist-v3 {
-        grid-template-columns: 1fr;
-    }
+    
 }
 
 @media (max-width: 680px) {
@@ -11601,89 +11527,29 @@ body[data-mode="analytics"] .analytics-shell {
     opacity: 0.5;
 }
 
-/* === HYDRA SQUEEZE MONITOR === */
-.hydra-panel {
-    margin-top: 8px;
-    border: 1px solid rgba(255,255,255,0.08);
-    border-radius: 4px;
-    background: rgba(0,0,0,0.2);
-}
-.hydra-header {
-    display: flex;
-    align-items: center;
-    padding: 8px 12px;
-    cursor: pointer;
-    user-select: none;
-}
-.hydra-header:hover { background: rgba(255,255,255,0.03); }
-.hydra-title {
-    font-size: 13px;
-    font-weight: 600;
-    font-family: 'IBM Plex Mono', monospace;
-    color: rgba(255,255,255,0.8);
-    flex: 1;
-}
-.hydra-warning-badge {
-    background: #f44336;
-    color: #fff;
-    border-radius: 50%;
-    width: 18px;
-    height: 18px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 11px;
-    font-weight: 700;
-    margin-right: 8px;
-    animation: hermes-badge-pulse 1.5s ease-in-out infinite;
-}
-.hydra-toggle { font-size: 10px; opacity: 0.5; }
-.hydra-body { padding: 0 12px 12px; }
-.hydra-tabs {
-    display: flex;
-    gap: 4px;
-    margin-bottom: 8px;
-    padding-top: 4px;
-}
-.hydra-tab {
-    padding: 4px 12px;
-    border: 1px solid rgba(255,255,255,0.1);
-    border-radius: 3px;
-    background: none;
-    color: rgba(255,255,255,0.5);
-    font-size: 12px;
-    cursor: pointer;
-}
+
+
+
+
+
+
+
+
+
 .hydra-tab.active {
     background: rgba(255,255,255,0.08);
     color: rgba(255,255,255,0.9);
     border-color: rgba(255,255,255,0.2);
 }
-.hydra-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 12px;
-    font-family: 'IBM Plex Mono', monospace;
-}
-.hydra-table th {
-    text-align: left;
-    padding: 4px 6px;
-    border-bottom: 1px solid rgba(255,255,255,0.1);
-    color: rgba(255,255,255,0.4);
-    font-weight: 500;
-    font-size: 10px;
-    text-transform: uppercase;
-}
-.hydra-table td {
-    padding: 5px 6px;
-    border-bottom: 1px solid rgba(255,255,255,0.04);
-    color: rgba(255,255,255,0.75);
-}
-.hydra-tier-extreme { color: #f44336; font-weight: 700; }
-.hydra-tier-high { color: #ff9800; font-weight: 600; }
-.hydra-tier-moderate { color: #ffc107; }
-.hydra-tier-low { color: rgba(255,255,255,0.4); }
-.hydra-exposure-warning {
+
+
+
+
+
+
+
+/* Squeeze exposure warning relocated to top of positions panel (P0 2026-07-02) */
+.positions-exposure-warning {
     padding: 6px 10px;
     margin-bottom: 8px;
     border-radius: 3px;
@@ -11692,35 +11558,12 @@ body[data-mode="analytics"] .analytics-shell {
     border: 1px solid rgba(244, 67, 54, 0.3);
     color: #f44336;
 }
-.hydra-convergence {
-    margin-top: 8px;
-    padding: 6px 10px;
-    border-radius: 3px;
-    font-size: 12px;
-    background: rgba(156, 39, 176, 0.12);
-    border: 1px solid rgba(156, 39, 176, 0.3);
-    color: #ce93d8;
-    font-weight: 600;
-}
-.hydra-footer {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-top: 8px;
-    padding-top: 6px;
-    border-top: 1px solid rgba(255,255,255,0.05);
-}
-.hydra-timestamp { font-size: 10px; opacity: 0.3; }
-.hydra-refresh-btn {
-    background: none;
-    border: 1px solid rgba(255,255,255,0.1);
-    color: rgba(255,255,255,0.5);
-    font-size: 11px;
-    padding: 2px 8px;
-    border-radius: 3px;
-    cursor: pointer;
-}
-.hydra-refresh-btn:hover { background: rgba(255,255,255,0.05); }
+
+
+
+
+
+
 
 /* === LIGHTNING CARDS === */
 
@@ -11947,88 +11790,33 @@ body[data-mode="analytics"] .analytics-shell {
     100% { background: #c9a04e22; color: #c9a04e; transform: scale(1); }
 }
 
-/* === CHRONOS ROW === */
-.chronos-row {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 1px;
-    background: #1a1f2e;
-    border-top: 1px solid #1a1f2e;
-    border-bottom: 1px solid #1a1f2e;
-}
 
-.chronos-hydra-col,
-.chronos-tabs-col {
-    background: #0a0e17;
-    padding: 12px 16px;
-}
 
-.chronos-hydra-col .hydra-panel {
-    margin: 0;
-    border-radius: 0;
-}
 
-/* Chronos tab bar */
-.chronos-tab-bar {
-    display: flex;
-    gap: 2px;
-    background: #111627;
-    border-radius: 4px;
-    padding: 2px;
-    margin-bottom: 12px;
-}
 
-.chronos-tab {
-    flex: 1;
-    text-align: center;
-    padding: 6px 12px;
-    background: transparent;
-    color: #556;
-    border: none;
-    border-radius: 3px;
-    font-size: 11px;
-    font-weight: 500;
-    cursor: pointer;
-    letter-spacing: 0.5px;
-    transition: all 0.2s;
-}
+
+
+
+
+
 
 .chronos-tab.active {
     background: #1a2235;
     color: #ccc;
 }
 
-/* Watchlist columns */
-.watchlist-columns {
-    display: flex;
-    gap: 12px;
-}
 
-.watchlist-col {
-    flex: 1;
-    min-width: 0;
-}
 
-.watchlist-col-header {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin-bottom: 8px;
-}
 
-.watchlist-col-header .watchlist-col-label {
-    font-size: 10px;
-    font-weight: 500;
-    letter-spacing: 0.5px;
-}
+
+
+
+
 
 .watchlist-col-header.long .watchlist-col-label { color: #00e676; }
 .watchlist-col-header.short .watchlist-col-label { color: #e5370e; }
 
-.watchlist-col-header .watchlist-col-line {
-    flex: 1;
-    height: 0.5px;
-}
+
 
 .watchlist-col-header.long .watchlist-col-line { background: #0a2e1a; }
 .watchlist-col-header.short .watchlist-col-line { background: #2e0a0a; }
@@ -12135,50 +11923,19 @@ body[data-mode="analytics"] .analytics-shell {
     color: #c9a04e;
 }
 
-/* Chronos earnings section */
-.chronos-sections {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-}
 
-.chronos-section-title {
-    font-size: 10px;
-    color: #667;
-    font-weight: 500;
-    letter-spacing: 0.5px;
-    margin-bottom: 6px;
-}
 
-.chronos-entry {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 4px 0;
-    border-bottom: 0.5px solid #111627;
-    font-size: 10px;
-}
 
-.chronos-entry-ticker {
-    color: #ccc;
-    font-weight: 500;
-    min-width: 50px;
-}
 
-.chronos-entry-date {
-    color: #889;
-}
 
-.chronos-entry-timing {
-    color: #556;
-    font-size: 9px;
-}
 
-.chronos-entry-overlap {
-    color: #e54;
-    font-size: 9px;
-    font-weight: 500;
-}
+
+
+
+
+
+
+
 
 /* Watchlist add modal — reuse existing modal styles */
 .watchlist-add-modal {
