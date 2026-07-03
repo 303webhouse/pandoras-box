@@ -1572,10 +1572,6 @@ if frontend_path:
     async def serve_app_js():
         return FileResponse(os.path.join(frontend_path, "app.js"))
 
-    @app.get("/analytics.js", response_class=FileResponse)
-    async def serve_analytics_js():
-        return FileResponse(os.path.join(frontend_path, "analytics.js"))
-
     @app.get("/cockpit.js", response_class=FileResponse)
     async def serve_cockpit_js():
         return FileResponse(os.path.join(frontend_path, "cockpit.js"))
