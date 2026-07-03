@@ -8,7 +8,7 @@ import pytest
 
 
 class TestFrontendEndpointsExist:
-    """Every GET endpoint called by app.js / analytics.js must exist."""
+    """Every GET endpoint called by app.js must exist."""
 
     FRONTEND_GET_ENDPOINTS = [
         "/health",
