@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Pandora - Real-time Trading Signal Dashboard">
     <title>Pandora</title>
-    <link rel="stylesheet" href="/styles.css?v=139">
+    <link rel="stylesheet" href="/styles.css?v=140">
     <link rel="manifest" href="/manifest.json">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -32,7 +32,6 @@
                     </div>
                 </div>
             </div>
-            <div class="daily-quote" id="dailyQuote"></div>
             <div class="header-controls">
                 <div class="mode-switcher" role="tablist" aria-label="App Mode">
                     <button type="button" class="mode-btn active" id="modeHubBtn" data-mode="hub" role="tab" aria-selected="true">Agora</button>
@@ -221,44 +220,11 @@
             <div class="intel-center" id="intelCenter">
                 <div class="intel-tabs">
                     <button class="intel-tab active" data-tab="sectors">SECTORS</button>
-                    <button class="intel-tab" data-tab="argus">ARGUS</button>
                     <button class="intel-tab" data-tab="earnings">EARNINGS</button>
                 </div>
                 <div class="intel-tab-content" id="sectorsTabContent">
                     <div class="sector-heatmap" id="sectorHeatmap">
                         <p class="empty-state">Loading sectors...</p>
-                    </div>
-                </div>
-                <div class="intel-tab-content" id="argusTabContent" style="display:none;">
-                    <div class="market-pulse-strip" id="marketPulseStrip">
-                        <span class="pulse-regime" id="pulseRegime">--</span>
-                        <span class="pulse-separator">&middot;</span>
-                        <span class="pulse-pc" id="pulsePcRatio">P/C --</span>
-                        <span class="pulse-separator">&middot;</span>
-                        <span class="pulse-premium" id="pulsePremium">$--</span>
-                        <span class="pulse-separator">&middot;</span>
-                        <span class="pulse-status" id="pulseStatus">--</span>
-                    </div>
-                    <div class="headlines-strip" id="headlinesStrip">
-                        <div class="headline-compact">Loading headlines...</div>
-                    </div>
-                    <div class="market-intel-section" id="marketIntelSection">
-                        <div class="radar-header">
-                            <span class="radar-title">MARKET INTELLIGENCE</span>
-                            <span class="radar-status" id="intelStatus">--</span>
-                        </div>
-                        <div class="intel-grid" id="intelContent">
-                            <p class="empty-state">Loading UW enrichment...</p>
-                        </div>
-                    </div>
-                    <div class="flow-radar-section" id="flowRadarSection">
-                        <div class="radar-header">
-                            <span class="radar-title">FLOW RADAR</span>
-                            <span class="radar-status" id="radarStatus">--</span>
-                        </div>
-                        <div class="radar-content" id="radarContent">
-                            <p class="empty-state">Waiting for flow data...</p>
-                        </div>
                     </div>
                 </div>
                 <div class="intel-tab-content" id="earningsTabContent" style="display:none;">
@@ -281,6 +247,25 @@
                                 <p class="empty-state">Loading...</p>
                             </div>
                         </div>
+                    </div>
+                </div>
+                <!-- Always-visible market intel (relocated from removed ARGUS tab) -->
+                <div class="market-intel-section" id="marketIntelSection">
+                    <div class="radar-header">
+                        <span class="radar-title">MARKET INTELLIGENCE</span>
+                        <span class="radar-status" id="intelStatus">--</span>
+                    </div>
+                    <div class="intel-grid" id="intelContent">
+                        <p class="empty-state">Loading UW enrichment...</p>
+                    </div>
+                </div>
+                <div class="flow-radar-section" id="flowRadarSection">
+                    <div class="radar-header">
+                        <span class="radar-title">FLOW RADAR</span>
+                        <span class="radar-status" id="radarStatus">--</span>
+                    </div>
+                    <div class="radar-content" id="radarContent">
+                        <p class="empty-state">Waiting for flow data...</p>
                     </div>
                 </div>
             </div>
@@ -479,6 +464,8 @@
                         <span class="positions-count" id="positionsCount">0</span>
                     </div>
                 </div>
+                <!-- Squeeze exposure warning (relocated from removed HYDRA panel) -->
+                <div id="positions-exposure-warning" class="positions-exposure-warning" style="display:none;"></div>
                 <div class="at-risk-mode-toggle">
                     <button class="at-risk-mode active" data-mode="direction" id="atRiskModeDirection">By Direction</button>
                     <button class="at-risk-mode" data-mode="expiry" id="atRiskModeExpiry">By Expiry</button>
@@ -524,165 +511,6 @@
             </div>
         </section>
 
-        <!-- CHRONOS ROW: Hydra Squeeze (left 50%) + Watchlist/Chronos Tabs (right 50%) -->
-        <section class="chronos-row">
-            <!-- LEFT: Hydra Squeeze Monitor (moved from bias-right-stack) -->
-            <div class="chronos-hydra-col">
-                <div class="hydra-panel" id="hydra-panel">
-                    <div class="hydra-header" onclick="toggleHydraPanel()">
-                        <span class="hydra-title">HYDRA Squeeze Monitor</span>
-                        <span class="hydra-warning-badge" id="hydra-warning-badge" style="display:none;">!</span>
-                        <span class="hydra-toggle" id="hydra-toggle">&#x25BC;</span>
-                    </div>
-                    <div class="hydra-body" id="hydra-body" style="display:block;">
-                        <div class="hydra-tabs">
-                            <button class="hydra-tab active" onclick="switchHydraTab('defensive')" id="hydra-tab-defensive">Defensive</button>
-                            <button class="hydra-tab" onclick="switchHydraTab('offensive')" id="hydra-tab-offensive">Offensive</button>
-                        </div>
-                        <div class="hydra-tab-content" id="hydra-defensive-content">
-                            <div id="hydra-exposure-warning" class="hydra-exposure-warning" style="display:none;"></div>
-                            <table class="hydra-table" id="hydra-exposure-table">
-                                <thead>
-                                    <tr>
-                                        <th>Ticker</th>
-                                        <th>Your Position</th>
-                                        <th>Short %</th>
-                                        <th>DTC</th>
-                                        <th>Score</th>
-                                        <th>Risk</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="hydra-exposure-tbody"></tbody>
-                            </table>
-                        </div>
-                        <div class="hydra-tab-content" id="hydra-offensive-content" style="display:none;">
-                            <table class="hydra-table" id="hydra-scores-table">
-                                <thead>
-                                    <tr>
-                                        <th>Ticker</th>
-                                        <th>Short %</th>
-                                        <th>DTC</th>
-                                        <th>Shorts P&amp;L</th>
-                                        <th>Call Flow</th>
-                                        <th>Score</th>
-                                        <th>Tier</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="hydra-scores-tbody"></tbody>
-                            </table>
-                        </div>
-                        <div id="hydra-convergence" class="hydra-convergence" style="display:none;"></div>
-                        <div class="hydra-footer">
-                            <span id="hydra-last-updated" class="hydra-timestamp"></span>
-                            <button class="hydra-refresh-btn" onclick="refreshHydra()">&#x21BB; Refresh</button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- RIGHT: Watchlist / Chronos Tabs -->
-            <div class="chronos-tabs-col">
-                <div class="chronos-tab-bar">
-                    <button class="chronos-tab active" data-chronos-tab="watchlist" onclick="switchChronosTab('watchlist')">WATCHLIST</button>
-                    <button class="chronos-tab" data-chronos-tab="earnings" onclick="switchChronosTab('earnings')">CHRONOS</button>
-                </div>
-
-                <!-- Watchlist Tab Content -->
-                <div class="chronos-tab-content" id="chronos-watchlist-content">
-                    <div class="watchlist-columns">
-                        <!-- LONG Column -->
-                        <div class="watchlist-col" id="watchlist-long-col">
-                            <div class="watchlist-col-header long">
-                                <span class="watchlist-col-label">LONG IDEAS</span>
-                                <span class="watchlist-col-line"></span>
-                            </div>
-                            <div class="watchlist-cards" id="watchlist-long-cards">
-                                <p class="empty-state">No long ideas yet</p>
-                            </div>
-                        </div>
-                        <!-- SHORT Column -->
-                        <div class="watchlist-col" id="watchlist-short-col">
-                            <div class="watchlist-col-header short">
-                                <span class="watchlist-col-label">SHORT IDEAS</span>
-                                <span class="watchlist-col-line"></span>
-                            </div>
-                            <div class="watchlist-cards" id="watchlist-short-cards">
-                                <p class="empty-state">No short ideas yet</p>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="watchlist-add-bar">
-                        <button class="watchlist-add-btn" id="watchlistAddBtn" onclick="openWatchlistAddModal()">+ Add Ticker</button>
-                    </div>
-                </div>
-
-                <!-- Chronos/Earnings Tab Content -->
-                <div class="chronos-tab-content" id="chronos-earnings-content" style="display: none;">
-                    <div class="chronos-sections">
-                        <div class="chronos-section">
-                            <h4 class="chronos-section-title">This Week — Book Impact</h4>
-                            <div id="chronos-book-impact" class="chronos-entries">
-                                <p class="empty-state">Loading earnings...</p>
-                            </div>
-                        </div>
-                        <div class="chronos-section">
-                            <h4 class="chronos-section-title">Market Movers</h4>
-                            <div id="chronos-market-movers" class="chronos-entries">
-                                <p class="empty-state">Loading...</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <!-- Watchlist v3 (existing RADAR) -->
-        <section class="watchlist-section">
-            <div class="watchlist-v3">
-                <!-- Sector Overview removed — redundant with heatmap + drill-down popup -->
-
-                <div class="watchlist-middle">
-                    <div class="tickers-panel">
-                        <div class="tickers-header">
-                            <h2>RADAR</h2>
-                            <div class="tickers-controls radar-controls">
-                                <div class="radar-filters">
-                                    <button class="radar-filter-pill active" data-filter="all">All</button>
-                                    <button class="radar-filter-pill" data-filter="mine">Mine</button>
-                                    <button class="radar-filter-pill" data-filter="positions">Positions</button>
-                                    <button class="radar-filter-pill" data-filter="scanner">Scanner</button>
-                                </div>
-                                <div class="radar-sort-pills">
-                                    <button class="radar-sort-pill active" data-sort="change_1d" title="Sort by daily change">Δ%</button>
-                                    <button class="radar-sort-pill" data-sort="relative_volume" title="Sort by relative volume">Vol</button>
-                                    <button class="radar-sort-pill" data-sort="sector" title="Sort by sector">Sec</button>
-                                    <button class="radar-sort-pill" data-sort="cta_zone" title="Sort by CTA zone">CTA</button>
-                                </div>
-                                <span class="radar-meta" id="ticker-count">0 tickers</span>
-                            </div>
-                        </div>
-
-                        <div id="ticker-list" class="ticker-list">
-                            <div class="watchlist-loading">Loading tickers...</div>
-                        </div>
-
-                        <div class="tickers-footer">
-                            <button id="tickers-refresh" class="btn-subtle">↻ Refresh</button>
-                            <span id="tickers-updated-at"></span>
-                        </div>
-
-                        <div id="bulk-actions" class="bulk-actions" style="display: none;">
-                            <span id="bulk-count">0 selected</span>
-                            <button id="bulk-mute">Mute All</button>
-                            <button id="bulk-unmute">Unmute All</button>
-                            <button id="bulk-remove">Remove All</button>
-                            <button id="bulk-cancel">Cancel</button>
-                        </div>
-                    </div>
-                </div>
-
-            </div>
-        </section>
 
         <!-- Strategy Controls Modal -->
         <div class="modal-overlay" id="strategiesModal" style="display:none;">
@@ -1971,7 +1799,7 @@
     <!-- TradingView Widget Script -->
     <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
-    <script src="/app.js?v=165"></script>
+    <script src="/app.js?v=166"></script>
     <script src="/cockpit.js?v=1"></script>
     <script src="/laboratory.js?v=1"></script>
 </body>
