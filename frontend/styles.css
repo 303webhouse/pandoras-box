@@ -11,10 +11,20 @@
     --accent-orange: #e5370e;
     --accent-green-dark: #4CAF50;
     --accent-orange-dark: #e5370e;
-    --pnl-negative: #ff9800;
-    --accent-red: #e5370e;
-    --bearish-color: #e5370e;
     --bias-border-color: #334155;
+    /* P0 4d — semantic color tokens (one up/down/warn everywhere). --down is
+       vermilion #ff5c33: pairs with the teal/lime scheme and passes ~4.8:1 text
+       contrast on #1e293b cards, where the old #e5370e failed (~3.4:1). */
+    --up: #7CFF6B;
+    --down: #ff5c33;
+    --warn: #facc15;
+    --neutral-text: var(--text-secondary);
+    /* Loss-meaning tokens aliased to the single --down (old: --pnl-negative
+       #ff9800, --accent-red #e5370e, --bearish-color #e5370e). Decorative
+       --accent-orange / --accent-orange-dark left as-is. */
+    --pnl-negative: var(--down);
+    --accent-red: var(--down);
+    --bearish-color: var(--down);
 }
 
 * {
@@ -29,6 +39,8 @@ body {
     color: var(--text-primary);
     line-height: 1.6;
     min-height: 100vh;
+    /* P0 4e — tabular figures so prices/P&L/scores stop shifting width per digit */
+    font-variant-numeric: tabular-nums;
 }
 
 [hidden] {
@@ -502,7 +514,7 @@ body {
     font-size: 11px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.03);
     cursor: pointer;
-    transition: background 0.15s;
+    /* P0 4f: transition pruned (repeated scroll-list row) */
 }
 
 .radar-row:hover {
@@ -606,7 +618,7 @@ body {
     border: 1px solid var(--border-color);
     border-radius: 8px;
     cursor: pointer;
-    transition: border-color 0.2s, box-shadow 0.2s, opacity 0.15s;
+    /* P0 4f: box-shadow/transition pruned (repeated heatmap cell) */
     overflow: hidden;
     box-sizing: border-box;
 }
@@ -3112,7 +3124,7 @@ body.override-active-bearish .override-toggle[data-active="true"] {
     padding: 8px 12px;
     cursor: pointer;
     position: relative;
-    transition: all 0.2s;
+    /* P0 4f: transition pruned (repeated scroll-list card) */
 }
 
 .position-card:hover {
@@ -11146,7 +11158,7 @@ body[data-mode="analytics"] .analytics-shell {
     border-radius: 8px;
     padding: 8px 12px;
     margin-bottom: 6px;
-    transition: opacity 0.3s, transform 0.3s;
+    /* P0 4f: transition pruned (repeated scroll-list signal card) */
 }
 
 /* Compact two-line card layout (P3B) */
