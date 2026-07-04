@@ -95,7 +95,7 @@ async def get_regime():
                     SUM(CASE WHEN m.ret_1d > 0.03 THEN 1 ELSE 0 END) AS up_3,
                     SUM(CASE WHEN m.ret_1d < -0.03 THEN 1 ELSE 0 END) AS down_3
                 FROM stable_metrics m JOIN stable_universe u ON u.ticker = m.ticker
-                WHERE m.date = $1 AND u.theme NOT IN ('Benchmark', 'Scan Only')""",
+                WHERE m.date = $1 AND u.theme NOT IN ('Benchmark', 'Scan Only', 'Sector ETF')""",
                 latest_metric_date,
             )
             total = (b["total"] or 0) or 1
@@ -198,7 +198,16 @@ async def get_rates():
         rows, as_of, empty = await _strip_rows(conn, ("yield", "spread"))
         yields = [r for r in rows if r["kind"] == "yield"]
         spread = next((r for r in rows if r["kind"] == "spread"), None)
-        return _envelope(as_of, "provisional", empty, yields=yields, spread=spread, count=len(yields))
+        curve_points = {r["symbol"]: r["value"] for r in yields}
+        # Ghost curve ~5 trading days ago from the intraday yield stream (null if no history)
+        ghost = await conn.fetch(
+            """SELECT DISTINCT ON (symbol) symbol, value FROM stable_intraday_points
+               WHERE symbol IN ('3M','5Y','10Y','30Y') AND ts <= NOW() - INTERVAL '5 days'
+               ORDER BY symbol, ts DESC"""
+        )
+        curve_5d = {r["symbol"]: r["value"] for r in ghost} or None
+        return _envelope(as_of, "provisional", empty, yields=yields, spread=spread, count=len(yields),
+                         curve_points=curve_points or None, curve_points_5d_ago=curve_5d)
 
 
 # ── Signal theme enrichment (read-time only) ─────────────────────────────────
@@ -241,3 +250,84 @@ async def enrich_endpoint(tickers: str = Query(..., description="comma-separated
     """Standalone read-time theme enrichment for a set of tickers."""
     mapping = await enrich_tickers_with_theme(tickers.split(","))
     return {"enrichment": mapping, "count": len(mapping)}
+
+
+# ── Addendum A3: sector divergence, FX, rates curve ──────────────────────────
+SECTOR_ETFS = ["XLK", "XLF", "XLV", "XLY", "XLC", "XLI", "XLP", "XLE", "XLU", "XLRE", "XLB"]
+
+
+@router.get("/sector-divergence")
+async def get_sector_divergence(window: str = Query("1d", pattern="^(1d|5d)$")):
+    """Per-sector %-change series (1d intraday / 5d daily) + above 50/200 DMA booleans."""
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        # DMA states from latest close metrics
+        dma_rows = await conn.fetch(
+            """SELECT ticker, above_ma50, above_ma200 FROM stable_metrics
+               WHERE date=(SELECT MAX(date) FROM stable_metrics) AND ticker = ANY($1::text[])""",
+            SECTOR_ETFS,
+        )
+        dma = {r["ticker"]: r for r in dma_rows}
+
+        series = {}
+        as_of = None
+        if window == "1d":
+            pts = await conn.fetch(
+                """SELECT symbol, ts, value FROM stable_intraday_points
+                   WHERE symbol = ANY($1::text[]) AND ts >= NOW() - INTERVAL '1 day'
+                   ORDER BY symbol, ts""",
+                SECTOR_ETFS,
+            )
+            for r in pts:
+                series.setdefault(r["symbol"], []).append({"ts": r["ts"].isoformat(), "value": r["value"]})
+                as_of = r["ts"] if as_of is None or r["ts"] > as_of else as_of
+        else:  # 5d daily closes, normalized to % change from the first close
+            bars = await conn.fetch(
+                """SELECT ticker, date, c FROM stable_daily_bars
+                   WHERE ticker = ANY($1::text[])
+                     AND date >= (SELECT MAX(date) - INTERVAL '8 days' FROM stable_daily_bars)
+                   ORDER BY ticker, date""",
+                SECTOR_ETFS,
+            )
+            by_t = {}
+            for r in bars:
+                by_t.setdefault(r["ticker"], []).append((r["date"], r["c"]))
+            for t, rows in by_t.items():
+                rows = rows[-6:]
+                base = rows[0][1] if rows else None
+                series[t] = [{"date": str(d), "value": round((c / base - 1.0) * 100, 3) if base else None}
+                             for d, c in rows]
+                if rows:
+                    as_of = datetime.combine(rows[-1][0], datetime.min.time(), tzinfo=timezone.utc)
+
+        out = []
+        for t in SECTOR_ETFS:
+            d = dma.get(t)
+            out.append({
+                "symbol": t,
+                "above_50dma": bool(d["above_ma50"]) if d and d["above_ma50"] is not None else None,
+                "above_200dma": bool(d["above_ma200"]) if d and d["above_ma200"] is not None else None,
+                "series": series.get(t, []),
+            })
+        degraded = all(len(s["series"]) == 0 for s in out)
+        return _envelope(as_of, "provisional", degraded, window=window, sectors=out, count=len(out))
+
+
+@router.get("/fx")
+async def get_fx():
+    """DXY + USDJPY latest level, day change, and intraday series."""
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        latest = await conn.fetch(
+            "SELECT symbol, value AS day_change_pct, extra AS level, as_of FROM stable_live_strip WHERE kind='fx' ORDER BY symbol"
+        )
+        pts = await conn.fetch(
+            """SELECT symbol, ts, value FROM stable_intraday_points
+               WHERE symbol IN ('DXY','USDJPY') AND ts >= NOW() - INTERVAL '1 day' ORDER BY symbol, ts"""
+        )
+        series = {}
+        for r in pts:
+            series.setdefault(r["symbol"], []).append({"ts": r["ts"].isoformat(), "value": r["value"]})
+        as_of = max((r["as_of"] for r in latest if r["as_of"]), default=None)
+        fx = [{**dict(r), "series": series.get(r["symbol"], [])} for r in latest]
+        return _envelope(as_of, "provisional", len(fx) == 0, fx=fx, count=len(fx))

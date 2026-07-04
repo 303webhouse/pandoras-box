@@ -20,8 +20,9 @@ from psycopg2.extras import execute_values
 
 from . import db, settings as settings_mod
 
-# Themes excluded from scoring (benchmarks, broad ETF sleeves, scan-only universe)
-EXCLUDED_THEMES = {"Benchmark", "Scan Only"}
+# Themes excluded from scoring (benchmarks, broad ETF sleeves, scan-only universe,
+# and the 11 SPDR sector ETFs — Addendum A1).
+EXCLUDED_THEMES = {"Benchmark", "Scan Only", "Sector ETF"}
 
 
 def _scalar(sql: str, params=None):
@@ -223,7 +224,7 @@ def get_regime_read() -> dict:
             SUM(CASE WHEN m.ret_1d > {big_move} THEN 1 ELSE 0 END) AS up_big,
             SUM(CASE WHEN m.ret_1d < -{big_move} THEN 1 ELSE 0 END) AS down_big
         FROM stable_metrics m JOIN stable_universe u ON u.ticker = m.ticker
-        WHERE m.date = %s AND u.theme NOT IN ('Benchmark', 'Scan Only')
+        WHERE m.date = %s AND u.theme NOT IN ('Benchmark', 'Scan Only', 'Sector ETF')
     """, [latest]).iloc[0].to_dict()
 
     return {

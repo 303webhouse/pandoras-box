@@ -13,6 +13,16 @@ from . import config, db
 
 REQUIRED_COLS = {"ticker", "name", "sector", "industry", "theme", "subtheme", "liquidity_tier"}
 
+# Addendum A1: the 11 SPDR sector ETFs are force-tagged theme='Sector ETF' so they are
+# EXCLUDED from theme scoring (see scoring.EXCLUDED_THEMES) but their metrics (50/200
+# DMA states) still feed the sector-divergence legend. The vendored CSV is left pristine;
+# the retag lives here.
+SECTOR_ETFS = {
+    "XLK": "Technology", "XLF": "Financials", "XLV": "Health Care", "XLY": "Discretionary",
+    "XLC": "Comm Services", "XLI": "Industrials", "XLP": "Staples", "XLE": "Energy",
+    "XLU": "Utilities", "XLRE": "Real Estate", "XLB": "Materials",
+}
+
 
 def load_universe() -> pd.DataFrame:
     """Read universe.csv, validate, and replace stable_universe. Returns the dataframe."""
@@ -28,6 +38,11 @@ def load_universe() -> pd.DataFrame:
         raise ValueError(f"Universe CSV missing columns: {missing}")
 
     df["ticker"] = df["ticker"].str.strip().str.upper()
+
+    # Retag sector ETFs -> 'Sector ETF' (excluded from scoring; feed sector-divergence)
+    mask = df["ticker"].isin(SECTOR_ETFS)
+    df.loc[mask, "theme"] = "Sector ETF"
+    df.loc[mask, "subtheme"] = df.loc[mask, "ticker"].map(SECTOR_ETFS)
 
     if df["ticker"].duplicated().any():
         dupes = df.loc[df["ticker"].duplicated(), "ticker"].tolist()
