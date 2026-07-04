@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Pandora · Judgment Layer (v2)</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/gridstack@11.1.2/dist/gridstack.min.css">
-    <link rel="stylesheet" href="/v2.css?v=1">
+    <link rel="stylesheet" href="/v2.css?v=2">
     <meta name="theme-color" content="#050810">
 </head>
 <body>
@@ -58,42 +58,146 @@
                 </div>
             </div>
 
-            <!-- Market column (2fr) — filled in B2b -->
-            <div class="grid-stack-item" gs-id="market-col" gs-x="0" gs-y="5" gs-w="8" gs-h="9">
+            <!-- ── Market column (x0..7) ─────────────────────────────────── -->
+
+            <!-- b1 Themes table -->
+            <div class="grid-stack-item" gs-id="themes" gs-x="0" gs-y="5" gs-w="8" gs-h="7">
                 <div class="grid-stack-item-content">
                     <div class="tile">
                         <div class="tile-header">
-                            <span class="tile-title">Market</span>
+                            <span class="tile-title" data-gloss="THEMES">Themes</span>
+                            <span class="tile-sub" id="themesAsOf"></span>
                             <div class="spacer"></div>
+                            <span class="health-dot" id="themesHealthDot"></span>
+                            <span class="tile-grip" title="Drag">⠿</span>
+                        </div>
+                        <div class="tile-body pad-0"><div id="themesTable" class="themes-table"></div></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- b2 Sector divergence chart -->
+            <div class="grid-stack-item" gs-id="divergence" gs-x="0" gs-y="12" gs-w="4" gs-h="6">
+                <div class="grid-stack-item-content">
+                    <div class="tile">
+                        <div class="tile-header">
+                            <span class="tile-title" data-gloss="DIVERGENCE">Sector Divergence</span>
+                            <div class="spacer"></div>
+                            <span class="seg" id="divToggle"><button type="button" data-w="1d" class="on">1D</button><button type="button" data-w="5d">5D</button></span>
                             <span class="tile-grip" title="Drag">⠿</span>
                         </div>
                         <div class="tile-body">
-                            <div class="placeholder">
-                                <span class="k">Market column</span>
-                                <span>Themes · Sector divergence · Breadth · Index · Curve · USD</span>
-                                <span style="color:var(--text-3)">Phase B2b</span>
-                            </div>
+                            <div class="chart-host"><canvas id="divChart"></canvas></div>
+                            <div class="legend-row" id="divLegend"></div>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <!-- Kairos column (1fr) — filled in B2b -->
-            <div class="grid-stack-item" gs-id="kairos-col" gs-x="8" gs-y="5" gs-w="4" gs-h="9">
+            <!-- b3 Breadth panel -->
+            <div class="grid-stack-item" gs-id="breadth" gs-x="4" gs-y="12" gs-w="4" gs-h="6">
                 <div class="grid-stack-item-content">
                     <div class="tile">
                         <div class="tile-header">
-                            <span class="tile-title" style="color:var(--teal)">Kairos · live setups</span>
+                            <span class="tile-title" data-gloss="BREADTH">Breadth</span>
+                            <span class="tile-sub" id="breadthAnchor"></span>
+                            <div class="spacer"></div>
+                            <span class="tile-grip" title="Drag">⠿</span>
+                        </div>
+                        <div class="tile-body"><div id="breadthPanel"></div></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- b4 Index strip -->
+            <div class="grid-stack-item" gs-id="index" gs-x="0" gs-y="18" gs-w="8" gs-h="2" gs-min-h="2">
+                <div class="grid-stack-item-content">
+                    <div class="tile">
+                        <div class="tile-header">
+                            <span class="tile-title" data-gloss="INDEX">Index</span>
+                            <div class="spacer"></div>
+                            <span class="health-dot" id="indexHealthDot"></span>
+                            <span class="tile-grip" title="Drag">⠿</span>
+                        </div>
+                        <div class="tile-body pad-0"><div class="index-strip" id="indexStrip"></div></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- b5 Yield curve mini -->
+            <div class="grid-stack-item" gs-id="curve" gs-x="0" gs-y="20" gs-w="4" gs-h="5">
+                <div class="grid-stack-item-content">
+                    <div class="tile">
+                        <div class="tile-header">
+                            <span class="tile-title" data-gloss="CURVE">Yield Curve</span>
                             <div class="spacer"></div>
                             <span class="tile-grip" title="Drag">⠿</span>
                         </div>
                         <div class="tile-body">
-                            <div class="placeholder">
-                                <span class="k">Kairos + Book + River</span>
-                                <span>Setups · book strip · judged river</span>
-                                <span style="color:var(--text-3)">Phase B2b</span>
-                            </div>
+                            <div class="chart-host sm"><canvas id="curveChart"></canvas></div>
+                            <div class="mini-vals" id="curveVals"></div>
                         </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- b6 USD carry-check mini -->
+            <div class="grid-stack-item" gs-id="usd" gs-x="4" gs-y="20" gs-w="4" gs-h="5">
+                <div class="grid-stack-item-content">
+                    <div class="tile">
+                        <div class="tile-header">
+                            <span class="tile-title" data-gloss="USD">USD Carry</span>
+                            <div class="spacer"></div>
+                            <span class="tile-grip" title="Drag">⠿</span>
+                        </div>
+                        <div class="tile-body"><div class="fx-wrap" id="fxWrap"></div></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ── Kairos column (x8..11) ────────────────────────────────── -->
+
+            <!-- b7 Book strip -->
+            <div class="grid-stack-item" gs-id="book" gs-x="8" gs-y="5" gs-w="4" gs-h="5" gs-min-h="4">
+                <div class="grid-stack-item-content">
+                    <div class="tile">
+                        <div class="tile-header">
+                            <span class="tile-title" data-gloss="BOOK">Book</span>
+                            <div class="spacer"></div>
+                            <span class="health-dot" id="bookHealthDot"></span>
+                            <span class="tile-grip" title="Drag">⠿</span>
+                        </div>
+                        <div class="tile-body"><div id="bookStrip"></div></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- b8 Kairos module -->
+            <div class="grid-stack-item" gs-id="kairos" gs-x="8" gs-y="10" gs-w="4" gs-h="9">
+                <div class="grid-stack-item-content">
+                    <div class="tile">
+                        <div class="tile-header">
+                            <span class="tile-title kairos-title" data-gloss="KAIROS">Kairos · live setups</span>
+                            <div class="spacer"></div>
+                            <span class="tile-sub" id="kairosQueued"></span>
+                            <span class="tile-grip" title="Drag">⠿</span>
+                        </div>
+                        <div class="tile-body pad-0"><div id="kairosCards" class="kairos-cards"></div></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- b9 River -->
+            <div class="grid-stack-item" gs-id="river" gs-x="8" gs-y="19" gs-w="4" gs-h="9">
+                <div class="grid-stack-item-content">
+                    <div class="tile">
+                        <div class="tile-header">
+                            <span class="tile-title" data-gloss="RIVER">River</span>
+                            <div class="spacer"></div>
+                            <span class="seg" id="riverPills"></span>
+                            <span class="tile-grip" title="Drag">⠿</span>
+                        </div>
+                        <div class="tile-body pad-0"><div id="riverStream" class="river"></div></div>
                     </div>
                 </div>
             </div>
@@ -108,6 +212,13 @@
         <div class="drawer-body" id="drawerBody"></div>
     </aside>
 
+    <!-- Member / theme popup -->
+    <div class="popup-backdrop" id="popupBackdrop"></div>
+    <div class="member-popup" id="memberPopup">
+        <div class="bar"><span class="tt" id="memberTitle"></span><span class="x" id="memberClose">✕</span></div>
+        <div class="body" id="memberBody"></div>
+    </div>
+
     <!-- TV popover -->
     <div class="tv-popover" id="tvPopover">
         <div class="bar"><span class="tk" id="tvPopTicker"></span><span class="x" id="tvPopClose">✕</span></div>
@@ -115,7 +226,8 @@
     </div>
 
     <script src="https://s3.tradingview.com/tv.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/gridstack@11.1.2/dist/gridstack-all.min.js"></script>
-    <script src="/v2.js?v=1"></script>
+    <script src="/v2.js?v=2"></script>
 </body>
 </html>

@@ -24,19 +24,42 @@
   const GLOSSARY = {
     HEALTH: 'Global data health — lime fresh, teal stale, vermilion feed down',
     MOVERS: 'Top gainers/losers screener (Yahoo), filtered: last >= $2, avg vol >= 500k',
-    REGIME: 'Composite bias regime and score',
-    COMPOSITE: 'Composite bias score (weighted factor blend)',
+    REGIME: 'Two lenses: Composite (weighted factor bias, X/100) vs Stable engine read (breadth-based)',
+    COMPOSITE: 'Composite bias score on a 0–100 scale (50 = neutral); the weighted factor blend',
+    STABLE: 'Stable engine regime — RISK-ON/NEUTRAL/RISK-OFF from % of universe above 50DMA',
     DOM: 'Dominant theme — score >= 75',
     EMG: 'Emerging / improving theme',
     FAD: 'Fading / deteriorating theme',
-    TIDE: 'Market tide — net options-flow direction (wired in B2b)',
-    HL: 'New 20-day / 52-week highs across the scored universe',
+    TIDE: 'Market tide — net options-flow direction (net call vs put premium, cached UW read)',
+    HL: 'New 20-day / 52-week highs (H) and lows (L) across the scored universe',
     BREADTH50: 'Percent of the scored universe above its 50-day moving average',
-    KILL: 'Kill-switch / circuit-breaker state (wired in B2b)',
+    BREADTH: 'Participation: % of universe above 20/50/200DMA, new highs/lows, ±3% movers',
+    KILL: 'Kill-switch / circuit-breaker state — ARMED means a market-risk breaker fired',
+    THEMES: 'Ranked theme board: score, 1-day delta, and status (dominant/emerging/fading)',
+    DIVERGENCE: 'Sector ETF %-change spread — which sectors lead/lag; dot = above both 50/200DMA',
+    INDEX: 'Major index 1-day % and ATR extension (how stretched vs typical range)',
+    CURVE: 'Treasury yield curve with a 5-day-ago ghost line; bp = basis-point day change',
+    USD: 'Dollar carry check — DXY and USD/JPY level and day change',
+    BOOK: 'Open book: balance, day P&L, net Greeks, and theme concentration guardrail',
+    KAIROS: 'Live actionable setups, ordered by grade / decision clock / regime fit',
+    RIVER: 'Merged judged stream: signals, regime shifts, flow, catalysts, headlines',
     R: 'Regime alignment', F: 'Flow confirmation',
     L: 'At a Pythia level (VAH/VAL/POC)', C: 'Crowding — consensus positioning, size down',
     VAH: 'Value-area high', VAL: 'Value-area low', POC: 'Point of control',
   };
+  // Setup display map (UI-only; DB keys unchanged). shadow = never actionable A-grade.
+  const SETUP_MAP = {
+    ICARUS: { name: 'ICARUS', desc: 'Fade VAH' },
+    HELEN: { name: 'HELEN', desc: 'Reclaim VA' },
+    ARGO: { name: 'ARGO', desc: 'Range Break + Flow' },
+    TRITON: { name: 'TRITON', desc: 'Whale Hunting', shadow: true },
+    HERA: { name: 'HERA', desc: '3-10 Oscillator Cross', shadow: true },
+  };
+  function setupDisplay(key) {
+    const k = String(key || '').toUpperCase();
+    for (const id in SETUP_MAP) { if (k.indexOf(id) !== -1) return SETUP_MAP[id]; }
+    return { name: key || 'SETUP', desc: '' };
+  }
   function applyGlossary(root) {
     (root || document).querySelectorAll('[data-gloss]').forEach((el) => {
       const g = GLOSSARY[el.getAttribute('data-gloss')];
@@ -103,11 +126,20 @@
   }
 
   // ── Regime band ─────────────────────────────────────────────────────────────
+  // Composite score is on a -1..+1 scale; render as X/100 to match the legacy banner:
+  const to100 = (s) => (s == null || !Number.isFinite(Number(s))) ? null : Math.round(((Number(s) + 1) / 2) * 100);
+  let _lastRegime = { composite: null, regime: null, tide: null, kill: null };
+
   async function loadRegimeBand() {
-    let composite = null, regime = null;
+    let composite = null, regime = null, tide = null, kill = null;
     try { const r = await apiFetch('/api/bias/composite'); if (r.ok) composite = await r.json(); } catch (_) {}
     try { const r = await apiFetch('/api/stable/regime'); if (r.ok) regime = await r.json(); } catch (_) {}
-    renderRegimeBand(composite, regime);
+    try { const r = await apiFetch('/api/board/tide'); if (r.ok) tide = await r.json(); } catch (_) {}
+    try { const r = await apiFetch('/api/board/kill-switch'); if (r.ok) kill = await r.json(); } catch (_) {}
+    _lastRegime = { composite, regime, tide, kill };
+    renderRegimeBand(composite, regime, tide, kill);
+    renderBreadthPanel(regime);          // b3 shares the regime payload
+    emitRegimeRiverItems(composite, regime, kill);
 
     const age = regime && regime.data_age_seconds != null ? regime.data_age_seconds : null;
     const degraded = regime ? regime.degraded : true;
@@ -121,22 +153,46 @@
       `<span class="chip ${cls}">${esc(t.theme)} <b>${t.score != null ? Math.round(t.score) : ''}</b></span>`).join(' ');
   }
 
-  function renderRegimeBand(composite, regime) {
+  function renderRegimeBand(composite, regime, tide, kill) {
     const band = $('regimeBand');
-    const bias = composite ? (composite.bias_level || composite.level || 'UNKNOWN') : 'UNKNOWN';
-    const score = composite && composite.composite_score != null ? Number(composite.composite_score).toFixed(2) : '--';
-    const conf = composite ? (composite.confidence || '') : '';
-    const biasCls = bias.includes('TORO') || bias.includes('BULL') ? 'val-up' : bias.includes('URSA') || bias.includes('BEAR') ? 'val-down' : 'val-teal';
 
+    // ── Cell 1: two regime lenses, rendered distinctly ──
+    const bias = composite ? (composite.bias_level || composite.level || 'UNKNOWN') : 'UNKNOWN';
+    const comp100 = composite ? to100(composite.composite_score) : null;
+    const biasCls = bias.includes('TORO') || bias.includes('BULL') ? 'val-up' : bias.includes('URSA') || bias.includes('BEAR') ? 'val-down' : 'val-teal';
     const breadth = (regime && regime.breadth) || {};
     const regimeLabel = regime ? (regime.regime_label || 'UNKNOWN') : 'UNKNOWN';
     const p50 = breadth.pct_above_50dma;
+    const stableCls = regimeLabel === 'RISK-ON' ? 'val-up' : regimeLabel === 'RISK-OFF' ? 'val-down' : 'val-teal';
+    // Divergence: one lens leans bullish while the other leans bearish
+    const compDir = comp100 == null ? 0 : comp100 >= 55 ? 1 : comp100 <= 45 ? -1 : 0;
+    const stableDir = regimeLabel === 'RISK-ON' ? 1 : regimeLabel === 'RISK-OFF' ? -1 : 0;
+    const diverge = compDir !== 0 && stableDir !== 0 && compDir !== stableDir;
+
+    // ── Cell 3: Tide ──
+    const t = tide && tide.tide;
+    const tideDir = t && t.direction ? t.direction : null;
+    const tideCls = tideDir === 'BULLISH' ? 'val-up' : tideDir === 'BEARISH' ? 'val-down' : 'val-muted';
+    const fmtM = (v) => (v == null ? '--' : '$' + (Number(v) / 1e6).toFixed(0) + 'M');
+    const tideSub = t ? `call ${fmtM(t.net_call_premium)} · put ${fmtM(t.net_put_premium)}`
+      : (tide && tide.degraded ? 'no cached flow' : '—');
+
+    // ── Cell 6: Kill-switch ──
+    const k = kill && kill.kill_switch;
+    const armed = k && k.active;
+    const pending = k && k.pending_reset;
+    const killLabel = armed ? (pending ? 'PENDING' : 'ARMED') : 'CLEAR';
+    const killCls = armed ? (pending ? 'val-teal' : 'val-down') : 'val-teal';
+    const killPulse = armed && !pending ? ' pulse-vermilion' : '';
+    const killSub = armed ? esc(k.trigger || 'risk-off') : 'normal';
+
+    const hl = (h, l) => `<span class="val-up num">${h != null ? h : '--'}</span><span class="val-muted"> / </span><span class="val-down num">${l != null ? l : '--'}</span>`;
 
     band.innerHTML = `
       <div class="regime-cell" data-drawer="regime">
-        <span class="label" data-gloss="REGIME">Regime · Composite</span>
-        <div class="big ${biasCls}">${esc(bias.replace(/_/g, ' '))}</div>
-        <div class="sub">stable: ${esc(regimeLabel)} · score <span class="num">${score}</span>${conf ? ' · ' + esc(conf) : ''}</div>
+        <span class="label" data-gloss="REGIME">Regime · two lenses</span>
+        <div class="sub"><span class="chip emg" data-gloss="COMPOSITE">C</span> <span class="${biasCls}">${esc(bias.replace(/_/g, ' '))}</span> <b class="num">${comp100 != null ? comp100 + '/100' : '--'}</b></div>
+        <div class="sub"><span class="chip ${diverge ? 'fad' : 'emg'}" data-gloss="STABLE">S</span> <span class="${stableCls}">${esc(regimeLabel)}</span> <span class="num">${p50 != null ? p50.toFixed(0) + '% &gt;50d' : ''}</span>${diverge ? ' <span class="val-down" title="Composite and Stable lenses disagree">⚠ divergence</span>' : ''}</div>
       </div>
       <div class="regime-cell" data-drawer="themes">
         <span class="label">Dominant · Emerging · Fading</span>
@@ -144,26 +200,26 @@
       </div>
       <div class="regime-cell">
         <span class="label" data-gloss="TIDE">Tide</span>
-        <div class="big val-muted">—</div>
-        <div class="sub">flow tide · B2b</div>
+        <div class="big ${tideCls}">${tideDir || '—'}</div>
+        <div class="sub">${tideSub}</div>
       </div>
       <div class="regime-cell" data-drawer="breadth">
-        <span class="label" data-gloss="HL">New Highs</span>
-        <div class="row"><span class="big num">${breadth.new_high_20d != null ? breadth.new_high_20d : '--'}</span></div>
-        <div class="sub">20d · 52w <span class="num">${breadth.new_high_52w != null ? breadth.new_high_52w : '--'}</span> · ±3% <span class="val-up num">${breadth.up_3 != null ? breadth.up_3 : '--'}</span>/<span class="val-down num">${breadth.down_3 != null ? breadth.down_3 : '--'}</span></div>
+        <span class="label" data-gloss="HL">New H / L</span>
+        <div class="sub">20d ${hl(breadth.new_high_20d, breadth.new_low_20d)}</div>
+        <div class="sub">52w ${hl(breadth.new_high_52w, breadth.new_low_52w)} <span class="val-muted">·</span> ±3% <span class="val-up num">${breadth.up_3 != null ? breadth.up_3 : '--'}</span>/<span class="val-down num">${breadth.down_3 != null ? breadth.down_3 : '--'}</span></div>
       </div>
       <div class="regime-cell" data-drawer="breadth">
         <span class="label" data-gloss="BREADTH50">% &gt; 50DMA</span>
         <div class="big num ${p50 != null && p50 >= 60 ? 'val-up' : p50 != null && p50 <= 40 ? 'val-down' : 'val-teal'}">${p50 != null ? p50.toFixed(0) + '%' : '--'}</div>
         <div class="gauge"><span style="width:${p50 != null ? Math.max(0, Math.min(100, p50)) : 0}%"></span></div>
       </div>
-      <div class="regime-cell">
+      <div class="regime-cell${killPulse}">
         <span class="label" data-gloss="KILL">Kill-switch</span>
-        <div class="big val-muted">—</div>
-        <div class="sub">circuit breaker · B2b</div>
+        <div class="big ${killCls}">${killLabel}</div>
+        <div class="sub">${killSub}</div>
       </div>`;
     applyGlossary(band);
-    band.querySelectorAll('[data-drawer]').forEach((c) => c.addEventListener('click', () => openDrawer(c.dataset.drawer, { composite, regime })));
+    band.querySelectorAll('[data-drawer]').forEach((c) => c.addEventListener('click', () => openDrawer(c.dataset.drawer, { composite, regime, tide, kill })));
   }
 
   // ── Movers tape ──────────────────────────────────────────────────────────────
@@ -211,11 +267,33 @@
       body.innerHTML = kv('Total (scored universe)', b.total) + kv('% > 20DMA', b.pct_above_20dma) + kv('% > 50DMA', b.pct_above_50dma) +
         kv('% > 200DMA', b.pct_above_200dma) + kv('New highs 20d', b.new_high_20d) + kv('New highs 52w', b.new_high_52w) +
         kv('Up > 3%', b.up_3) + kv('Down > 3%', b.down_3) + kv('as of (metrics)', ctx.regime.metrics_date);
+    } else if (kind === 'committee') {
+      title.textContent = 'Committee · ' + (ctx.ticker || '');
+      body.innerHTML = kv('Ticker', ctx.ticker || '—') + kv('Signal', ctx.sig || '—') +
+        '<div style="margin:10px 0;color:var(--text-3);font-size:12px">Loading options context…</div>';
+      (async () => {
+        try {
+          const r = await apiFetch('/api/committee/enrichment/' + encodeURIComponent(ctx.ticker));
+          if (!r.ok) return;
+          const e = (await r.json()).enrichment || {};
+          const iv = e.iv_rank || {}, tide = e.market_tide || {}, mp = e.max_pain || {}, sf = e.sector_flow || {};
+          body.innerHTML = kv('Ticker', ctx.ticker) + kv('Signal', ctx.sig || '—') +
+            kv('IV rank', iv.iv_rank != null ? Number(iv.iv_rank).toFixed(0) : '—') +
+            kv('Market tide', (tide.net_call_premium != null && tide.net_put_premium != null) ? (Number(tide.net_call_premium) > Number(tide.net_put_premium) ? 'bullish' : 'bearish') : '—') +
+            kv('Max pain', mp.max_pain_strike != null ? mp.max_pain_strike + ' (' + mp.dte + 'dte)' : '—') +
+            kv('Sector posture', sf.risk_posture || '—') +
+            '<div style="margin-top:10px;font-size:11px;color:var(--text-3)">Foreground UW read (on-demand). Full committee review runs from the legacy analyzer.</div>';
+        } catch (_) {}
+      })();
     } else {
       title.textContent = 'Regime detail';
       const c = ctx.composite || {}, r = ctx.regime || {};
-      body.innerHTML = kv('Composite bias', c.bias_level || c.level || '—') + kv('Composite score', c.composite_score != null ? c.composite_score : '—') +
+      const t = ctx.tide && ctx.tide.tide, k = ctx.kill && ctx.kill.kill_switch;
+      const c100 = to100(c.composite_score);
+      body.innerHTML = kv('Composite bias', c.bias_level || c.level || '—') + kv('Composite (0–100)', c100 != null ? c100 + '/100' : '—') +
+        kv('Composite raw', c.composite_score != null ? Number(c.composite_score).toFixed(3) : '—') +
         kv('Confidence', c.confidence || '—') + kv('Stable regime', r.regime_label || '—') + kv('% > 50DMA', (r.breadth || {}).pct_above_50dma) +
+        kv('Tide', t && t.direction ? t.direction : '—') + kv('Kill-switch', k ? (k.active ? (k.pending_reset ? 'PENDING RESET' : 'ARMED · ' + (k.trigger || '')) : 'CLEAR') : '—') +
         kv('Anchor', r.anchor || '—') + kv('Data age (s)', r.data_age_seconds != null ? Math.round(r.data_age_seconds) : '—');
     }
     $('drawerBackdrop').classList.add('open');
@@ -273,16 +351,469 @@
     } catch (_) { $('layoutStatus').textContent = 'layout save failed'; }
   }
 
+  // ═══ B2b modules ══════════════════════════════════════════════════════════
+  const fmt$ = (v) => (v == null ? '--' : (v < 0 ? '-$' : '$') + Math.abs(Number(v)).toLocaleString('en-US', { maximumFractionDigits: 0 }));
+  const signCls = (v) => (v == null ? '' : v > 0 ? 'val-up' : v < 0 ? 'val-down' : 'val-muted');
+  function setDot(id, age, degraded) { setHealth($(id), age, degraded); }
+
+  // ── b3 Breadth panel (shares the regime payload) ──────────────────────────
+  function renderBreadthPanel(regime) {
+    const el = $('breadthPanel'); if (!el) return;
+    const b = (regime && regime.breadth) || {};
+    $('breadthAnchor').textContent = regime ? (regime.anchor || '') : '';
+    const gauge = (label, v, gloss) => {
+      const w = v != null ? Math.max(0, Math.min(100, v)) : 0;
+      const col = v != null && v >= 60 ? 'var(--up)' : v != null && v <= 40 ? 'var(--down)' : 'var(--teal)';
+      return `<div class="breadth-gauge"><div class="lab"><span data-gloss="${gloss || ''}">${label}</span><b>${v != null ? v.toFixed(0) + '%' : '--'}</b></div>`
+        + `<div class="bar-track"><span style="width:${w}%;background:${col}"></span></div></div>`;
+    };
+    el.innerHTML = gauge('% &gt; 20DMA', b.pct_above_20dma) + gauge('% &gt; 50DMA', b.pct_above_50dma, 'BREADTH50') + gauge('% &gt; 200DMA', b.pct_above_200dma)
+      + `<div class="hl-counts">
+           <div class="hl-box"><div class="t">New Highs</div><div class="v val-up">${b.new_high_20d != null ? b.new_high_20d : '--'} <span class="val-muted" style="font-size:10px">20d</span> · ${b.new_high_52w != null ? b.new_high_52w : '--'} <span class="val-muted" style="font-size:10px">52w</span></div></div>
+           <div class="hl-box"><div class="t">New Lows</div><div class="v val-down">${b.new_low_20d != null ? b.new_low_20d : '--'} <span class="val-muted" style="font-size:10px">20d</span> · ${b.new_low_52w != null ? b.new_low_52w : '--'} <span class="val-muted" style="font-size:10px">52w</span></div></div>
+           <div class="hl-box"><div class="t">Up &gt; 3%</div><div class="v val-up">${b.up_3 != null ? b.up_3 : '--'}</div></div>
+           <div class="hl-box"><div class="t">Down &gt; 3%</div><div class="v val-down">${b.down_3 != null ? b.down_3 : '--'}</div></div>
+         </div>`;
+    applyGlossary(el);
+  }
+
+  // ── b1 Themes table ────────────────────────────────────────────────────────
+  function statusClass(st) {
+    const s = (st || '').toUpperCase();
+    if (s.indexOf('DOMINANT') !== -1 || s.indexOf('STRONG') !== -1) return 'st-dom';
+    if (s.indexOf('EMERG') !== -1 || s.indexOf('IMPROV') !== -1) return 'st-emg';
+    if (s.indexOf('FAD') !== -1 || s.indexOf('DETERIOR') !== -1 || s.indexOf('WEAK') !== -1) return 'st-fad';
+    return '';
+  }
+  async function loadThemes() {
+    let data = null;
+    try { const r = await apiFetch('/api/stable/themes'); if (r.ok) data = await r.json(); } catch (_) {}
+    const el = $('themesTable'); if (!el) return;
+    $('themesAsOf').textContent = data && data.date ? data.date : '';
+    setDot('themesHealthDot', data && data.data_age_seconds, data ? data.degraded : true);
+    _health.themes = (!data || data.degraded) ? 'down' : 'ok'; updateGlobalHealth();
+    const themes = (data && data.themes) || [];
+    if (!themes.length) { el.innerHTML = '<div class="th-row"><span class="nm val-muted">no theme snapshot</span></div>'; return; }
+    let html = '<div class="th-row head"><span class="rk">#</span><span class="nm">Theme</span><span class="sc">Score</span><span class="dl">1d Δ</span><span>Status</span></div>';
+    themes.forEach((t) => {
+      const d = t.score_1d_delta;
+      html += `<div class="th-row" data-theme="${esc(t.theme)}">
+        <span class="rk">${t.rank}</span>
+        <span class="nm">${esc(t.theme)} <span class="val-muted" style="font-size:10px">${t.n_names || ''}</span></span>
+        <span class="sc">${t.score != null ? Number(t.score).toFixed(0) : '--'}</span>
+        <span class="dl ${signCls(d)}">${d != null ? (d >= 0 ? '+' : '') + Number(d).toFixed(1) : '·'}</span>
+        <span class="status-chip ${statusClass(t.status)}">${esc(t.status || '')}</span></div>`;
+    });
+    el.innerHTML = html;
+    el.querySelectorAll('.th-row[data-theme]').forEach((r) => r.addEventListener('click', () => openThemeMembers(r.dataset.theme)));
+    applyGlossary(el);
+  }
+
+  async function openThemeMembers(theme) {
+    openPopup('Theme · ' + theme, '<div class="mem-sec">loading…</div>');
+    let data = null;
+    try { const r = await apiFetch('/api/stable/theme/' + encodeURIComponent(theme) + '/members'); if (r.ok) data = await r.json(); } catch (_) {}
+    if (!data) { $('memberBody').innerHTML = '<div class="mem-sec">unavailable</div>'; return; }
+    const row = (m) => {
+      const rs = m.rs_qqq_20d;
+      return `<div class="mem-row">
+        <span class="mtk" data-ticker="${esc(m.ticker)}">${esc(m.ticker)}</span>
+        <span class="val-muted" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(m.name || m.subtheme || '')}</span>
+        <span class="${signCls(m.ret_1d)}">${m.ret_1d != null ? (m.ret_1d >= 0 ? '+' : '') + (m.ret_1d * 100).toFixed(1) + '%' : '--'}</span>
+        <span class="val-muted">${m.last_price != null ? '$' + Number(m.last_price).toFixed(2) : '--'}</span>
+        <button class="opt-btn" data-ticker="${esc(m.ticker)}">opt</button></div>`;
+    };
+    const sec = (name, arr) => `<div class="mem-sec">${name} <span class="val-muted">· RS vs QQQ</span></div>` + ((arr || []).map(row).join('') || '<div class="mem-row"><span class="val-muted">none</span></div>');
+    $('memberBody').innerHTML = sec('Top by 1d', data.top) + sec('Bottom by 1d', data.bottom);
+    $('memberBody').querySelectorAll('.mtk[data-ticker]').forEach((e) => e.addEventListener('click', () => { closePopup(); openTvPopover(e.dataset.ticker, e); }));
+    $('memberBody').querySelectorAll('.opt-btn[data-ticker]').forEach((e) => e.addEventListener('click', () => loadOptionsContext(e)));
+  }
+
+  // Options context — FOREGROUND UW read on explicit click only (never polled).
+  async function loadOptionsContext(btn) {
+    const tk = btn.dataset.ticker;
+    const row = btn.closest('.mem-row');
+    if (row.nextElementSibling && row.nextElementSibling.classList.contains('opt-ctx')) { row.nextElementSibling.remove(); return; }
+    const ctx = document.createElement('div'); ctx.className = 'opt-ctx'; ctx.textContent = 'loading options context…';
+    row.after(ctx);
+    try {
+      const r = await apiFetch('/api/committee/enrichment/' + encodeURIComponent(tk));
+      if (!r.ok) { ctx.textContent = 'options context unavailable'; return; }
+      const e = (await r.json()).enrichment || {};
+      const iv = e.iv_rank || {}, tide = e.market_tide || {}, mp = e.max_pain || {};
+      const parts = [];
+      if (iv.iv_rank != null) parts.push('IV rank ' + Number(iv.iv_rank).toFixed(0));
+      if (tide.net_call_premium != null && tide.net_put_premium != null)
+        parts.push('tide ' + (Number(tide.net_call_premium) > Number(tide.net_put_premium) ? 'bullish' : 'bearish'));
+      if (mp.max_pain_strike != null) parts.push('max-pain ' + mp.max_pain_strike + ' (' + mp.dte + 'dte)');
+      ctx.textContent = parts.length ? tk + ' · ' + parts.join(' · ') : tk + ' · no options context cached';
+    } catch (_) { ctx.textContent = 'options context error'; }
+  }
+
+  // ── Charts (Chart.js) ──────────────────────────────────────────────────────
+  const SECTOR_RAMP = ['#14b8a6', '#7CFF6B', '#ff5c33', '#38bdf8', '#a78bfa', '#f472b6', '#2dd4bf', '#94a3b8', '#fb7185', '#4ade80', '#60a5fa'];
+  const _charts = {};
+  function makeLineChart(id, datasets, labels, opts) {
+    if (typeof Chart === 'undefined') return;
+    if (_charts[id]) { _charts[id].destroy(); }
+    const ctx = document.getElementById(id); if (!ctx) return;
+    _charts[id] = new Chart(ctx, {
+      type: 'line',
+      data: { labels, datasets },
+      options: Object.assign({
+        responsive: true, maintainAspectRatio: false, animation: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: { legend: { display: false }, tooltip: { enabled: true } },
+        scales: {
+          x: { ticks: { color: '#5b6b85', maxTicksLimit: 5, font: { size: 9 } }, grid: { color: 'rgba(27,39,69,0.4)' } },
+          y: { ticks: { color: '#5b6b85', font: { size: 9 } }, grid: { color: 'rgba(27,39,69,0.4)' } },
+        },
+        elements: { point: { radius: 0 }, line: { borderWidth: 1.4, tension: 0.25 } },
+      }, opts || {}),
+    });
+  }
+
+  // ── b2 Sector divergence ────────────────────────────────────────────────────
+  let _divWindow = '1d';
+  async function loadDivergence() {
+    let data = null;
+    try { const r = await apiFetch('/api/stable/sector-divergence?window=' + _divWindow); if (r.ok) data = await r.json(); } catch (_) {}
+    const legend = $('divLegend'); if (!legend) return;
+    if (!data || !data.sectors || data.degraded) {
+      legend.innerHTML = '<span class="legend-chip val-muted">divergence feed unavailable</span>';
+      if (_charts.divChart) { _charts.divChart.destroy(); delete _charts.divChart; }
+      return;
+    }
+    const sectors = data.sectors.filter((s) => s.series && s.series.length);
+    let labels = [];
+    sectors.forEach((s) => { if (s.series.length > labels.length) labels = s.series.map((p) => (p.ts ? p.ts.slice(11, 16) : (p.date || '').slice(5))); });
+    const datasets = sectors.map((s, i) => ({
+      label: s.symbol, borderColor: SECTOR_RAMP[i % SECTOR_RAMP.length], backgroundColor: 'transparent',
+      data: s.series.map((p) => (p.value != null ? Number((_divWindow === '1d' ? p.value : p.value)).toFixed(3) : null)),
+    }));
+    makeLineChart('divChart', datasets, labels);
+    legend.innerHTML = sectors.map((s, i) => {
+      const dmaCls = s.above_50dma && s.above_200dma ? 'dma-up' : (s.above_50dma === false && s.above_200dma === false ? 'dma-down' : 'dma-mix');
+      return `<span class="legend-chip"><span class="dot" style="background:${SECTOR_RAMP[i % SECTOR_RAMP.length]}"></span>${esc(s.symbol)}<span class="dma ${dmaCls}" title="above 50/200DMA"></span></span>`;
+    }).join('');
+  }
+
+  // ── b4 Index strip ──────────────────────────────────────────────────────────
+  async function loadIndexStrip() {
+    let data = null;
+    try { const r = await apiFetch('/api/stable/index-strip'); if (r.ok) data = await r.json(); } catch (_) {}
+    const el = $('indexStrip'); if (!el) return;
+    setDot('indexHealthDot', data && data.data_age_seconds, data ? data.degraded : true);
+    const order = ['SPY', 'QQQ', 'IWM', 'RSP', 'DIA'];
+    const rows = (data && data.indices) || [];
+    const map = {}; rows.forEach((r) => { map[r.symbol] = r; });
+    el.innerHTML = order.map((sym) => {
+      const r = map[sym]; const pct = r ? r.value : null; const ext = r ? r.atr_ext_50ma : null;
+      return `<div class="ix-cell" data-ticker="${sym}"><span class="sym">${sym}</span>`
+        + `<span class="chg ${signCls(pct)}">${pct != null ? (pct >= 0 ? '+' : '') + Number(pct).toFixed(2) + '%' : '--'}</span>`
+        + `<span class="ext">${ext != null ? (ext >= 0 ? '+' : '') + Number(ext).toFixed(1) + ' ATR' : ''}</span></div>`;
+    }).join('');
+    el.querySelectorAll('.ix-cell[data-ticker]').forEach((c) => c.addEventListener('click', () => openTvPopover(c.dataset.ticker, c)));
+  }
+
+  // ── b5 Yield curve mini ─────────────────────────────────────────────────────
+  async function loadRates() {
+    let data = null;
+    try { const r = await apiFetch('/api/stable/rates'); if (r.ok) data = await r.json(); } catch (_) {}
+    const vals = $('curveVals'); if (!vals) return;
+    if (!data || !data.curve_points) { vals.innerHTML = '<span class="val-muted">rates unavailable</span>'; return; }
+    const order = ['3M', '5Y', '10Y', '30Y'];
+    const cp = data.curve_points || {}, ghost = data.curve_points_5d_ago || null;
+    const yieldsBySym = {}; (data.yields || []).forEach((y) => { yieldsBySym[y.symbol] = y; });
+    const labels = order.filter((s) => cp[s] != null);
+    const datasets = [{ label: 'now', borderColor: '#14b8a6', backgroundColor: 'transparent', data: labels.map((s) => cp[s]) }];
+    if (ghost) datasets.push({ label: '5d ago', borderColor: 'rgba(139,152,173,0.5)', borderDash: [4, 3], backgroundColor: 'transparent', data: labels.map((s) => ghost[s] != null ? ghost[s] : null) });
+    makeLineChart('curveChart', datasets, labels);
+    vals.innerHTML = order.map((s) => {
+      const y = yieldsBySym[s]; const v = cp[s]; const bp = y ? y.day_change : null;
+      return `<span class="mv"><span class="k">${s}</span><span class="v">${v != null ? Number(v).toFixed(2) + '%' : '--'}</span>${bp != null ? `<span class="bp ${signCls(bp)}">${bp >= 0 ? '+' : ''}${Number(bp).toFixed(1)}bp</span>` : ''}</span>`;
+    }).join('');
+  }
+
+  // ── b6 USD carry mini ───────────────────────────────────────────────────────
+  function sparkPath(series, w, h) {
+    if (!series || series.length < 2) return '';
+    const vals = series.map((p) => Number(p.value)).filter((v) => Number.isFinite(v));
+    if (vals.length < 2) return '';
+    const min = Math.min(...vals), max = Math.max(...vals), rng = (max - min) || 1;
+    const step = w / (vals.length - 1);
+    return vals.map((v, i) => `${i === 0 ? 'M' : 'L'}${(i * step).toFixed(1)},${(h - ((v - min) / rng) * h).toFixed(1)}`).join(' ');
+  }
+  async function loadFx() {
+    let data = null;
+    try { const r = await apiFetch('/api/stable/fx'); if (r.ok) data = await r.json(); } catch (_) {}
+    const el = $('fxWrap'); if (!el) return;
+    const fx = (data && data.fx) || [];
+    if (!fx.length) { el.innerHTML = '<span class="val-muted">FX unavailable</span>'; return; }
+    el.innerHTML = fx.map((f) => {
+      const chg = f.day_change_pct; const lvl = f.level;
+      const path = sparkPath(f.series, 120, 24);
+      const col = chg > 0 ? '#7CFF6B' : chg < 0 ? '#ff5c33' : '#8b98ad';
+      return `<div class="fx-row"><span class="sym">${esc(f.symbol)}</span>`
+        + `<span class="spark">${path ? `<svg width="100%" height="24" viewBox="0 0 120 24" preserveAspectRatio="none"><path d="${path}" fill="none" stroke="${col}" stroke-width="1.4"/></svg>` : ''}</span>`
+        + `<span class="val">${lvl != null ? Number(lvl).toFixed(2) : '--'}</span>`
+        + `<span class="chg ${signCls(chg)}">${chg != null ? (chg >= 0 ? '+' : '') + Number(chg).toFixed(2) + '%' : ''}</span></div>`;
+    }).join('');
+  }
+
+  // ── b7 Book strip ───────────────────────────────────────────────────────────
+  async function loadBook() {
+    let balances = null, pnl = null, greeks = null, positions = null;
+    try { const r = await apiFetch('/api/portfolio/balances'); if (r.ok) balances = await r.json(); } catch (_) {}
+    try { const r = await apiFetch('/api/portfolio/pnl'); if (r.ok) pnl = await r.json(); } catch (_) {}
+    try { const r = await apiFetch('/api/v2/positions/greeks'); if (r.ok) greeks = await r.json(); } catch (_) {}
+    try { const r = await apiFetch('/api/v2/positions?status=OPEN'); if (r.ok) positions = await r.json(); } catch (_) {}
+    const el = $('bookStrip'); if (!el) return;
+    const bookOk = !!(balances || pnl);
+    setDot('bookHealthDot', bookOk ? 60 : null, !bookOk);
+    _health.book = bookOk ? 'ok' : 'down'; updateGlobalHealth();
+
+    const accts = Array.isArray(balances) ? balances : [];
+    const total = accts.reduce((s, a) => s + (Number(a.balance) || 0), 0);
+    const day = pnl && pnl.daily ? pnl.daily : {};
+    const g = greeks && (greeks.totals || greeks.portfolio) ? (greeks.totals || {}) : {};
+    const gv = (k1, k2) => { const v = (greeks && greeks.totals && greeks.totals[k1] != null) ? greeks.totals[k1] : (greeks && greeks.portfolio ? greeks.portfolio[k2] : null); return v; };
+    const delta = gv('delta', 'net_delta'), theta = gv('theta', 'net_theta'), vega = gv('vega', 'net_vega'), gamma = gv('gamma', 'net_gamma');
+
+    // Theme concentration: join open-position tickers -> theme, sum at-risk (current_value).
+    const conc = computeConcentration(positions);
+
+    el.innerHTML = `
+      <div class="book-line"><span class="k">Balance</span><span class="v">${accts.length ? fmt$(total) : '--'}</span></div>
+      <div class="book-line"><span class="k">Day P&amp;L</span><span class="v ${signCls(day.dollar)}">${day.dollar != null ? (day.dollar >= 0 ? '+' : '') + fmt$(day.dollar) : '--'}${day.pct != null ? ` <span style="font-size:10px">(${day.pct >= 0 ? '+' : ''}${Number(day.pct).toFixed(2)}%)</span>` : ''}</span></div>
+      <div class="book-greeks">
+        <span class="g"><span class="k">Δ</span><span>${delta != null ? Number(delta).toFixed(0) : '--'}</span></span>
+        <span class="g"><span class="k">Γ</span><span>${gamma != null ? Number(gamma).toFixed(1) : '--'}</span></span>
+        <span class="g"><span class="k">Θ</span><span>${theta != null ? Number(theta).toFixed(0) : '--'}</span></span>
+        <span class="g"><span class="k">V</span><span>${vega != null ? Number(vega).toFixed(0) : '--'}</span></span>
+      </div>
+      ${conc ? `<div class="conc-lamp ${conc.hot ? 'hot' : 'ok'}" title="Theme concentration guardrail — flags when one theme exceeds 50% of at-risk book"><span>Concentration · ${esc(conc.theme)}</span><span>${conc.pct}%</span></div>` : ''}
+      <div class="acct-chips">${accts.map((a) => `<span class="acct-chip">${esc((a.broker || a.account_name || '').slice(0, 4).toUpperCase())} ${fmt$(a.balance)}</span>`).join('')}</div>`;
+  }
+
+  let _themeMap = {}; // ticker -> {theme, theme_score, theme_status}
+  function computeConcentration(positions) {
+    const list = (positions && positions.positions) || [];
+    if (!list.length) return null;
+    const byTheme = {}; let totalRisk = 0;
+    list.forEach((p) => {
+      const risk = Math.abs(Number(p.current_value != null ? p.current_value : p.cost_basis) || 0);
+      if (!risk) return;
+      const tm = _themeMap[(p.ticker || '').toUpperCase()];
+      const theme = (tm && tm.theme) || 'Unmapped';
+      byTheme[theme] = (byTheme[theme] || 0) + risk; totalRisk += risk;
+    });
+    if (!totalRisk) return null;
+    let top = null;
+    Object.keys(byTheme).forEach((t) => { if (!top || byTheme[t] > byTheme[top]) top = t; });
+    const pct = Math.round((byTheme[top] / totalRisk) * 100);
+    return { theme: top, pct, hot: pct > 50 && top !== 'Unmapped' };
+  }
+  async function refreshThemeMap(positions) {
+    const list = (positions && positions.positions) || [];
+    const tickers = [...new Set(list.map((p) => (p.ticker || '').toUpperCase()).filter(Boolean))];
+    if (!tickers.length) { _themeMap = {}; return; }
+    try {
+      const r = await apiFetch('/api/stable/enrich?tickers=' + tickers.join(','));
+      if (r.ok) { const d = await r.json(); _themeMap = d.enrichment || {}; }
+    } catch (_) {}
+  }
+
+  // ── b8 Kairos module ────────────────────────────────────────────────────────
+  function gradeFromScore(s) { return s == null ? '·' : s >= 80 ? 'A' : s >= 65 ? 'B' : s >= 50 ? 'C' : 'D'; }
+  async function loadKairos() {
+    let data = null;
+    try { const r = await apiFetch('/api/trade-ideas?status=ACTIVE&limit=30'); if (r.ok) data = await r.json(); } catch (_) {}
+    const el = $('kairosCards'); if (!el) return;
+    let signals = (data && data.signals) || [];
+    // enrich theme for signal tickers (reuses the stable enrich read)
+    const tickers = [...new Set(signals.map((s) => (s.ticker || '').toUpperCase()).filter(Boolean))];
+    let smap = {};
+    if (tickers.length) { try { const r = await apiFetch('/api/stable/enrich?tickers=' + tickers.join(',')); if (r.ok) smap = (await r.json()).enrichment || {}; } catch (_) {} }
+    const scoreOf = (s) => (s.adjusted_score != null ? s.adjusted_score : s.score_v2 != null ? s.score_v2 : s.score);
+    signals.sort((a, b) => (scoreOf(b) || 0) - (scoreOf(a) || 0));
+    const bias = _lastRegime.composite ? (_lastRegime.composite.bias_level || '') : '';
+    const biasBull = /TORO|BULL/.test(bias), biasBear = /URSA|BEAR/.test(bias);
+    if (!signals.length) { el.innerHTML = '<div class="k-card"><span class="val-muted">no active setups</span></div>'; $('kairosQueued').textContent = ''; return; }
+    const visible = signals.slice(0, 3), queued = signals.length - visible.length;
+    $('kairosQueued').textContent = queued > 0 ? '+' + queued + ' queued' : '';
+    el.innerHTML = visible.map((s) => card(s, smap, biasBull, biasBear)).join('');
+    el.querySelectorAll('.btn-committee[data-ticker]').forEach((b) => b.addEventListener('click', () => openCommittee(b.dataset.ticker, b.dataset.sig)));
+    el.querySelectorAll('.k-card .tkr[data-ticker]').forEach((t) => t.addEventListener('click', () => openTvPopover(t.dataset.ticker, t)));
+    // feed the river with the top signals
+    addRiverItems(signals.slice(0, 8).map((s) => signalRiverItem(s, smap)));
+    renderRiver();
+
+    function card(s, smap, bull, bear) {
+      const disp = setupDisplay(s.codename || s.signal_type || s.strategy);
+      const sc = scoreOf(s); const grade = gradeFromScore(sc);
+      const side = (s.direction || '').toUpperCase();
+      const sideCls = side === 'LONG' ? 'side-long' : side === 'SHORT' ? 'side-short' : '';
+      const tm = smap[(s.ticker || '').toUpperCase()];
+      const themeTag = tm && tm.theme ? `${esc(tm.theme)}${tm.theme_score != null ? ' ' + Math.round(tm.theme_score) : ''}${tm.theme_status ? ' ' + String(tm.theme_status).slice(0, 3).toLowerCase() : ''}` : '';
+      // Evidence (honest: gray-off when unknown, never a fake check)
+      const rOk = (side === 'LONG' && bull) || (side === 'SHORT' && bear);
+      const rWarn = (side === 'LONG' && bear) || (side === 'SHORT' && bull);
+      const rCls = rOk ? 'ev-ok' : rWarn ? 'ev-warn' : 'ev-off';
+      const ed = s.enrichment_data || {};
+      const fCls = ed.flow || ed.market_structure ? 'ev-ok' : 'ev-off';
+      const shadow = disp.shadow;
+      const gradeShown = shadow ? '—' : grade;
+      return `<div class="k-card${shadow ? ' shadow' : ''}">
+        <div class="top"><span class="nm">${esc(disp.name)}</span><span class="desc">${esc(disp.desc)}</span>
+          <span class="grade ${gradeShown === 'A' ? 'val-up' : ''}">${gradeShown}</span></div>
+        <div class="lvls"><span class="tkr" data-ticker="${esc(s.ticker)}">${esc(s.ticker)}</span>
+          <span class="${sideCls}">${side || ''} ${s.entry_price != null ? Number(s.entry_price).toFixed(2) : ''}</span>
+          ${s.target_1 != null ? `<span>T ${Number(s.target_1).toFixed(2)}</span>` : ''}
+          ${s.stop_loss != null ? `<span>S ${Number(s.stop_loss).toFixed(2)}</span>` : ''}
+          ${s.timeframe ? `<span class="val-muted">${esc(s.timeframe)}</span>` : ''}</div>
+        <div class="k-evidence"><span class="${rCls}" data-gloss="R">R${rOk ? '✓' : rWarn ? '⚠' : '·'}</span>
+          <span class="${fCls}" data-gloss="F">F${fCls === 'ev-ok' ? '✓' : '·'}</span>
+          <span class="ev-off" data-gloss="L">L·</span><span class="ev-off" data-gloss="C">C·</span></div>
+        <div class="foot">${themeTag ? `<span class="k-theme">${themeTag}</span>` : ''}${shadow ? '<span class="shadow-tag">shadow</span>' : `<span class="clock ${sc >= 65 ? 'pulse-teal' : ''}"></span>`}
+          <button class="btn-committee" data-ticker="${esc(s.ticker)}" data-sig="${esc(s.signal_id || '')}">Committee</button></div>
+      </div>`;
+    }
+  }
+  function openCommittee(ticker, sig) {
+    openDrawer('committee', { ticker, sig });
+  }
+
+  // ── b9 River ────────────────────────────────────────────────────────────────
+  const _river = new Map();  // id -> item
+  let _riverFilter = 'all';
+  function addRiverItems(items) { (items || []).forEach((it) => { if (it && it.id) _river.set(it.id, it); }); }
+  function signalRiverItem(s, smap) {
+    const disp = setupDisplay(s.codename || s.signal_type || s.strategy);
+    const sc = s.adjusted_score != null ? s.adjusted_score : s.score_v2 != null ? s.score_v2 : s.score;
+    const shadow = disp.shadow;
+    const side = (s.direction || '').toUpperCase();
+    return {
+      id: 'sig:' + (s.signal_id || s.ticker + s.timestamp), type: 'signal',
+      tier: shadow ? 'shadow' : (sc >= 65 ? 'action' : 'info'),
+      sev: side === 'LONG' ? 'up' : side === 'SHORT' ? 'down' : 'teal',
+      ts: s.timestamp ? Date.parse(s.timestamp) : (s.created_at ? Date.parse(s.created_at) : Date.now()),
+      text: `<b>${esc(disp.name)}</b> ${esc(s.ticker)} ${side}${s.entry_price != null ? ' @ ' + Number(s.entry_price).toFixed(2) : ''}${sc != null ? ' · grade ' + gradeFromScore(sc) : ''}`,
+    };
+  }
+  function emitRegimeRiverItems(composite, regime, kill) {
+    // stable-vs-composite divergence
+    if (composite && regime) {
+      const c100 = to100(composite.composite_score);
+      const rl = regime.regime_label;
+      const cDir = c100 == null ? 0 : c100 >= 55 ? 1 : c100 <= 45 ? -1 : 0;
+      const sDir = rl === 'RISK-ON' ? 1 : rl === 'RISK-OFF' ? -1 : 0;
+      if (cDir && sDir && cDir !== sDir) {
+        addRiverItems([{ id: 'div:' + rl + ':' + cDir, type: 'regime', tier: 'action', sev: 'teal', ts: Date.now(),
+          text: `<b>Lens divergence</b> — Composite ${c100}/100 vs Stable ${esc(rl)}. Size with caution.` }]);
+      }
+    }
+    const k = kill && kill.kill_switch;
+    if (k && k.active) {
+      addRiverItems([{ id: 'kill:' + (k.trigger || '') + ':' + (k.triggered_at || ''), type: 'regime', tier: 'action', sev: 'down', ts: k.triggered_at ? Date.parse(k.triggered_at) : Date.now(),
+        text: `<b>Kill-switch ARMED</b> — ${esc(k.trigger || 'risk-off')}${k.description ? ' · ' + esc(k.description) : ''}` }]);
+    }
+    renderRiver();
+  }
+  async function loadDeskStreams() {
+    // flow radar (position flow + headlines) + hermes catalysts
+    let flow = null, hermes = null;
+    try { const r = await apiFetch('/api/flow/radar'); if (r.ok) flow = await r.json(); } catch (_) {}
+    try { const r = await apiFetch('/api/hermes/alerts?limit=12'); if (r.ok) hermes = await r.json(); } catch (_) {}
+    const items = [];
+    if (flow) {
+      (flow.position_flow || []).slice(0, 8).forEach((f, i) => {
+        const align = (f.alignment || '').toUpperCase();
+        if (align === 'NEUTRAL' || !align) return;
+        items.push({ id: 'flow:' + (f.ticker || i) + ':' + align, type: 'flow',
+          tier: f.strength === 'STRONG' ? 'action' : 'info', sev: align === 'CONFIRMING' ? 'up' : 'down', ts: Date.now(),
+          text: `<b>${esc(f.ticker || '')}</b> flow ${align.toLowerCase()}${f.strength ? ' (' + esc(f.strength.toLowerCase()) + ')' : ''} vs your position` });
+      });
+      (flow.watchlist_unusual || []).slice(0, 5).forEach((w, i) => {
+        items.push({ id: 'unusual:' + (w.ticker || i), type: 'flow', tier: 'info', sev: 'teal', ts: Date.now(),
+          text: `Unusual flow · <b>${esc(w.ticker || '')}</b>${w.sentiment ? ' ' + esc(w.sentiment) : ''}` });
+      });
+      (flow.headlines || []).slice(0, 6).forEach((h, i) => {
+        const hl = h.headline || h.title || ''; if (!hl) return;
+        items.push({ id: 'hl:' + hl.slice(0, 40), type: 'headline', tier: 'info', sev: null,
+          ts: h.created_at ? Date.parse(h.created_at) : Date.now(), text: esc(hl) });
+      });
+    }
+    if (hermes) {
+      (hermes.alerts || []).forEach((a) => {
+        items.push({ id: 'herm:' + (a.id || a.trigger_ticker), type: 'catalyst',
+          tier: (a.tier <= 1 ? 'action' : 'info'), sev: 'down', ts: a.created_at ? Date.parse(a.created_at) : Date.now(),
+          text: `<b>${esc(a.trigger_ticker || '')}</b> ${esc(a.headline_summary || a.event_type || 'catalyst')}` });
+      });
+    }
+    // Cowork stable digest (optional — render only if present)
+    try {
+      const r = await _rawFetch('/stable_digest.md', { cache: 'no-store' });
+      if (r.ok) {
+        const txt = (await r.text()).trim();
+        if (txt && txt[0] !== '<') items.push({ id: 'stable:digest', type: 'stable', tier: 'info', sev: 'teal', ts: Date.now(), text: '<b>Stable digest</b> · ' + esc(txt.split('\n')[0].slice(0, 160)) });
+      }
+    } catch (_) {}
+    addRiverItems(items);
+    renderRiver();
+  }
+  function renderRiver() {
+    const el = $('riverStream'); if (!el) return;
+    let items = [..._river.values()];
+    if (_riverFilter !== 'all') items = items.filter((i) => i.type === _riverFilter);
+    items.sort((a, b) => (b.ts || 0) - (a.ts || 0));
+    items = items.slice(0, 60);
+    // pills
+    const types = ['all', 'signal', 'flow', 'catalyst', 'regime', 'headline'];
+    $('riverPills').innerHTML = types.map((t) => `<button type="button" data-rt="${t}" class="${_riverFilter === t ? 'on' : ''}">${t}</button>`).join('');
+    $('riverPills').querySelectorAll('button[data-rt]').forEach((b) => b.addEventListener('click', () => { _riverFilter = b.dataset.rt; renderRiver(); }));
+    if (!items.length) { el.innerHTML = '<div class="rv-item info"><span class="rv-txt val-muted">stream quiet</span></div>'; return; }
+    el.innerHTML = items.map((it) => {
+      const t = new Date(it.ts || Date.now());
+      const hh = isNaN(t) ? '' : t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const cls = it.tier === 'action' ? 'action sev-' + (it.sev === 'up' ? 'up' : it.sev === 'down' ? 'down' : 'teal') + (it.sev === 'down' ? ' pulse-vermilion' : it.sev === 'up' ? ' pulse-lime' : ' pulse-teal') : it.tier;
+      return `<div class="rv-item ${cls}"><div class="rv-head"><span class="rv-dot t-${it.type}"></span><span class="rv-type">${it.type}</span><span class="rv-time">${hh}</span></div><div class="rv-txt">${it.text}</div></div>`;
+    }).join('');
+  }
+
+  // ── Popup helpers ───────────────────────────────────────────────────────────
+  function openPopup(title, html) { $('memberTitle').textContent = title; $('memberBody').innerHTML = html; $('popupBackdrop').classList.add('open'); $('memberPopup').classList.add('open'); }
+  function closePopup() { $('popupBackdrop').classList.remove('open'); $('memberPopup').classList.remove('open'); }
+
+  // ── Polling groups (idle interval budget: 4 << 10) ──────────────────────────
+  function refreshMarket() { loadThemes(); loadDivergence(); loadIndexStrip(); loadRates(); loadFx(); }
+  async function refreshDesk() {
+    let positions = null;
+    try { const r = await apiFetch('/api/v2/positions?status=OPEN'); if (r.ok) positions = await r.json(); } catch (_) {}
+    await refreshThemeMap(positions);
+    loadBook(); loadKairos(); loadDeskStreams();
+  }
+
   // ── Boot ────────────────────────────────────────────────────────────────────
   function boot() {
     applyGlossary(document);
     initGrid();
     loadRegimeBand(); managedInterval(loadRegimeBand, 60 * 1000);
     loadMoversTape(); managedInterval(loadMoversTape, 5 * 60 * 1000);
+    refreshMarket(); managedInterval(refreshMarket, 10 * 60 * 1000);
+    refreshDesk(); managedInterval(refreshDesk, 2 * 60 * 1000);
+    // divergence window toggle
+    const dt = $('divToggle');
+    if (dt) dt.querySelectorAll('button[data-w]').forEach((b) => b.addEventListener('click', () => {
+      _divWindow = b.dataset.w; dt.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b)); loadDivergence();
+    }));
     $('drawerClose').addEventListener('click', closeDrawer);
     $('drawerBackdrop').addEventListener('click', closeDrawer);
     $('tvPopClose').addEventListener('click', closeTvPopover);
-    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeDrawer(); closeTvPopover(); } });
+    $('memberClose').addEventListener('click', closePopup);
+    $('popupBackdrop').addEventListener('click', closePopup);
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeDrawer(); closeTvPopover(); closePopup(); } });
+    try { window.__mgd = _managed.size; } catch (_) {}  // idle interval count (acceptance check)
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
   else boot();
