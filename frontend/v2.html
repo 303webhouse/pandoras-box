@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Pandora · Judgment Layer (v2)</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/gridstack@11.1.2/dist/gridstack.min.css">
-    <link rel="stylesheet" href="/v2.css?v=2">
+    <link rel="stylesheet" href="/v2.css?v=3">
     <meta name="theme-color" content="#050810">
 </head>
 <body>
@@ -28,7 +28,7 @@
                         <div class="tile-header">
                             <span class="tile-title">Regime</span>
                             <div class="spacer"></div>
-                            <span class="tile-grip" title="Drag">⠿</span>
+                            <span class="tile-grip" data-gloss="GRIP">⠿</span>
                         </div>
                         <div class="tile-body pad-0">
                             <div class="regime-band" id="regimeBand">
@@ -46,7 +46,7 @@
                         <div class="tile-header">
                             <span class="tile-title" data-gloss="MOVERS">Movers</span>
                             <div class="spacer"></div>
-                            <span class="tile-grip" title="Drag">⠿</span>
+                            <span class="tile-grip" data-gloss="GRIP">⠿</span>
                         </div>
                         <div class="tile-body pad-0">
                             <div class="tape-wrap">
@@ -69,7 +69,7 @@
                             <span class="tile-sub" id="themesAsOf"></span>
                             <div class="spacer"></div>
                             <span class="health-dot" id="themesHealthDot"></span>
-                            <span class="tile-grip" title="Drag">⠿</span>
+                            <span class="tile-grip" data-gloss="GRIP">⠿</span>
                         </div>
                         <div class="tile-body pad-0"><div id="themesTable" class="themes-table"></div></div>
                     </div>
@@ -84,7 +84,7 @@
                             <span class="tile-title" data-gloss="DIVERGENCE">Sector Divergence</span>
                             <div class="spacer"></div>
                             <span class="seg" id="divToggle"><button type="button" data-w="1d" class="on">1D</button><button type="button" data-w="5d">5D</button></span>
-                            <span class="tile-grip" title="Drag">⠿</span>
+                            <span class="tile-grip" data-gloss="GRIP">⠿</span>
                         </div>
                         <div class="tile-body">
                             <div class="chart-host"><canvas id="divChart"></canvas></div>
@@ -102,7 +102,7 @@
                             <span class="tile-title" data-gloss="BREADTH">Breadth</span>
                             <span class="tile-sub" id="breadthAnchor"></span>
                             <div class="spacer"></div>
-                            <span class="tile-grip" title="Drag">⠿</span>
+                            <span class="tile-grip" data-gloss="GRIP">⠿</span>
                         </div>
                         <div class="tile-body"><div id="breadthPanel"></div></div>
                     </div>
@@ -117,7 +117,7 @@
                             <span class="tile-title" data-gloss="INDEX">Index</span>
                             <div class="spacer"></div>
                             <span class="health-dot" id="indexHealthDot"></span>
-                            <span class="tile-grip" title="Drag">⠿</span>
+                            <span class="tile-grip" data-gloss="GRIP">⠿</span>
                         </div>
                         <div class="tile-body pad-0"><div class="index-strip" id="indexStrip"></div></div>
                     </div>
@@ -131,7 +131,7 @@
                         <div class="tile-header">
                             <span class="tile-title" data-gloss="CURVE">Yield Curve</span>
                             <div class="spacer"></div>
-                            <span class="tile-grip" title="Drag">⠿</span>
+                            <span class="tile-grip" data-gloss="GRIP">⠿</span>
                         </div>
                         <div class="tile-body">
                             <div class="chart-host sm"><canvas id="curveChart"></canvas></div>
@@ -148,7 +148,7 @@
                         <div class="tile-header">
                             <span class="tile-title" data-gloss="USD">USD Carry</span>
                             <div class="spacer"></div>
-                            <span class="tile-grip" title="Drag">⠿</span>
+                            <span class="tile-grip" data-gloss="GRIP">⠿</span>
                         </div>
                         <div class="tile-body"><div class="fx-wrap" id="fxWrap"></div></div>
                     </div>
@@ -157,30 +157,34 @@
 
             <!-- ── Kairos column (x8..11) ────────────────────────────────── -->
 
-            <!-- b7 Book strip -->
-            <div class="grid-stack-item" gs-id="book" gs-x="8" gs-y="5" gs-w="4" gs-h="5" gs-min-h="4">
+            <!-- b7 Book strip + positions (c5) -->
+            <div class="grid-stack-item" gs-id="book" gs-x="8" gs-y="5" gs-w="4" gs-h="9" gs-min-h="5">
                 <div class="grid-stack-item-content">
                     <div class="tile">
                         <div class="tile-header">
                             <span class="tile-title" data-gloss="BOOK">Book</span>
                             <div class="spacer"></div>
+                            <button type="button" class="btn-add" id="bookAdd" data-gloss="ADD">+ add</button>
                             <span class="health-dot" id="bookHealthDot"></span>
-                            <span class="tile-grip" title="Drag">⠿</span>
+                            <span class="tile-grip" data-gloss="GRIP">⠿</span>
                         </div>
-                        <div class="tile-body"><div id="bookStrip"></div></div>
+                        <div class="tile-body pad-0">
+                            <div id="bookStrip" class="book-summary"></div>
+                            <div id="bookPositions" class="book-positions"></div>
+                        </div>
                     </div>
                 </div>
             </div>
 
             <!-- b8 Kairos module -->
-            <div class="grid-stack-item" gs-id="kairos" gs-x="8" gs-y="10" gs-w="4" gs-h="9">
+            <div class="grid-stack-item" gs-id="kairos" gs-x="8" gs-y="14" gs-w="4" gs-h="9">
                 <div class="grid-stack-item-content">
                     <div class="tile">
                         <div class="tile-header">
                             <span class="tile-title kairos-title" data-gloss="KAIROS">Kairos · live setups</span>
                             <div class="spacer"></div>
                             <span class="tile-sub" id="kairosQueued"></span>
-                            <span class="tile-grip" title="Drag">⠿</span>
+                            <span class="tile-grip" data-gloss="GRIP">⠿</span>
                         </div>
                         <div class="tile-body pad-0"><div id="kairosCards" class="kairos-cards"></div></div>
                     </div>
@@ -188,14 +192,14 @@
             </div>
 
             <!-- b9 River -->
-            <div class="grid-stack-item" gs-id="river" gs-x="8" gs-y="19" gs-w="4" gs-h="9">
+            <div class="grid-stack-item" gs-id="river" gs-x="8" gs-y="23" gs-w="4" gs-h="9">
                 <div class="grid-stack-item-content">
                     <div class="tile">
                         <div class="tile-header">
                             <span class="tile-title" data-gloss="RIVER">River</span>
                             <div class="spacer"></div>
                             <span class="seg" id="riverPills"></span>
-                            <span class="tile-grip" title="Drag">⠿</span>
+                            <span class="tile-grip" data-gloss="GRIP">⠿</span>
                         </div>
                         <div class="tile-body pad-0"><div id="riverStream" class="river"></div></div>
                     </div>
@@ -219,6 +223,13 @@
         <div class="body" id="memberBody"></div>
     </div>
 
+    <!-- Position add/close modal -->
+    <div class="modal-backdrop" id="modalBackdrop"></div>
+    <div class="pos-modal" id="posModal">
+        <div class="bar"><span class="tt" id="modalTitle"></span><span class="x" id="modalClose">✕</span></div>
+        <div class="body" id="modalBody"></div>
+    </div>
+
     <!-- TV popover -->
     <div class="tv-popover" id="tvPopover">
         <div class="bar"><span class="tk" id="tvPopTicker"></span><span class="x" id="tvPopClose">✕</span></div>
@@ -228,6 +239,6 @@
     <script src="https://s3.tradingview.com/tv.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/gridstack@11.1.2/dist/gridstack-all.min.js"></script>
-    <script src="/v2.js?v=2"></script>
+    <script src="/v2.js?v=3"></script>
 </body>
 </html>
