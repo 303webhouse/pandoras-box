@@ -86,6 +86,35 @@ async def stable_strip_loop():
         await asyncio.sleep(600)  # 10 minutes
 
 
+def _movers_work() -> dict:
+    from stable_engine import movers
+    return movers.run_movers_update()
+
+
+async def run_movers() -> dict:
+    return await asyncio.to_thread(_movers_work)
+
+
+async def stable_movers_loop():
+    """Movers screener every 10 min during RTH + one best-effort premarket pull ~08:00 ET."""
+    fired_premarket: set[str] = set()
+    while True:
+        try:
+            et = now_et()
+            if is_weekday(et):
+                pkey = et.strftime("%Y-%m-%d") + "-premarket"
+                if et.hour == 8 and et.minute < 10 and pkey not in fired_premarket:
+                    fired_premarket.add(pkey)
+                    await run_movers()
+                elif is_rth(et):
+                    await run_movers()
+                if et.hour == 0:
+                    fired_premarket = {k for k in fired_premarket if k.startswith(et.strftime("%Y-%m-%d"))}
+        except Exception as e:
+            logger.warning("[stable_jobs] movers loop error: %s", e)
+        await asyncio.sleep(600)  # 10 minutes
+
+
 async def run_nightly_close_recompute() -> dict:
     logger.info("[stable_jobs] nightly close recompute starting")
     res = await asyncio.to_thread(_nightly_work)
