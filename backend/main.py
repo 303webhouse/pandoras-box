@@ -1344,6 +1344,8 @@ app.include_router(mp_webhook_router, prefix="/webhook", tags=["market-profile"]
 app.include_router(signals_router, prefix="/api", tags=["signals"])
 from api.stable import router as stable_router
 app.include_router(stable_router, prefix="/api", tags=["stable"])
+from api.layout import router as layout_router
+app.include_router(layout_router, prefix="/api", tags=["layout"])
 
 # ─── MCP server (v1) ────────────────────────────────────────────────────
 # Mounted as an isolated ASGI sub-app at /mcp/v1. CORS / bearer auth /
@@ -1565,6 +1567,21 @@ if frontend_path:
     async def serve_frontend():
         """Serve the frontend dashboard"""
         return FileResponse(os.path.join(frontend_path, "index.html"))
+
+    # Dashboard v2 ("Judgment Layer") — parallel page; MUST be declared before the
+    # /app/{mode} catch-all so it isn't swallowed and served the legacy index.html.
+    @app.get("/app/v2", response_class=FileResponse)
+    async def serve_frontend_v2():
+        """Serve the v2 dashboard shell (parallel page; /app stays untouched)."""
+        return FileResponse(os.path.join(frontend_path, "v2.html"))
+
+    @app.get("/v2.js", response_class=FileResponse)
+    async def serve_v2_js():
+        return FileResponse(os.path.join(frontend_path, "v2.js"))
+
+    @app.get("/v2.css", response_class=FileResponse)
+    async def serve_v2_css():
+        return FileResponse(os.path.join(frontend_path, "v2.css"))
 
     @app.get("/app/{mode}", response_class=FileResponse)
     async def serve_frontend_mode(mode: str):
