@@ -165,6 +165,17 @@ CREATE TABLE IF NOT EXISTS stable_intraday_points (
     PRIMARY KEY (symbol, ts)
 );
 CREATE INDEX IF NOT EXISTS idx_stable_intraday_symbol_ts ON stable_intraday_points(symbol, ts);
+
+CREATE TABLE IF NOT EXISTS stable_movers (
+    side    TEXT NOT NULL,          -- 'gainer' | 'loser'
+    rank    INTEGER NOT NULL,
+    ticker  TEXT NOT NULL,
+    pct     DOUBLE PRECISION,       -- day % change
+    price   DOUBLE PRECISION,
+    theme   TEXT,                   -- from universe (null if not in universe)
+    as_of   TIMESTAMPTZ,
+    PRIMARY KEY (side, rank)
+);
 """
 
 

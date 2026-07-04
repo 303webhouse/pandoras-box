@@ -256,6 +256,29 @@ async def enrich_endpoint(tickers: str = Query(..., description="comma-separated
 SECTOR_ETFS = ["XLK", "XLF", "XLV", "XLY", "XLC", "XLI", "XLP", "XLE", "XLU", "XLRE", "XLB"]
 
 
+@router.get("/movers")
+async def get_movers():
+    """Latest movers snapshot: {gainers:[15], losers:[15]} with theme where applicable.
+
+    Serves the last stored snapshot with an honest data_age — a failed screener leaves
+    the snapshot in place (stale-labeled), never an empty-but-fresh response.
+    """
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT side, rank, ticker, pct, price, theme, as_of FROM stable_movers ORDER BY side, rank"
+        )
+        gainers = [dict(r) for r in rows if r["side"] == "gainer"]
+        losers = [dict(r) for r in rows if r["side"] == "loser"]
+        as_of = max((r["as_of"] for r in rows if r["as_of"]), default=None)
+        age = _age_seconds(as_of)
+        # Degraded if empty or stale (> 30 min since last successful screener store).
+        degraded = (not rows) or (age is not None and age > 1800)
+        return _envelope(as_of, "provisional", degraded,
+                         gainers=gainers, losers=losers,
+                         count={"gainers": len(gainers), "losers": len(losers)})
+
+
 @router.get("/sector-divergence")
 async def get_sector_divergence(window: str = Query("1d", pattern="^(1d|5d)$")):
     """Per-sector %-change series (1d intraday / 5d daily) + above 50/200 DMA booleans."""
