@@ -664,6 +664,14 @@ async def lifespan(app: FastAPI):
     flow_deadfeed_watchdog_task = asyncio.create_task(flow_deadfeed_watchdog_loop())  # L1.0 Chunk 3
     adx_regime_task = asyncio.create_task(adx_regime_loop())
 
+    # Stable Engine: nightly close recompute + provisional snapshots (yfinance, zero UW).
+    try:
+        from jobs.stable_jobs import stable_engine_loop
+        stable_engine_task = asyncio.create_task(stable_engine_loop())
+        logger.info("✅ Stable Engine scheduler started")
+    except Exception as e:
+        logger.warning(f"⚠️ Could not start Stable Engine scheduler: {e}")
+
     # Triton Step-0: whale-flow shadow poller (RTH 09:30-16:00 ET, 120s cadence).
     # SHADOW-ONLY — writes triton_flow_shadow; nothing reads it for scoring.
     async def triton_shadow_poller_loop():
