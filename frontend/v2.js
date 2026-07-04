@@ -27,6 +27,7 @@
     REGIME: 'Two lenses: Composite (weighted factor bias, X/100) vs Stable engine read (breadth-based)',
     COMPOSITE: 'Composite bias score on a 0–100 scale (50 = neutral); the weighted factor blend',
     STABLE: 'Stable engine regime — RISK-ON/NEUTRAL/RISK-OFF from % of universe above 50DMA',
+    DIVERGE: 'The Composite and Stable lenses disagree on direction — size with caution',
     DOM: 'Dominant theme — score >= 75',
     EMG: 'Emerging / improving theme',
     FAD: 'Fading / deteriorating theme',
@@ -40,12 +41,18 @@
     INDEX: 'Major index 1-day % and ATR extension (how stretched vs typical range)',
     CURVE: 'Treasury yield curve with a 5-day-ago ghost line; bp = basis-point day change',
     USD: 'Dollar carry check — DXY and USD/JPY level and day change',
-    BOOK: 'Open book: balance, day P&L, net Greeks, and theme concentration guardrail',
+    BOOK: 'Open book: balance, day P&L, net Greeks, theme-concentration guardrail, and positions',
+    ADD: 'Log a new position — calls the same create endpoint the legacy hub uses',
     KAIROS: 'Live actionable setups, ordered by grade / decision clock / regime fit',
+    CLOCK: 'Decision clock — time left before this setup expires; pulses until you open it',
     RIVER: 'Merged judged stream: signals, regime shifts, flow, catalysts, headlines',
     R: 'Regime alignment', F: 'Flow confirmation',
-    L: 'At a Pythia level (VAH/VAL/POC)', C: 'Crowding — consensus positioning, size down',
+    L: 'At a Pythia level (VAH/VAL/POC) — evidence lights when price sits on a value-area level',
+    C: 'Crowding — consensus positioning (post-flip metric; shown gray until wired, never faked)',
     VAH: 'Value-area high', VAL: 'Value-area low', POC: 'Point of control',
+    GRIP: 'Drag to move · resize from the tile edges',
+    DMA: 'Sector vs its moving averages — lime: above both 50 & 200DMA · vermilion: below both · gray: mixed',
+    CONC: 'Theme concentration guardrail — turns vermilion when one theme exceeds 50% of at-risk book',
   };
   // Setup display map (UI-only; DB keys unchanged). shadow = never actionable A-grade.
   const SETUP_MAP = {
@@ -192,7 +199,7 @@
       <div class="regime-cell" data-drawer="regime">
         <span class="label" data-gloss="REGIME">Regime · two lenses</span>
         <div class="sub"><span class="chip emg" data-gloss="COMPOSITE">C</span> <span class="${biasCls}">${esc(bias.replace(/_/g, ' '))}</span> <b class="num">${comp100 != null ? comp100 + '/100' : '--'}</b></div>
-        <div class="sub"><span class="chip ${diverge ? 'fad' : 'emg'}" data-gloss="STABLE">S</span> <span class="${stableCls}">${esc(regimeLabel)}</span> <span class="num">${p50 != null ? p50.toFixed(0) + '% &gt;50d' : ''}</span>${diverge ? ' <span class="val-down" title="Composite and Stable lenses disagree">⚠ divergence</span>' : ''}</div>
+        <div class="sub"><span class="chip emg" data-gloss="STABLE">S</span> <span class="${stableCls}">${esc(regimeLabel)}</span> <span class="num">${p50 != null ? p50.toFixed(0) + '% &gt;50d' : ''}</span>${diverge ? ' <span class="val-teal" data-gloss="DIVERGE">⚠ divergence</span>' : ''}</div>
       </div>
       <div class="regime-cell" data-drawer="themes">
         <span class="label">Dominant · Emerging · Fading</span>
@@ -494,8 +501,9 @@
     makeLineChart('divChart', datasets, labels);
     legend.innerHTML = sectors.map((s, i) => {
       const dmaCls = s.above_50dma && s.above_200dma ? 'dma-up' : (s.above_50dma === false && s.above_200dma === false ? 'dma-down' : 'dma-mix');
-      return `<span class="legend-chip"><span class="dot" style="background:${SECTOR_RAMP[i % SECTOR_RAMP.length]}"></span>${esc(s.symbol)}<span class="dma ${dmaCls}" title="above 50/200DMA"></span></span>`;
+      return `<span class="legend-chip"><span class="dot" style="background:${SECTOR_RAMP[i % SECTOR_RAMP.length]}"></span>${esc(s.symbol)}<span class="dma ${dmaCls}" data-gloss="DMA"></span></span>`;
     }).join('');
+    applyGlossary(legend);
   }
 
   // ── b4 Index strip ──────────────────────────────────────────────────────────
@@ -592,8 +600,169 @@
         <span class="g"><span class="k">Θ</span><span>${theta != null ? Number(theta).toFixed(0) : '--'}</span></span>
         <span class="g"><span class="k">V</span><span>${vega != null ? Number(vega).toFixed(0) : '--'}</span></span>
       </div>
-      ${conc ? `<div class="conc-lamp ${conc.hot ? 'hot' : 'ok'}" title="Theme concentration guardrail — flags when one theme exceeds 50% of at-risk book"><span>Concentration · ${esc(conc.theme)}</span><span>${conc.pct}%</span></div>` : ''}
+      ${conc ? `<div class="conc-lamp ${conc.hot ? 'hot' : 'ok'}" data-gloss="CONC"><span>Concentration · ${esc(conc.theme)}</span><span>${conc.pct}%</span></div>` : ''}
       <div class="acct-chips">${accts.map((a) => `<span class="acct-chip">${esc((a.broker || a.account_name || '').slice(0, 4).toUpperCase())} ${fmt$(a.balance)}</span>`).join('')}</div>`;
+    applyGlossary(el);
+    _openPositions = (positions && positions.positions) || [];
+    renderPositions();
+  }
+
+  // ── c5: Book positions (same source as legacy Ledger: GET /api/v2/positions?status=OPEN) ──
+  let _openPositions = [];
+  const OPT_PUT = /put/i, OPT_CALL = /call/i;
+  function structureStr(p) {
+    if ((p.asset_type || '').toUpperCase() === 'EQUITY' || (p.structure || '') === 'stock') {
+      return '×' + (p.quantity != null ? p.quantity : '') + ' sh';
+    }
+    const exp = p.expiry ? new Date(p.expiry + 'T00:00:00').toLocaleDateString('en-US', { month: '2-digit', day: '2-digit' }) : '';
+    const strikes = [p.long_strike, p.short_strike].filter((x) => x != null).join('/');
+    const type = OPT_PUT.test(p.structure || '') ? 'P' : OPT_CALL.test(p.structure || '') ? 'C' : '';
+    const qty = p.quantity != null ? ' ×' + p.quantity : '';
+    return `${exp} ${strikes}${type}${qty}`.trim();
+  }
+  function pnlPct(p) {
+    const cb = Math.abs(Number(p.cost_basis) || 0);
+    if (!cb || p.unrealized_pnl == null) return null;
+    return (Number(p.unrealized_pnl) / cb) * 100;
+  }
+  function renderPositions() {
+    const el = $('bookPositions'); if (!el) return;
+    const list = _openPositions;
+    if (!list.length) { el.innerHTML = '<div class="pos-empty">no open positions</div>'; return; }
+    el.innerHTML = list.map((p, i) => {
+      const pnl = p.unrealized_pnl != null ? Number(p.unrealized_pnl) : null;
+      const pct = pnlPct(p);
+      const dteCls = p.dte != null && p.dte <= 7 ? 'urgent' : p.dte != null && p.dte <= 14 ? 'soon' : '';
+      const dteStr = p.dte != null ? p.dte + ' DTE' : (p.asset_type === 'EQUITY' ? 'equity' : '');
+      return `<div class="pos-row" data-pi="${i}">
+        <span class="ptk">${esc(p.ticker)}</span>
+        <span class="pmid"><span class="pstruct">${esc(structureStr(p))}</span><span class="pdte ${dteCls}">${dteStr}</span></span>
+        <span class="ppnl ${signCls(pnl)}"><span class="amt">${pnl != null ? (pnl >= 0 ? '+' : '-') + '$' + Math.abs(pnl).toFixed(0) : '--'}</span><span class="pct">${pct != null ? (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%' : ''}</span></span>
+      </div>`;
+    }).join('');
+    el.querySelectorAll('.pos-row[data-pi]').forEach((r) => r.addEventListener('click', () => openPositionDrawer(_openPositions[+r.dataset.pi])));
+  }
+
+  async function openPositionDrawer(p) {
+    if (!p) return;
+    const title = $('drawerTitle'), body = $('drawerBody');
+    title.textContent = p.ticker + ' · position';
+    const kv = (k, v) => `<div class="kv"><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`;
+    const pnl = p.unrealized_pnl != null ? Number(p.unrealized_pnl) : null; const pct = pnlPct(p);
+    const tm = _themeMap[(p.ticker || '').toUpperCase()];
+    body.innerHTML =
+      kv('Structure', structureStr(p) + (p.structure ? '  (' + String(p.structure).replace(/_/g, ' ') + ')' : '')) +
+      kv('Direction', p.direction || '—') + kv('Account', p.account || '—') +
+      kv('Entry', p.entry_price != null ? p.entry_price : '—') + kv('Current', p.current_price != null ? p.current_price : '—') +
+      kv('Stop', p.stop_loss != null ? p.stop_loss : '—') + kv('Target', p.target_1 != null ? p.target_1 : '—') +
+      kv('Qty', p.quantity != null ? p.quantity : '—') + kv('DTE', p.dte != null ? p.dte : '—') +
+      kv('Cost basis', p.cost_basis != null ? '$' + Number(p.cost_basis).toFixed(2) : '—') +
+      kv('Max loss', p.max_loss != null ? '$' + Number(p.max_loss).toFixed(2) : '—') +
+      `<div class="kv"><span class="k">Unrealized P&amp;L</span><span class="v ${signCls(pnl)}">${pnl != null ? (pnl >= 0 ? '+' : '-') + '$' + Math.abs(pnl).toFixed(2) : '—'}${pct != null ? ' (' + (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%)' : ''}</span></div>` +
+      kv('Bucket', p.bucket || '—') + kv('Theme', tm && tm.theme ? tm.theme : '—') +
+      '<div id="posEarn" class="kv"><span class="k">Earnings</span><span class="v">…</span></div>' +
+      `<div class="drawer-actions">
+         <button type="button" class="btn-danger" id="posCloseBtn">Close position</button>
+         <button type="button" class="btn-secondary" id="posChartBtn">Chart</button>
+       </div>`;
+    $('drawerBackdrop').classList.add('open'); $('drawer').classList.add('open');
+    $('posCloseBtn').addEventListener('click', () => openCloseForm(p));
+    $('posChartBtn').addEventListener('click', (e) => { closeDrawer(); openTvPopover(p.ticker, e.target); });
+    // Earnings surface (CHRONOS) — single earnings source from P0
+    try {
+      const r = await apiFetch('/api/chronos/next-earnings-batch?tickers=' + encodeURIComponent(p.ticker));
+      if (r.ok) {
+        const e = (await r.json()).earnings || {}; const en = e[(p.ticker || '').toUpperCase()];
+        const cell = $('posEarn');
+        if (cell) cell.querySelector('.v').textContent = en && en.date ? en.date + (en.timing ? ' · ' + en.timing : '') : 'none scheduled';
+      }
+    } catch (_) {}
+  }
+
+  // ── c5: add / close via the EXISTING write endpoints (call, never modify) ──
+  const STRUCTURES = ['stock', 'long_call', 'long_put', 'call_debit_spread', 'put_debit_spread', 'call_credit_spread', 'put_credit_spread'];
+  function openModal(title, html) { $('modalTitle').textContent = title; $('modalBody').innerHTML = html; $('modalBackdrop').classList.add('open'); $('posModal').classList.add('open'); }
+  function closeModal() { $('modalBackdrop').classList.remove('open'); $('posModal').classList.remove('open'); }
+
+  function openAddForm() {
+    const fld = (id, label, attrs) => `<div class="fld"><label for="${id}">${label}</label><input id="${id}" ${attrs || ''}></div>`;
+    openModal('Add position', `
+      <div class="form-grid">
+        ${fld('f_ticker', 'Ticker', 'placeholder="AAPL" autocomplete="off"')}
+        <div class="fld"><label for="f_account">Account</label><select id="f_account"><option>ROBINHOOD</option><option>FIDELITY</option></select></div>
+        <div class="fld"><label for="f_structure">Structure</label><select id="f_structure">${STRUCTURES.map((s) => `<option value="${s}">${s.replace(/_/g, ' ')}</option>`).join('')}</select></div>
+        ${fld('f_qty', 'Quantity', 'type="number" min="1" value="1"')}
+        ${fld('f_entry', 'Entry price', 'type="number" step="any" placeholder="0.00"')}
+        ${fld('f_expiry', 'Expiry', 'type="date"')}
+        ${fld('f_long', 'Long strike', 'type="number" step="any"')}
+        ${fld('f_short', 'Short strike', 'type="number" step="any"')}
+        ${fld('f_stop', 'Stop', 'type="number" step="any"')}
+        ${fld('f_target', 'Target', 'type="number" step="any"')}
+        <div class="fld full">${'<label for="f_notes">Notes</label><input id="f_notes" placeholder="optional">'}</div>
+      </div>
+      <div class="form-actions"><button type="button" class="btn-primary" id="f_submit">Create</button><button type="button" class="btn-secondary" id="f_cancel">Cancel</button></div>
+      <div class="form-msg" id="f_msg"></div>`);
+    $('f_cancel').addEventListener('click', closeModal);
+    $('f_submit').addEventListener('click', submitAdd);
+  }
+  async function submitAdd() {
+    const val = (id) => { const e = $(id); return e && e.value !== '' ? e.value : null; };
+    const num = (id) => { const v = val(id); return v == null ? null : Number(v); };
+    const ticker = (val('f_ticker') || '').toUpperCase().trim();
+    const structure = val('f_structure');
+    if (!ticker) { $('f_msg').className = 'form-msg err'; $('f_msg').textContent = 'Ticker is required'; return; }
+    const body = {
+      ticker, asset_type: structure === 'stock' ? 'EQUITY' : 'OPTION', structure,
+      entry_price: num('f_entry'), quantity: parseInt(val('f_qty'), 10) || 1, source: 'MANUAL', account: val('f_account'),
+    };
+    if (num('f_long') != null) body.long_strike = num('f_long');
+    if (num('f_short') != null) body.short_strike = num('f_short');
+    if (val('f_expiry')) body.expiry = val('f_expiry');
+    if (num('f_stop') != null) body.stop_loss = num('f_stop');
+    if (num('f_target') != null) body.target_1 = num('f_target');
+    if (val('f_notes')) body.notes = val('f_notes');
+    $('f_msg').className = 'form-msg'; $('f_msg').textContent = 'saving…';
+    try {
+      const r = await apiFetch('/api/v2/positions', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' }, body: JSON.stringify(body) });
+      if (r.ok) { $('f_msg').className = 'form-msg ok'; $('f_msg').textContent = 'created'; setTimeout(() => { closeModal(); refreshDesk(); }, 500); }
+      else if (r.status === 401) { $('f_msg').className = 'form-msg err'; $('f_msg').textContent = 'sign in to add positions'; showLogin(); }
+      else { const d = await r.json().catch(() => ({})); $('f_msg').className = 'form-msg err'; $('f_msg').textContent = 'failed: ' + (d.detail || r.status); }
+    } catch (_) { $('f_msg').className = 'form-msg err'; $('f_msg').textContent = 'network error'; }
+  }
+
+  function openCloseForm(p) {
+    const mult = (p.asset_type || '').toUpperCase() === 'EQUITY' ? 1 : 100;
+    openModal('Close ' + p.ticker, `
+      <div class="form-grid">
+        <div class="fld"><label>Position</label><input value="${esc(p.ticker + ' · ' + structureStr(p))}" disabled></div>
+        <div class="fld"><label for="c_exit">Exit price</label><input id="c_exit" type="number" step="any" placeholder="${p.current_price != null ? p.current_price : '0.00'}"></div>
+        <div class="fld"><label for="c_qty">Quantity</label><input id="c_qty" type="number" min="1" value="${p.quantity != null ? p.quantity : 1}"></div>
+        <div class="fld"><label for="c_reason">Reason</label><select id="c_reason"><option value="manual">manual</option><option value="profit">profit</option><option value="loss">loss</option></select></div>
+        <div class="fld full"><label for="c_notes">Notes</label><input id="c_notes" placeholder="optional"></div>
+      </div>
+      <div class="form-actions"><button type="button" class="btn-danger" id="c_submit">Close position</button><button type="button" class="btn-secondary" id="c_cancel">Cancel</button></div>
+      <div class="form-msg" id="c_msg"></div>`);
+    $('c_cancel').addEventListener('click', closeModal);
+    $('c_submit').addEventListener('click', () => submitClose(p, mult));
+  }
+  async function submitClose(p, mult) {
+    const exit = $('c_exit').value !== '' ? Number($('c_exit').value) : null;
+    if (exit == null) { $('c_msg').className = 'form-msg err'; $('c_msg').textContent = 'Exit price required'; return; }
+    const qty = parseInt($('c_qty').value, 10) || p.quantity || 1;
+    const reason = $('c_reason').value;
+    const pnl = p.unrealized_pnl != null ? Number(p.unrealized_pnl) : 0;
+    const body = {
+      exit_price: exit, quantity: qty, exit_value: exit * mult * qty,
+      trade_outcome: pnl > 0 ? 'WIN' : pnl < 0 ? 'LOSS' : 'BREAKEVEN',
+      close_reason: reason, notes: $('c_notes').value || null,
+    };
+    $('c_msg').className = 'form-msg'; $('c_msg').textContent = 'closing…';
+    try {
+      const r = await apiFetch('/api/v2/positions/' + encodeURIComponent(p.position_id) + '/close', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' }, body: JSON.stringify(body) });
+      if (r.ok) { $('c_msg').className = 'form-msg ok'; $('c_msg').textContent = 'closed'; setTimeout(() => { closeModal(); closeDrawer(); refreshDesk(); }, 500); }
+      else if (r.status === 401) { $('c_msg').className = 'form-msg err'; $('c_msg').textContent = 'sign in to close'; showLogin(); }
+      else { const d = await r.json().catch(() => ({})); $('c_msg').className = 'form-msg err'; $('c_msg').textContent = 'failed: ' + (d.detail || r.status); }
+    } catch (_) { $('c_msg').className = 'form-msg err'; $('c_msg').textContent = 'network error'; }
   }
 
   let _themeMap = {}; // ticker -> {theme, theme_score, theme_status}
@@ -626,6 +795,19 @@
 
   // ── b8 Kairos module ────────────────────────────────────────────────────────
   function gradeFromScore(s) { return s == null ? '·' : s >= 80 ? 'A' : s >= 65 ? 'B' : s >= 50 ? 'C' : 'D'; }
+  // Decision-clock TTL: minutes remaining until a setup's expiry, or null if it carries no TTL.
+  function ttlMinutes(s) {
+    const raw = s.expires_at || s.decision_deadline || s.ttl_at;
+    if (!raw) return null;
+    const t = Date.parse(String(raw).replace('Z', '+00:00').replace(/([+-]\d{2}:\d{2})?$/, (m) => m || '+00:00'));
+    if (isNaN(t)) return null;
+    return Math.round((t - Date.now()) / 60000);
+  }
+  function ttlLabel(m) {
+    if (m <= 0) return 'expiring';
+    if (m < 60) return m + 'm';
+    const h = Math.floor(m / 60); return h + 'h' + (m % 60 ? ' ' + (m % 60) + 'm' : '');
+  }
   async function loadKairos() {
     let data = null;
     try { const r = await apiFetch('/api/trade-ideas?status=ACTIVE&limit=30'); if (r.ok) data = await r.json(); } catch (_) {}
@@ -637,21 +819,32 @@
     if (tickers.length) { try { const r = await apiFetch('/api/stable/enrich?tickers=' + tickers.join(',')); if (r.ok) smap = (await r.json()).enrichment || {}; } catch (_) {} }
     const scoreOf = (s) => (s.adjusted_score != null ? s.adjusted_score : s.score_v2 != null ? s.score_v2 : s.score);
     signals.sort((a, b) => (scoreOf(b) || 0) - (scoreOf(a) || 0));
+    // L-evidence: fetch Pythia value-area levels for the visible tickers only (cheap DB reads).
+    const visTickers = [...new Set(signals.slice(0, 3).map((s) => (s.ticker || '').toUpperCase()).filter(Boolean))];
+    const levelMap = {};
+    await Promise.all(visTickers.map(async (tk) => {
+      try { const r = await apiFetch('/api/board/levels/' + encodeURIComponent(tk)); if (r.ok) levelMap[tk] = await r.json(); } catch (_) {}
+    }));
     const bias = _lastRegime.composite ? (_lastRegime.composite.bias_level || '') : '';
     const biasBull = /TORO|BULL/.test(bias), biasBear = /URSA|BEAR/.test(bias);
     if (!signals.length) { el.innerHTML = '<div class="k-card"><span class="val-muted">no active setups</span></div>'; $('kairosQueued').textContent = ''; return; }
     const visible = signals.slice(0, 3), queued = signals.length - visible.length;
     $('kairosQueued').textContent = queued > 0 ? '+' + queued + ' queued' : '';
-    el.innerHTML = visible.map((s) => card(s, smap, biasBull, biasBear)).join('');
-    el.querySelectorAll('.btn-committee[data-ticker]').forEach((b) => b.addEventListener('click', () => openCommittee(b.dataset.ticker, b.dataset.sig)));
+    el.innerHTML = visible.map((s) => card(s, smap, biasBull, biasBear, levelMap)).join('');
+    applyGlossary(el);
+    el.querySelectorAll('.btn-committee[data-ticker]').forEach((b) => b.addEventListener('click', () => {
+      const card = b.closest('.k-card'); if (card) card.classList.add('acked');  // acknowledge -> stop the decision-clock pulse
+      openCommittee(b.dataset.ticker, b.dataset.sig);
+    }));
     el.querySelectorAll('.k-card .tkr[data-ticker]').forEach((t) => t.addEventListener('click', () => openTvPopover(t.dataset.ticker, t)));
     // feed the river with the top signals
     addRiverItems(signals.slice(0, 8).map((s) => signalRiverItem(s, smap)));
     renderRiver();
 
-    function card(s, smap, bull, bear) {
+    function card(s, smap, bull, bear, levelMap) {
       const disp = setupDisplay(s.codename || s.signal_type || s.strategy);
       const sc = scoreOf(s); const grade = gradeFromScore(sc);
+      const ttl = ttlMinutes(s);
       const side = (s.direction || '').toUpperCase();
       const sideCls = side === 'LONG' ? 'side-long' : side === 'SHORT' ? 'side-short' : '';
       const tm = smap[(s.ticker || '').toUpperCase()];
@@ -662,6 +855,17 @@
       const rCls = rOk ? 'ev-ok' : rWarn ? 'ev-warn' : 'ev-off';
       const ed = s.enrichment_data || {};
       const fCls = ed.flow || ed.market_structure ? 'ev-ok' : 'ev-off';
+      // L evidence: price sitting on a Pythia value-area level (VAH/VAL/POC). Gray when no MP data.
+      let lCls = 'ev-off', lChar = '·';
+      const lv = levelMap && levelMap[(s.ticker || '').toUpperCase()];
+      if (lv && lv.available && lv.levels) {
+        const px = s.entry_price != null ? Number(s.entry_price) : lv.levels.price_at_event;
+        const cands = [lv.levels.vah, lv.levels.val, lv.levels.poc].filter((x) => x != null).map(Number);
+        if (px && cands.length) {
+          const nearest = Math.min(...cands.map((x) => Math.abs(px - x)));
+          if (nearest / px < 0.004) { lCls = 'ev-ok'; lChar = '✓'; }
+        }
+      }
       const shadow = disp.shadow;
       const gradeShown = shadow ? '—' : grade;
       return `<div class="k-card${shadow ? ' shadow' : ''}">
@@ -674,8 +878,8 @@
           ${s.timeframe ? `<span class="val-muted">${esc(s.timeframe)}</span>` : ''}</div>
         <div class="k-evidence"><span class="${rCls}" data-gloss="R">R${rOk ? '✓' : rWarn ? '⚠' : '·'}</span>
           <span class="${fCls}" data-gloss="F">F${fCls === 'ev-ok' ? '✓' : '·'}</span>
-          <span class="ev-off" data-gloss="L">L·</span><span class="ev-off" data-gloss="C">C·</span></div>
-        <div class="foot">${themeTag ? `<span class="k-theme">${themeTag}</span>` : ''}${shadow ? '<span class="shadow-tag">shadow</span>' : `<span class="clock ${sc >= 65 ? 'pulse-teal' : ''}"></span>`}
+          <span class="${lCls}" data-gloss="L">L${lChar}</span><span class="ev-off" data-gloss="C">C·</span></div>
+        <div class="foot">${themeTag ? `<span class="k-theme">${themeTag}</span>` : ''}${shadow ? '<span class="shadow-tag">shadow</span>' : (ttl != null ? `<span class="clock-chip pulse-teal" data-gloss="CLOCK">⏱ ${ttlLabel(ttl)}</span>` : '')}
           <button class="btn-committee" data-ticker="${esc(s.ticker)}" data-sig="${esc(s.signal_id || '')}">Committee</button></div>
       </div>`;
     }
@@ -686,6 +890,7 @@
 
   // ── b9 River ────────────────────────────────────────────────────────────────
   const _river = new Map();  // id -> item
+  const _rvAcked = new Set(); // acknowledged action-item ids (pulse stops)
   let _riverFilter = 'all';
   function addRiverItems(items) { (items || []).forEach((it) => { if (it && it.id) _river.set(it.id, it); }); }
   function signalRiverItem(s, smap) {
@@ -776,9 +981,13 @@
     el.innerHTML = items.map((it) => {
       const t = new Date(it.ts || Date.now());
       const hh = isNaN(t) ? '' : t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      const cls = it.tier === 'action' ? 'action sev-' + (it.sev === 'up' ? 'up' : it.sev === 'down' ? 'down' : 'teal') + (it.sev === 'down' ? ' pulse-vermilion' : it.sev === 'up' ? ' pulse-lime' : ' pulse-teal') : it.tier;
-      return `<div class="rv-item ${cls}"><div class="rv-head"><span class="rv-dot t-${it.type}"></span><span class="rv-type">${it.type}</span><span class="rv-time">${hh}</span></div><div class="rv-txt">${it.text}</div></div>`;
+      const acked = _rvAcked.has(it.id);
+      const pulse = acked ? '' : (it.sev === 'down' ? ' pulse-vermilion' : it.sev === 'up' ? ' pulse-lime' : ' pulse-teal');
+      const cls = it.tier === 'action' ? 'action sev-' + (it.sev === 'up' ? 'up' : it.sev === 'down' ? 'down' : 'teal') + pulse + (acked ? ' acked' : '') : it.tier;
+      return `<div class="rv-item ${cls}" data-rid="${esc(it.id)}"><div class="rv-head"><span class="rv-dot t-${it.type}"></span><span class="rv-type">${it.type}</span><span class="rv-time">${hh}</span></div><div class="rv-txt">${it.text}</div></div>`;
     }).join('');
+    // Click an action item to acknowledge — stops its pulse (nothing pulses forever).
+    el.querySelectorAll('.rv-item.action[data-rid]').forEach((n) => n.addEventListener('click', () => { _rvAcked.add(n.dataset.rid); renderRiver(); }));
   }
 
   // ── Popup helpers ───────────────────────────────────────────────────────────
@@ -812,7 +1021,10 @@
     $('tvPopClose').addEventListener('click', closeTvPopover);
     $('memberClose').addEventListener('click', closePopup);
     $('popupBackdrop').addEventListener('click', closePopup);
-    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeDrawer(); closeTvPopover(); closePopup(); } });
+    $('bookAdd').addEventListener('click', openAddForm);
+    $('modalClose').addEventListener('click', closeModal);
+    $('modalBackdrop').addEventListener('click', closeModal);
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeDrawer(); closeTvPopover(); closePopup(); closeModal(); } });
     try { window.__mgd = _managed.size; } catch (_) {}  // idle interval count (acceptance check)
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);

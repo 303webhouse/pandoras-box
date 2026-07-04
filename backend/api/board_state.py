@@ -124,3 +124,33 @@ async def get_kill_switch():
     }
     # Live process read — the state itself is current as of now (not fabricated).
     return _envelope(now, "live", False, kill_switch=kill)
+
+
+@router.get("/levels/{ticker}")
+async def get_levels(ticker: str):
+    """Pythia market-profile value-area levels (VAH/VAL/POC) for a ticker — read-only.
+
+    Thin HTTP wrapper over the existing read-only service (services.read_only.market_profile),
+    the same source the Pandora MCP reads. Powers the Kairos 'L' evidence icon (price-at-a-level
+    check). Returns available=false when no MP event exists for the ticker (never fabricated).
+    """
+    try:
+        from services.read_only.market_profile import get_market_profile
+        res = await get_market_profile(ticker)
+    except Exception as exc:
+        logger.warning("[board] levels read failed for %s: %s", ticker, exc)
+        res = None
+
+    if not res or not res.get("data"):
+        return _envelope(None, None, True, ticker=(ticker or "").upper(), available=False, levels=None)
+
+    d = res["data"]
+    as_of = _parse_ts(d.get("as_of"))
+    levels = {
+        "vah": d.get("vah"), "val": d.get("val"), "poc": d.get("poc"),
+        "ib_high": d.get("ib_high"), "ib_low": d.get("ib_low"),
+        "price_at_event": d.get("price_at_event"),
+        "last_event": d.get("last_event"), "status": res.get("status"),
+    }
+    degraded = res.get("status") != "ok"
+    return _envelope(as_of, "close", degraded, ticker=(ticker or "").upper(), available=True, levels=levels)
