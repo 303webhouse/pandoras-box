@@ -634,11 +634,27 @@ async def get_active_signals_api():
         "signals:active:v1:default",
         compute_fn=_compute_signals_active,
     )
-    return {
+    result = {
         **data,
         "as_of": int(time.time() - age),
         "cache_age_seconds": age,
     }
+    # Read-time Stable Engine theme enrichment (additive; never blocks the feed).
+    # Attaches theme/theme_score/theme_status per ticker from the stable_* tables.
+    try:
+        from api.stable import enrich_tickers_with_theme
+        sigs = result.get("signals") or []
+        emap = await enrich_tickers_with_theme([s.get("ticker") for s in sigs if isinstance(s, dict)])
+        for s in sigs:
+            if isinstance(s, dict):
+                e = emap.get((s.get("ticker") or "").upper())
+                if e:
+                    s["theme"] = e["theme"]
+                    s["theme_score"] = e["theme_score"]
+                    s["theme_status"] = e["theme_status"]
+    except Exception as _enr_err:
+        logger.debug(f"theme enrichment skipped: {_enr_err}")
+    return result
 
 
 async def _compute_signals_active() -> Dict[str, Any]:
