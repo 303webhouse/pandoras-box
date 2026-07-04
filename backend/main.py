@@ -1346,6 +1346,8 @@ from api.stable import router as stable_router
 app.include_router(stable_router, prefix="/api", tags=["stable"])
 from api.layout import router as layout_router
 app.include_router(layout_router, prefix="/api", tags=["layout"])
+from api.board_state import router as board_router
+app.include_router(board_router, prefix="/api", tags=["board"])
 
 # ─── MCP server (v1) ────────────────────────────────────────────────────
 # Mounted as an isolated ASGI sub-app at /mcp/v1. CORS / bearer auth /

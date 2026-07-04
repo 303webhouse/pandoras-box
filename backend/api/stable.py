@@ -99,9 +99,34 @@ async def get_regime():
                 latest_metric_date,
             )
             total = (b["total"] or 0) or 1
+            # New lows: not stored in stable_metrics (only highs are), so compute read-time
+            # from bars, mirroring the metrics high rule (low <= trailing-min(low), 20/252
+            # sessions, 52w guarded by >=200 sessions of history — matches min_periods=200).
+            lo = await conn.fetchrow(
+                """WITH w AS (
+                       SELECT b.ticker, b.date, b.l,
+                              MIN(b.l) OVER (PARTITION BY b.ticker ORDER BY b.date
+                                             ROWS BETWEEN 19 PRECEDING AND CURRENT ROW)  AS min_20,
+                              MIN(b.l) OVER (PARTITION BY b.ticker ORDER BY b.date
+                                             ROWS BETWEEN 251 PRECEDING AND CURRENT ROW) AS min_252,
+                              COUNT(*) OVER (PARTITION BY b.ticker ORDER BY b.date
+                                             ROWS BETWEEN 251 PRECEDING AND CURRENT ROW) AS n
+                       FROM stable_daily_bars b
+                       WHERE b.date >= (SELECT MAX(date) - INTERVAL '400 days' FROM stable_daily_bars)
+                   )
+                   SELECT
+                       SUM(CASE WHEN w.n >= 20  AND w.l <= w.min_20  THEN 1 ELSE 0 END) AS new_low_20d,
+                       SUM(CASE WHEN w.n >= 200 AND w.l <= w.min_252 THEN 1 ELSE 0 END) AS new_low_52w
+                   FROM w
+                   JOIN stable_universe u ON u.ticker = w.ticker
+                   WHERE w.date = $1 AND u.theme NOT IN ('Benchmark', 'Scan Only', 'Sector ETF')""",
+                latest_metric_date,
+            )
             breadth = {
                 "total": b["total"], "up_3": b["up_3"], "down_3": b["down_3"],
                 "new_high_20d": b["new_high_20d"], "new_high_52w": b["new_high_52w"],
+                "new_low_20d": (lo["new_low_20d"] if lo else None),
+                "new_low_52w": (lo["new_low_52w"] if lo else None),
                 "pct_above_50dma": round(100.0 * (b["above_50"] or 0) / total, 1),
                 "pct_above_200dma": round(100.0 * (b["above_200"] or 0) / total, 1),
                 "pct_above_20dma": round(100.0 * (b["above_20"] or 0) / total, 1),
@@ -183,10 +208,25 @@ async def _strip_rows(conn, kinds: tuple) -> tuple[list, object, bool]:
 
 @router.get("/index-strip")
 async def get_index_strip():
-    """Latest majors 1d % change."""
+    """Latest majors 1d % change (value) + last price (extra) + ATR extension vs 50MA.
+
+    ATR extension is a daily-close measure from stable_metrics (atr_ext_50ma) attached
+    read-time; null when the symbol isn't in the metrics snapshot (never fabricated).
+    """
     pool = await get_postgres_client()
     async with pool.acquire() as conn:
         rows, as_of, empty = await _strip_rows(conn, ("index",))
+        syms = [r["symbol"] for r in rows]
+        ext_map = {}
+        if syms:
+            ext_rows = await conn.fetch(
+                """SELECT ticker, atr_ext_50ma FROM stable_metrics
+                   WHERE date=(SELECT MAX(date) FROM stable_metrics) AND ticker = ANY($1::text[])""",
+                syms,
+            )
+            ext_map = {r["ticker"]: r["atr_ext_50ma"] for r in ext_rows}
+        for r in rows:
+            r["atr_ext_50ma"] = ext_map.get(r["symbol"])
         return _envelope(as_of, "provisional", empty, indices=rows, count=len(rows))
 
 
