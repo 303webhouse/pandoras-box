@@ -1341,6 +1341,8 @@ app.include_router(chronos_router, prefix="/api", tags=["chronos"])
 app.include_router(mp_router, prefix="/api", tags=["market-profile"])
 app.include_router(mp_webhook_router, prefix="/webhook", tags=["market-profile"])
 app.include_router(signals_router, prefix="/api", tags=["signals"])
+from api.stable import router as stable_router
+app.include_router(stable_router, prefix="/api", tags=["stable"])
 
 # ─── MCP server (v1) ────────────────────────────────────────────────────
 # Mounted as an isolated ASGI sub-app at /mcp/v1. CORS / bearer auth /
