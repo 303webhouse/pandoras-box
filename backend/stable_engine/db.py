@@ -148,6 +148,23 @@ CREATE TABLE IF NOT EXISTS stable_theme_scores (
     PRIMARY KEY (theme, date, anchor)
 );
 CREATE INDEX IF NOT EXISTS idx_stable_theme_scores_date ON stable_theme_scores(date);
+
+CREATE TABLE IF NOT EXISTS stable_live_strip (
+    symbol      TEXT PRIMARY KEY,
+    kind        TEXT NOT NULL,               -- 'index' | 'yield' | 'spread' | 'sector' | 'fx'
+    value       DOUBLE PRECISION,            -- % change (index/sector/fx) or yield percent
+    day_change  DOUBLE PRECISION,            -- indices: n/a; yields: basis points; spread: bp
+    extra       DOUBLE PRECISION,            -- yields: raw level; free slot otherwise
+    as_of       TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS stable_intraday_points (
+    symbol  TEXT NOT NULL,
+    ts      TIMESTAMPTZ NOT NULL,
+    value   DOUBLE PRECISION,
+    PRIMARY KEY (symbol, ts)
+);
+CREATE INDEX IF NOT EXISTS idx_stable_intraday_symbol_ts ON stable_intraday_points(symbol, ts);
 """
 
 

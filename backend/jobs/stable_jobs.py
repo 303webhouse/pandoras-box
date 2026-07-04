@@ -57,6 +57,35 @@ def _provisional_work() -> dict:
     return live.run_provisional_snapshot(tickers)
 
 
+def _strip_work() -> dict:
+    from stable_engine import strip
+    return strip.run_strip_update()
+
+
+def is_rth(dt: datetime) -> bool:
+    """Roughly regular trading hours 09:30-16:00 ET on weekdays (holidays best-effort)."""
+    if not is_weekday(dt):
+        return False
+    mins = dt.hour * 60 + dt.minute
+    return 9 * 60 + 30 <= mins <= 16 * 60
+
+
+async def run_index_rates_strip() -> dict:
+    res = await asyncio.to_thread(_strip_work)
+    return res
+
+
+async def stable_strip_loop():
+    """Refresh the index/rates live strip every 10 min during RTH (market-days)."""
+    while True:
+        try:
+            if is_rth(now_et()):
+                await run_index_rates_strip()
+        except Exception as e:
+            logger.warning("[stable_jobs] strip loop error: %s", e)
+        await asyncio.sleep(600)  # 10 minutes
+
+
 async def run_nightly_close_recompute() -> dict:
     logger.info("[stable_jobs] nightly close recompute starting")
     res = await asyncio.to_thread(_nightly_work)
