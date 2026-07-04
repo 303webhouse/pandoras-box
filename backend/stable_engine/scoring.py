@@ -266,13 +266,19 @@ def store_theme_scores(scores: pd.DataFrame, anchor: str, as_of: datetime | None
             float(r["avg_rs_qqq_20d"]), as_of, 0.0, bool(degraded),
         ))
     col_list = ", ".join(_SCORE_COLS)
-    update_set = ", ".join(f"{c} = EXCLUDED.{c}" for c in _SCORE_COLS if c not in ("theme", "date", "anchor"))
+    # Replace the whole (date, anchor) set so themes that drop out of the basket (e.g.
+    # after a retag) don't linger as stale rows / duplicate ranks.
+    dates = sorted({pd.to_datetime(r["date"]).date() for _, r in scores.iterrows()})
     with db.connect() as conn:
         with conn.cursor() as cur:
+            ph = ",".join(["%s"] * len(dates))
+            cur.execute(
+                f"DELETE FROM stable_theme_scores WHERE anchor = %s AND date IN ({ph})",
+                [anchor] + dates,
+            )
             execute_values(
                 cur,
-                f"INSERT INTO stable_theme_scores ({col_list}) VALUES %s "
-                f"ON CONFLICT (theme, date, anchor) DO UPDATE SET {update_set}",
+                f"INSERT INTO stable_theme_scores ({col_list}) VALUES %s",
                 rows, page_size=1000,
             )
     return len(rows)
