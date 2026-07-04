@@ -1,0 +1,691 @@
+ticker,name,sector,industry,theme,subtheme,liquidity_tier
+NVDA,NVIDIA,Technology,Semiconductors,AI Infrastructure,GPU,Core
+AMD,Advanced Micro Devices,Technology,Semiconductors,AI Infrastructure,GPU/CPU,Core
+AVGO,Broadcom,Technology,Semiconductors,AI Infrastructure,Networking/ASIC,Core
+MRVL,Marvell Technology,Technology,Semiconductors,AI Infrastructure,Networking/ASIC,Core
+ANET,Arista Networks,Technology,Networking,AI Infrastructure,Networking,Core
+ALAB,Astera Labs,Technology,Semiconductors,AI Infrastructure,Connectivity,Core
+CRDO,Credo Technology,Technology,Semiconductors,AI Infrastructure,Connectivity,Active
+VRT,Vertiv Holdings,Industrials,Electrical Equipment,AI Infrastructure,Datacenter Power/Cooling,Core
+DELL,Dell Technologies,Technology,Hardware,AI Infrastructure,Servers,Core
+SMCI,Super Micro Computer,Technology,Hardware,AI Infrastructure,Servers,Active
+HPE,Hewlett Packard Enterprise,Technology,Hardware,AI Infrastructure,Servers,Active
+ARM,Arm Holdings,Technology,Semiconductors,AI Infrastructure,IP/Architecture,Core
+TSM,Taiwan Semiconductor,Technology,Semiconductors,AI Infrastructure,Foundry,Core
+CRWV,CoreWeave,Technology,IT Services,AI Infrastructure,GPU Cloud,Core
+NBIS,Nebius Group,Technology,IT Services,AI Infrastructure,GPU Cloud,Active
+NVT,nVent Electric,Industrials,Electrical Equipment,AI Infrastructure,Datacenter Electrical,Active
+MOD,Modine Manufacturing,Industrials,Industrial Machinery,AI Infrastructure,Datacenter Cooling,Active
+GFS,GlobalFoundries,Technology,Semiconductors,AI Infrastructure,Foundry,Active
+CDNS,Cadence Design Systems,Technology,Software,AI Infrastructure,EDA Tools,Active
+SNPS,Synopsys,Technology,Software,AI Infrastructure,EDA Tools,Active
+RR,Richtech Robotics,Technology,Hardware,AI Infrastructure,Service Robotics,Watch
+CIEN,Ciena,Technology,Networking,Optics,Optical Networking,Core
+LITE,Lumentum,Technology,Semiconductors,Optics,Optical Components,Core
+COHR,Coherent,Technology,Semiconductors,Optics,Optical/Photonics,Core
+FN,Fabrinet,Technology,Semiconductors,Optics,Optical Manufacturing,Core
+AAOI,Applied Optoelectronics,Technology,Semiconductors,Optics,Optical Modules,Active
+INFN,Infinera,Technology,Networking,Optics,Optical Networking,Watch
+BAND,Bandwidth,Technology,Networking,Optics,Communications,Watch
+VIAV,Viavi Solutions,Technology,Semiconductors,Optics,Optical Test/Measurement,Active
+ITRI,Itron,Technology,Hardware,Optics,Sensing/IoT,Watch
+ASML,ASML Holding,Technology,Semiconductors,Semiconductors,Equipment,Core
+AMAT,Applied Materials,Technology,Semiconductors,Semiconductors,Equipment,Core
+LRCX,Lam Research,Technology,Semiconductors,Semiconductors,Equipment,Core
+KLAC,KLA Corporation,Technology,Semiconductors,Semiconductors,Equipment,Core
+ENTG,Entegris,Technology,Semiconductors,Semiconductors,Materials,Active
+ONTO,Onto Innovation,Technology,Semiconductors,Semiconductors,Equipment,Active
+ACLS,Axcelis Technologies,Technology,Semiconductors,Semiconductors,Equipment,Watch
+INTC,Intel,Technology,Semiconductors,Semiconductors,CPU/Foundry,Core
+TXN,Texas Instruments,Technology,Semiconductors,Semiconductors,Analog,Active
+ADI,Analog Devices,Technology,Semiconductors,Semiconductors,Analog,Active
+MCHP,Microchip Technology,Technology,Semiconductors,Semiconductors,Analog/MCU,Active
+ON,ON Semiconductor,Technology,Semiconductors,Semiconductors,Power/Auto,Active
+NXPI,NXP Semiconductors,Technology,Semiconductors,Semiconductors,Auto/Industrial,Active
+MPWR,Monolithic Power Systems,Technology,Semiconductors,Semiconductors,Power,Active
+QCOM,Qualcomm,Technology,Semiconductors,Semiconductors,Mobile/Modem,Core
+MXL,MaxLinear,Technology,Semiconductors,Semiconductors,Connectivity,Watch
+SLAB,Silicon Labs,Technology,Semiconductors,Semiconductors,IoT/MCU,Watch
+LSCC,Lattice Semiconductor,Technology,Semiconductors,Semiconductors,FPGA,Watch
+WOLF,Wolfspeed,Technology,Semiconductors,Semiconductors,SiC/Power,Watch
+INDI,indie Semiconductor,Technology,Semiconductors,Semiconductors,Auto,Watch
+AMBA,Ambarella,Technology,Semiconductors,Semiconductors,Vision/Auto,Watch
+UMC,United Microelectronics,Technology,Semiconductors,Semiconductors,Foundry,Watch
+SOXL,Direxion Semis 3x Bull,ETF,Leveraged ETF,Semiconductors,Leveraged ETF,Active
+SMH,VanEck Semiconductor ETF,ETF,Sector ETF,Semiconductors,ETF,Core
+SOXX,iShares Semiconductor ETF,ETF,Sector ETF,Semiconductors,ETF,Active
+MU,Micron Technology,Technology,Semiconductors,Memory,DRAM/HBM,Core
+WDC,Western Digital,Technology,Hardware,Memory,HDD/Storage,Core
+STX,Seagate Technology,Technology,Hardware,Memory,HDD/Storage,Core
+SNDK,SanDisk,Technology,Semiconductors,Memory,Flash/NAND,Active
+PSTG,Pure Storage,Technology,Hardware,Memory,Enterprise Storage,Core
+NTAP,NetApp,Technology,Hardware,Memory,Enterprise Storage,Active
+RMBS,Rambus,Technology,Semiconductors,Memory,Memory IP/HBM,Active
+MRAM,Everspin Technologies,Technology,Semiconductors,Memory,MRAM,Watch
+HIMX,Himax Technologies,Technology,Semiconductors,Memory,Display/Memory,Watch
+MSFT,Microsoft,Technology,Software,AI Applications,Cloud/AI,Core
+GOOGL,Alphabet,Communication Services,Interactive Media,AI Applications,Search/AI,Core
+META,Meta Platforms,Communication Services,Interactive Media,AI Applications,Social/AI,Core
+AMZN,Amazon,Consumer Discretionary,Internet Retail,AI Applications,Cloud/AI,Core
+AAPL,Apple,Technology,Hardware,AI Applications,Devices/AI,Core
+ORCL,Oracle,Technology,Software,AI Applications,Cloud/AI,Core
+PLTR,Palantir,Technology,Software,AI Applications,Enterprise AI,Core
+APP,AppLovin,Communication Services,Interactive Media,AI Applications,AdTech AI,Core
+CRM,Salesforce,Technology,Software,AI Applications,Enterprise AI,Core
+ADBE,Adobe,Technology,Software,AI Applications,Creative AI,Active
+IBM,IBM,Technology,IT Services,AI Applications,Enterprise AI,Active
+SOUN,SoundHound AI,Technology,Software,AI Applications,Voice AI,Active
+BBAI,BigBear.ai,Technology,IT Services,AI Applications,Defense AI,Watch
+AI,C3.ai,Technology,Software,AI Applications,Enterprise AI,Active
+PATH,UiPath,Technology,Software,AI Applications,Automation,Watch
+DUOL,Duolingo,Communication Services,Interactive Media,AI Applications,EdTech AI,Active
+TEM,Tempus AI,Health Care,Health Care Technology,AI Applications,Healthcare AI,Active
+RXRX,Recursion Pharmaceuticals,Health Care,Biotechnology,AI Applications,AI Drug Discovery,Active
+SDGR,Schrodinger,Health Care,Health Care Technology,AI Applications,AI Drug Discovery,Watch
+CRNC,Cerence,Technology,Software,AI Applications,Voice AI,Watch
+NET,Cloudflare,Technology,Software,Software Infrastructure,Edge/Security,Core
+SNOW,Snowflake,Technology,Software,Software Infrastructure,Data Platform,Core
+MDB,MongoDB,Technology,Software,Software Infrastructure,Database,Active
+CRWD,CrowdStrike,Technology,Software,Software Infrastructure,Security,Core
+ZS,Zscaler,Technology,Software,Software Infrastructure,Security,Active
+OKTA,Okta,Technology,Software,Software Infrastructure,Security,Active
+S,SentinelOne,Technology,Software,Software Infrastructure,Security,Active
+PANW,Palo Alto Networks,Technology,Software,Software Infrastructure,Security,Core
+FTNT,Fortinet,Technology,Software,Software Infrastructure,Security,Active
+CFLT,Confluent,Technology,Software,Software Infrastructure,Data Platform,Active
+ESTC,Elastic,Technology,Software,Software Infrastructure,Search/Observability,Watch
+GTLB,GitLab,Technology,Software,Software Infrastructure,DevOps,Active
+FROG,JFrog,Technology,Software,Software Infrastructure,DevOps,Watch
+DT,Dynatrace,Technology,Software,Software Infrastructure,Observability,Watch
+TEAM,Atlassian,Technology,Software,Software Infrastructure,Collaboration,Active
+WDAY,Workday,Technology,Software,Software Infrastructure,Enterprise SaaS,Active
+NOW,ServiceNow,Technology,Software,Software Infrastructure,Enterprise SaaS,Core
+TWLO,Twilio,Technology,Software,Software Infrastructure,Communications,Active
+HUBS,HubSpot,Technology,Software,Software Infrastructure,CRM,Active
+VEEV,Veeva Systems,Technology,Software,Software Infrastructure,Vertical SaaS,Watch
+INTU,Intuit,Technology,Software,Software Infrastructure,Vertical SaaS,Active
+VST,Vistra,Utilities,Independent Power,Power/Grid,IPP,Core
+CEG,Constellation Energy,Utilities,Independent Power,Power/Grid,IPP/Nuclear,Core
+NRG,NRG Energy,Utilities,Independent Power,Power/Grid,IPP,Active
+TLN,Talen Energy,Utilities,Independent Power,Power/Grid,IPP/Nuclear,Core
+ETN,Eaton,Industrials,Electrical Equipment,Power/Grid,Electrical Equipment,Core
+PWR,Quanta Services,Industrials,Construction,Power/Grid,Grid Buildout,Core
+PRIM,Primoris Services,Industrials,Construction,Power/Grid,Grid Buildout,Active
+MYRG,MYR Group,Industrials,Construction,Power/Grid,Grid Buildout,Active
+STRL,Sterling Infrastructure,Industrials,Construction,Power/Grid,Datacenter Build,Active
+MTZ,MasTec,Industrials,Construction,Power/Grid,Infrastructure,Active
+GEV,GE Vernova,Industrials,Electrical Equipment,Power/Grid,Power Equipment,Core
+HUBB,Hubbell,Industrials,Electrical Equipment,Power/Grid,Electrical Equipment,Active
+PNR,Pentair,Industrials,Industrial Machinery,Power/Grid,Cooling/Water,Watch
+ATKR,Atkore,Industrials,Building Products,Power/Grid,Electrical Products,Watch
+FLNC,Fluence Energy,Industrials,Electrical Equipment,Power/Grid,Battery Storage,Active
+BE,Bloom Energy,Industrials,Electrical Equipment,Power/Grid,Fuel Cells,Active
+PLUG,Plug Power,Industrials,Electrical Equipment,Power/Grid,Hydrogen,Watch
+BWXT,BWX Technologies,Industrials,Aerospace/Defense,Power/Grid,Naval/Defense Nuclear,Active
+POWL,Powell Industries,Industrials,Electrical Equipment,Power/Grid,Power Distribution,Active
+AROC,Archrock,Energy,Oil & Gas Equipment,Power/Grid,Gas Compression,Watch
+XLU,Utilities Select Sector SPDR,ETF,Sector ETF,Power/Grid,ETF,Core
+OKLO,Oklo,Utilities,Nuclear,Nuclear,SMR,Core
+SMR,NuScale Power,Utilities,Nuclear,Nuclear,SMR,Core
+LEU,Centrus Energy,Utilities,Nuclear,Nuclear,Enrichment,Active
+NNE,Nano Nuclear Energy,Utilities,Nuclear,Nuclear,SMR,Active
+CCJ,Cameco,Energy,Uranium,Nuclear,Uranium Mining,Core
+UEC,Uranium Energy,Energy,Uranium,Nuclear,Uranium Mining,Active
+UUUU,Energy Fuels,Energy,Uranium,Nuclear,Uranium Mining,Watch
+URA,Global X Uranium ETF,ETF,Sector ETF,Nuclear,ETF,Active
+URNM,Sprott Uranium Miners ETF,ETF,Sector ETF,Nuclear,ETF,Active
+TSLA,Tesla,Consumer Discretionary,Auto,Robotics,EV/Humanoid,Core
+ISRG,Intuitive Surgical,Health Care,Health Care Equipment,Robotics,Surgical Robotics,Core
+ROK,Rockwell Automation,Industrials,Industrial Machinery,Robotics,Industrial Automation,Core
+TER,Teradyne,Technology,Semiconductors,Robotics,Test/Cobots,Active
+SYM,Symbotic,Industrials,Industrial Machinery,Robotics,Warehouse Automation,Core
+KSCP,Knightscope,Industrials,Industrial Machinery,Robotics,Security Robotics,Watch
+SERV,Serve Robotics,Industrials,Industrial Machinery,Robotics,Delivery Robotics,Active
+ABB,ABB Ltd,Industrials,Electrical Equipment,Robotics,Industrial Automation,Active
+EMR,Emerson Electric,Industrials,Electrical Equipment,Robotics,Industrial Automation,Active
+ZBRA,Zebra Technologies,Technology,Hardware,Robotics,Warehouse/Logistics,Active
+OUST,Ouster,Technology,Hardware,Robotics,Lidar/Sensing,Active
+MBLY,Mobileye,Technology,Semiconductors,Robotics,Autonomy,Active
+PTC,PTC Inc,Technology,Software,Robotics,Industrial Software,Watch
+AEVA,Aeva Technologies,Technology,Hardware,Robotics,Lidar/Sensing,Active
+INVZ,Innoviz Technologies,Technology,Hardware,Robotics,Lidar/Sensing,Watch
+LAZR,Luminar Technologies,Technology,Hardware,Robotics,Lidar/Sensing,Watch
+CGNX,Cognex,Technology,Hardware,Robotics,Machine Vision,Active
+FARO,FARO Technologies,Technology,Hardware,Robotics,3D Measurement,Watch
+IPGP,IPG Photonics,Technology,Hardware,Robotics,Industrial Lasers,Active
+FANUY,Fanuc Corporation,Industrials,Industrial Machinery,Robotics,Industrial Robots,Active
+NDSN,Nordson,Industrials,Industrial Machinery,Robotics,Precision Dispensing,Watch
+IONQ,IonQ,Technology,Hardware,Quantum,Trapped Ion,Core
+RGTI,Rigetti Computing,Technology,Hardware,Quantum,Superconducting,Active
+QBTS,D-Wave Quantum,Technology,Hardware,Quantum,Annealing,Active
+QUBT,Quantum Computing Inc,Technology,Hardware,Quantum,Photonic,Active
+ARQQ,Arqit Quantum,Technology,Software,Quantum,Quantum Security,Watch
+LAES,SEALSQ,Technology,Hardware,Quantum,Quantum Security,Watch
+QSI,Quantum-Si,Health Care,Health Care Equipment,Quantum,Quantum Sequencing,Watch
+QTUM,Defiance Quantum ETF,ETF,Sector ETF,Quantum,ETF,Active
+RTX,RTX Corporation,Industrials,Aerospace/Defense,Defense,Defense Prime,Core
+LMT,Lockheed Martin,Industrials,Aerospace/Defense,Defense,Defense Prime,Active
+NOC,Northrop Grumman,Industrials,Aerospace/Defense,Defense,Defense Prime,Active
+GD,General Dynamics,Industrials,Aerospace/Defense,Defense,Defense Prime,Active
+LHX,L3Harris,Industrials,Aerospace/Defense,Defense,Defense Prime,Watch
+HII,Huntington Ingalls,Industrials,Aerospace/Defense,Defense,Naval,Watch
+AVAV,AeroVironment,Industrials,Aerospace/Defense,Defense,Drones,Core
+KTOS,Kratos Defense,Industrials,Aerospace/Defense,Defense,Drones/Hypersonics,Core
+ACHR,Archer Aviation,Industrials,Aerospace/Defense,Defense,eVTOL,Active
+JOBY,Joby Aviation,Industrials,Aerospace/Defense,Defense,eVTOL,Active
+RKLB,Rocket Lab,Industrials,Aerospace/Defense,Defense,Space,Core
+ASTS,AST SpaceMobile,Communication Services,Telecommunications,Defense,Space,Core
+LUNR,Intuitive Machines,Industrials,Aerospace/Defense,Defense,Space,Active
+RDW,Redwire,Industrials,Aerospace/Defense,Defense,Space,Watch
+PL,Planet Labs,Industrials,Aerospace/Defense,Defense,Space,Watch
+LDOS,Leidos,Industrials,Aerospace/Defense,Defense,Defense IT,Active
+CW,Curtiss-Wright,Industrials,Aerospace/Defense,Defense,Defense Components,Watch
+ITA,iShares Aerospace & Defense ETF,ETF,Sector ETF,Defense,ETF,Active
+SHLD,Global X Defense Tech ETF,ETF,Sector ETF,Defense,ETF,Watch
+EQIX,Equinix,Real Estate,Specialized REITs,Datacenter REITs,Datacenter REIT,Core
+DLR,Digital Realty Trust,Real Estate,Specialized REITs,Datacenter REITs,Datacenter REIT,Core
+IRM,Iron Mountain,Real Estate,Specialized REITs,Datacenter REITs,Datacenter/Storage REIT,Active
+MP,MP Materials,Materials,Metals & Mining,Rare Earths,Rare Earths,Core
+USAR,USA Rare Earth,Materials,Metals & Mining,Rare Earths,Rare Earths,Active
+REMX,VanEck Rare Earth/Strategic Metals ETF,ETF,Sector ETF,Rare Earths,ETF,Watch
+RIVN,Rivian,Consumer Discretionary,Auto,EV/Autonomy,EV,Active
+LCID,Lucid Group,Consumer Discretionary,Auto,EV/Autonomy,EV,Watch
+LI,Li Auto,Consumer Discretionary,Auto,EV/Autonomy,China EV,Active
+XPEV,XPeng,Consumer Discretionary,Auto,EV/Autonomy,China EV,Active
+NIO,NIO,Consumer Discretionary,Auto,EV/Autonomy,China EV,Watch
+COIN,Coinbase,Financials,Capital Markets,Crypto Equities,Exchange,Core
+MSTR,Strategy,Technology,Software,Crypto Equities,BTC Treasury,Core
+HOOD,Robinhood,Financials,Capital Markets,Crypto Equities,Brokerage,Core
+MARA,Mara Holdings,Financials,Capital Markets,Crypto Equities,Miner,Active
+CLSK,CleanSpark,Financials,Capital Markets,Crypto Equities,Miner,Active
+WULF,TeraWulf,Financials,Capital Markets,Crypto Equities,Miner/HPC,Active
+IREN,IREN Limited,Financials,Capital Markets,Crypto Equities,Miner/HPC,Active
+CORZ,Core Scientific,Financials,Capital Markets,Crypto Equities,Miner/HPC,Active
+APLD,Applied Digital,Technology,IT Services,Crypto Equities,HPC/Datacenter,Active
+IBIT,iShares Bitcoin Trust,ETF,Crypto ETF,Crypto Equities,BTC ETF,Core
+ETHA,iShares Ethereum Trust,ETF,Crypto ETF,Crypto Equities,ETH ETF,Watch
+XBI,SPDR S&P Biotech ETF,ETF,Sector ETF,Biotech,ETF,Core
+IBB,iShares Biotechnology ETF,ETF,Sector ETF,Biotech,ETF,Active
+VRTX,Vertex Pharmaceuticals,Health Care,Biotechnology,Biotech,Large Cap Biotech,Active
+REGN,Regeneron,Health Care,Biotechnology,Biotech,Large Cap Biotech,Active
+GILD,Gilead Sciences,Health Care,Biotechnology,Biotech,Large Cap Biotech,Watch
+AMGN,Amgen,Health Care,Biotechnology,Biotech,Large Cap Biotech,Watch
+MRNA,Moderna,Health Care,Biotechnology,Biotech,mRNA/Vaccine,Active
+CRSP,CRISPR Therapeutics,Health Care,Biotechnology,Biotech,Gene Editing,Active
+VKTX,Viking Therapeutics,Health Care,Biotechnology,Biotech,Obesity/GLP,Active
+LLY,Eli Lilly,Health Care,Pharmaceuticals,Biotech,GLP-1 Leader,Core
+NVO,Novo Nordisk,Health Care,Pharmaceuticals,Biotech,GLP-1 Leader,Active
+NFLX,Netflix,Communication Services,Entertainment,Consumer Momentum,Streaming,Core
+SPOT,Spotify,Communication Services,Entertainment,Consumer Momentum,Streaming,Active
+ABNB,Airbnb,Consumer Discretionary,Travel,Consumer Momentum,Travel,Active
+UBER,Uber Technologies,Industrials,Transportation,Consumer Momentum,Mobility,Core
+DASH,DoorDash,Consumer Discretionary,Internet Retail,Consumer Momentum,Delivery,Active
+SHOP,Shopify,Technology,Software,Consumer Momentum,E-commerce Platform,Core
+MELI,MercadoLibre,Consumer Discretionary,Internet Retail,Consumer Momentum,LatAm E-commerce,Active
+CVNA,Carvana,Consumer Discretionary,Internet Retail,Consumer Momentum,E-commerce,Active
+RBLX,Roblox,Communication Services,Gaming,Consumer Momentum,Gaming,Active
+DKNG,DraftKings,Consumer Discretionary,Gaming,Consumer Momentum,Gaming,Active
+TTD,The Trade Desk,Communication Services,Interactive Media,Consumer Momentum,AdTech,Active
+RDDT,Reddit,Communication Services,Interactive Media,Consumer Momentum,Social,Core
+HIMS,Hims & Hers Health,Health Care,Health Care Services,Consumer Momentum,Telehealth,Active
+BABA,Alibaba,Consumer Discretionary,Internet Retail,China Tech,China Internet,Core
+PDD,PDD Holdings,Consumer Discretionary,Internet Retail,China Tech,China Internet,Active
+BIDU,Baidu,Communication Services,Interactive Media,China Tech,China Internet,Active
+JD,JD.com,Consumer Discretionary,Internet Retail,China Tech,China Internet,Watch
+KWEB,KraneShares CSI China Internet ETF,ETF,Country ETF,China Tech,ETF,Active
+FXI,iShares China Large-Cap ETF,ETF,Country ETF,China Tech,ETF,Watch
+GLD,SPDR Gold Shares,ETF,Commodity ETF,Metals,Gold ETF,Core
+GDX,VanEck Gold Miners ETF,ETF,Sector ETF,Metals,Gold Miners ETF,Core
+GDXJ,VanEck Junior Gold Miners ETF,ETF,Sector ETF,Metals,Junior Gold Miners ETF,Active
+SLV,iShares Silver Trust,ETF,Commodity ETF,Metals,Silver ETF,Active
+SIL,Global X Silver Miners ETF,ETF,Sector ETF,Metals,Silver Miners ETF,Active
+NEM,Newmont,Materials,Metals & Mining,Metals,Gold Miner,Active
+AEM,Agnico Eagle Mines,Materials,Metals & Mining,Metals,Gold Miner,Active
+FCX,Freeport-McMoRan,Materials,Metals & Mining,Metals,Copper,Core
+SCCO,Southern Copper,Materials,Metals & Mining,Metals,Copper,Active
+COPX,Global X Copper Miners ETF,ETF,Sector ETF,Metals,Copper Miners ETF,Active
+XLE,Energy Select Sector SPDR,ETF,Sector ETF,Energy,ETF,Core
+XOP,SPDR S&P Oil & Gas E&P ETF,ETF,Sector ETF,Energy,E&P ETF,Active
+XOM,Exxon Mobil,Energy,Integrated Oil & Gas,Energy,Major,Core
+CVX,Chevron,Energy,Integrated Oil & Gas,Energy,Major,Active
+OXY,Occidental Petroleum,Energy,Oil & Gas E&P,Energy,E&P,Active
+FANG,Diamondback Energy,Energy,Oil & Gas E&P,Energy,E&P,Active
+LNG,Cheniere Energy,Energy,Oil & Gas Storage,Energy,LNG,Active
+SLB,Schlumberger,Energy,Oil & Gas Equipment,Energy,Oil Services,Watch
+JPM,JPMorgan Chase,Financials,Banks,Financials,Money Center Bank,Core
+GS,Goldman Sachs,Financials,Capital Markets,Financials,Investment Bank,Active
+BX,Blackstone,Financials,Capital Markets,Financials,Alt Asset Manager,Active
+XLF,Financial Select Sector SPDR,ETF,Sector ETF,Financials,ETF,Core
+KRE,SPDR S&P Regional Banking ETF,ETF,Sector ETF,Financials,Regional Banks ETF,Active
+XLP,Consumer Staples Select SPDR,ETF,Sector ETF,Defensives,Staples ETF,Core
+XLV,Health Care Select Sector SPDR,ETF,Sector ETF,Defensives,Healthcare ETF,Core
+XLRE,Real Estate Select Sector SPDR,ETF,Sector ETF,Defensives,REIT ETF,Active
+SPY,SPDR S&P 500 ETF,ETF,Index ETF,Benchmark,SPX,Core
+QQQ,Invesco QQQ,ETF,Index ETF,Benchmark,NDX,Core
+IWM,iShares Russell 2000 ETF,ETF,Index ETF,Benchmark,R2K,Core
+DIA,SPDR Dow Jones Industrial ETF,ETF,Index ETF,Benchmark,DJIA,Active
+RSP,Invesco S&P 500 Equal Weight,ETF,Index ETF,Benchmark,Equal Weight SPX,Core
+MDY,SPDR S&P MidCap 400 ETF,ETF,Index ETF,Benchmark,MidCap,Active
+IJR,iShares Core S&P Small-Cap ETF,ETF,Index ETF,Benchmark,SmallCap,Watch
+VTI,Vanguard Total Stock Market ETF,ETF,Index ETF,Benchmark,Total Market,Active
+UVXY,ProShares Ultra VIX Short-Term Futures,ETF,Volatility ETF,Benchmark,VIX ETF,Active
+VXX,iPath Series B S&P 500 VIX Short-Term Futures ETN,ETF,Volatility ETF,Benchmark,VIX Short-Term,Active
+VXZ,iPath Series B S&P 500 VIX Mid-Term Futures ETN,ETF,Volatility ETF,Benchmark,VIX Mid-Term,Active
+TLT,iShares 20+ Year Treasury Bond ETF,ETF,Bond ETF,Benchmark,Long Bonds,Core
+HYG,iShares iBoxx HY Corporate Bond ETF,ETF,Bond ETF,Benchmark,High Yield,Active
+UUP,Invesco DB US Dollar Index Bullish,ETF,Currency ETF,Benchmark,USD,Active
+XLK,Technology Select Sector SPDR,ETF,Sector ETF,Benchmark,Tech ETF,Core
+XLY,Consumer Discretionary Select SPDR,ETF,Sector ETF,Benchmark,Discretionary ETF,Core
+XLC,Communication Services Select SPDR,ETF,Sector ETF,Benchmark,Comm Services ETF,Active
+XLI,Industrial Select Sector SPDR,ETF,Sector ETF,Benchmark,Industrials ETF,Active
+XLB,Materials Select Sector SPDR,ETF,Sector ETF,Benchmark,Materials ETF,Watch
+IWF,iShares Russell 1000 Growth ETF,ETF,Style ETF,Benchmark,Large Growth,Active
+IWD,iShares Russell 1000 Value ETF,ETF,Style ETF,Benchmark,Large Value,Active
+EFA,iShares MSCI EAFE ETF,ETF,Index ETF,Benchmark,Intl Developed,Active
+EEM,iShares MSCI Emerging Markets ETF,ETF,Index ETF,Benchmark,Emerging Mkts,Active
+MMM,3M,Industrials,Industrial Conglomerates,Scan Only,Industrial Conglomerates,Watch
+AOS,A. O. Smith,Industrials,Building Products,Scan Only,Building Products,Watch
+ABT,Abbott Laboratories,Health Care,Health Care Equipment,Scan Only,Health Care Equipment,Watch
+ABBV,AbbVie,Health Care,Biotechnology,Scan Only,Biotechnology,Watch
+ACN,Accenture,Information Technology,IT Consulting & Other Services,Scan Only,IT Consulting & Other Services,Watch
+AES,AES Corporation,Utilities,Independent Power Producers & Energy Traders,Scan Only,Independent Power Producers & Energy Traders,Watch
+AFL,Aflac,Financials,Life & Health Insurance,Scan Only,Life & Health Insurance,Watch
+A,Agilent Technologies,Health Care,Life Sciences Tools & Services,Scan Only,Life Sciences Tools & Services,Watch
+APD,Air Products,Materials,Industrial Gases,Scan Only,Industrial Gases,Watch
+AKAM,Akamai Technologies,Information Technology,Internet Services & Infrastructure,Scan Only,Internet Services & Infrastructure,Watch
+ALB,Albemarle Corporation,Materials,Specialty Chemicals,Scan Only,Specialty Chemicals,Watch
+ARE,Alexandria Real Estate Equities,Real Estate,Office REITs,Scan Only,Office REITs,Watch
+ALGN,Align Technology,Health Care,Health Care Supplies,Scan Only,Health Care Supplies,Watch
+ALLE,Allegion,Industrials,Building Products,Scan Only,Building Products,Watch
+LNT,Alliant Energy,Utilities,Electric Utilities,Scan Only,Electric Utilities,Watch
+ALL,Allstate,Financials,Property & Casualty Insurance,Scan Only,Property & Casualty Insurance,Watch
+GOOG,Alphabet Inc. (Class C),Communication Services,Interactive Media & Services,Scan Only,Interactive Media & Services,Watch
+MO,Altria,Consumer Staples,Tobacco,Scan Only,Tobacco,Watch
+AMCR,Amcor,Materials,Paper & Plastic Packaging,Scan Only,Paper & Plastic Packaging,Watch
+AEE,Ameren,Utilities,Multi-Utilities,Scan Only,Multi-Utilities,Watch
+AEP,American Electric Power,Utilities,Electric Utilities,Scan Only,Electric Utilities,Watch
+AXP,American Express,Financials,Consumer Finance,Scan Only,Consumer Finance,Watch
+AIG,American International Group,Financials,Multi-line Insurance,Scan Only,Multi-line Insurance,Watch
+AMT,American Tower,Real Estate,Telecom Tower REITs,Scan Only,Telecom Tower REITs,Watch
+AWK,American Water Works,Utilities,Water Utilities,Scan Only,Water Utilities,Watch
+AMP,Ameriprise Financial,Financials,Asset Management & Custody Banks,Scan Only,Asset Management & Custody Banks,Watch
+AME,Ametek,Industrials,Electrical Components & Equipment,Scan Only,Electrical Components & Equipment,Watch
+APH,Amphenol,Information Technology,Electronic Components,Scan Only,Electronic Components,Watch
+AON,Aon plc,Financials,Insurance Brokers,Scan Only,Insurance Brokers,Watch
+APA,APA Corporation,Energy,Oil & Gas Exploration & Production,Scan Only,Oil & Gas Exploration & Production,Watch
+APO,Apollo Global Management,Financials,Asset Management & Custody Banks,Scan Only,Asset Management & Custody Banks,Watch
+APTV,Aptiv,Consumer Discretionary,Automotive Parts & Equipment,Scan Only,Automotive Parts & Equipment,Watch
+ACGL,Arch Capital Group,Financials,Property & Casualty Insurance,Scan Only,Property & Casualty Insurance,Watch
+ADM,Archer Daniels Midland,Consumer Staples,Agricultural Products,Scan Only,Agricultural Products,Watch
+ARES,Ares Management,Financials,Asset Management & Custody Banks,Scan Only,Asset Management & Custody Banks,Watch
+AJG,Arthur J. Gallagher,Financials,Insurance Brokers,Scan Only,Insurance Brokers,Watch
+AIZ,Assurant,Financials,Multi-line Insurance,Scan Only,Multi-line Insurance,Watch
+T,AT&T,Communication Services,Integrated Telecommunication Services,Scan Only,Integrated Telecommunication Services,Watch
+ATO,Atmos Energy,Utilities,Gas Utilities,Scan Only,Gas Utilities,Watch
+ADSK,Autodesk,Information Technology,Application Software,Scan Only,Application Software,Watch
+ADP,Automatic Data Processing,Industrials,HR & Employment Services,Scan Only,HR & Employment Services,Watch
+AZO,AutoZone,Consumer Discretionary,Automotive Retail,Scan Only,Automotive Retail,Watch
+AVB,AvalonBay Communities,Real Estate,Multi-Family Residential REITs,Scan Only,Multi-Family Residential REITs,Watch
+AVY,Avery Dennison,Materials,Paper & Plastic Packaging,Scan Only,Paper & Plastic Packaging,Watch
+AXON,Axon Enterprise,Industrials,Aerospace & Defense,Scan Only,Aerospace & Defense,Watch
+BKR,Baker Hughes,Energy,Oil & Gas Equipment & Services,Scan Only,Oil & Gas Equipment & Services,Watch
+BALL,Ball Corporation,Materials,Metal & Glass Containers,Scan Only,Metal & Glass Containers,Watch
+BAC,Bank of America,Financials,Diversified Banks,Scan Only,Diversified Banks,Watch
+BAX,Baxter International,Health Care,Health Care Equipment,Scan Only,Health Care Equipment,Watch
+BDX,Becton Dickinson,Health Care,Health Care Equipment,Scan Only,Health Care Equipment,Watch
+BRK.B,Berkshire Hathaway,Financials,Multi-Sector Holdings,Scan Only,Multi-Sector Holdings,Watch
+BBY,Best Buy,Consumer Discretionary,Computer & Electronics Retail,Scan Only,Computer & Electronics Retail,Watch
+TECH,Bio-Techne,Health Care,Life Sciences Tools & Services,Scan Only,Life Sciences Tools & Services,Watch
+BIIB,Biogen,Health Care,Biotechnology,Scan Only,Biotechnology,Watch
+BLK,BlackRock,Financials,Asset Management & Custody Banks,Scan Only,Asset Management & Custody Banks,Watch
+XYZ,Block Inc.,Financials,Transaction & Payment Processing,Scan Only,Transaction & Payment Processing,Watch
+BK,BNY Mellon,Financials,Asset Management & Custody Banks,Scan Only,Asset Management & Custody Banks,Watch
+BA,Boeing,Industrials,Aerospace & Defense,Scan Only,Aerospace & Defense,Watch
+BKNG,Booking Holdings,Consumer Discretionary,"Hotels, Resorts & Cruise Lines",Scan Only,"Hotels, Resorts & Cruise Lines",Watch
+BSX,Boston Scientific,Health Care,Health Care Equipment,Scan Only,Health Care Equipment,Watch
+BMY,Bristol Myers Squibb,Health Care,Pharmaceuticals,Scan Only,Pharmaceuticals,Watch
+BR,Broadridge Financial Solutions,Industrials,Data Processing & Outsourced Services,Scan Only,Data Processing & Outsourced Services,Watch
+BRO,Brown & Brown,Financials,Insurance Brokers,Scan Only,Insurance Brokers,Watch
+BF.B,Brown-Forman,Consumer Staples,Distillers & Vintners,Scan Only,Distillers & Vintners,Watch
+BLDR,Builders FirstSource,Industrials,Building Products,Scan Only,Building Products,Watch
+BG,Bunge Global,Consumer Staples,Agricultural Products,Scan Only,Agricultural Products,Watch
+BXP,BXP Inc.,Real Estate,Office REITs,Scan Only,Office REITs,Watch
+CHRW,C.H. Robinson,Industrials,Air Freight & Logistics,Scan Only,Air Freight & Logistics,Watch
+CPT,Camden Property Trust,Real Estate,Multi-Family Residential REITs,Scan Only,Multi-Family Residential REITs,Watch
+CPB,Campbell Soup,Consumer Staples,Packaged Foods & Meats,Scan Only,Packaged Foods & Meats,Watch
+COF,Capital One,Financials,Consumer Finance,Scan Only,Consumer Finance,Watch
+CAH,Cardinal Health,Health Care,Health Care Distributors,Scan Only,Health Care Distributors,Watch
+CCL,Carnival,Consumer Discretionary,"Hotels, Resorts & Cruise Lines",Scan Only,"Hotels, Resorts & Cruise Lines",Watch
+CARR,Carrier Global,Industrials,Building Products,Scan Only,Building Products,Watch
+CASY,Casey's,Consumer Staples,Food Retail,Scan Only,Food Retail,Watch
+CAT,Caterpillar Inc.,Industrials,Construction Machinery,Scan Only,Construction Machinery,Watch
+CBOE,Cboe Global Markets,Financials,Financial Exchanges & Data,Scan Only,Financial Exchanges & Data,Watch
+CBRE,CBRE Group,Real Estate,Real Estate Services,Scan Only,Real Estate Services,Watch
+CDW,CDW Corporation,Information Technology,Technology Distributors,Scan Only,Technology Distributors,Watch
+COR,Cencora,Health Care,Health Care Distributors,Scan Only,Health Care Distributors,Watch
+CNC,Centene Corporation,Health Care,Managed Health Care,Scan Only,Managed Health Care,Watch
+CNP,CenterPoint Energy,Utilities,Multi-Utilities,Scan Only,Multi-Utilities,Watch
+CF,CF Industries,Materials,Fertilizers & Agricultural Chemicals,Scan Only,Fertilizers & Agricultural Chemicals,Watch
+CRL,Charles River Laboratories,Health Care,Life Sciences Tools & Services,Scan Only,Life Sciences Tools & Services,Watch
+SCHW,Charles Schwab,Financials,Investment Banking & Brokerage,Scan Only,Investment Banking & Brokerage,Watch
+CHTR,Charter Communications,Communication Services,Cable & Satellite,Scan Only,Cable & Satellite,Watch
+CMG,Chipotle Mexican Grill,Consumer Discretionary,Restaurants,Scan Only,Restaurants,Watch
+CB,Chubb Limited,Financials,Property & Casualty Insurance,Scan Only,Property & Casualty Insurance,Watch
+CHD,Church & Dwight,Consumer Staples,Household Products,Scan Only,Household Products,Watch
+CI,Cigna,Health Care,Health Care Services,Scan Only,Health Care Services,Watch
+CINF,Cincinnati Financial,Financials,Property & Casualty Insurance,Scan Only,Property & Casualty Insurance,Watch
+CTAS,Cintas,Industrials,Diversified Support Services,Scan Only,Diversified Support Services,Watch
+CSCO,Cisco,Information Technology,Communications Equipment,Scan Only,Communications Equipment,Watch
+C,Citigroup,Financials,Diversified Banks,Scan Only,Diversified Banks,Watch
+CFG,Citizens Financial Group,Financials,Regional Banks,Scan Only,Regional Banks,Watch
+CLX,Clorox,Consumer Staples,Household Products,Scan Only,Household Products,Watch
+CME,CME Group,Financials,Financial Exchanges & Data,Scan Only,Financial Exchanges & Data,Watch
+CMS,CMS Energy,Utilities,Multi-Utilities,Scan Only,Multi-Utilities,Watch
+KO,Coca-Cola Company,Consumer Staples,Soft Drinks,Scan Only,Soft Drinks,Watch
+CTSH,Cognizant,Information Technology,IT Consulting & Other Services,Scan Only,IT Consulting & Other Services,Watch
+CL,Colgate-Palmolive,Consumer Staples,Household Products,Scan Only,Household Products,Watch
+CMCSA,Comcast,Communication Services,Cable & Satellite,Scan Only,Cable & Satellite,Watch
+FIX,Comfort Systems USA,Industrials,Construction & Engineering,Scan Only,Construction & Engineering,Watch
+CAG,Conagra Brands,Consumer Staples,Packaged Foods & Meats,Scan Only,Packaged Foods & Meats,Watch
+COP,ConocoPhillips,Energy,Oil & Gas Exploration & Production,Scan Only,Oil & Gas Exploration & Production,Watch
+ED,Consolidated Edison,Utilities,Multi-Utilities,Scan Only,Multi-Utilities,Watch
+STZ,Constellation Brands,Consumer Staples,Distillers & Vintners,Scan Only,Distillers & Vintners,Watch
+COO,Cooper Companies,Health Care,Health Care Supplies,Scan Only,Health Care Supplies,Watch
+CPRT,Copart,Industrials,Diversified Support Services,Scan Only,Diversified Support Services,Watch
+GLW,Corning Inc.,Information Technology,Electronic Components,Scan Only,Electronic Components,Watch
+CPAY,Corpay,Financials,Transaction & Payment Processing,Scan Only,Transaction & Payment Processing,Watch
+CTVA,Corteva,Materials,Fertilizers & Agricultural Chemicals,Scan Only,Fertilizers & Agricultural Chemicals,Watch
+CSGP,CoStar Group,Real Estate,Real Estate Services,Scan Only,Real Estate Services,Watch
+COST,Costco,Consumer Staples,Consumer Staples Merchandise Retail,Scan Only,Consumer Staples Merchandise Retail,Watch
+CTRA,Coterra,Energy,Oil & Gas Exploration & Production,Scan Only,Oil & Gas Exploration & Production,Watch
+CRH,CRH plc,Materials,Construction Materials,Scan Only,Construction Materials,Watch
+CCI,Crown Castle,Real Estate,Telecom Tower REITs,Scan Only,Telecom Tower REITs,Watch
+CSX,CSX Corporation,Industrials,Rail Transportation,Scan Only,Rail Transportation,Watch
+CMI,Cummins,Industrials,Construction Machinery,Scan Only,Construction Machinery,Watch
+CVS,CVS Health,Health Care,Health Care Services,Scan Only,Health Care Services,Watch
+DHR,Danaher Corporation,Health Care,Life Sciences Tools & Services,Scan Only,Life Sciences Tools & Services,Watch
+DRI,Darden Restaurants,Consumer Discretionary,Restaurants,Scan Only,Restaurants,Watch
+DDOG,Datadog,Information Technology,Application Software,Scan Only,Application Software,Watch
+DVA,DaVita,Health Care,Health Care Services,Scan Only,Health Care Services,Watch
+DECK,Deckers Brands,Consumer Discretionary,Footwear,Scan Only,Footwear,Watch
+DE,Deere & Company,Industrials,Agricultural & Farm Machinery,Scan Only,Agricultural & Farm Machinery,Watch
+DAL,Delta Air Lines,Industrials,Passenger Airlines,Scan Only,Passenger Airlines,Watch
+DVN,Devon Energy,Energy,Oil & Gas Exploration & Production,Scan Only,Oil & Gas Exploration & Production,Watch
+DXCM,Dexcom,Health Care,Health Care Equipment,Scan Only,Health Care Equipment,Watch
+DG,Dollar General,Consumer Staples,Consumer Staples Merchandise Retail,Scan Only,Consumer Staples Merchandise Retail,Watch
+DLTR,Dollar Tree,Consumer Staples,Consumer Staples Merchandise Retail,Scan Only,Consumer Staples Merchandise Retail,Watch
+D,Dominion Energy,Utilities,Multi-Utilities,Scan Only,Multi-Utilities,Watch
+DPZ,Domino's,Consumer Discretionary,Restaurants,Scan Only,Restaurants,Watch
+DOV,Dover Corporation,Industrials,Industrial Machinery,Scan Only,Industrial Machinery,Watch
+DOW,Dow Inc.,Materials,Commodity Chemicals,Scan Only,Commodity Chemicals,Watch
+DHI,D. R. Horton,Consumer Discretionary,Homebuilding,Scan Only,Homebuilding,Watch
+DTE,DTE Energy,Utilities,Multi-Utilities,Scan Only,Multi-Utilities,Watch
+DUK,Duke Energy,Utilities,Electric Utilities,Scan Only,Electric Utilities,Watch
+DD,DuPont,Materials,Specialty Chemicals,Scan Only,Specialty Chemicals,Watch
+EBAY,eBay Inc.,Consumer Discretionary,Broadline Retail,Scan Only,Broadline Retail,Watch
+SATS,EchoStar,Communication Services,Wireless Telecommunication Services,Scan Only,Wireless Telecommunication Services,Watch
+ECL,Ecolab,Materials,Specialty Chemicals,Scan Only,Specialty Chemicals,Watch
+EIX,Edison International,Utilities,Electric Utilities,Scan Only,Electric Utilities,Watch
+EW,Edwards Lifesciences,Health Care,Health Care Equipment,Scan Only,Health Care Equipment,Watch
+EA,Electronic Arts,Communication Services,Interactive Home Entertainment,Scan Only,Interactive Home Entertainment,Watch
+ELV,Elevance Health,Health Care,Managed Health Care,Scan Only,Managed Health Care,Watch
+EME,Emcor,Industrials,Construction & Engineering,Scan Only,Construction & Engineering,Watch
+ETR,Entergy,Utilities,Electric Utilities,Scan Only,Electric Utilities,Watch
+EOG,EOG Resources,Energy,Oil & Gas Exploration & Production,Scan Only,Oil & Gas Exploration & Production,Watch
+EPAM,EPAM Systems,Information Technology,IT Consulting & Other Services,Scan Only,IT Consulting & Other Services,Watch
+EQT,EQT Corporation,Energy,Oil & Gas Exploration & Production,Scan Only,Oil & Gas Exploration & Production,Watch
+EFX,Equifax,Industrials,Research & Consulting Services,Scan Only,Research & Consulting Services,Watch
+EQR,Equity Residential,Real Estate,Multi-Family Residential REITs,Scan Only,Multi-Family Residential REITs,Watch
+ERIE,Erie Indemnity,Financials,Insurance Brokers,Scan Only,Insurance Brokers,Watch
+ESS,Essex Property Trust,Real Estate,Multi-Family Residential REITs,Scan Only,Multi-Family Residential REITs,Watch
+EL,Estee Lauder,Consumer Staples,Personal Care Products,Scan Only,Personal Care Products,Watch
+EG,Everest Group,Financials,Reinsurance,Scan Only,Reinsurance,Watch
+EVRG,Evergy,Utilities,Electric Utilities,Scan Only,Electric Utilities,Watch
+ES,Eversource Energy,Utilities,Electric Utilities,Scan Only,Electric Utilities,Watch
+EXC,Exelon,Utilities,Electric Utilities,Scan Only,Electric Utilities,Watch
+EXE,Expand Energy,Energy,Oil & Gas Exploration & Production,Scan Only,Oil & Gas Exploration & Production,Watch
+EXPE,Expedia Group,Consumer Discretionary,"Hotels, Resorts & Cruise Lines",Scan Only,"Hotels, Resorts & Cruise Lines",Watch
+EXPD,Expeditors International,Industrials,Air Freight & Logistics,Scan Only,Air Freight & Logistics,Watch
+EXR,Extra Space Storage,Real Estate,Self-Storage REITs,Scan Only,Self-Storage REITs,Watch
+FFIV,F5 Inc.,Information Technology,Communications Equipment,Scan Only,Communications Equipment,Watch
+FDS,FactSet,Financials,Financial Exchanges & Data,Scan Only,Financial Exchanges & Data,Watch
+FICO,Fair Isaac,Information Technology,Application Software,Scan Only,Application Software,Watch
+FAST,Fastenal,Industrials,Trading Companies & Distributors,Scan Only,Trading Companies & Distributors,Watch
+FRT,Federal Realty Investment Trust,Real Estate,Retail REITs,Scan Only,Retail REITs,Watch
+FDX,FedEx,Industrials,Air Freight & Logistics,Scan Only,Air Freight & Logistics,Watch
+FIS,Fidelity National Information Services,Financials,Transaction & Payment Processing,Scan Only,Transaction & Payment Processing,Watch
+FITB,Fifth Third Bancorp,Financials,Regional Banks,Scan Only,Regional Banks,Watch
+FSLR,First Solar,Information Technology,Semiconductors,Scan Only,Semiconductors,Watch
+FE,FirstEnergy,Utilities,Electric Utilities,Scan Only,Electric Utilities,Watch
+F,Ford Motor Company,Consumer Discretionary,Automobile Manufacturers,Scan Only,Automobile Manufacturers,Watch
+FTV,Fortive,Industrials,Industrial Machinery,Scan Only,Industrial Machinery,Watch
+FOXA,Fox Corporation (Class A),Communication Services,Broadcasting,Scan Only,Broadcasting,Watch
+FOX,Fox Corporation (Class B),Communication Services,Broadcasting,Scan Only,Broadcasting,Watch
+BEN,Franklin Resources,Financials,Asset Management & Custody Banks,Scan Only,Asset Management & Custody Banks,Watch
+GRMN,Garmin,Consumer Discretionary,Consumer Electronics,Scan Only,Consumer Electronics,Watch
+IT,Gartner,Information Technology,IT Consulting & Other Services,Scan Only,IT Consulting & Other Services,Watch
+GE,GE Aerospace,Industrials,Aerospace & Defense,Scan Only,Aerospace & Defense,Watch
+GEHC,GE HealthCare,Health Care,Health Care Equipment,Scan Only,Health Care Equipment,Watch
+GEN,Gen Digital,Information Technology,Systems Software,Scan Only,Systems Software,Watch
+GNRC,Generac,Industrials,Electrical Components & Equipment,Scan Only,Electrical Components & Equipment,Watch
+GIS,General Mills,Consumer Staples,Packaged Foods & Meats,Scan Only,Packaged Foods & Meats,Watch
+GM,General Motors,Consumer Discretionary,Automobile Manufacturers,Scan Only,Automobile Manufacturers,Watch
+GPC,Genuine Parts Company,Consumer Discretionary,Distributors,Scan Only,Distributors,Watch
+GPN,Global Payments,Financials,Transaction & Payment Processing,Scan Only,Transaction & Payment Processing,Watch
+GL,Globe Life,Financials,Life & Health Insurance,Scan Only,Life & Health Insurance,Watch
+GDDY,GoDaddy,Information Technology,Internet Services & Infrastructure,Scan Only,Internet Services & Infrastructure,Watch
+HAL,Halliburton,Energy,Oil & Gas Equipment & Services,Scan Only,Oil & Gas Equipment & Services,Watch
+HIG,Hartford,Financials,Property & Casualty Insurance,Scan Only,Property & Casualty Insurance,Watch
+HAS,Hasbro,Consumer Discretionary,Leisure Products,Scan Only,Leisure Products,Watch
+HCA,HCA Healthcare,Health Care,Health Care Facilities,Scan Only,Health Care Facilities,Watch
+DOC,Healthpeak Properties,Real Estate,Health Care REITs,Scan Only,Health Care REITs,Watch
+HSIC,Henry Schein,Health Care,Health Care Distributors,Scan Only,Health Care Distributors,Watch
+HSY,Hershey Company,Consumer Staples,Packaged Foods & Meats,Scan Only,Packaged Foods & Meats,Watch
+HLT,Hilton Worldwide,Consumer Discretionary,"Hotels, Resorts & Cruise Lines",Scan Only,"Hotels, Resorts & Cruise Lines",Watch
+HD,Home Depot,Consumer Discretionary,Home Improvement Retail,Scan Only,Home Improvement Retail,Watch
+HON,Honeywell,Industrials,Industrial Conglomerates,Scan Only,Industrial Conglomerates,Watch
+HRL,Hormel Foods,Consumer Staples,Packaged Foods & Meats,Scan Only,Packaged Foods & Meats,Watch
+HST,Host Hotels & Resorts,Real Estate,Hotel & Resort REITs,Scan Only,Hotel & Resort REITs,Watch
+HWM,Howmet Aerospace,Industrials,Aerospace & Defense,Scan Only,Aerospace & Defense,Watch
+HPQ,HP Inc.,Information Technology,Technology Hardware,Scan Only,Technology Hardware,Watch
+HUM,Humana,Health Care,Managed Health Care,Scan Only,Managed Health Care,Watch
+HBAN,Huntington Bancshares,Financials,Regional Banks,Scan Only,Regional Banks,Watch
+IEX,IDEX Corporation,Industrials,Industrial Machinery,Scan Only,Industrial Machinery,Watch
+IDXX,Idexx Laboratories,Health Care,Health Care Equipment,Scan Only,Health Care Equipment,Watch
+ITW,Illinois Tool Works,Industrials,Industrial Machinery,Scan Only,Industrial Machinery,Watch
+INCY,Incyte,Health Care,Biotechnology,Scan Only,Biotechnology,Watch
+IR,Ingersoll Rand,Industrials,Industrial Machinery,Scan Only,Industrial Machinery,Watch
+PODD,Insulet Corporation,Health Care,Health Care Equipment,Scan Only,Health Care Equipment,Watch
+IBKR,Interactive Brokers,Financials,Investment Banking & Brokerage,Scan Only,Investment Banking & Brokerage,Watch
+ICE,Intercontinental Exchange,Financials,Financial Exchanges & Data,Scan Only,Financial Exchanges & Data,Watch
+IFF,International Flavors & Fragrances,Materials,Specialty Chemicals,Scan Only,Specialty Chemicals,Watch
+IP,International Paper,Materials,Paper & Plastic Packaging,Scan Only,Paper & Plastic Packaging,Watch
+IVZ,Invesco,Financials,Asset Management & Custody Banks,Scan Only,Asset Management & Custody Banks,Watch
+INVH,Invitation Homes,Real Estate,Single-Family Residential REITs,Scan Only,Single-Family Residential REITs,Watch
+IQV,IQVIA,Health Care,Life Sciences Tools & Services,Scan Only,Life Sciences Tools & Services,Watch
+JBHT,J.B. Hunt,Industrials,Cargo Ground Transportation,Scan Only,Cargo Ground Transportation,Watch
+JBL,Jabil,Information Technology,Electronic Manufacturing Services,Scan Only,Electronic Manufacturing Services,Watch
+JKHY,Jack Henry & Associates,Financials,Transaction & Payment Processing,Scan Only,Transaction & Payment Processing,Watch
+J,Jacobs Solutions,Industrials,Construction & Engineering,Scan Only,Construction & Engineering,Watch
+JNJ,Johnson & Johnson,Health Care,Pharmaceuticals,Scan Only,Pharmaceuticals,Watch
+JCI,Johnson Controls,Industrials,Building Products,Scan Only,Building Products,Watch
+KVUE,Kenvue,Consumer Staples,Personal Care Products,Scan Only,Personal Care Products,Watch
+KDP,Keurig Dr Pepper,Consumer Staples,Soft Drinks,Scan Only,Soft Drinks,Watch
+KEY,KeyCorp,Financials,Regional Banks,Scan Only,Regional Banks,Watch
+KEYS,Keysight Technologies,Information Technology,Electronic Equipment & Instruments,Scan Only,Electronic Equipment & Instruments,Watch
+KMB,Kimberly-Clark,Consumer Staples,Household Products,Scan Only,Household Products,Watch
+KIM,Kimco Realty,Real Estate,Retail REITs,Scan Only,Retail REITs,Watch
+KMI,Kinder Morgan,Energy,Oil & Gas Storage & Transportation,Scan Only,Oil & Gas Storage & Transportation,Watch
+KKR,KKR & Co.,Financials,Asset Management & Custody Banks,Scan Only,Asset Management & Custody Banks,Watch
+KHC,Kraft Heinz,Consumer Staples,Packaged Foods & Meats,Scan Only,Packaged Foods & Meats,Watch
+KR,Kroger,Consumer Staples,Food Retail,Scan Only,Food Retail,Watch
+LH,Labcorp,Health Care,Health Care Services,Scan Only,Health Care Services,Watch
+LVS,Las Vegas Sands,Consumer Discretionary,Casinos & Gaming,Scan Only,Casinos & Gaming,Watch
+LEN,Lennar,Consumer Discretionary,Homebuilding,Scan Only,Homebuilding,Watch
+LII,Lennox International,Industrials,Building Products,Scan Only,Building Products,Watch
+LIN,Linde plc,Materials,Industrial Gases,Scan Only,Industrial Gases,Watch
+LYV,Live Nation Entertainment,Communication Services,Movies & Entertainment,Scan Only,Movies & Entertainment,Watch
+L,Loews Corporation,Financials,Multi-line Insurance,Scan Only,Multi-line Insurance,Watch
+LOW,Lowe's,Consumer Discretionary,Home Improvement Retail,Scan Only,Home Improvement Retail,Watch
+LULU,Lululemon Athletica,Consumer Discretionary,Apparel & Luxury Goods,Scan Only,Apparel & Luxury Goods,Watch
+LYB,LyondellBasell,Materials,Specialty Chemicals,Scan Only,Specialty Chemicals,Watch
+MTB,M&T Bank,Financials,Regional Banks,Scan Only,Regional Banks,Watch
+MPC,Marathon Petroleum,Energy,Oil & Gas Refining & Marketing,Scan Only,Oil & Gas Refining & Marketing,Watch
+MAR,Marriott International,Consumer Discretionary,"Hotels, Resorts & Cruise Lines",Scan Only,"Hotels, Resorts & Cruise Lines",Watch
+MRSH,Marsh McLennan,Financials,Insurance Brokers,Scan Only,Insurance Brokers,Watch
+MLM,Martin Marietta Materials,Materials,Construction Materials,Scan Only,Construction Materials,Watch
+MAS,Masco,Industrials,Building Products,Scan Only,Building Products,Watch
+MA,Mastercard,Financials,Transaction & Payment Processing,Scan Only,Transaction & Payment Processing,Watch
+MKC,McCormick & Company,Consumer Staples,Packaged Foods & Meats,Scan Only,Packaged Foods & Meats,Watch
+MCD,McDonald's,Consumer Discretionary,Restaurants,Scan Only,Restaurants,Watch
+MCK,McKesson Corporation,Health Care,Health Care Distributors,Scan Only,Health Care Distributors,Watch
+MDT,Medtronic,Health Care,Health Care Equipment,Scan Only,Health Care Equipment,Watch
+MRK,Merck & Co.,Health Care,Pharmaceuticals,Scan Only,Pharmaceuticals,Watch
+MET,MetLife,Financials,Life & Health Insurance,Scan Only,Life & Health Insurance,Watch
+MTD,Mettler Toledo,Health Care,Life Sciences Tools & Services,Scan Only,Life Sciences Tools & Services,Watch
+MGM,MGM Resorts,Consumer Discretionary,Casinos & Gaming,Scan Only,Casinos & Gaming,Watch
+MAA,Mid-America Apartment Communities,Real Estate,Multi-Family Residential REITs,Scan Only,Multi-Family Residential REITs,Watch
+TAP,Molson Coors Beverage,Consumer Staples,Brewers,Scan Only,Brewers,Watch
+MDLZ,Mondelez International,Consumer Staples,Packaged Foods & Meats,Scan Only,Packaged Foods & Meats,Watch
+MNST,Monster Beverage,Consumer Staples,Soft Drinks,Scan Only,Soft Drinks,Watch
+MCO,Moody's Corporation,Financials,Financial Exchanges & Data,Scan Only,Financial Exchanges & Data,Watch
+MS,Morgan Stanley,Financials,Investment Banking & Brokerage,Scan Only,Investment Banking & Brokerage,Watch
+MOS,Mosaic Company,Materials,Fertilizers & Agricultural Chemicals,Scan Only,Fertilizers & Agricultural Chemicals,Watch
+MSI,Motorola Solutions,Information Technology,Communications Equipment,Scan Only,Communications Equipment,Watch
+MSCI,MSCI Inc.,Financials,Financial Exchanges & Data,Scan Only,Financial Exchanges & Data,Watch
+NDAQ,Nasdaq Inc.,Financials,Financial Exchanges & Data,Scan Only,Financial Exchanges & Data,Watch
+NWSA,News Corp (Class A),Communication Services,Publishing,Scan Only,Publishing,Watch
+NWS,News Corp (Class B),Communication Services,Publishing,Scan Only,Publishing,Watch
+NEE,NextEra Energy,Utilities,Multi-Utilities,Scan Only,Multi-Utilities,Watch
+NKE,Nike Inc.,Consumer Discretionary,Apparel & Luxury Goods,Scan Only,Apparel & Luxury Goods,Watch
+NI,NiSource,Utilities,Multi-Utilities,Scan Only,Multi-Utilities,Watch
+NSC,Norfolk Southern,Industrials,Rail Transportation,Scan Only,Rail Transportation,Watch
+NTRS,Northern Trust,Financials,Asset Management & Custody Banks,Scan Only,Asset Management & Custody Banks,Watch
+NCLH,Norwegian Cruise Line Holdings,Consumer Discretionary,"Hotels, Resorts & Cruise Lines",Scan Only,"Hotels, Resorts & Cruise Lines",Watch
+NUE,Nucor,Materials,Steel,Scan Only,Steel,Watch
+NVR,NVR Inc.,Consumer Discretionary,Homebuilding,Scan Only,Homebuilding,Watch
+ORLY,O'Reilly Automotive,Consumer Discretionary,Automotive Retail,Scan Only,Automotive Retail,Watch
+ODFL,Old Dominion,Industrials,Cargo Ground Transportation,Scan Only,Cargo Ground Transportation,Watch
+OMC,Omnicom Group,Communication Services,Advertising,Scan Only,Advertising,Watch
+OKE,Oneok,Energy,Oil & Gas Storage & Transportation,Scan Only,Oil & Gas Storage & Transportation,Watch
+OTIS,Otis Worldwide,Industrials,Industrial Machinery,Scan Only,Industrial Machinery,Watch
+PCAR,Paccar,Industrials,Construction Machinery,Scan Only,Construction Machinery,Watch
+PKG,Packaging Corporation of America,Materials,Paper & Plastic Packaging,Scan Only,Paper & Plastic Packaging,Watch
+PSKY,Paramount Skydance Corporation,Communication Services,Movies & Entertainment,Scan Only,Movies & Entertainment,Watch
+PH,Parker Hannifin,Industrials,Industrial Machinery,Scan Only,Industrial Machinery,Watch
+PAYX,Paychex,Industrials,HR & Employment Services,Scan Only,HR & Employment Services,Watch
+PYPL,PayPal,Financials,Transaction & Payment Processing,Scan Only,Transaction & Payment Processing,Watch
+PEP,PepsiCo,Consumer Staples,Soft Drinks,Scan Only,Soft Drinks,Watch
+PFE,Pfizer,Health Care,Pharmaceuticals,Scan Only,Pharmaceuticals,Watch
+PCG,PG&E Corporation,Utilities,Multi-Utilities,Scan Only,Multi-Utilities,Watch
+PM,Philip Morris International,Consumer Staples,Tobacco,Scan Only,Tobacco,Watch
+PSX,Phillips 66,Energy,Oil & Gas Refining & Marketing,Scan Only,Oil & Gas Refining & Marketing,Watch
+PNW,Pinnacle West Capital,Utilities,Multi-Utilities,Scan Only,Multi-Utilities,Watch
+PNC,PNC Financial Services,Financials,Diversified Banks,Scan Only,Diversified Banks,Watch
+POOL,Pool Corporation,Consumer Discretionary,Distributors,Scan Only,Distributors,Watch
+PPG,PPG Industries,Materials,Specialty Chemicals,Scan Only,Specialty Chemicals,Watch
+PPL,PPL Corporation,Utilities,Electric Utilities,Scan Only,Electric Utilities,Watch
+PFG,Principal Financial Group,Financials,Life & Health Insurance,Scan Only,Life & Health Insurance,Watch
+PG,Procter & Gamble,Consumer Staples,Personal Care Products,Scan Only,Personal Care Products,Watch
+PGR,Progressive Corporation,Financials,Property & Casualty Insurance,Scan Only,Property & Casualty Insurance,Watch
+PLD,Prologis,Real Estate,Industrial REITs,Scan Only,Industrial REITs,Watch
+PRU,Prudential Financial,Financials,Life & Health Insurance,Scan Only,Life & Health Insurance,Watch
+PEG,Public Service Enterprise Group,Utilities,Electric Utilities,Scan Only,Electric Utilities,Watch
+PSA,Public Storage,Real Estate,Self-Storage REITs,Scan Only,Self-Storage REITs,Watch
+PHM,PulteGroup,Consumer Discretionary,Homebuilding,Scan Only,Homebuilding,Watch
+DGX,Quest Diagnostics,Health Care,Health Care Services,Scan Only,Health Care Services,Watch
+Q,Qnity Electronics,Information Technology,Semiconductor Equipment,Scan Only,Semiconductor Equipment,Watch
+RL,Ralph Lauren Corporation,Consumer Discretionary,Apparel & Luxury Goods,Scan Only,Apparel & Luxury Goods,Watch
+RJF,Raymond James Financial,Financials,Investment Banking & Brokerage,Scan Only,Investment Banking & Brokerage,Watch
+O,Realty Income,Real Estate,Retail REITs,Scan Only,Retail REITs,Watch
+REG,Regency Centers,Real Estate,Retail REITs,Scan Only,Retail REITs,Watch
+RF,Regions Financial Corporation,Financials,Regional Banks,Scan Only,Regional Banks,Watch
+RSG,Republic Services,Industrials,Environmental & Facilities Services,Scan Only,Environmental & Facilities Services,Watch
+RMD,ResMed,Health Care,Health Care Equipment,Scan Only,Health Care Equipment,Watch
+RVTY,Revvity,Health Care,Health Care Equipment,Scan Only,Health Care Equipment,Watch
+ROL,Rollins Inc.,Industrials,Environmental & Facilities Services,Scan Only,Environmental & Facilities Services,Watch
+ROP,Roper Technologies,Information Technology,Electronic Equipment & Instruments,Scan Only,Electronic Equipment & Instruments,Watch
+ROST,Ross Stores,Consumer Discretionary,Apparel Retail,Scan Only,Apparel Retail,Watch
+RCL,Royal Caribbean Group,Consumer Discretionary,"Hotels, Resorts & Cruise Lines",Scan Only,"Hotels, Resorts & Cruise Lines",Watch
+SPGI,S&P Global,Financials,Financial Exchanges & Data,Scan Only,Financial Exchanges & Data,Watch
+SBAC,SBA Communications,Real Estate,Telecom Tower REITs,Scan Only,Telecom Tower REITs,Watch
+SRE,Sempra,Utilities,Multi-Utilities,Scan Only,Multi-Utilities,Watch
+SHW,Sherwin-Williams,Materials,Specialty Chemicals,Scan Only,Specialty Chemicals,Watch
+SPG,Simon Property Group,Real Estate,Retail REITs,Scan Only,Retail REITs,Watch
+SWKS,Skyworks Solutions,Information Technology,Semiconductors,Scan Only,Semiconductors,Watch
+SJM,J.M. Smucker Company,Consumer Staples,Packaged Foods & Meats,Scan Only,Packaged Foods & Meats,Watch
+SW,Smurfit Westrock,Materials,Paper & Plastic Packaging,Scan Only,Paper & Plastic Packaging,Watch
+SNA,Snap-on,Industrials,Industrial Machinery,Scan Only,Industrial Machinery,Watch
+SOLV,Solventum,Health Care,Health Care Technology,Scan Only,Health Care Technology,Watch
+SO,Southern Company,Utilities,Electric Utilities,Scan Only,Electric Utilities,Watch
+LUV,Southwest Airlines,Industrials,Passenger Airlines,Scan Only,Passenger Airlines,Watch
+SWK,Stanley Black & Decker,Industrials,Industrial Machinery,Scan Only,Industrial Machinery,Watch
+SBUX,Starbucks,Consumer Discretionary,Restaurants,Scan Only,Restaurants,Watch
+STT,State Street Corporation,Financials,Asset Management & Custody Banks,Scan Only,Asset Management & Custody Banks,Watch
+STLD,Steel Dynamics,Materials,Steel,Scan Only,Steel,Watch
+STE,Steris,Health Care,Health Care Equipment,Scan Only,Health Care Equipment,Watch
+SYK,Stryker Corporation,Health Care,Health Care Equipment,Scan Only,Health Care Equipment,Watch
+SYF,Synchrony Financial,Financials,Consumer Finance,Scan Only,Consumer Finance,Watch
+SYY,Sysco,Consumer Staples,Food Distributors,Scan Only,Food Distributors,Watch
+TMUS,T-Mobile US,Communication Services,Wireless Telecommunication Services,Scan Only,Wireless Telecommunication Services,Watch
+TROW,T. Rowe Price,Financials,Asset Management & Custody Banks,Scan Only,Asset Management & Custody Banks,Watch
+TTWO,Take-Two Interactive,Communication Services,Interactive Home Entertainment,Scan Only,Interactive Home Entertainment,Watch
+TPR,Tapestry Inc.,Consumer Discretionary,Apparel & Luxury Goods,Scan Only,Apparel & Luxury Goods,Watch
+TRGP,Targa Resources,Energy,Oil & Gas Storage & Transportation,Scan Only,Oil & Gas Storage & Transportation,Watch
+TGT,Target Corporation,Consumer Staples,Consumer Staples Merchandise Retail,Scan Only,Consumer Staples Merchandise Retail,Watch
+TEL,TE Connectivity,Information Technology,Electronic Manufacturing Services,Scan Only,Electronic Manufacturing Services,Watch
+TDY,Teledyne Technologies,Information Technology,Electronic Equipment & Instruments,Scan Only,Electronic Equipment & Instruments,Watch
+TPL,Texas Pacific Land Corporation,Energy,Oil & Gas Exploration & Production,Scan Only,Oil & Gas Exploration & Production,Watch
+TXT,Textron,Industrials,Aerospace & Defense,Scan Only,Aerospace & Defense,Watch
+TMO,Thermo Fisher Scientific,Health Care,Life Sciences Tools & Services,Scan Only,Life Sciences Tools & Services,Watch
+TJX,TJX Companies,Consumer Discretionary,Apparel Retail,Scan Only,Apparel Retail,Watch
+TKO,TKO Group Holdings,Communication Services,Movies & Entertainment,Scan Only,Movies & Entertainment,Watch
+TSCO,Tractor Supply,Consumer Discretionary,Other Specialty Retail,Scan Only,Other Specialty Retail,Watch
+TT,Trane Technologies,Industrials,Building Products,Scan Only,Building Products,Watch
+TDG,TransDigm Group,Industrials,Aerospace & Defense,Scan Only,Aerospace & Defense,Watch
+TRV,Travelers Companies,Financials,Property & Casualty Insurance,Scan Only,Property & Casualty Insurance,Watch
+TRMB,Trimble Inc.,Information Technology,Application Software,Scan Only,Application Software,Watch
+TFC,Truist Financial,Financials,Diversified Banks,Scan Only,Diversified Banks,Watch
+TYL,Tyler Technologies,Information Technology,Application Software,Scan Only,Application Software,Watch
+TSN,Tyson Foods,Consumer Staples,Packaged Foods & Meats,Scan Only,Packaged Foods & Meats,Watch
+USB,U.S. Bancorp,Financials,Diversified Banks,Scan Only,Diversified Banks,Watch
+UDR,UDR Inc.,Real Estate,Multi-Family Residential REITs,Scan Only,Multi-Family Residential REITs,Watch
+ULTA,Ulta Beauty,Consumer Discretionary,Other Specialty Retail,Scan Only,Other Specialty Retail,Watch
+UNP,Union Pacific Corporation,Industrials,Rail Transportation,Scan Only,Rail Transportation,Watch
+UAL,United Airlines Holdings,Industrials,Passenger Airlines,Scan Only,Passenger Airlines,Watch
+UPS,United Parcel Service,Industrials,Air Freight & Logistics,Scan Only,Air Freight & Logistics,Watch
+URI,United Rentals,Industrials,Trading Companies & Distributors,Scan Only,Trading Companies & Distributors,Watch
+UNH,UnitedHealth Group,Health Care,Managed Health Care,Scan Only,Managed Health Care,Watch
+UHS,Universal Health Services,Health Care,Health Care Facilities,Scan Only,Health Care Facilities,Watch
+VLO,Valero Energy,Energy,Oil & Gas Refining & Marketing,Scan Only,Oil & Gas Refining & Marketing,Watch
+VTR,Ventas,Real Estate,Health Care REITs,Scan Only,Health Care REITs,Watch
+VLTO,Veralto,Industrials,Environmental & Facilities Services,Scan Only,Environmental & Facilities Services,Watch
+VRSN,Verisign,Information Technology,Internet Services & Infrastructure,Scan Only,Internet Services & Infrastructure,Watch
+VRSK,Verisk Analytics,Industrials,Research & Consulting Services,Scan Only,Research & Consulting Services,Watch
+VZ,Verizon,Communication Services,Integrated Telecommunication Services,Scan Only,Integrated Telecommunication Services,Watch
+VTRS,Viatris,Health Care,Pharmaceuticals,Scan Only,Pharmaceuticals,Watch
+VICI,Vici Properties,Real Estate,Hotel & Resort REITs,Scan Only,Hotel & Resort REITs,Watch
+V,Visa Inc.,Financials,Transaction & Payment Processing,Scan Only,Transaction & Payment Processing,Watch
+VMC,Vulcan Materials Company,Materials,Construction Materials,Scan Only,Construction Materials,Watch
+WRB,W. R. Berkley Corporation,Financials,Property & Casualty Insurance,Scan Only,Property & Casualty Insurance,Watch
+GWW,W. W. Grainger,Industrials,Industrial Machinery,Scan Only,Industrial Machinery,Watch
+WAB,Wabtec,Industrials,Construction Machinery,Scan Only,Construction Machinery,Watch
+WMT,Walmart,Consumer Staples,Consumer Staples Merchandise Retail,Scan Only,Consumer Staples Merchandise Retail,Watch
+DIS,Walt Disney Company,Communication Services,Movies & Entertainment,Scan Only,Movies & Entertainment,Watch
+WBD,Warner Bros. Discovery,Communication Services,Broadcasting,Scan Only,Broadcasting,Watch
+WM,Waste Management,Industrials,Environmental & Facilities Services,Scan Only,Environmental & Facilities Services,Watch
+WAT,Waters Corporation,Health Care,Life Sciences Tools & Services,Scan Only,Life Sciences Tools & Services,Watch
+WEC,WEC Energy Group,Utilities,Electric Utilities,Scan Only,Electric Utilities,Watch
+WFC,Wells Fargo,Financials,Diversified Banks,Scan Only,Diversified Banks,Watch
+WELL,Welltower,Real Estate,Health Care REITs,Scan Only,Health Care REITs,Watch
+WST,West Pharmaceutical Services,Health Care,Health Care Supplies,Scan Only,Health Care Supplies,Watch
+WY,Weyerhaeuser,Real Estate,Timber REITs,Scan Only,Timber REITs,Watch
+WSM,Williams-Sonoma Inc.,Consumer Discretionary,Homefurnishing Retail,Scan Only,Homefurnishing Retail,Watch
+WMB,Williams Companies,Energy,Oil & Gas Storage & Transportation,Scan Only,Oil & Gas Storage & Transportation,Watch
+WTW,Willis Towers Watson,Financials,Insurance Brokers,Scan Only,Insurance Brokers,Watch
+WYNN,Wynn Resorts,Consumer Discretionary,Casinos & Gaming,Scan Only,Casinos & Gaming,Watch
+XEL,Xcel Energy,Utilities,Multi-Utilities,Scan Only,Multi-Utilities,Watch
+XYL,Xylem Inc.,Industrials,Industrial Machinery,Scan Only,Industrial Machinery,Watch
+YUM,Yum! Brands,Consumer Discretionary,Restaurants,Scan Only,Restaurants,Watch
+ZBH,Zimmer Biomet,Health Care,Health Care Equipment,Scan Only,Health Care Equipment,Watch
+ZTS,Zoetis,Health Care,Pharmaceuticals,Scan Only,Pharmaceuticals,Watch
