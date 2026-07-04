@@ -24,6 +24,10 @@ logger = logging.getLogger(__name__)
 MAJORS = ["SPY", "QQQ", "IWM", "RSP", "DIA"]
 # Yahoo symbol -> tenor label stored in stable_live_strip.symbol
 YIELDS = {"^IRX": "3M", "^FVX": "5Y", "^TNX": "10Y", "^TYX": "30Y"}
+# Addendum A2: 11 SPDR sector ETFs (kind='sector', day %) + FX (kind='fx').
+SECTORS = ["XLK", "XLF", "XLV", "XLY", "XLC", "XLI", "XLP", "XLE", "XLU", "XLRE", "XLB"]
+FX = {"DX-Y.NYB": "DXY", "USDJPY=X": "USDJPY"}
+INTRADAY_RETENTION_DAYS = 7
 
 
 def _yield_pct(raw: float) -> float:
@@ -48,7 +52,7 @@ def fetch_strip() -> dict:
     """Fetch majors + yields. Returns {'rows': [(symbol,kind,value,day_change,extra)], 'as_of', 'degraded'}."""
     import yfinance as yf
 
-    syms = MAJORS + list(YIELDS.keys())
+    syms = MAJORS + list(YIELDS.keys()) + SECTORS + list(FX.keys())
     try:
         data = yf.download(syms, period="10d", interval="1d", auto_adjust=True,
                            group_by="ticker", progress=False, threads=True, actions=False)
@@ -93,8 +97,51 @@ def fetch_strip() -> dict:
             spread_bp = round(yld_chg["10Y"] - yld_chg["3M"], 1)
         rows.append(("10Y-3M", "spread", spread, spread_bp, None))
 
+    # Addendum A2: sector ETFs (day %) + FX (day % + level). Also stream yields.
+    intraday = [(tenor, pct) for tenor, pct in yld_pct.items()]  # (symbol, value_for_series)
+    for tk in SECTORS:
+        last, prev = _last_two_closes(data, tk, single)
+        if last is None:
+            continue
+        fetched += 1
+        pct = round((last / prev - 1.0) * 100, 3) if prev else None
+        rows.append((tk, "sector", pct, None, round(last, 2)))
+        if pct is not None:
+            intraday.append((tk, pct))  # normalized %-change series
+    for ysym, label in FX.items():
+        last, prev = _last_two_closes(data, ysym, single)
+        if last is None:
+            continue
+        fetched += 1
+        pct = round((last / prev - 1.0) * 100, 3) if prev else None
+        rows.append((label, "fx", pct, None, round(last, 4)))
+        intraday.append((label, round(last, 4)))  # fx series = level
+
     degraded = fetched < 0.9 * len(syms)
-    return {"rows": rows, "as_of": datetime.now(timezone.utc), "degraded": degraded, "fetched": fetched}
+    return {"rows": rows, "intraday": intraday, "as_of": datetime.now(timezone.utc),
+            "degraded": degraded, "fetched": fetched}
+
+
+def append_intraday(result: dict) -> int:
+    """Append the 10-min sector/fx readings to stable_intraday_points; prune >7 days."""
+    pts = result.get("intraday") or []
+    if not pts:
+        return 0
+    ts = result.get("as_of") or datetime.now(timezone.utc)
+    payload = [(sym, ts, float(val)) for (sym, val) in pts if val is not None]
+    with db.connect() as conn:
+        with conn.cursor() as cur:
+            execute_values(
+                cur,
+                """INSERT INTO stable_intraday_points (symbol, ts, value) VALUES %s
+                   ON CONFLICT (symbol, ts) DO UPDATE SET value = EXCLUDED.value""",
+                payload,
+            )
+            cur.execute(
+                "DELETE FROM stable_intraday_points WHERE ts < NOW() - INTERVAL '%s days'",
+                (INTRADAY_RETENTION_DAYS,),
+            )
+    return len(payload)
 
 
 def store_strip(result: dict) -> int:
@@ -120,9 +167,11 @@ def store_strip(result: dict) -> int:
 
 
 def run_strip_update() -> dict:
-    """Fetch + store the index/rates strip. Returns a small summary."""
+    """Fetch + store the index/rates/sector/fx strip; append intraday points."""
     result = fetch_strip()
     stored = store_strip(result)
-    logger.info("[stable_strip] stored %d rows (fetched=%s, degraded=%s)",
-                stored, result.get("fetched"), result.get("degraded"))
-    return {"stored": stored, "degraded": result.get("degraded"), "as_of": result.get("as_of")}
+    pts = append_intraday(result)
+    logger.info("[stable_strip] stored %d rows, %d intraday points (fetched=%s, degraded=%s)",
+                stored, pts, result.get("fetched"), result.get("degraded"))
+    return {"stored": stored, "intraday_points": pts,
+            "degraded": result.get("degraded"), "as_of": result.get("as_of")}
