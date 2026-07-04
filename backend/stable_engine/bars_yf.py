@@ -95,21 +95,27 @@ def fetch_batch(tickers: list[str], start: date, end: date) -> dict[str, pd.Data
 def download_and_store(
     tickers: list[str],
     years: int | None = None,
+    days: int | None = None,
     end: date | None = None,
     batch_size: int = 100,
     block_tickers: set[str] | None = None,
 ) -> dict:
-    """Download `years` of daily bars for `tickers`, upsert to stable_daily_bars.
+    """Download daily bars for `tickers`, upsert to stable_daily_bars.
 
     Args:
+        years: history length (backfill). Ignored if `days` is given.
+        days: incremental window (nightly refresh) — start = end - days.
         block_tickers: simulate a partial outage — these tickers are skipped from the
             request entirely (degraded-run test), never fabricated.
 
     Returns a coverage summary. degraded=True when coverage < 90% of the request.
     """
-    years = years or config.HISTORY_YEARS
     end = end or (date.today() + timedelta(days=1))  # yfinance end is exclusive
-    start = date(end.year - years, end.month, end.day)
+    if days is not None:
+        start = end - timedelta(days=days)
+    else:
+        years = years or config.HISTORY_YEARS
+        start = date(end.year - years, end.month, end.day)
     block_tickers = block_tickers or set()
 
     requested = [t for t in dict.fromkeys(tickers) if t and t not in block_tickers]  # dedupe, drop blocked
