@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pandora · Judgment Layer (v2)</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/gridstack@11.1.2/dist/gridstack.min.css">
+    <link rel="stylesheet" href="/v2.css?v=1">
+    <meta name="theme-color" content="#050810">
+</head>
+<body>
+    <header class="v2-topbar">
+        <span class="v2-brand">PANDORA</span>
+        <span class="v2-sub">Judgment Layer · v2</span>
+        <span class="health-dot" id="dataHealthDot" data-gloss="HEALTH" title=""></span>
+        <div class="spacer"></div>
+        <span class="v2-sub" id="layoutStatus"></span>
+        <a class="v2-legacy-link" href="/app">← Legacy /app</a>
+    </header>
+
+    <main class="v2-page">
+        <div class="grid-stack" id="v2Grid">
+
+            <!-- Regime band (full width) -->
+            <div class="grid-stack-item" gs-id="regime-band" gs-x="0" gs-y="0" gs-w="12" gs-h="3" gs-min-h="3">
+                <div class="grid-stack-item-content">
+                    <div class="tile">
+                        <div class="tile-header">
+                            <span class="tile-title">Regime</span>
+                            <div class="spacer"></div>
+                            <span class="tile-grip" title="Drag">⠿</span>
+                        </div>
+                        <div class="tile-body pad-0">
+                            <div class="regime-band" id="regimeBand">
+                                <div class="regime-cell placeholder"><span class="k">loading…</span></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Movers tape (full width) -->
+            <div class="grid-stack-item" gs-id="movers-tape" gs-x="0" gs-y="3" gs-w="12" gs-h="2" gs-min-h="2">
+                <div class="grid-stack-item-content">
+                    <div class="tile">
+                        <div class="tile-header">
+                            <span class="tile-title" data-gloss="MOVERS">Movers</span>
+                            <div class="spacer"></div>
+                            <span class="tile-grip" title="Drag">⠿</span>
+                        </div>
+                        <div class="tile-body pad-0">
+                            <div class="tape-wrap">
+                                <div class="tape-track" id="moversTape"></div>
+                                <div class="tape-status" id="moversStatus"><span class="health-dot" id="moversHealthDot"></span><span id="moversAge">—</span></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Market column (2fr) — filled in B2b -->
+            <div class="grid-stack-item" gs-id="market-col" gs-x="0" gs-y="5" gs-w="8" gs-h="9">
+                <div class="grid-stack-item-content">
+                    <div class="tile">
+                        <div class="tile-header">
+                            <span class="tile-title">Market</span>
+                            <div class="spacer"></div>
+                            <span class="tile-grip" title="Drag">⠿</span>
+                        </div>
+                        <div class="tile-body">
+                            <div class="placeholder">
+                                <span class="k">Market column</span>
+                                <span>Themes · Sector divergence · Breadth · Index · Curve · USD</span>
+                                <span style="color:var(--text-3)">Phase B2b</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Kairos column (1fr) — filled in B2b -->
+            <div class="grid-stack-item" gs-id="kairos-col" gs-x="8" gs-y="5" gs-w="4" gs-h="9">
+                <div class="grid-stack-item-content">
+                    <div class="tile">
+                        <div class="tile-header">
+                            <span class="tile-title" style="color:var(--teal)">Kairos · live setups</span>
+                            <div class="spacer"></div>
+                            <span class="tile-grip" title="Drag">⠿</span>
+                        </div>
+                        <div class="tile-body">
+                            <div class="placeholder">
+                                <span class="k">Kairos + Book + River</span>
+                                <span>Setups · book strip · judged river</span>
+                                <span style="color:var(--text-3)">Phase B2b</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <!-- Drawer -->
+    <div class="drawer-backdrop" id="drawerBackdrop"></div>
+    <aside class="drawer" id="drawer">
+        <div class="drawer-head"><h3 id="drawerTitle">Detail</h3><span class="x" id="drawerClose">✕</span></div>
+        <div class="drawer-body" id="drawerBody"></div>
+    </aside>
+
+    <!-- TV popover -->
+    <div class="tv-popover" id="tvPopover">
+        <div class="bar"><span class="tk" id="tvPopTicker"></span><span class="x" id="tvPopClose">✕</span></div>
+        <div class="host" id="tvPopHost"></div>
+    </div>
+
+    <script src="https://s3.tradingview.com/tv.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/gridstack@11.1.2/dist/gridstack-all.min.js"></script>
+    <script src="/v2.js?v=1"></script>
+</body>
+</html>

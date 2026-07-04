@@ -1,0 +1,201 @@
+/* Dashboard v2 — "Judgment Layer" · Phase B2a shell.
+   Design system v2 (supersedes P0 tokens). Yellow is retired (no warn hex anywhere).
+   Semantics: lime = bullish/positive · vermilion = bearish/negative · teal = attention. */
+
+:root {
+  --bg: #050810;
+  --panel: #0b1122;
+  --panel-2: #0d152b;
+  --border: #1b2745;
+  --border-strong: #223258;
+  --teal: #14b8a6;
+  --up: #7CFF6B;
+  --down: #ff5c33;
+  --text: #e2e8f0;
+  --text-2: #8b98ad;
+  --text-3: #5b6b85;
+  --mono: ui-monospace, "SFMono-Regular", "JetBrains Mono", Menlo, Consolas, monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+}
+.num, .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+/* ── Top bar ─────────────────────────────────────────────────────────────── */
+.v2-topbar {
+  display: flex; align-items: center; gap: 14px;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(180deg, var(--panel-2), var(--bg));
+  position: sticky; top: 0; z-index: 40;
+}
+.v2-brand { font-family: var(--mono); font-weight: 700; letter-spacing: 3px; color: var(--teal); font-size: 14px; }
+.v2-sub { color: var(--text-3); font-size: 12px; letter-spacing: 1px; text-transform: uppercase; }
+.v2-topbar .spacer { flex: 1; }
+.v2-legacy-link {
+  color: var(--text-2); font-size: 12px; text-decoration: none;
+  border: 1px solid var(--border-strong); border-radius: 6px; padding: 4px 10px;
+}
+.v2-legacy-link:hover { color: var(--text); border-color: var(--teal); }
+.health-dot {
+  width: 9px; height: 9px; border-radius: 50%; display: inline-block;
+  background: var(--text-3); box-shadow: 0 0 0 3px rgba(255,255,255,0.03);
+}
+.health-dot.ok { background: var(--up); }
+.health-dot.stale { background: var(--teal); }
+.health-dot.down { background: var(--down); }
+
+/* ── Grid + tiles ────────────────────────────────────────────────────────── */
+.v2-page { padding: 14px; }
+.grid-stack { background: transparent; }
+.tile {
+  height: 100%;
+  display: flex; flex-direction: column;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.tile-header {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-2);
+  flex: 0 0 auto;
+}
+.tile-title {
+  font-family: var(--mono); font-size: 11px; letter-spacing: 1.6px;
+  text-transform: uppercase; color: var(--text-2);
+}
+.tile-header .spacer { flex: 1; }
+.tile-grip {
+  cursor: grab; color: var(--text-3); font-size: 14px; line-height: 1;
+  padding: 2px 4px; border-radius: 4px; user-select: none;
+}
+.tile-grip:hover { color: var(--teal); background: rgba(20,184,166,0.08); }
+.tile-grip:active { cursor: grabbing; }
+.tile-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 12px; }
+.tile-body.pad-0 { padding: 0; }
+
+/* ── Regime band ─────────────────────────────────────────────────────────── */
+.regime-band {
+  display: grid;
+  grid-template-columns: 1.4fr 1.8fr 1fr 1fr 1fr 1.2fr;
+  gap: 1px;
+  background: var(--border);
+  height: 100%;
+}
+.regime-cell {
+  background: var(--panel);
+  padding: 10px 14px;
+  display: flex; flex-direction: column; gap: 4px; justify-content: center;
+  cursor: pointer;
+}
+.regime-cell:hover { background: var(--panel-2); }
+.regime-cell .label {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 1.4px;
+  text-transform: uppercase; color: var(--text-3);
+  display: flex; align-items: center; gap: 5px;
+}
+.regime-cell .big { font-size: 22px; font-weight: 700; line-height: 1.1; }
+.regime-cell .sub { font-size: 12px; color: var(--text-2); }
+.regime-cell .row { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.chip {
+  display: inline-flex; align-items: baseline; gap: 5px;
+  font-size: 12px; padding: 2px 8px; border-radius: 999px;
+  border: 1px solid var(--border-strong); color: var(--text-2);
+  font-family: var(--mono);
+}
+.chip.dom { color: var(--up); border-color: rgba(124,255,107,0.4); }
+.chip.emg { color: var(--teal); border-color: rgba(20,184,166,0.4); }
+.chip.fad { color: var(--down); border-color: rgba(255,92,51,0.4); }
+.chip.muted { color: var(--text-3); border-style: dashed; }
+.val-up { color: var(--up); }
+.val-down { color: var(--down); }
+.val-teal { color: var(--teal); }
+.val-muted { color: var(--text-3); }
+
+/* Gauge (for %>50dma) */
+.gauge { height: 6px; border-radius: 3px; background: var(--panel-2); overflow: hidden; border: 1px solid var(--border); }
+.gauge > span { display: block; height: 100%; background: var(--teal); }
+
+/* ── Movers tape ─────────────────────────────────────────────────────────── */
+.tape-wrap { position: relative; height: 100%; display: flex; align-items: center; overflow: hidden; }
+.tape-track {
+  display: inline-flex; align-items: center; gap: 26px; white-space: nowrap;
+  will-change: transform; animation: tape-marquee 60s linear infinite;
+  padding-left: 26px;
+}
+.tape-wrap:hover .tape-track { animation-play-state: paused; }
+@keyframes tape-marquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+@media (prefers-reduced-motion: reduce) { .tape-track { animation: none; } }
+.mover {
+  font-family: var(--mono); font-size: 13px; cursor: pointer;
+  display: inline-flex; align-items: baseline; gap: 7px;
+}
+.mover .tk { font-weight: 700; color: var(--text); }
+.mover:hover .tk { color: var(--teal); text-decoration: underline; }
+.mover.gain .pct { color: var(--up); }
+.mover.lose .pct { color: var(--down); }
+.mover .thm { color: var(--text-3); font-size: 11px; }
+.mover .sep { color: var(--border-strong); }
+.tape-status {
+  position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+  display: flex; align-items: center; gap: 6px; z-index: 2;
+  background: linear-gradient(90deg, transparent, var(--panel) 30%);
+  padding-left: 40px; font-family: var(--mono); font-size: 10px; color: var(--text-3);
+}
+
+/* Placeholder columns (filled in B2b) */
+.placeholder {
+  height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 6px; color: var(--text-3); font-size: 13px; text-align: center;
+}
+.placeholder .k { font-family: var(--mono); letter-spacing: 2px; text-transform: uppercase; color: var(--text-2); font-size: 11px; }
+
+/* ── Drawer ──────────────────────────────────────────────────────────────── */
+.drawer-backdrop {
+  position: fixed; inset: 0; background: rgba(3,6,14,0.6); z-index: 60;
+  display: none;
+}
+.drawer-backdrop.open { display: block; }
+.drawer {
+  position: fixed; top: 0; right: 0; height: 100%; width: 380px; max-width: 92vw;
+  background: var(--panel); border-left: 1px solid var(--border-strong); z-index: 61;
+  transform: translateX(100%); transition: transform 0.22s ease; display: flex; flex-direction: column;
+}
+.drawer.open { transform: translateX(0); }
+.drawer-head { display: flex; align-items: center; padding: 14px 16px; border-bottom: 1px solid var(--border); }
+.drawer-head h3 { margin: 0; font-size: 14px; font-family: var(--mono); letter-spacing: 1px; color: var(--teal); }
+.drawer-head .x { margin-left: auto; cursor: pointer; color: var(--text-3); font-size: 18px; }
+.drawer-body { padding: 16px; overflow: auto; }
+.kv { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+.kv .k { color: var(--text-2); } .kv .v { font-family: var(--mono); }
+
+/* ── TV popover ──────────────────────────────────────────────────────────── */
+.tv-popover {
+  position: fixed; z-index: 70; width: 520px; max-width: 92vw; height: 360px;
+  background: var(--panel); border: 1px solid var(--border-strong); border-radius: 12px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.6); display: none; flex-direction: column; overflow: hidden;
+}
+.tv-popover.open { display: flex; }
+.tv-popover .bar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+.tv-popover .bar .tk { font-family: var(--mono); font-weight: 700; color: var(--teal); }
+.tv-popover .bar .x { margin-left: auto; cursor: pointer; color: var(--text-3); }
+.tv-popover .host { flex: 1; }
+
+/* Pulse (semantic; stops on hover) — used sparingly in the shell */
+@keyframes pulse-teal { 0%,100% { box-shadow: 0 0 0 0 rgba(20,184,166,0.0);} 50% { box-shadow: 0 0 0 4px rgba(20,184,166,0.25);} }
+.pulse-teal { animation: pulse-teal 2s ease-in-out infinite; }
+.pulse-teal:hover { animation: none; }
+
+/* tooltip cursor affordance */
+[data-gloss] { cursor: help; }
