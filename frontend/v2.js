@@ -659,7 +659,7 @@
       kv('Cost basis', p.cost_basis != null ? '$' + Number(p.cost_basis).toFixed(2) : '—') +
       kv('Max loss', p.max_loss != null ? '$' + Number(p.max_loss).toFixed(2) : '—') +
       `<div class="kv"><span class="k">Unrealized P&amp;L</span><span class="v ${signCls(pnl)}">${pnl != null ? (pnl >= 0 ? '+' : '-') + '$' + Math.abs(pnl).toFixed(2) : '—'}${pct != null ? ' (' + (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%)' : ''}</span></div>` +
-      kv('Bucket', p.bucket || '—') + kv('Theme', tm && tm.theme ? tm.theme : '—') +
+      kv('Bucket', p.bucket || '—') + kv('Theme', tm && tm.theme ? (tm.theme + (tm.inverse ? ' (inverse)' : '')) : '—') +
       '<div id="posEarn" class="kv"><span class="k">Earnings</span><span class="v">…</span></div>' +
       `<div class="drawer-actions">
          <button type="button" class="btn-danger" id="posCloseBtn">Close position</button>
@@ -769,19 +769,23 @@
   function computeConcentration(positions) {
     const list = (positions && positions.positions) || [];
     if (!list.length) return null;
-    const byTheme = {}; let totalRisk = 0;
+    const byTheme = {}, invTheme = {}; let totalRisk = 0;
     list.forEach((p) => {
-      const risk = Math.abs(Number(p.current_value != null ? p.current_value : p.cost_basis) || 0);
+      const risk = Math.abs(Number(p.current_value != null ? p.current_value : (p.cost_basis != null ? p.cost_basis : p.max_loss)) || 0);
       if (!risk) return;
       const tm = _themeMap[(p.ticker || '').toUpperCase()];
       const theme = (tm && tm.theme) || 'Unmapped';
       byTheme[theme] = (byTheme[theme] || 0) + risk; totalRisk += risk;
+      if (tm && tm.inverse) invTheme[theme] = (invTheme[theme] || 0) + risk;
     });
     if (!totalRisk) return null;
     let top = null;
     Object.keys(byTheme).forEach((t) => { if (!top || byTheme[t] > byTheme[top]) top = t; });
     const pct = Math.round((byTheme[top] / totalRisk) * 100);
-    return { theme: top, pct, hot: pct > 50 && top !== 'Unmapped' };
+    // Netting is deferred (post-flip): if the top theme is majority-inverse, say so rather
+    // than imply long exposure. This is honest labeling, not direction-aware offsetting.
+    const invHeavy = (invTheme[top] || 0) > byTheme[top] / 2;
+    return { theme: top + (invHeavy ? ' (inverse)' : ''), pct, hot: pct > 50 && top !== 'Unmapped' };
   }
   async function refreshThemeMap(positions) {
     const list = (positions && positions.positions) || [];
