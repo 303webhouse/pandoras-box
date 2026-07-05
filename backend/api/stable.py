@@ -23,6 +23,36 @@ router = APIRouter(prefix="/stable", tags=["stable"])
 
 EXCLUDED_THEMES = ("Benchmark", "Scan Only")
 
+# ── Static ETF -> theme map (c5 rider) ──────────────────────────────────────
+# universe.csv only maps single stocks, so an ETF-heavy book reads "Unmapped" in the
+# concentration lamp. This lets the lamp SEE ETF exposure. Direction-aware NETTING of
+# inverse/leveraged funds against long books is a separate (post-flip) ticket — for now
+# an inverse fund is themed to its underlying with inverse=True (renders "<Theme> (inverse)").
+_ETF_THEME = {
+    # 11 SPDR sector ETFs
+    "XLK": ("Technology", False), "XLF": ("Financials", False), "XLV": ("Health Care", False),
+    "XLY": ("Consumer Discretionary", False), "XLC": ("Communication Svcs", False),
+    "XLI": ("Industrials", False), "XLP": ("Consumer Staples", False), "XLE": ("Energy", False),
+    "XLU": ("Utilities", False), "XLRE": ("Real Estate", False), "XLB": ("Materials", False),
+    # Precious metals
+    "GLD": ("Precious Metals", False), "SLV": ("Precious Metals", False), "IAU": ("Precious Metals", False),
+    "GDX": ("Precious Metals", False), "GDXJ": ("Precious Metals", False),
+    # Rates / credit
+    "TLT": ("Rates", False), "IEF": ("Rates", False), "SHY": ("Rates", False),
+    "HYG": ("Credit", False), "LQD": ("Credit", False),
+    # Energy complex (incl. leveraged/inverse)
+    "USO": ("Energy", False), "GUSH": ("Energy", False), "DRIP": ("Energy", True),
+    "ERX": ("Energy", False), "ERY": ("Energy", True),
+    # Leveraged / inverse -> underlying theme (+ inverse flag)
+    "SOXL": ("Semiconductors", False), "SOXS": ("Semiconductors", True),
+    "TQQQ": ("Big Tech", False), "SQQQ": ("Big Tech", True),
+    "UPRO": ("S&P 500", False), "SPXL": ("S&P 500", False),
+    "SPXS": ("S&P 500", True), "SH": ("S&P 500", True), "SDS": ("S&P 500", True),
+    "TNA": ("Small Caps", False), "TZA": ("Small Caps", True),
+    "LABU": ("Biotech", False), "LABD": ("Biotech", True),
+    "FAS": ("Financials", False), "FAZ": ("Financials", True),
+}
+
 
 def _age_seconds(as_of) -> float | None:
     if as_of is None:
@@ -274,11 +304,24 @@ async def enrich_tickers_with_theme(tickers: list[str]) -> dict:
             urows = await conn.fetch(
                 "SELECT ticker, theme FROM stable_universe WHERE ticker = ANY($1::text[])", tickers
             )
+            umap = {r["ticker"]: r["theme"] for r in urows}
+            # Generic universe buckets carry no real sector signal — let the ETF map override
+            # them (e.g. XLF 'Sector ETF' -> 'Financials'); keep specific universe themes.
+            generic = {"Sector ETF", "Benchmark", "Scan Only"}
             out = {}
-            for r in urows:
-                theme = r["theme"]
+            for t in tickers:
+                uni = umap.get(t)
+                etf = _ETF_THEME.get(t)
+                if uni and not (uni in generic and etf):
+                    theme, inv = uni, False
+                elif etf:
+                    theme, inv = etf
+                elif uni:
+                    theme, inv = uni, False
+                else:
+                    continue  # truly unmapped
                 sc, stt = score_map.get(theme, (None, None))
-                out[r["ticker"]] = {"theme": theme, "theme_score": sc, "theme_status": stt}
+                out[t] = {"theme": theme, "theme_score": sc, "theme_status": stt, "inverse": inv}
             return out
     except Exception as e:
         logger.warning("[stable] theme enrichment failed: %s", e)
