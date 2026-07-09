@@ -53,6 +53,8 @@
     GRIP: 'Drag to move · resize from the tile edges',
     DMA: 'Sector vs its moving averages — lime: above both 50 & 200DMA · vermilion: below both · gray: mixed',
     CONC: 'Theme concentration guardrail — turns vermilion when one theme exceeds 50% of at-risk book',
+    FLOWTAG: "Today's options-flow screener sentiment for this name (▲ bullish / ▼ bearish premium) — only lights up for names the screener already tracks",
+    KTAG: 'An active Kairos setup exists for this ticker right now — click to open committee context',
   };
   // Setup display map (UI-only; DB keys unchanged). shadow = never actionable A-grade.
   const SETUP_MAP = {
@@ -259,11 +261,56 @@
     _health.movers = flat ? 'down' : (degraded || age == null) ? 'down' : age > 900 ? 'stale' : 'ok';
     noteFlatline('movers', flat, 'Movers');
     updateGlobalHealth();
+    // Flow/Kairos badges — batched, rides the same 5-min movers cadence (no new poller).
+    if (data && ((data.gainers || []).length || (data.losers || []).length)) {
+      const tickers = [...(data.gainers || []), ...(data.losers || [])].map((m) => m.ticker);
+      fetchTickerContext(tickers).then((ctx) => annotateTickerBadges('#moversTape .mover', ctx));
+    }
+  }
+
+  // ── Ticker-context badges (options-flow sentiment + active Kairos setup) ──────────────
+  // Read-only batch call: flow reflects the EXISTING UW flow poller's own watchlist (lights
+  // up only for names it already tracks — never fabricated for the rest); kairos reflects
+  // whether an ACTIVE trade-idea exists for the ticker right now.
+  async function fetchTickerContext(tickers) {
+    const uniq = [...new Set(tickers.map((t) => (t || '').toUpperCase()).filter(Boolean))];
+    if (!uniq.length) return {};
+    try {
+      const r = await apiFetch('/api/board/ticker-context?tickers=' + uniq.join(','));
+      if (r.ok) return (await r.json()).context || {};
+    } catch (_) {}
+    return {};
+  }
+  function tickerBadgeHtml(ctx) {
+    if (!ctx) return '';
+    let html = '';
+    if (ctx.flow && ctx.flow.sentiment) {
+      const up = ctx.flow.sentiment === 'BULLISH';
+      html += `<span class="flow-tag ${up ? 'up' : 'down'}" data-gloss="FLOWTAG">${up ? '▲' : '▼'}</span>`;
+    }
+    if (ctx.kairos) html += `<span class="kairos-tag" data-gloss="KTAG">K</span>`;
+    return html;
+  }
+  function annotateTickerBadges(selector, ctxMap) {
+    document.querySelectorAll(selector).forEach((el) => {
+      const tk = (el.dataset.ticker || '').toUpperCase();
+      const slot = el.querySelector('.badge-slot');
+      if (!slot) return;
+      const html = tickerBadgeHtml(ctxMap[tk]);
+      if (html === slot.innerHTML) return;
+      slot.innerHTML = html;
+      applyGlossary(slot);
+      slot.querySelectorAll('.kairos-tag').forEach((b) => b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const k = ctxMap[tk] && ctxMap[tk].kairos;
+        openCommittee(tk, k ? k.signal_id : '');
+      }));
+    });
   }
 
   function moverEl(m, side) {
     const thm = m.theme ? ` <span class="sep">·</span> <span class="thm">${esc(m.theme)}</span>` : '';
-    return `<span class="mover ${side}" data-ticker="${esc(m.ticker)}"><span class="tk">${esc(m.ticker)}</span> <span class="pct">${fmtPct(m.pct)}</span>${thm}</span>`;
+    return `<span class="mover ${side}" data-ticker="${esc(m.ticker)}"><span class="tk">${esc(m.ticker)}</span> <span class="pct">${fmtPct(m.pct)}</span><span class="badge-slot"></span>${thm}</span>`;
   }
   function renderMoversTape(data) {
     const tape = $('moversTape');
@@ -443,11 +490,12 @@
     if (!data) { $('memberBody').innerHTML = '<div class="mem-sec">unavailable</div>'; return; }
     const row = (m) => {
       const rs = m.rs_qqq_20d;
-      return `<div class="mem-row">
+      return `<div class="mem-row" data-ticker="${esc(m.ticker)}">
         <span class="mtk" data-ticker="${esc(m.ticker)}">${esc(m.ticker)}</span>
         <span class="val-muted" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(m.name || m.subtheme || '')}</span>
         <span class="${signCls(m.ret_1d)}">${m.ret_1d != null ? (m.ret_1d >= 0 ? '+' : '') + (m.ret_1d * 100).toFixed(1) + '%' : '--'}</span>
         <span class="val-muted">${m.last_price != null ? '$' + Number(m.last_price).toFixed(2) : '--'}</span>
+        <span class="badge-slot"></span>
         <button class="opt-btn" data-ticker="${esc(m.ticker)}">opt</button></div>`;
     };
     const sec = (name, arr) => `<div class="mem-sec">${name} <span class="val-muted">· RS vs QQQ</span></div>` + ((arr || []).map(row).join('') || '<div class="mem-row"><span class="val-muted">none</span></div>');
@@ -459,6 +507,9 @@
       + sec('Top · ' + label, data.top) + sec('Bottom · ' + label, data.bottom);
     $('memberBody').querySelectorAll('.mtk[data-ticker]').forEach((e) => e.addEventListener('click', () => { closePopup(); openTvPopover(e.dataset.ticker, e); }));
     $('memberBody').querySelectorAll('.opt-btn[data-ticker]').forEach((e) => e.addEventListener('click', () => loadOptionsContext(e)));
+    // Flow/Kairos badges — on-demand for this popup only (not polled while closed).
+    const memberTickers = [...(data.top || []), ...(data.bottom || [])].map((m) => m.ticker);
+    fetchTickerContext(memberTickers).then((ctx) => annotateTickerBadges('#memberBody .mem-row', ctx));
   }
 
   // Options context — FOREGROUND UW read on explicit click only (never polled).
