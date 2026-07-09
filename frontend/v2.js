@@ -113,10 +113,11 @@
     if (sec < 5400) return Math.round(sec / 60) + 'm';
     return Math.round(sec / 3600) + 'h';
   }
-  function setHealth(el, ageSec, degraded) {
+  function setHealth(el, ageSec, degraded, flatline) {
     if (!el) return;
     let cls = 'health-dot', txt = 'fresh';
-    if (degraded || ageSec == null) { cls += ' down'; txt = 'unknown / degraded'; }
+    if (flatline) { cls += ' dead'; txt = 'DEAD — data pipe flatlined (aged past its SLO)'; }
+    else if (degraded || ageSec == null) { cls += ' down'; txt = 'unknown / degraded'; }
     else if (ageSec > 900) { cls += ' stale'; txt = 'stale ' + ageLabel(ageSec); }
     else { cls += ' ok'; txt = 'fresh ' + ageLabel(ageSec); }
     el.className = cls;
@@ -124,12 +125,26 @@
   }
 
   const _health = { regime: null, movers: null };
+  const _flat = {}; // feed -> flatline bool
   function updateGlobalHealth() {
+    const anyFlat = Object.values(_flat).some(Boolean);
     const vals = Object.values(_health).filter((v) => v !== null);
-    const worst = vals.includes('down') ? 'down' : vals.includes('stale') ? 'stale' : vals.length ? 'ok' : '';
+    const worst = anyFlat ? 'dead' : vals.includes('down') ? 'down' : vals.includes('stale') ? 'stale' : vals.length ? 'ok' : '';
     const dot = $('dataHealthDot');
     dot.className = 'health-dot' + (worst ? ' ' + worst : '');
-    dot.setAttribute('title', GLOSSARY.HEALTH + ' — ' + (worst || 'no data'));
+    dot.setAttribute('title', GLOSSARY.HEALTH + ' — ' + (worst === 'dead' ? 'DEAD feed(s) — pipe flatlined' : (worst || 'no data')));
+  }
+  // Record a feed's flatline state; adds exactly one River action item per incident
+  // (River dedups by id) and removes it on recovery.
+  function noteFlatline(feed, isFlat, label) {
+    const was = !!_flat[feed]; _flat[feed] = !!isFlat;
+    const id = 'flatline:' + feed;
+    if (isFlat) {
+      addRiverItems([{ id, type: 'regime', tier: 'action', sev: 'down', ts: Date.now(),
+        text: `<b>DEAD · ${esc(label || feed)} feed flatlined</b> — data pipe aged past its SLO (not just stale). Check /health → stable_jobs.` }]);
+    } else if (was) { _river.delete(id); _rvAcked.delete(id); }
+    if (was !== !!isFlat) renderRiver();
+    updateGlobalHealth();
   }
 
   // ── Regime band ─────────────────────────────────────────────────────────────
@@ -150,7 +165,8 @@
 
     const age = regime && regime.data_age_seconds != null ? regime.data_age_seconds : null;
     const degraded = regime ? regime.degraded : true;
-    _health.regime = (degraded || age == null) ? 'down' : age > 900 ? 'stale' : 'ok';
+    _health.regime = (regime && regime.flatline) ? 'down' : (degraded || age == null) ? 'down' : age > 900 ? 'stale' : 'ok';
+    noteFlatline('nightly', regime && regime.flatline, 'Regime / Themes');
     updateGlobalHealth();
   }
 
@@ -236,9 +252,12 @@
     renderMoversTape(data);
     const age = data && data.data_age_seconds != null ? data.data_age_seconds : null;
     const degraded = data ? data.degraded : true;
-    setHealth($('moversHealthDot'), age, degraded);
-    $('moversAge').textContent = degraded ? 'stale ' + ageLabel(age) : ageLabel(age) + ' old';
-    _health.movers = (degraded || age == null) ? 'down' : age > 900 ? 'stale' : 'ok';
+    const flat = !!(data && data.flatline);
+    setHealth($('moversHealthDot'), age, degraded, flat);
+    $('moversAge').textContent = flat ? 'DEAD · pipe stalled' : degraded ? 'stale ' + ageLabel(age) : ageLabel(age) + ' old';
+    $('moversAge').className = flat ? 'val-down' : '';
+    _health.movers = flat ? 'down' : (degraded || age == null) ? 'down' : age > 900 ? 'stale' : 'ok';
+    noteFlatline('movers', flat, 'Movers');
     updateGlobalHealth();
   }
 
@@ -361,7 +380,7 @@
   // ═══ B2b modules ══════════════════════════════════════════════════════════
   const fmt$ = (v) => (v == null ? '--' : (v < 0 ? '-$' : '$') + Math.abs(Number(v)).toLocaleString('en-US', { maximumFractionDigits: 0 }));
   const signCls = (v) => (v == null ? '' : v > 0 ? 'val-up' : v < 0 ? 'val-down' : 'val-muted');
-  function setDot(id, age, degraded) { setHealth($(id), age, degraded); }
+  function setDot(id, age, degraded, flatline) { setHealth($(id), age, degraded, flatline); }
 
   // ── b3 Breadth panel (shares the regime payload) ──────────────────────────
   function renderBreadthPanel(regime) {
@@ -397,7 +416,8 @@
     try { const r = await apiFetch('/api/stable/themes'); if (r.ok) data = await r.json(); } catch (_) {}
     const el = $('themesTable'); if (!el) return;
     $('themesAsOf').textContent = data && data.date ? data.date : '';
-    setDot('themesHealthDot', data && data.data_age_seconds, data ? data.degraded : true);
+    setDot('themesHealthDot', data && data.data_age_seconds, data ? data.degraded : true, data && data.flatline);
+    noteFlatline('nightly', data && data.flatline, 'Themes');
     _health.themes = (!data || data.degraded) ? 'down' : 'ok'; updateGlobalHealth();
     const themes = (data && data.themes) || [];
     if (!themes.length) { el.innerHTML = '<div class="th-row"><span class="nm val-muted">no theme snapshot</span></div>'; return; }
@@ -511,7 +531,8 @@
     let data = null;
     try { const r = await apiFetch('/api/stable/index-strip'); if (r.ok) data = await r.json(); } catch (_) {}
     const el = $('indexStrip'); if (!el) return;
-    setDot('indexHealthDot', data && data.data_age_seconds, data ? data.degraded : true);
+    setDot('indexHealthDot', data && data.data_age_seconds, data ? data.degraded : true, data && data.flatline);
+    noteFlatline('strip', data && data.flatline, 'Index / strip');
     const order = ['SPY', 'QQQ', 'IWM', 'RSP', 'DIA'];
     const rows = (data && data.indices) || [];
     const map = {}; rows.forEach((r) => { map[r.symbol] = r; });

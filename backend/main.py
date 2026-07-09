@@ -1053,6 +1053,16 @@ async def health_check():
     except Exception as _ze:
         zeus_block["error"] = str(_ze)
 
+    # Stable Engine job health — a dead data pipe is now visible where we already look.
+    stable_jobs_block: dict = {}
+    try:
+        from stable_engine.job_status import health_summary
+        stable_jobs_block = await health_summary()
+        if stable_jobs_block.get("any_flatline") and overall == "healthy":
+            overall = "degraded"
+    except Exception as _sje:
+        stable_jobs_block = {"error": str(_sje)}
+
     return {
         "status": overall,
         "server_time_et": now_et.strftime("%Y-%m-%d %H:%M:%S %Z"),
@@ -1060,6 +1070,7 @@ async def health_check():
         "postgres": postgres_state,
         "websocket_connections": len(manager.active_connections),
         "zeus": zeus_block,
+        "stable_jobs": stable_jobs_block,
     }
 
 
