@@ -451,7 +451,12 @@
         <button class="opt-btn" data-ticker="${esc(m.ticker)}">opt</button></div>`;
     };
     const sec = (name, arr) => `<div class="mem-sec">${name} <span class="val-muted">· RS vs QQQ</span></div>` + ((arr || []).map(row).join('') || '<div class="mem-row"><span class="val-muted">none</span></div>');
-    $('memberBody').innerHTML = sec('Top by 1d', data.top) + sec('Bottom by 1d', data.bottom);
+    // Freshness: live intraday (provisional) vs prior close — so stale close data is never mistaken for "now".
+    const fresh = data.anchor === 'provisional' ? `live · ${ageLabel(data.data_age_seconds)} old`
+      : data.anchor === 'close' ? `${String(data.as_of || '').slice(0, 10)} close` : 'unknown';
+    const label = data.anchor === 'provisional' ? "today's move" : '1d';
+    $('memberBody').innerHTML = `<div class="mem-sec" style="color:var(--text-3);border:none">as of ${esc(fresh)}</div>`
+      + sec('Top · ' + label, data.top) + sec('Bottom · ' + label, data.bottom);
     $('memberBody').querySelectorAll('.mtk[data-ticker]').forEach((e) => e.addEventListener('click', () => { closePopup(); openTvPopover(e.dataset.ticker, e); }));
     $('memberBody').querySelectorAll('.opt-btn[data-ticker]').forEach((e) => e.addEventListener('click', () => loadOptionsContext(e)));
   }
@@ -470,8 +475,10 @@
       const iv = e.iv_rank || {}, tide = e.market_tide || {}, mp = e.max_pain || {};
       const parts = [];
       if (iv.iv_rank != null) parts.push('IV rank ' + Number(iv.iv_rank).toFixed(0));
+      // NOTE: market_tide is WHOLE-MARKET (UW get_market_tide takes no ticker) — same for every
+      // name. Label it "mkt-tide" so it is never mistaken for this ticker's own flow.
       if (tide.net_call_premium != null && tide.net_put_premium != null)
-        parts.push('tide ' + (Number(tide.net_call_premium) > Number(tide.net_put_premium) ? 'bullish' : 'bearish'));
+        parts.push('mkt-tide ' + (Number(tide.net_call_premium) > Number(tide.net_put_premium) ? 'bullish' : 'bearish'));
       if (mp.max_pain_strike != null) parts.push('max-pain ' + mp.max_pain_strike + ' (' + mp.dte + 'dte)');
       ctx.textContent = parts.length ? tk + ' · ' + parts.join(' · ') : tk + ' · no options context cached';
     } catch (_) { ctx.textContent = 'options context error'; }

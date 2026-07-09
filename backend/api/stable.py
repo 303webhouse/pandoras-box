@@ -11,6 +11,7 @@ never a fabricated zero.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 
@@ -228,9 +229,32 @@ async def get_theme_members(theme: str, top: int = Query(5, ge=1, le=50), bottom
             theme, latest,
         )
         members = [dict(r) for r in rows]
+        # Live overlay during RTH: the popup should reflect TODAY's move, not yesterday's
+        # close (the theme score the user clicked is a live provisional read). Each member's
+        # last_price here is the prior (metrics-date) close, so today_ret = live/prior - 1.
+        anchor = "close"
         as_of = datetime.combine(latest, datetime.min.time(), tzinfo=timezone.utc)
+        live = {}
+        try:
+            from stable_engine.job_status import is_market_hours
+            if members and is_market_hours():
+                from stable_engine.live import fetch_live_prices
+                live = await asyncio.to_thread(fetch_live_prices, [m["ticker"] for m in members])
+        except Exception as e:
+            logger.warning("[stable] member live overlay failed for %s: %s", theme, e)
+            live = {}
+        if live:
+            anchor = "provisional"
+            as_of = datetime.now(timezone.utc)
+            for m in members:
+                lp = live.get(m["ticker"])
+                prior = m.get("last_price")
+                if lp is not None and prior:
+                    m["ret_1d"] = (lp / prior) - 1.0
+                    m["last_price"] = lp
+            members.sort(key=lambda m: (m.get("ret_1d") is None, -(m.get("ret_1d") or 0.0)))
         return _envelope(
-            as_of, "close", False,
+            as_of, anchor, False,
             theme=theme, member_count=len(members),
             top=members[:top], bottom=members[-bottom:][::-1] if members else [],
         )

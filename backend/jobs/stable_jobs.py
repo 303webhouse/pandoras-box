@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 import pytz
 
@@ -149,6 +149,47 @@ async def stable_movers_loop():
         except Exception as e:
             logger.warning("[stable_jobs] movers loop error: %s", e)
         await asyncio.sleep(600)  # 10 minutes
+
+
+async def _warm_tide() -> None:
+    """Pull the UW market-tide and stash the latest entry in a longer-lived redis key so the
+    v2 tide cell stays lit past the 60s UW cache TTL. Reuses the existing get_market_tide
+    caller (Nick-approved 2026-07-09) — one UW call per warm."""
+    import json
+    from integrations.uw_api import get_market_tide
+    from database.redis_client import get_redis_client
+    raw = await get_market_tide()
+    if not raw:
+        return
+    td = raw.get("data", raw) if isinstance(raw, dict) else raw
+    if isinstance(td, list) and td:
+        td = td[-1]
+    if not isinstance(td, dict):
+        return
+    client = await get_redis_client()
+    if not client:
+        return
+    payload = {
+        "net_call_premium": td.get("net_call_premium"),
+        "net_put_premium": td.get("net_put_premium"),
+        "net_volume": td.get("net_volume"),
+        "warmed_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await client.setex("board:tide:latest", 1800, json.dumps(payload))
+
+
+async def stable_tide_warmer_loop():
+    """Keep the v2 tide cell lit during RTH by warming the market-tide every 5 min (RTH only,
+    ~1 UW call each). Matches the legacy /app market-intel cadence; board /tide prefers the
+    warmed key so the cell no longer goes dark between the 60s UW cache windows."""
+    await asyncio.sleep(120)  # let the DB/redis pools settle after boot
+    while True:
+        try:
+            if is_rth(now_et()):
+                await _warm_tide()
+        except Exception as e:
+            logger.warning("[stable_jobs] tide warmer error: %s", e)
+        await asyncio.sleep(300)  # 5 minutes
 
 
 async def run_nightly_close_recompute() -> dict:

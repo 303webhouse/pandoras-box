@@ -667,10 +667,13 @@ async def lifespan(app: FastAPI):
     # Stable Engine: nightly close recompute + provisional snapshots + index/rates
     # strip (yfinance, zero UW).
     try:
-        from jobs.stable_jobs import stable_engine_loop, stable_strip_loop, stable_movers_loop
+        from jobs.stable_jobs import (
+            stable_engine_loop, stable_strip_loop, stable_movers_loop, stable_tide_warmer_loop,
+        )
         stable_engine_task = asyncio.create_task(stable_engine_loop())
         stable_strip_task = asyncio.create_task(stable_strip_loop())
         stable_movers_task = asyncio.create_task(stable_movers_loop())
+        stable_tide_task = asyncio.create_task(stable_tide_warmer_loop())
         logger.info("✅ Stable Engine scheduler started")
     except Exception as e:
         logger.warning(f"⚠️ Could not start Stable Engine scheduler: {e}")

@@ -51,48 +51,57 @@ def _envelope(as_of, anchor, degraded, **data):
     }
 
 
+def _tide_from(td: dict, as_of):
+    """Build the tide block from a raw {net_call_premium, net_put_premium, net_volume} dict."""
+    nc = td.get("net_call_premium")
+    npp = td.get("net_put_premium")
+    direction = delta = None
+    try:
+        if nc is not None and npp is not None:
+            ncf, npf = float(nc), float(npp)
+            direction = "BULLISH" if ncf > npf else "BEARISH" if ncf < npf else "NEUTRAL"
+            delta = ncf - npf
+    except (ValueError, TypeError):
+        pass
+    return {
+        "net_call_premium": nc, "net_put_premium": npp, "net_volume": td.get("net_volume"),
+        "direction": direction, "net_premium_delta": delta, "scope": "market",  # whole-market, not per-ticker
+    }, as_of
+
+
 @router.get("/tide")
 async def get_tide():
-    """Market tide (net options-flow direction) from the UW cache — read-only, no UW call.
+    """Market tide (net options-flow direction) — read-only, no UW call from this endpoint.
 
-    Cache hit  -> tide numbers + direction, anchor 'provisional'.
-    Cache miss -> degraded, null tide (honest: the widget hasn't warmed the cache and we
-                  will NOT trigger a UW request just to paint this cell).
+    Prefers the warmer's longer-lived key (board:tide:latest, refreshed every 5 min during RTH
+    by stable_tide_warmer_loop) so the cell stays lit past the 60s UW cache TTL. Falls back to
+    the raw UW cache; on a full miss reports honest degraded/null (never triggers a UW fetch).
     """
     tide = None
     as_of = None
     try:
-        from integrations.uw_api_cache import cache_get
-        raw = await cache_get("market_tide", "market")
-        if raw:
-            td = raw.get("data", raw) if isinstance(raw, dict) else raw
-            if isinstance(td, list) and td:
-                td = td[-1]
-            if isinstance(td, dict):
-                nc = td.get("net_call_premium")
-                npp = td.get("net_put_premium")
-                direction = None
-                delta = None
-                try:
-                    if nc is not None and npp is not None:
-                        ncf, npf = float(nc), float(npp)
-                        direction = "BULLISH" if ncf > npf else "BEARISH" if ncf < npf else "NEUTRAL"
-                        delta = ncf - npf
-                except (ValueError, TypeError):
-                    pass
-                tide = {
-                    "net_call_premium": nc,
-                    "net_put_premium": npp,
-                    "net_volume": td.get("net_volume"),
-                    "direction": direction,
-                    "net_premium_delta": delta,
-                }
-                as_of = _parse_ts(td.get("timestamp") or td.get("date") or td.get("time"))
+        import json
+        from database.redis_client import get_redis_client
+        client = await get_redis_client()
+        warmed = None
+        if client:
+            rawk = await client.get("board:tide:latest")
+            if rawk:
+                warmed = json.loads(rawk) if isinstance(rawk, (str, bytes, bytearray)) else rawk
+        if isinstance(warmed, dict):
+            tide, as_of = _tide_from(warmed, _parse_ts(warmed.get("warmed_at")))
+        else:
+            from integrations.uw_api_cache import cache_get
+            raw = await cache_get("market_tide", "market")
+            if raw:
+                td = raw.get("data", raw) if isinstance(raw, dict) else raw
+                if isinstance(td, list) and td:
+                    td = td[-1]
+                if isinstance(td, dict):
+                    tide, as_of = _tide_from(td, _parse_ts(td.get("timestamp") or td.get("date") or td.get("time")))
     except Exception as exc:
         logger.warning("[board] tide read failed: %s", exc)
 
-    # Data present (cached < TTL) => provisional/not-degraded even if the entry omits a
-    # parseable timestamp (as_of stays null; we never fabricate an age). Miss => degraded.
     return _envelope(as_of, "provisional" if tide else None, tide is None, tide=tide)
 
 
