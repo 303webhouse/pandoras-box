@@ -70,6 +70,42 @@ def is_rth(dt: datetime) -> bool:
     return 9 * 60 + 30 <= mins <= 16 * 60
 
 
+# ── Flatline detection: record every run on the async pool (never psycopg2) ──────
+async def _record(job_name: str, coro_fn):
+    """Run a job, recording success/failure to the job-status ledger. A thrown exception
+    becomes a counter increment (no more silent retry loops) and, once per incident, one
+    Hermes flatline alert. Never re-raises — the loop keeps ticking."""
+    from stable_engine import job_status
+    try:
+        res = await coro_fn()
+        await job_status.mark_success(job_name)
+        return res
+    except Exception as e:
+        logger.warning("[stable_jobs] %s failed: %s", job_name, e)
+        should_alert = await job_status.mark_failure(job_name, f"{type(e).__name__}: {e}")
+        if should_alert:
+            await _fire_flatline_alert(job_name, e)
+        return None
+
+
+async def _fire_flatline_alert(job_name: str, err: Exception) -> None:
+    """One Hermes catalyst alert per flatline incident (dedup guaranteed by the ledger's
+    alerted flag, not by poll cadence)."""
+    try:
+        from webhooks.hermes import _store_catalyst_event
+        await _store_catalyst_event(
+            event_type="stable_flatline", tier=1, trigger_ticker="STABLE",
+            sector_velocity={
+                "headline": f"Stable Engine '{job_name}' job flatlined — no successful run "
+                            f"({type(err).__name__}). Data pipe is DEAD, not just stale.",
+                "source": "stable_watchdog", "scenario": "flatline", "direction": "down",
+            },
+        )
+        logger.error("[stable_jobs] FLATLINE alert fired for job=%s", job_name)
+    except Exception as e:
+        logger.warning("[stable_jobs] could not fire flatline alert for %s: %s", job_name, e)
+
+
 async def run_index_rates_strip() -> dict:
     res = await asyncio.to_thread(_strip_work)
     return res
@@ -80,7 +116,7 @@ async def stable_strip_loop():
     while True:
         try:
             if is_rth(now_et()):
-                await run_index_rates_strip()
+                await _record("strip", run_index_rates_strip)
         except Exception as e:
             logger.warning("[stable_jobs] strip loop error: %s", e)
         await asyncio.sleep(600)  # 10 minutes
@@ -105,9 +141,9 @@ async def stable_movers_loop():
                 pkey = et.strftime("%Y-%m-%d") + "-premarket"
                 if et.hour == 8 and et.minute < 10 and pkey not in fired_premarket:
                     fired_premarket.add(pkey)
-                    await run_movers()
+                    await _record("movers", run_movers)
                 elif is_rth(et):
-                    await run_movers()
+                    await _record("movers", run_movers)
                 if et.hour == 0:
                     fired_premarket = {k for k in fired_premarket if k.startswith(et.strftime("%Y-%m-%d"))}
         except Exception as e:
@@ -143,13 +179,13 @@ async def stable_engine_loop():
                     key = f"{key_prefix}-prov-{h:02d}{m:02d}"
                     if et.hour == h and et.minute in (m, m + 1) and key not in fired:
                         fired.add(key)
-                        await run_provisional_snapshot()
+                        await _record("provisional", run_provisional_snapshot)
                 # Nightly recompute
                 nh, nm = NIGHTLY_TIME
                 nkey = f"{key_prefix}-nightly"
                 if et.hour == nh and et.minute in (nm, nm + 1) and nkey not in fired:
                     fired.add(nkey)
-                    await run_nightly_close_recompute()
+                    await _record("nightly", run_nightly_close_recompute)
             # Trim yesterday's keys at midnight ET
             if et.hour == 0 and et.minute < 2:
                 fired = {k for k in fired if k.startswith(key_prefix)}

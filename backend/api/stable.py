@@ -62,13 +62,23 @@ def _age_seconds(as_of) -> float | None:
     return max(0.0, (datetime.now(timezone.utc) - as_of).total_seconds())
 
 
-def _envelope(as_of, anchor, degraded, **data) -> dict:
+def _envelope(as_of, anchor, degraded, *, feed=None, **data) -> dict:
+    age = _age_seconds(as_of)
+    # Flatline: the feed has aged past its SLO -> DEAD, not just stale. Escalates degraded.
+    flatline = False
+    if feed:
+        try:
+            from stable_engine.job_status import feed_flatline
+            flatline = feed_flatline(feed, age)
+        except Exception:
+            flatline = False
     return {
         **data,
         "as_of": as_of.isoformat() if as_of else None,
-        "data_age_seconds": _age_seconds(as_of),
+        "data_age_seconds": age,
         "anchor": anchor,
         "degraded": bool(degraded) if degraded is not None else True,
+        "flatline": flatline,
     }
 
 
@@ -87,7 +97,7 @@ async def get_themes():
     async with pool.acquire() as conn:
         snap = await _latest_snapshot(conn)
         if not snap:
-            return _envelope(None, None, True, themes=[], count=0)
+            return _envelope(None, None, True, feed="nightly", themes=[], count=0)
         rows = await conn.fetch(
             """SELECT theme, rank, score, score_1d_delta, status, n_names,
                       breadth, leadership, momentum, extension_raw,
@@ -100,7 +110,7 @@ async def get_themes():
             snap["date"], snap["anchor"],
         )
         themes = [dict(r) for r in rows]
-        return _envelope(snap["as_of"], snap["anchor"], snap["degraded"],
+        return _envelope(snap["as_of"], snap["anchor"], snap["degraded"], feed="nightly",
                          date=str(snap["date"]), count=len(themes), themes=themes)
 
 
@@ -188,7 +198,7 @@ async def get_regime():
         anchor = snap["anchor"] if snap else None
         degraded = snap["degraded"] if snap else True
         return _envelope(
-            as_of, anchor, degraded,
+            as_of, anchor, degraded, feed="nightly",
             regime_label=regime_label,
             thresholds={"risk_on_pct_above_50dma": 60, "risk_off_pct_above_50dma": 40, "big_move_pct": 3.0},
             breadth=breadth,
@@ -257,7 +267,7 @@ async def get_index_strip():
             ext_map = {r["ticker"]: r["atr_ext_50ma"] for r in ext_rows}
         for r in rows:
             r["atr_ext_50ma"] = ext_map.get(r["symbol"])
-        return _envelope(as_of, "provisional", empty, indices=rows, count=len(rows))
+        return _envelope(as_of, "provisional", empty, feed="strip", indices=rows, count=len(rows))
 
 
 @router.get("/rates")
@@ -276,7 +286,7 @@ async def get_rates():
                ORDER BY symbol, ts DESC"""
         )
         curve_5d = {r["symbol"]: r["value"] for r in ghost} or None
-        return _envelope(as_of, "provisional", empty, yields=yields, spread=spread, count=len(yields),
+        return _envelope(as_of, "provisional", empty, feed="strip", yields=yields, spread=spread, count=len(yields),
                          curve_points=curve_points or None, curve_points_5d_ago=curve_5d)
 
 
@@ -357,7 +367,7 @@ async def get_movers():
         age = _age_seconds(as_of)
         # Degraded if empty or stale (> 30 min since last successful screener store).
         degraded = (not rows) or (age is not None and age > 1800)
-        return _envelope(as_of, "provisional", degraded,
+        return _envelope(as_of, "provisional", degraded, feed="movers",
                          gainers=gainers, losers=losers,
                          count={"gainers": len(gainers), "losers": len(losers)})
 
@@ -416,7 +426,7 @@ async def get_sector_divergence(window: str = Query("1d", pattern="^(1d|5d)$")):
                 "series": series.get(t, []),
             })
         degraded = all(len(s["series"]) == 0 for s in out)
-        return _envelope(as_of, "provisional", degraded, window=window, sectors=out, count=len(out))
+        return _envelope(as_of, "provisional", degraded, feed="strip", window=window, sectors=out, count=len(out))
 
 
 @router.get("/fx")
@@ -436,4 +446,4 @@ async def get_fx():
             series.setdefault(r["symbol"], []).append({"ts": r["ts"].isoformat(), "value": r["value"]})
         as_of = max((r["as_of"] for r in latest if r["as_of"]), default=None)
         fx = [{**dict(r), "series": series.get(r["symbol"], [])} for r in latest]
-        return _envelope(as_of, "provisional", len(fx) == 0, fx=fx, count=len(fx))
+        return _envelope(as_of, "provisional", len(fx) == 0, feed="strip", fx=fx, count=len(fx))

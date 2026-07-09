@@ -52,6 +52,19 @@ body {
 .health-dot.ok { background: var(--up); }
 .health-dot.stale { background: var(--teal); }
 .health-dot.down { background: var(--down); }
+/* DEAD (flatline) — pipe aged past SLO. Pulsing vermilion, distinct from the static
+   'down' (transient/unknown) and from teal 'stale'. */
+.health-dot.dead {
+  background: var(--down); width: 11px; height: 11px;
+  box-shadow: 0 0 0 3px rgba(255,92,51,0.28);
+  animation: pulse-vermilion 1.6s ease-in-out infinite;
+}
+.dead-badge {
+  font-family: var(--mono); font-size: 10px; font-weight: 700; letter-spacing: 1px;
+  color: var(--down); border: 1px solid rgba(255,92,51,0.6); border-radius: 4px; padding: 0 5px;
+  animation: pulse-vermilion 1.6s ease-in-out infinite;
+}
+.dead-badge:hover { animation: none; }
 
 /* ── Grid + tiles ────────────────────────────────────────────────────────── */
 .v2-page { padding: 14px; }
