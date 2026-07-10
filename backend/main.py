@@ -1386,19 +1386,89 @@ try:
     # /mcp/v1/health declared after the mount returns 404. (Verified
     # empirically post-deploy 2026-05-24T22:30 UTC.) Register the Route
     # first, then the Mount.
+    async def _mcp_asgi_self_check(target_app, method: str, path: str, host: str) -> dict:
+        """Fire a real ASGI request at an MCP sub-app in-process and report
+        what actually came back. Used so /mcp/v1/health can tell "discovery
+        endpoint is broken" apart from "app didn't even start" — the 421
+        incident on 2026-07-09 was invisible to the old health check because
+        it only proved the parent app was up, never that FastMCP's own
+        mounted routes were reachable."""
+        status_holder: dict = {"code": None}
+        body_buf = bytearray()
+        scope = {
+            "type": "http",
+            "method": method,
+            "path": path,
+            "raw_path": path.encode("ascii"),
+            "query_string": b"",
+            "root_path": "",
+            "scheme": "https",
+            "headers": [
+                (b"host", host.encode("ascii")),
+                (b"accept", b"application/json"),
+            ],
+            "client": ("127.0.0.1", 0),
+            "server": (host, 443),
+        }
+        body_sent = {"v": False}
+
+        async def receive():
+            if not body_sent["v"]:
+                body_sent["v"] = True
+                return {"type": "http.request", "body": b"", "more_body": False}
+            return {"type": "http.disconnect"}
+
+        async def send(message):
+            if message["type"] == "http.response.start":
+                status_holder["code"] = message["status"]
+            elif message["type"] == "http.response.body":
+                body_buf.extend(message.get("body", b""))
+
+        try:
+            await target_app(scope, receive, send)
+        except Exception as e:
+            return {"ok": False, "status": status_holder["code"], "error": f"{type(e).__name__}: {e}"}
+        code = status_holder["code"]
+        return {
+            "ok": code is not None and code < 400,
+            "status": code,
+            "body_snippet": bytes(body_buf[:200]).decode("utf-8", "replace"),
+        }
+
     @app.get("/mcp/v1/health", include_in_schema=False)
     async def _mcp_v1_health():
         # Unauthenticated by design — Nick needs to hit this from a browser
         # to tell "session stale" apart from "server down" without touching
         # an OAuth flow. See docs/operations/mcp-connection-guide.md § 1.
         uptime = int(_time.monotonic() - _HUB_MCP_START_MONOTONIC)
+
+        versions: dict = {}
+        try:
+            import fastmcp as _fastmcp_pkg
+            versions["fastmcp"] = getattr(_fastmcp_pkg, "__version__", "unknown")
+        except Exception as e:
+            versions["fastmcp"] = f"import error: {e}"
+        try:
+            import mcp as _mcp_pkg
+            versions["mcp"] = getattr(_mcp_pkg, "__version__", "unknown")
+        except Exception as e:
+            versions["mcp"] = f"import error: {e}"
+
+        public_host = os.environ.get("RAILWAY_PUBLIC_DOMAIN") or "pandoras-box-production.up.railway.app"
+        discovery_check = await _mcp_asgi_self_check(
+            _fastmcp_inner, "GET", "/.well-known/oauth-authorization-server", public_host
+        )
+
+        status = "ok" if discovery_check.get("ok") else "degraded"
         return {
-            "status": "ok",
+            "status": status,
             "service": "mcp/v1",
             "uptime_seconds": uptime,
             "deployed_at": _HUB_MCP_START_UTC.isoformat(),
             "worker_id": f"pid-{os.getpid()}",
             "version": (os.environ.get("RAILWAY_GIT_COMMIT_SHA") or "unknown")[:7],
+            "package_versions": versions,
+            "discovery_self_check": discovery_check,
         }
     logger.info("✅ /mcp/v1/health endpoint registered")
 
