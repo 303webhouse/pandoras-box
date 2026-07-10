@@ -718,6 +718,45 @@ async def lifespan(app: FastAPI):
             await asyncio.sleep(1800)  # 30-min check
     triton_grader_task = asyncio.create_task(triton_grader_loop())
 
+    # UW budget watchdog (Fable 2026-07-09): in-hub runtime circuit breaker. RTH-gated
+    # ~5-min tick; daily UW total >= 17K -> set the runtime shed flag (Triton poller
+    # skips) + ONE Discord alert; >= 18K -> human-call escalation. No env var, no
+    # redeploy. Replaces the TRITON_SHADOW_ENABLED env shed (which forced a mid-session
+    # redeploy = RTH-blackout violation); env remains manual fallback only.
+    async def uw_budget_watchdog_loop():
+        import pytz
+        from datetime import datetime as _dt
+        await asyncio.sleep(160)
+        while True:
+            try:
+                et = _dt.now(pytz.timezone("America/New_York"))
+                if et.weekday() < 5 and 9 <= et.hour < 16:
+                    from jobs.uw_budget_watchdog import run_budget_watchdog
+                    await run_budget_watchdog()
+            except Exception as e:
+                logger.warning("uw_budget_watchdog loop error: %s", e)
+            await asyncio.sleep(300)  # 5 min
+    uw_budget_watchdog_task = asyncio.create_task(uw_budget_watchdog_loop())
+
+    # UW daily-burn snapshot: persist each completed UTC day's per-caller + grand total
+    # to uw_daily_burn so the 48h Redis counter TTL can never blind us again. Runs 24/7
+    # (not RTH-gated — the UTC rollover is at 20:00 ET); snapshots the prior day once.
+    async def uw_daily_burn_snapshot_loop():
+        from datetime import datetime as _dt, timezone as _tz
+        await asyncio.sleep(200)
+        last_snap = None
+        while True:
+            try:
+                today_utc = _dt.now(_tz.utc).date()
+                if last_snap != today_utc:
+                    from jobs.uw_budget_watchdog import run_daily_burn_snapshot
+                    await run_daily_burn_snapshot()  # snapshots yesterday
+                    last_snap = today_utc
+            except Exception as e:
+                logger.warning("uw_daily_burn snapshot loop error: %s", e)
+            await asyncio.sleep(1800)  # 30-min check
+    uw_daily_burn_snapshot_task = asyncio.create_task(uw_daily_burn_snapshot_loop())
+
     wh_accumulation_task = asyncio.create_task(wh_accumulation_loop())
     wh_reversal_task = asyncio.create_task(wh_reversal_loop())
     sector_refresh_fast_task = asyncio.create_task(sector_refresh_fast_loop())

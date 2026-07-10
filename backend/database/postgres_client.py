@@ -1109,6 +1109,19 @@ async def init_database():
             WHERE created_at < NOW() - INTERVAL '90 days' AND graded_at IS NULL
         """)
 
+        # UW budget watchdog (Fable 2026-07-09): durable per-day UW-burn snapshot so
+        # the 48h Redis counter TTL can never blind us (mirrors migrations/022; the
+        # snapshot job also creates this defensively). day='_TOTAL' caller = grand total.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS uw_daily_burn (
+                day             DATE NOT NULL,
+                caller          TEXT NOT NULL,
+                count           INT  NOT NULL,
+                snapshotted_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+                PRIMARY KEY (day, caller)
+            )
+        """)
+
         # Brief 3A: Ariadne's Thread — outcome resolution columns on signals
         try:
             await conn.execute("""
