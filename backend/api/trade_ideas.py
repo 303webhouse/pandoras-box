@@ -176,6 +176,15 @@ async def get_trade_ideas_feed(
     if status and status.upper() == "ACTIVE":
         conditions.append("(expires_at IS NULL OR expires_at > NOW())")
 
+    # L0.1a ENFORCE: exclude gate-suppressed rows from this actionable feed. The flat
+    # feed (v2 Kairos's source) was never wired to the gate, unlike /grouped and
+    # /main-feed — so Holy Grail / PULLBACK / non-liquid RESISTANCE were leaking through
+    # (item 6a). Static predicate, no params; no-op string in shadow mode.
+    from config.l0_routing import l0_enforce_where_clause
+    _l0 = l0_enforce_where_clause()
+    if _l0:
+        conditions.append(_l0)
+
     where_clause = " AND ".join(conditions) if conditions else "TRUE"
 
     async with pool.acquire() as conn:
@@ -194,9 +203,18 @@ async def get_trade_ideas_feed(
             *params,
         )
 
+    # Additive `is_liquid` per row so the v2 grader can evaluate the validated-A cell
+    # (today: liquid SHORT in URSA). Read-time only; raw columns untouched.
+    from config.liquid_universe import is_liquid
+
+    def _enrich(row) -> dict:
+        d = attach_codename(serialize_db_row(dict(row)))
+        d["is_liquid"] = is_liquid(d.get("ticker"))
+        return d
+
     return {
         # L0.4: additive `codename` per row (raw signal_type/strategy untouched)
-        "signals": [attach_codename(serialize_db_row(dict(row))) for row in rows],
+        "signals": [_enrich(row) for row in rows],
         "total": total or 0,
         "limit": limit,
         "offset": offset,

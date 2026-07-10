@@ -45,6 +45,7 @@
     ADD: 'Log a new position — calls the same create endpoint the legacy hub uses',
     KAIROS: 'Live actionable setups, ordered by grade / decision clock / regime fit',
     CLOCK: 'Decision clock — time left before this setup expires; pulses until you open it',
+    GRADE: 'A = validated-cell match only (today: a liquid SHORT in a URSA regime); in NEUTRAL, no A is possible. B = ≥2 real evidence icons lit (R/F/L). C = fewer. Shadow setups never exceed their shadow tag. NOT the legacy score.',
     RIVER: 'Merged judged stream: signals, regime shifts, flow, catalysts, headlines',
     R: 'Regime alignment', F: 'Flow confirmation',
     L: 'At a Pythia level (VAH/VAL/POC) — evidence lights when price sits on a value-area level',
@@ -61,13 +62,14 @@
     ICARUS: { name: 'ICARUS', desc: 'Fade VAH' },
     HELEN: { name: 'HELEN', desc: 'Reclaim VA' },
     ARGO: { name: 'ARGO', desc: 'Range Break + Flow' },
+    ACHILLES: { name: 'ACHILLES', desc: 'Sell the Rip' },   // Nick-approved 6th roster setup (sell_the_rip → codename Achilles)
     TRITON: { name: 'TRITON', desc: 'Whale Hunting', shadow: true },
     HERA: { name: 'HERA', desc: '3-10 Oscillator Cross', shadow: true },
   };
   function setupDisplay(key) {
     const k = String(key || '').toUpperCase();
-    for (const id in SETUP_MAP) { if (k.indexOf(id) !== -1) return SETUP_MAP[id]; }
-    return { name: key || 'SETUP', desc: '' };
+    for (const id in SETUP_MAP) { if (k.indexOf(id) !== -1) return Object.assign({ roster: true }, SETUP_MAP[id]); }
+    return { name: key || 'SETUP', desc: '', roster: false };
   }
   function applyGlossary(root) {
     (root || document).querySelectorAll('[data-gloss]').forEach((el) => {
@@ -891,77 +893,108 @@
     if (m < 60) return m + 'm';
     const h = Math.floor(m / 60); return h + 'h' + (m % 60 ? ' ' + (m % 60) + 'm' : '');
   }
+  // Grade v1 — validated-cell table (promotions are a data edit, not code). A ONLY on a
+  // validated cell; else B if ≥2 real evidence icons lit, C otherwise. Shadow never exceeds shadow.
+  const VALIDATED_A_CELLS = [{ side: 'SHORT', regime: 'URSA', liquid: true }];
+  function currentRegime() {
+    const bias = (_lastRegime.composite && (_lastRegime.composite.bias_level || _lastRegime.composite.level)) || '';
+    return /URSA|BEAR/.test(bias) ? 'URSA' : /TORO|BULL/.test(bias) ? 'TORO' : 'NEUTRAL';
+  }
+  function gradeV1(s, litCount) {
+    const side = (s.direction || '').toUpperCase();
+    const reg = currentRegime();
+    const isA = VALIDATED_A_CELLS.some((c) =>
+      c.side === side && c.regime === reg && (c.liquid === undefined || c.liquid === !!s.is_liquid));
+    if (isA) return 'A';
+    return litCount >= 2 ? 'B' : 'C';
+  }
+  // Shared evidence eval (post-L-deepening): R = regime align, F = flow, L = at a Pythia level; C reserved.
+  function evalEvidence(s, levelMap, bull, bear) {
+    const side = (s.direction || '').toUpperCase();
+    const rOk = (side === 'LONG' && bull) || (side === 'SHORT' && bear);
+    const rWarn = (side === 'LONG' && bear) || (side === 'SHORT' && bull);
+    const rCls = rOk ? 'ev-ok' : rWarn ? 'ev-warn' : 'ev-off';
+    const ed = s.enrichment_data || {};
+    const fCls = ed.flow || ed.market_structure ? 'ev-ok' : 'ev-off';
+    let lCls = 'ev-off', lChar = '·';
+    const lv = levelMap && levelMap[(s.ticker || '').toUpperCase()];
+    if (lv && lv.available && lv.levels) {
+      const px = s.entry_price != null ? Number(s.entry_price) : lv.levels.price_at_event;
+      const cands = [lv.levels.vah, lv.levels.val, lv.levels.poc].filter((x) => x != null).map(Number);
+      if (px && cands.length && Math.min(...cands.map((x) => Math.abs(px - x))) / px < 0.004) { lCls = 'ev-ok'; lChar = '✓'; }
+    }
+    const litCount = [rCls, fCls, lCls].filter((c) => c === 'ev-ok').length;
+    return { side, rOk, rWarn, rCls, fCls, lCls, lChar, litCount };
+  }
+
   async function loadKairos() {
     let data = null;
-    try { const r = await apiFetch('/api/trade-ideas?status=ACTIVE&limit=30'); if (r.ok) data = await r.json(); } catch (_) {}
+    try { const r = await apiFetch('/api/trade-ideas?status=ACTIVE&limit=50'); if (r.ok) data = await r.json(); } catch (_) {}
     const el = $('kairosCards'); if (!el) return;
-    let signals = (data && data.signals) || [];
-    // enrich theme for signal tickers (reuses the stable enrich read)
+    const signals = (data && data.signals) || [];
     const tickers = [...new Set(signals.map((s) => (s.ticker || '').toUpperCase()).filter(Boolean))];
     let smap = {};
     if (tickers.length) { try { const r = await apiFetch('/api/stable/enrich?tickers=' + tickers.join(',')); if (r.ok) smap = (await r.json()).enrichment || {}; } catch (_) {} }
     const scoreOf = (s) => (s.adjusted_score != null ? s.adjusted_score : s.score_v2 != null ? s.score_v2 : s.score);
-    signals.sort((a, b) => (scoreOf(b) || 0) - (scoreOf(a) || 0));
-    // L-evidence: fetch Pythia value-area levels for the visible tickers only (cheap DB reads).
-    const visTickers = [...new Set(signals.slice(0, 3).map((s) => (s.ticker || '').toUpperCase()).filter(Boolean))];
+
+    // Roster gate: only display-map classes render as CARDS; everything else → River rows.
+    const roster = [], nonRoster = [];
+    signals.forEach((s) => (setupDisplay(s.codename || s.signal_type || s.strategy).roster ? roster : nonRoster).push(s));
+    roster.sort((a, b) => (scoreOf(b) || 0) - (scoreOf(a) || 0));
+
+    // L-evidence for the roster cards we might show (top ~6).
+    const visTickers = [...new Set(roster.slice(0, 6).map((s) => (s.ticker || '').toUpperCase()).filter(Boolean))];
     const levelMap = {};
-    await Promise.all(visTickers.map(async (tk) => {
-      try { const r = await apiFetch('/api/board/levels/' + encodeURIComponent(tk)); if (r.ok) levelMap[tk] = await r.json(); } catch (_) {}
-    }));
+    await Promise.all(visTickers.map(async (tk) => { try { const r = await apiFetch('/api/board/levels/' + encodeURIComponent(tk)); if (r.ok) levelMap[tk] = await r.json(); } catch (_) {} }));
     const bias = _lastRegime.composite ? (_lastRegime.composite.bias_level || '') : '';
     const biasBull = /TORO|BULL/.test(bias), biasBear = /URSA|BEAR/.test(bias);
-    if (!signals.length) { el.innerHTML = '<div class="k-card"><span class="val-muted">no active setups</span></div>'; $('kairosQueued').textContent = ''; return; }
-    const visible = signals.slice(0, 3), queued = signals.length - visible.length;
-    $('kairosQueued').textContent = queued > 0 ? '+' + queued + ' queued' : '';
-    el.innerHTML = visible.map((s) => card(s, smap, biasBull, biasBear, levelMap)).join('');
+
+    // Grade + evidence per roster signal; order by grade (A>B>C) then score.
+    const gradeRank = { A: 3, B: 2, C: 1 };
+    roster.forEach((s) => {
+      const disp = setupDisplay(s.codename || s.signal_type || s.strategy);
+      s._ev = evalEvidence(s, levelMap, biasBull, biasBear);
+      s._grade = disp.shadow ? '—' : gradeV1(s, s._ev.litCount);
+    });
+    roster.sort((a, b) => (gradeRank[b._grade] || 0) - (gradeRank[a._grade] || 0) || (scoreOf(b) || 0) - (scoreOf(a) || 0));
+
+    const visible = roster.slice(0, 3), queued = roster.length - visible.length;
+    $('kairosQueued').textContent = [queued > 0 ? '+' + queued + ' queued' : null,
+      nonRoster.length ? '+' + nonRoster.length + ' non-roster → river' : null].filter(Boolean).join(' · ');
+    el.innerHTML = visible.length ? visible.map((s) => card(s, smap)).join('')
+      : '<div class="k-card"><span class="val-muted">no roster setups' + (nonRoster.length ? ' — ' + nonRoster.length + ' non-roster in river' : '') + '</span></div>';
     applyGlossary(el);
     el.querySelectorAll('.btn-committee[data-ticker]').forEach((b) => b.addEventListener('click', () => {
-      const card = b.closest('.k-card'); if (card) card.classList.add('acked');  // acknowledge -> stop the decision-clock pulse
+      const c = b.closest('.k-card'); if (c) c.classList.add('acked');  // acknowledge -> stop the decision-clock pulse
       openCommittee(b.dataset.ticker, b.dataset.sig);
     }));
     el.querySelectorAll('.k-card .tkr[data-ticker]').forEach((t) => t.addEventListener('click', () => openTvPopover(t.dataset.ticker, t)));
-    // feed the river with the top signals
-    addRiverItems(signals.slice(0, 8).map((s) => signalRiverItem(s, smap)));
+
+    // River: roster cards as signal items + every non-roster class as a plain row under its raw name.
+    addRiverItems(visible.map((s) => signalRiverItem(s, smap)));
+    addRiverItems(nonRoster.map((s) => nonRosterRiverItem(s)));
     renderRiver();
 
-    function card(s, smap, bull, bear, levelMap) {
+    function card(s, smap) {
       const disp = setupDisplay(s.codename || s.signal_type || s.strategy);
-      const sc = scoreOf(s); const grade = gradeFromScore(sc);
       const ttl = ttlMinutes(s);
-      const side = (s.direction || '').toUpperCase();
+      const ev = s._ev; const side = ev.side;
       const sideCls = side === 'LONG' ? 'side-long' : side === 'SHORT' ? 'side-short' : '';
       const tm = smap[(s.ticker || '').toUpperCase()];
-      const themeTag = tm && tm.theme ? `${esc(tm.theme)}${tm.theme_score != null ? ' ' + Math.round(tm.theme_score) : ''}${tm.theme_status ? ' ' + String(tm.theme_status).slice(0, 3).toLowerCase() : ''}` : '';
-      // Evidence (honest: gray-off when unknown, never a fake check)
-      const rOk = (side === 'LONG' && bull) || (side === 'SHORT' && bear);
-      const rWarn = (side === 'LONG' && bear) || (side === 'SHORT' && bull);
-      const rCls = rOk ? 'ev-ok' : rWarn ? 'ev-warn' : 'ev-off';
-      const ed = s.enrichment_data || {};
-      const fCls = ed.flow || ed.market_structure ? 'ev-ok' : 'ev-off';
-      // L evidence: price sitting on a Pythia value-area level (VAH/VAL/POC). Gray when no MP data.
-      let lCls = 'ev-off', lChar = '·';
-      const lv = levelMap && levelMap[(s.ticker || '').toUpperCase()];
-      if (lv && lv.available && lv.levels) {
-        const px = s.entry_price != null ? Number(s.entry_price) : lv.levels.price_at_event;
-        const cands = [lv.levels.vah, lv.levels.val, lv.levels.poc].filter((x) => x != null).map(Number);
-        if (px && cands.length) {
-          const nearest = Math.min(...cands.map((x) => Math.abs(px - x)));
-          if (nearest / px < 0.004) { lCls = 'ev-ok'; lChar = '✓'; }
-        }
-      }
+      const themeTag = tm && tm.theme ? `${esc(tm.theme)}${tm.theme_score != null ? ' ' + Math.round(tm.theme_score) : ''}${tm.theme_status ? ' ' + String(tm.theme_status).slice(0, 3).toLowerCase() : ''}${tm.inverse ? ' (inv)' : ''}` : '';
       const shadow = disp.shadow;
-      const gradeShown = shadow ? '—' : grade;
+      const grade = s._grade;
       return `<div class="k-card${shadow ? ' shadow' : ''}">
         <div class="top"><span class="nm">${esc(disp.name)}</span><span class="desc">${esc(disp.desc)}</span>
-          <span class="grade ${gradeShown === 'A' ? 'val-up' : ''}">${gradeShown}</span></div>
+          <span class="grade ${grade === 'A' ? 'val-up' : ''}" data-gloss="GRADE">${grade}</span></div>
         <div class="lvls"><span class="tkr" data-ticker="${esc(s.ticker)}">${esc(s.ticker)}</span>
           <span class="${sideCls}">${side || ''} ${s.entry_price != null ? Number(s.entry_price).toFixed(2) : ''}</span>
           ${s.target_1 != null ? `<span>T ${Number(s.target_1).toFixed(2)}</span>` : ''}
           ${s.stop_loss != null ? `<span>S ${Number(s.stop_loss).toFixed(2)}</span>` : ''}
           ${s.timeframe ? `<span class="val-muted">${esc(s.timeframe)}</span>` : ''}</div>
-        <div class="k-evidence"><span class="${rCls}" data-gloss="R">R${rOk ? '✓' : rWarn ? '⚠' : '·'}</span>
-          <span class="${fCls}" data-gloss="F">F${fCls === 'ev-ok' ? '✓' : '·'}</span>
-          <span class="${lCls}" data-gloss="L">L${lChar}</span><span class="ev-off" data-gloss="C">C·</span></div>
+        <div class="k-evidence"><span class="${ev.rCls}" data-gloss="R">R${ev.rOk ? '✓' : ev.rWarn ? '⚠' : '·'}</span>
+          <span class="${ev.fCls}" data-gloss="F">F${ev.fCls === 'ev-ok' ? '✓' : '·'}</span>
+          <span class="${ev.lCls}" data-gloss="L">L${ev.lChar}</span><span class="ev-off" data-gloss="C">C·</span></div>
         <div class="foot">${themeTag ? `<span class="k-theme">${themeTag}</span>` : ''}${shadow ? '<span class="shadow-tag">shadow</span>' : (ttl != null ? `<span class="clock-chip pulse-teal" data-gloss="CLOCK">⏱ ${ttlLabel(ttl)}</span>` : '')}
           <button class="btn-committee" data-ticker="${esc(s.ticker)}" data-sig="${esc(s.signal_id || '')}">Committee</button></div>
       </div>`;
@@ -978,15 +1011,26 @@
   function addRiverItems(items) { (items || []).forEach((it) => { if (it && it.id) _river.set(it.id, it); }); }
   function signalRiverItem(s, smap) {
     const disp = setupDisplay(s.codename || s.signal_type || s.strategy);
-    const sc = s.adjusted_score != null ? s.adjusted_score : s.score_v2 != null ? s.score_v2 : s.score;
     const shadow = disp.shadow;
     const side = (s.direction || '').toUpperCase();
+    const grade = s._grade;  // grade v1 (attached in loadKairos) — never the legacy score
     return {
       id: 'sig:' + (s.signal_id || s.ticker + s.timestamp), type: 'signal',
-      tier: shadow ? 'shadow' : (sc >= 65 ? 'action' : 'info'),
+      tier: shadow ? 'shadow' : (grade === 'A' || grade === 'B' ? 'action' : 'info'),
       sev: side === 'LONG' ? 'up' : side === 'SHORT' ? 'down' : 'teal',
       ts: s.timestamp ? Date.parse(s.timestamp) : (s.created_at ? Date.parse(s.created_at) : Date.now()),
-      text: `<b>${esc(disp.name)}</b> ${esc(s.ticker)} ${side}${s.entry_price != null ? ' @ ' + Number(s.entry_price).toFixed(2) : ''}${sc != null ? ' · grade ' + gradeFromScore(sc) : ''}`,
+      text: `<b>${esc(disp.name)}</b> ${esc(s.ticker)} ${side}${s.entry_price != null ? ' @ ' + Number(s.entry_price).toFixed(2) : ''}${grade ? ' · grade ' + grade : ''}`,
+    };
+  }
+  // Non-roster classes never render as Kairos cards — they surface here under their raw name.
+  function nonRosterRiverItem(s) {
+    const raw = s.signal_type || s.strategy || 'SETUP';
+    const side = (s.direction || '').toUpperCase();
+    return {
+      id: 'nr:' + (s.signal_id || raw + (s.ticker || '')), type: 'signal', tier: 'info',
+      sev: side === 'LONG' ? 'up' : side === 'SHORT' ? 'down' : null,
+      ts: s.timestamp ? Date.parse(s.timestamp) : (s.created_at ? Date.parse(s.created_at) : Date.now()),
+      text: `<span class="rv-raw">${esc(raw)}</span> ${esc(s.ticker)} ${side}${s.entry_price != null ? ' @ ' + Number(s.entry_price).toFixed(2) : ''} <span class="val-muted">· non-roster</span>`,
     };
   }
   function emitRegimeRiverItems(composite, regime, kill) {
