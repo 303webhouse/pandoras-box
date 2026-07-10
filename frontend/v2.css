@@ -404,6 +404,7 @@ body {
 .rv-item .rv-type { font-family: var(--mono); font-size: 9px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-3); }
 .rv-item .rv-time { margin-left: auto; font-family: var(--mono); font-size: 9px; color: var(--text-3); }
 .rv-item .rv-txt { color: var(--text); line-height: 1.35; }
+.rv-raw { font-family: var(--mono); font-weight: 700; color: var(--text-2); }
 .rv-item.info .rv-txt { color: var(--text-2); }
 .rv-dot { width: 6px; height: 6px; border-radius: 50%; }
 .rv-dot.t-signal { background: var(--teal); } .rv-dot.t-flow { background: var(--up); }
