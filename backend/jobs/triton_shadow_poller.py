@@ -30,6 +30,13 @@ _PRIOR5_DAY_CACHE: dict = {}   # (ticker, date) -> prior_5d_ret
 
 async def run_triton_shadow_poller() -> None:
     """One poller tick. Never raises (fail-open)."""
+    # UW budget circuit breaker (Fable 2026-07-09): skip the whole cycle while the
+    # runtime shed flag is set (daily UW total >= 17K). Shadow research yields to
+    # committee/radar priority, never the reverse. Fail-open if Redis is unreadable.
+    from jobs.uw_budget_watchdog import is_triton_shed
+    if await is_triton_shed():
+        logger.info("triton_shadow: budget shed flag set — skipping cycle")
+        return
     from database.postgres_client import get_postgres_client
     from integrations.uw_api import get_flow_alerts
     from config.liquid_universe import LIQUID_UNIVERSE, SEMIS_AI_TECH
