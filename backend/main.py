@@ -1442,17 +1442,16 @@ try:
         # an OAuth flow. See docs/operations/mcp-connection-guide.md § 1.
         uptime = int(_time.monotonic() - _HUB_MCP_START_MONOTONIC)
 
+        from importlib.metadata import version as _pkg_version, PackageNotFoundError
+
         versions: dict = {}
-        try:
-            import fastmcp as _fastmcp_pkg
-            versions["fastmcp"] = getattr(_fastmcp_pkg, "__version__", "unknown")
-        except Exception as e:
-            versions["fastmcp"] = f"import error: {e}"
-        try:
-            import mcp as _mcp_pkg
-            versions["mcp"] = getattr(_mcp_pkg, "__version__", "unknown")
-        except Exception as e:
-            versions["mcp"] = f"import error: {e}"
+        for _pkg_name in ("fastmcp", "mcp"):
+            try:
+                versions[_pkg_name] = _pkg_version(_pkg_name)
+            except PackageNotFoundError:
+                versions[_pkg_name] = "not installed"
+            except Exception as e:
+                versions[_pkg_name] = f"lookup error: {e}"
 
         public_host = os.environ.get("RAILWAY_PUBLIC_DOMAIN") or "pandoras-box-production.up.railway.app"
         discovery_check = await _mcp_asgi_self_check(

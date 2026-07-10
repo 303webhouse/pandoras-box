@@ -54,4 +54,10 @@ google-generativeai>=0.8.0
 anthropic>=0.18.0
 
 # Model Context Protocol — Streamable HTTP server for Olympus hub access
-fastmcp>=3.3.1
+# Pinned (not >=): 2026-07-09 the connector went down (421 Misdirected
+# Request on every FastMCP-served path) and cleared on redeploy without any
+# app-code change — the unbounded >=3.3.1 pin meant Railway could silently
+# resolve a different fastmcp release on each rebuild. 3.4.4 is the version
+# confirmed working via /mcp/v1/health's package_versions field. Bump this
+# deliberately, not by drift.
+fastmcp==3.4.4
