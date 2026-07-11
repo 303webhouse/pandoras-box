@@ -12,7 +12,7 @@ def _decide(signal_type, ticker=None):
 
 
 # --- unconditional suppress set ----------------------------------------
-@pytest.mark.parametrize("st", ["HOLY_GRAIL_1H", "HOLY_GRAIL_15M", "PULLBACK_ENTRY", "TRAPPED_LONGS"])
+@pytest.mark.parametrize("st", ["HOLY_GRAIL_1H", "HOLY_GRAIL_15M", "PULLBACK_ENTRY", "TRAPPED_LONGS", "ARTEMIS_LONG"])
 def test_unconditional_suppress(st):
     d = _decide(st, ticker="AAPL")  # liquid ticker must not rescue these
     assert d["rule"] == l0.RULE_SUPPRESS
@@ -38,7 +38,7 @@ def test_resistance_rejection_non_liquid_suppressed(ticker):
 # --- keepers untouched --------------------------------------------------
 @pytest.mark.parametrize("st", [
     "GOLDEN_TOUCH", "TRAPPED_SHORTS", "TWO_CLOSE_VOLUME", "APIS_CALL",
-    "SELL_RIP_EMA", "ARTEMIS_LONG", "ARTEMIS_SHORT", "FOOTPRINT_LONG",
+    "SELL_RIP_EMA", "ARTEMIS_SHORT", "FOOTPRINT_LONG",
     "KODIAK_CALL", "SOME_UNKNOWN_TYPE",
 ])
 def test_keepers_never_suppressed(st):
