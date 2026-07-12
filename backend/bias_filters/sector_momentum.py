@@ -118,6 +118,7 @@ async def compute_sector_rotation() -> Dict[str, Dict[str, Any]]:
             "sector": sector_name,
             "etf": etf,
             "rs_5d": round(rs_5d, 2),
+            "rs_10d": round(rs_10d, 2) if rs_10d is not None else None,
             "rs_20d": round(rs_20d, 2),
             "rotation_momentum": round(rotation_momentum, 2),
             "status": status,
@@ -139,12 +140,19 @@ async def compute_sector_rotation() -> Dict[str, Dict[str, Any]]:
         entry["rank_change_5d"] = entry["rank_20d"] - entry["rank_5d"]
         # Positive rank_change = improved (moved up), negative = deteriorated
 
+    # rank_10d — only over entries that actually have rs_10d (never fabricate)
+    with_10d = [e for e in rank_data if e.get("rs_10d") is not None]
+    with_10d.sort(key=lambda x: x["rs_10d"], reverse=True)
+    for i, entry in enumerate(with_10d):
+        entry["rank_10d"] = i + 1
+
     # Update results with rank data
     for entry in rank_data:
         sector = entry["sector"]
         results[sector]["rank_5d"] = entry["rank_5d"]
         results[sector]["rank_20d"] = entry["rank_20d"]
         results[sector]["rank_change_5d"] = entry["rank_change_5d"]
+        results[sector]["rank_10d"] = entry.get("rank_10d")
 
     return results
 

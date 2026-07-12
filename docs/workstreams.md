@@ -27,13 +27,14 @@
 ---
 
 ## DASHBOARD-V2 — owner: Claude Code (dashboard session)
-**Last update:** 2026-07-09 (seeded by signals session; dashboard owner to maintain)
+**Last update:** 2026-07-11 (CC)
 
 | Item | Status | Next action | Blocked-on |
 |---|---|---|---|
 | Flip gates | (owner to fill) | — | — |
-| MCP mount outage | Active issue | Restore MCP mount | — |
-| Kairos fidelity 6a–c | (owner to fill) | — | — |
+| MCP mount outage | **RESOLVED 2026-07-11** — fastmcp==3.4.4 pinned (`aaea01c`); `/mcp/v1/health` 200, discovery self-check green. Do NOT toggle the connector (manifest unchanged) | — | — |
+| Kairos fidelity 6a–c | **SHIPPED 2026-07-11 (`dd28bd6`)** — roster gate (ACHILLES = 6th setup), grade v1 (validated-cell A only, no legacy-score A's), non-roster→river +N counter; joins flip gates | Fable live-verifies | — |
+| Sector RS-10d contract fix | **SHIPPED 2026-07-11 (this brief)** — writer stores rs_10d/rank_10d, reader honest-null + degraded + real staleness; T1–T4 green, local proof passed, prod Redis re-primed with new schema | Fable verifies live via MCP `hub_get_sector_strength` (do not self-grade) | — |
 | Badge redo | (owner to fill) | — | — |
 | Forensics 1–5 | In progress | **#3 (`/log-signal` caller inventory + routing) TRANSFERRED to SIGNALS-PIPELINE write-path census.** Dashboard keeps read-side only | — |
 
@@ -60,3 +61,4 @@
 
 ## Cross-stream dedupe log
 - **2026-07-09:** Write-path census is SIGNALS-PIPELINE's alone. Dashboard forensics #3 (`/log-signal` @ `analytics/api.py:2072` — caller inventory + routing through `process_signal_unified`) merges into it. Dashboard CC keeps read-side only. Census = Phase-0 findings first, no code before the report.
+- **2026-07-11:** Sector RS-10d contract fix (`sector_momentum.py` writer + `sector_strength.py` reader) owned by DASHBOARD-V2 CC — ATLAS-approved mini-brief, one Saturday push. `scanners/sector_rs.py` (Achilles' OWN `sector_rs:{ETF}` cache) is a separate, healthy pipeline — untouched; dual-pipeline consolidation is a build-backlog note only, not claimed by any stream yet.

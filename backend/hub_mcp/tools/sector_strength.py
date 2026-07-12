@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any, Dict, List
 
 from ..decorators import mcp_tool
@@ -42,7 +43,9 @@ def _classify_regime(sectors: List[Dict[str, Any]]) -> str:
     return "REGIME_AGNOSTIC"
 
 
-def _map_status(status: str, rs_20d: float) -> str:
+def _map_status(status: str, rs_20d: "float | None") -> str:
+    if rs_20d is None:
+        return "NEUTRAL"
     s = (status or "").upper()
     if s == "SURGING":
         return "LEADING" if rs_20d >= 0 else "ROTATING_IN"
@@ -66,8 +69,12 @@ async def hub_get_sector_strength() -> dict:
     by_rs_10d: List[Dict[str, Any]] = []
     by_rs_20d: List[Dict[str, Any]] = []
     for name, entry in raw.items():
-        rs_10d = entry.get("relative_strength_10d") or entry.get("rs_10d") or 0.0
-        rs_20d = entry.get("relative_strength_20d") or entry.get("rs_20d") or 0.0
+        rs_10d = entry.get("relative_strength_10d")
+        if rs_10d is None:
+            rs_10d = entry.get("rs_10d")
+        rs_20d = entry.get("relative_strength_20d")
+        if rs_20d is None:
+            rs_20d = entry.get("rs_20d")
         sector = {
             "etf": entry.get("etf") or entry.get("ticker"),
             "name": name,
@@ -81,14 +88,36 @@ async def hub_get_sector_strength() -> dict:
         by_rs_10d.append(sector)
         by_rs_20d.append(sector)
 
-    by_rs_10d.sort(key=lambda s: s["rs_10d"], reverse=True)
-    by_rs_20d.sort(key=lambda s: s["rs_20d"], reverse=True)
-    for rank, s in enumerate(by_rs_10d, start=1):
+    ranked_10 = [s for s in by_rs_10d if s["rs_10d"] is not None]
+    ranked_10.sort(key=lambda s: s["rs_10d"], reverse=True)
+    for rank, s in enumerate(ranked_10, start=1):
         if s["rank_10d"] is None:
             s["rank_10d"] = rank
-    for rank, s in enumerate(by_rs_20d, start=1):
+    ranked_20 = [s for s in by_rs_20d if s["rs_20d"] is not None]
+    ranked_20.sort(key=lambda s: s["rs_20d"], reverse=True)
+    for rank, s in enumerate(ranked_20, start=1):
         if s["rank_20d"] is None:
             s["rank_20d"] = rank
+
+    # Real staleness from the writer's per-entry updated_at (never hardcoded)
+    ages = []
+    now = datetime.now(timezone.utc)
+    for entry in raw.values():
+        ts = entry.get("updated_at")
+        if not ts:
+            continue
+        try:
+            ages.append((now - datetime.fromisoformat(ts)).total_seconds())
+        except (ValueError, TypeError):
+            continue
+    staleness = int(max(ages)) if ages else None
+
+    missing = []
+    for s in sectors:
+        if s["rs_10d"] is None:
+            missing.append(f"{s['etf']}:rs_10d")
+        if s["rs_20d"] is None:
+            missing.append(f"{s['etf']}:rs_20d")
 
     regime = _classify_regime(sectors)
     leaders_count = sum(1 for s in sectors if s["state"] in ("LEADING", "ROTATING_IN"))
@@ -101,13 +130,27 @@ async def hub_get_sector_strength() -> dict:
         "narrow_leadership_flag": narrow,
         "leadership_breadth_score": breadth_score,
     }
+    if missing:
+        data["warnings"] = [
+            "missing (null, ranks omitted — cache predates field or writer skipped): "
+            + ", ".join(missing)
+        ]
 
-    top = sorted(sectors, key=lambda s: s["rs_20d"], reverse=True)[:3]
-    bottom = sorted(sectors, key=lambda s: s["rs_20d"])[:2]
-    top_str = ", ".join(f"{s['etf']} ({s['rs_20d']:+.1f}%)" for s in top)
-    bot_str = ", ".join(f"{s['etf']} ({s['rs_20d']:+.1f}%)" for s in bottom)
+    have_20 = [s for s in sectors if s["rs_20d"] is not None]
+    top = sorted(have_20, key=lambda s: s["rs_20d"], reverse=True)[:3]
+    bottom = sorted(have_20, key=lambda s: s["rs_20d"])[:2]
+    top_str = ", ".join(f"{s['etf']} ({s['rs_20d']:+.1f}%)" for s in top) or "n/a"
+    bot_str = ", ".join(f"{s['etf']} ({s['rs_20d']:+.1f}%)" for s in bottom) or "n/a"
     summary = (
         f"Sector regime: {regime}. Leading: {top_str}. Lagging: {bot_str}. "
         f"Leadership breadth {breadth_score}."
     )
-    return make_response(status="ok", data=data, summary=summary, staleness_seconds=600)
+    if missing:
+        summary += f" DEGRADED: {len(missing)} field(s) missing."
+
+    return make_response(
+        status="degraded" if missing else "ok",
+        data=data,
+        summary=summary,
+        staleness_seconds=staleness,
+    )
