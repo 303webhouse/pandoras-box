@@ -152,7 +152,6 @@ REPLACE with:
     breadth_score = round(leaders_count / max(len(sectors), 1), 2)
     narrow = breadth_score < 0.35
 
-```python
     data = {
         "rotation_regime": regime,
         "sectors": sectors,
