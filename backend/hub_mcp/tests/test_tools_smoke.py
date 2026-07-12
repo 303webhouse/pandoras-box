@@ -238,6 +238,95 @@ async def test_sector_strength_ok():
     }
 
 
+# T1 — old-schema cache (no rs_10d): honest null + degraded + named warning, never a crash/0.0.
+@pytest.mark.asyncio
+async def test_sector_strength_t1_old_schema_degraded():
+    from hub_mcp.tools.sector_strength import hub_get_sector_strength
+
+    cache = {  # the live 2026-05-14 → 07-11 bug state — entries predate rs_10d
+        "Technology": {"etf": "XLK", "rs_5d": 1.1, "rs_20d": 4.1, "status": "SURGING"},
+        "Energy": {"etf": "XLE", "rs_5d": -0.9, "rs_20d": -3.2, "status": "DUMPING"},
+    }
+    with patch(
+        "hub_mcp.tools.sector_strength.get_sector_rotation",
+        new=AsyncMock(return_value=cache),
+    ):
+        r = await hub_get_sector_strength()
+    assert _is_valid_envelope(r)
+    assert r["status"] == "degraded"
+    secs = {s["etf"]: s for s in r["data"]["sectors"]}
+    assert secs["XLK"]["rs_10d"] is None and secs["XLK"]["rank_10d"] is None
+    warn = " ".join(r["data"].get("warnings", []))
+    assert "XLK:rs_10d" in warn and "XLE:rs_10d" in warn
+
+
+# T2 — legitimate zero must pass through as 0.0 with status ok (guards the `or`-eats-zero bug).
+@pytest.mark.asyncio
+async def test_sector_strength_t2_legit_zero_passes_through():
+    from hub_mcp.tools.sector_strength import hub_get_sector_strength
+
+    cache = {
+        "Technology": {"etf": "XLK", "rs_10d": 0.0, "rs_20d": 0.0, "status": "STEADY"},
+        "Energy": {"etf": "XLE", "rs_10d": 1.2, "rs_20d": 2.0, "status": "SURGING"},
+    }
+    with patch(
+        "hub_mcp.tools.sector_strength.get_sector_rotation",
+        new=AsyncMock(return_value=cache),
+    ):
+        r = await hub_get_sector_strength()
+    assert r["status"] == "ok"
+    xlk = next(s for s in r["data"]["sectors"] if s["etf"] == "XLK")
+    assert xlk["rs_10d"] == 0.0 and xlk["rs_20d"] == 0.0
+
+
+# T3 — real staleness from updated_at (±5s); absent/garbage timestamps → null, no exception.
+@pytest.mark.asyncio
+async def test_sector_strength_t3_real_staleness():
+    from datetime import datetime, timezone, timedelta
+
+    from hub_mcp.tools.sector_strength import hub_get_sector_strength
+
+    old = (datetime.now(timezone.utc) - timedelta(seconds=120)).isoformat()
+    cache = {
+        "Technology": {"etf": "XLK", "rs_10d": 2.4, "rs_20d": 4.1, "status": "SURGING", "updated_at": old},
+        "Energy": {"etf": "XLE", "rs_10d": -1.8, "rs_20d": -3.2, "status": "DUMPING", "updated_at": "garbage"},
+    }
+    with patch(
+        "hub_mcp.tools.sector_strength.get_sector_rotation",
+        new=AsyncMock(return_value=cache),
+    ):
+        r = await hub_get_sector_strength()
+    assert abs(r["staleness_seconds"] - 120) <= 5
+
+    cache2 = {"Technology": {"etf": "XLK", "rs_10d": 2.4, "rs_20d": 4.1, "status": "SURGING"}}
+    with patch(
+        "hub_mcp.tools.sector_strength.get_sector_rotation",
+        new=AsyncMock(return_value=cache2),
+    ):
+        r2 = await hub_get_sector_strength()
+    assert r2["staleness_seconds"] is None
+
+
+# T4 — rank_10d must follow rs_10d VALUES, not the cache/dict declaration order (the original bug).
+@pytest.mark.asyncio
+async def test_sector_strength_t4_rank10d_by_value_not_dict_order():
+    from hub_mcp.tools.sector_strength import hub_get_sector_strength
+
+    cache = {  # declared XLE, XLF, XLK — but rs_10d ranks XLK > XLF > XLE
+        "Energy": {"etf": "XLE", "rs_10d": -1.8, "rs_20d": -3.2, "status": "DUMPING"},
+        "Financials": {"etf": "XLF", "rs_10d": 0.6, "rs_20d": 0.9, "status": "STEADY"},
+        "Technology": {"etf": "XLK", "rs_10d": 2.4, "rs_20d": 4.1, "status": "SURGING"},
+    }
+    with patch(
+        "hub_mcp.tools.sector_strength.get_sector_rotation",
+        new=AsyncMock(return_value=cache),
+    ):
+        r = await hub_get_sector_strength()
+    assert r["status"] == "ok"
+    rank10 = {s["etf"]: s["rank_10d"] for s in r["data"]["sectors"]}
+    assert rank10 == {"XLK": 1, "XLF": 2, "XLE": 3}
+
+
 # ─── hub_get_hermes_alerts ───────────────────────────────────────────────
 
 @pytest.mark.asyncio
