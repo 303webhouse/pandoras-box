@@ -277,7 +277,15 @@ async def get_open_interest() -> Dict[str, Any]:
         oi_data = await _make_okx_request("/public/open-interest", {"instId": OKX_SWAP_SYMBOL})
         oi_rows = oi_data.get("data", []) if isinstance(oi_data, dict) else []
         if oi_rows:
-            current_oi = _to_float(oi_rows[0].get("oi"))
+            # S-1 Phase 1 fix (2026-07-13): OKX's "oi" field is raw CONTRACT
+            # COUNT (~3.2M at test time), not USD notional -- was being used
+            # directly as current_oi, producing a value ~600x too small.
+            # "oiUsd" is OKX's own USD-denominated figure (~$1.99B at test
+            # time, matches real-world BTC OI order of magnitude); use that.
+            # Verified live via raw OKX response, not assumed. Bug surfaced
+            # by the new sanity-bounds check (crypto_sanity_bounds.py)
+            # rejecting the implausible raw contract count.
+            current_oi = _to_float(oi_rows[0].get("oiUsd")) or _to_float(oi_rows[0].get("oi"))
             now_ts = datetime.now(timezone.utc)
             prev_snapshot = _get_cached("okx_oi_snapshot")
             _set_cache("okx_oi_snapshot", {"oi": current_oi, "ts": now_ts.isoformat()}, ttl=8 * 3600)
