@@ -1581,42 +1581,47 @@ async def get_active_trade_ideas(limit: int = 10) -> List[Dict[Any, Any]]:
     Excludes tickers that were dismissed in the last 24 hours or have open positions.
     """
     pool = await get_postgres_client()
-    
+
+    # L0.1a ENFORCE (2026-07-13): legacy read surface — exclude gate-suppressed rows.
+    from config.l0_routing import l0_enforce_where_clause
+    _l0 = l0_enforce_where_clause()
+    _l0_and = f" AND {_l0}" if _l0 else ""
+
     async with pool.acquire() as conn:
         # Use SELECT * to be resilient to schema changes
         # Order by created_at if score column doesn't exist
         try:
-            rows = await conn.fetch("""
+            rows = await conn.fetch(f"""
                 SELECT *
-                FROM signals 
-                WHERE user_action IS NULL 
+                FROM signals
+                WHERE user_action IS NULL
                 AND ticker NOT IN (
-                    SELECT DISTINCT ticker FROM signals 
-                    WHERE user_action = 'DISMISSED' 
+                    SELECT DISTINCT ticker FROM signals
+                    WHERE user_action = 'DISMISSED'
                     AND dismissed_at > NOW() - INTERVAL '24 hours'
                 )
                 AND ticker NOT IN (
                     SELECT DISTINCT ticker FROM unified_positions
                     WHERE status = 'OPEN'
-                )
+                ){_l0_and}
                 ORDER BY COALESCE(score, 0) DESC, created_at DESC
                 LIMIT $1
             """, limit)
         except Exception as e:
             # Fallback query without score ordering if that column doesn't exist
             logger.warning(f"Score-based query failed, using fallback: {e}")
-            rows = await conn.fetch("""
+            rows = await conn.fetch(f"""
                 SELECT signal_id, timestamp, strategy, ticker, asset_class,
                     direction, signal_type, entry_price, stop_loss, target_1,
                     risk_reward, timeframe, bias_level, adx, line_separation,
                     created_at
-                FROM signals 
-                WHERE user_action IS NULL 
+                FROM signals
+                WHERE user_action IS NULL
                 AND ticker NOT IN (
-                    SELECT DISTINCT ticker FROM signals 
-                    WHERE user_action = 'DISMISSED' 
+                    SELECT DISTINCT ticker FROM signals
+                    WHERE user_action = 'DISMISSED'
                     AND dismissed_at > NOW() - INTERVAL '24 hours'
-                )
+                ){_l0_and}
                 ORDER BY created_at DESC
                 LIMIT $1
             """, limit)
@@ -1693,6 +1698,12 @@ async def get_active_trade_ideas_paginated(
         )
     """)
 
+    # L0.1a ENFORCE (2026-07-13): legacy read surface — exclude gate-suppressed rows.
+    from config.l0_routing import l0_enforce_where_clause
+    _l0 = l0_enforce_where_clause()
+    if _l0:
+        filters.append(_l0)
+
     where_clause = " AND ".join(filters)
 
     async with pool.acquire() as conn:
@@ -1725,26 +1736,31 @@ async def get_signal_queue(limit: int = 50) -> List[Dict[Any, Any]]:
     Returns more signals than displayed to have a buffer for refills.
     """
     pool = await get_postgres_client()
-    
+
+    # L0.1a ENFORCE (2026-07-13): legacy read surface — exclude gate-suppressed rows.
+    from config.l0_routing import l0_enforce_where_clause
+    _l0 = l0_enforce_where_clause()
+    _l0_and = f" AND {_l0}" if _l0 else ""
+
     async with pool.acquire() as conn:
         # Use SELECT * to be resilient to schema changes
         try:
-            rows = await conn.fetch("""
+            rows = await conn.fetch(f"""
                 SELECT *
-                FROM signals 
-                WHERE user_action IS NULL 
+                FROM signals
+                WHERE user_action IS NULL{_l0_and}
                 ORDER BY COALESCE(score, 0) DESC, created_at DESC
                 LIMIT $1
             """, limit)
         except Exception as e:
             logger.warning(f"Signal queue query failed, using fallback: {e}")
-            rows = await conn.fetch("""
+            rows = await conn.fetch(f"""
                 SELECT signal_id, timestamp, strategy, ticker, asset_class,
                     direction, signal_type, entry_price, stop_loss, target_1,
                     risk_reward, timeframe, bias_level, adx, line_separation,
                     created_at
-                FROM signals 
-                WHERE user_action IS NULL 
+                FROM signals
+                WHERE user_action IS NULL{_l0_and}
                 ORDER BY created_at DESC
                 LIMIT $1
             """, limit)

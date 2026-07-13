@@ -214,13 +214,18 @@ async def get_ticker_context(tickers: str = Query(..., description="comma-separa
         logger.warning("[board] ticker-context flow read failed: %s", exc)
 
     try:
+        from config.l0_routing import l0_enforce_where_clause
         from database.postgres_client import get_postgres_client
         pool = await get_postgres_client()
+        # L0.1a ENFORCE (2026-07-13): kairos badge is an actionable read surface —
+        # exclude gate-suppressed rows (dashboard forensics item 1, owed since 817649c).
+        _l0 = l0_enforce_where_clause()
+        _l0_and = f" AND {_l0}" if _l0 else ""
         async with pool.acquire() as conn:
             rows = await conn.fetch(
-                """SELECT ticker, signal_id, signal_type, strategy, direction,
+                f"""SELECT ticker, signal_id, signal_type, strategy, direction,
                           COALESCE(adjusted_score, score_v2, score) AS best_score
-                   FROM signals WHERE status = 'ACTIVE' AND ticker = ANY($1::text[])
+                   FROM signals WHERE status = 'ACTIVE' AND ticker = ANY($1::text[]){_l0_and}
                    ORDER BY ticker, best_score DESC NULLS LAST""",
                 tks,
             )
