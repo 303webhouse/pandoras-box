@@ -718,21 +718,19 @@ async def lifespan(app: FastAPI):
             await asyncio.sleep(1800)  # 30-min check
     triton_grader_task = asyncio.create_task(triton_grader_loop())
 
-    # UW budget watchdog (Fable 2026-07-09): in-hub runtime circuit breaker. RTH-gated
+    # UW budget watchdog (Fable 2026-07-09): in-hub runtime circuit breaker. 24/7 as of
+    # 2026-07-13 (7/10 lesson: first real 17K crossing landed AFTER the close; the counter
+    # accumulates on the UTC day). Formerly RTH-gated
     # ~5-min tick; daily UW total >= 17K -> set the runtime shed flag (Triton poller
     # skips) + ONE Discord alert; >= 18K -> human-call escalation. No env var, no
     # redeploy. Replaces the TRITON_SHADOW_ENABLED env shed (which forced a mid-session
     # redeploy = RTH-blackout violation); env remains manual fallback only.
     async def uw_budget_watchdog_loop():
-        import pytz
-        from datetime import datetime as _dt
         await asyncio.sleep(160)
         while True:
             try:
-                et = _dt.now(pytz.timezone("America/New_York"))
-                if et.weekday() < 5 and 9 <= et.hour < 16:
-                    from jobs.uw_budget_watchdog import run_budget_watchdog
-                    await run_budget_watchdog()
+                from jobs.uw_budget_watchdog import run_budget_watchdog
+                await run_budget_watchdog()
             except Exception as e:
                 logger.warning("uw_budget_watchdog loop error: %s", e)
             await asyncio.sleep(300)  # 5 min
