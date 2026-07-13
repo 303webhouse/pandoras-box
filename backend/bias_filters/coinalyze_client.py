@@ -10,7 +10,16 @@ from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional, List
 import httpx
 
+from config.crypto_sanity_bounds import check_funding_rate, check_open_interest
+from bias_filters.crypto_vendor_health import record_observation
+
 logger = logging.getLogger(__name__)
+
+# S-1 Phase 1: all functions in this module are hardcoded to BTC today (see
+# BTC_PERP_SYMBOLS below) — multi-symbol parametrization is an R-2/R-3
+# prerequisite, not yet built. Bounds/health tracking below is written
+# per-symbol-ready but only ever called with "BTC" until that lands.
+_SYMBOL = "BTC"
 
 # API Configuration
 COINALYZE_BASE_URL = "https://api.coinalyze.net/v1"
@@ -53,6 +62,25 @@ def _set_cache(key: str, data: Any, ttl: int = CACHE_TTL_SECONDS):
         "data": data,
         "expires_at": datetime.now(timezone.utc) + timedelta(seconds=ttl)
     }
+
+
+async def _finalize_result(result: Dict[str, Any], cache_key: str, checker, value_key: str, feed_type: str) -> Dict[str, Any]:
+    """Sanity-bound `result[value_key]`, record vendor health, and only cache
+    the result if it passes. An out-of-bounds value is never cached and is
+    replaced with the module's existing 'unknown' error shape rather than
+    handed to callers — S-1 Phase 1.4/1.5 (AEGIS)."""
+    value = result.get(value_key)
+    ok, reason = checker(_SYMBOL, value)
+    status = await record_observation("coinalyze", feed_type, _SYMBOL, success=True, value_valid=ok, reason=reason)
+    if not ok:
+        logger.warning("Coinalyze %s bounds check failed, not caching: %s", feed_type, reason)
+        return {**result, "signal": "UNKNOWN", "error": reason, "health_status": status}
+    _set_cache(cache_key, result)
+    return {**result, "health_status": status}
+
+
+async def _record_failure(feed_type: str, reason: str) -> None:
+    await record_observation("coinalyze", feed_type, _SYMBOL, success=False, reason=reason)
 
 
 def _to_float(value: Any) -> Optional[float]:
@@ -168,8 +196,8 @@ async def get_funding_rate() -> Dict[str, Any]:
                 "source": "okx_fallback",
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
-            _set_cache(cache_key, result)
-            return result
+            return await _finalize_result(result, cache_key, check_funding_rate, "funding_rate", "funding_rate")
+        await _record_failure("funding_rate", "Failed to fetch funding rate from Coinalyze and OKX")
         return {
             "funding_rate": None,
             "predicted_rate": None,
@@ -204,10 +232,9 @@ async def get_funding_rate() -> Dict[str, Any]:
         "source": "coinalyze",
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
-    
-    _set_cache(cache_key, result)
+
     logger.info(f"Coinalyze Funding Rate: {funding_rate:.4f}% -> {signal}")
-    return result
+    return await _finalize_result(result, cache_key, check_funding_rate, "funding_rate", "funding_rate")
 
 
 async def get_open_interest() -> Dict[str, Any]:
@@ -303,8 +330,8 @@ async def get_open_interest() -> Dict[str, Any]:
                 "source": "okx_fallback",
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
-            _set_cache(cache_key, result)
-            return result
+            return await _finalize_result(result, cache_key, check_open_interest, "current_oi", "open_interest")
+        await _record_failure("open_interest", "Failed to fetch OI data from Coinalyze and OKX")
         return {
             "current_oi": None,
             "oi_change_4h": None,
@@ -313,12 +340,13 @@ async def get_open_interest() -> Dict[str, Any]:
             "signal": "UNKNOWN",
             "error": "Failed to fetch OI data from Coinalyze and OKX"
         }
-    
+
     # Parse OI history
     item = data[0]
     history = item.get("history", [])
-    
+
     if len(history) < 4:
+        await _record_failure("open_interest", "Insufficient OI history from Coinalyze")
         return {
             "current_oi": None,
             "oi_change_4h": None,
@@ -361,10 +389,9 @@ async def get_open_interest() -> Dict[str, Any]:
         "source": "coinalyze",
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
-    
-    _set_cache(cache_key, result)
+
     logger.info(f"Coinalyze OI: {oi_change_4h:+.2f}% vs Price: {price_change_4h:+.2f}% -> {divergence}")
-    return result
+    return await _finalize_result(result, cache_key, check_open_interest, "current_oi", "open_interest")
 
 
 async def get_liquidations() -> Dict[str, Any]:
@@ -462,7 +489,9 @@ async def get_liquidations() -> Dict[str, Any]:
                 "timestamp": datetime.now(timezone.utc).isoformat()
             }
             _set_cache(cache_key, result)
+            await record_observation("coinalyze", "liquidations", _SYMBOL, success=True)
             return result
+        await _record_failure("liquidations", "Failed to fetch liquidation data from Coinalyze and OKX")
         return {
             "long_liquidations": None,
             "short_liquidations": None,
@@ -478,6 +507,7 @@ async def get_liquidations() -> Dict[str, Any]:
     history = item.get("history", [])
     
     if not history:
+        await record_observation("coinalyze", "liquidations", _SYMBOL, success=True)
         return {
             "long_liquidations": 0,
             "short_liquidations": 0,
@@ -518,8 +548,9 @@ async def get_liquidations() -> Dict[str, Any]:
         "source": "coinalyze",
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
-    
+
     _set_cache(cache_key, result)
+    await record_observation("coinalyze", "liquidations", _SYMBOL, success=True)
     logger.info(f"Coinalyze Liquidations: ${total_liq/1e6:.1f}M ({long_pct:.0f}% long) -> {composition}")
     return result
 
@@ -600,21 +631,22 @@ async def get_term_structure() -> Dict[str, Any]:
                 "source": "okx_fallback",
                 "timestamp": datetime.now(timezone.utc).isoformat()
             }
-            _set_cache(cache_key, result)
-            return result
+            return await _finalize_result(result, cache_key, check_funding_rate, "current_funding", "term_structure")
 
+        await _record_failure("term_structure", "Failed to fetch funding history from Coinalyze and OKX")
         return {
             "structure": "unknown",
             "funding_trend": "unknown",
             "signal": "UNKNOWN",
             "error": "Failed to fetch funding history from Coinalyze and OKX"
         }
-    
+
     # Parse funding history
     item = data[0]
     history = item.get("history", [])
-    
+
     if len(history) < 2:
+        await _record_failure("term_structure", "Insufficient funding history from Coinalyze")
         return {
             "structure": "unknown",
             "funding_trend": "unknown",
@@ -665,10 +697,9 @@ async def get_term_structure() -> Dict[str, Any]:
         "source": "coinalyze",
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
-    
-    _set_cache(cache_key, result)
+
     logger.info(f"Coinalyze Term Structure: {structure}, trend: {funding_trend} -> {signal}")
-    return result
+    return await _finalize_result(result, cache_key, check_funding_rate, "current_funding", "term_structure")
 
 
 async def get_all_coinalyze_data() -> Dict[str, Any]:

@@ -132,7 +132,11 @@ When building any feature that needs market data, use these sources in this prio
 | **Max pain** | UW API `uw_api.get_max_pain()` | — | Per-expiry max pain levels |
 | **VIX, indices (^VIX, ^GSPC)** | yfinance | — | UW doesn't cover index symbols with `^` prefix |
 | **Breadth data (^ADVN, ^DECLN)** | yfinance / NYSE proxy | — | NYSE advance/decline, not on UW |
-| **Crypto (BTC, ETH)** | Binance/Coinalyze | yfinance | Futures data via `binance_futures.py` |
+| **Crypto quote/bars (BTC/ETH/SOL/ZEC)** | UW API `/api/crypto/{pair}/state` + `/ohlc/{size}` | Coinalyze/Binance/OKX (see matrix) | Ticker MUST be hyphenated (`BTC-USD`); no-hyphen format silently returns null. **ZEC quote works via UW but its OHLC bar history does not** — use Binance spot klines for ZEC bars, not UW. HYPE/FARTCOIN return HTTP 200 with `data: null` on both UW endpoints (fake-healthy) — not UW-covered at all |
+| **Crypto quote/bars (HYPE, FARTCOIN)** | OKX (ticker + candles) | Coinalyze (funding/OI/liq/term only) | Not listed on Binance spot or UW crypto endpoints. Full six-symbol coverage matrix (funding/OI/liquidations/term structure, 25-delta skew, quarterly basis, spot orderbook, bar-walk source per symbol): `docs/strategy-reviews/stater-swap-redesign/symbol-capability-matrix.md` |
+| **Crypto derivatives (funding/OI/liquidations/term structure, all 6 symbols)** | Coinalyze `coinalyze_client.py` | OKX (already wired in-client) | Only vendor confirmed live for all six symbols (BTC/ETH/SOL/HYPE/ZEC/FARTCOIN), incl. thin aggregation for HYPE/FARTCOIN |
+| **Crypto 25-delta skew** | Deribit `deribit_client.py` | — | BTC/ETH only (full option markets). SOL is a listed currency with ZERO active option instruments — nominal, not functional. HYPE/ZEC/FARTCOIN not listed at all |
+| **Crypto quarterly basis / futures premium** | Binance Futures `binance_client.py` | OKX (auto-fallback, already wired) | **Binance Futures is geo-blocked from Railway — HTTP 451, confirmed 2026-07-13.** Per hard rule: replace, never proxy/VPN. OKX fallback verified live for all 6 symbols |
 | **Macro (FRED series)** | FRED API | — | Interest rates, claims, yield curve, ISM |
 | **Sector ETF performance** | UW API `uw_api.get_snapshot()` | yfinance | All 11 SPDR sectors |
 | **News headlines (per ticker)** | UW API `uw_api.get_news_headlines()` | — | Real-time news feed |
@@ -148,6 +152,7 @@ When building any feature that needs market data, use these sources in this prio
 - TradingView webhooks are for alerts/signals, not data fetching
 - **`backend/integrations/polygon_equities.py` and `backend/integrations/polygon_options.py` are DEAD CODE.** Polygon plan was canceled 2026-04-27. If your build references either file, that is a bug — use UW API instead.
 - **FMP is DEPRECATED.** No new dependencies on Financial Modeling Prep.
+- **yfinance's crypto role: retained fallback, not actively monitored — known staleness risk.** Live in three places (`bias_filters/macro_confluence.py`'s BTC macro-confluence gate, `scripts/committee_context.py`'s committee technical enrichment, and one level removed via `scanners/cta_scanner.py` inside the `bias_scheduler.py` Crypto Scanner). A prior brief (`docs/codex-briefs/brief-committee-data-access-fix.md`) flagged yfinance crypto prices as "can be $20K+ stale" and proposed a Polygon-based fix that was never implemented — that fix should NOT be resurrected (Polygon is dead code, see above); the correct replacement is the new UW crypto endpoints (see Crypto rows above) once F-3 ships `hub_get_crypto_quote`. Do not add new yfinance-crypto call sites in the meantime.
 
 ## Bias Hierarchy
 

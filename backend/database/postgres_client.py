@@ -1122,6 +1122,35 @@ async def init_database():
             )
         """)
 
+        # Stater Swap v2 S-1 Phase 1 (migration 023): crypto vendor health-state
+        # audit trail (LIVE/DEGRADED/DEAD transitions + sanction/replace decisions).
+        # Append-only on transitions (mirrors migrations/023_crypto_vendor_health_audit.sql
+        # — keep in sync).
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS crypto_vendor_health_audit (
+                id                  SERIAL PRIMARY KEY,
+                vendor              TEXT NOT NULL,
+                feed_type           TEXT NOT NULL,
+                symbol              TEXT NOT NULL,
+                status              TEXT NOT NULL,
+                previous_status     TEXT,
+                reason              TEXT,
+                as_of               TIMESTAMPTZ,
+                data_age_seconds    NUMERIC,
+                sanction_decision   TEXT,
+                created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_crypto_vendor_health_latest
+                ON crypto_vendor_health_audit (vendor, feed_type, symbol, created_at DESC)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_crypto_vendor_health_dead
+                ON crypto_vendor_health_audit (created_at DESC)
+                WHERE status = 'DEAD'
+        """)
+
         # Brief 3A: Ariadne's Thread — outcome resolution columns on signals
         try:
             await conn.execute("""

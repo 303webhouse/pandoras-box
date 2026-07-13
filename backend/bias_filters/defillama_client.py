@@ -11,7 +11,15 @@ from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional, List
 import httpx
 
+from bias_filters.crypto_vendor_health import record_observation
+
 logger = logging.getLogger(__name__)
+
+# S-1 Phase 1: DeFiLlama is market-wide (stablecoin yields), not a
+# per-crypto-asset feed — no symbol-specific price/funding/OI/basis bounds
+# apply (verified 2026-07-13: not one of the four bound categories). Health
+# tracking uses a fixed pseudo-symbol since there's no per-symbol axis here.
+_SCOPE = "MARKET_WIDE"
 
 # API Configuration
 DEFILLAMA_BASE_URL = "https://yields.llama.fi"
@@ -89,6 +97,7 @@ async def get_stablecoin_aprs() -> Dict[str, Any]:
     data = await _make_request("/pools")
     
     if not data or "data" not in data:
+        await record_observation("defillama", "stablecoin_aprs", _SCOPE, success=False, reason="Failed to fetch yield data")
         return {
             "average_apy": None,
             "sentiment": "unknown",
@@ -123,6 +132,7 @@ async def get_stablecoin_aprs() -> Dict[str, Any]:
             })
     
     if not stablecoin_pools:
+        await record_observation("defillama", "stablecoin_aprs", _SCOPE, success=False, reason="No qualifying stablecoin pools found")
         return {
             "average_apy": None,
             "sentiment": "unknown",
@@ -167,8 +177,9 @@ async def get_stablecoin_aprs() -> Dict[str, Any]:
         "signal": signal,
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
-    
+
     _set_cache(cache_key, result)
+    await record_observation("defillama", "stablecoin_aprs", _SCOPE, success=True)
     logger.info(f"DeFiLlama Stablecoin APY: {weighted_apy:.2f}% avg ({len(top_pools)} pools) -> {sentiment}")
     return result
 
