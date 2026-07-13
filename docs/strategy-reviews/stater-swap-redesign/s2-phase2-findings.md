@@ -34,7 +34,9 @@ The same resolver run (executed for the shadow-test proof, `backfill_days=1`) al
 
 - **3 real `Session_Sweep` (BTCUSDT) crypto signals resolved** (`LOSS`, `BAR_WALK`) — these are exactly the signals Phase 0 found permanently stuck at `outcome IS NULL` because `outcome_resolver.py` handed `yfinance` a Binance-native ticker it can't parse. This is empirical proof the F-2 fix works on real, not just synthetic, data.
 - **1 real equity signal (`ARTEMIS_NKE`) also resolved correctly** (`WIN`, `BAR_WALK`) via the unchanged yfinance path — confirms the `_walk_touch()` extraction did not regress equity behavior.
-- Current state: of 133 total `Session_Sweep` crypto signals, 4 are now resolved (3 from this run + 1 pre-existing outlier from 2026-05-19), **129 remain `outcome IS NULL`** — those are older than the 1-day window I tested with.
+- Current state: of 133 total `Session_Sweep` crypto signals, 4 are now resolved (3 from this run + 1 pre-existing outlier from 2026-05-19), **129 remain `outcome IS NULL`**.
+
+**Correction (post-deploy check, 2026-07-13 23:31 UTC):** the 129 remaining were initially assumed to be a clearable backlog (see the now-superseded framing below). Checking the actual `status` breakdown after deploy: **101 are `EXPIRED`, 28 are `DISMISSED`** — both statuses the resolver's own WHERE clause has always explicitly excluded (`status NOT IN ('DISMISSED', 'EXPIRED')`), identical to how equity signals are handled. **There is no backlog to clear.** The 3 signals that resolved during testing were the only ones still in an active (non-expired, non-dismissed) state at the time — the fix's real effect is narrowly scoped to currently-live and future pending signals, exactly as intended, not a mass regrade of historical data. Confirmed directly against the deployed production code by calling `resolve_signal_outcomes(asset_class_filter="CRYPTO")` post-deploy: `resolved=4, still_null=129`, unchanged — proving no further signals were touched.
 
 ## Two things flagged for Nick before this ships (not decided unilaterally)
 
@@ -42,14 +44,14 @@ The same resolver run (executed for the shadow-test proof, `backfill_days=1`) al
 
 `backend/main.py`'s `outcome_resolver_loop()` gates every 15-min tick on `et.weekday() < 5 and 9 <= et.hour < 16` (NYSE hours). This predates Stater Swap entirely and was never crypto-aware. Effect: even with F-2's fix, crypto signals will only get walked Mon–Fri 9am–4pm ET — a BTC signal that fires Saturday night won't resolve until Monday morning at the earliest, despite the "15-minute" walker's name. This is a scheduling/cadence gap, not a resolver-logic gap — closer to R-1's session-engine territory than F-2's scope. **Not fixed in this pass** — flagging rather than silently expanding scope. Recommend either a dedicated 24/7 crypto-only resolver loop (small, additive) as a fast-follow, or explicit deferral to R-1/S-2.
 
-### 2. Deploying this will functionally clear the 129-signal backlog — is that acceptable without a dry run?
+### 2. Deploying this will functionally clear the 129-signal backlog — is that acceptable without a dry run? (raised in error — see correction)
 
-The brief's task 2.3 is explicit: *"No historical backfill in S-1. If a backfill is ever run later, it follows dry-run + apply with hard-stop gates."* I did not run a backfill script. But once this code deploys, the **normal always-scheduled job** (default `backfill_days=60`, next fires at the next equity-market-hours tick per finding #1 above) will pick up all 129 still-`NULL` `Session_Sweep` signals in its ordinary sweep, since they fall inside the 60-day window — the same mechanical effect as a backfill, just via the regular schedule rather than a dedicated script. This is worth an explicit yes/no rather than assuming: the 129 signals are real historical data feeding into future win-rate/promotion-gate math (per PROJECT_RULES's Outcome Tracking Semantics), and grading them all at once with brand-new logic, unreviewed, has some of the same risk profile the brief's dry-run-first instinct is protecting against — even though it isn't a bespoke backfill operation.
+At the time this was raised, I had not checked the `status` column of the 129 unresolved signals and assumed they were all still eligible for resolution. **Post-deploy verification found this was wrong: 101 are `EXPIRED`, 28 are `DISMISSED` — both already excluded by the resolver's unchanged WHERE clause.** There was never a 129-signal backfill risk; I should have checked `status` before raising this as a decision point. Confirmed directly against the deployed code: calling `resolve_signal_outcomes(asset_class_filter="CRYPTO")` post-deploy left `resolved=4, still_null=129` completely unchanged.
 
 ## Nick's decisions on the two flagged items (2026-07-13)
 
-1. **129-signal backlog:** ship it — let the normal scheduled job clear it. Not treated as a "backfill" requiring dry-run gates; the 3 real signals resolved during testing graded correctly (matches expected outcome given real price action), and this is the ordinary effect of a bug fix on an always-running job, not a bespoke historical operation.
-2. **24/7 scheduling gap:** fix now, not deferred to R-1. Implemented as a small additive change — see below.
+1. **129-signal backlog:** ship it — let the normal scheduled job clear it. **Superseded by the correction above: there was nothing to clear.** The concern itself was based on an incomplete check on my part (I hadn't looked at `status`), not a real risk — recording the decision for the audit trail, but the premise it was answering was wrong.
+2. **24/7 scheduling gap:** fix now, not deferred to R-1. Implemented as a small additive change — see below. This one was a real, correctly-diagnosed gap and remains valid.
 
 ### 24/7 crypto resolver loop (implemented per decision #2)
 
