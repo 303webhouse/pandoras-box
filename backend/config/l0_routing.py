@@ -66,7 +66,7 @@ SUPPRESS_IF_NON_LIQUID: frozenset[str] = frozenset({
 })
 
 # Everything not named above is KEPT untouched (GOLDEN_TOUCH, TRAPPED_SHORTS,
-# TWO_CLOSE_VOLUME, APIS_CALL, sell_the_rip*, Artemis*, footprint, etc.).
+# TWO_CLOSE_VOLUME, APIS_CALL, sell_the_rip*, ARTEMIS_SHORT, footprint, etc.).
 
 
 def _enforce_enabled() -> bool:
