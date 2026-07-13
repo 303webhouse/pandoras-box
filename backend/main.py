@@ -857,8 +857,12 @@ async def lifespan(app: FastAPI):
     chronos_task = asyncio.create_task(chronos_earnings_loop())
 
     # Outcome resolver: walk 15m bars for accepted signals every 15 min (market hours)
+    # S-1 Phase 2 (F-2, 2026-07-13): scoped to EQUITY only -- crypto now has its
+    # own 24/7 loop below (crypto_outcome_resolver_loop), since crypto trades
+    # around the clock and this equity-hours gate would otherwise delay a
+    # Saturday-night BTC signal's resolution until Monday morning.
     async def outcome_resolver_loop():
-        """Resolve WIN/LOSS for accepted signals via intraday bar walk-forward."""
+        """Resolve WIN/LOSS for accepted EQUITY signals via intraday bar walk-forward."""
         import pytz
         from datetime import datetime as dt_cls
         from jobs.outcome_resolver import resolve_signal_outcomes
@@ -869,7 +873,7 @@ async def lifespan(app: FastAPI):
             try:
                 et = dt_cls.now(pytz.timezone("America/New_York"))
                 if et.weekday() < 5 and 9 <= et.hour < 16:
-                    await resolve_signal_outcomes()
+                    await resolve_signal_outcomes(asset_class_filter="EQUITY")
                 else:
                     logger.debug("Outcome resolver: outside market hours, skipping")
             except Exception as e:
@@ -877,6 +881,26 @@ async def lifespan(app: FastAPI):
             await asyncio.sleep(900)  # 15 minutes
 
     outcome_resolver_task = asyncio.create_task(outcome_resolver_loop())
+
+    # Crypto outcome resolver: same 15-min bar-walk, but 24/7 -- no market-hours
+    # gate. S-1 Phase 2 (F-2, 2026-07-13). Separate task from the equity loop
+    # above so neither is blocked by the other's cadence/gating, and so the
+    # two never double-process the same signal (each filters to one
+    # asset_class).
+    async def crypto_outcome_resolver_loop():
+        """Resolve WIN/LOSS for accepted CRYPTO signals via intraday bar walk-forward, 24/7."""
+        from jobs.outcome_resolver import resolve_signal_outcomes
+
+        await asyncio.sleep(135)  # offset 15s from the equity loop's 120s startup delay
+
+        while True:
+            try:
+                await resolve_signal_outcomes(asset_class_filter="CRYPTO")
+            except Exception as e:
+                logger.warning("Crypto outcome resolver loop error: %s", e)
+            await asyncio.sleep(900)  # 15 minutes, 24/7
+
+    crypto_outcome_resolver_task = asyncio.create_task(crypto_outcome_resolver_loop())
 
     # B2 options-P&L resolver: capture entry/exit marks for signal_options_expressions
     async def b2_options_resolver_loop():
@@ -970,6 +994,7 @@ async def lifespan(app: FastAPI):
     watchlist_alert_task.cancel()
     chronos_task.cancel()
     outcome_resolver_task.cancel()
+    crypto_outcome_resolver_task.cancel()
     logger.info("🛑 Shutting down Pandora's Box...")
     await redis_client.close()
     await postgres_client.close()
