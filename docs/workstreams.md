@@ -29,7 +29,7 @@
 ---
 
 ## DASHBOARD-V2 — owner: Claude Code (dashboard session)
-**Last update:** 2026-07-11 (CC)
+**Last update:** 2026-07-13 (CC)
 
 | Item | Status | Next action | Blocked-on |
 |---|---|---|---|
@@ -37,6 +37,8 @@
 | MCP mount outage | **RESOLVED 2026-07-11** — fastmcp==3.4.4 pinned (`aaea01c`); `/mcp/v1/health` 200, discovery self-check green. Do NOT toggle the connector (manifest unchanged) | — | — |
 | Kairos fidelity 6a–c | **SHIPPED 2026-07-11 (`dd28bd6`)** — roster gate (ACHILLES = 6th setup), grade v1 (validated-cell A only, no legacy-score A's), non-roster→river +N counter; joins flip gates | Fable live-verifies | — |
 | Sector RS-10d contract fix | **SHIPPED 2026-07-11 (this brief)** — writer stores rs_10d/rank_10d, reader honest-null + degraded + real staleness; T1–T4 green, local proof passed, prod Redis re-primed with new schema | Fable verifies live via MCP `hub_get_sector_strength` (do not self-grade) | — |
+| Gate-1 SPY test-row neutralization | **DONE 2026-07-13 12:55 MT** (well before the 19:30 MT feedback-loop deadline) — deleted `unified_positions.id=344` (`POS_SPY_20260711_164210`), `trades.id=544`, `closed_positions.id=142` (transaction, per-statement RETURNING row-count guard, all 3 confirmed exactly 1 row before commit). Independently verified: 0 RT-TEST rows remain anywhere; `/api/analytics/trade-stats` + `/api/analytics/trades` + cockpit/laboratory dashboards no longer carry the phantom +$100 WIN / +$654.95 stale-unrealized artifact. Pre-existing gap flagged (not fixed, out of scope): no `is_test` column/convention exists anywhere — 2 older unremediated test rows still sit in `trades` (`id=171` "DOUBLE_TAP_TEST", `id=126` TSLA "test-deploy-check") with identical exposure through the same unfiltered endpoints | Consider an `is_test` boolean + default-exclude filter in `get_trade_rows()` so this class of leak can't recur silently | — |
+| `closed_at` defect — landing check | **Investigated 2026-07-13; likely a MISDIAGNOSIS, not a live defect.** No commit today touches `closed_at` (confirmed across all 7 of today's commits incl. `af5eb57`). But: `unified_positions` has **no `closed_at` column at all** (uses `exit_date`, correctly populated on the test row) — `trades.closed_at` and `closed_positions.closed_at` DO exist and ARE correctly bound to `now` in `close_position()` (`backend/api/unified_positions.py:1635,1707`), verified both in current DB values (real timestamps, not null) and via `git blame` (code unchanged since `f435d591`, 2026-04-29 — predates the 7/11 test). The close-endpoint JSON response's `position` object mirrors `unified_positions` (no `closed_at` key by design), which is the likely source of the original "null on both rows" observation. `scripts/migrate_close_handler.py` (the doc's "prior surgery" lead) is unrelated — it's a `close_attempts`/`background_task_failures` audit-table migration. Recommend re-verifying against a FRESH close before treating this as closed; not fixed here (out of scope — report only, per this task) | Owner to confirm/close in `docs/handoff-monday-2026-07-13.md` chase item 8, or reopen with a repro if a fresh close does show a real null | — |
 | Badge redo | (owner to fill) | — | — |
 | Forensics 1–5 | In progress | **#3 (`/log-signal` caller inventory + routing) TRANSFERRED to SIGNALS-PIPELINE write-path census.** Dashboard keeps read-side only | — |
 
