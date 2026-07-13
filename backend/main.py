@@ -1710,16 +1710,20 @@ for path in possible_paths:
         break
 
 if frontend_path:
+    # THE FLIP (2026-07-13, c4 of dashboard-rebuild-v2 brief): /app now serves
+    # v2 ("Judgment Layer"); the old layout moves to /app/legacy for a 7-day
+    # parallel-run window before a removal commit retires it (~2026-07-20).
     @app.get("/app", response_class=FileResponse)
     async def serve_frontend():
-        """Serve the frontend dashboard"""
-        return FileResponse(os.path.join(frontend_path, "index.html"))
+        """Serve the v2 dashboard (flipped 2026-07-13; was legacy index.html)"""
+        return FileResponse(os.path.join(frontend_path, "v2.html"))
 
-    # Dashboard v2 ("Judgment Layer") — parallel page; MUST be declared before the
-    # /app/{mode} catch-all so it isn't swallowed and served the legacy index.html.
+    # /app/v2 kept as a redundant alias post-flip (harmless; avoids breaking
+    # any bookmarked/shared links). MUST stay declared before the /app/{mode}
+    # catch-all so it isn't swallowed and served the legacy index.html.
     @app.get("/app/v2", response_class=FileResponse)
     async def serve_frontend_v2():
-        """Serve the v2 dashboard shell (parallel page; /app stays untouched)."""
+        """Serve the v2 dashboard shell (alias of /app post-flip)."""
         return FileResponse(os.path.join(frontend_path, "v2.html"))
 
     @app.get("/v2.js", response_class=FileResponse)
@@ -1732,7 +1736,9 @@ if frontend_path:
 
     @app.get("/app/{mode}", response_class=FileResponse)
     async def serve_frontend_mode(mode: str):
-        """Serve frontend for SPA client-side routes (/app/crypto, /app/hub)"""
+        """Serve legacy frontend for SPA client-side routes, including
+        /app/legacy (post-flip retention window) and pre-existing deep links
+        like /app/crypto, /app/hub."""
         return FileResponse(os.path.join(frontend_path, "index.html"))
     
     @app.get("/knowledgebase", response_class=FileResponse)
