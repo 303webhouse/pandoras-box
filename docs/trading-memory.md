@@ -1,5 +1,5 @@
 # TRADING MEMORY — Pandora's Box / Olympus Committee
-# Last updated: April 10, 2026
+# Last updated: June 12, 2026 (SPCX IPO day — Catalyst Module shipped; see bottom section)
 # Location: C:\trading-hub\docs\trading-memory.md
 # Rule: Read this file before ANY trading discussion, committee review, or position analysis.
 #       Update it whenever trades open/close or macro conditions change.
@@ -332,3 +332,89 @@ put book (HYG, XLY, BX, JETS, PLTR, TSLA) all benefit.
 - Tranche 4 (SPX breaks 6,400): JEPI $750 + EFA $750
 - Tranche 5 (recession confirmed): JEPI $750 + EFA $750
 - Cash reserve: $2,500. No tech/AI exposure.
+
+
+---
+
+## 🎯 CATALYST MODULE (added June 12, 2026 — SPCX IPO build day)
+
+**Purpose:** Surface fast-moving, high-conviction options-flow setups during major catalyst
+events (IPOs, index rebalances, macro prints) that retail does not see under the surface —
+rendered in a readable UI, not a terminal. Built on SPCX IPO day; designed to be reconfigured
+for future catalysts by swapping the ticker universe + thresholds.
+
+**Why it exists:** Hub's four legacy Insights tabs (Top Feed / Watchlist / TA / Research) were
+dead weight (Top Feed empty 30+ days, Watchlist an 82% dumping ground). The Catalyst tab is the
+redesign the April-24 Insights diagnostic called for, scoped to a concrete use case.
+
+### What shipped June 12 (live in production)
+1. **Flow Scanner** (`scripts/flow_scanner.py`) — standalone, READ-ONLY, runs locally in
+   PowerShell. Polls UW order-level flow on a ~45-name tiered universe (hot @30s / warm @120s).
+   - Detection logic (v2, dual-committee reviewed): imbalance/dominance gate (fires only when one
+     direction owns ≥70% of window premium — kills two-sided noise); server-side `min_premium`
+     filter (~$25K, defeats retail-confetti sampling bias); liquidity buckets (small/mid ≥$250K,
+     TSLA-class ≥$750K, mega/index ≥$2M); SPCX dark-pool block poller (≥$5M, the only
+     institutional read on a no-options new listing); ghost-ticker guard (rejects SPCX <$100 =
+     dead SPAC-ETF corpse); every alert mapped to a pre-written scenario (A hot-open / B
+     broken-open / removal forced-selling).
+   - Posts events to the hub via `/api/catalyst/manual` (X-API-Key auth) → writes `catalyst_events`
+     row → WS broadcast. Fire-and-forget; hub down never affects the terminal radar.
+   - **Independent fallback:** even if the hub UI breaks, the PowerShell scanner keeps printing.
+     It is the primary radar; the tab is the readable view on top.
+2. **Catalyst tab** (Insights section) — renders scanner events as cards, live via WebSocket,
+   large text (Nick's eyes). Decisive line: `▲/▼ TICKER DIRECTION $PREM (N sweeps · X% one-sided)
+   → scenario`. Staleness indicator + "armed and quiet" empty state.
+3. **Targeted-Hit trigger card + sound (Task D)** — high-conviction events (flow_cluster ≥80%
+   dominance + live scenario, OR any dp_block) pin to a 🎯 strip at top and fire a Web Audio beep
+   (behind a one-time "Enable sound" gesture; visual pin always fires; 3s debounce). Threshold is
+   one editable const (`DOMINANCE_HIT=0.80`).
+4. **Catalyst↔Signal Confluence Flag (Task E)** — when the existing trade-idea pipeline emits a
+   scored signal, the hub checks whether the flow scanner flagged the SAME ticker within 15 min;
+   on a direction-aligned match it writes a `confluence_flag` event → ⚡ card + pin + beep. Carries
+   strategy name + delta_seconds for backtesting. FAIL-OPEN: never blocks/delays signal emission.
+   - **CALIBRATION GATE: confluence_flag is CONTEXT-ONLY, not edge, until n≥50 flagged events are
+     backtested vs. non-confluence baseline (hit rate + lead/lag distribution). No agent or sizing
+     logic treats it as conviction input before that gate.** Card copy literally reads "context,
+     not entry timing."
+
+### Architecture notes (for any future agent touching this)
+- **Built almost entirely on EXISTING primitives** — `catalyst_events` table, `lightning_cards`,
+  WS `broadcast_event`, and the `signals/pipeline.py` confirmation hook all pre-existed. Three
+  separate features this build turned out to be ~60% already present in the codebase.
+  Investigation-first (read the code before assuming you must build) paid off repeatedly.
+- Display fields ride in the `catalyst_events.sector_velocity` JSONB column; the read path
+  (`/api/hermes/alerts`) returns it. Frontend `_sv()` normalizer handles it returning as a JSON
+  string (bug caught by empirical verification on deploy day).
+- `event_type` distinguishes streams in `catalyst_events`: `flow_cluster`, `dp_block`,
+  `confluence_flag` (this build) vs. Hermes's velocity-breach events. The Catalyst tab and the
+  committee path currently show ALL of them — see "still TODO" below re: clean separation.
+
+### What's NOT done yet (TODO / weekend + beyond)
+- **Pandora MCP committee visibility = PARTIAL.** Catalyst events are technically readable by the
+  committee through the existing `hub_get_hermes_alerts` MCP tool (they share `catalyst_events`),
+  BUT they arrive mislabeled/mixed with Hermes macro catalysts and the directional/scenario
+  context is buried. The CLEAN labeled surface (events tagged `signal_class:"CATALYST"`, distinct
+  from scored insights so PIVOT never treats them as conviction-tier) = weekend Task 7 in
+  `docs/codex-briefs/2026-06-11-catalyst-module-v1.md`. **Until Task 7 ships, do not rely on the
+  committee cleanly distinguishing catalyst flow from macro catalysts.**
+- **Production poller** (replaces the local PowerShell scanner with a hub-side loop) = weekend
+  Task 3. The scanner's v2 detection logic is the REFERENCE IMPLEMENTATION CC must port, not
+  reinvent. Preferred production endpoint: global `/api/option-trades/flow-alerts` (one call
+  covers all tickers + WS stream) — also the rate-budget-survival choice on high-vol days (June 12
+  rate-limited the UW account hard with scanner + hub jobs + cross all competing for 120/min).
+- **Webhook hardening (Hermes fail-closed)** = weekend Task 0, AEGIS-gated; `WEBHOOK_HERMES_ENFORCE`
+  stays in observe mode until the ~9 Hermes TV alerts are re-armed with the secret.
+- **Richer confluence** (reverse-direction, auction context) belongs in `confluence/engine.py`
+  (the existing batch engine, NOT modified June 12) on the weekend.
+
+### How to reconfigure for the NEXT catalyst (the whole point)
+- Scanner universe + thresholds live in the CONFIG block at the top of `scripts/flow_scanner.py`
+  (HOT/WARM dicts with per-ticker bias, cadences, dominance ratio, premium buckets). Edit, restart.
+- Weekend production version: catalyst config becomes a git-tracked repo file
+  (`backend/catalyst/configs/*.json`) — first config `SPCX_AI_INDEX` (window 6/12–6/22, halo
+  longs + NDX-add longs + NDX-removal shorts). Swap the file per event.
+
+### Run command (PowerShell — NOT cmd; no /d flag in PowerShell)
+    cd C:\trading-hub
+    railway run python scripts\flow_scanner.py
+(Header `══ FLOW SCANNER LIVE ══` = armed. Silence after = the gate working, not broken.)
