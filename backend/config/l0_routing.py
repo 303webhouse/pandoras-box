@@ -154,6 +154,37 @@ def l0_enforce_where_clause() -> str:
     return _L0_SUPPRESS_PREDICATE if _enforce_enabled() else ""
 
 
+def _row_would_suppress(row: Any) -> bool:
+    """True iff a signal dict carries an l0_shadow tag with would_suppress=true.
+    Tolerates triggering_factors as a dict OR a JSON string (Redis payloads
+    serialize it as text). Mirrors _L0_SUPPRESS_PREDICATE's keep/drop logic:
+    a missing tag/field COALESCEs to keep (returns False)."""
+    if not isinstance(row, dict):
+        return False
+    tf = row.get("triggering_factors")
+    if isinstance(tf, str):
+        try:
+            import json as _json
+            tf = _json.loads(tf)
+        except (ValueError, TypeError):
+            return False
+    if not isinstance(tf, dict):
+        return False
+    l0 = tf.get("l0_shadow")
+    if not isinstance(l0, dict):
+        return False
+    return bool(l0.get("would_suppress"))
+
+
+def l0_enforce_filter_rows(rows):
+    """Python-side twin of l0_enforce_where_clause() for feeds that don't hit a
+    SQL WHERE — e.g. the Redis-cached queue path. Drops gate-suppressed rows when
+    enforcing; pass-through (no-op) in shadow mode. Fail-safe: non-list → unchanged."""
+    if not _enforce_enabled() or not isinstance(rows, list):
+        return rows
+    return [r for r in rows if not _row_would_suppress(r)]
+
+
 async def l0_status(pool) -> Dict[str, Any]:
     """E3 enforcement visibility: {enforce, suppressed_today}. Read-only,
     fail-safe. Makes enforcement observable — quiet success and quiet failure
