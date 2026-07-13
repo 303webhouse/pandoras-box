@@ -9,7 +9,16 @@ from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional
 import httpx
 
+from config.crypto_sanity_bounds import check_price, check_basis_annualized
+from bias_filters.crypto_vendor_health import record_observation
+
 logger = logging.getLogger(__name__)
+
+# S-1 Phase 1: hardcoded to BTC today (BTCUSDT below) — multi-symbol
+# parametrization is an R-2/R-3 prerequisite. Matrix confirms Binance
+# Futures is geo-blocked from Railway (HTTP 451, verified 2026-07-13) for
+# all 6 symbols; OKX fallback is live for all 6.
+_SYMBOL = "BTC"
 
 # API Configuration
 BINANCE_SPOT_URL = "https://data-api.binance.vision/api/v3"  # geo-friendly mirror
@@ -130,6 +139,7 @@ async def get_spot_orderbook_skew() -> Dict[str, Any]:
         source = "okx_spot"
     
     if not data or "bids" not in data or "asks" not in data:
+        await record_observation("binance_spot", "orderbook_skew", _SYMBOL, success=False, reason="Failed to fetch orderbook from Binance Vision or OKX")
         return {
             "bid_depth": None,
             "ask_depth": None,
@@ -139,12 +149,13 @@ async def get_spot_orderbook_skew() -> Dict[str, Any]:
             "source": "unavailable",
             "error": "Failed to fetch orderbook from Binance Vision or OKX"
         }
-    
+
     bids = data["bids"]  # [[price, qty], ...]
     asks = data["asks"]
-    
+
     # Calculate depth within 2% of mid price
     if not bids or not asks:
+        await record_observation("binance_spot", "orderbook_skew", _SYMBOL, success=False, reason="Empty bids/asks in orderbook response")
         return {
             "bid_depth": 0,
             "ask_depth": 0,
@@ -196,10 +207,16 @@ async def get_spot_orderbook_skew() -> Dict[str, Any]:
         "source": source,
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
-    
+
+    ok, reason = check_price(_SYMBOL, result["mid_price"])
+    status = await record_observation(source, "orderbook_skew", _SYMBOL, success=True, value_valid=ok, reason=reason)
+    if not ok:
+        logger.warning("Binance orderbook_skew bounds check failed, not caching: %s", reason)
+        return {**result, "signal": "UNKNOWN", "error": reason, "health_status": status}
+
     _set_cache(cache_key, result, CACHE_TTL_ORDERBOOK)
     logger.info(f"Binance Orderbook: Bid {bid_depth:.1f} BTC, Ask {ask_depth:.1f} BTC, Imbalance {imbalance_pct:+.1f}% -> {sentiment}")
-    return result
+    return {**result, "health_status": status}
 
 
 async def get_quarterly_basis() -> Dict[str, Any]:
@@ -243,6 +260,7 @@ async def get_quarterly_basis() -> Dict[str, Any]:
             spot_source = "okx_spot"
     
     if not spot_data or "price" not in spot_data:
+        await record_observation("binance_spot", "quarterly_basis", _SYMBOL, success=False, reason="Failed to fetch spot price from Binance Vision or OKX")
         return {
             "spot_price": None,
             "basis_annualized": None,
@@ -269,6 +287,7 @@ async def get_quarterly_basis() -> Dict[str, Any]:
             perp_source = "okx_swap"
     
     if not perp_data or "price" not in perp_data:
+        await record_observation("binance_futures", "quarterly_basis", _SYMBOL, success=False, reason="Failed to fetch perp/futures price from Binance Futures or OKX (likely geo-block — HTTP 451 confirmed from Railway 2026-07-13)")
         return {
             "spot_price": spot_price,
             "basis_annualized": None,
@@ -316,10 +335,20 @@ async def get_quarterly_basis() -> Dict[str, Any]:
         "source": f"{spot_source}+{perp_source}",
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
-    
+
+    price_ok, price_reason = check_price(_SYMBOL, result["spot_price"])
+    basis_ok, basis_reason = check_basis_annualized(_SYMBOL, result["basis_annualized"])
+    ok = price_ok and basis_ok
+    reason = price_reason or basis_reason
+    vendor_label = f"{spot_source}+{perp_source}"
+    status = await record_observation(vendor_label, "quarterly_basis", _SYMBOL, success=True, value_valid=ok, reason=reason)
+    if not ok:
+        logger.warning("Binance quarterly_basis bounds check failed, not caching: %s", reason)
+        return {**result, "signal": "UNKNOWN", "error": reason, "health_status": status}
+
     _set_cache(cache_key, result, CACHE_TTL_BASIS)
     logger.info(f"Binance Basis: {basis_pct:.4f}% ({basis_annualized:.2f}% ann.) -> {sentiment}")
-    return result
+    return {**result, "health_status": status}
 
 
 async def get_all_binance_data() -> Dict[str, Any]:

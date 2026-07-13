@@ -12,7 +12,17 @@ from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional, List
 import httpx
 
+from config.crypto_sanity_bounds import check_skew_25d
+from bias_filters.crypto_vendor_health import record_observation
+
 logger = logging.getLogger(__name__)
+
+# S-1 Phase 1: hardcoded to BTC today (currency="BTC" below) — multi-symbol
+# parametrization is an R-2/R-3 prerequisite. Matrix confirms Deribit covers
+# BTC/ETH with real option markets; SOL is a listed currency with ZERO active
+# option instruments (verified 2026-07-13); HYPE/ZEC/FARTCOIN aren't listed
+# at all.
+_SYMBOL = "BTC"
 
 # API Configuration
 DERIBIT_BASE_URL = "https://www.deribit.com/api/v2"
@@ -92,6 +102,7 @@ async def get_25_delta_skew() -> Dict[str, Any]:
     })
     
     if not data:
+        await record_observation("deribit", "skew_25d", _SYMBOL, success=False, reason="Failed to fetch options data")
         return {
             "skew_25d": None,
             "sentiment": "unknown",
@@ -164,6 +175,7 @@ async def get_25_delta_skew() -> Dict[str, Any]:
             continue
     
     if not puts or not calls:
+        await record_observation("deribit", "skew_25d", _SYMBOL, success=False, reason="Insufficient options data for skew calculation")
         return {
             "skew_25d": None,
             "sentiment": "unknown",
@@ -186,6 +198,7 @@ async def get_25_delta_skew() -> Dict[str, Any]:
         call_25d_candidates = calls_sorted[:3] if calls_sorted else []
     
     if not put_25d_candidates or not call_25d_candidates:
+        await record_observation("deribit", "skew_25d", _SYMBOL, success=False, reason="Could not find 25-delta options")
         return {
             "skew_25d": None,
             "sentiment": "unknown",
@@ -229,10 +242,16 @@ async def get_25_delta_skew() -> Dict[str, Any]:
         "options_analyzed": len(put_25d_candidates) + len(call_25d_candidates),
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
-    
+
+    ok, reason = check_skew_25d(_SYMBOL, result["skew_25d"])
+    status = await record_observation("deribit", "skew_25d", _SYMBOL, success=True, value_valid=ok, reason=reason)
+    if not ok:
+        logger.warning("Deribit skew_25d bounds check failed, not caching: %s", reason)
+        return {**result, "signal": "UNKNOWN", "error": reason, "health_status": status}
+
     _set_cache(cache_key, result)
     logger.info(f"Deribit 25d Skew: {skew_25d:+.2f}% (put IV: {put_iv_25d:.1f}%, call IV: {call_iv_25d:.1f}%) -> {sentiment}")
-    return result
+    return {**result, "health_status": status}
 
 
 async def get_options_summary() -> Dict[str, Any]:

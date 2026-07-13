@@ -57,18 +57,22 @@ CRYPTO_TICKERS = {
     # Base tickers
     'BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'XRP', 'USDC', 'ADA', 'AVAX', 'DOGE',
     'DOT', 'TRX', 'LINK', 'MATIC', 'POL', 'SHIB', 'TON', 'LTC', 'BCH', 'XLM', 'UNI',
+    # Stater Swap v2 six-symbol universe additions (S-1 Phase 1, 2026-07-13):
+    # HYPE/ZEC/FARTCOIN were missing entirely — an alert on any of them would
+    # NOT get asset_class="CRYPTO" tagging. See symbol-capability-matrix.md.
+    'HYPE', 'ZEC', 'FARTCOIN',
     # TradingView USD pairs
     'BTCUSD', 'ETHUSD', 'SOLUSD', 'XRPUSD', 'ADAUSD', 'AVAXUSD', 'DOGEUSD',
     'DOTUSD', 'LINKUSD', 'MATICUSD', 'LTCUSD', 'BCHUSD', 'XLMUSD', 'UNIUSD',
-    'BNBUSD', 'TRXUSD', 'SHIBUSD', 'TONUSD',
-    # TradingView USDT pairs  
+    'BNBUSD', 'TRXUSD', 'SHIBUSD', 'TONUSD', 'HYPEUSD', 'ZECUSD', 'FARTCOINUSD',
+    # TradingView USDT pairs
     'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT', 'ADAUSDT', 'AVAXUSDT', 'DOGEUSDT',
     'DOTUSDT', 'LINKUSDT', 'MATICUSDT', 'LTCUSDT', 'BCHUSDT', 'XLMUSDT', 'UNIUSDT',
-    'BNBUSDT', 'TRXUSDT', 'SHIBUSDT', 'TONUSDT',
+    'BNBUSDT', 'TRXUSDT', 'SHIBUSDT', 'TONUSDT', 'HYPEUSDT', 'ZECUSDT', 'FARTCOINUSDT',
     # Binance/Bybit perpetuals
     'BTCUSDTPERP', 'ETHUSDTPERP', 'BTCPERP', 'ETHPERP',
     # TradingView .P suffix (Bybit perps)
-    'BTCUSDT.P', 'ETHUSDT.P',
+    'BTCUSDT.P', 'ETHUSDT.P', 'HYPEUSDT.P', 'FARTCOINUSDT.P',
 }
 
 
