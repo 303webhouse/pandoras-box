@@ -2,7 +2,9 @@
 
 Fable-approved design (2026-07-09), replacing the env-var shed:
 
-  1. RTH-gated ~5-min job reads the running daily UW total (get_daily_count).
+  1. 24/7 ~5-min job reads the running daily UW total (get_daily_count).
+     (2026-07-10 lesson: the first real 17K crossing happened AFTER the close —
+     the counter accumulates on the UTC day, so the watchdog watches the UTC day.)
      >= SHED_THRESHOLD (17,000) -> set a same-day RUNTIME shed flag
      (Redis `quota_shed:triton`, TTL to the next UTC rollover so it matches the
      counter reset). The Triton shadow poller checks the flag at the top of each
