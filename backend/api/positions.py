@@ -1051,13 +1051,18 @@ async def get_signal_queue():
     Returns up to 50 signals ranked by score.
     """
     from database.redis_client import get_active_signals as get_redis_signals
-    
+    from config.l0_routing import l0_enforce_filter_rows
+
     try:
         signals = _normalize_signal_payloads(await get_redis_signals())
-        
+
         if not signals:
             signals = _normalize_signal_payloads(await get_active_trade_ideas(limit=50))
-        
+
+        # L0.1a ENFORCE (2026-07-13): the Redis-cached queue bypasses the SQL WHERE
+        # filter, so gate-suppressed rows leaked here. Apply the Python-side twin.
+        signals = l0_enforce_filter_rows(signals)
+
         signals.sort(key=lambda x: x.get('score', 0) or 0, reverse=True)
         
         return {
