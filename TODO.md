@@ -507,3 +507,6 @@ If both clear, Nick greenlights a follow-up CC brief to swap primary gate from R
 ## ✅ Completed (March 5, 2026 Session)
 
 - [x] Bias engine overhaul: 20 factors, tick_breadth scoring, GEX recal, IV regime
+
+
+- [ ] worldmonitor (github.com/koala73/worldmonitor) — after hub dashboard rebuild ships: add finance.worldmonitor.app (or desktop app) as a separate desk surface for macro/geopolitical awareness; later consider borrowing its FEED SOURCES for the hub river (AGPL license — never vendor its code into this repo). Added 2026-07-03.
