@@ -6,11 +6,16 @@ from fastapi import APIRouter, Query
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 import asyncio
+import logging
 import os
 import time
 import httpx
 
+from config.crypto_symbol_matrix import get_symbol_entry, get_tier, is_tracked
+from jobs.crypto_bars import normalize_crypto_ticker
+
 router = APIRouter(prefix="/crypto", tags=["crypto-market"])
+logger = logging.getLogger(__name__)
 
 BINANCE_SPOT_BASE = "https://data-api.binance.vision"  # geo-friendly mirror
 _binance_perp_base = os.getenv("CRYPTO_BINANCE_PERP_BASE", "https://fapi.binance.com").rstrip("/")
@@ -631,4 +636,122 @@ async def get_circuit_breakers():
         "status": "success",
         "breakers": [strc],
         "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def _parse_ts_field(v):
+    if not v:
+        return None
+    try:
+        s = str(v).strip().replace("Z", "+00:00")
+        dt = datetime.fromisoformat(s)
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    except (ValueError, TypeError):
+        return None
+
+
+def _age_seconds_field(as_of):
+    if as_of is None:
+        return None
+    if as_of.tzinfo is None:
+        as_of = as_of.replace(tzinfo=timezone.utc)
+    return max(0.0, (datetime.now(timezone.utc) - as_of).total_seconds())
+
+
+def _field_envelope(as_of_raw, degraded, **data):
+    """Per-field house labeling contract (as_of, data_age_seconds, degraded) —
+    mirrors board_state.py's _envelope(), reimplemented locally per the
+    existing repo convention of no shared helper module for this pattern."""
+    as_of = _parse_ts_field(as_of_raw)
+    return {
+        **data,
+        "as_of": as_of.isoformat() if as_of else None,
+        "data_age_seconds": _age_seconds_field(as_of),
+        "degraded": bool(degraded) if degraded is not None else True,
+    }
+
+
+_NOT_YET_WIRED = "not yet wired for this symbol (bias_filters vendor clients are BTC-only; multi-symbol parametrization deferred to R-2/R-3)"
+_NOT_YET_BUILT_R1 = "not yet built (R-1 scope)"
+_NOT_YET_BUILT_R2 = "not yet built (R-2 scope)"
+
+
+@router.get("/state/{symbol}")
+async def get_crypto_state(symbol: str):
+    """Consolidated per-symbol crypto state envelope — S-1 Phase 3 (F-3.3).
+
+    Ships now (with honest nulls where later phases haven't built yet) so
+    R-1 (session/regime) and R-2 (tape-health) integrate against a stable
+    payload shape exactly once, rather than each phase inventing its own.
+    Every field carries as_of/data_age_seconds/degraded independently —
+    funding/OI/basis are real for BTC (the only symbol the underlying
+    bias_filters vendor clients currently support) and honest
+    null+degraded for every other tracked symbol, never a silently
+    mislabeled BTC value.
+    """
+    base_symbol = normalize_crypto_ticker(symbol)
+    if base_symbol is None or not is_tracked(base_symbol):
+        return {
+            "symbol": (symbol or "").upper(),
+            "error": (
+                f"'{symbol}' is not in the tracked crypto universe "
+                "(BTC, ETH, SOL, HYPE, ZEC, FARTCOIN)"
+            ),
+        }
+
+    entry = get_symbol_entry(base_symbol) or {}
+    tier = get_tier(base_symbol)
+
+    funding_field = _field_envelope(None, True, rate_pct=None, signal=None, note=_NOT_YET_WIRED)
+    oi_field = _field_envelope(None, True, current_oi_usd=None, signal=None, note=_NOT_YET_WIRED)
+    basis_field = _field_envelope(None, True, basis_annualized_pct=None, signal=None, note=_NOT_YET_WIRED)
+
+    if base_symbol == "BTC":
+        from bias_filters import coinalyze_client, binance_client
+
+        try:
+            funding_data = await coinalyze_client.get_funding_rate()
+            funding_field = _field_envelope(
+                funding_data.get("timestamp"),
+                bool(funding_data.get("error")) or funding_data.get("health_status") != "LIVE",
+                rate_pct=funding_data.get("funding_rate"), signal=funding_data.get("signal"),
+            )
+        except Exception as exc:
+            logger.warning("crypto state: funding fetch failed for BTC: %s", exc)
+
+        try:
+            oi_data = await coinalyze_client.get_open_interest()
+            oi_field = _field_envelope(
+                oi_data.get("timestamp"),
+                bool(oi_data.get("error")) or oi_data.get("health_status", "LIVE") != "LIVE",
+                current_oi_usd=oi_data.get("current_oi"), signal=oi_data.get("signal"),
+            )
+        except Exception as exc:
+            logger.warning("crypto state: OI fetch failed for BTC: %s", exc)
+
+        try:
+            basis_data = await binance_client.get_quarterly_basis()
+            basis_field = _field_envelope(
+                basis_data.get("timestamp"),
+                bool(basis_data.get("error")) or basis_data.get("health_status", "LIVE") != "LIVE",
+                basis_annualized_pct=basis_data.get("basis_annualized"), signal=basis_data.get("signal"),
+            )
+        except Exception as exc:
+            logger.warning("crypto state: basis fetch failed for BTC: %s", exc)
+
+    session_field = _field_envelope(None, True, state=None, note=_NOT_YET_BUILT_R1)
+    tape_health_field = _field_envelope(None, True, state=None, note=_NOT_YET_BUILT_R2)
+    regime_field = _field_envelope(None, True, state=None, note=_NOT_YET_BUILT_R1)
+
+    return {
+        "symbol": base_symbol,
+        "tier": tier,
+        "capabilities": entry,
+        "session": session_field,
+        "funding": funding_field,
+        "open_interest": oi_field,
+        "basis": basis_field,
+        "tape_health": tape_health_field,
+        "regime": regime_field,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
     }

@@ -132,8 +132,11 @@ arguments to every `@mcp_tool` decorator are copied verbatim from that doc.
 | `hub_get_hydra_scores` | `api/hydra.py:get_squeeze_scores` |
 | `hub_get_positions` | `api/unified_positions.py:list_positions` |
 | `hub_get_portfolio_balances` | `api/portfolio.py:get_balances` |
+| `hub_get_crypto_quote` | `services/read_only/crypto_quote.py:get_crypto_quote` |
 | `mcp_ping` | (internal — no data source) |
 | `mcp_describe_tools` | (internal — reads decorator registry) |
+
+**Note (2026-07-14):** this table and the "Tool List (v1)" heading predate 5 tools added without a table update — `hub_get_quote`, `hub_get_options_chain`, `hub_get_trade_ideas`, `hub_get_market_profile`, `hub_get_chart_indicators` are live (see `decorators.py`'s `REGISTERED_TOOL_NAMES` for the authoritative list) but missing here. Not backfilled in this pass (out of scope) — `hub_get_crypto_quote` added above since it's the tool this pass shipped.
 
 ## v2 Candidates (out of scope here)
 
