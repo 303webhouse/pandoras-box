@@ -167,7 +167,7 @@ async def refresh_ticker(ticker: str) -> Optional[Dict[str, Any]]:
         "refreshed_at": datetime.utcnow().isoformat(),
     }
 
-    # Try Polygon bars first (already has 5-min in-memory cache)
+    # Try UW bars first (get_bars caller="ohlc_bars" -- counts against the UW daily quota)
     bars = None
     try:
         from integrations.uw_api import get_bars
@@ -224,16 +224,30 @@ async def refresh_universe() -> Dict[str, Any]:
     Refresh universe cache for all watchlist tickers.
     Called by scheduler every 30 minutes during market hours.
 
+    Skips tickers whose cache entry hasn't expired yet -- the entry already
+    carries a 2h TTL (UNIVERSE_CACHE_TTL) but every 30-min tick used to
+    refetch unconditionally, spending a UW `ohlc_bars` call 4x more often
+    than the TTL contract implies (found in the 2026-07-14 ohlc_bars audit:
+    this path alone was ~3,400 of the day's ~4,300 ohlc_bars calls, 2.7x
+    its 1,500 quota). Honoring the TTL here cuts that to ~1 refresh/2h/ticker.
+
     Processes tickers sequentially with a small delay to be kind to APIs.
     Returns summary stats.
     """
     tickers = await get_watchlist_tickers()
     logger.info(f"🔄 Universe cache refresh starting for {len(tickers)} tickers")
 
-    results: Dict[str, Any] = {"total": len(tickers), "success": 0, "failed": 0, "tickers": {}}
+    results: Dict[str, Any] = {"total": len(tickers), "success": 0, "failed": 0, "skipped": 0, "tickers": {}}
+
+    client = await get_redis_client()
 
     for ticker in tickers:
         try:
+            if client and await client.exists(f"{UNIVERSE_CACHE_PREFIX}{ticker}"):
+                results["skipped"] += 1
+                results["tickers"][ticker] = "skipped-fresh"
+                continue
+
             data = await refresh_ticker(ticker)
             if data and (data.get("atr_14") or data.get("avg_volume_20d")):
                 results["success"] += 1
@@ -251,7 +265,7 @@ async def refresh_universe() -> Dict[str, Any]:
 
     logger.info(
         f"✅ Universe cache refresh complete: {results['success']}/{results['total']} tickers, "
-        f"{results['failed']} failed"
+        f"{results['skipped']} skipped (fresh), {results['failed']} failed"
     )
     return results
 
