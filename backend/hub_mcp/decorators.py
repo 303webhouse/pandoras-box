@@ -24,6 +24,7 @@ REGISTERED_TOOL_NAMES = frozenset(
         "hub_get_positions",
         "hub_get_portfolio_balances",
         "hub_get_quote",
+        "hub_get_crypto_quote",
         "hub_get_options_chain",
         "hub_get_trade_ideas",
         "hub_get_market_profile",

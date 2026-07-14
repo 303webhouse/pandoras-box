@@ -616,6 +616,58 @@ account?: "robinhood" | "fidelity_roth" | "brokerage_link_401k" | "breakout_prop
 
 ---
 
+## Tool 15: `hub_get_crypto_quote` (added 2026-07-14, S-1 Phase 3 / F-3)
+
+**Editorial note:** this doc documents 9 tools as "v1" (2026-05-14); the server has since grown to 14 registered tools (`hub_get_quote`, `hub_get_options_chain`, `hub_get_trade_ideas`, `hub_get_market_profile`, `hub_get_chart_indicators` were added without a doc update — see `backend/hub_mcp/decorators.py`'s `REGISTERED_TOOL_NAMES` for the authoritative current list). Backfilling those 5 is out of scope here; numbering this entry 15 to avoid colliding with a future backfill.
+
+**Description (verbatim for FastMCP decorator):**
+
+> Returns the current real-time quote for a single cryptocurrency from the Pandora's Box hub: spot price, 24-hour OHLCV, 24h percent change, data source (UW primary, OKX fallback), and the source timestamp. Tracked universe: BTC, ETH, SOL, HYPE, ZEC, FARTCOIN — pass the canonical hyphenated form (`BTC-USD`) or a bare base symbol (`BTC`); both are accepted and normalized identically.
+>
+> **Use this MANDATORILY instead of `hub_get_quote` for any of the six tracked crypto symbols.** `hub_get_quote("BTC")` does NOT return Bitcoin — it returns an equity/ETF ticker collision (see `hub_get_quote`'s asset-class guard, which will now return a disambiguation error rather than silently serving the wrong asset). Call this tool whenever the user asks about crypto price, "where is BTC trading," or any equivalent for the six tracked symbols.
+>
+> Do NOT call this for symbols outside the tracked six — it will return `status="unavailable"` with an explicit "not a recognized crypto symbol" error, not a best-effort guess. Do NOT call this for historical bars (out of v1 scope). Do NOT assume HTTP-success-shaped fields mean coverage exists — `status="unavailable"` with `spot=null` is the honest signal for HYPE/FARTCOIN when the underlying vendor has no data, which is expected and correctly reported, not a bug.
+>
+> Returns a single quote envelope with `status`: `live` (fresh data), `stale` (data older than 5 minutes), or `unavailable` (no vendor had coverage, or the returned value failed sanity-bounds validation). Crypto trades 24/7 — `market_state` is always `"open"`, there is no session-closed state.
+
+**Parameters:**
+- `symbol` (string, required): `BTC-USD` (canonical) or `BTC` (bare base symbol) — either normalizes to the same result. Case-insensitive.
+
+**When to call:**
+- Any Olympus agent's crypto leg needing a current price for BTC/ETH/SOL/HYPE/ZEC/FARTCOIN
+- User asks "what's Bitcoin at," "current ETH price," or equivalent for any of the six symbols
+- Before `hub_get_quote` would otherwise be called with one of these six symbols bare
+
+**When NOT to call:**
+- For any symbol outside the tracked six (equities, other crypto not yet onboarded)
+- For historical OHLCV bars (out of v1 scope)
+- As a substitute for `hub_get_quote` on non-crypto tickers
+
+**Data field schema:**
+
+```json
+{
+  "symbol": "BTC" | "ETH" | "SOL" | "HYPE" | "ZEC" | "FARTCOIN",
+  "spot": float | null,
+  "prior_close_24h": float | null,
+  "high_24h": float | null,
+  "low_24h": float | null,
+  "volume_24h": float | null,
+  "pct_change_24h": float | null,
+  "market_state": "open",
+  "source": "UW" | "OKX" | null,
+  "uw_timestamp": string | null,
+  "status": "live" | "stale" | "unavailable"
+}
+```
+
+**Summary example:**
+
+> "BTC: $62,143.58 (+0.48% 24h) — source UW, live."
+> "FARTCOIN: quote unavailable (no vendor has coverage) — this is a real N/A, not an error."
+
+---
+
 ## Acceptance Criteria for Tool Descriptions
 
 Before CC implements, this doc must pass three checks:
