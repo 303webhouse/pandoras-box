@@ -51,6 +51,29 @@ All of the following were run directly against the real, unmodified backend modu
 | `GET /api/crypto/state/HYPE` | Capability flags correctly carried (tier 3, full matrix entry); funding/OI/basis honest null+degraded with explicit "not yet wired" note; session/tape_health/regime null+degraded |
 | `GET /api/crypto/state/NOTASYMBOL` | Clean error, no partial/garbage response |
 
+## Deploy verification (post-push, 2026-07-14)
+
+4-step check per PROJECT_RULES.md:
+1. Railway deploy status: **SUCCESS** (`1dd9ed34`, 2026-07-14 14:07:08 MDT)
+2. Deploy content matches commit: confirmed via exact file-size match on the deployed container (`crypto_quote.py` 4136 bytes both places, `services/read_only/crypto_quote.py` 7601 bytes both places), timestamped to the deploy
+3. Empirically confirmed live (direct calls against `/app/backend`, no overlay): `hub_get_crypto_quote("BTC-USD")` → $64,874.99, live; `hub_get_quote("BTC")` bare → disambiguation error; `/api/crypto/state/BTC` → real funding/OI/basis
+4. Deploy was not silent — completed within the normal ~90s window, no log errors
+
+**F-3.5 empirical price-sanity check** (brief requirement: within sane range of two independent web sources):
+
+| Source | BTC price |
+|---|---|
+| Hub (`hub_get_crypto_quote`) | $64,874.99 |
+| CoinGecko | $64,877 |
+| Kraken | $64,875.10 |
+
+All three agree within ~$2 (a few thousandths of a percent) — well within any reasonable tolerance. P0 confirmed closed.
+
+## Standing obligations flagged for the coordination lane (per Titans review carry-forward + brief Done-definition #10)
+
+- **Nick must toggle the Pandora MCP connector** after this tool ship so Claude.ai picks up the new `hub_get_crypto_quote` tool and `hub_get_quote`'s new `asset_class` parameter.
+- **One Olympus committee smoke pass (BTC-USD via the new tools + SPY as control)** is due before this is considered fully closed — coordination lane runs this per the brief's own assignment, not this session. Readiness: both tools are live, verified, and the connector re-toggle is the only blocker before that pass can run.
+
 ## Not done / explicitly deferred
 
 - `docs/specs/hub-mcp-tool-descriptions-2026-05-14.md` and `hub_mcp/README.md`'s tool table were already 5 tools stale before this pass (`hub_get_quote`, `hub_get_options_chain`, `hub_get_trade_ideas`, `hub_get_market_profile`, `hub_get_chart_indicators`) — flagged in both docs, not backfilled (out of F-3 scope).
