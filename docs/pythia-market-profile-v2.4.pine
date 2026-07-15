@@ -36,6 +36,20 @@
 // v2.1 fixes: Universal session detection
 // v2.0 fixes: Volume distribution, prior-day VA, IB, etc.
 // ============================================================
+// REPO-SIDE CORRECTION (2026-07-15): the live TradingView copy of this
+// script had drifted from this file -- the payload carried "secret" and
+// "bar_time" fields this repo copy was missing. Reconciled here.
+// The live copy also had the webhook secret HARDCODED as a literal
+// string in the payload (a real credential, since redacted from git
+// history and from this file) instead of read from an input field --
+// that is how it ended up exposed via CSV/chat. Hardened: secret now
+// comes from webhookSecret (input.string(""), filled in per-alert in
+// TradingView's UI, same pattern every other TV-family script in this
+// repo already uses) -- never hardcode the actual value in this file.
+// Secret rotation is queued (Railway env + this field + re-arm all 4
+// Pythia alerts, one coordinated pass) -- until that lands, the OLD
+// secret value is still live and still was exposed; treat as compromised.
+// ============================================================
 
 //@version=5
 indicator("Pythia Market Profile v2.4", overlay=true, max_bars_back=500, max_lines_count=50, max_boxes_count=20, max_labels_count=50)
@@ -48,6 +62,7 @@ showLabels       = input.bool(true, "Show VAH/VAL/POC labels")
 showPrevDay      = input.bool(true, "Show prior-day levels")
 showFill         = input.bool(true, "Fill value area")
 alertCooldownMin = input.int(120, "Alert cooldown (minutes)", minval=15)
+webhookSecret    = input.string("", title="Webhook Secret", group="Webhook", tooltip="Must match PYTHIA_WEBHOOK_SECRET env var. Sent as the payload 'secret' field for server-side auth. Fill this in per-alert in TradingView's alert-creation UI -- NEVER hardcode the actual value in the script body.")
 
 // === COOLDOWN (v2.4 — clamp for non-time-based charts) ===
 tfMult       = timeframe.multiplier > 0 ? timeframe.multiplier : 1
@@ -365,7 +380,9 @@ comFields = '"ticker":"' + syminfo.ticker + '",' +
      '"ib_low":' + str.tostring(nz(ibLow, 0), format.mintick) + ',' +
      '"poor_high":' + (poorHigh ? 'true' : 'false') + ',' +
      '"poor_low":' + (poorLow ? 'true' : 'false') + ',' +
-     '"volume_quality":"' + volQuality + '"'
+     '"volume_quality":"' + volQuality + '",' +
+     '"secret":"' + webhookSecret + '",' +
+     '"bar_time":"' + str.tostring(timenow) + '"'
 
 // === FIRE ALERTS ===
 if valAlert
