@@ -3592,13 +3592,26 @@ async def run_crypto_scan_scheduled():
 
                 # Cache in Redis (longer TTL for crypto since it's 24/7)
                 await cache_signal(signal_id, trade_signal, ttl=14400)  # 4 hour TTL
-                
+
                 # Broadcast
                 await manager.broadcast_signal_smart(trade_signal, priority_threshold=75.0)
-                
+
                 logger.info(f"ðŸª™ Crypto signal: {ticker} {signal_type} (score: {score})")
                 signals_found += 1
-                
+
+                # S-1 Phase 4 (F-4): shadow dual-write. Runs AFTER the real path
+                # above has already completed -- never delays or risks the real
+                # signal. Records what process_signal_unified would have decided
+                # into crypto_dual_write_shadow (migration 024), zero real side
+                # effects (Discord/WS/committee/cache all suppressed by
+                # shadow=True). No cutover without Nick's written greenlight on
+                # the diff report (scripts/crypto_dual_write_diff_report.py).
+                try:
+                    from jobs.crypto_dual_write_shadow import shadow_write_crypto_signal
+                    await shadow_write_crypto_signal(trade_signal, signal_id)
+                except Exception as shadow_err:
+                    logger.warning("Crypto dual-write shadow skipped for %s: %s", signal_id, shadow_err)
+
             except Exception as ticker_err:
                 logger.warning(f"Error scanning {ticker}: {ticker_err}")
                 continue

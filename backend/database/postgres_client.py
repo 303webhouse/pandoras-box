@@ -1151,6 +1151,44 @@ async def init_database():
                 WHERE status = 'DEAD'
         """)
 
+        # Stater Swap v2 S-1 Phase 4 (migration 024): crypto dual-write shadow
+        # evidence table. NOTHING reads this for scoring/pipeline -- inert
+        # evidence data for the F-4 cutover diff report (mirrors
+        # migrations/024_crypto_dual_write_shadow.sql -- keep in sync).
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS crypto_dual_write_shadow (
+                id                      SERIAL PRIMARY KEY,
+                shadow_signal_id        TEXT UNIQUE NOT NULL,
+                real_signal_id          TEXT NOT NULL,
+                ticker                  TEXT NOT NULL,
+                direction               TEXT,
+                signal_type             TEXT,
+                fired_at                TIMESTAMPTZ NOT NULL,
+                real_score              NUMERIC,
+                real_status             TEXT,
+                shadow_score            NUMERIC,
+                shadow_score_v2         NUMERIC,
+                shadow_status           TEXT,
+                l0_shadow_decision      JSONB,
+                l1_shadow_decision      JSONB,
+                feed_tier_v1            TEXT,
+                feed_tier_v2            TEXT,
+                feed_tier_v2_path       TEXT,
+                confluence_badge        TEXT,
+                would_flag_committee    BOOLEAN,
+                raw_shadow_signal_data  JSONB,
+                created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_crypto_dual_write_shadow_fired
+                ON crypto_dual_write_shadow (fired_at DESC)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_crypto_dual_write_shadow_ticker
+                ON crypto_dual_write_shadow (ticker, fired_at DESC)
+        """)
+
         # Brief 3A: Ariadne's Thread — outcome resolution columns on signals
         try:
             await conn.execute("""

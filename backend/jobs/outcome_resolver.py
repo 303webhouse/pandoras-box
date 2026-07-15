@@ -35,8 +35,6 @@ from typing import List, Optional, Tuple
 
 import pandas as pd
 
-from jobs.crypto_bars import normalize_crypto_ticker, fetch_crypto_bars
-
 logger = logging.getLogger(__name__)
 
 
@@ -176,6 +174,15 @@ async def _walk_bars_crypto(
     no error if the ticker can't be normalized or has no LIVE bar source —
     the signal stays shadow-only/ungraded, per F-2 task 2.1.
     """
+    # Lazy import (matches this file's existing database.postgres_client
+    # pattern below): tests import this module as `backend.jobs.outcome_resolver`,
+    # where a top-level `from jobs.crypto_bars import ...` fails (no top-level
+    # `jobs` package from that vantage point) even though it resolves fine at
+    # runtime (uvicorn runs with cwd=backend/). Keeping this import local to
+    # the one function that needs it avoids breaking test collection for
+    # every other test in this module.
+    from jobs.crypto_bars import normalize_crypto_ticker, fetch_crypto_bars
+
     base_symbol = normalize_crypto_ticker(ticker)
     if base_symbol is None:
         logger.debug("Cannot normalize crypto ticker '%s' to a tracked base symbol — shadow-only, skipping", ticker)
