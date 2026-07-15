@@ -234,7 +234,7 @@ CRYPTO_SYMBOL_MATRIX: dict[str, dict] = {
         "bar_walk_source": {
             "vendor": "binance_spot_klines",
             "status": "LIVE",
-            "verified": "2026-07-13: ZEC confirmed listed on Binance spot (data-api.binance.vision) and OKX SWAP — candle-history endpoint not independently pulled in S-1, deferred to F-2 implementation. NOTE: UW crypto OHLC does NOT work for ZEC despite /state working — /api/crypto/ZEC-USD/ohlc/1d returned an empty array (verified 2026-07-13). Do not use UW as ZEC's bar-walk source.",
+            "verified": "2026-07-13: ZEC confirmed listed on Binance spot (data-api.binance.vision) and OKX SWAP. 2026-07-13 Phase 2 pre-wiring check confirmed candle-history live at the actual 15m granularity the resolver uses (5 real candles, ZECUSDT) -- see s1-phase2-findings.md. NOTE: UW crypto OHLC does NOT work for ZEC despite /state working — /api/crypto/ZEC-USD/ohlc/1d returned an empty array (verified 2026-07-13). Do not use UW as ZEC's bar-walk source.",
         },
         "binance_fail_fallback": "okx",
     },
