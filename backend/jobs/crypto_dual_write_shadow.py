@@ -1,32 +1,36 @@
-"""Stater Swap v2 S-1 Phase 4 (F-4) — crypto L0 routing dual-write shadow.
+"""Stater Swap v2 S-1 Phase 4 (F-4) — crypto L0 routing dual-write, INVERTED.
 
-`bias_scheduler.py`'s "Crypto Scanner" (`run_crypto_scan_scheduled`) is the
-one crypto signal path Phase 0 found bypassing `process_signal_unified`
-(writes via `log_signal` directly — see
-docs/strategy-reviews/stater-swap-redesign/s1-phase0-findings.md). This
-module runs that same signal through `process_signal_unified(shadow=True)`
-on a COPY with a distinct signal_id, and records what the real governance
-chokepoint would have decided into the dedicated `crypto_dual_write_shadow`
-table (migration 024) — never the real `signals` table, never Discord/
-WebSocket/committee/cache. The real (bypass) path's behavior is completely
-unchanged; this is pure additional observation.
+Original shape (through 2026-07-14): `bias_scheduler.py`'s "Crypto Scanner"
+(`run_crypto_scan_scheduled`) wrote via `log_signal` directly (the real,
+bypass path) while this module ran the same signal through
+`process_signal_unified(shadow=True)` on a copy, purely for comparison.
 
-Hard rule (brief F-4.2): no live cutover without Nick's written greenlight
-on the diff report produced by `scripts/crypto_dual_write_diff_report.py`
-after >=48h of 24/7 operation or n>=30 shadow rows, whichever comes first.
-This module only writes evidence — it never disables or replaces the real
-`log_signal` call.
+CUTOVER (2026-07-15, Fable-directed "inverted shadow" ruling): roles
+swapped. `process_signal_unified` (no `shadow=True`) is now the PRIMARY
+writer — persistence, Discord, WebSocket, committee flagging, and
+cross-strategy conflict-dismissal all run for real, same as every other
+signal source. The original ad hoc scorer is demoted to a shadow-logger:
+`log_bypass_shadow_comparison()` records what that old scoring path would
+have produced, for comparison only, into the SAME `crypto_dual_write_shadow`
+table (migration 024, reused — no schema change). It never persists to the
+real `signals` table and never triggers Discord/WebSocket/committee.
 
-Hot-reload (brief F-4.3): the dual-write can be disabled without a redeploy
-via the Redis flag below, mirroring `uw_budget_watchdog.py`'s
-`quota_shed:triton` pattern (a proven no-redeploy-needed runtime toggle;
-`system_config` in Postgres is unused/aspirational schema, not a working
-pattern — see Phase 4 investigation notes in the findings doc).
+Retirement bar (per Fable's ruling): the diff report
+(`scripts/crypto_dual_write_diff_report.py`) keeps running until n>=30 REAL
+(unified-path) signals accumulate, at which point the bypass shadow-logger
+retires entirely — no more ad hoc scoring, no more comparison rows. See
+docs/strategy-reviews/stater-swap-redesign/s1-phase4-findings.md for the
+full cutover record and the pre-deploy fan-out/Discord behavior review.
+
+Hot-reload: the shadow-logger can be disabled without a redeploy via the
+Redis flag below, mirroring `uw_budget_watchdog.py`'s `quota_shed:triton`
+pattern (a proven no-redeploy-needed runtime toggle; `system_config` in
+Postgres is unused/aspirational schema, not a working pattern — see Phase 4
+investigation notes in the findings doc).
 """
 
 from __future__ import annotations
 
-import copy
 import logging
 from datetime import datetime, timezone
 
@@ -54,36 +58,43 @@ async def is_dual_write_enabled() -> bool:
         return True
 
 
-async def shadow_write_crypto_signal(trade_signal: dict, real_signal_id: str) -> None:
-    """Run `trade_signal` through process_signal_unified(shadow=True) on a
-    copy and record the result in crypto_dual_write_shadow. Swallows all
-    errors — a shadow-write failure must never affect the real (bypass)
-    signal path that already completed before this is called.
+async def log_bypass_shadow_comparison(
+    unified_result: dict,
+    bypass_score: float,
+    bypass_bias_alignment: str,
+    bypass_triggering_factors: dict,
+) -> None:
+    """Record the demoted bypass scorer's output for comparison against the
+    now-REAL unified-pipeline result already persisted by the caller.
+
+    `unified_result` is the dict returned by `process_signal_unified()` for
+    the REAL, already-committed signal (persistence/Discord/broadcast/
+    committee-flagging all already happened before this is called). This
+    function only INSERTs a comparison row — it never touches the real
+    `signals` table and never triggers any further side effect. Swallows
+    all errors, same as the pre-cutover version: a shadow-logger failure
+    must never affect the real signal path that already completed.
     """
     if not await is_dual_write_enabled():
         return
 
+    real_signal_id = unified_result.get("signal_id")
+    if not real_signal_id:
+        return
+
     try:
-        from signals.pipeline import process_signal_unified
         from database.postgres_client import get_postgres_client
 
-        shadow_signal = copy.deepcopy(trade_signal)
-        shadow_signal["signal_id"] = f"SHADOW_{real_signal_id}"
-        # Clear any real-path-specific state that shouldn't leak into the
-        # shadow eval's own scoring/classification pass.
-        shadow_signal.pop("score", None)
-        shadow_signal.pop("bias_alignment", None)
-        shadow_signal.pop("triggering_factors", None)
-
-        result = await process_signal_unified(
-            shadow_signal, source="crypto_scanner_shadow", shadow=True
+        shadow_signal_id = f"BYPASS_{real_signal_id}"
+        tf = unified_result.get("triggering_factors") or {}
+        real_score = unified_result.get("score_v2")
+        if real_score is None:
+            real_score = unified_result.get("score")
+        committee_score = real_score or 0
+        would_flag_committee = bool(
+            unified_result.get("status") == "COMMITTEE_REVIEW"
+            or (committee_score and committee_score >= COMMITTEE_SCORE_THRESHOLD)
         )
-
-        tf = result.get("triggering_factors") or {}
-        score = result.get("score")
-        score_v2 = result.get("score_v2")
-        committee_score = score_v2 if score_v2 is not None else (score or 0)
-        would_flag_committee = bool(committee_score and committee_score >= COMMITTEE_SCORE_THRESHOLD)
 
         pool = await get_postgres_client()
         async with pool.acquire() as conn:
@@ -98,29 +109,33 @@ async def shadow_write_crypto_signal(trade_signal: dict, real_signal_id: str) ->
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
                 ON CONFLICT (shadow_signal_id) DO NOTHING
                 """,
-                shadow_signal["signal_id"],
+                shadow_signal_id,
                 real_signal_id,
-                trade_signal.get("ticker"),
-                trade_signal.get("direction"),
-                trade_signal.get("signal_type"),
+                unified_result.get("ticker"),
+                unified_result.get("direction"),
+                unified_result.get("signal_type"),
                 datetime.now(timezone.utc),
-                trade_signal.get("score"),
-                trade_signal.get("status"),
-                score,
-                score_v2,
-                result.get("status"),
+                real_score,
+                unified_result.get("status"),
+                bypass_score,
+                None,
+                "ACTIVE",  # the bypass scorer never gated status
                 _to_jsonable(tf.get("l0_shadow")),
                 _to_jsonable(tf.get("l1_shadow")),
-                result.get("feed_tier"),
-                result.get("feed_tier_v2"),
-                result.get("feed_tier_v2_path"),
-                result.get("confluence_badge"),
+                unified_result.get("feed_tier"),
+                unified_result.get("feed_tier_v2"),
+                unified_result.get("feed_tier_v2_path"),
+                unified_result.get("confluence_badge"),
                 would_flag_committee,
-                _to_jsonable(result),
+                _to_jsonable({
+                    "bypass_score": bypass_score,
+                    "bypass_bias_alignment": bypass_bias_alignment,
+                    "bypass_triggering_factors": bypass_triggering_factors,
+                }),
             )
-        logger.debug("Crypto dual-write shadow recorded for %s", real_signal_id)
+        logger.debug("Bypass shadow comparison recorded for %s", real_signal_id)
     except Exception as exc:
-        logger.warning("Crypto dual-write shadow failed for %s (non-blocking): %s", real_signal_id, exc)
+        logger.warning("Bypass shadow-logger failed for %s (non-blocking): %s", real_signal_id, exc)
 
 
 def _to_jsonable(value):

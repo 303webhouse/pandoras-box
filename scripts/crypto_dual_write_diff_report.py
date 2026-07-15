@@ -1,17 +1,28 @@
-r"""Crypto dual-write diff report — S-1 Phase 4 (F-4.1/F-4.2).
+r"""Crypto dual-write diff report — S-1 Phase 4 (F-4.1/F-4.2), post-cutover.
 
-Read-only. Summarizes crypto_dual_write_shadow (migration 024) so Nick can
-decide whether to greenlight retiring the bias_scheduler.py "Crypto
-Scanner" log_signal bypass in favor of routing through
-process_signal_unified for real.
+Read-only. Summarizes crypto_dual_write_shadow (migration 024, reused).
 
-HARD RULE (brief F-4.2): this script does NOT gate or auto-approve
-anything. It reports. Cutover requires Nick's WRITTEN greenlight on what
-this prints — no automated pass/fail exit code drives that decision (unlike
-l0_shadow_measure.py / l1_shadow_measure.py, which do assert a safety
-invariant). The brief's own readiness bar (>=48h of 24/7 operation OR n>=30
-shadow rows, whichever comes first) is reported so Nick knows whether it's
-too early to review yet.
+CUTOVER SHIPPED (2026-07-15, Fable-directed "inverted shadow" ruling):
+process_signal_unified is now the PRIMARY writer for bias_scheduler.py's
+"Crypto Scanner" signals. The original ad hoc scorer is demoted to a
+shadow-logger (jobs/crypto_dual_write_shadow.py::log_bypass_shadow_comparison)
+for comparison only. This report's role inverted along with it: `real_*`
+columns are now the REAL, persisted unified-pipeline result; `shadow_*`
+columns are the demoted bypass scorer's output, kept for comparison only.
+
+CURRENT PURPOSE: tracks readiness for FULL RETIREMENT of the demoted bypass
+shadow-logger (no more ad hoc scoring, no more comparison rows) — NOT a
+cutover gate anymore, cutover already happened. This script still does NOT
+gate or auto-retire anything; it reports. Retirement requires Nick's
+explicit go-ahead on what this prints, same discipline as the original
+cutover decision (unlike l0_shadow_measure.py / l1_shadow_measure.py, which
+do assert a safety invariant). The brief's own bar (>=48h of 24/7 operation
+OR n>=30 REAL rows, whichever comes first) is reported so Nick knows
+whether it's too early to retire yet. Per Fable's ruling, rows from the
+one-off cutover plumbing smoke test (S1_PHASE4_DUALWRITE_SMOKE_BTC_20260715)
+do not count toward this bar in spirit — it predates the cutover and was a
+plumbing check, not real signal volume; this script counts rows as they
+exist in the table and does not special-case that row out.
 
 Never prints the DB URL. Run from C:\trading-hub:
     python scripts\crypto_dual_write_diff_report.py
@@ -70,15 +81,15 @@ async def main() -> int:
             )
             n = window["n"] or 0
             print("=" * 72)
-            print("CRYPTO DUAL-WRITE DIFF REPORT (S-1 F-4)")
+            print("CRYPTO DUAL-WRITE DIFF REPORT (S-1 F-4) — post-cutover, tracks RETIREMENT")
             print("=" * 72)
-            print(f"Shadow rows total : {n}")
-            print(f"Window            : {window['first_fired']} -> {window['last_fired']}")
+            print(f"Comparison rows total : {n}  (real=unified pipeline, shadow=demoted bypass scorer)")
+            print(f"Window                : {window['first_fired']} -> {window['last_fired']}")
 
             if n == 0:
                 print()
-                print("No shadow rows yet. Nothing to review — the crypto scanner hasn't")
-                print("fired since the dual-write deployed, or the toggle is disabled.")
+                print("No comparison rows yet. Nothing to review — the crypto scanner hasn't")
+                print("fired since the cutover deployed, or the toggle is disabled.")
                 return 0
 
             hours_elapsed = None
@@ -89,12 +100,12 @@ async def main() -> int:
                 hours_elapsed = (datetime.now(timezone.utc) - first).total_seconds() / 3600.0
 
             ready = (hours_elapsed is not None and hours_elapsed >= READINESS_HOURS) or n >= READINESS_N
-            print(f"Hours since first shadow row : {hours_elapsed:.1f}" if hours_elapsed is not None else "Hours since first shadow row : n/a")
-            print(f"Readiness bar (brief F-4.1)  : >= {READINESS_HOURS}h OR n >= {READINESS_N} — "
+            print(f"Hours since first row : {hours_elapsed:.1f}" if hours_elapsed is not None else "Hours since first row : n/a")
+            print(f"Retirement bar (brief F-4.1) : >= {READINESS_HOURS}h OR n >= {READINESS_N} — "
                   f"{'MET' if ready else 'NOT YET MET'}")
             print()
             if not ready:
-                print("Too early to review for a cutover decision per the brief's own bar.")
+                print("Too early to retire the demoted bypass shadow-logger per the brief's own bar.")
                 print("Reporting what's collected so far anyway (informational only).")
                 print()
 
@@ -154,9 +165,10 @@ async def main() -> int:
             print()
 
             print("-" * 72)
-            print("This script does not gate anything. Cutover (retiring the log_signal")
-            print("bypass) requires Nick's WRITTEN greenlight on this report — see brief")
-            print("F-4.2. No greenlight, no cutover; the dual-write may outlive the brief.")
+            print("Cutover already shipped 2026-07-15 (unified pipeline is primary). This")
+            print("script does not gate anything. Full retirement of the demoted bypass")
+            print("shadow-logger requires Nick's explicit go-ahead on this report — see")
+            print("brief F-4.2 and the 2026-07-15 cutover addendum in the findings doc.")
             print("-" * 72)
             return 0
     finally:

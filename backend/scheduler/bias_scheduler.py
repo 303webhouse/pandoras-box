@@ -3474,18 +3474,29 @@ async def run_crypto_scan_scheduled():
     """
     Run crypto scanner 24/7 and push signals to Trade Ideas.
     Scheduled: Every 30 minutes around the clock.
-    
+
     Uses Hunter Scanner logic but focused on crypto tickers.
+
+    S-1 F-4 cutover (2026-07-15, Fable-directed "inverted shadow"): the
+    unified governance pipeline (process_signal_unified) is now the PRIMARY
+    writer for these signals -- persistence, Discord alerts, WebSocket
+    broadcast, committee flagging, and cross-strategy conflict-dismissal all
+    run for real, same as every other signal source. The original direct
+    log_signal() bypass is demoted to a shadow-logger (see
+    jobs/crypto_dual_write_shadow.py::log_bypass_shadow_comparison) -- its
+    score is computed for comparison only and never persisted to the real
+    `signals` table. The diff report (scripts/crypto_dual_write_diff_report.py)
+    keeps running until n>=30 real (unified-path) signals accumulate, at
+    which point the bypass shadow-logger retires entirely per Fable's ruling.
+    See docs/strategy-reviews/stater-swap-redesign/s1-phase4-findings.md.
     """
     logger.info("ðŸª™ Running scheduled Crypto scan...")
-    
+
     try:
         from scanners.cta_scanner import analyze_ticker_cta as analyze_single_ticker, CTA_SCANNER_AVAILABLE as SCANNER_AVAILABLE
-        from websocket.broadcaster import manager
-        from database.redis_client import cache_signal
-        from database.postgres_client import log_signal, update_signal_with_score
         from scoring.trade_ideas_scorer import calculate_signal_score
-        
+        from signals.pipeline import process_signal_unified
+
         if not SCANNER_AVAILABLE:
             logger.warning("CTA Scanner not available for crypto scan")
             _scheduler_status["crypto_scanner"]["status"] = "unavailable"
@@ -3555,62 +3566,45 @@ async def run_crypto_scan_scheduled():
                 except Exception:
                     pass
 
-                # Calculate score (with sector strength)
-                score, bias_alignment, triggering_factors = calculate_signal_score(
+                # S-1 F-4 bypass shadow-logger (demoted, 2026-07-15): the ad hoc
+                # scorer this path used to persist with directly. Kept ONLY as
+                # the comparison side of the retirement-tracking diff below --
+                # no longer authoritative, no longer written to `signals`.
+                bypass_score, bypass_bias_alignment, bypass_triggering_factors = calculate_signal_score(
                     trade_signal, current_bias, sector_strength=sector_strength_data
                 )
-                
-                trade_signal["score"] = score
-                trade_signal["bias_alignment"] = bias_alignment
-                trade_signal["triggering_factors"] = triggering_factors
-                
-                # Set confidence
-                if score >= 75:
-                    trade_signal["confidence"] = "HIGH"
-                elif score >= 55:
-                    trade_signal["confidence"] = "MEDIUM"
-                else:
-                    trade_signal["confidence"] = "LOW"
-                
-                # L1a bypass-leak tag: this crypto path calls log_signal directly,
-                # skipping the chokepoint (no scoring/feed-tier/L0/L1 gate). Tag only
-                # so we can measure the bypass fraction — routing it through the
-                # chokepoint is a separate follow-up (not L1a scope).
-                if isinstance(trade_signal.get("triggering_factors"), dict):
-                    trade_signal["triggering_factors"]["bypass_source"] = "bias_scheduler_crypto"
 
-                # Persist first; skip Redis/broadcast if DB write fails.
-                db_persisted = False
-                try:
-                    await log_signal(trade_signal)
-                    await update_signal_with_score(signal_id, score, bias_alignment, triggering_factors)
-                    db_persisted = True
-                except Exception as db_err:
-                    logger.error("Skipping crypto signal %s due to DB persistence failure: %s", signal_id, db_err)
-                if not db_persisted:
-                    continue
+                # REAL PATH (post S-1 F-4 cutover): unified governance
+                # chokepoint. Persists, scores (apply_scoring), feed-tier
+                # classifies, caches, broadcasts, flags for committee, and can
+                # dismiss on cross-strategy conflict -- exactly like every
+                # other signal source (crypto_setups.py, TradingView webhook,
+                # equity CTA scanner).
+                result_data = await process_signal_unified(trade_signal, source="crypto_scanner")
 
-                # Cache in Redis (longer TTL for crypto since it's 24/7)
-                await cache_signal(signal_id, trade_signal, ttl=14400)  # 4 hour TTL
-
-                # Broadcast
-                await manager.broadcast_signal_smart(trade_signal, priority_threshold=75.0)
-
-                logger.info(f"ðŸª™ Crypto signal: {ticker} {signal_type} (score: {score})")
+                logger.info(
+                    "ðŸª™ Crypto signal via unified pipeline: %s %s (score: %s, tier: %s, status: %s)",
+                    ticker, signal_type, result_data.get("score"),
+                    result_data.get("feed_tier"), result_data.get("status"),
+                )
                 signals_found += 1
 
-                # S-1 Phase 4 (F-4): shadow dual-write. Runs AFTER the real path
-                # above has already completed -- never delays or risks the real
-                # signal. Records what process_signal_unified would have decided
-                # into crypto_dual_write_shadow (migration 024), zero real side
-                # effects (Discord/WS/committee/cache all suppressed by
-                # shadow=True). No cutover without Nick's written greenlight on
-                # the diff report (scripts/crypto_dual_write_diff_report.py).
+                # Demoted bypass shadow-logger. Runs AFTER the real path above
+                # has already completed -- never delays or risks the real
+                # signal. Records what the OLD ad hoc scorer would have
+                # produced into crypto_dual_write_shadow (migration 024,
+                # reused, roles inverted) for the retirement-tracking diff.
+                # Never persisted to `signals`, never Discord/WS/committee.
                 try:
-                    from jobs.crypto_dual_write_shadow import shadow_write_crypto_signal
-                    await shadow_write_crypto_signal(trade_signal, signal_id)
+                    from jobs.crypto_dual_write_shadow import log_bypass_shadow_comparison
+                    await log_bypass_shadow_comparison(
+                        unified_result=result_data,
+                        bypass_score=bypass_score,
+                        bypass_bias_alignment=bypass_bias_alignment,
+                        bypass_triggering_factors=bypass_triggering_factors,
+                    )
                 except Exception as shadow_err:
-                    logger.warning("Crypto dual-write shadow skipped for %s: %s", signal_id, shadow_err)
+                    logger.warning("Bypass shadow-logger skipped for %s: %s", signal_id, shadow_err)
 
             except Exception as ticker_err:
                 logger.warning(f"Error scanning {ticker}: {ticker_err}")
