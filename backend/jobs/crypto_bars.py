@@ -13,7 +13,7 @@ working, and has no data at all for HYPE/FARTCOIN.
 All three per-symbol sources (UW crypto OHLC, Binance spot klines, OKX
 candles) were live-verified at 15-minute granularity on 2026-07-13 before
 this module was wired into the resolver -- see
-docs/strategy-reviews/stater-swap-redesign/s2-phase2-findings.md.
+docs/strategy-reviews/stater-swap-redesign/s1-phase2-findings.md.
 """
 
 from __future__ import annotations

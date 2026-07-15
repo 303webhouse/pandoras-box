@@ -1154,6 +1154,7 @@ async def process_signal_unified(
     skip_scoring: bool = False,
     cache_ttl: int = 3600,
     priority_threshold: float = 75.0,
+    shadow: bool = False,
 ) -> Dict[str, Any]:
     """
     Unified signal processing pipeline. Every signal source calls this
@@ -1174,6 +1175,19 @@ async def process_signal_unified(
         skip_scoring: True for signals that handle their own scoring (Scout alerts)
         cache_ttl: Redis cache TTL in seconds (default 1 hour)
         priority_threshold: Min score for priority WebSocket broadcast
+        shadow: S-1 Phase 4 (F-4) dual-write support. When True, runs every
+            gating/scoring/classification step (L0/L1 shadow gates, apply_scoring,
+            feed-tier v1/v2, ceiling caps) exactly as normal, then returns the
+            fully-computed signal_data WITHOUT any of: persistence to the real
+            `signals`/`signal_outcomes` tables, lightning-card dedup, catalyst
+            confluence, Redis cache, WebSocket broadcast, position tagging,
+            committee flagging, or the conflict-check that can DISMISS a real
+            production signal. The caller (bias_scheduler.py's crypto dual-write)
+            is responsible for writing the returned dict into its own dedicated
+            shadow table. Also suppresses the two Discord alerts that would
+            otherwise fire before the persistence boundary (feed-tier v2
+            divergence). Default False — zero behavior change for every
+            existing caller.
 
     Returns:
         Enriched signal_data dict with score, bias, status, etc.
@@ -1270,7 +1284,8 @@ async def process_signal_unified(
         signal_data["feed_tier_diverged"] = (_legacy_tier != _tier_v2)
 
         # Discord divergence alert when v2 would promote to top_feed but legacy wouldn't
-        if signal_data["feed_tier_diverged"] and _tier_v2 == "top_feed":
+        # (suppressed in shadow mode -- a shadow eval must never post to Discord)
+        if not shadow and signal_data["feed_tier_diverged"] and _tier_v2 == "top_feed":
             await _send_feed_tier_divergence_alert(
                 signal_data, _tier_v2, _path_v2, _legacy_tier
             )
@@ -1297,19 +1312,21 @@ async def process_signal_unified(
 
     # 3c. Lightning card dedup — if an active lightning card exists for this ticker,
     #     merge the signal as a confirmation instead of creating a separate card
-    try:
-        from api.hydra import check_lightning_card_match, add_lightning_confirmation
-        lc_match = await check_lightning_card_match(signal_data.get("ticker", ""))
-        if lc_match:
-            await add_lightning_confirmation(lc_match, signal_data)
-            logger.info(
-                "Lightning dedup: %s signal merged into card %s",
-                signal_data.get("ticker"), lc_match,
-            )
-            # Still persist the signal for history, but mark it as merged
-            signal_data["lightning_merged"] = True
-    except Exception as e:
-        logger.debug("Lightning dedup check skipped: %s", e)
+    #     (skipped in shadow mode -- must never touch a real lightning card)
+    if not shadow:
+        try:
+            from api.hydra import check_lightning_card_match, add_lightning_confirmation
+            lc_match = await check_lightning_card_match(signal_data.get("ticker", ""))
+            if lc_match:
+                await add_lightning_confirmation(lc_match, signal_data)
+                logger.info(
+                    "Lightning dedup: %s signal merged into card %s",
+                    signal_data.get("ticker"), lc_match,
+                )
+                # Still persist the signal for history, but mark it as merged
+                signal_data["lightning_merged"] = True
+        except Exception as e:
+            logger.debug("Lightning dedup check skipped: %s", e)
 
     # 3d. L0.1a SHADOW tag — write the gate decision into triggering_factors so
     #     it persists with the row. Placed AFTER scoring (apply_scoring resets
@@ -1341,6 +1358,20 @@ async def process_signal_unified(
             _tf["l1_shadow"] = _l1_decision
     except Exception as _l1_tag_err:
         logger.warning("L1 shadow gate write failed (non-blocking): %s", _l1_tag_err)
+
+    # S-1 Phase 4 (F-4): shadow mode stops here. Everything above this point is
+    # pure gating/scoring/classification (safe to run identically for a shadow
+    # eval); everything below is a side effect on shared state (real signals
+    # table, Redis, Discord, WebSocket, committee flags) or can dismiss a REAL
+    # production signal (the conflict check at 4f). The caller writes the
+    # returned signal_data into its own dedicated shadow table.
+    if shadow:
+        elapsed_ms = (datetime.utcnow() - start).total_seconds() * 1000
+        logger.info(
+            f"🌓 Shadow pipeline complete: {signal_data.get('ticker')} "
+            f"({source}, score={signal_data.get('score')}) in {elapsed_ms:.1f}ms"
+        )
+        return signal_data
 
     # 4. Persist to PostgreSQL
     try:
