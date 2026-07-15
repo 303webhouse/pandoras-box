@@ -43,3 +43,29 @@ Test data cleaned up after verification (both the synthetic shadow row and confi
 
 - **No cutover.** The `bias_scheduler.py` `log_signal` bypass is untouched and still runs exactly as before — this ships evidence-gathering only.
 - Diff report readiness bar (48h/n=30) will need real crypto signal volume to accumulate before it's meaningful — reported honestly as "NOT YET MET" until then, not faked.
+
+## Addendum (2026-07-15): Crypto Scanner dormancy investigation + F-4 plumbing smoke test
+
+The diff report sat at 0 shadow rows ~17-40h post-deploy. Fable directed a read-only root-cause trace before any fix, plus a single tagged synthetic signal through both paths as a plumbing smoke test. Findings:
+
+**Root cause — market condition, not a bug.** Live-ran `analyze_ticker_cta()` (the exact function `run_crypto_scan_scheduled()` calls per ticker) against production:
+- 12/15 tracked tickers (BTC, ETH, SOL, XRP, ADA, AVAX, DOGE, DOT, LINK, LTC, ATOM) sit in `CAPITULATION` zone (`sma20 < sma120` — structural downtrend); NEAR-USD in `WATERFALL` (`price < sma50`). All bearish.
+- The scanner's signal set (Golden Touch, Pullback Entry, Volume Breakout, Two-Close-Volume, Zone Upgrade) is long-only trend-continuation logic, and this path calls `analyze_ticker_cta()`/`analyze_ticker_cta_from_df()` with `allow_shorts` defaulted `False` — structurally cannot emit SHORT regardless of regime.
+- Bearish structure + long-only criteria = zero qualifying setups everywhere, every cycle. Correct output, not a failure.
+
+**Ruled out:**
+- **Scheduler health** — `_scanner_loop()` (started via `asyncio.create_task` at boot) has fired every 30 min without interruption; `mcp_ping` uptime traced continuously back to the Phase 4 deploy; the outer `try/except` around `run_crypto_scan_scheduled()` has never tripped.
+- **L0.1a enforcement (`02111cd`, 2026-07-03 07:42 MT)** — its own commit message states Crypto Scanner "bypasses the chokepoint (untagged) -> NOT suppressed by this flip." Confirmed in code: `cta_scanner.py` has zero references to `l0_routing`/`L0_ENFORCE`/`l0_shadow`. Enforcement only filters `/api/trade-ideas` + `hub_get_trade_ideas` read surfaces — never signal generation or this path's direct `log_signal()` write. Timing vs. the last real signal (2026-07-03) is coincidental.
+- **Binance** — this scanner path has zero Binance dependency. `analyze_ticker_cta()` fetches via `yf.Ticker(ticker).history(...)` directly; confirmed live, yfinance returning fresh data (BTC $64,968.98, 366 rows, current through today). Binance is used elsewhere (bar-walk resolver, funding/OI clients) but not here.
+- **Git history 7/2-7/4** — no commits in that window touch `cta_scanner.py`, the crypto ticker universe, or any Binance client.
+
+**Secondary bug found along the way:** 3/15 `CRYPTO_TICKERS` — `MATIC-USD`, `UNI-USD`, `APT-USD` — return `"possibly delisted; no price data found"` from yfinance every cycle, silently skipped (`error: Insufficient data`), no escalation. 20% of the universe has been dead weight indefinitely. Logged as a backlog quick-fix item (`docs/build-backlog.md` Tier 2 #5), not fixed here (needs a deploy; root cause reported first per instruction).
+
+**F-4 plumbing smoke test.** Fired one clearly-tagged synthetic signal through both paths, live on Railway, following F-2's test-row convention (distinctive `strategy`/`signal_type`, left in place as documented evidence rather than deleted):
+- `signal_id`: `S1_PHASE4_DUALWRITE_SMOKE_BTC_20260715`, `strategy: 'S1_Phase4_DualWriteSmoke'`, `signal_type: 'SMOKE_TEST'`, ticker `BTC-USD` — will not be picked up by any real-strategy-name dashboard filter.
+- Real path: `log_signal()` + `update_signal_with_score()` (the exact two calls the real bypass makes) — row landed correctly.
+- Shadow path: `shadow_write_crypto_signal(trade_signal, signal_id)` (the exact F-4 call site) — landed in `crypto_dual_write_shadow` with `real_signal_id` pointing at the row above, `shadow_signal_id = 'SHADOW_S1_PHASE4_DUALWRITE_SMOKE_BTC_20260715'`.
+- `scripts/crypto_dual_write_diff_report.py` re-run: picked up the row cleanly (n=1, real_score=42 vs shadow_score=8, would_suppress=false, feed_tier_v1=watchlist).
+- **This row does not count toward the readiness clock.** Per Fable's ruling, the 48h/n>=30 bar restarts from whenever the Crypto Scanner resumes producing real signals — this test proves the mechanism works, it does not seed real evidence. No bar-lowering.
+
+No code changed, no deploy made. Backlog updated (`docs/build-backlog.md`) with the watchdog item + delisted-ticker note before its held commit pushes.
