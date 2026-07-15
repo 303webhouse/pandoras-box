@@ -104,8 +104,14 @@ def test_path_a_footprint_long():
 
 
 def test_path_a_session_sweep():
-    s = _sig(signal_type="Session_Sweep", strategy="SessionSweep", score=76)
-    tier, path, badge = classify_signal_tier_v2(s, 76)
+    # S-1 Phase 5 fix (2026-07-14): score was hardcoded to 76, calibrated
+    # against the pre-2026-04-25 TOP_FEED_FLOOR of 75. Olympus retuned the
+    # floor to 82 that same day (retrospective PR #20, see module docstring)
+    # and this literal was never updated -- the classifier was correct, the
+    # test was stale. Using the symbolic constant (like test_path_a_qualifies
+    # already does) so this can't go stale again on a future retune.
+    s = _sig(signal_type="Session_Sweep", strategy="SessionSweep", score=TOP_FEED_FLOOR)
+    tier, path, badge = classify_signal_tier_v2(s, TOP_FEED_FLOOR)
     assert tier == "top_feed" and path == "A"
 
 

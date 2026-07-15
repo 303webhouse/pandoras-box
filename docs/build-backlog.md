@@ -2,7 +2,7 @@
 
 Authoritative queue of in-flight, near-term, and deferred build work for Pandora's Box. Maintained as ATHENA's canonical reference for priority arbitration during Titans review passes.
 
-**Last updated:** 2026-06-17 (v3 — rebuild stack L0/L1/L2 seated as active top-of-queue; sb3 + sec-work tracks noted as in-flight)
+**Last updated:** 2026-07-14 (v4 — ZEUS Phase II / Stater Swap v2 (S-1) promoted to top-of-queue; rebuild-stack L1/L2 + Outcome Tracking Phase C + committee review logging + Phase B `get_bars` displaced; S-1 defect items absorbed; post-R-2 checkpoint + HELIOS mockup parallel-track recorded; Olympus crypto specialist Tier-3 item added)
 **Maintained by:** ATHENA (Olympus Titans synthesis lane). Nick or CC may update directly when items are added, promoted, demoted, or closed.
 
 ---
@@ -13,8 +13,8 @@ ZEUS is the meta-project name for the multi-phase overhaul currently in progress
 
 | Phase | Scope | Status |
 |---|---|---|
-| **I** | Full Unusual Whales API integration into Pandora's Box (the work currently underway: Phase A heatmap popup, Phase B `get_bars` migration, Phase C Olympus enrichment + Phase A.5 ticker sub-card + OAuth on hub MCP) | IN_FLIGHT |
-| **II** | Stater Swap (crypto account) complete strategy revision around UW + TV MCPs | QUEUED |
+| **I** | Full Unusual Whales API integration into Pandora's Box (Phase A heatmap popup shipped; Phase B `get_bars` migration and the rest of Phase C now displaced behind Phase II — see below) | IN_FLIGHT (displaced) |
+| **II** | Stater Swap (crypto account) complete strategy revision around UW + TV MCPs. **PROMOTED TO TOP-OF-QUEUE 2026-07-14** — Brief S-1 (foundation) in progress: F-1/F-2/F-3 shipped + deployed, F-4 (dual-write, no cutover) shipped, F-5 (this update) in progress | **IN_FLIGHT — TOP OF QUEUE** |
 | **III** | Analytics functionality and dashboard overhaul (includes Trading hub UI v3, Abacus widget overhaul, related analytics surfaces) | QUEUED |
 | **IV** | Great Library update / revision | QUEUED — scope TBD, recovery via codebase grep + Nick recall pending |
 
@@ -41,17 +41,29 @@ Items deeper in Tier 2 / Tier 3 that previously anchored on "post-ZEUS" now anch
 
 ## Top of queue (active scope)
 
-**THE REBUILD STACK (L0 → L1 → L2) — the "urgent overhaul" placeholder is now filled.**
-Forced by the signal-edge-validation finding (2026-06-16): the hub's score / feed-tier system has no demonstrable edge; edge lives in the liquid universe + regime-conditional shorting. Master brief: `docs/codex-briefs/2026-06-16-rebuild-stack-master-brief.md`.
+**ZEUS PHASE II — STATER SWAP v2 (crypto foundation rebuild), promoted 2026-07-14.**
+Forced by the committee brief's P0 finding (2026-07-12): `hub_get_quote("BTC")` silently resolved to a $28 NYSE ETF instead of Bitcoin, plus the crypto signal write-path bypassing L0/L1 governance entirely. Committee brief: `docs/strategy-reviews/stater-swap-redesign/2026-07-12-stater-swap-v2-committee-brief.md`. Build brief: `docs/codex-briefs/2026-07-13-stater-swap-s1-foundation-brief.md` (Brief S-1, R-0 foundation).
 
-- **L0 — Foundation (subtraction + routing).** Brief `docs/codex-briefs/2026-06-17-L0-foundation-build-brief.md` — Titans-reviewed 2026-06-17, **unanimous APPROVE FOR CC** (`3671c85`). ACTIVE. Session 1 = L0.2 liquid allowlist + L0.1a suppression (shadow). L0.1b regime routing GATED on the sb3 ADX-regime promote (`signals.regime` verified 100% NULL on 12,837 rows).
-- **L1 — Signal Quality.** Flow + PYTHIA auction acceptance into signal GATING; canonical factor strategies (`docs/the-stable/`). Absorbs: Flow Radar key bug (Amendment 2), Artemis routing, the `feed_tier_classifier_v2._flow_aligned` third-flow-path check. QUEUED behind L0.
-- **L2 — Options Expression (Triton + Nemesis).** Only on L0+L1-validated signals + a forward-edge test. QUEUED.
-- **Sidecar (parallel track):** regime-gated `sell_the_rip` (Achilles) + kill-switch, shadow-first. Does NOT wait on the stack.
+- **F-1 — Vendor verification + Symbol Capability Matrix.** SHIPPED + deployed (`1aae39e`, `222f452`). Six-symbol matrix (BTC/ETH/SOL/HYPE/ZEC/FARTCOIN), sanity bounds, LIVE/DEGRADED/DEAD health tracking, TV ticker classifier fix.
+- **F-2 — Outcome-tracking parity.** SHIPPED + deployed (`3b91328`). Asset-class-aware `outcome_resolver.py`, per-symbol bar sources, 24/7 crypto resolver loop.
+- **F-3 — Crypto data path on the hub.** SHIPPED + deployed (`90f9d10`). `hub_get_crypto_quote`, asset-class guard on `hub_get_quote` (P0 CLOSED), `/api/crypto/state/{symbol}` envelope. Countersigned by independent price-anchor check 2026-07-14.
+- **F-4 — L0 routing dual-write.** SHIPPED (shadow-only — no cutover). `process_signal_unified` gained a `shadow` param; `bias_scheduler.py`'s Crypto Scanner bypass now dual-writes to `crypto_dual_write_shadow` alongside its unchanged real path. **Cutover explicitly gated on Nick's written greenlight on `scripts/crypto_dual_write_diff_report.py`'s output** (>=48h or n>=30 shadow rows) — no automatic promotion.
+- **F-5 — Hygiene + bookkeeping.** IN PROGRESS (this update): Drogen framework note recovered, `session_sweep` known-red test fixed (root cause: stale hardcoded score predating an Olympus floor retune, not a classifier bug), this backlog v4 pass.
+- **R-1 through R-5** (regime/session, keep-list upgrades, strategy portfolio, new surfaces, UI port) — **QUEUED behind S-1's Done Definition**, per the brief's own "R-4/R-5 forbidden before R-0 ships" rule. **Post-R-2 checkpoint recorded as a sequencing gate below.**
 
-**Parallel tracks in flight (NOT part of L0 — coordinate worktrees, never `git add .`):**
-- **sb3 (scoring correctness)** — three fixes (dead ADX regime gate, double-counted/false-bearish flow, iv_rank dispersion proxy) shadow-staged on `sb3-work` (C:/th-scoring); promote pending UW-recovery confirm (06-18 RTH, deploy after close). Handoff: `docs/sb3-handoff-for-strategy-overhaul.md`. **L0.1b depends on this promote.**
-- **sec-work (Fable security)** — plaintext Postgres pw rotation + move to env, pre-June-22. Branch `sec-work` (C:/th-security).
+**Displaced by this promotion (still real, real work — just no longer top-of-queue):**
+- **Rebuild stack L1 (Signal Quality) and L2 (Options Expression)** — L0 foundation work already shipped stays shipped; L1/L2 move behind ZEUS Phase II. Master brief `docs/codex-briefs/2026-06-16-rebuild-stack-master-brief.md` unchanged, just resequenced.
+- **Outcome Tracking Phase C** — partially self-paying via F-2's resolver-core work, but the full daily-walker re-walk project stays queued behind S-1.
+- **Committee review logging** — queued behind S-1.
+- **Phase B — `get_bars` migration off yfinance** — queued behind S-1 (closes ZEUS Phase I when it eventually ships).
+
+**Sequencing gate — Post-R-2 checkpoint (Titans review carry-forward, 2026-07-13):** before R-3/R-4 begin, ATHENA reassesses rebuild-stack L1 against Stater Swap's R-3/R-4 scope to decide relative priority. Standing obligation — do not skip.
+
+**Parallel track approved (not gated on R-0/R-1 build sequencing):** HELIOS concept-mockup production for the eventual R-5 UI port runs DURING R-0/R-1 build work. Design work ≠ build work — the "R-5 forbidden before R-0 ships" rule binds code, not HELIOS's mockup drafting. Mockup gate (>=3 approved concepts, multi-symbol switcher, per-symbol N/A states, tier badges, >=1 Tier-3 view) still applies before any R-5 build.
+
+**Parallel tracks in flight (NOT part of the rebuild stack — coordinate worktrees, never `git add .`):**
+- **sb3 (scoring correctness)** — three fixes (dead ADX regime gate, double-counted/false-bearish flow, iv_rank dispersion proxy) shadow-staged on `sb3-work` (C:/th-scoring); promote pending UW-recovery confirm. Handoff: `docs/sb3-handoff-for-strategy-overhaul.md`. **Rebuild-stack L0.1b depends on this promote** (unaffected by the Phase II promotion — L0 itself already shipped).
+- **sec-work (Fable security)** — plaintext Postgres pw rotation + move to env. Branch `sec-work` (C:/th-security).
 
 ---
 
@@ -88,7 +100,7 @@ Forced by the signal-edge-validation finding (2026-06-16): the hub's score / fee
 - **3-10 oscillator promotion re-audit.** Gated on Outcome Tracking Phase C ship + n≥250 post-Outcome-Tracking-Phase-B `both`-gate signals with leave-one-out robustness. Current verdict: NOT YET per `docs/strategy-reviews/raschke/3-10-promotion-reaudit-2026-05-08.md`.
 - **URSA stop-tightness recalibration.** Bounded MFE/MAE semantic shift post-Outcome-Tracking-Phase-B. Sequencing: after Outcome Tracking Phase C ships.
 - **`score_signals` pre-walk age cap remediation.** Specific scope TBD on first ATHENA review.
-- **BTCUSDT crypto ticker support.** Probably small scope; possible quick-win bucket on closer look.
+- ~~**BTCUSDT crypto ticker support.**~~ — **ABSORBED into ZEUS Phase II / Stater Swap S-1, CLOSED 2026-07-14.** Turned out to be far more than "quick-win bucket": Symbol Capability Matrix (F-1), asset-class-aware outcome resolver with per-symbol bar sources (F-2), `hub_get_crypto_quote` + asset-class guard (F-3), and the underlying ticker-normalization layer (`crypto_bars.normalize_crypto_ticker`) all trace back to this line item. See `docs/strategy-reviews/stater-swap-redesign/` for the full S-1 findings trail.
 
 ### Olympus / committee infrastructure
 
@@ -97,6 +109,7 @@ Forced by the signal-edge-validation finding (2026-06-16): the hub's score / fee
 ### Framework / housekeeping
 
 - **Titans reference docs authoring** (~20 references across the four Titans). Currently all `SKILL.md` files reference docs that do not exist; the "authoring status note" convention tells future agents to work from `PROJECT_RULES.md` + codebase in the interim. Recommended sequence: ATLAS first (backend-architecture, database-schema, phase-gate-playbook, uw-integration-playbook, mcp-server-patterns), then ATHENA (bucket-framework-builds, priority-decision-framework, olympus-impact-checklist, arbitration-precedent-log), then AEGIS + HELIOS in parallel.
+- **Hub MCP tool-descriptions spec is stale (5 tools missing).** `docs/specs/hub-mcp-tool-descriptions-2026-05-14.md` and `backend/hub_mcp/README.md`'s tool table both document only 9 of the 14 tools actually registered in `backend/hub_mcp/decorators.py`'s `REGISTERED_TOOL_NAMES` — `hub_get_quote`, `hub_get_options_chain`, `hub_get_trade_ideas`, `hub_get_market_profile`, and `hub_get_chart_indicators` were added without a doc update. Surfaced during Stater Swap S-1 Phase 3 (2026-07-14) when adding `hub_get_crypto_quote` (tool #15) — flagged inline in both docs at the time rather than backfilled, since backfilling 5 tools' worth of description-authoring is its own scoped task, not an S-1 side effect. Quick-win bucket: mostly transcription from each tool's existing docstring/`DESCRIPTION` constant into the doc's established per-tool section format.
 
 ### Radar feature (UI)
 
@@ -108,7 +121,7 @@ Forced by the signal-edge-validation finding (2026-06-16): the hub's score / fee
 
 ### ZEUS Phase II — Stater Swap
 
-- **Stater Swap (crypto account) complete strategy re-evaluation.** Full strategy redesign around UW + TV MCPs and new data feeds for both scalping and swing trading. Current crypto strategies pre-date MCP availability. Per memory recent updates + Nick recall 2026-05-22.
+**MOVED to Top of queue (active scope), 2026-07-14 — see above.** This Tier 3 entry predates the 2026-07-12 committee brief; kept here only as a pointer so old links don't 404. Do not re-derive scope from this line — the committee brief + Brief S-1 are now canonical.
 
 ### ZEUS Phase III — Analytics + dashboard overhaul
 
@@ -124,6 +137,7 @@ Forced by the signal-edge-validation finding (2026-06-16): the hub's score / fee
 - **HG Tier 1, 80-20, Anti HG, News Reversal strategies.** Queued after 3-10 oscillator cleared. Not strictly tied to a ZEUS phase.
 - **THALES module deployment.** Currently THALES exists only as committee persona invoked manually. Module would deploy cross-sectional sector RS, narrow-leadership detection, sector divergence alerts on schedule with pushed notifications. Closest existing infra: `/api/watchlist/sector-strength`. Could fit into Phase III dashboard work or be its own thing.
 - **X API Bookmark Intel Stream.** ~$3/mo. Titans one-pager required before any build commitment. Per memory #27. Post-ZEUS or Phase IV-adjacent.
+- **Olympus crypto specialist — permanent committee seat (MIDAS-class skill).** Added 2026-07-14 per Brief S-1 F-5.3 / Titans review carry-forward. Guest-seat precedent: the 2026-07-12 Stater Swap v2 committee pass used MIDAS (crypto derivatives & flows) and OCEANUS (FX/commodities) as one-off guest seats — both remain one-off per the 2026-07-13 Titans review decision. This item is the standing ask to make a MIDAS-class seat permanent. **Requires a Titans one-pager before any build** — no skill authoring, no committee-roster change, until that one-pager exists and is reviewed.
 
 ---
 
@@ -199,3 +213,4 @@ Recording priority calls made during ATHENA workflow passes that may set future 
 | 2026-05-27 | Top of queue restored to empty | Top of queue placeholder restored. Awaiting new major build entry (per Nick 2026-05-27 — urgent overhaul scope TBD) OR Phase C bundle brief authoring. |
 | 2026-06-17 | v3 — rebuild stack seated | Top of queue filled with the L0/L1/L2 rebuild stack (the 2026-05-27 "urgent overhaul" placeholder). Forced by the signal-edge-validation finding 2026-06-16. L0 brief Titans-reviewed → unanimous APPROVE FOR CC (`3671c85`). sb3 (scoring) + sec-work (Fable security) noted as in-flight parallel tracks. Tier-1 ZEUS Phase I items (Phase C bundle, Phase B) now sit BELOW the rebuild stack — displaced per ATHENA: fixing a foundation with no demonstrated edge outranks adding enrichment tools on top of it. |
 | 2026-06-29 | Backlog reconciliation | Marked OAuth state persistence **SHIPPED** (`3d6dd94`, 2026-05-27, Brief D rev2 Layer 2) — entry had gone stale as a "rev3 investigation-first" track, flagged in `dual-review-hub-scope-2026-05-27.md` but never updated (the 6/17 v3 pass demoted the Phase C bundle without auditing its bullets). Added closure-table row + this entry. **STILL PENDING:** the same Phase C bundle entry's "three v2 hub MCP tools" (`hub_get_options_chain`, `hub_get_chart_indicators` `e6a94ed`, `hub_get_market_profile`) have also shipped, and the 5/27 dual-review dissolved the bundle (enrichment wrappers dropped, A.5 split to HELIOS) — full Phase C bundle reconciliation not yet done. |
+| 2026-07-14 | v4 — ZEUS Phase II promoted | Committee brief (2026-07-12) + Titans review (2026-07-13) approved Brief S-1 (Stater Swap v2 foundation) as top-of-queue, forced by a live P0 (wrong-asset crypto quote) and the crypto L0-governance-bypass finding. Rebuild-stack L1/L2, Outcome Tracking Phase C, committee review logging, and Phase B `get_bars` all displaced (not dropped — resequenced behind S-1). S-1's own F-1 through F-4 shipped and deployed same week (`1aae39e`→`90f9d10`); F-5 (this update) closes the "BTCUSDT crypto ticker support" Tier-2 item (absorbed, far larger than originally scoped), records the post-R-2 checkpoint as a standing sequencing gate, records the HELIOS mockup parallel-track approval, and adds the Olympus-crypto-specialist Tier-3 item (Titans one-pager required before any build). Also flagged: hub MCP tool-descriptions spec is 5 tools stale (Framework/housekeeping). |
