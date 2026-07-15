@@ -12,35 +12,9 @@ import json
 import logging
 from dotenv import load_dotenv
 
+from utils.json_sanitize import sanitize_for_json as _sanitize_for_json
+
 logger = logging.getLogger(__name__)
-
-
-def _sanitize_for_json(obj: Any) -> Any:
-    """Convert nested payloads into JSON-serializable values."""
-    if isinstance(obj, dict):
-        return {k: _sanitize_for_json(v) for k, v in obj.items()}
-    if isinstance(obj, (list, tuple)):
-        return [_sanitize_for_json(item) for item in obj]
-    if isinstance(obj, datetime):
-        return obj.isoformat()
-    if isinstance(obj, Decimal):
-        return float(obj)
-
-    # Handle numpy-like scalars without importing numpy directly.
-    type_name = f"{type(obj).__module__}.{type(obj).__name__}".lower()
-    if "numpy" in type_name:
-        if "bool" in type_name:
-            return bool(obj)
-        if "int" in type_name:
-            return int(obj)
-        if "float" in type_name:
-            return float(obj)
-        if hasattr(obj, "tolist"):
-            try:
-                return obj.tolist()
-            except Exception:
-                return str(obj)
-    return obj
 
 
 def serialize_db_row(row_dict: Dict) -> Dict:

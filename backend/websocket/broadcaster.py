@@ -8,29 +8,9 @@ from typing import List, Dict, Any
 import json
 import logging
 
+from utils.json_sanitize import sanitize_for_json
+
 logger = logging.getLogger(__name__)
-
-
-def sanitize_for_json(obj):
-    """Convert numpy types to native Python types for JSON serialization"""
-    if isinstance(obj, dict):
-        return {k: sanitize_for_json(v) for k, v in obj.items()}
-    elif isinstance(obj, list):
-        return [sanitize_for_json(item) for item in obj]
-    else:
-        # Check for numpy types by checking module and class name
-        # This avoids import issues while still handling numpy types
-        type_name = type(obj).__module__ + '.' + type(obj).__name__
-        if 'numpy' in type_name:
-            if 'bool' in type_name.lower():
-                return bool(obj)
-            elif 'int' in type_name.lower():
-                return int(obj)
-            elif 'float' in type_name.lower():
-                return float(obj)
-            elif hasattr(obj, 'tolist'):
-                return obj.tolist()
-    return obj
 
 class ConnectionManager:
     """Manages WebSocket connections and broadcasts signals to all devices"""
