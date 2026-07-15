@@ -2,7 +2,7 @@
 
 Authoritative queue of in-flight, near-term, and deferred build work for Pandora's Box. Maintained as ATHENA's canonical reference for priority arbitration during Titans review passes.
 
-**Last updated:** 2026-07-15 (v4 — ZEUS Phase II / Stater Swap v2 (S-1) promoted to top-of-queue; rebuild-stack L1/L2 + Outcome Tracking Phase C + committee review logging + Phase B `get_bars` displaced; S-1 defect items absorbed; post-R-2 checkpoint + HELIOS mockup parallel-track recorded; Olympus crypto specialist Tier-3 item added; Crypto Scanner dormancy root-caused + flatline watchdog item added; F-4 cut over to unified pipeline as primary writer)
+**Last updated:** 2026-07-15 (v4 — ZEUS Phase II / Stater Swap v2 (S-1) promoted to top-of-queue; rebuild-stack L1/L2 + Outcome Tracking Phase C + committee review logging + Phase B `get_bars` displaced; S-1 defect items absorbed; post-R-2 checkpoint + HELIOS mockup parallel-track recorded; Olympus crypto specialist Tier-3 item added; Crypto Scanner dormancy root-caused + flatline watchdog item added; F-4 cut over to unified pipeline as primary writer; S-1 CLOSED — closure note authored; canonical ticker normalization item added, closes Tier 2 #6)
 **Maintained by:** ATHENA (Olympus Titans synthesis lane). Nick or CC may update directly when items are added, promoted, demoted, or closed.
 
 ---
@@ -14,7 +14,7 @@ ZEUS is the meta-project name for the multi-phase overhaul currently in progress
 | Phase | Scope | Status |
 |---|---|---|
 | **I** | Full Unusual Whales API integration into Pandora's Box (Phase A heatmap popup shipped; Phase B `get_bars` migration and the rest of Phase C now displaced behind Phase II — see below) | IN_FLIGHT (displaced) |
-| **II** | Stater Swap (crypto account) complete strategy revision around UW + TV MCPs. **PROMOTED TO TOP-OF-QUEUE 2026-07-14** — Brief S-1 (foundation) in progress: F-1/F-2/F-3 shipped + deployed, F-4 (dual-write, no cutover) shipped, F-5 (this update) in progress | **IN_FLIGHT — TOP OF QUEUE** |
+| **II** | Stater Swap (crypto account) complete strategy revision around UW + TV MCPs. **PROMOTED TO TOP-OF-QUEUE 2026-07-14.** **Brief S-1 (foundation) CLOSED 2026-07-15** — all 10 Done Definition items met, F-4 exceeded into a full cutover. Closure note: `docs/strategy-reviews/stater-swap-redesign/s1-closure-note.md`. R-1+ work may now begin per the brief's own gate. | **R-0 CLOSED — R-1 next** |
 | **III** | Analytics functionality and dashboard overhaul (includes Trading hub UI v3, Abacus widget overhaul, related analytics surfaces) | QUEUED |
 | **IV** | Great Library update / revision | QUEUED — scope TBD, recovery via codebase grep + Nick recall pending |
 
@@ -133,9 +133,17 @@ Forced by the committee brief's P0 finding (2026-07-12): `hub_get_quote("BTC")` 
 **Gates:** None blocking S-1. Independent hygiene/reliability item — small build once scoped.
 
 ### 6. `tradingview.py::is_crypto_ticker()` misses hyphenated tickers
+**Status: CLOSED — superseded by #7 below (2026-07-15).** Rather than patch this one classifier in isolation, Fable ruled a canonical normalization fix at pipeline ingress, which makes this specific symptom moot.
 **Bucket:** Quick-fix / data-integrity. **Added 2026-07-15**, surfaced incidentally during the F-4 cutover's pre-deploy Discord/fan-out research pass.
 **Why:** `CRYPTO_TICKERS` (`backend/webhooks/tradingview.py:56-69`) contains `'BTCUSD'` (no hyphen) and `is_crypto_ticker()` only strips `.P`/`PERP`/`-PERP` suffixes — a TradingView alert sending a hyphenated ticker like `"BTC-USD"` is not recognized, so `asset_class` gets silently miscomputed as `"EQUITY"` instead of `"CRYPTO"` for that signal. Live DB query confirmed 79 existing signals already mistagged this way (none have crossed the committee threshold, so no known downstream harm yet). Does not affect the Crypto Scanner path (`bias_scheduler.py` sets `asset_class` explicitly, bypassing this classifier).
 **Gates:** None blocking. Small, isolated fix (extend suffix/format handling) once scoped — not done here to keep the F-4 cutover change surface minimal.
+
+### 7. Canonical ticker normalization at pipeline ingress
+**Bucket:** Tactical / data-integrity + reliability. **Added 2026-07-15**, per Fable's ruling during the S-1 closure pass. **Slot: R-2.**
+**Why:** Three crypto signal sources each persist a different `ticker` string for the same coin — `crypto_setups.py` writes `"BTCUSDT"` (Binance-native), the Crypto Scanner writes `"BTC-USD"` (Yahoo-style), and the TradingView webhook path writes whatever raw string TradingView sends. This has two concrete, already-observed consequences: (1) closes #6 above — `tradingview.py::is_crypto_ticker()`'s hyphenated-ticker miss becomes moot once ingress is normalized upstream of that classifier, instead of patching the classifier's suffix list in isolation; (2) `_check_and_clear_conflicting_signals()` (`backend/signals/pipeline.py`) matches on exact `UPPER(ticker)` string equality, so it currently **cannot** catch a real cross-strategy conflict on the same coin — confirmed during the F-4 cutover's pre-deploy research pass (`docs/strategy-reviews/stater-swap-redesign/s1-phase4-findings.md`).
+**Proposal:** Reuse `backend/jobs/crypto_bars.py::normalize_crypto_ticker()` — already built and proven correct in F-2 (Phase 2) — at the point every crypto signal source writes its `ticker` field, so all three persist the same canonical form for the same coin.
+**Enables:** Real crypto cross-strategy conflict-dismissal (the normalization is the prerequisite; `_check_and_clear_conflicting_signals()` itself needs no change once tickers are consistent).
+**Gates:** None blocking S-1 (closure note recorded, not required for Done Definition). Sequenced at R-2 per Fable's ruling — do not start before R-1/R-2 gates clear per the brief's own sequencing rule.
 
 ### Framework / housekeeping
 
