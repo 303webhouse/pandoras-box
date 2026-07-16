@@ -145,6 +145,12 @@ Forced by the committee brief's P0 finding (2026-07-12): `hub_get_quote("BTC")` 
 **Enables:** Real crypto cross-strategy conflict-dismissal (the normalization is the prerequisite; `_check_and_clear_conflicting_signals()` itself needs no change once tickers are consistent).
 **Gates:** None blocking S-1 (closure note recorded, not required for Done Definition). Sequenced at R-2 per Fable's ruling — do not start before R-1/R-2 gates clear per the brief's own sequencing rule.
 
+### 8. Untracked codex-briefs provenance sweep
+**Bucket:** Housekeeping / provenance. **Added 2026-07-16**, surfaced during a Task-1.0 git-drift diagnostic for Brief S-2 (the diagnostic itself found no drift — see s2-phase0-findings.md addendum — but turned up these as a side effect).
+**Why:** 8 files under `docs/codex-briefs/` exist locally, untracked, never committed to `origin/main`: `2026-06-18-L1.0-chunk4-poller-reenable-handoff.md`, `2026-06-18-L1.0-flow-plumbing-repair.md`, `2026-06-18-L1b-canonical-factor-strategies.md`, `2026-06-23-stage2-options-backtest-build-brief.md`, `2026-06-29-bars-py-regular-session-filter.md`, `2026-06-29-pythia-mp-feed-reliability-titans-brief.md`, `2026-07-03-dashboard-rebuild-v2.md`, `hub-get-chart-indicators-v1-2026-06-25.md`. Same failure mode as the two S-2 Task 0.0 docs (brief authored/executed, never landed in the tree) and the Drogen note before that — a recurring pattern worth a deliberate sweep rather than one-off recoveries each time a brief happens to reference one.
+**Proposal:** A dedicated pass: for each file, confirm it's genuinely superseded/already-shipped (not live-executing) before deciding commit-as-historical-record vs. discard. Not done here — explicitly parked per Fable's instruction, not committed in this pass.
+**Gates:** None blocking. Low urgency, pure provenance hygiene.
+
 ### Framework / housekeeping
 
 - **Titans reference docs authoring** (~20 references across the four Titans). Currently all `SKILL.md` files reference docs that do not exist; the "authoring status note" convention tells future agents to work from `PROJECT_RULES.md` + codebase in the interim. Recommended sequence: ATLAS first (backend-architecture, database-schema, phase-gate-playbook, uw-integration-playbook, mcp-server-patterns), then ATHENA (bucket-framework-builds, priority-decision-framework, olympus-impact-checklist, arbitration-precedent-log), then AEGIS + HELIOS in parallel.
