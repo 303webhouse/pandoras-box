@@ -31,6 +31,13 @@ REGISTERED_TOOL_NAMES = frozenset(
         "hub_get_chart_indicators",
         "mcp_ping",
         "mcp_describe_tools",
+        # Brief 3 (2026-07-15) -- Stable Engine board on MCP
+        "hub_get_stable_regime",
+        "hub_get_stable_themes",
+        "hub_get_stable_theme_members",
+        "hub_get_stable_movers",
+        "hub_get_stable_rates_fx",
+        "hub_get_board_state",
     }
 )
 
