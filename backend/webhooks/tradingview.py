@@ -26,6 +26,7 @@ from utils.webhook_auth import (
     enforce_payload_size_cap,
 )
 from utils.pivot_auth import require_api_key
+from jobs.crypto_bars import normalize_crypto_ticker as _normalize_crypto_ticker
 
 logger = logging.getLogger(__name__)
 
@@ -258,6 +259,15 @@ async def receive_tradingview_alert(request: Request):
         observe=_tv_observe(),
         label="tradingview",
     )
+
+    # S-3 Phase 1 (FA-3, AEGIS): normalize crypto ticker at ingress, strictly
+    # after HMAC verification. The HMAC signature path above is byte-identical
+    # (Done-4). Normalization only fires for crypto-classified tickers so
+    # equity alerts are untouched.
+    if is_crypto_ticker(alert.ticker):
+        _canon = _normalize_crypto_ticker(alert.ticker)
+        if _canon:
+            alert.ticker = _canon
 
     # Dedup: reject duplicate webhooks within 60s window
     dedup_raw = f"{alert.ticker}:{alert.strategy}:{alert.direction}:{alert.timeframe}"

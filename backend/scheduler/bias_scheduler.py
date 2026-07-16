@@ -21,6 +21,7 @@ from typing import Dict, Any, Optional, List
 from enum import Enum
 
 from signals.pipeline import process_signal_unified
+from jobs.crypto_bars import normalize_crypto_ticker as _normalize_crypto_ticker
 
 logger = logging.getLogger(__name__)
 
@@ -3491,10 +3492,13 @@ async def check_flow_confirmation_for_cta(ticker: str, direction: str) -> bool:
 
 # Top crypto tickers to scan
 CRYPTO_TICKERS = [
-    'BTC-USD', 'ETH-USD', 'SOL-USD', 'XRP-USD', 'ADA-USD', 
-    'AVAX-USD', 'DOGE-USD', 'DOT-USD', 'LINK-USD', 'MATIC-USD',
-    'LTC-USD', 'UNI-USD', 'ATOM-USD', 'NEAR-USD', 'APT-USD'
+    'BTC-USD', 'ETH-USD', 'SOL-USD', 'XRP-USD', 'ADA-USD',
+    'AVAX-USD', 'DOGE-USD', 'DOT-USD', 'LINK-USD',
+    'LTC-USD', 'ATOM-USD', 'NEAR-USD',
 ]
+# S-3 Phase 1 (FA-1): MATIC-USD, UNI-USD, APT-USD removed — yfinance-delisted,
+# outside the six-symbol v2 universe, zero open positions + zero unresolved
+# signals confirmed via FA-1 pre-flight (2026-07-16). See s3-phase0-findings.md §1.6.
 
 async def run_crypto_scan_scheduled():
     """
@@ -3560,7 +3564,7 @@ async def run_crypto_scan_scheduled():
                 trade_signal = {
                     "signal_id": signal_id,
                     "timestamp": get_eastern_now().isoformat(),
-                    "ticker": ticker,
+                    "ticker": _normalize_crypto_ticker(ticker) or ticker,
                     "strategy": "Crypto Scanner",
                     "direction": direction,
                     "signal_type": signal_type,

@@ -16,6 +16,8 @@ import logging
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any
 
+from jobs.crypto_bars import normalize_crypto_ticker as _normalize_crypto_ticker
+
 logger = logging.getLogger(__name__)
 
 # Dedup cooldown: don't fire same strategy within this window
@@ -94,7 +96,7 @@ def _build_signal(
     return {
         "signal_id": signal_id,
         "timestamp": ts,
-        "ticker": ticker,
+        "ticker": _normalize_crypto_ticker(ticker) or ticker,
         "direction": direction,
         "strategy": strategy,
         "signal_type": strategy,
