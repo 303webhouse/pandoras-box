@@ -47,6 +47,9 @@ ENABLE_PRICE_HISTORY_COLLECTION = _bool_env("ENABLE_PRICE_HISTORY_COLLECTION", F
 # 2026-07-15). Set false to stop the hourly evaluation without a redeploy
 # rollback; the job only ever writes to crypto_regime_log (shadow-only).
 ENABLE_CRYPTO_REGIME_JOB = _bool_env("ENABLE_CRYPTO_REGIME_JOB", True)
+# S-3 (R-2): Cycle Extremes dial job. Default ENABLED -- kill switch only.
+# Writes to crypto_cycle_log only; never writes to signals table (D3 rule).
+ENABLE_CRYPTO_CYCLE_JOB = _bool_env("ENABLE_CRYPTO_CYCLE_JOB", True)
 ENABLE_PRICE_HISTORY_BACKFILL = _bool_env("ENABLE_PRICE_HISTORY_BACKFILL", False)
 
 # State file for bias history
@@ -80,6 +83,12 @@ _scheduler_status = {
         "rows_written": 0,
         "status": "idle",
         "interval": "60 min (24/7, shadow-only)"
+    },
+    "crypto_cycle": {
+        "last_run": None,
+        "rows_written": 0,
+        "status": "idle",
+        "interval": "60 min (24/7, shadow-only, zero signals feed writes)"
     },
     "bias_refresh": {
         "last_run": None,
@@ -2688,6 +2697,20 @@ async def start_scheduler():
         else:
             logger.info("Crypto regime classifier disabled via ENABLE_CRYPTO_REGIME_JOB=false")
 
+        # S-3 (R-2): Cycle Extremes dial, hourly, all six symbols.
+        # Shadow-only -- writes to crypto_cycle_log only, NEVER to signals table (D3).
+        if ENABLE_CRYPTO_CYCLE_JOB:
+            scheduler.add_job(
+                run_crypto_cycle_job_scheduled,
+                'interval',
+                hours=1,
+                id='crypto_cycle',
+                name='Crypto Cycle Extremes Dial',
+                replace_existing=True
+            )
+        else:
+            logger.info("Crypto cycle extremes job disabled via ENABLE_CRYPTO_CYCLE_JOB=false")
+
         # Composite bias refresh every 15 minutes
         scheduler.add_job(
             refresh_composite_bias,
@@ -3677,3 +3700,24 @@ async def run_crypto_regime_job_scheduled():
     except Exception as e:
         _scheduler_status["crypto_regime"]["status"] = f"error: {str(e)}"
         logger.error("Error in crypto regime job: %s", e)
+
+
+async def run_crypto_cycle_job_scheduled():
+    """S-3 (R-2): hourly Cycle Extremes dial evaluation. Shadow-only -- writes to
+    crypto_cycle_log only. NEVER writes to the signals table (D3 rule).
+    Failure here must never take down the scheduler loop.
+    """
+    logger.info("Running scheduled Cycle Extremes evaluation (all six symbols)...")
+    try:
+        from bias_filters.crypto_cycle_engine import evaluate_all_symbols
+
+        _scheduler_status["crypto_cycle"]["status"] = "running"
+        results = await evaluate_all_symbols()
+        rows_written = sum(1 for r in results.values() if "error" not in r)
+        _scheduler_status["crypto_cycle"]["last_run"] = get_eastern_now().isoformat()
+        _scheduler_status["crypto_cycle"]["rows_written"] = rows_written
+        _scheduler_status["crypto_cycle"]["status"] = "completed"
+        logger.info("Cycle Extremes evaluation complete -- %d/%d symbols logged", rows_written, len(results))
+    except Exception as e:
+        _scheduler_status["crypto_cycle"]["status"] = f"error: {str(e)}"
+        logger.error("Error in crypto cycle extremes job: %s", e)

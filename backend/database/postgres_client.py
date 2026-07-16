@@ -1259,6 +1259,76 @@ async def init_database():
             )
             logger.info("crypto_gate_config seeded (version 1, gating_enabled=false)")
 
+        # S-3 Phase 2 (R-2): Cycle Extremes + CVD tape-health tables
+        # Mirror of migrations/026_crypto_cycle_cvd.sql — keep in sync.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS crypto_cycle_config (
+                id          SERIAL      PRIMARY KEY,
+                created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                created_by  TEXT        NOT NULL,
+                note        TEXT,
+                config      JSONB       NOT NULL
+            )
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS crypto_cycle_log (
+                id               BIGSERIAL   PRIMARY KEY,
+                computed_at      TIMESTAMPTZ NOT NULL,
+                symbol           TEXT        NOT NULL,
+                tier             SMALLINT    NOT NULL,
+                composite_score  NUMERIC,
+                composite_method TEXT,
+                degraded         BOOLEAN     NOT NULL DEFAULT FALSE,
+                degrade_reason   TEXT,
+                live_cell_count  INTEGER,
+                min_live_cells   INTEGER,
+                cells            JSONB       NOT NULL,
+                config_version   INTEGER,
+                created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_crypto_cycle_log_symbol_computed
+                ON crypto_cycle_log (symbol, computed_at DESC)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_crypto_cycle_log_degraded
+                ON crypto_cycle_log (degraded) WHERE degraded
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS crypto_tape_health_log (
+                id                BIGSERIAL   PRIMARY KEY,
+                computed_at       TIMESTAMPTZ NOT NULL,
+                symbol            TEXT        NOT NULL,
+                state             TEXT,
+                slope             NUMERIC,
+                spot_cvd          NUMERIC,
+                perp_cvd          NUMERIC,
+                degraded          BOOLEAN     NOT NULL DEFAULT FALSE,
+                degrade_reason    TEXT,
+                stale             BOOLEAN     NOT NULL DEFAULT FALSE,
+                staleness_seconds INTEGER,
+                config_version    INTEGER,
+                created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_crypto_tape_health_log_symbol_computed
+                ON crypto_tape_health_log (symbol, computed_at DESC)
+        """)
+
+        # Idempotent seed for crypto_cycle_config
+        existing_cycle_config = await conn.fetchval("SELECT COUNT(*) FROM crypto_cycle_config")
+        if not existing_cycle_config:
+            from config.crypto_cycle_config_seed import SEED_CONFIG_V1
+            await conn.execute(
+                "INSERT INTO crypto_cycle_config (created_by, note, config) VALUES ($1, $2, $3)",
+                "SEED_S3",
+                "Initial seed, S-3 Phase 2 (dial writes zero feed rows; shadow observation only)",
+                json.dumps(SEED_CONFIG_V1),
+            )
+            logger.info("crypto_cycle_config seeded (version 1, SEED_S3)")
+
         # Brief 3A: Ariadne's Thread — outcome resolution columns on signals
         try:
             await conn.execute("""
