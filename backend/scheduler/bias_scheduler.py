@@ -40,6 +40,12 @@ def _bool_env(name: str, default: bool) -> bool:
 
 
 ENABLE_PRICE_HISTORY_COLLECTION = _bool_env("ENABLE_PRICE_HISTORY_COLLECTION", False)
+
+# S-2 (R-1): crypto regime classifier job. Default ENABLED -- this is a kill
+# switch for the shadow-logging job, not a launch switch (Fable amendment D,
+# 2026-07-15). Set false to stop the hourly evaluation without a redeploy
+# rollback; the job only ever writes to crypto_regime_log (shadow-only).
+ENABLE_CRYPTO_REGIME_JOB = _bool_env("ENABLE_CRYPTO_REGIME_JOB", True)
 ENABLE_PRICE_HISTORY_BACKFILL = _bool_env("ENABLE_PRICE_HISTORY_BACKFILL", False)
 
 # State file for bias history
@@ -67,6 +73,12 @@ _scheduler_status = {
         "signals_found": 0,
         "status": "idle",
         "interval": "30 min (24/7)"
+    },
+    "crypto_regime": {
+        "last_run": None,
+        "rows_written": 0,
+        "status": "idle",
+        "interval": "60 min (24/7, shadow-only)"
     },
     "bias_refresh": {
         "last_run": None,
@@ -2661,6 +2673,20 @@ async def start_scheduler():
             replace_existing=True
         )
 
+        # S-2 (R-1): crypto regime classifier, hourly, all six symbols.
+        # Shadow-only -- writes to crypto_regime_log only, never gates.
+        if ENABLE_CRYPTO_REGIME_JOB:
+            scheduler.add_job(
+                run_crypto_regime_job_scheduled,
+                'interval',
+                hours=1,
+                id='crypto_regime',
+                name='Crypto Regime Classifier',
+                replace_existing=True
+            )
+        else:
+            logger.info("Crypto regime classifier disabled via ENABLE_CRYPTO_REGIME_JOB=false")
+
         # Composite bias refresh every 15 minutes
         scheduler.add_job(
             refresh_composite_bias,
@@ -3627,3 +3653,23 @@ async def run_crypto_scan_scheduled():
 async def trigger_crypto_scan_now():
     """Manually trigger a crypto scan"""
     await run_crypto_scan_scheduled()
+
+
+async def run_crypto_regime_job_scheduled():
+    """S-2 (R-1): hourly crypto regime classifier. Shadow-only -- writes to
+    crypto_regime_log only, never gates or touches a real signal. Wrapped so
+    a failure here never takes down the scheduler loop.
+    """
+    logger.info("Running scheduled crypto regime classification...")
+    try:
+        from jobs.crypto_regime import run_crypto_regime_job
+
+        _scheduler_status["crypto_regime"]["status"] = "running"
+        written = await run_crypto_regime_job()
+        _scheduler_status["crypto_regime"]["last_run"] = get_eastern_now().isoformat()
+        _scheduler_status["crypto_regime"]["rows_written"] = written
+        _scheduler_status["crypto_regime"]["status"] = "completed"
+        logger.info("Crypto regime classification complete - %d rows written", written)
+    except Exception as e:
+        _scheduler_status["crypto_regime"]["status"] = f"error: {str(e)}"
+        logger.error("Error in crypto regime job: %s", e)

@@ -67,7 +67,8 @@ def _parse_iso_ts(raw: Optional[str]) -> Optional[datetime]:
         return None
 
 
-async def _fetch_uw_bars(base_symbol: str, candle_size: str, limit: int = 500) -> List[Tuple[datetime, float, float]]:
+async def _fetch_uw_bars_full(base_symbol: str, candle_size: str, limit: int = 500) -> List[Tuple[datetime, float, float, float, float]]:
+    """Returns (ts, open, high, low, close) tuples."""
     from integrations import uw_api
 
     pair = f"{base_symbol}-USD"
@@ -81,13 +82,14 @@ async def _fetch_uw_bars(base_symbol: str, candle_size: str, limit: int = 500) -
         if ts is None:
             continue
         try:
-            bars.append((ts, float(row["high"]), float(row["low"])))
+            bars.append((ts, float(row["open"]), float(row["high"]), float(row["low"]), float(row["close"])))
         except (KeyError, TypeError, ValueError):
             continue
     return bars
 
 
-async def _fetch_binance_spot_klines(base_symbol: str, interval: str, limit: int = 500) -> List[Tuple[datetime, float, float]]:
+async def _fetch_binance_spot_klines_full(base_symbol: str, interval: str, limit: int = 500) -> List[Tuple[datetime, float, float, float, float]]:
+    """Returns (ts, open, high, low, close) tuples."""
     pair = f"{base_symbol}USDT"
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
@@ -103,13 +105,15 @@ async def _fetch_binance_spot_klines(base_symbol: str, interval: str, limit: int
     for row in rows or []:
         try:
             ts = datetime.fromtimestamp(row[0] / 1000.0, tz=timezone.utc)
-            bars.append((ts, float(row[2]), float(row[3])))  # [open_time, open, high, low, close, ...]
+            # [open_time, open, high, low, close, ...]
+            bars.append((ts, float(row[1]), float(row[2]), float(row[3]), float(row[4])))
         except (IndexError, TypeError, ValueError):
             continue
     return bars
 
 
-async def _fetch_okx_candles(base_symbol: str, bar: str, limit: int = 300) -> List[Tuple[datetime, float, float]]:
+async def _fetch_okx_candles_full(base_symbol: str, bar: str, limit: int = 300) -> List[Tuple[datetime, float, float, float, float]]:
+    """Returns (ts, open, high, low, close) tuples."""
     inst = f"{base_symbol}-USDT-SWAP"
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
@@ -126,18 +130,17 @@ async def _fetch_okx_candles(base_symbol: str, bar: str, limit: int = 300) -> Li
     for row in rows or []:
         try:
             ts = datetime.fromtimestamp(int(row[0]) / 1000.0, tz=timezone.utc)
-            bars.append((ts, float(row[2]), float(row[3])))  # [ts, o, h, l, c, ...]
+            # [ts, o, h, l, c, ...]
+            bars.append((ts, float(row[1]), float(row[2]), float(row[3]), float(row[4])))
         except (IndexError, TypeError, ValueError):
             continue
     return bars
 
 
-async def fetch_crypto_bars(base_symbol: str, signal_ts: datetime, use_daily: bool) -> List[Tuple[datetime, float, float]]:
-    """Dispatch to the correct vendor per crypto_symbol_matrix's bar_walk_source
-    for `base_symbol`. Returns [] (never raises) if the symbol has no LIVE
-    bar_walk_source -- the caller (outcome_resolver) treats that as
-    "cannot resolve, stay shadow-only," per F-2 task 2.1's explicit
-    shadow-only-when-unsanctioned requirement.
+async def _fetch_full_ohlc(base_symbol: str, use_daily: bool) -> List[Tuple[datetime, float, float, float, float]]:
+    """Shared vendor dispatch, per crypto_symbol_matrix's bar_walk_source.
+    Returns [] (never raises) if the symbol has no LIVE bar_walk_source.
+    Internal -- fetch_crypto_bars() and fetch_crypto_ohlc() both wrap this.
     """
     entry = get_symbol_entry(base_symbol)
     if not entry:
@@ -151,11 +154,35 @@ async def fetch_crypto_bars(base_symbol: str, signal_ts: datetime, use_daily: bo
 
     vendor = bar_walk.get("vendor")
     if vendor == "uw_crypto_ohlc":
-        return await _fetch_uw_bars(base_symbol, "1d" if use_daily else "15m")
+        return await _fetch_uw_bars_full(base_symbol, "1d" if use_daily else "15m")
     if vendor == "binance_spot_klines":
-        return await _fetch_binance_spot_klines(base_symbol, "1d" if use_daily else "15m")
+        return await _fetch_binance_spot_klines_full(base_symbol, "1d" if use_daily else "15m")
     if vendor == "okx_candles":
-        return await _fetch_okx_candles(base_symbol, "1D" if use_daily else "15m")
+        return await _fetch_okx_candles_full(base_symbol, "1D" if use_daily else "15m")
 
     logger.warning("Unknown bar_walk_source vendor '%s' for %s -- shadow-only, skipping", vendor, base_symbol)
     return []
+
+
+async def fetch_crypto_bars(base_symbol: str, signal_ts: datetime, use_daily: bool) -> List[Tuple[datetime, float, float]]:
+    """Dispatch to the correct vendor per crypto_symbol_matrix's bar_walk_source
+    for `base_symbol`. Returns [] (never raises) if the symbol has no LIVE
+    bar_walk_source -- the caller (outcome_resolver) treats that as
+    "cannot resolve, stay shadow-only," per F-2 task 2.1's explicit
+    shadow-only-when-unsanctioned requirement.
+
+    (ts, high, low) only -- outcome_resolver's touch-detection walk doesn't
+    need open/close. Existing callers/contract unchanged; see
+    fetch_crypto_ohlc() for the full-OHLC variant (S-2 regime classifier).
+    """
+    full = await _fetch_full_ohlc(base_symbol, use_daily)
+    return [(ts, hi, lo) for ts, _o, hi, lo, _c in full]
+
+
+async def fetch_crypto_ohlc(base_symbol: str, use_daily: bool = True) -> List[Tuple[datetime, float, float, float, float]]:
+    """Full (ts, open, high, low, close) tuples via the same per-symbol vendor
+    routing as fetch_crypto_bars() -- for consumers that need close prices
+    (DMA, slope, ADX). S-2 (R-1) regime classifier's only consumer today.
+    Returns [] (never raises) if the symbol has no LIVE bar_walk_source.
+    """
+    return await _fetch_full_ohlc(base_symbol, use_daily)
