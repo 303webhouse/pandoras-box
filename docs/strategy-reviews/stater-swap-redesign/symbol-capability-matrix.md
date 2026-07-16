@@ -16,7 +16,7 @@ Phase 0 investigation found `backend/bias_filters/{coinalyze,deribit,binance,def
 | ETH | 1 | LIVE | LIVE (662 instr.) | GEO_BLOCKED → OKX LIVE | LIVE | LIVE | LIVE | UW OHLC — LIVE |
 | SOL | 2 | LIVE | **listed, 0 instruments** | GEO_BLOCKED → OKX LIVE | LIVE | LIVE | LIVE | UW OHLC — LIVE |
 | HYPE | 3 | LIVE (thin) | UNAVAILABLE | GEO_BLOCKED → OKX LIVE | UNAVAILABLE (400) | **UNAVAILABLE (fake-healthy)** | UNAVAILABLE → fixed | OKX candles — LIVE |
-| ZEC | 3 | LIVE | UNAVAILABLE | GEO_BLOCKED → OKX LIVE | LIVE | LIVE (quote only) | UNAVAILABLE → fixed | Binance spot klines (deferred verify) — **not UW** |
+| ZEC | 3 | LIVE | UNAVAILABLE | GEO_BLOCKED → OKX LIVE | LIVE | LIVE (quote only) | UNAVAILABLE → fixed | Binance spot klines (live-verified S-1 Phase 2) — **not UW** |
 | FARTCOIN | 3 | LIVE (thin) | UNAVAILABLE | GEO_BLOCKED → OKX LIVE | UNAVAILABLE (400) | **UNAVAILABLE (fake-healthy)** | UNAVAILABLE → fixed | OKX candles — LIVE |
 
 **Binance-fail fallback (all 6 symbols): OKX.** Verified — see below.
@@ -50,7 +50,7 @@ Ticker format matters too: the hyphenated form (`BTC-USD`) is required — the n
 
 ### 3. UW quote coverage and UW bar-walk (OHLC) coverage are NOT the same thing — ZEC proves it
 
-`/api/crypto/ZEC-USD/state` returns real current-price data (HTTP 200, real OHLCV). But `/api/crypto/ZEC-USD/ohlc/1d` returns `{"data": []}` — an empty candle history, despite the live quote working. This means **ZEC can get a live quote from UW but cannot use UW as its BAR_WALK bars source** — a distinct fact from HYPE/FARTCOIN, which fail on both endpoints identically. This nuance would have been missed by testing only the quote endpoint (which is what a naive coverage check would do). ZEC's recommended bar-walk source is Binance spot klines (ZEC is confirmed listed on Binance spot, unlike HYPE/FARTCOIN) — the exact candle-history pull wasn't independently verified in this pass and is deferred to F-2 implementation, noted honestly as such rather than assumed.
+`/api/crypto/ZEC-USD/state` returns real current-price data (HTTP 200, real OHLCV). But `/api/crypto/ZEC-USD/ohlc/1d` returns `{"data": []}` — an empty candle history, despite the live quote working. This means **ZEC can get a live quote from UW but cannot use UW as its BAR_WALK bars source** — a distinct fact from HYPE/FARTCOIN, which fail on both endpoints identically. This nuance would have been missed by testing only the quote endpoint (which is what a naive coverage check would do). ZEC's recommended bar-walk source is Binance spot klines (ZEC is confirmed listed on Binance spot, unlike HYPE/FARTCOIN). Update (S-2 docs pass, 2026-07-15): the candle-history pull WAS live-verified during S-1 Phase 2 — 5 real 15m candles pulled pre-wiring (`s1-phase2-findings.md`, "Pre-wiring verification") — this line originally deferred that verification and is corrected here rather than left stale. Note: 15m interval was what Phase 2 verified; the 1d interval S-2's regime classifier needs is live-checked in `s2-phase0-findings.md` §0.2.
 
 ### 4. Coinalyze already covers all six symbols — Hyperliquid sanction NOT triggered
 

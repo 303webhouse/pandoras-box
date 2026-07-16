@@ -71,4 +71,9 @@ Before sign-off, every Done-item citation in this note was independently re-chec
 
 ## Sign-off
 
-CC flags S-1 as closed per the brief's own Done Definition, with F-4 exceeded (cutover shipped, not just the diff report) per Fable's ruling. Awaiting Nick/Fable's formal acknowledgment before R-1 work begins, per the brief's own gate ("Nothing in R-1+ may start until this brief's Done definition is met").
+CC flags S-1 as closed per the brief's own Done Definition, with F-4 exceeded (cutover shipped, not just the diff report) per Fable's ruling. Both acknowledgments are now on record and the gate ("Nothing in R-1+ may start until this brief's Done definition is met") is cleared:
+
+- **Nick — SIGNED, 2026-07-15 22:28Z (16:28 MDT).** Empirical connector check: Pandora connector re-toggled post-tool-ship; `hub_get_crypto_quote("BTC-USD")` returned live Bitcoin (fresh timestamp, clean v2.0 envelope, correct asset) through Nick's own Claude.ai connector — the Done-item-10 connector-visibility condition is satisfied.
+- **Fable — COUNTERSIGNED, 2026-07-15.** The "pending one connector-visibility check" condition attached to the item-10 countersign is resolved by the same check. S-1 is formally closed.
+
+R-1 work (Brief S-2, `docs/codex-briefs/2026-07-15-stater-swap-s2-regime-session-brief.md`) is cleared to begin.
