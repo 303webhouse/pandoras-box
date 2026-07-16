@@ -1163,6 +1163,102 @@ async def init_database():
                 ON crypto_dual_write_shadow (ticker, fired_at DESC)
         """)
 
+        # Stater Swap v2 S-2 (migration 025): regime/session shadow layer.
+        # Three additive tables -- crypto_regime_log (hourly heartbeat per
+        # symbol), crypto_gate_shadow (one row per shadow gate evaluation),
+        # crypto_gate_config (append-only hot-reload config versions). Zero
+        # writes to signals/signal_outcomes/unified_positions (mirrors
+        # migrations/025_crypto_regime_session.sql -- keep in sync).
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS crypto_regime_log (
+                id                      BIGSERIAL PRIMARY KEY,
+                computed_at             TIMESTAMPTZ NOT NULL,
+                symbol                  TEXT NOT NULL,
+                tier                    SMALLINT NOT NULL,
+                is_master               BOOLEAN NOT NULL DEFAULT FALSE,
+                regime_state            TEXT NOT NULL,
+                price                   NUMERIC,
+                dma50                   NUMERIC,
+                price_vs_dma50_pct      NUMERIC,
+                adx14                   NUMERIC,
+                dma50_slope_pct         NUMERIC,
+                bars_source             TEXT,
+                bars_as_of              TIMESTAMPTZ,
+                bar_count               INTEGER,
+                data_age_seconds        INTEGER,
+                degraded                BOOLEAN NOT NULL DEFAULT FALSE,
+                degrade_reason          TEXT,
+                session_partition       TEXT,
+                event_windows           TEXT[],
+                weekend_holiday_flag    BOOLEAN NOT NULL DEFAULT FALSE,
+                config_version          INTEGER,
+                changed                 BOOLEAN NOT NULL DEFAULT FALSE,
+                created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_crypto_regime_log_symbol_computed
+                ON crypto_regime_log (symbol, computed_at DESC)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_crypto_regime_log_changed
+                ON crypto_regime_log (changed) WHERE changed
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS crypto_gate_shadow (
+                id                      BIGSERIAL PRIMARY KEY,
+                evaluated_at            TIMESTAMPTZ NOT NULL,
+                signal_id               TEXT NOT NULL,
+                symbol                  TEXT NOT NULL,
+                tier                    SMALLINT,
+                strategy                TEXT,
+                strategy_canonical      TEXT,
+                direction               TEXT,
+                regime_master           TEXT,
+                regime_symbol           TEXT,
+                session_partition       TEXT,
+                event_windows           TEXT[],
+                weekend_holiday_flag    BOOLEAN NOT NULL DEFAULT FALSE,
+                alt_gate                TEXT,
+                verdict                 TEXT NOT NULL,
+                reasons                 TEXT[],
+                config_version          INTEGER,
+                created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_crypto_gate_shadow_evaluated
+                ON crypto_gate_shadow (evaluated_at DESC)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_crypto_gate_shadow_strategy_verdict
+                ON crypto_gate_shadow (strategy, verdict)
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS crypto_gate_config (
+                id                      SERIAL PRIMARY KEY,
+                created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                created_by              TEXT NOT NULL,
+                note                    TEXT,
+                config                  JSONB NOT NULL
+            )
+        """)
+
+        # Idempotent seed: version 1, only if the table is empty. Runs every
+        # boot, no-ops after the first successful insert. gating_enabled=false
+        # (hard rule 1); event_windows carries the real Phase-0 inventory
+        # (s2-phase0-findings.md 0.4), not a placeholder.
+        existing_gate_config = await conn.fetchval("SELECT COUNT(*) FROM crypto_gate_config")
+        if not existing_gate_config:
+            from config.crypto_gate_config_seed import SEED_CONFIG_V1
+            await conn.execute(
+                "INSERT INTO crypto_gate_config (created_by, note, config) VALUES ($1, $2, $3)",
+                "SEED_S2",
+                "Initial seed, S-2 Phase 1 (gating_enabled=false)",
+                json.dumps(SEED_CONFIG_V1),
+            )
+            logger.info("crypto_gate_config seeded (version 1, gating_enabled=false)")
+
         # Brief 3A: Ariadne's Thread — outcome resolution columns on signals
         try:
             await conn.execute("""

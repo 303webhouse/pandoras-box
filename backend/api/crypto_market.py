@@ -755,3 +755,74 @@ async def get_crypto_state(symbol: str):
         "regime": regime_field,
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
+
+
+@router.get("/regime")
+async def get_crypto_regime():
+    """S-2 (R-1): per-symbol crypto regime state, data contract only (no UI
+    ships in this brief). Read from the latest crypto_regime_log row per
+    symbol. `data_age_seconds` is computed at REQUEST time, not cached from
+    write time -- a frozen job must LOOK frozen. No auth dependency, mirrors
+    /api/btc/sessions' public-GET posture (S-2 Phase-0 finding 0.4).
+    """
+    from database.postgres_client import get_postgres_client
+    from config.crypto_gate_loader import get_gate_config
+
+    config_version, _config = await get_gate_config()
+    pool = await get_postgres_client()
+    now = datetime.now(timezone.utc)
+
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT DISTINCT ON (symbol) symbol, tier, is_master, regime_state,
+                   computed_at, degraded, degrade_reason
+            FROM crypto_regime_log
+            ORDER BY symbol, computed_at DESC
+            """
+        )
+
+    def _shape(row) -> Dict[str, Any]:
+        computed_at = row["computed_at"]
+        age = None
+        if computed_at is not None:
+            ca = computed_at if computed_at.tzinfo else computed_at.replace(tzinfo=timezone.utc)
+            age = int((now - ca).total_seconds())
+        return {
+            "symbol": row["symbol"],
+            "tier": row["tier"],
+            "regime_state": row["regime_state"],
+            "computed_at": computed_at.isoformat() if computed_at else None,
+            "data_age_seconds": age,
+            "degraded": row["degraded"],
+            "degrade_reason": row["degrade_reason"],
+        }
+
+    master = None
+    symbols = []
+    for row in rows:
+        shaped = _shape(row)
+        if row["is_master"]:
+            master = shaped
+        symbols.append(shaped)
+
+    return {
+        "as_of": now.isoformat(),
+        "config_version": config_version,
+        "master": master,
+        "symbols": symbols,
+    }
+
+
+@router.get("/clock")
+async def get_crypto_clock():
+    """S-2 (R-1): session clock, dual-labeled (utc + america_denver) per
+    the HELIOS carry-forward -- the UI renders time, it never computes it.
+    No auth dependency, mirrors /api/btc/sessions' public-GET posture.
+    """
+    from config.crypto_gate_loader import get_gate_config
+    from utils.crypto_sessions import get_session_state
+
+    _config_version, config = await get_gate_config()
+    now = datetime.now(timezone.utc)
+    return get_session_state(now, config)

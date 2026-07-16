@@ -1385,6 +1385,26 @@ async def process_signal_unified(
     except Exception as e:
         logger.warning(f"Failed to write signal outcome: {e}")
 
+    # S-2 (R-1): shadow regime/session gate evaluation. Runs AFTER persistence
+    # (signal_data is already committed above) -- non-blocking per hard rule 5,
+    # any failure here logs and continues, never affecting the real signal.
+    # Computes-and-logs only; gating_enabled stays false through S-2 closure
+    # (hard rule 1) so maybe_enforce_gate() is a no-op every time it's called.
+    if signal_data.get("asset_class") == "CRYPTO":
+        try:
+            from bias_filters.crypto_gates import (
+                evaluate_gates, persist_gate_shadow_row, maybe_enforce_gate,
+            )
+            from config.crypto_gate_loader import get_gate_config
+
+            gate_row = await evaluate_gates(signal_data)
+            if gate_row is not None:
+                await persist_gate_shadow_row(gate_row)
+                _, gate_config = await get_gate_config()
+                await maybe_enforce_gate(signal_data, gate_row, gate_config)
+        except Exception as e:
+            logger.warning("Shadow gate evaluation skipped (non-blocking): %s", e)
+
     # 4a. Task E — catalyst↔signal confluence flag (context-only; fail-open, never blocks)
     try:
         await _emit_catalyst_confluence(signal_data)
