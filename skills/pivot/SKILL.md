@@ -48,10 +48,13 @@ PIVOT's MCP tools, called in order:
 1. `hub_get_quote(ticker=<the ticker>)` — real-time spot, intraday OHLCV, prior close, and UW server timestamp. The UW timestamp from `hub_get_quote` is the authoritative anchor for all price-anchored claims in this agent's output, including PIVOT's sizing-vs-spot math.
 2. `hub_get_portfolio_balances` — pull live balances for sizing. **REQUIRED before any sizing output.**
 3. `hub_get_positions` — surface existing positions on the ticker for bias-alignment cross-check.
+4. `hub_get_board_state()` — **REQUIRED, every pass, checked BEFORE synthesizing the verdict** (Brief 3, 2026-07-16). Read `kill_switch.active` before writing VERDICT/CONVICTION — see § Hard gates, gate 3. `tide.direction` (market-wide net options-flow) is supplementary context for the SYNTHESIS paragraph, not gating.
 
 (`mcp_ping` is handled by the universal framework in `_shared/COMMITTEE_RULES.md § Pre-Output Data Checklist Framework`; not enumerated separately here.)
 
 `hub_get_portfolio_balances` is non-optional. If it returns `status="unavailable"` or fails, PIVOT degrades to **DON'T TRADE — sizing unavailable.** Memory-snapshot balances are forbidden under any circumstance.
+
+`hub_get_board_state` is non-optional for the kill-switch check specifically. If it returns `status="unavailable"`, PIVOT cannot confirm the breaker is clear — treat as an unknown risk-off state and demote one conviction notch (per Override rule 3, MCP-degraded), do not assume kill-switch is inactive just because the read failed.
 
 ## § Synthesis logic
 
@@ -90,12 +93,13 @@ When a cap fires, surface the trigger on the conviction line.
 - **Divergence:** Direct disagreement between complementary lenses. Canonical case: PYTHAGORAS reads clean trend continuation while PYTHIA reads structural extreme. Surface in DIVERGENCES block, one line per entry.
 - **Bias-aligned convergence carve-out:** If a same-direction convergence aligns with Nick's documented bias patterns (macro-bearish or AI-bullish per Training Bible B.06), route the finding to the BIAS WARNING block, not CONVERGENCES. Bias-aligned convergence demotes, doesn't promote.
 
-### § Hard gates — two absolute vetoes
+### § Hard gates — three absolute vetoes
 
 These rules override conviction in either direction and can force DON'T TRADE regardless of directional reads.
 
 1. **DAEDALUS sizing veto.** If DAEDALUS reports sizing math fails (max-loss exceeds bucket cap, R:R inadequate, premium too rich), PIVOT outputs DON'T TRADE regardless of directional conviction. Never override DAEDALUS on sizing. The 2026-05-20 TSLA pass is the canonical lesson — strong directional thesis killed by sizing math that didn't work.
 2. **Bias-alignment dual flag.** If both URSA and THALES surface bias-alignment flags on the same trade, PIVOT outputs a BIAS WARNING block above the verdict and caps conviction at LOW. The default verdict is DON'T TRADE unless PIVOT can articulate explicitly why this specific trade is not bias-driven despite both flags firing. The 2026-05-20 TSLA pass surfaced a 6-week-old dead spread that exemplified this pattern.
+3. **Kill-switch active gate** (Brief 3, 2026-07-16). Checked via `hub_get_board_state().kill_switch` BEFORE writing VERDICT/CONVICTION, every pass. When `active=true`, apply the returned `bias_cap`/`bias_floor` to PIVOT's own conviction — the breaker's own severity (not a fixed PIVOT rule) determines how tightly bounded the verdict is; name the `trigger`/`description` on the conviction line (e.g., "CONVICTION: LOW — capped by kill-switch (SPY -1% intraday: Minor caution, cap bullish bias)"). This checks the breaker at the synthesis layer too, in addition to whatever the composite bias engine already applied upstream — defense in depth, not redundant. If the read itself fails (`status="unavailable"`), treat as unknown risk-off state per the Context A tool note above — demote, don't assume clear.
 
 ### BIAS WARNING block — worked example
 
