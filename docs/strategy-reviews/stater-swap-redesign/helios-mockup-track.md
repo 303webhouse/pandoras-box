@@ -42,3 +42,4 @@ No dependency on S-2..S-5 *code* to start concepting; **recommended start: after
 ## Log
 
 - 2026-07-15 — Track opened; charter committed; seed directions C1–C3 recorded. Next entry: concept session scheduled.
+- 2026-07-16 — S-3 payload contracts live (/api/crypto/cycle-extremes, /tape-health, hub_get_crypto_market_profile, /state wiring). Concept-session prerequisite met per charter timing; session may be scheduled.

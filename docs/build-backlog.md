@@ -133,7 +133,7 @@ Forced by the committee brief's P0 finding (2026-07-12): `hub_get_quote("BTC")` 
 **Gates:** None blocking S-1. Independent hygiene/reliability item — small build once scoped.
 
 ### 6. `tradingview.py::is_crypto_ticker()` misses hyphenated tickers
-**Status: CLOSED — superseded by #7 below (2026-07-15).** Rather than patch this one classifier in isolation, Fable ruled a canonical normalization fix at pipeline ingress, which makes this specific symptom moot.
+**Status: CLOSED — superseded by #7 below (2026-07-15); Phase-1 normalization shipped at commit `0037375` (S-3 R-2, 2026-07-16).** Rather than patch this one classifier in isolation, Fable ruled a canonical normalization fix at pipeline ingress, which makes this specific symptom moot.
 **Bucket:** Quick-fix / data-integrity. **Added 2026-07-15**, surfaced incidentally during the F-4 cutover's pre-deploy Discord/fan-out research pass.
 **Why:** `CRYPTO_TICKERS` (`backend/webhooks/tradingview.py:56-69`) contains `'BTCUSD'` (no hyphen) and `is_crypto_ticker()` only strips `.P`/`PERP`/`-PERP` suffixes — a TradingView alert sending a hyphenated ticker like `"BTC-USD"` is not recognized, so `asset_class` gets silently miscomputed as `"EQUITY"` instead of `"CRYPTO"` for that signal. Live DB query confirmed 79 existing signals already mistagged this way (none have crossed the committee threshold, so no known downstream harm yet). Does not affect the Crypto Scanner path (`bias_scheduler.py` sets `asset_class` explicitly, bypassing this classifier).
 **Gates:** None blocking. Small, isolated fix (extend suffix/format handling) once scoped — not done here to keep the F-4 cutover change surface minimal.
@@ -144,6 +144,10 @@ Forced by the committee brief's P0 finding (2026-07-12): `hub_get_quote("BTC")` 
 **Proposal:** Reuse `backend/jobs/crypto_bars.py::normalize_crypto_ticker()` — already built and proven correct in F-2 (Phase 2) — at the point every crypto signal source writes its `ticker` field, so all three persist the same canonical form for the same coin.
 **Enables:** Real crypto cross-strategy conflict-dismissal (the normalization is the prerequisite; `_check_and_clear_conflicting_signals()` itself needs no change once tickers are consistent).
 **Gates:** None blocking S-1 (closure note recorded, not required for Done Definition). Sequenced at R-2 per Fable's ruling — do not start before R-1/R-2 gates clear per the brief's own sequencing rule.
+**S-3 closure (2026-07-16):** Phase-1 shipped at commit `0037375` — all three ingress sites normalized. Item #6 formally closed with this commit ref.
+
+### 7a. Cycle Extremes signal #10 — UW ETF-flow exhaustion (S-5 scope)
+**Status: DEFERRED to S-5.** Deferred in S-3 (§4.6) pending ATLAS budget sizing of the UW ETF-flow feed against the 17K/18K Watchdog thresholds. Signal #10 ships as NA:DEFERRED_S5_BUDGET_SIZING in the Cycle Extremes payload until S-5 resolves the sizing question. Do not start before Post-R-2 checkpoint clears and S-5 brief is authored.
 
 ### 8. Untracked codex-briefs provenance sweep
 **Bucket:** Housekeeping / provenance. **Added 2026-07-16**, surfaced during a Task-1.0 git-drift diagnostic for Brief S-2 (the diagnostic itself found no drift — see s2-phase0-findings.md addendum — but turned up these as a side effect).
