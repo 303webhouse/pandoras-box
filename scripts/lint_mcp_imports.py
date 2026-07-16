@@ -51,6 +51,13 @@ FORBIDDEN_MODULES = {
     "api.confluence",
     "api.knowledgebase",
     "bias_filters.sector_rotation",  # auto_fetch_and_update writes
+    # Brief 3 (2026-07-15, AEGIS finding): route modules with no write endpoints
+    # today, but the query logic they used to hold directly now lives in
+    # services/read_only/stable.py + board.py -- direct import is no longer
+    # needed, so make it unenforceable-to-skip rather than a documented-only
+    # convention.
+    "api.stable",
+    "api.board_state",
     # data-write database modules
     "database.write",
 }

@@ -3,14 +3,14 @@ name: MCP import lint
 on:
   pull_request:
     paths:
-      - 'backend/mcp/**'
+      - 'backend/hub_mcp/**'
       - 'backend/services/read_only/**'
       - 'scripts/lint_mcp_imports.py'
       - '.github/workflows/mcp-lint.yml'
   push:
     branches: [main]
     paths:
-      - 'backend/mcp/**'
+      - 'backend/hub_mcp/**'
       - 'backend/services/read_only/**'
       - 'scripts/lint_mcp_imports.py'
       - '.github/workflows/mcp-lint.yml'

@@ -20,3 +20,9 @@ from . import market_profile as _market_profile  # noqa: F401
 from . import chart_indicators as _chart_indicators  # noqa: F401
 from . import ping as _ping  # noqa: F401
 from . import describe as _describe  # noqa: F401
+from . import stable_regime as _stable_regime  # noqa: F401
+from . import stable_themes as _stable_themes  # noqa: F401
+from . import stable_theme_members as _stable_theme_members  # noqa: F401
+from . import stable_movers as _stable_movers  # noqa: F401
+from . import stable_rates_fx as _stable_rates_fx  # noqa: F401
+from . import board_state as _board_state  # noqa: F401

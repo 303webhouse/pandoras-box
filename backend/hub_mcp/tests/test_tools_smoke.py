@@ -636,7 +636,7 @@ async def test_describe_lists_all_tools():
     r = await mcp_describe_tools()
     assert _is_valid_envelope(r)
     assert r["status"] == "ok"
-    assert r["data"]["tool_count"] == 14
+    assert r["data"]["tool_count"] == 21
     names = {t["name"] for t in r["data"]["tools"]}
     assert names == {
         "hub_get_bias_composite",
@@ -647,12 +647,19 @@ async def test_describe_lists_all_tools():
         "hub_get_positions",
         "hub_get_portfolio_balances",
         "hub_get_quote",
+        "hub_get_crypto_quote",
         "hub_get_options_chain",
         "hub_get_trade_ideas",
         "hub_get_market_profile",
         "hub_get_chart_indicators",
         "mcp_ping",
         "mcp_describe_tools",
+        "hub_get_stable_regime",
+        "hub_get_stable_themes",
+        "hub_get_stable_theme_members",
+        "hub_get_stable_movers",
+        "hub_get_stable_rates_fx",
+        "hub_get_board_state",
     }
 
 
