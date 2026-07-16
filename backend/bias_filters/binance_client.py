@@ -1,6 +1,13 @@
 """
-Market Microstructure Client (Binance + OKX fallback)
-Fetches BTC spot orderbook depth and perp-vs-spot basis with geo-safe fallbacks.
+Market Microstructure Client (Binance spot + OKX fallback)
+Fetches spot orderbook depth and perp-vs-spot basis, per symbol.
+
+S-3 Phase 1.5 (FA-7): get_spot_orderbook_skew() and get_quarterly_basis() are
+now per-symbol parametrized with symbol="BTC" default — every existing caller
+is signature-compatible and behavior-identical. Cache keys are per-symbol.
+HYPE and FARTCOIN are not listed on Binance spot (HTTP 400, verified 2026-07-13)
+and return NA:NOT_LISTED_BINANCE_SPOT for orderbook calls. OKX spot fallback
+is available for those symbols for price/basis if needed.
 """
 
 import logging
@@ -14,12 +21,6 @@ from bias_filters.crypto_vendor_health import record_observation
 
 logger = logging.getLogger(__name__)
 
-# S-1 Phase 1: hardcoded to BTC today (BTCUSDT below) — multi-symbol
-# parametrization is an R-2/R-3 prerequisite. Matrix confirms Binance
-# Futures is geo-blocked from Railway (HTTP 451, verified 2026-07-13) for
-# all 6 symbols; OKX fallback is live for all 6.
-_SYMBOL = "BTC"
-
 # API Configuration
 BINANCE_SPOT_URL = "https://data-api.binance.vision/api/v3"  # geo-friendly mirror
 _binance_perp_base = os.getenv("CRYPTO_BINANCE_PERP_BASE", "https://fapi.binance.com").rstrip("/")
@@ -30,10 +31,51 @@ BINANCE_FUTURES_URL = (
 BINANCE_PERP_HTTP_PROXY = os.getenv("CRYPTO_BINANCE_PERP_HTTP_PROXY", "").strip() or None
 OKX_MARKET_URL = "https://www.okx.com/api/v5/market"
 
+# Per-symbol Binance spot symbol (None = not listed on Binance spot).
+# Verified 2026-07-13 via data-api.binance.vision.
+_BINANCE_SPOT_SYMBOL: Dict[str, Optional[str]] = {
+    "BTC":      "BTCUSDT",
+    "ETH":      "ETHUSDT",
+    "SOL":      "SOLUSDT",
+    "HYPE":     None,       # HTTP 400 "Invalid symbol" (verified 2026-07-13)
+    "ZEC":      "ZECUSDT",  # ZEC IS listed on Binance spot (verified 2026-07-13)
+    "FARTCOIN": None,       # HTTP 400 "Invalid symbol" (verified 2026-07-13)
+}
+
+# Per-symbol OKX swap instrument ID for perp-price/basis fallback.
+_OKX_SWAP_INSTID: Dict[str, str] = {
+    "BTC":      "BTC-USDT-SWAP",
+    "ETH":      "ETH-USDT-SWAP",
+    "SOL":      "SOL-USDT-SWAP",
+    "HYPE":     "HYPE-USDT-SWAP",
+    "ZEC":      "ZEC-USDT-SWAP",
+    "FARTCOIN": "FARTCOIN-USDT-SWAP",
+}
+
+# Per-symbol OKX spot instrument ID for spot-price fallback.
+_OKX_SPOT_INSTID: Dict[str, str] = {
+    "BTC":      "BTC-USDT",
+    "ETH":      "ETH-USDT",
+    "SOL":      "SOL-USDT",
+    "HYPE":     "HYPE-USDT",
+    "ZEC":      "ZEC-USDT",
+    "FARTCOIN": "FARTCOIN-USDT",
+}
+
+# Per-symbol OKX spot orderbook instrument ID (HYPE/FARTCOIN: OKX spot only).
+_OKX_SPOT_BOOK_INSTID: Dict[str, str] = {
+    "BTC":      "BTC-USDT",
+    "ETH":      "ETH-USDT",
+    "SOL":      "SOL-USDT",
+    "HYPE":     "HYPE-USDT",
+    "ZEC":      "ZEC-USDT",
+    "FARTCOIN": "FARTCOIN-USDT",
+}
+
 # Cache for API responses
 _cache: Dict[str, Dict[str, Any]] = {}
-CACHE_TTL_ORDERBOOK = 60  # 1 minute for orderbook
-CACHE_TTL_BASIS = 300  # 5 minutes for basis
+CACHE_TTL_ORDERBOOK = 60   # 1 minute for orderbook
+CACHE_TTL_BASIS = 300      # 5 minutes for basis
 
 
 def _get_cached(key: str) -> Optional[Dict[str, Any]]:
@@ -53,6 +95,16 @@ def _set_cache(key: str, data: Any, ttl: int):
     }
 
 
+def _na_cell(symbol: str, reason: str) -> Dict[str, Any]:
+    """Return a §4.2-contract NA cell — never zeros, never nulls without reason."""
+    return {
+        "state": "NA",
+        "reason": reason,
+        "symbol": symbol,
+        "signal": "UNKNOWN",
+    }
+
+
 async def _make_request(url: str, params: Dict[str, Any] = None) -> Optional[Dict]:
     """Make request to a public market API endpoint"""
     try:
@@ -64,7 +116,6 @@ async def _make_request(url: str, params: Dict[str, Any] = None) -> Optional[Dic
             response = await client.get(url, params=params)
 
             if response.status_code not in (200,):
-                # 451 = geo-restricted (Binance Futures on Railway), treat as silent fallback
                 if response.status_code == 451:
                     logger.debug(f"Market API geo-restricted ({url}): 451 - using fallback")
                 else:
@@ -93,53 +144,79 @@ def _normalize_okx_book(okx_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if not bids or not asks:
         return None
 
-    # Keep [price, qty] shape used by the existing depth math.
     return {
         "bids": [[b[0], b[1]] for b in bids if len(b) >= 2],
         "asks": [[a[0], a[1]] for a in asks if len(a) >= 2],
     }
 
 
-async def get_spot_orderbook_skew() -> Dict[str, Any]:
+async def get_spot_orderbook_skew(symbol: str = "BTC") -> Dict[str, Any]:
     """
-    Get BTC/USDT spot orderbook depth and calculate bid/ask imbalance
-    
-    High bid depth = buyers waiting below (support)
-    High ask depth = sellers waiting above (resistance)
-    
+    Get spot orderbook depth and calculate bid/ask imbalance for symbol.
+
+    symbol defaults to "BTC" — all existing callers are signature-compatible.
+    HYPE and FARTCOIN are not listed on Binance spot and return
+    NA:NOT_LISTED_BINANCE_SPOT; OKX spot orderbook is used as fallback for
+    those symbols.
+
     Returns:
         {
-            "bid_depth": 150.5,  # BTC in top 20 bid levels
-            "ask_depth": 120.3,  # BTC in top 20 ask levels
-            "imbalance": 0.11,  # (bid - ask) / (bid + ask)
+            "bid_depth": 150.5,
+            "ask_depth": 120.3,
+            "imbalance": 0.11,
             "imbalance_pct": 11.0,
             "sentiment": "bid_heavy" | "ask_heavy" | "balanced",
             "signal": "FIRING" | "NEUTRAL",
             "timestamp": "..."
         }
     """
-    cache_key = "orderbook_skew"
+    symbol = (symbol or "BTC").upper()
+    binance_spot_sym = _BINANCE_SPOT_SYMBOL.get(symbol)
+    okx_spot_book = _OKX_SPOT_BOOK_INSTID.get(symbol)
+
+    cache_key = f"orderbook_skew:{symbol}"
     cached = _get_cached(cache_key)
     if cached:
         return cached
-    
-    # Try Binance spot depth first (geo-friendly mirror), then OKX spot books.
-    data = await _make_request(f"{BINANCE_SPOT_URL}/depth", {
-        "symbol": "BTCUSDT",
-        "limit": 1000
-    })
 
-    source = "binance_vision"
-    if not data or "bids" not in data or "asks" not in data:
+    data = None
+    source = "unavailable"
+
+    if binance_spot_sym is not None:
+        # Try Binance spot depth first (geo-friendly mirror)
+        data = await _make_request(f"{BINANCE_SPOT_URL}/depth", {
+            "symbol": binance_spot_sym,
+            "limit": 1000
+        })
+        if data and "bids" in data:
+            source = "binance_vision"
+        else:
+            data = None
+
+    if data is None and okx_spot_book:
+        # OKX spot orderbook fallback (also primary for HYPE/FARTCOIN)
         okx_data = await _make_request(f"{OKX_MARKET_URL}/books", {
-            "instId": "BTC-USDT",
+            "instId": okx_spot_book,
             "sz": 400
         })
         data = _normalize_okx_book(okx_data or {})
-        source = "okx_spot"
-    
+        if data:
+            source = "okx_spot"
+
+    if binance_spot_sym is None and not okx_spot_book:
+        # Structurally impossible: all six symbols have an OKX spot entry.
+        # Guard here for completeness.
+        await record_observation("binance_spot", "orderbook_skew", symbol, success=False,
+                                 reason=f"NA:NOT_LISTED_BINANCE_SPOT and no OKX spot entry for {symbol}")
+        return _na_cell(symbol, "NA:NOT_LISTED_BINANCE_SPOT")
+
     if not data or "bids" not in data or "asks" not in data:
-        await record_observation("binance_spot", "orderbook_skew", _SYMBOL, success=False, reason="Failed to fetch orderbook from Binance Vision or OKX")
+        if binance_spot_sym is None:
+            # Symbol not on Binance spot AND OKX also failed
+            reason = f"NA:NOT_LISTED_BINANCE_SPOT and OKX orderbook unavailable for {symbol}"
+        else:
+            reason = f"Failed to fetch orderbook from Binance Vision or OKX for {symbol}"
+        await record_observation("binance_spot", "orderbook_skew", symbol, success=False, reason=reason)
         return {
             "bid_depth": None,
             "ask_depth": None,
@@ -147,52 +224,49 @@ async def get_spot_orderbook_skew() -> Dict[str, Any]:
             "sentiment": "unknown",
             "signal": "UNKNOWN",
             "source": "unavailable",
-            "error": "Failed to fetch orderbook from Binance Vision or OKX"
+            "symbol": symbol,
+            "error": reason
         }
 
-    bids = data["bids"]  # [[price, qty], ...]
+    bids = data["bids"]
     asks = data["asks"]
 
-    # Calculate depth within 2% of mid price
     if not bids or not asks:
-        await record_observation("binance_spot", "orderbook_skew", _SYMBOL, success=False, reason="Empty bids/asks in orderbook response")
+        await record_observation("binance_spot", "orderbook_skew", symbol, success=False,
+                                 reason="Empty bids/asks in orderbook response")
         return {
             "bid_depth": 0,
             "ask_depth": 0,
             "imbalance": 0,
             "sentiment": "balanced",
-            "signal": "NEUTRAL"
+            "signal": "NEUTRAL",
+            "symbol": symbol,
         }
-    
+
     best_bid = float(bids[0][0])
     best_ask = float(asks[0][0])
     mid_price = (best_bid + best_ask) / 2
-    
-    # Define price range (2% from mid)
+
     bid_threshold = mid_price * 0.98
     ask_threshold = mid_price * 1.02
-    
-    # Sum depth within range
+
     bid_depth = sum(float(b[1]) for b in bids if float(b[0]) >= bid_threshold)
     ask_depth = sum(float(a[1]) for a in asks if float(a[0]) <= ask_threshold)
-    
-    # Calculate imbalance
+
     total_depth = bid_depth + ask_depth
     imbalance = (bid_depth - ask_depth) / total_depth if total_depth > 0 else 0
     imbalance_pct = imbalance * 100
-    
-    # Determine sentiment and signal
-    # >15% imbalance is significant
+
     if imbalance > 0.15:
         sentiment = "bid_heavy"
-        signal = "FIRING"  # Strong bid support = bullish
+        signal = "FIRING"
     elif imbalance < -0.15:
         sentiment = "ask_heavy"
-        signal = "FIRING"  # Strong ask resistance = bearish
+        signal = "FIRING"
     else:
         sentiment = "balanced"
         signal = "NEUTRAL"
-    
+
     result = {
         "bid_depth": round(bid_depth, 2),
         "ask_depth": round(ask_depth, 2),
@@ -205,126 +279,128 @@ async def get_spot_orderbook_skew() -> Dict[str, Any]:
         "sentiment": sentiment,
         "signal": signal,
         "source": source,
+        "symbol": symbol,
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
-    ok, reason = check_price(_SYMBOL, result["mid_price"])
-    status = await record_observation(source, "orderbook_skew", _SYMBOL, success=True, value_valid=ok, reason=reason)
+    ok, reason = check_price(symbol, result["mid_price"])
+    status = await record_observation(source, "orderbook_skew", symbol, success=True, value_valid=ok, reason=reason)
     if not ok:
-        logger.warning("Binance orderbook_skew bounds check failed, not caching: %s", reason)
+        logger.warning("Binance orderbook_skew[%s] bounds check failed, not caching: %s", symbol, reason)
         return {**result, "signal": "UNKNOWN", "error": reason, "health_status": status}
 
     _set_cache(cache_key, result, CACHE_TTL_ORDERBOOK)
-    logger.info(f"Binance Orderbook: Bid {bid_depth:.1f} BTC, Ask {ask_depth:.1f} BTC, Imbalance {imbalance_pct:+.1f}% -> {sentiment}")
+    logger.info(f"Orderbook[{symbol}]: Bid {bid_depth:.1f}, Ask {ask_depth:.1f}, Imbalance {imbalance_pct:+.1f}% -> {sentiment}")
     return {**result, "health_status": status}
 
 
-async def get_quarterly_basis() -> Dict[str, Any]:
+async def get_quarterly_basis(symbol: str = "BTC") -> Dict[str, Any]:
     """
-    Calculate quarterly futures basis (futures premium over spot)
-    
-    Basis = (Futures - Spot) / Spot * (365 / days_to_expiry) * 100
-    
-    High basis (>10% annualized) = Overleveraged longs, potential top
-    Negative basis = Panic/capitulation, potential bottom
-    
+    Calculate quarterly futures basis (futures premium over spot) for symbol.
+
+    symbol defaults to "BTC" — all existing callers are signature-compatible.
+    Binance Futures is geo-blocked from Railway (HTTP 451) for all symbols;
+    OKX swap is used as the perp-price fallback.
+
     Returns:
         {
             "spot_price": 100000,
             "futures_price": 101500,
             "basis_pct": 1.5,
             "basis_annualized": 12.5,
-            "days_to_expiry": 45,
             "sentiment": "contango" | "backwardation" | "neutral",
             "signal": "FIRING" | "NEUTRAL",
             "timestamp": "..."
         }
     """
-    cache_key = "quarterly_basis"
+    symbol = (symbol or "BTC").upper()
+    binance_spot_sym = _BINANCE_SPOT_SYMBOL.get(symbol)
+    okx_spot = _OKX_SPOT_INSTID.get(symbol)
+    okx_swap = _OKX_SWAP_INSTID.get(symbol)
+
+    cache_key = f"quarterly_basis:{symbol}"
     cached = _get_cached(cache_key)
     if cached:
         return cached
-    
-    # Get spot price (Binance Vision first, OKX spot fallback).
-    spot_data = await _make_request(f"{BINANCE_SPOT_URL}/ticker/price", {
-        "symbol": "BTCUSDT"
-    })
 
-    spot_source = "binance_vision"
-    if not spot_data or "price" not in spot_data:
-        okx_spot = await _make_request(f"{OKX_MARKET_URL}/ticker", {
-            "instId": "BTC-USDT"
+    # --- Spot price ---
+    spot_data = None
+    spot_source = "unavailable"
+
+    if binance_spot_sym:
+        spot_data = await _make_request(f"{BINANCE_SPOT_URL}/ticker/price", {
+            "symbol": binance_spot_sym
         })
-        if okx_spot and okx_spot.get("code") == "0" and okx_spot.get("data"):
-            spot_data = {"price": okx_spot["data"][0].get("last")}
+        if spot_data and "price" in spot_data:
+            spot_source = "binance_vision"
+        else:
+            spot_data = None
+
+    if spot_data is None and okx_spot:
+        okx_spot_resp = await _make_request(f"{OKX_MARKET_URL}/ticker", {"instId": okx_spot})
+        if okx_spot_resp and okx_spot_resp.get("code") == "0" and okx_spot_resp.get("data"):
+            spot_data = {"price": okx_spot_resp["data"][0].get("last")}
             spot_source = "okx_spot"
-    
+
     if not spot_data or "price" not in spot_data:
-        await record_observation("binance_spot", "quarterly_basis", _SYMBOL, success=False, reason="Failed to fetch spot price from Binance Vision or OKX")
+        vendor_label = "binance_vision" if binance_spot_sym else "okx_spot"
+        await record_observation(vendor_label, "quarterly_basis", symbol, success=False,
+                                 reason=f"Failed to fetch spot price for {symbol}")
         return {
             "spot_price": None,
             "basis_annualized": None,
             "sentiment": "unknown",
             "signal": "UNKNOWN",
             "source": "unavailable",
-            "error": "Failed to fetch spot price from Binance Vision or OKX"
+            "symbol": symbol,
+            "error": f"Failed to fetch spot price for {symbol}"
         }
-    
-    spot_price = float(spot_data["price"])
-    
-    # Get perpetual futures price (Binance Futures first, OKX swap fallback).
-    perp_data = await _make_request(f"{BINANCE_FUTURES_URL}/ticker/price", {
-        "symbol": "BTCUSDT"
-    })
 
+    spot_price = float(spot_data["price"])
+
+    # --- Perp/futures price (Binance Futures geo-blocked → OKX swap fallback) ---
+    perp_data = await _make_request(f"{BINANCE_FUTURES_URL}/ticker/price", {
+        "symbol": binance_spot_sym or (symbol + "USDT")
+    })
     perp_source = "binance_futures"
+
     if not perp_data or "price" not in perp_data:
-        okx_perp = await _make_request(f"{OKX_MARKET_URL}/ticker", {
-            "instId": "BTC-USDT-SWAP"
-        })
-        if okx_perp and okx_perp.get("code") == "0" and okx_perp.get("data"):
-            perp_data = {"price": okx_perp["data"][0].get("last")}
-            perp_source = "okx_swap"
-    
+        if okx_swap:
+            okx_perp_resp = await _make_request(f"{OKX_MARKET_URL}/ticker", {"instId": okx_swap})
+            if okx_perp_resp and okx_perp_resp.get("code") == "0" and okx_perp_resp.get("data"):
+                perp_data = {"price": okx_perp_resp["data"][0].get("last")}
+                perp_source = "okx_swap"
+
     if not perp_data or "price" not in perp_data:
-        await record_observation("binance_futures", "quarterly_basis", _SYMBOL, success=False, reason="Failed to fetch perp/futures price from Binance Futures or OKX (likely geo-block — HTTP 451 confirmed from Railway 2026-07-13)")
+        await record_observation("binance_futures", "quarterly_basis", symbol, success=False,
+                                 reason=f"Failed to fetch perp/futures price for {symbol} (likely geo-block — HTTP 451 confirmed from Railway)")
         return {
             "spot_price": spot_price,
             "basis_annualized": None,
             "sentiment": "unknown",
             "signal": "UNKNOWN",
             "source": f"{spot_source}->unavailable",
-            "error": "Failed to fetch perp/futures price from Binance Futures or OKX"
+            "symbol": symbol,
+            "error": f"Failed to fetch perp/futures price for {symbol}"
         }
-    
+
     futures_price = float(perp_data["price"])
-    
-    # Calculate basis
     basis_pct = (futures_price - spot_price) / spot_price * 100
-    
-    # For perpetuals, annualize based on funding rate equivalent
-    # Assume 8-hour funding, so annualize by multiplying by 3 * 365
-    # But for simplicity, just use the raw premium
-    basis_annualized = basis_pct * 365 / 7  # Assume weekly equivalent
-    
-    # Try to get actual quarterly futures
-    # Binance quarterly futures format: BTCUSDT_YYMMDD
-    # For now, use perpetual premium as approximation
-    
-    # Determine sentiment and signal
+    basis_annualized = basis_pct * 365 / 7
+
     if basis_annualized > 15:
         sentiment = "extreme_contango"
-        signal = "FIRING"  # Extreme bullish positioning = potential top
+        signal = "FIRING"
     elif basis_annualized > 5:
         sentiment = "contango"
         signal = "NEUTRAL"
     elif basis_annualized < -5:
         sentiment = "backwardation"
-        signal = "FIRING"  # Panic selling = potential bottom
+        signal = "FIRING"
     else:
         sentiment = "neutral"
         signal = "NEUTRAL"
-    
+
     result = {
         "spot_price": round(spot_price, 2),
         "futures_price": round(futures_price, 2),
@@ -333,36 +409,38 @@ async def get_quarterly_basis() -> Dict[str, Any]:
         "sentiment": sentiment,
         "signal": signal,
         "source": f"{spot_source}+{perp_source}",
+        "symbol": symbol,
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
-    price_ok, price_reason = check_price(_SYMBOL, result["spot_price"])
-    basis_ok, basis_reason = check_basis_annualized(_SYMBOL, result["basis_annualized"])
+    price_ok, price_reason = check_price(symbol, result["spot_price"])
+    basis_ok, basis_reason = check_basis_annualized(symbol, result["basis_annualized"])
     ok = price_ok and basis_ok
     reason = price_reason or basis_reason
     vendor_label = f"{spot_source}+{perp_source}"
-    status = await record_observation(vendor_label, "quarterly_basis", _SYMBOL, success=True, value_valid=ok, reason=reason)
+    status = await record_observation(vendor_label, "quarterly_basis", symbol, success=True, value_valid=ok, reason=reason)
     if not ok:
-        logger.warning("Binance quarterly_basis bounds check failed, not caching: %s", reason)
+        logger.warning("quarterly_basis[%s] bounds check failed, not caching: %s", symbol, reason)
         return {**result, "signal": "UNKNOWN", "error": reason, "health_status": status}
 
     _set_cache(cache_key, result, CACHE_TTL_BASIS)
-    logger.info(f"Binance Basis: {basis_pct:.4f}% ({basis_annualized:.2f}% ann.) -> {sentiment}")
+    logger.info(f"Basis[{symbol}]: {basis_pct:.4f}% ({basis_annualized:.2f}% ann.) -> {sentiment}")
     return {**result, "health_status": status}
 
 
-async def get_all_binance_data() -> Dict[str, Any]:
-    """Fetch all Binance data"""
+async def get_all_binance_data(symbol: str = "BTC") -> Dict[str, Any]:
+    """Fetch all market microstructure data for symbol."""
     import asyncio
-    
+
     results = await asyncio.gather(
-        get_spot_orderbook_skew(),
-        get_quarterly_basis(),
+        get_spot_orderbook_skew(symbol),
+        get_quarterly_basis(symbol),
         return_exceptions=True
     )
-    
+
     return {
         "orderbook": results[0] if not isinstance(results[0], Exception) else {"error": str(results[0])},
         "basis": results[1] if not isinstance(results[1], Exception) else {"error": str(results[1])},
+        "symbol": symbol,
         "timestamp": datetime.now(timezone.utc).isoformat()
     }

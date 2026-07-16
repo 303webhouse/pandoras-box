@@ -671,7 +671,7 @@ def _field_envelope(as_of_raw, degraded, **data):
     }
 
 
-_NOT_YET_WIRED = "not yet wired for this symbol (bias_filters vendor clients are BTC-only; multi-symbol parametrization deferred to R-2/R-3)"
+_NOT_YET_WIRED = "not yet wired"  # retired: S-3 Phase 1.5 parametrized all six symbols
 _NOT_YET_BUILT_R1 = "not yet built (R-1 scope)"
 _NOT_YET_BUILT_R2 = "not yet built (R-2 scope)"
 
@@ -702,42 +702,49 @@ async def get_crypto_state(symbol: str):
     entry = get_symbol_entry(base_symbol) or {}
     tier = get_tier(base_symbol)
 
-    funding_field = _field_envelope(None, True, rate_pct=None, signal=None, note=_NOT_YET_WIRED)
-    oi_field = _field_envelope(None, True, current_oi_usd=None, signal=None, note=_NOT_YET_WIRED)
-    basis_field = _field_envelope(None, True, basis_annualized_pct=None, signal=None, note=_NOT_YET_WIRED)
+    funding_field = _field_envelope(None, True, rate_pct=None, signal=None)
+    oi_field = _field_envelope(None, True, current_oi_usd=None, signal=None)
+    basis_field = _field_envelope(None, True, basis_annualized_pct=None, signal=None)
 
-    if base_symbol == "BTC":
-        from bias_filters import coinalyze_client, binance_client
+    # S-3 Phase 1.5 (FA-7): vendor clients are now per-symbol parametrized;
+    # funding/OI/basis data available for all six tracked symbols.
+    from bias_filters import coinalyze_client, binance_client
 
-        try:
-            funding_data = await coinalyze_client.get_funding_rate()
-            funding_field = _field_envelope(
-                funding_data.get("timestamp"),
-                bool(funding_data.get("error")) or funding_data.get("health_status") != "LIVE",
-                rate_pct=funding_data.get("funding_rate"), signal=funding_data.get("signal"),
-            )
-        except Exception as exc:
-            logger.warning("crypto state: funding fetch failed for BTC: %s", exc)
+    try:
+        funding_data = await coinalyze_client.get_funding_rate(base_symbol)
+        is_na = funding_data.get("state") == "NA"
+        funding_field = _field_envelope(
+            funding_data.get("timestamp"),
+            is_na or bool(funding_data.get("error")) or funding_data.get("health_status") != "LIVE",
+            rate_pct=funding_data.get("funding_rate"), signal=funding_data.get("signal"),
+            na_reason=funding_data.get("reason") if is_na else None,
+        )
+    except Exception as exc:
+        logger.warning("crypto state: funding fetch failed for %s: %s", base_symbol, exc)
 
-        try:
-            oi_data = await coinalyze_client.get_open_interest()
-            oi_field = _field_envelope(
-                oi_data.get("timestamp"),
-                bool(oi_data.get("error")) or oi_data.get("health_status", "LIVE") != "LIVE",
-                current_oi_usd=oi_data.get("current_oi"), signal=oi_data.get("signal"),
-            )
-        except Exception as exc:
-            logger.warning("crypto state: OI fetch failed for BTC: %s", exc)
+    try:
+        oi_data = await coinalyze_client.get_open_interest(base_symbol)
+        is_na = oi_data.get("state") == "NA"
+        oi_field = _field_envelope(
+            oi_data.get("timestamp"),
+            is_na or bool(oi_data.get("error")) or oi_data.get("health_status", "LIVE") != "LIVE",
+            current_oi_usd=oi_data.get("current_oi"), signal=oi_data.get("signal"),
+            na_reason=oi_data.get("reason") if is_na else None,
+        )
+    except Exception as exc:
+        logger.warning("crypto state: OI fetch failed for %s: %s", base_symbol, exc)
 
-        try:
-            basis_data = await binance_client.get_quarterly_basis()
-            basis_field = _field_envelope(
-                basis_data.get("timestamp"),
-                bool(basis_data.get("error")) or basis_data.get("health_status", "LIVE") != "LIVE",
-                basis_annualized_pct=basis_data.get("basis_annualized"), signal=basis_data.get("signal"),
-            )
-        except Exception as exc:
-            logger.warning("crypto state: basis fetch failed for BTC: %s", exc)
+    try:
+        basis_data = await binance_client.get_quarterly_basis(base_symbol)
+        is_na = basis_data.get("state") == "NA"
+        basis_field = _field_envelope(
+            basis_data.get("timestamp"),
+            is_na or bool(basis_data.get("error")) or basis_data.get("health_status", "LIVE") != "LIVE",
+            basis_annualized_pct=basis_data.get("basis_annualized"), signal=basis_data.get("signal"),
+            na_reason=basis_data.get("reason") if is_na else None,
+        )
+    except Exception as exc:
+        logger.warning("crypto state: basis fetch failed for %s: %s", base_symbol, exc)
 
     session_field = _field_envelope(None, True, state=None, note=_NOT_YET_BUILT_R1)
     tape_health_field = _field_envelope(None, True, state=None, note=_NOT_YET_BUILT_R2)
