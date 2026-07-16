@@ -26,3 +26,4 @@ from . import stable_theme_members as _stable_theme_members  # noqa: F401
 from . import stable_movers as _stable_movers  # noqa: F401
 from . import stable_rates_fx as _stable_rates_fx  # noqa: F401
 from . import board_state as _board_state  # noqa: F401
+from . import crypto_market_profile as _crypto_market_profile  # noqa: F401

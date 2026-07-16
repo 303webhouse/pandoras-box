@@ -746,9 +746,96 @@ async def get_crypto_state(symbol: str):
     except Exception as exc:
         logger.warning("crypto state: basis fetch failed for %s: %s", base_symbol, exc)
 
-    session_field = _field_envelope(None, True, state=None, note=_NOT_YET_BUILT_R1)
-    tape_health_field = _field_envelope(None, True, state=None, note=_NOT_YET_BUILT_R2)
-    regime_field = _field_envelope(None, True, state=None, note=_NOT_YET_BUILT_R1)
+    # S-3 Phase 4 (§6.2, FA-5): wire session, regime, and tape-health fields
+    # from real S-2 + S-3 data. Previously _NOT_YET_BUILT_R1 / _NOT_YET_BUILT_R2.
+    now_utc = datetime.now(timezone.utc)
+
+    # Session (S-2 R-1): from get_session_state
+    session_field: Dict[str, Any] = _field_envelope(None, True, state=None)
+    try:
+        from config.crypto_gate_loader import get_gate_config
+        from utils.crypto_sessions import get_session_state as _get_session
+        _cv, _scfg = await get_gate_config()
+        _sess = _get_session(now_utc, _scfg)
+        session_field = _field_envelope(
+            now_utc.isoformat(), False,
+            state=_sess.get("current_session"),
+            session_label=_sess.get("label"),
+            partition=_sess.get("partition"),
+        )
+    except Exception as exc:
+        logger.warning("crypto state: session fetch failed: %s", exc)
+        session_field = _field_envelope(None, True, state=None, error=str(exc))
+
+    # Regime (S-2 R-1): latest row from crypto_regime_log for this symbol
+    regime_field: Dict[str, Any] = _field_envelope(None, True, state=None)
+    try:
+        from database.postgres_client import get_postgres_client
+        _pool = await get_postgres_client()
+        async with _pool.acquire() as _conn:
+            _row = await _conn.fetchrow(
+                """
+                SELECT regime_state, computed_at, degraded, degrade_reason
+                FROM crypto_regime_log
+                WHERE symbol = $1
+                ORDER BY computed_at DESC
+                LIMIT 1
+                """,
+                base_symbol,
+            )
+        if _row:
+            _ca = _row["computed_at"]
+            _ca = _ca if _ca.tzinfo else _ca.replace(tzinfo=timezone.utc)
+            _age = int((now_utc - _ca).total_seconds())
+            _stale = _age > 7200
+            regime_field = _field_envelope(
+                _ca.isoformat(), _row["degraded"] or _stale,
+                state=_row["regime_state"],
+                data_age_seconds=_age,
+                degrade_reason=_row["degrade_reason"],
+            )
+        else:
+            regime_field = _field_envelope(None, True, state=None, note="no regime rows yet")
+    except Exception as exc:
+        logger.warning("crypto state: regime fetch failed for %s: %s", base_symbol, exc)
+        regime_field = _field_envelope(None, True, state=None, error=str(exc))
+
+    # Tape-health (S-3 R-2): latest row from crypto_tape_health_log
+    # §5.1 hard-stop: spot feed unavailable — currently returns NA for all symbols.
+    tape_health_field: Dict[str, Any] = _field_envelope(None, True, state=None)
+    try:
+        from database.postgres_client import get_postgres_client
+        _pool2 = await get_postgres_client()
+        async with _pool2.acquire() as _conn2:
+            _th_row = await _conn2.fetchrow(
+                """
+                SELECT state, slope, spot_cvd, perp_cvd, degraded, degrade_reason, computed_at
+                FROM crypto_tape_health_log
+                WHERE symbol = $1
+                ORDER BY computed_at DESC
+                LIMIT 1
+                """,
+                base_symbol,
+            )
+        if _th_row:
+            _th_ca = _th_row["computed_at"]
+            _th_ca = _th_ca if _th_ca.tzinfo else _th_ca.replace(tzinfo=timezone.utc)
+            _th_age = int((now_utc - _th_ca).total_seconds())
+            tape_health_field = _field_envelope(
+                _th_ca.isoformat(), _th_row["degraded"] or _th_age > 600,
+                state=_th_row["state"],
+                slope=_th_row["slope"],
+                spot_cvd=_th_row["spot_cvd"],
+                perp_cvd=_th_row["perp_cvd"],
+                data_age_seconds=_th_age,
+            )
+        else:
+            tape_health_field = _field_envelope(
+                None, True, state="NA", note="no tape-health rows yet (S-3 Phase 3 §5.1 hard-stop: spot feed unavailable)"
+            )
+    except Exception as exc:
+        logger.warning("crypto state: tape-health fetch failed for %s: %s", base_symbol, exc)
+        tape_health_field = _field_envelope(None, True, state=None, error=str(exc))
 
     return {
         "symbol": base_symbol,
@@ -760,7 +847,7 @@ async def get_crypto_state(symbol: str):
         "basis": basis_field,
         "tape_health": tape_health_field,
         "regime": regime_field,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": now_utc.isoformat(),
     }
 
 
@@ -833,3 +920,69 @@ async def get_crypto_clock():
     _config_version, config = await get_gate_config()
     now = datetime.now(timezone.utc)
     return get_session_state(now, config)
+
+
+@router.get("/cycle-extremes")
+async def get_cycle_extremes(symbol: Optional[str] = Query(None)):
+    """S-3 Phase 4 (§6.1) — Cycle Extremes dial.
+
+    Returns per-symbol composite + full cell set with §4.2 staleness contracts,
+    coverage headers, and canonical copy strings. Optional ?symbol= filters to
+    a single symbol; omitting returns all six.
+
+    The dial writes ZERO rows to the signals table (D3 rule). Data-layer only.
+    """
+    from bias_filters.crypto_cycle_engine import evaluate_cycle_extremes, evaluate_all_symbols
+
+    if symbol:
+        from jobs.crypto_bars import normalize_crypto_ticker
+        canon = normalize_crypto_ticker(symbol)
+        if not canon:
+            return {
+                "error": f"'{symbol}' is not a recognized crypto symbol",
+                "valid_symbols": ["BTC", "ETH", "SOL", "HYPE", "ZEC", "FARTCOIN"],
+            }
+        return await evaluate_cycle_extremes(canon)
+
+    return {
+        "as_of": datetime.now(timezone.utc).isoformat(),
+        "symbols": await evaluate_all_symbols(),
+    }
+
+
+@router.get("/tape-health")
+async def get_tape_health(symbol: Optional[str] = Query(None)):
+    """S-3 Phase 4 (§6.1) — CVD tape-health state.
+
+    Returns spot-vs-perp CVD split, state (SPOT_LED / PERP_LED / MIXED / NA),
+    and slope per covered symbol. Uncovered symbols return explicit NA state.
+
+    §5.1 HARD-STOP NOTE (2026-07-16): spot CVD feed is unavailable on Railway
+    (Binance spot trades geo-blocked; OKX spot trade feed not yet wired).
+    All symbols currently return NA:SPOT_FEED_UNAVAILABLE. CVD events (§5.3)
+    cannot fire until a spot feed is wired. Flagged for Fable review.
+    Optional ?symbol= filters to a single symbol.
+    """
+    from bias_filters.crypto_tape_health_engine import compute_tape_health, compute_all_tape_health
+
+    if symbol:
+        from jobs.crypto_bars import normalize_crypto_ticker
+        canon = normalize_crypto_ticker(symbol)
+        if not canon:
+            return {
+                "error": f"'{symbol}' is not a recognized crypto symbol",
+                "valid_symbols": ["BTC", "ETH", "SOL", "HYPE", "ZEC", "FARTCOIN"],
+            }
+        try:
+            from config.crypto_cycle_loader import get_cycle_config
+            _, config = await get_cycle_config()
+        except Exception:
+            config = {}
+        return await compute_tape_health(canon, config)
+
+    results = await compute_all_tape_health()
+    return {
+        "as_of": datetime.now(timezone.utc).isoformat(),
+        "note": "All symbols NA:SPOT_FEED_UNAVAILABLE — see §5.1 hard-stop in S-3 completion report",
+        "symbols": results,
+    }

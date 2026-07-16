@@ -38,6 +38,8 @@ REGISTERED_TOOL_NAMES = frozenset(
         "hub_get_stable_movers",
         "hub_get_stable_rates_fx",
         "hub_get_board_state",
+        # S-3 (R-2) — Cycle Extremes / crypto market profile
+        "hub_get_crypto_market_profile",
     }
 )
 
