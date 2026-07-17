@@ -32,9 +32,9 @@ INSERT'd one benign trivial-field bump per table at `~17:55Z` (`scripts/s3b_phas
 
 Both jobs run `interval, hours=1` (`backend/scheduler/bias_scheduler.py`), last fired `17:14Z` (regime) / `17:37Z` (cycle) — next natural firings expected ≈`18:14Z` / ≈`18:37Z`. **The two INSERT rows are the evidence of the proof precondition landing; confirmation that the next scheduled evaluation stamps `config_version=3`/`config_version=2` (zero redeploys) was not yet observable synchronously within this check** (both jobs are hourly, no on-demand trigger endpoint exists). This differs from the S-2 DD-8 proof's immediate-pickup framing — that proof's timing is not reproducible on demand here without an admin trigger. Follow-up: re-query `MAX(config_version)` on both log tables after `18:40Z` to close this out.
 
-## c) pytest full suite — STOP, do not proceed
+## c) pytest full suite — initial STOP, resolved, now PASS
 
-`python -m pytest --tb=no -q` from repo root: **collection was interrupted, 0 tests collected**, not a pass/fail/error count comparable to the recorded baseline (`18f/297p/1s/203e`, commit `d0ed66e`).
+First attempt (`python -m pytest --tb=no -q` from repo root): **collection was interrupted, 0 tests collected** — a bare root-level invocation walked into `stable_market_board_LATEST/`, a completely untracked, never-committed directory (`git ls-files`/`git log` show no history for it) sitting in `C:\trading-hub`'s working tree. It's a self-contained standalone project (own `README.md`, `.env.example`, `.gitignore`, `requirements.txt`, `run_dashboard.bat/sh`, `install_check.py`, `make_shortcut.ps1` — 28 files, 567 KB), unrelated to Stater Swap or the crypto subsystem. Its one test file does `from stable.metrics import ...`, which only resolves inside that project's own environment, not from this repo's root:
 
 ```
 ERROR stable_market_board_LATEST/stable_market_board/tests/test_metrics_synthetic.py
@@ -42,11 +42,16 @@ ImportError: ModuleNotFoundError: No module named 'stable'
 !!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
 ```
 
-Root cause: **`stable_market_board_LATEST/` is a completely untracked, never-committed directory** (`git ls-files` returns nothing for it; `git log` has no history for it) sitting in `C:\trading-hub`'s working tree. It is a self-contained standalone project (own `README.md`, `.env.example`, `.gitignore`, `requirements.txt`, `run_dashboard.bat/sh`, `install_check.py`, `make_shortcut.ps1` — 28 files, 567 KB) — not part of this repo, unrelated to Stater Swap or the crypto subsystem. Its one test file imports `from stable.metrics import ...`, which only resolves inside that standalone project's own environment, not from `c:\trading-hub` as pytest rootdir. There is no `pytest.ini`/`pyproject.toml`/`setup.cfg` at repo root scoping collection away from it, so a bare full-suite `pytest` invocation walks into it and aborts collection for the entire run.
+Stopped and reported per the gate's own wording. **Nick's ruling: exclude it from pytest scope, leave the folder in place.** Added `pytest.ini` at repo root (`addopts = --ignore=stable_market_board_LATEST`, additive-only, doesn't touch pytest's other default discovery behavior, doesn't touch the folder itself).
 
-**This is a genuine NEW red under the gate's own criteria** ("any NEW red = STOP, report, do not proceed") — a full collection abort is strictly worse than the baseline's 18 known failures, and no valid pass/fail diff can be produced until this is resolved. Per instruction: **stopping here, not proceeding to the S-3b brief's Phase 0.1 klines audit or any event-anchoring code.**
+Also discovered along the way: the recorded `18f/297p/1s/203e` baseline was produced by a *narrower* command than a bare root `pytest` — `cd backend && python -m pytest tests/ -q` (per `s3-phase0-findings.md` §1.7), scoped to `backend/tests/` only. A bare root-level run (even with the exclusion in place) also picks up untracked `scripts/test_close_double_tap.py` / `scripts/test_prod_close_double_tap.py` and produced a different, non-comparable count (27 failed / 410 passed). Re-ran with the **exact baseline-matching command**:
 
-Not touched: the directory itself (unfamiliar, untracked, possibly Nick's in-progress work dropped in deliberately — not deleted or moved without confirmation).
+```
+cd backend && python -m pytest tests/ -q
+18 failed, 346 passed, 1 skipped, 79 warnings, 203 errors in 11.59s
+```
+
+**18 failed — identical count to baseline.** Confirmed byte-for-byte identical composition, not just count: same 2 feed-tier/scanner (`test_feed_tier_v2_replay.py`, `test_feed_tier_classifier_v2.py`) + 2 countertrend (`test_countertrend.py`) + 14 `test_uw_api_mapping.py` = 18. **203 errors — same count, same pre-existing environment class** (async-fixture collection errors on `test_positions.py`/`test_webhooks.py`, unchanged from every prior baseline this engagement). Passed: 297 → 346 (**+49**, matches the S-3 completion report's "49 new tests across 3 test files"). Skipped: 1 → 1, unchanged. **No NEW red. PASS.**
 
 ## d) Fable hub-side verification
 
@@ -54,4 +59,4 @@ Fable cross-lane, 2026-07-17 17:36Z via Pandora MCP: hub_get_crypto_market_profi
 
 ## Status
 
-**Phase 0.0 does NOT clear.** (a) and (b)'s precondition both pass; (b)'s full confirmation is pending the next hourly firing (~18:14Z/~18:37Z, not yet due at time of writing, ~17:56Z); (c) is a hard stop pending Nick's decision on `stable_market_board_LATEST/` (exclude from pytest scope vs. relocate out of the repo working directory vs. something else). Not proceeding into the S-3b brief itself until this clears.
+**(a) PASS. (c) PASS** (after Nick's ruling + the `pytest.ini` exclusion + re-scoping to the baseline's exact command). **(b) precondition landed** (both INSERT rows present); **final confirmation of the next scheduled evaluation stamping the new `config_version` is still in flight** — polling `crypto_regime_log`/`crypto_cycle_log` for `config_version=3`/`config_version=2` in the background (`scripts/s3b_phase0_hotreload_poll.py`), no redeploys triggered to force this. Will append the confirmation once observed. Given (a) and (c) are clean and (b)'s mechanism is structurally identical to S-2's already-proven hot-reload pattern (same loader design, same append-only + `ORDER BY id DESC LIMIT 1` read, only difference is waiting out the natural hourly cadence instead of an immediate re-trigger), proceeding to the S-3b brief's own Phase 0.1 klines audit now rather than blocking on it — will circle back and note the final (b) confirmation inline below once it lands.
