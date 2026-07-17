@@ -629,39 +629,27 @@ async def test_quote_stale_propagates_status():
 
 @pytest.mark.asyncio
 async def test_describe_lists_all_tools():
+    """Verifies FastMCP's LIVE tool registry matches the REGISTERED_TOOL_NAMES
+    whitelist -- two independently-populated things that should always agree.
+
+    Derives from REGISTERED_TOOL_NAMES rather than a hardcoded count/set
+    (2026-07-16, Fable) -- a literal int/set here broke twice in 24h as
+    concurrent lanes each added a tool without updating this file. The
+    canonical, deliberately-hardcoded enumeration lives in exactly one place:
+    test_decorators.py::test_whitelisted_names_match_spec. This test's job is
+    consistency between the live server and that whitelist, not to be a
+    second copy of it."""
     # Importing this triggers registration of every tool.
     import hub_mcp.tools  # noqa: F401
     from hub_mcp.tools.describe import mcp_describe_tools
+    from hub_mcp.decorators import REGISTERED_TOOL_NAMES
 
     r = await mcp_describe_tools()
     assert _is_valid_envelope(r)
     assert r["status"] == "ok"
-    assert r["data"]["tool_count"] == 22
+    assert r["data"]["tool_count"] == len(REGISTERED_TOOL_NAMES)
     names = {t["name"] for t in r["data"]["tools"]}
-    assert names == {
-        "hub_get_bias_composite",
-        "hub_get_flow_radar",
-        "hub_get_sector_strength",
-        "hub_get_hermes_alerts",
-        "hub_get_hydra_scores",
-        "hub_get_positions",
-        "hub_get_portfolio_balances",
-        "hub_get_quote",
-        "hub_get_crypto_quote",
-        "hub_get_options_chain",
-        "hub_get_trade_ideas",
-        "hub_get_market_profile",
-        "hub_get_chart_indicators",
-        "mcp_ping",
-        "mcp_describe_tools",
-        "hub_get_crypto_market_profile",
-        "hub_get_stable_regime",
-        "hub_get_stable_themes",
-        "hub_get_stable_theme_members",
-        "hub_get_stable_movers",
-        "hub_get_stable_rates_fx",
-        "hub_get_board_state",
-    }
+    assert names == REGISTERED_TOOL_NAMES
 
 
 # ─── hub_get_market_profile ──────────────────────────────────────────────

@@ -24,24 +24,21 @@ def test_empty_description_fails():
             return {}
 
 
-def test_registered_tool_list_count():
-    """Adding a new tool requires editing the whitelist deliberately.
-    (Was 10; +options_chain/trade_ideas/market_profile, +chart_indicators 2026-06-25;
-    +crypto_quote 2026-07-14 (90f9d10); +6 Brief 3 stable/board tools 2026-07-16
-    (0a1e742); +crypto_market_profile 2026-07-16 (S-3 R-2, concurrent lane).
-    NOTE: this test was found failing (stuck at 14, then stuck at 21) TWICE within
-    24h during Brief 3 -- once from crypto_quote never getting the test updated,
-    once from a concurrent S-3 lane's tool addition landing the same evening.
-    Keep this in sync going forward; it's the whole point of a "deliberate edit"
-    guard -- the guard only works if the test moves with the whitelist."""
-    assert len(REGISTERED_TOOL_NAMES) == 22
-
-
 def test_whitelisted_names_match_spec():
     """The whitelist must exactly match the canonical names. hub_get_quote added
     2026-05-21; options_chain/trade_ideas/market_profile since; chart_indicators
     added 2026-06-25 (PYTHAGORAS daily technical feed); crypto_quote 2026-07-14;
-    6 Brief 3 stable/board tools 2026-07-16; crypto_market_profile 2026-07-16 (S-3 R-2)."""
+    6 Brief 3 stable/board tools 2026-07-16; crypto_market_profile 2026-07-16 (S-3 R-2).
+
+    Deliberate-edit guard: a new/removed tool name changes this frozenset literal,
+    which a reviewer sees in the diff. This is the ONE place that check belongs --
+    a separate len()==literal-int test used to sit alongside this one and broke
+    TWICE within 24h (crypto_quote, then crypto_market_profile, each landing
+    without the count test being updated) for zero extra coverage: two equal
+    frozensets already have equal length, so the count test could never catch
+    anything this one wouldn't also catch, just with a less useful error message.
+    Removed 2026-07-16 rather than fixed a third time -- kills the bug class
+    instead of re-patching an instance of it."""
     assert REGISTERED_TOOL_NAMES == frozenset(
         {
             "hub_get_bias_composite",
