@@ -502,6 +502,102 @@ async def lifespan(app: FastAPI):
                 logger.warning("Flow dead-feed watchdog error: %s", e)
             await asyncio.sleep(300)  # 5-min cadence
 
+    async def pythia_staleness_watchdog_loop():
+        """STOPGAP per-ticker PYTHIA MP-feed staleness alarm (2026-07-16, Fable GO).
+
+        The existing `_maybe_mp_feed_down_alarm` (config/l1_gate.py) checks GLOBAL
+        MAX(timestamp) across ALL of pythia_events -- any surviving liquid ticker
+        keeps that timestamp fresh and masks individual dead names. This is the
+        third time that exact blind spot caused an undetected outage (B4 6/10:
+        decay to 3 tickers; 6/29 review: decay to 23, SPY dark 12 days; 7/1-7/16:
+        SPY+QQQ dark 14 days, root cause = one ~240-symbol TradingView watchlist
+        alert with only ~39 calc slots, survivor set reshuffles on watchlist edits).
+
+        This is the STOPGAP, not the durable fix -- scope is intentionally minimal
+        (roster = SPY, QQQ only, per the GO). The durable fix (liquid-20 coverage,
+        feed-shed root-cause mitigation) is docs/codex-briefs/2026-06-29-pythia-mp-
+        feed-reliability-titans-brief.md Part 1, still not built -- this does not
+        replace that brief, it just makes sure SPY/QQQ specifically can never again
+        go dark for 14 days without anyone noticing.
+
+        Per-ticker Redis latch (mirrors flow_deadfeed_watchdog_loop exactly) --
+        each roster ticker alarms/recovers independently, not conflated.
+
+        Threshold is SESSION-aware, not a raw hour count: "no event for more than
+        1 full session" means the last event predates the previous COMPLETE
+        trading session, not "no event in the last 24-26h" -- a raw-hours
+        threshold would false-alarm every Monday morning across the weekend gap
+        (exactly the class of bug already found and fixed once this week for a
+        different feed's staleness math). Reuses the session-date helpers already
+        built and vetted for pythia_events in services/read_only/market_profile.py
+        rather than reimplementing weekday-session arithmetic a second time.
+        """
+        from datetime import datetime as _dt, timezone as _tz
+        from zoneinfo import ZoneInfo
+
+        ROSTER = ["SPY", "QQQ"]  # stopgap scope -- GO'd minimum, not the full liquid-20
+        LATCH_TTL = 7200  # ~2h -- one alarm per dead episode, not per cycle
+
+        def _in_rth() -> bool:
+            from datetime import time as _t
+            now = _dt.now(ZoneInfo("America/New_York"))
+            if now.weekday() >= 5:
+                return False
+            return _t(9, 30) <= now.time() <= _t(16, 0)
+
+        await asyncio.sleep(210)  # after the flow watchdog's 180s settle
+
+        while True:
+            try:
+                if _in_rth():
+                    from services.read_only.market_profile import _current_session_date, _prev_weekday
+
+                    redis = await get_redis_client()
+                    pool = await get_postgres_client()
+                    if redis and pool:
+                        now_et = _dt.now(ZoneInfo("America/New_York"))
+                        current_session = _current_session_date(now_et)
+
+                        for ticker in ROSTER:
+                            async with pool.acquire() as conn:
+                                ts = await conn.fetchval(
+                                    "SELECT MAX(timestamp) FROM pythia_events WHERE ticker = $1", ticker
+                                )
+
+                            latch_key = f"alarm:pythia_stale:{ticker}"
+                            latched = bool(await redis.get(latch_key))
+
+                            if ts is None:
+                                gap = None  # never fired at all -- treat as stale
+                                stale = True
+                            else:
+                                if ts.tzinfo is None:
+                                    ts = ts.replace(tzinfo=_tz.utc)
+                                event_session = ts.astimezone(ZoneInfo("America/New_York")).date()
+                                gap = 0
+                                d = current_session
+                                while d > event_session:
+                                    d = _prev_weekday(d)
+                                    gap += 1
+                                stale = gap > 1  # missed MORE than 1 full session
+
+                            if stale and not latched:
+                                from bias_engine.anomaly_alerts import send_alert
+                                age_desc = "no pythia_events row ever" if ts is None else f"last event {ts.isoformat()} ({gap} sessions ago)"
+                                status = f"{ticker}: {age_desc}. Stopgap roster alarm (SPY/QQQ) -- durable fix is the 6/29 per-name monitor brief, still unbuilt."
+                                await send_alert(f"🚨 PYTHIA feed dead: {ticker}", status, severity="warning")
+                                await redis.set(latch_key, "1", ex=LATCH_TTL)
+                                logger.warning("PYTHIA staleness alarm FIRED for %s: %s", ticker, status)
+                            elif (not stale) and latched:
+                                from bias_engine.anomaly_alerts import send_alert
+                                status = f"{ticker}: fresh again, last event {ts.isoformat() if ts else 'unknown'} ({gap} sessions ago)."
+                                await send_alert(f"✅ PYTHIA feed restored: {ticker}", status, severity="info")
+                                await redis.delete(latch_key)
+                                logger.info("PYTHIA staleness alarm CLEARED for %s: %s", ticker, status)
+            except Exception as e:
+                logger.warning("PYTHIA staleness watchdog error: %s", e)
+            await asyncio.sleep(1800)  # 30-min cadence -- session-day-granularity condition, no need for tighter polling
+
     # WH-ACCUMULATION scanner: detect institutional accumulation hourly (ZEUS 1A.3)
     async def wh_accumulation_loop():
         """Run WH-ACCUMULATION scanner every hour during market hours."""
@@ -662,6 +758,7 @@ async def lifespan(app: FastAPI):
     # flow_events feed for pipeline P2C / wh_confluence / committee briefings.
     uw_flow_poller_task = asyncio.create_task(uw_flow_poller_loop())
     flow_deadfeed_watchdog_task = asyncio.create_task(flow_deadfeed_watchdog_loop())  # L1.0 Chunk 3
+    pythia_staleness_watchdog_task = asyncio.create_task(pythia_staleness_watchdog_loop())  # stopgap, 2026-07-16
     adx_regime_task = asyncio.create_task(adx_regime_loop())
 
     # Stable Engine: nightly close recompute + provisional snapshots + index/rates
@@ -985,6 +1082,7 @@ async def lifespan(app: FastAPI):
     crypto_scan_task.cancel()
     uw_flow_poller_task.cancel()  # RE-ENABLED 2026-06-18 (L1.0 Chunk 4) — see creation site
     flow_deadfeed_watchdog_task.cancel()  # L1.0 Chunk 3 dead-feed watchdog
+    pythia_staleness_watchdog_task.cancel()  # stopgap PYTHIA roster staleness alarm
     triton_shadow_task.cancel()  # Triton Step-0 shadow poller
     triton_grader_task.cancel()  # Triton Step-0 grader
     wh_accumulation_task.cancel()

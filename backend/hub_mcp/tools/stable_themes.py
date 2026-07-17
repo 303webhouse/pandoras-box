@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from ..decorators import mcp_tool
 from ..envelope import make_response
-from ..stable_envelope import map_stable_status, flatline_error
+from ..stable_envelope import map_stable_status, flatline_error, theme_warnings
 from services.read_only.stable import get_themes
 
 DESCRIPTION = (
@@ -25,11 +25,6 @@ DESCRIPTION = (
     "data_quality_warnings on every response; if non-empty for a theme "
     "you're about to reason from, discount that theme's score."
 )
-
-_KNOWN_BAD_THEMES = {
-    "Robotics": "Robotics score is known-corrupted (delisted-ticker LAZR bug), do not treat as genuine momentum.",
-}
-
 
 def _curate(theme_row: dict) -> dict:
     return {
@@ -62,11 +57,7 @@ async def hub_get_stable_themes() -> dict:
     raw_themes = data.get("themes") or []
     curated_themes = [_curate(t) for t in raw_themes]
 
-    warnings = [
-        _KNOWN_BAD_THEMES[t["theme"]]
-        for t in curated_themes
-        if t.get("theme") in _KNOWN_BAD_THEMES
-    ]
+    warnings = theme_warnings([t.get("theme") for t in curated_themes])
 
     out_data = {
         "date": data.get("date"),
