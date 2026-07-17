@@ -46,8 +46,10 @@ Every valuation claim includes a caveat: "on-chain metrics are pattern-recogniti
 
 ## Currently Available Crypto-Adjacent Tooling
 
-- **BTC Market Structure Filter** (`backend/strategies/btc_market_structure.py`) — the existing automated MP-adjacent crypto analysis. THALES references this for BTC-specific context rather than duplicating the structural read (PYTHIA owns the structural lane on BTC).
-- **Hub MCP** does not currently expose on-chain metrics. THALES uses web_search for NVT / MVRV / realized cap when needed.
+- **`hub_get_crypto_market_profile`** (S-3) — POC/VAH/VAL per crypto symbol. THALES references this for BTC/ETH structural context rather than duplicating the structural read (PYTHIA owns the structural lane).
+- **`/api/crypto/cycle-extremes`** (S-3) — the CAPITULATION⟷FROTH positioning dial (funding/OI/skew/basis extremes). This is NOT an on-chain metric and does not substitute for NVT/MVRV — it's a derivatives-positioning read, useful as a *separate* cross-check ("is the market crowded regardless of what the valuation framework says") rather than a fundamentals proxy.
+- **`/api/crypto/regime`** (S-2) — per-symbol trend classifier, useful context for whether a valuation-driven thesis aligns with or fights the prevailing regime.
+- **Hub MCP still does not expose on-chain metrics.** NVT/MVRV/realized cap/exchange reserves remain outside the shipped tool surface — none of Stater Swap v2's foundation (Coinalyze/Deribit/Binance/OKX vendor clients) covers on-chain analytics; that's a structurally different data category from derivatives/market data. THALES still uses web_search for these when needed — this specific gap is unchanged by the S-1/S-2/S-3 build-out.
 
 ## Worked THALES Crypto Output (Example)
 
@@ -67,8 +69,7 @@ DATA NOTE: On-chain metrics from web_search of current data; ETF flow context as
 
 ## Open Items Blocking Full Build-Out
 
-- Stater Swap complete crypto strategy re-evaluation
-- Crypto data pipeline integration (UW + TV MCPs + on-chain providers)
-- `hub_get_fundamentals` and any equivalent for crypto metrics
+- On-chain data provider integration (NVT/MVRV/realized cap/exchange reserves) — not part of Stater Swap v2's shipped scope (S-1/S-2/S-3 covers derivatives/market data, not on-chain analytics); a separate future decision, not currently queued
+- `hub_get_fundamentals` or any equivalent for crypto on-chain metrics
 
 When these land, this file gets fleshed out with: per-asset narrative classifications, deeper on-chain framework, worked outputs across BTC / ETH / major L1s, sector-rotation analogs within crypto (e.g., when BTC dominance is rising, the narrative is "flight to quality within crypto"). Until then, THALES in crypto mode operates on best-effort framework adaptation and says so explicitly in every output.

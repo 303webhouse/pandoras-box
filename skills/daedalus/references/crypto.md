@@ -1,6 +1,6 @@
 # DAEDALUS — Crypto Options Playbook
 
-**STATUS: NOT APPLICABLE in v1.**
+**STATUS: NOT APPLICABLE in v1 — confirmed unchanged by Stater Swap v2's foundation build-out.** Briefs S-1/S-2/S-3 (ZEUS Phase II) shipped real crypto quote/market-profile/regime/session/cycle-extremes data — none of it introduces an options venue. Breakout Prop's account structure is untouched by this work; DAEDALUS's conclusion below stands exactly as before.
 
 DAEDALUS does NOT recommend options structures on crypto in the current scope. The Breakout Prop account is crypto-only and does NOT permit options trading — that account only supports spot or futures exposure on BTC.
 
