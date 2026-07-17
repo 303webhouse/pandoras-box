@@ -1,26 +1,26 @@
 # URSA — Crypto Playbook
 
-**STATUS: STUB.** This file is awaiting the Stater Swap strategy rebuild, which will redesign the crypto methodology around the UW API and TV (TradingView) MCP data sources.
-
-Until that rebuild lands, URSA should:
-1. Decline crypto-specific bear reads, OR
-2. Explicitly flag in the output that the crypto playbook is not yet ratified and any output is a best-effort sketch rather than a committee-grade read.
+**STATUS: FOUNDATION LIVE, PLAYBOOK NOT YET AUTHORED.** Stater Swap v2's foundation (Briefs S-1/S-2/S-3, ZEUS Phase II) shipped a real crypto data + governance layer — not via UW/TV MCP feeds as originally scoped (UW's crypto coverage is too thin; the actual build uses Coinalyze/Deribit/Binance/OKX vendor clients internally), but the tooling gap this stub was blocked on is closed. The bear-pattern *methodology* below is still not ratified — URSA should still:
+1. Decline crypto-specific bear reads that require unratified pattern-library judgment, OR
+2. Explicitly flag that the crypto playbook's methodology is not yet ratified — but note real data now backs whatever read is given (no longer "no data source exists").
 
 Do not author crypto reads from general LLM pretrained priors — the methodology must come from Nick's actual strategy work, not generic crypto knowledge.
 
-## Sections to Populate Once Stater Swap Rebuild Lands
+## What's real now (six-symbol universe: BTC, ETH, SOL, HYPE, ZEC, FARTCOIN)
 
-- **Bear pattern library** — funding rate reversals, on-chain distribution signals, ETF outflow regimes, BTC dominance breakdowns, halving cycle exhaustion, liquidation cascade setups
-- **Crypto-specific data sources and endpoints** — UW crypto coverage, TV MCP feeds, on-chain providers, exchange APIs
-- **Asset universe** — BTC, ETH, major L1s, L2s, DeFi, memes, AI tokens, and how to categorize for THALES cross-sectional rotation reads
-- **Position sizing rules** — adapted for 24/7 markets, leverage and liquidation dynamics, smaller cap requirements, Breakout Prop trailing-drawdown awareness
-- **Custody and execution constraints** — wallet management, exchange selection, gas considerations
-- **Three-bucket fit for crypto** — how B1/B2/B3 framework adapts to crypto's continuous market
+- **`hub_get_crypto_quote(symbol)`** — live quote, v2.0 envelope. Bare/ambiguous tickers ("BTC") error with candidates rather than silently resolving wrong (the original P0 this whole program started from).
+- **`hub_get_crypto_market_profile`** — POC/VAH/VAL per symbol (PYTHIA's lane; URSA cross-references for structural context on a bear thesis).
+- **`/api/crypto/regime`** — per-symbol TREND_UP/CHOP/TREND_DOWN, hourly, BTC as master gate. Directly usable for "is this bear thesis fighting the regime" checks.
+- **`/api/crypto/cycle-extremes`** — the **Cycle Extremes dial** (CAPITULATION ⟷ FROTH), full two-column for BTC/ETH, partial elsewhere per coverage. **This is URSA's froth-dial line:** when a bear thesis leans on "this is overextended," check the FROTH column here first — it's a real positioning-crowding read (funding/OI/skew/basis extremes), not a vibe. Copy is always "reduce new risk," never "sell" — URSA should not over-read a FROTH cell as a standalone short trigger; it's context, same as the CAPITULATION column is B1 accumulation-timing context, not a buy signal.
+- **`/api/crypto/tape-health`** — spot-vs-perp CVD split. Currently `NA:SPOT_FEED_UNAVAILABLE` for all symbols pending a small pending wire-in (S-3b micro-brief, not yet executed) — do not treat this field as a real read until that lands.
+- **Session/clock** (`/api/crypto/clock`) — ASIA/LONDON/NY partition + 5 event windows, dual-labeled.
 
-## Open Items Blocking This File
+**Still missing (the actual playbook gap):** the bear pattern library itself (funding rate reversals, on-chain distribution signals, ETF outflow regimes, dominance breakdowns, halving cycle exhaustion, liquidation cascade setups), position sizing rules adapted for 24/7 markets + Breakout Prop's trailing-drawdown awareness, and the three-bucket (B1/B2/B3) fit for crypto's continuous market. These are methodology/strategy calls (R-3+ scope, Brief S-4 onward), not data-availability gaps — the data now exists to eventually back them.
 
-- BTCUSDT ticker support in the hub
-- Stater Swap (crypto) complete strategy re-evaluation
-- Crypto data pipeline integration (UW + TV MCPs)
+## Open Items Blocking Full Ratification
 
-When these land, this file gets fleshed out and the `STATUS: STUB` line above gets removed.
+- Bear-pattern methodology itself (strategy work, not data — R-3/S-4+)
+- Position sizing rules for 24/7 markets + Breakout Prop drawdown awareness
+- Three-bucket (B1/B2/B3) crypto fit
+
+When these land, the `STATUS` line above changes to ratified and this stub note is removed.
