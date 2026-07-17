@@ -20,6 +20,30 @@ from __future__ import annotations
 
 from typing import Optional
 
+# Known-corrupted theme scores -- tool-output guard ONLY, does not fix the
+# upstream computation (that's a separate, not-yet-written brief; orphaned
+# P3 backlog item, scoped 7/10, never built). Shared here (not duplicated
+# per-tool) so a future addition/removal only happens in one place --
+# every hub_get_stable_* tool that surfaces a theme name checks this dict.
+# Micro-fix 2026-07-16 (Fable): originally only wired into hub_get_stable_themes;
+# hub_get_stable_regime's dominant/emerging/fading lists also surface theme
+# names (Robotics was serving unflagged at rank 1 in dominant[], THALES's
+# primary regime read) and needed the same guard.
+KNOWN_BAD_THEMES = {
+    "Robotics": "Robotics score is known-corrupted (delisted-ticker LAZR bug), do not treat as genuine momentum.",
+}
+
+
+def theme_warnings(theme_names: list) -> list:
+    """Return data_quality_warnings for any known-bad theme name present in theme_names."""
+    seen = []
+    out = []
+    for name in theme_names:
+        if name in KNOWN_BAD_THEMES and name not in seen:
+            seen.append(name)
+            out.append(KNOWN_BAD_THEMES[name])
+    return out
+
 
 def map_stable_status(data: dict, feed: Optional[str] = None) -> tuple[str, Optional[int]]:
     """Map a services/read_only/stable.py or board.py envelope dict to (mcp_status, staleness_seconds).
