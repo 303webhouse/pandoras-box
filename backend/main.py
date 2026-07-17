@@ -503,22 +503,31 @@ async def lifespan(app: FastAPI):
             await asyncio.sleep(300)  # 5-min cadence
 
     async def pythia_staleness_watchdog_loop():
-        """STOPGAP per-ticker PYTHIA MP-feed staleness alarm (2026-07-16, Fable GO).
+        """Per-name PYTHIA MP-feed staleness alarm -- durable fix, full liquid-20 roster.
+
+        docs/codex-briefs/2026-06-29-pythia-mp-feed-reliability-titans-brief.md
+        Part 1, BUILT 2026-07-17 (10-min ATLAS freshness re-check passed --
+        config.liquid_universe.LIQUID_UNIVERSE unchanged, still the 20-ticker
+        doc-exhaustive/provisional-ratified set). Part 2 (feed-shed root-cause)
+        was already answered by Fable's 2026-07-15 TV log export (one ~240-symbol
+        watchlist alert, ~39 calc slots, survivor set reshuffles on watchlist
+        edits) -- confirms the brief's own leading hypothesis almost exactly
+        (~40-64 guessed, ~39 found). No separate Part 2 build needed.
 
         The existing `_maybe_mp_feed_down_alarm` (config/l1_gate.py) checks GLOBAL
         MAX(timestamp) across ALL of pythia_events -- any surviving liquid ticker
         keeps that timestamp fresh and masks individual dead names. This is the
         third time that exact blind spot caused an undetected outage (B4 6/10:
         decay to 3 tickers; 6/29 review: decay to 23, SPY dark 12 days; 7/1-7/16:
-        SPY+QQQ dark 14 days, root cause = one ~240-symbol TradingView watchlist
-        alert with only ~39 calc slots, survivor set reshuffles on watchlist edits).
+        SPY+QQQ dark 14 days). Live proof the blind spot is still active right
+        now (2026-07-17, checked before shipping this): 14 of the 20 liquid-20
+        tickers are stale by 7-95+ days (HYG since April) while SPY/QQQ/SMH/
+        TSLA/IWM/NVDA stay fresh and keep the global alarm quiet throughout.
 
-        This is the STOPGAP, not the durable fix -- scope is intentionally minimal
-        (roster = SPY, QQQ only, per the GO). The durable fix (liquid-20 coverage,
-        feed-shed root-cause mitigation) is docs/codex-briefs/2026-06-29-pythia-mp-
-        feed-reliability-titans-brief.md Part 1, still not built -- this does not
-        replace that brief, it just makes sure SPY/QQQ specifically can never again
-        go dark for 14 days without anyone noticing.
+        Started as a same-evening STOPGAP (2026-07-16, SPY/QQQ only, Fable GO) --
+        promoted in-place to the full liquid-20 roster rather than standing up a
+        second parallel watchdog; same task/latch infrastructure, just the
+        roster and framing changed. The "stopgap retires" by becoming this.
 
         Per-ticker Redis latch (mirrors flow_deadfeed_watchdog_loop exactly) --
         each roster ticker alarms/recovers independently, not conflated.
@@ -531,11 +540,15 @@ async def lifespan(app: FastAPI):
         different feed's staleness math). Reuses the session-date helpers already
         built and vetted for pythia_events in services/read_only/market_profile.py
         rather than reimplementing weekday-session arithmetic a second time.
+
+        AEGIS (brief guardrail): alarm bodies carry ticker + timestamp + session-
+        gap count only -- no secrets/DSN/payloads.
         """
         from datetime import datetime as _dt, timezone as _tz
         from zoneinfo import ZoneInfo
+        from config.liquid_universe import LIQUID_UNIVERSE
 
-        ROSTER = ["SPY", "QQQ"]  # stopgap scope -- GO'd minimum, not the full liquid-20
+        ROSTER = sorted(LIQUID_UNIVERSE)  # full liquid-20, per the 6/29 brief's Part 1
         LATCH_TTL = 7200  # ~2h -- one alarm per dead episode, not per cycle
 
         def _in_rth() -> bool:
@@ -584,7 +597,7 @@ async def lifespan(app: FastAPI):
                             if stale and not latched:
                                 from bias_engine.anomaly_alerts import send_alert
                                 age_desc = "no pythia_events row ever" if ts is None else f"last event {ts.isoformat()} ({gap} sessions ago)"
-                                status = f"{ticker}: {age_desc}. Stopgap roster alarm (SPY/QQQ) -- durable fix is the 6/29 per-name monitor brief, still unbuilt."
+                                status = f"{ticker}: {age_desc}. Per-name liquid-20 roster alarm (6/29 brief Part 1)."
                                 await send_alert(f"🚨 PYTHIA feed dead: {ticker}", status, severity="warning")
                                 await redis.set(latch_key, "1", ex=LATCH_TTL)
                                 logger.warning("PYTHIA staleness alarm FIRED for %s: %s", ticker, status)
@@ -758,7 +771,7 @@ async def lifespan(app: FastAPI):
     # flow_events feed for pipeline P2C / wh_confluence / committee briefings.
     uw_flow_poller_task = asyncio.create_task(uw_flow_poller_loop())
     flow_deadfeed_watchdog_task = asyncio.create_task(flow_deadfeed_watchdog_loop())  # L1.0 Chunk 3
-    pythia_staleness_watchdog_task = asyncio.create_task(pythia_staleness_watchdog_loop())  # stopgap, 2026-07-16
+    pythia_staleness_watchdog_task = asyncio.create_task(pythia_staleness_watchdog_loop())  # 6/29 brief Part 1, full liquid-20 as of 2026-07-17
     adx_regime_task = asyncio.create_task(adx_regime_loop())
 
     # Stable Engine: nightly close recompute + provisional snapshots + index/rates
@@ -1082,7 +1095,7 @@ async def lifespan(app: FastAPI):
     crypto_scan_task.cancel()
     uw_flow_poller_task.cancel()  # RE-ENABLED 2026-06-18 (L1.0 Chunk 4) — see creation site
     flow_deadfeed_watchdog_task.cancel()  # L1.0 Chunk 3 dead-feed watchdog
-    pythia_staleness_watchdog_task.cancel()  # stopgap PYTHIA roster staleness alarm
+    pythia_staleness_watchdog_task.cancel()  # PYTHIA per-name liquid-20 staleness alarm (6/29 brief Part 1)
     triton_shadow_task.cancel()  # Triton Step-0 shadow poller
     triton_grader_task.cancel()  # Triton Step-0 grader
     wh_accumulation_task.cancel()
