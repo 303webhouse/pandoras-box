@@ -70,7 +70,6 @@ async def main() -> int:
                 if gate_done and cycle_done:
                     print("DONE both confirmed", flush=True)
                     return 0
-                print(f"waiting... elapsed={elapsed}s gate_done={gate_done} cycle_done={cycle_done}", flush=True)
                 await asyncio.sleep(POLL_SECONDS)
                 elapsed += POLL_SECONDS
     finally:
