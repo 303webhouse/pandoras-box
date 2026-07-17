@@ -30,7 +30,12 @@ INSERT'd one benign trivial-field bump per table at `~17:55Z` (`scripts/s3b_phas
 - `crypto_gate_config` **id=3**, `created_by='S3B_PHASE0_HOTRELOAD_PROOF'`: `regime.stale_bars_max_hours` 48 → 49.
 - `crypto_cycle_config` **id=2**, `created_by='S3B_PHASE0_HOTRELOAD_PROOF'`: `tape_health.staleness_seconds` 120 → 121.
 
-Both jobs run `interval, hours=1` (`backend/scheduler/bias_scheduler.py`), last fired `17:14Z` (regime) / `17:37Z` (cycle) — next natural firings expected ≈`18:14Z` / ≈`18:37Z`. **The two INSERT rows are the evidence of the proof precondition landing; confirmation that the next scheduled evaluation stamps `config_version=3`/`config_version=2` (zero redeploys) was not yet observable synchronously within this check** (both jobs are hourly, no on-demand trigger endpoint exists). This differs from the S-2 DD-8 proof's immediate-pickup framing — that proof's timing is not reproducible on demand here without an admin trigger. Follow-up: re-query `MAX(config_version)` on both log tables after `18:40Z` to close this out.
+Both jobs run `interval, hours=1` (`backend/scheduler/bias_scheduler.py`), last fired `17:14Z` (regime) / `17:37Z` (cycle) before the INSERT. **Confirmed via background poll (`scripts/s3b_phase0_hotreload_poll.py`):**
+
+- `crypto_regime_log`: `config_version=3` first observed at `2026-07-17T19:30:31.188Z` (symbol `FARTCOIN-USD`).
+- `crypto_cycle_log`: `config_version=2` first observed at `2026-07-17T19:30:50.266Z` (symbol `FARTCOIN`).
+
+Both picked up the new config on their next natural hourly firing, zero redeploys, zero code touched between the INSERT and the pickup — same mechanism S-2's DD-8 proof established. **PASS, item (b) fully closed.**
 
 ## c) pytest full suite — initial STOP, resolved, now PASS
 
@@ -59,4 +64,6 @@ Fable cross-lane, 2026-07-17 17:36Z via Pandora MCP: hub_get_crypto_market_profi
 
 ## Status
 
-**(a) PASS. (c) PASS** (after Nick's ruling + the `pytest.ini` exclusion + re-scoping to the baseline's exact command). **(b) precondition landed** (both INSERT rows present); **final confirmation of the next scheduled evaluation stamping the new `config_version` is still in flight** — polling `crypto_regime_log`/`crypto_cycle_log` for `config_version=3`/`config_version=2` in the background (`scripts/s3b_phase0_hotreload_poll.py`), no redeploys triggered to force this. Will append the confirmation once observed. Given (a) and (c) are clean and (b)'s mechanism is structurally identical to S-2's already-proven hot-reload pattern (same loader design, same append-only + `ORDER BY id DESC LIMIT 1` read, only difference is waiting out the natural hourly cadence instead of an immediate re-trigger), proceeding to the S-3b brief's own Phase 0.1 klines audit now rather than blocking on it — will circle back and note the final (b) confirmation inline below once it lands.
+**Phase 0.0 fully clears: (a) PASS, (b) PASS, (c) PASS.** No redeploys triggered anywhere in this check.
+
+Moved on to the S-3b brief's own Phase 0.1 klines audit next — that audit surfaced a separate, second hard-stop-class finding (a ticker-format defect in `get_market_structure_context()`'s Binance klines fetch, live in production since yesterday's `0037375`, worse than the brief's anticipated "BTC-only" case). Written up separately: `docs/strategy-reviews/stater-swap-redesign/s3b-phase0-findings.md`. **Not proceeding to S-3b Item 1 or Item 2** pending Nick/Fable ruling on that finding — this note's own Phase 0.0 scope is otherwise fully closed.
