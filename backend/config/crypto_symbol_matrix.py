@@ -309,6 +309,45 @@ HYPERLIQUID_BACKUP_CANDIDATE = {
 }
 
 
+# Per-symbol Binance FUTURES pair symbol (fapi.binance.com) -- the single
+# conversion choke point for btc_market_structure.py's CVD (:377, via
+# /api/crypto/market) and orderbook (:391) legs. S-3b Phase 0.1 finding
+# (2026-07-17): those two legs, plus the volume-profile leg, were feeding the
+# canonical bare base symbol ("BTC") straight to vendors expecting a pair
+# symbol ("BTCUSDT") -- a regression from 0037375's ticker normalization.
+#
+# Construction follows Binance's standard {BASE}USDT convention for all six.
+# BTC/ETH/SOL/ZEC are confirmed listed on Binance SPOT (see
+# bias_filters/binance_client.py's _BINANCE_SPOT_SYMBOL) -- a reasonable but
+# NOT dispositive signal for FUTURES listing. FUTURES listing itself is
+# UNVERIFIED here: this environment is geo-blocked from testing
+# fapi.binance.com directly, and the existing binance_quarterly_basis cells
+# above already show fapi.binance.com GEO_BLOCKED from Railway for all six
+# symbols (verified 2026-07-13), reconfirmed by bias_filters/binance_client.py
+# 's shipped S-3 comment as of 2026-07-16 ("Binance Futures is geo-blocked
+# from Railway (HTTP 451) for all symbols"). This map fixes the FORMAT bug
+# only -- it does not assert live coverage. Whether a fetch actually succeeds
+# is decided at runtime by the caller's existing honest-failure path
+# (invalid-symbol or geo-block alike -> None -> labeled NA, never a fabricated
+# zero) -- see get_market_structure_context()'s _score_cvd/_score_orderbook.
+BINANCE_FUTURES_PAIR_SYMBOL: dict[str, str] = {
+    "BTC": "BTCUSDT",
+    "ETH": "ETHUSDT",
+    "SOL": "SOLUSDT",
+    "HYPE": "HYPEUSDT",
+    "ZEC": "ZECUSDT",
+    "FARTCOIN": "FARTCOINUSDT",
+}
+
+
+def get_binance_futures_symbol(symbol: str) -> Optional[str]:
+    """Return the Binance Futures pair symbol for `symbol` (canonical base,
+    case-insensitive), or None if untracked. See BINANCE_FUTURES_PAIR_SYMBOL's
+    docstring for the verification caveat -- a returned symbol is the correct
+    format, not a live-coverage guarantee."""
+    return BINANCE_FUTURES_PAIR_SYMBOL.get((symbol or "").upper())
+
+
 def get_symbol_entry(symbol: str) -> Optional[dict]:
     """Return the matrix entry for `symbol` (case-insensitive), or None if untracked."""
     return CRYPTO_SYMBOL_MATRIX.get((symbol or "").upper())
