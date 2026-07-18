@@ -349,7 +349,13 @@ def _build_cvd_event_signal(
     }
 
     return {
-        "signal_id": f"CRYPTO_CVD_{event_type}_{symbol}_{int(time.time() * 1000)}",
+        # level_name embedded in signal_id, not just enrichment_data: a live
+        # production check (2026-07-18) found enrich_signal() unconditionally
+        # overwrites enrichment_data for EVERY signal (signals/pipeline.py:1447,
+        # no asset_class gate -- a pre-existing bug, out of this item's scope,
+        # flagged separately). signal_id is untouched by that path, so the
+        # cooldown lookback below keys off it instead -- robust either way.
+        "signal_id": f"CRYPTO_CVD_{event_type}_{symbol}_{level_name}_{int(time.time() * 1000)}",
         "timestamp": now_utc.isoformat(),
         "ticker": symbol,
         "direction": direction,
@@ -374,20 +380,24 @@ async def _check_cvd_cooldown(
     symbol: str, event_type: str, level_name: str, cooldown_seconds: int
 ) -> bool:
     """§5.7 dedup/cooldown: per-symbol, per-event-type, per-level, via a
-    signals table lookback query -- no new dedup table. True = may fire."""
+    signals table lookback query -- no new dedup table. True = may fire.
+
+    Keys off signal_id (LIKE prefix match), not enrichment_data->>'cvd_level'
+    -- see _build_cvd_event_signal()'s signal_id comment for why."""
     try:
         from database.postgres_client import get_postgres_client
         pool = await get_postgres_client()
+        prefix = f"CRYPTO_CVD_{event_type}_{symbol}_{level_name}_"
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
                 SELECT 1 FROM signals
                 WHERE ticker = $1 AND signal_type = $2 AND asset_class = 'CRYPTO'
-                  AND enrichment_data->>'cvd_level' = $3
+                  AND signal_id LIKE $3
                   AND timestamp > NOW() - ($4 || ' seconds')::interval
                 LIMIT 1
                 """,
-                symbol, event_type, level_name, str(cooldown_seconds),
+                symbol, event_type, prefix + "%", str(cooldown_seconds),
             )
         return row is None
     except Exception as exc:
