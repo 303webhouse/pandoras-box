@@ -355,16 +355,33 @@ async def get_market_structure_context(
     cvd_score, cvd_reason = 0, ""
     ob_score, ob_reason = 0, ""
 
-    # 1. Volume Profile (from 1H klines, last 24h)
+    # 1. Volume Profile (S-3b Fable ruling rev-2, LEG 1: rerouted off Binance
+    # Futures klines onto the F-2 bar source -- same source as
+    # hub_get_crypto_market_profile's VP, S-3 Sec1.4/Sec6.3 pattern reuse,
+    # empirically proven live for BTC/ETH on Railway. F-2 bars carry no
+    # per-bar volume, so the klines-shape volume is a placeholder (time-at-
+    # price, not volume-weighted) -- same fidelity tradeoff as that tool.
+    # NOTE: fetch_crypto_ohlc(use_daily=False) returns 15m-granularity bars,
+    # not 1h -- the last-24 slice below is ~6h of coverage, not 24h. This
+    # matches hub_get_crypto_market_profile's shipped behavior byte-for-byte
+    # (same "bars_1h"/24-slice naming there too); flagging the discrepancy
+    # here rather than silently "fixing" it, since Fable's ruling validated
+    # mirroring that exact shipped pattern, not improving it.
     try:
         cache_key = f"volume_profile_24h:{ticker}"
         cached_vp = _cache_get(cache_key)
         if cached_vp:
             vp_data = cached_vp
         else:
-            from integrations.binance_futures import get_klines
-            klines = await get_klines(ticker, "1h", limit=24)
-            if klines:
+            from jobs.crypto_bars import fetch_crypto_ohlc
+            bars_1h = await fetch_crypto_ohlc(ticker, use_daily=False)
+            if bars_1h:
+                recent_24h = bars_1h[-24:]
+                klines = [[
+                    int(bar[0].timestamp() * 1000),
+                    bar[1], bar[2], bar[3], bar[4],
+                    1.0,  # volume placeholder -- see note above
+                ] for bar in recent_24h]
                 vp_data = compute_volume_profile(klines)
                 _cache_set(cache_key, vp_data)
         vp_score, vp_reason = _score_volume_profile(vp_data, entry_price, direction)
@@ -372,26 +389,46 @@ async def get_market_structure_context(
         logger.warning(f"Volume profile error: {e}")
         vp_data = {"error": str(e)}
 
-    # 2. CVD Gate
+    # 2. CVD Gate (LEG 2: canonical->pair conversion at the boundary, single
+    # choke point via crypto_symbol_matrix.get_binance_futures_symbol().
+    # /api/crypto/market already has OKX fallback wired in internally for the
+    # perp legs, so this is expected to keep working even where direct
+    # Binance Futures calls are geo-blocked.)
     try:
-        cvd_data = await _fetch_cvd(ticker)
+        from config.crypto_symbol_matrix import get_binance_futures_symbol
+        pair_symbol = get_binance_futures_symbol(ticker)
+        if pair_symbol:
+            cvd_data = await _fetch_cvd(pair_symbol)
+        else:
+            cvd_data = {"error": f"no Binance Futures pair mapping for {ticker}"}
         cvd_score, cvd_reason = _score_cvd(cvd_data, direction)
     except Exception as e:
         logger.warning(f"CVD gate error: {e}")
         cvd_data = {"error": str(e)}
 
-    # 3. Orderbook Imbalance
+    # 3. Orderbook Imbalance (LEG 3: same choke point as Leg 2. No OKX
+    # fallback exists for this direct Binance Futures depth call -- honest NA
+    # if it comes back empty/geo-blocked, per binance_client.py's shipped
+    # NA:<REASON> labeling convention. Alternative depth vendor is explicitly
+    # NOT built here -- backlog, ATLAS-review item, per Fable's ruling.)
     try:
         cache_key = f"orderbook:{ticker}"
         cached_ob = _cache_get(cache_key)
         if cached_ob:
             ob_data = cached_ob
         else:
+            from config.crypto_symbol_matrix import get_binance_futures_symbol
             from integrations.binance_futures import get_orderbook_depth
-            raw_ob = await get_orderbook_depth(ticker, limit=20)
-            if raw_ob:
-                ob_data = compute_orderbook_imbalance(raw_ob, entry_price)
-                _cache_set(cache_key, ob_data)
+            pair_symbol = get_binance_futures_symbol(ticker)
+            if pair_symbol:
+                raw_ob = await get_orderbook_depth(pair_symbol, limit=20)
+                if raw_ob:
+                    ob_data = compute_orderbook_imbalance(raw_ob, entry_price)
+                    _cache_set(cache_key, ob_data)
+                else:
+                    ob_data = {"error": f"NA:BINANCE_FUTURES_UNAVAILABLE ({pair_symbol})"}
+            else:
+                ob_data = {"error": f"no Binance Futures pair mapping for {ticker}"}
         ob_score, ob_reason = _score_orderbook(ob_data, direction, entry_price)
     except Exception as e:
         logger.warning(f"Orderbook error: {e}")
