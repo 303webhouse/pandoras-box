@@ -179,6 +179,20 @@ def test_build_signal_enrichment_carries_level_and_reason():
     assert enrichment["event_reason"] == "some reason string"
 
 
+def test_build_signal_id_embeds_level_name():
+    """Live production check (2026-07-18): enrich_signal() unconditionally
+    overwrites enrichment_data for every signal (pipeline.py:1447, no
+    asset_class gate), so cooldown/dedup cannot rely on enrichment_data
+    surviving to a later lookback query. signal_id must carry the level so
+    the cooldown check has something durable to key off."""
+    sig = _build_cvd_event_signal(
+        "BTC", "CVD_ABSORPTION", "SHORT", 100.0, "VAH", 100.5, -80000.0,
+        _CONFIG, _NOW, "test reason",
+    )
+    assert "_VAH_" in sig["signal_id"]
+    assert sig["signal_id"].startswith("CRYPTO_CVD_CVD_ABSORPTION_BTC_VAH_")
+
+
 # ---------------------------------------------------------------------------
 # _check_cvd_cooldown
 # ---------------------------------------------------------------------------
@@ -218,6 +232,20 @@ def test_cooldown_fails_closed_on_db_error():
     with patch("database.postgres_client.get_postgres_client", new=_raise):
         result = _run(_check_cvd_cooldown("BTC", "CVD_DIVERGENCE", "VAL", 900))
     assert result is False  # fail-closed, never fires on an uncertain state
+
+
+def test_cooldown_query_keys_on_signal_id_not_enrichment_data():
+    """Must key off signal_id (survives enrich_signal()'s clobbering), never
+    enrichment_data->>'cvd_level' (confirmed unreliable in live production,
+    2026-07-18 -- see _build_cvd_event_signal()'s signal_id comment)."""
+    pool = _mock_pool(None)
+    with patch("database.postgres_client.get_postgres_client", new=AsyncMock(return_value=pool)):
+        _run(_check_cvd_cooldown("BTC", "CVD_DIVERGENCE", "VAL", 900))
+    query_arg = pool.acquire._c.fetchrow.call_args.args[0]
+    assert "signal_id LIKE" in query_arg
+    assert "enrichment_data" not in query_arg
+    bind_args = pool.acquire._c.fetchrow.call_args.args[1:]
+    assert any("CRYPTO_CVD_CVD_DIVERGENCE_BTC_VAL_" in str(a) for a in bind_args)
 
 
 # ---------------------------------------------------------------------------
