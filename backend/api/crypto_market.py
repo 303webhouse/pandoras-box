@@ -800,8 +800,7 @@ async def get_crypto_state(symbol: str):
         logger.warning("crypto state: regime fetch failed for %s: %s", base_symbol, exc)
         regime_field = _field_envelope(None, True, state=None, error=str(exc))
 
-    # Tape-health (S-3 R-2): latest row from crypto_tape_health_log
-    # §5.1 hard-stop: spot feed unavailable — currently returns NA for all symbols.
+    # Tape-health (S-3 R-2, spot leg wired S-3b): latest row from crypto_tape_health_log
     tape_health_field: Dict[str, Any] = _field_envelope(None, True, state=None)
     try:
         from database.postgres_client import get_postgres_client
@@ -831,7 +830,7 @@ async def get_crypto_state(symbol: str):
             )
         else:
             tape_health_field = _field_envelope(
-                None, True, state="NA", note="no tape-health rows yet (S-3 Phase 3 §5.1 hard-stop: spot feed unavailable)"
+                None, True, state="NA", note="no tape-health rows yet for this symbol"
             )
     except Exception as exc:
         logger.warning("crypto state: tape-health fetch failed for %s: %s", base_symbol, exc)
@@ -952,16 +951,19 @@ async def get_cycle_extremes(symbol: Optional[str] = Query(None)):
 
 @router.get("/tape-health")
 async def get_tape_health(symbol: Optional[str] = Query(None)):
-    """S-3 Phase 4 (§6.1) — CVD tape-health state.
+    """S-3 Phase 4 (§6.1) / S-3b Items 1+2 — CVD tape-health state.
 
     Returns spot-vs-perp CVD split, state (SPOT_LED / PERP_LED / MIXED / NA),
-    and slope per covered symbol. Uncovered symbols return explicit NA state.
+    and slope per covered symbol. Uncovered symbols (or a transient fetch
+    failure on either leg) return explicit NA state with a leg-specific
+    reason — never a fabricated value.
 
-    §5.1 HARD-STOP NOTE (2026-07-16): spot CVD feed is unavailable on Railway
-    (Binance spot trades geo-blocked; OKX spot trade feed not yet wired).
-    All symbols currently return NA:SPOT_FEED_UNAVAILABLE. CVD events (§5.3)
-    cannot fire until a spot feed is wired. Flagged for Fable review.
-    Optional ?symbol= filters to a single symbol.
+    §5.1 HARD-STOP RESOLVED (S-3b, 2026-07-17): OKX spot trades are wired in
+    alongside the already-live OKX swap (perp) feed. CVD event detection
+    (§5.3/§5.4) runs after each live computation and fires shadow events
+    (CVD_DIVERGENCE/CVD_ABSORPTION) through process_signal_unified() when
+    conditions are met — asset_class=CRYPTO, gating_enabled stays false, no
+    live behavior change. Optional ?symbol= filters to a single symbol.
     """
     from bias_filters.crypto_tape_health_engine import compute_tape_health, compute_all_tape_health
 
@@ -983,6 +985,6 @@ async def get_tape_health(symbol: Optional[str] = Query(None)):
     results = await compute_all_tape_health()
     return {
         "as_of": datetime.now(timezone.utc).isoformat(),
-        "note": "All symbols NA:SPOT_FEED_UNAVAILABLE — see §5.1 hard-stop in S-3 completion report",
+        "note": "Spot+perp CVD live via OKX (S-3b) — NA states are per-symbol/per-leg, not a blanket outage",
         "symbols": results,
     }
