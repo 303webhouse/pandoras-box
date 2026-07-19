@@ -44,6 +44,15 @@ async def enrich_signal(signal_data: Dict[str, Any]) -> Dict[str, Any]:
     if not ticker:
         return signal_data
 
+    # DEF-ENRICH-CLOBBER (2026-07-18): equity enrichment is asset-gated.
+    # CRYPTO signals carry producer-built enrichment (cvd_*, market_structure,
+    # ...) and must never route through the equity lookup stack (UW equity
+    # snapshot collides "BTC" with a ~$28 NYSE instrument; the yfinance
+    # fallback launders plausible prices for hyphenated forms). Same
+    # comparison as the shadow-gate check at signals/pipeline.py:1392.
+    if signal_data.get("asset_class") == "CRYPTO":
+        return signal_data
+
     enrichment: Dict[str, Any] = {
         "ticker": ticker,
         "enriched_at": datetime.utcnow().isoformat(),
@@ -133,8 +142,19 @@ async def enrich_signal(signal_data: Dict[str, Any]) -> Dict[str, Any]:
     except Exception as e:
         logger.debug(f"Sector 3-10 enrichment failed for {ticker}: {e}")
 
-    # --- Write to signal ---
-    signal_data["enrichment_data"] = enrichment
+    # --- Write to signal (merge, never replace) ---
+    # enrichment_data is a shared namespace: the enricher owns exactly the
+    # keys it builds above; producer keys and pipeline flags must survive.
+    existing = signal_data.get("enrichment_data")
+    if isinstance(existing, str):
+        try:
+            existing = json.loads(existing)
+        except (ValueError, TypeError):
+            existing = None
+    if not isinstance(existing, dict):
+        existing = {}
+    existing.update(enrichment)
+    signal_data["enrichment_data"] = existing
     signal_data["enriched_at"] = datetime.utcnow().isoformat()
 
     # Count how many fields we populated
@@ -259,11 +279,12 @@ async def persist_enrichment(signal_id: str, enrichment_data: Dict[str, Any]) ->
             await conn.execute(
                 """
                 UPDATE signals
-                SET enrichment_data = $2, enriched_at = NOW()
+                SET enrichment_data = COALESCE(enrichment_data, '{}'::jsonb) || $2::jsonb,
+                    enriched_at = NOW()
                 WHERE signal_id = $1
                 """,
                 signal_id,
-                json.dumps(enrichment_data),
+                enrichment_data if isinstance(enrichment_data, str) else json.dumps(enrichment_data),
             )
     except Exception as e:
         logger.warning(f"Failed to persist enrichment for {signal_id}: {e}")
