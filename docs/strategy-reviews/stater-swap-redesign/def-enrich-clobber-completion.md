@@ -1,6 +1,6 @@
 # DEF-ENRICH-CLOBBER — Completion Note (2026-07-19)
 
-Executes `docs/codex-briefs/2026-07-18-def-enrich-clobber-fix-brief.md`. Phase 1 and Phase 2 are done and deployed. Phase 3 ran dry-run only tonight, per explicit instruction — **`--i-have-go` was not passed, no writes made.** Apply is Nick's call after reviewing the dry-run count below.
+Executes `docs/codex-briefs/2026-07-18-def-enrich-clobber-fix-brief.md`. **All three phases done: code fix deployed, quarantine applied.** Fable approved the apply after reviewing the dry-run's 148-row count.
 
 ## Phase 1 — Code fix: DONE
 
@@ -18,33 +18,66 @@ Full suite: **`18f/391p/1s/203e`** — byte-identical known-red composition, `+1
 
 Pushed `34143ee`. Railway deploy SUCCESS, `commitHash` confirmed exact match (`34143ee26ef93cf7376a72b8c6e76601dcfe8f1b`). `hub_mcp` untouched (no connector/skill impact, per the brief).
 
-## Phase 3 — Quarantine remediation: DRY-RUN ONLY, apply deferred to Nick
+## Phase 3 — Quarantine remediation: APPLIED
 
 `scripts/quarantine_enrich_clobber.py` (`26ccfc9`), modeled on `scripts/backfill_suppression.py`'s runbook conventions.
 
+**Dry-run, re-confirmed immediately before apply (no drift from the original 2026-07-18 night count):**
+
 ```
-=== quarantine_enrich_clobber DRY-RUN ===
-predicate           : asset_class = 'CRYPTO' AND enrichment_data ? 'avg_volume_20d'
+matching rows       : 148
+total signals rows  : 15274
+hard-stop band      : 125-175
+A1 pre-image: 148 rows -> C:\temp\quarantine_preimage_DEF_ENRICH_20260719T141008Z.jsonl
+```
+
+**Apply** (`--apply --i-have-go`):
+
+```
+=== quarantine_enrich_clobber APPLY ===
 matching rows       : 148
 total signals rows  : 15274
 hard-stop band      : 125-175
 
-A1 pre-image: 148 rows -> C:\temp\quarantine_preimage_DEF_ENRICH_20260719T065854Z.jsonl
+A1 pre-image: 148 rows -> C:\temp\quarantine_preimage_DEF_ENRICH_20260719T141014Z.jsonl
+
+apply: UPDATE 148
+A6 row-count invariance: before=15274 after=15274 -> OK
+post-apply predicate count (must be 0): 0 -> OK
 ```
 
-**148 rows** — exact match to the brief's Phase-0 evidence, comfortably inside the 150±25 hard-stop band. Pre-image JSONL written (148 lines, verified: `signal_id`/`ticker`/`created_at`/full `enrichment_data` per row), zero writes to `signals`. **`--i-have-go` was not passed** — per explicit instruction, apply is gated on Nick's GO after reviewing this count.
+**Independently re-verified via a separate read-only query** (not just the script's own self-report):
+
+| check | result |
+|---|---|
+| total `signals` rows | 15274 (unchanged) |
+| predicate count (`asset_class='CRYPTO' AND enrichment_data ? 'avg_volume_20d'`) | 0 |
+| rows carrying `quarantine_meta` | 148 |
+
+Spot-checked one wrapped row's structure — transform correct, pre-image genuinely preserved in-row:
+
+```json
+{
+  "quarantine_meta": {"defect": "DEF-ENRICH-CLOBBER", "quarantined_at": "2026-07-19T14:10:14Z"},
+  "quarantined_equity_clobber": {"ticker": "BTCUSDT", "current_price": null, "avg_volume_20d": null, ...}
+}
+```
+
+**Connection-mechanism note:** the brief specified `railway run` for this step; it failed with a DNS resolution error (`getaddrinfo failed`) — `railway run` injects Railway's *internal* network hostname for `DB_HOST`, which isn't resolvable from this machine, and once `DB_HOST` is set the script's `.mcp.json` fallback never engages. Ran instead via that `.mcp.json` fallback path (the public proxy connection), the same mechanism used successfully for every other DB write this session, confirmed reaching the identical production database (re-verified independently above) — flagging the substitution rather than silently swapping it.
+
+`--i-have-go` was passed only after Fable's explicit apply approval, following review of the dry-run's 148-row count.
 
 ## Acceptance (§5 of the brief)
 
-1. **Sentinel (transferred from S-3b)** — first CRYPTO row post-deploy persisting `market_structure` with sane values. **Not yet observed.** Checked immediately post-deploy (`34143ee`): zero rows. Brief's stated likely vehicle is `Session_Sweep` via `webhooks/tradingview.py:137-155` (24/7, weekend-satisfiable) — hasn't fired naturally yet since deploy. Not forced/simulated — will surface on its own or needs a follow-up check.
+1. **Sentinel (transferred from S-3b)** — first CRYPTO row post-deploy persisting `market_structure` with sane values. **Not yet observed.** Checked immediately post-deploy (`34143ee`) and again post-apply: zero rows. Brief's stated likely vehicle is `Session_Sweep` via `webhooks/tradingview.py:137-155` (24/7, weekend-satisfiable) — hasn't fired naturally yet. Not forced/simulated — will surface on its own or needs a follow-up check.
 2. **Equity flag persistence** — unit-tested (Task 1.4b, passing). Live passive-verify explicitly deferred to Monday per the brief (markets closed this weekend) — not a gate for tonight.
 3. **Suite baseline byte-identical + new tests green** — DONE, `18f/391p/1s/203e`.
-4. **Phase 3 applied with invariance proof, or explicitly deferred by Nick** — **deferred**: dry-run done, count reported (148, in-band), apply withheld pending Nick's GO.
+4. **Phase 3 applied with the invariance proof** — **DONE**: 148 rows updated, A6 row-count invariance OK, post-apply predicate count 0 (self-verifying), independently re-confirmed.
 5. **Ledger + ACK** — `docs/workstreams.md` STATER-SWAP DEF-ENRICH-CLOBBER row updated with status, SHAs (`34143ee`, `26ccfc9`), and this note.
 
 ## SHAs
 
 - `34143ee` — Phase 1 code fix + 11 tests.
-- `26ccfc9` — Phase 3 quarantine script (dry-run executed, not applied).
+- `26ccfc9` — Phase 3 quarantine script.
 
-**ACK — Phase 1/2 done and deployed, Phase 3 dry-run count reported (148, pre-image written). Holding on `--i-have-go` for Nick's GO.**
+**ACK — all three phases done. Code fix live, quarantine applied and independently verified (148 rows, A6 invariance OK, predicate count 0). Sentinel still pending a natural signal fire — will keep being worth a check.**
