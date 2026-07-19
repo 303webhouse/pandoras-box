@@ -1,0 +1,20 @@
+{
+  "updated_at": "2026-03-06T22:00:00Z",
+  "updated_by": "nick",
+  "regime": "RISK-OFF / STAGFLATION RISK",
+  "narrative": "U.S. military operations against Iran ongoing. Oil spiked above $90 on supply disruption fears. Russia providing Iran targeting intelligence. Unemployment claims rising 3rd consecutive week. Fed constrained -- can't cut with oil spiking, can't hold with growth slowing. Tariff uncertainty ongoing.",
+  "key_facts": [
+    "Iran war: active and escalating",
+    "Oil: above $90, supply disruption premium",
+    "Unemployment: rising 3 consecutive weeks",
+    "Fed: stagflation bind, rate path uncertain",
+    "VIX: elevated 27+, backwardation",
+    "Gold: ATH, risk-off signal",
+    "Defense stocks: counter-trending higher"
+  ],
+  "sectors_to_watch": {
+    "bullish": ["defense", "energy", "gold miners"],
+    "bearish": ["tech (non-defense)", "consumer discretionary", "homebuilders"],
+    "neutral": ["utilities", "healthcare"]
+  }
+}

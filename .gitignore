@@ -28,6 +28,8 @@ data/archives/
 # Raw RH activity CSV exports — contains full trade history with cost basis.
 # Inputs to scripts/sync_rh_csv.py. Never commit.
 data/rh_csv/
+data/rh_2026_full.csv.csv
+data/rh_import_2026_jan_feb.csv
 
 # DB snapshots taken before destructive sync operations (e.g. RH CSV sync apply).
 # Contain raw position data including cost basis. Never commit.
