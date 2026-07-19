@@ -1,0 +1,671 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Stable Market Board</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/styles.css">
+<script src="/assets/vendor/chart.umd.min.js"></script>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <div class="brand-mark">SMB</div>
+    <div class="brand-meta">
+      <div class="brand-title">STABLE MARKET BOARD</div>
+      <div class="brand-sub" id="header-sub">Loading...</div>
+    </div>
+  </div>
+  <nav class="tabs">
+    <button class="tab active" data-tab="board">Daily Board</button>
+    <button class="tab" data-tab="themes">Themes</button>
+    <button class="tab" data-tab="breadth">Breadth</button>
+    <button class="tab" data-tab="momentum-scan">Momentum</button>
+    <button class="tab" data-tab="extension">Extension</button>
+    <button class="tab" data-tab="momentum">Clean Momentum</button>
+  </nav>
+  <div class="status">
+    <button class="live-btn" id="live-btn" title="Toggle live intraday prices (15-min delayed on Starter plan)" aria-label="Toggle live prices">
+      <span class="live-dot" id="live-dot"></span>
+      <span class="live-label" id="live-label">LIVE OFF</span>
+    </button>
+    <button class="refresh-btn" id="refresh-btn" title="Refresh data (pulls latest from Polygon and recomputes)" aria-label="Refresh data">
+      <svg class="refresh-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+      <span class="refresh-label">REFRESH</span>
+    </button>
+    <button class="settings-btn" id="settings-btn" title="Settings" aria-label="Settings">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+    </button>
+    <span class="dot"></span>
+    <span id="status-text">Live</span>
+  </div>
+</header>
+
+<!-- Live overlay status bar (hidden until LIVE is on) -->
+<div class="live-bar hidden" id="live-bar">
+  <span class="live-bar-pulse"></span>
+  <span id="live-bar-text">Live prices on</span>
+  <span class="live-bar-sep">·</span>
+  <span id="live-bar-age">—</span>
+  <span class="live-bar-sep">·</span>
+  <span class="live-bar-note">15-min delayed · structural metrics anchored to last close</span>
+</div>
+
+<main>
+
+  <!-- ========== DAILY BOARD TAB ========== -->
+  <section class="tab-pane active" data-pane="board">
+
+    <div class="grid-12">
+
+      <!-- Vol regime strip (compact) -->
+      <div class="card span-12 vol-strip" id="vol-strip-card">
+        <div id="vol-strip-body" class="vol-strip-body">
+          <!-- populated by JS -->
+        </div>
+      </div>
+
+      <!-- Regime block -->
+      <div class="card span-12 regime-card">
+        <div class="card-head">
+          <div class="card-title">REGIME READ</div>
+          <div class="card-meta" id="regime-asof">—</div>
+        </div>
+        <div class="regime-body" id="regime-body">
+          <!-- populated by JS -->
+        </div>
+      </div>
+
+      <!-- Index breadth block -->
+      <div class="card span-7 indices-card">
+        <div class="card-head">
+          <div class="card-title">INDEX & BENCHMARK</div>
+          <div class="card-meta">RET / DIST 50DMA / ATR EXT</div>
+        </div>
+        <div id="indices-body" class="indices-body">
+          <!-- populated by JS -->
+        </div>
+      </div>
+
+      <!-- Universe breadth block -->
+      <div class="card span-5 breadth-card">
+        <div class="card-head">
+          <div class="card-title">UNIVERSE BREADTH</div>
+          <div class="card-meta">EX-BENCHMARK</div>
+        </div>
+        <div id="breadth-body" class="breadth-body">
+          <!-- populated by JS -->
+        </div>
+      </div>
+
+      <!-- Top themes summary -->
+      <div class="card span-6 themes-summary-card">
+        <div class="card-head">
+          <div class="card-title">DOMINANT THEMES</div>
+          <div class="card-meta">SCORE / 1D Δ / STATUS</div>
+        </div>
+        <div id="dominant-themes" class="theme-list">
+          <!-- populated by JS -->
+        </div>
+      </div>
+
+      <!-- Emerging / fading -->
+      <div class="card span-6 themes-summary-card">
+        <div class="card-head">
+          <div class="card-title">EMERGING & FADING</div>
+          <div class="card-meta">BIGGEST 1D Δ MOVES</div>
+        </div>
+        <div id="emerging-fading" class="theme-list">
+          <!-- populated by JS -->
+        </div>
+      </div>
+
+      <!-- 5-day theme rotation tracker -->
+      <div class="card span-12 rotation-card">
+        <div class="card-head">
+          <div class="card-title">5-DAY THEME ROTATION</div>
+          <div class="card-meta" id="rotation-meta">CLIMBERS & FALLERS</div>
+        </div>
+        <div class="rotation-body" id="rotation-body">
+          <!-- populated by JS -->
+        </div>
+      </div>
+
+      <!-- ETF Pulse: Style Rotation -->
+      <div class="card span-4 etf-card">
+        <div class="card-head">
+          <div class="card-title">STYLE ROTATION</div>
+          <div class="card-meta">RATIO PERFORMANCE</div>
+        </div>
+        <div class="etf-body" id="style-rotation-body">
+          <!-- populated by JS -->
+        </div>
+      </div>
+
+      <!-- ETF Pulse: Risk Pulse -->
+      <div class="card span-4 etf-card">
+        <div class="card-head">
+          <div class="card-title">RISK PULSE</div>
+          <div class="card-meta">CROSS-ASSET</div>
+        </div>
+        <div class="etf-body" id="risk-pulse-body">
+          <!-- populated by JS -->
+        </div>
+      </div>
+
+      <!-- ETF Pulse: Sector Rotation -->
+      <div class="card span-4 etf-card">
+        <div class="card-head">
+          <div class="card-title">SECTOR ROTATION</div>
+          <div class="card-meta">VS SPY · 20D RS</div>
+        </div>
+        <div class="etf-body" id="sector-rotation-body">
+          <!-- populated by JS -->
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ========== THEMES TAB ========== -->
+  <section class="tab-pane" data-pane="themes">
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title">ALL THEMES</div>
+        <div class="card-meta">CLICK A ROW FOR CONSTITUENTS</div>
+      </div>
+      <table class="data-table" id="themes-table">
+        <thead>
+          <tr>
+            <th class="rank">#</th>
+            <th class="left">THEME</th>
+            <th>N</th>
+            <th>SCORE</th>
+            <th>1D Δ</th>
+            <th>BREADTH</th>
+            <th>LEAD</th>
+            <th>MOM</th>
+            <th>%>20DMA</th>
+            <th>%>50DMA</th>
+            <th>%NH20</th>
+            <th>RET 5D</th>
+            <th>RET 20D</th>
+            <th>ATR EXT</th>
+            <th>RS QQQ 20D</th>
+            <th>STATUS</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <div class="card hidden" id="theme-detail-card">
+      <div class="card-head">
+        <div class="card-title" id="theme-detail-title">—</div>
+        <div class="card-meta">
+          <button class="btn-close" id="close-theme-detail">CLOSE</button>
+        </div>
+      </div>
+      <table class="data-table" id="theme-constituents-table">
+        <thead>
+          <tr>
+            <th class="left">TICKER</th>
+            <th class="left">NAME</th>
+            <th>RET 1D</th>
+            <th>RET 5D</th>
+            <th>RET 20D</th>
+            <th>%>50DMA</th>
+            <th>ATR EXT</th>
+            <th>VOL R</th>
+            <th>NH20</th>
+            <th>NH52W</th>
+            <th>RS QQQ 20D</th>
+            <th>TIER</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ========== BREADTH TAB ========== -->
+  <section class="tab-pane" data-pane="breadth">
+
+    <!-- Chart 1: Participation Breadth -->
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title">PARTICIPATION BREADTH</div>
+        <div class="card-meta">
+          <div class="breadth-controls">
+            <label class="breadth-control-label">THEME:</label>
+            <select id="breadth-theme-select" class="breadth-select">
+              <option value="All">All ex-Benchmark</option>
+            </select>
+            <span class="control-divider"></span>
+            <div class="window-toggle" data-target="participation">
+              <button class="win-btn" data-window="1M">1M</button>
+              <button class="win-btn active" data-window="3M">3M</button>
+              <button class="win-btn" data-window="6M">6M</button>
+              <button class="win-btn" data-window="1Y">1Y</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="chart-wrap">
+        <canvas id="chart-participation"></canvas>
+      </div>
+      <div class="breadth-legend" id="participation-legend"></div>
+    </div>
+
+    <!-- Chart 2: Daily Impulse -->
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title">DAILY IMPULSE BREADTH</div>
+        <div class="card-meta">
+          <div class="breadth-controls">
+            <span class="card-meta-text" id="impulse-meta">ADVANCERS − DECLINERS · NEW 20D HIGHS OVERLAY</span>
+            <span class="control-divider"></span>
+            <div class="window-toggle" data-target="impulse">
+              <button class="win-btn active" data-window="1M">1M</button>
+              <button class="win-btn" data-window="3M">3M</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="chart-wrap">
+        <canvas id="chart-impulse"></canvas>
+      </div>
+    </div>
+
+    <!-- Chart 3: Cumulative A/D vs SPY -->
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title">CUMULATIVE ADVANCE/DECLINE vs SPY</div>
+        <div class="card-meta">
+          <div class="breadth-controls">
+            <span class="card-meta-text">A/D LINE LEADS PRICE · DIVERGENCES MATTER</span>
+            <span class="control-divider"></span>
+            <div class="window-toggle" data-target="adline">
+              <button class="win-btn" data-window="3M">3M</button>
+              <button class="win-btn active" data-window="6M">6M</button>
+              <button class="win-btn" data-window="1Y">1Y</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="chart-wrap">
+        <canvas id="chart-adline"></canvas>
+      </div>
+    </div>
+
+  </section>
+
+  <!-- ========== MOMENTUM SCANNER TAB ========== -->
+  <section class="tab-pane" data-pane="momentum-scan">
+
+    <!-- Filter controls -->
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title">MOMENTUM SCANNER · FILTERS</div>
+        <div class="card-meta" id="mom-scan-meta">—</div>
+      </div>
+      <div class="momscan-controls">
+        <div class="momscan-control-group">
+          <label class="momscan-label">MIN DOLLAR VOL</label>
+          <div class="momscan-presets">
+            <button class="momscan-preset" data-dvol="50">$50M</button>
+            <button class="momscan-preset active" data-dvol="100">$100M</button>
+            <button class="momscan-preset" data-dvol="250">$250M</button>
+            <button class="momscan-preset" data-dvol="500">$500M</button>
+            <button class="momscan-preset" data-dvol="1000">$1B</button>
+            <input type="number" id="mom-dvol-input" class="momscan-number" min="0" step="10" value="100" />
+            <span class="momscan-unit">M</span>
+          </div>
+        </div>
+
+        <div class="momscan-control-group">
+          <label class="momscan-label">MUST BE ABOVE</label>
+          <div class="momscan-checkbox-group">
+            <label class="momscan-checkbox">
+              <input type="checkbox" data-ma="10">
+              <span class="checkbox-mark"></span>
+              <span class="checkbox-label">10DMA</span>
+            </label>
+            <label class="momscan-checkbox">
+              <input type="checkbox" data-ma="20" checked>
+              <span class="checkbox-mark"></span>
+              <span class="checkbox-label">20DMA</span>
+            </label>
+            <label class="momscan-checkbox">
+              <input type="checkbox" data-ma="50" checked>
+              <span class="checkbox-mark"></span>
+              <span class="checkbox-label">50DMA</span>
+            </label>
+            <label class="momscan-checkbox">
+              <input type="checkbox" data-ma="200">
+              <span class="checkbox-mark"></span>
+              <span class="checkbox-label">200DMA</span>
+            </label>
+          </div>
+        </div>
+
+        <div class="momscan-control-group">
+          <label class="momscan-label">TIERS</label>
+          <div class="momscan-checkbox-group">
+            <label class="momscan-checkbox">
+              <input type="checkbox" data-tier="Core" checked>
+              <span class="checkbox-mark"></span>
+              <span class="checkbox-label">Core</span>
+            </label>
+            <label class="momscan-checkbox">
+              <input type="checkbox" data-tier="Active" checked>
+              <span class="checkbox-mark"></span>
+              <span class="checkbox-label">Active</span>
+            </label>
+            <label class="momscan-checkbox">
+              <input type="checkbox" data-tier="Watch" checked>
+              <span class="checkbox-mark"></span>
+              <span class="checkbox-label">Watch</span>
+            </label>
+          </div>
+        </div>
+
+        <div class="momscan-control-group">
+          <button class="btn-primary" id="momscan-apply">APPLY</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 1W momentum table -->
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title">TOP 25 · 1-WEEK ABSOLUTE MOMENTUM</div>
+        <div class="card-meta">(CLOSE − MIN 5D) / MIN 5D × 100 · DESC · 1D RET FLAGS SINGLE-DAY SPIKES</div>
+      </div>
+      <table class="data-table" id="momscan-1W-table">
+        <thead>
+          <tr>
+            <th class="rank">#</th>
+            <th class="left">TICKER</th>
+            <th class="left">NAME</th>
+            <th class="left">THEME</th>
+            <th>1W ABS</th>
+            <th>1W C/AVG5</th>
+            <th>1D RET</th>
+            <th>1M ABS</th>
+            <th>3M ABS</th>
+            <th>6M ABS</th>
+            <th>$VOL 20D</th>
+            <th>%>50DMA</th>
+            <th>ATR EXT</th>
+            <th>VOL R</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <!-- 1M momentum table -->
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title">TOP 25 · 1-MONTH ABSOLUTE MOMENTUM</div>
+        <div class="card-meta">(CLOSE − MIN 21D) / MIN 21D × 100 · DESC</div>
+      </div>
+      <table class="data-table" id="momscan-1M-table">
+        <thead>
+          <tr>
+            <th class="rank">#</th>
+            <th class="left">TICKER</th>
+            <th class="left">NAME</th>
+            <th class="left">THEME</th>
+            <th>1M ABS</th>
+            <th>1M C/AVG25</th>
+            <th>3M ABS</th>
+            <th>3M C/AVG66</th>
+            <th>6M ABS</th>
+            <th>6M C/AVG126</th>
+            <th>$VOL 20D</th>
+            <th>%>50DMA</th>
+            <th>ATR EXT</th>
+            <th>VOL R</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <!-- 3M momentum table -->
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title">TOP 25 · 3-MONTH ABSOLUTE MOMENTUM</div>
+        <div class="card-meta">(CLOSE − MIN 67D) / MIN 67D × 100 · DESC</div>
+      </div>
+      <table class="data-table" id="momscan-3M-table">
+        <thead>
+          <tr>
+            <th class="rank">#</th>
+            <th class="left">TICKER</th>
+            <th class="left">NAME</th>
+            <th class="left">THEME</th>
+            <th>3M ABS</th>
+            <th>3M C/AVG66</th>
+            <th>1M ABS</th>
+            <th>1M C/AVG25</th>
+            <th>6M ABS</th>
+            <th>6M C/AVG126</th>
+            <th>$VOL 20D</th>
+            <th>%>50DMA</th>
+            <th>ATR EXT</th>
+            <th>VOL R</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <!-- 6M momentum table -->
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title">TOP 25 · 6-MONTH ABSOLUTE MOMENTUM</div>
+        <div class="card-meta">(CLOSE − MIN 126D) / MIN 126D × 100 · DESC</div>
+      </div>
+      <table class="data-table" id="momscan-6M-table">
+        <thead>
+          <tr>
+            <th class="rank">#</th>
+            <th class="left">TICKER</th>
+            <th class="left">NAME</th>
+            <th class="left">THEME</th>
+            <th>6M ABS</th>
+            <th>6M C/AVG126</th>
+            <th>3M ABS</th>
+            <th>3M C/AVG66</th>
+            <th>1M ABS</th>
+            <th>1M C/AVG25</th>
+            <th>$VOL 20D</th>
+            <th>%>50DMA</th>
+            <th>ATR EXT</th>
+            <th>VOL R</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+  </section>
+
+  <!-- ========== EXTENSION TAB ========== -->
+  <section class="tab-pane" data-pane="extension">
+    <div class="grid-12">
+      <div class="card span-12">
+        <div class="card-head">
+          <div class="card-title">TOO HOT</div>
+          <div class="card-meta">≥ 8 ATRs ABOVE 50DMA · CHASE RISK · LATE-CYCLE BEHAVIOR</div>
+        </div>
+        <table class="data-table" id="too-hot-table">
+          <thead>
+            <tr>
+              <th class="left">TICKER</th>
+              <th class="left">THEME</th>
+              <th class="left">SUB</th>
+              <th>RET 1D</th>
+              <th>RET 5D</th>
+              <th>%>50DMA</th>
+              <th>ATR EXT</th>
+              <th>VOL R</th>
+              <th>NH20</th>
+              <th>RS QQQ 20D</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <div class="card span-12">
+        <div class="card-head">
+          <div class="card-title">FADING / WEAK</div>
+          <div class="card-meta">LOST 20DMA · NEGATIVE 5D · FORMER LEADERS LOSING TREND</div>
+        </div>
+        <table class="data-table" id="fading-table">
+          <thead>
+            <tr>
+              <th class="left">TICKER</th>
+              <th class="left">THEME</th>
+              <th class="left">SUB</th>
+              <th>RET 1D</th>
+              <th>RET 5D</th>
+              <th>%>50DMA</th>
+              <th>ATR EXT</th>
+              <th>VOL R</th>
+              <th>RS QQQ 20D</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== CLEAN MOMENTUM TAB ========== -->
+  <section class="tab-pane" data-pane="momentum">
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title">CLEAN MOMENTUM</div>
+        <div class="card-meta" id="momentum-meta">ABOVE 20/50DMA · 5D POSITIVE · ATR EXT 1-5 · VOL R > 1.0 · SORTED BY RS QQQ</div>
+      </div>
+      <table class="data-table" id="momentum-table">
+        <thead>
+          <tr>
+            <th class="left">TICKER</th>
+            <th class="left">NAME</th>
+            <th class="left">THEME</th>
+            <th class="left">SUB</th>
+            <th>RET 1D</th>
+            <th>RET 5D</th>
+            <th>RET 20D</th>
+            <th>%>50DMA</th>
+            <th>ATR EXT</th>
+            <th>VOL R</th>
+            <th>NH20</th>
+            <th>NH52W</th>
+            <th>RS QQQ 20D</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+</main>
+
+<!-- ========== SETTINGS MODAL ========== -->
+<div class="settings-overlay hidden" id="settings-overlay">
+  <div class="settings-panel" role="dialog" aria-labelledby="settings-title">
+    <div class="settings-head">
+      <div class="settings-title" id="settings-title">SETTINGS</div>
+      <button class="btn-close" id="settings-close-btn">CLOSE</button>
+    </div>
+
+    <div class="settings-body">
+
+      <section class="settings-section">
+        <div class="settings-section-title">MOVING AVERAGE PERIODS</div>
+        <div class="settings-help">
+          Select which moving averages to compute. Changes here require running
+          <code>python -m stable.metrics</code> to take effect.
+        </div>
+        <div class="settings-checkbox-group" id="ma-periods-group">
+          <!-- populated by JS -->
+        </div>
+        <div class="settings-warning hidden" id="ma-warning">
+          ⚠ MA periods changed. Save, then run <code>python -m stable.metrics</code> to apply.
+        </div>
+      </section>
+
+      <section class="settings-section">
+        <div class="settings-section-title">BREADTH BIG-MOVE THRESHOLD</div>
+        <div class="settings-help">
+          The "Up X% / Down X%" boxes on the Daily Board. Default is 4%.
+        </div>
+        <div class="settings-row">
+          <label class="settings-label">Threshold:</label>
+          <input type="number" id="big-move-input" class="settings-number" min="0.5" max="20" step="0.5">
+          <span class="settings-unit">%</span>
+        </div>
+      </section>
+
+      <section class="settings-section">
+        <div class="settings-section-title">EXTENSION CUTOFF (TOO HOT)</div>
+        <div class="settings-help">
+          Names with this many ATRs above the 50DMA show up in the "Too Hot" list. Default is 8.
+        </div>
+        <div class="settings-row">
+          <label class="settings-label">Cutoff:</label>
+          <input type="number" id="too-hot-input" class="settings-number" min="1" max="20" step="0.5">
+          <span class="settings-unit">ATRs</span>
+        </div>
+      </section>
+
+      <section class="settings-section">
+        <div class="settings-section-title">CLEAN MOMENTUM FILTER</div>
+        <div class="settings-help">
+          The criteria a name must meet to appear in Clean Momentum.
+        </div>
+        <div class="settings-row">
+          <label class="settings-label">Min ATR ext:</label>
+          <input type="number" id="cm-atr-min-input" class="settings-number" min="-5" max="20" step="0.5">
+          <span class="settings-unit">ATRs above 50DMA</span>
+        </div>
+        <div class="settings-row">
+          <label class="settings-label">Max ATR ext:</label>
+          <input type="number" id="cm-atr-max-input" class="settings-number" min="-5" max="20" step="0.5">
+          <span class="settings-unit">ATRs above 50DMA</span>
+        </div>
+        <div class="settings-row">
+          <label class="settings-label">Min vol ratio:</label>
+          <input type="number" id="cm-vol-input" class="settings-number" min="0" max="10" step="0.1">
+          <span class="settings-unit">× 20D avg volume</span>
+        </div>
+        <div class="settings-row">
+          <label class="settings-label">Min 5D return:</label>
+          <input type="number" id="cm-ret-input" class="settings-number" min="-50" max="50" step="0.5">
+          <span class="settings-unit">%</span>
+        </div>
+      </section>
+
+    </div>
+
+    <div class="settings-foot">
+      <button class="btn-secondary" id="settings-reset-btn">RESET TO DEFAULTS</button>
+      <button class="btn-primary" id="settings-save-btn">SAVE & APPLY</button>
+    </div>
+  </div>
+</div>
+
+<script src="/assets/app.js"></script>
+</body>
+</html>
