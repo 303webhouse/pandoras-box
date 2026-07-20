@@ -746,6 +746,50 @@ async def get_crypto_state(symbol: str):
     except Exception as exc:
         logger.warning("crypto state: basis fetch failed for %s: %s", base_symbol, exc)
 
+    # S-4 Phase 2 (Sec3.2): ATR (volatility context) + liquidations (1h flow).
+    # Named "liquidation-distance-in-ATRs" in the brief, but no price-level
+    # liquidation-cluster data source exists anywhere in this codebase
+    # (get_liquidations() is backward-looking $ volume/composition, not a
+    # price heatmap) -- shipping the two real, honestly-labeled numbers
+    # separately rather than fabricating a "distance" that don't have
+    # coherent units between them. See s4-phase2-completion.md.
+    atr_field = _field_envelope(None, True, atr=None)
+    liquidations_field = _field_envelope(None, True, total_usd=None, long_pct=None, composition=None, signal=None)
+
+    try:
+        from jobs.crypto_bars import fetch_crypto_ohlc
+        bars = await fetch_crypto_ohlc(base_symbol, use_daily=False)
+        if bars and len(bars) >= 15:
+            from indicators.atr import latest_atr
+            highs = [b[2] for b in bars]
+            lows = [b[3] for b in bars]
+            closes = [b[4] for b in bars]
+            atr_val = latest_atr(highs, lows, closes, period=14)
+            if atr_val is not None:
+                atr_field = _field_envelope(datetime.now(timezone.utc).isoformat(), False, atr=atr_val)
+            else:
+                atr_field = _field_envelope(None, True, atr=None, na_reason="insufficient bars for ATR(14)")
+        else:
+            atr_field = _field_envelope(None, True, atr=None, na_reason="no LIVE bar_walk_source for this symbol")
+    except Exception as exc:
+        logger.warning("crypto state: ATR fetch failed for %s: %s", base_symbol, exc)
+        atr_field = _field_envelope(None, True, atr=None, error=str(exc))
+
+    try:
+        liq_data = await coinalyze_client.get_liquidations(base_symbol)
+        is_na = liq_data.get("state") == "NA"
+        liquidations_field = _field_envelope(
+            liq_data.get("timestamp"),
+            is_na or bool(liq_data.get("error")),
+            total_usd=liq_data.get("total_liquidations"),
+            long_pct=liq_data.get("long_pct"),
+            composition=liq_data.get("composition"),
+            signal=liq_data.get("signal"),
+            na_reason=liq_data.get("reason") if is_na else None,
+        )
+    except Exception as exc:
+        logger.warning("crypto state: liquidations fetch failed for %s: %s", base_symbol, exc)
+
     # S-3 Phase 4 (§6.2, FA-5): wire session, regime, and tape-health fields
     # from real S-2 + S-3 data. Previously _NOT_YET_BUILT_R1 / _NOT_YET_BUILT_R2.
     now_utc = datetime.now(timezone.utc)
@@ -846,6 +890,8 @@ async def get_crypto_state(symbol: str):
         "basis": basis_field,
         "tape_health": tape_health_field,
         "regime": regime_field,
+        "atr": atr_field,
+        "liquidations": liquidations_field,
         "generated_at": now_utc.isoformat(),
     }
 
