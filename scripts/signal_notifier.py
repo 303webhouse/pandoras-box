@@ -310,7 +310,20 @@ def post_signal_alert(token: str, channel_id: str, signal: dict, signal_id: str)
         return None
 
 
-def post_crypto_signal_alert(token: str, channel_id: str, signal: dict, signal_id: str) -> dict | None:
+def fetch_crypto_state(api_url: str, ticker: str) -> dict[str, Any] | None:
+    """GET /crypto/state/{ticker} -- S-4 Phase 2 embed-parity data (regime,
+    session partition, tier, funding, liquidations, ATR). No auth required
+    (confirmed no-auth-dependency endpoint). Honest None on any failure --
+    this is a best-effort embed enhancement, never allowed to block the
+    core alert the way it worked before this addition."""
+    try:
+        return http_json(url=f"{api_url}/crypto/state/{ticker}", method="GET", timeout=10)
+    except Exception as e:
+        print(f"[WARN] Failed to fetch crypto state for {ticker}: {e}")
+        return None
+
+
+def post_crypto_signal_alert(token: str, channel_id: str, signal: dict, signal_id: str, api_url: str = "") -> dict | None:
     """Post a crypto-specific signal alert embed with Take/Pass/Watching buttons."""
     ticker = str(signal.get("ticker") or "BTCUSDT")
     direction = str(signal.get("direction") or "???").upper()
@@ -339,8 +352,20 @@ def post_crypto_signal_alert(token: str, channel_id: str, signal: dict, signal_i
     # Direction emoji
     dir_emoji = "\U0001f7e2" if direction in ("LONG", "BUY") else "\U0001f534"
 
+    # S-4 Phase 2: regime/session/tier + funding/liquidations/ATR, from
+    # /crypto/state/{ticker} -- best-effort, never blocks the core alert.
+    state = fetch_crypto_state(api_url, ticker) if api_url else None
+
     # Build description
     desc_lines = []
+
+    # First line (Sec3.4): {regime} | {session_partition} | Tier {n}
+    if state:
+        regime = ((state.get("regime") or {}).get("state")) or "N/A"
+        partition = ((state.get("session") or {}).get("partition")) or "N/A"
+        tier = state.get("tier")
+        tier_label = f"Tier {tier}" if tier is not None else "Tier N/A"
+        desc_lines.append(f"**{regime} | {partition} | {tier_label}**")
 
     # Entry / Stop / Target line
     levels = []
@@ -352,6 +377,29 @@ def post_crypto_signal_alert(token: str, channel_id: str, signal: dict, signal_i
         levels.append(f"Target: ${float(target):,.2f}")
     if levels:
         desc_lines.append(" | ".join(levels))
+
+    # Funding (Sec3.1) + liquidations/ATR (Sec3.2). Shown as two real,
+    # honestly-labeled numbers -- not a fabricated "distance in ATRs"
+    # composite (no price-level liquidation-cluster data source exists;
+    # see s4-phase2-completion.md for why). Funding shown per its natural
+    # 8h settlement unit, not projected against a guessed hold duration
+    # (no such convention exists anywhere in this codebase).
+    if state:
+        funding = state.get("funding") or {}
+        liq = state.get("liquidations") or {}
+        atr = state.get("atr") or {}
+        fl_parts = []
+        if funding.get("rate_pct") is not None and not funding.get("degraded"):
+            fl_parts.append(f"\U0001f4b0 Funding: {float(funding['rate_pct']):+.4f}%/8h")
+        if liq.get("total_usd") is not None and not liq.get("degraded"):
+            fl_parts.append(
+                f"\U0001f4a5 Liq(1h): ${float(liq['total_usd']) / 1e6:.1f}M "
+                f"({liq.get('long_pct', 0):.0f}% long)"
+            )
+        if atr.get("atr") is not None and not atr.get("degraded"):
+            fl_parts.append(f"ATR: ${float(atr['atr']):,.2f}")
+        if fl_parts:
+            desc_lines.append(" | ".join(fl_parts))
 
     # R:R and risk
     if entry and stop and target:
@@ -557,7 +605,7 @@ def main() -> int:
 
         # Post alert to Discord (use crypto embed for crypto signals)
         if sig_is_crypto:
-            resp = post_crypto_signal_alert(discord_token, channel_id, signal, signal_id)
+            resp = post_crypto_signal_alert(discord_token, channel_id, signal, signal_id, api_url)
         else:
             resp = post_signal_alert(discord_token, channel_id, signal, signal_id)
 
