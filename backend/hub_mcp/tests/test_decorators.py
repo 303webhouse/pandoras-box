@@ -63,5 +63,6 @@ def test_whitelisted_names_match_spec():
             "hub_get_stable_rates_fx",
             "hub_get_board_state",
             "hub_get_crypto_market_profile",
+            "hub_get_crypto_state",
         }
     )
