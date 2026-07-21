@@ -48,7 +48,8 @@ The OKX fallback path in both functions is a true fraction and correctly needs `
 
 **Verification:**
 - 4 new unit tests (job enabled by default, status/rows_written update on success, failure doesn't raise, status dict wired).
-- Live post-deploy: Railway logs confirm `"Added job \"Crypto Tape Health (spot-vs-perp CVD)\"" ` to the scheduler on boot. First 15-min tick had not yet elapsed at initial verification time (deploy completed 03:07 UTC, curl at 03:10 UTC); `tape_health.as_of` was still the pre-fix 07-18 value at that moment — expected given interval-trigger semantics, not a failure. *(Session note: watch/confirm the first natural tick freshens `tape_health.as_of` — see Follow-ups below if this report is read before that's confirmed.)*
+- Live post-deploy: Railway logs confirm `"Added job \"Crypto Tape Health (spot-vs-perp CVD)\"" ` to the scheduler on boot. First 15-min tick had not yet elapsed at initial verification time (deploy completed 03:07 UTC, curl at 03:10 UTC); `tape_health.as_of` was still the pre-fix 07-18 value at that moment — expected given interval-trigger semantics, not a failure.
+- **First natural tick confirmed 2026-07-21T03:31:02Z**: Railway logs show `"Running scheduled tape-health evaluation (all six symbols)..."` → `"Tape-health evaluation complete -- 5/6 symbols logged"` (5/6 non-NA; the 6th's honest-NA classification is expected — matches S-3b's known FARTCOIN live-OKX-spot-fetch gap, not a new issue). Live curl of `/api/crypto/state/BTC` immediately after: `tape_health.as_of: "2026-07-21T03:31:00.966Z", data_age_seconds: 34, degraded: false` — fresh, was 208,000+ seconds (58h) stale before this fix. **D3 fully closed, no open follow-up.**
 
 ---
 
@@ -90,5 +91,6 @@ Confirmed directly against production Postgres. The three signals whose Discord 
 Investigation-first with written root cause before every edit (all four defects, especially D2/D3 where the recon findings *contradicted* the brief's own assumed failure mode — reported honestly rather than following the given premise). Pathspec-only commits. No schema changes. D1.4's contract change scoped local to `crypto_market.py`'s funding field only, not touching `crypto_cycle_engine.py`'s separate consumer, per the brief's ATLAS-flag caution. No S-4 Phase 3 work started.
 
 ## Follow-ups (not blocking, not built)
-- Confirm D3's tape-health job's first natural 15-min tick freshens `tape_health.as_of` (infra confirmed registered and live; first fire not yet observed at report time).
 - The `signals.created_at` ~6-hour offset noted in V1 — worth a dedicated look if it recurs elsewhere.
+
+D3's tape-health first-tick watch (the only item open when this report was first drafted) is now closed — see verification above, confirmed live 2026-07-21T03:31Z.
