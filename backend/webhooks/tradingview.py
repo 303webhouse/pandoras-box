@@ -11,7 +11,7 @@ Supports multiple strategies:
 from fastapi import APIRouter, Request, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 import asyncio
 import hashlib
 import logging
@@ -331,11 +331,11 @@ async def process_scout_signal(alert: TradingViewAlert, start_time: datetime):
         return {"status": "cooldown", "detail": f"Scout cooldown active for {alert.ticker} {alert.direction}"}
 
     # Build signal data with Scout-specific fields
-    signal_id = f"SCOUT_{alert.ticker}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
+    signal_id = f"SCOUT_{alert.ticker}_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S_%f')}"
 
     signal_data = {
         "signal_id": signal_id,
-        "timestamp": alert.timestamp or datetime.now().isoformat(),
+        "timestamp": alert.timestamp or datetime.now(timezone.utc).isoformat(),
         "ticker": alert.ticker,
         "strategy": "Scout Sniper",  # B.2 — normalize name
         "direction": alert.direction,
@@ -429,11 +429,11 @@ async def process_holy_grail_signal(alert: TradingViewAlert, start_time: datetim
     rr = calculate_risk_reward(alert)
 
     # Build signal data
-    signal_id = f"HG_{alert.ticker}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
+    signal_id = f"HG_{alert.ticker}_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S_%f')}"
 
     signal_data = {
         "signal_id": signal_id,
-        "timestamp": alert.timestamp or datetime.now().isoformat(),
+        "timestamp": alert.timestamp or datetime.now(timezone.utc).isoformat(),
         "ticker": alert.ticker,
         "strategy": "Holy_Grail",
         "direction": alert.direction,
@@ -510,11 +510,11 @@ async def process_exhaustion_signal(alert: TradingViewAlert, start_time: datetim
     rr = calculate_risk_reward(alert)
     
     # Build signal data
-    signal_id = f"{alert.ticker}_{alert.direction}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
+    signal_id = f"{alert.ticker}_{alert.direction}_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S_%f')}"
     
     signal_data = {
         "signal_id": signal_id,
-        "timestamp": alert.timestamp or datetime.now().isoformat(),
+        "timestamp": alert.timestamp or datetime.now(timezone.utc).isoformat(),
         "ticker": alert.ticker,
         "strategy": "Exhaustion",
         "direction": alert.direction,
@@ -574,11 +574,11 @@ async def process_sniper_signal(alert: TradingViewAlert, start_time: datetime):
         signal_type = "BEAR_CALL"
     
     # Build signal data
-    signal_id = f"{alert.ticker}_{alert.direction}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
+    signal_id = f"{alert.ticker}_{alert.direction}_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S_%f')}"
     
     signal_data = {
         "signal_id": signal_id,
-        "timestamp": alert.timestamp or datetime.now().isoformat(),
+        "timestamp": alert.timestamp or datetime.now(timezone.utc).isoformat(),
         "ticker": alert.ticker,
         "strategy": "Sniper",
         "direction": alert.direction,
@@ -638,7 +638,7 @@ async def process_phalanx_signal(alert: TradingViewAlert, start_time: datetime):
         logger.info("⏳ Phalanx cooldown: skipping %s %s", alert.ticker, alert.direction)
         return {"status": "cooldown", "detail": f"Phalanx cooldown active for {alert.ticker} {alert.direction}"}
 
-    signal_id = f"PHALANX_{alert.ticker}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
+    signal_id = f"PHALANX_{alert.ticker}_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S_%f')}"
 
     direction = (alert.direction or "").upper()
     signal_type = "PHALANX_BULL" if direction in ["LONG", "BUY"] else "PHALANX_BEAR"
@@ -647,7 +647,7 @@ async def process_phalanx_signal(alert: TradingViewAlert, start_time: datetime):
 
     signal_data = {
         "signal_id": signal_id,
-        "timestamp": alert.timestamp or datetime.now().isoformat(),
+        "timestamp": alert.timestamp or datetime.now(timezone.utc).isoformat(),
         "ticker": alert.ticker,
         "strategy": "Phalanx",
         "direction": alert.direction,
@@ -777,11 +777,11 @@ async def process_artemis_signal(alert: TradingViewAlert, start_time: datetime):
     else:
         signal_type = "ARTEMIS_SHORT"
 
-    signal_id = f"ARTEMIS_{alert.ticker}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
+    signal_id = f"ARTEMIS_{alert.ticker}_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S_%f')}"
 
     signal_data = {
         "signal_id": signal_id,
-        "timestamp": alert.timestamp or datetime.now().isoformat(),
+        "timestamp": alert.timestamp or datetime.now(timezone.utc).isoformat(),
         "ticker": alert.ticker,
         "strategy": "Artemis",
         "direction": alert.direction,
@@ -895,11 +895,11 @@ async def process_generic_signal(alert: TradingViewAlert, start_time: datetime):
     else:
         signal_type = "BEAR_CALL"
     
-    signal_id = f"{alert.ticker}_{alert.direction}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
+    signal_id = f"{alert.ticker}_{alert.direction}_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S_%f')}"
     
     signal_data = {
         "signal_id": signal_id,
-        "timestamp": alert.timestamp or datetime.now().isoformat(),
+        "timestamp": alert.timestamp or datetime.now(timezone.utc).isoformat(),
         "ticker": alert.ticker,
         "strategy": alert.strategy,
         "direction": alert.direction,
