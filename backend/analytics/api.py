@@ -58,7 +58,8 @@ from analytics.queries import (
     window_bounds,
 )
 from analytics.robinhood_parser import parse_robinhood_csv_bytes
-from database.postgres_client import log_signal
+# (log_signal import removed 2026-07-21 with the /log-signal endpoint --
+#  this module no longer writes to `signals` directly.)
 
 logger = logging.getLogger(__name__)
 
@@ -141,29 +142,9 @@ class LogTradeLegRequest(BaseModel):
     notes: Optional[str] = None
 
 
-class LogSignalRequest(BaseModel):
-    signal_id: str
-    timestamp: Optional[datetime] = None
-    strategy: str
-    ticker: str
-    asset_class: str = "EQUITY"
-    direction: str
-    signal_type: str
-    entry_price: Optional[float] = None
-    stop_loss: Optional[float] = None
-    target_1: Optional[float] = None
-    target_2: Optional[float] = None
-    risk_reward: Optional[float] = None
-    timeframe: Optional[str] = None
-    bias_level: Optional[str] = None
-    adx: Optional[float] = None
-    line_separation: Optional[float] = None
-    score: Optional[float] = None
-    bias_alignment: Optional[str] = None
-    triggering_factors: Optional[Dict[str, Any]] = None
-    notes: Optional[str] = None
-    market_state: Optional[Dict[str, Any]] = None
-    factor_snapshot: Optional[Dict[str, Any]] = None
+# LogSignalRequest removed 2026-07-21 alongside its only consumer, the
+# POST /api/analytics/log-signal endpoint (see the removal note further
+# down this file, near /log-uw-snapshot).
 
 
 class UwSnapshotRequest(BaseModel):
@@ -2069,22 +2050,21 @@ async def create_manual_outcome(request: ManualOutcomeRequest, _=Depends(require
     return {"status": "ok", "signal_id": request.signal_id}
 
 
-@analytics_router.post("/log-signal")
-async def log_signal_endpoint(request: LogSignalRequest, _=Depends(require_api_key)):
-    data = request.model_dump()
-    market_state = data.pop("market_state", None)
-    factor_snapshot = data.pop("factor_snapshot", None)
-    if request.timestamp:
-        data["timestamp"] = request.timestamp.isoformat()
-    # L1a bypass-leak tag: manual/external insert that skips the chokepoint
-    # (no scoring/feed-tier/L0/L1 gate). Tag only — measure the bypass fraction.
-    _tf = data.get("triggering_factors")
-    if not isinstance(_tf, dict):
-        _tf = {}
-        data["triggering_factors"] = _tf
-    _tf["bypass_source"] = "analytics_log_signal_endpoint"
-    await log_signal(data, market_state=market_state, factor_snapshot=factor_snapshot)
-    return {"status": "ok", "signal_id": request.signal_id}
+# REMOVED 2026-07-21 (DEF-SIGNAL-METADATA, Nick+Fable ruling): the
+# POST /api/analytics/log-signal endpoint and its LogSignalRequest model.
+# It called log_signal() directly, bypassing process_signal_unified() and
+# therefore skipping scoring, feed-tier classification, L0/L1 gate
+# evaluation, dedup, outcome-record writing, Discord/WS broadcast and
+# committee flagging -- the last remaining side door around F-4's
+# settled chokepoint. Removal precondition verified: zero callers in
+# frontend/, scripts/, or on the VPS, and zero rows in `signals` ever
+# carried its self-applied triggering_factors.bypass_source tag
+# ('analytics_log_signal_endpoint'), i.e. it was never actually invoked
+# since that tag was added (1e27d11, 2026-06-18).
+# Recoverable from git history: see docs/workstreams.md for the removal
+# commit SHA. If a manual/external insert capability is ever wanted, add
+# it back routed THROUGH process_signal_unified(source="manual_api") so
+# it inherits scoring/gating/dedup like every other writer.
 
 
 @analytics_router.post("/log-uw-snapshot")

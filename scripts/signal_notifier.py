@@ -34,6 +34,23 @@ DISCORD_POST_SPACING_SECONDS = 1.2
 # here, so a sustained Discord outage can't hang one run.
 DISCORD_POST_MAX_ATTEMPTS = 3
 
+# Crypto alert floor -- RATIFIED 2026-07-21 (Nick + Fable).
+# COMPARISON IS STRICTLY LESS-THAN: a crypto signal whose effective score is
+# < 28 is SUPPRESSED (no Discord alert); a signal scoring EXACTLY 28 IS
+# alerted. Effective score = COALESCE(score_v2, score) -- the same field the
+# embed itself displays.
+# Calibrated on the post-DEF-CVD-DEDUP, burst-excluded distribution:
+#   CVD_ABSORPTION  n=33  min 11 / p25 18 / median 28 / p75 33 / max 38
+#   Session_Sweep   n=22  min 21 / p25 28 / median 35.5 / p75 38 / max 48
+# 28 sits at the CVD_ABSORPTION median and the Session_Sweep 25th percentile:
+# it cuts roughly the weakest half of the high-frequency absorption alerts
+# (the dominant noise source even post-dedup) while retaining ~75%+ of the
+# lower-volume, higher-conviction sweeps. The crypto score scale is
+# compressed (observed 11-48), so equity-style floors (65+) do not transfer.
+# Caveat on record: calibrated on n=55 across only the 2 currently-live
+# crypto strategies -- revisit if Crypto Scanner or Funding_Rate_Fade resume.
+CRYPTO_ALERT_MIN_SCORE = 28
+
 # L0.4 alias (display-only, additive). Canonical map = backend/config/
 # strategy_aliases.py. Resolve it when importable (backend on path, or a sibling
 # strategy_aliases.py copied next to this script on the VPS at deploy time);
@@ -659,6 +676,7 @@ def main() -> int:
         "skipped_old": 0,
         "skipped_non_trade": 0,
         "skipped_wrong_class": 0,
+        "skipped_low_score": 0,
     }
 
     for signal in signals:
@@ -692,6 +710,25 @@ def main() -> int:
             seen_ids.append(signal_id)
             seen_set.add(signal_id)
             continue
+
+        # Crypto alert floor. STRICTLY LESS-THAN: score < CRYPTO_ALERT_MIN_SCORE
+        # is suppressed; a signal scoring EXACTLY the floor IS alerted.
+        # Gated on the signal being crypto (not on --crypto mode) so the rule
+        # holds whichever cron invokes this. Terminal -> mark seen, matching
+        # the non-trade/aged-out skips above: the alert decision is made once
+        # when the signal first appears, and this is a noise filter, not a
+        # retry-later condition.
+        if sig_is_crypto:
+            _eff_score = signal.get("score_v2") or signal.get("score") or 0
+            try:
+                _below_floor = float(_eff_score) < CRYPTO_ALERT_MIN_SCORE
+            except (TypeError, ValueError):
+                _below_floor = False  # unparseable score -> don't silently suppress
+            if _below_floor:
+                result["skipped_low_score"] += 1
+                seen_ids.append(signal_id)
+                seen_set.add(signal_id)
+                continue
 
         # Post alert to Discord (use crypto embed for crypto signals). The
         # post functions retry internally on a 429 (bounded within this

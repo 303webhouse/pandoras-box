@@ -156,10 +156,9 @@ class TestAuthEnforcement:
         ("POST", "/api/analytics/outcomes/manual", {
             "ticker": "SPY", "direction": "LONG", "outcome": "WIN",
         }),
-        ("POST", "/api/analytics/log-signal", {
-            "signal_id": "test", "ticker": "SPY", "direction": "BULLISH",
-            "source": "test",
-        }),
+        # /api/analytics/log-signal removed 2026-07-21 (DEF-SIGNAL-METADATA):
+        # it bypassed process_signal_unified()'s chokepoint and had zero
+        # callers/zero invocations. Its auth-behavior case is dropped with it.
         ("POST", "/api/analytics/log-uw-snapshot", {
             "dashboard_type": "flow", "data": {},
         }),
