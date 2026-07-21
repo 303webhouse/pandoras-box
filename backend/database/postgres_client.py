@@ -1642,12 +1642,13 @@ async def log_signal(
                 score, bias_alignment, triggering_factors, bias_at_signal, notes,
                 day_of_week, hour_of_day, is_opex_week, days_to_earnings, market_event, signal_category,
                 feed_tier, adx_value, feed_tier_ceiling, score_ceiling_reason, gate_type,
-                feed_tier_v2, feed_tier_v2_path, feed_tier_diverged, confluence_badge
+                feed_tier_v2, feed_tier_v2_path, feed_tier_diverged, confluence_badge,
+                source
             ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
                 $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
                 $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32,
-                $33, $34, $35, $36
+                $33, $34, $35, $36, $37
             )
             ON CONFLICT (signal_id) DO NOTHING
         """,
@@ -1687,6 +1688,14 @@ async def log_signal(
             signal_data.get("feed_tier_v2_path"),                  # $34 v2 qualifying path (A/B/C/D)
             signal_data.get("feed_tier_diverged", False),          # $35 v1 != v2 decision
             signal_data.get("confluence_badge"),                   # $36 UI badge
+            # $37 DEF-SIGNAL-METADATA (2026-07-21): persist real provenance.
+            # process_signal_unified() sets signal_data["source"] (pipeline.py
+            # ~1198) to the true origin ("crypto_engine", "cta_scanner",
+            # "footprint", ...); it was silently dropped here before, so the
+            # column's DEFAULT 'tradingview' stamped EVERY row regardless of
+            # origin. `or "tradingview"` preserves that default only for the
+            # (unused) direct log_signal() caller that supplies no source.
+            signal_data.get("source") or "tradingview",
         )
         inserted = str(result).strip().endswith("1")
         if not inserted:

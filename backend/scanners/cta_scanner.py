@@ -18,7 +18,7 @@ import pandas as pd
 import numpy as np
 import logging
 from typing import Dict, List, Optional, Any, Tuple
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import uuid
 import asyncio
 import os
@@ -775,7 +775,7 @@ def check_golden_touch(df: pd.DataFrame, ticker: str) -> Optional[Dict]:
 
         return {
             "signal_id": str(uuid.uuid4()),
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "symbol": ticker,
             "signal_type": "GOLDEN_TOUCH",
             "direction": "LONG",
@@ -844,7 +844,7 @@ def check_two_close_volume(df: pd.DataFrame, ticker: str) -> Optional[Dict]:
 
         return {
             "signal_id": str(uuid.uuid4()),
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "symbol": ticker,
             "signal_type": "TWO_CLOSE_VOLUME",
             "direction": "LONG",
@@ -911,7 +911,7 @@ def check_pullback_entry(df: pd.DataFrame, ticker: str) -> Optional[Dict]:
 
         return {
             "signal_id": str(uuid.uuid4()),
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "symbol": ticker,
             "signal_type": "PULLBACK_ENTRY",
             "direction": "LONG",
@@ -980,7 +980,7 @@ def check_zone_upgrade(df: pd.DataFrame, ticker: str) -> Optional[Dict]:
 
         return {
             "signal_id": str(uuid.uuid4()),
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "symbol": ticker,
             "signal_type": "ZONE_UPGRADE",
             "direction": "LONG",
@@ -1092,8 +1092,8 @@ def check_trapped_longs(df: pd.DataFrame, ticker: str) -> Optional[Dict]:
         priority = 100
 
     return {
-        "signal_id": f"{ticker}_TRAPPED_LONGS_{datetime.now().strftime('%Y%m%d')}",
-        "timestamp": datetime.now().isoformat(),
+        "signal_id": f"{ticker}_TRAPPED_LONGS_{datetime.now(timezone.utc).strftime('%Y%m%d')}",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "symbol": ticker,
         "signal_type": "TRAPPED_LONGS",
         "direction": "SHORT",
@@ -1165,8 +1165,8 @@ def check_trapped_shorts(df: pd.DataFrame, ticker: str) -> Optional[Dict]:
         priority = 100
 
     return {
-        "signal_id": f"{ticker}_TRAPPED_SHORTS_{datetime.now().strftime('%Y%m%d')}",
-        "timestamp": datetime.now().isoformat(),
+        "signal_id": f"{ticker}_TRAPPED_SHORTS_{datetime.now(timezone.utc).strftime('%Y%m%d')}",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "symbol": ticker,
         "signal_type": "TRAPPED_SHORTS",
         "direction": "LONG",
@@ -1244,7 +1244,7 @@ def check_bearish_breakdown(df: pd.DataFrame, ticker: str) -> Optional[Dict]:
 
         return {
             "signal_id": str(uuid.uuid4()),
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "symbol": ticker,
             "signal_type": "BEARISH_BREAKDOWN",
             "direction": "SHORT",
@@ -1290,7 +1290,7 @@ def check_death_cross(df: pd.DataFrame, ticker: str) -> Optional[Dict]:
     if death_cross:
         return {
             "signal_id": str(uuid.uuid4()),
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "symbol": ticker,
             "signal_type": "DEATH_CROSS",
             "direction": "FILTER",  # Not a tradeable signal — suppresses longs
@@ -1357,7 +1357,7 @@ def check_resistance_rejection(df: pd.DataFrame, ticker: str) -> Optional[Dict]:
 
         return {
             "signal_id": str(uuid.uuid4()),
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "symbol": ticker,
             "signal_type": "RESISTANCE_REJECTION",
             "direction": "SHORT",
