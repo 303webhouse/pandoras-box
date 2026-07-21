@@ -219,13 +219,21 @@ async def get_theme_members(theme: str, top: int = 5, bottom: int = 5) -> dict:
     (AEGIS finding, Brief 3): sorts on the last-known ret_1d and takes the
     top+bottom slice BEFORE the yfinance live-price round-trip, so a large
     theme's live-fetch cost is bounded by top+bottom, not the whole roster.
+
+    Known residual limitation (accepted): the CANDIDATE POOL is still
+    selected from last-close ranking before the live fetch (same AEGIS cost
+    bound). A ticker that was mid-pack at close but is today's true extreme
+    won't appear in top/bottom. What IS guaranteed: whatever tickers make it
+    into the slice are correctly ranked relative to each other post-overlay
+    (min(top ret_1d) >= max(bottom ret_1d) always holds) -- this does not
+    widen the pool, it only fixes internal consistency (2026-07-21 fix).
     """
     try:
         pool = await get_postgres_client()
         async with pool.acquire() as conn:
             latest = await conn.fetchval("SELECT MAX(date) FROM stable_metrics")
             if latest is None:
-                return _envelope(None, "close", True, theme=theme, member_count=0, top=[], bottom=[])
+                return _envelope(None, "close", True, theme=theme, member_count=0, top=[], bottom=[], ranking_basis=None)
             rows = await conn.fetch(
                 """SELECT u.ticker, u.name, u.subtheme,
                           m.ret_1d, m.ret_5d, m.rs_qqq_20d,
@@ -271,20 +279,24 @@ async def get_theme_members(theme: str, top: int = 5, bottom: int = 5) -> dict:
                     if lp is not None and prior:
                         m["ret_1d"] = (lp / prior) - 1.0
                         m["last_price"] = lp
-                # Re-sort just the (small) live-updated slice; re-derive top/bottom from it.
+                # Re-sort the (small) live-updated slice and ACTUALLY re-derive
+                # top/bottom membership from the re-sorted order. The prior code
+                # refreshed values but kept nightly membership -> top/bottom
+                # inversion on reversal days (2026-07-21 Software Infrastructure
+                # incident: best 1d name rendered in BOTTOM, worst in TOP).
                 slice_members.sort(key=lambda m: (m.get("ret_1d") is None, -(m.get("ret_1d") or 0.0)))
-                by_ticker = {m["ticker"]: m for m in slice_members}
-                top_slice = [by_ticker.get(m["ticker"], m) for m in top_slice]
-                bottom_slice = [by_ticker.get(m["ticker"], m) for m in bottom_slice]
+                top_slice = slice_members[:top]
+                bottom_slice = slice_members[-bottom:][::-1] if slice_members else []
 
             return _envelope(
                 as_of, anchor, False,
                 theme=theme, member_count=len(members),
                 top=top_slice, bottom=bottom_slice,
+                ranking_basis=("live" if live else f"close@{latest}"),
             )
     except Exception as e:
         logger.warning("[services.stable] get_theme_members failed for %s: %s", theme, e)
-        return _envelope(None, "close", True, theme=theme, member_count=0, top=[], bottom=[])
+        return _envelope(None, "close", True, theme=theme, member_count=0, top=[], bottom=[], ranking_basis=None)
 
 
 async def get_movers() -> dict:

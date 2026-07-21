@@ -39,7 +39,11 @@ DESCRIPTION = (
     "Do NOT call this for a ticker outside the theme's own roster. Do NOT "
     "assume `top`/`bottom` sort the WHOLE theme -- only the top N and "
     "bottom N by 1d return are returned, matching the requested top/bottom "
-    "sizes (default 5/5, max 50/50)."
+    "sizes (default 5/5, max 50/50). The ranking_basis field states what "
+    "the top/bottom ranking is computed on: 'live' (RTH overlay succeeded) "
+    "or 'close@YYYY-MM-DD' (last close); when it is close-based, displayed "
+    "prices may still be live -- read the field before citing a name as a "
+    "leader or laggard."
 )
 
 _MEMBERS_CACHE: dict = {}
