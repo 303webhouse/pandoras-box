@@ -502,7 +502,11 @@
     };
     const sec = (name, arr) => `<div class="mem-sec">${name} <span class="val-muted">· RS vs QQQ</span></div>` + ((arr || []).map(row).join('') || '<div class="mem-row"><span class="val-muted">none</span></div>');
     // Freshness: live intraday (provisional) vs prior close — so stale close data is never mistaken for "now".
-    const fresh = data.anchor === 'provisional' ? `live · ${ageLabel(data.data_age_seconds)} old`
+    const rb = String(data.ranking_basis || '');
+    const fresh = data.anchor === 'provisional'
+      ? (rb && rb !== 'live'
+          ? `ranked @ ${rb.replace('close@', '')} close · prices live`
+          : `ranked live · ${ageLabel(data.data_age_seconds)} old`)
       : data.anchor === 'close' ? `${String(data.as_of || '').slice(0, 10)} close` : 'unknown';
     const label = data.anchor === 'provisional' ? "today's move" : '1d';
     $('memberBody').innerHTML = `<div class="mem-sec" style="color:var(--text-3);border:none">as of ${esc(fresh)}</div>`
