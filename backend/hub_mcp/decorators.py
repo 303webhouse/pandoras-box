@@ -40,6 +40,9 @@ REGISTERED_TOOL_NAMES = frozenset(
         "hub_get_board_state",
         # S-3 (R-2) — Cycle Extremes / crypto market profile
         "hub_get_crypto_market_profile",
+        # HUB-MCP-CRYPTO-STATE (2026-07-21) — DB/cache-backed consolidated
+        # crypto derivatives/regime/tape state (Path B, zero vendor calls)
+        "hub_get_crypto_state",
     }
 )
 
