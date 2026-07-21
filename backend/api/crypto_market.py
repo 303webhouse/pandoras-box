@@ -713,10 +713,20 @@ async def get_crypto_state(symbol: str):
     try:
         funding_data = await coinalyze_client.get_funding_rate(base_symbol)
         is_na = funding_data.get("state") == "NA"
+        funding_degraded = is_na or bool(funding_data.get("error")) or funding_data.get("health_status") != "LIVE"
+        funding_signal = funding_data.get("signal")
+        # DEF-FEED-TRIAGE D1.4: a degraded input must never report FIRING --
+        # degradation is already surfaced via the envelope's own `degraded`
+        # flag; suppress the signal itself to NEUTRAL so a consumer reading
+        # `signal` alone (without checking `degraded`) can't act on a value
+        # we don't actually trust. Local to this field only -- funding.signal
+        # has no other consumer in this endpoint's response construction.
+        if funding_degraded and funding_signal == "FIRING":
+            funding_signal = "NEUTRAL"
         funding_field = _field_envelope(
             funding_data.get("timestamp"),
-            is_na or bool(funding_data.get("error")) or funding_data.get("health_status") != "LIVE",
-            rate_pct=funding_data.get("funding_rate"), signal=funding_data.get("signal"),
+            funding_degraded,
+            rate_pct=funding_data.get("funding_rate"), signal=funding_signal,
             na_reason=funding_data.get("reason") if is_na else None,
         )
     except Exception as exc:
@@ -816,6 +826,15 @@ async def get_crypto_state(symbol: str):
     try:
         from database.postgres_client import get_postgres_client
         _pool = await get_postgres_client()
+        # DEF-FEED-TRIAGE D2 (2026-07-20): crypto_regime_log is keyed by the
+        # hyphenated canonical form ("BTC-USD", per jobs/crypto_regime.py's
+        # REGIME_SYMBOLS -- matches crypto_gates.py's real gate-consumer),
+        # not the bare base_symbol ("BTC") normalize_crypto_ticker() returns.
+        # The writer has been healthy the whole time (hourly, zero gaps) --
+        # this query simply never matched anything since the day it was
+        # wired. crypto_tape_health_log correctly uses the bare form already
+        # (its own writer keys bare) -- do not touch that query.
+        _regime_symbol = f"{base_symbol}-USD"
         async with _pool.acquire() as _conn:
             _row = await _conn.fetchrow(
                 """
@@ -825,7 +844,7 @@ async def get_crypto_state(symbol: str):
                 ORDER BY computed_at DESC
                 LIMIT 1
                 """,
-                base_symbol,
+                _regime_symbol,
             )
         if _row:
             _ca = _row["computed_at"]
