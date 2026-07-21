@@ -315,3 +315,101 @@ def test_fire_events_never_raises_on_internal_failure():
     p_bars = patch("jobs.crypto_bars.fetch_crypto_ohlc", new=AsyncMock(side_effect=RuntimeError("boom")))
     with p_bars:
         _run(_fire_cvd_events("BTC", {"value": 1.0}, _CONFIG, _NOW))  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# DEF-CVD-DEDUP (2026-07-21) -- cooldown window must have real margin over
+# the tape-health job's own 15-min polling interval. Root cause: the old
+# 900s cooldown was EXACTLY equal to the 900s (15-min) polling cadence, so
+# ordinary scheduler jitter (execution latency, bar-fetch time, DB
+# round-trips) pushed the real elapsed gap between ticks above or below
+# 900s essentially at random -- the cooldown only suppressed on the ticks
+# where jitter happened to land under it. Confirmed live: 3 fires ever
+# (as of 2026-07-19) -> 57+ in two days once D3 enabled the 15-min
+# schedule, with observed inter-fire gaps clustering right at 898-902s.
+# Fix widens both cooldowns to 1800s (2x the 15-min interval) via
+# crypto_cycle_config (hot-reload, no code change to the query itself --
+# it already correctly reads cooldown_seconds from config).
+#
+# Note: the per-level (POC/VAH/VAL) keying was investigated and is NOT
+# the defect -- _build_cvd_event_signal's signal_id already embeds the
+# level NAME (a stable 3-way category), not the drifting numeric level
+# price, so "tolerate small anchor-level drift" is already satisfied by
+# the existing design. No key-structure change needed.
+# ---------------------------------------------------------------------------
+
+_TAPE_HEALTH_JOB_INTERVAL_SECONDS = 15 * 60  # bias_scheduler.py's crypto_tape_health job
+
+
+def test_seed_cooldowns_have_real_margin_over_polling_interval():
+    """Regression guard: this exact test, if it had existed before
+    DEF-CVD-DEDUP, would have caught the original bug (900 has zero
+    margin over a 900-second interval)."""
+    import importlib
+    seed = importlib.import_module("config.crypto_cycle_config_seed")
+    cvd_cfg = seed.SEED_CONFIG_V1["cvd_events"]
+    assert cvd_cfg["absorption_cooldown_seconds"] >= 2 * _TAPE_HEALTH_JOB_INTERVAL_SECONDS
+    assert cvd_cfg["divergence_cooldown_seconds"] >= 2 * _TAPE_HEALTH_JOB_INTERVAL_SECONDS
+
+
+def test_fire_events_passes_widened_cooldown_seconds_to_check():
+    """Confirms _fire_cvd_events threads the widened config value through to
+    _check_cvd_cooldown -- not silently stuck on the old 900s default."""
+    closes = [100.0] * 11 + [95.0]
+    bars = _bars(closes, lows=[99.8] * 11 + [95.0])
+    vp = {"poc": 105.0, "vah": 108.0, "val": 95.1}
+    cell = {"value": 5_000.0}
+    widened_config = {"cvd_events": {**_CONFIG["cvd_events"], "divergence_cooldown_seconds": 1800}}
+
+    p_bars = patch("jobs.crypto_bars.fetch_crypto_ohlc", new=AsyncMock(return_value=bars))
+    p_vp = patch("strategies.btc_market_structure.compute_volume_profile", return_value=vp)
+    p_cooldown = patch(
+        "bias_filters.crypto_tape_health_engine._check_cvd_cooldown",
+        new=AsyncMock(return_value=True),
+    )
+    p_pipeline = patch("signals.pipeline.process_signal_unified", new=AsyncMock(return_value={}))
+
+    with p_bars, p_vp, p_cooldown as mock_cooldown, p_pipeline:
+        _run(_fire_cvd_events("BTC", cell, widened_config, _NOW))
+
+    mock_cooldown.assert_awaited_once()
+    call_args = mock_cooldown.await_args.args
+    assert call_args[-1] == 1800  # cooldown_seconds is the last positional arg
+
+
+def test_fire_events_falls_back_to_widened_default_when_config_key_missing():
+    """If cvd_events lacks the cooldown key entirely (e.g. a stale cached
+    config), the code-level fallback must be the widened 1800s, not the
+    old buggy 900s default."""
+    closes = [100.0] * 11 + [95.0]
+    bars = _bars(closes, lows=[99.8] * 11 + [95.0])
+    vp = {"poc": 105.0, "vah": 108.0, "val": 95.1}
+    cell = {"value": 5_000.0}
+    bare_config = {"cvd_events": {}}  # no cooldown keys at all
+
+    p_bars = patch("jobs.crypto_bars.fetch_crypto_ohlc", new=AsyncMock(return_value=bars))
+    p_vp = patch("strategies.btc_market_structure.compute_volume_profile", return_value=vp)
+    p_cooldown = patch(
+        "bias_filters.crypto_tape_health_engine._check_cvd_cooldown",
+        new=AsyncMock(return_value=True),
+    )
+    p_pipeline = patch("signals.pipeline.process_signal_unified", new=AsyncMock(return_value={}))
+
+    with p_bars, p_vp, p_cooldown as mock_cooldown, p_pipeline:
+        _run(_fire_cvd_events("BTC", cell, bare_config, _NOW))
+
+    call_args = mock_cooldown.await_args.args
+    assert call_args[-1] == 1800
+
+
+def test_cooldown_key_is_level_name_not_numeric_price():
+    """Confirms the investigated-and-ruled-out hypothesis: the dedup key
+    (via signal_id's LIKE prefix) is the level NAME (POC/VAH/VAL), a
+    stable category -- not the drifting numeric level_price. Small price
+    drift at the same structural level therefore already can't defeat the
+    cooldown; this was never the defect."""
+    sig_a = _build_cvd_event_signal("BTC", "CVD_ABSORPTION", "LONG", 100.0, "POC", 100.05, 60_000.0, _CONFIG, _NOW, "r")
+    sig_b = _build_cvd_event_signal("BTC", "CVD_ABSORPTION", "LONG", 100.3, "POC", 100.31, 60_000.0, _CONFIG, _NOW, "r")
+    prefix_a = sig_a["signal_id"].rsplit("_", 1)[0]
+    prefix_b = sig_b["signal_id"].rsplit("_", 1)[0]
+    assert prefix_a == prefix_b == "CRYPTO_CVD_CVD_ABSORPTION_BTC_POC"
