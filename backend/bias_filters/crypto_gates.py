@@ -105,6 +105,23 @@ async def evaluate_gates(signal_data: Dict[str, Any]) -> Optional[Dict[str, Any]
         elif tier == 2 and direction in _LONG_DIRECTIONS and master_rules.get("btc_trend_down_blocks_tier2_longs", True):
             _block("BTC_TREND_DOWN_T2_LONG_BLOCK")
 
+    # S-4 Phase 3 (4.3): no negative-funding-fade LONGs at Tier 3 -- a hard
+    # block, independent of BTC's regime state (unlike the TREND_DOWN rules
+    # above, this applies regardless of regime_master). "Negative-funding-
+    # fade LONG" is inferred as (strategy=='Funding_Rate_Fade' AND
+    # direction=='LONG') per Phase 0 finding 0.4 -- funding-rate sign isn't
+    # visible to this evaluator and doesn't need to be threaded in;
+    # crypto_setups.py's check_funding_rate_fade only ever goes LONG on
+    # negative funding (fade-the-crowd branch), so direction alone is
+    # already the correct proxy.
+    if (
+        tier == 3
+        and strategy == "Funding_Rate_Fade"
+        and direction in _LONG_DIRECTIONS
+        and master_rules.get("tier3_blocks_negative_funding_fade_longs", True)
+    ):
+        _block("TIER3_NEG_FUNDING_FADE_LONG_BLOCK")
+
     strategy_classes = config.get("strategy_classes", {})
     class_name = _find_strategy_class(strategy, strategy_classes)
     if class_name is None:

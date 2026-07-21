@@ -465,16 +465,44 @@ def post_crypto_signal_alert(token: str, channel_id: str, signal: dict, signal_i
         if fl_parts:
             desc_lines.append(" | ".join(fl_parts))
 
-    # R:R and risk
+        # S-4 Phase 3 (4.1): carry asymmetry -- Funding_Rate_Fade cards only,
+        # a first-class field distinct from the funding line above (DAEDALUS's
+        # rule: not buried). Reuses funding.rate_pct (already fetched, already
+        # degraded-gated above) and sizing.stop_distance_pct (already computed
+        # by calculate_breakout_position(), unused elsewhere in this embed) --
+        # no new vendor call, no new scoring dimension. Expresses how large
+        # the funding drag/tailwind is relative to the trade's own defined
+        # risk, not just the raw rate a second time.
+        if strategy == "Funding_Rate_Fade" and funding.get("rate_pct") is not None and not funding.get("degraded"):
+            stop_pct = sizing.get("stop_distance_pct")
+            if stop_pct:
+                carry_ratio = abs(float(funding["rate_pct"])) / float(stop_pct) * 100
+                desc_lines.append(
+                    f"⚖️ Carry Asymmetry: {float(funding['rate_pct']):+.4f}%/8h "
+                    f"≈ {carry_ratio:.0f}% of stop distance/settlement"
+                )
+
+    # R:R and risk. position_sizing is only reliably present for signals
+    # built via crypto_setups.py's _build_signal() -- other writers
+    # (e.g. CVD_ABSORPTION) don't populate it. Previously this silently
+    # substituted the raw price-delta `risk` for a real dollar figure
+    # (sizing.get("risk_usd", risk)) and defaulted risk_pct to a literal
+    # "?" -- rendering nonsense like "$0 (?%)". Now: only show the real
+    # dollar/pct figures when BOTH are genuinely present; otherwise fall
+    # back to a clearly-labeled per-unit price-distance figure instead of
+    # fabricating a dollar amount.
     if entry and stop and target:
         try:
             risk = abs(float(entry) - float(stop))
             reward = abs(float(target) - float(entry))
             if risk > 0:
                 rr = reward / risk
-                risk_usd = sizing.get("risk_usd", risk)
-                risk_pct = sizing.get("risk_pct", "?")
-                desc_lines.append(f"**R:R:** {rr:.1f}:1 | **Risk:** ${float(risk_usd):,.0f} ({risk_pct}%)")
+                risk_usd = sizing.get("risk_usd")
+                risk_pct = sizing.get("risk_pct")
+                if risk_usd is not None and risk_pct is not None:
+                    desc_lines.append(f"**R:R:** {rr:.1f}:1 | **Risk:** ${float(risk_usd):,.0f} ({risk_pct}%)")
+                else:
+                    desc_lines.append(f"**R:R:** {rr:.1f}:1 | **Risk/unit:** ${risk:,.2f}")
         except (ValueError, ZeroDivisionError):
             pass
 
