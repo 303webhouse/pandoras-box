@@ -139,18 +139,60 @@ async def check_funding_rate_fade(
         return None
 
     abs_rate = abs(rate)
-    if abs_rate < 0.0003:  # 0.03%
-        return None
 
     # Direction: fade the crowd
     if rate > 0:
         direction = "SHORT"
         stop = mark_price * 1.003
         target = mark_price * 0.995
+        # S-4 Phase 3 (4.2): positive-funding/SHORT floor unchanged.
+        if abs_rate < 0.0003:  # 0.03%
+            return None
     else:
         direction = "LONG"
         stop = mark_price * 0.997
         target = mark_price * 1.005
+        if abs_rate < 0.0003:  # 0.03% -- unchanged, matches today's floor
+            return None
+        if abs_rate < 0.0005:  # 0.05%
+            # S-4 Phase 3 (4.2) -- ATLAS's "stronger structural trigger" for
+            # negative-funding-fade LONGs (s4-phase0-findings.md 0.4,
+            # SATISFIED): reuse this function's own existing HIGH-confidence
+            # boundary as the intended raised entry floor -- a reused
+            # threshold, not a new dimension. Per s4-phase0-findings.md 0.4
+            # and brief hard rule 6 ("shadow-first where new gating logic is
+            # involved"), this strategy is currently live-eligible (fires
+            # 24/7, unflagged, straight into process_signal_unified) so the
+            # RULE ships shadow-gated, not enforced-by-default: this delta
+            # zone [0.0003, 0.0005) is the only band where behavior would
+            # actually change, so it's logged every time it's hit and only
+            # actually blocked once master_rules.
+            # funding_fade_negative_floor_raise_enabled is flipped true in
+            # crypto_gate_config (hot-reload, same mechanism 4.3 uses;
+            # default false -- today's 0.0003 floor keeps firing until
+            # Nick/Titans opt in).
+            try:
+                from config.crypto_gate_loader import get_gate_config
+
+                _, _gc = await get_gate_config()
+                _raise_enabled = bool(
+                    (_gc.get("master_rules") or {}).get(
+                        "funding_fade_negative_floor_raise_enabled", False
+                    )
+                )
+            except Exception as _gc_err:
+                logger.warning(
+                    "Funding_Rate_Fade: gate config fetch failed, defaulting "
+                    "raised-floor to disabled: %s", _gc_err,
+                )
+                _raise_enabled = False
+            logger.info(
+                "Funding_Rate_Fade LONG in delta zone (abs_rate=%.5f, "
+                "0.0003<=x<0.0005) -- raised-floor rule %s",
+                abs_rate, "ENFORCED" if _raise_enabled else "shadow-only (would block)",
+            )
+            if _raise_enabled:
+                return None
 
     if not _can_fire("Funding_Rate_Fade", direction):
         return None
