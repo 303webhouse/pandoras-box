@@ -29,6 +29,22 @@ body {
 }
 .num, .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 
+/* ── Scrollbars ──────────────────────────────────────────────────────────── */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background-color: var(--border-strong);
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover { background-color: var(--teal); }
+*::-webkit-scrollbar-corner { background: transparent; }
+
 /* ── Top bar ─────────────────────────────────────────────────────────────── */
 .v2-topbar {
   display: flex; align-items: center; gap: 14px;
@@ -37,7 +53,9 @@ body {
   background: linear-gradient(180deg, var(--panel-2), var(--bg));
   position: sticky; top: 0; z-index: 40;
 }
-.v2-brand { font-family: var(--mono); font-weight: 700; letter-spacing: 3px; color: var(--teal); font-size: 14px; }
+.v2-logo { display: flex; align-items: center; gap: 8px; }
+.v2-logo-icon { height: 26px; width: auto; }
+.v2-brand { font-family: 'Orbit', var(--mono); font-weight: 400; letter-spacing: 3px; color: var(--teal); font-size: 16px; }
 .v2-sub { color: var(--text-3); font-size: 12px; letter-spacing: 1px; text-transform: uppercase; }
 .v2-topbar .spacer { flex: 1; }
 .v2-legacy-link {
