@@ -50,6 +50,11 @@ ENABLE_CRYPTO_REGIME_JOB = _bool_env("ENABLE_CRYPTO_REGIME_JOB", True)
 # S-3 (R-2): Cycle Extremes dial job. Default ENABLED -- kill switch only.
 # Writes to crypto_cycle_log only; never writes to signals table (D3 rule).
 ENABLE_CRYPTO_CYCLE_JOB = _bool_env("ENABLE_CRYPTO_CYCLE_JOB", True)
+# DEF-FEED-TRIAGE D3 (2026-07-20): tape-health (S-3b) was never actually
+# scheduled -- compute_all_tape_health() has only ever been invoked by
+# manual/deploy-verification curls, not a real cron. Default ENABLED, same
+# kill-switch convention as its siblings above.
+ENABLE_CRYPTO_TAPE_HEALTH_JOB = _bool_env("ENABLE_CRYPTO_TAPE_HEALTH_JOB", True)
 ENABLE_PRICE_HISTORY_BACKFILL = _bool_env("ENABLE_PRICE_HISTORY_BACKFILL", False)
 
 # State file for bias history
@@ -89,6 +94,12 @@ _scheduler_status = {
         "rows_written": 0,
         "status": "idle",
         "interval": "60 min (24/7, shadow-only, zero signals feed writes)"
+    },
+    "crypto_tape_health": {
+        "last_run": None,
+        "rows_written": 0,
+        "status": "idle",
+        "interval": "15 min (24/7, shadow-only -- events still gated by their own dedup/cooldown)"
     },
     "bias_refresh": {
         "last_run": None,
@@ -2711,6 +2722,26 @@ async def start_scheduler():
         else:
             logger.info("Crypto cycle extremes job disabled via ENABLE_CRYPTO_CYCLE_JOB=false")
 
+        # DEF-FEED-TRIAGE D3 (2026-07-20): tape-health, every 15 min, all six
+        # symbols. Was never scheduled at all (S-3b shipped the engine +
+        # endpoint but not a caller) -- compute_all_tape_health() had only
+        # ever been exercised by manual/deploy-verification curls, which is
+        # why the log froze the moment that dev workstream closed. Shadow-
+        # only -- CVD event detection inside compute_tape_health() has its
+        # own cooldown/dedup and process_signal_unified() gating, unaffected
+        # by this job's own cadence.
+        if ENABLE_CRYPTO_TAPE_HEALTH_JOB:
+            scheduler.add_job(
+                run_crypto_tape_health_job_scheduled,
+                'interval',
+                minutes=15,
+                id='crypto_tape_health',
+                name='Crypto Tape Health (spot-vs-perp CVD)',
+                replace_existing=True
+            )
+        else:
+            logger.info("Crypto tape-health job disabled via ENABLE_CRYPTO_TAPE_HEALTH_JOB=false")
+
         # Composite bias refresh every 15 minutes
         scheduler.add_job(
             refresh_composite_bias,
@@ -3721,3 +3752,30 @@ async def run_crypto_cycle_job_scheduled():
     except Exception as e:
         _scheduler_status["crypto_cycle"]["status"] = f"error: {str(e)}"
         logger.error("Error in crypto cycle extremes job: %s", e)
+
+
+async def run_crypto_tape_health_job_scheduled():
+    """DEF-FEED-TRIAGE D3: 15-min tape-health (spot-vs-perp CVD) evaluation,
+    all six symbols. Writes to crypto_tape_health_log; CVD event detection
+    inside compute_tape_health() persists via process_signal_unified() only,
+    under its own cooldown/dedup -- this job doesn't touch signals directly.
+    Failure here must never take down the scheduler loop.
+    """
+    logger.info("Running scheduled tape-health evaluation (all six symbols)...")
+    try:
+        from bias_filters.crypto_tape_health_engine import compute_all_tape_health
+
+        _scheduler_status["crypto_tape_health"]["status"] = "running"
+        results = await compute_all_tape_health()
+        # compute_all_tape_health() always writes one crypto_tape_health_log
+        # row per symbol (persist happens even on the honest-NA path) -- this
+        # counts symbols that got a real, non-NA classification, not total
+        # rows written (every symbol writes a row regardless).
+        rows_written = sum(1 for r in results.values() if r.get("state") != "NA")
+        _scheduler_status["crypto_tape_health"]["last_run"] = get_eastern_now().isoformat()
+        _scheduler_status["crypto_tape_health"]["rows_written"] = rows_written
+        _scheduler_status["crypto_tape_health"]["status"] = "completed"
+        logger.info("Tape-health evaluation complete -- %d/%d symbols logged", rows_written, len(results))
+    except Exception as e:
+        _scheduler_status["crypto_tape_health"]["status"] = f"error: {str(e)}"
+        logger.error("Error in crypto tape-health job: %s", e)

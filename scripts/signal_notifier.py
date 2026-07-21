@@ -19,9 +19,20 @@ import datetime as dt
 import json
 import os
 import pathlib
+import time
 import urllib.error
 import urllib.request
 from typing import Any
+
+# DEF-FEED-TRIAGE D4 (2026-07-20): inter-post spacing (seconds) between
+# successive Discord posts within one run, to stay under the per-channel
+# message-create rate limit rather than fire a whole batch back-to-back.
+DISCORD_POST_SPACING_SECONDS = 1.2
+# Bounded attempts for a single post (429-aware retry + generic backoff for
+# transient network errors). The outer bound across MULTIPLE runs is the
+# existing SIGNAL_MAX_AGE_MIN cutoff -- deliberately not a bigger number
+# here, so a sustained Discord outage can't hang one run.
+DISCORD_POST_MAX_ATTEMPTS = 3
 
 # L0.4 alias (display-only, additive). Canonical map = backend/config/
 # strategy_aliases.py. Resolve it when importable (backend on path, or a sibling
@@ -127,6 +138,63 @@ def http_json(
     if not raw:
         return None
     return json.loads(raw)
+
+
+def _extract_retry_after(err: urllib.error.HTTPError) -> float:
+    """Best-effort wait-time extraction for a Discord 429, preferring the
+    JSON body's `retry_after` (seconds, float -- Discord's own field) over
+    the HTTP `Retry-After` header (integer seconds, generic fallback)."""
+    try:
+        raw = err.read()
+        if raw:
+            body = json.loads(raw.decode("utf-8"))
+            retry_after = body.get("retry_after")
+            if retry_after is not None:
+                return float(retry_after)
+    except Exception:
+        pass
+    try:
+        header_val = err.headers.get("Retry-After") if err.headers else None
+        if header_val is not None:
+            return float(header_val)
+    except Exception:
+        pass
+    return 1.0
+
+
+def _post_discord_with_retry(
+    url: str,
+    headers: dict[str, str],
+    payload: dict[str, Any],
+    label: str,
+    max_attempts: int = DISCORD_POST_MAX_ATTEMPTS,
+) -> dict | None:
+    """POST to Discord, retrying on 429 honoring the server's stated
+    retry-after, bounded to max_attempts. DEF-FEED-TRIAGE D4: the old code
+    treated a 429 the same as any other failure -- one shot, then the alert
+    was dropped permanently for this run. A 429 is not the caller's fault
+    and is retryable within the same run; a non-429 HTTPError or exhausted
+    retries returns None, same as the old behavior.
+    """
+    last_err: Exception | None = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return http_json(url=url, method="POST", headers=headers, payload=payload, timeout=30)
+        except urllib.error.HTTPError as e:
+            last_err = e
+            if e.code == 429 and attempt < max_attempts:
+                wait_s = _extract_retry_after(e) + 0.5
+                print(f"[WARN] Discord 429 for {label}, retrying in {wait_s:.1f}s (attempt {attempt}/{max_attempts})")
+                time.sleep(wait_s)
+                continue
+            print(f"[ERROR] Failed to post Discord alert for {label}: HTTP {e.code} {e.reason}")
+            return None
+        except Exception as e:
+            last_err = e
+            print(f"[ERROR] Failed to post Discord alert for {label}: {e}")
+            return None
+    print(f"[ERROR] Failed to post Discord alert for {label} after {max_attempts} attempts: {last_err}")
+    return None
 
 
 def ensure_data_dir() -> None:
@@ -303,11 +371,7 @@ def post_signal_alert(token: str, channel_id: str, signal: dict, signal_id: str)
     }
     payload = {"embeds": [embed], "components": components}
 
-    try:
-        return http_json(url=url, method="POST", headers=headers, payload=payload, timeout=30)
-    except Exception as e:
-        print(f"[ERROR] Failed to post Discord alert for {ticker}: {e}")
-        return None
+    return _post_discord_with_retry(url, headers, payload, label=ticker)
 
 
 def fetch_crypto_state(api_url: str, ticker: str) -> dict[str, Any] | None:
@@ -491,11 +555,7 @@ def post_crypto_signal_alert(token: str, channel_id: str, signal: dict, signal_i
     }
     payload = {"embeds": [embed], "components": components}
 
-    try:
-        return http_json(url=url, method="POST", headers=headers, payload=payload, timeout=30)
-    except Exception as e:
-        print(f"[ERROR] Failed to post crypto Discord alert for {ticker}: {e}")
-        return None
+    return _post_discord_with_retry(url, headers, payload, label=f"{ticker} (crypto)")
 
 
 def is_signal_crypto(signal: dict) -> bool:
@@ -588,22 +648,31 @@ def main() -> int:
             result["skipped_wrong_class"] += 1
             continue
 
-        seen_ids.append(signal_id)
-        seen_set.add(signal_id)
         result["new_signals"] += 1
 
-        # Skip non-trade signals
+        # Skip non-trade signals -- permanently terminal, mark seen now
         route = classify_signal(signal)
         if route != "trade":
             result["skipped_non_trade"] += 1
+            seen_ids.append(signal_id)
+            seen_set.add(signal_id)
             continue
 
-        # Skip old signals
+        # Skip old signals -- permanently terminal (aged out), mark seen now
         if is_signal_too_old(signal):
             result["skipped_old"] += 1
+            seen_ids.append(signal_id)
+            seen_set.add(signal_id)
             continue
 
-        # Post alert to Discord (use crypto embed for crypto signals)
+        # Post alert to Discord (use crypto embed for crypto signals). The
+        # post functions retry internally on a 429 (bounded within this
+        # run) -- a None here means genuine, retries-exhausted failure.
+        # DEF-FEED-TRIAGE D4: only mark "seen" on success or one of the
+        # terminal skips above -- a failed post is deliberately left
+        # un-seen so the NEXT run retries it, bounded by the existing
+        # is_signal_too_old() / SIGNAL_MAX_AGE_MIN cutoff rather than being
+        # lost the moment Discord returns an error.
         if sig_is_crypto:
             resp = post_crypto_signal_alert(discord_token, channel_id, signal, signal_id, api_url)
         else:
@@ -611,8 +680,14 @@ def main() -> int:
 
         if resp:
             result["alerts_posted"] += 1
+            seen_ids.append(signal_id)
+            seen_set.add(signal_id)
             # Save signal for button handler (committee for equity, decision log for crypto)
             save_pending_signal(signal_id, signal)
+
+        # Inter-post spacing: stay under Discord's per-channel message-create
+        # rate limit rather than fire a whole batch back-to-back.
+        time.sleep(DISCORD_POST_SPACING_SECONDS)
 
     # Save seen IDs
     save_seen_ids(seen_ids)

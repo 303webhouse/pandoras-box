@@ -258,9 +258,17 @@ async def get_funding_rate(symbol: str = "BTC") -> Dict[str, Any]:
         }
 
     # Parse response - Coinalyze returns array of symbols
+    # DEF-FEED-TRIAGE D1 (2026-07-20): Coinalyze's "value" is ALREADY a
+    # percentage (confirmed live: raw value=0.001058 for a real ~0.001%/8h
+    # BTC rate, cross-checked against OKX's raw fraction 0.0000121... at the
+    # same moment). The OKX fallback below (and in get_term_structure) is a
+    # true fraction and correctly needs *100 -- Coinalyze does not. Applying
+    # the same *100 to both vendors was a ~100x unit-error inflating every
+    # Coinalyze-sourced funding read (this function AND get_term_structure's
+    # history-derived values share the identical Coinalyze "v"/"value" unit).
     item = data[0]
-    funding_rate = item.get("value", 0) * 100  # Convert to percentage
-    predicted_rate = item.get("predictedValue", 0) * 100 if "predictedValue" in item else None
+    funding_rate = item.get("value", 0)
+    predicted_rate = item.get("predictedValue") if "predictedValue" in item else None
 
     if funding_rate > 0.05:
         sentiment = "overleveraged_longs"
@@ -722,8 +730,10 @@ async def get_term_structure(symbol: str = "BTC") -> Dict[str, Any]:
             "error": "Insufficient funding history"
         }
 
-    current_funding = history[-1].get("v", 0) * 100
-    avg_funding = sum(h.get("v", 0) for h in history) / len(history) * 100
+    # DEF-FEED-TRIAGE D1: Coinalyze's "v" is the same already-a-percentage
+    # unit as get_funding_rate()'s "value" -- no *100 here either.
+    current_funding = history[-1].get("v", 0)
+    avg_funding = sum(h.get("v", 0) for h in history) / len(history)
 
     if avg_funding > 0.02:
         structure = "contango"
@@ -733,8 +743,8 @@ async def get_term_structure(symbol: str = "BTC") -> Dict[str, Any]:
         structure = "flat"
 
     if len(history) >= 3:
-        recent_avg = sum(h.get("v", 0) for h in history[-2:]) / 2 * 100
-        older_avg = sum(h.get("v", 0) for h in history[:-2]) / max(len(history) - 2, 1) * 100
+        recent_avg = sum(h.get("v", 0) for h in history[-2:]) / 2
+        older_avg = sum(h.get("v", 0) for h in history[:-2]) / max(len(history) - 2, 1)
 
         if recent_avg > older_avg + 0.01:
             funding_trend = "rising"
