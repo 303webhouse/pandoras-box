@@ -420,7 +420,17 @@ async def _fire_cvd_events(
             event_type = event["signal_type"]
             level_name = json.loads(event["enrichment_data"])["cvd_level"]
             cooldown_key = "divergence_cooldown_seconds" if event_type == "CVD_DIVERGENCE" else "absorption_cooldown_seconds"
-            cooldown_seconds = cvd_cfg.get(cooldown_key, 900)
+            # DEF-CVD-DEDUP (2026-07-21): the cooldown window must have real
+            # margin over the tape-health job's own polling interval (15 min,
+            # bias_scheduler.py's crypto_tape_health job) or ordinary scheduler
+            # jitter defeats it every time -- confirmed root cause of a 3-fires-
+            # ever -> 57+-in-two-days spike (900s cooldown == 900s cadence, so
+            # the real elapsed gap between ticks landed on either side of the
+            # boundary essentially at random). Fallback here matches the fixed
+            # config default (1800s, 2x the interval) rather than the old,
+            # too-tight 900s, so a config-fetch failure fails toward the safe
+            # (wider) side, not back into the bug.
+            cooldown_seconds = cvd_cfg.get(cooldown_key, 1800)
 
             can_fire = await _check_cvd_cooldown(symbol, event_type, level_name, cooldown_seconds)
             if not can_fire:

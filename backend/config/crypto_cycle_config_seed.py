@@ -50,8 +50,13 @@ SEED_CONFIG_V1 = {
 
     # --- CVD event detection (§5.3) ---
     "cvd_events": {
-        "divergence_cooldown_seconds":  900,    # 15 min per-symbol-per-type cooldown
-        "absorption_cooldown_seconds":  900,
+        # DEF-CVD-DEDUP (2026-07-21): was 900s (15 min) -- exactly equal to
+        # the tape-health job's own 15-min polling interval, so ordinary
+        # scheduler jitter defeated the cooldown almost every tick (900s
+        # spike: 3 fires ever -> 57+ in two days). Needs real margin over
+        # the polling interval, not just equality to it.
+        "divergence_cooldown_seconds":  1800,    # 30 min -- 2x the 15-min poll interval
+        "absorption_cooldown_seconds":  1800,
         "divergence_signal_expiry_hours": 24,
         "absorption_signal_expiry_hours": 24,
     },
