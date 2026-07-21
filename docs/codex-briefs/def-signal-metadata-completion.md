@@ -53,7 +53,11 @@ Per the brief's decision-gate, a proposed `strategy → source` mapping for the 
 | **Scout / Scout Sniper** | ambiguous | **LOW — DO NOT BACKFILL** | same dual-origin problem (webhook vs `server_scanner`) |
 | **Artemis** | ambiguous | **MEDIUM** | believed webhook-only (`tradingview`) but not proven exhaustively |
 
-**Recommendation:** if a backfill is pursued at all, apply only the HIGH-confidence single-producer strategies and **leave the ambiguous ones as-is** (`'tradingview'`) rather than guess — the dual-origin strategies (Holy_Grail, Scout) are exactly the ones `confluence_validation` cares about, so a wrong backfill there would be worse than the honest-but-stale default. Forward-fill (new rows, already done by this fix) is unambiguous and sufficient for going-forward provenance. **Not applied — awaiting explicit approval; ATLAS flag if pursued.**
+**Recommendation:** if a backfill is pursued at all, apply only the HIGH-confidence single-producer strategies and **leave the ambiguous ones as-is** (`'tradingview'`) rather than guess — the dual-origin strategies (Holy_Grail, Scout) are exactly the ones `confluence_validation` cares about, so a wrong backfill there would be worse than the honest-but-stale default. Forward-fill (new rows, already done by this fix) is unambiguous and sufficient for going-forward provenance.
+
+> **RULING (Nick + Fable, 2026-07-21): NO — declined permanently.** No historical backfill will ever be performed. Rationale: `strategy` already identifies the producer without inventing anything, and a backfill would write *inferred* values into a column that otherwise holds *recorded* values, making the two permanently indistinguishable. Instead, the strategy→producer mapping and the `e8ed614` provenance cutline are documented at **`docs/reference/signal-provenance.md`**.
+>
+> **One correction recorded in that doc**, since it strengthens rather than weakens the ruling: `strategy` is *not* quite lossless. `Holy_Grail` and `Scout Sniper` are **dual-origin** — `scanners/holy_grail_scanner.py:224,255` and `scanners/scout_sniper_scanner.py:312` emit the identical `strategy` string that `webhooks/tradingview.py:438,340` does — so for those two, `strategy` alone cannot tell you which side produced a row. That is precisely the class where a backfill would have had to guess, so the "no backfill" outcome is right; only the "losslessly" premise needed the footnote. Post-cutline, `source` resolves it cleanly (`server_scanner` vs `tradingview`); pre-cutline it is unrecoverable, and that is now documented rather than papered over.
 
 ## 5. PROPOSAL (not applied) — `/api/analytics/log-signal` side-door disposition
 
@@ -64,7 +68,12 @@ Per the brief's decision-gate, a proposed `strategy → source` mapping for the 
 - **(B) Reroute through `process_signal_unified()`** — if a manual/external signal-insert capability is genuinely wanted, make it a first-class writer (pass `source="manual_api"`) so it inherits scoring/gating/dedup like everything else.
 - **(C) Leave as-is** — harmless today (unused, self-tagging), but it's a standing hole that a future caller could use to inject ungoverned rows.
 
-**Recommendation: (A) remove**, or (B) if the capability is wanted. **Not applied — flagging for decision per the brief (rerouting/removing a writer is its own decision).**
+**Recommendation: (A) remove**, or (B) if the capability is wanted.
+
+> **RULING (Nick + Fable, 2026-07-21): REMOVE — done, commit `982257c`.**
+> Removal precondition required by the ruling was verified first and came back clean: **zero callers** in `frontend/`, in `scripts/`, or anywhere on the VPS (`/opt/openclaw/workspace/`, `/home/openclaw/.openclaw/`, `/opt/pivot/`) — the only references in the entire repo were the route definition itself and one auth-test case. Combined with the zero rows ever carrying its `bypass_source` tag, nothing has ever called it.
+> Removed: the endpoint, the `LogSignalRequest` model, the now-dead `log_signal` import in `analytics/api.py`, and the route's parametrized auth-test entry. An in-place comment at the removal site records what was removed, why, and how to reinstate it correctly (routed **through** `process_signal_unified(source="manual_api")`) if the capability is ever wanted.
+> **Recoverability: commit `982257c`** (also recorded in `docs/workstreams.md` per the ruling). This closes the last side door around F-4's chokepoint — every remaining writer now routes through `process_signal_unified()`.
 
 ## 6. Follow-up flagged (out of scope, not fixed)
 
