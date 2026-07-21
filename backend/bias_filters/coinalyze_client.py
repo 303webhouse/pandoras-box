@@ -116,8 +116,23 @@ async def _finalize_result(
     if not ok:
         logger.warning("Coinalyze %s[%s] bounds check failed, not caching: %s", feed_type, symbol, reason)
         return {**result, "signal": "UNKNOWN", "error": reason, "health_status": status}
-    _set_cache(cache_key, result)
-    return {**result, "health_status": status}
+    # DEF-FUNDING-CACHE-HEALTH (2026-07-21): attach health_status BEFORE the
+    # cache write, not after. The prior order cached `result` without the
+    # field, so every cache hit inside the CACHE_TTL_SECONDS window returned a
+    # dict missing health_status. The funding consumer reads it with a bare
+    # .get("health_status") (crypto_market.py:716), so a cache hit yielded
+    # None -> None != "LIVE" -> degraded=true on perfectly healthy data
+    # (fake-degraded; production repro at 04a1983: false,true,true with an
+    # identical rate). Build ONE merged dict and use it for both the cache and
+    # the return so the cache-hit and cache-miss paths can never diverge again.
+    # This preserves honest degradation: when the feed is genuinely stale,
+    # `status` is DEGRADED/DEAD and the cached copy now carries that truthfully
+    # rather than a consumer-side default masking it. Shared by funding, OI and
+    # term_structure -- all three route through here -- but only funding was
+    # exposed, because OI/basis consumers pass a "LIVE" default (:740/:752).
+    result_with_health = {**result, "health_status": status}
+    _set_cache(cache_key, result_with_health)
+    return result_with_health
 
 
 async def _record_failure(feed_type: str, reason: str, symbol: str) -> None:
