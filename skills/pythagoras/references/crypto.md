@@ -18,6 +18,7 @@ The chart-reading methodology PYTHAGORAS uses for equities adapts reasonably wel
 ## Currently Available Crypto Tooling PYTHAGORAS Can Reference
 
 - **`hub_get_crypto_market_profile`** — POC/VAH/VAL per crypto symbol, PYTHIA-parity tool (S-3). PYTHAGORAS references this for structural confirmation rather than duplicating chart analysis.
+- **`hub_get_crypto_state(symbol)` — WARNING, not a PYTHAGORAS data source.** The tool does **not** serve ATR: its `atr` block returns `available=false` and is deliberately excluded from the health rollup (it is a live-bars-only field with no persisted source). **Never fabricate a crypto ATR** or infer one from another block. The daily Wilder ATR(14) PYTHAGORAS reads on equities via `hub_get_chart_indicators` has **no crypto equivalent exposed here** — for crypto stop distance / volatility, fall back to `hub_get_crypto_market_profile` session high/low or a chart screenshot, and say so in the DATA NOTE. The tool's other blocks (funding/OI/basis/liquidations/regime/tape) belong to TORO/URSA/THALES/PYTHIA, not PYTHAGORAS's trend/structure lane.
 - **`/api/crypto/regime`** and **`/api/crypto/clock`** — see above, both real and live.
 - **`/api/crypto/cycle-extremes`** — CAPITULATION⟷FROTH composite dial, useful cross-check for whether a chart-pattern read is fighting a positioning extreme.
 - **BTC Market Structure Filter** (`backend/strategies/btc_market_structure.py`) — the CVD/orderbook scoring layer underneath the market-profile tool; PYTHAGORAS still doesn't call this directly, references the MCP tool instead.
