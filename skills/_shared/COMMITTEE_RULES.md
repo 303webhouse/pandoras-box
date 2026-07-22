@@ -22,6 +22,8 @@ Each agent's own `SKILL.md` lists the specific MCP tools it calls in Context A �
 
 If ANY MCP tool returns `status="unavailable"` or `status="stale"`, append a DATA NOTE block at the end of the output naming which tool failed and degrade conviction by one notch per missing input. If `mcp_ping` itself fails, fall back to Context B (web_search ground truth) and surface "MCP: unreachable" prominently.
 
+**Multi-block tools — penalize the block, not the rollup.** A few tools (`hub_get_crypto_state`, `hub_get_stable_rates_fx`) return several independently-timed sub-blocks, each carrying its own `status`, and set the tool's TOP-LEVEL status to the WORST block. For these, apply the one-notch conviction penalty **only when the specific block an agent actually used is `degraded`, `stale`, or `unavailable`** — never on the top-level rollup alone. A healthy block sitting behind a degraded sibling is still a healthy input; docking conviction on it — and then compounding that across every agent into PIVOT's synthesis — throws away good data. (Example: `hub_get_crypto_state` for FARTCOIN can report top-level `stale` purely because its hourly cycle block lags, while `regime` and `tape_health` are fresh — an agent reading regime should not degrade on that.) Always name the specific block in the DATA NOTE, not just the tool. And never read a value out of a block whose own `status` is `degraded` or `unavailable` — surface it as missing instead.
+
 ### Context B: Hub unreachable, web_search fallback
 
 Mandatory GROUND TRUTH block at the top of every output:
