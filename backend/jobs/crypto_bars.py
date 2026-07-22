@@ -154,14 +154,24 @@ async def _fetch_full_ohlc(base_symbol: str, use_daily: bool) -> List[Tuple[date
 
     vendor = bar_walk.get("vendor")
     if vendor == "uw_crypto_ohlc":
-        return await _fetch_uw_bars_full(base_symbol, "1d" if use_daily else "15m")
-    if vendor == "binance_spot_klines":
-        return await _fetch_binance_spot_klines_full(base_symbol, "1d" if use_daily else "15m")
-    if vendor == "okx_candles":
-        return await _fetch_okx_candles_full(base_symbol, "1D" if use_daily else "15m")
+        bars = await _fetch_uw_bars_full(base_symbol, "1d" if use_daily else "15m")
+    elif vendor == "binance_spot_klines":
+        bars = await _fetch_binance_spot_klines_full(base_symbol, "1d" if use_daily else "15m")
+    elif vendor == "okx_candles":
+        bars = await _fetch_okx_candles_full(base_symbol, "1D" if use_daily else "15m")
+    else:
+        logger.warning("Unknown bar_walk_source vendor '%s' for %s -- shadow-only, skipping", vendor, base_symbol)
+        return []
 
-    logger.warning("Unknown bar_walk_source vendor '%s' for %s -- shadow-only, skipping", vendor, base_symbol)
-    return []
+    # DEF-CRYPTO-VP-ANCHOR sibling fix (2026-07-22): vendors disagree on order --
+    # UW and OKX return newest-first (descending), Binance oldest-first
+    # (ascending). Normalize to ASCENDING here, at the single source, so every
+    # consumer's positional slice / [-1] / touch-walk is chronological. This
+    # generalizes the local fix crypto_regime.py:115 applied for exactly one
+    # consumer while five siblings stayed exposed (VP tool + scoring twin, the
+    # CVD event engine, the crypto-state ATR). Per-consumer sorts (VP surfaces,
+    # regime, _walk_touch) remain as defense-in-depth.
+    return sorted(bars, key=lambda b: b[0])
 
 
 async def fetch_crypto_bars(base_symbol: str, signal_ts: datetime, use_daily: bool) -> List[Tuple[datetime, float, float]]:
