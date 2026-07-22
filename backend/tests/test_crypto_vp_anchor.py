@@ -128,6 +128,35 @@ def test_stale_bars_fail_closed_to_zero_score(monkeypatch):
     assert "volume profile unavailable" in result["reasoning"]
 
 
+# --------------------------------------------------------------------------
+# Source-level sort -- _fetch_full_ohlc normalizes vendor order for ALL
+# consumers (the sibling fix; every downstream positional slice is chronological).
+# --------------------------------------------------------------------------
+
+def test_fetch_full_ohlc_sorts_source_level(monkeypatch):
+    """_fetch_full_ohlc must return ascending-by-timestamp regardless of vendor
+    order, so bars[-24:]/recent[-1]/walk in every consumer are chronological.
+    FAILS pre-fix: UW/OKX return newest-first and the old code passed it through."""
+    import jobs.crypto_bars as cb
+    now = datetime.now(timezone.utc)
+    # descending (newest-first) -- the UW/OKX vendor order
+    desc = [(now - timedelta(minutes=15 * i), 100.0 + i, 100.5 + i, 99.5 + i, 100.0 + i) for i in range(30)]
+    monkeypatch.setattr(
+        cb, "get_symbol_entry",
+        lambda s: {"bar_walk_source": {"status": "LIVE", "vendor": "uw_crypto_ohlc"}},
+    )
+
+    async def _fake_uw(base, size, limit=500):
+        return desc
+
+    monkeypatch.setattr(cb, "_fetch_uw_bars_full", _fake_uw)
+    out = asyncio.run(cb._fetch_full_ohlc("BTC", use_daily=False))
+    ts = [b[0] for b in out]
+    assert ts == sorted(ts), "source fetch must emit ascending-by-timestamp"
+    assert out[-1][0] == max(ts), "newest bar must be last, so consumer [-1] is the current bar"
+    assert len(out) == 30
+
+
 if __name__ == "__main__":
     import traceback
     tests = [
