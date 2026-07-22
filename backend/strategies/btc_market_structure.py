@@ -357,33 +357,45 @@ async def get_market_structure_context(
 
     # 1. Volume Profile (S-3b Fable ruling rev-2, LEG 1: rerouted off Binance
     # Futures klines onto the F-2 bar source -- same source as
-    # hub_get_crypto_market_profile's VP, S-3 Sec1.4/Sec6.3 pattern reuse,
-    # empirically proven live for BTC/ETH on Railway. F-2 bars carry no
-    # per-bar volume, so the klines-shape volume is a placeholder (time-at-
-    # price, not volume-weighted) -- same fidelity tradeoff as that tool.
-    # NOTE: fetch_crypto_ohlc(use_daily=False) returns 15m-granularity bars,
-    # not 1h -- the last-24 slice below is ~6h of coverage, not 24h. This
-    # matches hub_get_crypto_market_profile's shipped behavior byte-for-byte
-    # (same "bars_1h"/24-slice naming there too); flagging the discrepancy
-    # here rather than silently "fixing" it, since Fable's ruling validated
-    # mirroring that exact shipped pattern, not improving it.
+    # hub_get_crypto_market_profile's VP, S-3 Sec1.4/Sec6.3 pattern reuse.
+    # F-2 bars carry no per-bar volume, so the klines-shape volume is a
+    # placeholder (time-at-price, not volume-weighted) -- same fidelity tradeoff
+    # as that tool. fetch_crypto_ohlc(use_daily=False) returns 15m bars, so the
+    # last-24 slice is ~6h of coverage (window length is a separate
+    # PYTHIA-ratified methodology call, deferred -- not changed here).
+    #
+    # DEF-CRYPTO-VP-ANCHOR (2026-07-22): fetch_crypto_ohlc returns bars in VENDOR
+    # order (UW/OKX newest-first, Binance oldest-first), UNSORTED, so a bare
+    # [-24:] grabbed the OLDEST 24 bars for descending vendors -> a value area
+    # 3-5 days stale. Fixed in lockstep with hub_get_crypto_market_profile: sort
+    # ascending before slicing, and fail closed on stale bars (vp error ->
+    # _score_volume_profile returns 0, NOT a phantom -5) rather than scoring an
+    # entry against a value area anchored days off the current tape.
     try:
         cache_key = f"volume_profile_24h:{ticker}"
         cached_vp = _cache_get(cache_key)
         if cached_vp:
             vp_data = cached_vp
         else:
+            from datetime import datetime, timezone
             from jobs.crypto_bars import fetch_crypto_ohlc
-            bars_1h = await fetch_crypto_ohlc(ticker, use_daily=False)
+            bars_1h = sorted(
+                await fetch_crypto_ohlc(ticker, use_daily=False) or [],
+                key=lambda b: b[0],
+            )  # ORDERING FIX -- never trust vendor order
             if bars_1h:
-                recent_24h = bars_1h[-24:]
-                klines = [[
-                    int(bar[0].timestamp() * 1000),
-                    bar[1], bar[2], bar[3], bar[4],
-                    1.0,  # volume placeholder -- see note above
-                ] for bar in recent_24h]
-                vp_data = compute_volume_profile(klines)
-                _cache_set(cache_key, vp_data)
+                recent_24h = bars_1h[-24:]  # most recent 24 x 15m = ~6h
+                newest_age = (datetime.now(timezone.utc) - recent_24h[-1][0]).total_seconds()
+                if newest_age > 1200:  # 20 min -- fail closed, do not score a stale window
+                    vp_data = {"error": f"stale bars: newest 15m bar {newest_age:.0f}s old"}
+                else:
+                    klines = [[
+                        int(bar[0].timestamp() * 1000),
+                        bar[1], bar[2], bar[3], bar[4],
+                        1.0,  # volume placeholder -- see note above
+                    ] for bar in recent_24h]
+                    vp_data = compute_volume_profile(klines)
+                    _cache_set(cache_key, vp_data)
         vp_score, vp_reason = _score_volume_profile(vp_data, entry_price, direction)
     except Exception as e:
         logger.warning(f"Volume profile error: {e}")
