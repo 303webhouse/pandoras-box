@@ -75,11 +75,17 @@ def test_binance_futures_symbol_no_coverage_case():
 # ---------------------------------------------------------------------------
 
 def _synthetic_bars(n=30, base_price=64000.0):
-    """n synthetic (ts, open, high, low, close) 15m bars with real price
-    spread, matching fetch_crypto_ohlc's return shape."""
+    """n synthetic (ts, open, high, low, close) 15m bars ending ~now, with real
+    price spread, matching fetch_crypto_ohlc's return shape. Timestamps are
+    fresh + incrementing (oldest->newest, newest ~= now) so the DEF-CRYPTO-VP-
+    ANCHOR freshness guard (newest bar must be < 20 min old) does not reject
+    them -- the fixed 2026-07-17 stamp this used before made every bar days
+    stale and tripped that guard."""
+    from datetime import timedelta
     bars = []
-    ts = datetime(2026, 7, 17, 0, 0, tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc)
     for i in range(n):
+        ts = now - timedelta(minutes=15 * (n - 1 - i))
         px = base_price + (i % 5) * 50
         bars.append((ts, px, px + 30, px - 30, px + 10))
     return bars
