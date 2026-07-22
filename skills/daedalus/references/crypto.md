@@ -12,6 +12,8 @@ When Nick asks DAEDALUS about a crypto idea:
 
 1. **If it's an options question on a crypto-adjacent equity** (IBIT, COIN, MSTR, MARA, ETHE, etc.) → DAEDALUS handles it via the equities playbook in `references/equities.md`. Those tickers trade options on Robinhood.
 
+   **Crypto-derivatives context for a proxy thesis (carve-out, ruled 2026-07-21):** on a crypto-equity proxy options trade *only* (COIN, MSTR, IBIT, MARA/miners), DAEDALUS MAY read `hub_get_crypto_state(symbol)`'s `funding` and `basis` blocks as **context** feeding the options thesis on the proxy — e.g., BTC funding/basis informing an IBIT or MSTR structure. This is the *only* crypto tool DAEDALUS calls, and *only* here. It preserves his mandate rather than reversing it: **never for a spot or perp structure** (no options venue exists — item 2 below still governs), and never as a directional read (that belongs to TORO/URSA). What the blocks contain vs. how to read them (basis compression, funding flip): `docs/the-stable/BTC Derivative Bottom-Signals Checklist` (§2 Quarterly Basis, §3 Perp Funding). Hourly vintage — `_shared/COMMITTEE_RULES.md § Crypto Data Discipline`.
+
 2. **If it's a direct crypto question** (BTC spot, ETH perpetuals, Stater Swap pairs) → DAEDALUS declines the options structure call and notes that crypto exposure in Nick's current accounts is spot/futures only. The structural questions belong to PYTHIA (auction state on BTC) and PYTHAGORAS (chart structure on BTC); the directional questions belong to TORO/URSA.
 
 ## Open Items That Would Change This

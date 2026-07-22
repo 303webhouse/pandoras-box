@@ -162,3 +162,12 @@ Each agent routes to an asset-class-specific reference playbook (typically `refe
 Universal routing rule: **Don't blend playbooks.** If the instrument spans both (e.g., a crypto-adjacent equity like COIN, MSTR, MARA), use the equities playbook — the trade is in stock/options form, even if the underlying exposure is crypto.
 
 Each agent's `SKILL.md` retains its specific routing configuration (default profile periods, sub-asset-class branching, instrument-specific defaults). The blend-prevention rule above is universal; the configuration specifics are agent-specific.
+
+## § Crypto Data Discipline
+
+Applies to every agent that reads `hub_get_crypto_state` (funding / open_interest / basis / liquidations / regime / tape_health / session). These are capability/operational rules, not methodology — the derivative-signal *interpretation* lives in `docs/the-stable/` (cited per agent in each `references/crypto.md`).
+
+1. **Hourly vintage.** `funding`, `open_interest`, `basis`, and `liquidations` are read from the cycle engine's hourly snapshot (`crypto_cycle_log`), not a live fetch. Use them for positioning and regime context, **not** for intraday timing or B3 scalp triggers. Liquidations especially: an hourly snapshot can miss a cascade that fired and resolved between samples.
+2. **Never call `hub_get_quote` bare** for BTC, ETH, SOL, HYPE, ZEC, or FARTCOIN — it returns an equity/ETF collision. Use `hub_get_crypto_quote` (or `hub_get_quote(..., asset_class="EQUITY")` only if you specifically mean the colliding stock).
+3. **No inferred scores.** `regime` and `cta_zone` are labeled engine classifications, not numbers. Never convert them to a score, and never infer the −45..+35 Market Structure Filter value — it is deliberately not exposed.
+4. **FARTCOIN coverage gap.** FARTCOIN's cycle block lags materially behind its `regime` and `tape_health` blocks. Expect per-block divergence on that symbol; it is correctly reported, not a bug — and per the multi-block rule above, penalize only the block you used, never the top-level rollup.
