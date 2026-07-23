@@ -106,6 +106,14 @@
 
 ---
 
+## BIAS-FACTOR-AUDIT — owner: Fable (coordination lane)
+
+| Date | Workstream | Status | Owner | Detail | Next |
+|---|---|---|---|---|---|
+| 2026-07-23 | BIAS-FACTOR-AUDIT Phase 0 | DONE (read-only) | Fable | credit_spreads = P1 DEF-CREDIT-PROXY-DURATION (proxy measures duration, not credit); weights located (FACTOR_CONFIG, hardcoded) + null-weight = hardcoded None in hub tool (DEF-BIAS-WEIGHT-NULL P2); 2 divergence-candidates pending raw_data (vix_term boundary, sahm tier); FACTOR-RATE-SHOCK proposed; writer-ownership drift flagged | Nick ratify §4 queue |
+
+---
+
 ## Cross-stream dedupe log
 - **2026-07-09:** Write-path census is SIGNALS-PIPELINE's alone. Dashboard forensics #3 (`/log-signal` @ `analytics/api.py:2072` — caller inventory + routing through `process_signal_unified`) merges into it. Dashboard CC keeps read-side only. Census = Phase-0 findings first, no code before the report.
 - **2026-07-11:** Sector RS-10d contract fix (`sector_momentum.py` writer + `sector_strength.py` reader) owned by DASHBOARD-V2 CC — ATLAS-approved mini-brief, one Saturday push. `scanners/sector_rs.py` (Achilles' OWN `sector_rs:{ETF}` cache) is a separate, healthy pipeline — untouched; dual-pipeline consolidation is a build-backlog note only, not claimed by any stream yet.
