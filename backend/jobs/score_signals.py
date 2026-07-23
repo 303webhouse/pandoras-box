@@ -114,7 +114,23 @@ async def score_pending_signals() -> None:
 
     pool = await get_postgres_client()
     async with pool.acquire() as conn:
-        pending = await conn.fetch("SELECT * FROM signal_outcomes WHERE outcome = 'PENDING'")
+        # DEF-CVD-QUARANTINE (Tier A): exclude quarantined rows from PROJECTED
+        # grading. signal_outcomes carries no quarantine marker, so LEFT JOIN
+        # signals (orphans -> NULL enrichment_data -> included, behavior preserved).
+        pending = await conn.fetch("""
+            SELECT so.* FROM signal_outcomes so
+            LEFT JOIN signals s ON s.signal_id = so.signal_id
+            WHERE so.outcome = 'PENDING'
+              AND (s.enrichment_data -> 'quarantine') IS NULL
+        """)
+        skipped = await conn.fetchval("""
+            SELECT count(*) FROM signal_outcomes so
+            JOIN signals s ON s.signal_id = so.signal_id
+            WHERE so.outcome = 'PENDING' AND (s.enrichment_data -> 'quarantine') IS NOT NULL
+        """)
+
+    if skipped:
+        logger.info("score_signals: skipped %d quarantined signals (DEF-CVD-QUARANTINE)", skipped)
 
     logger.info("Scoring %s pending signals", len(pending))
     now_utc = datetime.now(timezone.utc)

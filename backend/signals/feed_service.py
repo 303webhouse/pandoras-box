@@ -100,6 +100,12 @@ async def get_active_trade_ideas(
         "created_at > NOW() - INTERVAL '24 hours'",
         "user_action IS NULL",
         "COALESCE(signal_category, 'TRADE_SETUP') NOT IN ('INTRADAY_SETUP', 'FOOTPRINT')",
+        # DEF-CVD-QUARANTINE (Tier A): exclude quarantined rows from the actionable
+        # feed. This is the FIRST central visible-signals predicate (there is no
+        # pre-existing is_test filter to piggyback on); Tier B (SIGNALS-READ-LAYER)
+        # generalizes it across the remaining raw read paths. Covers the committee
+        # surface (hub_get_trade_ideas) and REST /trade-ideas — both route here.
+        "(enrichment_data -> 'quarantine') IS NULL",
     ]
     params: List[Any] = []
     idx = 1
