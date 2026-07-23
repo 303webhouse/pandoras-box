@@ -40,26 +40,28 @@ The ruling-4 mini-audit (required before this froze) confirmed the other three c
 
 ---
 
-## 2. Blast radius — all 272 quarantined
+## 2. Blast radius — all quarantined (predicate category-keyed)
 
-`signal_category = 'CRYPTO_CVD_EVENT'` — **272 rows as of 2026-07-22 (growing until the detector is disabled)**, all `CVD_ABSORPTION`, **0 `CVD_DIVERGENCE` lifetime**:
+`signal_category = 'CRYPTO_CVD_EVENT'`, all `CVD_ABSORPTION`, **0 `CVD_DIVERGENCE` lifetime**. The count **grew in real time until the detector was disabled**: 272 (audit) → 329 → 349 (at the 2026-07-23 05:06Z flip). Snapshot at 329:
 
 | Symbol | Vendor | Rows | `quarantine_class` |
 |--------|--------|------|--------------------|
-| BTC | UW (desc) | 79 | `mispriced` |
-| ETH | UW (desc) | 64 | `mispriced` |
-| HYPE | OKX (desc) | 48 | `mispriced` |
-| SOL | UW (desc) | 20 | `mispriced` |
-| ZEC | Binance (asc) | 61 | `correct_priced_phantom` |
-| **Total** | | **272** | **211 + 61** |
+| BTC | UW (desc) | 98 | `mispriced` |
+| ETH | UW (desc) | 77 | `mispriced` |
+| HYPE | OKX (desc) | 54 | `mispriced` |
+| SOL | UW (desc) | 24 | `mispriced` |
+| ZEC | Binance (asc) | 76 | `correct_priced_phantom` |
+| **Total (@329)** | | **329** | **253 + 76** |
 
-**80 graded outcomes** (BTC 43, ETH 37) carry propagated-wrong verdicts. The **73 "burst" rows** (Nick ruled KEEP) are a subset — §3 ruling 1.
+The predicate is **category-keyed**, so the exact frozen count (final per-symbol split confirmed by the R2 exit gate) does not change the write. ~80 graded outcomes carry propagated-wrong verdicts; the burst rows (Nick ruled KEEP) are a subset — §3 ruling 1.
+
+**Fire-rate characterization (R3 — the free data shadow mode would have collected):** the detector fired **272→329 (+57) in a single afternoon** and continued to 349 — this is its **post-source-sort fire rate on live-priced bars**, and it is (a) the floor the redesign must beat and (b) empirical proof that ATLAS #1 (disable-before-pre-image) was load-bearing. **The accrual is vendor-independent:** ZEC (Binance-ascending, correctly priced) added **15 of the 57** — a correctly-priced symbol phantom-firing at the same clip is one more nail in the logic-defect finding (§6). The 0-divergence lifetime held across all of it.
 
 ---
 
 ## 3. Rulings baked in (Fable, 2026-07-22)
 
-**Ruling 1 — QUARANTINE-EXCLUDE (not rewrite, not purge).** Additive marker, default-excluded from every read, excluded from grading, pre-image JSONL, one-line reversible. Precedent ×3: `is_test`, `cvd_dedup_burst`, `quarantined_equity_clobber`.
+**Ruling 1 — QUARANTINE-EXCLUDE (not rewrite, not purge).** Additive marker, default-excluded from every read, excluded from grading, pre-image JSONL, one-line reversible. Precedent: `cvd_dedup_burst`, `quarantined_equity_clobber` (both real, additive). **Correction:** `is_test` was cited as a third precedent but was **never built** (0 occurrences in backend; queued as W1-3) — so Tier A creates the first central visible-signals filter (§5b), it does not piggyback on one. Also (Fable): Option 2 (status/`user_action` overload) was rejected — it destroys DISMISSED lifecycle state, `user_action` is Nick's field, and grading needs a code edit either way (80 outcomes graded on the 335 DISMISSED rows).
 - **Validation-set re-scope (Fable):** the "keep them to replay a fixed detector" argument does **not** hold — there is no fixed detector to replay against; the 272 are the redesign's **BEFORE-picture**, nothing more. Quarantine therefore stands on **reversibility + precedent ×3 + Nick's burst-row KEEP**, not on replay value.
 - **Governance (Nick's explicit YES):** the 272 contain the 73 burst rows Nick ruled KEEP. Quarantine **keeps the rows** (honors the letter) while **excluding them from grading** (supersedes intent). Nick blessed this supersession.
 
@@ -86,16 +88,27 @@ ZEC's 61 rows are **correctly priced but still phantom** (same dead divergence b
 - Additive key in `signals.enrichment_data`: `"quarantine": {"reason": "DEF-CVD-QUARANTINE", "class": "mispriced|correct_priced_phantom", "at": "<UTC>", "brief": "2026-07-22-def-cvd-quarantine"}`. **No existing field overwritten; `signal_id` never touched** → `signal_outcomes` never orphaned.
 - **Reversal = one statement:** strip the `quarantine` key. Pre-image JSONL (§5c) is the full-restore backstop.
 
-### 5b. Default-exclude from every read — READ-PATH INVENTORY IS EVIDENCE (ATLAS #4)
-- **Central filter:** add `enrichment_data->'quarantine' IS NULL` to the canonical signals read path (`feed_service` builder), exactly as `is_test` is filtered centrally — every downstream read inherits exclusion from one place.
-- **Mandatory evidence for the done-definition:** an **enumerated list of every read path**, each marked filtered-centrally or filtered-individually, with per-path verification. **`hub_get_*` MCP tools are the committee-facing surface and MUST be in the list.** Candidates to enumerate + verify: `feed_service`, `signal_notifier.py`, `api/committee_bridge.py`, `analytics/api.py`, `analytics/oracle_engine.py`, `api/trade_ideas.py` + `hub_mcp/tools/trade_ideas.py`, `hub_mcp/tools/*` reading signals, `discord_bridge/bot.py`. Any path bypassing the canonical builder gets its own filter. **Do not assume central coverage — prove it.**
-- **Grading exclusion:** `outcome_resolver` and `score_signals` must skip quarantined rows so their (already-wrong) outcomes stop accruing/re-grading.
+### 5b. Default-exclude from every read — TIERED (ATLAS #4, inventory-verified)
+**Premise correction:** there is **no central signals filter to piggyback on.** `is_test` has **0 occurrences** in `backend/` — it was never built (it is queued as **W1-3**, whose own scope assumed a `get_trade_rows()` chokepoint the inventory proves does not exist). `feed_service.get_active_trade_ideas` is a chokepoint for the committee + grouped feed only, not a universal builder.
+
+**Inventory (verified):** `hub_get_trade_ideas` is the **only** signals-reading hub tool (→ feed_service); the other 20 `hub_get_*` tools are signals-free — so **the committee surface is secured by one feed_service edit.** ~10 other raw read paths query `signals` directly (REST `/trade-ideas` flat+tier, 3 legacy `postgres_client` readers behind `/signals/active`, `board_state`, `analyzer`, `hydra`, `confluence`), plus ~4–6 grading/analytics paths.
+
+**TIER A (this remediation — ~4 files, one deploy):**
+- **`feed_service` conditions[] one-liner:** `enrichment_data->'quarantine' IS NULL` — secures the committee (`hub_get_trade_ideas`) + grouped feed. **This creates the first central visible-signals predicate.**
+- **Grading exclusion:** same predicate into `outcome_resolver` (base_query) and `score_signals` (PROJECTED). A code edit, not status-based: 80 CVD outcomes were graded and persist on now-DISMISSED rows, so status alone doesn't gate. Log a skip count.
+- **Reconstruct guard:** `scripts/quarantine_enrich_clobber.py` predicate `+= AND signal_category IS DISTINCT FROM 'CRYPTO_CVD_EVENT'` — so a re-run cannot bury the quarantine key (ATLAS #2 mitigation, accepted).
+
+**TIER B — SIGNALS-READ-LAYER (new named build, NOT this remediation):** the canonical visible-signals predicate generalized across the remaining ~10 raw read paths, **delivering `is_test` (W1-3) in the same sweep.** Scheduled **only if reconciliation + breakout_prop land first this week; otherwise first post-vacation** — a 15-path read-layer deploy days before an 11-day no-code window is the exact pattern being avoided. Until Tier B, those ~10 dashboard/analytics/REST paths still surface quarantined rows; acceptable because the committee surface is secured (Tier A) and the 13 currently-ACTIVE rows self-age within 24h with the detector dark.
 
 ### 5c. Pre-image JSONL (immediately before the write, frozen set)
 - Dump the full pre-state of all quarantined `signals` rows + their `signal_outcomes` rows (11 fields + `signal_id` + full `enrichment_data`) to a timestamped JSONL under `backend/database/archive/`. Restore artifact + ATLAS evidence. **Taken AFTER the detector is disabled** (§8) so the snapshotted set is frozen.
 
-### 5d. Detector disable-pending-fix — DB CONFIG ROW, not env var (ATLAS #3)
-- **Halt via a DB config flag, not an env var.** An env-var change forces a Railway restart, which triggers the known transient-stale window across every in-process crypto asyncio writer (cycle/regime/tape). Use the **`crypto_gate_config` hot-reload pattern**: add a `cvd_events_enabled` key (default currently-true; set **false** to disable). The tape engine reads it per cycle via `get_gate_config()`, so it flips **without a bounce** — phone-flippable via a single DB write, no surface restart.
+### 5d. Detector disable-pending-fix — no-bounce config sentinel (ATLAS #3)
+ATLAS #3's core requirement is a **no-bounce, config-hot disable**. The named `cvd_events_enabled` flag this brief originally assumed **does not exist in code** — `_detect_cvd_events` ([crypto_tape_health_engine.py:247-250](../../backend/bias_filters/crypto_tape_health_engine.py#L247)) reads only *thresholds*, no gating boolean; and the hot-reload table is **`crypto_cycle_config`** (`get_cycle_config()`, 60s TTL, append-only), not `crypto_gate_config`. So the option that satisfies ATLAS #3 **as reviewed** is:
+- **Option A (chosen) — SENTINEL threshold-hack.** Set `crypto_cycle_config.cvd_events.absorption_cvd_threshold_usd = 1e15`. Divergence is already dead (§6) and absorption requires `|cvd_net| ≥ threshold`, so nothing fires. Config-only, hot-reloaded ≤60s, **no restart**, one-INSERT reversible, surgical (kills CVD event firing; leaves `crypto_tape_health_log` — the committee tape block — computing). **A is not a substitute for what ATLAS reviewed: the no-bounce config-hot disable is the condition; the named flag was an assumed implementation detail that turned out absent. B is the deviation.**
+- **Option B (rejected) — add the `enabled` flag in code.** Requires a Railway deploy = the exact restart/transient-stale window ATLAS #3 exists to avoid. The clean flag belongs in the detector redesign, not now.
+- **R1 — sentinel proven numeric (before the flip).** Stored as a JSON **number** (`jsonb_typeof = number`, value `1000000000000000`) so the loader's `json.loads` yields a Python number and `abs(cvd_net) ≥ 1e15` is a clean numeric compare that never fires — no string, no throw, no fire-on-everything fallback. **Applied 2026-07-23 as `crypto_cycle_config` id=5 (baseline id=4). RESTORE = re-INSERT config with `absorption_cvd_threshold_usd = 50000`.**
+- **R2 — exit gate (empirical).** After the flip, wait ≥2 detection cycles past the 60s TTL, then confirm **zero new `CRYPTO_CVD_EVENT` rows** AND `crypto_tape_health_log` still writing. Only then pre-image (ATLAS #1).
 - **Redesign requirements** (the fix the disable is pending):
   1. **Divergence branch is mathematically dead** ([crypto_tape_health_engine.py:279-281](../../backend/bias_filters/crypto_tape_health_engine.py#L279-L281)): `current_price = recent[-1][4]` (a close) is compared to `max/min` of a `window` that **includes recent[-1] itself** → a bar's close is bounded by its own high/low → `is_local_high/low` ~never true → CVD_DIVERGENCE ~never fires (0/272). Fix: compare the current bar's **high/low** vs the **prior** window (exclude the current bar).
   2. **Proximity is tautological** (line 276): `current_price` ∈ the bars that build POC/VAH/VAL and the 6h VA is ~0.6–0.8% wide → ~always within `proximity_pct` of a level. Fix: test proximity against structure not built from the current bar.
@@ -127,15 +140,20 @@ Confirmed against [crypto_tape_health_engine.py:259-305](../../backend/bias_filt
 
 ---
 
-## 8. Execution phases (ATLAS-ordered; each ATLAS condition is a stop-gate)
+## 8. Execution phases (ATLAS-ordered; current state marked)
 
-Reordered per **ATLAS #1** — disable lands **before** the pre-image so no rows accrue between snapshot and write:
+Per **ATLAS #1**, disable lands before the pre-image.
 
-1. **Phase 0 — inventory + dry-run (no writes).** Enumerate every read path (§5b, evidence) + every `enrichment_data` writer (§5e, confirm all merge). Count-only predicate check (expect ~272 + the §2 symbol breakdown).
-2. **Phase 1 — DISABLE the detector** via the `crypto_gate_config` DB row (§5d). Confirm no new CVD rows accrue. **The row set is now frozen.**
-3. **Phase 2 — pre-image JSONL** of the frozen set (§5c).
-4. **Phase 3 — quarantine write:** central read-filter + additive marker (with `quarantine_class`) on the frozen set + grading exclusion. `--i-have-go` required.
-5. **Phase 4 — verify:** quarantined rows absent from every enumerated read path (committee/`hub_get_*`, notifier, feed, analytics) + from grading; `signal_outcomes` join intact (no orphans); ZEC queryable as `correct_priced_phantom`; reversal rehearsed against the pre-image.
+- **Phase 0 — inventory + dry-run — ✅ DONE.** Read-path inventory (§5b) + `enrichment_data` writer enumeration (§5e) + count (349, category-keyed). Contradictions surfaced and ruled: no central filter → Tier A/B split (§5b); one reconstruct writer → guarded (§5e).
+- **Phase 1 — DISABLE — ✅ DONE (pending R2).** `crypto_cycle_config` id=5 sentinel (§5d).
+- **Phase 2 — R2 exit gate.** ≥2 cycles past the 60s TTL → confirm **zero new CVD rows** + `crypto_tape_health_log` still writing. Set frozen.
+- **Phase 3 — pre-image JSONL** of the frozen set (§5c).
+- **⛔ STOP — Nick's `--i-have-go`** (the marker write is the first destructive step).
+- **Phase 4 — marker write:** additive `enrichment_data.quarantine` (+ `quarantine_class`) on the frozen CVD set, via psycopg2. Reversible; pre-imaged.
+- **Phase 5 — Tier A deploy:** `feed_service` filter + grading exclusion (`outcome_resolver`, `score_signals`) + `quarantine_enrich_clobber` predicate guard. ~4 files, one deploy.
+- **Phase 6 — verify + reversal rehearsal** (test population = the 349): `hub_get_trade_ideas` returns **zero** CVD rows; grading job logs a **skip count**; `signal_outcomes` join intact (no orphans); ZEC queryable as `correct_priced_phantom`; reversal rehearsed against the pre-image.
+
+**TIER B (SIGNALS-READ-LAYER)** — the ~10 remaining raw read paths + `is_test` (W1-3) — is a **separate named build**, scheduled per §5b (this-week only if reconciliation + breakout_prop land first; else post-vacation).
 
 ---
 
@@ -152,7 +170,7 @@ Reordered per **ATLAS #1** — disable lands **before** the pre-image so no rows
 
 1. **Reorder phases** — disable before pre-image. → §8 (Phase 1 disable → Phase 2 pre-image).
 2. **Clobber-survival** — enumerate every `enrichment_data` writer, confirm merge-not-reconstruct. → §5e (both direct UPDATEs merge; Phase 0 re-confirms completeness incl. `scripts/`).
-3. **DB config row for the disable flag**, not env var (avoid the restart-induced transient-stale window). → §5d (`crypto_gate_config` hot-reload, `cvd_events_enabled`).
+3. **No-bounce config-hot disable**, not env var (avoid the restart-induced transient-stale window). → §5d **Option A**: `crypto_cycle_config` sentinel (`absorption_cvd_threshold_usd=1e15`, hot-reload ≤60s, no restart, applied as id=5). The assumed `cvd_events_enabled` flag does not exist in code — **A satisfies the condition as reviewed; B (code flag + deploy) is the deviation.** R1 parse proof + R2 empirical gate folded into §5d.
 4. **Read-path inventory is evidence** — enumerated bypass list with per-path verification, `hub_get_*` included. → §5b + done-def #2.
 
 **Standing rule:** any contradiction encountered mid-execution = stop and report.
