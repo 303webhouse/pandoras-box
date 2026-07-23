@@ -7,6 +7,18 @@
 
 ---
 
+## ✅ EXECUTED — Tier A, 2026-07-23 (Nick `--i-have-go`)
+
+- **Phase 1 — disable:** `crypto_cycle_config` id=5 sentinel (`absorption_cvd_threshold_usd=1e15`), no restart. **R2 exit gate passed:** zero new CVD rows across ≥2 cycles, `crypto_tape_health_log` writing (1s-fresh, 18 writes/35min).
+- **Phase 3 — pre-image:** `backend/database/archive/def_cvd_quarantine_preimage_20260723T054219Z.jsonl` (349 signals + 349 signal_outcomes) + copy at `C:\temp`.
+- **Phase 4 — marker write @ `2026-07-23T15:23:39Z`:** row-count invariance **349=349** (hard stop), affected **349**, `still_null=0`, class **269 / 80**, **cvd_dedup_burst survival 73/73/73** (both markers coexist).
+- **Phase 5 — deploy `ccfbffb`** (SUCCESS 15:31:03Z, health 200; ~2-min transient observed + self-healed). Suite byte-identical **17f/517p/1s/200e**.
+- **Phase 6 — verify:** `hub_get_trade_ideas(min_score=0)` → **0 CVD rows** (6 equity setups only); feed exclusion **13→0**; grading skip **score_signals=184** (outcome_resolver=0, its 13 ACTIVE rows already graded); `signal_outcomes` join **349:349**; reversal rehearsal **349 rows → ROLLBACK**, production untouched.
+
+**Open:** Tier B (SIGNALS-READ-LAYER) per §5b scheduling; detector redesign (§5d.1–2). Detector stays dark via the sentinel until redesigned.
+
+---
+
 ## 0. What this remediates (and what is already fixed)
 
 The vendor-order read-path defect is **already fixed and deployed** (`5da9e6c`, source sort in `_fetch_full_ohlc`, four-step verified — BTC CVD entry moved 63,092→65,757 post-deploy). This brief handles what the fix does **not** cure:
