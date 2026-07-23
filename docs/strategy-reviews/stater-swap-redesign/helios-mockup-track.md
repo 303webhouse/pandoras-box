@@ -43,3 +43,4 @@ No dependency on S-2..S-5 *code* to start concepting; **recommended start: after
 
 - 2026-07-15 — Track opened; charter committed; seed directions C1–C3 recorded. Next entry: concept session scheduled.
 - 2026-07-16 — S-3 payload contracts live (/api/crypto/cycle-extremes, /tape-health, hub_get_crypto_market_profile, /state wiring). Concept-session prerequisite met per charter timing; session may be scheduled.
+- 2026-07-23 — Concept plan filed (`2026-07-22-stater-swap-v2-mockup-concept-plan.md`; three concepts — C1 Command Rail / C2 Cockpit Grid / C3 Tape-First, hybrid legitimate). Renders in progress via Figma; Nick reaction pass pending. **Concept session formally started — HELIOS gate, pass one.**
