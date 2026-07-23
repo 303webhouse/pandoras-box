@@ -220,6 +220,9 @@ async def resolve_signal_outcomes(backfill_days: int = 60, asset_class_filter: O
     from database.postgres_client import get_postgres_client
 
     pool = await get_postgres_client()
+    # DEF-CVD-QUARANTINE (Tier A): exclude quarantined rows from grading so their
+    # phantom outcomes stop accruing. Status alone does not gate (80 CVD outcomes
+    # were graded and persist on now-DISMISSED rows), so this is a marker filter.
     base_query = """
         SELECT signal_id, ticker, direction, entry_price,
                stop_loss, target_1, timestamp, asset_class
@@ -231,13 +234,29 @@ async def resolve_signal_outcomes(backfill_days: int = 60, asset_class_filter: O
           AND entry_price IS NOT NULL
           AND stop_loss IS NOT NULL
           AND target_1 IS NOT NULL
+          AND (enrichment_data -> 'quarantine') IS NULL
+    """ % backfill_days
+
+    skip_query = """
+        SELECT count(*) FROM signals
+        WHERE outcome IS NULL
+          AND timestamp > NOW() - INTERVAL '%s days'
+          AND status NOT IN ('DISMISSED', 'EXPIRED')
+          AND signal_type NOT IN ('SCOUT_ALERT')
+          AND entry_price IS NOT NULL AND stop_loss IS NOT NULL AND target_1 IS NOT NULL
+          AND (enrichment_data -> 'quarantine') IS NOT NULL
     """ % backfill_days
 
     async with pool.acquire() as conn:
         if asset_class_filter:
             pending = await conn.fetch(base_query + " AND asset_class = $1", asset_class_filter)
+            skipped = await conn.fetchval(skip_query + " AND asset_class = $1", asset_class_filter)
         else:
             pending = await conn.fetch(base_query)
+            skipped = await conn.fetchval(skip_query)
+
+    if skipped:
+        logger.info("Outcome resolver: skipped %d quarantined signals (DEF-CVD-QUARANTINE)", skipped)
 
     if not pending:
         logger.info("Outcome resolver: no unresolved signals found")

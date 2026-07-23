@@ -62,7 +62,14 @@ _load_db_env()
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "backend"))
 from database.postgres_client import get_postgres_client  # noqa: E402
 
-PREDICATE = "asset_class = 'CRYPTO' AND enrichment_data ? 'avg_volume_20d'"
+PREDICATE = (
+    "asset_class = 'CRYPTO' AND enrichment_data ? 'avg_volume_20d' "
+    # DEF-CVD-QUARANTINE guard: never touch CVD-quarantined rows. This script
+    # WRAPS enrichment_data (reconstruct), which would bury a top-level
+    # 'quarantine' key under quarantined_equity_clobber and silently un-quarantine
+    # the row from the read-path filters. IS DISTINCT FROM keeps NULL-category rows.
+    "AND signal_category IS DISTINCT FROM 'CRYPTO_CVD_EVENT'"
+)
 
 COUNT_SQL = f"SELECT COUNT(*) FROM signals WHERE {PREDICATE}"
 TOTAL_SIGNALS_SQL = "SELECT COUNT(*) FROM signals"
