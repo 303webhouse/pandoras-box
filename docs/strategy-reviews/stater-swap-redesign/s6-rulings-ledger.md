@@ -13,7 +13,17 @@ Authoritative running record of gate decisions and Phase-0 reconciliation ruling
 | 2026-07-23 | Mockup gate (S-6) | **C2 Cockpit Grid** selected as final direction; iteration deferred to in-use tweaks | Nick | `helios-mockup-track.md` |
 | 2026-07-23 | Titans final review | Brief **APPROVED**; six conditions (C-A1/2/3, C-H1/2, C-S1, C-T1/2) folded into text | ATLAS · HELIOS · AEGIS · ATHENA | `2026-07-23-titans-final-s6-brief.md` |
 | 2026-07-24 | **SG-0** (Phase 0 gate) | **STOP → resolved via Option A.** No enforced discipline endpoint exists (C-A1). Adopt honest-seam descope. | Nick | Phase 0 P0.3 |
-| 2026-07-24 | **SG-1** (layout gate) | **CLEAR** — scaffold (S5.1 chips + S5.2 grid) matches the approved render | HELIOS via Fable | scaffold `1b47e82` |
+| 2026-07-24 | **SG-1** (layout gate) | **CLEAR** — scaffold (S5.1 chips + S5.2 grid) matches the approved render | Nick (ratified); CC ran the HELIOS layout comparison † | scaffold `1b47e82` |
+| 2026-07-24 | **SG-2** (pre-deploy gate) | **CONDITIONAL GO** — surface-honesty graded excellent; conditions C1–C4 required before merge | Fable (coordination lane) | full build `2ddc119` |
+
+† **SG-1 provenance (per Fable SG-2 ruling C1):** the coordination lane issued no SG-1 clearance and HELIOS's standing veto was not exercised. The layout comparison was **CC-produced** (scaffold-vs-render artifact) and **ratified by Nick's "SG-1 CLEAR" directive**.
+
+## SG-2 conditions (Fable, 2026-07-24)
+
+- **C1** — this ledger's SG-1 provenance correction (done, ↑).
+- **C2** — deploy sequencing: **HOLD** rebase+merge until the coordination lane signals **"AEGIS landed"** (the credential-rotation pass deploys first; S-6 rides immediately after, same day where possible). 07-31 timeline law is safe.
+- **C3** — do **not** rebase against the tangled local `main` (ownership-resolution in flight); when C2 clears, rebase against **origin/main from a worktree**.
+- **C4** — true-390 mobile eyeball on Nick's actual phone is logged as an **SG-3 input**.
 
 ## SG-0 Option A — honest-seam descope (detail)
 
@@ -33,10 +43,11 @@ Adopted per CC Phase-0 recommendations and ratified by Nick's 2026-07-24 directi
 
 ## Data-quality item (contained, backend follow-up)
 
-- **FARTCOIN fake-healthy price.** `/api/crypto/market` returns a bogus `binance_spot: 506.59` for FARTCOIN (not listed on Binance spot; real ≈ `0.1333`; the payload's own `spread: -506.45` flags it). The client (`stater.js::priceOf`) rejects cohort outliers (>25% from median) so no fake price ships. Real fix is backend — tracked as a separate item.
+- **FARTCOIN fake-healthy price.** `/api/crypto/market` returns a bogus `binance_spot: 506.59` for FARTCOIN (not listed on Binance spot; real ≈ `0.1333`; the payload's own `spread: -506.45` flags it). The client (`stater.js::priceOf`) rejects cohort outliers (>25% from median) so no fake price ships. Registered **DEF-FARTCOIN-VENDOR-PRICE (P2)** — contained client-side; backend fix post-vacation (Fable, 2026-07-24).
 
-## Still open (do not block the current build)
+## Still open
 
-- SG-2 (pre-deploy Fable go) and SG-3 (post-deploy HELIOS screenshot comparison, 2026-08-03) remain binding.
-- Branch `s6-stater-build` must be rebased on `main` before the SG-2 deploy.
+- **Deploy is HELD (C2):** rebase+merge waits for the coordination lane's **"AEGIS landed"** signal; AEGIS credential-rotation deploys first, S-6 rides immediately after.
+- When C2 clears, **rebase `s6-stater-build` against `origin/main` from a worktree** (C3) — not the tangled local `main`.
+- **SG-3** (post-deploy HELIOS screenshot comparison, 2026-08-03) remains binding; true-390 phone eyeball is an SG-3 input (C4).
 - Timeline law: deploy by **2026-07-31** or S-6 holds past the 2026-08-04 → 08-15 freeze.
