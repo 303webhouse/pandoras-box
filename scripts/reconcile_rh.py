@@ -13,7 +13,25 @@ from collections import defaultdict
 from datetime import datetime, date
 import asyncpg
 
-DB_URL = "postgresql://postgres:sioMAUjhdgNYWwZMZbkbcSyaAcwdJMty@trolley.proxy.rlwy.net:25012/railway"
+import os
+
+
+def _resolve_db_url() -> str:
+    """AEGIS 2026-07-24: never hardcode the DB credential -- resolve at connect time.
+    Prefer the DATABASE_URL env var; fall back to the local .mcp.json postgres args
+    (same source the sibling reconcile scripts use). Hard-fail if neither is present."""
+    env = os.environ.get("DATABASE_URL")
+    if env:
+        return env
+    try:
+        import json as _json
+        d = _json.load(open(".mcp.json"))
+        for a in d["mcpServers"]["postgres"].get("args", []):
+            if isinstance(a, str) and a.startswith(("postgres://", "postgresql://")):
+                return a
+    except Exception:
+        pass
+    raise SystemExit("DB URL not found: set DATABASE_URL env or run where .mcp.json exists")
 
 
 def parse_amt(s):
@@ -277,7 +295,7 @@ async def main():
     for t in trades:
         csv_by_ticker[t["ticker"]].append(t)
 
-    conn = await asyncpg.connect(DB_URL)
+    conn = await asyncpg.connect(_resolve_db_url())
     print("\nConnected to Railway Postgres")
 
     # ── Step 1: Roll back bad imports ──
