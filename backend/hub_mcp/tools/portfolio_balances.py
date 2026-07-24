@@ -39,6 +39,29 @@ _DB_TO_NORMAL = {
     "BREAKOUT_PROP": "breakout_prop",
 }
 
+# breakout_prop is intentionally NOT balance-tracked (DESCOPED 2026-07-23): no row
+# exists in account_balances by design. We surface it EXPLICITLY as untracked
+# (honest-absence) rather than omitting it silently, so a committee reader sees it
+# exists but is unmistakably non-sizable — declining to size it is correct behavior,
+# not a data gap. Kept OUT of `accounts` (the sizable set) and out of every total.
+_BREAKOUT_PROP_UNTRACKED = {
+    "account": "breakout_prop",
+    "broker": "breakout",
+    "tracked": False,
+    "status": "untracked",
+    "balance": None,
+    "cash": None,
+    "buying_power": None,
+    "margin_total": None,
+    "updated_at": None,
+    "is_stale": False,
+    "note": (
+        "breakout_prop is intentionally not balance-tracked (DESCOPED 2026-07-23); "
+        "no balance row exists by design. Committee must NOT size against it — "
+        "declining to size it is designed behavior, not a data gap (honest-absence)."
+    ),
+}
+
 
 def _is_stale(updated_iso: Optional[str], hours: int = 24) -> bool:
     if not updated_iso:
@@ -109,11 +132,20 @@ async def hub_get_portfolio_balances(account: Optional[Account] = None) -> dict:
         "total_cash": round(total_cash, 2),
         "total_buying_power": round(total_bp, 2),
     }
+    # Additive: list breakout_prop as explicitly untracked (never in `accounts`, never
+    # in a total) when unfiltered or explicitly filtered to it. No scoring/sizing logic.
+    if account is None or account == "breakout_prop":
+        data["untracked_accounts"] = [dict(_BREAKOUT_PROP_UNTRACKED)]
+    untracked_note = (
+        " breakout_prop: untracked (no balance row — not sizable)."
+        if "untracked_accounts" in data else ""
+    )
     status = "stale" if any_stale else "ok"
     summary = (
         f"Total ${total_balance:,.0f} across {len(accounts)} accounts. "
         f"Cash ${total_cash:,.0f}, BP ${total_bp:,.0f}. "
         + ("Some balances >24h old." if any_stale else "All balances recent.")
+        + untracked_note
     )
     return make_response(
         status=status,
