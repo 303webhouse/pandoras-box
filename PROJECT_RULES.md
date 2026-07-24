@@ -196,6 +196,7 @@ These are operational rules for the composite bias engine. Detailed factor weigh
 - New indicators → classify as MACRO/TECHNICAL/FLOW/BREADTH first.
 - UI changes → get Nick's approval before building.
 - Prompt changes → test after deploy (committee prompts are the system's brain).
+- **Bulk-checkpoint ban — RATIFIED 2026-07-24 (Nick).** Never make blanket "checkpoint" commits that stage the whole working tree (`git add .` / `git add -A` / `git commit -a`). Every commit is **pathspec-scoped** to the exact files a change touches. This repo is a multi-lane, multi-worktree environment, so the working tree routinely holds other lanes' uncommitted edits and untracked artifacts; a bulk checkpoint sweeps those into an unrelated commit and cross-contaminates lanes (as it did in the 2026-07-24 S-6 build tree). When the shared checkout is tangled and a docs record must land on `main`, commit it from a **clean worktree at `origin/main`**, not through the tangled tree.
 - **Position state changes flow through `unified_positions`.** When the table
   drifts from broker reality, reconcile via `scripts/sync_rh_csv.py` (RH CSV
   → unified_positions, dry-run-then-apply with audit logging). Don't maintain
