@@ -12,6 +12,10 @@ __pycache__/
 config/.env
 .mcp.json
 
+# Local Claude Code settings — per-machine, may hold local perms/paths; never track
+# (AEGIS 2026-07-24: untracked via git rm --cached; was committed in 66fb98c)
+.claude/settings.local.json
+
 # Logs
 *.log
 bot_startup.log
