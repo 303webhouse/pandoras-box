@@ -6,6 +6,7 @@
 **Depends on:** Nothing (Phase 1). Phase 2 is calendar-gated: **no work before 2026-08-15.**
 **Deploy freeze:** ABSOLUTE — no deploys 2026-08-04 through 2026-08-15.
 **v1.1 (2026-07-24):** Deconflicted with the S-6M mobile design lane charter — all `stater.html`/`stater.css` writes removed from this brief; T2.5 Stater pass superseded; P0.6 branch-overlap check added; deploy gate tightened.
+**v1.2 (2026-07-24, post-Phase-0):** Phase 0 COMPLETE, stop-gate fired and resolved. Absorbs CC-SHELL's ACK (filed alongside this brief as `docs/codex-briefs/2026-07-24-mobile-shell-phase0-ack.md` — the ACK is the detailed spec; this brief governs). Phase 1 rescoped T1.0–T1.7; route map corrected (`/app`, not `/`); `styles.css` added as sixth tracked target; Phase 2 T2.1 simplified to layout_key rows; truthful-source verdicts baked in.
 
 ---
 
@@ -44,44 +45,52 @@ CC must verify and report (ACK message) before writing code:
 - P0.5 Confirm whether any truthful source exists for bucket usage (B2 open count, B3 count today, circuit-breaker state). If none: Phase 2 omits those chips. **Do not hardcode or derive optimistically — fake-healthy is P0.**
 - P0.6 Diff the touched-file list of `s6-stater-build` against Phase 1's targets (`v2.html`, `v2.css`, `v2.js`, `index.html`, `manifest.json`). Report any overlap. **Any overlap → Phase 1 defers to 2026-08-15+ (see deploy gate).**
 
-**STOP-GATE:** post Phase 0 findings; proceed to Phase 1 only if P0.1–P0.3 hold no surprises. Any surprise → stop and surface.
+**STATUS: PHASE 0 COMPLETE (2026-07-24, CC-SHELL ACK filed).** Stop-gate fired on P0.1/P0.2/P0.3; findings reviewed and absorbed into v1.2. Key corrections of record: `/` serves a JSON health payload — Agora v2 lives at `/app` (alias `/app/v2`); Abacus is `/app/analytics` (hardcoded href only — never derive via `buildModePath`, which emits 404-prone two-segment paths); any new route must be declared ABOVE the `/app/{mode}` catch-all at `main.py:1864`; layout store is `v2_dashboard_layout(layout_key TEXT PK, layout JSONB, updated_at)` — single row `'default'`, unconditional upsert, `_ensure_table()` is `CREATE TABLE IF NOT EXISTS` and is NOT a migration path (schema changes go through `migrations/` + the `init_database()` mirror); GridStack 11.1.2's touch-resize handles are armed by default on phones today (live clobber hazard, pre-existing); `grid.load()`'s default `addRemove:true` deletes new tiles for saved-layout holders (pre-existing defect, fixed in T1.7).
 
-## 4. PHASE 1 — "Legible on vacation" (small, low-risk)
+## 4. PHASE 1 — "Legible on vacation" (rescoped v1.2)
+
+**T1.0 — Layout-row insurance (FIRST; may pre-run under Amendment 2).**
+Duplicate the live row: `INSERT` a copy of `layout_key='default'` as `layout_key='backup_20260724'`. Additive, reversible, makes the standing "unrecoverable clobber" recoverable. Report row count + both `updated_at` values.
 
 **T1.1 — One-column mobile collapse (v2.js).**
-Below 768 px, the grid renders as a single column. Default order (top→bottom): Regime, Movers, Kairos, Book, Themes, Sector Divergence, Breadth, Index, Yield Curve, USD Carry. Mechanism is CC's choice (gridstack columnOpts vs. explicit one-column sort) under the constraint in T1.2.
+Per the ACK's confirmed mechanics: `columnOpts` with `breakpointForWindow: true` (else the JS and CSS breakpoints fire at different widths) and a `{w: 768, c: 1}` breakpoint with **explicit `layout: 'list'`** (the default is `moveScale`). `'list'` sorts by saved y — NOT DOM order — so T1.1 includes an explicit per-`gs-id` mobile order map that overrides persisted positions. Mobile default order (all **11** tiles): `regime, movers, kairos, book, river, themes, divergence, breadth, index, curve, usd`.
 
-**T1.2 — Desktop-slot clobber guard (CRITICAL).**
-While in one-column/mobile mode: dragging and resizing disabled, grips hidden, and `saveLayout()` hard-guarded so it cannot POST (e.g., early-return when effective column count is 1). Acceptance test is mandatory: record `/api/layout` `updated_at` → use the site on a phone viewport for a full session → confirm `updated_at` unchanged and desktop grid renders identically after.
+**T1.2 — Anti-clobber (reframed; CRITICAL).**
+The real hazards: touch-resize handles armed by default on phones today; `h` bypassing GridStack's column cache (any mobile height change writes straight into the desktop slot); `layoutsNodesChange()` corrupting the cached desktop layout on mobile drags, which `save()` then persists. Mitigations, ALL required: (a) `setStatic(true)` whenever effective column count is 1 — single mechanism; do NOT mix with `enableMove`/`enableResize`, which are silent no-ops under static; (b) hard guard in `saveLayout()` — early-return when collapsed; (c) pin the load-order invariant: the change handler is wired only after `grid.load()` resolves (today an accident of `.finally()` ordering at v2.js:411–419) — make it explicit with a comment + acceptance check so no refactor re-arms cold-load clobber. Acceptance test mandatory: record `updated_at` → full phone session on `/app` including deliberate touch/drag/resize attempts → `updated_at` unchanged, desktop renders identically.
 
-**T1.3 — Mobile CSS pass (v2.css).**
-`@media (max-width: 768px)`: tile typography up to legible sizes, touch targets ≥ 44 px, tile spacing per mockup Deck 1 frame (minus glance row — that's Phase 2), drawer/popup/modal surfaces usable at phone width.
+**T1.3 — Mobile restructure (v2.css; restructuring, not typography).**
+At ≤768px: tiles auto-height with per-tile internal scroll containers removed (no ~2,900px stack of nested scrollers); `.regime-band` 6-column grid → wrapped chips (32px columns cannot hold 22px type at 390px); `.mem-row` / `.th-row` width fixes; `.v2-topbar` wraps or fits ≤390px and `body` gets an overflow-x guard (the topbar's ~420px min-content is the one element forcing document-level horizontal scroll); touch targets ≥ 44px; staleness ages visible on all 11 tiles (Ruling 6 — river included).
 
-**T1.4 — Shared bottom deck bar (3 tabs).**
-AGORA · STATER · ABACUS on `v2.html` and legacy `index.html` only — S-6M owns adding it to Stater surfaces after 08-03. Mobile-only (hidden ≥ 768 px), active state per current page, plain links to the routes confirmed in P0.2, no client-side framework. Known temporary gap: navigating to Stater is one-way (no bar there yet) until S-6M lands the reciprocal bar — acceptable, time-boxed, and noted here so nobody "fixes" it out of lane. File the bar's markup + CSS as a standalone reusable snippet alongside this brief so S-6M consumes it verbatim (one component, two lanes, zero drift).
+**T1.4 — Bottom deck bar (3 tabs; fixed-position reality).**
+`position: fixed` bar on `v2.html` + legacy `index.html`, mobile-only, S-6M owns Stater surfaces. Content-occlusion reserve: `padding-bottom` on `.container` (`styles.css:70` — **styles.css is hereby the sixth tracked target**) AND v2's scroll container, so the last tile clears the bar. Safe-area: `viewport-fit=cover` + `env(safe-area-inset-bottom)` padding so the bar clears the iPhone home indicator (zero safe-area handling exists in `frontend/` today). Hrefs hardcoded: `/app` (AGORA, active), `/app/stater` (STATER), `/app/analytics` (ABACUS) — never derived via `buildModePath` (emits 404-prone two-segment paths). Standing constraint: any future route is declared ABOVE the `main.py:1864` catch-all. Bar markup + CSS filed as a standalone reusable snippet for S-6M (one component, two lanes, zero drift).
 
-**T1.5 — PWA linking.**
-Add `<link rel="manifest" href="/manifest.json">` + apple-touch-icon tags to `v2.html` and `index.html` (Stater's tags arrive via the S-6M lane); align theme-color with the manifest; verify `start_url` lands on Agora v2 (fix path only if P0.2 shows otherwise). No service worker.
+**T1.5 — PWA (corrected fix set).**
+On `v2.html` AND `index.html`: `<link rel="manifest">`, `apple-touch-icon`, and `apple-mobile-web-app-*` tags (none exist anywhere today). `manifest.json`: `start_url` → **`/app`** (`/` serves a JSON health payload, not the dashboard). Theme-color aligned. No service worker — standalone install is therefore **iOS-only in Phase 1** (Android's install prompt requires the SW, deferred to Phase 2; Nick's device is an iPhone).
 
 **T1.6 — Cache-bust.**
-Bump `?v=` on `v2.css` / `v2.js` (and any touched assets) so phones don't serve stale files.
+Bump `?v=` on every touched asset so phones don't serve stale files.
 
-**Phase 1 Done Definition**
-- [ ] Phone screenshot vs mockup Deck 1 frame (minus glance row): legible, single column, correct default order
-- [ ] T1.2 clobber test passed (updated_at unchanged; desktop grid identical)
-- [ ] Deck bar navigates across all three surfaces; no dead tabs
-- [ ] Add to Home Screen (iPhone) opens standalone with the Pandora icon
-- [ ] Desktop rendering byte-identical in behavior (no regressions ≥ 768 px)
-- [ ] Live-verified on production URL, not just committed (committed ≠ deployed ≠ validated)
+**T1.7 — `grid.load()` tile-deletion defect (pre-existing; fixed here).**
+`v2.js:411` calls `grid.load(d.layout)` with `addRemove` defaulting to true — every tile whose `gs-id` is absent from the saved row is deleted from the DOM. Consequence today: any newly deployed tile silently vanishes for saved-layout holders (i.e., Nick). Fix: load without removal and reconcile — tiles present in markup but absent from the saved layout stay visible at a sane default position. Acceptance: simulate a saved row missing one tile; the tile renders.
 
-**Phase 1 deploy-window gate (ATHENA):** deploy only if commit + Railway deploy + live verification complete by **EOD Fri 2026-08-01 (MDT)**, the vacation-safe sprint's critical path is not displaced, **and P0.6 shows zero file overlap with `s6-stater-build`**. Miss the window or find overlap → Phase 1 waits and ships with Phase 2 after 2026-08-15. Never deploy 08-04 → 08-15.
+**Phase 1 Done Definition (v1.2)**
+- [ ] `backup_20260724` row exists (T1.0)
+- [ ] Phone screenshot vs mockup Deck 1 frame (minus glance row): legible single column, T1.1 order, zero horizontal scroll
+- [ ] T1.2 clobber test passed (`updated_at` unchanged; desktop identical; grid static on phone)
+- [ ] T1.7 reconcile test passed (missing-from-row tile still renders)
+- [ ] Deck bar navigates all three surfaces; last tile fully visible above the bar; bar clears the home indicator
+- [ ] iOS Add to Home Screen from `/app`: standalone, named, Pandora icon (Android install expressly deferred)
+- [ ] Desktop rendering and behavior identical ≥ 769px
+- [ ] Live-verified on production, not just committed (committed ≠ deployed ≠ validated)
+
+**Phase 1 deploy-window gate (ATHENA, v1.2):** deploy only if commit + Railway deploy + live verification complete by **EOD Fri 2026-08-01 (MDT)**, the vacation-safe sprint's critical path is not displaced, and a **build-time re-diff of all six targets** (`v2.html`, `v2.css`, `v2.js`, `index.html`, `manifest.json`, `styles.css`) against origin/main HEAD shows no unresolved cross-lane changes. Miss the window → Phase 1 ships with Phase 2 after 2026-08-15. Never deploy 08-04 → 08-15. **Conditional carve-out:** if Phase 1 misses the gate, T1.0 + T1.2's `saveLayout()` guard alone (clobber insurance) may ship as a standalone spine-cleared hotfix before 08-01, since that hazard is live regardless of this build.
 
 **STOP-GATE:** hard stop after Phase 1. Do not begin Phase 2 without an explicit go from Nick (calendar-gated regardless).
 
 ## 5. PHASE 2 — Full shell (2026-08-15+ only)
 
-**T2.1 — Layout slots (backend; ATLAS lane).**
-Extend `/api/layout` storage to slots keyed by `(user, device_class, deck)`; `device_class ∈ {desktop, mobile}`, `deck ∈ {agora, stater, abacus, book}`. Additive migration; existing row backfilled as `(desktop, agora)` and **never mutated**. Slot payload = versioned JSON (`layout_version`, module order, per-module size S/M/L, hidden flags, glance pins). Desktop code path behavior unchanged (shadow-by-default).
+**T2.1 — Layout slots (backend; ATLAS lane; simplified per P0.1).**
+No schema migration. Slots are **additional rows** in `v2_dashboard_layout` keyed by `layout_key`: `'default'` (desktop, untouched forever), `'mobile:agora'`, `'mobile:book'`, etc. Handler gains an allowlisted `key` param; `'default'` remains the hardcoded fallback so the desktop code path is byte-identical (shadow-by-default). Any true schema change goes through `migrations/` + the `init_database()` mirror — never by editing `_ensure_table()`, which is a silent no-op on the live DB. Slot payload = versioned JSON (`layout_version`, order, per-module size S/M/L, hidden flags, glance pins). Note of record: GridStack's column cache does not carry `h` — separate rows are the ONLY safe home for S/M/L heights. AEGIS riders from P0.1, decided at Phase 2 order time: auth-gate GET (currently public), add CSRF check on POST.
 
 **T2.2 — Glance row (Agora mobile).**
 Pinned 2×2 above the stack; defaults Regime / Index / Book / Kairos; data sourced from existing tile feeds — no new endpoints; staleness surfaced.
@@ -89,8 +98,8 @@ Pinned 2×2 above the stack; defaults Regime / Index / Book / Kairos; data sourc
 **T2.3 — Edit mode (per deck, mobile).**
 Per the Edit Mode mockup frame: list editor with drag-handle reorder, S/M/L per module, hide toggles, pin swap on Agora; Save → POST the deck's mobile slot; Cancel discards. Save status surfaced ("saved / failed / sign in") — no silent failure.
 
-**T2.4 — BOOK deck + fourth tab.**
-New mobile surface off the Book tile's existing data path (P0.4): summary strip (day P/L, open risk), one card per open position (structure, bucket tag, P/L%, DTE, stop, opened date), add/close via the existing modal flow, closed-today list. Bucket/circuit chips only if P0.5 found a truthful source; otherwise omit.
+**T2.4 — BOOK deck + fourth tab (rescoped per P0.4/P0.5).**
+New mobile surface off the Book tile's existing endpoints (`/api/portfolio/balances`, `/api/portfolio/pnl`, `/api/v2/positions?status=OPEN`): summary strip (day P/L, open risk), one card per open position — structure, DTE, opened date (present), P/L% (derived client-side). **Preconditions before this deck ships:** fix the always-zero greeks branch (`unified_positions.py:1152-1165`) or render the `stale: true` flag already on the wire — the mobile deck must not inherit the live fake-healthy; hoist the double-fetched open-positions payload (v2.js:1132 + :663). **Omitted, with a recorded work package:** bucket chips and B3-count chips have no runtime source (caps live only in the prompt layer; 0/304 historical rows carry a signal) — honest enablement = a real `bucket` column on `unified_positions` with a CHECK constraint, wired on create and update; separate future brief. `stop`/`target` render `—` when NULL (currently 20/20). "Closed today" requires a `since`/`limit` param server-side or is descoped — gate decision at Phase 2 order time. **Semantic constraint (mandatory):** the only implemented circuit breaker is the market-risk SPY/VIX one — if surfaced, label it "Market CB (SPY/VIX)", never group it with discipline chips, and add a fourth UNKNOWN state before reusing the kill-switch logic (v2.js:160-164/:208-211 currently collapses fetch failure into "CLEAR" — fail-open, do not copy).
 
 **T2.5 — Abacus deck.**
 Bottom bar + responsive CSS pass on the legacy Abacus surface only; content stays current-surface per the standing veto. **Stater's entire mobile pass is superseded by the S-6M lane charter** — its design happens in that lane (3-concept mockup gate → Nick reaction → brief), its brief routes through Fable for the HELIOS gate, and it consumes this brief's bar component + `deck='stater'` layout slot.
@@ -106,15 +115,16 @@ Bottom bar + responsive CSS pass on the legacy Abacus surface only; content stay
 
 ## 6. Titans record (condensed)
 
-- **ATLAS:** Sole schema touch is T2.1; additive-only, existing row immutable; T1.2 is the Phase 1 correctness item; P0.1/P0.5 close my unverified areas. Conviction HIGH on Phase 1, MODERATE on Phase 2 pending Phase 0.
-- **HELIOS:** Design authority = approved mockup; hard rules embedded (staleness ages, no hidden state, no dead tabs, no touch drag-resize). Conviction HIGH.
-- **AEGIS:** Layout writes stay behind existing auth; SW deferred / API never cached; no credentials enter client code. No veto.
-- **ATHENA:** Displaces nothing in the vacation-safe sprint; Abacus v2 veto preserved; S-6M lane charter deconflicted (v1.1 — Stater ceded, P0.6 added); deploy gate as specified including the zero-overlap condition. Approved for CC.
+- **ATLAS:** Sole schema touch eliminated — T2.1 is now additive rows, no DDL; migration-convention correction recorded (`migrations/` + `init_database()` mirror, never `_ensure_table()`); T1.0/T1.2 are the Phase 1 correctness items. Conviction HIGH.
+- **HELIOS:** Design authority = approved mockup; T1.3 restructuring serves the approved legibility intent; hard rules embedded (staleness on all 11 tiles, no hidden state, no dead tabs, no touch drag-resize, fail-open patterns banned). Conviction HIGH.
+- **AEGIS:** Rotation-era riders logged (public GET, no CSRF on POST) — decided at Phase 2 order time; SW stays deferred; no credentials enter client code. No veto.
+- **ATHENA:** v1.2 self-certified under the standing Titans record (changes reduce risk and stay inside the reviewed architecture — delta note to spine, no full re-pass at 8 days to gate); S-6M cession intact; deploy gate incl. six-target re-diff + hotfix carve-out. Approved for CC.
 
-## 7. Risk register
+## 7. Risk register (v1.2)
 
-1. **Desktop-slot clobber** (T1.2) — the one way this build hurts Nick. Guard + mandatory test.
-2. **Gridstack one-column ordering quirks** — P0.3 exists because 11.1.2's collapse ordering must be verified, not assumed.
-3. **Stale cached assets on phone** — T1.6 version bumps; no SW pre-vacation.
-4. **Scope creep into Stater/Abacus content** — rulings 1 & 5 are the fence.
-5. **Untruthful bucket chips** — omit unless P0.5 finds a real source; fail-closed.
+1. **Live touch-resize clobber (pre-existing, armed today)** — mitigated T1.0 (backup row) + T1.2 (static + guard + pinned load-order invariant). Interim: Nick avoids `/app` on phone until deploy.
+2. **`grid.load()` tile deletion (pre-existing)** — T1.7; explains future "deployed tile invisible to Nick" ghosts before they happen.
+3. **Fail-open kill-switch rendering + always-zero greeks (pre-existing fake-healthy, desktop)** — flagged to spine for triage; Phase 2 constraints recorded; not Phase 1 scope.
+4. **Stale cached assets on phone** — T1.6 version bumps; no SW pre-vacation.
+5. **Scope creep into Stater/Abacus content** — rulings 1, 5, 8 are the fence.
+6. **Cross-lane drift into the six targets** — build-time re-diff in the deploy gate.
