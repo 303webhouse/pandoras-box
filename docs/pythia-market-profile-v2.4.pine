@@ -158,7 +158,7 @@ if inSession and not na(sessionHigh) and not na(sessionLow)
     range_ = sessionHigh - sessionLow
     if range_ > 0
         binSize := range_ / numBins
-        loBinIdx = math.max(0, math.floor((low - sessionLow) / binSize))
+        loBinIdx = math.min(numBins - 1, math.max(0, math.floor((low - sessionLow) / binSize)))  // A-7 v2.4 clamp: bar low == sessionHigh else yields bucket numBins (OOB on a numBins-length array)
         hiBinIdx = math.min(numBins - 1, math.floor((high - sessionLow) / binSize))
         binsHit = hiBinIdx - loBinIdx + 1
         // v2.4: synthetic unit volume fallback for tickers without consolidated volume
