@@ -97,5 +97,22 @@ verify + one controlled restart. §5d.1 redesign stays post-vacation, unchanged.
   349 historical rows — the deployed Tier A filters (feed_service, score_signals, outcome_resolver)
   exclude this row on the committee surface; the ~10 raw read paths remain Tier B.
 
-## 6. Deploy record (appended at Step 4)
-- _PENDING — awaiting "AEGIS deploys complete."_
+## 6. Deploy record (Step 4 — COMPLETE)
+
+- **Deployed SHA:** `74aa47f9bd805acf759fc64f19cc4853aadce787` (`def-cvd-divergence-leak`
+  rebased onto origin/main `9e4d788`, pushed to `main` after AEGIS deploys completed).
+- **Four-step verify:**
+  1. Railway deployment `787403c6` — status **SUCCESS**.
+  2. Deployed `commitHash` `74aa47f…` == pushed SHA (exact match).
+  3. Live dark-proof — below.
+  4. No error silence / no job crash — **6 tape-health cycles ran post-restart, clean.**
+- **One controlled restart** (`railway restart`, exit 0; health recovered to `healthy`) +
+  dark-proof (poller, cycle observed 21:50Z / 3:50 PM MDT):
+  - post-restart tape-health cycles observed: **6** (`crypto_tape_health_log` id 2717 → 2723)
+    — proves the gated `_detect_cvd_events` runs every cycle without the divergence branch firing.
+  - **new `CRYPTO_CVD_%` rows since restart: 0** — branch stays dark across the restart.
+  - **feed predicate CVD rows: 0.**
+  - leaked row `id=16160`: quarantined (`DEF-CVD-DIVERGENCE-LEAK`), outcome `LOSS` unchanged,
+    **visible-to-grading-predicate = 0** (excluded).
+  - **OVERALL: PASS.**
+- Interim CVD caveat retires on Fable's grade of this restart proof.
