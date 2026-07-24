@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pandora · Stater Swap (v2)</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Orbit&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/v2.css?v=9">
+    <link rel="stylesheet" href="/stater.css?v=1">
+    <meta name="theme-color" content="#050810">
+</head>
+<body>
+    <!-- S-6 C2 COCKPIT GRID · scaffold (SG-1 increment: S5.1 chips row + S5.2 symbol grid live;
+         macro/tape/cycle/feed/drawer are structural placeholders pending the SG-1 layout gate). -->
+    <header class="v2-topbar">
+        <div class="v2-logo">
+            <span class="v2-brand">PANDORA</span>
+        </div>
+        <span class="v2-sub">Stater Swap · v2</span>
+        <span class="health-dot" id="pageHealthDot" data-gloss="HEALTH" title=""></span>
+        <div class="spacer"></div>
+        <span class="clock-chip" id="sessionChip" data-gloss="SESSION">SESSION · —</span>
+        <a class="v2-legacy-link" href="/app/v2">Judgment Layer →</a>
+    </header>
+
+    <main class="stater-page">
+
+        <!-- ── S5.1 Global chips row (pinned) ─────────────────────────────── -->
+        <section class="cockpit-chips" id="chipsRow" aria-label="Cockpit status chips">
+            <span class="ck-chip" id="chipRegime"><span class="k">REGIME</span><span class="v">—</span></span>
+            <span class="ck-chip" id="chipSession"><span class="k">SESSION</span><span class="v">—</span></span>
+            <span class="ck-chip" id="chipConcurrent"><span class="k">CONCURRENT</span><span class="v">—</span></span>
+            <span class="ck-chip" id="chipDaily"><span class="k">DAILY</span><span class="v">—</span></span>
+            <span class="ck-chip wide" id="chipFloor"><span class="k">DIST-TO-FLOOR</span><span class="v">—</span></span>
+        </section>
+
+        <!-- ── S5.2 Symbol grid (2×3 desktop → 1 col ≤768px) ──────────────── -->
+        <section class="symbol-grid" id="symbolGrid" aria-label="Symbol cockpit grid">
+            <!-- cards injected by stater.js in tier order: BTC ETH SOL HYPE ZEC FARTCOIN -->
+            <div class="grid-skeleton">loading symbols…</div>
+        </section>
+
+        <!-- ── S5.5 Collapsed macro band (placeholder — pending SG-1) ─────── -->
+        <section class="band macro-band pending" id="macroBand" data-gloss="MACRO">
+            <span class="band-title">MACRO</span>
+            <span class="pending-note">Horse-Rule context · pending SG-1 layout gate</span>
+        </section>
+
+        <!-- ── S5.3 Tape-health strip (placeholder — pending SG-1) ────────── -->
+        <section class="band pending" data-gloss="TAPE HEALTH">
+            <span class="band-title">TAPE HEALTH — BTC MASTER</span>
+            <span class="pending-note">CVD strip · pending SG-1 layout gate</span>
+        </section>
+
+        <!-- ── S5.4 Cycle Extremes dial (placeholder — pending SG-1) ──────── -->
+        <section class="band pending" data-gloss="CYCLE EXTREMES">
+            <span class="band-title">CYCLE EXTREMES</span>
+            <span class="pending-note">CAPITULATION ⟷ FROTH single-axis marker · pending SG-1 layout gate</span>
+        </section>
+
+        <!-- ── S5.7 Signal feed (placeholder — pending SG-1) ─────────────── -->
+        <section class="band pending" data-gloss="SIGNAL FEED">
+            <span class="band-title">SIGNAL FEED — LATEST</span>
+            <span class="pending-note">global crypto feed · pending SG-1 layout gate</span>
+        </section>
+
+        <footer class="cockpit-foot" id="cockpitFoot">
+            DIST-TO-FLOOR UNAVAILABLE — breakout_prop not reported by hub_get_portfolio_balances ·
+            rings render empty with reason · never zero · never full
+        </footer>
+    </main>
+
+    <!-- Drawer (v2 pattern; wired post-SG-1) -->
+    <div class="drawer-backdrop" id="drawerBackdrop"></div>
+    <aside class="drawer" id="drawer">
+        <div class="drawer-head"><h3 id="drawerTitle">Detail</h3><span class="x" id="drawerClose">✕</span></div>
+        <div class="drawer-body" id="drawerBody"></div>
+    </aside>
+
+    <script src="/stater.js?v=1"></script>
+</body>
+</html>

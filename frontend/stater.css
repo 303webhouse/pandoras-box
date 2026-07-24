@@ -1,0 +1,149 @@
+/* Stater Swap v2 — C2 Cockpit Grid.
+   Ports onto the Agora v2 design system: tokens, chip, drawer, health-dot come
+   from v2.css (linked first). This file adds ONLY the cockpit-specific layout.
+   Semantics inherited: lime(--up)=healthy/bullish · vermilion(--down)=degraded/bearish
+   · teal(--teal)=attention · text-3=N/A. No new hex values. */
+
+.stater-page {
+  padding: 12px 16px 40px;
+  max-width: 1480px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* ── S5.1 chips row (pinned) ───────────────────────────────────────────── */
+.cockpit-chips {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 0;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+.ck-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 7px;
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 5px 11px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--panel);
+  white-space: nowrap;
+}
+.ck-chip .k { color: var(--text-3); font-size: 10px; letter-spacing: 1.2px; }
+.ck-chip .v { color: var(--text); font-weight: 700; }
+.ck-chip.wide { border-style: dashed; }        /* dist-to-floor: honest seam */
+.ck-chip .v.seam { color: var(--text-3); font-weight: 400; }   /* N/A-with-reason */
+.ck-chip .v.adv  { color: var(--text-2); }      /* advisory (non-enforced) value */
+.ck-chip .v.up   { color: var(--up); }
+.ck-chip .v.down { color: var(--down); }
+
+/* ── S5.2 symbol grid ──────────────────────────────────────────────────── */
+.symbol-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.grid-skeleton { grid-column: 1 / -1; padding: 40px; text-align: center; color: var(--text-3); font-family: var(--mono); }
+
+.sym-card {
+  position: relative;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px 10px;
+  min-height: 158px;
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+}
+.sym-card:hover { border-color: var(--border-strong); }
+.sym-card.degraded { border-color: rgba(255,92,51,0.35); }
+
+.sc-head { display: flex; align-items: center; gap: 8px; }
+.sc-sym  { font-family: var(--mono); font-weight: 700; font-size: 14px; letter-spacing: 0.5px; }
+.tier-badge {
+  font-family: var(--mono); font-size: 9px; letter-spacing: 0.5px;
+  color: var(--text-3); border: 1px solid var(--border-strong);
+  border-radius: 4px; padding: 1px 5px;
+}
+.sc-head .health-dot { margin-left: auto; }
+
+.sc-price { font-size: 26px; font-weight: 700; line-height: 1.15; margin: 8px 0 2px; font-variant-numeric: tabular-nums; }
+.sc-price .prec { font-family: var(--mono); font-size: 10px; color: var(--text-3); letter-spacing: 1px; margin-left: 8px; vertical-align: middle; }
+
+.sc-chips { display: flex; gap: 8px; flex-wrap: wrap; font-family: var(--mono); font-size: 11px; color: var(--text-3); }
+.sc-chips .lab { color: var(--text-3); }
+.sc-chips .st { font-weight: 700; }
+.sc-chips .st.up { color: var(--up); } .sc-chips .st.down { color: var(--down); }
+.sc-chips .st.muted { color: var(--text-2); } .sc-chips .st.na { color: var(--text-3); }
+
+/* distance-to-floor ring (C2 signature element) — renders empty-with-reason */
+.floor-ring {
+  position: absolute; top: 44px; right: 14px;
+  width: 52px; height: 52px; border-radius: 50%;
+  border: 2px solid var(--border-strong);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-3); font-family: var(--mono); font-size: 16px;
+}
+.floor-ring.seam { border-style: dashed; }
+.floor-ring-lab { position: absolute; top: 98px; right: 8px; width: 64px; text-align: center;
+  font-family: var(--mono); font-size: 8px; letter-spacing: 0.5px; color: var(--text-3); }
+
+/* per-block health dots: FU OI BA LQ RG TP */
+.block-dots { display: flex; gap: 10px; margin-top: 10px; font-family: var(--mono); font-size: 8px; letter-spacing: 0.5px; color: var(--text-3); }
+.blk { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.blk .d { width: 6px; height: 6px; border-radius: 50%; background: var(--text-3); }
+.blk.ok  .d { background: var(--up); }
+.blk.bad .d { background: var(--down); }
+.blk.na  .d { background: transparent; border: 1px solid var(--text-3); }
+
+.sc-degrade { margin-top: 8px; display: flex; align-items: center; gap: 8px; }
+.partial-badge {
+  font-family: var(--mono); font-size: 9px; letter-spacing: 0.5px;
+  color: var(--down); border: 1px dashed rgba(255,92,51,0.5);
+  border-radius: 999px; padding: 1px 7px;
+}
+.degrade-note { font-family: var(--mono); font-size: 10px; color: var(--down); }
+
+/* ── placeholder bands (macro/tape/cycle/feed pending SG-1) ────────────── */
+.band {
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 10px; padding: 12px 14px;
+  display: flex; align-items: center; gap: 14px;
+}
+.band-title { font-family: var(--mono); font-size: 11px; letter-spacing: 1.5px; color: var(--text-2); }
+.macro-band { min-height: 40px; }
+.band.pending { border-style: dashed; }
+.pending-note { font-family: var(--mono); font-size: 10px; color: var(--text-3); letter-spacing: 0.5px; }
+
+.cockpit-foot {
+  font-family: var(--mono); font-size: 10px; color: var(--text-3);
+  letter-spacing: 0.3px; padding: 4px 2px; border-top: 1px solid var(--border);
+}
+
+/* health-dot states (v2.css defines only .stale) */
+.health-dot.ok  { background: var(--up); }
+.health-dot.bad { background: var(--down); }
+
+/* ══ §6 MOBILE COLLAPSE — single column ≤768px (Nick phone-only 08-04→08-15) ══
+   No width breakpoint exists in v2.css (P0.2); this is the authored default. */
+@media (max-width: 768px) {
+  .stater-page { padding: 8px 10px 32px; gap: 10px; }
+  .symbol-grid { grid-template-columns: 1fr; }         /* single-column stack, tier order */
+  .cockpit-chips { gap: 6px; max-height: none; }        /* wraps; no chip dropped */
+  .ck-chip { font-size: 11px; padding: 6px 10px; min-height: 30px; }
+  .sym-card { min-height: 44px; }                        /* ≥44px tap target */
+  .floor-ring { top: 40px; right: 12px; }
+  .v2-legacy-link { display: none; }                     /* keep topbar to one line */
+}
+@media (max-width: 420px) {
+  .drawer { width: 100vw; max-width: 100vw; }            /* full-height sheet */
+  .sc-price { font-size: 23px; }
+}

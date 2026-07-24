@@ -1845,6 +1845,22 @@ if frontend_path:
     async def serve_v2_css():
         return FileResponse(os.path.join(frontend_path, "v2.css"))
 
+    # ── S-6 Stater Swap v2 (C2 Cockpit Grid). These MUST be declared BEFORE the
+    # /app/{mode} catch-all below, or /app/stater is swallowed and served the
+    # legacy index.html (the FastAPI static-before-parameter ordering rule).
+    @app.get("/app/stater", response_class=FileResponse)
+    async def serve_stater():
+        """Serve the Stater Swap v2 crypto cockpit (S-6)."""
+        return FileResponse(os.path.join(frontend_path, "stater.html"))
+
+    @app.get("/stater.css", response_class=FileResponse)
+    async def serve_stater_css():
+        return FileResponse(os.path.join(frontend_path, "stater.css"))
+
+    @app.get("/stater.js", response_class=FileResponse)
+    async def serve_stater_js():
+        return FileResponse(os.path.join(frontend_path, "stater.js"))
+
     @app.get("/app/{mode}", response_class=FileResponse)
     async def serve_frontend_mode(mode: str):
         """Serve legacy frontend for SPA client-side routes, including
