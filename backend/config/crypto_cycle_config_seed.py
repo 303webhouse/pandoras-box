@@ -59,6 +59,12 @@ SEED_CONFIG_V1 = {
         "absorption_cooldown_seconds":  1800,
         "divergence_signal_expiry_hours": 24,
         "absorption_signal_expiry_hours": 24,
+        # DEF-CVD-DIVERGENCE-LEAK (2026-07-24): divergence branch disabled
+        # pending the §5d.1 redesign. Documented fail-closed default; the live
+        # gate is the code-level `cvd_cfg.get("divergence_enabled", False)`, so
+        # the sentinel config (id=5, no such key) is already OFF. Flip True via
+        # an appended config row only when the redesign lands.
+        "divergence_enabled": False,
     },
 
     # --- Shadow flag: dial never writes to signals table (§4.9, D3) ---

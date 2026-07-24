@@ -248,6 +248,15 @@ async def _detect_cvd_events(
         proximity_pct = cvd_cfg.get("level_proximity_pct", 0.3) / 100.0
         absorption_threshold = cvd_cfg.get("absorption_cvd_threshold_usd", 50_000.0)
         lookback_bars = cvd_cfg.get("local_extreme_lookback_bars", 12)
+        # DEF-CVD-DIVERGENCE-LEAK (2026-07-24): the CVD_DIVERGENCE branch is
+        # disabled pending the §5d.1 redesign. Its "0 lifetime fires" was a
+        # NEAR-zero probability, not zero -- it fired once, wrong (close-vs-own-
+        # bar-high/low phantom; is_local_low needs close == own_low == window
+        # min), on 2026-07-24T09:01Z. FAIL-CLOSED: a missing key or a stale /
+        # failed config load defaults OFF, mirroring the standing disable the
+        # absorption branch honors via the sentinel. Re-enable ONLY when the
+        # redesign lands (append a crypto_cycle_config row flipping this True).
+        divergence_enabled = bool(cvd_cfg.get("divergence_enabled", False))
 
         from jobs.crypto_bars import fetch_crypto_ohlc
         from strategies.btc_market_structure import compute_volume_profile
@@ -284,13 +293,13 @@ async def _detect_cvd_events(
         if cvd_net is None:
             return events
 
-        if is_local_high and cvd_net < 0:
+        if divergence_enabled and is_local_high and cvd_net < 0:
             events.append(_build_cvd_event_signal(
                 symbol, "CVD_DIVERGENCE", "SHORT", current_price,
                 level_name, level_price, cvd_net, config, now_utc,
                 f"price new local high near {level_name} but net CVD selling (${cvd_net:,.0f})",
             ))
-        elif is_local_low and cvd_net > 0:
+        elif divergence_enabled and is_local_low and cvd_net > 0:
             events.append(_build_cvd_event_signal(
                 symbol, "CVD_DIVERGENCE", "LONG", current_price,
                 level_name, level_price, cvd_net, config, now_utc,

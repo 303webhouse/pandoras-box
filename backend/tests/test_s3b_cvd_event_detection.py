@@ -36,6 +36,11 @@ _CONFIG = {
         "absorption_cooldown_seconds": 900,
         "divergence_signal_expiry_hours": 24,
         "absorption_signal_expiry_hours": 24,
+        # DEF-CVD-DIVERGENCE-LEAK (2026-07-24): the divergence branch is now
+        # config-gated and fail-closed OFF by default. The detection-logic
+        # tests below opt in explicitly so they still exercise that logic; the
+        # default-OFF behavior has its own regression section further down.
+        "divergence_enabled": True,
     }
 }
 
@@ -139,6 +144,57 @@ def test_no_event_when_volume_profile_errors():
     bars = _bars(closes)
     events = _detect_with(bars, {"error": "insufficient kline data"}, {"value": 100_000.0})
     assert events == []
+
+
+# ---------------------------------------------------------------------------
+# DEF-CVD-DIVERGENCE-LEAK (2026-07-24) -- the CVD_DIVERGENCE branch is disabled
+# pending the §5d.1 redesign. "0 lifetime fires != cannot fire": it fired once,
+# wrong, on 2026-07-24T09:01Z (BTC/VAL, LONG). The gate is config-driven and
+# FAIL-CLOSED -- a missing or false `cvd_events.divergence_enabled` => the
+# branch stays dark. Absorption is unaffected (it never fires at a local
+# extreme anyway). Re-enable only when the redesign lands.
+# ---------------------------------------------------------------------------
+
+_CONFIG_DIV_OFF = {"cvd_events": {**_CONFIG["cvd_events"], "divergence_enabled": False}}
+_CONFIG_DIV_MISSING = {"cvd_events": {k: v for k, v in _CONFIG["cvd_events"].items() if k != "divergence_enabled"}}
+
+
+def _detect_with_cfg(bars, vp, cell, cfg):
+    p1 = patch("jobs.crypto_bars.fetch_crypto_ohlc", new=AsyncMock(return_value=bars))
+    p2 = patch("strategies.btc_market_structure.compute_volume_profile", return_value=vp)
+    with p1, p2:
+        return _run(_detect_cvd_events("BTC", cell, cfg, _NOW))
+
+
+def test_divergence_dark_when_flag_missing_fail_closed():
+    """Fail-closed: with no `divergence_enabled` key at all (the live sentinel
+    config, or a stale cache), the long-divergence setup emits nothing."""
+    closes = [100.0] * 11 + [95.0]
+    bars = _bars(closes, lows=[99.8] * 11 + [95.0])
+    vp = {"poc": 105.0, "vah": 108.0, "val": 95.1}
+    cell = {"value": 5_000.0}  # net CVD buying at a fresh local low -- the exact 2026-07-24 shape
+    assert _detect_with_cfg(bars, vp, cell, _CONFIG_DIV_MISSING) == []
+
+
+def test_divergence_dark_when_flag_false():
+    """Explicit False also darks the short-divergence setup."""
+    closes = [100.0] * 11 + [105.0]
+    highs = [100.5] * 11 + [105.0]
+    bars = _bars(closes, highs=highs)
+    vp = {"poc": 95.0, "vah": 105.05, "val": 90.0}
+    cell = {"value": -5_000.0}
+    assert _detect_with_cfg(bars, vp, cell, _CONFIG_DIV_OFF) == []
+
+
+def test_absorption_unaffected_by_divergence_disable():
+    """The disable is surgical -- absorption still fires with divergence off."""
+    closes = [95.0, 100.0, 105.0, 100.0, 95.0, 100.0, 105.0, 100.0, 95.0, 100.0, 105.0, 100.0]
+    bars = _bars(closes)
+    vp = {"poc": 100.05, "vah": 108.0, "val": 88.0}
+    cell = {"value": 80_000.0}
+    events = _detect_with_cfg(bars, vp, cell, _CONFIG_DIV_MISSING)
+    assert len(events) == 1
+    assert events[0]["signal_type"] == "CVD_ABSORPTION"
 
 
 # ---------------------------------------------------------------------------
@@ -385,7 +441,7 @@ def test_fire_events_falls_back_to_widened_default_when_config_key_missing():
     bars = _bars(closes, lows=[99.8] * 11 + [95.0])
     vp = {"poc": 105.0, "vah": 108.0, "val": 95.1}
     cell = {"value": 5_000.0}
-    bare_config = {"cvd_events": {}}  # no cooldown keys at all
+    bare_config = {"cvd_events": {"divergence_enabled": True}}  # no cooldown keys; divergence opted in so detection reaches the cooldown check
 
     p_bars = patch("jobs.crypto_bars.fetch_crypto_ohlc", new=AsyncMock(return_value=bars))
     p_vp = patch("strategies.btc_market_structure.compute_volume_profile", return_value=vp)
