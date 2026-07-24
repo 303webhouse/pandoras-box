@@ -958,32 +958,40 @@ async def init_database():
             )
         """)
 
-        # Brief 07: Seed account balances (only if table is empty)
-        await conn.execute("""
-            INSERT INTO account_balances (account_name, broker, balance, updated_by)
-            SELECT 'Robinhood', 'robinhood', 4607.0, 'manual'
-            WHERE NOT EXISTS (SELECT 1 FROM account_balances WHERE account_name = 'Robinhood')
-        """)
-        await conn.execute("""
-            INSERT INTO account_balances (account_name, broker, balance, updated_by)
-            SELECT 'Fidelity 401A', 'fidelity', 10107.90, 'manual'
-            WHERE NOT EXISTS (SELECT 1 FROM account_balances WHERE account_name = 'Fidelity 401A')
-        """)
-        await conn.execute("""
-            INSERT INTO account_balances (account_name, broker, balance, updated_by)
-            SELECT 'Fidelity 403B', 'fidelity', 233.15, 'manual'
-            WHERE NOT EXISTS (SELECT 1 FROM account_balances WHERE account_name = 'Fidelity 403B')
-        """)
-        await conn.execute("""
-            INSERT INTO account_balances (account_name, broker, balance, updated_by)
-            SELECT 'Fidelity Roth', 'fidelity', 8223.41, 'manual'
-            WHERE NOT EXISTS (SELECT 1 FROM account_balances WHERE account_name = 'Fidelity Roth')
-        """)
-        await conn.execute("""
-            INSERT INTO account_balances (account_name, broker, balance, updated_by)
-            SELECT 'Interactive Brokers', 'ibkr', 0.0, 'manual'
-            WHERE NOT EXISTS (SELECT 1 FROM account_balances WHERE account_name = 'Interactive Brokers')
-        """)
+        # Brief 07: Seed account balances — ONLY on a genuinely empty table (fresh
+        # bootstrap). DEF-SEED-RESURRECTION fix (2026-07-24): the prior per-account
+        # `WHERE NOT EXISTS (... account_name = X)` guards resurrected deliberately-
+        # deleted rows on EVERY deploy (e.g. the 2026-07-23 IBKR delete + 401A/403B ->
+        # BROKERAGE_LINK_401K merge came back as seed rows on the next restart). A single
+        # truly-empty-table guard, evaluated once before any insert, prevents that. Seed
+        # VALUES are unchanged placeholders — on a real fresh bootstrap they carry stale
+        # numbers, acceptable for placeholders (flagged in the completion doc).
+        if not await conn.fetchval("SELECT EXISTS (SELECT 1 FROM account_balances)"):
+            await conn.execute("""
+                INSERT INTO account_balances (account_name, broker, balance, updated_by)
+                SELECT 'Robinhood', 'robinhood', 4607.0, 'manual'
+                WHERE NOT EXISTS (SELECT 1 FROM account_balances WHERE account_name = 'Robinhood')
+            """)
+            await conn.execute("""
+                INSERT INTO account_balances (account_name, broker, balance, updated_by)
+                SELECT 'Fidelity 401A', 'fidelity', 10107.90, 'manual'
+                WHERE NOT EXISTS (SELECT 1 FROM account_balances WHERE account_name = 'Fidelity 401A')
+            """)
+            await conn.execute("""
+                INSERT INTO account_balances (account_name, broker, balance, updated_by)
+                SELECT 'Fidelity 403B', 'fidelity', 233.15, 'manual'
+                WHERE NOT EXISTS (SELECT 1 FROM account_balances WHERE account_name = 'Fidelity 403B')
+            """)
+            await conn.execute("""
+                INSERT INTO account_balances (account_name, broker, balance, updated_by)
+                SELECT 'Fidelity Roth', 'fidelity', 8223.41, 'manual'
+                WHERE NOT EXISTS (SELECT 1 FROM account_balances WHERE account_name = 'Fidelity Roth')
+            """)
+            await conn.execute("""
+                INSERT INTO account_balances (account_name, broker, balance, updated_by)
+                SELECT 'Interactive Brokers', 'ibkr', 0.0, 'manual'
+                WHERE NOT EXISTS (SELECT 1 FROM account_balances WHERE account_name = 'Interactive Brokers')
+            """)
 
         # Balance snapshots — daily EOD photo of each account for PnL tracking
         await conn.execute("""
