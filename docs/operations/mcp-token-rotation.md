@@ -86,3 +86,26 @@ No redeploy or downtime needed; nothing references it.
 - **Token TTL tuning:** currently relying on GitHub's default token lifetime (effectively indefinite, manually revocable). v2 may issue our own short-lived JWTs derived from the GitHub auth.
 
 Until those land, this OAuth rotation is the auth control. Treat the GitHub OAuth App credentials accordingly.
+
+---
+
+## Rotating the PostgreSQL password (R-PG)
+
+Added 2026-07-24 by the AEGIS Coordinated Pass — this doc previously covered only the MCP GitHub OAuth secret. The executed-and-verified procedure:
+
+> **Prime directive:** the operator generates and holds the new password. Automated lanes verify BEHAVIOR only (accepted/rejected). No step displays a secret value.
+
+1. **Generate** a new password, **32 chars, letters + digits only** (symbols break URL-form DSNs). Keep the OLD value retrievable until verification passes (rollback = re-`ALTER` to old).
+2. **Railway → Postgres service → Query console:** `ALTER USER postgres WITH PASSWORD '<new>';` (hand-typed typos crash-loop the backend — paste from the password manager, or use a local-socket `psql` re-paste).
+3. **Railway → Postgres service → Variables:** update `POSTGRES_PASSWORD` (+ any literal `DATABASE_URL`/`PGPASSWORD`).
+4. **Railway → backend service → `DB_PASSWORD`** — look-then-branch:
+   - `${{Postgres.*}}` **reference** → just **redeploy** (value propagates).
+   - **literal** → edit the password segment (save redeploys). *(2026-07-24: it was a literal.)*
+   - Note: the backend reads discrete `DB_HOST/PORT/NAME/USER/DB_PASSWORD` (`backend/database/postgres_client.py`), NOT a single `DATABASE_URL`.
+5. **VPS OpenClaw:** confirm whether it is a **direct** Postgres consumer before editing anything — the 2026-07-24 pass found no VPS DB creds (it reaches data via the Railway hub API), so no VPS edit was required. Grep `/opt/openclaw` + `/home/openclaw/.openclaw` for `postgres://`/`DB_PASSWORD` on-box first.
+6. **Local `.mcp.json`** (`C:\trading-hub\.mcp.json`, gitignored): update the `postgres` server's connection-string password segment; restart the MCP client. Claude Desktop config was NOT a consumer (no postgres server).
+7. **Verify (behavior only):** old committed/prior string → **REJECTED (auth-failed)**; new credential → **ACCEPTED**; `/health` → `postgres: connected`; hub `mcp_ping` live. Helper: `scripts/aegis_conn_test.py` (stdin DSN → `ACCEPTED`/`REJECTED(<class>)`, never echoes the value).
+
+## Rotating a TradingView webhook secret (R-PY)
+
+The shared-secret contract is a JSON body field validated fail-closed via `hmac.compare_digest` (`backend/utils/webhook_auth.py`; `backend/webhooks/pythia_events.py`). To rotate: generate a 32-alnum secret → update the Railway env var (`PYTHIA_WEBHOOK_SECRET` for the Pythia path, `TRADINGVIEW_WEBHOOK_SECRET` for the generic path) → update the value everywhere the client emits it (TradingView alert message / Pine source) → re-arm alerts. **Enumerate alerts empirically** — the live "Pythia Market Profile" alerts POST to `/webhook/tradingview` and are internally forwarded to the pythia chokepoint; do not assume the alert list. *(2026-07-24: R-PY was WAIVED to the next-week pile; the live Pine hardcodes the secret in-source — see the ratified PINE-HYGIENE follow-up: migrate to an empty-default `input.string`.)*
