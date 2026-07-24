@@ -42,28 +42,37 @@
             <div class="grid-skeleton">loading symbols…</div>
         </section>
 
-        <!-- ── S5.5 Collapsed macro band (placeholder — pending SG-1) ─────── -->
-        <section class="band macro-band pending" id="macroBand" data-gloss="MACRO">
+        <!-- ── S5.5 Collapsed macro band (funding/OI/basis/liqs — render, per P0.4-1) ─ -->
+        <section class="band macro-band" id="macroBand" data-gloss="MACRO">
             <span class="band-title">MACRO</span>
-            <span class="pending-note">Horse-Rule context · pending SG-1 layout gate</span>
+            <div class="macro-vals" id="macroVals"><span class="pending-note">loading…</span></div>
         </section>
 
-        <!-- ── S5.3 Tape-health strip (placeholder — pending SG-1) ────────── -->
-        <section class="band pending" data-gloss="TAPE HEALTH">
-            <span class="band-title">TAPE HEALTH — BTC MASTER</span>
-            <span class="pending-note">CVD strip · pending SG-1 layout gate</span>
+        <!-- ── S5.3 Tape-health strip (BTC master) ────────────────────────── -->
+        <section class="band col" data-gloss="TAPE HEALTH">
+            <div class="band-head">
+                <span class="band-title">TAPE HEALTH — BTC MASTER</span>
+                <span class="health-dot" id="tapeBandDot"></span>
+            </div>
+            <div class="tape-body" id="tapeBody"><span class="pending-note">loading…</span></div>
         </section>
 
-        <!-- ── S5.4 Cycle Extremes dial (placeholder — pending SG-1) ──────── -->
-        <section class="band pending" data-gloss="CYCLE EXTREMES">
-            <span class="band-title">CYCLE EXTREMES</span>
-            <span class="pending-note">CAPITULATION ⟷ FROTH single-axis marker · pending SG-1 layout gate</span>
+        <!-- ── S5.4 Cycle Extremes dial (single-axis CAPITULATION⟷FROTH, live composite) ─ -->
+        <section class="band col" data-gloss="CYCLE EXTREMES">
+            <div class="band-head">
+                <span class="band-title">CYCLE EXTREMES — BTC MASTER</span>
+                <span class="band-meta" id="cycleCoverage"></span>
+            </div>
+            <div class="dial" id="cycleDial"><span class="pending-note">loading…</span></div>
         </section>
 
-        <!-- ── S5.7 Signal feed (placeholder — pending SG-1) ─────────────── -->
-        <section class="band pending" data-gloss="SIGNAL FEED">
-            <span class="band-title">SIGNAL FEED — LATEST</span>
-            <span class="pending-note">global crypto feed · pending SG-1 layout gate</span>
+        <!-- ── S5.7 Signal feed (global crypto feed below grid) ───────────── -->
+        <section class="band col" data-gloss="SIGNAL FEED">
+            <div class="band-head">
+                <span class="band-title">SIGNAL FEED — LATEST</span>
+                <span class="band-meta" id="feedCount"></span>
+            </div>
+            <div class="feed-list" id="feedList"><span class="pending-note">loading…</span></div>
         </section>
 
         <footer class="cockpit-foot" id="cockpitFoot">
