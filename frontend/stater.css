@@ -132,6 +132,70 @@
 .health-dot.ok  { background: var(--up); }
 .health-dot.bad { background: var(--down); }
 
+/* ── multi-row bands (tape / cycle / feed) ─────────────────────────────── */
+.band.col { flex-direction:column; align-items:stretch; gap:10px; }
+.band-head { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.band-meta { margin-left:auto; min-width:0; font-family:var(--mono); font-size:10px; color:var(--text-3); letter-spacing:0.5px; }
+
+/* S5.5 macro line */
+.macro-vals { display:flex; flex-wrap:wrap; gap:6px 20px; font-family:var(--mono); font-size:12px; color:var(--text-3); }
+.macro-vals .mv .lab { color:var(--text-3); }
+.macro-vals .mv .val { color:var(--text); font-weight:700; }
+.macro-vals .mv .val.up { color:var(--up); } .macro-vals .mv .val.down { color:var(--down); }
+.macro-vals .mv .val.seam { color:var(--text-3); font-weight:400; }
+
+/* S5.3 tape-health master band */
+.tape-body { display:flex; flex-direction:column; gap:9px; }
+.tape-row1 { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+.tape-state-chip { font-family:var(--mono); font-size:11px; font-weight:700; padding:2px 9px; border-radius:999px; border:1px solid var(--border-strong); }
+.tape-state-chip.up { color:var(--up); border-color:rgba(124,255,107,0.4); }
+.tape-state-chip.down { color:var(--down); border-color:rgba(255,92,51,0.4); }
+.tape-state-chip.muted { color:var(--text-2); }
+.tape-div { font-family:var(--mono); font-size:11px; color:var(--text-3); }
+.cvd-bar { display:flex; height:10px; border-radius:5px; overflow:hidden; background:var(--panel-2); border:1px solid var(--border); }
+.cvd-bar .spot { background:var(--up); } .cvd-bar .perp { background:var(--down); }
+.cvd-legend { display:flex; gap:22px; font-family:var(--mono); font-size:11px; color:var(--text-3); }
+.cvd-legend .v { color:var(--text); font-weight:700; }
+.cvd-legend .v.up { color:var(--up); } .cvd-legend .v.down { color:var(--down); }
+
+/* S5.4 cycle single-axis dial */
+.dial { padding:2px 4px; }
+.dial-top { display:flex; align-items:baseline; gap:10px; margin-bottom:20px; font-family:var(--mono); }
+.dial-top .score { font-size:15px; font-weight:700; color:var(--text); }
+.dial-top .ctx { font-size:11px; color:var(--teal); }
+.dial-track { position:relative; height:4px; border-radius:2px;
+  background:linear-gradient(90deg, var(--teal), var(--text-3) 50%, var(--down)); }
+.dial-marker { position:absolute; top:50%; width:12px; height:12px; border-radius:50%;
+  background:var(--text); border:2px solid var(--bg); transform:translate(-50%,-50%);
+  box-shadow:0 0 0 3px rgba(226,232,240,0.12); }
+.dial-ends { display:flex; justify-content:space-between; margin-top:9px;
+  font-family:var(--mono); font-size:10px; letter-spacing:0.5px; color:var(--text-3); }
+.dial-note { font-family:var(--mono); font-size:10px; color:var(--text-3); margin-top:8px; }
+
+/* S5.7 feed */
+.feed-list { display:flex; flex-direction:column; gap:8px; }
+.feed-item { display:flex; align-items:baseline; gap:12px; padding:10px 12px;
+  border:1px solid var(--border); border-radius:8px; background:var(--panel-2); }
+.feed-item .ft { font-family:var(--mono); font-weight:700; font-size:13px; color:var(--text); white-space:nowrap; }
+.feed-item .dir { font-family:var(--mono); font-size:10px; padding:1px 6px; border-radius:4px; border:1px solid var(--border-strong); }
+.feed-item .dir.long { color:var(--up); border-color:rgba(124,255,107,0.4); }
+.feed-item .dir.short { color:var(--down); border-color:rgba(255,92,51,0.4); }
+.feed-item .fctx { font-family:var(--mono); font-size:11px; color:var(--text-3); overflow:hidden; text-overflow:ellipsis; min-width:0; }
+.feed-item .fctx .seam { color:var(--text-3); font-style:italic; }
+.feed-right { margin-left:auto; display:flex; align-items:center; gap:10px; white-space:nowrap; }
+.sig-tag { font-family:var(--mono); font-size:9px; letter-spacing:1px; padding:2px 7px; border-radius:4px;
+  border:1px solid var(--border-strong); color:var(--text-3); }
+.sig-tag.shadow { color:var(--teal); border-color:rgba(20,184,166,0.4); }
+.feed-time { font-family:var(--mono); font-size:10px; color:var(--text-3); }
+.feed-empty { color:var(--text-3); font-family:var(--mono); font-size:12px; padding:6px 0; }
+
+/* drawer detail (extends v2.css .kv) */
+.dwr-sec { font-family:var(--mono); font-size:10px; letter-spacing:1.5px; color:var(--text-3); margin:16px 0 4px; }
+.dwr-sec:first-child { margin-top:0; }
+#drawerBody .kv .v.seam { color:var(--text-3); font-weight:400; }
+#drawerBody .kv .v.up { color:var(--up); } #drawerBody .kv .v.down { color:var(--down); }
+#drawerBody .kv .v.stale::after { content:" · stale"; color:var(--text-3); font-size:10px; }
+
 /* ══ §6 MOBILE COLLAPSE — single column ≤768px (Nick phone-only 08-04→08-15) ══
    No width breakpoint exists in v2.css (P0.2); this is the authored default. */
 @media (max-width: 768px) {
@@ -142,7 +206,21 @@
   .sym-card { min-height: 44px; }                        /* ≥44px tap target */
   .floor-ring { top: 40px; right: 12px; }
   .v2-legacy-link { display: none; }                     /* keep topbar to one line */
+  /* §6 no-horizontal-scroll: let wide mono content wrap instead of forcing width */
+  .band-meta { margin-left: 0; white-space: normal; flex-basis: 100%; }
+  #cycleCoverage { display: none; }                      /* long coverage note off on phone */
+  .feed-item { flex-wrap: wrap; }
+  .feed-right { margin-left: auto; }
+  .cvd-legend { flex-wrap: wrap; gap: 6px 16px; }
+  .macro-vals { gap: 4px 14px; }
+  /* wide chips (dist-to-floor) wrap their reason text instead of forcing page width */
+  .ck-chip { white-space: normal; max-width: 100%; }
+  .ck-chip.wide { flex-basis: 100%; }
+  .dial-note { white-space: normal; }
+  .cockpit-foot { word-break: break-word; }
 }
+/* §6 hard guard: the cockpit page never scrolls sideways */
+.stater-page { overflow-x: clip; }
 @media (max-width: 420px) {
   .drawer { width: 100vw; max-width: 100vw; }            /* full-height sheet */
   .sc-price { font-size: 23px; }

@@ -16,6 +16,7 @@
     { base: 'FARTCOIN', tier: 3, precBlocked: true },
   ];
   const POLL_MS = 30000;
+  let _last = { cycle: null, prices: {} };   // shared cache for the drawer
 
   // ── visibility-gated polling (mirrors v2.js managed-interval pattern) ────────
   let _timer = null;
@@ -64,6 +65,34 @@
   }
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, c => (
     { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+  function fmtUsd(v) {
+    const n = Number(v);
+    if (!isFinite(n)) return null;
+    const a = Math.abs(n), s = n < 0 ? '-' : '';
+    if (a >= 1e9) return `${s}$${(a / 1e9).toFixed(2)}B`;
+    if (a >= 1e6) return `${s}$${(a / 1e6).toFixed(2)}M`;
+    if (a >= 1e3) return `${s}$${(a / 1e3).toFixed(1)}K`;
+    return `${s}$${a.toFixed(2)}`;
+  }
+  function fmtPct(v) { const n = Number(v); return isFinite(n) ? `${n >= 0 ? '+' : ''}${n.toFixed(2)}%` : null; }
+  function fmtNum(v) { const n = Number(v); return isFinite(n) ? n.toLocaleString('en-US', { maximumFractionDigits: 0 }) : null; }
+  function mtTime(iso) {
+    if (!iso) return '—';
+    const d = new Date(/[Z]|[+-]\d\d:?\d\d$/.test(iso) ? iso : iso + 'Z');  // backend stores UTC, often tz-less
+    if (isNaN(d)) return '—';
+    return d.toLocaleTimeString('en-US', { timeZone: 'America/Denver', hour: '2-digit', minute: '2-digit', hour12: false }) + ' MT';
+  }
+  // /state envelope → {txt, cls}. Honest seam on na_reason / null / degraded — never fake-healthy.
+  function envRow(env, valueKey, fmt) {
+    if (!env) return { txt: 'N/A', cls: 'seam' };
+    if (env.na_reason) return { txt: `N/A — ${env.na_reason}`, cls: 'seam' };
+    const raw = env[valueKey];
+    if (raw == null) return { txt: 'N/A', cls: 'seam' };
+    const t = fmt(raw);
+    if (t == null) return { txt: 'N/A', cls: 'seam' };
+    return { txt: t, cls: (env.degraded || env.stale) ? 'seam stale' : '' };
+  }
 
   // ── per-block health from cycle-extremes cells + regime/tape flags ───────────
   // LIVE → ok · DEGRADED/STALE → bad · NA/absent → na (dashed, never fake-healthy)
@@ -201,16 +230,133 @@
     });
   }
 
-  // ── drawer (minimal; full per-symbol detail wired post-SG-1) ─────────────────
-  function openDrawer(base) {
-    const d = document.getElementById('drawer');
-    const bd = document.getElementById('drawerBackdrop');
-    const title = document.getElementById('drawerTitle');
-    const body = document.getElementById('drawerBody');
+  // ── S5.5 macro band (BTC-master aggregates — render content, per P0.4-1) ─────
+  function renderMacro(btc) {
+    const el = document.getElementById('macroVals');
+    if (!el) return;
+    if (!btc) { el.innerHTML = '<span class="pending-note">N/A — BTC master unavailable</span>'; return; }
+    const rows = [
+      ['FUNDING', envRow(btc.funding, 'rate_pct', v => `${(v).toFixed(4)} · ${btc.funding?.signal || '—'}`)],
+      ['OI', envRow(btc.open_interest, 'current_oi_usd', fmtUsd)],
+      ['BASIS', envRow(btc.basis, 'basis_annualized_pct', fmtPct)],
+      ['LIQS', envRow(btc.liquidations, 'total_usd', fmtUsd)],
+      ['LONG', envRow(btc.liquidations, 'long_pct', v => `${v.toFixed(1)}% · ${(btc.liquidations?.composition || '—').toUpperCase()}`)],
+    ];
+    el.innerHTML = rows.map(([lab, r]) =>
+      `<span class="mv"><span class="lab">${lab} </span><span class="val ${r.cls}">${esc(r.txt)}</span></span>`).join('');
+  }
+
+  // ── S5.3 tape-health master band (CVD split bar) ─────────────────────────────
+  function renderTapeBand(btcTape) {
+    const body = document.getElementById('tapeBody');
+    const dot = document.getElementById('tapeBandDot');
+    if (!body) return;
+    if (!btcTape) { body.innerHTML = '<span class="pending-note">N/A — tape-health unavailable</span>'; if (dot) dot.className = 'health-dot bad'; return; }
+    const st = btcTape.state || 'NA';
+    const stCls = st === 'SPOT_LED' ? 'up' : st === 'PERP_LED' ? 'down' : st === 'MIXED' ? 'muted' : 'muted';
+    const spot = Number(btcTape.spot_cvd), perp = Number(btcTape.perp_cvd);
+    const aSpot = Math.abs(spot) || 0, aPerp = Math.abs(perp) || 0, tot = (aSpot + aPerp) || 1;
+    // divergence derived honestly from spot/perp CVD sign agreement (no backend field exists)
+    const div = (isFinite(spot) && isFinite(perp)) ? (Math.sign(spot) === Math.sign(perp) ? 'ALIGNED' : 'DIVERGENT') : '—';
+    const stale = btcTape.degraded || btcTape.stale;
+    if (dot) dot.className = 'health-dot ' + (stale ? 'stale' : 'ok');
+    body.innerHTML =
+      `<div class="tape-row1">
+         <span class="tape-state-chip ${stCls}">${esc(st)}</span>
+         <span class="tape-div">CVD · ${div}${stale ? ' · stale' : ''}</span>
+       </div>
+       <div class="cvd-bar"><span class="spot" style="width:${(aSpot / tot * 100).toFixed(1)}%"></span><span class="perp" style="width:${(aPerp / tot * 100).toFixed(1)}%"></span></div>
+       <div class="cvd-legend">
+         <span>SPOT CVD <span class="v ${spot >= 0 ? 'up' : 'down'}">${esc(fmtNum(spot) ?? '—')}</span></span>
+         <span>PERP CVD <span class="v ${perp >= 0 ? 'up' : 'down'}">${esc(fmtNum(perp) ?? '—')}</span></span>
+       </div>`;
+  }
+
+  // ── S5.4 cycle single-axis dial (live composite_score, per P0.4-2) ───────────
+  function renderDial(cyc) {
+    const el = document.getElementById('cycleDial');
+    const cov = document.getElementById('cycleCoverage');
+    if (!el) return;
+    if (!cyc || cyc.composite_score == null) {
+      el.innerHTML = '<span class="pending-note">N/A — cycle composite unavailable</span>';
+      if (cov) cov.textContent = '';
+      return;
+    }
+    const score = Math.max(-100, Math.min(100, Number(cyc.composite_score)));
+    const pct = (score + 100) / 2;   // -100 CAPITULATION (left) → +100 FROTH (right)
+    const lean = score < -10 ? cyc.capitulation_context_copy : score > 10 ? cyc.froth_context_copy : 'neutral';
+    // S-10 ETF-flow input is S-5-deferred — surface it honestly
+    const cells = [...(cyc.capitulation_cells || []), ...(cyc.froth_cells || [])];
+    const s10 = cells.find(c => c.signal_id === 's10_etf_flow_exhaustion');
+    const s10note = (s10 && s10.state === 'NA') ? ' · S-10 ETF-flow input deferred (S-5)' : '';
+    if (cov) cov.textContent = cyc.coverage_note ? cyc.coverage_note.split('—')[0].trim() : '';
+    el.innerHTML =
+      `<div class="dial-top"><span class="score">${score.toFixed(0)}</span><span class="ctx">${esc(lean || '')}</span></div>
+       <div class="dial-track"><span class="dial-marker" style="left:${pct.toFixed(1)}%"></span></div>
+       <div class="dial-ends"><span>CAPITULATION</span><span>FROTH</span></div>
+       <div class="dial-note">FROTH → "reduce new risk", never "sell"${esc(s10note)}</div>`;
+  }
+
+  // ── S5.7 signal feed (global crypto feed; honest-empty if none — C-A2) ───────
+  function renderFeed(ideas) {
+    const list = document.getElementById('feedList');
+    const cnt = document.getElementById('feedCount');
+    if (!list) return;
+    const sigs = ((ideas && ideas.signals) || []).filter(s => s.asset_class === 'CRYPTO');
+    sigs.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+    if (cnt) cnt.textContent = `${sigs.length} crypto`;
+    if (!sigs.length) {
+      list.innerHTML = '<div class="feed-empty">No live crypto signals — feed empty (source live, nothing firing).</div>';
+      return;
+    }
+    list.innerHTML = sigs.slice(0, 8).map(s => {
+      const dir = (s.direction || '').toLowerCase();
+      const entry = s.entry_price != null ? `@ ${Number(s.entry_price).toLocaleString('en-US')}` : '';
+      const inv = s.stop_loss != null ? ` · inv ${Number(s.stop_loss).toLocaleString('en-US')}` : '';
+      // gating is dormant for crypto (shadow); funding-cost-over-hold & liq-ATR do not exist → seam
+      return `<div class="feed-item">
+          <span class="ft">${esc(s.signal_type || s.strategy || 'SIGNAL')} · ${esc(s.ticker || '')}</span>
+          <span class="dir ${dir}">${esc((s.direction || '').toUpperCase())}</span>
+          <span class="fctx">${esc(entry + inv)} · <span class="seam">funding-cost & liq-ATR n/a</span></span>
+          <span class="feed-right"><span class="sig-tag shadow">SHADOW</span><span class="feed-time">${esc(mtTime(s.created_at))}</span></span>
+        </div>`;
+    }).join('');
+  }
+
+  // ── drawer: full per-symbol detail (fetches /state/{symbol} on open) ─────────
+  function kvRow(label, r) { return `<div class="kv"><span class="k">${esc(label)}</span><span class="v ${r.cls}">${esc(r.txt)}</span></div>`; }
+  async function openDrawer(base) {
+    const d = document.getElementById('drawer'), bd = document.getElementById('drawerBackdrop');
+    const title = document.getElementById('drawerTitle'), body = document.getElementById('drawerBody');
     if (!d || !title || !body) return;
     title.textContent = `${base} · DETAIL`;
-    body.innerHTML = `<div class="kv"><span class="k">detail</span><span class="v">pending SG-1 layout gate</span></div>`;
+    body.innerHTML = '<div class="feed-empty">loading…</div>';
     d.classList.add('open'); if (bd) bd.classList.add('open');
+    let st = null;
+    try { st = await jget(`/api/crypto/state/${encodeURIComponent(base)}`); } catch (e) { st = null; }
+    if (!st) { body.innerHTML = '<div class="feed-empty">N/A — detail unavailable for this symbol.</div>'; return; }
+    const cyc = (_last.cycle && _last.cycle.symbols && _last.cycle.symbols[base]) || null;
+    const price = _last.prices[base];
+    const tp = st.tape_health || {};
+    const cycTxt = (cyc && cyc.composite_score != null)
+      ? { txt: `${Number(cyc.composite_score).toFixed(0)} · ${cyc.composite_score < -10 ? 'CAPITULATION' : cyc.composite_score > 10 ? 'FROTH' : 'NEUTRAL'}`, cls: '' }
+      : { txt: 'N/A', cls: 'seam' };
+    body.innerHTML =
+      `<div class="dwr-sec">DERIVATIVES</div>` +
+      kvRow('Funding', envRow(st.funding, 'rate_pct', v => `${v.toFixed(4)} · ${st.funding?.signal || '—'}`)) +
+      kvRow('Open interest', envRow(st.open_interest, 'current_oi_usd', fmtUsd)) +
+      kvRow('Basis (ann.)', envRow(st.basis, 'basis_annualized_pct', fmtPct)) +
+      kvRow('Liquidations 24h', envRow(st.liquidations, 'total_usd', fmtUsd)) +
+      kvRow('Long share', envRow(st.liquidations, 'long_pct', v => `${v.toFixed(1)}% · ${(st.liquidations?.composition || '—').toUpperCase()}`)) +
+      kvRow('ATR', envRow(st.atr, 'atr', v => Number(v).toLocaleString('en-US'))) +
+      `<div class="dwr-sec">TAPE</div>` +
+      kvRow('CVD state', tp.state ? { txt: tp.state + (tp.degraded ? '' : ''), cls: tp.degraded ? 'seam stale' : '' } : { txt: 'N/A', cls: 'seam' }) +
+      kvRow('Spot CVD', { txt: fmtNum(tp.spot_cvd) ?? 'N/A', cls: tp.spot_cvd == null ? 'seam' : '' }) +
+      kvRow('Perp CVD', { txt: fmtNum(tp.perp_cvd) ?? 'N/A', cls: tp.perp_cvd == null ? 'seam' : '' }) +
+      `<div class="dwr-sec">CYCLE &amp; PRICE</div>` +
+      kvRow('Cycle position', cycTxt) +
+      kvRow('Price', { txt: fmtPrice(price) ?? 'N/A', cls: price == null ? 'seam' : '' }) +
+      kvRow('Distance-to-floor', { txt: 'N/A — breakout_prop not reported', cls: 'seam' });
   }
   function closeDrawer() {
     document.getElementById('drawer')?.classList.remove('open');
@@ -226,27 +372,35 @@
 
   // ── refresh cycle ────────────────────────────────────────────────────────────
   async function refresh() {
-    const [regimeR, clockR, tapeR, cycleR, riskR] = await Promise.allSettled([
+    const [regimeR, clockR, tapeR, cycleR, riskR, btcStateR, ideasR] = await Promise.allSettled([
       jget('/api/crypto/regime'),
       jget('/api/crypto/clock'),
       jget('/api/crypto/tape-health'),
       jget('/api/crypto/cycle-extremes'),
       jget('/api/analytics/risk-budget'),
+      jget('/api/crypto/state/BTC'),            // macro band + master tape band
+      jget('/api/trade-ideas?limit=50'),        // signal feed (filtered to crypto client-side)
     ]);
     const regime = settledVal(regimeR), clock = settledVal(clockR),
-          tape = settledVal(tapeR), cycle = settledVal(cycleR), risk = settledVal(riskR);
+          tape = settledVal(tapeR), cycle = settledVal(cycleR), risk = settledVal(riskR),
+          btcState = settledVal(btcStateR), ideas = settledVal(ideasR);
 
     // price fan-out (per-symbol /market). NOTE: deployed-polling fetch strategy
-    // (batched vs 6× fan-out) is a perf item to settle before SG-2.
+    // (batched vs fan-out) is a perf item to settle before SG-2.
     const marketRs = await Promise.allSettled(
       SYMS.map(s => jget(`/api/crypto/market?symbol=${encodeURIComponent(s.base)}`)));
     const prices = {};
     SYMS.forEach((s, i) => { prices[s.base] = priceOf(settledVal(marketRs[i])); });
+    _last = { cycle, prices };
 
     renderChips(regime, clock, risk);
     renderGrid(regime, tape, cycle, prices);
+    renderMacro(btcState);
+    renderTapeBand(tape && tape.symbols && tape.symbols.BTC);
+    renderDial(cycle && cycle.symbols && cycle.symbols.BTC);
+    renderFeed(ideas);
 
-    const results = [regimeR, clockR, tapeR, cycleR, riskR];
+    const results = [regimeR, clockR, tapeR, cycleR, riskR, btcStateR, ideasR];
     setPageHealth(results.some(r => r.status === 'fulfilled'), results.some(r => r.status === 'rejected'));
   }
 
