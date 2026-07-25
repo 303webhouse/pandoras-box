@@ -19,9 +19,9 @@ Place immediately before the closing `</body>`, after all page content.
 ```html
 <!-- Mobile deck bar — canonical source: docs/components/pandora-deck-bar.md -->
 <nav class="deck-bar" aria-label="Decks">
-  <a class="deck-tab" href="/app"><span class="deck-ico" aria-hidden="true">◧</span><span>Agora</span></a>
-  <a class="deck-tab" href="/app/stater"><span class="deck-ico" aria-hidden="true">◈</span><span>Stater</span></a>
-  <a class="deck-tab" href="/app/analytics"><span class="deck-ico" aria-hidden="true">▤</span><span>Abacus</span></a>
+  <a class="deck-tab" href="/app"><span class="deck-ico" aria-hidden="true">▦</span><span>Agora</span></a>
+  <a class="deck-tab" href="/app/stater"><span class="deck-ico" aria-hidden="true">⇌</span><span>Stater</span></a>
+  <a class="deck-tab" href="/app/analytics"><span class="deck-ico" aria-hidden="true">Σ</span><span>Abacus</span></a>
 </nav>
 <script>
   /* Active-tab state from the real path. No framework, no derived hrefs. */
