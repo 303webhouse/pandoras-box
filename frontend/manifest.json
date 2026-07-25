@@ -1,11 +1,12 @@
 {
   "name": "Pandora's Box",
-  "short_name": "Pandora's Box",
+  "short_name": "Pandora",
   "description": "Real-time Trading Signal Dashboard",
-  "start_url": "/",
+  "start_url": "/app",
+  "scope": "/",
   "display": "standalone",
-  "background_color": "#0a0e27",
-  "theme_color": "#14b8a6",
+  "background_color": "#050810",
+  "theme_color": "#050810",
   "orientation": "portrait",
   "icons": [
     {

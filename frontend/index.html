@@ -2,14 +2,23 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- viewport-fit=cover is required for env(safe-area-inset-*) to resolve to
+         anything but 0 — the deck bar depends on it to clear the home indicator. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="description" content="Pandora - Real-time Trading Signal Dashboard">
     <title>Pandora</title>
-    <link rel="stylesheet" href="/styles.css?v=146">
+    <link rel="stylesheet" href="/styles.css?v=147">
     <link rel="manifest" href="/manifest.json">
+    <link rel="apple-touch-icon" href="/icon-192.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Pandora">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Orbit&display=swap" rel="stylesheet">
+    <!-- Matches this page's own --dark-bg. The manifest's theme_color matches its
+         start_url target (/app -> v2.html -> #050810) instead; a page's theme-color
+         should track its own chrome, not another page's. -->
     <meta name="theme-color" content="#0a0e27">
 </head>
 <body>
@@ -1836,6 +1845,27 @@
             </div>
         </div>
     </div>
+
+    <!-- Mobile deck bar — canonical source: docs/components/pandora-deck-bar.md -->
+    <nav class="deck-bar" aria-label="Decks">
+      <a class="deck-tab" href="/app"><span class="deck-ico" aria-hidden="true">◧</span><span>Agora</span></a>
+      <a class="deck-tab" href="/app/stater"><span class="deck-ico" aria-hidden="true">◈</span><span>Stater</span></a>
+      <a class="deck-tab" href="/app/analytics"><span class="deck-ico" aria-hidden="true">▤</span><span>Abacus</span></a>
+    </nav>
+    <script>
+      /* Active-tab state from the real path. No framework, no derived hrefs —
+         app.js's buildModePath() emits two-segment paths from /app/legacy that
+         404 on reload. */
+      (function () {
+        var p = window.location.pathname;
+        Array.prototype.forEach.call(document.querySelectorAll('.deck-bar .deck-tab'), function (a) {
+          var href = a.getAttribute('href');
+          var on = href === '/app' ? (p === '/app' || p === '/app/v2') : p.indexOf(href) === 0;
+          a.classList.toggle('is-active', on);
+          if (on) { a.setAttribute('aria-current', 'page'); } else { a.removeAttribute('aria-current'); }
+        });
+      })();
+    </script>
 
     <!-- TradingView Widget Script -->
     <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
