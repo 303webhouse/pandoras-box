@@ -13786,7 +13786,35 @@ body[data-mode="analytics"] .analytics-shell {
   }
   .deck-tab:active { background: rgba(20, 184, 166, 0.12); }
 
+  /* ── Fixed-position prerequisite (DEFECT FIX 2026-07-25) ──────────────────
+     A position:fixed element is placed against the LAYOUT viewport, not the
+     visible one. This page's header overflows 390px (.header-controls measures
+     413px, .logo-section 409px), so mobile browsers inflate the layout viewport
+     to ~425px. The bar then resolved bottom:0 at y=867 on an 844px screen —
+     off-screen. It was rendering correctly all along (computed display:flex);
+     it was simply parked outside the visible area.
+
+     The overflow is PRE-EXISTING legacy behaviour, measured identical on the
+     pre-Phase-1 baseline. The deck bar is just the first position:fixed element
+     on this page, so it is the first thing to expose it.
+
+     Fix the cause — let the header wrap instead of overflowing. */
+  .header, .logo-section, .header-controls, .status-group { flex-wrap: wrap; }
+
+  /* Belt: clip any residual overflow so the layout viewport cannot inflate.
+     The guard goes on <html> ONLY — on <body> it would make body a scroll
+     container and strand the document at viewport height. `clip` never
+     establishes a scroll container; `hidden` stays as the older-WebKit
+     fallback. (v2.css already satisfies this requirement via its T1.3 block.) */
+  html { overflow-x: hidden; overflow-x: clip; }
+
   /* Content-occlusion reserve — the bar is position:fixed, so without this the
-     last element on the legacy page sits permanently underneath it. */
-  .container { padding-bottom: calc(64px + env(safe-area-inset-bottom, 0px)); }
+     last element sits permanently underneath it.
+     This goes on BODY, not .container. The legacy page has THREE mode roots as
+     siblings — .container (hub), main.crypto-shell, and main.analytics-shell —
+     and only one is visible at a time. Reserving on .container alone left Abacus
+     (.analytics-shell) occluded by 28px, which is how this shipped broken.
+     body covers every current root and any future one. The bar is a direct child
+     of body and position:fixed, so it ignores this padding itself. */
+  body { max-width: 100%; padding-bottom: calc(64px + env(safe-area-inset-bottom, 0px)); }
 }
