@@ -13750,3 +13750,43 @@ body[data-mode="analytics"] .analytics-shell {
     padding: 12px 14px;
     min-width: 0;
 }
+
+/* ═══ T1.4 — mobile deck bar ════════════════════════════════════════════════
+   Verbatim copy. CANONICAL SOURCE: docs/components/pandora-deck-bar.md
+   Change it there first, then propagate to every consumer in the same commit.
+   This file does NOT define --panel-2/--border/--teal/--text-3/--mono, so the
+   var() fallbacks below are what actually render here. Do not strip them.
+   Appended last on purpose: equal-specificity rules later in the file win, so the
+   .container reserve is not undone by one of the earlier max-width:768px blocks. */
+.deck-bar { display: none; }
+
+@media (max-width: 768px) {
+  .deck-bar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 90;
+    display: flex; align-items: stretch;
+    background: var(--panel-2, #0d152b);
+    border-top: 1px solid var(--border, #1b2745);
+    /* Clears the iPhone home indicator. Requires viewport-fit=cover on the page's
+       viewport meta, or this resolves to 0 and the bar sits under the indicator. */
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  .deck-tab {
+    flex: 1 1 0; min-height: 52px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+    text-decoration: none; color: var(--text-3, #5b6b85);
+    font-family: var(--mono, ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace);
+    font-size: 10px; letter-spacing: 1.4px; text-transform: uppercase;
+    border-top: 2px solid transparent;
+  }
+  .deck-tab .deck-ico { font-size: 15px; line-height: 1; }
+  .deck-tab.is-active {
+    color: var(--teal, #14b8a6);
+    border-top-color: var(--teal, #14b8a6);
+    background: rgba(20, 184, 166, 0.07);
+  }
+  .deck-tab:active { background: rgba(20, 184, 166, 0.12); }
+
+  /* Content-occlusion reserve — the bar is position:fixed, so without this the
+     last element on the legacy page sits permanently underneath it. */
+  .container { padding-bottom: calc(64px + env(safe-area-inset-bottom, 0px)); }
+}

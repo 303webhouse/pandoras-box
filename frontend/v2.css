@@ -466,3 +466,161 @@ body {
   padding: 0 4px; cursor: pointer;
 }
 .kairos-tag:hover { background: rgba(20,184,166,0.15); }
+
+/* ═══ T1.2 — mobile interaction lock ════════════════════════════════════════
+   Driven by the .is-mobile-grid body class that syncStaticMode() toggles, NOT by a
+   media query, so it tracks the JS notion of "collapsed" exactly. Defense in depth
+   behind grid.setStatic(true): GridStack arms 5 resize handles per tile on any touch
+   device (alwaysShowResizeHandle:'mobile' resolves true), each a 3px drag from a
+   write to the single desktop layout row. display:none also removes hit-testing. */
+body.is-mobile-grid .ui-resizable-handle { display: none !important; }
+body.is-mobile-grid .tile-grip { display: none !important; }
+
+/* ═══ T1.3 — mobile restructure (<=768px) ═══════════════════════════════════
+   Matches the GridStack breakpoint exactly: its test is `width <= bp.w`, the same
+   boundary as max-width here, and columnOpts.breakpointForWindow makes both measure
+   the viewport. Desktop (>=769px) is untouched — every rule below is inside this
+   media query or behind the .is-mobile-grid class. */
+@media (max-width: 768px) {
+
+  /* Horizontal-overflow guard. Three things here are deliberate and coupled:
+     1. The guard goes on `html` ONLY. Putting overflow-x on `body` makes body a
+        scroll container (setting one axis non-visible forces the other to `auto`),
+        which strands the document at viewport height — momentum scrolling and
+        tap-status-bar-to-top both break on iOS.
+     2. `clip` where supported: unlike `hidden` it never establishes a scroll
+        container. `hidden` stays first as the fallback for older WebKit.
+     3. height:auto overrides the base `html, body { height: 100% }`, which
+        otherwise caps the document at 100vh and forces the overflow elsewhere.
+     Belt is here; the braces is fixing the actual cause (the topbar) below. */
+  html { overflow-x: hidden; overflow-x: clip; }
+  html, body { height: auto; min-height: 100%; }
+  body { max-width: 100%; }
+
+  /* ── Take the stack out of GridStack's absolute positioning ───────────────
+     Collapse preserves tile HEIGHT, so a 1-column grid keeps desktop-sized boxes at
+     phone width — ~2,900px of stack where every tile is its own scroll container
+     nested inside the document scroller. That double nesting is the scroll-chaining
+     trap. In normal flex flow tiles size to content and the page has ONE scroller.
+     Sequence comes from inline `order`, written by applyMobileOrder() from
+     MOBILE_ORDER in v2.js — that is the single source of truth for mobile order. */
+  /* Bottom padding is the deck bar's content-occlusion reserve: the bar is
+     position:fixed, so without it the last tile sits permanently underneath. */
+  .v2-page { padding: 10px 10px calc(64px + env(safe-area-inset-bottom, 0px)); }
+  .grid-stack {
+    display: flex; flex-direction: column;
+    height: auto !important; min-height: 0 !important;
+  }
+  .grid-stack > .grid-stack-item {
+    position: relative !important;
+    left: auto !important; top: auto !important;
+    width: 100% !important; min-width: 0 !important;
+    height: auto !important; min-height: 0 !important;
+    transform: none !important;
+    margin: 0 0 10px 0 !important; padding: 0 !important;
+  }
+  .grid-stack > .grid-stack-item > .grid-stack-item-content {
+    position: relative !important; inset: auto !important;
+    height: auto !important; overflow: visible !important;
+  }
+  .tile { height: auto !important; }
+  /* The second half of the nested-scroller fix. */
+  .tile-body { overflow: visible !important; max-height: none !important; }
+  .book-positions, .drawer-body, .member-popup .body, .pos-modal .body { overflow: visible !important; }
+  .tile-header { flex-wrap: wrap; row-gap: 4px; padding: 10px 12px; }
+
+  /* Movers: at 390px the marquee text runs under the staleness pill, and the
+     default gradient mask is too soft to separate them. Hard-cut instead — the
+     staleness readout must stay legible (Ruling 6). */
+  .tape-status {
+    background: var(--panel); padding-left: 10px;
+    box-shadow: -14px 0 14px -8px var(--panel);
+  }
+
+  /* Charts lose their percentage basis once the parent is auto-height. */
+  .chart-host { height: 200px !important; min-height: 200px; }
+  .chart-host.sm { height: 170px !important; min-height: 170px; }
+
+  /* ── Top bar: wrap instead of forcing a horizontal scrollbar ──────────────
+     Six unwrappable flex children (logo + PANDORA at letter-spacing 3px, subtitle,
+     health dot, spacer, layout status, legacy link) sum past 390px. */
+  .v2-topbar { flex-wrap: wrap; gap: 6px 10px; padding: 8px 12px; }
+  .v2-topbar .spacer { flex: 1 1 auto; }
+  .v2-sub { font-size: 10px; letter-spacing: 0.5px; }
+  /* The "Judgment Layer · v2" subtitle is decorative and is what pushes the row
+     past 390px. Dropping it lets logo + brand + health dot + legacy link share one
+     line. No data is hidden — staleness and health stay on the tiles (Ruling 6). */
+  .v2-topbar > .v2-sub:not(#layoutStatus) { display: none; }
+  #layoutStatus { order: 10; flex: 1 0 100%; }
+  .v2-legacy-link {
+    min-height: 44px; display: inline-flex; align-items: center;
+    padding: 6px 10px; font-size: 11px; white-space: nowrap;
+  }
+
+  /* ── Regime band: 6 fixed columns give ~32px of content width at 390px, which
+     cannot hold 22px type. Wrap to 2 across. ───────────────────────────────── */
+  .regime-band { grid-template-columns: repeat(2, minmax(0, 1fr)); height: auto; }
+  .regime-cell { min-height: 60px; padding: 10px 12px; }
+  .regime-cell .big { font-size: 19px; }
+  .regime-cell .row { gap: 6px; }
+
+  /* ── Fixed-width internal grids that overflow at 390px ───────────────────── */
+  /* was 26px 1fr 52px 60px 96px = 234px fixed */
+  .th-row { grid-template-columns: 20px minmax(0, 1fr) 40px 48px 62px; gap: 5px; padding: 8px 10px; min-height: 44px; }
+  .th-row .status-chip { font-size: 9px; padding: 1px 4px; }
+  /* was 54px 1fr 64px 60px 42px 56px = 276px fixed inside a 94vw popup */
+  .mem-row { grid-template-columns: 44px minmax(0, 1fr) 52px 50px 34px 44px; gap: 4px; min-height: 44px; }
+  .pos-row { grid-template-columns: 44px minmax(0, 1fr) 76px; min-height: 44px; padding: 9px 10px; }
+  .hl-counts, .form-grid { grid-template-columns: 1fr; }
+
+  /* ── Touch targets >= 44px ───────────────────────────────────────────────── */
+  .seg button { min-height: 44px; padding: 8px 14px; }
+  .btn-add { min-height: 44px; padding: 8px 14px; }
+  .btn-primary, .btn-secondary, .btn-danger, .btn-committee { min-height: 44px; padding: 10px 16px; }
+  .rv-item, .k-card, .ix-cell { min-height: 44px; }
+  .mem-row .opt-btn { min-height: 32px; padding: 4px 8px; }
+  .drawer-head .x, .member-popup .bar .x, .pos-modal .bar .x, .tv-popover .bar .x {
+    min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: flex-end;
+  }
+  /* 16px is the iOS threshold below which focusing an input auto-zooms the page. */
+  .fld input, .fld select { min-height: 44px; font-size: 16px; }
+
+  /* ── Overlay surfaces usable at phone width ──────────────────────────────── */
+  .drawer { width: 100%; max-width: 100%; }
+  .pos-modal, .member-popup { width: 96vw; max-width: 96vw; }
+  .tv-popover { width: 96vw; max-width: 96vw; height: 58vh; }
+}
+
+/* ═══ T1.4 — mobile deck bar ════════════════════════════════════════════════
+   Verbatim copy. CANONICAL SOURCE: docs/components/pandora-deck-bar.md
+   Change it there first, then propagate to every consumer in the same commit.
+   The var() fallbacks are load-bearing on consumers that lack these tokens
+   (styles.css does not define them) — do not strip them. */
+.deck-bar { display: none; }
+
+@media (max-width: 768px) {
+  .deck-bar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 90;
+    display: flex; align-items: stretch;
+    background: var(--panel-2, #0d152b);
+    border-top: 1px solid var(--border, #1b2745);
+    /* Clears the iPhone home indicator. Requires viewport-fit=cover on the page's
+       viewport meta, or this resolves to 0 and the bar sits under the indicator. */
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  .deck-tab {
+    flex: 1 1 0; min-height: 52px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+    text-decoration: none; color: var(--text-3, #5b6b85);
+    font-family: var(--mono, ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace);
+    font-size: 10px; letter-spacing: 1.4px; text-transform: uppercase;
+    border-top: 2px solid transparent;
+  }
+  .deck-tab .deck-ico { font-size: 15px; line-height: 1; }
+  .deck-tab.is-active {
+    color: var(--teal, #14b8a6);
+    border-top-color: var(--teal, #14b8a6);
+    background: rgba(20, 184, 166, 0.07);
+  }
+  .deck-tab:active { background: rgba(20, 184, 166, 0.12); }
+}

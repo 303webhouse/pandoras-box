@@ -402,23 +402,154 @@
   // ── Grid + layout persistence ───────────────────────────────────────────────
   let grid = null;
   let saveTimer = null;
+  let saveArmed = false;
+
+  // T1.1 — mobile collapse contract. 768px matches the CSS breakpoint exactly:
+  // GridStack's breakpoint test is `width <= bp.w`, same as @media (max-width:768px).
+  const MOBILE_MAX_W = 768;
+  const MOBILE_MQ = window.matchMedia('(max-width: ' + MOBILE_MAX_W + 'px)');
+
+  // Explicit phone stack order. GridStack's layout:'list' sorts by SAVED y/x, not
+  // DOM order, so without this map the phone order would be dictated by whatever
+  // desktop arrangement happens to be persisted. All 11 tiles are listed — no tile
+  // is silently dropped from the mobile deck (Ruling 6).
+  const MOBILE_ORDER = [
+    'regime-band', 'movers-tape', 'kairos', 'book', 'river',
+    'themes', 'divergence', 'breadth', 'index', 'curve', 'usd',
+  ];
+
+  function isCollapsed() {
+    if (MOBILE_MQ.matches) return true;
+    return !!grid && grid.getColumn() === 1;
+  }
+
+  const tileEls = () => Array.from(document.querySelectorAll('#v2Grid > .grid-stack-item[gs-id]'));
+
+  // T1.2(a) — setStatic is the SINGLE interaction mechanism on mobile. Do not pair it
+  // with enableMove()/enableResize(): those are unconditional no-ops once staticGrid is
+  // truthy, so a belt-and-braces call silently does nothing. Static also removes the
+  // touch-resize handles, which GridStack arms by default on any touch device
+  // (alwaysShowResizeHandle:'mobile' resolves to true) — 5 handles × 11 tiles, each a
+  // 3px drag away from a write.
+  function syncStaticMode() {
+    if (!grid) return;
+    const collapsed = isCollapsed();
+    grid.setStatic(collapsed);
+    document.body.classList.toggle('is-mobile-grid', collapsed);
+    if (collapsed) $('layoutStatus').textContent = 'mobile · layout locked';
+  }
+
+  // T1.1 — impose MOBILE_ORDER on the collapsed stack.
+  //
+  // Applied as inline CSS `order`, NOT by mutating GridStack's engine. T1.3 takes the
+  // mobile stack out of GridStack's absolute positioning so tiles can size to their
+  // content (the alternative is desktop-height tiles at phone width, i.e. a ~2,900px
+  // stack of nested scrollers). Once the stack is in normal flex flow, engine y is
+  // visually inert and CSS order is what actually decides sequence.
+  //
+  // The safety win is the point: this writes nothing through to GridStack's cached
+  // desktop layout, so the layoutsNodesChange corruption path cannot fire on mobile
+  // even in principle. MOBILE_ORDER stays the single source of truth for sequence.
+  function applyMobileOrder() {
+    const collapsed = isCollapsed();
+    tileEls().forEach((el) => {
+      if (!collapsed) { el.style.order = ''; return; }
+      const i = MOBILE_ORDER.indexOf(el.getAttribute('gs-id'));
+      // Unlisted tiles sort after the known set rather than jumping to the top.
+      el.style.order = String(i === -1 ? MOBILE_ORDER.length : i);
+    });
+  }
+
+  // T1.7 — tiles present in the markup but absent from the saved row must stay
+  // visible. load() is called with addRemove=false (below), so they survive; this
+  // parks them below the restored stack instead of leaving them overlapping.
+  function reconcileMissingTiles(saved) {
+    const savedIds = new Set((saved || []).map((n) => n && n.id).filter(Boolean));
+    const missing = tileEls().filter((el) => !savedIds.has(el.getAttribute('gs-id')));
+    if (!missing.length) return 0;
+    let maxY = 0;
+    tileEls().forEach((el) => {
+      if (missing.indexOf(el) !== -1) return;
+      const n = el.gridstackNode; if (!n) return;
+      maxY = Math.max(maxY, (n.y || 0) + (n.h || 1));
+    });
+    grid.batchUpdate();
+    missing.forEach((el) => {
+      const h = (el.gridstackNode && el.gridstackNode.h) || 1;
+      grid.update(el, { x: 0, y: maxY });
+      maxY += h;
+    });
+    grid.batchUpdate(false);
+    return missing.length;
+  }
+
   function initGrid() {
-    grid = GridStack.init({ column: 12, cellHeight: 46, margin: 7, handle: '.tile-grip', float: false,
-      resizable: { handles: 'e, se, s, sw, w' } });
-    // Load persisted layout (positions only), then wire save-on-change.
+    grid = GridStack.init({
+      column: 12, cellHeight: 46, margin: 7, handle: '.tile-grip', float: false,
+      resizable: { handles: 'e, se, s, sw, w' },
+      // T1.1 — collapse to one column at <=768px.
+      // breakpointForWindow:true is REQUIRED: without it GridStack measures the grid
+      // element's clientWidth rather than the viewport, so the JS collapse and the CSS
+      // media query fire at different widths. layout:'list' must be explicit — the
+      // 11.1.2 default is 'moveScale', which scales tiles into one column by ratio
+      // instead of stacking them in reading order.
+      columnOpts: {
+        breakpointForWindow: true,
+        layout: 'list',
+        breakpoints: [{ w: MOBILE_MAX_W, c: 1 }],
+      },
+    });
+
+    // Lock interaction before the first await, so a phone cannot drag or resize
+    // during the layout fetch.
+    syncStaticMode();
+
     apiFetch('/api/layout').then((r) => r.ok ? r.json() : null).then((d) => {
-      if (d && d.layout && Array.isArray(d.layout) && d.layout.length) {
-        try { grid.load(d.layout); } catch (_) {}
-        if (d.updated_at) $('layoutStatus').textContent = 'layout restored';
+      const saved = (d && Array.isArray(d.layout) && d.layout.length) ? d.layout : null;
+      if (saved) {
+        // T1.7 — addRemove MUST stay false. GridStack's default (true) deletes from
+        // the DOM every tile whose gs-id is absent from the saved row, so any newly
+        // shipped tile silently vanishes for anyone holding a layout. Never restore
+        // the default; see reconcileMissingTiles() for the placement half.
+        try { grid.load(saved, false); } catch (_) {}
+        const orphans = reconcileMissingTiles(saved);
+        if (d.updated_at) {
+          $('layoutStatus').textContent = 'layout restored'
+            + (orphans ? ' · ' + orphans + ' new tile' + (orphans > 1 ? 's' : '') : '');
+        }
       }
     }).catch(() => {}).finally(() => {
+      // Mobile order is applied AFTER any restore so it wins over persisted positions.
+      applyMobileOrder();
+      syncStaticMode();
+      // ══ T1.2(c) LOAD-ORDER INVARIANT — DO NOT MOVE THIS ══════════════════════
+      // GridStack dispatches 'change' twice during boot (constructor auto-parse and
+      // load()). Wiring the handler HERE, after load() settles, is the only reason
+      // those boot events don't reach saveLayout(). Hoisting this above the fetch, or
+      // awaiting inside the handler, re-arms a cold-load overwrite of the desktop slot.
+      // Acceptance: reload /app at phone width; /api/layout updated_at must not change.
+      saveArmed = true;
       grid.on('change', () => {
         clearTimeout(saveTimer);
         saveTimer = setTimeout(saveLayout, 800);
       });
     });
+
+    MOBILE_MQ.addEventListener('change', () => {
+      syncStaticMode();
+      applyMobileOrder();
+    });
   }
+
   async function saveLayout() {
+    // ══ T1.2(b) HARD GUARD ═══════════════════════════════════════════════════════
+    // There is exactly ONE layout row (layout_key='default') and POST is an
+    // unconditional upsert with no history, so any mobile-shaped write destroys the
+    // desktop arrangement unrecoverably. Mobile is read-only against /api/layout,
+    // always. Do not soften this to a confirm dialog or a separate mobile payload
+    // without a server-side second slot to write into.
+    if (isCollapsed()) { $('layoutStatus').textContent = 'mobile · layout locked'; return; }
+    if (!saveArmed) return;
     try {
       const layout = grid.save(false); // positions + gs-id, no content
       const r = await apiFetch('/api/layout', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' }, body: JSON.stringify({ layout }) });
