@@ -79,13 +79,51 @@ Each consumer must do **all three**, or the bar is broken in a way that is easy 
    `<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">`
    Without it `env(safe-area-inset-bottom)` is `0` and the bar sits under the home indicator.
 
-2. **Content-occlusion reserve** on the page's scroll container, inside a `max-width: 768px` media query — the bar is `position: fixed`, so it occludes the last element otherwise:
+2. **Content-occlusion reserve**, inside a `max-width: 768px` media query — the bar is `position: fixed`, so it occludes the last element otherwise:
    ```css
    padding-bottom: calc(64px + env(safe-area-inset-bottom, 0px));
    ```
-   Applied to `.v2-page` in `v2.css` and `.container` in `styles.css`.
+   Applied to `.v2-page` in `v2.css` and to **`body`** in `styles.css`.
+
+   **Reserve on `body`, not on a specific container, when the page has more than one
+   root.** The legacy page has three sibling mode roots — `.container` (hub),
+   `main.crypto-shell`, `main.analytics-shell` — with one visible at a time. Reserving
+   on `.container` alone left Abacus occluded by 28px and shipped that way. `body`
+   covers every current root and any future one; the bar is a direct child of `body`
+   and `position: fixed`, so it ignores that padding itself.
 
 3. **Cache-bust** the page's CSS and JS `?v=` on every change to this component.
+
+4. **The page must not overflow horizontally at 390px.** This one is non-obvious and it
+   is what broke the legacy surface on 2026-07-24 — read it before wiring the bar into a
+   new page.
+
+   A `position: fixed` element is placed against the **layout viewport**, not the visible
+   one. When page content is wider than the device width, mobile browsers *inflate* the
+   layout viewport to fit. The bar then resolves `bottom: 0` against that larger box and
+   lands below the fold — while still reporting `display: flex`, `position: fixed`,
+   `visibility: visible`. It renders perfectly and is simply parked off-screen.
+
+   Measured on `/app/analytics` at 390×844 before the fix:
+
+   | | value |
+   |---|---|
+   | `window.innerWidth` | **425** (device width 390) |
+   | `document.documentElement.scrollWidth` | **425** |
+   | bar rect | `top: 867` on an 844px screen, `width: 425` |
+   | widest offenders | `.header-controls` 413px, `.logo-section` 409px |
+
+   Fix the **cause** (let the overflowing row wrap; `flex-wrap: wrap` on the header
+   chain), and keep a **belt**: `html { overflow-x: hidden; overflow-x: clip; }` inside
+   the mobile media query. Put the guard on `<html>` only — on `<body>` it makes body a
+   scroll container, which strands the document at viewport height and breaks momentum
+   scrolling on iOS. `v2.css` satisfies this via its T1.3 block; `styles.css` via the
+   deck-bar block.
+
+   **Acceptance is rendered, never presence-level.** "Markup is in the document" and
+   "bar is visible on screen" are different claims — the first passed while the second
+   failed. Verify with the computed style *and* the bounding rect at 390×844:
+   `display: flex`, `rect.top === innerHeight - rect.height`, `rect.width === 390`.
 
 ## Known temporary gap (time-boxed, do not "fix" out of lane)
 
