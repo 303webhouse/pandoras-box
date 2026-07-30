@@ -35,7 +35,7 @@
     HL: 'New 20-day / 52-week highs (H) and lows (L) across the scored universe',
     BREADTH50: 'Percent of the scored universe above its 50-day moving average',
     BREADTH: 'Participation: % of universe above 20/50/200DMA, new highs/lows, ±3% movers',
-    KILL: 'Kill-switch / circuit-breaker state — ARMED means a market-risk breaker fired',
+    KILL: 'Kill-switch / circuit-breaker state. ARMED = a market-risk breaker fired. CLEAR = the system confirmed no breaker is active. NO TRIP ON RECORD = healthy resting state, nothing stored (the breaker only writes when it fires). UNKNOWN = the source could not be reached — not a clear',
     THEMES: 'Ranked theme board: score, 1-day delta, and status (dominant/emerging/fading)',
     DIVERGENCE: 'Sector ETF %-change spread — which sectors lead/lag; dot = above both 50/200DMA',
     INDEX: 'Major index 1-day % and ATR extension (how stretched vs typical range)',
@@ -156,12 +156,101 @@
   const to100 = (s) => (s == null || !Number.isFinite(Number(s))) ? null : Math.round(((Number(s) + 1) / 2) * 100);
   let _lastRegime = { composite: null, regime: null, tide: null, kill: null };
 
+  // When the kill-switch payload was last successfully READ. Distinct from the age
+  // of the STATE: a two-hour-old CLEAR rendered as fresh is fail-open wearing a
+  // valid 200, so the cell must be able to disclose how old its reading is.
+  let _killReadAt = null;
+
+  function fmtAge(sec) {
+    if (sec == null || !Number.isFinite(Number(sec))) return null;
+    const s = Math.max(0, Math.round(Number(sec)));
+    if (s < 60) return s + 's';
+    if (s < 3600) return Math.round(s / 60) + 'm';
+    if (s < 86400) return (s / 3600).toFixed(s < 36000 ? 1 : 0) + 'h';
+    return Math.round(s / 86400) + 'd';
+  }
+
+  // ── Kill-switch cell: five truthful states (DEF-KILLSWITCH-FAILOPEN) ────────
+  // The old renderer collapsed a failed fetch AND a null payload into "CLEAR /
+  // normal" — the operator-facing safety surface asserting all-clear from an
+  // absence of information. It must never say CLEAR unless the system said CLEAR.
+  //
+  // Authority rule (A1): `active` comes from the backend's in-memory state, which
+  // is what the enforcers (composite, bias_scheduler) actually act on. A persisted
+  // Redis record is PROVENANCE ONLY and never promotes the cell to ARMED — a board
+  // asserting protection the system isn't applying is worse than the original bug.
+  function killCellView(kill, readAt) {
+    // `kill` is null only when the fetch threw or returned non-200 (see loadRegimeBand).
+    // Single return point below — an early return here would skip the shared tail
+    // (size class, divergence, stale-read) and silently emit a broken class string.
+    const unreachable = !kill || !kill.kill_switch;
+    const k = (kill && kill.kill_switch) || {};
+    const p = (kill && kill.provenance) || {};
+    // No provenance (older backend) => cannot claim an event confirmed anything.
+    // Degrade toward the non-asserting state rather than toward reassurance.
+    const source = p.source || 'default-since-boot';
+    const stateAge = fmtAge(p.age_seconds);
+
+    // Reading age — surfaced once it is old enough to matter (backgrounded PWA).
+    const readAge = readAt != null ? (Date.now() - readAt) / 1000 : null;
+    const staleRead = readAge != null && readAge > 120 ? 'reading ' + fmtAge(readAge) + ' old' : null;
+
+    // ONE detail line, not two. The regime band is a fixed-height grid whose row is
+    // sized by its tallest cell: a fourth line here grew every cell 87px -> 98px and
+    // overflowed the band, which would clip the provenance away. Wording is kept
+    // compact so it holds one line at the 232px desktop cell width.
+    let v;
+    if (unreachable) {
+      v = { label: 'UNKNOWN', cls: 'val-amber', pulse: '',
+            prov: 'source unreachable — not a clear', provCls: 'val-amber' };
+    } else if (k.active) {
+      const pending = !!k.pending_reset;
+      const firedAge = fmtAge(k.triggered_at ? (Date.now() - Date.parse(k.triggered_at)) / 1000 : p.age_seconds);
+      const trig = esc(k.trigger || 'risk-off');
+      v = {
+        // pending_reset still means active=true — the breaker is still enforcing
+        // caps/floors until an operator accepts. It stays in the ARMED family.
+        label: pending ? 'ARMED · PENDING' : 'ARMED',
+        cls: 'val-down', pulse: ' pulse-vermilion',
+        prov: pending ? trig + ' · awaiting reset, still enforcing'
+                      : trig + (firedAge ? ' · fired ' + firedAge + ' ago' : ''),
+        provCls: 'val-down',
+      };
+    } else if (source === 'event-confirmed') {
+      v = { label: 'CLEAR', cls: 'val-teal', pulse: '',
+            prov: 'confirmed this session' + (stateAge ? ' · ' + stateAge : ''), provCls: '' };
+    } else if (source === 'restored-at-boot') {
+      v = { label: 'CLEAR', cls: 'val-teal', pulse: '',
+            prov: 'restored at startup' + (stateAge ? ' · ' + stateAge : ''), provCls: '' };
+    } else {
+      // Healthy resting state: the breaker writes only on events, so no record is
+      // the normal condition. Calm and affirmative — NOT "NO DATA", which implies
+      // breakage and trains the operator to ignore a working safety surface.
+      v = { label: 'NO TRIP ON RECORD', cls: 'val-quiet', pulse: '',
+            prov: 'nothing stored' + (stateAge ? ' · since startup ' + stateAge : ''), provCls: '' };
+    }
+
+    // A1 divergence — disclosed as a provenance value, not a sixth visual state.
+    // Provenance overlays apply only when we actually have a payload to describe.
+    if (!unreachable) {
+      if (p.divergence) { v.prov = esc(p.divergence); v.provCls = 'val-amber'; }
+      else if (p.persisted_record === 'unreadable') { v.prov += ' · record unreadable'; v.provCls = 'val-amber'; }
+      if (staleRead) { v.prov += ' · ' + staleRead; v.provCls = 'val-amber'; }
+    }
+    // Long labels ("NO TRIP ON RECORD") cannot hold the 22px/19px display size in a
+    // half-width phone cell; step them down rather than let them clip or overflow.
+    v.sizeCls = v.label.length > 8 ? ' big-long' : '';
+    return v;
+  }
+
   async function loadRegimeBand() {
     let composite = null, regime = null, tide = null, kill = null;
     try { const r = await apiFetch('/api/bias/composite'); if (r.ok) composite = await r.json(); } catch (_) {}
     try { const r = await apiFetch('/api/stable/regime'); if (r.ok) regime = await r.json(); } catch (_) {}
     try { const r = await apiFetch('/api/board/tide'); if (r.ok) tide = await r.json(); } catch (_) {}
-    try { const r = await apiFetch('/api/board/kill-switch'); if (r.ok) kill = await r.json(); } catch (_) {}
+    // A non-200 or a throw must leave `kill` null so the cell renders UNKNOWN.
+    // Only stamp the read clock on an actual success.
+    try { const r = await apiFetch('/api/board/kill-switch'); if (r.ok) { kill = await r.json(); _killReadAt = Date.now(); } } catch (_) {}
     _lastRegime = { composite, regime, tide, kill };
     renderRegimeBand(composite, regime, tide, kill);
     renderBreadthPanel(regime);          // b3 shares the regime payload
@@ -204,14 +293,8 @@
     const tideSub = t ? `call ${fmtM(t.net_call_premium)} · put ${fmtM(t.net_put_premium)}`
       : (tide && tide.degraded ? 'no cached flow' : '—');
 
-    // ── Cell 6: Kill-switch ──
-    const k = kill && kill.kill_switch;
-    const armed = k && k.active;
-    const pending = k && k.pending_reset;
-    const killLabel = armed ? (pending ? 'PENDING' : 'ARMED') : 'CLEAR';
-    const killCls = armed ? (pending ? 'val-teal' : 'val-down') : 'val-teal';
-    const killPulse = armed && !pending ? ' pulse-vermilion' : '';
-    const killSub = armed ? esc(k.trigger || 'risk-off') : 'normal';
+    // ── Cell 6: Kill-switch (five truthful states — see killCellView) ──
+    const kv6 = killCellView(kill, _killReadAt);
 
     const hl = (h, l) => `<span class="val-up num">${h != null ? h : '--'}</span><span class="val-muted"> / </span><span class="val-down num">${l != null ? l : '--'}</span>`;
 
@@ -240,10 +323,10 @@
         <div class="big num ${p50 != null && p50 >= 60 ? 'val-up' : p50 != null && p50 <= 40 ? 'val-down' : 'val-teal'}">${p50 != null ? p50.toFixed(0) + '%' : '--'}</div>
         <div class="gauge"><span style="width:${p50 != null ? Math.max(0, Math.min(100, p50)) : 0}%"></span></div>
       </div>
-      <div class="regime-cell${killPulse}">
+      <div class="regime-cell kill-cell${kv6.pulse}">
         <span class="label" data-gloss="KILL">Kill-switch</span>
-        <div class="big ${killCls}">${killLabel}</div>
-        <div class="sub">${killSub}</div>
+        <div class="big ${kv6.cls}${kv6.sizeCls}">${kv6.label}</div>
+        <div class="sub kill-prov ${kv6.provCls}">${kv6.prov}</div>
       </div>`;
     applyGlossary(band);
     band.querySelectorAll('[data-drawer]').forEach((c) => c.addEventListener('click', () => openDrawer(c.dataset.drawer, { composite, regime, tide, kill })));

@@ -11,6 +11,10 @@
   --teal: #14b8a6;
   --up: #7CFF6B;
   --down: #ff5c33;
+  /* Amber = "we cannot confirm this" — reserved for honest-seam states (UNKNOWN,
+     unreadable record, stale reading, provenance divergence). Deliberately NOT
+     --down: an unreachable source is not the same alarm as a fired breaker. */
+  --amber: #f5a524;
   --text: #e2e8f0;
   --text-2: #8b98ad;
   --text-3: #5b6b85;
@@ -152,6 +156,26 @@ body {
 .val-up { color: var(--up); }
 .val-down { color: var(--down); }
 .val-teal { color: var(--teal); }
+.val-amber { color: var(--amber); }
+/* Resting state ("NO TRIP ON RECORD"): legible and calm. Not teal — teal reads as
+   an affirmative all-clear, and this state is an absence of events, not a
+   confirmation. Not amber either: nothing is wrong. */
+.val-quiet { color: var(--text); }
+
+/* ── Kill-switch cell (DEF-KILLSWITCH-FAILOPEN) ───────────────────────────── */
+.kill-cell .big.big-long {
+  /* "NO TRIP ON RECORD" / "ARMED · PENDING" cannot hold the 22px display size in a
+     half-width phone cell. Step down and allow a second line instead of clipping. */
+  font-size: 13px; line-height: 1.2; letter-spacing: .02em;
+  text-transform: uppercase; white-space: normal;
+}
+.kill-cell .kill-prov {
+  font-size: 10.5px; color: var(--text-3); line-height: 1.3;
+  /* Provenance is the honest-seam disclosure — it must never be clipped away. */
+  white-space: normal; overflow-wrap: anywhere;
+}
+.kill-cell .kill-prov.val-amber { color: var(--amber); }
+.kill-cell .kill-prov.val-down { color: var(--down); }
 .val-muted { color: var(--text-3); }
 
 /* Gauge (for %>50dma) */

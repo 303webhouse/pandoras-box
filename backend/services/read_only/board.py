@@ -100,19 +100,61 @@ async def get_tide() -> dict:
     return _envelope(as_of, "provisional" if tide else None, tide is None, tide=tide)
 
 
+async def _persisted_cb_record() -> str:
+    """Live presence check on the CB Redis key -- PROVENANCE ONLY.
+
+    Authority rule (A1): this NEVER decides `active`. The enforcement consumers
+    (composite.py, bias_scheduler.py) read the in-memory state, so the display
+    must mirror the enforcer. A cell served from Redis could render ARMED while
+    bias scoring runs unconstrained -- a board asserting protection the system
+    is not applying, which is worse than the defect being fixed.
+
+    Returns: 'absent' | 'present-clear' | 'present-armed' | 'unreadable'
+    """
+    try:
+        from database.redis_client import get_redis_client
+        from webhooks.circuit_breaker import REDIS_CIRCUIT_BREAKER_KEY
+
+        client = await get_redis_client()
+        if not client:
+            return "unreadable"
+        raw = await client.get(REDIS_CIRCUIT_BREAKER_KEY)
+        if not raw:
+            return "absent"
+        rec = json.loads(raw)
+        return "present-armed" if bool(rec.get("active")) else "present-clear"
+    except Exception as exc:
+        logger.warning("[services.board] CB persisted-record check failed: %s", exc)
+        return "unreadable"
+
+
 async def get_kill_switch() -> dict:
-    """Circuit-breaker / kill-switch state (live in-memory process state, restored from Redis).
+    """Circuit-breaker / kill-switch state, with provenance (DEF-KILLSWITCH-FAILOPEN).
 
     active=True means a market-risk breaker fired (bias capped/floored, scoring throttled).
-    This is a live read of current state, so as_of is 'now' and degraded is False.
+
+    `active` is read from live in-memory process state, which is authoritative
+    because it is what the enforcers act on. What this function adds is *how the
+    state is known* -- event-confirmed this boot, restored at boot from a persisted
+    record, or a module default with nothing ever stored -- plus the real age of
+    that anchor.
+
+    Previously as_of was stamped `now` on every call, yielding data_age ~3e-05 and
+    degraded=False: a maximum-confidence all-clear manufactured from an assumption.
+    as_of is now the last state-affecting event (or boot), so age is truthful and
+    the MCP staleness mapping stays meaningful.
     """
-    now = datetime.now(timezone.utc)
     try:
-        from webhooks.circuit_breaker import get_circuit_breaker_state
+        from webhooks.circuit_breaker import (
+            get_circuit_breaker_state,
+            get_circuit_breaker_provenance,
+        )
         st = get_circuit_breaker_state() or {}
+        prov = get_circuit_breaker_provenance() or {}
     except Exception as exc:
         logger.warning("[services.board] kill-switch read failed: %s", exc)
-        return _envelope(None, None, True, kill_switch=None)
+        # No fabricated freshness on the failure path: as_of None -> UNKNOWN.
+        return _envelope(None, None, True, kill_switch=None, provenance=None)
 
     triggered = _parse_ts(st.get("triggered_at"))
     kill = {
@@ -125,5 +167,31 @@ async def get_kill_switch() -> dict:
         "pending_reset": bool(st.get("pending_reset")),
         "triggered_at": triggered.isoformat() if triggered else None,
     }
-    # Live process read -- the state itself is current as of now (not fabricated).
-    return _envelope(now, "live", False, kill_switch=kill)
+
+    source = prov.get("source") or "default-since-boot"
+    as_of = prov.get("as_of")
+    if isinstance(as_of, str):
+        as_of = _parse_ts(as_of)
+
+    persisted = await _persisted_cb_record()
+
+    # A1 divergence -- disclosed as a provenance VALUE, not a sixth visual state.
+    # Redis holding an armed record while memory stands at its default means the
+    # record was never loaded (e.g. written after boot, or boot restore failed).
+    divergence = None
+    if source == "default-since-boot" and persisted == "present-armed":
+        divergence = "persisted armed record present, not loaded"
+
+    provenance = {
+        "source": source,
+        "as_of": as_of.isoformat() if as_of else None,
+        "age_seconds": _age_seconds(as_of),
+        "persisted_record": persisted,
+        "divergence": divergence,
+    }
+
+    # degraded stays False here because none of these are faults: a default-since-boot
+    # resting state is healthy (absence is the CB's resting state -- it writes only on
+    # events). Honesty is carried by provenance, not by claiming breakage. A genuine
+    # fault takes the exception path above and reports degraded with as_of None.
+    return _envelope(as_of, "memory", False, kill_switch=kill, provenance=provenance)

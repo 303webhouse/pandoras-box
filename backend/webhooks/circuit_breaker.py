@@ -81,6 +81,30 @@ _circuit_breaker_state = {
 REDIS_CIRCUIT_BREAKER_KEY = "bias:circuit_breaker"
 REDIS_CIRCUIT_BREAKER_TTL = 86400
 
+# ── Provenance (observability only — no behaviour change) ────────────────────
+# The board's kill-switch cell must say HOW it knows what it knows. Without this
+# record the API cannot tell "an event confirmed CLEAR during this boot" apart
+# from "nothing was ever stored and the module default is standing" — and it was
+# reporting both as a maximum-confidence all-clear (DEF-KILLSWITCH-FAILOPEN).
+#
+# This is a read-only ledger about the in-memory state. It never influences
+# `active`, enforcement, or any write path.
+_BOOT_AT = datetime.now(timezone.utc)
+_cb_provenance: Dict[str, Any] = {
+    "source": "default-since-boot",   # | 'restored-at-boot' | 'event-confirmed'
+    "as_of": _BOOT_AT,                # last state-affecting event, else boot
+}
+
+
+def get_circuit_breaker_provenance() -> Dict[str, Any]:
+    """How the current in-memory CB state came to be. Display/provenance only."""
+    return dict(_cb_provenance)
+
+
+def _mark_provenance(source: str, as_of: Optional[datetime] = None) -> None:
+    _cb_provenance["source"] = source
+    _cb_provenance["as_of"] = as_of or datetime.now(timezone.utc)
+
 DISCORD_WEBHOOK_CB = os.getenv("DISCORD_WEBHOOK_CB") or ""
 
 
@@ -118,6 +142,11 @@ def reset_circuit_breaker() -> Dict[str, Any]:
 
 
 async def _persist_circuit_breaker_state() -> None:
+    # Single choke point for every state-affecting event (trip, decay transition,
+    # accept/reject reset, manual reset), so it is the honest place to record that
+    # this boot has a confirmed event behind its state. Marked before the Redis
+    # write: the in-memory change is what happened, whether or not it persisted.
+    _mark_provenance("event-confirmed")
     try:
         from database.redis_client import get_redis_client
 
@@ -153,6 +182,7 @@ async def restore_circuit_breaker_state() -> bool:
             restored.setdefault("pending_since", None)
             restored.setdefault("decay_fade", 1.0)
             _circuit_breaker_state = restored
+            _mark_provenance("restored-at-boot", _BOOT_AT)
             logger.info(
                 "Circuit breaker state restored (trigger=%s active=%s pending=%s)",
                 _circuit_breaker_state.get("trigger"),
