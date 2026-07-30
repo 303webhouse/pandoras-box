@@ -102,8 +102,23 @@ def get_circuit_breaker_provenance() -> Dict[str, Any]:
 
 
 def _mark_provenance(source: str, as_of: Optional[datetime] = None) -> None:
-    _cb_provenance["source"] = source
-    _cb_provenance["as_of"] = as_of or datetime.now(timezone.utc)
+    """Record how the in-memory state came to be. MUST NEVER RAISE.
+
+    This is observability bolted onto the enforcement path. If it could throw it
+    would become the deepest possible fail-open: a provenance failure aborting the
+    persistence — or worse the arm itself — of the market-risk breaker. Bookkeeping
+    added to prove honesty must never be able to break the thing it describes.
+    """
+    try:
+        _cb_provenance["source"] = source
+        _cb_provenance["as_of"] = as_of or datetime.now(timezone.utc)
+    except Exception:  # noqa: BLE001 - deliberately total
+        # Losing provenance degrades the display to its conservative default; it
+        # must never propagate. Logging is best-effort and also guarded.
+        try:
+            logger.warning("Provenance mark failed; display falls back to default-since-boot")
+        except Exception:  # noqa: BLE001
+            pass
 
 DISCORD_WEBHOOK_CB = os.getenv("DISCORD_WEBHOOK_CB") or ""
 
@@ -144,9 +159,20 @@ def reset_circuit_breaker() -> Dict[str, Any]:
 async def _persist_circuit_breaker_state() -> None:
     # Single choke point for every state-affecting event (trip, decay transition,
     # accept/reject reset, manual reset), so it is the honest place to record that
-    # this boot has a confirmed event behind its state. Marked before the Redis
-    # write: the in-memory change is what happened, whether or not it persisted.
-    _mark_provenance("event-confirmed")
+    # this boot has a confirmed event behind its state.
+    #
+    # The mark runs in `finally`, strictly AFTER the persistence attempt, and
+    # _mark_provenance() cannot raise. Two reasons it is positioned here and not
+    # before the try:
+    #   1. No call site guards this function. A throw ahead of the setex would abort
+    #      persistence and, from apply_circuit_breaker(), the arm path itself —
+    #      armed in memory, unpersisted, no Discord alert, 500 to the webhook.
+    #      Observability must not be able to break enforcement.
+    #   2. `finally` rather than the success path: `source` describes the IN-MEMORY
+    #      state, and the in-memory event happened whether or not Redis accepted it.
+    #      Marking only on success would report a real event as default-since-boot
+    #      during a Redis outage — the mirror image of the lie being fixed. The Redis
+    #      side is reported separately and truthfully via `persisted_record`.
     try:
         from database.redis_client import get_redis_client
 
@@ -160,6 +186,8 @@ async def _persist_circuit_breaker_state() -> None:
         )
     except Exception as exc:
         logger.warning("Failed to persist circuit breaker state: %s", exc)
+    finally:
+        _mark_provenance("event-confirmed")
 
 
 async def restore_circuit_breaker_state() -> bool:
