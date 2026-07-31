@@ -12495,6 +12495,17 @@ body[data-mode="analytics"] .analytics-shell {
 
 .greek-cell.positive { color: #7CFF6B; }
 .greek-cell.negative { color: #FF6B35; }
+/* DEF-GREEKS-ZERO honest-seam states. Amber = "this is not a whole number" or
+   "we have no measurement" — deliberately not the up/down colours, which would
+   imply a directional reading of a value we cannot fully source. */
+.greek-cell.greek-partial { color: #f5a524; }
+.greek-cell.greek-unknown { color: #f5a524; opacity: 0.85; }
+.greek-coverage {
+  font-size: 10.5px; color: #5b6b85; letter-spacing: 0.02em;
+  white-space: normal; overflow-wrap: anywhere;
+}
+.greek-coverage.greek-partial { color: #f5a524; }
+.greek-coverage.greek-unknown { color: #f5a524; }
 
 .greek-tooltip {
     position: absolute;

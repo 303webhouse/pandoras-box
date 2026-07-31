@@ -12516,13 +12516,15 @@ document.getElementById('greeksToggle')?.addEventListener('click', function() {
 });
 
 async function loadPortfolioGreeks() {
+    // A failed fetch must NOT leave the previous numbers standing. Silently
+    // returning here meant a stale delta kept being presented as current — the
+    // same fail-open class as the defect this fixes, one layer out.
     try {
         const resp = await fetch(`${API_URL}/v2/positions/greeks`);
-        if (!resp.ok) return;
-        const data = await resp.json();
-        renderPortfolioGreeks(data);
+        if (!resp.ok) { renderPortfolioGreeks({ status: 'unreachable' }); return; }
+        renderPortfolioGreeks(await resp.json());
     } catch (e) {
-        // Silently fail — greeks are optional
+        renderPortfolioGreeks({ status: 'unreachable' });
     }
 }
 
@@ -12530,44 +12532,96 @@ function renderPortfolioGreeks(data) {
     const row = document.getElementById('portfolioGreeksRow');
     if (!row) return;
 
-    const totals = data.totals || {};
-    const delta = totals.delta || 0;
-    const gamma = totals.gamma || 0;
-    const theta = totals.theta || 0;
-    const vega = totals.vega || 0;
+    // ── DEF-GREEKS-ZERO ────────────────────────────────────────────────────────
+    // The old code coalesced null -> 0 and then used "all four are zero" as a
+    // proxy for "no data". That conflated FLAT with UNKNOWN — the same category
+    // error as CLEAR-vs-UNKNOWN on the kill switch. The heuristic is REMOVED and
+    // replaced by real coverage from the API (R1+R2 ship as one change: R2 is
+    // only safe because R1 exists to tell the two apart).
+    //
+    // A sum built from some of the legs is a FLOOR, not an estimate — an
+    // understated delta tells the operator he carries LESS risk than he does.
+    const totals = (data && data.totals) || {};
+    const cov = (data && data.coverage) || null;
+    const perGreek = (cov && cov.per_greek) || {};
+    const unreachable = !data || data.status === 'unreachable';
 
-    if (delta === 0 && gamma === 0 && theta === 0 && vega === 0) {
-        // Show dashes when no data (after hours, API error, etc.)
-        document.getElementById('greekDelta').textContent = '\u0394 --';
-        document.getElementById('greekGamma').textContent = '\u0393 --';
-        document.getElementById('greekTheta').textContent = '\u0398 --';
-        document.getElementById('greekVega').textContent = 'V --';
-        document.getElementById('greekDelta').className = 'greek-cell';
-        document.getElementById('greekGamma').className = 'greek-cell';
-        document.getElementById('greekTheta').className = 'greek-cell';
-        document.getElementById('greekVega').className = 'greek-cell';
-        return;
+    const GREEKS = [
+        ['greekDelta', 'delta', '\u0394'],
+        ['greekGamma', 'gamma', '\u0393'],
+        ['greekTheta', 'theta', '\u0398'],
+        ['greekVega', 'vega', 'V'],
+    ];
+
+    GREEKS.forEach(([id, name, sym]) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        const v = totals[name];
+        const g = perGreek[name] || {};
+        const priced = g.priced, expected = g.expected;
+        // Per-greek completeness: a contract can carry delta and omit vega, so
+        // one greek may be exact while another is a floor.
+        const greekComplete = cov ? (expected > 0 && priced === expected) : false;
+
+        if (unreachable || v == null) {
+            // No measurement. Never 0, and never a bare "--" that could be read
+            // as flat.
+            el.textContent = `${sym} N/A`;
+            el.className = 'greek-cell greek-unknown';
+            el.title = unreachable ? 'greeks source unreachable' : 'no greeks available for any leg';
+            return;
+        }
+        const sign = v >= 0 ? '+' : '';
+        const rounded = Math.round(v);
+        if (greekComplete) {
+            el.textContent = `${sym} ${sign}${rounded}`;
+            el.className = 'greek-cell ' + (v >= 0 ? 'positive' : 'negative');
+            el.title = `${expected} of ${expected} legs priced`;
+        } else {
+            // Floor. The >= is the load-bearing claim: real exposure is this or more.
+            el.textContent = `${sym} \u2265${sign}${rounded}`;
+            el.className = 'greek-cell greek-partial';
+            el.title = `floor only — ${priced} of ${expected} legs priced; true value is this or larger`;
+        }
+    });
+
+    // One explicit coverage line for the row, so the ratio is stated and not
+    // merely implied by the >= markers.
+    let covEl = document.getElementById('greekCoverage');
+    if (!covEl) {
+        covEl = document.createElement('span');
+        covEl.id = 'greekCoverage';
+        covEl.className = 'greek-coverage';
+        row.appendChild(covEl);
+    }
+    if (unreachable) {
+        covEl.textContent = 'source unreachable';
+        covEl.className = 'greek-coverage greek-unknown';
+    } else if (!cov || !cov.legs_expected) {
+        covEl.textContent = totals.delta === 0 ? 'no open option legs' : '';
+        covEl.className = 'greek-coverage';
+    } else if (cov.complete) {
+        covEl.textContent = `${cov.legs_expected}/${cov.legs_expected} legs priced`;
+        covEl.className = 'greek-coverage';
+    } else if (cov.legs_priced > 0) {
+        covEl.textContent = `${cov.legs_priced}/${cov.legs_expected} legs priced \u2014 values are floors`;
+        covEl.className = 'greek-coverage greek-partial';
+    } else {
+        // Zero priced legs means there are no floors, there is nothing.
+        covEl.textContent = `0/${cov.legs_expected} legs priced \u2014 no greeks available`;
+        covEl.className = 'greek-coverage greek-unknown';
     }
 
-    const fmt = (v, prefix) => {
-        const sign = v >= 0 ? '+' : '';
-        return `${prefix} ${sign}${Math.round(v)}`;
-    };
-    document.getElementById('greekDelta').textContent = fmt(delta, '\u0394');
-    document.getElementById('greekDelta').className = 'greek-cell ' + (delta >= 0 ? 'positive' : 'negative');
-    document.getElementById('greekGamma').textContent = fmt(gamma, '\u0393');
-    document.getElementById('greekGamma').className = 'greek-cell ' + (gamma >= 0 ? 'positive' : 'negative');
-    document.getElementById('greekTheta').textContent = fmt(theta, '\u0398');
-    document.getElementById('greekTheta').className = 'greek-cell ' + (theta >= 0 ? 'positive' : 'negative');
-    document.getElementById('greekVega').textContent = fmt(vega, 'V');
-    document.getElementById('greekVega').className = 'greek-cell ' + (vega >= 0 ? 'positive' : 'negative');
+    _setGreekTooltip('greekDelta', 'delta', totals.delta);
+    _setGreekTooltip('greekGamma', 'gamma', totals.gamma);
+    _setGreekTooltip('greekTheta', 'theta', totals.theta);
+    _setGreekTooltip('greekVega', 'vega', totals.vega);
 
-    _setGreekTooltip('greekDelta', 'delta', delta);
-    _setGreekTooltip('greekGamma', 'gamma', gamma);
-    _setGreekTooltip('greekTheta', 'theta', theta);
-    _setGreekTooltip('greekVega', 'vega', vega);
-
-    renderStalenessIndicator(row, data.timestamp || data.computed_at);
+    // Guarded to match the rest of this function, which already handles a missing
+    // payload. Unguarded, a call with no data threw here and left the previous
+    // numbers on screen — a stale render surviving the very failure that should
+    // have replaced it with N/A.
+    renderStalenessIndicator(row, data ? (data.timestamp || data.computed_at) : null);
 }
 
 function _setGreekTooltip(elId, greek, value) {

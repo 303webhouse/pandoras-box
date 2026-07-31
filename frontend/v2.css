@@ -162,6 +162,15 @@ body {
    confirmation. Not amber either: nothing is wrong. */
 .val-quiet { color: var(--text); }
 
+/* DEF-GREEKS-ZERO — a floor is not a total, and N/A is not zero. Amber rather
+   than the up/down colours, which would imply a directional read of a value we
+   cannot fully source. */
+.book-greeks .g-floor { color: var(--amber); }
+.book-greeks .g-na { color: var(--amber); opacity: 0.85; }
+.book-greeks-note { font-size: 10px; color: var(--text-3); line-height: 1.3; margin-top: 2px; }
+.book-greeks-note.g-floor { color: var(--amber); }
+.book-greeks-note.g-na { color: var(--amber); }
+
 /* ── Kill-switch cell (DEF-KILLSWITCH-FAILOPEN) ───────────────────────────── */
 .kill-cell .big.big-long {
   /* "NO TRIP ON RECORD" / "ARMED · PENDING" cannot hold the 22px display size in a

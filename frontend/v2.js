@@ -883,9 +883,35 @@
     const accts = Array.isArray(balances) ? balances : [];
     const total = accts.reduce((s, a) => s + (Number(a.balance) || 0), 0);
     const day = pnl && pnl.daily ? pnl.daily : {};
-    const g = greeks && (greeks.totals || greeks.portfolio) ? (greeks.totals || {}) : {};
-    const gv = (k1, k2) => { const v = (greeks && greeks.totals && greeks.totals[k1] != null) ? greeks.totals[k1] : (greeks && greeks.portfolio ? greeks.portfolio[k2] : null); return v; };
-    const delta = gv('delta', 'net_delta'), theta = gv('theta', 'net_theta'), vega = gv('vega', 'net_vega'), gamma = gv('gamma', 'net_gamma');
+    // ── DEF-GREEKS-ZERO ────────────────────────────────────────────────────────
+    // A sum built from some of the legs is a FLOOR, not a total. Unavailable
+    // greeks render N/A, never 0 and never a bare "--" that reads as flat —
+    // an understated delta says the operator carries LESS risk than he does.
+    const gTotals = (greeks && greeks.totals) || {};
+    const gCov = (greeks && greeks.coverage) || null;
+    const gPer = (gCov && gCov.per_greek) || {};
+    const gUnreachable = !greeks;
+    const greekCell = (sym, name, decimals) => {
+        const v = gTotals[name];
+        if (gUnreachable || v == null) {
+            return `<span class="g"><span class="k">${sym}</span><span class="g-na">N/A</span></span>`;
+        }
+        const c = gPer[name] || {};
+        const exact = gCov && c.expected > 0 && c.priced === c.expected;
+        const num = Number(v).toFixed(decimals);
+        return exact
+            ? `<span class="g"><span class="k">${sym}</span><span>${num}</span></span>`
+            : `<span class="g"><span class="k">${sym}</span><span class="g-floor" title="floor only — ${c.priced} of ${c.expected} legs priced">≥${num}</span></span>`;
+    };
+    // Wording tracks the actual state: with zero legs priced there are no floors,
+    // there is nothing. Calling that "floors" would be its own small lie.
+    const greekNote = gUnreachable
+        ? '<div class="book-greeks-note g-na">greeks source unreachable</div>'
+        : (gCov && gCov.legs_expected && !gCov.complete)
+            ? (gCov.legs_priced > 0
+                ? `<div class="book-greeks-note g-floor">${gCov.legs_priced}/${gCov.legs_expected} legs priced — values are floors</div>`
+                : `<div class="book-greeks-note g-na">0/${gCov.legs_expected} legs priced — no greeks available</div>`)
+            : '';
 
     // Theme concentration: join open-position tickers -> theme, sum at-risk (current_value).
     const conc = computeConcentration(positions);
@@ -894,11 +920,12 @@
       <div class="book-line"><span class="k">Balance</span><span class="v">${accts.length ? fmt$(total) : '--'}</span></div>
       <div class="book-line"><span class="k">Day P&amp;L</span><span class="v ${signCls(day.dollar)}">${day.dollar != null ? (day.dollar >= 0 ? '+' : '') + fmt$(day.dollar) : '--'}${day.pct != null ? ` <span style="font-size:10px">(${day.pct >= 0 ? '+' : ''}${Number(day.pct).toFixed(2)}%)</span>` : ''}</span></div>
       <div class="book-greeks">
-        <span class="g"><span class="k">Δ</span><span>${delta != null ? Number(delta).toFixed(0) : '--'}</span></span>
-        <span class="g"><span class="k">Γ</span><span>${gamma != null ? Number(gamma).toFixed(1) : '--'}</span></span>
-        <span class="g"><span class="k">Θ</span><span>${theta != null ? Number(theta).toFixed(0) : '--'}</span></span>
-        <span class="g"><span class="k">V</span><span>${vega != null ? Number(vega).toFixed(0) : '--'}</span></span>
+        ${greekCell('Δ', 'delta', 0)}
+        ${greekCell('Γ', 'gamma', 1)}
+        ${greekCell('Θ', 'theta', 0)}
+        ${greekCell('V', 'vega', 0)}
       </div>
+      ${greekNote}
       ${conc ? `<div class="conc-lamp ${conc.hot ? 'hot' : 'ok'}" data-gloss="CONC"><span>Concentration · ${esc(conc.theme)}</span><span>${conc.pct}%</span></div>` : ''}
       <div class="acct-chips">${accts.map((a) => `<span class="acct-chip">${esc((a.broker || a.account_name || '').slice(0, 4).toUpperCase())} ${fmt$(a.balance)}</span>`).join('')}</div>`;
     applyGlossary(el);
