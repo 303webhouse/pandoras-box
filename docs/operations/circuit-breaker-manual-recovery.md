@@ -68,16 +68,20 @@ record, so the board will read **CLEAR** rather than NO TRIP ON RECORD afterward
 
 ## Two things worth knowing
 
-**Right now, an armed breaker expires on its own after 24 hours.** The stored record is
-written with a 24h TTL, so if the app restarts more than a day after the trip it comes back
-clear on its own. That is a safety net you currently have by accident.
+**An armed breaker no longer clears itself. This procedure is the only way out.**
 
-**That net is scheduled to be removed.** DEF-KILLSWITCH-TTL-RESTART will make the armed
-state fail *closed* — an armed breaker will no longer expire into silence, which is the
-correct behaviour for a safety device. This card is the precondition for that change: once
-armed state stops expiring, hand-clearing is the only way out, so the procedure above has
-to be one you can actually follow from a hotel. It is deliberately all dashboard clicks, no
-console and no credentials on your phone.
+It used to expire after 24 hours, and a restart a day later would come back clear on its
+own. That was a safety net you had by accident, and it was the wrong kind: a safety device
+that quietly disarms itself is worse than none, because the board keeps telling you it is
+protecting you. DEF-KILLSWITCH-TTL-RESTART removed it — an **armed** record now persists
+until someone clears it.
+
+So the steps above are load-bearing now, not a curiosity. They are deliberately all
+dashboard clicks: no console, no credentials on your phone, nothing you need a laptop for.
+
+**A cleared record still ages out after 24 hours**, which is why the board drifts back to
+NO TRIP ON RECORD a day after a reset. That is normal and correct — it means the system has
+no *stored* event any more, not that anything is wrong.
 
 ## What "armed" is actually doing while you wait
 
