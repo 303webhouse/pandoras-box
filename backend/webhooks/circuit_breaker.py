@@ -179,11 +179,28 @@ async def _persist_circuit_breaker_state() -> None:
         client = await get_redis_client()
         if not client:
             return
-        await client.setex(
-            REDIS_CIRCUIT_BREAKER_KEY,
-            REDIS_CIRCUIT_BREAKER_TTL,
-            json.dumps(_circuit_breaker_state),
-        )
+        payload = json.dumps(_circuit_breaker_state)
+        if _circuit_breaker_state.get("active"):
+            # ── R4 (DEF-KILLSWITCH-TTL-RESTART): ARMED STATE FAILS CLOSED ──────────
+            # An armed breaker must not expire into silence. Under the old blanket
+            # 24h TTL, a breaker armed more than a day before a process restart came
+            # back CLEAR: restore_circuit_breaker_state() found no key, left the
+            # module default standing, and the API stamped that fabricated all-clear
+            # as live and not degraded. A safety device that quietly disarms itself
+            # is worse than none, because the board keeps asserting the protection.
+            #
+            # SET with no expiry also CLEARS any TTL inherited from a previous
+            # clear-state write, which is exactly the intent: once armed, the record
+            # persists until an operator clears it.
+            #
+            # Recovery is documented and operator-verified, which is the precondition
+            # for shipping this: docs/operations/circuit-breaker-manual-recovery.md
+            await client.set(REDIS_CIRCUIT_BREAKER_KEY, payload)
+        else:
+            # Clear state keeps the 24h expiry, unchanged. Out of R4's scope, and it
+            # is the mechanism that returns the board to NO TRIP ON RECORD unassisted
+            # once a cleared record ages out.
+            await client.setex(REDIS_CIRCUIT_BREAKER_KEY, REDIS_CIRCUIT_BREAKER_TTL, payload)
     except Exception as exc:
         logger.warning("Failed to persist circuit breaker state: %s", exc)
     finally:
