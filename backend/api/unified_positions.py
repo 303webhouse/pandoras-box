@@ -1071,12 +1071,57 @@ async def update_account_balance(request: Request, _=Depends(require_api_key)):
     return {"status": "ok", "account": account_name, "cash": float(new_cash)}
 
 
+_GREEK_NAMES = ("delta", "gamma", "theta", "vega")
+
+
+def _empty_coverage(complete: bool) -> dict:
+    return {
+        "legs_expected": 0,
+        "legs_priced": 0,
+        "complete": complete,
+        "tickers_unavailable": 0,
+        "per_greek": {n: {"priced": 0, "expected": 0} for n in _GREEK_NAMES},
+    }
+
+
+def _greeks_unknown(status: str, **extra) -> dict:
+    """Failure envelope. Greeks are UNKNOWN — never zero.
+
+    DEF-GREEKS-ZERO: every one of these paths used to emit
+    {"delta": 0, "gamma": 0, ...}, so an API outage, a missing key, or a DB error
+    rendered as a flat book. Zero is a measurement; these states have no
+    measurement to report.
+    """
+    return {
+        "status": status,
+        "tickers": {},
+        "totals": {n: None for n in _GREEK_NAMES},
+        "coverage": _empty_coverage(False),
+        "portfolio": {f"net_{n}": None for n in _GREEK_NAMES},
+        **extra,
+    }
+
+
+def _greeks_flat(status: str) -> dict:
+    """No open positions => genuinely flat. Zero IS the fact here, and complete."""
+    return {
+        "status": status,
+        "tickers": {},
+        "totals": {n: 0 for n in _GREEK_NAMES},
+        "coverage": _empty_coverage(True),
+        "portfolio": {f"net_{n}": 0 for n in _GREEK_NAMES},
+    }
+
+
 @router.get("/v2/positions/greeks")
 async def portfolio_greeks():
     """
-    Get aggregate portfolio greeks from Polygon.io options snapshots.
-    Returns per-ticker and total portfolio greeks for committee context.
-    Gracefully returns zeros if API is unavailable (e.g., after hours).
+    Aggregate portfolio greeks from the UW options snapshot.
+
+    Reports COVERAGE alongside the numbers: a sum built from some of the legs is
+    a floor, not a total, and is labelled as such. Unavailable greeks report None,
+    never 0 — an understated delta tells the operator he carries less risk than
+    he does, which is the dangerous direction.
     """
     _zeros = {"delta": 0, "gamma": 0, "theta": 0, "vega": 0}
     try:
@@ -1112,9 +1157,9 @@ async def _portfolio_greeks_inner():
     try:
         from integrations.uw_api import get_ticker_greeks_summary, UW_API_KEY
         if not UW_API_KEY:
-            return {"status": "no_api_key", "tickers": {}, "totals": {"delta": 0, "gamma": 0, "theta": 0, "vega": 0}}
+            return _greeks_unknown("no_api_key")
     except ImportError:
-        return {"status": "unavailable", "tickers": {}, "totals": {"delta": 0, "gamma": 0, "theta": 0, "vega": 0}}
+        return _greeks_unknown("unavailable")
 
     try:
         pool = await get_postgres_client()
@@ -1124,10 +1169,10 @@ async def _portfolio_greeks_inner():
             )
     except Exception as e:
         logger.error("Greeks: DB query failed: %s", e)
-        return {"status": "db_error", "tickers": {}, "totals": {"delta": 0, "gamma": 0, "theta": 0, "vega": 0}}
+        return _greeks_unknown("db_error")
 
     if not rows:
-        return {"status": "no_positions", "tickers": {}, "totals": {"delta": 0, "gamma": 0, "theta": 0, "vega": 0}}
+        return _greeks_flat("no_positions")
 
     try:
         positions = [_row_to_dict(r) for r in rows]
@@ -1138,10 +1183,12 @@ async def _portfolio_greeks_inner():
             by_ticker.setdefault(p["ticker"], []).append(p)
 
         ticker_greeks = {}
-        total_delta = 0.0
-        total_gamma = 0.0
-        total_theta = 0.0
-        total_vega = 0.0
+        # Sum only known values; carry coverage so the renderer can present a
+        # partial sum as a FLOOR rather than a total (R1).
+        greek_sums = {n: 0.0 for n in _GREEK_NAMES}
+        greek_priced = {n: 0 for n in _GREEK_NAMES}
+        legs_expected_total = 0
+        tickers_unavailable = 0
 
         for ticker, pos_list in by_ticker.items():
             try:
@@ -1150,43 +1197,69 @@ async def _portfolio_greeks_inner():
                            [(p.get("long_strike"), p.get("short_strike"), p.get("expiry")) for p in pos_list])
                 greeks_result = await get_ticker_greeks_summary(ticker, pos_list)
                 if greeks_result:
-                    logger.info("Greeks: %s returned delta=%.2f gamma=%.4f theta=%.2f vega=%.2f",
+                    logger.info("Greeks: %s delta=%s gamma=%s theta=%s vega=%s (%s/%s legs priced)",
                                ticker,
-                               greeks_result.get("net_delta", 0),
-                               greeks_result.get("net_gamma", 0),
-                               greeks_result.get("net_theta", 0),
-                               greeks_result.get("net_vega", 0))
+                               greeks_result.get("net_delta"),
+                               greeks_result.get("net_gamma"),
+                               greeks_result.get("net_theta"),
+                               greeks_result.get("net_vega"),
+                               greeks_result.get("legs_priced"),
+                               greeks_result.get("legs_expected"))
                     ticker_greeks[ticker] = greeks_result
+
+                    # BRANCH BUG FIX. These four lines previously sat in the `else`
+                    # arm — the arm where greeks_result is falsy — so the portfolio
+                    # totals never accumulated on the success path and were
+                    # structurally always zero, while the failure path called
+                    # .get() on None and raised straight into the outer handler.
+                    # This is the "all zeros" the defect was registered under.
+                    legs_expected_total += greeks_result.get("legs_expected", 0) or 0
+                    cov = greeks_result.get("coverage") or {}
+                    for name in _GREEK_NAMES:
+                        v = greeks_result.get(f"net_{name}")
+                        if v is None:
+                            continue
+                        greek_sums[name] += v
+                        greek_priced[name] += ((cov.get(name) or {}).get("priced") or 0)
                 else:
-                    logger.warning("Greeks: %s returned None (snapshot empty or no matching contracts)", ticker)
-                    total_delta += greeks_result.get("net_delta", 0)
-                    total_gamma += greeks_result.get("net_gamma", 0)
-                    total_theta += greeks_result.get("net_theta", 0)
-                    total_vega += greeks_result.get("net_vega", 0)
+                    logger.warning("Greeks: %s returned no result (ticker skipped entirely)", ticker)
+                    tickers_unavailable += 1
             except Exception as e:
                 logger.warning("Greeks fetch failed for %s: %s", ticker, e)
                 ticker_greeks[ticker] = {"error": str(e)}
 
+        _places = {"delta": 2, "gamma": 4, "theta": 2, "vega": 2}
+
+        def _total(name: str):
+            # No priced legs for this greek => UNKNOWN. Never 0.
+            return round(greek_sums[name], _places[name]) if greek_priced[name] else None
+
+        totals = {n: _total(n) for n in _GREEK_NAMES}
+        complete = (
+            tickers_unavailable == 0
+            and legs_expected_total > 0
+            and all(greek_priced[n] == legs_expected_total for n in _GREEK_NAMES)
+        )
+        coverage = {
+            "legs_expected": legs_expected_total,
+            "legs_priced": min(greek_priced.values()) if greek_priced else 0,
+            "complete": complete,
+            "tickers_unavailable": tickers_unavailable,
+            "per_greek": {n: {"priced": greek_priced[n], "expected": legs_expected_total}
+                          for n in _GREEK_NAMES},
+        }
+
         result = {
             "status": "ok",
             "tickers": ticker_greeks,
-            "totals": {
-                "delta": round(total_delta, 2),
-                "gamma": round(total_gamma, 4),
-                "theta": round(total_theta, 2),
-                "vega": round(total_vega, 2),
-            },
-            "portfolio": {
-                "net_delta": round(total_delta, 2),
-                "net_gamma": round(total_gamma, 4),
-                "net_theta": round(total_theta, 2),
-                "net_vega": round(total_vega, 2),
-            },
+            "totals": totals,
+            "coverage": coverage,
+            "portfolio": {f"net_{n}": totals[n] for n in _GREEK_NAMES},
         }
 
     except Exception as e:
         logger.error("Greeks computation failed: %s", e)
-        return {"status": "computation_error", "error": str(e), "tickers": {}, "totals": {"delta": 0, "gamma": 0, "theta": 0, "vega": 0}}
+        return _greeks_unknown("computation_error", error=str(e))
 
     # Cache for 60 seconds + stale cache for 24 hours (after-hours fallback)
     if redis:

@@ -1173,6 +1173,26 @@ def _get_contract_mid(contract: dict) -> Optional[float]:
     return None
 
 
+_GREEKS = ("delta", "gamma", "theta", "vega")
+
+
+def _accumulate(sums: dict, priced: dict, g: dict, sign: int, qty: int) -> None:
+    """Add one leg's greeks into the running totals, counting only KNOWN values.
+
+    DEF-GREEKS-ZERO: the previous form was `(g.get("delta") or 0) * qty * 100`,
+    and Python's `or` treats None and 0 identically — so an unknown leg became a
+    zero-contribution leg and the portfolio delta came out understated with no
+    indication. Understated risk is the dangerous direction. A missing value must
+    reduce COVERAGE, never silently reduce the SUM.
+    """
+    for name in _GREEKS:
+        v = g.get(name)
+        if v is None:
+            continue
+        sums[name] += sign * float(v) * qty * 100
+        priced[name] += 1
+
+
 def _get_contract_greeks(contract: dict) -> dict:
     """Extract greeks from a contract dict."""
     greeks = contract.get("greeks", {})
@@ -1359,14 +1379,19 @@ async def get_ticker_greeks_summary(
     positions: List[Dict[str, Any]],
 ) -> Optional[Dict[str, Any]]:
     """Aggregate greeks for all positions in a ticker. Matches polygon_options schema."""
-    chain = await get_options_snapshot(underlying)
-    if not chain:
-        return None
+    # An empty chain is ZERO COVERAGE, not "no answer". Returning None here made
+    # the caller unable to distinguish "this ticker has no greeks" from "this
+    # ticker has no positions", so the legs vanished from the portfolio ratio
+    # entirely. Fall through instead: every leg counts as expected, none as
+    # priced, and the portfolio reports honestly incomplete.
+    chain = await get_options_snapshot(underlying) or []
 
-    total_delta = 0.0
-    total_gamma = 0.0
-    total_theta = 0.0
-    total_vega = 0.0
+    # Sum only what is KNOWN, and count what contributed. Coverage is tracked
+    # per greek because a contract can carry delta while omitting vega.
+    sums = {g: 0.0 for g in _GREEKS}
+    priced = {g: 0 for g in _GREEKS}
+    legs_expected = 0
+    legs_priced = 0
     underlying_price = None
 
     for pos in positions:
@@ -1376,9 +1401,8 @@ async def get_ticker_greeks_summary(
         long_strike = pos.get("long_strike")
         short_strike = pos.get("short_strike")
 
-        if not expiry or not long_strike:
-            continue
-
+        # Identify options FIRST, so a non-option (equity, no greeks concept) is
+        # excluded from coverage entirely rather than counted as a gap.
         if "put" in structure:
             opt_type = "put"
         elif "call" in structure:
@@ -1386,14 +1410,19 @@ async def get_ticker_greeks_summary(
         else:
             continue
 
+        # An OPTION we cannot price is a coverage gap, not an invisible non-event.
+        # Previously this `continue` dropped the position silently and coverage
+        # looked complete while real legs were missing from the sum.
+        if not expiry or not long_strike:
+            legs_expected += 1 + (1 if short_strike else 0)
+            continue
+
         # Long leg
+        legs_expected += 1
         long_c = _find_contract(chain, float(long_strike), str(expiry), opt_type)
         if long_c:
-            g = _get_contract_greeks(long_c)
-            total_delta += (g.get("delta") or 0) * qty * 100
-            total_gamma += (g.get("gamma") or 0) * qty * 100
-            total_theta += (g.get("theta") or 0) * qty * 100
-            total_vega += (g.get("vega") or 0) * qty * 100
+            legs_priced += 1
+            _accumulate(sums, priced, _get_contract_greeks(long_c), +1, qty)
             if underlying_price is None:
                 ua = long_c.get("underlying_asset", {})
                 if ua and ua.get("price"):
@@ -1401,20 +1430,31 @@ async def get_ticker_greeks_summary(
 
         # Short leg
         if short_strike:
+            legs_expected += 1
             short_c = _find_contract(chain, float(short_strike), str(expiry), opt_type)
             if short_c:
-                g = _get_contract_greeks(short_c)
-                total_delta -= (g.get("delta") or 0) * qty * 100
-                total_gamma -= (g.get("gamma") or 0) * qty * 100
-                total_theta -= (g.get("theta") or 0) * qty * 100
-                total_vega -= (g.get("vega") or 0) * qty * 100
+                legs_priced += 1
+                _accumulate(sums, priced, _get_contract_greeks(short_c), -1, qty)
+
+    # A greek with zero priced legs is UNKNOWN, not zero. None survives to the
+    # renderer, which is the whole point: `or 0` here is what turned an unknown
+    # leg into a zero-contribution leg and understated the operator's risk.
+    def _net(name: str, places: int):
+        return round(sums[name], places) if priced[name] else None
 
     return {
         "underlying_price": underlying_price,
-        "net_delta": round(total_delta, 2),
-        "net_gamma": round(total_gamma, 4),
-        "net_theta": round(total_theta, 2),
-        "net_vega": round(total_vega, 2),
+        "net_delta": _net("delta", 2),
+        "net_gamma": _net("gamma", 4),
+        "net_theta": _net("theta", 2),
+        "net_vega": _net("vega", 2),
+        # Coverage (R1). A partial sum is a FLOOR, not an estimate — the renderer
+        # needs the ratio to say so, and per-greek counts because a contract can
+        # carry delta but not vega.
+        "legs_expected": legs_expected,
+        "legs_priced": legs_priced,
+        "complete": legs_expected > 0 and all(priced[g] == legs_expected for g in _GREEKS),
+        "coverage": {g: {"priced": priced[g], "expected": legs_expected} for g in _GREEKS},
     }
 
 
