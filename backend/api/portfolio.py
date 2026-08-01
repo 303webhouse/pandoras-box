@@ -389,11 +389,29 @@ async def get_portfolio_pnl():
     current_total = sum(current.values())
 
     async def get_snapshot_total(target_date):
-        """Get total balance from snapshot on or before target_date."""
+        """Total balance from the latest snapshot on or before target_date,
+        restricted to CURRENTLY-ACTIVE accounts.
+
+        DEF-DAYPNL-PHANTOM: without the active-account filter this summed every
+        account that has ever HELD a snapshot, while current_total above sums
+        only the accounts that still exist. The 2026-07-23 reconciliation merged
+        Fidelity 401A ($11,075.62) and Fidelity 403B ($566.73) into
+        BROKERAGE_LINK_401K ($11,642.35 — exactly their sum) and removed the
+        originals from account_balances. balance_snapshots still holds them, so
+        the merged money was counted once on the current side and again,
+        unmerged, on the historical side. The board reported a fixed
+        -$11,642.35 / -35.32% on daily, weekly AND monthly, every day since the
+        reconciliation. The "loss" was the consolidation itself.
+
+        The subquery is deliberately against account_balances rather than a
+        hardcoded list: accounts are merged and retired over time, and this must
+        stay correct the next time that happens.
+        """
         rows = await pool.fetch("""
             SELECT DISTINCT ON (account_name) account_name, balance
             FROM balance_snapshots
             WHERE snapshot_date <= $1
+              AND account_name IN (SELECT account_name FROM account_balances)
             ORDER BY account_name, snapshot_date DESC
         """, target_date)
         if not rows:
