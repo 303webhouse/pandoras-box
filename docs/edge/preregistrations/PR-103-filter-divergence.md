@@ -1,9 +1,10 @@
-# PR-103 — Conflict-Filter Divergence Quantification
-Status: REGISTERED · Filed 2026-08-18 · Mode: DESCRIPTIVE
-Inherits PR-100. Formalizes the §6 non-monotonicity finding.
-POPULATION: all seven gate-PASS pairs, both strata.
-OUTPUT: per pair — Δ(T1+) and Δ(candidate-expectancy) between
-DISMISSED and NON-DISMISSED, with CIs on each stratum; the signed
-divergence table, no causal claim. Feeds a possible future Phase-2
-pre-registration on the dismissal mechanism; makes none itself.
-Multiple-comparisons: descriptive; no tests.
+# PR-103 — Conflict-Filter Divergence Quantification · v1.1
+Status: REGISTERED · Mode: EXPLORE (descriptive) — findings
+eligible only as future pre-registrations, never conclusions.
+Inherits PR-100 v1.1 in full. Formalizes §6 non-monotonicity.
+POPULATION: seven gate-PASS pairs, both strata, per direction.
+OUTPUT: per pair, Δ(T1+) and Δ(candidate-expectancy) between
+DISMISSED and NON-DISMISSED with per-stratum CIs; signed
+divergence table; no causal claim; three-ledger lines and fence on
+every table. May seed a future Phase-2 PR on the dismissal
+mechanism; makes no claim itself.
