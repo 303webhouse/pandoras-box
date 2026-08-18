@@ -49,11 +49,37 @@ would surface all 64 at once. Under Phase-A's Committee Condition 4 that is
 6× the ">10 surfaced HG_1H per session" kill threshold, and it would trip the
 kill for a reason unrelated to the A1 flip's actual merits.
 
-## Not yet verified
+## ~~Not yet verified~~ → MEASURED 2026-08-18 (EDGE)
 
-Whether the `positions.py` re-score path currently fires against HG_1H rows in
-practice. The mechanism is proven by code read; the frequency is not measured.
-That measurement should precede the fix, since it sets severity.
+*Original open question: whether the `positions.py` re-score path currently fires
+against HG_1H rows in practice — mechanism proven by code read, frequency
+unmeasured, and that measurement was stated to set severity.*
+
+**EDGE supplied the frequency 2026-08-18: 1 untagged row / 2,466 post-07-03
+suppress-set rows = 0.04%.**
+
+Reading, stated precisely so it is not over-claimed in either direction:
+
+- The **mechanism is confirmed real** — this is not a false-positive code read.
+- The **wild firing rate is ~zero**. The re-score path is not, in practice,
+  stripping tags at any meaningful rate.
+- The **64-row blast radius stands, but is dormant** — real, and bounded by that
+  base rate rather than by any guard in the code. The exposure is latent
+  capacity, not observed behaviour.
+- **No retroactive surfacing risk is added today** by this measurement, per EDGE.
+  It does not bear on the Phase-A day-one surfacing watch.
+
+**Severity deliberately NOT changed here.** EDGE has routed the demotion to
+spine; this ticket records the measurement and leaves the P1/P2 ruling to that
+process. Do not read the retained `P1` header as a counter-position.
+
+**What the base rate does and does not settle.** It settles *likelihood*. It does
+not settle *consequence*: the failure is still silent and still fail-open, so a
+single strip surfaces a row with no error anywhere. Per EDGE, this is logged as a
+Map §6 footnote for v1.1 — the suppression tag being mutable and fail-open makes
+**visibility strata time-varying**, which is the more general statement of this
+defect than "a leak." The fix below remains the fix regardless of the rate; what
+the rate changes is the priority of applying it.
 
 ## Proposed minimal fix (NOT applied — Phase-A scope fence: one code line)
 
