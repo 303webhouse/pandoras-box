@@ -1,8 +1,24 @@
 # DEF-L0-TESTS-STALE-HG1H
 
-**Severity:** P2 · **Filed:** 2026-08-18 · **Status:** OPEN
+**Severity:** P2 · **Filed:** 2026-08-18 · **Status:** RESOLVED 2026-08-19 — no code change required
 **Surface:** `backend/tests/test_l0_routing.py`
 **Introduced by:** `ae99def` (Phase-A A1 flip) — expected consequence, not a regression in behaviour
+
+## RESOLVED 2026-08-19
+
+Spine's re-suppression order (`0a2f51a`) restored `HOLY_GRAIL_1H` to
+`SUPPRESS_ALWAYS`, which restored the premise these four tests encode. Verified
+immediately after the edit: **30 passed, 0 failed** — the suite self-healed with
+no test edit, exactly as the reversal note below anticipated.
+
+The proposed fix was therefore correctly **not** applied. Had it been applied on
+2026-08-18, the rewritten tests would now be asserting the wrong policy and would
+need a second edit to undo. Left here as a worked example of why the reversal
+note belonged in the original filing.
+
+Re-open only if `HOLY_GRAIL_1H` is un-suppressed again; step 3 below (an explicit
+positive test pinning whichever state is intended) remains the durable fix and
+would survive either direction.
 
 ## Symptom
 
