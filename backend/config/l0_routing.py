@@ -51,7 +51,9 @@ RULE_SUPPRESS_IF_NON_LIQUID = "SUPPRESS_IF_NON_LIQUID"
 
 # signal_types suppressed unconditionally (every timeframe / direction).
 # 2026-08-18 STRIKE Phase-A A1: HOLY_GRAIL_1H un-suppressed for 7-day watch-only observation — see docs/strike/2026-08-18-phase-a-approval-record.md
+# 2026-08-19 SUPERSEDED — spine re-suppression order (R1 watch-only mechanism absent OR kill-criterion trip, either ground independently). HOLY_GRAIL_1H restored below.
 SUPPRESS_ALWAYS: frozenset[str] = frozenset({
+    "HOLY_GRAIL_1H",   # Phase-A observation proceeds UNDER suppression — grading continues per L0 architecture; visibility deferred to 08-25 reconvene.
     "HOLY_GRAIL_15M",  # Holy_Grail — KILL confirmed
     "PULLBACK_ENTRY",  # CTA Scanner — high-vol bleeder (-0.25)
     "TRAPPED_LONGS",   # CTA Scanner — -2.54
