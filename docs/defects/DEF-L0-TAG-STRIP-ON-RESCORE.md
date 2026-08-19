@@ -1,6 +1,7 @@
 # DEF-L0-TAG-STRIP-ON-RESCORE
 
-**Severity:** P1 · **Filed:** 2026-08-18 · **Status:** OPEN
+**Severity:** P3 · **Filed:** 2026-08-18 · **Status:** OPEN
+**Demoted P1 → P3 by spine 2026-08-19**, on the measured base rate below.
 **Surface:** `backend/database/postgres_client.py:2103-2112` ·
 `backend/api/positions.py:720-753`
 **Found by:** STRIKE Phase-A Gate 3 (mechanics read). Pre-existing; **not**
@@ -69,11 +70,16 @@ Reading, stated precisely so it is not over-claimed in either direction:
 - **No retroactive surfacing risk is added today** by this measurement, per EDGE.
   It does not bear on the Phase-A day-one surfacing watch.
 
-**Severity deliberately NOT changed here.** EDGE has routed the demotion to
-spine; this ticket records the measurement and leaves the P1/P2 ruling to that
-process. Do not read the retained `P1` header as a counter-position.
+**Severity RULED 2026-08-19 — demoted P1 → P3 by spine**, on the measured base
+rate above. EDGE routed the demotion rather than self-applying it; the interim
+retention of the `P1` header was logged by spine as proper form and explicitly
+**not** a counter-position.
 
-**What the base rate does and does not settle.** It settles *likelihood*. It does
+**What the base rate does and does not settle** (spine 2026-08-19, adopted
+verbatim as the governing generalization): **rate settles likelihood, not
+consequence — the fix is unchanged, only its queue position.**
+
+It settles *likelihood*. It does
 not settle *consequence*: the failure is still silent and still fail-open, so a
 single strip surfaces a row with no error anywhere. Per EDGE, this is logged as a
 Map §6 footnote for v1.1 — the suppression tag being mutable and fail-open makes
