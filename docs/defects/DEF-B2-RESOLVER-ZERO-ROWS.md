@@ -53,6 +53,42 @@ here** — A4 is diagnosis-only and identifying the exact bind site requires
 reading the running revision. The *class* of defect is established; the precise
 line is not.
 
+### DISCREPANCY RESOLVED 2026-08-19 (CC-SHELL, re-read from HEAD)
+
+No deployed-vs-HEAD divergence is required, and no second statement is involved.
+The failing bind is the **NO_CHAIN branch insert at `b2_options_resolver.py:256-266`**,
+not the success-path insert at `:340-352` the note above was reading:
+
+```python
+VALUES ($1, $2, 0, 0, $3::date, 0, $4, 'NO_CHAIN', 'OPTIONS_PNL')
+...
+signal_id, opt_type, expiry, entry_f,
+```
+
+Here `$3` **is** `expiry`, and it **is** `$3::date` — an exact match for the
+logged `argument $3: '2026-08-28'`. `expiry` comes from `_find_expiry()`, which
+returns `candidate.isoformat()` — a `str`. asyncpg encodes parameters before the
+`::date` cast is applied, so the cast cannot rescue it; its DATE encoder calls
+`.toordinal()` on the value and raises exactly the observed error. Bind site is
+now identified; the *class* and the *line* are both established.
+
+**Second finding, free from the same evidence:** every failure is in the
+`if not chain:` branch, which means the UW chain fetch is returning falsy for
+every signal — otherwise execution would reach the success-path insert instead.
+So a chain-fetch failure is running underneath the bind failure. Fixing only the
+date bind would convert 0 rows into rows that are **all `NO_CHAIN`** — non-zero
+but empty of the friction data STRIKE-SPEC-02/03 actually need. The acceptance
+test below should therefore require at least one non-`NO_CHAIN` row, not merely
+a non-zero count.
+
+**Independent corroboration (different sample, same failure):** a separate
+2,000-line pull of the same deployment (`f86d2021`, commit `afef615`) yielded
+**8** `b2:` lines, all the identical `$3 … toordinal` error — five UUID-keyed
+plus `SOL-USD_LONG_20260819_170103 / _173136 / _180210`. That sample overlaps
+but is not identical to the 10 recorded above (different window), so both are
+partial views of one failure population, not competing counts. **Neither number
+is a total** — both are floors bounded by their log window.
+
 ## Fix path
 Phase-A Phase 4 delivers root cause + minimal fix proposal (no fix in-session).
 Acceptance after fix: >=1 row written during one RTH session with plausible
