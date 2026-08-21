@@ -502,6 +502,105 @@ async def lifespan(app: FastAPI):
                 logger.warning("Flow dead-feed watchdog error: %s", e)
             await asyncio.sleep(300)  # 5-min cadence
 
+    async def signals_freshness_watchdog_loop():
+        """DEF-SIGNAL-PERSISTENCE-COLLAPSE dead-man's switch for signal persistence.
+
+        /health is the RECORD; this is the ALARM. The enumeration found ZERO clients
+        of /health in the repo, so a freshness block alone would sit on a page nobody
+        reads -- fake-healthy reproduced inside the fix for fake-healthy.
+
+        Alarms on NEW rejections (delta since last check), never on the cumulative
+        count: a cumulative gap never returns to zero within a process lifetime, so it
+        would re-fire every latch-TTL forever and make recovery unreachable. A
+        permanently-crying alarm gets muted, which restores fake-healthy by another
+        route (R-IV.46(c)).
+
+        Deliberately NOT RTH-gated: RTH gates EXPECTATIONS (staleness); a rejection is
+        EVIDENCE and alerts at any hour, any day -- the overnight webhook path is live.
+        """
+        LATCH_KEY = "alarm:signals_persistence:active"
+        LATCH_TTL = 7200
+        CLEAN_CYCLES_TO_HEAL = 3      # ~15 min of no new rejections
+
+        last_rejected: dict[str, int] = {}
+        clean_streak = 0
+        episode_open = False
+        # Classes already dark when this process first looks are a STANDING CONDITION,
+        # not a new event -- e.g. crypto_engine (last row 07-22) and crypto_cvd_engine
+        # (07-24) are correctly flatline at boot. Paging on them would page on history
+        # every restart. /health still carries the truth; only a TRANSITION to dark
+        # pages. A baseline-dark class that recovers leaves the baseline, so if it
+        # later goes dark again that IS a transition and does page.
+        baseline_dark: set[str] | None = None
+
+        await asyncio.sleep(240)  # let the pipeline seed counters after boot
+
+        while True:
+            try:
+                from stable_engine.signals_freshness import signals_freshness_summary
+                summary = await signals_freshness_summary()
+                classes = summary.get("classes", {}) or {}
+
+                new_rejections = {}
+                for cls, d in classes.items():
+                    cur = int(d.get("rejected") or 0)
+                    delta = cur - last_rejected.get(cls, cur if not episode_open else 0)
+                    last_rejected[cls] = cur
+                    if delta > 0:
+                        new_rejections[cls] = (delta, d)
+
+                dark_now = {c for c, d in classes.items()
+                            if d.get("status") in ("flatline", "no_data")
+                            and not int(d.get("rejected") or 0)}
+                if baseline_dark is None:
+                    baseline_dark = set(dark_now)   # first look: adopt, never page
+                    if baseline_dark:
+                        logger.info(
+                            "Signals watchdog baseline-dark at boot (not paged): %s",
+                            ", ".join(sorted(baseline_dark)))
+                baseline_dark -= (set(classes) - dark_now)  # recovered -> leaves baseline
+                stale_bad = {c: classes[c] for c in sorted(dark_now - baseline_dark)}
+
+                redis = await get_redis_client()
+                latched = bool(await redis.get(LATCH_KEY)) if redis else False
+
+                if new_rejections or stale_bad:
+                    clean_streak = 0
+                    if not latched:
+                        from bias_engine.anomaly_alerts import send_alert
+                        parts = [
+                            f"{c}: +{n} NEW rejections (total={d.get('rejected')}, "
+                            f"persisted={d.get('persisted')}, age={d.get('last_persist_age_s')}s)"
+                            for c, (n, d) in sorted(new_rejections.items())
+                        ] + [
+                            f"{c}: no data (age={d.get('last_persist_age_s')}s)"
+                            for c, d in sorted(stale_bad.items())
+                        ]
+                        status = "; ".join(parts)
+                        await send_alert("🚨 Signal persistence degraded", status, severity="warning")
+                        if redis:
+                            await redis.set(LATCH_KEY, "1", ex=LATCH_TTL)
+                        episode_open = True
+                        logger.error("Signal persistence alarm FIRED: %s", status)
+                elif episode_open or latched:
+                    clean_streak += 1
+                    if clean_streak >= CLEAN_CYCLES_TO_HEAL:
+                        from bias_engine.anomaly_alerts import send_alert
+                        status = (f"No new rejections for {CLEAN_CYCLES_TO_HEAL} cycles "
+                                  f"(worst={summary.get('worst_status')}, "
+                                  f"oldest_age={summary.get('oldest_persist_age_s')}s)")
+                        await send_alert("✅ Signal persistence restored", status, severity="info")
+                        if redis:
+                            await redis.delete(LATCH_KEY)
+                        episode_open = False
+                        clean_streak = 0
+                        logger.info("Signal persistence alarm CLEARED: %s", status)
+            except asyncio.CancelledError:
+                raise  # shutdown must not be swallowed by the catch-all below
+            except Exception as e:
+                logger.warning("Signals freshness watchdog error: %s", e)
+            await asyncio.sleep(300)  # 5-min cadence
+
     async def pythia_staleness_watchdog_loop():
         """Per-name PYTHIA MP-feed staleness alarm -- durable fix, full liquid-20 roster.
 
@@ -762,6 +861,7 @@ async def lifespan(app: FastAPI):
     sector_rs_task = asyncio.create_task(sector_rs_loop())
     sell_the_rip_task = asyncio.create_task(sell_the_rip_scan_loop())
     staleness_task = asyncio.create_task(factor_staleness_loop())
+    signals_freshness_task = asyncio.create_task(signals_freshness_watchdog_loop())
     vwap_task = asyncio.create_task(vwap_validation_loop())
     crypto_scan_task = asyncio.create_task(crypto_scan_loop())
     # RE-ENABLED 2026-06-18 (L1.0 Chunk 4): trimmed to the L0.2 liquid universe
@@ -1091,6 +1191,7 @@ async def lifespan(app: FastAPI):
     sector_rs_task.cancel()
     sell_the_rip_task.cancel()
     staleness_task.cancel()
+    signals_freshness_task.cancel()  # DEF-SIGNAL-PERSISTENCE-COLLAPSE watchdog
     vwap_task.cancel()
     crypto_scan_task.cancel()
     uw_flow_poller_task.cancel()  # RE-ENABLED 2026-06-18 (L1.0 Chunk 4) — see creation site
@@ -1239,6 +1340,17 @@ async def health_check():
     except Exception as _sje:
         stable_jobs_block = {"error": str(_sje)}
 
+    # DEF-SIGNAL-PERSISTENCE-COLLAPSE: signal persistence was invisible here while
+    # 459 signals were lost. Table-sourced staleness + issued-vs-persisted gap.
+    signals_freshness_block: dict = {}
+    try:
+        from stable_engine.signals_freshness import signals_freshness_summary
+        signals_freshness_block = await signals_freshness_summary()
+        if signals_freshness_block.get("any_flatline") and overall == "healthy":
+            overall = "degraded"
+    except Exception as _sfe:
+        signals_freshness_block = {"error": str(_sfe)}
+
     return {
         "status": overall,
         "server_time_et": now_et.strftime("%Y-%m-%d %H:%M:%S %Z"),
@@ -1247,6 +1359,7 @@ async def health_check():
         "websocket_connections": len(manager.active_connections),
         "zeus": zeus_block,
         "stable_jobs": stable_jobs_block,
+        "signals_freshness": signals_freshness_block,
     }
 
 

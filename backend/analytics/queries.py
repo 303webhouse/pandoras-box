@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from database.postgres_client import get_postgres_client
+from utils.json_sanitize import dumps_jsonb
 
 
 def _utc_now_naive() -> datetime:
@@ -540,7 +541,7 @@ async def insert_trade(trade: Dict[str, Any]) -> Dict[str, Any]:
         trade.get("notes"),
         trade.get("pivot_recommendation"),
         trade.get("pivot_conviction"),
-        json.dumps(trade.get("full_context") or {}),
+        dumps_jsonb(trade.get("full_context") or {}),
         trade.get("bias_at_entry"),
         trade.get("risk_amount"),
         trade.get("origin") or "manual",
@@ -715,7 +716,7 @@ async def insert_uw_snapshot(payload: Dict[str, Any]) -> Dict[str, Any]:
         payload.get("timestamp"),
         payload.get("dashboard_type"),
         payload.get("time_slot"),
-        json.dumps(payload.get("extracted_data") or {}),
+        dumps_jsonb(payload.get("extracted_data") or {}),
         payload.get("raw_summary"),
         payload.get("signal_alignment"),
     ]

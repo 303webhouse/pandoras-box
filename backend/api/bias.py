@@ -13,6 +13,7 @@ from typing import Optional, Dict, Any
 import logging
 import json
 import os
+from utils.json_sanitize import dumps_jsonb
 
 logger = logging.getLogger(__name__)
 
@@ -886,7 +887,7 @@ async def _log_factor_history(
                 factor_id,
                 score,
                 bias,
-                json.dumps(sanitize_for_json(data or {})),
+                dumps_jsonb(data or {}),
                 collected_at,
             )
     except Exception as exc:

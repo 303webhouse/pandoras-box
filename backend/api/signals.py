@@ -15,6 +15,7 @@ from pydantic import BaseModel
 
 from database.postgres_client import get_postgres_client
 from utils.pivot_auth import require_api_key
+from utils.json_sanitize import dumps_jsonb
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -97,7 +98,7 @@ async def record_nick_action(
                 user_action = $2
             WHERE signal_id = $3
             """,
-            json.dumps(nick_decision),
+            dumps_jsonb(nick_decision),
             user_action,
             signal_id,
         )

@@ -13,6 +13,7 @@ import logging
 from dotenv import load_dotenv
 
 from utils.json_sanitize import sanitize_for_json as _sanitize_for_json
+from utils.json_sanitize import dumps_jsonb
 
 logger = logging.getLogger(__name__)
 
@@ -1263,7 +1264,7 @@ async def init_database():
                 "INSERT INTO crypto_gate_config (created_by, note, config) VALUES ($1, $2, $3)",
                 "SEED_S2",
                 "Initial seed, S-2 Phase 1 (gating_enabled=false)",
-                json.dumps(SEED_CONFIG_V1),
+                dumps_jsonb(SEED_CONFIG_V1),
             )
             logger.info("crypto_gate_config seeded (version 1, gating_enabled=false)")
 
@@ -1333,7 +1334,7 @@ async def init_database():
                 "INSERT INTO crypto_cycle_config (created_by, note, config) VALUES ($1, $2, $3)",
                 "SEED_S3",
                 "Initial seed, S-3 Phase 2 (dial writes zero feed rows; shadow observation only)",
-                json.dumps(SEED_CONFIG_V1),
+                dumps_jsonb(SEED_CONFIG_V1),
             )
             logger.info("crypto_cycle_config seeded (version 1, SEED_S3)")
 
@@ -1678,8 +1679,8 @@ async def log_signal(
             signal_data.get('line_separation'),
             signal_data.get('score'),
             signal_data.get('bias_alignment'),
-            json.dumps(_sanitize_for_json(triggering_factors)) if triggering_factors is not None else None,
-            json.dumps(_sanitize_for_json(bias_at_signal)) if bias_at_signal is not None else None,
+            dumps_jsonb(triggering_factors) if triggering_factors is not None else None,
+            dumps_jsonb(bias_at_signal) if bias_at_signal is not None else None,
             signal_data.get("notes"),
             calendar_fields.get("day_of_week"),
             calendar_fields.get("hour_of_day"),
@@ -1758,7 +1759,7 @@ async def create_position(signal_id: str, position_data: Dict[Any, Any]) -> Opti
             'OPEN',
             position_data.get('broker', 'MANUAL'),
             position_data.get('target_2'),
-            json.dumps(position_data.get('bias_at_open')) if position_data.get('bias_at_open') is not None else None,
+            dumps_jsonb(position_data.get('bias_at_open')) if position_data.get('bias_at_open') is not None else None,
             position_data.get('actual_entry_price') or position_data.get('entry_price')
         )
         return row["id"] if row and "id" in row else None
@@ -2109,7 +2110,7 @@ async def update_signal_with_score(signal_id: str, score: float, bias_alignment:
             UPDATE signals 
             SET score = $2, bias_alignment = $3, triggering_factors = $4
             WHERE signal_id = $1
-        """, signal_id, score, bias_alignment, json.dumps(_sanitize_for_json(triggering_factors)))
+        """, signal_id, score, bias_alignment, dumps_jsonb(triggering_factors))
 
 
 async def update_signal_outcome(
@@ -2287,7 +2288,7 @@ async def close_position_in_db(
             loss_reason,
             notes,
             quantity_closed,
-            json.dumps(bias_at_close) if bias_at_close is not None else None
+            dumps_jsonb(bias_at_close) if bias_at_close is not None else None
         )
         
         if row:
@@ -2486,7 +2487,7 @@ async def log_options_position(position: Dict[Any, Any]):
                 'hermes_watchlist',
                 $1::jsonb
             ) ON CONFLICT (key) DO NOTHING
-        """, json.dumps({
+        """, dumps_jsonb({
             "tickers": {
                 "SPY":  {"threshold_pct": 1.0, "timeframe_min": 30, "category": "broad_market"},
                 "QQQ":  {"threshold_pct": 1.0, "timeframe_min": 30, "category": "tech"},
@@ -2602,12 +2603,12 @@ async def log_options_position(position: Dict[Any, Any]):
             position['underlying'],
             position['strategy_type'],
             position.get('direction'),
-            json.dumps(position.get('legs', [])),
+            dumps_jsonb(position.get('legs', [])),
             position.get('entry_date'),
             position.get('net_premium'),
             position.get('max_profit'),
             position.get('max_loss'),
-            json.dumps(position.get('breakeven', [])),
+            dumps_jsonb(position.get('breakeven', [])),
             position.get('notes'),
             position.get('thesis'),
             position.get('status', 'OPEN'),
@@ -2649,7 +2650,7 @@ async def link_options_position_to_signal(
         """,
             position_id,
             signal_id,
-            json.dumps(bias_at_open) if bias_at_open else None,
+            dumps_jsonb(bias_at_open) if bias_at_open else None,
             signal_data.get('score') if signal_data else None,
             signal_data.get('entry_price') if signal_data else None
         )
@@ -2802,7 +2803,7 @@ async def create_pending_trade(signal_id: str, trade_type: str, params: dict) ->
             params.get("planned_target"),
             params.get("planned_quantity"),
             params.get("options_structure"),
-            json.dumps(params.get("options_legs")) if params.get("options_legs") else None,
+            dumps_jsonb(params.get("options_legs")) if params.get("options_legs") else None,
             params.get("options_net_premium"),
             params.get("options_max_loss"),
             params.get("options_expiry"),

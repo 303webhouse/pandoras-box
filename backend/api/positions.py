@@ -26,6 +26,7 @@ from database.postgres_client import (
 from websocket.broadcaster import manager
 
 from api._swr_cache import SWRCache
+from utils.json_sanitize import dumps_jsonb
 
 logger = logging.getLogger(__name__)
 
@@ -410,7 +411,7 @@ async def accept_signal_as_options(signal_id: str, request: AcceptSignalAsOption
             """,
                 position_id, request.underlying.upper(), asset_type,
                 request.strategy_type, direction,
-                json.dumps(legs_json),
+                dumps_jsonb(legs_json),
                 abs(request.net_premium), request.contracts, cost_basis,
                 request.max_loss, request.max_profit,
                 signal_data.get("stop_loss"), signal_data.get("target_1"),

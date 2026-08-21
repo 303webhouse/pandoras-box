@@ -14,6 +14,7 @@ from fastapi import APIRouter, Body, HTTPException, Request
 
 from database.postgres_client import get_postgres_client
 from utils.session import COOKIE_NAME, verify_session
+from utils.json_sanitize import dumps_jsonb
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["layout"])
@@ -66,6 +67,6 @@ async def post_layout(request: Request, payload: dict = Body(...)):
             """INSERT INTO v2_dashboard_layout (layout_key, layout, updated_at)
                VALUES ($1, $2::jsonb, now())
                ON CONFLICT (layout_key) DO UPDATE SET layout=EXCLUDED.layout, updated_at=now()""",
-            _LAYOUT_KEY, json.dumps(layout),
+            _LAYOUT_KEY, dumps_jsonb(layout),
         )
     return {"ok": True}

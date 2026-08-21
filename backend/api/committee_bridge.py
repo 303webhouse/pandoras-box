@@ -19,6 +19,7 @@ from pydantic import BaseModel
 
 from database.postgres_client import get_postgres_client, serialize_db_row
 from committee.decision_parser import extract_committee_decision
+from utils.json_sanitize import dumps_jsonb
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -140,7 +141,7 @@ async def submit_committee_results(body: CommitteeResult, _=Depends(require_api_
             WHERE signal_id = $1
             """,
             body.signal_id,
-            json.dumps(committee_data),
+            dumps_jsonb(committee_data),
             body.committee_run_id,
         )
 
@@ -183,7 +184,7 @@ async def submit_committee_results(body: CommitteeResult, _=Depends(require_api_
                 ON CONFLICT (committee_run_id) DO NOTHING
                 """,
                 current["ticker"],
-                json.dumps(agent_reads) if agent_reads else None,
+                dumps_jsonb(agent_reads) if agent_reads else None,
                 body.pivot_synthesis,
                 body.conviction,
                 recommendation,

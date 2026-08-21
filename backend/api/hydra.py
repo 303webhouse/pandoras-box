@@ -20,6 +20,7 @@ from scanners.hydra_squeeze import (
     persist_scores,
     scan_squeeze_universe,
 )
+from utils.json_sanitize import dumps_jsonb
 
 logger = logging.getLogger("hydra_api")
 router = APIRouter(prefix="/hydra", tags=["Hydra Squeeze Scanner"])
@@ -291,7 +292,7 @@ async def add_lightning_confirmation(card_id: str, signal_data: dict):
 
         await conn.execute(
             "UPDATE lightning_cards SET confirmations = $1, updated_at = NOW() WHERE id = $2",
-            json.dumps(existing), card_id,
+            dumps_jsonb(existing), card_id,
         )
 
     # Push WebSocket update for flash animation on frontend

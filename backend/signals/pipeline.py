@@ -1148,6 +1148,24 @@ async def _emit_catalyst_confluence(signal_data: Dict[str, Any]) -> None:
         logger.warning("Catalyst confluence check failed (fail-open): %s", exc)
 
 
+def completion_status(persisted: bool, persist_error: BaseException | None) -> tuple[str, str]:
+    """Map a persistence outcome to (status_text, logger_level_name).
+
+    DEF-SIGNAL-PERSISTENCE-COLLAPSE: completion status IS the persistence outcome.
+    Three distinguishable states -- a dedupe is a correct no-op and must never be
+    reported as data loss, and a failure must never be reported as success.
+    Pure by design so the mapping is unit-testable without driving the pipeline.
+    """
+    if persisted:
+        return "✅ Pipeline complete", "info"
+    if persist_error is not None:
+        return "❌ Pipeline FAILED — row NOT persisted", "error"
+    return (
+        "⚠️ Pipeline complete (DEDUPE — duplicate signal_id, no row written)",
+        "warning",
+    )
+
+
 async def process_signal_unified(
     signal_data: Dict[str, Any],
     source: str = "tradingview",
@@ -1374,10 +1392,27 @@ async def process_signal_unified(
         return signal_data
 
     # 4. Persist to PostgreSQL
+    # DEF-SIGNAL-PERSISTENCE-COLLAPSE (2026-08-20): log_signal's return value was
+    # discarded here and its exception swallowed, so a rejected INSERT still
+    # reported "Pipeline complete" downstream -- the ghost-id factory that hid a
+    # 459-signal loss for two days. Three states are now distinguished and carried
+    # to the completion log: persisted / dedupe (ON CONFLICT) / failed.
+    persisted = False
+    persist_error = None
     try:
-        await log_signal(signal_data)
+        persisted = bool(await log_signal(signal_data))
     except Exception as e:
+        persist_error = e
         logger.error(f"Failed to log signal: {e}")
+    try:
+        from stable_engine.signals_freshness import record_attempt
+        record_attempt(
+            signal_data.get("source"),
+            persisted,
+            str(persist_error) if persist_error is not None else None,
+        )
+    except Exception:
+        pass  # metrics must never break the pipeline
 
     # Write PENDING outcome record for accuracy tracking
     try:
@@ -1542,8 +1577,11 @@ async def process_signal_unified(
         logger.debug("B2 expression creation skipped: %s", _b2_err)
 
     elapsed_ms = (datetime.utcnow() - start).total_seconds() * 1000
-    logger.info(
-        f"✅ Pipeline complete: {signal_data.get('ticker')} "
+    # Completion status IS the persistence outcome -- never a bare success marker.
+    _status, _level = completion_status(persisted, persist_error)
+    _emit = getattr(logger, _level)
+    _emit(
+        f"{_status}: {signal_data.get('ticker')} "
         f"({source}, score={signal_data.get('score')}) in {elapsed_ms:.1f}ms"
     )
 

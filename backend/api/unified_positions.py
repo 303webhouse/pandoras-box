@@ -22,6 +22,7 @@ from websocket.broadcaster import manager
 from models.position_risk import calculate_position_risk, infer_direction
 
 from api._swr_cache import SWRCache
+from utils.json_sanitize import dumps_jsonb
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -528,7 +529,7 @@ async def create_position(req: CreatePositionRequest, _=Depends(require_api_key)
             RETURNING *
         """,
             position_id, req.ticker.upper(), req.asset_type, req.structure, direction,
-            json.dumps(req.legs) if req.legs else None,
+            dumps_jsonb(req.legs) if req.legs else None,
             req.entry_price, req.quantity, cost_basis,
             max_loss, max_profit, req.stop_loss, req.target_1, req.target_2,
             breakeven if breakeven else None,
@@ -1564,7 +1565,7 @@ async def _resolve_signal_outcome(pool, position: dict, exit_price: float,
             round(pnl_pct, 2),
             round(realized_pnl, 2),
             closed_at,
-            _json.dumps(options_metrics) if options_metrics else None,
+            dumps_jsonb(options_metrics) if options_metrics else None,
             f"Closed: {trade_outcome} (${realized_pnl:+.2f}, {pnl_pct:+.1f}%)",
         )
 
@@ -2015,7 +2016,7 @@ async def bulk_create_positions(req: BulkRequest, _=Depends(require_api_key)):
                 """,
                     position_id, item.ticker.upper(), item.asset_type,
                     item.structure, direction,
-                    json.dumps(item.legs) if item.legs else None,
+                    dumps_jsonb(item.legs) if item.legs else None,
                     item.entry_price, item.quantity, max_loss, max_profit,
                     breakeven if breakeven else None,
                     expiry, dte, n_long, n_short,
@@ -2265,7 +2266,7 @@ async def run_mark_to_market() -> dict:
                 legs_data = inferred
                 # Persist inferred legs back to DB so future MTM runs don't re-parse
                 try:
-                    legs_json_str = json.dumps(inferred)
+                    legs_json_str = dumps_jsonb(inferred)
                     async with pool.acquire() as conn:
                         await conn.execute(
                             "UPDATE unified_positions SET legs = $1 WHERE position_id = $2",

@@ -18,6 +18,7 @@ from database.redis_client import get_redis_client, sanitize_for_json
 from database.postgres_client import get_postgres_client
 from websocket.broadcaster import manager
 from bias_engine.anomaly_alerts import send_alert
+from utils.json_sanitize import dumps_jsonb
 
 logger = logging.getLogger(__name__)
 
@@ -349,13 +350,11 @@ async def store_factor_reading(reading: FactorReading) -> None:
                 reading.score,
                 reading.signal,
                 reading.source,
-                json.dumps(
-                    sanitize_for_json(
-                        {
-                            "raw_data": reading.raw_data or {},
-                            "metadata": reading.metadata or {},
-                        }
-                    )
+                dumps_jsonb(
+                    {
+                        "raw_data": reading.raw_data or {},
+                        "metadata": reading.metadata or {},
+                    }
                 ),
             )
     except Exception as exc:
@@ -483,7 +482,7 @@ async def log_composite(result: CompositeResult) -> None:
                 result.velocity_multiplier,
                 result.override,
                 result.confidence,
-                json.dumps(sanitize_for_json(factor_scores)),
+                dumps_jsonb(factor_scores, marker=False),   # map-shaped: factor_id -> score, returned verbatim over HTTP
             )
     except Exception as exc:
         logger.warning(f"Failed to log composite bias: {exc}")

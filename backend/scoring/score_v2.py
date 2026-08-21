@@ -14,6 +14,7 @@ This is the "full score" in the flash/full two-pass pattern.
 import json
 import logging
 from typing import Any, Dict, Optional, Tuple
+from utils.json_sanitize import dumps_jsonb
 
 logger = logging.getLogger(__name__)
 
@@ -342,7 +343,7 @@ async def persist_score_v2(signal_id: str, score_v2: float, factors: Dict[str, A
                 """,
                 signal_id,
                 score_v2,
-                json.dumps(factors),
+                dumps_jsonb(factors),
             )
     except Exception as e:
         logger.warning(f"Failed to persist score_v2 for {signal_id}: {e}")

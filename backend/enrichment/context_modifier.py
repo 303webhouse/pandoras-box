@@ -23,6 +23,7 @@ from typing import Dict, Optional
 
 from database.redis_client import get_redis_client
 from database.postgres_client import get_postgres_client
+from utils.json_sanitize import dumps_jsonb
 
 logger = logging.getLogger(__name__)
 
@@ -362,7 +363,7 @@ async def enrich_trade_idea(signal_id: str, ticker: str, direction: str, base_sc
                        context_updated_at = NOW()
                    WHERE signal_id = $5""",
                 context_modifier,
-                json.dumps(factors),
+                dumps_jsonb(factors),
                 adjusted_score,
                 is_contrarian,
                 signal_id,

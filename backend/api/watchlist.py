@@ -17,6 +17,7 @@ import json
 import os
 import logging
 from datetime import datetime, timezone
+from utils.json_sanitize import dumps_jsonb
 
 logger = logging.getLogger(__name__)
 
@@ -186,7 +187,7 @@ async def init_watchlist_table() -> None:
                         ON CONFLICT (sector_name) DO NOTHING
                     """,
                         sector_name,
-                        json.dumps(sector_data.get("tickers", [])),
+                        dumps_jsonb(sector_data.get("tickers", [])),
                         sector_data.get("etf"),
                         idx,
                     )
@@ -409,7 +410,7 @@ async def save_watchlist_data_async(data: Dict[str, Any]) -> bool:
                             tickers = $2, etf = $3, sort_order = $4, updated_at = NOW()
                     """,
                         sector_name,
-                        json.dumps(sector_data.get("tickers", [])),
+                        dumps_jsonb(sector_data.get("tickers", [])),
                         sector_data.get("etf"),
                         idx,
                     )
@@ -965,7 +966,7 @@ async def add_watchlist_ticker(request: WatchlistTickerAdd, _=Depends(require_ap
                 ON CONFLICT (sector_name) DO NOTHING
                 """,
                 sector,
-                json.dumps([]),
+                dumps_jsonb([]),
                 None,
                 int(max_sort or 0) + 1,
             )

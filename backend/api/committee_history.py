@@ -15,6 +15,7 @@ from utils.pivot_auth import require_api_key
 from fastapi import Depends
 
 from database.postgres_client import get_postgres_client
+from utils.json_sanitize import dumps_jsonb
 
 logger = logging.getLogger("committee_history")
 router = APIRouter(prefix="/committee", tags=["committee-history"])
@@ -99,7 +100,7 @@ async def store_committee_recommendation(request: Request, _=Depends(require_api
             body.get("structure"),
             body.get("levels"),
             body.get("size"),
-            json.dumps(body) if body else None,
+            dumps_jsonb(body) if body else None,
         )
 
     logger.info("Committee recommendation stored: %s %s %s",
