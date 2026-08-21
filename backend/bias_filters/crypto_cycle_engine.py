@@ -27,6 +27,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from config.crypto_symbol_matrix import get_tier, is_tracked, CRYPTO_SYMBOL_MATRIX
+from utils.json_sanitize import dumps_jsonb
 
 logger = logging.getLogger(__name__)
 
@@ -462,7 +463,7 @@ async def evaluate_cycle_extremes(symbol: str) -> Dict[str, Any]:
                 now_utc, symbol, tier, composite_score, composite_method,
                 degraded, degrade_reason, live_count,
                 config.get("min_live_cells_btc_eth", 3) if tier <= 2 else config.get("min_live_cells_others", 2),
-                _json.dumps(cells_all), config_version,
+                dumps_jsonb(cells_all), config_version,
             )
     except Exception as exc:
         logger.error("Failed to persist cycle log for %s: %s", symbol, exc)

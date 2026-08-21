@@ -18,6 +18,7 @@ import httpx
 from analytics.computations import classify_outcome, mean, safe_div
 from analytics.queries import get_signal_stats_rows
 from database.postgres_client import get_postgres_client
+from utils.json_sanitize import dumps_jsonb
 
 logger = logging.getLogger(__name__)
 
@@ -287,7 +288,7 @@ async def run_strategy_health_monitor(window_days: int = 30) -> Dict[str, Any]:
                     avg_mfe_pct,
                     avg_mae_pct,
                     mfe_mae_ratio,
-                    json.dumps(regime_breakdown),
+                    dumps_jsonb(regime_breakdown),
                     len(convergence_signal_ids),
                     convergence_accuracy,
                     grade,
@@ -327,7 +328,7 @@ async def run_strategy_health_monitor(window_days: int = 30) -> Dict[str, Any]:
                         grade,
                         "grade_changed_to_c_or_below",
                         message,
-                        json.dumps(metadata),
+                        dumps_jsonb(metadata),
                     )
                     webhook_messages.append(message)
                     alerts_sent += 1

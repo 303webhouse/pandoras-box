@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import date
+from utils.json_sanitize import dumps_jsonb
 
 logger = logging.getLogger("triton_shadow")
 
@@ -131,7 +132,7 @@ async def run_triton_shadow_poller() -> None:
                     bool(a.get("has_sweep")), classify_bucket(ticker, premium_i),
                     spot, None,  # chg_pct_day: not reliably in the alert payload -> null
                     prior_5d, ticker in LIQUID_UNIVERSE, ticker in SEMIS_AI_TECH,
-                    bias_level, gex_regime, json.dumps(raw),
+                    bias_level, gex_regime, dumps_jsonb(raw),
                 )
             if res and res.endswith(" 1"):   # asyncpg "INSERT 0 1" = new row
                 inserted += 1

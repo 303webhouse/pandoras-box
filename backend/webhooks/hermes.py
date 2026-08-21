@@ -30,6 +30,7 @@ from utils.webhook_auth import (
     enforce_payload_size_cap,
     strip_secret,
 )
+from utils.json_sanitize import dumps_jsonb
 
 logger = logging.getLogger("hermes")
 router = APIRouter(tags=["hermes"])
@@ -577,9 +578,9 @@ async def _store_catalyst_event(**kwargs) -> str:
             kwargs["trigger_ticker"],
             kwargs.get("trigger_move_pct"),
             kwargs.get("trigger_timeframe", "30min"),
-            json.dumps(kwargs.get("correlated_tickers", [])),
-            json.dumps(kwargs.get("sector_velocity", {})),
-            json.dumps(kwargs.get("trip_wire_status", {})),
+            dumps_jsonb(kwargs.get("correlated_tickers", [])),
+            dumps_jsonb(kwargs.get("sector_velocity", {})),
+            dumps_jsonb(kwargs.get("trip_wire_status", {})),
         )
         return row["id"]
 

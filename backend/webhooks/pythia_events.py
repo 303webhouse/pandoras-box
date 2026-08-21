@@ -16,6 +16,7 @@ from fastapi import APIRouter, HTTPException, Request
 
 from database.postgres_client import get_postgres_client
 from database.redis_client import get_redis_client
+from utils.json_sanitize import dumps_jsonb
 
 logger = logging.getLogger("pythia_events")
 router = APIRouter(tags=["pythia"])
@@ -172,7 +173,7 @@ async def pythia_webhook(request: Request = None, payload: dict = None):
                 ib_high,     # already None-or-float (nz-zero scrubbed)
                 ib_low,
                 interpretation,
-                json.dumps(payload),  # secret already stripped above
+                dumps_jsonb(payload),  # secret already stripped above
             )
             event_id = row["id"] if row else None
     except Exception as e:

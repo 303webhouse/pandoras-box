@@ -58,6 +58,7 @@ from analytics.queries import (
     window_bounds,
 )
 from analytics.robinhood_parser import parse_robinhood_csv_bytes
+from utils.json_sanitize import dumps_jsonb
 # (log_signal import removed 2026-07-21 with the /log-signal endpoint --
 #  this module no longer writes to `signals` directly.)
 
@@ -2640,9 +2641,9 @@ async def save_weekly_report(
             VALUES ($1, $2::jsonb, $3, $4::jsonb, $5, $6, $7)
         """,
             datetime.strptime(req.week_of, "%Y-%m-%d").date(),
-            json.dumps(req.report_json, default=str),
+            dumps_jsonb(req.report_json, default=str),
             req.narrative,
-            json.dumps(req.lessons or [], default=str),
+            dumps_jsonb(req.lessons or [], default=str),
             req.total_pnl,
             req.total_trades,
             req.win_rate,

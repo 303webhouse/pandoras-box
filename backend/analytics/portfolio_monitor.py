@@ -14,6 +14,7 @@ from typing import Any, Dict, List
 import httpx
 
 from database.postgres_client import get_postgres_client
+from utils.json_sanitize import dumps_jsonb
 
 logger = logging.getLogger(__name__)
 
@@ -204,8 +205,8 @@ async def snapshot_portfolio_and_alert() -> Dict[str, Any]:
                 snapshot["total_risk"],
                 snapshot["risk_pct_of_account"],
                 snapshot["largest_position_pct"],
-                json.dumps(snapshot["sector_exposure"]),
-                json.dumps(snapshot["direction_exposure"]),
+                dumps_jsonb(snapshot["sector_exposure"], marker=False),      # map-shaped: sector -> exposure
+                dumps_jsonb(snapshot["direction_exposure"], marker=False),   # map-shaped: direction -> exposure
                 snapshot["correlated_positions"],
                 snapshot["max_correlated_loss"],
             )

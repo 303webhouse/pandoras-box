@@ -1,6 +1,9 @@
 # DEF-SIGNAL-PERSISTENCE-COLLAPSE
 
-**Severity:** P0 (proposed) · **Filed:** 2026-08-19 · **Status:** OPEN — CAUSE UNATTRIBUTED
+**Severity:** P0 · **Filed:** 2026-08-19 · **Status:** MECHANISM CAPTURED — FIX SHIPPED 2026-08-21
+**Mechanism:** NaN-POISON — a non-finite float reaches `json.dumps`, which emits the bare
+tokens `NaN`/`Infinity`/`-Infinity` (valid JavaScript, invalid JSON); Postgres rejects the
+JSONB bind; the exception is swallowed; the pipeline reports success on a row that does not exist.
 **Surface:** `signals` table write path (all emitters)
 **Found by:** CC-SHELL, Phase-A day-two observation check
 
@@ -81,3 +84,66 @@ Everything downstream reads `signals` as system of record. While this holds:
    full RTH session's count against the ~140/day baseline.
 
 **Do not close on the single 22:30 row.**
+
+
+---
+
+## RESOLUTION (2026-08-21)
+
+**Census of record: 459 signals lost** — 08-18: 249, 08-19: 210, 08-20: 0. Measured
+from orphan `signal_outcomes` rows: `write_signal_outcome` runs six lines after
+`log_signal`, in a separate transaction, binds no JSON, and succeeded throughout, so
+outcome rows without a matching signal are an exact census. This supersedes the
+earlier log-derived floors (188/128), which were flagged as floors at filing.
+
+**Signature:** healthy writer, per-row JSONB rejection of a globally poisoned payload.
+The sole `INSERT INTO signals` (`postgres_client.py:1646`) binds 37 columns of which
+exactly two are JSONB — `$19 triggering_factors` and `$20 bias_at_signal` — so the
+failing bind is one of those two.
+
+**Triplet of record:** last good write 2026-08-18 04:12:38Z · death expression
+2026-08-18 13:23:37.8Z (first orphan, `HG_SPY_20260818_132235_both`) · restoration
+2026-08-19 22:30:31Z. Poison-entry bracket (07:17:00Z, 13:23:37.8Z] on 08-18.
+**Clearing mechanism FORMALLY OPEN:** no write was attempted in
+[22:02:11Z → 22:27:44Z], so restart/container-wipe cannot be distinguished from
+independent clearing inside that attempt-free interval.
+
+### Retractions, on the record
+
+* **ATR/enrichment attribution — WITHDRAWN.** `enrich_signal()` runs at
+  `pipeline.py:1447`, **69 lines after** `log_signal()` at `:1378`; the `ATR=nan`
+  log line is emitted *after* that signal's INSERT was already attempted. Adjacent
+  log lines belong to different signals. `enrichment_data` is not in the INSERT at
+  all. Lost signals include `SOL-USD_*`, and `signal_enricher.py:53-54` returns early
+  for CRYPTO before any enrichment dict exists. **ATR NaN was a concurrent
+  non-lethal decoy.** Caught by an adversarial reviewer pre-ship.
+* **`ae99def` (HOLY_GRAIL_1H un-suppression) — EXONERATED.** Independent code proof:
+  `SUPPRESS_ALWAYS` membership is tested at exactly 2 lines repo-wide, reachable only
+  via `evaluate_l0_gate()`, which has 1 production caller that is pure and never
+  diverts; `should_divert()` has 0 production call sites. L0 is surface-only and sits
+  after persistence.
+* **`bias_at_signal["scheduler_bias"]` — NAMED CANDIDATE, NOT CAUSE.** Sourced from
+  `data/bias_history.json`, NaN-permissive in both directions, global to every signal,
+  untracked in git so it lives on ephemeral container FS. Matches the deploy bracket.
+  **Cannot be proven — the value is retained nowhere.** The fix closes the class, not
+  the instance.
+
+### Fix
+
+`utils/json_sanitize.dumps_jsonb()` is now the single chokepoint for every JSONB
+bind: non-finite → `null` + named degraded path, never zero, never silent;
+`allow_nan=False` locked. **51 call sites routed**, fence-asserted in CI with
+multi-line, variable-held and `*params` detection. Completion status is now the
+persistence outcome (persisted / dedupe / failed). `signals_freshness` in `/health`
+carries table-sourced staleness plus an issued-vs-persisted reconciliation counter,
+with a Discord watchdog consumer — `/health` had **zero clients**, so the surface
+alone would have been another fake-healthy seam.
+
+See `docs/codex-briefs/2026-08-20-brief-def-signal-persistence-collapse.md`.
+
+### Still open, filed separately
+
+DEF-BGTASK-NO-SUPERVISION (nothing restarts a dead background task; 0 clients of
+`/health`) · REC-008 swallow hardening (139 broad handlers, 0 re-raise, 109 swallows)
+· read-side reservoir sanitize (`json.loads` accepts bare NaN) · `bias_history.json`
+provenance (→ T8).

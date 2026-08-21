@@ -9,6 +9,7 @@ from typing import Optional, List
 from datetime import datetime, timezone, timedelta
 import logging
 import json
+from utils.json_sanitize import dumps_jsonb
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -166,9 +167,9 @@ async def set_regime_override(override: RegimeOverride, _=Depends(verify_pivot_k
                 override.regime_label,
                 override.direction.upper(),
                 override.dominant_driver,
-                json.dumps(override.sectors_favored),
-                json.dumps(override.sectors_avoided),
-                json.dumps(override.theme_keywords),
+                dumps_jsonb(override.sectors_favored),
+                dumps_jsonb(override.sectors_avoided),
+                dumps_jsonb(override.theme_keywords),
                 override.reversal_mode,
                 expires_at,
             )

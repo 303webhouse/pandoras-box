@@ -17,6 +17,7 @@ import json
 import logging
 from datetime import datetime
 from typing import Any, Dict, Optional
+from utils.json_sanitize import dumps_jsonb
 
 logger = logging.getLogger(__name__)
 
@@ -267,6 +268,22 @@ async def _fetch_snapshot(ticker: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+def _as_payload(value):
+    """Normalize a pre-serialized enrichment payload so the chokepoint can sanitize it.
+
+    json.loads accepts the bare NaN/Infinity tokens that Postgres rejects, so decoding
+    a producer-serialized string yields real float('nan') values that dumps_jsonb then
+    coerces to null. A string that will not decode is passed through unchanged rather
+    than discarded -- the bind may still fail, but loudly and without inventing data.
+    """
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except (TypeError, ValueError):
+            return value
+    return value
+
+
 async def persist_enrichment(signal_id: str, enrichment_data: Dict[str, Any]) -> None:
     """
     Write enrichment data to the signals table.
@@ -284,7 +301,13 @@ async def persist_enrichment(signal_id: str, enrichment_data: Dict[str, Any]) ->
                 WHERE signal_id = $1
                 """,
                 signal_id,
-                enrichment_data if isinstance(enrichment_data, str) else json.dumps(enrichment_data),
+                # DEF-SIGNAL-PERSISTENCE-COLLAPSE: the str branch previously bound a
+                # caller-supplied string straight to $2::jsonb with NO sanitization --
+                # the guaranteed path for every CRYPTO signal, whose producers
+                # pre-serialize with bare json.dumps and whose enrichment skips the
+                # str->dict normalization at :53-54. json.loads ACCEPTS bare NaN, so
+                # round-tripping through it lets the chokepoint null the value.
+                dumps_jsonb(_as_payload(enrichment_data)),
             )
     except Exception as e:
         logger.warning(f"Failed to persist enrichment for {signal_id}: {e}")

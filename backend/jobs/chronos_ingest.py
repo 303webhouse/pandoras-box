@@ -12,6 +12,7 @@ from datetime import date
 
 from database.postgres_client import get_postgres_client
 from utils.position_overlap import ETF_COMPONENTS
+from utils.json_sanitize import dumps_jsonb
 
 logger = logging.getLogger("chronos_ingest")
 
@@ -109,7 +110,7 @@ async def run_chronos_earnings_ingest():
             in_wl = ticker in watchlist_tickers
             overlap_details = None
             if ticker in etf_overlap_map:
-                overlap_details = json.dumps({"etf_positions": etf_overlap_map[ticker]})
+                overlap_details = dumps_jsonb({"etf_positions": etf_overlap_map[ticker]})
 
             # Coerce numeric fields — FMP can return strings, None, or numbers
             def _to_float(v):

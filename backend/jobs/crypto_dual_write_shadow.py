@@ -143,11 +143,15 @@ def _to_jsonable(value):
     this pool) -- mirrors postgres_client.py's log_signal/update_signal_with_score
     convention exactly (json.dumps(_sanitize_for_json(value)))."""
     import json
-    from database.postgres_client import _sanitize_for_json
+    from utils.json_sanitize import dumps_jsonb
 
     if value is None:
         return None
     try:
-        return json.dumps(_sanitize_for_json(value))
-    except (TypeError, ValueError):
+        return dumps_jsonb(value)
+    except (TypeError, ValueError) as exc:
+        # R-IV.47(d): allow_nan=False raises ValueError, so a bare `except ValueError`
+        # here would silently swallow the chokepoint's own assertion and downgrade a
+        # JSONB object to a JSON string scalar. Minimum ERROR, never a quiet fallback.
+        logger.error("_to_jsonable fell back to string form (%s): %s", type(exc).__name__, exc)
         return json.dumps(str(value))
