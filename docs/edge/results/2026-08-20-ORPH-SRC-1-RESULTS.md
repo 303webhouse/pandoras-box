@@ -141,3 +141,51 @@ CTA Scanner | cta_scanner | 16 | 2026-08-20 13:00:54.473932 | 2026-08-20 20:12:0
 | ORPH-SRC-A-FALLBACK  (gated: runs ONLY if A errored on the column) | 11 |
 | ORPH-SRC-B  key-format fingerprint, PULLBACK_ENTRY ghosts | 10 |
 | ORPH-SRC-C  post-restoration persisted-type check | 1 |
+
+---
+
+## ADJUDICATION v1.1 · EDGE · 2026-08-24
+
+Supersedes the v1.0 adjudication (relay-only, never filed) **whole**; authored with
+the filed artifact open; strike lineage carried.
+
+**(i)** `signal_outcomes` has **NO `source` column — STANDS.** Artifact:
+`UndefinedColumn`; the gate fired correctly and the fallback ran only then.
+
+**(ii)** A-FALLBACK by-type ≡ LETH-f3: **11/11 cells, both sum 459** —
+chair-verified (R-IV.65(a)); reads 40 minutes apart the same evening (20:49:09Z ·
+21:29:42Z, 2026-08-20). **NO DIVERGENCE**; outcomes-type-mutation **DEAD**; RECON
+retired.
+
+**(iii) CORRECTED.** The B block's 10 sampled ghost keys are **10/10 bare UUIDs**.
+UUID is the CTA pipeline's NORMAL persisted key format (artifact exhibits
+`e43fd128-…`, `b906c177-…` — persisted CTA PULLBACK_ENTRY rows; T6-C
+precedent per R-IV.65(b)) ⇒ **B alone discriminates nothing.**
+NON-PIPELINE-WRITER is **DEAD** on the surviving grounds: the C block — CTA
+Scanner persisting PULLBACK_ENTRY post-restoration (16 rows, 08-20 13:00 → 20:12,
+source `cta_scanner`) — plus ghost-key format matching the pipeline's own.
+
+**(iv)** Emitter-never-dead **STANDS**; premise-error root = unscoped
+Crypto-Scanner-only C2 citation (owned two-sided per R-IV.40(a)).
+
+**(v) RATE RESIDUAL, upgraded (R-IV.65(f)).** B-block cluster timing (~15-min
+cycles, 2–4 per burst) + rate coherence (~90/day in-window vs 8–16/day
+persisted either side) **SUPPORT** table-reading-dedupe. Refined mechanism: UUID ids
+⇒ `ON CONFLICT` cannot dedupe ⇒ the suppressor must be a **pre-insert
+`signals` query**, disabled by table death. Discriminator: one grep of the CTA scan
+path for a pre-insert `signals` query — EDGE-claimed, non-blocking.
+
+### STRIKE LINEAGE
+
+- **v1.0(iii) evidence description STRUCK** — inversion ("structured keys, ZERO
+  UUIDs" written against a 10/10-UUID artifact in view; mechanism: the conclusion
+  was re-justified under the already-falsified original premise instead of the
+  corrected route).
+- **v1.0 timeline STRUCK** ("08-20 vs 08-21" — both reads were 2026-08-20 evening).
+- **v1.0 relay rollup cells STRUCK** (arithmetic false; summed past 459).
+
+Conclusions survive on artifact grounds throughout.
+
+**LESSON, binding:** adjudication prose is authored with the artifact open —
+**RECALL MAY PROPOSE; ONLY THE ARTIFACT MAY ASSERT** applies to the adjudicator
+first.

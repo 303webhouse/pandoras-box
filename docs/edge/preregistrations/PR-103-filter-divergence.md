@@ -18,11 +18,18 @@ PR-101 §7's row basis. Δ = DISMISSED − NON-DISMISSED · **Track-A fence.**
 
 ### Δ(T1+), percentage points
 
-Per-stratum CIs are in PR-101 §7 Table A.
+**Restated at A′ vintage (R-IV.65(e) ITEM 3).** Δ = DISMISSED −
+NON-DISMISSED, from **Table A′**; per-stratum CIs in PR-101 §7 Table A′.
 
-HG-L −3.5 · HG-S −6.4 · ART-L −9.2 · ART-S −4.7 ·
-CTA-L −4.0 · **CTA-S: not computable at gate** ("PERMANENT INSUFFICIENT"
-dismissed cell) · STR-S +1.2.
+HG-L −3.5 · HG-S −6.1 · ART-L −9.0 · ART-S −5.1 ·
+**CTA-L not computable at gate** (dismissed cell PERMANENT INSUFFICIENT, n=249) ·
+**CTA-S not computable at gate** (n=39) · STR-S +1.2.
+
+> CC-BUILD filing note: `STR-S +1.2` derives from the sell_the_rip SHORT DISMISSED
+> cell, which is **absent from Table A′ as relayed** — see the completeness flag
+> in PR-101 §7. The arithmetic is correct against the row basis
+> (55.6 − 54.4 = +1.2); the citation target is incomplete until that cell is
+> restored.
 
 ### Δ(candidate-expectancy)
 
@@ -47,8 +54,16 @@ does not.
 
 ### FINDING RESTATED
 
-From the filed Map §6, now with CIs: **the conflict filter is NON-MONOTONIC** —
-it strips worse from HG / Artemis / CTA-L, and better-or-equal from STR.
+**Restated at A′ vintage:** the conflict filter is **NON-MONOTONIC** — dismissed
+populations underperform non-dismissed for Holy_Grail and Artemis in **all four
+pairs** (the filter strips worse), while sell_the_rip SHORT **inverts** (+1.2). CTA
+is **silent at gate in both directions and is cited neither way** — a change from
+the pre-A′ text, which cited CTA-L as stripping worse.
+
+Map §6's CTA-L clause inherits this restatement at the next Map amendment pass.
+
+Δ(candidate-expectancy) cells below (TA-101b-derived, same vintage) stand
+unchanged.
 
 No causal claim. EXPLORE eligibility only: any mechanism test is a future
 pre-registration.
