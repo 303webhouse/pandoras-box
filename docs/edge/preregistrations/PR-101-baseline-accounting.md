@@ -24,7 +24,7 @@ unwritten per Map §5. Strategy-wide 16,775-era figures: unwritten 902, orphan
 side-ledger ORPH-SPORADIC 370 (never merged; ORPH-POISON 459 is post-window by
 construction).
 
-### Table A — verdict counts + T1+
+### Table A — vintage G1v2 @2026-08-18, windowless, pre-resolver — HELD, superseded for citation by Table A′ (R-IV.64(b))
 
 EDGE-committed record; Wilson95 derived from committed n/rate.
 
@@ -55,6 +55,73 @@ ART-L 375 @23.2 [19.2, 27.7] · ART-S 405 @33.1 [28.7, 37.8] · CTA-L 247 @30.4
 > recorded so the document does not silently contradict itself, and is **open for
 > EDGE reconciliation**; the likely reading is that Table A derives from a
 > different run or population than TA-101a/b.
+>
+> **RESOLVED 2026-08-24 (R-IV.65(e) ITEM 1).** EDGE named the run: Table A is
+> vintage G1v2 @2026-08-18, windowless, pre-resolver. It is retitled HELD above
+> and superseded for citation by **Table A′** below, which is derived from the
+> TA-101a verbatim rows at resolution vintage 2026-08-20 04:34Z. Spine's ruling
+> was correct: a vintage label, not arithmetic.
+
+### Table A′ — verdict counts + T1+ (Wilson 95%) — CITABLE
+
+Derived from TA-101a verbatim rows
+(`docs/edge/results/2026-08-20-T7-TRACKA-RESULTS.md`, sha256
+`1b18246b4b52c4de13e23b71c732fdac609cf1d6038bc5fc2eca84188be3dd7b`) · window
+< 2026-08-18 00:00Z · **resolution vintage 2026-08-20 04:34Z** · strata as-of
+same (stratum-vintage convention, R-IV.65(c)).
+
+Verdicts = STOPPED_OUT / HIT_T1 / HIT_T2 (PR-100(e)). Strategy totals audit
+3,808 / 2,684 / 6,645 / 3,026 = **16,163**.
+
+Header notes, carried from the manifest: this table is **signal_type-blind** —
+Holy_Grail 6,645 includes 2 Holy_Grail + APIS_CALL rows, hence **+2** vs PR-105's
+type-filtered 6,643 (reconciled, not disagreeing). Bucket vocabulary is uneven
+(INVALIDATED only CTA; HIT_T2 absent from HG; PENDING in 3 of 4) —
+administrative / in-flight buckets sit outside verdict denominators.
+
+**NON-DISMISSED**
+
+| pair | n | T1+ | Wilson 95% |
+|---|---|---|---|
+| Holy_Grail LONG | 2,760 | 13.6% | [12.4, 15.0] |
+| Holy_Grail SHORT | 3,031 | 20.8% | [19.4, 22.3] |
+| Artemis LONG | 1,599 | 32.3% | [30.1, 34.7] |
+| Artemis SHORT | 1,416 | 37.9% | [35.4, 40.5] |
+| CTA Scanner LONG | 1,296 | 34.8% | [32.3, 37.4] |
+| CTA Scanner SHORT | 461 | 37.1% | [32.8, 41.6] |
+| sell_the_rip SHORT | 1,623 | 54.4% | [52.0, 56.8] |
+
+**DISMISSED**
+
+| pair | n | T1+ | Wilson 95% |
+|---|---|---|---|
+| Holy_Grail LONG | 347 | 10.1% | [7.3, 13.7] |
+| Holy_Grail SHORT | 333 | 14.7% | [11.3, 18.9] |
+| Artemis LONG | 377 | 23.3% | [19.4, 27.9] |
+| Artemis SHORT | 408 | 32.8% | [28.5, 37.5] |
+| CTA Scanner LONG | 249 | — | INSUFFICIENT · accumulation ≈0/wk (window closed) — **PERMANENT INSUFFICIENT** |
+| CTA Scanner SHORT | 39 | — | INSUFFICIENT · accumulation ≈0/wk (window closed) — **PERMANENT INSUFFICIENT** |
+
+**RENDER-LAW NOTE:** the G1v2-vintage table carried CTA-L DISMISSED (then 247) as a
+rated cell — sub-gate under PR-100(f), caught at A′ derivation. The
+SIGNAL-LEVEL fence rides all cells.
+
+> **FILING-TIME COMPLETENESS FLAG — raised by CC-BUILD at filing, not authored
+> by EDGE.**
+> Table A′ as relayed lists **13 cells**, while its header states "n agrees with
+> TA-101b **14/14**". The absent cell is **sell_the_rip SHORT DISMISSED**, which the
+> superseded Table A did carry (n=320 @55.6). Derived from the same TA-101a rows
+> this table cites: **n = 320, T1+ = 178/320 = 55.6%, Wilson 95% [50.1, 61.0].**
+> That figure is recorded here as CC-BUILD's derivation and is deliberately **NOT
+> inserted into Table A′ as an EDGE cell** — the table above is EDGE's record and
+> is filed as relayed.
+> Verification performed on the other 13: every one matches the row basis exactly on
+> n, rate, and both Wilson bounds; the four strategy totals and the 16,163 sum
+> reproduce; the cited sha256 matches the filed artifact byte-for-byte. The only
+> defect found is this omission.
+> **Consequence for ITEM 3:** PR-103 §7's `STR-S +1.2` derives from this cell
+> (55.6 − 54.4 = +1.2, arithmetically correct). Until the cell is restored to
+> A′, that Δ cites a figure its own source table does not display.
 
 ### Table B — candidate-expectancy distribution, holding, excursion
 
