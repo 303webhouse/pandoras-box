@@ -109,78 +109,99 @@ its acceptance retires §0-R1 for converted surfaces. The once-
 queued write-side fix is dead. Standing rules per §0-R1.
 
 ## §4 · PRICE DATA & PROVENANCE
-Internal price history DOES NOT EXIST: price_history = 0 rows (real
-COUNT, QS-02-E2). Known consumers (get_spy_daily_closes,
-get_price_bars, get_signals_for_backtest) return empty series
-silently; endpoint blast-radius enumeration = open backlog.
-RULES: every price series is EXTERNAL (UW primary, yfinance
-fallback), per-series provenance labels, never mix providers inside
-one test unlabeled (P10). GRADING PROVENANCE: score_signals walks
-DAILY yfinance bars, stop-checked-before-target within each bar —
-same-bar ambiguity resolves pessimistically; costs absent entirely;
-intraday strategies on daily bars is a category error (§6).
-Quote layer: DEF-QUOTE-PRIORCLOSE-VINTAGE stands (cross-source
-verify SPY/QQQ/SMH prior_close); UW /option-contracts caps at 500
-(pass expiry + option_type); greeks caller-side cap fix deferred.
-signal_forward_returns: FROZEN June 7–9 batch (22,942 rows / 11,471
-pre-June signals) — vintage artifact, not a pipeline.
+
+*v1.1 — delta log: price-collector probable-cause added; provenance finding
+restated hygiene-only per the R-IV.29(a) retraction; all else unchanged.*
+
+**Internal price history DOES NOT EXIST:** `price_history` = 0 rows (real COUNT,
+QS-02-E2).
+
+PROBABLE CAUSE captured (R-IV.18(d)): `analytics.price_collector` volume guard
+refusing ALL inserts (DB 1032 MB vs 300 MB abort threshold; 70 refusals / 4 min);
+evidence attached to standing PRICE-COLLECTOR-GUARD P2. Known consumers
+(`get_spy_daily_closes`, `get_price_bars`, `get_signals_for_backtest`) return empty
+series **silently**; endpoint blast-radius enumeration = open backlog.
+
+**RULES:** every price series is EXTERNAL (UW primary, yfinance fallback),
+per-series provenance labels, never mix providers inside one test unlabeled (P10).
+
+**HYGIENE FINDING, flag-not-fold** (R-IV.29(a): causal elevation WITHDRAWN; carried
+as hygiene only): live enrichment observed leaning on yfinance fallback and
+deprecated Polygon calls — UW-primary hierarchy violated in the enrichment path;
+remediation separate scope.
+
+**GRADING PROVENANCE:** `score_signals` walks DAILY yfinance bars,
+stop-checked-before-target within each bar — same-bar ambiguity resolves
+pessimistically; costs absent entirely; intraday strategies on daily bars is a
+category error (§6).
+
+**Quote layer:** DEF-QUOTE-PRIORCLOSE-VINTAGE stands; UW `/option-contracts` caps at
+500 (pass expiry + option_type); greeks caller-side cap fix deferred.
+`signal_forward_returns`: FROZEN June 7–9 batch (22,942 rows / 11,471 pre-June
+signals) — vintage artifact, not a pipeline.
 
 ## §5 · OUTCOME SYSTEMS, COVERAGE, REALIZED LAYER
-signal_outcomes = SYSTEM OF RECORD; every confirmed reader sits on
-it (grader; dashboard hit-rates; Watchdog→strategy_health→committee
-via so.outcome). signals-side columns = projection/annotation under
-the outcome_source guard (BAR_WALK · ACTUAL_TRADE/Ariadne ·
-COUNTERFACTUAL · PROJECTED_FROM_BAR_WALK); dual-write atomic since
-Phase C (05-09); the 11,313-row diff log records the one-time May
-8–11 backfill; post-May divergence unlogged at that writer.
-CREATION: PENDING placeholder with the signal (99.9% within 5s),
-unconditional in the unified pipeline. 'PENDING' is a STRING — zero
-NULLs; outcome IS NOT NULL is not a resolution test
-(DEF-EDGE-SPEC-B2). AXES LAW (QS-04-2): status and outcome are
-independent — EXPIRED-status with HIT_T2-outcome is common; neither
-proxies the other. signals-side outcome=NULL is BY DESIGN for
-EXPIRED/INVALIDATED; graded-ness keys on outcome_source there.
-COVERAGE: 902 signals lack outcome rows, independently reproduced
-(QS-04-4 = QS-02 reading key): Crypto Scanner 830 (entire pre-Aug
-life) + ~70-row March pre-unification tail. Post-08-03 Crypto
-Scanner rows ARE covered (CS-45). Auto-DISMISSED conflict signals
-still get graded → all populations stratify by signals.status.
-signal_options_expressions: 0 rows despite both entry points wired
-and live, B2_SHADOW_MODE=true (STRIKE-Q2 CR-6) — fake-healthy
-candidate, cause unattributed, build-lane queue.
-RESOLUTION (08-02 snapshot): STOPPED_OUT 9,484 · HIT_T1 2,907 ·
-EXPIRED 2,100 · HIT_T2 1,097 · PENDING 368 · INVALIDATED 287;
-EXPIRED = age>10d regardless of price; resolver live. This
-distribution is pooled across strategy/direction/status and is
-INADMISSIBLE as performance evidence; stratified reads are Phase 1
-(charter law 2).
-ORPHANS — LIVE MECHANISM: 370 outcome rows with no parent (#370:
-08-10, fourth era; profile Feb–Mar 141 / Apr–May 0 / Jun–Jul 228 /
-Aug ≥1). Classes @08-03: 134 stem-twin-recoverable / 61 UUID /
-174 structured parentless. Duplicates ZERO (re-tested at source) —
-counts inflation-safe; but signals-anchored joins DROP orphaned
-events → coverage accounting is a three-ledger sum: matched (G1v2)
-+ orphaned (ORPH) + unwritten (902). Stem-matching is many-to-many
-(~21× fan-out) — attribution-only, not a repair key without a
-tiebreak.
-REALIZED LAYER — THE PHASE-1 BLOCKER: trades/trade_legs carry the
-admissible schema (pnl_dollars, pnl_percent, rr_achieved,
-risk_amount, per-leg commission) but 342 rows link to FOUR distinct
-signal_ids (~1%); trade_legs holds 36 rows. After-cost per-strategy
-P&L is NOT COMPUTABLE today. REC-EDGE-006: APPROVED and routed
-(spine 08-17) — joint read-only Phase 0 serving 006+005, then two
-separate ATLAS-lens briefs; design laws bind the build: (a) every
-new trade carries signal_id OR an explicit NO_SIGNAL/DISCRETIONARY
-marker — absence becomes a statement, never a gap; (b) backfill
-links only where derivable with stated confidence; underivable rows
-stay unlinked and LABELED. Book state: canonical table is
-Robinhood-RECONCILED through 8/17 EOD with an unreconciled
-FIDELITY_ROTH sleeve (46 rows: 4 OPEN / 42 CLOSED) — an unmeasured
-gap, not an absent one (P5). §0-R4 caveat applies. Fake-healthy on
-record: Watchdog graded crypto_scanner daily through 08-17 across a
-period with zero gradeable outcomes (F-EDGE-001); remediation
-folded into REC-004 — strategy_health will render UNGRADED/DEAD for
-zero-lifetime-outcome strategies.
+
+*v1.1 — delta log: orphan partition per R-IV.39(a); poison-incident lines;
+Fidelity-stale ruling; outcomes-writer immunity; §7-supersession note; all else
+unchanged.*
+
+`signal_outcomes` = **SYSTEM OF RECORD**; every confirmed reader sits on it (grader;
+dashboard hit-rates; Watchdog → `strategy_health` → committee via `so.outcome`).
+
+Signals-side columns = projection / annotation under the `outcome_source` guard
+(BAR_WALK · ACTUAL_TRADE/Ariadne · COUNTERFACTUAL ·
+PROJECTED_FROM_BAR_WALK); dual-write atomic since Phase C (05-09); the 11,313-row
+diff log records the one-time May 8–11 backfill; post-May divergence unlogged at
+that writer.
+
+**The outcomes writer carries NO JSON payload — immune to the NaN-POISON class,
+CODE-CONFIRMED** and empirically total through the 08-18/19 incident (LETH-1:
+459/459 single-write-lethal, ghosts 1:1 with lost signals).
+
+**CREATION:** PENDING placeholder with the signal (99.9% within 5s), unconditional
+in the unified pipeline. `'PENDING'` is a STRING — zero NULLs; `outcome IS NOT
+NULL` is **not** a resolution test (DEF-EDGE-SPEC-B2).
+
+**AXES LAW:** `status` and `outcome` are independent. Signals-side `outcome=NULL` is
+BY DESIGN for EXPIRED / INVALIDATED; graded-ness keys on `outcome_source` there.
+
+**COVERAGE:** 902 signals lack outcome rows (independently reproduced): Crypto
+Scanner 830 (entire pre-Aug life) + ~70-row March pre-unification tail. Post-08-03
+Crypto Scanner rows ARE covered. Auto-DISMISSED conflict signals still get graded
+→ all populations stratify by `signals.status`. `signal_options_expressions`:
+root cause = asyncpg date bind (DEF-B2-RESOLVER, resolved-in-code per the 2de26c6
+era).
+
+**RESOLUTION (08-02 snapshot):** STOPPED_OUT 9,484 · HIT_T1 2,907 · EXPIRED
+2,100 · HIT_T2 1,097 · PENDING 368 · INVALIDATED 287; EXPIRED = age > 10d
+regardless of price; resolver live. This distribution is pooled across strategy /
+direction / status and is **INADMISSIBLE as performance evidence**; stratified reads
+are Phase 1 (charter law 2).
+
+**ORPHAN LEDGER OF RECORD (R-IV.39(a)):** 829 = **ORPH-SPORADIC 370** (historical;
+~6 months; dormant 8 days pre-incident; classes @08-03: 134 stem-twin / 61 UUID /
+174 structured) + **ORPH-POISON 459** (mass-incident ghosts, 08-18 13:23:37 →
+08-19 22:02:11; INSERT-failure class; 1:1 with lost signals) — **LABELED, NEVER
+MERGED.** Duplicates ZERO at source. Signals-anchored joins DROP orphaned events
+→ coverage accounting = matched + orphaned (by class) + unwritten. Stem-matching
+is many-to-many (~21× fan-out) — attribution-only. Poison death undatable
+within (22:02:11, 22:30:31] — neutral interval statement governs.
+
+**REALIZED LAYER — THE PHASE-1 BLOCKER:** `trades` / `trade_legs` carry the
+admissible schema but 342 rows link to FOUR distinct `signal_id`s (~1%); after-cost
+per-strategy P&L **NOT COMPUTABLE**. REC-006 APPROVED and routed (joint Phase 0
+→ two ATLAS briefs; design laws in ledger).
+
+**Book state:** Robinhood-RECONCILED through 8/17 EOD; FIDELITY_ROTH sleeve (46
+rows) **RULED STALE** by principal directive (untracked trades since last update)
+— fence entered, no lane treats those rows as current; evidence filed to
+DEF-NO-BROKER-SYNC Exhibit B; future reconciliation runs census-first per the CHAT 4
+pattern. §0-R4 caveat applies.
+
+**Fake-healthy on record:** Watchdog graded `crypto_scanner` daily through 08-17
+across a period with zero gradeable outcomes (F-EDGE-001; corpse-grading fix folded
+into REC-004).
 
 ## §6 · POPULATIONS & n, PER DIRECTION
 Source: QS-04-2 (G1v2, horizon 08-18) at 29b5bb7; windows per §2.
