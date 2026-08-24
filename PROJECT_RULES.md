@@ -147,6 +147,7 @@ When building any feature that needs market data, use these sources in this prio
 **Key rules:**
 - `backend/integrations/uw_api.py` is the canonical client — use the helpers there, do not call UW endpoints directly elsewhere
 - UW results are cached in Redis; respect existing TTLs and add new ones for new endpoints
+- **`UW_GOVERNOR_MODE=enforce` is GATED on reconciling the quota table in `backend/integrations/uw_governor.py` against `uw_daily_burn` actuals first** (spine R-IV.62(d)). The table carries stale assumptions: `flow_per_expiry` is quota'd at 100/day on a comment reading "uw_flow_poller (deactivated)", while the poller is live (`main.py`, RE-ENABLED 2026-06-18) and burns ~1,600/day — 16× its quota. Flipping enforce against unreconciled quotas would starve the live flow feed on day one. Reconcile per-caller against `uw_daily_burn` before the flip.
 - yfinance is acceptable ONLY for indices/breadth that UW doesn't cover, and as a fallback when UW fails
 - **Never use the enrichment cache (`watchlist:enriched`) as the sole data source for a feature** — it only covers tickers in the watchlist
 - TradingView webhooks are for alerts/signals, not data fetching
