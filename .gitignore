@@ -34,6 +34,15 @@ data/archives/
 data/rh_csv/
 data/rh_2026_full.csv.csv
 data/rh_import_2026_jan_feb.csv
+# Broker/account exports are NEVER committed — this repo is PUBLIC.
+# data/imports/ held an untracked Fidelity account-history CSV on 2026-08-25;
+# the path was not ignored, so any `git add -A` would have published it.
+data/imports/
+*_Trade_Updates.csv
+RH_Report_*.csv
+History_for_Account_*.csv
+Positions_*.PNG
+Positions_*.png
 
 # DB snapshots taken before destructive sync operations (e.g. RH CSV sync apply).
 # Contain raw position data including cost basis. Never commit.
