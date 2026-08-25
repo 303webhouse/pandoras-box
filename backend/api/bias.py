@@ -649,6 +649,10 @@ async def get_composite_timeframes():
         "composite_bias": result.bias_level,
         "composite_numeric": result.bias_numeric,
         "confidence": result.confidence,
+        # Coverage honesty (R-IV.99 item 2): `confidence` is COUNT-based and cannot
+        # distinguish a score built on 19% of the weight from one built on 40%.
+        "coverage_ratio": result.coverage_ratio,
+        "excluded_factors": result.excluded_factors,
         "override": result.override,
         "timestamp": result.timestamp.isoformat(),
         "timeframes": timeframe_results,

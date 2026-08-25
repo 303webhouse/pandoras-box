@@ -76,6 +76,13 @@ def _build_timeframe_payload(composite: Dict[str, Any]) -> Dict[str, Any]:
         "factors": factors,
         "active_factor_count": active or len(composite.get("active_factors") or []),
         "stale_factor_count": stale or len(composite.get("stale_factors") or []),
+        # R-IV.99 item 2. Counts alone are misleading: six active factors carry
+        # anywhere from 19% to 40% of the intended weight depending on WHICH six,
+        # and the composite renormalises over survivors so the score reads identical
+        # either way. coverage_ratio is the fraction of intended evidence the score
+        # actually rests on. None = unknown (pre-fix cached payload), never 0.0.
+        "coverage_ratio": composite.get("coverage_ratio"),
+        "excluded_factors": composite.get("excluded_factors") or [],
     }
 
 
