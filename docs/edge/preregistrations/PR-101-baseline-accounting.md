@@ -99,8 +99,14 @@ administrative / in-flight buckets sit outside verdict denominators.
 | Holy_Grail SHORT | 333 | 14.7% | [11.3, 18.9] |
 | Artemis LONG | 377 | 23.3% | [19.4, 27.9] |
 | Artemis SHORT | 408 | 32.8% | [28.5, 37.5] |
+| sell_the_rip SHORT | 320 | 55.6% | [50.1, 61.0] |
 | CTA Scanner LONG | 249 | — | INSUFFICIENT · accumulation ≈0/wk (window closed) — **PERMANENT INSUFFICIENT** |
 | CTA Scanner SHORT | 39 | — | INSUFFICIENT · accumulation ≈0/wk (window closed) — **PERMANENT INSUFFICIENT** |
+
+**DELTA LOG (EDGE, 2026-08-25):** shipped A′ carried 13 cells under a 14/14
+header; the sell_the_rip SHORT DISMISSED cell is restored above from TA-101a
+verbatim rows. This bound is exact at **61.0**; the HELD G1v2-vintage table's
+60.9 was truncation. **The header claim is true as of this amendment.**
 
 **RENDER-LAW NOTE:** the G1v2-vintage table carried CTA-L DISMISSED (then 247) as a
 rated cell — sub-gate under PR-100(f), caught at A′ derivation. The
@@ -120,8 +126,14 @@ SIGNAL-LEVEL fence rides all cells.
 > reproduce; the cited sha256 matches the filed artifact byte-for-byte. The only
 > defect found is this omission.
 > **Consequence for ITEM 3:** PR-103 §7's `STR-S +1.2` derives from this cell
-> (55.6 − 54.4 = +1.2, arithmetically correct). Until the cell is restored to
-> A′, that Δ cites a figure its own source table does not display.
+> (55.6 − 54.4 = +1.2, arithmetically correct).
+>
+> **RESOLVED 2026-08-25 (R-IV.70(d)).** EDGE restored the cell to Table A′ at
+> n=320, T1+ 55.6%, [50.1, 61.0] — identical to the derivation recorded above,
+> with the 60.9/61.0 difference attributed to truncation in the HELD G1v2 table.
+> Table A′ now carries 14 cells and its 14/14 header claim holds. PR-103 §7's
+> Δ now cites a figure its source table displays; the filing note there is
+> closed by the same amendment.
 
 ### Table B — candidate-expectancy distribution, holding, excursion
 

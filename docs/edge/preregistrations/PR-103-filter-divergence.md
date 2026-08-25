@@ -25,11 +25,10 @@ HG-L −3.5 · HG-S −6.1 · ART-L −9.0 · ART-S −5.1 ·
 **CTA-L not computable at gate** (dismissed cell PERMANENT INSUFFICIENT, n=249) ·
 **CTA-S not computable at gate** (n=39) · STR-S +1.2.
 
-> CC-BUILD filing note: `STR-S +1.2` derives from the sell_the_rip SHORT DISMISSED
-> cell, which is **absent from Table A′ as relayed** — see the completeness flag
-> in PR-101 §7. The arithmetic is correct against the row basis
-> (55.6 − 54.4 = +1.2); the citation target is incomplete until that cell is
-> restored.
+> CC-BUILD filing note, **CLOSED 2026-08-25 (R-IV.70(d))**: `STR-S +1.2` derives
+> from the sell_the_rip SHORT DISMISSED cell, which was absent from Table A′ as
+> first relayed. EDGE restored it (n=320, 55.6%, [50.1, 61.0]). The Δ now cites
+> a figure its source table displays.
 
 ### Δ(candidate-expectancy)
 
