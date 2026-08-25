@@ -211,6 +211,14 @@ class CompositeResult(BaseModel):
     timestamp: datetime
     confidence: str
     unverifiable_factors: List[str] = Field(default_factory=list)
+    # Coverage honesty (R-IV.99 item 2). FACTOR_CONFIG weights sum to 1.00, so the
+    # active weight sum IS the fraction of intended evidence the score rests on.
+    # It was computed as a divisor and discarded; `confidence` is COUNT-based and
+    # cannot substitute -- 6 active factors span 19%-40% coverage depending on WHICH
+    # six. None (never 0.0) when unknown, e.g. a cached pre-fix payload: GREEKS-ZERO
+    # precedent -- an absent measurement must not render as a real zero.
+    coverage_ratio: Optional[float] = None
+    excluded_factors: List[str] = Field(default_factory=list)
     circuit_breaker: Optional[Dict[str, Any]] = None
     timeframe_scores: Optional[Dict[str, Any]] = None
     # B1 GEX regime gate — derived from gex factor raw_data["gex_regime"].
@@ -916,6 +924,10 @@ async def compute_composite() -> CompositeResult:
     factors = {factor_id: readings.get(factor_id) for factor_id in FACTOR_CONFIG}
     active_factors = [factor_id for factor_id in FACTOR_CONFIG if factor_id in active]
     stale_factors = [factor_id for factor_id in FACTOR_CONFIG if factor_id in stale_set]
+    # active_weight_sum is already the coverage fraction (weights sum to 1.00).
+    # Surface it instead of discarding it after use as a normalisation divisor.
+    coverage_ratio = round(active_weight_sum, 4)
+    excluded_factors = [f for f in FACTOR_CONFIG if f not in active]
 
     # Compute per-timeframe sub-scores from active factors
     timeframe_scores = {}
@@ -965,6 +977,8 @@ async def compute_composite() -> CompositeResult:
         timestamp=now,
         confidence=confidence,
         unverifiable_factors=sorted(unverifiable_factors),
+        coverage_ratio=coverage_ratio,
+        excluded_factors=excluded_factors,
         circuit_breaker=cb_meta,
         timeframe_scores=timeframe_scores,
         gex_regime=_gex_regime,
