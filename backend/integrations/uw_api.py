@@ -598,6 +598,28 @@ async def _get_bars_via_uw(
     return bars_out
 
 
+# ── DEF-BARS-NO-PROVENANCE (R-IV.108(a)) ─────────────────────────────
+# get_bars determines its provider at each of three return points and was
+# discarding it, so a consumer could not tell a UW series from a yfinance one.
+# The two disagree by adjustment convention, which makes an unlabelled series
+# unusable for a benchmark arm (P10: never mix providers inside one test).
+# Stamped per bar, not per call: the list shape is unchanged, existing
+# `if not bars:` consumers are untouched, the value survives JSON serialisation
+# through /api/market/bars/ for free, and a stitched series would show its seam.
+PROVIDER_UW = "uw"
+PROVIDER_YFINANCE = "yfinance"
+
+
+def _tag_provider(bars, provider):
+    """Stamp provenance on each bar dict. Returns `bars` unchanged otherwise."""
+    if not bars:
+        return bars
+    for b in bars:
+        if isinstance(b, dict):
+            b["provider"] = provider
+    return bars
+
+
 async def get_bars(
     ticker: str,
     multiplier: int = 1,
@@ -613,6 +635,8 @@ async def get_bars(
 
     Matches polygon_equities.get_bars() schema:
         List of dicts with keys: o, h, l, c, v, vw, t, n
+    plus `provider` ("uw" | "yfinance") per DEF-BARS-NO-PROVENANCE. Cached
+    series carry the provider they were fetched under.
     """
     cache_key = f"{ticker}|{multiplier}|{timespan}|{from_date}|{to_date}"
     cached = await cache_get("quote", cache_key)
@@ -632,6 +656,7 @@ async def get_bars(
             logger.warning("UW get_bars path raised for %s: %s — falling back to yfinance", ticker, e)
             bars = None
         if bars:
+            bars = _tag_provider(bars, PROVIDER_UW)
             await cache_set("quote", cache_key, bars)
             return bars
         logger.info(
@@ -643,6 +668,7 @@ async def get_bars(
         loop = asyncio.get_event_loop()
         bars = await loop.run_in_executor(None, _fetch_yfinance_bars, ticker, from_date, to_date)
         if bars:
+            bars = _tag_provider(bars, PROVIDER_YFINANCE)
             await cache_set("quote", cache_key, bars)
         return bars
     except Exception as e:
