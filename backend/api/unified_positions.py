@@ -22,6 +22,9 @@ from websocket.broadcaster import manager
 from models.position_risk import calculate_position_risk, infer_direction
 
 from api._swr_cache import SWRCache
+from api._position_write_scope import (  # D1 second half: allowlist prevents
+    WriteScope, assert_columns_allowed,
+)
 from utils.json_sanitize import dumps_jsonb
 
 logger = logging.getLogger(__name__)
@@ -1421,6 +1424,13 @@ async def update_position(position_id: str, req: UpdatePositionRequest, _=Depend
     if len(sets) <= 1:
         raise HTTPException(status_code=400, detail="No fields to update")
 
+    # D1 allowlist. A manual edit may write neither mark nor realized fields.
+    # Checked against the columns actually entering the SET clause, not against the
+    # request model's declared fields, so a column reaching SQL by any route is caught.
+    assert_columns_allowed(
+        [s.split("=")[0].strip() for s in sets], WriteScope.MANUAL_EDIT
+    )
+
     params.append(position_id)
     set_clause = ", ".join(sets)
 
@@ -2129,6 +2139,10 @@ async def reconcile_positions(req: ReconcileRequest, _=Depends(require_api_key))
                         direction=ep.get("direction", "")
                     )
             if updates:
+                # D1 allowlist. The mark path may write mark fields only; a realized
+                # field arriving here would mean the reconcile route had started
+                # closing positions as a side effect.
+                assert_columns_allowed(updates.keys(), WriteScope.MARK_JOB)
                 set_parts = []
                 params = []
                 pidx = 1
