@@ -50,7 +50,7 @@ sector assignment : closed 133-ticker map (Amendments 1-3), static lookup, not a
 
 ## Per-cell metrics - sector x EQUITY_ETF
 
-Options rows are part 2, excluded here and enumerated. Cross-class pooling barred. The UNCLASSIFIED sector cell DISSOLVES per R-IV.118(a) - a classification failure is not a category.
+Options rows are part 2, excluded here and enumerated. Cross-class pooling barred. The R-IV.118(a) dissolution of the UNCLASSIFIED cell is STRUCK per R-IV.119; the section is RETAINED, EMPTY-BY-CONSTRUCTION (see below).
 
 ### SEMIS/DRAM x EQUITY_ETF
 
@@ -119,6 +119,12 @@ tickers: BITI / BITX / BTCZ / CRCL / MSTZ
 **Provenance-tier line:** 7 BROKER-VALIDATED / 7 MANUAL / 10 PRINCIPAL-ATTESTED-INTERIOR - accounts: 17 FIDELITY_ROTH / 7 ROBINHOOD
 
 tickers: CF / ICE / IPI / MOO / NBIS / QQQI / SQQQ / SRTY / TLT / TSLQ
+
+**REALIZED-DISCRETIONARY** - measures the principal discretionary book only; says nothing about signal-layer strategy edge, and Track A says nothing about it.
+
+### UNCLASSIFIED x EQUITY_ETF
+
+**Patch 6 (R-IV.119), verbatim:** "UNCLASSIFIED (3): SMST - SSPC - WRTH - in the population, in the universe count, in no sector cell; no metrics render. Cell is empty by construction, not by absence of trades. Resolution open per R-IV.94(g)."
 
 **REALIZED-DISCRETIONARY** - measures the principal discretionary book only; says nothing about signal-layer strategy edge, and Track A says nothing about it.
 
