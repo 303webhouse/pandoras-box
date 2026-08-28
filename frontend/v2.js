@@ -757,6 +757,9 @@
 
   // ── Charts (Chart.js) ──────────────────────────────────────────────────────
   const SECTOR_RAMP = ['#14b8a6', '#7CFF6B', '#ff5c33', '#38bdf8', '#a78bfa', '#f472b6', '#2dd4bf', '#94a3b8', '#fb7185', '#4ade80', '#60a5fa'];
+  // Graded gray for divergence isolation mode, light → dark. '#3a4452' is the floor: it
+  // stays legible above the grid color rgba(27,39,69,0.4). Do not extend darker.
+  const DIV_GRAY = ['#9aa6ba', '#8d99ad', '#808ca0', '#737f93', '#667286', '#5a6679', '#4e5a6c', '#434e5f', '#3a4452'];
   const _charts = {};
   function makeLineChart(id, datasets, labels, opts) {
     if (typeof Chart === 'undefined') return;
@@ -780,27 +783,105 @@
 
   // ── b2 Sector divergence ────────────────────────────────────────────────────
   let _divWindow = '1d';
+  // Isolation-mode selection, by symbol. Module scope on purpose: loadDivergence() rebuilds
+  // legend.innerHTML and makeLineChart() destroys the chart on every 10-min refresh, so state
+  // kept in the DOM or on the chart object would not survive. Keyed by symbol, not index, so
+  // it also survives the sector list changing shape between fetches.
+  const _divSel = new Set();
+  let _divSectors = [];
+
+  // Last non-null value of a series; null when the series is entirely null.
+  function _divFinal(s) {
+    const ser = (s && s.series) || [];
+    for (let i = ser.length - 1; i >= 0; i--) { if (ser[i] && ser[i].value != null) return Number(ser[i].value); }
+    return null;
+  }
+
+  // Rank the unselected sectors by final value, descending: lightest gray to the highest,
+  // darkest to the lowest. Cycles when unselected count exceeds the ramp. All-null series
+  // take the darkest stop.
+  function _divGrays(sectors) {
+    const ranked = [], nulls = [], map = {};
+    sectors.forEach((s) => { if (!_divSel.has(s.symbol)) (_divFinal(s) == null ? nulls : ranked).push(s); });
+    ranked.sort((a, b) => _divFinal(b) - _divFinal(a));
+    ranked.forEach((s, i) => { map[s.symbol] = DIV_GRAY[i % DIV_GRAY.length]; });
+    nulls.forEach((s) => { map[s.symbol] = DIV_GRAY[DIV_GRAY.length - 1]; });
+    return map;
+  }
+
+  function _divToggle(sym) { if (!sym) return; if (_divSel.has(sym)) _divSel.delete(sym); else _divSel.add(sym); _divRender(); }
+  function _divClear() { if (!_divSel.size) return; _divSel.clear(); _divRender(); }
+
   async function loadDivergence() {
     let data = null;
     try { const r = await apiFetch('/api/stable/sector-divergence?window=' + _divWindow); if (r.ok) data = await r.json(); } catch (_) {}
     const legend = $('divLegend'); if (!legend) return;
     if (!data || !data.sectors || data.degraded) {
+      _divSectors = [];
       legend.innerHTML = '<span class="legend-chip val-muted">divergence feed unavailable</span>';
       if (_charts.divChart) { _charts.divChart.destroy(); delete _charts.divChart; }
       return;
     }
-    const sectors = data.sectors.filter((s) => s.series && s.series.length);
+    _divSectors = data.sectors.filter((s) => s.series && s.series.length);
+    _divRender();
+  }
+
+  // Pure re-render from _divSectors + _divSel. Called by the fetch and by every selection
+  // change, so a click repaints without refetching.
+  function _divRender() {
+    const legend = $('divLegend'); if (!legend) return;
+    const sectors = _divSectors; if (!sectors.length) return;
+    // Isolation only when at least one selected symbol is actually in this payload. A sector
+    // dropping out of the feed must not strand the tile all-gray with nothing lit; the symbol
+    // stays in _divSel, so isolation resumes if it comes back.
+    const iso = _divSel.size > 0 && sectors.some((s) => _divSel.has(s.symbol));
+    const grays = iso ? _divGrays(sectors) : {};
     let labels = [];
     sectors.forEach((s) => { if (s.series.length > labels.length) labels = s.series.map((p) => (p.ts ? p.ts.slice(11, 16) : (p.date || '').slice(5))); });
-    const datasets = sectors.map((s, i) => ({
-      label: s.symbol, borderColor: SECTOR_RAMP[i % SECTOR_RAMP.length], backgroundColor: 'transparent',
-      data: s.series.map((p) => (p.value != null ? Number((_divWindow === '1d' ? p.value : p.value)).toFixed(3) : null)),
-    }));
-    makeLineChart('divChart', datasets, labels);
-    legend.innerHTML = sectors.map((s, i) => {
+    const datasets = sectors.map((s, i) => {
+      const own = SECTOR_RAMP[i % SECTOR_RAMP.length];
+      const on = !iso || _divSel.has(s.symbol);
+      const d = {
+        label: s.symbol, borderColor: on ? own : grays[s.symbol], backgroundColor: 'transparent',
+        data: s.series.map((p) => (p.value != null ? Number(p.value).toFixed(3) : null)),
+      };
+      if (iso) d.borderWidth = on ? 2.2 : 0.9;  // omitted in normal mode so the shared default holds
+      return d;
+    });
+    // Everything divergence-specific rides opts. makeLineChart is shared with curveChart and
+    // is not touched. Object.assign is shallow, so plugins must be passed whole. The chart's
+    // own `interaction` is deliberately left alone — hit-testing uses an explicit mode below,
+    // so index-mode tooltips keep behaving exactly as they do today.
+    makeLineChart('divChart', datasets, labels, {
+      onClick: (evt, _els, chart) => {
+        const c = chart || evt.chart; if (!c) return;
+        // 'nearest' + intersect:false so a click *near* a line resolves; the chart's own
+        // index-mode interaction is left untouched for tooltips.
+        const hit = c.getElementsAtEventForMode(evt, 'nearest', { intersect: false }, true);
+        if (!hit || !hit.length) return;
+        const ds = c.data.datasets[hit[0].datasetIndex]; if (!ds) return;
+        // Deferred: _divToggle re-renders, which destroys this chart. Doing that inside
+        // Chart.js's own click dispatch tears the instance out from under it.
+        setTimeout(() => _divToggle(ds.label), 0);
+      },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          enabled: true,
+          filter: (item) => { if (!iso) return true; const s = sectors[item.datasetIndex]; return !!s && _divSel.has(s.symbol); },
+        },
+      },
+    });
+    const chips = sectors.map((s, i) => {
+      const own = SECTOR_RAMP[i % SECTOR_RAMP.length];
+      const on = !iso || _divSel.has(s.symbol);
       const dmaCls = s.above_50dma && s.above_200dma ? 'dma-up' : (s.above_50dma === false && s.above_200dma === false ? 'dma-down' : 'dma-mix');
-      return `<span class="legend-chip"><span class="dot" style="background:${SECTOR_RAMP[i % SECTOR_RAMP.length]}"></span>${esc(s.symbol)}<span class="dma ${dmaCls}" data-gloss="DMA"></span></span>`;
+      const cls = 'legend-chip div-chip' + (iso ? (on ? ' sel' : ' unsel') : '');
+      const bg = iso && on ? ` style="background:${own}24"` : '';  // own color at ~14%
+      return `<span class="${cls}"${bg} data-sym="${esc(s.symbol)}"><span class="dot" style="background:${on ? own : grays[s.symbol]}"></span>${esc(s.symbol)}<span class="dma ${dmaCls}" data-gloss="DMA"></span></span>`;
     }).join('');
+    // "All" is always first and always present — it must not reflow the row on click.
+    legend.innerHTML = `<span class="legend-chip div-chip div-all${iso ? '' : ' sel'}" data-all="1">ALL</span>` + chips;
     applyGlossary(legend);
   }
 
@@ -1388,6 +1469,13 @@
     if (dt) dt.querySelectorAll('button[data-w]').forEach((b) => b.addEventListener('click', () => {
       _divWindow = b.dataset.w; dt.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b)); loadDivergence();
     }));
+    // divergence isolation: delegate on the container — chips are destroyed and rebuilt on
+    // every refresh, so per-chip listeners would be lost and re-added each cycle.
+    const dl = $('divLegend');
+    if (dl) dl.addEventListener('click', (e) => {
+      const chip = e.target.closest('.div-chip'); if (!chip) return;
+      if (chip.dataset.all) _divClear(); else _divToggle(chip.dataset.sym);
+    });
     $('drawerClose').addEventListener('click', closeDrawer);
     $('drawerBackdrop').addEventListener('click', closeDrawer);
     $('tvPopClose').addEventListener('click', closeTvPopover);
@@ -1396,7 +1484,7 @@
     $('bookAdd').addEventListener('click', openAddForm);
     $('modalClose').addEventListener('click', closeModal);
     $('modalBackdrop').addEventListener('click', closeModal);
-    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeDrawer(); closeTvPopover(); closePopup(); closeModal(); } });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeDrawer(); closeTvPopover(); closePopup(); closeModal(); _divClear(); } });
     try { window.__mgd = _managed.size; } catch (_) {}  // idle interval count (acceptance check)
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
