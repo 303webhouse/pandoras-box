@@ -293,6 +293,21 @@ body {
 .legend-chip .dma { width: 6px; height: 6px; border-radius: 50%; }
 .dma-up { background: var(--up); } .dma-down { background: var(--down); } .dma-mix { background: var(--text-3); }
 
+/* Sector divergence — isolation mode (FEAT-DIV-ISOLATE). Scoped to #divLegend so the shared
+   .legend-chip rules above stay inert for any other consumer. Chips are interactive now, so
+   they carry a pointer and a hover state. Padding applies in BOTH modes on purpose: chip
+   geometry must not change on click, or the whole row reflows sideways. */
+#divLegend .div-chip { cursor: pointer; padding: 1px 5px; border-radius: 999px; transition: color 90ms linear, background-color 90ms linear; }
+#divLegend .div-chip:hover { background: rgba(139,152,173,0.14); }
+#divLegend .div-chip.sel { color: var(--text); }
+/* Unselected dims the LABEL and DMA only — never the chip box, so the dot keeps the exact
+   gray its line was assigned. Chip dot and line must read as the same value. */
+#divLegend .div-chip.unsel { color: var(--text-3); }
+#divLegend .div-chip.unsel .dma { opacity: 0.5; }
+#divLegend .div-chip.unsel:hover { color: var(--text-2); }
+#divLegend .div-all { letter-spacing: 0.04em; color: var(--text-3); }
+#divLegend .div-all.sel { color: var(--text); background: rgba(139,152,173,0.16); }
+
 /* b1 Themes table */
 .themes-table { display: flex; flex-direction: column; font-size: 12px; }
 .th-row {
