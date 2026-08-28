@@ -181,6 +181,22 @@ bars PROVIDER yfinance (uniform, VERIFIED per-series via the per-bar provider fi
 
 **ZERO-WINDOW census cross-check:** per-cell counts METALS 1 · CRYPTO 5 · OTHER 7, ledger-wide 13 of 66, independently reproduced by CC-QUERY from the merged ledger (census sha256 `a86e0cee…`); per-cell n 14/7/9/12/24 reproduces the filed render exactly.
 
+## Patch numbering (R-IV.123)
+
+Stated so the sequence never reads as a lost payload — a gap explained is a gap; a gap
+unexplained is a missing artifact.
+
+| patch | artifact | status |
+|---|---|---|
+| 1–5 | `PR-106-RESULTS-PART1` (the render) | applied, filed `ad584b8`, sha256 `4b781c84…` |
+| 6 | `PR-106-RESULTS-PART1` (the render) | applied, filed `817b531`, sha256 `d2baffb2…` |
+| **7** | — | **NEVER ASSIGNED.** No patch-7 artifact was drafted or dropped. R-IV.119(c) ruled the SMST wording a *sub-patch* — "No patch 7" — deferring the tightened wording to part 2's spec, where UNCLASSIFIED re-renders post-backfill regardless. Disk corroborates: no `pr106-*patch7*` file exists on any ferry path. |
+| 8 (8A + 8B) | `PR-106-ARMS-PART1` (this document) | applied, filed `ca7d0b3` |
+| 9 (folded as 8C) | `PR-106-ARMS-PART1` (this document) | applied in the same commit per patch 9's batching instruction |
+
+Patches 1–6 acted on the RENDER; patches 8–9 act on the ARMS. The two artifacts have
+separate hash chains: render `4b781c84 → d2baffb2`; arms `dc9e8178 → …`.
+
 ## Not computable
 
 **None.** All 66 cells-contributing units produced arm values. SBU is the study's only fetch failure and is cell-excluded, so no arm consumes it.
