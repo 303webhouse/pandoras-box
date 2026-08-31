@@ -176,6 +176,12 @@ class CreatePositionRequest(BaseModel):
 
 
 class UpdatePositionRequest(BaseModel):
+    # FEAT-POSITION-LIFECYCLE Phase 2, R-IV.116: OPTIONAL at the API layer. Absent ->
+    # the audit trigger stamps actor='legacy-ui' and reason NULL, so the legacy caller
+    # (app.js:11073) needs no coordinated change. The new lifecycle UI requires them
+    # client-side and sends both.
+    reason: Optional[str] = None
+    actor: Optional[str] = None
     status: Optional[str] = None  # OPEN, CLOSED, EXPIRED — allows reopening closed positions
     direction: Optional[str] = None  # LONG, SHORT
     structure: Optional[str] = None
@@ -390,6 +396,11 @@ async def create_position(req: CreatePositionRequest, _=Depends(require_api_key)
 
     # --- Check for existing open position to combine with ---
     account = (req.account or "ROBINHOOD").upper()
+
+    # R-IV.75(d) ETF-only invariant, enforced AT ENTRY. Refusing here is the whole
+    # point: an OPTION row on the Roth is prima facie mis-attributed, and a row admitted
+    # now becomes a reconciliation problem for whoever finds it months later.
+    _assert_etf_only(account, req.asset_type)
     existing = None
     async with pool.acquire() as conn:
         existing = await conn.fetchrow("""
@@ -1434,12 +1445,20 @@ async def update_position(position_id: str, req: UpdatePositionRequest, _=Depend
     params.append(position_id)
     set_clause = ", ".join(sets)
 
+    # SET LOCAL only takes effect inside a transaction; without one the audit trigger
+    # reads an empty setting and falls back to 'legacy-ui'. Both settings are scoped to
+    # this transaction, so concurrent requests cannot see each other's actor.
     async with pool.acquire() as conn:
-        row = await conn.fetchrow(f"""
-            UPDATE unified_positions SET {set_clause}
-            WHERE position_id = ${idx}
-            RETURNING *
-        """, *params)
+        async with conn.transaction():
+            await conn.execute("SELECT set_config('app.actor', $1, true)",
+                               (req.actor or "legacy-ui"))
+            await conn.execute("SELECT set_config('app.reason', $1, true)",
+                               (req.reason or ""))
+            row = await conn.fetchrow(f"""
+                UPDATE unified_positions SET {set_clause}
+                WHERE position_id = ${idx}
+                RETURNING *
+            """, *params)
 
     if not row:
         raise HTTPException(status_code=404, detail=f"Position {position_id} not found")
@@ -2416,3 +2435,191 @@ async def mark_to_market(_=Depends(require_api_key)):
     return await run_mark_to_market()
 
 
+# ── FEAT-POSITION-LIFECYCLE Phase 2 ────────────────────────────────────────────
+# Three endpoints, one invariant. The audit trigger records every mutation; the
+# allowlist refuses the ones a caller may not make. These add lots, manual edits with
+# a reason, and cash events — and the cash path deliberately touches no position row.
+
+# R-IV.75(d) ETF-only invariant. An option structure on the Roth is prima facie
+# mis-attributed, so it is refused at entry rather than corrected later.
+_ETF_ONLY_ACCOUNTS = {"FIDELITY_ROTH"}
+
+
+def _assert_etf_only(account: Optional[str], asset_type: Optional[str]) -> None:
+    acct = (account or "").strip().upper()
+    at = (asset_type or "").strip().upper()
+    if acct in _ETF_ONLY_ACCOUNTS and at == "OPTION":
+        raise HTTPException(
+            status_code=400,
+            detail=(f"{acct} is an ETF-only account (R-IV.75(d)): option structures are "
+                    f"not permitted. An OPTION row on this account is prima facie "
+                    f"mis-attributed — check the account before retrying."),
+        )
+
+
+class AddLotRequest(BaseModel):
+    fill_date: str
+    quantity: float
+    price: Optional[float] = None
+    fees: float = 0.0
+    source: str = "MANUAL"
+    reason: Optional[str] = None
+    actor: Optional[str] = None
+
+
+@router.post("/v2/positions/{position_id}/lots")
+async def add_position_lot(position_id: str, req: AddLotRequest,
+                           _=Depends(require_api_key)):
+    """Add a fill to an existing position and recompute its blended basis.
+
+    Quantity and blended basis become COMPUTED from the lot set, so the position row
+    stops being a hand-maintained aggregate. Never writes a mark or a realized field —
+    adding to a position is not a valuation event and not a close.
+    """
+    if req.quantity == 0:
+        raise HTTPException(status_code=400, detail="quantity must be non-zero")
+    if req.source not in ("MANUAL", "IMPORT"):
+        raise HTTPException(status_code=400,
+                            detail="source must be MANUAL or IMPORT; LEGACY-SINGLE-LOT is "
+                                   "reserved for the Phase-1 backfill")
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        pos = await conn.fetchrow(
+            "SELECT position_id, ticker, structure, asset_type, account, status "
+            "FROM unified_positions WHERE position_id = $1", position_id)
+        if not pos:
+            raise HTTPException(status_code=404, detail=f"Position {position_id} not found")
+        if pos["status"] != "OPEN":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Position {position_id} is {pos['status']}, not OPEN — a lot cannot "
+                       f"be added to a position that is already closed or expired.")
+        _assert_etf_only(pos["account"], pos["asset_type"])
+
+        async with conn.transaction():
+            await conn.execute("SELECT set_config('app.actor', $1, true)",
+                               (req.actor or "lifecycle-ui"))
+            await conn.execute(
+                "SELECT set_config('app.reason', $1, true)",
+                (req.reason or f"add lot {req.quantity} @ {req.price} on {req.fill_date}"))
+            await conn.execute(
+                """INSERT INTO position_lots
+                       (position_id, fill_date, quantity, price, fees, source)
+                   VALUES ($1, $2::timestamptz, $3, $4, $5, $6)""",
+                position_id, req.fill_date, req.quantity, req.price, req.fees, req.source)
+
+            lots = await conn.fetch(
+                "SELECT quantity, price, fees FROM position_lots WHERE position_id = $1",
+                position_id)
+            total_qty = sum(float(l["quantity"]) for l in lots)
+            priced = [l for l in lots if l["price"] is not None]
+            # Blended basis is cost-weighted over PRICED lots only. A lot with no price
+            # still moves quantity; folding it in at zero would silently dilute the basis.
+            if priced and total_qty:
+                cost = sum(float(l["quantity"]) * float(l["price"]) + float(l["fees"] or 0)
+                           for l in priced)
+                priced_qty = sum(float(l["quantity"]) for l in priced)
+                blended = cost / priced_qty if priced_qty else None
+            else:
+                blended = None
+
+            await conn.execute(
+                """UPDATE unified_positions
+                   SET quantity = $1, entry_price = COALESCE($2, entry_price),
+                       cost_basis = COALESCE($3, cost_basis), updated_at = NOW()
+                   WHERE position_id = $4""",
+                int(total_qty), blended,
+                (blended * total_qty if blended is not None else None), position_id)
+
+        rows = await conn.fetch(
+            "SELECT id, fill_date, quantity, price, fees, source FROM position_lots "
+            "WHERE position_id = $1 ORDER BY fill_date, id", position_id)
+
+    return {"status": "lot_added", "position_id": position_id,
+            "quantity": total_qty, "blended_basis": blended,
+            "unpriced_lots": len(lots) - len(priced),
+            "lots": [dict(r) for r in rows]}
+
+
+@router.get("/v2/positions/{position_id}/lots")
+async def get_position_lots(position_id: str):
+    """Lot breakdown behind a position's blended basis."""
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT id, fill_date, quantity, price, fees, source, created_at "
+            "FROM position_lots WHERE position_id = $1 ORDER BY fill_date, id", position_id)
+    return {"position_id": position_id, "lots": [dict(r) for r in rows], "count": len(rows)}
+
+
+class CashEventRequest(BaseModel):
+    account: str
+    direction: str            # DEPOSIT | WITHDRAWAL
+    amount: float             # positive; direction carries the sign
+    event_date: str
+    description: Optional[str] = None
+
+
+_CANONICAL_ACCOUNTS = {"ROBINHOOD", "FIDELITY_ROTH", "FIDELITY_401A"}
+
+
+@router.post("/v2/cash-events")
+async def record_cash_event(req: CashEventRequest, _=Depends(require_api_key)):
+    """Record a deposit or withdrawal and adjust that account's cash snapshot.
+
+    Touches NO position row and NO realized field — this is the contract Phase 4's
+    insulation test is written against. DEF-CASH-EVENTS-UNTRACKED's remedy: cash flows
+    have had no write path from the UI, so deposits and withdrawals never entered the
+    system and every return computed against account value was unverifiable.
+    """
+    acct = req.account.strip().upper()
+    if acct not in _CANONICAL_ACCOUNTS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"account must be one of {sorted(_CANONICAL_ACCOUNTS)} (case-insensitive); "
+                   f"got '{req.account}'")
+    direction = req.direction.strip().upper()
+    if direction not in ("DEPOSIT", "WITHDRAWAL"):
+        raise HTTPException(status_code=400, detail="direction must be DEPOSIT or WITHDRAWAL")
+    if req.amount <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail="amount must be positive; direction carries the sign. A negative amount "
+                   "with direction=WITHDRAWAL would double-negate.")
+
+    signed = req.amount if direction == "DEPOSIT" else -req.amount
+    desc = req.description or direction.title()
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            # occurrence is part of the dedup key (Phase-1 D4): two genuine same-day,
+            # same-amount, same-description events are distinct, not a duplicate.
+            occ = await conn.fetchval(
+                """SELECT COALESCE(MAX(occurrence), 0) + 1 FROM cash_flows
+                   WHERE account_name = $1 AND flow_type = $2 AND amount = $3
+                     AND description = $4 AND activity_date = $5::date
+                     AND imported_from = 'MANUAL_UI'""",
+                acct, direction, signed, desc, req.event_date)
+            row = await conn.fetchrow(
+                """INSERT INTO cash_flows
+                       (account_name, flow_type, amount, description, activity_date,
+                        imported_from, occurrence)
+                   VALUES ($1, $2, $3, $4, $5::date, 'MANUAL_UI', $6)
+                   RETURNING id, occurrence""",
+                acct, direction, signed, desc, req.event_date, occ)
+            bal = await conn.fetchrow(
+                """UPDATE account_balances
+                   SET cash = COALESCE(cash, 0) + $1, updated_at = NOW(),
+                       updated_by = 'lifecycle-ui'
+                   WHERE account_name = $2
+                   RETURNING account_name, cash, balance""", signed, acct)
+
+    if not bal:
+        # The cash_flow is recorded; the snapshot simply has no row for this account.
+        # Reported, not silently swallowed — a missing snapshot is a finding.
+        return {"status": "recorded_no_snapshot", "cash_flow_id": row["id"],
+                "occurrence": row["occurrence"], "amount": signed,
+                "warning": f"no account_balances row for {acct}; cash snapshot not adjusted"}
+    return {"status": "recorded", "cash_flow_id": row["id"], "occurrence": row["occurrence"],
+            "account": acct, "direction": direction, "amount": signed,
+            "cash_after": float(bal["cash"]), "balance_unchanged": float(bal["balance"])}
