@@ -182,6 +182,11 @@ class UpdatePositionRequest(BaseModel):
     # client-side and sends both.
     reason: Optional[str] = None
     actor: Optional[str] = None
+    # R-IV.143(2). Documentary vocabulary, no CHECK constraint: CORE | B1_MACRO |
+    # B1_C_CONVEXITY | B2_TACTICAL | B3_SCALP | HEDGE | MOMENTUM | OTHER. A semantic
+    # field, so MANUAL_EDIT may write it — the D1 allowlist refuses marks and realized
+    # fields, not position semantics. NULL is untagged; OTHER is a deliberate choice.
+    strategy_tag: Optional[str] = None
     status: Optional[str] = None  # OPEN, CLOSED, EXPIRED — allows reopening closed positions
     direction: Optional[str] = None  # LONG, SHORT
     structure: Optional[str] = None
@@ -1410,6 +1415,10 @@ async def update_position(position_id: str, req: UpdatePositionRequest, _=Depend
     if req.source is not None:
         sets.append(f"source = ${idx}")
         params.append(req.source)
+        idx += 1
+    if req.strategy_tag is not None:
+        sets.append(f"strategy_tag = ${idx}")
+        params.append(req.strategy_tag)
         idx += 1
     if req.signal_id is not None:
         sets.append(f"signal_id = ${idx}")
