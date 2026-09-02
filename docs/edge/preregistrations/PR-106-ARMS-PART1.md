@@ -206,12 +206,15 @@ unexplained is a missing artifact.
 |---|---|---|
 | 1–5 | `PR-106-RESULTS-PART1` (the render) | applied, filed `ad584b8`, sha256 `4b781c84…` |
 | 6 | `PR-106-RESULTS-PART1` (the render) | applied, filed `817b531`, sha256 `d2baffb2…` |
-| **7** | — | **NEVER ASSIGNED.** No patch-7 artifact was drafted or dropped. R-IV.119(c) ruled the SMST wording a *sub-patch* — "No patch 7" — deferring the tightened wording to part 2's spec, where UNCLASSIFIED re-renders post-backfill regardless. Disk corroborates: no `pr106-*patch7*` file exists on any ferry path. |
+| **7** | — | **NEVER ASSIGNED.** Drafted and relayed; never reached disk before R-IV.119(c) deferred the wording (EDGE's statement, R-IV.169(a)). R-IV.119(c) ruled the SMST wording a *sub-patch* — "No patch 7" — deferring the tightened wording to part 2's spec, where UNCLASSIFIED re-renders post-backfill regardless. **Prior wording said "No patch-7 artifact was drafted or dropped" on the strength of disk absence; disk can evidence only that nothing reached disk, never that nothing was drafted.** |
 | 8 (8A + 8B) | `PR-106-ARMS-PART1` (this document) | applied, filed `ca7d0b3` |
 | 9 (folded as 8C) | `PR-106-ARMS-PART1` (this document) | applied in the same commit per patch 9's batching instruction |
+| 10 (10A–10D) | `PR-106-ARMS-PART1` (this document) | applied, filed `c7e7b25`, sha256 `3d140e09…`. Sub-patches 10A detection-failure · 10B multi-exit window integrity · 10C four-tier composition · 10D Clause-1 mandatory form. **Verified-landed by EDGE from origin** (R-IV.169(a)). |
 
-Patches 1–6 acted on the RENDER; patches 8–9 act on the ARMS. The two artifacts have
-separate hash chains: render `4b781c84 → d2baffb2`; arms `dc9e8178 → …`.
+Patches 1–6 acted on the RENDER; patches 8–10 act on the ARMS. The two artifacts have
+separate hash chains: render `4b781c84 → d2baffb2`; arms `dc9e8178 → 79e2bba4 → f0ba5d87 → 3d140e09`.
+
+Every link read from git history, not recalled — `dc9e8178` c5d513c (filed) · `79e2bba4` ca7d0b3 (patches 8A/8B/8C) · `f0ba5d87` 79a4a04 (patch numbering) · `3d140e09` c7e7b25 (patch 10, 17,386 B). R-IV.169(a) states the chain as its endpoints `dc9e8178 → 3d140e09`; the two interior links are filed postimages of this same document and are shown, since a chain that skips links cannot be walked. **The chain necessarily lags this document by one commit** — a file cannot record the hash of the commit that is writing it. The postimage of the commit carrying this very row is therefore absent by construction, not missing; it enters the chain at the next amendment. Per this section's own rule, that gap is hereby explained.
 
 ## Not computable
 
