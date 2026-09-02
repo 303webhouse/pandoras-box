@@ -56,3 +56,30 @@ whether an absence is a defect. A band that does not characterize its series wil
 healthy day anomalous and a dead day normal — and per the absence law, *an absence dates
 nothing until you establish the expected event rate across it*. A wrong rate is worse than
 no rate, because it licenses a conclusion.
+
+---
+
+## SCOPE BY A COLUMN THAT SPANS THE WINDOW
+
+**R-IV.151(b). Worked example: the Triton element census.**
+
+A column populated from date X **cannot scope a query whose window opens before X**.
+Absence seen through such a filter is a **population-boundary artifact, not a
+measurement** — the rows are there; the filter cannot see them.
+
+This is inference-from-absence, mechanized. The query returns a smaller number, no error,
+and every downstream reader takes the shortfall for a finding about the world.
+
+**Worked example.** `source` was populated from 2026-07-21. Filtering
+`source = 'footprint'` returns **148 of 558 rows (27%)** — reading four months of live
+history as absent. `strategy` and `signal_type` span the full window and return **558**.
+Same population, same question, three columns; two answer it and one reports a boundary.
+
+**The check, before any scoped query is trusted:** establish that the scoping column is
+populated across the whole window, not merely present in the schema. A column's existence
+says nothing about its coverage, and `NOT NULL` on new rows is compatible with NULL on
+every old one.
+
+Kin to the absence law — *an absence dates nothing until you establish the expected event
+rate across it* — and to the vacuous-column family, where a filter that matches nothing
+runs clean and returns something shaped like an answer.
