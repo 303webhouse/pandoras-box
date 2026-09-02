@@ -56,6 +56,16 @@ absent.
 > is a ledger *about authorship*, and is therefore the single document where
 > attribution-from-recall does the most damage.
 
+> **Rider — your own filings are part of the record.** Authorship confers no exemption from
+> re-reading before quoting. A draft you wrote is not the artifact that was filed: it may have
+> been renamed at filing, folded into another document, corrected by its executor, or never
+> have arrived. **Operative corollary: your own filed artifacts are readable — read them rather
+> than reporting uncertainty about them.**
+
+*This rider's own absence was discovered by the exact failure it names: it was reported in
+relay as "filed to conventions" and had never been written into the file.* Full origin story
+at `verification-laws.md` §4B (R-IV.169(b) / R-IV.174).
+
 ---
 
 ## E-1 · B0's absence is a result
