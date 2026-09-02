@@ -83,3 +83,24 @@ every old one.
 Kin to the absence law — *an absence dates nothing until you establish the expected event
 rate across it* — and to the vacuous-column family, where a filter that matches nothing
 runs clean and returns something shaped like an answer.
+
+## AN AMENDMENT CITES THE BYTES IT CHANGES
+
+**R-IV.162(e).**
+
+Every **replacement** quotes the exact text it replaces, verified against the filed blob at
+cut time. Every **addition** declares ADDITION and names its insertion point by quoted
+neighbor text. **Bare section numbers are not anchors.**
+
+**Worked example.** Three amendments in one week — §4 (R-IV.138) · §6 (R-IV.145) · §8
+(Amendment 1B) — were cut against a section numbering the filed artifact never had. Each
+converted a replacement into a stop or an improvised insertion: §4 had nothing to replace and
+forced a restructure, §6's clause text never arrived and the section was opened as a
+placeholder, §8 did not exist and the gate was applied as an addition with the substitution
+flagged on its face.
+
+The failure is not that the amendments were wrong — their content was correct every time. It
+is that a bare section number cannot be verified before the cut, so the mismatch surfaces at
+apply time in the receiving lane rather than at authoring time in the sending one.
+
+Origin: R-IV.162.

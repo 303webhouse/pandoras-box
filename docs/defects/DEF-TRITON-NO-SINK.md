@@ -25,6 +25,31 @@ at P2 rather than P3: a sink added today starts accumulating today, and every da
 enrichment computed before that point is gone. The defect's cost grows with every day it
 stays open, and no later fix recovers it.
 
+**QUANTIFIED (R-IV.162, carried from R-IV.160.7).** Measured by CC-QUERY's
+`TRITON-K-CAPTURE-AND-BURN-SWEEP`, filed at
+`docs/edge/results/2026-09-02-triton-k-capture-and-burn-sweep.md`:
+
+| path | calls | days active | rate | share of metered spend |
+|---|---|---|---|---|
+| `darkpool_ticker` — **this defect** | **12,320** | 49 | **~251/day** | **2.19%** |
+| `market_tide` — `DEF-TRITON-TIDE-NO-SINK` below | 2,926 | 41 | ~71/day | 0.52% |
+| **combined, both unsunk paths** | **15,246** | — | — | **2.7%** |
+
+Window **2026-07-09 → 2026-09-01**, against `_TOTAL` 562,421 metered UW calls.
+
+**The 15,246 figure spans BOTH no-sink paths — it is not this defect's count.** This
+defect's own count is **12,320**. The combined figure is carried here because the sweep
+measures both in one read and the relay states them together; it must not be cited as the
+dark-pool total.
+
+**ACCRUING, NOT HISTORICAL.** The window closes at the measurement, not at the defect — the
+calls are still being made and still not sunk. Every figure above is a floor that rises while
+this stays open.
+
+**Denominator caveat, from the source:** the named callers sum to 562,415 against `_TOTAL`
+562,421 — a 6-call gap, so `_TOTAL` is maintained independently rather than as an exact sum
+of parts. The percentages are accurate to ~0.001%, but `_TOTAL` is not a derived figure.
+
 The founding design lists `darkpool_enrichment` as **SHADOW ONLY** — `confluence_bonus=0`,
 annotates never scores. That is why it was never noticed: an annotation nobody scores on
 is an annotation nobody misses. It is also the top rung of the data-fidelity ladder
