@@ -18,6 +18,18 @@ caught.
 Each entry names the sub-form of **RECALL MAY PROPOSE; ONLY THE ARTIFACT MAY ASSERT** that
 produced it. Naming sub-forms is the point: none of them *feels* like recall in the moment.
 
+The nine sub-forms below scope to **RECALL-ASSERTION failures** — cases where a lane
+asserted something it had not read. They classify; they do not gatekeep. This ledger records
+falsified and corrected findings **regardless of mechanism family**, and an entry outside the
+recall-assertion family states its class in the Sub-form field with a one-line filing
+rationale (the E-10 precedent, now the rule).
+
+A second enumerated group crystallizes when any out-of-family class reaches **two instances** —
+the same standard applied to NULL-TRIGGER. Until then, out-of-family classes live inline.
+
+**Out-of-family count is stated with the entry total** (currently **3 of 13**). If that ratio
+climbs, the taxonomy is under-covering, and the count is how anyone notices.
+
 | sub-form | what it feels like |
 |---|---|
 | INFERENCE FROM ABSENCE | reasoning |
@@ -28,6 +40,7 @@ produced it. Naming sub-forms is the point: none of them *feels* like recall in 
 | MECHANISM FROM SYMPTOM | diagnosis |
 | PARTIAL APPLICATION | having already fixed it |
 | COINCIDENT AGREEMENT | confirmation |
+| ATTRIBUTION FROM RECALL | accountability |
 
 **COINCIDENT AGREEMENT** deserves its note: a number that matches expectation for the wrong
 reason. Two instances, both caught by CC-QUERY — 969 pending rows against a "~1,000 holdout"
@@ -35,6 +48,13 @@ reason. Two instances, both caught by CC-QUERY — 969 pending rows against a "~
 excl-zero-window 17 against its non-broker-validated 17. It is the hardest sub-form to catch,
 because the usual cue that something is wrong — a number that looks wrong — is exactly what is
 absent.
+
+**Standing rule for this ledger (§4B).**
+
+> **Every attribution in this ledger is read from the record, never from recall — including
+> attributions of the catch.** A ledger whose organising premise is "another lane caught it"
+> is a ledger *about authorship*, and is therefore the single document where
+> attribution-from-recall does the most damage.
 
 ---
 
@@ -126,7 +146,7 @@ $17.03.
 **Artifact:** the part-1 render, `PR-106-RESULTS-PART1`.
 **Falsified by:** broker records — ids 91 (NBIS) and 92 (ICE) carried filed realized values of
 −0.20 and −0.52 against actual −40.40 and −8.92; net −$48.60.
-**Sub-form:** **NONE — SOURCE-DATA ERROR, not an inference failure.**
+**Sub-form:** **OUT-OF-FAMILY — SOURCE-DATA ERROR.**
 **Why it is filed with the others:** E-1 through E-9 are analyst inference errors. E-10 is the
 first whose cause is upstream data, and the ledger must not imply every falsification is an
 analyst's. A study can be reasoned correctly end to end and still carry wrong numbers if the
@@ -144,7 +164,7 @@ n = 843 (stated R-IV.153).
 validation n = 828.
 **Mechanism:** a residue-scoped count — 72, every query behind it predicated
 `fired_at < 08-17` — read as a table-wide population count.
-**Sub-form:** **FENCED-EXPECTATION-OVERTURNED.** Not a recall sub-form: the expectation was
+**Sub-form:** **OUT-OF-FAMILY — FENCED-EXPECTATION-OVERTURNED.** Filing rationale: the expectation was
 fenced as a proposal, carried a stated unknown into the registration (`n = 843 − k`, *k*
 unknown), and was overturned by the measurement the fence called for. **The machinery
 functioned.** It is filed so the ledger records the case where the guard held, not only the
@@ -158,10 +178,28 @@ validation time.
 **Artifact:** the R-IV.139 ruling. **Never reached the database.**
 **Superseded by:** R-IV.157 — **−95.99**, corrected before any write.
 **Mechanism:** the 06-22 and 06-24 adds were averaged into a basis that predates them.
-**Sub-form:** **NONE — COMPUTATION CORRECTED PRE-WRITE, not an inference failure.** Caught at
+**Sub-form:** **OUT-OF-FAMILY — COMPUTATION CORRECTED PRE-WRITE.** Caught at
 execution review, which is where it was supposed to be caught.
 **What survived:** everything downstream. The correction is 1.73 on a single unit and touched
 no aggregate, because no aggregate had been computed from the wrong figure yet.
+
+## E-13 · CC-QUERY formed the k = 0 inference
+**Claim:** "CC-QUERY's own k=0 inference is theirs and they own it."
+**Artifact:** EDGE relay to spine, 2026-09-02.
+**Falsified by:** CC-QUERY, from the record — the k = 0 expectation was formed in R-IV.153,
+explicitly labeled as an expectation and gated pending direct read. CC-QUERY had filed the
+caveat form *before* the read, endorsing EDGE's fallback.
+**Sub-form:** ATTRIBUTION FROM RECALL.
+**How it happened:** an ambiguous phrase in CC-QUERY's report ("the inference read a scoped
+count as a population count") was read as self-attribution and restated as settled fact,
+without reading R-IV.153.
+**What survived:** nothing of the attribution. The transferable lesson is CC-QUERY's and is
+now §2 of `verification-laws.md`.
+**Aggravating circumstance, filed because it is the point:** this occurred in the same batch
+that delivered a ledger whose premise is that every entry was caught by another lane.
+
+*Filed at E-13, not EDGE's §4C index of E-11: the held ledger's sequence assigns
+(R-IV.164(b)). EDGE identifies its entries by content, not by number.*
 
 ---
 
