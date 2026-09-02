@@ -135,6 +135,34 @@ than hygiene.
 **What survived:** every count, both win rates, both average wins, four of five cells, all gate
 statuses, all arm values. The correction moves money, not structure.
 
+## E-11 · k = 0 for the Triton holdout
+**Claim:** the Triton holdout contains no index-symbol rows — `k = 0`, so effective validation
+n = 843 (stated R-IV.153).
+**Artifact:** none. Labeled proposal-only throughout; **no artifact ever shipped it.**
+**Falsified by:** direct read — CC-QUERY's `TRITON-K-CAPTURE-AND-BURN-SWEEP`, as-of
+2026-09-02 18:48:49Z: **k = 15** (SPX 6 · SPXW 6 · RUTW 2 · VIX 1 · RUT 0). Effective
+validation n = 828.
+**Mechanism:** a residue-scoped count — 72, every query behind it predicated
+`fired_at < 08-17` — read as a table-wide population count.
+**Sub-form:** **FENCED-EXPECTATION-OVERTURNED.** Not a recall sub-form: the expectation was
+fenced as a proposal, carried a stated unknown into the registration (`n = 843 − k`, *k*
+unknown), and was overturned by the measurement the fence called for. **The machinery
+functioned.** It is filed so the ledger records the case where the guard held, not only the
+cases where it did not.
+**What survived:** the registration's caveat form, vindicated — §5 filed the unknown rather
+than assuming zero, so the shortfall arrived as an expected quantity instead of a surprise at
+validation time.
+
+## E-12 · XLF id 170 realized −97.72
+**Claim:** XLF id 170 realized **−97.72** (ruled R-IV.139).
+**Artifact:** the R-IV.139 ruling. **Never reached the database.**
+**Superseded by:** R-IV.157 — **−95.99**, corrected before any write.
+**Mechanism:** the 06-22 and 06-24 adds were averaged into a basis that predates them.
+**Sub-form:** **NONE — COMPUTATION CORRECTED PRE-WRITE, not an inference failure.** Caught at
+execution review, which is where it was supposed to be caught.
+**What survived:** everything downstream. The correction is 1.73 on a single unit and touched
+no aggregate, because no aggregate had been computed from the wrong figure yet.
+
 ---
 
 ## Standing check

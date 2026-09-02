@@ -137,7 +137,7 @@ timing) — the founding scope boundary binds.
 
 *The registration carried no §8 and no gate clause. Amendment 1B is phrased as a
 replacement; there was nothing to replace, so it is applied as an ADDITION. The text is
-EDGE's, verbatim.*
+EDGE's, verbatim. Ratified as applied, R-IV.162.*
 
 > **GATE:** validation use is gated on `DEF-TRITON-GRADER-DARK` remediation AND on the
 > holdout being graded **except the enumerated ungradeable set (k = 15,
@@ -158,4 +158,4 @@ EDGE's, verbatim.*
   received
 - → R-IV.146 — §6 authored fresh by successor spine (R-IV.140 wording lost with
   context 1)
-- → R-IV (EDGE Amendment 1) — §5 k captured (k=15, effective n=828), §8 gate ADDED, §5 cross-reference appended
+- → R-IV.162 — Amendment 1 ratified as applied — §5 k captured (k=15, effective n=828), §8 gate ADDED, §5 cross-reference appended
