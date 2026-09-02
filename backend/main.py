@@ -873,6 +873,8 @@ async def lifespan(app: FastAPI):
     flow_deadfeed_watchdog_task = asyncio.create_task(flow_deadfeed_watchdog_loop())  # L1.0 Chunk 3
     pythia_staleness_watchdog_task = asyncio.create_task(pythia_staleness_watchdog_loop())  # 6/29 brief Part 1, full liquid-20 as of 2026-07-17
     adx_regime_task = asyncio.create_task(adx_regime_loop())
+    from jobs.strike_ib_converter import strike_ib_converter_loop
+    strike_ib_task = asyncio.create_task(strike_ib_converter_loop())  # STRIKE-SPEC-01 shadow converter + per-ticker watermarks
 
     # Stable Engine: nightly close recompute + provisional snapshots + index/rates
     # strip (yfinance, zero UW).
@@ -1192,6 +1194,7 @@ async def lifespan(app: FastAPI):
     sell_the_rip_task.cancel()
     staleness_task.cancel()
     signals_freshness_task.cancel()  # DEF-SIGNAL-PERSISTENCE-COLLAPSE watchdog
+    strike_ib_task.cancel()  # STRIKE-SPEC-01 converter
     vwap_task.cancel()
     crypto_scan_task.cancel()
     uw_flow_poller_task.cancel()  # RE-ENABLED 2026-06-18 (L1.0 Chunk 4) — see creation site
@@ -1351,6 +1354,17 @@ async def health_check():
     except Exception as _sfe:
         signals_freshness_block = {"error": str(_sfe)}
 
+    # STRIKE-SPEC-01 addendum s3: below the n-gate the watermark instrument must
+    # render its OWN insufficiency rather than going silent. Silence during
+    # onboarding is indistinguishable from health, and an absent ticker must not
+    # render the same as a healthy one. Read-only and additive; never raises.
+    strike_watermarks_block: dict = {}
+    try:
+        from jobs.strike_ib_converter import strike_watermarks_summary
+        strike_watermarks_block = await strike_watermarks_summary()
+    except Exception as _swe:
+        strike_watermarks_block = {"error": str(_swe)}
+
     return {
         "status": overall,
         "server_time_et": now_et.strftime("%Y-%m-%d %H:%M:%S %Z"),
@@ -1360,6 +1374,7 @@ async def health_check():
         "zeus": zeus_block,
         "stable_jobs": stable_jobs_block,
         "signals_freshness": signals_freshness_block,
+        "strike_watermarks": strike_watermarks_block,
     }
 
 

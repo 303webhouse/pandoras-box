@@ -59,6 +59,7 @@ def class_key(source: str | None) -> str:
 REGISTERED_CLASSES: frozenset[str] = frozenset({
     "tradingview", "server_scanner", "cta_scanner",
     "crypto_scanner", "crypto_engine", "crypto_cvd_engine", "footprint",
+    "STRIKE_IB_BREAK",
 })
 
 # Per-class staleness SLO (seconds) -- the "nothing is arriving at all" detector.
@@ -71,11 +72,18 @@ SLO_SECONDS: dict[str, int] = {
     "crypto_scanner": 12 * 3600,
     "crypto_engine": 12 * 3600,
     "crypto_cvd_engine": 12 * 3600,
+    # ~1 emission/session; the per-ticker watermark in
+    # jobs/strike_ib_converter.py is the REAL alarm. This is only a
+    # total-death backstop, and it must not page across weekends or
+    # holidays -- a 26h SLO on a weekday-only producer is a guaranteed
+    # false red roughly 104 times a year.
+    "STRIKE_IB_BREAK": 5 * 24 * 3600,
 }
 
 # Classes that only flow during regular trading hours. Crypto runs 24/7 and must
 # not flatline overnight or at weekends (anti-fake-sick).
-RTH_ONLY_CLASSES = frozenset({"tradingview", "server_scanner", "cta_scanner", "footprint"})
+RTH_ONLY_CLASSES = frozenset({"tradingview", "server_scanner", "cta_scanner",
+                             "footprint", "STRIKE_IB_BREAK"})
 
 _RANK = {"ok": 0, "no_data": 1, "stale": 1, "flatline": 2}
 

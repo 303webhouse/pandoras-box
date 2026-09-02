@@ -1505,6 +1505,41 @@ async def init_database():
         except Exception as e:
             print(f"WARNING: pythia_events table creation skipped: {e}")
 
+        # STRIKE-SPEC-01: IB-break shadow converter instrumentation.
+        # Mirrors migrations/027_strike_ib_shadow.sql verbatim -- keep the two in sync.
+        # DELETION LAW (SPEC-01 addendum s2): no retention or cleanup policy may
+        # touch strike_ib_session_counts, or the pythia_events history it
+        # summarizes, while the decay-instrument derivation claim is unexercised.
+        try:
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS strike_feed_watermarks (
+                    ticker              TEXT PRIMARY KEY,
+                    baseline_sessions   INTEGER NOT NULL DEFAULT 0,
+                    last_event_ts       TIMESTAMPTZ,
+                    last_event_session  DATE,
+                    last_ib_event_ts    TIMESTAMPTZ,
+                    last_signal_ts      TIMESTAMPTZ,
+                    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """)
+        except Exception as e:
+            print(f"WARNING: strike_feed_watermarks table creation skipped: {e}")
+
+        try:
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS strike_ib_session_counts (
+                    ticker          TEXT NOT NULL,
+                    session_date    DATE NOT NULL,
+                    pythia_events   INTEGER NOT NULL DEFAULT 0,
+                    ib_events       INTEGER NOT NULL DEFAULT 0,
+                    signals_emitted INTEGER NOT NULL DEFAULT 0,
+                    rejects         INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY (ticker, session_date)
+                )
+            """)
+        except Exception as e:
+            print(f"WARNING: strike_ib_session_counts table creation skipped: {e}")
+
         # Brief C v1.1: committee_accuracy view for Phase 4 win-rate measurement
         try:
             await conn.execute("""
@@ -1652,12 +1687,12 @@ async def log_signal(
                 day_of_week, hour_of_day, is_opex_week, days_to_earnings, market_event, signal_category,
                 feed_tier, adx_value, feed_tier_ceiling, score_ceiling_reason, gate_type,
                 feed_tier_v2, feed_tier_v2_path, feed_tier_diverged, confluence_badge,
-                source
+                source, status
             ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
                 $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
                 $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32,
-                $33, $34, $35, $36, $37
+                $33, $34, $35, $36, $37, $38
             )
             ON CONFLICT (signal_id) DO NOTHING
         """,
@@ -1705,6 +1740,28 @@ async def log_signal(
             # origin. `or "tradingview"` preserves that default only for the
             # (unused) direct log_signal() caller that supplies no source.
             signal_data.get("source") or "tradingview",
+            # $38 STRIKE-SPEC-01: explicit status for shadow emission. Never
+            # pass NULL — explicit NULL bypasses the column DEFAULT and the
+            # boot-time backfill (line ~675) flips NULL→ACTIVE anyway.
+            #
+            # SCOPED TO 'SHADOW' DELIBERATELY — this is a build-time deviation
+            # from the brief's literal `signal_data.get("status") or "ACTIVE"`,
+            # reported for ratification. The brief states "No other emitter
+            # passes status". Six do. webhooks/tradingview.py:538 sets
+            # status="IGNORE" on suppressed Exhaustion BULL and that dict
+            # reaches THIS insert via _process_with_market_structure ->
+            # process_signal_unified (:1217 preserves it, :1403 inserts it).
+            # Because log_signal never passed status before, those rows have
+            # always landed on the column DEFAULT 'ACTIVE' and are therefore
+            # visible in board_state.py:134 and trade_ideas.py:53/294/489,
+            # all of which gate on status = 'ACTIVE'. Honoring IGNORE would
+            # silently drop them from those surfaces — a live-surface change
+            # inside a shadow-only build, and one D4 cannot catch because D4
+            # looks for stray SHADOW rows, not stray IGNORE rows.
+            # The discarded-status behavior is ticketed as
+            # DEF-SIGNAL-STATUS-DISCARDED, not fixed here (brief Gates:
+            # "Defects encountered are ticketed, not fixed").
+            "SHADOW" if signal_data.get("status") == "SHADOW" else "ACTIVE",
         )
         inserted = str(result).strip().endswith("1")
         if not inserted:
