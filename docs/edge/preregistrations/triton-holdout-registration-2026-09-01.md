@@ -4,10 +4,10 @@ Registration of record. PIN authored by CC-QUERY; amendments per R-IV.138 / R-IV
 The residue census that originally shipped with this PIN is re-filed to
 `docs/edge/results/2026-09-01-triton-holdout-pin-and-residue-census.md` (R-IV.140).
 
-**Section numbering note:** the artifact as originally filed carried PART 1 / PART 2, not
-§1–§6. The ordered amendments address §2, §4 and §6, so the sections below are numbered to
-give those amendments anchors. §1 is CC-QUERY's PIN text verbatim; no PIN value is
-re-derived.
+**Section numbering note:** the artifact as originally filed carried PART 1 / PART 2,
+not §1–§6. The ordered amendments address §2, §4 and §6, so the sections below are
+numbered to give those amendments anchors. **§3 is intentionally vacant.** §1 is
+CC-QUERY's PIN text verbatim; no PIN value is re-derived.
 
 ---
 
@@ -86,15 +86,28 @@ Single-regime caveat, binding on any read of this set: a failure here cannot sep
 
 ---
 
-## §6 · NOT-A-KILL-ON-ITS-OWN-EVIDENCE CLAUSE — TEXT NOT RECEIVED
+## §6 · NOT A KILL ON ITS OWN EVIDENCE (R-IV.146)
 
-The R-IV.140 edit list names a "§6 not-a-kill-on-its-own-evidence clause". **Its text has
-not reached this lane** — it appears in the handoff's edit list by name only, and in no
-relay, brief, or ferry-path artifact available here. The section is opened as an explicit
-placeholder rather than filled with a reconstruction, per *artifacts assert, recall
-proposes*.
+*The R-IV.140 wording did not survive the context-1 retirement. This text is authored
+fresh by the successor spine and supersedes it — a ruling, not a reconstruction.*
 
-**Re-issue the clause text through spine and it lands in one commit.**
+A negative result on this holdout is **not, on its own evidence, a KILL** of the sweep
+premise or of any pillar. Three grounds, each sufficient alone:
+
+1. **SINGLE REGIME.** The set spans one fired-window (2026-08-17 → 08-31). A failure
+   cannot separate "no edge" from "not this regime" — state both readings or neither
+   (§5).
+2. **NO REGISTERED CRITERION.** Validation n = 843 − k; no confirmatory criterion has
+   been registered against this set, and none may be fixed after outcomes are read. An
+   unregistered failure adjudicates nothing.
+3. **REGISTERED ROLE.** KILL/survive semantics for the premise are pre-registered to the
+   audit's explore population (H1 follow / H2 fade, R-IV.131 brief). This set's role is
+   **CONFIRM material** for an edge the explore step surfaces — under its own CONFIRM
+   registration, criterion fixed before any split.
+
+**Symmetrically:** a positive result here cannot rescue a premise the audit killed, and
+neither outcome on this set speaks to the untested pillars (dark-pool, absorption, tide,
+timing) — the founding scope boundary binds.
 
 ---
 
@@ -108,3 +121,5 @@ proposes*.
   `docs/edge/results/`
 - → R-IV.145 — edit list relayed to CC-BUILD; applied except §6, whose text was not
   received
+- → R-IV.146 — §6 authored fresh by successor spine (R-IV.140 wording lost with
+  context 1)
