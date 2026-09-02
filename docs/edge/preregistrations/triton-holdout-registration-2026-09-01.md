@@ -6,7 +6,7 @@ The residue census that originally shipped with this PIN is re-filed to
 
 **Section numbering note:** the artifact as originally filed carried PART 1 / PART 2,
 not §1–§6. The ordered amendments address §2, §4 and §6, so the sections below are
-numbered to give those amendments anchors. **§3 is intentionally vacant.** §1 is
+numbered to give those amendments anchors. **§3 and §7 are intentionally vacant.** §1 is
 CC-QUERY's PIN text verbatim; no PIN value is re-derived.
 
 ---
@@ -76,13 +76,35 @@ Rows with `id > 377783` are the **FUTURE cohort** and sit outside the identity e
 
 ---
 
-## §5 · k-CAPTURE — PENDING
+## §5 · k-CAPTURE — CAPTURED (Amendment 1A)
 
-`k` = index-symbol rows inside the 843. Capture AUTHORIZED (R-IV.140), one aggregate read.
-**Result not yet received by this lane.** Effective validation n = 843 − k.
+**k = 15**, captured 2026-09-02 18:48:49Z: SPX 6 · SPXW 6 · RUTW 2 · VIX 1 · RUT 0.
+Control: the same predicate returns 843 rows across 152 tickers, so 15 is a measurement,
+not an empty result.
+
+**EFFECTIVE VALIDATION n = 843 − 15 = 828.**
+
+PERMANENCE IS INFERRED, NOT MEASURED — stated as the limit it is: these 15 are held
+ungradeable by symbol class (0 of 72 same-symbol residue rows ever graded; all carry NULL
+`prior_5d_ret`), not by a read of `prior_5d_ret` on the 15 themselves. That read sits
+outside the R-IV.140 authorization and has not been taken. If it is ever taken and any of
+the 15 carries a backward series, effective n rises accordingly.
+
+ONGOING, not historical: 3 index-symbol rows have already entered the FUTURE cohort
+(`id > 377783`). The coverage defect keeps producing rows; it is not closed by the pin.
 
 Single-regime caveat, binding on any read of this set: a failure here cannot separate
 "no edge" from "not this regime" — **state both readings or neither**.
+
+**Amendment 1C — cross-reference.** The 72 index rows named in the residue census are
+RESIDUE-SCOPED (`fired_at < 08-17`) and disjoint from this holdout. The table-wide index
+population is **90: 72 residue · 15 holdout · 3 future cohort**. A scoped count is not a
+population count — the two must not be netted or substituted for one another.
+
+**Note for the record, no action:** the registration's caveat form worked as intended. §5
+filed "effective validation n = 843 − *k*, *k* unknown" rather than assuming zero, so the
+shortfall arrives as an expected quantity rather than a surprise at validation time. That
+is the whole function of stating an unknown at registration.
 
 ---
 
@@ -111,6 +133,19 @@ timing) — the founding scope boundary binds.
 
 ---
 
+## §8 · VALIDATION GATE (Amendment 1B — ADDED, see note)
+
+*The registration carried no §8 and no gate clause. Amendment 1B is phrased as a
+replacement; there was nothing to replace, so it is applied as an ADDITION. The text is
+EDGE's, verbatim.*
+
+> **GATE:** validation use is gated on `DEF-TRITON-GRADER-DARK` remediation AND on the
+> holdout being graded **except the enumerated ungradeable set (k = 15,
+> SPX/SPXW/RUTW/VIX)**. A "fully graded" condition is unsatisfiable by construction and
+> must not be used as the trigger. Effective validation population at trigger: **828**.
+
+---
+
 ## CHAIN OF RECORD
 
 - CC-QUERY PIN capture, registered_at `2026-09-01 03:28:12.361091+00`
@@ -123,3 +158,4 @@ timing) — the founding scope boundary binds.
   received
 - → R-IV.146 — §6 authored fresh by successor spine (R-IV.140 wording lost with
   context 1)
+- → R-IV (EDGE Amendment 1) — §5 k captured (k=15, effective n=828), §8 gate ADDED, §5 cross-reference appended
