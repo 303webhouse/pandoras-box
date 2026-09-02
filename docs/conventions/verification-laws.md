@@ -4,7 +4,7 @@
 **Proposed path:** `docs/conventions/verification-laws.md` — path is spine's to rule, but it
 must be settled before OLYMPUS-TRITON consumes §1 verbatim, since a law quoted from an
 unstable path is a citation without a scope.
-Ratified in full, R-IV.166, 2026-09-02 — content, §1.1 as adjudicated, and path.
+Ratified in full, R-IV.166, 2026-09-02 — content, §1.1 as adjudicated, and path; addendum-1 folded, R-IV.173/174.
 Citable at the section anchors. **This supersedes the “proposed path” qualifier above,
 which is EDGE's original text and is left unedited because the body is ratified as written.**
 **§4 was applied to the ledger at filing (commit `8a52e91`)**, per its own instruction.
@@ -178,6 +178,16 @@ does not feel like recall.
 > a ledger *about authorship*, and is therefore the single document where attribution-from-recall
 > does the most damage.
 
+> **Rider — your own filings are part of the record.** Authorship confers no exemption from
+> re-reading before quoting. A draft you wrote is not the artifact that was filed: it may have
+> been renamed at filing, folded into another document, corrected by its executor, or never
+> have arrived. Origin story, filed because it is the argument: this rider was stated in relay
+> as "filed to conventions" and was never written into the file — and in the same session its
+> author, holding an open read instrument, declined to assert on two of his own filed artifacts
+> rather than reading them. Both were on origin the whole time, one renamed and one folded into
+> its parent. **Operative corollary: your own filed artifacts are readable — read them rather
+> than reporting uncertainty about them.**
+
 ### 4C · New entry
 
 **E-11 · CC-QUERY formed the k = 0 inference**
@@ -238,3 +248,53 @@ as classified-outside. Amend E-10's field to the positive form when this lands.
 **Numbering:** BUILD's held ledger governs. EDGE has not read that file since it was picked up
 and does not assert an index for §4C's entry — it files at whatever index the held ledger
 assigns, and the three out-of-family entries are identified here by content, not by number.
+
+### 4E · Instance counting — object vs actor
+
+An instance may be distinct by **object** or by **actor**, and both count toward the
+two-instances threshold.
+
+- **Distinct by object** — NULL-TRIGGER's two instances: a definitional gate and a
+  data-population field. One lane, two different things.
+- **Distinct by actor** — ATTRIBUTION FROM RECALL's two instances: two lanes, independently,
+  on one event.
+
+The actor form is arguably the **stronger** evidence for a sub-form, because a sub-form is a
+claim about **how lanes err**, not about what they err on. Two lanes independently induced
+into the same failure by the same ambiguous phrase demonstrates the failure is structural
+rather than idiosyncratic. Where the count rests on the actor form, say so — the reading is
+defensible and should be visible rather than assumed.
+
+---
+
+## 5 · READS DISAGREE → IDENTITY FIRST {#reads-disagree}
+
+*Structurally this belongs with §§1–3 as a law rather than after an amendment section. It is
+appended rather than renumbered, to avoid renumbering a ratified document — the same handling
+the vacant sections get. Placement after §4 is deliberate and ratified (R-IV.174(b)).*
+
+**When two lanes' reads of one path disagree, neither is preferred by seniority, recency, or
+who spoke last.** The disagreement resolves in this order:
+
+1. **IDENTITY.** Both lanes state **commit + blob SHA** of what they read. Differing SHAs
+   close the question immediately — the lanes read different objects, and neither read was
+   wrong.
+2. **PROBE LOCALIZATION** *(CC-QUERY's corollary).* **Matching SHAs localize the fault to a
+   probe, but only a re-read with a DIFFERENT instrument identifies it.** Identity proves one
+   lane is misreading; it does not say which, and re-running the same extractor cannot tell
+   you. Change the instrument, not the effort.
+3. **CONTROL DISCIPLINE** *(CC-BUILD's law).* **A control tests the same proposition as the
+   claim.** Existence cannot discriminate presence: confirming a file exists says nothing
+   about whether a section within it does.
+
+**Worked example.** Two lanes read one path and reported a five-row patch table and an empty
+section. Blob SHAs matched — `13679c0a…`, commit `8b0c25f` — so the object was identical and
+the fault was a probe. The probe was a range-terminated extractor (`sed -n '/heading/,/^$/p'`)
+that stopped at the blank line immediately after the heading and printed a two-line window;
+the table six lines below was never in range. A re-read with a different instrument
+(`grep -A 14`) identified which lane was misreading. **The output was an artifact of the probe,
+reported as a property of the file** — and it had become an instruction to reconstruct a table
+that was already there, which would have produced a duplicate.
+
+The block that held pending identity is what prevented the edit. That is the law's purpose:
+not to determine who is right, but to stop an edit until the object is known.
