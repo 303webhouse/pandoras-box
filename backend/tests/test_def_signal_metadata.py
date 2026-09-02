@@ -64,6 +64,16 @@ def _signal(**overrides):
     return base
 
 
+# log_signal()'s positional parameter tail. `source` was the LAST argument when
+# these guards were written; STRIKE-SPEC-01 (2026-09-02) appended `status` as $38,
+# so source is now second-from-last. Kept as a named constant rather than a bare
+# index so the next append has exactly one place to update — and so a future
+# append that silently shifts these assertions fails loudly here instead of
+# quietly re-pointing them at the wrong column.
+SOURCE_ARG = -2
+STATUS_ARG = -1
+
+
 def _run_log_signal(signal_data):
     pool, conn = _mock_pool()
     with patch("database.postgres_client.get_postgres_client", new=AsyncMock(return_value=pool)), \
@@ -81,7 +91,7 @@ def test_log_signal_persists_real_source():
     that value, not the DEFAULT 'tradingview'."""
     conn = _run_log_signal(_signal(source="crypto_engine"))
     args = conn.execute.await_args.args
-    assert args[-1] == "crypto_engine", f"source not persisted; got {args[-1]!r}"
+    assert args[SOURCE_ARG] == "crypto_engine", f"source not persisted; got {args[SOURCE_ARG]!r}"
     # SQL must actually name the source column now
     assert "source" in args[0]
 
@@ -89,7 +99,7 @@ def test_log_signal_persists_real_source():
 def test_log_signal_source_varies_by_writer():
     for src in ("cta_scanner", "footprint", "whale_hunter", "crypto_cvd_engine", "server_scanner"):
         conn = _run_log_signal(_signal(signal_id=f"TEST_{src}", source=src))
-        assert conn.execute.await_args.args[-1] == src
+        assert conn.execute.await_args.args[SOURCE_ARG] == src
 
 
 def test_log_signal_source_falls_back_to_tradingview_when_absent():
@@ -99,12 +109,12 @@ def test_log_signal_source_falls_back_to_tradingview_when_absent():
     sig = _signal()
     sig.pop("source", None)
     conn = _run_log_signal(sig)
-    assert conn.execute.await_args.args[-1] == "tradingview"
+    assert conn.execute.await_args.args[SOURCE_ARG] == "tradingview"
 
 
 def test_log_signal_none_source_falls_back():
     conn = _run_log_signal(_signal(source=None))
-    assert conn.execute.await_args.args[-1] == "tradingview"
+    assert conn.execute.await_args.args[SOURCE_ARG] == "tradingview"
 
 
 # ---------------------------------------------------------------------------
@@ -171,3 +181,22 @@ if __name__ == "__main__":
         t()
         print(f"PASS: {t.__name__}")
     print(f"\nAll {len(tests)} DEF-SIGNAL-METADATA tests passed.")
+
+
+def test_log_signal_status_defaults_to_active_for_ordinary_writers():
+    """STRIKE-SPEC-01 regression guard. $38 `status` was appended to log_signal so
+    the STRIKE converter could persist status='SHADOW'. Every OTHER writer must
+    still land 'ACTIVE' — including writers that set signal_data["status"]
+    themselves (webhooks/tradingview.py:538 sets 'IGNORE'), because honoring
+    those would change what board_state and trade_ideas display.
+    See docs/defects/DEF-SIGNAL-STATUS-DISCARDED.md."""
+    conn = _run_log_signal(_signal(source="crypto_engine"))
+    assert conn.execute.await_args.args[STATUS_ARG] == "ACTIVE"
+
+    conn = _run_log_signal(_signal(source="tradingview", status="IGNORE"))
+    assert conn.execute.await_args.args[STATUS_ARG] == "ACTIVE", (
+        "an IGNORE status must NOT reach the insert — that is a live-surface change"
+    )
+
+    conn = _run_log_signal(_signal(source="STRIKE_IB_BREAK", status="SHADOW"))
+    assert conn.execute.await_args.args[STATUS_ARG] == "SHADOW"
