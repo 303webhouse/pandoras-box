@@ -340,6 +340,13 @@ the committed code before declaring complete.
 1. After `git push origin main`, confirm Railway deploy status:
    `railway deployment list -s <service>` — most recent deployment must
    show SUCCESS, not BUILDING / FAILED / CRASHED.
+
+   **`/health` is read at least twice after Railway SUCCESS; a single sample
+   in the restart window is not a result.** Railway reports SUCCESS before the
+   app finishes restarting. Evidenced 3/3 on 2026-09-02 (R-IV.166): every
+   docs push that day returned `status: error` on the first poll and `healthy`
+   on the second.
+
 2. Verify deploy SHA matches commit SHA being shipped. Mismatch = stale
    container, retry deploy or trigger an empty commit to force rebuild.
 3. Empirically confirm the patched code is live — query the running

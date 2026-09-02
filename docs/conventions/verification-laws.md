@@ -4,11 +4,10 @@
 **Proposed path:** `docs/conventions/verification-laws.md` — path is spine's to rule, but it
 must be settled before OLYMPUS-TRITON consumes §1 verbatim, since a law quoted from an
 unstable path is a citation without a scope.
-**Filed 2026-09-02 · spine ratification pending (R-IV.164).** Filed is not binding;
-ratification follows spine's read on origin. Added by CC-BUILD as a flagged filing
-annotation per R-IV.164(d) — EDGE's copy carried none. The proposed path above is
-**unruled**; §1 must not be cited by OLYMPUS-TRITON until spine settles it.
-**§4 was applied to the ledger in this same commit**, per its own instruction.
+Ratified in full, R-IV.166, 2026-09-02 — content, §1.1 as adjudicated, and path.
+Citable at the section anchors. **This supersedes the “proposed path” qualifier above,
+which is EDGE's original text and is left unedited because the body is ratified as written.**
+**§4 was applied to the ledger at filing (commit `8a52e91`)**, per its own instruction.
 
 **Sections are individually citable:** `#null-trigger` · `#scoped-count` · `#narrow-caution`.
 **§4 is an amendment instruction** to `docs/conventions/falsified-findings-ledger.md`, applied

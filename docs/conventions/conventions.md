@@ -4,6 +4,11 @@ Rules that generalize past the incident that produced them. Each entry names its
 and, where one exists, a worked example — a convention without a worked example is a
 slogan.
 
+Three laws live in `verification-laws.md` — NULL-TRIGGER (`#null-trigger`) · A SCOPED
+COUNT SHIPS WITH ITS COMPLEMENT (`#scoped-count`) · NARROW CAUTION (`#narrow-caution`).
+The sub-form taxonomy lives in `falsified-findings-ledger.md`. Operational conventions file
+here; laws file there.
+
 ---
 
 ## A header states settled buckets only
