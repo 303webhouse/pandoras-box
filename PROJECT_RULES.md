@@ -347,6 +347,18 @@ the committed code before declaring complete.
    docs push that day returned `status: error` on the first poll and `healthy`
    on the second.
 
+   **A deployment status that cannot be read is not SUCCESS; enumerate
+   terminal states; unreadable = keep-waiting.** A wait loop written as
+   "not BUILDING and not DEPLOYING" exits on an empty string, a parse
+   failure, or a CLI error, so a failure to READ the status is
+   indistinguishable from the deploy having finished - it fails open.
+   Enumerate SUCCESS / FAILED / CRASHED as terminal and treat everything
+   else, including unreadable, as keep-waiting. Evidenced 2026-09-02
+   (R-IV.178(d)): commit 6f2de35 reported BUILDING, BUILDING, DEPLOYING
+   and only reached SUCCESS on the FOURTH check, while an earlier
+   fail-open loop had already returned a premature healthy read from the
+   PREVIOUS deploy on the same commit.
+
 2. Verify deploy SHA matches commit SHA being shipped. Mismatch = stale
    container, retry deploy or trigger an empty commit to force rebuild.
 3. Empirically confirm the patched code is live — query the running
