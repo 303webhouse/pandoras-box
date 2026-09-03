@@ -1,0 +1,122 @@
+[
+ {
+  "id": 188,
+  "ticker": "SOXS",
+  "opened_at": "2026-05-14",
+  "qty": 50,
+  "filed_realized": 29.0,
+  "broker_corrected_realized": 29.26,
+  "delta_filed_minus_broker": -0.26,
+  "convention": "AVERAGE-COST (R-IV.139)",
+  "closing_fills": [
+   {
+    "date": "2026-05-15",
+    "qty": 50.0,
+    "proceeds": 449.01,
+    "basis": 419.75,
+    "realized": 29.26,
+    "note": ""
+   }
+  ]
+ },
+ {
+  "id": 354,
+  "ticker": "SOXS",
+  "opened_at": "2026-07-15",
+  "qty": 6,
+  "filed_realized": 69.79,
+  "broker_corrected_realized": 69.79,
+  "delta_filed_minus_broker": 0.0,
+  "convention": "AVERAGE-COST (R-IV.139)",
+  "closing_fills": [
+   {
+    "date": "2026-07-17",
+    "qty": 6.0,
+    "proceeds": 347.04,
+    "basis": 277.25,
+    "realized": 69.79,
+    "note": ""
+   }
+  ]
+ },
+ {
+  "id": 383,
+  "ticker": "SOXS",
+  "opened_at": "2026-08-17",
+  "qty": 6,
+  "filed_realized": 38.28,
+  "broker_corrected_realized": 39.51,
+  "delta_filed_minus_broker": -1.23,
+  "convention": "AVERAGE-COST (R-IV.139)",
+  "closing_fills": [
+   {
+    "date": "2026-08-18",
+    "qty": 6.185477,
+    "proceeds": 277.51,
+    "basis": 238.0,
+    "realized": 39.51,
+    "note": ""
+   }
+  ]
+ },
+ {
+  "id": 69,
+  "ticker": "TSLQ",
+  "opened_at": "2026-03-11",
+  "qty": 30,
+  "filed_realized": 24.1,
+  "broker_corrected_realized": 23.95,
+  "delta_filed_minus_broker": 0.15,
+  "convention": "AVERAGE-COST (R-IV.139)",
+  "closing_fills": [
+   {
+    "date": "2026-03-13",
+    "qty": 30.0,
+    "proceeds": 666.45,
+    "basis": 642.5,
+    "realized": 23.95,
+    "note": ""
+   }
+  ]
+ },
+ {
+  "id": 348,
+  "ticker": "SOXS",
+  "opened_at": "2026-07-07",
+  "qty": 87,
+  "filed_realized": -58.3,
+  "broker_corrected_realized": -31.71,
+  "delta_filed_minus_broker": -26.59,
+  "convention": "AVERAGE-COST (R-IV.139)",
+  "closing_fills": [
+   {
+    "date": "2026-07-14",
+    "qty": 87.0,
+    "proceeds": 347.99,
+    "basis": 379.7,
+    "realized": -31.71,
+    "note": ""
+   }
+  ]
+ },
+ {
+  "id": 382,
+  "ticker": "SOXS",
+  "opened_at": "2026-08-05",
+  "qty": 8,
+  "filed_realized": 5.14,
+  "broker_corrected_realized": 5.14,
+  "delta_filed_minus_broker": 0.0,
+  "convention": "AVERAGE-COST (R-IV.139)",
+  "closing_fills": [
+   {
+    "date": "2026-08-11",
+    "qty": 8.185061,
+    "proceeds": 360.14,
+    "basis": 355.0,
+    "realized": 5.14,
+    "note": ""
+   }
+  ]
+ }
+]

@@ -371,6 +371,33 @@ the committed code before declaring complete.
 
 A brief is not complete until step 3 is empirically confirmed.
 
+## DO-NOT-RUN: scripts/reconcile_rh.py
+
+**STANDING ORDER, R-IV.210(a), effective 2026-09-03 until remediated.**
+**Do not run `scripts/reconcile_rh.py`. Not in dry-run, not with a narrowed predicate.**
+
+Two properties combine into silent data corruption, both verified in the file:
+
+1. **It rebuilds destructively.** Line 303 is
+   `DELETE FROM trades WHERE origin = 'csv_reconciliation'`, followed by a re-INSERT. Re-inserted rows draw fresh
+   `nextval()` serials, so **ids rotate while content survives**.
+2. **It then reverts P&L by hard-coded id.** Lines 306-333 carry **19 literal
+   trade ids** in `pnl_reverts`, each applied as
+   `UPDATE trades SET pnl_dollars = $1 WHERE id = $2`.
+
+**The delete runs BEFORE the reverts, in the same run.** So the script rotates
+the keyspace and then writes nineteen P&L values into whatever rows now occupy
+those id slots. The ids were valid against one keyspace; the script's own
+rebuild is what invalidates them, and nothing in it notices.
+
+**A re-run misapplies nineteen P&L reverts to arbitrary rows.** There is no
+guard, no assertion on row identity, and `trades` carries no
+`created_at` / `updated_at`, so the damage would not be datable afterwards.
+
+Registered as DEF-TRADES-DESTRUCTIVE-REBUILD (P1). Fix is HELD; **this
+DO-NOT-RUN is the interim control.** Diagnosis of record:
+`docs/edge/results/2026-09-03-trades-rekey-diagnosis.md`
+
 ## unified_positions Schema Limitation
 
 The `unified_positions` table represents spreads via `long_strike` and
