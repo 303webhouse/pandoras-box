@@ -84,6 +84,35 @@ test, and the D7 result must state this span rather than "one weekend".
 has not opened, not because holidays are handled. Stating that explicitly so a
 green D7 is not later cited as evidence the holiday case works.
 
+## PRE-REGISTERED EXPECTATION (R-IV.199(a)) — ACCEPT-UNFIXED
+
+Spine ruled ACCEPT-UNFIXED **with the expectation registered before the window**,
+which converts this from a defect that will surprise someone into an instrument
+whose misbehaviour is characterized.
+
+**Registered before the fact, 2026-09-03:**
+
+- `baseline_sessions` reaches **3** at Friday 2026-09-04 close (sessions 09-03,
+  09-04 and the deploy-day partial).
+- **Monday 2026-09-07 is a weekday market holiday and is unmodeled.** After
+  **11:00 ET** expect **UP TO 8 LATCHED FALSE ALARMS**, one per allowlist ticker.
+- **Clear-notify on Tuesday 09-08** as the feed returns.
+
+**D7 therefore adjudicates TWO lines, not one:**
+
+| line | expectation |
+|---|---|
+| Sat 09-05 / Sun 09-06 | **ZERO** alarms — the weekday gate holds |
+| Mon 09-07 | **count the pre-registered set** — up to 8, latched, after 11:00 ET |
+
+A weekend pass alone is not a D7 pass, and a Monday alarm is not a D7 failure.
+**A false alarm predicted to the hour is an instrument characterized, not an
+instrument trusted** — the fix below is still owed.
+
+*[Added by CC-BUILD beyond the letter of R-IV.199(b)/(c), so the D7 read has the
+expectation on the artifact rather than only in a relay. Revert if the
+registration was meant to live only in the ruling.]*
+
 ## Fix, when commissioned
 
 A holiday calendar for the converter's RTH window, or an alarm suppressor keyed

@@ -81,10 +81,61 @@ timestamp rather than a correction to when the trade occurred.
 Five unworked candidate tickers were attributed row by row (`rh_unit_attribution.json`,
 10 DB units: SOXS 6, SQQQ/TSLQ/URA/BITX 1 each).
 
-**CANDIDATE ids: 69 · 150 · 188 · 354 · 383** — pending CC-QUERY's intersection against the
-66-unit manifest.
-**Already excluded upstream, do not intersect:** 348 · 382 (EDGE) · 368 · 369 · 370
-(INVALID-LIFETIME).
+**CANDIDATE ids: 69 · 150 · 188 · 348 · 354 · 382 · 383** — seven, corrected below.
+**Excluded, do not intersect: 368 · 369 · 370 only**, on INVALID-LIFETIME (NULL
+entry_price/exit_price/cost_basis; realized_pnl present with no derivation).
+
+> **CORRECTION (R-IV.192 pass, CC-POSITIONS error).** An earlier version of this file and of
+> `rh_unit_attribution.json` labelled **348 and 382** `EXCLUDED-UPSTREAM (EDGE)`. That was
+> wrong. The label was taken from a relay parenthetical enumerating rows a mismatch *might
+> land on* ("SOXS 368/348/382, SQQQ 370") and hard-coded as a disposition without checking it
+> against the ledger. Both are ordinary units with real prices and realized values, and
+> CC-QUERY confirms both are **IN THE 66, src=B**.
+>
+> **`CSV_RECONCILE` is a source tier, not a disposition.** 368/369/370 are excluded because
+> their entry/exit/basis are NULL, not because of their source.
+>
+> This is load-bearing: the weakening argument "a mismatch landing on an already-excluded row
+> changes nothing" **does not apply to 348 or 382**. Both contribute.
+
+Content keys for the two restored units:
+
+```
+id 348  SOXS  opened_at 2026-07-07 06:00:00+00  qty 87  realized -58.30  CSV_RECONCILE
+id 382  SOXS  opened_at 2026-08-05 13:00:10+00  qty  8  realized  +5.14  CSV_RECONCILE
+```
+
+### Intersection result (CC-QUERY, on the five originally submitted)
+
+```
+188  SOXS  05-14  50  +29.00   IN THE 66 — SEMIS/DRAM, src=B
+354  SOXS  07-15   6  +69.79   IN THE 66 — SEMIS/DRAM, src=B
+383  SOXS  08-17   6  +38.28   IN THE 66 — SEMIS/DRAM, src=B
+ 69  TSLQ  03-11  30  +24.10   IN THE 66 — OTHER,      src=B
+150  URA   04-23   1  +24.00   OUT-OF-SCOPE (option; no content-key match)
+```
+
+348 and 382 were withheld from that pass by the error above and require intersection.
+SEMIS/DRAM already carries 3 of 4 hits; both restored units are SOXS, so the concentration
+in that cell can only increase.
+
+### Content key is not unique at day granularity
+
+R-IV.183(b) ruled `(ticker, opened_at)`. At **day** granularity the 66 units occupy only 61
+distinct keys — five collide, including SOXS 2026-07-15 and TSLQ 2026-03-11, which are two of
+the four hits. Keying on ticker+date alone resolves them to the wrong source tier by ordering.
+**Adding `quantity` and `realized_pnl` resolves all five uniquely** and is the recommended key.
+
+`position_id` is UNIQUE and stronger, but **the timestamp encoded in it is not a reliable join
+key** — 2 of 5 sampled ids disagree with their own `entry_date`:
+
+```
+ id 348  POS_SOXS_20260707_060000 03  entry_date 2026-07-07 06:00:00+00   agree
+ id 354  POS_SOXS_20260715_060000     entry_date 2026-07-15 00:00:00+00   DISAGREE  6h (TZ artifact at minting)
+ id 382  POS_SOXS_20260805_130010     entry_date 2026-08-05 13:00:10+00   agree
+ id  69  POS_TSLQ_20260311_000848     entry_date 2026-03-11 00:08:48+00   agree
+ id 170  POS_XLF_20260429_062700      entry_date 2026-04-28 00:00:00+00   DISAGREE  date AND time
+```
 
 **Two candidates already reconcile against export and are unlikely to be instances:**
 
