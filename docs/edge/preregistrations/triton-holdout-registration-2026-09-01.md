@@ -161,6 +161,27 @@ on an artifact rather than on a recollection. It is also the worked example for
 > SPX/SPXW/RUTW/VIX)**. A "fully graded" condition is unsatisfiable by construction and
 > must not be used as the trigger. Effective validation population at trigger: **828**.
 
+**EXPLORE POPULATION PREDICATE (binding, R-IV.187(c)).**
+
+> `id <= 377783 AND graded_at IS NOT NULL AND fired_at < 2026-08-17`
+
+**Post-remediation, `graded_at` alone NEVER selects the explore population.** Once
+`DEF-TRITON-GRADER-DARK` is fixed the grader grades holdout rows too, so the holdout
+**dissolves into any `graded_at`-only sweep**. The defining clause is `fired_at < 2026-08-17`,
+and omitting it is not a narrowing error — it silently inverts what the query is about.
+
+EDGE stated this as the ITEM 1 objection on 2026-09-01, in these terms: *"Anyone running
+`WHERE graded_at IS NOT NULL` post-fix sweeps the holdout in without noticing."* It happened
+on 2026-09-02, to the lane that had quoted and agreed with the objection. See
+`docs/edge/results/2026-09-02-triton-audit-halt-contamination.md` — the §2 tripwire fired
+correctly (`audit_n` 6,618 against bound [6,045 · 6,099]) and the audit halted with no
+artifact produced.
+
+**The RELEASE clause EDGE flagged as absent on 09-01 is still absent** — *grading does NOT
+release the set; no-peek applies to outcomes regardless of `graded_at` status.* It is the
+clause that exists to stop exactly this, and it was not there to stop it. Its authorship sits
+with spine/EDGE, not with this lane; recorded here so the gap is visible at the point of use.
+
 ---
 
 ## CHAIN OF RECORD

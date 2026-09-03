@@ -109,3 +109,29 @@ is that a bare section number cannot be verified before the cut, so the mismatch
 apply time in the receiving lane rather than at authoring time in the sending one.
 
 Origin: R-IV.162.
+
+
+## A GATE VALUE NAMES ITS TREE
+
+**R-IV.187(e), spine-authored.**
+
+Every fingerprint states **which bytes it hashes** — the working-tree file, or the git blob.
+**For a CRLF-bearing file these are different numbers for identical content**, and a gate
+quoted without its tree is a value that will fail against a correct object.
+
+Equality between the two is **proven by normalization round-trip, never assumed**: strip the
+CRs from the working-tree bytes and the result must equal the blob byte-for-byte.
+
+**Worked example — the five-artifact filing of 2026-09-02.** Three `.md` files were already
+LF, so working-tree and blob hashes agreed (`3c478c9b` · `b60d31af` · `beb1eabd`). Two JSONs
+carried CRLF and diverged: `rh_crosscheck.json` gated at `8ae7405a` / 33,313 B in the working
+tree and landed as `beeb0927` / 31,500 B in the blob; `rh_unit_attribution.json` `15bd1bac` /
+3,436 → `c4a16e1c` / 3,285. CR-stripping each working-tree file reproduced its filed blob
+exactly, which is what turned an alarming hash mismatch into a stated convention. The repo is
+uniformly `i/lf` with `core.autocrlf=true`, so a Windows checkout restores CRLF and the
+working-tree gate returns.
+
+**Corollary on instruments.** The CR count itself must be measured with an instrument that
+counts *characters*, not lines: `grep -c $''` reports matching lines and gave 123 on a file
+containing zero CRs. `tr -cd '' | wc -c` is correct. A gate value is only as good as the
+probe that produced it.
