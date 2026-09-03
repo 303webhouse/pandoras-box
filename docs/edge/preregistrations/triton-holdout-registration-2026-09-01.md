@@ -139,6 +139,23 @@ timing) — the founding scope boundary binds.
 replacement; there was nothing to replace, so it is applied as an ADDITION. The text is
 EDGE's, verbatim. Ratified as applied, R-IV.162.*
 
+**LINEAGE, R-IV.184(c) — the note above describes the committed file accurately, and is
+wrong about the lineage.** `docs/defects/R-IV.170d-ARCHAEOLOGY.md` recovered the context-1
+draft (7,850 B, sha256 `b60518b7…`): it numbered its sections plainly, `## 1 ·` through
+`## 10 ·` with no section sign, and **its §8 "Gates and counter" carried a GATE clause** —
+*"validation use is gated on `DEF-TRITON-GRADER-DARK` remediation"*. The literal strings
+`§7`/`§8` missed on grep because the draft never used the glyph, not because the sections
+were absent.
+
+All three §-anchored amendments were cut against **that** outline. So **Amendment 1B was
+the replacement it claimed to be**; this file concluded otherwise because it was reading
+the PIN-based rebuild, not the draft. The phantom outline was never phantom.
+
+**Nothing was lost and nothing is reopened** — the committed version supersedes on content,
+carrying every amendment through R-IV.162. The three-amendment anchor mystery is CLOSED,
+on an artifact rather than on a recollection. It is also the worked example for
+`verification-laws.md` §5: identity first, and a bare section number is not an anchor.
+
 > **GATE:** validation use is gated on `DEF-TRITON-GRADER-DARK` remediation AND on the
 > holdout being graded **except the enumerated ungradeable set (k = 15,
 > SPX/SPXW/RUTW/VIX)**. A "fully graded" condition is unsatisfiable by construction and
