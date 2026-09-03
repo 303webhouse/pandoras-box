@@ -490,6 +490,14 @@ async def process_events(conn, redis, now_et: datetime) -> Dict[str, int]:
     )
 
     emitted_ids = set()
+    # Per-cycle distinct-event guards for the counter columns. Scoped to the
+    # cycle, not the session: a cycle cannot double-count, and cross-cycle
+    # repeats are absorbed by the ON CONFLICT on the real insert. Making these
+    # session-scoped would need state this loop does not carry, and the fix that
+    # actually closes the historical inflation is the backfill from
+    # pythia_events named on the DEF's face.
+    seen_event_ids = set()
+    rejected_event_ids = set()
     for rec in events:
         ev = dict(rec)
         stats["seen"] += 1
@@ -503,12 +511,22 @@ async def process_events(conn, redis, now_et: datetime) -> Dict[str, int]:
         else:
             session_date = _session_date(now_et)
 
-        await _session_counts_bump(conn, ev["ticker"], session_date, "ib_events")
+        # DEF-STRIKE-IB-EVENTS-OVERCOUNT: count DISTINCT events, not rows-seen.
+        # The 2h lookback returns the same event on up to 24 consecutive cycles,
+        # so bumping per returned row made the multiplier depend on how long an
+        # event survived the window — 24x at 10:31, 2x at 15:55. A time-of-day
+        # gradient manufactured entirely by the counter, in the table the
+        # addendum designates as the substrate for any future daily-rate band.
+        if ev["id"] not in seen_event_ids:
+            seen_event_ids.add(ev["id"])
+            await _session_counts_bump(conn, ev["ticker"], session_date, "ib_events")
 
         ok, reason = validate_event(ev)
         if not ok:
             stats["rejected"] += 1
-            await _session_counts_bump(conn, ev["ticker"], session_date, "rejects")
+            if ev["id"] not in rejected_event_ids:
+                rejected_event_ids.add(ev["id"])
+                await _session_counts_bump(conn, ev["ticker"], session_date, "rejects")
             # Binding condition 7: converter-level only. NEVER record_attempt(
             # rejected) here -- a validation reject is CORRECT behavior, and
             # paging the persistence alarm on correct behavior is a false red by
@@ -544,6 +562,21 @@ async def process_events(conn, redis, now_et: datetime) -> Dict[str, int]:
         signal_data = build_signal_data(ev, direction, session_date, is_reversal)
 
         if dry:
+            # DEF-STRIKE-IB-EVENTS-OVERCOUNT, second-order half: this branch used
+            # to `continue` BEFORE emitted_ids was populated, so the same event
+            # re-logged on every cycle it stayed inside the 2h lookback — up to
+            # 24 lines for one event. On 2026-09-03 that rotated the 500-line log
+            # buffer and destroyed the very evidence D1 step 4 asks for: the
+            # review session's proof was erased by the volume of its own logging.
+            #
+            # Registering the id here makes dry-run log each event ONCE per
+            # session, and — the point spine's log-capture order was really
+            # after — makes dry-run EXERCISE THE DEDUP PATH instead of bypassing
+            # it. A dry run that skips the mechanism it is meant to rehearse is
+            # not a rehearsal.
+            if signal_id in emitted_ids:
+                continue
+            emitted_ids.add(signal_id)
             redacted = {k: v for k, v in signal_data.items() if k != "triggering_factors"}
             logger.info("STRIKE DRY-RUN would emit: %s", redacted)
             continue
