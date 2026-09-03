@@ -371,6 +371,24 @@ the committed code before declaring complete.
 
 A brief is not complete until step 3 is empirically confirmed.
 
+**No deploys inside RTH while a collection window is live.** Narrow practice,
+not the retired blanket blackout: it binds only when something is actively
+collecting into the database during 09:30-16:00 ET, and only for the service
+that hosts it. Docs-only pushes redeploy the app too and are covered.
+
+The reason is measured, not precautionary. Each redeploy drops the hub for
+roughly 60-170s. On 2026-09-02 and 09-03 this lane started **8 of 20
+deployments inside RTH**, an estimated **8 to 23 minutes** of hub downtime
+during collection hours, while a shadow converter was mid-observation. No loss
+has been attributed to it — the 09-01 QQQ/SMH deaths were investigated and are
+NOT deploy-aligned — but the exposure was unnecessary, and a collection window
+is exactly when an unexplained gap is most expensive to interpret: every gap
+has to be excluded as a deploy artifact before it can be read as a finding.
+
+**Batch after the close instead.** Three service-touching changes queued on
+2026-09-03 shipped as one restart rather than three, which is the practice.
+
+
 ## DO-NOT-RUN: scripts/reconcile_rh.py
 
 **STANDING ORDER, R-IV.210(a), effective 2026-09-03 until remediated.**

@@ -33,6 +33,11 @@ logger = logging.getLogger(__name__)
 
 _ET = pytz.timezone("America/New_York")
 
+# DEF-MP-DEAD-RENDERS-AS-QUIET: sessions behind at which a feed stops being
+# "quiet" and starts being "not arriving". Two means the feed missed a whole
+# completed session AND the current one.
+DARK_AFTER_SESSIONS = 2
+
 
 def _safe_float(v: Any) -> Optional[float]:
     if v is None:
@@ -56,6 +61,38 @@ def _prev_weekday(d: date) -> date:
     while cur.weekday() >= 5:  # Mon=0 … Fri=4, Sat=5, Sun=6
         cur -= timedelta(days=1)
     return cur
+
+
+def _sessions_behind(event_session: date, current_session: date) -> int:
+    """Trading sessions between an event's session and the session under analysis.
+
+    Counts WEEKDAYS, not calendar days. A Friday event read on Monday is ONE
+    session behind, not three — a calendar-day count would call every Monday
+    dark, which is the DEF-NIGHTLY-FLATLINE failure applied to a new instrument.
+    """
+    n = 0
+    d = current_session
+    while d > event_session:
+        d = _prev_weekday(d)
+        n += 1
+    return n
+
+
+def classify_freshness(sessions_behind: int) -> str:
+    """Three-state freshness verdict. DEF-MP-DEAD-RENDERS-AS-QUIET, R-IV.231(b).
+
+    ok    - from the session under analysis
+    stale - exactly one session behind; a genuinely quiet session looks like this
+    dark  - DARK_AFTER_SESSIONS or more behind; the feed is not arriving
+
+    Symbol-agnostic by construction: it takes a count, not a ticker, so it cannot
+    special-case a roster. There is deliberately no survivor list — the survivor
+    set fell every week through 2026-07/08, so a hardcoded roster would be stale
+    the week after it shipped and would then assert liveness that no longer holds.
+    """
+    if sessions_behind == 0:
+        return "ok"
+    return "stale" if sessions_behind < DARK_AFTER_SESSIONS else "dark"
 
 
 def _current_session_date(now_et: datetime) -> date:
@@ -119,7 +156,28 @@ async def get_market_profile(ticker: str) -> Optional[Dict[str, Any]]:
     event_session = ts.astimezone(_ET).date()
     current_session = _current_session_date(now_et)
 
-    status = "ok" if event_session >= current_session else "stale"
+    # DEF-MP-DEAD-RENDERS-AS-QUIET (R-IV.231(b)): three states, not two.
+    #
+    # The gate resolves max(timestamp) for THIS ticker at call time and compares
+    # it to the session under analysis. There is deliberately NO survivor list:
+    # the survivor set fell every week without exception through 2026-07/08, so
+    # a hardcoded roster is tripwire decay at feed scale — it would be stale the
+    # week after it shipped and would then assert liveness that no longer holds.
+    #
+    #   ok    — event is from the session under analysis
+    #   stale — exactly one session behind; a genuinely quiet session looks like
+    #           this, so it is labelled but not alarming
+    #   dark  — TWO OR MORE sessions behind. A feed that has missed a full
+    #           session plus the current one is not "quiet"; it is not arriving.
+    #
+    # DARK_AFTER_SESSIONS is a registered predicate (verification-laws section
+    # 1.2), so its satisfaction rate over the population it is used on is stated
+    # rather than assumed. Measured 2026-09-03 over every ticker in
+    # pythia_events: 206 of 212 dark, 6 live — the state it selects is the
+    # common case today, which is exactly why the two-state vocabulary failed.
+    sessions_behind = _sessions_behind(event_session, current_session)
+    status = classify_freshness(sessions_behind)
+
     age_seconds = int((now_utc - ts).total_seconds())
 
     data = {
@@ -143,6 +201,8 @@ async def get_market_profile(ticker: str) -> Optional[Dict[str, Any]]:
         "session_date": event_session.isoformat(),
         "as_of": ts.astimezone(timezone.utc).isoformat(),
         "event_age_seconds": age_seconds,
+        # sessions, not seconds: 3,293,950s does not read as 38 days
+        "sessions_behind": sessions_behind,
         # Static tag — the Pine payload carries no version field (verified
         # 2026-06-10 against a live SPY raw_payload), so this can't read reality
         # from the data. Reflects the current live Pine (v2.4). For true

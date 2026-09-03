@@ -21,8 +21,12 @@ DESCRIPTION = (
     'structure," "the 80% rule," "value-area migration," or "is this a fade or a '
     'chase." `single_prints` and `day_type` are NOT yet computed by the Pine feed '
     "and are returned as null — never inferred.\n\n"
-    "Status semantics: `ok` = levels from the current session; `stale` = levels from "
-    "a prior session (still returned, with session_date + event_age_seconds — the "
+    "Status semantics: `ok` = levels from the session under analysis; `stale` = ONE "
+    "session behind, returned with session_date and sessions_behind; `dark` = TWO OR "
+    "MORE sessions behind — the feed is NOT ARRIVING and the levels DO NOT describe "
+    "the current market, so do not reason from them without confirming the feed. "
+    "This surface CANNOT distinguish an upstream outage from a quiet market and does "
+    "not try; it reports the observation, never the cause. (was: `stale` = "
     "feed has been quiet this session); `unavailable` = no levels exist for this "
     "ticker (PYTHIA should fall back to her framework-only disclaimer, never "
     "fabricate levels).\n\n"
@@ -63,11 +67,26 @@ async def hub_get_market_profile(ticker: str) -> dict:
     age = result.get("staleness_seconds")
     tkr = data["ticker"]
 
-    if status == "stale":
+    sb = data.get("sessions_behind")
+
+    if status == "dark":
+        # Never assert a market condition here. From the pipe end a delivery
+        # outage and a quiet market are the same observation, so this states
+        # the observation and refuses the cause.
         summary = (
-            f"{tkr} MP (PRIOR session {data['session_date']}): "
-            f"POC {data['poc']}, VAH {data['vah']}, VAL {data['val']}. "
-            f"Feed quiet this session ({age}s old)."
+            f"{tkr} MP IS DARK — NO EVENTS SINCE {data['session_date']} "
+            f"({sb} sessions). These levels are from that date and DO NOT "
+            f"describe the current market. The feed is not arriving; whether "
+            f"the cause is upstream or delivery is not knowable from here. "
+            f"Do not trade or reason from these levels without confirming the "
+            f"feed. POC {data['poc']}, VAH {data['vah']}, VAL {data['val']}."
+        )
+    elif status == "stale":
+        summary = (
+            f"{tkr} MP from PRIOR session {data['session_date']} "
+            f"({sb} session behind): POC {data['poc']}, VAH {data['vah']}, "
+            f"VAL {data['val']}. No events yet in the session under analysis — "
+            f"cause not determinable from this surface."
         )
     else:
         summary = (
