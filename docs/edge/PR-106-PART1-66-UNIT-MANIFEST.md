@@ -139,6 +139,8 @@ would show post-read value corrections is overtaken: those ids no longer denote 
 **The underlying units survive** and are recoverable by content key `(ticker, opened_at)`,
 which resolves 17 of 18 captured rows. That key — not the id — is the durable identifier.
 
+*[CC-BUILD, R-IV.187(d), citing EDGE ITEM 2: the content-key decision was **NECESSARY, not cautious**. The 66 units span **three id formats** — broker fill-hash pairs, `unified_positions` integers, and `POS_` keys. No single integer keyspace covers the manifest, so an id-level intersection was never going to work across the whole set regardless of the re-key.]*
+
 ### Canonical re-derivation for src=B
 
 ```sql
