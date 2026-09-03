@@ -89,3 +89,8 @@ data/_*.json
 scripts/retrospective_output.json
 # Windows Explorer folder metadata
 desktop.ini
+
+# LOCAL ONLY — deferred-security register (R-IV.224(a)). Never committed while
+# this repository is public. Ignored here so the rule is enforced by the tool
+# rather than remembered by a lane.
+docs/security/
