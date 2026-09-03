@@ -156,6 +156,14 @@ producing a repeatable effect — and the aggregate is carried by one week.
 | all three horizons exactly equal | **0** |
 | rows on watchdog-shed days 07-10 / 07-13 | **307** |
 
+*[CC-BUILD annotation, R-IV.210(d), citing `docs/edge/results/2026-09-03-trades-rekey-diagnosis.md`: the poller WAS
+disrupted as the brief records — the rows drained late from backlog rather than never
+arriving, with 07-10's last insert landing **+2.72 days** after its fire-date. **The 307
+rows are genuine live captures and their inclusion is correct.** The 07-08 lag signature
+and the 07-10 volume shortfall route to the 09-15 supervision inputs as **watchdog
+under-count evidence** — a shed that reports fully-stopped while rows are still draining
+is under-counting what it sheds.]*
+
 **LIMITATION — the brief's check could not be run as written.** It asks whether `fwd_ret`
 values reconcile against actual price history. **No price series is available to this lane**,
 so external reconciliation was not performed; the above are internal-consistency checks only.
