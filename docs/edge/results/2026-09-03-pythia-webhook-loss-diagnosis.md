@@ -100,7 +100,14 @@ the allowlist was written, and R-IV.109(e)'s dedicated-alert precondition would 
 been testable at build time instead of discovered in the dry-run.
 
 **A new detector for a condition an existing detector is already reporting is not
-redundancy. It is a second alarm nobody will act on, and it consumed a build slot.**
+redundancy. **It is a second alarm against a condition the first alarm reported
+1,200 times without producing action, and it consumed a build slot.**
+
+*[FORECAST-AS-STATE correction. This read "a second alarm nobody will act on" —
+a flat future indicative predicting behaviour that has not occurred. The measured
+claim is the one that carries the argument anyway: the first alarm's ~1,200
+deliveries produced no action, which is evidence, not forecast. Found by
+CC-QUERY's future-conditional tell run on this lane's own artifacts.]*
 
 ## 5 — (d) LIMITATION REGISTERED
 
