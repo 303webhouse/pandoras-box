@@ -22,7 +22,7 @@ an Olympus-driven entry. **There is no CHECK constraint, enum, or foreign key on
 `unified_positions.account`**, so nothing at the storage layer stops recurrence, and the
 existing UI guard cannot help a caller that never touches the UI. The five rows were remapped
 to `FIDELITY_ROTH` under R-IV.192(d)/R-IV.200(c) with the evidence recorded per row (account
-scope: 652303158 is the only tradeable Fidelity account, AHRP descoped; ETF-only invariant) —
+scope: ACCT-ROTH is the only tradeable Fidelity account, AHRP descoped; ETF-only invariant) —
 **the remap corrects the instances; it does not close the path.**
 
 ## CORRECTION TO THE FILING RECORD
