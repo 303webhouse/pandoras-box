@@ -132,6 +132,6 @@ uniformly `i/lf` with `core.autocrlf=true`, so a Windows checkout restores CRLF 
 working-tree gate returns.
 
 **Corollary on instruments.** The CR count itself must be measured with an instrument that
-counts *characters*, not lines: `grep -c $''` reports matching lines and gave 123 on a file
-containing zero CRs. `tr -cd '' | wc -c` is correct. A gate value is only as good as the
+counts *characters*, not lines: `grep -c $'\r'` reports matching lines and gave 123 on a file
+containing zero CRs. `tr -cd '\r' | wc -c` is correct. A gate value is only as good as the
 probe that produced it.
