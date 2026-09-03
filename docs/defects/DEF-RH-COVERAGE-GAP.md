@@ -116,6 +116,56 @@ later arrival reads as arrival, not regression. `RAMZ` and `TJX` have Fidelity-s
 - **Whether sub-population 2 is exhaustive.** It was found by attributing five tickers. The
   other 23 in the mismatch population have not had unit-level attribution run.
 
+## AMENDMENT R-IV.215(a) — a backfill SOURCE exists in-DB. Remedy cost changes; defect does not.
+
+**Which ledger this defect is measured against: `unified_positions`.** The cross-check read
+`account='ROBINHOOD' AND realized_pnl IS NOT NULL AND COALESCE(exit_date, entry_date) >=
+'2026-01-01'`. **`trades` was never read.** That is the ledger every position-level consumer
+uses — `hub_get_positions`, account rollups, the ETF-only invariant — so it is the right
+surface for the defect.
+
+A rebuild has since ingested Jan–Feb rows into **`trades`**, not into `unified_positions`:
+
+```
+trades            RH rows Jan-Feb 2026 ......  97   realized +$1,965.71
+unified_positions RH rows Jan-Feb 2026 ......  70
+
+of the 33 enumerated gap tickers
+  now present in trades .....................  25
+  still absent from trades ..................   8
+  still DB-MISSING in unified_positions .....  33   <- UNCHANGED
+```
+
+**Measured against `unified_positions` the gap has not moved: 33 of 33, +$178.64.** Measured
+against `trades`, 25 tickers now carry −$69.49 of realized and only 8 remain absent.
+
+**BTCZ is not an exception.** It has a `unified_positions` row (id 98, CLOSED, realized
+−4.00) but dated **2026-03-20**, unrelated to its Jan–Feb export activity, and it still fails
+the defect's predicate.
+
+### What this changes
+
+For **25 of 33** the remedy is no longer re-ingest-from-broker but **PROPAGATE-AND-DIFF**
+`trades` → `unified_positions`, with an in-database reference to diff against. Cheaper and
+more verifiable.
+
+### Binding conditions on any propagation
+
+- **Key on CONTENT — ticker · dates · quantity · realized — NEVER on `trades.id`.**
+  R-IV.188 established that the re-key was observed in **`trades`**, while
+  `unified_positions` proved stable by content with every ruled write intact. Propagation
+  would therefore be sourcing from the *less* stable of the two ledgers; an id-keyed
+  propagation inherits that instability.
+- **8 tickers are absent from BOTH ledgers** — `BKR` · `CAT` · `CRWV` · `CVNA` · `GHRS` ·
+  `SHNY` · `SNDK` · `SPGI`. The rebuild supplies nothing for these; they still require a
+  broker-sourced backfill.
+
+### What this does not change
+
+The defect and its magnitude **stand as measured against `unified_positions`**. A row in
+`trades` is invisible to every consumer this defect is about. This is a **remedy-cost
+finding**, not a correction to the measurement. Fix remains **HELD**.
+
 ## REMEDIATION
 
 **HELD and unsequenced.** Remedy family is ingestion — an RH activity ingest path feeding
