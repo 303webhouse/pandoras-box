@@ -390,9 +390,28 @@ the keyspace and then writes nineteen P&L values into whatever rows now occupy
 those id slots. The ids were valid against one keyspace; the script's own
 rebuild is what invalidates them, and nothing in it notices.
 
-**A re-run misapplies nineteen P&L reverts to arbitrary rows.** There is no
+**A re-run writes nineteen P&L values keyed by literal id.** There is no
 guard, no assertion on row identity, and `trades` carries no
-`created_at` / `updated_at`, so the damage would not be datable afterwards.
+`created_at` / `updated_at`, so any damage would not be datable afterwards.
+
+**AMENDED, R-IV.214(c) — the order is UNCHANGED; the rationale narrows.**
+CC-QUERY measured the nineteen literals against the live table: **19 of 19 point at their
+named tickers with the exact stated P&L**, partitioned **16 `origin='imported'` + 3
+`position_ledger`**. **None sits in a class the delete removes.** So the coupling is
+**CURRENTLY INERT** — a re-run today would revert nineteen rows that are still the right
+nineteen rows.
+
+R-IV.210(a)'s **"arbitrary rows" phrasing is SUPERSEDED** on this face. The defect is not
+that the reverts land wrong today; it is **ID-LITERAL COUPLING**: **nothing in the script
+guarantees that partition.** The literals are coupled to a keyspace by nothing but
+coincidence of which origins the delete happens to touch. One rebuild that rotates an
+`imported` or `position_ledger` row, or one widening of the delete predicate — including the
+obvious fix for facet 4, covering both origin spellings — moves a literal onto a row it was
+never verified against, silently.
+
+**A guard that holds by accident is not a guard.** The DO-NOT-RUN stands on that, not on
+present breakage.
+
 
 Registered as DEF-TRADES-DESTRUCTIVE-REBUILD (P1). Fix is HELD; **this
 DO-NOT-RUN is the interim control.** Diagnosis of record:
