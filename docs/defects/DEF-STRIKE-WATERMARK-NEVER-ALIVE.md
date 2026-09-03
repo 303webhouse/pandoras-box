@@ -86,8 +86,15 @@ load-bearing until the alarm works.
 D7's first half reads *"Watermark rows exist for all 8 tickers."* **It is true right
 now, while five of them are dark.** Row existence cannot discriminate liveness — the
 same shape as a control that tests file existence against a claim about rows. D7's
-second half (no false alarms across a weekend) will also pass, for the wrong reason:
-the alarm cannot fire at all.
+second half (no false alarms across a weekend) **cannot fail while this defect is
+open**, for the wrong reason: the alarm cannot fire at all, so its absence across a
+weekend is guaranteed by construction rather than observed.
+
+*[FORECAST-AS-STATE correction. This read "will also pass" — a flat future
+indicative about an outcome that has not occurred. What is actually established is
+structural: an alarm that cannot fire cannot produce a false alarm. That is a
+property of the code today, checkable now, and it is the stronger claim. Found by
+CC-QUERY's future-conditional tell run on this lane's own artifacts.]*
 
 **A green D7 on 09-07 must not be read as this defect being absent.**
 
