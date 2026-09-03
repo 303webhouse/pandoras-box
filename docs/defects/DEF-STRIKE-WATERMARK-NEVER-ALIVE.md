@@ -1,8 +1,13 @@
-# DEF-STRIKE-WATERMARK-NULL-TRIGGER · P1
+# DEF-STRIKE-WATERMARK-NEVER-ALIVE · P2
 
 **Found:** 2026-09-03, during SPEC-01's D1 step-4 dry-run session, by reading the
 watermark table rather than the rendered state.
 **Status:** TICKETED, NOT FIXED (brief Gates). **SPEC-01 stays in dry-run.**
+**Registered name and severity per R-IV.225(c).** Filed by CC-BUILD as
+DEF-STRIKE-WATERMARK-NULL-TRIGGER at P1; renamed and downgraded to P2 on spine's
+ruling. **The downgrade is earned, not administrative** — see the interim mitigation
+below. Fix HELD behind alert restoration and the Friday grader work; sequencing is
+CC-BUILD's.
 
 ---
 
@@ -59,6 +64,22 @@ was sized against eight.
 
 **This half is not a code fix.** The five alerts need re-creating in TradingView. The
 code defect is that nothing would ever have told anyone.
+
+## INTERIM MITIGATION — the rendering is currently the only working detector
+
+**This is why the defect is P2 rather than P1.** The alarm is mute, but the state is
+not invisible: the addendum's `/health strike_watermarks` block renders
+`INSUFFICIENT n=<baseline_sessions>` per ticker, so a human reading /health sees five tickers
+sitting at n=1 and can tell they are not progressing.
+
+That rendering was added under the SPEC-01 addendum section 3 for a different
+reason — so silence during onboarding could not be mistaken for health. **It is now
+carrying a load it was not designed for**, and it is the only thing standing between
+this defect and total silence.
+
+**Consequence for the fix sequence:** the rendering must not be removed, simplified,
+or gated behind the same n-threshold as the alarm while this defect is open. It is
+load-bearing until the alarm works.
 
 ## D7 passes vacuously against this
 
