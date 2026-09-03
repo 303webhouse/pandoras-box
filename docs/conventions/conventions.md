@@ -135,3 +135,43 @@ working-tree gate returns.
 counts *characters*, not lines: `grep -c $'\r'` reports matching lines and gave 123 on a file
 containing zero CRs. `tr -cd '\r' | wc -c` is correct. A gate value is only as good as the
 probe that produced it.
+
+
+## DOCUMENT CONTENT TRAVELS BY FILE
+
+**R-IV.202(d).**
+
+**Never by `python -c`, never by an unquoted heredoc.** Shell metacharacters inside document
+text are **data, not syntax**, and every layer between the author and the file is one
+more chance for a layer to disagree about which it is looking at.
+
+Write the content to a file, then let the file do the writing: `python script.py`, not `python -c "..."`. A
+quoted heredoc is safer than an unquoted one but still passes the body through the
+shell's here-document handling, which is enough to lose a backslash.
+
+**Three instances in one session, 2026-09-02, none of which reached origin:**
+
+| what was meant | what was written | caught by |
+|---|---|---|
+| the two-character escape `\r` | a real CR byte | the both-trees hash check from A GATE VALUE NAMES ITS TREE |
+| the same escape, in the repair | a real CR byte again, so the fix was a silent no-op | an assertion that no CR may survive |
+| the term `baseline_sessions` | nothing — the shell ran it as command substitution and wrote the empty result | reading the rendered paragraph |
+
+The third is the sharpest. **The shell did not error.** It ran a command, got nothing,
+and wrote nothing where a term belonged. A silent substitution is indistinguishable from
+text that was never typed, and it survives any check that greps for what should be
+absent rather than reading what is present.
+
+**The durable forms.** Build shell-significant characters from character codes when they
+must appear in content — `chr(96)` for a backtick, `chr(92) + chr(114)` for the escape — and assert the
+postcondition **positively**: not *"the wrong thing is gone"* but *"the right thing is
+present, exactly once, and nothing else changed."* Where it applies, the round-trip is
+strongest: undo the edit and the result must equal the source bytes.
+
+A fourth instance occurred while authoring this very entry, and its assertions caught it
+before the file was staged: a placeholder was substituted into a slot that already
+carried backticks, producing a doubled pair. **An entry about quoting is written with
+placeholders for every shell-significant term, and checks each one after writing.**
+
+Kin to *rendering catches what diffs miss* — all four were invisible in a diff and
+obvious on the rendered line.
