@@ -1,8 +1,10 @@
-# DEF-STRIKE-SESSION-COUNTS-INFLATED · P2
+# DEF-STRIKE-IB-EVENTS-OVERCOUNT · P2
 
 **Found:** 2026-09-03, SPEC-01 D1 step-4 dry-run, by checking a counter against the
 source table instead of reading it.
-**Status:** TICKETED, NOT FIXED (brief Gates).
+**Status:** TICKETED, NOT FIXED (brief Gates). **Registered name per R-IV.225(c)**;
+filed by CC-BUILD as DEF-STRIKE-SESSION-COUNTS-INFLATED. Fix HELD behind alert
+restoration and the Friday grader work; sequencing is CC-BUILD's.
 
 ---
 
@@ -65,6 +67,28 @@ every cycle. Today's single event produced up to 24 such lines and rotated the 5
 log buffer, which is why the dry-run lines were **not readable** by the time the session
 was reviewed. **The evidence D1 step 4 asks for was destroyed by the volume of its own
 logging.**
+
+## THE SUBSTRATE IS POISONED IN ONE COLUMN, NOT LOST
+
+**`pythia_events` remains the truth.** It holds one row per real event with its own timestamp
+and id, and nothing in this defect touches it. `strike_ib_session_counts` is a *derived* counter,
+and every column of it is **recomputable from the raw table** once the counting rule
+is fixed:
+
+    SELECT ticker, date(timestamp AT TIME ZONE 'America/New_York') AS session_date,
+           count(*) FILTER (WHERE alert_type IN ('ib_break_up','ib_break_down'))
+    FROM pythia_events GROUP BY 1, 2
+
+So the deletion law's purpose survives. **What the law protects is `pythia_events` history**, and
+that is exactly what makes the derived column repairable — a backfill can rebuild
+`ib_events` for every past session as long as the raw rows are still there.
+
+**The standing instruction that follows:** the deletion law now has a second, sharper
+reason. It was written so a future decay instrument could be derived; it is *also*
+what makes today's corrupted counter recoverable. **Sweeping `pythia_events` would convert a
+one-column repairable defect into permanent data loss.**
+
+**Until the backfill runs, `ib_events` and `rejects` are NOT a baseline for anything.**
 
 ## Fix, when commissioned — not chosen here
 
