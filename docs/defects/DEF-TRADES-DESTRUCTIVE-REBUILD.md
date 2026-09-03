@@ -41,6 +41,27 @@ the keyspace and then writes nineteen P&L values into whatever rows now occupy t
 slots. Nothing checks that the target row is the intended one — no ticker assertion, no
 content key, no row count guard.
 
+**AMENDED, R-IV.214(c) — the order is UNCHANGED; the rationale narrows.**
+CC-QUERY measured the nineteen literals against the live table: **19 of 19 point at their
+named tickers with the exact stated P&L**, partitioned **16 `origin='imported'` + 3 `position_ledger`**.
+**None sits in a class the delete removes.** So the coupling is **CURRENTLY INERT** — a
+re-run today would revert nineteen rows that are still the right nineteen rows.
+
+R-IV.210(a)'s "arbitrary rows" phrasing is **SUPERSEDED**. The defect is not that the
+reverts land wrong today; it is **ID-LITERAL COUPLING**: **nothing in the script guarantees
+that partition.** The literals are coupled to a keyspace by nothing but coincidence of which
+origins the delete happens to touch. One rebuild that rotates an `origin='imported'` or `position_ledger` row, or one
+widening of the delete predicate — **including the obvious fix for facet 4, covering both
+origin spellings** — moves a literal onto a row it was never verified against, silently.
+
+That last point is the sharp one: **fixing facet 4 is what arms facet 2.** Widen the delete
+to cover `csv_reconcile` and the deleted class grows; if it ever grows to include a row a literal
+points at, the reverts start landing on rotated ids. The two facets must be fixed together
+or in that order, never facet 4 alone.
+
+**A guard that holds by accident is not a guard.** The DO-NOT-RUN stands on that, not on
+present breakage.
+
 **This is a self-invalidating literal**: the ids were correct against exactly one keyspace,
 and the script's own first action is what destroys that keyspace.
 
@@ -75,7 +96,7 @@ that looks rebuilt and is half stale.
 
 ## Why P1
 
-Facets 1 and 2 together are a **live path to silent, undatable corruption of realized P&L
+Facets 1 and 2 together are a **latent path to silent, undatable corruption of realized P&L
 figures** — the numbers the book is adjudicated on. It requires no unusual input; it needs
 only for someone to run the reconciliation script a second time, which is what a
 reconciliation script exists for.

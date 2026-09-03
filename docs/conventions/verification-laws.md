@@ -4,7 +4,7 @@
 **Proposed path:** `docs/conventions/verification-laws.md` — path is spine's to rule, but it
 must be settled before OLYMPUS-TRITON consumes §1 verbatim, since a law quoted from an
 unstable path is a citation without a scope.
-Ratified in full, R-IV.166, 2026-09-02 — content, §1.1 as adjudicated, and path; addendum-1 folded, R-IV.173/174.
+Ratified in full, R-IV.166, 2026-09-02 — content, §1.1 as adjudicated, and path; addendum-1 folded, R-IV.173/174; addendum-2 folded, R-IV.202.
 Citable at the section anchors. **This supersedes the “proposed path” qualifier above,
 which is EDGE's original text and is left unedited because the body is ratified as written.**
 **§4 was applied to the ledger at filing (commit `8a52e91`)**, per its own instruction.
@@ -72,6 +72,46 @@ Clause 4 carries the whole load. It admits the legitimate alarm — declared 0%,
 reachable on a stated event — and catches the null trigger, where the state-change is stated
 and *cannot occur*: `chg_pct_day` becoming non-NULL in a population where it never is, or a
 holdout becoming fully graded when fifteen of its rows never grade.
+
+### 1.2 · Key uniqueness is a registered predicate {#key-uniqueness}
+
+**A content key declared unique IS a registered predicate.** Its satisfaction rate is
+`distinct_keys / rows`; its declared value is 1.0. §1.1 therefore binds on keys **without
+amendment** — measure against the population before use, HALT on mismatch, amend and
+re-measure.
+
+This is filed as a corollary rather than a new law because that is what the failure was:
+§1.1 already covered the case and nobody recognised a key declaration as a predicate
+registration. **A law whose scope is unrecognised is functionally absent**, and the remedy is
+to state the scope, not to write a second law.
+
+**OPERATIVE.** Before a key's first use as a join or identity key, state `(rows, distinct_keys)` over
+**the population it will be used on**. Equal → proceed. Unequal → HALT; amend the key
+(additional columns, or a different key) and re-measure before use. **A key measured on one
+population is not measured for another.**
+
+**WORKED EXAMPLE.** `(ticker, opened_at)`, ruled at R-IV.183(b), used against the 66-unit
+PR-106 population: 66 rows, 61 distinct keys — declared 1.0, measured 0.924. Five collisions,
+two carrying live hits. A first pass resolved the collided keys **by ordering** and produced
+two phantom `src=A` attributions, which would have triggered a downstream bound on rows that
+do not exist. The amended key `(ticker, opened_at, qty, realized)` measures 66-on-66. The
+ruling shipped without the measurement; the catch cost one near-miss.
+
+**MINTING COROLLARY.** A key generator must measure its output over **the population it will
+key**, not the population it was designed against. Collectors mint keys before their
+population exists, so the gate is **post-mint**: first use of a minted keyspace as a join key
+requires the `(rows, distinct_keys)` statement at that moment.
+
+**TWO CHECKS, BOTH REQUIRED — satisfying one is not satisfying the other:**
+
+| check | question | scope | failure |
+|---|---|---|---|
+| **UNIQUENESS** (this section) | does the key identify exactly one row? | within ONE list | collision → resolution by ordering → phantom matches |
+| **KEYSPACE IDENTITY** (KEYSPACE COLLISION, instrument-audit doctrine) | do both lists' keys mean the same thing? | ACROSS two lists | a match that cannot mean → false positives on schedule |
+
+A key can be perfectly unique in each list and still join two keyspaces that do not
+correspond. A key can be drawn from one keyspace and still collide within it. **Both checks
+run, and both are stated on the artifact's face.**
 
 ---
 
@@ -279,10 +319,16 @@ who spoke last.** The disagreement resolves in this order:
 1. **IDENTITY.** Both lanes state **commit + blob SHA** of what they read. Differing SHAs
    close the question immediately — the lanes read different objects, and neither read was
    wrong.
-2. **PROBE LOCALIZATION** *(CC-QUERY's corollary).* **Matching SHAs localize the fault to a
-   probe, but only a re-read with a DIFFERENT instrument identifies it.** Identity proves one
-   lane is misreading; it does not say which, and re-running the same extractor cannot tell
-   you. Change the instrument, not the effort.
+2. **DERIVATION SCOPE, then probe.** Matching SHAs prove the **object** is not the source of
+   the disagreement. What remains is (a) a difference in what each derivation **drew on**, or
+   (b) a probe fault — and **(a) is tested first**, because it is cheaper and because it can
+   resolve with **no fault anywhere**. An unstated source dependency presents exactly as a
+   misread. Only once source sets are shown identical does the probe question arise, and then
+   *(CC-QUERY's corollary)* only a re-read with a **different instrument** identifies it —
+   re-running the same extractor cannot. Change the instrument, not the effort.
+   **Worked example (a):** one hash-pinned object, two derivations — 50 units from source A
+   alone, 66 from A plus a second Robinhood read. Identity matched, both probes sound,
+   neither lane wrong.
 3. **CONTROL DISCIPLINE** *(CC-BUILD's law).* **A control tests the same proposition as the
    claim.** Existence cannot discriminate presence: confirming a file exists says nothing
    about whether a section within it does.
