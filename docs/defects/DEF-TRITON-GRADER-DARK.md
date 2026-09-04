@@ -1,6 +1,27 @@
 # DEF-TRITON-GRADER-DARK
 
-**Severity:** P1 · **Escalated:** 2026-09-02 (R-IV.151(c)), was P2 · **Status:** OPEN
+**Severity:** P1 · **Escalated:** 2026-09-02 (R-IV.151(c)), was P2 ·
+**Status: DIAGNOSED** — Phase 0 complete, R-IV.252(c). Fix AUTHORIZED as the P1/P2
+precondition build, position one. Diagnosis of record: `docs/edge/results/2026-09-04-triton-grader-diagnosis-and-external-arm.md`
+
+**THE DEFECT IS LIVENESS, NEVER CORRECTNESS.** The R-IV.189(b) external arm passed
+**102 of 102 cells** cross-vendor. Nothing the grader wrote is wrong; the problem is
+that it stopped writing and nothing said so.
+
+**THE ONE-LINE DIAGNOSIS:** *since 2026-07-31 the grader has not been running on its
+schedule at all — it has been running on deploys.* The schedule broke and the deploy
+cadence masked it, because this repo deploys often enough that the gaps read as
+outages rather than as the norm.
+
+**Four gaps, not one**, each ended by a deploy rather than by a scheduled run:
+07-31→08-17 (17d) · 08-17→08-26 (9d) · 08-26→08-27 (1d) · 08-27→09-02 (6d).
+**The 17-day gap is the deploy freeze** — FREEZE LAW ran 08-04→08-15, no deploys meant
+no restarts meant no grading. Before 07-31 it ran daily without a miss.
+
+**Proof the restarts are what grade**, from a count that cannot otherwise occur:
+`GRADE_LIMIT = 1000` caps a pass at 1,000 rows, and **2026-08-27 graded 1,862** — at least two
+passes in one calendar day, which `last_run` makes impossible inside a single process.
+Six commits landed after 16:15 ET that day.
 **Surface:** Triton shadow grader — the writer of `triton_flow_shadow.graded_at` and the
 `fwd_ret_*` fields
 

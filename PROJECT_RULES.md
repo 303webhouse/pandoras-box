@@ -388,6 +388,20 @@ has to be excluded as a deploy artifact before it can be read as a finding.
 **Batch after the close instead.** Three service-touching changes queued on
 2026-09-03 shipped as one restart rather than three, which is the practice.
 
+**AND A TENSION TO NAME, because the two rules point opposite ways.** Until the
+Triton grader runs on its own schedule, **fewer deploys = less grading** — the grader
+has not run on schedule since 2026-07-31; it runs on process restarts, and every
+grading gap since has ended on a deploy rather than on a scheduled pass. The 17-day
+gap is exactly the 08-04→08-15 deploy freeze. See
+`docs/defects/DEF-TRITON-GRADER-DARK.md` and `docs/edge/results/2026-09-04-triton-grader-diagnosis-and-external-arm.md`.
+
+**This is NOT a reason to deploy more.** It is a reason to fix the grader, and it is
+recorded here so that a future reader who sees grading stop after a quiet deploy week
+recognises the cause instead of hunting a new one. **A system whose data collection
+depends on its deploy cadence has a defect, not a deployment policy** — and the two
+rules only conflict while that defect is open. When the grader runs on its own
+schedule, this paragraph retires and the RTH rule stands alone.
+
 
 ## DO-NOT-RUN: scripts/reconcile_rh.py
 

@@ -267,6 +267,35 @@ one.
 
 ---
 
+## TWO FACETS ADDED, BOTH HELD (R-IV.252(d))
+
+Registered 2026-09-04. **HELD** — recorded, not fixed, and not scheduled here.
+
+### Facet A — the 381-alarming / 407-flattering pair
+
+Two positions whose P&L was **zeroed rather than computed against entry**. The pair is
+the diagnostic: one reads alarming and one reads flattering, from the *same* defect. A
+single-direction error would have been caught by whoever it hurt; a symmetric one hides,
+because the flattering half suppresses the complaint the alarming half would have
+generated.
+
+**Zeroed is not computed.** A P&L of 0.00 against an entry the position actually has is
+not a small error — it is the absence of the calculation, rendered in the same field and
+format as a real result.
+
+### Facet B — `update_position` (`backend/api/unified_positions.py:1486`) rewrites unrealized P&L with no status check
+
+`update_position` (`backend/api/unified_positions.py:1486`) overwrites `unrealized_pnl` with **no guard on position status**, so a closed or
+expired position is as writable as an open one.
+
+**INERT ONLY WHILE `current_price` IS NULL.** That is the whole containment, and it is an
+accident of the current data rather than a property of the code. **The moment
+`current_price` is populated — which is exactly what the mark job exists to do — this
+becomes live**, and it will rewrite P&L on positions that are no longer open.
+
+**So the ordering matters:** anything that fixes or restarts the mark path arms this
+facet. It is not safe to treat "no observed damage" as evidence the guard exists.
+
 ## Summary
 
 | # | Finding | Confidence |
