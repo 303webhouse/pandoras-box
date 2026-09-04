@@ -98,6 +98,40 @@ whose misbehaviour is characterized.
   **11:00 ET** expect **UP TO 8 LATCHED FALSE ALARMS**, one per allowlist ticker.
 - **Clear-notify on Tuesday 09-08** as the feed returns.
 
+### RESTATED 2026-09-04 (R-IV.242(c)) — the reachable Monday count is ONE, not eight
+
+**The original "up to 8" was sized before the collapse diagnosis and is superseded.**
+It assumed eight tickers able to reach the n-gate. Measured after RE10045:
+
+| ticker | baseline_sessions | can it alarm Monday? |
+|---|---|---|
+| **IWM** | **3** — gate cleared 2026-09-04 | **YES** |
+| QQQ, SMH | 1 | no — died 09-01, capped |
+| DIA, TLT, XLE, XLF, XLK | 1 | no — never-alive since deploy, capped |
+
+Seven of eight are pinned at `baseline_sessions = 1` by `DEF-STRIKE-WATERMARK-NEVER-ALIVE`: `baseline_sessions` increments only
+on a NEW session, and a dark ticker never supplies one. The alarm gates on
+`>= 3`, so those seven **cannot fire** — the null-trigger, doing exactly what
+its own DEF says it does.
+
+**PRE-REGISTERED MONDAY COUNT: 1 (IWM).** Live rendering on 2026-09-04 17:30 ET
+corroborates it — IWM reads `OK`, the other seven read `INSUFFICIENT n=1`.
+
+**A ONE-ALARM MONDAY IS THE PREDICTION MET, NOT THE INSTRUMENT UNDERPERFORMING.**
+Stated here because the earlier figure is on this same page, and a reader comparing
+Monday's outcome to "up to 8" would read a correct instrument as a failed one. The
+count fell because the population able to alarm collapsed, not because the alarm
+weakened.
+
+**Zero alarms Monday would be a FAILURE**, and that is now the discriminating
+outcome: IWM is alive, so Monday's holiday silence is reachable for it. If IWM does
+not alarm, the holiday defect is not what this document says it is.
+
+**The two defects clear together.** As RE10045 restarts land and dark tickers resume,
+their baselines begin incrementing and the reachable set grows back toward eight —
+at which point this holiday defect's blast radius returns to its original size. Fixing
+one without the other trades a mute alarm for eight noisy ones.
+
 **D7 therefore adjudicates TWO lines, not one:**
 
 | line | expectation |

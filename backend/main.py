@@ -875,6 +875,8 @@ async def lifespan(app: FastAPI):
     adx_regime_task = asyncio.create_task(adx_regime_loop())
     from jobs.strike_ib_converter import strike_ib_converter_loop
     strike_ib_task = asyncio.create_task(strike_ib_converter_loop())  # STRIKE-SPEC-01 shadow converter + per-ticker watermarks
+    from jobs.qqq_sma_watch import qqq_sma_watch_loop
+    qqq_sma_task = asyncio.create_task(qqq_sma_watch_loop())  # R-IV.193 D1 pause rule: QQQ vs computed 200-SMA
 
     # Stable Engine: nightly close recompute + provisional snapshots + index/rates
     # strip (yfinance, zero UW).
@@ -1195,6 +1197,7 @@ async def lifespan(app: FastAPI):
     staleness_task.cancel()
     signals_freshness_task.cancel()  # DEF-SIGNAL-PERSISTENCE-COLLAPSE watchdog
     strike_ib_task.cancel()  # STRIKE-SPEC-01 converter
+    qqq_sma_task.cancel()  # R-IV.193 QQQ 200-SMA watch
     vwap_task.cancel()
     crypto_scan_task.cancel()
     uw_flow_poller_task.cancel()  # RE-ENABLED 2026-06-18 (L1.0 Chunk 4) — see creation site
@@ -1365,6 +1368,17 @@ async def health_check():
     except Exception as _swe:
         strike_watermarks_block = {"error": str(_swe)}
 
+    # R-IV.193: the pause-rule watch renders ARMED / INSUFFICIENT / ERROR.
+    # A cross needs two observations, so a first evaluation reports
+    # INSUFFICIENT rather than silently arming — silence and readiness must
+    # not look alike on this surface either.
+    qqq_sma_block: dict = {}
+    try:
+        from jobs.qqq_sma_watch import qqq_sma_status
+        qqq_sma_block = await qqq_sma_status()
+    except Exception as _qse:
+        qqq_sma_block = {"state": "ERROR", "reason": str(_qse)}
+
     return {
         "status": overall,
         "server_time_et": now_et.strftime("%Y-%m-%d %H:%M:%S %Z"),
@@ -1375,6 +1389,7 @@ async def health_check():
         "stable_jobs": stable_jobs_block,
         "signals_freshness": signals_freshness_block,
         "strike_watermarks": strike_watermarks_block,
+        "qqq_sma_watch": qqq_sma_block,
     }
 
 
