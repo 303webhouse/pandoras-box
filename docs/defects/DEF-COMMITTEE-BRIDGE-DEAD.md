@@ -22,3 +22,19 @@ endpoint reachable? errors in audit log?
 ## Fix path
 Separate VPS-side session (A3). Acceptance: a signal requested during RTH
 receives `committee_completed_at` within one cron cycle, two consecutive days.
+
+---
+
+## R-IV.178(a) RE-ISSUE — SPINE-HELD, executor CC-BUILD when sequenced
+
+Recorded 2026-09-04 (R-IV.252(b)) so the item is addressed rather than remembered.
+**Not scheduled by this lane**; it executes when spine sequences it.
+
+Adjacent material, by address so it can be re-verified in three minutes rather than
+trusted:
+
+| what | address |
+|---|---|
+| the read path | `backend/api/trade_ideas.py:50-61` |
+| the results artifact | STRIKE-Q1, commit `518b381` |
+| this defect | DEF-COMMITTEE-BRIDGE-DEAD (P1) |

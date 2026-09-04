@@ -1,4 +1,15 @@
-"""R-IV.193 — QQQ daily close vs its COMPUTED 200-SMA. D1 pause-rule wiring.
+"""R-IV.193 — QQQ daily close vs its COMPUTED 200-SMA.
+
+CHARTER: PROVISIONAL (R-IV.252(a)). This shipped as D1 pause-rule wiring, and THE
+QQQM PAUSE-RULE CONSUMER IS GONE. The instrument is deliberately left DEPLOYED as a
+provisional regime signal rather than switched off, because it is cheap, it is
+correct, and its state is visible on /health; the PIVOT pass either RE-CHARTERS it
+(regime alert routed to the principal via Hermes) or RETIRES it.
+
+**Until that ruling, nothing downstream consumes this.** Do not wire a consumer to it
+without the re-charter — an instrument with no owner acquiring readers by accident is
+how an unratified signal becomes load-bearing.
+
 
 The book's D1 pause rule keys on QQQ crossing its 200-day simple moving average.
 This watches for that cross in either direction and alerts, latched.
