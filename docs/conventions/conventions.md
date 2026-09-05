@@ -175,3 +175,46 @@ placeholders for every shell-significant term, and checks each one after writing
 
 Kin to *rendering catches what diffs miss* — all four were invisible in a diff and
 obvious on the rendered line.
+
+
+## A DEFECT REGISTERED BY RULING IS FILED IN THE SAME COMMIT AS THAT RULING'S OTHER FILINGS
+
+**R-IV.263(b).**
+
+**A DEF name cited twice with no file is a phantom by definition.** Not by judgement,
+not on review — by definition, because the second citation proves the name is being
+used as a reference and the missing file proves there is nothing to refer to.
+
+Registration and filing are one act. A ruling that registers a defect and files three
+other artifacts in the same breath must file the defect too, or the name enters
+circulation with nothing behind it. **The phantom sweep re-runs monthly** and is
+mechanical: regex the DEF-shaped names out of every document, index the filenames
+case-insensitively, and difference the sets.
+
+**WORKED EXAMPLE — the sweep of 2026-09-05, at HEAD 7dbed6b.** Thirty-four true
+phantoms. Three were **load-bearing on a registered window**: a name cited inside a
+pre-registration, doing argumentative work, with no artifact anywhere to check it
+against. That is the failure mode — not untidiness, but a citation that cannot be
+verified because its referent does not exist.
+
+**PHANTOM DOES NOT MEAN UNADDRESSED, and the distinction is the useful part.** Of the
+five phantoms in this lane's domain, two were already resolved in substance and had
+simply never acquired an artifact: `DEF-BARS-NO-PROVENANCE` was **closed in code** at `773e7a8`, and
+`DEF-DB-VOLUME-CEILING` was **superseded** by a registration that holds its content. A phantom is a
+bookkeeping fact about the repository, not a claim about the defect. Stub it, record
+what its citations say, and mark plainly whether anything is actually open.
+
+**Two probe disciplines the same sweep demonstrated**, both worth carrying:
+
+- **Case-insensitive filename matching.** The first pass matched only uppercase
+  `DEF-` while briefs are named lowercase, mis-scoring **18 registered defects as
+  phantoms** — including two with 23 citations each. The same family as the
+  range-terminated `sed` range that made a present table look empty.
+- **Report the complement.** The raw set difference was 58; 24 were probe artifacts or
+  misclassifications. Publishing 58 would have been a scoped count shipped without its
+  complement, and the number that survived scrutiny is 34.
+
+**Concurrency note, because the sweep hit it:** the repo is written while it is swept.
+`DEF-SOXS-PRICE-DISCONTINUITY` was filed *between* the sweep's first and last pass and moved from phantom to
+filed mid-run. **A sweep therefore states its vintage and its HEAD**, and is true as of
+that instant and not after.
