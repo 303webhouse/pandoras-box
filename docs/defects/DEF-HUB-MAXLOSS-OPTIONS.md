@@ -77,3 +77,26 @@ not named in the brief.
 ## REMEDIATION
 
 **HELD.** No fix attempted, no `max_loss` value written or corrected by this lane.
+
+---
+
+## WIDENED — stock rows too (CC-BUILD annotation, R-IV.265(e))
+
+The name says OPTIONS. **It is not confined to options.**
+
+**Stock rows carry `max_loss` computed off a MARK, not off BASIS.** Cited instance,
+POSITIONS': **id 409 reads 1,547.70 where basis gives 1,498.30** — a 49.40 difference
+on one position, in the direction of overstating risk.
+
+**Why the direction matters and is not reassuring.** Overstating max loss looks
+conservative, so it does not generate a complaint — the same asymmetry as the
+381-alarming / 407-flattering pair in `DEF-MARK-INTEGRITY`, where the flattering half suppressed the
+report the alarming half would have caused. **An error that only ever errs safe is an
+error nobody files.**
+
+**A mark-derived max loss also moves with the market**, which a maximum loss must not do:
+basis is fixed at entry, and a risk bound that drifts with price is not a bound.
+
+**Not measured by this lane.** The 409 figures are POSITIONS' citation. How many stock
+rows are affected, and whether the options half shares the mechanism, is unread here and
+not asserted. Scoped into the ledger-integrity build (1b) as *"option and stock math"*.
