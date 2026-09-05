@@ -348,7 +348,28 @@ the committed code before declaring complete.
    on the second.
 
    **A deployment status that cannot be read is not SUCCESS; enumerate
-   terminal states; unreadable = keep-waiting.** A wait loop written as
+   terminal states; unreadable = keep-waiting.** **And the same law one level up:
+   AN ACCEPTANCE PREDICATE ENUMERATES ITS PASS STATES; everything else is
+   continue-or-report.**
+
+   Three loop defects, one law each time. The shape was always *"exit unless
+   it is a bad value I thought of"*, and each fix patched the case in hand
+   rather than the class:
+
+   | date | the loop accepted | should have required |
+   |---|---|---|
+   | 09-02 | a single health sample | at least two |
+   | 09-03 | an unreadable status | an enumerated terminal state |
+   | 09-05 | `degraded` as terminal | `healthy`, explicitly |
+
+   The third was found only because `degraded` happened to occur — a
+   crypto_scanner flatline on an unrelated deploy. **A negative predicate
+   cannot be tested by the cases it was written against**, which is why it
+   survived two rounds of fixing.
+
+   This is the positive-postcondition principle already adopted for document
+   edits — *not "the wrong thing is gone" but "the right thing is present,
+   exactly once, and nothing else changed"* — applied to deploys. A wait loop written as
    "not BUILDING and not DEPLOYING" exits on an empty string, a parse
    failure, or a CLI error, so a failure to READ the status is
    indistinguishable from the deploy having finished - it fails open.
