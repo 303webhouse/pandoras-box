@@ -35,3 +35,19 @@ The citations assert closure; they do not record the original symptom, the disco
 the verification method. If this is ever wanted as a proper record rather than a stub,
 it needs the pre-fix behaviour written down — which is not recoverable from the citations
 and is not invented here.
+
+---
+
+## RESOLVED INTO A MEASURED DEFECT — R-IV.275(d)
+
+**The live instance is registered at `docs/defects/DEF-UW-OHLC-DEAD.md`.**
+
+This stub was filed from citing context only and said so on its face. **It is not
+superseded and it is not a duplicate** — the ruling reconciles **one stub, two names**, so
+a reader arriving by either name reaches the same evidence.
+
+**What the measurement added that the citations could not:** UW `/ohlc/1d` is serving
+**zero bars**, 40 of 40 fetches fall back to yfinance, and the provenance label
+`indicators_source` is a hardcoded literal that reports a server which served none of them.
+**The phantom named a missing provenance; the measurement found the provenance present and
+false**, which is the worse of the two and was not knowable from the citations.

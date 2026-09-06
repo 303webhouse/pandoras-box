@@ -81,6 +81,20 @@ family as DEF-TRITON-INDEX-UNGRADEABLE.
 
 **This is also the fix that caps T6**, so T5 lands first.
 
+**Definition pinned by R-IV.275(b) S3, and T5 remains the SINGLE implementation of it
+(R-IV.275(c)) — the strata task does not build a second one.** Classify **by PRODUCT
+TYPE**: cash-settled index / ETF / single name.
+
+**NOT by `INDEX_TICKERS`.** Measured 2026-09-05: that set is
+`{SPY, QQQ, SMH, NVDA, AVGO, MSFT, GOOGL, AMZN, META}` — **nine members: three ETFs and
+exactly six single names, and zero cash-settled index products.** It is a **$2M premium
+FLOW-TIER bucket**, and its name is the whole trap: a reader looking for an instrument
+class finds a set called *INDEX_TICKERS* and uses it, silently classifying six of the
+largest single names in the book as indices.
+
+**A set named for a class it does not encode is worse than an absent one** — the absent
+one makes you go and look.
+
 ### T6 — Bounded `lookback_days`
 
 Today `lookback_days = (today - earliest).days + 12` anchored on the oldest ungraded row, which the 72 index rows pin
@@ -125,7 +139,24 @@ the first three weeks is the worse outcome: it reads as measured-and-absent.
 | footprint-present | `signals.source = 'footprint'` — **a JOIN, not a stamp**; there is no footprint table or column | **NEEDS A WINDOW DEFINITION** — present *within what interval of the row* |
 | tide sign | **NO SINK.** Redis-only at `board:tide:latest`, 1800 s TTL | **NO — see below** |
 
-**Two are free, three need a definition before they can be built, and one is blocked.**
+**UPDATE 2026-09-05 — R-IV.275(b) SUPPLIES EVERY DEFINITION THIS TABLE WAS MISSING.**
+The three open definitions are now closed and the blocked one is deferred *with its
+definition fixed*, which is the difference between a stratum that is missing and a stratum
+that is undefined:
+
+| stratum | now |
+|---|---|
+| **S1** day-of-week | from `fired_at` (ET). **Cells are unequal by construction** (Thu 1,572 vs Fri 1,035 in the pinned population) and are **reported, never rebalanced** — rebalancing would manufacture a population that never fired |
+| **S2** DXY trend sign | **PROXY DECLARED** — UUP daily closes from `stable_daily_bars`, `sign(close[t−1] − close[t−6])`, stamped at fire. **The proxy is declared, not silent**: UUP is not DXY, and the face says so |
+| **S3** instrument class | by PRODUCT TYPE (see T5) — **one implementation, in T5** |
+| **S4** sector | one-time ticker→sector map from UW `/info`, cached. **A ticker with no map is UNMAPPED, never guessed** |
+| **S5** footprint-present | a footprint row, **same ticker + same trading date** (the census join key); **strategy-scoped, never source-scoped**; the under-count figure **is dated whenever cited** |
+| **S6** tide sign | **DEFERRED COMPUTATION.** Net premium sign of the 5-minute market-tide bar containing `fired_at`, from `market_tide_history`, once the sink ships and backfills. **Face states NOT STAMPED AT CLOCK START** |
+
+**S5's "strategy-scoped, never source-scoped" is the load-bearing clause**, and it is the
+same distinction that made `signals.source = 'footprint'` a join rather than a stamp: `source` records which
+producer wrote the row, not which strategy the row belongs to, and joining on the wrong one
+silently changes the population.
 The three definitions are cheap but they are *decisions*, not implementation: each one
 silently determines what the seven-week window can later claim.
 
@@ -177,6 +208,15 @@ Two conditions, both from defects already registered:
   not arrived, and the two must not share a value. This is the vacuous-column family
   (QS-02's PENDING string, DEF-EDGE-SPEC-B2) arriving by a new route.
 
+**Definition pinned by R-IV.275(b) H2:** the horizons live in **NEW columns with their OWN
+completion marker** (`graded_20d_at`).
+
+**`graded_at` KEEPS ITS MEANING — 5d terminal — FOREVER, AND MAY NOT MOVE.** The seal count,
+the residue, the tripwire identity and the RELEASE predicate all key on it. **Widening
+`graded_at` to mean "graded at some horizon" would silently redefine four registered
+quantities at once**, including the holdout's release condition — which is the one
+predicate in this system that must not move under any circumstance.
+
 ## Done definition
 
 - D1 — tests green; deploy verified four-step with the poll sequence reported.
@@ -216,5 +256,7 @@ reserved.**
 **Second question, added 2026-09-05 (R-IV.274(c) scope).** **Tide sign cannot be
 stamped when the clock starts** — the sink lands one build later, and the poller is
 now paused. Either the registration face declares it NOT STAMPED, or the clock waits
-for position 2. **Spine to choose.** T8 carries the measurement and the trap; this
-lane does not pick the branch.
+for position 2. **ANSWERED by R-IV.275(b) S6: NOT STAMPED AT CLOCK START.** The registration face
+declares it; the clock does not wait. The definition is fixed now and the values arrive
+with the sinks build, so the amendment does not land after the clock — which was the
+constraint that made this a question rather than a preference.

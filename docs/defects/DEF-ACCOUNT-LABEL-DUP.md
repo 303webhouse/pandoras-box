@@ -127,22 +127,115 @@ order described it as lowercase `fidelity`. A case-sensitive predicate would hav
 
 ---
 
-## REMAINING SURFACE — 6 of 9 surfaces still carry aliases
+## REMAINING SURFACE — 3 of 9 surfaces still carry aliases
 
-Full schema scan, 2026-09-05. **`unified_positions` is the only clean position surface.**
-Nothing below has been touched.
+Full schema scan 2026-09-05, updated after the R-IV.272 folds. **Six surfaces are now clean;
+three are HELD for the ledger-integrity build.**
 
-| surface | non-canonical values (row counts) |
-|---|---|
-| `unified_positions.account` | **CLEAN** ✅ |
-| `portfolio_snapshots.account` | **CLEAN** ✅ (ROBINHOOD only) |
-| `positions.broker` | **CLEAN** ✅ (empty) |
-| `account_balances.account_name` | `BROKERAGE_LINK_401K` (1) — *BUILD, R-IV.268(c)* |
-| `account_balances.broker` | `fidelity` (2) · `robinhood` (1) — a **lowercase second vocabulary** |
-| `cash_flows.account_name` | `FIDELITY_401A` (1) — **an alias with a real cash flow attached** |
-| `closed_positions.account` | `robinhood` (5) · `FIDELITY` (1) |
-| `trades.account` | **`robinhood` (132)** · `FIDELITY` (1) |
-| `balance_snapshots.account_name` | `Robinhood` (114) · `Fidelity Roth` (114) · `Interactive Brokers` (90) · `Fidelity 401A` (90) · `Fidelity 403B` (90) · `BROKERAGE_LINK_401K` (31) — **six variants, 529 rows** |
+| surface | state | detail |
+|---|---|---|
+| `unified_positions.account` | **CLEAN** ✅ | id 409 remapped, R-IV.268(b) |
+| `portfolio_snapshots.account` | **CLEAN** ✅ | ROBINHOOD only |
+| `positions.broker` | **CLEAN** ✅ | empty |
+| `trades.account` | **FOLDED** ✅ | `robinhood` (132) → ROBINHOOD · `FIDELITY` (1) → FIDELITY_ROTH · R-IV.272 |
+| `closed_positions.account` | **FOLDED** ✅ | `robinhood` (5) → ROBINHOOD · `FIDELITY` (1) → FIDELITY_ROTH · R-IV.272 |
+| `cash_flows.account_name` | **FOLDED** ✅ | `FIDELITY_401A` (1) → FIDELITY_ROTH · R-IV.272 |
+| `account_balances.account_name` | **HELD** | `BROKERAGE_LINK_401K` (1) — BUILD, ledger-integrity build |
+| `account_balances.broker` | **HELD** | `fidelity` (2) · `robinhood` (1) — a **lowercase second vocabulary**, still unaddressed |
+| `balance_snapshots.account_name` | **HELD** | six variants, **529 rows** — see the analysis below |
+
+**Post-fold counts, 2026-09-05:** `trades` ROBINHOOD 312 / FIDELITY_ROTH 48 ·
+`closed_positions` ROBINHOOD 117 / FIDELITY_ROTH 42 · `cash_flows` ROBINHOOD 17 /
+FIDELITY_ROTH 14. Each write was a guarded statement with a pre-commit invariant asserting
+zero non-canonical values remaining on that column. **Label-only: no amounts, dates,
+quantities or statuses were touched.**
+
+The `cash_flows` row carried a real flow — **ACH deposit $170.78, `activity_date` 2026-04-23,
+`imported_from` manual** (id 15). It moved account label only.
+
+### The fold repaired a live measurement, not just tidiness
+
+`DEF-RH-COVERAGE-GAP`'s **25 of 33** was re-derived before the write, per R-IV.272(b):
+
+```
+ predicate                                     tickers found
+ account = 'ROBINHOOD'   (case-sensitive)  ...........  1     <-- before the fold
+ upper(account) = 'ROBINHOOD'              ........... 25
+ account ignored entirely                  ........... 25
+ account = 'ROBINHOOD'   AFTER the fold    ........... 25     <-- repaired
+```
+
+**The 25-of-33 figure on origin is CORRECT** and needs no correction — it was derived
+case-insensitively. But **24 of those 25 tickers were reachable only under lowercase
+`robinhood`**; only WFC sat under uppercase. Anyone re-deriving with the obvious
+case-sensitive predicate would have got **1**, and concluded the in-DB backfill source did
+not exist. The fold removes that trap. `BTCZ` additionally carries rows under *both*
+accounts, which bears on its worked line in that defect.
+
+### `balance_snapshots` — report-only analysis, R-IV.272(b). READ BEFORE RETIRING ANYTHING.
+
+**⚠ The premise of R-IV.268(c) does not survive measurement.** That order says the
+`BROKERAGE_LINK_401K` row *"is a duplicate of FIDELITY_ROTH; retire it (do not sum it)."*
+**The two carry different values and always have:**
+
+```
+ FIDELITY_ROTH        8,842.09
+ BROKERAGE_LINK_401K 11,642.35
+```
+
+`BROKERAGE_LINK_401K` is **not a value-duplicate** — it is the exact arithmetic sum of the
+two retired series, verified on the consolidation date:
+
+```
+ 2026-07-23   Fidelity 401A 11,075.62 + Fidelity 403B 566.73 = 11,642.35   EXACT
+```
+
+So retiring it *as a duplicate* would not deduplicate a figure — it would **remove $11,642.35
+of recorded balance from the book.** Whether that is right turns on what R-IV.268(a)'s "one
+account" means: one *relationship* holding a Roth sleeve **and** a BrokerageLink sleeve with
+distinct balances, or one *balance* recorded twice. **The data cannot distinguish these and I
+am not choosing.** Stated before BUILD acts, because "retire the duplicate" and "delete
+$11.6k" are the same statement under one reading and opposite under the other.
+
+**Series inventory** — three Fidelity series overlap completely on **90 shared dates**
+(2026-03-20 → 07-23), and their values do **not** agree; they are three distinct magnitudes,
+so a naive sum triple-counts in magnitude rather than duplicating a number:
+
+| series | rows | date range | balance range |
+|---|---|---|---|
+| Fidelity Roth | 114 | 03-20 → 08-26 | 8,233.52 – 8,842.09 |
+| Fidelity 401A | 90 | 03-20 → 07-23 | 10,107.90 – 11,075.62 |
+| Fidelity 403B | 90 | 03-20 → 07-23 | 233.15 – 566.73 |
+| BROKERAGE_LINK_401K | 31 | 07-24 → 09-04 | 11,642.35 *(constant)* |
+| FIDELITY_ROTH | 7 | 08-27 → 09-04 | 8,842.09 *(constant)* |
+
+The vocabulary changed **twice**: 07-23/24 (401A + 403B → BROKERAGE_LINK_401K, same day the
+IB series ends) and 08-26/27 (spaced → underscore).
+
+**IB orphans:** `Interactive Brokers`, **90 rows, 2026-03-20 → 2026-07-23, every balance
+0.00.** A zero-valued series for a broker whose `account_balances` row was deleted 07-23; the
+deletion never reached the snapshot history.
+
+**The whole table is a fake-healthy time series.** 543 rows carry **32 distinct balance
+values — 5.9% variety — and four of the eight series are literally constant:**
+
+| series | rows | distinct balances |
+|---|---|---|
+| BROKERAGE_LINK_401K | 31 | **1** |
+| Interactive Brokers | 90 | **1** |
+| FIDELITY_ROTH | 7 | **1** |
+| ROBINHOOD | 7 | **1** |
+| Fidelity 403B | 90 | 3 |
+| Fidelity 401A | 90 | 4 |
+| Fidelity Roth | 114 | 5 |
+| Robinhood | 114 | 14 |
+
+It reads as daily account history and contains almost none. The mechanism is
+`DEF-BALANCE-COLUMN-SEMANTICS` propagating: the job re-snapshots a frozen
+`account_balances.balance` every day, so **`ROBINHOOD` shows 7 consecutive daily rows of
+835.69 — the same stale hand-typed figure whose true vintage is 2026-08-24 17:01:35Z.**
+Any chart drawn from this table shows flat lines that are an artifact of the writer, not the
+account.
 
 ### Three consequences worth naming before anyone writes
 
@@ -188,6 +281,20 @@ uppercase — `UPPER-CASE`. Confirmed in the live payload: the tool returns
 clean and returns something shaped like an answer — the vacuous-column family.
 
 **The rule:** DB predicates on account are **case-insensitive or use the stored form**.
+
+### POSITIONS note — this facet is a candidate MECHANISM for the alias contamination
+
+The two findings compose. BUILD measures that **the hub emits `robinhood` where the DB stores
+`ROBINHOOD`**; POSITIONS measured that **`trades` held 132 rows under lowercase `robinhood`**
+(42% of the Robinhood ledger) before the R-IV.272 fold. A writer that round-trips a value
+through the tool — reads a rendered account string and writes it back — produces exactly that
+contamination, in exactly that case.
+
+**Candidate, not established.** No write path has been traced, and the lowercase rows could
+equally come from an importer with its own casing. Recorded because the two measurements were
+taken independently by different lanes and happen to fit, which is worth a trace rather than
+an assumption. The trace is BUILD's; the fold has already removed the symptom, so **if
+lowercase rows reappear in `trades` after 2026-09-05, that is the round-trip confirmed.**
 Never copy an account string out of a tool rendering into a query.
 
 **HELD.** It rides the account-enum collapse in the ledger-integrity build, because the

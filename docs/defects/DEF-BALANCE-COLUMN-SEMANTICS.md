@@ -123,6 +123,28 @@ Recorded as a measurement, not a conclusion.
 
 ---
 
+## THE DEFECT PROPAGATES INTO HISTORY — 2026-09-05
+
+`balance_snapshots` re-snapshots `account_balances.balance` daily. Because that column is
+frozen, **the snapshot history inherits the freeze and renders it as a flat line.**
+
+543 rows carry **32 distinct balance values (5.9% variety)**, and **four of eight series are
+literally constant**: `BROKERAGE_LINK_401K` (31 rows, 1 value), `Interactive Brokers`
+(90 rows, 1 value), `FIDELITY_ROTH` (7 rows, 1 value), `ROBINHOOD` (7 rows, 1 value).
+
+**`ROBINHOOD` shows seven consecutive daily snapshots of 835.69** — the same stale
+hand-typed figure whose true vintage is **2026-08-24 17:01:35Z**. A chart of that series
+shows a flat, healthy-looking week that is an artifact of the writer, not of the account.
+
+This is the same failure as the `updated_at` finding above, one layer out: **a stale value
+acquiring an appearance of currency by being re-recorded.** Fixing column-level vintage
+without fixing the snapshot job leaves the false history in place.
+
+Full series inventory in `DEF-ACCOUNT-LABEL-DUP` → *`balance_snapshots` — report-only
+analysis*.
+
+---
+
 ## WHAT SURVIVES, STATED WEAKLY
 
 The two columns have **uncoordinated provenance and different vintages**, so comparing them

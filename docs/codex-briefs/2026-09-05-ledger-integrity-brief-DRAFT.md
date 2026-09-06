@@ -51,8 +51,21 @@ below** — CC-BUILD, 2026-09-05, read at `fda9224`, and it is worse than "casin
 
 **Two surfaces call it `BROKERAGE_LINK_401K` and two call it `FIDELITY_401A`.** Per
 R-IV.268(a) the Roth IRA and the 401k BrokerageLink are **ONE account**, so the correct
-collapse target is **two canonical accounts**, not three — and the census must say which
-name survives before any constraint enumerates it.
+collapse target is **two canonical accounts**, not three.
+
+> **ANSWERED — R-IV.275(e)(3). THERE IS NO THIRD ACCOUNT.** The canonical set is exactly
+> `{ROBINHOOD, FIDELITY_ROTH}`. `BROKERAGE_LINK_401K` / `FIDELITY_401A` / `FIDELITY_403B` are **historical aliases of the same account**, and the
+> `BROKERAGE_LINK_401K` balance row is a **stale VINTAGE of it** — not a second account, not a
+> duplicate row to be reconciled.
+>
+> **Retire it from every aggregate; preserve it as history. Never sum two vintages of one
+> account.** That sentence is the whole defect in one line: the +120% / +223% overstatement
+> in T4 is not an extra account being counted, it is **the same account counted at two ages
+> and added to itself.**
+>
+> **Still open, and NOT a blocker:** the 401A + 403B **sub-series merge rule** waits on one
+> principal fact, asked this turn. **Phase 0 item.** Nothing in T1–T7 depends on it, because
+> the sub-series live inside a single canonical account either way.
 
 **A second defect found in the same read, not previously registered.**
 `_match_account_balance` (`unified_positions.py:71-78`) matches by **`startswith`**, and
@@ -141,6 +154,10 @@ environment, a restore, a disaster-recovery boot — where `init_database()` wou
 **the app would fail to start.** The failure is invisible in every normal deploy and
 certain in the one case where recovery matters.
 
+**RULED — R-IV.275(e)(1): the CHECK constraint and the seed land in ONE commit, and the
+seed is rewritten to the two canonical accounts.** Spine's words: *a constraint that fails
+only on recovery day is the worst possible latency.*
+
 **Therefore: the constraint and the seed change land in the SAME COMMIT.** A constraint that
 contradicts the seed is not a half-done migration; it is a boot failure waiting for the
 worst possible day.
@@ -164,6 +181,14 @@ Two aggravations, both to be fixed with it: `is_stale` returns true for the 1.2-
 the 88-day row alike, so it **cannot discriminate**; and the summary prints *"Some balances
 >24h old"* for a row 88 days stale. **A phrase that stays true as the magnitude grows is a
 floor, not a warning** — third instance of that family.
+
+**AND the snapshot writer, per R-IV.275(f) — in scope here, not a separate task.**
+POSITIONS measured that `balance_snapshots` **re-writes stale hand-typed values as fresh daily
+points** (7 × 835.69). **Fixing column vintage without fixing the writer leaves false
+history**: the row would finally admit its age while the snapshot series continues to
+assert, once a day, that the value was observed that day. **A corrected present over a
+fabricated past is not a fix** — and the snapshot series is what any trend, chart or
+reconciliation reads.
 
 ### T6 — `max_loss` from basis, never from mark
 
@@ -217,7 +242,12 @@ being well presented.
 each. R-IV.268(a) settles that they are ONE account; it does not settle what to call it.
 **And the label is separately DISPUTED** — `DEF-ACCOUNT-LABEL-DUP` records that one of the
 two enum labels is factually wrong (401k vs 403b). **Naming a canonical account after a
-label known to be wrong would freeze the error into a constraint.** Spine to rule.
+label known to be wrong would freeze the error into a constraint.**
+
+**ANSWERED — R-IV.275(e)(3): neither. The canonical set is `{ROBINHOOD, FIDELITY_ROTH}`**, and the disputed
+401k/403b label does not enter it at all. **The dispute is dissolved rather than settled**:
+a label that names no canonical account cannot be the wrong name for one. It survives only
+as history, where being wrong is a recorded fact instead of a live constraint.
 
 **Q2 — Does the retired-IB row keep a balance?** A retired row with a live number can still
 be summed by something that does not check the flag; a retired row with a null balance loses
@@ -227,5 +257,6 @@ should have to say what it includes.
 
 **Q3 — Is the `startswith` prefix collision in scope here or its own defect?** It was found
 during this draft (P0.1), it is on a money path, and it is not any of the six registered
-items. **This lane recommends registering it now and fixing it inside T2**, since T2 rewrites
-that function anyway.
+items. **ANSWERED — R-IV.275(e)(2): registered as `DEF-ACCOUNT-MATCH-PREFIX`, P1, money path.
+Fix is EXACT MATCH on canonical labels** — not a narrowed prefix and not a longer alias
+list. **Scoped into T2**, which rewrites that function anyway.
