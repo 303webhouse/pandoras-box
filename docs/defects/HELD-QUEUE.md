@@ -64,6 +64,32 @@ was done.
 | DEF-MARK-INTEGRITY facets A and B | R-IV.252(d) | HELD; facet B arms when the mark path restarts |
 | 178(a) re-issue | R-IV.252(b) | spine-held, executor CC-BUILD when sequenced |
 
+## SINKS BUILD — A PRECONDITION THAT MUST NOT BE INHERITED
+
+**Raised by CC-QUERY on the census relay, recorded here so the sinks build cannot lose it.**
+
+R-IV.276 resolved UW-side backfill support **for tide only**, read from the unusualwhales
+MCP tool description (`market_tide` with *date optional, interval_5m optional*). **That
+description says nothing about `/api/darkpool/{TICKER}`**, and the two endpoints are not the same shape —
+one is a market-wide time series, the other a per-ticker print list.
+
+**Leg (d)'s backfill support is UNMEASURED.** Both legs sat in one paragraph of the census
+and share a concluding sentence, which is exactly how one inherits the other's answer
+without evidence.
+
+**BUILD's obligation, in the sinks build:** when tide is confirmed against the live
+endpoint, **dark pool is confirmed separately in the same pass.** A single confirmation
+covering both is not acceptable, because *backfillable* versus *forward-only* is precisely
+what the Hunter would be claiming about its own history.
+
+**And the consequence is asymmetric.** Tide is one market-wide series; dark pool is
+per-ticker across the universe. **If dark pool IS backfillable, the draw is large enough
+that AEGIS sizing applies before anything ships** — the 2026-07-17 watchdog-shed precedent.
+
+**Both pollers are currently PAUSED** (R-IV.273(c)), so neither is accruing history while
+this is unresolved. Nothing is lost by the pause; the backfill question is what decides
+whether anything can be recovered.
+
 ## Not held — position one
 
 The grader precondition build. Brief drafted at `docs/codex-briefs/2026-09-04-grader-precondition-brief-DRAFT.md`, **awaiting ATLAS/AEGIS**.
