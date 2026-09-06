@@ -95,6 +95,29 @@ largest single names in the book as indices.
 **A set named for a class it does not encode is worse than an absent one** — the absent
 one makes you go and look.
 
+**SOURCE RULED — R-IV.279(e). Two inputs, and neither is `INDEX_TICKERS`:**
+
+| class | source |
+|---|---|
+| ETF vs equity | **UW `/info` issue type**, per ticker |
+| cash-settled index | **the list carried in `DEF-TRITON-INDEX-UNGRADEABLE`: SPX · SPXW · RUT · RUTW · VIX** |
+
+**`INDEX_TICKERS` IS NEVER CONSULTED FOR CLASSIFICATION**, and the grader build **renames it to
+what it is — a premium tier — so the word stops lying.** The rename is part of this task,
+not a tidy-up deferred to later: while the name survives, the next reader repeats the
+mistake, and a comment saying *"not really an index"* has never once stopped anyone.
+
+**Two build facts measured 2026-09-05, both of which shape the work:**
+
+- **`/info` already exists in the client** — `uw_api.py:408`, with a **24-hour cache**. So
+  S4's sector map and S3's issue type come from the same call, and the cache makes a
+  per-ticker one-time map cheap. **They should be fetched together, once.**
+- **No code reads an issue-type field today.** `issue_type` appears nowhere in `backend/`.
+  This is new consumption of an existing endpoint, so **the field's presence and its
+  vocabulary must be verified against a live response before the classifier is written** —
+  not assumed from the endpoint's name. If a ticker has no issue type it is **UNMAPPED**,
+  the same rule S4 gives sector, and never guessed.
+
 ### T6 — Bounded `lookback_days`
 
 Today `lookback_days = (today - earliest).days + 12` anchored on the oldest ungraded row, which the 72 index rows pin

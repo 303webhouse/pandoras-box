@@ -252,3 +252,54 @@ vintage and HEAD.
 gate measured earlier in the same session, and **file only what gates — reporting the rest
 by address rather than guessing which version was meant.** A gate that has moved is not a
 mismatch to be resolved by judgement; it is a question for the staging lane.
+
+
+## ONE AUTHOR PER FILE
+
+**R-IV.279(b).**
+
+**While a file sits under a lane's manifest, only that lane edits it.** Another lane's
+facet is **RELAYED to the author as text, for the author to insert** — never appended
+directly to the file.
+
+**This is the companion to *A LANE STAGES A SETTLED MANIFEST*, and the two divide cleanly:**
+that rule governs the **handover** — do not read a moving target. This one governs the
+interval **between** handovers — do not be the thing that moves it.
+
+### Worked example — 2026-09-05, two lanes annotating two files
+
+Two DEFs under POSITIONS' manifest were annotated by CC-BUILD **and** by POSITIONS on the
+same day, neither lane seeing the other's edit until the gates disagreed. What this lane
+measured on `DEF-ACCOUNT-LABEL-DUP.md` alone:
+
+| observation | gate / size |
+|---|---|
+| first pickup | 5,206 B |
+| changed mid-task, same day | `66ca733f` · 8,884 B |
+| after this lane appended its own facet | `3cd3fb92` · 9,979 B |
+| gate named in the ruling | `c6aa2ba8` · 13,577 B |
+| transient, caught mid-write | `ac5f1c85` |
+| settled | `de40dafe` · 15,651 B |
+
+**Its sibling moved the same way**, and at one point **neither copy was a superset of the
+other**: POSITIONS' was smaller (8,379 B) than this lane's (8,805 B) while each held a facet
+the other lacked. **Filing either one verbatim would have silently destroyed a measured
+finding.**
+
+### What it cost, stated plainly
+
+**Two gates named in a live ruling were dead before the ruling could be executed.** A
+filing had to stop, watch the files across three consecutive samples to prove they had
+settled, and then justify filing at a gate the ruling did not name. **None of that is
+anyone's error** — both lanes were doing correct work on their own findings.
+
+**And the resolution was itself the churn.** The gates moved *because* POSITIONS pulled
+this lane's facets from origin and merged them. **The fix and the symptom were the same
+event**, which is exactly why it cannot be detected as a problem while it is happening.
+
+### The rule, restated as the thing that should have happened
+
+**CC-BUILD's facets should have traveled to POSITIONS as text**, and POSITIONS should have
+inserted them. One writer, one manifest, one gate that means something. **A gate is a
+promise about a file's contents; a second author makes that promise unkeepable** — not by
+breaking it, but by making it undecidable which lane's copy the promise was about.
