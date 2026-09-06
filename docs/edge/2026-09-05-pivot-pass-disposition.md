@@ -80,7 +80,7 @@ bad default — would silently stop collection, which is the failure this board 
 registered under several names. **Stopping collection must be an act, never an omission.**
 Two mutations of that rule were tested; both kill tests.
 
-**Confirmed from the running process, not the dashboard**, as the ruling requires:
+**Confirmed from the running process, not the dashboard**, as the ruling requires — measured 2026-09-05: both flags read true on two consecutive samples, against false/false measured on the same field before the flags were set (a negative control, so the field is known to discriminate rather than merely assert):
 `/health.paused_pollers` reports what the process actually read. A Railway variable is a claim about
 configuration; the health field is evidence about behaviour. The pause deliberately does
 **not** drive the health verdict — an intended state that degrades health teaches readers
@@ -91,6 +91,37 @@ a 1800 s TTL, so the v2 board tide cell goes dark ~30 min after the last warm; d
 promotions from the accumulation scanner stop. **Those two are the pause working.**
 Anything else that errors or empties through Tue 09-08 close is the hidden consumer the
 re-scope clause predicted, and is diagnostic.
+
+## The watch — what to sample, and when it first means anything
+
+**Both loops are session-gated, so nothing observable changes until RTH.** Monday 09-07 is
+Labor Day; **the first sample that can carry information is Tuesday 09-08.** Sampling over
+the weekend confirms configuration, not behaviour — the distinction the ruling draws when
+it says a hidden consumer cannot reveal itself on a holiday weekend.
+
+| when | check | what a pass looks like |
+|---|---|---|
+| now (done) | `/health.paused_pollers` | both flags read `true` from the running process |
+| now (done) | boot log | app up, no import error from the new module |
+| Tue 09-08 ~09:35 ET | `/health.paused_pollers` + log | ONE transition line per poller, then silence |
+| Tue 09-08 ~09:35 ET | `board:tide:latest` | **absent** — the 1800 s TTL has expired unrefreshed |
+| Tue 09-08 through close | any consumer | see the two expected emptyings below; anything else is the finding |
+| Tue 09-08 close | UW call count | dark-pool and tide call counts at **zero** for the session |
+
+**Expected, and therefore not findings:** the v2 board tide cell dark (its key is gone),
+and zero WH-ACCUMULATION promotions (its dark-pool condition 1 never runs). **Those two
+are the pause working.**
+
+**Everything else that errors or empties is the hidden runtime consumer the re-scope §4
+clause predicted, and is the diagnostic value of doing this at all.** Breakage is the
+point, not the failure — a consumer nobody knew about is exactly what a pause is for.
+
+**One asymmetry worth stating before the watch runs.** A consumer that *silently* degrades
+— returns a default, a zero, or a stale value rather than erroring — will produce no
+signal at all, and this board has now catalogued six of those under the
+compute-then-discard name and three under self-recovery. **A quiet watch is therefore weak
+evidence, not strong evidence**, and should be reported as "nothing surfaced" rather than
+"nothing broke."
 
 **Not paused, deliberately:** the on-demand consumers — `committee_bridge.py:248-249`, `sectors.py:624`, and the
 signal-pipeline enrichment — which spend only when something asks. Pausing those would
