@@ -1,8 +1,13 @@
 # CC BRIEF — GRADER-PRECONDITION: liveness, supervision, and one calendar
 
-**Date:** 2026-09-04 · **Lane:** CC-BUILD (draft) · **Authority:** R-IV.252(c)
-**Status: DRAFT FOR ATLAS/AEGIS.** Spine runs the review here; **no code is written
-until that pass returns.** Position one next week.
+**Date:** 2026-09-04 · **Lane:** CC-BUILD · **Authority:** R-IV.252(c)
+**Status: CC-ACTIONABLE — R-IV.289.** The ATLAS/AEGIS pass returned and its seven
+revisions are applied (R-IV.287). **Code may begin.**
+
+**Actionable at gate `1a8260d6` · 27,454 B LF** — re-attached by R-IV.292(d) after the T1
+correction. The delta from the reviewed gate `ed0d99ec` is **one hunk, +12/-3 lines, entirely
+the T1 fenced-hypothesis paragraph**; nothing else moved, verified by diff before code
+began.
 
 **Source of record:** `docs/edge/results/2026-09-04-triton-grader-diagnosis-and-external-arm.md` (CC-QUERY, gate 551f9430).
 Every mechanism claim below is that document's; this brief adds only the build shape.
@@ -388,9 +393,29 @@ predicate in this system that must not move under any circumstance.
   never provoked does not satisfy this.**
 - D3 — a scheduled pass runs with **no deploy in the window**, proving the schedule
   works rather than the restart. **This is the acceptance test for the whole brief**
-  and cannot be satisfied on a day anything was deployed. **The window is RULED by
-  R-IV.255(b) — cited, not re-opened.** (That ruling's text is not on this lane's record,
-  so this brief carries the citation and does not restate its terms.)
+  and cannot be satisfied on a day anything was deployed. **The window is RULED by R-IV.255(b),
+  TERMS NOW SUPPLIED (R-IV.289(b)):** the **first full calendar day after the precondition
+  build deploys is DEPLOY-FROZEN** — commits held locally, **no pushes** — and **D3 reads
+  the following morning.** Generalized: *an acceptance test that needs a quiet window gets a
+  scheduled one.*
+
+  **Dates taken (this lane's call, on spine's suggested shape):**
+
+  | when | what |
+  |---|---|
+  | **Tue 2026-09-08, after the close** | deploy the precondition build |
+  | **Wed 2026-09-09** | **DEPLOY-FROZEN.** Commits held locally, nothing pushed |
+  | **Thu 2026-09-10, AM** | **D3 read** |
+
+  **One interaction checked before taking these dates:** the poller-pause watch
+  (R-IV.274(a)) runs *through Tue 09-08 close*, so a deploy after that close **does not
+  disturb it** — the watch has already concluded. Monday 09-07 is Labor Day, so Tuesday is
+  the first RTH session and the earliest honest deploy day.
+
+  **The freeze is the acceptance test, not an inconvenience around it.** D3 asks whether the
+  schedule works rather than the restart; **a push during the frozen day silently converts a
+  pass into a restart-driven pass** and the test reports success for the wrong reason —
+  which is the null-verifier this brief exists to remove.
 - D4 — durable `last_run` shows a run for a day with no deploy.
 - D5 — the 72 index rows no longer appear in a pass's first 72 slots.
 - D6 — `lookback_days` bounded; the measured window stops growing.
@@ -400,6 +425,28 @@ predicate in this system that must not move under any circumstance.
   present-but-null column satisfies neither and fails this.
 - D9 — 10d/20d horizons each carry a resolution rule and a distinct
   not-yet-resolvable state, demonstrated on a row too young to resolve.
+
+## THE BUILD REPORT MUST CARRY (R-IV.289(d))
+
+**Six items. Each is an OBSERVATION, not an assertion that a thing was done.**
+
+1. **Poll sequences per deploy.** Every sample, in order, with its status — not a summary
+   verdict. Railway SUCCESS is not app-up; that has now occurred five times.
+2. **The deafness test AS AN OBSERVATION.** **What was withheld**, **what fired**, and
+   **the latch cleared AND the clearing verified.** *"The sentinel works"* does not satisfy
+   this. A green sentinel that was never provoked satisfies nothing (D2).
+3. **Seal count before AND after each of A, B, C** — six numbers, each `count(id <= 377783 AND fired_at >= '2026-08-17 00:00:00Z') == 843`.
+4. **Phase B's expected count STATED BEFORE IT RAN, and the count MET.** Stating it
+   afterwards is fitting the prediction to the result; **the ordering is the whole test.**
+5. **The post-condition grep, RE-RUN**, with its output, after the last commit that touches
+   `backend/`.
+6. **The `/info` issue-type vocabulary AS RETURNED LIVE, quoted, BEFORE the classifier was
+   written.** Not the field's documented values — the values the endpoint actually
+   returned, on the day.
+
+**Every one of these is written the same way for the same reason:** each names a thing that
+could have been skipped and reported as done. **An observation can be wrong; an assertion
+that work happened cannot be checked at all.**
 
 ## AEGIS HYGIENE (R-IV.287(7)) — binding on every task above
 

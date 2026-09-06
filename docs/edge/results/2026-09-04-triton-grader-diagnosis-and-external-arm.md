@@ -1,5 +1,15 @@
 # DEF-TRITON-GRADER-DARK — PHASE-0 MECHANISM DIAGNOSIS + R-IV.189(b) EXTERNAL ARM
 
+> **PROVENANCE (R-IV.289(e)):** the 09-02 grading run consumed **live UW bars** via
+> `get_ohlc`, which has **no fallback path**; the external arm was **cross-vendor for every
+> row class.** UW `/ohlc/1d` onset bounded **after 2026-09-05 17:55Z** — a **separate,
+> later failure** from the grader's.
+
+> *CC-BUILD note, kept distinct from the ruled line above:* R-IV.289(e) wrote the bound as
+> *after 2026-09-02 20:41Z*; **R-IV.292(c) narrowed it to after 2026-09-05 17:55Z** on the
+> SMH datum. The narrower bound is carried here. Full derivation and both bounds' sources
+> live on `docs/defects/DEF-UW-OHLC-DEAD.md`.
+
 **FROM:** CC-QUERY · **TO:** spine · **cc:** OLYMPUS-TRITON, EDGE, CC-BUILD, CC-POSITIONS
 **Vintage (in-DB UTC): `2026-09-04 21:29:06.834394+00`** · read-only · measure before classify
 **Firewall:** every row read is `fired_at < 2026-08-17` (audit population). **No holdout row
