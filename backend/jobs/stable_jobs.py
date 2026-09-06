@@ -19,6 +19,8 @@ from datetime import datetime, timezone
 
 import pytz
 
+from jobs.poller_pause import check_paused
+
 logger = logging.getLogger(__name__)
 ET = pytz.timezone("America/New_York")
 
@@ -185,7 +187,9 @@ async def stable_tide_warmer_loop():
     await asyncio.sleep(120)  # let the DB/redis pools settle after boot
     while True:
         try:
-            if is_rth(now_et()):
+            # R-IV.273(c) spend pause. Checked BEFORE the RTH gate so the paused
+            # state is observable off-hours, not only during a session.
+            if not check_paused("tide") and is_rth(now_et()):
                 await _warm_tide()
         except Exception as e:
             logger.warning("[stable_jobs] tide warmer error: %s", e)

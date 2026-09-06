@@ -715,13 +715,17 @@ async def lifespan(app: FastAPI):
         """Run WH-ACCUMULATION scanner every hour during market hours."""
         import pytz
         from datetime import datetime as dt_cls
+        from jobs.poller_pause import check_paused
 
         await asyncio.sleep(600)  # 10 min after startup (let flow_events seed first)
 
         while True:
             try:
                 et = dt_cls.now(pytz.timezone("America/New_York"))
-                if et.weekday() < 5 and 9 <= et.hour < 16:
+                # R-IV.273(c) spend pause, checked before the market-hours gate.
+                if check_paused("darkpool"):
+                    pass
+                elif et.weekday() < 5 and 9 <= et.hour < 16:
                     from scanners.wh_accumulation import run_wh_accumulation_scan
                     await run_wh_accumulation_scan()
                 else:
@@ -1379,6 +1383,13 @@ async def health_check():
     except Exception as _qse:
         qqq_sma_block = {"state": "ERROR", "reason": str(_qse)}
 
+    paused_pollers_block: dict = {}
+    try:
+        from jobs.poller_pause import pause_status
+        paused_pollers_block = pause_status()
+    except Exception as _ppe:
+        paused_pollers_block = {"state": "ERROR", "reason": str(_ppe)}
+
     return {
         "status": overall,
         "server_time_et": now_et.strftime("%Y-%m-%d %H:%M:%S %Z"),
@@ -1390,6 +1401,7 @@ async def health_check():
         "signals_freshness": signals_freshness_block,
         "strike_watermarks": strike_watermarks_block,
         "qqq_sma_watch": qqq_sma_block,
+        "paused_pollers": paused_pollers_block,
     }
 
 
