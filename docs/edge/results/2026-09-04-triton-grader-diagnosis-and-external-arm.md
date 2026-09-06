@@ -1,14 +1,15 @@
 # DEF-TRITON-GRADER-DARK — PHASE-0 MECHANISM DIAGNOSIS + R-IV.189(b) EXTERNAL ARM
 
-> **PROVENANCE (R-IV.289(e)):** the 09-02 grading run consumed **live UW bars** via
-> `get_ohlc`, which has **no fallback path**; the external arm was **cross-vendor for every
-> row class.** UW `/ohlc/1d` onset bounded **after 2026-09-05 17:55Z** — a **separate,
-> later failure** from the grader's.
+> **AUTHOR'S BLOCK — CC-QUERY, relayed VERBATIM by R-IV.293(d).** This replaces spine's
+> earlier one-line provenance note. Gate over the quoted text only: `38b9585e`, `919` bytes.
+>
+> BAR PROVENANCE (R-IV.290(c)). Grader bars are UW. The grading path is fetch_r_close_index → get_ohlc (backend/integrations/uw_api.py:223), which has no yfinance fallback — the fallback at :663 belongs to get_bars(...), a function the grader never calls — and fetch_r_close_index additionally filters on market_time='r', a field yfinance bars do not carry (_fetch_yfinance_bars, :1569, emits o/h/l/c/v/vw/t/n). Recompute bars are yfinance (stable_daily_bars, backend/stable_engine/bars_yf.py). The vendor separation is proven, not assumed, and it holds for every row class — including the post-repair 09-02 batch, which UW served: CACHE_TTLS["ohlc"] = 300 seconds cannot bridge days, so the 20:41:55Z run fetched live. The 0.0001 max delta on that batch reflects ticker liquidity, not a same-vendor fingerprint — BURST 08-17 also maxes at 0.0001, and 94 of 102 cells are exactly 0.0000 across all four batches.
 
-> *CC-BUILD note, kept distinct from the ruled line above:* R-IV.289(e) wrote the bound as
-> *after 2026-09-02 20:41Z*; **R-IV.292(c) narrowed it to after 2026-09-05 17:55Z** on the
-> SMH datum. The narrower bound is carried here. Full derivation and both bounds' sources
-> live on `docs/defects/DEF-UW-OHLC-DEAD.md`.
+*CC-BUILD's onset note, kept beneath the author's block and clearly this lane's:*
+R-IV.289(e) first wrote the bound as **after 2026-09-02 20:41Z**; **R-IV.292(c) narrowed it
+to after 2026-09-05 ≈ 17:55Z** on the SMH datum, and the upper bound is **2026-09-06
+00:41Z**. Both bounds, and the fact that they are **different kinds of evidence** — one
+derived from `staleness_seconds`, one recorded wall-clock — are tabled on `docs/defects/DEF-UW-OHLC-DEAD.md`.
 
 **FROM:** CC-QUERY · **TO:** spine · **cc:** OLYMPUS-TRITON, EDGE, CC-BUILD, CC-POSITIONS
 **Vintage (in-DB UTC): `2026-09-04 21:29:06.834394+00`** · read-only · measure before classify

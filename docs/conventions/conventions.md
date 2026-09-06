@@ -376,3 +376,43 @@ and **both are correct** — they are answering different questions.
 paid to fix an unreal one: every ruling, manifest and chain line that cites the old name
 now cites nothing. **The name is an address, not a claim about time** — and the document's
 face is where a time claim belongs.
+
+
+## A LIVENESS PROBE IS A CONSUMER THAT FAILS WHEN THE SOURCE DIES
+
+**R-IV.293(e), from CC-QUERY.**
+
+**Never a counter that measures traffic.** A probe must be something that **stops working**
+when the thing it watches stops working. A counter keeps counting.
+
+**Worked example — the UW bar outage, 2026-09-05.**
+
+| instrument | what it read across the outage | dated the onset? |
+|---|---|---|
+| `ohlc_bars` burn counter | **1,689–2,018 calls/day, straight through** | **NO** |
+| the grader (`get_ohlc`, no fallback) | wrote 962 / 9 / 1,862 / 573 rows, then **could not write** | **YES** |
+
+**The counter was not broken and it was not lying.** Calls really were being made at the
+usual rate — **and every one of them was failing into a silent fallback.** *Traffic
+continued; service did not.* **A metric that cannot distinguish those two is not a health
+signal**, whatever it is named.
+
+**The grader dated the outage because it CONSUMES the thing.** No fallback, so no bars means
+no rows, and **the absence of rows is the measurement.** It was never designed as a probe;
+it became the only one available because it was the only consumer that could not paper over
+the failure.
+
+**The rule this yields for anything built to watch a source:**
+
+- **A probe with a fallback is not a probe.** The fallback is exactly the mechanism that
+  destroys the signal — see `DEF-UW-OHLC-DEAD`, where a working fallback hid a dead primary for
+  days.
+- **Count failures, never volume**, and only where a failure can actually surface.
+- **Prefer a real consumer over a synthetic ping.** A synthetic ping tests the endpoint; a
+  real consumer tests the endpoint *as this system uses it*, which is the question that
+  matters and the one the SMH read answered.
+
+**Kin to the null-trigger law.** There the trigger could not fire; here the probe cannot
+fail. **Both are instruments that report success by construction**, and neither can be
+caught by inspecting its output — only by asking what it would do if the thing it watches
+were dead.
