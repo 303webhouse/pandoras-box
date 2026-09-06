@@ -2,11 +2,37 @@
 
 **Severity:** P2 · **Registered:** 2026-08-25 (R-IV.80d condition 3) ·
 **FILED AS A DOCUMENT:** 2026-09-05 (R-IV.264(c))
-**Status:** **DISPUTE RESOLVED 2026-09-05 (R-IV.268(a)) — REMEDIATION OPEN.**
-The question *"what are the accounts"* is answered. The **data still carries aliases on 6 of
-9 surfaces**; `unified_positions` is clean, nothing else is. Do not read the resolved header
-as a clean book — see **REMAINING SURFACE** below.
-**Owner:** CC-POSITIONS (evidence) · CC-BUILD (surface) · principal (the plan-type fact)
+**Status:** **PREMISE RESOLVED (R-IV.284) — REMEDIATION OPEN.**
+
+> **PREMISE RESOLVED (R-IV.284): two tracked accounts — FIDELITY_ROTH (the Roth 401k
+> BrokerageLink, the account actually traded) and ROBINHOOD — plus parked out-of-scope money
+> that was mistaken for a third account. BROKERAGE_LINK_401K ($11,642.35 = 401A + 403B
+> exactly) is the parked sum under a misleading name, not a vintage of the trading account.
+> The 401k/403b label dispute is dissolved: neither label names a tracked account.**
+>
+> — text of record, R-IV.285(b), relayed from CC-BUILD under convention #9 and applied
+> verbatim.
+
+### ⚠ THE TRAP, IN ONE LINE
+
+**`BROKERAGE_LINK_401K` wears the traded account's name over parked money.** *"BrokerageLink"*
+belongs to **`FIDELITY_ROTH`** — the Roth 401k BrokerageLink is the account actually traded.
+The row carrying that name holds **401A + 403B parked funds, out of scope**.
+
+**The misleading part is the half that looks right.** Anyone matching on "brokerage link" to
+find the traded account finds the parked pot instead — and a wrong plan-type digit would have
+been the *safer* error, because it looks wrong on sight. This one does not.
+
+**REMEDIATION IS NOT COMPLETE.** Six of nine surfaces are clean; **three remain HELD** for
+the ledger-integrity build. Do not read the resolved premise as a clean book — see
+**REMAINING SURFACE** below.
+**Author:** CC-POSITIONS — **sole author** under convention #9 (one author per file).
+CC-BUILD's FACET section below is **inherited text maintained here**, not co-owned; send
+further facets as text. The principal's fact of record is **cited, not co-owned**.
+**Surface owner (remediation):** CC-BUILD. Authoring this file and owning the code surface
+are different things — nothing here claims the fix.
+*Superseded: the former owner line named `principal (the plan-type fact)`. That question no
+longer exists — see RESOLUTION; the premise died rather than the fact arriving.*
 **Surface:** `unified_positions.account` · `account_balances.account_name` · the canonical
 account vocabulary in `docs/feat-position-lifecycle.md`
 **Binding consequence in force:** *"One account label, canonical. **Do not write under
@@ -40,13 +66,21 @@ Three consequences, each independently checkable:
 2. **`BROKERAGE_LINK_401K` holds a balance ($11,642.35) and has never held a position row.**
 3. **`FIDELITY` holds a position row and has no balance row at all.**
 
-## THE PLAN-TYPE ERROR
+## ~~THE PLAN-TYPE ERROR~~ — DISSOLVED, R-IV.284/285(b)
 
-`BROKERAGE_LINK_401K` is the merged label for the Fidelity **401A + 403B** consolidation of
-2026-07-23. **One of the two enum labels it merges is factually wrong** — Fidelity states
+> **Superseded, retained as history.** The dispute below was never resolved — it
+> **dissolved**. Per the text of record: *"neither label names a tracked account."* There was
+> no fact to establish, because the thing the labels disagreed about is not in scope.
+
+~~`BROKERAGE_LINK_401K` is the merged label for the Fidelity **401A + 403B** consolidation of
+2026-07-23. One of the two enum labels it merges is factually wrong — Fidelity states
 **403(b)**, the label says **401K**
-(`FIDELITY_IMPORT_PHASE1A_PREWRITE_CENSUS.md:184`). The name asserts a plan type the broker
-contradicts.
+(`FIDELITY_IMPORT_PHASE1A_PREWRITE_CENSUS.md:184`).~~
+
+**What survives:** the name is still misleading, but for a different reason than recorded
+here — and it is the defect's sharpest point, so it is stated at the top of this file under
+**⚠ THE TRAP, IN ONE LINE** rather than restated here. In short: the trap is the *name*, not
+the plan-type digit.
 
 **AHRP is DESCOPED from tradeable aggregates** as of 2026-08-25, so this row must never be
 summed into a sizing figure regardless of what it is called.
@@ -107,8 +141,22 @@ describing the same thing three ways.
 |---|---|
 | **Tracked set** | **TWO accounts: `ROBINHOOD` · `FIDELITY_ROTH`** |
 | **Canonical labels** | `ROBINHOOD` · `FIDELITY_ROTH` |
-| **Aliases to retire** | `FIDELITY` · `FIDELITY_401A` · `BROKERAGE_LINK_401K` — and every case/spacing variant below |
+| **True alias — retire** | `FIDELITY` (+ every case/spacing variant of the two canonical labels) |
+| **NOT aliases — OUT OF SCOPE** | `FIDELITY_401A` · `FIDELITY_403B` · `BROKERAGE_LINK_401K` — **parked out-of-scope money, mistaken for a third account** (R-IV.284) |
 | **`breakout_prop`** | stays **descoped** |
+
+> ### ⚠ ALIAS MAP CORRECTED — R-IV.284
+>
+> R-IV.268(a) listed `FIDELITY_401A` and `BROKERAGE_LINK_401K` as **aliases** of the Roth.
+> **They are not.** 401A and 403B were **parked money** — real, separate accounts — now out
+> of scope rather than duplicate names for the trading account. Only `FIDELITY` was ever a
+> true alias, and that remap (id 409) stands.
+>
+> **This vindicates the measurement flagged at R-IV.272** and recorded below: the
+> `BROKERAGE_LINK_401K` balance is **not a value-duplicate of `FIDELITY_ROTH`** — it is
+> 401A + 403B = 11,642.35 exactly, a distinct pot. Retiring it *as a duplicate* would have
+> deleted $11,642.35 of real parked balance. **Retire from aggregates, do not merge into the
+> Roth.**
 
 ### Executed — `unified_positions` is clean
 
@@ -139,7 +187,7 @@ three are HELD for the ledger-integrity build.**
 | `positions.broker` | **CLEAN** ✅ | empty |
 | `trades.account` | **FOLDED** ✅ | `robinhood` (132) → ROBINHOOD · `FIDELITY` (1) → FIDELITY_ROTH · R-IV.272 |
 | `closed_positions.account` | **FOLDED** ✅ | `robinhood` (5) → ROBINHOOD · `FIDELITY` (1) → FIDELITY_ROTH · R-IV.272 |
-| `cash_flows.account_name` | **FOLDED** ✅ | `FIDELITY_401A` (1) → FIDELITY_ROTH · R-IV.272 |
+| `cash_flows.account_name` | **REVERTED** ⚠ | `FIDELITY_401A` (1) → FIDELITY_ROTH at R-IV.272 was **WRONG** — re-labelled `OUT_OF_SCOPE` at R-IV.284. See below. |
 | `account_balances.account_name` | **HELD** | `BROKERAGE_LINK_401K` (1) — BUILD, ledger-integrity build |
 | `account_balances.broker` | **HELD** | `fidelity` (2) · `robinhood` (1) — a **lowercase second vocabulary**, still unaddressed |
 | `balance_snapshots.account_name` | **HELD** | six variants, **529 rows** — see the analysis below |
@@ -150,8 +198,36 @@ FIDELITY_ROTH 14. Each write was a guarded statement with a pre-commit invariant
 zero non-canonical values remaining on that column. **Label-only: no amounts, dates,
 quantities or statuses were touched.**
 
-The `cash_flows` row carried a real flow — **ACH deposit $170.78, `activity_date` 2026-04-23,
-`imported_from` manual** (id 15). It moved account label only.
+### The `cash_flows` fold was WRONG and has been reverted — R-IV.284
+
+id 15 carried a real flow: **ACH deposit $170.78, `activity_date` 2026-04-23,
+`imported_from` manual**. R-IV.272 folded it `FIDELITY_401A` → `FIDELITY_ROTH` on the alias
+premise. With 401A reclassified as parked money, that fold moved a deposit into the trading
+account that never went there.
+
+**The balance series settles it to the cent, on the row's own `activity_date`:**
+
+```
+ 2026-04-23     Fidelity 401A   10,446.18 -> 10,616.96    +170.78   <-- EXACT MATCH
+                Fidelity Roth    8,489.49 ->  8,577.64    + 88.15
+                Fidelity 403B      344.55 ->    344.55       0.00
+```
+
+**The deposit landed in the parked 401A account, not the trading Roth.** Re-labelled
+`OUT_OF_SCOPE`; amount, flow_type, activity_date and imported_from untouched. `cash_flows` is
+back to ROBINHOOD 17 / FIDELITY_ROTH 13, plus this one row correctly out of scope.
+
+**Independent corroboration of the +88.15.** The Roth series moves in units of **88.15** —
++88.15 on 04-23, +176.30 (= 2 × 88.15) on 05-26, +88.15 on 06-10 — which is exactly the
+recurring `TRANSFERRED FROM TO BROKERAGE OPTION (Cash) 88.15` line appearing four times in
+the Fidelity 60-day export (`RH_FACE_AND_CASH_EVENTS.md` §1d). Two independent sources agree
+that 88.15 is the Roth's cadence and 170.78 is not a Roth event.
+
+**Lesson recorded:** the fold was executed correctly — guarded statement, exact rowcount,
+invariant satisfied — and was still wrong, because the *premise* it inherited was wrong. A
+clean execution against a bad map produces a clean-looking bad result. This is the framing
+class again, and the thing that caught it was a check against an independent series, not a
+re-read of the write.
 
 ### The fold repaired a live measurement, not just tidiness
 
