@@ -98,6 +98,13 @@ the amendment body: `73bfd3a0`, `1511` bytes UTF-8, LF.
 > 
 > **H2 10d/20d horizons** — stored in NEW columns with their OWN completion marker (`graded_20d_at`). `graded_at` keeps its meaning (5d terminal) forever: the seal count, the residue, the tripwire identity, and the RELEASE predicate all key on it and none may move.
 
+**S2 ANNOTATION (R-IV.281(c)) — the stronger ground for the UUP proxy.** The census
+established that `dxy_trend` is a **computed bias-engine composite** (`backend/bias_engine/composite.py:134`,
+*"DXY 5d trend + SMA20 context + VIX interaction"*) that **was never persisted per row in
+any form.** So the proxy is not a workaround for a table that went dark: **a per-row DXY
+stamp has never existed**, and no amount of repairing `factor_history` would have produced one.
+**The proxy is the only construction available, not the cheaper of two.**
+
 **Face label, carried from the ruling: hypothesis generation, not verdict.** Criteria and
 verdict semantics are unchanged by this amendment; nothing here can move a pass/fail.
 

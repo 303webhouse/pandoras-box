@@ -29,9 +29,15 @@ ask for, and the caller cannot tell from the response that it happened. Same fam
 different route: there the wrong row was in the table, here the wrong row is in the
 predicate.
 
-**And it compounds the account collapse.** Per R-IV.275(e)(3) the canonical set is exactly
-`{ROBINHOOD, FIDELITY_ROTH}`, with `BROKERAGE_LINK_401K` / `FIDELITY_401A` / `FIDELITY_403B` as **historical aliases of the same account**. A prefix matcher
-over aliases of one account is how two vintages of one account get summed as two accounts.
+**And it compounds the account collapse.** Per R-IV.284 the canonical set is exactly `{ROBINHOOD, FIDELITY_ROTH}` — **two tracked
+accounts** — while `FIDELITY_401A` / `FIDELITY_403B` / `BROKERAGE_LINK_401K` label **parked, untraded money that
+is OUT OF SCOPE**, not aliases of anything.
+
+**That makes this defect worse, not milder.** A prefix matcher on `fidelity` does not
+merely over-match two vintages of one account; **it pulls out-of-scope parked money into a
+filter asked for the trading account.** The only legitimate alias of `FIDELITY_ROTH` is
+`FIDELITY` — and `fidelity` matches that alias *and* both parked labels
+identically.
 
 ## Fix (ruled)
 

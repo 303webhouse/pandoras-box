@@ -173,7 +173,18 @@ before the file was staged: a placeholder was substituted into a slot that alrea
 carried backticks, producing a doubled pair. **An entry about quoting is written with
 placeholders for every shell-significant term, and checks each one after writing.**
 
-Kin to *rendering catches what diffs miss* — all four were invisible in a diff and
+A fifth instance, POSITIONS' (R-IV.281(d)), extends the rule past the shell: `subprocess.run(text=True)`
+under the Windows locale **decoded successfully and produced mangled em-dashes.** Nothing
+raised. The text stayed plausible — it simply stopped matching its anchors, and only an
+assertion caught it.
+
+**So: explicit UTF-8 on every subprocess read of document text.** This instance is the
+sharpest of the five, because the other four corrupted content at a point where something
+*could* have failed. **A successful decode into the wrong characters cannot fail**, which
+puts it in the null-verifier family rather than the quoting one: the operation reports
+success and the damage is downstream, in a comparison that quietly finds nothing.
+
+Kin to *rendering catches what diffs miss* — all five were invisible in a diff and
 obvious on the rendered line.
 
 
@@ -303,3 +314,50 @@ event**, which is exactly why it cannot be detected as a problem while it is hap
 inserted them. One writer, one manifest, one gate that means something. **A gate is a
 promise about a file's contents; a second author makes that promise unkeepable** — not by
 breaking it, but by making it undecidable which lane's copy the promise was about.
+
+
+## A NEGATIVE FINDING STATES ITS SEARCH SCOPE
+
+**R-IV.281(a).**
+
+**A negative is a property of where you looked, never of the thing sought.** Report it with
+the scope attached — the paths, the patterns, the window — so a reader sees the hole
+instead of inferring an absence.
+
+**Worked example — 2026-09-05.** This lane reported a staged census as *"not on any
+reachable path"* **three times**. The sweep was by full content hash, which felt
+exhaustive, over `C:\th-build`, `C:\trading-hub` and Downloads. **The ferry directory
+`C:\temp\cc-query-handoff` was not among them.** The file was there the whole time, gate matching
+exactly — and this lane had already filed **sixteen** artifacts from that same directory.
+
+**The cost was not the wasted search.** The finding was relayed as a property of the
+artifact, so another lane was sent to re-stage a file that was correctly staged, and a
+ruling was written around a failure class (*said-staged-wasn't*) that had not occurred.
+**A mis-scoped negative does not merely fail to find a thing; it manufactures a different
+problem elsewhere.**
+
+**Probe-coverage family, search-boundary form.** Its siblings are a `limit=` that is not a
+parameter of the endpoint, a `cut -c` truncation read as a truncated document, and a
+`grep -c` counting lines where characters were meant. **Each reports a property of the
+instrument as a property of the subject** — here the instrument is the set of places
+searched.
+
+**The operational form: when something cannot be found, name the paths searched before
+concluding anything.**
+
+
+## FERRY ARTIFACTS ARE NAMED BY LOCAL DATE
+
+**R-IV.281(b), from CC-QUERY.**
+
+**A staged file's name carries the LOCAL date it was written. The UTC vintage lives inside
+the document**, on its face, where it can be read precisely.
+
+**Worked example:** `2026-09-06-MOBY-DICK-CENSUS-PHASE0.md` was written **2026-09-05 18:13 MDT**, and its own
+face states the in-DB vintage `2026-09-06 00:11:34.310740+00`. The name and the vintage differ by a day
+and **both are correct** — they are answering different questions.
+
+**Existing names stand. Renaming for cosmetics creates dead gates**, which is a real cost
+paid to fix an unreal one: every ruling, manifest and chain line that cites the old name
+now cites nothing. **The name is an address, not a claim about time** — and the document's
+face is where a time claim belongs.

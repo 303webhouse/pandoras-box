@@ -118,6 +118,28 @@ mistake, and a comment saying *"not really an index"* has never once stopped any
   not assumed from the endpoint's name. If a ticker has no issue type it is **UNMAPPED**,
   the same rule S4 gives sector, and never guessed.
 
+**S4's sector map absorbs the duplicated SPDR literal (R-IV.281(c)) — and the duplication
+is larger than the census reported.** The census cites two files. **Measured 2026-09-05 by
+CC-BUILD: 10 declaration sites across 9 files**, counting any place where ≥ 9 of the 11
+SPDR tickers appear within an 8-line window:
+
+```
+analytics/calendar_context.py  api/flow_radar.py  api/stable.py (x2)
+discord_bridge/bot.py  indicators/sector_rotation_3_10.py
+scanners/hybrid_scanner.py  scanners/universe.py
+stable_engine/strip.py  stable_engine/universe.py
+```
+
+**The shapes differ** — some are ticker sets, some ticker→name maps, one is a
+name→ticker map — **which is why they drifted apart without anyone noticing.** One of the
+ten carries 9 of 11, not 11 of 11: `scanners/hybrid_scanner.py:978`. **Whether that is a deliberate
+subset or a decayed copy is unread**, and the S4 build must decide rather than assume.
+
+**Scope note, stated so it is not silently widened:** S4 needs **one** sector source. It
+does **not** need all ten call sites migrated in the grader build — that is a larger
+refactor with its own blast radius. **What this task owes is the single source and a
+declaration of which sites it supersedes**, so the eleventh copy is never written.
+
 ### T6 — Bounded `lookback_days`
 
 Today `lookback_days = (today - earliest).days + 12` anchored on the oldest ungraded row, which the 72 index rows pin

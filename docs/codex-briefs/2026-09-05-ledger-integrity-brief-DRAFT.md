@@ -13,9 +13,11 @@ same gate as the grader brief.
 
 ## What this fixes, in one line
 
-**The hub's account ledger cannot be reconciled against the broker**, because the same
-account carries five different names across code, one of those names is summed as a third
-account, and the marks that price the positions are written without a guard.
+**The hub's account ledger cannot be reconciled against the broker**, because
+**two tracked accounts plus parked out-of-scope money were mistaken for a third account**
+(R-IV.284), the parked sum is added into every aggregate, the tracked account carries
+several names across code, and the marks that price the positions are written without a
+guard.
 
 ## Binding conditions
 
@@ -53,19 +55,29 @@ below** — CC-BUILD, 2026-09-05, read at `fda9224`, and it is worse than "casin
 R-IV.268(a) the Roth IRA and the 401k BrokerageLink are **ONE account**, so the correct
 collapse target is **two canonical accounts**, not three.
 
-> **ANSWERED — R-IV.275(e)(3). THERE IS NO THIRD ACCOUNT.** The canonical set is exactly
-> `{ROBINHOOD, FIDELITY_ROTH}`. `BROKERAGE_LINK_401K` / `FIDELITY_401A` / `FIDELITY_403B` are **historical aliases of the same account**, and the
-> `BROKERAGE_LINK_401K` balance row is a **stale VINTAGE of it** — not a second account, not a
-> duplicate row to be reconciled.
+> **ANSWERED — R-IV.275(e)(3), then CORRECTED BY R-IV.284 BEFORE ANY CODE. Read the
+> correction, not the first answer.**
 >
-> **Retire it from every aggregate; preserve it as history. Never sum two vintages of one
-> account.** That sentence is the whole defect in one line: the +120% / +223% overstatement
-> in T4 is not an extra account being counted, it is **the same account counted at two ages
-> and added to itself.**
+> **PRINCIPAL FACT (R-IV.284(a)):** Pandora tracks **exactly two accounts** — `FIDELITY_ROTH`,
+> the Roth 401k BrokerageLink and **the account actually traded**, and `ROBINHOOD`,
+> high-risk: options primarily, with crypto, ETFs and stocks at times. **The 401A and 403B
+> balances are PARKED MUTUAL-FUND MONEY, untraded, OUT OF SCOPE.**
 >
-> **Still open, and NOT a blocker:** the 401A + 403B **sub-series merge rule** waits on one
-> principal fact, asked this turn. **Phase 0 item.** Nothing in T1–T7 depends on it, because
-> the sub-series live inside a single canonical account either way.
+> **THE CORRECTION MATTERS AND IS NOT COSMETIC.** R-IV.275(e)(3) called the
+> `BROKERAGE_LINK_401K` row a **stale vintage of the same account**. It is not. **It is the
+> PARKED SUM under a misleading name** — `$11,642.35`, exactly 401A + 403B. **A
+> different pot, not an older reading of the same pot.**
+>
+> **Same action, different reason, and the reason is what the build encodes.** Retire it
+> from every aggregate — **because it is other money, not because it is old.** A
+> staleness-based fix would have been *refreshed* by a diligent future maintainer; a
+> scope-based one cannot be, because there is nothing to refresh it to.
+>
+> **ALIAS MAP, corrected (R-IV.284(c)):** aliases of `FIDELITY_ROTH` = `{FIDELITY}`.
+> **OUT-OF-SCOPE retired labels** = `{FIDELITY_401A, FIDELITY_403B, BROKERAGE_LINK_401K, Interactive Brokers}`. **These are
+> not aliases of anything.** Rows carrying them are tagged `OUT_OF_SCOPE` and preserved
+> under the retention law — **never deleted, never summed, never charted with the trading
+> account.**
 
 **A second defect found in the same read, not previously registered.**
 `_match_account_balance` (`unified_positions.py:71-78`) matches by **`startswith`**, and
@@ -84,8 +96,19 @@ these are different questions and conflating them is how the trap was built.
 
 ### P0.3 — `balance_snapshots`: three-series history and its merge rule
 
-**POSITIONS supplies the history. The merge rule is ruled by R-IV.271(e) and is
-non-negotiable:**
+**POSITIONS supplies the history. R-IV.284(d) RULES THE HISTORY RULE: NO MERGE.**
+
+`balance_snapshots` keeps the **Fidelity Roth series as the trading account's history.** The
+401A, 403B and IB series are **flagged out-of-scope and excluded from every chart and every
+aggregate** — not merged into it, not reconciled against it.
+
+**This supersedes the merge rule as the CROSS-ACCOUNT question**, and it supersedes it in
+the strongest way: the question does not arise. Two series belonging to different pots were
+never candidates for merging, and the earlier rule was answering a question about one pot
+read twice.
+
+**The R-IV.271(e) rule still governs WITHIN a series**, where two readings of the same
+account on the same date genuinely can disagree:
 
 - **same date + same value → dedupe.**
 - **same date + DIFFERING values → NEVER the same measurement. Investigate; do not merge,
@@ -244,10 +267,14 @@ each. R-IV.268(a) settles that they are ONE account; it does not settle what to 
 two enum labels is factually wrong (401k vs 403b). **Naming a canonical account after a
 label known to be wrong would freeze the error into a constraint.**
 
-**ANSWERED — R-IV.275(e)(3): neither. The canonical set is `{ROBINHOOD, FIDELITY_ROTH}`**, and the disputed
-401k/403b label does not enter it at all. **The dispute is dissolved rather than settled**:
-a label that names no canonical account cannot be the wrong name for one. It survives only
-as history, where being wrong is a recorded fact instead of a live constraint.
+**ANSWERED — R-IV.275(e)(3), CORRECTED BY R-IV.284: neither, and the question was
+malformed.** The canonical set is `{ROBINHOOD, FIDELITY_ROTH}`. **Neither candidate names a
+tracked account**, because the pot they refer to is **parked, untraded, out of scope** —
+so the question *"which name survives"* presupposed a third account that does not exist.
+
+**The dispute is dissolved rather than settled**: a label that names no canonical account
+cannot be the wrong name for one. It survives as an out-of-scope tag, where being
+misleading is a recorded fact instead of a live constraint.
 
 **Q2 — Does the retired-IB row keep a balance?** A retired row with a live number can still
 be summed by something that does not check the flag; a retired row with a null balance loses
