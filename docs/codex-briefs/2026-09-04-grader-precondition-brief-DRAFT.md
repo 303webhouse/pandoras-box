@@ -47,6 +47,29 @@ dead process instead.
 A timeout that fires must LOG and let the next cycle retry, not re-raise into the
 fail-open swallow.
 
+**PINNED VALUE — 300 s, derived, not chosen (R-IV.287(3)).**
+
+```
+measured grader pass        ~20 s
+floor  = 10 x measured      200 s      (the >=10x rule)
+PINNED                      300 s      (15x; headroom for a slow bar-fetch day)
+```
+
+**Why a multiple of the measured pass and not a round number picked for comfort.** A
+timeout below the real distribution's tail converts a slow pass into a failed one and the
+grader loses days it would have completed. **10x is the floor because the measured pass is
+a single sample, not a distribution** — there is no p99 to size against, so the multiple
+carries the uncertainty the sample cannot.
+
+**Per-fire metric, required:** every fire increments a counter and logs the elapsed time.
+**A timeout with no metric is indistinguishable from a timeout that never fires** — the
+null-trigger law, and the reason this cannot ship as a bare `asyncio.wait_for`.
+
+**What this leaves for T4.** A fire is a **skip reason**, and T4 is what records it.
+Together they answer *"why did this pass not grade?"*; **neither answers it alone** — T1
+knows the timeout fired but not what the pass was trying to do, T4 knows a pass was skipped
+but not that the cause was a hang. **They ship together or the question stays open.**
+
 ### T2 — Durable `last_run`
 
 Today `last_run` is process memory, so a restart re-arms the day and a missed day leaves
@@ -57,6 +80,23 @@ durable to read.
 **Watch the interaction:** durable `last_run` removes the accidental re-arm that deploys
 currently provide. Ship T1 and T3 with it or grading gets *less* frequent, not more.
 The current behaviour is a bug that is also the only thing keeping the grader alive.
+
+**SHAPE RULED — a GENERIC `job_runs` TABLE, wired for the grader ONLY (R-IV.287(4)).**
+
+One table, job-agnostic columns — job name, started, finished, status, rows touched, skip
+reason, error — and **exactly one writer wired in this build: the grader.**
+
+**Generic schema, single wiring, and the split is deliberate.** A grader-shaped table would
+be the sixth private bookkeeping surface in this repo, and the weekday-approximation family
+is what five private copies of one idea look like. **But wiring every job at once turns a
+precondition build into a platform migration**, with a blast radius across jobs this brief
+has not measured.
+
+**So: the schema may serve everything; this build proves it on one job.** Other jobs adopt
+it when their own work opens them, and **the brief states that they have NOT been
+migrated** rather than leaving a half-populated table to imply coverage that does not
+exist — an empty row for a job that never wrote is indistinguishable from a job that
+never ran.
 
 ### T3 — Register in `signals_freshness` + liveness sentinel + DEAFNESS TEST
 
@@ -140,6 +180,41 @@ does **not** need all ten call sites migrated in the grader build — that is a 
 refactor with its own blast radius. **What this task owes is the single source and a
 declaration of which sites it supersedes**, so the eleventh copy is never written.
 
+### T5b — CLASSIFICATION BACKFILL (R-IV.287(1))
+
+**T5 classifies at ingest. Existing rows carry no class**, so the 72 permanently-ungradeable
+index rows keep occupying the head of every pass until they are labelled. **T5 without T5b
+fixes the future and leaves the defect running.**
+
+**THE SEAL INVARIANT, ASSERTED BEFORE AND AFTER EVERY PHASE:**
+
+```
+count(id <= 377783 AND fired_at >= '2026-08-17 00:00:00Z') == 843
+```
+
+**Any deviation HALTS the phase and reverts it.** This is tripwire T1 of the forward-window
+registration (*Seal breach | I1 != 843 | HALT, diagnose, no criterion evaluated*) — **not a
+new check invented for this task, the existing one, honoured by a task that writes to the
+sealed population's table.** A backfill is exactly the kind of operation that would breach
+it silently.
+
+**Phasing — A, B, C, each with its row delta stated BEFORE it runs:**
+
+| phase | what it does | row delta expected | gate to proceed |
+|---|---|---|---|
+| **A — shadow** | write the class to a NEW column; **no consumer reads it** | every target row classified; **0 rows change any existing column** | seal == 843; the count of classified rows equals the count of targeted rows |
+| **B — verify** | compare the shadow class against the known population | **the 72 index rows are identified as such**, and the 15 cash-settled rows inside the seal are among them | seal == 843; **a stated, non-zero expected count that is MET, not merely non-empty** |
+| **C — cut over** | the grader's ordering and filter read the class | **0 further writes**; only read-path behaviour changes | seal == 843 after |
+
+**Phase B's gate is the one that matters, and it is written to be falsifiable.** *"Some
+rows were classified"* passes trivially and proves nothing — the vacuous-count family.
+**The expected count is declared before the phase runs**, per §1.1, and a mismatch in
+either direction is a HALT rather than a note.
+
+**Nothing in A or B changes what the grader reads.** The class is inert until C, so a
+wrong classification is recoverable by correcting a column — **not by re-grading, which
+T7's resolution forbids.**
+
 ### T6 — Bounded `lookback_days`
 
 Today `lookback_days = (today - earliest).days + 12` anchored on the oldest ungraded row, which the 72 index rows pin
@@ -148,6 +223,21 @@ bound**. 74 days x 337 tickers on 09-02.
 
 **T5 removes the anchor; T6 puts a ceiling on it anyway.** Both, because a bound that
 depends on another fix staying correct is not a bound.
+
+**THE BOUND — >= 20 TRADING DAYS PLUS HOLIDAY SLACK (R-IV.287(5)).**
+
+The longest horizon this brief introduces is **20d** (T9), so the window must cover 20
+*trading* days at minimum — **a bound below the longest horizon silently truncates the
+horizon it was meant to serve**, and would do so by returning fewer bars rather than by
+failing.
+
+**Plus holiday slack, and the slack comes from T7's calendar, never from a multiplier.**
+A calendar-days figure computed as `20 x 1.6` is the weekday approximation wearing a
+different constant — the same family this brief exists to retire. **T7 supplies the trading
+calendar; T6 asks it how many calendar days hold 20 trading days, plus margin.**
+
+**Order: T7 before T6's final value.** T6 can ship a conservative constant first, but its
+*correct* value is a question only the calendar can answer.
 
 ### T7 — ONE market-calendar utility
 
@@ -159,6 +249,25 @@ silently treats an unknown year as all-weekdays.
 **Sequencing note:** T7 changes which tickers can alarm on a holiday, so it interacts
 with `DEF-STRIKE-WATERMARK-NEVER-ALIVE`'s n-gate. Fix the calendar before tuning that gate, or the holiday
 defect's blast radius moves underneath the fix.
+
+**RESOLUTION, ON THE FACE (R-IV.287(2)): CALENDAR-CORRECT HORIZONS APPLY TO NEW GRADES
+ONLY. NO RE-GRADING, EVER.**
+
+Rows already graded under the old holiday-blind arithmetic **keep their values**. The
+calendar changes what is computed from the cutover forward and **touches nothing behind
+it.**
+
+**This is not a convenience and it is not a deferral — re-grading would be a
+registration breach.** Graded outcomes are the population the forward window and the
+sealed holdout are defined over. **Silently recomputing them changes the evidence after
+the predictions were registered**, which is the one thing a pre-registration exists to
+prevent. A better number obtained that way is worth less than the worse number it
+replaced.
+
+**Consequence to state rather than hide: the series is not internally homogeneous.** Grades
+before the cutover used a different day-count than grades after it. **Anyone pooling across
+the boundary is pooling two definitions**, and the brief says so here so that a later
+analyst finds the seam documented instead of discovering it as an anomaly.
 
 ### T8 — Per-row OBSERVATIONAL strata stamps
 
@@ -270,7 +379,9 @@ predicate in this system that must not move under any circumstance.
   never provoked does not satisfy this.**
 - D3 — a scheduled pass runs with **no deploy in the window**, proving the schedule
   works rather than the restart. **This is the acceptance test for the whole brief**
-  and cannot be satisfied on a day anything was deployed.
+  and cannot be satisfied on a day anything was deployed. **The window is RULED by
+  R-IV.255(b) — cited, not re-opened.** (That ruling's text is not on this lane's record,
+  so this brief carries the citation and does not restate its terms.)
 - D4 — durable `last_run` shows a run for a day with no deploy.
 - D5 — the 72 index rows no longer appear in a pass's first 72 slots.
 - D6 — `lookback_days` bounded; the measured window stops growing.
@@ -280,6 +391,41 @@ predicate in this system that must not move under any circumstance.
   present-but-null column satisfies neither and fails this.
 - D9 — 10d/20d horizons each carry a resolution rule and a distinct
   not-yet-resolvable state, demonstrated on a row too young to resolve.
+
+## AEGIS HYGIENE (R-IV.287(7)) — binding on every task above
+
+**1 — The deafness test is TEST-LABELLED, AUDIT-LOGGED, and CLEARS ITS LATCH.**
+D2 requires the sentinel be *made to fire*. That means deliberately writing an alarm
+condition into a live system, so: the fired artifact carries an explicit **TEST** label on
+its face, the act is **audit-logged** (who, when, what was induced, what was observed), and
+**the latch is cleared afterwards and the clearing is verified** — not assumed.
+**An uncleared test latch is a live alarm that everyone has been told to ignore**, which is
+strictly worse than never testing.
+
+**2 — The metering script is KEY-SAFE and RETIRED AFTER ONE RUN.**
+The out-of-band request for `DEF-UW-OHLC-DEAD`'s metering question (R-IV.279(d)) reads a
+credential. It **never prints, logs, or echoes it**; it is **deleted after the single run**,
+and the run's *result* — not the script — is what gets filed. **A one-off script that
+survives its one use becomes a permanent credential-handling surface nobody owns.**
+
+**3 — The auth header is never logged on any error path. STATED WITH ITS GREP.**
+
+```
+grep -rnE "logger\.(error|warning|exception|info).*(headers|Authorization|Bearer|UW_API_KEY)" backend/ --include=*.py
+  -> no matches   (run 2026-09-05, at `5bb844d`)
+```
+
+**The check is reachable, which is the part worth asserting.** `backend/integrations/uw_api.py` alone
+contains **14** logging calls for the pattern to match against, so an empty result is
+evidence rather than an artefact of there being nothing to find — **an empty grep over an
+empty corpus proves nothing**, and this corpus is not empty. The header is constructed at
+`uw_api.py:175` and must stay out of every log call added by this build; **re-run the
+grep as a post-condition.**
+
+**4 — Every migration carries a `-- DOWN` section.**
+Including T5b's column and T2's `job_runs` table. **A migration without a down
+path is a one-way door**, and this build adds a column to the table the sealed holdout
+lives in.
 
 ## Gates / what NOT to do
 
@@ -292,11 +438,10 @@ predicate in this system that must not move under any circumstance.
 
 ## Open question for the review
 
-**D3 requires a day with no deploy.** This repo deploys often, and the board's cadence
-this week was multiple deploys daily. Either the acceptance window is deliberately
-quiet, or D3 cannot be satisfied — and an acceptance test that cannot be run is the
-null-verifier this brief exists to remove. **Spine to rule on how that window is
-reserved.**
+**~~D3 requires a day with no deploy.~~ CLOSED — ruled by R-IV.255(b) (R-IV.287(6)).**
+It is no longer an open question and is not re-argued here. The concern that raised it
+stands as the reason the ruling was needed: **an acceptance test that cannot be run is the
+null-verifier this brief exists to remove.**
 
 **Second question, added 2026-09-05 (R-IV.274(c) scope).** **Tide sign cannot be
 stamped when the clock starts** — the sink lands one build later, and the poller is
