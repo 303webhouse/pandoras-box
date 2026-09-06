@@ -80,6 +80,8 @@ dependency deep and nobody is counting it.
 returning nothing. **Stated as a question. Metering is a property of UW's side and is not
 observable from this codebase.**
 
+**ANSWERED as a METHOD by R-IV.279(d), below** — not from code, from the wire. The question stands; what changed is that it is now measurable, and the measurement is scheduled into the AEGIS sizing pass.
+
 ## The yfinance tension, recorded on this face per the ruling
 
 **Declared fallback. De-facto primary. On two surfaces, in two different ways:**
@@ -112,6 +114,37 @@ tickers succeeding. The breadth symbols are gone; the equities are not.
    writes. The three are distinguishable by response code and by whether other UW endpoints
    still answer (they do: `/info`, earnings and flow all returned on the same boot, so a
    blanket auth failure is already ruled out).
+
+## SCOPE CONFIRMED — R-IV.279(d)
+
+1. **`indicators_source` is derived from which server actually answered, PER CALL.** Not per module,
+   not per boot, not a default with an override — the value is produced by the code path
+   that returned the bars. **A per-boot value would be right until the first fallback and
+   silently wrong after it**, which is the defect restated one level up.
+2. **Fallback events are counted and alarmed.** Today's rate is 100%, so the first
+   measurement is the alarm.
+
+### The metering question, answered EMPIRICALLY — and the wire is currently discarded
+
+Spine's method: **read UW's rate-limit headers before and after one cycle** during the
+AEGIS sizing pass. *Unobservable from code, observable from the wire.*
+
+**One thing the build must know first: this client does not read those headers.**
+`_uw_request` (`backend/integrations/uw_api.py:147`) carries a 120 req/min **token bucket** and handles a **429** by returning the
+`UWUnavailable(RATE_LIMITED)` sentinel — but **no response header is captured anywhere in the module.** Grep for
+`x-ratelimit` returns nothing.
+
+**So "observable from the wire" is exactly right, and it is not observable from this client
+as written.** The measurement needs either a temporary header capture in `_uw_request` (`backend/integrations/uw_api.py:147`), or an
+out-of-band request that bypasses the client entirely. **The second is preferable for a
+one-off**: it changes no production code path to answer a question about production, and
+it cannot itself perturb the counter it is measuring.
+
+**Why the answer matters beyond tidiness.** If a dead `/ohlc/1d` still meters, the hub is
+spending quota at roughly 40 requests per cycle for zero bars, and the budget watchdog's
+`NEXT_TIER_SHED_CANDIDATES` list is queued to shed callers that are already returning nothing — shedding
+would then reduce the metered spend while changing no data at all, which is the one case
+where a shed is pure profit and nobody has noticed it is available.
 
 ## Reconciliation — one stub, two names
 
