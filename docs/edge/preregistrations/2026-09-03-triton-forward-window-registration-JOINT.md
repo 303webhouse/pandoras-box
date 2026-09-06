@@ -70,7 +70,43 @@
 
 **Collector design law** — binds every instrument this window deploys, by anchor (verification-laws, ratified R-IV.167): §1 `#null-trigger` incl. §1.1 · §2 `#scoped-count` · §3 `#narrow-caution`; plus the five-defect requirements as ratified at re-scope §5. Every predicate this registration declares carries its expected satisfaction rate on its face, per §1.1 — audited for compliance at §8.7, one gap found and closed there.
 
-**Chain:** base draft `5f23564b` → EDGE §8 `0e59be37` (superseded) → TRITON counter-again (I2, over-broad postcondition) → EDGE correction at source, new gate `b1c9791b` → **this joint manifest** → spine ratification = **T0** → PIVOT pass with the principal (EXTEND + registration + spend, one sitting; closing on §7(d)'s sentence as written). → **R-IV.273** — EXTEND + test blessed at PIVOT pass; Amendment 1 pending; spend PAUSED. Disposition filed at `docs/edge/2026-09-05-pivot-pass-disposition.md`, verbatim region gate `0427de59`.
+**Chain:** base draft `5f23564b` → EDGE §8 `0e59be37` (superseded) → TRITON counter-again (I2, over-broad postcondition) → EDGE correction at source, new gate `b1c9791b` → **this joint manifest** → spine ratification = **T0** → PIVOT pass with the principal (EXTEND + registration + spend, one sitting; closing on §7(d)'s sentence as written). → **R-IV.273** — EXTEND + test blessed at PIVOT pass; Amendment 1 pending; spend PAUSED. Disposition filed at `docs/edge/2026-09-05-pivot-pass-disposition.md`, verbatim region gate `0427de59`. → **R-IV.275** — Amendment 1: observational strata.
+
+## AMENDMENT 1 · DECLARED OBSERVATIONAL STRATA
+
+**Spine-authored, R-IV.275(b). Filed by CC-BUILD 2026-09-05 under R-IV.273(b)'s
+precondition order: Amendment 1 filed → P1/P2 verify → clock. THE AMENDMENT NEVER LANDS
+AFTER THE CLOCK, and this filing is what makes the clock startable.**
+
+**Wording is as issued.** The relay's hard-wrap line breaks were rejoined — including two
+that split identifiers mid-token — and no word was changed, added, or removed. Gate over
+the amendment body: `73bfd3a0`, `1511` bytes UTF-8, LF.
+
+> DECLARED OBSERVATIONAL STRATA (hypothesis generation only; criteria and verdict semantics unchanged). Recorded per row at ingest from the first window session unless marked deferred:
+> 
+> **S1 day-of-week** — from `fired_at` (ET); cells are unequal by construction (Thu 1,572 vs Fri 1,035 in the pinned population) and are reported, never rebalanced.
+> 
+> **S2 DXY trend sign** — PROXY DECLARED: UUP daily closes (`stable_daily_bars`); `sign(close[t−1] − close[t−6])`; stamped at fire.
+> 
+> **S3 instrument class** — by PRODUCT TYPE: cash-settled index / ETF / single name. NOT by `INDEX_TICKERS`, which is a $2M premium tier holding six single names.
+> 
+> **S4 sector** — one-time ticker→sector map from UW `/info`, cached; a ticker with no map is UNMAPPED, never guessed.
+> 
+> **S5 footprint-present** — a footprint row for the same ticker on the same trading date (the census join key); strategy-scoped, never source-scoped; the under-count figure is dated whenever cited.
+> 
+> **S6 tide sign** — DEFERRED COMPUTATION: net premium sign of the 5-minute market-tide bar containing `fired_at`, computed from `market_tide_history` once the sink ships and backfills. Face states NOT STAMPED AT CLOCK START. Definition fixed here; values arrive later.
+> 
+> **H2 10d/20d horizons** — stored in NEW columns with their OWN completion marker (`graded_20d_at`). `graded_at` keeps its meaning (5d terminal) forever: the seal count, the residue, the tripwire identity, and the RELEASE predicate all key on it and none may move.
+
+**Face label, carried from the ruling: hypothesis generation, not verdict.** Criteria and
+verdict semantics are unchanged by this amendment; nothing here can move a pass/fail.
+
+**S6 is the one stratum that is NOT STAMPED at clock start**, and it says so on this face
+rather than appearing as a column full of nulls. Its *definition* is fixed here and its
+*values* arrive with the sinks build — the order that matters, because a definition
+authored after seeing the data is not a registration. **A later backfill does not undeclare
+it.**
+
 
 ---
 
