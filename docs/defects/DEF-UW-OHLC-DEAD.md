@@ -45,6 +45,17 @@ yfinance at `backend/integrations/uw_api.py:663`.
   SPY QQQ IWM TLT XLE SMH XLF HYG GLD, same line, same fallback
 ```
 
+**The 40 are all genuine UW attempts — checked, not assumed.** `get_bars` **skips the UW
+round-trip entirely** for `^`-prefixed tickers and for sub-daily timespans
+(`if timespan == "day" and not ticker.startswith("^")`), so those never reach the fallback log line at all. **All 15 measured tickers
+are plain daily equities**, so every one of the 40 lines is a UW call that returned nothing.
+
+**And the two paths are the same fetch, which tightens the argument.** `_get_bars_via_uw` routes
+Path B's UW attempt **through `get_ohlc` itself** (`uw_api.py:521-537`) — so Path A and Path B are not
+two endpoints, they are **one fetch with and without a safety net.** A Path A failure and a
+Path B fallback at the same moment are **the same underlying event**, which is why the SMH
+liveness datum and the fallback burst bound the same onset.
+
 **Nothing alarmed, and that is the defect's shape rather than an oversight.** The fallback
 succeeds, so every consumer gets bars, so no error surfaces anywhere. **A fallback that
 works silently makes the primary's death invisible** — the same structure as the grader
@@ -143,14 +154,40 @@ Path A half is the P1 — because a hardcoded literal on a path with no alternat
 never be right by accident, only by coincidence of the original author being correct on
 the day.
 
-## ONSET — bounded by CC-QUERY, and it is NOT the grader's cause
+## FIX SHAPE FOR PATH A — RULED, R-IV.292(b)
+
+**The unavailable shell asserts no provenance.** `indicators_source` is `null` (or
+`"none"`) whenever the payload has no bars — **a payload that computed nothing names no
+computer.** The `ok` case carries `"uw"`, exactly the way Path B carries its provider
+tag.
+
+**Same tag vocabulary on both paths.** Path B already emits `PROVIDER_UW` / `PROVIDER_YFINANCE` via
+`_tag_provider`; Path A adopts those values rather than inventing `uw_computed` as a third
+spelling of the same idea. **Two vocabularies for one fact is how the next reader learns
+that provenance is decorative.**
+
+## ONSET — NARROWED, and it is NOT the grader's cause
+
+**Both bounds, with their sources, because they are not the same KIND of evidence:**
+
+| bound | value | source | how it was obtained |
+|---|---|---|---|
+| **LOWER** (alive) | **2026-09-05 ≈ 17:55Z** | spine, R-IV.292(c) | `hub_get_chart_indicators(SMH)` — **Path A** — returned `status: ok` with **253 bars**. **DERIVED**, not logged: computed from `staleness_seconds 78,882` against the 09-04 bar. Spine flags the hub response timestamp as authoritative **if logged** |
+| **UPPER** (dead) | **2026-09-06 00:41Z** | this lane | fresh boot after deploy `2655b8cb`, 9 tickers, all falling back. **Recorded wall-clock** |
+| upper, tighter but weaker | **≤ 2026-09-06 00:29Z** | this lane | the 500-line buffer read preceded this session's first `date -u`. **Inferred from session ordering, NOT a recorded timestamp** |
+
+**So the onset window is roughly seven hours on 2026-09-05**, not the three days the first
+filing allowed.
+
+**The earlier bound is superseded, not deleted:** R-IV.288(b) put onset *after 2026-09-02
+20:41:55Z* from the grader's last write. That remains true and is simply looser — **the
+SMH datum is a later liveness proof on the same path.**
+
+**Grader-write liveness, retained as the coarse instrument:**
 
 ```
-grader writes date UW liveness (Path A, no fallback):
-  08-17  962 rows | 08-26  9 | 08-27  1,862 | 09-02  573   -> UW ALIVE
-  09-05  measured DEAD (this lane, twice, incl. a fresh boot)
-
-ONSET: after 2026-09-02 20:41:55Z, at or before 2026-09-05.
+Path A writes date UW liveness (no fallback, so a write proves a fetch):
+  08-17  962 rows | 08-26  9 | 08-27  1,862 | 09-02  573
 ```
 
 **UW served on 08-17, 08-27 and 09-02 — all AFTER the grader died on 07-31.** So **one
