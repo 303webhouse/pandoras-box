@@ -3,6 +3,25 @@
 **Registered** 2026-09-05 by R-IV.275(d). **Found** by CC-BUILD 2026-09-05 during the
 position-0 outage diagnosis — **it was not what either alarm was about.** **Status:** OPEN.
 
+> ## CORRECTION — 2026-09-06, on CC-QUERY's finding
+>
+> **Two claims in the original filing were WRONG and are corrected below in place.**
+>
+> **1. The blast-radius table was wrong.** It listed six `get_ohlc` callers as inheriting the
+> yfinance fallback. **They do not.** `get_ohlc` (`uw_api.py:223-279`) contains **zero** yfinance
+> references; the fallback lives in `get_bars` (`uw_api.py:623-678`), a **different function**, which
+> contains nine. A `get_ohlc` caller gets `None`, not a silent yfinance bar. **The corrected
+> two-way split is below.**
+>
+> **2. The label mechanism was wrong.** The original said the field claims `uw_computed` *"while
+> yfinance computed it."* For `backend/services/read_only/chart_indicators.py` that cannot happen — it calls `get_ohlc`, gets
+> `None`, and returns the unavailable shell. **The real mechanism is worse, and is
+> corrected below.**
+>
+> **The severities do not move.** The outage is still P2, the label still P1. **What
+> changes is the mechanism, and a defect whose mechanism is wrong is a defect that will be
+> fixed in the wrong place.**
+
 **Two severities on purpose.** The outage is P2: the fallback works, so no consumer is
 returning wrong bars today. **The label is P1**, because the hub tells its readers the bars
 came from a server that served none of them.
@@ -40,10 +59,19 @@ running on deploys instead of on schedule, and as the six compute-then-discard f
 "indicators_source": "uw_computed", "as_of": as_of,
 ```
 
-It is not derived from which server answered. `chart_indicators.py:117` calls `get_ohlc`,
-which falls back to yfinance internally and returns bars either way — so **the field says
-`uw_computed` while yfinance computed it, and has said so for every fetch in both
-measurements above.** `backend/hub_mcp/tools/chart_indicators.py:23` repeats the claim in
+It is not derived from anything. **CORRECTED MECHANISM:** `backend/services/read_only/chart_indicators.py`:117 calls `get_ohlc`, which
+has **no fallback** — so when UW is dead it returns `None` and the module returns its
+*unavailable shell* at `backend/services/read_only/chart_indicators.py`:37. **That shell hardcodes the same string:**
+
+```
+"ticker": tkr, "timeframe": timeframe, "spot": None, "bar_count": 0,
+"indicators_source": "uw_computed", "as_of": None,
+```
+
+**So the field asserts a UW computation on a payload with `bar_count: 0`.** Not *"yfinance
+computed it"* — **nothing computed it, and the field still names UW.** The function is
+even docstringed *"Honest unavailable shell — never fake-fresh"*, and it is honest about
+staleness while asserting a false provenance in the same dictionary. `backend/hub_mcp/tools/chart_indicators.py:23` repeats the claim in
 the tool description the committee reads.
 
 **A hardcoded provenance string is a NULL PROVENANCE.** It cannot report anything else, so
@@ -53,7 +81,11 @@ a check. It was true when written and became false without changing.
 **P1 because it is an assertion about evidence.** A reader deciding how much to trust a
 number asks where it came from; this field answers with a constant.
 
-## Blast radius — every caller inherits the fallback
+## Blast radius — TWO PATHS, and only one of them falls back
+
+**This is the corrected table. The original conflated the two functions.**
+
+**Path A — `get_ohlc`: NO FALLBACK. These callers get `None` when UW is dead.**
 
 | caller tag | site |
 |---|---|
@@ -61,9 +93,23 @@ number asks where it came from; this field answers with a constant.
 | `ohlc_bars` | `backend/integrations/uw_api.py:537` |
 | `ohlc_quote` | `backend/integrations/uw_api.py:354` |
 | `ohlc_sector` | `backend/jobs/sector_constituent_refresh.py:190` |
-| `triton_flow_shadow` | `backend/jobs/triton_shadow_common.py:56` |
+| `triton_flow_shadow` | `backend/jobs/triton_shadow_common.py:56` — **the grader** |
 | `chart_indicators` | `backend/services/read_only/chart_indicators.py:117` |
-| (via `get_bars:623`) | `backend/jobs/qqq_sma_watch.py:176` — **the R-IV.193 instrument** |
+
+**Path B — `get_bars`: HAS the yfinance fallback.** `qqq_sma_watch.py:176` (the R-IV.193
+instrument), `correlation_monitor`, `trip_wire_monitor`, `market_data`,
+`sectors`, `composite`, `universe_cache`, `a3_fwd_return_resolver`,
+`wrr_buy_model`.
+
+**The 40 measured fallbacks are Path B traffic only.** *"Every daily-bar fetch falls
+through to yfinance"* was too broad: **Path A fetches do not fall through, they fail.**
+
+**The R-IV.193 SMA watch is on Path B**, so the original conclusion about it still holds —
+correct today because the fallback holds, not because the primary does. **That was traced
+and remains traced.**
+
+**The grader is on Path A**, which is CC-QUERY's proof (a): it cannot grade without live UW
+bars, so **every row it wrote dates UW liveness.**
 
 **The R-IV.193 QQQ 200-SMA watch is on this path**, traced rather than assumed:
 `_fetch_closes` → `uw_api.get_bars` (`:623`) → the fallback log at `:663`. **It is correct
@@ -82,6 +128,42 @@ observable from this codebase.**
 
 **ANSWERED as a METHOD by R-IV.279(d), below** — not from code, from the wire. The question stands; what changed is that it is now measurable, and the measurement is scheduled into the AEGIS sizing pass.
 
+## THE INVERSION — provenance exists where it was least needed
+
+`get_bars` **already tags its provider.** `_tag_provider(bars, PROVIDER_UW)`, a `provider` field valued
+`"uw"` or `"yfinance"`, *"per DEF-BARS-NO-PROVENANCE"* (`uw_api.py:638`), with
+cached series carrying the provider they were fetched under.
+
+**So the provenance work was done on the path that HAS a real choice of provider, and was
+not done on the path that has none — which is the path that asserts one anyway.**
+
+**That inverts the phantom's reconciliation.** `DEF-BARS-NO-PROVENANCE` was stubbed as *"closed in code at
+`773e7a8`, artifact never filed."* **It is closed for Path B and open for Path A**, and the
+Path A half is the P1 — because a hardcoded literal on a path with no alternative can
+never be right by accident, only by coincidence of the original author being correct on
+the day.
+
+## ONSET — bounded by CC-QUERY, and it is NOT the grader's cause
+
+```
+grader writes date UW liveness (Path A, no fallback):
+  08-17  962 rows | 08-26  9 | 08-27  1,862 | 09-02  573   -> UW ALIVE
+  09-05  measured DEAD (this lane, twice, incl. a fresh boot)
+
+ONSET: after 2026-09-02 20:41:55Z, at or before 2026-09-05.
+```
+
+**UW served on 08-17, 08-27 and 09-02 — all AFTER the grader died on 07-31.** So **one
+mechanism does not explain both**, and this defect is a separate, later failure.
+**Merging them would leave the grader's loop defect unfixed behind a repaired vendor
+path** — a fix that makes the symptom disappear while the cause remains.
+
+**Burn data cannot date it, and that is this defect's own shape.** `ohlc_bars` held
+1,689–2,018 calls/day through 09-04. **Calls keep being made and consumers keep getting
+bars, so a silent fallback leaves no volume signature.** The only instrument that dated the
+onset was **a consumer with no fallback** — which is the argument for Path A's
+existence, not against it.
+
 ## The yfinance tension, recorded on this face per the ruling
 
 **Declared fallback. De-facto primary. On two surfaces, in two different ways:**
@@ -89,8 +171,9 @@ observable from this codebase.**
 - `backend/jobs/stable_jobs.py`'s module docstring opens **"yfinance-only (zero UW calls)"**
   — yfinance as *declared primary*. (That same sentence is wrong a second way: the module
   hosts the tide warmer, which is a UW call every five RTH minutes.)
-- The daily-bar path is **nominally UW-primary with yfinance fallback**, and **100% of
-  measured fetches are served by the fallback** — yfinance as *de-facto primary*.
+- **Path B** is nominally UW-primary with yfinance fallback, and **100% of measured Path B
+  fetches are served by the fallback** — yfinance as *de-facto primary*. **Scoped to Path
+  B**: Path A has no fallback and simply fails, which is why it could date the onset.
 
 **A dependency that is load-bearing everywhere and documented as a fallback is a single
 point of failure nobody is counting.** It is why a yfinance outage was a plausible

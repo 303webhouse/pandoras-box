@@ -38,9 +38,18 @@ into re-validating output — that question is answered.
 ### T1 — Timeout on the grader call
 
 `asyncio.wait_for` around the grader call. Today `await run_triton_shadow_grader()` carries none, so a single hung UW bar fetch parks the
-loop until the process dies. **This is the fenced hypothesis in A4** — the diagnosis
-can show the loop *would* park and cannot show that it did, because that needs Railway
-process logs this lane cannot read. **The timeout is correct whether or not the
+loop until the process dies. **The fenced hypothesis in A4 is now FALSIFIED as the cause of the 07-31 outage
+(CC-QUERY, 2026-09-06).** The grader reaches bars through `get_ohlc`, which has **no
+fallback**, so every row it wrote dates UW liveness: **962 rows on 08-17, 1,862 on 08-27,
+573 on 09-02 — all after the grader died on 07-31.** **UW was alive throughout, so a dead
+vendor cannot be the grader's cause**, and `DEF-UW-OHLC-DEAD` is a separate, later failure
+(onset after 2026-09-02 20:41:55Z).
+
+**T1 still ships, and its justification is now the plain one rather than the hypothesis:**
+an unbounded `await run_triton_shadow_grader()` is wrong on its own terms. **Do NOT merge this with
+`DEF-UW-OHLC-DEAD`** — repairing the vendor path would make the symptom vanish while the loop
+defect (in-memory `last_run`, no timeout) remains, which is the shape this brief exists to
+prevent. **The timeout is correct whether or not the
 hypothesis holds**, which is why it goes first: it costs nothing if the cause was a
 dead process instead.
 
