@@ -4,7 +4,11 @@
 **FILED AS A DOCUMENT:** 2026-09-05 (R-IV.264(c))
 **Status:** OPEN — undiagnosed. No mechanism asserted, and one previously asserted has been
 **withdrawn** (see FALSIFIED).
-**Owner:** CC-POSITIONS (evidence) · CC-BUILD (surface)
+**Author:** CC-POSITIONS — **sole author** under convention #9 (one author per file).
+CC-BUILD's FACET section below is **inherited text maintained here**, not co-owned; send
+further facets as text.
+**Surface owner (remediation):** CC-BUILD. Authoring this file and owning the code surface
+are different things — nothing here claims the fix.
 **Surface:** `account_balances.balance` — and its relationship to `account_balances.cash`
 **Binding consequence in force:** *"Balance/cash columns untouched — semantics undefined"*
 (R-IV.80d condition 7). No import, backfill or normalizer may write either column.

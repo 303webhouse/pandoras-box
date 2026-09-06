@@ -181,6 +181,28 @@ certain in the one case where recovery matters.
 seed is rewritten to the two canonical accounts.** Spine's words: *a constraint that fails
 only on recovery day is the worst possible latency.*
 
+**AND THE CONSTRAINT ADMITS A THIRD VALUE (R-IV.286(b)): `OUT_OF_SCOPE`.**
+
+```
+account IN ('ROBINHOOD', 'FIDELITY_ROTH', 'OUT_OF_SCOPE')
+```
+
+**Two canonical accounts, one explicit not-an-account.** `OUT_OF_SCOPE` is how the parked
+401A/403B/IB money is carried under the retention law — preserved, never summed, never
+charted with the trading account.
+
+**It is not a hypothetical value: `cash_flows` id 15 already carries it** (spine's fact of
+record). **So a two-value constraint would fail on data that exists today**, which is the
+same failure mode as the seed trap one paragraph up — a constraint written from the
+vocabulary someone intends rather than the vocabulary the table holds. **Both instances
+have the same cure: enumerate against the data, not against the plan.**
+
+**The third value is what makes the retirement expressible.** Without it the only ways to
+retire a row are deletion (forbidden) or a nullable side-flag that every aggregate must
+remember to check — **and an aggregate that must remember is the defect this build is
+closing.** A row whose account is `OUT_OF_SCOPE` cannot be summed into a tracked total by
+accident, because it does not name a tracked account at all.
+
 **Therefore: the constraint and the seed change land in the SAME COMMIT.** A constraint that
 contradicts the seed is not a half-done migration; it is a boot failure waiting for the
 worst possible day.

@@ -342,6 +342,21 @@ parameter of the endpoint, a `cut -c` truncation read as a truncated document, a
 instrument as a property of the subject** — here the instrument is the set of places
 searched.
 
+**A fourth sibling, offered under R-IV.286(a) and found while authoring against this very
+rule.** A guard was written to prove an edit had NOT moved a gated document body. It
+extracted that body as *"from the start marker to the following heading"* — and the edit
+had just inserted new prose immediately before that heading. **The guard hashed the body
+plus the insertion and reported the body had moved.** It had not.
+
+**The instrument's window was defined relative to a landmark the edit relocated.** A
+false positive, caught because it fired before the write rather than after — but the same
+construction returns a false NEGATIVE the moment an edit lands *inside* the window instead
+of beside it. **A verifier whose scope is defined relative to the thing it verifies is
+measuring an unknown region**, and it is only luck which direction the error runs.
+
+**The fix was to anchor the window to the structure being protected** — the blockquote's
+own line prefixes — rather than to whatever happened to follow it.
+
 **The operational form: when something cannot be found, name the paths searched before
 concluding anything.**
 
