@@ -49,6 +49,12 @@ Measured (k/burn artifact `4557c775…`): `darkpool_ticker` 12,320 calls, ~251/d
 
 **Call: PERSIST, with a hard pause date.** The spend's only value is the sink, and the sink's economics are favorable precisely because acquisition is already running and paid. Therefore: sink briefs release to BUILD's queue on ratification of this proposal (builds were correctly HELD until it, R-IV.152). **If no sink is live by forward-window T0, the dark-pool poller pauses by flag** — rollback-flag pattern, 48-hour watch; any breakage identifies the hidden runtime consumer the Q4 sweep has not yet found, which is itself diagnostic. Tide follows the same rule at lower stakes. Proposed queue order, ATHENA/spine governing: grader mechanism diagnosis → sinks → flow-leg upgrade.
 
+> **STATE OF RECORD** (CC-BUILD annotation, R-IV.274(b)): **"condition fired 09-03 · ruled 09-05 · PAUSED by principal · resume on sink ship."**
+>
+> The conditional above — *"if no sink is live by forward-window T0, the dark-pool poller pauses by flag"* — **is no longer a conditional.** T0 was reached at spine ratification 09-03 with no sink live, so the condition fired; R-IV.273(c) ruled it 09-05 and the principal gave the word. Both pollers were paused by flag the same day — tide as well as dark pool, the clause's "tide follows the same rule" — and the executing artifact is `docs/edge/2026-09-05-pivot-pass-disposition.md`.
+>
+> **Watch** runs 48h OR through the first full RTH session, whichever is later: **Tuesday 09-08 close**, because Monday 09-07 is Labor Day and a consumer that only runs in market hours cannot reveal itself on a holiday weekend. **Resume is not date-bound; it is event-bound to the sinks build shipping** at position 2, with backfill from UW history.
+
 ## §5 · COLLECTOR DESIGN LAW
 
 Every collector and consumer this track registers forward carries the five defects as requirements:

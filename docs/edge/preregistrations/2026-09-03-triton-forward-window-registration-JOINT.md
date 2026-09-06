@@ -70,7 +70,7 @@
 
 **Collector design law** — binds every instrument this window deploys, by anchor (verification-laws, ratified R-IV.167): §1 `#null-trigger` incl. §1.1 · §2 `#scoped-count` · §3 `#narrow-caution`; plus the five-defect requirements as ratified at re-scope §5. Every predicate this registration declares carries its expected satisfaction rate on its face, per §1.1 — audited for compliance at §8.7, one gap found and closed there.
 
-**Chain:** base draft `5f23564b` → EDGE §8 `0e59be37` (superseded) → TRITON counter-again (I2, over-broad postcondition) → EDGE correction at source, new gate `b1c9791b` → **this joint manifest** → spine ratification = **T0** → PIVOT pass with the principal (EXTEND + registration + spend, one sitting; closing on §7(d)'s sentence as written).
+**Chain:** base draft `5f23564b` → EDGE §8 `0e59be37` (superseded) → TRITON counter-again (I2, over-broad postcondition) → EDGE correction at source, new gate `b1c9791b` → **this joint manifest** → spine ratification = **T0** → PIVOT pass with the principal (EXTEND + registration + spend, one sitting; closing on §7(d)'s sentence as written). → **R-IV.273** — EXTEND + test blessed at PIVOT pass; Amendment 1 pending; spend PAUSED. Disposition filed at `docs/edge/2026-09-05-pivot-pass-disposition.md`, verbatim region gate `0427de59`.
 
 ---
 
