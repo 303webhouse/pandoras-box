@@ -218,3 +218,37 @@ what its citations say, and mark plainly whether anything is actually open.
 `DEF-SOXS-PRICE-DISCONTINUITY` was filed *between* the sweep's first and last pass and moved from phantom to
 filed mid-run. **A sweep therefore states its vintage and its HEAD**, and is true as of
 that instant and not after.
+
+
+## A LANE STAGES A SETTLED MANIFEST
+
+**R-IV.271(b).**
+
+A lane hands over **one table**: paths, gates **measured at stage time**, and **no edits
+to any listed file until the receiving lane confirms filing**. The receiver picks up from
+the manifest and from nothing else — not from a directory listing, not from what happens
+to be on a ferry path.
+
+**Supersession is announced, with the dead gates named.** CC-QUERY's form is the model:
+when revised stubs replaced earlier ones, the superseded values were stated as dead rather
+than left to be discovered as mismatches.
+
+**Worked example — 2026-09-05, why this rule exists.** A pickup of five artifacts
+returned **two gates that matched**:
+
+- Two gates named in the ruling matched **no file on any reachable path**; they had been
+  superseded before pickup, and the supersession was not announced.
+- Two files were present carrying **neither** stated gate.
+- One file changed **during the task** — 5,206 B on first read, 8,884 B minutes later.
+- One file in the source tree was **newer than the copy already filed**, so the filed
+  copy was stale on arrival.
+
+**None of that is anyone's error.** Each lane was doing correct work on its own artifacts.
+**The failure is concurrent editing of a set that is simultaneously being read** — the
+same shape as a sweep whose subject is written mid-run, which is why a sweep states its
+vintage and HEAD.
+
+**The receiving lane's obligation follows from this:** re-hash at apply time, never trust a
+gate measured earlier in the same session, and **file only what gates — reporting the rest
+by address rather than guessing which version was meant.** A gate that has moved is not a
+mismatch to be resolved by judgement; it is a question for the staging lane.
