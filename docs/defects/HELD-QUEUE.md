@@ -7,6 +7,29 @@ phantom; none is claimed to be diagnosed. Ordered by nothing — sequencing is s
 
 ---
 
+## READ FIRST — WHERE STAGED ARTIFACTS ACTUALLY LIVE
+
+**The ferry directory is `C:\temp\cc-query-handoff\`. It is outside both git trees.**
+
+Staged files arrive there under **UPPERCASE** names and are filed into the repo under
+**lowercase** ones — e.g. `2026-09-05-PHANTOM-REGISTRATION-SWEEP.md` became `docs/edge/results/2026-09-05-phantom-registration-sweep.md`. **Sixteen of the
+thirty-five files in that directory have already been filed this way.**
+
+**Why this is pinned.** On 2026-09-05 this lane reported a staged census as *"not on any
+reachable path"* **three times**, after sweeping `C:\th-build`, `C:\trading-hub` and
+Downloads by content hash. The file was present the whole time, at the ferry path, gate
+matching exactly. **The sweep was exhaustive over the wrong set.**
+
+**The lesson is not about this directory.** A negative result is a property of **where you
+looked**, never of the thing you were looking for — and reporting it as the latter sends
+another lane to re-stage an artifact that was already staged. **State the search scope with
+every negative finding**, so a reader can see the hole rather than infer its absence. This
+is the probe-artifact family (a `limit=` that is not a parameter, a `cut -c` truncation, a
+`grep -c` counting lines not characters) arriving as a search boundary rather than a tool
+flag.
+
+**When an artifact cannot be found: name the paths searched, before concluding anything.**
+
 ## READ FIRST — the split-adjustment remediation trap
 
 **Anyone touching split adjustments reads this before writing a line.** Pinned per
