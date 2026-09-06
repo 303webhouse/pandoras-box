@@ -13,6 +13,12 @@ in `docs/edge/results/QS-01-RESULTS.md` and `docs/session-handoff.md`, but no de
 
 That is **44 days dark at the time of this filing**, across every factor, not one.
 
+**The last factor written was `excess_cape`** (census §(b)). The composite itself lives at
+`backend/bias_engine/composite.py:134` and is described as *"DXY 5d trend + SMA20 context +
+VIX interaction"* — **it is computed, and it was never persisted per row**, which is a
+second finding sitting underneath the first: even a live `factor_history` would not have
+carried a per-row DXY stamp.
+
 ## Code side — this lane's contribution, and it narrows the cause
 
 **The table has exactly two writers, both reachable, both in `backend/api/bias.py`:**
