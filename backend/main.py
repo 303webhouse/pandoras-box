@@ -17,6 +17,12 @@ import sys
 
 # Import our modules (will create these next)
 from database.redis_client import get_redis_client
+
+# T1 (R-IV.287(3)): the grader call is bounded. DERIVED, not chosen -- the measured
+# pass is ~20s, the >=10x floor is 200s, and 300s is 15x for a slow bar-fetch day.
+# The multiple carries the uncertainty a single sample cannot: there is no p99 here.
+TRITON_GRADER_TIMEOUT_S = 300
+TRITON_GRADER_TIMEOUTS = {"count": 0, "last_session": None}
 from database.postgres_client import get_postgres_client
 from websocket.broadcaster import manager
 
@@ -917,20 +923,61 @@ async def lifespan(app: FastAPI):
     triton_shadow_task = asyncio.create_task(triton_shadow_poller_loop())
 
     # Triton Step-0 grader: daily post-close direction-adjusted forward returns.
+    #
+    # T1 (timeout) + T2 (durable last_run) of the grader-precondition build,
+    # R-IV.289. They ship together deliberately: durable state removes the
+    # accidental re-arm that deploys used to provide, so shipping T2 alone would
+    # make grading LESS frequent, not more.
     async def triton_grader_loop():
         import os, pytz
         from datetime import datetime as _dt, time as _t
-        if os.getenv("TRITON_SHADOW_ENABLED", "true").lower() == "false":
+        from jobs.job_runs import (JOB_TRITON_GRADER, STATUS_OK, STATUS_ERROR,
+                                   STATUS_TIMEOUT, start_run, finish_run,
+                                   has_completed)
+        # Railway returns '' for an unset reference, so `or` is the required idiom
+        # (CLAUDE.md); getenv(name, default) would hand back '' rather than the default.
+        if (os.getenv("TRITON_SHADOW_ENABLED") or "true").strip().lower() == "false":
             return
-        last_run = None
         await asyncio.sleep(180)
         while True:
             try:
                 et = _dt.now(pytz.timezone("America/New_York"))
-                if et.weekday() < 5 and et.time() >= _t(16, 15) and last_run != et.date():
-                    from jobs.triton_shadow_grader import run_triton_shadow_grader
-                    await run_triton_shadow_grader()
-                    last_run = et.date()
+                session = et.date()
+                if et.weekday() < 5 and et.time() >= _t(16, 15):
+                    # TRI-STATE. None means job_runs could not be read, and it is
+                    # NOT the same as False -- but for this job both lead to a run.
+                    done = await has_completed(JOB_TRITON_GRADER, session)
+                    if done is None:
+                        logger.warning(
+                            "triton grader: job_runs unreadable for %s -- RUNNING ANYWAY. "
+                            "The pass is idempotent (it only touches graded_at IS NULL), "
+                            "so a duplicate converges; a SKIPPED pass is the defect this "
+                            "build exists to remove.", session)
+                    if not done:
+                        run_id = await start_run(JOB_TRITON_GRADER, session)
+                        from jobs.triton_shadow_grader import run_triton_shadow_grader
+                        try:
+                            result = await asyncio.wait_for(
+                                run_triton_shadow_grader(),
+                                timeout=TRITON_GRADER_TIMEOUT_S,
+                            )
+                            rows = (result or {}).get("graded") if isinstance(result, dict) else None
+                            await finish_run(run_id, STATUS_OK, rows_touched=rows)
+                        except asyncio.TimeoutError:
+                            # T1's per-fire metric. A timeout with no counter is
+                            # indistinguishable from a timeout that never fires.
+                            TRITON_GRADER_TIMEOUTS["count"] += 1
+                            TRITON_GRADER_TIMEOUTS["last_session"] = str(session)
+                            logger.error(
+                                "triton grader TIMEOUT after %ss (fire #%d, session %s) -- "
+                                "logging and leaving the day UNMARKED so the next cycle retries",
+                                TRITON_GRADER_TIMEOUT_S,
+                                TRITON_GRADER_TIMEOUTS["count"], session)
+                            await finish_run(run_id, STATUS_TIMEOUT,
+                                             skip_reason="timeout after %ss" % TRITON_GRADER_TIMEOUT_S)
+                        except Exception as e:
+                            await finish_run(run_id, STATUS_ERROR, error=str(e))
+                            raise
             except Exception as e:
                 logger.warning("triton_shadow grader loop error: %s", e)
             await asyncio.sleep(1800)  # 30-min check
@@ -1390,6 +1437,31 @@ async def health_check():
     except Exception as _ppe:
         paused_pollers_block = {"state": "ERROR", "reason": str(_ppe)}
 
+    # T2 evidence surface (R-IV.289 D4): the grader's DURABLE last run, read from
+    # job_runs rather than from process memory. This is what makes "did it run?"
+    # a SELECT. It does NOT drive the overall verdict -- the sentinel that does is
+    # T3, and T3 is not built yet.
+    grader_block: dict = {}
+    try:
+        from jobs.job_runs import JOB_TRITON_GRADER, last_run as _job_last_run
+        _lr = await _job_last_run(JOB_TRITON_GRADER)
+        grader_block = {
+            "job": JOB_TRITON_GRADER,
+            "last_run": None if _lr is None else {
+                "session_date": str(_lr.get("session_date")),
+                "started_at": str(_lr.get("started_at")),
+                "finished_at": str(_lr.get("finished_at")),
+                "status": _lr.get("status"),
+                "rows_touched": _lr.get("rows_touched"),
+                "skip_reason": _lr.get("skip_reason"),
+            },
+            "timeouts": dict(TRITON_GRADER_TIMEOUTS),
+            "timeout_seconds": TRITON_GRADER_TIMEOUT_S,
+            "note": "no row = never wired or never run; T3 sentinel not built yet",
+        }
+    except Exception as _gbe:
+        grader_block = {"state": "ERROR", "reason": str(_gbe)}
+
     return {
         "status": overall,
         "server_time_et": now_et.strftime("%Y-%m-%d %H:%M:%S %Z"),
@@ -1402,6 +1474,7 @@ async def health_check():
         "strike_watermarks": strike_watermarks_block,
         "qqq_sma_watch": qqq_sma_block,
         "paused_pollers": paused_pollers_block,
+        "triton_grader": grader_block,
     }
 
 

@@ -1540,6 +1540,38 @@ async def init_database():
         except Exception as e:
             print(f"WARNING: strike_ib_session_counts table creation skipped: {e}")
 
+        # T2 of the grader-precondition build (R-IV.289).
+        # Mirrors migrations/028_job_runs.sql -- keep the two in sync.
+        #
+        # Generic by schema, wired to ONE job in this build (the Triton grader).
+        # A job absent from this table is NOT WIRED; that is never evidence the
+        # job did not run.
+        try:
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS job_runs (
+                    id            BIGSERIAL PRIMARY KEY,
+                    job_name      TEXT        NOT NULL,
+                    session_date  DATE        NOT NULL,
+                    started_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    finished_at   TIMESTAMPTZ,
+                    status        TEXT        NOT NULL DEFAULT 'running',
+                    rows_touched  INTEGER,
+                    skip_reason   TEXT,
+                    error         TEXT
+                )
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_job_runs_job_session_ok
+                    ON job_runs (job_name, session_date DESC)
+                    WHERE status = 'ok'
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_job_runs_job_started
+                    ON job_runs (job_name, started_at DESC)
+            """)
+        except Exception as e:
+            print(f"WARNING: job_runs table creation skipped: {e}")
+
         # Brief C v1.1: committee_accuracy view for Phase 4 win-rate measurement
         try:
             await conn.execute("""
