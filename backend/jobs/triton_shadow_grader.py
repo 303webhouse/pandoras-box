@@ -21,6 +21,44 @@ HORIZONS = (1, 3, 5)
 GRADE_LIMIT = 1000  # rows/pass ceiling
 
 
+# T6 (R-IV.287(5)): the bar window is BOUNDED.
+#
+# It used to be (today - earliest).days + 12, anchored on the oldest ungraded row —
+# which the 72 permanently-ungradeable index rows pinned at 2026-07-02, so the
+# window grew by one day every day, without bound. T5 removes that anchor; T6 caps
+# it anyway, because a bound that depends on another fix staying correct is not a
+# bound.
+#
+# >= 20 TRADING DAYS (the longest horizon T9 introduces) plus buffer, and the
+# calendar-day figure comes from T7's calendar, NEVER from a multiplier. `20 * 1.6`
+# is the weekday approximation wearing a different constant: right most weeks,
+# wrong across every holiday, and hardest to notice for exactly that reason.
+GRADER_LOOKBACK_TRADING_DAYS = 25          # 20d horizon + 5 sessions of buffer
+GRADER_LOOKBACK_SLACK_DAYS = 5
+# Used only when the calendar cannot answer (a date past its stated horizon).
+# Deliberately generous: over-fetching costs a larger query, under-fetching drops
+# a horizon silently, and those are not symmetric.
+GRADER_LOOKBACK_FALLBACK_DAYS = 45
+
+
+def _bounded_lookback(earliest, today) -> int:
+    """min(what the oldest row needs, the T7-derived cap). Never unbounded."""
+    needed = (today - earliest).days + 12
+    try:
+        from stable_engine.market_calendar import calendar_days_covering
+
+        cap = calendar_days_covering(GRADER_LOOKBACK_TRADING_DAYS, today) + GRADER_LOOKBACK_SLACK_DAYS
+    except Exception as exc:
+        # LOUD. A calendar that cannot answer must not be replaced by a guess in
+        # silence -- the fallback is a stated constant, and it says so.
+        logger.error(
+            "triton_grader: market calendar could not size the lookback (%s: %s) -- "
+            "using the stated fallback of %d days, NOT a computed rule",
+            type(exc).__name__, exc, GRADER_LOOKBACK_FALLBACK_DAYS)
+        cap = GRADER_LOOKBACK_FALLBACK_DAYS
+    return max(1, min(needed, cap))
+
+
 def _dir_adj(entry: float, close: float, direction: str) -> float:
     """Direction-adjusted return %. BULL = raw; BEAR = -raw. Positive = correct."""
     raw = (close - entry) / entry * 100.0
@@ -81,7 +119,7 @@ async def run_triton_shadow_grader() -> dict:
             (g["fired_at"].date() if hasattr(g["fired_at"], "date") else g["fired_at"])
             for g in group
         )
-        lookback_days = (today - earliest).days + 12  # cover oldest fire + 5td + buffer
+        lookback_days = _bounded_lookback(earliest, today)
         idx = await fetch_r_close_index(ticker, lookback_days)
         if not idx:
             logger.warning("triton_grader: no 'r' bars for %s — skip %d", ticker, len(group))
