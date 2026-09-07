@@ -70,7 +70,7 @@
 
 **Collector design law** — binds every instrument this window deploys, by anchor (verification-laws, ratified R-IV.167): §1 `#null-trigger` incl. §1.1 · §2 `#scoped-count` · §3 `#narrow-caution`; plus the five-defect requirements as ratified at re-scope §5. Every predicate this registration declares carries its expected satisfaction rate on its face, per §1.1 — audited for compliance at §8.7, one gap found and closed there.
 
-**Chain:** base draft `5f23564b` → EDGE §8 `0e59be37` (superseded) → TRITON counter-again (I2, over-broad postcondition) → EDGE correction at source, new gate `b1c9791b` → **this joint manifest** → spine ratification = **T0** → PIVOT pass with the principal (EXTEND + registration + spend, one sitting; closing on §7(d)'s sentence as written). → **R-IV.273** — EXTEND + test blessed at PIVOT pass; Amendment 1 pending; spend PAUSED. Disposition filed at `docs/edge/2026-09-05-pivot-pass-disposition.md`, verbatim region gate `0427de59`. → **R-IV.275** — Amendment 1: observational strata. → **R-IV.301** — H-CORE4 declared.
+**Chain:** base draft `5f23564b` → EDGE §8 `0e59be37` (superseded) → TRITON counter-again (I2, over-broad postcondition) → EDGE correction at source, new gate `b1c9791b` → **this joint manifest** → spine ratification = **T0** → PIVOT pass with the principal (EXTEND + registration + spend, one sitting; closing on §7(d)'s sentence as written). → **R-IV.273** — EXTEND + test blessed at PIVOT pass; Amendment 1 pending; spend PAUSED. Disposition filed at `docs/edge/2026-09-05-pivot-pass-disposition.md`, verbatim region gate `0427de59`. → **R-IV.275** — Amendment 1: observational strata. → **R-IV.301** — H-CORE4 declared. → **R-IV.306.**
 
 ## AMENDMENT 1 · DECLARED OBSERVATIONAL STRATA
 
@@ -124,6 +124,23 @@ and lands in `etf_other` — a bucket this lane added because six of the fifteen
 the measured bar path match no sub-class (COPX, GLD, HYG, RSP, SMH, TLT). **Stated here so
 that a later cut by S3 does not silently split H-CORE4 three-to-one and read the split as a
 result.**
+
+**H-CORE4 — PRIOR RESOLVED. Spine-authored, R-IV.306(a), from the second read
+(gate `ef52c6f7`). Verbatim; gate over the quoted text only: `50ba06a6`, `399` bytes.**
+
+> H-CORE4 was named from a first-read cell in a population the third read (8d1f4e92) shows is carried by one week. Its own weekly series — 32.0 · 71.2 · 54.0 · 12.9 · 91.7 · 83.3 · 51.4 — tracks the pooled shape: 87.9% across 2026-07-27 and 08-03, 42.2% across the other five. H-CORE4 is a name for those two weeks. The declaration stands as a pre-clock named list; its prior is regime beta.
+
+**UNIT OF INFERENCE — DECLARED PRE-CLOCK. Spine-authored, R-IV.306(b). Verbatim; gate
+`83d1a64b`, `433` bytes.**
+
+> For every stratum cut (S1–S7, H-CORE4), the WEEK is the unit of inference. Row-level Wilson intervals are reported for scale and never cited as the confidence of a weekly-varying quantity. No stratum result is reported as significant unless it holds in ≥5 of 7 computable weeks (mirroring C3) or a stated week-level test is applied. The grader sentinel's §1.1 predicate is unaffected — pass completion is not a market outcome.
+
+**CC-BUILD note on the two summary figures, checked not assumed:** the simple means of that
+series are **87.5** and **44.3**, against the stated **87.9** and **42.2**. **The stated
+figures are n-WEIGHTED, and that is the correct form** — the weeks hold unequal row counts
+(the third read's carrying week alone is 1,197 of 6,098). Recorded so a later reader who
+averages the seven printed numbers and gets a different answer knows why, rather than
+filing an erratum against a correct line.
 
 **Face label, carried from the ruling: hypothesis generation, not verdict.** Criteria and
 verdict semantics are unchanged by this amendment; nothing here can move a pass/fail.
