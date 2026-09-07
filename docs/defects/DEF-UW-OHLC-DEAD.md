@@ -230,7 +230,21 @@ tickers succeeding. The breadth symbols are gone; the equities are not.
    decision, not an implementation detail: state it, and state the expected satisfaction
    rate per §1.1 so the alarm is known to be reachable. **Today's rate is 100%, so any
    threshold below 100 fires immediately — which is the correct first observation.**
-3. **Read-only investigation of why `/ohlc/1d` fails** — quota, deprecation, or auth. No
+3. **Read-only investigation of why `/ohlc/1d` fails. AUTH AND ACCOUNT SUSPENSION ARE
+   ELIMINATED (R-IV.301(d))** — same key, same host, `/info` returned 200. **Remaining
+   candidates, and nothing else is on the list:**
+
+   | candidate | what would confirm it |
+   |---|---|
+   | **endpoint deprecation** | a 404/410, or a vendor changelog entry |
+   | **OHLC-specific entitlement change** | a 403 on `/ohlc/1d` while other endpoints answer 200 |
+   | **vendor-side outage** | it starts working again with no change here |
+
+   **The third is the one that needs saying out loud:** a vendor outage resolves itself, and
+   **a fallback that works means nobody would notice the recovery either.** The fallback-rate
+   alarm in item 2 is what makes recovery observable, not just failure.
+
+   The metering question rides the same `railway run` mechanism ratified at R-IV.301(a). No
    writes. The three are distinguishable by response code and by whether other UW endpoints
    still answer (they do: `/info`, earnings and flow all returned on the same boot, so a
    blanket auth failure is already ruled out).
