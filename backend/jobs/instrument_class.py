@@ -37,18 +37,68 @@ would be indistinguishable from a measurement downstream.
 """
 
 import logging
+from datetime import date as _date
 from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
 CLASS_CASH_SETTLED_INDEX = "cash_settled_index"
-CLASS_ETF = "etf"
 CLASS_SINGLE_NAME = "single_name"
 CLASS_UNMAPPED = "unmapped"
 
+# S3 ETF SUB-CLASSES (R-IV.301(c)). Static maps, horizon stated below.
+CLASS_ETF_BROAD = "etf_broad"
+CLASS_ETF_SECTOR = "etf_sector"
+CLASS_ETF_LEVERAGED_INVERSE = "etf_leveraged_inverse"
+# NOT in the ruling, and argued rather than assumed. R-IV.301(c) names three ETF
+# sub-classes; SIX OF THE FIFTEEN tickers on the measured bar path match none of
+# them -- COPX, GLD, HYG, RSP, SMH, TLT -- and SMH is a member of H-CORE4.
+#
+# Those are not UNMAPPED: the vendor positively told us they are ETFs. Collapsing
+# "known ETF, sub-class not in any static map" into "we do not know what this is"
+# would discard a measured fact, and UNMAPPED is the bucket a reader trusts least.
+# So they get their own honest bucket and the gap is reported, not absorbed.
+CLASS_ETF_OTHER = "etf_other"
+
+# NO COARSE `CLASS_ETF` ALIAS. The module is new, nothing imported it, and a name
+# that silently changed meaning (SPY was 'etf', it is now 'etf_broad') is a worse
+# trap than a missing one.
+
 ALL_CLASSES = frozenset({
-    CLASS_CASH_SETTLED_INDEX, CLASS_ETF, CLASS_SINGLE_NAME, CLASS_UNMAPPED,
+    CLASS_CASH_SETTLED_INDEX, CLASS_ETF_BROAD, CLASS_ETF_SECTOR,
+    CLASS_ETF_LEVERAGED_INVERSE, CLASS_ETF_OTHER, CLASS_SINGLE_NAME, CLASS_UNMAPPED,
 })
+
+# ── STATIC MAPS: stated horizon, loud failure past it ─────────────────────
+# Holidays are data, not logic -- and so is this. A static map that silently
+# outlives its accuracy is the failure mode the calendar rule exists to prevent,
+# so the horizon is explicit and expiry is LOUD (see static_map_expired()).
+STATIC_MAP_VALID_THROUGH = _date(2027, 3, 31)
+
+BROAD_INDEX_ETFS = frozenset({"SPY", "QQQ", "IWM", "DIA"})
+
+# S4's ONE sector map (R-IV.301(b)). The 11 SPDR sector ETFs appear as a literal
+# in ten declaration sites across nine files (measured 2026-09-05); THIS is the
+# single source those supersede. Ticker -> sector name.
+SPDR_SECTOR_ETFS = {
+    "XLK": "Technology", "XLF": "Financials", "XLV": "Health Care",
+    "XLY": "Consumer Discretionary", "XLC": "Communication Services",
+    "XLI": "Industrials", "XLP": "Consumer Staples", "XLE": "Energy",
+    "XLU": "Utilities", "XLRE": "Real Estate", "XLB": "Materials",
+}
+
+# Built from the repo's existing knowledge (api/stable.py _ETF_THEME), not invented.
+LEVERAGED_INVERSE_ETFS = frozenset({
+    "SOXL", "SOXS", "TQQQ", "SQQQ", "UPRO", "SPXL", "SPXS", "SH", "SDS",
+    "TNA", "TZA", "LABU", "LABD", "FAS", "FAZ", "GUSH", "DRIP", "ERX", "ERY",
+})
+
+SECTOR_BROAD = "BROAD"
+
+
+def static_map_expired(today=None) -> bool:
+    """True once the static maps are past their stated horizon."""
+    return (today or _date.today()) > STATIC_MAP_VALID_THROUGH
 
 # DEF-TRITON-INDEX-UNGRADEABLE: cash-settled index symbols with no price series.
 # These are the 15 rows inside the sealed holdout that can never be graded.
@@ -56,7 +106,7 @@ CASH_SETTLED_INDEX_SYMBOLS = frozenset({"SPX", "SPXW", "RUT", "RUTW", "VIX"})
 
 # Observed live 2026-09-06. Extend only from a fresh live read, never from a guess.
 ISSUE_TYPE_TO_CLASS: Dict[str, str] = {
-    "etf": CLASS_ETF,
+    "etf": CLASS_ETF_OTHER,        # refined into a sub-class by classify()
     "common stock": CLASS_SINGLE_NAME,
 }
 
@@ -73,7 +123,23 @@ def classify(ticker: Optional[str], issue_type: Optional[str]) -> str:
     key = (issue_type or "").strip().lower()
     if not key:
         return CLASS_UNMAPPED
-    return ISSUE_TYPE_TO_CLASS.get(key, CLASS_UNMAPPED)
+    base = ISSUE_TYPE_TO_CLASS.get(key, CLASS_UNMAPPED)
+    if base is not CLASS_ETF_OTHER:
+        return base
+    # Vendor says ETF; the static maps say which kind.
+    if static_map_expired():
+        logger.error(
+            "instrument_class: STATIC MAPS EXPIRED (valid through %s) -- %s "
+            "classified as %s rather than a stale sub-class",
+            STATIC_MAP_VALID_THROUGH, sym, CLASS_ETF_OTHER)
+        return CLASS_ETF_OTHER
+    if sym in BROAD_INDEX_ETFS:
+        return CLASS_ETF_BROAD
+    if sym in SPDR_SECTOR_ETFS:
+        return CLASS_ETF_SECTOR
+    if sym in LEVERAGED_INVERSE_ETFS:
+        return CLASS_ETF_LEVERAGED_INVERSE
+    return CLASS_ETF_OTHER
 
 
 def is_gradeable(instrument_class: str) -> bool:
@@ -100,3 +166,28 @@ async def classify_ticker(ticker: str) -> str:
         logger.warning("instrument_class(%s): /info fetch failed: %s", sym, exc)
         return CLASS_UNMAPPED
     return classify(sym, info.get("issue_type"))
+
+
+def sector_for(ticker: Optional[str], instrument_class: str,
+               info_sector: Optional[str] = None) -> Optional[str]:
+    """S4's sector stratum (R-IV.301(b)). One map, four rules:
+
+      broad-index ETF  -> "BROAD"       (keeps the stratum informative on an
+                                         ETF-heavy universe instead of blanking it)
+      SPDR sector ETF  -> its sector    (from SPDR_SECTOR_ETFS, the single source)
+      single name      -> /info sector
+      anything else    -> None (UNMAPPED)
+
+    UNMAPPED ONLY when the vendor returns null for a single name, or the ticker
+    matches no map. Measured 2026-09-06: /info returns sector=None for EVERY ETF,
+    which is why ETFs are answered from the maps and not from the vendor.
+    """
+    sym = (ticker or "").strip().upper()
+    if instrument_class == CLASS_ETF_BROAD or sym in BROAD_INDEX_ETFS:
+        return SECTOR_BROAD
+    if sym in SPDR_SECTOR_ETFS:
+        return SPDR_SECTOR_ETFS[sym]
+    if instrument_class == CLASS_SINGLE_NAME:
+        s = (info_sector or "").strip()
+        return s or None
+    return None

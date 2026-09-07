@@ -267,6 +267,45 @@ mistake, and a comment saying *"not really an index"* has never once stopped any
   not assumed from the endpoint's name. If a ticker has no issue type it is **UNMAPPED**,
   the same rule S4 gives sector, and never guessed.
 
+**S3 SUB-CLASSES + S4 VOCABULARY RULED (R-IV.301(b),(c)) — BUILT 2026-09-07 in
+`backend/jobs/instrument_class.py`, the single implementation.**
+
+| S3 class | source |
+|---|---|
+| `cash_settled_index` | the DEF list; checked FIRST because `issue_type` is null for these |
+| `etf_broad` | static: SPY QQQ IWM DIA |
+| `etf_sector` | static: the 11 SPDR sector ETFs — **S4's one map** |
+| `etf_leveraged_inverse` | static, built from the repo's existing `api/stable.py::_ETF_THEME` rather than invented |
+| `single_name` | `issue_type` = "Common Stock" |
+
+**S4 sector:** `"BROAD"` for broad-index ETFs · the sector name for SPDR sector ETFs ·
+`/info` for single names · UNMAPPED only when the vendor returns null for a single name
+or the ticker matches no map. **`"BROAD"` is what keeps the stratum informative on an
+ETF-heavy universe** instead of blanking it.
+
+**Static maps carry a stated horizon and fail loudly past it** — `STATIC_MAP_VALID_THROUGH = 2027-03-31`. Past that date
+the classifier refuses to serve a sub-class it can no longer vouch for and returns
+`etf_other` with an ERROR log, rather than a stale label. Same rule as the holiday calendar:
+**data, not logic.**
+
+### A FOURTH BUCKET THIS LANE ADDED, and the gap it makes visible
+
+R-IV.301(c) names three ETF sub-classes. **Six of the fifteen tickers on the measured bar
+path match none of them:** COPX, GLD, HYG, RSP, SMH, TLT.
+
+**They are NOT UNMAPPED.** The vendor positively said ETF. Collapsing *"known ETF,
+sub-class not in any static map"* into *"we do not know what this is"* would **discard a
+measured fact**, and UNMAPPED is the bucket a reader trusts least. So they land in
+`etf_other` and the gap is reported rather than absorbed.
+
+**And SMH is a member of H-CORE4.** The named hypothesis stratum is therefore **not
+homogeneous under S3** — three `etf_broad` and one `etf_other`. Recorded on Amendment 1's face so a
+later cut by S3 cannot split H-CORE4 three-to-one and read the split as a result.
+
+**Out-of-band reads follow the ratified pattern (R-IV.301(a)):** `railway run`, key never
+printed, no production path touched, retired after the run. **The metering test uses the
+same mechanism.**
+
 **S4's sector map absorbs the duplicated SPDR literal (R-IV.281(c)) — and the duplication
 is larger than the census reported.** The census cites two files. **Measured 2026-09-05 by
 CC-BUILD: 10 declaration sites across 9 files**, counting any place where ≥ 9 of the 11

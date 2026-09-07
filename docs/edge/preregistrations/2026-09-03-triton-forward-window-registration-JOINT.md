@@ -70,7 +70,7 @@
 
 **Collector design law** — binds every instrument this window deploys, by anchor (verification-laws, ratified R-IV.167): §1 `#null-trigger` incl. §1.1 · §2 `#scoped-count` · §3 `#narrow-caution`; plus the five-defect requirements as ratified at re-scope §5. Every predicate this registration declares carries its expected satisfaction rate on its face, per §1.1 — audited for compliance at §8.7, one gap found and closed there.
 
-**Chain:** base draft `5f23564b` → EDGE §8 `0e59be37` (superseded) → TRITON counter-again (I2, over-broad postcondition) → EDGE correction at source, new gate `b1c9791b` → **this joint manifest** → spine ratification = **T0** → PIVOT pass with the principal (EXTEND + registration + spend, one sitting; closing on §7(d)'s sentence as written). → **R-IV.273** — EXTEND + test blessed at PIVOT pass; Amendment 1 pending; spend PAUSED. Disposition filed at `docs/edge/2026-09-05-pivot-pass-disposition.md`, verbatim region gate `0427de59`. → **R-IV.275** — Amendment 1: observational strata.
+**Chain:** base draft `5f23564b` → EDGE §8 `0e59be37` (superseded) → TRITON counter-again (I2, over-broad postcondition) → EDGE correction at source, new gate `b1c9791b` → **this joint manifest** → spine ratification = **T0** → PIVOT pass with the principal (EXTEND + registration + spend, one sitting; closing on §7(d)'s sentence as written). → **R-IV.273** — EXTEND + test blessed at PIVOT pass; Amendment 1 pending; spend PAUSED. Disposition filed at `docs/edge/2026-09-05-pivot-pass-disposition.md`, verbatim region gate `0427de59`. → **R-IV.275** — Amendment 1: observational strata. → **R-IV.301** — H-CORE4 declared.
 
 ## AMENDMENT 1 · DECLARED OBSERVATIONAL STRATA
 
@@ -104,6 +104,26 @@ established that `dxy_trend` is a **computed bias-engine composite** (`backend/b
 any form.** So the proxy is not a workaround for a table that went dark: **a per-row DXY
 stamp has never existed**, and no amount of repairing `factor_history` would have produced one.
 **The proxy is the only construction available, not the cheaper of two.**
+
+**NAMED HYPOTHESIS STRATUM — H-CORE4. Spine-authored, R-IV.301(c). DECLARED NOW,
+PRE-CLOCK.**
+
+`H-CORE4 = {SPY, QQQ, IWM, SMH}` — named from the first market read's finding (**3d 60.4%, n = 1,269**,
+filed at `docs/edge/results/2026-09-06-triton-first-market-read.md`). **Criteria and verdict semantics are unchanged by this
+declaration**; it names a stratum, it does not add an endpoint.
+
+**It is declared before the clock for the reason the whole precondition order exists:** a
+stratum named after seeing the window's own outcomes is not a hypothesis, it is a
+description. **This one is named from the EXPLORE population, which is disjoint from the
+window** — that is what makes pre-declaration meaningful rather than ceremonial.
+
+**CC-BUILD annotation, not part of the spine-authored declaration — H-CORE4 IS NOT
+HOMOGENEOUS UNDER S3.** Measured 2026-09-07 while building the S3 classifier: SPY, QQQ and
+IWM are `etf_broad`; **SMH is not.** SMH matches none of R-IV.301(c)'s three ETF sub-classes
+and lands in `etf_other` — a bucket this lane added because six of the fifteen tickers on
+the measured bar path match no sub-class (COPX, GLD, HYG, RSP, SMH, TLT). **Stated here so
+that a later cut by S3 does not silently split H-CORE4 three-to-one and read the split as a
+result.**
 
 **Face label, carried from the ruling: hypothesis generation, not verdict.** Criteria and
 verdict semantics are unchanged by this amendment; nothing here can move a pass/fail.

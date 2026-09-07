@@ -13,10 +13,10 @@ class TestLiveVocabulary:
     """The four tickers actually read, with the values actually returned."""
 
     def test_spy_etf(self):
-        assert ic.classify("SPY", "ETF") == ic.CLASS_ETF
+        assert ic.classify("SPY", "ETF") == ic.CLASS_ETF_BROAD
 
     def test_xlf_etf(self):
-        assert ic.classify("XLF", "ETF") == ic.CLASS_ETF
+        assert ic.classify("XLF", "ETF") == ic.CLASS_ETF_SECTOR
 
     def test_nvda_common_stock(self):
         assert ic.classify("NVDA", "Common Stock") == ic.CLASS_SINGLE_NAME
@@ -52,7 +52,7 @@ class TestUnknownIsNeverGuessed:
         assert ic.classify(None, "ETF") == ic.CLASS_UNMAPPED
 
     def test_case_and_whitespace_insensitive(self):
-        assert ic.classify("spy", "  etf ") == ic.CLASS_ETF
+        assert ic.classify("spy", "  etf ") == ic.CLASS_ETF_BROAD
         assert ic.classify("nvda", "COMMON STOCK") == ic.CLASS_SINGLE_NAME
 
 
@@ -75,10 +75,82 @@ class TestGradeability:
     def test_cash_settled_is_not_gradeable(self):
         assert ic.is_gradeable(ic.CLASS_CASH_SETTLED_INDEX) is False
 
-    @pytest.mark.parametrize("c", [ic.CLASS_ETF, ic.CLASS_SINGLE_NAME, ic.CLASS_UNMAPPED])
+    @pytest.mark.parametrize("c", [ic.CLASS_ETF_BROAD, ic.CLASS_ETF_SECTOR,
+                              ic.CLASS_ETF_LEVERAGED_INVERSE, ic.CLASS_ETF_OTHER,
+                              ic.CLASS_SINGLE_NAME, ic.CLASS_UNMAPPED])
     def test_everything_else_is(self, c):
         assert ic.is_gradeable(c) is True
 
     def test_unmapped_is_gradeable_deliberately(self):
         """Excluding on ignorance would silently shrink the population."""
         assert ic.is_gradeable(ic.CLASS_UNMAPPED) is True
+
+
+class TestS3SubClasses:
+    """R-IV.301(c). Static maps with a stated horizon."""
+
+    def test_broad_index_etfs(self):
+        for s in ["SPY", "QQQ", "IWM", "DIA"]:
+            assert ic.classify(s, "ETF") == ic.CLASS_ETF_BROAD
+
+    def test_spdr_sector_etfs(self):
+        assert len(ic.SPDR_SECTOR_ETFS) == 11
+        for s in ic.SPDR_SECTOR_ETFS:
+            assert ic.classify(s, "ETF") == ic.CLASS_ETF_SECTOR
+
+    def test_leveraged_inverse(self):
+        for s in ["SOXL", "SOXS", "TQQQ", "SQQQ", "TZA", "FAZ"]:
+            assert ic.classify(s, "ETF") == ic.CLASS_ETF_LEVERAGED_INVERSE
+
+    def test_etf_other_is_not_unmapped(self):
+        """The vendor POSITIVELY said ETF. Collapsing that into UNMAPPED would
+        discard a measured fact — these six are the gap, not an unknown."""
+        for s in ["COPX", "GLD", "HYG", "RSP", "SMH", "TLT"]:
+            c = ic.classify(s, "ETF")
+            assert c == ic.CLASS_ETF_OTHER
+            assert c != ic.CLASS_UNMAPPED
+
+    def test_smh_is_in_H_CORE4_and_is_not_broad(self):
+        """H-CORE4 = {SPY, QQQ, IWM, SMH} is NOT homogeneous under S3."""
+        assert ic.classify("SMH", "ETF") == ic.CLASS_ETF_OTHER
+        assert ic.classify("SPY", "ETF") == ic.CLASS_ETF_BROAD
+
+    def test_static_maps_have_a_stated_horizon(self):
+        from datetime import date
+        assert ic.STATIC_MAP_VALID_THROUGH == date(2027, 3, 31)
+        assert ic.static_map_expired(date(2027, 3, 31)) is False
+        assert ic.static_map_expired(date(2027, 4, 1)) is True
+
+    def test_expiry_is_loud_and_refuses_a_stale_subclass(self, monkeypatch):
+        """Past the horizon the map must not serve a sub-class it can no longer
+        vouch for — reachability of the loud path, proven."""
+        monkeypatch.setattr(ic, "static_map_expired", lambda *a, **k: True)
+        assert ic.classify("SPY", "ETF") == ic.CLASS_ETF_OTHER
+
+
+class TestS4Sector:
+    """R-IV.301(b)."""
+
+    def test_broad_index_etfs_are_BROAD(self):
+        for s in ["SPY", "QQQ", "IWM", "DIA"]:
+            assert ic.sector_for(s, ic.classify(s, "ETF")) == "BROAD"
+
+    def test_spdr_sector_etfs_carry_their_sector(self):
+        assert ic.sector_for("XLF", ic.CLASS_ETF_SECTOR) == "Financials"
+        assert ic.sector_for("XLRE", ic.CLASS_ETF_SECTOR) == "Real Estate"
+
+    def test_single_name_uses_info_sector(self):
+        assert ic.sector_for("NVDA", ic.CLASS_SINGLE_NAME, "Technology") == "Technology"
+
+    def test_single_name_with_null_vendor_sector_is_unmapped(self):
+        assert ic.sector_for("ZZZZ", ic.CLASS_SINGLE_NAME, None) is None
+        assert ic.sector_for("ZZZZ", ic.CLASS_SINGLE_NAME, "  ") is None
+
+    def test_other_etfs_are_unmapped_for_sector(self):
+        """Measured: /info returns sector=None for every ETF, so there is nothing
+        to fall back to — this is the magnitude declared on the registration face."""
+        for s in ["SMH", "GLD", "TLT", "HYG", "COPX", "RSP"]:
+            assert ic.sector_for(s, ic.CLASS_ETF_OTHER) is None
+
+    def test_leveraged_inverse_is_unmapped_for_sector(self):
+        assert ic.sector_for("SOXS", ic.CLASS_ETF_LEVERAGED_INVERSE) is None
