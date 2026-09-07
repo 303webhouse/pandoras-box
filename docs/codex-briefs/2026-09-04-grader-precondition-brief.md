@@ -394,6 +394,37 @@ converter window, and this grader loop. **Holidays are data, not logic** — an 
 list with a stated horizon and a loud failure past it, never a computed rule that
 silently treats an unknown year as all-weekdays.
 
+**BUILT 2026-09-07 — `backend/stable_engine/market_calendar.py`. 31 dates enumerated, 2025-01-01 through
+2027-12-31, computed at authoring time and then WRITTEN DOWN.** Deriving once to author is
+sound; deriving at runtime is the failure being replaced.
+
+**What the computed form costs, measured on the one already in this repo.** `discord_bridge/bot.py::_us_market_holidays`
+derives holidays from rules for any year, so it answers confidently for 2099 — and it
+carries eight entries, **omitting two real market holidays:**
+
+| omitted | why it is missed |
+|---|---|
+| **Juneteenth** | a market holiday only since 2022 |
+| **Good Friday** | a market holiday that is **not a federal one** |
+
+**That helper reports the market OPEN on both, every year, silently.** A rule-based calendar
+cannot be audited by reading it; a list can be checked against a published schedule in a
+minute. **That is the whole argument, and it is why the loud failure past the horizon is a
+feature** — `CalendarHorizonError` is raised, never swallowed, and a caller that catches it and falls
+back to a weekday rule has rebuilt the thing this deletes.
+
+**Anchor for the whole set:** Labor Day 2026 resolves to **2026-09-07**, the day the file
+was written and a market holiday.
+
+**Not modelled, stated so absence is not read as coverage:** early closes and ad-hoc
+closures. Day granularity only.
+
+**T6 now sizes from it rather than from a multiplier.** The pinned case — oldest ungraded
+row at 2026-07-02 — went from **80 calendar days and growing by one a day** to **41,
+bounded**. A test asserts that an OLDER anchor does not widen the window, which is the
+defect in one assertion. And `calendar_days_covering()` for 20 sessions ending 2026-09-08 is **29 days**,
+where `20 * 1.6` says 32: not merely wrong, **underived**.
+
 **Sequencing note:** T7 changes which tickers can alarm on a holiday, so it interacts
 with `DEF-STRIKE-WATERMARK-NEVER-ALIVE`'s n-gate. Fix the calendar before tuning that gate, or the holiday
 defect's blast radius moves underneath the fix.

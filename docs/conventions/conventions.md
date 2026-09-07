@@ -136,6 +136,26 @@ counts *characters*, not lines: `grep -c $'\r'` reports matching lines and gave 
 containing zero CRs. `tr -cd '\r' | wc -c` is correct. A gate value is only as good as the
 probe that produced it.
 
+**STRENGTHENED, R-IV.303(e): THE AUTHOR STATES THE TREE.**
+
+Checking both forms is the receiver's safety net, not the protocol. **The lane that publishes
+a gate says which tree it names — raw or LF-normalised — on the manifest, every time.**
+
+**Worked example, 2026-09-06/07, two artifacts from the same lane in two days:**
+
+| artifact | gate | tree it named |
+|---|---|---|
+| Moby Dick census | `3bbddd58` | **LF** (raw and LF were identical — the file had no CRLF) |
+| first market read | `5f3da161` | **RAW/CRLF** (its LF form is `19bfcdb8`) |
+
+**Neither was wrong, and that is the problem.** A receiver who assumes either convention is
+right half the time and reports a dead gate the other half — and a dead gate sends the
+publishing lane to re-stage a file that was correctly staged, which is the cost already
+recorded under *A NEGATIVE FINDING STATES ITS SEARCH SCOPE*.
+
+**The receiver still checks both** — that is what caught this — **but a value published
+without its tree is an incomplete measurement**, in the same way a length published without
+its unit is.
 
 ## DOCUMENT CONTENT TRAVELS BY FILE
 
