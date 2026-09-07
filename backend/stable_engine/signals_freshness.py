@@ -37,6 +37,7 @@ from __future__ import annotations
 import logging
 from collections import defaultdict
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 from stable_engine.job_status import is_market_hours
 
@@ -60,7 +61,30 @@ REGISTERED_CLASSES: frozenset[str] = frozenset({
     "tradingview", "server_scanner", "cta_scanner",
     "crypto_scanner", "crypto_engine", "crypto_cvd_engine", "footprint",
     "STRIKE_IB_BREAK",
+    # T3, R-IV.295(a). A CONSUMER job, not a producer -- see AGE_SOURCE below.
+    "triton_grader",
 })
+
+# ── PLUGGABLE AGE SOURCE (T3, R-IV.295(a)) ────────────────────────────────
+# This module's premise was that every class is a signal PRODUCER, so every age
+# came from MAX(created_at) ON signals. The Triton grader is a signal CONSUMER:
+# it UPDATEs triton_flow_shadow and never writes a signals row.
+#
+# Registering it without this hook would have given it age=None forever, so
+# _class_status could only ever return "no_data" and THE STALENESS BRANCH COULD
+# NEVER FIRE -- a sentinel that cannot fail, inside the task built to add
+# supervision. Same surface, same alarm path, different age source.
+AGE_SOURCE_SIGNALS = "signals"
+AGE_SOURCE_JOB_RUNS = "job_runs"
+AGE_SOURCES: dict[str, str] = {"triton_grader": AGE_SOURCE_JOB_RUNS}
+
+# Classes whose work is expected once per TRADING SESSION rather than continuously.
+# Their SLO is only evaluated when a pass was actually due -- see _pass_overdue().
+SESSION_JOB_CLASSES = frozenset({"triton_grader"})
+
+# The grader runs post-close; give it until 16:15 ET plus grace before a pass for
+# that session is considered due.
+SESSION_JOB_DUE_HOUR_ET = 17
 
 # Per-class staleness SLO (seconds) -- the "nothing is arriving at all" detector.
 DEFAULT_SLO_SECONDS = 4 * 3600
@@ -78,12 +102,45 @@ SLO_SECONDS: dict[str, int] = {
     # holidays -- a 26h SLO on a weekday-only producer is a guaranteed
     # false red roughly 104 times a year.
     "STRIKE_IB_BREAK": 5 * 24 * 3600,
+    # T3 (R-IV.295(a)): "pass completed within 26h".
+    #
+    # 26h ALONE WOULD BE A GUARANTEED WEEKEND FALSE RED -- this module already
+    # says so six lines above, about a different weekday-only job. The grader runs
+    # weekdays post-close, so Friday's pass is 48h+ old by Sunday and the hour
+    # bound would fire every single weekend.
+    #
+    # So the hour bound is kept AND gated on whether a pass was DUE
+    # (_pass_overdue). That is what makes R-IV.295(a)'s declared satisfaction of
+    # ~100% OF CALENDAR DAYS true rather than ~5/7.
+    "triton_grader": 26 * 3600,
 }
 
 # Classes that only flow during regular trading hours. Crypto runs 24/7 and must
 # not flatline overnight or at weekends (anti-fake-sick).
 RTH_ONLY_CLASSES = frozenset({"tradingview", "server_scanner", "cta_scanner",
                              "footprint", "STRIKE_IB_BREAK"})
+
+def _pass_overdue(last_session_date, now_et=None) -> bool:
+    """Is a session-job pass actually DUE and missing?
+
+    Weekday approximation, deliberately and temporarily: T7 replaces this with the
+    single market-calendar utility. Until then it is a HOLIDAY false red, which is
+    a smaller and rarer wrong than a weekend one -- stated so the next reader does
+    not mistake it for a considered permanent choice.
+    """
+    from datetime import timedelta
+    if now_et is None:
+        now_et = datetime.now(ZoneInfo("America/New_York"))
+    # Most recent weekday whose post-close has passed.
+    d = now_et.date()
+    if now_et.hour < SESSION_JOB_DUE_HOUR_ET:
+        d = d - timedelta(days=1)
+    while d.weekday() >= 5:
+        d = d - timedelta(days=1)
+    if last_session_date is None:
+        return True
+    return last_session_date < d
+
 
 _RANK = {"ok": 0, "no_data": 1, "stale": 1, "flatline": 2}
 
@@ -118,10 +175,20 @@ def counters_snapshot() -> dict[str, dict[str, int]]:
     return {k: dict(v) for k, v in _COUNTERS.items()}
 
 
-def _class_status(cls: str, age: float | None, rejected: int) -> str:
+def _class_status(cls: str, age: float | None, rejected: int,
+                  last_session_date=None) -> str:
     """Rejections escalate independently of age, at any hour."""
     if rejected > 0:
         return "flatline"
+    if cls in SESSION_JOB_CLASSES:
+        # A session job is judged on WHETHER A DUE PASS IS MISSING, then on the
+        # hour bound. Age alone cannot distinguish "no pass was due" (a weekend)
+        # from "a pass was due and never came" -- and those are opposite facts.
+        if not _pass_overdue(last_session_date):
+            return "ok"
+        if age is None:
+            return "no_data"
+        return "flatline" if age > SLO_SECONDS.get(cls, DEFAULT_SLO_SECONDS) else "ok"
     rth_gated = cls in RTH_ONLY_CLASSES and not is_market_hours()
     if age is None:
         return "ok" if rth_gated else "no_data"
@@ -162,6 +229,28 @@ async def signals_freshness_summary() -> dict:
             "classes": {},
         }
 
+    # ── pluggable age source (T3) ──────────────────────────────────────────
+    # Consumer jobs do not appear in the signals query above; their age comes from
+    # job_runs. Read per class so a failure on one never blanks the others.
+    session_dates: dict[str, object] = {}
+    for cls, src in AGE_SOURCES.items():
+        if src != AGE_SOURCE_JOB_RUNS:
+            continue
+        try:
+            from jobs.job_runs import last_completed
+            row = await last_completed(cls)
+            if row and row.get("finished_at") is not None:
+                fin = row["finished_at"]
+                if fin.tzinfo is None:
+                    fin = fin.replace(tzinfo=timezone.utc)
+                ages[cls] = (now - fin).total_seconds()
+                session_dates[cls] = row.get("session_date")
+        except Exception as e:
+            # Unknown, NOT stale. Leaving the age absent renders "no_data";
+            # inventing a large age would render "flatline" and fabricate an
+            # outage out of a read failure.
+            logger.error("[signals_freshness] job_runs age read failed for %s: %s", cls, e)
+
     counters = counters_snapshot()
     classes: dict[str, dict] = {}
     worst = "ok"
@@ -172,7 +261,8 @@ async def signals_freshness_summary() -> dict:
     for cls in sorted(REGISTERED_CLASSES | set(ages) | set(counters)):
         c = counters.get(cls, {"persisted": 0, "rejected": 0, "deduped": 0})
         age = ages.get(cls)
-        status = _class_status(cls, age, c["rejected"])
+        status = _class_status(cls, age, c["rejected"],
+                               last_session_date=session_dates.get(cls))
         if _RANK[status] > _RANK[worst]:
             worst = status
         if age is not None and (cls not in RTH_ONLY_CLASSES or is_market_hours()):

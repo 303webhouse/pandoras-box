@@ -35,8 +35,10 @@ def test_terminal_statuses_are_enumerated():
 
 
 def test_job_name_constant_is_shared():
-    """The loop and the reader must not drift apart on the key."""
-    assert jr.JOB_TRITON_GRADER == "triton_shadow_grader"
+    """The loop and the reader must not drift apart on the key — AND the value
+    must be the string R-IV.295(a) rules, because a hand-written query will use
+    the ruled name. One constant, one spelling, matching the ruling."""
+    assert jr.JOB_TRITON_GRADER == "triton_grader"
 
 
 @pytest.mark.asyncio

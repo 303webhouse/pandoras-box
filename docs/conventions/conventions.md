@@ -412,6 +412,25 @@ the failure.
   real consumer tests the endpoint *as this system uses it*, which is the question that
   matters and the one the SMH read answered.
 
+### Instance 2 — the same shape, one day later, in a supervision task written to prevent it
+
+**R-IV.295(c).** The grader-precondition brief's T3 said *register the grader in
+`signals_freshness`*. That module reads **every** age from `SELECT source, MAX(created_at) FROM signals GROUP BY source` — and **the grader never writes a
+signals row.** The registered class would have carried no age forever, so its staleness
+branch could not fire.
+
+**A probe that reads a table the source never writes cannot fail when the source dies.**
+Same law as the burn counter, arrived at from the opposite direction: there the instrument
+measured the wrong quantity, here it would have measured the right quantity **in a place
+the quantity never appears.**
+
+**What makes it worth recording is where it was found.** Not in legacy code — **in a task
+written to add supervision, in a brief written to remove instruments that cannot fail,
+reviewed and ruled CC-ACTIONABLE.** It was caught at build time by reading the query the
+module actually runs. **The defect class survives being written down by people actively
+looking for it**, which is the case for verifying at the point of construction rather than
+trusting review.
+
 **Kin to the null-trigger law.** There the trigger could not fire; here the probe cannot
 fail. **Both are instruments that report success by construction**, and neither can be
 caught by inspecting its output — only by asking what it would do if the thing it watches

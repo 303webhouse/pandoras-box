@@ -31,7 +31,7 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 # Wired in this build. Kept as a constant so the loop and the reader cannot drift.
-JOB_TRITON_GRADER = "triton_shadow_grader"
+JOB_TRITON_GRADER = "triton_grader"   # the string R-IV.295(a) rules
 
 # Terminal statuses, enumerated. Anything else is not a completion.
 STATUS_RUNNING = "running"
@@ -100,6 +100,35 @@ async def has_completed(job_name: str, session_date: date) -> Optional[bool]:
         return found is not None
     except Exception as exc:
         logger.warning("[job_runs] has_completed(%s) unreadable: %s", job_name, exc)
+        return None
+
+
+async def last_completed(job_name: str) -> Optional[dict]:
+    """The most recent run that COUNTS AS RAN, for the T3 sentinel (R-IV.295(a)).
+
+    `ok` OR `skipped`. A pass that ran and skipped for a stated reason (T4) ran:
+    **the sentinel measures the pass, not the grades.** `timeout` and `error` are
+    excluded — those are the pass failing, which is precisely what must alarm.
+
+    Returns None when there is no such run OR when the table cannot be read. The
+    caller must not read None as "stale": see signals_freshness, which renders an
+    unreadable age as unknown rather than as an age past its SLO.
+    """
+    try:
+        from database.postgres_client import get_postgres_client
+
+        pool = await get_postgres_client()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT session_date, finished_at, status FROM job_runs "
+                "WHERE job_name = $1 AND status = ANY($2::text[]) "
+                "AND finished_at IS NOT NULL "
+                "ORDER BY finished_at DESC LIMIT 1",
+                job_name, [STATUS_OK, STATUS_SKIPPED],
+            )
+        return dict(row) if row else None
+    except Exception as exc:
+        logger.warning("[job_runs] last_completed(%s) failed: %s", job_name, exc)
         return None
 
 
