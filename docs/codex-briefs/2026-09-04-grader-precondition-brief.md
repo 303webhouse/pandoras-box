@@ -153,7 +153,7 @@ surface, same alarm path, different age source.**
 | field | value |
 |---|---|
 | predicate | **a pass completed within 26h, when a pass was due** |
-| expected satisfaction | **≈100% of CALENDAR days** |
+| expected satisfaction | **≈100% of DUE passes** |
 | state change | **a missed trading day** |
 | reachability | the deafness test — age the completion past threshold, observe the alarm, **clear it and VERIFY the clear** |
 
@@ -166,8 +166,9 @@ warning six lines above the new entry**, written about `STRIKE_IB_BREAK`:
 > *"it must not page across weekends or holidays — a 26h SLO on a weekday-only producer is
 > a guaranteed false red roughly 104 times a year."*
 
-**So the hour bound is kept AND gated on whether a pass was DUE** (`_pass_overdue()`). **That gate is
-what makes the declared satisfaction of ≈100% OF CALENDAR DAYS true** — ungated, the same
+**So the hour bound is kept AND gated on whether a pass was DUE** (`_pass_overdue()`). **R-IV.298(a) corrects the declaration's unit: ≈100% of DUE PASSES**, not of
+calendar days — spine's original wording was wrong at write time, and the gate is what makes
+the corrected form measurable at all — ungated, the same
 predicate satisfies roughly five days in seven, and the §1.1 declaration would have been
 false on its face the day it was written.
 
@@ -211,6 +212,37 @@ largest single names in the book as indices.
 
 **A set named for a class it does not encode is worse than an absent one** — the absent
 one makes you go and look.
+
+**VOCABULARY READ LIVE 2026-09-06, BEFORE THE CLASSIFIER WAS WRITTEN** (report
+contract item 6). Out-of-band via `railway run` so the key was never printed and no
+production code path changed:
+
+```
+SPY   HTTP 200   issue_type "ETF"            sector None
+XLF   HTTP 200   issue_type "ETF"            sector None
+NVDA  HTTP 200   issue_type "Common Stock"   sector "Technology"
+SPX   HTTP 200   issue_type null             sector None
+19 fields returned; issue_type present on all four.
+```
+
+**Three findings, none of them assumable from the field's name:**
+
+**1. `issue_type` IS NULL FOR SPX.** The cash-settled list is therefore not a convenience
+alongside the vendor — **it is the only thing that classifies those symbols**, and it must
+be consulted FIRST. A vendor-first implementation returns UNMAPPED for exactly the class
+this task exists to separate out. **This is why the order in the code is the order it is.**
+
+**2. `sector` IS NULL FOR EVERY ETF MEASURED** — SPY, XLF and SPX all null; only the single
+name carried one. **S4's sector stratum will therefore be UNMAPPED across most of the
+Triton universe**, which is heavily ETF. Amendment 1's rule already covers the *handling*
+(*"a ticker with no map is UNMAPPED, never guessed"*), but **the MAGNITUDE belongs on the
+registration face**: a stratum that is unmapped for most rows is not a stratum anyone should
+later condition on without knowing that. **Declared here rather than discovered at analysis
+time.**
+
+**3. `/info` ANSWERED 200 WHILE `/ohlc/1d` SERVED NOTHING.** Independent re-confirmation that
+`DEF-UW-OHLC-DEAD` is **endpoint-specific**, not an auth or account failure — fresh evidence for
+that defect's fix item 3, obtained as a side effect rather than by a separate investigation.
 
 **SOURCE RULED — R-IV.279(e). Two inputs, and neither is `INDEX_TICKERS`:**
 
