@@ -14,6 +14,31 @@ Every mechanism claim below is that document's; this brief adds only the build s
 
 ---
 
+## ERRATUM 1 — this brief nearly shipped a null-trigger in its own supervision task
+
+**Found at build time, 2026-09-06, filing T3. Recorded per R-IV.295(c).**
+
+**T3 said "register in `signals_freshness`". Doing that literally would have produced a sentinel that
+could never fire.**
+
+`signals_freshness` derives **every** age from one query — `SELECT source, MAX(created_at) FROM signals GROUP BY source` — because its premise is that every
+registered class is a signal **PRODUCER**. **The grader is a signal CONSUMER:** it
+`UPDATE triton_flow_shadow` and never writes a signals row. So the class would have carried `age = None`
+forever, `_class_status` could only ever return `"no_data"`, and **the staleness branch was
+unreachable by construction.**
+
+**Binding-condition premise, corrected on this face:** the gate *"NO second sentinel where
+`signals_freshness` already covers it"* rested on the assumption that it covers the grader. **It does
+not, and cannot, without an age source.** The T3 built under R-IV.295(a) is therefore **not
+a second sentinel — it is the first one that can fail.**
+
+**Why this belongs on the brief rather than in a note.** The brief exists to remove
+supervision that cannot fail, and **its own supervision task specified one.** The defect
+class is not something the author was insufficiently alert to; it is something that
+survives being written down by someone actively looking for it. **That is the argument for
+build-time verification over review**, and it is why the reachability requirement in §1.1
+is stated as a demonstration rather than an assertion.
+
 ## What this fixes, in one line
 
 **Since 2026-07-31 the grader has not run on its schedule — it has run on deploys.**
@@ -113,6 +138,44 @@ exist — an empty row for a job that never wrote is indistinguishable from a jo
 never ran.
 
 ### T3 — Register in `signals_freshness` + liveness sentinel + DEAFNESS TEST
+
+**SHAPE RULED — R-IV.295(a). BUILT 2026-09-06.**
+
+The sentinel reads `job_runs.last_completed(job_name='triton_grader')` and registers `triton_grader` in `signals_freshness` as a class whose
+**AGE SOURCE IS PLUGGABLE**: `MAX(created_at)` on `signals` for producers, `job_runs` for consumer jobs. **Same
+surface, same alarm path, different age source.**
+
+**A pass that ran and skipped for a stated reason (T4) COUNTS AS RAN** — `job_runs.last_completed(job_name='triton_grader')` accepts
+`ok` / `skipped` and excludes `timeout` / `error`. **The sentinel measures the pass, not the grades.**
+
+### §1.1 REGISTRATION
+
+| field | value |
+|---|---|
+| predicate | **a pass completed within 26h, when a pass was due** |
+| expected satisfaction | **≈100% of CALENDAR days** |
+| state change | **a missed trading day** |
+| reachability | the deafness test — age the completion past threshold, observe the alarm, **clear it and VERIFY the clear** |
+
+### The 26h bound needed a session gate, and this module says why in its own words
+
+**A bare 26h SLO would be a guaranteed weekend false red.** The grader runs weekdays
+post-close, so Friday's pass is 48h+ old by Sunday. **`signals_freshness` already carries that exact
+warning six lines above the new entry**, written about `STRIKE_IB_BREAK`:
+
+> *"it must not page across weekends or holidays — a 26h SLO on a weekday-only producer is
+> a guaranteed false red roughly 104 times a year."*
+
+**So the hour bound is kept AND gated on whether a pass was DUE** (`_pass_overdue()`). **That gate is
+what makes the declared satisfaction of ≈100% OF CALENDAR DAYS true** — ungated, the same
+predicate satisfies roughly five days in seven, and the §1.1 declaration would have been
+false on its face the day it was written.
+
+**Deliberate temporary approximation, stated so it is not mistaken for a settled choice:**
+`_pass_overdue()` uses a **weekday** rule, so it is a **holiday** false red until **T7** replaces it
+with the single market calendar. That is a smaller and rarer wrong than a weekly one, and
+it is the fifth member of the weekday-approximation family this brief exists to retire —
+**registered here rather than left to be discovered.**
 
 R-IV.133(b) ordered this registration and **it is not in the code.** Register the
 grader, add the sentinel, and **demonstrate at deploy that the sentinel can fire** —

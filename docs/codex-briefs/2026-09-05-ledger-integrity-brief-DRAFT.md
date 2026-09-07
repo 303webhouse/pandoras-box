@@ -245,6 +245,26 @@ not a bound.** The error errs *safe*, which is why nobody filed it — the same 
 let the flattering half of `DEF-MARK-INTEGRITY`'s pair suppress the report the alarming half
 would have caused. **An error that only ever errs safe is an error nobody files.**
 
+### T6b — A NUMERIC STOP COLUMN HOLDS A LEVEL, NOT A RULE (R-IV.295(e))
+
+**POSITIONS' second instance of the schema gap.** A numeric stop column can hold
+`480.00`. It cannot hold *"close below 480 on a daily bar"* or *"exit by Friday if
+unresolved"* — so **conditional close-stops and time stops live only in free-text notes.**
+
+**The consequence is not that the rule is missing. It is that the rule is INVISIBLE TO
+EVERY CONSUMER.** Risk math reads the number and computes a bound that the actual exit
+discipline does not match; nothing errors, and the mismatch is discoverable only by a human
+reading notes. **A stop that only a person can see is not a stop the system has.**
+
+**Same family as `DEF-HUB-MAXLOSS-OPTIONS`**, where a bound is computed off a mark instead of basis: in
+both cases a **risk quantity is represented by a number that cannot express the thing it
+stands for.** The fix is not a bigger number — it is a stop that carries its **type** and
+its **trigger**, with the numeric level as one field of several.
+
+**Scoped here, not built here.** It rides the ledger build because it is the same table and
+the same migration wave; **the exit-rule vocabulary is a decision for the Trade Analysis
+lane**, which is where the discipline is authored.
+
 ### T7 — Positions tab — **MOCKUP GATE**
 
 **No UI code until a mockup is approved.** Last in sequence deliberately: a tab built over an
