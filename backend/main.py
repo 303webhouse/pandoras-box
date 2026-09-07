@@ -962,7 +962,13 @@ async def lifespan(app: FastAPI):
                                 timeout=TRITON_GRADER_TIMEOUT_S,
                             )
                             rows = (result or {}).get("graded") if isinstance(result, dict) else None
-                            await finish_run(run_id, STATUS_OK, rows_touched=rows)
+                            # T4: the pass RAN, so status is ok even when it graded
+                            # nothing. The reasons ride in skip_reason -- "ran and
+                            # skipped for a stated reason" is a run, not a failure.
+                            _sk = (result or {}).get("skips") if isinstance(result, dict) else None
+                            _reason = ", ".join("%s=%d" % kv for kv in sorted(_sk.items())) if _sk else None
+                            await finish_run(run_id, STATUS_OK, rows_touched=rows,
+                                             skip_reason=_reason)
                         except asyncio.TimeoutError:
                             # T1's per-fire metric. A timeout with no counter is
                             # indistinguishable from a timeout that never fires.

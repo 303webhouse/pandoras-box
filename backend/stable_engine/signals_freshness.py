@@ -110,8 +110,9 @@ SLO_SECONDS: dict[str, int] = {
     # bound would fire every single weekend.
     #
     # So the hour bound is kept AND gated on whether a pass was DUE
-    # (_pass_overdue). That is what makes R-IV.295(a)'s declared satisfaction of
-    # ~100% OF CALENDAR DAYS true rather than ~5/7.
+    # (_pass_overdue). The declared unit is ~100% OF DUE PASSES (R-IV.298(a)
+    # corrects R-IV.295(a)'s 'calendar days'); ungated, a bare 26h bound would
+    # miss roughly two days in seven and the declaration could not hold.
     "triton_grader": 26 * 3600,
 }
 

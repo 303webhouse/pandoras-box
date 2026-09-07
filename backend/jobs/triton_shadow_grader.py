@@ -36,9 +36,16 @@ async def run_triton_shadow_grader() -> dict:
         fetch_r_close_index, nth_trading_day, close_on_or_near, _f,
     )
 
+    # T4 (R-IV.289): every skip carries a REASON. A bare count answers "how many
+    # did not grade" and not "why", and the two questions have different fixes.
+    skips: dict[str, int] = {}
+
+    def _skip(reason: str, n: int = 1) -> None:
+        skips[reason] = skips.get(reason, 0) + n
+
     pool = await get_postgres_client()
     if not pool:
-        return {"graded": 0, "skipped": 0}
+        return {"graded": 0, "skipped": 0, "skips": {"no_db_pool": 1}}
 
     async with pool.acquire() as conn:
         rows = await conn.fetch(
@@ -54,7 +61,8 @@ async def run_triton_shadow_grader() -> dict:
             GRADE_LIMIT,
         )
     if not rows:
-        return {"graded": 0, "skipped": 0}
+        # NOT a skip. Nothing was ungraded, which is the healthy steady state.
+        return {"graded": 0, "skipped": 0, "skips": {}}
 
     # Group by ticker for batched bar fetches
     by_ticker: dict = {}
@@ -66,6 +74,7 @@ async def run_triton_shadow_grader() -> dict:
 
     for ticker, group in by_ticker.items():
         if not ticker:
+            _skip("blank_ticker", len(group))
             skipped += len(group)
             continue
         earliest = min(
@@ -76,6 +85,7 @@ async def run_triton_shadow_grader() -> dict:
         idx = await fetch_r_close_index(ticker, lookback_days)
         if not idx:
             logger.warning("triton_grader: no 'r' bars for %s — skip %d", ticker, len(group))
+            _skip("no_regular_session_bars", len(group))
             skipped += len(group)
             continue
 
@@ -88,19 +98,29 @@ async def run_triton_shadow_grader() -> dict:
                 if not entry or entry <= 0:
                     entry = close_on_or_near(idx, fire_d)
                 if not entry or entry <= 0:
+                    _skip("no_entry_price")
                     skipped += 1
                     continue
 
                 vals = {1: None, 3: None, 5: None}
+                # T4: a horizon that HAS NOT ARRIVED and a horizon whose BAR IS
+                # MISSING both leave vals empty, and they are opposite facts --
+                # the first resolves itself tomorrow, the second never does.
+                # A single "skipped" count cannot tell them apart, which is how a
+                # real bar gap hides inside an expected wait.
+                any_reachable = False
                 for k in HORIZONS:
                     tgt = nth_trading_day(fire_d, k)
                     if tgt > today:
                         continue  # horizon not reached yet
+                    any_reachable = True
                     close_k = close_on_or_near(idx, tgt)
                     if close_k is not None:
                         vals[k] = _dir_adj(entry, close_k, direction)
 
                 if all(v is None for v in vals.values()):
+                    _skip("bars_missing_for_reached_horizon" if any_reachable
+                          else "horizon_not_reached_yet")
                     skipped += 1
                     continue
 
@@ -121,8 +141,10 @@ async def run_triton_shadow_grader() -> dict:
                     fully += 1
             except Exception as exc:
                 logger.warning("triton_grader: row %s skip: %s", g["id"], type(exc).__name__)
+                _skip("row_error:" + type(exc).__name__)
                 skipped += 1
                 continue
 
-    logger.info("triton_grader: touched=%d fully_graded=%d skipped=%d", graded, fully, skipped)
-    return {"graded": graded, "fully_graded": fully, "skipped": skipped}
+    logger.info("triton_grader: touched=%d fully_graded=%d skipped=%d reasons=%s",
+                graded, fully, skipped, skips or "{}")
+    return {"graded": graded, "fully_graded": fully, "skipped": skipped, "skips": skips}

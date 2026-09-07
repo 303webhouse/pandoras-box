@@ -235,6 +235,14 @@ tickers succeeding. The breadth symbols are gone; the equities are not.
    still answer (they do: `/info`, earnings and flow all returned on the same boot, so a
    blanket auth failure is already ruled out).
 
+   **RE-CONFIRMED 2026-09-06 with a direct, out-of-band call**, not inferred from a boot
+   log: `/info` returned **HTTP 200 with 19 fields for four tickers** while `/ohlc/1d` was
+   serving nothing. **Same key, same account, same host, one endpoint dead.** That
+   eliminates auth and account-level suspension outright and leaves quota-per-endpoint or
+   deprecation. The call was made for T5's vocabulary read, so this evidence cost nothing
+   extra — worth noting because the metering test in the AEGIS pass can be carried the
+   same way.
+
 ## SCOPE CONFIRMED — R-IV.279(d)
 
 1. **`indicators_source` is derived from which server actually answered, PER CALL.** Not per module,
