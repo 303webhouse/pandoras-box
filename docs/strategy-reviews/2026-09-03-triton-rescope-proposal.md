@@ -49,7 +49,22 @@ Measured (k/burn artifact `4557c775…`): `darkpool_ticker` 12,320 calls, ~251/d
 
 **Call: PERSIST, with a hard pause date.** The spend's only value is the sink, and the sink's economics are favorable precisely because acquisition is already running and paid. Therefore: sink briefs release to BUILD's queue on ratification of this proposal (builds were correctly HELD until it, R-IV.152). **If no sink is live by forward-window T0, the dark-pool poller pauses by flag** — rollback-flag pattern, 48-hour watch; any breakage identifies the hidden runtime consumer the Q4 sweep has not yet found, which is itself diagnostic. Tide follows the same rule at lower stakes. Proposed queue order, ATHENA/spine governing: grader mechanism diagnosis → sinks → flow-leg upgrade.
 
-> **STATE OF RECORD** (CC-BUILD annotation, R-IV.274(b)): **"condition fired 09-03 · ruled 09-05 · PAUSED by principal · resume on sink ship."**
+> **STATE OF RECORD — SUPERSEDED 2026-09-08, R-IV.321(a):** *"watch found LIVE consumers
+> — the Regime panel's flow read and the `options_flow` / `darkpool` composite factors — pause
+> REVERSED 2026-09-08; sinks add persistence alongside the live path."* **Entered under
+> spine's name: spine's 'costs nothing' claim is the falsified finding.**
+>
+> **What the pause was FOR still holds** — it was a diagnostic, and it worked exactly as a
+> diagnostic should: **breakage identified consumers no sweep had found.** The clause
+> predicted a hidden runtime consumer; the watch found two classes of them. **The pause is
+> reversed on its result, not abandoned as a mistake.**
+>
+> **And the finding is the one this lane could not have made from a quiet watch.** The
+> 09-05 filing warned that *"a quiet watch is weak evidence, not strong"* and that silent
+> degradation leaves no signal. **These consumers did not error — they went to zero**, which
+> is the shape that warning named.
+>
+> *Prior line, kept:* **"condition fired 09-03 · ruled 09-05 · PAUSED by principal · resume on sink ship."**
 >
 > The conditional above — *"if no sink is live by forward-window T0, the dark-pool poller pauses by flag"* — **is no longer a conditional.** T0 was reached at spine ratification 09-03 with no sink live, so the condition fired; R-IV.273(c) ruled it 09-05 and the principal gave the word. Both pollers were paused by flag the same day — tide as well as dark pool, the clause's "tide follows the same rule" — and the executing artifact is `docs/edge/2026-09-05-pivot-pass-disposition.md`.
 >
@@ -72,7 +87,7 @@ Conventions binding by anchor — `docs/conventions/verification-laws.md`, ratif
 
 **Registered:** GRADER-DARK (P2 — **RECOVERED 09-02 20:41:55Z, not resolved**; mechanism diagnosis commissioned; the watchdog-premise contradiction — 307 graded rows on fire-dates recorded as fully shed — and the re-key rider are dual-routed into that diagnosis) · RETENTION-DARK (P3 — fix BLOCKED pending residue documentation; any restored policy must be grader-gated) · DEAD-FIELDS · GRADER-NO-SKIP-REASON · INDEX-UNGRADEABLE (ongoing — index rows continue to arrive ungradeable in the future cohort).
 
-**Requested, unconfirmed:** DARKPOOL-NO-SINK · TIDE-NO-SINK — mechanism now measured; registration re-requested with this filing.
+**Requested, unconfirmed:** `darkpool`-NO-SINK · TIDE-NO-SINK — mechanism now measured; registration re-requested with this filing.
 
 **Open:** Amendment 2 grade-identity check on the 09-02 repair (53 mixed-path rows entered audit_n; retroactive sample re-grade requested) · RELEASE clause restoration into the holdout registration (demonstrated hole, per the halt doc) · Q4 sweep result · Q5 reachability read · verification-laws header still carries the pre-ratification citation bar (one-line BUILD fix).
 
