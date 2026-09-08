@@ -148,9 +148,30 @@ its convention, so **a consumer summing across rows cannot detect the mixture** 
 a number, and the number is wrong by the fee component of however many rows happen to be
 net. This is the vacuous-column family arriving as a UNIT error rather than a null one.
 
-**Measured relation on the WEAT row:** `max_loss 30.52 / basis 15.26` — exactly 2.0000. Stated as an
-observation; whether that is a 2-lot, a 2-contract or a 2-leg row is **not determined
-here**, and it matters to the fix.
+**Measured relation on the WEAT row:** `max_loss 30.52 / basis 15.26` — exactly 2.0000.
+
+> **RESOLVED by POSITIONS (R-IV.315(b)): id 367's `max_loss` was the SIX-CONTRACT DEBIT
+> CARRIED ON A THREE-CONTRACT REMAINDER** — stale scope after a **partial close**. The
+> 2.0000 is 6/3, not a leg count and not a lot count.
+>
+> **This is the SAME DEFECT ON THE CLOSING SIDE**, and it belongs beside `unified_positions.py:440-447`:
+>
+> | event | what happens to `max_loss` | result |
+> |---|---|---|
+> | **scale-IN** | scaled by `new_qty / old_qty`, never recomputed from the blended entry | carries the FIRST LOT'S PRICE at the final qty (id 409) |
+> | **partial CLOSE** | **not rescaled at all** | carries the PRE-CLOSE SCOPE on the remainder (id 367) |
+>
+> **Two symptoms, one cause: a derived quantity is stored and then maintained by event
+> handlers.** The scale-in path at least tried and got the factor arithmetically right; the
+> closing path does not try. **Neither is fixable by improving the handler**, because the
+> next event type will need its own correct rule, and the one after that.
+>
+> ****recompute-on-every-write** COVERS BOTH**, and that is the test of the fix: a remedy that only closes the
+> case in front of it is how this defect reached two event types in the first place.
+>
+> **POPULATION CENSUS IN THE BUILD**, as POSITIONS said — **how many rows currently carry a
+> `max_loss` from a scope they no longer have is UNMEASURED**, and two known instances from two
+> different event types is not a basis for guessing the third number.
 
 **IN SCOPE: normalize to GROSS, with a FEE-DELTA COLUMN.** Gross plus an explicit fee
 delta is strictly more information than either convention alone — and, unlike a
