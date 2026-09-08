@@ -83,13 +83,40 @@ and then discarded before serialization** — `composite.py:932-935` computes
 
 **NOT DIAGNOSED HERE.** Stated as a measurement with its two candidate explanations named.
 
+## SOURCE PATHS — the half this census owed (added 2026-09-08)
+
+**Traced for the four dead factors. The declared sources are in the modules' own headers:**
+
+| factor | module | declared source |
+|---|---|---|
+| `copper_gold_ratio` | `bias_filters/copper_gold_ratio.py` | *"yfinance COPX (copper miners ETF), GLD (gold ETF)"* |
+| `spy_trend_intraday` | `bias_filters/spy_trend_intraday.py` | *"yfinance SPY"* |
+| `dxy_trend` | `bias_filters/dxy_trend.py` | computed composite; imports `neutral_reading()` |
+| `breadth_intraday` | `bias_filters/breadth_intraday.py` | reads a cached JSON payload (breadth) |
+
+**Two of the four declare yfinance**, which is notable against the standing tension: this
+lane recorded on 2026-09-05 that yfinance is *declared fallback, de-facto primary*, and
+these two name it as **primary in their own headers**. **A third surface for that tension.**
+
+**And yfinance's measured failure was on BREADTH SYMBOLS specifically** — `^ADVN`,
+`^DECLN` and their variants, HTTP 404, while all 15 equity tickers succeeded.
+**`breadth_intraday` is a breadth factor.** That is a candidate mechanism for one of the four,
+and it is a LEAD not a finding: the module reads a cached payload, so whether the cache is
+fed by the failing symbols is unread.
+
+**`bias_filters/copper_gold_ratio.py` names COPX and GLD** — both of which appear in the measured
+`/ohlc/1d` fallback list. They resolve through Path B, which falls back and works, so a dead
+`copper_gold_ratio` is **not** explained by the UW outage. **Named to close it off, not to blame it.**
+
 ## What this census did NOT do
 
-**Source paths per factor were not traced, and 7-day history was not read.** Spine asked
-for both; the live payload carries neither, and reading history is a DB question that
-belongs with CC-QUERY. **The four zero-readers are identified and the coverage defect is
-confirmed without them** — the source-path map would say *why* each is dead, which is the
-next question, not this one.
+**7-DAY HISTORY WAS NOT READ.** The live payload does not carry it and reading history is a
+DB question that belongs with CC-QUERY. **It is the one item of R-IV.321(b) still
+outstanding.**
+
+*(Source paths WERE traced — added above on 2026-09-08. This paragraph originally said they
+were not, and is corrected rather than deleted so the sequence is legible: the census was
+filed with that half owed, and the half was paid the same day.)*
 
 **`excess_cape` and `savita` are correctly excluded** and are the only two the system admits
 to missing. **`excess_cape` was the last factor `factor_history` ever recorded** (2026-07-23,
