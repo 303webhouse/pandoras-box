@@ -245,5 +245,26 @@ DEPLOY**, so it does not disturb D3's frozen day. TEST-labelled, audit-logged, l
 **Observations 3 and 4 — T5b's A/B/C**, six seal counts, Phase B's expected count declared
 before it runs. Against prod after this deploy, as ruled.
 
+### Schedule of record, R-IV.324
+
+| when | what | deploy? |
+|---|---|---|
+| **Wed 09-09** | **DEAFNESS TEST** — age the `job_runs` completion by controlled write, TEST-labelled, audit-logged; observe the alarm; restore; clear the latch; **verify the clear**. **T5b A/B/C.** | **NO — frozen day** |
+| **Thu 09-10 AM** | **D3 read** | no |
+| **Thu 09-10** | post-D3 batch: grader yfinance fallback + provider column, fallback-rate alarm, Path A display fallback, SPY-to-allowlist | yes |
+
+**D3 stands on LIVENESS ALONE (R-IV.324(b)): a scheduled pass that ran and skipped
+satisfies it.** Tonight's pass graded zero and that is not a D3 failure — D3 asks whether
+the SCHEDULE works, and the answer does not depend on whether bars arrived.
+
+**T5b's Phase B expected count is declared against the classification predicate on
+`triton_flow_shadow` (R-IV.324(d)) — bar-independent**, so the dead vendor path does not block it. **The
+seal invariant `count(...) == 843` is tomorrow's meaningful check**, not grading throughput.
+
+**Vendor side:** the principal is checking the UW plan/endpoint status; this lane's three
+read-only candidates (deprecation / entitlement / outage) narrow on his answer. **No
+further probing from here** — a second lane testing the same endpoint would add calls and
+no information.
+
 **Observation 5 — the post-condition grep**, re-run after the last `backend/` commit, which is
 Thursday's batch.
