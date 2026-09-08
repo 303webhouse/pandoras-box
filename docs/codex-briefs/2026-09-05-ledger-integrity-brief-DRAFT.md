@@ -285,6 +285,15 @@ equivalently  51.5899 x 30           = 1,547.70
 > EARLIER and 20 @ 49.12 LATER.** If the view shows a single 20-share order, the two-lot
 > reading fails and the corrupt reading returns.
 >
+> **STATE OF RECORD (R-IV.310(a)): "two lots entered, one no longer held"**, pending
+> Activity & Orders. **"Corrupt row" is withdrawn.**
+>
+> **THE FIX (R-IV.310(a)): RECOMPUTE `max_loss` ON EVERY WRITE** — `entry x qty` for stock rows,
+> the option math for option rows. **Not "scale it correctly"**: any rule that carries a
+> previous value forward re-creates this defect the next time an input moves. The defect is
+> not that the scaling factor was wrong — it was arithmetically right — **it is that a
+> derived quantity was stored and then maintained.**
+>
 > **What does NOT change either way:** the row and the broker order **can both be right and
 > still disagree**, because the hub holds a blended position and not its lots. That is the
 > finding, and it is bigger than this row.
@@ -369,10 +378,28 @@ which lots, in what order, at what prices — was never stored.
 row without its lots reproduces this exact ambiguity on every scaled position, and renders
 it attractively.
 
-**Interaction with T6d, stated because it decides a schema:** provenance is **per lot**,
-not per position. A scaled position can hold one `BROKER_VERIFIED` lot and one `PRINCIPAL_REPORTED` lot, and
-collapsing that to a single row-level value **loses precisely the distinction the column
-exists to make.**
+**SCHEMA RULED — R-IV.310(b). PROVENANCE IS PER LOT.**
+
+```
+position_lots (position_id, qty, price, fill_time, provenance, source)
+```
+
+**The position row becomes the AGGREGATE. Entry, cost basis and `max_loss` DERIVE from the
+lots and are never stored independently of them.**
+
+**That single sentence closes the whole family.** T6's defect was a derived quantity being
+stored and separately maintained; T6d's was provenance being collapsed to a row that has
+more than one origin; T6e's was lots not existing at all. **They are one defect in three
+places, and derivation-from-lots is one fix for all three** — a stored aggregate cannot
+drift from lots it is computed from on read.
+
+**The ledger build creates the table and the derivation. The positions-screen brief consumes
+it** for scale-in, edit, and multi-leg. **It is id 409's whole problem in schema form.**
+
+**EVIDENCE — three live instances (R-IV.310, closing note): ids 409, 332, 367.**
+**Three rows, three lot events, zero columns.** The count is the argument: this is not one
+row's accident but the normal outcome of scaling any position, and **nothing needs building
+beyond what the schema above already orders.**
 
 ### T7 — Positions tab — **MOCKUP GATE**
 
