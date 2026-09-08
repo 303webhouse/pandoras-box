@@ -15,7 +15,14 @@
      id 332 USO's basis is under review, table and total deliberately unchanged.
      TA-009 (2026-09-07): acceptance-test coverage rule added to Standing rules — no
      BROKER_VERIFIED figure without an export covering the entry date; screenshots correct
-     only where the export is silent and the note must say so. id 409 is the first instance. -->
+     only where the export is silent and the note must say so. id 409 is the first instance.
+     R-IV.313 / TA-012 (2026-09-07): USO id 332 SPLIT FIFO — id 332 is now the CLOSED 6/15
+     lot (realized +37.00 gross) and the OPEN 7/06 lot is the new id 412 (basis 38.00).
+     THE D5 USO MEMBER IS id 412; the TA-005 stamp above naming id 332 records that stamp as
+     issued, and its "basis under review" is now CLOSED. WEAT normalized to gross
+     (15.26 -> 15.00) with its 8/24 partial sale recorded as id 413. Roster total $2,685.20,
+     headroom $1,164.80. Book stamps TA-006/TA-010 carried to id 412 — disposition only;
+     TA-010's average-cost figures are superseded by FIFO and must not be revived. -->
 <!-- Owned by Nick. Olympus updates on committee passes. Cowork morning task reads this + live positions (Pandora MCP) + the Stable board. Created 2026-07-03. -->
 
 ## How this doc works
