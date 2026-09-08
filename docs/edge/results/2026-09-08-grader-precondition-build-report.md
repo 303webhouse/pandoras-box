@@ -89,3 +89,48 @@ on a day with a non-zero expected event rate. Until `n >= 3` exists for more tha
 ticker, **no alarm-count predicate on this surface can be informative** — which is the
 `DEF-STRIKE-WATERMARK-NEVER-ALIVE` n-gate interaction already registered, arriving as an
 acceptance-test problem rather than a monitoring one.
+
+---
+
+## PYTHIA v2.5 — FEED RESTORATION WATCH (R-IV.322)
+
+**Deployed by the principal ~15:20 ET 2026-09-08.** Dedicated v2.5 alerts live for
+**SPY · QQQ · IWM · SMH**; the old v2.4 alerts for those four are being retired to prevent
+duplicate deliveries.
+
+**Owed in tomorrow's report:** first v2.5 event per ticker with its timestamp · any
+duplicates seen before the old alerts stopped · watermark baseline starts. The MP-untrusted
+rule (R-IV.255(c)) lifts per ticker on its first v2.5 event; SPEC-01 rate re-derivation
+(R-IV.233(c)) begins accumulating. **The secret stays on the register.**
+
+### FLAGGED PRE-CLOCK — the restored set IS H-CORE4, exactly
+
+```
+H-CORE4      IWM · QQQ · SMH · SPY
+v2.5 tickers IWM · QQQ · SMH · SPY      identical
+```
+
+**The window's named hypothesis stratum is precisely the set whose feed is restored first.**
+
+**The consequence is a selection effect on the registration, not on the feed.** If the
+window clock starts while only these four carry a live v2.5 feed, then any **H-CORE4 versus
+rest** comparison is confounded by **feed availability** rather than by market behaviour —
+the stratum would look different because it is the only one being measured properly.
+
+**Raised now because the clock has not started.** The precondition order is Amendment 1
+filed → P1/P2 verify → clock, so this is still a pre-clock fact and can be declared on the
+registration face. **After the clock it would be an excuse.** This lane does not edit the
+registration unbidden; the observation is spine's to place.
+
+### And the converter's eight split three ways
+
+```
+on v2.5   QQQ · IWM · SMH          (3 of 8)
+on v2.4   DIA · TLT · XLE · XLF · XLK   (5 of 8)
+v2.5 but NOT in the converter allowlist   SPY
+```
+
+**This bears directly on D7's replacement predicate.** The rewritten form scores the `OK`
+count against a stated **k of 8** — and three of those eight are about to start a fresh
+baseline on a new feed while five stay on the old one. **k must be declared knowing the
+split, or it silently measures the restoration rather than the feeds.**
