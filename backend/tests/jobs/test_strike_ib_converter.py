@@ -177,10 +177,16 @@ def test_risk_reward_is_none_when_entry_sits_on_the_stop():
 # ── expiry roll ─────────────────────────────────────────────────────────────
 
 def test_expiry_friday_rolls_to_wednesday():
-    """2026-09-04 is a Friday; +3 trading sessions = Wed 2026-09-09."""
+    """2026-09-04 is a Friday; +3 TRADING sessions = Thu 2026-09-10.
+
+    CORRECTED under T7 (R-IV.319(b)). This asserted Wed 09-09, which counted
+    Monday 2026-09-07 -- LABOR DAY -- as a session. The test encoded
+    DEF-STRIKE-WATERMARK-HOLIDAY as expected behaviour. Sessions are 09-08,
+    09-09, 09-10.
+    """
     assert date(2026, 9, 4).weekday() == 4
     exp = compute_expires_at(date(2026, 9, 4))
-    assert exp.date() == date(2026, 9, 9)
+    assert exp.date() == date(2026, 9, 10)
     assert exp.hour == 20 and exp.tzinfo == timezone.utc
 
 
@@ -190,8 +196,15 @@ def test_expiry_monday_rolls_to_thursday():
 
 
 def test_next_weekday_skips_the_weekend():
-    assert next_weekday(date(2026, 9, 4)) == date(2026, 9, 7)   # Fri -> Mon
-    assert next_weekday(date(2026, 9, 7)) == date(2026, 9, 8)   # Mon -> Tue
+    """CORRECTED under T7: it also skips holidays now, and this example needed one.
+
+    Friday 2026-09-04's next SESSION is Tuesday 09-08, not Monday 09-07 -- Labor
+    Day. The old assertion is preserved below as the thing that changed.
+    """
+    assert next_weekday(date(2026, 9, 4)) == date(2026, 9, 8)   # Fri -> Tue (Mon = Labor Day)
+    assert next_weekday(date(2026, 9, 8)) == date(2026, 9, 9)   # Tue -> Wed
+    # a plain weekend, no holiday in the way
+    assert next_weekday(date(2026, 9, 11)) == date(2026, 9, 14)  # Fri -> Mon
 
 
 # ── shadow invariants ───────────────────────────────────────────────────────

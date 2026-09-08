@@ -35,9 +35,15 @@ class TestPassOverdue:
     def test_friday_pass_covers_sunday(self):
         assert sf._pass_overdue(date(2026, 9, 4), _et(2026, 9, 6, 23)) is False
 
-    def test_friday_pass_is_overdue_by_monday_evening(self):
-        """Monday's post-close has passed and Monday's pass never ran."""
-        assert sf._pass_overdue(date(2026, 9, 4), _et(2026, 9, 7, 18)) is True
+    def test_friday_pass_is_overdue_by_tuesday_evening(self):
+        """CORRECTED under T7 (R-IV.319(b)). This lane wrote it on 09-06 asserting
+        that a Friday pass is overdue by MONDAY 09-07 evening -- and 09-07 is Labor
+        Day, so no pass was ever due. THE TEST ENCODED THE HOLIDAY FALSE RED AS
+        CORRECT BEHAVIOUR, in the very sentinel built to remove false reds.
+
+        Tuesday 09-08 is the first session after, and Friday's pass is overdue then.
+        """
+        assert sf._pass_overdue(date(2026, 9, 4), _et(2026, 9, 8, 18)) is True
 
     def test_not_overdue_before_the_post_close_hour(self):
         """Monday 10:00 ET: Monday's pass is not due yet; Friday's still covers."""
