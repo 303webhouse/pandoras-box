@@ -239,27 +239,55 @@ reconciliation reads.
 
 `DEF-HUB-MAXLOSS-OPTIONS`, **widened to stock rows** (R-IV.265(e)).
 
-> ### THE CITED INSTANCE IS CORRUPT — CC-BUILD, 2026-09-07, on R-IV.308(a)
+> ### THE CITED INSTANCE IS **UNRESOLVED PENDING LOT HISTORY** — R-IV.309(b)
 >
-> This defect's only cited instance was *"id 409 reads 1,547.70 where basis gives
-> 1,498.30."* **TA-003 has now found the same row wrong on qty (30 → 20), entry
-> (49.9433 → 49.12) and trade date.**
+> **Reframed from "corrupt" on spine's ruling, and the counter-hypothesis now has an
+> exact arithmetic and code confirmation. This lane's earlier "corrupt" reading is
+> WITHDRAWN as the leading explanation.**
 >
-> **1,498.30 IS 30 × 49.9433, TO THE CENT.** The "basis" this defect compared against
-> was computed from the corrupt qty and the corrupt entry. **True basis is
-> 20 × 49.12 = 982.40**, so the cited 49.40 gap is not the defect's magnitude; against
-> 1,547.70 the gap is **565.30** — and a discrepancy that large is not obviously the
-> same defect at all.
+> **THE TWO-LOT DECOMPOSITION.** TA-003 read qty 20 @ 49.12 from the broker. The hub row
+> holds 30 @ 49.9433. Those are consistent if the position is **two lots**:
 >
-> **A defect's evidence was corrupted by a different defect on the same row.** That is the
-> finding, and it is worse than either error alone: this defect looked **small and safe** —
-> a 3% overstatement, erring conservative — **precisely because its comparison figure
-> shared the error it was measuring.**
+> ```
+lot 1    10 @ 51.5899  =   515.90     (earlier, higher)
+lot 2    20 @ 49.1200  =   982.40     (what TA read in Activity & Orders)
+blend    30 @ 49.9433  = 1,498.30     exact
+> ```
 >
-> **Consequence for this build: a NEW instance must be measured on a verified row before
-> the mechanism can be trusted. Nothing here is retracted** — a mark-derived bound still
-> moves with the market, which is wrong independently — **but its one worked example no
-> longer demonstrates that.**
+> **THE MECHANISM, CONFIRMED IN CODE AND TO THE CENT.** `unified_positions.py:440-447` — the
+> ADD-TO-EXISTING branch of `POST /v2/positions` (`create_position`, :382) — recomputes the entry as a proper weighted
+> average and recomputes cost basis from it, **but scales `max_loss` BY QUANTITY ALONE:**
+>
+> ```
+scale        = new_qty / old_qty
+new_max_loss = old_max_loss * scale        # never recomputed from the new entry
+> ```
+>
+> **So max_loss carries the FIRST LOT'S PRICE forward at the FINAL quantity.** Test:
+>
+> ```
+first-lot max_loss 515.90  x (30/10) = 1,547.70
+observed max_loss                    = 1,547.70     EXACT
+equivalently  51.5899 x 30           = 1,547.70
+(the other ordering, 982.40 x 30/20, gives 1,473.60 -- it does NOT match)
+> ```
+>
+> **The match also fixes the lot ORDER**: the 10-share lot came first, the 20-share lot
+> second. Only that ordering reproduces the observed number.
+>
+> **MECHANISM OF RECORD for stock rows, replacing the mark-derived hypothesis
+> (R-IV.309(b)):** *max_loss is frozen at the first lot's price × the final quantity, and
+> is never recomputed on scale-in.* `update_position` does not recompute it either — it writes
+> `max_loss` only when a caller supplies one (`unified_positions.py:1407-1409`), so nothing anywhere revisits it.
+>
+> **DISCRIMINATOR, still owed:** the principal's **Activity & Orders** view (Trade Analysis
+> holds the ask). **The prediction is specific and falsifiable: two SOXS buys, 10 @ ~51.59
+> EARLIER and 20 @ 49.12 LATER.** If the view shows a single 20-share order, the two-lot
+> reading fails and the corrupt reading returns.
+>
+> **What does NOT change either way:** the row and the broker order **can both be right and
+> still disagree**, because the hub holds a blended position and not its lots. That is the
+> finding, and it is bigger than this row.
 
 **A mark-derived maximum loss moves with the market, and a bound that drifts with price is
 not a bound.** The error errs *safe*, which is why nobody filed it — the same asymmetry that
@@ -325,6 +353,27 @@ figure was computed from it as if it were fact.
 **Provenance is not a status field.** It answers *"how do we know this?"*, which is a
 different question from *"is it open?"* and must not be folded into one.
 
+### T6e — LOT HISTORY (R-IV.309(d)) — A REQUIREMENT, NOT A FEATURE
+
+**The hub can hold a blended position but not its lots.** So a hub row and a broker order
+**can both be correct and disagree**, and no amount of care at the reconciliation step
+resolves it — the information needed is not in the schema.
+
+**id 409 is the whole problem in one row.** Three lanes spent a day on a discrepancy that
+is not a discrepancy: TA read one lot, the hub held the blend, and `max_loss` carried the
+first lot's price at the final quantity. **Every one of those three numbers is internally
+defensible. The row still cannot be checked**, because the thing that would settle it —
+which lots, in what order, at what prices — was never stored.
+
+**It rides the positions-screen brief as a REQUIREMENT.** A screen that renders a blended
+row without its lots reproduces this exact ambiguity on every scaled position, and renders
+it attractively.
+
+**Interaction with T6d, stated because it decides a schema:** provenance is **per lot**,
+not per position. A scaled position can hold one `BROKER_VERIFIED` lot and one `PRINCIPAL_REPORTED` lot, and
+collapsing that to a single row-level value **loses precisely the distinction the column
+exists to make.**
+
 ### T7 — Positions tab — **MOCKUP GATE**
 
 **No UI code until a mockup is approved.** Last in sequence deliberately: a tab built over an
@@ -355,32 +404,31 @@ being well presented.
 - **D-final — ACCEPTANCE: the Trade Analysis lane confirms hub against broker, per
   position.** Until this passes, R-IV.268(d)'s sizing restriction stands.
 
-## A LEAD, NOT A FINDING — id 409 is a SOXS row, and the ratio is 1.5251
+## THE 1.52 LEAD — RETIRED ON ARITHMETIC (R-IV.309(c))
 
-**Reported because it may bear on `DEF-SOXS-PRICE-DISCONTINUITY`, and explicitly NOT acted on.**
+**Recorded so the next reader does not rediscover the coincidence and act on it.**
+
+The lead was: id 409's corrupt-to-true notional ratio is **1.5251**, against the pinned
+SOXS trap's **~1.52x**. Same ticker, three significant digits.
+
+**It is empty, and the arithmetic says why in one line:**
 
 ```
-corrupt notional  30 x 49.9433 = 1,498.299
-true notional     20 x 49.12   =   982.400
-ratio                            1.5251
+1.5251  =  1.5000  x  1.0168
+           qty ratio  entry ratio
+           (30/20)    (49.9433/49.12)
 ```
 
-**The pinned SOXS trap records the real discrepancy as ~1.52x.** Same ticker, same figure
-to three significant digits.
+**The notional ratio is the product of the quantity ratio and the price ratio, BY
+CONSTRUCTION** — that is true of any two positions whatsoever. Neither input has anything
+to do with a split. **1.5 x 1.0168 landing near 1.52 is a coincidence between an arbitrary
+product and an unrelated price break.**
 
-**Why this is a lead and not a conclusion:** the trap's 1.52 is a **price** discrepancy
-matched to a 1.51x price break on 06-10. **1.5251 here is a NOTIONAL ratio** — qty times
-price. Those are different quantities, and a coincidence between them on a two-digit figure
-is entirely possible.
+**This retires the lead on arithmetic alone**, independently of how the lot question
+resolves: the identity holds whether id 409 is one corrupt lot or two correct ones.
 
-**But if they share a cause, the remediation changes completely:** a data-entry error is
-fixed by correcting the row, and a split mis-adjustment is fixed by correcting the
-adjustment — **and doing either one to the other's problem makes it worse.**
-
-**DO NOT ACT ON THIS.** The remediation trap pinned at the top of `docs/defects/HELD-QUEUE.md` says a reader
-handed *"reconcile the 6.57x discrepancy"* will strip the x10 that is correct. **This lead
-adds a second way to do the wrong thing confidently, so it is recorded with its
-non-equivalence attached rather than as a number someone can pick up.**
+**DO NOT ACT stands** on the pinned trap itself, which is a separate matter and remains
+live.
 
 ## Gates / what NOT to do
 
