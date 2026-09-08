@@ -6,7 +6,16 @@
      id 408 stamped R-IV.251(b), both 2026-09-04 post-close.
      Expiry completeness is now a QUERY, not this header (R-IV.251(c)): each session close,
      every row WHERE expiry <= today AND status='OPEN' is stamped. The hand-enumerated
-     dated-action line is retired as the completeness instrument; id 408 is why. -->
+     dated-action line is retired as the completeness instrument; id 408 is why.
+     TA-004 (2026-09-07): id 411 entry updated by the Trade Analysis lane — invalidation
+     resolved (volume leg NOT FIRED, TA-002), price stop set (TA-002/TA-003), companion lot
+     id 409 recorded. Book-writes now originate at Trade Analysis; data-integrity at spine.
+     TA-005 (2026-09-07): TA-004 figure corrections — id 409 basis $982.45 (avg 49.1225),
+     combined $1,344.14, partial restated as 4 of 7 (57%); D5 roster carries a note that
+     id 332 USO's basis is under review, table and total deliberately unchanged.
+     TA-009 (2026-09-07): acceptance-test coverage rule added to Standing rules — no
+     BROKER_VERIFIED figure without an export covering the entry date; screenshots correct
+     only where the export is silent and the note must say so. id 409 is the first instance. -->
 <!-- Owned by Nick. Olympus updates on committee passes. Cowork morning task reads this + live positions (Pandora MCP) + the Stable board. Created 2026-07-03. -->
 
 ## How this doc works
@@ -31,10 +40,21 @@ One entry per active thesis (B1 longer-dated, B2 tactical). Every entry MUST hav
 | 404 | IEO | FIDELITY_ROTH | stock | 1,400.60 |
 | 398 | MOO | FIDELITY_ROTH | stock | 851.70 |
 | 406 | COPX | FIDELITY_ROTH | stock | 356.80 |
-| 332 | USO | ROBINHOOD | call_debit_spread 150/165 | 145.00 |
+| **412** | USO | ROBINHOOD | call_debit_spread 150/165 | **38.00** |
 | 365 | XLE | ROBINHOOD | call_debit_spread 70/80 | 23.10 |
-| 367 | WEAT | ROBINHOOD | call_debit_spread 29/30 ×3 | 15.26 |
-| | | | **TOTAL** | **2,792.46** |
+| 367 | WEAT | ROBINHOOD | call_debit_spread 29/30 ×3 | **15.00** |
+| | | | **TOTAL** | **2,685.20** |
+
+- **TA-005 review CLOSED (R-IV.313(d)).** USO 145.00 → **38.00**, WEAT 15.26 → **15.00**;
+  total **$2,685.20**, headroom **$1,164.80**. Both corrections are export-verified against
+  `rh-8.31.2026.csv` and recomputed from the ledger, not transcribed.
+- **The USO member is now id 412, not id 332.** id 332 was split FIFO (R-IV.313(b)): it became
+  the CLOSED 6/15 lot (1 @ 1.45, sold 7/17 at 1.82 gross, realized **+37.00**), and the
+  surviving 7/06 lot — 1 @ 0.38, basis 38.00 — is the new **id 412**. Membership is by id, so
+  the roster follows the lot, not the row that used to hold it.
+- **WEAT's 15.26 was a NET figure** on a roster that is otherwise gross; normalized to 15.00
+  (fee delta 0.26). See `DEF-HUB-MAXLOSS-OPTIONS` — the hub mixes gross and net across option
+  rows, which is a ledger-build normalization item, not a WEAT-specific one.
 
 - **CAP: $3,850** all-wrapper cost basis. **Headroom $1,057.54.**
 - **SLEEVE OPEN — adds within headroom, each subject to standing rules.** This reverses the
@@ -78,6 +98,15 @@ One entry per active thesis (B1 longer-dated, B2 tactical). Every entry MUST hav
   sentence is true again as of 09-04 — it was the short-dated leg, not the wording, that
   made it false.
 
+### Acceptance-test coverage · TA-009
+No row is acceptance-tested, and no figure marked BROKER_VERIFIED, without an export covering
+its entry date. A screenshot corrects only where the export is silent, and the note says the
+export was silent.
+
+**First instance:** id 409 SOXS, corrected 2026-09-06 as **SCREEN_VERIFIED** — no export on
+disk carries a September 2026 activity line, so the export was silent and the row says so.
+See `DEF-EXPORT-COVERAGE-GAP`.
+
 ### Interim rule — option risk figures · R-IV.207(d)
 - **Never size off `max_loss`.** It is unreliable on option rows.
 - **Derive** `entry_price x quantity x 100`, and **cross-check** against `unrealized_pnl`.
@@ -94,21 +123,25 @@ One entry per active thesis (B1 longer-dated, B2 tactical). Every entry MUST hav
   basis **$361.69**.
 - Entry logic: pop into weak participation; short-horizon mean reversion.
 - Invalidation (price/level/event): **semis extend above 2026-09-04's high on expanding
-  volume.** **Price leg LIKELY FIRED** — semis extended after entry. **Volume leg
-  UNASSESSED**, pending principal; whichever he states governs Tuesday's open (R-IV.256(c)).
+  volume.** **Price leg fired 09-04. Volume leg NOT FIRED — principal ruling 2026-09-06
+  (TA-002): low-volume session, extension not on expanding volume. Compound invalidation did
+  not fire; held on stops.**
 - **EXIT PLAN — two fields (R-IV.256(b)):**
   - **TIME STOP: flat by Wed 2026-09-09 close.** Binds per B2, ruled. Monday 09-07 is a
     holiday, so only **two sessions remain** — Tue 09-08 and Wed 09-09.
-  - **PRICE STOP: PENDING — OLYMPUS sets at the PIVOT pass before Tue 2026-09-08 open**
-    (R-IV.257(b)). Written as the word, not left blank. The `stop_loss` column is numeric
-    and cannot carry it, so the column stays NULL and the absence is recorded in `notes`
-    where every read will see it. **The pass is now the binding dependency** — if it does
-    not happen before Tuesday's open, the position runs to the time stop with no price
-    stop at all.
+  - **PRICE STOP (TA-002/TA-003): hard 43.20 unconditional (SMH≈580) = `stop_loss` column.
+    Daily-close stop 44.10 conditional on SMH>576 — notes only. Target 49.00: **4 of 7 off
+    at 49.00 (57%, rounded up from 50%); remaining 3 carry the stop set.** Time stop
+    unchanged: flat by Wed 2026-09-09 close.**
 - **SIZE EXCEPTION LOGGED:** $361.69 basis against B2's $300 cap — **principal-accepted**,
   R-IV.253(b). Recorded as an exception, not a new cap.
+- **COMPANION LOT — id 409, FIDELITY_ROTH, B2 (TA-002).** Same stop set; 100% off at 49.00 or
+  Wed close. Broker: **20 sh, basis $982.45 (avg 49.1225, shown as 49.12)** bought 09-04 —
+  *basis total is authoritative* (TA-005). Hub row: **30 @ 49.9433 dated 09-03 — qty/entry
+  DISPUTED, fix at SPINE.** Combined basis **$1,344.14 (broker)** vs B2's $300 cap —
+  exception logged, principal-accepted.
 - Review date: **2026-09-08** (first session after the holiday).
-- Status: **UNDER PRESSURE** — day-one −10.3%.
+- Status: **UNDER PRESSURE — on stops through Wed 09-09.**
 - **Concurrency — UNENFORCEABLE AS THE BOOK STANDS.** B2 permits two concurrent. This is
   the only row in the book carrying any bucket tag: across 355 rows `strategy_tag` has ever
   held one value (`CORE`, on id 401, closed 2026-09-04) and `tags` is NULL on every row.

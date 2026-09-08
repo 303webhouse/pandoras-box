@@ -100,3 +100,35 @@ basis is fixed at entry, and a risk bound that drifts with price is not a bound.
 **Not measured by this lane.** The 409 figures are POSITIONS' citation. How many stock
 rows are affected, and whether the options half shares the mechanism, is unread here and
 not asserted. Scoped into the ledger-integrity build (1b) as *"option and stock math"*.
+
+---
+
+## FACET — the hub mixes GROSS and NET across option rows (CC-POSITIONS, R-IV.313(f))
+
+`max_loss` is not only miscomputed; on some rows it is computed **from a net-basis figure while
+neighbouring rows are gross.** Measured against the broker export 2026-09-07:
+
+| row | stored | export gross | export net | which convention |
+|---|---|---|---|---|
+| id 332 USO 150/165 | `cost_basis` **145.00** | 145.00 | 145.10 | **GROSS** |
+| id 367 WEAT 29/30 | `cost_basis` **15.26**, `max_loss` **30.52** | 15.00 / 30.00 | 15.26 / 30.52 | **NET** |
+
+**Two consequences, both live before this filing:**
+
+1. **Mixed-convention realized figures.** Computing realized as *gross proceeds − net basis*
+   yields a number belonging to neither convention. The WEAT partial sale was recorded at
+   **+14.74** in `trades` id 601 — not the gross **+15.00**, not the net **+14.48**. Both
+   POSITIONS and spine reproduced that mixed figure before the export settled it.
+2. **Whole-trade `max_loss` on a partial row.** id 367's `max_loss` 30.52 (now 30.00) is the
+   **six-lot** debit carried on a **three-lot** remainder. True max loss on what remains is
+   **15.00** — the stored figure overstates by 2×. This is the same overstatement shape as the
+   XLE 69.30-vs-23.10 and WEAT 30.52-vs-15.26 cases already on this defect, but its *cause* is
+   different: not a bad formula, a stale scope after a partial close.
+
+**Normalization item for the ledger-integrity build:** pick one convention — gross, per
+R-IV.312(a), matching the hub's majority — and normalize every option row's `cost_basis`,
+`max_loss` and derived realized to it, recording the fee delta rather than burying it. Until
+then, any figure crossing two rows may silently cross two conventions.
+
+**Not asserted:** how many rows are affected. Two were measured because two were being
+corrected; the population is unmeasured and a census is part of the build, not of this filing.

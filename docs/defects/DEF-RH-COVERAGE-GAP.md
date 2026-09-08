@@ -174,6 +174,44 @@ time-structure above. No writes were made in filing or reshaping this.
 
 ---
 
+## SUB-CLASS — "lot events recorded in prose or nowhere" · R-IV.313(e)
+
+Three instances found 2026-09-05 → 09-07, across both accounts. **They are three distinct
+failures, not three of one**, and the distinction decides which remedy earns credit.
+
+| # | failure | instance | where the event actually lived |
+|---|---|---|---|
+| 1 | **prose-only** | id 332 USO 150/165 | The second spread (7/06, $38) and the 7/17 sale existed **only inside a `notes` string**. Columns showed one lot at 1.45. |
+| 2 | **one-ledger-of-two** | id 367 WEAT 29/30 | The 8/24 partial sale was in **`trades` id 601 but not in `unified_positions`** — structurally present, in one ledger of two. `closed_positions` held zero WEAT rows. |
+| 3 | **no-artifact** | id 409 SOXS | Neither prose nor ledger: **no export covers the entry date at all.** See `DEF-EXPORT-COVERAGE-GAP`. |
+
+### Resolution of all three (R-IV.313)
+
+- **1 · USO** — split FIFO into id 332 (CLOSED 6/15 lot, realized **+37.00** gross) and
+  **id 412** (OPEN 7/06 lot, basis **38.00**). Export-verified line by line.
+- **2 · WEAT** — partial sale recorded once in the canonical system as **id 413**
+  (CLOSED, 3 @ 0.05 → 0.10, realized **+15.00** gross), citing `trades` id 601 as the
+  import-level record. **No `closed_positions` insert** — one event, one canonical record.
+- **3 · id 409** — corrected to 20 @ 49.1225 under **`SCREEN_VERIFIED`** provenance, with the
+  export silence stated on the row. **The 10-lot's fate remains OPEN.**
+
+### The lots table is credited for 1 and 2 ONLY
+
+A lots table gives prose-only and one-ledger-of-two events a structured home, and would have
+prevented both. **It cannot fix no-artifact.** A lots table with no source to populate it is an
+empty lots table, and crediting it for instance 3 would overstate the remedy — the fix there is
+an export cadence, not a schema.
+
+### Convention finding, surfaced by the same pass
+
+Fixing these exposed that **the hub mixes gross and net across option rows**: id 332's basis
+145.00 was gross, id 367's 15.26 was net. Realized figures computed across the two conventions
+(gross proceeds minus net basis) produce numbers belonging to neither — the WEAT sale carried
+**+14.74**, which is not the gross **+15.00** nor the net **+14.48**. Recorded on
+`DEF-HUB-MAXLOSS-OPTIONS` as a ledger-build normalization item.
+
+---
+
 ## FIDELITY SIBLING — PENDING (CC-BUILD annotation, R-IV.310(d))
 
 **Conditional. Nothing is claimed yet.**
