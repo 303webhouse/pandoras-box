@@ -171,3 +171,30 @@ finding**, not a correction to the measurement. Fix remains **HELD**.
 **HELD and unsequenced.** Remedy family is ingestion — an RH activity ingest path feeding
 `unified_positions`, analogous to the Fidelity path (R-IV.112-b/141), scoped by the
 time-structure above. No writes were made in filing or reshaping this.
+
+---
+
+## FIDELITY SIBLING — PENDING (CC-BUILD annotation, R-IV.310(d))
+
+**Conditional. Nothing is claimed yet.**
+
+**IF** the principal's Activity & Orders view shows a **10-share SOXS sale on 2026-09-04**,
+that is an **unlogged Fidelity closure** — and this defect, registered on the Robinhood
+ingest path, **has a sibling on the account the sweep assumed complete.**
+
+**Why it would matter beyond one row.** This defect's class is **EXISTENCE**: rows that
+should be present and are not. A Fidelity instance would say the gap is **not
+broker-specific**, which is the difference between *"one ingest path is lossy"* and
+*"absence is not detected on any path."* **The second cannot be fixed by fixing Robinhood.**
+
+**Consequence if confirmed:** CC-POSITIONS adds the row, and **Friday's realized figure
+moves.** A realized number that changes when a missing row is added is the same shape as the
+aggregate defects in the ledger build — correct arithmetic over an incomplete set.
+
+**AUTHORSHIP NOTE (conventions #9).** This file's owner line reads *"CC-POSITIONS
+(evidence) · BUILD (pickup)"*. The annotation is filed by CC-BUILD on spine's direct
+instruction, and **the same text has been relayed to CC-POSITIONS so it is not inserted
+twice.** Both trees held this file byte-identical at LF `beafcb5a` and quiescent since 09-03
+when the annotation was written.
+
+**Discriminator, still owed:** Activity & Orders. Trade Analysis holds the ask.
