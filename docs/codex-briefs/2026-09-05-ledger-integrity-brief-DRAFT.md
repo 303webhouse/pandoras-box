@@ -401,6 +401,59 @@ it** for scale-in, edit, and multi-leg. **It is id 409's whole problem in schema
 row's accident but the normal outcome of scaling any position, and **nothing needs building
 beyond what the schema above already orders.**
 
+### T6f — IMPORT CADENCE (`DEF-EXPORT-COVERAGE-GAP`) — A REQUIREMENT
+
+**The lots table needs a source.** `position_lots` can be created empty; it cannot be
+**populated** by anything this build otherwise contains. An import cadence — a scheduled
+job, or a defined manual rhythm with a liveness check — **is the source.**
+
+#### Why this is a requirement and not a later convenience
+
+**Without it, T6d's provenance column is a constant, and a constant provenance is a NULL
+PROVENANCE.**
+
+Every row starts `PRINCIPAL_REPORTED`. **`BROKER_VERIFIED` is reachable only through a broker record arriving.** If
+no import path exists, nothing ever transitions, the column reads `PRINCIPAL_REPORTED` on every row
+forever, and **it can never be observed to be wrong** — which is precisely the defect
+already registered on `indicators_source`, where a hardcoded `uw_computed` named a server that served
+nothing.
+
+**Third instance of that law in this register**, and the first one that would be built
+*after* the law was written:
+
+| instance | the constant | why it could not fail |
+|---|---|---|
+| `indicators_source` | `uw_computed` literal | not derived from which server answered |
+| notes-only `APPROXIMATE` | free text | invisible to every consumer that computes |
+| **T6d without T6f** | **`PRINCIPAL_REPORTED` on every row** | **no event exists that could flip it** |
+
+**So T6f is not "how the lots get filled." It is what makes T6d falsifiable.** A provenance
+column whose second value is unreachable is worse than no column, because it *looks* like
+evidence.
+
+#### The same requirement answers the balance-vintage half
+
+**T5's 88-day hand-typed balance and T6e's missing lots have ONE cause between them: no
+broker data arrives on a cadence.** The balance is stale because nothing refreshes it; the
+lots are absent because nothing delivers them. **One import path closes both**, which is
+why it belongs in this build rather than in a later one.
+
+> **CC-BUILD flag — the instruction was truncated.** The ruling reads *"the same requirement
+> that answers 'live balances"* and ends there. **The reading above — that it points at
+> T5's column-vintage defect — is this lane's INFERENCE, not the ruling's words.** It is
+> written as the obvious completion and marked so it can be corrected in one edit if the
+> intended clause was different.
+
+#### Registration status — the name does not resolve
+
+**`DEF-EXPORT-COVERAGE-GAP` is a PHANTOM as of 2026-09-07.** Searched `C:\th-build\docs` and `C:\trading-hub\docs`,
+every markdown file, by name and by citation: **no artifact, and no other document cites
+it.** This brief is currently its only mention.
+
+**Not a claim about the defect — a bookkeeping fact**, exactly as the R-IV.263 sweep
+defined it. The requirement above stands on its own reasoning; **what is missing is the
+artifact the name points at**, and the brief should not be the only thing carrying it.
+
 ### T7 — Positions tab — **MOCKUP GATE**
 
 **No UI code until a mockup is approved.** Last in sequence deliberately: a tab built over an
