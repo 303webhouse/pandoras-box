@@ -70,7 +70,7 @@
 
 **Collector design law** — binds every instrument this window deploys, by anchor (verification-laws, ratified R-IV.167): §1 `#null-trigger` incl. §1.1 · §2 `#scoped-count` · §3 `#narrow-caution`; plus the five-defect requirements as ratified at re-scope §5. Every predicate this registration declares carries its expected satisfaction rate on its face, per §1.1 — audited for compliance at §8.7, one gap found and closed there.
 
-**Chain:** base draft `5f23564b` → EDGE §8 `0e59be37` (superseded) → TRITON counter-again (I2, over-broad postcondition) → EDGE correction at source, new gate `b1c9791b` → **this joint manifest** → spine ratification = **T0** → PIVOT pass with the principal (EXTEND + registration + spend, one sitting; closing on §7(d)'s sentence as written). → **R-IV.273** — EXTEND + test blessed at PIVOT pass; Amendment 1 pending; spend PAUSED. Disposition filed at `docs/edge/2026-09-05-pivot-pass-disposition.md`, verbatim region gate `0427de59`. → **R-IV.275** — Amendment 1: observational strata. → **R-IV.301** — H-CORE4 declared. → **R-IV.306.**
+**Chain:** base draft `5f23564b` → EDGE §8 `0e59be37` (superseded) → TRITON counter-again (I2, over-broad postcondition) → EDGE correction at source, new gate `b1c9791b` → **this joint manifest** → spine ratification = **T0** → PIVOT pass with the principal (EXTEND + registration + spend, one sitting; closing on §7(d)'s sentence as written). → **R-IV.273** — EXTEND + test blessed at PIVOT pass; Amendment 1 pending; spend PAUSED. Disposition filed at `docs/edge/2026-09-05-pivot-pass-disposition.md`, verbatim region gate `0427de59`. → **R-IV.275** — Amendment 1: observational strata. → **R-IV.301** — H-CORE4 declared. → **R-IV.306.** → **R-IV.323.**
 
 ## AMENDMENT 1 · DECLARED OBSERVATIONAL STRATA
 
@@ -141,6 +141,40 @@ figures are n-WEIGHTED, and that is the correct form** — the weeks hold unequa
 (the third read's carrying week alone is 1,197 of 6,098). Recorded so a later reader who
 averages the seven printed numbers and gets a different answer knows why, rather than
 filing an erratum against a correct line.
+
+**FEED-AVAILABILITY CONFOUND — DECLARED PRE-CLOCK. Spine-authored, R-IV.323(a).
+Verbatim; gate over the quoted text only: `4a1870be`, `363` bytes.**
+
+> PYTHIA v2.5 feed restored 2026-09-08 for exactly the H-CORE4 set (SPY QQQ IWM SMH), the remaining universe still on the collapsed v2.4 feed. The window's rows (triton_flow_shadow) are UW-sourced and unaffected. Any stratum whose source is PYTHIA/TradingView-delivered is CONFOUNDED by feed availability for the restoration period and is reported with that caveat.
+
+**CC-BUILD read, answering the ruling's question (R-IV.323(a)) — S5 IS AFFECTED.**
+`signals.source = 'footprint'` is **TradingView-delivered**, not internal:
+
+```
+backend/webhooks/footprint.py:1-4   "Receives footprint imbalance signals ... from
+                                     TradingView's 'Footprint Alert for Pandora'
+                                     PineScript indicator."
+backend/webhooks/footprint.py:227   @router.post("/footprint")
+backend/webhooks/footprint.py:206   "source": "footprint"
+backend/webhooks/footprint.py:220   process_signal_unified(signal_data, source="footprint")
+```
+
+**So S5 (footprint-present) CARRIES THE CAVEAT BY NAME.**
+
+**One distinction that matters and is easy to lose:** footprint is a **DIFFERENT Pine
+indicator** from PYTHIA, so **the RE10045 mechanism does not automatically apply to it** —
+that was PYTHIA's own array bug. **What it shares is the DELIVERY CHANNEL**, and the
+confound the declaration names is availability, not the specific kill. **S5 is confounded
+because it arrives the same way, not because it broke the same way.**
+
+**Measured, for scale:** the Moby Dick census put footprint at **577 rows, 17 tickers,
+through 2026-09-04 18:45** — so it was **alive four days ago**, and this is a caveat about
+a live feed's coverage rather than a dead one.
+
+**S1–S4, S6 and H2 are unaffected by this clause** on their sources as declared: day-of-week
+and instrument class are derived, sector comes from UW `/info`, DXY from
+`UUP`, tide from UW once the sink lands. **S5 is the only TradingView-delivered
+stratum in Amendment 1.**
 
 **Face label, carried from the ruling: hypothesis generation, not verdict.** Criteria and
 verdict semantics are unchanged by this amendment; nothing here can move a pass/fail.
