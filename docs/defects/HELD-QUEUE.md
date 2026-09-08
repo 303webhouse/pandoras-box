@@ -87,6 +87,13 @@ was done.
 | DEF-MARK-INTEGRITY facets A and B | R-IV.252(d) | HELD; facet B arms when the mark path restarts |
 | 178(a) re-issue | R-IV.252(b) | spine-held, executor CC-BUILD when sequenced |
 
+**MOVED OUT OF HELD 2026-09-07 (R-IV.308(a)):** the **account-string write-path trace** is
+now **in scope for the ledger-integrity build** as T6c. It was parked as a read-only
+investigation of a label problem; TA-003 showed the same write path producing **four wrong
+fields on one money row** (id 409: qty, entry, trade date, account). **A label defect and a
+numeric defect turned out to be one unguarded write**, which is why it stops being a
+question and becomes a task.
+
 ## SINKS BUILD — A PRECONDITION THAT MUST NOT BE INHERITED
 
 **Raised by CC-QUERY on the census relay, recorded here so the sinks build cannot lose it.**
