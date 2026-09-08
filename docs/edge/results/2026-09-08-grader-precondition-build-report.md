@@ -148,3 +148,102 @@ of producing a number.
 
 **SPY-to-allowlist:** R-IV.109(e) is now satisfied — SPY has a dedicated v2.5 alert. **It
 rides Thursday's post-D3 batch with the Path A display fallback, not tonight's push.**
+
+---
+
+## DEPLOY + FIRST PASS — 2026-09-08 (observation 1, and part of 2)
+
+**Push 16:02 ET, `39a20e9..bdb790a`, 21 commits, ONE deploy carrying the code AND the un-pause
+flags** — flags set beforehand with `--skip-deploys`.
+
+### Observation 1 — poll sequence, deployment `c38df2d9`
+
+```
+polls 1-11   BUILDING
+poll 12      DEPLOYING
+poll 13      UNREADABLE     <- predicate HELD; not treated as terminal
+poll 14      SUCCESS
+```
+
+**Readiness gate:** `healthy` on two consecutive samples — **not `degraded`**. The
+`stable_jobs` provisional flatline and the `signals_freshness` flatline both cleared on the live session, exactly as
+`DEF-STABLE-PROVISIONAL-WEEKEND-FLATLINE` said they would, unaided.
+
+**Boot integrity:** startup complete, no traceback, no `ImportError`, and **no
+`job_runs table creation skipped` warning** — migration 028's DDL mirror executed.
+
+### Un-pause, confirmed the same three ways as the pause
+
+```
+/health.paused_pollers   {"darkpool": false, "tide": false}
+[poller_pause] tide poller RUNNING (PAUSE_TIDE_POLLER=false)
+[poller_pause] darkpool poller RUNNING (PAUSE_DARKPOOL_POLLER=false)
+```
+
+### THE FIRST PASS — and it separates the two defects on its own
+
+```
+session_date  2026-09-08
+started       20:38:46.091487+00     finished  20:38:57.278960+00     (11 s)
+status        ok
+rows_touched  0
+skip_reason   no_regular_session_bars=650
+timeouts      {"count": 0, "last_session": null}
+sentinel      {"status": "ok", "last_persist_age_s": 33, "registered": true}
+```
+
+**Every task is exercised by that single row.**
+
+**T1** — 11 s against a 300 s bound, and `timeouts.count` reads **0**. Not absent: **zero**. The
+metric distinguishes *did not fire* from *not instrumented*, which was its whole
+justification.
+
+**T2** — a durable row exists, so *did it run?* is now a `SELECT`. **It started 16:38 ET,
+not 16:15, and that is CORRECT rather than late:** the loop takes a 180 s boot delay then
+checks every 30 minutes, so the ~16:08 check fell before the 16:15 gate and skipped, and the
+16:38 check passed it. **Under the old in-memory flag that interaction was invisible.**
+
+**T3** — the sentinel reads `registered: true`, `status: ok`, `last_persist_age_s: 33`. **The pluggable age source worked
+on live data**: 33 seconds, read from `job_runs`, for a job that writes no `signals` row. The
+class that would have carried `age = None` forever carries a real age on its first day.
+
+**T4 — and this is the night's finding.** `no_regular_session_bars=650`
+
+### The grader is FIXED and grading NOTHING, and those are now separately visible
+
+**650 of 650 rows skipped, 0 graded, because the bar fetch returned nothing.** The grader is
+on **Path A** (`get_ohlc`, no fallback) and `DEF-UW-OHLC-DEAD` is still live — **64 fallback log
+lines on this boot** on the Path B side confirm the endpoint is still serving nothing.
+
+```
+WARNING triton_grader: no 'r' bars for ARM  -- skip 1
+WARNING triton_grader: no 'r' bars for ADBE -- skip 1
+INFO    triton_grader: touched=0 fully_graded=0 skipped=650
+        reasons={'no_regular_session_bars': 650}
+```
+
+**Before T4, this pass would have reported "0 graded, 650 skipped" with no reason —
+indistinguishable from "there was nothing to grade."**
+
+**It is the cleanest possible vindication of not merging the two defects** (R-IV.288(b),
+R-IV.310). **The loop defect is FIXED:** the pass ran on schedule, bounded, durably
+recorded, and the sentinel reads it alive. **The vendor defect is UNFIXED:** it graded
+nothing. **Merged, tonight would have looked like a failed build instead of a working build
+reporting a separate outage.**
+
+**Liveness is not correctness, and the sentinel says so correctly:** `status: ok` on a pass that
+graded zero rows. **A pass that ran and skipped for a stated reason counts as ran**
+(R-IV.295(a)) — a rule written before there was a case, now with one.
+
+### Still owed
+
+**Observation 2 — the deafness test.** It requires provoking the sentinel, which means
+writing an alarm condition into a live system. **Proposed for Wednesday: it needs NO
+DEPLOY**, so it does not disturb D3's frozen day. TEST-labelled, audit-logged, latch cleared
+**and the clearing verified**.
+
+**Observations 3 and 4 — T5b's A/B/C**, six seal counts, Phase B's expected count declared
+before it runs. Against prod after this deploy, as ruled.
+
+**Observation 5 — the post-condition grep**, re-run after the last `backend/` commit, which is
+Thursday's batch.
