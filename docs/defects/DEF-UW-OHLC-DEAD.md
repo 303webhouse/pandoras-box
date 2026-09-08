@@ -257,6 +257,50 @@ tickers succeeding. The breadth symbols are gone; the equities are not.
    extra — worth noting because the metering test in the AEGIS pass can be carried the
    same way.
 
+## FIX SHAPE SUPERSEDED — R-IV.324(b). THE GRADER GETS THE FALLBACK.
+
+**R-IV.321(d) ruled the grader STAYS on the no-fallback path**, and this file argued that at
+length: it is the liveness instrument (conventions #12) and the cross-vendor certificate.
+**R-IV.324(b) supersedes it. The window clock is blocked by THIS defect, not by the
+grader**, and a grader that cannot grade blocks P1 indefinitely while the vendor is out.
+
+**Thursday's post-D3 batch:**
+
+| change | what it replaces |
+|---|---|
+| grader falls back to yfinance, **with per-grade provider provenance — a COLUMN, never a note** | the no-fallback path |
+| **fallback-rate alarm** becomes the UW liveness instrument | the grader's silence |
+| the external arm's cross-vendor claim is **scoped by provider going forward** | an unqualified claim |
+| Path A display fallback (`chart_indicators`, bias factors) | Path A returning `None` |
+| SPY-to-allowlist (R-IV.109(e) satisfied) | — |
+
+**Both properties are PRESERVED BY OTHER MEANS rather than dismissed**, and that is why the
+supersession is coherent instead of a reversal:
+
+- **Liveness** moves from *"the grader goes silent"* to *"the fallback rate rises."* Same
+  law — conventions #12 asks for a consumer that fails when the source dies, and a
+  fallback-rate alarm fails loudly in exactly that case. **It is a better instrument**: it
+  measures every fetch instead of one job's daily pass.
+- **The cross-vendor claim** stops being a property of the path and becomes **a property of
+  each row**, which is strictly more information. A column can say *which* vendor; silence
+  could only say *some vendor, uniformly*.
+
+### The retired certificate still certifies the PAST, and that is worth writing down
+
+**Every row graded before Thursday's change was NECESSARILY UW-sourced**, because Path A had
+no fallback: `get_ohlc` returned bars or it returned `None`, and a skipped row is not a graded
+row. **There was no third possibility.**
+
+**So the provider column can be backfilled for historical rows as `"uw"` with certainty,
+not with an assumption** — and it must be, or those rows carry `NULL` and a later reader
+cannot tell "graded before provenance existed" from "provider unknown". **That is
+`DEF-BIAS-NULL-AS-NEUTRAL`'s exact shape**, registered today on the bias factors, and it would arrive here
+by the same route if the backfill were skipped.
+
+**The property being retired is what makes the backfill sound.** The no-fallback path is
+being given up going forward; **its whole historical value is realised in one migration**,
+and only if that migration runs.
+
 ## SEVERITY RAISED TO P1 — R-IV.321(d)
 
 **The outage was P2 on the ground that the fallback worked and no consumer returned wrong
