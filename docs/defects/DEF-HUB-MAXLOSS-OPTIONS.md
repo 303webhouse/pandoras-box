@@ -132,3 +132,35 @@ then, any figure crossing two rows may silently cross two conventions.
 
 **Not asserted:** how many rows are affected. Two were measured because two were being
 corrected; the population is unmeasured and a census is part of the build, not of this filing.
+
+---
+
+## MECHANISM — TWO EVENT TYPES, ONE CAUSE (R-IV.317(d))
+
+**Filed by CC-BUILD on spine's instruction under the exception form ratified at
+R-IV.317(a); text relayed to CC-POSITIONS so it is not inserted twice.**
+
+| event | what happens to `max_loss` | result |
+|---|---|---|
+| **scale-IN** | scaled by `new_qty / old_qty` (`unified_positions.py:440-447`), never recomputed from the blended entry | carries the **first lot's price** at the final quantity — **id 409** |
+| **partial CLOSE** | **not rescaled at all** | carries the **pre-close scope** on the remainder — **id 367** |
+
+**Confirmed arithmetically on both.** id 409: first-lot `max_loss` 515.90 × (30/10) = 1,547.70,
+the observed value exactly — and the other lot ordering gives 1,473.60, so the arithmetic
+also fixes which lot came first. id 367: 30.52 / 15.26 = 2.0000, the six-contract debit
+carried on a three-contract remainder.
+
+**Two symptoms, one cause: a derived quantity is stored and then maintained by event
+handlers.** The scale-in path at least tried and got its factor arithmetically right. The
+closing path does not try.
+
+**A REMEDY THAT ONLY CLOSES THE CASE IN FRONT OF IT IS HOW THIS REACHED TWO EVENT TYPES.**
+Improving either handler leaves the next event type needing its own correct rule, and the
+one after that. ****Recompute-on-every-write** is the fix, and covering both is the test of it.**
+
+`update_position` does not recompute either — it writes `max_loss` only when a caller supplies one
+(`unified_positions.py:1407-1409`) — so nothing anywhere revisits the value once written.
+
+**POPULATION UNMEASURED.** How many rows currently carry a `max_loss` from a scope they no
+longer have is not known; **two instances from two different event types is not a basis for
+guessing a third number.** Census belongs in the ledger build.
