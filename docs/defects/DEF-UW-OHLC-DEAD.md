@@ -1,4 +1,4 @@
-# DEF-UW-OHLC-DEAD · P2 (outage) · **P1 (the label facet)**
+# DEF-UW-OHLC-DEAD · **P1 (outage, raised R-IV.321(d))** · **P1 (the label facet)**
 
 **Registered** 2026-09-05 by R-IV.275(d). **Found** by CC-BUILD 2026-09-05 during the
 position-0 outage diagnosis — **it was not what either alarm was about.** **Status:** OPEN.
@@ -256,6 +256,34 @@ tickers succeeding. The breadth symbols are gone; the equities are not.
    deprecation. The call was made for T5's vocabulary read, so this evidence cost nothing
    extra — worth noting because the metering test in the AEGIS pass can be carried the
    same way.
+
+## SEVERITY RAISED TO P1 — R-IV.321(d)
+
+**The outage was P2 on the ground that the fallback worked and no consumer returned wrong
+bars. THE BLAST RADIUS NOW INCLUDES REGIME FACTORS**, which are a decision surface — and
+the same-day census found four factors reading a fresh, active `0.0`
+(`docs/edge/results/2026-09-08-regime-factor-census.md`). **A bar path that feeds a decision surface is not P2 because
+its fallback holds.**
+
+### Fix shape — RULED, and it splits the paths deliberately
+
+| consumer class | path | why |
+|---|---|---|
+| **DISPLAY** — `chart_indicators`, bias factors | route through `get_bars`'s **provider-tagged** fallback | they must show a number, and the tag says whose |
+| **THE GRADER** | **stays on `get_ohlc`, no fallback** | it is the **liveness instrument** and the **cross-vendor certificate** |
+
+**The grader's lack of a fallback is not a gap to be closed — it is the property that made
+the outage datable at all.** Conventions #12: *a liveness probe is a consumer that fails
+when the source dies.* Giving it a fallback would buy nothing and destroy the only
+instrument that dated this.
+
+**And it is the cross-vendor certificate.** The grader consumes UW while the recompute path
+consumes yfinance; **that separation is what makes the external arm cross-vendor for every
+row class** (CC-QUERY's provenance block, this file's sibling). Routing the grader through a
+yfinance fallback would silently make the arm same-vendor **and nothing would announce it.**
+
+**CODE CHANGE IS THURSDAY, AFTER D3 — NOT tonight's push.** Tonight's deploy is the
+precondition build, and Wednesday is the frozen day D3 depends on.
 
 ## SCOPE CONFIRMED — R-IV.279(d)
 
