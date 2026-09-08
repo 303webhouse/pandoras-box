@@ -134,3 +134,17 @@ v2.5 but NOT in the converter allowlist   SPY
 count against a stated **k of 8** — and three of those eight are about to start a fresh
 baseline on a new feed while five stay on the old one. **k must be declared knowing the
 split, or it silently measures the restoration rather than the feeds.**
+
+### k DECLARED — R-IV.323(b)
+
+**k = 3 of 8 for the first read: QQQ · IWM · SMH** — the allowlist tickers on the restored
+feed. **Rising as dedicated alerts are added** (DIA XLK XLF XLE TLT on the principal's next
+TradingView round).
+
+**Declared BEFORE the read, which is the whole point of the rewrite.** The old form scored
+an alarm count that returned 1 whether one feed was silent or all eight were dead. **This
+one names which three can reach `OK` and why**, so a shortfall identifies a ticker instead
+of producing a number.
+
+**SPY-to-allowlist:** R-IV.109(e) is now satisfied — SPY has a dedicated v2.5 alert. **It
+rides Thursday's post-D3 batch with the Path A display fallback, not tonight's push.**
