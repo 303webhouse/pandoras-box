@@ -237,8 +237,29 @@ reconciliation reads.
 
 ### T6 — `max_loss` from basis, never from mark
 
-`DEF-HUB-MAXLOSS-OPTIONS`, **widened to stock rows** (R-IV.265(e)). Cited instance, id 409:
-1,547.70 where basis gives 1,498.30.
+`DEF-HUB-MAXLOSS-OPTIONS`, **widened to stock rows** (R-IV.265(e)).
+
+> ### THE CITED INSTANCE IS CORRUPT — CC-BUILD, 2026-09-07, on R-IV.308(a)
+>
+> This defect's only cited instance was *"id 409 reads 1,547.70 where basis gives
+> 1,498.30."* **TA-003 has now found the same row wrong on qty (30 → 20), entry
+> (49.9433 → 49.12) and trade date.**
+>
+> **1,498.30 IS 30 × 49.9433, TO THE CENT.** The "basis" this defect compared against
+> was computed from the corrupt qty and the corrupt entry. **True basis is
+> 20 × 49.12 = 982.40**, so the cited 49.40 gap is not the defect's magnitude; against
+> 1,547.70 the gap is **565.30** — and a discrepancy that large is not obviously the
+> same defect at all.
+>
+> **A defect's evidence was corrupted by a different defect on the same row.** That is the
+> finding, and it is worse than either error alone: this defect looked **small and safe** —
+> a 3% overstatement, erring conservative — **precisely because its comparison figure
+> shared the error it was measuring.**
+>
+> **Consequence for this build: a NEW instance must be measured on a verified row before
+> the mechanism can be trusted. Nothing here is retracted** — a mark-derived bound still
+> moves with the market, which is wrong independently — **but its one worked example no
+> longer demonstrates that.**
 
 **A mark-derived maximum loss moves with the market, and a bound that drifts with price is
 not a bound.** The error errs *safe*, which is why nobody filed it — the same asymmetry that
@@ -265,6 +286,45 @@ its **trigger**, with the numeric level as one field of several.
 the same migration wave; **the exit-rule vocabulary is a decision for the Trade Analysis
 lane**, which is where the discipline is authored.
 
+### T6c — GUARDED MANUAL-ENTRY PATH (R-IV.308(a))
+
+**TA-003's instance: one write path, four wrong fields, one money row.** id 409 carried a
+wrong qty, a wrong entry, a wrong trade date **and** the unmapped account label. **They are
+not four defects. They are one unguarded write.**
+
+**The account-string write-path trace MOVES FROM HELD INTO THIS BUILD'S SCOPE** — it was
+parked as a read-only investigation, and the instance shows the same path producing
+numeric corruption, not just a label problem.
+
+**The guard, three parts:** the account must be a **canonical label** (T2's enum, not free
+text); **required fields are required** — qty, entry, trade date, account — with no
+silent defaults; and **a rejected write says which field failed**, because a manual-entry
+form that fails silently is how four fields go wrong at once without anyone noticing.
+
+**No silent defaults is the load-bearing clause.** A default is indistinguishable from a
+value the principal typed, and **once written, nothing downstream can tell them apart.**
+
+### T6d — ROW-LEVEL PROVENANCE (R-IV.308(b))
+
+**A new column on every money row**, one of:
+
+| value | meaning |
+|---|---|
+| `PRINCIPAL_REPORTED` | the principal said so; **not verified against anything** |
+| `BROKER_VERIFIED` | matched to a broker record; the **verifying event and its timestamp are stamped on transition** |
+| `IMPORTED` | landed via an import path, carrying that import's identity |
+
+**Every manual entry starts `PRINCIPAL_REPORTED`. NOTHING SIZES OFF A ROW AS VERIFIED UNTIL IT FLIPS.**
+
+**This retires the notes-only `APPROXIMATE` / `PENDING-CSV` convention into the column**, and the
+reason is exactly the reason free-text notes fail everywhere else in this register: **a
+caveat a human must read is invisible to every consumer that computes.** id 409 is the
+instance — it was reported, not verified, and nothing in the schema said so, so a risk
+figure was computed from it as if it were fact.
+
+**Provenance is not a status field.** It answers *"how do we know this?"*, which is a
+different question from *"is it open?"* and must not be folded into one.
+
 ### T7 — Positions tab — **MOCKUP GATE**
 
 **No UI code until a mockup is approved.** Last in sequence deliberately: a tab built over an
@@ -284,12 +344,43 @@ being well presented.
   closed and re-measured live, not asserted.
 - **D6** — column-level vintage: a cash-only write does not refresh the balance's age, shown
   on a real row.
-- **D7** — `max_loss` computed from basis on both stock and option rows; id 409 reads
-  1,498.30.
+- **D7** — `max_loss` computed from basis on both stock and option rows. **The old form of
+  this criterion said "id 409 reads 1,498.30" and is WITHDRAWN: that figure is
+  30 × 49.9433, the corrupt qty times the corrupt entry** (R-IV.308(a)). Accepting it
+  would have baked a data-entry error into a done-criterion and called the build finished
+  when it reproduced one. **The criterion is now: on a row whose provenance is
+  BROKER_VERIFIED, max_loss equals qty × entry.**
 - **D8** — IB's 90 rows **retired and still present.** A count proving they exist is part of
   this criterion.
 - **D-final — ACCEPTANCE: the Trade Analysis lane confirms hub against broker, per
   position.** Until this passes, R-IV.268(d)'s sizing restriction stands.
+
+## A LEAD, NOT A FINDING — id 409 is a SOXS row, and the ratio is 1.5251
+
+**Reported because it may bear on `DEF-SOXS-PRICE-DISCONTINUITY`, and explicitly NOT acted on.**
+
+```
+corrupt notional  30 x 49.9433 = 1,498.299
+true notional     20 x 49.12   =   982.400
+ratio                            1.5251
+```
+
+**The pinned SOXS trap records the real discrepancy as ~1.52x.** Same ticker, same figure
+to three significant digits.
+
+**Why this is a lead and not a conclusion:** the trap's 1.52 is a **price** discrepancy
+matched to a 1.51x price break on 06-10. **1.5251 here is a NOTIONAL ratio** — qty times
+price. Those are different quantities, and a coincidence between them on a two-digit figure
+is entirely possible.
+
+**But if they share a cause, the remediation changes completely:** a data-entry error is
+fixed by correcting the row, and a split mis-adjustment is fixed by correcting the
+adjustment — **and doing either one to the other's problem makes it worse.**
+
+**DO NOT ACT ON THIS.** The remediation trap pinned at the top of `docs/defects/HELD-QUEUE.md` says a reader
+handed *"reconcile the 6.57x discrepancy"* will strip the x10 that is correct. **This lead
+adds a second way to do the wrong thing confidently, so it is recorded with its
+non-equivalence attached rather than as a number someone can pick up.**
 
 ## Gates / what NOT to do
 
