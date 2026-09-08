@@ -126,6 +126,51 @@ on 2026-07-23 — after which `DEF-SEED-RESURRECTION` showed the startup seed **
 deleted rows on every deploy** until an empty-table guard was added. **Retirement must be a
 column, not an absence**, or the next fresh boot resurrects what this build retires.
 
+### P0.6 — OPTION-ROW BASIS CONVENTION (R-IV.314(d)) — the WEAT instance
+
+**The hub stores option-row basis INCONSISTENTLY.** Some rows gross, some net:
+
+```
+USO    basis 145.00   gross
+WEAT   basis  15.26   net       max_loss 30.52
+```
+
+**Why this is not detectable by looking at the numbers, which is the whole danger.** Both
+figures are shaped exactly like `price x 100 x qty`:
+
+```
+1.4500 x 100 x 1 = 145.00
+0.1526 x 100 x 1 =  15.26
+```
+
+**A net basis and a gross basis are the same shape.** Nothing about either value announces
+its convention, so **a consumer summing across rows cannot detect the mixture** — it gets
+a number, and the number is wrong by the fee component of however many rows happen to be
+net. This is the vacuous-column family arriving as a UNIT error rather than a null one.
+
+**Measured relation on the WEAT row:** `max_loss 30.52 / basis 15.26` — exactly 2.0000. Stated as an
+observation; whether that is a 2-lot, a 2-contract or a 2-leg row is **not determined
+here**, and it matters to the fix.
+
+**IN SCOPE: normalize to GROSS, with a FEE-DELTA COLUMN.** Gross plus an explicit fee
+delta is strictly more information than either convention alone — and, unlike a
+convention flag, **it cannot be true and useless**: the delta is a number that must
+reconcile.
+
+**AND: realized is never computed across conventions again.** That is the acceptance shape,
+not a caution. A realized figure summed over mixed-convention rows is wrong by an amount
+nobody can bound without re-deriving every row.
+
+#### This decides a field on T6e's table, before it is built
+
+`position_lots.price` **inherits the same ambiguity.** If some lots carry net prices and some gross,
+**deriving basis from lots reproduces this defect at a finer grain** — and it would be
+harder to find, because the aggregate would no longer be the thing anyone inspects.
+
+**So the lots table declares its price convention as part of its definition:** `position_lots.price`
+is **GROSS**, and the fee delta is a sibling column. **A derivation is only as sound as the
+units of what it derives from**, and this is the moment that is cheap to fix.
+
 ### P0.5 — Hub vs broker, per position
 
 **The acceptance baseline, captured BEFORE any change.** Without a pre-state there is
@@ -438,21 +483,22 @@ broker data arrives on a cadence.** The balance is stale because nothing refresh
 lots are absent because nothing delivers them. **One import path closes both**, which is
 why it belongs in this build rather than in a later one.
 
-> **CC-BUILD flag — the instruction was truncated.** The ruling reads *"the same requirement
-> that answers 'live balances"* and ends there. **The reading above — that it points at
-> T5's column-vintage defect — is this lane's INFERENCE, not the ruling's words.** It is
-> written as the obvious completion and marked so it can be corrected in one edit if the
-> intended clause was different.
+> **CONFIRMED — R-IV.314(b).** The clause arrived truncated and this lane completed it;
+> spine confirms the completion is what was meant. **The inference marker is retired
+> because it would now mislead in the other direction** — a reader seeing "this lane's
+> inference" on a ruled line would discount a confirmed fact. The line of record:
+> **the 88-day hand-typed balance and the missing lots share one cause — no broker data
+> on a cadence.**
 
 #### Registration status — the name does not resolve
 
-**`DEF-EXPORT-COVERAGE-GAP` is a PHANTOM as of 2026-09-07.** Searched `C:\th-build\docs` and `C:\trading-hub\docs`,
+**RESOLVING — R-IV.314(c): `DEF-EXPORT-COVERAGE-GAP` FILES FROM POSITIONS under R-IV.313(e) this pass, and this brief's citation resolves on that filing.** It was a phantom when this requirement was written: searched `C:\th-build\docs` and `C:\trading-hub\docs`,
 every markdown file, by name and by citation: **no artifact, and no other document cites
 it.** This brief is currently its only mention.
 
-**Not a claim about the defect — a bookkeeping fact**, exactly as the R-IV.263 sweep
-defined it. The requirement above stands on its own reasoning; **what is missing is the
-artifact the name points at**, and the brief should not be the only thing carrying it.
+**That was a bookkeeping fact, not a claim about the defect**, exactly as the R-IV.263
+sweep defined it — and it is now being cured at the source rather than by this brief
+carrying the name alone. **Re-check on pickup: a citation that resolves is the whole point.**
 
 ### T7 — Positions tab — **MOCKUP GATE**
 
