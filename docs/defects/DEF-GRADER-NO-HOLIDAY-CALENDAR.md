@@ -43,3 +43,42 @@ all-weekdays-are-sessions.
 **Note the interaction with `DEF-STRIKE-WATERMARK-NEVER-ALIVE`'s n-gate:** raising or lowering that gate changes which
 tickers can alarm on a holiday. Fix the calendar first, or the holiday defect's blast
 radius changes underneath the fix.
+
+---
+
+## THE RULE CONTAMINATES THE TESTS THAT WOULD HAVE CAUGHT IT (R-IV.320(a))
+
+**Measured 2026-09-08, when the calendar replaced the weekday rule in T7's three ruled
+consumers. Three existing tests failed, and ALL THREE WERE WRONG THE SAME WAY.**
+
+| test | asserted | correct |
+|---|---|---|
+| `test_next_weekday_skips_the_weekend` | Fri 09-04 → **Mon 09-07** | Tue **09-08** |
+| `test_expiry_friday_rolls_to_wednesday` | +3 sessions = **09-09** | **09-10** |
+| `test_friday_pass_is_overdue_by_monday_evening` (CC-BUILD's) | overdue by **Mon 09-07** evening | Tuesday |
+
+**Every one used `2026-09-04 -> 2026-09-07` as its Friday-to-Monday example, and 2026-09-07 is LABOR DAY.**
+
+**Written at different times, by different hands, into different subsystems** — the
+converter tests with SPEC-01, the sentinel test two days ago — and each independently
+picked the nearest weekend and baked the holiday in.
+
+**The third is the sharpest.** It was written by CC-BUILD **on 2026-09-06, inside the
+liveness sentinel built to remove false reds**, and it **asserted the holiday false red as
+correct behaviour.** The author was actively working on this defect's family at the time.
+
+### Why this is the defect's most important property
+
+**A computed weekday rule does not merely produce wrong answers — it produces a wrong
+EXPECTATION, and the expectation is what the test encodes.** A test author asks "what
+should Friday plus one be?", applies the same mental rule the code applies, gets Monday, and
+writes it down. **The test then passes forever and proves the code matches the rule rather
+than the market.**
+
+**This is why the fix is data and not logic.** An explicit list can be read against a
+published schedule by someone who has never seen the code. A rule can only be checked by
+someone who already knows the answer — and if they knew it, the bug would not exist.
+
+**All three were corrected to trading-day values with the reasoning on their faces, not
+relaxed.** Four new tests assert Labor Day and Good Friday specifically, so the next
+regression fails on a named day rather than on an arithmetic drift.

@@ -120,6 +120,37 @@ that AEGIS sizing applies before anything ships** — the 2026-07-17 watchdog-sh
 this is unresolved. Nothing is lost by the pause; the backfill question is what decides
 whether anything can be recovered.
 
+## HELD — CALENDAR MIGRATION (R-IV.320(b))
+
+**Sequenced BEHIND sinks and ledger. Small, mechanical, and not to be pulled forward.**
+
+T7 built `backend/stable_engine/market_calendar.py` and wired the **three consumers the grader brief ruled**. The
+rest of the tree still approximates.
+
+**Measured 2026-09-08, stated with its scope:** the weekday rule appears in **~55 sites**
+across `backend/`, and there are **THREE separate `is_trading_day()` implementations**, none of them the
+calendar:
+
+| implementation | site |
+|---|---|
+| bias scheduler's | `scheduler/bias_scheduler.py:2070` |
+| discord bridge's | `discord_bridge/bot.py:241` |
+| score_signals' | `jobs/score_signals.py:86` |
+
+**The discord bridge's is the one already known to be wrong** — it computes eight
+holidays from rules and **omits Juneteenth and Good Friday**, so it reports the market open
+on both, every year.
+
+**Why it is held rather than done.** It is a wide, low-risk edit across subsystems this
+build has not measured, and **the three ruled consumers are the ones with a live defect
+behind them.** A migration that touches fifty-five call sites on the evening of a deploy is
+how a small correct change becomes an incident.
+
+**Why it is registered rather than left.** Three competing implementations of one question
+is the shape that produced the family in the first place — **and the calendar has now made
+it four unless the others are retired.** Adding a correct implementation beside three wrong
+ones is not obviously progress; it is progress only if the migration follows.
+
 ## Not held — position one
 
 The grader precondition build. Brief drafted at `docs/codex-briefs/2026-09-04-grader-precondition-brief-DRAFT.md`, **awaiting ATLAS/AEGIS**.
