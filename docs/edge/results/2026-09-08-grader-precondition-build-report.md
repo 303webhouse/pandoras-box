@@ -251,7 +251,18 @@ before it runs. Against prod after this deploy, as ruled.
 |---|---|---|
 | **Wed 09-09** | **DEAFNESS TEST** — age the `job_runs` completion by controlled write, TEST-labelled, audit-logged; observe the alarm; restore; clear the latch; **verify the clear**. **T5b A/B/C.** | **NO — frozen day** |
 | **Thu 09-10 AM** | **D3 read** | no |
-| **Thu 09-10** | post-D3 batch: grader yfinance fallback + provider column, fallback-rate alarm, Path A display fallback, SPY-to-allowlist | yes |
+| **Thu 09-10** | post-D3 batch: grader yfinance fallback + provider column **+ MANDATORY provider backfill (R-IV.325(b))**, fallback-rate alarm, Path A display fallback, SPY-to-allowlist | yes |
+
+**The backfill is not optional and not deferrable.** It runs under T5b's discipline — A/B/C,
+expected count declared before Phase B (**= the count of graded rows at the moment of the
+deploy**), seal `== 843` before and after, and the write touching the new column only.
+**The invariant it establishes is `provider IS NULL <-> graded_at IS NULL`, asserted both ways** — so the rule is a query,
+not a memory.
+
+**Deploy-day ordering matters and is stated here so it is not improvised:** the expected
+count must be taken **at the deploy**, because the grader may run between measuring and
+backfilling. Take it, then backfill, then re-assert — **a count measured an hour early is a
+different population.**
 
 **D3 stands on LIVENESS ALONE (R-IV.324(b)): a scheduled pass that ran and skipped
 satisfies it.** Tonight's pass graded zero and that is not a D3 failure — D3 asks whether
