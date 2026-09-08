@@ -455,3 +455,59 @@ trusting review.
 fail. **Both are instruments that report success by construction**, and neither can be
 caught by inspecting its output — only by asking what it would do if the thing it watches
 were dead.
+
+
+## APPENDS GO THROUGH WHOLE-FILE REWRITES, AND NEW FILES ARE NORMALIZED TO THE TREE'S CONVENTION
+
+**R-IV.317(c), from CC-POSITIONS.**
+
+**The creating tool's default is not the repo's.** A file is written in whatever the tool
+emits; the tree has its own convention; **nothing reconciles the two unless someone does.**
+
+### Two shapes, and only one of them is visible
+
+**1 — A new file in the wrong convention.** Measured on this lane's own work, 2026-09-07:
+
+```
+NEW this session (Write tool / heredoc)        neighbours in the same directories
+  instrument_class.py       uniform LF           stable_jobs.py    uniform CRLF (239)
+  job_runs.py               uniform LF           main.py           uniform CRLF (2,172)
+  market_calendar.py        uniform LF           test_webhooks.py  uniform CRLF (40)
+  test_market_calendar.py   uniform LF
+  028_job_runs.sql          uniform LF
+```
+
+**Six of seven new files landed LF beside uniform-CRLF neighbours.** The seventh,
+`poller_pause.py`, reads CRLF — **because it has already been through git**, which is the
+tell: the tree's convention is applied on checkout, so a file only looks conformant after
+it has made the round trip. **Until then the working tree is inconsistent with itself and
+nothing complains.**
+
+**2 — An append in a different convention from its base.** `cat >>` writes LF; if the
+base is CRLF the file becomes **MIXED**, which is the shape that actually breaks things.
+Measured on two staged artifacts: **173 CRLF + 38 LF**, and **102 CRLF + 32 LF** — in
+both cases a CRLF body with an LF appendix.
+
+**The mixed case REQUIRES a CRLF base.** Appending LF to an LF file just stays LF, which is
+why this lane's own `cat >> backend/tests/test_instrument_class.py` append produced a clean file and looked fine: **the base
+had never been through git.** *The bug needs the tree's convention to have been applied
+once already*, so it appears on mature files and not on new ones — the opposite of where a
+reader would look.
+
+### The rule
+
+**Append by whole-file rewrite** — read, modify, write the whole thing in one convention —
+**never by `>>` onto a file whose terminators you have not checked.**
+**Normalize new files to the tree's convention at creation**, not at the next commit.
+
+### Why it is worth a convention rather than a lint
+
+**A mixed file's LF gate is stable and its raw gate is not.** Measured live on 2026-09-07:
+two staged files read MIXED and then uniform CRLF **minutes apart**, same content, while
+**the LF gate was identical across both reads.** A raw-tree gate went dead in that interval;
+the LF gate did not move.
+
+**So the damage is not corruption — it is that a gate stops meaning anything.** Two lanes
+hash the same file and disagree, each correctly. Kin to *A GATE VALUE NAMES ITS TREE*: that
+rule says publish which tree you measured, **this one says stop producing files that have
+two answers.**
