@@ -943,7 +943,16 @@ async def lifespan(app: FastAPI):
             try:
                 et = _dt.now(pytz.timezone("America/New_York"))
                 session = et.date()
-                if et.weekday() < 5 and et.time() >= _t(16, 15):
+                # T7: the grader's own session gate. A holiday is not a session,
+                # so a pass is not DUE on one -- and job_runs would otherwise
+                # record a holiday as a missed day.
+                from stable_engine.market_calendar import is_trading_day_or_none
+                _td = is_trading_day_or_none(session)
+                if _td is None:
+                    logger.error(
+                        "triton grader: market calendar cannot answer for %s -- "
+                        "treating as NOT a session. Extend MARKET_HOLIDAYS.", session)
+                if _td is True and et.time() >= _t(16, 15):
                     # TRI-STATE. None means job_runs could not be read, and it is
                     # NOT the same as False -- but for this job both lead to a run.
                     done = await has_completed(JOB_TRITON_GRADER, session)

@@ -133,10 +133,33 @@ def build_signal_id(ticker: str, session_date: date, direction: str) -> str:
 
 
 def next_weekday(d: date) -> date:
+    """The next TRADING day. Name kept for its callers; the weekday rule is gone.
+
+    T7 (R-IV.319(b)): this used to skip Saturday and Sunday and count every holiday
+    as a session, which is DEF-STRIKE-WATERMARK-HOLIDAY -- a market holiday read as
+    a dead feed. The calendar is the authority now.
+
+    Past the calendar's stated horizon it FALLS BACK to the weekday rule and says so
+    LOUDLY. That is a deliberate, narrow exception to "never swallow
+    CalendarHorizonError": this function computes a signal EXPIRY, so raising would
+    drop live rows on the floor. The fallback is the OLD behaviour, logged, not a
+    silent guess -- and the log line is the thing that gets the calendar extended.
+    """
+    from stable_engine.market_calendar import CalendarHorizonError, is_trading_day
+
     cur = d + timedelta(days=1)
-    while cur.weekday() >= 5:
-        cur += timedelta(days=1)
-    return cur
+    try:
+        while not is_trading_day(cur):
+            cur += timedelta(days=1)
+        return cur
+    except CalendarHorizonError as exc:
+        logger.error(
+            "strike_converter: market calendar exhausted at %s (%s) -- falling back to "
+            "the WEEKDAY rule, which counts holidays as sessions. Extend MARKET_HOLIDAYS.",
+            cur, exc)
+        while cur.weekday() >= 5:
+            cur += timedelta(days=1)
+        return cur
 
 
 def compute_expires_at(session_date: date, sessions: int = EXPIRY_SESSIONS) -> datetime:
@@ -626,8 +649,23 @@ async def strike_ib_converter_loop() -> None:
         try:
             if is_enabled():
                 now_et = datetime.now(ET)
+                # T7 (R-IV.319(b)): a market holiday is not a session. The old
+                # `weekday() < 5` opened the window on Labor Day, the converter found
+                # nothing because the market was shut, and the watermark recorded a
+                # session with no arrivals -- DEF-STRIKE-WATERMARK-HOLIDAY.
+                from stable_engine.market_calendar import is_trading_day_or_none
+
+                _trading = is_trading_day_or_none(now_et.date())
+                if _trading is None:
+                    # Past the calendar horizon. UNKNOWN is not YES: do not open a
+                    # window on a day we cannot vouch for. Loud, and it stops rather
+                    # than guesses, because a wrongly-opened window writes watermark
+                    # history that later reads as truth.
+                    logger.error(
+                        "strike_converter: market calendar cannot answer for %s -- "
+                        "window CLOSED. Extend MARKET_HOLIDAYS.", now_et.date())
                 in_window = (
-                    now_et.weekday() < 5
+                    _trading is True
                     and dtime(9, 30) <= now_et.time() <= dtime(16, 5)
                 )
                 if in_window:

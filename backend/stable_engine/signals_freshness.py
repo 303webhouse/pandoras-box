@@ -132,12 +132,24 @@ def _pass_overdue(last_session_date, now_et=None) -> bool:
     from datetime import timedelta
     if now_et is None:
         now_et = datetime.now(ZoneInfo("America/New_York"))
-    # Most recent weekday whose post-close has passed.
+    # Most recent TRADING day whose post-close has passed. T7 (R-IV.319(b))
+    # replaces the weekday approximation this function shipped with -- it was the
+    # fifth member of that family and was labelled temporary when written.
+    from stable_engine.market_calendar import CalendarHorizonError, is_trading_day
+
     d = now_et.date()
     if now_et.hour < SESSION_JOB_DUE_HOUR_ET:
         d = d - timedelta(days=1)
-    while d.weekday() >= 5:
-        d = d - timedelta(days=1)
+    try:
+        while not is_trading_day(d):
+            d = d - timedelta(days=1)
+    except CalendarHorizonError as exc:
+        # A health read must not raise. Say so and use the old rule, which is
+        # WRONG ONLY ON HOLIDAYS -- and say which, so the alarm is read correctly.
+        logger.error("[signals_freshness] calendar exhausted at %s (%s) -- weekday "
+                     "fallback; holiday reads may be false", d, exc)
+        while d.weekday() >= 5:
+            d = d - timedelta(days=1)
     if last_session_date is None:
         return True
     return last_session_date < d

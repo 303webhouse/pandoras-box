@@ -119,3 +119,35 @@ class TestT6Bound:
 
     def test_past_horizon_uses_the_stated_fallback(self):
         assert _bounded_lookback(date(2028, 1, 2), date(2028, 3, 1)) == GRADER_LOOKBACK_FALLBACK_DAYS
+
+
+class TestConsumersUseTheCalendar:
+    """T7's ruled consumers (R-IV.319(b)). Labor Day 2026-09-07 is the case that
+    produced DEF-STRIKE-WATERMARK-HOLIDAY, so it is the one asserted."""
+
+    def test_converter_next_weekday_skips_labor_day(self):
+        from jobs.strike_ib_converter import next_weekday
+        # Friday 09-04 -> the next SESSION is Tuesday 09-08, not Monday the 7th.
+        assert next_weekday(date(2026, 9, 4)) == date(2026, 9, 8)
+
+    def test_converter_next_weekday_skips_good_friday(self):
+        from jobs.strike_ib_converter import next_weekday
+        assert next_weekday(date(2026, 4, 2)) == date(2026, 4, 6)
+
+    def test_sentinel_does_not_expect_a_pass_on_a_holiday(self):
+        """Monday 09-07 evening: the last DUE session is Friday 09-04, so a Friday
+        pass is current and must not alarm."""
+        from stable_engine import signals_freshness as sf
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        et = datetime(2026, 9, 7, 20, 0, tzinfo=ZoneInfo("America/New_York"))
+        assert sf._pass_overdue(date(2026, 9, 4), et) is False
+
+    def test_sentinel_does_expect_a_pass_on_the_next_session(self):
+        """Tuesday 09-08 evening: Tuesday's pass is due; Friday's no longer covers."""
+        from stable_engine import signals_freshness as sf
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        et = datetime(2026, 9, 8, 20, 0, tzinfo=ZoneInfo("America/New_York"))
+        assert sf._pass_overdue(date(2026, 9, 4), et) is True
+        assert sf._pass_overdue(date(2026, 9, 8), et) is False
