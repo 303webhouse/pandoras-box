@@ -285,6 +285,42 @@ supersession is coherent instead of a reversal:
   each row**, which is strictly more information. A column can say *which* vendor; silence
   could only say *some vendor, uniformly*.
 
+### PROVIDER BACKFILL — MANDATORY IN THURSDAY'S BATCH (R-IV.325(b))
+
+**Every row with `graded_at` set before the fallback deploy → `provider = 'uw'`, BY CERTAINTY.** Not an
+assumption: no third possibility existed (see below).
+
+**Runs under T5b's discipline** — the same phasing and the same invariant, because it is
+the same kind of operation: a write against the table the sealed population lives in.
+
+| phase | what it does | gate to proceed |
+|---|---|---|
+| **A — shadow** | add the column; **write nothing** | seal `count(id <= 377783 AND fired_at >= '2026-08-17') == 843` |
+| **B — backfill** | set `provider = 'uw'` where `graded_at IS NOT NULL`, **touching the new column and nothing else** | expected count **declared before the phase runs** = **the count of graded rows at the moment of the deploy**; met exactly; seal `count(id <= 377783 AND fired_at >= '2026-08-17') == 843` |
+| **C — cut over** | the fallback ships; new grades write their real provider | seal `count(id <= 377783 AND fired_at >= '2026-08-17') == 843` after |
+
+**The write touches the new column only.** Phase B must not update `graded_at`, the returns, or
+anything else — a backfill that edits a second column is no longer auditable by a count.
+
+### THE INVARIANT, so the rule is checkable rather than remembered
+
+**`NULL` provider is reserved for "NOT GRADED", never for "unknown".** That is
+expressible as a predicate, and it should be asserted rather than described:
+
+```
+provider IS NULL   <->   graded_at IS NULL
+```
+
+**Both directions, after Phase B and forever after.** A graded row always names its vendor;
+an ungraded row never does. **Any row violating it is a defect, and one query finds every
+one of them** — which is the difference between a convention and a constraint.
+
+**Why the reservation matters more than it looks.** If `NULL` were allowed to mean
+"unknown", the column would answer *"where did this come from?"* with *"we don't know"* for
+rows where **we do know with certainty** — and that is `DEF-BIAS-NULL-AS-NEUTRAL`'s exact failure, a real
+state and an absent one sharing a representation. **The backfill is what keeps the column
+honest; without it the column is born ambiguous.**
+
 ### The retired certificate still certifies the PAST, and that is worth writing down
 
 **Every row graded before Thursday's change was NECESSARILY UW-sourced**, because Path A had
