@@ -14,6 +14,20 @@ present, fresh and scored `0.0` counts as active** — so a dead factor rendered
 
 **The metric cannot fall for the failure it exists to detect.**
 
+> ## CORRECTION — 2026-09-08 evening: the LIVE instance is 1 of 18, not 4
+>
+> **The measurement cited below said four of eighteen "covered" factors were dead. Three of
+> those were genuinely covered** — their 0.0 is a designed scoring band, not a fabrication
+> (see `DEF-BIAS-NULL-AS-NEUTRAL`'s correction). **The live figure is one: `dxy_trend`.**
+>
+> **THE DEFECT STANDS UNCHANGED, and the correction sharpens rather than weakens it.**
+> Coverage counted a fabricated 0.0 as covered — that is demonstrated, once. **And the
+> demonstration is now cleaner: one factor confirmed dead by an independent source
+> (`factor_history`, 0 rows since 07-23) is counted at full weight toward 0.94.**
+>
+> **The structural half is untouched:** a metric that cannot fall when a factor dies is a
+> null verifier whether it is currently mis-counting one factor or four.
+
 ## Measured 2026-09-08 15:04 ET
 
 ```
