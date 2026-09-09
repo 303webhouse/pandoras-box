@@ -1,5 +1,22 @@
 # DEF-BIAS-NULL-AS-NEUTRAL · P1
 
+> ## SHAPE OF RECORD (R-IV.336(a))
+>
+> **"A score emitted with its raw input ABSENT."** Not a score that is zero.
+>
+> **Live instance: `gex`, 35 of 695 readings (5.0%), INTERMITTENT.**
+>
+> **The discriminator, and it is now conventions #14:**
+>
+> ```
+> raw varying under a constant score   ->  BAND         working as designed
+> raw ABSENT   under any score         ->  FABRICATION  the defect
+> ```
+>
+> **The payload is the only witness.** A derived value cannot witness its own input, and
+> this file was mis-attributed twice — to four factors, then to `dxy_trend` — by reading
+> scores instead of raw.
+
 **Registered** 2026-09-08 by R-IV.321(c). **Confirmed live the same day** — measured, not
 inferred. **Status:** OPEN. **P1: decision surface.**
 **Census of record:** `docs/edge/results/2026-09-08-regime-factor-census.md`

@@ -511,3 +511,48 @@ the LF gate did not move.
 hash the same file and disagree, each correctly. Kin to *A GATE VALUE NAMES ITS TREE*: that
 rule says publish which tree you measured, **this one says stop producing files that have
 two answers.**
+
+
+## A DERIVED VALUE CANNOT WITNESS ITS OWN INPUT
+
+**R-IV.336(a).**
+
+**Raw varying under a constant score is a BAND. Raw absent under any score is
+FABRICATION. The payload is the only witness.**
+
+```
+raw varies, score constant   ->  BAND        working as designed
+raw ABSENT, score present    ->  FABRICATION the defect
+```
+
+**A score cannot tell you which it is.** Zero is a legitimate output of most scoring bands
+and also the value a fabricated reading carries; **the two are identical at the output and
+distinguishable only at the input.**
+
+### Worked example — the same lane getting it wrong twice in two days
+
+| attempt | the inference | why it failed |
+|---|---|---|
+| 2026-09-08 | four factors reading exactly 0.0 must share a cause | **0.0 is the designed middle band of three of them.** A quiet tape produces it correctly |
+| 2026-09-08 evening | `dxy_trend` calls `neutral_reading()` on its no-data branch, so it fabricates | **the branch exists and is not taken.** 196 distinct raw values say so |
+
+**Both are the same error: inferring runtime behaviour from static reading, and stopping at
+the first plausible mechanism.** Reading the code established that a fabrication path
+*existed*. **Only the data could say whether it FIRED**, and the data said it did not — in
+`dxy_trend`. It fires in `gex`, 35 of 695 readings, which no amount of code-reading would
+have distinguished.
+
+### Why this is a convention and not a note about one module
+
+**The pattern generalises to every derived surface in this register.** A composite score, a
+`max_loss`, a `coverage_ratio`, an `indicators_source` — each is a value computed from an
+input, and **in every one of those cases this board has been misled by reading the output.**
+
+**The rule that follows: when a derived value looks wrong, the question is never "what does
+this value mean?" It is "what was the input, and was there one?"** If the input is not
+stored, that is the finding — and it is why the sinks build stores raw payloads rather than
+conclusions.
+
+**Kin to the null-verifier law from the other side.** There, an instrument could not report
+failure. Here, an output cannot report its own provenance. **Both are cured by the same
+move: keep the evidence, not the verdict.**

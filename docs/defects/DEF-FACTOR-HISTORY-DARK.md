@@ -1,4 +1,51 @@
-# DEF-FACTOR-HISTORY-DARK · P2
+# DEF-FACTOR-HISTORY-DARK · ~~P2~~ — SEVERITY IN QUESTION, see the correction
+
+> ## CORRECTED FROM THE FILED READ — R-IV.331(b) / R-IV.336(c). THIS FILE CITED THE WRONG
+> ## TABLE.
+>
+> **Source: `docs/edge/results/2026-09-08-factor-history-read.md` (`192f134c`), CC-QUERY, vintage 2026-09-09 02:30:57Z.**
+>
+> ```
+> factor_readings          327,828 rows   last write 2026-09-09 02:20:54   11,654 in 7d   28 factors   ALIVE
+> bias_composite_history    32,614 rows   last write 2026-09-09 02:20:56      851 in 7d                ALIVE
+> factor_history             4,507 rows   last write 2026-07-23 08:00:00        0 in 7d    8 factors   DEAD
+> bias_history                   0 rows   —                                                           EMPTY
+> ```
+>
+> **`factor_history` IS A STALE DUPLICATE. `factor_readings` IS CANONICAL AND WRITING** — 25× larger,
+> differently named, and never probed by either lane until this read.
+>
+> ### What is WITHDRAWN from this file
+>
+> **The consequence claim.** This file said *"44 days of factor history have no backfill and
+> are simply gone."* **FALSE.** `factor_readings` holds that history — 11,654 rows in the last
+> seven days alone. **Nothing was lost.**
+>
+> **And the P2 justification went with it.** The severity rested on *"the table's purpose is
+> history"* and on that history being unrecoverable. **Neither holds.** Severity is spine's
+> to set; this lane will not quietly keep a P2 whose stated reason is withdrawn.
+>
+> ### What SURVIVES, narrowly
+>
+> **`factor_history` really is dark since 2026-07-23**, and the code-side finding stands: its only
+> two writers are `persist_savita_reading` and `update_factor_from_pivot` behind a cross-host POST from Pivot, and its failure
+> path is a swallowed `logger.warning`. **All of that is true of a table that should be retired.**
+>
+> **The precise fact:** `factor_history` and the `excess_cape` factor both stop at exactly
+> `2026-07-23 08:00:00.501827`. **They are one series written to two places, and that series
+> died.** The table did not go dark independently — it went dark because its last writer did.
+>
+> ### The error this file made, which is the same one twice over
+>
+> **A property of ONE TABLE was reported as a property of THE SURFACE.** CC-QUERY owns the
+> original miss and says so on their artifact; **this lane repeated it** — the Moby Dick
+> census said *"factor_history is dark"*, and this file turned that into *"factor history is
+> dark"* without probing for a differently-named table.
+>
+> **That is conventions #10 in its other form:** a negative is a property of where you
+> looked. **Here the search space was table NAMES, and one name was searched.**
+
+
 
 **Found** 2026-09-05 by CC-BUILD, while verifying a claim in CC-QUERY's Moby Dick census
 rather than restating it. **Status:** OPEN. **Not previously registered** — the name appears
