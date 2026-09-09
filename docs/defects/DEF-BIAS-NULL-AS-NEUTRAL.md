@@ -6,6 +6,26 @@ inferred. **Status:** OPEN. **P1: decision surface.**
 
 ---
 
+> ## CORRECTION 2 — 2026-09-09: the instance is `gex`, 35 rows. `dxy_trend` WITHDRAWN.
+>
+> **CC-QUERY measured it (`docs/edge/results/2026-09-09-band-vs-dead-factor-discrimination.md`): `dxy_trend` is a BAND** — 196 distinct `current` values,
+> 211 distinct `pct_change_5d`, raw present on every row. **Its no-data branch exists and is
+> not being taken.**
+>
+> **THE LIVE POPULATION IS `gex`: 35 of 695 readings (5.0%) at score 0.0 with
+> `raw_data = {}`. Every other factor has zero such rows.**
+>
+> **The mechanism stands and the helper is still the cause** — `gex` is one of the
+> `neutral_reading()` callers. **What was wrong was the attribution**, twice: first to four factors,
+> then to the wrong one of them.
+>
+> **The defect's true shape, and it is narrower and more precise than either earlier
+> statement: a score emitted with its raw input ABSENT.** Not a score that is zero. The raw
+> payload is the witness; the score never was.
+>
+> **P1 stands.** 5% of GEX readings tell a consumer "neutral" when the correct answer is
+> "unavailable", on a decision surface, with nothing distinguishing them.
+
 > ## CORRECTION — 2026-09-08 evening: ONE INSTANCE, NOT FOUR
 >
 > **This file was registered on a four-factor observation. Three of those four are

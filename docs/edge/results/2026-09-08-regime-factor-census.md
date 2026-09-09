@@ -10,6 +10,45 @@
 
 ---
 
+> # CORRECTION 2 — 2026-09-09. `dxy_trend` IS ALSO WITHDRAWN. THE INSTANCE IS `gex`.
+>
+> **CC-QUERY's band-vs-dead read (`docs/edge/results/2026-09-09-band-vs-dead-factor-discrimination.md`) measured what this lane inferred, and the
+> inference was wrong a second time.**
+>
+> `dxy_trend` **is a BAND, not a fabrication**: `current` carries **196 distinct values**,
+> `pct_change_5d` **211**, and **raw_data is present on every row.** The zeros are a band
+> over a moving dollar index. **Zero dead fields across all six examined.**
+>
+> **THE ACTUAL LIVE POPULATION IS ONE FACTOR, 35 ROWS:** `gex` emits **35 of 695
+> readings (5.0%) at score 0.0 with `raw_data = {}`.** Every other factor: **zero such
+> rows.** That is the defect's true shape — **a score emitted with its raw input ABSENT**,
+> not a score that happens to be zero.
+>
+> **The mechanism this lane found was right; the instance was wrong.** `gex` is one of the
+> `neutral_reading()` callers identified on 2026-09-08. **The helper does fabricate, and it fabricates
+> in `gex`** — not in `dxy_trend`, whose no-data branch exists but is not being taken.
+>
+> ### The error, stated once because it is the same error twice
+>
+> **First correction:** I read four zero scores as a common cause without checking what zero
+> MEANS in each scorer. **Second correction:** I read `neutral_reading()` on `dxy_trend`'s no-data branch as
+> evidence the branch was TAKEN. **Both are the same mistake — inferring runtime behaviour
+> from static reading, and stopping at the first plausible mechanism.**
+>
+> **THE DISCRIMINATOR, which is CC-QUERY's and is now the rule:**
+>
+> ```
+> raw varying   under a constant score   ->  BAND     (working as designed)
+> raw ABSENT    under any score          ->  FABRICATION (the defect)
+> ```
+>
+> **A score alone can never distinguish them.** The raw payload is the only witness, and it
+> is the thing this lane did not look at until CC-QUERY did.
+>
+> **Bookkeeping, from the source:** `dxy_trend` reads 2 distinct scores / 588 zeros in the
+> R-IV.330 artifact and 3 / 634 in this one — **the trailing-7-day window moved one day
+> between reads.** Same conclusion; stated so the two figures do not read as a contradiction.
+
 > # CORRECTION — 2026-09-08 evening. THE CENTRAL CLAIM OF FINDING 1 IS WITHDRAWN.
 >
 > **This census asserted:** *"A factor that computes something does not land on exactly

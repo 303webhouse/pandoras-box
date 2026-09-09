@@ -14,6 +14,20 @@ present, fresh and scored `0.0` counts as active** — so a dead factor rendered
 
 **The metric cannot fall for the failure it exists to detect.**
 
+> ## CORRECTION 2 — 2026-09-09: the live instance is `gex`, and it is a RATE not a count
+>
+> **`dxy_trend` is withdrawn as an instance** (CC-QUERY, `docs/edge/results/2026-09-09-band-vs-dead-factor-discrimination.md` — it is a band). **The live
+> mis-count is `gex`, 35 of its 695 readings.**
+>
+> **That changes the defect's arithmetic in a way worth stating: it is INTERMITTENT.**
+> `gex` is not permanently dead — it carries real values 95% of the time and fabricates
+> 5%. **So coverage is not steadily overstated by one factor's weight; it is overstated
+> only on the 5% of cycles where `gex` has no input**, and a single reading of
+> `coverage_ratio` cannot tell you which kind of cycle you are in.
+>
+> **That is harder to catch than a permanently dead factor, not easier.** A factor that is
+> always wrong shows up in any sample; one that is wrong 5% of the time shows up in none.
+
 > ## CORRECTION — 2026-09-08 evening: the LIVE instance is 1 of 18, not 4
 >
 > **The measurement cited below said four of eighteen "covered" factors were dead. Three of
