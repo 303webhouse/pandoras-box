@@ -6,6 +6,22 @@ inferred. **Status:** OPEN. **P1: decision surface.**
 
 ---
 
+> ## CORRECTION — 2026-09-08 evening: ONE INSTANCE, NOT FOUR
+>
+> **This file was registered on a four-factor observation. Three of those four are
+> WITHDRAWN.** `spy_trend_intraday`, `breadth_intraday` and `copper_gold_ratio` have **0.0 as their designed middle scoring
+> band**, and all three correctly return `None` when data is missing — which makes
+> `factor_scorer.py:87-97` delete their cache key so the composite excludes them. **The ruled fix already
+> exists for them.**
+>
+> **The defect is real and narrow: `dxy_trend`.** Its `compute_score()` is typed `-> FactorReading` rather than
+> `Optional[FactorReading]`, **so it cannot return `None`** and the exclusion path can never fire. On the
+> no-data branch it returns `neutral_reading()` — score 0.0, `datetime.utcnow()` timestamp — and
+> `factor_history` confirms it dead since 2026-07-23.
+>
+> **The severity does not move.** One fabricating factor on a decision surface, invisible by
+> construction, is still P1. **What moves is the population and therefore the fix's scope.**
+
 ## The defect
 
 **A factor with no data renders as `0.0`, is marked `is_stale: false`, and is counted

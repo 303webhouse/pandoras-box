@@ -10,6 +10,47 @@
 
 ---
 
+> # CORRECTION — 2026-09-08 evening. THE CENTRAL CLAIM OF FINDING 1 IS WITHDRAWN.
+>
+> **This census asserted:** *"A factor that computes something does not land on exactly
+> 0.000 — four of them doing so simultaneously is a signature, not a market state."*
+>
+> **THAT IS FALSE, and it is false for three of the four.** Found by tracing the routes
+> R-IV.329(b) asked for, before the fix could claim completeness — which is exactly what
+> that instruction was for.
+>
+> **0.0 IS THE DESIGNED MIDDLE BAND of three of these factors:**
+>
+> ```
+> spy_trend_intraday   _score_ema_distance:   -0.3 < pct   <= 0.3   -> 0.0
+> breadth_intraday     _score_breadth_ratio:   0.8 < ratio <= 1.2   -> 0.0
+> copper_gold_ratio    _score_copper_gold:    -1.0 < spread<= 1.0   -> 0.0
+> ```
+>
+> **A market sitting near its 9 EMA, with balanced up/down volume and copper in line with
+> gold, produces exactly 0.000 on all three — correctly.** The simultaneity I called a
+> signature is what a quiet tape looks like through banded scorers.
+>
+> **AND THE EXCLUSION FIX ALREADY EXISTS FOR THEM.** All three return `None` when data is
+> missing, and `factor_scorer.py:87-97` **deletes the Redis key** on a `None` return, *"so composite
+> excludes this factor instead of using an old cached fallback reading."* **That is
+> R-IV.329(b)'s ruled fix, already built, already working.**
+>
+> **What survives, and it is narrow and real:** `dxy_trend` is the ONE fabricating instance.
+> Its `compute_score()` is typed **`-> FactorReading`, not `Optional[FactorReading]`** — it **cannot return `None`**, so the
+> scorer's key-deletion path can never fire for it. On the no-data branch it returns
+> `neutral_reading()` (`bias_filters/dxy_trend.py:28,34`), a fresh-stamped 0.0. **And `dxy_trend` is independently
+> confirmed dead** — `factor_history` holds 0 rows for it since 2026-07-23.
+>
+> **So: one confirmed dead factor fabricating a neutral, not four.** The defect is real, the
+> mechanism is real, and **the population was overstated four-fold by this lane.**
+>
+> **Why the error happened, since it is the reusable part:** the four zero-readers were
+> handed to this lane as suspects, and **all four being zero was treated as evidence of a
+> common cause without reading what zero MEANS in each scorer.** A shared value is not a
+> shared mechanism. **The check that would have caught it — read the scoring band — costs
+> one grep, and was not done until the ruling asked for the other three routes.**
+
 ## FINDING 1 — FOUR FACTORS READ 0 AND ARE MARKED FRESH
 
 **All four of spine's named suspects, and they are exactly the ones that read zero:**
