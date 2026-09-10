@@ -82,8 +82,15 @@ async def pythia_webhook(request: Request = None, payload: dict = None):
         raise HTTPException(status_code=503, detail="webhook auth not configured")
     supplied = str(payload.get("secret") or "")
     if not hmac.compare_digest(supplied, PYTHIA_WEBHOOK_SECRET):
-        logger.warning("Rejected PYTHIA webhook — invalid secret (ticker=%s)",
-                       payload.get("ticker"))
+        # R-IV.331(a): log the DISCRIMINATOR, never the value. secret_len 0 means the
+        # alert carried no secret field at all (a misconfigured alert); a non-zero length
+        # means a wrong value (a stale secret). Those have different fixes, and before this
+        # line they were indistinguishable — the rejection recorded only the ticker.
+        # len() and bool() are safe to log. The value is not, and must never be.
+        logger.warning(
+            "Rejected PYTHIA webhook — invalid secret (ticker=%s secret_len=%d present=%s)",
+            payload.get("ticker"), len(supplied), bool(supplied),
+        )
         raise HTTPException(status_code=401, detail="invalid webhook secret")
 
     # ── AEGIS: strip secret before ANY logging or persistence ──
