@@ -59,13 +59,15 @@ async def compute_score() -> Optional[FactorReading]:
     reading = await compute_score_uw()
     if reading is not None:
         return reading
-    # UW unavailable or stale — neutral reading; no Polygon fallback (deprecated).
-    logger.info("gex: UW GEX unavailable/stale — neutral reading (Polygon fallback retired)")
-    return neutral_reading(
-        "gex",
-        "GEX unavailable — UW data missing or stale",
-        source="uw_api",
-    )
+    # UW unavailable or stale. RETURN None, NOT a neutral reading (R-IV.329(b)).
+    #
+    # This used to fabricate score 0.0 with a utcnow() timestamp, so a factor with no
+    # data read FRESH and ACTIVE and was counted toward coverage_ratio — measured at
+    # 35 of 695 readings (DEF-BIAS-NULL-AS-NEUTRAL). None is the exclusion signal:
+    # factor_scorer.py:87-97 deletes the cached key so the composite drops the factor
+    # rather than averaging in a neutral nobody measured.
+    logger.info("gex: UW GEX unavailable/stale — returning None so the composite EXCLUDES it")
+    return None
 
 
 async def _compute_score_polygon() -> Optional[FactorReading]:
@@ -120,7 +122,10 @@ async def _compute_score_polygon() -> Optional[FactorReading]:
         contracts_used += 1
 
     if contracts_used < 10:
-        return neutral_reading("gex", f"GEX: insufficient contracts ({contracts_used})", source="polygon")
+        # Insufficient sample is ABSENT, not NEUTRAL (R-IV.329(b)). See above.
+        logger.info("gex: insufficient contracts (%d) — returning None so the composite EXCLUDES it",
+                    contracts_used)
+        return None
 
     normalized = net_gex / GEX_SCALE_FACTOR
     score = _score_gex(normalized)
