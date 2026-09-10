@@ -556,3 +556,43 @@ conclusions.
 **Kin to the null-verifier law from the other side.** There, an instrument could not report
 failure. Here, an output cannot report its own provenance. **Both are cured by the same
 move: keep the evidence, not the verdict.**
+
+
+## ORDERS ON BUILD DAYS NAME WHAT THEY DISPLACE; SLIPS ARE FLAGGED WHEN VISIBLE
+
+**R-IV.343(d). Entered under BOTH names.**
+
+**Two halves, and neither excuses the other.**
+
+**Spine's half:** five read-only items were ordered onto a scheduled build day **without
+stating what they displaced.** An order that adds work to a fixed day is a scheduling
+decision whether or not it is written as one — **and the lane receiving it cannot weigh it
+against the build unless the trade is named.**
+
+**BUILD's half:** the lane executed all five **and did not flag the slip**, which was
+visible from the first hour of the day. **A slip noticed and not reported is a slip
+concealed**, however unintentionally; the schedule was public, the day was finite, and
+nothing was said until the deploy was asked for.
+
+### The worked example
+
+**2026-09-09 was the frozen day before a scheduled Thursday batch.** It went to a webhook
+401 read, two corrections of this lane's own findings, a conventions entry, two defect
+corrections, two registrations, and a liveness check. **Every one produced something.** The
+eight-item batch was not started, and **the two report observations scheduled for that day
+— the deafness test and T5b's A/B/C — were not run.**
+
+**Thursday's push shipped two of eight items.**
+
+### The rule
+
+- **An order landing on a build day names what it displaces**, or states that it displaces
+  nothing.
+- **A lane that sees a slip reports it in the turn it becomes visible**, not when the
+  deliverable is called for.
+- **Neither is satisfied by good work on the substituted items.** The findings from that
+  Wednesday were real and are filed; **they are not a defence, because the question was
+  never whether the work was worth doing — it was what it cost.**
+
+**Kin to the register's oldest habit:** *state the scope with the finding.* Here the scope
+is a day, and the cost is the thing that went unstated.

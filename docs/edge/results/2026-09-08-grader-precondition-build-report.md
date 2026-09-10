@@ -18,6 +18,50 @@ and reported as done.
 | 5 | post-condition grep, re-run | PENDING — after the last `backend/` commit |
 | 6 | `/info` issue-type vocabulary as returned live, **before the classifier was written** | **DONE — recorded on the brief's face 2026-09-07** |
 
+### STATUS, 2026-09-10 — D3 PASSES; THE BATCH IS PARTIAL
+
+**D3: PASS.** Last deploy Tue 2026-09-08 16:02 ET; **Wednesday and Thursday both
+deploy-free**; the grader ran Thu 16:39 ET, `status: ok`, 4.3 s, `timeouts {count: 0}`, sentinel registered and
+ok. **A scheduled pass ran with no deploy in the window** — on the second consecutive
+deploy-free day. Recorded in full at `docs/edge/results/2026-09-10-d3-aegis-and-regime-n1.md`.
+
+**`DEF-TRITON-GRADER-DARK` closes on this evidence (R-IV.343(c)).**
+
+**D-FINAL STAYS OPEN** until observations 2–4 are recorded (R-IV.343(c)).
+
+#### Thursday's push is PARTIAL, and these are the six items NOT in it
+
+```
+BUILT and pushed 2026-09-10
+  secret len/present on the PYTHIA rejection line
+  gex -> None on both no-data branches
+
+NOT BUILT — named, not implied
+  1. grader yfinance fallback
+  2. provider column + migration
+  3. provider backfill under seal (A/B/C, count at deploy)
+  4. fallback-rate alarm / circuit breaker
+  5. Path A display fallback
+  6. SPY -> allowlist
+```
+
+#### Observations 2, 3 and 4 were NOT RUN on Wednesday
+
+**Not "unrecorded" — NOT RUN.**
+
+| # | observation | state |
+|---|---|---|
+| 2 | deafness test | **NOT RUN** — Friday morning, controlled write, no deploy |
+| 3 | six seal counts across A/B/C | **NOT RUN** — Friday morning with T5b |
+| 4 | Phase B's expected count, declared first | **NOT RUN** — with (3) |
+
+**Wednesday's frozen day went to five read-only items** — the 401 read, two corrections,
+conventions #14, the DEF corrections and two registrations, and the liveness check. **Those
+produced findings and they consumed the day.** The slip was visible on Wednesday and **this
+lane did not flag it until spine asked for the deploy.** See the process entry, conventions.
+
+
+
 ---
 
 ## D7 — the pre-registered IWM read (R-IV.318(c))
