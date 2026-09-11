@@ -161,3 +161,58 @@ def test_no_railway_internal_ids_are_exposed(monkeypatch):
     blob = repr(build_identity())
     assert "e2be1633" not in blob
     assert "e19cc86b" not in blob
+
+
+# --------------------------------------------------------------------------
+# witness vs attestation — R-IV.345(b)
+#
+# This service has no RAILWAY_GIT_* var, so every SHA that arrives is DECLARED
+# by whoever set it. The field must say so: a declaration that presents itself
+# as a witness is the fabrication this register keeps finding.
+# --------------------------------------------------------------------------
+
+def test_platform_sourced_commit_is_a_witness(monkeypatch):
+    monkeypatch.setenv("RAILWAY_GIT_COMMIT_SHA", "a" * 40)
+    b = build_identity()
+    assert b["identity_kind"] == "platform"
+    assert "note" not in b
+
+
+@pytest.mark.parametrize("name", ["SOURCE_COMMIT", "GIT_COMMIT", "COMMIT_SHA", "BUILD_COMMIT"])
+def test_non_platform_commit_is_declared_and_says_so(monkeypatch, name):
+    monkeypatch.setenv(name, "b" * 40)
+    b = build_identity()
+    assert b["identity_kind"] == "declared"
+    assert b["commit_source"] == name
+    assert "CANNOT witness what is running" in b["note"]
+    assert name in b["note"]
+
+
+def test_absent_commit_kind_is_unavailable():
+    assert build_identity()["identity_kind"] == "unavailable"
+
+
+def test_malformed_commit_kind_is_unavailable(monkeypatch):
+    """Malformed must not be dressed up as a declaration."""
+    monkeypatch.setenv("SOURCE_COMMIT", "not-a-sha")
+    b = build_identity()
+    assert b["identity_kind"] == "unavailable"
+    assert b["identity_readable"] is False
+
+
+def test_platform_beats_declaration_when_both_present(monkeypatch):
+    """If Railway ever starts providing it, the witness must win automatically."""
+    monkeypatch.setenv("BUILD_COMMIT", "d" * 40)
+    monkeypatch.setenv("RAILWAY_GIT_COMMIT_SHA", "e" * 40)
+    b = build_identity()
+    assert b["identity_kind"] == "platform"
+    assert b["commit"] == "e" * 40
+
+
+def test_declared_note_does_not_claim_verification(monkeypatch):
+    """The wording is the safeguard; assert it cannot be read as a pass."""
+    monkeypatch.setenv("SOURCE_COMMIT", "f" * 40)
+    note = build_identity()["note"]
+    assert "intended to deploy" in note
+    assert "compare it to the sha it pushed itself" in note
+    assert "uptime_seconds" in note

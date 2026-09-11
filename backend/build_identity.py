@@ -50,6 +50,26 @@ COMMIT_ENV_NAMES = (
     "COMMIT_SHA",
     "BUILD_COMMIT",
 )
+
+# WITNESS vs ATTESTATION -- R-IV.345(b).
+#
+# Measured 2026-09-10: this service has NO RAILWAY_GIT_* variable, and a service
+# variable referencing ${{RAILWAY_GIT_COMMIT_SHA}} resolves to EMPTY. So the only
+# way a SHA reaches this process is that somebody PUT it there before the deploy.
+#
+# That is a DECLARATION, not a witness -- conventions #14, a derived value cannot
+# witness its own input. A variable set by the pusher says what the pusher intended
+# to deploy; it cannot say what is actually running. If a later deploy lands without
+# the variable being updated, the field keeps asserting the OLD sha over NEW code --
+# which is a fabrication, and worse than reporting nothing.
+#
+# So the block names which kind it has, and a verifier is told what it may conclude:
+#   "platform"    -- only the platform can set this name; it tracks the deploy.
+#   "declared"    -- an attestation by whoever configured it. MUST be cross-checked
+#                    against the sha the verifier itself pushed; equality is the
+#                    whole of its value, and it proves INTENT MATCHED, not identity.
+#   "unavailable" -- no sha. Fail the identity half.
+PLATFORM_COMMIT_NAMES = frozenset({"RAILWAY_GIT_COMMIT_SHA"})
 BRANCH_ENV_NAMES = ("RAILWAY_GIT_BRANCH", "GIT_BRANCH", "BUILD_BRANCH")
 
 _SHA_RE = re.compile(r"\A[0-9a-f]{7,40}\Z")
@@ -84,14 +104,32 @@ def build_identity() -> dict:
         now = datetime.now(timezone.utc)
         readable = commit is not None and commit != MALFORMED
 
+        if not readable:
+            identity_kind = "unavailable"
+        elif commit_source in PLATFORM_COMMIT_NAMES:
+            identity_kind = "platform"
+        else:
+            identity_kind = "declared"
+
         block = {
             "commit": commit,
             "commit_source": commit_source,
+            "identity_kind": identity_kind,
             "branch": branch,
             "identity_readable": readable,
             "process_started_at": PROCESS_STARTED_AT.isoformat(),
             "uptime_seconds": int((now - PROCESS_STARTED_AT).total_seconds()),
         }
+        if identity_kind == "declared":
+            block["note"] = (
+                "commit was DECLARED via "
+                + commit_source
+                + ", not witnessed by the platform. It states what the pusher "
+                "intended to deploy and CANNOT witness what is running. A verifier "
+                "must compare it to the sha it pushed itself; equality proves the "
+                "declaration matched, not that the code is that sha. Corroborate "
+                "with uptime_seconds."
+            )
         if not readable:
             # An absence that explains itself, so no reader has to guess whether
             # the field is missing because the build is old or because nothing
