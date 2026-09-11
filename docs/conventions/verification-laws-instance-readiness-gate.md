@@ -178,3 +178,70 @@ itself unreadable rather than guessing, that a malformed value never appears in 
 that a SHA-shaped `DB_PASSWORD` or `PIVOT_API_KEY` is not picked up by the allowlist, and that
 `''` — which is what Railway returns for an unset reference — reads as absent rather than
 present.
+
+---
+
+## R-IV.345(b) EXECUTED — AND THE ANSWER IS "UNREADABLE"
+
+**Staged, not deployed.** `SOURCE_COMMIT` set with `--skip-deploys`; `latestDeployment`
+remained `4accd6b7` (22:58:49Z, the push deploy). **No redeploy was triggered**, as ordered.
+
+### The measurement, and it is the negative one
+
+**`SOURCE_COMMIT = ${{RAILWAY_GIT_COMMIT_SHA}}` RESOLVES TO EMPTY — length 0.**
+
+Not the literal `${{RAILWAY_GIT_COMMIT_SHA}}`. Not a SHA. **Railway ACCEPTED the reference and resolved it to
+nothing**, which means `RAILWAY_GIT_COMMIT_SHA` does not exist for this service.
+
+**This is a second, independent confirmation by a different mechanism.** The CLI listing said
+*"not among the names"*; Railway's own variable resolver now says *"resolves to empty."* **A
+listing can omit; a resolver has to answer.** Two mechanisms, one answer.
+
+**So on Friday the field reports `identity_readable: false`** — which is the outcome the
+build was designed to make legible rather than fatal, and the verifier fails the identity
+half on it, as ruled.
+
+### AND THAT CREATES A TRAP WORTH NAMING BEFORE IT IS WALKED INTO
+
+**The obvious remedy is to set the SHA by hand before each push. That remedy fabricates.**
+
+A variable set by the pusher **says what the pusher intended to deploy. It cannot say what is
+running.** If any later deploy lands without the variable being updated — another lane's push,
+a Railway restart, a rollback — **the field goes on asserting the OLD sha over NEW code.**
+A deploy verifier would then read a confident, wrong identity and PASS.
+
+**That is conventions #14 exactly: a derived value cannot witness its own input.** And it is
+strictly worse than the absence it replaces, because **an absence fails closed and a
+fabrication passes.**
+
+### So the field names which kind of claim it holds
+
+| `identity_kind` | means | what a verifier may conclude |
+|---|---|---|
+| `platform` | only the platform can set that name | **tracks the deploy.** Identity half PASSES on a match. |
+| `declared` | an attestation by whoever configured it | **compare to the sha the verifier ITSELF pushed.** Equality proves the declaration matched — **NOT that the running code is that sha.** Corroborate with `uptime_seconds`. |
+| `unavailable` | no sha, or malformed | **FAIL the identity half.** |
+
+**Malformed maps to `unavailable`, never to `declared`** — a value that failed its shape check
+must not be dressed up as an attestation.
+
+**And `platform` beats `declared` automatically** when both are present, so if Railway ever
+starts providing the variable, the witness wins with no code change. Tested.
+
+### Friday's procedure, and its honest ceiling
+
+1. `railway variable set BUILD_COMMIT=<sha> --skip-deploys` **immediately before** the push,
+   so the deploy the push triggers reads the matching value;
+2. push;
+3. Step 3 asserts **liveness** AND **`build.commit == the sha I pushed`** AND
+   **`uptime_seconds` < time-since-push**.
+
+**What that proves:** the declaration matched the intent, and the process restarted in the
+window. **What it does NOT prove:** that the bytes running are that commit. **Only the
+platform can witness that, and this platform does not.** Stated so the ceiling is on the
+record rather than discovered later.
+
+**One imprecision, under-claimed on purpose:** `SOURCE_COMMIT` is configured here AS a
+platform reference, so a value arriving through it would in fact be platform-derived — but
+**the code cannot verify that at runtime and therefore reports it as `declared`.**
+Under-claiming is the safe direction for a field whose whole job is not to overclaim.
