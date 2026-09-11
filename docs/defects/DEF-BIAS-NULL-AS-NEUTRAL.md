@@ -147,9 +147,9 @@ a different constant: **any constant is indistinguishable from a measurement.**
 
 ## Fix shape — not chosen here
 
-**A factor with no reading must be `excluded_factors`UDED, not scored 0.0**, and its exclusion must reach
+**A factor with no reading must be EXCLUDED, not scored 0.0**, and its exclusion must reach
 `coverage_ratio` so the loss is visible. That is the same fix as
-DEF`coverage_ratio` and the two should ship together — excluding a factor that
+`DEF-BIAS-COVERAGE-OMITS-ABSENT` and the two should ship together — excluding a factor that
 coverage cannot report is a half fix.
 
 ## Not determined here
@@ -157,3 +157,102 @@ coverage cannot report is a half fix.
 **Why each of the four is dead.** Source paths were not traced; that needs the per-factor
 map the census could not build from the live payload. **Four are identified; none is
 diagnosed.**
+
+---
+
+## READING THIS DEFECT: THE CADENCE, AND THE TRAP (R-IV.352(a))
+
+**One cadence, not two.** `refresh_composite_bias()` calls `score_all_factors()`
+(`bias_scheduler.py:2444`) then `compute_composite()` (`:2457`) **sequentially in the same
+coroutine**, on a **15-minute** interval registered at `:2746`, with **no market-hours gate**.
+**96 cycles per 24 h, around the clock.** The gex reading interval and the composite cycle
+interval are the same number and cannot drift apart.
+
+**The apparent second schedule is DEAD CODE.** `_fallback_scheduler()` (`:3110`) carries its
+own 15-minute composite branch at `:3163`, but it is launched **only** from
+`except ImportError:` at `:2894-2897`. **`apscheduler>=3.10.0` is at `requirements.txt:45`,
+so that branch never runs.** The two are mutually exclusive, not additive — **there is no
+doubling, and anyone reconciling row counts against 192/day is reconciling against a number
+that does not exist.**
+
+### THE TRAP — rows are not cycles
+
+**`compute_composite()` calls `log_composite()` ITSELF** (`composite.py:989`), so **every
+caller writes a `bias_composite_history` row** — eight call sites in `api/bias.py`, one in
+`api/uw_integration.py`, one in the scheduler. **Row arrival = 96/day PLUS one per API hit,
+at arbitrary times.**
+
+**And an HTTP-triggered composite re-reads the SAME Redis state.** The `gex` key stays as the
+last scoring pass left it, so **one event is observed by every row until the next pass** —
+**COUNTING ROWS OVER-COUNTS EVENTS by a factor set by API traffic**, which is not a constant
+and is not recorded.
+
+**Count cycles, not rows.** The clean counter is `factor_readings`: **one write per scoring
+pass, no HTTP path.**
+
+## THE CONSUMER-SIDE INSTANCE (R-IV.352(d))
+
+**484 of 867 composite cycles carry `gex` 0.0 with no flat-vs-unavailable distinction.**
+**55.8%**, and **13.8× the 35 readings** the producer-side instance counts.
+
+**This is the same defect one layer down the pipe:** at the reading, `0.0` with `raw_data {}`
+is a fabrication; **by the time it reaches the composite, the `raw_data` is gone and `0.0` is
+just `0.0`.** The consumer cannot tell a measured-flat gex from an unavailable one **because
+the distinguishing field does not survive the hop.**
+
+### What 484 does NOT establish, and the check that would settle it
+
+**DO NOT read 484 as 449 genuinely-flat readings plus 35 fabrications.** Two readings fit, and
+this file does not choose between them:
+
+1. **Genuine flat band.** `gex` really scores 0.0 about half the time and the fabrications are
+   a small slice — in which case **the fix removes ~5% and the 0.0s largely REMAIN, correctly.**
+2. **Persistence amplification.** The trap above: each reading is observed by more than one
+   composite row, so a smaller set of underlying 0.0 readings is counted many times.
+
+**SCOPE NOT ESTABLISHED, and it governs the arithmetic:** 484/867 and 35/695 were measured by
+different lanes and **a common window has NOT been shown.** `867 / 695 = 1.25` is consistent
+with the HTTP surplus over the same span — **consistent with, not evidence of.** Until the
+windows are stated, the ratio 13.8 is **not interpretable** as a rate relationship.
+
+**The settling read:** join each 0.0 composite cycle to the `factor_readings` row it was
+computed from and ask whether that row's `raw_data` is `{}` or populated. **`{}` is a
+fabrication; populated is a band.** That is conventions #14's discriminator applied at the
+consumer, and it needs no new instrumentation.
+
+### THE PREDICTION THIS MAKES, stated before the read
+
+**After the fix, `gex` 0.0 does NOT disappear from composite rows.** Only the ~5% that were
+fabrications become `null`. **A reader expecting the 0.0s to vanish will call a working fix
+broken** — which is why the expectation is written down here rather than discovered against
+the data.
+
+## RULED — THE DELETE MUST NOT BE LOAD-BEARING (R-IV.352(c))
+
+**A failed delete must not leave a fabricated-active state.**
+
+**On delete failure the scorer writes an EXPLICIT EXCLUDED MARKER that the composite honours
+— a TOMBSTONE, not an absence.** So **exclusion never depends on a delete succeeding.**
+
+**Why a tombstone and not a retry:** a retry still has a failure mode that ends in silence,
+and **the current design fails OPEN** — `factor_scorer.py:96-99` logs a warning and continues,
+leaving the prior key live and `gex` counted **active** for up to its 4-hour staleness window.
+**A tombstone fails CLOSED:** the composite sees an explicit "excluded" state and excludes,
+whatever happened to the delete.
+
+**Note which bound applies.** The Redis TTL is
+`max(REDIS_FACTOR_LATEST_TTL 86400, 4 × 3600) = 86400 s`, but **TTL does not gate `active` —
+the 4-hour staleness window does** (`composite.py:769-775`). The key outlives its usefulness by
+20 h; **the damage window is 4 h.**
+
+**Consequence for reading the current deploy:** **a `gex` still in `active_factors` does NOT
+falsify the shipped fix** without first checking whether
+`"Failed to clear stale key for %s"` fired in the same interval. **That is the line to grep.**
+
+### Scheduling
+
+**RIDES WITH THE REGIME FIX IN THE AGORA BRIEF. NOT FRIDAY.**
+
+**The Agora brief is not yet drafted** — the panel-by-panel census (R-IV.338(a)) that feeds it
+is still owed — **so the ruled design is recorded HERE so it is not lost to a file that does
+not exist yet**, and moves to the brief when the brief is written.
