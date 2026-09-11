@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 
 # Wired in this build. Kept as a constant so the loop and the reader cannot drift.
 JOB_TRITON_GRADER = "triton_grader"   # the string R-IV.295(a) rules
+JOB_NIGHTLY = "stable_nightly"      # the string R-IV.360(1) rules
 
 # Terminal statuses, enumerated. Anything else is not a completion.
 STATUS_RUNNING = "running"
