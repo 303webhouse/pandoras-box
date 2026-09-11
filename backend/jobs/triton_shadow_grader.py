@@ -109,6 +109,7 @@ async def run_triton_shadow_grader() -> dict:
 
     today = datetime.now(timezone.utc).date()
     graded = fully = skipped = 0
+    providers_used: dict = {}
 
     for ticker, group in by_ticker.items():
         if not ticker:
@@ -120,12 +121,18 @@ async def run_triton_shadow_grader() -> dict:
             for g in group
         )
         lookback_days = _bounded_lookback(earliest, today)
-        idx = await fetch_r_close_index(ticker, lookback_days)
+        idx, provider = await fetch_r_close_index(ticker, lookback_days)
         if not idx:
-            logger.warning("triton_grader: no 'r' bars for %s — skip %d", ticker, len(group))
+            # Still reachable AFTER the fallback: UW empty AND yfinance empty.
+            # The reason string is unchanged so the 944-row backlog stays
+            # comparable across the fix -- a renamed reason would reset the
+            # series and make the fallback look effective by discontinuity.
+            logger.warning("triton_grader: no 'r' bars for %s (provider=%s) — skip %d",
+                           ticker, provider, len(group))
             _skip("no_regular_session_bars", len(group))
             skipped += len(group)
             continue
+        providers_used[provider] = providers_used.get(provider, 0) + len(group)
 
         for g in group:
             try:
@@ -169,10 +176,11 @@ async def run_triton_shadow_grader() -> dict:
                         SET fwd_ret_1d = COALESCE($2, fwd_ret_1d),
                             fwd_ret_3d = COALESCE($3, fwd_ret_3d),
                             fwd_ret_5d = COALESCE($4, fwd_ret_5d),
+                            provider = $5,
                             graded_at  = CASE WHEN $4 IS NOT NULL THEN NOW() ELSE graded_at END
                         WHERE id = $1
                         """,
-                        g["id"], vals[1], vals[3], vals[5],
+                        g["id"], vals[1], vals[3], vals[5], provider,
                     )
                 graded += 1
                 if vals[5] is not None:
@@ -183,6 +191,11 @@ async def run_triton_shadow_grader() -> dict:
                 skipped += 1
                 continue
 
-    logger.info("triton_grader: touched=%d fully_graded=%d skipped=%d reasons=%s",
-                graded, fully, skipped, skips or "{}")
-    return {"graded": graded, "fully_graded": fully, "skipped": skipped, "skips": skips}
+    logger.info("triton_grader: touched=%d fully_graded=%d skipped=%d reasons=%s providers=%s",
+                graded, fully, skipped, skips or "{}", providers_used or "{}")
+    # providers_used is the fallback's OWN evidence: if it is all "uw" the net
+    # was never needed, and if it is all "yfinance" Path A is dead for every
+    # ticker -- two very different worlds that a graded-count alone cannot tell
+    # apart. Returned so the caller can record it without re-deriving it.
+    return {"graded": graded, "fully_graded": fully, "skipped": skipped,
+            "skips": skips, "providers": providers_used}

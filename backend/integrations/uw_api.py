@@ -620,6 +620,43 @@ def _tag_provider(bars, provider):
     return bars
 
 
+async def get_bars_yfinance(
+    ticker: str,
+    from_date: Optional[str] = None,
+    to_date: Optional[str] = None,
+) -> Optional[List[Dict[str, Any]]]:
+    """The yfinance leg of get_bars(), on its own — NO UW round-trip.
+
+    Exists for callers that have ALREADY established UW has nothing for this
+    ticker and must not pay for asking twice. The Triton grader is the first:
+    `triton_shadow_common.fetch_r_close_index()` tries UW under its own governor
+    caller, and when that yields no regular-session bar it needs the net WITHOUT
+    re-entering UW.
+
+    WHY NOT JUST CALL get_bars(): its UW leg runs under `caller="ohlc_bars"`
+    (`_get_bars_via_uw`, :537). Triton is deliberately isolated from that budget
+    — see triton_shadow_common's module docstring — so routing Triton's fallback
+    through get_bars() would make Triton ride the exact caller it was built to
+    avoid, and would re-issue the query that just came back empty.
+
+    Same return shape and the same `provider` stamp as get_bars().
+    """
+    cache_key = f"yf|{ticker}|{from_date}|{to_date}"
+    cached = await cache_get("quote", cache_key)
+    if cached:
+        return cached
+    try:
+        loop = asyncio.get_event_loop()
+        bars = await loop.run_in_executor(None, _fetch_yfinance_bars, ticker, from_date, to_date)
+    except Exception as e:
+        logger.error("yfinance-only bars failed for %s: %s", ticker, e)
+        return None
+    if bars:
+        bars = _tag_provider(bars, PROVIDER_YFINANCE)
+        await cache_set("quote", cache_key, bars)
+    return bars
+
+
 async def get_bars(
     ticker: str,
     multiplier: int = 1,

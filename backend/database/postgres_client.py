@@ -1078,6 +1078,15 @@ async def init_database():
             CREATE INDEX IF NOT EXISTS idx_triton_flow_shadow_fired
                 ON triton_flow_shadow (fired_at DESC)
         """)
+
+        # Migration 029 (R-IV.325(b)): provenance on every graded row.
+        # NULL means NOT GRADED -- never "vendor unknown". The backfill that
+        # establishes `provider IS NULL <-> graded_at IS NULL` is Phase B,
+        # scripts/backfill_029_provider.py, run at the deploy under its seal.
+        await conn.execute("""
+            ALTER TABLE triton_flow_shadow
+                ADD COLUMN IF NOT EXISTS provider TEXT
+        """)
         await conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_triton_flow_shadow_ticker
                 ON triton_flow_shadow (ticker, fired_at DESC)
