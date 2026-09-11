@@ -642,6 +642,24 @@ REPORTER that dies with the source reports nothing, and its silence is read as c
 > **If the answer includes the resource it reports on, it is not a channel — it is a
 > best-effort courtesy, and something computed independently must carry the alarm.**
 
+### THE WORKED EXAMPLE — caught in the build of this law's own fix
+
+**Writing the out-of-band channel, the first draft scanned `FRESHNESS_SLO`.** That name does
+not exist in `job_status.py`; the roster is `JOB_FEEDS`.
+
+**The lookup sat inside the function's own `try/except`, so `unrecorded_failures()` would have
+returned `[]` forever** — no error, no log line, a clean empty list. **The reader would have
+seen "no unrecorded failures" and been right only by accident.**
+
+**A NULL VERIFIER INSIDE THE FIX FOR A NULL VERIFIER**, written by the lane that had filed the
+law four hours earlier. **The broad `except` that makes a health path safe is the same
+construct that makes a wrong name invisible** — and this file's whole subject is channels that
+fail quietly.
+
+**What caught it was not review. It was asking the roster to name itself** — printing the keys
+rather than trusting the identifier. **A test now asserts the scan iterates `JOB_FEEDS`**, so
+the name cannot drift back.
+
 **Kin:** the null-verifier law (a check that cannot fail), of which this is the reporting-side
 form — **a report that cannot be written is a check that cannot fail, arrived at from the
 other direction.**

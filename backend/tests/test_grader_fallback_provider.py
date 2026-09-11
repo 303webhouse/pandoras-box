@@ -271,3 +271,26 @@ async def test_index_ticker_never_reaches_either_provider(patched):
     idx, provider = await tsc.fetch_r_close_index("SPX", 25)
     assert idx, "precondition: a series IS available for SPX — the guard is load-bearing"
     assert calls["ohlc"] == 1
+
+
+# --------------------------------------------------------------------------
+# T5b Phase C (R-IV.360(2)) — the queue excludes what can never grade
+# --------------------------------------------------------------------------
+
+def test_queue_excludes_cash_settled_but_not_null():
+    """NULL is NOT 'gradeable unknown = exclude'. An unclassified row is not known
+    to be ungradeable, and excluding it would shrink the queue on a missing value."""
+    src = Path(__file__).resolve().parents[1] / "jobs" / "triton_shadow_grader.py"
+    body = src.read_text(encoding="utf-8")
+    pred = "instrument_class IS NULL OR instrument_class <> 'cash_settled_index'"
+    assert pred in body, "the queue predicate is missing or was rewritten"
+    assert "graded_at IS NULL" in body
+
+
+def test_queue_predicate_and_guard_agree_on_the_class():
+    """Two places name the same class; they must not drift apart."""
+    from jobs.instrument_class import CLASS_CASH_SETTLED_INDEX
+    src = Path(__file__).resolve().parents[1] / "jobs" / "triton_shadow_grader.py"
+    body = src.read_text(encoding="utf-8")
+    assert "'%s'" % CLASS_CASH_SETTLED_INDEX in body
+    assert "is_gradeable(classify(" in body, "the runtime guard is gone"
