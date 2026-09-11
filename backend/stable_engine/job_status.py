@@ -98,6 +98,7 @@ async def mark_success(job_name: str) -> None:
                      consecutive_failures = 0, alerted = FALSE, updated_at = now()""",
                 job_name,
             )
+        await clear_unrecorded_failure(job_name)
     except Exception as e:
         logger.warning("[job_status] mark_success(%s) failed: %s", job_name, e)
 
@@ -129,8 +130,88 @@ async def mark_failure(job_name: str, err: str) -> bool:
                 )
                 return True
     except Exception as e:
+        # THE CASE THIS EXISTS FOR: the database that the job failed against is
+        # the database this write needs. Do not let the incident vanish.
         logger.warning("[job_status] mark_failure(%s) failed: %s", job_name, e)
+        await _mark_failure_out_of_band(job_name, err)
     return False
+
+
+# ── R-IV.360(1) / conventions #15 ───────────────────────────────────────────
+# mark_failure() writes to Postgres. On 2026-09-10 the nightly failed BECAUSE
+# Postgres went into recovery, so the write that would have recorded the failure
+# failed too -- the incident left no row, and /health showed an AGE rather than
+# an error. An error channel that shares a dependency with the thing it watches
+# is silent exactly when it matters.
+#
+# Redis is a SEPARATE SERVICE and stayed `ok` throughout that outage. It is not a
+# better database; it is a DIFFERENT dependency, which is the only property being
+# bought here. If both are down the log still has it, and the age-based SLO --
+# which needs nothing from either -- remains the backstop.
+REDIS_FAILURE_KEY = "jobstatus:unrecorded_failure:{job_name}"
+REDIS_FAILURE_TTL_S = 48 * 3600
+
+
+async def _mark_failure_out_of_band(job_name: str, err: str) -> bool:
+    """Record a failure Postgres could not. Returns True if it was recorded."""
+    try:
+        from database.redis_client import get_redis_client
+        client = await get_redis_client()
+        if not client:
+            return False
+        import json as _json
+        from datetime import datetime as _dt, timezone as _tz
+        await client.setex(
+            REDIS_FAILURE_KEY.format(job_name=job_name),
+            REDIS_FAILURE_TTL_S,
+            _json.dumps({
+                "job_name": job_name,
+                "error": (err or "")[:500],
+                "at": _dt.now(_tz.utc).isoformat(),
+                "note": "postgres could not record this failure -- see conventions #15",
+            }),
+        )
+        logger.warning("[job_status] %s failure recorded OUT OF BAND (redis): %s",
+                       job_name, (err or "")[:200])
+        return True
+    except Exception as exc:
+        # Both channels down. The log is what is left, and it is said plainly.
+        logger.error("[job_status] %s failure UNRECORDED on both channels: %s / %s",
+                     job_name, (err or "")[:200], exc)
+        return False
+
+
+async def unrecorded_failures() -> list[dict]:
+    """Failures Redis holds that Postgres never got. Read by /health."""
+    out: list[dict] = []
+    try:
+        from database.redis_client import get_redis_client
+        client = await get_redis_client()
+        if not client:
+            return out
+        import json as _json
+        for job in JOB_FEEDS:   # the tracked-job roster
+            raw = await client.get(REDIS_FAILURE_KEY.format(job_name=job))
+            if raw:
+                try:
+                    out.append(_json.loads(raw))
+                except Exception:
+                    out.append({"job_name": job, "error": "unparseable marker"})
+    except Exception as exc:
+        logger.warning("[job_status] unrecorded_failures read failed: %s", exc)
+    return out
+
+
+async def clear_unrecorded_failure(job_name: str) -> None:
+    """A later success clears the out-of-band marker -- otherwise a one-off outage
+    would show as a standing failure and become another alarm nobody reads."""
+    try:
+        from database.redis_client import get_redis_client
+        client = await get_redis_client()
+        if client:
+            await client.delete(REDIS_FAILURE_KEY.format(job_name=job_name))
+    except Exception:
+        pass
 
 
 async def get_all() -> list[dict]:
@@ -173,9 +254,18 @@ async def health_summary() -> dict:
             "last_success_age_s": round(age) if age is not None else None,
             "last_error": (j["last_error"] or None),
         }
+    # R-IV.360(1): failures Postgres could not record. A channel nobody reads is
+    # not a channel -- it is a different place to be silent. These escalate the
+    # verdict, because a failure that could not be written down is strictly worse
+    # evidence than one that could: the row's absence is not evidence of health.
+    unrecorded = await unrecorded_failures()
+    if unrecorded and worst == "ok":
+        worst = "stale"
+
     return {
         "worst_status": worst,
         "oldest_feed_age_s": round(oldest_age) if oldest_age is not None else None,
         "any_flatline": worst == "flatline",
+        "unrecorded_failures": unrecorded,
         "jobs": out_jobs,
     }

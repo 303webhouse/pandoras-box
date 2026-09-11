@@ -73,21 +73,52 @@ def is_rth(dt: datetime) -> bool:
 
 
 # ── Flatline detection: record every run on the async pool (never psycopg2) ──────
-async def _record(job_name: str, coro_fn):
+async def _record(job_name: str, coro_fn, session_date=None):
     """Run a job, recording success/failure to the job-status ledger. A thrown exception
     becomes a counter increment (no more silent retry loops) and, once per incident, one
-    Hermes flatline alert. Never re-raises — the loop keeps ticking."""
+    Hermes flatline alert. Never re-raises — the loop keeps ticking.
+
+    R-IV.360(1): when `session_date` is given the run is ALSO written to `job_runs`,
+    the durable per-session ledger the retry reads back. That write is what makes
+    "did this session's pass complete?" survive a process restart -- the in-process
+    `fired` set could not, and a restart at the wrong moment either lost the session
+    or double-fired it."""
     from stable_engine import job_status
+
+    run_id = None
+    if session_date is not None:
+        try:
+            from jobs.job_runs import JOB_NIGHTLY, start_run
+            run_id = await start_run(JOB_NIGHTLY if job_name == "nightly" else job_name,
+                                     session_date)
+        except Exception as exc:
+            # A supervision write must never stop the work it supervises.
+            logger.warning("[stable_jobs] job_runs start_run(%s) failed: %s", job_name, exc)
+
     try:
         res = await coro_fn()
         await job_status.mark_success(job_name)
+        await _finish_run(run_id, "ok")
         return res
     except Exception as e:
         logger.warning("[stable_jobs] %s failed: %s", job_name, e)
+        await _finish_run(run_id, "error", str(e))
         should_alert = await job_status.mark_failure(job_name, f"{type(e).__name__}: {e}")
         if should_alert:
             await _fire_flatline_alert(job_name, e)
         return None
+
+
+async def _finish_run(run_id, status: str, error: str = None) -> None:
+    """Close the job_runs row. Swallows everything: this is the supervision
+    channel, and it must not be able to fail the job it is supervising."""
+    if run_id is None:
+        return
+    try:
+        from jobs.job_runs import finish_run
+        await finish_run(run_id, status, error=(error or "")[:500] or None)
+    except Exception as exc:
+        logger.warning("[stable_jobs] job_runs finish_run failed: %s", exc)
 
 
 async def _fire_flatline_alert(job_name: str, err: Exception) -> None:
@@ -210,6 +241,46 @@ async def run_provisional_snapshot() -> dict:
     return res
 
 
+# R-IV.360(1). Retry cadence and cut-off, named rather than inlined.
+NIGHTLY_RETRY_EVERY_S = 15 * 60          # a failed pass is re-attempted every 15 min
+NIGHTLY_RETRY_UNTIL_HOUR_ET = 23         # ...until 23:59 ET; past that it is tomorrow's
+_nightly_attempted_at: dict = {}         # session key -> last attempt (rate limit only)
+
+
+async def _maybe_run_nightly(et, key_prefix: str) -> None:
+    """Run the nightly if this session's pass has not completed. Never raises.
+
+    THE TRI-STATE IS LOAD-BEARING. `has_completed` returns True / False / None,
+    and None means THE QUESTION COULD NOT BE ANSWERED -- which, on the night this
+    fix exists for, is exactly what an unreachable Postgres returns.
+
+        True  -> done. Stop.
+        False -> not done. Run.
+        None  -> UNKNOWN. Run anyway, rate-limited.
+
+    Collapsing None into True would reproduce the defect precisely: a database too
+    sick to answer would be read as a session already handled. Collapsing it into
+    False is what we do, deliberately, and the rate limit is what makes that safe --
+    without it an unreadable database would re-fire the nightly every 45 seconds.
+    """
+    from jobs.job_runs import JOB_NIGHTLY, has_completed
+
+    last = _nightly_attempted_at.get(key_prefix)
+    if last is not None and (et - last).total_seconds() < NIGHTLY_RETRY_EVERY_S:
+        return
+    try:
+        done = await has_completed(JOB_NIGHTLY, et.date())
+    except Exception as exc:
+        logger.warning("[stable_jobs] nightly completion check failed: %s", exc)
+        done = None
+    if done is True:
+        return
+    _nightly_attempted_at[key_prefix] = et
+    if last is not None:
+        logger.warning("[stable_jobs] nightly RETRY for %s (completed=%s)", key_prefix, done)
+    await _record("nightly", run_nightly_close_recompute, session_date=et.date())
+
+
 async def stable_engine_loop():
     """One-minute ticker that fires the nightly recompute + provisional snapshots at
     their ET times (weekdays), each at most once per calendar day."""
@@ -225,12 +296,22 @@ async def stable_engine_loop():
                     if et.hour == h and et.minute in (m, m + 1) and key not in fired:
                         fired.add(key)
                         await _record("provisional", run_provisional_snapshot)
-                # Nightly recompute
+                # ── Nightly recompute — R-IV.360(1), RETRY ───────────────────
+                # THE OLD SHAPE HAD TWO INDEPENDENT WAYS TO LOSE A SESSION:
+                #   1. `fired.add(nkey)` ran BEFORE the job, so a FAILED pass was
+                #      recorded as fired and never retried;
+                #   2. the trigger was a two-minute window (`minute in (nm, nm+1)`),
+                #      so after 21:01 the condition could not be true again that day
+                #      even with an empty `fired`.
+                # On 2026-09-10 Postgres entered recovery mid-run: the pass was lost
+                # and `stable_daily_bars` went a day without advancing.
+                #
+                # NOW: run at or after NIGHTLY_TIME whenever THIS SESSION'S PASS HAS
+                # NOT COMPLETED, where "completed" is a DURABLE question answered by
+                # job_runs -- not an in-process set that a restart clears.
                 nh, nm = NIGHTLY_TIME
-                nkey = f"{key_prefix}-nightly"
-                if et.hour == nh and et.minute in (nm, nm + 1) and nkey not in fired:
-                    fired.add(nkey)
-                    await _record("nightly", run_nightly_close_recompute)
+                if (et.hour, et.minute) >= (nh, nm) and et.hour <= NIGHTLY_RETRY_UNTIL_HOUR_ET:
+                    await _maybe_run_nightly(et, key_prefix)
             # Trim yesterday's keys at midnight ET
             if et.hour == 0 and et.minute < 2:
                 fired = {k for k in fired if k.startswith(key_prefix)}
