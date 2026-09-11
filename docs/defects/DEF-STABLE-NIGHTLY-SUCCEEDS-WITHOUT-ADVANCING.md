@@ -66,3 +66,73 @@ that status was the wrong thing to read.
 success for a job whose purpose is to advance a table; **"the newest bar is newer than it
 was"** is. Same correction as the grader's: a job that ran and wrote nothing is a job that
 ran and wrote nothing, and it should say so.
+
+---
+
+## ESCALATION 2026-09-11 — IT NO LONGER SUCCEEDS. IT IS FLATLINE.
+
+**Measured live 2026-09-11 14:52Z (08:52 MT / 10:52 ET) from `/health`:**
+
+```
+stable_jobs.jobs.nightly.status              flatline
+stable_jobs.jobs.nightly.last_success_age_s  136160   = 37.8 h
+stable_jobs.oldest_feed_age_s                136160
+stable_jobs.any_flatline                     True
+signals_freshness.any_flatline               False
+/health.status                               degraded
+```
+
+**Last success: Wed 2026-09-09 21:02 ET. Thursday's 21:00 run did not succeed.**
+
+### FIRST: IS THIS THE WEEKEND ARTIFACT? NO — and the check is mandatory here
+
+**`DEF-NIGHTLY-FLATLINE` records that the 26 h SLO on a weekday-only job renders `flatline`
+every weekend BY CONSTRUCTION** — ~104 false reds a year — **and this lane already reported a
+recurrence off that artifact once, on 2026-08-24, and retracted it.** So the discriminator is
+applied before any claim:
+
+```
+nightly gate   stable_jobs.py:29  NIGHTLY_TIME = (21, 0) ET
+               stable_jobs.py:69  if not is_weekday(dt): return   (weekday() < 5)
+
+Wed 2026-09-09  weekday()=2  scheduled  <- last SUCCESS, 21:02 ET
+Thu 2026-09-10  weekday()=3  scheduled  <- MISSED. This is the tell.
+Fri 2026-09-11  weekday()=4  scheduled  <- reading taken 10:52 ET
+```
+
+**The 37.8 h gap SPANS A SCHEDULED WEEKDAY SLOT.** The maximum legitimate gap inside a
+weekday run is ~24 h; the weekend gate cannot produce 37.8 h on a Friday morning, because no
+weekend intervened. **REAL, not the artifact.**
+
+### The defect has CHANGED CHARACTER, and the new state is the better one
+
+**This register named it for succeeding while its output stood still.** It no longer does
+that. **It now fails, and says so.**
+
+| | before | now |
+|---|---|---|
+| job status | `ok` | **`flatline`** |
+| output | `stable_daily_bars` ending 09-04 | still stale |
+| `/health.status` | `healthy` | **`degraded`** |
+
+**A job that fails honestly is strictly more useful than one that succeeds falsely** — the
+first is visible on a surface someone already watches, the second was only findable by
+comparing a status against a table. **The name on this file now describes a past state.**
+**Kept, so citations resolve**, with the current state on its face.
+
+### And it is the SOLE cause of `degraded`
+
+`signals_freshness.any_flatline` is **False**; `stable_jobs.any_flatline` is **True**.
+**Nothing else on the surface is contributing.** Anyone reading `degraded` today is reading
+this defect and only this defect.
+
+### NOT DETERMINED HERE
+
+**Why Thursday's run failed.** No log read was taken. **Whether the flatline and the stale
+`stable_daily_bars` share a cause is UNREAD** — the table was already stale while the job was
+still reporting `ok`, so **the staleness predates the flatline and cannot have been caused by
+it.** That ordering is established; the cause is not.
+
+**Related and still unproven as cause:** `DEF-STABLE-REGIME-FROM-N2` — `breadth.total = 1` is
+the shape of a partially-written day, and a nightly that has not advanced in 37.8 h is a
+candidate for why the metrics table holds one qualifying row. **Candidate, not conclusion.**
