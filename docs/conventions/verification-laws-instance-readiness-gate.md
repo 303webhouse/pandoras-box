@@ -245,3 +245,36 @@ record rather than discovered later.
 platform reference, so a value arriving through it would in fact be platform-derived — but
 **the code cannot verify that at runtime and therefore reports it as `declared`.**
 Under-claiming is the safe direction for a field whose whole job is not to overclaim.
+
+---
+
+## STEP 3 OF RECORD — RATIFIED (R-IV.348(b))
+
+**Three lines, in priority order. Identity passes on (1)+(2); (3) corroborates.**
+
+| # | line | what it is | source |
+|---|---|---|---|
+| 1 | Railway's deployment record for the LIVE deployment — `commitHash`, `status: SUCCESS`, `createdAt` | **the platform's witness**, read by the verifier itself | `railway status --json` |
+| 2 | `uptime_seconds` < time-since-push | **the restart witness** | `/health.build` |
+| 3 | `build.commit` == the sha the verifier pushed | **the declaration matched intent** | `/health.build` |
+
+**`platform` beats `declared`** if Railway ever injects the variable — automatic, no code
+change, tested.
+
+### Why (1) is the platform's witness here and the CLI listing was not
+
+**The verifier READS the deployment record rather than being told about it.** Railway's record
+of which commit it built is the one claim on this platform that **nothing in our push
+procedure can set**, which is exactly what makes it a witness and the env var an attestation.
+
+**And the ceiling stays on the record:** (1) is the deployer's own account of its work.
+Pairing it with (2) — a property of the running process, observed independently — is what
+keeps the verification from consulting a single party. **(3) adds nothing on its own and is
+never sufficient**, which is why it is listed third rather than dropped.
+
+### The Step 2 failure mode this inherits
+
+**`railway status` is read by a tool that can fail to resolve it** — 40 unreadable polls on
+2026-09-10 from a `.cmd` shim a bare `subprocess` could not find. **Unreadable is not a pass**
+(R-IV.344(d)): line (1) unreadable means the identity half FAILS, and the verifier says the
+CLI was unreadable rather than reporting the deploy unverified for a different reason.
