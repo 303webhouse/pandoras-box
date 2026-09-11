@@ -343,3 +343,94 @@ no information.
 
 **Observation 5 — the post-condition grep**, re-run after the last `backend/` commit, which is
 Thursday's batch.
+
+---
+
+## OBSERVATIONS 2, 3 AND 4 — RUN 2026-09-11 (R-IV.356(a)(b))
+
+**All three were NOT RUN as of last night's filing. Two are now RUN. One cannot be.**
+
+### Observation 2 — DEAFNESS TEST: **PASS. The sentinel is not deaf.**
+
+**Controlled write against `job_runs` id=3, the grader's supervision row only.**
+No grade, no return, no market data touched. 18:48:47Z / 14:48:47 ET.
+
+```
+BEFORE   row      session_date=2026-09-10  finished_at=2026-09-10 20:39:06Z  status=ok
+BEFORE   /health  triton_grader status=ok  age_s=79782
+WRITE    aged  -> session_date=2026-09-06  finished_at=-30h   [TEST-labelled in `error`]
+OBSERVE  poll 1   status=FLATLINE          age_s=108004        <- THE ALARM FIRED
+RESTORE  row put back
+VERIFY   database row matches original: TRUE
+VERIFY   clear poll 1 status=ok age_s=79791                    <- THE CLEAR VERIFIED
+```
+
+**BOTH legs of the predicate had to be forced, and that is the point.** `_class_status`
+returns `ok` unless `_pass_overdue(...)` AND `age > 26 h`. At 14:48 ET today neither held —
+Friday's pass is not due until 17:00 ET, and the age was 22.2 h. **Ageing one leg only would
+have left the alarm correctly silent and proved nothing** — the null-verifier shape, in the
+probe rather than in the thing probed.
+
+**Total time in the aged state: 4 seconds.** The restore is verified **against the database**,
+not against the script's own variables — a script that checks its own memory is asserting that
+it did what it intended, not that the row came back.
+
+### Observation 3/4 — T5b's A/B/C: **CANNOT BE RUN. T5b IS NOT BUILT.**
+
+**Not "not run" — the operation does not exist.**
+
+**Search scope, per conventions #10:** `migrations/*.sql` (021 is the table's only DDL),
+every `ALTER TABLE triton_flow_shadow` in the worktree, and all of `backend/jobs/`.
+
+| T5b requires | state |
+|---|---|
+| an `instrument_class` column on `triton_flow_shadow` | **ABSENT** |
+| a migration adding it | **ABSENT** |
+| a consumer reading it (Phase C cut-over) | **ABSENT** |
+| the classifier itself (T5, `jobs/instrument_class.py`) | **BUILT** |
+
+**T5 classifies at ingest and nothing applies it to stored rows** — which is precisely what
+the brief warned of: *"T5 without T5b fixes the future and leaves the defect running."*
+
+### WHAT WAS MEASURED INSTEAD — the seal, and Phase B's predicate, both read-only
+
+**18:50:39Z / 14:50:39 ET. No writes.**
+
+```
+SEAL   count(id <= 377783 AND fired_at >= '2026-08-17') = 843   expected 843   INTACT
+TABLE  total 7938   graded 6855   ungraded 1083
+```
+
+**Phase B's expected count, declared here BEFORE any write ever runs**, using the classifier's
+own predicate verbatim — `CASH_SETTLED_INDEX_SYMBOLS = {SPX, SPXW, RUT, RUTW, VIX}`:
+
+| | measured | brief said |
+|---|---|---|
+| cash-settled rows INSIDE the seal | **15** | **15** — **MATCHES EXACTLY** |
+| cash-settled rows, whole table | **100** | 72 |
+| of those 100, **ungraded** | **100** | — |
+
+**The 72 is not a discrepancy, it is a stale figure** — measured 09-02, and the population has
+grown since. **The 15 is the gate that matters and it is met on the nose.**
+
+**And the 100/100 is the defect, quantified:** **every cash-settled row is ungraded, and none
+ever can be.** They are 100 of 1,083 ungraded rows — **9.2% of the grader's queue is work that
+cannot succeed**, re-attempted every pass.
+
+```
+SPXW  46 rows, 0 graded      RUTW   5 rows, 0 graded
+SPX   45 rows, 0 graded      VIX    3 rows, 0 graded
+                             RUT    1 row,  0 graded
+```
+
+**A CORRECTION MADE BEFORE FILING, not after.** The first read used a nine-symbol index list of
+this lane's own invention and returned **95 / 13** — a mismatch against the brief on both
+counts. **That was the predicate, not the data.** Re-run against
+`CASH_SETTLED_INDEX_SYMBOLS` verbatim it is 100 / 15, and the seal figure matches. **A census
+run with a hand-written predicate measures the predicate.**
+
+## PROVIDER BACKFILL — expected count at 14:50 ET was 6,855
+
+**It must be RE-TAKEN AT THE DEPLOY and is not carried forward from here.** The grader runs
+16:15 ET tonight, between this read and the backfill. `scripts/backfill_029_provider.py`
+measures it inside the same transaction that writes, so this figure is context, not an input.

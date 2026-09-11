@@ -136,3 +136,52 @@ it.** That ordering is established; the cause is not.
 **Related and still unproven as cause:** `DEF-STABLE-REGIME-FROM-N2` — `breadth.total = 1` is
 the shape of a partially-written day, and a nightly that has not advanced in 37.8 h is a
 candidate for why the metrics table holds one qualifying row. **Candidate, not conclusion.**
+
+---
+
+## CAUSE - READ FROM THURSDAY'S LOG, 2026-09-11 (R-IV.356(d))
+
+**One line: Postgres entered RECOVERY mid-run and severed the job's connection.**
+
+```
+INFO:jobs.stable_jobs:[stable_jobs] nightly close recompute starting
+WARNING:jobs.stable_jobs:[stable_jobs] nightly failed: connection already closed
+WARNING:stable_engine.job_status:[job_status] mark_failure(nightly) failed:
+        the database system is in recovery mode
+DETAIL:  Consistent recovery state has not been yet reached.   (x3)
+```
+
+**The job STARTED.** Not skipped, not mis-scheduled, not gated off. Its connection died
+underneath it, and Postgres was still replaying WAL when it tried to say so.
+
+### THE STRUCTURAL FINDING - the failure recorder shares the failure's dependency
+
+**`mark_failure(nightly)` ALSO FAILED, for the same reason.** So there is no error row: the
+job's error channel needed the database that was down.
+
+**Which is why this surfaced as `flatline` - an AGE - and not as an error status.** The
+age-based SLO was the ONLY instrument that caught it, precisely because it is computed from
+the ABSENCE of a success rather than the presence of a report. **An error channel that depends
+on the resource it reports on cannot report that resource failing.**
+
+**`DEF-NIGHTLY-FLATLINE` spends its length on that SLO's false reds. Today it earned its
+keep** - and the same file carries the discrimination that proved today's red real.
+
+### THE DEFECT IS NOT THE OUTAGE. IT IS THAT NOTHING RETRIED.
+
+**Postgres recovered. The nightly did not re-run.** It is scheduled once, 21:00 ET on a
+weekday, so a pass consumed by a transient outage is lost until the next slot - **a few
+minutes of database blip costs a full day of `stable_daily_bars`.**
+
+**FIX SHAPE - NOT a one-liner, so Saturday's first item by R-IV.356(d)'s own test.** A
+catch-up needs a did-this-session's-pass-complete predicate, which is exactly what
+`jobs/job_runs.has_completed()` was built for on the grader - the machinery exists, but wiring
+it changes WHEN the job may run, and that is scheduling semantics rather than a patch.
+
+**The CAUSE rides tonight. The FIX does not.**
+
+### Ordering, restated because it constrains Saturday
+
+**The stale `stable_daily_bars` PREDATES this outage** - already ending 09-04 while the job
+still reported `ok` on 09-08. **Separate cause, separate line.** A retry recovers the lost
+Thursday; it does not explain 09-04.
