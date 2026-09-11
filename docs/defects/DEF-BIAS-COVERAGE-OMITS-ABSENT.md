@@ -82,3 +82,68 @@ excluded and named. **Ships with `DEF-BIAS-NULL-AS-NEUTRAL`**; either alone leav
 **And the roster needs a source outside itself** — an expected-factor list the config is
 checked against, so absence from the config is detectable. Without it, this half of the
 defect is unfixable by construction: **a set cannot notice what was never in it.**
+
+---
+
+## FACET — THE RULED FIX IS UNVERIFIABLE HISTORICALLY (R-IV.350(b))
+
+**Registered 2026-09-10. Found while answering R-IV.348(a); not asserted as a cause.**
+
+**`coverage_ratio` and `excluded_factors` are NEVER PERSISTED.** Both are computed in
+`compute_composite()` (`bias_engine/composite.py:929, 932`), placed on the `CompositeResult`,
+served live at `api/bias.py:654`, cached in Redis — **and dropped at the database boundary.**
+
+`bias_composite_history` writes exactly nine columns (`database/postgres_client.py:459-471`):
+
+```
+composite_score  bias_level  bias_numeric  active_factors  stale_factors
+velocity_multiplier  override  confidence  factor_scores
+```
+
+**Neither is among them.**
+
+### Why this is a facet of THIS defect and not a separate one
+
+**The ruled fix is exclusion PLUS counting** — a null-scored factor is excluded and the
+coverage figure falls to say so. **`coverage_ratio` IS the counting half.** It is not stored,
+**so the counting half cannot be shown to have worked on any historical window** — only
+inferred from `active_factors` / `stale_factors`, which is the exclusion half restated.
+
+**A fix whose effect is computed and discarded cannot be verified after the fact**, and this
+register's standing objection to compute-then-discard is exactly that. **Tenth instance.**
+
+### The remedy travels with the sinks brief
+
+**Persist per cycle: `coverage_ratio`, `active_factors`, `stale_factors`.** Two of the three
+are already columns; **`coverage_ratio` is the one that is not.** Filed as an addition to the
+sinks brief's canonicalization item — **schema change, not a new writer.**
+
+## KNOWN LIMITATION — A FAILED REDIS DELETE LEAVES gex STALE-BUT-ACTIVE FOR UP TO 4 h (R-IV.350(c))
+
+**On the face, not fixed now.**
+
+The exclusion depends on a Redis DELETE that sits inside a `try/except` which **logs and
+continues** (`bias_engine/factor_scorer.py:96-99`):
+
+```python
+except Exception as del_exc:
+    logger.warning("Failed to clear stale key for %s: %s", factor_id, del_exc)
+```
+
+**That is the warning line to grep.** If it fires, the previous `gex` key survives, and
+`compute_composite()` will keep counting it as **active** until it ages past
+`FACTOR_CONFIG["gex"]["staleness_hours"] = 4` — **up to four hours of a fabricated reading
+still inside the composite, after the fix.**
+
+**Note which bound applies:** the Redis TTL is
+`max(REDIS_FACTOR_LATEST_TTL 86400, 4 × 3600) = 86400 s`, but **TTL is not what gates
+`active` — the 4-hour staleness window is** (`composite.py:769-775`). The key outlives its
+usefulness by 20 h; the damage window is 4 h.
+
+**Consequence for any read:** **a `gex` still in `active_factors` does NOT falsify the fix**
+without first checking whether that warning line fired in the same interval.
+
+**Not fixed now, and the reason is stated:** making the delete authoritative means either
+failing the scoring pass on a delete error or writing an explicit tombstone, and **both change
+what a no-data cycle means** — which is a decision for the ruling that owns the exclusion, not
+a quiet hardening.
