@@ -94,6 +94,14 @@ async def run_triton_shadow_grader() -> dict:
             WHERE graded_at IS NULL
               AND fired_at IS NOT NULL
               AND fired_at < NOW() - INTERVAL '1 day'   -- at least T+1 could exist
+              -- T5b Phase C (R-IV.360(2)): rows that can NEVER grade do not get to
+              -- occupy the queue. They are the OLDEST ungraded rows -- nothing ever
+              -- clears them -- so `ORDER BY fired_at` puts them at the head of
+              -- EVERY pass, where they consume GRADE_LIMIT budget forever.
+              -- NULL is included deliberately: an unclassified row is not known to
+              -- be ungradeable, and excluding it would silently shrink the queue on
+              -- the strength of a missing value.
+              AND (instrument_class IS NULL OR instrument_class <> 'cash_settled_index')
             ORDER BY fired_at
             LIMIT $1
             """,
