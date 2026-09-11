@@ -1477,8 +1477,20 @@ async def health_check():
     except Exception as _gbe:
         grader_block = {"state": "ERROR", "reason": str(_gbe)}
 
+    # R-IV.344(b): IDENTITY BY DECLARATION. The readiness gate proved liveness and
+    # not identity -- /health read `healthy` on the old build and the new one alike.
+    # This block says WHICH build is answering. `identity_readable: False` means a
+    # deploy verifier must FAIL the identity half, never pass it.
+    build_block: dict = {}
+    try:
+        from build_identity import build_identity
+        build_block = build_identity()
+    except Exception as _bie:
+        build_block = {"identity_readable": False, "error": str(_bie)}
+
     return {
         "status": overall,
+        "build": build_block,
         "server_time_et": now_et.strftime("%Y-%m-%d %H:%M:%S %Z"),
         "redis": redis_state,
         "postgres": postgres_state,

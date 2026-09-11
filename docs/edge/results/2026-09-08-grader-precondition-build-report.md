@@ -45,6 +45,26 @@ NOT BUILT — named, not implied
   6. SPY -> allowlist
 ```
 
+#### VERIFICATION STATE — three states, R-IV.344(c)
+
+**A fix is not closed until its exercising event is observed.** DEPLOYED says the code is
+running. EXERCISED says the changed branch was entered in production. **They are different
+claims and this column will no longer let them share a cell.**
+
+| fix | state | the exercising event | expected rate |
+|---|---|---|---|
+| `gex` returns `None` instead of a neutral reading | **NOT-EXERCISED** | a factor cycle where UW GEX is unavailable or stale | ~5% of readings (35 of 695 measured) |
+| rejection line carries `secret_len` / `present` | **NOT-EXERCISED** | the next rejected PYTHIA webhook | 3 rejections observed 09-09; rate unestablished |
+
+**Both DEPLOYED 2026-09-10 22:58Z, both NOT-EXERCISED as of this filing.**
+
+**The rates matter and are stated deliberately.** At ~5% of readings, `gex` should exercise
+within hours and **its continued non-exercising becomes evidence in its own right** — either
+the branch is unreachable or the measured 5% was not a rate. **The webhook figure is NOT a
+rate**: three rejections on one day establishes that rejections happen, not how often, and
+**an absence dates nothing until the expected event rate across it is known.** So the webhook
+line cannot yet convict a silence, and says so rather than implying a schedule.
+
 #### Observations 2, 3 and 4 were NOT RUN on Wednesday
 
 **Not "unrecorded" — NOT RUN.**
