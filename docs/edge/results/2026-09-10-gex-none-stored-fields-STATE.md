@@ -93,3 +93,83 @@ cycle **writes nothing at all.** **The change is visible as an ABSENCE OF WRITES
 
 **~5% of readings** (35 of 695 measured, R-IV.336). **State the expected event rate before
 reading the window**, or an absence of `null`s dates nothing.
+
+---
+
+# AMENDMENT 1 — THE CADENCES (R-IV.350(a))
+
+**Amends STATE `5d3850ec` (LF-normalised, 5124 B). Additive: no byte above this line
+changes.** Filed 2026-09-10 by CC-BUILD, from the schedulers.
+
+## THERE IS ONE CADENCE, NOT TWO
+
+**`refresh_composite_bias()` calls both, sequentially, in the same coroutine:**
+
+```
+scheduler/bias_scheduler.py:2444   await score_all_factors()      <- gex is read HERE
+scheduler/bias_scheduler.py:2457   result = await compute_composite()
+```
+
+**So the gex reading interval and the composite cycle interval are THE SAME INTERVAL and
+cannot drift apart.** They are not two numbers to reconcile — a composite cycle is always
+preceded by a factor scoring pass in the same call.
+
+**The interval is 15 minutes**, registered at `:2746` as
+`scheduler.add_job(refresh_composite_bias, 'interval', minutes=15, id='composite_bias_refresh')`.
+
+**No market-hours gate** on the composite path (the sector-rotation call inside it is
+market-hours aware; the composite is not). So **96 cycles per 24 h, around the clock.**
+
+**And the apparent second schedule is dead code.** `_fallback_scheduler()` (`:3110`) carries
+its own 15-minute composite branch at `:3163`, but it is launched ONLY from
+`except ImportError:` at `:2894-2897` — APScheduler absent. **`apscheduler>=3.10.0` is at
+`requirements.txt:45`, so that branch does not run** and the two schedules are mutually
+exclusive, not additive. **There is no doubling.**
+
+## BUT THE ROW CADENCE IS NOT THE CYCLE CADENCE — this is the trap
+
+**`compute_composite()` calls `log_composite()` ITSELF**, at `bias_engine/composite.py:989`.
+**Every caller writes a `bias_composite_history` row**, and the callers are not only the
+scheduler:
+
+```
+api/bias.py:150, 368, 461, 542, 725, 746, 762, 774   <- EIGHT call sites
+api/uw_integration.py:206
+scheduler/bias_scheduler.py:2457                      <- the 15-minute cycle
+```
+
+**So row arrival = 96/day PLUS one per API hit, at arbitrary times.**
+
+### The consequence for counting
+
+**An HTTP-triggered composite re-reads the SAME Redis state** — the `gex` key is still absent
+until the next scoring pass writes it. **So one `None` event produces a null in EVERY row
+between the deleting cycle and the next successful gex write**, not one null.
+
+**COUNTING NULL ROWS OVER-COUNTS EVENTS, and by an unknown factor set by API traffic.**
+
+**Count cycles, not rows.** The event is a 15-minute scoring pass in which `gex` returned
+`None`, and the clean counter is the **absence of a `factor_readings` write** — one write per
+pass, no HTTP path, per the STATE above.
+
+## W, DERIVED
+
+**Base rate ~5% of scoring passes** (35 of 695, R-IV.336). **96 passes per 24 h.**
+
+| W | passes | expected `None` events | P(zero events) |
+|---|---|---|---|
+| 5 h | 20 | 1.0 | 36% |
+| 15 h | 60 | 3.0 | 4.6% |
+| **24 h** | **96** | **4.8** | **0.7%** |
+
+**W = 24 h.** At that width a zero result is a **0.7%** outcome — **so zero becomes evidence
+rather than silence**, which is the whole point of fixing W before reading rather than after.
+
+**Stated as the absence law requires:** the expected event rate across the window is declared
+HERE, before the read. **A shorter W cannot convict** — at 5 h, zero events happens better
+than one time in three with the fix working perfectly.
+
+**One caveat on the base rate:** 5% was measured PRE-fix, on rows the pre-fix code wrote. The
+fix changes **what is recorded**, not **whether UW GEX is available**, so the underlying rate
+should carry over. **If the observed rate departs sharply from 5%, that is a finding about the
+feed, not about the fix.**

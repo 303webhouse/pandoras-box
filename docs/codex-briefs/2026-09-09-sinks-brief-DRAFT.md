@@ -174,6 +174,30 @@ just finished making.
 
 ---
 
+### S7 — persist the composite's coverage figures (R-IV.350(b))
+
+**Added by R-IV.350(b). Schema change, not a new writer.**
+
+**`bias_composite_history` must carry `coverage_ratio` per cycle.** `active_factors` and
+`stale_factors` are already columns; **`coverage_ratio` is computed at
+`bias_engine/composite.py:929` and discarded at the DB boundary.**
+
+**Why it belongs in THIS brief:** the brief's subject is sinks that compute and discard. This
+is the same shape one layer up — **a figure the engine produces every cycle, serves live, and
+never writes down** — and its absence makes `DEF-BIAS-COVERAGE-OMITS-ABSENT`'s ruled fix
+unverifiable on any historical window.
+
+- **add** `coverage_ratio DOUBLE PRECISION` to `bias_composite_history` (nullable: rows before
+  the migration genuinely do not have it, and **a backfilled default would fabricate the exact
+  quantity this defect is about**);
+- **write it** in `log_composite()` alongside the nine existing columns;
+- **do NOT backfill.** The value cannot be reconstructed from stored columns —
+  `active_factors` gives the membership but the weights live in `FACTOR_CONFIG`, which has
+  changed. **A recomputed historical coverage would be a derived value witnessing its own
+  input** (conventions #14).
+
+**Done when:** a cycle's served `coverage_ratio` and its stored value agree on a live read.
+
 ## Done definition
 
 - **D1** — tests green; deploy verified four-step with the poll sequence reported.
