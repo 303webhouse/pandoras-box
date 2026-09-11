@@ -5,9 +5,9 @@
     python scripts/backfill_029_provider.py --commit    # takes the seal and writes
 
 WHAT IT DOES
-    Sets `provider = 'uw'` on every row that was graded before the fallback
-    shipped. That is certainty, not assumption: before the fallback, get_ohlc
-    was the only path to a Triton close, so no third possibility existed.
+    Sets `provider = 'uw'` on every row graded before the fallback shipped. That
+    is certainty, not assumption: before the fallback, get_ohlc was the only path
+    to a Triton close, so no third possibility existed.
 
 THE DISCIPLINE, and why each step is here rather than remembered
     A  seal BEFORE      count(id <= 377783 AND fired_at >= '2026-08-17') == 843
@@ -23,108 +23,113 @@ THE DISCIPLINE, and why each step is here rather than remembered
     -  invariant        provider IS NULL <-> graded_at IS NULL, asserted BOTH
                         ways, on the whole table
 
-ANY failure rolls the whole thing back. There is no partial success state:
-a half-backfilled column is worse than an empty one, because it looks finished.
+ONE transaction. Any failure rolls the whole thing back: there is no partial
+success state, because a half-backfilled column is worse than an empty one --
+it looks finished.
 """
 from __future__ import annotations
 
 import argparse
-import asyncio
+import json
 import os
-import sys
+
+import psycopg2
+import psycopg2.extras
 
 SEAL_MAX_ID = 377783
 SEAL_FROM = "2026-08-17"
 SEAL_EXPECTED = 843
+MCP_CONFIG = r"C:\trading-hub\.mcp.json"
 
 
-async def main(commit: bool) -> int:
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
-    from database.postgres_client import get_postgres_client
-
-    pool = await get_postgres_client()
-    if not pool:
-        print("FAIL: no database pool")
-        return 2
-
-    async with pool.acquire() as conn:
-        async with conn.transaction():
-            seal_before = await conn.fetchval(
-                "SELECT count(*) FROM triton_flow_shadow "
-                "WHERE id <= $1 AND fired_at >= $2::date",
-                SEAL_MAX_ID, SEAL_FROM,
-            )
-            print("A  seal BEFORE        : %s (expected %s)" % (seal_before, SEAL_EXPECTED))
-            if seal_before != SEAL_EXPECTED:
-                print("   HALT — the sealed population moved. Nothing written.")
-                raise RuntimeError("seal mismatch before")
-
-            # Declared before the write, inside the same transaction that writes.
-            expected = await conn.fetchval(
-                "SELECT count(*) FROM triton_flow_shadow "
-                "WHERE graded_at IS NOT NULL AND provider IS NULL"
-            )
-            print("   expected rows      : %s   <- DECLARED BEFORE THE WRITE" % expected)
-
-            already = await conn.fetchval(
-                "SELECT count(*) FROM triton_flow_shadow WHERE provider IS NOT NULL"
-            )
-            print("   already stamped    : %s" % already)
-
-            if not commit:
-                print("\nDRY RUN — nothing written. Re-run with --commit at the deploy.")
-                raise _DryRun()
-
-            # PHASE B. The new column ONLY.
-            status = await conn.execute(
-                "UPDATE triton_flow_shadow SET provider = 'uw' "
-                "WHERE graded_at IS NOT NULL AND provider IS NULL"
-            )
-            written = int(status.split()[-1])
-            print("B  rows written       : %s" % written)
-            if written != expected:
-                print("   HALT — written != expected. Rolling back.")
-                raise RuntimeError("count mismatch: %s != %s" % (written, expected))
-
-            seal_after = await conn.fetchval(
-                "SELECT count(*) FROM triton_flow_shadow "
-                "WHERE id <= $1 AND fired_at >= $2::date",
-                SEAL_MAX_ID, SEAL_FROM,
-            )
-            print("C  seal AFTER         : %s (expected %s)" % (seal_after, SEAL_EXPECTED))
-            if seal_after != SEAL_EXPECTED:
-                print("   HALT — the seal moved across the write. Rolling back.")
-                raise RuntimeError("seal mismatch after")
-
-            # The invariant, both directions, on the WHOLE table.
-            graded_without = await conn.fetchval(
-                "SELECT count(*) FROM triton_flow_shadow "
-                "WHERE graded_at IS NOT NULL AND provider IS NULL"
-            )
-            ungraded_with = await conn.fetchval(
-                "SELECT count(*) FROM triton_flow_shadow "
-                "WHERE graded_at IS NULL AND provider IS NOT NULL"
-            )
-            print("   graded w/o provider: %s (must be 0)" % graded_without)
-            print("   ungraded w/ provider: %s (must be 0)" % ungraded_with)
-            if graded_without or ungraded_with:
-                print("   HALT — invariant violated. Rolling back.")
-                raise RuntimeError("invariant violated")
-
-            print("\nPASS — provider IS NULL <-> graded_at IS NULL holds. Committed.")
-    return 0
+def dsn() -> str:
+    """Backend env vars when running IN the container; the operator's configured
+    connection otherwise. Same database either way -- the phases below are what
+    make this safe, not where it is run from."""
+    host = os.getenv("DB_HOST") or ""
+    if host:
+        return "postgresql://%s:%s@%s:%s/%s" % (
+            os.getenv("DB_USER") or "postgres",
+            os.getenv("DB_PASSWORD") or "",
+            host,
+            os.getenv("DB_PORT") or "5432",
+            os.getenv("DB_NAME") or "railway",
+        )
+    cfg = json.load(open(MCP_CONFIG))
+    for a in cfg["mcpServers"]["postgres"]["args"]:
+        if isinstance(a, str) and a.startswith("postgres"):
+            return a
+    raise SystemExit("no connection available")
 
 
-class _DryRun(Exception):
-    """Aborts the transaction so a dry run cannot write."""
+def main(commit: bool) -> int:
+    conn = psycopg2.connect(dsn())
+    conn.autocommit = False          # ONE transaction; any HALT rolls it all back
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    try:
+        cur.execute(
+            "SELECT count(*) n FROM triton_flow_shadow "
+            "WHERE id <= %s AND fired_at >= %s::date", (SEAL_MAX_ID, SEAL_FROM))
+        seal_before = cur.fetchone()["n"]
+        print("A  seal BEFORE         : %s (expected %s)" % (seal_before, SEAL_EXPECTED))
+        if seal_before != SEAL_EXPECTED:
+            raise RuntimeError("seal mismatch before")
+
+        cur.execute("SELECT count(*) n FROM triton_flow_shadow "
+                    "WHERE graded_at IS NOT NULL AND provider IS NULL")
+        expected = cur.fetchone()["n"]
+        print("   expected rows       : %s   <- DECLARED BEFORE THE WRITE" % expected)
+        cur.execute("SELECT count(*) n FROM triton_flow_shadow WHERE provider IS NOT NULL")
+        print("   already stamped     : %s" % cur.fetchone()["n"])
+
+        if not commit:
+            conn.rollback()
+            print()
+            print("DRY RUN - nothing written. Re-run with --commit.")
+            return 0
+
+        cur.execute("UPDATE triton_flow_shadow SET provider = 'uw' "
+                    "WHERE graded_at IS NOT NULL AND provider IS NULL")
+        written = cur.rowcount
+        print("B  rows written        : %s" % written)
+        if written != expected:
+            raise RuntimeError("count mismatch: %s != %s" % (written, expected))
+
+        cur.execute(
+            "SELECT count(*) n FROM triton_flow_shadow "
+            "WHERE id <= %s AND fired_at >= %s::date", (SEAL_MAX_ID, SEAL_FROM))
+        seal_after = cur.fetchone()["n"]
+        print("C  seal AFTER          : %s (expected %s)" % (seal_after, SEAL_EXPECTED))
+        if seal_after != SEAL_EXPECTED:
+            raise RuntimeError("seal moved across the write")
+
+        cur.execute("SELECT count(*) n FROM triton_flow_shadow "
+                    "WHERE graded_at IS NOT NULL AND provider IS NULL")
+        graded_without = cur.fetchone()["n"]
+        cur.execute("SELECT count(*) n FROM triton_flow_shadow "
+                    "WHERE graded_at IS NULL AND provider IS NOT NULL")
+        ungraded_with = cur.fetchone()["n"]
+        print("   graded w/o provider : %s (must be 0)" % graded_without)
+        print("   ungraded w/ provider: %s (must be 0)" % ungraded_with)
+        if graded_without or ungraded_with:
+            raise RuntimeError("invariant violated")
+
+        conn.commit()
+        print()
+        print("PASS - provider IS NULL <-> graded_at IS NULL holds. COMMITTED.")
+        return 0
+    except Exception as exc:
+        conn.rollback()
+        print()
+        print("HALT - %s. Rolled back; nothing written." % exc)
+        return 1
+    finally:
+        cur.close()
+        conn.close()
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--commit", action="store_true",
                     help="actually write; without it this is a dry run")
-    args = ap.parse_args()
-    try:
-        raise SystemExit(asyncio.run(main(args.commit)))
-    except _DryRun:
-        raise SystemExit(0)
+    raise SystemExit(main(ap.parse_args().commit))
