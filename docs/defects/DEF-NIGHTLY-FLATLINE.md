@@ -125,3 +125,26 @@ scheduled run revived it. Retained verbatim per strike convention.
    rendered, so prior-day content cannot read as current.
 
 Close on 1 + 2 shipped with fail-first tests. Defect 3 rides its own line.
+
+---
+
+## 2026-09-11 — A **REAL** FLATLINE, DISCRIMINATED FROM THIS FILE'S ARTIFACT
+
+**Measured 14:52Z (10:52 ET):** `nightly` `flatline`, `last_success_age_s 136160` (37.8 h),
+sole cause of `/health.status: degraded` (`signals_freshness.any_flatline` is `False`).
+
+**The weekend-gate test this file exists to demand was applied FIRST, and it clears:**
+
+| day | `weekday()` | scheduled | what happened |
+|---|---|---|---|
+| Wed 2026-09-09 | 2 | yes | **last success, 21:02 ET** |
+| Thu 2026-09-10 | 3 | yes | **MISSED** |
+| Fri 2026-09-11 | 4 | yes | reading taken 10:52 ET |
+
+**No weekend intervened, and the gap spans a scheduled weekday slot** — so the 26 h SLO is
+not the reason this is red. **This one is real.**
+
+**Recorded here because this file's whole point is that a red on this job must be
+discriminated before it is believed** — and the discrimination is what makes a red mean
+something. **The instrument behaved correctly today.** Detail on the job's own register,
+`DEF-STABLE-NIGHTLY-SUCCEEDS-WITHOUT-ADVANCING`.
