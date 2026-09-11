@@ -198,6 +198,24 @@ unverifiable on any historical window.
 
 **Done when:** a cycle's served `coverage_ratio` and its stored value agree on a live read.
 
+### S9 — `observation_date` on factor readings (R-IV.364(d))
+
+**Same shape as S7, one table over: a field the engine HAS and does not write down.**
+
+`factor_readings.timestamp` is the WRITE time. For a factor built from a market series the
+observation may be a different day — the batch runs 96×/24 h with no market-hours gate, so
+weekend and holiday rows carry the prior session's values under a current stamp.
+
+- **add** `observation_date DATE` to `factor_readings`, nullable;
+- **source it from the input's own as-of.** `get_latest_price()` currently discards that at
+  `factor_utils.py:453` (`iloc[-1]` on a 5-day frame) — **the date exists in the frame and is
+  thrown away one line before it is needed**, which is what makes this cheap;
+- **do NOT backfill.** The as-of of a past reading is not recoverable from the row, and
+  inferring it from the stamp is the assumption the column exists to remove.
+
+**Done when:** a reading written on a Saturday reports the preceding Friday as its
+`observation_date`, and a reading written intraday reports that day.
+
 ## Done definition
 
 - **D1** — tests green; deploy verified four-step with the poll sequence reported.

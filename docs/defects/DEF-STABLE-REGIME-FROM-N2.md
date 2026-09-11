@@ -77,3 +77,56 @@ reason: **a classifier below its minimum sample must say so rather than classify
 **The floor is a decision, not an implementation detail**, and it needs the same §1.1
 treatment as any other predicate: declare the expected satisfaction rate, and demonstrate
 the INSUFFICIENT state is reachable.
+
+---
+
+## FACET — READINGS ARE STAMPED WITH THE COMPUTATION DATE, NOT THE OBSERVATION DATE (R-IV.364(d))
+
+**Registered 2026-09-11. Surfaced by PS-01's population pre-flight; confirmed from the code.**
+
+**The composite batch has NO market-hours gate** — `refresh_composite_bias()` runs every 15
+minutes, **96 cycles per 24 h, seven days a week, holidays included** (R-IV.350(a)). Every one
+of the seventeen scored factors writes a reading.
+
+**So on a Saturday, `iv_regime` writes a reading stamped Saturday carrying FRIDAY'S VIX:**
+
+```
+bias_filters/iv_regime.py:38     vix = await get_latest_price("^VIX")
+bias_engine/factor_utils.py:449      data = await get_price_history(ticker, days=5)
+                          :453      return float(data["close"].iloc[-1])
+```
+
+**`iloc[-1]` on a five-day window, returning a bare float with no as-of.**
+
+### The value is right. The DATE is the defect.
+
+**Using Friday's VIX on Saturday is correct** — the market is shut and Friday's VIX *is* the
+prevailing VIX. **What is missing is any record that the observation and the stamp are
+different days.** The timestamp witnesses the COMPUTATION, not the OBSERVATION, and nothing
+downstream can separate them.
+
+**Conventions #14 at one remove:** not a derived value that cannot witness its own input, but a
+stamp that witnesses the wrong event.
+
+### Measured consequence, from PS-01's pre-flight
+
+**56 of 416 eligible `iv_regime` days are weekend-dated**, and — counted against
+`market_calendar` for the same window — **a further ~14 are market holidays**, which weekday
+logic would keep. **362 weekdays in the window, 14 non-trading, 348 weekday trading days.**
+
+**It reached a registered `n`**: PS-01's block count moves ~18 → ~16 → **~15** as the rule
+tightens. **A stamp nobody questioned propagated into a pre-registered population size.**
+
+### Fix shape — `observation_date` on readings
+
+**A reading carries the date of the OBSERVATION it is built from**, distinct from the write
+time. Filed into the **sinks brief's canonicalization item** alongside `coverage_ratio`.
+
+**It is NOT weekend-detection.** The right source is the input's own as-of — which
+`get_latest_price()` currently discards at `iloc[-1]`. **Any consumer can then ask "what day is
+this a reading OF?" instead of inferring it from when it was written.**
+
+**And the near-term workaround is not the fix:** joining a population to `stable_daily_bars`
+(PS-01's sixth precision) removes the bad dates by construction and is right for that
+population, **but it repairs each consumer separately and leaves the readings ambiguous for the
+next one.**

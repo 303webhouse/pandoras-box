@@ -363,6 +363,48 @@ either direction is a HALT rather than a note.
 wrong classification is recoverable by correcting a column — **not by re-grading, which
 T7's resolution forbids.**
 
+### T5b PHASE C — THE 7,838 `unmapped` ROWS ARE PENDING, NOT FINAL (R-IV.364(c))
+
+**Answer: PENDING.** The 2026-09-11 backfill called `classify(ticker, None)` and made **no
+vendor calls**. With `issue_type` absent, the classifier's own rule applies — *UNKNOWN IS
+NEVER GUESSED* — so every non-cash-settled ticker returns `unmapped` **by construction, not by
+measurement**. The one class the grader acts on, `cash_settled_index`, is checked before
+`issue_type` is consulted and is therefore exact.
+
+**So `unmapped` here means "not yet asked", and it is NOT usable as a stratum.** Any cut on
+`instrument_class` other than cash-settled-vs-rest is currently cutting on a placeholder.
+
+#### THE SCHEDULING CONSTRAINT, and it is the module's own
+
+> *"Shares its call with S4's sector map: one `/info` fetch answers both, **which is why they
+> must be built together** rather than as two per-ticker fetches."*
+> — `jobs/instrument_class.py:155-157`
+
+**Running the classification backfill alone would spend 385 `/info` calls and leave S4 to spend
+385 more.** `_get_info_cached_long` caches 24 h, so a combined pass costs **385 calls once**;
+two separate passes on different days cost **770**. **They are one operation and must be
+scheduled as one.**
+
+**Budget check, since the last two builds were bitten by caller collisions:**
+`_get_info_cached_long` issues under `caller="stock_info"` (`uw_api.py:407`) — **its own tag,
+not the throttled `ohlc_bars` / `ohlc_quote`.** No collision. **`stock_info`'s own budget
+headroom is NOT measured here** and should be read before the pass runs, not during it.
+
+#### What the combined pass needs, so it is not improvised on the day
+
+1. **a `sector` column** alongside `instrument_class` — S4's stratum has nowhere to land today;
+2. **one pass over the 385 distinct tickers** calling `classify_ticker()` and `sector_for()`
+   from the same `/info` response;
+3. **the same A/B/C seal discipline** as 029 and 030 — expected counts declared before the
+   write, `843` before and after, new columns only;
+4. **`STATIC_MAP_VALID_THROUGH = 2027-03-31` asserted at run time.** Past that date
+   `classify()` returns `etf_other` rather than a stale sub-class, and **a backfill run after
+   expiry would silently flatten every ETF sub-class** — the map's guard protects the runtime
+   path and nothing currently protects a batch.
+
+**NOT scheduled here. Named so it is not mistaken for done**, and so the 770-call version is
+not reached for by accident.
+
 ### T6 — Bounded `lookback_days`
 
 Today `lookback_days = (today - earliest).days + 12` anchored on the oldest ungraded row, which the 72 index rows pin
