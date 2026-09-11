@@ -1079,6 +1079,48 @@ async def init_database():
                 ON triton_flow_shadow (fired_at DESC)
         """)
 
+        # Migration 031 (S8, R-IV.361): forward option-chain collection.
+        # raw_contract_count/truncated exist because UW caps the chain call at
+        # 500 and a censored capture is indistinguishable from a thin market.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS option_chain_snapshots (
+                id                  BIGSERIAL PRIMARY KEY,
+                captured_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                session_date        DATE        NOT NULL,
+                ticker              TEXT        NOT NULL,
+                expiry              DATE        NOT NULL,
+                dte                 INTEGER     NOT NULL,
+                contract_type       TEXT        NOT NULL,
+                strike              NUMERIC(12,4) NOT NULL,
+                bid                 NUMERIC(12,4),
+                ask                 NUMERIC(12,4),
+                iv                  NUMERIC(10,6),
+                open_interest       BIGINT,
+                volume              BIGINT,
+                raw_contract_count  INTEGER,
+                truncated           BOOLEAN     NOT NULL DEFAULT FALSE,
+                source              TEXT        NOT NULL DEFAULT 'uw',
+                UNIQUE (session_date, ticker, expiry, contract_type, strike)
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_option_chain_snap_session
+                ON option_chain_snapshots (session_date DESC, ticker)
+        """)
+
+        # Migration 030 (R-IV.360(2), T5b): stored instrument class. The grader's
+        # queue reads it to stop re-selecting rows that can never grade.
+        await conn.execute("""
+            ALTER TABLE triton_flow_shadow
+                ADD COLUMN IF NOT EXISTS instrument_class TEXT
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_triton_shadow_ungraded_gradeable
+                ON triton_flow_shadow (fired_at)
+                WHERE graded_at IS NULL
+                  AND (instrument_class IS NULL OR instrument_class <> 'cash_settled_index')
+        """)
+
         # Migration 029 (R-IV.325(b)): provenance on every graded row.
         # NULL means NOT GRADED -- never "vendor unknown". The backfill that
         # establishes `provider IS NULL <-> graded_at IS NULL` is Phase B,

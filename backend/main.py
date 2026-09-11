@@ -1488,9 +1488,20 @@ async def health_check():
     except Exception as _bie:
         build_block = {"identity_readable": False, "error": str(_bie)}
 
+    # S8 (R-IV.361): a forward collection needs a surface that shows a missed
+    # session WHILE IT CAN STILL BE NOTICED. The data can never show it later --
+    # an absent day leaves no row to be absent from.
+    s8_block: dict = {}
+    try:
+        from jobs.option_chain_snapshot import snapshot_status
+        s8_block = await snapshot_status()
+    except Exception as _s8e:
+        s8_block = {"state": "ERROR", "reason": str(_s8e)}
+
     return {
         "status": overall,
         "build": build_block,
+        "option_chain_snapshot": s8_block,
         "server_time_et": now_et.strftime("%Y-%m-%d %H:%M:%S %Z"),
         "redis": redis_state,
         "postgres": postgres_state,
