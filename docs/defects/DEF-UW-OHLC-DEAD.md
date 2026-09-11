@@ -454,3 +454,18 @@ throttle stays distinguishable from absence. **Nineteen consumers do `if not dat
 return None`, and the sentinel is falsy.** So every throttled read in this file's
 evidence base was recorded by its caller as *"no data"*. **The distinction existed in
 the code and was destroyed one layer above it.**
+
+### And the local budget constant was wrong throughout (R-IV.369(e))
+
+`uw_api_cache.py:39` reads `DAILY_BUDGET = 20000  # UW Basic plan limit`. **The account's
+actual limit is 40,000**, per UW's own 429 body.
+
+**Every budget-percentage alert this system has ever fired used the wrong denominator** —
+the 50/70/85/90% thresholds fired at 10k/14k/17k/18k actual requests, i.e. at 25/35/43/45%
+of the real limit. **The alerts were early, not late**, so nothing was missed; but no
+reading of "we are at 90% of budget" ever meant what it said.
+
+**Raising it to 40,000 raises the ceiling on our own spend and is therefore a DECISION,
+not a correction** — and it must be taken together with the reserve for the second
+consumer (`DEF-UW-CLIENT-BYPASS`), which needs ~23,400 of the 40,000. **A hub budget set
+against 40,000 without that reserve would be sized to overrun the account by design.**
