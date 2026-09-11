@@ -403,3 +403,54 @@ R-IV.263(c) from citing context only. That stub recorded a name with no measurem
 it; this file is the measurement. **The stub is not superseded — it is resolved into this
 one**, and it now carries a pointer here so a reader arriving by either name lands on the
 evidence.
+
+---
+
+## 2026-09-11 — THE CAUSE IS IN QUESTION: UW IS RETURNING 429, ACCOUNT-WIDE (R-IV.367)
+
+**A raw vendor read tonight returned `HTTP 429 daily_request_limit_hit` on
+`/ohlc/1d`, on `greek-exposure`, AND ON `/info`** — the control this file used on
+2026-09-06 to eliminate auth and suspension.
+
+```
+{"code":"daily_request_limit_hit","current_limit":40000,
+ "message":"You have hit your daily request limit of 40000 requests. ...
+            Only requests with a 200 status code count toward your limit."}
+```
+
+**NOT entitlement, NOT tier-gating, NOT deprecation.** And **not endpoint-specific**,
+because `/info` fails identically.
+
+### What this does and does not overturn
+
+**It does NOT retract this defect.** The 09-06 read had `/info` answering 200 while
+`/ohlc/1d` served nothing — **a 429 cannot produce that pattern**, since it hits every
+endpoint at once. **So on 09-06 the quota was not exhausted, and something else was
+wrong with `/ohlc/1d`.**
+
+**What it DOES overturn is the assumption that every later observation of this defect
+was the same phenomenon.** An empty OHLC read taken on a day the account was already
+throttled says nothing about the endpoint. **Some fraction of this defect's evidence may
+be quota, and which fraction is unknown.**
+
+### The discriminator, available tonight at no cost
+
+**The limit resets at 8PM EST = 21:00 ET.** A single `/ohlc/1d` call after that
+separates the two:
+
+| result after reset | meaning |
+|---|---|
+| returns bars | **quota exhaustion, and this defect's characterisation is wrong** |
+| `200` with an empty array | **endpoint-specific, and this defect stands as filed** |
+
+**No conclusion should be drawn until it runs.** Registered here so the question is not
+lost, and so nobody re-cites the 09-06 elimination without noticing it now has a
+competing explanation for the days since.
+
+### Consumer-side note, because it shaped the evidence
+
+`_uw_request` returns a typed `UWUnavailable(RATE_LIMITED)` on 429 — deliberately, so
+throttle stays distinguishable from absence. **Nineteen consumers do `if not data:
+return None`, and the sentinel is falsy.** So every throttled read in this file's
+evidence base was recorded by its caller as *"no data"*. **The distinction existed in
+the code and was destroyed one layer above it.**
