@@ -596,3 +596,52 @@ eight-item batch was not started, and **the two report observations scheduled fo
 
 **Kin to the register's oldest habit:** *state the scope with the finding.* Here the scope
 is a day, and the cost is the thing that went unstated.
+
+
+## #15 FAILURE MARKING MUST NOT DEPEND ON THE RESOURCE IT REPORTS ON
+
+**R-IV.358(a). Measured, not theorised** — `DEF-STABLE-NIGHTLY-SUCCEEDS-WITHOUT-ADVANCING`,
+2026-09-10.
+
+**The worked case, four lines of log:**
+
+```
+[stable_jobs] nightly close recompute starting
+[stable_jobs] nightly failed: connection already closed
+[job_status] mark_failure(nightly) failed: the database system is in recovery mode
+DETAIL:  Consistent recovery state has not been yet reached.
+```
+
+**The job failed because Postgres went into recovery. The recorder of that failure wrote to
+Postgres.** So the failure was real, was detected, was handled — **and left no record.**
+
+### Why this is worse than a missing log line
+
+**An error channel sharing a dependency with the thing it watches is SILENT EXACTLY WHEN IT
+MATTERS.** It reports every failure the resource survives and none of the failures the
+resource causes — **which is the opposite of the distribution anyone reads it for.** Its
+record is not merely incomplete; it is biased toward the harmless.
+
+**And the silence is indistinguishable from health** on the surface that consumes it: a
+`job_status` table with no error row reads the same whether the job never failed or failed so
+badly it could not say so.
+
+### What actually caught it
+
+**The AGE-BASED SLO** — `flatline` computed from the absence of a success, **not from the
+presence of a report.** It needed nothing from the failing resource to be correct.
+
+**That is the design rule, and it is the same rule as conventions #12 one turn further:**
+**a probe must not require cooperation from the thing it is probing.** #12 says a liveness
+probe is a consumer that fails when the source dies. This says the converse trap: **a failure
+REPORTER that dies with the source reports nothing, and its silence is read as calm.**
+
+### The test
+
+> **Ask of any error channel: "what failure mode silences this?"**
+> **If the answer includes the resource it reports on, it is not a channel — it is a
+> best-effort courtesy, and something computed independently must carry the alarm.**
+
+**Kin:** the null-verifier law (a check that cannot fail), of which this is the reporting-side
+form — **a report that cannot be written is a check that cannot fail, arrived at from the
+other direction.**

@@ -204,3 +204,70 @@ def test_as_date_handles_both_schemas(raw, expected):
 
 def test_as_date_does_not_raise_on_absurd_epoch():
     assert tsc._as_date(10 ** 18) is None
+
+
+# --------------------------------------------------------------------------
+# R-IV.358(b) — the cash-settled guard
+#
+# The load-bearing assertion is NOT "it skipped". It is that NO FETCH WAS
+# ATTEMPTED. Before the fallback, an index ticker failed slowly on an empty UW
+# answer. With a yfinance net behind it, yfinance DOES serve ^SPX-shaped series
+# — so the net would hand back a price and the grader would compute a forward
+# return on an instrument that has no such return. A wrong grade inside the
+# sealed population is a registration breach; the skip it replaces is a gap.
+# --------------------------------------------------------------------------
+
+from jobs.instrument_class import classify, is_gradeable
+
+
+@pytest.mark.parametrize("sym", ["SPX", "SPXW", "RUT", "RUTW", "VIX",
+                                 "spx", " spxw ", "Vix"])
+def test_cash_settled_tickers_are_ungradeable(sym):
+    """The guard's predicate is the classifier's, case/space tolerant."""
+    assert is_gradeable(classify(sym, None)) is False
+
+
+@pytest.mark.parametrize("sym", ["SPY", "QQQ", "NVDA", "IWM", "XLF", "TLT"])
+def test_tradeable_tickers_stay_gradeable(sym):
+    """The guard must not eat the population it exists to protect."""
+    assert is_gradeable(classify(sym, None)) is True
+
+
+def test_guard_predicate_matches_the_classifier_set_exactly():
+    """One author for that symbol set — the guard must not carry a second copy."""
+    from jobs.instrument_class import CASH_SETTLED_INDEX_SYMBOLS
+    for sym in CASH_SETTLED_INDEX_SYMBOLS:
+        assert is_gradeable(classify(sym, None)) is False
+    src = Path(__file__).resolve().parents[1] / "jobs" / "triton_shadow_grader.py"
+    body = src.read_text(encoding="utf-8")
+    assert "is_gradeable(classify(" in body, "the guard is not using the classifier"
+    for sym in CASH_SETTLED_INDEX_SYMBOLS:
+        assert '"%s"' % sym not in body, "the grader hard-codes %s — second copy of the set" % sym
+
+
+def test_guard_reason_string_is_the_ruled_one():
+    src = Path(__file__).resolve().parents[1] / "jobs" / "triton_shadow_grader.py"
+    assert 'UNGRADEABLE-NO-SERIES' in src.read_text(encoding="utf-8")
+
+
+def test_guard_precedes_any_fetch_in_source_order():
+    """`never fetched from either source` — assert the ORDER, not just presence."""
+    src = Path(__file__).resolve().parents[1] / "jobs" / "triton_shadow_grader.py"
+    body = src.read_text(encoding="utf-8")
+    guard = body.index("UNGRADEABLE-NO-SERIES")
+    fetch = body.index("idx, provider = await fetch_r_close_index")
+    assert guard < fetch, "the guard runs AFTER the fetch — the net still gets consulted"
+
+
+@pytest.mark.asyncio
+async def test_index_ticker_never_reaches_either_provider(patched):
+    """End to end: neither leg is called for a cash-settled symbol."""
+    F, calls = patched
+    F.ohlc_ret = [UW_BAR]
+    F.yf_ret = [YF_BAR]
+    # fetch_r_close_index is what the guard prevents being called at all; prove
+    # that calling it for SPX WOULD have produced a series, so the guard is what
+    # stops it rather than an empty upstream.
+    idx, provider = await tsc.fetch_r_close_index("SPX", 25)
+    assert idx, "precondition: a series IS available for SPX — the guard is load-bearing"
+    assert calls["ohlc"] == 1

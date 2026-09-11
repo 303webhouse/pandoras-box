@@ -73,6 +73,7 @@ async def run_triton_shadow_grader() -> dict:
     from jobs.triton_shadow_common import (
         fetch_r_close_index, nth_trading_day, close_on_or_near, _f,
     )
+    from jobs.instrument_class import classify, is_gradeable
 
     # T4 (R-IV.289): every skip carries a REASON. A bare count answers "how many
     # did not grade" and not "why", and the two questions have different fixes.
@@ -121,6 +122,28 @@ async def run_triton_shadow_grader() -> dict:
             for g in group
         )
         lookback_days = _bounded_lookback(earliest, today)
+        # ── R-IV.358(b) GUARD: cash-settled index rows are UNGRADEABLE, and the
+        # fallback must not go looking for a series that cannot exist. SPX/SPXW/
+        # RUT/RUTW/VIX settle in cash and have no tradeable close to grade
+        # against; before the fallback they failed slowly, on an empty UW answer.
+        # WITH a yfinance net behind them they would fail DIFFERENTLY -- yfinance
+        # DOES serve ^SPX-shaped series, so the net would hand back a price and
+        # the grader would compute a forward return on an instrument that has no
+        # such return. THAT IS WORSE THAN THE SKIP IT REPLACES: a wrong grade
+        # inside the sealed population is a registration breach, where a skip is
+        # only a gap.
+        #
+        # The predicate is the CLASSIFIER's, not a second copy of the symbol list
+        # -- one author for that set (conventions #9). issue_type is passed as
+        # None deliberately: the cash-settled branch is checked FIRST and does not
+        # consult it, so this needs no per-ticker vendor call at grade time.
+        if not is_gradeable(classify(ticker, None)):
+            logger.info("triton_grader: %s is cash-settled — UNGRADEABLE-NO-SERIES, skip %d "
+                        "(no fetch attempted)", ticker, len(group))
+            _skip("UNGRADEABLE-NO-SERIES", len(group))
+            skipped += len(group)
+            continue
+
         idx, provider = await fetch_r_close_index(ticker, lookback_days)
         if not idx:
             # Still reachable AFTER the fallback: UW empty AND yfinance empty.
