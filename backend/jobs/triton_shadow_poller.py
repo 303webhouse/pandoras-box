@@ -100,7 +100,11 @@ async def run_triton_shadow_poller() -> None:
             # (ticker, day) across ticks so a recurring ticker is bar-fetched once/day.
             ck = (ticker, today)
             if ck not in _PRIOR5_DAY_CACHE:
-                idx = await fetch_r_close_index(ticker, PRIOR_LOOKBACK_DAYS)
+                # Tuple since R-IV.324. The poller's prior-5d is a DISPLAY figure
+                # and has no provider column to write to, so the provider is
+                # discarded HERE, deliberately and visibly, rather than by an
+                # unpacking that hides it.
+                idx, _provider = await fetch_r_close_index(ticker, PRIOR_LOOKBACK_DAYS)
                 p5 = None
                 ds = sorted(idx)
                 if len(ds) >= 6 and idx[ds[-6]]:
