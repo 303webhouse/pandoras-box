@@ -294,3 +294,31 @@ def test_queue_predicate_and_guard_agree_on_the_class():
     body = src.read_text(encoding="utf-8")
     assert "'%s'" % CLASS_CASH_SETTLED_INDEX in body
     assert "is_gradeable(classify(" in body, "the runtime guard is gone"
+
+
+# --------------------------------------------------------------------------
+# DEF-GRADER-QUEUE-CENSORED-AT-LIMIT (R-IV.364(b))
+# A skip count equal to GRADE_LIMIT measures the limit, not the backlog.
+# --------------------------------------------------------------------------
+
+def test_summary_separates_selected_from_outstanding():
+    src = Path(__file__).resolve().parents[1] / "jobs" / "triton_shadow_grader.py"
+    body = src.read_text(encoding="utf-8")
+    for field in ("ungraded_total", "selected", "censored"):
+        assert '"%s"' % field in body, "%s is missing from the pass summary" % field
+
+
+def test_censored_is_computed_against_grade_limit():
+    src = Path(__file__).resolve().parents[1] / "jobs" / "triton_shadow_grader.py"
+    body = src.read_text(encoding="utf-8")
+    assert "censored = selected >= GRADE_LIMIT" in body
+
+
+def test_ungraded_total_uses_the_same_predicate_as_the_queue():
+    """If the count and the selection disagree, `outstanding` is a different
+    population from the one the pass is draining — worse than no number."""
+    src = Path(__file__).resolve().parents[1] / "jobs" / "triton_shadow_grader.py"
+    body = src.read_text(encoding="utf-8")
+    pred = "instrument_class IS NULL OR instrument_class <> 'cash_settled_index'"
+    assert body.count(pred) == 2, "queue and count predicates have drifted apart"
+    assert body.count("fired_at < NOW() - INTERVAL '1 day'") == 2

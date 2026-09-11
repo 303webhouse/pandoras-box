@@ -107,9 +107,32 @@ async def run_triton_shadow_grader() -> dict:
             """,
             GRADE_LIMIT,
         )
+    # DEF-GRADER-QUEUE-CENSORED-AT-LIMIT (R-IV.364(b)). A skip count equal to
+    # GRADE_LIMIT measures the LIMIT, not the backlog: on 2026-09-11 the pass
+    # reported no_regular_session_bars=1000 against GRADE_LIMIT=1000 with 1,083
+    # rows ungraded, and that was read as growth. The queue total is counted
+    # separately so `processed` and `outstanding` can never be confused again.
+    async with pool.acquire() as conn:
+        ungraded_total = await conn.fetchval(
+            """
+            SELECT count(*) FROM triton_flow_shadow
+            WHERE graded_at IS NULL
+              AND fired_at IS NOT NULL
+              AND fired_at < NOW() - INTERVAL '1 day'
+              AND (instrument_class IS NULL OR instrument_class <> 'cash_settled_index')
+            """
+        )
+    selected = len(rows)
+    censored = selected >= GRADE_LIMIT
+    if censored:
+        logger.warning("triton_grader: selection hit GRADE_LIMIT %d of %s ungraded — "
+                       "per-reason counts are CENSORED at the limit",
+                       GRADE_LIMIT, ungraded_total)
+
     if not rows:
         # NOT a skip. Nothing was ungraded, which is the healthy steady state.
-        return {"graded": 0, "skipped": 0, "skips": {}}
+        return {"graded": 0, "skipped": 0, "skips": {},
+                "ungraded_total": ungraded_total, "selected": 0, "censored": False}
 
     # Group by ticker for batched bar fetches
     by_ticker: dict = {}
@@ -229,4 +252,9 @@ async def run_triton_shadow_grader() -> dict:
     # ticker -- two very different worlds that a graded-count alone cannot tell
     # apart. Returned so the caller can record it without re-deriving it.
     return {"graded": graded, "fully_graded": fully, "skipped": skipped,
-            "skips": skips, "providers": providers_used}
+            "skips": skips, "providers": providers_used,
+            # `selected` is what this pass looked at; `ungraded_total` is what
+            # exists. When censored is True the skip reasons describe the
+            # SELECTION and say nothing about the remainder.
+            "ungraded_total": ungraded_total, "selected": selected,
+            "censored": censored}
