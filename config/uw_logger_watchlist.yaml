@@ -1,0 +1,18 @@
+# UW forward-logger watchlist. Start small, expand once proven.
+# Phase 0.5 launch set (10 tickers):
+tickers:
+  - SPY   # baseline — primary test symbol throughout Phase 0 spike
+  - QQQ   # Nasdaq proxy
+  - IWM   # Small cap
+  - DIA   # Dow
+  - XLK   # Tech sector
+  - XLF   # Financials
+  - NVDA  # Flow-heavy mega-cap
+  - TSLA  # Flow-heavy mega-cap
+  - AAPL  # Flow-heavy mega-cap
+  - AMZN  # Flow-heavy mega-cap
+
+# Future expansion candidates (do NOT add yet — rate limits unknown):
+# XLE, XLY, XLV, AMD, META, GOOGL, MSFT, plus top 20 active options names
+# Expanding to 20+ tickers without re-running rate-limit burst-test risks
+# starving the live committee pipeline.
