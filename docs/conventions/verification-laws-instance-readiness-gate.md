@@ -105,3 +105,76 @@ and is named above as owed.**
   them passed vacuously.**
 - **Conventions #12** — a liveness probe is a consumer that fails when the source dies. Same
   shape, one layer up: **a deploy probe must fail when the deploy does not land.**
+
+---
+
+## RATIFIED AS STEP 3 OF RECORD (R-IV.344(a))
+
+**Liveness AND identity. Neither alone.** Entered into the verification procedure.
+
+## IDENTITY BY DECLARATION — built, and its premise does not hold as stated (R-IV.344(b))
+
+**Built:** `backend/build_identity.py` adds a `build` block to `/health` carrying `commit`,
+`commit_source`, `branch`, `identity_readable`, `process_started_at` and `uptime_seconds`.
+
+**FINDING — the env var the ruling names is NOT present on this service.** The fourteen
+Railway-injected variable names visible to `pandoras-box` are:
+
+```
+RAILWAY_ENVIRONMENT      RAILWAY_ENVIRONMENT_ID    RAILWAY_ENVIRONMENT_NAME
+RAILWAY_PRIVATE_DOMAIN   RAILWAY_PROJECT_ID        RAILWAY_PROJECT_NAME
+RAILWAY_PUBLIC_DOMAIN    RAILWAY_SERVICE_ID        RAILWAY_SERVICE_NAME
+RAILWAY_SERVICE_PANDORAS_BOX_URL                   RAILWAY_STATIC_URL
+RAILWAY_VOLUME_ID        RAILWAY_VOLUME_MOUNT_PATH RAILWAY_VOLUME_NAME
+```
+
+**No `RAILWAY_GIT_*` of any kind.** And the absence is informative rather than an artifact of
+how the list was read: **Railway-provided variables DO appear in it** — `RAILWAY_ENVIRONMENT`
+and `RAILWAY_PROJECT_ID` are Railway's, not ours — **so the list is not "user-defined vars
+only."**
+
+**Stated as a scope, per conventions #10:** this is what the deploy CLI reports for this
+service and environment. **It does not prove the variable is absent from the container at
+runtime** — a platform may inject at runtime what it does not list. **That distinction is
+exactly why the code does not assume either way.**
+
+### The build is designed so the answer is visible rather than assumed
+
+- **SHA readable** → `identity_readable: true`, and Step 3's identity half is read directly.
+- **SHA absent** → `identity_readable: false` with a note naming every variable checked.
+  **A verifier MUST fail the identity half on this. It must never pass.**
+
+**So Friday's deploy is itself the measurement.** The field resolves the question the CLI
+could not, and either outcome is usable.
+
+### The corroborator is now direct, not inferential
+
+**`uptime_seconds` replaces the counter-reset inference as the primary corroborating half.**
+If uptime is less than the elapsed time since the push, the serving process started after the
+push. **That is a witness, not an inference** — the counter-reset read required assuming
+those counters were in-process, and this does not.
+
+**The counter-reset check is KEPT** as ruled, now as a third line rather than the only
+alternative to the deployer's own word.
+
+### If the variable is genuinely absent, the remedy is a config change, not a code change
+
+**A service variable referencing Railway's own git SHA** would resolve per-deploy and needs no
+code edit — `build_identity` already reads `SOURCE_COMMIT`. **NOT DONE HERE:** setting a
+production variable is an outward-facing config change and it triggers a redeploy. **Flagged
+for Friday's deploy window, not taken tonight**, and named so the decision is the principal's.
+
+## SECURITY NOTE ON A PUBLIC SURFACE
+
+**`/health` is public and unauthenticated**, so the block reads a **fixed allowlist** of five
+commit names and three branch names — **never `os.environ` at large** — and **shape-validates
+before emitting**: a value that is not 7–40 lowercase hex is reported as `"malformed"` and its
+content never reaches the payload. **Railway's project, service and deployment identifiers are
+deliberately NOT exposed**; the commit SHA is already public because the repo is, and the
+identifiers carry account shape that nothing on this surface needs.
+
+**Twenty tests, and the load-bearing ones are negative:** that an unreadable identity reports
+itself unreadable rather than guessing, that a malformed value never appears in the payload,
+that a SHA-shaped `DB_PASSWORD` or `PIVOT_API_KEY` is not picked up by the allowlist, and that
+`''` — which is what Railway returns for an unset reference — reads as absent rather than
+present.
