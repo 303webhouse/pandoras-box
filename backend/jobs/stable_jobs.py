@@ -89,8 +89,8 @@ async def _record(job_name: str, coro_fn, session_date=None):
     if session_date is not None:
         try:
             from jobs.job_runs import JOB_NIGHTLY, start_run
-            run_id = await start_run(JOB_NIGHTLY if job_name == "nightly" else job_name,
-                                     session_date)
+            ledger_name = JOB_NIGHTLY if job_name == "nightly" else job_name
+            run_id = await start_run(ledger_name, session_date)
         except Exception as exc:
             # A supervision write must never stop the work it supervises.
             logger.warning("[stable_jobs] job_runs start_run(%s) failed: %s", job_name, exc)
@@ -247,6 +247,47 @@ NIGHTLY_RETRY_UNTIL_HOUR_ET = 23         # ...until 23:59 ET; past that it is to
 _nightly_attempted_at: dict = {}         # session key -> last attempt (rate limit only)
 
 
+# S8 (R-IV.361). 15:45 ET is a CHOICE: late enough that the session's IV is
+# meaningful, early enough that quotes are still live. A post-close capture would
+# record stale, wide, untradeable spreads -- and would look like data.
+S8_SNAPSHOT_TIME = (15, 45)
+S8_RETRY_UNTIL_HOUR_ET = 17              # quotes are worthless much past this
+S8_RETRY_EVERY_S = 10 * 60
+_s8_attempted_at: dict = {}
+
+
+async def _maybe_run_s8(et, key_prefix: str) -> None:
+    """Capture the chain if this session has not been captured. Never raises."""
+    from jobs.job_runs import has_completed
+    from jobs.option_chain_snapshot import JOB_NAME as S8_JOB
+
+    last = _s8_attempted_at.get(key_prefix)
+    if last is not None and (et - last).total_seconds() < S8_RETRY_EVERY_S:
+        return
+    try:
+        done = await has_completed(S8_JOB, et.date())
+    except Exception as exc:
+        logger.warning("[s8] completion check failed: %s", exc)
+        done = None
+    if done is True:
+        return
+    _s8_attempted_at[key_prefix] = et
+    if last is not None:
+        logger.warning("[s8] RETRY for %s (completed=%s)", key_prefix, done)
+    await _record(S8_JOB, _run_s8, session_date=et.date())
+
+
+async def _run_s8():
+    from jobs.option_chain_snapshot import run_option_chain_snapshot
+    res = await run_option_chain_snapshot()
+    # A capture that wrote nothing is a FAILED capture, not a quiet success --
+    # otherwise has_completed() marks the session done and the retry stops on a
+    # day with no data at all.
+    if not res or not res.get("rows"):
+        raise RuntimeError("s8 capture wrote no rows: %s" % res)
+    return res
+
+
 async def _maybe_run_nightly(et, key_prefix: str) -> None:
     """Run the nightly if this session's pass has not completed. Never raises.
 
@@ -296,6 +337,16 @@ async def stable_engine_loop():
                     if et.hour == h and et.minute in (m, m + 1) and key not in fired:
                         fired.add(key)
                         await _record("provisional", run_provisional_snapshot)
+                # ── S8 option-chain snapshot (R-IV.361) ──────────────────────
+                # FORWARD COLLECTION. A session not captured is gone: no vendor
+                # call returns yesterday's bid/ask/IV as they stood. So this uses
+                # the SAME completion-backed retry as the nightly rather than a
+                # one-shot window -- for a collector, "we tried once" is the one
+                # outcome that cannot be repaired.
+                sh, sm = S8_SNAPSHOT_TIME
+                if (et.hour, et.minute) >= (sh, sm) and et.hour <= S8_RETRY_UNTIL_HOUR_ET:
+                    await _maybe_run_s8(et, key_prefix)
+
                 # ── Nightly recompute — R-IV.360(1), RETRY ───────────────────
                 # THE OLD SHAPE HAD TWO INDEPENDENT WAYS TO LOSE A SESSION:
                 #   1. `fired.add(nkey)` ran BEFORE the job, so a FAILED pass was
