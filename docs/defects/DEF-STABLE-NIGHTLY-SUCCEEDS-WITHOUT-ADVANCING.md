@@ -185,3 +185,38 @@ it changes WHEN the job may run, and that is scheduling semantics rather than a 
 **The stale `stable_daily_bars` PREDATES this outage** - already ending 09-04 while the job
 still reported `ok` on 09-08. **Separate cause, separate line.** A retry recovers the lost
 Thursday; it does not explain 09-04.
+
+---
+
+## OBSERVED 2026-09-12 00:59 ET — THE FIX WORKED, AND THE RETRY DID NOT RUN
+
+**Pre-registered before the run (R-IV.361), and met exactly:**
+
+```
+/health.status              degraded  ->  HEALTHY
+stable_jobs.worst_status    flatline  ->  ok
+nightly.status              flatline  ->  ok
+nightly.last_success_age_s  14244 s   =  3 h 57 m  ->  succeeded 21:03 ET
+consecutive_failures        0
+unrecorded_failures         []
+```
+
+**45 hours of flatline cleared on the first scheduled pass after the deploy.**
+
+### AND THE HALF THAT MUST BE SAID: THE RETRY BRANCH WAS NOT EXERCISED
+
+**The nightly fired at 21:00 and succeeded at 21:03 — first attempt.** Postgres was
+healthy, so nothing retried.
+
+**DEPLOYED is not EXERCISED** (R-IV.344(c)). What last night proves is that the job runs
+and completes under the new scheduling; **it proves nothing about the behaviour the fix
+was built for.** The retry path, the tri-state `None` handling, and the out-of-band
+failure channel are all still **NOT-EXERCISED**.
+
+**They exercise when Postgres next fails during the 21:00 window — which is not
+schedulable and may be months away.** Recorded so nobody later reads "the nightly
+recovered" as "the retry works."
+
+**`unrecorded_failures: []` is likewise NOT evidence the channel works** — it is evidence
+nothing has needed it. A channel with nothing in it and a channel that cannot write look
+identical from outside.

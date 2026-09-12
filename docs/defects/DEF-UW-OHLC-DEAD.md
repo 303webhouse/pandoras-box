@@ -469,3 +469,61 @@ reading of "we are at 90% of budget" ever meant what it said.
 not a correction** — and it must be taken together with the reserve for the second
 consumer (`DEF-UW-CLIENT-BYPASS`), which needs ~23,400 of the 40,000. **A hub budget set
 against 40,000 without that reserve would be sized to overrun the account by design.**
+
+---
+
+# RESOLVED 2026-09-12 — THE ENDPOINT WAS NEVER DEAD. IT WAS QUOTA.
+
+**The post-reset probe, 00:55 ET, five hours after the 20:00 ET reset:**
+
+```
+GET /api/stock/SPY/ohlc/1d          HTTP 200   756 bars   data[] len 756
+GET /api/stock/SPY/greek-exposure   HTTP 200   250 rows
+GET /api/stock/SPY/info             HTTP 200
+
+x-uw-daily-req-count  1652 / 40000
+```
+
+**A full year of SPY dailies, `market_time` values `pr` / `po` / `r` intact, dated
+2025-09-11 through 2026-09-11.** Exactly the series the grader needs and could not get.
+
+**The same call that returned nothing for nine days returns 756 bars when the account has
+requests left.**
+
+## What was actually wrong, start to finish
+
+1. **A second UW client on the VPS** (`uw_forward_logger`, `DEF-UW-CLIENT-BYPASS`) shared
+   the API key outside the governed chokepoint, at up to 34,560 requests/day.
+2. **The account hit its 40,000/day limit**, daily.
+3. **UW returned 429 on every endpoint** — including the ones this defect was filed
+   against.
+4. **Nineteen consumers collapsed the 429 sentinel to `None`**
+   (`DEF-UW-THROTTLE-COLLAPSED-TO-NONE`), so the throttle arrived as *"no data"*.
+5. **This defect was filed on that wording** — and nine days of evidence were read as an
+   endpoint failure.
+
+## The 2026-09-06 observation still stands, and it is why this took nine days
+
+**`/info` answered 200 while `/ohlc/1d` served nothing.** A 429 cannot produce that — it
+hits every endpoint at once. **So on that day the account was NOT exhausted and something
+else was genuinely wrong with `/ohlc/1d`**, or the read caught a transient.
+
+**That single correct observation is what made the endpoint-specific reading credible**,
+and every later observation was then filed under a heading the first one had earned.
+**The defect was right once and re-confirmed by evidence that did not test it.**
+
+> **A CHARACTERISATION EARNED BY ONE MEASUREMENT MUST BE RE-EARNED, NOT RE-CITED.**
+> Later observations consistent with a filed cause are not evidence for it unless they
+> could have distinguished it from the alternatives — and *"the endpoint returned
+> nothing"* could not distinguish a dead endpoint from an exhausted account for a single
+> one of the nine days.
+
+## Status
+
+**CLOSED as mis-attributed.** The live defect is `DEF-UW-QUOTA-EXHAUSTION` with
+`DEF-UW-CLIENT-BYPASS` as its cause and `DEF-UW-THROTTLE-COLLAPSED-TO-NONE` as the reason
+it stayed hidden.
+
+**The grader's yfinance fallback stays.** It was built for a dead endpoint and is
+correct for an exhausted one — **a second source is the right answer to both**, and it is
+now the thing that keeps grading working on any day the budget runs out before 16:15 ET.
