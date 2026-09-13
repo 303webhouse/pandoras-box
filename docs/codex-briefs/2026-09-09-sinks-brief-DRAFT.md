@@ -1,5 +1,18 @@
 # CC BRIEF — SINKS: persist the two discarded feeds, and stop losing NBBO
 
+> **REVISION 2 — R-IV.376.** Amends ATLAS PASS 1 (F1–F9) and AEGIS A2.
+> **BASE: gate `8d6f4e3f`, LF-normalised, 13,660 B** — the version carrying S7 and S9.
+>
+> **GATE DISCREPANCY, stated rather than absorbed.** The review names `4cad9aa8`.
+> **No version in this lane's tree hashes to it** — the three committed versions are
+> `638863f1` (original), `9adbad19` (+S7), `8d6f4e3f` (+S9), and raw == LF for all three
+> (this file has no CRLF, so line endings cannot explain the difference). No copy exists
+> in the ferry directory.
+> **Every finding maps cleanly onto `8d6f4e3f`** — F9 cites S9, which exists only there —
+> **so this revision is built on `8d6f4e3f` and says so.** If EDGE holds a `4cad9aa8` the
+> two need reconciling before the final read; the amendments below are unaffected either
+> way, but the gate arithmetic is not.
+
 **Authority** R-IV.326(a). **Position two**, behind the grader precondition build and ahead
 of ledger integrity (R-IV.273(d)).
 
@@ -44,6 +57,30 @@ discarded a number that could be recomputed. **This one discards a market state 
 for an instant.**
 
 ---
+
+## THE BUILD SPLITS IN TWO (F2, A2) — and the split is a sequencing constraint
+
+**SINKS-A and SINKS-B ship separately. B cannot start before the quota layer enforces.**
+
+| | contents | new UW fetches | gate to start |
+|---|---|---|---|
+| **SINKS-A** | S1 · S2 (writer) · S5 · S6 · S7 · S9 — **the live writers** | **ZERO** | none. Codes this weekend after the ledger carve-out. |
+| **SINKS-B** | S4 — log ingest, then sized vendor gap draws | **yes** | **governor ENFORCING with the corrected denominator, `/health` showing account usage, and the transfer verified** |
+
+**Why the split is not optional.** SINKS-A reuses payloads the pollers already hold (S3)
+and issues no request at all, so it cannot touch the budget. **SINKS-B draws from the
+vendor — and a draw against an unmetered account is precisely the outage just diagnosed.**
+`uw_forward_logger` exhausted 40,000 requests/day and took the GEX factor dark for
+10 h 28 m; **a per-ticker backfill sweep is the same shape of spend, run deliberately.**
+
+**So the order is: quota layer → SINKS-A → transfer verified → SINKS-B**, and SINKS-B is
+**AEGIS-sized against `40,000 − measured hub demand`**, not against 40,000, and
+**scheduled after the 20:00 ET reset** so a miscalculation costs the quiet overnight
+window rather than the next session's panels.
+
+**The measured remainder does not exist yet.** It arrives with the meter (`/health`
+account usage) and the post-stop convergence read. **SINKS-B has no start date until that
+number does.**
 
 ## Binding conditions
 
@@ -120,9 +157,18 @@ enricher's read path — **the candidate key is composite and must be measured, 
 One row per tide snapshot. The warmer currently writes **one Redis key with a 1800 s TTL**
 and overwrites it (`stable_jobs.py::_warm_tide`), so **the series has never existed.**
 
-Per the census: `net_call_premium`, `net_put_premium`, `net_volume`, plus the snapshot
-timestamp — and **the 5-minute interval the MCP description exposes**, which is what S6's
-tide-sign stratum needs.
+**FIXED BY THE REGISTRATION (F8): 5-MINUTE BARS, NOT SNAPSHOTS.** Amendment 1's S6 defines
+tide sign as *"the net premium sign of the 5-minute market-tide bar containing
+`fired_at`"* — **so a snapshot cadence cannot compute it**, however convenient. One row per
+5-minute bar, **stored from the response the poller already receives** (S3: no second
+fetch), **deduped on the BAR timestamp** rather than on arrival time.
+
+Per the census: `net_call_premium`, `net_put_premium`, `net_volume`, plus the **bar**
+timestamp.
+
+**Dedupe on the bar, not the fetch, is the load-bearing detail.** The warmer polls more
+often than 5 minutes, so the same bar arrives repeatedly; **keying on arrival would store
+the same bar many times and make a count of rows meaningless as a count of bars.**
 
 ### S3 — the writers reuse the pollers' PARSED payloads
 
@@ -134,15 +180,40 @@ spend the k/burn artifact measured, and (b) **persist a different observation fr
 the live consumer acted on** — which would make the sink's history disagree with the
 decisions taken from it, silently.
 
-### S4 — Backfill, gated
+### S4 — Backfill (SINKS-B) — THE SOURCE HAS CHANGED (F1)
 
-**Tide:** supported per the MCP description, **confirmed live in this build** before any
-draw. Backfill to the window's start where the endpoint allows.
+**The dark-pool backfill is no longer a vendor draw. It is an INGEST OF OUR OWN LOGS.**
 
-**Dark pool:** **OPEN** — measured in this build (P0.1). **If backfillable, AEGIS sizes it
-before any draw**, because per-ticker across the universe is a large call count. **If not,
-(d) is forward-only and no backfill exists at any price** — which changes what the Hunter
-can claim about its own history and must be stated on the registration face, not discovered.
+`uw_forward_logger` has written per-ticker Parquet since ~mid-August — `darkpool`,
+`flow_alerts`, `net_prem_ticks`, `spot_exposures` — under
+`/opt/openclaw/workspace/data/cache/uw/<type>/<TICKER>/<YYYYMM>.parquet`, merge-and-append
+with `drop_duplicates`. **The data this brief was going to buy from the vendor is already
+on disk, collected by the very process that exhausted the quota collecting it.**
+
+- **provider = `'uw_forward_logger'`** on every ingested row. Not `'uw'`: these arrived
+  through a different client, on a different host, with a different retry and backoff.
+  **Same vendor is not same provenance**, and S1's `provider` invariant is what makes that
+  recordable.
+- **The vendor is drawn ONLY for gaps**, only after the ingest establishes what the gaps
+  are, and only if P0.1's measurement supports it.
+- **Ingest runs under the T5b discipline**: expected counts declared before the write,
+  invariants asserted before and after, seal-equivalent on any table it touches.
+
+**The window is bounded by what was copied, not by what was collected.** Coverage starts
+at the earliest `YYYYMM` present in the transfer and **ends when the logger stopped** —
+both dates are facts about the archive, and **both must be read off the copy rather than
+assumed from the deploy date.**
+
+**TIDE IS DIFFERENT AND STAYS A VENDOR DRAW.** The logger holds **per-ticker net-premium
+ticks, not the market-wide series**, so it cannot supply `market_tide_history`. That
+backfill comes from the vendor's `date` + `interval_5m` parameters — **~78 bars/day**,
+which is small enough that AEGIS sizing is a formality rather than a constraint. **Stated
+so nobody reaches for the logger's `net_prem_ticks` and gets a different quantity with a
+similar name.**
+
+**If the transfer is incomplete, the ingest window shrinks and no draw replaces it** — the
+logger's archive is the only copy, and the box retires. **That is the risk the transfer
+plan's verification step exists to bound.**
 
 ### S5 — NBBO at print time
 
@@ -166,6 +237,21 @@ The enricher returns a dict that `process_signal_unified` folds into the signal.
 **What the enricher computes and returns must land in `enrichment_data` on the signal row**,
 so a signal's dark-pool context is recoverable from the signal rather than only from a live
 re-fetch that no longer returns the same window.
+
+**THE WRITE MERGES, IT DOES NOT REPLACE (F5).** `enrichment_data` already holds keys from
+other enrichment paths. **A whole-column write destroys them silently** — the signal still
+has an `enrichment_data`, it is still valid JSONB, and what is missing is only visible to
+someone who knew it was there.
+
+```sql
+-- merge, preserving existing keys
+UPDATE signals SET enrichment_data = COALESCE(enrichment_data, '{}'::jsonb) || $2::jsonb
+WHERE id = $1
+```
+
+**Not `SET enrichment_data = $2`.** The `||` operator is the whole fix, and the test is a
+signal that carries another path's key before the dark-pool write and still carries it
+after.
 
 **This is the smallest task and the one most likely to be dropped**, because the aggregate
 "works" today — it reaches the committee live. **It is in scope because a decision surface
@@ -207,6 +293,11 @@ observation may be a different day — the batch runs 96×/24 h with no market-h
 weekend and holiday rows carry the prior session's values under a current stamp.
 
 - **add** `observation_date DATE` to `factor_readings`, nullable;
+- **`observation_date` IS THE INPUT'S EXCHANGE DATE (F9), never the fetch time.** For a
+  bar-sourced factor it is the bar's session date. **For a non-bar input it is the release
+  date if the source states one, and `NULL` if it does not** — `NULL` meaning *"the source
+  did not say"*, which is a different fact from *"we did not look"* and must not be
+  conflated with it;
 - **source it from the input's own as-of.** `get_latest_price()` currently discards that at
   `factor_utils.py:453` (`iloc[-1]` on a 5-day frame) — **the date exists in the frame and is
   thrown away one line before it is needed**, which is what makes this cheap;
@@ -215,6 +306,53 @@ weekend and holiday rows carry the prior session's values under a current stamp.
 
 **Done when:** a reading written on a Saturday reports the preceding Friday as its
 `observation_date`, and a reading written intraday reports that day.
+
+### S10 — THE WRITERS RUN AFTER THE LIVE RETURN (F6) — a mechanism, not a check
+
+**D4 says "no change to any live consumer's payload." That is a CHECK. F6 asks for the
+property that makes the check unnecessary.**
+
+**Every sink writer runs in a background task scheduled AFTER the live payload has been
+returned to its consumer.** Not before, not inline, not in a `finally`.
+
+```python
+result = build_live_payload(...)      # what the consumer gets
+asyncio.ensure_future(write_sink(parsed))   # cannot alter or delay `result`
+return result
+```
+
+**Why a check is insufficient.** A writer on the live path can fail in three ways a payload
+diff will not catch: it can **raise** (killing the response), it can **block** (the
+TradingView handler has a ~10 s timeout — `CLAUDE.md`), or it can **succeed slowly** and
+turn a fast surface into a slow one. **D4 compares outputs; none of those three changes an
+output.**
+
+**A BROKEN SINK MUST NOT BECOME THE PAUSE OUTAGE BY ANOTHER ROUTE.** The pollers were
+paused once this register already, and the lesson was that live consumers are live.
+**Adding a writer to their path re-creates that exposure with a new name.**
+
+**Testable as a property:** a writer that raises unconditionally must leave every live
+consumer's response byte-identical and no slower. **That test is the deliverable, not the
+diff.**
+
+### S11 — SIZE AND RETENTION, DECLARED BEFORE THE FIRST ROW (F7)
+
+**Railway Postgres has a ceiling, and this build's whole purpose is to write a lot of rows
+forever.**
+
+**Before the first migration runs, the brief states:**
+
+- **`prints/day × tickers × bytes/row`** → a **stated table-growth figure** in MB/month,
+  computed from a measured session, not estimated from a guess;
+- **a retention or partition policy**, declared with it — monthly partitions on
+  `executed_at`, or a stated retention horizon, or an explicit "keep forever and here is
+  the ceiling date";
+- **the same for `market_tide_history`**, which is small (~78 bars/day) and should be
+  stated anyway so the asymmetry is on the record.
+
+**A growth figure without a policy is not a plan**, and a policy chosen after the table is
+large is a migration under pressure. **`DEF-PGSS-TEXTFILE-GROWTH` is already on this
+register for a volume nobody sized in advance.**
 
 ## Done definition
 
@@ -229,12 +367,26 @@ weekend and holiday rows carry the prior session's values under a current stamp.
   made and its response recorded.
 - **D6** — key uniqueness registered: `(rows, distinct_keys)` on the print key, before use.
 - **D7** — `provider` populated on every row from the first, and the `NULL` meaning declared.
-- **D8** — migrations carry `-- DOWN`.
+- **D8** — migrations carry `-- DOWN`. **All of them, both halves.**
+- **D9** — **SINKS-A ships with zero new UW requests**, demonstrated: the account counter
+  is unchanged across a deploy and a full session of writer activity.
+- **D10** — **a writer that raises unconditionally leaves every live payload byte-identical
+  and no slower** (S10). The property, not the diff.
+- **D11** — **table-growth figure and retention policy stated before the first migration**
+  (S11).
+- **D12** — **`enrichment_data` merge preserves a pre-existing key** from another path
+  (S6/F5).
+- **D13** — **ingest counts declared before the write and met exactly**, T5b discipline,
+  with the archive's coverage window read off the copy.
 
 ## Gates / what NOT to do
 
 - **NO second fetch** for the sink (S3).
-- **NO backfill draw before AEGIS sizing** (S4).
+- **NO backfill draw before the governor ENFORCES**, `/health` shows account usage, and
+  AEGIS has sized it against the **measured remainder** — not against 40,000 (S4, A2).
+- **NO vendor draw for anything the archive already holds.**
+- **NO writer on a live request path** (S10).
+- **NO whole-column write to `enrichment_data`** (S6).
 - **NO storing a derived spread in place of the NBBO pair** (S5).
 - **NO defaulting a missing NBBO to zero** — it has a bucket already.
 - **NO change to live consumer payloads** — the pause proved they are live.
@@ -248,9 +400,30 @@ weekend and holiday rows carry the prior session's values under a current stamp.
 it is one call per interval instead of one per ticker per interval. **Unmeasured; named
 because the census did not cover it.**
 
-**Q2 — what is the print key?** UW prints carry no id in the path the enricher reads. If the
-composite key is not unique, dedupe on replay is undefined. **Measure before designing the
-table, per §1.2.**
+**Q2 — what is the print key? MEASURE ON BOTH SOURCES (F3).** UW prints carry no id in the
+path the enricher reads. If the composite key is not unique, dedupe on replay is undefined.
+**Measure before designing the table, per §1.2** — `(rows, distinct_keys)` stated, not
+assumed.
+
+**And measure it TWICE, on two different populations:**
+
+1. **the logger's Parquet** — which stored the RAW payload. **If UW prints carry an id that
+   the enricher's read path simply does not surface, the archive already contains it**, and
+   the key question is answered before the table is designed rather than after.
+2. **one live session** — because the archive's shape is what UW sent in August, and the
+   live path is what it sends now.
+
+**The two answers can differ, and that difference is itself the finding.** A key that is
+unique in the archive and not live means the field was dropped somewhere between them.
+
+**Q4 — the logger's GEX file: do not build on it (F4).** `greek_exposure_daily/<TICKER>/
+<TICKER>_rolling.parquet` is **overwritten every run** — one fetch wide, not a history.
+**And GEX history already exists in `factor_readings.metadata`**, which stores the raw
+payload per reading, at the 15-minute factor cadence since the column existed.
+
+**Verify the archive's depth when the transfer lands — then do not build on it.** The
+in-house series is denser, longer, and already governed. **Named here because "we have GEX
+Parquet" is exactly the sentence that would send someone to the wrong source.**
 
 **Q3 — does the tide sink's 5-minute interval need its own row, or is the snapshot cadence
 enough?** Amendment 1's S6 defines tide sign as *"the net premium sign of the 5-minute
