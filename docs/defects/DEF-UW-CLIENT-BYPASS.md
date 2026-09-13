@@ -99,3 +99,56 @@ clients decrement**, so the governor governs the account rather than one process
 
 **Whatever is chosen, the invariant is the same: the account has one budget, so it needs
 one accountant.**
+
+---
+
+## CONFIRMED BY OUTCOME — 2026-09-13 05:02 ET
+
+**The convergence check named in the transfer plan has run, and it converged exactly.**
+
+```
+                   account   hub      other
+2026-09-11 (Fri)    40,000   16,583   23,417   59%   <- limit hit 09:46 ET
+2026-09-13 (Sun)       586      585        0    0%   <- 9 h into the quota day
+```
+
+**586 = 585 + the one probe call that read the header.** There is nothing else on the key.
+
+**This was the verification, not a re-statement of the identification.** The claim was made
+from a deploy script — `gen_vps_writer.py`, its pacing arithmetic, and a 23,417-request
+gap. **It could have been wrong in two ways: the logger might not have been running, or it
+might not have been the whole gap.** Both are now excluded: the gap closed to zero when the
+logger stopped, so it was running and it was all of it.
+
+**AND THERE IS NO THIRD CONSUMER.** Friday's overnight read showed 1,031 "other" requests
+in five hours and I flagged it as needing explanation before Monday. **It is explained: the
+logger was still running then.** The stop came later.
+
+### What this unlocks — and the figure that is NOT yet measured
+
+**Hub-only demand can now be measured against the 40,000 cap for the first time.** But not
+from the numbers above:
+
+| day | hub | why it is not the answer |
+|---|---|---|
+| Sun 09-13 | 585 (9 h) | market closed; near-idle |
+| Sat 09-12 | 2,725 | market closed |
+| **Fri 09-11** | **16,583** | **TRUNCATED — the account 429'd from 09:46 ET, so callers spent the session failing, backing off, or serving cache** |
+
+**Friday's 16,583 counts ATTEMPTS, not satisfied demand, and a session spent throttled is
+not a session's worth of work.** It is neither a floor nor a ceiling: retries inflate it,
+give-ups deflate it, and which dominates is unmeasured.
+
+**MONDAY 2026-09-14 IS THE FIRST CLEAN FULL-SESSION MEASUREMENT**, and it is the number the
+plan decision needs. **Nothing before it should be quoted as hub demand.**
+
+### The recommendation firms up
+
+**Still: no plan purchase.** One collector was 59% of a 40,000-request account. With it
+stopped, a full trading session has to exceed ~40,000 on its own before more quota is the
+answer — **and Friday's throttled 16,583 is the only hub figure in existence, which makes
+"we need more quota" an assertion nobody can currently support.**
+
+**The governor should still move to enforce.** Not because the pressure remains — it does
+not — but because **nothing prevents the next uncounted client.** The bypass is the defect;
+the quota exhaustion was its symptom.
