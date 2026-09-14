@@ -93,25 +93,44 @@ def is_unavailable(obj) -> bool:
 # (`GET /api/uw/health/by_caller`); the mechanism is the durable part, the
 # numbers are knobs. Tags match the `caller=` strings passed at each call site
 # (see the ohlc_* split in get_ohlc).
-QUOTA_SAFETY_BUFFER = 2000  # leave >=2k/day headroom under the 20k UW cap
+QUOTA_SAFETY_BUFFER = 2000  # headroom under the HUB budget, not the account limit
 
+# ── RETUNED 2026-09-14 AGAINST MEASURED DEMAND (R-IV.379(c)) ────────────
+# The previous table called itself "STARTING VALUES to tune against the first
+# post-reset session's telemetry". That telemetry now exists, and it showed the
+# table would have blocked three live callers on sight -- including `ohlc_quote`,
+# a FOREGROUND caller, which is the tier the tiering exists to protect.
+#
+# Each quota below is max(observed Friday 09-11, projected Monday 09-14) x ~1.2.
+# Friday's figures are inflated by retries under 429 and Monday's are a partial
+# day projected to 24 h; taking the MAXIMUM of the two is deliberate -- a quota
+# sized to the smaller sighting blocks on the day the larger recurs.
+#
+# TWO FINDINGS FELL OUT OF THE MEASUREMENT AND ARE RECORDED HERE:
+#   * `outcome_resolver` was NOT IN THIS TABLE AT ALL and ran on DEFAULT_QUOTA
+#     500 while spending 2,764 by mid-session -- the single largest hub caller
+#     on Monday, governed by a default meant for unknown code paths.
+#   * `flow_per_expiry` is commented "uw_flow_poller (deactivated)" and spent
+#     1,640 on Friday. A caller documented as off is the fifth-largest consumer;
+#     the comment is stale or the poller is not off, and which one is UNREAD.
 QUOTAS: Dict[str, Tuple[int, str]] = {
-    # ── FOREGROUND (live trading — generous, structurally reserved) ──
-    "snapshot": (3000, TIER_FOREGROUND),          # live prices: MTM, quote, macro strip
-    "option_contracts": (2000, TIER_FOREGROUND),  # DAEDALUS options chains
-    "ohlc_quote": (800, TIER_FOREGROUND),         # regular-session daily-change (quote path)
-    "iv_rank": (700, TIER_FOREGROUND),            # chain IV rank
-    "max_pain": (700, TIER_FOREGROUND),           # chain max pain
-    "greek_exposure": (500, TIER_FOREGROUND),     # GEX
-    "flow_recent": (1500, TIER_FOREGROUND),       # Flow Radar + wh_accumulation (committee-facing)
+    # ── FOREGROUND (live trading — protected, never clock-gated) ──
+    "snapshot": (1100, TIER_FOREGROUND),          # live prices: MTM, quote, macro strip
+    "ohlc_quote": (2300, TIER_FOREGROUND),        # measured 1,929 projected — was 800
+    "option_contracts": (2100, TIER_FOREGROUND),  # DAEDALUS options chains
+    "iv_rank": (250, TIER_FOREGROUND),
+    "max_pain": (200, TIER_FOREGROUND),
+    "greek_exposure": (500, TIER_FOREGROUND),     # GEX — small, and decision-critical
+    "flow_recent": (400, TIER_FOREGROUND),        # Flow Radar + wh_accumulation
     "market_tide": (300, TIER_FOREGROUND),
-    "chart_indicators": (700, TIER_FOREGROUND),   # PYTHAGORAS daily technical feed (one ohlc/1d pull/call)
+    "chart_indicators": (700, TIER_FOREGROUND),
     # ── STANDARD (scanners / factors) ──
-    "ohlc_bars": (1500, TIER_STANDARD),           # factor/indicator daily bars (bars.py + get_bars)
-    "darkpool_ticker": (800, TIER_STANDARD),
-    "flow_per_expiry": (100, TIER_STANDARD),      # uw_flow_poller (deactivated) — standby reclaimed 500->100 to fund chart_indicators
+    "outcome_resolver": (4500, TIER_STANDARD),    # NEWLY LISTED — was on the 500 default
+    "ohlc_bars": (2500, TIER_STANDARD),
+    "flow_per_expiry": (2000, TIER_STANDARD),     # "deactivated" and spending: see above
+    "darkpool_ticker": (500, TIER_STANDARD),
+    "stock_info": (400, TIER_STANDARD),           # +/info backfill headroom for T5b Phase C
     "news_headlines": (300, TIER_STANDARD),
-    "stock_info": (300, TIER_STANDARD),
     "short_interest": (200, TIER_STANDARD),
     "congressional": (100, TIER_STANDARD),
     "insider_ticker": (100, TIER_STANDARD),
@@ -121,15 +140,21 @@ QUOTAS: Dict[str, Tuple[int, str]] = {
     "earnings_afterhours": (100, TIER_STANDARD),
     "earnings_dates": (100, TIER_STANDARD),
     # ── BACKGROUND (cut first; afternoon staleness is acceptable) ──
-    "ohlc_sector": (1500, TIER_BACKGROUND),       # sector WK% — heatmap, glanceable tier
-    "technical_indicator": (1500, TIER_BACKGROUND),  # sector RSI
+    # Sized to Monday's projection x1.3, NOT to Friday's 4,069 / 3,894. Friday was
+    # measured under 429s, so those counts are inflated by retries that cannot
+    # recur once this gate is live -- sizing a BACKGROUND tier to a retry storm
+    # would reserve budget for a failure mode being removed in the same change.
+    # If they do hit the ceiling the heatmap goes visibly stale, which is the
+    # trade this tier was created to make.
+    "ohlc_sector": (2500, TIER_BACKGROUND),       # sector WK% — heatmap
+    "technical_indicator": (2500, TIER_BACKGROUND),  # sector RSI
     "sector_etfs": (300, TIER_BACKGROUND),
-    "darkpool_recent": (100, TIER_BACKGROUND),    # reclaimed 300->100 to fund chart_indicators
-    "triton_flow_shadow": (450, TIER_BACKGROUND), # Triton Step-0 shadow logger: flow-alerts poll + ALL its bar-fetches (clean attribution; must never die as collateral when ohlc_bars throttles)
+    "darkpool_recent": (100, TIER_BACKGROUND),
+    "triton_flow_shadow": (450, TIER_BACKGROUND),
 }
-# QUOTAS sum = 17,950 (17,500 + 450 triton_flow_shadow). Under the 18,000 target
-# (DAILY_BUDGET 20,000 - QUOTA_SAFETY_BUFFER 2,000); safety buffer = 2,050. ✓
-# (Sized 450 not 500 to stay strictly UNDER 18,000 per the docstring's "held under".)
+# Sum is asserted against the HUB budget by a test, not by a comment that can go
+# stale — the previous table's arithmetic comment survived two edits to the
+# numbers it described.
 
 # Unknown / untagged callers: small STANDARD allowance so a new code path can't
 # silently blow the budget, but isn't instantly blocked either.
@@ -141,6 +166,94 @@ UNTAGGED_QUOTA = 200  # "untagged" should trend to zero as tag coverage fills in
 def _mode() -> str:
     """Governor mode from env, empty-safe. 'observe' (default) | 'enforce'."""
     return (os.getenv("UW_GOVERNOR_MODE") or "observe").strip().lower()
+
+
+# ── R-IV.379(c): SHED BY ACCOUNT STATE, NOT ONLY BY OUR OWN COUNT ───────
+# Per-caller quotas govern THIS process. They cannot see the other client on the
+# key, and on 2026-09-11 that client spent 23,417 of the account's 40,000 while
+# every hub caller sat inside its quota. The account was exhausted and the
+# governor had nothing to say, because it was measuring the wrong thing.
+#
+# So the gate is now two-sided:
+#   1. per-caller quota  — stops ONE caller running away (unchanged)
+#   2. ACCOUNT SHED      — stops the hub adding to an account already near its
+#                          limit, whoever filled it
+#
+# Tiers shed in order, so the account's last requests belong to the callers a
+# trading decision depends on. FOREGROUND holds until 92%: gex, tide, flow
+# alerts and /info keep working while the heatmap goes visibly stale, which is
+# the trade this tiering existed for.
+ACCOUNT_SHED_AT = {
+    TIER_BACKGROUND: 0.55,
+    TIER_STANDARD: 0.75,
+    TIER_FOREGROUND: 0.92,
+}
+ACCOUNT_EXHAUSTED = "ACCOUNT_NEAR_LIMIT"
+
+# ── Market-hours gate, AT THE CHOKEPOINT ────────────────────────────────
+# R-IV.368(b)(2) asks for a gate on every UW poller. Putting it here instead of
+# in each poller is deliberate and stronger: one place, it catches every caller
+# including ones not written yet, and it cannot be forgotten by a new poller —
+# which is exactly how DEF-UW-CLIENT-BYPASS happened.
+#
+# Holidays come from the ONE calendar (market_calendar), not a weekday test, so
+# a Thanksgiving poll is gated the same as a Sunday one.
+NON_RTH_QUOTA_FACTOR = {
+    TIER_BACKGROUND: 0.0,    # a sector heatmap has nothing to refresh at 03:00
+    TIER_STANDARD: 0.25,
+    TIER_FOREGROUND: 1.0,    # never gated: a live read is a live read
+}
+
+
+def _is_rth(now_et=None) -> bool:
+    """True during a regular trading session. Fail-OPEN: an unreadable calendar
+    returns True, because gating a live caller on a calendar error would turn a
+    data problem into an outage."""
+    try:
+        from datetime import datetime as _dt, time as _time
+        from zoneinfo import ZoneInfo
+        from stable_engine.market_calendar import is_trading_day
+        now = now_et or _dt.now(ZoneInfo("America/New_York"))
+        if not is_trading_day(now.date()):
+            return False
+        return _time(9, 30) <= now.time() <= _time(16, 0)
+    except Exception:
+        return True
+
+
+def effective_quota(caller: str, now_et=None) -> Tuple[int, str]:
+    """Per-caller quota after the market-hours factor. Never below 1 for
+    FOREGROUND — a tier that can reach zero is a tier that can be starved by a
+    rounding rule."""
+    quota, tier = quota_for(caller)
+    if _is_rth(now_et):
+        return quota, tier
+    factor = NON_RTH_QUOTA_FACTOR.get(tier, 0.25)
+    return max(0, int(quota * factor)), tier
+
+
+async def account_shed(tier: str) -> Optional[str]:
+    """Should this tier be shed on ACCOUNT state? Returns a reason or None.
+
+    Fail-OPEN on every unknown: no header seen yet, unreadable Redis, missing
+    limit. An unmeasured account must not block traffic — that would make the
+    instrument an outage of its own, which is the failure this whole register
+    keeps finding.
+    """
+    try:
+        from integrations.uw_api import account_quota
+        q = await account_quota()
+        used, limit = q.get("used"), q.get("limit")
+        if not isinstance(used, int) or not isinstance(limit, int) or limit <= 0:
+            return None
+        pct = used / limit
+        threshold = ACCOUNT_SHED_AT.get(tier, 0.75)
+        if pct >= threshold:
+            return "account %d/%d = %.0f%% >= %.0f%% for %s" % (
+                used, limit, pct * 100, threshold * 100, tier)
+    except Exception:
+        return None
+    return None
 
 
 def quota_for(caller: str) -> Tuple[int, str]:
@@ -161,8 +274,20 @@ async def precheck(caller: str) -> Optional[UWUnavailable]:
     unreadable (Redis down) the count reads 0 and the call proceeds — we never
     block UW because of an infra blip.
     """
-    quota, tier = quota_for(caller)
+    quota, tier = effective_quota(caller)
     count = await get_caller_count(caller)
+
+    # Gate 2: the ACCOUNT, whoever filled it. Checked even when this caller is
+    # inside its own quota — that is the case the 2026-09-11 exhaustion was.
+    shed = await account_shed(tier)
+    if shed is not None:
+        if _mode() == "enforce":
+            logger.warning("UW governor BLOCK caller=%s tier=%s reason=account_shed %s",
+                           caller, tier, shed)
+            return UWUnavailable(ACCOUNT_EXHAUSTED, caller=caller, tier=tier, detail=shed)
+        logger.info("UW governor WOULD-BLOCK caller=%s tier=%s reason=account_shed %s "
+                    "mode=observe", caller, tier, shed)
+
     if count < quota:
         return None
 

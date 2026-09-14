@@ -36,7 +36,32 @@ CACHE_TTLS = {
     "option_chain_live": 25,     # hub_get_options_chain — short TTL for live-market chain display
 }
 
-DAILY_BUDGET = 20000     # UW Basic plan limit
+# R-IV.369(e): the account's REAL limit is 40,000, read from UW's own 429 body
+# and confirmed by x-uw-token-req-limit on every response. This constant said
+# 20,000 from the start, so every budget-percentage alert ever fired used the
+# wrong denominator — the 50/70/85/90% thresholds fired at 25/35/43/45% of the
+# real limit. Early, not late, so nothing was missed; but no reading of "we are
+# at 90% of budget" ever meant what it said.
+UW_ACCOUNT_LIMIT = 40000
+
+# WHAT THE HUB MAY SPEND is NOT the account limit. Another client shares this key
+# (DEF-UW-CLIENT-BYPASS): 23,417 requests on 2026-09-11, ~8,200 projected
+# 2026-09-14. A hub budget sized against 40,000 is sized to overrun the account by
+# design — so a reserve is held for consumers this process cannot see or govern.
+#
+# SIZED TO THE TYPICAL, NOT THE WORST CASE — and that is a design decision, not
+# an oversight. Observed: 23,417 on 09-11, ~8,200 projected 09-14. A static
+# reserve at 23,417 would leave the hub 16,583, below its own measured demand of
+# 21,275, and would starve it every day to insure against one.
+#
+# The worst case is covered by a DIFFERENT mechanism: uw_governor.account_shed()
+# reads UW's own account counter and sheds tiers as the account fills, whoever
+# filled it. The static reserve buys predictable headroom for a normal day; the
+# dynamic gate catches the day the other client returns. Each does the thing it
+# is good at, and neither has to be worst-case alone.
+UW_FOREIGN_RESERVE = 12000
+
+DAILY_BUDGET = UW_ACCOUNT_LIMIT - UW_FOREIGN_RESERVE   # = 20,000 hub-spendable
 BUDGET_ALERT_THRESHOLDS = [0.50, 0.70, 0.85, 0.90]  # Alert at each crossing — 90% is CRITICAL ceiling (drops 95% in favor of earlier-firing CRITICAL)
 
 # In-memory stats (reset on deploy)
