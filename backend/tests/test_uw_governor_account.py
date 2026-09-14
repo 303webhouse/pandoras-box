@@ -1,0 +1,217 @@
+"""R-IV.379(c) — the governor governs the ACCOUNT, and gates outside RTH.
+
+The load-bearing tests are the FAIL-OPEN ones. This gate sits at the single
+chokepoint every UW call passes through: if it can block on its own ignorance —
+no header yet, Redis down, calendar unreadable — then the instrument built to
+prevent an outage becomes one. That is the failure this register keeps finding,
+and it would be especially poor here.
+"""
+
+import sys
+from datetime import datetime, time
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from integrations import uw_governor as g
+
+ET = ZoneInfo("America/New_York")
+RTH = datetime(2026, 9, 14, 11, 0, tzinfo=ET)        # Monday, mid-session
+AFTER = datetime(2026, 9, 14, 22, 0, tzinfo=ET)      # Monday night
+WEEKEND = datetime(2026, 9, 13, 11, 0, tzinfo=ET)    # Sunday
+HOLIDAY = datetime(2026, 9, 7, 11, 0, tzinfo=ET)     # Labor Day
+
+
+# ---------------------------------------------------------------- RTH gate
+
+def test_rth_is_rth():
+    assert g._is_rth(RTH) is True
+
+
+@pytest.mark.parametrize("when,label", [(AFTER, "after hours"), (WEEKEND, "sunday"),
+                                        (HOLIDAY, "labor day")])
+def test_non_rth_is_not_rth(when, label):
+    assert g._is_rth(when) is False, label
+
+
+def test_holiday_uses_the_one_calendar_not_a_weekday_test():
+    """Labor Day 2026-09-07 is a Monday. A weekday test would call it RTH."""
+    assert HOLIDAY.weekday() < 5
+    assert g._is_rth(HOLIDAY) is False
+
+
+def test_background_quota_goes_to_zero_outside_rth():
+    q_rth, tier = g.effective_quota("ohlc_sector", RTH)
+    q_off, _ = g.effective_quota("ohlc_sector", AFTER)
+    assert tier == g.TIER_BACKGROUND
+    assert q_rth > 0 and q_off == 0
+
+
+def test_foreground_is_never_gated_by_the_clock():
+    q_rth, tier = g.effective_quota("snapshot", RTH)
+    q_off, _ = g.effective_quota("snapshot", AFTER)
+    assert tier == g.TIER_FOREGROUND
+    assert q_off == q_rth, "a live read was throttled for being out of hours"
+
+
+def test_standard_is_reduced_not_eliminated():
+    q_rth, _ = g.effective_quota("ohlc_bars", RTH)
+    q_off, _ = g.effective_quota("ohlc_bars", AFTER)
+    assert 0 < q_off < q_rth
+
+
+def test_calendar_failure_fails_open(monkeypatch):
+    """Gating a live caller on a calendar error turns a data problem into an outage."""
+    import stable_engine.market_calendar as mc
+
+    def boom(d):
+        raise RuntimeError("calendar exhausted")
+
+    monkeypatch.setattr(mc, "is_trading_day", boom, raising=False)
+    assert g._is_rth(AFTER) is True, "an unreadable calendar blocked traffic"
+
+
+# ------------------------------------------------- account shedding, by tier
+
+@pytest.fixture
+def account(monkeypatch):
+    state = {"used": 0, "limit": 40000}
+
+    async def fake():
+        return dict(state)
+
+    import integrations.uw_api as uw
+    monkeypatch.setattr(uw, "account_quota", fake, raising=False)
+    return state
+
+
+@pytest.mark.asyncio
+async def test_no_shed_on_an_empty_account(account):
+    account["used"] = 1000
+    for tier in (g.TIER_BACKGROUND, g.TIER_STANDARD, g.TIER_FOREGROUND):
+        assert await g.account_shed(tier) is None
+
+
+@pytest.mark.asyncio
+async def test_tiers_shed_in_order_as_the_account_fills(account):
+    account["used"] = int(0.60 * 40000)          # 60%
+    assert await g.account_shed(g.TIER_BACKGROUND) is not None
+    assert await g.account_shed(g.TIER_STANDARD) is None
+    assert await g.account_shed(g.TIER_FOREGROUND) is None
+
+    account["used"] = int(0.80 * 40000)          # 80%
+    assert await g.account_shed(g.TIER_STANDARD) is not None
+    assert await g.account_shed(g.TIER_FOREGROUND) is None
+
+    account["used"] = int(0.95 * 40000)          # 95%
+    assert await g.account_shed(g.TIER_FOREGROUND) is not None
+
+
+@pytest.mark.asyncio
+async def test_foreground_survives_the_2026_09_11_shape(account):
+    """23,417 of 40,000 spent by a client we do not control = 59%. The decision
+    callers must still work; the heatmap must not."""
+    account["used"] = 23417
+    assert await g.account_shed(g.TIER_FOREGROUND) is None
+    assert await g.account_shed(g.TIER_BACKGROUND) is not None
+
+
+@pytest.mark.asyncio
+async def test_shed_reason_names_the_numbers(account):
+    account["used"] = 30000
+    r = await g.account_shed(g.TIER_BACKGROUND)
+    assert "30000" in r and "40000" in r
+
+
+# ----------------------------------------------------- fail-open on unknowns
+
+@pytest.mark.asyncio
+async def test_no_header_yet_does_not_block(account):
+    account.clear()
+    account.update({"note": "no UW quota header seen yet this process"})
+    assert await g.account_shed(g.TIER_BACKGROUND) is None
+
+
+@pytest.mark.asyncio
+async def test_missing_limit_does_not_block(account):
+    account.clear()
+    account.update({"used": 39000})
+    assert await g.account_shed(g.TIER_BACKGROUND) is None, "blocked without a denominator"
+
+
+@pytest.mark.asyncio
+async def test_zero_limit_does_not_divide_or_block(account):
+    account.clear()
+    account.update({"used": 100, "limit": 0})
+    assert await g.account_shed(g.TIER_BACKGROUND) is None
+
+
+@pytest.mark.asyncio
+async def test_account_read_raising_does_not_block(monkeypatch):
+    async def boom():
+        raise RuntimeError("redis down")
+
+    import integrations.uw_api as uw
+    monkeypatch.setattr(uw, "account_quota", boom, raising=False)
+    assert await g.account_shed(g.TIER_FOREGROUND) is None
+
+
+# ------------------------------------------------------------- the constants
+
+def test_reserve_covers_the_typical_and_the_gate_covers_the_tail():
+    """The reserve is sized to the TYPICAL foreign spend (~8,200 projected
+    2026-09-14), not the worst case (23,417 on 09-11) — because a static reserve
+    at the worst case leaves the hub 16,583 against its own measured demand of
+    21,275, starving it every day to insure against one.
+
+    The worst case is covered by account_shed() instead, which reads the vendor's
+    counter and sheds tiers whoever filled the account. Two mechanisms, each
+    doing what it is good at; neither has to be worst-case alone."""
+    from integrations.uw_api_cache import (
+        UW_ACCOUNT_LIMIT, UW_FOREIGN_RESERVE, DAILY_BUDGET)
+    assert UW_ACCOUNT_LIMIT == 40000
+    assert UW_FOREIGN_RESERVE >= 8246, "reserve below the measured typical"
+    assert UW_FOREIGN_RESERVE < 23417, (
+        "reserve at the worst case — that is the dynamic gate's job, and this "
+        "would starve the hub every normal day")
+    assert DAILY_BUDGET == UW_ACCOUNT_LIMIT - UW_FOREIGN_RESERVE
+
+
+def test_hub_quota_table_fits_inside_the_hub_budget():
+    """Asserted, not commented. The previous table carried an arithmetic comment
+    that survived two edits to the numbers it described."""
+    from integrations.uw_api_cache import DAILY_BUDGET
+    target = DAILY_BUDGET - g.QUOTA_SAFETY_BUFFER
+    total = sum(q for q, _ in g.QUOTAS.values())
+    assert total <= target, (
+        "quota table sums to %d, above the buffered hub budget %d — sized to "
+        "overrun the account by design" % (total, target))
+
+
+def test_every_measured_caller_has_an_explicit_entry():
+    """`outcome_resolver` was the largest hub caller on 2026-09-14 and was not in
+    the table at all, running on the 500 default meant for unknown code paths."""
+    for caller in ("outcome_resolver", "ohlc_quote", "flow_per_expiry",
+                   "ohlc_sector", "technical_indicator", "ohlc_bars"):
+        assert caller in g.QUOTAS, "%s has no explicit quota" % caller
+
+
+def test_measured_monday_demand_does_not_trip_the_table():
+    """The retune exists because the old table blocked three live callers on
+    sight, one of them FOREGROUND."""
+    measured = {"outcome_resolver": 2764, "ohlc_quote": 1439, "technical_indicator": 1419,
+                "ohlc_sector": 1417, "flow_per_expiry": 1140, "ohlc_bars": 1109,
+                "option_contracts": 1052, "snapshot": 445}
+    for caller, used in measured.items():
+        quota, _ = g.quota_for(caller)
+        assert used < quota, "%s would block at its measured %d (quota %d)" % (
+            caller, used, quota)
+
+
+def test_shed_thresholds_are_ordered():
+    assert (g.ACCOUNT_SHED_AT[g.TIER_BACKGROUND]
+            < g.ACCOUNT_SHED_AT[g.TIER_STANDARD]
+            < g.ACCOUNT_SHED_AT[g.TIER_FOREGROUND] <= 1.0)

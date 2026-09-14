@@ -1491,6 +1491,16 @@ async def health_check():
     # S8 (R-IV.361): a forward collection needs a surface that shows a missed
     # session WHILE IT CAN STILL BE NOTICED. The data can never show it later --
     # an absent day leaves no row to be absent from.
+    # R-IV.379(c): UW's OWN account counter and the gap against ours. The gap is
+    # what revealed a second consumer of the API key; without it, internal
+    # accounting looks complete and is not.
+    uw_quota_block: dict = {}
+    try:
+        from integrations.uw_api import account_quota
+        uw_quota_block = await account_quota()
+    except Exception as _uqe:
+        uw_quota_block = {"state": "ERROR", "reason": str(_uqe)}
+
     s8_block: dict = {}
     try:
         from jobs.option_chain_snapshot import snapshot_status
@@ -1502,6 +1512,7 @@ async def health_check():
         "status": overall,
         "build": build_block,
         "option_chain_snapshot": s8_block,
+        "uw_quota": uw_quota_block,
         "server_time_et": now_et.strftime("%Y-%m-%d %H:%M:%S %Z"),
         "redis": redis_state,
         "postgres": postgres_state,

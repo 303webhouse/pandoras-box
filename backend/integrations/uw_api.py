@@ -142,6 +142,81 @@ async def _consume_token():
             _bucket_tokens -= 1
 
 
+# ── R-IV.379(c): the ACCOUNT's own counter ───────────────────────────────
+# Our per-caller counter measures what THIS PROCESS issued. On 2026-09-11 it read
+# 16,583 while UW reported the 40,000 limit hit — so our number was never the
+# account's number, and no amount of internal accounting would have shown that.
+#
+# UW publishes the truth on every response, 200 or 429:
+#     x-uw-daily-req-count   requests used today, per UW, ALL clients
+#     x-uw-token-req-limit   the account's daily limit
+#
+# This is what lets the governor govern the ACCOUNT rather than one process —
+# "the account has one budget, so it needs one accountant" (DEF-UW-CLIENT-BYPASS).
+# Stored in Redis so it survives a deploy: a counter that resets on restart would
+# under-report on exactly the days with the most restarts.
+REDIS_KEY_UW_QUOTA = "uw:quota_headers"
+
+
+async def _capture_quota_headers(resp) -> None:
+    """Record UW's own count/limit. Never raises; never touches the body."""
+    try:
+        used = resp.headers.get("x-uw-daily-req-count")
+        limit = resp.headers.get("x-uw-token-req-limit")
+        if used is None and limit is None:
+            return
+        from database.redis_client import get_redis_client
+        client = await get_redis_client()
+        if not client:
+            return
+        import json as _json
+        from datetime import datetime as _dt, timezone as _tz
+        await client.setex(REDIS_KEY_UW_QUOTA, 36 * 3600, _json.dumps({
+            "used": int(used) if used and str(used).isdigit() else None,
+            "limit": int(limit) if limit and str(limit).isdigit() else None,
+            "at": _dt.now(_tz.utc).isoformat(),
+            "status": resp.status_code,
+        }))
+    except Exception:
+        # Telemetry must never fail the call it observes.
+        pass
+
+
+async def account_quota() -> dict:
+    """UW's own numbers plus ours, so the GAP is visible. Never raises.
+
+    The gap is the finding: ours counts what this process issued, UW's counts the
+    ACCOUNT. A large difference means another client shares the key — which is not
+    otherwise detectable from inside this process.
+    """
+    out: dict = {"source": "uw_response_headers"}
+    try:
+        from database.redis_client import get_redis_client
+        from integrations.uw_api_cache import get_daily_count
+        client = await get_redis_client()
+        if client:
+            import json as _json
+            raw = await client.get(REDIS_KEY_UW_QUOTA)
+            if raw:
+                out.update(_json.loads(raw))
+        try:
+            ours = await get_daily_count()
+            out["ours_attributed"] = ours
+            if isinstance(out.get("used"), int):
+                out["unattributed"] = out["used"] - ours
+        except Exception:
+            pass
+        u, l = out.get("used"), out.get("limit")
+        if isinstance(u, int) and isinstance(l, int) and l:
+            out["remaining"] = l - u
+            out["pct_used"] = round(100.0 * u / l, 1)
+        if "used" not in out:
+            out["note"] = "no UW quota header seen yet this process"
+    except Exception as exc:
+        out["error"] = type(exc).__name__
+    return out
+
+
 async def _uw_request(path: str, params: dict = None, caller: str = "untagged") -> Optional[dict]:
     """
     Core UW API request with circuit breaker, rate limiter, retry, and counting.
@@ -179,6 +254,7 @@ async def _uw_request(path: str, params: dict = None, caller: str = "untagged") 
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
                 resp = await client.get(url, headers=headers, params=params or {})
+                await _capture_quota_headers(resp)
                 if resp.status_code == 200:
                     _record_success()
                     return resp.json()
