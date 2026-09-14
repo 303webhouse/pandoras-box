@@ -102,7 +102,7 @@ one accountant.**
 
 ---
 
-## CONFIRMED BY OUTCOME — 2026-09-13 05:02 ET
+## ~~CONFIRMED BY OUTCOME — 2026-09-13 05:02 ET~~ — WITHDRAWN, SEE BELOW
 
 **The convergence check named in the transfer plan has run, and it converged exactly.**
 
@@ -152,3 +152,63 @@ answer — **and Friday's throttled 16,583 is the only hub figure in existence, 
 **The governor should still move to enforce.** Not because the pressure remains — it does
 not — but because **nothing prevents the next uncounted client.** The bypass is the defect;
 the quota exhaustion was its symptom.
+
+---
+
+## WITHDRAWN 2026-09-14 — THE CONFIRMATION WAS TAKEN ON A SUNDAY
+
+**The Sunday convergence read cannot distinguish "stopped" from "idle because it is the
+weekend", and I filed it as a confirmation. That was wrong.**
+
+```
+                        account     hub     other
+2026-09-11 Fri           40,000   16,583   23,417   59%
+2026-09-13 Sun (9 h)        586      585        0    0%   <- read as CONFIRMATION
+2026-09-14 Mon (17.9 h)  17,859   11,718    6,140   34%   <- the consumer is BACK
+```
+
+**A weekday-only consumer reads zero on a Sunday.** So does a stopped one. **The
+measurement I called a verification could not separate the two hypotheses it was meant to
+decide between** — which is this register's own null-verifier law, committed by the lane
+that has been filing instances of it all week.
+
+**And I had the discriminator in hand and did not apply it.** Four hours before that read I
+filed the nightly's weekend false-red discrimination — *a gap spanning a weekend proves
+nothing about a weekday-gated process* — and then took a weekend reading as proof about a
+process whose schedule I had never established.
+
+### What is actually true now
+
+| | Friday | Monday |
+|---|---|---|
+| other-consumer rate | **1,697/h** (to exhaustion at 09:46 ET) | **344/h** |
+| as % of the logger's full pacing (1,440/h) | 118% | **24%** |
+
+**The second consumer is still running, at about a fifth of Friday's rate.**
+
+**Three readings fit and this file chooses none of them:** the logger was partially
+stopped; the logger is stopped and a *different* VPS process (`premarket_briefing`,
+`flow_scanner`) is the residual; or the logger is throttling itself differently. **The VPS
+is still unreachable from this workstation, so the distinguishing read remains the one
+that has been blocked since Friday.**
+
+### Today is not an exhaustion day, which is why this is P1 and not P0
+
+```
+projected at the 20:00 ET reset, at current rates
+  account   23,985 / 40,000        hub   15,738        other   8,246
+```
+
+**No exhaustion expected, and 0 rate-limited responses in the sampled window.** The
+pressure is off; **the defect is not.** A consumer nobody can see is a consumer nobody can
+size, and the plan decision still has no trustworthy denominator.
+
+### The rule this costs
+
+> **A CONVERGENCE CHECK MUST RUN WHEN BOTH SIDES ARE ACTIVE.**
+> Two counters agreeing while one of them has nothing to count is not agreement. **Before
+> reading a gap as closed, establish that the process which produced it was scheduled to
+> run during the window.**
+
+**Kin to conventions #15 and to `DEF-NIGHTLY-FLATLINE`'s weekend artifact — the same
+mistake in three subsystems this week, twice caught and once committed.**
