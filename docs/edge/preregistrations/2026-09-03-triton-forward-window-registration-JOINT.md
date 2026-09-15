@@ -385,3 +385,73 @@ nothing is a result worth recording.
 **Merge note.** §§8.1–8.7 attach to BASE DRAFT `5f23564b` unchanged; §8.5a and §8.5b are
 counter-drafts to parameters the base draft flagged OPEN and are TRITON's to accept, reject, or
 counter again. On agreement, the joint manifest ships for spine ratification and T0 begins there.
+
+---
+
+# CLOCK STARTED — R-IV.381(b)
+
+**→ R-IV.381 — clock started.**
+
+## P1 and P2, declared on the face with their evidence
+
+### P1 — GRADING IS CONTINUOUS
+
+| component | evidence | vintage |
+|---|---|---|
+| **today's pass** | `rows_touched 971`, `status ok`, 76 s | 2026-09-14 16:17 ET |
+| **the fallback** | `no_regular_session_bars` **absent** (1,000 on 09-11); yfinance path entered and provider recorded per row | 2026-09-14 |
+| **the sentinel** | T3 reads `job_runs` via `last_completed`, session-gated by `market_calendar`, SLO 26 h | live since `c38df2d9` |
+
+**SATISFIED.** The grader runs, grades, and its grading is visible in a durable ledger.
+
+### P2 — THE GRADER IS SUPERVISED
+
+| component | evidence | vintage |
+|---|---|---|
+| **deafness test** | alarm forced to `flatline` by a controlled write, observed on the first poll, restored, **clear verified against the database** | 2026-09-11 14:48 ET |
+| **both legs forced** | `_pass_overdue` AND the 26 h age — ageing one leg only would have left the alarm correctly silent and proved nothing | same |
+| **timeout guard** | `TRITON_GRADER_TIMEOUT_S = 300`, `timeouts {count: 0}` | live |
+
+**SATISFIED.** The sentinel has been shown to fire, and shown to clear.
+
+## THE CLOCK
+
+```
+T_clock  =  first session after  =  Tue 2026-09-15
+window   =  7 weeks
+end      =  Fri 2026-10-30       (as stated in R-IV.381(b))
+```
+
+### ARITHMETIC CHECK, because n is registered
+
+**Measured against `market_calendar`:**
+
+```
+Tue 2026-09-15 -> Fri 2026-10-30
+  calendar days      45   =  6.43 calendar weeks
+  TRADING days       34   =  6.8 trading weeks
+  holidays in window  0
+exactly 35 trading days (7 x 5) from Tue 2026-09-15 ends  Mon 2026-11-02
+```
+
+**Fri 2026-10-30 is 34 trading days — ONE TRADING DAY SHORT of 7 x 5.**
+
+**Reported, not resolved.** The discrepancy is one session, and it is trivial in effect and
+not trivial in kind: **`n` is registered, and a window stated as "7 weeks" that measures
+6.8 will be quoted as 7 by whoever reads the prose rather than the date.**
+
+**Both readings are defensible** — week 1 is a partial Tue–Fri, so "seven calendar weeks
+ending on a Friday" lands on 10-30, while "thirty-five trading days" lands on 11-02.
+**EDGE's call.** The window below is written to the stated end date and will be amended in
+one line if the other reading is preferred.
+
+**No holiday falls inside either version**, so the two differ by exactly one session and by
+nothing else.
+
+## S7 and S6
+
+- **S7 stamps at or before the start** — retrofittable from bars, so it does not gate
+  T_clock.
+- **S6 stays deferred to SINKS-B**, as declared. Its tide-sign stratum needs
+  `market_tide_history`, which does not exist until the sinks build ships, and SINKS-B is
+  itself gated on the quota layer and the transfer.

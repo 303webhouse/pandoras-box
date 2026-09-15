@@ -39,7 +39,39 @@ verification, the freshness SLOs and every alarm read.
 nothing between the two sanitised the payload. That path is now guarded (R-IV.381); **this
 file is about why the NaN exists at all.**
 
-## Fix shape — not chosen here
+## FIX — RULED (R-IV.381(d)): ONE PREDICATE, USED TWICE
+
+**The insufficiency check and the computation must share a single predicate.**
+
+Today they do not. Something decides the watch has enough data; something else computes a
+mean. **Both encode an idea of "enough", they disagree, and the disagreement is only
+visible as a NaN three layers downstream.**
+
+@@F@@
+    WRONG                               RIGHT
+    if len(series) < 2:                 def _sufficient(series):
+        return INSUFFICIENT                 return <the one definition>
+    sma = mean(series)      <- a          if not _sufficient(series):
+                               different      return INSUFFICIENT
+                               idea of      sma = mean(series)   <- the SAME idea
+                               "enough"
+@@F@@
+
+**THE TEST IS THE SAME-PREDICATE-APPEARS-TWICE TEST**, and this register has now used it
+three times — on the grader's queue predicate versus its outstanding count, on the sinks
+brief's dedupe key, and here. **Assert in a test that the two sites reference one
+function**, not that they currently agree: agreement is a state, shared code is a property.
+
+### And an output assertion behind it
+
+**A shared predicate stops the disagreement. It does not stop an input nobody predicted.**
+So the computed result is asserted finite before it is returned — **an output check cannot
+be outflanked by an input that was never enumerated**, which is precisely how an all-null
+series got past a length check.
+
+**Both, not either.** The predicate is the fix; the output assertion is the floor.
+
+## Fix shape — superseded, kept for the reasoning
 
 **The INSUFFICIENT branch must cover every path that can produce a non-finite result**, not
 only the one the author had in mind. The check is presumably `len(series) < 2` or similar;

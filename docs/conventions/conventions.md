@@ -663,3 +663,55 @@ the name cannot drift back.
 **Kin:** the null-verifier law (a check that cannot fail), of which this is the reporting-side
 form — **a report that cannot be written is a check that cannot fail, arrived at from the
 other direction.**
+
+
+## #17 A HEALTH SURFACE NEVER FAILS CLOSED
+
+**R-IV.381(d). Measured, not theorised** — `DEF-HEALTH-SERIALIZATION-FAILED-CLOSED`,
+2026-09-14.
+
+> **Serialisation failures are per-block and named. The instrument that watches everything
+> must not be able to go blind.**
+
+### The worked case
+
+`/health` returned **HTTP 500** for hours on `ValueError: Out of range float values are not
+JSON compliant: nan`.
+
+**Every block in the payload had its own `try/except`. Every one of them succeeded.** The
+failure was in encoding the assembled result — **one layer above every guard**, in code
+nobody had thought of as a failure site because it was not code anybody wrote.
+
+### Why "fails closed" is the finding and "500" is only the symptom
+
+**A health endpoint returning 500 is indistinguishable from the application being down.**
+The instrument's failure wears the costume of the failure it reports.
+
+**That inverts what an instrument is for.** A missing field says *"this is unknown"*. A 500
+says *"the thing you are watching is broken"* — and it says it loudest exactly when the
+watcher is the broken part. **A reader is not merely uninformed; a reader is MISDIRECTED,
+and sent to search the wrong subsystem.**
+
+**One NaN in one optional watch took down the verification surface for a deploy, five
+freshness SLOs, three alarm reads and the governor's own gate state.** The blast radius of
+an instrument failure is every decision that instrument informs.
+
+### The rule
+
+- **A health payload is sanitised as a whole, after assembly** — per-block guards cannot
+  see a failure that only exists once the blocks are combined.
+- **A bad value is REPLACED AND NAMED, never dropped.** A silently-omitted key makes a
+  broken computation look like a missing feature.
+- **The endpoint returns 200 with the damage described**, rather than a status code that
+  will be read as a verdict on something else.
+
+### The test
+
+> **Ask of a health surface: "what makes this return a non-200?"**
+> **If any answer is a fault in the DATA it reports rather than in the SERVICE it reports
+> on, it can fail closed — and it will, on the day the data is worst.**
+
+**Kin:** conventions #15 (failure marking must not depend on the resource it reports on) —
+this is the same betrayal one level up, where the reporter does not merely fail to report
+but reports the wrong subject. And the null-verifier law's mirror: **a verifier that cannot
+fail is useless; a verifier whose failure impersonates its subject is worse than useless.**

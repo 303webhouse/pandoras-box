@@ -65,6 +65,31 @@ rate**: three rejections on one day establishes that rejections happen, not how 
 **an absence dates nothing until the expected event rate across it is known.** So the webhook
 line cannot yet convict a silence, and says so rather than implying a schedule.
 
+### HALT CONDITION REWRITTEN (R-IV.381(a)) — and the first wording was wrong
+
+**As declared 2026-09-11:** *"`UNGRADEABLE-NO-SERIES` = 0 means the guard did not fire and
+the fallback may have graded an index row."*
+
+**That wording is WRONG and Monday's pass would have tripped it falsely.** The guard
+reported zero, and zero was correct: **the T5b queue predicate excludes
+`instrument_class = 'cash_settled_index'` BEFORE selection**, so the 100 index rows were
+never selected and the runtime guard never had to act.
+
+**CORRECTED CONDITION, on the face:**
+
+> **The breach is zero from the guard WITH index rows in the queue.**
+> Zero from the guard AND zero index rows selected is the designed outcome — it means the
+> column did its work and the guard was not needed.
+
+**The two mechanisms were built to overlap on purpose** (R-IV.358(b)): the column stops
+index rows being selected; the guard catches any the column has not classified yet.
+**A halt condition that reads the guard alone cannot tell "nothing needed catching" from
+"something was missed"** — which is the absent-vs-real collapse, committed inside a halt
+condition written to prevent a breach.
+
+**Monday's evidence: `rows_touched 971`, `no_regular_session_bars` absent entirely,
+`skip_reason bars_missing_for_reached_horizon=29`.** No index row was graded.
+
 #### Observations 2, 3 and 4 were NOT RUN on Wednesday
 
 **Not "unrecorded" — NOT RUN.**
