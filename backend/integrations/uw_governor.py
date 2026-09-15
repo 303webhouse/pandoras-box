@@ -125,9 +125,22 @@ QUOTAS: Dict[str, Tuple[int, str]] = {
     "market_tide": (300, TIER_FOREGROUND),
     "chart_indicators": (700, TIER_FOREGROUND),
     # ── STANDARD (scanners / factors) ──
-    "outcome_resolver": (4500, TIER_STANDARD),    # NEWLY LISTED — was on the 500 default
+    # R-IV.380(b) READ: this tag names a JOB, not an endpoint — the only call site
+    # is crypto_bars.py:75, /api/crypto/{pair}/ohlc/{candle_size} at limit=500.
+    # It violates the endpoint-grain convention stated at uw_api_cache.py:115,
+    # which is why a table built by walking endpoints never saw it and it ran on
+    # the 500 unknown-code-path default while being the largest hub caller.
+    # RENAME to `crypto_ohlc` is owed — deferred because renaming resets the
+    # counter mid-measurement.
+    "outcome_resolver": (4500, TIER_STANDARD),
     "ohlc_bars": (2500, TIER_STANDARD),
-    "flow_per_expiry": (2000, TIER_STANDARD),     # "deactivated" and spending: see above
+    # R-IV.380(b) READ: the poller IS running (main.py:882, every 300 s, RTH-gated)
+    # and its output is consumed three ways — flow_radar's build_flow_summary,
+    # board_state's uw:flow:{ticker}, and the flow_events feed. The old
+    # "deactivated" comment named a DIFFERENT, genuinely-disabled loop in
+    # bias_scheduler.py and sized this one's quota to 100 while it spent 1,640.
+    # 2000 matches the "~1,680 UW calls/day" main.py:878 already documented.
+    "flow_per_expiry": (2000, TIER_STANDARD),
     "darkpool_ticker": (500, TIER_STANDARD),
     "stock_info": (400, TIER_STANDARD),           # +/info backfill headroom for T5b Phase C
     "news_headlines": (300, TIER_STANDARD),
@@ -232,6 +245,32 @@ def effective_quota(caller: str, now_et=None) -> Tuple[int, str]:
     return max(0, int(quota * factor)), tier
 
 
+# R-IV.380(a): AN INSTRUMENT THAT FAILS OPEN MUST NOT FAIL SILENTLY.
+# Every open-on-unknown path below records WHY it opened, and /health.uw_quota
+# publishes it as `gate_state`. Without this, "the governor is not shedding" and
+# "the governor cannot see the account" are the same observation from outside —
+# which is the absent-vs-neutral collapse this register has filed four times.
+GATE_STATE_KEY = "uw:governor_gate_state"
+_LAST_GATE_STATE = {"state": "unknown", "detail": "no precheck yet", "at": None}
+
+
+def _set_gate_state(state: str, detail: str) -> None:
+    """Record the gate's own condition. Logs only on TRANSITION, so a steady
+    open state does not fill the log while a new one is still visible."""
+    prev = _LAST_GATE_STATE.get("state")
+    if prev != state:
+        log = logger.warning if state.startswith("open:") else logger.info
+        log("UW governor gate_state %s -> %s (%s)", prev, state, detail)
+    from datetime import datetime as _dt, timezone as _tz
+    _LAST_GATE_STATE.update({"state": state, "detail": detail,
+                             "at": _dt.now(_tz.utc).isoformat()})
+
+
+def gate_state() -> dict:
+    """The gate's own condition, for /health.uw_quota."""
+    return dict(_LAST_GATE_STATE)
+
+
 async def account_shed(tier: str) -> Optional[str]:
     """Should this tier be shed on ACCOUNT state? Returns a reason or None.
 
@@ -239,19 +278,34 @@ async def account_shed(tier: str) -> Optional[str]:
     limit. An unmeasured account must not block traffic — that would make the
     instrument an outage of its own, which is the failure this whole register
     keeps finding.
+
+    EVERY open-on-unknown path sets gate_state, so the opening is observable.
     """
     try:
         from integrations.uw_api import account_quota
         q = await account_quota()
         used, limit = q.get("used"), q.get("limit")
-        if not isinstance(used, int) or not isinstance(limit, int) or limit <= 0:
+        if not isinstance(used, int):
+            _set_gate_state("open:no_header",
+                            "no x-uw-daily-req-count seen yet this process")
+            return None
+        if not isinstance(limit, int) or limit <= 0:
+            _set_gate_state("open:no_limit",
+                            "account used=%s but no usable limit — cannot compute a "
+                            "percentage, so nothing is shed" % used)
             return None
         pct = used / limit
         threshold = ACCOUNT_SHED_AT.get(tier, 0.75)
         if pct >= threshold:
-            return "account %d/%d = %.0f%% >= %.0f%% for %s" % (
+            reason = "account %d/%d = %.0f%% >= %.0f%% for %s" % (
                 used, limit, pct * 100, threshold * 100, tier)
-    except Exception:
+            _set_gate_state("shedding", reason)
+            return reason
+        _set_gate_state("armed", "account %d/%d = %.0f%%, below every threshold"
+                        % (used, limit, pct * 100))
+    except Exception as exc:
+        _set_gate_state("open:read_error",
+                        "account state unreadable: %s" % type(exc).__name__)
         return None
     return None
 
