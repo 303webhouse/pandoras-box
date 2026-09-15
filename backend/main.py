@@ -1335,6 +1335,49 @@ async def l0_status_endpoint():
     pool = await get_postgres_client()
     return {"date": _date.today().isoformat(), **(await l0_status(pool))}
 
+def _json_safe(obj, _path="", _found=None):
+    """Replace non-finite floats with None, recording where they were.
+
+    WHY THIS EXISTS: on 2026-09-14 /health returned HTTP 500 for hours with
+    `ValueError: Out of range float values are not JSON compliant: nan`. Every
+    block in the payload is individually wrapped in try/except — and every one of
+    them SUCCEEDED. The failure was at SERIALISATION, after the last guard had
+    already passed, so a per-block guard could never have caught it.
+
+    A health endpoint that can 500 is worse than one that reports a bad value:
+    the whole four-step deploy verification, the freshness SLOs and the alarm
+    surfaces all read this one route, and they were blind while it was down.
+
+    NaN is REPLACED, NOT DROPPED, and the path is reported in `_nonfinite`: a
+    silently-omitted key would make a broken computation look like a missing
+    feature, which is the absent-vs-real collapse this register keeps filing.
+    """
+    import math
+    if _found is None:
+        _found = []
+    if isinstance(obj, float):
+        if math.isnan(obj) or math.isinf(obj):
+            _found.append(_path or "<root>")
+            return None
+        return obj
+    if isinstance(obj, dict):
+        return {k: _json_safe(v, "%s.%s" % (_path, k) if _path else str(k), _found)
+                for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_json_safe(v, "%s[%d]" % (_path, i), _found) for i, v in enumerate(obj)]
+    return obj
+
+
+def _sanitise_health(payload: dict) -> dict:
+    found: list = []
+    out = _json_safe(payload, "", found)
+    if found:
+        out["_nonfinite"] = sorted(set(found))
+        logger.error("/health carried non-finite floats at %s — replaced with null "
+                     "so the endpoint cannot 500", sorted(set(found)))
+    return out
+
+
 @app.get("/health")
 async def health_check():
     """Resilient health check (never throws on transient dependency failures)."""
@@ -1508,7 +1551,7 @@ async def health_check():
     except Exception as _s8e:
         s8_block = {"state": "ERROR", "reason": str(_s8e)}
 
-    return {
+    return _sanitise_health({
         "status": overall,
         "build": build_block,
         "option_chain_snapshot": s8_block,
@@ -1524,7 +1567,7 @@ async def health_check():
         "qqq_sma_watch": qqq_sma_block,
         "paused_pollers": paused_pollers_block,
         "triton_grader": grader_block,
-    }
+    })
 
 
 async def verify_zeus_schema() -> None:
