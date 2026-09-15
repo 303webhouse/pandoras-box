@@ -236,3 +236,49 @@ twice.** Both trees held this file byte-identical at LF `beafcb5a` and quiescent
 when the annotation was written.
 
 **Discriminator, still owed:** Activity & Orders. Trade Analysis holds the ask.
+
+---
+
+## FOURTH FAILURE CLASS — WHOLE LIFECYCLE ABSENT · R-IV.386(a)
+
+The sub-class above named three failures. September's reconciliation found a fourth, and it is
+the worst of the four because **nothing about it is visible from inside the database.**
+
+**Confirmed instance — QQQ 690/685 put debit ×2, now id 422.**
+
+```
+ 2026-09-09  BTO 690P ×2 @0.41   STO 685P ×2 @0.26   -> gross basis 30.00
+ 2026-09-11  OEXP both legs                          -> expired worthless, realized -30.00
+```
+
+**Opened and expired without ever being booked.** A $30 loss came and went and the book never
+held a row for it at any point in its life.
+
+### Why this class is different from the first three
+
+| class | what the DB shows | detectable from inside the DB? |
+|---|---|---|
+| prose-only | a row with the event buried in `notes` | yes — read the notes |
+| one-ledger-of-two | a row in `trades`, absent from `unified_positions` | yes — cross-ledger diff |
+| no-artifact | a row that cannot be verified | yes — the row exists to ask about |
+| **whole lifecycle absent** | **nothing** | **NO** |
+
+The first three all leave something to trip over. This one leaves **no row, no note, no
+orphaned close, and no imbalance** — the position opened and closed inside the gap, so every
+internal consistency check passes. A reconciliation that only compares DB rows to DB rows
+returns clean.
+
+**Only export reconciliation detects it**, and only if the export covers both ends of the
+lifecycle. id 422 was found because the 09-01 → 09-14 export contained both the open and the
+expiry; had the export begun 09-10 it would still be invisible.
+
+### Remedy — the import cadence, as a job
+
+`DEF-EXPORT-COVERAGE-GAP`'s standing export cadence is necessary but not sufficient here: a
+human-placed export is itself a gap-prone instrument, and the window between two manual exports
+is exactly where a short-dated lifecycle hides. **The remedy for this class is the ledger
+build's import job (T6f)** — a cadence that runs whether or not anyone remembers, so no
+interval exists in which a position can live and die unobserved.
+
+**The lots table does not fix this class either.** Like the no-artifact class, it has nothing
+to populate from. Credit for this class belongs to T6f alone.
