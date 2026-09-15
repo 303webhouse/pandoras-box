@@ -111,7 +111,30 @@ $startLine | Tee-Object -FilePath $todayLogFile -Append | Out-Host
 
 try {
     Set-Content -Path $lockPath -Value ("started_at={0}" -f (Get-Date).ToString("o")) -Encoding UTF8
-    & $pythonCmd @cmdArgs 2>&1 | Tee-Object -FilePath $todayLogFile -Append | Out-Host
+
+    # R-IV.391(a): KEEP THE TRACEBACK BODY.
+    #
+    # `& python ... 2>&1` in PowerShell 5.1 wraps EACH stderr line in a
+    # NativeCommandError. With the default $ErrorActionPreference that first
+    # wrapped line is a TERMINATING error, so the try block died on line 1 of the
+    # traceback and Tee-Object never saw lines 2..n. Every failure log from
+    # 2026-07-16 onward is 342 bytes containing exactly:
+    #
+    #     archive failure: Traceback (most recent call last):
+    #
+    # A log that records THAT it failed and discards WHY is compute-then-discard
+    # with a filename. Setting the preference to Continue for the call makes the
+    # wrapped lines non-terminating, so the whole stream reaches the log and the
+    # exit code — not a stderr line — decides success.
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & $pythonCmd @cmdArgs 2>&1 | Tee-Object -FilePath $todayLogFile -Append | Out-Host
+    }
+    finally {
+        $ErrorActionPreference = $prevEAP
+    }
+
     if ($LASTEXITCODE -ne 0) {
         throw "archive job exited with code $LASTEXITCODE"
     }
