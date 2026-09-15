@@ -96,3 +96,51 @@ evening tests only the evening.
 **The connection-rate sample, 10 minutes, during RTH** — process, connection count, and
 rate. **It is the one part of this order that a 03:09 reading cannot substitute for**, and
 I have not pretended otherwise.
+
+---
+
+## R-IV.389(c) — THE 02:15 TASK DOES NOT TOUCH UW
+
+```
+\TradingHub-PriceHistoryArchive   daily 02:15, state Ready
+  -> powershell -File C:	rading-hub\scriptsun_price_history_archive.ps1
+  -> python -m backend.jobs.archive_price_history
+         --older-than-days N --batch-size N [--purge]
+```
+
+**Zero references to `uw_api`, `unusualwhales`, `UW_API_KEY` or `_uw_request` in
+`backend/jobs/archive_price_history.py`.** It reads `price_history` from Postgres and
+writes gzipped CSV locally — **a database archival job, not a vendor client.**
+
+**Named either way, as ordered: NOT a UW consumer.** It is also at 02:15, which was never
+an RTH window; this confirms by content what the trigger already suggested by time.
+
+### An unrelated finding, recorded because I was looking at it
+
+```
+LastRunTime 2026-09-14 02:15:15    LastTaskResult 1    NextRun 2026-09-15 02:15:15
+```
+
+**`LastTaskResult = 1` is a non-zero exit — the archive job FAILED its last run.**
+
+**Outside the quota question entirely and not chased here.** Recorded because a scheduled
+job whose last result is a failure will keep that result until someone reads it, and the
+only reason anyone read it today was that it appeared in a list compiled for a different
+purpose.
+
+## R-IV.389(b) — THE DISCONNECT METER IS ARMED
+
+**Window confirmed: 12:00–13:00 ET. Meter 11:00 → 14:00 ET, every 10 minutes, 19
+samples, 19 requests against a 40,000 cap.**
+
+**Declared before the run, per §1.1:**
+
+| "other" DURING 12:00–13:00 | conclusion |
+|---|---|
+| **near zero** | the daytime consumer is the **MCP connector** |
+| **~1,345/h**, unchanged from BEFORE | it is **not** — the VPS is what remains, and the console is the only way in |
+| **between** | both, in the proportions the meter measures |
+
+**The hub's own counter is sampled at every point**, so `other` is the difference of two
+measured series rather than a residual against an assumption — which is the correction
+the Sunday read earned.
