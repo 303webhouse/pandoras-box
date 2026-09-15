@@ -376,3 +376,35 @@ Never copy an account string out of a tool rendering into a query.
 **HELD.** It rides the account-enum collapse in the ledger-integrity build, because the
 canonical two-value enum is where the casing gets settled once rather than defended at
 every call site.
+
+---
+
+## SCOPE BOUNDARY — AHRP letterhead is not an account · R-IV.386(e)
+
+**Principal ruling 2026-09-15, recorded so it is never re-litigated.**
+
+Fidelity trade confirmations for the tracked account print as:
+
+```
+ FMTC TTEE / AHRP 403B PLAN / FBO <a name that is not the principal's>
+ account *****3158   registration: CORPORATE TRUST/NON-PROTOTYPE
+```
+
+Every line on those confirmations reconciles to `FIDELITY_ROTH` rows **to the cent** — QQQM,
+GDX, SIL, IEO, COPX and SOXS across 09-01 → 09-08. **They are the principal's own trades in his
+Fidelity Roth 401(k).** The AHRP wording is the plan's legal registration, not a second account.
+
+### The boundary, stated precisely
+
+| artifact | treatment |
+|---|---|
+| **AHRP 401A/403B rows in `account_balances`** | **DESCOPED** — never summed into a tradeable aggregate (R-IV.75(b), unchanged) |
+| **Trade confirmations bearing AHRP letterhead** | **IN SCOPE** — book to `FIDELITY_ROTH` |
+
+The descoping rule attaches to **balance rows**, not to **trade documents**. Reading it the
+other way would have excluded the principal's live trading account from its own book on the
+strength of a letterhead.
+
+**Do not raise this as a scope question again.** A confirmation headed AHRP is not evidence of
+an out-of-scope account; it is the normal appearance of the in-scope one. Mirrored to memory at
+`account-scope-and-sizing-figure.md`.

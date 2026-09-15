@@ -22,7 +22,11 @@
      issued, and its "basis under review" is now CLOSED. WEAT normalized to gross
      (15.26 -> 15.00) with its 8/24 partial sale recorded as id 413. Roster total $2,685.20,
      headroom $1,164.80. Book stamps TA-006/TA-010 carried to id 412 — disposition only;
-     TA-010's average-cost figures are superseded by FIFO and must not be revived. -->
+     TA-010's average-cost figures are superseded by FIFO and must not be revived.
+     R-IV.386(d) / TA (2026-09-15): D5 roster restamped from the September export — FIVE
+     members, total $3,003.50, headroom $846.50. id 412 USO and id 365 XLE both EXITED
+     2026-09-10 (+512.00 / +31.90) and leave the sleeve; COPX adds a second lot, id 431
+     (09-08, 4 @ 94.85). TA's line said seven members; the total and headroom were right. -->
 <!-- Owned by Nick. Olympus updates on committee passes. Cowork morning task reads this + live positions (Pandora MCP) + the Stable board. Created 2026-07-03. -->
 
 ## How this doc works
@@ -46,43 +50,26 @@ One entry per active thesis (B1 longer-dated, B2 tactical). Every entry MUST hav
 |---|---|---|---|---|
 | 404 | IEO | FIDELITY_ROTH | stock | 1,400.60 |
 | 398 | MOO | FIDELITY_ROTH | stock | 851.70 |
-| 406 | COPX | FIDELITY_ROTH | stock | 356.80 |
-| **412** | USO | ROBINHOOD | call_debit_spread 150/165 | **38.00** |
-| 365 | XLE | ROBINHOOD | call_debit_spread 70/80 | 23.10 |
-| 367 | WEAT | ROBINHOOD | call_debit_spread 29/30 ×3 | **15.00** |
-| | | | **TOTAL** | **2,685.20** |
+| **431** | COPX | FIDELITY_ROTH | stock (09-08 lot) | **379.40** |
+| 406 | COPX | FIDELITY_ROTH | stock (09-02 lot) | 356.80 |
+| 367 | WEAT | ROBINHOOD | call_debit_spread 29/30 ×3 | 15.00 |
+| | | | **TOTAL** | **3,003.50** |
 
-- **TA-005 review CLOSED (R-IV.313(d)).** USO 145.00 → **38.00**, WEAT 15.26 → **15.00**;
-  total **$2,685.20**, headroom **$1,164.80**. Both corrections are export-verified against
-  `rh-8.31.2026.csv` and recomputed from the ledger, not transcribed.
-- **The USO member is now id 412, not id 332.** id 332 was split FIFO (R-IV.313(b)): it became
-  the CLOSED 6/15 lot (1 @ 1.45, sold 7/17 at 1.82 gross, realized **+37.00**), and the
-  surviving 7/06 lot — 1 @ 0.38, basis 38.00 — is the new **id 412**. Membership is by id, so
-  the roster follows the lot, not the row that used to hold it.
-- **WEAT's 15.26 was a NET figure** on a roster that is otherwise gross; normalized to 15.00
-  (fee delta 0.26). See `DEF-HUB-MAXLOSS-OPTIONS` — the hub mixes gross and net across option
-  rows, which is a ledger-build normalization item, not a WEAT-specific one.
-
-- **CAP: $3,850** all-wrapper cost basis. **Headroom $1,057.54.**
-- **SLEEVE OPEN — adds within headroom, each subject to standing rules.** This reverses the
-  prior CLOSED state. Two members exited **2026-09-04 18:01Z**: id 402 GDX (760.00) and
-  id 405 SIL (292.62), removing $1,052.62 of basis and taking headroom from $4.92 to
-  $1,057.54. An add is no longer refused by rule; it still faces every other standing rule.
-- **COMPOSITION — precious metals ZERO as of 2026-09-04 18:01Z.** GDX and SIL were the only
-  precious-metals members and both exited 39 seconds apart. What remains is energy (IEO,
-  USO, XLE), agriculture (MOO, WEAT) and copper (COPX). The sleeve's size fell 27% but its
-  *composition* changed more than its size did — read the cap against that, not just the
-  dollar figure.
-- **Verified against the ledger, not transcribed.** All six bases reproduce as
-  `quantity x entry_price x (100 for options)` and the total lands on $2,792.46 to the cent.
-- **Basis is COST BASIS, never `max_loss` — and the failure direction has FLIPPED.**
-  Stored `max_loss` on this roster: XLE **69.30** against a true 23.10 (+46.20), WEAT
-  **30.52** against 15.26 (+15.26), and **MOO is NULL** — absent, not wrong. Summing
-  `max_loss` now yields **$2,002.22, understating the true $2,792.46 by $790.24**, because
-  the NULL silently drops an $851.70 member and outweighs the two overstatements. Under the
-  old roster the same mistake overstated and breached the cap; it now *understates* and
-  would invite adds the cap should refuse. The dangerous direction reversed with the
-  roster. See DEF-HUB-MAXLOSS-OPTIONS below.
+- **Cap $3,850 — headroom $846.50.** Down from $1,164.80.
+- **FIVE members, not seven (R-IV.386(d), corrected on execution).** TA's line said seven; two
+  members **exited 2026-09-10** and are no longer in the sleeve:
+  **id 412 USO** (basis 38.00, realized **+512.00**) and **id 365 XLE** (basis 23.10, realized
+  **+31.90**). Both closures are export-verified and were reported at R-IV.385; they had not
+  reached the roster line. The **total and headroom TA quoted are correct** — $3,003.50 and
+  $846.50 — because the arithmetic was already run over open rows only. Only the count was wrong.
+- **COPX is now two lots, both members.** id 406 (09-02, 4 @ 89.20) and **id 431 (09-08, 4 @
+  94.85)** — 8 shares, combined basis **736.20**. The 09-08 lot is the single largest addition
+  since the last stamp and is what consumed most of the headroom.
+- **Membership is by id, and ids change when lots split or close.** The sleeve has turned over
+  twice in ten days: USO moved 332 → 412 on the FIFO split, then 412 exited; XLE exited; COPX
+  gained a second id. Reading this table by ticker rather than by id will misstate it.
+- **Verified against the ledger, not transcribed.** All five bases reproduce as
+  `quantity × entry_price × (100 for options)` and the total lands on $3,003.50 to the cent.
 
 ### D4 hedge line — DECLINED, rolled · R-IV.209
 - **DECLINED 2026-09-03 by principal.** No new convexity purchased.
@@ -110,9 +97,17 @@ No row is acceptance-tested, and no figure marked BROKER_VERIFIED, without an ex
 its entry date. A screenshot corrects only where the export is silent, and the note says the
 export was silent.
 
-**First instance:** id 409 SOXS, corrected 2026-09-06 as **SCREEN_VERIFIED** — no export on
-disk carries a September 2026 activity line, so the export was silent and the row says so.
-See `DEF-EXPORT-COVERAGE-GAP`.
+**First instance, now RESOLVED:** id 409 SOXS was corrected 2026-09-06 as **SCREEN_VERIFIED**
+because no export on disk then carried a September 2026 activity line. **That is no longer true.**
+A Robinhood export covering 2026-09-01 → 09-14 landed 2026-09-15, and Fidelity trade
+confirmations cover 09-01 → 09-08. id 409's figures are now **BROKER_VERIFIED**: the account
+bought **10 @ 51.5850 on 09-03** and **10 @ 46.6601 on 09-04** — 20 shares, $982.45, average
+**49.1225**, matching the screen correction to the cent.
+
+**And the open question closed with it.** The "missing 10 shares" were never sold and never
+existed: the hub's original 30 @ 49.9433 = $1,498.30 = 515.85 **× 2** + 466.60, i.e. the 09-03
+lot was **ingested twice**. See `DEF-EXPORT-COVERAGE-GAP` (Robinhood coverage now closed;
+Fidelity still evidenced by confirmation rather than export).
 
 ### Interim rule — option risk figures · R-IV.207(d)
 - **Never size off `max_loss`.** It is unreliable on option rows.
@@ -148,7 +143,24 @@ See `DEF-EXPORT-COVERAGE-GAP`.
   DISPUTED, fix at SPINE.** Combined basis **$1,344.14 (broker)** vs B2's $300 cap —
   exception logged, principal-accepted.
 - Review date: **2026-09-08** (first session after the holiday).
-- Status: **UNDER PRESSURE — on stops through Wed 09-09.**
+- Status: **CLOSED 2026-09-14 — thesis resolved, awaiting retirement by TA.**
+
+> **⚠ THIS ENTRY DESCRIBES A CLOSED POSITION (R-IV.385).** Robinhood SOXS went flat on
+> **2026-09-14** and the book carried it as open for six days. The stops never fired: a second
+> lot was added 09-11 at 43.60 and **both lots were sold 09-14 at 50.99**.
+>
+> | lot | bought | basis | realized |
+> |---|---|---|---|
+> | id 411 | 09-03, 7 @ 51.67 | 361.69 | **−4.76** |
+> | id 418 | 09-11, 7 @ 43.60 | 305.20 | **+51.73** |
+> | | | | **+46.97 net** |
+>
+> **Outcome for the retirement note:** the B2 time stop (Wed 09-09 close) and the price stops
+> (hard 43.20 / daily-close 44.10) were all **overtaken by an add-and-hold** that was never
+> booked. The thesis was right in direction and wrong in timing; the position was rescued by
+> averaging down, not by the discipline that was written for it. **Per this doc's own rule —
+> "when a thesis dies, move it to Retired with the outcome" — this belongs in Retired. That
+> move is TA's, not POSITIONS'.**
 - **Concurrency — UNENFORCEABLE AS THE BOOK STANDS.** B2 permits two concurrent. This is
   the only row in the book carrying any bucket tag: across 355 rows `strategy_tag` has ever
   held one value (`CORE`, on id 401, closed 2026-09-04) and `tags` is NULL on every row.
