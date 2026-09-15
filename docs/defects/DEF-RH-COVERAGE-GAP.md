@@ -212,9 +212,30 @@ Fixing these exposed that **the hub mixes gross and net across option rows**: id
 
 ---
 
-## FIDELITY SIBLING — PENDING (CC-BUILD annotation, R-IV.310(d))
+## FIDELITY SIBLING — **RESOLVED NEGATIVE** 2026-09-15 (R-IV.387(b))
 
-**Conditional. Nothing is claimed yet.**
+> **THE DISCRIMINATOR CAME BACK. There is no unlogged Fidelity closure.**
+>
+> The annotation below turned on whether a **10-share SOXS sale on 2026-09-04** existed. The
+> September artifacts answer it: **09-04 was a BUY, not a sale.** Fidelity bought 10 @ 51.5850
+> on 09-03 and 10 @ 46.6601 on 09-04 — 20 shares, $982.45. The hub's 30 @ 49.9433 = $1,498.30
+> = **515.85 × 2 + 466.60**: the 09-03 lot was **ingested twice**.
+>
+> **The ten shares were never bought, so they were never sold.** The mechanism is duplicate
+> ingest, now registered as `DEF-INGEST-DUPLICATE-LOT` (P1) — a *write-path* defect, not an
+> existence defect. **This defect gains no Fidelity sibling.**
+>
+> **What survives, and it is the more useful half.** The annotation's reasoning was right: a
+> Fidelity instance *would* have meant absence is undetected on every path. It asked the right
+> question and named the right discriminator. What it could not know is that **an over-count
+> and an unlogged closure present identically from inside the book** — both read as "the
+> quantity is not what I expect." Only the broker artifact separates them, and their remedies
+> are opposite: one deletes a phantom, one inserts a missing row. **Acting on the wrong one
+> would have added a fabricated closure to the ledger.**
+>
+> Filed as a worked example of why a discriminator must be an artifact and not an inference.
+
+**Original annotation retained below as history. Conditional, and the condition did not hold.**
 
 **IF** the principal's Activity & Orders view shows a **10-share SOXS sale on 2026-09-04**,
 that is an **unlogged Fidelity closure** — and this defect, registered on the Robinhood
