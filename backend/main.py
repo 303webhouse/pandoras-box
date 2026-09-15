@@ -1544,6 +1544,16 @@ async def health_check():
     except Exception as _uqe:
         uw_quota_block = {"state": "ERROR", "reason": str(_uqe)}
 
+    # R-IV.383(c): the unresolved fraction beside the caller's budget. A worsening
+    # signal generator raises the largest UW caller's bill with no code change; this
+    # makes that a visible number instead of a silent one.
+    resolver_block: dict = {}
+    try:
+        from jobs.outcome_resolver import resolver_backlog_status
+        resolver_block = await resolver_backlog_status()
+    except Exception as _rbe:
+        resolver_block = {"state": "ERROR", "reason": str(_rbe)}
+
     s8_block: dict = {}
     try:
         from jobs.option_chain_snapshot import snapshot_status
@@ -1556,6 +1566,7 @@ async def health_check():
         "build": build_block,
         "option_chain_snapshot": s8_block,
         "uw_quota": uw_quota_block,
+        "outcome_resolver": resolver_block,
         "server_time_et": now_et.strftime("%Y-%m-%d %H:%M:%S %Z"),
         "redis": redis_state,
         "postgres": postgres_state,

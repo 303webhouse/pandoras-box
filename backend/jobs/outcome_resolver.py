@@ -334,3 +334,61 @@ if __name__ == "__main__":
         logger.info("Backfill complete")
     else:
         parser.print_help()
+
+
+# ── R-IV.383(c): the quality metric that drives the UW bill ──────────────
+# This job is the largest UW caller in the hub (2,764 requests on 2026-09-14,
+# 23.6% of hub spend). Its spend is `unresolved_signals x runs_per_day`, because
+# every unresolved signal in the rolling window is re-fetched on EVERY run —
+# by design, since a signal that has not yet touched target or stop may touch one
+# tomorrow.
+#
+# THE CONSEQUENCE NOBODY WOULD SEE: a worsening signal generator — more signals
+# that touch neither target nor stop — raises this caller's UW bill with no code
+# change and no alarm. The budget is coupled to a quality metric, and the coupling
+# is invisible from either side.
+#
+# So the fraction is published beside the budget. A rising number is then a
+# VISIBLE number rather than a silent bill.
+RESOLVER_WINDOW_DAYS = 60
+
+
+async def resolver_backlog_status() -> dict:
+    """Unresolved-signal fraction, for /health. Never raises."""
+    from database.postgres_client import get_postgres_client
+    try:
+        pool = await get_postgres_client()
+        if not pool:
+            return {"state": "UNKNOWN", "reason": "no pool"}
+        # The predicate MIRRORS resolve_signal_outcomes' own. If the two drift,
+        # this number describes a different population than the one being
+        # re-fetched — which is worse than no number (the same-predicate test).
+        common = """
+            FROM signals
+            WHERE timestamp > NOW() - INTERVAL '%d days'
+              AND status NOT IN ('DISMISSED', 'EXPIRED')
+              AND signal_type NOT IN ('SCOUT_ALERT')
+              AND entry_price IS NOT NULL AND stop_loss IS NOT NULL
+              AND target_1 IS NOT NULL
+        """ % RESOLVER_WINDOW_DAYS
+        async with pool.acquire() as conn:
+            total = await conn.fetchval("SELECT count(*) " + common)
+            unresolved = await conn.fetchval(
+                "SELECT count(*) " + common + " AND outcome IS NULL")
+        total = int(total or 0)
+        unresolved = int(unresolved or 0)
+        out = {
+            "window_days": RESOLVER_WINDOW_DAYS,
+            "measurable_signals": total,
+            "unresolved": unresolved,
+            "resolved": total - unresolved,
+            "uw_caller": "outcome_resolver",
+            "note": ("every unresolved signal is re-fetched on every run — this count "
+                     "IS the UW bill's multiplier"),
+        }
+        # Fraction only when there is something to take a fraction OF. A rate over
+        # an empty population is the NaN that took /health down on 2026-09-14.
+        out["unresolved_fraction"] = round(unresolved / total, 4) if total else None
+        return out
+    except Exception as exc:
+        return {"state": "ERROR", "reason": type(exc).__name__}
