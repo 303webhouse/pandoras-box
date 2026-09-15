@@ -422,6 +422,29 @@ window   =  7 weeks
 end      =  Fri 2026-10-30       (as stated in R-IV.381(b))
 ```
 
+## WINDOW OF RECORD (R-IV.382(b)) — SETTLED
+
+```
+T_clock        Tue 2026-09-15
+blind reads    seven, weekly, every FRIDAY:
+                 2026-09-18  2026-09-25  2026-10-02  2026-10-09
+                 2026-10-16  2026-10-23  2026-10-30
+sessions       34            <- the registered n
+week 1         PARTIAL, 4 sessions (Tue-Fri), declared
+C3 gate        ">= 5 of 7" counts READS, not sessions
+```
+
+> **NEVER "7 WEEKS" WITHOUT "34 SESSIONS" BESIDE IT.**
+>
+> The window is seven weekly reads over **34 sessions**, not 35. Week 1 is short by one
+> session because the clock starts on a Tuesday. **Quoting the duration without the count
+> lets a reader reconstruct 35 from "7 x 5" and compare against a population that does not
+> exist.**
+
+**C3's threshold counts READS.** Five of seven Friday reads, each read standing on whatever
+sessions preceded it — **so the partial first week costs the window one session and costs
+C3 nothing**, because week 1 still produces exactly one read.
+
 ### ARITHMETIC CHECK, because n is registered
 
 **Measured against `market_calendar`:**
