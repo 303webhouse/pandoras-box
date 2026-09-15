@@ -81,3 +81,60 @@ of exactly that. **Caught only because the earlier direct read contradicted it.*
 **The corrected read decodes UTF-16 explicitly and counts both classes — 73 failed, 19
 clean — so the two numbers must sum to the file count, and they do.** A check that
 reports both sides of a partition cannot silently return the empty set for one of them.
+
+---
+
+## CAUSE FOUND, AND IT IS NOT WHAT THE LOG SUGGESTED (R-IV.391(a))
+
+**Reproduced by running the job exactly as the task runs it — bare, `--dry-run`:**
+
+```
+ModuleNotFoundError: No module named 'database'
+  -> fallback: from backend.database.postgres_client import ...
+  -> backend/database/postgres_client.py:15
+         from utils.json_sanitize import sanitize_for_json
+ModuleNotFoundError: No module named 'utils'
+```
+
+**The dual-import fallback works one level deep and breaks at the next.**
+`archive_price_history.py` guards its OWN import with a try/except — `database.` then
+`backend.database.` — and the fallback succeeds in reaching the module. **But that module
+uses unqualified imports (`from utils...`, `from database...`) which resolve only when
+`backend/` is the path root**, which is how the app runs in the container and is not how
+`python -m backend.jobs.archive_price_history` runs from the repo root.
+
+**So the job has never been able to run under its own scheduled invocation** in the
+configuration that has been in place since the 07-16 streak began. **It is a path
+problem, not a database problem, not a data problem.**
+
+**Fourteen traceback lines. The log kept one.**
+
+## THE TWO FIXES TAKEN NOW
+
+**1. PURGE DISABLED AT THE TASK — done and verified:**
+
+```
+BEFORE  -NoProfile -ExecutionPolicy Bypass -File ...un_price_history_archive.ps1
+AFTER   -NoProfile -ExecutionPolicy Bypass -File ...un_price_history_archive.ps1 -NoPurge
+```
+
+**`purge` defaulted to TRUE** (`Read-BoolEnv -Name PRICE_HISTORY_ARCHIVE_PURGE -Default
+$true`) and the task passed no switch — so the flag was never IN the arguments to remove;
+it was a default, and the fix is the suppressing switch. **Applied to the live task and
+read back to confirm.**
+
+**Archive → verify → purge ordering is NOT yet implemented** — that is the chase. Purge
+is off until it is.
+
+**2. THE LOG NOW KEEPS THE TRACEBACK.** `$ErrorActionPreference = 'Continue'` around the
+native call, so PowerShell 5.1's `NativeCommandError` wrapping of each stderr line is
+non-terminating and the whole stream reaches `Tee-Object`. **The exit code decides
+success, not the presence of a stderr line.**
+
+### NOT YET IN EFFECT — stated so it is not assumed
+
+**The logging fix is in the repo. The scheduled task runs from `C:	rading-hub`, which
+is CC-POSITIONS' checkout**, and it will pick the change up when that tree next syncs.
+**The purge change IS live immediately** — it was made on the task object, not in a file.
+
+**So as of this filing: purge off everywhere, better logging in the repo only.**

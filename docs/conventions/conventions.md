@@ -715,3 +715,62 @@ an instrument failure is every decision that instrument informs.
 this is the same betrayal one level up, where the reporter does not merely fail to report
 but reports the wrong subject. And the null-verifier law's mirror: **a verifier that cannot
 fail is useless; a verifier whose failure impersonates its subject is worse than useless.**
+
+
+## #18 A NEGATIVE READ REPORTS THE PARTITION
+
+**R-IV.391(c). The instance is this lane's own, from the same hour it was written.**
+
+> **A check that can return the empty set for one class reports BOTH classes, and they
+> must sum to the population.**
+
+### The instance
+
+Counting failed runs in 92 log files:
+
+@@F@@
+    for f in logs; do iconv -f UTF-16LE -t UTF-8 "$f" | grep -q "archive failure" || echo "no-failure: $f"; done
+
+    result: 92 logs WITHOUT a failure line      <- ALL of them
+@@F@@
+
+**Including the file whose failure line had been read directly, by eye, four minutes
+earlier.**
+
+`iconv` failed silently on the encoding, `grep` matched nothing, and every file was
+reported clean. **The check could only ever return one answer, and it returned it
+confidently.**
+
+### Why a one-sided count is the dangerous shape
+
+**A negative result is the cheapest thing a broken check can produce.** A search that
+finds nothing looks identical whether the population is clean or the instrument is dead —
+**and "nothing found" is the answer people are least likely to interrogate**, because it
+asks nothing of them.
+
+**Reporting both classes makes the instrument testable by arithmetic:**
+
+@@F@@
+    73 with + 19 without = 92 files      <- and 92 is the file count
+@@F@@
+
+**Had the broken version reported both, it would have read `0 + 0 = 0` against a
+population of 92, and the failure would have been visible in the output itself rather
+than requiring an independent memory to contradict it.**
+
+### The rule
+
+- **Never report only the matching class.** Report matched, unmatched, and the total.
+- **Assert the sum.** `matched + unmatched == population` is one line and it converts a
+  silent instrument failure into a loud one.
+- **A count of zero against an unstated population is not a finding.** It is a sentence
+  that will be quoted as one.
+
+**This is conventions #10 sharpened.** #10 says a negative finding states its search
+scope — WHERE it looked. **#18 says it states its partition — WHAT IT FOUND AND DID NOT
+FIND, summing to what it searched.** Scope tells you the check looked in the right place;
+the partition tells you the check was working when it got there.
+
+**Kin:** the null-verifier law. **A search that cannot report a non-empty complement is a
+verification that cannot fail**, and this one was built by the lane that had filed four
+instances of that law in the preceding week.
