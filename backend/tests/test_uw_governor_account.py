@@ -215,3 +215,84 @@ def test_shed_thresholds_are_ordered():
     assert (g.ACCOUNT_SHED_AT[g.TIER_BACKGROUND]
             < g.ACCOUNT_SHED_AT[g.TIER_STANDARD]
             < g.ACCOUNT_SHED_AT[g.TIER_FOREGROUND] <= 1.0)
+
+
+# --------------------------------------------------------------------------
+# R-IV.380(a) — fail-open must not fail SILENTLY
+#
+# "the governor is not shedding" and "the governor cannot see the account" are
+# the same observation from outside unless the gate publishes its own condition.
+# That is the absent-vs-neutral collapse this register has filed four times.
+# --------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_gate_state_armed_when_the_account_is_readable(account):
+    account["used"] = 1000
+    await g.account_shed(g.TIER_BACKGROUND)
+    assert g.gate_state()["state"] == "armed"
+
+
+@pytest.mark.asyncio
+async def test_gate_state_says_shedding_with_its_numbers(account):
+    account["used"] = 30000
+    await g.account_shed(g.TIER_BACKGROUND)
+    st = g.gate_state()
+    assert st["state"] == "shedding"
+    assert "30000" in st["detail"]
+
+
+@pytest.mark.asyncio
+async def test_gate_state_distinguishes_no_header_from_armed(account):
+    account.clear()
+    account.update({"note": "nothing yet"})
+    await g.account_shed(g.TIER_BACKGROUND)
+    st = g.gate_state()
+    assert st["state"] == "open:no_header"
+    assert st["state"] != "armed", "an unseeing gate reported as an armed one"
+
+
+@pytest.mark.asyncio
+async def test_gate_state_distinguishes_missing_limit(account):
+    account.clear()
+    account.update({"used": 39000})
+    await g.account_shed(g.TIER_BACKGROUND)
+    assert g.gate_state()["state"] == "open:no_limit"
+
+
+@pytest.mark.asyncio
+async def test_gate_state_records_a_read_error(monkeypatch):
+    async def boom():
+        raise RuntimeError("redis down")
+
+    import integrations.uw_api as uw
+    monkeypatch.setattr(uw, "account_quota", boom, raising=False)
+    await g.account_shed(g.TIER_FOREGROUND)
+    st = g.gate_state()
+    assert st["state"] == "open:read_error"
+    assert "RuntimeError" in st["detail"]
+
+
+@pytest.mark.asyncio
+async def test_every_open_path_is_distinguishable(account, monkeypatch):
+    """Three different ways to fail open, three different states. If any two
+    collapsed, a reader could not tell which instrument was blind."""
+    seen = set()
+    account.clear(); account.update({"note": "x"})
+    await g.account_shed(g.TIER_BACKGROUND); seen.add(g.gate_state()["state"])
+    account.clear(); account.update({"used": 1})
+    await g.account_shed(g.TIER_BACKGROUND); seen.add(g.gate_state()["state"])
+
+    async def boom():
+        raise RuntimeError("x")
+
+    import integrations.uw_api as uw
+    monkeypatch.setattr(uw, "account_quota", boom, raising=False)
+    await g.account_shed(g.TIER_BACKGROUND); seen.add(g.gate_state()["state"])
+    assert len(seen) == 3, "open states collapsed: %s" % seen
+
+
+@pytest.mark.asyncio
+async def test_gate_state_timestamps_itself(account):
+    account["used"] = 100
+    await g.account_shed(g.TIER_BACKGROUND)
+    assert g.gate_state()["at"] is not None

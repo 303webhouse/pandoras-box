@@ -212,6 +212,13 @@ async def account_quota() -> dict:
             out["pct_used"] = round(100.0 * u / l, 1)
         if "used" not in out:
             out["note"] = "no UW quota header seen yet this process"
+        # R-IV.380(a): the gate's OWN condition. "not shedding" and "cannot see
+        # the account" must not read the same from outside.
+        try:
+            from integrations.uw_governor import gate_state
+            out["gate_state"] = gate_state()
+        except Exception:
+            out["gate_state"] = {"state": "unknown", "detail": "governor unreadable"}
     except Exception as exc:
         out["error"] = type(exc).__name__
     return out
