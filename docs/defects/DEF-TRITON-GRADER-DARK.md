@@ -77,3 +77,23 @@ and folding it in would let a P3 ride a P1's urgency while obscuring the P1's ac
   indistinguishable from a backlog.
 - `DEF-TRITON-RETENTION-DARK` (P3) — fix BLOCKED by law while the reason rows are undeleted
   is itself unexplained.
+
+---
+
+## CLOSED — 2026-09-14 (R-IV.381(a))
+
+**The fallback is EXERCISED, not merely deployed.**
+
+```
+2026-09-14 16:17 ET   rows_touched 971   status ok   76 s
+                      no_regular_session_bars  ABSENT   (was 1,000 on 09-11)
+                      bars_missing_for_reached_horizon = 29
+```
+
+**971 rows graded, from zero.** The skip reason that defined this defect is gone from the
+summary entirely, and the 29 that remain carry a different and honest reason — a horizon
+that arrived with its specific bar missing, which is not the same fact as "no series
+exists".
+
+**Closed on evidence of the branch being ENTERED, not on the deploy landing.** D3 proved
+the grader runs on the schedule; this proves it grades when it runs.
