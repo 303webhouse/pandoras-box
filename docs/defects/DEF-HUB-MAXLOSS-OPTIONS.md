@@ -150,6 +150,28 @@ the observed value exactly — and the other lot ordering gives 1,473.60, so the
 also fixes which lot came first. id 367: 30.52 / 15.26 = 2.0000, the six-contract debit
 carried on a three-contract remainder.
 
+### ⚠ SUPERSEDED BY THE EXPORT — id 409 is not a clean instance (R-IV.387(b))
+
+**Both decompositions of id 409 on this page reasoned from `qty = 30`, and that quantity was
+itself wrong.** The September artifacts show the account held **20 shares, basis $982.45** —
+the 09-03 lot was ingested twice (`DEF-INGEST-DUPLICATE-LOT`, P1).
+
+| decomposition | what it said | status |
+|---|---|---|
+| **POSITIONS'** (above, :88) | `max_loss` 1,547.70 against basis 1,498.30 — *"a 49.40 difference"* | **SUPERSEDED.** True basis is 982.45, so the real gap is **565.25**, not 49.40. The denominator was contaminated. |
+| **CC-BUILD's** (below) | first-lot `max_loss` 515.90 × (30/10) = 1,547.70 | **MECHANISM STANDS, EXEMPLAR DOES NOT.** The scale-IN rule is confirmed and the arithmetic is exact — but its multiplier `30/10` is built on a phantom lot. On the true quantity it would give 515.90 × 2 = 1,031.80, still wrong against 982.45, but wrong by a different amount for a different reason. |
+
+**What survives from BUILD's analysis, unchanged:** the two-event-type mechanism, the
+recompute-on-every-write remedy, id 367 as the partial-CLOSE exemplar, and the inference that
+**09-03 was the first lot** — the export confirms that ordering independently.
+
+**What id 409 actually demonstrates** is a *compound*: a duplicate ingest inflated the
+quantity, and the scale-IN handler then propagated the first lot's price across the inflated
+count. **A correct handler fed a corrupt quantity still produces a corrupt figure**, which is
+an argument for recompute-on-write and against trusting any stored derived value — but it is
+not a clean demonstration of scale-IN, and should not be cited as one. **A clean scale-IN
+exemplar is still owed.**
+
 **Two symptoms, one cause: a derived quantity is stored and then maintained by event
 handlers.** The scale-in path at least tried and got its factor arithmetically right. The
 closing path does not try.
