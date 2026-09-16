@@ -1,5 +1,8 @@
 # CC BRIEF — LEDGER INTEGRITY: one account vocabulary, guarded marks, honest vintage
 
+> **REVISION 5 — `position_lots` ALREADY EXISTS** (14 of 34 open positions carry a
+> LEGACY-SINGLE-LOT lot; 20 carry none); the build is an ALTER, and any backfill needs a
+> NOT EXISTS guard or it doubles 14 positions. See T6e.
 > **REVISION 4 — corrects REV3's `broker_ref`**: the Robinhood export carries no
 > reference column at all, so `broker_ref` is permanently NULL on that side.
 > **REVISION 3 — R-IV.405(d)** adds D9/D10/D11 and `broker_ref`; the done-definition
@@ -463,6 +466,62 @@ it attractively.
 position_lots (position_id, qty, price, fill_time, provenance, source)
 ```
 
+> ### ⚠ REV5 — `position_lots` ALREADY EXISTS IN PRODUCTION. BUILD FROM IT, NOT OVER IT.
+>
+> **Measured 2026-09-16, through the API, aggregates only.** Created by
+> `scripts/feat_position_lifecycle_phase1.py` (`cf8b9e9`, **2026-08-26 — before R-IV.310
+> ruled the schema above**), with a one-time `LEGACY-SINGLE-LOT` backfill guarded by
+> `WHERE NOT EXISTS`. Served by `GET` and `POST /api/v2/positions/{id}/lots`
+> (`backend/api/unified_positions.py`), and the `POST` already reports `unpriced_lots`.
+>
+> ```
+> ruled  (above)   position_lots (position_id, qty,      price, fill_time, provenance, source)
+> LIVE             position_lots (position_id, quantity, price, fill_date, fees,       source)
+> ```
+>
+> | of 34 OPEN positions | count |
+> |---|---|
+> | with exactly 1 lot, all `source = LEGACY-SINGLE-LOT` | **14** |
+> | with **ZERO** lots | **20** |
+> | lots with NULL price | 0 |
+>
+> **Three consequences, each of which fails silently if ignored:**
+>
+> 1. **`CREATE TABLE IF NOT EXISTS` would do NOTHING** and leave the live shape in place;
+>    every later `INSERT` naming `qty`, `fill_time` or `provenance` then fails. **The build
+>    is an ALTER from the live shape to the ruled one, not a CREATE.**
+> 2. **The data half's dry run (`LOTS_LEGS_DATA_HALF` (a), 374 synthetic lots, one per
+>    position) does not know these 14 rows exist.** Applied as staged, **14 positions get a
+>    SECOND lot and their Σ lot qty doubles** — every row individually valid, the sum wrong.
+>    That is `DEF-INGEST-DUPLICATE-LOT` arriving through the backfill instead of the
+>    importer. **Any backfill carries the same `WHERE NOT EXISTS` guard the original
+>    script did.**
+> 3. **D9's first invariant already FAILS live** — 20 of 34 open positions have no lot. The
+>    data half's "PASS" was true of its staged table, which is why it said the pass
+>    "confirms the generator, not the data"; **the live table is the data, and it does not
+>    pass.** The 20 are, on this reading, positions opened after the 08-26 backfill, since
+>    nothing writes a lot on open.
+>
+> **And D4:** the table is created ONLY by a script — not by a migration, not by app
+> startup. **A fresh database boots without it and both lots routes fail.** The build
+> therefore lands `position_lots` in `migrations/` (idempotent, matching the live shape
+> first), which is what D4's fresh-DB boot test exists to catch.
+>
+> **FOR SPINE — not decided here, because each choice touches live code:**
+> - **`quantity` → `qty` and `fill_date` → `fill_time`:** renames break the live `GET`/`POST`
+>   routes unless the same commit updates them; `fill_date → fill_time` is also a type change
+>   (date → timestamp), and the 14 existing rows have no time component to carry.
+> - **`fees`:** present live, absent from the ruled schema — and the P0.6 census *needs* a fee
+>   delta, so dropping it would discard the one field the gross/net work depends on.
+> - **`provenance` for the 14 existing rows:** per T6d it is INHERITED from each parent
+>   position row. It must not be defaulted, and it must not be `BROKER_VERIFIED`.
+>
+> **How this was missed, stated because it is the lesson:** the 2026-09-16 survey searched
+> `migrations/` and `backend/` for DDL and concluded "no lots/legs schema exists." It read
+> SOURCE CODE to answer a question about the DATABASE — **Addendum 3, Law 2, committed by the
+> lane that filed it.** The table was created by a script, so no search of migrations could
+> find it, and the `backend/` hit was dismissed unread.
+
 **The position row becomes the AGGREGATE. Entry, cost basis and `max_loss` DERIVE from the
 lots and are never stored independently of them.**
 
@@ -628,8 +687,9 @@ one.**
 
 ### T6f — IMPORT CADENCE (`DEF-EXPORT-COVERAGE-GAP`) — A REQUIREMENT
 
-**The lots table needs a source.** `position_lots` can be created empty; it cannot be
-**populated** by anything this build otherwise contains. An import cadence — a scheduled
+**The lots table needs a source.** `position_lots` already exists and is **partially
+populated — 14 of 34 open positions, by a one-time backfill** (REV5, above); nothing this
+build otherwise contains populates it further. An import cadence — a scheduled
 job, or a defined manual rhythm with a liveness check — **is the source.**
 
 #### Why this is a requirement and not a later convenience

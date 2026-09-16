@@ -117,14 +117,40 @@
     if (sec < 5400) return Math.round(sec / 60) + 'm';
     return Math.round(sec / 3600) + 'h';
   }
+  // R-IV.413(e) — ONE mapping for every health dot AND every _health rank, so the two can
+  // no longer disagree. v2.css:14-16 is the rule: amber means "we cannot confirm this";
+  // vermilion means "confirmed bad"; an unreachable source is not a fired breaker.
+  //   degraded === true   the payload REPORTED an error          -> 'down'        vermilion
+  //   degraded == null    NO readable payload at all             -> 'unconfirmed' amber
+  //   age null or > 900s  cannot confirm freshness               -> 'unconfirmed' amber
+  //   flatline            pipe aged past its SLO (job record)    -> 'dead'        pulsing
+  // Callers pass null for an absent payload. The old `data ? data.degraded : true` turned
+  // "we received nothing" into "the source is broken", and no later code could undo it.
+  function healthState(ageSec, degraded, flatline) {
+    if (flatline) return 'dead';
+    if (degraded === true) return 'down';
+    if (degraded == null || ageSec == null || ageSec > 900) return 'unconfirmed';
+    return 'ok';
+  }
+  function paintDot(el, st) {
+    el.className = 'health-dot' + (st ? ' ' + st : '');
+    // v2.css has no amber dot rule, and v2.css is ABACUS's file (R-IV.410(f)). Until its
+    // pass adds `.health-dot.unconfirmed { background: var(--amber); }` the TOKEN is set
+    // inline here -- a token, never a hex -- and cleared for every other state.
+    el.style.background = st === 'unconfirmed' ? 'var(--amber)' : '';
+  }
   function setHealth(el, ageSec, degraded, flatline) {
     if (!el) return;
-    let cls = 'health-dot', txt = 'fresh';
-    if (flatline) { cls += ' dead'; txt = 'DEAD — data pipe flatlined (aged past its SLO)'; }
-    else if (degraded || ageSec == null) { cls += ' down'; txt = 'unknown / degraded'; }
-    else if (ageSec > 900) { cls += ' stale'; txt = 'stale ' + ageLabel(ageSec); }
-    else { cls += ' ok'; txt = 'fresh ' + ageLabel(ageSec); }
-    el.className = cls;
+    const st = healthState(ageSec, degraded, flatline);
+    let txt;
+    if (st === 'dead') txt = 'DEAD — data pipe flatlined (aged past its SLO)';
+    else if (st === 'down') txt = 'degraded — the source reported an error';
+    else if (st === 'unconfirmed') {
+      txt = degraded == null ? 'unknown — no readable payload; cannot confirm'
+          : ageSec == null ? 'unknown age — cannot confirm freshness'
+          : 'stale ' + ageLabel(ageSec) + ' — cannot confirm freshness';
+    } else txt = 'fresh ' + ageLabel(ageSec);
+    paintDot(el, st);
     el.setAttribute('title', txt);
   }
 
@@ -133,10 +159,10 @@
   function updateGlobalHealth() {
     const anyFlat = Object.values(_flat).some(Boolean);
     const vals = Object.values(_health).filter((v) => v !== null);
-    const worst = anyFlat ? 'dead' : vals.includes('down') ? 'down' : vals.includes('stale') ? 'stale' : vals.length ? 'ok' : '';
+    const worst = (anyFlat || vals.includes('dead')) ? 'dead' : vals.includes('down') ? 'down' : vals.includes('unconfirmed') ? 'unconfirmed' : vals.length ? 'ok' : '';
     const dot = $('dataHealthDot');
-    dot.className = 'health-dot' + (worst ? ' ' + worst : '');
-    dot.setAttribute('title', GLOSSARY.HEALTH + ' — ' + (worst === 'dead' ? 'DEAD feed(s) — pipe flatlined' : (worst || 'no data')));
+    paintDot(dot, worst);
+    dot.setAttribute('title', GLOSSARY.HEALTH + ' — ' + (worst === 'dead' ? 'DEAD feed(s) — pipe flatlined' : worst === 'down' ? 'a source reported an error' : worst === 'unconfirmed' ? 'cannot confirm — a feed is unreadable or stale' : (worst || 'no data')));
   }
   // Record a feed's flatline state; adds exactly one River action item per incident
   // (River dedups by id) and removes it on recovery.
@@ -257,8 +283,8 @@
     emitRegimeRiverItems(composite, regime, kill);
 
     const age = regime && regime.data_age_seconds != null ? regime.data_age_seconds : null;
-    const degraded = regime ? regime.degraded : true;
-    _health.regime = (regime && regime.flatline) ? 'down' : (degraded || age == null) ? 'down' : age > 900 ? 'stale' : 'ok';
+    const degraded = regime ? !!regime.degraded : null;   // null = no payload (R-IV.413(e))
+    _health.regime = healthState(age, degraded, regime && regime.flatline);
     noteFlatline('nightly', regime && regime.flatline, 'Regime / Themes');
     updateGlobalHealth();
   }
@@ -338,12 +364,12 @@
     try { const r = await apiFetch('/api/stable/movers'); if (r.ok) data = await r.json(); } catch (_) {}
     renderMoversTape(data);
     const age = data && data.data_age_seconds != null ? data.data_age_seconds : null;
-    const degraded = data ? data.degraded : true;
+    const degraded = data ? !!data.degraded : null;   // null = no payload (R-IV.413(e))
     const flat = !!(data && data.flatline);
     setHealth($('moversHealthDot'), age, degraded, flat);
-    $('moversAge').textContent = flat ? 'DEAD · pipe stalled' : degraded ? 'stale ' + ageLabel(age) : ageLabel(age) + ' old';
+    $('moversAge').textContent = flat ? 'DEAD · pipe stalled' : degraded === true ? 'degraded · ' + ageLabel(age) : degraded == null ? 'no data' : ageLabel(age) + ' old';
     $('moversAge').className = flat ? 'val-down' : '';
-    _health.movers = flat ? 'down' : (degraded || age == null) ? 'down' : age > 900 ? 'stale' : 'ok';
+    _health.movers = healthState(age, degraded, flat);
     noteFlatline('movers', flat, 'Movers');
     updateGlobalHealth();
     // Flow/Kairos badges — batched, rides the same 5-min movers cadence (no new poller).
@@ -679,9 +705,9 @@
     try { const r = await apiFetch('/api/stable/themes'); if (r.ok) data = await r.json(); } catch (_) {}
     const el = $('themesTable'); if (!el) return;
     $('themesAsOf').textContent = data && data.date ? data.date : '';
-    setDot('themesHealthDot', data && data.data_age_seconds, data ? data.degraded : true, data && data.flatline);
+    setDot('themesHealthDot', data && data.data_age_seconds, data ? !!data.degraded : null, data && data.flatline);
     noteFlatline('nightly', data && data.flatline, 'Themes');
-    _health.themes = (!data || data.degraded) ? 'down' : 'ok'; updateGlobalHealth();
+    _health.themes = !data ? 'unconfirmed' : data.degraded ? 'down' : 'ok'; updateGlobalHealth();
     const themes = (data && data.themes) || [];
     if (!themes.length) { el.innerHTML = '<div class="th-row"><span class="nm val-muted">no theme snapshot</span></div>'; return; }
     let html = '<div class="th-row head"><span class="rk">#</span><span class="nm">Theme</span><span class="sc">Score</span><span class="dl">1d Δ</span><span>Status</span></div>';
@@ -890,7 +916,7 @@
     let data = null;
     try { const r = await apiFetch('/api/stable/index-strip'); if (r.ok) data = await r.json(); } catch (_) {}
     const el = $('indexStrip'); if (!el) return;
-    setDot('indexHealthDot', data && data.data_age_seconds, data ? data.degraded : true, data && data.flatline);
+    setDot('indexHealthDot', data && data.data_age_seconds, data ? !!data.degraded : null, data && data.flatline);
     noteFlatline('strip', data && data.flatline, 'Index / strip');
     const order = ['SPY', 'QQQ', 'IWM', 'RSP', 'DIA'];
     const rows = (data && data.indices) || [];
@@ -958,8 +984,8 @@
     try { const r = await apiFetch('/api/v2/positions?status=OPEN'); if (r.ok) positions = await r.json(); } catch (_) {}
     const el = $('bookStrip'); if (!el) return;
     const bookOk = !!(balances || pnl);
-    setDot('bookHealthDot', bookOk ? 60 : null, !bookOk);
-    _health.book = bookOk ? 'ok' : 'down'; updateGlobalHealth();
+    setDot('bookHealthDot', bookOk ? 60 : null, bookOk ? false : null);
+    _health.book = bookOk ? 'ok' : 'unconfirmed'; updateGlobalHealth();
 
     const accts = Array.isArray(balances) ? balances : [];
     const total = accts.reduce((s, a) => s + (Number(a.balance) || 0), 0);

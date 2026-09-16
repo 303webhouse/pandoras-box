@@ -15,12 +15,11 @@
     /* P0 4d — semantic color tokens (one up/down/warn everywhere). --down is
        vermilion #ff5c33: pairs with the teal/lime scheme and passes ~4.8:1 text
        contrast on #1e293b cards, where the old #e5370e failed (~3.4:1). */
-    /* R-IV.411(b) — GAIN COLOUR SETTLED BY THE PRINCIPAL: #00e676, the de-facto gain
-       colour (69 literal sites + every var(--accent-green, #00e676) fallback). It differs
-       from the old --up (#7CFF6B), so the principal's colour wins and --up is ALIASED
-       to it. --accent-lime keeps #7CFF6B: it is an accent, not the gain semantic. */
-    --up-bright: #00e676;
-    --up: var(--up-bright);
+    /* R-IV.413(c): --up STAYS #7CFF6B pending the principal's confirmation. He named
+       "Agora's lime", which is v2's --up. R-IV.411(b)'s #00e676 is WITHDRAWN and retires
+       with the legacy page. Gain references point AT var(--up); --up itself is not
+       repointed, and there is no --up-bright. */
+    --up: #7CFF6B;
     --down: #ff5c33;
     --warn: #facc15;
     --neutral-text: var(--text-secondary);
@@ -32,8 +31,9 @@
     --bearish-color: var(--down);
     /* R-IV.410(b) — the GAIN half P0 4d never did. Without these, every bullish rule
        rendered wrong while its bearish twin rendered (styles.css:5103/5126/5188,
-       8519). --accent-green: all 12 existing fallbacks are already #00e676, so
-       defining it changes nothing at those sites and repairs the 13th. */
+       8519). --accent-green: its 12 other sites carry a #00e676 FALLBACK, which
+       rendered only because the token was undefined. Defining it moves those 12 from
+       #00e676 to --up — a visible change, and the one R-IV.413(c) implies. */
     --bullish-color: var(--up);
     --accent-green: var(--up);
     /* The other broken references are NOT gain and are fixed to their OWN meaning,
@@ -9031,7 +9031,7 @@ body[data-mode="analytics"] .analytics-shell {
     color: var(--text-primary);
 }
 
-.metric-value.positive { color: var(--accent-lime); }
+.metric-value.positive { color: var(--up); }
 .metric-value.negative { color: var(--down); }
 
 .position-thesis {
