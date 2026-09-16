@@ -322,7 +322,11 @@ async def account_shed(tier: str) -> Optional[str]:
         # that would clear it can never arrive. Fails OPEN, as an unmeasured
         # account must.
         if _reading_predates_reset(q.get("at")):
-            _set_gate_state("open:no_header",
+            # R-IV.407(b): its OWN state, not folded into open:no_header. "no header
+            # has ever been cached" and "the cached header belongs to a spent quota
+            # day" have different causes and different fixes; one name for both is
+            # the collapse this register keeps filing (conventions #18).
+            _set_gate_state("open:stale_reading",
                             "last header %s predates the 00:00Z reset - the "
                             "account is UNMEASURED for this quota day, not at "
                             "%s" % (q.get("at"), used))

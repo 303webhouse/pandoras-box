@@ -103,6 +103,64 @@ reading returns shed reason `None`.
 
 ---
 
+## THE LATCH IS BROKEN — PROVEN BY TRAFFIC, NOT BY THE TIMESTAMP
+
+**R-IV.405(b) named the exercise as "a fresh `at` timestamp and gate_state leaving
+shedding." The second half passed immediately. THE FIRST HALF CANNOT BE PRODUCED BY
+WAITING, and that is itself the finding.**
+
+**What the latch claim actually asserts:** shedding suppresses the calls whose responses
+would clear it. **So the proof that it is broken is that the calls resumed** — and they did:
+
+| | hub's own daily counter |
+|---|---|
+| 09:00-11:20 ET, every 10-min meter sample, pre-fix | **0** |
+| 13:19 ET, ~30 min post-fix | **905** |
+| 13:26 ET | **996** |
+
+Circuit breaker closed, `consecutive_failures: 0`, `callers_over_quota: []`, cache misses
+1,057 against 13 hits — **so nearly every one of those was a real HTTP call that
+succeeded.** The hub was shed to a standstill through the entire meter window and is now
+issuing ~13 calls a minute. **That is the latch broken, measured.**
+
+## BUT THE READING STILL HAS NOT REFRESHED — AND THAT IS A SECOND DEFECT
+
+**`/health.uw_quota.at` is still `2026-09-15T15:13:51Z` after ~1,000 successful calls.**
+`_capture_quota_headers(resp)` runs on every response, before the status check, so it is
+being called roughly a thousand times an hour and writing nothing.
+
+**Cause NOT established, and the domain is named rather than generalised** (Law 2's
+corollary): either the endpoints the hub actually calls do not return
+`x-uw-daily-req-count`, or the Redis write is failing inside its own `except: pass`. **What
+IS established is narrower and sufficient: the hub's current traffic does not refresh the
+reading.** The morning's meter got the header from `/api/stock/SPY/info` on all 15 samples,
+so the header exists somewhere in UW's surface — just not, apparently, where the hub looks.
+
+### Why this makes the fix load-bearing in a way it was not designed to be
+
+**After the next 00:00Z, `at` will be pre-reset again — and will stay that way, because
+nothing refreshes it.** So:
+
+```
+before the fix : stale 92% -> shed everything          FALSE POSITIVE, latched
+after the fix  : stale     -> open, shed never fires   FALSE NEGATIVE, permanent
+```
+
+**The fix converts a false positive into a false negative.** That is the correct trade for
+an unmeasured account — an unmeasured account must not block traffic, and a protection that
+cannot be refreshed must not be trusted to fire — **but it means account-level shedding is
+now effectively OFF, and the only thing that could turn it back on is a capture path that
+is demonstrably not writing.**
+
+> **The real defect was never the staleness check. It is that the account meter stopped
+> reporting and nothing noticed for sixteen hours** — because a value that never changes
+> and a value that is merely stable look identical on a dashboard.
+
+**Owed next:** establish which UW endpoints return the quota header, and make the capture's
+own silence visible — a reading that has not moved across N successful calls is a finding,
+not a steady state. Tomorrow's meter hits `/api/stock/SPY/info` directly every ten minutes
+and will settle the first half.
+
 ## OPEN — A RECOMMENDATION NOT TAKEN UNASKED
 
 **The ruled routing puts two different facts under one state name.** `open:no_header` now
