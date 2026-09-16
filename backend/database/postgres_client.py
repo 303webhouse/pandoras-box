@@ -1108,6 +1108,18 @@ async def init_database():
                 ON option_chain_snapshots (session_date DESC, ticker)
         """)
 
+        # Migration 032 (R-IV.394, T1): the mark guard's verdict column. On any
+        # non-OK value unrealized_pnl was NOT written -- never zeroed, because a
+        # zero P&L is a CLAIM that the position is flat.
+        await conn.execute("""
+            ALTER TABLE unified_positions
+                ADD COLUMN IF NOT EXISTS mark_status TEXT
+        """)
+        await conn.execute("""
+            ALTER TABLE unified_positions
+                ADD COLUMN IF NOT EXISTS mark_checked_at TIMESTAMPTZ
+        """)
+
         # Migration 030 (R-IV.360(2), T5b): stored instrument class. The grader's
         # queue reads it to stop re-selecting rows that can never grade.
         await conn.execute("""

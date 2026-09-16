@@ -38,6 +38,16 @@ data/rh_import_2026_jan_feb.csv
 # data/imports/ held an untracked Fidelity account-history CSV on 2026-08-25;
 # the path was not ignored, so any `git add -A` would have published it.
 data/imports/
+
+# R-IV.396(a): STAGED BOOK DATA. `data/staging/` held five broker-derived files on
+# 2026-09-15 — lots, broker_refs, gross/net, structure census, lot failures — with
+# NO ignore rule. Untracked, but one `git add -A` from publication in a PUBLIC repo,
+# which is the same near-miss the data/imports/ note above records from 08-25.
+# Directory-level, not per-file: a pattern listing today's filenames does not cover
+# tomorrow's, and the next staged file will not be called stage_lots.csv.
+data/staging/
+stage_*.csv
+
 *_Trade_Updates.csv
 RH_Report_*.csv
 History_for_Account_*.csv
