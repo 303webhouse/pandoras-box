@@ -271,6 +271,32 @@ def gate_state() -> dict:
     return dict(_LAST_GATE_STATE)
 
 
+def _reading_predates_reset(at_iso, now=None) -> bool:
+    """Is this quota reading from a PREVIOUS quota day? (UW resets at 00:00Z.)
+
+    DEF-GOVERNOR-STALE-READING-LATCHES. The cache TTL is 36 h and the quota
+    period is 24 h, so a reading can outlive the day it describes. A count from
+    yesterday is not a small error about today -- it is a statement about a
+    counter that has since been set back to zero.
+
+    Unparseable or missing -> False. We do not invent staleness any more than we
+    invent freshness; a reading we cannot age is handled by the callers' other
+    guards.
+    """
+    if not at_iso:
+        return False
+    from datetime import datetime as _dt, timezone as _tz
+    try:
+        t = _dt.fromisoformat(str(at_iso).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return False
+    if t.tzinfo is None:
+        t = t.replace(tzinfo=_tz.utc)
+    n = now or _dt.now(_tz.utc)
+    reset = n.astimezone(_tz.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    return t < reset
+
+
 async def account_shed(tier: str) -> Optional[str]:
     """Should this tier be shed on ACCOUNT state? Returns a reason or None.
 
@@ -287,7 +313,19 @@ async def account_shed(tier: str) -> Optional[str]:
         used, limit = q.get("used"), q.get("limit")
         if not isinstance(used, int):
             _set_gate_state("open:no_header",
-                            "no x-uw-daily-req-count seen yet this process")
+                            "no x-uw-daily-req-count in the shared cache")
+            return None
+        # R-IV.405(b) / R-IV.406(c): a reading from BEFORE the last 00:00Z reset
+        # describes a counter that no longer exists. Treating it as current
+        # LATCHES: every tier sheds at a high stale percentage, shedding
+        # suppresses the calls whose responses carry the header, and the reading
+        # that would clear it can never arrive. Fails OPEN, as an unmeasured
+        # account must.
+        if _reading_predates_reset(q.get("at")):
+            _set_gate_state("open:no_header",
+                            "last header %s predates the 00:00Z reset - the "
+                            "account is UNMEASURED for this quota day, not at "
+                            "%s" % (q.get("at"), used))
             return None
         if not isinstance(limit, int) or limit <= 0:
             _set_gate_state("open:no_limit",
