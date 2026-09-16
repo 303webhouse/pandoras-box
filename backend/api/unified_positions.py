@@ -69,13 +69,21 @@ ACCOUNT_DISPLAY_MAP = {
 
 
 def _match_account_balance(account_filter: str, balance_name: str) -> bool:
-    """Check if a balance row name matches the requested account filter."""
-    filter_upper = account_filter.upper()
-    name_lower = balance_name.lower().strip()
-    aliases = ACCOUNT_DISPLAY_MAP.get(filter_upper, [])
-    # Normalize underscores to spaces for startsWith matching (FIDELITY_ROTH → fidelity roth)
-    filter_normalized = filter_upper.lower().replace("_", " ")
-    return name_lower in aliases or name_lower.startswith(filter_normalized)
+    """Does this balance row satisfy a request for `account_filter`?
+
+    T2 (R-IV.394): membership is LOOKED UP in config.accounts, never inferred from
+    the shape of a string.
+
+    THE DEFECT THIS REPLACES, registered at P0.1: this function matched by
+    `startswith`, and the legacy `FIDELITY` filter normalised to the prefix
+    `fidelity` — which matched `Fidelity Roth`, `Fidelity 401A` AND `Fidelity 403B`
+    alike. A request for the ONE traded account silently summed TWO parked ones
+    with it. A prefix answers "does this name begin with those letters", which is a
+    question about spelling, asked on a surface where the question is about
+    ownership of money.
+    """
+    from config.accounts import accounts_match
+    return accounts_match(account_filter, balance_name)
 
 
 async def _adjust_account_cash_with_conn(conn, account: str, delta: float) -> bool:
@@ -831,11 +839,11 @@ async def portfolio_summary(account: Optional[str] = Query(None)):
     # Filter by account if specified
     if account:
         account_upper = account.upper()
-        if account_upper == "FIDELITY":
-            # Show all Fidelity sub-accounts
-            positions = [p for p in positions if (p.get("account") or "").upper().startswith("FIDELITY")]
-        else:
-            positions = [p for p in positions if (p.get("account") or "ROBINHOOD").upper() == account_upper]
+        # T2: one vocabulary. `FIDELITY` is an ALIAS of FIDELITY_ROTH, not a
+        # prefix family — the 401A/403B rows are parked money and out of scope.
+        from config.accounts import accounts_match
+        positions = [p for p in positions
+                     if accounts_match(account, p.get("account") or "ROBINHOOD")]
 
     # Fetch cash + stored balance from account_balances.
     # Path A: stored `balance` is the headline source of truth. `cash` continues
@@ -852,8 +860,10 @@ async def portfolio_summary(account: Optional[str] = Query(None)):
                     "SELECT account_name, cash, balance, updated_at FROM account_balances"
                 )
                 if account.upper() == "FIDELITY":
+                    # T2: an alias resolves to ONE account, not a prefix family.
+                    from config.accounts import accounts_match as _am
                     fid_rows = [br for br in bal_rows
-                                if (br["account_name"] or "").lower().startswith("fidelity")]
+                                if _am(account, br["account_name"])]
                     cash = sum(float(br["cash"] or 0) for br in fid_rows)
                     stored_balance = sum(float(br["balance"] or 0) for br in fid_rows)
                     ts = [br["updated_at"] for br in fid_rows if br["updated_at"]]
@@ -1481,12 +1491,32 @@ async def update_position(position_id: str, req: UpdatePositionRequest, _=Depend
             result["quantity"], result.get("structure", ""),
             direction=result.get("direction", "")
         )
+        # ── T1 MARK GUARD (R-IV.394) ───────────────────────────────────────
+        # On any non-OK verdict this writes NOTHING to unrealized_pnl. It does not
+        # write zero: a zero P&L is a CLAIM that the position is flat, and it is
+        # indistinguishable from a real flat position on every surface downstream.
+        # The previous value is left standing, stamped with the reason.
+        from api.mark_guard import evaluate_mark, mark_is_writable
+        _mark_status, _mark_reason = evaluate_mark(
+            result.get("current_price"), result.get("entry_price"))
         async with pool.acquire() as conn:
-            await conn.execute(
-                "UPDATE unified_positions SET unrealized_pnl = $1 WHERE position_id = $2",
-                unrealized, position_id
-            )
-        result["unrealized_pnl"] = unrealized
+            if mark_is_writable(_mark_status):
+                await conn.execute(
+                    "UPDATE unified_positions SET unrealized_pnl = $1, "
+                    "mark_status = $2, mark_checked_at = NOW() WHERE position_id = $3",
+                    unrealized, _mark_status, position_id
+                )
+                result["unrealized_pnl"] = unrealized
+            else:
+                await conn.execute(
+                    "UPDATE unified_positions SET mark_status = $1, "
+                    "mark_checked_at = NOW() WHERE position_id = $2",
+                    _mark_status, position_id
+                )
+                logger.warning(
+                    "T1 mark guard: %s for position %s — unrealized_pnl NOT written (%s)",
+                    _mark_status, position_id, _mark_reason)
+        result["mark_status"] = _mark_status
 
     # BUG 3: If entry_price or quantity changed on an OPEN position, adjust cash for the cost_basis delta
     cash_ok = None
