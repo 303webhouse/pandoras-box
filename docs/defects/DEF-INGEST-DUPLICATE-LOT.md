@@ -80,6 +80,46 @@ Note the two Fidelity confirmations carry reference numbers (`26246-P2JS0Y`, `26
 and order numbers. **The uniqueness key already exists in the artifact**; nothing in the book
 stores it.
 
+## FILL IDENTITY — RULED, and the composite alternative is measured dead (R-IV.397(b))
+
+**The remedy above said the uniqueness key "already exists in the artifact." That is true for
+Fidelity and false for Robinhood**, and the correction is now the rule of record:
+
+| broker | fill identity |
+|---|---|
+| **Fidelity** | the **confirmation reference + order number** (`26246-P2JS0Y` / `26246-FXX1M`) |
+| **Robinhood** | **(export file sha256, line number)** — unique by construction, honest about origin |
+
+The Robinhood export carries **no reference column at all**: nine columns, none of them a fill
+or order id.
+
+### Composite field keys are rejected — measured, not argued
+
+A composite of date + instrument + trans code + quantity + price + amount **collides on real
+fills**:
+
+```
+ rh-8.31.2026.csv    94 byte-identical repeated lines across 88 distinct fills
+ 3c8dbee9-…csv        8 byte-identical repeated lines
+                         — 2 identical VIX 10/21 legs on 09-11
+                         — 3 identical XLF 10/16 legs on 09-01 (×2 structures)
+```
+
+Those are **separate real fills**. A composite key rejects the second as a duplicate and loses
+it — turning a dedup control into an instance of the very defect this file registers, in the
+opposite direction.
+
+### And the export corpus already contains the duplication
+
+**`3b84f64e-…csv` is a COMPLETE SUBSET of `rh-8.31.2026.csv` — all 61 of its lines appear in
+both.** An import job that ingests both files without file-level dedup double-counts 61 fills.
+**The mechanism this defect registers is sitting latent in the artifacts themselves**, waiting
+for an importer that trusts its inputs. `(file sha256, line)` makes that impossible by
+construction: the same fill read from two files is two different identities, and the second
+resolves to the same position only through the lot's own content key.
+
+---
+
 ## STATUS
 
 Registration only. **id 409 was corrected under R-IV.312(c) and is now BROKER_VERIFIED at

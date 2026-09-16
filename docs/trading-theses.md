@@ -26,7 +26,11 @@
      R-IV.386(d) / TA (2026-09-15): D5 roster restamped from the September export — FIVE
      members, total $3,003.50, headroom $846.50. id 412 USO and id 365 XLE both EXITED
      2026-09-10 (+512.00 / +31.90) and leave the sleeve; COPX adds a second lot, id 431
-     (09-08, 4 @ 94.85). TA's line said seven members; the total and headroom were right. -->
+     (09-08, 4 @ 94.85). TA's line said seven members; the total and headroom were right.
+     TA-017 (2026-09-15): id 411 RETIRED with its outcome and lesson; the surviving Roth SOXS
+     x40 gets its own Active entry, bucket and invalidation PENDING principal, review 09-16
+     FOMC. id 409 stop_loss 43.20 -> NULL (TA-013's order, which never reached CC-POSITIONS).
+     target_1 49.00 and strategy_tag B2 on id 409 flagged stale, not changed. -->
 <!-- Owned by Nick. Olympus updates on committee passes. Cowork morning task reads this + live positions (Pandora MCP) + the Stable board. Created 2026-07-03. -->
 
 ## How this doc works
@@ -118,6 +122,83 @@ Fidelity still evidenced by confirmation rather than export).
 
 ## Active theses
 
+### SOXS ×40 · FIDELITY_ROTH — semis / equity-drawdown thesis · TA-017
+- **Bucket: PENDING principal.** Leveraged ETF; B2 rules do not fit a multi-week hold, and B1
+  is excluded for leveraged by standing rule. **The position is live and unchartered.**
+- Thesis: hot-CPI / hike / oil-shock equity drawdown, expressed through 3× inverse semis.
+- **Invalidation: PENDING principal.** No price level is live — id 409's 43.20 was TA-002's
+  Robinhood level and was NULLed at TA-017(3).
+- Review date: **2026-09-16 (FOMC).**
+- Status: **on — unchartered.**
+- Last Olympus read: 09-09/09-10 — instrument mismatch for a multi-week thesis, stated once.
+
+**The two lots, both BROKER_VERIFIED against Fidelity confirmations:**
+
+| id | bought | qty | price | basis |
+|---|---|---|---|---|
+| 409 | 09-03 + 09-04 | 20 | 51.5850 / 46.6601 → avg **49.1225** | 982.45 |
+| 430 | 09-08 | 20 | **43.4901** | 869.80 |
+| | | **40** | | **1,852.25** |
+
+At the 09-14 mark of **51.73** the pair carries **+$216.95** into FOMC eve.
+
+> **⚠ TWO STALE FIELDS ON id 409, flagged not changed.** `target_1` still reads **49.00** and
+> `strategy_tag` still reads **B2** — both are TA-002's, set for the Robinhood trade that
+> retired below. They are stale by exactly the reasoning that retired the 43.20 stop, but
+> neither was ordered changed. **A position whose bucket is PENDING should not be carrying a
+> bucket tag**; until it is re-chartered, `B2` on this row is a label the thesis contradicts.
+
+### [TEMPLATE — copy for each new thesis]
+- Bucket: B1 / B2
+- Thesis (one sentence):
+- Expression (ticker/structure):
+- Entry logic:
+- Invalidation (price/level/event):
+- Review date:
+- Theme (Stable universe):
+- Status: building / on / trimming
+- Last Olympus read (date + verdict):
+
+---
+
+## Watch / developing
+(Ideas not yet expressed — one line each, with the trigger that would activate them.)
+
+### QQQM core re-entry — single level, no order placed · R-IV.257(a)
+- **Trigger: QQQ-equivalent 681.** Approx **QQQM 280.3** — *derived, not ruled*: 681 × 0.4116,
+  the ratio from the verified 2026-09-04 pair QQQ 717.98 / QQQM 295.53. The ratio drifts;
+  re-derive at the pass rather than treating 280.3 as fixed.
+- **Replaces the three-tranche ladder, which is not merely cancelled but collapsed to its
+  lowest rung.** T2 at QQQ-equiv 697 is **SKIPPED** outright. 681 was T3's level and survives
+  as a **level, not a dated tranche** — the old 10-09 backstop is **NOT carried** unless the
+  principal says so.
+- **Size: strictly less than the prior $1,456.60 tranche.** Exact size TBD at the PIVOT pass.
+- **NO ORDER PLACED.** GTC-vs-alert mechanics decided at the pass, on the principal's
+  reasoning that *a level nobody watches is a rule that can't fire.*
+- Predecessor: id 401, closed 2026-09-04 at 295.53 for +21.05 — a discretionary exit and a
+  principal exception to D1 (regime-break-only), no regime-break call made.
+
+---
+
+## Retired theses
+(Date closed · thesis · outcome · one-line lesson.)
+
+### 2026-09-14 · id 411 SOXS ×7 ROBINHOOD — fade the semis pop (B2, R-IV.253(b))
+**Entry** 51.67 on 09-04 · **outcome:** CLOSED 09-14, **realized −4.76 gross** (7 × 50.99 =
+356.93 against basis 361.69), export-verified.
+
+**The trade did not end alone.** A second lot — **id 418, 7 @ 43.60 on 09-11, realized +51.73**
+— was bought while this one was underwater, and the 09-14 sale of 14 shares closed both FIFO.
+**Pair net +46.97.** The retirement is of id 411; the money was made by the lot that was never
+chartered.
+
+**Lesson: no rule in this trade fired.** The Wed 09-09 time stop was overridden — added to
+instead of exited. The 43.20 price stop was never reached. The exit was discretionary, three
+sessions later. **A B2 that outlives its time stop is an untagged position until it is
+re-chartered.**
+
+*Full working entry retained below as filed, for the record.*
+
 ### id 411 · SOXS — fade the semis pop · R-IV.253(b)
 - Bucket: **B2** (tactical, 1–3 day)
 - Thesis (one sentence): fade today's semis pop on weak volume.
@@ -178,37 +259,3 @@ Fidelity still evidenced by confirmation rather than export).
   confirmed: the entry went into a pop that continued, which fits the shape, but one day
   does not establish it and the volume leg is unassessed.
 
-### [TEMPLATE — copy for each new thesis]
-- Bucket: B1 / B2
-- Thesis (one sentence):
-- Expression (ticker/structure):
-- Entry logic:
-- Invalidation (price/level/event):
-- Review date:
-- Theme (Stable universe):
-- Status: building / on / trimming
-- Last Olympus read (date + verdict):
-
----
-
-## Watch / developing
-(Ideas not yet expressed — one line each, with the trigger that would activate them.)
-
-### QQQM core re-entry — single level, no order placed · R-IV.257(a)
-- **Trigger: QQQ-equivalent 681.** Approx **QQQM 280.3** — *derived, not ruled*: 681 × 0.4116,
-  the ratio from the verified 2026-09-04 pair QQQ 717.98 / QQQM 295.53. The ratio drifts;
-  re-derive at the pass rather than treating 280.3 as fixed.
-- **Replaces the three-tranche ladder, which is not merely cancelled but collapsed to its
-  lowest rung.** T2 at QQQ-equiv 697 is **SKIPPED** outright. 681 was T3's level and survives
-  as a **level, not a dated tranche** — the old 10-09 backstop is **NOT carried** unless the
-  principal says so.
-- **Size: strictly less than the prior $1,456.60 tranche.** Exact size TBD at the PIVOT pass.
-- **NO ORDER PLACED.** GTC-vs-alert mechanics decided at the pass, on the principal's
-  reasoning that *a level nobody watches is a rule that can't fire.*
-- Predecessor: id 401, closed 2026-09-04 at 295.53 for +21.05 — a discretionary exit and a
-  principal exception to D1 (regime-break-only), no regime-break call made.
-
----
-
-## Retired theses
-(Date closed · thesis · outcome · one-line lesson.)
