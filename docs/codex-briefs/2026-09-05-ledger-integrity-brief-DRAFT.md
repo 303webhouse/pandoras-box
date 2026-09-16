@@ -1,5 +1,7 @@
 # CC BRIEF — LEDGER INTEGRITY: one account vocabulary, guarded marks, honest vintage
 
+> **REVISION 4 — corrects REV3's `broker_ref`**: the Robinhood export carries no
+> reference column at all, so `broker_ref` is permanently NULL on that side.
 > **REVISION 3 — R-IV.405(d)** adds D9/D10/D11 and `broker_ref`; the done-definition
 > covered T1-T7 only and could be satisfied with none of the lots work existing.
 > **REVISION 2 — R-IV.403(c)** adds the thesis/lot binding (T6e). **REVISION 1 — R-IV.398(c).** POSITIONS' findings folded in: the fill-identity key,
@@ -524,8 +526,22 @@ beyond what the schema above already orders.**
 
 ### `broker_ref` — THE BROKER'S OWN REFERENCE, ON THE LOT (R-IV.395(b))
 
-**Every lot carries `broker_ref`:** the Fidelity confirmation number, or the Robinhood
-export reference, where the source document has one.
+**Every lot carries `broker_ref`:** the Fidelity confirmation reference and order number,
+where the source document has one.
+
+> **CORRECTION (measured, `LOTS_LEGS_DATA_HALF` 34b0a2ed (b)).** An earlier draft of this
+> section said "or the Robinhood export reference". **There is no such thing.** The Robinhood
+> export has nine columns — `Activity Date · Process Date · Settle Date · Instrument ·
+> Description · Trans Code · Quantity · Price · Amount` — and **no fill id, order id or
+> confirmation number anywhere in the artifact.**
+
+**So `broker_ref` is NULL for every Robinhood lot, permanently, and that is a property of the
+broker's export rather than a gap in our capture.** Measured: of 27 September rows, **6 carry
+a reference and all 6 are Fidelity; the 18 Robinhood rows carry 0.**
+
+**This is exactly why the ruled fallback is not a nicety.** `(export file sha256, line number)`
+is not a second-best identity on the Robinhood side — **it is the only identity available**,
+because the artifact supplies none of its own.
 
 **This is the fill-identity rule made into a COLUMN, not a second scheme.** The identity
 key ruled above is *(confirmation number)* falling back to *(export file sha256, line
@@ -535,8 +551,12 @@ and cited. **Without it the key exists only inside the importer**, and every lat
 
 **For September rows** the reference is captured with the lot, per R-IV.395(b).
 
-**For earlier rows it is `NULL`, and `NULL` here means "no export line exists to source
-one" — which is a DIFFERENT fact from "not yet looked up".** The census records which of
+**For earlier rows `NULL` must be partitioned, because it carries three different facts.**
+Measured on 347 pre-September rows with an entry date: **an export line exists for 274; 73
+have none.** Add the Robinhood population, for which no reference can ever exist. So `NULL`
+means *"the broker issues none"*, *"an export line exists but has not been sourced"*, or
+*"no export line covers this row"* — **and those have three different remedies, one of which
+is "never".** The census records which of
 the two applies per row; a lot whose provenance is `BROKER_VERIFIED` and whose `broker_ref`
 is `NULL` is a contradiction the census must resolve, not a gap to be tolerated.
 
@@ -732,7 +752,12 @@ before the legs exist would produce a well-structured one.**
   have replaced synthetics on at least the September rows. **The four NULL-price closed rows
   carry an export price or an explicit UNKNOWN lot, never 0.** Fill identity is the
   confirmation number, else `(export file sha256, line number)`; **no composite field key
-  exists anywhere in the import path.** Import dedupes at FILE level, and the criterion
+  exists anywhere in the import path** — and the criterion cites the measured collisions
+  rather than the principle: the **09-01 XLF export contains two byte-identical three-leg
+  fills on the same date**, and the **09-09 NVDA fills likewise**. A composite of
+  date+instrument+trans code+quantity+price+amount rejects the second of each as a duplicate
+  **when it is a real second fill**, so a dedupe that passes on this corpus without
+  special-casing them has silently destroyed position quantity. Import dedupes at FILE level, and the criterion
   names the hard case: **`3b84f64e` is a strict SUBSET of `rh-8.31`, and importing both must
   not double-count the intersection** — a check that only compares whole files for equality
   passes this test while failing the case, so the demonstration is the containment, not two
