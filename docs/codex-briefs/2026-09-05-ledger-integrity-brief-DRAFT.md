@@ -1,5 +1,14 @@
 # CC BRIEF — LEDGER INTEGRITY: one account vocabulary, guarded marks, honest vintage
 
+> **REVISION 1 — R-IV.398(c).** POSITIONS' findings folded in: the fill-identity key,
+> file-level import dedupe, UNKNOWN lots, and the cost-basis ordering constraint.
+> **Base gate `ab0b929a`, LF-normalised, 33,681 B.**
+>
+> **T1/T2/T4 ARE NO LONGER PENDING — they deployed 2026-09-15 as `e73fb16`** (mark guard,
+> `config/accounts.py`, scope-excluded aggregates), reported DEPLOYED / NOT-EXERCISED.
+> The task text below is kept as the specification they were built to; **read it as the
+> record of what was ordered, not as outstanding work.**
+
 **Authority** R-IV.268(d), slotted 1b; **re-sequenced to position 3** by R-IV.273(d)
 (grader P1/P2 → sinks + backfill → ledger integrity). **Drafts on paper in parallel**, per
 the same ruling.
@@ -462,6 +471,50 @@ drift from lots it is computed from on read.
 **The ledger build creates the table and the derivation. The positions-screen brief consumes
 it** for scale-in, edit, and multi-leg. **It is id 409's whole problem in schema form.**
 
+### FILL IDENTITY — RULED (R-IV.398(c)). Composite field keys are REJECTED.
+
+**The key is, in order:**
+
+```
+1. the Fidelity CONFIRMATION NUMBER, where the export carries one
+2. otherwise (export file sha256, line number)
+```
+
+**COMPOSITE FIELD KEYS ARE REJECTED** — no `(ticker, date, qty, price)` tuple, however
+many columns are added to it.
+
+**Why, stated so it is not re-proposed as an optimisation.** A field tuple is a
+DESCRIPTION of a fill, and two genuinely distinct fills can share every described
+attribute: the same ticker, the same day, the same size, the same price, because a broker
+routed one order as two. **A key that cannot separate them will silently merge them**, and
+the merge is invisible — the position is simply smaller than it was. **`DEF-INGEST-DUPLICATE-LOT`
+is the same family from the other side**, where one fill was counted twice; a field tuple
+fixes that direction and breaks this one.
+
+**The confirmation number is the BROKER'S OWN identity for the fill** — it is the only
+value in the export that the broker guarantees unique, and it is therefore the only one
+that can be trusted to separate fills we cannot otherwise tell apart.
+
+**And the fallback is deliberately not a field tuple either.** `(export file sha256, line
+number)` identifies a fill by WHERE IT WAS WRITTEN rather than by what it says, so two
+identical-looking lines on two lines of one file remain two fills. **It is weaker than a
+confirmation number — a re-exported file gives the same fill a new identity — which is
+exactly why file-level dedupe below is a REQUIREMENT and not a companion nicety.**
+
+### THE FOUR NULL-PRICE ROWS ARE UNKNOWN LOTS, NOT ZERO AND NOT ABSENT
+
+**F1's backfill takes them as EXPLICIT UNKNOWN LOTS:** a lot row exists, its quantity is
+real, and its price is `NULL` with `provenance = UNKNOWN`.
+
+**Not dropped**, because the shares exist and a position whose lots do not sum to its
+quantity is a broken aggregate. **Not zero**, because a zero price is a claim that the
+shares were free, and it would flow straight into a derived cost basis and a derived
+`max_loss` as a number nobody can distinguish from a measurement.
+
+> **A lot with an unknown price must make every figure derived from it unknown too** —
+> which is only possible if the unknown is REPRESENTABLE. That is the whole reason it is a
+> row with a NULL rather than an omission.
+
 **EVIDENCE — three live instances (R-IV.310, closing note): ids 409, 332, 367.**
 **Three rows, three lot events, zero columns.** The count is the argument: this is not one
 row's accident but the normal outcome of scaling any position, and **nothing needs building
@@ -497,6 +550,29 @@ nothing.
 column whose second value is unreachable is worse than no column, because it *looks* like
 evidence.
 
+#### IMPORT MUST DEDUPE AT FILE LEVEL — RULED (R-IV.398(c))
+
+**Measured: `3b84f64e` ⊂ `rh-8.31`.** One export file's content is a strict subset of
+another's. **Re-importing both, with only row-level dedupe, double-counts every fill in the
+intersection.**
+
+**File-level dedupe means the importer records the sha256 of every file it has consumed and
+refuses a file it has already seen** — before a single row is read.
+
+**Why row-level dedupe alone cannot do this job:**
+
+- **the weaker fill identity is file-scoped.** `(export file sha256, line number)` gives the
+  SAME fill a DIFFERENT identity in a re-export, so row-level dedupe cannot recognise it;
+- **and the overlap is not a duplicate file, it is a CONTAINED one.** `rh-8.31` is a
+  superset, so its sha differs and nothing at row level flags the shared region. **A
+  containment is invisible to any check that compares whole files for equality** —
+  which is why the register is of CONSUMED files, and a superset arriving later must be
+  reconciled against what its subset already delivered, not merely rejected as new.
+
+**Stated as a requirement and not a safeguard:** without it the lots table is populated by
+a process whose output depends on which files were imported in which order. **That is not a
+ledger, it is a transcript of an import history.**
+
 #### The same requirement answers the balance-vintage half
 
 **T5's 88-day hand-typed balance and T6e's missing lots have ONE cause between them: no
@@ -526,6 +602,22 @@ carrying the name alone. **Re-check on pickup: a citation that resolves is the w
 **No UI code until a mockup is approved.** Last in sequence deliberately: a tab built over an
 unreconciled ledger renders wrong numbers attractively, and a number is more believed for
 being well presented.
+
+### ORDERING CONSTRAINT — `DEF-COST-BASIS-NOT-RESCALED` RESOLVES AFTER THE LEGS MODEL (R-IV.398(c))
+
+**Its ten rows are NOT touched before the legs model exists. Never before.**
+
+**Because the rescale is only well-defined once a position's legs are.** A multi-leg
+position's cost basis is a function of its legs; rescaling it while the hub still holds a
+single blended row means choosing a number that the legs model may then contradict — **and
+the second correction is harder than the first, because by then the wrong value has been
+derived from.**
+
+**This is the same ordering argument T1 made and is the reason T1 went first.** Guarding the
+mark before fixing the vocabulary avoided a well-named wrong answer; **fixing the basis
+before the legs exist would produce a well-structured one.**
+
+**Sequence of record:** legs model → then the ten rows → never the reverse.
 
 ## Done definition
 
