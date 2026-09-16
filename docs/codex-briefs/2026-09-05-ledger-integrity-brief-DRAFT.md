@@ -1,6 +1,6 @@
 # CC BRIEF — LEDGER INTEGRITY: one account vocabulary, guarded marks, honest vintage
 
-> **REVISION 1 — R-IV.398(c).** POSITIONS' findings folded in: the fill-identity key,
+> **REVISION 2 — R-IV.403(c)** adds the thesis/lot binding (T6e). **REVISION 1 — R-IV.398(c).** POSITIONS' findings folded in: the fill-identity key,
 > file-level import dedupe, UNKNOWN lots, and the cost-basis ordering constraint.
 > **Base gate `ab0b929a`, LF-normalised, 33,681 B.**
 >
@@ -519,6 +519,69 @@ shares were free, and it would flow straight into a derived cost basis and a der
 **Three rows, three lot events, zero columns.** The count is the argument: this is not one
 row's accident but the normal outcome of scaling any position, and **nothing needs building
 beyond what the schema above already orders.**
+
+### A LOT IS VISIBLE TO THE THESIS THAT OWNS IT — RULED (R-IV.403(c))
+
+**The requirement, in three parts:**
+
+1. **A thesis binds to `position_id`** — not to a ticker, not to a lot.
+2. **A thesis aggregates over ALL lots of its position**, so an add cannot be invisible to
+   it.
+3. **An add with no owning thesis is SURFACED, not silent.**
+
+#### The evidence: ids 411 and 418, from `trading-theses` at gate `e4a1858a`
+
+The first entry in that document's Retired section is **id 411, SOXS ×7 ROBINHOOD**, closed
+**−4.76**. Its own closing note records a second holding — **id 418, 7 @ 43.60 on 09-11,
+realized +51.73** — which the document itself calls *a lot*, and which **was never written
+down as a thesis**. **Pair net +46.97.**
+
+> **The retirement is of the thesis; the money was made by the holding outside it.**
+
+**The register and the money decoupled in BOTH directions at once**: the tracked idea lost,
+and the untracked one paid. That is worse than either failure alone, because the thesis
+document read as a complete account of the position while being an account of its losing
+half. The same entry records that **no rule in the trade fired** and that the Wed 09-09 time
+stop was overridden — so the surface that should have prompted a review was also the surface
+that had gone quiet.
+
+#### Why `position_id` is the binding, argued rather than asserted
+
+**Not to a lot.** A thesis bound to a lot leaves every subsequent add unowned *by
+construction* — the gap would be guaranteed rather than detected, and part 3 would fire on
+every normal add until it was ignored.
+
+**Not to a ticker.** The book already holds distinct positions in one ticker — SOXS 411 and
+418 here, XLF 300/301/420 under `DEF-STRUCTURE-STORED-TWO-WAYS`. A ticker binding merges
+them, and P&L lands against an idea that did not produce it. **A wrong attribution is worse
+than a missing one, because it is spendable as a conclusion.**
+
+**`position_id` is the granularity at which a thesis is actually formed** — it is the level
+a human reasons at when they decide to hold something.
+
+#### An open question this requirement HANDS to the structure census, and does not answer
+
+**`trading-theses` calls id 418 a LOT. The hub holds it under its own id.** Whether that id
+is a separate position row or is already modelled as an add is **not established here and is
+not assumed** — it is exactly what R-IV.395(c)'s structure census and migration map must
+record per row.
+
+**The requirement is written to survive either answer.** If 418 is an add, part 2 makes it
+visible to 411's thesis. If it is genuinely a separate position, part 3 surfaces it as a
+position holding money with no thesis attached. **What is ruled out is the third case, which
+is what actually happened: it was neither aggregated nor surfaced, and the loss was filed as
+the whole story.**
+
+#### What "surfaced" means, so it is not built as a blocker
+
+**It does not reject the write.** An add with no thesis is legitimate — theses are written
+by a human, sometimes after the fact. **It appears on a review surface as an unowned
+position or unowned add, and stays there until a thesis claims it or it is closed.**
+
+A gate that blocked the write would be routed around within a week; a count that nobody
+renders is the silence this whole register keeps filing. **The test is Law 3's: a surface
+showing "0 unowned adds" must be shown, with a probe, to be capable of showing a non-zero
+one.**
 
 ### T6f — IMPORT CADENCE (`DEF-EXPORT-COVERAGE-GAP`) — A REQUIREMENT
 
