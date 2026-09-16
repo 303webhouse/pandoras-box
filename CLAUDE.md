@@ -122,11 +122,31 @@ All committee members (TORO, URSA, Sector Expert, Technical Analyst, PYTHIA) mus
 1. **Pull a real UTC timestamp from a tool first.** Run `bash_tool` with `date -u`, query a recent git log, or read a Railway deployment timestamp. Do not infer or guess the time.
 
 2. **Convert UTC to U.S. Mountain Time before communicating it to Nick.** Mountain Time is the only timezone Nick thinks in. Always show MT alongside (or instead of) UTC when speaking to him about *when* something happened or is happening.
-   - DST awareness: MDT (UTC−6) from mid-March to early November; MST (UTC−7) otherwise. If unsure which is in effect on the current date, run `bash_tool` with `TZ='America/Denver' date` to get the correct local conversion.
+   - DST awareness: MDT (UTC−6) from mid-March to early November; MST (UTC−7) otherwise. If unsure which is in effect on the current date, convert with Python `zoneinfo`, which reads Windows' own tz database:
+     ```
+     python -c "from datetime import datetime,timezone
+     from zoneinfo import ZoneInfo
+     u=datetime.now(timezone.utc)
+     print(u.astimezone(ZoneInfo('America/Denver')).strftime('%a %Y-%m-%d %H:%M %Z'))"
+     ```
    - Format: state both for technical traceability — e.g. "06:31 UTC (12:31 AM MDT)" or "deploy completed at 23:14 UTC (5:14 PM MST)".
 
 3. **Do not volunteer time-of-day commentary** ("it's late", "you've been at this all day") unless step 1 produced a real timestamp. A skipped sleep-related quip is better than a fabricated one.
 
 4. **In purely technical context** (SQL window calculations, cron schedules, log filtering), UTC alone is fine — no need to convert when Mountain Time isn't relevant to the operation.
 
+5. **`TZ='<zone>' date` IS PROHIBITED** (R-IV.402(a)). This machine's Git Bash ships no
+   tzdata, so `TZ=` is **silently ignored** — every zone returns the same UTC clock
+   labelled `GMT`. Measured 2026-09-16 02:28 UTC: `America/Denver`, `America/New_York`,
+   `Asia/Tokyo` and `Australia/Sydney` — sixteen hours of real offset between them — all
+   returned `"Wed 2026-09-16 02:28 GMT"`. True Denver time was **Tue 20:28 MDT**: wrong by
+   six hours and a day boundary, with no error raised. **A `GMT` label on a request for a
+   US zone is proof the conversion did not happen.**
+
 This rule exists because Claude has been wrong about local time multiple times by inferring rather than measuring. The fix is the two-step flow: pull real UTC → convert to MT → state both.
+
+**And the instrument itself must be checked, not just obeyed.** The prohibited command was
+prescribed *by this rule* for months; following it faithfully reintroduced the exact error
+the rule exists to prevent, because it answers plausibly instead of failing. Filed as a
+verification-laws instance at
+`docs/conventions/verification-laws-instance-prescribed-instrument.md`.
