@@ -15,7 +15,12 @@
     /* P0 4d — semantic color tokens (one up/down/warn everywhere). --down is
        vermilion #ff5c33: pairs with the teal/lime scheme and passes ~4.8:1 text
        contrast on #1e293b cards, where the old #e5370e failed (~3.4:1). */
-    --up: #7CFF6B;
+    /* R-IV.411(b) — GAIN COLOUR SETTLED BY THE PRINCIPAL: #00e676, the de-facto gain
+       colour (69 literal sites + every var(--accent-green, #00e676) fallback). It differs
+       from the old --up (#7CFF6B), so the principal's colour wins and --up is ALIASED
+       to it. --accent-lime keeps #7CFF6B: it is an accent, not the gain semantic. */
+    --up-bright: #00e676;
+    --up: var(--up-bright);
     --down: #ff5c33;
     --warn: #facc15;
     --neutral-text: var(--text-secondary);
@@ -25,6 +30,21 @@
     --pnl-negative: var(--down);
     --accent-red: var(--down);
     --bearish-color: var(--down);
+    /* R-IV.410(b) — the GAIN half P0 4d never did. Without these, every bullish rule
+       rendered wrong while its bearish twin rendered (styles.css:5103/5126/5188,
+       8519). --accent-green: all 12 existing fallbacks are already #00e676, so
+       defining it changes nothing at those sites and repairs the 13th. */
+    --bullish-color: var(--up);
+    --accent-green: var(--up);
+    /* The other broken references are NOT gain and are fixed to their OWN meaning,
+       not pointed at green. --accent-cyan takes the value its own rule's glow
+       already uses (rgba(0, 229, 255) at :7711); --text-muted maps to the
+       secondary text role, as --neutral-text does. */
+    --accent-cyan: #00e5ff;
+    --text-muted: var(--text-secondary);
+    /* R-IV.410(b) — JetBrains Mono was declared 27x and loaded nowhere. v2's stack:
+       system mono first, the named face only if the viewer has it installed. */
+    --mono: ui-monospace, "SFMono-Regular", "JetBrains Mono", Menlo, Consolas, monospace;
 }
 
 * {
@@ -819,7 +839,7 @@ body {
 }
 
 .headline-ticker {
-    font-family: 'JetBrains Mono', monospace;
+    font-family: var(--mono);
     font-size: 8px;
     padding: 0 3px;
     border-radius: 2px;
@@ -854,14 +874,14 @@ body {
 }
 .portfolio-pnl-side {
     font-size: 0.78rem;
-    font-family: 'JetBrains Mono', monospace;
+    font-family: var(--mono);
     min-width: 80px;
     white-space: nowrap;
 }
 .portfolio-pnl-side:first-child { text-align: right; }
 .portfolio-pnl-side:last-child { text-align: left; }
 .portfolio-combined-balance {
-    font-family: 'JetBrains Mono', monospace;
+    font-family: var(--mono);
     font-size: 3.2rem;
     font-weight: 700;
     color: var(--accent-lime);
@@ -874,7 +894,7 @@ body {
 .portfolio-monthly-pnl {
     text-align: center;
     font-size: 0.78rem;
-    font-family: 'JetBrains Mono', monospace;
+    font-family: var(--mono);
     margin-bottom: 14px;
     min-height: 1.2em;
 }
@@ -985,7 +1005,7 @@ body {
 }
 
 .portfolio-account-balance {
-    font-family: 'JetBrains Mono', monospace;
+    font-family: var(--mono);
     font-size: 1.4rem;
     font-weight: 600;
     color: var(--text-primary);
@@ -1135,7 +1155,7 @@ body {
 }
 
 .portfolio-stat .stat-value {
-    font-family: 'JetBrains Mono', monospace;
+    font-family: var(--mono);
     font-size: 0.85rem;
     font-weight: 600;
     color: var(--text-primary);
@@ -3227,7 +3247,7 @@ body.override-active-bearish .override-toggle[data-active="true"] {
     padding: 6px 8px;
     background: rgba(20, 184, 166, 0.06);
     border-radius: 4px;
-    font-family: 'JetBrains Mono', monospace;
+    font-family: var(--mono);
     font-size: 11px;
     display: flex;
     justify-content: space-between;
@@ -3402,7 +3422,7 @@ body.override-active-bearish .override-toggle[data-active="true"] {
 }
 
 .position-strikes {
-    font-family: 'JetBrains Mono', monospace;
+    font-family: var(--mono);
     font-size: 11px;
     color: var(--text-secondary);
     margin-bottom: 6px;
@@ -3481,7 +3501,7 @@ body.override-active-bearish .override-toggle[data-active="true"] {
     border-radius: 6px;
     padding: 8px 10px;
     color: var(--text-primary);
-    font-family: 'JetBrains Mono', monospace;
+    font-family: var(--mono);
     font-size: 13px;
 }
 
@@ -3500,7 +3520,7 @@ body.override-active-bearish .override-toggle[data-active="true"] {
 }
 
 .risk-preview-line {
-    font-family: 'JetBrains Mono', monospace;
+    font-family: var(--mono);
     font-size: 12px;
     color: var(--text-primary);
     padding: 2px 0;
@@ -4551,7 +4571,7 @@ body.override-active-bearish .override-toggle[data-active="true"] {
     font-size: 0.85rem;
     color: var(--text-secondary);
     padding: 8px 0 4px;
-    font-family: 'JetBrains Mono', monospace;
+    font-family: var(--mono);
 }
 
 .edit-add-section {
@@ -4579,7 +4599,7 @@ body.override-active-bearish .override-toggle[data-active="true"] {
 }
 
 .edit-add-preview {
-    font-family: 'JetBrains Mono', monospace;
+    font-family: var(--mono);
     font-size: 0.8rem;
     color: var(--accent-lime);
     margin-top: 6px;
@@ -7469,7 +7489,7 @@ body[data-mode="analytics"] .analytics-shell {
 }
 .strc-banner-icon { font-size: 16px; }
 .strc-banner-text { flex: 1; }
-.strc-banner-price { font-family: 'JetBrains Mono', monospace; font-size: 14px; font-weight: 700; }
+.strc-banner-price { font-family: var(--mono); font-size: 14px; font-weight: 700; }
 @keyframes strc-pulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.8; }
@@ -9012,7 +9032,7 @@ body[data-mode="analytics"] .analytics-shell {
 }
 
 .metric-value.positive { color: var(--accent-lime); }
-.metric-value.negative { color: var(--accent-orange); }
+.metric-value.negative { color: var(--down); }
 
 .position-thesis {
     font-style: italic;
@@ -9303,7 +9323,7 @@ body[data-mode="analytics"] .analytics-shell {
     align-items: center;
     gap: 6px;
     font-size: 12px;
-    font-family: 'JetBrains Mono', 'SF Mono', monospace;
+    font-family: var(--mono);
     color: #90a4ae;
     padding: 4px 10px;
     background: rgba(255, 255, 255, 0.03);
@@ -9396,7 +9416,7 @@ body[data-mode="analytics"] .analytics-shell {
 
 .sector-etf {
     font-size: 11px;
-    font-family: 'JetBrains Mono', 'SF Mono', monospace;
+    font-family: var(--mono);
     padding: 2px 6px;
     border-radius: 3px;
     background: rgba(255, 255, 255, 0.04);
@@ -9425,7 +9445,7 @@ body[data-mode="analytics"] .analytics-shell {
 .sector-rank {
     font-size: 10px;
     color: #546e7a;
-    font-family: 'JetBrains Mono', 'SF Mono', monospace;
+    font-family: var(--mono);
 }
 
 .ticker-header-row {
@@ -9471,13 +9491,13 @@ body[data-mode="analytics"] .analytics-shell {
 .ticker-symbol {
     font-weight: 700;
     color: #e0e8f0;
-    font-family: 'JetBrains Mono', 'SF Mono', monospace;
+    font-family: var(--mono);
     font-size: 12px;
 }
 
 .col-price {
     text-align: right;
-    font-family: 'JetBrains Mono', 'SF Mono', monospace;
+    font-family: var(--mono);
     color: #90a4ae;
     font-size: 11px;
 }
@@ -9485,7 +9505,7 @@ body[data-mode="analytics"] .analytics-shell {
 .col-1d,
 .col-1w {
     text-align: right;
-    font-family: 'JetBrains Mono', 'SF Mono', monospace;
+    font-family: var(--mono);
     font-weight: 600;
     font-size: 11px;
 }
@@ -9496,7 +9516,7 @@ body[data-mode="analytics"] .analytics-shell {
 
 .col-signals {
     text-align: center;
-    font-family: 'JetBrains Mono', 'SF Mono', monospace;
+    font-family: var(--mono);
     font-size: 12px;
 }
 
@@ -9770,7 +9790,7 @@ body[data-mode="analytics"] .analytics-shell {
 .ticker-symbol-v3 {
     font-weight: 700;
     color: #e0e8f0;
-    font-family: 'JetBrains Mono', 'SF Mono', monospace;
+    font-family: var(--mono);
 }
 
 .ticker-sector-v3 {
@@ -9785,7 +9805,7 @@ body[data-mode="analytics"] .analytics-shell {
 .ticker-change-v3,
 .ticker-rvol-v3,
 .ticker-signals-v3 {
-    font-family: 'JetBrains Mono', 'SF Mono', monospace;
+    font-family: var(--mono);
     font-size: 11px;
     text-align: right;
 }
@@ -10956,7 +10976,7 @@ body[data-mode="analytics"] .analytics-shell {
 }
 
 .balance-value {
-    font-family: 'JetBrains Mono', monospace;
+    font-family: var(--mono);
     font-variant-numeric: tabular-nums;
 }
 
@@ -11010,7 +11030,7 @@ body[data-mode="analytics"] .analytics-shell {
 .portfolio-positions-table td {
     padding: 7px 8px;
     border-bottom: 1px solid rgba(51, 65, 85, 0.4);
-    font-family: 'JetBrains Mono', monospace;
+    font-family: var(--mono);
     font-size: 0.78rem;
 }
 
@@ -11022,7 +11042,7 @@ body[data-mode="analytics"] .analytics-shell {
     padding: 2px 8px;
     border-radius: 10px;
     font-size: 0.7rem;
-    font-family: 'JetBrains Mono', monospace;
+    font-family: var(--mono);
     color: var(--text-secondary);
 }
 
@@ -11611,7 +11631,7 @@ body[data-mode="analytics"] .analytics-shell {
 }
 .hermes-confidence {
     font-size: 11px;
-    font-family: 'IBM Plex Mono', monospace;
+    font-family: var(--mono);
 }
 .hermes-analysis-body {
     margin: 6px 0;
@@ -11678,7 +11698,7 @@ body[data-mode="analytics"] .analytics-shell {
     border-radius: 6px;
     padding: 12px 14px;
     margin-bottom: 10px;
-    font-family: 'IBM Plex Mono', monospace;
+    font-family: var(--mono);
     font-size: 12px;
     background: rgba(0,0,0,0.4);
     overflow: visible;
@@ -13718,7 +13738,7 @@ body[data-mode="analytics"] .analytics-shell {
     background: rgba(255, 255, 255, 0.02);
     color: var(--text-primary);
     cursor: pointer;
-    font-family: 'JetBrains Mono', monospace;
+    font-family: var(--mono);
     font-variant-numeric: tabular-nums;
 }
 .focus-chip:hover { border-color: var(--accent-teal); }
@@ -13740,7 +13760,7 @@ body[data-mode="analytics"] .analytics-shell {
 /* === Heatmap freshness chip (P0 Task 5) — 3-state fresh/stale/unknown === */
 .heatmap-staleness-chip {
     font-size: 10px;
-    font-family: 'JetBrains Mono', monospace;
+    font-family: var(--mono);
     letter-spacing: 0.3px;
     white-space: nowrap;
 }
