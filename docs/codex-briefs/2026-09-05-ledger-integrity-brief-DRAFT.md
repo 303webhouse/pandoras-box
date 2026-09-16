@@ -1,5 +1,7 @@
 # CC BRIEF — LEDGER INTEGRITY: one account vocabulary, guarded marks, honest vintage
 
+> **REVISION 3 — R-IV.405(d)** adds D9/D10/D11 and `broker_ref`; the done-definition
+> covered T1-T7 only and could be satisfied with none of the lots work existing.
 > **REVISION 2 — R-IV.403(c)** adds the thesis/lot binding (T6e). **REVISION 1 — R-IV.398(c).** POSITIONS' findings folded in: the fill-identity key,
 > file-level import dedupe, UNKNOWN lots, and the cost-basis ordering constraint.
 > **Base gate `ab0b929a`, LF-normalised, 33,681 B.**
@@ -520,6 +522,27 @@ shares were free, and it would flow straight into a derived cost basis and a der
 row's accident but the normal outcome of scaling any position, and **nothing needs building
 beyond what the schema above already orders.**
 
+### `broker_ref` — THE BROKER'S OWN REFERENCE, ON THE LOT (R-IV.395(b))
+
+**Every lot carries `broker_ref`:** the Fidelity confirmation number, or the Robinhood
+export reference, where the source document has one.
+
+**This is the fill-identity rule made into a COLUMN, not a second scheme.** The identity
+key ruled above is *(confirmation number)* falling back to *(export file sha256, line
+number)*; `broker_ref` is where the first of those is written down so it can be read back
+and cited. **Without it the key exists only inside the importer**, and every later question
+— *"which export line is this lot?"* — is answered by re-deriving rather than by reading.
+
+**For September rows** the reference is captured with the lot, per R-IV.395(b).
+
+**For earlier rows it is `NULL`, and `NULL` here means "no export line exists to source
+one" — which is a DIFFERENT fact from "not yet looked up".** The census records which of
+the two applies per row; a lot whose provenance is `BROKER_VERIFIED` and whose `broker_ref`
+is `NULL` is a contradiction the census must resolve, not a gap to be tolerated.
+
+> **`broker_ref` is what makes `BROKER_VERIFIED` falsifiable.** A provenance stamp with
+> nothing to check it against is an assertion about an assertion.
+
 ### A LOT IS VISIBLE TO THE THESIS THAT OWNS IT — RULED (R-IV.403(c))
 
 **The requirement, in three parts:**
@@ -703,6 +726,29 @@ before the legs exist would produce a well-structured one.**
   BROKER_VERIFIED, max_loss equals qty × entry.**
 - **D8** — IB's 90 rows **retired and still present.** A count proving they exist is part of
   this criterion.
+- **D9 — LOTS AND FILLS.** Every position has **≥1 lot** and **Σ lot qty == row qty**,
+  demonstrated on live rows and **not by construction** — the synthetic backfill satisfies
+  both invariants trivially (R-IV.397(a)), so the criterion is met only once real fills
+  have replaced synthetics on at least the September rows. **The four NULL-price closed rows
+  carry an export price or an explicit UNKNOWN lot, never 0.** Fill identity is the
+  confirmation number, else `(export file sha256, line number)`; **no composite field key
+  exists anywhere in the import path.** Import dedupes at FILE level, and the criterion
+  names the hard case: **`3b84f64e` is a strict SUBSET of `rh-8.31`, and importing both must
+  not double-count the intersection** — a check that only compares whole files for equality
+  passes this test while failing the case, so the demonstration is the containment, not two
+  identical files.
+- **D10 — THE THESIS SEES ITS LOTS.** A thesis binds to `position_id` and its figures
+  aggregate over **all** lots of that position; an add with no owning thesis is **surfaced**
+  on a review surface, not silent. **Demonstrated by probe, per Law 3 (R-IV.403(a)):** a
+  surface reading "0 unowned adds" must be shown capable of reading non-zero — add an
+  unowned lot, see the count move, remove it, see it move back. **A zero that has never been
+  shown to be able to be non-zero is not evidence**, and this criterion is the one most
+  likely to be satisfied by a display that is simply dark.
+- **D11 — IMPORT CADENCE HAS A HEARTBEAT.** The import runs as a job and **writes to
+  `job_runs` through the API on every run, including failures** (R-IV.391(b)). The criterion
+  is the FAILURE path, not the success path: **kill the source and observe the run recorded
+  as failed** — a cadence whose only evidence is fresh data cannot be distinguished from a
+  cadence that has stopped while the data happens to still look recent (conventions #12).
 - **D-final — ACCEPTANCE: the Trade Analysis lane confirms hub against broker, per
   position.** Until this passes, R-IV.268(d)'s sizing restriction stands.
 
