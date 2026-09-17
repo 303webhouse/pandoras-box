@@ -12,6 +12,7 @@ import json
 import time
 
 from api.unified_positions import _adjust_account_cash, CREDIT_STRUCTURES
+from models.accounts import canonical_account  # R-IV.445(a): one vocabulary
 from database.redis_client import get_signal, delete_signal, cache_signal, get_redis_client
 from database.postgres_client import (
     update_signal_action,
@@ -211,7 +212,9 @@ async def accept_signal(signal_id: str, request: AcceptSignalRequest):
         now = datetime.now(timezone.utc)
         ticker = (signal_data.get('ticker') or '').upper()
         position_id = f"POS_{ticker or 'UNK'}_{now.strftime('%Y%m%d_%H%M%S')}"
-        account = (request.account or "ROBINHOOD").upper()
+        # R-IV.445(a): the vocabulary is the canonical module's, on every write path. An
+        # uppercased free string is what let a retired alias keep being written.
+        account = canonical_account(request.account or "ROBINHOOD")
         direction = signal_data.get('direction', 'LONG')
         cost_basis = round(request.actual_entry_price * request.quantity, 2)
 
@@ -416,7 +419,8 @@ async def accept_signal_as_options(signal_id: str, request: AcceptSignalAsOption
                 request.max_loss, request.max_profit,
                 signal_data.get("stop_loss"), signal_data.get("target_1"),
                 expiry, dte, long_strike, short_strike,
-                "SIGNAL", signal_id, (request.account or "ROBINHOOD").upper(), backtest_notes
+                "SIGNAL", signal_id, canonical_account(request.account or "ROBINHOOD"),
+                backtest_notes
             )
 
         # Auto-adjust cash: deduct cost for debit, add premium for credit
@@ -424,7 +428,8 @@ async def accept_signal_as_options(signal_id: str, request: AcceptSignalAsOption
             s = (request.strategy_type or "").lower()
             cash_delta = cost_basis if s in CREDIT_STRUCTURES else -cost_basis
             try:
-                await _adjust_account_cash(pool, (request.account or "ROBINHOOD").upper(), cash_delta)
+                await _adjust_account_cash(
+                    pool, canonical_account(request.account or "ROBINHOOD"), cash_delta)
             except Exception as e:
                 logger.warning("Cash adjustment failed on signal accept: %s", e)
 
