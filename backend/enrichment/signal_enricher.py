@@ -256,8 +256,8 @@ async def _fetch_snapshot(ticker: str) -> Optional[Dict[str, Any]]:
     # UW answered with nothing. They have different causes and clear differently, so a surface
     # that merges them cannot be acted on.
     from utils.vendor_substitution import record_substitution
-    from integrations.uw_governor import is_unavailable
-    reason = (f"uw snapshot not attempted: governor block ({snap.reason})"
+    from integrations.uw_governor import describe_block, is_unavailable
+    reason = (f"uw snapshot {describe_block(snap)}"
               if is_unavailable(snap) else "uw snapshot unavailable")
     record_substitution("enricher.snapshot", "uw", "yfinance", reason, ticker)
     try:

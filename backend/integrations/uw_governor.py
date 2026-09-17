@@ -87,6 +87,22 @@ def is_unavailable(obj) -> bool:
     return isinstance(obj, UWUnavailable)
 
 
+# Reasons that mean UW ANSWERED. Everything else on the sentinel means the call never left
+# this process. The distinction is the whole value of the sentinel to a consumer announcing a
+# substitution: "they refused us" and "we never asked" have different causes, different
+# remedies, and different owners.
+VENDOR_ANSWERED = frozenset({RATE_LIMITED})
+
+
+def describe_block(sentinel) -> str:
+    """A phrase naming WHICH negative this was, for a substitution announcement."""
+    if not is_unavailable(sentinel):
+        return "no usable payload"
+    if sentinel.reason in VENDOR_ANSWERED:
+        return f"uw refused the call ({sentinel.reason})"
+    return f"not attempted: governor block ({sentinel.reason})"
+
+
 # ── Per-caller daily quota table ─────────────────────────────────────
 # (quota, tier). Sum held under DAILY_BUDGET - QUOTA_SAFETY_BUFFER. These are
 # STARTING VALUES to tune against the first post-reset session's telemetry
@@ -312,11 +328,25 @@ def _reading_predates_reset(at_iso, now=None) -> bool:
 #
 # So age is a gate condition in its own right: past ACCOUNT_READING_MAX_AGE_S the account is
 # UNMEASURED NOW, whatever it said then, and an unmeasured account opens -- the same posture
-# every other unknown in this module takes. Opening lets a call through, and that call's
-# response carries the header, so the gate is self-CLEARING instead of self-sustaining. If the
-# account really is exhausted the fresh reading (a 429 carries the header too) sheds again
-# immediately, on evidence rather than on memory.
+# every other unknown in this module takes. Opening lets a call through, and a 200's response
+# carries the header, so the gate is self-CLEARING instead of self-sustaining.
+#
+# ── CORRECTION, MEASURED AGAINST THE VENDOR 2026-09-17 ──────────────────────────
+# That paragraph used to end: "if the account really is exhausted the fresh reading (a 429
+# carries the header too) sheds again immediately." The parenthesis was FALSE, and it was taken
+# from a module comment rather than from UW. A live 429 carries `x-request-id` and nothing else
+# -- no counter, no limit. An exhausted account therefore cannot produce a reading at all, and
+# the design as shipped opens, calls, is refused, and learns nothing from the refusal.
+#
+# The refusal is still evidence; it is simply not numeric. A 429 is now stored with its
+# timestamp, and for RATE_LIMIT_BACKOFF_S afterwards the two non-interactive tiers shed on THAT
+# -- a measured refusal rather than a remembered percentage. FOREGROUND is never shed on it,
+# both because it is what a person is waiting on and because it keeps one path open through
+# which a 200, and so a real reading, can still arrive. The window is short and self-expiring:
+# evidence that suppresses its own renewal indefinitely is the latch this work exists to remove.
 ACCOUNT_READING_MAX_AGE_S = 1800        # 30 minutes
+RATE_LIMIT_BACKOFF_S = 600              # 10 minutes after a measured refusal
+RATE_LIMIT_SHED_TIERS = ("STANDARD", "BACKGROUND")
 
 
 def _reading_age_s(at_iso, now=None):
@@ -347,6 +377,16 @@ async def account_shed(tier: str) -> Optional[str]:
         from integrations.uw_api import account_quota
         q = await account_quota()
         used, limit = q.get("used"), q.get("limit")
+        # A REFUSAL IS A MEASUREMENT, and it is checked before any counter, because it is the
+        # most recent thing the vendor has said about the account. It carries no number, so it
+        # cannot set a percentage — only a bounded back-off on the tiers nobody is waiting on.
+        r429 = _reading_age_s(q.get("last_429_at"))
+        if r429 is not None and r429 <= RATE_LIMIT_BACKOFF_S and tier in RATE_LIMIT_SHED_TIERS:
+            reason = ("UW refused a call %.0f min ago (429, no counter in it) - backing %s off "
+                      "for %.0f min on measured refusal" % (r429 / 60, tier,
+                                                            RATE_LIMIT_BACKOFF_S / 60))
+            _set_gate_state("shed:rate_limited", reason)
+            return reason
         if not isinstance(used, int):
             _set_gate_state("open:no_header",
                             "no x-uw-daily-req-count in the shared cache")

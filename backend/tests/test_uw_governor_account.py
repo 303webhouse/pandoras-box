@@ -350,3 +350,46 @@ async def test_the_cross_day_state_is_still_its_own(account):
                      - timedelta(minutes=5)).isoformat()
     assert await g.account_shed(g.TIER_STANDARD) is None
     assert g.gate_state()["state"] == "open:stale_reading"
+
+
+# ── a refusal is a measurement (measured 2026-09-17: a 429 carries no counter) ──────────
+@pytest.mark.asyncio
+async def test_a_recent_refusal_sheds_the_tiers_nobody_is_waiting_on(account):
+    """The account cannot be read while it is exhausted, because the refusal carries no
+    number. The refusal itself is the reading."""
+    from datetime import datetime, timedelta, timezone
+    account["used"] = 100                       # a healthy counter, and stale by definition
+    account["last_429_at"] = (datetime.now(timezone.utc) - timedelta(minutes=2)).isoformat()
+    reason = await g.account_shed(g.TIER_STANDARD)
+    assert reason and "refused" in reason
+    assert g.gate_state()["state"] == "shed:rate_limited"
+    assert await g.account_shed(g.TIER_BACKGROUND)
+
+
+@pytest.mark.asyncio
+async def test_a_refusal_never_sheds_the_interactive_tier(account):
+    """FOREGROUND stays open: it is what a person is waiting on, and it is the path through
+    which a 200 -- the only response that carries a counter -- can still arrive."""
+    from datetime import datetime, timedelta, timezone
+    account["used"] = 100
+    account["last_429_at"] = (datetime.now(timezone.utc) - timedelta(minutes=2)).isoformat()
+    assert await g.account_shed(g.TIER_FOREGROUND) is None
+
+
+@pytest.mark.asyncio
+async def test_the_backoff_expires_on_its_own(account):
+    """A shed that outlived its evidence would be the latch again, in a new costume."""
+    from datetime import datetime, timedelta, timezone
+    account["used"] = 100
+    account["last_429_at"] = (datetime.now(timezone.utc)
+                              - timedelta(seconds=g.RATE_LIMIT_BACKOFF_S + 60)).isoformat()
+    assert await g.account_shed(g.TIER_STANDARD) is None
+    assert g.gate_state()["state"] != "shed:rate_limited"
+
+
+@pytest.mark.asyncio
+async def test_an_unreadable_refusal_timestamp_does_not_shed(account):
+    account["used"] = 100
+    account["last_429_at"] = "not-a-time"
+    assert await g.account_shed(g.TIER_STANDARD) is None
+    assert g.gate_state()["state"] != "shed:rate_limited"
