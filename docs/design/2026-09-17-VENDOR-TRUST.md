@@ -61,3 +61,46 @@ presence in `stable_daily_bars`, and the rows that could have failed were exactl
 membership excluded (the Law 1 instance, filed in Addendum 3 at R-IV.428(c)).
 
 The statement is repeated on the filed certificate's own face.
+
+
+## WHO SERVED A READING IS READ OFF THE READING (R-IV.441, measured 2026-09-17)
+
+**Two corrections, both found by the surfaces this session shipped rather than by review, and
+both of the same shape: a fact about a system was taken from this repository's own text
+instead of from the system.**
+
+### A frame's vendor is a property of the frame, never of the branch it arrived on
+
+`uw_api.get_bars()` falls back to yfinance **inside itself**. A caller standing in the
+"UW primary path" therefore learns nothing about the vendor from the branch it is in — and
+`factor_utils.get_price_history()` was writing `"uw"` from exactly that inference: onto the
+returned frame, onto the Redis vendor key beside the cached frame, and so onto every factor
+payload downstream.
+
+**The measurement that exposed it:** on one process, `/health` reported
+`uw_api.get_bars` with **primary_ok 0 and 23 substitutions**, and `factor_utils.price_history`
+— downstream of it, in the same process — with **22 primaries, all labelled `uw`**. Both
+cannot be true.
+
+**It travels in `df.attrs["provider"]` now**, stamped from the per-bar provider that
+`get_bars` already writes and that the DataFrame conversion had been discarding. Mixed or
+unstamped bars produce `None`, which reads as `unknown` — a value the vocabulary already has,
+and the only honest one.
+
+> **A vendor label inferred from control flow is not provenance. It is a guess that happens
+> to be right while the primary is healthy — which is exactly when nobody checks it.**
+
+### A 429 carries no counter, so an exhausted account cannot report itself
+
+`uw_api.py` asserted, in a comment, that UW "publishes the truth on every response, 200 or
+429". **A live request against the account returns 429 with `x-request-id` and nothing else**
+— no `x-uw-daily-req-count`, no `x-uw-token-req-limit`. R-IV.441(c)'s self-clearing design was
+written against that sentence: it opens the gate when the reading is stale so a fresh reading
+can arrive, and against an exhausted account no reading can arrive at all.
+
+**The refusal is still evidence; it is simply not numeric.** Each 429 is stored with its
+timestamp and the two non-interactive tiers back off on it for ten minutes — measured refusal
+rather than remembered percentage — while FOREGROUND is never shed on it, because it is what a
+person is waiting on and because it keeps open the one path through which a 200, and so a real
+counter, can still arrive. The window expires on its own: evidence that suppresses its own
+renewal indefinitely is the latch in a new costume.
