@@ -226,6 +226,30 @@ async def get_trade_ideas_feed(
     }
 
 
+# R-IV.432(f): a behaviour change the River's reader would otherwise see as data going missing
+# is ANNOUNCED on the River when it lands. A code constant, so the notice ships in the same
+# deploy as the change it describes; `since`/`until` are ET dates, inclusive.
+RIVER_NOTICES = [
+    {
+        "id": "expiry-honoured-2026-09-17",
+        "since": "2026-09-17",
+        "until": "2026-10-01",
+        "title": "Ideas now expire on time",
+        "body": ("Intraday ideas now leave the River 4 hours after they fire; until today they "
+                 "stayed 24. Swing ideas (4-hour and daily charts) keep 24 hours and weekly ideas "
+                 "7 days. Every signal always computed its expiry; it was not being stored."),
+    },
+]
+
+
+@router.get("/trade-ideas/notices")
+async def get_river_notices():
+    """Active River notices. Declared before /trade-ideas/{signal_id}."""
+    from zoneinfo import ZoneInfo
+    today = datetime.now(ZoneInfo("America/New_York")).date().isoformat()
+    return {"notices": [n for n in RIVER_NOTICES if n["since"] <= today <= n["until"]]}
+
+
 @router.get("/trade-ideas/grouped")
 async def get_trade_ideas_grouped(
     limit: int = Query(default=20, le=50),

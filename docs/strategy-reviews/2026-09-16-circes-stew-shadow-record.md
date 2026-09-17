@@ -3,7 +3,7 @@
 **Internal id:** `circes_stew`. **Lineage (only):** Turtle Soup — Williams; Raschke's
 close-back-inside refinement (Olympus review 2026-04-22 §2.1).
 **State:** SHADOW since d990abb (deployed 2026-09-17 05:50 UTC). Not tradeable, not scored,
-not sized. **Rulings:** R-IV.421, R-IV.422, R-IV.429(b), R-IV.430(a)(b).
+not sized. **Rulings:** R-IV.421, R-IV.422, R-IV.429(b), R-IV.430(a)(b), R-IV.432(a)-(e)(h).
 **Code:** `backend/scanners/circes_stew.py` (trigger, pure), `backend/jobs/circes_stew_job.py`
 (daily pass). **Tests:** `backend/tests/test_circes_stew.py`.
 
@@ -46,20 +46,56 @@ expectancy in both sector regimes (R-IV.421(f)). The stored label is
 | *own stratum* | `REGIME_AGNOSTIC` |
 
 `ACTIVE_DISTRIBUTION` and `REGIME_AGNOSTIC` are **reported separately and never folded into
-either** gate regime. **A promotion claim states which labels its expectancy came from.** *BUILD's reading, not
-ruled:* a row with no label (NULL — the rotation cache was unreadable at fire time) is
-reported as its own stratum as well, never assigned one.
+either** gate regime. **A promotion claim states which labels its expectancy came from.**
+A row with no label (NULL — the rotation cache was unreadable at fire time) is
+`UNLABELLED`, its own stratum, never assigned one (R-IV.432(d)).
+
+## RATIFIED — R-IV.432 (the grading)
+
+- **Walk hold: 10 sessions is the primary; 5 and 20 are reported beside it.** Nobody has measured
+  the hold, so the curve is reported rather than one number defended.
+- **"VA-edge >= 60% of winners" means `edge` + `outside`** -- both are the extension case the
+  review meant; `mid` was the reject. The edge / outside split is reported beside it.
+- **Exclusions:** a row whose window holds a calendar factor its series does not carry, or an
+  adjustment seam, is counted, kept out of the aggregates, and reported on its own line.
+- **A second vendor** checks every row whose window spans a calendar event (the HON case: the
+  primary vendor inflates pre-ex prices on its own factor, and same-vendor verification cannot
+  see it). Disagreement holds the row -- flagged, never graded.
 
 ## PROMOTION GATES (R-IV.421(f), unchanged)
 
-Sharpe > 0.8 · PF > 1.4 · ≥ 100 trades · VA-edge ≥ 60% of winners · positive expectancy in
-BOTH `CONCENTRATED_LEADERSHIP` and `BROAD_ROTATION`. Shadow visibility is not promotion.
+Sharpe > 0.8 · PF > 1.4 · >= 100 trades · VA-edge (edge + outside) >= 60% of winners ·
+positive expectancy in BOTH `CONCENTRATED_LEADERSHIP` and `BROAD_ROTATION`. Evaluated on the
+primary hold. Shadow visibility is not promotion.
+
+## THE NULL CASE — the number the filters must beat (R-IV.432(h))
+
+**CIRCE'S STEW, UNFILTERED: SPY daily only, no location gate, no regime, walk grades on the
+module's own rules.** Bars 2020-01-02 -> 2026-09-16 (yfinance, split-adjusted, dividends
+excluded, fetched 2026-09-17 13:22 UTC), code at the backtest module v1 plus R-IV.432.
+
+| hold | trades | win rate | avg win | avg loss | **expectancy** | PF | max DD | Sharpe |
+|---|---|---|---|---|---|---|---|---|
+| 5 | 226 | 36.3% | +1.83R | -1.42R | **-0.24R** | 0.73 | -65.3R | -0.63 |
+| **10 (primary)** | 226 | 31.9% | +2.13R | -1.43R | **-0.30R** | 0.69 | -77.0R | -0.77 |
+| 20 | 225 | 32.0% | +2.19R | -1.46R | **-0.29R** | 0.71 | -72.9R | -0.74 |
+
+**Caveats, on the face:**
+- **One symbol.** SPY is an index; the live shadow runs on single names.
+- **No gates.** The location gate and the regime cannot be applied historically -- there is no
+  historical prior-session VA, and the rotation regime is not stored. This is the trigger
+  alone.
+- **Average losses beyond -1R** are gap exits at the open, which the walk books at the price
+  actually available.
+- **Not a verdict on the gated strategy.** It is the baseline the gated version has to beat.
 
 ## OPEN PARAMETERS AND KNOWN GAPS
 
 - **Firehose response:** more than 10 passing fires in a day surfaces none and latches the
   feed stopped until the gate is tightened and `GATE_VERSION` bumped. (Built; not separately
   ratified.)
+- **Edge band 25%** is provisional until the first 30 fires show its distribution
+  (R-IV.430(a)).
 - **Universe:** tickers with a PYTHIA event in the last ~10 calendar days — location is part
   of the trigger, so a name with no VA can never pass it.
 - **Flow:** there is no per-bar dark-pool or put-sweep store; the payload carries the latest

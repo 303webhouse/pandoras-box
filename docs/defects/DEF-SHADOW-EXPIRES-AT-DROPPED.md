@@ -1,8 +1,7 @@
 # DEF-SHADOW-EXPIRES-AT-DROPPED — P2
 
 **Registered:** R-IV.430(c). **Found:** 2026-09-17, CC-BUILD, while building CIRCE'S STEW
-(R-IV.429(b)). **Status:** FIXED FOR SHADOW ROWS with the backtest module (see RESOLUTION);
-**the wider drop below is OPEN and needs its own ruling.**
+(R-IV.429(b)). **Status:** RESOLVED — both halves (SHADOW rows with 2bc8a59; every row by R-IV.432(f)).
 **Row count:** CC-QUERY, when next free. **Code-path facts below:** read from source by
 CC-BUILD at d990abb; no database was read for this entry.
 
@@ -48,27 +47,36 @@ the backtest module**, which is where the grading horizon and the EXPIRED rule g
 Rows already written cannot be repaired from the row: the expiry would have to be recomputed
 from the entry session under the rule the backtest module fixes, and stated as recomputed.
 
-## RESOLUTION — with the backtest module (R-IV.429(b))
+## RESOLUTION
 
-`log_signal` now writes `expires_at` **for SHADOW rows only**, by a separate statement after a
-real insert (`_write_shadow_expiry`), so a failure there cannot lose the signal. STRIKE rows
-written from this deploy onward carry their expiry; rows already written stay NULL and are not
-back-filled.
+**Half 1 — SHADOW rows (2bc8a59, with the backtest module).** A separate write after the insert,
+SHADOW only, while the live half waited for its ruling.
 
-## THE DROP IS WIDER THAN STRIKE — OPEN, needs a ruling
+**Half 2 — every row (R-IV.432(f): "fix it, announce the change on the River").** The INSERT
+now names `expires_at` ($39), and the separate SHADOW write is gone. A value that cannot be read
+is stored as NULL -- the old behaviour -- and logged; it never fails the INSERT.
 
-The entry above says no other writer sets `signals.expires_at`. **That is true of STRIKE's rows,
-and it understates the defect.** `signals/pipeline.py` sets
-`signal_data["expires_at"] = ... or calculate_expiry(signal_data)` for **every** signal that goes
-through `process_signal_unified` (4 hours intraday, 24 hours swing, 7 days weekly), and the same
-INSERT discards all of them.
+### What the pipeline computes, and one mapping it got wrong
 
-**The live feed has been running on that absence:**
-- the flat feed's ACTIVE filter is `expires_at IS NULL OR expires_at > NOW()`, which every live
-  row passes;
-- `/api/trade-ideas/expire` falls back to `created_at + 24 hours` when `expires_at` is NULL.
+`calculate_expiry`: intraday 4 hours, 4-hour and daily charts 24 hours, weekly 7 days, anything
+unrecognised 4 hours. **TradingView sends intraday intervals as minute counts** (`"60"`,
+`"240"`), and the lists never matched a number, so a **4-hour chart fell to the 4-hour
+default** instead of 24. Harmless while nothing was stored; wrong the moment it is. Minute
+counts are now read as minutes: >= 240 -> 24 hours, >= 10080 -> 7 days, otherwise 4.
 
-So an intraday signal the pipeline meant to expire after 4 hours stays on the ACTIVE surfaces
-for 24. **Persisting the value for ACTIVE rows would change what the live feed shows, and for how
-long.** That is a live-surface decision, so this fix is scoped to SHADOW rows and the rest is left
-as found. Source-read facts; how the live feed's contents would change is a CC-QUERY read.
+### What changes on the live surfaces — stated before it lands
+
+| surface | before | after |
+|---|---|---|
+| flat feed `/api/trade-ideas?status=ACTIVE` (the River, Kairos) | every row passed `expires_at IS NULL` | an intraday idea drops out 4 hours after it fired |
+| expiry sweep (every 5 min) | ACTIVE rows expired at `created_at + 24h` | at their own expiry; the 24h fallback remains for rows with none |
+| a user action on an expired idea | possible for 24 hours | refused as terminal after the expiry (`EXPIRED` was already terminal) |
+| legacy `/api/signals/active` (the old UI) | hides a ticker for 24h after a dismissal | unchanged rule, but the sweep's `DISMISSED` now lands 4h after an intraday fire, so **a fresh same-day idea on that ticker is hidden there** until the 24h passes |
+| CTA scanner cooldown (`has_recent_active_signal`) | — | **unchanged**: CTA rows are `DAILY` (24h) and carry no pipeline expiry |
+| SHADOW rows | not on ACTIVE surfaces | unchanged |
+
+The legacy-UI effect is the sweep's existing choice to record a system expiry as
+`user_action = 'DISMISSED'`; it is reported, not changed here.
+
+**Announced on the River:** `GET /api/trade-ideas/notices` carries the notice from the deploy
+day for two weeks, for CC-ABACUS to render.

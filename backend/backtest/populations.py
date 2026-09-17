@@ -62,9 +62,13 @@ class Population:
     horizons: Tuple[int, ...]
     since: date
     cells: Callable[[Dict[str, Any]], Tuple[str, ...]]
-    walk_hold: Optional[int] = None
+    walk_holds: Tuple[int, ...] = ()        # the FIRST is the primary; the rest are the curve
     time_exit_label: str = "TIME"
     note: str = ""
+
+    @property
+    def primary_hold(self) -> Optional[int]:
+        return self.walk_holds[0] if self.walk_holds else None
 
     def sql(self) -> str:
         return (f"SELECT {_BASE}, {self.tag_columns} FROM signals "
@@ -124,8 +128,9 @@ CIRCES_STEW = Population(
     horizons=(1, 3, 5, 10),
     since=date(2026, 9, 17),
     cells=_circe_cells,
-    walk_hold=10,
-    note="Walk hold of 10 sessions is BUILD's proposal, not ruled.",
+    walk_holds=(10, 5, 20),
+    note="Walk hold 10 sessions is the primary (R-IV.432(a)); 5 and 20 are reported beside it, "
+         "because the hold is a parameter nobody has measured.",
 )
 
 POPULATIONS: Dict[str, Population] = {p.name: p for p in (THREE_TEN, PASS9, CIRCES_STEW)}

@@ -89,6 +89,29 @@ CREATE TABLE IF NOT EXISTS backtest_results (
 CREATE INDEX IF NOT EXISTS idx_backtest_results_run ON backtest_results (run_id);
 """
 
+# Migration 036 (R-IV.432(e)): a row the second vendor disagrees with is HELD, not graded.
+# The hold is recorded so the check is not re-paid every pass; it is keyed on the basis, so a
+# new basis looks again.
+DDL_HOLDS = """
+CREATE TABLE IF NOT EXISTS shadow_grade_holds (
+    id              BIGSERIAL PRIMARY KEY,
+    signal_id       TEXT        NOT NULL,
+    population      TEXT        NOT NULL,
+    method          TEXT        NOT NULL,
+    horizon         INTEGER     NOT NULL,
+    basis_id        TEXT        NOT NULL,
+    reason          TEXT        NOT NULL,
+    detail          JSONB       NOT NULL,
+    tags            JSONB,
+    grader_version  TEXT        NOT NULL,
+    run_id          BIGINT,
+    held_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (signal_id, population, method, horizon, basis_id)
+);
+CREATE INDEX IF NOT EXISTS idx_shadow_grade_holds_population
+    ON shadow_grade_holds (population, method, horizon);
+"""
+
 WRITE_COLUMNS = ("signal_id", "population", "method", "horizon", "anchor_session",
                  "exit_session", "entry_raw", "entry_factor", "entry_basis", "anchor_close",
                  "exit_price", "ret_pct", "ret_raw_pct", "ret_v2_pct", "r_multiple", "outcome",
@@ -97,7 +120,7 @@ WRITE_COLUMNS = ("signal_id", "population", "method", "horizon", "anchor_session
 
 
 async def ensure_tables(conn) -> None:
-    for stmt in [s for s in DDL.split(";") if s.strip()]:
+    for stmt in [s for s in (DDL + DDL_HOLDS).split(";") if s.strip()]:
         await conn.execute(stmt)
 
 
@@ -107,6 +130,47 @@ async def existing(conn, population: str, signal_ids: List[str]) -> Dict[Tuple[s
         "WHERE population = $1 AND signal_id = ANY($2::text[])",
         population, signal_ids)
     return {(r["signal_id"], r["method"], r["horizon"]): r["basis_id"] for r in rows}
+
+
+async def held(conn, population: str, signal_ids: List[str], basis_id: str) -> set:
+    rows = await conn.fetch(
+        "SELECT signal_id, method, horizon FROM shadow_grade_holds "
+        "WHERE population = $1 AND basis_id = $2 AND signal_id = ANY($3::text[])",
+        population, basis_id, signal_ids)
+    return {(r["signal_id"], r["method"], r["horizon"]) for r in rows}
+
+
+def hold_record(g, population: str, reason: str, detail: Dict[str, Any], tags: Dict[str, Any],
+                grader_version: str, run_id: Optional[int]) -> Tuple:
+    safe_tags = {k: v for k, v in tags.items() if not k.startswith("_")}
+    return (g.signal_id, population, g.method, g.horizon, g.basis["basis_id"], reason,
+            dumps_jsonb(detail, default=str), dumps_jsonb(safe_tags, default=str),
+            grader_version, run_id)
+
+
+async def insert_holds(conn, records: List[Tuple]) -> int:
+    written = 0
+    for rec in records:
+        res = await conn.execute(
+            "INSERT INTO shadow_grade_holds (signal_id, population, method, horizon, basis_id, "
+            "reason, detail, tags, grader_version, run_id) "
+            "VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9,$10) "
+            "ON CONFLICT (signal_id, population, method, horizon, basis_id) DO NOTHING", *rec)
+        written += int(str(res).strip().endswith("1"))
+    return written
+
+
+async def load_holds(conn, population: str) -> List[Dict[str, Any]]:
+    rows = await conn.fetch(
+        "SELECT signal_id, method, horizon, reason, tags FROM shadow_grade_holds "
+        "WHERE population = $1", population)
+    out = []
+    for r in rows:
+        d = dict(r)
+        t = d.get("tags")
+        d["tags"] = json.loads(t) if isinstance(t, str) else (t or {})
+        out.append(d)
+    return out
 
 
 def grade_record(g, population: str, sign: int, tags: Dict[str, Any], grader_version: str,

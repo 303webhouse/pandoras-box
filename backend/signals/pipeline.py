@@ -187,6 +187,18 @@ def calculate_expiry(signal_data: Dict[str, Any]) -> Optional[datetime]:
     """
     timeframe = (signal_data.get("timeframe") or "1H").upper()
 
+    # TradingView's {{interval}} is a MINUTE COUNT for intraday charts ("60", "240") and a
+    # letter for the rest ("D", "W"). A 4-hour chart arrives as "240", which the lists below
+    # never matched, so it fell to the 4-hour default instead of the 4H rule's 24 hours.
+    # Harmless while expires_at was never written; wrong the moment it is (R-IV.432(f)).
+    if timeframe.isdigit():
+        minutes = int(timeframe)
+        if minutes >= 7 * 24 * 60:
+            return datetime.utcnow() + timedelta(days=7)
+        if minutes >= 240:
+            return datetime.utcnow() + timedelta(hours=24)
+        return datetime.utcnow() + timedelta(hours=4)
+
     # Intraday signals expire in 4 hours
     if timeframe in ("1", "3", "5", "15", "30", "1M", "3M", "5M", "15M", "30M", "1H"):
         return datetime.utcnow() + timedelta(hours=4)

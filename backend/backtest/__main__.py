@@ -1,7 +1,7 @@
 """CLI.  cd backend && python -m backtest <command>
 
   known-answers                      acceptance #2, live (network only; no database)
-  history --symbol SPY --start 2020-01-01 [--max-hold 10]
+  history --symbol SPY --start 2020-01-01 [--holds 10,5,20]
                                      CIRCE'S STEW, vanilla, over history (network only)
   grade --population three_ten       one grading pass (DATABASE -- run where the app runs)
 """
@@ -32,14 +32,17 @@ def _history(args) -> int:
     if s is None:
         print("no bars returned")
         return 1
-    grades = engine.run_history(s, engine.circe_triggers, engine.circe_lookback(),
-                                args.max_hold, "circes_stew")
-    rows = [g.as_dict() for g in grades if g.status == "graded"]
-    summary = metrics.summarize_r(rows, sessions=s.dates)
+    holds = [int(h) for h in args.holds.split(",")]
+    curve = {}
+    for hold in holds:
+        grades = engine.run_history(s, engine.circe_triggers, engine.circe_lookback(),
+                                    hold, "circes_stew")
+        rows = [g.as_dict() for g in grades if g.status == "graded"]
+        curve[str(hold)] = dict(metrics.summarize_r(rows, sessions=s.dates),
+                                triggers=len(grades))
     print(json.dumps({"strategy": "circes_stew (VANILLA: no location gate, no regime)",
                       "symbol": args.symbol.upper(), "first_bar": s.dates[0], "last_bar": s.last,
-                      "basis": s.basis(), "max_hold": args.max_hold,
-                      "triggers": len(grades), "graded": len(rows), "summary": summary},
+                      "basis": s.basis(), "primary_hold": holds[0], "by_hold": curve},
                      indent=2, default=str))
     return 0
 
@@ -65,7 +68,7 @@ def main(argv=None) -> int:
     h = sub.add_parser("history")
     h.add_argument("--symbol", required=True)
     h.add_argument("--start", required=True)
-    h.add_argument("--max-hold", type=int, default=10)
+    h.add_argument("--holds", default="10,5,20", help="walk holds; the first is the primary")
     g = sub.add_parser("grade")
     g.add_argument("--population", required=True, choices=["three_ten", "pass9", "circes_stew"])
     args = p.parse_args(argv)

@@ -152,6 +152,10 @@ QUOTAS: Dict[str, Tuple[int, str]] = {
     "earnings_premarket": (100, TIER_STANDARD),
     "earnings_afterhours": (100, TIER_STANDARD),
     "earnings_dates": (100, TIER_STANDARD),
+    # R-IV.432(e): the backtest module's second-vendor check -- /ohlc/1d, only for graded
+    # rows whose window spans a calendar event, at most 40 tickers a pass. It runs after the
+    # close, where STANDARD keeps 25% (50/day), which is the ceiling it is sized under.
+    "ohlc_grader": (200, TIER_STANDARD),
     # ── BACKGROUND (cut first; afternoon staleness is acceptable) ──
     # Sized to Monday's projection x1.3, NOT to Friday's 4,069 / 3,894. Friday was
     # measured under 429s, so those counts are inflated by retries that cannot

@@ -243,13 +243,14 @@ CIRCE_GATES = {"sharpe_gt": 0.8, "pf_gt": 1.4, "min_trades": 100, "va_edge_share
 
 def circe_promotion_check(walk_rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
     """R-IV.421(f), with R-IV.430(b)'s labels stated on the face. This REPORTS the gates; it
-    promotes nothing. "VA edge" is read as location == 'edge'; the share counting 'outside'
-    as well is shown beside it, because the gate's wording does not settle it."""
+    promotes nothing. "VA edge" means EDGE + OUTSIDE (R-IV.432(b)) -- both are the extension
+    case the review meant; mid was the reject. The split is reported beside it."""
     overall = summarize_r(walk_rows)
     winners = [r for r in walk_rows if (r.get("r_multiple") or 0) > 0]
     loc = lambda r: (r.get("tags") or {}).get("va_location")
     edge = sum(1 for r in winners if loc(r) == "edge")
-    edge_or_out = sum(1 for r in winners if loc(r) in ("edge", "outside"))
+    outside = sum(1 for r in winners if loc(r) == "outside")
+    share = lambda k: round(100 * k / len(winners), 2) if winners else None
     regimes = {name: summarize_r([r for r in walk_rows if regime_label(r) == label])
                for name, label in PROMOTION_REGIMES.items()}
     others = {label: summarize_r([r for r in walk_rows if regime_label(r) == label])
@@ -258,11 +259,13 @@ def circe_promotion_check(walk_rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]
         "sharpe": overall.get("sharpe") is not None and overall["sharpe"] > CIRCE_GATES["sharpe_gt"],
         "pf": overall.get("pf_r") is not None and overall["pf_r"] > CIRCE_GATES["pf_gt"],
         "trades": overall.get("n", 0) >= CIRCE_GATES["min_trades"],
-        "va_edge": bool(winners) and 100 * edge / len(winners) >= CIRCE_GATES["va_edge_share_of_winners"],
+        "va_edge": bool(winners) and share(edge + outside) >= CIRCE_GATES["va_edge_share_of_winners"],
         "both_regimes_positive": all((regimes[k].get("expectancy_r") or 0) > 0 and regimes[k].get("n")
                                      for k in PROMOTION_REGIMES),
     }
     return {"overall": overall, "checks": checks, "all_met": all(checks.values()),
-            "va_edge_share_of_winners": round(100 * edge / len(winners), 2) if winners else None,
-            "va_edge_or_outside_share_of_winners": round(100 * edge_or_out / len(winners), 2) if winners else None,
+            "va_edge_share_of_winners": share(edge + outside),
+            "va_edge_definition": "edge + outside (R-IV.432(b))",
+            "va_split_of_winners": {"edge": share(edge), "outside": share(outside),
+                                    "other_or_unknown": share(len(winners) - edge - outside)},
             "regimes": regimes, "regime_labels": PROMOTION_REGIMES, "other_strata": others}
