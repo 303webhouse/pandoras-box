@@ -175,11 +175,10 @@ class TestAuthEnforcement:
         ("POST", "/webhook/test", {"ping": "test"}),
     ]
 
+    # Book reads require auth (R-IV.417); they are covered by TestBookReadsGated below.
     PUBLIC_ROUTES = [
         ("GET", "/health"),
         ("GET", "/live"),
-        ("GET", "/api/v2/positions?status=OPEN"),
-        ("GET", "/api/v2/positions/summary"),
         ("GET", "/api/bias/composite"),
         ("GET", "/api/committee/queue"),
         ("GET", "/api/monitoring/factor-staleness"),
@@ -334,3 +333,131 @@ class TestSessionAuth:
         assert r.status_code == 200, r.text
         assert "pivot_session" in r.headers.get("set-cookie", "")
         assert client.post("/api/auth/logout").status_code == 200
+
+
+# ── R-IV.417 — book-reading GETs are gated ──────────────────────────────────────────────
+
+BOOK_PREFIXES = ("/api/analytics", "/api/portfolio", "/api/v2/positions", "/api/options/positions")
+_AUTH_DEP_NAMES = {"require_api_key", "verify_pivot_key", "verify_api_key"}
+
+
+def _has_auth(dependant) -> bool:
+    """Walk FastAPI's RESOLVED dependency tree — what actually runs on a request.
+
+    Deliberately not inspect.signature(): a gate declared as
+    `@router.get(..., dependencies=[Depends(require_api_key)])` is invisible to a
+    signature check, so that check would report a gated route as open (or, written the
+    other way round, an open one as gated). The dependant is the ground truth.
+    """
+    for dep in dependant.dependencies:
+        if getattr(dep.call, "__name__", "") in _AUTH_DEP_NAMES or _has_auth(dep):
+            return True
+    return False
+
+
+def _ungated_book_gets(app) -> list:
+    out = []
+    for route in app.routes:
+        methods = getattr(route, "methods", None) or set()
+        path = getattr(route, "path", "")
+        if "GET" in methods and path.startswith(BOOK_PREFIXES):
+            if not _has_auth(route.dependant):
+                out.append(path)
+    return sorted(out)
+
+
+class TestBookReadsGated:
+    """Every book-reading GET answers 401 without credentials and accepts all three
+    credential forms. One or more samples per router that serves them."""
+
+    SAMPLES = [
+        "/api/analytics/trade-stats",                 # analytics router
+        "/api/analytics/export/trades",               # named in R-IV.417(a)
+        "/api/analytics/cash-flows",                  # analytics router
+        "/api/portfolio/balances",                    # portfolio router
+        "/api/portfolio/positions",                   # portfolio router
+        "/api/portfolio/cash-flows",                  # portfolio router
+        "/api/v2/positions?status=OPEN",              # unified_positions — formerly PUBLIC
+        "/api/v2/positions/summary",                  # unified_positions — formerly PUBLIC
+        "/api/v2/positions/greeks",                   # unified_positions
+        "/api/analytics/footprint-correlation",       # footprint_correlation router
+        "/api/analytics/confluence-validation",       # app-level route in main.py
+    ]
+
+    @pytest.mark.parametrize("path", SAMPLES)
+    def test_no_credentials_is_401(self, client, path):
+        r = client.get(path)
+        assert r.status_code == 401, f"GET {path} returned {r.status_code} without credentials"
+
+    @pytest.mark.parametrize("path", SAMPLES)
+    def test_wrong_key_is_401(self, client, path):
+        r = client.get(path, headers={"X-API-Key": "wrong-key"})
+        assert r.status_code == 401, f"GET {path} accepted a wrong key ({r.status_code})"
+
+    @pytest.mark.parametrize("path", SAMPLES)
+    def test_machine_key_accepted(self, client, test_api_key, path):
+        r = client.get(path, headers={"X-API-Key": test_api_key})
+        assert r.status_code not in (401, 403), f"GET {path} rejected a valid key ({r.status_code})"
+
+    @pytest.mark.parametrize("path", SAMPLES)
+    def test_bearer_accepted(self, client, test_api_key, path):
+        r = client.get(path, headers={"Authorization": f"Bearer {test_api_key}"})
+        assert r.status_code not in (401, 403), f"GET {path} rejected a valid Bearer ({r.status_code})"
+
+    @pytest.mark.parametrize("path", SAMPLES)
+    def test_session_cookie_accepted_without_csrf_header(self, client, path):
+        """The browser path. A GET is not a mutation, so no X-Requested-With is needed —
+        requiring it would blank every dashboard read."""
+        from utils.session import issue_session, COOKIE_NAME
+        token = issue_session()
+        assert token, "issue_session() returned None — DASHBOARD_SESSION_SECRET not set"
+        r = client.get(path, cookies={COOKIE_NAME: token})
+        assert r.status_code not in (401, 403), f"GET {path} rejected a valid session ({r.status_code})"
+
+
+class TestBookReadCompleteness:
+    """A new book route cannot quietly ship open."""
+
+    def test_no_ungated_get_under_book_prefixes(self, client):
+        from main import app
+        open_routes = _ungated_book_gets(app)
+        assert not open_routes, (
+            f"{len(open_routes)} book-reading GET route(s) have no auth:\n"
+            + "\n".join(f"  - GET {p}" for p in open_routes)
+            + "\n\nAdd dependencies=[Depends(require_api_key)] to the decorator. There is no "
+              "exemption list for these prefixes, by design (R-IV.417(c))."
+        )
+
+    def test_there_is_something_to_check(self, client):
+        """Guards against the completeness test passing because the prefix matched nothing."""
+        from main import app
+        n = sum(1 for r in app.routes
+                if "GET" in (getattr(r, "methods", None) or set())
+                and getattr(r, "path", "").startswith(BOOK_PREFIXES))
+        assert n >= 30, f"only {n} GET routes under the book prefixes — the scan is not seeing the routers"
+
+    def test_detector_reports_an_ungated_route(self):
+        """Law 3 (Addendum 3): prove the detector CAN say "open" before trusting its silence.
+        One gated and one ungated route under a book prefix; it must flag exactly one."""
+        from fastapi import Depends, FastAPI
+        from utils.pivot_auth import require_api_key
+
+        probe = FastAPI()
+
+        @probe.get("/api/portfolio/__probe_gated", dependencies=[Depends(require_api_key)])
+        async def _gated():
+            return {}
+
+        @probe.get("/api/portfolio/__probe_param_gated")
+        async def _param_gated(_=Depends(require_api_key)):
+            return {}
+
+        @probe.get("/api/portfolio/__probe_open")
+        async def _open():
+            return {}
+
+        @probe.get("/elsewhere/__probe_open")
+        async def _out_of_scope():
+            return {}
+
+        assert _ungated_book_gets(probe) == ["/api/portfolio/__probe_open"]

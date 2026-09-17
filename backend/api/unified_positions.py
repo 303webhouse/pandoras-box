@@ -626,7 +626,7 @@ async def _sweep_expired_positions():
         logger.warning("Expired position sweep failed: %s", e)
 
 
-@router.get("/v2/positions")
+@router.get("/v2/positions", dependencies=[Depends(require_api_key)])
 async def list_positions(
     status: str = Query("OPEN", description="Filter by status: OPEN, CLOSED, EXPIRED, or ALL"),
     ticker: Optional[str] = Query(None),
@@ -817,7 +817,7 @@ async def expire_sweep(_=Depends(require_api_key)):
         return {"status": "error", "detail": str(e)}
 
 
-@router.get("/v2/positions/summary")
+@router.get("/v2/positions/summary", dependencies=[Depends(require_api_key)])
 async def portfolio_summary(account: Optional[str] = Query(None)):
     """
     Portfolio summary for the bias row widget and committee context.
@@ -1143,7 +1143,7 @@ def _greeks_flat(status: str) -> dict:
     }
 
 
-@router.get("/v2/positions/greeks")
+@router.get("/v2/positions/greeks", dependencies=[Depends(require_api_key)])
 async def portfolio_greeks():
     """
     Aggregate portfolio greeks from the UW options snapshot.
@@ -1303,7 +1303,7 @@ async def _portfolio_greeks_inner():
     return result
 
 
-@router.get("/v2/positions/{position_id}")
+@router.get("/v2/positions/{position_id}", dependencies=[Depends(require_api_key)])
 async def get_position(position_id: str):
     """Get a single position by ID."""
     pool = await get_postgres_client()
@@ -2580,7 +2580,7 @@ async def add_position_lot(position_id: str, req: AddLotRequest,
             "lots": [dict(r) for r in rows]}
 
 
-@router.get("/v2/positions/{position_id}/lots")
+@router.get("/v2/positions/{position_id}/lots", dependencies=[Depends(require_api_key)])
 async def get_position_lots(position_id: str):
     """Lot breakdown behind a position's blended basis."""
     pool = await get_postgres_client()

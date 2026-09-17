@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import pathlib
+import urllib.error
 import urllib.request
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -107,27 +108,43 @@ def load_discord_token(cfg: dict[str, Any], env_file: dict[str, str]) -> str:
 
 # ── Data fetching ──
 
-def _fetch_railway_json(path: str, api_url: str) -> dict:
-    """Fetch JSON from Railway API."""
+def _fetch_railway_json(path: str, api_url: str, api_key: str = "") -> dict:
+    """Fetch JSON from Railway API.
+
+    Analytics reads are AUTHENTICATED (R-IV.417). An auth rejection is logged as an ERROR
+    naming the cause: the caller treats {} as "Oracle not populated" and silently switches
+    to a fallback report, so without this the weekly review would change source and nobody
+    would know why.
+    """
     url = f"{api_url.rstrip('/')}{path}"
     req = urllib.request.Request(url, method="GET")
     req.add_header("User-Agent", "Hermes-Dispatch/1.0")
+    if api_key:
+        req.add_header("X-API-Key", api_key)
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
             return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        if e.code in (401, 403):
+            log.error("Railway fetch for %s REJECTED (HTTP %s) — PIVOT_API_KEY %s; "
+                      "any fallback below is running because of AUTH, not missing data",
+                      path, e.code, "missing" if not api_key else "not accepted")
+        else:
+            log.warning("Railway fetch failed for %s: HTTP %s", path, e.code)
+        return {}
     except Exception as e:
         log.warning("Railway fetch failed for %s: %s", path, e)
         return {}
 
 
-def fetch_oracle_data(api_url: str) -> dict:
+def fetch_oracle_data(api_url: str, api_key: str = "") -> dict:
     """Fetch Oracle payload for the last 7 days."""
-    return _fetch_railway_json("/api/analytics/oracle?days=7", api_url)
+    return _fetch_railway_json("/api/analytics/oracle?days=7", api_url, api_key)
 
 
-def fetch_risk_budget(api_url: str) -> dict:
+def fetch_risk_budget(api_url: str, api_key: str = "") -> dict:
     """Fetch current risk budget."""
-    return _fetch_railway_json("/api/analytics/risk-budget", api_url)
+    return _fetch_railway_json("/api/analytics/risk-budget", api_url, api_key)
 
 
 def fetch_bias_composite(api_url: str) -> dict:
@@ -414,8 +431,8 @@ def run_hermes_dispatch() -> dict:
     api_key = pick_env("PIVOT_API_KEY", cfg, env_file)
 
     # Step 1: Fetch data from Railway
-    oracle = fetch_oracle_data(api_url)
-    risk = fetch_risk_budget(api_url)
+    oracle = fetch_oracle_data(api_url, api_key or "")   # gated reads (R-IV.417)
+    risk = fetch_risk_budget(api_url, api_key or "")
     bias = fetch_bias_composite(api_url)
 
     if not oracle.get("system_health"):

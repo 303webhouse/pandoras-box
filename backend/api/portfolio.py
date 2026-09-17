@@ -35,7 +35,7 @@ def _row_to_dict(row) -> dict:
 
 # ── 1. GET /balances ──
 
-@router.get("/balances")
+@router.get("/balances", dependencies=[Depends(require_api_key)])
 async def get_balances():
     pool = await get_postgres_client()
     rows = await pool.fetch("""
@@ -158,7 +158,7 @@ def _v2_to_legacy_dict(row) -> dict:
     }
 
 
-@router.get("/positions")
+@router.get("/positions", dependencies=[Depends(require_api_key)])
 async def get_positions():
     pool = await get_postgres_client()
     rows = await pool.fetch("""
@@ -177,7 +177,7 @@ async def get_positions():
 
 # ── 5b. GET /positions/closed ──
 
-@router.get("/positions/closed")
+@router.get("/positions/closed", dependencies=[Depends(require_api_key)])
 async def get_closed_positions(
     ticker: Optional[str] = Query(None),
     limit: int = Query(50, ge=1, le=500),
@@ -244,7 +244,7 @@ async def update_closed_position(closed_id: int, body: ClosedPositionUpdate, _=D
 
 # ── 6. GET /trade-history ──
 
-@router.get("/trade-history")
+@router.get("/trade-history", dependencies=[Depends(require_api_key)])
 async def get_trade_history(
     ticker: Optional[str] = Query(None),
     start_date: Optional[str] = Query(None),
@@ -283,7 +283,7 @@ async def get_trade_history(
 
 # ── 7. GET /trade-history/stats ──
 
-@router.get("/trade-history/stats")
+@router.get("/trade-history/stats", dependencies=[Depends(require_api_key)])
 async def get_trade_history_stats():
     pool = await get_postgres_client()
 
@@ -358,7 +358,7 @@ async def log_cash_flow(body: CashFlowCreate, _=Depends(require_api_key)):
     return result
 
 
-@router.get("/pnl")
+@router.get("/pnl", dependencies=[Depends(require_api_key)])
 async def get_portfolio_pnl():
     """
     Compare current balances to snapshots for daily, weekly, and monthly PnL.
@@ -470,7 +470,7 @@ async def snapshot_account_balances():
         logger.warning("Balance snapshot failed: %s", e)
 
 
-@router.get("/cash-flows")
+@router.get("/cash-flows", dependencies=[Depends(require_api_key)])
 async def get_cash_flows(
     account: Optional[str] = Query(None),
     limit: int = Query(50, ge=1, le=500),

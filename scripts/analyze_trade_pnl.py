@@ -1,10 +1,18 @@
 """Analyze trade P&L data to find incorrect entries."""
-import json, sys, httpx
+import json, os, sys, httpx
 
 API = "https://pandoras-box-production.up.railway.app"
+API_KEY = os.environ.get("PIVOT_API_KEY") or ""
 
 def main():
-    resp = httpx.get(f"{API}/api/analytics/trades?days=90", timeout=15)
+    # Analytics reads are authenticated (R-IV.417). Without this, a 401 body parses as
+    # {"detail": ...}, the lookup below falls through to [], and the script reports
+    # "Total trades in DB: 0" — a confident, wrong answer.
+    if not API_KEY:
+        sys.exit("PIVOT_API_KEY is not set — /api/analytics/trades requires it")
+    resp = httpx.get(f"{API}/api/analytics/trades?days=90", timeout=15,
+                     headers={"X-API-Key": API_KEY})
+    resp.raise_for_status()
     data = resp.json()
     trades = data if isinstance(data, list) else data.get("trades", data.get("rows", []))
     print(f"Total trades in DB: {len(trades)}")

@@ -671,7 +671,7 @@ def build_market_context(signal: dict, api_url: str, api_key: str) -> dict:
     portfolio = {}
     try:
         from committee_context import fetch_portfolio_context
-        portfolio = fetch_portfolio_context(api_url)
+        portfolio = fetch_portfolio_context(api_url, api_key)   # book reads are gated (R-IV.417)
     except Exception:
         pass
 
