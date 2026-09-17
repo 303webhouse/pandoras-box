@@ -105,8 +105,42 @@ the nightly job, against a weekend gap, by the same lane.**
 > **A law is not learned when it is written. It is learned when it is applied to the next
 > subsystem, which looks nothing like the one that produced it.**
 
-**Instance count: 2.** Both self-inflicted, both caught by a later measurement rather than
-by review, and the second committed by the author of the first.
+### A third instance — the lane that wrote the law, on a database (R-IV.416(b))
+
+**Filed under CC-BUILD's name, because CC-BUILD committed it.**
+
+**The question (2026-09-16):** does the lots/legs build start from an empty schema?
+
+**The measurement:** a search of `migrations/` and `backend/` for DDL creating a lots table.
+**It found none, and the survey reported "no lots/legs schema exists."** A `backend/` file did
+match — `api/unified_positions.py` — and was dismissed unread as "probably a comment."
+
+**The truth:** `position_lots` had existed in production since **2026-08-26**, created by
+`scripts/feat_position_lifecycle_phase1.py` with a one-time backfill. The matched file held its
+live `GET` and `POST` routes. **Of 34 open positions, 14 carried a lot and 20 carried none.**
+
+**Same law, third surface.** The first instance read a configuration surface to answer a
+question about a runtime; this one **read SOURCE CODE to answer a question about a DATABASE.**
+A table is created by whatever ran against the database — a migration, a startup hook, or a
+script run once by hand — and **no search of the migrations directory can see the third.**
+The two confirmations it did have (no DDL in `migrations/`, no DDL in `backend/`) shared a
+domain, and the domain was not the one being asked about.
+
+**What it would have cost, had the build proceeded on it:** a create-if-missing that silently
+does nothing against the existing table, inserts that then fail on columns that do not exist,
+and **a backfill that gives 14 positions a second lot and doubles their quantity** — every row
+individually valid, the sum wrong.
+
+**And the corollary held again.** The survey's negative named its scope ("migrations/ and
+backend/"). That is why the correction was a correction and not a retraction: the scope
+sentence said exactly which domain had been searched, and the answer was in a different one.
+
+> **The dismissed hit is the part to keep.** The search DID find the evidence and the
+> author did not read it. A negative finding is not bounded only by where it looked, but by
+> **what it looked at and chose not to open.**
+
+**Instance count: 3.** All self-inflicted, all caught by a later measurement rather than by
+review — **and the third committed by the lane that wrote the law.**
 
 ---
 
