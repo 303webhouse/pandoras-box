@@ -84,10 +84,16 @@ def test_new_semantic_column_is_permitted_new_mark_column_is_not():
 # --- structural: the wiring, not a copy of it ---------------------------------
 def test_patch_site_checks_set_clause_columns_not_model_fields():
     src = UP.read_text(encoding="utf-8")
-    assert 'assert_columns_allowed(\n        [s.split("=")[0].strip() for s in sets], WriteScope.MANUAL_EDIT\n    )' in src, (
+    flat = " ".join(src.split())
+    # The columns checked are the ones built into the SET clause. The expression was hoisted
+    # into `touched` with R-IV.444(c), which added a second check over the same list.
+    assert 'touched = [s.split("=")[0].strip() for s in sets]' in flat, (
         "the PATCH site must check the columns actually entering the SET clause; "
         "checking the request model's declared fields would miss any column that "
         "reaches SQL by another route")
+    assert "assert_columns_allowed(touched, WriteScope.MANUAL_EDIT)" in flat
+    assert "assert_derived_not_edited(touched, has_lots)" in flat, (
+        "and the same list is what the derived-field refusal sees")
 
 
 def test_reconcile_mark_site_is_scoped_to_mark_job():

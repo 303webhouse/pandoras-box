@@ -29,7 +29,7 @@ database:
 
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, Mapping, Optional
+from typing import Any, Dict, Iterable, List, Mapping, Optional
 
 # --- vocabulary ---------------------------------------------------------------------------
 PRINCIPAL_REPORTED = "PRINCIPAL_REPORTED"
@@ -114,6 +114,81 @@ def derive_aggregate(lots: Iterable[Mapping[str, Any]], asset_type: Optional[str
             "fees": fees, "entry_price": entry_price, "cost_basis": cost_basis,
             "basis_known": cost_basis is not None, "unknown_reason": reason,
             "multiplier": multiplier(asset_type)}
+
+
+def fifo_plan(lots: Iterable[Mapping[str, Any]], qty: float, price: Optional[float],
+              asset_type: Optional[str] = None, fees: float = 0.0) -> Dict[str, Any]:
+    """Which acquisitions a disposal consumes, oldest first, and what it realizes.
+
+    A LOT IS AN EVENT AND IS NEVER EDITED (R-IV.444(c)). A reduction does not rewrite the
+    fills it sells out of -- it is its own event, allocated against the ones it consumes, so
+    the ledger still answers "what did we buy, and when" after the selling is over.
+
+    Returns the allocation per acquiring lot, the realized total, and what would be left. It
+    computes; it does not write. The caller shows this before anything is committed, which is
+    the whole requirement: realized is SEEN before it is real.
+
+    An unpriced acquisition makes the realized amount UNKNOWN rather than zero -- the gain
+    against a cost nobody recorded is not a number, and calling it one would book a fiction
+    as a result.
+    """
+    mult = multiplier(asset_type)
+    remaining = abs(float(qty))
+    open_lots = [dict(l) for l in lots if float(l.get("qty") or 0) > 0]
+    open_lots.sort(key=lambda l: (l.get("fill_time") or 0, l.get("id") or 0))
+    consumed = [dict(l) for l in lots if float(l.get("qty") or 0) < 0]
+    already = abs(sum(float(l.get("qty") or 0) for l in consumed))
+
+    # Oldest-first, net of what earlier disposals already took.
+    available: List[Dict[str, Any]] = []
+    debt = already
+    for lot in open_lots:
+        left = float(lot["qty"])
+        if debt > 0:
+            take = min(debt, left)
+            left -= take
+            debt -= take
+        if left > 0:
+            available.append({**lot, "available": left})
+
+    total_available = sum(l["available"] for l in available)
+    allocations: List[Dict[str, Any]] = []
+    realized_known = True
+    realized = 0.0
+    need = remaining
+    for lot in available:
+        if need <= 0:
+            break
+        take = min(need, lot["available"])
+        need -= take
+        cost = lot.get("price")
+        if cost is None or price is None:
+            realized_known = False
+            gain = None
+        else:
+            gain = (float(price) - float(cost)) * take * mult
+            realized += gain
+        allocations.append({"lot_id": lot.get("id"), "qty": take,
+                            "cost_per_unit": None if cost is None else float(cost),
+                            "proceeds_per_unit": None if price is None else float(price),
+                            "realized": gain})
+
+    return {
+        "requested_qty": remaining,
+        "available_qty": total_available,
+        "sufficient": need <= 1e-9,
+        "shortfall": round(need, 10) if need > 1e-9 else 0.0,
+        "allocations": allocations,
+        "fees": float(fees or 0),
+        "realized": round(realized - float(fees or 0), 6) if realized_known else None,
+        "realized_known": realized_known,
+        "realized_unknown_reason": None if realized_known else (
+            "an acquisition or the disposal carries no price; a gain against a cost nobody "
+            "recorded is not a number"),
+        "remaining_qty": round(total_available - remaining, 10) if need <= 1e-9 else None,
+        "closes_position": need <= 1e-9 and abs(total_available - remaining) < 1e-9,
+        "multiplier": mult,
+    }
 
 
 def integral_qty(qty: float) -> Optional[int]:
