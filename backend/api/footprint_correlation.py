@@ -9,14 +9,15 @@ import logging
 from datetime import datetime, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
+from utils.pivot_auth import require_api_key
 from database.postgres_client import get_postgres_client, serialize_db_row
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.get("/analytics/footprint-correlation")
+@router.get("/analytics/footprint-correlation", dependencies=[Depends(require_api_key)])
 async def footprint_correlation(
     days: int = Query(default=14, ge=1, le=90),
     window_minutes: int = Query(default=30, ge=5, le=120),

@@ -1206,31 +1206,47 @@ def build_market_flow_context(api_url: str, api_key: str) -> str:
 
 # ── Portfolio Context ─────────────────────────────────────────
 
-def fetch_portfolio_context(api_url: str) -> dict:
+def fetch_portfolio_context(api_url: str, api_key: str = "") -> dict:
     """
     Fetch portfolio balances + active positions from Railway API.
     Returns dict with 'balances' and 'positions' keys, or {} on failure.
     Never raises — committee runs without portfolio data if this fails.
+
+    Book reads are AUTHENTICATED (R-IV.417). Without a key both reads 401, and the
+    committee would deliberate with no portfolio at all while looking healthy — so a
+    missing key and an auth rejection are logged as WARNINGS, not swallowed at debug.
     """
     import urllib.request
     import urllib.error
 
     base = api_url.rstrip("/")
     result = {}
+    headers = {"X-API-Key": api_key} if api_key else {}
+    if not api_key:
+        _log.warning("fetch_portfolio_context: no PIVOT_API_KEY — book reads are gated, "
+                     "so the committee will run WITHOUT portfolio context")
 
     # Fetch balances
     try:
-        req = urllib.request.Request(f"{base}/api/portfolio/balances")
+        req = urllib.request.Request(f"{base}/api/portfolio/balances", headers=headers)
         with urllib.request.urlopen(req, timeout=8) as resp:
             result["balances"] = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        (_log.warning if e.code in (401, 403) else _log.debug)(
+            "Portfolio balances unavailable: HTTP %s%s", e.code,
+            " — AUTH REJECTED, committee runs without balances" if e.code in (401, 403) else "")
     except Exception as e:
         _log.debug("Portfolio balances unavailable: %s", e)
 
     # Fetch active positions
     try:
-        req = urllib.request.Request(f"{base}/api/portfolio/positions")
+        req = urllib.request.Request(f"{base}/api/portfolio/positions", headers=headers)
         with urllib.request.urlopen(req, timeout=8) as resp:
             result["positions"] = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        (_log.warning if e.code in (401, 403) else _log.debug)(
+            "Portfolio positions unavailable: HTTP %s%s", e.code,
+            " — AUTH REJECTED, committee runs without positions" if e.code in (401, 403) else "")
     except Exception as e:
         _log.debug("Portfolio positions unavailable: %s", e)
 

@@ -484,7 +484,7 @@ def _set_cached_backtest(key: str, payload: Dict[str, Any]) -> None:
     _BACKTEST_CACHE[key] = {"created_at": datetime.utcnow(), "payload": payload}
 
 
-@analytics_router.get("/signal-stats")
+@analytics_router.get("/signal-stats", dependencies=[Depends(require_api_key)])
 async def signal_stats(
     source: Optional[str] = None,
     ticker: Optional[str] = None,
@@ -670,7 +670,7 @@ async def signal_stats(
     }
 
 
-@analytics_router.get("/trade-stats")
+@analytics_router.get("/trade-stats", dependencies=[Depends(require_api_key)])
 async def trade_stats(
     account: Optional[str] = None,
     ticker: Optional[str] = None,
@@ -827,7 +827,7 @@ async def trade_stats(
     }
 
 
-@analytics_router.get("/signals")
+@analytics_router.get("/signals", dependencies=[Depends(require_api_key)])
 async def list_signals(
     source: Optional[str] = None,
     ticker: Optional[str] = None,
@@ -914,7 +914,7 @@ async def list_signals(
     }
 
 
-@analytics_router.get("/trades")
+@analytics_router.get("/trades", dependencies=[Depends(require_api_key)])
 async def list_trades(
     account: Optional[str] = None,
     ticker: Optional[str] = None,
@@ -980,7 +980,7 @@ async def list_trades(
     }
 
 
-@analytics_router.get("/trade/{trade_id}/legs")
+@analytics_router.get("/trade/{trade_id}/legs", dependencies=[Depends(require_api_key)])
 async def trade_legs(trade_id: int = Path(..., ge=1)):
     rows = await fetch_rows(
         """
@@ -994,7 +994,7 @@ async def trade_legs(trade_id: int = Path(..., ge=1)):
     return {"trade_id": trade_id, "rows": rows}
 
 
-@analytics_router.get("/health-alerts")
+@analytics_router.get("/health-alerts", dependencies=[Depends(require_api_key)])
 async def health_alerts(
     resolved: bool = False,
     limit: int = Query(100, ge=1, le=500),
@@ -1037,7 +1037,7 @@ async def dismiss_health_alert(alert_id: int = Path(..., ge=1), _=Depends(requir
     return {"status": "ok", "alert": updated[0]}
 
 
-@analytics_router.get("/factor-performance")
+@analytics_router.get("/factor-performance", dependencies=[Depends(require_api_key)])
 async def factor_performance(
     factor: Optional[str] = None,
     days: int = Query(60, ge=1, le=3650),
@@ -1209,7 +1209,7 @@ async def factor_performance(
     }
 
 
-@analytics_router.get("/strategy-comparison")
+@analytics_router.get("/strategy-comparison", dependencies=[Depends(require_api_key)])
 async def strategy_comparison(
     days: int = Query(30, ge=1, le=3650),
     ticker: Optional[str] = None,
@@ -1310,7 +1310,7 @@ async def strategy_comparison(
     }
 
 
-@analytics_router.get("/strategy-health")
+@analytics_router.get("/strategy-health", dependencies=[Depends(require_api_key)])
 async def strategy_health(days: int = Query(30, ge=1, le=3650)):
     exists_rows = await fetch_rows("SELECT to_regclass('public.strategy_health') AS table_name")
     exists = bool(exists_rows and exists_rows[0].get("table_name"))
@@ -1393,7 +1393,7 @@ async def strategy_health(days: int = Query(30, ge=1, le=3650)):
     }
 
 
-@analytics_router.get("/convergence-stats")
+@analytics_router.get("/convergence-stats", dependencies=[Depends(require_api_key)])
 async def convergence_stats(
     days: int = Query(30, ge=1, le=3650),
     min_sources: int = Query(2, ge=2, le=6),
@@ -1455,7 +1455,7 @@ async def convergence_stats(
     }
 
 
-@analytics_router.get("/portfolio-risk")
+@analytics_router.get("/portfolio-risk", dependencies=[Depends(require_api_key)])
 async def portfolio_risk(account: Optional[str] = None):
     snapshots = await get_latest_portfolio_snapshots(account=account)
     if not snapshots:
@@ -1618,7 +1618,7 @@ async def portfolio_risk(account: Optional[str] = None):
     }
 
 
-@analytics_router.get("/price-data")
+@analytics_router.get("/price-data", dependencies=[Depends(require_api_key)])
 async def price_data(
     ticker: str = Query(..., min_length=1),
     timeframe: str = Query("D"),
@@ -1713,7 +1713,7 @@ async def price_data(
     }
 
 
-@analytics_router.get("/risk-history")
+@analytics_router.get("/risk-history", dependencies=[Depends(require_api_key)])
 async def risk_history(
     account: Optional[str] = None,
     days: int = Query(30, ge=1, le=3650),
@@ -2078,7 +2078,7 @@ async def log_uw_snapshot(request: UwSnapshotRequest, _=Depends(require_api_key)
     return {"status": "ok", "snapshot": created}
 
 
-@analytics_router.get("/uw-snapshots")
+@analytics_router.get("/uw-snapshots", dependencies=[Depends(require_api_key)])
 async def get_uw_snapshots(
     days: int = Query(1, ge=1, le=30),
     dashboard_type: Optional[str] = None,
@@ -2259,7 +2259,7 @@ async def delete_trade_by_id(trade_id: int, _=Depends(require_api_key)):
     return {"deleted": trade_id}
 
 
-@analytics_router.get("/export/signals")
+@analytics_router.get("/export/signals", dependencies=[Depends(require_api_key)])
 async def export_signals(
     format: str = Query("csv", pattern="^(csv)$"),
     source: Optional[str] = None,
@@ -2279,7 +2279,7 @@ async def export_signals(
     return _csv_response(rows, "signals_export.csv")
 
 
-@analytics_router.get("/export/trades")
+@analytics_router.get("/export/trades", dependencies=[Depends(require_api_key)])
 async def export_trades(
     format: str = Query("csv", pattern="^(csv)$"),
     account: Optional[str] = None,
@@ -2299,7 +2299,7 @@ async def export_trades(
     return _csv_response(rows, "trades_export.csv")
 
 
-@analytics_router.get("/export/factors")
+@analytics_router.get("/export/factors", dependencies=[Depends(require_api_key)])
 async def export_factors(
     format: str = Query("csv", pattern="^(csv)$"),
     factor: Optional[str] = None,
@@ -2323,7 +2323,7 @@ async def export_factors(
     return _csv_response(rows, "factors_export.csv")
 
 
-@analytics_router.get("/export/price-history")
+@analytics_router.get("/export/price-history", dependencies=[Depends(require_api_key)])
 async def export_price_history(
     format: str = Query("csv", pattern="^(csv)$"),
     ticker: Optional[str] = None,
@@ -2349,7 +2349,7 @@ async def export_price_history(
     return _csv_response(rows, "price_history_export.csv")
 
 
-@analytics_router.get("/schema-status")
+@analytics_router.get("/schema-status", dependencies=[Depends(require_api_key)])
 async def schema_status():
     tables = await get_schema_table_summary()
     try:
@@ -2387,7 +2387,7 @@ async def schema_status():
 # ── Ariadne's Thread: Risk Budget + Counterfactuals ──────────────────
 
 
-@analytics_router.get("/risk-budget")
+@analytics_router.get("/risk-budget", dependencies=[Depends(require_api_key)])
 async def get_risk_budget(account: Optional[str] = None):
     """
     Ariadne's Thread: live risk budget from the real book.
@@ -2520,7 +2520,7 @@ async def resolve_counterfactuals(_=Depends(require_api_key)):
 
 # ── Brief 3B: The Oracle — pre-computed insights endpoint ────────────
 
-@analytics_router.get("/oracle")
+@analytics_router.get("/oracle", dependencies=[Depends(require_api_key)])
 async def get_oracle_insights(
     days: int = Query(30, ge=7, le=365),
     account: Optional[str] = Query(None),
@@ -2578,7 +2578,7 @@ async def get_oracle_insights(
 
 # ── Brief 3D: Hermes Dispatch — weekly reports endpoint ──────────────
 
-@analytics_router.get("/weekly-reports")
+@analytics_router.get("/weekly-reports", dependencies=[Depends(require_api_key)])
 async def get_weekly_reports(
     limit: int = Query(12, ge=1, le=52),
 ):
@@ -2660,7 +2660,7 @@ async def run_backfill_attribution(_=Depends(require_api_key)):
     return result
 
 
-@analytics_router.get("/cash-flows")
+@analytics_router.get("/cash-flows", dependencies=[Depends(require_api_key)])
 async def list_cash_flows(account: Optional[str] = None, days: int = 365):
     """List all cash flows (withdrawals, deposits)."""
     from database.postgres_client import get_postgres_client
@@ -2699,7 +2699,7 @@ async def log_cash_flow(body: dict, _=Depends(require_api_key)):
     return {"status": "created", "cash_flow": dict(row)}
 
 
-@analytics_router.get("/bias-accuracy")
+@analytics_router.get("/bias-accuracy", dependencies=[Depends(require_api_key)])
 async def bias_accuracy_report(days: int = Query(30, ge=1, le=365)):
     """Directional accuracy of bias + gatekeeper effectiveness."""
     from database.postgres_client import get_postgres_client

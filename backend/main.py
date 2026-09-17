@@ -3,7 +3,8 @@ Pandora's Box - Main FastAPI Application
 High-performance trading signal processor with sub-100ms latency
 """
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import Depends, FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from utils.pivot_auth import require_api_key
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -1633,14 +1634,14 @@ async def vwap_validation_endpoint():
     return {"status": "unavailable", "message": "VWAP validation not available (missing yfinance/pandas or outside market hours)"}
 
 
-@app.get("/api/analytics/confluence-validation")
+@app.get("/api/analytics/confluence-validation", dependencies=[Depends(require_api_key)])
 async def confluence_validation_endpoint(days: int = 30):
     """Compare outcomes of confluent vs standalone signals."""
     from analytics.confluence_validation import compute_confluence_validation
     return await compute_confluence_validation(days=days)
 
 
-@app.get("/api/analytics/shadow-validation")
+@app.get("/api/analytics/shadow-validation", dependencies=[Depends(require_api_key)])
 async def shadow_validation_endpoint(days: int = 5):
     """Compare server-side scanner signals vs TradingView webhook signals."""
     from analytics.confluence_validation import compute_shadow_validation
