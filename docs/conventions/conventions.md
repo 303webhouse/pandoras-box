@@ -728,11 +728,11 @@ fail is useless; a verifier whose failure impersonates its subject is worse than
 
 Counting failed runs in 92 log files:
 
-@@F@@
+```
     for f in logs; do iconv -f UTF-16LE -t UTF-8 "$f" | grep -q "archive failure" || echo "no-failure: $f"; done
 
     result: 92 logs WITHOUT a failure line      <- ALL of them
-@@F@@
+```
 
 **Including the file whose failure line had been read directly, by eye, four minutes
 earlier.**
@@ -750,9 +750,9 @@ asks nothing of them.
 
 **Reporting both classes makes the instrument testable by arithmetic:**
 
-@@F@@
+```
     73 with + 19 without = 92 files      <- and 92 is the file count
-@@F@@
+```
 
 **Had the broken version reported both, it would have read `0 + 0 = 0` against a
 population of 92, and the failure would have been visible in the output itself rather
@@ -774,3 +774,57 @@ the partition tells you the check was working when it got there.
 **Kin:** the null-verifier law. **A search that cannot report a non-empty complement is a
 verification that cannot fail**, and this one was built by the lane that had filed four
 instances of that law in the preceding week.
+
+
+## #19 A SHADOW DECISION LIVES ON THE ROW, AND NOTHING MAY OVERWRITE IT
+
+**R-IV.423(a), standing rule. First instance: R-IV.430(d).**
+
+> **A shadow decision is persisted as structured data on the signal row — the decision, the
+> gate version, its inputs, its thresholds, and whether it diverged. Discord is never a
+> record.**
+
+### The rule has two halves
+
+**1 — It must land.** Pass 9 built its three shadow records exactly as specified, in memory,
+and the signals INSERT never wrote them: **zero signals carried the evidence** a 60-day review
+was waiting on (R-IV.423(b)). A shadow that is computed and not stored is not a shadow — it is
+a log line that nobody will read, and the review it feeds is a review of nothing.
+
+**2 — It must survive.** Stored evidence that a later writer can replace is evidence with an
+expiry nobody chose. **Where a shadow's payload lives is a decision about which writers can
+erase it**, and it is made at build time, not discovered at review time.
+
+- Pass 9's records got their own columns rather than `committee_data`, because
+  `committee_bridge` replaces `committee_data` wholesale when a committee run lands.
+- CIRCE'S STEW's payload rides the INSERT itself (`triggering_factors`), so no follow-up
+  write can leave a fire without it.
+
+### Instance 1 — a legacy re-scorer that could erase shadow evidence (R-IV.430(d))
+
+`update_signal_with_score` **replaces** `triggering_factors` — the field where the STRIKE and
+CIRCE shadows keep their full payload and their L0 suppress tag. The legacy `/signals` path
+calls it for any unscored row it reads.
+
+**Only the L0 filter kept shadow rows away from that path**, and `L0_ENFORCE=false` is the
+filter's documented rollback. Flipping the rollback would have scored every shadow row and
+**overwritten the payload the shadow exists to keep, and the tag that hides it** — silently,
+because a re-score looks like ordinary work.
+
+**Caught while building CIRCE (d990abb), before any shadow row was lost.** The statement now
+skips `status = 'SHADOW'`, so a shadow row's integrity no longer depends on a flag whose
+purpose is to be flipped.
+
+> **A shadow whose payload can be overwritten by a legacy re-scorer is a shadow that erases its
+> own evidence.** — R-IV.430(d)
+
+### The test
+
+> **For every shadow field: name every statement that can WRITE it after the insert. If the
+> answer depends on a flag, a filter, or a caller's good behaviour, the evidence is not
+> stored — it is lent.**
+
+**Kin:** conventions #15 (failure marking must not depend on the resource it reports on) —
+the same shape one step earlier: **protection that depends on a switch whose job is to be
+switched is not protection.** And DEF-SHADOW-EXPIRES-AT-DROPPED, half 1 of this rule failing
+for a third field at the same insert.
