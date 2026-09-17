@@ -148,3 +148,17 @@ def test_the_enricher_names_the_block_when_there_was_one():
     with patch("integrations.uw_api.get_snapshot", new=AsyncMock(return_value=blocked)),          patch("bias_engine.factor_utils.get_price_history", new=AsyncMock(return_value=None)):
         asyncio.run(se._fetch_snapshot("QQQ"))
     assert "not attempted" in vs.summary()["consumers"]["enricher.snapshot"]["last_reason"]
+
+
+def test_a_refusal_is_not_reported_as_a_call_we_never_made():
+    """RATE_LIMITED comes back only AFTER a 429, so it is the one sentinel that means UW
+    answered. Calling it "not attempted" mislabels it in the other direction."""
+    from integrations import uw_api
+    from integrations.uw_governor import UWUnavailable, describe_block
+    refused = UWUnavailable("RATE_LIMITED", caller="ohlc_bars")
+    fb = [{"o": 1, "h": 1, "l": 1, "c": 1, "v": 1, "t": 1757980800000}]
+    with patch.object(uw_api, "cache_get", new=AsyncMock(return_value=None)),          patch.object(uw_api, "cache_set", new=AsyncMock(return_value=None)),          patch.object(uw_api, "get_ohlc", new=AsyncMock(return_value=refused)),          patch.object(uw_api, "_fetch_yfinance_bars", lambda *a, **k: fb):
+        asyncio.run(uw_api.get_bars("QQQ", 1, "day", "2026-09-01", "2026-09-17"))
+    reason = vs.summary()["consumers"]["uw_api.get_bars"]["last_reason"]
+    assert "refused" in reason and "not attempted" not in reason
+    assert "not attempted" in describe_block(UWUnavailable("CIRCUIT_OPEN"))

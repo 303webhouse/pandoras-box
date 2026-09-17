@@ -36,6 +36,7 @@ from integrations.uw_governor import (
     precheck as _governor_precheck,
     UWUnavailable,
     is_unavailable,
+    describe_block,
     NO_API_KEY as _GOV_NO_API_KEY,
     CIRCUIT_OPEN as _GOV_CIRCUIT_OPEN,
     RATE_LIMITED as _GOV_RATE_LIMITED,
@@ -149,9 +150,22 @@ async def _consume_token():
 # 16,583 while UW reported the 40,000 limit hit — so our number was never the
 # account's number, and no amount of internal accounting would have shown that.
 #
-# UW publishes the truth on every response, 200 or 429:
+# UW publishes the account's own counter on a 200:
 #     x-uw-daily-req-count   requests used today, per UW, ALL clients
 #     x-uw-token-req-limit   the account's daily limit
+#
+# ── CORRECTION, MEASURED 2026-09-17 ─────────────────────────────────────
+# This comment used to say "on every response, 200 or 429", and R-IV.441(c) was written
+# against that sentence. It is FALSE. A live 429 from /stock-state carries exactly one
+# header of interest — `x-request-id` — and no counter and no limit. So an exhausted
+# account produces no reading at all: the gate opens because the last reading is old, the
+# call goes out, UW refuses it, and nothing about that refusal updates what we know. The
+# consequence is recorded rather than assumed away: a 429 IS evidence of exhaustion even
+# without a number, so it is stored as its own timestamped fact below and the governor
+# backs off on it for a bounded window. Time-bounded, because an evidence-free shed that
+# suppresses its own evidence is the latch this whole line of work exists to remove.
+REDIS_KEY_UW_429 = "uw:last_429"
+RATE_LIMIT_EVIDENCE_TTL_S = 7200
 #
 # This is what lets the governor govern the ACCOUNT rather than one process —
 # "the account has one budget, so it needs one accountant" (DEF-UW-CLIENT-BYPASS).
@@ -161,11 +175,16 @@ REDIS_KEY_UW_QUOTA = "uw:quota_headers"
 
 
 async def _capture_quota_headers(resp) -> None:
-    """Record UW's own count/limit. Never raises; never touches the body."""
+    """Record UW's own count/limit, and a refusal as its own fact.
+
+    Never raises; never touches the body.
+    """
     try:
         used = resp.headers.get("x-uw-daily-req-count")
         limit = resp.headers.get("x-uw-token-req-limit")
         if used is None and limit is None:
+            if resp.status_code == 429:
+                await _record_429()
             return
         from database.redis_client import get_redis_client
         client = await get_redis_client()
@@ -181,6 +200,25 @@ async def _capture_quota_headers(resp) -> None:
         }))
     except Exception:
         # Telemetry must never fail the call it observes.
+        pass
+
+
+async def _record_429() -> None:
+    """Store the refusal itself, with its time. Never raises.
+
+    A 429 carries no counter, so it cannot update `used`. What it does carry is the fact
+    that UW turned a request away at a known instant, which is a measurement of the account
+    in the only form the vendor offers when it is at its limit.
+    """
+    try:
+        from database.redis_client import get_redis_client
+        client = await get_redis_client()
+        if not client:
+            return
+        from datetime import datetime as _dt, timezone as _tz
+        await client.setex(REDIS_KEY_UW_429, RATE_LIMIT_EVIDENCE_TTL_S,
+                           _dt.now(_tz.utc).isoformat())
+    except Exception:
         pass
 
 
@@ -201,6 +239,10 @@ async def account_quota() -> dict:
             raw = await client.get(REDIS_KEY_UW_QUOTA)
             if raw:
                 out.update(_json.loads(raw))
+            last_429 = await client.get(REDIS_KEY_UW_429)
+            if last_429:
+                out["last_429_at"] = (last_429.decode() if isinstance(last_429, bytes)
+                                      else str(last_429))
         try:
             ours = await get_daily_count()
             out["ours_attributed"] = ours
@@ -799,7 +841,7 @@ async def get_bars(
         # both as "unavailable or empty" is how a substituting process looks identical to a
         # blocked one on /health, which was the live reading on 2026-09-17.
         if is_unavailable(bars):
-            reason = f"uw /ohlc/1d not attempted: governor block ({bars.reason})"
+            reason = f"uw /ohlc/1d {describe_block(bars)}"
         else:
             reason = "uw /ohlc/1d returned no regular-session bar"
         logger.info("%s for %s — falling back to yfinance", reason, ticker)
