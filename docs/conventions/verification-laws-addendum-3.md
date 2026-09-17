@@ -21,6 +21,22 @@ Ratified as Step 3 of record by R-IV.344(a); the three-line form settled at R-IV
 **One line:** a gate that cannot distinguish the two states either side of the event it
 gates is a null verifier for that event, however well it works for its own.
 
+### An instance in a sampling frame — the Triton certificate (R-IV.428(c))
+
+**Filed from the ruling; the certificate itself is not re-read here.** The certificate's
+verification sample **required each row to be present in `stable_daily_bars`** — and the rows
+that could fail the adjusted-bars check (`DEF-ADJUSTED-BARS-VS-RAW-ENTRY`) were exactly the rows
+that membership excluded. **It passed, and it could not have done otherwise.**
+
+**Same law, different surface.** The readiness gate could not tell the old process from the new
+one; this sample could not contain the failure it was drawn to look for.
+
+> **A SAMPLING FRAME THAT CANNOT CONTAIN THE FAILURE CANNOT TEST FOR IT.**
+
+**The check is Law 3's, applied to a sample rather than an instrument:** before trusting a clean
+sample, name one row that WOULD have failed and confirm the frame could have drawn it. If no such
+row can be named, the sample is a statement about the frame, not about the population.
+
 ---
 
 ## LAW 2 — INDEPENDENCE IS OF THE QUESTION, NOT THE MECHANISM
