@@ -995,16 +995,19 @@
     const el = $('bookStrip'); if (!el) return;
     const bookOk = !!(balances || pnl);
     const accts = Array.isArray(balances) ? balances : [];
-    // R-IV.416(c) — the age is the payload's own vintage, never a constant (the old
-    // `bookOk ? 60 : null` asserted "fresh" for any non-empty read). The Balance total sums
-    // every row, so the OLDEST row's updated_at (timestamptz) governs; no stamp -> null ->
-    // unconfirmed. /pnl carries no age of its own.
-    const stamped = accts.map((a) => ({ name: a.account_name, t: Date.parse(a.updated_at) }))
+    // R-IV.416(c) — no fabricated age (the old `bookOk ? 60 : null` asserted "fresh" for any
+    // non-empty read), and no borrowed one either. account_balances.updated_at is NOT the
+    // Balance's vintage: the position write path stamps it on cash-only adjustments
+    // (unified_positions.py, `SET cash = cash + $1, updated_at = NOW()`) without re-reading
+    // balance, so a fresh stamp can sit on a weeks-old balance. No field records when the
+    // balance itself was read, so the age is unknown -> unconfirmed. The title still names
+    // the row touched longest ago (R-IV.420(d) interim). /pnl carries no age of its own.
+    const touched = accts.map((a) => ({ name: a.account_name, t: Date.parse(a.updated_at) }))
       .filter((a) => Number.isFinite(a.t)).sort((x, y) => x.t - y.t);
-    const oldest = stamped.length ? stamped[0] : null;
-    const bookAge = oldest ? Math.max(0, (Date.now() - oldest.t) / 1000) : null;
-    const bookNote = oldest ? 'oldest balance: ' + (oldest.name || '?') + ', as of ' + new Date(oldest.t).toISOString().slice(0, 16) + 'Z' : null;
-    setDot('bookHealthDot', bookAge, bookOk ? false : null, false, null, bookNote);
+    const oldest = touched.length ? touched[0] : null;
+    const bookNote = 'balance vintage not recorded'
+      + (oldest ? '; row touched longest ago: ' + (oldest.name || '?') + ' at ' + new Date(oldest.t).toISOString().slice(0, 16) + 'Z' : '');
+    setDot('bookHealthDot', null, bookOk ? false : null, false, null, bookNote);
     // The RANK ignores age, as themes does (4c76c5c): balances are not a streaming feed, so
     // a 900s bound would pin the global dot amber all day. The tile's own dot still shows
     // the honest age; the bound the book should be judged by is not yet ruled.
