@@ -1,7 +1,8 @@
 # DEF-SHADOW-EXPIRES-AT-DROPPED — P2
 
 **Registered:** R-IV.430(c). **Found:** 2026-09-17, CC-BUILD, while building CIRCE'S STEW
-(R-IV.429(b)). **Status:** OPEN — **not to be fixed yet** (see DISPOSITION).
+(R-IV.429(b)). **Status:** FIXED FOR SHADOW ROWS with the backtest module (see RESOLUTION);
+**the wider drop below is OPEN and needs its own ruling.**
 **Row count:** CC-QUERY, when next free. **Code-path facts below:** read from source by
 CC-BUILD at d990abb; no database was read for this entry.
 
@@ -46,3 +47,28 @@ to the backtest module.
 the backtest module**, which is where the grading horizon and the EXPIRED rule get defined.
 Rows already written cannot be repaired from the row: the expiry would have to be recomputed
 from the entry session under the rule the backtest module fixes, and stated as recomputed.
+
+## RESOLUTION — with the backtest module (R-IV.429(b))
+
+`log_signal` now writes `expires_at` **for SHADOW rows only**, by a separate statement after a
+real insert (`_write_shadow_expiry`), so a failure there cannot lose the signal. STRIKE rows
+written from this deploy onward carry their expiry; rows already written stay NULL and are not
+back-filled.
+
+## THE DROP IS WIDER THAN STRIKE — OPEN, needs a ruling
+
+The entry above says no other writer sets `signals.expires_at`. **That is true of STRIKE's rows,
+and it understates the defect.** `signals/pipeline.py` sets
+`signal_data["expires_at"] = ... or calculate_expiry(signal_data)` for **every** signal that goes
+through `process_signal_unified` (4 hours intraday, 24 hours swing, 7 days weekly), and the same
+INSERT discards all of them.
+
+**The live feed has been running on that absence:**
+- the flat feed's ACTIVE filter is `expires_at IS NULL OR expires_at > NOW()`, which every live
+  row passes;
+- `/api/trade-ideas/expire` falls back to `created_at + 24 hours` when `expires_at` is NULL.
+
+So an intraday signal the pipeline meant to expire after 4 hours stays on the ACTIVE surfaces
+for 24. **Persisting the value for ACTIVE rows would change what the live feed shows, and for how
+long.** That is a live-surface decision, so this fix is scoped to SHADOW rows and the rest is left
+as found. Source-read facts; how the live feed's contents would change is a CC-QUERY read.

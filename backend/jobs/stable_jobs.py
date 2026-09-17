@@ -389,6 +389,34 @@ async def _run_circe_pass(et) -> None:
         logger.warning("[circes_stew] job_runs finish failed: %s", exc)
 
 
+# THE SHADOW GRADER (R-IV.423(c), R-IV.429(b)): the backtest module's post-close pass. Same
+# durable completion check as the nightly; a failed pass retries every RETRY_EVERY_S until
+# RETRY_UNTIL_HOUR_ET (backtest/job.py), clear of the 21:00 nightly.
+_grader_attempted_at: dict = {}
+
+
+async def _maybe_run_shadow_grader(et, key_prefix: str) -> None:
+    """Never raises."""
+    from backtest import job as grader
+    from jobs.job_runs import has_completed
+
+    last = _grader_attempted_at.get(key_prefix)
+    if last is not None and (et - last).total_seconds() < grader.RETRY_EVERY_S:
+        return
+    try:
+        done = await has_completed(grader.JOB_NAME, et.date())
+    except Exception as exc:
+        logger.warning("[shadow_grader] completion check failed: %s", exc)
+        done = None
+    if done is True:
+        return
+    _grader_attempted_at[key_prefix] = et
+    if last is not None:
+        logger.warning("[shadow_grader] RETRY for %s (completed=%s)", key_prefix, done)
+    await _record(grader.JOB_NAME, lambda: grader.run_shadow_grader(et.date()),
+                  session_date=et.date())
+
+
 async def _maybe_run_nightly(et, key_prefix: str) -> None:
     """Run the nightly if this session's pass has not completed. Never raises.
 
@@ -480,6 +508,14 @@ async def stable_engine_loop():
                         _circe_attempted_at[key_prefix] = et
                         logger.error("[circes_stew] market calendar cannot answer for %s -- "
                                      "pass NOT run. Extend MARKET_HOLIDAYS.", et.date())
+                # ── The shadow grader (R-IV.429(b)) ──────────────────────────
+                from backtest import job as _grader
+                from stable_engine.market_calendar import is_trading_day_or_none as _open_day
+
+                gh, gm = _grader.RUN_TIME_ET
+                if ((et.hour, et.minute) >= (gh, gm) and et.hour <= _grader.RETRY_UNTIL_HOUR_ET
+                        and _open_day(et.date()) is True):
+                    await _maybe_run_shadow_grader(et, key_prefix)
             # Trim yesterday's keys at midnight ET
             if et.hour == 0 and et.minute < 2:
                 fired = {k for k in fired if k.startswith(key_prefix)}

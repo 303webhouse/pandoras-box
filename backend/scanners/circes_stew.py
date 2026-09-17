@@ -48,7 +48,8 @@ LINEAGE = "Turtle Soup (Williams; Raschke's close-back-inside refinement)"
 N_BARS = 20
 CONFIRM_BARS = 4                     # 1-4 bars, the breach bar itself counting as 1
 DAILY_CEILING = 10                   # R-IV.421(d): above this the trigger is too loose
-VA_EDGE_FRACTION = 0.25              # outer quarter of the VA on each side = "edge"
+VA_EDGE_FRACTION = 0.25              # outer quarter of the VA on each side = "edge";
+                                     # PROVISIONAL until 30 fires show its distribution (R-IV.430(a))
 LOCATION_GATE = frozenset({"outside", "edge"})
 TARGET_R_MULTIPLE = 2.0              # review: "structural ... or fixed R-multiple"
 

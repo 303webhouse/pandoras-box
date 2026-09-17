@@ -1705,6 +1705,13 @@ async def init_database():
         except Exception as e:
             print(f"WARNING: signals enrichment-join columns skipped (lock timeout?): {e}")
 
+        # The backtest module's tables (migration 035; backtest/store.py holds the DDL).
+        try:
+            from backtest.store import ensure_tables as _ensure_backtest_tables
+            await _ensure_backtest_tables(conn)
+        except Exception as e:
+            print(f"WARNING: backtest tables skipped: {e}")
+
         # ZEUS Phase 2: Feed tier classification column
         try:
             await conn.execute("""
@@ -1887,7 +1894,33 @@ async def log_signal(
             logger.warning("Signal insert skipped (duplicate signal_id=%s)", signal_data.get("signal_id"))
         else:
             await _write_iv_regime_evidence(conn, signal_data)
+            await _write_shadow_expiry(conn, signal_data)
         return inserted
+
+
+async def _write_shadow_expiry(conn, signal_data) -> None:
+    """DEF-SHADOW-EXPIRES-AT-DROPPED, moved with the backtest module (R-IV.430(c)).
+
+    SHADOW ROWS ONLY. Every pipeline signal also computes an expiry (pipeline.calculate_expiry)
+    that the INSERT above discards, and the live feed has been running on that absence: the
+    ACTIVE filter passes every NULL expiry and the expire sweep falls back to created_at +
+    24h. Persisting it for ACTIVE rows would change what the live feed shows and for how long
+    -- a live-surface change that needs its own ruling, not a side effect of this one. A
+    SHADOW row is never on an ACTIVE surface, so for it the value is only what the grading
+    rule reads.
+
+    A separate statement, like the evidence write: a failure here never loses the signal.
+    """
+    if signal_data.get("status") != "SHADOW" or not signal_data.get("expires_at"):
+        return
+    try:
+        await conn.execute(
+            "UPDATE signals SET expires_at = $2 WHERE signal_id = $1 AND status = 'SHADOW'",
+            signal_data["signal_id"],
+            _normalize_timestamp_for_db(signal_data["expires_at"]),
+        )
+    except Exception as exc:
+        logger.error("shadow expiry NOT persisted for %s: %s", signal_data.get("signal_id"), exc)
 
 
 async def _write_iv_regime_evidence(conn, signal_data) -> None:
