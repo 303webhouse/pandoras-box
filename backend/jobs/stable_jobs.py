@@ -329,6 +329,66 @@ async def _run_s8():
     return res
 
 
+# CIRCE'S STEW (R-IV.429(b)). After the close, once per trading session, with the same
+# durable completion check as S8 and the nightly. Its own runner rather than _record():
+# bars that are not published YET are a wait, not a failure, so they are recorded as a
+# failed attempt (the retry must still see the session as not done) but do not count
+# toward the flatline alarm until ALARM_FROM_HOUR_ET.
+_circe_attempted_at: dict = {}
+
+
+async def _maybe_run_circe(et, key_prefix: str) -> None:
+    """Never raises."""
+    from jobs import circes_stew_job as circe
+    from jobs.job_runs import has_completed
+
+    last = _circe_attempted_at.get(key_prefix)
+    if last is not None and (et - last).total_seconds() < circe.RETRY_EVERY_S:
+        return
+    try:
+        done = await has_completed(circe.JOB_NAME, et.date())
+    except Exception as exc:
+        logger.warning("[circes_stew] completion check failed: %s", exc)
+        done = None
+    if done is True:
+        return
+    _circe_attempted_at[key_prefix] = et
+    if last is not None:
+        logger.warning("[circes_stew] RETRY for %s (completed=%s)", key_prefix, done)
+    await _run_circe_pass(et)
+
+
+async def _run_circe_pass(et) -> None:
+    from jobs import circes_stew_job as circe
+    from jobs.job_runs import finish_run, start_run
+    from stable_engine import job_status
+
+    run_id = await start_run(circe.JOB_NAME, et.date())
+    try:
+        res = await circe.run_circes_stew(et.date())
+    except circe.SessionBarsUnavailable as e:
+        await _finish_run(run_id, "error", str(e))
+        if et.hour < circe.ALARM_FROM_HOUR_ET:
+            logger.warning("[circes_stew] session bars not published yet: %s", e)
+            return
+        should_alert = await job_status.mark_failure(circe.JOB_NAME, f"SessionBarsUnavailable: {e}")
+        if should_alert:
+            await _fire_flatline_alert(circe.JOB_NAME, e)
+        return
+    except Exception as e:
+        logger.warning("[circes_stew] pass failed: %s", e)
+        await _finish_run(run_id, "error", str(e))
+        should_alert = await job_status.mark_failure(circe.JOB_NAME, f"{type(e).__name__}: {e}")
+        if should_alert:
+            await _fire_flatline_alert(circe.JOB_NAME, e)
+        return
+    await job_status.mark_success(circe.JOB_NAME)
+    try:
+        await finish_run(run_id, "ok", rows_touched=res.get("persisted"))
+    except Exception as exc:
+        logger.warning("[circes_stew] job_runs finish failed: %s", exc)
+
+
 async def _maybe_run_nightly(et, key_prefix: str) -> None:
     """Run the nightly if this session's pass has not completed. Never raises.
 
@@ -404,6 +464,22 @@ async def stable_engine_loop():
                 nh, nm = NIGHTLY_TIME
                 if (et.hour, et.minute) >= (nh, nm) and et.hour <= NIGHTLY_RETRY_UNTIL_HOUR_ET:
                     await _maybe_run_nightly(et, key_prefix)
+
+                # ── CIRCE'S STEW daily pass (R-IV.429(b)) ────────────────────
+                # A market holiday is not a session, and a date the calendar cannot
+                # answer for is not one either: UNKNOWN is not YES.
+                from jobs import circes_stew_job as _circe
+                from stable_engine.market_calendar import is_trading_day_or_none
+
+                ch, cm = _circe.RUN_TIME_ET
+                if (et.hour, et.minute) >= (ch, cm) and et.hour <= _circe.RETRY_UNTIL_HOUR_ET:
+                    _open = is_trading_day_or_none(et.date())
+                    if _open is True:
+                        await _maybe_run_circe(et, key_prefix)
+                    elif _open is None and key_prefix not in _circe_attempted_at:
+                        _circe_attempted_at[key_prefix] = et
+                        logger.error("[circes_stew] market calendar cannot answer for %s -- "
+                                     "pass NOT run. Extend MARKET_HOLIDAYS.", et.date())
             # Trim yesterday's keys at midnight ET
             if et.hour == 0 and et.minute < 2:
                 fired = {k for k in fired if k.startswith(key_prefix)}

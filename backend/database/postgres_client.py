@@ -1694,6 +1694,17 @@ async def init_database():
         except Exception as e:
             print(f"WARNING: signals iv_regime evidence columns skipped (lock timeout?): {e}")
 
+        # R-IV.422: the enrichment join, on the row (migration 034). CIRCE'S STEW writes it
+        # first; every scanner follows. Written by a separate statement after the insert.
+        try:
+            await conn.execute("""
+                ALTER TABLE signals
+                    ADD COLUMN IF NOT EXISTS va_location           TEXT,
+                    ADD COLUMN IF NOT EXISTS sector_rotation_state TEXT
+            """)
+        except Exception as e:
+            print(f"WARNING: signals enrichment-join columns skipped (lock timeout?): {e}")
+
         # ZEUS Phase 2: Feed tier classification column
         try:
             await conn.execute("""
@@ -2298,7 +2309,13 @@ async def get_signal_by_id(signal_id: str) -> Optional[Dict[Any, Any]]:
 
 
 async def update_signal_with_score(signal_id: str, score: float, bias_alignment: str, triggering_factors: Dict):
-    """Update a signal with its calculated score and bias alignment"""
+    """Update a signal with its calculated score and bias alignment.
+
+    Never a SHADOW row. Shadow emissions are not scored (R-IV.421(c)), and this statement
+    REPLACES triggering_factors -- where a shadow row keeps its full payload and its L0
+    suppress tag. Today the L0 filter keeps shadow rows away from the legacy re-scorer, but
+    L0_ENFORCE=false is the documented rollback, so the row's integrity must not depend on it.
+    """
     pool = await get_postgres_client()
     
     async with pool.acquire() as conn:
@@ -2306,6 +2323,7 @@ async def update_signal_with_score(signal_id: str, score: float, bias_alignment:
             UPDATE signals 
             SET score = $2, bias_alignment = $3, triggering_factors = $4
             WHERE signal_id = $1
+              AND COALESCE(status, 'ACTIVE') <> 'SHADOW'
         """, signal_id, score, bias_alignment, dumps_jsonb(triggering_factors))
 
 

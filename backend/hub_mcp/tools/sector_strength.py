@@ -7,7 +7,11 @@ from typing import Any, Dict, List
 
 from ..decorators import mcp_tool
 from ..envelope import make_response
-from services.read_only.sectors import get_sector_rotation
+from services.read_only.sectors import (
+    classify_rotation_regime,
+    get_sector_rotation,
+    map_sector_state,
+)
 
 DESCRIPTION = (
     "Returns cross-sectional sector relative strength and rotation regime tags "
@@ -30,28 +34,10 @@ DESCRIPTION = (
 )
 
 
-def _classify_regime(sectors: List[Dict[str, Any]]) -> str:
-    """Heuristic rotation-regime label from per-sector RS readings."""
-    leaders = [s for s in sectors if s["state"] in ("LEADING", "ROTATING_IN")]
-    laggards = [s for s in sectors if s["state"] in ("LAGGING", "ROTATING_OUT")]
-    if len(leaders) <= 2:
-        return "CONCENTRATED_LEADERSHIP"
-    if len(leaders) >= 5 and len(laggards) <= 3:
-        return "BROAD_ROTATION"
-    if len(laggards) >= 6:
-        return "ACTIVE_DISTRIBUTION"
-    return "REGIME_AGNOSTIC"
-
-
-def _map_status(status: str, rs_20d: "float | None") -> str:
-    if rs_20d is None:
-        return "NEUTRAL"
-    s = (status or "").upper()
-    if s == "SURGING":
-        return "LEADING" if rs_20d >= 0 else "ROTATING_IN"
-    if s == "DUMPING":
-        return "LAGGING" if rs_20d <= 0 else "ROTATING_OUT"
-    return "NEUTRAL"
+# One definition, shared with the signal enrichment join (R-IV.422). The local names
+# are kept so this module reads as it did.
+_classify_regime = classify_rotation_regime
+_map_status = map_sector_state
 
 
 @mcp_tool(name="hub_get_sector_strength", description=DESCRIPTION)

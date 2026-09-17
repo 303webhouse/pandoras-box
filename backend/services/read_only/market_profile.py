@@ -215,3 +215,55 @@ async def get_market_profile(ticker: str) -> Optional[Dict[str, Any]]:
     }
 
     return {"status": status, "data": data, "staleness_seconds": age_seconds}
+
+
+def _et_midnight_utc(d: date) -> datetime:
+    """00:00 America/New_York on `d`, as an aware UTC instant (DST-correct)."""
+    return _ET.localize(datetime(d.year, d.month, d.day)).astimezone(timezone.utc)
+
+
+async def get_prior_session_vas(conn, tickers, session_date: date) -> Dict[str, Dict[str, Any]]:
+    """PRIOR-SESSION developing VA for each ticker, as it stood before `session_date`.
+
+    R-IV.422 / Olympus review 2026-04-22 (PYTHIA + PYTHAGORAS): "use PRIOR SESSION developing
+    VA at signal time -- cumulative VA introduces lookahead bias." So this never reads a row
+    from `session_date` itself: the window is the prior trading day's ET calendar date and
+    nothing else. The last event in that window whose VA is usable carries the prior session's
+    VA as developed through its final alert.
+
+    A ticker with no usable row in that window is ABSENT from the result -- a stale VA from an
+    older session is not the prior session's VA, and is not returned as if it were.
+    Pine serializes a missing level as 0, so zero / inverted levels are excluded in SQL.
+
+    Returns {ticker: {vah, val, poc, as_of, va_session}}.
+    """
+    from stable_engine.market_calendar import previous_trading_day
+
+    prior = previous_trading_day(session_date)
+    rows = await conn.fetch(
+        """
+        SELECT DISTINCT ON (ticker) ticker, vah, val, poc, timestamp
+        FROM pythia_events
+        WHERE ticker = ANY($1::text[])
+          AND timestamp >= $2::timestamptz
+          AND timestamp <  $3::timestamptz
+          AND vah > 0 AND val > 0 AND vah > val
+        ORDER BY ticker, timestamp DESC
+        """,
+        sorted({(t or "").upper() for t in tickers if t}),
+        _et_midnight_utc(prior),
+        _et_midnight_utc(prior + timedelta(days=1)),
+    )
+    out: Dict[str, Dict[str, Any]] = {}
+    for r in rows:
+        ts = r["timestamp"]
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        out[r["ticker"]] = {
+            "vah": _num_or_none(r["vah"]),
+            "val": _num_or_none(r["val"]),
+            "poc": _num_or_none(r["poc"]),
+            "as_of": ts.astimezone(timezone.utc).isoformat(),
+            "va_session": prior.isoformat(),
+        }
+    return out

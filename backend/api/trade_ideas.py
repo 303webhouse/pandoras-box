@@ -180,9 +180,14 @@ async def get_trade_ideas_feed(
     # feed (v2 Kairos's source) was never wired to the gate, unlike /grouped and
     # /main-feed — so Holy Grail / PULLBACK / non-liquid RESISTANCE were leaking through
     # (item 6a). Static predicate, no params; no-op string in shadow mode.
+    #
+    # Except for an explicit status=SHADOW read. Shadow emitters (STRIKE, CIRCE'S STEW) tag
+    # every row would_suppress so the legacy surfaces that filter only on user_action cannot
+    # show them -- which means the L0 exclusion would hide exactly the rows a SHADOW read asks
+    # for. SHADOW rows never match status=ACTIVE, so no actionable read is widened.
     from config.l0_routing import l0_enforce_where_clause
     _l0 = l0_enforce_where_clause()
-    if _l0:
+    if _l0 and not (status and status.upper() == "SHADOW"):
         conditions.append(_l0)
 
     where_clause = " AND ".join(conditions) if conditions else "TRUE"
