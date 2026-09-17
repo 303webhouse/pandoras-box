@@ -17,7 +17,12 @@
   --amber: #f5a524;
   --text: #e2e8f0;
   --text-2: #8b98ad;
-  --text-3: #5b6b85;
+  /* R-IV.416(e) / DEF-V2-TEXT3-CONTRAST — was #5b6b85 (3.71 / 3.48 / 3.35 : 1 on
+     --bg / --panel / --panel-2, failing WCAG AA at 8-12px). Same hue and saturation,
+     lightness only: 5.12 / 4.80 / 4.63 : 1. Hardcoded copies that do NOT follow this
+     token: v2.js chart ticks (#5b6b85), and the deck-bar fallbacks in styles.css and
+     docs/components/pandora-deck-bar.md. */
+  --text-3: #70829d;
   --mono: ui-monospace, "SFMono-Regular", "JetBrains Mono", Menlo, Consolas, monospace;
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
@@ -72,10 +77,17 @@ body {
   background: var(--text-3); box-shadow: 0 0 0 3px rgba(255,255,255,0.03);
 }
 .health-dot.ok { background: var(--up); }
+/* v2.js no longer emits .stale (R-IV.413(e)); kept because stater.js still does. */
 .health-dot.stale { background: var(--teal); }
+/* Confirmed bad: the payload reported an error (R-IV.413(e)). */
 .health-dot.down { background: var(--down); }
+/* Cannot confirm: no readable payload, unknown age, or stale by age (R-IV.413(e)). */
+.health-dot.unconfirmed { background: var(--amber); }
+/* R-IV.416(c): a market-hours feed outside the session. --text-2, so it stays distinct
+   from the unpainted --text-3 dot shown before the first read. */
+.health-dot.closed { background: var(--text-2); }
 /* DEAD (flatline) — pipe aged past SLO. Pulsing vermilion, distinct from the static
-   'down' (transient/unknown) and from teal 'stale'. */
+   'down' (a reported error) and from amber 'unconfirmed'. */
 .health-dot.dead {
   background: var(--down); width: 11px; height: 11px;
   box-shadow: 0 0 0 3px rgba(255,92,51,0.28);

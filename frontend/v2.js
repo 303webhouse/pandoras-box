@@ -22,7 +22,7 @@
 
   // ── Central glossary (single source of truth for tooltips) ─────────────────
   const GLOSSARY = {
-    HEALTH: 'Global data health — lime fresh, teal stale, vermilion feed down',
+    HEALTH: 'Global data health — lime fresh, amber cannot confirm (unreadable or stale), grey market closed, vermilion source error, pulsing = dead feed',
     MOVERS: 'Top gainers/losers screener (Yahoo), filtered: last >= $2, avg vol >= 500k',
     REGIME: 'Two lenses: Composite (weighted factor bias, X/100) vs Stable engine read (breadth-based)',
     COMPOSITE: 'Composite bias score on a 0–100 scale (50 = neutral); the weighted factor blend',
@@ -124,34 +124,41 @@
   //   degraded == null    NO readable payload at all             -> 'unconfirmed' amber
   //   age null or > 900s  cannot confirm freshness               -> 'unconfirmed' amber
   //   flatline            pipe aged past its SLO (job record)    -> 'dead'        pulsing
+  //   session 'closed'    market-hours feed outside the session  -> 'closed'      grey
   // Callers pass null for an absent payload. The old `data ? data.degraded : true` turned
   // "we received nothing" into "the source is broken", and no later code could undo it.
-  function healthState(ageSec, degraded, flatline) {
+  //
+  // R-IV.416(c) — CLOSED. A market-hours feed outside the session is correctly quiet, not
+  // unconfirmed. `session` comes from the PAYLOAD ('open' | 'closed' | null), computed
+  // server-side from THE market calendar (stable_engine/market_calendar.py). This file
+  // never decides the session itself: a weekday/clock test here would be a second
+  // calendar, which is the silent approximation that module exists to delete. An absent
+  // or null session is NOT 'closed' -- it falls through to the age test.
+  function healthState(ageSec, degraded, flatline, session) {
     if (flatline) return 'dead';
     if (degraded === true) return 'down';
-    if (degraded == null || ageSec == null || ageSec > 900) return 'unconfirmed';
+    if (degraded == null) return 'unconfirmed';
+    if (session === 'closed') return 'closed';
+    if (ageSec == null || ageSec > 900) return 'unconfirmed';
     return 'ok';
   }
   function paintDot(el, st) {
     el.className = 'health-dot' + (st ? ' ' + st : '');
-    // v2.css has no amber dot rule, and v2.css is ABACUS's file (R-IV.410(f)). Until its
-    // pass adds `.health-dot.unconfirmed { background: var(--amber); }` the TOKEN is set
-    // inline here -- a token, never a hex -- and cleared for every other state.
-    el.style.background = st === 'unconfirmed' ? 'var(--amber)' : '';
   }
-  function setHealth(el, ageSec, degraded, flatline) {
+  function setHealth(el, ageSec, degraded, flatline, session, note) {
     if (!el) return;
-    const st = healthState(ageSec, degraded, flatline);
+    const st = healthState(ageSec, degraded, flatline, session);
     let txt;
     if (st === 'dead') txt = 'DEAD — data pipe flatlined (aged past its SLO)';
     else if (st === 'down') txt = 'degraded — the source reported an error';
+    else if (st === 'closed') txt = 'closed — market session not open' + (ageSec != null ? '; last update ' + ageLabel(ageSec) + ' ago' : '');
     else if (st === 'unconfirmed') {
       txt = degraded == null ? 'unknown — no readable payload; cannot confirm'
           : ageSec == null ? 'unknown age — cannot confirm freshness'
           : 'stale ' + ageLabel(ageSec) + ' — cannot confirm freshness';
     } else txt = 'fresh ' + ageLabel(ageSec);
     paintDot(el, st);
-    el.setAttribute('title', txt);
+    el.setAttribute('title', note ? txt + ' · ' + note : txt);
   }
 
   const _health = { regime: null, movers: null };
@@ -159,10 +166,12 @@
   function updateGlobalHealth() {
     const anyFlat = Object.values(_flat).some(Boolean);
     const vals = Object.values(_health).filter((v) => v !== null);
-    const worst = (anyFlat || vals.includes('dead')) ? 'dead' : vals.includes('down') ? 'down' : vals.includes('unconfirmed') ? 'unconfirmed' : vals.length ? 'ok' : '';
+    // 'closed' ranks below 'ok': one open, fresh feed makes the whole board 'ok'; the board
+    // reads 'closed' only when every ranked feed is closed.
+    const worst = (anyFlat || vals.includes('dead')) ? 'dead' : vals.includes('down') ? 'down' : vals.includes('unconfirmed') ? 'unconfirmed' : vals.includes('ok') ? 'ok' : vals.length ? 'closed' : '';
     const dot = $('dataHealthDot');
     paintDot(dot, worst);
-    dot.setAttribute('title', GLOSSARY.HEALTH + ' — ' + (worst === 'dead' ? 'DEAD feed(s) — pipe flatlined' : worst === 'down' ? 'a source reported an error' : worst === 'unconfirmed' ? 'cannot confirm — a feed is unreadable or stale' : (worst || 'no data')));
+    dot.setAttribute('title', GLOSSARY.HEALTH + ' — ' + (worst === 'dead' ? 'DEAD feed(s) — pipe flatlined' : worst === 'down' ? 'a source reported an error' : worst === 'unconfirmed' ? 'cannot confirm — a feed is unreadable or stale' : worst === 'closed' ? 'market session not open' : (worst || 'no data')));
   }
   // Record a feed's flatline state; adds exactly one River action item per incident
   // (River dedups by id) and removes it on recovery.
@@ -284,7 +293,7 @@
 
     const age = regime && regime.data_age_seconds != null ? regime.data_age_seconds : null;
     const degraded = regime ? !!regime.degraded : null;   // null = no payload (R-IV.413(e))
-    _health.regime = healthState(age, degraded, regime && regime.flatline);
+    _health.regime = healthState(age, degraded, regime && regime.flatline, regime && regime.session);
     noteFlatline('nightly', regime && regime.flatline, 'Regime / Themes');
     updateGlobalHealth();
   }
@@ -366,10 +375,11 @@
     const age = data && data.data_age_seconds != null ? data.data_age_seconds : null;
     const degraded = data ? !!data.degraded : null;   // null = no payload (R-IV.413(e))
     const flat = !!(data && data.flatline);
-    setHealth($('moversHealthDot'), age, degraded, flat);
-    $('moversAge').textContent = flat ? 'DEAD · pipe stalled' : degraded === true ? 'degraded · ' + ageLabel(age) : degraded == null ? 'no data' : ageLabel(age) + ' old';
+    const session = data && data.session;
+    setHealth($('moversHealthDot'), age, degraded, flat, session);
+    $('moversAge').textContent = flat ? 'DEAD · pipe stalled' : degraded === true ? 'degraded · ' + ageLabel(age) : degraded == null ? 'no data' : session === 'closed' ? 'closed' + (age != null ? ' · ' + ageLabel(age) + ' old' : '') : ageLabel(age) + ' old';
     $('moversAge').className = flat ? 'val-down' : '';
-    _health.movers = healthState(age, degraded, flat);
+    _health.movers = healthState(age, degraded, flat, session);
     noteFlatline('movers', flat, 'Movers');
     updateGlobalHealth();
     // Flow/Kairos badges — batched, rides the same 5-min movers cadence (no new poller).
@@ -669,7 +679,7 @@
   // ═══ B2b modules ══════════════════════════════════════════════════════════
   const fmt$ = (v) => (v == null ? '--' : (v < 0 ? '-$' : '$') + Math.abs(Number(v)).toLocaleString('en-US', { maximumFractionDigits: 0 }));
   const signCls = (v) => (v == null ? '' : v > 0 ? 'val-up' : v < 0 ? 'val-down' : 'val-muted');
-  function setDot(id, age, degraded, flatline) { setHealth($(id), age, degraded, flatline); }
+  function setDot(id, age, degraded, flatline, session, note) { setHealth($(id), age, degraded, flatline, session, note); }
 
   // ── b3 Breadth panel (shares the regime payload) ──────────────────────────
   function renderBreadthPanel(regime) {
@@ -705,7 +715,7 @@
     try { const r = await apiFetch('/api/stable/themes'); if (r.ok) data = await r.json(); } catch (_) {}
     const el = $('themesTable'); if (!el) return;
     $('themesAsOf').textContent = data && data.date ? data.date : '';
-    setDot('themesHealthDot', data && data.data_age_seconds, data ? !!data.degraded : null, data && data.flatline);
+    setDot('themesHealthDot', data && data.data_age_seconds, data ? !!data.degraded : null, data && data.flatline, data && data.session);
     noteFlatline('nightly', data && data.flatline, 'Themes');
     _health.themes = !data ? 'unconfirmed' : data.degraded ? 'down' : 'ok'; updateGlobalHealth();
     const themes = (data && data.themes) || [];
@@ -916,7 +926,7 @@
     let data = null;
     try { const r = await apiFetch('/api/stable/index-strip'); if (r.ok) data = await r.json(); } catch (_) {}
     const el = $('indexStrip'); if (!el) return;
-    setDot('indexHealthDot', data && data.data_age_seconds, data ? !!data.degraded : null, data && data.flatline);
+    setDot('indexHealthDot', data && data.data_age_seconds, data ? !!data.degraded : null, data && data.flatline, data && data.session);
     noteFlatline('strip', data && data.flatline, 'Index / strip');
     const order = ['SPY', 'QQQ', 'IWM', 'RSP', 'DIA'];
     const rows = (data && data.indices) || [];
@@ -984,10 +994,22 @@
     try { const r = await apiFetch('/api/v2/positions?status=OPEN'); if (r.ok) positions = await r.json(); } catch (_) {}
     const el = $('bookStrip'); if (!el) return;
     const bookOk = !!(balances || pnl);
-    setDot('bookHealthDot', bookOk ? 60 : null, bookOk ? false : null);
+    const accts = Array.isArray(balances) ? balances : [];
+    // R-IV.416(c) — the age is the payload's own vintage, never a constant (the old
+    // `bookOk ? 60 : null` asserted "fresh" for any non-empty read). The Balance total sums
+    // every row, so the OLDEST row's updated_at (timestamptz) governs; no stamp -> null ->
+    // unconfirmed. /pnl carries no age of its own.
+    const stamped = accts.map((a) => ({ name: a.account_name, t: Date.parse(a.updated_at) }))
+      .filter((a) => Number.isFinite(a.t)).sort((x, y) => x.t - y.t);
+    const oldest = stamped.length ? stamped[0] : null;
+    const bookAge = oldest ? Math.max(0, (Date.now() - oldest.t) / 1000) : null;
+    const bookNote = oldest ? 'oldest balance: ' + (oldest.name || '?') + ', as of ' + new Date(oldest.t).toISOString().slice(0, 16) + 'Z' : null;
+    setDot('bookHealthDot', bookAge, bookOk ? false : null, false, null, bookNote);
+    // The RANK ignores age, as themes does (4c76c5c): balances are not a streaming feed, so
+    // a 900s bound would pin the global dot amber all day. The tile's own dot still shows
+    // the honest age; the bound the book should be judged by is not yet ruled.
     _health.book = bookOk ? 'ok' : 'unconfirmed'; updateGlobalHealth();
 
-    const accts = Array.isArray(balances) ? balances : [];
     const total = accts.reduce((s, a) => s + (Number(a.balance) || 0), 0);
     const day = pnl && pnl.daily ? pnl.daily : {};
     // ── DEF-GREEKS-ZERO ────────────────────────────────────────────────────────
