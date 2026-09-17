@@ -14,13 +14,21 @@ sold (higher) put in short_strike. The side is the column; the right is the stru
 EVERY OPTION ROW GETS AN OUTCOME AND NOTHING IS SILENTLY DROPPED (R-IV.432(c)). A row that
 cannot become legs is recorded with the reason it cannot, and is left exactly as it is:
 
-  MIGRATED                          legs written from the stored strikes
-  MERGED_INTO                       its legs belong to another position (the XLF group)
-  UNMIGRATABLE_NO_STRIKES           typed OPTION with no strike to convert (R-IV.444(b))
-  UNMIGRATABLE_NO_EXPIRY            a leg without an expiry is not a leg
-  UNMIGRATABLE_LEGS_EXCEED_STRIKES  the structure has more legs than the row has columns
-  UNMIGRATABLE_LEG_IN_NOTES         a leg recorded in prose; migrating the rest would assert
-                                    a 2-leg position where a 3-leg one exists
+  MIGRATED                 legs written from the stored strikes
+  MERGED_INTO              its legs belong to another position (the XLF group)
+  ENTERED_BY_HAND          the shape exceeded the columns and the legs were typed in
+  PENDING_CAPABILITY       the data exists but the shape needs hand-entry (R-IV.445(c)):
+                           a third leg recorded in prose, or a structure with more legs than
+                           two strike columns can hold. NOT a failure -- the row is waiting on
+                           a capability, and the capability now exists at
+                           POST /v2/positions/{id}/legs
+  UNMIGRATABLE_NO_STRIKES  typed OPTION with no strike to convert (R-IV.444(b))
+  UNMIGRATABLE_NO_EXPIRY   a leg without an expiry is not a leg
+
+The two classes are kept apart because they resolve differently: an UNMIGRATABLE row needs a
+SOURCE (an export, a memory, a broker record), while a PENDING_CAPABILITY row needs nothing but
+someone to type what the note already says. Filing the second under the first would have
+described work as damage.
 
 PRICES ARE NOT INVENTED. A vertical records its NET, never the split, so each leg's price is
 NULL unless a fill recorded it. The unknown is representable, exactly as it is for a lot.
@@ -48,10 +56,14 @@ LEGS_EXCEED_STRIKES = {"iron_condor"}
 
 MIGRATED = "MIGRATED"
 MERGED_INTO = "MERGED_INTO"
+ENTERED_BY_HAND = "ENTERED_BY_HAND"
 NO_STRIKES = "UNMIGRATABLE_NO_STRIKES"
 NO_EXPIRY = "UNMIGRATABLE_NO_EXPIRY"
-LEGS_EXCEED = "UNMIGRATABLE_LEGS_EXCEED_STRIKES"
-LEG_IN_NOTES = "UNMIGRATABLE_LEG_IN_NOTES"
+# R-IV.445(c): waiting on hand-entry, not failed. Both members were ruled to stay unmigrated
+# until the edit path could enter their legs, and to be recorded as pending-capability.
+PENDING_CAPABILITY = "PENDING_CAPABILITY"
+# The labels these rows were first written under, remapped once on the next boot.
+LEGACY_PENDING_LABELS = ("UNMIGRATABLE_LEGS_EXCEED_STRIKES", "UNMIGRATABLE_LEG_IN_NOTES")
 
 # ── The XLF group, ruled (R-IV.444(b)) ───────────────────────────────────────────────────
 # 300 holds 45P/40P at 8, 301 holds 30P at 8, and 420 holds two 09-01 structures whose own
@@ -80,20 +92,23 @@ def classify(row: Dict[str, Any]) -> Tuple[str, List[Dict[str, Any]], str]:
     """(outcome, legs, detail) for one option row. Pure."""
     pid = row.get("position_id")
     if pid in LEG_IN_NOTES_POSITIONS:
-        return LEG_IN_NOTES, [], LEG_IN_NOTES_POSITIONS[pid]
+        return (PENDING_CAPABILITY, [],
+                f"{LEG_IN_NOTES_POSITIONS[pid]} — awaiting hand-entry of the full structure")
 
     structure = (row.get("structure") or "").strip().lower()
     long_strike, short_strike = row.get("long_strike"), row.get("short_strike")
     expiry, qty = row.get("expiry"), row.get("quantity")
 
     if structure in LEGS_EXCEED_STRIKES:
-        return (LEGS_EXCEED, [],
-                f"{structure} has more legs than long_strike/short_strike can hold")
+        return (PENDING_CAPABILITY, [],
+                f"{structure} has more legs than long_strike/short_strike can hold — awaiting "
+                f"hand-entry of the full structure")
     if not structure or structure not in STRUCTURES:
         if long_strike is None and short_strike is None:
             return NO_STRIKES, [], f"structure={structure or 'NULL'} and no strike on the row"
-        return (LEGS_EXCEED, [],
-                f"structure={structure or 'NULL'} is not in the mapped vocabulary")
+        return (PENDING_CAPABILITY, [],
+                f"structure={structure or 'NULL'} is not in the mapped vocabulary — its legs "
+                f"are entered by hand, not guessed from a name")
     if long_strike is None:
         return NO_STRIKES, [], f"{structure} with no long_strike"
 
@@ -118,6 +133,12 @@ async def run(conn) -> Dict[str, int]:
     The guard is the outcome record, not the legs: a position recorded as UNMIGRATABLE has no
     legs by definition, and re-running must not keep reconsidering it.
     """
+    # R-IV.445(c): rows filed under the first labels are re-filed as pending-capability. They
+    # were never failures; the capability they wait on arrived after they were classified.
+    await conn.execute(
+        "UPDATE position_legs_migration SET outcome = $1 WHERE outcome = ANY($2::text[])",
+        PENDING_CAPABILITY, list(LEGACY_PENDING_LABELS))
+
     rows = await conn.fetch(
         """SELECT p.position_id, p.structure, p.long_strike, p.short_strike, p.expiry,
                   p.quantity, p.asset_type
