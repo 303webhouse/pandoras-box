@@ -475,6 +475,15 @@ body {
    legible; "shadow" is carried by the dashed amber rule and the banner instead of dimming. */
 .rv-item.shadow-banner { border-left: 2px dashed var(--amber); }
 .rv-item .rv-banner { margin-top: 3px; font-family: var(--mono); font-size: 10px; letter-spacing: 0.5px; color: var(--amber); }
+/* River notice (BUILD's /api/trade-ideas/notices): an operator message about the feed, so
+   teal (attention), never amber or vermilion, which are health states. */
+.rv-notice {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 8px 12px; border-bottom: 1px solid var(--border);
+  border-left: 2px solid var(--teal); background: var(--panel-2);
+}
+.rv-notice-t { font-family: var(--mono); font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: var(--teal); }
+.rv-notice-b { font-size: 12px; color: var(--text); line-height: 1.35; }
 /* R-IV.427(b): the daily count, the rate-limit surface for River-only shadow classes. */
 .rv-count { padding: 6px 12px; border-bottom: 1px solid var(--border); font-family: var(--mono); font-size: 10px; letter-spacing: 0.5px; color: var(--text-2); }
 .rv-count.over { color: var(--amber); }
