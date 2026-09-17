@@ -427,23 +427,41 @@ async def get_price_history(ticker: str, days: int = 30) -> pd.DataFrame:
     # --- Polygon primary path (equity/ETF tickers only) ---
     if symbol not in _YFINANCE_ONLY_SYMBOLS:
         try:
-            from integrations.uw_api import get_bars_as_dataframe as _polygon_bars
+            from integrations.uw_api import (get_bars_as_dataframe as _polygon_bars,
+                                             frame_provider as _frame_provider)
             polygon_df = await _polygon_bars(symbol, days)
+            # WHO SERVED IT, read off the frame instead of inferred from the branch it came
+            # back on. get_bars() falls back to yfinance INSIDE itself, so a frame arriving
+            # here has only ever meant "some vendor answered". Calling it uw wrote a false
+            # vendor onto every cached price and every factor payload on exactly the days UW
+            # was not serving: measured live 2026-09-17, get_bars reporting primary_ok 0 and
+            # 23 substitutions in the same process this consumer called 22 of them "uw"
+            # (R-IV.433(b) VENDOR-ON-EVERY-ROW; R-IV.435(f)'s defect, one layer down).
+            served_by = _frame_provider(polygon_df) or VENDOR_UNKNOWN
             if polygon_df is not None and not polygon_df.empty:
                 polygon_df = _normalize_history(polygon_df)
                 if not _has_bounds_violation(symbol, polygon_df, stage="polygon"):
                     if not _has_price_mismatch(symbol, polygon_df, reference_price):
-                        # Cache Polygon result in Redis
+                        # Cache the frame under the vendor that actually served it
                         try:
                             client = await get_redis_client()
                             if client and polygon_df is not None and not polygon_df.empty:
                                 payload = polygon_df.to_json(orient="split")
                                 await client.setex(cache_key, PRICE_CACHE_TTL, payload)
-                                await client.setex(cache_key + ":vendor", PRICE_CACHE_TTL, "uw")
+                                await client.setex(cache_key + ":vendor", PRICE_CACHE_TTL,
+                                                   served_by)
                         except Exception as exc:
                             logger.warning("Price cache write failed for %s (polygon): %s", symbol, type(exc).__name__)
-                        record_primary(PRICE_CONSUMER, "uw")
-                        return tag_vendor(polygon_df, "uw")
+                        if served_by == "uw":
+                            record_primary(PRICE_CONSUMER, "uw")
+                        else:
+                            # Announced here too: get_bars' own announcement is about its
+                            # consumer, and this consumer's state must not read "primary" while
+                            # it is handing back someone else's bars (conventions #21).
+                            record_substitution(PRICE_CONSUMER, "uw", served_by,
+                                                "uw did not serve these bars; the fallback "
+                                                "inside get_bars did", symbol)
+                        return tag_vendor(polygon_df, served_by)
                     else:
                         logger.warning("Polygon %s data mismatches live quote, falling back to yfinance", symbol)
                 else:
