@@ -1,10 +1,19 @@
 """Abacus summary: the data contract behind the v2 Abacus page (R-IV.429).
 
 STUB. Every metric is served from the mocked fixture below, with `source: "mock"` on each
-block and `mock: true` at the top, so the page shows its mock banner. Live data replaces
-one block at a time as sources land (R-IV.429(a)). A block turns live by changing its own
-`source` to "live" and carrying a real `computed_at`; the page drops the banner only when
-no block is still mock.
+block and `mock: true` at the top, so the page shows its mock banner. The fixture responds to
+the range SERVER-SIDE (charter D2: the range changes the figures, and nothing is recomputed in
+the browser). Counts and dollars scale with the window's length, rates stay put, and every
+range stays internally consistent.
+
+Live data replaces one block at a time as sources land (R-IV.429(a)). A block turns live by
+changing its own `source` to "live" and carrying a real `computed_at`; the page drops the
+banner only when no block is still mock.
+
+LIVE CONNECTION IS GATED (charter §2, ATHENA step 3): no block goes live until the lots/legs
+model lands. The unit is the position lifecycle, and the window filters on CLOSE date.
+/api/analytics/trade-stats windows on opened_at over the `trades` rows, so it is not a
+drop-in source.
 
 Gated like every book read (R-IV.417): the same dependency as /api/analytics and
 /api/portfolio, because what this route returns once live is the principal's book.
@@ -14,7 +23,7 @@ Contract (every block):
   computed_at  ISO-8601 UTC, when the figure was computed. For the fixture this is the
                instant it was AUTHORED, never "now": a mock stamped with the request time
                would read as fresh.
-Rates carry their n. Unknown is null, never 0.
+Rates carry their n. Unknown is null, never 0. `version` is the contract's version (R9).
 """
 
 from __future__ import annotations
@@ -24,13 +33,20 @@ from datetime import date, datetime, timedelta
 from typing import Optional
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from utils.pivot_auth import require_api_key
 
 router = APIRouter(prefix="/abacus", tags=["abacus"])
 
 RANGES = ("30d", "90d", "ytd", "all")
+SUMMARY_VERSION = 1
+
+# The mock book's first day, so "All" has a length. Not a real date from the book.
+MOCK_BOOK_START = date(2025, 10, 1)
+# The fixture's figures below are the 90-day window's.
+FIXTURE_BASE_DAYS = 90
+MIN_SCALE = 0.05
 
 # When the fixture was written. Not a data vintage: nothing here was computed from trades.
 FIXTURE_AUTHORED_AT = "2026-09-17T05:30:00Z"
@@ -41,6 +57,7 @@ _S = {"source": "mock", "computed_at": FIXTURE_AUTHORED_AT}
 # Money is USD, signed. Rates are fractions 0..1.
 FIXTURE = {
     "mock": True,
+    "version": SUMMARY_VERSION,
     "scope": {"label": "Both accounts", "closed_positions": 249, **_S},
     "stats": [
         {"key": "net_profit", "label": "Net profit", "format": "usd", "value": 1573,
@@ -54,7 +71,8 @@ FIXTURE = {
         {"key": "avg_win_loss", "label": "Avg win / avg loss", "format": "usd_pair", "value": [48, -52],
          "meaning": "Losers slightly bigger than winners — the tails book does this.", **_S},
         {"key": "max_drawdown", "label": "Max drawdown", "format": "usd", "value": -1140,
-         "meaning": "Largest peak-to-trough fall. −9%, late July.", **_S},
+         "date": None,  # the trough's date, set per range
+         "meaning": "Largest peak-to-trough fall in the range. The date is the trough.", **_S},
         {"key": "sharpe", "label": "Sharpe ratio", "format": "ratio", "value": 0.8,
          "qualifier": {"state": "unknown", "label": "rough"},
          "meaning": "Gain per unit of volatility. Needs many more trades to be precise — read it as direction, not a grade.", **_S},
@@ -65,17 +83,18 @@ FIXTURE = {
         # Shape of the mockup's curve; start-to-end = net profit, and the marked fall = max drawdown.
         "points": [10900, 11010, 10930, 11420, 11300, 11860, 12050, 11330,
                    10910, 11380, 11760, 11610, 12010, 12160, 12400, 12473],
-        "drawdown": {"from_index": 6, "to_index": 8, "amount": -1140},
+        "drawdown": {"from_index": 6, "to_index": 8, "amount": -1140, "date": None},
         **_S,
     },
     "leaks": {
         "items": [
-            {"label": "Adding to losers", "amount": -612, "detail": "6 adds against an open loss; 5 lost more."},
-            {"label": "Far-OTM tails", "amount": -480, "detail": "11 bought, 0 paid, avg 41 days held."},
-            {"label": "Overridden time stops", "amount": -318, "detail": "4 held past exit; the rule would have paid +$95."},
-            {"label": "Untagged trades", "amount": -141, "detail": "9 with no bucket or thesis."},
-            {"label": "Index ETF verticals", "amount": 1020, "detail": "Your edge. 58% win, PF 1.9, n=38."},
-            {"label": "Commodity sleeve", "amount": 744, "detail": "Under cap; harvested twice. n=9."},
+            # Counts live in `n` (charter R2), never inside the prose, so they scale with the range.
+            {"label": "Adding to losers", "amount": -612, "n": 6, "detail": "Adds against an open loss that went on to lose more."},
+            {"label": "Far-OTM tails", "amount": -480, "n": 11, "detail": "Bought far out of the money; none paid. Avg 41 days held."},
+            {"label": "Overridden time stops", "amount": -318, "n": 4, "detail": "Held past the time-stop exit."},
+            {"label": "Untagged trades", "amount": -141, "n": 9, "detail": "No bucket or thesis recorded."},
+            {"label": "Index ETF verticals", "amount": 1020, "n": 38, "detail": "Your edge. 58% win, PF 1.9."},
+            {"label": "Commodity sleeve", "amount": 744, "n": 9, "detail": "Under cap; harvested at target."},
         ],
         **_S,
     },
@@ -145,6 +164,8 @@ FIXTURE = {
 def _resolve_range(key: str, start: Optional[date], end: Optional[date], today: date) -> dict:
     """Echo the requested window. Explicit dates win over the preset key."""
     if start and end:
+        if start > end:
+            raise HTTPException(status_code=422, detail="from must not be after to")
         return {"key": "custom", "from": start.isoformat(), "to": end.isoformat()}
     if key == "30d":
         frm = today - timedelta(days=30)
@@ -157,6 +178,66 @@ def _resolve_range(key: str, start: Optional[date], end: Optional[date], today: 
     return {"key": key, "from": frm.isoformat() if frm else None, "to": today.isoformat()}
 
 
+def _span(rng: dict) -> tuple:
+    """(first day, last day) of the window. "All" starts at the mock book's first day."""
+    last = date.fromisoformat(rng["to"])
+    first = date.fromisoformat(rng["from"]) if rng["from"] else MOCK_BOOK_START
+    return min(max(first, MOCK_BOOK_START), last), last
+
+
+def _cnt(v, scale: float):
+    """Scale a positive count; never below 1, never a fraction. None and 0 pass through."""
+    if v is None or isinstance(v, bool) or not isinstance(v, int) or v <= 0:
+        return v
+    return max(1, round(v * scale))
+
+
+def _usd(v, scale: float):
+    return v if v is None else round(v * scale)
+
+
+def _scaled(scale: float) -> dict:
+    """The fixture for a window `scale` times the base window's length.
+
+    Counts and dollars scale; rates, ratios and per-trade figures do not. The equity curve is
+    stretched about its first point, and net profit and max drawdown are READ BACK from the
+    rounded curve, so start-to-end == net profit and the marked fall == max drawdown hold
+    exactly for every range.
+    """
+    out = copy.deepcopy(FIXTURE)
+    closed = _cnt(out["scope"]["closed_positions"], scale)
+    out["scope"]["closed_positions"] = closed
+
+    eq = out["equity"]
+    p0 = eq["points"][0]
+    eq["points"] = [round(p0 + (p - p0) * scale) for p in eq["points"]]
+    dd = eq["drawdown"]
+    dd["amount"] = eq["points"][dd["to_index"]] - eq["points"][dd["from_index"]]
+    net = eq["points"][-1] - eq["points"][0]
+
+    for st in out["stats"]:
+        if st["key"] == "net_profit":
+            st["value"] = net
+        elif st["key"] == "max_drawdown":
+            st["value"] = dd["amount"]
+        elif st["key"] == "win_rate":
+            st["n"] = closed
+
+    for it in out["leaks"]["items"]:
+        it["amount"] = _usd(it["amount"], scale)
+        it["n"] = _cnt(it["n"], scale)
+
+    for table in out["breakdowns"]:
+        kinds = [c[1] for c in table["columns"]]
+        for row in table["rows"]:
+            for i, kind in enumerate(kinds):
+                if kind == "int":
+                    row[i] = _cnt(row[i], scale)
+                elif kind == "usd":
+                    row[i] = _usd(row[i], scale)
+    return out
+
+
 @router.get("/summary")
 async def abacus_summary(
     range: str = Query("90d", pattern="^(30d|90d|ytd|all)$"),
@@ -164,15 +245,27 @@ async def abacus_summary(
     end: Optional[date] = Query(None, alias="to"),
     _=Depends(require_api_key),
 ):
-    """The Abacus page's payload. STUB: the mocked fixture, with the requested range echoed.
-
-    The figures do NOT change with the range while the source is mock. The page says so via
-    the banner, and `range_applied: false` says it in the data.
-    """
-    out = copy.deepcopy(FIXTURE)
+    """The Abacus page's payload. STUB: the mocked fixture, scaled to the requested range."""
     # The market's calendar day, not the server's: Railway runs in UTC, which is already
     # "tomorrow" for the principal every evening after 6 PM MT.
     today_et = datetime.now(ZoneInfo("America/New_York")).date()
-    out["range"] = _resolve_range(range, start, end, today_et)
-    out["range_applied"] = False
+    rng = _resolve_range(range, start, end, today_et)
+    first, last = _span(rng)
+    span_days = (last - first).days
+    out = _scaled(max(max(span_days, 1) / FIXTURE_BASE_DAYS, MIN_SCALE))
+
+    # The curve's points are evenly spaced across the window, which dates the trough. The
+    # real span (possibly 0) is used here, so the date can never fall outside the window.
+    eq = out["equity"]
+    n_pts = len(eq["points"])
+    trough_i = eq["drawdown"]["to_index"]
+    trough = (first + timedelta(days=round(span_days * trough_i / (n_pts - 1)))).isoformat()
+    eq["from"], eq["to"] = first.isoformat(), last.isoformat()
+    eq["drawdown"]["date"] = trough
+    for st in out["stats"]:
+        if st["key"] == "max_drawdown":
+            st["date"] = trough
+
+    out["range"] = rng
+    out["range_applied"] = True
     return out
