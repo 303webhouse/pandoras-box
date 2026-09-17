@@ -58,6 +58,12 @@
     if (format !== 'usd' && format !== 'usd_cents') return '';
     return v > 0 ? 'ab-up' : v < 0 ? 'ab-down' : '';
   }
+  // An ISO calendar date ("2026-08-03") as "Aug 3". Read in UTC so the day never shifts.
+  const shortDate = (iso) => {
+    const t = Date.parse(String(iso || '') + 'T00:00:00Z');
+    return Number.isFinite(t) ? new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric' }).format(new Date(t)) : '';
+  };
+  const SUMMARY_VERSION = 1;
   const chip = (state, label) => `<span class="ab-chip" data-state="${esc(state)}">${esc(label)}</span>`;
   const isMock = (block) => !block || block.source !== 'live';
   // A block's own chip: mock is "unknown", never fresh. Live shows when it was computed (MT).
@@ -115,7 +121,7 @@
   function renderStats(d) {
     $('abStats').innerHTML = (d.stats || []).map((s) => {
       const q = s.qualifier ? ' ' + chip(s.qualifier.state, s.qualifier.label) : '';
-      const nTxt = s.n != null ? ' · n=' + s.n : '';
+      const nTxt = (s.n != null ? ' · n=' + s.n : '') + (s.date ? ' · trough ' + shortDate(s.date) : '');
       return `<div class="ab-stat" data-key="${esc(s.key)}">
         <span class="ab-v ${tone(s.value, s.format)}">${esc(fmt(s.value, s.format))}${q}</span>
         <span class="ab-l">${esc(s.label)}${esc(nTxt)}${isMock(s) ? '' : ' ' + blockChip(s)}</span>
@@ -146,11 +152,11 @@
     if (dr && dr.from_index != null && dr.to_index != null) {
       const x0 = x(dr.from_index), x1 = x(dr.to_index);
       dd = `<rect class="ab-eq-dd" x="${x0.toFixed(1)}" y="${T}" width="${(x1 - x0).toFixed(1)}" height="${B - T}"/>`
-        + `<text class="ab-eq-ddl" x="${(x0 + 6).toFixed(1)}" y="${T + 16}">${esc(fmt(dr.amount, 'usd'))}</text>`;
+        + `<text class="ab-eq-ddl" x="${(x0 + 6).toFixed(1)}" y="${T + 16}">${esc(fmt(dr.amount, 'usd'))}${dr.date ? ' · ' + esc(shortDate(dr.date)) : ''}</text>`;
     }
     const line = pts.map((v, i) => x(i).toFixed(1) + ',' + y(v).toFixed(1)).join(' ');
     const label = `Equity curve${isMock(e) ? ', mock' : ''}: ${fmt(pts[0], 'usd_plain')} to ${fmt(pts[pts.length - 1], 'usd_plain')}`
-      + (dr ? `, max drawdown ${fmt(dr.amount, 'usd')}` : '');
+      + (dr ? `, max drawdown ${fmt(dr.amount, 'usd')}${dr.date ? ' at ' + dr.date : ''}` : '');
     $('abEquity').innerHTML = `<svg class="ab-eq" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(label)}">${grid}${dd}<polyline class="ab-eq-line" points="${line}"/></svg>`;
   }
   function renderLeaks(d) {
@@ -158,7 +164,7 @@
     $('abLeaksChip').innerHTML = l ? blockChip(l) : '';
     $('abLeaks').innerHTML = ((l && l.items) || []).map((it) => `<li class="${it.amount > 0 ? 'ok' : ''}">
       <span class="ab-k">${esc(it.label)} <span class="ab-n">${esc(fmt(it.amount, 'usd'))}</span></span>
-      <span class="ab-d">${esc(it.detail || '')}</span>
+      <span class="ab-d">${it.n != null ? 'n=' + esc(it.n) + ' · ' : ''}${esc(it.detail || '')}</span>
       ${it.href ? `<a href="${esc(it.href)}">see them</a>` : ''}
     </li>`).join('');
   }
@@ -282,7 +288,18 @@
       $('abAsof').innerHTML = chip('unknown', 'unavailable');
       return;
     }
-    render(await r.json());
+    let d = null;
+    try { d = await r.json(); } catch (_) { d = null; }
+    if (!d || d.version !== SUMMARY_VERSION) {
+      // A contract this page does not know is not rendered at all: a wrong field silently read
+      // is a wrong number on the principal's screen.
+      $('abError').hidden = false;
+      $('abError').textContent = 'Abacus summary has an unexpected shape (version ' + (d && d.version != null ? d.version : '?')
+        + ', page expects ' + SUMMARY_VERSION + '). Nothing below is current.';
+      $('abAsof').innerHTML = chip('unknown', 'unavailable');
+      return;
+    }
+    render(d);
   }
 
   wireRange();
