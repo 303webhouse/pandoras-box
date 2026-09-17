@@ -6,7 +6,7 @@ Provides endpoints for all macro bias filters including:
 - Future: VIX, Put/Call Ratio, etc.
 """
 
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, HTTPException, Depends, Query, Request
 from pydantic import BaseModel
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
@@ -14,6 +14,9 @@ import logging
 import json
 import os
 from utils.json_sanitize import dumps_jsonb
+from utils.factor_write_audit import (  # R-IV.442(b): a write into the engine leaves a line
+    auth_mode, caller_of, record_factor_write,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -673,9 +676,15 @@ async def get_composite_timeframes():
 async def update_factor_from_pivot(
     factor_name: str,
     payload: PivotFactorUpdate,
+    request: Request,
     _: str = Depends(verify_pivot_key)
 ):
-    """Store a new factor reading from Pivot and recompute composite bias."""
+    """Store a new factor reading from Pivot and recompute composite bias.
+
+    R-IV.442(b): the accepted write is AUDITED. The reading's own `source` is a label the
+    caller chose — it answers what the write claims to be. The audit line records what the
+    request itself reveals: address, agent, auth mode, factor, time.
+    """
     if not COMPOSITE_AVAILABLE:
         raise HTTPException(status_code=503, detail="Composite bias engine not available")
 
@@ -721,14 +730,21 @@ async def update_factor_from_pivot(
         data=raw_data,
         collected_at=collected_at,
     )
+    await record_factor_write("POST /bias/factors/{factor_name}", factor_id=factor_id,
+                              caller=caller_of(request), auth=auth_mode(_),
+                              source=record_payload["source"], score=score)
 
     result = await compute_composite()
     return result.model_dump(mode="json")
 
 
 @router.post("/bias/factor-update")
-async def update_factor_reading(update: FactorUpdateRequest):
-    """Store a new factor reading and recompute composite bias"""
+async def update_factor_reading(update: FactorUpdateRequest, request: Request):
+    """Store a new factor reading and recompute composite bias.
+
+    Audited on acceptance (R-IV.442(b)): this is the same door into the composite as the
+    Pivot route, and it was the quieter of the two.
+    """
     if not COMPOSITE_AVAILABLE:
         raise HTTPException(status_code=503, detail="Composite bias engine not available")
 
@@ -743,14 +759,21 @@ async def update_factor_reading(update: FactorUpdateRequest):
     payload["factor_id"] = factor_id
 
     await record_factor_reading(payload)
+    await record_factor_write("POST /bias/factor-update", factor_id=factor_id,
+                              caller=caller_of(request), auth=auth_mode(None),
+                              source=payload.get("source"), score=update.score)
     result = await compute_composite()
 
     return result.model_dump(mode="json")
 
 
 @router.post("/bias/override")
-async def set_bias_override(request: BiasOverrideRequest):
-    """Manually override composite bias"""
+async def set_bias_override(request: BiasOverrideRequest, http_request: Request):
+    """Manually override composite bias.
+
+    Audited on acceptance (R-IV.442(b)). An override replaces the engine's answer outright,
+    so it is the write with the most consequence and the least to distinguish it afterwards.
+    """
     if not COMPOSITE_AVAILABLE:
         raise HTTPException(status_code=503, detail="Composite bias engine not available")
 
@@ -759,6 +782,9 @@ async def set_bias_override(request: BiasOverrideRequest):
         raise HTTPException(status_code=400, detail="Invalid bias level")
 
     await set_override(level=level, reason=request.reason, expires_hours=request.expires_hours)
+    await record_factor_write("POST /bias/override", factor_id=f"OVERRIDE:{level}",
+                              caller=caller_of(http_request), auth=auth_mode(None),
+                              source=request.reason)
     result = await compute_composite()
 
     return result.model_dump(mode="json")
