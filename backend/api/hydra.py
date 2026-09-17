@@ -11,7 +11,8 @@ import json
 import logging
 import os
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import Depends, APIRouter, HTTPException, Query, Request
+from utils.pivot_auth import require_api_key
 
 from database.postgres_client import get_postgres_client
 from scanners.hydra_squeeze import (
@@ -152,7 +153,7 @@ async def check_convergence():
     return {"convergence": False, "hermes_active": len(hermes_events), "high_squeeze_matches": 0}
 
 
-@router.post("/refresh")
+@router.post("/refresh", dependencies=[Depends(require_api_key)])
 async def refresh_squeeze_scores():
     """Trigger a full rescan of the squeeze universe."""
     logger.info("HYDRA: Manual refresh triggered")
@@ -235,7 +236,7 @@ async def get_lightning_cards(
     return {"lightning_cards": cards}
 
 
-@router.patch("/lightning/{card_id}/status")
+@router.patch("/lightning/{card_id}/status", dependencies=[Depends(require_api_key)])
 async def update_lightning_status(card_id: str, request: Request):
     """Update card status: dismissed, acted_on, expired."""
     data = await request.json()

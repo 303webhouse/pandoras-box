@@ -6662,7 +6662,7 @@ async function _runOlympusQuickReview(symbol) {
     try {
         var resp = await fetch(API_URL + '/committee/quick-review', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: authHeaders(),   // session write: needs the CSRF header (R-IV.419)
             body: JSON.stringify({ ticker: symbol, direction: null, timeframe: 'swing' }),
         });
         if (!resp.ok) throw new Error('HTTP ' + resp.status);
@@ -12913,7 +12913,7 @@ function updateHermesPivotAnalysis(analysisJson, category) {
 async function dismissHermesAlert() {
     if (!hermesCurrentEvent) return;
     try {
-        await fetch(`${API_URL}/hermes/alerts/${hermesCurrentEvent.id}/dismiss`, { method: 'PATCH' });
+        await fetch(`${API_URL}/hermes/alerts/${hermesCurrentEvent.id}/dismiss`, { method: 'PATCH', headers: authHeaders() });
     } catch (err) {
         console.error('Hermes dismiss error:', err);
     }

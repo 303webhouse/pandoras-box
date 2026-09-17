@@ -15,7 +15,8 @@ from typing import Dict, List, Optional, Any
 from decimal import Decimal
 
 import pytz
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import Depends, APIRouter, HTTPException, Query
+from utils.pivot_auth import require_api_key
 from pydantic import BaseModel
 
 from database.redis_client import get_redis_client
@@ -495,7 +496,7 @@ class QuickReviewRequest(BaseModel):
     timeframe: str = "swing"
 
 
-@router.post("/committee/quick-review")
+@router.post("/committee/quick-review", dependencies=[Depends(require_api_key)])
 async def quick_review(req: QuickReviewRequest):
     """Olympus one-shot committee review via Claude Sonnet."""
     if not ANTHROPIC_API_KEY:

@@ -20,6 +20,43 @@ os.environ["DASHBOARD_PASSWORD"] = "test-dashboard-password"
 from fastapi.testclient import TestClient
 
 
+def _require_a_runnable_test_client() -> None:
+    """R-IV.419(c) — a test suite that cannot execute is a test suite that passes.
+
+    starlette's TestClient passes `app=` to httpx.Client, which httpx 0.28 removed. Against
+    a newer httpx EVERY test that uses the `client` fixture errors at setup — hundreds of
+    identical, cryptic errors in which no assertion ever runs, so nothing the suite exists to
+    catch can be caught. This checks the actual capability (building a client), not a version
+    number, and stops the whole session with the fix instead.
+
+    Recipe (backend/requirements.txt pins httpx==0.26.0):
+        python -m venv --system-site-packages .venv-test
+        .venv-test/Scripts/python -m pip install httpx==0.26.0
+        .venv-test/Scripts/python -m pytest backend/tests
+    """
+    from starlette.applications import Starlette
+    try:
+        TestClient(Starlette())
+    except TypeError as exc:
+        import httpx
+        import starlette
+        message = "\n".join([
+            "",
+            "THE TEST SUITE CANNOT RUN IN THIS ENVIRONMENT - and a suite that cannot run "
+            "cannot fail.",
+            f"starlette {starlette.__version__} TestClient is incompatible with httpx "
+            f"{httpx.__version__}: {exc}",
+            "backend/requirements.txt pins httpx==0.26.0. Use an isolated env:",
+            "    python -m venv --system-site-packages .venv-test",
+            "    .venv-test/Scripts/python -m pip install httpx==0.26.0",
+            "    .venv-test/Scripts/python -m pytest backend/tests",
+        ])
+        pytest.exit(message, returncode=3)
+
+
+_require_a_runnable_test_client()
+
+
 # ---------------------------------------------------------------------------
 # Async helpers
 # ---------------------------------------------------------------------------
