@@ -63,6 +63,10 @@ REGISTERED_CLASSES: frozenset[str] = frozenset({
     "STRIKE_IB_BREAK",
     # T3, R-IV.295(a). A CONSUMER job, not a producer -- see AGE_SOURCE below.
     "triton_grader",
+    # R-IV.429(b). A once-a-session producer whose legitimate row count can be zero (a
+    # quiet day, or a firehose stop that persists everything as unsurfaced) -- so both of
+    # its source values are judged on whether the day's PASS completed.
+    "circes_stew", "circes_stew_unsurfaced",
 })
 
 # ── PLUGGABLE AGE SOURCE (T3, R-IV.295(a)) ────────────────────────────────
@@ -76,11 +80,18 @@ REGISTERED_CLASSES: frozenset[str] = frozenset({
 # supervision. Same surface, same alarm path, different age source.
 AGE_SOURCE_SIGNALS = "signals"
 AGE_SOURCE_JOB_RUNS = "job_runs"
-AGE_SOURCES: dict[str, str] = {"triton_grader": AGE_SOURCE_JOB_RUNS}
+AGE_SOURCES: dict[str, str] = {
+    "triton_grader": AGE_SOURCE_JOB_RUNS,
+    "circes_stew": AGE_SOURCE_JOB_RUNS,
+    "circes_stew_unsurfaced": AGE_SOURCE_JOB_RUNS,
+}
+# job_runs name per class, where it differs from the class. Both CIRCE source values are
+# written by ONE pass.
+AGE_SOURCE_JOB_NAME: dict[str, str] = {"circes_stew_unsurfaced": "circes_stew"}
 
 # Classes whose work is expected once per TRADING SESSION rather than continuously.
 # Their SLO is only evaluated when a pass was actually due -- see _pass_overdue().
-SESSION_JOB_CLASSES = frozenset({"triton_grader"})
+SESSION_JOB_CLASSES = frozenset({"triton_grader", "circes_stew", "circes_stew_unsurfaced"})
 
 # The grader runs post-close; give it until 16:15 ET plus grace before a pass for
 # that session is considered due.
@@ -114,6 +125,8 @@ SLO_SECONDS: dict[str, int] = {
     # corrects R-IV.295(a)'s 'calendar days'); ungated, a bare 26h bound would
     # miss roughly two days in seven and the declaration could not hold.
     "triton_grader": 26 * 3600,
+    "circes_stew": 26 * 3600,
+    "circes_stew_unsurfaced": 26 * 3600,
 }
 
 # Classes that only flow during regular trading hours. Crypto runs 24/7 and must
@@ -249,9 +262,13 @@ async def signals_freshness_summary() -> dict:
     for cls, src in AGE_SOURCES.items():
         if src != AGE_SOURCE_JOB_RUNS:
             continue
+        # The declared source is the ONLY source: a class that also writes signals rows
+        # must not keep the row age when the job_runs read fails -- that would judge a
+        # once-a-session producer on row age over a weekend.
+        ages.pop(cls, None)
         try:
             from jobs.job_runs import last_completed
-            row = await last_completed(cls)
+            row = await last_completed(AGE_SOURCE_JOB_NAME.get(cls, cls))
             if row and row.get("finished_at") is not None:
                 fin = row["finished_at"]
                 if fin.tzinfo is None:
