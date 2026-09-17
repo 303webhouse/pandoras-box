@@ -18,7 +18,11 @@ from datetime import datetime, timezone
 import pandas as pd
 from psycopg2.extras import execute_values
 
+import logging
+
 from . import db, settings as settings_mod
+
+logger = logging.getLogger(__name__)
 
 # Themes excluded from scoring (benchmarks, broad ETF sleeves, scan-only universe,
 # and the 11 SPDR sector ETFs — Addendum A1).
@@ -48,13 +52,61 @@ def _scale_to_100(value: float, low: float, high: float) -> float:
     return max(0.0, min(100.0, pct))
 
 
+# ── R-IV.435(e): THE ANCHOR IS THE NEWEST **COMPLETE** DATE ─────────────────────
+#
+# WHAT HAPPENED. Theme scores stopped on 2026-09-04 while metrics kept landing through 09-15.
+# The newest date in stable_metrics (09-16) held TWO tickers against 677 on every prior date --
+# a partial write, and `MAX(date)` made it the anchor. Every theme read a two-ticker universe,
+# the basket came back empty, and the nightly stored zero rows while reporting a successful
+# pass. A partial date is not a young date: it is an incomplete one, and it must not be able to
+# become the thing everything else is measured against.
+#
+# THE MINIMUM IS DECLARED, NOT INFERRED. A date counts as complete when it carries at least
+# ANCHOR_MIN_COVERAGE of the universe. Stated as a fraction of `stable_universe` so it tracks
+# the universe rather than a number that goes stale: at 690 tickers the bar is 552, which 677
+# clears and 2 does not.
+#
+# NO SILENT FALLBACK. When no date clears the bar the readers return EMPTY and say so. Falling
+# back to MAX(date) would restore exactly the defect this closes.
+ANCHOR_MIN_COVERAGE = 0.80
+ANCHOR_MIN_TICKERS_FLOOR = 50
+
+
+def anchor_date(as_of=None):
+    """(date, coverage, required) for the newest COMPLETE metrics date, or (None, ...).
+
+    `as_of` bounds the search, so a backfill can ask for the anchor as it stood on a past day.
+    """
+    universe_n = _scalar("SELECT COUNT(DISTINCT ticker) FROM stable_universe") or 0
+    required = max(ANCHOR_MIN_TICKERS_FLOOR, int(universe_n * ANCHOR_MIN_COVERAGE))
+    row = db.read_df(
+        """
+        SELECT date, COUNT(DISTINCT ticker) AS n
+        FROM stable_metrics
+        WHERE (%s IS NULL OR date <= %s)
+        GROUP BY date
+        HAVING COUNT(DISTINCT ticker) >= %s
+        ORDER BY date DESC
+        LIMIT 1
+        """,
+        [as_of, as_of, required],
+    )
+    if row is None or row.empty:
+        logger.warning("[stable_scoring] no metrics date carries %d of %d universe tickers -- "
+                       "NOT anchoring on MAX(date); readers return empty", required, universe_n)
+        return None, 0, required
+    return row.iloc[0]["date"], int(row.iloc[0]["n"]), required
+
+
 def compute_theme_scores(as_of: pd.Timestamp | None = None) -> pd.DataFrame:
-    """Compute one row per theme for the latest date (or as_of). Math identical to source."""
-    latest_date = _scalar("SELECT MAX(date) FROM stable_metrics")
-    if as_of is None:
-        as_of = latest_date
+    """Compute one row per theme for the newest COMPLETE date (or as_of). Math unchanged."""
+    latest_date, coverage, required = anchor_date(as_of)
     if latest_date is None:
         return pd.DataFrame()
+    if as_of is None:
+        as_of = latest_date
+    logger.info("[stable_scoring] anchor %s (%d tickers, minimum %d)",
+                latest_date, coverage, required)
 
     df = db.read_df("""
         SELECT u.theme, u.ticker, u.liquidity_tier,
@@ -176,7 +228,7 @@ def compute_theme_scores(as_of: pd.Timestamp | None = None) -> pd.DataFrame:
 
 def get_theme_constituents(theme: str, limit: int = 50) -> pd.DataFrame:
     """Latest metrics for all tickers in a theme, sorted by 5D return."""
-    latest_date = _scalar("SELECT MAX(date) FROM stable_metrics")
+    latest_date, _, _ = anchor_date()
     if latest_date is None:
         return pd.DataFrame()
     return db.read_df("""
@@ -200,7 +252,7 @@ def get_regime_read() -> dict:
     cfg = settings_mod.load()
     big_move = cfg["breadth"]["big_move_threshold"]
 
-    latest = _scalar("SELECT MAX(date) FROM stable_metrics")
+    latest, _, _ = anchor_date()
     if latest is None:
         return {"as_of": None, "benchmarks": [], "breadth": {}, "thresholds": {"big_move_pct": big_move * 100}}
 
@@ -282,3 +334,55 @@ def store_theme_scores(scores: pd.DataFrame, anchor: str, as_of: datetime | None
                 rows, page_size=1000,
             )
     return len(rows)
+
+
+# ── R-IV.435(e): RECOMPUTE THE DAYS THE PARTIAL ANCHOR COST ────────────────────
+#
+# Theme scores stopped on 2026-09-04 while metrics kept landing. Those days are computable --
+# the metrics are there -- so the nightly fills any COMPLETE date that has no scores instead of
+# leaving a hole that only a hand-run script could close. Bounded per pass, oldest first, and it
+# writes nothing for a date it cannot compute.
+BACKFILL_LOOKBACK_DAYS = 45
+BACKFILL_MAX_DATES_PER_PASS = 20
+
+
+def missing_score_dates(anchor: str = "close", lookback_days: int = BACKFILL_LOOKBACK_DAYS):
+    """COMPLETE metrics dates inside the window that carry no stored scores for this anchor."""
+    universe_n = _scalar("SELECT COUNT(DISTINCT ticker) FROM stable_universe") or 0
+    required = max(ANCHOR_MIN_TICKERS_FLOOR, int(universe_n * ANCHOR_MIN_COVERAGE))
+    df = db.read_df(
+        """
+        SELECT m.date
+        FROM (
+            SELECT date, COUNT(DISTINCT ticker) AS n
+            FROM stable_metrics
+            WHERE date >= (SELECT MAX(date) FROM stable_metrics) - %s::int
+            GROUP BY date
+        ) m
+        LEFT JOIN (
+            SELECT DISTINCT date FROM stable_theme_scores WHERE anchor = %s
+        ) s ON s.date = m.date
+        WHERE m.n >= %s AND s.date IS NULL
+        ORDER BY m.date
+        """,
+        [lookback_days, anchor, required],
+    )
+    return [] if df is None or df.empty else list(df["date"])
+
+
+def backfill_missing_theme_scores(anchor: str = "close",
+                                  lookback_days: int = BACKFILL_LOOKBACK_DAYS,
+                                  limit: int = BACKFILL_MAX_DATES_PER_PASS,
+                                  degraded: bool = False) -> list:
+    """Compute and store scores for each missing COMPLETE date. Returns [(date, rows)]."""
+    out = []
+    for d in missing_score_dates(anchor, lookback_days)[:limit]:
+        scores = compute_theme_scores(as_of=d)
+        if scores is None or scores.empty:
+            logger.warning("[stable_scoring] backfill: %s has no computable scores", d)
+            continue
+        out.append((str(d), store_theme_scores(scores, anchor=anchor, degraded=degraded)))
+    if out:
+        logger.info("[stable_scoring] backfilled %d date(s): %s", len(out), out)
+    return out
+

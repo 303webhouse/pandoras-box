@@ -49,8 +49,14 @@ def _nightly_work() -> dict:
     m = metrics.compute_metrics()
     scores = scoring.compute_theme_scores()
     stored = scoring.store_theme_scores(scores, anchor="close", degraded=coverage["degraded"])
+    # R-IV.435(e): any COMPLETE metrics date with no scores is filled here, so a gap closes
+    # itself the night after the anchor is fixed instead of waiting for a hand-run script.
+    backfilled = scoring.backfill_missing_theme_scores(anchor="close",
+                                                       degraded=coverage["degraded"])
     return {"coverage": coverage["coverage_pct"], "degraded": coverage["degraded"],
-            "metrics_rows": m.get("rows_written", 0), "themes_stored": stored}
+            "metrics_rows": m.get("rows_written", 0), "themes_stored": stored,
+            "held_dates": m.get("held_dates") or [],
+            "themes_backfilled": backfilled}
 
 
 def _provisional_work() -> dict:
