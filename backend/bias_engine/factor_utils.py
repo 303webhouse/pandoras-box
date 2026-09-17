@@ -24,9 +24,58 @@ logger = logging.getLogger(__name__)
 # Tickers that must stay on yfinance (no Polygon Indices/Currencies subscription).
 _YFINANCE_ONLY_SYMBOLS = {"^VIX", "^VIX3M", "^ADVN", "^DECLN", "^ADV", "^DEC", "ADVN", "DECLN", "DX-Y.NYB"}
 
+
+# ── R-IV.435(f): THE READING NAMES THE VENDOR THAT SERVED IT ────────────────────
+#
+# `get_price_history` reads UW FIRST for equity and ETF symbols and falls back to yfinance --
+# the branch is still called "Polygon primary path" and imports UW under a `_polygon_bars`
+# alias, from a vendor that is no longer in the stack. Thirteen factors nevertheless report
+# `source="yfinance"` as a literal, so a reading served by UW said yfinance on its face.
+#
+# The frame now carries the vendor that produced it, and the vendor survives the Redis cache in
+# its own key -- a DataFrame's `attrs` do not survive serialisation, and a cached frame whose
+# vendor was forgotten would report the default forever. A frame cached before this change
+# reports "unknown", which is the honest answer and not a guess.
+VENDOR_ATTR = "vendor"
+VENDOR_UNKNOWN = "unknown"
+PRICE_CONSUMER = "factor_utils.price_history"
+
+
+def tag_vendor(df, vendor: str):
+    """Stamp the serving vendor on a frame. Returns the frame."""
+    try:
+        if df is not None:
+            df.attrs[VENDOR_ATTR] = vendor
+    except Exception:
+        pass
+    return df
+
+
+def price_vendors(*frames) -> str:
+    """The vendor(s) behind a reading built from several frames.
+
+    'uw', 'yfinance', 'unknown', or a joined 'uw+yfinance' when a reading mixes them -- which is
+    a fact about the reading, not a formatting choice, and is exactly what a single hardcoded
+    label hid.
+    """
+    seen = sorted({price_vendor(f) for f in frames if f is not None})
+    return "+".join(seen) if seen else VENDOR_UNKNOWN
+
+
+def price_vendor(df) -> str:
+    """The vendor that served this frame: 'uw', 'yfinance', or 'unknown'. Never a guess."""
+    try:
+        v = (df.attrs or {}).get(VENDOR_ATTR) if df is not None else None
+    except Exception:
+        v = None
+    return v or VENDOR_UNKNOWN
+
+
 PRICE_CACHE_TTL = 900  # 15 minutes
 PRICE_CACHE_VERSION = "v3"
 # Symbols with additional live-quote mismatch validation.
+from utils.vendor_substitution import record_primary, record_substitution
+
 PRICE_VALIDATION_SYMBOLS = {"SPY", "^VIX", "^VIX3M", "DX-Y.NYB"}
 # Plausibility bounds for all shared bias-system market tickers.
 # Values outside these ranges are treated as anomalous and rejected.
@@ -345,6 +394,10 @@ async def get_price_history(ticker: str, days: int = 30) -> pd.DataFrame:
             cached = await client.get(cache_key)
             if cached:
                 df = _decode_cached_history(cached)
+                cached_vendor = await client.get(cache_key + ":vendor")
+                if isinstance(cached_vendor, bytes):
+                    cached_vendor = cached_vendor.decode("utf-8", "ignore")
+                df = tag_vendor(df, cached_vendor or VENDOR_UNKNOWN)
                 df = _normalize_history(df)
                 df = _prefer_adjusted_close(symbol, df, reference_price)
                 if _has_bounds_violation(symbol, df, stage="cached"):
@@ -386,9 +439,11 @@ async def get_price_history(ticker: str, days: int = 30) -> pd.DataFrame:
                             if client and polygon_df is not None and not polygon_df.empty:
                                 payload = polygon_df.to_json(orient="split")
                                 await client.setex(cache_key, PRICE_CACHE_TTL, payload)
+                                await client.setex(cache_key + ":vendor", PRICE_CACHE_TTL, "uw")
                         except Exception as exc:
                             logger.warning("Price cache write failed for %s (polygon): %s", symbol, type(exc).__name__)
-                        return polygon_df
+                        record_primary(PRICE_CONSUMER, "uw")
+                        return tag_vendor(polygon_df, "uw")
                     else:
                         logger.warning("Polygon %s data mismatches live quote, falling back to yfinance", symbol)
                 else:
@@ -399,6 +454,10 @@ async def get_price_history(ticker: str, days: int = 30) -> pd.DataFrame:
             logger.warning("Polygon fetch failed for %s, falling back to yfinance: %s", symbol, exc)
 
     # --- yfinance fallback path ---
+    # R-IV.433(c): announced. A Yahoo-only symbol (^VIX and friends) is yfinance BY DESIGN and
+    # is not a substitution; every other symbol reaching here means UW did not serve it.
+    if symbol not in _YFINANCE_ONLY_SYMBOLS:
+        record_substitution(PRICE_CONSUMER, "uw", "yfinance", "uw bars unusable or absent", symbol)
     data = _download_history(auto_adjust=True)
     data = _prefer_adjusted_close(symbol, data, reference_price)
     if _has_bounds_violation(symbol, data, stage="download(auto_adjust=True)"):
@@ -436,13 +495,16 @@ async def get_price_history(ticker: str, days: int = 30) -> pd.DataFrame:
     try:
         client = await get_redis_client()
         if client and data is not None and not data.empty:
+            await client.setex(cache_key + ":vendor", PRICE_CACHE_TTL, "yfinance")
             payload = data.to_json(orient="split")
             # Store raw payload (not double-encoded) to avoid decode ambiguity.
             await client.setex(cache_key, PRICE_CACHE_TTL, payload)
     except Exception as exc:
         logger.warning(f"Price cache write failed for {symbol}: {type(exc).__name__}")
 
-    return data
+    if symbol in _YFINANCE_ONLY_SYMBOLS:
+        record_primary(PRICE_CONSUMER, "yfinance")     # yfinance IS the primary for these
+    return tag_vendor(data, "yfinance")
 
 
 async def get_latest_price(ticker: str) -> Optional[float]:

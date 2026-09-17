@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 try:
     from bias_engine.composite import FactorReading
-    from bias_engine.factor_utils import score_to_signal, get_price_history
+    from bias_engine.factor_utils import score_to_signal, get_price_history, price_vendors
 except ImportError:
     from backend.bias_engine.composite import FactorReading
     from backend.bias_engine.factor_utils import score_to_signal, get_price_history
@@ -50,7 +50,7 @@ async def compute_score() -> Optional[FactorReading]:
         signal=score_to_signal(score),
         detail=f"SPY {current_price:.2f}, 200 SMA {current_sma:.2f} ({pct_distance:+.1f}%)",
         timestamp=datetime.utcnow(),
-        source="yfinance",
+        source=price_vendors(data),
         raw_data={
             "price": current_price,
             "sma200": round(current_sma, 2),

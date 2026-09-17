@@ -23,7 +23,7 @@ from datetime import datetime
 from enum import Enum
 
 from bias_engine.composite import FactorReading
-from bias_engine.factor_utils import score_to_signal, get_price_history
+from bias_engine.factor_utils import score_to_signal, get_price_history, price_vendors
 
 logger = logging.getLogger(__name__)
 
@@ -235,7 +235,7 @@ async def compute_breadth_score() -> Optional[FactorReading]:
             f"({pct_dev:+.1f}%), 5d ROC: {roc_5d:+.2f}%"
         ),
         timestamp=datetime.utcnow(),
-        source="yfinance",
+        source=price_vendors(rsp, spy),
         raw_data={
             "rsp": float(rsp["close"].iloc[-1]),
             "spy": float(spy["close"].iloc[-1]),

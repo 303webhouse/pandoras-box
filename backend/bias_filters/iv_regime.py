@@ -25,7 +25,7 @@ IV_HISTORY_LOOKBACK = 20  # 20 data points for rank calculation
 
 try:
     from bias_engine.composite import FactorReading
-    from bias_engine.factor_utils import score_to_signal, get_latest_price
+    from bias_engine.factor_utils import score_to_signal, get_latest_price, price_vendors
 except ImportError:
     FactorReading = None
     score_to_signal = None
@@ -148,7 +148,7 @@ async def compute_score() -> Optional[FactorReading]:
             signal="NEUTRAL",
             detail=f"IV regime: building baseline ({len(history)}/{IV_HISTORY_LOOKBACK} readings, VIX {vix:.1f})",
             timestamp=datetime.utcnow(),
-            source="yfinance",
+            source=price_vendors(vix_hist),
             raw_data={
                 "vix": round(vix, 2),
                 "history_count": len(history) if history else 0,
@@ -177,7 +177,7 @@ async def compute_score() -> Optional[FactorReading]:
         signal=score_to_signal(score),
         detail=f"IV rank: {iv_rank:.0f}% (VIX {vix:.1f}, {label})",
         timestamp=datetime.utcnow(),
-        source="yfinance",
+        source=price_vendors(vix_hist),
         raw_data={
             "vix": round(vix, 2),
             "iv_rank": round(iv_rank, 1),

@@ -21,7 +21,7 @@ from datetime import datetime
 from enum import Enum
 
 from bias_engine.composite import FactorReading
-from bias_engine.factor_utils import score_to_signal, get_price_history, get_latest_price
+from bias_engine.factor_utils import score_to_signal, get_price_history, get_latest_price, price_vendors
 
 logger = logging.getLogger(__name__)
 
@@ -416,7 +416,7 @@ async def compute_dollar_smile_score() -> Optional[FactorReading]:
             f"SMA20 {sma_20:.2f}, VIX {'elevated' if vix_elevated else 'calm'} at {vix:.1f}"
         ),
         timestamp=datetime.utcnow(),
-        source="yfinance",
+        source=price_vendors(dxy),
         raw_data={
             "dxy": float(current_dxy),
             "sma20": float(sma_20),
