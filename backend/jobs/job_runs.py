@@ -40,6 +40,14 @@ STATUS_OK = "ok"
 STATUS_ERROR = "error"
 STATUS_TIMEOUT = "timeout"
 STATUS_SKIPPED = "skipped"
+# R-IV.426(b). The pass ran to the end but its OWN output check failed (e.g. the nightly
+# downloaded and computed, then stored zero theme rows). It is a FAILURE — recorded with its
+# reason — and it is a COMPLETED PASS, so the retry leaves it alone: a deterministic data
+# defect does not heal on repetition, and each retry re-downloads the whole universe.
+STATUS_COMPLETED_DEFECTIVE = "completed_defective"
+# What the RETRY question counts as "this session's pass is done". Not the same question as
+# "this session produced good data" -- last_completed() below still counts only ok/skipped.
+PASS_COMPLETE_STATUSES = (STATUS_OK, STATUS_COMPLETED_DEFECTIVE)
 
 
 async def start_run(job_name: str, session_date: date) -> Optional[int]:
@@ -82,8 +90,11 @@ async def finish_run(run_id: Optional[int], status: str,
 
 
 async def has_completed(job_name: str, session_date: date) -> Optional[bool]:
-    """TRI-STATE. True = a successful run exists for this session date.
+    """TRI-STATE. True = this session's PASS completed (ok, or completed_defective).
     False = none exists. None = the question could not be answered.
+
+    completed_defective counts as completed on purpose (R-IV.426(b)): the retry exists for
+    a pass that did not finish, not for one that finished and produced nothing.
 
     None is not False. A caller that collapses them has decided what an
     unreadable database means without saying so.
@@ -95,8 +106,8 @@ async def has_completed(job_name: str, session_date: date) -> Optional[bool]:
         async with pool.acquire() as conn:
             found = await conn.fetchval(
                 "SELECT 1 FROM job_runs WHERE job_name = $1 AND session_date = $2 "
-                "AND status = $3 LIMIT 1",
-                job_name, session_date, STATUS_OK,
+                "AND status = ANY($3::text[]) LIMIT 1",
+                job_name, session_date, list(PASS_COMPLETE_STATUSES),
             )
         return found is not None
     except Exception as exc:
