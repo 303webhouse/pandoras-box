@@ -579,6 +579,57 @@ def test_notices_route_precedes_the_signal_id_route():
     assert paths.index("/trade-ideas/notices") < paths.index("/trade-ideas/{signal_id}")
 
 
+class _SqlConn:
+    def __init__(self):
+        self.sql = []
+
+    async def execute(self, sql, *a):
+        self.sql.append(sql)
+        return "UPDATE 0"
+
+
+class _SqlPool:
+    def __init__(self, conn):
+        self.conn = conn
+
+    def acquire(self):
+        conn = self.conn
+
+        class _A:
+            async def __aenter__(self):
+                return conn
+
+            async def __aexit__(self, *e):
+                return False
+        return _A()
+
+
+def test_a_system_expiry_is_not_a_user_dismissal():
+    """R-IV.434(b): both system sweeps record 'EXPIRED', so the legacy 24h ticker hide --
+    which keys on a human's 'DISMISSED' -- does not fire when an idea runs out of time."""
+    from api import trade_ideas as ti
+    conn = _SqlConn()
+    with patch.object(ti, "get_postgres_client", new=AsyncMock(return_value=_SqlPool(conn))):
+        asyncio.run(ti.expire_stale_signals())
+    assert "user_action = 'EXPIRED'" in conn.sql[0] and "'DISMISSED'" not in conn.sql[0]
+
+    from scheduler import bias_scheduler as bs
+    conn = _SqlConn()
+    with patch("database.postgres_client.get_postgres_client",
+               new=AsyncMock(return_value=_SqlPool(conn))):
+        asyncio.run(bs.auto_dismiss_old_signals())
+    sql = conn.sql[0]
+    assert "user_action = 'EXPIRED'" in sql and "'DISMISSED'" not in sql
+    assert "<> 'SHADOW'" in sql                      # a shadow row is never "dismissed"
+
+
+def test_the_legacy_hide_keys_on_a_human_dismissal_only():
+    from database import postgres_client as pc
+    for fn in (pc.get_active_trade_ideas, pc.get_active_trade_ideas_paginated):
+        src = inspect.getsource(fn)
+        assert "user_action = 'DISMISSED'" in src and "EXPIRED" not in src
+
+
 def test_grader_is_registered_as_a_session_job():
     from stable_engine import signals_freshness as sf
     assert "shadow_grader" in sf.REGISTERED_CLASSES and "shadow_grader" in sf.SESSION_JOB_CLASSES

@@ -61,7 +61,11 @@ UW_ACCOUNT_LIMIT = 40000
 # is good at, and neither has to be worst-case alone.
 UW_FOREIGN_RESERVE = 12000
 
-DAILY_BUDGET = UW_ACCOUNT_LIMIT - UW_FOREIGN_RESERVE   # = 20,000 hub-spendable
+# Hub-spendable: the account limit less the reserve. The number is deliberately NOT restated
+# here -- this line used to say "= 20,000" while the arithmetic gave 28,000 (R-IV.434(d), the
+# third comment in this area to outlive its numbers). The arithmetic is the record, and
+# test_uw_governor_account asserts it.
+DAILY_BUDGET = UW_ACCOUNT_LIMIT - UW_FOREIGN_RESERVE
 BUDGET_ALERT_THRESHOLDS = [0.50, 0.70, 0.85, 0.90]  # Alert at each crossing — 90% is CRITICAL ceiling (drops 95% in favor of earlier-firing CRITICAL)
 
 # In-memory stats (reset on deploy)

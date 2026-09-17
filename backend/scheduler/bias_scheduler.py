@@ -2226,13 +2226,17 @@ async def auto_dismiss_old_signals():
         
         pool = await get_postgres_client()
         async with pool.acquire() as conn:
-            # Dismiss signals older than 24 hours that haven't been acted upon
+            # Expire signals older than 24 hours that haven't been acted upon. A system
+            # expiry, not a user dismissal (R-IV.434(b)): 'EXPIRED', so the legacy feeds'
+            # 24-hour ticker hide (keyed on 'DISMISSED') does not fire. SHADOW rows are left
+            # alone -- they are never on an actionable surface, and their notes carry a banner.
             result = await conn.execute("""
-                UPDATE signals 
-                SET user_action = 'DISMISSED', 
+                UPDATE signals
+                SET user_action = 'EXPIRED',
                     dismissed_at = NOW(),
-                    notes = COALESCE(notes || ' | ', '') || 'Auto-dismissed after 24h'
-                WHERE user_action IS NULL 
+                    notes = COALESCE(notes || ' | ', '') || 'Auto-expired after 24h'
+                WHERE user_action IS NULL
+                AND COALESCE(status, 'ACTIVE') <> 'SHADOW'
                 AND created_at < NOW() - INTERVAL '24 hours'
             """)
             
@@ -2244,7 +2248,7 @@ async def auto_dismiss_old_signals():
                     count = int(parts[1])
             
             if count > 0:
-                logger.info(f"ðŸ—‘ï¸ Auto-dismissed {count} signals older than 24 hours")
+                logger.info(f"ðŸ—‘ï¸ Auto-expired {count} signals older than 24 hours")
             
     except Exception as e:
         logger.error(f"âŒ Auto-dismiss error: {e}")

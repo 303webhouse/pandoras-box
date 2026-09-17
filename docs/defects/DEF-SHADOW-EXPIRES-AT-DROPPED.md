@@ -71,12 +71,17 @@ counts are now read as minutes: >= 240 -> 24 hours, >= 10080 -> 7 days, otherwis
 | flat feed `/api/trade-ideas?status=ACTIVE` (the River, Kairos) | every row passed `expires_at IS NULL` | an intraday idea drops out 4 hours after it fired |
 | expiry sweep (every 5 min) | ACTIVE rows expired at `created_at + 24h` | at their own expiry; the 24h fallback remains for rows with none |
 | a user action on an expired idea | possible for 24 hours | refused as terminal after the expiry (`EXPIRED` was already terminal) |
-| legacy `/api/signals/active` (the old UI) | hides a ticker for 24h after a dismissal | unchanged rule, but the sweep's `DISMISSED` now lands 4h after an intraday fire, so **a fresh same-day idea on that ticker is hidden there** until the 24h passes |
+| legacy `/api/signals/active` (the old UI) | hides a ticker for 24h after a dismissal | **unchanged in effect**: the sweeps now record a system expiry as `EXPIRED`, not `DISMISSED` (R-IV.434(b)), so the hide fires only on a human's dismissal |
 | CTA scanner cooldown (`has_recent_active_signal`) | — | **unchanged**: CTA rows are `DAILY` (24h) and carry no pipeline expiry |
 | SHADOW rows | not on ACTIVE surfaces | unchanged |
 
-The legacy-UI effect is the sweep's existing choice to record a system expiry as
-`user_action = 'DISMISSED'`; it is reported, not changed here.
+**A system expiry is not a user dismissal (R-IV.434(b)).** Both sweeps -- the 5-minute
+expiry sweep and the hourly 24-hour auto-dismiss -- recorded a system expiry as
+`user_action = 'DISMISSED'`, which is what the legacy feeds' 24-hour ticker hide keys on. With
+the 4-hour expiry, that would have hidden fresh same-day ideas in the old UI. They now record
+`EXPIRED`. The hourly sweep also leaves SHADOW rows alone: they are never on an actionable
+surface, and it appended to the notes that carry CIRCE'S STEW's banner. Rows written before
+this change keep the `DISMISSED` they were given; nothing is rewritten.
 
 **Announced on the River:** `GET /api/trade-ideas/notices` carries the notice from the deploy
 day for two weeks, for CC-ABACUS to render.
