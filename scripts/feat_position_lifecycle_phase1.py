@@ -151,30 +151,34 @@ def main() -> int:
         """, (list(FROZEN_LABELS),))
         print(f"  {tbl}: {cur.rowcount} row(s) normalised")
 
-    # ---------- STEP 3: position_lots ----------
-    print("\n-- STEP 3 position_lots + LEGACY-SINGLE-LOT backfill ---------------")
+    # ---------- STEP 3: position_lots — SUPERSEDED, now READ-ONLY ----------
+    # This step created the table and backfilled one LEGACY-SINGLE-LOT row per position on
+    # 2026-08-26. Both halves are retired:
+    #
+    #   the TABLE is owned by migrations/037_position_lots_ruled_shape.sql and mirrored at boot.
+    #   Creating it from a script is what put a production table outside migrations/ in the
+    #   first place, where no search of the migrations directory could see it.
+    #
+    #   the BACKFILL is not re-runnable. Its NOT EXISTS guard prevents a second lot on a
+    #   position that has one, but it would invent a first lot for each position that has
+    #   none — 50 of them today — and a lot invented from the row it is supposed to verify
+    #   satisfies "every position has a lot" by construction while measuring nothing.
+    #
+    # What remains here is the reading, which is the part that was worth keeping.
+    print("\n-- STEP 3 position_lots (owned by migration 037; read only here) ---")
     cur.execute("""
-        CREATE TABLE IF NOT EXISTS position_lots (
-            id            serial PRIMARY KEY,
-            position_id   text NOT NULL REFERENCES unified_positions(position_id)
-                              ON DELETE CASCADE,
-            fill_date     timestamptz NOT NULL,
-            quantity      numeric NOT NULL,
-            price         numeric,
-            fees          numeric NOT NULL DEFAULT 0,
-            source        text NOT NULL DEFAULT 'MANUAL'
-                              CHECK (source IN ('MANUAL','IMPORT','LEGACY-SINGLE-LOT')),
-            created_at    timestamptz NOT NULL DEFAULT now()
-        )""")
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_position_lots_position ON position_lots(position_id)")
-    print("  position_lots ensured")
-    cur.execute("""
-        INSERT INTO position_lots (position_id, fill_date, quantity, price, fees, source)
-        SELECT p.position_id, p.entry_date, p.quantity, p.entry_price, 0, 'LEGACY-SINGLE-LOT'
-        FROM unified_positions p
-        WHERE NOT EXISTS (SELECT 1 FROM position_lots l WHERE l.position_id = p.position_id)
+        SELECT COUNT(*) FROM information_schema.columns
+         WHERE table_name = 'position_lots' AND column_name IN ('qty', 'fill_time', 'provenance')
     """)
-    print(f"  backfilled {cur.rowcount} LEGACY-SINGLE-LOT row(s)")
+    if cur.fetchone()[0] == 3:
+        print("  position_lots is at the ruled shape (qty, fill_time, provenance)")
+    else:
+        print("  position_lots is NOT at the ruled shape — run migration 037 or boot the app")
+    cur.execute("""
+        SELECT COUNT(*) FROM unified_positions p
+         WHERE NOT EXISTS (SELECT 1 FROM position_lots l WHERE l.position_id = p.position_id)
+    """)
+    print(f"  {cur.fetchone()[0]} position(s) carry no lot — the starting state, not backfilled")
 
     # ---------- STEP 4 (D2): widen position_sync_audit ----------
     print("\n-- STEP 4 (D2) widen position_sync_audit ---------------------------")
@@ -305,7 +309,7 @@ def main() -> int:
 
     cur.execute("SELECT COUNT(*) FROM position_lots l JOIN unified_positions p "
                 "USING (position_id) WHERE l.source='LEGACY-SINGLE-LOT' "
-                "AND (l.quantity <> p.quantity OR l.price IS DISTINCT FROM p.entry_price)")
+                "AND (l.qty <> p.quantity OR l.price IS DISTINCT FROM p.entry_price)")
     drift = cur.fetchone()[0]
     print(f"  backfill fidelity: {drift} lot(s) disagree with their position (must be 0)")
     if drift:

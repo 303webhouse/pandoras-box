@@ -891,6 +891,89 @@ async def init_database():
             ADD COLUMN IF NOT EXISTS short_leg_price NUMERIC
         """)
 
+        # position_lots — the fills behind a position, and the ONLY place its entry price and
+        # cost basis come from (R-IV.310(b), R-IV.441(a)). The table has existed in production
+        # since 2026-08-26 under different column names; migrations/037 renames rather than
+        # recreates, and boot mirrors the migration so a fresh database and the live one reach
+        # the same shape. Keep the two in sync.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS position_lots (
+                id           SERIAL PRIMARY KEY,
+                position_id  TEXT        NOT NULL
+                             REFERENCES unified_positions(position_id) ON DELETE CASCADE,
+                fill_time    TIMESTAMPTZ NOT NULL,
+                qty          NUMERIC     NOT NULL,
+                price        NUMERIC,
+                fees         NUMERIC     NOT NULL DEFAULT 0,
+                source       TEXT        NOT NULL DEFAULT 'MANUAL'
+                             CHECK (source IN ('MANUAL', 'IMPORT', 'LEGACY-SINGLE-LOT')),
+                provenance   TEXT,
+                broker_ref   TEXT,
+                created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_position_lots_position ON position_lots (position_id)
+        """)
+        # The renames, conditioned on both names, so a database at either shape converges and a
+        # second boot is a no-op.
+        await conn.execute("""
+            DO $$
+            BEGIN
+                IF EXISTS (SELECT 1 FROM information_schema.columns
+                            WHERE table_name = 'position_lots' AND column_name = 'quantity')
+                   AND NOT EXISTS (SELECT 1 FROM information_schema.columns
+                            WHERE table_name = 'position_lots' AND column_name = 'qty') THEN
+                    ALTER TABLE position_lots RENAME COLUMN quantity TO qty;
+                END IF;
+                IF EXISTS (SELECT 1 FROM information_schema.columns
+                            WHERE table_name = 'position_lots' AND column_name = 'fill_date')
+                   AND NOT EXISTS (SELECT 1 FROM information_schema.columns
+                            WHERE table_name = 'position_lots' AND column_name = 'fill_time') THEN
+                    ALTER TABLE position_lots RENAME COLUMN fill_date TO fill_time;
+                END IF;
+            END $$;
+        """)
+        await conn.execute("""
+            ALTER TABLE position_lots
+            ADD COLUMN IF NOT EXISTS provenance TEXT,
+            ADD COLUMN IF NOT EXISTS broker_ref TEXT
+        """)
+        # Provenance is inherited from the parent position and never defaulted; the mapping is
+        # migration 037's, applied here to any row that still carries none. Guarded on NULL, so
+        # boot can never overwrite a value a later path set.
+        await conn.execute("""
+            UPDATE position_lots l
+               SET provenance = CASE
+                    WHEN l.price IS NULL THEN 'UNKNOWN'
+                    WHEN p.source IN ('IMPORTED_HISTORICAL', 'CSV_IMPORT', 'CSV_SYNC',
+                                      'CSV_RECONCILE', 'fidelity_confirm') THEN 'IMPORTED'
+                    ELSE 'PRINCIPAL_REPORTED'
+               END
+              FROM unified_positions p
+             WHERE p.position_id = l.position_id AND l.provenance IS NULL
+        """)
+        await conn.execute("""
+            UPDATE position_lots SET provenance = 'UNKNOWN' WHERE provenance IS NULL
+        """)
+        await conn.execute("ALTER TABLE position_lots ALTER COLUMN provenance SET NOT NULL")
+        await conn.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                                WHERE conname = 'position_lots_provenance_check') THEN
+                    ALTER TABLE position_lots ADD CONSTRAINT position_lots_provenance_check
+                        CHECK (provenance IN ('PRINCIPAL_REPORTED', 'BROKER_VERIFIED',
+                                              'IMPORTED', 'UNKNOWN'));
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                                WHERE conname = 'position_lots_verified_needs_ref') THEN
+                    ALTER TABLE position_lots ADD CONSTRAINT position_lots_verified_needs_ref
+                        CHECK (provenance <> 'BROKER_VERIFIED' OR broker_ref IS NOT NULL);
+                END IF;
+            END $$;
+        """)
+
         # Brief 05: Committee override tracking on signals and trades
         try:
             await conn.execute("""
