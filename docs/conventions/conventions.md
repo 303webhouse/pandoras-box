@@ -828,3 +828,67 @@ purpose is to be flipped.
 the same shape one step earlier: **protection that depends on a switch whose job is to be
 switched is not protection.** And DEF-SHADOW-EXPIRES-AT-DROPPED, half 1 of this rule failing
 for a third field at the same insert.
+
+
+## #20 EVERY STORED PRICE NAMES ITS VENDOR AND ITS BASIS
+
+**R-IV.433(b), standing. The backtest module is the first writer built to it (2bc8a59).**
+
+> **Any stored price or graded outcome records the vendor that produced it and the adjustment
+> basis it is on. A price without both is a number whose meaning can change without the row
+> changing.**
+
+### Why a price needs two labels, not one
+
+**The vendor alone is not enough.** yfinance returns split-adjusted closes with
+`auto_adjust=False` and split- *and* dividend-adjusted closes without it; the library's default
+changed once already. Two rows from "yfinance" can be on different bases.
+
+**The basis alone is not enough either.** "Split-adjusted" means adjusted *as of when it was
+fetched*, by *that vendor's* calendar -- and one vendor's calendar has been measured applying a
+factor in the wrong direction (HON). The same words on two vendors are two claims.
+
+**And the basis moves after the row is written.** An adjusted series is rescaled every time a
+later action lands, so a return computed from a stored raw entry against a series fetched later
+is a return on two scales. **196 stored forward returns are exactly that** (DEF-ADJUSTED-BARS-
+VS-RAW-ENTRY).
+
+### The rule
+
+- **Every writer of a price or an outcome stores `vendor` and `basis`** (the basis says
+  split / dividend / as-of). The backtest module stores both on every graded row, and the
+  fetch time beside them.
+- **A call that fetches prices states its adjustment explicitly** -- never a library default.
+- **Existing writers that do not comply are listed, not assumed.** R-IV.433(a)'s census names
+  them; each becomes a line on a DEF, not a silent exception.
+
+**Kin:** the calibration clause (a figure carries its origin) -- this is the same clause at the
+grain of a row.
+
+
+## #21 A SUBSTITUTED VENDOR IS ANNOUNCED
+
+**R-IV.433(c), standing.**
+
+> **No consumer swaps vendors silently. A fallback logs, sets a state, and surfaces on /health.**
+
+### What its absence cost
+
+**The nine-day UW diagnosis.** Consumers fell back from UW to yfinance and kept producing
+plausible numbers; nothing said which vendor any of them had used. A fallback that works is
+indistinguishable, from outside, from the primary working -- **until the day the two vendors
+disagree, and then nobody can say which one a figure came from.**
+
+### The rule
+
+- **A fallback records the substitution** -- consumer, primary, fallback, reason, when -- in a
+  state that `/health` publishes (`vendor_substitution`).
+- **It logs once per transition,** not per call, so a steady fallback does not bury the log and
+  a new one is still visible.
+- **The row it produces carries the fallback vendor** (#20), so the substitution is also on the
+  data, not only on the dashboard.
+- **A fallback that is the primary by design** (yfinance for `^VIX`-style indices UW does not
+  carry) is not a substitution and is not reported as one.
+
+**Kin:** conventions #15 and #17 -- the failure (here, the swap) must be visible on a channel
+that does not depend on the thing that failed.

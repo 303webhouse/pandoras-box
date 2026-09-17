@@ -82,7 +82,11 @@ async def _fetch_close_index(ticker: str, from_date: date) -> Optional[Dict[date
     except Exception as exc:
         logger.warning("a3_fwd: UW bars failed for %s: %s — trying yfinance", ticker, exc)
 
-    # yfinance fallback
+    # yfinance fallback -- announced (R-IV.433(c)). get_bars already falls back to yfinance
+    # itself (and records that); this branch runs only when that also produced nothing.
+    from utils.vendor_substitution import record_substitution
+    record_substitution("a3_fwd.bars", "uw_api.get_bars", "yfinance",
+                        "get_bars returned nothing", ticker)
     try:
         import asyncio, yfinance as yf
         loop = asyncio.get_event_loop()

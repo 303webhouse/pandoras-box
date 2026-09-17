@@ -221,6 +221,8 @@ async def _fetch_snapshot(ticker: str) -> Optional[Dict[str, Any]]:
                     result["current_price"] = float(last_trade["p"])
 
             if result.get("current_price"):
+                from utils.vendor_substitution import record_primary
+                record_primary("enricher.snapshot", "uw")
                 return result
 
     except ImportError:
@@ -248,7 +250,9 @@ async def _fetch_snapshot(ticker: str) -> Optional[Dict[str, Any]]:
     except Exception as e:
         logger.debug(f"UW API snapshot failed for {ticker}: {e}")
 
-    # yfinance fallback
+    # yfinance fallback -- announced (R-IV.433(c))
+    from utils.vendor_substitution import record_substitution
+    record_substitution("enricher.snapshot", "uw", "yfinance", "uw snapshot unavailable", ticker)
     try:
         from bias_engine.factor_utils import get_price_history
         df = await get_price_history(ticker, days=5)
