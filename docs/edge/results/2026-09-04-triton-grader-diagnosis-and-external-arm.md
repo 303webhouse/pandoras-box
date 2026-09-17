@@ -218,3 +218,26 @@ the post-repair batch.
    outside that binding.
 
 Whether those gate T0 is spine's ruling, not mine. The correctness precondition is met.
+
+---
+
+## SCOPE OF THIS CERTIFICATE — restated on its face (R-IV.436(c))
+
+**This certificate proves VENDOR AGREEMENT ON ORDINARY DAYS. It does not prove ADJUSTMENT
+CORRECTNESS ACROSS A CORPORATE ACTION.**
+
+The 102 cells compare two vendors' closes on the same sessions and find them equal to the cent.
+That is a statement about two feeds agreeing, and it is the statement that was needed. It is not
+a statement about either feed being RIGHT across a split, a spin-off or a dividend — and the
+sample could never have contained such a failure: membership required presence in
+`stable_daily_bars`, and the rows that could have failed the adjustment check were exactly the
+rows that requirement excluded. That is the Law 1 instance filed under R-IV.428(c): a sampling
+frame that cannot contain the failure cannot test for it.
+
+The adjustment question is answered elsewhere, by different instruments: the backtest module's
+second-vendor check (R-IV.432(e)), the Triton grader's corporate-action hold (R-IV.436(b)), and
+the vendor-trust rule of record (`docs/design/2026-09-17-VENDOR-TRUST.md`, R-IV.436(a)).
+
+**Gate note:** this section is an ADDITION to a filed artifact, so the artifact's gate moves.
+The ferried original is untouched at `551f9430`; this repo copy moves from `26a3e347` to the value
+recorded in the filing commit.

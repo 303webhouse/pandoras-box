@@ -1,6 +1,6 @@
-# UW AS THE PRIMARY SOURCE OF DAILY BARS — PRICED, NOT DECIDED
+# UW AS THE PRIMARY SOURCE OF DAILY BARS — CLOSED: NO (R-IV.435(d))
 
-**R-IV.433(d).** A decision prepared for the principal, not taken. **Author:** CC-BUILD.
+**R-IV.433(d) prepared it; R-IV.435(d) CLOSED it: NO.** yfinance stays primary for bars. **Author:** CC-BUILD.
 **Written:** 2026-09-17 13:32 UTC (07:32 MDT). **Code read at:** 2bc8a59 plus the R-IV.432/433 working tree.
 **Inputs:** call volumes below are READ FROM CODE (universe sizes, cadences), not measured.
 The measured half — how many calls each consumer actually makes today — is CC-QUERY's census
@@ -9,7 +9,23 @@ slot, not a guess.
 
 ---
 
-## THE ANSWER IN ONE LINE
+## THE DECIDING FACT (R-IV.435(d)) — A 365-DAY HARD CEILING
+
+**UW returns at most one year of daily bars: 410 sessions requested, 252 returned.** Measured by
+CC-QUERY. That ends it on its own, before any budget question:
+
+- the Stable backfill is **5 years**, and MA200 / 52-week metrics need more than one year;
+- a multi-year consumer cannot be served at ANY price, so the move could only ever have been
+  partial — which means two vendors inside one series, the APH seam by construction;
+- and the volume answer fails too: **~29,000 calls on a heavy weekday against a 28,000 hub
+  budget**, so it does not fit even with the reserve released.
+
+**Decision: NO. yfinance stays primary for daily bars.** What ships instead was already ruled and
+is already built: vendor and basis on every stored row (conventions #20) and announced
+substitution (conventions #21). The section below is the pricing as it stood when the question
+was open; it is kept because it records what was measured, not to reopen it.
+
+## THE ANSWER AS IT STOOD BEFORE THE CEILING WAS MEASURED
 
 **Daily bars on UW cost roughly 1,000–3,500 calls a trading day at today's universes, which fits
 under the 40,000 account limit. The cost is not the constraint. Four other things break first**:
