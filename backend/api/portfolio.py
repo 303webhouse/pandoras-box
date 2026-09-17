@@ -43,7 +43,19 @@ async def get_balances():
         FROM account_balances
         ORDER BY CASE broker WHEN 'robinhood' THEN 0 ELSE 1 END, account_name
     """)
-    return [_row_to_dict(r) for r in rows]
+    # R-IV.439(a)/440(a) — the canonical scope travels WITH the row, so no consumer has to
+    # keep its own list of which accounts are tradeable. Same vocabulary the MCP tool uses
+    # (hub_mcp/tools/portfolio_balances.py, T4): config.accounts is the one source.
+    # Additive: `account_name`/`balance` are unchanged, so existing readers are unaffected.
+    from config.accounts import is_in_scope, normalize_account
+
+    out = []
+    for r in rows:
+        d = _row_to_dict(r)
+        d["scope"] = normalize_account(d.get("account_name"))
+        d["in_scope"] = is_in_scope(d.get("account_name"))
+        out.append(d)
+    return out
 
 
 # ── 2. POST /balances/update ──
