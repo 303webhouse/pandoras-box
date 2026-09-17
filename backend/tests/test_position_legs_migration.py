@@ -79,18 +79,20 @@ def test_a_structure_with_no_expiry_cannot_become_a_leg():
     assert "not a leg" in detail
 
 
-def test_a_structure_with_more_legs_than_columns_is_named_not_halved():
+def test_a_structure_with_more_legs_than_columns_waits_rather_than_being_halved():
+    """R-IV.445(c): pending-capability, not a failure. It needs someone to type the legs,
+    not a source to be found."""
     outcome, legs, detail = LM.classify(_row(structure="iron_condor"))
-    assert outcome == LM.LEGS_EXCEED and legs == []
-    assert "more legs" in detail
+    assert outcome == LM.PENDING_CAPABILITY and legs == []
+    assert "more legs" in detail and "hand-entry" in detail
 
 
 def test_a_leg_that_lives_in_a_note_blocks_the_row_rather_than_publishing_two():
     """NVDA 415 holds a third leg in prose. Migrating the two stored strikes would assert a
     2-leg position where a 3-leg one exists — worse than not migrating it."""
     outcome, legs, detail = LM.classify(_row(position_id="POS_NVDA_20260911_001150"))
-    assert outcome == LM.LEG_IN_NOTES and legs == []
-    assert "$50 put" in detail
+    assert outcome == LM.PENDING_CAPABILITY and legs == []
+    assert "$50 put" in detail and "hand-entry" in detail
 
 
 def test_an_unmapped_structure_is_not_forced_through_the_vertical_shape():
@@ -178,3 +180,27 @@ def test_the_migration_and_boot_agree():
         assert token in sql and token in boot, token
     assert "-- DOWN" in sql
     assert "legs_migration import run" in boot, "boot must run the expansion it created"
+
+
+# --- pending-capability is not failure (R-IV.445(c)) ---------------------------------------
+def test_the_two_classes_are_kept_apart():
+    """An UNMIGRATABLE row needs a SOURCE; a PENDING_CAPABILITY row needs someone to type what
+    the note already says. Filing the second under the first describes work as damage."""
+    assert LM.PENDING_CAPABILITY != LM.NO_STRIKES
+    no_src, _, _ = LM.classify(_row(structure=None, long_strike=None, short_strike=None,
+                                    expiry=None))
+    pending, _, _ = LM.classify(_row(structure="iron_condor"))
+    assert no_src.startswith("UNMIGRATABLE") and pending == "PENDING_CAPABILITY"
+
+
+def test_the_first_labels_are_re_filed_rather_than_left_behind():
+    src = (ROOT / "backend" / "database" / "legs_migration.py").read_text(encoding="utf-8")
+    flat = " ".join(src.split())
+    assert "UPDATE position_legs_migration SET outcome = $1 WHERE outcome = ANY($2::text[])" in flat
+    assert "UNMIGRATABLE_LEGS_EXCEED_STRIKES" in src and "UNMIGRATABLE_LEG_IN_NOTES" in src
+
+
+def test_an_unmapped_structure_is_entered_not_guessed():
+    outcome, legs, detail = LM.classify(_row(structure="butterfly"))
+    assert outcome == LM.PENDING_CAPABILITY and legs == []
+    assert "not guessed" in detail

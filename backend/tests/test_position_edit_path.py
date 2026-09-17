@@ -216,3 +216,127 @@ def test_the_plan_is_recomputed_inside_the_transaction(monkeypatch):
     src = inspect.getsource(U.reduce_position)
     assert "FOR UPDATE" in src
     assert src.count("fifo_plan(") == 2
+
+
+# --- leg entry: the capability the pending rows were waiting on (R-IV.445(c)) ---------------
+def _leg_pool(position, legs, dup=None, existing=None):
+    conn = MagicMock()
+    conn.calls = []
+
+    async def fetchrow(sql, *args):
+        if "FROM position_legs l" in sql:
+            return existing
+        return position
+
+    async def fetchval(sql, *args):
+        conn.calls.append((" ".join(sql.split()), args))
+        if "broker_ref" in sql:
+            return dup
+        if "MAX(leg_seq)" in sql:
+            return len(legs) + 1
+        return 42
+
+    async def fetch(sql, *args):
+        return [dict(l) for l in legs]
+
+    async def execute(sql, *args):
+        conn.calls.append((" ".join(sql.split()), args))
+
+    conn.fetchrow, conn.fetchval, conn.fetch, conn.execute = fetchrow, fetchval, fetch, execute
+    conn.transaction = lambda: _Txn()
+    pool = MagicMock()
+    pool.acquire = _Acq(conn)
+    return pool, conn
+
+
+OPTION_POS = {"position_id": "p1", "ticker": "NVDA", "asset_type": "OPTION"}
+
+
+def _add_leg(monkeypatch, position=OPTION_POS, legs=(), dup=None, **body):
+    from api import unified_positions as U
+    pool, conn = _leg_pool(position, legs, dup)
+    monkeypatch.setattr(U, "get_postgres_client", AsyncMock(return_value=pool))
+    req = U.LegRequest(**{"option_type": "PUT", "side": "LONG", "strike": 50.0,
+                          "expiry": "2027-01-15", "qty": 2, **body})
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(U.add_position_leg("p1", req)), conn
+    finally:
+        loop.close()
+
+
+def test_a_leg_can_be_entered_by_hand(monkeypatch):
+    out, conn = _add_leg(monkeypatch)
+    ins = [c for c in conn.calls if "INSERT INTO position_legs" in c[0]]
+    assert len(ins) == 1 and out["status"] == "leg_added"
+    assert ins[0][1][2] == "PUT" and ins[0][1][3] == "LONG" and ins[0][1][4] == 50.0
+
+
+def test_entering_a_leg_settles_the_pending_capability_record(monkeypatch):
+    """The row was never a failed migration — it was waiting for this endpoint."""
+    _, conn = _add_leg(monkeypatch)
+    settle = [c for c in conn.calls if "position_legs_migration" in c[0]]
+    assert settle and "ENTERED_BY_HAND" in settle[0][0]
+    assert "PENDING_CAPABILITY%" in settle[0][0]
+
+
+def test_a_leg_entry_is_appended_never_renumbered(monkeypatch):
+    _, conn = _add_leg(monkeypatch)
+    assert any("COALESCE(MAX(leg_seq), 0) + 1" in c[0] for c in conn.calls)
+
+
+def test_a_leg_entry_is_audited_on_the_position_timeline(monkeypatch):
+    _, conn = _add_leg(monkeypatch)
+    audit = [c for c in conn.calls if "INSERT INTO position_sync_audit" in c[0]]
+    assert len(audit) == 1 and audit[0][1][0] == "LEG_ADD"
+
+
+def test_a_leg_needs_a_side_that_says_bought_or_sold(monkeypatch):
+    with pytest.raises(HTTPException) as e:
+        _add_leg(monkeypatch, side="EITHER")
+    assert "LONG or SHORT" in e.value.detail
+
+
+def test_a_leg_needs_a_real_option_type(monkeypatch):
+    with pytest.raises(HTTPException):
+        _add_leg(monkeypatch, option_type="STOCK")
+
+
+def test_a_leg_needs_a_parseable_expiry(monkeypatch):
+    with pytest.raises(HTTPException) as e:
+        _add_leg(monkeypatch, expiry="soon")
+    assert "expiry must be a date" in e.value.detail
+
+
+def test_legs_do_not_belong_to_an_equity_row(monkeypatch):
+    with pytest.raises(HTTPException) as e:
+        _add_leg(monkeypatch, position=dict(OPTION_POS, asset_type="EQUITY"))
+    assert "legs belong to option structures" in e.value.detail
+
+
+def test_a_duplicate_broker_reference_is_refused_on_a_leg(monkeypatch):
+    with pytest.raises(HTTPException) as e:
+        _add_leg(monkeypatch, dup="p9", broker_ref="26246-P2JS0Y")
+    assert e.value.status_code == 409
+
+
+def test_a_leg_deletion_requires_a_stated_reason():
+    from api import unified_positions as U
+    sig = inspect.signature(U.delete_position_leg)
+    assert sig.parameters["reason"].default is not None, "reason is a required query parameter"
+    src = inspect.getsource(U.delete_position_leg)
+    assert "LEG_DELETE" in src and "never had it" in src
+
+
+def test_a_leg_edit_records_field_old_and_new():
+    from api import unified_positions as U
+    src = inspect.getsource(U.update_position_leg)
+    assert '"LEG_EDIT"' in src and "before" in src and "after" in src
+    assert "f\"leg:{leg_seq}:{field}\"" in src
+
+
+def test_a_leg_edit_never_promotes_provenance_to_verified():
+    from api import unified_positions as U
+    src = inspect.getsource(U.update_position_leg)
+    assert "provenance_for_lot(\"MANUAL\", changes[\"price\"])" in src
+    assert "BROKER_VERIFIED" not in src
