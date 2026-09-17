@@ -15,7 +15,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 try:
-    from bias_engine.factor_utils import score_to_signal, get_price_history, get_latest_price, neutral_reading
+    from bias_engine.factor_utils import score_to_signal, get_price_history, get_latest_price, neutral_reading, price_vendors
 except Exception:  # pragma: no cover
     from backend.bias_engine.factor_utils import score_to_signal, get_price_history, get_latest_price, neutral_reading
 
@@ -25,13 +25,13 @@ from bias_engine.composite import FactorReading
 async def compute_score() -> FactorReading:
     data = await get_price_history("DX-Y.NYB", days=30)
     if data is None or data.empty or "close" not in data.columns or len(data) < 20:
-        return neutral_reading("dxy_trend", "DXY data unavailable", source="yfinance")
+        return neutral_reading("dxy_trend", "DXY data unavailable", source=price_vendors(data))
 
     close = data["close"].astype(float)
     current = float(close.iloc[-1])
     sma_20 = float(close.rolling(20).mean().iloc[-1])
     if len(close) < 6:
-        return neutral_reading("dxy_trend", "Insufficient DXY lookback", source="yfinance")
+        return neutral_reading("dxy_trend", "Insufficient DXY lookback", source=price_vendors(data))
 
     prior_5 = float(close.iloc[-6])
     pct_change_5d = ((current - prior_5) / prior_5) * 100 if prior_5 else 0.0
@@ -58,7 +58,7 @@ async def compute_score() -> FactorReading:
             f"5d {pct_change_5d:+.2f}% ({trend}), {vix_label}"
         ),
         timestamp=datetime.utcnow(),
-        source="yfinance",
+        source=price_vendors(data),
         raw_data={
             "current": round(current, 4),
             "sma_20": round(sma_20, 4),

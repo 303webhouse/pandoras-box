@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 try:
     from bias_engine.composite import FactorReading
-    from bias_engine.factor_utils import score_to_signal, get_price_history
+    from bias_engine.factor_utils import score_to_signal, get_price_history, price_vendors
 except ImportError:
     from backend.bias_engine.composite import FactorReading
     from backend.bias_engine.factor_utils import score_to_signal, get_price_history
@@ -54,7 +54,7 @@ async def compute_score() -> Optional[FactorReading]:
         signal=score_to_signal(score),
         detail=f"COPX 20d: {copx_return:+.1f}%, GLD 20d: {gld_return:+.1f}%, spread: {spread:+.1f}%",
         timestamp=datetime.utcnow(),
-        source="yfinance",
+        source=price_vendors(copx_data, gld_data),
         raw_data={
             "copx_return_20d": round(copx_return, 2),
             "gld_return_20d": round(gld_return, 2),

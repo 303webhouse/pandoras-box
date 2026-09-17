@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 try:
     from bias_engine.composite import FactorReading
-    from bias_engine.factor_utils import score_to_signal, get_price_history
+    from bias_engine.factor_utils import score_to_signal, get_price_history, price_vendors
 except ImportError:
     from backend.bias_engine.composite import FactorReading
     from backend.bias_engine.factor_utils import score_to_signal, get_price_history
@@ -62,7 +62,7 @@ async def compute_score() -> Optional[FactorReading]:
         signal=score_to_signal(score),
         detail=f"RSP/SPY ratio 5d ROC: {roc:+.2f}% ({'improving' if roc > 0.2 else 'deteriorating' if roc < -0.2 else 'stable'})",
         timestamp=datetime.utcnow(),
-        source="yfinance",
+        source=price_vendors(rsp_data, spy_data),
         raw_data={
             "ratio_now": round(ratio_now, 4),
             "ratio_5d": round(ratio_5d, 4),

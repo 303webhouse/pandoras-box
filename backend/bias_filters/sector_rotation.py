@@ -24,7 +24,7 @@ from datetime import datetime
 from enum import Enum
 
 from bias_engine.composite import FactorReading
-from bias_engine.factor_utils import score_to_signal, get_price_history
+from bias_engine.factor_utils import score_to_signal, get_price_history, price_vendors
 
 logger = logging.getLogger(__name__)
 
@@ -253,7 +253,7 @@ async def compute_sector_rotation_score() -> Optional[FactorReading]:
             f"5d ROC: {roc_5d:+.2f}%"
         ),
         timestamp=datetime.utcnow(),
-        source="yfinance",
+        source=price_vendors(xlk, xlp, xlu, xly),
         raw_data={
             "xlk": float(xlk["close"].iloc[-1]),
             "xly": float(xly["close"].iloc[-1]),
