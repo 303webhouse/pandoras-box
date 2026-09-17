@@ -44,10 +44,15 @@ CACHE_TTLS = {
 # at 90% of budget" ever meant what it said.
 UW_ACCOUNT_LIMIT = 40000
 
-# WHAT THE HUB MAY SPEND is NOT the account limit. Another client shares this key
-# (DEF-UW-CLIENT-BYPASS): 23,417 requests on 2026-09-11, ~8,200 projected
-# 2026-09-14. A hub budget sized against 40,000 is sized to overrun the account by
-# design — so a reserve is held for consumers this process cannot see or govern.
+# WHAT THE HUB MAY SPEND is NOT the account limit. Spend on this key that this process did
+# not make is real and measured — 23,417 requests on 2026-09-11, ~8,200 projected 2026-09-14 —
+# so a reserve is held for consumers this process cannot see or govern.
+#
+# R-IV.438(a): WHOSE spend that was is no longer attributed to the VPS collector. That host has
+# been inactive for months and those processes never ran; the attribution is withdrawn on
+# DEF-UW-CLIENT-BYPASS's face. The remaining hypothesis is the key that sat in a tracked file of
+# a public repo, rotated 2026-09-17. The reserve stands until a post-rotation session measures
+# what is left; if the gap vanishes, this constant is the thing to revisit.
 #
 # SIZED TO THE TYPICAL, NOT THE WORST CASE — and that is a design decision, not
 # an oversight. Observed: 23,417 on 09-11, ~8,200 projected 09-14. A static

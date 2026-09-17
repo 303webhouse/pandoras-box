@@ -5,6 +5,46 @@
 
 ---
 
+## RETRACTED — THE HOST NEVER RAN (R-IV.438(a)(b), 2026-09-17)
+
+**The principal confirms the Hetzner box has been unpaid and inactive for months.
+`uw_forward_logger` and `flow_scanner` were NEVER RUNNING.** Everything below that attributes
+spend to them is **WITHDRAWN**, and is kept rather than deleted so the reasoning stays legible:
+
+- **"a second UW client on another host" is HYPOTHETICAL, not live.** The deploy tree exists in
+  this repo; the processes never did.
+- **The 86%-of-account pacing arithmetic is void.** It describes what the script WOULD have
+  spent, not what anything spent.
+- **The GEX paragraph is void** as an explanation of the outage: no sibling collector was
+  polling that endpoint.
+- **The rule at the top STANDS.** "Every UW call goes through `_uw_request` or it does not go"
+  is a property of the mechanism, not a claim about a host, and an ungoverned call remains
+  invisible wherever it is made.
+
+**The DEF's own caveat was correct and was not enough.** It said the identification came "from
+the deploy script, not an observation of a running process" — and the number was still carried
+forward into rulings as though the process existed. A caveat beside a figure does not stop the
+figure travelling.
+
+### What replaces it — one hypothesis, and it is now measured
+
+**The leaked vendor key (security register S12): the credential was in a tracked file of a
+PUBLIC repo.** With the box gone there is no other host that could hold either key.
+
+**Measured 2026-09-17 after the principal rotated (values never handled, status codes only):**
+
+| key | fingerprint | HTTP |
+|---|---|---|
+| the old key, still in the desktop MCP config | `67a10879` | **401** — revoked, the rotation is effective |
+| the new key, in Railway | `3f5e0660` | **429** — authenticates; the account was already near its cap from today's pre-rotation traffic |
+
+**A 429 on the new key is not a second consumer; it is today's spend, counted against the
+account before the rotation.** Tomorrow's meter is the decisive read (R-IV.437(c),
+R-IV.438(c)): a gap that survives a key change is a consumer holding the NEW key; a gap that
+vanishes was the leaked one.
+
+---
+
 ## THE RULE
 
 `_uw_request` is the single chokepoint: token bucket, per-caller counter, governor
