@@ -40,10 +40,36 @@ def test_a_reading_built_from_two_vendors_says_so():
     assert fu.price_vendors(_frame("uw"), None) == "uw"
 
 
-def test_the_uw_path_tags_uw_and_records_the_primary():
+def test_the_uw_path_tags_the_vendor_that_served_it_not_the_branch_it_took():
+    """CORRECTED 2026-09-17: this asserted a literal "uw" on the UW branch, which is exactly
+    the bug one layer down. get_bars() falls back to yfinance inside itself, so the branch
+    says nothing about the vendor; only the frame does."""
     src = inspect.getsource(fu.get_price_history)
-    assert 'return tag_vendor(polygon_df, "uw")' in src
-    assert 'record_primary(PRICE_CONSUMER, "uw")' in src
+    assert 'return tag_vendor(polygon_df, served_by)' in src
+    assert 'served_by = _frame_provider(polygon_df) or VENDOR_UNKNOWN' in src
+    assert 'if served_by == "uw":' in src, "the primary is recorded only when uw served it"
+    flat = " ".join(src.split())
+    assert 'cache_key + ":vendor", PRICE_CACHE_TTL, served_by' in flat, (
+        "the cached vendor must be the one that served the frame, not the branch's name")
+
+
+def test_a_frame_carries_its_providers_stamp_out_of_the_bar_list():
+    """The stamp exists per bar and used to die at the DataFrame boundary."""
+    import asyncio
+    from unittest.mock import AsyncMock, patch
+    from integrations import uw_api
+    bars = [{"o": 1, "h": 1, "l": 1, "c": 1, "v": 1, "t": 1757980800000 + i * 86400000,
+             "provider": "yfinance"} for i in range(3)]
+    with patch.object(uw_api, "get_bars", new=AsyncMock(return_value=bars)):
+        df = asyncio.run(uw_api.get_bars_as_dataframe("QQQ", days=3))
+    assert uw_api.frame_provider(df) == "yfinance"
+
+
+def test_a_mixed_or_unstamped_frame_does_not_claim_a_vendor():
+    from integrations import uw_api
+    assert uw_api.frame_provider_of([{"provider": "uw"}, {"provider": "yfinance"}]) is None
+    assert uw_api.frame_provider_of([{"o": 1}]) is None
+    assert uw_api.frame_provider(None) is None
 
 
 def test_the_yfinance_path_is_announced_except_where_it_is_the_primary():

@@ -892,7 +892,27 @@ async def get_bars_as_dataframe(ticker: str, days: int = 30):
     df.index.name = "Date"
     if len(df) > days:
         df = df.iloc[-days:]
+    # The per-bar `provider` stamp does not survive into numeric columns, and dropping it here
+    # is what let a caller conclude "uw" from the mere existence of a frame. It travels in
+    # attrs instead: no column added, no consumer's shape changed, and the one question that
+    # matters -- who actually served these bars -- is answerable at the other end.
+    df.attrs["provider"] = frame_provider_of(bars)
     return df
+
+
+def frame_provider_of(bars) -> Optional[str]:
+    """The provider stamped on a bar list, or None when it is mixed or absent."""
+    seen = {b.get("provider") for b in bars if isinstance(b, dict)}
+    seen.discard(None)
+    return seen.pop() if len(seen) == 1 else None
+
+
+def frame_provider(df) -> Optional[str]:
+    """Who served this frame, per its own stamp. None when it does not say."""
+    try:
+        return df.attrs.get("provider")
+    except Exception:
+        return None
 
 
 async def get_previous_close(ticker: str) -> Optional[Dict[str, Any]]:
