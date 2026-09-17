@@ -151,6 +151,23 @@ def _to_pyval(v):
     return v
 
 
+def _hold_incomplete_dates(metrics_df):
+    """(publishable rows, held dates). A date needs the declared share of the universe.
+
+    The same declared minimum the scoring anchor uses -- one definition, so the writer cannot
+    publish a date the reader would refuse to anchor on (conventions #9)."""
+    from . import scoring
+
+    counts = metrics_df.groupby("date")["ticker"].nunique()
+    if counts.empty:
+        return metrics_df, []
+    required = max(scoring.ANCHOR_MIN_TICKERS_FLOOR,
+                   int(counts.max() * scoring.ANCHOR_MIN_COVERAGE))
+    ok = counts[counts >= required].index
+    held = [(str(d), int(counts[d])) for d in counts.index if d not in ok]
+    return metrics_df[metrics_df["date"].isin(ok)], held
+
+
 def compute_metrics(tickers: Optional[list] = None) -> dict:
     """Compute metrics for all tickers (or a subset) and write to stable_metrics."""
     db.init_schema()
@@ -184,6 +201,26 @@ def compute_metrics(tickers: Optional[list] = None) -> dict:
 
     metrics_df = pd.concat(out_frames, ignore_index=True)[_OUT_COLS]
 
+    # R-IV.435(e): A DATE IS PUBLISHED ONLY WHEN ITS UNIVERSE HAS LANDED.
+    # A handful of tickers whose vendor served one extra session used to write a date of their
+    # own, and MAX(date) made that two-ticker date the anchor for everything. Dates below the
+    # declared coverage are HELD BACK -- not dropped: the next run recomputes them, and they
+    # appear the day their universe is complete. Held dates are logged with their counts.
+    # A subset run (tickers=...) cannot judge coverage and is left alone, which is said here
+    # rather than assumed.
+    if tickers is None:
+        metrics_df, held_dates = _hold_incomplete_dates(metrics_df)
+        if held_dates:
+            logger.warning("[stable_metrics] holding %d incomplete date(s) until their universe "
+                           "lands: %s", len(held_dates), held_dates)
+    else:
+        held_dates = []
+
+    if metrics_df.empty:
+        logger.warning("[stable_metrics] every computed date is incomplete; nothing published")
+        return {"tickers_processed": len(out_frames), "rows_written": 0,
+                "held_dates": held_dates}
+
     affected = metrics_df["ticker"].unique().tolist()
     rows = [tuple(_to_pyval(v) for v in rec) for rec in metrics_df.itertuples(index=False, name=None)]
     col_list = ", ".join(_OUT_COLS)
@@ -204,6 +241,7 @@ def compute_metrics(tickers: Optional[list] = None) -> dict:
         "tickers_processed": len(out_frames),
         "rows_written": len(metrics_df),
         "ma_periods_computed": ma_periods,
+        "held_dates": held_dates,
     }
     logger.info("[stable_metrics] Done. %d tickers, %d metric rows written.",
                 summary["tickers_processed"], summary["rows_written"])
