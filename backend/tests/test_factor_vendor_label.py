@@ -96,3 +96,26 @@ def test_the_rewritten_factors_label_from_their_frames():
     for name in ("breadth_momentum.py", "credit_spreads.py", "market_breadth.py",
                  "sector_rotation.py", "iv_regime.py"):
         assert name in labelled
+
+
+# ── DEF-GEX-STALE-SPY-PRICE: a price carries its date and its vendor ───────────
+
+def test_price_detail_carries_as_of_and_vendor():
+    import asyncio
+    from unittest.mock import AsyncMock, patch
+    idx = pd.to_datetime(["2026-09-15", "2026-09-16"])
+    df = fu.tag_vendor(pd.DataFrame({"close": [660.0, 754.2]}, index=idx), "uw")
+    with patch.object(fu, "get_price_history", new=AsyncMock(return_value=df)):
+        out = asyncio.run(fu.get_latest_price_detail("SPY"))
+    assert out == {"price": 754.2, "as_of": "2026-09-16", "vendor": "uw"}
+    with patch.object(fu, "get_price_history", new=AsyncMock(return_value=pd.DataFrame())):
+        out = asyncio.run(fu.get_latest_price_detail("SPY"))
+    assert out == {"price": None, "as_of": None, "vendor": fu.VENDOR_UNKNOWN}
+
+
+def test_the_gex_payload_carries_the_price_provenance():
+    from pathlib import Path
+    src = (Path(fu.__file__).resolve().parents[1] / "bias_filters" / "gex.py").read_text(
+        encoding="utf-8", errors="ignore")
+    assert "get_latest_price_detail(" in src
+    assert '"spy_price_as_of"' in src and '"spy_price_vendor"' in src

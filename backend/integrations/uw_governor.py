@@ -301,6 +301,38 @@ def _reading_predates_reset(at_iso, now=None) -> bool:
     return t < reset
 
 
+# ── R-IV.441(c): A SHED DECISION NEEDS A FRESH READING ──────────────────────────
+#
+# The cross-day rule below (a reading from before 00:00Z) closed one latch. Production then
+# showed the SAME latch inside a single day: 3,717 calls attributed, FOUR account readings, and
+# no attempts -- the gate shed on a reading hours old, shedding suppressed the calls whose
+# responses carry `x-uw-daily-req-count`, and the reading that would clear it could not arrive.
+# A latch does not need a day boundary to sustain itself; it only needs to suppress its own
+# input.
+#
+# So age is a gate condition in its own right: past ACCOUNT_READING_MAX_AGE_S the account is
+# UNMEASURED NOW, whatever it said then, and an unmeasured account opens -- the same posture
+# every other unknown in this module takes. Opening lets a call through, and that call's
+# response carries the header, so the gate is self-CLEARING instead of self-sustaining. If the
+# account really is exhausted the fresh reading (a 429 carries the header too) sheds again
+# immediately, on evidence rather than on memory.
+ACCOUNT_READING_MAX_AGE_S = 1800        # 30 minutes
+
+
+def _reading_age_s(at_iso, now=None):
+    """Age of a quota reading in seconds, or None when it cannot be aged."""
+    if not at_iso:
+        return None
+    from datetime import datetime as _dt, timezone as _tz
+    try:
+        t = _dt.fromisoformat(str(at_iso).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    if t.tzinfo is None:
+        t = t.replace(tzinfo=_tz.utc)
+    return ((now or _dt.now(_tz.utc)) - t).total_seconds()
+
+
 async def account_shed(tier: str) -> Optional[str]:
     """Should this tier be shed on ACCOUNT state? Returns a reason or None.
 
@@ -334,6 +366,21 @@ async def account_shed(tier: str) -> Optional[str]:
                             "last header %s predates the 00:00Z reset - the "
                             "account is UNMEASURED for this quota day, not at "
                             "%s" % (q.get("at"), used))
+            return None
+        # R-IV.441(c): an old reading cannot justify shedding, and shedding is what keeps it
+        # old. Its own state, never folded into the cross-day one: "belongs to a spent quota
+        # day" and "is hours old today" have different causes and different fixes.
+        age = _reading_age_s(q.get("at"))
+        if age is None:
+            _set_gate_state("open:reading_unageable",
+                            "last header carries no usable timestamp (%r) - it cannot be "
+                            "shown FRESH, so it does not shed" % (q.get("at"),))
+            return None
+        if age > ACCOUNT_READING_MAX_AGE_S:
+            _set_gate_state("open:reading_too_old",
+                            "last header %s is %.0f min old (limit %.0f min) - the account is "
+                            "UNMEASURED NOW, not at %s" % (q.get("at"), age / 60,
+                                                           ACCOUNT_READING_MAX_AGE_S / 60, used))
             return None
         if not isinstance(limit, int) or limit <= 0:
             _set_gate_state("open:no_limit",

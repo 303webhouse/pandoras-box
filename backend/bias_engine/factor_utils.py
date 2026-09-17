@@ -509,10 +509,29 @@ async def get_price_history(ticker: str, days: int = 30) -> pd.DataFrame:
 
 async def get_latest_price(ticker: str) -> Optional[float]:
     """Fetch latest close price for a ticker."""
+    return (await get_latest_price_detail(ticker))["price"]
+
+
+async def get_latest_price_detail(ticker: str) -> Dict[str, Any]:
+    """{price, as_of, vendor} for the latest close.
+
+    DEF-GEX-STALE-SPY-PRICE: a price alone cannot be audited. GEX carried a SPY close ~13%
+    below the traded price on most of its readings, and the payload said only the number --
+    no date, no vendor -- so nothing on the reading could show it was old or whose it was.
+    """
     data = await get_price_history(ticker, days=5)
     if data is None or data.empty or "close" not in data.columns:
-        return None
-    return float(data["close"].iloc[-1])
+        return {"price": None, "as_of": None, "vendor": VENDOR_UNKNOWN}
+    as_of = None
+    try:
+        idx = data.index[-1]
+        as_of = str(getattr(idx, "date", lambda: idx)())[:10]
+    except Exception:
+        as_of = None
+    if as_of is None and "date" in data.columns:
+        as_of = str(data["date"].iloc[-1])[:10]
+    return {"price": float(data["close"].iloc[-1]), "as_of": as_of,
+            "vendor": price_vendor(data)}
 
 
 async def purge_suspicious_cache_entries() -> Dict[str, int]:

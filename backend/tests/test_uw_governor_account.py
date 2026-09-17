@@ -78,10 +78,13 @@ def test_calendar_failure_fails_open(monkeypatch):
 
 @pytest.fixture
 def account(monkeypatch):
+    # R-IV.441(c): a shed decision needs a FRESH reading, so the fixture carries the timestamp
+    # every real reading carries. Age is exercised separately below.
     state = {"used": 0, "limit": 40000}
 
     async def fake():
-        return dict(state)
+        from datetime import datetime as _d, timezone as _tz
+        return dict(state, at=state.get("at") or _d.now(_tz.utc).isoformat())
 
     import integrations.uw_api as uw
     monkeypatch.setattr(uw, "account_quota", fake, raising=False)
@@ -296,3 +299,54 @@ async def test_gate_state_timestamps_itself(account):
     account["used"] = 100
     await g.account_shed(g.TIER_BACKGROUND)
     assert g.gate_state()["at"] is not None
+
+
+# ── R-IV.441(c): a shed decision needs a FRESH reading ─────────────────────────
+
+def test_reading_age_is_measured_or_unknown_never_invented():
+    from datetime import datetime, timezone
+    now = datetime(2026, 9, 17, 18, 15, tzinfo=timezone.utc)
+    assert g._reading_age_s("2026-09-17T14:59:31+00:00", now) == pytest.approx(11728.0, abs=2)
+    assert g._reading_age_s("2026-09-17T18:10:00Z", now) == pytest.approx(300.0, abs=2)
+    assert g._reading_age_s(None, now) is None
+    assert g._reading_age_s("not-a-time", now) is None
+
+
+@pytest.mark.asyncio
+async def test_the_production_latch_opens_instead_of_sustaining_itself(account):
+    """3,717 calls, four readings, no attempts: the gate shed on a reading hours old, and
+    shedding suppressed the calls whose responses carry the header."""
+    from datetime import datetime, timedelta, timezone
+    account["used"] = 38168
+    account["at"] = (datetime.now(timezone.utc) - timedelta(hours=3, minutes=16)).isoformat()
+    assert await g.account_shed(g.TIER_STANDARD) is None
+    assert g.gate_state()["state"] == "open:reading_too_old"
+
+
+@pytest.mark.asyncio
+async def test_a_fresh_reading_still_sheds(account):
+    from datetime import datetime, timedelta, timezone
+    account["used"] = 38168
+    account["at"] = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+    reason = await g.account_shed(g.TIER_STANDARD)
+    assert reason and "95%" in reason
+    assert g.gate_state()["state"] == "shedding"
+
+
+@pytest.mark.asyncio
+async def test_an_unageable_reading_does_not_shed(account):
+    account["used"] = 38168
+    account["at"] = "not-a-time"
+    assert await g.account_shed(g.TIER_STANDARD) is None
+    assert g.gate_state()["state"] == "open:reading_unageable"
+
+
+@pytest.mark.asyncio
+async def test_the_cross_day_state_is_still_its_own(account):
+    """Two causes, two names (conventions #18): yesterday's counter vs today's stale one."""
+    from datetime import datetime, timedelta, timezone
+    account["used"] = 38168
+    account["at"] = (datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+                     - timedelta(minutes=5)).isoformat()
+    assert await g.account_shed(g.TIER_STANDARD) is None
+    assert g.gate_state()["state"] == "open:stale_reading"

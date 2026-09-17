@@ -23,10 +23,10 @@ logger = logging.getLogger(__name__)
 
 try:
     from bias_engine.composite import FactorReading
-    from bias_engine.factor_utils import score_to_signal, get_latest_price, neutral_reading
+    from bias_engine.factor_utils import score_to_signal, get_latest_price, get_latest_price_detail, neutral_reading
 except ImportError:
     from backend.bias_engine.composite import FactorReading
-    from backend.bias_engine.factor_utils import score_to_signal, get_latest_price, neutral_reading
+    from backend.bias_engine.factor_utils import score_to_signal, get_latest_price, get_latest_price_detail, neutral_reading
 
 # Normalization baselines
 GEX_SCALE_FACTOR = 2_000_000_000  # $2B — Polygon contract-level calc (legacy path, unused)
@@ -85,7 +85,13 @@ async def _compute_score_polygon() -> Optional[FactorReading]:
             logger.warning("gex: Polygon options module not available")
             return None
 
-    spy_price = await get_latest_price("SPY")
+    # R-IV.441(b) / DEF-GEX-STALE-SPY-PRICE: this price is not decoration -- it sets the
+    # +/-10% strike band AND multiplies every gamma contribution below, so a stale one moves
+    # the factor the composite scores on. The reading now carries the close's own date and the
+    # vendor that served it, so a stale price is visible ON the payload instead of only in a
+    # later census.
+    _spy = await get_latest_price_detail("SPY")
+    spy_price, spy_price_as_of, spy_price_vendor = _spy["price"], _spy["as_of"], _spy["vendor"]
     if not spy_price or spy_price <= 0:
         logger.warning("gex: cannot get SPY price — skipping")
         return None
@@ -157,6 +163,8 @@ async def _compute_score_polygon() -> Optional[FactorReading]:
             "net_gex": round(net_gex, 0),
             "normalized": round(normalized, 4),
             "spy_price": round(spy_price, 2),
+            "spy_price_as_of": spy_price_as_of,
+            "spy_price_vendor": spy_price_vendor,
             "contracts_used": contracts_used,
         },
     )
