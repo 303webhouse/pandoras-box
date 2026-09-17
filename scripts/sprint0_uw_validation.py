@@ -17,7 +17,10 @@ except ImportError:
     print("ERROR: pip install requests")
     sys.exit(1)
 
-UW_API_KEY = os.environ.get("UW_API_KEY", "cb579cb8-6e37-46ea-b4c5-f8f3b93a025d")
+UW_API_KEY = os.environ.get("UW_API_KEY", "")
+if not UW_API_KEY:
+    print("UW_API_KEY is not set in the environment")
+    sys.exit(1)
 UW_BASE = "https://api.unusualwhales.com"
 UW_HEADERS = {"Authorization": f"Bearer {UW_API_KEY}", "Accept": "application/json"}
 

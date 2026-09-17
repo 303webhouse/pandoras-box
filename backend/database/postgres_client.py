@@ -2751,7 +2751,7 @@ async def log_options_position(position: Dict[Any, Any]):
             "correlation_window_minutes": 5,
             "correlation_min_tickers": 2,
             "vps_trigger_url": "http://188.245.250.2:8000/api/hermes/trigger",
-            "vps_api_key": "FFlSBL-YT-69cLMa8G_NtMOMYYMMo89vnQL-Az8AqI0",
+            "vps_api_key": os.getenv("HERMES_VPS_KEY") or "",
             "cooldown_minutes": 15,
         }))
 

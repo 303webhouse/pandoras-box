@@ -87,7 +87,7 @@ CREATE TABLE IF NOT EXISTS system_config (
 
 | Item | Status | Details |
 |---|---|---|
-| Railway env: `HERMES_VPS_KEY` | ✅ Set | `FFlSBL-YT-69cLMa8G_NtMOMYYMMo89vnQL-Az8AqI0` |
+| Railway env: `HERMES_VPS_KEY` | ✅ Set | `[redacted: set HERMES_VPS_KEY in the environment]` |
 | VPS env: `HERMES_API_KEY` | ✅ Set | Same value, in `/etc/openclaw/openclaw.env` |
 | VPS env: `ANTHROPIC_API_KEY` | ✅ Set | In `/etc/openclaw/openclaw.env` |
 | VPS env: `PANDORA_API_URL` | ✅ Already existed | `https://pandoras-box-production.up.railway.app/api` |
@@ -140,7 +140,7 @@ Builds the core detection layer:
     "correlation_window_minutes": 5,
     "correlation_min_tickers": 2,
     "vps_trigger_url": "http://188.245.250.2:8000/api/hermes/trigger",
-    "vps_api_key": "FFlSBL-YT-69cLMa8G_NtMOMYYMMo89vnQL-Az8AqI0",
+    "vps_api_key": "set in the environment (HERMES_VPS_KEY)",
     "cooldown_minutes": 15
 }
 ```
