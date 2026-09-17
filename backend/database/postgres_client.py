@@ -891,6 +891,119 @@ async def init_database():
             ADD COLUMN IF NOT EXISTS short_leg_price NUMERIC
         """)
 
+        # position_legs — what a multi-leg position actually holds (R-IV.444(b)). Two strike
+        # columns describe a vertical and nothing else, so a three-leg structure had to be split
+        # across rows or written into a note, and a screen reading those rows renders one
+        # position twice. Mirrors migrations/039; the expansion itself lives in
+        # database/legs_migration.py and runs below, guarded by its own outcome table.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS position_legs (
+                id            BIGSERIAL   PRIMARY KEY,
+                position_id   TEXT        NOT NULL
+                              REFERENCES unified_positions(position_id) ON DELETE CASCADE,
+                leg_seq       INTEGER     NOT NULL,
+                option_type   TEXT        NOT NULL CHECK (option_type IN ('CALL', 'PUT')),
+                side          TEXT        NOT NULL CHECK (side IN ('LONG', 'SHORT')),
+                strike        NUMERIC     NOT NULL,
+                expiry        DATE        NOT NULL,
+                qty           NUMERIC     NOT NULL,
+                price         NUMERIC,
+                provenance    TEXT        NOT NULL
+                              CHECK (provenance IN ('PRINCIPAL_REPORTED', 'BROKER_VERIFIED',
+                                                    'IMPORTED', 'UNKNOWN')),
+                broker_ref    TEXT,
+                migrated_from TEXT,
+                created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                UNIQUE (position_id, leg_seq)
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_position_legs_position ON position_legs (position_id)
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS position_legs_migration (
+                position_id   TEXT        PRIMARY KEY
+                              REFERENCES unified_positions(position_id) ON DELETE CASCADE,
+                outcome       TEXT        NOT NULL,
+                detail        TEXT,
+                legs_written  INTEGER     NOT NULL DEFAULT 0,
+                merged_into   TEXT,
+                migrated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        try:
+            from database.legs_migration import run as _expand_legs
+            _legs = await _expand_legs(conn)
+            if _legs:
+                print(f"  position legs migration: {_legs}")
+        except Exception as e:
+            # A boot-time data migration must never take the app down with it.
+            print(f"WARNING: position legs migration skipped: {type(e).__name__}: {e}")
+
+        # position_lot_closures — a reduction ALLOCATES against the fills it consumes rather
+        # than editing them (R-IV.444(c)). The disposal is its own negative-quantity lot, so
+        # SUM(qty) still equals the position afterwards and the ledger still answers what was
+        # bought and when. Mirrors migrations/040.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS position_lot_closures (
+                id                BIGSERIAL   PRIMARY KEY,
+                position_id       TEXT        NOT NULL
+                                  REFERENCES unified_positions(position_id) ON DELETE CASCADE,
+                disposal_lot_id   INTEGER     NOT NULL
+                                  REFERENCES position_lots(id) ON DELETE CASCADE,
+                acquired_lot_id   INTEGER     NOT NULL
+                                  REFERENCES position_lots(id) ON DELETE CASCADE,
+                qty               NUMERIC     NOT NULL,
+                cost_per_unit     NUMERIC,
+                proceeds_per_unit NUMERIC,
+                realized          NUMERIC,
+                multiplier        INTEGER     NOT NULL DEFAULT 1,
+                created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_lot_closures_position
+                ON position_lot_closures (position_id, created_at DESC)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_lot_closures_disposal
+                ON position_lot_closures (disposal_lot_id)
+        """)
+        # A confirmation number is the broker's identity for ONE fill, so the same one arriving
+        # twice is the same fill arriving twice. NULL stays unconstrained: one broker issues no
+        # references at all, and NULL there is a property of that export, not a gap.
+        try:
+            await conn.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_position_lots_broker_ref
+                    ON position_lots (broker_ref) WHERE broker_ref IS NOT NULL
+            """)
+        except Exception as e:
+            print(f"WARNING: broker_ref uniqueness not applied: {type(e).__name__}: {e}")
+
+        # factor_write_audit — who wrote into the regime engine (R-IV.442(b)). A factor POST
+        # changes a score the composite reads on the spot; the reading's own `source` is a label
+        # the caller chose, and this is the half that can be checked. Mirrors migrations/038.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS factor_write_audit (
+                id              BIGSERIAL   PRIMARY KEY,
+                endpoint        TEXT        NOT NULL,
+                factor_id       TEXT,
+                caller          TEXT        NOT NULL,
+                auth_mode       TEXT        NOT NULL,
+                claimed_source  TEXT,
+                score           NUMERIC,
+                accepted_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_factor_write_audit_time
+                ON factor_write_audit (accepted_at DESC)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_factor_write_audit_factor
+                ON factor_write_audit (factor_id, accepted_at DESC)
+        """)
+
         # position_lots — the fills behind a position, and the ONLY place its entry price and
         # cost basis come from (R-IV.310(b), R-IV.441(a)). The table has existed in production
         # since 2026-08-26 under different column names; migrations/037 renames rather than

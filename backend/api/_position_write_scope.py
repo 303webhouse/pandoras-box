@@ -47,6 +47,37 @@ REALIZED_COLUMNS: frozenset[str] = frozenset({
     "trade_outcome",
 })
 
+# R-IV.444(c): every field COMPUTED from the lot set. They are not edited where they are
+# derived — an edit is a claim that the aggregate differs from the fills behind it, which is
+# the drift the lots rewrite exists to end. The door is not closed, it is moved: add a fill or
+# reduce one, and the aggregate follows.
+#
+# Where a position has NO lots the aggregate derives from nothing, so a direct edit is still
+# the only way to state it and stays allowed. That asymmetry is deliberate and is the reason
+# the check takes `has_lots` rather than reading a flag: the rule is about this row's evidence,
+# not about a mode the caller selects.
+DERIVED_COLUMNS: frozenset[str] = frozenset({
+    "quantity",
+    "entry_price",
+    "cost_basis",
+})
+
+
+def assert_derived_not_edited(columns: Iterable[str], has_lots: bool) -> None:
+    """Raise 400 when an edit would overwrite a figure this position's lots compute."""
+    if not has_lots:
+        return
+    offending = sorted(set(columns) & DERIVED_COLUMNS)
+    if not offending:
+        return
+    raise HTTPException(
+        status_code=400,
+        detail=(f"Write refused: {offending} are derived from this position's lots. Add a fill "
+                f"(POST /v2/positions/{{position_id}}/lots) or reduce one (POST "
+                f"/v2/positions/{{position_id}}/reduce) and the aggregate follows — an edit "
+                f"here would make the row disagree with the fills behind it."),
+    )
+
 
 class WriteScope(str, Enum):
     MANUAL_EDIT = "manual_edit"

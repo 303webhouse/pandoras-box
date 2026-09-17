@@ -21,12 +21,12 @@ from database.redis_client import get_redis_client
 from websocket.broadcaster import manager
 from models.position_risk import calculate_position_risk, infer_direction
 from models.position_lots import (  # R-IV.441(a): the position row is the AGGREGATE
-    derive_aggregate, integral_qty, provenance_for_lot,
+    derive_aggregate, fifo_plan, integral_qty, provenance_for_lot,
 )
 
 from api._swr_cache import SWRCache
 from api._position_write_scope import (  # D1 second half: allowlist prevents
-    WriteScope, assert_columns_allowed,
+    WriteScope, assert_columns_allowed, assert_derived_not_edited,
 )
 from utils.json_sanitize import dumps_jsonb
 
@@ -1460,9 +1460,16 @@ async def update_position(position_id: str, req: UpdatePositionRequest, _=Depend
     # D1 allowlist. A manual edit may write neither mark nor realized fields.
     # Checked against the columns actually entering the SET clause, not against the
     # request model's declared fields, so a column reaching SQL by any route is caught.
-    assert_columns_allowed(
-        [s.split("=")[0].strip() for s in sets], WriteScope.MANUAL_EDIT
-    )
+    touched = [s.split("=")[0].strip() for s in sets]
+    assert_columns_allowed(touched, WriteScope.MANUAL_EDIT)
+
+    # R-IV.444(c): and it may not overwrite what the lots compute. Read against THIS position's
+    # evidence — a row with fills behind it has a derived quantity and basis; a row without any
+    # has nothing to derive from, and the edit is still the only way to state it.
+    async with pool.acquire() as conn:
+        has_lots = bool(await conn.fetchval(
+            "SELECT 1 FROM position_lots WHERE position_id = $1 LIMIT 1", position_id))
+    assert_derived_not_edited(touched, has_lots)
 
     params.append(position_id)
     set_clause = ", ".join(sets)
@@ -2558,6 +2565,20 @@ async def add_position_lot(position_id: str, req: AddLotRequest,
             await conn.execute(
                 "SELECT set_config('app.reason', $1, true)",
                 (req.reason or f"add lot {req.qty} @ {req.price} on {req.fill_time}"))
+            # R-IV.444(c): the same broker reference twice is the same fill twice. Refused with
+            # the lot it already is, so the caller learns WHICH record they are duplicating and
+            # not merely that they are. The database carries the same rule as a unique index —
+            # this check exists to make the refusal legible, not to be the only one.
+            if req.broker_ref:
+                dup = await conn.fetchrow(
+                    "SELECT id, position_id FROM position_lots WHERE broker_ref = $1",
+                    req.broker_ref)
+                if dup:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(f"broker_ref {req.broker_ref} is already lot {dup['id']} on "
+                                f"position {dup['position_id']} — a confirmation number is the "
+                                f"broker's own identity for one fill."))
             # Provenance is derived from HOW THE LOT ARRIVED and is never defaulted by the
             # database: MANUAL is PRINCIPAL_REPORTED, IMPORT is IMPORTED, an unpriced lot is
             # UNKNOWN. BROKER_VERIFIED is unreachable from here by design — it requires a
@@ -2668,6 +2689,193 @@ async def get_lots_coverage(limit: int = Query(50, ge=0, le=500)):
         "open_gaps": [dict(r) for r in open_gaps],
         "open_gaps_truncated": len(open_gaps) == limit,
     }
+
+
+class ReducePositionRequest(BaseModel):
+    """A reduction or a close, priced and dated like the fill it is.
+
+    `confirm` defaults to FALSE: the first call is a question. R-IV.444(c) requires the
+    realized amount to be SEEN before it is real, and a preview that has to be asked for in a
+    special way is a preview nobody runs.
+    """
+    qty: float
+    price: Optional[float] = None
+    fill_time: Optional[str] = None
+    fees: float = 0.0
+    broker_ref: Optional[str] = None
+    confirm: bool = False
+    reason: Optional[str] = None
+    actor: Optional[str] = None
+
+
+@router.post("/v2/positions/{position_id}/reduce")
+async def reduce_position(position_id: str, req: ReducePositionRequest,
+                          _=Depends(require_api_key)):
+    """Sell part or all of a position, FIFO, showing the realized result before it is real.
+
+    A reduction NEVER edits the lots it consumes. It is its own event — a negative-quantity
+    lot — allocated oldest-first against the acquisitions it sells out of, so the ledger still
+    answers "what was bought, and when" after the selling is done, and SUM(qty) still equals
+    the position.
+
+    With `confirm` false (the default) nothing is written and the plan comes back: which lots
+    would be consumed, at what cost, and what the whole thing realizes. With `confirm` true
+    the same plan is recomputed inside the transaction and then written — recomputed, because
+    a plan shown a minute ago describes a lot set that may have changed since.
+    """
+    if req.qty <= 0:
+        raise HTTPException(status_code=400, detail="qty must be positive — a reduction's "
+                                                    "direction is the endpoint, not its sign")
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        pos = await conn.fetchrow(
+            "SELECT position_id, ticker, asset_type, account, status "
+            "FROM unified_positions WHERE position_id = $1", position_id)
+        if not pos:
+            raise HTTPException(status_code=404, detail=f"Position {position_id} not found")
+        if pos["status"] != "OPEN":
+            raise HTTPException(status_code=400,
+                                detail=f"Position {position_id} is {pos['status']}, not OPEN")
+
+        lots = await conn.fetch(
+            "SELECT id, fill_time, qty, price, fees FROM position_lots "
+            "WHERE position_id = $1 ORDER BY fill_time, id", position_id)
+        plan = fifo_plan([dict(l) for l in lots], req.qty, req.price, pos["asset_type"],
+                         req.fees)
+
+        if not plan["sufficient"]:
+            raise HTTPException(
+                status_code=400,
+                detail=(f"lots hold {plan['available_qty']} and the reduction asks for "
+                        f"{plan['requested_qty']} — short by {plan['shortfall']}. The book "
+                        f"cannot sell what it has no record of buying."))
+        if not req.confirm:
+            return {"status": "preview", "position_id": position_id, "written": False,
+                    **plan,
+                    "note": "nothing was written; send the same body with confirm=true"}
+
+        if req.broker_ref:
+            dup = await conn.fetchrow(
+                "SELECT id, position_id FROM position_lots WHERE broker_ref = $1",
+                req.broker_ref)
+            if dup:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(f"broker_ref {req.broker_ref} is already lot {dup['id']} on "
+                            f"position {dup['position_id']}"))
+
+        async with conn.transaction():
+            await conn.execute("SELECT set_config('app.actor', $1, true)",
+                               (req.actor or "lifecycle-ui"))
+            await conn.execute("SELECT set_config('app.reason', $1, true)",
+                               (req.reason or f"reduce {req.qty} @ {req.price}"))
+            # Recomputed under the transaction: the plan the caller saw described the lot set
+            # as it was, and a confirmation is not a licence to write yesterday's arithmetic.
+            fresh = await conn.fetch(
+                "SELECT id, fill_time, qty, price, fees FROM position_lots "
+                "WHERE position_id = $1 ORDER BY fill_time, id FOR UPDATE", position_id)
+            plan = fifo_plan([dict(l) for l in fresh], req.qty, req.price, pos["asset_type"],
+                             req.fees)
+            if not plan["sufficient"]:
+                raise HTTPException(
+                    status_code=409,
+                    detail=("the lot set changed between the preview and the confirmation; "
+                            "re-run the preview"))
+            disposal_id = await conn.fetchval(
+                """INSERT INTO position_lots
+                       (position_id, fill_time, qty, price, fees, source, provenance,
+                        broker_ref)
+                   VALUES ($1, COALESCE($2::timestamptz, NOW()), $3, $4, $5, 'MANUAL', $6, $7)
+                   RETURNING id""",
+                position_id, req.fill_time, -abs(req.qty), req.price, req.fees,
+                provenance_for_lot("MANUAL", req.price), req.broker_ref)
+            for a in plan["allocations"]:
+                await conn.execute(
+                    """INSERT INTO position_lot_closures
+                           (position_id, disposal_lot_id, acquired_lot_id, qty, cost_per_unit,
+                            proceeds_per_unit, realized, multiplier)
+                       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)""",
+                    position_id, disposal_id, a["lot_id"], a["qty"], a["cost_per_unit"],
+                    a["proceeds_per_unit"], a["realized"], plan["multiplier"])
+
+            remaining = await conn.fetch(
+                "SELECT qty, price, fees FROM position_lots WHERE position_id = $1",
+                position_id)
+            agg = derive_aggregate([dict(r) for r in remaining], pos["asset_type"])
+            stored_qty = integral_qty(agg["qty"])
+            if stored_qty is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"lots would sum to {agg['qty']}, which INTEGER quantity cannot hold")
+            # The position's own realized field is NOT written here. Realized belongs to the
+            # close path and its allocations live in position_lot_closures; writing it from two
+            # places is how a figure comes to have two owners and no author.
+            await conn.execute(
+                """UPDATE unified_positions
+                   SET quantity = $1, entry_price = $2, cost_basis = $3, updated_at = NOW()
+                   WHERE position_id = $4""",
+                stored_qty, agg["entry_price"], agg["cost_basis"], position_id)
+
+    return {"status": "reduced", "position_id": position_id, "written": True,
+            "disposal_lot_id": disposal_id, "quantity_after": stored_qty,
+            "entry_price_after": agg["entry_price"], "cost_basis_after": agg["cost_basis"],
+            "basis_known": agg["basis_known"], **plan}
+
+
+@router.get("/v2/positions/legs/coverage", dependencies=[Depends(require_api_key)])
+async def get_legs_coverage(limit: int = Query(100, ge=0, le=500)):
+    """What became of every option row when legs were expanded (R-IV.444(b)).
+
+    The migrated rows are the boring half. This surface exists for the other half: each row
+    that could NOT become legs, with the reason, because a row quietly left behind renders as
+    a position whose structure the screen will silently mis-state.
+    """
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        by_outcome = await conn.fetch(
+            "SELECT outcome, COUNT(*) AS positions, SUM(legs_written) AS legs "
+            "FROM position_legs_migration GROUP BY outcome ORDER BY outcome")
+        unmigrated = await conn.fetch(
+            """SELECT m.position_id, p.ticker, p.status, p.structure, m.outcome, m.detail,
+                      m.merged_into
+                 FROM position_legs_migration m
+                 JOIN unified_positions p ON p.position_id = m.position_id
+                WHERE m.outcome <> 'MIGRATED'
+                ORDER BY m.outcome, m.position_id LIMIT $1""", limit)
+        pending = await conn.fetchval(
+            """SELECT COUNT(*) FROM unified_positions p
+                WHERE p.asset_type IN ('OPTION', 'SPREAD')
+                  AND NOT EXISTS (SELECT 1 FROM position_legs_migration m
+                                   WHERE m.position_id = p.position_id)""")
+    return {
+        "by_outcome": {r["outcome"]: {"positions": r["positions"], "legs": r["legs"]}
+                       for r in by_outcome},
+        # An option row with no outcome at all is the one population this table cannot explain,
+        # so it is counted separately rather than folded into a total that looks complete.
+        "option_rows_without_an_outcome": pending,
+        "not_migrated": [dict(r) for r in unmigrated],
+        "not_migrated_truncated": len(unmigrated) == limit,
+    }
+
+
+@router.get("/v2/positions/{position_id}/legs", dependencies=[Depends(require_api_key)])
+async def get_position_legs(position_id: str):
+    """What this position actually holds, one row per leg.
+
+    A position whose legs live on another row says so through `merged_into` rather than
+    rendering as an empty structure.
+    """
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        legs = await conn.fetch(
+            "SELECT id, leg_seq, option_type, side, strike, expiry, qty, price, provenance, "
+            "broker_ref, migrated_from FROM position_legs WHERE position_id = $1 "
+            "ORDER BY leg_seq", position_id)
+        rec = await conn.fetchrow(
+            "SELECT outcome, detail, legs_written, merged_into, migrated_at "
+            "FROM position_legs_migration WHERE position_id = $1", position_id)
+    return {"position_id": position_id, "legs": [dict(r) for r in legs], "count": len(legs),
+            "migration": dict(rec) if rec else None}
 
 
 @router.get("/v2/positions/{position_id}/lots", dependencies=[Depends(require_api_key)])

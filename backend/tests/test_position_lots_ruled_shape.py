@@ -223,6 +223,8 @@ def _pool(position, lots_after):
         conn.executed.append((" ".join(sql.split()), args))
 
     async def fetchrow(sql, *args):
+        if "FROM position_lots WHERE broker_ref" in sql:
+            return None          # no existing lot carries this reference
         return position
 
     async def fetch(sql, *args):
