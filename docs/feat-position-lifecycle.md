@@ -19,10 +19,28 @@ Principal-commissioned 2026-08-26. Lots, an audit trail, and a cash-event write 
   `BROKERAGE_LINK_401K` deliberately untouched (frozen dispute, DEF-ACCOUNT-LABEL-DUP).
 - `cash_flows.occurrence` added to the dedup key.
 
+**Phase 3 — the ruled shape** (migration `037`, 2026-09-17, R-IV.441(a))
+
+- `position_lots` moved INTO `migrations/` and reached the ruled schema by ALTER, not by
+  CREATE: `quantity` -> `qty`, `fill_date` -> `fill_time` (a pure rename — the live column was
+  already `TIMESTAMPTZ`), `fees` KEPT for the gross/net delta, `provenance` and `broker_ref`
+  added. Renames are guarded on both names; boot mirrors the migration.
+- **Provenance is inherited, never defaulted.** Existing lots take it from the parent
+  position's `source`; new ones from how they arrived. `BROKER_VERIFIED` is unreachable from
+  any path here, and the table refuses it without a `broker_ref` to check it against.
+- **No lot is invented.** 50 of 380 positions have none — 20 of 34 OPEN — so the lots
+  invariant is FALSE today and is reported rather than backfilled away:
+  `GET /v2/positions/lots/coverage`, by status, with the open rows named.
+- The add path stopped folding fees into the per-unit price, stopped dropping the 100x
+  contract multiplier on option rows, stopped extrapolating a basis across an unpriced lot
+  (it now stores NULL and says why), and refuses a lot sum an INTEGER quantity cannot hold.
+- Request fields are `fill_time` and `qty`; the old names are refused, not aliased.
+
 **Phase 2 — endpoints** (`5a3da53`)
 
-- `POST /v2/positions/{id}/lots`, `GET .../lots` — blended basis recomputed from the lot
-  set, cost-weighted over **priced lots only**.
+- `POST /v2/positions/{id}/lots`, `GET .../lots` — basis recomputed from the lot set over
+  **priced lots only** (superseded in part by Phase 3 above: gross, with the asset's
+  multiplier, and UNKNOWN rather than extrapolated when a lot has no price).
 - `POST /v2/cash-events` — DEPOSIT/WITHDRAWAL, account-scoped, touches no position row
   and no realized field.
 - ETF-only invariant (R-IV.75(d)) at both entry points.
