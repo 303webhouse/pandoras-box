@@ -72,6 +72,8 @@ full backend suite (before R-IV.417/419): 25 failed, 1202 passed, 1 skipped
 - **No CI.** The guard makes an unrunnable suite loud; it does not make anyone run it. **Until
   the suite runs somewhere on every push, a completeness test is only as good as the last
   person who remembered to run it** — which is the condition this defect was found in.
-- **The 25 pre-existing failures are not triaged here.** One (`test_countertrend`) is
+- **The 25 pre-existing failures are not triaged here.** They are now NAMED in
+  `docs/defects/TEST-BASELINE.md` (R-IV.430(f)), with the 4 `hub_mcp` smoke failures that a
+  `backend/tests` run never sees; a run is compared to that list by node id, not by count. One (`test_countertrend`) is
   order-dependent: a different test of the pair fails depending on run order, and neither makes
   an HTTP call.
