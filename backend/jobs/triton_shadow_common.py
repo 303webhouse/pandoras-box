@@ -110,9 +110,13 @@ async def fetch_r_close_index(
             dd = _as_date(b.get("start_time") or b.get("date"))
             if c is not None and dd is not None:
                 out[dd] = c
+    from utils.vendor_substitution import record_primary, record_substitution
     if out:
+        record_primary("triton_grader.bars", PROVIDER_UW)
         return out, PROVIDER_UW
 
+    record_substitution("triton_grader.bars", PROVIDER_UW, PROVIDER_YFINANCE,
+                        "no usable regular-session UW bar", ticker.upper())
     # ── The net. Reached ONLY when UW produced no usable regular-session bar. ──
     # get_bars_yfinance touches no UW endpoint: the isolation in the module
     # docstring is preserved, and we do not re-ask the query that just failed.

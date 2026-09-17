@@ -31,6 +31,7 @@ from integrations.uw_api_cache import (
     cache_get, cache_set, increment_daily_counter, increment_429_counter,
     get_daily_count, get_cache_stats,
 )
+from utils.vendor_substitution import record_primary, record_substitution
 from integrations.uw_governor import (
     precheck as _governor_precheck,
     UWUnavailable,
@@ -778,11 +779,15 @@ async def get_bars(
         if bars:
             bars = _tag_provider(bars, PROVIDER_UW)
             await cache_set("quote", cache_key, bars)
+            record_primary("uw_api.get_bars", PROVIDER_UW)
             return bars
         logger.info(
             "UW /ohlc/1d unavailable or empty for %s — falling back to yfinance",
             ticker,
         )
+        # R-IV.433(c): announced. (The ^-index path below is yfinance BY DESIGN and is not.)
+        record_substitution("uw_api.get_bars", PROVIDER_UW, PROVIDER_YFINANCE,
+                            "uw /ohlc/1d unavailable or empty", ticker)
 
     try:
         loop = asyncio.get_event_loop()

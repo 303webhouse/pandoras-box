@@ -177,8 +177,11 @@ async def refresh_ticker(ticker: str) -> Optional[Dict[str, Any]]:
     except Exception as e:
         logger.debug(f"Polygon bars failed for {ticker}: {e}")
 
-    # yfinance fallback
+    # yfinance fallback -- announced (R-IV.433(c))
     if not bars:
+        from utils.vendor_substitution import record_substitution
+        record_substitution("universe_cache.bars", "uw_api.get_bars", "yfinance",
+                            "get_bars gave fewer than 15 bars", ticker)
         try:
             from bias_engine.factor_utils import get_price_history
 

@@ -1555,6 +1555,14 @@ async def health_check():
     except Exception as _rbe:
         resolver_block = {"state": "ERROR", "reason": str(_rbe)}
 
+    # R-IV.433(c): a substituted vendor is announced -- which consumers are on their fallback.
+    vendor_block: dict = {}
+    try:
+        from utils.vendor_substitution import summary as vendor_summary
+        vendor_block = vendor_summary()
+    except Exception as _vse:
+        vendor_block = {"state": "ERROR", "reason": str(_vse)}
+
     s8_block: dict = {}
     try:
         from jobs.option_chain_snapshot import snapshot_status
@@ -1579,6 +1587,7 @@ async def health_check():
         "qqq_sma_watch": qqq_sma_block,
         "paused_pollers": paused_pollers_block,
         "triton_grader": grader_block,
+        "vendor_substitution": vendor_block,
     })
 
 
