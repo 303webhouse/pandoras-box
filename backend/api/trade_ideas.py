@@ -508,13 +508,18 @@ async def expire_stale_signals(_=Depends(require_api_key)):
     """
     Auto-expire signals past their expires_at timestamp.
     Called by cron or scheduler. Safe to call frequently (idempotent).
+
+    A system expiry is NOT a user dismissal (R-IV.434(b)): it records user_action
+    'EXPIRED', so the legacy feeds' 24-hour hide -- which keys on 'DISMISSED', a human's
+    decision about a ticker -- does not fire when an idea simply runs out of time.
+    Rows expired before this change keep the 'DISMISSED' they were written with.
     """
     pool = await get_postgres_client()
 
     async with pool.acquire() as conn:
         result = await conn.execute("""
             UPDATE signals
-            SET status = 'EXPIRED', user_action = 'DISMISSED', dismissed_at = NOW()
+            SET status = 'EXPIRED', user_action = 'EXPIRED', dismissed_at = NOW()
             WHERE status = 'ACTIVE'
             AND (
                 (expires_at IS NOT NULL AND expires_at < NOW())
