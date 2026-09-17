@@ -326,7 +326,7 @@ async def hermes_webhook(request: Request):
 PIVOT_API_KEY = os.getenv("PIVOT_API_KEY") or ""
 
 
-@router.post("/hermes/analysis")
+@router.post("/hermes/analysis", dependencies=[Depends(require_api_key)])
 async def receive_hermes_analysis(request: Request):
     """
     Receives Pivot's LLM analysis from VPS and updates the catalyst_events row.
@@ -449,7 +449,7 @@ async def get_hermes_alerts(
     return {"alerts": alerts, "count": len(alerts)}
 
 
-@router.patch("/hermes/alerts/{event_id}/dismiss")
+@router.patch("/hermes/alerts/{event_id}/dismiss", dependencies=[Depends(require_api_key)])
 async def dismiss_hermes_alert(event_id: str):
     """Mark a catalyst event as dismissed."""
     pool = await get_postgres_client()

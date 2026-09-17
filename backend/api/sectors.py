@@ -18,7 +18,8 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 import pytz
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import Depends, APIRouter, HTTPException, Query
+from utils.pivot_auth import require_api_key
 
 from database.redis_client import get_redis_client
 from database.postgres_client import get_postgres_client
@@ -798,7 +799,7 @@ async def get_sector_leaders(
     return response
 
 
-@router.post("/seed-constituents")
+@router.post("/seed-constituents", dependencies=[Depends(require_api_key)])
 async def seed_sector_constituents():
     """Admin endpoint: force re-seed sector_constituents from hardcoded data."""
     pool = await get_postgres_client()

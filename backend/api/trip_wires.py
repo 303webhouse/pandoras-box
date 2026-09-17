@@ -10,7 +10,8 @@ import asyncio
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import Depends, APIRouter, HTTPException
+from utils.pivot_auth import require_api_key
 
 from database.redis_client import get_redis_client
 
@@ -230,7 +231,7 @@ async def get_trip_wires():
     }
 
 
-@router.post("/ceasefire/{status}")
+@router.post("/ceasefire/{status}", dependencies=[Depends(require_api_key)])
 async def set_ceasefire_wire(status: str):
     """Manually set the ceasefire trip wire. Values: HOT, COLD."""
     if status.upper() not in ("HOT", "COLD"):

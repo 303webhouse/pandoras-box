@@ -29,6 +29,21 @@ AUTH_EXEMPT_MUTATIONS = {
     # Dashboard auth — intentionally public (login can't require a session; logout clears it)
     ("POST", "/api/auth/login"),
     ("POST", "/api/auth/logout"),
+    # R-IV.419(a) — routes with their OWN auth, confirmed by reading the handler, NEVER by a
+    # live request. Each is re-checked by TestExemptionsStillHold, so an
+    # entry here cannot quietly outlive the mechanism that justified it.
+    #   TradingView-style webhooks: header-less, body-secret gated.
+    ("POST", "/api/webhook/pythia"),       # fail-closed, constant-time (PYTHIA_WEBHOOK_SECRET)
+    ("POST", "/webhook/mp_levels"),        # fail-closed, constant-time (PYTHIA_WEBHOOK_SECRET)
+    ("POST", "/api/webhook/hermes"),       # validate_webhook_secret (switch: WEBHOOK_HERMES_ENFORCE)
+    ("POST", "/webhook/footprint"),        # validate_webhook_secret (switch: WEBHOOK_FOOTPRINT_ENFORCE)
+    #   Own header/session checks that require_api_key cannot express:
+    ("POST", "/api/chronos/refresh"),      # PIVOT_API_KEY via header OR ?api_key= query param
+    ("POST", "/api/layout"),               # verify_session; its v2 caller sends no CSRF header
+    #   The MCP app: GitHub OAuth (OAuthProxy) + username allowlist, hub_mcp/auth.py
+    ("POST", "/mcp/v1"),
+    ("DELETE", "/mcp/v1"),
+    ("POST", "/register"),                 # OAuth dynamic client registration for that connector
 }
 
 # Pre-existing routes that need auth but weren't in Phase 0H scope.
@@ -266,22 +281,9 @@ class TestAuthCompleteness:
                 unprotected.append(f"{method} {path}")
                 continue
 
-            has_auth = False
-            try:
-                sig = inspect.signature(endpoint)
-                for param in sig.parameters.values():
-                    default = param.default
-                    if default is inspect.Parameter.empty:
-                        continue
-                    # FastAPI Depends objects have a .dependency attribute
-                    dep_func = getattr(default, "dependency", None)
-                    if dep_func is not None and getattr(dep_func, "__name__", "") in (
-                        "require_api_key", "verify_pivot_key", "verify_api_key",
-                    ):
-                        has_auth = True
-                        break
-            except (ValueError, TypeError):
-                pass
+            # The RESOLVED dependant tree — what FastAPI actually runs. A signature check
+            # cannot see `@router.post(..., dependencies=[Depends(require_api_key)])`.
+            has_auth = _has_auth(route.dependant) if hasattr(route, "dependant") else False
 
             if not has_auth:
                 unprotected.append(f"{method} {path}")
@@ -461,3 +463,114 @@ class TestBookReadCompleteness:
             return {}
 
         assert _ungated_book_gets(probe) == ["/api/portfolio/__probe_open"]
+
+
+# ── R-IV.419(a) — write routes that had no auth of their own are gated ──────────────────
+
+# Machine-only: the handler ALSO requires X-API-Key after the gate, so a browser session is
+# rightly refused there (defence in depth for a VPS endpoint, not a defect). Module scope,
+# because a comprehension inside a class body cannot see class-level names.
+_MACHINE_ONLY_WRITES = frozenset({"/api/hermes/analysis"})
+
+
+class TestWriteRoutesGated:
+    """No credentials -> 401 (before the handler runs, so nothing is written); a machine key
+    is accepted; a browser session is accepted only WITH the CSRF header."""
+
+    ROUTES = [
+        ("POST", "/api/committee/quick-review", {"ticker": "SPY"}),
+        ("PATCH", "/api/hermes/alerts/1/dismiss", None),
+        ("POST", "/api/hermes/analysis", {"event_id": "1"}),
+        ("PATCH", "/api/hydra/lightning/1/status", {"status": "dismissed"}),
+        ("POST", "/api/hydra/refresh", None),
+        ("POST", "/api/sectors/seed-constituents", None),
+        ("POST", "/api/trade-watchlist", {"ticker": "SPY"}),
+        ("PATCH", "/api/trade-watchlist/1", {"notes": "x"}),
+        ("DELETE", "/api/trade-watchlist/1", None),
+        ("POST", "/api/trade-watchlist/1/reactivate", None),
+        ("POST", "/api/trip-wires/ceasefire/off", None),
+    ]
+
+    @staticmethod
+    def _send(client, method, path, body, headers=None, cookies=None):
+        kw = {}
+        if headers:
+            kw["headers"] = headers
+        if cookies:
+            kw["cookies"] = cookies
+        if body is not None and method != "DELETE":
+            kw["json"] = body
+        return client.request(method, path, **kw)
+
+    @pytest.mark.parametrize("method,path,body", ROUTES)
+    def test_no_credentials_is_401(self, client, method, path, body):
+        r = self._send(client, method, path, body)
+        assert r.status_code == 401, f"{method} {path} -> {r.status_code} without credentials"
+
+    @pytest.mark.parametrize("method,path,body", ROUTES)
+    def test_machine_key_accepted(self, client, test_api_key, method, path, body):
+        r = self._send(client, method, path, body, headers={"X-API-Key": test_api_key})
+        assert r.status_code not in (401, 403), f"{method} {path} rejected a valid key ({r.status_code})"
+
+    @pytest.mark.parametrize("method,path,body", ROUTES)
+    def test_session_without_csrf_header_is_403(self, client, method, path, body):
+        from utils.session import issue_session, COOKIE_NAME
+        r = self._send(client, method, path, body, cookies={COOKIE_NAME: issue_session()})
+        assert r.status_code == 403, f"{method} {path} -> {r.status_code}; a session write needs the CSRF header"
+
+    @pytest.mark.parametrize("method,path,body",
+                             [r for r in ROUTES if r[1] not in _MACHINE_ONLY_WRITES])
+    def test_session_with_csrf_header_accepted(self, client, method, path, body):
+        from utils.session import issue_session, COOKIE_NAME
+        r = self._send(client, method, path, body,
+                       headers={"X-Requested-With": "XMLHttpRequest"},
+                       cookies={COOKIE_NAME: issue_session()})
+        assert r.status_code not in (401, 403), f"{method} {path} rejected a valid session ({r.status_code})"
+
+
+class TestExemptionsStillHold:
+    """An exemption is a claim that the route authenticates some OTHER way. Each claim is
+    checked here, so the exemption list cannot outlive the mechanism that justified it."""
+
+    @pytest.mark.parametrize("path,body", [
+        ("/api/chronos/refresh", None),
+        ("/api/layout", {"layout": {}}),
+    ])
+    def test_own_check_rejects_without_credentials(self, client, path, body):
+        r = client.post(path, json=body) if body is not None else client.post(path)
+        assert r.status_code == 401, f"POST {path} -> {r.status_code}; its own auth check is gone"
+
+    @pytest.mark.parametrize("path", ["/api/webhook/pythia", "/webhook/mp_levels"])
+    def test_fail_closed_webhook_rejects_without_secret(self, client, path):
+        r = client.post(path, json={"ticker": "SPY"})
+        assert r.status_code in (401, 503), (
+            f"POST {path} -> {r.status_code}; a fail-closed webhook must reject a secretless body")
+
+    @pytest.mark.parametrize("path,body,enforce_env,secret_env", [
+        ("/api/webhook/hermes", {"ticker": "SPY"}, "WEBHOOK_HERMES_ENFORCE", "HERMES_WEBHOOK_SECRET"),
+        ("/webhook/footprint", {"ticker": "SPY"}, "WEBHOOK_FOOTPRINT_ENFORCE", "TRADINGVIEW_WEBHOOK_SECRET"),
+    ])
+    def test_observe_webhook_rejects_once_enforce_is_on(self, client, monkeypatch,
+                                                        path, body, enforce_env, secret_env):
+        """These two gate on validate_webhook_secret behind an enforce switch. The exemption
+        is only honest if that switch actually closes them — proven here."""
+        monkeypatch.setenv(enforce_env, "true")
+        monkeypatch.setenv(secret_env, "test-webhook-secret-for-enforce")
+        r = client.post(path, json=body)
+        assert r.status_code == 401, (
+            f"POST {path} -> {r.status_code} with {enforce_env}=true and no secret; "
+            f"the flip-day switch does not close this route")
+
+    def test_mcp_app_is_built_with_an_auth_provider(self):
+        import inspect as _inspect
+        from hub_mcp import server
+        src = _inspect.getsource(server)
+        assert "auth=build_oauth_provider()" in src, "the MCP app no longer wires its OAuth provider"
+
+    def test_mcp_oauth_provider_is_built_when_configured(self, monkeypatch):
+        """The MCP exemption holds only while the provider is actually built."""
+        from hub_mcp import auth as mcp_auth
+        monkeypatch.setenv(mcp_auth.GITHUB_CLIENT_ID_ENV, "id")
+        monkeypatch.setenv(mcp_auth.GITHUB_CLIENT_SECRET_ENV, "secret")
+        monkeypatch.setenv(mcp_auth.ALLOWED_USERS_ENV, "someone")
+        assert mcp_auth.build_oauth_provider() is not None

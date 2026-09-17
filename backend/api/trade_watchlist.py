@@ -19,7 +19,8 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import Depends, APIRouter, HTTPException
+from utils.pivot_auth import require_api_key
 from pydantic import BaseModel
 
 from database.postgres_client import get_postgres_client
@@ -167,7 +168,7 @@ async def list_watchlist(
     }
 
 
-@router.post("")
+@router.post("", dependencies=[Depends(require_api_key)])
 async def add_watchlist_entry(entry: WatchlistEntry):
     ticker = entry.ticker.upper().strip()
     direction = entry.direction.upper().strip()
@@ -216,7 +217,7 @@ async def add_watchlist_entry(entry: WatchlistEntry):
     return _row_to_dict(row)
 
 
-@router.patch("/{entry_id}")
+@router.patch("/{entry_id}", dependencies=[Depends(require_api_key)])
 async def update_watchlist_entry(entry_id: str, update: WatchlistUpdate):
     try:
         eid = uuid.UUID(entry_id)
@@ -281,7 +282,7 @@ async def update_watchlist_entry(entry_id: str, update: WatchlistUpdate):
     return _row_to_dict(row)
 
 
-@router.delete("/{entry_id}")
+@router.delete("/{entry_id}", dependencies=[Depends(require_api_key)])
 async def delete_watchlist_entry(entry_id: str):
     try:
         eid = uuid.UUID(entry_id)
@@ -297,7 +298,7 @@ async def delete_watchlist_entry(entry_id: str):
     return {"status": "deactivated", "id": entry_id}
 
 
-@router.post("/{entry_id}/reactivate")
+@router.post("/{entry_id}/reactivate", dependencies=[Depends(require_api_key)])
 async def reactivate_watchlist_entry(entry_id: str):
     try:
         eid = uuid.UUID(entry_id)
