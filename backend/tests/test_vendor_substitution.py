@@ -103,3 +103,48 @@ def test_every_wired_consumer_and_health_publish_it():
                       ("integrations.uw_api", "uw_api.get_bars")]:
         src = inspect.getsource(__import__(mod, fromlist=["x"]))
         assert f'record_substitution("{name}"' in src, name
+
+
+# --- the announcement names WHICH negative it is (conventions #18) -----------------------
+def test_a_governor_block_is_not_reported_as_an_empty_vendor_answer():
+    """The live reading on 2026-09-17: 27 substitutions, reason "unavailable or empty", and
+    no way to tell from the surface that not one of those calls had been issued."""
+    from integrations import uw_api
+    from integrations.uw_governor import UWUnavailable
+    blocked = UWUnavailable("QUOTA_EXCEEDED", caller="ohlc_bars")
+    fb = [{"o": 1, "h": 1, "l": 1, "c": 1, "v": 1, "t": 1757980800000}]
+    with patch.object(uw_api, "cache_get", new=AsyncMock(return_value=None)),          patch.object(uw_api, "cache_set", new=AsyncMock(return_value=None)),          patch.object(uw_api, "get_ohlc", new=AsyncMock(return_value=blocked)),          patch.object(uw_api, "_fetch_yfinance_bars", lambda *a, **k: fb):
+        asyncio.run(uw_api.get_bars("QQQ", 1, "day", "2026-09-01", "2026-09-17"))
+    c = vs.summary()["consumers"]["uw_api.get_bars"]
+    assert c["state"] == "substituting"
+    assert "not attempted" in c["last_reason"] and "QUOTA_EXCEEDED" in c["last_reason"]
+
+
+def test_an_empty_uw_answer_still_reads_as_an_empty_uw_answer():
+    from integrations import uw_api
+    fb = [{"o": 1, "h": 1, "l": 1, "c": 1, "v": 1, "t": 1757980800000}]
+    with patch.object(uw_api, "cache_get", new=AsyncMock(return_value=None)),          patch.object(uw_api, "cache_set", new=AsyncMock(return_value=None)),          patch.object(uw_api, "get_ohlc", new=AsyncMock(return_value=[])),          patch.object(uw_api, "_fetch_yfinance_bars", lambda *a, **k: fb):
+        asyncio.run(uw_api.get_bars("QQQ", 1, "day", "2026-09-01", "2026-09-17"))
+    c = vs.summary()["consumers"]["uw_api.get_bars"]
+    assert "no regular-session bar" in c["last_reason"]
+    assert "not attempted" not in c["last_reason"]
+
+
+def test_the_snapshot_sentinel_survives_the_call_it_was_raised_on():
+    """get_snapshot collapsed the sentinel to None, so the enricher could only ever say
+    "unavailable". Falsy either way, so no `if snap:` consumer changes behaviour."""
+    from integrations import uw_api
+    from integrations.uw_governor import UWUnavailable, is_unavailable
+    blocked = UWUnavailable("CIRCUIT_OPEN", caller="snapshot")
+    with patch.object(uw_api, "cache_get", new=AsyncMock(return_value=None)),          patch.object(uw_api, "_uw_request", new=AsyncMock(return_value=blocked)):
+        out = asyncio.run(uw_api.get_snapshot("QQQ"))
+    assert is_unavailable(out) and not out
+
+
+def test_the_enricher_names_the_block_when_there_was_one():
+    from enrichment import signal_enricher as se
+    from integrations.uw_governor import UWUnavailable
+    blocked = UWUnavailable("QUOTA_EXCEEDED", caller="snapshot")
+    with patch("integrations.uw_api.get_snapshot", new=AsyncMock(return_value=blocked)),          patch("bias_engine.factor_utils.get_price_history", new=AsyncMock(return_value=None)):
+        asyncio.run(se._fetch_snapshot("QQQ"))
+    assert "not attempted" in vs.summary()["consumers"]["enricher.snapshot"]["last_reason"]
