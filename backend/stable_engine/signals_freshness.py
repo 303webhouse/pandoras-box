@@ -67,6 +67,8 @@ REGISTERED_CLASSES: frozenset[str] = frozenset({
     # quiet day, or a firehose stop that persists everything as unsurfaced) -- so both of
     # its source values are judged on whether the day's PASS completed.
     "circes_stew", "circes_stew_unsurfaced",
+    # R-IV.429(b). The backtest module's grading pass -- a consumer, like the Triton grader.
+    "shadow_grader",
 })
 
 # ── PLUGGABLE AGE SOURCE (T3, R-IV.295(a)) ────────────────────────────────
@@ -84,6 +86,7 @@ AGE_SOURCES: dict[str, str] = {
     "triton_grader": AGE_SOURCE_JOB_RUNS,
     "circes_stew": AGE_SOURCE_JOB_RUNS,
     "circes_stew_unsurfaced": AGE_SOURCE_JOB_RUNS,
+    "shadow_grader": AGE_SOURCE_JOB_RUNS,
 }
 # job_runs name per class, where it differs from the class. Both CIRCE source values are
 # written by ONE pass.
@@ -91,7 +94,8 @@ AGE_SOURCE_JOB_NAME: dict[str, str] = {"circes_stew_unsurfaced": "circes_stew"}
 
 # Classes whose work is expected once per TRADING SESSION rather than continuously.
 # Their SLO is only evaluated when a pass was actually due -- see _pass_overdue().
-SESSION_JOB_CLASSES = frozenset({"triton_grader", "circes_stew", "circes_stew_unsurfaced"})
+SESSION_JOB_CLASSES = frozenset({"triton_grader", "circes_stew", "circes_stew_unsurfaced",
+                                 "shadow_grader"})
 
 # The grader runs post-close; give it until 16:15 ET plus grace before a pass for
 # that session is considered due.
@@ -127,6 +131,7 @@ SLO_SECONDS: dict[str, int] = {
     "triton_grader": 26 * 3600,
     "circes_stew": 26 * 3600,
     "circes_stew_unsurfaced": 26 * 3600,
+    "shadow_grader": 26 * 3600,
 }
 
 # Classes that only flow during regular trading hours. Crypto runs 24/7 and must
