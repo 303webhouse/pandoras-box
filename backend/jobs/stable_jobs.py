@@ -100,6 +100,15 @@ async def _record(job_name: str, coro_fn, session_date=None):
         await job_status.mark_success(job_name)
         await _finish_run(run_id, "ok")
         return res
+    except OutputCheckFailed as e:
+        # A FAILURE (job_status, alert) that is a COMPLETED PASS (job_runs) -- R-IV.426(b).
+        logger.warning("[stable_jobs] %s produced no output: %s", job_name, e)
+        from jobs.job_runs import STATUS_COMPLETED_DEFECTIVE
+        await _finish_run(run_id, STATUS_COMPLETED_DEFECTIVE, str(e))
+        should_alert = await job_status.mark_failure(job_name, f"OutputCheckFailed: {e}")
+        if should_alert:
+            await _fire_flatline_alert(job_name, e)
+        return None
     except Exception as e:
         logger.warning("[stable_jobs] %s failed: %s", job_name, e)
         await _finish_run(run_id, "error", str(e))
@@ -227,10 +236,42 @@ async def stable_tide_warmer_loop():
         await asyncio.sleep(300)  # 5 minutes
 
 
+class OutputCheckFailed(RuntimeError):
+    """R-IV.426. The pass completed, but the step's own output says it produced nothing.
+    Recorded as a failure with its reason; NOT retried (see job_runs.STATUS_COMPLETED_DEFECTIVE)."""
+
+
+def check_nightly_output(res: dict) -> None:
+    """R-IV.426(c) — the step's OWN OUTPUT is the success predicate.
+
+    Before this, "no exception" was success, so a night that stored zero theme rows reported
+    `ok` for eight days while the regime and themes panels read DEAD. The fields checked are
+    the ones the pass itself returns.
+
+    Download degraded (coverage < 90%) + no output -> ordinary RuntimeError: the retry exists
+    for exactly that. Download fine + no output -> OutputCheckFailed: deterministic, not retried.
+    """
+    problems = []
+    if not res.get("metrics_rows"):
+        problems.append("metrics_rows=%s" % res.get("metrics_rows"))
+    if not res.get("themes_stored"):
+        problems.append("themes_stored=%s" % res.get("themes_stored"))
+    if not problems:
+        return
+    detail = "%s (coverage %s%%, degraded=%s)" % (
+        ", ".join(problems), res.get("coverage"), res.get("degraded"))
+    if res.get("degraded"):
+        raise RuntimeError("nightly download degraded and produced no output: " + detail)
+    raise OutputCheckFailed(
+        "nightly pass completed but produced no output: " + detail
+        + " — not retried (R-IV.426: the download succeeded, so a retry repeats it for nothing)")
+
+
 async def run_nightly_close_recompute() -> dict:
     logger.info("[stable_jobs] nightly close recompute starting")
     res = await asyncio.to_thread(_nightly_work)
     logger.info("[stable_jobs] nightly close recompute done: %s", res)
+    check_nightly_output(res)
     return res
 
 

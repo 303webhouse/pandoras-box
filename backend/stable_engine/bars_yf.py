@@ -26,6 +26,22 @@ logger = logging.getLogger(__name__)
 _AUTO_ADJUST = True
 
 
+_SHARE_CLASS = __import__("re").compile(r"^([A-Z]+)\.([A-Z])$")
+
+
+def to_yahoo_symbol(ticker: str) -> str:
+    """R-IV.426(d) — the ONE mapping from a universe symbol to Yahoo's.
+
+    US share classes are written with a dot in the universe (BRK.B, BF.B) and with a hyphen
+    by Yahoo (BRK-B, BF-B); requested as-is they fail as "possibly delisted". Only a
+    letters-dot-single-letter symbol is rewritten, so exchange suffixes (7203.T, SHOP.TO)
+    and pairs already in Yahoo form (BTC-USD) pass through unchanged. Rows are stored under
+    the UNIVERSE symbol; the Yahoo form never leaves this module.
+    """
+    m = _SHARE_CLASS.match(ticker or "")
+    return "%s-%s" % (m.group(1), m.group(2)) if m else ticker
+
+
 def _extract_ticker_frame(data: pd.DataFrame, ticker: str, single: bool) -> pd.DataFrame | None:
     """Pull a single ticker's OHLCV frame out of a yfinance download result."""
     try:
@@ -65,12 +81,13 @@ def fetch_batch(tickers: list[str], start: date, end: date) -> dict[str, pd.Data
     tickers = [t for t in tickers if t]
     if not tickers:
         return {}
+    yahoo = {t: to_yahoo_symbol(t) for t in tickers}   # universe symbol -> Yahoo symbol
 
     last_err = None
     for attempt in (1, 2):
         try:
             data = yf.download(
-                tickers, start=start.isoformat(), end=end.isoformat(),
+                list(yahoo.values()), start=start.isoformat(), end=end.isoformat(),
                 auto_adjust=_AUTO_ADJUST, group_by="ticker",
                 progress=False, threads=True, actions=False,
             )
@@ -78,9 +95,9 @@ def fetch_batch(tickers: list[str], start: date, end: date) -> dict[str, pd.Data
             out: dict[str, pd.DataFrame] = {}
             if data is not None and not data.empty:
                 for t in tickers:
-                    frame = _extract_ticker_frame(data, t, single)
+                    frame = _extract_ticker_frame(data, yahoo[t], single)
                     if frame is not None:
-                        out[t] = frame
+                        out[t] = frame              # stored under the UNIVERSE symbol
             return out
         except Exception as e:  # transient network/yfinance error
             last_err = e
