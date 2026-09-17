@@ -103,10 +103,18 @@ def test_add_lot_reserves_the_backfill_source():
 
 
 def test_blended_basis_uses_priced_lots_only():
-    src = UP.read_text(encoding="utf-8")
-    assert "priced = [l for l in lots if l[\"price\"] is not None]" in src, (
-        "an unpriced lot must move quantity without diluting the basis; folding it in "
-        "at zero would silently understate cost")
+    """The property, now asserted on behaviour rather than on a line of source.
+
+    The arithmetic moved to models/position_lots.py with R-IV.441(a); this test keeps its
+    meaning and loses its literal. An unpriced lot must move quantity without diluting the
+    basis — folding it in at zero would silently understate cost.
+    """
+    from models.position_lots import derive_aggregate
+    agg = derive_aggregate([{"qty": 10, "price": 5.0, "fees": 0},
+                            {"qty": 10, "price": None, "fees": 0}], "EQUITY")
+    assert agg["qty"] == 20, "the unpriced lot still moves quantity"
+    assert agg["entry_price"] == 5.0, "and does not dilute a blend it has no price for"
+    assert agg["cost_basis"] is None, "the whole-position basis is unknown while it is"
 
 
 # --- reason / actor (R-IV.116) -------------------------------------------------

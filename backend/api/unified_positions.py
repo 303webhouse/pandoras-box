@@ -20,6 +20,9 @@ from database.postgres_client import get_postgres_client
 from database.redis_client import get_redis_client
 from websocket.broadcaster import manager
 from models.position_risk import calculate_position_risk, infer_direction
+from models.position_lots import (  # R-IV.441(a): the position row is the AGGREGATE
+    derive_aggregate, integral_qty, provenance_for_lot,
+)
 
 from api._swr_cache import SWRCache
 from api._position_write_scope import (  # D1 second half: allowlist prevents
@@ -2497,11 +2500,19 @@ def _assert_etf_only(account: Optional[str], asset_type: Optional[str]) -> None:
 
 
 class AddLotRequest(BaseModel):
-    fill_date: str
-    quantity: float
+    """A fill, in the ruled vocabulary (R-IV.310(b) / migration 037).
+
+    `fill_time` and `qty` were `fill_date` and `quantity` until 2026-09-17. The old names are
+    NOT accepted as aliases: a stale caller gets a 422 naming the field it sent, which is the
+    loud failure this register keeps asking for, where an alias would quietly accept a body
+    written against a schema that no longer exists.
+    """
+    fill_time: str
+    qty: float
     price: Optional[float] = None
     fees: float = 0.0
     source: str = "MANUAL"
+    broker_ref: Optional[str] = None
     reason: Optional[str] = None
     actor: Optional[str] = None
 
@@ -2509,14 +2520,20 @@ class AddLotRequest(BaseModel):
 @router.post("/v2/positions/{position_id}/lots")
 async def add_position_lot(position_id: str, req: AddLotRequest,
                            _=Depends(require_api_key)):
-    """Add a fill to an existing position and recompute its blended basis.
+    """Add a fill to an existing position and DERIVE its figures from the lot set.
 
-    Quantity and blended basis become COMPUTED from the lot set, so the position row
-    stops being a hand-maintained aggregate. Never writes a mark or a realized field —
-    adding to a position is not a valuation event and not a close.
+    Quantity, entry price and cost basis are computed from the lots on every add, so the
+    position row stops being a hand-maintained aggregate that can drift from the fills behind
+    it. Never writes a mark or a realized field — adding to a position is not a valuation
+    event and not a close.
+
+    Three things this route now refuses to do quietly:
+      * fold fees into the per-unit price (the basis is GROSS; fees are reported beside it),
+      * drop the 100x contract multiplier on an option row,
+      * store a cost basis for a lot set that contains an unpriced lot.
     """
-    if req.quantity == 0:
-        raise HTTPException(status_code=400, detail="quantity must be non-zero")
+    if req.qty == 0:
+        raise HTTPException(status_code=400, detail="qty must be non-zero")
     if req.source not in ("MANUAL", "IMPORT"):
         raise HTTPException(status_code=400,
                             detail="source must be MANUAL or IMPORT; LEGACY-SINGLE-LOT is "
@@ -2540,55 +2557,140 @@ async def add_position_lot(position_id: str, req: AddLotRequest,
                                (req.actor or "lifecycle-ui"))
             await conn.execute(
                 "SELECT set_config('app.reason', $1, true)",
-                (req.reason or f"add lot {req.quantity} @ {req.price} on {req.fill_date}"))
+                (req.reason or f"add lot {req.qty} @ {req.price} on {req.fill_time}"))
+            # Provenance is derived from HOW THE LOT ARRIVED and is never defaulted by the
+            # database: MANUAL is PRINCIPAL_REPORTED, IMPORT is IMPORTED, an unpriced lot is
+            # UNKNOWN. BROKER_VERIFIED is unreachable from here by design — it requires a
+            # broker record to have been matched, which no path in this build performs.
             await conn.execute(
                 """INSERT INTO position_lots
-                       (position_id, fill_date, quantity, price, fees, source)
-                   VALUES ($1, $2::timestamptz, $3, $4, $5, $6)""",
-                position_id, req.fill_date, req.quantity, req.price, req.fees, req.source)
+                       (position_id, fill_time, qty, price, fees, source, provenance,
+                        broker_ref)
+                   VALUES ($1, $2::timestamptz, $3, $4, $5, $6, $7, $8)""",
+                position_id, req.fill_time, req.qty, req.price, req.fees, req.source,
+                provenance_for_lot(req.source, req.price), req.broker_ref)
 
             lots = await conn.fetch(
-                "SELECT quantity, price, fees FROM position_lots WHERE position_id = $1",
+                "SELECT qty, price, fees FROM position_lots WHERE position_id = $1",
                 position_id)
-            total_qty = sum(float(l["quantity"]) for l in lots)
-            priced = [l for l in lots if l["price"] is not None]
-            # Blended basis is cost-weighted over PRICED lots only. A lot with no price
-            # still moves quantity; folding it in at zero would silently dilute the basis.
-            if priced and total_qty:
-                cost = sum(float(l["quantity"]) * float(l["price"]) + float(l["fees"] or 0)
-                           for l in priced)
-                priced_qty = sum(float(l["quantity"]) for l in priced)
-                blended = cost / priced_qty if priced_qty else None
-            else:
-                blended = None
+            agg = derive_aggregate([dict(l) for l in lots], pos["asset_type"])
 
+            stored_qty = integral_qty(agg["qty"])
+            if stored_qty is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(f"lots sum to {agg['qty']}, which unified_positions.quantity "
+                            f"(INTEGER) cannot hold — storing it would drop the fraction and "
+                            f"lose shares from the book without an event."))
+
+            # The aggregate is WRITTEN, not merged. An add changes the quantity, so a basis
+            # kept from before the add describes a position that no longer exists. When the lot
+            # set contains an unpriced lot the basis is genuinely unknown and is stored as
+            # NULL — representable, rather than extrapolated over the priced lots at a number
+            # nothing measured.
             await conn.execute(
                 """UPDATE unified_positions
-                   SET quantity = $1, entry_price = COALESCE($2, entry_price),
-                       cost_basis = COALESCE($3, cost_basis), updated_at = NOW()
+                   SET quantity = $1, entry_price = $2, cost_basis = $3, updated_at = NOW()
                    WHERE position_id = $4""",
-                int(total_qty), blended,
-                (blended * total_qty if blended is not None else None), position_id)
+                stored_qty, agg["entry_price"], agg["cost_basis"], position_id)
 
         rows = await conn.fetch(
-            "SELECT id, fill_date, quantity, price, fees, source FROM position_lots "
-            "WHERE position_id = $1 ORDER BY fill_date, id", position_id)
+            "SELECT id, fill_time, qty, price, fees, source, provenance, broker_ref "
+            "FROM position_lots WHERE position_id = $1 ORDER BY fill_time, id", position_id)
 
     return {"status": "lot_added", "position_id": position_id,
-            "quantity": total_qty, "blended_basis": blended,
-            "unpriced_lots": len(lots) - len(priced),
+            "quantity": stored_qty, "entry_price": agg["entry_price"],
+            "cost_basis": agg["cost_basis"], "basis_known": agg["basis_known"],
+            "basis_unknown_reason": agg["unknown_reason"], "fees_total": agg["fees"],
+            "multiplier": agg["multiplier"], "unpriced_lots": agg["unpriced_lots"],
             "lots": [dict(r) for r in rows]}
+
+
+@router.get("/v2/positions/lots/coverage", dependencies=[Depends(require_api_key)])
+async def get_lots_coverage(limit: int = Query(50, ge=0, le=500)):
+    """How much of the book actually has lots behind it — the lots invariant, read live.
+
+    Two claims are checked per position: that it has at least one lot, and that its lots sum to
+    its stored quantity. Both are FALSE on part of the book today, and this surface exists so
+    that stays visible rather than being asserted away. It is not a display that has never been
+    seen to move: the counts are non-zero on the live book, and they move when a lot is added
+    or removed.
+
+    Every population is counted and named — a position with no stored quantity cannot be
+    checked against its lots and is its own line, never folded into either answer.
+    """
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT p.status,
+                      COUNT(*)                                             AS positions,
+                      COUNT(*) FILTER (WHERE a.lots > 0)                   AS with_lots,
+                      COUNT(*) FILTER (WHERE a.lots = 0)                   AS without_lots,
+                      COUNT(*) FILTER (WHERE p.quantity IS NULL)           AS unquantified,
+                      COUNT(*) FILTER (WHERE a.lots > 0 AND p.quantity IS NOT NULL
+                                         AND a.lot_qty <> p.quantity)      AS qty_mismatch,
+                      COUNT(*) FILTER (WHERE a.unpriced > 0)               AS with_unpriced_lot
+                 FROM unified_positions p
+                 JOIN LATERAL (
+                        SELECT COUNT(*) AS lots,
+                               COALESCE(SUM(l.qty), 0) AS lot_qty,
+                               COUNT(*) FILTER (WHERE l.price IS NULL) AS unpriced
+                          FROM position_lots l WHERE l.position_id = p.position_id
+                      ) a ON TRUE
+                GROUP BY p.status ORDER BY p.status""")
+        open_gaps = await conn.fetch(
+            """SELECT p.position_id, p.ticker, p.quantity,
+                      COALESCE(SUM(l.qty), 0) AS lot_qty, COUNT(l.id) AS lots
+                 FROM unified_positions p
+                 LEFT JOIN position_lots l ON l.position_id = p.position_id
+                WHERE p.status = 'OPEN'
+                GROUP BY p.position_id, p.ticker, p.quantity
+               HAVING COUNT(l.id) = 0
+                   OR (p.quantity IS NOT NULL AND COALESCE(SUM(l.qty), 0) <> p.quantity)
+                ORDER BY p.position_id LIMIT $1""", limit)
+        prov = await conn.fetch(
+            "SELECT provenance, COUNT(*) AS lots, "
+            "COUNT(*) FILTER (WHERE broker_ref IS NOT NULL) AS with_broker_ref "
+            "FROM position_lots GROUP BY provenance ORDER BY provenance")
+
+    keys = ("positions", "with_lots", "without_lots", "unquantified", "qty_mismatch",
+            "with_unpriced_lot")
+    by_status = {r["status"]: {k: r[k] for k in keys} for r in rows}
+    totals = {k: sum(v[k] for v in by_status.values()) for k in keys}
+    return {
+        "invariant": "every position has >= 1 lot and SUM(lot qty) == row qty",
+        "holds": totals["without_lots"] == 0 and totals["qty_mismatch"] == 0,
+        "totals": totals,
+        "by_status": by_status,
+        "provenance": {r["provenance"]: {"lots": r["lots"],
+                                         "with_broker_ref": r["with_broker_ref"]}
+                       for r in prov},
+        "open_gaps": [dict(r) for r in open_gaps],
+        "open_gaps_truncated": len(open_gaps) == limit,
+    }
 
 
 @router.get("/v2/positions/{position_id}/lots", dependencies=[Depends(require_api_key)])
 async def get_position_lots(position_id: str):
-    """Lot breakdown behind a position's blended basis."""
+    """Lot breakdown behind a position's basis, with each lot's provenance."""
     pool = await get_postgres_client()
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            "SELECT id, fill_date, quantity, price, fees, source, created_at "
-            "FROM position_lots WHERE position_id = $1 ORDER BY fill_date, id", position_id)
-    return {"position_id": position_id, "lots": [dict(r) for r in rows], "count": len(rows)}
+            "SELECT id, fill_time, qty, price, fees, source, provenance, broker_ref, "
+            "created_at FROM position_lots WHERE position_id = $1 ORDER BY fill_time, id",
+            position_id)
+        pos = await conn.fetchrow(
+            "SELECT asset_type, quantity FROM unified_positions WHERE position_id = $1",
+            position_id)
+    agg = derive_aggregate([dict(r) for r in rows], pos["asset_type"] if pos else None)
+    return {"position_id": position_id, "lots": [dict(r) for r in rows], "count": len(rows),
+            "derived": agg,
+            # The stored quantity beside the one the lots imply. Where they disagree the row is
+            # an aggregate that has drifted from its own fills, and saying so here is the
+            # difference between a screen that shows a number and one that shows a claim.
+            "stored_quantity": pos["quantity"] if pos else None,
+            "agrees_with_stored": (pos is not None and pos["quantity"] is not None
+                                   and float(pos["quantity"]) == agg["qty"])}
 
 
 class CashEventRequest(BaseModel):
