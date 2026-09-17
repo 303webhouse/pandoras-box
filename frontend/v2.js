@@ -65,7 +65,18 @@
     ACHILLES: { name: 'ACHILLES', desc: 'Sell the Rip' },   // Nick-approved 6th roster setup (sell_the_rip → codename Achilles)
     TRITON: { name: 'TRITON', desc: 'Whale Hunting', shadow: true },
     HERA: { name: 'HERA', desc: '3-10 Oscillator Cross', shadow: true },
+    // R-IV.421 / R-IV.427(b): RIVER ONLY. Unbacktested shadow: never a Kairos card (Kairos is
+    // for strategies with measured expectancy), never graded, never sized. Internal id
+    // circes_stew; "Turtle Soup" is lineage only. Every fire carries the standing banner.
+    CIRCES_STEW: { name: "CIRCE'S STEW", desc: 'Fade the Breakout', shadow: true, riverOnly: true,
+      banner: "CIRCE'S STEW · SHADOW — unbacktested, no expectancy measured, do not size." },
   };
+  // R-IV.421(d): above this many fires a day the trigger is too loose. The feed enforces the
+  // limit; the River shows the count against it.
+  const CIRCE_DAILY_CEILING = 10;
+  // Calendar date in New York. A date label only: the session question belongs to the one
+  // calendar server-side and is not asked here.
+  const etDate = (ms) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date(ms));
   function setupDisplay(key) {
     const k = String(key || '').toUpperCase();
     for (const id in SETUP_MAP) { if (k.indexOf(id) !== -1) return Object.assign({ roster: true }, SETUP_MAP[id]); }
@@ -1315,8 +1326,12 @@
     const scoreOf = (s) => (s.adjusted_score != null ? s.adjusted_score : s.score_v2 != null ? s.score_v2 : s.score);
 
     // Roster gate: only display-map classes render as CARDS; everything else → River rows.
-    const roster = [], nonRoster = [];
-    signals.forEach((s) => (setupDisplay(s.codename || s.signal_type || s.strategy).roster ? roster : nonRoster).push(s));
+    // River-only shadow classes (R-IV.427(b)) take neither path: no card, no raw-name row.
+    const roster = [], nonRoster = [], riverOnly = [];
+    signals.forEach((s) => {
+      const d = setupDisplay(s.codename || s.signal_type || s.strategy);
+      (d.riverOnly ? riverOnly : d.roster ? roster : nonRoster).push(s);
+    });
     roster.sort((a, b) => (scoreOf(b) || 0) - (scoreOf(a) || 0));
 
     // L-evidence for the roster cards we might show (top ~6).
@@ -1350,6 +1365,7 @@
     // River: roster cards as signal items + every non-roster class as a plain row under its raw name.
     addRiverItems(visible.map((s) => signalRiverItem(s, smap)));
     addRiverItems(nonRoster.map((s) => nonRosterRiverItem(s)));
+    addRiverItems(riverOnly.map((s) => signalRiverItem(s, smap)));
     renderRiver();
 
     function card(s, smap) {
@@ -1393,10 +1409,14 @@
     const grade = s._grade;  // grade v1 (attached in loadKairos) — never the legacy score
     return {
       id: 'sig:' + (s.signal_id || s.ticker + s.timestamp), type: 'signal',
-      tier: shadow ? 'shadow' : (grade === 'A' || grade === 'B' ? 'action' : 'info'),
+      // A bannered shadow keeps full opacity: the .shadow tier's 0.5 opacity would drop the
+      // amber banner to 3.08:1 on --panel, and a warning nobody can read is not a warning.
+      tier: disp.banner ? 'shadow-banner' : shadow ? 'shadow' : (grade === 'A' || grade === 'B' ? 'action' : 'info'),
       sev: side === 'LONG' ? 'up' : side === 'SHORT' ? 'down' : 'teal',
       ts: s.timestamp ? Date.parse(s.timestamp) : (s.created_at ? Date.parse(s.created_at) : Date.now()),
-      text: `<b>${esc(disp.name)}</b> ${esc(s.ticker)} ${side}${s.entry_price != null ? ' @ ' + Number(s.entry_price).toFixed(2) : ''}${grade ? ' · grade ' + grade : ''}`,
+      riverOnly: !!disp.riverOnly,
+      text: `<b>${esc(disp.name)}</b> ${esc(s.ticker)} ${side}${s.entry_price != null ? ' @ ' + Number(s.entry_price).toFixed(2) : ''}${grade ? ' · grade ' + grade : ''}`
+        + (disp.banner ? `<div class="rv-banner">${esc(disp.banner)}</div>` : ''),
     };
   }
   // Non-roster classes never render as Kairos cards — they surface here under their raw name.
@@ -1481,8 +1501,17 @@
     const types = ['all', 'signal', 'flow', 'catalyst', 'regime', 'headline'];
     $('riverPills').innerHTML = types.map((t) => `<button type="button" data-rt="${t}" class="${_riverFilter === t ? 'on' : ''}">${t}</button>`).join('');
     $('riverPills').querySelectorAll('button[data-rt]').forEach((b) => b.addEventListener('click', () => { _riverFilter = b.dataset.rt; renderRiver(); }));
-    if (!items.length) { el.innerHTML = '<div class="rv-item info"><span class="rv-txt val-muted">stream quiet</span></div>'; return; }
-    el.innerHTML = items.map((it) => {
+    // R-IV.427(b): the daily count is the rate-limit surface. It counts fires THIS PAGE has
+    // seen today (New York date): the ACTIVE feed it reads drops expired ideas, so this is a
+    // floor on the day's fires, and the label says so.
+    const today = etDate(Date.now());
+    const circeToday = [..._river.values()].filter((i) => i.riverOnly && i.ts && etDate(i.ts) === today).length;
+    const countRow = circeToday && (_riverFilter === 'all' || _riverFilter === 'signal')
+      ? `<div class="rv-count${circeToday > CIRCE_DAILY_CEILING ? ' over' : ''}">CIRCE'S STEW · SHADOW · ${circeToday} seen today (ET)`
+        + (circeToday > CIRCE_DAILY_CEILING ? ` — above the ~${CIRCE_DAILY_CEILING}/day ceiling: the trigger is too loose (R-IV.421(d))` : '') + '</div>'
+      : '';
+    if (!items.length) { el.innerHTML = countRow + '<div class="rv-item info"><span class="rv-txt val-muted">stream quiet</span></div>'; return; }
+    el.innerHTML = countRow + items.map((it) => {
       const t = new Date(it.ts || Date.now());
       const hh = isNaN(t) ? '' : t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       const acked = _rvAcked.has(it.id);
