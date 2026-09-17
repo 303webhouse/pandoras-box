@@ -32,7 +32,13 @@ VIX_REGIME_HIGH_THRESHOLD = 30.0
 # alongside v1 for 60 days, then promote to default or revert.
 # Per empirical finding: VIX ≥ 30 has become a crisis-regime marker in
 # post-2023 structural vol regime. Percentile-based gate corrects the drift.
-VIX_REGIME_USE_PERCENTILE       = True      # master feature flag
+# R-IV.423(b): v2 is COMPUTED and PERSISTED as shadow evidence and never decides -- v1 stays
+# authoritative (see "Effective suppression" below). The old name, VIX_REGIME_USE_PERCENTILE,
+# read as if v2 were in use.
+VIX_REGIME_V2_SHADOW            = True
+# Stored on every v2 record. r1 = the R-IV.423 / R-IV.425(c) repair: newest trading days,
+# market-calendar dates, and a typed fallback (insufficient_history vs error).
+VIX_REGIME_V2_GATE_VERSION      = "v2-pass9-r1"
 VIX_REGIME_PERCENTILE_LOW        = 5.0       # 5th percentile of lookback
 VIX_REGIME_PERCENTILE_HIGH       = 90.0      # 90th percentile of lookback
 VIX_REGIME_PERCENTILE_LOOKBACK   = 252       # trading days
@@ -613,11 +619,20 @@ async def apply_scoring(signal_data: Dict[str, Any]) -> Dict[str, Any]:
                             v2_threshold_used = None
                             v2_meta: dict = {}
 
-                            if VIX_REGIME_USE_PERCENTILE:
+                            if VIX_REGIME_V2_SHADOW:
                                 pct = await _compute_vix_percentiles(VIX_REGIME_PERCENTILE_LOOKBACK)
-                                if pct:
+                                v2_meta = {
+                                    "gate_version": VIX_REGIME_V2_GATE_VERSION,
+                                    "mode": pct.get("mode"),
+                                    "n_days": pct.get("n_days"),
+                                    "window_start": pct.get("window_start"),
+                                    "window_end": pct.get("window_end"),
+                                }
+                                if pct.get("error"):
+                                    v2_meta["error"] = pct["error"]
+                                if pct.get("mode") == "percentile":
                                     low, high = pct["p5_value"], pct["p90_value"]
-                                    v2_meta = {"p5": low, "p90": high, "n_days": pct["n_days"], "mode": "percentile"}
+                                    v2_meta.update({"p5": low, "p90": high})
                                     v2_threshold_used = f"p5={low:.2f}/p90={high:.2f}"
                                     v2_suppressed = (
                                         vix_value < low
@@ -626,14 +641,19 @@ async def apply_scoring(signal_data: Dict[str, Any]) -> Dict[str, Any]:
                                         or vix_value > VIX_REGIME_ABS_CEILING
                                     )
                                 else:
+                                    # insufficient_history OR error: the SAME fallback thresholds,
+                                    # but the mode says which -- R-IV.425(c). A failed query used
+                                    # to be recorded as "warmup_fallback", indistinguishable from
+                                    # genuinely short history.
                                     low, high = VIX_REGIME_WARMUP_FALLBACK_LOW, VIX_REGIME_WARMUP_FALLBACK_HIGH
-                                    v2_meta = {"mode": "warmup_fallback", "low": low, "high": high}
-                                    v2_threshold_used = f"warmup={low}/{high}"
+                                    v2_meta.update({"low": low, "high": high})
+                                    v2_threshold_used = f"{pct.get('mode')}={low}/{high}"
                                     v2_suppressed = vix_value < low or vix_value > high
 
                             # ── Dual-logging ──────────────────────────────────────────────
                             diverged = v1_suppressed != v2_suppressed
                             signal_data.setdefault("committee_data", {})["iv_regime_legacy"] = {
+                                "gate_version": "v1",
                                 "decision": "suppress" if v1_suppressed else "allow",
                                 "threshold_used": v1_threshold_used,
                                 "vix_value": vix_value,
@@ -681,7 +701,17 @@ async def apply_scoring(signal_data: Dict[str, Any]) -> Dict[str, Any]:
                                         vix_value, strategy,
                                     )
         except Exception as iv_err:
-            logger.debug("iv_regime gate check skipped: %s", iv_err)
+            # Law 3: this was a DEBUG line, so a broken gate left no evidence and no trace.
+            # The failure is recorded on the row it was evaluating -- unless a complete v2
+            # record already exists, which a later step's error must not overwrite.
+            logger.warning("iv_regime gate check failed: %s", iv_err)
+            _cd = signal_data.setdefault("committee_data", {})
+            if "iv_regime_v2" not in _cd:
+                _cd["iv_regime_v2"] = {
+                    "gate_version": VIX_REGIME_V2_GATE_VERSION,
+                    "mode": "gate_error",
+                    "error": f"{type(iv_err).__name__}: {iv_err}"[:300],
+                }
 
         # Update signal
         signal_data["score"] = score
@@ -808,44 +838,79 @@ async def _send_feed_tier_divergence_alert(
         logger.debug("Feed-tier divergence alert send failed: %s", _ae)
 
 
-async def _compute_vix_percentiles(lookback_days: int = 252) -> Optional[dict]:
-    """
-    Compute VIX percentiles from factor_readings over lookback window.
-    Returns {'p5_value', 'p90_value', 'n_days'} or None if insufficient data.
+async def _compute_vix_percentiles(lookback_days: int = 252) -> dict:
+    """VIX percentiles over the MOST RECENT `lookback_days` TRADING days.
 
-    Backfill rows (source='fred_backfill') and live rows (source='yfinance') are
-    both included — the gate only cares about the raw vix value in metadata.
+    Always returns a dict with a `mode` -- never None:
+      percentile            -> p5_value, p90_value, n_days, window_start, window_end
+      insufficient_history  -> n_days found, window_start, window_end, needed
+      error                 -> error (type and message)
+
+    R-IV.425(c), the two defects this replaces:
+      * `DISTINCT ON (DATE(timestamp)) ... ORDER BY DATE(timestamp)` forces ascending order,
+        so `LIMIT 252` kept the OLDEST dates in the span -- on 2026-09-16 a window ending
+        2026-07-04 -- and DATE() used the session's (UTC) calendar with weekends counted.
+        Now: the latest reading per ET date, dates DESCENDING, filtered to trading days by
+        the one market calendar, then the first N kept.
+      * any error returned None, which the caller recorded as warm-up. Now an error is its
+        own mode, with its reason, on the persisted evidence.
+
+    Backfill rows (source='fred_backfill') and live rows (source='yfinance') are both
+    included -- the gate only cares about the raw vix value in metadata.
     """
     try:
         import numpy as np
         from database.postgres_client import get_postgres_client
+        from stable_engine.market_calendar import is_trading_day_or_none
         pool = await get_postgres_client()
         async with pool.acquire() as conn:
             rows = await conn.fetch(
                 """
-                SELECT DISTINCT ON (DATE(timestamp))
-                    (metadata->'raw_data'->>'vix')::FLOAT AS vix
-                FROM factor_readings
-                WHERE factor_id = 'iv_regime'
-                  AND metadata->'raw_data'->>'vix' IS NOT NULL
-                  AND timestamp > NOW() - (INTERVAL '1 day' * $1)
-                ORDER BY DATE(timestamp), timestamp DESC
-                LIMIT $2
+                SELECT DISTINCT ON (d) d, vix
+                FROM (
+                    SELECT (timestamp AT TIME ZONE 'America/New_York')::date AS d,
+                           timestamp AS ts,
+                           (metadata->'raw_data'->>'vix')::FLOAT AS vix
+                    FROM factor_readings
+                    WHERE factor_id = 'iv_regime'
+                      AND metadata->'raw_data'->>'vix' IS NOT NULL
+                      AND timestamp > NOW() - (INTERVAL '1 day' * $1)
+                ) r
+                ORDER BY d DESC, ts DESC
                 """,
-                int(lookback_days * 1.5),
-                lookback_days,
+                # a calendar span wide enough to hold N trading days plus holidays
+                int(lookback_days * 1.6),
             )
-        if len(rows) < lookback_days:
-            return None  # warmup — caller falls back to absolute thresholds
-        vix_values = [r["vix"] for r in rows]
+        kept = []
+        calendar_unknown = 0                 # dates the calendar could not answer for
+        for r in rows:                       # newest first
+            d = r["d"]
+            open_ = is_trading_day_or_none(d)
+            if open_ is None:                # outside the calendar's coverage: a STATED
+                calendar_unknown += 1        # weekday fallback, counted on the record
+                open_ = d.weekday() < 5
+            if open_ and r["vix"] is not None:
+                kept.append((d, float(r["vix"])))
+            if len(kept) >= lookback_days:
+                break
+        window = {
+            "n_days": len(kept),
+            "calendar_unknown": calendar_unknown,
+            "window_start": kept[-1][0].isoformat() if kept else None,
+            "window_end": kept[0][0].isoformat() if kept else None,
+        }
+        if len(kept) < lookback_days:
+            return {"mode": "insufficient_history", "needed": lookback_days, **window}
+        vix_values = [v for _, v in kept]
         return {
+            "mode": "percentile",
             "p5_value":  float(np.percentile(vix_values, VIX_REGIME_PERCENTILE_LOW)),
             "p90_value": float(np.percentile(vix_values, VIX_REGIME_PERCENTILE_HIGH)),
-            "n_days":    len(vix_values),
+            **window,
         }
     except Exception as exc:
         logger.warning("VIX percentile computation failed: %s", exc)
-        return None
+        return {"mode": "error", "error": f"{type(exc).__name__}: {exc}"[:300]}
 
 
 async def _check_and_clear_conflicting_signals(signal_data: Dict[str, Any]) -> bool:
