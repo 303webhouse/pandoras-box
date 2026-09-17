@@ -1,6 +1,7 @@
 # VERIFICATION-LAWS ADDENDUM 3 — laws found by running the instruments
 
-**FROM:** CC-BUILD. **Commissioned:** R-IV.359(b) (Law 2), R-IV.343(a) (Law 1), R-IV.403(a) (Law 3).
+**FROM:** CC-BUILD. **Commissioned:** R-IV.359(b) (Law 2), R-IV.343(a) (Law 1), R-IV.403(a) (Law 3);
+calibration clause R-IV.354(a), filed R-IV.425(d).
 **Target:** `docs/conventions/verification-laws.md` (ratified R-IV.166).
 **All three laws below were produced by a verification failing in production, not by review.**
 
@@ -288,3 +289,58 @@ the replacement would have failed, **with no way back and the window hours away.
 **A working instrument is an asset. Reaching for it is a two-step operation whose first step
 costs a single command.**
 
+---
+
+## THE CALIBRATION CLAUSE — A CALIBRATED FIGURE CARRIES ITS ORIGIN
+
+**Ordered R-IV.354(a); it never landed; filed R-IV.425(d).**
+
+> **DRAFTING NOTE, stated so it is not mistaken for the ruling's text:** R-IV.354(a) itself
+> did not reach this lane and is not filed in either tree or the ferry. This clause is written
+> from R-IV.425's statement of the defect it exists to prevent, and from the two live cases
+> below. **Spine corrects the wording if it departs from what R-IV.354(a) said.**
+
+### The clause
+
+> **Every calibrated figure — a threshold, a percentile, a correlation, an expectancy, a
+> hit rate — is cited WITH ITS ORIGIN or it is not cited.**
+
+**The origin is four things, all of which must be recoverable later:**
+
+1. **The population** — the exact row set (ids, or a hash of the ids), not a description of it.
+   *"The 04-22 cohort"* is a description; a description can silently re-select.
+2. **The measure** — the code, at a commit, with its parameters.
+3. **The input vintage** — when each series was read. **An adjusted price series is not the same
+   input on two different days** (see `DEF-ADJUSTED-BARS-VS-RAW-ENTRY`).
+4. **The window** — the actual first and last date used, as dates, not as "252 days".
+
+**The test that makes this more than bookkeeping: re-running with the same origin must reproduce
+the figure.** A figure that cannot be re-run from its origin is a claim about a moment, and is
+cited as one or not at all.
+
+### Why this is a verification law and not a documentation rule
+
+**A calibration is an instrument whose output becomes someone else's input.** A threshold feeds a
+gate; a percentile feeds a suppression; a correlation feeds a promotion decision. **If its origin
+is lost, a later disagreement cannot be located**, and the register is left choosing between two
+numbers with no way to say which is wrong. That is Law 2 in time rather than in space: two
+readings that share a name are not confirmations of each other unless they share an origin.
+
+### The two cases that forced it
+
+**1. The 3-10 calibration (R-IV.425(b), `DEF-3-10-CALIBRATION-NONREPRODUCING`).** On a population
+described as fixed, **+0.946 once and −0.326 on re-run.** Without the first run's row set and
+commit, the register cannot tell whether the population moved or the measure did — and until it
+can, no figure from that era is cited.
+
+**2. The PASS 9 VIX percentile (R-IV.425(c)).** The shadow gate's thresholds were described as
+*"the 5th and 90th percentile of the last 252 trading days."* **Read in the code, they were the
+5th and 90th percentile of the OLDEST 252 calendar dates with a reading in a 378-day span** —
+`DISTINCT ON (DATE(timestamp))` forces an ascending order, so `LIMIT 252` keeps the start of the
+span; weekends count; and the date is the database session's (UTC by default), not the market's.
+The Pass 9 reconstruction (R-IV.425(c)) puts today's window end at 2026-07-04. **The description and
+the origin disagreed for the whole life of the gate, and the promotion review was built on the
+description.** Recording the actual first and last date (item 4) would have shown it on day one.
+
+**Instance count: 2.** Both found by re-running or re-reading, not by the figure itself — which is
+the point: **a calibrated figure never announces that its origin has drifted.**
