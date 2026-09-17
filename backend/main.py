@@ -1867,6 +1867,8 @@ from api.layout import router as layout_router
 app.include_router(layout_router, prefix="/api", tags=["layout"])
 from api.board_state import router as board_router
 app.include_router(board_router, prefix="/api", tags=["board"])
+from api.abacus import router as abacus_router  # R-IV.429 — /api/abacus/summary (stub)
+app.include_router(abacus_router, prefix="/api", tags=["abacus"])
 
 # ─── MCP server (v1) ────────────────────────────────────────────────────
 # Mounted as an isolated ASGI sub-app at /mcp/v1. CORS / bearer auth /
@@ -2192,6 +2194,22 @@ if frontend_path:
     @app.get("/stater.js", response_class=FileResponse)
     async def serve_stater_js():
         return FileResponse(os.path.join(frontend_path, "stater.js"))
+
+    # ── Abacus v2 (R-IV.429). Declared BEFORE the /app/{mode} catch-all, like /app/stater.
+    # Served at /app/abacus while its data is mock. /app/analytics stays the legacy page
+    # until the replacement is live; the tab is repointed then (R-IV.413(a)).
+    @app.get("/app/abacus", response_class=FileResponse)
+    async def serve_abacus():
+        """Serve the Abacus v2 page (mock-bannered until its sources land)."""
+        return FileResponse(os.path.join(frontend_path, "abacus.html"))
+
+    @app.get("/abacus.css", response_class=FileResponse)
+    async def serve_abacus_css():
+        return FileResponse(os.path.join(frontend_path, "abacus.css"))
+
+    @app.get("/abacus.js", response_class=FileResponse)
+    async def serve_abacus_js():
+        return FileResponse(os.path.join(frontend_path, "abacus.js"))
 
     @app.get("/app/{mode}", response_class=FileResponse)
     async def serve_frontend_mode(mode: str):
