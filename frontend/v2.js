@@ -1024,8 +1024,19 @@
     // the honest age; the bound the book should be judged by is not yet ruled.
     _health.book = bookOk ? 'ok' : 'unconfirmed'; updateGlobalHealth();
 
-    const total = accts.reduce((s, a) => s + (Number(a.balance) || 0), 0);
+    // R-IV.440(a) — the BALANCE is the tradeable book. Scope comes from the payload
+    // (`in_scope`, set from config.accounts, the same vocabulary the MCP tool uses); this
+    // file never keeps its own list of account names. If no row carries the field the
+    // backend is older than this page: sum everything and SAY the scope is unknown rather
+    // than publishing a total whose membership we cannot state.
+    const scoped = accts.filter((a) => a.in_scope === true);
+    const excluded = accts.filter((a) => a.in_scope === false);
+    const scopeKnown = accts.some((a) => typeof a.in_scope === 'boolean');
+    const counted = scopeKnown ? scoped : accts;
+    const total = counted.reduce((s, a) => s + (Number(a.balance) || 0), 0);
     const day = pnl && pnl.daily ? pnl.daily : {};
+
+
     // ── DEF-GREEKS-ZERO ────────────────────────────────────────────────────────
     // A sum built from some of the legs is a FLOOR, not a total. Unavailable
     // greeks render N/A, never 0 and never a bare "--" that reads as flat —
@@ -1034,6 +1045,33 @@
     const gCov = (greeks && greeks.coverage) || null;
     const gPer = (gCov && gCov.per_greek) || {};
     const gUnreachable = !greeks;
+    // ── (b) Day P&L never renders a number when nothing is priced ────────────────
+    // A zero on the most-read figure in the app is the fake-fresh rule broken: it is
+    // indistinguishable from a real flat day. When no leg is priced there is no
+    // measurement, so the line says UNAVAILABLE and names the reason the source gave.
+    const covLegs = gCov ? (gCov.legs_expected || 0) : 0;
+    const covPriced = gCov ? (gCov.legs_priced || 0) : 0;
+    const gStatus = greeks && greeks.status ? String(greeks.status) : null;
+    const MARK_REASON = {
+      no_api_key: 'marks unavailable — no vendor key',
+      unavailable: 'marks unavailable — vendor unavailable',
+      db_error: 'marks unavailable — database error',
+      computation_error: 'marks unavailable — computation error',
+    };
+    let dayUnavailable = null;
+    if (!pnl) dayUnavailable = 'source unreachable';
+    else if (day.dollar == null) dayUnavailable = 'not reported';
+    else if (gUnreachable) dayUnavailable = 'marks unavailable — greeks source unreachable';
+    else if (gStatus && MARK_REASON[gStatus]) dayUnavailable = MARK_REASON[gStatus];
+    else if (covLegs > 0 && covPriced === 0) dayUnavailable = 'no marks — 0 of ' + covLegs + ' legs priced';
+    // The vintage of the Day P&L is not recorded anywhere (R-IV.420(d)); say so rather than
+    // let an unlabelled figure read as current.
+    const dayChip = '<span class="vintage-chip" data-state="unknown" title="'
+      + esc(dayUnavailable || 'no field records when this was computed')
+      + '">vintage not recorded</span>';
+    const dayCell = dayUnavailable
+      ? `<span class="v val-amber">UNAVAILABLE <span class="book-reason">${esc(dayUnavailable)}</span> ${dayChip}</span>`
+      : `<span class="v ${signCls(day.dollar)}">${(day.dollar >= 0 ? '+' : '') + fmt$(day.dollar)}${day.pct != null ? ` <span style="font-size:10px">(${day.pct >= 0 ? '+' : ''}${Number(day.pct).toFixed(2)}%)</span>` : ''} ${dayChip}</span>`;
     const greekCell = (sym, name, decimals) => {
         const v = gTotals[name];
         if (gUnreachable || v == null) {
@@ -1060,8 +1098,9 @@
     const conc = computeConcentration(positions);
 
     el.innerHTML = `
-      <div class="book-line"><span class="k">Balance</span><span class="v">${accts.length ? fmt$(total) : '--'}</span></div>
-      <div class="book-line"><span class="k">Day P&amp;L</span><span class="v ${signCls(day.dollar)}">${day.dollar != null ? (day.dollar >= 0 ? '+' : '') + fmt$(day.dollar) : '--'}${day.pct != null ? ` <span style="font-size:10px">(${day.pct >= 0 ? '+' : ''}${Number(day.pct).toFixed(2)}%)</span>` : ''}</span></div>
+      <div class="book-line"><span class="k">Balance</span><span class="v">${counted.length ? fmt$(total) : '--'}${scopeKnown ? '' : ' <span class="vintage-chip" data-state="unknown" title="this backend does not report account scope; the total is every row">scope unknown</span>'}</span></div>
+      ${scopeKnown && excluded.length ? `<div class="book-note">excludes ${excluded.length} out-of-scope account${excluded.length > 1 ? 's' : ''}: ${excluded.map((a) => esc(a.account_name || '?')).join(', ')}</div>` : ''}
+      <div class="book-line"><span class="k">Day P&amp;L</span>${dayCell}</div>
       <div class="book-greeks">
         ${greekCell('Δ', 'delta', 0)}
         ${greekCell('Γ', 'gamma', 1)}
@@ -1070,7 +1109,11 @@
       </div>
       ${greekNote}
       ${conc ? `<div class="conc-lamp ${conc.hot ? 'hot' : 'ok'}" data-gloss="CONC"><span>Concentration · ${esc(conc.theme)}</span><span>${conc.pct}%</span></div>` : ''}
-      <div class="acct-chips">${accts.map((a) => `<span class="acct-chip">${esc((a.broker || a.account_name || '').slice(0, 4).toUpperCase())} ${fmt$(a.balance)}</span>`).join('')}</div>`;
+      <div class="acct-chips">${accts.map((a) => {
+          const out = a.in_scope === false;
+          const tag = esc((a.broker || a.account_name || '').slice(0, 4).toUpperCase());
+          return `<span class="acct-chip${out ? ' out-of-scope' : ''}"${out ? ' title="out of scope — parked money, not in the Balance"' : ''}>${tag} ${fmt$(a.balance)}${out ? ' · out of scope' : ''}</span>`;
+        }).join('')}</div>`;
     applyGlossary(el);
     _openPositions = (positions && positions.positions) || [];
     renderPositions();
@@ -1094,19 +1137,61 @@
     if (!cb || p.unrealized_pnl == null) return null;
     return (Number(p.unrealized_pnl) / cb) * 100;
   }
+  // R-IV.440(c) — a defined-risk debit structure cannot lose more than it cost, so a return
+  // below -100% is arithmetic about a basis that is wrong (DEF-COST-BASIS-NOT-RESCALED), not
+  // a loss. The figure is struck through and flagged; a plausible-looking wrong number is
+  // worse than a visibly broken one. The upper bound is only checked where a max is known:
+  // a long call's gain is unbounded, so there is nothing to check it against.
+  const DEF_BASIS_URL = 'https://github.com/303webhouse/pandoras-box/blob/main/docs/defects/DEF-COST-BASIS-NOT-RESCALED.md';
+  function basisSuspect(p, pct) {
+    if (pct == null) return null;
+    const debit = Number(p.cost_basis) > 0;
+    if (debit && pct < -100) return 'below -100% on a defined-risk debit structure';
+    const maxGain = p.max_gain != null ? Number(p.max_gain) : null;
+    const cb = Math.abs(Number(p.cost_basis) || 0);
+    if (maxGain != null && cb > 0 && pct > (maxGain / cb) * 100 + 0.5) return 'above the structure\u2019s maximum gain';
+    return null;
+  }
+  const basisChip = (why) => `<a class="basis-chip" href="${DEF_BASIS_URL}" target="_blank" rel="noopener"`
+    + ` title="${esc(why)} — the cost basis is under review (DEF-COST-BASIS-NOT-RESCALED)">BASIS UNDER REVIEW</a>`;
+
+  // R-IV.440(d) — INTERIM, until the legs model lands. The screen shows the same structure
+  // twice today; grouping by (ticker, expiry, structure) at least says so out loud. It does
+  // NOT decide whether those rows are one position or several — that is the legs model's
+  // answer, and the count is the honest way to show the question.
+  function groupPositions(list) {
+    const groups = new Map();
+    (list || []).forEach((p, i) => {
+      const key = [(p.ticker || '').toUpperCase(), p.expiry || '-', p.structure || '-'].join('|');
+      if (!groups.has(key)) groups.set(key, { key, rows: [], idx: i });
+      groups.get(key).rows.push(p);
+    });
+    return [...groups.values()].map((g) => {
+      const rows = g.rows;
+      const pnls = rows.map((r) => (r.unrealized_pnl == null ? null : Number(r.unrealized_pnl)));
+      const anyPnl = pnls.some((v) => v != null);
+      const pnl = anyPnl ? pnls.reduce((a, v) => a + (v || 0), 0) : null;
+      const cb = rows.reduce((a, r) => a + Math.abs(Number(r.cost_basis) || 0), 0);
+      const pct = anyPnl && cb ? (pnl / cb) * 100 : null;
+      return { head: rows[0], rows, idx: g.idx, count: rows.length, pnl, pct,
+               suspect: rows.map((r) => basisSuspect(r, pnlPct(r))).find(Boolean) || null };
+    });
+  }
   function renderPositions() {
     const el = $('bookPositions'); if (!el) return;
     const list = _openPositions;
     if (!list.length) { el.innerHTML = '<div class="pos-empty">no open positions</div>'; return; }
-    el.innerHTML = list.map((p, i) => {
-      const pnl = p.unrealized_pnl != null ? Number(p.unrealized_pnl) : null;
-      const pct = pnlPct(p);
+    el.innerHTML = groupPositions(list).map((g) => {
+      const p = g.head;
+      const pnl = g.pnl;
+      const pct = g.pct;
       const dteCls = p.dte != null && p.dte <= 7 ? 'urgent' : p.dte != null && p.dte <= 14 ? 'soon' : '';
       const dteStr = p.dte != null ? p.dte + ' DTE' : (p.asset_type === 'EQUITY' ? 'equity' : '');
-      return `<div class="pos-row" data-pi="${i}">
-        <span class="ptk">${esc(p.ticker)}</span>
+      const pctTxt = pct != null ? (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%' : '';
+      return `<div class="pos-row" data-pi="${g.idx}">
+        <span class="ptk">${esc(p.ticker)}${g.count > 1 ? `<span class="dup-count" title="${g.count} rows share this ticker, expiry and structure — the legs model decides whether that is one position or several">×${g.count}</span>` : ''}</span>
         <span class="pmid"><span class="pstruct">${esc(structureStr(p))}</span><span class="pdte ${dteCls}">${dteStr}</span></span>
-        <span class="ppnl ${signCls(pnl)}"><span class="amt">${pnl != null ? (pnl >= 0 ? '+' : '-') + '$' + Math.abs(pnl).toFixed(0) : '--'}</span><span class="pct">${pct != null ? (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%' : ''}</span></span>
+        <span class="ppnl ${g.suspect ? '' : signCls(pnl)}"><span class="amt">${pnl != null ? (pnl >= 0 ? '+' : '-') + '$' + Math.abs(pnl).toFixed(0) : '--'}</span>${g.suspect ? `<span class="pct struck">${esc(pctTxt)}</span>${basisChip(g.suspect)}` : `<span class="pct">${pctTxt}</span>`}</span>
       </div>`;
     }).join('');
     el.querySelectorAll('.pos-row[data-pi]').forEach((r) => r.addEventListener('click', () => openPositionDrawer(_openPositions[+r.dataset.pi])));
@@ -1118,6 +1203,7 @@
     title.textContent = p.ticker + ' · position';
     const kv = (k, v) => `<div class="kv"><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`;
     const pnl = p.unrealized_pnl != null ? Number(p.unrealized_pnl) : null; const pct = pnlPct(p);
+    const suspect = basisSuspect(p, pct);
     const tm = _themeMap[(p.ticker || '').toUpperCase()];
     body.innerHTML =
       kv('Structure', structureStr(p) + (p.structure ? '  (' + String(p.structure).replace(/_/g, ' ') + ')' : '')) +
@@ -1127,7 +1213,7 @@
       kv('Qty', p.quantity != null ? p.quantity : '—') + kv('DTE', p.dte != null ? p.dte : '—') +
       kv('Cost basis', p.cost_basis != null ? '$' + Number(p.cost_basis).toFixed(2) : '—') +
       kv('Max loss', p.max_loss != null ? '$' + Number(p.max_loss).toFixed(2) : '—') +
-      `<div class="kv"><span class="k">Unrealized P&amp;L</span><span class="v ${signCls(pnl)}">${pnl != null ? (pnl >= 0 ? '+' : '-') + '$' + Math.abs(pnl).toFixed(2) : '—'}${pct != null ? ' (' + (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%)' : ''}</span></div>` +
+      `<div class="kv"><span class="k">Unrealized P&amp;L</span><span class="v ${suspect ? '' : signCls(pnl)}">${pnl != null ? (pnl >= 0 ? '+' : '-') + '$' + Math.abs(pnl).toFixed(2) : '—'}${pct != null ? (suspect ? ' <span class="struck">(' + (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%)</span> ' + basisChip(suspect) : ' (' + (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%)') : ''}</span></div>` +
       kv('Bucket', p.bucket || '—') + kv('Theme', tm && tm.theme ? (tm.theme + (tm.inverse ? ' (inverse)' : '')) : '—') +
       '<div id="posEarn" class="kv"><span class="k">Earnings</span><span class="v">…</span></div>' +
       `<div class="drawer-actions">
