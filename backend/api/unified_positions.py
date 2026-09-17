@@ -23,6 +23,9 @@ from models.position_risk import calculate_position_risk, infer_direction
 from models.position_lots import (  # R-IV.441(a): the position row is the AGGREGATE
     derive_aggregate, fifo_plan, integral_qty, provenance_for_lot,
 )
+from models.accounts import (  # R-IV.445(a): one vocabulary, read by every write path
+    CANONICAL_ACCOUNTS, canonical_account,
+)
 
 from api._swr_cache import SWRCache
 from api._position_write_scope import (  # D1 second half: allowlist prevents
@@ -411,7 +414,11 @@ async def create_position(req: CreatePositionRequest, _=Depends(require_api_key)
     )
 
     # --- Check for existing open position to combine with ---
-    account = (req.account or "ROBINHOOD").upper()
+    # R-IV.445(a): the account comes from the canonical vocabulary, not from whatever arrived.
+    # `.upper()` alone accepted any string spelled in capitals, which is how rows kept being
+    # written under a retired alias eleven days after the remap — the path minted them. An
+    # alias normalises; anything else is refused with the vocabulary and the value.
+    account = canonical_account(req.account or "ROBINHOOD")
 
     # R-IV.75(d) ETF-only invariant, enforced AT ENTRY. Refusing here is the whole
     # point: an OPTION row on the Roth is prima facie mis-attributed, and a row admitted
@@ -2822,6 +2829,222 @@ async def reduce_position(position_id: str, req: ReducePositionRequest,
             "basis_known": agg["basis_known"], **plan}
 
 
+class LegRequest(BaseModel):
+    """One leg of a structure, entered or corrected by hand (R-IV.445(c))."""
+    option_type: str                      # CALL | PUT
+    side: str                             # LONG | SHORT
+    strike: float
+    expiry: str
+    qty: float
+    price: Optional[float] = None
+    broker_ref: Optional[str] = None
+    reason: Optional[str] = None
+    actor: Optional[str] = None
+
+
+class LegPatchRequest(BaseModel):
+    """A correction to one leg. Every field optional; at least one required."""
+    option_type: Optional[str] = None
+    side: Optional[str] = None
+    strike: Optional[float] = None
+    expiry: Optional[str] = None
+    qty: Optional[float] = None
+    price: Optional[float] = None
+    broker_ref: Optional[str] = None
+    reason: Optional[str] = None
+    actor: Optional[str] = None
+
+
+_LEG_FIELDS = ("option_type", "side", "strike", "expiry", "qty", "price", "broker_ref")
+
+
+def _leg_values(option_type: str, side: str) -> tuple:
+    ot, sd = (option_type or "").strip().upper(), (side or "").strip().upper()
+    if ot not in ("CALL", "PUT"):
+        raise HTTPException(status_code=400, detail="option_type must be CALL or PUT")
+    if sd not in ("LONG", "SHORT"):
+        raise HTTPException(status_code=400,
+                            detail="side must be LONG or SHORT — a leg is bought or sold, and "
+                                   "the sign of a quantity is not a substitute for saying which")
+    return ot, sd
+
+
+async def _audit_leg(conn, position_id: str, ticker: str, operation: str, field: str,
+                     before, after, actor: Optional[str], reason: Optional[str]) -> None:
+    """One timeline per position (Phase-1 D2) — leg writes append to it, not to a new table."""
+    await conn.execute(
+        """INSERT INTO position_sync_audit
+               (operation, position_id, ticker, field, before_state, after_state, actor, reason,
+                executed_at)
+           VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8, NOW())""",
+        operation, position_id, ticker, field,
+        dumps_jsonb(before) if before is not None else None,
+        dumps_jsonb(after) if after is not None else None,
+        actor or "lifecycle-ui", reason)
+
+
+async def _settle_pending_capability(conn, position_id: str) -> None:
+    """A position waiting on hand-entry stops waiting once its legs exist.
+
+    The row was never a failed migration — the shape was beyond what two strike columns could
+    hold. When the legs are entered the record says so rather than staying filed under a
+    capability that has since arrived.
+    """
+    await conn.execute(
+        """UPDATE position_legs_migration
+              SET outcome = 'ENTERED_BY_HAND',
+                  detail = COALESCE(detail, '') || ' | legs entered by hand (R-IV.445(c))',
+                  legs_written = (SELECT COUNT(*) FROM position_legs l
+                                   WHERE l.position_id = $1),
+                  migrated_at = NOW()
+            WHERE position_id = $1 AND outcome LIKE 'PENDING_CAPABILITY%'""",
+        position_id)
+
+
+@router.post("/v2/positions/{position_id}/legs")
+async def add_position_leg(position_id: str, req: LegRequest, _=Depends(require_api_key)):
+    """Enter one leg of a structure by hand.
+
+    This is the capability the three- and four-leg rows have been waiting on: a structure whose
+    shape exceeded two strike columns could not be recorded at all, so it was left unmigrated
+    rather than published as a smaller position than it is.
+
+    A leg is appended, never renumbered: `leg_seq` is the order legs were entered, and reusing
+    a sequence number would silently rewrite a different leg than the caller named.
+    """
+    ot, sd = _leg_values(req.option_type, req.side)
+    if req.qty == 0:
+        raise HTTPException(status_code=400, detail="qty must be non-zero")
+    try:
+        exp = date.fromisoformat(str(req.expiry)[:10])
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail=f"expiry must be a date; got '{req.expiry}'")
+
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        pos = await conn.fetchrow(
+            "SELECT position_id, ticker, asset_type FROM unified_positions "
+            "WHERE position_id = $1", position_id)
+        if not pos:
+            raise HTTPException(status_code=404, detail=f"Position {position_id} not found")
+        if (pos["asset_type"] or "").upper() not in ("OPTION", "SPREAD"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"{position_id} is {pos['asset_type']}; legs belong to option structures")
+        if req.broker_ref:
+            dup = await conn.fetchval(
+                "SELECT position_id FROM position_legs WHERE broker_ref = $1", req.broker_ref)
+            if dup:
+                raise HTTPException(status_code=409,
+                                    detail=f"broker_ref {req.broker_ref} is already on {dup}")
+
+        async with conn.transaction():
+            seq = await conn.fetchval(
+                "SELECT COALESCE(MAX(leg_seq), 0) + 1 FROM position_legs WHERE position_id = $1",
+                position_id)
+            leg_id = await conn.fetchval(
+                """INSERT INTO position_legs
+                       (position_id, leg_seq, option_type, side, strike, expiry, qty, price,
+                        provenance, broker_ref, migrated_from)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'hand-entered')
+                   RETURNING id""",
+                position_id, seq, ot, sd, req.strike, exp, req.qty, req.price,
+                provenance_for_lot("MANUAL", req.price), req.broker_ref)
+            after = {"leg_seq": seq, "option_type": ot, "side": sd, "strike": req.strike,
+                     "expiry": str(exp), "qty": req.qty, "price": req.price}
+            await _audit_leg(conn, position_id, pos["ticker"], "LEG_ADD", f"leg:{seq}",
+                             None, after, req.actor, req.reason)
+            await _settle_pending_capability(conn, position_id)
+
+        legs = await conn.fetch(
+            "SELECT id, leg_seq, option_type, side, strike, expiry, qty, price, provenance, "
+            "broker_ref FROM position_legs WHERE position_id = $1 ORDER BY leg_seq", position_id)
+    return {"status": "leg_added", "position_id": position_id, "leg_id": leg_id, "leg_seq": seq,
+            "legs": [dict(r) for r in legs], "count": len(legs)}
+
+
+@router.patch("/v2/positions/{position_id}/legs/{leg_seq}")
+async def update_position_leg(position_id: str, leg_seq: int, req: LegPatchRequest,
+                              _=Depends(require_api_key)):
+    """Correct one leg, with the trail on the position's own timeline.
+
+    Every change records the field, what it was, what it became, who did it and why. A leg
+    entered wrong is corrected here rather than deleted and re-added, because a delete and an
+    add are two events and a correction is one.
+    """
+    changes = {f: getattr(req, f) for f in _LEG_FIELDS if getattr(req, f) is not None}
+    if not changes:
+        raise HTTPException(status_code=400, detail="no fields to update")
+    if "option_type" in changes or "side" in changes:
+        ot, sd = _leg_values(changes.get("option_type", "CALL"), changes.get("side", "LONG"))
+        if "option_type" in changes:
+            changes["option_type"] = ot
+        if "side" in changes:
+            changes["side"] = sd
+    if "expiry" in changes:
+        try:
+            changes["expiry"] = date.fromisoformat(str(changes["expiry"])[:10])
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail="expiry must be a date")
+
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        leg = await conn.fetchrow(
+            "SELECT l.*, p.ticker FROM position_legs l "
+            "JOIN unified_positions p ON p.position_id = l.position_id "
+            "WHERE l.position_id = $1 AND l.leg_seq = $2", position_id, leg_seq)
+        if not leg:
+            raise HTTPException(status_code=404,
+                                detail=f"leg {leg_seq} not found on {position_id}")
+        async with conn.transaction():
+            for field, value in changes.items():
+                before, after = leg[field], value
+                if str(before) == str(after):
+                    continue
+                await conn.execute(
+                    f"UPDATE position_legs SET {field} = $1 WHERE id = $2", value, leg["id"])
+                await _audit_leg(conn, position_id, leg["ticker"], "LEG_EDIT",
+                                 f"leg:{leg_seq}:{field}",
+                                 {"value": str(before)}, {"value": str(after)},
+                                 req.actor, req.reason)
+            # A price arriving makes the leg's provenance a reported one; it never makes it
+            # verified, which needs a broker record matched and is not what an edit is.
+            if "price" in changes:
+                await conn.execute(
+                    "UPDATE position_legs SET provenance = $1 WHERE id = $2",
+                    provenance_for_lot("MANUAL", changes["price"]), leg["id"])
+
+        legs = await conn.fetch(
+            "SELECT id, leg_seq, option_type, side, strike, expiry, qty, price, provenance, "
+            "broker_ref FROM position_legs WHERE position_id = $1 ORDER BY leg_seq", position_id)
+    return {"status": "leg_updated", "position_id": position_id, "leg_seq": leg_seq,
+            "changed": sorted(changes), "legs": [dict(r) for r in legs]}
+
+
+@router.delete("/v2/positions/{position_id}/legs/{leg_seq}")
+async def delete_position_leg(position_id: str, leg_seq: int, reason: str = Query(...),
+                              actor: Optional[str] = Query(None),
+                              _=Depends(require_api_key)):
+    """Remove a leg entered in error. `reason` is required — a structure losing a leg with no
+    stated cause is indistinguishable from a structure that never had it."""
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        leg = await conn.fetchrow(
+            "SELECT l.*, p.ticker FROM position_legs l "
+            "JOIN unified_positions p ON p.position_id = l.position_id "
+            "WHERE l.position_id = $1 AND l.leg_seq = $2", position_id, leg_seq)
+        if not leg:
+            raise HTTPException(status_code=404,
+                                detail=f"leg {leg_seq} not found on {position_id}")
+        async with conn.transaction():
+            await conn.execute("DELETE FROM position_legs WHERE id = $1", leg["id"])
+            await _audit_leg(conn, position_id, leg["ticker"], "LEG_DELETE", f"leg:{leg_seq}",
+                             {"option_type": leg["option_type"], "side": leg["side"],
+                              "strike": str(leg["strike"]), "expiry": str(leg["expiry"]),
+                              "qty": str(leg["qty"])}, None, actor, reason)
+    return {"status": "leg_deleted", "position_id": position_id, "leg_seq": leg_seq}
+
+
 @router.get("/v2/positions/legs/coverage", dependencies=[Depends(require_api_key)])
 async def get_legs_coverage(limit: int = Query(100, ge=0, le=500)):
     """What became of every option row when legs were expanded (R-IV.444(b)).
@@ -2909,7 +3132,9 @@ class CashEventRequest(BaseModel):
     description: Optional[str] = None
 
 
-_CANONICAL_ACCOUNTS = {"ROBINHOOD", "FIDELITY_ROTH", "FIDELITY_401A"}
+# Kept as a name for the phase-2 contract test; the vocabulary itself now lives in
+# models/accounts.py so that every write path reads the same one (R-IV.445(a)).
+_CANONICAL_ACCOUNTS = set(CANONICAL_ACCOUNTS)
 
 
 @router.post("/v2/cash-events")
@@ -2921,12 +3146,7 @@ async def record_cash_event(req: CashEventRequest, _=Depends(require_api_key)):
     have had no write path from the UI, so deposits and withdrawals never entered the
     system and every return computed against account value was unverifiable.
     """
-    acct = req.account.strip().upper()
-    if acct not in _CANONICAL_ACCOUNTS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"account must be one of {sorted(_CANONICAL_ACCOUNTS)} (case-insensitive); "
-                   f"got '{req.account}'")
+    acct = canonical_account(req.account)
     direction = req.direction.strip().upper()
     if direction not in ("DEPOSIT", "WITHDRAWAL"):
         raise HTTPException(status_code=400, detail="direction must be DEPOSIT or WITHDRAWAL")
