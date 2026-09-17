@@ -37,7 +37,7 @@ stored series, and UW's missing coverage of index symbols.
 | | calls/day |
 |---|---|
 | UW account limit (`x-uw-token-req-limit`) | 40,000 |
-| reserve held for the other client on the key (`UW_FOREIGN_RESERVE`) | 12,000 |
+| reserve held for spend this process does not make (`UW_FOREIGN_RESERVE`) | 12,000 |
 | hub budget (`DAILY_BUDGET`) | 28,000 |
 | safety buffer | 2,000 |
 | **per-caller quota table, summed** (incl. the new `ohlc_grader`, 200) | **25,000** |
@@ -46,7 +46,10 @@ stored series, and UW's missing coverage of index symbols.
 *The comment beside `DAILY_BUDGET` in `uw_api_cache.py` says 20,000. The arithmetic gives
 28,000. The comment is stale.*
 
-**If the other client is gone (R-IV.433(d)'s premise), the 12,000 reserve is releasable.**
+**R-IV.438(a):** that spend is no longer attributed to the VPS collector — the host was
+inactive for months and those processes never ran. The remaining hypothesis is the leaked key,
+rotated 2026-09-17. **If the post-rotation meter shows the gap gone, the 12,000 reserve is
+releasable.**
 `account_shed()` still sheds tiers by UW's own counter if it returns. Releasing it is a
 one-constant change, and it is the principal's call.
 
