@@ -63,6 +63,18 @@ HERMES_CONFIG = {
 
 VPS_API_KEY = os.getenv("HERMES_VPS_KEY") or ""
 
+# ── R-IV.442(b): THE COLLECTOR TRIGGER IS OFF UNLESS SOMETHING IS LISTENING ──────────────
+# This lever calls out to the collector host. That host has been out of service for months
+# (R-IV.438(a)): its last write back into this system landed 2026-04-01, one row, and nothing
+# has arrived since.
+#
+# So the trigger is DISABLED by default and enabled only by explicit configuration. Turning it
+# on is one environment variable, and whoever turns it on is asserting that something is
+# listening at the other end -- which is the claim that went unchecked for five months, and
+# the reason a retired integration should be switched off rather than left to fail quietly.
+VPS_TRIGGER_ENABLED = (os.getenv("HERMES_VPS_TRIGGER_ENABLED") or "").strip().lower() in (
+    "1", "true", "yes", "on")
+
 # ── Chunk E cutover toggle (OBSERVE until flip-day) ──
 # /api/webhook/hermes is unauthenticated today and its real risk is the VPS-scrape-burst
 # lever (resource-abuse / amplification), not the catalyst cards. Gate with a SEPARATE
@@ -187,9 +199,12 @@ async def hermes_webhook(request: Request):
         trip_wire_status=trip_wire_status,
     )
 
-    # Trigger VPS scrape burst
+    # Trigger VPS scrape burst — only when the trigger is explicitly enabled (R-IV.442(b)).
     vps_url = config.get("vps_trigger_url")
-    if vps_url and VPS_API_KEY:
+    if vps_url and VPS_API_KEY and not VPS_TRIGGER_ENABLED:
+        logger.info("HERMES: collector trigger is disabled (HERMES_VPS_TRIGGER_ENABLED unset) "
+                    "— event %s recorded, nothing sent outbound", event_id)
+    elif vps_url and VPS_API_KEY:
         try:
             search_terms = _build_search_terms(ticker, direction, correlated)
             async with httpx.AsyncClient(timeout=5.0) as client:
