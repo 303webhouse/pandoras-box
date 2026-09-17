@@ -1,0 +1,165 @@
+/* Abacus (v2) — R-IV.429. Built from the published "Abacus · v2 skin · build-from mockup".
+   Loads AFTER v2.css, which owns every colour and font token. This file adds only the page.
+   D6: no hex (and no copied rgb) literal here. Every colour is a v2 token; the one tint
+   (the drawdown band) is fill-opacity on var(--down). If a tint is ever needed, use
+   color-mix() on the token, never a copied value.
+   Every class is prefixed ab- so nothing collides with v2.css (.chip, .seg, .tile …).
+   R8: readable text never uses --text-3, and nothing readable is opacity-dimmed. */
+
+/* The mockup's proposed scale (§13 draft, names for review). Scoped to this page until the
+   names are ratified and promoted into v2.css :root. Breakpoints are constants, not tokens:
+   ab-narrow = 900px (grid stacks), ab-phone = 768px (v2's), ab-small = 640px. */
+.ab-page {
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 24px; --sp-6: 32px;
+  --r-1: 4px; --r-2: 6px; --r-3: 10px;
+  --fs-1: 11px; --fs-2: 12px; --fs-3: 14px; --fs-4: 16px; --fs-5: 20px; --fs-6: 28px;
+
+  display: block;
+  max-width: 1180px; margin: 0 auto;
+  padding: var(--sp-5) var(--sp-4) 64px;
+  font-size: var(--fs-3); line-height: 1.5;
+}
+.ab-page button { font: inherit; color: inherit; cursor: pointer; }
+.ab-page [hidden] { display: none !important; }
+
+/* ── Header + range controls ─────────────────────────────────────────────── */
+.ab-head { display: flex; flex-wrap: wrap; gap: var(--sp-3) var(--sp-5); align-items: center; justify-content: space-between; }
+.ab-h1 { margin: 0; font-size: var(--fs-6); font-weight: 600; letter-spacing: -.3px; }
+.ab-asof { color: var(--text-2); font-size: var(--fs-2); margin-top: 2px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.ab-controls { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; }
+.ab-seg { display: inline-flex; border: 1px solid var(--border); border-radius: var(--r-2); overflow: hidden; background: var(--panel); }
+.ab-seg button { background: transparent; border: 0; padding: 7px 13px; color: var(--text-2); font-size: var(--fs-2); }
+.ab-seg button[aria-pressed="true"] { background: var(--panel-2); color: var(--text); box-shadow: inset 0 -2px 0 var(--teal); }
+.ab-dates { display: inline-flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; color: var(--text-2); font-size: var(--fs-2); }
+.ab-dates input {
+  font: var(--fs-2) var(--mono); padding: 6px 8px; border: 1px solid var(--border);
+  border-radius: var(--r-1); background: var(--panel); color: var(--text); color-scheme: dark;
+}
+
+/* Keyboard focus is visible everywhere on this page (H-8). */
+.ab-page button:focus-visible,
+.ab-page summary:focus-visible,
+.ab-page input:focus-visible,
+.ab-page th[tabindex]:focus-visible { outline: 2px solid var(--teal); outline-offset: -2px; }
+
+/* ── Vintage chip — four states, never red (R6, §7.7) ─────────────────────── */
+.ab-chip {
+  display: inline-flex; align-items: center; gap: 6px; font: var(--fs-1) var(--mono);
+  padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-2);
+  white-space: nowrap; vertical-align: middle;
+}
+.ab-chip::before { content: ""; width: 6px; height: 6px; border-radius: 50%; box-sizing: border-box; }
+.ab-chip[data-state="fresh"]::before { background: var(--teal); }
+.ab-chip[data-state="stale"] { border-color: var(--amber); color: var(--amber); }
+.ab-chip[data-state="stale"]::before { background: var(--amber); }
+.ab-chip[data-state="unknown"] { border-style: dashed; border-color: var(--amber); color: var(--amber); }
+.ab-chip[data-state="unknown"]::before { background: transparent; border: 1px solid var(--amber); }
+.ab-chip[data-state="closed"]::before { background: var(--text-3); }
+
+/* ── Mock banner + error ─────────────────────────────────────────────────── */
+.ab-banner, .ab-error {
+  margin: var(--sp-4) 0 0; padding: var(--sp-2) var(--sp-3);
+  border: 1px dashed var(--amber); border-radius: var(--r-2); color: var(--amber); font-size: var(--fs-2);
+}
+.ab-error { border-style: solid; }
+
+/* ── Grid: stats + equity | leaks ────────────────────────────────────────── */
+.ab-grid { display: grid; grid-template-columns: 2fr 1fr; gap: var(--sp-4); margin-top: var(--sp-4); align-items: start; }
+.ab-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(168px, 1fr)); gap: var(--sp-2); }
+.ab-stat { background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-2); padding: var(--sp-3) var(--sp-4); }
+.ab-stat .ab-v { display: block; font-family: var(--mono); font-size: var(--fs-5); font-weight: 600; line-height: 1.15; }
+.ab-stat .ab-l { display: block; color: var(--text-2); font-size: var(--fs-2); margin-top: 2px; }
+.ab-stat details { margin-top: 6px; font-size: var(--fs-1); color: var(--text-2); line-height: 1.45; }
+.ab-stat summary { cursor: pointer; list-style: none; color: var(--teal); }
+.ab-stat summary::-webkit-details-marker { display: none; }
+.ab-up { color: var(--up); }
+.ab-down { color: var(--down); }
+
+.ab-card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-2); padding: var(--sp-3) var(--sp-4); }
+.ab-equity { margin-top: var(--sp-4); }
+.ab-h2 { margin: 0 0 var(--sp-3); font-size: var(--fs-3); font-weight: 600; display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; }
+
+/* Equity SVG: every colour from a token via CSS (SVG attributes cannot read var()). */
+.ab-eq { width: 100%; height: auto; display: block; }
+.ab-eq-grid { stroke: var(--border); stroke-width: 1; }
+.ab-eq-grid.mid { stroke-dasharray: 3 6; }
+.ab-eq-axis { fill: var(--text-2); font: 11px var(--mono); }
+.ab-eq-dd { fill: var(--down); fill-opacity: .10; }
+.ab-eq-ddl { fill: var(--down); font: 11px var(--mono); }
+.ab-eq-line { fill: none; stroke: var(--up); stroke-width: 2; }
+
+.ab-leaks { padding: 0; margin: 0; list-style: none; }
+.ab-leaks li { margin: 0 0 var(--sp-3); padding-left: var(--sp-3); border-left: 2px solid var(--down); }
+.ab-leaks li.ok { border-left-color: var(--up); }
+.ab-leaks .ab-k { display: block; font-weight: 600; font-size: var(--fs-3); }
+.ab-leaks .ab-n { font-family: var(--mono); }
+.ab-leaks .ab-d { display: block; color: var(--text-2); font-size: var(--fs-2); }
+
+/* ── Tabs + tables ───────────────────────────────────────────────────────── */
+.ab-tabs { display: flex; gap: 2px; flex-wrap: wrap; border-bottom: 1px solid var(--border); margin: var(--sp-5) 0 var(--sp-3); }
+.ab-tabs button {
+  background: transparent; border: 0; border-bottom: 2px solid transparent;
+  padding: 9px 14px; color: var(--text-2); margin-bottom: -1px; font-size: var(--fs-3);
+}
+.ab-tabs button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--teal); }
+
+.ab-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--r-2); }
+.ab-table { width: 100%; border-collapse: collapse; background: var(--panel); }
+.ab-table th, .ab-table td { text-align: left; padding: 9px var(--sp-3); border-top: 1px solid var(--border); font-size: var(--fs-3); }
+.ab-table th {
+  border-top: 0; background: var(--panel-2); color: var(--text-2); font-weight: 600;
+  font-size: var(--fs-2); cursor: pointer; -webkit-user-select: none; user-select: none; white-space: nowrap;
+}
+.ab-table th[aria-sort="ascending"]::after { content: " ▲"; color: var(--teal); }
+.ab-table th[aria-sort="descending"]::after { content: " ▼"; color: var(--teal); }
+.ab-table .ab-num { text-align: right; font-family: var(--mono); }
+.ab-table tbody tr:hover { background: var(--panel-2); }
+.ab-bar { height: 6px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 999px; overflow: hidden; min-width: 88px; }
+.ab-bar i { display: block; height: 100%; background: var(--down); }
+
+/* Placeholder section. The mockup dimmed its table to .55; that drops --text-2 below AA
+   (R8, H-13), so the placeholder is carried by the dashed frame instead. */
+.ab-slot {
+  margin-top: var(--sp-5); border: 1px dashed var(--border-strong); border-radius: var(--r-2);
+  padding: var(--sp-4); color: var(--text-2); font-size: var(--fs-3);
+}
+.ab-slot .ab-h2 { margin-bottom: var(--sp-2); color: var(--text); }
+.ab-slot .ab-scroll { margin-top: var(--sp-3); border-style: dashed; }
+.ab-foot { margin-top: var(--sp-6); color: var(--text-2); font-size: var(--fs-2); border-top: 1px solid var(--border); padding-top: var(--sp-3); }
+.ab-dash { color: var(--text-2); }
+
+/* ── Sign-in (401) — token-styled, no hex ─────────────────────────────────── */
+.ab-login {
+  position: fixed; inset: 0; z-index: 200; background: var(--bg);
+  display: flex; align-items: center; justify-content: center;
+}
+/* An author `display` beats the UA's [hidden] rule, so the overlay must restate it or it
+   covers the page on every load (caught by the render check). */
+.ab-login[hidden] { display: none; }
+.ab-login-form {
+  background: var(--panel); border: 1px solid var(--border-strong); border-radius: 12px;
+  padding: 30px; display: flex; flex-direction: column; gap: 12px; min-width: 280px;
+}
+.ab-login-title { color: var(--teal); font-weight: 700; letter-spacing: 2px; font-family: var(--mono); }
+.ab-login-form input {
+  padding: 10px; border-radius: 6px; border: 1px solid var(--border-strong);
+  background: var(--bg); color: var(--text); font-size: 16px;
+}
+.ab-login-err { color: var(--down); font-size: var(--fs-2); min-height: 14px; }
+
+/* ── Breakpoints (named constants above) ─────────────────────────────────── */
+@media (max-width: 900px) {                 /* ab-narrow */
+  .ab-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 768px) {                 /* ab-phone: v2's; the deck bar is fixed */
+  .ab-page { padding: var(--sp-3) var(--sp-3) calc(64px + env(safe-area-inset-bottom, 0px)); }
+  .ab-seg button { min-height: 44px; padding: 8px 14px; }
+  .ab-tabs button { min-height: 44px; }
+  .ab-dates input { min-height: 44px; font-size: 16px; }
+  .ab-stat summary { display: inline-block; min-height: 32px; line-height: 32px; }
+}
+@media (max-width: 640px) {                 /* ab-small */
+  .ab-h1 { font-size: var(--fs-5); }
+  .ab-table th, .ab-table td { padding: 8px; }
+  .ab-stats { grid-template-columns: 1fr 1fr; }
+}

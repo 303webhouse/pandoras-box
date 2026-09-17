@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <!-- viewport-fit=cover: the deck bar's env(safe-area-inset-bottom) needs it. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Pandora · Abacus</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Orbit&display=swap" rel="stylesheet">
+    <!-- v2.css first: the tokens and the shell. abacus.css adds only this page. -->
+    <link rel="stylesheet" href="/v2.css?v=15">
+    <link rel="stylesheet" href="/abacus.css?v=1">
+    <link rel="manifest" href="/manifest.json">
+    <link rel="apple-touch-icon" href="/icon-192.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Pandora">
+    <!-- No theme-color meta: a meta tag cannot read a token, and D6 allows no hex here.
+         The installed PWA takes theme_color from /manifest.json. -->
+</head>
+<body>
+    <header class="v2-topbar">
+        <div class="v2-logo">
+            <img src="/assets/pandora-logo.png" alt="Pandora" class="v2-logo-icon">
+            <span class="v2-brand">PANDORA</span>
+        </div>
+        <span class="v2-sub">Abacus · v2</span>
+        <div class="spacer"></div>
+        <a class="v2-legacy-link" href="/app">← Agora</a>
+        <a class="v2-legacy-link" href="/app/analytics" title="The legacy Abacus, which still carries the live figures">Legacy Abacus →</a>
+    </header>
+
+    <main class="ab-page" id="abPage">
+        <header class="ab-head">
+            <div>
+                <h1 class="ab-h1">Abacus</h1>
+                <div class="ab-asof" id="abAsof">loading…</div>
+            </div>
+            <div class="ab-controls">
+                <div class="ab-seg" role="group" aria-label="Date range" id="abRange">
+                    <button type="button" data-range="30d" aria-pressed="false">30d</button><button type="button" data-range="90d" aria-pressed="true">90d</button><button type="button" data-range="ytd" aria-pressed="false">YTD</button><button type="button" data-range="all" aria-pressed="false">All</button>
+                </div>
+                <div class="ab-dates">
+                    <label>from <input type="date" id="abFrom"></label>
+                    <label>to <input type="date" id="abTo"></label>
+                </div>
+            </div>
+        </header>
+
+        <div class="ab-banner" id="abBanner" hidden></div>
+        <div class="ab-error" id="abError" hidden></div>
+
+        <div class="ab-grid">
+            <div>
+                <div class="ab-stats" id="abStats"></div>
+                <section class="ab-card ab-equity">
+                    <h2 class="ab-h2">Equity <span id="abEquityChip"></span></h2>
+                    <div id="abEquity"></div>
+                </section>
+            </div>
+            <aside class="ab-card">
+                <h2 class="ab-h2">Where you're leaking <span id="abLeaksChip"></span></h2>
+                <ul class="ab-leaks" id="abLeaks"></ul>
+            </aside>
+        </div>
+
+        <div class="ab-tabs" role="tablist" aria-label="Breakdowns" id="abTabs"></div>
+        <div id="abPanels"></div>
+
+        <section class="ab-slot" id="abSlot"></section>
+
+        <footer class="ab-foot">Every rate shows its n. Every figure carries when it was computed. Unknown is shown as unknown, never as 0.</footer>
+    </main>
+
+    <div class="ab-login" id="abLogin" hidden>
+        <form class="ab-login-form" id="abLoginForm">
+            <div class="ab-login-title">PANDORA · ABACUS</div>
+            <input id="abPw" type="password" placeholder="Password" autocomplete="current-password">
+            <button type="submit" class="btn-primary">Sign in</button>
+            <div class="ab-login-err" id="abLoginErr"></div>
+        </form>
+    </div>
+
+    <!-- Mobile deck bar — canonical source: docs/components/pandora-deck-bar.md -->
+    <nav class="deck-bar" aria-label="Decks">
+      <a class="deck-tab" href="/app"><span class="deck-ico" aria-hidden="true">▦</span><span>Agora</span></a>
+      <a class="deck-tab" href="/app/stater"><span class="deck-ico" aria-hidden="true">⇌</span><span>Stater</span></a>
+      <a class="deck-tab" href="/app/analytics"><span class="deck-ico" aria-hidden="true">Σ</span><span>Abacus</span></a>
+    </nav>
+    <script>
+      /* Active-tab state from the real path. No framework, no derived hrefs. */
+      (function () {
+        var p = window.location.pathname;
+        Array.prototype.forEach.call(document.querySelectorAll('.deck-bar .deck-tab'), function (a) {
+          var href = a.getAttribute('href');
+          var on = href === '/app' ? (p === '/app' || p === '/app/v2') : p.indexOf(href) === 0;
+          a.classList.toggle('is-active', on);
+          if (on) { a.setAttribute('aria-current', 'page'); } else { a.removeAttribute('aria-current'); }
+        });
+      })();
+    </script>
+
+    <script src="/abacus.js?v=1"></script>
+</body>
+</html>
