@@ -414,8 +414,9 @@ def test_strata_and_the_promotion_labels():
     chk = M.circe_promotion_check(rows)
     assert chk["checks"]["both_regimes_positive"] is False        # no BROAD_ROTATION rows
     assert chk["checks"]["trades"] is False
-    assert chk["va_edge_share_of_winners"] == 50.0
-    assert chk["va_edge_or_outside_share_of_winners"] == 100.0
+    # R-IV.432(b): "VA edge" is edge + outside; the split is reported beside it
+    assert chk["va_edge_share_of_winners"] == 100.0 and chk["checks"]["va_edge"] is True
+    assert chk["va_split_of_winners"] == {"edge": 50.0, "outside": 50.0, "other_or_unknown": 0.0}
     assert set(chk["other_strata"]) == {"ACTIVE_DISTRIBUTION", "REGIME_AGNOSTIC", "UNLABELLED"}
     assert chk["other_strata"]["ACTIVE_DISTRIBUTION"]["n"] == 1   # reported, never folded in
 
@@ -449,22 +450,29 @@ def test_grade_rows_never_regrades_and_never_writes_pending():
     r = G.ShadowRow("C1", "TEST", "LONG", fired(days[0]), 10.0, 9.0, 12.0,
                     B.ENTRY_SESSION_CLOSE, {"source": "circes_stew"})
     done = {("C1", "return", 1): BASIS_ID, ("C1", "return", 3): "some-older-basis"}
-    records, counts = job.grade_rows(CIRCES_STEW, [r], {"TEST": s}, done, days[5], run_id=9)
+    held_keys = {("C1", "walk", 5)}
+    graded, counts = job.grade_rows(CIRCES_STEW, [r], {"TEST": s}, done, held_keys, days[5])
     assert counts["already_graded"] == 1 and counts["basis_differs_not_regraded"] == 1
-    assert counts["graded"] == 1                           # h=5 matures exactly on days[5]
-    assert counts["pending"] == 2                          # h=10, and the 10-session walk
-    assert all(len(rec) == len(WRITE_COLUMNS) for rec in records)
+    assert counts["held_earlier"] == 1                     # a hold is never re-checked
+    assert [(g.method, g.horizon) for _, _, g in graded] == [("return", 5)]
+    assert counts["pending"] == 3                          # h=10, and the 10- and 20-session walks
+    writes, holds = asyncio.run(job.check_independent(CIRCES_STEW, graded, {"TEST": s}, counts,
+                                                      days[5], 9, fetch_uw=AsyncMock()))
+    assert holds == [] and counts["graded"] == 1           # no calendar event: no second vendor
+    assert all(len(rec) == len(WRITE_COLUMNS) for rec in writes)
 
 
-def test_store_is_insert_only_and_the_migration_matches():
+def test_store_is_insert_only_and_the_migrations_match():
     from backtest import store
-    src = inspect.getsource(store.insert_grades)
-    assert "ON CONFLICT (signal_id, population, method, horizon) DO NOTHING" in src
-    assert "UPDATE" not in src
-    mig = (Path(__file__).resolve().parents[2] / "migrations" / "035_backtest_module.sql").read_text(encoding="utf-8")
+    for fn in (store.insert_grades, store.insert_holds):
+        src = inspect.getsource(fn)
+        assert "DO NOTHING" in src and "UPDATE" not in src
+    migs = Path(__file__).resolve().parents[2] / "migrations"
     norm = lambda x: " ".join(x.split())
-    assert norm(store.DDL) in norm(mig)
+    assert norm(store.DDL) in norm((migs / "035_backtest_module.sql").read_text(encoding="utf-8"))
+    assert norm(store.DDL_HOLDS) in norm((migs / "036_shadow_grade_holds.sql").read_text(encoding="utf-8"))
     assert "UNIQUE (signal_id, population, method, horizon)" in store.DDL
+    assert "UNIQUE (signal_id, population, method, horizon, basis_id)" in store.DDL_HOLDS
 
 
 def test_population_sql_and_classes():
@@ -517,32 +525,58 @@ class _RecConn:
         self.calls.append((sql, args))
 
 
-def test_shadow_expiry_is_written_for_shadow_rows_only_and_naive_utc():
-    from database.postgres_client import _write_shadow_expiry
-    conn = _RecConn()
-    exp = datetime(2026, 9, 22, 20, 0, tzinfo=UTC)
-    asyncio.run(_write_shadow_expiry(conn, {"signal_id": "S", "status": "ACTIVE", "expires_at": exp}))
-    asyncio.run(_write_shadow_expiry(conn, {"signal_id": "S", "status": "SHADOW"}))
-    assert conn.calls == []
-    asyncio.run(_write_shadow_expiry(conn, {"signal_id": "S", "status": "SHADOW", "expires_at": exp}))
-    sql, args = conn.calls[0]
-    assert "status = 'SHADOW'" in sql and args == ("S", datetime(2026, 9, 22, 20, 0))
-
-
-def test_a_failed_expiry_write_never_raises():
-    from database import postgres_client as pc
-    with patch.object(pc, "logger") as log:
-        asyncio.run(pc._write_shadow_expiry(_RecConn(RuntimeError("x")),
-                                            {"signal_id": "S", "status": "SHADOW",
-                                             "expires_at": datetime(2026, 9, 22)}))
-    assert log.error.called
-
-
-def test_expiry_is_written_only_after_a_real_insert():
+def test_every_row_stores_its_expiry_and_a_bad_value_never_loses_the_signal():
+    """R-IV.432(f): both halves of DEF-SHADOW-EXPIRES-AT-DROPPED."""
     from database import postgres_client as pc
     src = inspect.getsource(pc.log_signal)
-    assert src.index("inserted = ") < src.index("_write_shadow_expiry")
-    assert "else:" in src[src.index("inserted = "):src.index("_write_shadow_expiry")]
+    assert "status, expires_at" in src and "$38, $39" in src
+    assert "_expiry_for_db(" in src
+    f = pc._expiry_for_db
+    assert f(None) is None and f("") is None
+    assert f(datetime(2026, 9, 22, 20, 0, tzinfo=UTC)) == datetime(2026, 9, 22, 20, 0)
+    assert f("2026-09-22T20:00:00+00:00") == datetime(2026, 9, 22, 20, 0)
+    assert f(datetime(2026, 9, 22, 16, 0)) == datetime(2026, 9, 22, 16, 0)       # naive = UTC
+    with patch.object(pc, "logger") as log:
+        assert f("not a time", "S") is None
+        assert f(12345, "S") is None
+    assert log.warning.call_count == 2
+
+
+@pytest.mark.parametrize("tf,hours", [
+    ("60", 4), ("15", 4), ("5", 4), ("1H", 4), ("15m", 4), (None, 4),
+    ("240", 24), ("4H", 24), ("D", 24), ("1D", 24), ("daily", 24), ("1440", 24),
+    ("W", 168), ("10080", 168),
+])
+def test_expiry_follows_the_chart_including_tradingview_minute_counts(tf, hours):
+    from signals.pipeline import calculate_expiry
+    before = datetime.utcnow()
+    exp = calculate_expiry({"timeframe": tf})
+    assert abs((exp - before).total_seconds() - hours * 3600) < 5
+
+
+def test_the_river_announces_the_change_while_it_is_fresh():
+    from api import trade_ideas as ti
+    notice = next(n for n in ti.RIVER_NOTICES if n["id"] == "expiry-honoured-2026-09-17")
+    assert "4 hours" in notice["body"] and "24" in notice["body"]
+
+    class _Now:
+        def __init__(self, d):
+            self.d = d
+
+        def now(self, tz=None):
+            return datetime(self.d.year, self.d.month, self.d.day, 12, tzinfo=tz)
+
+    for d, shown in [(date(2026, 9, 16), False), (date(2026, 9, 17), True),
+                     (date(2026, 10, 1), True), (date(2026, 10, 2), False)]:
+        with patch.object(ti, "datetime", _Now(d)):
+            out = asyncio.run(ti.get_river_notices())
+        assert (notice in out["notices"]) is shown, d
+
+
+def test_notices_route_precedes_the_signal_id_route():
+    from api import trade_ideas as ti
+    paths = [r.path for r in ti.router.routes]
+    assert paths.index("/trade-ideas/notices") < paths.index("/trade-ideas/{signal_id}")
 
 
 def test_grader_is_registered_as_a_session_job():
@@ -584,3 +618,141 @@ def test_the_fast_bootstrap_equals_the_row_bootstrap():
         plain = lambda rows, _s=stat: _s(rows)            # no .agg -> the row path
         slow = M.block_bootstrap_delta(a, b, plain, day, reps=400, bar=0.1)
         assert fast == slow
+
+
+# ── R-IV.432: the hold curve, excluded and held lines, the second vendor ────────
+
+def _walk_row(cell_source, d, r, hold, loc="edge", regime="BROAD_ROTATION", flags=()):
+    return {"method": "walk", "horizon": hold, "anchor_session": d, "target_session": d,
+            "r_multiple": r, "ret_pct": r, "ret_raw_pct": r, "direction_sign": 1,
+            "flags": list(flags),
+            "tags": {"source": cell_source, "va_location": loc, "sector_rotation_state": regime}}
+
+
+def test_circe_reports_the_hold_curve_and_gates_on_the_primary():
+    from backtest import report
+    from backtest.populations import CIRCES_STEW
+    assert CIRCES_STEW.walk_holds == (10, 5, 20) and CIRCES_STEW.primary_hold == 10
+    days = trading_days(date(2026, 8, 3), 3)
+    rows = [_walk_row("circes_stew", d, v, h) for h in (5, 10, 20)
+            for d, v in zip(days, (1.0, -1.0, 2.0 * h / 10))]
+    out = report.build(CIRCES_STEW, rows)
+    curve = [o for o in out if o["stratum"] == "HOLD_CURVE" and o["cell"] == "surfaced"]
+    assert len(curve) == 1 and curve[0]["horizon"] == 10
+    assert set(curve[0]["summary"]["by_hold"]) == {"5", "10", "20"}
+    assert curve[0]["summary"]["by_hold"]["20"]["n"] == 3
+    gates = [o for o in out if o["stratum"] == "PROMOTION_GATES"]
+    assert [g["horizon"] for g in gates] == [10]
+
+
+def test_excluded_rows_are_their_own_line_and_held_rows_are_counted():
+    from backtest import report
+    from backtest.populations import CIRCES_STEW
+    days = trading_days(date(2026, 8, 3), 3)
+    rows = [_walk_row("circes_stew", days[0], 1.0, 10),
+            _walk_row("circes_stew", days[1], -1.0, 10, flags=["adjustment_seam_in_window"])]
+    holds = [{"method": "walk", "horizon": 10, "reason": "independent_price_disagrees",
+              "tags": {"source": "circes_stew"}}]
+    out = report.build(CIRCES_STEW, rows, holds)
+
+    def line(stratum):
+        return next(o for o in out if o["cell"] == "surfaced" and o["stratum"] == stratum
+                    and o["method"] == "walk")
+
+    assert line("ALL")["summary"]["n"] == 1
+    assert line("ALL")["summary"]["excluded_rows"] == 1
+    assert line("ALL")["summary"]["held_rows"] == 1
+    assert line("EXCLUDED")["summary"]["n"] == 1
+    assert line("EXCLUDED")["summary"]["excluded_by_flag"] == {"adjustment_seam_in_window": 1}
+    assert line("HELD")["summary"]["held_by_reason"] == {"independent_price_disagrees": 1}
+
+
+def _graded_with_event(days, entry=100.0, closes=None, event=date(2026, 8, 5)):
+    s, _ = series(closes or [100.0, 101.0, 102.0, 103.0], splits={event: 1.0000001})
+    r = row("LONG", days[0], entry)
+    g = G.grade_return(r, s, 2, THROUGH)
+    assert g.status == G.GRADED
+    return r, s, g
+
+
+def test_second_vendor_agree_disagree_unavailable():
+    from backtest import independent as I
+    days = trading_days(date(2026, 8, 3), 4)
+    r, s, g = _graded_with_event(days)
+    assert I.spans_event(g)
+    assert I.compare(g, s, {days[0]: 100.2, days[2]: 102.1})["verdict"] == "agree"
+    # the HON shape: the primary series is inflated pre-ex against the second vendor
+    hon = I.compare(g, s, {days[0]: 100.0 / 1.049, days[2]: 102.0})
+    assert hon["verdict"] == "disagree"
+    assert hon["anchor_ratio"] == pytest.approx(1.049, rel=1e-3)
+    assert I.compare(g, s, {days[0]: 100.0, days[2]: 106.0})["verdict"] == "disagree"
+    assert I.compare(g, s, {days[0]: 100.0})["verdict"] == "unavailable"
+    assert I.compare(g, s, None)["verdict"] == "unavailable"
+
+
+def test_event_rows_are_written_only_when_the_second_vendor_agrees():
+    import copy
+    from collections import Counter
+    from backtest import job
+    from backtest.populations import THREE_TEN
+    days = trading_days(date(2026, 8, 3), 4)
+    r, s, g = _graded_with_event(days)
+    r.tags = {"gate_type": "both"}
+
+    def run(uw):
+        counts = Counter()
+        writes, holds = asyncio.run(job.check_independent(
+            THREE_TEN, [(r, 1, copy.deepcopy(g))], {"TEST": s}, counts, days[3], 1,
+            fetch_uw=AsyncMock(return_value=uw)))
+        return writes, holds, counts
+
+    w, h, c = run({days[0]: 100.0, days[2]: 102.0})
+    assert len(w) == 1 and not h and c["flag:independent_agrees"] == 1
+    w, h, c = run({days[0]: 95.0, days[2]: 102.0})
+    assert not w and len(h) == 1 and h[0][5] == "independent_price_disagrees"
+    w, h, c = run(None)
+    assert not w and not h and c["independent_unavailable"] == 1   # unknown is not agreement
+
+
+def test_second_vendor_spend_is_capped_per_pass():
+    from collections import Counter
+    from backtest import job, independent as I
+    from backtest.populations import THREE_TEN
+    days = trading_days(date(2026, 8, 3), 4)
+    graded = []
+    for i in range(I.MAX_TICKERS_PER_PASS + 5):
+        r, s, g = _graded_with_event(days)
+        r.ticker = f"T{i:03d}"
+        graded.append((r, 1, g))
+    fetch = AsyncMock(return_value=None)
+    counts = Counter()
+    asyncio.run(job.check_independent(THREE_TEN, graded, {x[0].ticker: s for x in graded},
+                                      counts, days[3], 1, fetch_uw=fetch))
+    assert fetch.await_count == I.MAX_TICKERS_PER_PASS
+    assert counts["independent_deferred"] == 5
+    first = job._rotation([f"T{i}" for i in range(50)], date(2026, 9, 17))
+    second = job._rotation([f"T{i}" for i in range(50)], date(2026, 9, 18))
+    assert first != second and sorted(first) == sorted(second)
+
+
+def test_the_second_vendor_has_its_own_governor_tag_after_hours():
+    from integrations import uw_governor as gov
+    from backtest import independent as I
+    quota, tier = gov.QUOTAS[I.UW_CALLER]
+    assert tier == gov.TIER_STANDARD                        # BACKGROUND is zero after hours
+    assert I.MAX_TICKERS_PER_PASS <= int(quota * gov.NON_RTH_QUOTA_FACTOR[tier])
+
+
+def test_uw_closes_are_regular_session_and_the_sentinel_is_unavailable():
+    from backtest import independent as I
+    from integrations.uw_governor import UWUnavailable
+    bars = [{"market_time": "r", "start_time": "2026-08-03T13:30:00Z", "close": "10.5"},
+            {"market_time": "po", "start_time": "2026-08-03T20:00:00Z", "close": "11"},
+            {"market_time": "r", "start_time": "2026-08-04T13:30:00Z", "close": None}]
+    with patch("integrations.uw_api.get_ohlc", new=AsyncMock(return_value=bars)) as g:
+        out = asyncio.run(I.fetch_uw_closes("aph", date(2026, 8, 1), today=date(2026, 8, 10)))
+    assert out == {date(2026, 8, 3): 10.5}
+    assert g.await_args.kwargs["caller"] == I.UW_CALLER
+    blocked = AsyncMock(return_value=UWUnavailable("QUOTA_EXCEEDED"))
+    with patch("integrations.uw_api.get_ohlc", new=blocked):
+        assert asyncio.run(I.fetch_uw_closes("aph", date(2026, 8, 1))) is None

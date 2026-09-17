@@ -66,12 +66,13 @@ def _signal(**overrides):
 
 # log_signal()'s positional parameter tail. `source` was the LAST argument when
 # these guards were written; STRIKE-SPEC-01 (2026-09-02) appended `status` as $38,
-# so source is now second-from-last. Kept as a named constant rather than a bare
-# index so the next append has exactly one place to update — and so a future
-# append that silently shifts these assertions fails loudly here instead of
-# quietly re-pointing them at the wrong column.
-SOURCE_ARG = -2
-STATUS_ARG = -1
+# and R-IV.432(f) (2026-09-17) appended `expires_at` as $39. Kept as named
+# constants rather than bare indices so the next append has exactly one place to
+# update — and so a future append that silently shifts these assertions fails
+# loudly here instead of quietly re-pointing them at the wrong column.
+SOURCE_ARG = -3
+STATUS_ARG = -2
+EXPIRES_ARG = -1
 
 
 def _run_log_signal(signal_data):
@@ -200,3 +201,13 @@ def test_log_signal_status_defaults_to_active_for_ordinary_writers():
 
     conn = _run_log_signal(_signal(source="STRIKE_IB_BREAK", status="SHADOW"))
     assert conn.execute.await_args.args[STATUS_ARG] == "SHADOW"
+
+
+def test_log_signal_persists_expires_at_as_naive_utc():
+    """R-IV.432(f): the pipeline's computed expiry is stored ($39), never discarded."""
+    from datetime import datetime, timezone
+    conn = _run_log_signal(_signal(expires_at=datetime(2026, 9, 17, 18, 0, tzinfo=timezone.utc)))
+    assert conn.execute.await_args.args[EXPIRES_ARG] == datetime(2026, 9, 17, 18, 0)
+    assert "expires_at" in conn.execute.await_args.args[0]
+    conn = _run_log_signal(_signal())
+    assert conn.execute.await_args.args[EXPIRES_ARG] is None

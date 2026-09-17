@@ -1813,12 +1813,12 @@ async def log_signal(
                 day_of_week, hour_of_day, is_opex_week, days_to_earnings, market_event, signal_category,
                 feed_tier, adx_value, feed_tier_ceiling, score_ceiling_reason, gate_type,
                 feed_tier_v2, feed_tier_v2_path, feed_tier_diverged, confluence_badge,
-                source, status
+                source, status, expires_at
             ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
                 $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
                 $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32,
-                $33, $34, $35, $36, $37, $38
+                $33, $34, $35, $36, $37, $38, $39
             )
             ON CONFLICT (signal_id) DO NOTHING
         """,
@@ -1888,39 +1888,34 @@ async def log_signal(
             # DEF-SIGNAL-STATUS-DISCARDED, not fixed here (brief Gates:
             # "Defects encountered are ticketed, not fixed").
             "SHADOW" if signal_data.get("status") == "SHADOW" else "ACTIVE",
+            # $39 DEF-SHADOW-EXPIRES-AT-DROPPED, both halves (R-IV.430(c), R-IV.432(f)). Every
+            # pipeline signal computes an expiry and this INSERT used to discard it, so intraday
+            # ideas stayed on the ACTIVE surfaces for the sweep's 24-hour fallback instead of 4.
+            # An unreadable value is stored as NULL -- the old behaviour -- never a reason to
+            # lose the signal.
+            _expiry_for_db(signal_data.get("expires_at"), signal_data.get("signal_id")),
         )
         inserted = str(result).strip().endswith("1")
         if not inserted:
             logger.warning("Signal insert skipped (duplicate signal_id=%s)", signal_data.get("signal_id"))
         else:
             await _write_iv_regime_evidence(conn, signal_data)
-            await _write_shadow_expiry(conn, signal_data)
         return inserted
 
 
-async def _write_shadow_expiry(conn, signal_data) -> None:
-    """DEF-SHADOW-EXPIRES-AT-DROPPED, moved with the backtest module (R-IV.430(c)).
-
-    SHADOW ROWS ONLY. Every pipeline signal also computes an expiry (pipeline.calculate_expiry)
-    that the INSERT above discards, and the live feed has been running on that absence: the
-    ACTIVE filter passes every NULL expiry and the expire sweep falls back to created_at +
-    24h. Persisting it for ACTIVE rows would change what the live feed shows and for how long
-    -- a live-surface change that needs its own ruling, not a side effect of this one. A
-    SHADOW row is never on an ACTIVE surface, so for it the value is only what the grading
-    rule reads.
-
-    A separate statement, like the evidence write: a failure here never loses the signal.
-    """
-    if signal_data.get("status") != "SHADOW" or not signal_data.get("expires_at"):
-        return
+def _expiry_for_db(value, signal_id=None):
+    """signals.expires_at is TIMESTAMP (naive UTC). None stays None; anything unreadable is
+    logged and stored as None rather than failing the INSERT."""
+    if value in (None, ""):
+        return None
+    if not isinstance(value, (str, datetime)):
+        logger.warning("expires_at of type %s not stored for %s", type(value).__name__, signal_id)
+        return None
     try:
-        await conn.execute(
-            "UPDATE signals SET expires_at = $2 WHERE signal_id = $1 AND status = 'SHADOW'",
-            signal_data["signal_id"],
-            _normalize_timestamp_for_db(signal_data["expires_at"]),
-        )
-    except Exception as exc:
-        logger.error("shadow expiry NOT persisted for %s: %s", signal_data.get("signal_id"), exc)
+        return _normalize_timestamp_for_db(value)
+    except (TypeError, ValueError) as exc:
+        logger.warning("expires_at %r not stored for %s: %s", value, signal_id, exc)
+        return None
 
 
 async def _write_iv_regime_evidence(conn, signal_data) -> None:
