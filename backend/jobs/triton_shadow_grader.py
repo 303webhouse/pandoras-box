@@ -12,6 +12,7 @@ columns; the signals table is UNTOUCHED, no outcome_source writes anywhere.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import date, datetime, timezone
 
@@ -65,6 +66,61 @@ def _dir_adj(entry: float, close: float, direction: str) -> float:
     if (direction or "").upper() == "BEAR":
         raw = -raw
     return round(raw, 4)
+
+
+# ── R-IV.436(b): A ROW WHOSE WINDOW SPANS A CORPORATE ACTION IS HELD, NOT GRADED ──
+#
+# The same rule the backtest module got at R-IV.432(e), for the same reason and on both
+# vendor paths. `spot_at_fire` is a RAW price recorded when the row fired; every bar series
+# in use -- UW's and yfinance's alike -- is SPLIT-ADJUSTED AS OF FETCH. A split between the
+# fire and the fetch therefore compares two price scales, and the grade is wrong by the split
+# ratio. The two KORU rows (ids 38201, 80352; 20-for-1 ex 2026-07-15) are the measured case:
+# stored grades of -94% and +95% that are really +13% and -17%.
+#
+# The fallback makes this urgent rather than theoretical: yfinance serves a series for almost
+# anything, so a row that used to fail slowly on an empty UW answer now gets a plausible
+# number instead.
+#
+# UNKNOWN IS NOT "NO EVENTS". When the calendar cannot be read the row is held, with its own
+# reason, and tried again next pass -- the grader's other skips work the same way.
+#
+# R-IV.436(d): the calendar here is yfinance's and the bars may be UW's, so the check is
+# already cross-vendor on the UW path. It is a HOLD, never a correction: resolving a held row
+# needs an independent price (UW spot, or the raw entry), never this vendor's calendar
+# confirming this vendor's bars.
+CALENDAR_UNAVAILABLE = "corporate_action_calendar_unavailable"
+HELD_CORPORATE_ACTION = "held_corporate_action"
+
+
+def _split_ex_dates(ticker: str):
+    """Ex-dates of split-type actions for a ticker, or None when the calendar cannot be read."""
+    try:
+        import yfinance as yf
+
+        s = yf.Ticker(ticker).splits
+        if s is None:
+            return None
+        out = set()
+        for ts, ratio in s.items():
+            try:
+                if float(ratio) > 0:
+                    out.add(ts.date() if hasattr(ts, "date") else ts)
+            except (TypeError, ValueError):
+                continue
+        return out
+    except Exception as exc:  # noqa: BLE001 -- unreadable, not empty
+        logger.warning("triton_grader: split calendar unreadable for %s: %s",
+                       ticker, type(exc).__name__)
+        return None
+
+
+def spans_corporate_action(ex_dates, fire_date, through):
+    """True when an ex-date falls after the fire and at or before the fetch.
+
+    An action ON the fire date is already inside the fire-time price; one after the fetch is
+    not in the series yet. Everything between rescales the series under the raw entry.
+    """
+    return any(fire_date < d <= through for d in (ex_dates or ()))
 
 
 async def run_triton_shadow_grader() -> dict:
@@ -140,7 +196,7 @@ async def run_triton_shadow_grader() -> dict:
         by_ticker.setdefault((r["ticker"] or "").upper(), []).append(r)
 
     today = datetime.now(timezone.utc).date()
-    graded = fully = skipped = 0
+    graded = fully = skipped = held = 0
     providers_used: dict = {}
 
     for ticker, group in by_ticker.items():
@@ -174,6 +230,28 @@ async def run_triton_shadow_grader() -> dict:
             _skip("UNGRADEABLE-NO-SERIES", len(group))
             skipped += len(group)
             continue
+
+        # R-IV.436(b), BEFORE the fetch: a fully-held ticker costs no vendor call.
+        ex_dates = await asyncio.to_thread(_split_ex_dates, ticker)
+        if ex_dates is None:
+            logger.warning("triton_grader: %s calendar unreadable — holding %d row(s)",
+                           ticker, len(group))
+            _skip(CALENDAR_UNAVAILABLE, len(group))
+            skipped += len(group)
+            held += len(group)
+            continue
+        gradable = []
+        for g in group:
+            fd = g["fired_at"].date() if hasattr(g["fired_at"], "date") else g["fired_at"]
+            if spans_corporate_action(ex_dates, fd, today):
+                _skip(HELD_CORPORATE_ACTION)
+                skipped += 1
+                held += 1
+            else:
+                gradable.append(g)
+        if not gradable:
+            continue
+        group = gradable
 
         idx, provider = await fetch_r_close_index(ticker, lookback_days)
         if not idx:
@@ -245,13 +323,13 @@ async def run_triton_shadow_grader() -> dict:
                 skipped += 1
                 continue
 
-    logger.info("triton_grader: touched=%d fully_graded=%d skipped=%d reasons=%s providers=%s",
-                graded, fully, skipped, skips or "{}", providers_used or "{}")
+    logger.info("triton_grader: touched=%d fully_graded=%d skipped=%d held=%d reasons=%s providers=%s",
+                graded, fully, skipped, held, skips or "{}", providers_used or "{}")
     # providers_used is the fallback's OWN evidence: if it is all "uw" the net
     # was never needed, and if it is all "yfinance" Path A is dead for every
     # ticker -- two very different worlds that a graded-count alone cannot tell
     # apart. Returned so the caller can record it without re-deriving it.
-    return {"graded": graded, "fully_graded": fully, "skipped": skipped,
+    return {"graded": graded, "fully_graded": fully, "skipped": skipped, "held": held,
             "skips": skips, "providers": providers_used,
             # `selected` is what this pass looked at; `ungraded_total` is what
             # exists. When censored is True the skip reasons describe the
