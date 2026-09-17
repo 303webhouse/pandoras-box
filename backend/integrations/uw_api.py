@@ -35,6 +35,7 @@ from utils.vendor_substitution import record_primary, record_substitution
 from integrations.uw_governor import (
     precheck as _governor_precheck,
     UWUnavailable,
+    is_unavailable,
     NO_API_KEY as _GOV_NO_API_KEY,
     CIRCUIT_OPEN as _GOV_CIRCUIT_OPEN,
     RATE_LIMITED as _GOV_RATE_LIMITED,
@@ -518,6 +519,14 @@ async def get_snapshot(ticker: str) -> Optional[Dict[str, Any]]:
     # uses kebab-case). UW returned 404 on every call, tripping the circuit breaker
     # and degrading the heatmap to stale fallback data. Validated against api_spec.yaml.
     state_resp = await _uw_request(f"/api/stock/{ticker.upper()}/stock-state", caller="snapshot")
+    # The governor's sentinel is PROPAGATED, not collapsed (same contract as get_ohlc and
+    # technical_indicator): it is falsy, so every `if snap:` consumer behaves as before, and a
+    # consumer that wants to say WHY it is falling back can now read the cause instead of
+    # reporting "unavailable" for a call that was never issued.
+    if isinstance(state_resp, UWUnavailable):
+        logger.warning("UW state BLOCKED for %s (%s) — returning the governor's sentinel",
+                       ticker, state_resp.reason)
+        return state_resp
     if not state_resp or "data" not in state_resp:
         logger.warning("UW state unavailable for %s — returning None", ticker)
         return None
@@ -619,6 +628,8 @@ async def _get_bars_via_uw(
     lookback = min(lookback, 730)  # 2-year cap; revisit if a consumer needs more
 
     raw = await get_ohlc(ticker, "1d", lookback_days=lookback, caller="ohlc_bars")
+    if is_unavailable(raw):
+        return raw          # the governor's block, with its reason — not "UW had no data"
     if not raw:
         return None
 
@@ -781,13 +792,18 @@ async def get_bars(
             await cache_set("quote", cache_key, bars)
             record_primary("uw_api.get_bars", PROVIDER_UW)
             return bars
-        logger.info(
-            "UW /ohlc/1d unavailable or empty for %s — falling back to yfinance",
-            ticker,
-        )
-        # R-IV.433(c): announced. (The ^-index path below is yfinance BY DESIGN and is not.)
-        record_substitution("uw_api.get_bars", PROVIDER_UW, PROVIDER_YFINANCE,
-                            "uw /ohlc/1d unavailable or empty", ticker)
+        # R-IV.433(c): announced — and the announcement names WHICH of two different things
+        # happened (conventions #18). "We never asked" and "they had nothing" have different
+        # causes and different remedies: a governor block is our own control flow and clears
+        # when quota does, while an empty 200 is a vendor answer about this ticker. Reporting
+        # both as "unavailable or empty" is how a substituting process looks identical to a
+        # blocked one on /health, which was the live reading on 2026-09-17.
+        if is_unavailable(bars):
+            reason = f"uw /ohlc/1d not attempted: governor block ({bars.reason})"
+        else:
+            reason = "uw /ohlc/1d returned no regular-session bar"
+        logger.info("%s for %s — falling back to yfinance", reason, ticker)
+        record_substitution("uw_api.get_bars", PROVIDER_UW, PROVIDER_YFINANCE, reason, ticker)
 
     try:
         loop = asyncio.get_event_loop()

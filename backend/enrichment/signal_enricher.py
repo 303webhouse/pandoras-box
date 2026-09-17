@@ -197,6 +197,7 @@ async def _fetch_snapshot(ticker: str) -> Optional[Dict[str, Any]]:
     Returns dict with current_price, today_volume, prev_close or None.
     """
     # Try UW API snapshot first (Polygon-compatible schema)
+    snap = None          # bound before the try so the fallback below can say WHY it fell back
     try:
         from integrations.uw_api import get_snapshot
         snap = await get_snapshot(ticker)
@@ -250,9 +251,15 @@ async def _fetch_snapshot(ticker: str) -> Optional[Dict[str, Any]]:
     except Exception as e:
         logger.debug(f"UW API snapshot failed for {ticker}: {e}")
 
-    # yfinance fallback -- announced (R-IV.433(c))
+    # yfinance fallback -- announced (R-IV.433(c)), and the announcement names which of two
+    # different things happened: a call the governor blocked before it was issued, or a call
+    # UW answered with nothing. They have different causes and clear differently, so a surface
+    # that merges them cannot be acted on.
     from utils.vendor_substitution import record_substitution
-    record_substitution("enricher.snapshot", "uw", "yfinance", "uw snapshot unavailable", ticker)
+    from integrations.uw_governor import is_unavailable
+    reason = (f"uw snapshot not attempted: governor block ({snap.reason})"
+              if is_unavailable(snap) else "uw snapshot unavailable")
+    record_substitution("enricher.snapshot", "uw", "yfinance", reason, ticker)
     try:
         from bias_engine.factor_utils import get_price_history
         df = await get_price_history(ticker, days=5)
