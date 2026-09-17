@@ -1400,6 +1400,34 @@
   // ── b9 River ────────────────────────────────────────────────────────────────
   const _river = new Map();  // id -> item
   const _rvAcked = new Set(); // acknowledged action-item ids (pulse stops)
+  // ── River notices (BUILD's contract) ───────────────────────────────────────
+  // GET /api/trade-ideas/notices -> {notices:[{id, since, until, title, body}]}. An empty
+  // list, an unreadable payload, or a route that is not there yet all mean the same thing:
+  // nothing to show. A notice is an operator message about the feed, never an alarm, so it
+  // never raises an error state in the River.
+  let _notices = [];
+  function parseNotices(data) {
+    const list = data && Array.isArray(data.notices) ? data.notices : [];
+    return list.filter((n) => n && n.id && (n.title || n.body)).map((n) => ({
+      id: String(n.id), title: n.title == null ? '' : String(n.title),
+      body: n.body == null ? '' : String(n.body), since: n.since, until: n.until,
+    }));
+  }
+  // A missing or unparseable bound is an OPEN bound: the server sent the notice, so the
+  // default is to show it. Only a bound we can read is allowed to hide one.
+  function activeNotices(now) {
+    const ms = (v) => { const t = Date.parse(v); return Number.isFinite(t) ? t : null; };
+    return _notices.filter((n) => {
+      const a = ms(n.since), b = ms(n.until);
+      return !(a != null && now < a) && !(b != null && now > b);
+    });
+  }
+  async function loadNotices() {
+    let data = null;
+    try { const r = await apiFetch('/api/trade-ideas/notices'); if (r.ok) data = await r.json(); } catch (_) {}
+    _notices = parseNotices(data);
+    renderRiver();
+  }
   let _riverFilter = 'all';
   function addRiverItems(items) { (items || []).forEach((it) => { if (it && it.id) _river.set(it.id, it); }); }
   function signalRiverItem(s, smap) {
@@ -1506,12 +1534,17 @@
     // floor on the day's fires, and the label says so.
     const today = etDate(Date.now());
     const circeToday = [..._river.values()].filter((i) => i.riverOnly && i.ts && etDate(i.ts) === today).length;
+    const noticeRows = activeNotices(Date.now()).map((n) =>
+      `<div class="rv-notice" data-nid="${esc(n.id)}">`
+      + (n.title ? `<span class="rv-notice-t">${esc(n.title)}</span>` : '')
+      + (n.body ? `<span class="rv-notice-b">${esc(n.body)}</span>` : '')
+      + '</div>').join('');
     const countRow = circeToday && (_riverFilter === 'all' || _riverFilter === 'signal')
       ? `<div class="rv-count${circeToday > CIRCE_DAILY_CEILING ? ' over' : ''}">CIRCE'S STEW · SHADOW · ${circeToday} seen today (ET)`
         + (circeToday > CIRCE_DAILY_CEILING ? ` — above the ~${CIRCE_DAILY_CEILING}/day ceiling: the trigger is too loose (R-IV.421(d))` : '') + '</div>'
       : '';
-    if (!items.length) { el.innerHTML = countRow + '<div class="rv-item info"><span class="rv-txt val-muted">stream quiet</span></div>'; return; }
-    el.innerHTML = countRow + items.map((it) => {
+    if (!items.length) { el.innerHTML = noticeRows + countRow + '<div class="rv-item info"><span class="rv-txt val-muted">stream quiet</span></div>'; return; }
+    el.innerHTML = noticeRows + countRow + items.map((it) => {
       const t = new Date(it.ts || Date.now());
       const hh = isNaN(t) ? '' : t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       const acked = _rvAcked.has(it.id);
@@ -1533,7 +1566,7 @@
     let positions = null;
     try { const r = await apiFetch('/api/v2/positions?status=OPEN'); if (r.ok) positions = await r.json(); } catch (_) {}
     await refreshThemeMap(positions);
-    loadBook(); loadKairos(); loadDeskStreams();
+    loadBook(); loadKairos(); loadDeskStreams(); loadNotices();
   }
 
   // ── Boot ────────────────────────────────────────────────────────────────────
