@@ -1681,6 +1681,19 @@ async def init_database():
         except Exception as e:
             print(f"WARNING: committee_accuracy view creation skipped: {e}")
 
+        # R-IV.423(b): Pass 9 shadow evidence, on the row (migration 033). Written by a
+        # SEPARATE statement after the insert, so if this ALTER is ever skipped the signal
+        # still persists and only the evidence write fails -- loudly.
+        try:
+            await conn.execute("""
+                ALTER TABLE signals
+                    ADD COLUMN IF NOT EXISTS iv_regime_legacy   JSONB,
+                    ADD COLUMN IF NOT EXISTS iv_regime_v2       JSONB,
+                    ADD COLUMN IF NOT EXISTS iv_regime_diverged BOOLEAN
+            """)
+        except Exception as e:
+            print(f"WARNING: signals iv_regime evidence columns skipped (lock timeout?): {e}")
+
         # ZEUS Phase 2: Feed tier classification column
         try:
             await conn.execute("""
@@ -1861,7 +1874,38 @@ async def log_signal(
         inserted = str(result).strip().endswith("1")
         if not inserted:
             logger.warning("Signal insert skipped (duplicate signal_id=%s)", signal_data.get("signal_id"))
+        else:
+            await _write_iv_regime_evidence(conn, signal_data)
         return inserted
+
+
+async def _write_iv_regime_evidence(conn, signal_data) -> None:
+    """R-IV.423(a)/(b) -- a shadow decision is persisted on the signal row, or it is not a
+    shadow. Pass 9's three records are built in pipeline.apply_scoring into the in-memory
+    `committee_data`, which the INSERT above never wrote: zero signals carried them.
+
+    Own columns rather than committee_data, because committee_bridge REPLACES committee_data
+    wholesale when a committee run lands -- evidence stored there would be erased later.
+
+    A separate statement, so a failure here can never lose the signal itself. It is logged
+    at ERROR: evidence that does not land is the defect this exists to close.
+    """
+    cd = signal_data.get("committee_data") or {}
+    legacy, v2, diverged = cd.get("iv_regime_legacy"), cd.get("iv_regime_v2"), cd.get("iv_regime_diverged")
+    if legacy is None and v2 is None and diverged is None:
+        return                                   # the gate did not evaluate this signal
+    try:
+        await conn.execute(
+            "UPDATE signals SET iv_regime_legacy = $2, iv_regime_v2 = $3, iv_regime_diverged = $4 "
+            "WHERE signal_id = $1",
+            signal_data["signal_id"],
+            dumps_jsonb(legacy) if legacy is not None else None,
+            dumps_jsonb(v2) if v2 is not None else None,
+            diverged,
+        )
+    except Exception as exc:
+        logger.error("iv_regime shadow evidence NOT persisted for %s: %s",
+                     signal_data.get("signal_id"), exc)
 
 async def update_signal_action(signal_id: str, action: str):
     """

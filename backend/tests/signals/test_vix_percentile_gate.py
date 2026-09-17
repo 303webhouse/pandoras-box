@@ -94,29 +94,190 @@ def test_percentile_computation_with_regime_shift():
 
 
 # ---------------------------------------------------------------------------
-# 4. Warmup fallback: <252 rows causes _compute_vix_percentiles to return None
+# 4. The percentile source: typed modes, newest trading days (R-IV.423 / R-IV.425(c))
+#
+# The test this replaces asserted `result is None` for short history. Its mock made
+# `pool.acquire` return a COROUTINE, so `async with` raised, the old function caught that
+# and returned None -- and the test passed through the ERROR path, never the warm-up one.
+# It was an instance of the exact defect R-IV.425(c) names. The mock below is a real async
+# context manager, and error and warm-up are asserted as DIFFERENT outcomes.
 # ---------------------------------------------------------------------------
 
-def test_warmup_fallback_when_history_insufficient():
-    short_rows = [{"vix": 18.0}] * 50
+from datetime import date, timedelta  # noqa: E402
 
-    mock_conn = AsyncMock()
-    mock_conn.fetch = AsyncMock(return_value=short_rows)
 
-    mock_ctx = AsyncMock()
-    mock_ctx.__aenter__ = AsyncMock(return_value=mock_conn)
-    mock_ctx.__aexit__ = AsyncMock(return_value=False)
+class _Acquire:
+    def __init__(self, conn):
+        self._conn = conn
 
-    mock_pool = AsyncMock()
-    mock_pool.acquire = AsyncMock(return_value=mock_ctx)
+    async def __aenter__(self):
+        return self._conn
 
-    async def run():
-        # Patch at the source module since get_postgres_client is imported lazily inside the function
-        with patch("database.postgres_client.get_postgres_client", new=AsyncMock(return_value=mock_pool)):
+    async def __aexit__(self, *exc):
+        return False
+
+
+class _Pool:
+    def __init__(self, rows=None, raises=None):
+        self._rows, self._raises = rows or [], raises
+        self.sql = None
+
+    def acquire(self):
+        pool = self
+
+        class _Conn:
+            async def fetch(self, sql, *args):
+                pool.sql = sql
+                if pool._raises:
+                    raise pool._raises
+                return pool._rows
+
+        return _Acquire(_Conn())
+
+
+def _rows_newest_first(n_calendar_days, end=date(2026, 9, 16), vix_of=lambda d: 18.0):
+    return [{"d": end - timedelta(days=i), "vix": vix_of(end - timedelta(days=i))}
+            for i in range(n_calendar_days)]
+
+
+def _run(pool):
+    async def go():
+        with patch("database.postgres_client.get_postgres_client", new=AsyncMock(return_value=pool)):
             return await _compute_vix_percentiles(VIX_REGIME_PERCENTILE_LOOKBACK)
+    return asyncio.run(go())
 
-    result = asyncio.run(run())
-    assert result is None, "Should return None when fewer than 252 days of history"
+
+def test_short_history_is_insufficient_history_not_error():
+    r = _run(_Pool(rows=_rows_newest_first(50)))
+    assert r["mode"] == "insufficient_history"
+    assert r["needed"] == VIX_REGIME_PERCENTILE_LOOKBACK
+    assert 0 < r["n_days"] < VIX_REGIME_PERCENTILE_LOOKBACK
+    assert "error" not in r
+
+
+def test_a_query_error_is_error_not_warmup():
+    r = _run(_Pool(raises=RuntimeError("connection reset")))
+    assert r["mode"] == "error"
+    assert "connection reset" in r["error"]
+
+
+def test_the_old_broken_mock_is_now_caught_as_an_error():
+    """The differential: the mock that used to 'pass' the warm-up test now says error."""
+    mock_ctx = AsyncMock()
+    mock_pool = AsyncMock()
+    mock_pool.acquire = AsyncMock(return_value=mock_ctx)   # the old, broken shape
+    r = _run(mock_pool)
+    assert r["mode"] == "error", "a broken pool must never be recorded as short history"
+
+
+def test_keeps_the_NEWEST_trading_days_not_the_oldest():
+    """Enough history for two windows; the kept one must end at the newest date."""
+    rows = _rows_newest_first(700)
+    r = _run(_Pool(rows=rows))
+    assert r["mode"] == "percentile"
+    assert r["n_days"] == VIX_REGIME_PERCENTILE_LOOKBACK
+    assert r["window_end"] == "2026-09-16"
+    assert r["window_start"] > "2025-08-01", r["window_start"]
+
+
+def test_the_newest_values_are_the_ones_used():
+    """Old readings are extreme, recent ones calm: a correct window sees only the calm."""
+    end = date(2026, 9, 16)
+    rows = _rows_newest_first(900, end=end,
+                              vix_of=lambda d: 15.0 if (end - d).days < 380 else 80.0)
+    r = _run(_Pool(rows=rows))
+    assert r["mode"] == "percentile"
+    assert r["p90_value"] == pytest.approx(15.0)
+
+
+def test_weekends_and_holidays_are_not_trading_days():
+    r = _run(_Pool(rows=_rows_newest_first(700)))
+    start = date.fromisoformat(r["window_start"])
+    # 252 trading days span far more than 252 calendar days
+    assert (date(2026, 9, 16) - start).days > 330
+    # 2026-09-07 is Labor Day and 2026-09-13 a Sunday: neither may count
+    open_day = lambda d: d.weekday() < 5 and d != date(2026, 9, 7)
+    with patch("stable_engine.market_calendar.is_trading_day_or_none") as cal:
+        cal.side_effect = open_day
+        r2 = _run(_Pool(rows=_rows_newest_first(20)))
+    expected = sum(open_day(date(2026, 9, 16) - timedelta(days=i)) for i in range(20))
+    assert expected == 13          # 14 weekdays in the span, minus Labor Day
+    assert r2["n_days"] == expected
+
+
+def test_calendar_gaps_are_counted_not_hidden():
+    with patch("stable_engine.market_calendar.is_trading_day_or_none", return_value=None):
+        r = _run(_Pool(rows=_rows_newest_first(10)))
+    assert r["calendar_unknown"] == 10
+    assert r["n_days"] == 8        # the weekday fallback, stated rather than silent
+
+
+def test_market_dates_not_session_dates():
+    pool = _Pool(rows=_rows_newest_first(5))
+    _run(pool)
+    assert "America/New_York" in pool.sql
+    assert "ORDER BY d DESC" in pool.sql
+
+
+def test_flag_is_named_for_what_it_does():
+    import signals.pipeline as pl
+    assert pl.VIX_REGIME_V2_SHADOW is True
+    assert not hasattr(pl, "VIX_REGIME_USE_PERCENTILE")
+    assert pl.VIX_REGIME_V2_GATE_VERSION
+
+
+# ---------------------------------------------------------------------------
+# 4b. The evidence lands on the row (R-IV.423(a)/(b))
+# ---------------------------------------------------------------------------
+
+class _RecConn:
+    def __init__(self, raises=None):
+        self.calls, self._raises = [], raises
+
+    async def execute(self, sql, *args):
+        if self._raises:
+            raise self._raises
+        self.calls.append((sql, args))
+
+
+def _signal(**cd):
+    return {"signal_id": "SIG-1", "committee_data": cd}
+
+
+def test_evidence_is_written_to_its_own_columns():
+    from database.postgres_client import _write_iv_regime_evidence
+    conn = _RecConn()
+    asyncio.run(_write_iv_regime_evidence(conn, _signal(
+        iv_regime_legacy={"decision": "allow"}, iv_regime_v2={"decision": "suppress"},
+        iv_regime_diverged=True)))
+    sql, args = conn.calls[0]
+    assert "iv_regime_legacy" in sql and "iv_regime_v2" in sql and "iv_regime_diverged" in sql
+    assert "committee_data" not in sql     # the committee bridge replaces that column wholesale
+    assert args[0] == "SIG-1" and args[3] is True
+
+
+def test_no_evidence_no_write():
+    from database.postgres_client import _write_iv_regime_evidence
+    conn = _RecConn()
+    asyncio.run(_write_iv_regime_evidence(conn, _signal()))
+    assert conn.calls == []
+
+
+def test_a_failed_evidence_write_never_raises_into_the_signal_path():
+    from database.postgres_client import _write_iv_regime_evidence
+    conn = _RecConn(raises=RuntimeError("column does not exist"))
+    with patch("database.postgres_client.logger") as log:
+        asyncio.run(_write_iv_regime_evidence(conn, _signal(iv_regime_diverged=False)))
+    assert log.error.called, "evidence that does not land must be loud"
+
+
+def test_log_signal_writes_evidence_only_after_a_real_insert():
+    import inspect
+    from database import postgres_client as pc
+    src = inspect.getsource(pc.log_signal)
+    i_ins, i_ev = src.index("inserted = "), src.index("_write_iv_regime_evidence")
+    assert i_ins < i_ev
+    assert "else:" in src[i_ins:i_ev], "a duplicate insert must not overwrite stored evidence"
 
 
 # ---------------------------------------------------------------------------
