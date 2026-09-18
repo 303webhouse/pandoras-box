@@ -123,6 +123,18 @@ def test_the_chip_names_what_the_figure_holds_that_the_book_does_not():
     assert out["complete"] is False
 
 
+def test_the_chip_counts_trades_that_have_a_book_row_but_no_link():
+    """After the import, the only unlinked trades left were ones whose day HAS a book row they
+    could not be paired with. A 'no book row that day' test went silent about all of them."""
+    calls = [[{"unlinked": 0, "absent": 0, "absent_realized": 0, "unknown_result": 0}],
+             [{"n": 23, "pnl": 846.73, "no_book_row": 0}]]
+    with patch.object(Q, "fetch_rows", new=AsyncMock(side_effect=calls)):
+        out = asyncio.run(Q.book_coverage_gap())
+    assert out["complete"] is False
+    assert "23 trades" in out["chip"] and "not linked to the book" in out["chip"]
+    assert "0 with no book row at all" in out["chip"]
+
+
 def test_the_chip_is_complete_only_when_both_directions_are_empty():
     calls = [[{"unlinked": 0, "absent": 0, "absent_realized": 0, "unknown_result": 0}],
              [{"n": 3, "pnl": 1.0}]]
