@@ -363,8 +363,13 @@ def _reading_age_s(at_iso, now=None):
     return ((now or _dt.now(_tz.utc)) - t).total_seconds()
 
 
-async def account_shed(tier: str) -> Optional[str]:
+async def account_shed(tier: str, now=None) -> Optional[str]:
     """Should this tier be shed on ACCOUNT state? Returns a reason or None.
+
+    `now` is a clock seam, not a parameter callers pass in production: every age here is
+    measured against a real instant, and a test that builds "three hours old" out of the
+    wall clock silently changes meaning depending on the hour it runs at — which is how a
+    scenario meant to sit inside one quota day starts landing on the other side of a reset.
 
     Fail-OPEN on every unknown: no header seen yet, unreadable Redis, missing
     limit. An unmeasured account must not block traffic — that would make the
@@ -380,7 +385,7 @@ async def account_shed(tier: str) -> Optional[str]:
         # A REFUSAL IS A MEASUREMENT, and it is checked before any counter, because it is the
         # most recent thing the vendor has said about the account. It carries no number, so it
         # cannot set a percentage — only a bounded back-off on the tiers nobody is waiting on.
-        r429 = _reading_age_s(q.get("last_429_at"))
+        r429 = _reading_age_s(q.get("last_429_at"), now)
         if r429 is not None and r429 <= RATE_LIMIT_BACKOFF_S and tier in RATE_LIMIT_SHED_TIERS:
             reason = ("UW refused a call %.0f min ago (429, no counter in it) - backing %s off "
                       "for %.0f min on measured refusal" % (r429 / 60, tier,
@@ -397,7 +402,7 @@ async def account_shed(tier: str) -> Optional[str]:
         # suppresses the calls whose responses carry the header, and the reading
         # that would clear it can never arrive. Fails OPEN, as an unmeasured
         # account must.
-        if _reading_predates_reset(q.get("at")):
+        if _reading_predates_reset(q.get("at"), now):
             # R-IV.407(b): its OWN state, not folded into open:no_header. "no header
             # has ever been cached" and "the cached header belongs to a spent quota
             # day" have different causes and different fixes; one name for both is
@@ -410,7 +415,7 @@ async def account_shed(tier: str) -> Optional[str]:
         # R-IV.441(c): an old reading cannot justify shedding, and shedding is what keeps it
         # old. Its own state, never folded into the cross-day one: "belongs to a spent quota
         # day" and "is hours old today" have different causes and different fixes.
-        age = _reading_age_s(q.get("at"))
+        age = _reading_age_s(q.get("at"), now)
         if age is None:
             _set_gate_state("open:reading_unageable",
                             "last header carries no usable timestamp (%r) - it cannot be "
