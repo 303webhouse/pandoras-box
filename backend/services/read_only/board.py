@@ -157,8 +157,30 @@ async def get_kill_switch() -> dict:
         return _envelope(None, None, True, kill_switch=None, provenance=None)
 
     triggered = _parse_ts(st.get("triggered_at"))
+    active = bool(st.get("active"))
+    # R-IV.457(a)(1): a disputed fire still ARMS (fail-safe), but it never renders as plain
+    # ACTIVE -- the state word says DISPUTED and both readings sit side by side.
+    if not active:
+        display_state = "CLEAR"
+    elif st.get("disputed") is True:
+        display_state = "DISPUTED"
+    elif st.get("pending_reset"):
+        display_state = "PENDING_RESET"
+    else:
+        display_state = "ACTIVE"
+    try:
+        from webhooks.circuit_breaker import TRIGGER_CLAIMS
+        claim = TRIGGER_CLAIMS.get((st.get("trigger") or "").lower())
+    except Exception:
+        claim = None
     kill = {
-        "active": bool(st.get("active")),
+        "active": active,
+        "display_state": display_state,
+        "readings": {
+            "alert": {"source": "TradingView", "trigger": st.get("trigger"), "claims": claim},
+            "hub": st.get("hub_reading"),
+        } if active else None,
+        "last_self_clear": st.get("last_self_clear"),
         "trigger": st.get("trigger"),
         "description": st.get("description"),
         "bias_cap": st.get("bias_cap"),

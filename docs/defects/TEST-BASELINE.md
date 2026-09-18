@@ -82,3 +82,16 @@ As observed (not triaged):
   the function (`database.postgres_client`, `signals.feed_service`), so the module has no
   such attributes and the patch raises `AttributeError` before the tool runs. **Those three
   tests never reach the tool**, so the MCP trade-ideas tool has no working smoke test.
+
+## `backend/hub_mcp/tests/test_envelope.py` — 2 failing (registered R-IV.457(g), 2026-09-18)
+
+```
+hub_mcp/tests/test_envelope.py::test_status_ok
+hub_mcp/tests/test_envelope.py::test_schema_version_is_always_v1
+```
+
+**Cause, measured:** the envelope emits `schema_version: v2.0`; both tests assert `v1.0`. They
+fail on the tree BEFORE the 2026-09-18 kill-switch work (checked by stashing it and re-running),
+so the version was bumped without the tests following. Registered rather than edited: whether
+v2.0 is the intended contract is the envelope owner's call, and a test changed to match the code
+is a test that no longer checks anything.

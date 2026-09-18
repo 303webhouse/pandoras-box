@@ -2962,6 +2962,73 @@ async def _verify_row(table: str, position_id: str, row_id: int, req: VerifyRequ
             "verified_event": req.verified_event}
 
 
+class CorrectRealizedRequest(BaseModel):
+    """An adjudicated correction to a CLOSED row's realized result (R-IV.457(d))."""
+    realized_pnl: float
+    evidence: str                  # the lines that support the verdict, shown beside it (#23)
+    reason: str
+    ruling: str
+    exit_price: Optional[float] = None
+    actor: Optional[str] = None
+
+
+@router.post("/v2/positions/{position_id}/correct-realized")
+async def correct_realized(position_id: str, req: CorrectRealizedRequest,
+                           _=Depends(require_api_key)):
+    """Correct the realized result of a row that has already ended — with its evidence.
+
+    There was no path for this at all: the PATCH refuses realized fields (they belong to the
+    close path) and the close path refuses a row that is not OPEN. So an adjudicated correction
+    to a closed trade had nowhere to go but raw SQL.
+
+    CONVENTIONS #23: an adjudication shows its evidence lines beside its verdict. `evidence` is
+    REQUIRED and is written onto the row with the verdict and the value it replaces, so a later
+    reader sees the lines that support the number rather than a number alone. The prior figure is
+    kept on the row too — a correction that erases what it corrected cannot be checked.
+    """
+    for name in ("evidence", "reason", "ruling"):
+        if not str(getattr(req, name) or "").strip():
+            raise HTTPException(
+                status_code=400,
+                detail=f"{name} is required — a corrected result with no {name} beside it is "
+                       f"a verdict alone, which is what conventions #23 exists to stop")
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT position_id, status, realized_pnl, exit_price, notes FROM unified_positions "
+            "WHERE position_id = $1", position_id)
+        if not row:
+            raise HTTPException(status_code=404, detail=f"Position {position_id} not found")
+        if (row["status"] or "").upper() not in ("CLOSED", "EXPIRED"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"{position_id} is {row['status']}; a realized correction applies to a "
+                       f"row that has ended (an open row closes through /close)")
+        prior = row["realized_pnl"]
+        new = round(float(req.realized_pnl), 2)
+        outcome = "WIN" if new > 0 else "LOSS" if new < 0 else "BREAKEVEN"
+        note = (f" || {req.ruling} REALIZED CORRECTION: "
+                f"{'NULL' if prior is None else f'{float(prior):+.2f}'} -> {new:+.2f}"
+                + (f"; exit_price {row['exit_price']} -> {req.exit_price}"
+                   if req.exit_price is not None else "")
+                + f". EVIDENCE: {req.evidence.strip()} REASON: {req.reason.strip()}")
+        async with conn.transaction():
+            await conn.execute("SELECT set_config('app.actor', $1, true)",
+                               (req.actor or "lifecycle-ui"))
+            await conn.execute("SELECT set_config('app.reason', $1, true)",
+                               f"{req.ruling}: realized correction with evidence")
+            await conn.execute(
+                """UPDATE unified_positions
+                      SET realized_pnl = $1, trade_outcome = $2,
+                          exit_price = COALESCE($3, exit_price),
+                          notes = COALESCE(notes, '') || $4, updated_at = NOW()
+                    WHERE position_id = $5""",
+                new, outcome, req.exit_price, note, position_id)
+    return {"status": "corrected", "position_id": position_id,
+            "realized_before": None if prior is None else float(prior),
+            "realized_after": new, "trade_outcome": outcome, "evidence_recorded": True}
+
+
 class RetireDuplicateRequest(BaseModel):
     """Retire a row that records a trade the book already holds under another id."""
     duplicate_of: str            # the keeper's position_id
