@@ -189,3 +189,23 @@ def test_the_rule_is_written_where_the_next_reconciliation_will_read_it():
     flat = " ".join(src.replace("#", " ").split())
     assert "reports ABSENCE where there is DUPLICATION" in flat
     assert "or it is not an inventory" in flat.lower()
+
+
+# --- boot resilience (measured 2026-09-18) --------------------------------------------------
+def test_a_constraint_that_cannot_be_added_does_not_end_the_boot():
+    """One row carrying the status without its pointer stopped the rest of the DDL sequence
+    silently: the app served, the schema bootstrap did not finish, and the index that came
+    after it was simply never created."""
+    boot = BOOT.read_text(encoding="utf-8")
+    i = boot.index("unified_positions_duplicate_pointer")
+    window = boot[i - 1500:i + 2500]
+    assert "try:" in window and "except Exception" in window, (
+        "an ALTER that raises here takes every statement after it down with it")
+
+
+def test_a_refused_constraint_names_the_rows_that_blocked_it():
+    """A warning that says only 'not applied' leaves the next reader to re-derive which rows
+    were in the way."""
+    boot = BOOT.read_text(encoding="utf-8")
+    assert "blocking rows:" in boot
+    assert "SELECT position_id, status, duplicate_of FROM unified_positions" in boot

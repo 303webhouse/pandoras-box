@@ -945,21 +945,37 @@ async def init_database():
         await conn.execute("""
             ALTER TABLE unified_positions ADD COLUMN IF NOT EXISTS duplicate_of TEXT
         """)
-        await conn.execute("""
-            DO $$
-            BEGIN
-                IF NOT EXISTS (SELECT 1 FROM pg_constraint
-                                WHERE conname = 'unified_positions_duplicate_pointer') THEN
-                    ALTER TABLE unified_positions ADD CONSTRAINT unified_positions_duplicate_pointer
-                        CHECK ((status = 'DUPLICATE_OF') = (duplicate_of IS NOT NULL));
-                END IF;
-                IF NOT EXISTS (SELECT 1 FROM pg_constraint
-                                WHERE conname = 'unified_positions_duplicate_not_self') THEN
-                    ALTER TABLE unified_positions ADD CONSTRAINT unified_positions_duplicate_not_self
-                        CHECK (duplicate_of IS NULL OR duplicate_of <> position_id);
-                END IF;
-            END $$;
-        """)
+        # A CHECK that existing data violates cannot be added, and an ALTER that raises here
+        # takes every statement after it down with it -- measured 2026-09-18, when one row
+        # carrying the status without its pointer stopped the rest of this sequence silently.
+        # So each constraint is attempted on its own, and a refusal NAMES the rows that
+        # blocked it instead of ending the boot.
+        for _name, _check, _violation in (
+            ("unified_positions_duplicate_pointer",
+             "(status = 'DUPLICATE_OF') = (duplicate_of IS NOT NULL)",
+             "status = 'DUPLICATE_OF' AND duplicate_of IS NULL "
+             "OR status <> 'DUPLICATE_OF' AND duplicate_of IS NOT NULL"),
+            ("unified_positions_duplicate_not_self",
+             "duplicate_of IS NULL OR duplicate_of <> position_id",
+             "duplicate_of = position_id"),
+        ):
+            try:
+                await conn.execute(f"""
+                    DO $$
+                    BEGIN
+                        IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                                        WHERE conname = '{_name}') THEN
+                            ALTER TABLE unified_positions
+                                ADD CONSTRAINT {_name} CHECK ({_check});
+                        END IF;
+                    END $$;
+                """)
+            except Exception as e:
+                _bad = await conn.fetch(
+                    f"SELECT position_id, status, duplicate_of FROM unified_positions "
+                    f"WHERE {_violation} LIMIT 5")
+                print(f"WARNING: {_name} not applied ({type(e).__name__}); "
+                      f"blocking rows: {[dict(r) for r in _bad]}")
         await conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_unified_positions_duplicate_of
                 ON unified_positions (duplicate_of) WHERE duplicate_of IS NOT NULL
