@@ -166,6 +166,14 @@ async def get_kill_switch() -> dict:
         "scoring_modifier": st.get("scoring_modifier"),
         "pending_reset": bool(st.get("pending_reset")),
         "triggered_at": triggered.isoformat() if triggered else None,
+        # R-IV.455: how long a latch has been waiting is the one number that distinguishes a
+        # breaker protecting the session from one left armed two days after its own condition
+        # cleared. Shown, with the hub's own reading at fire and whether it confirmed the fire.
+        "triggered_age_seconds": _age_seconds(triggered),
+        "pending_since": st.get("pending_since"),
+        "pending_age_seconds": _age_seconds(_parse_ts(st.get("pending_since"))),
+        "hub_reading": st.get("hub_reading"),
+        "disputed": st.get("disputed"),
     }
 
     source = prov.get("source") or "default-since-boot"
