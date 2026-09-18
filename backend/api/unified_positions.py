@@ -28,6 +28,13 @@ from models.accounts import (  # R-IV.445(a): one vocabulary, read by every writ
 )
 from models.position_status import DUPLICATE_OF  # R-IV.449(a): retired, not deleted
 
+# R-IV.454(d): each terminal status, and the path that records how a position reached it.
+TERMINAL_VIA_PATH = {
+    "CLOSED": "POST /v2/positions/{id}/close (or /reduce for part of it)",
+    "EXPIRED": "the expiry sweep, which records the expiry date and an UNKNOWN result",
+    "DUPLICATE_OF": "POST /v2/positions/{id}/retire-duplicate, which names the keeper",
+}
+
 from api._swr_cache import SWRCache
 from api._position_write_scope import (  # D1 second half: allowlist prevents
     WriteScope, assert_columns_allowed, assert_derived_not_edited,
@@ -628,23 +635,51 @@ async def create_position(req: CreatePositionRequest, _=Depends(require_api_key)
 
 # ── READ ──────────────────────────────────────────────────────────────
 
-async def _sweep_expired_positions():
-    """Mark OPEN positions as EXPIRED if their expiry date has passed."""
+EXPIRY_SWEEP_ACTOR = "expiry-sweep"
+
+
+async def _sweep_expired_positions() -> List[Dict[str, Any]]:
+    """End OPEN positions whose expiry has passed, recording the result, never leaving it absent.
+
+    R-IV.454(d): a terminal status is reachable only through a path that records the exit. An
+    expiry is a fact about the DATE (the contract ended on its expiry) and says nothing about the
+    value: a spread can expire in the money, a long option worthless. So the sweep records what it
+    knows, exit_date = the expiry, and writes the result as UNKNOWN explicitly, which a reader can
+    tell apart from a result that was simply never written.
+
+    AND IT RUNS ON A SCHEDULE, NEVER ON A READ. It used to be called from GET /v2/positions and
+    from the portfolio summary, so a request to LOOK at the book could end positions in it. It is
+    now driven by the stable-jobs loop and by the authenticated manual endpoint. Never raises.
+    """
     try:
         pool = await get_postgres_client()
         async with pool.acquire() as conn:
-            result = await conn.execute("""
-                UPDATE unified_positions
-                SET status = 'EXPIRED', updated_at = NOW()
-                WHERE status = 'OPEN'
-                  AND expiry IS NOT NULL
-                  AND expiry < CURRENT_DATE
-            """)
-            count = int(result.split()[-1]) if result else 0
-            if count > 0:
-                logger.info("Auto-expired %d positions past their expiry date", count)
+            async with conn.transaction():
+                await conn.execute("SELECT set_config('app.actor', $1, true)",
+                                   EXPIRY_SWEEP_ACTOR)
+                await conn.execute(
+                    "SELECT set_config('app.reason', $1, true)",
+                    "R-IV.454(d): expiry passed; result recorded as UNKNOWN until marked")
+                rows = await conn.fetch("""
+                    UPDATE unified_positions
+                       SET status = 'EXPIRED',
+                           exit_date = COALESCE(exit_date, expiry::timestamptz),
+                           trade_outcome = COALESCE(trade_outcome, 'UNKNOWN'),
+                           updated_at = NOW()
+                     WHERE status = 'OPEN'
+                       AND expiry IS NOT NULL
+                       AND expiry < CURRENT_DATE
+                    RETURNING position_id, ticker, expiry
+                """)
+        expired = [{"position_id": r["position_id"], "ticker": r["ticker"],
+                    "expiry": str(r["expiry"])} for r in rows]
+        if expired:
+            logger.info("Expiry sweep ended %d position(s), result UNKNOWN: %s",
+                        len(expired), [e["position_id"] for e in expired])
+        return expired
     except Exception as e:
         logger.warning("Expired position sweep failed: %s", e)
+        return []
 
 
 @router.get("/v2/positions", dependencies=[Depends(require_api_key)])
@@ -690,8 +725,8 @@ async def _compute_positions(
     asset_type_upper: Optional[str],
 ) -> Dict[str, Any]:
     """Heavy assembly path for /v2/positions — pulled out of the handler so SWR can wrap it."""
-    # Auto-expire positions past their expiry date
-    await _sweep_expired_positions()
+    # R-IV.454(d): the expiry sweep used to run HERE, so a request to look at the book could end
+    # positions in it. It runs on the stable-jobs schedule now; a read writes nothing.
 
     pool = await get_postgres_client()
 
@@ -818,24 +853,10 @@ async def _compute_positions(
 
 @router.post("/v2/positions/expire-sweep")
 async def expire_sweep(_=Depends(require_api_key)):
-    """Manually trigger expiry sweep for positions past their expiry date."""
-    try:
-        pool = await get_postgres_client()
-        async with pool.acquire() as conn:
-            rows = await conn.fetch("""
-                UPDATE unified_positions
-                SET status = 'EXPIRED', updated_at = NOW()
-                WHERE status = 'OPEN'
-                  AND expiry IS NOT NULL
-                  AND expiry < CURRENT_DATE
-                RETURNING position_id, ticker, expiry
-            """)
-        expired = [{"position_id": r["position_id"], "ticker": r["ticker"],
-                     "expiry": str(r["expiry"])} for r in rows]
-        return {"status": "ok", "expired_count": len(expired), "expired": expired}
-    except Exception as e:
-        logger.error("Expire sweep failed: %s", e)
-        return {"status": "error", "detail": str(e)}
+    """Manually trigger the expiry sweep. Same function as the schedule, so both record the
+    same result: exit_date = the expiry, outcome UNKNOWN until marked (R-IV.454(d))."""
+    expired = await _sweep_expired_positions()
+    return {"status": "ok", "expired_count": len(expired), "expired": expired}
 
 
 @router.get("/v2/positions/summary", dependencies=[Depends(require_api_key)])
@@ -845,8 +866,7 @@ async def portfolio_summary(account: Optional[str] = Query(None)):
     Returns: total positions, capital at risk, net direction, nearest expiry.
     Optional account filter: ?account=ROBINHOOD or ?account=FIDELITY
     """
-    # Auto-expire first
-    await _sweep_expired_positions()
+    # R-IV.454(d): no sweep on a read — see _sweep_expired_positions.
 
     pool = await get_postgres_client()
 
@@ -1359,8 +1379,19 @@ async def update_position(position_id: str, req: UpdatePositionRequest, _=Depend
     idx = 1
 
     if req.status is not None:
+        # R-IV.454(d): a terminal status is reachable only through a path that records the exit.
+        # The PATCH records nothing about one, so it cannot end a position; it names the doors
+        # that can. (Reopening, a move AWAY from terminal, is not what the rule governs.)
+        target = req.status.strip().upper()
+        if target in TERMINAL_VIA_PATH:
+            raise HTTPException(
+                status_code=400,
+                detail=(f"status {target} is not set by an edit — it needs "
+                        f"{TERMINAL_VIA_PATH[target]}, which records how the position ended. "
+                        f"An edit that ends a position leaves a closed row with no result, "
+                        f"and nothing downstream can tell that from a real flat trade."))
         sets.append(f"status = ${idx}")
-        params.append(req.status.upper())
+        params.append(target)
         idx += 1
     if req.direction is not None:
         sets.append(f"direction = ${idx}")
@@ -1548,27 +1579,12 @@ async def update_position(position_id: str, req: UpdatePositionRequest, _=Depend
 
     # BUG 3: If entry_price or quantity changed on an OPEN position, adjust cash for the cost_basis delta
     cash_ok = None
-    if (req.entry_price is not None or req.quantity is not None) and result.get("status", "").upper() == "OPEN":
-        old_cost = float(old_pos.get("cost_basis") or 0)
-        s = (result.get("structure") or "").lower()
-        is_stock = s in ("stock", "stock_long", "long_stock", "stock_short", "short_stock")
-        new_entry = float(result.get("entry_price") or 0)
-        new_qty = int(result.get("quantity") or 0)
-        new_cost = abs(new_entry) * new_qty * (1 if is_stock else 100)
-
-        if round(new_cost, 2) != round(old_cost, 2):
-            cost_delta = new_cost - old_cost
-            # For debit positions: more cost = less cash. For credit: more cost = more cash.
-            cash_delta = cost_delta if s in CREDIT_STRUCTURES else -cost_delta
-            cash_ok = await _adjust_account_cash(pool, result.get("account", "ROBINHOOD"), cash_delta)
-
-            # Update cost_basis in DB to match
-            async with pool.acquire() as conn:
-                await conn.execute(
-                    "UPDATE unified_positions SET cost_basis = $1 WHERE position_id = $2",
-                    round(new_cost, 2), position_id
-                )
-            result["cost_basis"] = round(new_cost, 2)
+    # R-IV.453/454: A RECORD CORRECTION IS NOT A FILL. This block used to recompute cost_basis
+    # and ADJUST THE ACCOUNT'S CASH whenever an edit touched entry_price or quantity, so
+    # correcting a mistyped quantity moved money in the book that never moved at the broker.
+    # Measured 2026-09-18: correcting NVDA 415's quantity from 2 to 3 debited ROBINHOOD cash by
+    # 16.00 and rewrote the recorded basis 32.00 to 48.00, neither of which the edit asked for.
+    # Cash moves belong to fills (add-lot, reduce, close); an edit writes exactly what it names.
 
     try:
         await manager.broadcast_position_update({
