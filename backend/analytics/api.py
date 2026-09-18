@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, UploadFile, File
 from utils.pivot_auth import require_api_key
+from models import position_status  # R-IV.449(a): "not open" is not "completed"
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -690,8 +691,12 @@ async def trade_stats(
         signal_source=signal_source,
     )
     total = len(rows)
-    open_rows = [r for r in rows if str(r.get("status", "")).lower() == "open"]
-    closed_rows = [r for r in rows if str(r.get("status", "")).lower() != "open"]
+    # R-IV.449(a): "not open" and "completed" are different questions. A retired duplicate is
+    # neither — its fills happened once and its money belongs to the row it duplicates — so
+    # partitioning on `!= open` sums one trade twice. The vocabulary answers it once, in
+    # models/position_status.py.
+    open_rows = [r for r in rows if position_status.is_open(r.get("status"))]
+    closed_rows = [r for r in rows if position_status.counts_as_realized(r.get("status"))]
     pnl_values = [_as_float(r.get("pnl_dollars")) for r in closed_rows if r.get("pnl_dollars") is not None]
     realized_pnl = sum(pnl_values)
     unrealized_pnl = sum(_as_float(r.get("pnl_dollars"), 0.0) for r in open_rows if r.get("pnl_dollars") is not None)

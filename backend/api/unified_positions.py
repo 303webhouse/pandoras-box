@@ -26,6 +26,7 @@ from models.position_lots import (  # R-IV.441(a): the position row is the AGGRE
 from models.accounts import (  # R-IV.445(a): one vocabulary, read by every write path
     CANONICAL_ACCOUNTS, canonical_account,
 )
+from models.position_status import DUPLICATE_OF  # R-IV.449(a): retired, not deleted
 
 from api._swr_cache import SWRCache
 from api._position_write_scope import (  # D1 second half: allowlist prevents
@@ -2928,6 +2929,68 @@ async def _verify_row(table: str, position_id: str, row_id: int, req: VerifyRequ
     return {"status": "verified", "position_id": position_id, "table": table, "id": row_id,
             "provenance": "BROKER_VERIFIED", "broker_ref": req.broker_ref,
             "verified_event": req.verified_event}
+
+
+class RetireDuplicateRequest(BaseModel):
+    """Retire a row that records a trade the book already holds under another id."""
+    duplicate_of: str            # the keeper's position_id
+    reason: str                  # required — why this row is the duplicate and that one the keeper
+    actor: Optional[str] = None
+
+
+@router.post("/v2/positions/{position_id}/retire-duplicate")
+async def retire_duplicate_position(position_id: str, req: RetireDuplicateRequest,
+                                    _=Depends(require_api_key)):
+    """Mark a row as a duplicate of another. It is never deleted (R-IV.449(a)).
+
+    The duplicate is the only record that the duplication happened, and the only evidence of
+    what caused it — here, a row filed under a retired account alias that an account-scoped
+    inventory could not see, so the reconciliation reported absence where there was duplication.
+
+    Its notes are untouched. Its money stops counting because every rollup asks for CLOSED or
+    EXPIRED rather than for "not open"; the keeper already carries the realized figure.
+    """
+    if req.duplicate_of == position_id:
+        raise HTTPException(status_code=400, detail="a row cannot be a duplicate of itself")
+    if not req.reason.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="reason is required — a retirement with no stated cause is indistinguishable "
+                   "from a row quietly removed from the totals")
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT position_id, ticker, status, realized_pnl FROM unified_positions "
+            "WHERE position_id = $1", position_id)
+        if not row:
+            raise HTTPException(status_code=404, detail=f"Position {position_id} not found")
+        keeper = await conn.fetchrow(
+            "SELECT position_id, ticker, status FROM unified_positions WHERE position_id = $1",
+            req.duplicate_of)
+        if not keeper:
+            raise HTTPException(
+                status_code=404,
+                detail=f"keeper {req.duplicate_of} not found — a duplicate must point at a row "
+                       f"that exists, or the trade it stops carrying is carried by nothing")
+        if keeper["status"] == DUPLICATE_OF:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{req.duplicate_of} is itself retired as a duplicate; point at the row "
+                       f"that actually holds the trade")
+        async with conn.transaction():
+            await conn.execute("SELECT set_config('app.actor', $1, true)",
+                               (req.actor or "lifecycle-ui"))
+            await conn.execute("SELECT set_config('app.reason', $1, true)", req.reason)
+            await conn.execute(
+                """UPDATE unified_positions
+                      SET status = $1, duplicate_of = $2, updated_at = NOW()
+                    WHERE position_id = $3""",
+                DUPLICATE_OF, req.duplicate_of, position_id)
+    return {"status": "retired", "position_id": position_id, "marked": DUPLICATE_OF,
+            "duplicate_of": req.duplicate_of, "keeper_ticker": keeper["ticker"],
+            "realized_no_longer_counted": (float(row["realized_pnl"])
+                                           if row["realized_pnl"] is not None else None),
+            "notes_preserved": True}
 
 
 @router.post("/v2/positions/{position_id}/verify")
