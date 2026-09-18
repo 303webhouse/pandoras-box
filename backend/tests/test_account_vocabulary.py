@@ -110,7 +110,11 @@ def test_the_remap_never_invents_a_mapping():
     assert "DISPUTED" in src
 
 
-def test_the_remap_writes_only_the_account_column():
+def test_the_remap_writes_only_the_label_column():
+    """CORRECTED with R-IV.450: the remap now covers every table that stores the label, so the
+    write is parameterised by table and column. What must not change is that it writes ONE
+    column and nothing else."""
     src = SCRIPT.read_text(encoding="utf-8")
-    assert src.count("UPDATE unified_positions") == 1
-    assert "SET account = $1, updated_at = NOW()" in src
+    assert src.count("UPDATE {table} SET {column} = $1") == 1
+    writes = [ln for ln in src.splitlines() if "UPDATE " in ln and "SET" in ln]
+    assert len(writes) == 1, f"one write site, got {writes}"
