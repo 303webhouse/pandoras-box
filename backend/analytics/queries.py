@@ -202,10 +202,17 @@ async def book_coverage_gap() -> Dict[str, Any]:
     every time a position closes by a path that is not the close endpoint. A chip carrying a
     number from the day it was written is the stale-figure defect in a new place.
 
-    Three populations, each named by its method (conventions #18):
+    Populations, each named by its method (conventions #18):
       unlinked        CLOSED/EXPIRED with no trade_id — no record the close endpoint wrote
       absent          unlinked AND no same-ticker same-day trades row — nothing plausible either
       unknown_result  CLOSED/EXPIRED with neither realized nor outcome — ended, result unrecorded
+      trades_orphans  closed trades rows with no book row that day — IN this figure, NOT in the
+                      book (added after the acceptance test: the gap runs BOTH ways)
+
+    CORRECTED 2026-09-18. The first version measured one direction only -- what the book holds
+    that `trades` lacks. The acceptance test for the read-from-book build found the other: 70
+    closed trades in this figure with no book row at all (+356.10, historical imports). A chip
+    naming only what a figure is missing reads as "the rest is right", and it was not.
     """
     try:
         rows = await fetch_rows(
@@ -229,9 +236,30 @@ async def book_coverage_gap() -> Dict[str, Any]:
                                    AND trade_outcome IS NULL)                 AS unknown_result
               FROM ended
             """, [])
+        orphans = await fetch_rows(
+            """
+            SELECT COUNT(*) AS n, COALESCE(SUM(t.pnl_dollars), 0) AS pnl
+              FROM trades t
+             WHERE LOWER(t.status) IN ('closed', 'expired')
+               AND NOT EXISTS (SELECT 1 FROM unified_positions p WHERE p.trade_id = t.id)
+               AND NOT EXISTS (SELECT 1 FROM unified_positions p
+                                WHERE p.ticker = t.ticker
+                                  AND p.exit_date::date = t.closed_at::date
+                                  AND UPPER(p.status) <> 'OPEN')
+            """, [])
         r = rows[0] if rows else {}
+        o = orphans[0] if orphans else {}
         absent = int(r.get("absent") or 0)
         absent_realized = round(float(r.get("absent_realized") or 0), 2)
+        orphan_n = int(o.get("n") or 0)
+        orphan_pnl = round(float(o.get("pnl") or 0), 2)
+        parts = []
+        if absent:
+            parts.append(f"{absent} closes ({absent_realized:+,.2f} realized) are in the book "
+                         f"but not in this figure")
+        if orphan_n:
+            parts.append(f"{orphan_n} trades ({orphan_pnl:+,.2f}) are in this figure with no "
+                         f"book row")
         return {
             "source": "trades",
             "book_source": "unified_positions",
@@ -239,9 +267,10 @@ async def book_coverage_gap() -> Dict[str, Any]:
             "absent_closes": absent,
             "absent_realized": absent_realized,
             "unknown_result_closes": int(r.get("unknown_result") or 0),
-            "complete": absent == 0,
-            "chip": (f"{absent} closes ({absent_realized:+,.2f} realized) are in the book but "
-                     f"not in this figure" if absent else None),
+            "trades_orphans": orphan_n,
+            "trades_orphans_pnl": orphan_pnl,
+            "complete": absent == 0 and orphan_n == 0,
+            "chip": "; ".join(parts) if parts else None,
             "ruling": "R-IV.451(a): analytics reads the book; until then this figure is partial",
         }
     except Exception as exc:
@@ -249,6 +278,139 @@ async def book_coverage_gap() -> Dict[str, Any]:
         return {"source": "trades", "complete": None,
                 "chip": "coverage of the book could not be measured for this figure",
                 "error": type(exc).__name__}
+
+
+# ── THE BOOK READER (R-IV.451(a), R-IV.454(f)) ─────────────────────────────────────────────
+#
+# Analytics reads the book. `trades` is filled by one write path, so every position ended any
+# other way was missing from every analytics figure (77 closes, -1,373.64 realized, when ruled).
+# This reads `unified_positions` and projects each row into the shape the analytics routes
+# already consume, so their contracts do not move -- only their source does.
+#
+# THE SIX RULINGS, each implemented where it is enforced:
+#   (1) exit_date windows a terminal row's realized; entry_date windows an open row.
+#   (2) a terminal row with NO RESULT is counted and never summed: pnl_dollars stays None, and
+#       `result_known` says so, so no rollup can mistake it for a flat trade.
+#   (3) retired duplicates are excluded by the vocabulary (position_status), and counted.
+#   (4) the account filter reads every alias (models.accounts.scope_for).
+#   (5) realized is the row's own figure now; lot closures take over when that table has rows.
+#   (6) percent return is realized / |cost_basis|, and NULL when the basis is NULL or zero --
+#       the source of the impossible percentages on the principal's screen.
+#
+# AND THE NULL-PREDICATE RULE (R-IV.454(b)): a terminal row with no exit_date cannot be placed
+# in a window, so it is returned FLAGGED `undated`, never silently dropped. The rollup keeps it
+# out of windowed sums and surfaces it as its own line.
+
+BOOK_FIELDS_NOT_IN_BOOK = ("rr_achieved", "risk_pct", "bias_at_entry",
+                           "account_balance_at_open", "exit_reason")
+
+
+def _aware(dt):
+    from datetime import timezone as _tz
+    return dt.replace(tzinfo=_tz.utc) if dt is not None and dt.tzinfo is None else dt
+
+
+def book_row_to_trade_shape(r: Dict[str, Any]) -> Dict[str, Any]:
+    """One book row in the trades shape. Pure, so the projection is testable without a database."""
+    from models import position_status as PS
+
+    status = PS.normalize(r.get("status"))
+    terminal = PS.counts_as_realized(status)
+    realized = r.get("realized_pnl")
+    basis = r.get("cost_basis")
+    pnl = (float(realized) if realized is not None else None) if terminal else (
+        float(r["unrealized_pnl"]) if r.get("unrealized_pnl") is not None else None)
+    pct = None
+    if pnl is not None and basis is not None and float(basis) != 0:
+        pct = round(pnl / abs(float(basis)) * 100.0, 4)
+    return {
+        "id": r.get("id"),
+        "position_id": r.get("position_id"),
+        "trade_id": r.get("trade_id"),
+        "ticker": r.get("ticker"),
+        "direction": r.get("direction"),
+        "structure": r.get("structure"),
+        "account": r.get("account"),
+        "status": status.lower(),
+        "opened_at": r.get("entry_date"),
+        "closed_at": r.get("exit_date"),
+        "pnl_dollars": pnl,
+        "pnl_percent": pct,
+        "origin": (r.get("source") or "manual").lower(),
+        "signal_id": r.get("signal_id"),
+        "signal_source": r.get("linked_signal_strategy"),
+        "linked_signal_strategy": r.get("linked_signal_strategy"),
+        "linked_signal_type": r.get("linked_signal_type"),
+        "linked_signal_bias": r.get("linked_signal_bias"),
+        "trade_outcome": r.get("trade_outcome"),
+        "notes": r.get("notes"),
+        "cost_basis": float(basis) if basis is not None else None,
+        "result_known": (not terminal) or realized is not None,
+        "undated": terminal and r.get("exit_date") is None,
+        "backfill_exempt": PS.is_backfill_exempt(r),
+        "source_table": "unified_positions",
+        # Present in the trades shape, absent from the book: named rather than invented.
+        **{f: None for f in BOOK_FIELDS_NOT_IN_BOOK},
+    }
+
+
+async def get_book_rows(
+    account: Optional[str] = None,
+    ticker: Optional[str] = None,
+    direction: Optional[str] = None,
+    structure: Optional[str] = None,
+    origin: Optional[str] = None,
+    days: int = 90,
+    signal_source: Optional[str] = None,
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+) -> Dict[str, Any]:
+    """The book, windowed and projected. Returns {"rows": [...], "retired_excluded": n}.
+
+    Terminal rows are windowed on exit_date, open rows on entry_date, and a terminal row with
+    no exit_date is included FLAGGED rather than dropped (the NULL-predicate rule).
+    """
+    from models import position_status as PS
+    from models.accounts import scope_for
+
+    start_dt, end_dt = window_bounds(days=days, start=start, end=end)
+    params: List[Any] = [_aware(start_dt), _aware(end_dt)]
+    conditions = ["""(
+        (UPPER(p.status) = 'OPEN' AND (p.entry_date IS NULL OR p.entry_date BETWEEN $1 AND $2))
+        OR (UPPER(p.status) <> 'OPEN' AND (p.exit_date IS NULL OR p.exit_date BETWEEN $1 AND $2))
+    )"""]
+    if account:
+        params.append([s.upper() for s in scope_for(account)])
+        conditions.append(f"UPPER(COALESCE(p.account, '')) = ANY(${len(params)}::text[])")
+    if ticker:
+        params.append(ticker.upper())
+        conditions.append(f"UPPER(p.ticker) = ${len(params)}")
+    if direction:
+        params.append(direction.upper())
+        conditions.append(f"UPPER(COALESCE(p.direction, '')) = ${len(params)}")
+    if structure:
+        params.append(structure.lower())
+        conditions.append(f"LOWER(COALESCE(p.structure, '')) = ${len(params)}")
+    if origin:
+        params.append(origin.lower())
+        conditions.append(f"LOWER(COALESCE(p.source, 'manual')) = ${len(params)}")
+    if signal_source:
+        params.append(f"%{signal_source}%")
+        conditions.append(f"LOWER(COALESCE(s.strategy, '')) LIKE LOWER(${len(params)})")
+
+    raw = await fetch_rows(f"""
+        SELECT p.*,
+               s.strategy   AS linked_signal_strategy,
+               s.signal_type AS linked_signal_type,
+               s.bias_level AS linked_signal_bias
+          FROM unified_positions p
+          LEFT JOIN signals s ON s.signal_id = p.signal_id
+         WHERE {" AND ".join(conditions)}
+         ORDER BY COALESCE(p.exit_date, p.entry_date) ASC NULLS LAST, p.id ASC
+    """, params)
+    retired = [r for r in raw if PS.is_retired(r.get("status"))]
+    rows = [book_row_to_trade_shape(r) for r in raw if not PS.is_retired(r.get("status"))]
+    return {"rows": rows, "retired_excluded": len(retired)}
 
 
 async def get_trade_rows(
