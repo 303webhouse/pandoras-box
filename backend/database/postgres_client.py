@@ -1016,6 +1016,31 @@ async def init_database():
             ("backfill exemption column", """
                 ALTER TABLE unified_positions ADD COLUMN IF NOT EXISTS backfill_exempt_reason TEXT
             """),
+            # R-IV.456(a) (migrations/045): a basis covering less than the quantity says so.
+            ("basis incomplete column", """
+                ALTER TABLE unified_positions
+                    ADD COLUMN IF NOT EXISTS basis_incomplete_reason TEXT
+            """),
+            ("NVDA 415 basis mark", """
+                UPDATE unified_positions
+                   SET basis_incomplete_reason = 'R-IV.456(a): quantity 3, basis 32.00 covers 2 structures (net 0.16); the third structure has no recorded fill. Legs entered from a broker screen showing marks, not fills.'
+                 WHERE position_id = 'POS_NVDA_20260911_001150'
+                   AND basis_incomplete_reason IS NULL
+            """),
+            # R-IV.456(b) (migrations/046): a correction to a cash snapshot is labelled as one.
+            ("cash adjustments table", """
+                CREATE TABLE IF NOT EXISTS cash_adjustments (
+                    id           BIGSERIAL   PRIMARY KEY,
+                    account      TEXT        NOT NULL,
+                    amount       NUMERIC     NOT NULL,
+                    cash_before  NUMERIC,
+                    cash_after   NUMERIC,
+                    reason       TEXT        NOT NULL,
+                    ruling       TEXT        NOT NULL,
+                    actor        TEXT        NOT NULL,
+                    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """),
             ("group E marks", """
                 UPDATE unified_positions
                    SET backfill_exempt_reason = 'R-IV.454(c) GROUP E: honest absence under R-IV.112-b -- closed with no realized figure the record can support. EXEMPT from any backfill; no blanket backfill of closed-with-no-realized, ever.'

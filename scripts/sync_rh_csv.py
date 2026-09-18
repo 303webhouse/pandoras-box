@@ -1113,7 +1113,20 @@ def apply_actions(conn, actions: List[Action], run_id: uuid.UUID,
                 elif a.op == "UPDATE":
                     _apply_update(cur, a, run_id, csv_paths_joined, csv_sha)
                 elif a.op == "CLOSE":
-                    _apply_close(cur, a, run_id, csv_paths_joined, csv_sha)
+                    # R-IV.456(c): the close action is RETIRED, not rerouted. It wrote CLOSED
+                    # stamped with the sync's own date and no result -- the exact write the
+                    # terminal-status rule forbids, and the likely source of Group A's six rows.
+                    # The close path exists (POST /v2/positions/{id}/close records the exit
+                    # price, the realized result and the real date). The sync REPORTS the close
+                    # the export implies and writes nothing, so the rest of the run still lands.
+                    _audit(cur, run_id, csv_paths_joined, csv_sha, "CLOSE_NOT_APPLIED",
+                           a.db_row["position_id"] if a.db_row else None,
+                           a.position_key.ticker, a.position_key.structure, None, None,
+                           (a.notes or "") + " | R-IV.456(c): close action retired; "
+                           "close this position through POST /v2/positions/{id}/close")
+                    print(f"  CLOSE NOT APPLIED (retired, R-IV.456(c)): "
+                          f"{a.db_row['position_id'] if a.db_row else a.position_key.ticker}"
+                          f" -- the export implies a close; use the close path")
                 # NO_OP_FLAG: audit only, no DB write to unified_positions
                 else:
                     _audit(cur, run_id, csv_paths_joined, csv_sha, a.op, None,
@@ -1224,6 +1237,16 @@ def _apply_update(cur, a: Action, run_id, csv_paths_joined: str, csv_sha: str) -
 
 
 def _apply_close(cur, a: Action, run_id, csv_paths_joined: str, csv_sha: str) -> None:
+    """RETIRED (R-IV.456(c)) -- no longer called. Kept so the history of what it did is readable:
+    it wrote status CLOSED with exit_date = the day the SYNC ran and no exit price and no
+    result, which is how positions came to be closed with nothing recorded about how. The
+    database now refuses that write outright (migrations/044)."""
+    raise RuntimeError("sync_rh_csv close action is retired (R-IV.456(c)); "
+                       "use POST /v2/positions/{id}/close")
+
+
+def _apply_close_retired_body(cur, a: Action, run_id, csv_paths_joined: str,
+                              csv_sha: str) -> None:
     db_row = a.db_row
     assert db_row is not None
     pid = db_row["position_id"]

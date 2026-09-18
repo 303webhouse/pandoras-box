@@ -99,20 +99,28 @@ def derive_aggregate(lots: Iterable[Mapping[str, Any]], asset_type: Optional[str
     if priced and priced_qty:
         entry_price = sum(_f(l.get("qty")) * _f(l.get("price")) for l in priced) / priced_qty
 
+    # R-IV.456(a): RECOMPUTE NEVER PRICES UNPRICED QUANTITY. The basis is the basis of what is
+    # PRICED -- right for every unit a fill covers -- and unpriced units leave it untouched and
+    # mark the row incomplete. The first version stored NULL here, which was honest about the
+    # unknown but discarded a basis that was correct for everything priced.
     cost_basis = None
     reason = None
+    unpriced_qty = qty - priced_qty
     if not lots:
         reason = "no lots"
-    elif unpriced:
-        reason = f"{unpriced} lot(s) carry no price"
-    elif entry_price is None or not qty:
-        reason = "quantity nets to zero"
+    elif entry_price is None or not priced_qty:
+        reason = "no lot carries a price" if unpriced else "quantity nets to zero"
     else:
-        cost_basis = entry_price * qty * multiplier(asset_type)
+        cost_basis = entry_price * priced_qty * multiplier(asset_type)
+        if unpriced:
+            reason = (f"{unpriced} lot(s) carry no price: basis covers {priced_qty:g} of "
+                      f"{qty:g} units")
 
     return {"qty": qty, "priced_qty": priced_qty, "unpriced_lots": unpriced,
+            "unpriced_qty": unpriced_qty,
             "fees": fees, "entry_price": entry_price, "cost_basis": cost_basis,
-            "basis_known": cost_basis is not None, "unknown_reason": reason,
+            "basis_known": cost_basis is not None, "basis_complete": reason is None,
+            "unknown_reason": reason,
             "multiplier": multiplier(asset_type)}
 
 

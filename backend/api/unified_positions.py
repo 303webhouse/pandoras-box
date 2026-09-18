@@ -1425,6 +1425,15 @@ async def update_position(position_id: str, req: UpdatePositionRequest, _=Depend
         sets.append(f"quantity = ${idx}")
         params.append(req.quantity)
         idx += 1
+        # R-IV.456(a): quantity that grows with no price beside it is UNPRICED. The basis is not
+        # recomputed -- it was right for everything priced -- and the row says what it does not
+        # cover, so a later reader cannot mistake a partial basis for a whole one.
+        old_q = int(old_pos.get("quantity") or 0)
+        if (req.quantity > old_q and req.cost_basis is None and req.entry_price is None):
+            sets.append(f"basis_incomplete_reason = ${idx}")
+            params.append(f"R-IV.456(a): quantity {old_q} -> {req.quantity} with no price for "
+                          f"the {req.quantity - old_q} added unit(s); basis covers {old_q}")
+            idx += 1
     if req.current_price is not None:
         sets.append(f"current_price = ${idx}")
         params.append(req.current_price)
@@ -2680,9 +2689,12 @@ async def add_position_lot(position_id: str, req: AddLotRequest,
             # nothing measured.
             await conn.execute(
                 """UPDATE unified_positions
-                   SET quantity = $1, entry_price = $2, cost_basis = $3, updated_at = NOW()
-                   WHERE position_id = $4""",
-                stored_qty, agg["entry_price"], agg["cost_basis"], position_id)
+                   SET quantity = $1, entry_price = $2, cost_basis = $3,
+                       basis_incomplete_reason = $4, updated_at = NOW()
+                   WHERE position_id = $5""",
+                stored_qty, agg["entry_price"], agg["cost_basis"],
+                (f"R-IV.456(a): {agg['unknown_reason']}" if agg["unknown_reason"] else None),
+                position_id)
 
         rows = await conn.fetch(
             "SELECT id, fill_time, qty, price, fees, source, provenance, broker_ref "
@@ -2881,9 +2893,12 @@ async def reduce_position(position_id: str, req: ReducePositionRequest,
             # places is how a figure comes to have two owners and no author.
             await conn.execute(
                 """UPDATE unified_positions
-                   SET quantity = $1, entry_price = $2, cost_basis = $3, updated_at = NOW()
-                   WHERE position_id = $4""",
-                stored_qty, agg["entry_price"], agg["cost_basis"], position_id)
+                   SET quantity = $1, entry_price = $2, cost_basis = $3,
+                       basis_incomplete_reason = $4, updated_at = NOW()
+                   WHERE position_id = $5""",
+                stored_qty, agg["entry_price"], agg["cost_basis"],
+                (f"R-IV.456(a): {agg['unknown_reason']}" if agg["unknown_reason"] else None),
+                position_id)
 
     return {"status": "reduced", "position_id": position_id, "written": True,
             "disposal_lot_id": disposal_id, "quantity_after": stored_qty,
@@ -3370,6 +3385,64 @@ class CashEventRequest(BaseModel):
 # Kept as a name for the phase-2 contract test; the vocabulary itself now lives in
 # models/accounts.py so that every write path reads the same one (R-IV.445(a)).
 _CANONICAL_ACCOUNTS = set(CANONICAL_ACCOUNTS)
+
+
+class CashAdjustmentRequest(BaseModel):
+    """A correction to the hub's own cash snapshot. Not money moving (R-IV.456(b))."""
+    account: str
+    amount: float                 # signed: +16.00 restores a 16.00 debit
+    reason: str
+    ruling: str                   # the ruling that authorises this correction, e.g. "R-IV.456(b)"
+    actor: Optional[str] = None
+
+
+@router.post("/v2/cash-adjustments")
+async def record_cash_adjustment(req: CashAdjustmentRequest, _=Depends(require_api_key)):
+    """Correct the cash SNAPSHOT when the hub itself moved it wrongly. Labelled, never disguised.
+
+    Not a deposit: /v2/cash-events records money crossing the account boundary, and every
+    return figure reads it as such. Not raw SQL: that leaves no reason and no author. This writes
+    the snapshot and a `cash_adjustments` row in one transaction -- amount, balance before and
+    after, reason, the ruling that authorised it, and who ran it.
+
+    Both the reason and the ruling are REQUIRED. A correction to money with no stated cause and
+    no authority behind it is indistinguishable from the error it claims to repair.
+    """
+    acct = canonical_account(req.account)
+    if not req.reason.strip():
+        raise HTTPException(status_code=400, detail="reason is required")
+    if not req.ruling.strip():
+        raise HTTPException(status_code=400,
+                            detail="ruling is required — a correction to cash cites what "
+                                   "authorised it")
+    if req.amount == 0:
+        raise HTTPException(status_code=400, detail="amount must be non-zero")
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                "SELECT account_name, cash FROM account_balances WHERE account_name = $1 "
+                "FOR UPDATE", acct)
+            if not row:
+                raise HTTPException(status_code=404,
+                                    detail=f"no account_balances row for {acct}")
+            before = float(row["cash"] or 0)
+            after = round(before + float(req.amount), 2)
+            await conn.execute(
+                "UPDATE account_balances SET cash = $1, updated_at = NOW(), "
+                "updated_by = $2 WHERE account_name = $3",
+                after, f"adjustment ({req.ruling})", acct)
+            adj_id = await conn.fetchval(
+                """INSERT INTO cash_adjustments
+                       (account, amount, cash_before, cash_after, reason, ruling, actor)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id""",
+                acct, float(req.amount), before, after, req.reason, req.ruling,
+                req.actor or "lifecycle-ui")
+    logger.info("Cash ADJUSTMENT %s %+.2f (%s -> %s) per %s: %s",
+                acct, req.amount, before, after, req.ruling, req.reason)
+    return {"status": "adjusted", "id": adj_id, "account": acct, "amount": req.amount,
+            "cash_before": before, "cash_after": after, "ruling": req.ruling,
+            "not_a_deposit": True}
 
 
 @router.post("/v2/cash-events")

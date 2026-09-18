@@ -102,15 +102,17 @@ def test_the_same_lots_on_an_equity_row_do_not():
     assert agg["cost_basis"] == pytest.approx(2.80)
 
 
-def test_an_unpriced_lot_moves_quantity_and_makes_the_basis_unknown():
+def test_an_unpriced_lot_moves_quantity_and_leaves_the_priced_basis_standing():
+    """R-IV.456(a) replaced the first rule. NULL was honest about the unknown and discarded a
+    basis that was right for every priced unit; the priced basis now stands and the row says
+    what it does not cover."""
     agg = derive_aggregate([{"qty": 10, "price": 5.0, "fees": 0},
                             {"qty": 5, "price": None, "fees": 0}], "EQUITY")
     assert agg["qty"] == 15, "the shares exist whether or not their price is known"
-    assert agg["entry_price"] == 5.0, "the blend over PRICED lots is still computable"
-    assert agg["cost_basis"] is None, "and the whole-position basis is not"
-    assert agg["basis_known"] is False
-    assert "no price" in agg["unknown_reason"]
-    assert agg["unpriced_lots"] == 1
+    assert agg["entry_price"] == 5.0, "the blend over PRICED lots"
+    assert agg["cost_basis"] == 50.0, "the basis of what is priced, never extrapolated to 75"
+    assert agg["basis_complete"] is False and agg["unpriced_qty"] == 5
+    assert "covers 10 of 15" in agg["unknown_reason"]
 
 
 def test_an_empty_lot_set_says_so_rather_than_returning_zero():
@@ -290,15 +292,16 @@ def test_fees_stay_out_of_the_stored_entry_price(monkeypatch):
     assert out["entry_price"] == 5.0 and out["fees_total"] == 4.0
 
 
-def test_an_unpriced_lot_writes_a_null_basis_and_says_why(monkeypatch):
+def test_an_unpriced_lot_keeps_the_priced_basis_and_marks_the_row(monkeypatch):
+    """R-IV.456(a): recompute never prices unpriced quantity."""
     out, conn = _add(monkeypatch, OPEN_EQUITY,
                      [{"qty": 10, "price": 5.0, "fees": 0}, {"qty": 5, "price": None,
                                                              "fees": 0}],
                      qty=5, price=None)
     upd = [e for e in conn.executed if "UPDATE unified_positions" in e[0]][0]
-    assert upd[1][2] is None, "the basis written is NULL, not an extrapolation"
-    assert out["basis_known"] is False and out["unpriced_lots"] == 1
-    assert out["quantity"] == 15
+    assert upd[1][2] == 50.0, "the priced basis, not 75.00 invented for unpriced units"
+    assert upd[1][3] and "covers 10 of 15" in upd[1][3], "the row says what is uncovered"
+    assert out["unpriced_lots"] == 1 and out["quantity"] == 15
 
 
 def test_a_fractional_lot_sum_is_refused_with_the_reason(monkeypatch):

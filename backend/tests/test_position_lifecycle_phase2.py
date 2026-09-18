@@ -114,7 +114,8 @@ def test_blended_basis_uses_priced_lots_only():
                             {"qty": 10, "price": None, "fees": 0}], "EQUITY")
     assert agg["qty"] == 20, "the unpriced lot still moves quantity"
     assert agg["entry_price"] == 5.0, "and does not dilute a blend it has no price for"
-    assert agg["cost_basis"] is None, "the whole-position basis is unknown while it is"
+    # R-IV.456(a): the priced basis stands and the row is marked incomplete
+    assert agg["cost_basis"] == 50.0 and agg["basis_complete"] is False
 
 
 # --- reason / actor (R-IV.116) -------------------------------------------------
