@@ -236,16 +236,22 @@ async def book_coverage_gap() -> Dict[str, Any]:
                                    AND trade_outcome IS NULL)                 AS unknown_result
               FROM ended
             """, [])
+        # CORRECTED AGAIN, same day: "no book row that day" stopped seeing trades whose day DOES
+        # hold a book row that could not be paired with them -- a second trade, or a duplicate
+        # record. After the import those were the only ones left, and the chip went quiet about
+        # them. The count that matters is every closed trade not LINKED to the book; the strict
+        # no-book-row-at-all figure is kept beside it as its own partition.
         orphans = await fetch_rows(
             """
-            SELECT COUNT(*) AS n, COALESCE(SUM(t.pnl_dollars), 0) AS pnl
+            SELECT COUNT(*) AS n, COALESCE(SUM(t.pnl_dollars), 0) AS pnl,
+                   COUNT(*) FILTER (WHERE NOT EXISTS (
+                       SELECT 1 FROM unified_positions p
+                        WHERE p.ticker = t.ticker
+                          AND p.exit_date::date = t.closed_at::date
+                          AND UPPER(p.status) <> 'OPEN')) AS no_book_row
               FROM trades t
              WHERE LOWER(t.status) IN ('closed', 'expired')
                AND NOT EXISTS (SELECT 1 FROM unified_positions p WHERE p.trade_id = t.id)
-               AND NOT EXISTS (SELECT 1 FROM unified_positions p
-                                WHERE p.ticker = t.ticker
-                                  AND p.exit_date::date = t.closed_at::date
-                                  AND UPPER(p.status) <> 'OPEN')
             """, [])
         r = rows[0] if rows else {}
         o = orphans[0] if orphans else {}
@@ -253,13 +259,14 @@ async def book_coverage_gap() -> Dict[str, Any]:
         absent_realized = round(float(r.get("absent_realized") or 0), 2)
         orphan_n = int(o.get("n") or 0)
         orphan_pnl = round(float(o.get("pnl") or 0), 2)
+        orphan_strict = int(o.get("no_book_row") or 0)
         parts = []
         if absent:
             parts.append(f"{absent} closes ({absent_realized:+,.2f} realized) are in the book "
                          f"but not in this figure")
         if orphan_n:
-            parts.append(f"{orphan_n} trades ({orphan_pnl:+,.2f}) are in this figure with no "
-                         f"book row")
+            parts.append(f"{orphan_n} trades ({orphan_pnl:+,.2f}) in this figure are not linked "
+                         f"to the book ({orphan_strict} with no book row at all)")
         return {
             "source": "trades",
             "book_source": "unified_positions",
@@ -269,6 +276,7 @@ async def book_coverage_gap() -> Dict[str, Any]:
             "unknown_result_closes": int(r.get("unknown_result") or 0),
             "trades_orphans": orphan_n,
             "trades_orphans_pnl": orphan_pnl,
+            "trades_orphans_no_book_row": orphan_strict,
             "complete": absent == 0 and orphan_n == 0,
             "chip": "; ".join(parts) if parts else None,
             "ruling": "R-IV.451(a): analytics reads the book; until then this figure is partial",
