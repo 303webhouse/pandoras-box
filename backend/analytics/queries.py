@@ -177,6 +177,80 @@ async def get_signal_stats_rows(
     return await fetch_rows(query, params)
 
 
+# ── WHICH ROLLUP READS WHAT (R-IV.451(d)) ─────────────────────────────────────────────────
+#
+# Written down because a fix was credited to the wrong mechanism once already: the partition
+# change in /trade-stats was correct and did not remove the BITX double count, because that
+# rollup never read the table the double count lived in.
+#
+#   /api/analytics/trade-stats    get_trade_rows -> trades          (realized, win rate, curve)
+#   /api/analytics/trades         get_trade_rows -> trades          (the list)
+#   /api/analytics/export/trades  get_trade_rows -> trades          (the CSV)
+#   /api/v2/positions*            unified_positions                 (the book)
+#   /api/portfolio/positions/closed  closed_positions               (legacy closed list)
+#
+# `trades` is filled by ONE write path (the close endpoint). R-IV.451(a) rules that analytics
+# reads the book instead; until that ships, every figure above carries `book_coverage` so a
+# reader can see what the figure is missing. The ruling's order: (1) analytics reads the book,
+# (2) realized metrics go live on Abacus, (3) trades retires or becomes a labelled import log.
+
+
+async def book_coverage_gap() -> Dict[str, Any]:
+    """What the book holds that `trades` does not, computed live. Never raises.
+
+    Live rather than quoted: the ruling measured 77 closes and -1,373.64, and those figures move
+    every time a position closes by a path that is not the close endpoint. A chip carrying a
+    number from the day it was written is the stale-figure defect in a new place.
+
+    Three populations, each named by its method (conventions #18):
+      unlinked        CLOSED/EXPIRED with no trade_id — no record the close endpoint wrote
+      absent          unlinked AND no same-ticker same-day trades row — nothing plausible either
+      unknown_result  CLOSED/EXPIRED with neither realized nor outcome — ended, result unrecorded
+    """
+    try:
+        rows = await fetch_rows(
+            """
+            WITH ended AS (
+                SELECT p.*,
+                       EXISTS (SELECT 1 FROM trades t
+                                WHERE t.ticker = p.ticker
+                                  AND t.closed_at::date = p.exit_date::date) AS plausible
+                  FROM unified_positions p
+                 WHERE p.status IN ('CLOSED', 'EXPIRED')
+            )
+            SELECT
+                COUNT(*) FILTER (WHERE trade_id IS NULL)                      AS unlinked,
+                COUNT(*) FILTER (WHERE trade_id IS NULL AND exit_date IS NOT NULL
+                                   AND NOT plausible)                         AS absent,
+                COALESCE(SUM(realized_pnl) FILTER (WHERE trade_id IS NULL
+                                   AND exit_date IS NOT NULL AND NOT plausible), 0)
+                                                                              AS absent_realized,
+                COUNT(*) FILTER (WHERE realized_pnl IS NULL
+                                   AND trade_outcome IS NULL)                 AS unknown_result
+              FROM ended
+            """, [])
+        r = rows[0] if rows else {}
+        absent = int(r.get("absent") or 0)
+        absent_realized = round(float(r.get("absent_realized") or 0), 2)
+        return {
+            "source": "trades",
+            "book_source": "unified_positions",
+            "unlinked_closes": int(r.get("unlinked") or 0),
+            "absent_closes": absent,
+            "absent_realized": absent_realized,
+            "unknown_result_closes": int(r.get("unknown_result") or 0),
+            "complete": absent == 0,
+            "chip": (f"{absent} closes ({absent_realized:+,.2f} realized) are in the book but "
+                     f"not in this figure" if absent else None),
+            "ruling": "R-IV.451(a): analytics reads the book; until then this figure is partial",
+        }
+    except Exception as exc:
+        # An unmeasurable gap is reported as unmeasured — never as complete.
+        return {"source": "trades", "complete": None,
+                "chip": "coverage of the book could not be measured for this figure",
+                "error": type(exc).__name__}
+
+
 async def get_trade_rows(
     account: Optional[str] = None,
     ticker: Optional[str] = None,

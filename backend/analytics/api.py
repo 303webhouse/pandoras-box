@@ -38,6 +38,7 @@ from analytics.computations import (
     std_dev,
 )
 from analytics.queries import (
+    book_coverage_gap,          # R-IV.451(a): what the book holds that the figure does not
     close_trade,
     fetch_rows,
     find_matching_signals,
@@ -454,7 +455,8 @@ async def _attach_convergence_prices(events: List[Dict[str, Any]]) -> None:
         event["price_1d_later"] = prices.get(next_day_key)
 
 
-def _csv_response(rows: List[Dict[str, Any]], filename: str) -> StreamingResponse:
+def _csv_response(rows: List[Dict[str, Any]], filename: str,
+                  coverage: Optional[Dict[str, Any]] = None) -> StreamingResponse:
     output = io.StringIO()
     if rows:
         writer = csv.DictWriter(output, fieldnames=list(rows[0].keys()))
@@ -462,6 +464,13 @@ def _csv_response(rows: List[Dict[str, Any]], filename: str) -> StreamingRespons
         writer.writerows(rows)
     payload = output.getvalue().encode("utf-8")
     headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    # R-IV.451(a): a CSV cannot carry a chip without breaking every parser that reads it, so the
+    # coverage travels in headers. An export is the figure most likely to be read far from the
+    # screen that would have shown the warning.
+    if coverage is not None:
+        headers["X-Book-Coverage-Complete"] = str(coverage.get("complete")).lower()
+        if coverage.get("chip"):
+            headers["X-Book-Coverage-Gap"] = coverage["chip"]
     return StreamingResponse(io.BytesIO(payload), media_type="text/csv", headers=headers)
 
 
@@ -790,6 +799,9 @@ async def trade_stats(
             total_pct = safe_div(sum(pnl_values), start_equity) * 100.0
 
     return {
+        # R-IV.451(a): this figure reads `trades`, which one write path fills. The block below
+        # says what the book holds that this figure does not — computed live, every call.
+        "book_coverage": await book_coverage_gap(),
         "window_days": days,
         "total_trades": total,
         "open": len(open_rows),
@@ -978,6 +990,7 @@ async def list_trades(
     page = filtered[offset: offset + limit]
 
     return {
+        "book_coverage": await book_coverage_gap(),   # R-IV.451(a): this list reads `trades`
         "total": total,
         "limit": limit,
         "offset": offset,
@@ -2301,7 +2314,7 @@ async def export_trades(
         start=start,
         end=end,
     )
-    return _csv_response(rows, "trades_export.csv")
+    return _csv_response(rows, "trades_export.csv", coverage=await book_coverage_gap())
 
 
 @analytics_router.get("/export/factors", dependencies=[Depends(require_api_key)])
