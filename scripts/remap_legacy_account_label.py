@@ -28,32 +28,47 @@ from models.accounts import CANONICAL_ACCOUNTS, DISPUTED, normalize_account  # n
 
 REASON = "R-IV.445(a): retired account alias remapped to the canonical label"
 
+# CORRECTED 2026-09-18 (R-IV.450). The first run was scoped to unified_positions, because that
+# is the table the defect was noticed in — and the alias survived in every other table that
+# stores the label. That is the same shape as an account-scoped inventory that cannot see a row
+# filed elsewhere, committed here one ruling later: A VOCABULARY FIX IS SCOPED TO EVERY TABLE
+# THAT STORES THE VOCABULARY, not to the table where someone happened to see the problem.
+#
+# cash_flows and account_balances are listed rather than assumed clean, because "assumed clean"
+# is exactly how the first scope was chosen.
+TABLES = (
+    ("unified_positions", "account", "position_id"),
+    ("closed_positions", "account", "id"),
+    ("trades", "account", "id"),
+    ("cash_flows", "account_name", "id"),
+    ("account_balances", "account_name", "id"),
+)
+
 
 async def main(confirm: bool) -> int:
     from database.postgres_client import get_postgres_client
     pool = await get_postgres_client()
     async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            """SELECT position_id, ticker, status, account, source, created_at
-                 FROM unified_positions
-                WHERE account IS NOT NULL AND account <> ALL($1::text[])
-                ORDER BY created_at""", list(CANONICAL_ACCOUNTS))
-
         plan, skipped = [], []
-        for r in rows:
-            target = normalize_account(r["account"])
-            if not target or r["account"] in DISPUTED:
-                skipped.append((r, "no canonical meaning — needs a ruling, not a guess"))
-            else:
-                plan.append((r, target))
+        for table, column, key in TABLES:
+            rows = await conn.fetch(
+                f"""SELECT {key} AS key, {column} AS label FROM {table}
+                     WHERE {column} IS NOT NULL AND {column} <> ALL($1::text[])
+                     ORDER BY {key}""", list(CANONICAL_ACCOUNTS))
+            for r in rows:
+                target = normalize_account(r["label"])
+                if not target or r["label"] in DISPUTED:
+                    skipped.append((table, key, r,
+                                    "no canonical meaning — needs a ruling, not a guess"))
+                else:
+                    plan.append((table, column, key, r, target))
 
-        print(f"\n{len(rows)} row(s) carry a non-canonical account label.\n")
-        for r, target in plan:
-            print(f"  {r['position_id']:34} {r['ticker']:6} {r['status']:8} "
-                  f"{r['account']} -> {target}   (written {r['created_at']:%Y-%m-%d}, "
-                  f"source {r['source']})")
-        for r, why in skipped:
-            print(f"  SKIP {r['position_id']:29} {r['ticker']:6} {r['account']}: {why}")
+        print(f"\n{len(plan) + len(skipped)} row(s) across {len(TABLES)} table(s) carry a "
+              f"non-canonical label.\n")
+        for table, column, key, r, target in plan:
+            print(f"  {table:20} {key}={str(r['key']):30} {r['label']} -> {target}")
+        for table, key, r, why in skipped:
+            print(f"  SKIP {table:16} {key}={str(r['key']):30} {r['label']}: {why}")
 
         if not plan:
             print("\nNothing to remap.")
@@ -66,13 +81,13 @@ async def main(confirm: bool) -> int:
         async with conn.transaction():
             await conn.execute("SELECT set_config('app.actor', $1, true)", "principal")
             await conn.execute("SELECT set_config('app.reason', $1, true)", REASON)
-            for r, target in plan:
+            for table, column, key, r, target in plan:
                 await conn.execute(
-                    "UPDATE unified_positions SET account = $1, updated_at = NOW() "
-                    "WHERE position_id = $2 AND account = $3",
-                    target, r["position_id"], r["account"])
-        print(f"\n{len(plan)} row(s) remapped. The audit trigger holds the before/after per "
-              f"row; this script wrote no other column.")
+                    f"UPDATE {table} SET {column} = $1 WHERE {key} = $2 AND {column} = $3",
+                    target, r["key"], r["label"])
+        print(f"\n{len(plan)} row(s) remapped across {len({t for t, *_ in plan})} table(s). "
+              f"Only the label column was written; unified_positions also carries the "
+              f"before/after on its audit timeline.")
         return 0
 
 

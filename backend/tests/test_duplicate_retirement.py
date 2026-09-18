@@ -19,12 +19,16 @@ from fastapi import HTTPException
 sys.path.insert(0, __file__.rsplit("tests", 1)[0])
 
 from models import position_status as PS  # noqa: E402
-from models.accounts import FIDELITY_ROTH, scope_for, scope_sql  # noqa: E402
+from models.accounts import (  # noqa: E402
+    FIDELITY_ROTH, reconciliation_scope, scope_for, scope_sql,
+)
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 MIGRATION = ROOT / "migrations" / "043_duplicate_retirement.sql"
 BOOT = ROOT / "backend" / "database" / "postgres_client.py"
 ANALYTICS = ROOT / "backend" / "analytics" / "api.py"
+
+sys.path.insert(0, str(ROOT / "scripts"))
 
 
 # --- the status vocabulary -------------------------------------------------------------
@@ -186,9 +190,9 @@ def test_the_sql_helper_matches_every_spelling():
 
 def test_the_rule_is_written_where_the_next_reconciliation_will_read_it():
     src = (ROOT / "backend" / "models" / "accounts.py").read_text(encoding="utf-8")
-    flat = " ".join(src.replace("#", " ").split())
-    assert "reports ABSENCE where there is DUPLICATION" in flat
-    assert "or it is not an inventory" in flat.lower()
+    flat = " ".join(src.replace("#", " ").split()).lower()
+    assert "reports absence where there is duplication" in flat
+    assert "reads every row touching that window, in any status" in flat
 
 
 # --- boot resilience (measured 2026-09-18) --------------------------------------------------
@@ -209,3 +213,73 @@ def test_a_refused_constraint_names_the_rows_that_blocked_it():
     boot = BOOT.read_text(encoding="utf-8")
     assert "blocking rows:" in boot
     assert "SELECT position_id, status, duplicate_of FROM unified_positions" in boot
+
+
+# --- the amended rule: label, status AND window (R-IV.450(a)) -------------------------------
+def test_a_reconciliation_scope_filters_no_status_at_all():
+    """The proximate cause of the duplicate was `status = 'OPEN'`, not the alias: a row opened
+    and closed inside the window is exactly the row a status filter hides."""
+    clause, params = reconciliation_scope("FIDELITY_ROTH", "2026-09-01", "2026-09-17")
+    assert "status" not in clause.lower(), "a status filter is what hid the round trip"
+    assert "= ANY($1::text[])" in clause and "FIDELITY" in params[0]
+
+
+def test_the_window_is_overlap_and_not_containment():
+    """A row opened before the window and closed inside it is in the window."""
+    clause, _ = reconciliation_scope("ROBINHOOD", "2026-09-01", "2026-09-17")
+    assert "entry_date <= $3" in clause and "exit_date >= $2" in clause
+    assert "entry_date >= $2" not in clause, "containment would drop the earlier opening"
+
+
+def test_an_open_row_is_never_excluded_by_its_null_exit_date():
+    clause, _ = reconciliation_scope("ROBINHOOD", "2026-09-01", "2026-09-17")
+    assert "exit_date IS NULL OR" in clause
+
+
+def test_the_corrected_cause_is_recorded_not_quietly_edited():
+    """The module said the alias hid the row. It did not — LIKE 'FIDELITY%' matched both."""
+    src = (ROOT / "backend" / "models" / "accounts.py").read_text(encoding="utf-8")
+    flat = " ".join(src.replace("#", " ").split())
+    assert "CORRECTION, R-IV.450(a)" in flat
+    assert "That was WRONG and is recorded rather than quietly edited" in flat
+    assert "proximate cause was the STATUS scope" in flat
+
+
+def test_the_governing_line_is_on_the_face_of_both_modules():
+    acc = (ROOT / "backend" / "models" / "accounts.py").read_text(encoding="utf-8")
+    st = (ROOT / "backend" / "models" / "position_status.py").read_text(encoding="utf-8")
+    line = "duplicate and an absence present identically"
+    assert line in " ".join(acc.replace("#", " ").split()).lower()
+    assert line in " ".join(st.split()).lower()
+
+
+# --- the lift, corrected (R-IV.450(e)) ------------------------------------------------------
+def test_the_reference_classifier_reads_segments_not_a_character_window():
+    """The notes DO say which order each reference is, two hundred characters away."""
+    import lift_broker_refs_from_notes as L
+    note = ("09-08 Bought 4 @ 94.85 -> basis 379.40. SECOND COPX lot; id 406 is the 09-02 lot "
+            "(4 @ 89.20, basis 356.80). Combined 8 shares, basis 736.20. D5 sleeve member by "
+            "id - the roster must add this lot. Ref 26251-P9TZC2, order 26251-FYD2J. "
+            "|| R-IV.447(b) CLOSE, ref 26254-Q7D3D4. Same 09-11 8-share sale.")
+    assert L.classify(note) == [("entry", "26251-P9TZC2"), ("exit", "26254-Q7D3D4")]
+
+
+def test_a_close_only_note_yields_no_entry_reference():
+    """id 409 has two fills on the open side and no single reference for them."""
+    import lift_broker_refs_from_notes as L
+    got = L.classify("1-3 day trade || R-IV.447(b) CLOSE, ref 26257-PBS5D3.")
+    assert got == [("exit", "26257-PBS5D3")]
+
+
+def test_a_retired_duplicate_never_acquires_broker_evidence():
+    src = (ROOT / "scripts" / "lift_broker_refs_from_notes.py").read_text(encoding="utf-8")
+    assert "if is_retired(r[\"status\"]):" in src
+    assert "belongs to the row it duplicates" in src
+
+
+def test_the_remap_covers_every_table_that_stores_the_label():
+    import remap_legacy_account_label as R
+    names = {t for t, *_ in R.TABLES}
+    assert {"unified_positions", "closed_positions", "trades"} <= names
+    src = (ROOT / "scripts" / "remap_legacy_account_label.py").read_text(encoding="utf-8")
+    assert "EVERY TABLE" in src.upper()

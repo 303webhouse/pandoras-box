@@ -5,7 +5,9 @@ by naming the one you don't (`status != 'OPEN'`). The second form treats every n
 as a completed trade, which was harmless while the only other values were CLOSED and EXPIRED —
 and stops being harmless the moment a row exists that is neither open nor a result.
 
-DUPLICATE_OF is exactly such a row. It records a trade the book already holds under another
+A duplicate and an absence present identically, and the remedies are opposite: one wants
+a row written, the other wants a row stopped from counting, and both read as an empty
+result from the wrong query. DUPLICATE_OF is exactly such a row. It records a trade the book already holds under another
 position_id: the fills happened once, so its money must be counted once. Retiring the duplicate
 by deletion would destroy the evidence of the duplication, and leaving it CLOSED would double
 every figure computed from it. It is kept, marked, and pointed at its keeper.

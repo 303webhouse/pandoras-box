@@ -32,26 +32,39 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "backend"))
 
+from models.position_status import is_retired  # noqa: E402
+
 REF = r"[0-9]{4,6}-[A-Z0-9]{5,8}"
-# The reference with the words immediately before it, which is what says entry or exit.
-CONTEXT = re.compile(r"(.{0,60}?)(?:ref|confirm(?:ation)?)[ :#]*(" + REF + ")",
-                     re.IGNORECASE | re.DOTALL)
+FIND_REF = re.compile(r"(?:ref|confirm(?:ation)?)[ :#]*(" + REF + ")", re.IGNORECASE)
+# CORRECTED 2026-09-18 (R-IV.450(e)). The first version read a fixed 60 characters before each
+# reference and called everything else UNDECIDED. The notes DO say which order each reference
+# is -- "09-08 Bought 4 @ 94.85 ... Ref 26251-P9TZC2" and "R-IV.447(b) CLOSE, ref 26254-Q7D3D4"
+# -- but the word can sit two hundred characters away, because the sentence between them is
+# doing other work. A window is the wrong unit: the note's own segments are the unit, and the
+# notes are already segmented with "||".
+SEGMENT = re.compile(r"\|\|")
 BUY_WORDS = ("bought", "buy", "bto", "opened", "acquired")
-SELL_WORDS = ("sold", "sell", "sale", "stc", "closed", "exit")
+SELL_WORDS = ("sold", "sell", "sale", "stc", "close", "closed", "exit")
 REASON = "R-IV.448(b): broker reference moved from notes into its column"
 
 
 def classify(note: str):
-    """[(side, reference)] for a note. `side` is 'entry', 'exit' or None when it does not say."""
+    """[(side, reference)] for a note. `side` is 'entry', 'exit' or None when it does not say.
+
+    Read per SEGMENT: within one segment of a note, the buy or sell word that precedes a
+    reference is describing it, however far back it sits. Across segments it is describing a
+    different event, which is why the segment and not a character count is the unit.
+    """
     out = []
-    for lead, ref in CONTEXT.findall(note or ""):
-        text = lead.lower()
-        buy = max((text.rfind(w) for w in BUY_WORDS), default=-1)
-        sell = max((text.rfind(w) for w in SELL_WORDS), default=-1)
-        side = None
-        if buy >= 0 or sell >= 0:
-            side = "entry" if buy > sell else "exit"
-        out.append((side, ref))
+    for segment in SEGMENT.split(note or ""):
+        for m in FIND_REF.finditer(segment):
+            lead = segment[:m.start()].lower()
+            buy = max((lead.rfind(w) for w in BUY_WORDS), default=-1)
+            sell = max((lead.rfind(w) for w in SELL_WORDS), default=-1)
+            side = None
+            if buy >= 0 or sell >= 0:
+                side = "entry" if buy > sell else "exit"
+            out.append((side, m.group(1)))
     return out
 
 
@@ -64,8 +77,15 @@ async def main(confirm: bool) -> int:
                   FROM unified_positions
                  WHERE notes ~ '{REF}'
                  ORDER BY position_id""")
-        plan, undecided = [], []
+        plan, undecided, retired = [], [], []
         for r in rows:
+            # R-IV.449(a)/450(f): a retired duplicate must not ACQUIRE broker evidence. Its
+            # trade belongs to the row it duplicates, and the keeper already carries the
+            # references; writing them here too would put one fill's identity on two rows and
+            # undo the retirement's whole point. Found by this script matching such a row.
+            if is_retired(r["status"]):
+                retired.append(r)
+                continue
             found = classify(r["notes"])
             entry = next((ref for side, ref in found if side == "entry"), None)
             exit_ref = next((ref for side, ref in found if side == "exit"), None)
@@ -81,6 +101,9 @@ async def main(confirm: bool) -> int:
         for r, entry, exit_ref in plan:
             print(f"  {r['position_id']:34} {r['ticker']:6} {r['status']:8} "
                   f"entry={entry or '-':14} exit={exit_ref or '-':14}")
+        for r in retired:
+            print(f"  RETIRED   {r['position_id']:26} {r['ticker']:6} — a duplicate does not "
+                  f"carry the evidence of the trade its keeper holds; skipped")
         for r, unknown in undecided:
             print(f"  UNDECIDED {r['position_id']:26} {r['ticker']:6} {unknown} — the note does "
                   f"not say which order this is; left alone")
