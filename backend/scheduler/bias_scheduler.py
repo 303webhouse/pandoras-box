@@ -2387,9 +2387,15 @@ async def reset_circuit_breaker_scheduled():
     Clears any overnight risk events
     """
     try:
-        from webhooks.circuit_breaker import reset_circuit_breaker
+        from webhooks.circuit_breaker import (reset_circuit_breaker,
+                                              _persist_circuit_breaker_state)
         result = reset_circuit_breaker()
-        logger.info(f"ðŸ”“ Circuit breaker reset at market open: {result}")
+        # R-IV.455: the reset used to clear MEMORY only. The armed record sits in Redis with no
+        # expiry (armed state fails closed), so the next restart restored it -- and a breaker
+        # that fired on 09-16 was re-armed by every deploy for two days. The clear has to reach
+        # the same store the arm did, or it is not a clear.
+        await _persist_circuit_breaker_state()
+        logger.info(f"ðŸ”“ Circuit breaker reset at market open (persisted): {result}")
     except Exception as e:
         logger.error(f"Error resetting circuit breaker: {e}")
 

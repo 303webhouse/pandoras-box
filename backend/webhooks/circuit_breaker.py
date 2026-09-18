@@ -259,37 +259,60 @@ async def _verify_condition_cleared(verify_type: str) -> bool:
     return False
 
 
-async def _check_spy_recovery(threshold_pct: float) -> bool:
-    """Check if SPY is no longer down by threshold_pct from previous close."""
+async def hub_spy_reading() -> Dict[str, Any]:
+    """The hub's OWN reading of SPY against its prior close, every input named and aged.
+
+    R-IV.455(e) -- THE VINTAGE RULE. A breaker fire used to carry its verdict and nothing else:
+    TradingView sends a trigger NAME, the hub cannot see the reference price, the current price,
+    either timestamp, or the percentage behind it, and so a fire on a false reading looked
+    exactly like a fire on a true one. This is the hub's independent measurement, recorded
+    beside every SPY fire so the verdict carries its evidence. Never raises; a reading it cannot
+    take is reported as not taken, never as a pass.
+    """
+    now = datetime.now(timezone.utc)
+    out: Dict[str, Any] = {"read_at": now.isoformat(), "price": None, "prior_close": None,
+                           "change_pct": None, "vendor": None, "method": None, "error": None}
     try:
-        # Try Polygon first
         from integrations.uw_api import get_snapshot, get_previous_close
         snapshot = await get_snapshot("SPY")
         prev = await get_previous_close("SPY")
-        if snapshot and prev:
-            current = snapshot.get("day", {}).get("c") or snapshot.get("lastTrade", {}).get("p")
-            prev_close = prev.get("c")
-            if current and prev_close and prev_close > 0:
-                change_pct = ((current - prev_close) / prev_close) * 100
-                return change_pct > threshold_pct
-    except ImportError:
-        pass
-    except Exception:
-        pass
-
-    # yfinance fallback
+        prev_row = (prev.get("results") or [{}])[0] if isinstance(prev, dict) else {}
+        current = None
+        if snapshot:
+            current = (snapshot.get("day") or {}).get("c") or \
+                (snapshot.get("lastTrade") or {}).get("p")
+        prior = prev_row.get("c") if isinstance(prev_row, dict) else None
+        if current and prior and float(prior) > 0:
+            out.update(price=float(current), prior_close=float(prior), vendor="uw",
+                       method="snapshot vs previous close",
+                       change_pct=round((float(current) - float(prior)) / float(prior) * 100, 3))
+            return out
+    except Exception as exc:
+        out["error"] = f"uw: {type(exc).__name__}"
     try:
-        from bias_engine.factor_utils import get_price_history
+        from bias_engine.factor_utils import get_price_history, price_vendor
         data = await get_price_history("SPY", days=5)
         if data is not None and not data.empty and "close" in data.columns and len(data) >= 2:
             current = float(data["close"].iloc[-1])
-            prev_close = float(data["close"].iloc[-2])
-            if prev_close > 0:
-                change_pct = ((current - prev_close) / prev_close) * 100
-                return change_pct > threshold_pct
-    except Exception:
-        pass
-    return False
+            prior = float(data["close"].iloc[-2])
+            if prior > 0:
+                out.update(price=current, prior_close=prior, vendor=price_vendor(data),
+                           method="last two daily closes (fallback)",
+                           price_as_of=str(data.index[-1])[:10],
+                           change_pct=round((current - prior) / prior * 100, 3))
+                return out
+    except Exception as exc:
+        out["error"] = (out["error"] + "; " if out["error"] else "") + \
+            f"history: {type(exc).__name__}"
+    return out
+
+
+async def _check_spy_recovery(threshold_pct: float) -> bool:
+    """Is SPY no longer down by threshold_pct from its prior close? Fails CLOSED: a reading
+    that cannot be taken is not a recovery."""
+    reading = await hub_spy_reading()
+    pct = reading.get("change_pct")
+    return pct is not None and pct > threshold_pct
 
 
 async def _check_vix_below(threshold: float) -> bool:
@@ -636,8 +659,45 @@ async def apply_circuit_breaker(trigger: str) -> Dict[str, Any]:
     return _circuit_breaker_state
 
 
+SPY_TRIGGER_THRESHOLD = {"spy_down_1pct": -1.0, "spy_down_2pct": -2.0}
+
+
+async def _stamp_hub_reading(trigger: Optional[str]) -> None:
+    """Record the hub's own SPY reading on a SPY fire, and flag a fire it does not confirm.
+
+    Recorded and flagged, NOT rejected: refusing to arm on a disagreement would change what the
+    safety device does, which is a ruling. What changes here is that a disputed fire can no
+    longer look like a confirmed one.
+    """
+    threshold = SPY_TRIGGER_THRESHOLD.get((trigger or "").lower())
+    if threshold is None or not _circuit_breaker_state.get("active"):
+        return
+    reading = await hub_spy_reading()
+    pct = reading.get("change_pct")
+    disputed = None if pct is None else pct > threshold
+    _circuit_breaker_state["hub_reading"] = reading
+    _circuit_breaker_state["disputed"] = disputed
+    base = _circuit_breaker_state.get("description") or trigger
+    if pct is None:
+        note = "hub reading NOT TAKEN (" + str(reading.get("error")) + ")"
+    else:
+        note = (f"hub reading at fire: SPY {reading['price']:.2f} vs prior close "
+                f"{reading['prior_close']:.2f} = {pct:+.2f}% ({reading['vendor']}, "
+                f"{reading['method']})")
+        if disputed:
+            note += f" -- DOES NOT CONFIRM the {threshold:.0f}% trigger"
+    _circuit_breaker_state["description"] = f"{base} | {note}"
+    await _persist_circuit_breaker_state()
+    if disputed:
+        logger.warning("Circuit breaker %s DISPUTED by the hub's own reading: %s", trigger, note)
+
+
 async def _circuit_breaker_background_work(state: dict):
     """Heavy follow-up work after circuit breaker triggers. Runs as background task."""
+    try:
+        await _stamp_hub_reading(state.get("trigger"))
+    except Exception as e:
+        logger.warning("Could not stamp the hub's reading on the fire: %s", e)
     # Force re-score all factors with fresh data, then recompute composite
     try:
         from bias_engine.factor_scorer import score_all_factors
