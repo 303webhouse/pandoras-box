@@ -126,3 +126,28 @@ def test_the_disagreement_names_both_numbers():
 def test_the_tolerance_is_a_cent_by_default():
     from api.unified_positions import ClosePositionRequest
     assert ClosePositionRequest(exit_price=1.0).realized_tolerance == 0.01
+
+
+# --- fresh-database boot order (the D4 class) -----------------------------------------------
+def test_nothing_touches_position_lots_before_it_is_created():
+    """On the live database every table already exists, so an ordering mistake here is
+    invisible — it only fails on a database booting from empty, which is the one case this
+    ordering exists for. Caught on the live shape by a constraint that kept coming back."""
+    boot = BOOT.read_text(encoding="utf-8")
+    created = boot.index("CREATE TABLE IF NOT EXISTS position_lots (")
+    for dependent in ("CREATE TABLE IF NOT EXISTS position_lot_closures",
+                      "ADD COLUMN IF NOT EXISTS verified_at",
+                      "uq_position_lots_broker_ref"):
+        assert boot.index(dependent) > created, (
+            f"{dependent!r} runs before position_lots exists — a fresh boot fails there")
+
+
+def test_the_superseded_constraint_is_not_re_created_after_it_is_dropped():
+    """It was: the drop ran in one block and the create in a later one, so every boot put the
+    weaker rule back. The end state looked right in code and was wrong in the database."""
+    boot = BOOT.read_text(encoding="utf-8")
+    creates = [ln for ln in boot.splitlines()
+               if "ADD CONSTRAINT position_lots_verified_needs_ref" in ln
+               and not ln.strip().startswith("--")]
+    assert creates == [], "nothing may re-create the superseded reference-only rule"
+    assert "DROP CONSTRAINT position_lots_verified_needs_ref" in boot
