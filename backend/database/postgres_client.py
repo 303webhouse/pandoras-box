@@ -891,6 +891,53 @@ async def init_database():
             ADD COLUMN IF NOT EXISTS short_leg_price NUMERIC
         """)
 
+        # R-IV.448(b): the broker's reference ON the position row. Nine captured references
+        # were living in `notes`, where they are prose -- readable by a human and by nothing
+        # else, so the verification that depends on one could not be enforced. Two columns
+        # because a row carries the order that opened it AND the order that closed it; neither
+        # is unique, because one fill can close several positions (the 60-share SOXS sale
+        # covers three rows). Mirrors migrations/042.
+        await conn.execute("""
+            ALTER TABLE unified_positions
+            ADD COLUMN IF NOT EXISTS broker_ref      TEXT,
+            ADD COLUMN IF NOT EXISTS exit_broker_ref TEXT,
+            ADD COLUMN IF NOT EXISTS provenance      TEXT,
+            ADD COLUMN IF NOT EXISTS verified_at     TIMESTAMPTZ,
+            ADD COLUMN IF NOT EXISTS verified_event  TEXT
+        """)
+        await conn.execute("""
+            UPDATE unified_positions
+               SET provenance = CASE
+                    WHEN source IN ('IMPORTED_HISTORICAL', 'CSV_IMPORT', 'CSV_SYNC',
+                                    'CSV_RECONCILE', 'fidelity_confirm') THEN 'IMPORTED'
+                    ELSE 'PRINCIPAL_REPORTED'
+               END
+             WHERE provenance IS NULL
+        """)
+        await conn.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                                WHERE conname = 'unified_positions_provenance_check') THEN
+                    ALTER TABLE unified_positions ADD CONSTRAINT unified_positions_provenance_check
+                        CHECK (provenance IS NULL OR provenance IN ('PRINCIPAL_REPORTED',
+                               'BROKER_VERIFIED', 'IMPORTED', 'UNKNOWN'));
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                                WHERE conname = 'unified_positions_verified_needs_evidence') THEN
+                    ALTER TABLE unified_positions
+                        ADD CONSTRAINT unified_positions_verified_needs_evidence
+                        CHECK (provenance <> 'BROKER_VERIFIED'
+                               OR (broker_ref IS NOT NULL AND verified_event IS NOT NULL
+                                   AND verified_at IS NOT NULL));
+                END IF;
+            END $$;
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_unified_positions_broker_ref
+                ON unified_positions (broker_ref) WHERE broker_ref IS NOT NULL
+        """)
+
         # position_legs — what a multi-leg position actually holds (R-IV.444(b)). Two strike
         # columns describe a vertical and nothing else, so a three-leg structure had to be split
         # across rows or written into a note, and a screen reading those rows renders one
