@@ -969,6 +969,46 @@ async def init_database():
             CREATE INDEX IF NOT EXISTS idx_lot_closures_disposal
                 ON position_lot_closures (disposal_lot_id)
         """)
+        # R-IV.447(b): BROKER_VERIFIED becomes reachable, and only on evidence. The value was
+        # always in the vocabulary and nothing could write it, because no path matched a broker
+        # record. A reconciliation against the confirmations is such a match, so the transition
+        # exists and carries what T6d requires: the verifying event and its timestamp, stamped
+        # AT the transition. verified_at is the time of the MATCH, never of the fill.
+        # Mirrors migrations/041.
+        await conn.execute("""
+            ALTER TABLE position_lots
+            ADD COLUMN IF NOT EXISTS verified_at    TIMESTAMPTZ,
+            ADD COLUMN IF NOT EXISTS verified_event TEXT
+        """)
+        await conn.execute("""
+            ALTER TABLE position_legs
+            ADD COLUMN IF NOT EXISTS verified_at    TIMESTAMPTZ,
+            ADD COLUMN IF NOT EXISTS verified_event TEXT
+        """)
+        await conn.execute("""
+            DO $$
+            BEGIN
+                IF EXISTS (SELECT 1 FROM pg_constraint
+                            WHERE conname = 'position_lots_verified_needs_ref') THEN
+                    ALTER TABLE position_lots DROP CONSTRAINT position_lots_verified_needs_ref;
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                                WHERE conname = 'position_lots_verified_needs_evidence') THEN
+                    ALTER TABLE position_lots ADD CONSTRAINT position_lots_verified_needs_evidence
+                        CHECK (provenance <> 'BROKER_VERIFIED'
+                               OR (broker_ref IS NOT NULL AND verified_event IS NOT NULL
+                                   AND verified_at IS NOT NULL));
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                                WHERE conname = 'position_legs_verified_needs_evidence') THEN
+                    ALTER TABLE position_legs ADD CONSTRAINT position_legs_verified_needs_evidence
+                        CHECK (provenance <> 'BROKER_VERIFIED'
+                               OR (broker_ref IS NOT NULL AND verified_event IS NOT NULL
+                                   AND verified_at IS NOT NULL));
+                END IF;
+            END $$;
+        """)
+
         # A confirmation number is the broker's identity for ONE fill, so the same one arriving
         # twice is the same fill arriving twice. NULL stays unconstrained: one broker issues no
         # references at all, and NULL there is a property of that export, not a gap.

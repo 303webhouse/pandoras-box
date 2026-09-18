@@ -317,18 +317,24 @@ async def test_the_production_latch_opens_instead_of_sustaining_itself(account):
     """3,717 calls, four readings, no attempts: the gate shed on a reading hours old, and
     shedding suppressed the calls whose responses carry the header."""
     from datetime import datetime, timedelta, timezone
+    # Pinned mid-day UTC: "three hours old" has to stay inside one quota day to mean what this
+    # test says it means. Built from the wall clock it lands before the 00:00Z reset for the
+    # first three hours of every day, and the cross-day rule answers first -- correctly, and
+    # about a different question.
+    now = datetime(2026, 9, 17, 18, 0, tzinfo=timezone.utc)
     account["used"] = 38168
-    account["at"] = (datetime.now(timezone.utc) - timedelta(hours=3, minutes=16)).isoformat()
-    assert await g.account_shed(g.TIER_STANDARD) is None
+    account["at"] = (now - timedelta(hours=3, minutes=16)).isoformat()
+    assert await g.account_shed(g.TIER_STANDARD, now=now) is None
     assert g.gate_state()["state"] == "open:reading_too_old"
 
 
 @pytest.mark.asyncio
 async def test_a_fresh_reading_still_sheds(account):
     from datetime import datetime, timedelta, timezone
+    now = datetime(2026, 9, 17, 18, 0, tzinfo=timezone.utc)      # same reason as above
     account["used"] = 38168
-    account["at"] = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
-    reason = await g.account_shed(g.TIER_STANDARD)
+    account["at"] = (now - timedelta(minutes=5)).isoformat()
+    reason = await g.account_shed(g.TIER_STANDARD, now=now)
     assert reason and "95%" in reason
     assert g.gate_state()["state"] == "shedding"
 

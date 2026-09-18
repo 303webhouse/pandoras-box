@@ -237,6 +237,16 @@ class ClosePositionRequest(BaseModel):
     trade_outcome: Optional[str] = None      # WIN / LOSS / BREAKEVEN (frontend-computed)
     loss_reason: Optional[str] = None        # SETUP_FAILED / EXECUTION_ERROR / MARKET_CONDITIONS
     close_reason: Optional[str] = "manual"   # profit / loss / expired / manual
+    # R-IV.447(b): an exit that already happened keeps the day it happened on. The close path
+    # stamped NOW() unconditionally, so a missed exit recorded weeks later read as today's —
+    # and the date is what every later reconciliation joins on.
+    exit_date: Optional[str] = None
+    # The realized figure the caller computed, CHECKED rather than stored. When it disagrees
+    # with what this row's own basis implies, the write is refused and both numbers are named:
+    # a plausible-looking number from a different method is the failure mode here, and one of
+    # them being 16x the other is exactly how it presents.
+    expected_realized: Optional[float] = None
+    realized_tolerance: float = 0.01
 
 
 class BulkPositionItem(BaseModel):
@@ -1698,6 +1708,24 @@ async def close_position(position_id: str, req: ClosePositionRequest, _=Depends(
     pool = await get_postgres_client()
     now = datetime.now(timezone.utc)
 
+    # R-IV.447(b): an exit that already happened keeps its own date. A close recorded weeks
+    # later used to read as today's, and the date is what every later reconciliation joins on.
+    # Bounded on both sides: a future exit has not happened, and an exit before the position
+    # existed is a typo rather than a correction.
+    if req.exit_date:
+        try:
+            exit_when = datetime.fromisoformat(str(req.exit_date).replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400,
+                                detail=f"exit_date must be a date or timestamp; "
+                                       f"got '{req.exit_date}'")
+        if exit_when.tzinfo is None:
+            exit_when = exit_when.replace(tzinfo=timezone.utc)
+        if exit_when > now:
+            raise HTTPException(status_code=400,
+                                detail=f"exit_date {req.exit_date} is in the future")
+        now = exit_when
+
     # Record the attempt for auditability (outside main transaction — logged even on failure)
     attempt_id = None
     try:
@@ -1764,6 +1792,23 @@ async def close_position(position_id: str, req: ClosePositionRequest, _=Depends(
                     realized_pnl = round((entry_price - req.exit_price) * 100 * close_qty, 2)
                 else:
                     realized_pnl = round((req.exit_price - entry_price) * 100 * close_qty, 2)
+
+                # R-IV.447(b): the caller's figure is CHECKED, never stored in place of this
+                # one. Two methods that disagree produce two defensible numbers, and the one
+                # computed elsewhere is the one nothing here can re-derive — so the write is
+                # refused with both named rather than silently preferring either. The danger
+                # this guards is specific and measured: a figure from the wrong walk can land
+                # 16x too large and still look reasonable on the screen.
+                if req.expected_realized is not None:
+                    delta = abs(realized_pnl - float(req.expected_realized))
+                    if delta > abs(float(req.realized_tolerance)):
+                        raise HTTPException(
+                            status_code=409,
+                            detail=(f"realized disagreement: this row's basis implies "
+                                    f"{realized_pnl:+.2f} (entry {entry_price} x {close_qty}), "
+                                    f"the caller expected {float(req.expected_realized):+.2f} — "
+                                    f"a difference of {delta:.2f}. Nothing was written. Settle "
+                                    f"which basis is right before closing the row."))
 
                 trade_outcome = "WIN" if realized_pnl > 0 else "LOSS" if realized_pnl < 0 else "BREAKEVEN"
 
@@ -2827,6 +2872,76 @@ async def reduce_position(position_id: str, req: ReducePositionRequest,
             "disposal_lot_id": disposal_id, "quantity_after": stored_qty,
             "entry_price_after": agg["entry_price"], "cost_basis_after": agg["cost_basis"],
             "basis_known": agg["basis_known"], **plan}
+
+
+class VerifyRequest(BaseModel):
+    """A match against a broker record, with the evidence that makes it re-checkable."""
+    broker_ref: str
+    verified_event: str
+    actor: Optional[str] = None
+    reason: Optional[str] = None
+
+
+async def _verify_row(table: str, position_id: str, row_id: int, req: VerifyRequest,
+                      key_column: str = "id"):
+    """Stamp one lot or leg BROKER_VERIFIED. The only path to that value anywhere.
+
+    A verification is a TRANSITION, not a field. It records what was matched and when the match
+    was made, and the database refuses the value without both — `verified_at` is the time of
+    the MATCH, never the fill's, which would make a row look as though it was confirmed on the
+    day it traded.
+    """
+    if not req.broker_ref.strip() or not req.verified_event.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="broker_ref and verified_event are both required — a verification naming "
+                   "neither what was matched nor its reference cannot be re-checked, which is "
+                   "the condition BROKER_VERIFIED exists to escape")
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            f"SELECT r.*, p.ticker FROM {table} r "
+            f"JOIN unified_positions p ON p.position_id = r.position_id "
+            f"WHERE r.position_id = $1 AND r.{key_column} = $2", position_id, row_id)
+        if not row:
+            raise HTTPException(status_code=404,
+                                detail=f"{table} {row_id} not found on {position_id}")
+        held = await conn.fetchval(
+            f"SELECT position_id FROM {table} WHERE broker_ref = $1 AND {key_column} <> $2",
+            req.broker_ref, row_id)
+        if held:
+            raise HTTPException(status_code=409,
+                                detail=f"broker_ref {req.broker_ref} is already on {held}")
+        async with conn.transaction():
+            await conn.execute(
+                f"""UPDATE {table}
+                       SET provenance = 'BROKER_VERIFIED', broker_ref = $1,
+                           verified_event = $2, verified_at = NOW()
+                     WHERE position_id = $3 AND {key_column} = $4""",
+                req.broker_ref, req.verified_event, position_id, row_id)
+            await _audit_leg(conn, position_id, row["ticker"], "VERIFY",
+                             f"{table}:{row_id}:provenance",
+                             {"provenance": row["provenance"], "broker_ref": row["broker_ref"]},
+                             {"provenance": "BROKER_VERIFIED", "broker_ref": req.broker_ref,
+                              "verified_event": req.verified_event},
+                             req.actor, req.reason or req.verified_event)
+    return {"status": "verified", "position_id": position_id, "table": table, "id": row_id,
+            "provenance": "BROKER_VERIFIED", "broker_ref": req.broker_ref,
+            "verified_event": req.verified_event}
+
+
+@router.post("/v2/positions/{position_id}/lots/{lot_id}/verify")
+async def verify_position_lot(position_id: str, lot_id: int, req: VerifyRequest,
+                              _=Depends(require_api_key)):
+    """Match a lot to a broker record — the only route to BROKER_VERIFIED for a lot."""
+    return await _verify_row("position_lots", position_id, lot_id, req)
+
+
+@router.post("/v2/positions/{position_id}/legs/{leg_seq}/verify")
+async def verify_position_leg(position_id: str, leg_seq: int, req: VerifyRequest,
+                              _=Depends(require_api_key)):
+    """Match a leg to a broker record — the only route to BROKER_VERIFIED for a leg."""
+    return await _verify_row("position_legs", position_id, leg_seq, req, key_column="leg_seq")
 
 
 class LegRequest(BaseModel):
