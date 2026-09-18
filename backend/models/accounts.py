@@ -137,6 +137,18 @@ def reconciliation_scope(account: Optional[str], start, end, *, table: str = "p"
     Deliberately takes no status argument. There is no correct reconciliation scope that
     filters by status -- a row opened and closed inside the window is exactly the row a status
     filter hides, and hiding it is what turns a duplicate into a reported absence.
+
+    THE NULL-PREDICATE RULE (R-IV.454(b)). A date predicate on a NULLABLE column silently
+    excludes every NULL: `exit_date >= X` means "closed on or after X AND has a recorded close
+    date", never the first alone. Both date predicates here carry their `IS NULL OR` branch, so
+    a terminal row with no exit date -- every undated expiry, every status-only close -- is IN
+    the scope rather than silently out of it. Such a row cannot be placed inside the window, so
+    it appears in every window it could belong to; that is the safe direction, because a row
+    shown twice is visible and a row shown never is the false absence this rule exists to stop.
+
+    THIRD SCOPE INSTANCE, recorded because the count is the argument: the label scope, the
+    status scope, and now the NULL predicate each produced a false absence, and two of the
+    three produced a write.
     """
     spellings = [s.upper() for s in scope_for(account)]
     clause = (f"UPPER({table}.account) = ANY($1::text[]) "

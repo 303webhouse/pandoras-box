@@ -400,6 +400,41 @@ async def _run_circe_pass(et) -> None:
 # RETRY_UNTIL_HOUR_ET (backtest/job.py), clear of the 21:00 nightly.
 _grader_attempted_at: dict = {}
 
+# ── The expiry sweep (R-IV.454(d)) ──────────────────────────────────────────────────────
+# Moved here from the READ path, where GET /v2/positions ran it and a request to look at the
+# book could end positions in it. Once per calendar day, before the open, recorded to job_runs
+# like every other pass so a restart neither skips nor repeats it. It runs on WEEKDAYS,
+# market holidays included (an expiry is a date, and a holiday does not stop it having
+# passed); a Friday expiry is therefore ended Monday at 06:30 ET rather than on a weekend read.
+EXPIRY_SWEEP_JOB = "expiry_sweep"
+EXPIRY_SWEEP_TIME_ET = (6, 30)
+_expiry_attempted_on: set = set()
+
+
+async def _maybe_run_expiry_sweep(et) -> None:
+    """Never raises."""
+    from jobs.job_runs import has_completed
+
+    day = et.date()
+    if day in _expiry_attempted_on:
+        return
+    try:
+        done = await has_completed(EXPIRY_SWEEP_JOB, day)
+    except Exception as exc:
+        logger.warning("[expiry_sweep] completion check failed: %s", exc)
+        done = None
+    if done is True:
+        _expiry_attempted_on.add(day)
+        return
+    _expiry_attempted_on.add(day)
+
+    async def _run():
+        from api.unified_positions import _sweep_expired_positions
+        ended = await _sweep_expired_positions()
+        return {"ended": len(ended), "position_ids": [e["position_id"] for e in ended]}
+
+    await _record(EXPIRY_SWEEP_JOB, _run, session_date=day)
+
 
 async def _maybe_run_shadow_grader(et, key_prefix: str) -> None:
     """Never raises."""
@@ -514,6 +549,10 @@ async def stable_engine_loop():
                         _circe_attempted_at[key_prefix] = et
                         logger.error("[circes_stew] market calendar cannot answer for %s -- "
                                      "pass NOT run. Extend MARKET_HOLIDAYS.", et.date())
+                # ── The expiry sweep (R-IV.454(d)) — off the read path ────────
+                eh, em = EXPIRY_SWEEP_TIME_ET
+                if (et.hour, et.minute) >= (eh, em):
+                    await _maybe_run_expiry_sweep(et)
                 # ── The shadow grader (R-IV.429(b)) ──────────────────────────
                 from backtest import job as _grader
                 from stable_engine.market_calendar import is_trading_day_or_none as _open_day

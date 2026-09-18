@@ -54,3 +54,20 @@ def counts_as_realized(status: Optional[str]) -> bool:
 def is_retired(status: Optional[str]) -> bool:
     """True when the row is kept as evidence and counted nowhere."""
     return normalize(status) in RETIRED_STATUSES
+
+
+# ── BACKFILL EXEMPTION (R-IV.454(c)) ───────────────────────────────────────────────────────
+#
+# NO BLANKET BACKFILL OF "CLOSED WITH NO REALIZED" — EVER. The rows in that state are not one
+# thing: some are honest absences (the record cannot support a figure), some are duplicates
+# (where a backfill would count the same trade twice, for real), and some are ends nobody
+# recorded. Six groups got six reads, not one remedy.
+#
+# A row carrying `backfill_exempt_reason` must not be written by any sweep. The mark is a
+# REASON rather than a flag so the next sweep that meets it reads why it must stop.
+def is_backfill_exempt(row) -> bool:
+    """True when a row is marked exempt from every backfill. Accepts a mapping or a record."""
+    try:
+        return bool((row.get("backfill_exempt_reason") or "").strip())
+    except AttributeError:
+        return False

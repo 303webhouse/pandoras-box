@@ -80,3 +80,25 @@ one structure came to be stored two ways in the first place.
 
 Registration only. **No rows converted, no convention declared canonical.** id 420 and id 415
 carry notes stating which shape they use and why.
+
+## ADDENDUM — R-IV.453(d), CC-BUILD, 2026-09-18: the two-strike schema also MISDESCRIBES
+
+**The STATUS above is superseded for two groups.** Both are now held as legs, and each converted
+row names where it came from (the rule this DEF set):
+
+| group | before | now |
+|---|---|---|
+| XLF 300 / 301 / 420 | a vertical, a single, and a combined row for one structure | one position, three legs (45P/40P/30P, 10/16), 301 and 420 marked `MERGED_INTO` — R-IV.444(b) |
+| NVDA 415 | `put_debit_spread`, qty 2, third leg in prose | `put_butterfly`, qty 3, three legs (100P long / 90P short / 50P long, 1/15/27) — R-IV.453 |
+
+**The sharper finding, and the reason this addendum exists: this is the SECOND butterfly stored
+as a two-leg spread.** A two-strike schema does not only split one structure across rows — it
+can store a three-leg position as a two-leg one on a single row, with nothing on the row saying
+anything is missing. Both instances were only visible because a human wrote the third leg into
+the notes; a position whose notes are silent would read as a complete vertical.
+
+**The NVDA quantity was wrong too (2 → 3),** which the two-column shape could not have shown —
+there was no leg row whose count could disagree with the position's.
+
+Leg prices are NULL on both groups: the XLF June vintage records only a net per spread, and the
+NVDA legs were entered from a broker screen showing **marks, not fills**.

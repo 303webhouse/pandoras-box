@@ -981,6 +981,54 @@ async def init_database():
                 ON unified_positions (duplicate_of) WHERE duplicate_of IS NOT NULL
         """)
 
+        # R-IV.454(c)(d): a terminal status is reachable only with an exit recorded. The app
+        # routes are closed in code; this trigger closes the door for direct writes. It fires on
+        # the TRANSITION only, so historical rows that ended with no result stay editable.
+        # Mirrors migrations/044. Each statement is attempted on its own (R-IV.449): a refusal
+        # must never end the rest of the bootstrap.
+        for _label, _sql in (
+            ("terminal-needs-exit function", """
+                CREATE OR REPLACE FUNCTION unified_positions_terminal_needs_exit()
+                RETURNS trigger AS $$
+                BEGIN
+                    IF NEW.status IN ('CLOSED', 'EXPIRED')
+                       AND (TG_OP = 'INSERT' OR OLD.status IS DISTINCT FROM NEW.status)
+                       AND NEW.exit_price IS NULL
+                       AND NEW.realized_pnl IS NULL
+                       AND NEW.trade_outcome IS NULL THEN
+                        RAISE EXCEPTION
+                            'R-IV.454(d): % would reach % with no exit recorded (no exit_price, realized_pnl or trade_outcome). Use the close or reduce path, or record the outcome explicitly -- UNKNOWN is a valid one.',
+                            NEW.position_id, NEW.status
+                            USING ERRCODE = 'check_violation';
+                    END IF;
+                    RETURN NEW;
+                END $$ LANGUAGE plpgsql
+            """),
+            ("terminal-needs-exit trigger", """
+                DROP TRIGGER IF EXISTS trg_unified_positions_terminal_needs_exit
+                    ON unified_positions
+            """),
+            ("terminal-needs-exit trigger create", """
+                CREATE TRIGGER trg_unified_positions_terminal_needs_exit
+                    BEFORE INSERT OR UPDATE OF status ON unified_positions
+                    FOR EACH ROW EXECUTE FUNCTION unified_positions_terminal_needs_exit()
+            """),
+            ("backfill exemption column", """
+                ALTER TABLE unified_positions ADD COLUMN IF NOT EXISTS backfill_exempt_reason TEXT
+            """),
+            ("group E marks", """
+                UPDATE unified_positions
+                   SET backfill_exempt_reason = 'R-IV.454(c) GROUP E: honest absence under R-IV.112-b -- closed with no realized figure the record can support. EXEMPT from any backfill; no blanket backfill of closed-with-no-realized, ever.'
+                 WHERE position_id IN ('POS_GUSH_20260609_232044', 'POS_SOXS_20260610_154556',
+                                       'POS_GDXJ_20260618_174846', 'POS_XLE_20260618_174913')
+                   AND backfill_exempt_reason IS NULL
+            """),
+        ):
+            try:
+                await conn.execute(_sql)
+            except Exception as e:
+                print(f"WARNING: {_label} not applied: {type(e).__name__}: {e}")
+
         # position_legs — what a multi-leg position actually holds (R-IV.444(b)). Two strike
         # columns describe a vertical and nothing else, so a three-leg structure had to be split
         # across rows or written into a note, and a screen reading those rows renders one
