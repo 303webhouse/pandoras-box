@@ -77,3 +77,33 @@ def canonical_account(value: Optional[str], *, field: str = "account") -> str:
 def non_canonical(values: Iterable[Optional[str]]) -> list:
     """Every value in `values` that no write should have stored. For reading a book."""
     return sorted({v for v in values if v is not None and normalize_account(v) != v})
+
+
+# ── THE RECONCILIATION RULE (R-IV.449(b), standing) ─────────────────────────────────────────
+#
+# AN INVENTORY IS SCOPED TO THE CANONICAL LABEL PLUS EVERY KNOWN ALIAS, OR IT IS NOT AN
+# INVENTORY. An account-scoped read cannot see rows misfiled outside its scope, so a
+# reconciliation that asks only for the canonical spelling reports ABSENCE where there is
+# DUPLICATION — and then writes the missing row it believes it found.
+#
+# That is not hypothetical: a BITX round trip was entered under the retired alias, an inventory
+# scoped to the canonical label missed it, the trade was re-created from the confirmations, and
+# the book carried one trade's money twice.
+#
+# `scope_for` returns every spelling a reconciliation must look under. It is the easy path on
+# purpose: a rule that requires remembering is a rule that gets forgotten on the day it matters.
+def scope_for(account: Optional[str]) -> list:
+    """Every spelling an inventory of `account` must read, canonical first.
+
+    Raises on an unknown label rather than returning a one-element list, because silently
+    scoping to exactly what was typed is the failure this exists to prevent.
+    """
+    canonical = canonical_account(account)
+    aliases = sorted(spelling for spelling, target in ALIASES.items() if target == canonical)
+    return [canonical] + aliases
+
+
+def scope_sql(account: Optional[str], column: str = "account") -> tuple:
+    """(clause, params) selecting every spelling of `account`, for a reconciliation read."""
+    spellings = scope_for(account)
+    return f"UPPER({column}) = ANY($1::text[])", [[s.upper() for s in spellings]]

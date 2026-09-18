@@ -938,6 +938,33 @@ async def init_database():
                 ON unified_positions (broker_ref) WHERE broker_ref IS NOT NULL
         """)
 
+        # R-IV.449(a): a duplicate is retired by being MARKED, never deleted -- it is the only
+        # record that the duplication happened. The pointer is a column because a keeper named
+        # in prose cannot be joined or checked, and the constraints make the two fields agree.
+        # Mirrors migrations/043.
+        await conn.execute("""
+            ALTER TABLE unified_positions ADD COLUMN IF NOT EXISTS duplicate_of TEXT
+        """)
+        await conn.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                                WHERE conname = 'unified_positions_duplicate_pointer') THEN
+                    ALTER TABLE unified_positions ADD CONSTRAINT unified_positions_duplicate_pointer
+                        CHECK ((status = 'DUPLICATE_OF') = (duplicate_of IS NOT NULL));
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                                WHERE conname = 'unified_positions_duplicate_not_self') THEN
+                    ALTER TABLE unified_positions ADD CONSTRAINT unified_positions_duplicate_not_self
+                        CHECK (duplicate_of IS NULL OR duplicate_of <> position_id);
+                END IF;
+            END $$;
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_unified_positions_duplicate_of
+                ON unified_positions (duplicate_of) WHERE duplicate_of IS NOT NULL
+        """)
+
         # position_legs — what a multi-leg position actually holds (R-IV.444(b)). Two strike
         # columns describe a vertical and nothing else, so a three-leg structure had to be split
         # across rows or written into a note, and a screen reading those rows renders one
