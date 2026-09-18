@@ -60,8 +60,14 @@ def test_verification_is_the_only_route_to_the_value():
                and not ln.strip().startswith("#")]
     for ln in assigns:
         assert "provenance = 'BROKER_VERIFIED'" in ln or "\"provenance\": \"BROKER_VERIFIED\"" in ln
-    assert sum("provenance = 'BROKER_VERIFIED'" in ln for ln in assigns) == 1, (
-        "exactly one SQL site may assign it, and it is the verify transition")
+    # Two SQL sites, and both are verify transitions: one for lots and legs, one for the
+    # position row (R-IV.448(b)). The property is not "one site" but "every site is a
+    # verification" — a stamp reachable from an ordinary write is the thing being prevented.
+    from api import unified_positions as U
+    verify_src = (inspect.getsource(U._verify_row) + inspect.getsource(U.verify_position))
+    assert verify_src.count("provenance = 'BROKER_VERIFIED'") == 2
+    assert sum("provenance = 'BROKER_VERIFIED'" in ln for ln in assigns) == 2, (
+        "exactly the two verify transitions may assign it")
 
 
 def test_both_lots_and_legs_have_the_route():
@@ -135,8 +141,10 @@ def test_nothing_touches_position_lots_before_it_is_created():
     ordering exists for. Caught on the live shape by a constraint that kept coming back."""
     boot = BOOT.read_text(encoding="utf-8")
     created = boot.index("CREATE TABLE IF NOT EXISTS position_lots (")
+    flat = " ".join(boot.split())
+    created_flat = flat.index("CREATE TABLE IF NOT EXISTS position_lots (")
+    assert flat.index("ALTER TABLE position_lots ADD COLUMN IF NOT EXISTS verified_at") >         created_flat, "the lots verification columns run before their table exists"
     for dependent in ("CREATE TABLE IF NOT EXISTS position_lot_closures",
-                      "ADD COLUMN IF NOT EXISTS verified_at",
                       "uq_position_lots_broker_ref"):
         assert boot.index(dependent) > created, (
             f"{dependent!r} runs before position_lots exists — a fresh boot fails there")

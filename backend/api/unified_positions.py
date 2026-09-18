@@ -2930,6 +2930,47 @@ async def _verify_row(table: str, position_id: str, row_id: int, req: VerifyRequ
             "verified_event": req.verified_event}
 
 
+@router.post("/v2/positions/{position_id}/verify")
+async def verify_position(position_id: str, req: VerifyRequest, _=Depends(require_api_key)):
+    """Match a POSITION row to a broker record (R-IV.448(b)).
+
+    The row carries the same three pieces of evidence as a lot or a leg. What it does NOT
+    carry is a uniqueness rule on the reference: one fill can close several positions — the
+    60-share SOXS sale covers three rows — so a reference is EXPECTED to repeat here, and a
+    constraint forbidding it would reject the correction set's own evidence.
+    """
+    if not req.broker_ref.strip() or not req.verified_event.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="broker_ref and verified_event are both required — a verification naming "
+                   "neither what was matched nor its reference cannot be re-checked")
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT position_id, ticker, provenance, broker_ref FROM unified_positions "
+            "WHERE position_id = $1", position_id)
+        if not row:
+            raise HTTPException(status_code=404, detail=f"Position {position_id} not found")
+        async with conn.transaction():
+            await conn.execute("SELECT set_config('app.actor', $1, true)",
+                               (req.actor or "lifecycle-ui"))
+            await conn.execute("SELECT set_config('app.reason', $1, true)",
+                               (req.reason or req.verified_event))
+            await conn.execute(
+                """UPDATE unified_positions
+                      SET provenance = 'BROKER_VERIFIED', broker_ref = $1,
+                          verified_event = $2, verified_at = NOW(), updated_at = NOW()
+                    WHERE position_id = $3""",
+                req.broker_ref, req.verified_event, position_id)
+            await _audit_leg(conn, position_id, row["ticker"], "VERIFY", "provenance",
+                             {"provenance": row["provenance"], "broker_ref": row["broker_ref"]},
+                             {"provenance": "BROKER_VERIFIED", "broker_ref": req.broker_ref,
+                              "verified_event": req.verified_event},
+                             req.actor, req.reason or req.verified_event)
+    return {"status": "verified", "position_id": position_id, "provenance": "BROKER_VERIFIED",
+            "broker_ref": req.broker_ref, "verified_event": req.verified_event}
+
+
 @router.post("/v2/positions/{position_id}/lots/{lot_id}/verify")
 async def verify_position_lot(position_id: str, lot_id: int, req: VerifyRequest,
                               _=Depends(require_api_key)):
