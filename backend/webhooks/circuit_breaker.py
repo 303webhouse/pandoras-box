@@ -343,8 +343,11 @@ async def check_decay() -> Optional[Dict[str, Any]]:
     if not trigger or trigger not in DECAY_CONFIG:
         return None
 
-    # Already in pending_reset? Just update fade factor.
+    # Already in pending_reset? Self-resolve once a full session has passed; otherwise fade.
     if _circuit_breaker_state.get("pending_reset"):
+        cleared = await self_resolve_if_due()
+        if cleared:
+            return cleared
         return _update_pending_fade()
 
     # Check if max time has elapsed
@@ -412,6 +415,94 @@ async def check_decay() -> Optional[Dict[str, Any]]:
         logger.warning("Could not broadcast pending_reset: %s", e)
 
     return {"status": "pending_reset", "trigger": trigger}
+
+
+# ── R-IV.457(a)(2) / CONVENTIONS #22: A LATCH CLEARS WITHOUT BEING SEEN ─────────────────────
+#
+# A pending reset -- the trigger's condition has already cleared -- used to wait for a human to
+# accept it, on a surface the principal does not watch, announced through a notification path
+# that had been retired. It waited 42 hours. An alarm whose clearing depends on a human seeing
+# it is a latch by construction.
+#
+# So once the condition has cleared AND one full regular session has passed since, the breaker
+# clears ITSELF, persists the clear, and logs a notice. Human accept remains the path for a
+# same-session clear, which is the only case where a person's judgement adds something the
+# condition check does not.
+SESSION_OPEN_ET = (9, 30)
+SESSION_CLOSE_ET = (16, 0)
+_LAST_SELF_CLEAR: Dict[str, Any] = {}
+
+
+def full_session_elapsed_since(since_utc: datetime, now_utc: Optional[datetime] = None) -> bool:
+    """Has a complete regular session (open to close, on a trading day) run AFTER `since`?
+
+    The first session that counts is the one whose OPEN is at or after `since`. A day the
+    calendar cannot answer for is not assumed to be a session -- for a kill switch, unknown is
+    not permission.
+    """
+    from zoneinfo import ZoneInfo
+    from datetime import time as _time
+    from stable_engine.market_calendar import is_trading_day_or_none
+
+    et = ZoneInfo("America/New_York")
+    now_utc = now_utc or datetime.now(timezone.utc)
+    if since_utc.tzinfo is None:
+        since_utc = since_utc.replace(tzinfo=timezone.utc)
+    since_et = since_utc.astimezone(et)
+    day = since_et.date()
+    if since_et.time() > _time(*SESSION_OPEN_ET):
+        day = day + timedelta(days=1)
+    for _ in range(14):
+        if is_trading_day_or_none(day) is True:
+            close = datetime.combine(day, _time(*SESSION_CLOSE_ET), tzinfo=et)
+            return now_utc >= close.astimezone(timezone.utc)
+        day = day + timedelta(days=1)
+    return False
+
+
+async def self_resolve_if_due(now_utc: Optional[datetime] = None) -> Optional[Dict[str, Any]]:
+    """Clear a pending reset whose condition cleared a full session ago. Never raises."""
+    global _LAST_SELF_CLEAR
+    try:
+        if not (_circuit_breaker_state.get("active") and
+                _circuit_breaker_state.get("pending_reset")):
+            return None
+        since = _circuit_breaker_state.get("pending_since")
+        if not since:
+            return None
+        since_dt = datetime.fromisoformat(str(since).replace("Z", "+00:00"))
+        if not full_session_elapsed_since(since_dt, now_utc):
+            return None
+        trigger = _circuit_breaker_state.get("trigger")
+        _LAST_SELF_CLEAR = {
+            "trigger": trigger,
+            "triggered_at": _circuit_breaker_state.get("triggered_at"),
+            "pending_since": since,
+            "cleared_at": (now_utc or datetime.now(timezone.utc)).isoformat(),
+            "rule": "R-IV.457(a)(2): condition cleared and a full session passed",
+        }
+        reset_circuit_breaker()
+        _circuit_breaker_state["last_self_clear"] = dict(_LAST_SELF_CLEAR)
+        await _persist_circuit_breaker_state()
+        logger.warning(
+            "CIRCUIT BREAKER SELF-CLEARED: %s (fired %s, condition cleared %s) -- a full "
+            "session passed with no human accept; cleared per R-IV.457(a)(2)",
+            trigger, _LAST_SELF_CLEAR["triggered_at"], since)
+        return {"status": "self_cleared", **_LAST_SELF_CLEAR}
+    except Exception as exc:
+        logger.warning("Circuit breaker self-resolution check failed: %s", exc)
+        return None
+
+
+# What each alert CLAIMS, so a disputed fire can show the claim beside the hub's reading.
+TRIGGER_CLAIMS = {
+    "spy_down_1pct": "SPY down at least 1% intraday",
+    "spy_down_2pct": "SPY down at least 2% intraday",
+    "vix_spike": "VIX up 15% or more",
+    "vix_extreme": "VIX above 30",
+    "spy_up_2pct": "SPY up at least 2% after a decline",
+    "spy_recovery": "SPY back above the prior session close",
+}
 
 
 def _update_pending_fade() -> Optional[Dict[str, Any]]:

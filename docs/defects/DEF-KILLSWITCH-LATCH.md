@@ -1,7 +1,7 @@
 # DEF-KILLSWITCH-LATCH — the breaker's clear never reached the store its arm wrote to
 
 **Registered:** R-IV.455(e). **Found and disarmed:** CC-BUILD, 2026-09-18, during market hours.
-**Status:** DISARMED 17:55:58 UTC (13:55 ET) through the operator path; mechanism FIXED.
+**Status:** DISARMED 17:55:58 UTC (13:55 ET) through the operator path; mechanism FIXED and the two latch rulings (R-IV.457(a)) IMPLEMENTED. **ONE ITEM STAYS OPEN — the 17:44:46Z phantom trigger, below. This DEF is not closed.**
 
 > **A safety device that cannot clear is not conservative, it is broken in the other
 > direction.** It read ACTIVE for about 47 hours on a condition its own check had cleared two
@@ -50,13 +50,15 @@ reached. The 0.9 scoring modifier dampened positive scores while unfaded — abo
 consumer of board state — for ~47 hours after its own condition cleared. The harm is a false
 signal, not a changed number.
 
-## ONE THING NOT ESTABLISHED
+## UNEXPLAINED — AND STAYS SO (R-IV.457(c))
 
 For a period on 09-18 the composite payload carried a different state — `triggered_at`
 2026-09-18T17:44:46Z, not pending, modifier 0.9 — while the persisted record and the serving
 process both held the 09-16 latch. The logs that would say what produced it belong to deployments
 that are no longer retrievable. After the disarm both surfaces agree: inactive. **Recorded as
-unexplained rather than attributed.**
+unexplained rather than attributed**, and ruled to stay open (R-IV.457(c)): the reason it cannot
+be closed is that the evidence which would close it no longer exists, and a DEF that closes on
+missing evidence has decided the question by default.
 
 ## WHAT SHIPPED
 
@@ -74,10 +76,24 @@ unexplained rather than attributed.**
   payload shaped `{"results": [...]}`, so it never computed anything and always used its
   fallback.
 
-## OPEN, FOR RULING
+## RULED (R-IV.457(a)) AND IMPLEMENTED
 
-- Whether a **disputed** fire should arm at all.
-- Whether `pending_reset` should resolve on its own after a bound, rather than waiting
-  indefinitely for an accept.
+- **A DISPUTED fire still ARMS** — fail-safe is right for a kill switch — but it renders as
+  **DISPUTED**, never plain ACTIVE: the board and the composite carry a `display_state`, and the
+  board shows the alert's claim beside the hub's reading.
+- **A PENDING RESET SELF-RESOLVES** once its condition has cleared and one full regular session
+  has passed since, with a logged notice and a `last_self_clear` record on the state. Human accept
+  is for same-session clears only.
+- **The 09:30 ET job applies that rule instead of an unconditional wipe.** It used to clear the
+  breaker every morning regardless of its condition — memory-only at first, and durably once the
+  R-IV.455 fix made it persist, which would have failed OPEN for a genuine crash fired late the
+  day before. It now clears only what the rule allows.
+
+Filed as conventions #22: a latched state carries a clearing path that does not depend on being
+seen.
+
+## STILL OPEN
+
+- The phantom trigger above.
 - The TradingView alert's own comparison — prior close, session open, or intraday high — lives
   in the Pine script, not in this repository, and cannot be read from here.

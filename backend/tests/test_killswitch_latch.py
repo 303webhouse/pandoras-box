@@ -116,13 +116,14 @@ def test_the_webhook_stays_fast_because_the_reading_is_taken_in_the_background()
 
 
 # --- the latch -----------------------------------------------------------------------------
-def test_the_scheduled_reset_reaches_the_store_the_arm_wrote_to():
-    """It cleared memory only; the armed record in Redis (no expiry) re-armed every restart."""
-    src = (ROOT / "backend" / "scheduler" / "bias_scheduler.py").read_text(encoding="utf-8")
-    i = src.index("async def reset_circuit_breaker_scheduled")
-    body = src[i:i + 1400]
-    assert "await _persist_circuit_breaker_state()" in body
-    assert body.index("reset_circuit_breaker()") < body.index("await _persist_circuit_breaker_state()")
+def test_a_clear_reaches_the_store_the_arm_wrote_to():
+    """It cleared memory only; the armed record in Redis (no expiry) re-armed every restart.
+
+    SUPERSEDED IN SHAPE by R-IV.457(a): the 09:30 job no longer clears unconditionally -- it
+    applies the self-resolution rule -- so the persist now lives where a clear actually happens.
+    The property is unchanged: any clear reaches Redis."""
+    src = inspect.getsource(CB.self_resolve_if_due)
+    assert src.index("reset_circuit_breaker()") < src.index("await _persist_circuit_breaker_state()")
 
 
 def test_the_board_shows_how_long_a_latch_has_been_waiting():

@@ -2387,15 +2387,15 @@ async def reset_circuit_breaker_scheduled():
     Clears any overnight risk events
     """
     try:
-        from webhooks.circuit_breaker import (reset_circuit_breaker,
-                                              _persist_circuit_breaker_state)
-        result = reset_circuit_breaker()
-        # R-IV.455: the reset used to clear MEMORY only. The armed record sits in Redis with no
-        # expiry (armed state fails closed), so the next restart restored it -- and a breaker
-        # that fired on 09-16 was re-armed by every deploy for two days. The clear has to reach
-        # the same store the arm did, or it is not a clear.
-        await _persist_circuit_breaker_state()
-        logger.info(f"ðŸ”“ Circuit breaker reset at market open (persisted): {result}")
+        from webhooks.circuit_breaker import self_resolve_if_due
+        # R-IV.457(a): this job used to clear the breaker UNCONDITIONALLY at 09:30 -- memory
+        # only at first, and durably once R-IV.455 made it persist. That made it fail OPEN: a
+        # genuine crash that fired at 15:50 would have been wiped the next morning whether or
+        # not the market had recovered. The ruled rule is condition-bound and time-bound: a
+        # breaker clears when its condition has cleared AND a full session has passed. That is
+        # what this job now applies; an armed breaker whose condition has NOT cleared stays.
+        result = await self_resolve_if_due()
+        logger.info(f"Circuit breaker market-open check: {result or 'nothing due'}")
     except Exception as e:
         logger.error(f"Error resetting circuit breaker: {e}")
 

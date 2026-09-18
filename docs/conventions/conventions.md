@@ -892,3 +892,43 @@ disagree, and then nobody can say which one a figure came from.**
 
 **Kin:** conventions #15 and #17 -- the failure (here, the swap) must be visible on a channel
 that does not depend on the thing that failed.
+
+
+## #22 A LATCHED STATE CARRIES A CLEARING PATH THAT DOES NOT DEPEND ON BEING SEEN
+
+**R-IV.457(b), standing.**
+
+> **Anything that can hold a state until something happens must say what clears it, and at
+> least one clearing path must be time-bound, condition-bound, or both -- never only "a person
+> notices and acts".**
+
+### Three instances in one week
+
+| instance | what held it | what it was waiting for |
+|---|---|---|
+| the UW governor's stale reading | a quota reading hours old kept shedding the calls that would have refreshed it | a reading that shedding prevented |
+| the account shed | the same latch inside a single day -- 3,717 calls, four readings | the same |
+| the kill switch | a `pending_reset` whose own condition cleared on 09-16 evening | a human accept, on a surface the principal does not watch, announced over a notification path that had been retired -- 42 hours |
+
+**The shape is the same each time: the state suppresses, or sits unseen beside, the thing that
+would clear it.** A latch needs no malfunction to sustain itself; it only needs its clearing
+path to depend on an input it cannot produce.
+
+### The rule
+
+- **Name the clearing paths** of any state that persists until an event, on the code's face.
+- **At least one must not depend on being seen.** Time-bound (it expires), condition-bound (a
+  measurement clears it), or both. A human action may be one path; it may not be the only one.
+- **A restart is not a clearing path** -- it either re-arms from storage or discards state that
+  should have survived, and neither is a decision.
+- **A self-clear logs a notice** saying what cleared, when it fired, and why it was allowed to
+  clear, so the absence of a human decision is recorded rather than silent.
+
+**The fail-safe caveat (R-IV.457(a)(1)):** clearing on a condition is not clearing on a guess. A
+kill switch whose fire is *disputed* by the hub's own reading still arms -- fail-safe is right
+for a safety device -- but it renders as DISPUTED with both readings side by side, never as
+plain ACTIVE. What this convention forbids is a state that cannot end, not a state that is
+cautious while it lasts.
+
+**Kin:** conventions #15 and #17 (a failure must be visible on a channel that does not depend on
+the thing that failed) -- this is the same rule applied to recovery rather than to alarm.

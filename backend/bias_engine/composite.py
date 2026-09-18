@@ -908,6 +908,12 @@ async def compute_composite() -> CompositeResult:
                 "triggered_at": cb_state.get("triggered_at"),
                 "pending_reset": cb_state.get("pending_reset", False),
                 "decay_fade": cb_state.get("decay_fade", 1.0),
+                # R-IV.457(a)(1): a disputed fire is armed but never shown as plain ACTIVE.
+                "disputed": cb_state.get("disputed"),
+                "display_state": ("DISPUTED" if cb_state.get("disputed") is True else
+                                  "PENDING_RESET" if cb_state.get("pending_reset") else
+                                  "ACTIVE"),
+                "hub_reading": cb_state.get("hub_reading"),
             }
             logger.info(
                 "Circuit breaker applied to composite: trigger=%s mod=%.2f cap=%s floor=%s → %s",
