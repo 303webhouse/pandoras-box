@@ -360,3 +360,33 @@ description.** Recording the actual first and last date (item 4) would have show
 
 **Instance count: 2.** Both found by re-running or re-reading, not by the figure itself — which is
 the point: **a calibrated figure never announces that its origin has drifted.**
+
+
+## INSTRUMENT SCOPE — AN ABSENCE IS ONLY EVIDENCE WHERE THE INSTRUMENT COULD HAVE SHOWN A PRESENCE
+
+### An instance filed by CC-BUILD against its own claim (R-IV.458(f), 2026-09-18)
+
+**The claim.** Auditing past quantity and entry edits for the cash drift the old PATCH recompute
+could cause, CC-BUILD reported that the recompute's signature appeared "exactly once" in the
+audit trail -- the NVDA edit of 2026-09-18 -- "since 2026-08-26".
+
+**The instrument.** It looked for an edit that changed quantity or entry, followed within seconds
+by a separate write that changed `cost_basis` alone -- the shape the recompute leaves when the
+caller does NOT send a basis.
+
+**What it could not see.** A PATCH that sends the new basis ITSELF changes quantity, entry and
+basis in one write, so there is no second, basis-only write to find. **Nine of the twelve edits
+in the trail have that shape.** The instrument was blind to three quarters of its population and
+reported "once" -- a count the instrument could not have made any larger than it did.
+
+**And the window was misstated.** The audit trail starts on **2026-05-26**, not 2026-08-26: the
+figure named the trigger's installation date from memory rather than reading the table's first
+row.
+
+**The finding of record is CC-POSITIONS' per-edit check,** which reads each of the twelve edits
+directly: net drift inside the trail is -16.00, reversed by adjustment #1, so zero; before
+2026-05-26, unknown.
+
+> **A negative count is bounded by the shapes the query can match, not by the rows it scanned.**
+> Before reporting "N instances", ask what an instance would have to look like to be missed --
+> and count those rows too.

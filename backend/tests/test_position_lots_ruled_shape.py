@@ -304,12 +304,13 @@ def test_an_unpriced_lot_keeps_the_priced_basis_and_marks_the_row(monkeypatch):
     assert out["unpriced_lots"] == 1 and out["quantity"] == 15
 
 
-def test_a_fractional_lot_sum_is_refused_with_the_reason(monkeypatch):
-    with pytest.raises(HTTPException) as e:
-        _add(monkeypatch, OPEN_EQUITY, [{"qty": 2.5, "price": 5.0, "fees": 0}],
-             qty=2.5, price=5.0)
-    assert e.value.status_code == 400
-    assert "INTEGER" in e.value.detail and "lose shares" in e.value.detail
+def test_a_fractional_lot_sum_is_stored_exactly(monkeypatch):
+    """R-IV.458(b) superseded the refusal: quantity is NUMERIC and the book matches the broker
+    including fractions. The refusal protected an INTEGER column from losing shares."""
+    out, conn = _add(monkeypatch, OPEN_EQUITY, [{"qty": 2.5, "price": 5.0, "fees": 0}],
+                     qty=2.5, price=5.0)
+    upd = [e for e in conn.executed if "UPDATE unified_positions" in e[0]][0]
+    assert upd[1][0] == 2.5 and out["quantity"] == 2.5
 
 
 def test_a_lot_cannot_be_added_to_a_closed_position(monkeypatch):

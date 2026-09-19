@@ -36,7 +36,7 @@ def _is_debit_iron_condor(legs: list) -> bool:
 def calculate_position_risk(
     structure: str,
     entry_price: float,
-    quantity: int,
+    quantity: float,
     long_strike: Optional[float] = None,
     short_strike: Optional[float] = None,
     legs: Optional[list] = None,
@@ -56,6 +56,9 @@ def calculate_position_risk(
     Returns:
         dict with max_loss, max_profit, breakeven (list), direction
     """
+    # R-IV.458(b): quantity is NUMERIC in the book and can arrive as Decimal.
+    quantity = float(quantity or 0)
+    entry_price = float(entry_price) if entry_price is not None else entry_price
     s = structure.lower().replace("-", "_").replace(" ", "_") if structure else "unknown"
     multiplier = 100  # options contract multiplier
 

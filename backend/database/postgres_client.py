@@ -831,7 +831,7 @@ async def init_database():
                 -- Entry
                 entry_price NUMERIC,
                 entry_date TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                quantity INTEGER NOT NULL DEFAULT 1,
+                quantity NUMERIC NOT NULL DEFAULT 1,   -- R-IV.458(b): exact, fractions included
                 cost_basis NUMERIC,
 
                 -- Risk (auto-calculated for spreads, user-provided for equity)
@@ -1040,6 +1040,14 @@ async def init_database():
                     actor        TEXT        NOT NULL,
                     created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )
+            """),
+            # R-IV.458 (migrations/047): quantity is exact; a mark says how it was made.
+            ("quantity numeric", """
+                ALTER TABLE unified_positions
+                    ALTER COLUMN quantity TYPE NUMERIC USING quantity::numeric
+            """),
+            ("mark reason column", """
+                ALTER TABLE unified_positions ADD COLUMN IF NOT EXISTS mark_reason TEXT
             """),
             ("group E marks", """
                 UPDATE unified_positions
