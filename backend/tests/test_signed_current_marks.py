@@ -161,4 +161,4 @@ def test_with_legs_refuses_a_net_whose_sign_contradicts_the_payoff(monkeypatch):
 def test_with_legs_records_the_side():
     from api import unified_positions as U
     src = inspect.getsource(U.create_position_with_legs)
-    assert "entry_side" in src and "incomplete, req.notes, entry_side)" in src
+    assert "entry_side" in src and "incomplete, req.notes, entry_side, row_source" in src

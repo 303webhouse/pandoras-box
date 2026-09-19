@@ -64,13 +64,17 @@ def _payoff_at(legs, ratios, s: float) -> float:
     return v
 
 
-def analyze(legs: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
-    """Net premium, max profit, max loss and breakevens, per structure and per contract set."""
+def analyze(legs: Sequence[Dict[str, Any]],
+            net_premium_override: Optional[float] = None) -> Dict[str, Any]:
+    """Net premium, max profit, max loss and breakevens, per structure and per contract set.
+
+    net_premium_override: the signed net per structure when it is known from the row rather than
+    the legs (+ paid, - received) -- a position whose legs carry no fills (R-IV.463(e))."""
     legs = list(legs)
     if not legs:
         return {"legs": 0, "computable": False, "reason": "no legs"}
     expiries = {str(l.get("expiry"))[:10] for l in legs}
-    net = net_premium(legs)
+    net = net_premium(legs) if net_premium_override is None else float(net_premium_override)
     out: Dict[str, Any] = {
         "legs": len(legs),
         "net_premium": net,
