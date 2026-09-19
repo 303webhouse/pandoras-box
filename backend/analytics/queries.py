@@ -183,19 +183,22 @@ async def get_signal_stats_rows(
 # change in /trade-stats was correct and did not remove the BITX double count, because that
 # rollup never read the table the double count lived in.
 #
-#   /api/analytics/trade-stats    get_trade_rows -> trades          (realized, win rate, curve)
-#   /api/analytics/trades         get_trade_rows -> trades          (the list)
-#   /api/analytics/export/trades  get_trade_rows -> trades          (the CSV)
-#   /api/v2/positions*            unified_positions                 (the book)
-#   /api/portfolio/positions/closed  closed_positions               (legacy closed list)
+#   /api/analytics/trade-stats    get_book_rows -> unified_positions  (realized, win rate, curve)
+#   /api/analytics/trades         get_book_rows -> unified_positions  (the list)
+#   /api/analytics/export/trades  get_book_rows -> unified_positions  (the CSV)
+#   /api/v2/positions*            unified_positions                   (the book)
+#   /api/portfolio/positions/closed  closed_positions                 (legacy closed list)
 #
-# `trades` is filled by ONE write path (the close endpoint). R-IV.451(a) rules that analytics
-# reads the book instead; until that ships, every figure above carries `book_coverage` so a
-# reader can see what the figure is missing. The ruling's order: (1) analytics reads the book,
-# (2) realized metrics go live on Abacus, (3) trades retires or becomes a labelled import log.
+# SWITCHED 2026-09-19 (R-IV.463(h)). `trades` is filled by ONE write path (the close endpoint);
+# R-IV.451(a) ruled that analytics reads the book, and the acceptance test reconciled the change
+# by population and value before it shipped (unexplained 0.00). Every figure above still carries
+# `book_coverage` -- now naming what the BOOK figure lacks: closed trades no book row is linked
+# to, ended rows with no result, ended rows with no exit date. The ruling's order: (1) analytics
+# reads the book [done], (2) realized metrics go live on Abacus, (3) trades retires or becomes a
+# labelled import log.
 
 
-async def book_coverage_gap() -> Dict[str, Any]:
+async def book_coverage_gap(reader: str = "trades") -> Dict[str, Any]:
     """What the book holds that `trades` does not, computed live. Never raises.
 
     Live rather than quoted: the ruling measured 77 closes and -1,373.64, and those figures move
@@ -213,6 +216,12 @@ async def book_coverage_gap() -> Dict[str, Any]:
     that `trades` lacks. The acceptance test for the read-from-book build found the other: 70
     closed trades in this figure with no book row at all (+356.10, historical imports). A chip
     naming only what a figure is missing reads as "the rest is right", and it was not.
+
+    reader="book" (R-IV.463(h), the switch): the figure now reads the book, so what the book holds
+    is IN it. What it lacks is the other side -- closed trades no book row is linked to -- and
+    two populations the book reader counts and never sums: ended rows with no result, and ended
+    rows with no exit date. The trades-reader keys are kept, so the acceptance script still
+    compares the two readers with one instrument.
     """
     try:
         rows = await fetch_rows(
@@ -233,7 +242,8 @@ async def book_coverage_gap() -> Dict[str, Any]:
                                    AND exit_date IS NOT NULL AND NOT plausible), 0)
                                                                               AS absent_realized,
                 COUNT(*) FILTER (WHERE realized_pnl IS NULL
-                                   AND trade_outcome IS NULL)                 AS unknown_result
+                                   AND trade_outcome IS NULL)                 AS unknown_result,
+                COUNT(*) FILTER (WHERE exit_date IS NULL)                     AS undated
               FROM ended
             """, [])
         # CORRECTED AGAIN, same day: "no book row that day" stopped seeing trades whose day DOES
@@ -260,7 +270,35 @@ async def book_coverage_gap() -> Dict[str, Any]:
         orphan_n = int(o.get("n") or 0)
         orphan_pnl = round(float(o.get("pnl") or 0), 2)
         orphan_strict = int(o.get("no_book_row") or 0)
+        unknown = int(r.get("unknown_result") or 0)
+        undated = int(r.get("undated") or 0)
         parts = []
+        if reader == "book":
+            if orphan_n:
+                parts.append(f"{orphan_n} closed trades ({orphan_pnl:+,.2f}) in the old trades "
+                             f"ledger are not linked to the book and are not in this figure "
+                             f"({orphan_strict} with no book row at all)")
+            if unknown:
+                parts.append(f"{unknown} ended positions have no result recorded -- counted, "
+                             f"never summed")
+            if undated:
+                parts.append(f"{undated} ended positions have no exit date -- listed, not "
+                             f"placed in a window")
+            return {
+                "source": "unified_positions",
+                "old_source": "trades",
+                "unlinked_closes": int(r.get("unlinked") or 0),
+                "absent_closes": absent,
+                "absent_realized": absent_realized,
+                "unknown_result_closes": unknown,
+                "undated_closes": undated,
+                "trades_orphans": orphan_n,
+                "trades_orphans_pnl": orphan_pnl,
+                "trades_orphans_no_book_row": orphan_strict,
+                "complete": orphan_n == 0,
+                "chip": "; ".join(parts) if parts else None,
+                "ruling": "R-IV.463(h): analytics reads the book",
+            }
         if absent:
             parts.append(f"{absent} closes ({absent_realized:+,.2f} realized) are in the book "
                          f"but not in this figure")

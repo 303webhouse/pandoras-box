@@ -9,7 +9,7 @@ import io
 import json
 import hashlib
 import logging
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, UploadFile, File
@@ -38,7 +38,9 @@ from analytics.computations import (
     std_dev,
 )
 from analytics.queries import (
-    book_coverage_gap,          # R-IV.451(a): what the book holds that the figure does not
+    BOOK_FIELDS_NOT_IN_BOOK,    # present in the trades shape, never recorded in the book
+    book_coverage_gap,          # R-IV.463(h): what the BOOK figure lacks, named
+    get_book_rows,              # R-IV.463(h): analytics reads the book
     close_trade,
     fetch_rows,
     find_matching_signals,
@@ -162,6 +164,22 @@ class UwSnapshotRequest(BaseModel):
 class ImportTradesRequest(BaseModel):
     trades: List[Dict[str, Any]] = Field(default_factory=list)
     account: Optional[str] = "robinhood"
+
+
+_EARLIEST = datetime.min.replace(tzinfo=timezone.utc)
+_LATEST = datetime.max.replace(tzinfo=timezone.utc)
+
+
+def _when(row: Dict[str, Any], *keys: str, missing: datetime = _EARLIEST) -> datetime:
+    """The first present timestamp among `keys`, always tz-aware, so rows from the book (aware)
+    and a missing value never meet as naive-vs-aware -- which raises instead of ordering."""
+    for k in keys:
+        v = row.get(k)
+        if isinstance(v, datetime):
+            return v if v.tzinfo else v.replace(tzinfo=timezone.utc)
+        if isinstance(v, date):
+            return datetime(v.year, v.month, v.day, tzinfo=timezone.utc)
+    return missing
 
 
 def _as_float(value: Any, default: float = 0.0) -> float:
@@ -690,7 +708,9 @@ async def trade_stats(
     days: int = Query(90, ge=1, le=3650),
     signal_source: Optional[str] = None,
 ):
-    rows = await get_trade_rows(
+    # R-IV.463(h): the book, not `trades`. Terminal rows are windowed on exit_date, open rows on
+    # entry_date; retired duplicates are excluded by the vocabulary and counted.
+    book = await get_book_rows(
         account=account,
         ticker=ticker,
         direction=direction,
@@ -699,6 +719,7 @@ async def trade_stats(
         days=days,
         signal_source=signal_source,
     )
+    rows = book["rows"]
     total = len(rows)
     # R-IV.449(a): "not open" and "completed" are different questions. A retired duplicate is
     # neither — its fills happened once and its money belongs to the row it duplicates — so
@@ -706,10 +727,17 @@ async def trade_stats(
     # models/position_status.py.
     open_rows = [r for r in rows if position_status.is_open(r.get("status"))]
     closed_rows = [r for r in rows if position_status.counts_as_realized(r.get("status"))]
-    pnl_values = [_as_float(r.get("pnl_dollars")) for r in closed_rows if r.get("pnl_dollars") is not None]
+    # R-IV.454(b)(2): an ended row with no exit date cannot be placed in a window, and one with no
+    # result has nothing to sum. Both are COUNTED in `closed` and listed; neither enters a sum,
+    # a win rate or the curve -- a no-result row summed as zero would read as a flat trade.
+    undated_rows = [r for r in closed_rows if r.get("undated")]
+    no_result_rows = [r for r in closed_rows if not r.get("result_known")]
+    summable = [r for r in closed_rows
+                if r.get("result_known") and not r.get("undated") and r.get("pnl_dollars") is not None]
+    pnl_values = [_as_float(r.get("pnl_dollars")) for r in summable]
     realized_pnl = sum(pnl_values)
     unrealized_pnl = sum(_as_float(r.get("pnl_dollars"), 0.0) for r in open_rows if r.get("pnl_dollars") is not None)
-    pct_values = [_as_float(r.get("pnl_percent")) / 100.0 for r in closed_rows if r.get("pnl_percent") is not None]
+    pct_values = [_as_float(r.get("pnl_percent")) / 100.0 for r in summable if r.get("pnl_percent") is not None]
 
     wins = [p for p in pnl_values if p > 0]
     losses = [p for p in pnl_values if p < 0]
@@ -721,7 +749,7 @@ async def trade_stats(
 
     equity_curve: List[Dict[str, Any]] = []
     cumulative = 0.0
-    for row in sorted(closed_rows, key=lambda r: r.get("closed_at") or r.get("opened_at") or datetime.utcnow()):
+    for row in sorted(summable, key=lambda r: _when(r, "closed_at", "opened_at")):
         cumulative += _as_float(row.get("pnl_dollars"), 0.0)
         closed_at = row.get("closed_at") or row.get("opened_at")
         if isinstance(closed_at, datetime):
@@ -756,8 +784,8 @@ async def trade_stats(
     profit_factor = compute_profit_factor(wins, losses)
     sharpe = compute_sharpe(pct_values)
     sortino = compute_sortino(pct_values)
-    rr_values = [_as_float(r.get("rr_achieved")) for r in closed_rows if r.get("rr_achieved") is not None]
-    risk_pct_values = [_as_float(r.get("risk_pct")) for r in closed_rows if r.get("risk_pct") is not None]
+    rr_values = [_as_float(r.get("rr_achieved")) for r in summable if r.get("rr_achieved") is not None]
+    risk_pct_values = [_as_float(r.get("risk_pct")) for r in summable if r.get("risk_pct") is not None]
 
     by_account: Dict[str, Dict[str, Any]] = {}
     by_structure: Dict[str, Dict[str, Any]] = {}
@@ -766,7 +794,7 @@ async def trade_stats(
     by_signal_source: Dict[str, Dict[str, Any]] = {}
     exit_reason_counts: Dict[str, int] = {}
 
-    for row in closed_rows:
+    for row in summable:
         acct = (row.get("account") or "UNKNOWN").lower()
         struct = (row.get("structure") or "unknown").lower()
         bias = (row.get("bias_at_entry") or row.get("linked_signal_bias") or "UNKNOWN").upper()
@@ -799,13 +827,21 @@ async def trade_stats(
             total_pct = safe_div(sum(pnl_values), start_equity) * 100.0
 
     return {
-        # R-IV.451(a): this figure reads `trades`, which one write path fills. The block below
-        # says what the book holds that this figure does not — computed live, every call.
-        "book_coverage": await book_coverage_gap(),
+        # R-IV.463(h): this figure reads the book. The block below names what it lacks —
+        # computed live, every call.
+        "book_coverage": await book_coverage_gap(reader="book"),
+        "source": "unified_positions",
         "window_days": days,
         "total_trades": total,
         "open": len(open_rows),
         "closed": len(closed_rows),
+        "closed_summed": len(summable),
+        "closed_no_result": len(no_result_rows),       # counted, never summed
+        "closed_undated": len(undated_rows),           # listed, not placed in a window
+        "retired_excluded": book["retired_excluded"],
+        # Fields the trades shape carried that the book never recorded: their aggregates are
+        # null, not zero -- a 0.00 average R:R is a claim about trades nobody measured.
+        "fields_not_in_book": list(BOOK_FIELDS_NOT_IN_BOOK),
         "win_rate": round(win_rate, 3),
         "pnl": {
             "total_dollars": round(sum(pnl_values), 3),
@@ -816,7 +852,7 @@ async def trade_stats(
             "avg_loss_dollars": round(avg_loss, 3),
             "largest_win": round(max(wins), 3) if wins else 0.0,
             "largest_loss": round(min(losses), 3) if losses else 0.0,
-            "avg_rr_achieved": round(mean(rr_values), 3),
+            "avg_rr_achieved": round(mean(rr_values), 3) if rr_values else None,
             "expectancy_per_trade": round(expectancy, 3),
         },
         "risk_metrics": {
@@ -826,7 +862,7 @@ async def trade_stats(
             "max_drawdown_dollars": max_dd_dollars,
             "max_drawdown_peak_date": peak_date,
             "max_drawdown_trough_date": trough_date,
-            "avg_risk_per_trade_pct": round(mean(risk_pct_values), 3),
+            "avg_risk_per_trade_pct": round(mean(risk_pct_values), 3) if risk_pct_values else None,
             "profit_factor": profit_factor,
         },
         "by_account": by_account,
@@ -947,7 +983,7 @@ async def list_trades(
     limit: int = Query(200, ge=1, le=1000),
     offset: int = Query(0, ge=0),
 ):
-    rows = await get_trade_rows(
+    book = await get_book_rows(                          # R-IV.463(h): the book
         account=account,
         ticker=ticker,
         direction=direction,
@@ -959,7 +995,7 @@ async def list_trades(
         end=end,
     )
 
-    filtered = rows
+    filtered = book["rows"]
     if status:
         status_upper = status.upper()
         filtered = [
@@ -979,18 +1015,19 @@ async def list_trades(
                 or needle in str(row.get("origin") or "").lower()
             ]
 
+    # A book row can carry no date at all; it sorts as newest, as the undated did before, and a
+    # naive "now" beside the book's aware timestamps would raise instead of sorting.
     filtered.sort(
-        key=lambda row: (
-            row.get("opened_at") or row.get("closed_at") or datetime.utcnow(),
-            row.get("id") or 0,
-        ),
+        key=lambda row: (_when(row, "opened_at", "closed_at", missing=_LATEST), row.get("id") or 0),
         reverse=True,
     )
     total = len(filtered)
     page = filtered[offset: offset + limit]
 
     return {
-        "book_coverage": await book_coverage_gap(),   # R-IV.451(a): this list reads `trades`
+        "book_coverage": await book_coverage_gap(reader="book"),   # R-IV.463(h): reads the book
+        "source": "unified_positions",
+        "retired_excluded": book["retired_excluded"],
         "total": total,
         "limit": limit,
         "offset": offset,
@@ -2307,14 +2344,10 @@ async def export_trades(
 ):
     if format.lower() != "csv":
         raise HTTPException(status_code=400, detail="Only format=csv is supported")
-    rows = await get_trade_rows(
-        account=account,
-        ticker=ticker,
-        days=90,
-        start=start,
-        end=end,
-    )
-    return _csv_response(rows, "trades_export.csv", coverage=await book_coverage_gap())
+    book = await get_book_rows(account=account, ticker=ticker, days=90,   # R-IV.463(h)
+                               start=start, end=end)
+    return _csv_response(book["rows"], "trades_export.csv",
+                         coverage=await book_coverage_gap(reader="book"))
 
 
 @analytics_router.get("/export/factors", dependencies=[Depends(require_api_key)])

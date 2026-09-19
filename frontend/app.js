@@ -679,7 +679,7 @@ function loadAnalyticsBundle() {
     _analyticsBundleState = 'loading';
     // cockpit.js first (exports window.analyticsUtils that laboratory.js depends on)
     _injectScript('/cockpit.js?v=2')
-        .then(() => _injectScript('/laboratory.js?v=2'))
+        .then(() => _injectScript('/laboratory.js?v=3'))
         .then(() => { _analyticsBundleState = 'loaded'; })
         .catch(err => { console.error('Analytics bundle load failed:', err); _analyticsBundleState = 'idle'; });
 }
