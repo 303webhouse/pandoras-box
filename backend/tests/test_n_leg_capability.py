@@ -20,7 +20,8 @@ sys.path.insert(0, __file__.rsplit("tests", 1)[0])
 
 from models.leg_payoff import analyze, display_strikes, recognize  # noqa: E402
 from services.leg_mark import (  # noqa: E402
-    mark_from_legs, name_path_priced_same_legs, prior_mark_came_from_legs, structure_ratios,
+    mark_from_legs, name_path_priced_same_legs, payoff_range, prior_mark_came_from_legs,
+    structure_ratios,
 )
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -101,10 +102,11 @@ def test_a_position_is_marked_from_every_leg_across_expiries():
 
     async def pricer(tk, group, expiry):
         calls.append((expiry, len(group)))
-        return {"net_mark": 1.0 if expiry == "2026-10-16" else -0.4, "leg_details": []}
+        # signed BUY-minus-SELL: the short near call is worth -1.0, the long far call +1.4
+        return {"net_mark": -1.0 if expiry == "2026-10-16" else 1.4, "leg_details": []}
     legs = [L("CALL", "SHORT", 100, q=2, e="2026-10-16"), L("CALL", "LONG", 100, q=2, e="2026-11-20")]
     out = _run(mark_from_legs("SPY", legs, 2, "calendar", pricer))
-    assert out["ok"] and abs(out["net_mark"] - 0.6) < 1e-9
+    assert out["ok"] and abs(out["net_mark"] - 0.4) < 1e-9
     assert sorted(calls) == [("2026-10-16", 1), ("2026-11-20", 1)]
     assert out["reason"].startswith("priced from 2 leg(s)")
 
@@ -183,6 +185,62 @@ def test_a_legs_position_never_falls_through_to_a_name_based_path():
     block = src[i:src.index("# --- Multi-leg path", i)]
     assert "continue" in block
     assert "mark_status = 'UNAVAILABLE'" in block and "current_price = NULL" in block
+
+
+# --- a net outside what the legs can be worth is not a price (R-IV.462(d)) -------------------
+def _g(t, a, k, q=1):
+    return {"option_type": t, "action": a, "strike": k, "quantity": q}
+
+
+@pytest.mark.parametrize("group,low,high", [
+    ([_g("call", "BUY", 120), _g("call", "SELL", 130)], 0, 10),          # debit vertical: 0..width
+    ([_g("put", "SELL", 100), _g("put", "BUY", 90)], -10, 0),            # credit vertical, as held
+    ([_g("put", "BUY", 100), _g("put", "SELL", 90), _g("put", "BUY", 50)], 0, 60),  # NVDA 415
+    ([_g("call", "BUY", 90), _g("call", "SELL", 100, 2), _g("call", "BUY", 110)], 0, 10),
+    ([_g("call", "BUY", 100)], 0, float("inf")),                          # no ceiling
+    ([_g("call", "SELL", 100)], float("-inf"), 0),                        # no floor
+])
+def test_payoff_range_is_what_one_structure_can_be_worth(group, low, high):
+    assert payoff_range(group) == (low, high)
+
+
+def _price_at(net):
+    async def pricer(tk, group, expiry):
+        return {"net_mark": net, "leg_details": []}
+    return pricer
+
+
+def test_slv_316s_quotes_are_refused_not_turned_positive():
+    """120C at 0.02 and 130C at 0.105: a higher-strike call priced above a lower one. The old
+    path stored -0.085; the first legs path stored abs() of it, +0.085. Neither is a price."""
+    legs = [L("CALL", "LONG", 120, q=5, e="2026-09-30"), L("CALL", "SHORT", 130, q=5, e="2026-09-30")]
+    out = _run(mark_from_legs("SLV", legs, 5, "call_debit_spread", _price_at(-0.085)))
+    assert out["ok"] is False and "outside what they can be worth" in out["reason"]
+    assert "+0.00 to +10.00" in out["reason"]
+
+
+def test_a_vertical_priced_above_its_width_is_refused():
+    legs = [L("PUT", "LONG", 100, q=2), L("PUT", "SHORT", 90, q=2)]
+    out = _run(mark_from_legs("X", legs, 2, "put_debit_spread", _price_at(10.5)))
+    assert out["ok"] is False and "outside" in out["reason"]
+
+
+def test_a_credit_structure_is_bounded_in_its_own_sign():
+    legs = [L("PUT", "SHORT", 100, q=1), L("PUT", "LONG", 90, q=1)]
+    assert _run(mark_from_legs("X", legs, 1, "put_credit_spread", _price_at(-3.0)))["ok"]
+    assert not _run(mark_from_legs("X", legs, 1, "put_credit_spread", _price_at(0.02)))["ok"]
+
+
+def test_a_long_call_has_no_ceiling_to_break():
+    legs = [L("CALL", "LONG", 100, q=1)]
+    out = _run(mark_from_legs("X", legs, 1, "long_call", _price_at(250.0)))
+    assert out["ok"] and "no ceiling" not in out["reason"]
+
+
+def test_a_near_worthless_spread_one_tick_below_zero_is_still_refused():
+    """QQQ 427 at -0.005: nearly worthless is a real state; below zero is not one."""
+    legs = [L("PUT", "LONG", 640, q=4), L("PUT", "SHORT", 630, q=4)]
+    assert not _run(mark_from_legs("QQQ", legs, 4, "put_debit_spread", _price_at(-0.005)))["ok"]
 
 
 # --- exact quantity (R-IV.458(b)) ---------------------------------------------------------

@@ -398,6 +398,8 @@ async def dry_run(conn, ts):
     total_before = await conn.fetchval(f"SELECT count(*) FROM {TABLE}")
     tr = conn.transaction()
     await tr.start()
+    await conn.execute("SELECT set_config('app.actor', $1, true)",  # R-IV.462(b)
+                       "def_position_integrity.py")
     try:
         n_soxs, n_xlf = await _apply_updates(conn)
         sa = await _fetch_one(conn, SOXS_ID)
@@ -451,6 +453,8 @@ async def apply(conn, ts, i_have_go):
     touched_recs = [r for r in recs if r["_touched"]]
     tr = conn.transaction()
     await tr.start()
+    await conn.execute("SELECT set_config('app.actor', $1, true)",  # R-IV.462(b)
+                       "def_position_integrity.py")
     try:
         await _apply_updates(conn)
         for rec in touched_recs:
@@ -475,6 +479,8 @@ async def apply(conn, ts, i_have_go):
     total_before = await conn.fetchval(f"SELECT count(*) FROM {TABLE}")
     tr = conn.transaction()
     await tr.start()
+    await conn.execute("SELECT set_config('app.actor', $1, true)",  # R-IV.462(b)
+                       "def_position_integrity.py")
     committed = False
     try:
         n_soxs, n_xlf = await _apply_updates(conn)
@@ -511,6 +517,8 @@ async def restore(conn, path):
     touched = [r for r in recs if r.get("_touched")]
     tr = conn.transaction()
     await tr.start()
+    await conn.execute("SELECT set_config('app.actor', $1, true)",  # R-IV.462(b)
+                       "def_position_integrity.py")
     try:
         for rec in touched:
             n = await _restore_row(conn, rec)

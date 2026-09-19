@@ -91,6 +91,8 @@ def main():
     cur_conn = psycopg2.connect(conn_url())
     cur_conn.autocommit = False
     cur = cur_conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    # R-IV.462(b): the audit names this script; autocommit is off, so this is one transaction.
+    cur.execute("SELECT set_config('app.actor', %s, true)", ("reconcile_window_2026-06-17.py",))
     log = []
 
     # STAGE 1a closes

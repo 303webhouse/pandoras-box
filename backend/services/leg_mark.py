@@ -22,15 +22,25 @@ census's correct class). A prior from the name-based path on any other leg set p
 structure, and keeping it would keep the invented number. A negative prior is never good: no
 vertical or single leg the two-strike path priced is worth less than nothing.
 
+A NET OUTSIDE WHAT THE LEGS CAN BE WORTH IS NOT A PRICE (R-IV.462(d)). Whatever the legs are, one
+structure of them is worth something between the lowest and highest its payoff can reach at expiry
+-- a debit vertical between zero and its width, a long butterfly between zero and its wing. Leg
+quotes that put the net outside that range were taken at different moments (a live mid on one leg,
+an old last trade on another), and the set is UNAVAILABLE for the cycle. The check reads the legs
+only, so it holds for any structure with no allowlist. Before it, the mark path stored abs() of
+the net, which turned an impossible -0.085 into a plausible +0.085.
+
 Pure apart from the injected pricer, so every rule is testable without a vendor.
 """
 
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 LEGS_MARK_PREFIX = "priced from "
+BOUND_TOLERANCE = 1e-6          # float noise only: a quote a tenth of a cent out is still out
+INF = float("inf")
 
 Pricer = Callable[[str, List[Dict[str, Any]], str], Awaitable[Optional[Dict[str, Any]]]]
 
@@ -50,6 +60,36 @@ def structure_ratios(legs: List[Dict[str, Any]], row_qty) -> Optional[List[int]]
             return None
         out.append(int(round(r)))
     return out
+
+
+def payoff_range(group: List[Dict[str, Any]]) -> Tuple[float, float]:
+    """(low, high): what ONE structure of these same-expiry legs can be worth, per share.
+
+    The expiration payoff is piecewise linear with corners at the strikes, so its extremes sit at
+    zero, at a strike, or out along the upper tail -- which is unbounded when the call legs are net
+    long (no ceiling) or net short (no floor). Before expiry the value lies inside the same range:
+    time value cannot carry a set of legs past what it can pay.
+    """
+    def sign(g):
+        return 1 if str(g.get("action", "")).upper() == "BUY" else -1
+
+    def pay(s):
+        v = 0.0
+        for g in group:
+            k = float(g["strike"])
+            intrinsic = max(0.0, s - k) if g["option_type"] == "call" else max(0.0, k - s)
+            v += sign(g) * float(g["quantity"]) * intrinsic
+        return v
+
+    values = [pay(s) for s in [0.0] + sorted({float(g["strike"]) for g in group})]
+    slope = sum(sign(g) * float(g["quantity"]) for g in group if g["option_type"] == "call")
+    low = -INF if slope < 0 else min(values)
+    high = INF if slope > 0 else max(values)
+    return low, high
+
+
+def _edge(x: float, none_word: str) -> str:
+    return none_word if x in (INF, -INF) else f"{x:+.2f}"
 
 
 async def mark_from_legs(ticker: str, legs: List[Dict[str, Any]], row_qty,
@@ -91,7 +131,15 @@ async def mark_from_legs(ticker: str, legs: List[Dict[str, Any]], row_qty,
                                + (f" ({err})" if err else "")
                                + " -- a net built from the remaining legs would price a "
                                  "different structure")}
-        net += float(res["net_mark"])
+        value = float(res["net_mark"])
+        low, high = payoff_range(group)
+        if value < low - BOUND_TOLERANCE or value > high + BOUND_TOLERANCE:
+            return {"ok": False, "net_mark": None, "details": details,
+                    "reason": (f"the {expiry} quotes price these legs at {value:+.4f} per "
+                               f"structure, outside what they can be worth "
+                               f"({_edge(low, 'no floor')} to {_edge(high, 'no ceiling')}) -- "
+                               f"at least one leg's quote is from another moment")}
+        net += value
         details.extend(res.get("leg_details") or [])
     return {"ok": True, "net_mark": net, "details": details,
             "reason": f"{LEGS_MARK_PREFIX}{n} leg(s) ({structure or 'CUSTOM'})"}

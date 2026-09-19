@@ -1107,6 +1107,10 @@ def apply_actions(conn, actions: List[Action], run_id: uuid.UUID,
 
     with conn:  # transaction
         with conn.cursor() as cur:
+            # R-IV.462(b): the audit names this script, not the legacy UI. Transaction-local,
+            # and this whole run is one transaction.
+            cur.execute("SELECT set_config('app.actor', %s, true)", ("sync_rh_csv.py",))
+            cur.execute("SELECT set_config('app.reason', %s, true)", (f"sync run {run_id}",))
             for a in actions:
                 if a.op == "INSERT":
                     _apply_insert(cur, a, run_id, csv_paths_joined, csv_sha)

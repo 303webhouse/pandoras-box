@@ -70,6 +70,11 @@ async def main():
         print("STRUCTURE before:", await dist(conn, "structure"))
         print("DIRECTION before:", await dist(conn, "direction"))
 
+        # R-IV.462(b): one transaction, and the audit names this script.
+        tr = conn.transaction()
+        await tr.start()
+        await conn.execute("SELECT set_config('app.actor', $1, true)", "migrate_unified_vocab.py")
+
         # Apply structure mappings
         struct_changed = 0
         for old, new in STRUCTURE_MAP.items():
@@ -94,6 +99,7 @@ async def main():
                 print(f"  direction {old} -> {new}: {n}")
             dir_changed += n
 
+        await tr.commit()
         print(f"\nStructure rows relabeled: {struct_changed} | Direction rows relabeled: {dir_changed}")
         print("\nSTRUCTURE after:", await dist(conn, "structure"))
         print("DIRECTION after:", await dist(conn, "direction"))

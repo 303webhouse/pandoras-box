@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 
 from utils.json_sanitize import sanitize_for_json as _sanitize_for_json
 from utils.json_sanitize import dumps_jsonb
+from utils.audit_actor import BOOT_MIGRATION, name_actor  # R-IV.462(b): boot writes name themselves
 
 logger = logging.getLogger(__name__)
 
@@ -905,15 +906,17 @@ async def init_database():
             ADD COLUMN IF NOT EXISTS verified_at     TIMESTAMPTZ,
             ADD COLUMN IF NOT EXISTS verified_event  TEXT
         """)
-        await conn.execute("""
-            UPDATE unified_positions
-               SET provenance = CASE
-                    WHEN source IN ('IMPORTED_HISTORICAL', 'CSV_IMPORT', 'CSV_SYNC',
-                                    'CSV_RECONCILE', 'fidelity_confirm') THEN 'IMPORTED'
-                    ELSE 'PRINCIPAL_REPORTED'
-               END
-             WHERE provenance IS NULL
-        """)
+        async with conn.transaction():                                # R-IV.462(b)
+            await name_actor(conn, BOOT_MIGRATION, "boot: provenance backfill (migrations/042)")
+            await conn.execute("""
+                UPDATE unified_positions
+                   SET provenance = CASE
+                        WHEN source IN ('IMPORTED_HISTORICAL', 'CSV_IMPORT', 'CSV_SYNC',
+                                        'CSV_RECONCILE', 'fidelity_confirm') THEN 'IMPORTED'
+                        ELSE 'PRINCIPAL_REPORTED'
+                   END
+                 WHERE provenance IS NULL
+            """)
         await conn.execute("""
             DO $$
             BEGIN
@@ -1056,9 +1059,30 @@ async def init_database():
                                        'POS_GDXJ_20260618_174846', 'POS_XLE_20260618_174913')
                    AND backfill_exempt_reason IS NULL
             """),
+            # R-IV.462(b) (migrations/048): the instant machine writers began naming themselves,
+            # recorded by the first boot of the build that does it, and what it means for rows
+            # written before it.
+            ("audit actor epochs table", """
+                CREATE TABLE IF NOT EXISTS audit_actor_epochs (
+                    epoch     TEXT        PRIMARY KEY,
+                    began_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    note      TEXT        NOT NULL
+                )
+            """),
+            ("audit actor epoch: machine writers named", """
+                INSERT INTO audit_actor_epochs (epoch, note)
+                VALUES ('machine-writers-named', 'R-IV.462(b): from began_at every machine writer names itself in app.actor (mark-to-market, boot-migration, expiry-sweep, a script by its file name). Before began_at the audit trigger''s default legacy-ui also covered machine writes -- the mark job, boot backfills and scripts -- so a legacy-ui row before began_at is AMBIGUOUS: it may be a person or a job. A deploy runs the old and new builds side by side for a few minutes, so old-build legacy-ui mark writes can appear shortly after began_at.')
+                ON CONFLICT (epoch) DO NOTHING
+            """),
+            ("audit actor column comment", """
+                COMMENT ON COLUMN position_sync_audit.actor IS 'Who made the change: the writer sets app.actor in the same transaction; absent, the trigger records legacy-ui. BEFORE audit_actor_epochs.began_at (epoch machine-writers-named) legacy-ui is AMBIGUOUS -- measured 2026-09-19 05:30 UTC, 6,271 such UPDATE rows since 2026-08-27, 3,239 of them the mark job -- and cannot be read as a person. Rows before 2026-08-27 carry no actor at all. AFTER it, legacy-ui means a request to an endpoint whose caller named no actor (R-IV.116). R-IV.462(b).'
+            """),
         ):
             try:
-                await conn.execute(_sql)
+                # R-IV.462(b): a boot write names itself; its own transaction carries the name.
+                async with conn.transaction():
+                    await name_actor(conn, BOOT_MIGRATION, f"boot: {_label}")
+                    await conn.execute(_sql)
             except Exception as e:
                 print(f"WARNING: {_label} not applied: {type(e).__name__}: {e}")
 
@@ -1316,11 +1340,13 @@ async def init_database():
 
         # Brief 05b: Fix negative entry_price for options positions
         # Entry price should always be positive; structure determines credit vs debit PnL
-        await conn.execute("""
-            UPDATE unified_positions
-            SET entry_price = ABS(entry_price)
-            WHERE entry_price < 0
-        """)
+        async with conn.transaction():                                # R-IV.462(b)
+            await name_actor(conn, BOOT_MIGRATION, "boot: Brief 05b entry_price sign")
+            await conn.execute("""
+                UPDATE unified_positions
+                SET entry_price = ABS(entry_price)
+                WHERE entry_price < 0
+            """)
 
         # Brief 07: Cash flow events for accurate P&L calculation
         await conn.execute("""

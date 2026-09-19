@@ -33,6 +33,10 @@ from services.leg_mark import (  # R-IV.458(a)/460(b): legs, not names, say what
 from models.leg_payoff import (  # R-IV.460(c): any number of legs, no allowlist
     analyze, display_strikes, recognize,
 )
+from api.mark_guard import (  # R-IV.394 (T1), now reaching the mark job (R-IV.462(d))
+    MARK_REJECTED, evaluate_mark, mark_is_writable,
+)
+from utils.audit_actor import MARK_TO_MARKET, name_actor  # R-IV.462(b)
 
 # R-IV.454(d): each terminal status, and the path that records how a position reached it.
 TERMINAL_VIA_PATH = {
@@ -1574,10 +1578,12 @@ async def update_position(position_id: str, req: UpdatePositionRequest, _=Depend
         # write zero: a zero P&L is a CLAIM that the position is flat, and it is
         # indistinguishable from a real flat position on every surface downstream.
         # The previous value is left standing, stamped with the reason.
-        from api.mark_guard import evaluate_mark, mark_is_writable
         _mark_status, _mark_reason = evaluate_mark(
             result.get("current_price"), result.get("entry_price"))
-        async with pool.acquire() as conn:
+        # R-IV.462(b): the recompute belongs to the same request, so it carries the request's
+        # actor. It ran after the edit's transaction had closed and was recorded as legacy-ui.
+        async with pool.acquire() as conn, conn.transaction():
+            await name_actor(conn, req.actor or "legacy-ui", req.reason or None)
             if mark_is_writable(_mark_status):
                 await conn.execute(
                     "UPDATE unified_positions SET unrealized_pnl = $1, "
@@ -2440,6 +2446,7 @@ async def run_mark_to_market() -> dict:
         greeks_json = None
         long_leg_price = None
         short_leg_price = None
+        refused = None          # a reading that is not a price, and why (R-IV.462(d))
 
         # ── R-IV.458(a)/460(b): A POSITION WITH LEGS IS MARKED FROM ITS LEGS ─────────────
         # Any structure name, no allowlist. It NEVER falls through to the spread or single-leg
@@ -2454,8 +2461,18 @@ async def run_mark_to_market() -> dict:
             else:
                 outcome = await mark_from_legs(ticker, table_legs, quantity, structure,
                                                get_multi_leg_value)
-            async with pool.acquire() as conn:
+            if outcome.get("ok"):
+                # R-IV.394 (T1) reaches the mark job (R-IV.462(d)): a mark it rejects is a failed
+                # cycle, never a write.
+                _verdict, _why = evaluate_mark(abs(float(outcome["net_mark"])), entry_price)
+                if not mark_is_writable(_verdict):
+                    outcome = {"ok": False, "reason": f"T1 mark guard (R-IV.394): {_why}"}
+            async with pool.acquire() as conn, conn.transaction():
+                await name_actor(conn, MARK_TO_MARKET)                       # R-IV.462(b)
                 if outcome.get("ok"):
+                    # abs() is the value in the entry's orientation ONLY because mark_from_legs
+                    # refused any net outside what the legs can be worth: a set whose payoff
+                    # keeps one sign then has a net of that sign too.
                     mark = abs(float(outcome["net_mark"]))
                     unreal = _compute_unrealized_pnl(entry_price, mark, quantity, structure,
                                                      direction=(row.get("direction") or ""))
@@ -2505,7 +2522,8 @@ async def run_mark_to_market() -> dict:
                 # Persist inferred legs back to DB so future MTM runs don't re-parse
                 try:
                     legs_json_str = dumps_jsonb(inferred)
-                    async with pool.acquire() as conn:
+                    async with pool.acquire() as conn, conn.transaction():
+                        await name_actor(conn, MARK_TO_MARKET, "legs inferred from notes")
                         await conn.execute(
                             "UPDATE unified_positions SET legs = $1 WHERE position_id = $2",
                             legs_json_str, row["position_id"],
@@ -2554,6 +2572,14 @@ async def run_mark_to_market() -> dict:
                     )
                     if result and result.get("spread_value") is not None:
                         current_price = result["spread_value"]
+                        # R-IV.462(d): a vertical is worth between zero and its width. T1
+                        # refuses the floor; the ceiling is refused here. Either way it is two
+                        # leg quotes from different moments, not a price.
+                        _width = abs(long_strike - short_strike)
+                        if current_price > _width + 1e-6:
+                            refused = (f"quotes price this vertical at {current_price:.4f}, "
+                                       f"above its width {_width:g}; a leg's quote is from "
+                                       f"another moment")
                         long_leg_price = result.get("long_mid")
                         short_leg_price = result.get("short_mid")
                         direction = (row.get("direction") or "").upper()
@@ -2610,15 +2636,33 @@ async def run_mark_to_market() -> dict:
                 pass
 
         if current_price is not None and unrealized is not None:
-            async with pool.acquire() as conn:
-                await conn.execute("""
-                    UPDATE unified_positions SET
-                        current_price = $1, unrealized_pnl = $2,
-                        long_leg_price = $3, short_leg_price = $4,
-                        price_updated_at = NOW(), updated_at = NOW()
-                    WHERE position_id = $5
-                """, current_price, unrealized, long_leg_price, short_leg_price, row["position_id"])
-            updated += 1
+            # R-IV.394 (T1) reaches the mark job (R-IV.462(d)). It was wired only into the PATCH
+            # recompute, so the writer behind nearly every mark stored negative values on debit
+            # spreads for weeks. A mark it rejects writes NOTHING to the price or the P&L: the
+            # prior stands, stamped with the reason.
+            _verdict, _why = ((MARK_REJECTED, refused) if refused
+                              else evaluate_mark(current_price, entry_price))
+            async with pool.acquire() as conn, conn.transaction():
+                await name_actor(conn, MARK_TO_MARKET)                       # R-IV.462(b)
+                if mark_is_writable(_verdict):
+                    await conn.execute("""
+                        UPDATE unified_positions SET
+                            current_price = $1, unrealized_pnl = $2,
+                            long_leg_price = $3, short_leg_price = $4,
+                            mark_status = 'OK', mark_reason = NULL, mark_checked_at = NOW(),
+                            price_updated_at = NOW(), updated_at = NOW()
+                        WHERE position_id = $5
+                    """, current_price, unrealized, long_leg_price, short_leg_price,
+                        row["position_id"])
+                    updated += 1
+                else:
+                    await conn.execute("""
+                        UPDATE unified_positions SET
+                            mark_status = $1, mark_reason = $2, mark_checked_at = NOW()
+                        WHERE position_id = $3
+                    """, _verdict, _why, row["position_id"])
+                    logger.warning("T1 mark guard (mark job): %s for %s -- nothing written (%s)",
+                                   _verdict, row["position_id"], _why)
         # NOTE: prior versions had an elif that wiped current_price/unrealized_pnl
         # to NULL/0 for OPTION/SPREAD rows whose current cycle failed to price.
         # That branch defended against a historical "stock price written to options
