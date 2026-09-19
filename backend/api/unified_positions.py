@@ -28,7 +28,7 @@ from models.accounts import (  # R-IV.445(a): one vocabulary, read by every writ
 )
 from models.position_status import DUPLICATE_OF  # R-IV.449(a): retired, not deleted
 from services.leg_mark import (  # R-IV.458(a)/460(b): legs, not names, say what is held
-    mark_from_legs, name_path_priced_same_legs, prior_mark_came_from_legs, stale_reason,
+    mark_from_legs, prior_is_good, stale_reason,
 )
 from models.leg_payoff import (  # R-IV.460(c): any number of legs, no allowlist
     analyze, display_strikes, recognize,
@@ -2485,10 +2485,9 @@ async def run_mark_to_market() -> dict:
                         WHERE position_id = $4
                     """, mark, unreal, outcome["reason"], row["position_id"])
                     updated += 1
-                elif (prior_mark_came_from_legs(row.get("mark_reason"))
-                      or name_path_priced_same_legs(table_legs, structure, expiry, long_strike,
-                                                    short_strike, quantity,
-                                                    row.get("current_price"))):
+                elif prior_is_good(row.get("mark_reason"), table_legs, structure, expiry,
+                                   long_strike, short_strike, quantity,
+                                   row.get("current_price")):
                     # The mark guard's rule: a failed cycle writes nothing over a GOOD value.
                     # This prior is good -- legs produced it, or the two-strike path priced
                     # exactly the contracts the legs hold -- so it stands, stamped.
