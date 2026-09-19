@@ -20,8 +20,8 @@ sys.path.insert(0, __file__.rsplit("tests", 1)[0])
 
 from models.leg_payoff import analyze, display_strikes, recognize  # noqa: E402
 from services.leg_mark import (  # noqa: E402
-    mark_from_legs, name_path_priced_same_legs, payoff_range, prior_mark_came_from_legs,
-    stale_reason, structure_ratios,
+    mark_from_legs, name_path_priced_same_legs, payoff_range, prior_is_good,
+    prior_mark_came_from_legs, stale_reason, structure_ratios,
 )
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -179,13 +179,26 @@ def test_a_row_that_disagrees_with_its_legs_keeps_no_name_path_prior():
     assert not name_path_priced_same_legs(legs, "put_debit_spread", E, 45, 40, 8, 0.01)
 
 
-def test_the_stale_branch_keeps_a_good_name_path_prior():
+def test_the_stale_branch_asks_who_wrote_the_prior():
     from api import unified_positions as U
     src = inspect.getsource(U.run_mark_to_market)
     i = src.index("A POSITION WITH LEGS IS MARKED FROM ITS LEGS")
     block = src[i:src.index("# --- Multi-leg path", i)]
-    stale = block[block.index("prior_mark_came_from_legs"):block.index("mark_status = 'STALE'")]
-    assert "name_path_priced_same_legs" in stale
+    stale = block[block.index("prior_is_good("):block.index("mark_status = 'STALE'")]
+    assert 'row.get("mark_reason")' in stale
+
+
+def test_a_pre_bound_legs_prior_is_not_rescued_by_its_shape():
+    """QQQ 356: a plain vertical whose prior 0.01 was abs(-0.01), written by the legs path before
+    the bound. The shape matches what the two-strike path prices; the writer does not."""
+    legs = [_leg("PUT", "LONG", 360, q=8), _leg("PUT", "SHORT", 350, q=8)]
+    args = (legs, "put_debit_spread", E, 360, 350, 8, 0.01)
+    pre_bound = "priced from 2 leg(s) (put_debit_spread)"
+    assert not prior_is_good(pre_bound, *args)
+    assert not prior_is_good(stale_reason(pre_bound, "outside"), *args)
+    assert prior_is_good(pre_bound + ", within what they can be worth", *args)
+    assert prior_is_good(None, *args), "a two-strike prior on the same legs is still good"
+    assert prior_is_good(stale_reason(None, "no quote"), *args)
 
 
 def test_a_legs_position_never_falls_through_to_a_name_based_path():

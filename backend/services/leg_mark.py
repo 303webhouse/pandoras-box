@@ -156,6 +156,24 @@ def prior_mark_came_from_legs(mark_reason: Optional[str]) -> bool:
     return head.startswith(LEGS_MARK_PREFIX) and BOUNDED_MARKER in head
 
 
+def prior_is_good(mark_reason: Optional[str], legs: List[Dict[str, Any]], structure: Optional[str],
+                  expiry, long_strike, short_strike, row_qty, prior_mark) -> bool:
+    """May this prior stand, as STALE, through a failed legs cycle? Decided by WHO WROTE IT first.
+
+    The mark's reason names its writer. A legs mark is good only if the bound checked it -- one
+    written before the bound stored abs() of the net and may be an impossible value turned
+    positive. Only a prior the legs path did NOT write is judged by whether the two-strike path
+    priced exactly the legs held. (QQQ 356, 2026-09-19 06:21 UTC: a pre-bound legs prior of 0.01,
+    abs(-0.01), was kept because its legs are a plain vertical -- the shape test never asked
+    which path wrote it.)
+    """
+    head = str(mark_reason or "").split(STALE_SEP)[0]
+    if head.startswith(LEGS_MARK_PREFIX):
+        return BOUNDED_MARKER in head
+    return name_path_priced_same_legs(legs, structure, expiry, long_strike, short_strike,
+                                      row_qty, prior_mark)
+
+
 def stale_reason(prior_reason: Optional[str], why: Optional[str]) -> str:
     """The prior's own reason first -- so it still reads as what produced the mark -- then why
     this cycle did not refresh it. Never stacks: each failed cycle replaces the last one's cause."""
