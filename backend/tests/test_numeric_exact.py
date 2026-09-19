@@ -53,3 +53,13 @@ def test_every_pooled_connection_gets_the_codec():
     assert kw["encoder"] is PC._numeric_text and kw["decoder"] is Decimal
     src = inspect.getsource(PC.get_postgres_client)
     assert "init=_init_connection" in src
+
+
+def test_an_equity_mark_is_the_quoted_price_not_the_vendors_float32():
+    """Measured 2026-09-19 16:51 UTC: six equity marks written through the codec still read
+    45.709999084472656 -- the vendor's float32 for 45.71, stored exactly as received."""
+    import numpy as np
+    assert round(float(np.float32(45.71)), 4) == 45.71
+    from api import unified_positions as U
+    src = inspect.getsource(U.run_mark_to_market)
+    assert "current_price = round(float(info.last_price), 4)" in src

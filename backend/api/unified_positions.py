@@ -2709,7 +2709,10 @@ async def run_mark_to_market() -> dict:
                 t = yf.Ticker(ticker)
                 info = t.fast_info
                 if hasattr(info, 'last_price') and info.last_price:
-                    current_price = float(info.last_price)
+                    # R-IV.463(e): the vendor hands over a float32 -- 45.71 arrives as
+                    # 45.709999084472656 -- and a share price is quoted to at most 4 decimals,
+                    # so rounding there recovers the price instead of storing its noise.
+                    current_price = round(float(info.last_price), 4)
                     unrealized = _compute_unrealized_pnl(
                         entry_price, current_price, quantity, structure,
                         direction=row.get("direction", "")
