@@ -1074,6 +1074,59 @@ async def init_database():
                     END IF;
                 END $$
             """),
+            # R-IV.463(e) (migrations/050): an INSERT is audited like any other write -- a row
+            # written straight into the book was the one write with no trail.
+            ("audit trigger function, inserts included", """
+                CREATE OR REPLACE FUNCTION unified_positions_audit() RETURNS trigger AS $$
+                BEGIN
+                    IF (TG_OP = 'INSERT') THEN
+                        INSERT INTO position_sync_audit
+                            (operation, position_id, ticker, structure,
+                             before_state, after_state, actor, reason, executed_at)
+                        VALUES ('INSERT', NEW.position_id, NEW.ticker, NEW.structure,
+                                NULL, to_jsonb(NEW),
+                                COALESCE(NULLIF(current_setting('app.actor', true), ''), 'legacy-ui'),
+                                NULLIF(current_setting('app.reason', true), ''), now());
+                        RETURN NEW;
+                    ELSIF (TG_OP = 'UPDATE') THEN
+                        IF to_jsonb(OLD) IS DISTINCT FROM to_jsonb(NEW) THEN
+                            INSERT INTO position_sync_audit
+                                (operation, position_id, ticker, structure,
+                                 before_state, after_state, actor, reason, executed_at)
+                            VALUES ('UPDATE', NEW.position_id, NEW.ticker, NEW.structure,
+                                    to_jsonb(OLD), to_jsonb(NEW),
+                                    COALESCE(NULLIF(current_setting('app.actor', true), ''), 'legacy-ui'),
+                                    NULLIF(current_setting('app.reason', true), ''), now());
+                        END IF;
+                        RETURN NEW;
+                    ELSIF (TG_OP = 'DELETE') THEN
+                        INSERT INTO position_sync_audit
+                            (operation, position_id, ticker, structure,
+                             before_state, after_state, actor, reason, executed_at)
+                        VALUES ('DELETE', OLD.position_id, OLD.ticker, OLD.structure,
+                                to_jsonb(OLD), NULL,
+                                COALESCE(NULLIF(current_setting('app.actor', true), ''), 'legacy-ui'),
+                                NULLIF(current_setting('app.reason', true), ''), now());
+                        RETURN OLD;
+                    END IF;
+                    RETURN NULL;
+                END;
+                $$ LANGUAGE plpgsql
+            """),
+            ("audit trigger fires on insert", """
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (SELECT 1 FROM pg_trigger
+                                    WHERE tgname = 'trg_unified_positions_audit'
+                                      AND tgrelid = 'unified_positions'::regclass
+                                      AND (tgtype & 4) = 4) THEN
+                        DROP TRIGGER IF EXISTS trg_unified_positions_audit ON unified_positions;
+                        CREATE TRIGGER trg_unified_positions_audit
+                            AFTER INSERT OR UPDATE OR DELETE ON unified_positions
+                            FOR EACH ROW EXECUTE FUNCTION unified_positions_audit();
+                    END IF;
+                END $$
+            """),
             # R-IV.462(b) (migrations/048): the instant machine writers began naming themselves,
             # recorded by the first boot of the build that does it, and what it means for rows
             # written before it.

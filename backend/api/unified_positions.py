@@ -206,6 +206,10 @@ class CreatePositionRequest(BaseModel):
     tags: Optional[List[str]] = None
     bucket: Optional[str] = None
     thesis: Optional[str] = None
+    # R-IV.463(b): who is asking, for the audit -- the optional actor PATCH already takes. Absent,
+    # the write is recorded as legacy-ui: a request whose caller named no one.
+    actor: Optional[str] = None
+    reason: Optional[str] = None
 
 
 class UpdatePositionRequest(BaseModel):
@@ -266,6 +270,10 @@ class ClosePositionRequest(BaseModel):
     # them being 16x the other is exactly how it presents.
     expected_realized: Optional[float] = None
     realized_tolerance: float = 0.01
+    # R-IV.463(b): who is asking, for the audit -- the optional actor PATCH already takes. Absent,
+    # the write is recorded as legacy-ui: a request whose caller named no one.
+    actor: Optional[str] = None
+    reason: Optional[str] = None
 
 
 class BulkPositionItem(BaseModel):
@@ -289,6 +297,10 @@ class BulkPositionItem(BaseModel):
 
 class BulkRequest(BaseModel):
     positions: List[BulkPositionItem]
+    # R-IV.463(b): who is asking, for the audit -- the optional actor PATCH already takes. Absent,
+    # the write is recorded as legacy-ui: a request whose caller named no one.
+    actor: Optional[str] = None
+    reason: Optional[str] = None
 
 
 class ReconcileItem(BaseModel):
@@ -307,6 +319,10 @@ class ReconcileItem(BaseModel):
 
 class ReconcileRequest(BaseModel):
     positions: List[ReconcileItem]
+    # R-IV.463(b): who is asking, for the audit -- the optional actor PATCH already takes. Absent,
+    # the write is recorded as legacy-ui: a request whose caller named no one.
+    actor: Optional[str] = None
+    reason: Optional[str] = None
 
 
 # ── Helpers ───────────────────────────────────────────────────────────
@@ -510,7 +526,8 @@ async def create_position(req: CreatePositionRequest, _=Depends(require_api_key)
             new_max_profit = round(float(new_max_profit) * scale, 2) if new_max_profit else None
 
         pos_id = existing["position_id"]
-        async with pool.acquire() as conn:
+        async with pool.acquire() as conn, conn.transaction():
+            await name_actor(conn, req.actor or "legacy-ui", req.reason or None)  # R-IV.463(b)
             row = await conn.fetchrow("""
                 UPDATE unified_positions
                 SET quantity = $2, entry_price = $3, cost_basis = $4,
@@ -592,7 +609,8 @@ async def create_position(req: CreatePositionRequest, _=Depends(require_api_key)
         except (ValueError, TypeError):
             pass
 
-    async with pool.acquire() as conn:
+    async with pool.acquire() as conn, conn.transaction():
+        await name_actor(conn, req.actor or "legacy-ui", req.reason or None)  # R-IV.463(b)
         row = await conn.fetchrow("""
             INSERT INTO unified_positions (
                 position_id, ticker, asset_type, structure, direction, legs,
@@ -1809,6 +1827,7 @@ async def close_position(position_id: str, req: ClosePositionRequest, _=Depends(
     try:
         async with pool.acquire() as conn:
             async with conn.transaction():
+                await name_actor(conn, req.actor or "legacy-ui", req.reason or None)  # R-IV.463(b)
                 # SELECT FOR UPDATE — row-level lock prevents double-close races.
                 # NOWAIT: a racing second request gets immediate 409 instead of queuing.
                 try:
@@ -2070,7 +2089,9 @@ async def get_close_attempts(position_id: str, _=Depends(require_api_key)):
 # ── DELETE ────────────────────────────────────────────────────────────
 
 @router.delete("/v2/positions/{position_id}")
-async def delete_position(position_id: str, _=Depends(require_api_key)):
+async def delete_position(position_id: str, _=Depends(require_api_key),
+                          actor: Optional[str] = Query(None),     # R-IV.463(b)
+                          reason: Optional[str] = Query(None)):
     """Delete a position (for errors/test data). Reverses cash adjustment from creation."""
     pool = await get_postgres_client()
     async with pool.acquire() as conn:
@@ -2097,7 +2118,8 @@ async def delete_position(position_id: str, _=Depends(require_api_key)):
             logger.error("Cash reversal failed on delete: %s", e)
             cash_ok = False
 
-    async with pool.acquire() as conn:
+    async with pool.acquire() as conn, conn.transaction():
+        await name_actor(conn, actor or "legacy-ui", reason or None)  # R-IV.463(b)
         await conn.execute(
             "DELETE FROM unified_positions WHERE position_id = $1", position_id
         )
@@ -2182,7 +2204,8 @@ async def bulk_create_positions(req: BulkRequest, _=Depends(require_api_key)):
                 else:
                     exit_date_val = datetime.now(timezone.utc)
 
-            async with pool.acquire() as conn:
+            async with pool.acquire() as conn, conn.transaction():
+                await name_actor(conn, req.actor or "legacy-ui", req.reason or None)  # R-IV.463(b)
                 await conn.execute("""
                     INSERT INTO unified_positions (
                         position_id, ticker, asset_type, structure, direction, legs,
@@ -2327,7 +2350,8 @@ async def reconcile_positions(req: ReconcileRequest, _=Depends(require_api_key))
                 set_parts.append("price_updated_at = NOW()")
                 set_parts.append("updated_at = NOW()")
                 params.append(ep["position_id"])
-                async with pool.acquire() as conn:
+                async with pool.acquire() as conn, conn.transaction():
+                    await name_actor(conn, req.actor or "legacy-ui", req.reason or None)  # R-IV.463(b)
                     await conn.execute(
                         f"UPDATE unified_positions SET {', '.join(set_parts)} WHERE position_id = ${pidx}",
                         *params
@@ -2343,7 +2367,8 @@ async def reconcile_positions(req: ReconcileRequest, _=Depends(require_api_key))
             structure = item.spread_type or ("stock" if item.position_type == "STOCK" else "long_call")
             direction = item.direction or "LONG"
 
-            async with pool.acquire() as conn:
+            async with pool.acquire() as conn, conn.transaction():
+                await name_actor(conn, req.actor or "legacy-ui", req.reason or None)  # R-IV.463(b)
                 await conn.execute("""
                     INSERT INTO unified_positions (
                         position_id, ticker, asset_type, structure, direction,

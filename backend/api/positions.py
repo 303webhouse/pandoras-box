@@ -12,6 +12,7 @@ import json
 import time
 
 from api.unified_positions import _adjust_account_cash, CREDIT_STRUCTURES
+from utils.audit_actor import name_actor  # R-IV.463(b): who accepted, for the audit
 from models.accounts import canonical_account  # R-IV.445(a): one vocabulary
 from database.redis_client import get_signal, delete_signal, cache_signal, get_redis_client
 from database.postgres_client import (
@@ -73,6 +74,10 @@ class SignalAction(BaseModel):
     action: str  # "DISMISS" or "SELECT"
 
 class AcceptSignalRequest(BaseModel):
+    # R-IV.463(b): who is asking, for the audit -- the optional actor PATCH already takes. Absent,
+    # the write is recorded as legacy-ui: a request whose caller named no one.
+    actor: Optional[str] = None
+    reason: Optional[str] = None
     """Request to accept a signal and open a position"""
     signal_id: str
     actual_entry_price: float
@@ -93,6 +98,10 @@ class OptionLegRequest(BaseModel):
     premium: float = 0.0
 
 class AcceptSignalAsOptionsRequest(BaseModel):
+    # R-IV.463(b): who is asking, for the audit -- the optional actor PATCH already takes. Absent,
+    # the write is recorded as legacy-ui: a request whose caller named no one.
+    actor: Optional[str] = None
+    reason: Optional[str] = None
     """Request to accept a signal and open an options position"""
     signal_id: str
     underlying: str
@@ -218,7 +227,8 @@ async def accept_signal(signal_id: str, request: AcceptSignalRequest):
         direction = signal_data.get('direction', 'LONG')
         cost_basis = round(request.actual_entry_price * request.quantity, 2)
 
-        async with pool.acquire() as conn:
+        async with pool.acquire() as conn, conn.transaction():
+            await name_actor(conn, request.actor or "legacy-ui", request.reason or None)  # R-IV.463(b)
             row = await conn.fetchrow("""
                 INSERT INTO unified_positions (
                     position_id, ticker, asset_type, structure, direction,
@@ -395,7 +405,8 @@ async def accept_signal_as_options(signal_id: str, request: AcceptSignalAsOption
         # Create position directly in unified_positions table
         from database.postgres_client import get_postgres_client
         pool = await get_postgres_client()
-        async with pool.acquire() as conn:
+        async with pool.acquire() as conn, conn.transaction():
+            await name_actor(conn, request.actor or "legacy-ui", request.reason or None)  # R-IV.463(b)
             row = await conn.fetchrow("""
                 INSERT INTO unified_positions (
                     position_id, ticker, asset_type, structure, direction, legs,
