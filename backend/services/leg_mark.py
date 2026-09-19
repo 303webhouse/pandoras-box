@@ -16,8 +16,11 @@ WHAT "CANNOT BE PRICED" MEANS HERE, and why it is UNAVAILABLE rather than a reta
   * the legs disagree with the row (legs hold 10 structures, the row says 8) -- the scale of the
     position is not known, so no per-position figure is either;
   * a leg has no quote -- a net built from some legs is a different structure's price.
-A prior mark is retained through a failed cycle ONLY if legs produced it. A prior mark from the
-name-based path priced a different structure, and keeping it would keep the invented number.
+A prior mark is retained through a failed cycle when it is a GOOD value: legs produced it, or the
+two-strike path priced exactly the contracts the legs hold (a vertical or a single leg -- the
+census's correct class). A prior from the name-based path on any other leg set priced a different
+structure, and keeping it would keep the invented number. A negative prior is never good: no
+vertical or single leg the two-strike path priced is worth less than nothing.
 
 Pure apart from the injected pricer, so every rule is testable without a vendor.
 """
@@ -95,5 +98,39 @@ async def mark_from_legs(ticker: str, legs: List[Dict[str, Any]], row_qty,
 
 
 def prior_mark_came_from_legs(mark_reason: Optional[str]) -> bool:
-    """Only a legs-derived prior may survive a failed legs cycle."""
+    """A legs-derived prior survives a failed legs cycle."""
     return bool(mark_reason) and str(mark_reason).startswith(LEGS_MARK_PREFIX)
+
+
+def name_path_priced_same_legs(legs: List[Dict[str, Any]], structure: Optional[str], expiry,
+                               long_strike, short_strike, row_qty, prior_mark) -> bool:
+    """True when the two-strike path priced exactly the contracts these legs hold.
+
+    Such a prior is a GOOD value under the mark guard's rule and survives a failed cycle as STALE.
+    Mirrors the two-strike path's own choices: the option type from the NAME, the spread branch
+    when a short strike exists and the name says spread/credit/debit, else the single leg at the
+    long strike. Anything wider than that path could see -- three legs, two expiries, a ratio, a
+    type the name did not say -- priced a different structure and is not good.
+    """
+    try:
+        if prior_mark is None or float(prior_mark) < 0:
+            return False
+    except (TypeError, ValueError):
+        return False
+    if not legs or len(legs) > 2 or expiry is None or long_strike is None:
+        return False
+    if structure_ratios(legs, row_qty) != [1] * len(legs):
+        return False
+    if any(str(l.get("expiry"))[:10] != str(expiry)[:10] for l in legs):
+        return False
+    s = (structure or "").lower()
+    kind = "PUT" if "put" in s else "CALL"
+    if any(str(l.get("option_type") or "").upper() != kind for l in legs):
+        return False
+    spread_branch = bool(short_strike) and ("spread" in s or "credit" in s or "debit" in s)
+    if spread_branch:
+        if len(legs) != 2:
+            return False
+        by_side = {str(l.get("side") or "").upper(): float(l["strike"]) for l in legs}
+        return by_side == {"LONG": float(long_strike), "SHORT": float(short_strike)}
+    return len(legs) == 1 and float(legs[0]["strike"]) == float(long_strike)

@@ -28,7 +28,7 @@ from models.accounts import (  # R-IV.445(a): one vocabulary, read by every writ
 )
 from models.position_status import DUPLICATE_OF  # R-IV.449(a): retired, not deleted
 from services.leg_mark import (  # R-IV.458(a)/460(b): legs, not names, say what is held
-    mark_from_legs, prior_mark_came_from_legs,
+    mark_from_legs, name_path_priced_same_legs, prior_mark_came_from_legs,
 )
 from models.leg_payoff import (  # R-IV.460(c): any number of legs, no allowlist
     analyze, display_strikes, recognize,
@@ -2468,14 +2468,19 @@ async def run_mark_to_market() -> dict:
                         WHERE position_id = $4
                     """, mark, unreal, outcome["reason"], row["position_id"])
                     updated += 1
-                elif prior_mark_came_from_legs(row.get("mark_reason")):
+                elif (prior_mark_came_from_legs(row.get("mark_reason"))
+                      or name_path_priced_same_legs(table_legs, structure, expiry, long_strike,
+                                                    short_strike, quantity,
+                                                    row.get("current_price"))):
                     # The mark guard's rule: a failed cycle writes nothing over a GOOD value.
-                    # This prior is good -- legs produced it -- so it stands, stamped.
+                    # This prior is good -- legs produced it, or the two-strike path priced
+                    # exactly the contracts the legs hold -- so it stands, stamped.
                     await conn.execute(
                         "UPDATE unified_positions SET mark_checked_at = NOW(), "
                         "mark_status = 'STALE' WHERE position_id = $1", row["position_id"])
                 else:
-                    # A prior mark from a name-chosen method priced a DIFFERENT structure.
+                    # A prior mark from a name-chosen method on any wider leg set priced a
+                    # DIFFERENT structure (or is negative, which nothing it priced can be).
                     # Keeping it would keep the invented number, so it is cleared and the row
                     # says why it cannot be priced. NULL is not zero: it claims nothing.
                     await conn.execute("""
