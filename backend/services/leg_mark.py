@@ -39,6 +39,11 @@ from collections import defaultdict
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 LEGS_MARK_PREFIX = "priced from "
+# A legs mark that passed the payoff bound says so. Marks written before the bound existed
+# (2026-09-18 to 2026-09-19 06:12 UTC) stored abs() of the net and do not carry it, so they are
+# not good priors: QQQ 356's 0.01 was abs() of -0.01 (360P 0.02 under 350P 0.03).
+BOUNDED_MARKER = "within what they can be worth"
+STALE_SEP = " | "
 BOUND_TOLERANCE = 1e-6          # float noise only: a quote a tenth of a cent out is still out
 INF = float("inf")
 
@@ -142,12 +147,20 @@ async def mark_from_legs(ticker: str, legs: List[Dict[str, Any]], row_qty,
         net += value
         details.extend(res.get("leg_details") or [])
     return {"ok": True, "net_mark": net, "details": details,
-            "reason": f"{LEGS_MARK_PREFIX}{n} leg(s) ({structure or 'CUSTOM'})"}
+            "reason": f"{LEGS_MARK_PREFIX}{n} leg(s) ({structure or 'CUSTOM'}), {BOUNDED_MARKER}"}
 
 
 def prior_mark_came_from_legs(mark_reason: Optional[str]) -> bool:
-    """A legs-derived prior survives a failed legs cycle."""
-    return bool(mark_reason) and str(mark_reason).startswith(LEGS_MARK_PREFIX)
+    """A legs-derived prior that passed the payoff bound survives a failed legs cycle."""
+    head = str(mark_reason or "").split(STALE_SEP)[0]
+    return head.startswith(LEGS_MARK_PREFIX) and BOUNDED_MARKER in head
+
+
+def stale_reason(prior_reason: Optional[str], why: Optional[str]) -> str:
+    """The prior's own reason first -- so it still reads as what produced the mark -- then why
+    this cycle did not refresh it. Never stacks: each failed cycle replaces the last one's cause."""
+    head = str(prior_reason or "").split(STALE_SEP)[0] or "prior mark kept"
+    return f"{head}{STALE_SEP}not refreshed: {why or 'no reason given'}"
 
 
 def name_path_priced_same_legs(legs: List[Dict[str, Any]], structure: Optional[str], expiry,

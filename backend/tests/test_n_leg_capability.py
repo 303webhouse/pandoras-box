@@ -21,7 +21,7 @@ sys.path.insert(0, __file__.rsplit("tests", 1)[0])
 from models.leg_payoff import analyze, display_strikes, recognize  # noqa: E402
 from services.leg_mark import (  # noqa: E402
     mark_from_legs, name_path_priced_same_legs, payoff_range, prior_mark_came_from_legs,
-    structure_ratios,
+    stale_reason, structure_ratios,
 )
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -109,6 +109,7 @@ def test_a_position_is_marked_from_every_leg_across_expiries():
     assert out["ok"] and abs(out["net_mark"] - 0.4) < 1e-9
     assert sorted(calls) == [("2026-10-16", 1), ("2026-11-20", 1)]
     assert out["reason"].startswith("priced from 2 leg(s)")
+    assert prior_mark_came_from_legs(out["reason"]), "a bounded legs mark is a good prior"
 
 
 def test_a_missing_quote_makes_the_mark_unavailable_not_partial():
@@ -130,9 +131,18 @@ def test_a_row_that_disagrees_with_its_legs_is_unavailable():
 
 
 def test_only_a_legs_derived_prior_may_survive_a_failed_cycle():
-    assert prior_mark_came_from_legs("priced from 3 leg(s) (put_butterfly)")
+    good = "priced from 2 leg(s) (put_debit_spread), within what they can be worth"
+    assert prior_mark_came_from_legs(good)
+    # written before the bound existed: abs() of the net, so possibly an impossible value flipped
+    # positive (QQQ 356: 0.01 = abs(0.02 - 0.03)). Not a good prior.
+    assert not prior_mark_came_from_legs("priced from 2 leg(s) (put_debit_spread)")
     assert not prior_mark_came_from_legs(None)
     assert not prior_mark_came_from_legs("OK")
+    # a STALE prior keeps reading as good, and says why it was not refreshed, without stacking
+    once = stale_reason(good, "no quote for the 2026-10-16 leg(s) 350P")
+    assert prior_mark_came_from_legs(once) and "not refreshed: no quote" in once
+    assert stale_reason(once, "outside") == good + " | not refreshed: outside"
+    assert stale_reason(None, None) == "prior mark kept | not refreshed: no reason given"
 
 
 def _leg(t, s, k, q=2, e=E):

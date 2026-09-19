@@ -28,7 +28,7 @@ from models.accounts import (  # R-IV.445(a): one vocabulary, read by every writ
 )
 from models.position_status import DUPLICATE_OF  # R-IV.449(a): retired, not deleted
 from services.leg_mark import (  # R-IV.458(a)/460(b): legs, not names, say what is held
-    mark_from_legs, name_path_priced_same_legs, prior_mark_came_from_legs,
+    mark_from_legs, name_path_priced_same_legs, prior_mark_came_from_legs, stale_reason,
 )
 from models.leg_payoff import (  # R-IV.460(c): any number of legs, no allowlist
     analyze, display_strikes, recognize,
@@ -2492,9 +2492,13 @@ async def run_mark_to_market() -> dict:
                     # The mark guard's rule: a failed cycle writes nothing over a GOOD value.
                     # This prior is good -- legs produced it, or the two-strike path priced
                     # exactly the contracts the legs hold -- so it stands, stamped.
+                    # It says why it was not refreshed (R-IV.462): a STALE mark with no cause
+                    # cannot be told from one whose legs were refused as impossible.
                     await conn.execute(
                         "UPDATE unified_positions SET mark_checked_at = NOW(), "
-                        "mark_status = 'STALE' WHERE position_id = $1", row["position_id"])
+                        "mark_status = 'STALE', mark_reason = $2 WHERE position_id = $1",
+                        row["position_id"],
+                        stale_reason(row.get("mark_reason"), outcome.get("reason")))
                 else:
                     # A prior mark from a name-chosen method on any wider leg set priced a
                     # DIFFERENT structure (or is negative, which nothing it priced can be).
