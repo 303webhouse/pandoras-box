@@ -20,6 +20,8 @@ def conn_url():
 
 c = psycopg2.connect(conn_url()); c.autocommit = False
 cur = c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+# R-IV.462(b): the audit names this script; autocommit is off, so this is one transaction.
+cur.execute("SELECT set_config('app.actor', %s, true)", ("fix_ibit_call_roundtrip.py",))
 log = []
 
 # 1) remove the bogus open
