@@ -125,7 +125,8 @@ def test_boot_mirrors_it_one_statement_at_a_time():
     boot = BOOT.read_text(encoding="utf-8")
     assert "trg_unified_positions_terminal_needs_exit" in boot
     i = boot.index("terminal-needs-exit function")
-    assert "except Exception as e:" in boot[i:i + 4000], (
+    loop_end = boot.index("except Exception as e:", i)
+    assert "for _label, _sql in" in boot[i - 3000:i] and loop_end - i < 12000, (
         "a refused statement must never end the rest of the bootstrap (R-IV.449)")
 
 

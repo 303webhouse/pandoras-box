@@ -127,7 +127,7 @@ def _v2_to_legacy_dict(row) -> dict:
 
     # Compute current_value: current_price × qty × multiplier
     cp = d.get("current_price")
-    qty = d.get("quantity") or 0
+    qty = float(d.get("quantity") or 0)   # R-IV.458(b): NUMERIC
     multiplier = 1 if is_stock else 100
     current_value = round(cp * multiplier * qty, 2) if cp is not None else None
 

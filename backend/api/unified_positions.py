@@ -21,12 +21,18 @@ from database.redis_client import get_redis_client
 from websocket.broadcaster import manager
 from models.position_risk import calculate_position_risk, infer_direction
 from models.position_lots import (  # R-IV.441(a): the position row is the AGGREGATE
-    derive_aggregate, fifo_plan, integral_qty, provenance_for_lot,
+    derive_aggregate, fifo_plan, provenance_for_lot,
 )
 from models.accounts import (  # R-IV.445(a): one vocabulary, read by every write path
     CANONICAL_ACCOUNTS, canonical_account,
 )
 from models.position_status import DUPLICATE_OF  # R-IV.449(a): retired, not deleted
+from services.leg_mark import (  # R-IV.458(a)/460(b): legs, not names, say what is held
+    mark_from_legs, prior_mark_came_from_legs,
+)
+from models.leg_payoff import (  # R-IV.460(c): any number of legs, no allowlist
+    analyze, display_strikes, recognize,
+)
 
 # R-IV.454(d): each terminal status, and the path that records how a position reached it.
 TERMINAL_VIA_PATH = {
@@ -172,7 +178,7 @@ class CreatePositionRequest(BaseModel):
     legs: Optional[List[Dict[str, Any]]] = None
 
     entry_price: Optional[float] = None
-    quantity: int = Field(default=1, alias="contracts")
+    quantity: float = Field(default=1, alias="contracts")   # R-IV.458(b): fractions held
     cost_basis: Optional[float] = None
 
     # Risk — auto-calculated if structure is provided, can be overridden
@@ -219,7 +225,7 @@ class UpdatePositionRequest(BaseModel):
     unrealized_pnl: Optional[float] = None
     notes: Optional[str] = None
     tags: Optional[List[str]] = None
-    quantity: Optional[int] = None
+    quantity: Optional[float] = None   # R-IV.458(b): the broker's quantity, fractions included
     entry_price: Optional[float] = None
     cost_basis: Optional[float] = None
     legs: Optional[str] = None
@@ -240,7 +246,7 @@ class UpdatePositionRequest(BaseModel):
 class ClosePositionRequest(BaseModel):
     exit_price: float
     notes: Optional[str] = None
-    quantity: Optional[int] = None  # If < total qty, partial close (reduce position, keep remainder open)
+    quantity: Optional[float] = None  # If < total qty, partial close (reduce position, keep remainder open)
     exit_value: Optional[float] = None       # Total exit value (exit_price × multiplier × qty)
     trade_outcome: Optional[str] = None      # WIN / LOSS / BREAKEVEN (frontend-computed)
     loss_reason: Optional[str] = None        # SETUP_FAILED / EXECUTION_ERROR / MARKET_CONDITIONS
@@ -332,6 +338,10 @@ def _row_to_dict(row) -> dict:
 
 def _compute_unrealized_pnl(entry_price: float, current_price: float, quantity: int, structure: str, asset_type: str = "", direction: str = "") -> float:
     """Compute unrealized P&L based on position type and credit/debit nature."""
+    # R-IV.458(b): quantity is NUMERIC now and arrives as Decimal; Decimal * float raises.
+    quantity = float(quantity or 0)
+    entry_price = float(entry_price) if entry_price is not None else entry_price
+    current_price = float(current_price) if current_price is not None else current_price
     if not entry_price or not current_price:
         return 0.0
     s = (structure or "").lower()
@@ -459,7 +469,7 @@ async def create_position(req: CreatePositionRequest, _=Depends(require_api_key)
 
     if existing and req.entry_price is not None:
         # --- ADD TO EXISTING POSITION (weighted average cost basis) ---
-        old_qty = existing["quantity"] or 0
+        old_qty = float(existing["quantity"] or 0)
         old_entry = float(existing["entry_price"] or 0)
         add_qty = req.quantity
         add_entry = req.entry_price
@@ -979,7 +989,7 @@ async def portfolio_summary(account: Optional[str] = Query(None)):
             cost = p.get("cost_basis")
             if cost is None:
                 ep = p.get("entry_price") or 0
-                qty = p.get("quantity") or 0
+                qty = float(p.get("quantity") or 0)
                 cost = ep * qty * 100
             pnl = p.get("unrealized_pnl") or 0
             total_position_value += cost + pnl
@@ -1428,7 +1438,7 @@ async def update_position(position_id: str, req: UpdatePositionRequest, _=Depend
         # R-IV.456(a): quantity that grows with no price beside it is UNPRICED. The basis is not
         # recomputed -- it was right for everything priced -- and the row says what it does not
         # cover, so a later reader cannot mistake a partial basis for a whole one.
-        old_q = int(old_pos.get("quantity") or 0)
+        old_q = float(old_pos.get("quantity") or 0)
         if (req.quantity > old_q and req.cost_basis is None and req.entry_price is None):
             sets.append(f"basis_incomplete_reason = ${idx}")
             params.append(f"R-IV.456(a): quantity {old_q} -> {req.quantity} with no price for "
@@ -1799,7 +1809,7 @@ async def close_position(position_id: str, req: ClosePositionRequest, _=Depends(
                 pos = _row_to_dict(row)
                 entry_price = pos.get("entry_price") or 0
                 structure = pos.get("structure") or ""
-                total_qty = pos["quantity"]
+                total_qty = float(pos["quantity"] or 0)
 
                 close_qty = req.quantity if req.quantity and req.quantity < total_qty else total_qty
                 is_partial = close_qty < total_qty
@@ -2392,13 +2402,28 @@ async def run_mark_to_market() -> dict:
     errors = []
     use_options_pricing = bool(UW_API_KEY) and get_spread_value is not None
 
+    # R-IV.458(a)/460(b): legs are read from the table they live in, once, for every open row.
+    legs_by_position: Dict[str, List[Dict[str, Any]]] = {}
+    try:
+        async with pool.acquire() as conn:
+            leg_rows = await conn.fetch(
+                "SELECT position_id, leg_seq, option_type, side, strike, expiry, qty "
+                "FROM position_legs WHERE position_id = ANY($1::text[]) "
+                "ORDER BY position_id, leg_seq",
+                [r["position_id"] for r in rows])
+        for lr in leg_rows:
+            legs_by_position.setdefault(lr["position_id"], []).append(dict(lr))
+    except Exception as e:
+        logger.warning("position_legs read failed; legs positions will read UNAVAILABLE: %s", e)
+        legs_by_position = None
+
     # Cache chain snapshots per ticker to avoid duplicate API calls
     for row in rows:
         ticker = row["ticker"]
         structure = (row.get("structure") or "").lower()
         at = (row.get("asset_type") or "").upper()
         entry_price = float(row["entry_price"]) if row["entry_price"] else None
-        quantity = row["quantity"]
+        quantity = float(row["quantity"]) if row["quantity"] is not None else 0.0
         expiry = row.get("expiry")
         long_strike = float(row["long_strike"]) if row.get("long_strike") else None
         short_strike = float(row["short_strike"]) if row.get("short_strike") else None
@@ -2416,7 +2441,55 @@ async def run_mark_to_market() -> dict:
         long_leg_price = None
         short_leg_price = None
 
+        # ── R-IV.458(a)/460(b): A POSITION WITH LEGS IS MARKED FROM ITS LEGS ─────────────
+        # Any structure name, no allowlist. It NEVER falls through to the spread or single-leg
+        # paths below: those choose their method from the name, and a name-chosen method is
+        # how a three-leg butterfly came to be priced as its 100P alone.
+        table_legs = (legs_by_position or {}).get(row["position_id"])
+        if table_legs or legs_by_position is None:
+            if legs_by_position is None:
+                outcome = {"ok": False, "reason": "position_legs could not be read this cycle"}
+            elif not (use_options_pricing and get_multi_leg_value is not None):
+                outcome = {"ok": False, "reason": "no options pricer configured"}
+            else:
+                outcome = await mark_from_legs(ticker, table_legs, quantity, structure,
+                                               get_multi_leg_value)
+            async with pool.acquire() as conn:
+                if outcome.get("ok"):
+                    mark = abs(float(outcome["net_mark"]))
+                    unreal = _compute_unrealized_pnl(entry_price, mark, quantity, structure,
+                                                     direction=(row.get("direction") or ""))
+                    await conn.execute("""
+                        UPDATE unified_positions SET
+                            current_price = $1, unrealized_pnl = $2,
+                            mark_status = 'OK', mark_reason = $3,
+                            price_updated_at = NOW(), mark_checked_at = NOW(),
+                            updated_at = NOW()
+                        WHERE position_id = $4
+                    """, mark, unreal, outcome["reason"], row["position_id"])
+                    updated += 1
+                elif prior_mark_came_from_legs(row.get("mark_reason")):
+                    # The mark guard's rule: a failed cycle writes nothing over a GOOD value.
+                    # This prior is good -- legs produced it -- so it stands, stamped.
+                    await conn.execute(
+                        "UPDATE unified_positions SET mark_checked_at = NOW(), "
+                        "mark_status = 'STALE' WHERE position_id = $1", row["position_id"])
+                else:
+                    # A prior mark from a name-chosen method priced a DIFFERENT structure.
+                    # Keeping it would keep the invented number, so it is cleared and the row
+                    # says why it cannot be priced. NULL is not zero: it claims nothing.
+                    await conn.execute("""
+                        UPDATE unified_positions SET
+                            current_price = NULL, unrealized_pnl = NULL,
+                            mark_status = 'UNAVAILABLE', mark_reason = $1,
+                            mark_checked_at = NOW(), updated_at = NOW()
+                        WHERE position_id = $2
+                    """, outcome.get("reason"), row["position_id"])
+            continue
+
         # --- Multi-leg path: iron condors, straddles, etc. via legs JSONB ---
+        # (Legacy: rows with NO legs in position_legs. The allowlist below no longer decides
+        # anything for a position whose legs are in the table.)
         legs_data = row.get("legs")
 
         # Auto-infer legs from notes if missing for multi-leg structures
@@ -2674,13 +2747,10 @@ async def add_position_lot(position_id: str, req: AddLotRequest,
                 position_id)
             agg = derive_aggregate([dict(l) for l in lots], pos["asset_type"])
 
-            stored_qty = integral_qty(agg["qty"])
-            if stored_qty is None:
-                raise HTTPException(
-                    status_code=400,
-                    detail=(f"lots sum to {agg['qty']}, which unified_positions.quantity "
-                            f"(INTEGER) cannot hold — storing it would drop the fraction and "
-                            f"lose shares from the book without an event."))
+            # R-IV.458(b): the book matches the broker including fractions. quantity is NUMERIC,
+            # so the lots' exact sum is stored -- the refusal that stood here protected an
+            # INTEGER column from losing shares, and the column no longer loses them.
+            stored_qty = agg["qty"]
 
             # The aggregate is WRITTEN, not merged. An add changes the quantity, so a basis
             # kept from before the add describes a position that no longer exists. When the lot
@@ -2883,11 +2953,7 @@ async def reduce_position(position_id: str, req: ReducePositionRequest,
                 "SELECT qty, price, fees FROM position_lots WHERE position_id = $1",
                 position_id)
             agg = derive_aggregate([dict(r) for r in remaining], pos["asset_type"])
-            stored_qty = integral_qty(agg["qty"])
-            if stored_qty is None:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"lots would sum to {agg['qty']}, which INTEGER quantity cannot hold")
+            stored_qty = agg["qty"]   # R-IV.458(b): exact, fractions included
             # The position's own realized field is NOT written here. Realized belongs to the
             # close path and its allocations live in position_lot_closures; writing it from two
             # places is how a figure comes to have two owners and no author.
@@ -2962,13 +3028,173 @@ async def _verify_row(table: str, position_id: str, row_id: int, req: VerifyRequ
             "verified_event": req.verified_event}
 
 
+class EntryLeg(BaseModel):
+    option_type: str               # CALL | PUT
+    side: str                      # LONG | SHORT
+    strike: float
+    expiry: str
+    ratio: float = 1               # contracts per structure
+    price: Optional[float] = None  # this leg's fill, when known
+
+
+class LegsPreviewRequest(BaseModel):
+    legs: List[EntryLeg]
+    quantity: float = 1            # structures
+
+
+class WithLegsRequest(BaseModel):
+    """A position entered from its legs — any number of them (R-IV.460(c))."""
+    ticker: str
+    account: str
+    legs: List[EntryLeg]
+    quantity: float = 1                  # structures
+    net_price: Optional[float] = None    # per structure, when the legs are not priced one by one
+    structure: Optional[str] = None      # a label; the legs are what is held regardless
+    direction: Optional[str] = None
+    entry_date: Optional[str] = None
+    notes: Optional[str] = None
+    broker_ref: Optional[str] = None
+    reason: Optional[str] = None
+    actor: Optional[str] = None
+
+
+def _validated_legs(legs: List[EntryLeg], quantity: float) -> List[Dict[str, Any]]:
+    if not legs:
+        raise HTTPException(status_code=400, detail="at least one leg is required")
+    if quantity is None or quantity <= 0:
+        raise HTTPException(status_code=400, detail="quantity (structures) must be positive")
+    out = []
+    for i, leg in enumerate(legs, 1):
+        ot, sd = _leg_values(leg.option_type, leg.side)
+        if leg.strike is None or leg.strike <= 0:
+            raise HTTPException(status_code=400, detail=f"leg {i}: strike must be positive")
+        if leg.ratio is None or leg.ratio <= 0:
+            raise HTTPException(status_code=400, detail=f"leg {i}: ratio must be positive")
+        try:
+            exp = date.fromisoformat(str(leg.expiry)[:10])
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail=f"leg {i}: expiry must be a date")
+        out.append({"option_type": ot, "side": sd, "strike": float(leg.strike),
+                    "expiry": exp, "qty": float(leg.ratio) * float(quantity),
+                    "ratio": float(leg.ratio), "price": leg.price})
+    return out
+
+
+@router.post("/v2/positions/legs/preview", dependencies=[Depends(require_api_key)])
+async def preview_legs(req: LegsPreviewRequest):
+    """What a set of legs IS and what it can make or lose — computed before anything is saved.
+
+    Any number of legs (R-IV.460(c) lifted the old ceiling of four). Names the structure where it
+    recognizes one and says CUSTOM where it does not; a CUSTOM set is enterable all the same.
+    """
+    legs = _validated_legs(req.legs, req.quantity)
+    analysis = analyze(legs)
+    scale = float(req.quantity)
+    for k in ("max_profit", "max_loss"):
+        if isinstance(analysis.get(k), (int, float)):
+            analysis[f"{k}_position"] = round(analysis[k] * scale, 2)
+    return {"structure": recognize(legs), "legs": len(legs), "quantity": req.quantity,
+            "analysis": analysis, "display_strikes": display_strikes(legs)}
+
+
+@router.post("/v2/positions/with-legs")
+async def create_position_with_legs(req: WithLegsRequest, _=Depends(require_api_key)):
+    """Enter a position from its legs, atomically: the row, every leg, and its first lot.
+
+    The legs are the source. The two strike columns are written as a DERIVED summary for display
+    (R-IV.460(d)); nothing prices or marks from them for a position that has legs. The entry is
+    the legs' net when every leg is priced, else `net_price`, else unknown — and an unknown entry
+    marks the row basis-incomplete rather than inventing one.
+    """
+    account = canonical_account(req.account)
+    _assert_etf_only(account, "OPTION")
+    legs = _validated_legs(req.legs, req.quantity)
+    analysis = analyze(legs)
+    recognized = recognize(legs)
+    structure = (req.structure or recognized).strip().lower()
+    net = analysis.get("net_premium")
+    if net is None and req.net_price is not None:
+        net = float(req.net_price)
+    qty = float(req.quantity)
+    entry = abs(net) if net is not None else None
+    basis = round(entry * qty * 100, 2) if entry is not None else None
+    max_loss = analysis.get("max_loss")
+    max_profit = analysis.get("max_profit")
+    if isinstance(max_loss, (int, float)):
+        max_loss = round(max_loss * qty, 2)
+    if isinstance(max_profit, (int, float)):
+        max_profit = round(max_profit * qty, 2)
+    shown = display_strikes(legs)
+    expiries = sorted({l["expiry"] for l in legs})
+    now = datetime.now(timezone.utc)
+    pid = f"POS_{req.ticker.upper()}_{now.strftime('%Y%m%d_%H%M%S')}_L{len(legs)}"
+    incomplete = (None if entry is not None else
+                  "R-IV.460(c): entered with no leg prices and no net price; basis unknown")
+
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("SELECT set_config('app.actor', $1, true)",
+                               (req.actor or "lifecycle-ui"))
+            await conn.execute("SELECT set_config('app.reason', $1, true)",
+                               (req.reason or f"entered with {len(legs)} leg(s) as {structure}"))
+            await conn.execute("""
+                INSERT INTO unified_positions
+                    (position_id, ticker, asset_type, structure, direction, quantity,
+                     entry_price, cost_basis, max_loss, max_profit, breakeven, entry_date,
+                     expiry, long_strike, short_strike, account, source, status, provenance,
+                     broker_ref, basis_incomplete_reason, notes, created_at, updated_at)
+                VALUES ($1, $2, 'OPTION', $3, $4, $5, $6, $7, $8, $9, $10,
+                        COALESCE($11::timestamptz, NOW()), $12, $13, $14, $15, 'MANUAL', 'OPEN',
+                        'PRINCIPAL_REPORTED', $16, $17, $18, NOW(), NOW())""",
+                pid, req.ticker.upper(), structure, (req.direction or "").upper() or None,
+                qty, entry, basis,
+                max_loss if isinstance(max_loss, (int, float)) else None,
+                max_profit if isinstance(max_profit, (int, float)) else None,
+                analysis.get("breakevens"), req.entry_date, expiries[0],
+                shown["long_strike"], shown["short_strike"], account, req.broker_ref,
+                incomplete, req.notes)
+            for seq, leg in enumerate(legs, 1):
+                await conn.execute("""
+                    INSERT INTO position_legs
+                        (position_id, leg_seq, option_type, side, strike, expiry, qty, price,
+                         provenance, migrated_from)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'entered-with-legs')""",
+                    pid, seq, leg["option_type"], leg["side"], leg["strike"], leg["expiry"],
+                    leg["qty"], leg["price"], provenance_for_lot("MANUAL", leg["price"]))
+            await conn.execute("""
+                INSERT INTO position_lots
+                    (position_id, fill_time, qty, price, fees, source, provenance, broker_ref)
+                VALUES ($1, COALESCE($2::timestamptz, NOW()), $3, $4, 0, 'MANUAL', $5, $6)""",
+                pid, req.entry_date, qty, entry, provenance_for_lot("MANUAL", entry),
+                req.broker_ref)
+            await conn.execute("""
+                INSERT INTO position_legs_migration
+                    (position_id, outcome, detail, legs_written)
+                VALUES ($1, 'ENTERED_WITH_LEGS', $2, $3)""",
+                pid, f"entered from {len(legs)} leg(s); recognized as {recognized}", len(legs))
+
+    return {"status": "created", "position_id": pid, "structure": structure,
+            "recognized_as": recognized, "legs": len(legs), "quantity": qty,
+            "entry_price": entry, "cost_basis": basis, "analysis": analysis,
+            "display_strikes": shown, "basis_incomplete_reason": incomplete}
+
+
 class CorrectRealizedRequest(BaseModel):
-    """An adjudicated correction to a CLOSED row's realized result (R-IV.457(d))."""
-    realized_pnl: float
+    """An adjudicated correction to an ENDED row's recorded figures (R-IV.457(d), R-IV.458).
+
+    Every figure is optional; at least one is required. quantity, entry_price and cost_basis
+    were added for R-IV.458(b)(c): GUSH 358's fractional share and TSLA 352's gross entry had no
+    path, because the PATCH refuses lot-derived fields and the close path refuses a closed row.
+    """
+    realized_pnl: Optional[float] = None
+    exit_price: Optional[float] = None
+    quantity: Optional[float] = None
+    entry_price: Optional[float] = None
+    cost_basis: Optional[float] = None
     evidence: str                  # the lines that support the verdict, shown beside it (#23)
     reason: str
     ruling: str
-    exit_price: Optional[float] = None
     actor: Optional[str] = None
 
 
@@ -2992,41 +3218,78 @@ async def correct_realized(position_id: str, req: CorrectRealizedRequest,
                 status_code=400,
                 detail=f"{name} is required — a corrected result with no {name} beside it is "
                        f"a verdict alone, which is what conventions #23 exists to stop")
+    fields = {f: getattr(req, f) for f in
+              ("realized_pnl", "exit_price", "quantity", "entry_price", "cost_basis")
+              if getattr(req, f) is not None}
+    if not fields:
+        raise HTTPException(status_code=400, detail="no figure to correct")
     pool = await get_postgres_client()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT position_id, status, realized_pnl, exit_price, notes FROM unified_positions "
-            "WHERE position_id = $1", position_id)
+            "SELECT position_id, status, realized_pnl, exit_price, quantity, entry_price, "
+            "cost_basis, notes FROM unified_positions WHERE position_id = $1", position_id)
         if not row:
             raise HTTPException(status_code=404, detail=f"Position {position_id} not found")
         if (row["status"] or "").upper() not in ("CLOSED", "EXPIRED"):
             raise HTTPException(
                 status_code=400,
-                detail=f"{position_id} is {row['status']}; a realized correction applies to a "
-                       f"row that has ended (an open row closes through /close)")
-        prior = row["realized_pnl"]
-        new = round(float(req.realized_pnl), 2)
-        outcome = "WIN" if new > 0 else "LOSS" if new < 0 else "BREAKEVEN"
-        note = (f" || {req.ruling} REALIZED CORRECTION: "
-                f"{'NULL' if prior is None else f'{float(prior):+.2f}'} -> {new:+.2f}"
-                + (f"; exit_price {row['exit_price']} -> {req.exit_price}"
-                   if req.exit_price is not None else "")
+                detail=f"{position_id} is {row['status']}; a correction here applies to a row "
+                       f"that has ended (an open row closes through /close)")
+        lot_sources = [r["source"] for r in await conn.fetch(
+            "SELECT source FROM position_lots WHERE position_id = $1", position_id)]
+        shape = {"quantity", "entry_price", "cost_basis"} & set(fields)
+        real_lots = [s for s in lot_sources if s != "LEGACY-SINGLE-LOT"]
+        if shape and real_lots:
+            raise HTTPException(
+                status_code=400,
+                detail=(f"{sorted(shape)} derive from this row's {len(real_lots)} recorded fill(s); "
+                        f"correct the fills, not the aggregate they compute"))
+
+        changes = []
+        for f, v in fields.items():
+            before = row[f]
+            after = round(float(v), 2) if f in ("realized_pnl", "cost_basis") else float(v)
+            fields[f] = after
+            changes.append(f"{f} {'NULL' if before is None else before} -> {after}")
+        outcome = None
+        if "realized_pnl" in fields:
+            r = fields["realized_pnl"]
+            outcome = "WIN" if r > 0 else "LOSS" if r < 0 else "BREAKEVEN"
+        note = (f" || {req.ruling} CORRECTION: " + "; ".join(changes)
                 + f". EVIDENCE: {req.evidence.strip()} REASON: {req.reason.strip()}")
+        sets, params = [], []
+        for f, v in fields.items():
+            params.append(v)
+            sets.append(f"{f} = ${len(params)}")
+        if outcome:
+            params.append(outcome)
+            sets.append(f"trade_outcome = ${len(params)}")
+        params.append(note)
+        sets.append(f"notes = COALESCE(notes, '') || ${len(params)}")
+        params.append(position_id)
         async with conn.transaction():
             await conn.execute("SELECT set_config('app.actor', $1, true)",
                                (req.actor or "lifecycle-ui"))
             await conn.execute("SELECT set_config('app.reason', $1, true)",
-                               f"{req.ruling}: realized correction with evidence")
+                               f"{req.ruling}: correction with evidence")
             await conn.execute(
-                """UPDATE unified_positions
-                      SET realized_pnl = $1, trade_outcome = $2,
-                          exit_price = COALESCE($3, exit_price),
-                          notes = COALESCE(notes, '') || $4, updated_at = NOW()
-                    WHERE position_id = $5""",
-                new, outcome, req.exit_price, note, position_id)
+                f"UPDATE unified_positions SET {', '.join(sets)}, updated_at = NOW() "
+                f"WHERE position_id = ${len(params)}", *params)
+            # A LEGACY-SINGLE-LOT is a COPY of the row, backfilled from it -- not a fill. When
+            # the row it copied is corrected, the copy is regenerated from the corrected row so
+            # the two cannot drift; a real fill is never touched here (refused above).
+            if shape and lot_sources and not real_lots:
+                await conn.execute(
+                    """UPDATE position_lots l
+                          SET qty = p.quantity, price = p.entry_price
+                         FROM unified_positions p
+                        WHERE p.position_id = l.position_id AND l.position_id = $1
+                          AND l.source = 'LEGACY-SINGLE-LOT'""", position_id)
     return {"status": "corrected", "position_id": position_id,
-            "realized_before": None if prior is None else float(prior),
-            "realized_after": new, "trade_outcome": outcome, "evidence_recorded": True}
+            "realized_before": None if row["realized_pnl"] is None else float(row["realized_pnl"]),
+            "realized_after": fields.get("realized_pnl"),
+            "changes": changes, "trade_outcome": outcome, "evidence_recorded": True,
+            "legacy_lot_regenerated": bool(shape and lot_sources and not real_lots)}
 
 
 class RetireDuplicateRequest(BaseModel):

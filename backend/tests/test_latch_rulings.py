@@ -138,7 +138,9 @@ def _correct(monkeypatch, row, **body):
     from api import unified_positions as U
     conn = MagicMock()
     conn.calls = []
-    conn.fetchrow = AsyncMock(return_value=row)
+    conn.fetchrow = AsyncMock(return_value={**{"quantity": 1, "entry_price": 0.18,
+                                               "cost_basis": 18.0}, **row})
+    conn.fetch = AsyncMock(return_value=[])          # the row's lot sources
 
     async def execute(sql, *args):
         conn.calls.append((" ".join(sql.split()), args))
@@ -161,8 +163,9 @@ CLOSED = {"position_id": "POS_XLE_20260715_164155", "status": "CLOSED", "realize
 def test_a_correction_keeps_the_prior_figure_and_the_evidence_on_the_row(monkeypatch):
     out, conn = _correct(monkeypatch, CLOSED)
     upd = [c for c in conn.calls if "UPDATE unified_positions" in c[0]][0]
-    note = upd[1][3]
-    assert "+81.94 -> +64.00" in note and "EVIDENCE: export lines" in note
+    note = next(a for a in upd[1] if isinstance(a, str) and "CORRECTION" in a)
+    # R-IV.458 broadened the path to every recorded figure; the note names each change
+    assert "realized_pnl 81.94 -> 64.0" in note and "EVIDENCE: export lines" in note
     assert out["realized_before"] == 81.94 and out["realized_after"] == 64.0
 
 
