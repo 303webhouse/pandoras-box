@@ -1,11 +1,26 @@
 # DEF-NEGATIVE-SPREAD-MARK — debit spreads carried marks below zero, and one stood for three weeks
 
-**Registered:** R-IV.462(d). **Found:** CC-BUILD, 2026-09-19, reading the first cycle of the legs
-mark path. **Status:** FIXED FORWARD (R-IV.462 commit). The historical figures stay in the audit
-and are on record here, so the impossible numbers are not merely gone.
+**Registered:** R-IV.462(d); accepted R-IV.463(d) at **14 positions within audit reach**. The
+audit covers 2026-05-26 onward; **before that is unknown**. **Found:** CC-BUILD, 2026-09-19,
+reading the first cycle of the legs mark path. **Status:** FIXED FORWARD (R-IV.462, R-IV.463(a)(c)).
+The historical figures stay in the audit and are on record here, so the impossible numbers are
+not merely gone.
 
 > A debit spread cannot be worth less than nothing. A mark below zero is not a price: it is two
 > quotes taken at different moments, subtracted.
+
+**ROOT CAUSE: legs priced at different moments.** A live mid on one leg and a weeks-old last trade
+on another subtract to a price nobody could trade at.
+
+**AND THE GUARD THAT WOULD HAVE CAUGHT IT WAS WIRED INTO ONE OF TWO WRITE PATHS. A guard wired
+into one of two write paths is a guard on neither.** T1 (R-IV.394) refuses a mark at or below
+zero, but only the PATCH recompute called it. The mark job, which writes nearly every mark, never
+did.
+
+**A STALE QUOTE THAT IS STILL POSSIBLE PASSES THE PAYOFF BOUND SILENTLY.** The bound (R-IV.462)
+catches only impossible results. So since R-IV.463(a), a MARK takes nothing but a two-sided quote
+or a trade from the current session. Chains and greeks keep the wider fallback: a chain is a
+lookup, and a mark is a claim about what the principal holds right now.
 
 ---
 
@@ -84,12 +99,29 @@ census of all time.**
 - **On the two-strike path, a vertical priced above its width is refused.** T1 covers the floor.
 - **A negative prior is never kept** (4d3e7e2).
 
-## NOT FIXED — named so they are not mistaken for fixed
+## CLOSED BY R-IV.463
 
-- **`_get_contract_mid` still reaches for a last trade of any age**, which is the root of
-  mixed-moment legs. The bound catches the impossible results. A stale leg quote that is still
-  possible passes. Not changed here: that function serves every options consumer (chains,
-  greeks), not only the mark.
-- **`abs()` is ambiguous for a leg set whose payoff can take either sign** (a ratio, a risk
-  reversal, some custom sets): the book records a mark as a magnitude. No open position holds such
-  a set today.
+- **(a) A mark takes a two-sided quote or a trade from the current session, nothing older**
+  (`utils/options_math.compute_mark`, and `for_mark=True` on the three pricers, set by the mark
+  job alone). The vendor reports no trade time. A contract's session volume above zero is the
+  evidence that its last price is from that session (on a weekend, Friday's session). A leg
+  without either reads UNAVAILABLE or STALE, with the reason naming the leg, its bid, ask and
+  volume.
+- **(c) `abs()` is retired.** A mark is the SIGNED net in the side the position was entered on:
+  the value held for a debit, the cost to close for a credit. A set that crosses zero now reads
+  negative instead of folding back positive. The side follows from the legs:
+  1. their payoff, when it cannot change sign;
+  2. their fills;
+  3. the side recorded at entry (`entry_side`).
+  With none of these, the mark is UNAVAILABLE rather than guessed. T1's floor applies where the
+  value cannot go negative. Where it can, the payoff range is the floor.
+
+## STILL NOT FIXED — named so they are not mistaken for fixed
+
+- **Chains and greeks keep the wide fallback, by ruling.** Any reader that takes a chain's `mid`
+  as a mark reintroduces the root.
+- **A calendar or diagonal is bounded per expiry, not jointly.** The near and far legs are each
+  checked, but nothing bounds their combination. A stale-but-possible quote on one of them
+  passes.
+- **Two closed rows still store a negative mark**, STUB 37 (−0.010) and IBIT 313 (−0.005). A
+  closed row's result is its realized figure; these marks are left as the record of the defect.

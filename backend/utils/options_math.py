@@ -33,7 +33,7 @@ All functions operate on the normalized contract dict shape returned by
 from __future__ import annotations
 
 import math
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 
 def _norm_cdf(x: float) -> float:
@@ -74,6 +74,42 @@ def compute_mid(contract: Dict[str, Any]) -> Optional[float]:
     if vwap and float(vwap) > 0:
         return float(vwap)
     return None
+
+
+def compute_mark(contract: Dict[str, Any]) -> Tuple[Optional[float], str]:
+    """What one contract is worth NOW, for a MARK -- or None, and why (R-IV.463(a)).
+
+    A chain is a lookup; a mark is a claim about what the principal holds right now. So a mark
+    takes only:
+        1. a two-sided quote (bid AND ask above zero): the mid;
+        2. else a trade in the current session: the last trade price, when the contract's session
+           volume is above zero. The vendor reports no trade time. Its volume counts the most
+           recent session, so volume above zero is the evidence that the last price is that
+           session's -- on a weekend, Friday's.
+    Nothing else. compute_mid's further fallbacks -- a last trade of ANY age, the day's close,
+    VWAP -- stay for chains and greeks.
+
+    THE ROOT THIS CLOSES (DEF-NEGATIVE-SPREAD-MARK): legs priced at different moments. A live mid
+    on one leg and a weeks-old last trade on another subtract to a price nobody could trade at.
+    The payoff bound catches the IMPOSSIBLE results; a stale quote that is still POSSIBLE passes
+    the bound silently -- which is why the quote itself must be current.
+    """
+    quote = contract.get("last_quote", {}) or {}
+    bid, ask = quote.get("bid"), quote.get("ask")
+    try:
+        if bid and ask and float(bid) > 0 and float(ask) > 0:
+            return round((float(bid) + float(ask)) / 2, 4), "two-sided quote"
+    except (TypeError, ValueError):
+        pass
+    price = (contract.get("last_trade", {}) or {}).get("price")
+    volume = (contract.get("day", {}) or {}).get("volume") or 0
+    try:
+        if price and float(price) > 0 and float(volume) > 0:
+            return float(price), "trade this session"
+    except (TypeError, ValueError):
+        pass
+    return None, (f"no two-sided quote (bid {bid}, ask {ask}) and no trade this session "
+                  f"(volume {volume})")
 
 
 def compute_bid_ask_spread_pct(contract: Dict[str, Any]) -> Optional[float]:

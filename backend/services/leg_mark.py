@@ -131,9 +131,11 @@ async def mark_from_legs(ticker: str, legs: List[Dict[str, Any]], row_qty,
             err = None
         if not res or res.get("net_mark") is None:
             strikes = ", ".join(f"{g['strike']:g}{g['option_type'][:1].upper()}" for g in group)
+            why = "; ".join((res or {}).get("unpriced") or [])     # R-IV.463(a): say which, and why
             return {"ok": False, "net_mark": None, "details": details,
                     "reason": (f"no quote for the {expiry} leg(s) {strikes}"
                                + (f" ({err})" if err else "")
+                               + (f" [{why}]" if why else "")
                                + " -- a net built from the remaining legs would price a "
                                  "different structure")}
         value = float(res["net_mark"])
@@ -154,6 +156,50 @@ def prior_mark_came_from_legs(mark_reason: Optional[str]) -> bool:
     """A legs-derived prior that passed the payoff bound survives a failed legs cycle."""
     head = str(mark_reason or "").split(STALE_SEP)[0]
     return head.startswith(LEGS_MARK_PREFIX) and BOUNDED_MARKER in head
+
+
+def _as_group(legs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return [{"action": "BUY" if str(l.get("side") or "").upper() == "LONG" else "SELL",
+             "option_type": str(l.get("option_type") or "").lower(),
+             "strike": float(l["strike"]), "quantity": abs(float(l.get("qty") or 1))}
+            for l in legs]
+
+
+def entry_orientation(legs: List[Dict[str, Any]],
+                      entry_side: Optional[str] = None) -> Tuple[Optional[int], str]:
+    """Which way the position was entered: +1 a DEBIT (the mark is the value held), -1 a CREDIT
+    (the mark is the cost to close), None when nothing records it -- and what decided it.
+    R-IV.463(c): a mark is a SIGNED net, and this is the side its sign is read against.
+
+    In order of certainty:
+      "payoff"        the legs' payoff never changes sign -- a set that can never be worth less
+                      than zero was bought, and one that can never be worth more was sold. No
+                      name and no human input: it follows from the legs.
+      "entry prices"  every leg carries its fill; the net's sign is the side.
+      "entry side"    recorded at entry (POST /v2/positions/with-legs) for a set that can be
+                      worth either sign -- a ratio, a risk reversal -- entered without leg prices.
+    Anything else is None. A guess here decides the sign of the P&L.
+    """
+    if not legs:
+        return None, "unrecorded"
+    by_expiry: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    for leg in legs:
+        by_expiry[str(leg.get("expiry"))[:10]].append(leg)
+    ranges = [payoff_range(_as_group(g)) for g in by_expiry.values()]
+    if all(lo >= -BOUND_TOLERANCE for lo, _ in ranges) and any(hi > BOUND_TOLERANCE for _, hi in ranges):
+        return 1, "payoff"
+    if all(hi <= BOUND_TOLERANCE for _, hi in ranges) and any(lo < -BOUND_TOLERANCE for lo, _ in ranges):
+        return -1, "payoff"
+    prices = [leg.get("price") for leg in legs]
+    if all(p is not None for p in prices):
+        net = sum((1 if str(leg.get("side") or "").upper() == "LONG" else -1)
+                  * abs(float(leg.get("qty") or 1)) * float(leg["price"]) for leg in legs)
+        if abs(net) > BOUND_TOLERANCE:
+            return (1 if net > 0 else -1), "entry prices"
+    side = str(entry_side or "").upper()
+    if side in ("DEBIT", "CREDIT"):
+        return (1 if side == "DEBIT" else -1), "entry side"
+    return None, "unrecorded"
 
 
 def prior_is_good(mark_reason: Optional[str], legs: List[Dict[str, Any]], structure: Optional[str],
