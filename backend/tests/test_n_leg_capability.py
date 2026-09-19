@@ -20,7 +20,7 @@ sys.path.insert(0, __file__.rsplit("tests", 1)[0])
 
 from models.leg_payoff import analyze, display_strikes, recognize  # noqa: E402
 from services.leg_mark import (  # noqa: E402
-    mark_from_legs, prior_mark_came_from_legs, structure_ratios,
+    mark_from_legs, name_path_priced_same_legs, prior_mark_came_from_legs, structure_ratios,
 )
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -131,6 +131,49 @@ def test_only_a_legs_derived_prior_may_survive_a_failed_cycle():
     assert prior_mark_came_from_legs("priced from 3 leg(s) (put_butterfly)")
     assert not prior_mark_came_from_legs(None)
     assert not prior_mark_came_from_legs("OK")
+
+
+def _leg(t, s, k, q=2, e=E):
+    return {"option_type": t, "side": s, "strike": k, "qty": q, "expiry": e}
+
+
+@pytest.mark.parametrize("legs,structure,ls,ss,prior,good", [
+    # the census's correct class: the two-strike path priced exactly these contracts
+    ([_leg("PUT", "LONG", 60), _leg("PUT", "SHORT", 55)], "put_debit_spread", 60, 55, 0.035, True),
+    ([_leg("PUT", "LONG", 60)], "long_put", 60, None, 0.02, True),
+    # SLV 316: a debit spread marked -0.085 -- nothing the path priced is worth less than nothing
+    ([_leg("CALL", "LONG", 120), _leg("CALL", "SHORT", 130)], "call_debit_spread", 120, 130,
+     -0.085, False),
+    # NVDA 415 / XLF 300: three legs -- the path priced a different structure
+    ([_leg("PUT", "LONG", 100), _leg("PUT", "SHORT", 90), _leg("PUT", "LONG", 50)],
+     "put_butterfly", 100, 90, 0.10, False),
+    # the name says call, the legs are puts: the path priced the wrong contracts
+    ([_leg("PUT", "LONG", 60), _leg("PUT", "SHORT", 55)], "call_debit_spread", 60, 55, 0.03, False),
+    # the strikes the path read are not the strikes held
+    ([_leg("PUT", "LONG", 60), _leg("PUT", "SHORT", 50)], "put_debit_spread", 60, 55, 0.03, False),
+    # a leg on another expiry
+    ([_leg("PUT", "LONG", 60), _leg("PUT", "SHORT", 55, e="2026-11-20")], "put_debit_spread",
+     60, 55, 0.03, False),
+    # no prior at all
+    ([_leg("PUT", "LONG", 60)], "long_put", 60, None, None, False),
+])
+def test_a_prior_is_good_only_where_the_two_strike_path_priced_the_legs_held(
+        legs, structure, ls, ss, prior, good):
+    assert name_path_priced_same_legs(legs, structure, E, ls, ss, 2, prior) is good
+
+
+def test_a_row_that_disagrees_with_its_legs_keeps_no_name_path_prior():
+    legs = [_leg("PUT", "LONG", 45, q=10), _leg("PUT", "SHORT", 40, q=10)]
+    assert not name_path_priced_same_legs(legs, "put_debit_spread", E, 45, 40, 8, 0.01)
+
+
+def test_the_stale_branch_keeps_a_good_name_path_prior():
+    from api import unified_positions as U
+    src = inspect.getsource(U.run_mark_to_market)
+    i = src.index("A POSITION WITH LEGS IS MARKED FROM ITS LEGS")
+    block = src[i:src.index("# --- Multi-leg path", i)]
+    stale = block[block.index("prior_mark_came_from_legs"):block.index("mark_status = 'STALE'")]
+    assert "name_path_priced_same_legs" in stale
 
 
 def test_a_legs_position_never_falls_through_to_a_name_based_path():
