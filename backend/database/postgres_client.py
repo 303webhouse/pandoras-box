@@ -93,6 +93,33 @@ DB_PASSWORD = os.getenv("DB_PASSWORD") or "postgres"
 # Global connection pool
 _db_pool: Optional[asyncpg.Pool] = None
 
+
+def _numeric_text(value) -> str:
+    """How a Python value is written into a NUMERIC column (R-IV.463(e), first finding).
+
+    asyncpg's own encoder writes a float by its EXACT BINARY EXPANSION, so 34.81 was stored as
+    34.81000000000000227373675443232059478759765625 and 0.015 as 0.0149999999999999994448...
+    Measured 2026-09-19: 171 of 407 realized figures in the book carried such residue, 204 of
+    452 entry prices, 192 of 326 lot prices. repr() is the shortest decimal that reads back as
+    the same float -- what the writer meant. The same class as the quantity fix: the book holds
+    the number that was given, not an artefact of how it travelled.
+
+    float() first: a numpy float64 is a float, and its repr under NumPy 2 is "np.float64(...)".
+    """
+    if isinstance(value, bool):
+        return "1" if value else "0"
+    if isinstance(value, float):
+        return repr(float(value))
+    return str(value)
+
+
+async def _init_connection(conn) -> None:
+    """Every pooled connection writes NUMERIC through _numeric_text and reads it as Decimal
+    (unchanged). Text format; arrays of numeric (breakeven) use the same codec -- both verified
+    read-only against production 2026-09-19 before this shipped."""
+    await conn.set_type_codec("numeric", encoder=_numeric_text, decoder=Decimal,
+                              schema="pg_catalog", format="text")
+
 async def get_postgres_client() -> asyncpg.Pool:
     """Get or create PostgreSQL connection pool"""
     global _db_pool
@@ -106,6 +133,7 @@ async def get_postgres_client() -> asyncpg.Pool:
             password=DB_PASSWORD,
             min_size=2,
             max_size=10,
+            init=_init_connection,          # R-IV.463(e): NUMERIC gets the number, not its float
             server_settings={
                 'idle_in_transaction_session_timeout': '300000',  # 5 min — kill zombie transactions
                 'statement_timeout': '30000',  # 30s — prevent runaway queries
