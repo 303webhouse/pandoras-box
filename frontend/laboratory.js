@@ -475,7 +475,14 @@
             return;
         }
 
-        fetchJson('/trade/' + tradeId + '/legs').then(function (legPayload) {
+        // R-IV.463(h): journal rows come from the book, so a row's `id` is the book row's id and
+        // `trade_id` is its link to `trades`, where legs live. A book row with no link has no
+        // legs to fetch -- asking by `id` would return a DIFFERENT trade's legs.
+        var legsTradeId = trade.source_table === 'unified_positions' ? trade.trade_id : tradeId;
+        var legsFetch = (legsTradeId === null || legsTradeId === undefined)
+            ? Promise.resolve({ rows: [] })
+            : fetchJson('/trade/' + legsTradeId + '/legs');
+        legsFetch.then(function (legPayload) {
             return safeArray(legPayload ? legPayload.rows : []);
         }).catch(function () {
             return [];

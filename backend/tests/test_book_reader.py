@@ -152,7 +152,8 @@ def test_the_acceptance_script_reconciles_by_population_and_fails_on_a_residue()
     assert "return 0 if round(surplus - explained, 2) == 0 else 1" in src
 
 
-def test_the_routes_are_not_switched_until_the_second_gap_is_ruled():
-    """The book reader exists; the routes still read trades, with the chip."""
+def test_the_routes_read_the_book():
+    """R-IV.463(h): switched after the acceptance test reconciled (unexplained 0.00)."""
     api = (ROOT / "backend" / "analytics" / "api.py").read_text(encoding="utf-8")
-    assert "get_book_rows(" not in api
+    assert api.count("await get_book_rows(") == 3
+    assert "await get_trade_rows(" not in api

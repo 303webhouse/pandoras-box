@@ -59,12 +59,13 @@ def test_all_three_populations_are_named_by_method():
         assert name in src
 
 
-def test_every_route_that_reads_trades_carries_it():
+def test_every_analytics_route_carries_it_in_book_mode():
+    """R-IV.463(h): the routes read the book, and the chip names what the BOOK figure lacks."""
     api = (ROOT / "backend" / "analytics" / "api.py").read_text(encoding="utf-8")
     from analytics import api as A
     for fn in (A.trade_stats, A.list_trades, A.export_trades):
-        assert "book_coverage_gap()" in inspect.getsource(fn), fn.__name__
-    assert api.count('"book_coverage": await book_coverage_gap()') == 2
+        assert 'book_coverage_gap(reader="book")' in inspect.getsource(fn), fn.__name__
+    assert api.count('"book_coverage": await book_coverage_gap(reader="book")') == 2
 
 
 def test_the_export_carries_it_in_headers_not_in_the_csv():
@@ -78,4 +79,5 @@ def test_which_rollup_reads_what_is_written_down():
     """A fix was credited to the wrong mechanism once; the map is the guard against twice."""
     src = (ROOT / "backend" / "analytics" / "queries.py").read_text(encoding="utf-8")
     assert "WHICH ROLLUP READS WHAT" in src
-    assert "/api/analytics/trade-stats    get_trade_rows -> trades" in src
+    assert "/api/analytics/trade-stats    get_book_rows -> unified_positions" in src
+    assert "SWITCHED 2026-09-19 (R-IV.463(h))" in src
