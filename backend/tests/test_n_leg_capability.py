@@ -309,7 +309,9 @@ def _correct(monkeypatch, lots, **body):
     conn.fetchrow = AsyncMock(return_value={
         "position_id": "G", "status": "CLOSED", "realized_pnl": 6.40, "exit_price": 39.5,
         "quantity": 15, "entry_price": 39.09, "cost_basis": 586.35, "notes": ""})
-    conn.fetch = AsyncMock(return_value=[{"source": s} for s in lots])
+    # the row's lots answer the lots query; it has no legs (R-IV.463(e) derives max_loss)
+    conn.fetch = AsyncMock(side_effect=lambda sql, *a: [{"source": s} for s in lots]
+                           if "position_lots" in sql else [])
 
     async def execute(sql, *args):
         conn.calls.append((" ".join(sql.split()), args))

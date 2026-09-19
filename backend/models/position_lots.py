@@ -43,6 +43,8 @@ PROVENANCE_VALUES = (PRINCIPAL_REPORTED, BROKER_VERIFIED, IMPORTED, UNKNOWN)
 # which applies it once to the rows that predate this module.
 IMPORT_PARENT_SOURCES = frozenset({
     "IMPORTED_HISTORICAL", "CSV_IMPORT", "CSV_SYNC", "CSV_RECONCILE", "fidelity_confirm",
+    # R-IV.463(f)(g): a row entered from a broker record -- a relabel, or the evidence path.
+    "BROKER_EXPORT",
 })
 # Lot sources the write path accepts. LEGACY-SINGLE-LOT is the 2026-08-26 backfill's and is not
 # writable through the API.
@@ -67,6 +69,12 @@ def provenance_for_parent(parent_source: Optional[str], price: Any = 0) -> str:
     if price is None:
         return UNKNOWN
     return IMPORTED if (parent_source or "") in IMPORT_PARENT_SOURCES else PRINCIPAL_REPORTED
+
+
+def is_verified(provenance: Optional[str]) -> bool:
+    """Whether a record carries the verified value. Read-only: write paths compare through this
+    and never name the value, so the only sites that ASSIGN it stay the verify transitions."""
+    return provenance == BROKER_VERIFIED
 
 
 def provenance_for_lot(lot_source: Optional[str], price: Any = 0) -> str:

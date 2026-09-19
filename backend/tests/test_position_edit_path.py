@@ -338,5 +338,7 @@ def test_a_leg_edit_records_field_old_and_new():
 def test_a_leg_edit_never_promotes_provenance_to_verified():
     from api import unified_positions as U
     src = inspect.getsource(U.update_position_leg)
-    assert "provenance_for_lot(\"MANUAL\", changes[\"price\"])" in src
+    # R-IV.463(e): the edit may now say the leg came from an export (IMPORT); provenance_for_lot
+    # never returns the verified value, and the edit never names it.
+    assert 'provenance_for_lot(relabel or "MANUAL",' in src
     assert "BROKER_VERIFIED" not in src

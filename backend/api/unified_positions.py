@@ -22,7 +22,8 @@ from database.redis_client import get_redis_client
 from websocket.broadcaster import manager
 from models.position_risk import calculate_position_risk, infer_direction
 from models.position_lots import (  # R-IV.441(a): the position row is the AGGREGATE
-    derive_aggregate, fifo_plan, provenance_for_lot,
+    BROKER_VERIFIED, IMPORT_PARENT_SOURCES, LOT_SOURCE_PROVENANCE, derive_aggregate, fifo_plan,
+    is_verified, provenance_for_lot, provenance_for_parent,
 )
 from models.accounts import (  # R-IV.445(a): one vocabulary, read by every write path
     CANONICAL_ACCOUNTS, canonical_account,
@@ -1531,6 +1532,14 @@ async def update_position(position_id: str, req: UpdatePositionRequest, _=Depend
         sets.append(f"source = ${idx}")
         params.append(req.source)
         idx += 1
+        # R-IV.463(f): a relabelled source re-derives provenance from it -- a row relabelled as
+        # landed from a broker record must not go on saying the principal reported it. A
+        # BROKER_VERIFIED row keeps its verification: relabelling a source is not un-verifying.
+        sets.append(f"provenance = CASE WHEN provenance = ${idx} THEN provenance "
+                    f"WHEN entry_price IS NULL THEN 'UNKNOWN' ELSE ${idx + 1} END")
+        params.append(BROKER_VERIFIED)      # compared, never assigned: a relabel is not a verification
+        params.append(provenance_for_parent(req.source, 0))
+        idx += 2
     if req.strategy_tag is not None:
         sets.append(f"strategy_tag = ${idx}")
         params.append(req.strategy_tag)
@@ -3194,6 +3203,8 @@ class WithLegsRequest(BaseModel):
     broker_ref: Optional[str] = None
     reason: Optional[str] = None
     actor: Optional[str] = None
+    # R-IV.463(e): MANUAL (entered by hand) or IMPORT (read from a broker export or statement).
+    source: str = "MANUAL"
 
 
 def _validated_legs(legs: List[EntryLeg], quantity: float) -> List[Dict[str, Any]]:
@@ -3246,6 +3257,8 @@ async def create_position_with_legs(req: WithLegsRequest, _=Depends(require_api_
     """
     account = canonical_account(req.account)
     _assert_etf_only(account, "OPTION")
+    leg_source = _leg_source(req.source)            # R-IV.463(e)
+    row_source = "MANUAL" if leg_source == "MANUAL" else "BROKER_EXPORT"
     legs = _validated_legs(req.legs, req.quantity)
     analysis = analyze(legs)
     recognized = recognize(legs)
@@ -3297,15 +3310,16 @@ async def create_position_with_legs(req: WithLegsRequest, _=Depends(require_api_
                      broker_ref, basis_incomplete_reason, notes, entry_side, created_at,
                      updated_at)
                 VALUES ($1, $2, 'OPTION', $3, $4, $5, $6, $7, $8, $9, $10,
-                        COALESCE($11::timestamptz, NOW()), $12, $13, $14, $15, 'MANUAL', 'OPEN',
-                        'PRINCIPAL_REPORTED', $16, $17, $18, $19, NOW(), NOW())""",
+                        COALESCE($11::timestamptz, NOW()), $12, $13, $14, $15, $20, 'OPEN',
+                        $21, $16, $17, $18, $19, NOW(), NOW())""",
                 pid, req.ticker.upper(), structure, (req.direction or "").upper() or None,
                 qty, entry, basis,
                 max_loss if isinstance(max_loss, (int, float)) else None,
                 max_profit if isinstance(max_profit, (int, float)) else None,
                 analysis.get("breakevens"), req.entry_date, expiries[0],
                 shown["long_strike"], shown["short_strike"], account, req.broker_ref,
-                incomplete, req.notes, entry_side)
+                incomplete, req.notes, entry_side, row_source,
+                provenance_for_parent(row_source, entry))
             for seq, leg in enumerate(legs, 1):
                 await conn.execute("""
                     INSERT INTO position_legs
@@ -3313,13 +3327,13 @@ async def create_position_with_legs(req: WithLegsRequest, _=Depends(require_api_
                          provenance, migrated_from)
                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'entered-with-legs')""",
                     pid, seq, leg["option_type"], leg["side"], leg["strike"], leg["expiry"],
-                    leg["qty"], leg["price"], provenance_for_lot("MANUAL", leg["price"]))
+                    leg["qty"], leg["price"], provenance_for_lot(leg_source, leg["price"]))
             await conn.execute("""
                 INSERT INTO position_lots
                     (position_id, fill_time, qty, price, fees, source, provenance, broker_ref)
-                VALUES ($1, COALESCE($2::timestamptz, NOW()), $3, $4, 0, 'MANUAL', $5, $6)""",
-                pid, req.entry_date, qty, entry, provenance_for_lot("MANUAL", entry),
-                req.broker_ref)
+                VALUES ($1, COALESCE($2::timestamptz, NOW()), $3, $4, 0, $7, $5, $6)""",
+                pid, req.entry_date, qty, entry, provenance_for_lot(leg_source, entry),
+                req.broker_ref, leg_source)
             await conn.execute("""
                 INSERT INTO position_legs_migration
                     (position_id, outcome, detail, legs_written)
@@ -3345,6 +3359,10 @@ class CorrectRealizedRequest(BaseModel):
     quantity: Optional[float] = None
     entry_price: Optional[float] = None
     cost_basis: Optional[float] = None
+    # R-IV.463(e): the day the exit happened. A date alone is that day in Denver, the
+    # principal's day -- the convention of the rows already corrected by hand.
+    exit_date: Optional[str] = None
+    # max_loss is NOT an input: it derives from the corrected row and the path writes it.
     evidence: str                  # the lines that support the verdict, shown beside it (#23)
     reason: str
     ruling: str
@@ -3372,15 +3390,16 @@ async def correct_realized(position_id: str, req: CorrectRealizedRequest,
                 detail=f"{name} is required — a corrected result with no {name} beside it is "
                        f"a verdict alone, which is what conventions #23 exists to stop")
     fields = {f: getattr(req, f) for f in
-              ("realized_pnl", "exit_price", "quantity", "entry_price", "cost_basis")
+              ("realized_pnl", "exit_price", "quantity", "entry_price", "cost_basis", "exit_date")
               if getattr(req, f) is not None}
-    if not fields:
-        raise HTTPException(status_code=400, detail="no figure to correct")
+    if "exit_date" in fields:
+        fields["exit_date"] = _when_from_evidence(fields["exit_date"], "exit_date")
     pool = await get_postgres_client()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             "SELECT position_id, status, realized_pnl, exit_price, quantity, entry_price, "
-            "cost_basis, notes FROM unified_positions WHERE position_id = $1", position_id)
+            "cost_basis, notes, exit_date, max_loss, structure, long_strike, short_strike, "
+            "legs, entry_side FROM unified_positions WHERE position_id = $1", position_id)
         if not row:
             raise HTTPException(status_code=404, detail=f"Position {position_id} not found")
         if (row["status"] or "").upper() not in ("CLOSED", "EXPIRED"):
@@ -3400,10 +3419,23 @@ async def correct_realized(position_id: str, req: CorrectRealizedRequest,
 
         changes = []
         for f, v in fields.items():
-            before = row[f]
-            after = round(float(v), 2) if f in ("realized_pnl", "cost_basis") else float(v)
+            before = row.get(f)
+            if f == "exit_date":
+                after = v
+            else:
+                after = round(float(v), 2) if f in ("realized_pnl", "cost_basis") else float(v)
             fields[f] = after
             changes.append(f"{f} {'NULL' if before is None else before} -> {after}")
+        # R-IV.463(e): max_loss DERIVES from the row as corrected and the path writes it. A shape
+        # corrected without it left 352 and 358 carrying the figure of the shape they no longer
+        # have. A correction with no figure at all is how a stale one is brought into line.
+        derived = await _derive_max_loss(conn, row, fields)
+        if derived is not None and (row.get("max_loss") is None
+                                    or abs(float(row["max_loss"]) - derived) > 0.005):
+            changes.append(f"max_loss {row.get('max_loss')} -> {derived} (derived)")
+            fields["max_loss"] = derived
+        if not fields:
+            raise HTTPException(status_code=400, detail="no figure to correct")
         outcome = None
         if "realized_pnl" in fields:
             r = fields["realized_pnl"]
@@ -3442,7 +3474,192 @@ async def correct_realized(position_id: str, req: CorrectRealizedRequest,
             "realized_before": None if row["realized_pnl"] is None else float(row["realized_pnl"]),
             "realized_after": fields.get("realized_pnl"),
             "changes": changes, "trade_outcome": outcome, "evidence_recorded": True,
+            "max_loss_derived": fields.get("max_loss"),
             "legacy_lot_regenerated": bool(shape and lot_sources and not real_lots)}
+
+
+class ClosedFromEvidenceRequest(BaseModel):
+    """A position that ENDED before the book recorded it, entered from its evidence (R-IV.463(g)).
+
+    The shape the import will need: a closed row, its legs, its opening fill, and the lines
+    that support it -- with no cash moved, because the cash moved when the trade happened.
+    """
+    ticker: str
+    account: str
+    asset_type: str = "OPTION"                 # OPTION | EQUITY
+    structure: str
+    direction: Optional[str] = None
+    quantity: float
+    entry_price: float                         # per structure / per share, as the record gives it
+    entry_date: str
+    exit_date: str
+    exit_price: Optional[float] = None
+    realized_pnl: Optional[float] = None       # the record's figure; derived gross when absent
+    trade_outcome: Optional[str] = None        # WIN | LOSS | BREAKEVEN | UNKNOWN
+    status: str = "CLOSED"                     # CLOSED | EXPIRED
+    expiry: Optional[str] = None
+    long_strike: Optional[float] = None
+    short_strike: Optional[float] = None
+    legs: Optional[List[EntryLeg]] = None      # per structure, as POST /v2/positions/with-legs
+    source: str = "BROKER_EXPORT"              # an import source: the row landed from a record
+    broker_ref: Optional[str] = None
+    exit_broker_ref: Optional[str] = None
+    trade_id: Optional[int] = None             # the trades row recording the same event, if any
+    evidence: str
+    reason: str
+    ruling: str
+    actor: Optional[str] = None
+
+
+@router.post("/v2/positions/closed-from-evidence")
+async def create_closed_from_evidence(req: ClosedFromEvidenceRequest,
+                                      _=Depends(require_api_key)):
+    """Record a position that ended before the book held it -- from its evidence (R-IV.463(g)).
+
+    There was no path: every create opens a row and credits or debits cash, and every close
+    ends an OPEN row. So a real event the book had missed -- ids 512/513 -- could be recorded
+    only by direct SQL, bypassing every guard. A reconciliation that must bypass every guarded
+    path to record a real event is a missing capability, not a workaround.
+
+    One transaction, named for the audit: the row (CLOSED or EXPIRED, provenance IMPORTED from
+    its import source -- never BROKER_VERIFIED, which is its own path), its legs when given, and
+    its opening fill as an IMPORT lot. The exit lives on the row, as the close path leaves it.
+    NO CASH MOVES: the trade already moved it, and the balance already holds it. max_loss and
+    cost_basis derive; realized is the record's figure, or the gross from entry and exit when
+    the record gives none. Evidence, reason and ruling are required and written onto the row.
+    """
+    for name in ("evidence", "reason", "ruling"):
+        if not str(getattr(req, name) or "").strip():
+            raise HTTPException(status_code=400, detail=(
+                f"{name} is required -- a row created from evidence with no {name} beside it "
+                f"is a number alone (conventions #23)"))
+    status = (req.status or "").strip().upper()
+    if status not in ("CLOSED", "EXPIRED"):
+        raise HTTPException(status_code=400, detail=(
+            f"status {req.status!r}: this path records a position that has ENDED -- CLOSED or "
+            f"EXPIRED. An open position is entered through POST /v2/positions or /with-legs"))
+    source = (req.source or "").strip()
+    if source not in IMPORT_PARENT_SOURCES:
+        raise HTTPException(status_code=400, detail=(
+            f"source {req.source!r}: a row from evidence landed from a record, so its source is "
+            f"an import source: {sorted(IMPORT_PARENT_SOURCES)}"))
+    if req.quantity is None or req.quantity <= 0:
+        raise HTTPException(status_code=400, detail="quantity must be positive")
+    if req.entry_price is None or req.entry_price < 0:
+        raise HTTPException(status_code=400, detail=(
+            "entry_price is the magnitude paid or received; its side comes from the legs or the "
+            "structure"))
+    if req.exit_price is None and req.realized_pnl is None and not req.trade_outcome:
+        raise HTTPException(status_code=400, detail=(
+            "R-IV.454(d): an ended row needs its exit -- an exit price, a realized figure, or "
+            "the outcome (UNKNOWN is a valid one)"))
+    entered = _when_from_evidence(req.entry_date, "entry_date")
+    exited = _when_from_evidence(req.exit_date, "exit_date")
+    if exited < entered:
+        raise HTTPException(status_code=400, detail="exit_date is before entry_date")
+
+    account = canonical_account(req.account)
+    asset_type = (req.asset_type or "OPTION").strip().upper()
+    _assert_etf_only(account, asset_type)
+    structure = req.structure.strip().lower()
+    qty = float(req.quantity)
+    entry = float(req.entry_price)
+    mult = 100 if asset_type in ("OPTION", "SPREAD") else 1
+
+    legs = _validated_legs(req.legs, qty) if req.legs else []
+    expiry = None
+    if legs:
+        side, _how = entry_orientation(legs)
+        if side is None:
+            side = _orientation_by_name(structure, req.direction or "")
+        shown = display_strikes(legs)
+        long_k, short_k = shown["long_strike"], shown["short_strike"]
+        expiry = sorted({l["expiry"] for l in legs})[0]
+    else:
+        long_k, short_k = normalize_spread_strikes(req.long_strike, req.short_strike, structure)
+        if asset_type in ("OPTION", "SPREAD"):
+            side = _orientation_by_name(structure, req.direction or "")
+        else:
+            short_stock = structure in ("stock_short", "short_stock") or \
+                (req.direction or "").upper() == "SHORT"
+            side = -1 if short_stock else 1
+        if req.expiry:
+            try:
+                expiry = date.fromisoformat(str(req.expiry)[:10])
+            except (ValueError, TypeError):
+                raise HTTPException(status_code=400, detail="expiry must be a date")
+
+    realized = req.realized_pnl
+    realized_note = "the record's figure"
+    if realized is None and req.exit_price is not None:
+        realized = round(side * (float(req.exit_price) - entry) * qty * mult, 2)
+        realized_note = "derived gross from entry and exit (the record gave no realized figure)"
+    outcome = (req.trade_outcome or "").strip().upper() or (
+        None if realized is None else "WIN" if realized > 0 else "LOSS" if realized < 0
+        else "BREAKEVEN") or "UNKNOWN"
+    cost_basis = round(entry * qty * mult, 2)
+    entry_side = {1: "DEBIT", -1: "CREDIT"}.get(side) if asset_type in ("OPTION", "SPREAD") else None
+    now = datetime.now(timezone.utc)
+    pid = f"POS_{req.ticker.upper()}_{entered.strftime('%Y%m%d')}_EV{now.strftime('%H%M%S%f')[:10]}"
+    note = (f"{req.ruling} CREATED FROM EVIDENCE: {status} {qty:g} {structure} "
+            f"{req.entry_date} -> {req.exit_date}; realized {realized} ({realized_note}). "
+            f"EVIDENCE: {req.evidence.strip()} REASON: {req.reason.strip()}")
+
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        for ref in (req.broker_ref, req.exit_broker_ref):
+            if not ref:
+                continue
+            dup = await conn.fetchval(
+                "SELECT position_id FROM unified_positions WHERE broker_ref = $1 "
+                "OR exit_broker_ref = $1 UNION SELECT position_id FROM position_lots "
+                "WHERE broker_ref = $1 LIMIT 1", ref)
+            if dup:
+                raise HTTPException(status_code=409, detail=(
+                    f"broker_ref {ref} is already recorded on {dup} -- the event is in the book"))
+        if req.trade_id is not None:
+            linked = await conn.fetchval(
+                "SELECT position_id FROM unified_positions WHERE trade_id = $1", req.trade_id)
+            if linked:
+                raise HTTPException(status_code=409, detail=(
+                    f"trades id {req.trade_id} is already linked to {linked}"))
+        max_loss = _max_loss_for(legs, side, entry, qty, structure, long_k, short_k, None)
+        async with conn.transaction():
+            await name_actor(conn, req.actor or "lifecycle-ui",                  # R-IV.463(b)
+                             f"{req.ruling}: created from evidence")
+            await conn.execute("""
+                INSERT INTO unified_positions
+                    (position_id, ticker, asset_type, structure, direction, quantity,
+                     entry_price, cost_basis, entry_date, exit_date, exit_price, realized_pnl,
+                     trade_outcome, status, expiry, long_strike, short_strike, account, source,
+                     provenance, broker_ref, exit_broker_ref, trade_id, entry_side, notes,
+                     max_loss, created_at, updated_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
+                        $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, NOW(), NOW())""",
+                pid, req.ticker.upper(), asset_type, structure,
+                (req.direction or "").upper() or None, qty, entry, cost_basis, entered, exited,
+                req.exit_price, realized, outcome, status, expiry, long_k, short_k, account,
+                source, provenance_for_parent(source, entry), req.broker_ref,
+                req.exit_broker_ref, req.trade_id, entry_side, note, max_loss)
+            for seq, leg in enumerate(legs, 1):
+                await conn.execute("""
+                    INSERT INTO position_legs
+                        (position_id, leg_seq, option_type, side, strike, expiry, qty, price,
+                         provenance, migrated_from)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'closed-from-evidence')""",
+                    pid, seq, leg["option_type"], leg["side"], leg["strike"], leg["expiry"],
+                    leg["qty"], leg["price"], provenance_for_lot("IMPORT", leg["price"]))
+            lot_id = await conn.fetchval("""
+                INSERT INTO position_lots
+                    (position_id, fill_time, qty, price, fees, source, provenance, broker_ref)
+                VALUES ($1, $2, $3, $4, 0, 'IMPORT', $5, $6) RETURNING id""",
+                pid, entered, qty, entry, provenance_for_lot("IMPORT", entry), req.broker_ref)
+
+    return {"status": "created", "position_id": pid, "row_status": status,
+            "realized_pnl": realized, "realized_basis": realized_note, "trade_outcome": outcome,
+            "cost_basis": cost_basis, "max_loss": max_loss, "legs": len(legs),
+            "opening_lot_id": lot_id, "provenance": provenance_for_parent(source, entry),
+            "cash_moved": False}
 
 
 class RetireDuplicateRequest(BaseModel):
@@ -3571,6 +3788,9 @@ class LegRequest(BaseModel):
     qty: float
     price: Optional[float] = None
     broker_ref: Optional[str] = None
+    # R-IV.463(e): where the leg came from. MANUAL = entered by hand (PRINCIPAL_REPORTED);
+    # IMPORT = read from a broker export or statement (IMPORTED). Never BROKER_VERIFIED here.
+    source: str = "MANUAL"
     reason: Optional[str] = None
     actor: Optional[str] = None
 
@@ -3584,11 +3804,95 @@ class LegPatchRequest(BaseModel):
     qty: Optional[float] = None
     price: Optional[float] = None
     broker_ref: Optional[str] = None
+    source: Optional[str] = None      # R-IV.463(e): relabel where the leg came from
     reason: Optional[str] = None
     actor: Optional[str] = None
 
 
 _LEG_FIELDS = ("option_type", "side", "strike", "expiry", "qty", "price", "broker_ref")
+
+
+def _leg_source(source: Optional[str]) -> str:
+    """MANUAL or IMPORT -- the lots vocabulary, so a leg and a fill say where they came from the
+    same way. Anything else is refused rather than read as MANUAL."""
+    s = (source or "MANUAL").strip().upper()
+    if s not in LOT_SOURCE_PROVENANCE:
+        raise HTTPException(status_code=400, detail=(
+            f"source {source!r}: MANUAL (entered by hand) or IMPORT (read from a broker export "
+            f"or statement)"))
+    return s
+
+
+def _when_from_evidence(value: Any, name: str) -> datetime:
+    """A timestamp from a record. A DATE alone is that day at 00:00 in Denver -- the principal's
+    day, and the convention of the rows already corrected by hand (06:00 UTC in summer). The
+    close path reads a bare date as 00:00 UTC; that difference is reported, not changed here."""
+    text = str(value or "").strip()
+    try:
+        if len(text) <= 10:
+            d = date.fromisoformat(text)
+            from zoneinfo import ZoneInfo
+            when = datetime(d.year, d.month, d.day, tzinfo=ZoneInfo("America/Denver"))
+        else:
+            when = datetime.fromisoformat(text.replace("Z", "+00:00"))
+            if when.tzinfo is None:
+                when = when.replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail=f"{name} must be a date or a timestamp; "
+                                                    f"got {value!r}")
+    when = when.astimezone(timezone.utc)
+    if when > datetime.now(timezone.utc):
+        raise HTTPException(status_code=400, detail=f"{name} {value} is in the future")
+    return when
+
+
+async def _derive_max_loss(conn, row, corrected: Dict[str, Any]) -> Optional[float]:
+    """max_loss of the row AS CORRECTED -- never an input (R-IV.463(e)).
+
+    From its legs when it has them (R-IV.460: the legs say what is held), with the row's entry as
+    the signed net in the side it was entered on; else by the derivation the create path uses.
+    None when the row does not carry enough to derive it, or its loss has no bound."""
+    entry = corrected.get("entry_price", row.get("entry_price"))
+    qty = corrected.get("quantity", row.get("quantity"))
+    if entry is None or qty is None:
+        return None
+    legs = [dict(l) for l in await conn.fetch(
+        "SELECT option_type, side, strike, expiry, qty, price FROM position_legs "
+        "WHERE position_id = $1 ORDER BY leg_seq", row.get("position_id"))]
+    side = entry_orientation(legs, row.get("entry_side"))[0] if legs else None
+    return _max_loss_for(legs, side, entry, qty, row.get("structure"), row.get("long_strike"),
+                         row.get("short_strike"), row.get("legs"))
+
+
+def _max_loss_for(legs, side, entry, qty, structure, long_strike, short_strike,
+                  raw_legs) -> Optional[float]:
+    """The derivation itself, pure: legs and their side when there are legs, else the create
+    path's calculate_position_risk. None when it cannot be derived or has no bound."""
+    import math
+    if legs:
+        if side is None:
+            return None
+        loss = analyze(legs, net_premium_override=side * float(entry)).get("max_loss")
+        return round(float(loss) * float(qty), 2) if isinstance(loss, (int, float)) else None
+    if not structure:
+        return None
+    ls, ss = normalize_spread_strikes(
+        float(long_strike) if long_strike is not None else None,
+        float(short_strike) if short_strike is not None else None, structure)
+    if isinstance(raw_legs, str):
+        try:
+            raw_legs = json.loads(raw_legs)
+        except ValueError:
+            raw_legs = None
+    try:
+        loss = calculate_position_risk(structure=structure, entry_price=float(entry),
+                                       quantity=float(qty), long_strike=ls, short_strike=ss,
+                                       legs=raw_legs).get("max_loss")
+    except Exception:
+        return None
+    if loss is None or not math.isfinite(float(loss)):
+        return None
+    return round(float(loss), 2)
 
 
 def _leg_values(option_type: str, side: str) -> tuple:
@@ -3652,6 +3956,7 @@ async def add_position_leg(position_id: str, req: LegRequest, _=Depends(require_
         exp = date.fromisoformat(str(req.expiry)[:10])
     except (ValueError, TypeError):
         raise HTTPException(status_code=400, detail=f"expiry must be a date; got '{req.expiry}'")
+    leg_source = _leg_source(req.source)          # R-IV.463(e): refused before anything is read
 
     pool = await get_postgres_client()
     async with pool.acquire() as conn:
@@ -3679,10 +3984,11 @@ async def add_position_leg(position_id: str, req: LegRequest, _=Depends(require_
                 """INSERT INTO position_legs
                        (position_id, leg_seq, option_type, side, strike, expiry, qty, price,
                         provenance, broker_ref, migrated_from)
-                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'hand-entered')
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
                    RETURNING id""",
                 position_id, seq, ot, sd, req.strike, exp, req.qty, req.price,
-                provenance_for_lot("MANUAL", req.price), req.broker_ref)
+                provenance_for_lot(leg_source, req.price), req.broker_ref,
+                "hand-entered" if leg_source == "MANUAL" else "broker-export")
             after = {"leg_seq": seq, "option_type": ot, "side": sd, "strike": req.strike,
                      "expiry": str(exp), "qty": req.qty, "price": req.price}
             await _audit_leg(conn, position_id, pos["ticker"], "LEG_ADD", f"leg:{seq}",
@@ -3706,7 +4012,8 @@ async def update_position_leg(position_id: str, leg_seq: int, req: LegPatchReque
     add are two events and a correction is one.
     """
     changes = {f: getattr(req, f) for f in _LEG_FIELDS if getattr(req, f) is not None}
-    if not changes:
+    relabel = _leg_source(req.source) if req.source is not None else None   # R-IV.463(e)
+    if not changes and relabel is None:
         raise HTTPException(status_code=400, detail="no fields to update")
     if "option_type" in changes or "side" in changes:
         ot, sd = _leg_values(changes.get("option_type", "CALL"), changes.get("side", "LONG"))
@@ -3740,12 +4047,23 @@ async def update_position_leg(position_id: str, leg_seq: int, req: LegPatchReque
                                  f"leg:{leg_seq}:{field}",
                                  {"value": str(before)}, {"value": str(after)},
                                  req.actor, req.reason)
-            # A price arriving makes the leg's provenance a reported one; it never makes it
-            # verified, which needs a broker record matched and is not what an edit is.
-            if "price" in changes:
-                await conn.execute(
-                    "UPDATE position_legs SET provenance = $1 WHERE id = $2",
-                    provenance_for_lot("MANUAL", changes["price"]), leg["id"])
+            # A price arriving makes the leg's provenance a reported one -- or an imported one,
+            # when the edit says it was read from a broker record (R-IV.463(e)); it never makes
+            # it verified, which needs a broker record matched and is not what an edit is. A
+            # source relabel alone never un-verifies a verified leg.
+            if "price" in changes or (relabel is not None
+                                      and not is_verified(leg["provenance"])):
+                new_prov = provenance_for_lot(relabel or "MANUAL",
+                                              changes.get("price", leg["price"]))
+                if new_prov != leg["provenance"]:
+                    await conn.execute(
+                        "UPDATE position_legs SET provenance = $1 WHERE id = $2",
+                        new_prov, leg["id"])
+                    await _audit_leg(conn, position_id, leg["ticker"], "LEG_EDIT",
+                                     f"leg:{leg_seq}:provenance",
+                                     {"value": str(leg["provenance"])}, {"value": new_prov},
+                                     req.actor, req.reason)
+                    changes["provenance"] = new_prov
 
         legs = await conn.fetch(
             "SELECT id, leg_seq, option_type, side, strike, expiry, qty, price, provenance, "
