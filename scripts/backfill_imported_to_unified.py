@@ -171,22 +171,27 @@ async def main():
 
         # ---- COMMIT ----
         inserted = 0
-        for r in rows:
-            await conn.execute(
-                """
-                INSERT INTO unified_positions
-                    (position_id, ticker, asset_type, structure, direction, entry_price,
-                     entry_date, quantity, expiry, dte, long_strike, short_strike, source,
-                     status, exit_price, exit_date, realized_pnl, trade_outcome, trade_id,
-                     created_at, updated_at)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,NOW(),NOW())
-                """,
-                r["position_id"], r["ticker"], r["asset_type"], r["structure"], r["direction"],
-                r["entry_price"], r["entry_date"], r["quantity"], r["expiry"], r["dte"],
-                r["long_strike"], r["short_strike"], r["source"], r["status"],
-                r["exit_price"], r["exit_date"], r["realized_pnl"], r["trade_outcome"], r["trade_id"],
-            )
-            inserted += 1
+        # R-IV.463(e): inserts are audited now; the audit names this script, and the
+        # rows land in one transaction.
+        async with conn.transaction():
+            await conn.execute("SELECT set_config('app.actor', $1, true)",
+                               "backfill_imported_to_unified.py")
+            for r in rows:
+                await conn.execute(
+                    """
+                    INSERT INTO unified_positions
+                        (position_id, ticker, asset_type, structure, direction, entry_price,
+                         entry_date, quantity, expiry, dte, long_strike, short_strike, source,
+                         status, exit_price, exit_date, realized_pnl, trade_outcome, trade_id,
+                         created_at, updated_at)
+                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,NOW(),NOW())
+                    """,
+                    r["position_id"], r["ticker"], r["asset_type"], r["structure"], r["direction"],
+                    r["entry_price"], r["entry_date"], r["quantity"], r["expiry"], r["dte"],
+                    r["long_strike"], r["short_strike"], r["source"], r["status"],
+                    r["exit_price"], r["exit_date"], r["realized_pnl"], r["trade_outcome"], r["trade_id"],
+                )
+                inserted += 1
 
         up_after = await conn.fetchval("SELECT COUNT(*) FROM unified_positions")
         pnl_after = await conn.fetchval(

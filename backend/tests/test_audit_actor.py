@@ -20,17 +20,13 @@ import pytest
 sys.path.insert(0, __file__.rsplit("tests", 1)[0])
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-WRITE = re.compile(r"\b(UPDATE|DELETE\s+FROM)\s+unified_positions\b", re.I)
+WRITE = re.compile(r"\b(UPDATE|DELETE\s+FROM|INSERT\s+INTO)\s+unified_positions\b", re.I)
 
-# The trigger records UPDATE and DELETE only (AFTER DELETE OR UPDATE, measured 2026-09-19), so an
-# INSERT-only writer never reaches the actor column. Request-driven endpoints write on behalf of a
-# caller the endpoint cannot identify: after the epoch, legacy-ui means exactly that (R-IV.116).
-REQUEST_DRIVEN = {
-    "create_position": "POST /v2/positions -- the caller's request",
-    "close_position": "POST /v2/positions/{id}/close -- the caller's request",
-    "delete_position": "DELETE /v2/positions/{id} -- the caller's request",
-    "reconcile_positions": "POST /v2/positions/reconcile -- the caller's request",
-}
+# R-IV.463(e): the trigger records INSERT as well as UPDATE and DELETE, so every writer of either
+# kind names itself. R-IV.463(b): the request-driven endpoints -- create, close, delete,
+# reconcile, bulk, the two signal accepts -- take the optional actor PATCH already had and name
+# the caller, legacy-ui only when the caller names no one. None is exempt any more.
+REQUEST_DRIVEN: dict = {}
 SCRIPT_EXEMPT = {
     "feat_position_lifecycle_phase1.py": "its two writes are a trigger probe rolled back to a "
                                          "savepoint and a no-op the trigger does not record",
@@ -115,10 +111,7 @@ def test_every_script_that_updates_or_deletes_names_itself():
 
 def test_the_exemptions_are_still_true():
     """An exemption that stops being true must be removed, not left to excuse a new writer."""
-    src = (ROOT / "backend" / "api" / "unified_positions.py").read_text(encoding="utf-8")
-    for name in REQUEST_DRIVEN:
-        i = src.index(f"async def {name}(")
-        assert "Depends(require_api_key)" in src[i:i + 400], f"{name} is no longer an endpoint"
+    assert REQUEST_DRIVEN == {}, "R-IV.463(b): every request-driven writer names its caller"
     probe = (ROOT / "scripts" / "feat_position_lifecycle_phase1.py").read_text(encoding="utf-8")
     assert "ROLLBACK TO SAVEPOINT trigger_probe" in probe and "SET notes = notes" in probe
 
@@ -151,6 +144,26 @@ def test_the_cutover_is_recorded_and_the_ambiguity_is_said():
         assert "COMMENT ON COLUMN position_sync_audit.actor" in text
         assert "AMBIGUOUS" in text
     assert "UPDATE position_sync_audit" not in mig, "historical rows are not rewritten"
+
+
+def test_inserts_are_audited_in_both_mirrors():
+    mig = (ROOT / "migrations" / "050_audit_inserts.sql").read_text(encoding="utf-8")
+    boot = (ROOT / "backend" / "database" / "postgres_client.py").read_text(encoding="utf-8")
+    for text in (mig, boot):
+        assert "IF (TG_OP = 'INSERT') THEN" in text
+        assert "AFTER INSERT OR UPDATE OR DELETE ON unified_positions" in text
+        assert "(tgtype & 4) = 4" in text, "re-created only when it does not already fire"
+
+
+def test_the_four_endpoints_take_the_actor_patch_has():
+    from api import unified_positions as U
+    from api import positions as P
+    for model in (U.CreatePositionRequest, U.ClosePositionRequest, U.BulkRequest,
+                  U.ReconcileRequest, P.AcceptSignalRequest, P.AcceptSignalAsOptionsRequest):
+        assert {"actor", "reason"} <= set(model.model_fields), model.__name__
+    import inspect
+    params = inspect.signature(U.delete_position).parameters
+    assert "actor" in params and "reason" in params
 
 
 def test_the_mark_job_and_the_patch_recompute_pass_t1():
