@@ -64,9 +64,12 @@ census of all time.**
    times were not read.*
 3. **The first legs path would have hidden it.** 1ab7fe4 (2026-09-18) stored `abs()` of a leg
    set's net, which turns −0.085 into +0.085, an invented gain. QQQ 356 and 427 carried negative
-   two-strike marks on 09-18 and read +0.01 / +0.005 after the first legs cycle. **Whether those
-   legs nets were negative cannot be recovered**, because the legs path did not store its leg
-   quotes.
+   two-strike marks on 09-18 and read +0.01 / +0.005 after the first legs cycle. The legs path
+   did not store its leg quotes, so those nets cannot be recovered. For QQQ 356, though, the
+   chain read at 06:14 UTC shows the 360P at 0.02 under the 350P at 0.03: a net of −0.01, which
+   the bound refused at 06:13. The prior it kept, 0.01, is exactly abs(−0.01). **A legs prior
+   now counts as good only if the bound checked it.** Marks from before the bound do not carry
+   the marker, so they are cleared on their next failed cycle, not kept.
 
 ## THE FIX (R-IV.462)
 
