@@ -11,6 +11,7 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime, date, timezone, timedelta
 from decimal import Decimal
 import asyncio
+import functools
 import logging
 import json
 import os
@@ -28,7 +29,7 @@ from models.accounts import (  # R-IV.445(a): one vocabulary, read by every writ
 )
 from models.position_status import DUPLICATE_OF  # R-IV.449(a): retired, not deleted
 from services.leg_mark import (  # R-IV.458(a)/460(b): legs, not names, say what is held
-    mark_from_legs, prior_is_good, stale_reason,
+    entry_orientation, mark_from_legs, prior_is_good, stale_reason,
 )
 from models.leg_payoff import (  # R-IV.460(c): any number of legs, no allowlist
     analyze, display_strikes, recognize,
@@ -340,12 +341,31 @@ def _row_to_dict(row) -> dict:
     return d
 
 
-def _compute_unrealized_pnl(entry_price: float, current_price: float, quantity: int, structure: str, asset_type: str = "", direction: str = "") -> float:
-    """Compute unrealized P&L based on position type and credit/debit nature."""
+def _orientation_by_name(structure: str, direction: str = "") -> int:
+    """+1 debit, -1 credit, from the NAME -- for rows whose legs are not in position_legs.
+
+    The one place the name decides a side. A position with legs is oriented by its legs
+    (services.leg_mark.entry_orientation); the P&L formula below and the legacy mark path read
+    this, so the two can never disagree about which way a named row was entered."""
+    s = (structure or "").lower()
+    d = (direction or "").upper()
+    if s in CREDIT_STRUCTURES and not (s in ("iron_condor", "iron_butterfly") and d == "LONG"):
+        return -1
+    return 1
+
+
+def _compute_unrealized_pnl(entry_price: float, current_price: float, quantity: int, structure: str, asset_type: str = "", direction: str = "", orientation: Optional[int] = None) -> float:
+    """Compute unrealized P&L based on position type and credit/debit nature.
+
+    `orientation` (R-IV.463(c)): +1 debit / -1 credit, decided from a position's legs. The mark
+    is the signed net in that orientation, so P&L is orientation x (mark - entry) for every
+    structure -- including one whose mark has crossed below zero."""
     # R-IV.458(b): quantity is NUMERIC now and arrives as Decimal; Decimal * float raises.
     quantity = float(quantity or 0)
     entry_price = float(entry_price) if entry_price is not None else entry_price
     current_price = float(current_price) if current_price is not None else current_price
+    if orientation in (1, -1) and entry_price is not None and current_price is not None:
+        return round(orientation * (current_price - entry_price) * 100 * quantity, 2)
     if not entry_price or not current_price:
         return 0.0
     s = (structure or "").lower()
@@ -358,17 +378,9 @@ def _compute_unrealized_pnl(entry_price: float, current_price: float, quantity: 
             # Short stock: profit when price drops
             return round((entry_price - current_price) * qty, 2)
         return round((current_price - entry_price) * qty, 2)
-    if s in CREDIT_STRUCTURES:
-        # Most credit structures: received premium at open, pay to close
-        # Exception: iron condors/butterflies can be net debit depending on strikes
-        # LONG iron condor = debit (paid to open) → profit when value increases
-        # SHORT iron condor = credit (received to open) → profit when value decreases
-        if s in ("iron_condor", "iron_butterfly") and d == "LONG":
-            return round((current_price - entry_price) * 100 * quantity, 2)
-        # Standard credit: profit when current < entry
-        return round((entry_price - current_price) * 100 * quantity, 2)
-    # Debit: paid premium at open → profit when current > entry
-    return round((current_price - entry_price) * 100 * quantity, 2)
+    # Credit (received at open, pay to close): profit when current < entry. Debit: profit when
+    # current > entry. A LONG iron condor/butterfly is a debit. One rule, _orientation_by_name.
+    return round(_orientation_by_name(s, d) * (current_price - entry_price) * 100 * quantity, 2)
 
 
 def _compute_dte(expiry_str: str) -> Optional[int]:
@@ -2413,7 +2425,7 @@ async def run_mark_to_market() -> dict:
     try:
         async with pool.acquire() as conn:
             leg_rows = await conn.fetch(
-                "SELECT position_id, leg_seq, option_type, side, strike, expiry, qty "
+                "SELECT position_id, leg_seq, option_type, side, strike, expiry, qty, price "
                 "FROM position_legs WHERE position_id = ANY($1::text[]) "
                 "ORDER BY position_id, leg_seq",
                 [r["position_id"] for r in rows])
@@ -2447,6 +2459,7 @@ async def run_mark_to_market() -> dict:
         long_leg_price = None
         short_leg_price = None
         refused = None          # a reading that is not a price, and why (R-IV.462(d))
+        unpriced = None         # the vendor answered, and a leg has no mark (R-IV.463(a))
 
         # ── R-IV.458(a)/460(b): A POSITION WITH LEGS IS MARKED FROM ITS LEGS ─────────────
         # Any structure name, no allowlist. It NEVER falls through to the spread or single-leg
@@ -2459,23 +2472,37 @@ async def run_mark_to_market() -> dict:
             elif not (use_options_pricing and get_multi_leg_value is not None):
                 outcome = {"ok": False, "reason": "no options pricer configured"}
             else:
+                # R-IV.463(a): a mark takes a two-sided quote or a trade this session, nothing
+                # older; chains and greeks keep the wider fallback.
                 outcome = await mark_from_legs(ticker, table_legs, quantity, structure,
-                                               get_multi_leg_value)
-            if outcome.get("ok"):
-                # R-IV.394 (T1) reaches the mark job (R-IV.462(d)): a mark it rejects is a failed
-                # cycle, never a write.
-                _verdict, _why = evaluate_mark(abs(float(outcome["net_mark"])), entry_price)
+                                               functools.partial(get_multi_leg_value,
+                                                                 for_mark=True))
+            orientation, oriented_by = entry_orientation(table_legs or [],
+                                                         row.get("entry_side"))
+            if outcome.get("ok") and orientation is None:
+                outcome = {"ok": False, "reason": (
+                    "which way this position was entered is not recorded -- no leg prices and "
+                    "no entry side -- and its legs can be worth either sign, so a mark cannot "
+                    "say whether it is value held or a cost to close")}
+            if outcome.get("ok") and oriented_by == "payoff":
+                # R-IV.394 (T1) reaches the mark job (R-IV.462(d)). Its floor -- at or below zero
+                # is not a price -- holds for a set whose value cannot change sign. A set that
+                # CAN has the payoff range as floor and ceiling (checked in mark_from_legs):
+                # T1's floor would refuse the very sign R-IV.463(c) keeps.
+                _verdict, _why = evaluate_mark(orientation * float(outcome["net_mark"]),
+                                               entry_price)
                 if not mark_is_writable(_verdict):
                     outcome = {"ok": False, "reason": f"T1 mark guard (R-IV.394): {_why}"}
             async with pool.acquire() as conn, conn.transaction():
                 await name_actor(conn, MARK_TO_MARKET)                       # R-IV.462(b)
                 if outcome.get("ok"):
-                    # abs() is the value in the entry's orientation ONLY because mark_from_legs
-                    # refused any net outside what the legs can be worth: a set whose payoff
-                    # keeps one sign then has a net of that sign too.
-                    mark = abs(float(outcome["net_mark"]))
+                    # R-IV.463(c): the SIGNED net in the entry's orientation -- the value held
+                    # for a debit, the cost to close for a credit. Never folded by abs(): a set
+                    # that has crossed zero reads negative, and that sign is the information.
+                    mark = orientation * float(outcome["net_mark"])
                     unreal = _compute_unrealized_pnl(entry_price, mark, quantity, structure,
-                                                     direction=(row.get("direction") or ""))
+                                                     direction=(row.get("direction") or ""),
+                                                     orientation=orientation)
                     await conn.execute("""
                         UPDATE unified_positions SET
                             current_price = $1, unrealized_pnl = $2,
@@ -2535,14 +2562,22 @@ async def run_mark_to_market() -> dict:
                 except Exception as e:
                     logger.warning("Failed to persist inferred legs for %s: %s", row["position_id"], e)
 
+        jsonb_attempted = False
         if use_options_pricing and expiry and legs_data:
             try:
                 if isinstance(legs_data, str):
                     legs_data = json.loads(legs_data)
                 if isinstance(legs_data, list) and len(legs_data) >= 2:
-                    result = await get_multi_leg_value(ticker, legs_data, str(expiry))
+                    jsonb_attempted = True
+                    result = await get_multi_leg_value(ticker, legs_data, str(expiry),
+                                                       for_mark=True)
+                    if result and result.get("unpriced"):
+                        unpriced = "; ".join(result["unpriced"])
                     if result and result.get("net_mark") is not None:
-                        current_price = abs(result["net_mark"])
+                        # R-IV.463(c): no abs(). These legacy legs carry no entry side, so the
+                        # orientation is the name's -- the rule the P&L formula itself uses.
+                        current_price = (_orientation_by_name(structure, row.get("direction") or "")
+                                         * float(result["net_mark"]))
                         direction = (row.get("direction") or "").upper()
                         unrealized = _compute_unrealized_pnl(
                             entry_price, current_price, quantity, structure,
@@ -2564,6 +2599,10 @@ async def run_mark_to_market() -> dict:
                 row["position_id"], structure,
             )
             continue
+        # Legs that were priced and failed never fall through to a two-strike or single-leg
+        # method: those price a different structure (the R-IV.458 defect, on the legacy path).
+        if current_price is None and jsonb_attempted:
+            continue
 
         # --- Polygon path: real spread-level pricing ---
         if current_price is None and use_options_pricing and expiry and long_strike:
@@ -2571,8 +2610,11 @@ async def run_mark_to_market() -> dict:
                 if short_strike and ("spread" in structure or "credit" in structure or "debit" in structure):
                     # Spread position — get both legs
                     result = await get_spread_value(
-                        ticker, long_strike, short_strike, str(expiry), structure
+                        ticker, long_strike, short_strike, str(expiry), structure,
+                        for_mark=True,                                  # R-IV.463(a)
                     )
+                    if result and result.get("unpriced"):
+                        unpriced = "; ".join(result["unpriced"])
                     if result and result.get("spread_value") is not None:
                         current_price = result["spread_value"]
                         # R-IV.462(d): a vertical is worth between zero and its width. T1
@@ -2601,8 +2643,11 @@ async def run_mark_to_market() -> dict:
                     # Single leg (long_put, long_call, etc.)
                     opt_type = "put" if "put" in structure else "call"
                     result = await get_single_option_value(
-                        ticker, long_strike, str(expiry), opt_type
+                        ticker, long_strike, str(expiry), opt_type,
+                        for_mark=True,                                  # R-IV.463(a)
                     )
+                    if result and result.get("unpriced"):
+                        unpriced = "; ".join(result["unpriced"])
                     if result and result.get("option_value") is not None:
                         current_price = result["option_value"]
                         long_leg_price = result["option_value"]
@@ -2666,6 +2711,19 @@ async def run_mark_to_market() -> dict:
                     """, _verdict, _why, row["position_id"])
                     logger.warning("T1 mark guard (mark job): %s for %s -- nothing written (%s)",
                                    _verdict, row["position_id"], _why)
+        elif unpriced:
+            # R-IV.463(a): the vendor answered and a leg has no mark -- no two-sided quote and
+            # no trade this session. Not an outage, so it is said: the prior stands as STALE
+            # (the two-strike path wrote it on these same contracts), with the reason.
+            async with pool.acquire() as conn, conn.transaction():
+                await name_actor(conn, MARK_TO_MARKET)                       # R-IV.462(b)
+                await conn.execute(
+                    "UPDATE unified_positions SET mark_status = $1, mark_reason = $2, "
+                    "mark_checked_at = NOW() WHERE position_id = $3",
+                    "STALE" if row.get("current_price") is not None else "UNAVAILABLE",
+                    stale_reason(row.get("mark_reason"), f"no mark: {unpriced}")
+                    if row.get("current_price") is not None else f"no mark: {unpriced}",
+                    row["position_id"])
         # NOTE: prior versions had an elif that wiped current_price/unrealized_pnl
         # to NULL/0 for OPTION/SPREAD rows whose current cycle failed to price.
         # That branch defended against a historical "stock price written to options
@@ -3100,7 +3158,10 @@ class WithLegsRequest(BaseModel):
     account: str
     legs: List[EntryLeg]
     quantity: float = 1                  # structures
-    net_price: Optional[float] = None    # per structure, when the legs are not priced one by one
+    # Per structure, when the legs are not priced one by one. SIGNED (R-IV.463(c)): positive =
+    # paid (a debit), negative = received (a credit). The sign is what a ratio or a risk reversal
+    # loses when only the magnitude is kept.
+    net_price: Optional[float] = None
     structure: Optional[str] = None      # a label; the legs are what is held regardless
     direction: Optional[str] = None
     entry_date: Optional[str] = None
@@ -3164,10 +3225,23 @@ async def create_position_with_legs(req: WithLegsRequest, _=Depends(require_api_
     analysis = analyze(legs)
     recognized = recognize(legs)
     structure = (req.structure or recognized).strip().lower()
-    net = analysis.get("net_premium")
+    net = analysis.get("net_premium")          # signed: + paid (debit), - received (credit)
     if net is None and req.net_price is not None:
-        net = float(req.net_price)
+        net = float(req.net_price)             # signed the same way
     qty = float(req.quantity)
+    # R-IV.463(c): the entry is kept as a magnitude WITH its side beside it. A set that cannot
+    # change sign has its side fixed by its payoff, and a stated net that contradicts it is a
+    # typo in the sign -- refused, not stored.
+    by_payoff, how = entry_orientation(legs)
+    stated = None if not net else (1 if net > 0 else -1)
+    if how == "payoff" and stated is not None and stated != by_payoff:
+        raise HTTPException(status_code=400, detail=(
+            f"these legs can only be entered for a {'debit' if by_payoff > 0 else 'credit'} "
+            f"(their payoff is never {'negative' if by_payoff > 0 else 'positive'}); the net "
+            f"{'implied by the leg prices' if analysis.get('net_premium') is not None else 'given'}"
+            f" is a {'debit' if stated > 0 else 'credit'} -- check the prices or the sign"))
+    side = stated if stated is not None else (by_payoff if how == "payoff" else None)
+    entry_side = {1: "DEBIT", -1: "CREDIT"}.get(side)
     entry = abs(net) if net is not None else None
     basis = round(entry * qty * 100, 2) if entry is not None else None
     max_loss = analysis.get("max_loss")
@@ -3195,17 +3269,18 @@ async def create_position_with_legs(req: WithLegsRequest, _=Depends(require_api_
                     (position_id, ticker, asset_type, structure, direction, quantity,
                      entry_price, cost_basis, max_loss, max_profit, breakeven, entry_date,
                      expiry, long_strike, short_strike, account, source, status, provenance,
-                     broker_ref, basis_incomplete_reason, notes, created_at, updated_at)
+                     broker_ref, basis_incomplete_reason, notes, entry_side, created_at,
+                     updated_at)
                 VALUES ($1, $2, 'OPTION', $3, $4, $5, $6, $7, $8, $9, $10,
                         COALESCE($11::timestamptz, NOW()), $12, $13, $14, $15, 'MANUAL', 'OPEN',
-                        'PRINCIPAL_REPORTED', $16, $17, $18, NOW(), NOW())""",
+                        'PRINCIPAL_REPORTED', $16, $17, $18, $19, NOW(), NOW())""",
                 pid, req.ticker.upper(), structure, (req.direction or "").upper() or None,
                 qty, entry, basis,
                 max_loss if isinstance(max_loss, (int, float)) else None,
                 max_profit if isinstance(max_profit, (int, float)) else None,
                 analysis.get("breakevens"), req.entry_date, expiries[0],
                 shown["long_strike"], shown["short_strike"], account, req.broker_ref,
-                incomplete, req.notes)
+                incomplete, req.notes, entry_side)
             for seq, leg in enumerate(legs, 1):
                 await conn.execute("""
                     INSERT INTO position_legs
@@ -3228,7 +3303,8 @@ async def create_position_with_legs(req: WithLegsRequest, _=Depends(require_api_
 
     return {"status": "created", "position_id": pid, "structure": structure,
             "recognized_as": recognized, "legs": len(legs), "quantity": qty,
-            "entry_price": entry, "cost_basis": basis, "analysis": analysis,
+            "entry_price": entry, "entry_side": entry_side, "cost_basis": basis,
+            "analysis": analysis,
             "display_strikes": shown, "basis_incomplete_reason": incomplete}
 
 

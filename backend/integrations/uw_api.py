@@ -1434,14 +1434,28 @@ def _get_contract_greeks(contract: dict) -> dict:
     }
 
 
+def _mark_or_mid(contract: dict, for_mark: bool):
+    """(value, why). A MARK takes a two-sided quote or a trade this session (R-IV.463(a));
+    anything else -- a chain, a research resolver -- keeps the wider mid fallback."""
+    if for_mark:
+        from utils.options_math import compute_mark
+        return compute_mark(contract)
+    return _get_contract_mid(contract), "mid"
+
+
 async def get_spread_value(
     underlying: str,
     long_strike: float,
     short_strike: float,
     expiry: str,
     structure: str,
+    for_mark: bool = False,
 ) -> Optional[Dict[str, Any]]:
-    """Get current spread value from UW options chain. Matches polygon_options schema."""
+    """Get current spread value from UW options chain. Matches polygon_options schema.
+
+    for_mark=True (the mark job, R-IV.463(a)): a leg with no two-sided quote and no trade this
+    session is not priced, and the answer says which and why: {"spread_value": None,
+    "unpriced": [...]}. None still means the chain itself did not answer."""
     struct_lower = structure.lower()
     if "put" in struct_lower:
         opt_type = "put"
@@ -1464,11 +1478,20 @@ async def get_spread_value(
     short_c = _find_contract(chain, short_strike, expiry, opt_type)
     if not long_c or not short_c:
         logger.warning("spread_value: missing contract for %s %s/%s %s", underlying, long_strike, short_strike, expiry)
+        if for_mark:
+            return {"spread_value": None, "unpriced": [
+                f"{k:g}{opt_type[0].upper()}: not in the vendor's chain"
+                for k, c in ((long_strike, long_c), (short_strike, short_c)) if not c]}
         return None
 
-    long_mid = _get_contract_mid(long_c)
-    short_mid = _get_contract_mid(short_c)
+    long_mid, long_why = _mark_or_mid(long_c, for_mark)
+    short_mid, short_why = _mark_or_mid(short_c, for_mark)
     if long_mid is None or short_mid is None:
+        if for_mark:
+            return {"spread_value": None, "unpriced": [
+                f"{k:g}{opt_type[0].upper()}: {w}"
+                for k, m, w in ((long_strike, long_mid, long_why), (short_strike, short_mid, short_why))
+                if m is None]}
         return None
 
     if "credit" in struct_lower:
@@ -1498,8 +1521,10 @@ async def get_single_option_value(
     strike: float,
     expiry: str,
     option_type: str,
+    for_mark: bool = False,
 ) -> Optional[Dict[str, Any]]:
-    """Get current value of a single option contract. Matches polygon_options schema."""
+    """Get current value of a single option contract. Matches polygon_options schema.
+    for_mark=True: as get_spread_value (R-IV.463(a))."""
     chain = await get_options_snapshot(
         underlying,
         expiration_date=str(expiry)[:10],
@@ -1512,10 +1537,15 @@ async def get_single_option_value(
 
     contract = _find_contract(chain, strike, expiry, option_type)
     if not contract:
+        if for_mark:
+            return {"option_value": None, "unpriced": [
+                f"{strike:g}{option_type[0].upper()}: not in the vendor's chain"]}
         return None
 
-    mid = _get_contract_mid(contract)
+    mid, why = _mark_or_mid(contract, for_mark)
     if mid is None:
+        if for_mark:
+            return {"option_value": None, "unpriced": [f"{strike:g}{option_type[0].upper()}: {why}"]}
         return None
 
     underlying_price = None
@@ -1534,8 +1564,13 @@ async def get_multi_leg_value(
     underlying: str,
     legs: List[Dict[str, Any]],
     expiry: str,
+    for_mark: bool = False,
 ) -> Optional[Dict[str, Any]]:
-    """Get net mark for a multi-leg position. Matches polygon_options schema."""
+    """Get net mark for a multi-leg position. Matches polygon_options schema.
+
+    The net is SIGNED: BUY legs add, SELL legs subtract. for_mark=True (R-IV.463(a)): every leg
+    that cannot be marked is named with its reason, {"net_mark": None, "unpriced": [...]};
+    None still means the chain itself did not answer."""
     if not legs:
         return None
 
@@ -1563,6 +1598,7 @@ async def get_multi_leg_value(
     net_mark = 0.0
     leg_details = []
     underlying_price = None
+    unpriced: List[str] = []
 
     for leg in legs:
         action = leg.get("action", "BUY").upper()
@@ -1573,10 +1609,16 @@ async def get_multi_leg_value(
         contract = _find_contract(chain, strike, expiry, opt_type)
         if not contract:
             logger.warning("multi_leg: missing %s %s %s %s", underlying, strike, expiry, opt_type)
+            if for_mark:
+                unpriced.append(f"{strike:g}{opt_type[:1].upper()}: not in the vendor's chain")
+                continue
             return None
 
-        mid = _get_contract_mid(contract)
+        mid, why = _mark_or_mid(contract, for_mark)
         if mid is None:
+            if for_mark:
+                unpriced.append(f"{strike:g}{opt_type[:1].upper()}: {why}")
+                continue
             return None
 
         sign = 1 if action == "BUY" else -1
@@ -1596,6 +1638,9 @@ async def get_multi_leg_value(
             "greeks": _get_contract_greeks(contract),
         })
 
+    if unpriced:
+        return {"net_mark": None, "unpriced": unpriced, "leg_details": leg_details,
+                "underlying_price": underlying_price}
     return {
         "net_mark": round(net_mark, 4),
         "leg_details": leg_details,

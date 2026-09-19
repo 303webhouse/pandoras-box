@@ -1059,6 +1059,21 @@ async def init_database():
                                        'POS_GDXJ_20260618_174846', 'POS_XLE_20260618_174913')
                    AND backfill_exempt_reason IS NULL
             """),
+            # R-IV.463(c) (migrations/049): the side a position was entered on, for a set of legs
+            # whose value can take either sign.
+            ("entry side column", """
+                ALTER TABLE unified_positions ADD COLUMN IF NOT EXISTS entry_side TEXT
+            """),
+            ("entry side check", """
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                                    WHERE conname = 'unified_positions_entry_side_check') THEN
+                        ALTER TABLE unified_positions ADD CONSTRAINT unified_positions_entry_side_check
+                            CHECK (entry_side IS NULL OR entry_side IN ('DEBIT', 'CREDIT'));
+                    END IF;
+                END $$
+            """),
             # R-IV.462(b) (migrations/048): the instant machine writers began naming themselves,
             # recorded by the first boot of the build that does it, and what it means for rows
             # written before it.
