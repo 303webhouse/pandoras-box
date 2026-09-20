@@ -932,3 +932,84 @@ cautious while it lasts.
 
 **Kin:** conventions #15 and #17 (a failure must be visible on a channel that does not depend on
 the thing that failed) -- this is the same rule applied to recovery rather than to alarm.
+
+
+---
+
+## #24 A DATE IN THE BOOK IS THE PRINCIPAL'S DAY
+
+**Registered:** R-IV.464(a). **Author:** CC-BUILD. (#23 is CC-POSITIONS'.)
+
+### What its absence cost
+
+One date meant two instants, depending on which door it came through. The close path read a bare
+`exit_date` as **00:00 UTC**; the rows corrected by hand, and the evidence path built for them,
+read the same string as **00:00 in Denver** (06:00 UTC in summer). The principal reads his book in
+Mountain Time, so a close entered as "2026-07-17" through the close path renders on his screen as
+**2026-07-16** -- the day before the day he typed. Two paths, two days, same input, and a
+reconciliation that joins on the date sees rows that do not line up.
+
+### The rule
+
+- **A bare date is that day at 00:00 in `America/Denver`.** The principal's day is the book's day.
+- **A timestamp keeps its own time.** One with no zone is UTC: it came from a machine, and a
+  machine's clock here is UTC.
+- **One module holds the conversion** (`backend/utils/book_time.py`), and every path into the book
+  reads dates through it -- close, the PATCH, bulk import, both lot paths, with-legs, the
+  correction path, the evidence path, and the expiry sweep. A date parsed in SQL, or in a second
+  helper, is how the two conventions arose.
+- **An unreadable date is refused, never replaced by today.** The bulk importer used to fall back
+  to `now()`, which stamps a months-old close as today -- the defect R-IV.447(b) closed on the
+  close path, still open on another.
+
+**Kin:** the time rule in `CLAUDE.md` (state MT and UTC, measured not inferred) -- this is the same
+rule applied to what is *stored* rather than what is *said*.
+
+
+---
+
+## #25 A MARK IS SIGNED IN THE SIDE THE POSITION WAS ENTERED ON
+
+**Registered:** R-IV.464(b), confirming the convention chosen under R-IV.463(c). **Author:**
+CC-BUILD.
+
+### What its absence cost
+
+The mark path stored `abs()` of a leg set's net. For a debit spread quoted at -0.085 -- two leg
+quotes taken at different moments -- it stored **+0.085**, an invented gain on a structure that
+cannot be worth less than nothing. And for a set whose value can take either sign (a ratio, a risk
+reversal), the magnitude alone loses which side of zero the position is on: the one thing the
+number was for.
+
+### The rule
+
+- **`current_price` on a position with legs is the SIGNED net in the side the position was entered
+  on:** the value held for a debit, the cost to close for a credit. Positive means the position is
+  still on the side it was entered; **negative means it has crossed**, and that sign is the
+  information.
+- **The side is decided from the legs, most certain first:** their payoff when it cannot change
+  sign (a set never worth less than zero was bought); then their fills; then `entry_side`,
+  recorded at entry for a set that can be worth either sign.
+- **With none of those, the mark is UNAVAILABLE.** A guessed side is a guessed sign on the P&L.
+- **P&L is `side x (mark - entry)`** for every structure, so one rule covers a credit that has
+  crossed as well as an ordinary debit.
+
+### The alternative, and why it was not taken
+
+The other convention is the **raw BUY-minus-SELL net**: positive when the holder owns value,
+negative when the holder owes it, with no reference to how the position was entered. It is the
+more primitive statement, and it would make `entry_price` signed too.
+
+It was not taken because it is a larger change for no gain today:
+- `entry_price` would have to carry a sign, and the boot step that forces `ABS(entry_price)` on
+  every start (Brief 05b) would have to be retired -- it would otherwise erase the sign on every
+  deploy;
+- every reader of `entry_price` and `current_price` -- the portfolio surfaces, the risk
+  calculation, the analytics projection, the frontend -- assumes a magnitude with the side implied
+  by the structure's name, and each would have to be re-read and re-tested;
+- no open position today is a set whose value can cross zero, so nothing is currently mis-stated
+  by the entry-side convention.
+
+**What would make it right to revisit:** a book that routinely holds ratios or risk reversals, or
+a decision to store entry as a signed net for its own sake. The migration then is: sign
+`entry_price`, retire the ABS step, and convert readers -- not a re-litigation of this entry.

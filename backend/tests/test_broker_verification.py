@@ -110,7 +110,10 @@ def test_an_exit_keeps_the_day_it_happened_on():
     assert "exit_date" in ClosePositionRequest.model_fields
     src = API.read_text(encoding="utf-8")
     assert "is in the future" in src, "a future exit has not happened"
-    assert "now = exit_when" in src, "the supplied date replaces NOW() for the whole close"
+    # R-IV.464(a): the supplied date still replaces NOW() for the whole close; it is now read
+    # through the one convention (a bare date is the principal's day, 00:00 Denver), so the
+    # close and the corrected rows cannot mean different instants by the same string.
+    assert 'now = _when(req.exit_date, "exit_date")' in src
 
 
 def test_the_callers_realized_figure_is_checked_not_stored():

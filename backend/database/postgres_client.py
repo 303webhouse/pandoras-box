@@ -113,6 +113,14 @@ def _numeric_text(value) -> str:
     return str(value)
 
 
+async def _record_boot(conn) -> None:
+    """R-IV.464(f): name the build this boot is running, for the row the DDL loop writes."""
+    sha = (os.getenv("RAILWAY_GIT_COMMIT_SHA") or os.getenv("GIT_COMMIT_SHA")
+           or os.getenv("SOURCE_COMMIT") or "")
+    if sha:
+        await conn.execute("SELECT set_config('app.commit_sha', $1, false)", sha[:40])
+
+
 async def _init_connection(conn) -> None:
     """Every pooled connection writes NUMERIC through _numeric_text and reads it as Decimal
     (unchanged). Text format; arrays of numeric (breakeven) use the same codec -- both verified
@@ -160,6 +168,7 @@ async def init_database():
         # Safety: fail fast on lock contention instead of blocking the table indefinitely.
         # Without this, ALTER TABLE can hold ACCESS EXCLUSIVE lock for hours if another
         # query is running, blocking ALL reads and writes to the table.
+        await _record_boot(conn)            # R-IV.464(f): this boot, named by its build
         await conn.execute("SET lock_timeout = '5s'")
         # Temporarily raise statement_timeout for DDL (CREATE TABLE can be slow on first run)
         await conn.execute("SET statement_timeout = '60s'")
@@ -1101,6 +1110,24 @@ async def init_database():
                             CHECK (entry_side IS NULL OR entry_side IN ('DEBIT', 'CREDIT'));
                     END IF;
                 END $$
+            """),
+            # R-IV.464(f) (migrations/051): every boot records itself, so a restart is visible
+            # in the book's own store rather than only in a deployment console.
+            ("service boots table", """
+                CREATE TABLE IF NOT EXISTS service_boots (
+                    id          BIGSERIAL   PRIMARY KEY,
+                    booted_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    commit_sha  TEXT,
+                    note        TEXT
+                )
+            """),
+            ("service boots index", """
+                CREATE INDEX IF NOT EXISTS idx_service_boots_at ON service_boots (booted_at DESC)
+            """),
+            ("this boot", """
+                INSERT INTO service_boots (commit_sha, note)
+                VALUES (NULLIF(COALESCE(current_setting('app.commit_sha', true), ''), ''),
+                        'init_database')
             """),
             # R-IV.463(e) (migrations/050): an INSERT is audited like any other write -- a row
             # written straight into the book was the one write with no trail.

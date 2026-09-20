@@ -366,6 +366,12 @@ def book_row_to_trade_shape(r: Dict[str, Any]) -> Dict[str, Any]:
     basis = r.get("cost_basis")
     pnl = (float(realized) if realized is not None else None) if terminal else (
         float(r["unrealized_pnl"]) if r.get("unrealized_pnl") is not None else None)
+    # R-IV.464(c): money is ROUNDED AT READ, never rewritten at rest. Values written before
+    # ccd9f69 (2026-09-19) carry the float residue they were stored with -- 34.81 as
+    # 34.81000000000000227... -- and that is the record as written. Two decimals is what a
+    # dollar figure is; the stored value keeps its residue and its history.
+    pnl = None if pnl is None else round(pnl, 2)
+    basis = None if basis is None else round(float(basis), 2)
     pct = None
     if pnl is not None and basis is not None and float(basis) != 0:
         pct = round(pnl / abs(float(basis)) * 100.0, 4)
@@ -390,7 +396,7 @@ def book_row_to_trade_shape(r: Dict[str, Any]) -> Dict[str, Any]:
         "linked_signal_bias": r.get("linked_signal_bias"),
         "trade_outcome": r.get("trade_outcome"),
         "notes": r.get("notes"),
-        "cost_basis": float(basis) if basis is not None else None,
+        "cost_basis": basis,
         "result_known": (not terminal) or realized is not None,
         "undated": terminal and r.get("exit_date") is None,
         "backfill_exempt": PS.is_backfill_exempt(r),

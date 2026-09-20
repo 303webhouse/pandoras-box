@@ -375,17 +375,23 @@ by a separate write that changed `cost_basis` alone -- the shape the recompute l
 caller does NOT send a basis.
 
 **What it could not see.** A PATCH that sends the new basis ITSELF changes quantity, entry and
-basis in one write, so there is no second, basis-only write to find. **Nine of the twelve edits
-in the trail have that shape.** The instrument was blind to three quarters of its population and
-reported "once" -- a count the instrument could not have made any larger than it did.
+basis in one write, so there is no second, basis-only write to find. The recompute fires on a
+QUANTITY change, and the continuous trail holds **five** of those: TJX (2 -> 1), SOXS (10 -> 30),
+SOXS (30 -> 20), NVDA 415 (2 -> 3) and GUSH 358 (15 -> 15.35049). **Four of the five send the
+basis in the same write.** The instrument could see only the fifth -- NVDA, 2026-09-18 -- and
+reported "once": a count it could not have made any larger than it did.
 
-**And the window was misstated.** The audit trail starts on **2026-05-26**, not 2026-08-26: the
-figure named the trigger's installation date from memory rather than reading the table's first
-row.
+**The window was right; the correction to it was not (R-IV.464(d)).** The continuous trail starts
+**2026-08-26 21:02:24 UTC**, the date originally reported. Twenty rows precede it, from two
+CSV-sync runs (2026-05-26 and 2026-07-19), each carrying that tool's own `sync_run_id`; they are
+one tool's records, not a trail of every write. The "2026-05-26" restatement, and the "from
+memory" characterisation of the original figure, were themselves the error -- and this correction
+is the same law applied to a correction: **a figure quoted from a relay is not a figure read from
+the table.**
 
-**The finding of record is CC-POSITIONS' per-edit check,** which reads each of the twelve edits
-directly: net drift inside the trail is -16.00, reversed by adjustment #1, so zero; before
-2026-05-26, unknown.
+**The finding of record reads each of the five quantity edits directly:** net drift inside the
+trail is -16.00 on the NVDA edit, reversed by adjustment #1, so **0.00**; before 2026-08-26
+21:02 UTC, unknown. (Measured again by CC-BUILD 2026-09-19 under R-IV.464(d).)
 
 > **A negative count is bounded by the shapes the query can match, not by the rows it scanned.**
 > Before reporting "N instances", ask what an instance would have to look like to be missed --
