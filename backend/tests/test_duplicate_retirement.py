@@ -113,8 +113,32 @@ def _pool(rows):
     return pool, conn
 
 
-DUP = {"position_id": "dup", "ticker": "BITX", "status": "CLOSED", "realized_pnl": -16.5}
-KEEPER = {"position_id": "keep", "ticker": "BITX", "status": "CLOSED", "realized_pnl": -16.0}
+DUP = {"position_id": "dup", "ticker": "BITX", "status": "CLOSED", "realized_pnl": -16.5,
+       "trade_id": None}
+KEEPER = {"position_id": "keep", "ticker": "BITX", "status": "CLOSED", "realized_pnl": -16.0,
+          "trade_id": None}
+
+
+def test_a_link_follows_the_keeper_when_the_row_it_sat_on_is_retired(monkeypatch):
+    """R-IV.465(c): the trade happened ONCE. Retiring the row it was recorded against is a
+    bookkeeping act, so the link moves to the row that now carries the trade (BITX: the link to
+    trades id 619 sat on the retired row while its keeper carried none)."""
+    out, conn = _retire(monkeypatch, {"dup": dict(DUP, trade_id=619), "keep": dict(KEEPER)})
+    assert out["link_moved_to_keeper"] == 619 and out["link_conflict"] is None
+    keeper_write = [e for e in conn.executed if e[1] and e[1][-1] == "keep"][0]
+    assert keeper_write[1][0] == 619 and "LINK FOLLOWED from retired dup" in keeper_write[1][1]
+    retired_write = [e for e in conn.executed if "SET status = $1" in e[0]][0]
+    assert retired_write[1][3] == 619, "the retired row's link is cleared in the same write"
+    assert "LINK MOVED to keeper keep" in retired_write[1][4]
+
+
+def test_a_link_that_disagrees_with_the_keepers_own_is_left_for_adjudication(monkeypatch):
+    out, conn = _retire(monkeypatch, {"dup": dict(DUP, trade_id=619),
+                                      "keep": dict(KEEPER, trade_id=700)})
+    assert out["link_moved_to_keeper"] is None and "for adjudication" in out["link_conflict"]
+    retired_write = [e for e in conn.executed if "SET status = $1" in e[0]][0]
+    assert retired_write[1][3] is None, "nothing is moved while the two disagree"
+    assert "LINK NOT MOVED" in retired_write[1][4]
 
 
 def _retire(monkeypatch, rows, **body):
@@ -142,6 +166,16 @@ def test_retiring_never_deletes_and_never_touches_the_notes(monkeypatch):
     _, conn = _retire(monkeypatch, {"dup": DUP, "keep": KEEPER})
     assert not [e for e in conn.executed if "DELETE" in e[0].upper()]
     assert not [e for e in conn.executed if "notes" in e[0]]
+
+
+def test_a_moved_link_appends_its_line_and_overwrites_nothing(monkeypatch):
+    """R-IV.465(c) writes one line when a link moves. The duplicate's own notes are the record
+    of what caused the duplication: they are appended to, never replaced."""
+    _, conn = _retire(monkeypatch, {"dup": dict(DUP, trade_id=619), "keep": dict(KEEPER)})
+    writes = [e for e in conn.executed if "notes" in e[0]]
+    assert writes, "a moved link is recorded"
+    for sql, _args in writes:
+        assert "notes = COALESCE(notes, '') ||" in sql and "SET notes = $" not in sql
 
 
 def test_a_retirement_needs_a_stated_reason(monkeypatch):
