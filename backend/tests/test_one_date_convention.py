@@ -101,7 +101,7 @@ class _Acq:
     def __call__(self): return self
 
 
-def _link(monkeypatch, row, trade, other=None, **body):
+def _link(monkeypatch, row, trade, held_by=None, **body):
     conn = MagicMock()
     conn.calls = []
 
@@ -109,8 +109,14 @@ def _link(monkeypatch, row, trade, other=None, **body):
         conn.calls.append((" ".join(sql.split()), args))
 
     conn.execute = execute
-    conn.fetchrow = AsyncMock(side_effect=lambda sql, *a: row if "unified_positions" in sql else trade)
-    conn.fetchval = AsyncMock(return_value=other)
+    def _read(sql, *a):
+        if "FROM trades" in sql:
+            return trade
+        if "trade_id = $1 AND position_id" in sql:
+            return held_by          # the row that already holds this link, retired or not
+        return row
+
+    conn.fetchrow = AsyncMock(side_effect=_read)
     conn.transaction = lambda: _Txn()
     pool = MagicMock()
     pool.acquire = _Acq(conn)
@@ -140,8 +146,30 @@ def test_a_link_that_would_contradict_one_already_recorded_is_refused(monkeypatc
         _link(monkeypatch, dict(BOOK, trade_id=999), dict(TRADE))
     assert e.value.status_code == 409 and "already linked to trades id 999" in e.value.detail
     with pytest.raises(HTTPException) as e:
-        _link(monkeypatch, dict(BOOK), dict(TRADE), other="POS_OTHER")
+        _link(monkeypatch, dict(BOOK), dict(TRADE),
+              held_by={"position_id": "POS_OTHER", "status": "CLOSED", "duplicate_of": None})
     assert e.value.status_code == 409 and "already linked to POS_OTHER" in e.value.detail
+
+
+def test_a_keeper_takes_up_the_link_its_retired_duplicate_held(monkeypatch):
+    """R-IV.465(c): not a second link -- the follow. The retired row's link is cleared in the
+    same transaction, and both rows say where it went."""
+    out, conn = _link(monkeypatch, dict(BOOK), dict(TRADE),
+                      held_by={"position_id": "POS_RETIRED", "status": "DUPLICATE_OF",
+                               "duplicate_of": BOOK["position_id"]})
+    assert out["followed_from_retired"] == "POS_RETIRED"
+    cleared = [c for c in conn.calls if c[1] and c[1][-1] == "POS_RETIRED"][0]
+    assert "LINK MOVED to keeper" in cleared[1][0]
+    kept = [c for c in conn.calls if c[1] and c[1][-1] == BOOK["position_id"]][0]
+    assert kept[1][0] == 536 and "FOLLOWED from retired POS_RETIRED" in kept[1][1]
+
+
+def test_a_link_held_by_a_row_retired_under_a_different_keeper_is_still_refused(monkeypatch):
+    with pytest.raises(HTTPException) as e:
+        _link(monkeypatch, dict(BOOK), dict(TRADE),
+              held_by={"position_id": "POS_RETIRED", "status": "DUPLICATE_OF",
+                       "duplicate_of": "POS_SOMEONE_ELSE"})
+    assert e.value.status_code == 409
 
 
 def test_a_link_without_evidence_is_refused(monkeypatch):

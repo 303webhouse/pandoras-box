@@ -1013,3 +1013,43 @@ It was not taken because it is a larger change for no gain today:
 **What would make it right to revisit:** a book that routinely holds ratios or risk reversals, or
 a decision to store entry as a signed net for its own sake. The migration then is: sign
 `entry_price`, retire the ABS step, and convert readers -- not a re-litigation of this entry.
+
+
+---
+
+## #26 A SENSITIVE SOURCE IS READ BY A FIELD PARSER, NOT A MASK
+
+**Registered:** R-IV.465(f). **Author:** CC-BUILD, with CC-POSITIONS' verification of the reader.
+
+> **A mask fails open on what it has not anticipated; a field parser fails closed.**
+
+### Two instances, one rule
+
+1. **CC-BUILD, 2026-09-17.** Inspecting a configuration seed, it ran a plain `grep` over the line
+   and a live credential was printed into the session transcript. The value was already public in
+   the repo, so the exposure class did not change -- but the transcript is a second copy, and the
+   mistake was avoidable. Every later read of those lines went through a masking script.
+2. **CC-POSITIONS, 2026-09-20.** Reading a broker PDF for figures, it printed a name and an
+   identifier to the terminal beside them.
+
+Both readers took the whole document and tried to *remove* what they recognised as sensitive. A
+mask can only hide what its author thought of; the name in a header, the identifier in a footer
+and the reference beside the figure are exactly what it has not thought of.
+
+### The rule
+
+- **Name the fields you want, and the TYPE each value must be.** A field with no declared type
+  accepts anything, which is the mask's failure in another costume.
+- **Anything not whitelisted is never read.** A whitelisted label whose value is not of the
+  declared type is reported ABSENT, never returned as free text.
+- **No flag prints the document.** A reader with a `--raw` escape hatch is a mask again the first
+  time someone is in a hurry.
+- **An honest absence is a reading.** A label that does not occur prints ABSENT; silence would be
+  indistinguishable from not having looked (#18).
+- **The canonical reader is `scripts/read_pdf_fields.py`**, in the repo under CC-BUILD. Its tests
+  put a name, an account number and an advisor's phone number beside the figures in the fixture,
+  and assert that none of them can come back.
+
+**Kin:** conventions #18 (a negative read reports the partition) -- an absent field is a partition
+of the read, not an empty result; and the handling rule in the local security register: **the
+masking script, every time, without exception** -- of which this convention is the general form.

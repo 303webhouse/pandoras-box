@@ -3515,23 +3515,41 @@ async def link_trade(position_id: str, req: LinkTradeRequest, _=Depends(require_
             "SELECT id, ticker, pnl_dollars, closed_at FROM trades WHERE id = $1", req.trade_id)
         if not trade:
             raise HTTPException(status_code=404, detail=f"trades id {req.trade_id} not found")
-        other = await conn.fetchval(
-            "SELECT position_id FROM unified_positions WHERE trade_id = $1 AND position_id <> $2",
-            req.trade_id, position_id)
-        if other:
-            raise HTTPException(status_code=409, detail=(
-                f"trades id {req.trade_id} is already linked to {other}"))
+        held_by = await conn.fetchrow(
+            "SELECT position_id, status, duplicate_of FROM unified_positions "
+            "WHERE trade_id = $1 AND position_id <> $2", req.trade_id, position_id)
+        follows = None
+        if held_by:
+            # R-IV.465(c): a link recorded against a row later retired points at its keeper. The
+            # trade happened once; taking it up here is the follow, not a second link.
+            if (held_by["status"] == DUPLICATE_OF
+                    and held_by["duplicate_of"] == position_id):
+                follows = held_by["position_id"]
+            else:
+                raise HTTPException(status_code=409, detail=(
+                    f"trades id {req.trade_id} is already linked to {held_by['position_id']}"))
         note = (f" || {req.ruling} LINKED to trades id {req.trade_id} "
                 f"({trade['ticker']}, {str(trade['closed_at'])[:10]}, "
                 f"{trade['pnl_dollars']}). EVIDENCE: {req.evidence.strip()} "
                 f"REASON: {req.reason.strip()}")
+        if follows:
+            note += (f" FOLLOWED from retired {follows} (R-IV.465(c)): the retirement was a "
+                     f"bookkeeping act, not a change of fact.")
         async with conn.transaction():
             await name_actor(conn, req.actor or "lifecycle-ui",
                              f"{req.ruling}: linked to trades id {req.trade_id}")
+            if follows:
+                await conn.execute(
+                    "UPDATE unified_positions SET trade_id = NULL, "
+                    "notes = COALESCE(notes, '') || $1, updated_at = NOW() "
+                    "WHERE position_id = $2",
+                    f" || R-IV.465(c) LINK MOVED to keeper {position_id}: trades id "
+                    f"{req.trade_id}", follows)
             await conn.execute(
                 "UPDATE unified_positions SET trade_id = $1, notes = COALESCE(notes, '') || $2, "
                 "updated_at = NOW() WHERE position_id = $3", req.trade_id, note, position_id)
     return {"status": "linked", "position_id": position_id, "trade_id": req.trade_id,
+            "followed_from_retired": follows,
             "book_realized": None if row["realized_pnl"] is None else float(row["realized_pnl"]),
             "trades_realized": None if trade["pnl_dollars"] is None else float(trade["pnl_dollars"]),
             "figures_agree": (row["realized_pnl"] is not None and trade["pnl_dollars"] is not None
@@ -3751,13 +3769,13 @@ async def retire_duplicate_position(position_id: str, req: RetireDuplicateReques
     pool = await get_postgres_client()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT position_id, ticker, status, realized_pnl FROM unified_positions "
+            "SELECT position_id, ticker, status, realized_pnl, trade_id FROM unified_positions "
             "WHERE position_id = $1", position_id)
         if not row:
             raise HTTPException(status_code=404, detail=f"Position {position_id} not found")
         keeper = await conn.fetchrow(
-            "SELECT position_id, ticker, status FROM unified_positions WHERE position_id = $1",
-            req.duplicate_of)
+            "SELECT position_id, ticker, status, trade_id FROM unified_positions "
+            "WHERE position_id = $1", req.duplicate_of)
         if not keeper:
             raise HTTPException(
                 status_code=404,
@@ -3768,20 +3786,52 @@ async def retire_duplicate_position(position_id: str, req: RetireDuplicateReques
                 status_code=400,
                 detail=f"{req.duplicate_of} is itself retired as a duplicate; point at the row "
                        f"that actually holds the trade")
+        # R-IV.465(c): A LINK FOLLOWS THE KEEPER. A `trades` row linked to this one records an
+        # event that happened ONCE; the retirement is a bookkeeping act, not a change of fact,
+        # so the link moves to the row that now carries the trade. The retired row keeps the
+        # record of where it pointed, in its note and in the audit.
+        link_moved = None
+        link_conflict = None
+        if row["trade_id"] is not None:
+            if keeper["trade_id"] is None:
+                link_moved = int(row["trade_id"])
+            elif int(keeper["trade_id"]) != int(row["trade_id"]):
+                link_conflict = (f"this row is linked to trades id {row['trade_id']} and the "
+                                 f"keeper to {keeper['trade_id']}; the link stays here and the "
+                                 f"disagreement is for adjudication")
         async with conn.transaction():
             await conn.execute("SELECT set_config('app.actor', $1, true)",
                                (req.actor or "lifecycle-ui"))
             await conn.execute("SELECT set_config('app.reason', $1, true)", req.reason)
+            note = (f" || R-IV.465(c) LINK MOVED to keeper {req.duplicate_of}: trades id "
+                    f"{link_moved}") if link_moved else (
+                f" || R-IV.465(c) LINK NOT MOVED: {link_conflict}" if link_conflict else "")
+            # The duplicate's own notes are the record of what caused the duplication, so they
+            # are never overwritten. A link that moves appends its line; nothing else writes here.
             await conn.execute(
-                """UPDATE unified_positions
-                      SET status = $1, duplicate_of = $2, updated_at = NOW()
-                    WHERE position_id = $3""",
-                DUPLICATE_OF, req.duplicate_of, position_id)
+                f"""UPDATE unified_positions
+                       SET status = $1, duplicate_of = $2,
+                           trade_id = CASE WHEN $4::bigint IS NULL THEN trade_id ELSE NULL END,
+                           {"notes = COALESCE(notes, '') || $5," if note else ""}
+                           updated_at = NOW()
+                     WHERE position_id = $3""",
+                *((DUPLICATE_OF, req.duplicate_of, position_id, link_moved, note) if note
+                  else (DUPLICATE_OF, req.duplicate_of, position_id, link_moved)))
+            if link_moved is not None:
+                await conn.execute(
+                    """UPDATE unified_positions
+                          SET trade_id = $1,
+                              notes = COALESCE(notes, '') || $2, updated_at = NOW()
+                        WHERE position_id = $3""",
+                    link_moved,
+                    f" || R-IV.465(c) LINK FOLLOWED from retired {position_id}: trades id "
+                    f"{link_moved}", req.duplicate_of)
     return {"status": "retired", "position_id": position_id, "marked": DUPLICATE_OF,
             "duplicate_of": req.duplicate_of, "keeper_ticker": keeper["ticker"],
             "realized_no_longer_counted": (float(row["realized_pnl"])
                                            if row["realized_pnl"] is not None else None),
-            "notes_preserved": True}
+            "notes_preserved": True, "link_moved_to_keeper": link_moved,
+            "link_conflict": link_conflict}
 
 
 @router.post("/v2/positions/{position_id}/verify")

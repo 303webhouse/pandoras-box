@@ -68,7 +68,11 @@ async def main(days: int) -> int:
     explained = round(s(book_only) - s(trades_only) - s(retired_in_old)
                       + sum(d for *_, d in linked_delta), 2)
     surplus = round(new_sum - old_sum, 2)
-    chip = await book_coverage_gap()
+    # R-IV.465(e): the chip in BOOK mode, the same side the switched routes read. In trades
+    # mode it named what the book holds that `trades` lacks -- a true figure about the OLD
+    # reader, printed beside this script's book_only count, which reads as a disagreement
+    # between two numbers that measure different populations.
+    chip = await book_coverage_gap(reader="book")
 
     print(f"\nwindow: {days} days")
     print(f"  OLD reader (trades)  realized {old_sum:+,.2f} over {len(old_closed)} closed rows")
@@ -87,8 +91,14 @@ async def main(days: int) -> int:
     print(f"    no result         {len(no_result)} rows  "
           f"({sum(1 for r in no_result if r['backfill_exempt'])} exempt, Group E)")
     print(f"    retired excluded  {new['retired_excluded']} rows\n")
-    print(f"  chip said: absent {chip.get('absent_closes')} closes "
-          f"{chip.get('absent_realized'):+,.2f}; unknown-result {chip.get('unknown_result_closes')}")
+    print(f"  chip (book mode) said: {chip.get('trades_orphans')} closed trades "
+          f"{chip.get('trades_orphans_pnl'):+,.2f} not linked to the book; "
+          f"{chip.get('unknown_result_closes')} with no result; "
+          f"{chip.get('undated_closes')} with no exit date")
+    if chip.get("trades_orphans") != len(trades_only):
+        print(f"    NOTE: the chip counts every closed trade not linked to the book "
+              f"({chip.get('trades_orphans')}); this run's trades_only is windowed and excludes "
+              f"trades whose book row is retired ({len(trades_only)}).")
     if linked_delta:
         print("\n  linked pairs that disagree (book vs trades):")
         for r, t, d in sorted(linked_delta, key=lambda x: -abs(x[2]))[:12]:
