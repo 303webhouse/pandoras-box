@@ -39,6 +39,7 @@ from api.mark_guard import (  # R-IV.394 (T1), now reaching the mark job (R-IV.4
     MARK_REJECTED, evaluate_mark, mark_is_writable,
 )
 from utils.audit_actor import MARK_TO_MARKET, name_actor  # R-IV.462(b)
+from utils.book_time import book_instant, optional_instant  # R-IV.464(a): one date, one instant
 
 # R-IV.454(d): each terminal status, and the path that records how a position reached it.
 TERMINAL_VIA_PATH = {
@@ -708,7 +709,9 @@ async def _sweep_expired_positions() -> List[Dict[str, Any]]:
                 rows = await conn.fetch("""
                     UPDATE unified_positions
                        SET status = 'EXPIRED',
-                           exit_date = COALESCE(exit_date, expiry::timestamptz),
+                           -- R-IV.464(a): the day it expired, in the principal's timezone
+                           exit_date = COALESCE(exit_date,
+                                                expiry::timestamp AT TIME ZONE 'America/Denver'),
                            trade_outcome = COALESCE(trade_outcome, 'UNKNOWN'),
                            updated_at = NOW()
                      WHERE status = 'OPEN'
@@ -1562,7 +1565,7 @@ async def update_position(position_id: str, req: UpdatePositionRequest, _=Depend
         idx += 1
     if req.closed_at is not None:
         sets.append(f"exit_date = ${idx}")
-        params.append(datetime.fromisoformat(req.closed_at.replace("Z", "+00:00")))
+        params.append(_when(req.closed_at, "closed_at"))       # R-IV.464(a)
         idx += 1
 
     if len(sets) <= 1:
@@ -1794,18 +1797,9 @@ async def close_position(position_id: str, req: ClosePositionRequest, _=Depends(
     # Bounded on both sides: a future exit has not happened, and an exit before the position
     # existed is a typo rather than a correction.
     if req.exit_date:
-        try:
-            exit_when = datetime.fromisoformat(str(req.exit_date).replace("Z", "+00:00"))
-        except (ValueError, TypeError):
-            raise HTTPException(status_code=400,
-                                detail=f"exit_date must be a date or timestamp; "
-                                       f"got '{req.exit_date}'")
-        if exit_when.tzinfo is None:
-            exit_when = exit_when.replace(tzinfo=timezone.utc)
-        if exit_when > now:
-            raise HTTPException(status_code=400,
-                                detail=f"exit_date {req.exit_date} is in the future")
-        now = exit_when
+        # R-IV.464(a): a bare date is the principal's day, 00:00 in Denver -- not 00:00 UTC,
+        # which rendered a close as the day before on every surface he reads.
+        now = _when(req.exit_date, "exit_date")
 
     # Record the attempt for auditability (outside main transaction — logged even on failure)
     attempt_id = None
@@ -2205,13 +2199,11 @@ async def bulk_create_positions(req: BulkRequest, _=Depends(require_api_key)):
                 else:
                     realized_pnl = round((exit_price - item.entry_price) * 100 * item.quantity, 2)
                 trade_outcome = "WIN" if realized_pnl > 0 else ("LOSS" if realized_pnl < 0 else "BREAKEVEN")
-                if item.exit_date:
-                    try:
-                        exit_date_val = datetime.fromisoformat(item.exit_date)
-                    except (ValueError, TypeError):
-                        exit_date_val = datetime.now(timezone.utc)
-                else:
-                    exit_date_val = datetime.now(timezone.utc)
+                # R-IV.464(a): one convention. An unreadable date is refused, not replaced with
+                # today -- a row stamped today for a close that happened months ago is the
+                # defect R-IV.447(b) closed on the close path.
+                exit_date_val = (_when(item.exit_date, "exit_date") if item.exit_date
+                                 else datetime.now(timezone.utc))
 
             async with pool.acquire() as conn, conn.transaction():
                 await name_actor(conn, req.actor or "legacy-ui", req.reason or None)  # R-IV.463(b)
@@ -2885,8 +2877,9 @@ async def add_position_lot(position_id: str, req: AddLotRequest,
                 """INSERT INTO position_lots
                        (position_id, fill_time, qty, price, fees, source, provenance,
                         broker_ref)
-                   VALUES ($1, $2::timestamptz, $3, $4, $5, $6, $7, $8)""",
-                position_id, req.fill_time, req.qty, req.price, req.fees, req.source,
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8)""",
+                position_id, _when(req.fill_time, "fill_time"),      # R-IV.464(a)
+                req.qty, req.price, req.fees, req.source,
                 provenance_for_lot(req.source, req.price), req.broker_ref)
 
             lots = await conn.fetch(
@@ -3083,9 +3076,10 @@ async def reduce_position(position_id: str, req: ReducePositionRequest,
                 """INSERT INTO position_lots
                        (position_id, fill_time, qty, price, fees, source, provenance,
                         broker_ref)
-                   VALUES ($1, COALESCE($2::timestamptz, NOW()), $3, $4, $5, 'MANUAL', $6, $7)
+                   VALUES ($1, COALESCE($2, NOW()), $3, $4, $5, 'MANUAL', $6, $7)
                    RETURNING id""",
-                position_id, req.fill_time, -abs(req.qty), req.price, req.fees,
+                position_id, optional_instant(req.fill_time, "fill_time"),   # R-IV.464(a)
+                -abs(req.qty), req.price, req.fees,
                 provenance_for_lot("MANUAL", req.price), req.broker_ref)
             for a in plan["allocations"]:
                 await conn.execute(
@@ -3313,13 +3307,15 @@ async def create_position_with_legs(req: WithLegsRequest, _=Depends(require_api_
                      broker_ref, basis_incomplete_reason, notes, entry_side, created_at,
                      updated_at)
                 VALUES ($1, $2, 'OPTION', $3, $4, $5, $6, $7, $8, $9, $10,
-                        COALESCE($11::timestamptz, NOW()), $12, $13, $14, $15, $20, 'OPEN',
+                        COALESCE($11, NOW()), $12, $13, $14, $15, $20, 'OPEN',
                         $21, $16, $17, $18, $19, NOW(), NOW())""",
                 pid, req.ticker.upper(), structure, (req.direction or "").upper() or None,
                 qty, entry, basis,
                 max_loss if isinstance(max_loss, (int, float)) else None,
                 max_profit if isinstance(max_profit, (int, float)) else None,
-                analysis.get("breakevens"), req.entry_date, expiries[0],
+                analysis.get("breakevens"),
+                optional_instant(req.entry_date, "entry_date"),      # R-IV.464(a)
+                expiries[0],
                 shown["long_strike"], shown["short_strike"], account, req.broker_ref,
                 incomplete, req.notes, entry_side, row_source,
                 provenance_for_parent(row_source, entry))
@@ -3334,8 +3330,9 @@ async def create_position_with_legs(req: WithLegsRequest, _=Depends(require_api_
             await conn.execute("""
                 INSERT INTO position_lots
                     (position_id, fill_time, qty, price, fees, source, provenance, broker_ref)
-                VALUES ($1, COALESCE($2::timestamptz, NOW()), $3, $4, 0, $7, $5, $6)""",
-                pid, req.entry_date, qty, entry, provenance_for_lot(leg_source, entry),
+                VALUES ($1, COALESCE($2, NOW()), $3, $4, 0, $7, $5, $6)""",
+                pid, optional_instant(req.entry_date, "entry_date"), qty, entry,
+                provenance_for_lot(leg_source, entry),
                 req.broker_ref, leg_source)
             await conn.execute("""
                 INSERT INTO position_legs_migration
@@ -3396,7 +3393,7 @@ async def correct_realized(position_id: str, req: CorrectRealizedRequest,
               ("realized_pnl", "exit_price", "quantity", "entry_price", "cost_basis", "exit_date")
               if getattr(req, f) is not None}
     if "exit_date" in fields:
-        fields["exit_date"] = _when_from_evidence(fields["exit_date"], "exit_date")
+        fields["exit_date"] = _when(fields["exit_date"], "exit_date")
     pool = await get_postgres_client()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
@@ -3481,6 +3478,66 @@ async def correct_realized(position_id: str, req: CorrectRealizedRequest,
             "legacy_lot_regenerated": bool(shape and lot_sources and not real_lots)}
 
 
+class LinkTradeRequest(BaseModel):
+    """Link a book row to the `trades` row recording the same event (R-IV.464(e))."""
+    trade_id: int
+    evidence: str                # what makes them the same event, beside the verdict (#23)
+    reason: str
+    ruling: str
+    actor: Optional[str] = None
+
+
+@router.post("/v2/positions/{position_id}/link-trade")
+async def link_trade(position_id: str, req: LinkTradeRequest, _=Depends(require_api_key)):
+    """Record that a book row and a `trades` row are the same event.
+
+    There was no path: `trade_id` is written by the close endpoint when IT creates the trade, and
+    an adjudicated pair -- a book row and a ledger row that match on ticker, day and figure --
+    had nowhere to be recorded. Analytics reads the book now (R-IV.463(h)), so a link changes no
+    figure; what it changes is the coverage chip, which counts every closed trade the book is not
+    linked to. Refuses a link that would contradict one already recorded, in either direction.
+    """
+    for name in ("evidence", "reason", "ruling"):
+        if not str(getattr(req, name) or "").strip():
+            raise HTTPException(status_code=400, detail=(
+                f"{name} is required -- a link is an adjudication (conventions #23)"))
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT position_id, ticker, trade_id, realized_pnl, exit_date FROM "
+            "unified_positions WHERE position_id = $1", position_id)
+        if not row:
+            raise HTTPException(status_code=404, detail=f"Position {position_id} not found")
+        if row["trade_id"] is not None and int(row["trade_id"]) != int(req.trade_id):
+            raise HTTPException(status_code=409, detail=(
+                f"{position_id} is already linked to trades id {row['trade_id']}"))
+        trade = await conn.fetchrow(
+            "SELECT id, ticker, pnl_dollars, closed_at FROM trades WHERE id = $1", req.trade_id)
+        if not trade:
+            raise HTTPException(status_code=404, detail=f"trades id {req.trade_id} not found")
+        other = await conn.fetchval(
+            "SELECT position_id FROM unified_positions WHERE trade_id = $1 AND position_id <> $2",
+            req.trade_id, position_id)
+        if other:
+            raise HTTPException(status_code=409, detail=(
+                f"trades id {req.trade_id} is already linked to {other}"))
+        note = (f" || {req.ruling} LINKED to trades id {req.trade_id} "
+                f"({trade['ticker']}, {str(trade['closed_at'])[:10]}, "
+                f"{trade['pnl_dollars']}). EVIDENCE: {req.evidence.strip()} "
+                f"REASON: {req.reason.strip()}")
+        async with conn.transaction():
+            await name_actor(conn, req.actor or "lifecycle-ui",
+                             f"{req.ruling}: linked to trades id {req.trade_id}")
+            await conn.execute(
+                "UPDATE unified_positions SET trade_id = $1, notes = COALESCE(notes, '') || $2, "
+                "updated_at = NOW() WHERE position_id = $3", req.trade_id, note, position_id)
+    return {"status": "linked", "position_id": position_id, "trade_id": req.trade_id,
+            "book_realized": None if row["realized_pnl"] is None else float(row["realized_pnl"]),
+            "trades_realized": None if trade["pnl_dollars"] is None else float(trade["pnl_dollars"]),
+            "figures_agree": (row["realized_pnl"] is not None and trade["pnl_dollars"] is not None
+                              and abs(float(row["realized_pnl"]) - float(trade["pnl_dollars"])) < 0.005)}
+
+
 class ClosedFromEvidenceRequest(BaseModel):
     """A position that ENDED before the book recorded it, entered from its evidence (R-IV.463(g)).
 
@@ -3556,8 +3613,8 @@ async def create_closed_from_evidence(req: ClosedFromEvidenceRequest,
         raise HTTPException(status_code=400, detail=(
             "R-IV.454(d): an ended row needs its exit -- an exit price, a realized figure, or "
             "the outcome (UNKNOWN is a valid one)"))
-    entered = _when_from_evidence(req.entry_date, "entry_date")
-    exited = _when_from_evidence(req.exit_date, "exit_date")
+    entered = _when(req.entry_date, "entry_date")
+    exited = _when(req.exit_date, "exit_date")
     if exited < entered:
         raise HTTPException(status_code=400, detail="exit_date is before entry_date")
 
@@ -3826,25 +3883,18 @@ def _leg_source(source: Optional[str]) -> str:
     return s
 
 
-def _when_from_evidence(value: Any, name: str) -> datetime:
-    """A timestamp from a record. A DATE alone is that day at 00:00 in Denver -- the principal's
-    day, and the convention of the rows already corrected by hand (06:00 UTC in summer). The
-    close path reads a bare date as 00:00 UTC; that difference is reported, not changed here."""
-    text = str(value or "").strip()
+def _when(value: Any, name: str, *, allow_future: bool = False) -> datetime:
+    """A caller's date or timestamp, as the instant the book stores (R-IV.464(a)).
+
+    utils.book_time holds the convention -- a bare date is that day at 00:00 in DENVER, the
+    principal's day -- and every path into the book reads dates through here, so one date cannot
+    mean two instants depending on which door it came through."""
     try:
-        if len(text) <= 10:
-            d = date.fromisoformat(text)
-            from zoneinfo import ZoneInfo
-            when = datetime(d.year, d.month, d.day, tzinfo=ZoneInfo("America/Denver"))
-        else:
-            when = datetime.fromisoformat(text.replace("Z", "+00:00"))
-            if when.tzinfo is None:
-                when = when.replace(tzinfo=timezone.utc)
+        when = book_instant(value, name)
     except (TypeError, ValueError):
         raise HTTPException(status_code=400, detail=f"{name} must be a date or a timestamp; "
                                                     f"got {value!r}")
-    when = when.astimezone(timezone.utc)
-    if when > datetime.now(timezone.utc):
+    if not allow_future and when > datetime.now(timezone.utc):
         raise HTTPException(status_code=400, detail=f"{name} {value} is in the future")
     return when
 

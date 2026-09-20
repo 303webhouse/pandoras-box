@@ -107,7 +107,7 @@ def test_exit_date_is_corrected_as_the_principals_day(monkeypatch):
 
 def test_a_future_exit_date_is_refused():
     with pytest.raises(HTTPException) as e:
-        U._when_from_evidence("2099-01-01", "exit_date")
+        U._when("2099-01-01", "exit_date")      # R-IV.464(a): one convention, every path
     assert "future" in e.value.detail
 
 

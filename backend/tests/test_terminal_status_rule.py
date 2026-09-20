@@ -79,7 +79,9 @@ def test_a_quantity_edit_no_longer_moves_cash_or_rewrites_the_basis():
 def test_the_sweep_records_the_expiry_date_and_an_explicit_unknown():
     from api import unified_positions as U
     src = inspect.getsource(U._sweep_expired_positions)
-    assert "exit_date = COALESCE(exit_date, expiry::timestamptz)" in src
+    # R-IV.464(a): the day it expired, in the principal's timezone -- expiry::timestamptz would
+    # stamp 00:00 UTC, which renders as the day before on every surface he reads.
+    assert "expiry::timestamp AT TIME ZONE 'America/Denver'" in src
     assert "trade_outcome = COALESCE(trade_outcome, 'UNKNOWN')" in src
     assert "set_config('app.actor'" in src, "the audit names the sweep as the actor"
 

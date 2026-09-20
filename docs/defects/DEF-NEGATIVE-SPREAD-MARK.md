@@ -61,10 +61,12 @@ Every row the audit trail recorded with `current_price < 0`:
 All times UTC, 2026. STUB 37 and IBIT 313 are closed and still store their negative mark. A closed
 row's result is its realized figure, and those rows were left as they are.
 
-**What the instrument could see (#18, addendum 3).** The audit records UPDATE and DELETE, only
-when a row changed, and only from 2026-05-26. A negative mark written before that, or held in a
-row that was never rewritten, cannot appear here. **Fourteen is the count within its reach, not a
-census of all time.**
+**What the instrument could see (#18, addendum 3; corrected by R-IV.464(d)).** The audit records
+UPDATE and DELETE, only when a row changed, and the CONTINUOUS trail starts **2026-08-26 21:02:24
+UTC** -- the twenty rows before it are two CSV-sync runs' own records (2026-05-26, 2026-07-19),
+not a record of every write. A negative mark written before that instant, or held in a row that
+was never rewritten, cannot appear here. **Fourteen is the count from 2026-08-26 21:02 UTC
+onward; before it, unknown.**
 
 ## THE MECHANISM
 
