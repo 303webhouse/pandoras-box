@@ -16,7 +16,9 @@ import pytest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "scripts"))
 
-from read_pdf_fields import extract_fields, main, parse_field  # noqa: E402
+from read_pdf_fields import (  # noqa: E402
+    TRADE_FIELDS, extract_fields, extract_trade_lines, main, parse_field,
+)
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 
@@ -91,9 +93,9 @@ def test_a_field_must_declare_its_type():
 
 def test_no_path_in_the_reader_prints_the_document():
     src = (ROOT / "scripts" / "read_pdf_fields.py").read_text(encoding="utf-8")
-    # two in the one emitter (json and line form), two refusals to stderr that print no
-    # document content -- and nothing else anywhere.
-    assert src.count("print(") == 4
+    # three in the one emitter (json, trade line, field line) and two refusals to stderr that
+    # print no document content -- and nothing else anywhere.
+    assert src.count("print(") == 5
     assert src.count("file=sys.stderr") == 2
     assert "print(text" not in src and "--raw" not in src and "--dump" not in src
 
@@ -122,3 +124,66 @@ def test_it_runs_as_a_script_end_to_end(tmp_path):
     assert proc.returncode == 0, proc.stderr
     assert "Total Account Value [money] -: ABSENT" in proc.stdout
     assert proc.stdout.count("\n") == 1, "one line per whitelisted field, and nothing else"
+
+
+# --- the trade-line shape (R-IV.470(c)) -------------------------------------------------------
+CONFIRM = ["""
+    ACTIVITY   Prepared for NICK HERTZOG   Account 123-456789   Advisor Jane Rivera (555) 010-9988
+    YOU BOUGHT  3 HYG 11/20/2026 $73 P  @ $0.4067   REF 26259-MCQGWD
+    Sold 2 IBIT 6/12/2026 $62 C at $0.16   Conf# 31007-KKQPLX
+    Dividend received 12.40 on core position
+    SOLD 100 BITX @ 16.0650
+    Message: please call your advisor about the transfer.
+"""]
+
+
+def test_a_fill_is_read_as_five_typed_fields():
+    rows = extract_trade_lines(CONFIRM)
+    assert [(r["action"], r["quantity"], r["price"], r["symbol"], r["reference"]) for r in rows] == [
+        ("BUY", "3", "$0.4067", "HYG", "26259-MCQGWD"),
+        ("SELL", "2", "$0.16", "IBIT", "31007-KKQPLX"),
+        ("SELL", "100", "16.0650", "BITX", None),
+    ]
+
+
+def test_a_row_that_is_not_a_fill_is_never_emitted():
+    rows = extract_trade_lines(CONFIRM)
+    assert len(rows) == 3, "the dividend, the header and the message are not fills"
+    blob = json.dumps(rows)
+    for secret in ("NICK", "HERTZOG", "123-456789", "Jane", "Rivera", "555", "advisor",
+                   "Dividend", "12.40"):
+        assert secret not in blob
+
+
+def test_a_fill_missing_one_of_the_five_says_which():
+    rows = extract_trade_lines(CONFIRM)
+    assert rows[2]["absent"] == ["reference"] and rows[0]["absent"] == []
+
+
+def test_the_printed_trade_line_carries_only_those_fields(capsys):
+    from read_pdf_fields import _emit
+    _emit(extract_trade_lines(CONFIRM), as_json=False)
+    printed = capsys.readouterr().out
+    assert "trade p1: action=BUY quantity=3 price=$0.4067 symbol=HYG reference=26259-MCQGWD" in printed
+    assert "ABSENT: reference" in printed
+    for secret in ("NICK", "HERTZOG", "123-456789", "Jane", "advisor", "Dividend"):
+        assert secret not in printed
+
+
+def test_the_shape_is_the_whitelist():
+    assert TRADE_FIELDS == ("action", "quantity", "price", "symbol", "reference")
+    for r in extract_trade_lines(CONFIRM):
+        assert set(r) == {"page", "absent", *TRADE_FIELDS}
+
+
+def test_trade_lines_run_as_a_script(tmp_path):
+    pytest.importorskip("pypdf")
+    from pypdf import PdfWriter
+    writer = PdfWriter()
+    writer.add_blank_page(width=200, height=200)
+    out = tmp_path / "blank.pdf"
+    with open(out, "wb") as fh:
+        writer.write(fh)
+    proc = subprocess.run([sys.executable, str(ROOT / "scripts" / "read_pdf_fields.py"),
+                           str(out), "--trade-lines"], capture_output=True, text=True, timeout=120)
+    assert proc.returncode == 0 and proc.stdout == "", "no fills, and nothing else said"

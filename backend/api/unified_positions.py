@@ -7,7 +7,7 @@ Replaces the fragmented positions + open_positions + options_positions system.
 from fastapi import APIRouter, Depends, HTTPException, Header, Query, Request
 from utils.pivot_auth import require_api_key
 from pydantic import BaseModel, Field
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 from datetime import datetime, date, timezone, timedelta
 from decimal import Decimal
 import asyncio
@@ -22,8 +22,8 @@ from database.redis_client import get_redis_client
 from websocket.broadcaster import manager
 from models.position_risk import calculate_position_risk, infer_direction
 from models.position_lots import (  # R-IV.441(a): the position row is the AGGREGATE
-    BROKER_VERIFIED, IMPORT_PARENT_SOURCES, LOT_SOURCE_PROVENANCE, derive_aggregate, fifo_plan,
-    is_verified, provenance_for_lot, provenance_for_parent,
+    BROKER_VERIFIED, IMPORT_PARENT_SOURCES, LOT_SOURCE_PROVENANCE, SCREEN_VERIFIED,
+    derive_aggregate, fifo_plan, is_verified, outranks, provenance_for_lot, provenance_for_parent,
 )
 from models.accounts import (  # R-IV.445(a): one vocabulary, read by every write path
     CANONICAL_ACCOUNTS, canonical_account,
@@ -3887,6 +3887,202 @@ async def verify_position_leg(position_id: str, leg_seq: int, req: VerifyRequest
                               _=Depends(require_api_key)):
     """Match a leg to a broker record — the only route to BROKER_VERIFIED for a leg."""
     return await _verify_row("position_legs", position_id, leg_seq, req, key_column="leg_seq")
+
+
+class ScreenVerifyRequest(BaseModel):
+    """What a broker SCREEN showed, with the evidence that makes it re-checkable (R-IV.470(a))."""
+    fields_read: List[str]         # the fields actually read off the screen, named
+    captured_at: str               # when the screen was captured -- not the fill, not now
+    transcribed_by: str            # who read it across
+    reason: Optional[str] = None
+    ruling: Optional[str] = None
+
+
+def _screen_evidence(req: "ScreenVerifyRequest") -> Tuple[str, datetime]:
+    """The evidence line the database stores, and the instant it was captured."""
+    fields = [str(f).strip() for f in (req.fields_read or []) if str(f).strip()]
+    if not fields:
+        raise HTTPException(status_code=400, detail=(
+            "fields_read is required -- a screen verification that does not name the fields it "
+            "read cannot be re-checked against the screen, which is what this rung is for"))
+    if not str(req.transcribed_by or "").strip():
+        raise HTTPException(status_code=400, detail=(
+            "transcribed_by is required -- a reading has a reader"))
+    captured = _when(req.captured_at, "captured_at")
+    return (f"SCREEN: {', '.join(fields)}; captured {captured.isoformat()}; "
+            f"transcribed by {req.transcribed_by.strip()}"), captured
+
+
+def _screen_refusal(current: Optional[str]) -> None:
+    """A screen never overwrites a stronger claim (R-IV.470(a))."""
+    if outranks(current, SCREEN_VERIFIED):
+        raise HTTPException(status_code=409, detail=(
+            f"this record is already {current}, which supersedes a screen reading: an export "
+            f"line is the broker's own file and a verification is a matched reference. Correct "
+            f"the stronger record through its own path, or leave it."))
+
+
+async def _screen_verify_row(table: str, position_id: str, row_id: int,
+                             req: ScreenVerifyRequest, key_column: str = "id"):
+    """Stamp one lot or leg SCREEN_VERIFIED -- the only path to that value (R-IV.470(a))."""
+    evidence, captured = _screen_evidence(req)
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            f"SELECT r.*, p.ticker FROM {table} r "
+            f"JOIN unified_positions p ON p.position_id = r.position_id "
+            f"WHERE r.position_id = $1 AND r.{key_column} = $2", position_id, row_id)
+        if not row:
+            raise HTTPException(status_code=404,
+                                detail=f"{table} {row_id} not found on {position_id}")
+        _screen_refusal(row["provenance"])
+        async with conn.transaction():
+            await conn.execute(
+                f"""UPDATE {table}
+                       SET provenance = $1, verified_event = $2, verified_at = $3
+                     WHERE position_id = $4 AND {key_column} = $5""",
+                SCREEN_VERIFIED, evidence, captured, position_id, row_id)
+            await _audit_leg(conn, position_id, row["ticker"], "SCREEN_VERIFY",
+                             f"{table}:{row_id}:provenance",
+                             {"provenance": row["provenance"]},
+                             {"provenance": SCREEN_VERIFIED, "verified_event": evidence},
+                             req.transcribed_by, req.reason or (req.ruling or "R-IV.470(a)"))
+    return {"status": "screen_verified", "position_id": position_id, "table": table,
+            "id": row_id, "provenance": SCREEN_VERIFIED, "verified_event": evidence,
+            "captured_at": captured.isoformat(), "was": row["provenance"]}
+
+
+@router.post("/v2/positions/{position_id}/screen-verify")
+async def screen_verify_position(position_id: str, req: ScreenVerifyRequest,
+                                 _=Depends(require_api_key)):
+    """Record that a broker SCREEN showed this row's figures (R-IV.470(a)).
+
+    Its own rung, with its own evidence. `verified_at` is when the SCREEN WAS CAPTURED -- not the
+    fill's time, and not now: a screen read a week later is evidence about the day it was taken.
+    The path refuses to overwrite IMPORTED or BROKER_VERIFIED, because an export line and a
+    matched reference are both stronger than a reading of a picture.
+    """
+    evidence, captured = _screen_evidence(req)
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT position_id, ticker, provenance FROM unified_positions WHERE position_id = $1",
+            position_id)
+        if not row:
+            raise HTTPException(status_code=404, detail=f"Position {position_id} not found")
+        _screen_refusal(row["provenance"])
+        async with conn.transaction():
+            await name_actor(conn, req.transcribed_by,
+                             req.reason or f"{req.ruling or 'R-IV.470(a)'}: screen verification")
+            await conn.execute(
+                """UPDATE unified_positions
+                      SET provenance = $1, verified_event = $2, verified_at = $3,
+                          updated_at = NOW()
+                    WHERE position_id = $4""",
+                SCREEN_VERIFIED, evidence, captured, position_id)
+            await _audit_leg(conn, position_id, row["ticker"], "SCREEN_VERIFY", "provenance",
+                             {"provenance": row["provenance"]},
+                             {"provenance": SCREEN_VERIFIED, "verified_event": evidence},
+                             req.transcribed_by, req.reason or (req.ruling or "R-IV.470(a)"))
+    return {"status": "screen_verified", "position_id": position_id,
+            "provenance": SCREEN_VERIFIED, "verified_event": evidence,
+            "captured_at": captured.isoformat(), "was": row["provenance"]}
+
+
+@router.post("/v2/positions/{position_id}/lots/{lot_id}/screen-verify")
+async def screen_verify_lot(position_id: str, lot_id: int, req: ScreenVerifyRequest,
+                            _=Depends(require_api_key)):
+    """A lot whose figures a broker screen showed -- the only route to SCREEN_VERIFIED for a lot."""
+    return await _screen_verify_row("position_lots", position_id, lot_id, req)
+
+
+@router.post("/v2/positions/{position_id}/legs/{leg_seq}/screen-verify")
+async def screen_verify_leg(position_id: str, leg_seq: int, req: ScreenVerifyRequest,
+                            _=Depends(require_api_key)):
+    """A leg whose figures a broker screen showed -- the only route to SCREEN_VERIFIED for a leg."""
+    return await _screen_verify_row("position_legs", position_id, leg_seq, req,
+                                    key_column="leg_seq")
+
+
+class CorrectTerminalStatusRequest(BaseModel):
+    """A wrong terminal status, corrected with its evidence (R-IV.470(b))."""
+    status: str                    # CLOSED | EXPIRED | OPEN
+    evidence: str
+    reason: str
+    ruling: str
+    actor: Optional[str] = None
+
+
+@router.post("/v2/positions/{position_id}/correct-terminal-status")
+async def correct_terminal_status(position_id: str, req: CorrectTerminalStatusRequest,
+                                  _=Depends(require_api_key)):
+    """Correct a terminal status that is wrong -- with its evidence (R-IV.470(b)).
+
+    The sweep wrote EXPIRED/UNKNOWN over HYG 218 before the ruling that it had been ROLLED
+    arrived, and nothing could fix it: the PATCH refuses terminal statuses (R-IV.454(d)), the
+    close path takes only OPEN rows, and the retire path is for duplicates. So a wrong status
+    could be corrected only by SQL straight into the table.
+
+    **The race is inherent -- a sweep and a ruling can always cross -- so correctability is the
+    fix, not timing.** A row moved back to OPEN cannot keep an exit it did not have: the exit
+    date, exit price, realized figure and outcome are cleared, and the response says what went.
+    A row moved between terminal statuses keeps its exit and must have one (R-IV.454(d)).
+    """
+    for name in ("evidence", "reason", "ruling"):
+        if not str(getattr(req, name) or "").strip():
+            raise HTTPException(status_code=400, detail=(
+                f"{name} is required -- a status corrected with no {name} beside it is a verdict "
+                f"alone (conventions #23)"))
+    target = (req.status or "").strip().upper()
+    if target not in ("CLOSED", "EXPIRED", "OPEN"):
+        raise HTTPException(status_code=400, detail=(
+            f"status {req.status!r}: CLOSED, EXPIRED or OPEN. A duplicate is retired through "
+            f"/retire-duplicate, which records its keeper."))
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT position_id, ticker, status, exit_date, exit_price, realized_pnl, "
+            "trade_outcome FROM unified_positions WHERE position_id = $1", position_id)
+        if not row:
+            raise HTTPException(status_code=404, detail=f"Position {position_id} not found")
+        was = (row["status"] or "").upper()
+        if was not in ("CLOSED", "EXPIRED"):
+            raise HTTPException(status_code=400, detail=(
+                f"{position_id} is {row['status']}, not terminal: this path corrects a status "
+                f"that ended the row wrongly. An OPEN row ends through /close or /reduce."))
+        if was == target:
+            raise HTTPException(status_code=400, detail=f"{position_id} is already {target}")
+        cleared = {}
+        if target == "OPEN":
+            cleared = {k: (float(row[k]) if isinstance(row[k], (int, float)) else
+                           (row[k].isoformat() if hasattr(row[k], "isoformat") else row[k]))
+                       for k in ("exit_date", "exit_price", "realized_pnl", "trade_outcome")
+                       if row[k] is not None}
+        elif not any(row[k] is not None for k in ("exit_price", "realized_pnl", "trade_outcome")):
+            raise HTTPException(status_code=400, detail=(
+                "R-IV.454(d): a terminal status needs its exit -- an exit price, a realized "
+                "figure, or the outcome (UNKNOWN is a valid one). Record it through "
+                "/correct-realized first."))
+        note = (f" || {req.ruling} TERMINAL STATUS CORRECTED: {was} -> {target}"
+                + (f"; cleared {', '.join(sorted(cleared))}" if cleared else "")
+                + f". EVIDENCE: {req.evidence.strip()} REASON: {req.reason.strip()}")
+        async with conn.transaction():
+            await name_actor(conn, req.actor or "lifecycle-ui",
+                             f"{req.ruling}: terminal status corrected with evidence")
+            if target == "OPEN":
+                await conn.execute(
+                    """UPDATE unified_positions
+                          SET status = 'OPEN', exit_date = NULL, exit_price = NULL,
+                              realized_pnl = NULL, trade_outcome = NULL,
+                              notes = COALESCE(notes, '') || $1, updated_at = NOW()
+                        WHERE position_id = $2""", note, position_id)
+            else:
+                await conn.execute(
+                    """UPDATE unified_positions
+                          SET status = $1, notes = COALESCE(notes, '') || $2, updated_at = NOW()
+                        WHERE position_id = $3""", target, note, position_id)
+    return {"status": "corrected", "position_id": position_id, "was": was, "now": target,
+            "cleared": cleared or None, "evidence_recorded": True}
 
 
 class LegRequest(BaseModel):

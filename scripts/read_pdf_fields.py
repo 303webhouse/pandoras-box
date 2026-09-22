@@ -13,6 +13,11 @@ those values and nothing else. A label that is not whitelisted is never read. A 
 whose value is not of the declared type is reported as absent rather than returned as free text.
 **There is no flag that prints the document.**
 
+A TRADE LINE is a shape rather than a label (R-IV.470(c)): a confirmation or an activity
+statement lists fills as rows, not as "Label: value" pairs. `--trade-lines` reads those rows under
+the same discipline -- five named fields, each of a declared type, and nothing else off the line.
+A row that is not a fill is never emitted; a fill missing one of the five reports it ABSENT.
+
 Usage, from the repo root:
 
     python scripts/read_pdf_fields.py STATEMENT.pdf \\
@@ -21,6 +26,8 @@ Usage, from the repo root:
         --field "Trade Date::date"
 
     python scripts/read_pdf_fields.py STATEMENT.pdf --profile scripts/pdf_profiles/example.json
+
+    python scripts/read_pdf_fields.py CONFIRM.pdf --trade-lines
 
 Every occurrence of a whitelisted label is reported, in document order, with its page. A label
 that never occurs prints ABSENT: an honest absence is a reading, and silence is not.
@@ -44,6 +51,27 @@ FIELD_TYPES: Dict[str, str] = {
     "percent": r"-?\d+(?:\.\d+)?\s?%",
 }
 WINDOW = 80          # how far past a label a value may sit, in characters
+
+# --- the trade-line shape (R-IV.470(c)) ------------------------------------------------------
+# Five fields, each a token of its own type. The ACTION word is what makes a row a fill; without
+# one, the row is not read at all -- which is how free text (a name, an address, a message from
+# the broker) stays out of the output even though it sits on the same page.
+ACTIONS = {
+    "BUY": "BUY", "BOUGHT": "BUY", "BOT": "BUY", "YOU BOUGHT": "BUY", "PURCHASE": "BUY",
+    "SELL": "SELL", "SOLD": "SELL", "SLD": "SELL", "YOU SOLD": "SELL", "SALE": "SELL",
+}
+TRADE_FIELDS = ("action", "quantity", "price", "symbol", "reference")
+_ACTION_RE = re.compile(r"\b(YOU BOUGHT|YOU SOLD|BOUGHT|PURCHASE|BUY|BOT|SOLD|SALE|SELL|SLD)\b",
+                        re.IGNORECASE)
+_QTY_RE = re.compile(r"(?<![\w.$])(\d{1,3}(?:,\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?)(?![\w.%])")
+_PRICE_RE = re.compile(r"\$\s?-?\d{1,3}(?:,\d{3})*\.\d{2,4}|(?<![\w.$])-?\d+\.\d{2,4}(?![\w%])")
+# A symbol is a ticker, optionally with an option description after it (strike, C/P, a date).
+_SYMBOL_RE = re.compile(r"\b([A-Z]{1,6})(?:\s+(\d{1,2}/\d{1,2}/\d{2,4}|\d{4}-\d{2}-\d{2}))?"
+                        r"(?:\s+\$?(\d+(?:\.\d+)?)\s*([CP]))?\b")
+_REF_RE = re.compile(r"\b(?:REF|CONF(?:IRMATION)?|ORDER|TRADE)\s*#?\s*([A-Z0-9][A-Z0-9-]{3,})\b",
+                     re.IGNORECASE)
+_NOT_A_SYMBOL = {"BUY", "SELL", "BOUGHT", "SOLD", "BOT", "SLD", "YOU", "REF", "CONF", "ORDER",
+                 "TRADE", "SHARES", "SHS", "AT", "USD", "PURCHASE", "SALE", "CONFIRMATION"}
 
 
 def parse_field(spec: str) -> Tuple[str, str]:
@@ -83,6 +111,48 @@ def extract_fields(pages: Sequence[str], fields: Sequence[Tuple[str, str]]) -> L
     return out
 
 
+def extract_trade_lines(pages: Sequence[str]) -> List[Dict[str, Any]]:
+    """Fills, one record per row that carries an ACTION word. Pure, like extract_fields.
+
+    Only the five fields are returned. Everything else on the row -- a name, a note, an address,
+    a balance the reader did not ask for -- is never part of a record, because a record is built
+    from typed tokens rather than from the line.
+    """
+    out: List[Dict[str, Any]] = []
+    for page_no, text in enumerate(pages, 1):
+        for raw in (text or "").splitlines():
+            line = raw.strip()
+            action_hit = _ACTION_RE.search(line)
+            if not action_hit:
+                continue
+            after = line[action_hit.end():]
+            price = _PRICE_RE.search(after) or _PRICE_RE.search(line)
+            qty = None
+            for m in _QTY_RE.finditer(after):
+                if price and m.start() >= price.start() and m.end() <= price.end():
+                    continue            # the price is not the quantity
+                qty = m
+                break
+            symbol = None
+            for m in _SYMBOL_RE.finditer(after):
+                if m.group(1) in _NOT_A_SYMBOL:
+                    continue
+                symbol = m
+                break
+            ref = _REF_RE.search(line)
+            record = {
+                "page": page_no,
+                "action": ACTIONS.get(action_hit.group(1).upper(), action_hit.group(1).upper()),
+                "quantity": qty.group(1) if qty else None,
+                "price": price.group(0).strip() if price else None,
+                "symbol": symbol.group(1) if symbol else None,
+                "reference": ref.group(1) if ref else None,
+            }
+            record["absent"] = [f for f in TRADE_FIELDS if record.get(f) is None]
+            out.append(record)
+    return out
+
+
 def read_pages(path: str, pages: str = "") -> List[str]:
     """Page texts from the PDF. Returned to extract_fields and to nothing else."""
     from pypdf import PdfReader          # imported here so --help works without the dependency
@@ -114,6 +184,11 @@ def _emit(rows: List[Dict[str, Any]], as_json: bool) -> None:
         return
     for r in rows:
         where = f"p{r['page']}" if r["page"] else "-"
+        if "action" in r:            # a trade line: the five fields, and what was absent
+            parts = " ".join(f"{f}={r[f]}" for f in TRADE_FIELDS if r.get(f) is not None)
+            absent = f" ABSENT: {', '.join(r['absent'])}" if r["absent"] else ""
+            print(f"trade {where}: {parts}{absent}")
+            continue
         shown = r["value"] if r["value"] is not None else (r["note"] or "ABSENT")
         print(f"{r['field']} [{r['type']}] {where}: {shown}")
 
@@ -124,6 +199,8 @@ def main(argv: Sequence[str]) -> int:
     ap.add_argument("--field", action="append", default=[], metavar="Label::type",
                     help="a whitelisted field and the type its value must be")
     ap.add_argument("--profile", help="JSON file: {\"fields\": [\"Label::type\", ...]}")
+    ap.add_argument("--trade-lines", action="store_true",
+                    help="read fills by shape: action, quantity, price, symbol, reference")
     ap.add_argument("--pages", default="", help="1,3,5-7 (default: all)")
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args(argv)
@@ -131,6 +208,13 @@ def main(argv: Sequence[str]) -> int:
     specs = list(args.field)
     if args.profile:
         specs += json.loads(open(args.profile, encoding="utf-8").read()).get("fields", [])
+    if args.trade_lines:
+        pages = read_pages(args.pdf, args.pages)
+        rows = extract_trade_lines(pages)
+        if specs:
+            rows += extract_fields(pages, [parse_field(s) for s in specs])
+        _emit(rows, args.json)
+        return 0
     if not specs:
         print("no fields named: this reader returns only fields you whitelist", file=sys.stderr)
         return 2

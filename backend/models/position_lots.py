@@ -33,10 +33,24 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional
 
 # --- vocabulary ---------------------------------------------------------------------------
 PRINCIPAL_REPORTED = "PRINCIPAL_REPORTED"
+SCREEN_VERIFIED = "SCREEN_VERIFIED"
 BROKER_VERIFIED = "BROKER_VERIFIED"
 IMPORTED = "IMPORTED"
 UNKNOWN = "UNKNOWN"
-PROVENANCE_VALUES = (PRINCIPAL_REPORTED, BROKER_VERIFIED, IMPORTED, UNKNOWN)
+PROVENANCE_VALUES = (PRINCIPAL_REPORTED, SCREEN_VERIFIED, BROKER_VERIFIED, IMPORTED, UNKNOWN)
+
+# R-IV.470(a): the ladder, weakest first. SCREEN_VERIFIED is its own rung: the BROKER DISPLAYED
+# the figure and someone transcribed it, which is more than the principal recalling it and less
+# than a reference matched to a broker record. An export line always supersedes a screen -- the
+# export is the broker's own file, the screen is a reading of a picture of it.
+PROVENANCE_RANK = {UNKNOWN: 0, PRINCIPAL_REPORTED: 1, SCREEN_VERIFIED: 2, IMPORTED: 3,
+                   BROKER_VERIFIED: 4}
+
+
+def outranks(candidate: Optional[str], current: Optional[str]) -> bool:
+    """Whether `candidate` is a stronger claim than `current`. A stamp never walks down the
+    ladder: that is how a screen reading would erase an export line."""
+    return PROVENANCE_RANK.get(candidate or "", 0) > PROVENANCE_RANK.get(current or "", 0)
 
 # Parent-position sources that mean "this row landed through an import path". Measured over the
 # live book 2026-09-17; the mapping is mirrored in migrations/037_position_lots_ruled_shape.sql,

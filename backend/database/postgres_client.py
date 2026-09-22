@@ -1138,6 +1138,69 @@ async def init_database():
                                        'POS_GDXJ_20260618_174846', 'POS_XLE_20260618_174913')
                    AND backfill_exempt_reason IS NULL
             """),
+            # R-IV.470(a) (migrations/052): SCREEN_VERIFIED joins the vocabulary as its own rung,
+            # with its own evidence -- what the screen showed, when it was captured, who read it.
+            ("provenance vocabulary: unified_positions", """
+                DO $$
+                BEGIN
+                    ALTER TABLE unified_positions DROP CONSTRAINT IF EXISTS unified_positions_provenance_check;
+                    ALTER TABLE unified_positions ADD CONSTRAINT unified_positions_provenance_check
+                        CHECK (provenance IS NULL OR provenance IN
+                               ('PRINCIPAL_REPORTED', 'SCREEN_VERIFIED', 'BROKER_VERIFIED',
+                                'IMPORTED', 'UNKNOWN'));
+                END $$
+            """),
+            ("provenance vocabulary: position_lots", """
+                DO $$
+                BEGIN
+                    ALTER TABLE position_lots DROP CONSTRAINT IF EXISTS position_lots_provenance_check;
+                    ALTER TABLE position_lots ADD CONSTRAINT position_lots_provenance_check
+                        CHECK (provenance IN ('PRINCIPAL_REPORTED', 'SCREEN_VERIFIED',
+                                              'BROKER_VERIFIED', 'IMPORTED', 'UNKNOWN'));
+                END $$
+            """),
+            ("provenance vocabulary: position_legs", """
+                DO $$
+                BEGIN
+                    ALTER TABLE position_legs DROP CONSTRAINT IF EXISTS position_legs_provenance_check;
+                    ALTER TABLE position_legs ADD CONSTRAINT position_legs_provenance_check
+                        CHECK (provenance IN ('PRINCIPAL_REPORTED', 'SCREEN_VERIFIED',
+                                              'BROKER_VERIFIED', 'IMPORTED', 'UNKNOWN'));
+                END $$
+            """),
+            ("screen verification needs its evidence: unified_positions", """
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                                    WHERE conname = 'unified_positions_screen_needs_evidence') THEN
+                        ALTER TABLE unified_positions ADD CONSTRAINT unified_positions_screen_needs_evidence
+                            CHECK (provenance <> 'SCREEN_VERIFIED'
+                                   OR (verified_event IS NOT NULL AND verified_at IS NOT NULL));
+                    END IF;
+                END $$
+            """),
+            ("screen verification needs its evidence: position_lots", """
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                                    WHERE conname = 'position_lots_screen_needs_evidence') THEN
+                        ALTER TABLE position_lots ADD CONSTRAINT position_lots_screen_needs_evidence
+                            CHECK (provenance <> 'SCREEN_VERIFIED'
+                                   OR (verified_event IS NOT NULL AND verified_at IS NOT NULL));
+                    END IF;
+                END $$
+            """),
+            ("screen verification needs its evidence: position_legs", """
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                                    WHERE conname = 'position_legs_screen_needs_evidence') THEN
+                        ALTER TABLE position_legs ADD CONSTRAINT position_legs_screen_needs_evidence
+                            CHECK (provenance <> 'SCREEN_VERIFIED'
+                                   OR (verified_event IS NOT NULL AND verified_at IS NOT NULL));
+                    END IF;
+                END $$
+            """),
             # R-IV.463(c) (migrations/049): the side a position was entered on, for a set of legs
             # whose value can take either sign.
             ("entry side column", """
