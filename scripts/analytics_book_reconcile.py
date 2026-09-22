@@ -88,8 +88,14 @@ async def main(days: int) -> int:
     print(f"    unexplained     {round(surplus - explained, 2):+,.2f}   <- must be 0.00\n")
     print(f"  kept visible, not summed:")
     print(f"    undated terminal  {len(undated)} rows  (realized on them {s(undated):+,.2f})")
+    # R-IV.465(e): the chip counts rows with NEITHER realized nor outcome; this counts rows with
+    # no realized FIGURE. The difference is rows the sweep ended with an explicit UNKNOWN, and
+    # naming it here stops two right numbers from reading as a disagreement.
+    no_outcome_either = [r for r in no_result if not r.get("trade_outcome")]
     print(f"    no result         {len(no_result)} rows  "
-          f"({sum(1 for r in no_result if r['backfill_exempt'])} exempt, Group E)")
+          f"({sum(1 for r in no_result if r['backfill_exempt'])} exempt, Group E; "
+          f"{len(no_outcome_either)} with no outcome either -- the chip's count, "
+          f"{len(no_result) - len(no_outcome_either)} ended UNKNOWN by the sweep)")
     print(f"    retired excluded  {new['retired_excluded']} rows\n")
     print(f"  chip (book mode) said: {chip.get('trades_orphans')} closed trades "
           f"{chip.get('trades_orphans_pnl'):+,.2f} not linked to the book; "
