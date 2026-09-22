@@ -124,12 +124,23 @@ def test_the_refusal_names_the_row_and_the_paths():
 
 
 def test_boot_mirrors_it_one_statement_at_a_time():
+    """R-IV.449: a refused statement must never end the rest of the bootstrap.
+
+    Read structurally rather than by distance: the loop grows with every ruling, and a guard
+    that measures characters fails on the growth instead of on the property.
+    """
+    import ast
     boot = BOOT.read_text(encoding="utf-8")
     assert "trg_unified_positions_terminal_needs_exit" in boot
-    i = boot.index("terminal-needs-exit function")
-    loop_end = boot.index("except Exception as e:", i)
-    assert "for _label, _sql in" in boot[i - 3000:i] and loop_end - i < 12000, (
-        "a refused statement must never end the rest of the bootstrap (R-IV.449)")
+    loops = [n for n in ast.walk(ast.parse(boot))
+             if isinstance(n, ast.For) and isinstance(n.target, ast.Tuple)
+             and [e.id for e in n.target.elts if isinstance(e, ast.Name)] == ["_label", "_sql"]]
+    assert loops, "the guarded statement loop is gone"
+    holding = [n for n in loops
+               if "terminal-needs-exit function" in ast.get_source_segment(boot, n.iter)]
+    assert holding, "the terminal-status statements are not in the guarded loop"
+    body = ast.get_source_segment(boot, holding[0])
+    assert "try:" in body and "except Exception as e:" in body and "conn.execute(_sql)" in body
 
 
 def test_the_known_consequence_is_on_the_face():
