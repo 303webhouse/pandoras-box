@@ -113,12 +113,54 @@ def _numeric_text(value) -> str:
     return str(value)
 
 
+_BOOT_ROW_ID: Optional[int] = None
+
+
 async def _record_boot(conn) -> None:
-    """R-IV.464(f): name the build this boot is running, for the row the DDL loop writes."""
+    """Record THIS boot before anything else is attempted (R-IV.464(f), R-IV.465 follow-up).
+
+    It was written inside the schema loop and so was only written when the schema work reached
+    it: the deploys of 2026-09-20 recorded themselves, and the restart at 15:21:32 UTC that ran
+    for the next 53 hours did not. **A record that exists only when everything else worked is not
+    a record of what happened.** It is now the first write of the boot, in its own transaction,
+    and a failure here is logged and never blocks startup.
+
+    The row is completed at the end of init_database. A row that never gains its completion note
+    is a boot whose schema init did not finish -- readable in SQL, without a console.
+    """
+    global _BOOT_ROW_ID
+    _BOOT_ROW_ID = None
     sha = (os.getenv("RAILWAY_GIT_COMMIT_SHA") or os.getenv("GIT_COMMIT_SHA")
            or os.getenv("SOURCE_COMMIT") or "")
-    if sha:
-        await conn.execute("SELECT set_config('app.commit_sha', $1, false)", sha[:40])
+    try:
+        async with conn.transaction():
+            await conn.execute("SELECT set_config('app.actor', $1, true)", "boot-migration")
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS service_boots (
+                    id          BIGSERIAL   PRIMARY KEY,
+                    booted_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    commit_sha  TEXT,
+                    note        TEXT
+                )""")
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_service_boots_at ON service_boots (booted_at DESC)")
+            _BOOT_ROW_ID = await conn.fetchval(
+                "INSERT INTO service_boots (commit_sha, note) VALUES ($1, $2) RETURNING id",
+                sha[:40] or None, "boot")
+    except Exception as e:
+        print(f"WARNING: boot not recorded: {type(e).__name__}: {e}")
+
+
+async def _mark_schema_ready(conn) -> None:
+    """The boot's row gains its completion note once the schema work is done."""
+    if _BOOT_ROW_ID is None:
+        return
+    try:
+        await conn.execute(
+            "UPDATE service_boots SET note = $1 WHERE id = $2",
+            "boot; schema init complete", _BOOT_ROW_ID)
+    except Exception as e:
+        print(f"WARNING: boot completion not recorded: {type(e).__name__}: {e}")
 
 
 async def _init_connection(conn) -> None:
@@ -1110,24 +1152,6 @@ async def init_database():
                             CHECK (entry_side IS NULL OR entry_side IN ('DEBIT', 'CREDIT'));
                     END IF;
                 END $$
-            """),
-            # R-IV.464(f) (migrations/051): every boot records itself, so a restart is visible
-            # in the book's own store rather than only in a deployment console.
-            ("service boots table", """
-                CREATE TABLE IF NOT EXISTS service_boots (
-                    id          BIGSERIAL   PRIMARY KEY,
-                    booted_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    commit_sha  TEXT,
-                    note        TEXT
-                )
-            """),
-            ("service boots index", """
-                CREATE INDEX IF NOT EXISTS idx_service_boots_at ON service_boots (booted_at DESC)
-            """),
-            ("this boot", """
-                INSERT INTO service_boots (commit_sha, note)
-                VALUES (NULLIF(COALESCE(current_setting('app.commit_sha', true), ''), ''),
-                        'init_database')
             """),
             # R-IV.463(e) (migrations/050): an INSERT is audited like any other write -- a row
             # written straight into the book was the one write with no trail.
@@ -2323,6 +2347,10 @@ async def init_database():
         except Exception as e:
             print(f"WARNING: divergence_events table creation skipped: {e}")
 
+        # R-IV.464(f): the boot's own row gains its completion note here. A row without it is a
+        # boot whose schema init did not finish -- the state that hid the 2026-09-20 15:21:32
+        # restart, when the record itself sat behind the work it was meant to witness.
+        await _mark_schema_ready(conn)
         print("Database schema initialized")
 
 async def log_signal(

@@ -44,6 +44,24 @@ SELECT booted_at, commit_sha FROM service_boots ORDER BY booted_at DESC LIMIT 20
 
 Two boots of the same commit with no deploy between them is a restart, and its instant is the row.
 
+## THE RECORD MISSED THE NEXT ONE (measured 2026-09-22)
+
+`service_boots` recorded the two deploys of 2026-09-20 (04:21:24 and 06:53:58 UTC) and **missed a
+restart**: `/health` reports the running process started **2026-09-20 15:21:32 UTC** and has run
+since (53 hours at the time of measurement), and no row exists for it.
+
+**The record sat behind the work it was meant to witness.** The insert was one entry in
+`init_database`'s guarded statement loop, so it was written only when the schema work reached it.
+A boot whose schema init aborts earlier -- a lock timeout on an ALTER is the likely way -- boots
+anyway, serves traffic, and leaves no trace.
+
+**Fixed:** the row is now the FIRST write of the boot, in its own transaction, before any schema
+work, and a failure to record is logged rather than fatal. The row gains a completion note at the
+end of `init_database`, so **a row without it is a boot whose schema init did not finish** -- also
+readable in SQL, without a console. Both are what the next restart will be read from.
+
+> A record that exists only when everything else worked is not a record of what happened.
+
 ## STILL OPEN
 
 - **This restart's cause.** Not recoverable from here.

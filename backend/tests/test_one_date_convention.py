@@ -184,7 +184,55 @@ def test_a_boot_leaves_a_row_in_both_mirrors():
     boot = (ROOT / "backend" / "database" / "postgres_client.py").read_text(encoding="utf-8")
     for text in (mig, boot):
         assert "CREATE TABLE IF NOT EXISTS service_boots" in text
-    assert "INSERT INTO service_boots" in boot
     from database import postgres_client as PC
     assert "RAILWAY_GIT_COMMIT_SHA" in inspect.getsource(PC._record_boot)
     assert "await _record_boot(conn)" in inspect.getsource(PC.init_database)
+
+
+def test_the_boot_is_recorded_before_the_schema_work_not_inside_it():
+    """Measured 2026-09-22: the two deploys of 09-20 recorded themselves and the restart at
+    15:21:32 UTC -- which then ran for 53 hours -- did not, because the insert sat inside the
+    schema loop. A record that exists only when everything else worked is not a record."""
+    from database import postgres_client as PC
+    src = inspect.getsource(PC.init_database)
+    assert src.index("await _record_boot(conn)") < src.index("for _label, _sql in")
+    assert "INSERT INTO service_boots" not in src, "the row is not written by the schema loop"
+    rec = inspect.getsource(PC._record_boot)
+    assert "INSERT INTO service_boots" in rec and "async with conn.transaction():" in rec
+    assert "except Exception" in rec, "a boot that cannot be recorded still boots"
+
+
+def test_a_boot_row_says_whether_the_schema_work_finished():
+    from database import postgres_client as PC
+    assert "boot; schema init complete" in inspect.getsource(PC._mark_schema_ready)
+    assert "await _mark_schema_ready(conn)" in inspect.getsource(PC.init_database)
+
+
+def test_the_boot_record_writes_in_order_and_completes(monkeypatch):
+    from database import postgres_client as PC
+    calls = []
+
+    class Conn:
+        async def execute(self, sql, *a):
+            calls.append((" ".join(sql.split())[:60], a))
+
+        async def fetchval(self, sql, *a):
+            calls.append((" ".join(sql.split())[:60], a))
+            return 77
+
+        def transaction(self):
+            class _T:
+                async def __aenter__(s): return None
+                async def __aexit__(s, *a): return False
+            return _T()
+
+    monkeypatch.setenv("RAILWAY_GIT_COMMIT_SHA", "abc1234def")
+    conn = Conn()
+    _run(PC._record_boot(conn))
+    assert PC._BOOT_ROW_ID == 77
+    assert any(c[0].startswith("CREATE TABLE IF NOT EXISTS service_boots") for c in calls)
+    assert any(c[0].startswith("INSERT INTO service_boots") and c[1] == ("abc1234def", "boot")
+               for c in calls)
+    _run(PC._mark_schema_ready(conn))
+    assert ("UPDATE service_boots SET note = $1 WHERE id = $2",
+            ("boot; schema init complete", 77)) in [(c[0], c[1]) for c in calls]
