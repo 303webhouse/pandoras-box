@@ -7,14 +7,17 @@
   const tone = (v) => v == null ? '' : v > 0 ? 'pm-up' : v < 0 ? 'pm-down' : '';
 
   const PROV = {
+    UNKNOWN: ['unknown', 'unknown', 'Lowest rung: nothing says where this came from.'],
     BROKER_VERIFIED: ['verified', 'broker verified', 'A broker record backs this row (reference on file).'],
-    SCREEN_VERIFIED: ['screen', 'screen read', 'Read off a broker screen; an export line will supersede it.'],
+    SCREEN_VERIFIED: ['screen', 'screen read', 'Read off a broker screen; an import or broker record will supersede it.'],
     PRINCIPAL_REPORTED: ['reported', 'reported', 'Reported by the principal; no broker evidence yet.'],
-    IMPORTED: ['imported', 'imported', 'Loaded from a file; not independently confirmed.'],
+    IMPORTED: ['imported', 'imported', 'Loaded from an export file; ranks above a screen read, below a broker-referenced record.'],
   };
   const prov = (p) => { const [s, l, t] = PROV[p] || ['reported', p, '']; return `<span class="pm-chip" data-state="${s}" title="${esc(t)}">${esc(l)}</span>`; };
   const chip = (state, label, title) => `<span class="pm-chip" data-state="${state}"${title ? ` title="${esc(title)}"` : ''}>${esc(label)}</span>`;
-  const mockBanner = () => `<div class="pm-banner">Mock data — layout only · ${esc(P.label)} · figures are invented, the principal approves or adjusts the layout</div>`;
+  const ladder = () => `<div class="pm-ladder">Provenance, weakest to strongest: ${P.ladder.map((k) => prov(k)).join(' <span class="pm-dim">&lt;</span> ')}</div>`;
+  const buckets = () => `<div class="pm-ladder">Buckets: ${P.buckets.map(([n, d]) => `<span class="pm-tag">${esc(n)}${d ? ' · ' + esc(d) : ''}</span>`).join(' ')}</div>`;
+  const mockBanner = () => `<div class="pm-banner">Mock data — layout only · ${esc(P.label)} · every figure is invented, the principal approves or adjusts the layout</div>${ladder()}${buckets()}`;
 
   function markCell(p) {
     if (p.mark == null) return `<span class="pm-amber" title="no mark: the source could not price this position">UNAVAILABLE</span>`;
@@ -31,12 +34,14 @@
     const scale = Math.max(s.ceiling, s.atRisk) * 1.15;
     const pct = (v) => Math.min(100, (v / scale) * 100).toFixed(1);
     const headroom = s.ceiling - s.atRisk;
-    const cashOk = s.cash >= s.cashFloor;
-    return `<div class="pm-gauge" role="img" aria-label="${esc(s.account)}: at risk ${usd(s.atRisk)} of ${usd(s.ceiling)} ceiling; cash ${usd(s.cash)} against a ${usd(s.cashFloor)} floor">
-      <div class="pm-g-head"><span class="pm-g-name">${esc(s.account)} <span class="pm-dim">${esc(s.kind)}</span></span>
-        <span class="pm-g-fig">${usd(s.atRisk)} at risk of ${usd(s.ceiling)} ceiling · headroom <b class="${headroom < 0 ? 'pm-down' : ''}">${usd(headroom)}</b></span></div>
-      <div class="pm-g-track"><i class="pm-g-fill" style="width:${pct(s.atRisk)}%"></i><b class="pm-g-ceil" style="left:${pct(s.ceiling)}%" title="ceiling ${usd(s.ceiling)}"></b></div>
-      <div class="pm-g-foot"><span>Cash ${usd(s.cash)} vs floor ${usd(s.cashFloor)} ${cashOk ? chip('verified', 'above floor') : chip('reported', 'BELOW FLOOR')}</span><span class="pm-dim">balance ${usd(s.balance)}</span></div>
+    const floor = s.cashFloor != null;
+    const cashOk = !floor || s.cash >= s.cashFloor;
+    return `<div class="pm-gauge" role="img" aria-label="${esc(s.account)}: ${esc(s.measure)} ${usd(s.atRisk)} of ${usd(s.ceiling)}${floor ? '; cash ' + usd(s.cash) + ' against a ' + usd(s.cashFloor) + ' floor' : ''}">
+      <div class="pm-g-head"><span class="pm-g-name">${esc(s.account)} <span class="pm-dim">${esc(s.kind)}</span> ${chip('unknown', 'mock', 'Invented figures')}</span>
+        <span class="pm-g-fig">${usd(s.atRisk)} ${esc(s.measure)} of ${usd(s.ceiling)} · headroom <b class="${headroom < 0 ? 'pm-down' : ''}">${usd(headroom)}</b></span></div>
+      <div class="pm-dim">${esc(s.rule)}</div>
+      <div class="pm-g-track"><i class="pm-g-fill" style="width:${pct(s.atRisk)}%"></i><b class="pm-g-ceil" style="left:${pct(s.ceiling)}%" title="limit ${usd(s.ceiling)}"></b></div>
+      <div class="pm-g-foot"><span>${floor ? `Cash ${usd(s.cash)} vs $200 always-in-cash floor ${cashOk ? chip('verified', 'above floor') : chip('reported', 'BELOW FLOOR')}` : `Cash ${usd(s.cash)}`}</span><span class="pm-dim">balance ${usd(s.balance)}</span></div>
     </div>`;
   }
 
@@ -93,10 +98,10 @@
     return `<form class="pm-ticket" onsubmit="return false"><h4>Pre-trade ticket <span class="pm-dim">— the only way a new position enters (X8)</span></h4>
       <div class="pm-tape">Tape: ${chip('reported', t.tape.state)} <span class="pm-dim">${esc(t.tape.detail)}</span></div>
       <label>Trade direction<select><option>bearish (with the tape)</option><option>bullish (AGAINST the tape)</option><option>neutral</option></select></label>
-      <label>Bucket<select><option>B1 thesis</option><option>B2 swing</option><option>B3 income</option></select></label>
+      <label>Bucket<select>${P.buckets.map(([n, d]) => `<option>${esc(n)}${d ? ' — ' + esc(d) : ''}</option>`).join('')}</select></label>
       <label>Ticker / structure<input value="e.g. IWM put debit spread 215/210"></label>
       <label>Max loss<input value="$120"></label>
-      <div class="pm-caps">${chip('verified', 'within sleeve ceiling: headroom $188')} ${chip('verified', 'cash stays above $200 floor')}</div>
+      <div class="pm-caps">${chip('verified', 'within sleeve ceiling: headroom $556 (mock)')} ${chip('verified', 'cash stays above $200 (mock)')}</div>
       <label>Stop written<select><option>broker order</option><option>daily-close</option><option>none — say why</option></select></label>
       <label>Invalidation<input value="what makes this wrong"></label>
       <label>Time stop<input value="date or DTE"></label>
@@ -124,5 +129,5 @@
       <div class="pm-dim">Exist today: list, summary, single, lots (list/add), legs (list/add/edit), verify / screen-verify, close, reduce, patch, correct-realized, closed-from-evidence.</div></details>`;
   }
 
-  window.PMP = { esc, usd, prov, chip, mockBanner, gauge, bookTable, bookRow, bookHead, detail, actions, ticket, history, missing, sleeves: P.sleeves, open: P.open };
+  window.PMP = { ladder, buckets, esc, usd, prov, chip, mockBanner, gauge, bookTable, bookRow, bookHead, detail, actions, ticket, history, missing, sleeves: P.sleeves, open: P.open };
 })();
