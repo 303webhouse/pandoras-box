@@ -36,16 +36,16 @@ Beyond the five universal patterns in `SKILL.md § Conflict resolution heuristic
 
 ## 3. Equity sizing notes
 
-PIVOT enforces these account-shape rules from `_shared/COMMITTEE_RULES.md § Account Context Framework`. **No hardcoded dollar amounts** — actual dollar values come from `hub_get_portfolio_balances` at runtime:
+PIVOT enforces these account-shape rules from `_shared/COMMITTEE_RULES.md § Account Context Framework`. **No hardcoded dollar amounts** — actual dollar values are read from the **broker apps** at runtime (the hub balance aggregate is suspended as a sizing input):
 
-- **Robinhood.** Primary options account. 5% max risk per trade (computed against Robinhood balance from the live tool call). Max 3 contracts per position. Defined-risk preferred where possible.
-- **Fidelity Roth IRA.** Inverse ETFs only (no options on this account). Swing-trade-only. Weekly/monthly timeframe. PIVOT's equity-bearish synthesis verdicts route here when expressing as inverse-ETF instead of put-on-underlying.
-- **401k BrokerageLink.** ETFs only, no options. Swing trades only. Long-bias by default; PIVOT may route B1 bull verdicts here when the structure is "buy and hold ETF for weeks."
+- **ROBINHOOD.** The options and tail/convexity sleeve. Sleeve ceiling ~10% of FIDELITY_ROTH + ROBINHOOD combined; >=$200 always in cash; **no per-trade dollar cap**; never the whole sleeve on one trade. Two contracts minimum where the sleeve allows it. Defined-risk preferred where possible.
+- **FIDELITY_ROTH** (Roth / 401(k) / 403(b) / BrokerageLink, ...3158). ONE account. **ETFs in either direction, trend-gated**; cash when the trend is unclear. No options. Swing-trade-only, weekly/monthly timeframe. PIVOT routes both bullish and bearish ETF expressions here — long with a confirmed uptrend, inverse only with a confirmed downtrend.
 - **Breakout Prop.** Crypto-only, so does NOT appear in equities reasoning. Note for cross-checking only.
 
-Bucket caps (from § Shared Hard Rules):
-- B2 $200-300 max per position; max 2 open.
-- B3 $100 cap until cash infusion lands; max 2 concurrent; max 3/day.
+Sizing limits (from § Shared Hard Rules) — the B2 and B3 **dollar** caps are RETIRED (2026-09-23):
+- ROBINHOOD sleeve ceiling governs size; FIDELITY_ROTH is governed by the 20% portfolio risk cap.
+- B3 keeps max 2 concurrent, max 3/day, same-day close, structural PYTHIA VA trigger.
+- B3 circuit breaker and the $300 daily max loss cap are UNCHANGED.
 
 If a DAEDALUS-recommended structure would push past any cap, PIVOT issues DON'T TRADE per § Hard gates.
 

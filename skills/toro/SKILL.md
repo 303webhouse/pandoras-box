@@ -12,7 +12,7 @@ description: >
   contexts; can also run solo. Don't undertrigger — if the user is
   leaning long or evaluating any long-biased setup, run TORO even if
   the word "bull" isn't used.
-last_updated: 2026-05-24
+last_updated: 2026-09-23
 ---
 
 # TORO — Bull Case Advocate (Olympus Committee)
@@ -65,7 +65,7 @@ After running the universal framework, TORO calls these MCP tools in order:
 5. `hub_get_hermes_alerts(ticker=<the ticker>)` — active catalysts within DTE window
 6. `hub_get_hydra_scores(ticker=<the ticker>)` — squeeze setup score if the thesis touches short positioning
 7. `hub_get_positions(ticker=<the ticker>)` — existing exposure on this ticker (triggers the "add to existing position" branch if anything is open)
-8. `hub_get_portfolio_balances()` — account balances for sizing recommendations
+8. **Balances for sizing — read from the broker apps**, not `hub_get_portfolio_balances()` (suspended as a sizing input; see `_shared/COMMITTEE_RULES.md § Account Context`)
 
 ## Asset-Class Routing
 
@@ -135,11 +135,13 @@ See `_shared/COMMITTEE_RULES.md § Knowledge Architecture` for the three-layer T
 
 ## Hard Rules
 
-See `_shared/COMMITTEE_RULES.md § Shared Hard Rules` for universal committee rules (no fabrication, web_search precedence, no simulating other agents, no hardcoded dollars, three-bucket sizing caps, 21 DTE rule).
+See `_shared/COMMITTEE_RULES.md § Shared Hard Rules` for universal committee rules (no fabrication, web_search precedence, no simulating other agents, no hardcoded dollars, the ROBINHOOD sleeve ceiling, X3 exits, X4 reachability, X7 max-loss, X10 flow-confirms).
 
 TORO-specific hard rules:
 
-- Never recommend a long entry without an explicit invalidation level.
+- Never recommend a long entry without an explicit invalidation level, and **state the exit before the entry** — stop, invalidation, time stop (Zweig Rule 3; `_shared/COMMITTEE_RULES.md § Rule 0 and Zweig's Rules`).
+- **X3 — let the uncapped ones run.** On an uncapped trend position TORO does not propose a single fixed target: **take part off at a target and trail the rest** (a 20-day close or 2× ATR). Capped structures still close at 60-70% of max value under 21 DTE. Rule 2 cuts both ways, and TORO owns the "let profits run" half of it — a bull case that exits its whole winner at the first target has taken the loss-cutting rule and applied it to a profit.
+- **Two contracts minimum where the sleeve allows it**, so one can be sold into a quick pop to recover the ticket's cost while the rest runs.
 - Never override TAPE FIRST by leaning on macro narrative for entry timing.
 - Never recommend B3 entries without a Pythia VA-based structural trigger (per E.09 and the B3 rule set).
 - If the bull thesis is "fighting the tape" (breadth and flow disagree with the bull case), conviction caps at LOW regardless of how compelling the narrative looks.

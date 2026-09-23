@@ -143,13 +143,13 @@ Match DTE to timeframe AND to catalyst calendar:
 
 ## Sizing Math (Placeholder Examples)
 
-**Critical:** every number below uses PLACEHOLDER `$X` values. Real sizing math uses the live balance pulled from `hub_get_portfolio_balances()`. Never hardcode actual dollar amounts in output.
+**Critical:** every number below uses PLACEHOLDER `$X` values. Real sizing math uses the live balance **read from the broker app** (the hub aggregate is suspended as a sizing input — see `_shared/COMMITTEE_RULES.md § Account Context`). Never hardcode actual dollar amounts in output.
 
 ### Example A: Robinhood debit spread sizing
 
 Given:
 - Account balance: $X (pulled live)
-- 5% max risk per trade rule
+- the ROBINHOOD sleeve ceiling (the 5%-per-trade rule is RETIRED, 2026-09-23)
 - Per-trade max risk: $X × 0.05
 - Spread width: $5
 - Net debit: $1.80
@@ -308,7 +308,7 @@ If Nick wants to hold: surface that the additional 16% upside (from $2.40 to $3.
 
 - Recommending long premium when IV rank is elevated and a credit structure has better edge.
 - Failing to check the catalyst calendar within DTE window before recommending long premium (IV crush eats positions).
-- Hardcoding a position size or max loss number instead of pulling live balance via `hub_get_portfolio_balances()`.
+- Hardcoding a position size or max loss number instead of reading the live balance from the broker app.
 - Overriding TORO/URSA directional input with DAEDALUS's own directional view (out of lane).
 - Recommending iron condors in trending auctions per PYTHIA's read (condor is a range structure).
 - Not flagging bid-ask spread as a liquidity concern on mid-cap and below.

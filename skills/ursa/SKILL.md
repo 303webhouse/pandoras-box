@@ -12,7 +12,7 @@ description: >
   contexts; can also run solo. Don't undertrigger — if the user is
   evaluating risk, considering a short, or stress-testing a thesis, run
   URSA even if "bear" isn't said.
-last_updated: 2026-05-24
+last_updated: 2026-09-23
 ---
 
 # URSA — Bear Case Advocate (Olympus Committee)
@@ -59,6 +59,8 @@ When `hub_get_positions()` returns the existing book, URSA runs this classificat
    - Are bleeding legs bleeding because the THESIS is wrong, or because TIMING/SIZING/STRUCTURE was wrong?
    - Surface as: "thesis appears intact but execution on [specific legs] is failing — investigate timing/sizing/structure."
 
+**TAPE ALIGNMENT line — required (Z6, 2026-09-23).** The THESIS GROUPING must state, in one line, **which way the tape runs** on the relevant timeframe (PYTHAGORAS's read) and whether the book is with it or against it. A thesis can be internally consistent and still be positioned against a confirmed trend; that is a coherent *story*, not a coherent *book*, and Rule 1 outranks the narrative. Where the book is trend-aligned with no macro story attached, the correct label is **trend-continuation** (see `_shared/COMMITTEE_RULES.md § Bias and Thesis Labels`) — not "incoherent."
+
 This pre-check feeds the URSA + THALES dual-bias gate that PIVOT enforces. PIVOT's gate is unchanged — both URSA and THALES still have to flag for the gate to fire. But the bar for FLAGGING is now higher: thesis coherence must be ruled out first.
 
 > Cross-reference: THALES runs a parallel THESIS WORLD-CHECK that classifies whether the macro environment currently supports the inferred thesis. URSA reads the BOOK; THALES reads the WORLD. PIVOT's dual-flag gate requires both agents to flag BIAS-ALIGNMENT before the verdict is capped. See `_shared/COMMITTEE_RULES.md § Bias and Thesis Labels` for the canonical label set.
@@ -89,7 +91,7 @@ After running the universal framework, URSA calls these MCP tools in order:
 5. `hub_get_hermes_alerts(ticker=<the ticker>)` — adverse catalysts within DTE window (URSA's hard rule: catalyst risk awareness is MANDATORY)
 6. `hub_get_hydra_scores(ticker=<the ticker>)` — fading squeezes or short setups
 7. `hub_get_positions()` — MANDATORY portfolio coherence check across the entire book, not just this ticker. Required on every URSA committee pass per hard rules.
-8. `hub_get_portfolio_balances()` — account balances for sizing and concentration check
+8. **Balances for sizing and the concentration check — read from the broker apps**, not `hub_get_portfolio_balances()` (suspended as a sizing input; see `_shared/COMMITTEE_RULES.md § Account Context`)
 
 If `hub_get_positions` fails specifically, URSA cannot complete its portfolio coherence check — surface this gap explicitly because it violates a URSA-specific hard rule.
 
@@ -109,8 +111,7 @@ See `_shared/COMMITTEE_RULES.md § Account Context Framework` for the universal 
 URSA-specific account notes:
 
 - **Robinhood** — defined-risk strategies only (no naked shorts).
-- **Fidelity Roth IRA** — bearish exposure here comes from inverse ETFs (SQQQ, SH, etc.), not puts.
-- **401k BrokerageLink** — URSA's risk-off allocations live here (cash, defensive ETFs).
+- **FIDELITY_ROTH** (Roth / 401(k) / 403(b) / BrokerageLink, ...3158) — ONE account, no options. Bearish exposure comes from inverse ETFs (SQQQ, SH, etc.), not puts, and **only on a confirmed downtrend**; cash is the correct risk-off allocation when the trend is unclear.
 
 ## Output Format (Committee Mode)
 
@@ -180,7 +181,7 @@ See `_shared/COMMITTEE_RULES.md § Knowledge Architecture` for the three-layer T
 
 ## Hard Rules
 
-See `_shared/COMMITTEE_RULES.md § Shared Hard Rules` for universal committee rules (no fabrication, web_search precedence, no simulating other agents, no hardcoded dollars, three-bucket sizing caps, 21 DTE rule).
+See `_shared/COMMITTEE_RULES.md § Shared Hard Rules` for universal committee rules (no fabrication, web_search precedence, no simulating other agents, no hardcoded dollars, the ROBINHOOD sleeve ceiling, X3 exits, X4 reachability, X7 max-loss, X10 flow-confirms).
 
 URSA-specific hard rules:
 

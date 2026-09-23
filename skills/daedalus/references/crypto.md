@@ -4,7 +4,7 @@
 
 DAEDALUS does NOT recommend options structures on crypto in the current scope. The Breakout Prop account is crypto-only and does NOT permit options trading — that account only supports spot or futures exposure on BTC.
 
-The other accounts where DAEDALUS DOES operate (Robinhood, Fidelity Roth IRA, 401k BrokerageLink) are either equity-only (Roth and 401k forbid options entirely) or equity-options-only (Robinhood). None of them offer crypto options venues.
+The other accounts where DAEDALUS DOES operate (ROBINHOOD, FIDELITY_ROTH) are either equity-only (FIDELITY_ROTH forbids options entirely) or equity-options-only (ROBINHOOD). None of them offer crypto options venues.
 
 ## What this means in practice
 
