@@ -155,8 +155,12 @@ CREATE TABLE IF NOT EXISTS stable_live_strip (
     value       DOUBLE PRECISION,            -- % change (index/sector/fx) or yield percent
     day_change  DOUBLE PRECISION,            -- indices: n/a; yields: basis points; spread: bp
     extra       DOUBLE PRECISION,            -- yields: raw level; free slot otherwise
-    as_of       TIMESTAMPTZ
+    as_of       TIMESTAMPTZ,
+    reason      TEXT                         -- why value is NULL; rendered as UNAVAILABLE
 );
+-- Additive for deployments created before the reason column existed: CREATE TABLE
+-- IF NOT EXISTS above is a no-op on them, so the column has to be added explicitly.
+ALTER TABLE stable_live_strip ADD COLUMN IF NOT EXISTS reason TEXT;
 
 CREATE TABLE IF NOT EXISTS stable_intraday_points (
     symbol  TEXT NOT NULL,

@@ -73,7 +73,7 @@ async def _latest_snapshot(conn):
 async def _strip_rows(conn, kinds: tuple) -> tuple[list, object, bool]:
     ph = ",".join(f"${i+1}" for i in range(len(kinds)))
     rows = await conn.fetch(
-        f"SELECT symbol, kind, value, day_change, extra, as_of FROM stable_live_strip WHERE kind IN ({ph}) ORDER BY symbol",
+        f"SELECT symbol, kind, value, day_change, extra, as_of, reason FROM stable_live_strip WHERE kind IN ({ph}) ORDER BY symbol",
         *kinds,
     )
     as_of = max((r["as_of"] for r in rows if r["as_of"]), default=None)
