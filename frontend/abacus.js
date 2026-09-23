@@ -64,7 +64,24 @@
     return Number.isFinite(t) ? new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric' }).format(new Date(t)) : '';
   };
   const SUMMARY_VERSION = 1;
-  const chip = (state, label) => `<span class="ab-chip" data-state="${esc(state)}">${esc(label)}</span>`;
+  const chip = (state, label, title) => `<span class="ab-chip" data-state="${esc(state)}"${title ? ` title="${esc(title)}"` : ''}>${esc(label)}</span>`;
+  // R-IV.484(c) — the census beside a live stat: how many closed/expired positions in the
+  // window were counted, and why the rest were not (basis-incomplete, return past -100% of
+  // basis, or a realized_pnl the book never recorded). Those rows are never averaged in
+  // silently, so the chip is how the reader sees that they existed.
+  function coverageChip(cov) {
+    if (!cov) return '';
+    const ex = cov.excluded || {};
+    const flagged = (ex.basis_incomplete || 0) + (ex.return_below_neg100pct || 0) + (ex.no_realized_pnl || 0);
+    if (!cov.total) return ' ' + chip('unknown', 'no closed positions in range');
+    if (!flagged) return ' ' + chip('fresh', 'n=' + cov.counted + ' of ' + cov.total);
+    const parts = [];
+    if (ex.basis_incomplete) parts.push(ex.basis_incomplete + ' basis incomplete');
+    if (ex.return_below_neg100pct) parts.push(ex.return_below_neg100pct + ' return past -100% of basis');
+    if (ex.no_realized_pnl) parts.push(ex.no_realized_pnl + ' never recorded a result');
+    return ' ' + chip('stale', 'n=' + cov.counted + ' of ' + cov.total,
+      flagged + ' excluded, never averaged in: ' + parts.join(', '));
+  }
   const isMock = (block) => !block || block.source !== 'live';
   // A block's own chip: mock is "unknown", never fresh. Live shows when it was computed (MT).
   const mtTime = (iso) => new Intl.DateTimeFormat('en-US', { timeZone: 'America/Denver', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(iso)) + ' MT';
@@ -124,7 +141,7 @@
       const nTxt = (s.n != null ? ' · n=' + s.n : '') + (s.date ? ' · trough ' + shortDate(s.date) : '');
       return `<div class="ab-stat" data-key="${esc(s.key)}">
         <span class="ab-v ${tone(s.value, s.format)}">${esc(fmt(s.value, s.format))}${q}</span>
-        <span class="ab-l">${esc(s.label)}${esc(nTxt)}${isMock(s) ? '' : ' ' + blockChip(s)}</span>
+        <span class="ab-l">${esc(s.label)}${esc(nTxt)}${isMock(s) ? '' : ' ' + blockChip(s)}${coverageChip(s.coverage)}</span>
         ${s.meaning ? `<details><summary>what it means</summary>${esc(s.meaning)}</details>` : ''}
       </div>`;
     }).join('');

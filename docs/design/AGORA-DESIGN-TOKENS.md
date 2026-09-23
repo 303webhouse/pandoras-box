@@ -463,8 +463,9 @@ Rules that follow from R6, R7 and R8:
 | flatline | `.dead` vermilion pulse | `.dead` | unchanged |
 | **payload says `session: 'closed'`** | — | — | **`.closed`, filled `--text-2`**. It ranks below `ok` globally, so the board reads closed only when every ranked feed is closed. |
 | book dot age | fabricated `60` | fabricated `60` | oldest `account_balances.updated_at`. **Superseded by `466cefc` (LIVE): `null` → `unconfirmed`**, because `updated_at` is stamped by four cash-only writers and is not the balance's vintage. The title says "balance vintage not recorded" and names the row touched longest ago. |
+| **value present but its own arithmetic does not close** (`value != extra / prior_close - 1`, beyond rounding) | — | — | **`.suspect`, `--amber` fill with a `--down` ring** (`625916f`, BUILD, reviewed under R-IV.484(g) — no new hex, both tokens existing; the ring composes "can't confirm" with "the source is wrong" rather than adding a third hue). Cell text gets `.ix-suspect` (amber, wavy `--down` underline). Ranks **below `down`, above every freshness state** — a source that admits failure is worse than one whose sum will not close, but no freshness state can redeem a number that is wrong. Only the index strip escalates to the topbar dot on `suspect` today (`v2.js:949-953`); the strip's routine freshness states still do not reach the roll-up. |
 
-**Precedence (staged):** dead > down > unconfirmed (no payload) > closed > unconfirmed (age) > ok. The global rank is dead > down > unconfirmed > ok > closed.
+**Precedence (staged):** dead > down > suspect > unconfirmed (no payload) > closed > unconfirmed (age) > ok. The global rank is dead > down > suspect > unconfirmed > ok > closed.
 
 **Rev 3 proposed a hollow amber ring for "unknown"; that is superseded.** BUILD shipped one `unconfirmed` state covering both unknown and stale, and R-IV.416(c) builds on that mapping. The **vintage chip** still separates stale (solid) from unknown (dashed), because a chip has a border to use and a dot doesn't.
 
