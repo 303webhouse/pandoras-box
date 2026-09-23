@@ -147,7 +147,7 @@ def _resolve(by_session: dict, cur, prev, repaired):
 def fetch_strip() -> dict:
     """Fetch majors + yields + sectors + FX.
 
-    Returns {'rows': [(symbol, kind, value, day_change, extra, reason)], 'as_of',
+    Returns {'rows': [(symbol, kind, value, day_change, extra, reason, prior_close)], 'as_of',
     'degraded', 'fetched', 'unresolved', 'sessions'}.
 
     A change is emitted ONLY when both closes it spans come from the two sessions
@@ -207,8 +207,12 @@ def fetch_strip() -> dict:
         pct = round((last / base - 1.0) * 100, 3) if (last is not None and base) else None
         if pct is None:
             unresolved += 1
+        # prior_close is carried so the served change can be CHECKED against the
+        # served price downstream. A percent published without the base it was
+        # divided by cannot be audited by anything that reads it.
         rows.append((out_sym or sym, kind, pct,
-                     None, round(last, digits) if last is not None else None, reason))
+                     None, round(last, digits) if last is not None else None, reason,
+                     round(base, 6) if base is not None else None))
         return pct
 
     for m in MAJORS:
@@ -221,7 +225,7 @@ def fetch_strip() -> dict:
                                       prev_session, repaired.get(ysym))
         if last is None:
             unresolved += 1
-            rows.append((tenor, "yield", None, None, None, reason))
+            rows.append((tenor, "yield", None, None, None, reason, None))
             continue
         fetched += 1
         # The level is today's own bar, so it stands on its own; only the day
@@ -234,7 +238,8 @@ def fetch_strip() -> dict:
             yld_chg[tenor] = bp
         else:
             unresolved += 1
-        rows.append((tenor, "yield", round(pct, 3), bp, round(last, 3), reason))
+        rows.append((tenor, "yield", round(pct, 3), bp, round(last, 3), reason,
+                     round(_yield_pct(base), 6) if base is not None else None))
 
     # 10y - 3m spread (percentage points; day change in bp)
     if "10Y" in yld_pct and "3M" in yld_pct:
@@ -242,7 +247,7 @@ def fetch_strip() -> dict:
         spread_bp = None
         if yld_chg.get("10Y") is not None and yld_chg.get("3M") is not None:
             spread_bp = round(yld_chg["10Y"] - yld_chg["3M"], 1)
-        rows.append(("10Y-3M", "spread", spread, spread_bp, None, None))
+        rows.append(("10Y-3M", "spread", spread, spread_bp, None, None, None))
 
     # Addendum A2: sector ETFs (day %) + FX (day % + level). Also stream yields.
     intraday = [(tenor, pct) for tenor, pct in yld_pct.items()]  # (symbol, value_for_series)
@@ -296,16 +301,17 @@ def store_strip(result: dict) -> int:
         return 0
     as_of = result.get("as_of") or datetime.now(timezone.utc)
     db.init_schema()
-    payload = [(s, k, v, dc, ex, as_of, rsn) for (s, k, v, dc, ex, rsn) in rows]
+    payload = [(s, k, v, dc, ex, as_of, rsn, pc) for (s, k, v, dc, ex, rsn, pc) in rows]
     with db.connect() as conn:
         with conn.cursor() as cur:
             execute_values(
                 cur,
-                """INSERT INTO stable_live_strip (symbol, kind, value, day_change, extra, as_of, reason)
+                """INSERT INTO stable_live_strip (symbol, kind, value, day_change, extra, as_of, reason, prior_close)
                    VALUES %s
                    ON CONFLICT (symbol) DO UPDATE SET
                      kind=EXCLUDED.kind, value=EXCLUDED.value, day_change=EXCLUDED.day_change,
-                     extra=EXCLUDED.extra, as_of=EXCLUDED.as_of, reason=EXCLUDED.reason""",
+                     extra=EXCLUDED.extra, as_of=EXCLUDED.as_of, reason=EXCLUDED.reason,
+                     prior_close=EXCLUDED.prior_close""",
                 payload,
             )
     return len(payload)
