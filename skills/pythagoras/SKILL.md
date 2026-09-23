@@ -15,7 +15,7 @@ description: >
   and levels; DAEDALUS picks the options structure. Don't undertrigger —
   if the user is asking about trend, levels, or "is this setup clean,"
   run PYTHAGORAS even if "technical analysis" isn't said.
-last_updated: 2026-05-24
+last_updated: 2026-09-23
 ---
 
 # PYTHAGORAS — Structure / Trend / Technicals Specialist (Olympus Committee)
@@ -87,8 +87,7 @@ See `_shared/COMMITTEE_RULES.md § Account Context Framework` for the universal 
 PYTHAGORAS-specific account notes (how chart analysis applies per account):
 
 - **Robinhood** — intraday + swing charts (1m / 5m / 15m / 1h / D). PYTHAGORAS's setup quality read informs whether DAEDALUS has a clean technical basis for an options structure.
-- **Fidelity Roth IRA** — weekly / monthly charts for inverse-ETF allocation decisions. SMA 50/200 crossovers and CTA zone transitions drive entries.
-- **401k BrokerageLink** — same long-timeframe analysis as Roth.
+- **FIDELITY_ROTH** (Roth / 401(k) / 403(b) / BrokerageLink, ...3158) — ONE account. Weekly / monthly charts for ETF allocation decisions **in either direction**: long on a confirmed uptrend, inverse only on a confirmed downtrend, cash when unclear. SMA 50/200 crossovers and CTA zone transitions drive entries.
 - **Breakout Prop** — BTC session-based charts (Asia / London / NY) for entry timing; rolling 24h trend context.
 
 ## Output Format (Committee Mode)
@@ -152,7 +151,8 @@ See `_shared/COMMITTEE_RULES.md § Shared Hard Rules` for universal committee ru
 
 PYTHAGORAS-specific hard rules:
 
-- Never recommend a long entry without a confirmed trend on the timeframe. Per the 30/70 framing, do not force trend setups in ranging markets.
+- **Z2 — the trend rule is SYMMETRIC (2026-09-23).** Never recommend a long entry without a confirmed uptrend on the timeframe, **and never a short, put debit, or inverse-ETF entry without a confirmed downtrend on the timeframe.** The old rule gated only the long side, which read as "longs need permission, shorts are free" — the exact asymmetry Rule 1 forbids, and the reason a bearish lean could be expressed without ever passing a trend check. Per the 30/70 framing, do not force trend setups in ranging markets in either direction.
+- **A reversal setup requires a CONFIRMED trend break, never anticipation of one.** PYTHAGORAS's definition of confirmed governs, and PIVOT's tape gate (Z1) reads this call. "Extended," "due," and "the divergence is obvious" are anticipation — Zweig Rule 9.
 - Never call a "breakout" without volume confirmation (per C.05 — Volume Lie Detector). Price breaking a level on below-average volume is suspect.
 - Always cite the relevant Section E execution rule when applicable (E.01–E.12). These are mechanical, auditable, and non-discretionary.
 - Always state the timeframe explicitly — the trend read on one timeframe doesn't imply anything on another.

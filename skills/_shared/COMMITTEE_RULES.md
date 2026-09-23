@@ -6,6 +6,61 @@ This file is the single canonical source for architectural patterns that bind ev
 
 ---
 
+## § Rule 0 and Zweig's Rules — constitutional
+
+### Rule 0 — The Tape Is The Final Arbiter
+
+Ratified as constitutional. It binds every agent, every pass, every tier.
+
+> **When any input disagrees with the tape about direction, the tape wins.** A macro view, a factor composite, a thesis, a conviction, a fundamental read or a personal opinion may size a position down or stand it aside. None of them may set direction against a confirmed trend.
+
+### Zweig's 17 rules
+
+Source: Marty Zweig, Market Technicians Association, 4/11/90 (Shearson Lehman Hutton handout). Entered 2026-09-23 on principal directive.
+
+1. The trend is your friend, don't fight the tape.
+2. Let profits run, take losses quickly.
+3. If you buy for a reason, and that reason is discounted or is no longer valid, then sell!
+4. If the values don't make sense, then don't participate. (2+2=4)
+5. The cheap get cheaper, the dear get dearer.
+6. Don't fight the FED (less valid than #1).
+7. Every indicator eventually bites the dust.
+8. Adapt to change.
+9. Don't let your opinion of what *should* happen bias your trading strategy.
+10. Don't blame your mistakes on the market.
+11. Don't play all the time.
+12. The market is not efficient, but is still tough to beat.
+13. You'll never know all the answers.
+14. If you can't sleep at night, reduce your positions or get out.
+15. Don't put too much faith in the "experts."
+16. Don't focus too much on short term information flows.
+17. Beware "New Era" thinking, i.e. it's different this time because...
+
+### How Olympus reads them
+
+**Precedence.** Rule 1 outranks every macro rule, Rule 6 included — that is Zweig's own ranking ("less valid than #1"). It is the same principle as Rule 0 above. When the tape and a macro view disagree about direction, the tape sets direction; the macro view may only size down or stand aside.
+
+**Who carries which rule into every pass.**
+
+| Seat | Rules it answers for |
+|---|---|
+| PYTHAGORAS | 1 (trend), 5 (leaders lead), 8 (adapt) |
+| URSA | 9 (opinion bias), 10 (own the mistake), 14 (sleep test), 17 (new era) |
+| DAEDALUS | 2 (exits), 4 (math that adds up), 11 (don't force it), 14 (size) |
+| THALES | 6 (Fed), 12 (tough to beat), 15 (experts), 17 (new era) |
+| PYTHIA | 1 (trending vs bracketing), 16 (short-term flow) |
+| TORO | 2 (let it run), 5 (buy strength) |
+| PIVOT | all of them — and 3, 11, 13 at the verdict |
+
+**Minimum binding — in force from the day this section is filed.**
+
+1. PIVOT's SYNTHESIS names the tape's direction (from PYTHAGORAS) and the trade's direction. If they oppose, it names Rule 1 as strained and the evidence that the trend has broken.
+2. Every agent that recommends a trade states the exit **before** the entry: where the stop lives (a broker order or a hub alert), the invalidation (Rule 3), and the time stop.
+
+**Reversal setups.** A reversal setup is valid on a **confirmed trend break** — PYTHAGORAS's definition of confirmed governs — never in anticipation of one. "It's extended," "it's due," and "the divergence is obvious" are anticipation, and Rule 9 covers them.
+
+---
+
 ## § Pre-Output Data Checklist Framework
 
 Every committee agent runs one of two pre-output data checklists depending on runtime context.
@@ -81,16 +136,17 @@ Each agent's `SKILL.md` retains a short "what it owns vs what belongs to other a
 
 ## § Account Context Framework
 
-Agents pull account balances at runtime via `hub_get_portfolio_balances()` (Context A) when sizing-relevant. NEVER hardcode dollar amounts. NEVER cite a specific account balance unless it came from a live tool call within this conversation.
+NEVER hardcode dollar amounts. NEVER cite a specific account balance unless it came from a source named below within this conversation.
+
+**Where balances come from, until further notice (principal's decision, 2026-09-23):** read the balance **from the broker apps**, not from `hub_get_portfolio_balances()`. The hub's balance aggregate is under repair; until that fix lands and this line is changed, a hub balance is not a sizing input. An agent that cannot get a broker-app figure sizes by percentage and says the dollar figure is unavailable — it does not substitute a hub number.
 
 Structural shape of Nick's accounts (role-only descriptions, no dollar amounts):
 
-- **Robinhood** — primary options account. 5% max risk per trade. Max 3 contracts.
-- **Fidelity Roth IRA** — inverse ETFs only (no options on this account). Swing trades, weekly/monthly timeframe.
-- **401k BrokerageLink** — ETFs only, no options. Swing trades.
+- **FIDELITY_ROTH** — ONE account (Roth / 401(k) / 403(b) / BrokerageLink, …3158). **ETFs in either direction, trend-gated** per Rule 0 and Z2: long an ETF only with a confirmed uptrend on its timeframe, inverse or short-side only with a confirmed downtrend, **cash when the trend is unclear**. No options on this account. Swing trades, weekly/monthly timeframe.
+- **ROBINHOOD** — the options and tail/convexity sleeve. Ceiling: **about 10% of FIDELITY_ROTH + ROBINHOOD combined**. **At least $200 stays in cash at all times.** No per-trade dollar cap. **Never the whole sleeve on one trade.**
 - **Breakout Prop** — crypto-only. Trailing drawdown floor — losing the eval = losing access. Sizing is extra conservative because of this.
 
-Live balance and buying power: `GET /api/portfolio/balances` from the hub (or the `hub_get_portfolio_balances()` MCP tool).
+**Retired 2026-09-23, do not reinstate:** the separate "401k BrokerageLink" entry (it is part of FIDELITY_ROTH, not a second account); "Fidelity Roth IRA — inverse ETFs only"; ROBINHOOD's "5% max risk per trade"; and "max 3 contracts". The sleeve ceiling above replaces the per-trade dollar caps.
 
 Each agent's `SKILL.md` may add a short agent-specific note about how it uses each account (e.g., URSA: "Robinhood — defined-risk only, no naked shorts"; PYTHIA: "Robinhood — PYTHIA's MP levels inform strike anchoring and timing; DAEDALUS owns the structure choice"). Those agent-specific addenda stay in each agent's file.
 
@@ -121,12 +177,15 @@ When URSA's THESIS GROUPING pre-check or THALES's THESIS WORLD-CHECK classify th
 - **Iran-escalation thesis.** Long energy (XLE, USO, oil-equity), long ag (CF, MOS, food), short consumer discretionary (XLY), short high-multiple growth, short credit (HYG). Macro tells: oil rising, energy leading, ag inputs firming, geopolitical headlines elevated.
 - **AI-bubble-deflation thesis.** Short AI names (IGV, software), short semis, short hyperscaler infrastructure. Macro tells: semis breaking down, IGV/software de-rating, hyperscaler capex narratives cracking.
 - **Fed-hawkish thesis.** Short long-duration (TLT puts), short rate-sensitive (XLF puts, REITs), long short-duration cash equivalents. Macro tells: 10y yield rising, dollar firming, rate-cut expectations pushed out.
-- **Pure macro-bearish bias stack.** Broad short-index exposure with no offsetting long structure and no thematic coherence tying positions together. This is the failure mode the THESIS pre-checks exist to distinguish from the three coherent theses above.
+- **Trend-continuation thesis.** The book is positioned *with* a confirmed trend and the thesis is the trend itself — no macro story required. Macro tells: PYTHAGORAS confirms the trend on the position's timeframe, leadership is consistent with it (Rule 5), and nothing in the book fights it. **This label exists because the previous four all required a macro narrative, which meant the most Zweig-compliant book on the list — long a confirmed uptrend — had no coherent label and read as incoherent.** Added per Z6, 2026-09-23.
+- **Pure macro-bearish bias stack.** Broad short-index exposure with no offsetting long structure and no thematic coherence tying positions together. This is the failure mode the THESIS pre-checks exist to distinguish from the coherent theses above.
 
 **Lane split:**
 - URSA reads BOOK coherence: do positions span multiple directions tied to a single coherent thesis?
 - THALES reads WORLD coherence: does the current macro environment support the thesis right now?
 - Both must rule out a coherent thesis before the BIAS-ALIGNMENT flag fires (per the PIVOT dual-flag gate).
+
+**TAPE ALIGNMENT line (Z6) — required in URSA's THESIS GROUPING and THALES's THESIS WORLD-CHECK.** A coherent thesis must also say **which way the tape runs**. Both agents add one line naming the tape's direction on the relevant timeframe (PYTHAGORAS's read) and whether the book is with it or against it. A thesis that is internally consistent but positioned against a confirmed trend is a coherent *story*, not a coherent *book* — Rule 1 outranks the narrative, and PIVOT is entitled to see that stated rather than inferred.
 
 **Adding a new label:** When a new coherent thesis emerges in the book (e.g., a future "AI-capex-acceleration" thesis or "China-reopening" thesis), add it here first, then update URSA and THALES references. Don't let labels drift across agent files.
 
@@ -146,10 +205,14 @@ These rules apply to every committee agent:
 
 These additional rules apply only to agents that recommend specific trade entries or sizing:
 
-- Never recommend sizing that violates three-bucket caps: B2 $200–300 max with max 2 open; B3 $100 cap until cash infusion lands, max 2 concurrent, max 3/day, same-day close, structural Pythia VA trigger required.
-- Below 21 DTE on any options expression, recommend closing at 60–70% of max value — don't hold for perfection.
-- **B3 daily circuit breaker.** Two consecutive B3 losses in a single session triggers a circuit breaker — no further B3 entries that day, regardless of direction or which agent surfaces the setup. Daily max loss cap remains $300 regardless of trade count. Applies to TORO long-B3 and URSA short-B3 entries equally; PIVOT enforces at synthesis time.
-- **20% portfolio risk cap.** Sum of max losses across all open positions must not exceed 20% of the relevant account balance pulled live from `hub_get_portfolio_balances`. DAEDALUS enforces at structure proposal; URSA surfaces in portfolio coherence check; PIVOT vetos via DON'T TRADE if a new position would push the book over the cap.
+- **Sizing is governed by the ROBINHOOD sleeve ceiling** (§ Account Context), not by per-bucket dollar caps. The B2 $200–300 cap and the B3 $100 cap are **retired** as of 2026-09-23. What survives from the bucket rules: B3 keeps max 2 concurrent, max 3/day, same-day close, and a structural PYTHIA VA trigger.
+- **B3 daily circuit breaker — UNCHANGED.** Two consecutive B3 losses in a single session triggers a circuit breaker — no further B3 entries that day, regardless of direction or which agent surfaces the setup. **The $300 daily max loss cap remains, regardless of trade count.** Applies to TORO long-B3 and URSA short-B3 entries equally; PIVOT enforces at synthesis time.
+- **Two contracts minimum, whenever the sleeve allows it.** Size a long-premium options trade so one contract can be sold into a quick pop to recover the ticket's cost while the rest runs. A one-contract ticket has no scale-out and forces an all-or-nothing exit; prefer a cheaper strike or a later expiry that admits two over a single expensive one. This is X3's scale-out applied to long premium.
+- **X3 — exits by structure.** Capped structures (verticals, condors, any defined-max-value spread) keep the **60–70% of max value under 21 DTE** rule; don't hold for perfection. Uncapped trend positions do the opposite: **take part off at a target and trail the rest** (a 20-day close or 2× ATR). Rule 2 cuts both ways — capped profits get taken, uncapped profits get run.
+- **X4 — reachability (DAEDALUS hard rule).** Break-even must sit within **1.5× the implied expected move to expiry**. A strike the underlying cannot plausibly reach is Rule 4 — the values don't make sense, so don't participate. **Applies to every bucket EXCEPT TAIL**; the tail sleeve buys unreachable strikes on purpose and is exempt by design.
+- **X7 — max loss for the portfolio cap.** An ETF or stock position counts its loss **to its written stop**: a stop order at the broker, or a daily-close stop recorded in the position's notes. **Only when neither exists does it count 100%** of the position. A stop that lives solely in someone's head is not written and does not count.
+- **20% portfolio risk cap — FIDELITY_ROTH only.** Sum of max losses across open positions must not exceed 20% of the **FIDELITY_ROTH** balance (read from the broker app, per § Account Context). ROBINHOOD is governed by its sleeve ceiling instead, not by this cap. DAEDALUS enforces at structure proposal; URSA surfaces in portfolio coherence check; PIVOT vetos via DON'T TRADE if a new position would push the book over.
+- **X10 — flow confirms, it does not originate.** On B1 and B2 trades, an options-flow read may only *confirm* a thesis that already stands on trend and structure. A trade whose entire reason is "there was flow" is Rule 16 — short-term information flow mistaken for an edge — and does not pass.
 
 Agents that do not recommend trades (PYTHIA, PYTHAGORAS, THALES) do not need to enforce the trade-sizing rules — but their structural / trend / macro reads may inform whether a trade meets these gates when other agents evaluate.
 

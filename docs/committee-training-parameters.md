@@ -135,9 +135,10 @@
 
 **R.01** — Most retail blow-ups come from SIZING, not thesis. Over-leverage kills. Even correct theses lose money if position size is wrong. This is the single most important risk principle.
 
-**R.02** — Account-specific risk limits:
-- **401(k) BrokerageLink (~$8,100):** Max 1% per trade (~$81). High-conviction exception exists but requires explicit override acknowledgment.
-- **Robinhood (~$4,698):** Max 5% per trade (~$235), ONLY for asymmetric setups with strong conviction and bias alignment. Defined-risk strategies preferred.
+**R.02** — Account-specific risk limits. (Rewritten 2026-09-23 on the principal's account decision. **No dollar amounts are recorded here** — balances are read from the broker apps at runtime, per `skills/_shared/COMMITTEE_RULES.md § Account Context`, while the hub's balance aggregate is suspended as a sizing input.)
+- **FIDELITY_ROTH** — ONE account (Roth / 401(k) / 403(b) / BrokerageLink, ...3158). ETFs in either direction, **trend-gated**: long only with a confirmed uptrend, inverse/short-side only with a confirmed downtrend, **cash when the trend is unclear**. No options. Governed by the **20% portfolio risk cap**, where an ETF's max loss counts to its **written stop** (broker order or a daily-close stop in the notes) and 100% only when neither exists.
+- **ROBINHOOD** — the options and tail/convexity sleeve. Governed by a **sleeve ceiling of about 10% of FIDELITY_ROTH + ROBINHOOD combined**, at least **$200 always in cash**, **no per-trade dollar cap**, and **never the whole sleeve on one trade**. Defined-risk strategies preferred. Two contracts minimum wherever the sleeve allows it, so one can be sold into a pop to recover the ticket's cost while the rest runs.
+- **RETIRED, do not reinstate:** the 1%-per-trade 401(k) limit, Robinhood's 5%-per-trade cap, "max 3 contracts", and the separate 401(k) BrokerageLink account entry. The B3 circuit breaker and the **$300 daily max loss cap** are UNCHANGED and remain in force.
 - **Breakout Prop (~$25,000):** Personal max daily loss 2.5% (~$620). Personal drawdown floor adds $500 cushion above the account's real trailing drawdown floor. Never use more than 50% of daily loss allowance.
 
 **R.03** — DEFCON circuit breaker system:
@@ -216,11 +217,11 @@
 
 **B.04** — Bias transitions are signals themselves. A shift from Toro Major to Toro Minor is a yellow flag even though it's still bullish. Deteriorating conviction matters even before the bias flips.
 
-**B.05** — Nick's personal macro bias (currently bearish due to political/fiscal/geopolitical concerns) may differ from the system bias. When they conflict: system bias governs short-term trade direction; Nick's macro view governs portfolio-level positioning and theme selection.
+**B.05** — **The tape governs direction at every tier.** (Rewritten 2026-09-23, Z4, on the principal's decision.) A macro view — Nick's or the system's — does not set the book's direction at any timeframe. What it does set: **the size of a capped thesis sleeve, and the hedge budget.** When a macro view and the tape disagree about direction, the tape wins and the macro view may size down, hedge, or stand aside. The prior form of this rule gave the macro view "portfolio-level positioning," which is direction by another name at the tier where direction matters most — Zweig Rule 6 is explicitly "less valid than #1," and Rule 0 makes the tape the final arbiter.
 
 **B.06** — Bias challenge protocol: Nick has documented tendencies toward AI-bullishness and macro-bearishness. Committee agents — especially URSA — should actively flag countersignals to these biases. Challenging bias with evidence is explicitly part of the job.
 
-**B.07** — Three-tier signal hierarchy: (1) Macro Bias (weekly/monthly regime — what direction is the tide flowing?), (2) Daily Bias (today's TICK breadth, overnight positioning, gap context), (3) Execution signals (intraday triggers from approved strategies). Execution signals must align with at least one higher tier to be tradeable.
+**B.07** — **Three-tier hierarchy: Trend (direction) -> Macro (size and hedges) -> Execution (timing).** (Rewritten 2026-09-23, Z4.) (1) **Trend** — the confirmed trend on the trade's timeframe, PYTHAGORAS's read, sets DIRECTION. (2) **Macro** — regime, Fed, positioning; sets the SIZE of the capped thesis sleeve and the HEDGE budget, never direction. (3) **Execution** — intraday triggers from approved strategies; sets TIMING. Execution must align with the trend tier to be tradeable. The prior order put Macro first and let a macro read license a trade the tape contradicted; that ordering is retired.
 
 
 ---

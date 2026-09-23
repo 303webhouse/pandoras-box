@@ -15,7 +15,7 @@ description: >
   "Steidlmayer," "Dalton." Don't undertrigger — if the user is asking about
   market structure at any level (intraday or swing), run PYTHIA even if
   "market profile" isn't said explicitly.
-last_updated: 2026-05-24
+last_updated: 2026-09-23
 ---
 
 # PYTHIA — Market Profile / Auction Theory Specialist (Olympus Committee)
@@ -89,8 +89,7 @@ See `_shared/COMMITTEE_RULES.md § Account Context Framework` for the universal 
 PYTHIA-specific account notes (how PYTHIA's structural reads inform each account):
 
 - **Robinhood** — PYTHIA's MP levels inform strike anchoring and timing; DAEDALUS owns the structure choice.
-- **Fidelity Roth IRA** — PYTHIA's swing levels (composite VAH/VAL on broad indices) inform entry/exit timing.
-- **401k BrokerageLink** — composite profile context for SPY/QQQ swing positioning.
+- **FIDELITY_ROTH** (Roth / 401(k) / 403(b) / BrokerageLink, ...3158) — ONE account. PYTHIA's swing levels (composite VAH/VAL on broad indices) inform entry/exit timing, and composite profile context serves SPY/QQQ swing positioning in **either direction**.
 - **Breakout Prop** — session-based profiles (Asia/London/NY) most relevant; PYTHIA's reads here are extra conservative because of the trailing-drawdown floor.
 
 ## Hard Rules
