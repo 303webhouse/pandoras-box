@@ -1,7 +1,14 @@
 # DEF-V2-TEXT3-CONTRAST — P2 (accessibility)
 
 **Registered:** R-IV.410(d), as H-7. **Measured:** 2026-09-16, WCAG 2.x relative luminance.
-**Surface:** `frontend/v2.css:20` — `--text-3: #5b6b85`.
+**Surface (at registration):** `frontend/v2.css:20` — `--text-3: #5b6b85`.
+**Status: FIXED for this lane's files, R-IV.495(d).** The token raised to `--text-3: #70829d`
+landed earlier (`c6a4aa8`) but two hardcoded copies still carried the old failing value:
+`v2.js`'s chart-tick colour and this file's own `.deck-tab` fallback (`var(--text-3, #5b6b85)`).
+Both now read `#70829d`, independently re-measured at 5.12 / 4.80 / 4.63 : 1 on `--bg` /
+`--panel` / `--panel-2` -- all clear the 4.5:1 AA bar. Two copies remain outside this lane's
+ownership: the deck-bar fallbacks in the legacy `styles.css` and
+`docs/components/pandora-deck-bar.md`, unchanged and still `#5b6b85`.
 
 ---
 
