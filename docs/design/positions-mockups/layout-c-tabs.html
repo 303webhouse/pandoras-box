@@ -1,0 +1,29 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Positions · C Tabs (mock, re-derived 09-23)</title>
+<link rel="stylesheet" href="../../../frontend/v2.css"><link rel="stylesheet" href="pm.css"></head><body>
+<div class="pm-page"><div id="banner"></div>
+<div class="pm-nav"><a href="layout-a-ledger.html" class="">A · Ledger</a><a href="layout-b-split.html" class="">B · Split</a><a href="layout-c-tabs.html" class="on">C · Tabs &amp; cards</a></div>
+<h1 class="pm-h1">Positions · C — Tabs &amp; cards (phone-first: one thing at a time)</h1>
+<div class="pm-tabs" role="tablist" id="tabs"></div><div id="view"></div>
+<div id="missing"></div></div><script src="pm-data.js"></script><script src="pm-parts.js"></script><script>const X = window.PMP; document.getElementById("banner").innerHTML = X.mockBanner(); document.getElementById("missing").innerHTML = X.missing();
+let tab = 'Book', openId = null, showActions = false;
+const TABS = ['Book', 'New', 'History'];
+function card(p) {
+  return `<div class="pm-pcard" data-id="${p.id}"><header><span><b>${p.ticker}</b> <span class="pm-dim">${p.bucket} · ${p.structure}</span></span>${X.prov(p.prov)}</header>
+  <div class="pm-line"><span>qty ${p.qty} · cost ${X.usd(p.cost)}</span><span>mark ${p.mark == null ? '<span class="pm-amber">UNAVAILABLE</span>' : X.usd(p.mark)}</span></div>
+  ${openId === p.id ? `<div class="pm-sheet">${X.detail(p)}<div style="margin-top:8px"><button class="pm-btn" data-act="1">${showActions ? 'Hide actions' : 'Actions'}</button></div>${showActions ? X.actions(p) : ''}</div>` : ''}</div>`;
+}
+function view() {
+  document.getElementById('tabs').innerHTML = TABS.map(t => `<button role="tab" aria-selected="${t === tab}" data-t="${t}">${t === 'New' ? 'New (ticket)' : t}</button>`).join('');
+  const v = document.getElementById('view');
+  if (tab === 'Book') v.innerHTML = X.sleeves.map(s => X.gauge(s) + X.open.filter(p => p.account === s.account).map(card).join('')).join('');
+  else if (tab === 'New') v.innerHTML = `<div class="pm-card">${X.ticket()}</div>`; else v.innerHTML = `<div class="pm-card">${X.history()}</div>`;
+}
+document.getElementById('tabs').addEventListener('click', e => { const b = e.target.closest('button'); if (b) { tab = b.dataset.t; view(); } });
+document.getElementById('view').addEventListener('click', e => {
+  if (e.target.closest('[data-act]')) { showActions = !showActions; view(); return; }
+  const c = e.target.closest('.pm-pcard'); if (!c || e.target.closest('.pm-sheet')) return;
+  const id = Number(c.dataset.id); openId = openId === id ? null : id; showActions = false; view();
+});
+view();
+</script></body></html>
