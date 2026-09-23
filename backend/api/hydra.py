@@ -71,7 +71,7 @@ async def get_squeeze_scores(
 
 
 @router.get("/exposure")
-async def get_position_exposure():
+async def get_position_exposure(_=Depends(require_api_key)):
     """DEFENSIVE MODE: Cross-reference Nick's open positions against squeeze risk."""
     exposure = await check_position_exposure()
 

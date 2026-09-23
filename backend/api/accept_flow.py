@@ -14,7 +14,7 @@ import json
 import logging
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import Depends, APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from database.postgres_client import (
@@ -25,6 +25,7 @@ from database.postgres_client import (
     fill_pending_trade,
     expire_pending_trades,
 )
+from utils.pivot_auth import require_api_key
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -324,6 +325,7 @@ async def fill_options(pending_id: int, body: FillOptionsRequest):
 @router.get("/pending-trades")
 async def list_pending_trades(
     status: str = Query(default="PENDING"),
+    _=Depends(require_api_key),
 ):
     """List pending trades, with signal data joined."""
     pool = await get_postgres_client()

@@ -3,7 +3,7 @@ Positions API
 Manages selected trades and open positions with comprehensive logging for backtesting.
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import Depends, APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 from datetime import datetime, date, timezone
@@ -29,6 +29,7 @@ from websocket.broadcaster import manager
 
 from api._swr_cache import SWRCache
 from utils.json_sanitize import dumps_jsonb
+from utils.pivot_auth import require_api_key
 
 logger = logging.getLogger(__name__)
 
@@ -1030,6 +1031,7 @@ async def _compute_signals_active() -> Dict[str, Any]:
 
 @router.get("/signals/active/paged")
 async def get_active_signals_paged(
+    _=Depends(require_api_key),
     limit: int = 10,
     offset: int = 0,
     asset_class: Optional[str] = None
@@ -1062,7 +1064,7 @@ async def get_active_signals_paged(
 
 
 @router.get("/signals/queue")
-async def get_signal_queue():
+async def get_signal_queue(_=Depends(require_api_key)):
     """
     Get the full queue of active signals (for auto-refill).
     Returns up to 50 signals ranked by score.
@@ -1237,6 +1239,7 @@ async def clear_all_signals():
 
 @router.get("/signals/statistics")
 async def get_trading_statistics(
+    _=Depends(require_api_key),
     ticker: Optional[str] = None,
     strategy: Optional[str] = None,
     start_date: Optional[str] = None,
