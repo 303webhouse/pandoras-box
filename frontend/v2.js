@@ -1133,10 +1133,9 @@
       </div>
       ${greekNote}
       ${conc ? `<div class="conc-lamp ${conc.hot ? 'hot' : 'ok'}" data-gloss="CONC"><span>Concentration · ${esc(conc.theme)}</span><span>${conc.pct}%</span></div>` : ''}
-      <div class="acct-chips">${accts.map((a) => {
-          const out = a.in_scope === false;
+      <div class="acct-chips">${accts.filter((a) => a.in_scope !== false).map((a) => {
           const tag = esc((a.broker || a.account_name || '').slice(0, 4).toUpperCase());
-          return `<span class="acct-chip${out ? ' out-of-scope' : ''}"${out ? ' title="out of scope — parked money, not in the Balance"' : ''}>${tag} ${fmt$(a.balance)}${out ? ' · out of scope' : ''}</span>`;
+          return `<span class="acct-chip">${tag} ${fmt$(a.balance)}</span>`;
         }).join('')}</div>`;
     applyGlossary(el);
     _openPositions = (positions && positions.positions) || [];
