@@ -1,8 +1,8 @@
 """Abacus summary: the data contract behind the v2 Abacus page (R-IV.429).
 
-STUB. Every metric is served from the mocked fixture below, with `source: "mock"` on each
-block and `mock: true` at the top, so the page shows its mock banner. The fixture responds to
-the range SERVER-SIDE (charter D2: the range changes the figures, and nothing is recomputed in
+Most of the payload is still the mocked fixture below, with `source: "mock"` on each block
+and `mock: true` at the top, so the page shows its mock banner. The fixture responds to the
+range SERVER-SIDE (charter D2: the range changes the figures, and nothing is recomputed in
 the browser). Counts and dollars scale with the window's length, rates stay put, and every
 range stays internally consistent.
 
@@ -10,10 +10,16 @@ Live data replaces one block at a time as sources land (R-IV.429(a)). A block tu
 changing its own `source` to "live" and carrying a real `computed_at`; the page drops the
 banner only when no block is still mock.
 
-LIVE CONNECTION IS GATED (charter §2, ATHENA step 3): no block goes live until the lots/legs
-model lands. The unit is the position lifecycle, and the window filters on CLOSE date.
-/api/analytics/trade-stats windows on opened_at over the `trades` rows, so it is not a
-drop-in source.
+LIVE, since R-IV.484(c): the `net_profit` and `win_rate` stats, read from `unified_positions`
+via `_load_book_realized()`. The unit is the position lifecycle, and the window filters on
+CLOSE date (`exit_date`) -- /api/analytics/trade-stats windows on `opened_at` over the
+`trades` rows instead, so it is not a drop-in source. Each of the two carries a `coverage`
+object beside it: the census (`LOWER(status) IN ('closed','expired')`, windowed the same way),
+how many rows were counted, and why the rest were not (basis-incomplete, return below -100%
+of cost basis, or a `realized_pnl` the book never recorded). Everything else -- equity,
+leaks, breakdowns including discipline, strategies -- stays mock, and its `source` field says
+so; discipline metrics have no source columns yet (no stop/time-stop/override/tag columns) and
+are not wired.
 
 Gated like every book read (R-IV.417): the same dependency as /api/analytics and
 /api/portfolio, because what this route returns once live is the principal's book.
@@ -29,12 +35,13 @@ Rates carry their n. Unknown is null, never 0. `version` is the contract's versi
 from __future__ import annotations
 
 import copy
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from database.postgres_client import get_postgres_client
 from utils.pivot_auth import require_api_key
 
 router = APIRouter(prefix="/abacus", tags=["abacus"])
@@ -238,6 +245,63 @@ def _scaled(scale: float) -> dict:
     return out
 
 
+async def _load_book_realized(pool, first: Optional[date], last: date) -> dict:
+    """Realized P&L and win rate, live, per R-IV.464(h).
+
+    Census predicate (R-IV.484(c)): LOWER(status) IN ('closed','expired'), windowed on
+    exit_date (the CLOSE, not the open -- /api/analytics/trade-stats windows on opened_at,
+    which is why it is not a drop-in source here). A row with basis_incomplete_reason set, or
+    whose realized return computes below -100% of its cost basis (a data-integrity signal, not
+    a real result), is counted in the census but never averaged into net profit or win rate. A
+    row the book never recorded a realized_pnl for is excluded the same way -- never treated as
+    a $0 trade.
+    """
+    conditions = ["LOWER(status) IN ('closed', 'expired')", "exit_date IS NOT NULL", "exit_date::date <= $1"]
+    params: list = [last]
+    if first is not None:
+        conditions.append("exit_date::date >= $2")
+        params.append(first)
+    rows = await pool.fetch(
+        f"SELECT realized_pnl, cost_basis, basis_incomplete_reason FROM unified_positions "
+        f"WHERE {' AND '.join(conditions)}",
+        *params,
+    )
+
+    excl_basis = excl_return = excl_unrecorded = 0
+    counted_pnls: list = []
+    for r in rows:
+        if r["basis_incomplete_reason"]:
+            excl_basis += 1
+            continue
+        pnl = r["realized_pnl"]
+        basis = r["cost_basis"]
+        if pnl is not None and basis and float(basis) != 0:
+            if (float(pnl) / abs(float(basis))) < -1:
+                excl_return += 1
+                continue
+        if pnl is None:
+            excl_unrecorded += 1
+            continue
+        counted_pnls.append(float(pnl))
+
+    counted = len(counted_pnls)
+    wins = sum(1 for p in counted_pnls if p > 0)
+    return {
+        "net_profit": round(sum(counted_pnls), 2) if counted else None,
+        "win_rate": round(wins / counted, 4) if counted else None,
+        "coverage": {
+            "predicate": "LOWER(status) IN ('closed','expired'), windowed on exit_date",
+            "total": len(rows),
+            "counted": counted,
+            "excluded": {
+                "basis_incomplete": excl_basis,
+                "return_below_neg100pct": excl_return,
+                "no_realized_pnl": excl_unrecorded,
+            },
+        },
+    }
+
+
 @router.get("/summary")
 async def abacus_summary(
     range: str = Query("90d", pattern="^(30d|90d|ytd|all)$"),
@@ -265,6 +329,25 @@ async def abacus_summary(
     for st in out["stats"]:
         if st["key"] == "max_drawdown":
             st["date"] = trough
+
+    # R-IV.484(c) — net profit and win rate go live off the book; the window is the RAW
+    # requested range, not `first` above (that clamps "all" to the mock book's fake start
+    # date, which has no place gating a real query).
+    live_first = date.fromisoformat(rng["from"]) if rng["from"] else None
+    live_last = date.fromisoformat(rng["to"])
+    pool = await get_postgres_client()
+    book = await _load_book_realized(pool, live_first, live_last)
+    live_stamp = {"source": "live", "computed_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")}
+    for st in out["stats"]:
+        if st["key"] == "net_profit":
+            st["value"] = book["net_profit"]
+            st["coverage"] = book["coverage"]
+            st.update(live_stamp)
+        elif st["key"] == "win_rate":
+            st["value"] = book["win_rate"]
+            st["n"] = book["coverage"]["counted"]
+            st["coverage"] = book["coverage"]
+            st.update(live_stamp)
 
     out["range"] = rng
     out["range_applied"] = True
