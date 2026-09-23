@@ -1,0 +1,22 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Positions · B Split (mock, re-derived 09-23)</title>
+<link rel="stylesheet" href="../../../frontend/v2.css"><link rel="stylesheet" href="pm.css"></head><body>
+<div class="pm-page"><div id="banner"></div>
+<div class="pm-nav"><a href="layout-a-ledger.html" class="">A · Ledger</a><a href="layout-b-split.html" class="on">B · Split</a><a href="layout-c-tabs.html" class="">C · Tabs &amp; cards</a></div>
+<h1 class="pm-h1">Positions · B — Split (book on the left, one sticky work pane on the right)</h1>
+<div class="pm-split"><div><div id="gauges"></div><div id="books"></div></div>
+<div class="pm-side pm-card"><div class="pm-tabs" role="tablist" id="tabs"></div><div id="pane"></div></div></div>
+<div id="missing"></div></div><script src="pm-data.js"></script><script src="pm-parts.js"></script><script>const X = window.PMP; document.getElementById("banner").innerHTML = X.mockBanner(); document.getElementById("missing").innerHTML = X.missing();
+let sel = X.open[0], tab = 'Detail';
+const TABS = ['Detail', 'Actions', 'New', 'History'];
+function pane() {
+  document.getElementById('tabs').innerHTML = TABS.map(t => `<button role="tab" aria-selected="${t === tab}" data-t="${t}">${t === 'New' ? 'New (ticket)' : t}</button>`).join('');
+  document.getElementById('pane').innerHTML = tab === 'Detail' ? X.detail(sel) : tab === 'Actions' ? X.actions(sel) : tab === 'New' ? X.ticket() : X.history();
+  document.querySelectorAll('tr.pm-row').forEach(r => r.classList.toggle('sel', Number(r.dataset.id) === sel.id));
+}
+document.getElementById('gauges').innerHTML = X.sleeves.map(X.gauge).join('');
+document.getElementById('books').innerHTML = X.sleeves.map(s => `<div class="pm-card"><h1 class="pm-h1">${s.account} · open</h1><div class="pm-scroll">${X.bookTable(s.account)}</div></div>`).join('');
+document.getElementById('books').addEventListener('click', e => { const tr = e.target.closest('tr.pm-row'); if (!tr) return; sel = X.open.find(o => o.id === Number(tr.dataset.id)); if (tab === 'New' || tab === 'History') tab = 'Detail'; pane(); });
+document.getElementById('tabs').addEventListener('click', e => { const b = e.target.closest('button'); if (b) { tab = b.dataset.t; pane(); } });
+pane();
+</script></body></html>
