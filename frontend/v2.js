@@ -128,6 +128,30 @@
     if (sec < 5400) return Math.round(sec / 60) + 'm';
     return Math.round(sec / 3600) + 'h';
   }
+  // R-IV.410(c)/(d), R6+R7, design doc §7.7 -- the ruled four-state vintage chip. Shows the
+  // ABSOLUTE instant a reading is true for; the relative age goes in the title only (relay
+  // temporal-anchor law -- a bare "5m old" goes stale on a backgrounded PWA). Never red: an
+  // unreachable/unreadable source is `unknown`, not the same alarm as a fired breaker (R7).
+  // `unknownLabel`/`unknownTitle` let a caller say WHY it's unknown ("scope unknown", "balance
+  // vintage not recorded") instead of the spec's generic "as of --" -- the two existing
+  // callers keep their more specific text by passing it through here.
+  function vintageChip({ iso, freshBoundSec, session, unknownLabel, unknownTitle } = {}) {
+    if (session === 'closed') {
+      const abs = iso && Number.isFinite(Date.parse(iso)) ? new Date(iso).toISOString().slice(11, 16) + 'Z' : null;
+      return `<span class="vintage-chip" data-state="closed"${abs ? ` title="session closed ${esc(abs)}"` : ''}>closed${abs ? ' · ' + esc(abs) : ''}</span>`;
+    }
+    const t = iso ? Date.parse(iso) : NaN;
+    if (!Number.isFinite(t)) {
+      return `<span class="vintage-chip" data-state="unknown"${unknownTitle ? ` title="${esc(unknownTitle)}"` : ''}>${esc(unknownLabel || 'as of —')}</span>`;
+    }
+    const ageSec = Math.max(0, (Date.now() - t) / 1000);
+    const bound = freshBoundSec || 900;
+    const state = ageSec <= bound ? 'fresh' : 'stale';
+    const abs = new Date(t).toISOString().slice(11, 16) + 'Z';
+    const rel = ageLabel(ageSec);
+    const title = state === 'fresh' ? `read ${rel} ago` : `${rel} old`;
+    return `<span class="vintage-chip" data-state="${state}" data-fresh-s="${bound}" title="${esc(title)}">as of ${esc(abs)}</span>`;
+  }
   // R-IV.413(e) — ONE mapping for every health dot AND every _health rank, so the two can
   // no longer disagree. v2.css:14-16 is the rule: amber means "we cannot confirm this";
   // vermilion means "confirmed bad"; an unreachable source is not a fired breaker.
@@ -829,8 +853,11 @@
         interaction: { mode: 'index', intersect: false },
         plugins: { legend: { display: false }, tooltip: { enabled: true } },
         scales: {
-          x: { ticks: { color: '#5b6b85', maxTicksLimit: 5, font: { size: 9 } }, grid: { color: 'rgba(27,39,69,0.4)' } },
-          y: { ticks: { color: '#5b6b85', font: { size: 9 } }, grid: { color: 'rgba(27,39,69,0.4)' } },
+          // DEF-V2-TEXT3-CONTRAST / R-IV.495(d) -- Chart.js takes a literal, not a CSS custom
+          // property, so this has to be kept in sync with --text-3 (v2.css) by hand. Was
+          // #5b6b85 (3.71/3.48/3.35:1, below the 4.5 AA bar); matches the raised token now.
+          x: { ticks: { color: '#70829d', maxTicksLimit: 5, font: { size: 9 } }, grid: { color: 'rgba(27,39,69,0.4)' } },
+          y: { ticks: { color: '#70829d', font: { size: 9 } }, grid: { color: 'rgba(27,39,69,0.4)' } },
         },
         elements: { point: { radius: 0 }, line: { borderWidth: 1.4, tension: 0.25 } },
       }, opts || {}),
@@ -1091,9 +1118,10 @@
     else if (covLegs > 0 && covPriced === 0) dayUnavailable = 'no marks — 0 of ' + covLegs + ' legs priced';
     // The vintage of the Day P&L is not recorded anywhere (R-IV.420(d)); say so rather than
     // let an unlabelled figure read as current.
-    const dayChip = '<span class="vintage-chip" data-state="unknown" title="'
-      + esc(dayUnavailable || 'no field records when this was computed')
-      + '">vintage not recorded</span>';
+    const dayChip = vintageChip({
+      unknownLabel: 'vintage not recorded',
+      unknownTitle: dayUnavailable || 'no field records when this was computed',
+    });
     const dayCell = dayUnavailable
       ? `<span class="v val-amber">UNAVAILABLE <span class="book-reason">${esc(dayUnavailable)}</span> ${dayChip}</span>`
       : `<span class="v ${signCls(day.dollar)}">${(day.dollar >= 0 ? '+' : '') + fmt$(day.dollar)}${day.pct != null ? ` <span style="font-size:10px">(${day.pct >= 0 ? '+' : ''}${Number(day.pct).toFixed(2)}%)</span>` : ''} ${dayChip}</span>`;
@@ -1123,7 +1151,7 @@
     const conc = computeConcentration(positions);
 
     el.innerHTML = `
-      <div class="book-line"><span class="k">Balance</span><span class="v">${counted.length ? fmt$(total) : '--'}${scopeKnown ? '' : ' <span class="vintage-chip" data-state="unknown" title="this backend does not report account scope; the total is every row">scope unknown</span>'}</span></div>
+      <div class="book-line"><span class="k">Balance</span><span class="v">${counted.length ? fmt$(total) : '--'}${scopeKnown ? '' : ' ' + vintageChip({ unknownLabel: 'scope unknown', unknownTitle: 'this backend does not report account scope; the total is every row' })}</span></div>
       <div class="book-line"><span class="k">Day P&amp;L</span>${dayCell}</div>
       <div class="book-greeks">
         ${greekCell('Δ', 'delta', 0)}
