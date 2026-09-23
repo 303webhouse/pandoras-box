@@ -61,7 +61,16 @@ HERMES_CONFIG = {
     "cooldown_minutes": 15,
 }
 
-VPS_API_KEY = os.getenv("HERMES_VPS_KEY") or ""
+# ── R-IV.498(a)1: HERMES_VPS_KEY IS GONE, NOT ROTATED ────────────────────────────
+# The key leaked into public git history (44 blobs, 2026-01-19 -> 2026-09-22) and the
+# collector host it authenticated to is retired: 188.245.250.2:8000 answers HTTP 000 on
+# both the trigger path and root, and HERMES_VPS_TRIGGER_ENABLED was never set, so this
+# value was never actually sent. Nothing live needed it, so it is deleted rather than
+# reissued -- a credential no path requires should not exist to be leaked again.
+#
+# The hub's INBOUND hermes auth never used this key: receive_hermes_analysis compares
+# against PIVOT_API_KEY, and still does. Deleting this changes no inbound gate.
+VPS_API_KEY = ""  # permanently empty; see above. Do NOT re-add an os.getenv here.
 
 # ── R-IV.442(b): THE COLLECTOR TRIGGER IS OFF UNLESS SOMETHING IS LISTENING ──────────────
 # This lever calls out to the collector host. That host has been out of service for months
@@ -201,7 +210,14 @@ async def hermes_webhook(request: Request):
 
     # Trigger VPS scrape burst — only when the trigger is explicitly enabled (R-IV.442(b)).
     vps_url = config.get("vps_trigger_url")
-    if vps_url and VPS_API_KEY and not VPS_TRIGGER_ENABLED:
+    if vps_url and not VPS_API_KEY:
+        # R-IV.498(a)1. The credential is deleted and the host is retired, so this lever
+        # REFUSES rather than failing quietly at the socket. If the collector ever returns
+        # it needs a new credential issued deliberately, not this branch reopened.
+        logger.info("HERMES: collector trigger REFUSED — HERMES_VPS_KEY was deleted "
+                    "(R-IV.498(a)1) and the collector host is retired; event %s recorded, "
+                    "nothing sent outbound", event_id)
+    elif vps_url and VPS_API_KEY and not VPS_TRIGGER_ENABLED:
         logger.info("HERMES: collector trigger is disabled (HERMES_VPS_TRIGGER_ENABLED unset) "
                     "— event %s recorded, nothing sent outbound", event_id)
     elif vps_url and VPS_API_KEY:

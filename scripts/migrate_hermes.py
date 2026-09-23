@@ -82,7 +82,8 @@ async def main():
             "correlation_window_minutes": 5,
             "correlation_min_tickers": 2,
             "vps_trigger_url": "http://188.245.250.2:8000/api/hermes/trigger",
-            "vps_api_key": os.getenv("HERMES_VPS_KEY") or "",
+            # R-IV.498(a)1: no `vps_api_key` — see postgres_client.py's note. Secrets stay
+            # in the environment, never in a system_config row.
             "cooldown_minutes": 15,
         })
         await conn.execute(

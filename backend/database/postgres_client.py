@@ -3398,7 +3398,10 @@ async def log_options_position(position: Dict[Any, Any]):
             "correlation_window_minutes": 5,
             "correlation_min_tickers": 2,
             "vps_trigger_url": "http://188.245.250.2:8000/api/hermes/trigger",
-            "vps_api_key": os.getenv("HERMES_VPS_KEY") or "",
+            # R-IV.498(a)1: no `vps_api_key` here. This seed put the live credential into
+            # system_config, so the leak had a THIRD home besides git history and Railway
+            # (found in the DB at rotation time, length 43, equal to the live value). A
+            # credential does not belong in a config row; secrets stay in the environment.
             "cooldown_minutes": 15,
         }))
 
