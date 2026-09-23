@@ -6,6 +6,14 @@ Triton's UW bar-fetches go through get_ohlc(caller="triton_flow_shadow") + the
 when the over-quota ohlc_bars caller throttles). SHADOW-ONLY: no
 scoring/pipeline coupling.
 
+R-IV.482(c) / R-IV.485(e) — THE PIN, which overrides everything below: while
+Triton's registered window is open (through 2026-11-06, `TRITON_BARS_PIN_UNTIL`)
+`fetch_r_close_index` returns yfinance UNCONDITIONALLY and makes no UW request
+at all. Grading a registered population on a series that changes vendor
+mid-window is not grading one population. Read the pin before reading the
+fallback: from 2026-09-14 the two produced the same outcome by accident, and
+04f6480 ended that by repairing UW for every consumer.
+
 R-IV.324 — THE FALLBACK, and what it does NOT change: when UW yields no
 regular-session bar, `fetch_r_close_index` falls through to
 `get_bars_yfinance()`, which touches NO UW endpoint and so spends NO governor
@@ -20,10 +28,41 @@ from __future__ import annotations
 import logging
 from datetime import date, datetime, timedelta, timezone
 from typing import Dict, Optional, Tuple
+from zoneinfo import ZoneInfo
 
 logger = logging.getLogger("triton_shadow")
 
 TRITON_CALLER = "triton_flow_shadow"
+
+ET = ZoneInfo("America/New_York")
+
+# ── R-IV.482(c) / R-IV.485(e): THE TRITON BAR PIN ────────────────────────────
+# Triton's registered window grades on yfinance, END TO END. Until 04f6480 that
+# happened by accident: UW yielded no usable regular-session bar, so every row
+# from 2026-09-14 took the fallback. 04f6480 repaired the UW path for every
+# consumer, which silently UN-PINNED Triton — measured 2026-09-23 19:1xZ,
+# `triton_grader.bars` read state=primary primary_ok=27 subs=0, i.e. back on UW
+# with the window still open.
+#
+# A population whose bar vendor changes mid-window is not one population. The
+# hypothesis was registered against a yfinance series and must be graded against
+# a yfinance series, whatever UW returns and however healthy UW is.
+#
+# Expressed as DATA — a date anyone can read against the registration without
+# running anything — and INCLUSIVE of its last day. It lapses on its own: a pin
+# that needs a second deploy to remove is a pin that outlives its window.
+TRITON_BARS_PIN_UNTIL = date(2026, 11, 6)
+
+
+def triton_bars_pinned(session_date: Optional[date] = None) -> bool:
+    """True while Triton's bars are held on yfinance by ruling.
+
+    The session date is the EXCHANGE's, not the server's: the grader runs at
+    20:00 ET, which is already the next UTC day, and a pin that lapses a day
+    early on a UTC clock would hand the last session of the window to UW.
+    """
+    d = session_date or datetime.now(ET).date()
+    return d <= TRITON_BARS_PIN_UNTIL
 
 # Mega/index premium bucket (flow_scanner INDEX_TICKERS — the $2M tier).
 INDEX_TICKERS = {"SPY", "QQQ", "SMH", "NVDA", "AVGO", "MSFT", "GOOGL", "AMZN", "META"}
@@ -59,9 +98,13 @@ PROVIDER_NONE = "none"
 
 
 async def fetch_r_close_index(
-    ticker: str, lookback_days: int
+    ticker: str, lookback_days: int, session_date: Optional[date] = None
 ) -> Tuple[Dict[date, float], str]:
     """{date: regular-session close}, AND the provider that produced it.
+
+    R-IV.482(c)/R-IV.485(e): while the Triton window is open this returns
+    yfinance UNCONDITIONALLY and never calls UW — see TRITON_BARS_PIN_UNTIL.
+    Everything below describes the path taken once the pin lapses.
 
     R-IV.324: the grader gets the fallback. UW via `get_ohlc` is tried first and
     remains the preferred source; only when it yields NO usable regular-session
@@ -90,6 +133,22 @@ async def fetch_r_close_index(
     from integrations.uw_api import (
         get_ohlc, get_bars_yfinance, PROVIDER_UW, PROVIDER_YFINANCE,
     )
+    from utils.vendor_substitution import record_primary, record_substitution
+
+    # ── The pin, BEFORE the UW call. ─────────────────────────────────────────
+    # Not "try UW, fall back": yfinance IS the source for this window, so no UW
+    # request is made at all and the pin cannot be defeated by UW returning
+    # perfectly good bars. Recorded as PRIMARY, not as a substitution: under the
+    # pin yfinance is not a fallback and this consumer's primary_ok is not a
+    # statement about UW's health. R-IV.489(a) — the primary_ok=1 check applies
+    # to the other consumers, never to this one.
+    if triton_bars_pinned(session_date):
+        record_primary("triton_grader.bars", PROVIDER_YFINANCE)
+        idx, prov = await _yfinance_close_index(ticker)
+        if not idx:
+            logger.warning("triton_grader: PINNED to yfinance and it gave nothing for %s "
+                           "— skipping, NOT falling through to UW", ticker)
+        return idx, prov
 
     # ── UW first, under Triton's own governor caller. Unchanged. ──
     try:
@@ -110,7 +169,6 @@ async def fetch_r_close_index(
             dd = _as_date(b.get("start_time") or b.get("date"))
             if c is not None and dd is not None:
                 out[dd] = c
-    from utils.vendor_substitution import record_primary, record_substitution
     if out:
         record_primary("triton_grader.bars", PROVIDER_UW)
         return out, PROVIDER_UW
@@ -124,16 +182,30 @@ async def fetch_r_close_index(
         "triton_grader: UW gave no 'r' bars for %s (%d raw) — falling back to yfinance",
         ticker, len(bars) if isinstance(bars, list) else 0,
     )
+    return await _yfinance_close_index(ticker)
+
+
+async def _yfinance_close_index(ticker: str) -> Tuple[Dict[date, float], str]:
+    """{date: close} from yfinance, and the provider READ OFF THE BARS.
+
+    One implementation serves both callers — the R-IV.324 fallback and the
+    R-IV.482(c) pin — so the pinned window and the fallback cannot drift apart
+    and grade on subtly different series. Touches no UW endpoint, so Triton's
+    governor isolation holds for both.
+    """
+    from integrations.uw_api import get_bars_yfinance, PROVIDER_YFINANCE
+
     try:
         fb = await get_bars_yfinance(ticker.upper())
     except Exception as exc:
-        logger.warning("triton fallback bars failed %s: %s", ticker, type(exc).__name__)
+        logger.warning("triton yfinance bars failed %s: %s", ticker, type(exc).__name__)
         return {}, PROVIDER_NONE
     if not fb or not isinstance(fb, list):
         return {}, PROVIDER_NONE
 
     # Polygon-shaped: c=close, t=epoch ms. NO market_time filter here — see the
     # filter trap above. Provider is READ off the bar, not assumed.
+    out: Dict[date, float] = {}
     providers = set()
     for b in fb:
         if not isinstance(b, dict):

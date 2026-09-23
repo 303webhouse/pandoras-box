@@ -1,6 +1,7 @@
 """R-IV.433(c) / conventions #21 — a substituted vendor is announced."""
 import asyncio
 import inspect
+from datetime import date as _dt_date
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -74,12 +75,37 @@ def test_get_bars_on_the_primary_records_the_primary():
     assert c["state"] == "primary" and c["primary_ok"] == 1
 
 
+# R-IV.489(a): Triton's bars are PINNED to yfinance while its registered window
+# is open, so these two cases — which are about the UW-first path the pin
+# suspends — are dated past it. The pin's own recording is asserted below.
+_AFTER_PIN = _dt_date(2026, 11, 9)
+
+
+def test_the_triton_pin_records_yfinance_as_the_primary():
+    """Under the pin yfinance is NOT a fallback, so this must not read 'substituting'.
+
+    triton_grader.bars is therefore not a statement about UW's health while the
+    window is open — R-IV.489(a) puts the primary_ok=1 check on the OTHER
+    consumers for exactly this reason.
+    """
+    from jobs import triton_shadow_common as tsc
+    fb = [{"c": 10.0, "t": 1757980800000, "provider": "yfinance"}]
+    uw = AsyncMock(return_value=[{"market_time": "r", "date": "2026-09-22", "close": "99"}])
+    with patch("integrations.uw_api.get_ohlc", new=uw),          patch("integrations.uw_api.get_bars_yfinance", new=AsyncMock(return_value=fb)):
+        out, provider = asyncio.run(tsc.fetch_r_close_index("koru", 10,
+                                                            session_date=_dt_date(2026, 9, 23)))
+    assert provider == "yfinance" and out
+    assert uw.await_count == 0, "the pin made a UW request"
+    c = vs.summary()["consumers"]["triton_grader.bars"]
+    assert c["state"] == "primary", "the pin was announced as a substitution"
+
+
 def test_the_triton_fallback_is_announced():
     from jobs import triton_shadow_common as tsc
     fb = [{"c": 10.0, "t": 1757980800000}]
     with patch("integrations.uw_api.get_ohlc", new=AsyncMock(return_value=[])), \
          patch("integrations.uw_api.get_bars_yfinance", new=AsyncMock(return_value=fb)):
-        asyncio.run(tsc.fetch_r_close_index("koru", 10))
+        asyncio.run(tsc.fetch_r_close_index("koru", 10, session_date=_AFTER_PIN))
     assert vs.summary()["consumers"]["triton_grader.bars"]["state"] == "substituting"
 
 
@@ -88,7 +114,7 @@ def test_the_triton_primary_path_records_the_primary():
     from jobs import triton_shadow_common as tsc
     bars = [{"market_time": "r", "start_time": "2026-09-16T13:30:00Z", "close": "10"}]
     with patch("integrations.uw_api.get_ohlc", new=AsyncMock(return_value=bars)):
-        out, provider = asyncio.run(tsc.fetch_r_close_index("koru", 10))
+        out, provider = asyncio.run(tsc.fetch_r_close_index("koru", 10, session_date=_AFTER_PIN))
     assert provider == "uw" and out
     assert vs.summary()["consumers"]["triton_grader.bars"]["state"] == "primary"
 
