@@ -70,6 +70,18 @@ def grade_rows(pop: Population, rows: List[G.ShadowRow], series: Dict[str, Any],
     return graded, counts
 
 
+def _set_facts(counts: Counter, facts: Dict[str, Any]) -> None:
+    """Record facts on the counter by ASSIGNMENT (R-IV.477(c)).
+
+    `Counter.update` ADDS: it is for tallies. These are facts -- how many rows, when the bars
+    were fetched -- and one of them is a string, so `str + int` raised and took the pass down
+    AFTER the grades had been written and BEFORE the results were built. 87 runs ended error
+    with grades landing and backtest_results empty, which is exactly what that ordering does.
+    """
+    for key, value in facts.items():
+        counts[key] = value
+
+
 def _rotation(tickers, through: date):
     """A daily-rotating order, so tickers UW never covers cannot hold the same slots forever."""
     return sorted(tickers, key=lambda t: hashlib.md5(f"{t}|{through}".encode()).hexdigest())
@@ -144,11 +156,16 @@ async def grade_population(conn, pop: Population, through: date,
                                                 fetch_uw)
         counts["written"] = await store.insert_grades(conn, writes)
         counts["holds_written"] = await store.insert_holds(conn, holds)
-        counts.update({"population_rows": len(rows), "rows_needing_grades": len(need),
-                       "tickers_requested": len({r.ticker for r in need}),
-                       "tickers_returned": len(series),
-                       "bars_fetched_at": next(iter(series.values())).fetched_at if series else None})
-        if counts["written"] or counts["holds_written"]:
+        _set_facts(counts, {"population_rows": len(rows), "rows_needing_grades": len(need),
+                            "tickers_requested": len({r.ticker for r in need}),
+                            "tickers_returned": len(series),
+                            "bars_fetched_at": (next(iter(series.values())).fetched_at
+                                                if series else None)})
+        # R-IV.477(c): built when this pass wrote something -- OR when the population has no
+        # results at all. Every row being already graded is the ordinary steady state, and under
+        # the old condition it meant the table stayed empty forever: the 87 failed runs left
+        # grades behind them and nothing ever rebuilt the report from those grades.
+        if counts["written"] or counts["holds_written"] or not await store.has_results(conn, pop.name):
             graded_rows = await store.load_graded(conn, pop.name)
             held_rows = await store.load_holds(conn, pop.name)
             results = await asyncio.to_thread(report_mod.build, pop, graded_rows, held_rows)
