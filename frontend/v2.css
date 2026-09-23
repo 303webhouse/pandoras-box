@@ -83,6 +83,11 @@ body {
 .health-dot.down { background: var(--down); }
 /* Cannot confirm: no readable payload, unknown age, or stale by age (R-IV.413(e)). */
 .health-dot.unconfirmed { background: var(--amber); }
+/* R-IV.488(d): the arithmetic does not close. Distinct from 'down' (the source
+   said it failed) and from 'unconfirmed' (we cannot date it) — here the number
+   is present, fresh and internally contradictory, which is the worst of the three
+   to show plain. Ringed so it reads as an assertion, not a shade of amber. */
+.health-dot.suspect { background: var(--amber); box-shadow: 0 0 0 2px var(--down); }
 /* R-IV.416(c): a market-hours feed outside the session. --text-2, so it stays distinct
    from the unpainted --text-3 dot shown before the first read. */
 .health-dot.closed { background: var(--text-2); }
@@ -361,6 +366,7 @@ body {
 .ix-cell .ext { font-family: var(--mono); font-size: 9px; color: var(--text-3); }
 /* An unsourceable value states itself. Smaller than a percent so the word fits the
    cell, and muted+dashed so it never reads as a live number at a glance. */
+.ix-cell .chg.ix-suspect { color: var(--amber); text-decoration: underline wavy var(--down) 1px; cursor: help; }
 .ix-cell .chg.ix-unavail { font-size: 8.5px; font-weight: 600; letter-spacing: 0.5px; color: var(--text-3); border-bottom: 1px dashed var(--text-3); cursor: help; }
 
 /* b5/b6 mini values */

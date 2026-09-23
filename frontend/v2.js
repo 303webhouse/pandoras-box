@@ -145,9 +145,17 @@
   // never decides the session itself: a weekday/clock test here would be a second
   // calendar, which is the silent approximation that module exists to delete. An absent
   // or null session is NOT 'closed' -- it falls through to the age test.
-  function healthState(ageSec, degraded, flatline, session) {
+  // R-IV.488(d) — `suspect`. Two plus two makes four before the dot turns green.
+  // A served change that disagrees with its own served spot and prior close is not
+  // a fresh number, whatever its timestamp says. On 2026-09-23 this dot read lime
+  // 'fresh 8m' over QQQ +0.024% against a -0.69% tape: every input it had was
+  // healthy, because none of them was the arithmetic. It ranks below 'down' (a
+  // source that says it failed is worse than one whose sum does not close) and
+  // above every freshness state, which can never redeem a number that is wrong.
+  function healthState(ageSec, degraded, flatline, session, incoherent) {
     if (flatline) return 'dead';
     if (degraded === true) return 'down';
+    if (incoherent) return 'suspect';
     if (degraded == null) return 'unconfirmed';
     if (session === 'closed') return 'closed';
     if (ageSec == null || ageSec > 900) return 'unconfirmed';
@@ -156,11 +164,12 @@
   function paintDot(el, st) {
     el.className = 'health-dot' + (st ? ' ' + st : '');
   }
-  function setHealth(el, ageSec, degraded, flatline, session, note) {
+  function setHealth(el, ageSec, degraded, flatline, session, note, incoherent) {
     if (!el) return;
-    const st = healthState(ageSec, degraded, flatline, session);
+    const st = healthState(ageSec, degraded, flatline, session, incoherent && incoherent.length);
     let txt;
     if (st === 'dead') txt = 'DEAD — data pipe flatlined (aged past its SLO)';
+    else if (st === 'suspect') txt = 'SUSPECT — ' + incoherent.join(', ') + ': the change shown does not equal spot / prior close - 1. Do not trade off these until it clears.';
     else if (st === 'down') txt = 'degraded — the source reported an error';
     else if (st === 'closed') txt = 'closed — market session not open' + (ageSec != null ? '; last update ' + ageLabel(ageSec) + ' ago' : '');
     else if (st === 'unconfirmed') {
@@ -179,10 +188,10 @@
     const vals = Object.values(_health).filter((v) => v !== null);
     // 'closed' ranks below 'ok': one open, fresh feed makes the whole board 'ok'; the board
     // reads 'closed' only when every ranked feed is closed.
-    const worst = (anyFlat || vals.includes('dead')) ? 'dead' : vals.includes('down') ? 'down' : vals.includes('unconfirmed') ? 'unconfirmed' : vals.includes('ok') ? 'ok' : vals.length ? 'closed' : '';
+    const worst = (anyFlat || vals.includes('dead')) ? 'dead' : vals.includes('down') ? 'down' : vals.includes('suspect') ? 'suspect' : vals.includes('unconfirmed') ? 'unconfirmed' : vals.includes('ok') ? 'ok' : vals.length ? 'closed' : '';
     const dot = $('dataHealthDot');
     paintDot(dot, worst);
-    dot.setAttribute('title', GLOSSARY.HEALTH + ' — ' + (worst === 'dead' ? 'DEAD feed(s) — pipe flatlined' : worst === 'down' ? 'a source reported an error' : worst === 'unconfirmed' ? 'cannot confirm — a feed is unreadable or stale' : worst === 'closed' ? 'market session not open' : (worst || 'no data')));
+    dot.setAttribute('title', GLOSSARY.HEALTH + ' — ' + (worst === 'dead' ? 'DEAD feed(s) — pipe flatlined' : worst === 'suspect' ? 'SUSPECT — a displayed change does not match its own spot and prior close' : worst === 'down' ? 'a source reported an error' : worst === 'unconfirmed' ? 'cannot confirm — a feed is unreadable or stale' : worst === 'closed' ? 'market session not open' : (worst || 'no data')));
   }
   // Record a feed's flatline state; adds exactly one River action item per incident
   // (River dedups by id) and removes it on recovery.
@@ -690,7 +699,7 @@
   // ═══ B2b modules ══════════════════════════════════════════════════════════
   const fmt$ = (v) => (v == null ? '--' : (v < 0 ? '-$' : '$') + Math.abs(Number(v)).toLocaleString('en-US', { maximumFractionDigits: 0 }));
   const signCls = (v) => (v == null ? '' : v > 0 ? 'val-up' : v < 0 ? 'val-down' : 'val-muted');
-  function setDot(id, age, degraded, flatline, session, note) { setHealth($(id), age, degraded, flatline, session, note); }
+  function setDot(id, age, degraded, flatline, session, note, incoherent) { setHealth($(id), age, degraded, flatline, session, note, incoherent); }
 
   // ── b3 Breadth panel (shares the regime payload) ──────────────────────────
   function renderBreadthPanel(regime) {
@@ -937,9 +946,15 @@
     let data = null;
     try { const r = await apiFetch('/api/stable/index-strip'); if (r.ok) data = await r.json(); } catch (_) {}
     const el = $('indexStrip'); if (!el) return;
-    setDot('indexHealthDot', data && data.data_age_seconds, data ? !!data.degraded : null, data && data.flatline, data && data.session);
+    setDot('indexHealthDot', data && data.data_age_seconds, data ? !!data.degraded : null, data && data.flatline, data && data.session, null, data && data.incoherent);
     noteFlatline('strip', data && data.flatline, 'Index / strip');
     const order = ['SPY', 'QQQ', 'IWM', 'RSP', 'DIA'];
+    // A suspect strip escalates the topbar dot. Only escalation is registered here:
+    // the strip's routine freshness states stay out of the global roll-up, which is
+    // how this tile behaved before, so nothing else on the board changes meaning.
+    _health.index = (data && data.incoherent && data.incoherent.length) ? 'suspect' : null;
+    updateGlobalHealth();
+    const bad = new Set((data && data.incoherent) || []);
     const rows = (data && data.indices) || [];
     const map = {}; rows.forEach((r) => { map[r.symbol] = r; });
     el.innerHTML = order.map((sym) => {
@@ -948,8 +963,12 @@
       // renders as UNAVAILABLE carrying that reason, never as a dash that reads
       // like "flat" and never as a value computed from whatever bars were around.
       const why = r && r.reason ? String(r.reason) : (r ? '' : 'no row served for this symbol');
+      // A number whose own arithmetic does not close is shown, but never shown plain:
+      // the reader must be able to see that the board does not stand behind it.
+      const sus = bad.has(sym);
+      const susWhy = sus && r ? `SUSPECT — ${pct}% does not equal ${r.extra} / ${r.prior_close} - 1. Do not trade off this.` : '';
       const chg = pct != null
-        ? `<span class="chg ${signCls(pct)}">${(pct >= 0 ? '+' : '') + Number(pct).toFixed(2)}%</span>`
+        ? `<span class="chg ${signCls(pct)}${sus ? ' ix-suspect' : ''}"${sus ? ` title="${esc(susWhy)}"` : ''}>${(pct >= 0 ? '+' : '') + Number(pct).toFixed(2)}%${sus ? ' ?' : ''}</span>`
         : `<span class="chg ix-unavail" title="${esc(why)}">UNAVAILABLE</span>`;
       return `<div class="ix-cell" data-ticker="${sym}"${pct == null ? ` title="${esc(why)}"` : ''}><span class="sym">${sym}</span>`
         + chg

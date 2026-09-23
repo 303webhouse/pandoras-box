@@ -79,6 +79,37 @@ async def get_theme_members(theme: str, top: int = Query(5, ge=1, le=50), bottom
     return await stable_read.get_theme_members(theme, top=top, bottom=bottom)
 
 
+def _incoherent_rows(rows: list) -> list:
+    """Symbols whose served change disagrees with their own served spot and prior close.
+
+    R-IV.488(d). Two plus two makes four before the dot turns green: a percent is
+    only believable if it equals spot/prior - 1. The 2026-09-23 failure passed
+    every check the board had — fresh timestamp, degraded=false, lime dot — while
+    QQQ carried +0.024% against a -0.69% tape, because nothing ever compared the
+    number against the two numbers it was made from.
+
+    Absent inputs are NOT incoherent; they are already covered by `reason` and the
+    UNAVAILABLE render. This flags only a row that asserts all three and is wrong.
+
+    Tolerance is the rounding the row itself carries: `extra` is stored to 2dp and
+    `value` to 3dp, so the recomputation cannot be exact. Anything past that is
+    arithmetic that does not close.
+    """
+    out = []
+    for r in rows:
+        val, spot, prior = r.get("value"), r.get("extra"), r.get("prior_close")
+        if val is None or spot is None or prior in (None, 0):
+            continue
+        try:
+            implied = (float(spot) / float(prior) - 1.0) * 100.0
+        except (TypeError, ValueError, ZeroDivisionError):
+            continue
+        tol = (0.005 / abs(float(prior))) * 100.0 + 0.002
+        if abs(float(val) - implied) > max(tol, 0.02):
+            out.append(r["symbol"])
+    return out
+
+
 @router.get("/index-strip")
 async def get_index_strip():
     """Latest majors 1d % change (value) + last price (extra) + ATR extension vs 50MA.
@@ -106,8 +137,10 @@ async def get_index_strip():
         for r in rows:
             r["atr_ext_50ma"] = ext_map.get(r["symbol"])
         unresolved = [r["symbol"] for r in rows if r.get("reason")]
+        incoherent = _incoherent_rows(rows)
         return _envelope(as_of, "provisional", empty or bool(unresolved), feed="strip",
-                         indices=rows, count=len(rows), unresolved=unresolved)
+                         indices=rows, count=len(rows), unresolved=unresolved,
+                         incoherent=incoherent)
 
 
 @router.get("/rates")

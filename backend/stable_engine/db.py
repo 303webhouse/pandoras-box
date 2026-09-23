@@ -156,11 +156,13 @@ CREATE TABLE IF NOT EXISTS stable_live_strip (
     day_change  DOUBLE PRECISION,            -- indices: n/a; yields: basis points; spread: bp
     extra       DOUBLE PRECISION,            -- yields: raw level; free slot otherwise
     as_of       TIMESTAMPTZ,
-    reason      TEXT                         -- why value is NULL; rendered as UNAVAILABLE
+    reason      TEXT,                        -- why value is NULL; rendered as UNAVAILABLE
+    prior_close DOUBLE PRECISION             -- the base `value` was divided by, so it can be checked
 );
--- Additive for deployments created before the reason column existed: CREATE TABLE
--- IF NOT EXISTS above is a no-op on them, so the column has to be added explicitly.
+-- Additive for deployments created before these columns existed: CREATE TABLE
+-- IF NOT EXISTS above is a no-op on them, so they have to be added explicitly.
 ALTER TABLE stable_live_strip ADD COLUMN IF NOT EXISTS reason TEXT;
+ALTER TABLE stable_live_strip ADD COLUMN IF NOT EXISTS prior_close DOUBLE PRECISION;
 
 CREATE TABLE IF NOT EXISTS stable_intraday_points (
     symbol  TEXT NOT NULL,
