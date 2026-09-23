@@ -15,11 +15,12 @@ Run:  PYTHONPATH=backend python -m pytest backend/stable_engine/tests
 """
 
 from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import pytest
 
-from stable_engine.strip import _closes_by_session, _resolve, session_pair
+from stable_engine.strip import ET, _closes_by_session, _resolve, session_pair
 
 # The real frame served on 2026-09-23, with the real gap.
 CLOSES = {
@@ -85,15 +86,29 @@ def test_closes_by_session_keys_on_the_bar_date():
 
 @pytest.mark.parametrize("now,cur,prior", [
     # RTH on a Wednesday -> today vs the prior session.
-    (datetime(2026, 9, 23, 10, 30), date(2026, 9, 23), date(2026, 9, 22)),
+    (datetime(2026, 9, 23, 10, 30, tzinfo=ET), date(2026, 9, 23), date(2026, 9, 22)),
     # Before the bell there is no bar for today, so the pair shifts back.
-    (datetime(2026, 9, 23, 8, 0), date(2026, 9, 22), date(2026, 9, 21)),
+    (datetime(2026, 9, 23, 8, 0, tzinfo=ET), date(2026, 9, 22), date(2026, 9, 21)),
     # Exactly the opening bell counts as open.
-    (datetime(2026, 9, 23, 9, 30), date(2026, 9, 23), date(2026, 9, 22)),
+    (datetime(2026, 9, 23, 9, 30, tzinfo=ET), date(2026, 9, 23), date(2026, 9, 22)),
     # Saturday -> Friday vs Thursday.
-    (datetime(2026, 9, 26, 12, 0), date(2026, 9, 25), date(2026, 9, 24)),
+    (datetime(2026, 9, 26, 12, 0, tzinfo=ET), date(2026, 9, 25), date(2026, 9, 24)),
     # Monday after Thanksgiving 2026-11-26 (holiday) -> skips it and the weekend.
-    (datetime(2026, 11, 27, 10, 0), date(2026, 11, 27), date(2026, 11, 25)),
+    (datetime(2026, 11, 27, 10, 0, tzinfo=ET), date(2026, 11, 27), date(2026, 11, 25)),
 ])
 def test_session_pair_follows_the_market_calendar(now, cur, prior):
     assert session_pair(now) == (cur, prior)
+
+
+def test_session_pair_refuses_a_naive_datetime():
+    """A wall-clock read is meaningless without a zone, so it must not be guessed."""
+    with pytest.raises(ValueError):
+        session_pair(datetime(2026, 9, 23, 10, 30))
+
+
+def test_session_pair_converts_rather_than_assumes():
+    """08:00 ET is 12:00 UTC; the same instant must give the same pair either way."""
+    utc = datetime(2026, 9, 23, 12, 0, tzinfo=ZoneInfo("UTC"))
+    assert session_pair(utc) == session_pair(utc.astimezone(ET))
+    assert session_pair(utc) == (date(2026, 9, 22), date(2026, 9, 21))  # pre-bell
+
