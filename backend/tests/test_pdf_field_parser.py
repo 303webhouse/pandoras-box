@@ -170,6 +170,16 @@ def test_the_printed_trade_line_carries_only_those_fields(capsys):
         assert secret not in printed
 
 
+def test_prose_that_carries_an_action_word_is_not_a_fill():
+    """R-IV.477(d): the class that leaked on the Fidelity confirmations -- disclosure text read
+    as trades (symbol=STOP, reference=cannot). A fill has a quantity AND a price."""
+    prose = ["""
+    You cannot BUY or SELL in a restricted account. Contact the STOP desk before you trade.
+    Orders to buy are subject to review; see the TRADE disclosures on the reverse.
+"""]
+    assert extract_trade_lines(prose) == []
+
+
 def test_the_shape_is_the_whitelist():
     assert TRADE_FIELDS == ("action", "quantity", "price", "symbol", "reference")
     for r in extract_trade_lines(CONFIRM):

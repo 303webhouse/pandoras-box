@@ -16,7 +16,18 @@ whose value is not of the declared type is reported as absent rather than return
 A TRADE LINE is a shape rather than a label (R-IV.470(c)): a confirmation or an activity
 statement lists fills as rows, not as "Label: value" pairs. `--trade-lines` reads those rows under
 the same discipline -- five named fields, each of a declared type, and nothing else off the line.
-A row that is not a fill is never emitted; a fill missing one of the five reports it ABSENT.
+A row that is not a fill is never emitted; a fill missing the symbol or the reference reports it
+ABSENT.
+
+**PROVISIONAL, AND NOT THE READER OF RECORD (R-IV.477(d)).** On the 2026-09-18 and 2026-09-21
+Fidelity confirmations this shape read **0 of 7 fills**, emitted about fourteen all-ABSENT rows
+per file, and -- worse -- emitted disclosure prose as trades (symbol=STOP, reference=cannot).
+Emitting page text that is not a fill breaks the whitelist's one promise. CC-POSITIONS' whitelist
+parser read 7 of 7 and is the reader of record until this one clears the bar: 7/7 on both files,
+every earlier confirmation matched fill for fill, and a disclosure page alone emitting nothing.
+A row now needs BOTH a quantity and a price to be a fill at all, which is what kept the prose out
+in the fixture here -- but the 0-of-7 miss is a shape this reader has never seen, and it is not
+fixed by guessing.
 
 Usage, from the repo root:
 
@@ -140,6 +151,10 @@ def extract_trade_lines(pages: Sequence[str]) -> List[Dict[str, Any]]:
                 symbol = m
                 break
             ref = _REF_RE.search(line)
+            if qty is None or price is None:
+                # R-IV.477(d): a fill has a quantity AND a price. Without both, the row is prose
+                # that happens to contain an action word -- the class that leaked disclosure text.
+                continue
             record = {
                 "page": page_no,
                 "action": ACTIONS.get(action_hit.group(1).upper(), action_hit.group(1).upper()),
