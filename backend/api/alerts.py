@@ -10,7 +10,7 @@ import json
 from pydantic import BaseModel
 
 try:
-    from utils.pivot_auth import verify_pivot_key
+    from utils.pivot_auth import verify_pivot_key, require_api_key
 except ModuleNotFoundError:
     from backend.utils.pivot_auth import verify_pivot_key
 
@@ -82,37 +82,14 @@ async def receive_pivot_alert(payload: PivotAlertRequest, _: str = Depends(verif
         return {"status": "error", "detail": str(e)}
 
 
-@router.get("/alerts/earnings/{ticker}")
-async def get_earnings_alert(ticker: str):
-    """
-    Check earnings timing for a specific ticker
-    
-    Returns:
-    - When next earnings is
-    - Whether to avoid (pre-earnings) or target (post-earnings)
-    - Score adjustment recommendation
-    """
-    try:
-        from alerts.earnings_calendar import check_earnings_timing
-        
-        ticker = ticker.upper().strip()
-        earnings_info = check_earnings_timing(ticker)
-        
-        return {
-            "status": "success",
-            **earnings_info
-        }
-    except Exception as e:
-        logger.error(f"Error checking earnings for {ticker}: {e}")
-        return {
-            "status": "error",
-            "detail": str(e),
-            "ticker": ticker
-        }
-
-
+# ── R-IV.503(b) / CLAUDE.md route ordering ────────────────────────────────────
+# STATIC BEFORE PARAMETERIZED. This block sat AFTER /alerts/earnings/{ticker} and was
+# therefore unreachable: every request to /alerts/earnings/check-positions matched the
+# {ticker} route with ticker="check-positions" and was served by that ungated handler.
+# So the gate added here fired on nothing until the order was fixed — the route AEGIS
+# flagged was not the route answering the path.
 @router.get("/alerts/earnings/check-positions")
-async def check_positions_earnings():
+async def check_positions_earnings(_=Depends(require_api_key)):
     """
     Check all open positions for upcoming earnings
     
@@ -141,3 +118,33 @@ async def check_positions_earnings():
             "detail": str(e),
             "warnings": []
         }
+
+
+@router.get("/alerts/earnings/{ticker}")
+async def get_earnings_alert(ticker: str):
+    """
+    Check earnings timing for a specific ticker
+    
+    Returns:
+    - When next earnings is
+    - Whether to avoid (pre-earnings) or target (post-earnings)
+    - Score adjustment recommendation
+    """
+    try:
+        from alerts.earnings_calendar import check_earnings_timing
+        
+        ticker = ticker.upper().strip()
+        earnings_info = check_earnings_timing(ticker)
+        
+        return {
+            "status": "success",
+            **earnings_info
+        }
+    except Exception as e:
+        logger.error(f"Error checking earnings for {ticker}: {e}")
+        return {
+            "status": "error",
+            "detail": str(e),
+            "ticker": ticker
+        }
+

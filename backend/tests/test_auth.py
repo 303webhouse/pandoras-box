@@ -574,3 +574,197 @@ class TestExemptionsStillHold:
         monkeypatch.setenv(mcp_auth.GITHUB_CLIENT_SECRET_ENV, "secret")
         monkeypatch.setenv(mcp_auth.ALLOWED_USERS_ENV, "someone")
         assert mcp_auth.build_oauth_provider() is not None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# R-IV.503(b) — ROUTE-DISCOVERED book-read coverage.
+#
+# BOOK_PREFIXES above is an ASSUMPTION, and it is the assumption that hid six
+# routes serving the principal's holdings on a public repo: /api/hydra/exposure,
+# /api/alerts/earnings/check-positions, /api/flow/radar, /api/chronos/book-impact,
+# /api/pending-trades and /api/signals/statistics. Not one of them starts with a
+# book prefix, so the prefix test passed while all six answered without
+# credentials.
+#
+# This check asks what the handler TOUCHES, not where it is mounted. A GET whose
+# handler reads a book table must require auth, wherever it lives.
+# ─────────────────────────────────────────────────────────────────────────────
+
+BOOK_TABLES = {
+    "unified_positions", "position_lots", "position_legs", "closed_positions",
+    "options_positions", "pending_trades", "account_balances", "cash_flows",
+    "trades", "trade_executions", "signal_outcomes", "portfolio_snapshots",
+}
+
+# Handlers that name a book table but do NOT serve its rows. Each is justified by
+# reading the handler, and each is re-checked below, so an entry cannot outlive
+# the reason for it.
+BOOK_READ_EXEMPT_GETS: set = set()
+
+_SRC_CACHE: dict = {}
+
+
+def _fn_source(fn, depth=0, seen=None):
+    """Source of `fn` plus the same-project functions it calls, to `depth`.
+
+    A handler usually delegates its SQL to a helper, so reading only the handler
+    would miss the table and call the route clean. Depth-limited and cycle-safe;
+    the limit is stated rather than assumed complete.
+    """
+    import inspect as _i
+    seen = seen if seen is not None else set()
+    key = getattr(fn, "__qualname__", None) or repr(fn)
+    if key in seen or depth > 2:
+        return ""
+    seen.add(key)
+    try:
+        src = _i.getsource(_i.unwrap(fn))
+    except (OSError, TypeError):
+        return ""
+    out = [src]
+    if depth < 2:
+        g = getattr(_i.unwrap(fn), "__globals__", {}) or {}
+        import ast
+        try:
+            tree = ast.parse(_i.cleandoc(src)) if src.strip().startswith(("def ", "async def ")) else ast.parse(src)
+        except SyntaxError:
+            try:
+                import textwrap
+                tree = ast.parse(textwrap.dedent(src))
+            except SyntaxError:
+                return "".join(out)
+        names = set()
+        for n in ast.walk(tree):
+            if isinstance(n, ast.Call):
+                f = n.func
+                if isinstance(f, ast.Name):
+                    names.add(f.id)
+                elif isinstance(f, ast.Attribute):
+                    names.add(f.attr)
+        for nm in names:
+            tgt = g.get(nm)
+            if callable(tgt) and getattr(tgt, "__module__", "") and not getattr(tgt, "__module__", "").startswith(
+                ("fastapi", "pydantic", "starlette", "builtins", "typing", "asyncio", "datetime", "json", "os", "re")
+            ):
+                out.append(_fn_source(tgt, depth + 1, seen))
+    return "".join(out)
+
+
+import re as _re
+
+_SQL_CTX = ("from", "join", "into", "update", "table")
+
+
+def _reads_table(src: str, table: str) -> bool:
+    """True only where `table` appears in SQL position, not in prose.
+
+    A bare substring test flagged four routes that merely contain the WORD:
+    /api/congress/recent-trades (its own path string), /api/cta/signals/{ticker}
+    ("unusual trades" in a sentence), and the two crypto routes (Binance/OKX
+    `/trades` endpoints). A detector that cries wolf gets switched off, so it
+    matches FROM/JOIN/INTO/UPDATE/TABLE <name> and nothing else.
+    """
+    # Built from character classes only: a SQL keyword, then non-word characters,
+    # then the table name as a whole word. No backslash escapes, so the pattern
+    # cannot be mangled by whatever writes this file.
+    pat = _re.compile(
+        "(?:^|[^A-Za-z0-9_])(?:" + "|".join(_SQL_CTX) + ")[^A-Za-z0-9_]+"
+        + _re.escape(table) + "(?![A-Za-z0-9_])",
+        _re.I,
+    )
+    return bool(pat.search(src))
+
+
+def _book_reading_gets(app) -> list:
+    """(path, tables) for every GET whose handler reaches a book table."""
+    found = []
+    for route in app.routes:
+        methods = getattr(route, "methods", None) or set()
+        path = getattr(route, "path", "")
+        ep = getattr(route, "endpoint", None)
+        if "GET" not in methods or not ep:
+            continue
+        key = f"{path}:{getattr(ep, '__qualname__', '')}"
+        if key not in _SRC_CACHE:
+            _SRC_CACHE[key] = _fn_source(ep)
+        src = _SRC_CACHE[key]
+        hit = sorted(t for t in BOOK_TABLES if _reads_table(src, t))
+        if hit:
+            found.append((path, hit))
+    return sorted(found)
+
+
+class TestBookReadsDiscoveredByHandler:
+    """R-IV.503(b): discovery by what the handler touches, not by where it is mounted."""
+
+    def test_the_six_named_routes_are_gated(self, client):
+        """The routes AEGIS found open. Named explicitly so a regression is unmistakable."""
+        from main import app
+        six = {
+            "/api/hydra/exposure",
+            "/api/alerts/earnings/check-positions",
+            "/api/flow/radar",
+            "/api/chronos/book-impact",
+            "/api/pending-trades",
+            "/api/signals/statistics",
+        }
+        by_path = {getattr(r, "path", ""): r for r in app.routes
+                   if "GET" in (getattr(r, "methods", None) or set())}
+        missing = sorted(p for p in six if p not in by_path)
+        assert not missing, f"route(s) vanished from the app: {missing}"
+        ungated = sorted(p for p in six if not _has_auth(by_path[p].dependant))
+        assert not ungated, (
+            "R-IV.503(b) routes are open again:\n" + "\n".join(f"  - GET {p}" for p in ungated))
+
+    @pytest.mark.parametrize("path", sorted([
+        "/api/hydra/exposure",
+        "/api/alerts/earnings/check-positions",
+        "/api/flow/radar",
+        "/api/chronos/book-impact",
+        "/api/pending-trades",
+        "/api/signals/statistics",
+    ]))
+    def test_six_answer_401_without_credentials(self, client, path):
+        assert client.get(path).status_code == 401
+
+    @pytest.mark.parametrize("path", sorted([
+        "/api/hydra/exposure", "/api/flow/radar", "/api/pending-trades",
+        "/api/chronos/book-impact", "/api/signals/statistics",
+        "/api/alerts/earnings/check-positions",
+    ]))
+    def test_six_accept_a_session_cookie(self, client, path):
+        """The dashboard path — a GET needs no X-Requested-With, or every read blanks."""
+        from utils.session import issue_session, COOKIE_NAME
+        token = issue_session()
+        assert token, "issue_session() returned None — DASHBOARD_SESSION_SECRET not set"
+        r = client.get(path, cookies={COOKIE_NAME: token})
+        assert r.status_code not in (401, 403), f"GET {path} rejected a valid session ({r.status_code})"
+
+    def test_no_ungated_get_touches_a_book_table(self, client):
+        """The general rule. No prefix list — the prefix list is what hid the six."""
+        from main import app
+        offenders = [(p, t) for p, t in _book_reading_gets(app)
+                     if p not in BOOK_READ_EXEMPT_GETS
+                     and not _has_auth({r.path: r for r in app.routes
+                                        if getattr(r, "path", "") == p
+                                        and "GET" in (getattr(r, "methods", None) or set())}[p].dependant)]
+        assert not offenders, (
+            f"{len(offenders)} GET route(s) read a book table without auth:\n"
+            + "\n".join(f"  - GET {p}  (touches: {', '.join(t)})" for p, t in offenders)
+            + "\n\nGate with Depends(require_api_key), or justify in BOOK_READ_EXEMPT_GETS "
+              "after reading the handler.")
+
+    def test_the_discovery_itself_works(self, client):
+        """A test that can't find anything passes for the wrong reason."""
+        from main import app
+        found = _book_reading_gets(app)
+        assert len(found) >= 6, (
+            f"handler discovery found only {len(found)} book-reading GETs — the scan is broken, "
+            "not the app")
+
+    def test_every_exemption_still_lacks_book_rows(self, client):
+        """An exemption cannot outlive the reading that justified it."""
+        from main import app
+        paths = {p for p, _ in _book_reading_gets(app)}
+        stale = sorted(p for p in BOOK_READ_EXEMPT_GETS if p not in paths)
+        assert not stale, f"exemption(s) no longer touch a book table — delete them: {stale}"

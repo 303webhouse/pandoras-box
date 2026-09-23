@@ -16,11 +16,12 @@ import time
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 
-from fastapi import APIRouter
+from fastapi import Depends, APIRouter
 from database.redis_client import get_redis_client
 from database.postgres_client import get_postgres_client
 
 from api._swr_cache import SWRCache
+from utils.pivot_auth import require_api_key
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/flow", tags=["flow-radar"])
@@ -148,7 +149,7 @@ async def _load_flow_from_db(pool, lookback_hours: int = 72):
 
 
 @router.get("/radar")
-async def get_flow_radar():
+async def get_flow_radar(_=Depends(require_api_key)):
     """
     Contextual flow intelligence: positions, watchlist, sectors, market pulse.
 

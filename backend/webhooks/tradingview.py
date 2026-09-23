@@ -1244,7 +1244,7 @@ async def receive_mcclellan_data(payload: McClellanPayload):
 
 
 @router.get("/outcomes/{signal_id}")
-async def get_signal_outcome(signal_id: str):
+async def get_signal_outcome(signal_id: str, _=Depends(require_api_key)):
     """
     Return outcome data for a signal. Used by VPS outcome matcher.
     Returns 404 if signal_id not found in signal_outcomes table.

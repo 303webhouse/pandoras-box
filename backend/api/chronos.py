@@ -12,10 +12,11 @@ import logging
 from datetime import date, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Query, HTTPException, Request
+from fastapi import Depends, APIRouter, Query, HTTPException, Request
 
 from database.postgres_client import get_postgres_client
 from utils.position_overlap import ETF_COMPONENTS
+from utils.pivot_auth import require_api_key
 
 logger = logging.getLogger("chronos_api")
 router = APIRouter(prefix="/chronos")
@@ -89,7 +90,7 @@ async def get_earnings_calendar(
 
 # ── GET /chronos/book-impact ───────────────────────────────────────
 @router.get("/book-impact")
-async def get_book_impact():
+async def get_book_impact(_=Depends(require_api_key)):
     """Earnings affecting current positions (next 14 days)."""
     today = date.today()
     d_to = today + timedelta(days=14)
