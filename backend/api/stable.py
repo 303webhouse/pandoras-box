@@ -85,6 +85,11 @@ async def get_index_strip():
 
     ATR extension is a daily-close measure from stable_metrics (atr_ext_50ma) attached
     read-time; null when the symbol isn't in the metrics snapshot (never fabricated).
+
+    A row whose `value` is null carries a `reason`; the surface renders UNAVAILABLE
+    with it. Any such row degrades the feed, so the health dot cannot read green
+    over a value the pipeline could not source — the failure this endpoint served
+    on 2026-09-23 was a *wrong* number under a green dot, not a missing one.
     """
     pool = await get_postgres_client()
     async with pool.acquire() as conn:
@@ -100,7 +105,9 @@ async def get_index_strip():
             ext_map = {r["ticker"]: r["atr_ext_50ma"] for r in ext_rows}
         for r in rows:
             r["atr_ext_50ma"] = ext_map.get(r["symbol"])
-        return _envelope(as_of, "provisional", empty, feed="strip", indices=rows, count=len(rows))
+        unresolved = [r["symbol"] for r in rows if r.get("reason")]
+        return _envelope(as_of, "provisional", empty or bool(unresolved), feed="strip",
+                         indices=rows, count=len(rows), unresolved=unresolved)
 
 
 @router.get("/rates")

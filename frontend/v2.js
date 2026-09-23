@@ -944,8 +944,15 @@
     const map = {}; rows.forEach((r) => { map[r.symbol] = r; });
     el.innerHTML = order.map((sym) => {
       const r = map[sym]; const pct = r ? r.value : null; const ext = r ? r.atr_ext_50ma : null;
-      return `<div class="ix-cell" data-ticker="${sym}"><span class="sym">${sym}</span>`
-        + `<span class="chg ${signCls(pct)}">${pct != null ? (pct >= 0 ? '+' : '') + Number(pct).toFixed(2) + '%' : '--'}</span>`
+      // A percent the backend could not source arrives as null WITH a reason. It
+      // renders as UNAVAILABLE carrying that reason, never as a dash that reads
+      // like "flat" and never as a value computed from whatever bars were around.
+      const why = r && r.reason ? String(r.reason) : (r ? '' : 'no row served for this symbol');
+      const chg = pct != null
+        ? `<span class="chg ${signCls(pct)}">${(pct >= 0 ? '+' : '') + Number(pct).toFixed(2)}%</span>`
+        : `<span class="chg ix-unavail" title="${esc(why)}">UNAVAILABLE</span>`;
+      return `<div class="ix-cell" data-ticker="${sym}"${pct == null ? ` title="${esc(why)}"` : ''}><span class="sym">${sym}</span>`
+        + chg
         + `<span class="ext">${ext != null ? (ext >= 0 ? '+' : '') + Number(ext).toFixed(1) + ' ATR' : ''}</span></div>`;
     }).join('');
     el.querySelectorAll('.ix-cell[data-ticker]').forEach((c) => c.addEventListener('click', () => openTvPopover(c.dataset.ticker, c)));

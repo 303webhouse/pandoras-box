@@ -359,6 +359,9 @@ body {
 .ix-cell .sym { font-family: var(--mono); font-size: 11px; color: var(--text-2); letter-spacing: 1px; }
 .ix-cell .chg { font-family: var(--mono); font-size: 15px; font-weight: 700; }
 .ix-cell .ext { font-family: var(--mono); font-size: 9px; color: var(--text-3); }
+/* An unsourceable value states itself. Smaller than a percent so the word fits the
+   cell, and muted+dashed so it never reads as a live number at a glance. */
+.ix-cell .chg.ix-unavail { font-size: 8.5px; font-weight: 600; letter-spacing: 0.5px; color: var(--text-3); border-bottom: 1px dashed var(--text-3); cursor: help; }
 
 /* b5/b6 mini values */
 .mini-vals { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px; font-family: var(--mono); font-size: 11px; }
