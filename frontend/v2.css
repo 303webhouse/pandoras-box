@@ -19,9 +19,11 @@
   --text-2: #8b98ad;
   /* R-IV.416(e) / DEF-V2-TEXT3-CONTRAST — was #5b6b85 (3.71 / 3.48 / 3.35 : 1 on
      --bg / --panel / --panel-2, failing WCAG AA at 8-12px). Same hue and saturation,
-     lightness only: 5.12 / 4.80 / 4.63 : 1. Hardcoded copies that do NOT follow this
-     token: v2.js chart ticks (#5b6b85), and the deck-bar fallbacks in styles.css and
-     docs/components/pandora-deck-bar.md. */
+     lightness only: 5.12 / 4.80 / 4.63 : 1. R-IV.495(d): v2.js chart ticks and this
+     file's own deck-tab fallback caught up (both were still #5b6b85). Two copies remain
+     outside this lane's files -- the deck-bar fallbacks in the legacy styles.css and
+     docs/components/pandora-deck-bar.md -- and stay stale until whoever owns those pages
+     raises them. */
   --text-3: #70829d;
   --mono: ui-monospace, "SFMono-Regular", "JetBrains Mono", Menlo, Consolas, monospace;
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -721,7 +723,7 @@ body.is-mobile-grid .tile-grip { display: none !important; }
   .deck-tab {
     flex: 1 1 0; min-height: 52px;
     display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
-    text-decoration: none; color: var(--text-3, #5b6b85);
+    text-decoration: none; color: var(--text-3, #70829d);
     font-family: var(--mono, ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace);
     font-size: 10px; letter-spacing: 1.4px; text-transform: uppercase;
     border-top: 2px solid transparent;
