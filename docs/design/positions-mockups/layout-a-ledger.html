@@ -1,0 +1,24 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Positions · A Ledger (mock, re-derived 09-23)</title>
+<link rel="stylesheet" href="../../../frontend/v2.css"><link rel="stylesheet" href="pm.css"></head><body>
+<div class="pm-page"><div id="banner"></div>
+<div class="pm-nav"><a href="layout-a-ledger.html" class="on">A · Ledger</a><a href="layout-b-split.html" class="">B · Split</a><a href="layout-c-tabs.html" class="">C · Tabs &amp; cards</a></div>
+<h1 class="pm-h1">Positions · A — Ledger (one long page, detail opens under the row)</h1>
+<div id="gauges"></div>
+<div class="pm-card"><details><summary class="pm-h1" style="cursor:pointer;margin:0">+ New position — pre-trade ticket</summary><div id="ticket" style="margin-top:8px"></div></details></div>
+<div id="books"></div>
+<div class="pm-card" id="hist"></div>
+<div id="missing"></div></div><script src="pm-data.js"></script><script src="pm-parts.js"></script><script>const X = window.PMP; document.getElementById("banner").innerHTML = X.mockBanner(); document.getElementById("missing").innerHTML = X.missing();
+document.getElementById('gauges').innerHTML = X.sleeves.map(X.gauge).join('');
+document.getElementById('ticket').innerHTML = X.ticket();
+document.getElementById('hist').innerHTML = X.history();
+document.getElementById('books').innerHTML = X.sleeves.map(s => `<div class="pm-card"><h1 class="pm-h1">${s.account} · open</h1><div class="pm-scroll" data-acct="${s.account}">${X.bookTable(s.account)}</div></div>`).join('');
+document.getElementById('books').addEventListener('click', (e) => {
+  const tr = e.target.closest('tr.pm-row'); if (!tr) return;
+  const open = tr.nextElementSibling && tr.nextElementSibling.classList.contains('pm-inline');
+  document.querySelectorAll('tr.pm-inline').forEach(n => n.remove()); document.querySelectorAll('tr.pm-row.sel').forEach(n => n.classList.remove('sel'));
+  if (open) return;
+  const p = X.open.find(o => o.id === Number(tr.dataset.id)); tr.classList.add('sel');
+  tr.insertAdjacentHTML('afterend', `<tr class="pm-inline"><td colspan="7"><div class="pm-split">${'<div>' + X.detail(p) + '</div><div>' + X.actions(p) + '</div>'}</div></td></tr>`);
+});
+</script></body></html>
