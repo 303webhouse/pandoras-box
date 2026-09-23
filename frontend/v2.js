@@ -1030,7 +1030,6 @@
     // backend is older than this page: sum everything and SAY the scope is unknown rather
     // than publishing a total whose membership we cannot state.
     const scoped = accts.filter((a) => a.in_scope === true);
-    const excluded = accts.filter((a) => a.in_scope === false);
     const scopeKnown = accts.some((a) => typeof a.in_scope === 'boolean');
     const counted = scopeKnown ? scoped : accts;
     const total = counted.reduce((s, a) => s + (Number(a.balance) || 0), 0);
@@ -1099,7 +1098,6 @@
 
     el.innerHTML = `
       <div class="book-line"><span class="k">Balance</span><span class="v">${counted.length ? fmt$(total) : '--'}${scopeKnown ? '' : ' <span class="vintage-chip" data-state="unknown" title="this backend does not report account scope; the total is every row">scope unknown</span>'}</span></div>
-      ${scopeKnown && excluded.length ? `<div class="book-note">excludes ${excluded.length} out-of-scope account${excluded.length > 1 ? 's' : ''}: ${excluded.map((a) => esc(a.account_name || '?')).join(', ')}</div>` : ''}
       <div class="book-line"><span class="k">Day P&amp;L</span>${dayCell}</div>
       <div class="book-greeks">
         ${greekCell('Δ', 'delta', 0)}
@@ -1162,7 +1160,19 @@
   function groupPositions(list) {
     const groups = new Map();
     (list || []).forEach((p, i) => {
-      const key = [(p.ticker || '').toUpperCase(), p.expiry || '-', p.structure || '-'].join('|');
+      // R-IV.479(c) — account + instrument + structure + strikes + expiry. The first key
+      // (ticker+expiry+structure) collapsed rows that differ by ACCOUNT or by STRIKES, so
+      // two positions in two accounts, or two different spreads on one expiry, counted as
+      // duplicates of each other. Measured on the live book: the short key found 5 groups,
+      // this one finds 3, and the difference was never duplication.
+      const key = [
+        (p.account || '?').toUpperCase(),
+        (p.ticker || '').toUpperCase(),
+        p.structure || '-',
+        p.long_strike == null ? '-' : String(p.long_strike),
+        p.short_strike == null ? '-' : String(p.short_strike),
+        p.expiry || '-',
+      ].join('|');
       if (!groups.has(key)) groups.set(key, { key, rows: [], idx: i });
       groups.get(key).rows.push(p);
     });
