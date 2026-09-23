@@ -74,7 +74,17 @@ def session_pair(now_et: datetime) -> tuple:
     market_calendar exists to fail loudly there, and catching it to fall back on a
     weekday rule would rebuild the silent approximation it replaces. fetch_strip
     turns it into an unavailable strip with a stated reason, never a guess.
+
+    The argument must be timezone-aware. The opening-bell test below reads
+    wall-clock fields, which mean nothing until the zone is known: hand this a
+    naive UTC datetime and every morning from 09:30Z to 13:30Z resolves to the
+    wrong session pair. Converting is right; guessing is not, so a naive input
+    raises rather than being assumed to be ET.
     """
+    if now_et.tzinfo is None:
+        raise ValueError("session_pair requires a timezone-aware datetime; a naive "
+                         "one cannot be placed against the exchange clock")
+    now_et = now_et.astimezone(ET)
     d = now_et.date()
     open_yet = (now_et.hour * 60 + now_et.minute) >= 9 * 60 + 30
     cur = d if (is_trading_day(d) and open_yet) else previous_trading_day(d)
