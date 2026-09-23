@@ -347,6 +347,17 @@ async def _uw_request(path: str, params: dict = None, caller: str = "untagged") 
 # ═════════════════════════════════════════════════════════════════
 
 
+def _bar_date(bar: Dict[str, Any]) -> str:
+    """The session date of a UW bar, as a sortable string.
+
+    `date` is the real field; `start_time` is accepted only so a future schema
+    change cannot silently reorder every bar. A bar with neither sorts first,
+    which keeps it away from the [-1] "most recent" slot that callers read.
+    """
+    v = bar.get("date") or bar.get("start_time") or ""
+    return str(v)
+
+
 async def get_ohlc(
     ticker: str,
     candle_size: str = "1d",
@@ -355,11 +366,22 @@ async def get_ohlc(
 ) -> Optional[List[Dict[str, Any]]]:
     """Fetch OHLC bars from UW `/api/stock/{ticker}/ohlc/{candle_size}`.
 
-    Returns the UW bars list directly (passthrough of the `data` array).
-    Each bar carries keys: open, high, low, close, total_volume (or volume),
-    start_time, market_time ('pr'/'r'/'po' for pre/regular/post sessions),
-    among others. Schema is not normalized to the Polygon-shaped get_bars()
-    response — callers that already work with the UW shape should use this.
+    Returns the UW bars list SORTED ASCENDING BY SESSION DATE, so bars[-1] is
+    the most recent bar. UW itself serves them newest-first; do not rely on the
+    vendor's order anywhere.
+
+    Each bar carries keys: open, high, low, close, total_volume, volume,
+    `date`, market_time ('pr'/'r'/'po' for pre/regular/post sessions).
+    There is NO `start_time` key — an earlier version of this docstring said
+    there was, and three call sites believed it: one sorted by
+    `b.get("start_time") or ""` (every key equal, so a no-op that left the bars
+    descending) and one skipped every bar that lacked it, which is the "UW
+    returned no regular-session bar" symptom, misdiagnosed as a vendor outage.
+    Verified against the live cache 2026-09-23: keys are exactly
+    ['close','date','high','low','market_time','open','total_volume','volume'].
+
+    Schema is not normalized to the Polygon-shaped get_bars() response — callers
+    that already work with the UW shape should use this.
 
     candle_size: any UW-supported candle ('1m', '5m', '15m', '30m', '1h', '1d',
         '1w', '1mo'). Defaults to daily.
@@ -375,7 +397,10 @@ async def get_ohlc(
     cache_key = f"{symbol}|{candle_size}|{lookback_days}"
     cached = await cache_get("ohlc", cache_key)
     if cached is not None:
-        return cached
+        # Also sorted on the way out: entries written before this ordering
+        # existed are still in Redis for the rest of their TTL, and returning
+        # them in vendor order would keep serving the defect after the deploy.
+        return sorted(cached, key=_bar_date) if isinstance(cached, list) else cached
 
     params: Dict[str, Any] = {}
     if lookback_days and lookback_days > 0:
@@ -399,6 +424,16 @@ async def get_ohlc(
     bars = resp["data"]
     if not isinstance(bars, list):
         return None
+
+    # Sort at source, ascending by session date. UW serves bars NEWEST-FIRST, and
+    # every positional consumer in this repo was written for the ascending
+    # yfinance/Polygon convention, so each one silently read the wrong end:
+    # _get_regular_session_change took reg[-1]/reg[-2] and got 2025-09-23/24,
+    # publishing SPY 663.21 +0.32% while SPY was 768.93 -0.55% (2026-09-23).
+    # Ordering the bars once, here, is what makes [-1] mean "most recent"
+    # everywhere downstream instead of each caller re-deriving it (and getting
+    # it wrong). See also the crypto twin of this landmine in fetch_crypto_ohlc.
+    bars = sorted(bars, key=_bar_date)
 
     await cache_set("ohlc", cache_key, bars)
     return bars
@@ -494,8 +529,17 @@ async def _get_regular_session_change(ticker: str) -> Optional[Dict[str, Any]]:
         except (ValueError, TypeError):
             return None
 
+    # get_ohlc() sorts ascending, so [-1] is the newest session. The dates are
+    # checked anyway and carried into the result: this is the surface that
+    # published a year-old bar as today's index level, and the thing that made
+    # it invisible was that no date was ever looked at, let alone reported.
     today = regular_bars[-1]
     prev = regular_bars[-2]
+    today_date, prev_date = _bar_date(today), _bar_date(prev)
+    if today_date <= prev_date:
+        logger.warning("UW ohlc/1d bars for %s are not ascending (%s <= %s) — refusing "
+                       "to compute a change from them", ticker, today_date, prev_date)
+        return None
 
     today_close = _f(today.get("close"))
     prev_close = _f(prev.get("close"))
@@ -514,6 +558,8 @@ async def _get_regular_session_change(ticker: str) -> Optional[Dict[str, Any]]:
         "prev_close": prev_close,
         "change": change,
         "change_pct": change_pct,
+        "today_date": today_date,
+        "prev_date": prev_date,
     }
     await cache_set("quote", cache_key, result)
     return result
@@ -691,11 +737,22 @@ async def _get_bars_via_uw(
             v = int(v_raw)
         except (TypeError, ValueError):
             v = 0
+        # The session stamp is `date` ('2026-09-23'); `start_time` does not exist
+        # on a UW bar. Reading only `start_time` meant ts_ms was always None and
+        # EVERY bar hit the `continue` below — the function returned [] for every
+        # ticker, every time, and that empty list was read as "UW has no
+        # regular-session bar" rather than as the key-name bug it is.
         ts_ms: Optional[int] = None
-        start_time = b.get("start_time")
-        if start_time:
+        stamp = b.get("date") or b.get("start_time")
+        if stamp:
+            s = str(stamp)
             try:
-                dt = datetime.fromisoformat(str(start_time).replace("Z", "+00:00"))
+                if len(s) == 10:  # a bare session date -> midnight UTC
+                    dt = datetime.fromisoformat(s).replace(tzinfo=timezone.utc)
+                else:
+                    dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
                 ts_ms = int(dt.timestamp() * 1000)
             except (ValueError, TypeError):
                 pass

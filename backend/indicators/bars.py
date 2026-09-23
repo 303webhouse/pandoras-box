@@ -34,9 +34,13 @@ async def fetch_daily_ohlc(
     if not bars or not isinstance(bars, list):
         return None
 
-    # Ensure chronological order (UW carries start_time per bar)
+    # get_ohlc() now guarantees ascending order. This sort used to key on
+    # `start_time`, which no UW bar carries, so every key was "" and the sort
+    # was a stable no-op that left the bars newest-first while reading as if it
+    # had ordered them. Keyed on the real field it is merely redundant.
     try:
-        bars = sorted(bars, key=lambda b: b.get("start_time") or "")
+        from integrations.uw_api import _bar_date
+        bars = sorted(bars, key=_bar_date)
     except Exception:
         pass
 
