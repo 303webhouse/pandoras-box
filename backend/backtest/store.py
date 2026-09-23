@@ -237,6 +237,12 @@ async def load_graded(conn, population: str) -> List[Dict[str, Any]]:
     return out
 
 
+async def has_results(conn, population: str) -> bool:
+    """Whether this population has any results row at all (R-IV.477(c))."""
+    return bool(await conn.fetchval(
+        "SELECT 1 FROM backtest_results WHERE population = $1 LIMIT 1", population))
+
+
 async def write_results(conn, run_id: int, population: str, results: Iterable[Dict[str, Any]]) -> int:
     n = 0
     for r in results:
