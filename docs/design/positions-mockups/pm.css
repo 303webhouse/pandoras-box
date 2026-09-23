@@ -25,8 +25,10 @@ h1.pm-h1 { font-size: 15px; letter-spacing: 1.6px; text-transform: uppercase; fo
 .pm-chip[data-state="verified"]::before { background: var(--teal); }
 .pm-chip[data-state="screen"] { color: var(--text); } .pm-chip[data-state="screen"]::before { background: var(--text-2); }
 .pm-chip[data-state="reported"] { color: var(--amber); border-color: var(--amber); } .pm-chip[data-state="reported"]::before { background: var(--amber); }
-.pm-chip[data-state="imported"], .pm-chip[data-state="unknown"] { color: var(--amber); border-style: dashed; border-color: var(--amber); }
-.pm-chip[data-state="imported"]::before, .pm-chip[data-state="unknown"]::before { background: transparent; border: 1px solid var(--amber); }
+.pm-chip[data-state="unknown"] { color: var(--amber); border-style: dashed; border-color: var(--amber); }
+.pm-chip[data-state="unknown"]::before { background: transparent; border: 1px solid var(--amber); }
+.pm-chip[data-state="imported"] { color: var(--text); } .pm-chip[data-state="imported"]::before { background: transparent; border: 1px solid var(--teal); }
+.pm-ladder { font-size: 11px; color: var(--text-3); display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
 .pm-tag { font-family: var(--mono); font-size: 10px; border: 1px solid var(--border-strong); border-radius: 4px; padding: 0 5px; color: var(--text-2); }
 .pm-gauge { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 12px; margin-bottom: 12px; }
 .pm-g-head, .pm-g-foot { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; font-size: 12px; }
