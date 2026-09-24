@@ -109,6 +109,38 @@ def fetch_batch(tickers: list[str], start: date, end: date) -> dict[str, pd.Data
     return {}
 
 
+def incomplete_sessions(lookback_days: int = 10) -> list:
+    """[(date, bars_held, required)] for recent sessions below the anchor threshold.
+
+    The thresholds are scoring's, not this module's: one definition, so a session the
+    writer calls complete is one the reader will anchor on, and vice versa
+    (convention #9). `required` is a share of the largest session seen in the window,
+    which tracks the universe without hardcoding its size.
+
+    Read-only. Naming an incomplete session is this function's whole job; deciding
+    what to do about it belongs to the caller and to the reader that would anchor.
+    """
+    from . import scoring
+
+    try:
+        df = db.read_df(
+            "SELECT date, COUNT(*) AS n FROM stable_daily_bars "
+            "WHERE date >= CURRENT_DATE - %s::int GROUP BY date ORDER BY date",
+            (lookback_days,),
+        )
+    except Exception as exc:
+        logger.warning("[stable_bars] completeness read failed: %s", type(exc).__name__)
+        return []
+    if df is None or df.empty:
+        return []
+    counts = {str(r["date"]): int(r["n"]) for _, r in df.iterrows()}
+    if not counts:
+        return []
+    required = max(scoring.ANCHOR_MIN_TICKERS_FLOOR,
+                   int(max(counts.values()) * scoring.ANCHOR_MIN_COVERAGE))
+    return [(d, n, required) for d, n in sorted(counts.items()) if n < required]
+
+
 def download_and_store(
     tickers: list[str],
     years: int | None = None,
@@ -173,7 +205,32 @@ def download_and_store(
     # Blocked tickers count against coverage (they are genuinely absent this run).
     degraded = coverage_pct < 90.0 or bool(skipped_blocked)
 
+    # R-IV.497(e) — PER-DATE COMPLETENESS, because per-ticker coverage cannot see this.
+    #
+    # The contract above is per TICKER: "did this symbol answer at all". A vendor can
+    # answer for 679 symbols and still hold a session for only 135 of them, and that
+    # run scores 100% coverage. Measured 2026-09-24: stable_daily_bars held 679 bars
+    # for 09-18, 09-21 and 09-23 and **135** for 09-22, while this summary reported a
+    # healthy run — the bars layer had no per-date notion at all.
+    #
+    # It matters because the anchor is a DATE. An incomplete session that becomes the
+    # anchor feeds the regime, which is the committee's trend tier, off a fraction of
+    # the universe. metrics and scoring already refuse such a date; the bars layer did
+    # not name it, so nothing upstream could see it coming.
+    #
+    # Uses scoring's thresholds rather than its own, so the writer cannot report a date
+    # healthy that the reader would refuse to anchor on (convention #9).
+    incomplete_dates = incomplete_sessions()
+    if incomplete_dates:
+        degraded = True
+        logger.warning(
+            "[stable_bars] INCOMPLETE session(s) after this run: %s — each holds fewer "
+            "bars than the universe expects and MUST NOT become the anchor",
+            ", ".join("%s=%d/%d" % (d, n, exp) for d, n, exp in incomplete_dates))
+
     summary = {
+        "incomplete_dates": [{"date": d, "bars": n, "expected_at_least": exp}
+                             for d, n, exp in (incomplete_dates or [])],
         "requested": len(requested),
         "blocked": len(skipped_blocked),
         "target": total_target,
