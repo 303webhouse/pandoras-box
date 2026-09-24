@@ -579,3 +579,100 @@ not a guarantee.
 QUERY executes each read **from this blob, as of the read**, and **names the blob on the read's
 face**. The blob is this file's git object id; the id in force before this amendment was
 `57cb26a3`.
+
+---
+
+# AMENDMENT 4 · R-IV.521 — SESSION GAPS AND GRADE PROVENANCE
+
+**Filed by:** CC-BUILD, 2026-09-24, on SPINE's order R-IV.522(b)5.
+**Prior:** Amendment 1 (observational strata, R-IV.275); Amendment 2 (bar vendor as a pinned
+instrument property, R-IV.489(a)); Amendment 3 (read cadence, window of record, bar vendor,
+R-IV.485).
+
+**Verbatim as issued. Nothing below this line to the end of the amendment is this lane's wording.**
+
+> TRITON — AMENDMENT 4 · R-IV.521 · issued 2026-09-24 by SPINE (Fable 3)
+>
+> Session gaps and grade provenance. Issued before any read, on provenance evidence only; no
+> outcome was observed (CC-QUERY's R-IV.518 check read nullness aggregates only).
+>
+> (a) Finding. When the pinned vendor had no bar for a horizon session, the grader's close lookup
+> used a neighbouring session's close and recorded nothing to show it. The vendor held 2026-09-22
+> for about one symbol in five, and 15 W1 rows are known to have been graded across that gap. No
+> grade records the date of the bar it used, so no grade made before this amendment can be shown
+> free of the fault.
+>
+> (b) Provenance. Every grade records the session date of the close it used. A grade is valid only
+> when that date is its horizon session.
+>
+> (c) No substitution. A horizon session is a weekday on which the exchange traded. If the pinned
+> vendor returns no bar for it after three separate requests, that horizon stays ungraded; no other
+> session's close is used.
+>
+> (d) New class in §P2: UNGRADEABLE-SESSION-GAP — a horizon left ungraded under (c) when a read's
+> grading runs. It is excluded from that read and listed on the read's face with ticker, horizon
+> and session.
+>
+> (e) Fresh grading. Immediately before a read executes, its cohort is graded afresh under (b) and
+> (c), and the new grades are appended as new versions. The read uses those versions and names
+> them on its face. Grades made before this amendment are kept unchanged and used by no read.
+>
+> (f) A read executes only if (b)–(e) are live and verified, and session gaps are no more than 5%
+> of its cohort's gradeable horizons. Otherwise it postpones under the registration's extension
+> provision, its face says why, and SPINE rules on what follows. Read 1 remains scheduled for
+> 2026-09-25 on these terms.
+>
+> (g) Nothing else changes: metric, horizons, cohorts, vendor pin, nulls and read schedule stand,
+> except as (f) allows.
+
+## A4 · AS IMPLEMENTED — this lane's note, not part of the amendment
+
+**(b) Provenance.** `triton_grade_versions` carries `entry_session`, `session_1d`, `session_3d`,
+`session_5d` and `session_gaps`. The session is written **beside the figure it produced**, in the
+same insert, so a return and its provenance cannot be separated by a later write. The columns were
+**added and never backfilled**: NULL means "graded before provenance was recorded", which is
+exactly what (e) calls such a grade — kept, and used by no read.
+
+**(c) No substitution.** The old lookup `close_on_or_near` is the fault in (a): it returned a bare
+float, so a neighbour's close was indistinguishable from the session's own. It now returns **the
+close and the session it came from**, and its substituting behaviour is **unchanged for callers
+outside the window**, which R-IV.522(b)2 preserved. In-window grading uses `close_on_session`,
+which takes the session or nothing and **cannot substitute at all** — the rule is enforced by the
+absence of the capability, not by a caller remembering to check.
+
+**"Three separate requests"** is counted in `triton_session_bar_attempts`, keyed
+`(ticker, session_date, provider)`. Separate **in time**, not three calls in one breath: the vendor
+served different coverage to identical requests days apart (R-IV.517(b)), so a same-pass retry
+would mostly re-ask a cache and name a recoverable absence permanent. The nightly pass counts one
+attempt per pass and holds the horizon meanwhile under `session_bar_absent_retrying`. The
+fresh-grade command of (e) must reach a verdict *before* a read, so it makes the attempts itself —
+each a real vendor round trip, each recorded — and only then names a gap. Same threshold, same
+counter, and no verdict is ever reached on one failure.
+
+**A horizon session is a weekday the exchange traded.** `nth_trading_day` walks Mon–Fri with no
+holiday calendar (it mirrors a3, v0). That is safe here only because **no exchange holiday falls
+inside the window through the last read's horizons** — 2026-09-15 to 2026-11-06 contains none,
+measured against `market_calendar`'s explicit list on 2026-09-24 and reported under R-IV.522(b)4
+before deploying. The grader no longer trusts that memory: an in-window horizon the calendar does
+not call a session is **refused loudly** and graded by nothing. A test asserts the emptiness of the
+holiday set inside the window, and a second asserts that every one of the 34 in-window sessions has
+all three horizons landing on a session — so an extension of the window fails the suite rather than
+grading across a holiday.
+
+**(d) The class.** `UNGRADEABLE-SESSION-GAP` is returned by the grading pass as a **list of
+`{row_id, ticker, horizon, session}`**, not a count. A count answers how many and never which, and
+(d) requires the face to name ticker, horizon and session.
+
+**(e) Fresh grading.** `python -m jobs.triton_fresh_grade --cohort W1`. It appends to
+`triton_grade_versions` and records attempts, and **writes nothing into `triton_flow_shadow`** — not
+the returns, not `provider`, and above all not `graded_at`. Overwriting the pre-amendment grades
+would destroy the comparison that shows what the substitution did, which is why (e) keeps them. A
+test parses the command's AST and fails if any live string in it names `graded_at` or an update of
+the shadow table.
+
+**Cohorts** are derived, not stored: W1 begins at T_clock (Tue 2026-09-15) and each later cohort is
+that Mon–Fri week, through W7 ending 2026-10-30. That is 4 + 5×6 = **34 sessions**, which is
+R-IV.485(b)'s own figure — the arithmetic is the check, and a test asserts it.
+
+**Blob chain.** The id in force before this amendment was `c6203e4b`; before Amendment 3,
+`57cb26a3`.

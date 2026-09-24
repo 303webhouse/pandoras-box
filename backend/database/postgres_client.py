@@ -1883,6 +1883,40 @@ async def init_database():
                 ON triton_grade_versions (row_id, version)
         """)
 
+        # Amendment 4(b) (R-IV.521 / R-IV.522(b)1): EVERY GRADE RECORDS THE SESSION
+        # DATE OF THE CLOSE IT USED. A grade is valid only when that date IS its
+        # horizon session, and before these columns existed no grade could be shown
+        # free of the substitution Amendment 4(a) found. Added, never backfilled:
+        # NULL here means "made before provenance was recorded", which is exactly
+        # what 4(e) says such grades are — kept, and used by no read.
+        for _col in ("entry_session", "session_1d", "session_3d", "session_5d"):
+            await conn.execute(
+                "ALTER TABLE triton_grade_versions "
+                "ADD COLUMN IF NOT EXISTS %s DATE" % _col)
+        # The horizons left ungraded under 4(c), as "3d@2026-09-22" pairs, so 4(d)'s
+        # face can list ticker, horizon and session without re-deriving them.
+        await conn.execute("""
+            ALTER TABLE triton_grade_versions
+                ADD COLUMN IF NOT EXISTS session_gaps TEXT
+        """)
+
+        # Amendment 4(c): "after three separate requests". Three calls inside one
+        # pass are not three requests — the vendor served DIFFERENT coverage to
+        # identical requests days apart (R-IV.517(b)), so the count has to survive
+        # the pass that made it. One row per (ticker, session, provider): the claim
+        # is about a vendor's coverage of a session, not about any grade.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS triton_session_bar_attempts (
+                ticker           TEXT        NOT NULL,
+                session_date     DATE        NOT NULL,
+                provider         TEXT        NOT NULL,
+                attempts         INTEGER     NOT NULL DEFAULT 0,
+                first_attempt_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                last_attempt_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (ticker, session_date, provider)
+            )
+        """)
+
         # Migration 031 (S8, R-IV.361): forward option-chain collection.
         # raw_contract_count/truncated exist because UW caps the chain call at
         # 500 and a censored capture is indistinguishable from a thin market.
