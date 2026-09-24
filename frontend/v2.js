@@ -1859,7 +1859,7 @@ const X = (function () {
   const chip = (state, label, title) => `<span class="pp-chip" data-state="${state}"${title ? ` title="${esc(title)}"` : ''}>${esc(label)}</span>`;
   const ladder = () => `<div class="pp-ladder">Provenance, weakest to strongest: ${P.ladder.map((k) => prov(k)).join(' <span class="pp-dim">&lt;</span> ')}</div>`;
   const buckets = () => `<div class="pp-ladder">Buckets: ${P.buckets.map(([n, d]) => `<span class="pp-tag">${esc(n)}${d ? ' · ' + esc(d) : ''}</span>`).join(' ')}</div>`;
-  const mockBanner = () => `<div class="pp-banner">Mock data — layout only · ${esc(P.label)} · every figure is invented, the principal approves or adjusts the layout</div>${ladder()}${buckets()}`;
+  const mockBanner = () => `<div class="pp-banner">Live: cash. Everything else on this panel is sample data.</div>${ladder()}${buckets()}`;
 
   function markCell(p) {
     if (p.mark == null) return `<span class="pp-amber" title="no mark: the source could not price this position">UNAVAILABLE</span>`;
@@ -1976,7 +1976,7 @@ const X = (function () {
 
   // ── Panel ────────────────────────────────────────────────────────────────
   const mq = window.matchMedia('(max-width: 820px)');
-  const st = { cb: { status: 'idle', accounts: {}, error: null }, cash: null, open: false, id: null, tab: 'Detail', mtab: 'Book', card: null, actions: false, opener: null };
+  const st = { cb: { status: 'idle', accounts: {}, scope: [], meta: {}, error: null }, cash: null, open: false, id: null, tab: 'Detail', mtab: 'Book', card: null, actions: false, opener: null };
   let backdrop = null, panel = null;
   const TABS = ['Detail', 'Actions', 'New', 'History'];
   const MTABS = ['Book', 'New', 'History'];
@@ -2012,7 +2012,7 @@ const X = (function () {
   // These two forms write real money through BUILD's routes (relay f689efb70dbce557da6d):
   //   POST /api/portfolio/cash-entry     deposit / withdrawal / other, idempotent on the form's key
   //   POST /api/portfolio/cash-reanchor  "set cash to my broker's figure"; returns the difference
-  //   GET  /api/portfolio/cash-balance   the ledger's derived balance, with the stored one beside it
+  //   GET  /api/portfolio/cash-balance   the ledger's derived balance (the stored figure is retired, R-IV.560)
   // Rules kept here: NO arithmetic on the page (every figure shown is the server's), NO write to
   // account_balances (neither route touches it), the CSRF header on every mutation, every refusal's
   // `detail` shown as sent, and one confirmation. The rest of the panel is still mock.
@@ -2029,28 +2029,16 @@ const X = (function () {
     if (st.cb.status === 'loading') return;
     st.cb.status = 'loading'; st.cb.error = null; if (st.open) render();
     try {
-      const r = await cashApi()('/api/portfolio/cash-balance', { credentials: 'same-origin' });
-      if (!r.ok) throw new Error(r.status === 401 ? 'sign in to see the hub\'s cash' : 'HTTP ' + r.status);
-      const d = await r.json();
-      st.cb.accounts = (d && d.accounts) || {}; st.cb.status = 'ok';
+      const api = cashApi();
+      const [rc, rb] = await Promise.all([api('/api/portfolio/cash-balance', { credentials: 'same-origin' }), api('/api/portfolio/balances', { credentials: 'same-origin' })]);
+      if (!rc.ok) throw new Error(rc.status === 401 ? 'sign in to see the hub\'s cash' : 'cash: HTTP ' + rc.status);
+      if (!rb.ok) throw new Error(rb.status === 401 ? 'sign in to see your accounts' : 'accounts: HTTP ' + rb.status);
+      const d = await rc.json(), bal = await rb.json();
+      st.cb.accounts = (d && d.accounts) || {};
+      st.cb.scope = (Array.isArray(bal) ? bal : []).filter((a) => a && a.in_scope === true).map((a) => a.account_name);
+      st.cb.status = 'ok';
     } catch (e) { st.cb.status = 'error'; st.cb.error = String(e && e.message || e); }
     if (st.open) render();
-  }
-  function cashLive(s) {
-    const cb = st.cb, hd = `<div class="pp-cash-live"><span class="pp-k">Cash · live · the hub's own ledger</span>`;
-    if (cb.status === 'loading' || cb.status === 'idle') return hd + '<div class="pp-dim">loading…</div></div>';
-    if (cb.status === 'error') return hd + `<div>${X.chip('unknown', 'unavailable', cb.error)} <span class="pp-dim">${X.esc(cb.error)}</span> <button type="button" class="pp-btn pp-link" data-cash-reload="1">Retry</button></div></div>`;
-    const a = cb.accounts[s.account];
-    if (!a) return hd + `<div>${X.chip('unknown', 'no record', 'The hub returned nothing for this account')} <span class="pp-dim">the hub returned nothing for ${X.esc(s.account)}</span></div></div>`;
-    const d = a.derived || {}, rc = a.reconciliation || {};
-    let top;
-    if (d.derivable) top = `<div class="pp-cash-fig">${money2(d.balance)} <span class="pp-dim">derived${d.opening_date ? ' from the ' + X.esc(d.opening_date) + ' opening balance' : ''}</span></div>`;
-    else top = `<div>${X.chip('unknown', 'no balance', d.reason || 'the ledger cannot state a balance')} <span class="pp-dim">${X.esc(d.reason || 'the ledger cannot state a balance')}</span></div>`;
-    let cmp;
-    if (rc.difference != null) cmp = `Stored figure ${money2(rc.stored)} · difference ${signed2(rc.difference)}${rc.agrees ? '' : ' <span class="pp-dim">(' + X.esc(rc.reason || '') + ')</span>'}`;
-    else if (rc.stored != null) cmp = `Stored figure ${money2(rc.stored)} · nothing to compare it with: the ledger has no balance`;
-    else cmp = 'No stored figure' + (d.derivable ? ' to compare against' : '');
-    return hd + top + `<div class="pp-cash-cmp">${cmp}</div></div>`;
   }
   function refusal(status, body, err) {
     if (err) return { text: 'Could not reach the hub' + (err.name === 'AbortError' ? ' (timed out)' : '') + '. The entry may or may not have been recorded. Press Confirm again to retry: the same key means it cannot be booked twice.', retry: true };
@@ -2072,7 +2060,7 @@ const X = (function () {
   function cashPanel(s) {
     const k = st.cash;
     if (!k || k.acct !== s.account) return '';
-    const v = k.v, accts = X.sleeves.map((x) => `<option value="${X.esc(x.account)}"${x.account === k.acct ? ' selected' : ''}>${X.esc(x.account)}</option>`).join('');
+    const v = k.v, accts = st.cb.scope.map((n) => `<option value="${X.esc(n)}"${n === k.acct ? ' selected' : ''}>${X.esc(acctName(n))}</option>`).join('');
     const flow = k.kind === 'flow';
     const head = `<h4>${flow ? 'Add deposit / withdrawal' : "Set cash to my broker's figure"} ${X.chip('verified', 'live', 'This writes to the hub')}</h4>`;
     if (k.step === 'result') return `<div class="pp-ticket pp-cashform" data-cash-form><div>${head}</div>${k.resultHtml}<button type="button" class="pp-btn" data-cash-done="1">Done</button></div>`;
@@ -2082,8 +2070,8 @@ const X = (function () {
       const kindWord = v.type === 'other' ? 'Other movement' : v.type === 'withdrawal' ? 'Withdraw' : 'Deposit';
       const cb = st.cb.accounts[k.acct], noBal = !(cb && cb.derived && cb.derived.derivable);
       const q = flow
-        ? `${kindWord} ${signedAmt} ${direction === 'out' ? 'out of' : 'into'} ${X.esc(k.acct)}, dated ${X.esc(v.date)}${v.note ? ` (“${X.esc(v.note)}”)` : ''}?`
-        : `Set ${X.esc(k.acct)} cash to ${signedAmt} as of now?${noBal ? ' The hub has no balance for this account, so this becomes its first anchor: there will be nothing to compare against.' : ' The hub will show what it had and the difference.'}`;
+        ? `${kindWord} ${signedAmt} ${direction === 'out' ? 'out of' : 'into'} ${X.esc(acctName(k.acct))}, dated ${X.esc(v.date)}${v.note ? ` (“${X.esc(v.note)}”)` : ''}?`
+        : `Set ${X.esc(acctName(k.acct))} cash to ${signedAmt} as of now?${noBal ? ' The hub has no balance for this account, so this becomes its first anchor: there will be nothing to compare against.' : ' The hub will show what it had and the difference.'}`;
       return `<div class="pp-ticket pp-cashform" data-cash-form><div>${head}</div><div class="pp-cash-q">${q}<div class="pp-dim">This writes money to the hub. One confirmation.</div></div>
         ${k.err ? `<div class="pp-cash-err" role="alert">${X.esc(k.err)}</div>` : ''}
         <div class="pp-cash-btns"><button type="button" class="pp-btn primary" data-cash-confirm="1"${k.busy ? ' disabled aria-busy="true"' : ''}>${k.busy ? 'Recording…' : (k.err ? 'Confirm again' : 'Confirm and record')}</button><button type="button" class="pp-btn" data-cash-back="1"${k.busy ? ' disabled' : ''}>Back</button></div></div>`;
@@ -2092,15 +2080,59 @@ const X = (function () {
       <label>Account<select data-cf="acct">${accts}</select></label>
       ${flow ? `<label>Type<select data-cf="type"><option value="deposit"${v.type === 'deposit' ? ' selected' : ''}>Deposit</option><option value="withdrawal"${v.type === 'withdrawal' ? ' selected' : ''}>Withdrawal</option><option value="other"${v.type === 'other' ? ' selected' : ''}>Other</option></select></label>
         ${v.type === 'other' ? `<label>Direction<select data-cf="dir"><option value="in"${v.dir === 'in' ? ' selected' : ''}>Money in (+)</option><option value="out"${v.dir === 'out' ? ' selected' : ''}>Money out (−)</option></select></label>` : ''}` : ''}
+      ${flow ? '' : '<div class="pp-cash-q">Enter any trades you haven\'t recorded yet first — the figure you type should already include them.</div>'}
       <label>${flow ? 'Amount ($)' : "Broker's cash figure ($)"}<input data-cf="amount" inputmode="decimal" autocomplete="off" value="${X.esc(v.amount)}" placeholder="0.00"></label>
       ${flow ? `<label>Date the money moved<input data-cf="date" type="date" value="${X.esc(v.date)}"></label>` : ''}
       <label>Note<input data-cf="note" value="${X.esc(v.note)}" placeholder="optional"></label>
       ${k.err ? `<div class="pp-cash-err" role="alert">${X.esc(k.err)}</div>` : ''}
       <div class="pp-cash-btns"><button type="button" class="pp-btn primary" data-cash-review="1">Continue</button><button type="button" class="pp-btn" data-cash-cancel="1">Cancel</button></div></div>`;
   }
-  function gaugeC(s) {
-    const k = st.cash, open = k && k.acct === s.account, off = open && k.busy ? ' disabled' : '';
-    return X.gauge(s) + cashLive(s) + `<div class="pp-cash-actions"><button type="button" class="pp-btn" data-cash-open="flow" data-acct="${X.esc(s.account)}"${off}>Deposit / withdrawal</button><button type="button" class="pp-btn" data-cash-open="set" data-acct="${X.esc(s.account)}"${off}>Set cash to broker's figure</button></div>` + cashPanel(s);
+  // R-IV.560: ONE card per account. A plain name, one large live figure (Cash) with one small line
+  // saying where it came from, a movement line only when there has been movement since, and the two
+  // actions as small text buttons. Every figure is the server's; nothing here is invented. There is
+  // deliberately no stored figure and no "difference" on the card: a difference appears only as the
+  // result of "Set cash".
+  const acctName = (n) => String(n || '').toLowerCase().split('_').filter(Boolean).map((w) => w[0].toUpperCase() + w.slice(1)).join(' ');
+  const TYPE_WORD = { TRADE_DEBIT: 'trades', TRADE_CREDIT: 'trades', TRANSFER_IN: 'deposits', TRANSFER_OUT: 'withdrawals', DIVIDEND: 'dividends', INTEREST: 'interest', FEE: 'fees', ADJUSTMENT: 'adjustments', OTHER: 'other movements' };
+  const whenMT = (iso) => { const t = Date.parse(iso); return Number.isFinite(t) ? new Intl.DateTimeFormat('en-US', { timeZone: 'America/Denver', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(t)) + ' MT' : null; };
+  const dayLabel = (ymd) => { const t = Date.parse(String(ymd || '') + 'T00:00:00Z'); return Number.isFinite(t) ? new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(t)) : null; };
+  // Where the figure came from. The hub's read does not yet say whether its starting point was the
+  // principal's broker figure or a statement, nor at what time, so the line states only what is known:
+  // the broker-figure wording appears for a figure set in this session (its own response carries the
+  // instant); otherwise the opening balance and its date, which the read does carry.
+  function sourceLine(name, d) {
+    const m = st.cb.meta[name];
+    if (m && m.as_of && whenMT(m.as_of)) return 'set from your broker figure · ' + whenMT(m.as_of);
+    const day = dayLabel(d.opening_date);
+    return day ? 'from the opening balance · ' + day : 'the opening balance has no date';
+  }
+  function moveLine(d) {
+    if (d.movement_since_opening == null || d.movement_since_opening === 0) return '';
+    const words = []; Object.keys(d.by_type || {}).forEach((t) => { const w = TYPE_WORD[t] || String(t).toLowerCase(); if (words.indexOf(w) < 0) words.push(w); });
+    const detail = Object.keys(d.by_type || {}).map((t) => (TYPE_WORD[t] || t) + ' ' + money2(d.by_type[t])).join(', ');
+    const sign = d.movement_since_opening > 0 ? 'pp-up' : 'pp-down';
+    return `<div class="pp-acct-mv ${sign}" title="${X.esc(detail)}">${d.movement_since_opening > 0 ? '+' : ''}${money2(d.movement_since_opening)}${words.length ? ' from ' + X.esc(words.join(', ')) : ''} since</div>`;
+  }
+  function cashCard(name) {
+    if (!name) return '';
+    const cb = st.cb, k = st.cash, mine = k && k.acct === name, off = mine && k.busy ? ' disabled' : '';
+    let body;
+    if (cb.status === 'loading' || cb.status === 'idle') body = '<div class="pp-acct-fig pp-dim">…</div>';
+    else if (cb.status === 'error') body = `<div class="pp-acct-nofig">Cash unavailable</div><div class="pp-acct-src">${X.esc(cb.error)} <button type="button" class="pp-tbtn" data-cash-reload="1">Retry</button></div>`;
+    else {
+      const a = cb.accounts[name], d = (a && a.derived) || {};
+      if (!a) body = '<div class="pp-acct-nofig">No record</div><div class="pp-acct-src">The hub returned nothing for this account.</div>';
+      else if (d.derivable) body = `<div class="pp-acct-fig">${money2(d.balance)}</div><div class="pp-acct-src">${X.esc(sourceLine(name, d))}</div>${moveLine(d)}`;
+      else body = `<div class="pp-acct-nofig">No balance yet</div><div class="pp-acct-src" title="${X.esc(d.reason || '')}">Nothing has told the hub where this account started. Use “Set cash to my broker's figure” to give it a starting point.</div>`;
+    }
+    return `<div class="pp-acct" data-acct-card="${X.esc(name)}"><div class="pp-acct-name">${X.esc(acctName(name))}</div><div class="pp-k">Cash</div>${body}
+      <div class="pp-acct-actions"><button type="button" class="pp-tbtn" data-cash-open="flow" data-acct="${X.esc(name)}"${off}>Deposit / withdrawal</button><button type="button" class="pp-tbtn" data-cash-open="set" data-acct="${X.esc(name)}"${off}>Set cash to my broker's figure</button></div>${cashPanel({ account: name })}</div>`;
+  }
+  function cashCards() {
+    const cb = st.cb;
+    if (cb.scope.length) return cb.scope.map(cashCard).join('');
+    if (cb.status === 'error') return '<div class="pp-acct"><div class="pp-acct-nofig">Cash unavailable</div><div class="pp-acct-src">' + X.esc(cb.error || '') + ' <button type="button" class="pp-tbtn" data-cash-reload="1">Retry</button></div></div>';
+    return cb.status === 'ok' ? '<div class="pp-acct"><div class="pp-acct-nofig">No accounts</div></div>' : '<div class="pp-acct"><div class="pp-acct-fig pp-dim">…</div></div>';
   }
   function cashInput(e) {
     const f = e.target.closest && e.target.closest('[data-cf]');
@@ -2118,23 +2150,18 @@ const X = (function () {
       return `<div class="pp-cash-res pp-cash-warn" role="alert"><b>Not booked: this key already recorded a different movement.</b><ul>${rows}</ul>${X.esc(b.conflict_note || '')}<div class="pp-dim">The first entry stands and nothing was changed.</div></div><button type="button" class="pp-btn" data-cash-newkey="1">Book this one as a new movement</button>`;
     }
     const what = b.status === 'recorded' ? 'Recorded' : 'Already recorded: the same entry, nothing was booked twice';
-    return `<div class="pp-cash-res" role="status"><b>${what}.</b> ${X.esc(b.account_name)} ${X.esc(String(b.kind || '').toLowerCase())} of ${money2(b.amount)} dated ${X.esc(b.event_date)}.</div>` + balanceAfter(b);
+    return `<div class="pp-cash-res" role="status"><b>${what}.</b> ${X.esc(acctName(b.account_name))} ${X.esc(String(b.kind || '').toLowerCase())} of ${money2(b.amount)} dated ${X.esc(b.event_date)}.</div>`;
   }
   function reanchorResult(k, r, sentAmt) {
     const b = r.body;
     if (b.status === 'already_reanchored') {
       const changed = k.attempts.length > 1 && k.attempts.some((x) => x !== sentAmt);
-      return `<div class="pp-cash-res pp-cash-warn" role="status"><b>Already recorded under this entry's key: nothing was written this time.</b>${changed ? ` <b>You sent a different figure than an earlier press of this same entry, so the recorded figure may not be ${money2(sentAmt)}.</b>` : ''}<div class="pp-dim">A repeat shows no difference: the hub reports the figure it holds now, not the gap the first press revealed.</div></div>${changed ? '<button type="button" class="pp-btn" data-cash-newkey="1">Set it as a new entry</button>' : ''}` + balanceAfter(b);
+      return `<div class="pp-cash-res pp-cash-warn" role="status"><b>Already recorded under this entry's key: nothing was written this time.</b>${changed ? ` <b>You sent a different figure than an earlier press of this same entry, so the recorded figure may not be ${money2(sentAmt)}.</b>` : ''}<div class="pp-dim">A repeat shows no difference: the hub reports the figure it holds now, not the gap the first press revealed.</div></div>${changed ? '<button type="button" class="pp-btn" data-cash-newkey="1">Set it as a new entry</button>' : ''}`;
     }
     const line = b.derived_before == null
       ? `First balance: nothing to compare. The hub had no balance to compare with; you entered ${money2(b.entered)}.`
       : `Hub had ${money2(b.derived_before)}; you entered ${money2(b.entered)}; difference ${signed2(b.difference)}.`;
-    return `<div class="pp-cash-res" role="status"><b>${line}</b>${b.difference_note ? `<div class="pp-dim">${X.esc(b.difference_note)}</div>` : ''}</div>` + balanceAfter(b);
-  }
-  function balanceAfter(b) {
-    const d = b.derived, rc = b.reconciliation;
-    if (!d) return '';
-    return `<div class="pp-cash-cmp">${d.derivable ? 'Hub balance now ' + money2(d.balance) : 'Hub still has no balance: ' + X.esc(d.reason || '')}${rc && rc.stored != null ? ' · stored figure ' + money2(rc.stored) + (rc.difference != null ? ' · difference ' + signed2(rc.difference) : '') : ''}</div>`;
+    return `<div class="pp-cash-res" role="status"><b>${line}</b>${b.difference_note ? `<div class="pp-dim">${X.esc(b.difference_note)}</div>` : ''}</div>`;
   }
   async function cashSubmit(k) {
     const flow = k.kind === 'flow', a = cleanAmt(k.v.amount);
@@ -2152,7 +2179,8 @@ const X = (function () {
     k.busy = false;
     if (r.ok && r.body && (r.body.status || '').indexOf('already_') !== 0 && r.body.status !== 'recorded' && r.body.status !== 'reanchored') { k.err = 'The hub answered with an unexpected status (' + r.body.status + '); check the ledger before repeating.'; render(); return; }
     if (!r.ok) { const f = refusal(r.status, r.body, r.err); k.err = f.text; k.focus = null; render(); return; }
-    if (r.body.derived) st.cb.accounts[k.acct] = { derived: r.body.derived, reconciliation: r.body.reconciliation, flow: r.body.flow, event_count: r.body.event_count };
+    if (!flow && r.body.status === 'reanchored' && r.body.as_of) st.cb.meta[k.acct] = { as_of: r.body.as_of };
+    if (r.body.derived) st.cb.accounts[k.acct] = { derived: r.body.derived, flow: r.body.flow, event_count: r.body.event_count };
     k.resultHtml = flow ? entryResult(k, r) : reanchorResult(k, r, a);
     k.step = 'result'; k.err = null; render();
   }
@@ -2200,8 +2228,8 @@ const X = (function () {
     mq.addEventListener('change', () => { if (st.open) { render(); liftBook(); } });
   }
   function head() {
-    return `<div class="pp-head"><h2>Positions</h2>${X.chip('unknown', 'mock', 'Every figure here is invented')}<span class="pp-dim">skeleton · no live data</span><button type="button" class="pp-x" aria-label="Close positions panel">✕</button></div>
-      <div class="pp-banner">Mock data — a working skeleton: the positions, gauges and ticket are invented. The cash lines and the two cash actions are LIVE and write to the hub. Roll stays disabled until R-IV.452 lands.</div>
+    return `<div class="pp-head"><h2>Positions</h2>${X.chip('unknown', 'sample', 'Everything except cash is sample data')}<button type="button" class="pp-x" aria-label="Close positions panel">✕</button></div>
+      <div class="pp-banner">Live: cash. Everything else on this panel is sample data.</div>
 `;
   }
   function legend() { return `<details class="pp-legend"><summary>Legend: provenance ladder and buckets</summary>${X.ladder()}${X.buckets()}</details>`; }
@@ -2210,7 +2238,6 @@ const X = (function () {
   // need a viewport of 1400px or more (CSS); narrower, they stack inside the same 50% panel.
   function summaryCard(p) {
     const cell = (k, v) => `<div class="pp-sc"><span class="pp-k">${k}</span><span class="pp-sv">${v}</span></div>`;
-    const acct = X.sleeves.find((s) => s.account === p.account);
     return `<div class="pp-sum pp-card">
       <div class="pp-sum-top"><span class="pp-sum-tk">${X.esc(p.ticker)}</span>${X.prov(p.prov)}</div>
       <div class="pp-sum-sub">${X.esc(p.bucket)} · ${X.esc(p.account)}</div>
@@ -2219,14 +2246,14 @@ const X = (function () {
       <div class="pp-sum-grid">${cell('Qty', p.qty)}${cell('Cost', X.usd(p.cost))}${cell('Mark', X.markCell(p))}${cell('P&amp;L', X.pnlCell(p))}</div>
       <div class="pp-sum-stop">${X.stopBadge(p.stop)}</div>
       <button type="button" class="pp-btn pp-link" data-allpos="1">← All positions</button>
-    </div>${acct ? gaugeC(acct) : ''}`;
+    </div>${st.cb.scope.indexOf(p.account) >= 0 ? cashCard(p.account) : ''}`;
   }
   function desktop() {
     const sel = byId(st.id);
     const none = '<div class="pp-dim">Pick a position in the Book strip.</div>';
     const pane = st.tab === 'Detail' ? (sel ? X.detail(sel) : none) : st.tab === 'Actions' ? (sel ? X.actions(sel) : none) : st.tab === 'New' ? X.ticket() : X.history();
     const col1 = sel ? summaryCard(sel)
-      : X.sleeves.map(gaugeC).join('') + X.sleeves.map((s) => `<div class="pp-card"><h3 class="pp-h">${X.esc(s.account)} · open</h3><div class="pp-scroll">${X.bookTable(s.account)}</div></div>`).join('');
+      : cashCards() + X.sleeves.map((s) => `<div class="pp-card"><h3 class="pp-h">${X.esc(acctName(s.account))} · sample positions</h3><div class="pp-scroll">${X.bookTable(s.account)}</div></div>`).join('');
     return `<div class="pp-cols"><div class="pp-col1">${col1}</div>
       <div class="pp-col2 pp-card"><div class="pp-tabs" role="tablist">${TABS.map((t) => `<button type="button" role="tab" aria-selected="${t === st.tab}" data-tab="${t}">${t === 'New' ? 'New (ticket)' : t}</button>`).join('')}</div>${pane}</div></div>${legend()}${X.missing()}`;
   }
@@ -2237,7 +2264,7 @@ const X = (function () {
       ${on ? `<div class="pp-sheet">${X.detail(p)}<div style="margin-top:8px"><button type="button" class="pp-btn" data-toggle-actions="1">${st.actions ? 'Hide actions' : 'Actions'}</button></div>${st.actions ? X.actions(p) : ''}</div>` : ''}</div>`;
   }
   function phone() {
-    const v = st.mtab === 'Book' ? X.sleeves.map((s) => gaugeC(s) + X.open.filter((p) => p.account === s.account).map(card).join('')).join('')
+    const v = st.mtab === 'Book' ? cashCards() + X.sleeves.map((s) => X.open.filter((p) => p.account === s.account).map(card).join('')).join('')
       : st.mtab === 'New' ? `<div class="pp-card">${X.ticket()}</div>` : `<div class="pp-card">${X.history()}</div>`;
     return `<div class="pp-tabs" role="tablist">${MTABS.map((t) => `<button type="button" role="tab" aria-selected="${t === st.mtab}" data-mtab="${t}">${t === 'New' ? 'New (ticket)' : t}</button>`).join('')}</div>${v}${legend()}${X.missing()}`;
   }
