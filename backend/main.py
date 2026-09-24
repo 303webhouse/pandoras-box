@@ -1017,6 +1017,26 @@ async def lifespan(app: FastAPI):
             await asyncio.sleep(300)  # 5 min
     uw_budget_watchdog_task = asyncio.create_task(uw_budget_watchdog_loop())
 
+    # Position loss alert (R-IV.517(d), scope corrected by R-IV.526(c)): unstopped
+    # FIDELITY_ROTH losses at 2% of the account, written daily-close stops breached at
+    # the close, and long premium at 2x cost. Every figure comes from the position's
+    # LOTS and a live mark -- never from the stored money columns, whose contract scope
+    # Trade Analysis found wrong. One tick reads one query; the pass is self-gating on
+    # the hour, is deduped per session, and never raises.
+    async def loss_alert_loop():
+        if (os.getenv("LOSS_ALERT_ENABLED") or "true").strip().lower() == "false":
+            return
+        from jobs.loss_alert import TICK_SECONDS
+        await asyncio.sleep(200)
+        while True:
+            try:
+                from jobs.loss_alert import run_loss_alert
+                await run_loss_alert()
+            except Exception as e:
+                logger.warning("loss_alert loop error: %s", e)
+            await asyncio.sleep(TICK_SECONDS)
+    loss_alert_task = asyncio.create_task(loss_alert_loop())
+
     # UW daily-burn snapshot: persist each completed UTC day's per-caller + grand total
     # to uw_daily_burn so the 48h Redis counter TTL can never blind us again. Runs 24/7
     # (not RTH-gated — the UTC rollover is at 20:00 ET); snapshots the prior day once.
@@ -1272,6 +1292,7 @@ async def lifespan(app: FastAPI):
     pythia_staleness_watchdog_task.cancel()  # PYTHIA per-name liquid-20 staleness alarm (6/29 brief Part 1)
     triton_shadow_task.cancel()  # Triton Step-0 shadow poller
     triton_grader_task.cancel()  # Triton Step-0 grader
+    loss_alert_task.cancel()  # position loss alert (R-IV.517(d)/R-IV.526(c))
     wh_accumulation_task.cancel()
     wh_reversal_task.cancel()
     oracle_task.cancel()
