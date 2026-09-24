@@ -260,3 +260,118 @@ def test_the_live_shape_of_the_roth_ledger_reads_end_to_end():
     assert out["balance"] == 686.52
     assert out["external_flow_since_opening"] == 669.49   # the dividend is excluded
     assert out["by_type"][cl.TRANSFER_IN] == 669.49
+
+
+# -- R-IV.542(b): the anchor, and what sits either side of it ----------------
+
+def test_pre_anchor_events_are_written_for_the_record_and_ignored_by_the_reader():
+    """They are already inside the statement the anchor came from. Counting them
+    again would add the same money twice."""
+    events = [
+        ev(cl.TRANSFER_IN, "88.15", 1, 1),          # before
+        ev(cl.DIVIDEND, "17.03", 5, 2),             # before
+        ev(cl.ANCHOR, "6007.29", 24, 3),
+        ev(cl.DIVIDEND, "0.64", 25, 4),             # after
+    ]
+    out = cl.balance_from_events(events)
+    assert out["balance"] == 6007.93
+    assert out["events_counted"] == 1
+
+
+def test_the_roth_anchor_with_its_pending_dividend():
+    """POSITIVE CONTROL on R-IV.542(b)'s own figures: cash 6,007.29 as of 09-24,
+    with the 0.64 pending dividend as an event after it."""
+    events = [ev(cl.ANCHOR, "6007.29", 24, 1), ev(cl.DIVIDEND, "0.64", 25, 2)]
+    out = cl.balance_from_events(events)
+    assert out["opening_balance"] == 6007.29
+    assert out["balance"] == 6007.93
+    assert out["external_flow_since_opening"] == 0.0     # a dividend is not a transfer
+
+
+def test_a_same_day_event_is_counted_and_flagged():
+    """The anchor is an instant (11:09 ET); an event carries only a date. So a
+    same-day event cannot be ordered against it by its own data. R-IV.542(b) puts
+    the pending dividend after the anchor, so it counts -- and it is named, because
+    the one thing worse than counting it would be counting it silently."""
+    events = [ev(cl.ANCHOR, "6007.29", 24, 1), ev(cl.DIVIDEND, "0.64", 24, 2)]
+    out = cl.balance_from_events(events)
+    assert out["balance"] == 6007.93
+    assert out["same_day_as_anchor"] == [2]
+
+
+def test_the_answer_does_not_depend_on_the_order_rows_were_inserted():
+    """Ordering same-day events by row id would make the balance a function of who
+    wrote first. The dividend counts whether it was inserted before or after."""
+    before = [ev(cl.DIVIDEND, "0.64", 24, 1), ev(cl.ANCHOR, "6007.29", 24, 2)]
+    after = [ev(cl.ANCHOR, "6007.29", 24, 1), ev(cl.DIVIDEND, "0.64", 24, 2)]
+    assert cl.balance_from_events(before)["balance"] == 6007.93
+    assert cl.balance_from_events(after)["balance"] == 6007.93
+
+
+def test_nothing_is_flagged_same_day_when_nothing_is():
+    out = cl.balance_from_events([ev(cl.ANCHOR, "100.00", 1, 1),
+                                  ev(cl.DIVIDEND, "1.00", 2, 2)])
+    assert out["same_day_as_anchor"] == []
+
+
+def test_robinhood_stays_underivable_on_its_april_ledger():
+    """R-IV.542(c): no anchor from the April events, and no zero. Seventeen real
+    movements still produce no balance, which is the correct answer."""
+    events = [ev("ACH", "-500.00", 20, i) for i in range(1, 18)]
+    out = cl.balance_from_events(events)
+    assert out["balance"] is None and out["derivable"] is False
+    assert out["by_type"] == {}          # nothing counted without a starting point
+
+
+# -- the anchor route's contract ---------------------------------------------
+
+def _portfolio_source():
+    import inspect
+
+    from api import portfolio
+
+    return inspect.getsource(portfolio.write_cash_anchor)
+
+
+def _portfolio_live_strings():
+    """Only the strings the route actually executes with. Its docstring names
+    `account_balances` on purpose -- to say it does not touch it -- so a text scan
+    cannot tell the promise apart from a breach of it."""
+    import ast
+    import inspect
+
+    from api import portfolio
+
+    tree = ast.parse(inspect.getsource(portfolio.write_cash_anchor).lstrip())
+    docs = set()
+    for node in ast.walk(tree):
+        body = getattr(node, "body", None)
+        if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef)) and body:
+            first = body[0]
+            if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant) \
+                    and isinstance(first.value.value, str):
+                docs.add(id(first.value))
+    return " ".join(n.value for n in ast.walk(tree)
+                    if isinstance(n, ast.Constant) and isinstance(n.value, str)
+                    and id(n) not in docs).upper()
+
+
+def test_the_anchor_route_refuses_without_evidence_and_without_a_ruling():
+    """An opening balance with no statement behind it is a guess with a timestamp."""
+    src = _portfolio_source()
+    assert "evidence_ref is required" in src
+    assert "ruling is required" in src
+
+
+def test_the_anchor_route_touches_no_stored_balance():
+    """Writing both would leave two figures free to disagree, which is the fault."""
+    live = _portfolio_live_strings()
+    assert "ACCOUNT_BALANCES" not in live
+    assert "UPDATE " not in live
+    # Positive control: it DOES write the ledger, so the scan is reading real SQL.
+    assert "INSERT INTO CASH_FLOWS" in live
+
+
+def test_the_anchor_route_is_idempotent():
+    live = _portfolio_live_strings()
+    assert "ON CONFLICT" in live and "DO NOTHING" in live
