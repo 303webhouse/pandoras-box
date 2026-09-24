@@ -1976,7 +1976,7 @@ const X = (function () {
 
   // ── Panel ────────────────────────────────────────────────────────────────
   const mq = window.matchMedia('(max-width: 820px)');
-  const st = { open: false, id: null, tab: 'Detail', mtab: 'Book', card: null, actions: false, note: null, live: null, opener: null };
+  const st = { cash: null, open: false, id: null, tab: 'Detail', mtab: 'Book', card: null, actions: false, note: null, live: null, opener: null };
   let backdrop = null, panel = null;
   const TABS = ['Detail', 'Actions', 'New', 'History'];
   const MTABS = ['Book', 'New', 'History'];
@@ -2014,6 +2014,98 @@ const X = (function () {
     const sel = st.open ? byId(st.id) : null;
     rows.forEach((r) => { const on = !!sel && realTicker(r) === sel.ticker; r.classList.toggle('pp-cur', on); if (on) r.setAttribute('aria-current', 'true'); else r.removeAttribute('aria-current'); });
   }
+  // ── Cash actions (R-IV.547) ─────────────────────────────────────────────────
+  // MOCK. Both actions write money on the real page, so each takes ONE confirmation, and the
+  // form cannot double-submit (busy flag: the confirm button is disabled the instant it is
+  // pressed, and the handler ignores a second call). Nothing here calls the network: the two
+  // `mock*` functions below are the only seam to replace when BUILD's endpoints (R-IV.546) land.
+  const money2 = (v) => (v < 0 ? '−' : '') + '$' + Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const signed2 = (v) => (Math.abs(v) < 0.005 ? '$0.00 (no difference)' : (v < 0 ? '−' : '+') + '$' + Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+  const todayMT = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Denver' }).format(new Date());
+  const acctSleeve = (a) => X.sleeves.find((s) => s.account === a);
+  function mockPostCashFlow(f) {     // -> what BUILD's deposit/withdrawal response will carry
+    return new Promise((res) => setTimeout(() => {
+      const s = acctSleeve(f.account), before = s.cash, delta = f.type === 'withdrawal' ? -f.amount : f.amount;
+      s.cash = Math.round((before + delta) * 100) / 100;
+      res({ account: f.account, type: f.type, amount: f.amount, date: f.date, before, after: s.cash });
+    }, 500));
+  }
+  function mockPostCashSet(f) {      // -> the hub's derived figure, the figure entered, the difference
+    return new Promise((res) => setTimeout(() => {
+      const s = acctSleeve(f.account), hub = s.cash;
+      s.cash = Math.round(f.amount * 100) / 100;
+      res({ account: f.account, hub, entered: f.amount, difference: Math.round((f.amount - hub) * 100) / 100 });
+    }, 500));
+  }
+  function cashPanel(s) {
+    const k = st.cash;
+    if (!k || k.acct !== s.account) return '';
+    const v = k.v, accts = X.sleeves.map((x) => `<option value="${X.esc(x.account)}"${x.account === k.acct ? ' selected' : ''}>${X.esc(x.account)}</option>`).join('');
+    const head = `<h4>${k.kind === 'flow' ? 'Add deposit / withdrawal' : "Set cash to my broker's figure"} ${X.chip('unknown', 'mock', 'Nothing is written')}</h4>`;
+    if (k.step === 'result') {
+      const r = k.result;
+      const line = k.kind === 'flow'
+        ? `Recorded: ${X.esc(r.account)} ${r.type} of ${money2(r.amount)} dated ${X.esc(r.date)}. Cash ${money2(r.before)} → ${money2(r.after)}.`
+        : `Hub had ${money2(r.hub)}; you entered ${money2(r.entered)}; difference ${signed2(r.difference)}.`;
+      return `<div class="pp-ticket pp-cashform" data-cash-form><div>${head}</div><div class="pp-cash-res" role="status">${line}<div class="pp-dim">(mock response: nothing was written)</div></div><button type="button" class="pp-btn" data-cash-done="1">Done</button></div>`;
+    }
+    if (k.step === 'confirm') {
+      const a = parseFloat(v.amount);
+      const q = k.kind === 'flow'
+        ? `${v.type === 'withdrawal' ? 'Withdraw' : 'Deposit'} ${money2(a)} ${v.type === 'withdrawal' ? 'from' : 'to'} ${X.esc(k.acct)}, dated ${X.esc(v.date)}${v.note ? ` (“${X.esc(v.note)}”)` : ''}?`
+        : `Set ${X.esc(k.acct)} cash to ${money2(a)} as of now? The hub will show what it had and the difference.`;
+      return `<div class="pp-ticket pp-cashform" data-cash-form><div>${head}</div><div class="pp-cash-q">${q}<div class="pp-dim">This writes money. One confirmation.</div></div>
+        <div class="pp-cash-btns"><button type="button" class="pp-btn primary" data-cash-confirm="1"${k.busy ? ' disabled aria-busy="true"' : ''}>${k.busy ? 'Recording…' : 'Confirm and record'}</button><button type="button" class="pp-btn" data-cash-back="1"${k.busy ? ' disabled' : ''}>Back</button></div></div>`;
+    }
+    const flow = k.kind === 'flow';
+    return `<div class="pp-ticket pp-cashform" data-cash-form role="group" aria-label="${flow ? 'Add deposit or withdrawal' : 'Set cash to broker figure'} (mock)"><div>${head}</div>
+      <label>Account<select data-cf="acct">${accts}</select></label>
+      ${flow ? `<label>Type<select data-cf="type"><option value="deposit"${v.type === 'deposit' ? ' selected' : ''}>Deposit</option><option value="withdrawal"${v.type === 'withdrawal' ? ' selected' : ''}>Withdrawal</option></select></label>` : ''}
+      <label>${flow ? 'Amount ($)' : "Broker's cash figure ($)"}<input data-cf="amount" inputmode="decimal" autocomplete="off" value="${X.esc(v.amount)}" placeholder="0.00"></label>
+      ${flow ? `<label>Date<input data-cf="date" type="date" value="${X.esc(v.date)}"></label><label>Note<input data-cf="note" value="${X.esc(v.note)}" placeholder="optional"></label>` : ''}
+      ${k.err ? `<div class="pp-cash-err" role="alert">${X.esc(k.err)}</div>` : ''}
+      <div class="pp-cash-btns"><button type="button" class="pp-btn primary" data-cash-review="1">Continue</button><button type="button" class="pp-btn" data-cash-cancel="1">Cancel</button></div></div>`;
+  }
+  function gaugeC(s) {
+    const k = st.cash;
+    const open = k && k.acct === s.account;
+    return X.gauge(s) + `<div class="pp-cash-actions"><button type="button" class="pp-btn" data-cash-open="flow" data-acct="${X.esc(s.account)}"${open && k.busy ? ' disabled' : ''}>Deposit / withdrawal</button><button type="button" class="pp-btn" data-cash-open="set" data-acct="${X.esc(s.account)}"${open && k.busy ? ' disabled' : ''}>Set cash to broker's figure</button></div>` + cashPanel(s);
+  }
+  function cashInput(e) {
+    const f = e.target.closest && e.target.closest('[data-cf]');
+    if (!f || !st.cash) return;
+    const name = f.dataset.cf;
+    if (name === 'acct') { st.cash.acct = f.value; st.cash.focus = 'acct'; render(); return; }
+    st.cash.v[name] = f.value;
+  }
+  function cashClick(t) {
+    const open = t.closest('[data-cash-open]');
+    if (open) { if (st.cash && st.cash.busy) return true; st.cash = { acct: open.dataset.acct, kind: open.dataset.cashOpen, step: 'form', err: null, busy: false, focus: 'amount', v: { type: 'deposit', amount: '', date: todayMT(), note: '' } }; render(); return true; }
+    if (!st.cash) return false;
+    const k = st.cash;
+    if (t.closest('[data-cash-cancel],[data-cash-done]')) { if (!k.busy) { st.cash = null; render(); } return true; }
+    if (t.closest('[data-cash-back]')) { if (!k.busy) { k.step = 'form'; k.focus = 'amount'; render(); } return true; }
+    if (t.closest('[data-cash-review]')) {
+      const a = Number(String(k.v.amount).replace(/[$,\s]/g, ''));
+      const s = acctSleeve(k.acct);
+      if (!Number.isFinite(a) || String(k.v.amount).trim() === '') k.err = 'Enter an amount.';
+      else if (k.kind === 'flow' && a <= 0) k.err = 'Enter an amount above zero; pick Deposit or Withdrawal for the direction.';
+      else if (k.kind === 'set' && a < 0) k.err = 'A cash figure cannot be negative.';
+      else if (k.kind === 'flow' && !/^\d{4}-\d{2}-\d{2}$/.test(k.v.date || '')) k.err = 'Pick a date.';
+      else if (k.kind === 'flow' && k.v.date > todayMT()) k.err = 'The date cannot be in the future.';
+      else if (k.kind === 'flow' && k.v.type === 'withdrawal' && a > s.cash) k.err = 'That withdrawal is more than the ' + money2(s.cash) + ' of cash the hub shows.';
+      else { k.err = null; k.v.amount = String(Math.round(a * 100) / 100); k.step = 'confirm'; }
+      k.focus = k.err ? 'amount' : null; render(); return true;
+    }
+    if (t.closest('[data-cash-confirm]')) {
+      if (k.busy) return true;                       // a second press is ignored, not queued
+      k.busy = true; render();
+      const f = { account: k.acct, type: k.v.type, amount: parseFloat(k.v.amount), date: k.v.date, note: k.v.note };
+      (k.kind === 'flow' ? mockPostCashFlow(f) : mockPostCashSet(f)).then((r) => { k.busy = false; k.step = 'result'; k.result = r; k.focus = null; render(); });
+      return true;
+    }
+    return false;
+  }
   function build() {
     if (panel) return;
     backdrop = document.createElement('div'); backdrop.className = 'pp-backdrop';
@@ -2022,6 +2114,9 @@ const X = (function () {
     document.body.appendChild(backdrop); document.body.appendChild(panel);
     backdrop.addEventListener('click', close);
     panel.addEventListener('click', onPanelClick);
+    panel.addEventListener('input', cashInput);
+    panel.addEventListener('change', cashInput);
+    panel.addEventListener('submit', (e) => e.preventDefault());
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && st.open) close(); });
     mq.addEventListener('change', () => { if (st.open) { render(); liftBook(); } });
   }
@@ -2045,14 +2140,14 @@ const X = (function () {
       <div class="pp-sum-grid">${cell('Qty', p.qty)}${cell('Cost', X.usd(p.cost))}${cell('Mark', X.markCell(p))}${cell('P&amp;L', X.pnlCell(p))}</div>
       <div class="pp-sum-stop">${X.stopBadge(p.stop)}</div>
       <button type="button" class="pp-btn pp-link" data-allpos="1">← All positions</button>
-    </div>${acct ? X.gauge(acct) : ''}`;
+    </div>${acct ? gaugeC(acct) : ''}`;
   }
   function desktop() {
     const sel = byId(st.id);
     const none = '<div class="pp-dim">Pick a position in the Book strip.</div>';
     const pane = st.tab === 'Detail' ? (sel ? X.detail(sel) : none) : st.tab === 'Actions' ? (sel ? X.actions(sel) : none) : st.tab === 'New' ? X.ticket() : X.history();
     const col1 = sel ? summaryCard(sel)
-      : X.sleeves.map(X.gauge).join('') + X.sleeves.map((s) => `<div class="pp-card"><h3 class="pp-h">${X.esc(s.account)} · open</h3><div class="pp-scroll">${X.bookTable(s.account)}</div></div>`).join('');
+      : X.sleeves.map(gaugeC).join('') + X.sleeves.map((s) => `<div class="pp-card"><h3 class="pp-h">${X.esc(s.account)} · open</h3><div class="pp-scroll">${X.bookTable(s.account)}</div></div>`).join('');
     return `<div class="pp-cols"><div class="pp-col1">${col1}</div>
       <div class="pp-col2 pp-card"><div class="pp-tabs" role="tablist">${TABS.map((t) => `<button type="button" role="tab" aria-selected="${t === st.tab}" data-tab="${t}">${t === 'New' ? 'New (ticket)' : t}</button>`).join('')}</div>${pane}</div></div>${legend()}${X.missing()}`;
   }
@@ -2063,7 +2158,7 @@ const X = (function () {
       ${on ? `<div class="pp-sheet">${X.detail(p)}<div style="margin-top:8px"><button type="button" class="pp-btn" data-toggle-actions="1">${st.actions ? 'Hide actions' : 'Actions'}</button></div>${st.actions ? X.actions(p) : ''}</div>` : ''}</div>`;
   }
   function phone() {
-    const v = st.mtab === 'Book' ? X.sleeves.map((s) => X.gauge(s) + X.open.filter((p) => p.account === s.account).map(card).join('')).join('')
+    const v = st.mtab === 'Book' ? X.sleeves.map((s) => gaugeC(s) + X.open.filter((p) => p.account === s.account).map(card).join('')).join('')
       : st.mtab === 'New' ? `<div class="pp-card">${X.ticket()}</div>` : `<div class="pp-card">${X.history()}</div>`;
     return `<div class="pp-tabs" role="tablist">${MTABS.map((t) => `<button type="button" role="tab" aria-selected="${t === st.mtab}" data-mtab="${t}">${t === 'New' ? 'New (ticket)' : t}</button>`).join('')}</div>${v}${legend()}${X.missing()}`;
   }
@@ -2075,10 +2170,12 @@ const X = (function () {
     panel.querySelectorAll('tr.pp-row').forEach((r) => r.classList.toggle('sel', Number(r.dataset.id) === st.id));
     const body = panel.querySelector('.pp-body'); if (body) body.scrollTop = keepTop;
     markRow();
+    if (st.cash && st.cash.focus) { const el = panel.querySelector('[data-cf="' + st.cash.focus + '"]'); if (el) el.focus(); st.cash.focus = null; }
   }
   function onPanelClick(e) {
     const t = e.target;
     if (t.closest('.pp-x')) return close();
+    if (cashClick(t)) return;
     const live = t.closest('[data-live]');
     if (live) { const fn = window.__v2 && window.__v2.openPositionDrawerAt; if (fn) { close(); fn(Number(live.dataset.live)); } return; }
     if (t.closest('[data-allpos]')) { st.id = null; st.card = null; if (st.tab === 'Detail' || st.tab === 'Actions') st.tab = 'Detail'; setHash(true); return render(); }
