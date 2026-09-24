@@ -818,6 +818,28 @@ async def _compute_positions(
 
     positions = [_row_to_dict(r) for r in rows]
 
+    # Gap 1 (R-IV.526(b), R-IV.522(a)): the money this route serves is derived from
+    # the lots that are still open, in one place, by one author. `max_loss` and
+    # `unrealized_pnl` carry the lot-derived figures; what the table holds moves to
+    # `max_loss_stored` / `unrealized_pnl_stored` so the divergence stays readable
+    # rather than being overwritten in flight. A row with no lots reads None with a
+    # `basis_reason`, because a stand-in figure is the fault being removed.
+    #
+    # A read still writes nothing (R-IV.454(d)): this derives, it does not repair.
+    try:
+        from services.read_only.positions import attach_economics, fetch_lots_by_position
+
+        async with pool.acquire() as conn:
+            _lots = await fetch_lots_by_position(
+                conn, [p.get("position_id") for p in positions])
+        attach_economics(positions, _lots)
+    except Exception as e:
+        # Loud, and the row keeps its stored values rather than losing them: a
+        # failure here must not make the screen think the book is empty.
+        logger.error("gap 1: lot-derived money unavailable this cycle (%s) — rows "
+                     "carry their STORED figures, which may hold the wrong scope",
+                     type(e).__name__)
+
     # Refresh DTE for open positions
     today = date.today()
     for p in positions:
