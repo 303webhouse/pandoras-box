@@ -90,31 +90,110 @@ _COLOR = {
 _SENT_IN_PROCESS: set = set()
 
 
-def account_value_usd() -> float:
-    """Railway hands back '' for an unset reference, so `or` is the required idiom."""
+def account_value_usd() -> Optional[float]:
+    """The env override, or None. R-IV.551(c) retired the standing constant.
+
+    The figure is now COMPUTED -- derived cash plus the open positions at their marks
+    -- so a constant here would be a second answer to a question that has one. The
+    env var survives as the principal's lever for a day the ledger cannot answer.
+    """
     raw = (os.getenv("LOSS_ALERT_ACCOUNT_VALUE") or "").strip()
-    if raw:
-        try:
-            v = float(raw)
-            if v > 0:
-                return v
-            logger.warning("LOSS_ALERT_ACCOUNT_VALUE is not positive -- using the ruling's figure")
-        except ValueError:
-            logger.warning("LOSS_ALERT_ACCOUNT_VALUE is not a number -- using the ruling's figure")
-    return DEFAULT_ACCOUNT_VALUE_USD
+    if not raw:
+        return None
+    try:
+        v = float(raw)
+    except ValueError:
+        logger.warning("LOSS_ALERT_ACCOUNT_VALUE is not a number -- ignored")
+        return None
+    if v <= 0:
+        logger.warning("LOSS_ALERT_ACCOUNT_VALUE is not positive -- ignored")
+        return None
+    return v
 
 
-def loss_threshold_usd() -> float:
-    """2% of the account value, rounded HALF-UP to the cent (convention #27).
+def account_value(rows: List[Dict[str, Any]], derived_cash: Optional[Any],
+                  cash_reason: Optional[str] = None) -> Dict[str, Any]:
+    """The account's value: DERIVED CASH plus its open positions at their marks.
 
-    Through the same `money()` the position economics uses, so the alert's threshold
-    and the figures it compares against cannot round by two different rules.
+    R-IV.551(c). The $11,319.53 constant is retired -- it was a figure typed off a
+    statement, and money integrity now answers the same question from the book
+    itself. A constant beside a computed figure is two answers to one question, and
+    the stale one always wins the day nobody checks.
+
+    PARTIAL RATHER THAN GUESSED. If a position in scope has no market value -- no
+    lots, or no live mark -- its contribution is unknown, and the total says so. It
+    is still returned: an understated account makes the 2% trigger SMALLER, so a
+    partial figure errs toward alerting, which is the safe direction. What it must
+    never do is fill the hole with a number.
+
+    With no derived cash there is no value at all, and the reason travels with the
+    None. Inventing zero cash would make the threshold a function of the positions
+    alone, which is not the account.
     """
     from decimal import Decimal
 
     from services.position_economics import money
 
-    return money(Decimal(str(account_value_usd())) * Decimal(str(LOSS_FRACTION)))
+    cash = None if derived_cash is None else Decimal(str(derived_cash))
+    positions = Decimal("0")
+    missing: List[Any] = []
+    counted = 0
+    for r in rows:
+        if (r.get("account") or "").upper() != ACCOUNT:
+            continue
+        if (r.get("status") or "OPEN").upper() != "OPEN":
+            continue
+        # The same `position_economics` the triggers use, so the account value and
+        # the losses measured against it cannot be built from two arithmetics.
+        econ = position_economics(_f(r.get("remainder")), _f(r.get("lot_cost")),
+                                  _f(r.get("current_price")),
+                                  (r.get("asset_type") or "").upper() == "OPTION")
+        # This module's `position_economics` names the marked figure `value`; the
+        # services module names the same thing `market_value`. Reading the wrong key
+        # returns None, which this function would have reported as an unvalued
+        # position -- a silently partial account value, which is the one failure it
+        # exists to prevent. Its own test caught exactly that.
+        mv = None if econ is None else econ.get("value")
+        if mv is None:
+            missing.append(r.get("id"))
+            continue
+        positions += Decimal(str(mv))
+        counted += 1
+
+    if cash is None:
+        return {"value": None, "cash": None, "positions_value": money(positions),
+                "positions_counted": counted, "positions_unvalued": missing,
+                "partial": bool(missing),
+                "reason": cash_reason or "the cash ledger cannot state a balance"}
+    return {
+        "value": money(cash + positions),
+        "cash": money(cash),
+        "positions_value": money(positions),
+        "positions_counted": counted,
+        "positions_unvalued": missing,
+        "partial": bool(missing),
+        "reason": ("%d position(s) in this account could not be valued, so the "
+                   "account value is PARTIAL and understates the book"
+                   % len(missing)) if missing else None,
+    }
+
+
+def loss_threshold_usd(value: Optional[float] = None) -> Optional[float]:
+    """2% of the account value, rounded HALF-UP to the cent (convention #27).
+
+    Through the same `money()` the position economics uses, so the alert's threshold
+    and the figures it compares against cannot round by two different rules. None in,
+    None out: no account value, no threshold, and T1 cannot fire on a guess.
+    """
+    from decimal import Decimal
+
+    from services.position_economics import money
+
+    if value is None:
+        value = account_value_usd()
+    if value is None:
+        return None
+    return money(Decimal(str(value)) * Decimal(str(LOSS_FRACTION)))
 
 
 # -- the stop the hub cannot see ---------------------------------------------
@@ -266,7 +345,9 @@ POSITION_SQL = """
 def evaluate_rows(rows: List[Dict[str, Any]], *, now: Optional[datetime] = None,
                   session_closes: Optional[Dict[str, float]] = None,
                   after_close: bool = False,
-                  expect_live_mark: bool = True) -> List[Dict[str, Any]]:
+                  expect_live_mark: bool = True,
+                  threshold: Optional[float] = None,
+                  account_value_usd_: Optional[float] = None) -> List[Dict[str, Any]]:
     """Every alert the book earns right now. Pure: no I/O, so the tests can drive it.
 
     `expect_live_mark` is False outside the hours when the mark job runs. A mark that
@@ -274,7 +355,11 @@ def evaluate_rows(rows: List[Dict[str, Any]], *, now: Optional[datetime] = None,
     as one every night would train the principal to ignore the channel.
     """
     out: List[Dict[str, Any]] = []
-    threshold = loss_threshold_usd()
+    # R-IV.551(c): the threshold comes from the COMPUTED account value. With none,
+    # T1 cannot fire -- 2% of an unknown number is not a number, and the caller
+    # reports the absence rather than this function inventing a figure to compare.
+    if threshold is None:
+        threshold = loss_threshold_usd()
     session_closes = session_closes or {}
 
     for r in rows:
@@ -315,11 +400,13 @@ def evaluate_rows(rows: List[Dict[str, Any]], *, now: Optional[datetime] = None,
             continue
 
         # T1 -- unstopped loss, this account only.
-        if in_account and econ["pnl"] <= -threshold and not has_live_broker_stop(r):
+        if (in_account and threshold is not None
+                and econ["pnl"] <= -threshold and not has_live_broker_stop(r)):
             out.append({
                 "trigger": TRIGGER_UNSTOPPED_LOSS, "id": rid, "position_id": pid,
                 "ticker": ticker, "account": r.get("account"),
                 "loss": econ["pnl"], "threshold": -threshold,
+                "account_value": account_value_usd_,
                 "remainder": econ["remainder"], "cost": econ["cost"],
                 "value": econ["value"], "mark": mark,
                 "written_stop": _f(r.get("stop_loss")),
@@ -373,7 +460,7 @@ def _body(a: Dict[str, Any]) -> Tuple[str, str]:
             "P&L figures (R-IV.526(c))."
             % (tk, a.get("account"), format(abs(a["loss"]), ",.2f"), a["remainder"],
                int(LOSS_FRACTION * 100), format(abs(a["threshold"]), ",.2f"),
-               format(account_value_usd(), ",.0f"), format(a["cost"], ",.2f"),
+               format(a.get("account_value") or 0.0, ",.0f"), format(a["cost"], ",.2f"),
                format(a["value"], ",.2f"), a["mark"], stop_line)
         )
     if t == TRIGGER_CLOSE_STOP:
@@ -530,6 +617,35 @@ async def _session_closes(tickers: List[str], session: date) -> Dict[str, float]
     return out
 
 
+async def _account_value_now(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """The account value from the live book: derived cash + open positions at marks.
+
+    The env override still wins when set, because a day the ledger cannot answer is
+    exactly when the principal needs a lever. It is a LEVER, not the default -- the
+    default is now computed (R-IV.551(c)).
+    """
+    override = account_value_usd()
+    if override is not None:
+        return {"value": override, "cash": None, "positions_value": None,
+                "positions_counted": 0, "positions_unvalued": [], "partial": False,
+                "reason": "LOSS_ALERT_ACCOUNT_VALUE override is set"}
+    try:
+        from database.postgres_client import get_postgres_client
+        from services.cash_ledger import balance_from_events
+
+        pool = await get_postgres_client()
+        async with pool.acquire() as conn:
+            events = await conn.fetch(
+                """SELECT id, flow_type, amount, activity_date
+                     FROM cash_flows WHERE account_name = $1
+                    ORDER BY activity_date, id""", ACCOUNT)
+        derived = balance_from_events([dict(e) for e in events])
+        return account_value(rows, derived["balance"], derived["reason"])
+    except Exception as exc:  # noqa: BLE001
+        return account_value(rows, None,
+                             "the cash ledger could not be read (%s)" % type(exc).__name__)
+
+
 async def run_loss_alert(*, injected_rows: Optional[List[Dict[str, Any]]] = None,
                          now: Optional[datetime] = None) -> Dict[str, Any]:
     """One pass. Never raises.
@@ -567,9 +683,36 @@ async def run_loss_alert(*, injected_rows: Optional[List[Dict[str, Any]]] = None
             if want:
                 closes = await _session_closes(want, session)
 
+        # R-IV.551(c): the account value, computed. Derived cash plus this account's
+        # open positions at their marks -- not a constant typed off a statement.
+        av = await _account_value_now(rows)
+        result["account_value"] = av
+        threshold = loss_threshold_usd(av.get("value"))
+        result["threshold"] = threshold
+        if threshold is None:
+            # Loud: T1 is the trigger this job exists for, and it is not firing.
+            logger.warning("loss_alert: no account value (%s) - the 2%% trigger cannot "
+                           "fire this pass", av.get("reason"))
+        elif av.get("partial"):
+            logger.warning("loss_alert: account value is PARTIAL (%d position(s) "
+                           "unvalued); the threshold understates and errs toward "
+                           "alerting", len(av.get("positions_unvalued") or []))
+
         alerts = evaluate_rows(rows, now=now, session_closes=closes,
                                after_close=after_close,
-                               expect_live_mark=marks_expected(et))
+                               expect_live_mark=marks_expected(et),
+                               threshold=threshold,
+                               account_value_usd_=av.get("value"))
+        if threshold is None:
+            alerts.append({
+                "trigger": NOTICE_UNMEASURABLE, "id": None,
+                "position_id": "ACCOUNT:%s" % ACCOUNT, "ticker": ACCOUNT,
+                "account": ACCOUNT,
+                "reason": "the account value cannot be computed (%s), so the "
+                          "%d%% loss trigger did not run at all"
+                          % (av.get("reason") or "no reason given",
+                             int(LOSS_FRACTION * 100)),
+            })
         result["alerts"] = len(alerts)
 
         async def _send(title: str, description: str, trigger: str,

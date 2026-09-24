@@ -134,17 +134,25 @@ async def _adjust_account_cash_with_conn(conn, account: str, delta: float,
     transaction as the position change or not at all. Cash that moved without an
     event, or an event without the movement, are both worse than neither.
     """
-    from services.cash_ledger import TRADE_CREDIT, TRADE_DEBIT, dedup_key
+    from services.cash_ledger import (TRADE_CREDIT, TRADE_DEBIT, dedup_key,
+                                      stored_cash_is_retired)
 
     rows = await conn.fetch("SELECT account_name, cash FROM account_balances")
     for row in rows:
         if _match_account_balance(account, row["account_name"]):
             acct = row["account_name"]
             amount = round(delta, 2)
-            await conn.execute(
-                "UPDATE account_balances SET cash = cash + $1, updated_at = NOW(), updated_by = 'auto' WHERE account_name = $2",
-                amount, acct,
-            )
+            # R-IV.551(b): once an account is anchored the stored total is read-only
+            # history and the derived figure is the answer. The EVENT below is still
+            # written -- that is what the derived figure is made of.
+            if await stored_cash_is_retired(conn, acct):
+                logger.info("cash: %s is anchored, stored total left untouched "
+                            "(%+.2f recorded as an event)", acct, amount)
+            else:
+                await conn.execute(
+                    "UPDATE account_balances SET cash = cash + $1, updated_at = NOW(), updated_by = 'auto' WHERE account_name = $2",
+                    amount, acct,
+                )
             etype = TRADE_CREDIT if amount >= 0 else TRADE_DEBIT
             when = event_date or date.today()
             # A key only where the movement can be attributed. Unattributed cash is
@@ -1259,8 +1267,20 @@ async def update_account_balance(request: Request, _=Depends(require_api_key)):
 
     account_name = body.get("account_name", "Robinhood")
 
+    from services.cash_ledger import stored_cash_is_retired
+
     pool = await get_postgres_client()
     async with pool.acquire() as conn:
+        # R-IV.551(b): an anchored account's stored total is read-only history.
+        # Setting a number here would put a figure nobody derives back in front of
+        # readers who are now served the derived one.
+        if await stored_cash_is_retired(conn, account_name):
+            return {"status": "not_applied", "account": account_name,
+                    "cash_unchanged": True,
+                    "reason": "this account is anchored, so its stored cash total is "
+                              "read-only history (R-IV.551(b)). To set cash to what "
+                              "the broker shows, use POST /api/portfolio/cash-reanchor, "
+                              "which records the difference instead of hiding it."}
         result = await conn.execute(
             "UPDATE account_balances SET cash = $1, updated_at = NOW(), updated_by = 'dashboard' WHERE account_name = $2",
             float(new_cash), account_name,
@@ -2361,6 +2381,15 @@ async def reconcile_cash(request: Request, _=Depends(require_api_key)):
             if _match_account_balance(account, row["account_name"]):
                 old_cash = float(row["cash"] or 0)
                 drift = round(float(known_cash) - old_cash, 2)
+                from services.cash_ledger import stored_cash_is_retired
+
+                if await stored_cash_is_retired(conn, row["account_name"]):
+                    return {"status": "not_applied", "account": row["account_name"],
+                            "old_cash": old_cash, "drift": drift,
+                            "reason": "this account is anchored, so its stored cash "
+                                      "total is read-only history (R-IV.551(b)). "
+                                      "Re-anchor through POST /api/portfolio/"
+                                      "cash-reanchor, which reports the difference."}
                 await conn.execute(
                     "UPDATE account_balances SET cash = $1, updated_at = NOW(), updated_by = 'cash_reconcile' WHERE account_name = $2",
                     round(float(known_cash), 2), row["account_name"],
@@ -4616,10 +4645,19 @@ async def record_cash_adjustment(req: CashAdjustmentRequest, _=Depends(require_a
                                     detail=f"no account_balances row for {acct}")
             before = float(row["cash"] or 0)
             after = round(before + float(req.amount), 2)
-            await conn.execute(
-                "UPDATE account_balances SET cash = $1, updated_at = NOW(), "
-                "updated_by = $2 WHERE account_name = $3",
-                after, f"adjustment ({req.ruling})", acct)
+            from services.cash_ledger import stored_cash_is_retired
+
+            # R-IV.551(b): the adjustment is still RECORDED below -- it is evidence
+            # either way -- but on an anchored account it no longer moves a total
+            # that nothing reads.
+            _retired = await stored_cash_is_retired(conn, acct)
+            if not _retired:
+                await conn.execute(
+                    "UPDATE account_balances SET cash = $1, updated_at = NOW(), "
+                    "updated_by = $2 WHERE account_name = $3",
+                    after, f"adjustment ({req.ruling})", acct)
+            else:
+                after = before
             adj_id = await conn.fetchval(
                 """INSERT INTO cash_adjustments
                        (account, amount, cash_before, cash_after, reason, ruling, actor)
@@ -4672,12 +4710,16 @@ async def record_cash_event(req: CashEventRequest, _=Depends(require_api_key)):
                    VALUES ($1, $2, $3, $4, $5::date, 'MANUAL_UI', $6)
                    RETURNING id, occurrence""",
                 acct, direction, signed, desc, req.event_date, occ)
-            bal = await conn.fetchrow(
-                """UPDATE account_balances
-                   SET cash = COALESCE(cash, 0) + $1, updated_at = NOW(),
-                       updated_by = 'lifecycle-ui'
-                   WHERE account_name = $2
-                   RETURNING account_name, cash, balance""", signed, acct)
+            from services.cash_ledger import stored_cash_is_retired
+
+            bal = None
+            if not await stored_cash_is_retired(conn, acct):
+                bal = await conn.fetchrow(
+                    """UPDATE account_balances
+                       SET cash = COALESCE(cash, 0) + $1, updated_at = NOW(),
+                           updated_by = 'lifecycle-ui'
+                       WHERE account_name = $2
+                       RETURNING account_name, cash, balance""", signed, acct)
 
     if not bal:
         # The cash_flow is recorded; the snapshot simply has no row for this account.
