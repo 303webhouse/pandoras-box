@@ -287,6 +287,12 @@ def _cli() -> int:
 
     import json
     print(json.dumps(res, indent=2, default=str))
+    # R-IV.533(b): QUERY verifies the append BY COUNT, so the count is the last
+    # line and is greppable on its own, not only a key inside the JSON above.
+    print("versions_written=%d selected=%d graded=%d session_gaps=%d plan=%s"
+          % (res.get("versions_written", 0), res.get("selected", 0),
+             len(res.get("rows") or []), len(res.get("session_gaps") or []),
+             str(bool(res.get("plan"))).lower()))
     return 0 if not res.get("error") else 1
 
 

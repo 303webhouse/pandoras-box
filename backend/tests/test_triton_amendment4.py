@@ -389,3 +389,95 @@ async def test_a_session_that_has_not_happened_cannot_be_counted_against():
     assert pool.counts == {}
     # Positive control: a past session still counts.
     assert await grader._count_bar_absence(pool, "AAA", SESSION, "yfinance") == 1
+
+
+# -- R-IV.533(b): what QUERY needs to rely on on Friday ----------------------
+
+def _fresh_grade_sql():
+    """Every SQL string in the fresh-grade command, as one blob."""
+    import ast
+    import inspect
+
+    from jobs import triton_fresh_grade as fg
+
+    tree = ast.parse(inspect.getsource(fg))
+    docs = set()
+    for node in ast.walk(tree):
+        body = getattr(node, "body", None)
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef,
+                             ast.AsyncFunctionDef)) and body:
+            first = body[0]
+            if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant) \
+                    and isinstance(first.value.value, str):
+                docs.add(id(first.value))
+    return " ".join(n.value for n in ast.walk(tree)
+                    if isinstance(n, ast.Constant) and isinstance(n.value, str)
+                    and id(n) not in docs).upper()
+
+
+def test_the_append_does_not_depend_on_graded_at():
+    """QUERY found that a row's grade columns LOCK when its 5d value lands, so a
+    write path that updated the row first would report success and change nothing.
+
+    The command cannot be that path: `graded_at` appears in no live string in it at
+    all -- not as a filter on the selection, not as a column it sets. It therefore
+    appends for a locked row exactly as for an open one."""
+    sql = _fresh_grade_sql()
+    assert "GRADED_AT" not in sql
+    assert "UPDATE" not in sql
+    # Positive control: the scan IS reading the command's real SQL.
+    assert "INSERT INTO TRITON_GRADE_VERSIONS" in sql
+    assert "FROM TRITON_FLOW_SHADOW" in sql
+
+
+def test_the_selection_filters_only_on_identity_and_class():
+    """It selects by id or by cohort dates, never by grade state -- so a cohort's
+    graded and ungraded rows are treated alike."""
+    sql = _fresh_grade_sql()
+    assert "WHERE ID = ANY" in sql
+    assert "FIRED_AT >=" in sql
+    for grade_state in ("GRADED_AT", "FWD_RET_1D", "FWD_RET_3D", "FWD_RET_5D"):
+        assert "WHERE %s" % grade_state not in sql
+
+
+@pytest.mark.parametrize("col", ["ENTRY_SESSION", "SESSION_1D", "SESSION_3D",
+                                 "SESSION_5D", "SESSION_GAPS"])
+def test_every_version_carries_its_recorded_sessions(col):
+    """Amendment 4(b) lives in these five columns of triton_grade_versions. Both
+    writers name them in the same INSERT as the figures, so a return and its
+    provenance cannot be separated by a later write."""
+    fresh = _fresh_grade_sql()
+    assert col in fresh
+
+    import ast
+    import inspect
+
+    from jobs import triton_shadow_grader as g
+
+    nightly = " ".join(
+        n.value for n in ast.walk(ast.parse(inspect.getsource(g)))
+        if isinstance(n, ast.Constant) and isinstance(n.value, str)
+    ).upper()
+    assert col in nightly
+
+
+def test_the_schema_declares_those_columns():
+    """The DDL is where they come from, so a dropped migration fails here."""
+    import inspect
+
+    from database import postgres_client as pc
+
+    src = inspect.getsource(pc).upper()
+    for col in ("ENTRY_SESSION", "SESSION_1D", "SESSION_3D", "SESSION_5D",
+                "SESSION_GAPS"):
+        assert col in src
+    assert "TRITON_SESSION_BAR_ATTEMPTS" in src
+
+
+def test_the_command_prints_the_count_on_its_own_line():
+    """QUERY verifies by count, so the count is greppable without parsing JSON."""
+    import inspect
+
+    from jobs import triton_fresh_grade as fg
+
+    assert "versions_written=%d" in inspect.getsource(fg._cli)
