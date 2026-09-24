@@ -1453,9 +1453,21 @@ async def init_database():
         """)
 
         # position_lot_closures — a reduction ALLOCATES against the fills it consumes rather
-        # than editing them (R-IV.444(c)). The disposal is its own negative-quantity lot, so
-        # SUM(qty) still equals the position afterwards and the ledger still answers what was
-        # bought and when. Mirrors migrations/040.
+        # than editing them (R-IV.444(c)). The disposal is its own negative-quantity lot.
+        #
+        # CONVENTION #29 (R-IV.511(c)) — this comment used to say "SUM(qty) still equals the
+        # position", and that is wrong in a way that matters:
+        #
+        #   unified_positions.quantity  = THE SIZE OPENED. It does not move when the
+        #                                 position is reduced.
+        #   SUM(position_lots.qty)      = THE OPEN REMAINDER, because the disposal lots are
+        #                                 negative and net against the acquisitions.
+        #   SUM(qty) WHERE qty > 0      = the size opened, and THAT is what equals
+        #                                 unified_positions.quantity wherever lots exist.
+        #
+        # Reading SUM(qty) as "the position" silently reports a partially-closed position at
+        # its remainder while `quantity` still reads the opened size — two numbers that
+        # disagree by exactly the amount disposed. Mirrors migrations/040.
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS position_lot_closures (
                 id                BIGSERIAL   PRIMARY KEY,
