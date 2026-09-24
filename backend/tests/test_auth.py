@@ -633,6 +633,19 @@ def _fn_source(fn, depth=0, seen=None):
                 tree = ast.parse(textwrap.dedent(src))
             except SyntaxError:
                 return "".join(out)
+        # R-IV.511(a): follow REFERENCE edges, not only call edges.
+        #
+        # QUERY's first walk missed /api/signals/active for exactly this reason. Its
+        # handler never calls the thing that reads the book — it hands it over:
+        #
+        #     swr.get_or_refresh(key, compute_fn=_compute_signals_active)
+        #
+        # A walker that reads `ast.Call.func` sees `get_or_refresh` and stops. The
+        # name that matters is an ARGUMENT, and the book read happens a hop later
+        # inside it. Every bare Name in the body is therefore resolved, whether it
+        # is called here, passed as a positional, passed as a keyword, or stored.
+        # It over-collects — a name that is merely mentioned gets resolved too —
+        # and that is the right direction to be wrong in for a security check.
         names = set()
         for n in ast.walk(tree):
             if isinstance(n, ast.Call):
@@ -641,6 +654,10 @@ def _fn_source(fn, depth=0, seen=None):
                     names.add(f.id)
                 elif isinstance(f, ast.Attribute):
                     names.add(f.attr)
+            elif isinstance(n, ast.Name):
+                names.add(n.id)
+            elif isinstance(n, ast.Attribute):
+                names.add(n.attr)
         for nm in names:
             tgt = g.get(nm)
             if callable(tgt) and getattr(tgt, "__module__", "") and not getattr(tgt, "__module__", "").startswith(
