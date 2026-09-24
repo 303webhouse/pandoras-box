@@ -1725,7 +1725,7 @@
     initGrid();
     loadRegimeBand(); managedInterval(loadRegimeBand, 60 * 1000);
     loadMoversTape(); managedInterval(loadMoversTape, 5 * 60 * 1000);
-    refreshMarket(); managedInterval(refreshMarket, 10 * 60 * 1000);
+    refreshMarket(); managedInterval(refreshMarket, 60 * 1000);
     refreshDesk(); managedInterval(refreshDesk, 2 * 60 * 1000);
     // divergence window toggle
     const dt = $('divToggle');
