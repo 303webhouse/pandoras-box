@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 from datetime import date, datetime, timezone
 
 logger = logging.getLogger("triton_shadow")
@@ -60,12 +61,24 @@ def _bounded_lookback(earliest, today) -> int:
     return max(1, min(needed, cap))
 
 
-def _dir_adj(entry: float, close: float, direction: str) -> float:
-    """Direction-adjusted return %. BULL = raw; BEAR = -raw. Positive = correct."""
-    raw = (close - entry) / entry * 100.0
+def _dir_adj(entry: float, close: float, direction: str):
+    """Direction-adjusted return %, or None when it is not a number.
+
+    BULL = raw; BEAR = -raw. Positive = correct.
+
+    The None is the last line against a NaN grade. `_f` now refuses a non-finite
+    price at the one place both vendor paths convert one, so nothing should reach
+    here that could produce one — but 62 row-horizons in this very table hold `NaN`
+    because every guard upstream was written as `if not x`, and `not nan` is False.
+    A figure that is not a number is not a grade, and it must not be writable.
+    """
+    try:
+        raw = (close - entry) / entry * 100.0
+    except (TypeError, ValueError, ZeroDivisionError):
+        return None
     if (direction or "").upper() == "BEAR":
         raw = -raw
-    return round(raw, 4)
+    return round(raw, 4) if math.isfinite(raw) else None
 
 
 # ── R-IV.436(b): A ROW WHOSE WINDOW SPANS A CORPORATE ACTION IS HELD, NOT GRADED ──
@@ -134,6 +147,7 @@ SESSION_GAP_MIN_ATTEMPTS = 3
 SESSION_GAP = "UNGRADEABLE-SESSION-GAP"          # Amendment 4(d)'s §P2 class
 SESSION_BAR_RETRYING = "session_bar_absent_retrying"
 HORIZON_NOT_A_SESSION = "horizon_not_a_session"
+NON_FINITE_RETURN = "non_finite_return"
 
 
 async def _count_bar_absence(pool, ticker: str, session_date, provider: str) -> int:
@@ -415,7 +429,12 @@ async def run_triton_shadow_grader() -> dict:
                         _skip(gap)
                         continue
                     if close_k is not None:
-                        vals[k] = _dir_adj(entry, close_k, direction)
+                        _v = _dir_adj(entry, close_k, direction)
+                        if _v is None:
+                            gaps[k] = tgt
+                            _skip(NON_FINITE_RETURN)
+                            continue
+                        vals[k] = _v
                         sess[k] = used_k
 
                 for _k, _d in gaps.items():

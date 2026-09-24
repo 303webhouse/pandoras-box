@@ -26,6 +26,7 @@ a provider, and the grade records it.
 from __future__ import annotations
 
 import logging
+import math
 from datetime import date, datetime, timedelta, timezone
 from typing import Dict, Optional, Tuple
 from zoneinfo import ZoneInfo
@@ -75,10 +76,22 @@ LARGE_MIN = 750_000  # flow_scanner LARGE_MIN_PREMIUM (TSLA-class)
 
 
 def _f(x) -> Optional[float]:
+    """float, or None — and a NON-FINITE value is None, not a number.
+
+    `float("nan")` succeeds, so the old form admitted NaN as a price and every
+    downstream guard let it through: `not nan` is False and `nan <= 0` is False, so
+    an entry check of `if not entry or entry <= 0` passes a NaN entry, and a NaN
+    close arithmetics into a NaN grade. That is how 62 row-horizons came to hold
+    `NaN` in `triton_flow_shadow` (found 2026-09-24, in-window, horizons 09-22 and
+    09-23 — the two sessions the vendor served incompletely). A NaN is not a price
+    and never was; it is an ABSENT bar, and it has to be absent here, at the one
+    place both vendor paths convert a number.
+    """
     try:
-        return float(x)
+        v = float(x)
     except (TypeError, ValueError):
         return None
+    return v if math.isfinite(v) else None
 
 
 def classify_bucket(ticker: str, premium_usd: Optional[int]) -> str:
@@ -267,6 +280,21 @@ def nth_trading_day(anchor: date, n: int) -> date:
     return day
 
 
+def _finite(v) -> Optional[float]:
+    """A close, or None. NaN and infinity are ABSENT BARS, not values.
+
+    Belt and braces with `_f`: these two lookups are Amendment 4's gate, and a gate
+    that is only safe because something upstream stayed correct is not a gate.
+    """
+    if v is None:
+        return None
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return f if math.isfinite(f) else None
+
+
 def close_on_or_near(idx: Dict[date, float],
                      target: date) -> Tuple[Optional[float], Optional[date]]:
     """(close, THE SESSION IT CAME FROM). Target first, else ±1/±2 calendar days.
@@ -279,11 +307,12 @@ def close_on_or_near(idx: Dict[date, float],
     and a caller that must not substitute compares it to `target` — or uses
     `close_on_session`, which cannot substitute at all.
     """
-    if target in idx:
-        return idx[target], target
+    v = _finite(idx.get(target))
+    if v is not None:
+        return v, target
     for delta in (1, -1, 2, -2):
         d = target + timedelta(days=delta)
-        v = idx.get(d)
+        v = _finite(idx.get(d))
         if v is not None:
             return v, d
     return None, None
@@ -297,7 +326,7 @@ def close_on_session(idx: Dict[date, float], target: date) -> Optional[float]:
     close is a different session's price, and naming it as this one's is the fault
     Amendment 4 exists to close.
     """
-    return idx.get(target)
+    return _finite(idx.get(target))
 
 
 # ── Amendment 4(c): a horizon session is a weekday THE EXCHANGE TRADED ──────────
