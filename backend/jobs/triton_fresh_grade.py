@@ -44,7 +44,8 @@ from jobs.triton_shadow_grader import (
 )
 from jobs.triton_shadow_common import (
     PROVIDER_NONE, cohort_bounds, cohort_of, close_on_session,
-    fetch_r_close_index, horizon_is_session, nth_trading_day, triton_row_pinned, _f,
+    fetch_r_close_index, horizon_is_session, horizon_reached, nth_trading_day,
+    triton_row_pinned, _f,
 )
 
 logger = logging.getLogger("triton_fresh_grade")
@@ -179,7 +180,7 @@ async def fresh_grade(*, row_ids: Optional[List[int]] = None,
         wanted = sorted({
             d for _, fd in keep
             for d in [fd] + [nth_trading_day(fd, k) for k in HORIZONS]
-            if d <= today
+            if d == fd or horizon_reached(d)
         })
         idx, provider, tries = await _series_with_attempts(
             ticker, lookback, wanted, pool, attempts)
@@ -203,8 +204,8 @@ async def fresh_grade(*, row_ids: Optional[List[int]] = None,
             gaps: Dict[int, date] = {}
             for k in HORIZONS:
                 tgt = nth_trading_day(fd, k)
-                if tgt > today:
-                    continue                      # horizon not reached yet
+                if not horizon_reached(tgt):
+                    continue                      # its session is not over yet
                 if horizon_is_session(tgt) is not True:
                     gaps[k] = tgt
                     _skip(HORIZON_NOT_A_SESSION)

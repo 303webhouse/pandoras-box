@@ -159,6 +159,17 @@ async def _count_bar_absence(pool, ticker: str, session_date, provider: str) -> 
     a stated route for a gap. Being loud about a gap is recoverable; silently never
     resolving is not.
     """
+    # A session that has not happened cannot have a missing bar. Counting one
+    # against it is how the first control run put three attempts on 2026-09-24 at
+    # 02:30 that morning — and a counter at three is a permanent gap the moment the
+    # horizon becomes reachable. The horizon check upstream stops that from
+    # happening; this stops it from being possible.
+    from jobs.triton_shadow_common import horizon_reached
+
+    if not horizon_reached(session_date):
+        logger.warning("triton_grader: refusing to count a missing bar for %s %s — "
+                       "that session is not over", ticker, session_date)
+        return 0
     try:
         async with pool.acquire() as conn:
             n = await conn.fetchval(
@@ -213,7 +224,8 @@ async def run_triton_shadow_grader() -> dict:
     """One grading pass. Never raises (fail-open). Returns a small summary."""
     from database.postgres_client import get_postgres_client
     from jobs.triton_shadow_common import (
-        fetch_r_close_index, nth_trading_day, horizon_is_session, _f,
+        fetch_r_close_index, nth_trading_day, horizon_is_session,
+        horizon_reached, _f,
         triton_row_pinned, PROVIDER_NONE,
     )
     from jobs.instrument_class import classify, is_gradeable
@@ -407,8 +419,8 @@ async def run_triton_shadow_grader() -> dict:
                 gaps: dict = {}
                 for k in HORIZONS:
                     tgt = nth_trading_day(fire_d, k)
-                    if tgt > today:
-                        continue  # horizon not reached yet
+                    if not horizon_reached(tgt):
+                        continue  # its session is not over yet
                     any_reachable = True
                     # Amendment 4(c) defines a horizon session as a weekday THE
                     # EXCHANGE TRADED. nth_trading_day walks Mon-Fri with no holiday

@@ -341,6 +341,26 @@ def close_on_session(idx: Dict[date, float], target: date) -> Optional[float]:
 # NOT change any horizon — it refuses to grade one that is not a session, loudly,
 # which is what an extended window would need.
 
+# A HORIZON IS REACHED ONLY ONCE ITS SESSION IS OVER.
+#
+# The grader asked `tgt > today` against the UTC date. At 02:30 ET the UTC date is
+# already tomorrow's while tomorrow's session has not opened, so a horizon landing on
+# it read as REACHED. That was survivable before Amendment 4 -- the row just retried
+# -- but 4(c) now counts failed requests toward a PERMANENT gap, so an unopened
+# session would be named UNGRADEABLE. The first control run did exactly that: KLAC's
+# 5d horizon, 2026-09-24, called a gap at 02:30 ET that morning.
+#
+# So: strictly BEFORE the current ET session date. A horizon grades from the next
+# session onward, never from its own. The alternative -- same day past the close --
+# saves a day of latency and buys the risk of three attempts landing in the hour
+# before the vendor publishes the bar. Reads lag their cohort by a week (A3(a)), so
+# the day costs nothing and the risk is not worth taking.
+def horizon_reached(tgt: date, now: Optional[datetime] = None) -> bool:
+    """True when tgt's session has finished, measured on the EXCHANGE's clock."""
+    now = now or datetime.now(timezone.utc)
+    return tgt < now.astimezone(ET).date()
+
+
 def horizon_is_session(d: date) -> Optional[bool]:
     """True/False/None (the calendar cannot answer for that date)."""
     try:
