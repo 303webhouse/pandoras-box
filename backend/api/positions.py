@@ -634,7 +634,7 @@ async def handle_signal_action(action: SignalAction):
 
 
 @router.get("/signals/active")
-async def get_active_signals_api():
+async def get_active_signals_api(_=Depends(require_api_key)):
     """
     Get all active trade ideas (not dismissed or selected).
     Returns top 10 ranked by score with bias alignment.

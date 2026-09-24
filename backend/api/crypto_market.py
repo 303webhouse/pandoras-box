@@ -2,7 +2,9 @@
 Crypto market data proxy for the frontend.
 Provides funding rates, CVD, order flow, and spot/perp basis without CORS issues.
 """
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
+
+from utils.pivot_auth import require_api_key
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 import asyncio
@@ -1015,7 +1017,8 @@ async def get_cycle_extremes(symbol: Optional[str] = Query(None)):
 
 
 @router.get("/tape-health")
-async def get_tape_health(symbol: Optional[str] = Query(None)):
+async def get_tape_health(symbol: Optional[str] = Query(None),
+                          _=Depends(require_api_key)):
     """S-3 Phase 4 (§6.1) / S-3b Items 1+2 — CVD tape-health state.
 
     Returns spot-vs-perp CVD split, state (SPOT_LED / PERP_LED / MIXED / NA),
