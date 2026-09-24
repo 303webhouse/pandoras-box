@@ -104,3 +104,6 @@ desktop.ini
 # this repository is public. Ignored here so the rule is enforced by the tool
 # rather than remembered by a lane.
 docs/security/
+
+# Local pinned-httpx test env (R-IV.512): never committed.
+.venv-test/
