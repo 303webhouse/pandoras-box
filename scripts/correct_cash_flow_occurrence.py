@@ -80,6 +80,10 @@ def main() -> int:
         conn.rollback()
         return 0
 
+    cur.execute("SELECT count(*) AS n FROM cash_flow_corrections WHERE ruling = %s",
+                (RULING,))
+    audit_before = cur.fetchone()["n"]
+
     corrected = 0
     for r in rows:
         cur.execute("UPDATE cash_flows SET occurrence = 0 WHERE id = %s AND occurrence <> 0",
@@ -98,18 +102,24 @@ def main() -> int:
     cur.execute("SELECT count(*) AS n FROM cash_flows WHERE occurrence <> 0")
     remaining = cur.fetchone()["n"]
     cur.execute("SELECT count(*) AS n FROM cash_flow_corrections WHERE ruling = %s", (RULING,))
-    audit = cur.fetchone()["n"]
+    audit_total = cur.fetchone()["n"]
+    # THE DELTA, not the total. Comparing this run's corrections against every audit
+    # row ever written made a clean re-run report failure -- and the re-run is
+    # precisely how the first run gets verified, so a check that breaks it destroys
+    # the thing it was guarding. Caught on the second run, which is the point.
+    audit_written = audit_total - audit_before
 
-    if remaining != 0 or audit != corrected:
+    if remaining != 0 or audit_written != corrected:
         conn.rollback()
-        print("REFUSED: remaining=%s audit=%s corrected=%s - rolled back"
-              % (remaining, audit, corrected))
+        print("REFUSED: remaining=%s audit_written=%s corrected=%s - rolled back"
+              % (remaining, audit_written, corrected))
         return 1
 
     conn.commit()
-    print("\ncorrected   : %d" % corrected)
-    print("audit rows  : %d" % audit)
-    print("remaining   : %d" % remaining)
+    print("\ncorrected        : %d" % corrected)
+    print("audit rows added : %d" % audit_written)
+    print("audit rows total : %d" % audit_total)
+    print("remaining        : %d" % remaining)
     conn.close()
     return 0
 
