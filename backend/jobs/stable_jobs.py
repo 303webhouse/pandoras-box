@@ -159,15 +159,31 @@ async def run_index_rates_strip() -> dict:
     return res
 
 
+# R-IV.512(c)3 — 600s -> 120s, approved on the R-IV.490 measurement.
+#
+# This costs NO UW budget. The strip is yfinance-only and an open screen never
+# reaches it: the browser reads stable_live_strip out of Postgres, this loop is
+# the only thing that calls a vendor, and the number of open screens cannot
+# change the call count. So the cost is one batched yfinance request per tick —
+# roughly 39 batches a day at 600s, roughly 195 at 120s — against UW's ~12,000
+# of 40,000, untouched either way.
+#
+# The screen's own poll is ABACUS's file and is being relayed, not edited here.
+# Until it lands, worst-case staleness is the poll period, not this one: halving
+# the client relative to the job is what removes the doubled window, and the job
+# cadence alone cannot.
+STRIP_REFRESH_SECONDS = 120
+
+
 async def stable_strip_loop():
-    """Refresh the index/rates live strip every 10 min during RTH (market-days)."""
+    """Refresh the index/rates live strip every 2 min during RTH (market-days)."""
     while True:
         try:
             if is_rth(now_et()):
                 await _record("strip", run_index_rates_strip)
         except Exception as e:
             logger.warning("[stable_jobs] strip loop error: %s", e)
-        await asyncio.sleep(600)  # 10 minutes
+        await asyncio.sleep(STRIP_REFRESH_SECONDS)
 
 
 def _movers_work() -> dict:
