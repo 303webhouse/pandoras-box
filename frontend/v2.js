@@ -1172,6 +1172,7 @@
 
   // ── c5: Book positions (same source as legacy Ledger: GET /api/v2/positions?status=OPEN) ──
   let _openPositions = [];
+  window.__v2 = { openPositionDrawerAt: (i) => openPositionDrawer(_openPositions[i]) };
   const OPT_PUT = /put/i, OPT_CALL = /call/i;
   function structureStr(p) {
     if ((p.asset_type || '').toUpperCase() === 'EQUITY' || (p.structure || '') === 'stock') {
@@ -1751,4 +1752,348 @@
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
   else boot();
+})();
+
+/* Positions panel, R-IV.509. A slide-over on Agora, MOCK DATA ONLY until BUILD's backend scope is ruled (R-IV.511(d)).
+   One panel: layout B on desktop, layout C on phone. */
+(function () {
+  'use strict';
+const PM = {
+  label: 're-derived 09-23',
+  sleeves: [
+    // mock figures. RH ceiling ~10% of (FIDELITY_ROTH + ROBINHOOD), $200 always in cash.
+    // FIDELITY_ROTH's cap: max losses within 20% of its own balance.
+    { account: 'ROBINHOOD', kind: 'options sleeve', rule: 'ceiling ≈ 10% of combined balance', measure: 'at risk', ceiling: 968, atRisk: 412, cashFloor: 200, cash: 223.69, balance: 835.69 },
+    { account: 'FIDELITY_ROTH', kind: 'equity sleeve', rule: 'cap: max losses within 20% of its balance', measure: 'max loss', ceiling: 1768, atRisk: 1210, cashFloor: null, cash: 1980.0, balance: 8842.09 },
+  ],
+  open: [
+    { id: 517, account: 'ROBINHOOD', ticker: 'AVGO', bucket: 'B2 tactical', structure: 'put debit spread 300/290', qty: 2, cost: 148, mark: 171, markState: 'fresh', prov: 'BROKER_VERIFIED', expiry: '2026-10-16',
+      stop: { type: 'daily-close', level: 'close < 305' }, invalidation: 'Daily close above 312 voids the bearish read', timeStop: '09-29 (5 days, B2 window)', tags: ['semis', 'committee'],
+      lots: [{ id: 1, when: '09-22 10:41', qty: 2, price: 0.74, fees: 1.30, prov: 'BROKER_VERIFIED', ref: 'RH-…7f2a' }],
+      legs: [{ seq: 1, side: 'long', type: 'put', strike: 300, price: 3.10 }, { seq: 2, side: 'short', type: 'put', strike: 290, price: 2.36 }],
+      evidence: ['Broker fill 09-22 10:41: BUY 2 AVGO 10/16 300P @3.10, SELL 2 290P @2.36 (broker_ref RH-…7f2a)', 'Cost check: (3.10 − 2.36) × 2 × 100 = 148.00, matches recorded basis'] },
+    { id: 519, account: 'ROBINHOOD', ticker: 'TSLA', bucket: 'B2 tactical', structure: 'put debit spread 260/250', qty: 1, cost: 96, mark: null, markState: 'unknown', prov: 'SCREEN_VERIFIED', expiry: '2026-10-16',
+      stop: { type: 'none', level: '—' }, invalidation: 'not written', timeStop: 'not set', tags: [],
+      lots: [{ id: 2, when: '09-22 11:05', qty: 1, price: 0.96, fees: 0.65, prov: 'SCREEN_VERIFIED', ref: '—' }],
+      legs: [{ seq: 1, side: 'long', type: 'put', strike: 260, price: null }, { seq: 2, side: 'short', type: 'put', strike: 250, price: null }],
+      evidence: ['Read from a broker screen (fields + capture time recorded); no fill reference yet', 'Export line will supersede this and promote it to BROKER_VERIFIED'] },
+    { id: 520, account: 'ROBINHOOD', ticker: 'NVDA', bucket: 'B1 thesis', structure: '3-leg put fly 415', qty: 1, cost: 168, mark: 121, markState: 'stale', prov: 'PRINCIPAL_REPORTED', expiry: '2026-11-20', basisIncomplete: 'quantity 3, basis covers 2 structures; third has no recorded fill',
+      stop: { type: 'broker order', level: 'stop @ 60% of debit' }, invalidation: 'Thesis dead if NVDA reclaims 430 on volume', timeStop: '11-06', tags: ['thesis'],
+      lots: [{ id: 3, when: '09-15', qty: 1, price: 1.68, fees: 0, prov: 'PRINCIPAL_REPORTED', ref: '—' }],
+      legs: [{ seq: 1, side: 'long', type: 'put', strike: 425, price: null }, { seq: 2, side: 'short', type: 'put', strike: 415, price: null }, { seq: 3, side: 'long', type: 'put', strike: 405, price: null }],
+      evidence: ['Basis incomplete by ruling — counted in the census, never averaged into realized or win rate'] },
+    { id: 516, account: 'ROBINHOOD', ticker: 'HYG', bucket: 'HEDGE', structure: 'put debit spread 76/73', qty: 5, cost: 70, mark: 96, markState: 'fresh', prov: 'BROKER_VERIFIED', expiry: '2026-11-20', rolledFrom: 218,
+      stop: { type: 'daily-close', level: 'close < 77.2' }, invalidation: 'Credit spreads tighten below 3.1', timeStop: '11-13',
+      tags: ['credit', 'roll'],
+      lots: [{ id: 4, when: '09-22 09:58', qty: 3, price: 0.14, fees: 0.9, prov: 'BROKER_VERIFIED', ref: 'RH-…1c90' }, { id: 5, when: '09-22 10:02', qty: 2, price: 0.13, fees: 0.6, prov: 'BROKER_VERIFIED', ref: 'RH-…1c91' }],
+      legs: [{ seq: 1, side: 'long', type: 'put', strike: 76, price: 0.58 }, { seq: 2, side: 'short', type: 'put', strike: 73, price: 0.39 }],
+      evidence: ['Roll: closed #218 (−110.00) and opened #516 in one motion', 'Roll cost 30.00 recorded on lot 1 only'] },
+    { id: 601, account: 'FIDELITY_ROTH', ticker: 'PDBC', bucket: 'CORE', structure: 'equity', qty: 50, cost: 690, mark: 702, markState: 'fresh', prov: 'BROKER_VERIFIED', expiry: null,
+      stop: { type: 'daily-close', level: 'close < 13.2' }, invalidation: 'Commodity sleeve breaks its 200-day', timeStop: 'none (holding)', tags: ['commodity'],
+      lots: [{ id: 6, when: '09-01', qty: 50, price: 13.80, fees: 0, prov: 'BROKER_VERIFIED', ref: 'FID-…22b0' }], legs: [],
+      evidence: ['Fidelity confirmation 09-01: BUY 50 PDBC @13.80'] },
+    { id: 602, account: 'FIDELITY_ROTH', ticker: 'SOXS', bucket: 'HEDGE', structure: 'equity', qty: 25, cost: 420, mark: 391, markState: 'fresh', prov: 'BROKER_VERIFIED', expiry: null,
+      stop: { type: 'broker order', level: 'stop @ 14.40' }, invalidation: 'Semis trend resumes: SMH closes above its 20-day', timeStop: 'review when SMH resets', tags: ['semis', 'inverse'],
+      lots: [{ id: 7, when: '09-10', qty: 25, price: 16.80, fees: 0, prov: 'BROKER_VERIFIED', ref: 'FID-…31c4' }], legs: [],
+      evidence: ['Fidelity confirmation 09-10: BUY 25 SOXS @16.80'] },
+  ],
+  history: {
+    coverage: { total: 8, counted: 6, excluded: { basis_incomplete: 1, return_below_neg100pct: 1, no_realized_pnl: 0 } },
+    rows: [
+      { id: 480, ticker: 'QQQ', structure: 'call debit spread', closed: '09-19', realized: 74.0, prov: 'BROKER_VERIFIED', why: 'target' },
+      { id: 471, ticker: 'SPY', structure: 'put debit spread', closed: '09-17', realized: -52.0, prov: 'BROKER_VERIFIED', why: 'stop' },
+      { id: 465, ticker: 'XLF', structure: 'call debit spread', closed: '09-12', realized: 31.0, prov: 'SCREEN_VERIFIED', why: 'time stop' },
+      { id: 452, ticker: 'ORCL', structure: 'put debit spread', closed: '09-09', realized: -88.0, prov: 'BROKER_VERIFIED', why: 'stop' },
+      { id: 447, ticker: 'SOXS', structure: 'equity', closed: '09-08', realized: 19.0, prov: 'IMPORTED', why: 'target' },
+      { id: 440, ticker: 'UVXY', structure: 'call', closed: '09-05', realized: -40.0, prov: 'BROKER_VERIFIED', why: 'expired' },
+      { id: 433, ticker: 'NVDA', structure: '3-leg put fly', closed: '09-03', realized: null, prov: 'PRINCIPAL_REPORTED', why: 'basis under review', flag: 'basis incomplete' },
+      { id: 429, ticker: 'IBIT', structure: 'put debit spread', closed: '09-02', realized: -190.0, prov: 'IMPORTED', why: 'return past −100% of basis', flag: 'return < −100%' },
+    ],
+    chains: [
+      { label: 'HYG roll chain', legs: [{ id: 218, closed: '09-22', realized: -110.0 }, { id: 516, open: true }], net: -110.0, note: 'reads as ONE trade: roll cost 30.00 on lot 1, chain result −110.00 so far' },
+    ],
+  },
+  buckets: [['B1 thesis','multi-week'],['B2 tactical','3–5 days'],['B3 scalp','intraday'],['CORE',''],['HEDGE',''],['TAIL','']],
+  ladder: ['UNKNOWN','PRINCIPAL_REPORTED','SCREEN_VERIFIED','IMPORTED','BROKER_VERIFIED'],
+  ticket: {
+    tape: { state: 'DOWN', detail: 'SPY below 20-day, breadth 38%' },
+    fields: ['tape vs trade direction', 'bucket', 'max loss vs caps', 'stop written', 'invalidation', 'time stop', 'Zweig rule strained'],
+  },
+  missing: [
+    'roll route (R-IV.452, not landed) — Roll button shows disabled state',
+    'stop type / invalidation / time stop / bucket have no columns (bucket lives inside notes text)',
+    'pre-trade ticket has no route or storage: X8 needs fields on the position row',
+    'sleeve ceiling and cash floor have no read endpoint (figures here are mock)',
+    'evidence lines are stored as prose in notes; a structured list needs a source',
+  ],
+};
+
+const X = (function () {
+  const P = PM;
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const MINUS = '−';
+  const usd = (v, signed) => v == null ? '—' : (v < 0 ? MINUS : (signed && v > 0 ? '+' : '')) + '$' + Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: v % 1 ? 2 : 0, maximumFractionDigits: 2 });
+  const tone = (v) => v == null ? '' : v > 0 ? 'pp-up' : v < 0 ? 'pp-down' : '';
+
+  const PROV = {
+    UNKNOWN: ['unknown', 'unknown', 'Lowest rung: nothing says where this came from.'],
+    BROKER_VERIFIED: ['verified', 'broker verified', 'A broker record backs this row (reference on file).'],
+    SCREEN_VERIFIED: ['screen', 'screen read', 'Read off a broker screen; an import or broker record will supersede it.'],
+    PRINCIPAL_REPORTED: ['reported', 'reported', 'Reported by the principal; no broker evidence yet.'],
+    IMPORTED: ['imported', 'imported', 'Loaded from an export file; ranks above a screen read, below a broker-referenced record.'],
+  };
+  const prov = (p) => { const [s, l, t] = PROV[p] || ['reported', p, '']; return `<span class="pp-chip" data-state="${s}" title="${esc(t)}">${esc(l)}</span>`; };
+  const chip = (state, label, title) => `<span class="pp-chip" data-state="${state}"${title ? ` title="${esc(title)}"` : ''}>${esc(label)}</span>`;
+  const ladder = () => `<div class="pp-ladder">Provenance, weakest to strongest: ${P.ladder.map((k) => prov(k)).join(' <span class="pp-dim">&lt;</span> ')}</div>`;
+  const buckets = () => `<div class="pp-ladder">Buckets: ${P.buckets.map(([n, d]) => `<span class="pp-tag">${esc(n)}${d ? ' · ' + esc(d) : ''}</span>`).join(' ')}</div>`;
+  const mockBanner = () => `<div class="pp-banner">Mock data — layout only · ${esc(P.label)} · every figure is invented, the principal approves or adjusts the layout</div>${ladder()}${buckets()}`;
+
+  function markCell(p) {
+    if (p.mark == null) return `<span class="pp-amber" title="no mark: the source could not price this position">UNAVAILABLE</span>`;
+    const v = usd(p.mark);
+    return p.markState === 'stale' ? `${v} ${chip('unknown', 'stale mark', 'Mark is older than its bound; cannot confirm it is current.')}` : v;
+  }
+  function pnlCell(p) {
+    if (p.mark == null) return `<span class="pp-amber">—</span>`;
+    if (p.basisIncomplete) return `<span class="pp-amber" title="${esc(p.basisIncomplete)}">basis under review</span>`;
+    const d = p.mark - p.cost; return `<span class="${tone(d)}">${usd(d, true)}</span>`;
+  }
+
+  function gauge(s) {
+    const scale = Math.max(s.ceiling, s.atRisk) * 1.15;
+    const pct = (v) => Math.min(100, (v / scale) * 100).toFixed(1);
+    const headroom = s.ceiling - s.atRisk;
+    const floor = s.cashFloor != null;
+    const cashOk = !floor || s.cash >= s.cashFloor;
+    return `<div class="pp-gauge" role="img" aria-label="${esc(s.account)}: ${esc(s.measure)} ${usd(s.atRisk)} of ${usd(s.ceiling)}${floor ? '; cash ' + usd(s.cash) + ' against a ' + usd(s.cashFloor) + ' floor' : ''}">
+      <div class="pp-g-head"><span class="pp-g-name">${esc(s.account)} <span class="pp-dim">${esc(s.kind)}</span> ${chip('unknown', 'mock', 'Invented figures')}</span>
+        <span class="pp-g-fig">${usd(s.atRisk)} ${esc(s.measure)} of ${usd(s.ceiling)} · headroom <b class="${headroom < 0 ? 'pp-down' : ''}">${usd(headroom)}</b></span></div>
+      <div class="pp-dim">${esc(s.rule)}</div>
+      <div class="pp-g-track"><i class="pp-g-fill" style="width:${pct(s.atRisk)}%"></i><b class="pp-g-ceil" style="left:${pct(s.ceiling)}%" title="limit ${usd(s.ceiling)}"></b></div>
+      <div class="pp-g-foot"><span>${floor ? `Cash ${usd(s.cash)} vs $200 always-in-cash floor ${cashOk ? chip('verified', 'above floor') : chip('reported', 'BELOW FLOOR')}` : `Cash ${usd(s.cash)}`}</span><span class="pp-dim">balance ${usd(s.balance)}</span></div>
+    </div>`;
+  }
+
+  function stopBadge(st) {
+    const map = { 'broker order': 'verified', 'daily-close': 'screen', none: 'reported' };
+    const note = { 'broker order': 'Rests at the broker; fires on its own.', 'daily-close': 'Watched at the close; fires only if someone acts.', none: 'No stop written.' };
+    return chip(map[st.type] || 'reported', st.type === 'none' ? 'no stop' : 'stop: ' + st.type, note[st.type]) + (st.level && st.level !== '—' ? ` <span class="pp-dim">${esc(st.level)}</span>` : '');
+  }
+
+  function bookRow(p, attrs) {
+    return `<tr class="pp-row" ${attrs || ''} data-id="${p.id}">
+      <td><b>${esc(p.ticker)}</b><div class="pp-dim">${esc(p.bucket)}</div></td>
+      <td>${esc(p.structure)}${p.expiry ? `<div class="pp-dim">exp ${esc(p.expiry.slice(5))}</div>` : ''}</td>
+      <td class="pp-num">${p.qty}</td><td class="pp-num">${usd(p.cost)}</td><td class="pp-num">${markCell(p)}</td>
+      <td class="pp-num">${pnlCell(p)}</td><td>${prov(p.prov)}</td></tr>`;
+  }
+  const bookHead = `<thead><tr><th>Position</th><th>Structure</th><th class="pp-num">Qty</th><th class="pp-num">Cost</th><th class="pp-num">Mark</th><th class="pp-num">P&amp;L</th><th>Provenance</th></tr></thead>`;
+  function bookTable(account, rowAttrs) {
+    const rows = P.open.filter((p) => p.account === account);
+    return `<table class="pp-table">${bookHead}<tbody>${rows.map((p) => bookRow(p, rowAttrs ? rowAttrs(p) : '')).join('')}</tbody></table>`;
+  }
+
+  function detail(p) {
+    const lots = p.lots.map((l) => `<tr><td>${esc(l.when)}</td><td class="pp-num">${l.qty}</td><td class="pp-num">${l.price.toFixed(2)}</td><td class="pp-num">${l.fees.toFixed(2)}</td><td>${prov(l.prov)}</td><td class="pp-dim">${esc(l.ref)}</td></tr>`).join('');
+    const legs = p.legs.length ? p.legs.map((g) => `<tr><td>${g.seq}</td><td>${esc(g.side)}</td><td>${esc(g.type)}</td><td class="pp-num">${g.strike}</td><td class="pp-num">${g.price == null ? '<span class="pp-amber">unpriced</span>' : g.price.toFixed(2)}</td></tr>`).join('') : '';
+    return `<div class="pp-detail">
+      <h3>${esc(p.ticker)} · ${esc(p.structure)} ${prov(p.prov)}</h3>
+      ${p.basisIncomplete ? `<div class="pp-note pp-warn">Basis under review — ${esc(p.basisIncomplete)}</div>` : ''}
+      <div class="pp-kv">
+        <div><span class="pp-k">Stop</span>${stopBadge(p.stop)}</div>
+        <div><span class="pp-k">Time stop</span>${esc(p.timeStop)}</div>
+        <div class="pp-wide"><span class="pp-k">Invalidation</span>${p.invalidation === 'not written' ? '<span class="pp-amber">not written</span>' : esc(p.invalidation)}</div>
+        <div class="pp-wide"><span class="pp-k">Tags</span>${p.tags.length ? p.tags.map((t) => `<span class="pp-tag">${esc(t)}</span>`).join(' ') : '<span class="pp-dim">none</span>'}</div>
+      </div>
+      <h4>Lots</h4><table class="pp-table pp-sm"><thead><tr><th>When</th><th class="pp-num">Qty</th><th class="pp-num">Price</th><th class="pp-num">Fees</th><th>Provenance</th><th>Ref</th></tr></thead><tbody>${lots}</tbody></table>
+      ${legs ? `<h4>Legs</h4><table class="pp-table pp-sm"><thead><tr><th>#</th><th>Side</th><th>Type</th><th class="pp-num">Strike</th><th class="pp-num">Price</th></tr></thead><tbody>${legs}</tbody></table>` : ''}
+      <h4>Evidence <span class="pp-dim">(beside the verdict, #23)</span></h4><ul class="pp-evid">${p.evidence.map((e) => `<li>${esc(e)}</li>`).join('')}</ul>
+    </div>`;
+  }
+
+  function actions(p) {
+    const rolled = p.rolledFrom ? ` (follows #${p.rolledFrom})` : '';
+    const A = [
+      ['Edit', 'Change tags, stop, invalidation, time stop.', 'Needs: what changed and why (one line).', false],
+      ['Add a lot', 'Record another fill into this position.', 'Needs: fill time, qty, price, fees — and a broker reference or a screen capture.', false],
+      ['Close', 'End the position and record the result.', 'Needs: exit price, close time, and the closing fill reference (or screen capture). Result recomputed from lots.', false],
+      ['Roll' + rolled, 'Close this and open the next as one linked trade.', 'Needs: both fills, linked. Waits on R-IV.452 — not landed.', true],
+    ];
+    return `<div class="pp-actions"><h4>Actions on ${esc(p.ticker)} #${p.id}</h4>${A.map(([n, d, need, off]) => `<div class="pp-act${off ? ' off' : ''}"><button type="button" class="pp-btn" ${off ? 'disabled' : ''}>${esc(n)}</button><div><div>${esc(d)}</div><div class="pp-need">${esc(need)}</div></div></div>`).join('')}</div>`;
+  }
+
+  function ticket() {
+    const t = P.ticket;
+    return `<form class="pp-ticket" onsubmit="return false"><h4>Pre-trade ticket <span class="pp-dim">— the only way a new position enters (X8)</span></h4>
+      <div class="pp-tape">Tape: ${chip('reported', t.tape.state)} <span class="pp-dim">${esc(t.tape.detail)}</span></div>
+      <label>Trade direction<select><option>bearish (with the tape)</option><option>bullish (AGAINST the tape)</option><option>neutral</option></select></label>
+      <label>Bucket<select>${P.buckets.map(([n, d]) => `<option>${esc(n)}${d ? ' — ' + esc(d) : ''}</option>`).join('')}</select></label>
+      <label>Ticker / structure<input value="e.g. IWM put debit spread 215/210"></label>
+      <label>Max loss<input value="$120"></label>
+      <div class="pp-caps">${chip('verified', 'within sleeve ceiling: headroom $556 (mock)')} ${chip('verified', 'cash stays above $200 (mock)')}</div>
+      <label>Stop written<select><option>broker order</option><option>daily-close</option><option>none — say why</option></select></label>
+      <label>Invalidation<input value="what makes this wrong"></label>
+      <label>Time stop<input value="date or DTE"></label>
+      <label>Zweig rule strained<select><option>none</option><option>the tape sets direction</option><option>another rule…</option></select></label>
+      <div class="pp-need">A ticket saves onto the position row. A trade against the tape, or with no stop, shows amber above and asks for a reason before it can be submitted.</div>
+      <button type="button" class="pp-btn primary">Save ticket (mock: saves nothing)</button></form>`;
+  }
+
+  function history() {
+    const h = P.history, c = h.coverage;
+    const ex = c.excluded, flagged = ex.basis_incomplete + ex.return_below_neg100pct + ex.no_realized_pnl;
+    const counted = h.rows.filter((r) => !r.flag && r.realized != null);
+    const net = counted.reduce((s, r) => s + r.realized, 0);
+    const wins = counted.filter((r) => r.realized > 0).length;
+    const cov = chip(flagged ? 'reported' : 'verified', `n=${c.counted} of ${c.total}`, `${flagged} excluded, never averaged in: ${ex.basis_incomplete} basis incomplete, ${ex.return_below_neg100pct} return past −100% of basis`);
+    const rows = h.rows.map((r) => `<tr class="${r.flag ? 'pp-flagged' : ''}"><td>#${r.id}</td><td><b>${esc(r.ticker)}</b> <span class="pp-dim">${esc(r.structure)}</span></td><td>${esc(r.closed)}</td><td class="pp-num">${r.realized == null ? '<span class="pp-amber">null</span>' : `<span class="${tone(r.realized)}">${usd(r.realized, true)}</span>`}</td><td>${esc(r.why)}${r.flag ? ' ' + chip('reported', r.flag) : ''}</td><td>${prov(r.prov)}</td></tr>`).join('');
+    const chain = h.chains.map((k) => `<div class="pp-chain"><b>${esc(k.label)}</b> — ${k.legs.map((l) => l.open ? `#${l.id} <span class="pp-dim">open</span>` : `#${l.id} ${usd(l.realized, true)}`).join(' → ')} · <span class="${tone(k.net)}">${usd(k.net, true)}</span> <span class="pp-dim">${esc(k.note)}</span></div>`).join('');
+    return `<div class="pp-history"><h4>History <span class="pp-dim">closed &amp; expired, windowed on close date</span></h4>
+      <div class="pp-hstats"><span>Realized <b class="${tone(net)}">${usd(net, true)}</b> ${cov}</span><span>Win rate <b>${Math.round(wins / counted.length * 100)}%</b> <span class="pp-dim">n=${counted.length}</span> ${cov}</span></div>
+      ${chain}<table class="pp-table"><thead><tr><th>#</th><th>Position</th><th>Closed</th><th class="pp-num">Realized</th><th>Why</th><th>Provenance</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  }
+
+  function missing() {
+    return `<details class="pp-missing"><summary>Endpoints and fields found missing (${P.missing.length})</summary><ul>${P.missing.map((m) => `<li>${esc(m)}</li>`).join('')}</ul>
+      <div class="pp-dim">Exist today: list, summary, single, lots (list/add), legs (list/add/edit), verify / screen-verify, close, reduce, patch, correct-realized, closed-from-evidence.</div></details>`;
+  }
+
+  return { ladder, buckets, esc, usd, prov, chip, mockBanner, gauge, bookTable, bookRow, bookHead, detail, actions, ticket, history, missing, sleeves: P.sleeves, open: P.open };
+})();
+
+  // ── Panel ────────────────────────────────────────────────────────────────
+  const mq = window.matchMedia('(max-width: 820px)');
+  const st = { open: false, id: null, tab: 'Detail', mtab: 'Book', card: null, actions: false, note: null, live: null, opener: null };
+  let backdrop = null, panel = null;
+  const TABS = ['Detail', 'Actions', 'New', 'History'];
+  const MTABS = ['Book', 'New', 'History'];
+  const byId = (id) => X.open.find((p) => p.id === Number(id)) || null;
+  const hashFor = () => '#positions' + (st.id ? '/' + st.id : '') + (st.id && st.tab !== 'Detail' ? '/' + st.tab.toLowerCase() : '');
+  function readHash() {
+    const m = /^#positions(?:\/(\d+))?(?:\/(detail|actions|new|history))?$/.exec(location.hash || '');
+    if (!m) return null;
+    const p = m[1] ? byId(m[1]) : null;
+    const tab = m[2] ? m[2][0].toUpperCase() + m[2].slice(1) : 'Detail';
+    return { id: p ? p.id : null, tab };
+  }
+  function setHash(replace) {
+    const h = hashFor(), url = location.pathname + location.search + h;
+    if (location.hash === h) return;
+    history[replace ? 'replaceState' : 'pushState'](null, '', url);
+  }
+  function build() {
+    if (panel) return;
+    backdrop = document.createElement('div'); backdrop.className = 'pp-backdrop';
+    panel = document.createElement('aside'); panel.className = 'pp-panel';
+    panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-modal', 'true'); panel.setAttribute('aria-label', 'Positions (mock data)');
+    document.body.appendChild(backdrop); document.body.appendChild(panel);
+    backdrop.addEventListener('click', close);
+    panel.addEventListener('click', onPanelClick);
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && st.open) close(); });
+    mq.addEventListener('change', () => { if (st.open) render(); });
+  }
+  function head() {
+    return `<div class="pp-head"><h2>Positions</h2>${X.chip('unknown', 'mock', 'Every figure here is invented')}<span class="pp-dim">skeleton · no live data</span><button type="button" class="pp-x" aria-label="Close positions panel">✕</button></div>
+      <div class="pp-banner">Mock data — a working skeleton. Nothing here is your book. The roll action stays disabled until R-IV.452 lands.</div>
+      ${st.note ? `<div class="pp-note pp-warn">${X.esc(st.note)}${st.live != null ? ` <button type="button" class="pp-btn pp-link" data-live="${st.live}">Open the live detail</button>` : ''}</div>` : ''}`;
+  }
+  function legend() { return `<details class="pp-legend"><summary>Legend: provenance ladder and buckets</summary>${X.ladder()}${X.buckets()}</details>`; }
+  function desktop() {
+    const sel = byId(st.id);
+    const none = '<div class="pp-dim">Pick a row.</div>';
+    const pane = st.tab === 'Detail' ? (sel ? X.detail(sel) : none) : st.tab === 'Actions' ? (sel ? X.actions(sel) : none) : st.tab === 'New' ? X.ticket() : X.history();
+    const books = X.sleeves.map((s) => `<div class="pp-card"><h3 class="pp-h">${X.esc(s.account)} · open</h3><div class="pp-scroll">${X.bookTable(s.account)}</div></div>`).join('');
+    return `<div class="pp-split"><div class="pp-left">${X.sleeves.map(X.gauge).join('')}${books}</div>
+      <div class="pp-side pp-card"><div class="pp-tabs" role="tablist">${TABS.map((t) => `<button type="button" role="tab" aria-selected="${t === st.tab}" data-tab="${t}">${t === 'New' ? 'New (ticket)' : t}</button>`).join('')}</div>${pane}</div></div>${legend()}${X.missing()}`;
+  }
+  function card(p) {
+    const on = st.card === p.id;
+    return `<div class="pp-pcard" data-card="${p.id}"><header><span><b>${X.esc(p.ticker)}</b> <span class="pp-dim">${X.esc(p.bucket)} · ${X.esc(p.structure)}</span></span>${X.prov(p.prov)}</header>
+      <div class="pp-line"><span>qty ${p.qty} · cost ${X.usd(p.cost)}</span><span>mark ${p.mark == null ? '<span class="pp-amber">UNAVAILABLE</span>' : X.usd(p.mark)}</span></div>
+      ${on ? `<div class="pp-sheet">${X.detail(p)}<div style="margin-top:8px"><button type="button" class="pp-btn" data-toggle-actions="1">${st.actions ? 'Hide actions' : 'Actions'}</button></div>${st.actions ? X.actions(p) : ''}</div>` : ''}</div>`;
+  }
+  function phone() {
+    const v = st.mtab === 'Book' ? X.sleeves.map((s) => X.gauge(s) + X.open.filter((p) => p.account === s.account).map(card).join('')).join('')
+      : st.mtab === 'New' ? `<div class="pp-card">${X.ticket()}</div>` : `<div class="pp-card">${X.history()}</div>`;
+    return `<div class="pp-tabs" role="tablist">${MTABS.map((t) => `<button type="button" role="tab" aria-selected="${t === st.mtab}" data-mtab="${t}">${t === 'New' ? 'New (ticket)' : t}</button>`).join('')}</div>${v}${legend()}${X.missing()}`;
+  }
+  function render() {
+    if (!panel) return;
+    const prev = panel.querySelector('.pp-body');
+    const keepTop = prev ? prev.scrollTop : 0;
+    panel.innerHTML = head() + `<div class="pp-body">${mq.matches ? phone() : desktop()}</div>`;
+    panel.querySelectorAll('tr.pp-row').forEach((r) => r.classList.toggle('sel', Number(r.dataset.id) === st.id));
+    const body = panel.querySelector('.pp-body'); if (body) body.scrollTop = keepTop;
+  }
+  function onPanelClick(e) {
+    const t = e.target;
+    if (t.closest('.pp-x')) return close();
+    const live = t.closest('[data-live]');
+    if (live) { const fn = window.__v2 && window.__v2.openPositionDrawerAt; if (fn) { close(); fn(Number(live.dataset.live)); } return; }
+    const tab = t.closest('[data-tab]');
+    if (tab) { st.tab = tab.dataset.tab; setHash(true); return render(); }
+    const mtab = t.closest('[data-mtab]');
+    if (mtab) { st.mtab = mtab.dataset.mtab; return render(); }
+    if (t.closest('[data-toggle-actions]')) { st.actions = !st.actions; return render(); }
+    const tr = t.closest('tr.pp-row');
+    if (tr) { st.id = Number(tr.dataset.id); if (st.tab === 'New' || st.tab === 'History') st.tab = 'Detail'; setHash(true); return render(); }
+    const c = t.closest('.pp-pcard');
+    if (c && !t.closest('.pp-sheet')) { const id = Number(c.dataset.card); st.card = st.card === id ? null : id; st.id = st.card; st.actions = false; setHash(true); return render(); }
+  }
+  function show(opts) {
+    build();
+    st.open = true;
+    st.note = opts.note || null; st.live = opts.live != null ? opts.live : null;
+    if (opts.id != null) { st.id = opts.id; st.card = opts.id; }
+    if (opts.tab) st.tab = opts.tab;
+    if (!st.id && !mq.matches) st.id = X.open[0].id;
+    if (mq.matches && opts.id != null) st.mtab = 'Book';
+    render();
+    requestAnimationFrame(() => { backdrop.classList.add('open'); panel.classList.add('open'); const x = panel.querySelector('.pp-x'); if (x) x.focus(); });
+  }
+  function open(opts, push) {
+    opts = opts || {};
+    st.opener = document.activeElement;
+    show(opts);
+    if (push !== false) setHash(false);
+  }
+  function hide() {
+    st.open = false;
+    if (backdrop) { backdrop.classList.remove('open'); panel.classList.remove('open'); }
+    if (st.opener && st.opener.focus) { try { st.opener.focus(); } catch (_) {} }
+  }
+  function close() {
+    if (!st.open) return;
+    hide();
+    if (/^#positions/.test(location.hash)) history.pushState(null, '', location.pathname + location.search);
+  }
+  function sync() {
+    const h = readHash();
+    if (h) { if (!st.open) show({ id: h.id, tab: h.tab }); else { st.id = h.id; st.tab = h.tab; render(); } }
+    else if (st.open) hide();
+  }
+  // The doorway: the Book strip, or a row in it. Capture phase, so it precedes the live drawer's own row handler.
+  function realTicker(row) { const n = row.querySelector('.ptk'); return n && n.firstChild ? String(n.firstChild.textContent || '').trim().toUpperCase() : ''; }
+  document.addEventListener('click', (e) => {
+    const row = e.target.closest && e.target.closest('#bookPositions .pos-row');
+    if (row) {
+      e.preventDefault(); e.stopPropagation();
+      const tk = realTicker(row), m = X.open.find((p) => p.ticker === tk);
+      open(m ? { id: m.id } : { note: (tk || 'That position') + ' is not in the mock data. This skeleton shows invented positions only.', live: row.dataset.pi != null ? Number(row.dataset.pi) : null });
+      return;
+    }
+    if (e.target.closest && e.target.closest('#bookStrip')) { e.preventDefault(); open({}); }
+  }, true);
+  document.addEventListener('keydown', (e) => {
+    if (e.target && e.target.id === 'bookStrip' && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); open({}); }
+  });
+  window.addEventListener('popstate', sync);
+  window.addEventListener('hashchange', sync);
+  function init() {
+    const strip = document.getElementById('bookStrip');
+    if (strip) { strip.setAttribute('tabindex', '0'); strip.setAttribute('role', 'button'); strip.setAttribute('aria-label', 'Open the positions panel (mock data)'); strip.classList.add('pp-door'); }
+    const pos = document.getElementById('bookPositions'); if (pos) pos.classList.add('pp-door');
+    sync();
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();
